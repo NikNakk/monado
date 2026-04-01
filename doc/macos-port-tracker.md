@@ -50,11 +50,16 @@ SPDX-License-Identifier: BSL-1.0
   values inline in the message stream
 - added `tests/tests_macos_ipc_swapchain_probe.c` to validate the service-backed
   macOS swapchain import/export path over real IPC
+- added `tests/tests_macos_openxr_loaderless_probe.c` to validate the macOS
+  OpenXR state tracker by loading `libopenxr_monado.dylib` directly and
+  creating a headless session against `monado-service`
 
 ## Still expected after this patch set
 
 - more IPC/server portability work after the first `poll()` conversion
 - real OpenXR state-tracker validation on top of the now-working IPC image path
+- a real graphics-bound OpenXR session path after the new headless-state-tracker
+  probe
 - cleanup/teardown fixes for the service-backed probe shutdown path
 - deciding whether any additional WiVRn compositor patches should be ported, or
   only mined for design ideas
@@ -80,6 +85,12 @@ SPDX-License-Identifier: BSL-1.0
   - import them back through `xrt_comp_import_swapchain`
   - validate acquire/release on the imported swapchain over the real
     service/client boundary
+- the new loaderless OpenXR probe can now:
+  - dlopen `libopenxr_monado.dylib` directly on macOS
+  - negotiate `xrGetInstanceProcAddr` without a separately installed loader
+  - create an OpenXR instance with `XR_MND_headless`
+  - select the simulated HMD system through the OpenXR state tracker
+  - create a headless OpenXR session over the real Monado service boundary
 - with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
   into the older frame-submit path for deeper compositor debugging
 - the earlier branch result that the compute compositor consumes submitted
@@ -89,6 +100,9 @@ SPDX-License-Identifier: BSL-1.0
 - the current service-backed probe still exits with noisy but non-fatal
   shutdown logging (`ipc_call_session_destroy` and server-side broken-pipe
   output), which should be cleaned up before this moves beyond spike status
+- the current loaderless OpenXR probe still leaves shutdown-side service noise
+  (`Invalid command received.` after disconnect), which should be understood
+  before treating this path as stable
 
 ## Recommended workflow
 
@@ -101,5 +115,8 @@ SPDX-License-Identifier: BSL-1.0
    path.
 4. Use `tests/tests_macos_ipc_swapchain_probe` against a running
    `monado-service` to validate the real service/client image path
-5. Fix only the first blocker each round
-6. Keep notes here so the blocker order stays explicit
+5. Use `tests/tests_macos_openxr_loaderless_probe` with
+   `MONADO_OPENXR_RUNTIME_PATH` set to `libopenxr_monado.dylib` to validate the
+   headless OpenXR path over the real service boundary
+6. Fix only the first blocker each round
+7. Keep notes here so the blocker order stays explicit

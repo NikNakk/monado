@@ -125,16 +125,27 @@ service/client boundary:
 That means the first real cross-process macOS image path is now working in the
 Monado spike, not just the earlier in-process loopback probe.
 
+The next validation step now also exists:
+
+- `tests/tests_macos_openxr_loaderless_probe.c` dlopens
+  `libopenxr_monado.dylib`, negotiates `xrGetInstanceProcAddr` directly via
+  `xrNegotiateLoaderRuntimeInterface`, enables `XR_MND_headless`, and creates
+  an OpenXR instance, system, and headless session against a running
+  `monado-service`
+
+This is the first proof on macOS that the OpenXR state tracker itself can come
+up over the service boundary, not just the lower-level IPC compositor APIs.
+
 ## Likely next blocker classes
 
 After the first successful runtime probe, the next blocker classes are clearer:
 
 - additional Linux-only event loop assumptions in server/service code
 - desktop compositor assumptions around display/window targets
-- state-tracker validation with a real OpenXR app path instead of only the
-  internal XRT probes
-- cleanup/teardown issues after the service-backed IPC probe, currently visible
-  as noisy but non-fatal disconnect/session-destroy logging on shutdown
+- moving from the new headless OpenXR probe to a real graphics-bound OpenXR
+  session path
+- cleanup/teardown issues after the service-backed IPC and loaderless OpenXR
+  probes, currently visible as noisy shutdown-side protocol logging
 - missing macOS-native process/service integration
 
 ## Strategic note

@@ -128,4 +128,8 @@ if(APPLE)
 	add_executable(tests_macos_ipc_swapchain_probe tests_macos_ipc_swapchain_probe.c)
 	target_link_libraries(tests_macos_ipc_swapchain_probe PRIVATE ipc_client xrt-interfaces aux_util)
 	set_target_properties(tests_macos_ipc_swapchain_probe PROPERTIES FOLDER monado_tests)
+
+	add_executable(tests_macos_openxr_loaderless_probe tests_macos_openxr_loaderless_probe.c)
+	target_link_libraries(tests_macos_openxr_loaderless_probe PRIVATE xrt-interfaces xrt-external-openxr)
+	set_target_properties(tests_macos_openxr_loaderless_probe PROPERTIES FOLDER monado_tests)
 endif()
