@@ -44,13 +44,18 @@ SPDX-License-Identifier: BSL-1.0
   `IOSurfaceRef`
 - wired the first real macOS native-image path with `VK_EXT_metal_objects`
   so compositor swapchains can export/import `IOSurfaceRef` handles
+- fixed macOS runtime-dir fallback so the service uses a real absolute socket
+  path instead of the literal `~/.cache`
+- added `IOSurfaceRef` transport across Unix IPC by carrying `IOSurfaceID`
+  values inline in the message stream
+- added `tests/tests_macos_ipc_swapchain_probe.c` to validate the service-backed
+  macOS swapchain import/export path over real IPC
 
 ## Still expected after this patch set
 
 - more IPC/server portability work after the first `poll()` conversion
-- client/shared-image plumbing for real OpenXR apps or a streaming bridge
-- cross-process transport for `IOSurfaceRef` handles in the IPC path
-- cleanup/teardown fixes for the optional deeper frame-submit probe path
+- real OpenXR state-tracker validation on top of the now-working IPC image path
+- cleanup/teardown fixes for the service-backed probe shutdown path
 - deciding whether any additional WiVRn compositor patches should be ported, or
   only mined for design ideas
 
@@ -68,21 +73,33 @@ SPDX-License-Identifier: BSL-1.0
   - export native swapchain images as `IOSurfaceRef`
   - import those images back through `xrt_comp_import_swapchain`
   - validate acquire/release on the imported swapchain
+- the new macOS IPC probe can now:
+  - launch against a running `monado-service`
+  - create a native swapchain over the IPC client path
+  - receive exported `IOSurfaceRef` images from the service
+  - import them back through `xrt_comp_import_swapchain`
+  - validate acquire/release on the imported swapchain over the real
+    service/client boundary
 - with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
   into the older frame-submit path for deeper compositor debugging
 - the earlier branch result that the compute compositor consumes submitted
   projection-layer pose data is still valid, but that path is no longer the
   default probe exit because the cleanup path after deeper submission still
   trips a macOS-only teardown bug
+- the current service-backed probe still exits with noisy but non-fatal
+  shutdown logging (`ipc_call_session_destroy` and server-side broken-pipe
+  output), which should be cleaned up before this moves beyond spike status
 
 ## Recommended workflow
 
 1. Reconfigure with the no-SDL macOS recipe from `doc/macos-port.md`
 2. Build with `ninja -k 1`
-3. Use `tests/tests_macos_runtime_probe` for native runtime regression checks on
-   macOS while the handle model is still in flux
+3. Use `tests/tests_macos_runtime_probe` for in-process native-image regression
+   checks on macOS
    Default run validates the IOSurface round-trip.
    `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1` keeps going into the older frame-submit
    path.
-4. Fix only the first blocker each round
-5. Keep notes here so the blocker order stays explicit
+4. Use `tests/tests_macos_ipc_swapchain_probe` against a running
+   `monado-service` to validate the real service/client image path
+5. Fix only the first blocker each round
+6. Keep notes here so the blocker order stays explicit

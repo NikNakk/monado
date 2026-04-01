@@ -1806,7 +1806,11 @@ ipc_handle_swapchain_create(volatile struct ipc_client_state *ics,
 	*out_image_count = xsc->image_count;
 
 	// Setup the fds.
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	*out_handle_count = max_handle_capacity;
+#else
 	*out_handle_count = xsc->image_count;
+#endif
 	for (size_t i = 0; i < xsc->image_count; i++) {
 		out_handles[i] = xscn->images[i].handle;
 	}

@@ -16,6 +16,7 @@
 #endif
 
 #include "util/u_logging.h"
+#include "util/u_misc.h"
 #include "util/u_pretty_print.h"
 
 #include "shared/ipc_protocol.h"
@@ -28,6 +29,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <assert.h>
+
+#ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE
+#include <IOSurface/IOSurfaceRef.h>
+#endif
 
 
 /*
@@ -334,6 +339,74 @@ ipc_send_handles_graphics_buffer(struct ipc_message_channel *imc,
                                  uint32_t handle_count)
 {
 	return ipc_send_fds(imc, data, size, handles, handle_count);
+}
+
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+
+xrt_result_t
+ipc_receive_handles_graphics_buffer(struct ipc_message_channel *imc,
+                                    void *out_data,
+                                    size_t size,
+                                    xrt_graphics_buffer_handle_t *out_handles,
+                                    uint32_t handle_count)
+{
+	const size_t ids_size = sizeof(IOSurfaceID) * handle_count;
+	const size_t total_size = size + ids_size;
+	uint8_t *buf = U_TYPED_ARRAY_CALLOC(uint8_t, total_size);
+	if (buf == NULL) {
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	xrt_result_t result = ipc_receive(imc, buf, total_size);
+	if (result != XRT_SUCCESS) {
+		free(buf);
+		return result;
+	}
+
+	memcpy(out_data, buf, size);
+
+	const IOSurfaceID *ids = (const IOSurfaceID *)(buf + size);
+	bool failed = false;
+	for (uint32_t i = 0; i < handle_count; ++i) {
+		if (ids[i] == 0) {
+			out_handles[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+			continue;
+		}
+
+		out_handles[i] = IOSurfaceLookup(ids[i]);
+		if (out_handles[i] == NULL) {
+			failed = true;
+		}
+	}
+
+	free(buf);
+	return failed ? XRT_ERROR_IPC_FAILURE : XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_send_handles_graphics_buffer(struct ipc_message_channel *imc,
+                                 const void *data,
+                                 size_t size,
+                                 const xrt_graphics_buffer_handle_t *handles,
+                                 uint32_t handle_count)
+{
+	const size_t ids_size = sizeof(IOSurfaceID) * handle_count;
+	const size_t total_size = size + ids_size;
+	uint8_t *buf = U_TYPED_ARRAY_CALLOC(uint8_t, total_size);
+	if (buf == NULL) {
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	memcpy(buf, data, size);
+
+	IOSurfaceID *ids = (IOSurfaceID *)(buf + size);
+	for (uint32_t i = 0; i < handle_count; ++i) {
+		ids[i] = xrt_graphics_buffer_is_valid(handles[i]) ? IOSurfaceGetID(handles[i]) : 0;
+	}
+
+	xrt_result_t result = ipc_send(imc, buf, total_size);
+	free(buf);
+	return result;
 }
 
 #else

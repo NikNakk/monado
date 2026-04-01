@@ -28,10 +28,15 @@
 #define PATH_MAX 4096
 #endif
 
-#ifdef XRT_OS_LINUX
+#if defined(XRT_OS_LINUX) || defined(XRT_OS_OSX)
 #include <sys/stat.h>
-#include <linux/limits.h>
+#endif
 
+#ifdef XRT_OS_LINUX
+#include <linux/limits.h>
+#endif
+
+#if defined(XRT_OS_LINUX) || defined(XRT_OS_OSX)
 static int
 mkpath(const char *path)
 {
@@ -62,6 +67,7 @@ mkpath(const char *path)
 	return 0;
 }
 
+#ifdef XRT_OS_LINUX
 static bool
 is_dir(const char *path)
 {
@@ -72,10 +78,18 @@ is_dir(const char *path)
 		return false;
 	}
 }
+#endif
 
 int
 u_file_get_config_dir(char *out_path, size_t out_path_size)
 {
+#ifdef XRT_OS_OSX
+	const char *home = getenv("HOME");
+	if (home != NULL) {
+		return snprintf(out_path, out_path_size, "%s/Library/Application Support/monado", home);
+	}
+	return -1;
+#else
 	const char *xdg_home = getenv("XDG_CONFIG_HOME");
 	const char *home = getenv("HOME");
 	if (xdg_home != NULL) {
@@ -85,6 +99,7 @@ u_file_get_config_dir(char *out_path, size_t out_path_size)
 		return snprintf(out_path, out_path_size, "%s/.config/monado", home);
 	}
 	return -1;
+#endif
 }
 
 int
@@ -162,6 +177,19 @@ u_file_open_file_in_config_dir_subpath(const char *subpath, const char *filename
 int
 u_file_get_hand_tracking_models_dir(char *out_path, size_t out_path_size)
 {
+#ifdef XRT_OS_OSX
+	const char *home = getenv("HOME");
+	if (home != NULL) {
+		return snprintf(out_path, out_path_size, "%s/Library/Application Support/monado/hand-tracking-models",
+		                home);
+	}
+
+	if (out_path_size > 0) {
+		out_path[0] = '\0';
+	}
+
+	return -1;
+#else
 	const char *suffix = "/monado/hand-tracking-models";
 	const char *xdg_data_home = getenv("XDG_DATA_HOME");
 	const char *home = getenv("HOME");
@@ -196,9 +224,10 @@ u_file_get_hand_tracking_models_dir(char *out_path, size_t out_path_size)
 	}
 
 	return ret;
+#endif
 }
 
-#endif /* XRT_OS_LINUX */
+#endif /* XRT_OS_LINUX || XRT_OS_OSX */
 
 int
 u_file_get_runtime_dir(char *out_path, size_t out_path_size)
@@ -208,10 +237,30 @@ u_file_get_runtime_dir(char *out_path, size_t out_path_size)
 		return snprintf(out_path, out_path_size, "%s", xdg_rt);
 	}
 
+#ifdef XRT_OS_OSX
+	const char *xdg_cache = getenv("XDG_CACHE_HOME");
+	if (xdg_cache != NULL) {
+		int ret = snprintf(out_path, out_path_size, "%s/monado", xdg_cache);
+		if (ret <= 0 || ret >= (int)out_path_size) {
+			return ret;
+		}
+		return mkpath(out_path) == 0 ? ret : -1;
+	}
+
+	const char *home = getenv("HOME");
+	if (home != NULL) {
+		int ret = snprintf(out_path, out_path_size, "%s/Library/Caches/monado", home);
+		if (ret <= 0 || ret >= (int)out_path_size) {
+			return ret;
+		}
+		return mkpath(out_path) == 0 ? ret : -1;
+	}
+#else
 	const char *xdg_cache = getenv("XDG_CACHE_HOME");
 	if (xdg_cache != NULL) {
 		return snprintf(out_path, out_path_size, "%s", xdg_cache);
 	}
+#endif
 
 #ifdef XRT_OS_WINDOWS
 #ifndef UNICODE     // If Unicode support is disabled, use ANSI functions directly into out_path
@@ -230,8 +279,12 @@ u_file_get_runtime_dir(char *out_path, size_t out_path_size)
 	return wcstombs(out_path, temp, out_path_size);
 #endif // UNICODE
 #else
+#ifdef XRT_OS_OSX
+	return -1;
+#else
 	const char *cache = "~/.cache";
 	return snprintf(out_path, out_path_size, "%s", cache);
+#endif
 #endif
 }
 

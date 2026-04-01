@@ -110,9 +110,20 @@ FD handle model:
   path for deeper compositor debugging
 
 This is the first real macOS-native shared-image path, not just scaffolding.
-What is still missing is the wider client/runtime plumbing around it: IPC
-transport for cross-process handles, state-tracker validation with a real app,
-and cleanup of the optional deeper frame-submit path.
+The next step after that was to prove the same handle model across the real
+service/client boundary:
+
+- `u_file_get_runtime_dir` now gives macOS a real absolute runtime directory
+  and creates it on demand instead of returning the literal string `~/.cache`
+- the Unix IPC message transport on macOS can now carry `IOSurfaceRef` handles
+  by sending `IOSurfaceID` values inline in the message payload
+- `tests/tests_macos_ipc_swapchain_probe.c` can connect to a running
+  `monado-service`, create a native IPC swapchain, import the returned
+  `IOSurfaceRef` images back through `xrt_comp_import_swapchain`, and validate
+  acquire/release on the imported swapchain
+
+That means the first real cross-process macOS image path is now working in the
+Monado spike, not just the earlier in-process loopback probe.
 
 ## Likely next blocker classes
 
@@ -120,11 +131,10 @@ After the first successful runtime probe, the next blocker classes are clearer:
 
 - additional Linux-only event loop assumptions in server/service code
 - desktop compositor assumptions around display/window targets
-- client/shared-image plumbing still needs a real macOS-native transport for
-  those `IOSurfaceRef` handles across process boundaries
-- client-facing shared-image import/export work for a real OpenXR app or
-  streaming bridge
-- cleanup/teardown bugs in the optional deeper frame-submit probe path
+- state-tracker validation with a real OpenXR app path instead of only the
+  internal XRT probes
+- cleanup/teardown issues after the service-backed IPC probe, currently visible
+  as noisy but non-fatal disconnect/session-destroy logging on shutdown
 - missing macOS-native process/service integration
 
 ## Strategic note
