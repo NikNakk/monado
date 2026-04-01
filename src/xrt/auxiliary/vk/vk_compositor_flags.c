@@ -54,6 +54,18 @@ check_feature(VkFormat format,
 	return true;
 }
 
+static bool
+vk_csci_requires_external_handle_support(void)
+{
+#if defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+	// The macOS spike currently supports native compositor allocations without exporting shared image handles.
+	// Do not let the placeholder FD handle model suppress otherwise valid local swapchain formats.
+	return false;
+#else
+	return true;
+#endif
+}
+
 
 /*
  *
@@ -382,6 +394,10 @@ vk_csci_is_format_supported(struct vk_bundle *vk,
 		VK_DEBUG(vk, "Depth/stencil format '%s' cannot be used as render target in optimal layout!",
 		         vk_format_string(format));
 		return false;
+	}
+
+	if (!vk_csci_requires_external_handle_support()) {
+		return true;
 	}
 
 

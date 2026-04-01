@@ -38,13 +38,13 @@ SPDX-License-Identifier: BSL-1.0
 - enabled MoltenVK portability-driver instance creation
 - relaxed the native macOS compositor probe path so internal image allocations
   do not require Linux FD export support
+- stopped suppressing native macOS swapchain formats just because the current
+  placeholder handle model cannot export Linux FD handles
 
 ## Still expected after this patch set
 
 - more IPC/server portability work after the first `poll()` conversion
 - replacing the placeholder macOS FD graphics-handle model with a real one
-- compositor format advertisement that matches the macOS native path instead of
-  Linux-style import/export assumptions
 - client/shared-image plumbing for real OpenXR apps or a streaming bridge
 - deciding whether any additional WiVRn compositor patches should be ported, or
   only mined for design ideas
@@ -59,6 +59,7 @@ SPDX-License-Identifier: BSL-1.0
   - start an in-process session against the simulated HMD
   - create a native swapchain
   - submit a non-fast-path frame
+  - advertise real native swapchain formats without a probe-only fallback
   - validate that the compute compositor consumes submitted projection-layer
     pose data after the multi-compositor render thread latches the queued frame
 

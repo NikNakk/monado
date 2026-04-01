@@ -79,6 +79,9 @@ The branch now also has a first real runtime probe on macOS:
 - when the probe leaves the session alive long enough for the multi-compositor
   render thread to consume queued layers, the compute compositor does in fact
   use the submitted projection-layer pose data path that was ported from WiVRn
+- the compositor now also advertises real native swapchain formats on macOS
+  instead of an empty format table, because local/native format support is no
+  longer incorrectly filtered through Linux-style external-handle export checks
 
 Two macOS-specific Vulkan adjustments were required for that probe:
 
@@ -100,9 +103,6 @@ After the first successful runtime probe, the next blocker classes are clearer:
 - desktop compositor assumptions around display/window targets
 - the fact that `xrt_handles.h` still routes macOS through the Unix FD graphics
   handle path
-- compositor format advertisement still being filtered through
-  import/export-capability checks that do not match the current macOS native
-  path
 - client-facing shared-image import/export work for a real OpenXR app or
   streaming bridge
 - missing macOS-native process/service integration
