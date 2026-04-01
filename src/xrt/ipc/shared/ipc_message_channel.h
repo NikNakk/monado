@@ -30,6 +30,8 @@ struct ipc_message_channel
 {
 	xrt_ipc_handle_t ipc_handle;
 	enum u_logging_level log_level;
+	bool frame_reads;
+	bool frame_writes;
 };
 
 /*!

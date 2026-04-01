@@ -59,6 +59,114 @@ union imcontrol_buf {
 	struct cmsghdr align;
 };
 
+#ifdef XRT_OS_OSX
+static xrt_result_t
+ipc_send_exact_internal(struct ipc_message_channel *imc, const void *data, size_t size, const int *handles, uint32_t handle_count)
+{
+	const uint8_t *ptr = (const uint8_t *)data;
+	size_t total = 0;
+	bool sent_handles = false;
+
+	while (total < size) {
+		struct msghdr msg = {0};
+		struct iovec iov = {0};
+
+		iov.iov_base = (void *)(ptr + total);
+		iov.iov_len = size - total;
+
+		msg.msg_name = NULL;
+		msg.msg_namelen = 0;
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_flags = 0;
+
+		union imcontrol_buf u = {0};
+		if (!sent_handles && handles != NULL && handle_count > 0) {
+			const size_t fds_size = sizeof(int) * handle_count;
+			const size_t cmsg_size = CMSG_SPACE(fds_size);
+			msg.msg_control = u.buf;
+			msg.msg_controllen = cmsg_size;
+
+			struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+			cmsg->cmsg_level = SOL_SOCKET;
+			cmsg->cmsg_type = SCM_RIGHTS;
+			cmsg->cmsg_len = CMSG_LEN(fds_size);
+			memcpy(CMSG_DATA(cmsg), handles, fds_size);
+		}
+
+		ssize_t ret = sendmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
+		if (ret < 0) {
+			int code = errno;
+			IPC_ERROR(imc, "sendmsg(%i) failed: '%i' '%s'!", imc->ipc_handle, code, strerror(code));
+			return XRT_ERROR_IPC_FAILURE;
+		}
+		if (ret == 0) {
+			IPC_ERROR(imc, "sendmsg(%i) failed: no data sent!", imc->ipc_handle);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		total += (size_t)ret;
+		sent_handles = true;
+	}
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+ipc_receive_exact_internal(struct ipc_message_channel *imc, void *out_data, size_t size, int *out_handles, uint32_t handle_count)
+{
+	uint8_t *ptr = (uint8_t *)out_data;
+	size_t total = 0;
+	bool copied_handles = false;
+
+	while (total < size) {
+		struct iovec iov = {0};
+		struct msghdr msg = {0};
+		union imcontrol_buf u = {0};
+
+		iov.iov_base = ptr + total;
+		iov.iov_len = size - total;
+
+		msg.msg_name = NULL;
+		msg.msg_namelen = 0;
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_flags = 0;
+		if (!copied_handles && out_handles != NULL && handle_count > 0) {
+			msg.msg_control = u.buf;
+			msg.msg_controllen = sizeof(u.buf);
+		}
+
+		ssize_t len = recvmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
+		if (len < 0) {
+			int code = errno;
+			IPC_ERROR(imc, "recvmsg(%i) failed: '%i' '%s'!", (int)imc->ipc_handle, code, strerror(code));
+			return XRT_ERROR_IPC_FAILURE;
+		}
+		if (len == 0) {
+			IPC_ERROR(imc, "recvmsg(%i) failed: no data!", (int)imc->ipc_handle);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		if (!copied_handles && out_handles != NULL && handle_count > 0) {
+			struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+			if (cmsg == NULL) {
+				IPC_ERROR(imc, "recvmsg(%i) failed: missing file descriptors!", (int)imc->ipc_handle);
+				return XRT_ERROR_IPC_FAILURE;
+			}
+
+			const size_t fds_size = sizeof(int) * handle_count;
+			memcpy(out_handles, (int *)CMSG_DATA(cmsg), fds_size);
+		}
+
+		total += (size_t)len;
+		copied_handles = true;
+	}
+
+	return XRT_SUCCESS;
+}
+#endif
+
 
 /*
  *
@@ -79,6 +187,16 @@ ipc_message_channel_close(struct ipc_message_channel *imc)
 xrt_result_t
 ipc_send(struct ipc_message_channel *imc, const void *data, size_t size)
 {
+#ifdef XRT_OS_OSX
+	if (imc->frame_writes) {
+		uint32_t framed_size = (uint32_t)size;
+		xrt_result_t ret = ipc_send_exact_internal(imc, &framed_size, sizeof(framed_size), NULL, 0);
+		if (ret != XRT_SUCCESS) {
+			return ret;
+		}
+		return ipc_send_exact_internal(imc, data, size, NULL, 0);
+	}
+#endif
 	const uint8_t *ptr = (const uint8_t *)data;
 	size_t total = 0;
 
@@ -115,6 +233,21 @@ ipc_send(struct ipc_message_channel *imc, const void *data, size_t size)
 xrt_result_t
 ipc_receive(struct ipc_message_channel *imc, void *out_data, size_t size)
 {
+#ifdef XRT_OS_OSX
+	if (imc->frame_reads) {
+		uint32_t framed_size = 0;
+		xrt_result_t ret = ipc_receive_exact_internal(imc, &framed_size, sizeof(framed_size), NULL, 0);
+		if (ret != XRT_SUCCESS) {
+			return ret;
+		}
+		if ((size_t)framed_size != size) {
+			IPC_ERROR(imc, "recvmsg(%i) failed: wrong framed size '%u', expected '%i'!", (int)imc->ipc_handle,
+			          framed_size, (int)size);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+		return ipc_receive_exact_internal(imc, out_data, size, NULL, 0);
+	}
+#endif
 	uint8_t *ptr = (uint8_t *)out_data;
 	size_t total = 0;
 
@@ -153,6 +286,22 @@ ipc_receive(struct ipc_message_channel *imc, void *out_data, size_t size)
 xrt_result_t
 ipc_receive_fds(struct ipc_message_channel *imc, void *out_data, size_t size, int *out_handles, uint32_t handle_count)
 {
+#ifdef XRT_OS_OSX
+	if (imc->frame_reads) {
+		uint32_t framed_size = 0;
+		xrt_result_t ret =
+		    ipc_receive_exact_internal(imc, &framed_size, sizeof(framed_size), out_handles, handle_count);
+		if (ret != XRT_SUCCESS) {
+			return ret;
+		}
+		if ((size_t)framed_size != size) {
+			IPC_ERROR(imc, "recvmsg(%i) failed: wrong framed size '%u', expected '%i'!", (int)imc->ipc_handle,
+			          framed_size, (int)size);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+		return ipc_receive_exact_internal(imc, out_data, size, NULL, 0);
+	}
+#endif
 	assert(imc != NULL);
 	assert(out_data != NULL);
 	assert(size != 0);
@@ -164,34 +313,42 @@ ipc_receive_fds(struct ipc_message_channel *imc, void *out_data, size_t size, in
 	const size_t cmsg_size = CMSG_SPACE(fds_size);
 	memset(u.buf, 0, cmsg_size);
 
-	struct iovec iov = {0};
-	iov.iov_base = out_data;
-	iov.iov_len = size;
+	uint8_t *ptr = (uint8_t *)out_data;
+	size_t total = 0;
+	bool copied_handles = false;
 
-	struct msghdr msg = {0};
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-	msg.msg_control = u.buf;
-	msg.msg_controllen = cmsg_size;
+	while (total < size) {
+		struct iovec iov = {0};
+		iov.iov_base = ptr + total;
+		iov.iov_len = size - total;
 
-	ssize_t len = recvmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
-	if (len < 0) {
-		IPC_ERROR(imc, "recvmsg(%i) failed: '%s'!", imc->ipc_handle, strerror(errno));
-		return XRT_ERROR_IPC_FAILURE;
+		struct msghdr msg = {0};
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_control = copied_handles ? NULL : u.buf;
+		msg.msg_controllen = copied_handles ? 0 : cmsg_size;
+
+		ssize_t len = recvmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
+		if (len < 0) {
+			IPC_ERROR(imc, "recvmsg(%i) failed: '%s'!", imc->ipc_handle, strerror(errno));
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		if (len == 0) {
+			IPC_ERROR(imc, "recvmsg(%i) failed: no data!", imc->ipc_handle);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		if (!copied_handles) {
+			struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+			if (cmsg != NULL) {
+				memcpy(out_handles, (int *)CMSG_DATA(cmsg), fds_size);
+			}
+			copied_handles = true;
+		}
+
+		total += (size_t)len;
 	}
-
-	if (len == 0) {
-		IPC_ERROR(imc, "recvmsg(%i) failed: no data!", imc->ipc_handle);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	// Did the other side actually send file descriptors.
-	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-	if (cmsg == NULL) {
-		return XRT_SUCCESS;
-	}
-
-	memcpy(out_handles, (int *)CMSG_DATA(cmsg), fds_size);
 
 	return XRT_SUCCESS;
 }
@@ -199,6 +356,16 @@ ipc_receive_fds(struct ipc_message_channel *imc, void *out_data, size_t size, in
 xrt_result_t
 ipc_send_fds(struct ipc_message_channel *imc, const void *data, size_t size, const int *handles, uint32_t handle_count)
 {
+#ifdef XRT_OS_OSX
+	if (imc->frame_writes) {
+		uint32_t framed_size = (uint32_t)size;
+		xrt_result_t ret = ipc_send_exact_internal(imc, &framed_size, sizeof(framed_size), handles, handle_count);
+		if (ret != XRT_SUCCESS) {
+			return ret;
+		}
+		return ipc_send_exact_internal(imc, data, size, NULL, 0);
+	}
+#endif
 	assert(imc != NULL);
 	assert(data != NULL);
 	assert(size != 0);
@@ -209,48 +376,64 @@ ipc_send_fds(struct ipc_message_channel *imc, const void *data, size_t size, con
 	union imcontrol_buf u = {0};
 	size_t cmsg_size = CMSG_SPACE(fds_size);
 
-	struct iovec iov = {0};
-	iov.iov_base = (void *)data;
-	iov.iov_len = size;
+	const uint8_t *ptr = (const uint8_t *)data;
+	size_t total = 0;
+	bool sent_handles = false;
 
-	struct msghdr msg = {0};
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-	msg.msg_flags = 0;
-	msg.msg_control = u.buf;
-	msg.msg_controllen = cmsg_size;
+	while (total < size) {
+		struct iovec iov = {0};
+		iov.iov_base = (void *)(ptr + total);
+		iov.iov_len = size - total;
 
-	struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-	cmsg->cmsg_level = SOL_SOCKET;
-	cmsg->cmsg_type = SCM_RIGHTS;
-	cmsg->cmsg_len = CMSG_LEN(fds_size);
+		struct msghdr msg = {0};
+		msg.msg_name = NULL;
+		msg.msg_namelen = 0;
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_flags = 0;
+		msg.msg_control = sent_handles ? NULL : u.buf;
+		msg.msg_controllen = sent_handles ? 0 : cmsg_size;
 
-	memcpy(CMSG_DATA(cmsg), handles, fds_size);
+		if (!sent_handles) {
+			struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+			cmsg->cmsg_level = SOL_SOCKET;
+			cmsg->cmsg_type = SCM_RIGHTS;
+			cmsg->cmsg_len = CMSG_LEN(fds_size);
 
-	ssize_t ret = sendmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
-	if (ret >= 0) {
-		return XRT_SUCCESS;
+			memcpy(CMSG_DATA(cmsg), handles, fds_size);
+		}
+
+		ssize_t ret = sendmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
+		if (ret < 0) {
+			/*
+			 * Error path.
+			 */
+
+			struct u_pp_sink_stack_only sink;
+			u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+
+			u_pp(dg, "sendmsg(%i) failed: count: %u, error: '%i' '%s'!", imc->ipc_handle, handle_count, errno,
+			     strerror(errno));
+
+			for (uint32_t i = 0; i < handle_count; i++) {
+				u_pp(dg, "\n\tfd #%i: %i", i, handles[i]);
+			}
+
+			IPC_ERROR(imc, "%s", sink.buffer);
+
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		if (ret == 0) {
+			IPC_ERROR(imc, "sendmsg(%i) failed: no data sent!", imc->ipc_handle);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		total += (size_t)ret;
+		sent_handles = true;
 	}
 
-	/*
-	 * Error path.
-	 */
-
-	struct u_pp_sink_stack_only sink;
-	u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
-
-	u_pp(dg, "sendmsg(%i) failed: count: %u, error: '%i' '%s'!", imc->ipc_handle, handle_count, errno,
-	     strerror(errno));
-
-	for (uint32_t i = 0; i < handle_count; i++) {
-		u_pp(dg, "\n\tfd #%i: %i", i, handles[i]);
-	}
-
-	IPC_ERROR(imc, "%s", sink.buffer);
-
-	return XRT_ERROR_IPC_FAILURE;
+	return XRT_SUCCESS;
 }
 
 xrt_result_t

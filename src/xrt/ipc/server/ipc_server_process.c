@@ -890,6 +890,10 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 	ics->local_space_overseer_index = UINT32_MAX;
 	ics->client_state.id = id;
 	ics->imc.ipc_handle = ipc_handle;
+#ifdef XRT_OS_OSX
+	ics->imc.frame_reads = false;
+	ics->imc.frame_writes = true;
+#endif
 	ics->server = vs;
 	ics->server_thread_index = cs_index;
 

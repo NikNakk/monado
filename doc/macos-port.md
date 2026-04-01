@@ -148,6 +148,19 @@ macOS:
   OpenXR Vulkan client bring-up, so the macOS `IOSurfaceRef` import path no
   longer incorrectly fails the generic external-handle importability check
 
+The branch now also reaches the first service-backed graphics submit on macOS:
+
+- the Unix IPC transport now has an Apple-specific server-to-client framing
+  path so reply boundaries survive `SOCK_STREAM` short reads instead of letting
+  `session_poll_events` spill into the following `wait_frame` reply
+- the IPC protocol generator now treats graphics-buffer reply capacity as
+  `XRT_MAX_SWAPCHAIN_IMAGES` instead of `XRT_MAX_IPC_HANDLES`, which fixes the
+  macOS `IOSurfaceID` reply-size mismatch on `swapchain_create`
+- with those two fixes in place,
+  `tests/tests_macos_openxr_vulkan_probe.c` can now complete `xrWaitFrame`,
+  create the service-backed OpenXR swapchain, and submit one projection frame
+  through the live macOS Monado service/runtime path
+
 ## Likely next blocker classes
 
 After the first successful runtime probe, the next blocker classes are clearer:
@@ -155,7 +168,7 @@ After the first successful runtime probe, the next blocker classes are clearer:
 - additional Linux-only event loop assumptions in server/service code
 - desktop compositor assumptions around display/window targets
 - moving from the new graphics-bound swapchain probe to real frame submission
-  and view/layer submission on macOS
+  and view/layer submission on macOS beyond the current one-frame validation
 - cleanup/teardown issues after the service-backed IPC and loaderless OpenXR
   probes, currently visible as noisy shutdown-side protocol logging
 - missing macOS-native process/service integration

@@ -55,6 +55,10 @@ SPDX-License-Identifier: BSL-1.0
   creating a headless session against `monado-service`
 - added `tests/tests_macos_openxr_vulkan_probe.c` to validate a real
   graphics-bound OpenXR Vulkan session and swapchain path on macOS
+- added Apple-specific reply framing for server-to-client IPC traffic so reply
+  boundaries survive macOS `SOCK_STREAM` short reads
+- fixed the IPC protocol generator so graphics-buffer reply capacity uses
+  `XRT_MAX_SWAPCHAIN_IMAGES` instead of `XRT_MAX_IPC_HANDLES`
 
 ## Still expected after this patch set
 
@@ -99,6 +103,9 @@ SPDX-License-Identifier: BSL-1.0
   - create a graphics-bound OpenXR session on macOS
   - create an OpenXR swapchain and enumerate three Vulkan swapchain images
     over the real service-backed path
+  - complete `xrWaitFrame` with a valid predicted display time over the live
+    service boundary
+  - submit one projection frame through the live macOS service/runtime path
 - with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
   into the older frame-submit path for deeper compositor debugging
 - the earlier branch result that the compute compositor consumes submitted
@@ -112,8 +119,8 @@ SPDX-License-Identifier: BSL-1.0
   (`Invalid command received.` after disconnect), which should be understood
   before treating this path as stable
 - the current Vulkan OpenXR probe also still leaves shutdown-side service noise
-  (`sendmsg(...): Broken pipe` during disconnect), even though the
-  session/swapchain path succeeds
+  (`Invalid command received.` after disconnect), even though the
+  first frame-submit path now succeeds
 
 ## Recommended workflow
 

@@ -365,6 +365,10 @@ ipc_client_connection_init(struct ipc_connection *ipc_c,
 	U_ZERO(ipc_c);
 	ipc_c->imc.ipc_handle = XRT_IPC_HANDLE_INVALID;
 	ipc_c->imc.log_level = log_level;
+#ifdef XRT_OS_OSX
+	ipc_c->imc.frame_reads = true;
+	ipc_c->imc.frame_writes = false;
+#endif
 	ipc_c->ism_handle = XRT_SHMEM_HANDLE_INVALID;
 
 	// Must be done first.

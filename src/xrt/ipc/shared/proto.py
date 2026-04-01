@@ -363,7 +363,11 @@ ipc_dispatch(volatile struct ipc_client_state *ics, ipc_command_t *ipc_command)
             args.extend("&reply." + arg.name for arg in call.out_args)
 
         if call.out_handles:
-            args.extend(("XRT_MAX_IPC_HANDLES",
+            handle_capacity = "XRT_MAX_IPC_HANDLES"
+            if call.out_handles.stem == "graphics_buffer":
+                handle_capacity = "XRT_MAX_SWAPCHAIN_IMAGES"
+
+            args.extend((handle_capacity,
                          call.out_handles.arg_name,
                          "&" + call.out_handles.count_arg_name))
 

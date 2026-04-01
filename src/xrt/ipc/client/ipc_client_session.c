@@ -12,7 +12,6 @@
 
 #include "ipc_client_generated.h"
 
-
 /*!
  * IPC client implementation of @ref xrt_session.
  *
