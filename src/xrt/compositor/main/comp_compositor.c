@@ -512,6 +512,9 @@ static const char *optional_instance_extensions[] = {
 #ifdef VK_EXT_swapchain_colorspace
     VK_EXT_SWAPCHAIN_COLORSPACE_EXTENSION_NAME,
 #endif
+#ifdef VK_KHR_portability_enumeration
+    VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+#endif
 #ifdef VK_EXT_display_surface_counter
     VK_EXT_DISPLAY_SURFACE_COUNTER_EXTENSION_NAME,
 #endif
@@ -532,7 +535,9 @@ static const char *required_device_extensions[] = {
 
 // Platform version of "external_memory"
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+#if !defined(XRT_OS_OSX)
     VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+#endif
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
     VK_ANDROID_EXTERNAL_MEMORY_ANDROID_HARDWARE_BUFFER_EXTENSION_NAME,
@@ -614,6 +619,9 @@ static const char *optional_device_extensions[] = {
 #endif
 #ifdef VK_KHR_synchronization2
     VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME,
+#endif
+#ifdef VK_KHR_portability_subset
+    VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
 #endif
 };
 

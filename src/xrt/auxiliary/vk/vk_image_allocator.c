@@ -66,6 +66,18 @@ get_image_memory_handle_type(void)
 #endif
 }
 
+static bool
+use_external_memory_handles(void)
+{
+#if defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+	// macOS currently compiles through the FD handle path, but MoltenVK does not support FD-based image export.
+	// Allow native compositor allocations to proceed without external-memory export metadata.
+	return false;
+#else
+	return true;
+#endif
+}
+
 static void
 add_format_non_dup(struct format_list_helper *flh, VkFormat format)
 {
@@ -159,14 +171,17 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	 * Create the image.
 	 */
 
-	VkExternalMemoryHandleTypeFlags memory_handle_type = get_image_memory_handle_type();
+	VkExternalMemoryHandleTypeFlags memory_handle_type = 0;
+	if (use_external_memory_handles()) {
+		memory_handle_type = get_image_memory_handle_type();
 
-	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
-	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
-	    .handleTypes = memory_handle_type,
-	    .pNext = next_chain,
-	};
-	CHAIN(external_memory_image_create_info);
+		VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
+		    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
+		    .handleTypes = memory_handle_type,
+		    .pNext = next_chain,
+		};
+		CHAIN(external_memory_image_create_info);
+	}
 
 	// Format list helper needed for the below.
 	struct format_list_helper flh = XRT_STRUCT_INIT;
@@ -340,11 +355,13 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	}
 
 	// In->pNext
-	VkExportMemoryAllocateInfo export_alloc_info = {
-	    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
-	    .handleTypes = memory_handle_type,
-	};
-	CHAIN(export_alloc_info);
+	if (use_external_memory_handles()) {
+		VkExportMemoryAllocateInfo export_alloc_info = {
+		    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
+		    .handleTypes = memory_handle_type,
+		};
+		CHAIN(export_alloc_info);
+	}
 
 	ret = vk_alloc_and_bind_image_memory(   //
 	    vk,                                 // vk_bundle
@@ -526,6 +543,13 @@ vk_ic_get_handles(struct vk_bundle *vk,
                   uint32_t max_handles,
                   xrt_graphics_buffer_handle_t *out_handles)
 {
+#if defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+	for (size_t i = 0; i < vkic->image_count && i < max_handles; i++) {
+		out_handles[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+	}
+	return VK_SUCCESS;
+#endif
+
 	VkResult ret = VK_SUCCESS;
 
 	size_t i = 0;

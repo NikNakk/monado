@@ -221,6 +221,12 @@ create_instance(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_arg
 	    .ppEnabledExtensionNames = u_extension_list_get_data(instance_ext_list),
 	};
 
+#ifdef VK_KHR_portability_enumeration
+	if (u_extension_list_contains(instance_ext_list, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME)) {
+		instance_info.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+	}
+#endif
+
 	ret = vk->vkCreateInstance(&instance_info, NULL, &vk->instance);
 	if (ret != VK_SUCCESS) {
 		VK_ERROR_RET(vk, "vkCreateInstance", "Failed to create Vulkan instance", ret);

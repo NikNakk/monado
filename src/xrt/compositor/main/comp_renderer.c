@@ -948,6 +948,25 @@ dispatch_graphics(struct comp_renderer *r,
  *
  */
 
+static struct comp_layer *
+get_projection_layer(struct comp_layer_accum *layers)
+{
+	for (uint32_t layer = 0; layer < layers->layer_count; ++layer) {
+		switch (layers->layers[layer].data.type) {
+		case XRT_LAYER_PROJECTION:
+		case XRT_LAYER_PROJECTION_DEPTH: return &layers->layers[layer];
+		case XRT_LAYER_QUAD:
+		case XRT_LAYER_CUBE:
+		case XRT_LAYER_CYLINDER:
+		case XRT_LAYER_EQUIRECT1:
+		case XRT_LAYER_EQUIRECT2:
+		case XRT_LAYER_PASSTHROUGH: break;
+		}
+	}
+
+	return NULL;
+}
+
 /*!
  * @pre render_compute_init(render, &c->nr)
  */
@@ -972,14 +991,36 @@ dispatch_compute(struct comp_renderer *r,
 	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
 	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
-	calc_pose_data(                //
-	    r,                         //
-	    fov_source,                //
-	    fovs,                      //
-	    world_poses_scanout_begin, //
-	    world_poses_scanout_end,   //
-	    eye_poses,                 //
-	    render->r->view_count);    //
+	if (!c->base.frame_params.one_projection_layer_fast_path) {
+		struct comp_layer *proj_layer = get_projection_layer(&c->base.layer_accum);
+		int64_t predicted_display_time_ns = c->frame.rendering.predicted_display_time_ns;
+		int64_t cutoff_ns = 3 * c->frame_interval_ns;
+
+		if (proj_layer != NULL && llabs(predicted_display_time_ns - proj_layer->data.timestamp) <= cutoff_ns) {
+			struct xrt_layer_projection_view_data *data = proj_layer->data.proj.v;
+			COMP_SPEW(c, "Using submitted projection layer pose data in compute compositor");
+
+			// projection_depth shares the same initial view layout as projection
+			for (uint32_t view = 0; view < render->r->view_count; ++view) {
+				fovs[view] = data[view].fov;
+				world_poses_scanout_begin[view] = data[view].pose;
+				world_poses_scanout_end[view] = data[view].pose;
+				eye_poses[view] = data[view].pose;
+
+				c->base.frame_params.fovs[view] = data[view].fov;
+				c->base.frame_params.poses[view] = data[view].pose;
+			}
+		} else {
+			calc_pose_data(                //
+			    r,                         //
+			    fov_source,                //
+			    fovs,                      //
+			    world_poses_scanout_begin, //
+			    world_poses_scanout_end,   //
+			    eye_poses,                 //
+			    render->r->view_count);    //
+		}
+	}
 
 	// Target Vulkan resources..
 	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
