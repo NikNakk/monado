@@ -59,13 +59,19 @@ SPDX-License-Identifier: BSL-1.0
   boundaries survive macOS `SOCK_STREAM` short reads
 - fixed the IPC protocol generator so graphics-buffer reply capacity uses
   `XRT_MAX_SWAPCHAIN_IMAGES` instead of `XRT_MAX_IPC_HANDLES`
+- enabled Monado's existing remote driver build option on macOS so the MVP
+  remote-HMD path can be built and tested without inventing a new device stack
+- fixed the remote driver's socket creation path for macOS by falling back when
+  `SOCK_CLOEXEC` is unavailable
+- enabled `config_v0.json` loading on macOS so remote-builder settings can be
+  selected through the normal config path instead of env-only overrides
 
 ## Still expected after this patch set
 
 - more IPC/server portability work after the first `poll()` conversion
 - real OpenXR state-tracker validation on top of the now-working IPC image path
-- frame submission and layer submission after the new graphics-bound Vulkan
-  session/swapchain probe
+- remote-driver validation on macOS as the first host-side remote-HMD stub
+- adapting the remote driver protocol/data model to the Quest MVP pose path
 - cleanup/teardown fixes for the service-backed probe shutdown path
 - deciding whether any additional WiVRn compositor patches should be ported, or
   only mined for design ideas
@@ -106,9 +112,17 @@ SPDX-License-Identifier: BSL-1.0
   - complete `xrWaitFrame` with a valid predicted display time over the live
     service boundary
   - submit one projection frame through the live macOS service/runtime path
-  - expose the next sustained-render blocker when
-    `MACOS_OPENXR_VULKAN_PROBE_FRAMES>1`: Metal rejects the current
-    `IOSurface` array-texture import path for `MTLTextureType2DArray`
+  - submit multiple projection frames cleanly when
+    `MACOS_OPENXR_VULKAN_PROBE_FRAMES>1` and
+    `MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS=1`
+  - isolate the sustained-render blocker to the current `IOSurface`
+    array-texture import path for `MTLTextureType2DArray`
+- the existing remote builder can now be brought up on macOS:
+  - `XRT_BUILD_DRIVER_REMOTE=ON` now configures and builds cleanly on Apple
+    Silicon
+  - a macOS `config_v0.json` with `active=remote` is now honored
+  - `monado-service` selects the remote builder, exposes `Remote HMD`, and
+    listens on the configured TCP port
 - with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
   into the older frame-submit path for deeper compositor debugging
 - the earlier branch result that the compute compositor consumes submitted
@@ -138,5 +152,10 @@ SPDX-License-Identifier: BSL-1.0
    headless OpenXR path over the real service boundary
 6. Use `tests/tests_macos_openxr_vulkan_probe` to validate the first
    graphics-bound OpenXR Vulkan session and swapchain path on macOS
-7. Fix only the first blocker each round
-8. Keep notes here so the blocker order stays explicit
+   `MACOS_OPENXR_VULKAN_PROBE_FRAMES=3` plus
+   `MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS=1` is currently the useful
+   sustained-render regression path on Apple Silicon.
+7. Use a macOS `config_v0.json` with `active=remote` when validating the
+   remote-builder path on Apple Silicon
+8. Fix only the first blocker each round
+9. Keep notes here so the blocker order stays explicit

@@ -119,7 +119,11 @@ socket_close(r_socket_t id)
 static inline r_socket_t
 socket_create(void)
 {
+#ifdef SOCK_CLOEXEC
 	return socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#else
+	return socket(AF_INET, SOCK_STREAM, 0);
+#endif
 }
 
 static inline int

@@ -63,6 +63,25 @@ get_frame_count(void)
 	return (uint32_t)parsed;
 }
 
+static bool
+use_per_view_swapchains(void)
+{
+	const char *value = getenv("MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS");
+	if (value == NULL || value[0] == '\0') {
+		return false;
+	}
+
+	return strcmp(value, "0") != 0;
+}
+
+struct probe_swapchain
+{
+	XrSwapchain handle;
+	XrSwapchainCreateInfo create_info;
+	XrSwapchainImageVulkanKHR *images;
+	uint32_t image_count;
+};
+
 static int
 get_proc(PFN_xrGetInstanceProcAddr get_instance_proc_addr,
          XrInstance instance,
@@ -193,10 +212,12 @@ main(void)
 	XrInstance instance = XR_NULL_HANDLE;
 	XrSession session = XR_NULL_HANDLE;
 	XrSpace local_space = XR_NULL_HANDLE;
-	XrSwapchain swapchain = XR_NULL_HANDLE;
 	VkInstance vk_instance = VK_NULL_HANDLE;
 	VkDevice vk_device = VK_NULL_HANDLE;
 	uint32_t frame_count = get_frame_count();
+	bool per_view_swapchains = use_per_view_swapchains();
+	struct probe_swapchain *swapchains = NULL;
+	uint32_t swapchain_count = 0;
 
 	if (frame_count == 0) {
 		return 1;
@@ -595,53 +616,65 @@ main(void)
 		goto out;
 	}
 
-	XrSwapchainCreateInfo swapchain_info = {
-	    .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
-	    .createFlags = 0,
-	    .usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT,
-	    .format = formats[0],
-	    .sampleCount = views[0].recommendedSwapchainSampleCount,
-	    .width = views[0].recommendedImageRectWidth,
-	    .height = views[0].recommendedImageRectHeight,
-	    .faceCount = 1,
-	    .arraySize = view_count,
-	    .mipCount = 1,
-	};
+	swapchain_count = per_view_swapchains ? view_count : 1;
+	swapchains = calloc(swapchain_count, sizeof(*swapchains));
+	if (swapchains == NULL) {
+		free(formats);
+		free(views);
+		ret = fail_msg("calloc(probe swapchains) failed");
+		goto out;
+	}
+
+	for (uint32_t i = 0; i < swapchain_count; ++i) {
+		swapchains[i].handle = XR_NULL_HANDLE;
+		swapchains[i].create_info = (XrSwapchainCreateInfo){
+		    .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
+		    .createFlags = 0,
+		    .usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT,
+		    .format = formats[0],
+		    .sampleCount = views[i].recommendedSwapchainSampleCount,
+		    .width = views[i].recommendedImageRectWidth,
+		    .height = views[i].recommendedImageRectHeight,
+		    .faceCount = 1,
+		    .arraySize = per_view_swapchains ? 1 : view_count,
+		    .mipCount = 1,
+		};
+	}
 	free(formats);
 	free(views);
 
-	xr = xrCreateSwapchain(session, &swapchain_info, &swapchain);
-	if (xr != XR_SUCCESS) {
-		ret = fail_xr("xrCreateSwapchain", xr);
-		goto out;
-	}
+	for (uint32_t i = 0; i < swapchain_count; ++i) {
+		xr = xrCreateSwapchain(session, &swapchains[i].create_info, &swapchains[i].handle);
+		if (xr != XR_SUCCESS) {
+			ret = fail_xr("xrCreateSwapchain", xr);
+			goto out;
+		}
 
-	uint32_t image_count = 0;
-	xr = xrEnumerateSwapchainImages(swapchain, 0, &image_count, NULL);
-	if (xr != XR_SUCCESS) {
-		ret = fail_xr("xrEnumerateSwapchainImages(count)", xr);
-		goto out;
-	}
+		xr = xrEnumerateSwapchainImages(swapchains[i].handle, 0, &swapchains[i].image_count, NULL);
+		if (xr != XR_SUCCESS) {
+			ret = fail_xr("xrEnumerateSwapchainImages(count)", xr);
+			goto out;
+		}
 
-	XrSwapchainImageVulkanKHR *images = calloc(image_count, sizeof(*images));
-	if (images == NULL) {
-		ret = fail_msg("calloc(swapchain images) failed");
-		goto out;
-	}
-	for (uint32_t i = 0; i < image_count; ++i) {
-		images[i].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
-	}
+		swapchains[i].images = calloc(swapchains[i].image_count, sizeof(*swapchains[i].images));
+		if (swapchains[i].images == NULL) {
+			ret = fail_msg("calloc(swapchain images) failed");
+			goto out;
+		}
+		for (uint32_t j = 0; j < swapchains[i].image_count; ++j) {
+			swapchains[i].images[j].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
+		}
 
-	xr = xrEnumerateSwapchainImages(swapchain, image_count, &image_count, (XrSwapchainImageBaseHeader *)images);
-	if (xr != XR_SUCCESS) {
-		free(images);
-		ret = fail_xr("xrEnumerateSwapchainImages(list)", xr);
-		goto out;
+		xr = xrEnumerateSwapchainImages(swapchains[i].handle, swapchains[i].image_count, &swapchains[i].image_count,
+		                                (XrSwapchainImageBaseHeader *)swapchains[i].images);
+		if (xr != XR_SUCCESS) {
+			ret = fail_xr("xrEnumerateSwapchainImages(list)", xr);
+			goto out;
+		}
 	}
 
 	XrView *located_views = calloc(view_count, sizeof(*located_views));
 	if (located_views == NULL) {
-		free(images);
 		ret = fail_msg("calloc(located views) failed");
 		goto out;
 	}
@@ -652,7 +685,6 @@ main(void)
 	XrCompositionLayerProjectionView *projection_views = calloc(view_count, sizeof(*projection_views));
 	if (projection_views == NULL) {
 		free(located_views);
-		free(images);
 		ret = fail_msg("calloc(projection views) failed");
 		goto out;
 	}
@@ -668,7 +700,6 @@ main(void)
 		if (xr != XR_SUCCESS) {
 			free(projection_views);
 			free(located_views);
-			free(images);
 			ret = fail_xr("xrWaitFrame", xr);
 			goto out;
 		}
@@ -680,35 +711,34 @@ main(void)
 		if (xr != XR_SUCCESS) {
 			free(projection_views);
 			free(located_views);
-			free(images);
 			ret = fail_xr("xrBeginFrame", xr);
 			goto out;
 		}
 
-		uint32_t image_index = 0;
-		XrSwapchainImageAcquireInfo acquire_info = {
-		    .type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO,
-		};
-		xr = xrAcquireSwapchainImage(swapchain, &acquire_info, &image_index);
-		if (xr != XR_SUCCESS) {
-			free(projection_views);
-			free(located_views);
-			free(images);
-			ret = fail_xr("xrAcquireSwapchainImage", xr);
-			goto out;
-		}
+		for (uint32_t i = 0; i < swapchain_count; ++i) {
+			uint32_t image_index = 0;
+			XrSwapchainImageAcquireInfo acquire_info = {
+			    .type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO,
+			};
+			xr = xrAcquireSwapchainImage(swapchains[i].handle, &acquire_info, &image_index);
+			if (xr != XR_SUCCESS) {
+				free(projection_views);
+				free(located_views);
+				ret = fail_xr("xrAcquireSwapchainImage", xr);
+				goto out;
+			}
 
-		XrSwapchainImageWaitInfo wait_info = {
-		    .type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
-		    .timeout = XR_INFINITE_DURATION,
-		};
-		xr = xrWaitSwapchainImage(swapchain, &wait_info);
-		if (xr != XR_SUCCESS) {
-			free(projection_views);
-			free(located_views);
-			free(images);
-			ret = fail_xr("xrWaitSwapchainImage", xr);
-			goto out;
+			XrSwapchainImageWaitInfo wait_info = {
+			    .type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
+			    .timeout = XR_INFINITE_DURATION,
+			};
+			xr = xrWaitSwapchainImage(swapchains[i].handle, &wait_info);
+			if (xr != XR_SUCCESS) {
+				free(projection_views);
+				free(located_views);
+				ret = fail_xr("xrWaitSwapchainImage", xr);
+				goto out;
+			}
 		}
 
 		for (uint32_t i = 0; i < view_count; ++i) {
@@ -730,7 +760,6 @@ main(void)
 		if (xr != XR_SUCCESS) {
 			free(projection_views);
 			free(located_views);
-			free(images);
 			ret = fail_xr("xrLocateViews", xr);
 			goto out;
 		}
@@ -738,33 +767,36 @@ main(void)
 		if (located_view_count != view_count) {
 			free(projection_views);
 			free(located_views);
-			free(images);
 			ret = fail_msg("xrLocateViews returned unexpected view count");
 			goto out;
 		}
 
-		XrSwapchainImageReleaseInfo release_info = {
-		    .type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO,
-		};
-		xr = xrReleaseSwapchainImage(swapchain, &release_info);
-		if (xr != XR_SUCCESS) {
-			free(projection_views);
-			free(located_views);
-			free(images);
-			ret = fail_xr("xrReleaseSwapchainImage", xr);
-			goto out;
+		for (uint32_t i = 0; i < swapchain_count; ++i) {
+			XrSwapchainImageReleaseInfo release_info = {
+			    .type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO,
+			};
+			xr = xrReleaseSwapchainImage(swapchains[i].handle, &release_info);
+			if (xr != XR_SUCCESS) {
+				free(projection_views);
+				free(located_views);
+				ret = fail_xr("xrReleaseSwapchainImage", xr);
+				goto out;
+			}
 		}
 
 		for (uint32_t i = 0; i < view_count; ++i) {
 			projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
 			projection_views[i].pose = located_views[i].pose;
 			projection_views[i].fov = located_views[i].fov;
-			projection_views[i].subImage.swapchain = swapchain;
+			projection_views[i].subImage.swapchain =
+			    per_view_swapchains ? swapchains[i].handle : swapchains[0].handle;
 			projection_views[i].subImage.imageRect.offset.x = 0;
 			projection_views[i].subImage.imageRect.offset.y = 0;
-			projection_views[i].subImage.imageRect.extent.width = (int32_t)swapchain_info.width;
-			projection_views[i].subImage.imageRect.extent.height = (int32_t)swapchain_info.height;
-			projection_views[i].subImage.imageArrayIndex = i;
+			projection_views[i].subImage.imageRect.extent.width =
+			    (int32_t)(per_view_swapchains ? swapchains[i].create_info.width : swapchains[0].create_info.width);
+			projection_views[i].subImage.imageRect.extent.height =
+			    (int32_t)(per_view_swapchains ? swapchains[i].create_info.height : swapchains[0].create_info.height);
+			projection_views[i].subImage.imageArrayIndex = per_view_swapchains ? 0 : i;
 		}
 
 		XrCompositionLayerProjection projection_layer = {
@@ -787,23 +819,27 @@ main(void)
 		if (xr != XR_SUCCESS) {
 			free(projection_views);
 			free(located_views);
-			free(images);
 			ret = fail_xr("xrEndFrame", xr);
 			goto out;
 		}
 	}
 
 	fprintf(stdout,
-	        "OpenXR Vulkan probe created session, swapchain, and submitted %u projection frames with %u images.\n",
-	        frame_count, image_count);
+	        "OpenXR Vulkan probe created session, %u swapchain(s), and submitted %u projection frames.\n",
+	        swapchain_count, frame_count);
 	free(projection_views);
 	free(located_views);
-	free(images);
 	ret = 0;
 
 out:
-	if (swapchain != XR_NULL_HANDLE && xrDestroySwapchain != NULL) {
-		xrDestroySwapchain(swapchain);
+	if (swapchains != NULL) {
+		for (uint32_t i = 0; i < swapchain_count; ++i) {
+			free(swapchains[i].images);
+			if (swapchains[i].handle != XR_NULL_HANDLE && xrDestroySwapchain != NULL) {
+				xrDestroySwapchain(swapchains[i].handle);
+			}
+		}
+		free(swapchains);
 	}
 	if (local_space != XR_NULL_HANDLE && xrDestroySpace != NULL) {
 		xrDestroySpace(local_space);

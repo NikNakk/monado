@@ -161,11 +161,30 @@ The branch now also reaches the first service-backed graphics submit on macOS:
   create the service-backed OpenXR swapchain, and submit one projection frame
   through the live macOS Monado service/runtime path
 - the same probe now has an opt-in multi-frame mode via
-  `MACOS_OPENXR_VULKAN_PROBE_FRAMES`, but values greater than `1` currently
-  expose the next real graphics blocker on macOS: the current `IOSurface`
-  import/export path trips Metal validation on array-texture usage
-  (`MTLTextureType2DArray`), which means the current swapchain model is still
-  too Linux/Vulkan-shaped for sustained stereo submission
+  `MACOS_OPENXR_VULKAN_PROBE_FRAMES`
+- on macOS, sustained stereo submission currently works when the probe uses
+  one `arraySize=1` swapchain per eye
+  (`MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS=1`)
+- the failing case is specifically the current stereo array-swapchain model:
+  the `IOSurface` import/export path trips Metal validation on
+  `MTLTextureType2DArray`, so the first real macOS remote-render path should be
+  treated as per-eye 2D swapchains, not a Vulkan-style stereo array image
+
+The branch now also validates the first host-side remote-HMD stub path on
+macOS:
+
+- Monado's existing remote driver now builds on macOS after a small
+  `SOCK_CLOEXEC` portability fix
+- the config loader now reads `config_v0.json` on macOS instead of excluding
+  Apple entirely
+- with a macOS config directory populated and `active` set to `remote`,
+  `monado-service` now selects the remote builder, exposes `Remote HMD` plus
+  remote controllers, and listens on the configured TCP port
+
+This does not make the headset path done, but it changes the next step. The
+first Quest experiment should start by adapting the existing remote driver data
+path to the MVP pose/video contract, not by inventing a new host-side HMD
+abstraction.
 
 ## Likely next blocker classes
 
@@ -173,9 +192,10 @@ After the first successful runtime probe, the next blocker classes are clearer:
 
 - additional Linux-only event loop assumptions in server/service code
 - desktop compositor assumptions around display/window targets
-- moving from the new graphics-bound swapchain probe to real frame submission
-  and view/layer submission on macOS beyond the current one-frame validation,
-  especially around the macOS array-texture swapchain model
+- moving from the new graphics-bound swapchain probe to a remote-HMD device
+  path and an actual network-fed pose source
+- deciding whether the macOS workaround should stay an app-level constraint
+  (one swapchain per eye) or become a deeper compositor/runtime policy
 - cleanup/teardown issues after the service-backed IPC and loaderless OpenXR
   probes, currently visible as noisy shutdown-side protocol logging
 - missing macOS-native process/service integration
