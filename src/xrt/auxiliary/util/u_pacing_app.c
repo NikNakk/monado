@@ -19,6 +19,7 @@
 #include "util/u_trace_marker.h"
 
 #include <stdio.h>
+#include <inttypes.h>
 #include <assert.h>
 
 DEBUG_GET_ONCE_LOG_OPTION(log_level, "U_PACING_APP_LOG", U_LOGGING_WARN)
@@ -552,6 +553,10 @@ pa_mark_point(struct u_pacing_app *upa, int64_t frame_id, enum u_timing_point po
 
 	DEBUG_PRINT_ID_FRAME_POINT(frame_id, f, point);
 
+	if (f->frame_id != frame_id) {
+		UPA_LOG_E("frame_id mismatch at point %d: expected=%" PRId64 " got=%" PRId64 " index=%zu state=%d",
+		          point, f->frame_id, frame_id, index, f->state);
+	}
 	assert(f->frame_id == frame_id);
 
 	switch (point) {

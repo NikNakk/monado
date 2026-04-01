@@ -541,10 +541,18 @@ ipc_compositor_wait_frame(struct xrt_compositor *xc,
 	xrt_result_t xret;
 
 	int64_t frame_id = -1;
-	int64_t wake_up_time_ns = 0;
 	int64_t predicted_display_time = 0;
 	int64_t predicted_display_period = 0;
 
+#ifdef XRT_OS_OSX
+	xret = ipc_call_compositor_wait_frame( //
+	    icc->ipc_c,                        // Connection
+	    &frame_id,                         // Frame id
+	    &predicted_display_time,           // Display time
+	    &predicted_display_period);        // Current period
+	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_compositor_wait_frame");
+#else
+	int64_t wake_up_time_ns = 0;
 	xret = ipc_call_compositor_predict_frame( //
 	    icc->ipc_c,                           // Connection
 	    &frame_id,                            // Frame id
@@ -559,6 +567,7 @@ ipc_compositor_wait_frame(struct xrt_compositor *xc,
 	// Signal that we woke up.
 	xret = ipc_call_compositor_wait_woke(icc->ipc_c, frame_id);
 	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_compositor_wait_woke");
+#endif
 
 	// Only write arguments once we have fully waited.
 	*out_frame_id = frame_id;

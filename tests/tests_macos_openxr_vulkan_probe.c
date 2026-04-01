@@ -60,6 +60,32 @@ get_proc(PFN_xrGetInstanceProcAddr get_instance_proc_addr,
 	return 0;
 }
 
+static int
+wait_for_session_state(PFN_xrPollEvent xrPollEvent, XrInstance instance, XrSessionState target_state)
+{
+	for (uint32_t i = 0; i < 64; ++i) {
+		XrEventDataBuffer event = {
+		    .type = XR_TYPE_EVENT_DATA_BUFFER,
+		};
+		XrResult xr = xrPollEvent(instance, &event);
+		if (xr == XR_EVENT_UNAVAILABLE) {
+			continue;
+		}
+		if (xr != XR_SUCCESS) {
+			return fail_xr("xrPollEvent", xr);
+		}
+
+		if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+			const XrEventDataSessionStateChanged *changed = (const XrEventDataSessionStateChanged *)&event;
+			if (changed->state == target_state) {
+				return 0;
+			}
+		}
+	}
+
+	return fail_msg("Timed out waiting for OpenXR session state");
+}
+
 static bool
 have_instance_extension(const char *target)
 {
@@ -144,6 +170,7 @@ main(void)
 	void *runtime = NULL;
 	XrInstance instance = XR_NULL_HANDLE;
 	XrSession session = XR_NULL_HANDLE;
+	XrSpace local_space = XR_NULL_HANDLE;
 	XrSwapchain swapchain = XR_NULL_HANDLE;
 	VkInstance vk_instance = VK_NULL_HANDLE;
 	VkDevice vk_device = VK_NULL_HANDLE;
@@ -260,23 +287,43 @@ main(void)
 	}
 
 	PFN_xrDestroyInstance xrDestroyInstance = NULL;
+	PFN_xrPollEvent xrPollEvent = NULL;
 	PFN_xrGetSystem xrGetSystem = NULL;
 	PFN_xrDestroySession xrDestroySession = NULL;
 	PFN_xrCreateSession xrCreateSession = NULL;
+	PFN_xrBeginSession xrBeginSession = NULL;
+	PFN_xrWaitFrame xrWaitFrame = NULL;
+	PFN_xrBeginFrame xrBeginFrame = NULL;
+	PFN_xrEndFrame xrEndFrame = NULL;
+	PFN_xrLocateViews xrLocateViews = NULL;
+	PFN_xrCreateReferenceSpace xrCreateReferenceSpace = NULL;
+	PFN_xrDestroySpace xrDestroySpace = NULL;
 	PFN_xrEnumerateViewConfigurationViews xrEnumerateViewConfigurationViews = NULL;
 	PFN_xrEnumerateSwapchainFormats xrEnumerateSwapchainFormats = NULL;
 	PFN_xrCreateSwapchain xrCreateSwapchain = NULL;
 	PFN_xrDestroySwapchain xrDestroySwapchain = NULL;
 	PFN_xrEnumerateSwapchainImages xrEnumerateSwapchainImages = NULL;
+	PFN_xrAcquireSwapchainImage xrAcquireSwapchainImage = NULL;
+	PFN_xrWaitSwapchainImage xrWaitSwapchainImage = NULL;
+	PFN_xrReleaseSwapchainImage xrReleaseSwapchainImage = NULL;
 	PFN_xrGetVulkanGraphicsRequirements2KHR xrGetVulkanGraphicsRequirements2KHR = NULL;
 	PFN_xrCreateVulkanInstanceKHR xrCreateVulkanInstanceKHR = NULL;
 	PFN_xrGetVulkanGraphicsDevice2KHR xrGetVulkanGraphicsDevice2KHR = NULL;
 	PFN_xrCreateVulkanDeviceKHR xrCreateVulkanDeviceKHR = NULL;
 
 	if (get_proc(get_instance_proc_addr, instance, "xrDestroyInstance", (PFN_xrVoidFunction *)&xrDestroyInstance) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrPollEvent", (PFN_xrVoidFunction *)&xrPollEvent) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrGetSystem", (PFN_xrVoidFunction *)&xrGetSystem) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrCreateSession", (PFN_xrVoidFunction *)&xrCreateSession) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrDestroySession", (PFN_xrVoidFunction *)&xrDestroySession) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrBeginSession", (PFN_xrVoidFunction *)&xrBeginSession) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrWaitFrame", (PFN_xrVoidFunction *)&xrWaitFrame) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrBeginFrame", (PFN_xrVoidFunction *)&xrBeginFrame) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrEndFrame", (PFN_xrVoidFunction *)&xrEndFrame) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrLocateViews", (PFN_xrVoidFunction *)&xrLocateViews) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrCreateReferenceSpace",
+	             (PFN_xrVoidFunction *)&xrCreateReferenceSpace) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrDestroySpace", (PFN_xrVoidFunction *)&xrDestroySpace) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrEnumerateViewConfigurationViews",
 	             (PFN_xrVoidFunction *)&xrEnumerateViewConfigurationViews) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrEnumerateSwapchainFormats",
@@ -287,6 +334,12 @@ main(void)
 	             (PFN_xrVoidFunction *)&xrDestroySwapchain) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrEnumerateSwapchainImages",
 	             (PFN_xrVoidFunction *)&xrEnumerateSwapchainImages) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrAcquireSwapchainImage",
+	             (PFN_xrVoidFunction *)&xrAcquireSwapchainImage) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrWaitSwapchainImage",
+	             (PFN_xrVoidFunction *)&xrWaitSwapchainImage) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrReleaseSwapchainImage",
+	             (PFN_xrVoidFunction *)&xrReleaseSwapchainImage) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrGetVulkanGraphicsRequirements2KHR",
 	             (PFN_xrVoidFunction *)&xrGetVulkanGraphicsRequirements2KHR) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrCreateVulkanInstanceKHR",
@@ -439,6 +492,34 @@ main(void)
 		goto out;
 	}
 
+	if (wait_for_session_state(xrPollEvent, instance, XR_SESSION_STATE_READY) != 0) {
+		ret = 1;
+		goto out;
+	}
+
+	XrSessionBeginInfo begin_info = {
+	    .type = XR_TYPE_SESSION_BEGIN_INFO,
+	    .primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+	};
+	xr = xrBeginSession(session, &begin_info);
+	if (xr != XR_SUCCESS) {
+		ret = fail_xr("xrBeginSession", xr);
+		goto out;
+	}
+
+	XrReferenceSpaceCreateInfo space_info = {
+	    .type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO,
+	    .referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL,
+	    .poseInReferenceSpace = {
+	        .orientation = {.w = 1.0f},
+	    },
+	};
+	xr = xrCreateReferenceSpace(session, &space_info, &local_space);
+	if (xr != XR_SUCCESS) {
+		ret = fail_xr("xrCreateReferenceSpace", xr);
+		goto out;
+	}
+
 	uint32_t view_count = 0;
 	xr = xrEnumerateViewConfigurationViews(instance, system_id, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0,
 	                                       &view_count, NULL);
@@ -496,7 +577,7 @@ main(void)
 	    .width = views[0].recommendedImageRectWidth,
 	    .height = views[0].recommendedImageRectHeight,
 	    .faceCount = 1,
-	    .arraySize = 1,
+	    .arraySize = view_count,
 	    .mipCount = 1,
 	};
 	free(formats);
@@ -531,28 +612,159 @@ main(void)
 		goto out;
 	}
 
-	fprintf(stdout, "OpenXR Vulkan probe created session and swapchain with %u images.\n", image_count);
+	XrFrameWaitInfo frame_wait_info = {
+	    .type = XR_TYPE_FRAME_WAIT_INFO,
+	};
+	XrFrameState frame_state = {
+	    .type = XR_TYPE_FRAME_STATE,
+	};
+	xr = xrWaitFrame(session, &frame_wait_info, &frame_state);
+	if (xr != XR_SUCCESS) {
+		free(images);
+		ret = fail_xr("xrWaitFrame", xr);
+		goto out;
+	}
+
+	XrFrameBeginInfo frame_begin_info = {
+	    .type = XR_TYPE_FRAME_BEGIN_INFO,
+	};
+	xr = xrBeginFrame(session, &frame_begin_info);
+	if (xr != XR_SUCCESS) {
+		free(images);
+		ret = fail_xr("xrBeginFrame", xr);
+		goto out;
+	}
+
+	uint32_t image_index = 0;
+	XrSwapchainImageAcquireInfo acquire_info = {
+	    .type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO,
+	};
+	xr = xrAcquireSwapchainImage(swapchain, &acquire_info, &image_index);
+	if (xr != XR_SUCCESS) {
+		free(images);
+		ret = fail_xr("xrAcquireSwapchainImage", xr);
+		goto out;
+	}
+
+	XrSwapchainImageWaitInfo wait_info = {
+	    .type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
+	    .timeout = XR_INFINITE_DURATION,
+	};
+	xr = xrWaitSwapchainImage(swapchain, &wait_info);
+	if (xr != XR_SUCCESS) {
+		free(images);
+		ret = fail_xr("xrWaitSwapchainImage", xr);
+		goto out;
+	}
+
+	XrView *located_views = calloc(view_count, sizeof(*located_views));
+	if (located_views == NULL) {
+		free(images);
+		ret = fail_msg("calloc(located views) failed");
+		goto out;
+	}
+	for (uint32_t i = 0; i < view_count; ++i) {
+		located_views[i].type = XR_TYPE_VIEW;
+	}
+
+	XrViewLocateInfo locate_info = {
+	    .type = XR_TYPE_VIEW_LOCATE_INFO,
+	    .viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+	    .displayTime = frame_state.predictedDisplayTime,
+	    .space = local_space,
+	};
+	XrViewState view_state = {
+	    .type = XR_TYPE_VIEW_STATE,
+	};
+	uint32_t located_view_count = 0;
+	xr = xrLocateViews(session, &locate_info, &view_state, view_count, &located_view_count, located_views);
+	if (xr != XR_SUCCESS) {
+		free(located_views);
+		free(images);
+		ret = fail_xr("xrLocateViews", xr);
+		goto out;
+	}
+
+	if (located_view_count != view_count) {
+		free(located_views);
+		free(images);
+		ret = fail_msg("xrLocateViews returned unexpected view count");
+		goto out;
+	}
+
+	XrSwapchainImageReleaseInfo release_info = {
+	    .type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO,
+	};
+	xr = xrReleaseSwapchainImage(swapchain, &release_info);
+	if (xr != XR_SUCCESS) {
+		free(located_views);
+		free(images);
+		ret = fail_xr("xrReleaseSwapchainImage", xr);
+		goto out;
+	}
+
+	XrCompositionLayerProjectionView *projection_views = calloc(view_count, sizeof(*projection_views));
+	if (projection_views == NULL) {
+		free(located_views);
+		free(images);
+		ret = fail_msg("calloc(projection views) failed");
+		goto out;
+	}
+
+	for (uint32_t i = 0; i < view_count; ++i) {
+		projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+		projection_views[i].pose = located_views[i].pose;
+		projection_views[i].fov = located_views[i].fov;
+		projection_views[i].subImage.swapchain = swapchain;
+		projection_views[i].subImage.imageRect.offset.x = 0;
+		projection_views[i].subImage.imageRect.offset.y = 0;
+		projection_views[i].subImage.imageRect.extent.width = (int32_t)swapchain_info.width;
+		projection_views[i].subImage.imageRect.extent.height = (int32_t)swapchain_info.height;
+		projection_views[i].subImage.imageArrayIndex = i;
+	}
+
+	XrCompositionLayerProjection projection_layer = {
+	    .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
+	    .space = local_space,
+	    .viewCount = view_count,
+	    .views = projection_views,
+	};
+	const XrCompositionLayerBaseHeader *layers[] = {
+	    (const XrCompositionLayerBaseHeader *)&projection_layer,
+	};
+	XrFrameEndInfo frame_end_info = {
+	    .type = XR_TYPE_FRAME_END_INFO,
+	    .displayTime = frame_state.predictedDisplayTime,
+	    .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
+	    .layerCount = 1,
+	    .layers = layers,
+	};
+	xr = xrEndFrame(session, &frame_end_info);
+	if (xr != XR_SUCCESS) {
+		free(projection_views);
+		free(located_views);
+		free(images);
+		ret = fail_xr("xrEndFrame", xr);
+		goto out;
+	}
+
+	fprintf(stdout,
+	        "OpenXR Vulkan probe created session, swapchain, and submitted one projection frame with %u images.\n",
+	        image_count);
+	free(projection_views);
+	free(located_views);
 	free(images);
 	ret = 0;
 
 out:
-	if (swapchain != XR_NULL_HANDLE) {
-		PFN_xrDestroySwapchain xrDestroySwapchainLocal = NULL;
-		if (instance != XR_NULL_HANDLE &&
-		    get_proc(get_instance_proc_addr, instance, "xrDestroySwapchain",
-		             (PFN_xrVoidFunction *)&xrDestroySwapchainLocal) == 0 &&
-		    xrDestroySwapchainLocal != NULL) {
-			xrDestroySwapchainLocal(swapchain);
-		}
+	if (swapchain != XR_NULL_HANDLE && xrDestroySwapchain != NULL) {
+		xrDestroySwapchain(swapchain);
 	}
-	if (session != XR_NULL_HANDLE) {
-		PFN_xrDestroySession xrDestroySessionLocal = NULL;
-		if (instance != XR_NULL_HANDLE &&
-		    get_proc(get_instance_proc_addr, instance, "xrDestroySession",
-		             (PFN_xrVoidFunction *)&xrDestroySessionLocal) == 0 &&
-		    xrDestroySessionLocal != NULL) {
-			xrDestroySessionLocal(session);
-		}
+	if (local_space != XR_NULL_HANDLE && xrDestroySpace != NULL) {
+		xrDestroySpace(local_space);
+	}
+	if (session != XR_NULL_HANDLE && xrDestroySession != NULL) {
+		xrDestroySession(session);
 	}
 	if (vk_device != VK_NULL_HANDLE) {
 		vkDestroyDevice(vk_device, NULL);
@@ -560,13 +772,8 @@ out:
 	if (vk_instance != VK_NULL_HANDLE) {
 		vkDestroyInstance(vk_instance, NULL);
 	}
-	if (instance != XR_NULL_HANDLE) {
-		PFN_xrDestroyInstance xrDestroyInstanceLocal = NULL;
-		if (get_proc(get_instance_proc_addr, instance, "xrDestroyInstance",
-		             (PFN_xrVoidFunction *)&xrDestroyInstanceLocal) == 0 &&
-		    xrDestroyInstanceLocal != NULL) {
-			xrDestroyInstanceLocal(instance);
-		}
+	if (instance != XR_NULL_HANDLE && xrDestroyInstance != NULL) {
+		xrDestroyInstance(instance);
 	}
 	if (runtime != NULL) {
 		dlclose(runtime);

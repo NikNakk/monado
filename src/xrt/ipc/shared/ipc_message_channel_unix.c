@@ -79,23 +79,34 @@ ipc_message_channel_close(struct ipc_message_channel *imc)
 xrt_result_t
 ipc_send(struct ipc_message_channel *imc, const void *data, size_t size)
 {
-	struct msghdr msg = {0};
-	struct iovec iov = {0};
+	const uint8_t *ptr = (const uint8_t *)data;
+	size_t total = 0;
 
-	iov.iov_base = (void *)data;
-	iov.iov_len = size;
+	while (total < size) {
+		struct msghdr msg = {0};
+		struct iovec iov = {0};
 
-	msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-	msg.msg_flags = 0;
+		iov.iov_base = (void *)(ptr + total);
+		iov.iov_len = size - total;
 
-	ssize_t ret = sendmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
-	if (ret < 0) {
-		int code = errno;
-		IPC_ERROR(imc, "sendmsg(%i) failed: '%i' '%s'!", imc->ipc_handle, code, strerror(code));
-		return XRT_ERROR_IPC_FAILURE;
+		msg.msg_name = NULL;
+		msg.msg_namelen = 0;
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_flags = 0;
+
+		ssize_t ret = sendmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
+		if (ret < 0) {
+			int code = errno;
+			IPC_ERROR(imc, "sendmsg(%i) failed: '%i' '%s'!", imc->ipc_handle, code, strerror(code));
+			return XRT_ERROR_IPC_FAILURE;
+		}
+		if (ret == 0) {
+			IPC_ERROR(imc, "sendmsg(%i) failed: no data sent!", imc->ipc_handle);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		total += (size_t)ret;
 	}
 
 	return XRT_SUCCESS;
@@ -104,31 +115,36 @@ ipc_send(struct ipc_message_channel *imc, const void *data, size_t size)
 xrt_result_t
 ipc_receive(struct ipc_message_channel *imc, void *out_data, size_t size)
 {
-	// wait for the response
-	struct iovec iov = {0};
-	struct msghdr msg = {0};
+	uint8_t *ptr = (uint8_t *)out_data;
+	size_t total = 0;
 
-	iov.iov_base = out_data;
-	iov.iov_len = size;
+	while (total < size) {
+		struct iovec iov = {0};
+		struct msghdr msg = {0};
 
-	msg.msg_name = 0;
-	msg.msg_namelen = 0;
-	msg.msg_iov = &iov;
-	msg.msg_iovlen = 1;
-	msg.msg_flags = 0;
+		iov.iov_base = ptr + total;
+		iov.iov_len = size - total;
 
-	ssize_t len = recvmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
+		msg.msg_name = 0;
+		msg.msg_namelen = 0;
+		msg.msg_iov = &iov;
+		msg.msg_iovlen = 1;
+		msg.msg_flags = 0;
 
-	if (len < 0) {
-		int code = errno;
-		IPC_ERROR(imc, "recvmsg(%i) failed: '%i' '%s'!", (int)imc->ipc_handle, code, strerror(code));
-		return XRT_ERROR_IPC_FAILURE;
-	}
+		ssize_t len = recvmsg(imc->ipc_handle, &msg, MSG_NOSIGNAL);
 
-	if ((size_t)len != size) {
-		IPC_ERROR(imc, "recvmsg(%i) failed: wrong size '%i', expected '%i'!", (int)imc->ipc_handle, (int)len,
-		          (int)size);
-		return XRT_ERROR_IPC_FAILURE;
+		if (len < 0) {
+			int code = errno;
+			IPC_ERROR(imc, "recvmsg(%i) failed: '%i' '%s'!", (int)imc->ipc_handle, code, strerror(code));
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		if (len == 0) {
+			IPC_ERROR(imc, "recvmsg(%i) failed: no data!", (int)imc->ipc_handle);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		total += (size_t)len;
 	}
 
 	return XRT_SUCCESS;

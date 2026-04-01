@@ -16,6 +16,14 @@
 		]
 	},
 
+	"compositor_wait_frame": {
+		"out": [
+			{"name": "frame_id", "type": "int64_t"},
+			{"name": "predicted_display_time", "type": "int64_t"},
+			{"name": "predicted_display_period", "type": "int64_t"}
+		]
+	},
+
 	"compositor_wait_woke": {
 		"in": [
 			{"name": "frame_id", "type": "int64_t"}

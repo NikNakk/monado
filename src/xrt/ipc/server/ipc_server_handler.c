@@ -1088,6 +1088,51 @@ ipc_handle_compositor_predict_frame(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_compositor_wait_frame(volatile struct ipc_client_state *ics,
+                                 int64_t *out_frame_id,
+                                 int64_t *out_predicted_display_time_ns,
+                                 int64_t *out_predicted_display_period_ns)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+
+	/*
+	 * We use this to signal that the session has started, this is needed
+	 * to make this client/session active/visible/focused.
+	 */
+	ipc_server_activate_session(ics);
+
+	int64_t wake_up_time_ns = 0;
+	int64_t predicted_gpu_time_ns = 0;
+
+	xrt_result_t xret = xrt_comp_predict_frame(       //
+	    ics->xc,                                      //
+	    out_frame_id,                                 //
+	    &wake_up_time_ns,                             //
+	    &predicted_gpu_time_ns,                       //
+	    out_predicted_display_time_ns,                //
+	    out_predicted_display_period_ns);             //
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	if (*out_predicted_display_period_ns <= 0) {
+		*out_predicted_display_period_ns = 16666666; // 60 Hz fallback for the macOS probe path.
+	}
+	if (*out_predicted_display_time_ns <= 0) {
+		*out_predicted_display_time_ns = os_monotonic_get_ns() + *out_predicted_display_period_ns;
+	}
+
+	(void)wake_up_time_ns;
+	(void)predicted_gpu_time_ns;
+
+	return xrt_comp_mark_frame(ics->xc, *out_frame_id, XRT_COMPOSITOR_FRAME_POINT_WOKE, os_monotonic_get_ns());
+}
+
+xrt_result_t
 ipc_handle_compositor_wait_woke(volatile struct ipc_client_state *ics, int64_t frame_id)
 {
 	IPC_TRACE_MARKER();
