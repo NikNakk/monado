@@ -272,6 +272,10 @@ client_loop(volatile struct ipc_client_state *ics)
 		// Peek the first 4 bytes to get the command type
 		enum ipc_command cmd;
 		ssize_t len = recv(ics->imc.ipc_handle, &cmd, sizeof(cmd), MSG_PEEK);
+		if (len == 0) {
+			IPC_INFO(ics->server, "Client disconnected.");
+			break;
+		}
 		if (len != sizeof(cmd)) {
 			IPC_ERROR(ics->server, "Invalid command received.");
 			break;

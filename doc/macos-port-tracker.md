@@ -115,12 +115,9 @@ SPDX-License-Identifier: BSL-1.0
 - the current service-backed probe still exits with noisy but non-fatal
   shutdown logging (`ipc_call_session_destroy` and server-side broken-pipe
   output), which should be cleaned up before this moves beyond spike status
-- the current loaderless OpenXR probe still leaves shutdown-side service noise
-  (`Invalid command received.` after disconnect), which should be understood
-  before treating this path as stable
-- the current Vulkan OpenXR probe also still leaves shutdown-side service noise
-  (`Invalid command received.` after disconnect), even though the
-  first frame-submit path now succeeds
+- the per-client Unix IPC loop now treats a zero-byte `MSG_PEEK` as a normal
+  client disconnect on macOS, so the loaderless and Vulkan probes no longer end
+  with the misleading `Invalid command received.` server error
 
 ## Recommended workflow
 
