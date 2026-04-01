@@ -457,6 +457,7 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 	free(props);
 
 	struct u_extension_list *device_extension_list = u_extension_list_builder_build(&device_extension_builder);
+	bool metal_objects_enabled = u_extension_list_contains(device_extension_list, VK_EXT_METAL_OBJECTS_EXTENSION_NAME);
 
 	VkPhysicalDeviceFeatures2KHR physical_device_features = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
@@ -561,6 +562,10 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 		sys->vk.image_format_list_enabled = image_format_list_enabled;
 	}
 #endif
+
+	if (*vulkanResult == VK_SUCCESS) {
+		sys->vk.metal_objects_enabled = metal_objects_enabled;
+	}
 
 	u_extension_list_destroy(&device_extension_list);
 

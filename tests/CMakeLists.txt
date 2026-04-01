@@ -132,4 +132,8 @@ if(APPLE)
 	add_executable(tests_macos_openxr_loaderless_probe tests_macos_openxr_loaderless_probe.c)
 	target_link_libraries(tests_macos_openxr_loaderless_probe PRIVATE xrt-interfaces xrt-external-openxr)
 	set_target_properties(tests_macos_openxr_loaderless_probe PROPERTIES FOLDER monado_tests)
+
+	add_executable(tests_macos_openxr_vulkan_probe tests_macos_openxr_vulkan_probe.c)
+	target_link_libraries(tests_macos_openxr_vulkan_probe PRIVATE aux_vk xrt-interfaces xrt-external-openxr)
+	set_target_properties(tests_macos_openxr_vulkan_probe PROPERTIES FOLDER monado_tests)
 endif()

@@ -1179,6 +1179,7 @@ struct oxr_system
 		bool timeline_semaphore_enabled;
 		bool debug_utils_enabled;
 		bool image_format_list_enabled;
+		bool metal_objects_enabled;
 	} vk;
 
 #endif

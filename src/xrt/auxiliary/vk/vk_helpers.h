@@ -948,6 +948,7 @@ vk_init_from_given(struct vk_bundle *vk,
                    bool external_semaphore_fd_enabled,
                    bool timeline_semaphore_enabled,
                    bool image_format_list_enabled,
+                   bool metal_objects_enabled,
                    bool debug_utils_enabled,
                    enum u_logging_level log_level);
 

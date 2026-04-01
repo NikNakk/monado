@@ -136,14 +136,26 @@ The next validation step now also exists:
 This is the first proof on macOS that the OpenXR state tracker itself can come
 up over the service boundary, not just the lower-level IPC compositor APIs.
 
+The branch now also reaches the first graphics-bound OpenXR success path on
+macOS:
+
+- `tests/tests_macos_openxr_vulkan_probe.c` uses `XR_KHR_vulkan_enable2` to
+  create a Vulkan instance and device through Monado's OpenXR runtime
+- on Apple Silicon it now succeeds through `xrCreateSession` and
+  `xrCreateSwapchain`, and can enumerate three swapchain images from the live
+  service-backed compositor path
+- the key fix there was plumbing `VK_EXT_metal_objects` state through the
+  OpenXR Vulkan client bring-up, so the macOS `IOSurfaceRef` import path no
+  longer incorrectly fails the generic external-handle importability check
+
 ## Likely next blocker classes
 
 After the first successful runtime probe, the next blocker classes are clearer:
 
 - additional Linux-only event loop assumptions in server/service code
 - desktop compositor assumptions around display/window targets
-- moving from the new headless OpenXR probe to a real graphics-bound OpenXR
-  session path
+- moving from the new graphics-bound swapchain probe to real frame submission
+  and view/layer submission on macOS
 - cleanup/teardown issues after the service-backed IPC and loaderless OpenXR
   probes, currently visible as noisy shutdown-side protocol logging
 - missing macOS-native process/service integration

@@ -53,13 +53,15 @@ SPDX-License-Identifier: BSL-1.0
 - added `tests/tests_macos_openxr_loaderless_probe.c` to validate the macOS
   OpenXR state tracker by loading `libopenxr_monado.dylib` directly and
   creating a headless session against `monado-service`
+- added `tests/tests_macos_openxr_vulkan_probe.c` to validate a real
+  graphics-bound OpenXR Vulkan session and swapchain path on macOS
 
 ## Still expected after this patch set
 
 - more IPC/server portability work after the first `poll()` conversion
 - real OpenXR state-tracker validation on top of the now-working IPC image path
-- a real graphics-bound OpenXR session path after the new headless-state-tracker
-  probe
+- frame submission and layer submission after the new graphics-bound Vulkan
+  session/swapchain probe
 - cleanup/teardown fixes for the service-backed probe shutdown path
 - deciding whether any additional WiVRn compositor patches should be ported, or
   only mined for design ideas
@@ -91,6 +93,12 @@ SPDX-License-Identifier: BSL-1.0
   - create an OpenXR instance with `XR_MND_headless`
   - select the simulated HMD system through the OpenXR state tracker
   - create a headless OpenXR session over the real Monado service boundary
+- the new Vulkan OpenXR probe can now:
+  - negotiate `XR_KHR_vulkan_enable2`
+  - create a Vulkan instance and device through Monado's OpenXR runtime
+  - create a graphics-bound OpenXR session on macOS
+  - create an OpenXR swapchain and enumerate three Vulkan swapchain images
+    over the real service-backed path
 - with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
   into the older frame-submit path for deeper compositor debugging
 - the earlier branch result that the compute compositor consumes submitted
@@ -103,6 +111,9 @@ SPDX-License-Identifier: BSL-1.0
 - the current loaderless OpenXR probe still leaves shutdown-side service noise
   (`Invalid command received.` after disconnect), which should be understood
   before treating this path as stable
+- the current Vulkan OpenXR probe also still leaves shutdown-side service noise
+  (`sendmsg(...): Broken pipe` during disconnect), even though the
+  session/swapchain path succeeds
 
 ## Recommended workflow
 
@@ -118,5 +129,7 @@ SPDX-License-Identifier: BSL-1.0
 5. Use `tests/tests_macos_openxr_loaderless_probe` with
    `MONADO_OPENXR_RUNTIME_PATH` set to `libopenxr_monado.dylib` to validate the
    headless OpenXR path over the real service boundary
-6. Fix only the first blocker each round
-7. Keep notes here so the blocker order stays explicit
+6. Use `tests/tests_macos_openxr_vulkan_probe` to validate the first
+   graphics-bound OpenXR Vulkan session and swapchain path on macOS
+7. Fix only the first blocker each round
+8. Keep notes here so the blocker order stays explicit

@@ -1187,6 +1187,7 @@ vk_init_from_given(struct vk_bundle *vk,
                    bool external_semaphore_fd_enabled,
                    bool timeline_semaphore_enabled,
                    bool image_format_list_enabled,
+                   bool metal_objects_enabled,
                    bool debug_utils_enabled,
                    enum u_logging_level log_level)
 {
@@ -1230,6 +1231,10 @@ vk_init_from_given(struct vk_bundle *vk,
 	// Vulkan does not let us read what extensions was enabled.
 	if (image_format_list_enabled) {
 		vk->has_KHR_image_format_list = image_format_list_enabled;
+	}
+
+	if (metal_objects_enabled) {
+		vk->has_EXT_metal_objects = true;
 	}
 
 #ifdef VK_KHR_timeline_semaphore

@@ -85,6 +85,7 @@ xrt_gfx_vk_provider_create(struct xrt_compositor_native *xcn,
                            bool external_semaphore_fd_enabled,
                            bool timeline_semaphore_enabled,
                            bool image_format_list_enabled,
+                           bool metal_objects_enabled,
                            bool debug_utils_enabled,
                            bool renderdoc_enabled,
                            uint32_t queue_family_index,
@@ -100,6 +101,7 @@ xrt_gfx_vk_provider_create(struct xrt_compositor_native *xcn,
 	    external_semaphore_fd_enabled,                              //
 	    timeline_semaphore_enabled,                                 //
 	    image_format_list_enabled,                                  //
+	    metal_objects_enabled,                                      //
 	    debug_utils_enabled,                                        //
 	    renderdoc_enabled,                                          //
 	    queue_family_index,                                         //
