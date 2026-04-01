@@ -358,6 +358,14 @@ fill_in_external_object_properties(struct vk_bundle *vk)
 	                           &vk->external.depth_image_import_opaque_fd,
 	                           &vk->external.depth_image_export_opaque_fd);
 
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	const bool metal_objects_enabled = vk->has_EXT_metal_objects;
+
+	vk->external.color_image_import_iosurface = metal_objects_enabled;
+	vk->external.color_image_export_iosurface = metal_objects_enabled;
+	vk->external.depth_image_import_iosurface = metal_objects_enabled;
+	vk->external.depth_image_export_iosurface = metal_objects_enabled;
+
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	get_external_image_support(vk, false, VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT,
 	                           &vk->external.color_image_import_opaque_fd,

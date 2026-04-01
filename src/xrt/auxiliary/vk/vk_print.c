@@ -186,6 +186,20 @@ vk_print_external_handles_info(struct vk_bundle *vk, enum u_logging_level log_le
 	);                                                                                //
 
 
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+
+	U_LOG_IFL(log_level, vk->log_level,                                               //
+	          "Supported images:"                                                     //
+	          "\n\t%s:\n\t\tcolor import=%s export=%s\n\t\tdepth import=%s export=%s" //
+	          ,                                                                       //
+	          "IOSurfaceRef",                                                         //
+	          vk->external.color_image_import_iosurface ? "true" : "false",           //
+	          vk->external.color_image_export_iosurface ? "true" : "false",           //
+	          vk->external.depth_image_import_iosurface ? "true" : "false",           //
+	          vk->external.depth_image_export_iosurface ? "true" : "false"            //
+	);                                                                                //
+
+
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 
 	U_LOG_IFL(log_level, vk->log_level,                                               //

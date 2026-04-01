@@ -95,16 +95,36 @@ This does not mean the macOS handle model is solved. It only proves that the
 native compositor can run far enough to validate the remote-pose compositor
 behavior.
 
+The branch now also takes the first real step away from the placeholder macOS
+FD handle model:
+
+- `xrt_graphics_buffer_handle_t` is now `IOSurfaceRef` on macOS instead of
+  pretending to be a Unix file descriptor
+- the compositor now requires and uses `VK_EXT_metal_objects` on macOS for
+  native-image export/import
+- the native runtime probe can now export compositor swapchain images as
+  `IOSurfaceRef`, import them back through `xrt_comp_import_swapchain`, and
+  successfully acquire/release the imported images
+- the default probe path exits after that verified round-trip; setting
+  `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1` keeps going into the older frame-submit
+  path for deeper compositor debugging
+
+This is the first real macOS-native shared-image path, not just scaffolding.
+What is still missing is the wider client/runtime plumbing around it: IPC
+transport for cross-process handles, state-tracker validation with a real app,
+and cleanup of the optional deeper frame-submit path.
+
 ## Likely next blocker classes
 
 After the first successful runtime probe, the next blocker classes are clearer:
 
 - additional Linux-only event loop assumptions in server/service code
 - desktop compositor assumptions around display/window targets
-- the fact that `xrt_handles.h` still routes macOS through the Unix FD graphics
-  handle path
+- client/shared-image plumbing still needs a real macOS-native transport for
+  those `IOSurfaceRef` handles across process boundaries
 - client-facing shared-image import/export work for a real OpenXR app or
   streaming bridge
+- cleanup/teardown bugs in the optional deeper frame-submit probe path
 - missing macOS-native process/service integration
 
 ## Strategic note

@@ -139,6 +139,12 @@ struct vk_bundle
 		bool depth_image_import_opaque_fd;
 		bool depth_image_export_opaque_fd;
 
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+		bool color_image_import_iosurface;
+		bool color_image_export_iosurface;
+		bool depth_image_import_iosurface;
+		bool depth_image_export_iosurface;
+
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 		bool color_image_import_opaque_fd;
 		bool color_image_export_opaque_fd;

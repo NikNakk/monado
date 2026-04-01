@@ -20,6 +20,10 @@
 #include "unistd.h"
 #endif // !XRT_OS_WINDOWS
 
+#ifdef XRT_OS_OSX
+#include <IOSurface/IOSurfaceRef.h>
+#endif
+
 
 #ifdef __cplusplus
 extern "C" {
@@ -236,7 +240,56 @@ xrt_graphics_buffer_is_valid(xrt_graphics_buffer_handle_t handle)
  */
 #define XRT_GRAPHICS_BUFFER_HANDLE_INVALID NULL
 
-#elif defined(XRT_OS_ANDROID) && !defined(XRT_OS_ANDROID_USE_AHB) || defined(XRT_OS_LINUX) || defined(XRT_OS_OSX)
+#elif defined(XRT_OS_OSX)
+
+/*!
+ * The type underlying buffers shared between compositor clients and the main
+ * compositor.
+ *
+ * On macOS, this is an IOSurfaceRef. The Vulkan import/export plumbing is
+ * still incomplete, but the public handle model should match the platform
+ * instead of pretending these are Unix file descriptors.
+ */
+typedef IOSurfaceRef xrt_graphics_buffer_handle_t;
+
+/*!
+ * Defined to allow detection of the underlying type.
+ *
+ * @relates xrt_graphics_buffer_handle_t
+ */
+#define XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE 1
+
+/*!
+ * Placeholder import ownership contract for the unfinished macOS Vulkan
+ * shared-image path.
+ *
+ * @relates xrt_graphics_buffer_handle_t
+ * @see XRT_GRAPHICS_BUFFER_HANDLE_CONSUMED_BY_VULKAN_IMPORT
+ */
+#define XRT_GRAPHICS_BUFFER_HANDLE_REFERENCE_ADDED_BY_VULKAN_IMPORT 1
+
+/*!
+ * Check whether a graphics buffer handle is valid.
+ *
+ * @public @memberof xrt_graphics_buffer_handle_t
+ */
+static inline bool
+xrt_graphics_buffer_is_valid(xrt_graphics_buffer_handle_t handle)
+{
+	return handle != NULL;
+}
+
+/*!
+ * An invalid value for a graphics buffer.
+ *
+ * Note that there may be more than one value that's invalid - use
+ * xrt_graphics_buffer_is_valid() instead of comparing against this!
+ *
+ * @relates xrt_graphics_buffer_handle_t
+ */
+#define XRT_GRAPHICS_BUFFER_HANDLE_INVALID NULL
+
+#elif defined(XRT_OS_ANDROID) && !defined(XRT_OS_ANDROID_USE_AHB) || defined(XRT_OS_LINUX)
 
 /*!
  * The type underlying buffers shared between compositor clients and the main

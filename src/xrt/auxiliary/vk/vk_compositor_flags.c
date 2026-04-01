@@ -57,7 +57,7 @@ check_feature(VkFormat format,
 static bool
 vk_csci_requires_external_handle_support(void)
 {
-#if defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
+#if defined(XRT_OS_OSX) && (defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE))
 	// The macOS spike currently supports native compositor allocations without exporting shared image handles.
 	// Do not let the placeholder FD handle model suppress otherwise valid local swapchain formats.
 	return false;
@@ -78,6 +78,9 @@ vk_cb_get_buffer_external_handle_type(struct vk_bundle *vk)
 {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	(void)vk;
+	return 0;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
@@ -227,6 +230,10 @@ vk_csci_get_image_external_handle_type(struct vk_bundle *vk, struct xrt_image_na
 {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT_KHR;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	(void)vk;
+	(void)xin;
+	return 0;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)

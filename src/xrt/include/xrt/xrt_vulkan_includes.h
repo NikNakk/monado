@@ -17,6 +17,12 @@
 // preemptively include windows.h if applicable so we can specify our own flags for it.
 #include "xrt/xrt_windows.h"
 
+#ifdef XRT_OS_OSX
+#ifndef VK_USE_PLATFORM_METAL_EXT
+#define VK_USE_PLATFORM_METAL_EXT
+#endif
+#endif
+
 #define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h> // IWYU pragma: export
 

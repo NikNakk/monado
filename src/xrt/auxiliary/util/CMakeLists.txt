@@ -149,6 +149,10 @@ if(XRT_HAVE_LINUX OR ANDROID)
 	target_sources(aux_util PRIVATE u_linux.c u_linux.h)
 endif()
 
+if(APPLE)
+	target_link_libraries(aux_util PUBLIC "-framework CoreFoundation" "-framework IOSurface")
+endif()
+
 # Is basically used everywhere, unavoidable.
 if(XRT_HAVE_SYSTEM_CJSON)
 	target_link_libraries(aux_util PUBLIC cJSON::cJSON)

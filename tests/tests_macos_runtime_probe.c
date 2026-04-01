@@ -13,6 +13,7 @@
 
 #include "os/os_time.h"
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -35,6 +36,7 @@ main(void)
 	struct xrt_session *xs = NULL;
 	struct xrt_compositor_native *xcn = NULL;
 	struct xrt_swapchain_native *xscn = NULL;
+	struct xrt_swapchain *imported_xsc = NULL;
 	int ret = 1;
 
 	xrt_result_t xret = xrt_instance_create(NULL, &xinst);
@@ -115,6 +117,28 @@ main(void)
 		goto out;
 	}
 
+	fprintf(stdout, "Created native swapchain with %u images.\n", xscn->base.image_count);
+	for (uint32_t i = 0; i < xscn->base.image_count; ++i) {
+		fprintf(stdout, "  native[%u]: handle=%p size=%llu dedicated=%d\n", i, (void *)xscn->images[i].handle,
+		        (unsigned long long)xscn->images[i].size, xscn->images[i].use_dedicated_allocation ? 1 : 0);
+	}
+	fflush(stdout);
+
+	struct xrt_image_native imported_images[XRT_MAX_SWAPCHAIN_IMAGES] = {0};
+	for (uint32_t i = 0; i < xscn->base.image_count; ++i) {
+		imported_images[i] = xscn->images[i];
+	}
+
+	fprintf(stdout, "Importing native swapchain back into the compositor.\n");
+	fflush(stdout);
+	xret = xrt_comp_import_swapchain(&xcn->base, &xsci, imported_images, xscn->base.image_count, &imported_xsc);
+	if (xret != XRT_SUCCESS) {
+		ret = fail_xret("xrt_comp_import_swapchain", xret);
+		goto out;
+	}
+	fprintf(stdout, "Imported native swapchain successfully.\n");
+	fflush(stdout);
+
 	uint32_t image_index = 0;
 	xret = xrt_swapchain_acquire_image(&xscn->base, &image_index);
 	if (xret != XRT_SUCCESS) {
@@ -132,6 +156,32 @@ main(void)
 	if (xret != XRT_SUCCESS) {
 		ret = fail_xret("xrt_swapchain_release_image", xret);
 		goto out;
+	}
+
+	uint32_t imported_image_index = 0;
+	xret = xrt_swapchain_acquire_image(imported_xsc, &imported_image_index);
+	if (xret != XRT_SUCCESS) {
+		ret = fail_xret("xrt_swapchain_acquire_image(imported)", xret);
+		goto out;
+	}
+
+	xret = xrt_swapchain_wait_image(imported_xsc, 1000000000ll, imported_image_index);
+	if (xret != XRT_SUCCESS) {
+		ret = fail_xret("xrt_swapchain_wait_image(imported)", xret);
+		goto out;
+	}
+
+	xret = xrt_swapchain_release_image(imported_xsc, imported_image_index);
+	if (xret != XRT_SUCCESS) {
+		ret = fail_xret("xrt_swapchain_release_image(imported)", xret);
+		goto out;
+	}
+
+	fprintf(stdout, "Verified native IOSurface swapchain round-trip successfully.\n");
+	fflush(stdout);
+
+	if (getenv("MACOS_RUNTIME_PROBE_SUBMIT_FRAME") == NULL) {
+		return 0;
 	}
 
 	int64_t frame_id = -1;
@@ -249,6 +299,7 @@ out:
 	if (xcn != NULL) {
 		xrt_comp_end_session(&xcn->base);
 	}
+	xrt_swapchain_reference(&imported_xsc, NULL);
 	xrt_swapchain_native_reference(&xscn, NULL);
 	xrt_comp_native_destroy(&xcn);
 	xrt_session_destroy(&xs);

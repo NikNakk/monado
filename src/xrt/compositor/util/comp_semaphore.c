@@ -20,7 +20,7 @@
 
 #ifdef VK_KHR_timeline_semaphore
 static xrt_result_t
-semaphore_wait(struct xrt_compositor_semaphore *xcsem, uint64_t value, uint64_t timeout_ns)
+comp_semaphore_wait(struct xrt_compositor_semaphore *xcsem, uint64_t value, uint64_t timeout_ns)
 {
 	struct comp_semaphore *csem = comp_semaphore(xcsem);
 	struct vk_bundle *vk = csem->vk;
@@ -50,7 +50,7 @@ semaphore_wait(struct xrt_compositor_semaphore *xcsem, uint64_t value, uint64_t 
 }
 
 static void
-semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
+comp_semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
 {
 	struct comp_semaphore *csem = comp_semaphore(xcsem);
 	struct vk_bundle *vk = csem->vk;
@@ -102,8 +102,8 @@ comp_semaphore_create(struct vk_bundle *vk,
 	struct comp_semaphore *csem = U_TYPED_CALLOC(struct comp_semaphore);
 
 	csem->base.reference.count = 1;
-	csem->base.destroy = semaphore_destroy;
-	csem->base.wait = semaphore_wait;
+	csem->base.destroy = comp_semaphore_destroy;
+	csem->base.wait = comp_semaphore_wait;
 	csem->semaphore = semaphore;
 	csem->handle = handle;
 	csem->vk = vk;

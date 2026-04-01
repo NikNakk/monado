@@ -40,12 +40,17 @@ SPDX-License-Identifier: BSL-1.0
   do not require Linux FD export support
 - stopped suppressing native macOS swapchain formats just because the current
   placeholder handle model cannot export Linux FD handles
+- changed the macOS graphics-buffer abstraction from the placeholder FD model to
+  `IOSurfaceRef`
+- wired the first real macOS native-image path with `VK_EXT_metal_objects`
+  so compositor swapchains can export/import `IOSurfaceRef` handles
 
 ## Still expected after this patch set
 
 - more IPC/server portability work after the first `poll()` conversion
-- replacing the placeholder macOS FD graphics-handle model with a real one
 - client/shared-image plumbing for real OpenXR apps or a streaming bridge
+- cross-process transport for `IOSurfaceRef` handles in the IPC path
+- cleanup/teardown fixes for the optional deeper frame-submit probe path
 - deciding whether any additional WiVRn compositor patches should be ported, or
   only mined for design ideas
 
@@ -58,10 +63,17 @@ SPDX-License-Identifier: BSL-1.0
   - create the MoltenVK instance and compute device
   - start an in-process session against the simulated HMD
   - create a native swapchain
-  - submit a non-fast-path frame
   - advertise real native swapchain formats without a probe-only fallback
-  - validate that the compute compositor consumes submitted projection-layer
-    pose data after the multi-compositor render thread latches the queued frame
+  - report `IOSurfaceRef` as the macOS graphics-buffer handle model
+  - export native swapchain images as `IOSurfaceRef`
+  - import those images back through `xrt_comp_import_swapchain`
+  - validate acquire/release on the imported swapchain
+- with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
+  into the older frame-submit path for deeper compositor debugging
+- the earlier branch result that the compute compositor consumes submitted
+  projection-layer pose data is still valid, but that path is no longer the
+  default probe exit because the cleanup path after deeper submission still
+  trips a macOS-only teardown bug
 
 ## Recommended workflow
 
@@ -69,5 +81,8 @@ SPDX-License-Identifier: BSL-1.0
 2. Build with `ninja -k 1`
 3. Use `tests/tests_macos_runtime_probe` for native runtime regression checks on
    macOS while the handle model is still in flux
+   Default run validates the IOSurface round-trip.
+   `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1` keeps going into the older frame-submit
+   path.
 4. Fix only the first blocker each round
 5. Keep notes here so the blocker order stays explicit

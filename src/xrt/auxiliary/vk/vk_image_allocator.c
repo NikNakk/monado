@@ -57,6 +57,8 @@ get_image_memory_handle_type(void)
 {
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_ANDROID_HARDWARE_BUFFER_BIT_ANDROID;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	return 0;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
 	return VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT_KHR;
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
@@ -72,6 +74,10 @@ use_external_memory_handles(void)
 #if defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
 	// macOS currently compiles through the FD handle path, but MoltenVK does not support FD-based image export.
 	// Allow native compositor allocations to proceed without external-memory export metadata.
+	return false;
+#elif defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	// The macOS graphics buffer handle model is now IOSurface-based, but Vulkan shared-image import/export is not
+	// wired up yet. Native compositor allocations can still proceed without external-memory export metadata.
 	return false;
 #else
 	return true;
@@ -182,6 +188,16 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 		};
 		CHAIN(external_memory_image_create_info);
 	}
+
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	if (vk->has_EXT_metal_objects) {
+		VkExportMetalObjectCreateInfoEXT export_metal_object_create_info = {
+		    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+		    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_IOSURFACE_BIT_EXT,
+		};
+		CHAIN(export_metal_object_create_info);
+	}
+#endif
 
 	// Format list helper needed for the below.
 	struct format_list_helper flh = XRT_STRUCT_INIT;
@@ -397,6 +413,41 @@ destroy_image(struct vk_bundle *vk, struct vk_image *image)
 	}
 }
 
+static VkResult
+get_image_native_handle(struct vk_bundle *vk, VkImage image, xrt_graphics_buffer_handle_t *out_handle)
+{
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	if (!vk->has_EXT_metal_objects || vk->vkExportMetalObjectsEXT == NULL) {
+		*out_handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+
+	VkExportMetalIOSurfaceInfoEXT io_surface_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_IO_SURFACE_INFO_EXT,
+	    .image = image,
+	};
+	VkExportMetalObjectsInfoEXT export_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+	    .pNext = &io_surface_info,
+	};
+
+	vk->vkExportMetalObjectsEXT(vk->device, &export_info);
+
+	if (io_surface_info.ioSurface == NULL) {
+		*out_handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	*out_handle = u_graphics_buffer_ref(io_surface_info.ioSurface);
+	return xrt_graphics_buffer_is_valid(*out_handle) ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
+#else
+	(void)vk;
+	(void)image;
+	(void)out_handle;
+	return VK_ERROR_EXTENSION_NOT_PRESENT;
+#endif
+}
+
 
 /*
  *
@@ -554,8 +605,13 @@ vk_ic_get_handles(struct vk_bundle *vk,
 
 	size_t i = 0;
 	for (; i < vkic->image_count && i < max_handles; i++) {
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+		ret = get_image_native_handle(vk, vkic->images[i].handle, &out_handles[i]);
+		VK_CHK_ONLY_PRINT(ret, "get_image_native_handle");
+#else
 		ret = vk_get_native_handle_from_device_memory(vk, vkic->images[i].memory, &out_handles[i]);
 		VK_CHK_ONLY_PRINT(ret, "vk_get_native_handle_from_device_memory");
+#endif
 		if (ret != VK_SUCCESS) {
 			break;
 		}

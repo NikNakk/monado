@@ -1110,7 +1110,17 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	VkExternalMemoryHandleTypeFlags handle_type = vk_csci_get_image_external_handle_type(vk, image_native);
 
 	bool importable = false;
-	vk_csci_get_image_external_support(vk, image_format, info->bits, handle_type, &importable, NULL);
+	if (
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	    !vk->has_EXT_metal_objects
+#else
+	    true
+#endif
+	) {
+		vk_csci_get_image_external_support(vk, image_format, info->bits, handle_type, &importable, NULL);
+	} else {
+		importable = true;
+	}
 
 	if (!importable) {
 		VK_ERROR(vk, "External memory handle is not importable");
@@ -1129,12 +1139,6 @@ vk_create_image_from_native(struct vk_bundle *vk,
 		image_create_flags |= VK_IMAGE_CREATE_PROTECTED_BIT;
 	}
 
-	// In->pNext
-	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
-	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
-	    .handleTypes = handle_type,
-	};
-
 #ifdef VK_KHR_image_format_list
 	VkFormat formats[XRT_MAX_SWAPCHAIN_CREATE_INFO_FORMAT_LIST_COUNT] = {0};
 	for (uint32_t i = 0; i < info->format_count; ++i) {
@@ -1148,15 +1152,42 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	};
 	const bool has_mutable_format_list =
 	    has_mutable_usage && vk->has_KHR_image_format_list && info->format_count > 0;
+#endif
+
+	void *image_create_next = NULL;
+
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER) || \
+    defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
+	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
+	    .handleTypes = handle_type,
+	};
+	image_create_next = &external_memory_image_create_info;
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	if (!vk->has_EXT_metal_objects) {
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+
+	VkImportMetalIOSurfaceInfoEXT import_io_surface_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_IO_SURFACE_INFO_EXT,
+	    .ioSurface = image_native->handle,
+	};
+	image_create_next = &import_io_surface_info;
+#else
+#error "need port"
+#endif
+
+#ifdef VK_KHR_image_format_list
 	if (has_mutable_format_list) {
-		external_memory_image_create_info.pNext = &image_format_list_create_info;
+		image_format_list_create_info.pNext = image_create_next;
+		image_create_next = &image_format_list_create_info;
 	}
 #endif
 
 	// In
 	VkImageCreateInfo vk_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-	    .pNext = &external_memory_image_create_info,
+	    .pNext = image_create_next,
 	    .flags = image_create_flags,
 	    .imageType = VK_IMAGE_TYPE_2D,
 	    .format = image_format,
@@ -1189,6 +1220,8 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	};
 
 	// TODO memoryTypeBits from VkMemoryFdPropertiesKHR
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	// IOSurface import is encoded on VkImageCreateInfo via VkImportMetalIOSurfaceInfoEXT.
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	VkImportAndroidHardwareBufferInfoANDROID import_memory_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_ANDROID_HARDWARE_BUFFER_INFO_ANDROID,
@@ -1245,22 +1278,29 @@ vk_create_image_from_native(struct vk_bundle *vk,
 		VK_ERROR(vk, "size must be greater than 0");
 
 	} else if (requirements.size > image_native->size) {
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+		// IOSurface import does not provide a separate exported-memory size to validate here.
+#else
 		VK_ERROR(vk, "size mismatch, exported %" PRIu64 " but requires %" PRIu64, image_native->size,
 		         requirements.size);
 		if (!debug_get_bool_option_vk_ignore_memory_size_mismatch()) {
 			vk->vkDestroyImage(vk->device, image, NULL);
 			return VK_ERROR_OUT_OF_DEVICE_MEMORY;
 		}
+#endif
 	} else if (requirements.size < image_native->size) {
 		// it's OK if we have more memory than we need, APIs can round up
 	}
 
 	VkMemoryDedicatedAllocateInfoKHR dedicated_memory_info = {
 	    .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR,
-	    .pNext = &import_memory_info,
 	    .image = image,
 	    .buffer = VK_NULL_HANDLE,
 	};
+
+#if !defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	dedicated_memory_info.pNext = &import_memory_info;
+#endif
 
 	ret = vk_alloc_and_bind_image_memory( //
 	    vk,                               // vk_bundle
@@ -1312,6 +1352,17 @@ get_device_memory_handle(struct vk_bundle *vk, VkDeviceMemory device_memory, xrt
 	*out_handle = fd;
 
 	return ret;
+}
+
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+
+static VkResult
+get_device_memory_handle(struct vk_bundle *vk, VkDeviceMemory device_memory, xrt_graphics_buffer_handle_t *out_handle)
+{
+	(void)vk;
+	(void)device_memory;
+	*out_handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
+	return VK_ERROR_EXTENSION_NOT_PRESENT;
 }
 
 #elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
