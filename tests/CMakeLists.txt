@@ -138,6 +138,15 @@ if(APPLE)
 	set_target_properties(tests_macos_openxr_vulkan_probe PROPERTIES FOLDER monado_tests)
 
 	if(XRT_BUILD_DRIVER_REMOTE)
+		add_executable(tests_macos_remote_pose_bridge tests_macos_remote_pose_bridge.c)
+		target_link_libraries(tests_macos_remote_pose_bridge PRIVATE drv_remote xrt-interfaces aux_util)
+		target_include_directories(tests_macos_remote_pose_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers)
+		set_target_properties(tests_macos_remote_pose_bridge PROPERTIES FOLDER monado_tests)
+
+		add_executable(tests_macos_remote_pose_packet_sender tests_macos_remote_pose_packet_sender.c)
+		target_link_libraries(tests_macos_remote_pose_packet_sender PRIVATE xrt-interfaces aux_util)
+		set_target_properties(tests_macos_remote_pose_packet_sender PROPERTIES FOLDER monado_tests)
+
 		add_executable(tests_macos_remote_driver_pose_probe tests_macos_remote_driver_pose_probe.c)
 		target_link_libraries(tests_macos_remote_driver_pose_probe PRIVATE drv_remote xrt-interfaces aux_util)
 		target_include_directories(tests_macos_remote_driver_pose_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers)

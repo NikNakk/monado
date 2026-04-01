@@ -200,6 +200,24 @@ The branch now also has a first remote-pose validation tool on macOS:
 That is the first proof on macOS that Monado's runtime can render through the
 remote-device path instead of only the simulated local HMD path.
 
+The branch now also has the first tiny bridge layer between a simpler headset
+pose packet and Monado's remote-driver protocol:
+
+- `tests/tests_macos_remote_pose_protocol.h` defines a small `v0` pose packet
+  carrying orientation, position, and timestamps
+- `tests/tests_macos_remote_pose_bridge.c` listens for that packet on local UDP
+  port `4243` and forwards it into the remote driver's TCP stream on port
+  `4242`
+- `tests/tests_macos_remote_pose_packet_sender.c` is a synthetic sender for
+  that bridge packet
+- with `monado-service` in `active=remote` mode, the bridge can forward hundreds
+  of packets while `tests/tests_macos_openxr_vulkan_probe.c` continues to run
+  successfully against `Remote HMD`
+
+This is not the final network protocol, but it is the first clean separation
+between "Quest-like pose packet" and "Monado internal remote-driver protocol"
+on macOS.
+
 ## Likely next blocker classes
 
 After the first successful runtime probe, the next blocker classes are clearer:

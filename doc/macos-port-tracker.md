@@ -67,6 +67,10 @@ SPDX-License-Identifier: BSL-1.0
   selected through the normal config path instead of env-only overrides
 - added `tests/tests_macos_remote_driver_pose_probe.c` to feed synthetic head
   poses into the remote-driver TCP path on macOS
+- added a tiny local bridge layer:
+  - `tests/tests_macos_remote_pose_protocol.h`
+  - `tests/tests_macos_remote_pose_bridge.c`
+  - `tests/tests_macos_remote_pose_packet_sender.c`
 
 ## Still expected after this patch set
 
@@ -74,7 +78,7 @@ SPDX-License-Identifier: BSL-1.0
 - real OpenXR state-tracker validation on top of the now-working IPC image path
 - remote-driver validation on macOS as the first host-side remote-HMD stub
 - adapting the remote driver protocol/data model to the Quest MVP pose path
-- bridging Quest-side pose transport into the now-working remote-driver path
+- replacing the local UDP bridge with a real Quest-side pose transport path
 - cleanup/teardown fixes for the service-backed probe shutdown path
 - deciding whether any additional WiVRn compositor patches should be ported, or
   only mined for design ideas
@@ -131,6 +135,11 @@ SPDX-License-Identifier: BSL-1.0
   - with that probe connected,
     `tests/tests_macos_openxr_vulkan_probe.c` now runs against `Remote HMD`
     instead of the simulated device and still submits projection frames
+  - the new local UDP bridge path can now:
+    - accept a tiny `v0` pose packet on UDP `4243`
+    - translate that packet into the remote-driver TCP stream on `4242`
+    - forward live packets while the Vulkan OpenXR probe runs against
+      `Remote HMD`
 - with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
   into the older frame-submit path for deeper compositor debugging
 - the earlier branch result that the compute compositor consumes submitted
@@ -167,5 +176,8 @@ SPDX-License-Identifier: BSL-1.0
    remote-builder path on Apple Silicon
 8. Use `tests/tests_macos_remote_driver_pose_probe` to keep `Remote HMD`
    fed with synthetic poses while validating OpenXR/runtime behavior
-9. Fix only the first blocker each round
-10. Keep notes here so the blocker order stays explicit
+9. Use `tests/tests_macos_remote_pose_bridge` plus
+   `tests/tests_macos_remote_pose_packet_sender` when validating the first
+   "simpler-than-Monado" pose packet path on macOS
+10. Fix only the first blocker each round
+11. Keep notes here so the blocker order stays explicit
