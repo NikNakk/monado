@@ -106,6 +106,9 @@ SPDX-License-Identifier: BSL-1.0
   - complete `xrWaitFrame` with a valid predicted display time over the live
     service boundary
   - submit one projection frame through the live macOS service/runtime path
+  - expose the next sustained-render blocker when
+    `MACOS_OPENXR_VULKAN_PROBE_FRAMES>1`: Metal rejects the current
+    `IOSurface` array-texture import path for `MTLTextureType2DArray`
 - with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
   into the older frame-submit path for deeper compositor debugging
 - the earlier branch result that the compute compositor consumes submitted

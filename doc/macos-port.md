@@ -160,6 +160,12 @@ The branch now also reaches the first service-backed graphics submit on macOS:
   `tests/tests_macos_openxr_vulkan_probe.c` can now complete `xrWaitFrame`,
   create the service-backed OpenXR swapchain, and submit one projection frame
   through the live macOS Monado service/runtime path
+- the same probe now has an opt-in multi-frame mode via
+  `MACOS_OPENXR_VULKAN_PROBE_FRAMES`, but values greater than `1` currently
+  expose the next real graphics blocker on macOS: the current `IOSurface`
+  import/export path trips Metal validation on array-texture usage
+  (`MTLTextureType2DArray`), which means the current swapchain model is still
+  too Linux/Vulkan-shaped for sustained stereo submission
 
 ## Likely next blocker classes
 
@@ -168,7 +174,8 @@ After the first successful runtime probe, the next blocker classes are clearer:
 - additional Linux-only event loop assumptions in server/service code
 - desktop compositor assumptions around display/window targets
 - moving from the new graphics-bound swapchain probe to real frame submission
-  and view/layer submission on macOS beyond the current one-frame validation
+  and view/layer submission on macOS beyond the current one-frame validation,
+  especially around the macOS array-texture swapchain model
 - cleanup/teardown issues after the service-backed IPC and loaderless OpenXR
   probes, currently visible as noisy shutdown-side protocol logging
 - missing macOS-native process/service integration

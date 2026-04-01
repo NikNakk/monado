@@ -14,6 +14,7 @@
 #include "openxr/openxr_platform.h"
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,6 +40,27 @@ fail_msg(const char *what)
 {
 	fprintf(stderr, "%s\n", what);
 	return 1;
+}
+
+static uint32_t
+get_frame_count(void)
+{
+	const char *value = getenv("MACOS_OPENXR_VULKAN_PROBE_FRAMES");
+	if (value == NULL || value[0] == '\0') {
+		return 1;
+	}
+
+	errno = 0;
+	char *end = NULL;
+	long parsed = strtol(value, &end, 10);
+	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 120) {
+		fprintf(stderr,
+		        "Invalid MACOS_OPENXR_VULKAN_PROBE_FRAMES=%s, expected integer in [1,120]\n",
+		        value);
+		return 0;
+	}
+
+	return (uint32_t)parsed;
 }
 
 static int
@@ -174,6 +196,11 @@ main(void)
 	XrSwapchain swapchain = XR_NULL_HANDLE;
 	VkInstance vk_instance = VK_NULL_HANDLE;
 	VkDevice vk_device = VK_NULL_HANDLE;
+	uint32_t frame_count = get_frame_count();
+
+	if (frame_count == 0) {
+		return 1;
+	}
 
 	const char *runtime_path = getenv("MONADO_OPENXR_RUNTIME_PATH");
 	if (runtime_path == NULL || runtime_path[0] == '\0') {
@@ -612,51 +639,6 @@ main(void)
 		goto out;
 	}
 
-	XrFrameWaitInfo frame_wait_info = {
-	    .type = XR_TYPE_FRAME_WAIT_INFO,
-	};
-	XrFrameState frame_state = {
-	    .type = XR_TYPE_FRAME_STATE,
-	};
-	xr = xrWaitFrame(session, &frame_wait_info, &frame_state);
-	if (xr != XR_SUCCESS) {
-		free(images);
-		ret = fail_xr("xrWaitFrame", xr);
-		goto out;
-	}
-
-	XrFrameBeginInfo frame_begin_info = {
-	    .type = XR_TYPE_FRAME_BEGIN_INFO,
-	};
-	xr = xrBeginFrame(session, &frame_begin_info);
-	if (xr != XR_SUCCESS) {
-		free(images);
-		ret = fail_xr("xrBeginFrame", xr);
-		goto out;
-	}
-
-	uint32_t image_index = 0;
-	XrSwapchainImageAcquireInfo acquire_info = {
-	    .type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO,
-	};
-	xr = xrAcquireSwapchainImage(swapchain, &acquire_info, &image_index);
-	if (xr != XR_SUCCESS) {
-		free(images);
-		ret = fail_xr("xrAcquireSwapchainImage", xr);
-		goto out;
-	}
-
-	XrSwapchainImageWaitInfo wait_info = {
-	    .type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
-	    .timeout = XR_INFINITE_DURATION,
-	};
-	xr = xrWaitSwapchainImage(swapchain, &wait_info);
-	if (xr != XR_SUCCESS) {
-		free(images);
-		ret = fail_xr("xrWaitSwapchainImage", xr);
-		goto out;
-	}
-
 	XrView *located_views = calloc(view_count, sizeof(*located_views));
 	if (located_views == NULL) {
 		free(images);
@@ -667,42 +649,6 @@ main(void)
 		located_views[i].type = XR_TYPE_VIEW;
 	}
 
-	XrViewLocateInfo locate_info = {
-	    .type = XR_TYPE_VIEW_LOCATE_INFO,
-	    .viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
-	    .displayTime = frame_state.predictedDisplayTime,
-	    .space = local_space,
-	};
-	XrViewState view_state = {
-	    .type = XR_TYPE_VIEW_STATE,
-	};
-	uint32_t located_view_count = 0;
-	xr = xrLocateViews(session, &locate_info, &view_state, view_count, &located_view_count, located_views);
-	if (xr != XR_SUCCESS) {
-		free(located_views);
-		free(images);
-		ret = fail_xr("xrLocateViews", xr);
-		goto out;
-	}
-
-	if (located_view_count != view_count) {
-		free(located_views);
-		free(images);
-		ret = fail_msg("xrLocateViews returned unexpected view count");
-		goto out;
-	}
-
-	XrSwapchainImageReleaseInfo release_info = {
-	    .type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO,
-	};
-	xr = xrReleaseSwapchainImage(swapchain, &release_info);
-	if (xr != XR_SUCCESS) {
-		free(located_views);
-		free(images);
-		ret = fail_xr("xrReleaseSwapchainImage", xr);
-		goto out;
-	}
-
 	XrCompositionLayerProjectionView *projection_views = calloc(view_count, sizeof(*projection_views));
 	if (projection_views == NULL) {
 		free(located_views);
@@ -711,46 +657,145 @@ main(void)
 		goto out;
 	}
 
-	for (uint32_t i = 0; i < view_count; ++i) {
-		projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-		projection_views[i].pose = located_views[i].pose;
-		projection_views[i].fov = located_views[i].fov;
-		projection_views[i].subImage.swapchain = swapchain;
-		projection_views[i].subImage.imageRect.offset.x = 0;
-		projection_views[i].subImage.imageRect.offset.y = 0;
-		projection_views[i].subImage.imageRect.extent.width = (int32_t)swapchain_info.width;
-		projection_views[i].subImage.imageRect.extent.height = (int32_t)swapchain_info.height;
-		projection_views[i].subImage.imageArrayIndex = i;
-	}
+	for (uint32_t frame = 0; frame < frame_count; ++frame) {
+		XrFrameWaitInfo frame_wait_info = {
+		    .type = XR_TYPE_FRAME_WAIT_INFO,
+		};
+		XrFrameState frame_state = {
+		    .type = XR_TYPE_FRAME_STATE,
+		};
+		xr = xrWaitFrame(session, &frame_wait_info, &frame_state);
+		if (xr != XR_SUCCESS) {
+			free(projection_views);
+			free(located_views);
+			free(images);
+			ret = fail_xr("xrWaitFrame", xr);
+			goto out;
+		}
 
-	XrCompositionLayerProjection projection_layer = {
-	    .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
-	    .space = local_space,
-	    .viewCount = view_count,
-	    .views = projection_views,
-	};
-	const XrCompositionLayerBaseHeader *layers[] = {
-	    (const XrCompositionLayerBaseHeader *)&projection_layer,
-	};
-	XrFrameEndInfo frame_end_info = {
-	    .type = XR_TYPE_FRAME_END_INFO,
-	    .displayTime = frame_state.predictedDisplayTime,
-	    .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
-	    .layerCount = 1,
-	    .layers = layers,
-	};
-	xr = xrEndFrame(session, &frame_end_info);
-	if (xr != XR_SUCCESS) {
-		free(projection_views);
-		free(located_views);
-		free(images);
-		ret = fail_xr("xrEndFrame", xr);
-		goto out;
+		XrFrameBeginInfo frame_begin_info = {
+		    .type = XR_TYPE_FRAME_BEGIN_INFO,
+		};
+		xr = xrBeginFrame(session, &frame_begin_info);
+		if (xr != XR_SUCCESS) {
+			free(projection_views);
+			free(located_views);
+			free(images);
+			ret = fail_xr("xrBeginFrame", xr);
+			goto out;
+		}
+
+		uint32_t image_index = 0;
+		XrSwapchainImageAcquireInfo acquire_info = {
+		    .type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO,
+		};
+		xr = xrAcquireSwapchainImage(swapchain, &acquire_info, &image_index);
+		if (xr != XR_SUCCESS) {
+			free(projection_views);
+			free(located_views);
+			free(images);
+			ret = fail_xr("xrAcquireSwapchainImage", xr);
+			goto out;
+		}
+
+		XrSwapchainImageWaitInfo wait_info = {
+		    .type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
+		    .timeout = XR_INFINITE_DURATION,
+		};
+		xr = xrWaitSwapchainImage(swapchain, &wait_info);
+		if (xr != XR_SUCCESS) {
+			free(projection_views);
+			free(located_views);
+			free(images);
+			ret = fail_xr("xrWaitSwapchainImage", xr);
+			goto out;
+		}
+
+		for (uint32_t i = 0; i < view_count; ++i) {
+			located_views[i].type = XR_TYPE_VIEW;
+			located_views[i].next = NULL;
+		}
+
+		XrViewLocateInfo locate_info = {
+		    .type = XR_TYPE_VIEW_LOCATE_INFO,
+		    .viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+		    .displayTime = frame_state.predictedDisplayTime,
+		    .space = local_space,
+		};
+		XrViewState view_state = {
+		    .type = XR_TYPE_VIEW_STATE,
+		};
+		uint32_t located_view_count = 0;
+		xr = xrLocateViews(session, &locate_info, &view_state, view_count, &located_view_count, located_views);
+		if (xr != XR_SUCCESS) {
+			free(projection_views);
+			free(located_views);
+			free(images);
+			ret = fail_xr("xrLocateViews", xr);
+			goto out;
+		}
+
+		if (located_view_count != view_count) {
+			free(projection_views);
+			free(located_views);
+			free(images);
+			ret = fail_msg("xrLocateViews returned unexpected view count");
+			goto out;
+		}
+
+		XrSwapchainImageReleaseInfo release_info = {
+		    .type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO,
+		};
+		xr = xrReleaseSwapchainImage(swapchain, &release_info);
+		if (xr != XR_SUCCESS) {
+			free(projection_views);
+			free(located_views);
+			free(images);
+			ret = fail_xr("xrReleaseSwapchainImage", xr);
+			goto out;
+		}
+
+		for (uint32_t i = 0; i < view_count; ++i) {
+			projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+			projection_views[i].pose = located_views[i].pose;
+			projection_views[i].fov = located_views[i].fov;
+			projection_views[i].subImage.swapchain = swapchain;
+			projection_views[i].subImage.imageRect.offset.x = 0;
+			projection_views[i].subImage.imageRect.offset.y = 0;
+			projection_views[i].subImage.imageRect.extent.width = (int32_t)swapchain_info.width;
+			projection_views[i].subImage.imageRect.extent.height = (int32_t)swapchain_info.height;
+			projection_views[i].subImage.imageArrayIndex = i;
+		}
+
+		XrCompositionLayerProjection projection_layer = {
+		    .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
+		    .space = local_space,
+		    .viewCount = view_count,
+		    .views = projection_views,
+		};
+		const XrCompositionLayerBaseHeader *layers[] = {
+		    (const XrCompositionLayerBaseHeader *)&projection_layer,
+		};
+		XrFrameEndInfo frame_end_info = {
+		    .type = XR_TYPE_FRAME_END_INFO,
+		    .displayTime = frame_state.predictedDisplayTime,
+		    .environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE,
+		    .layerCount = 1,
+		    .layers = layers,
+		};
+		xr = xrEndFrame(session, &frame_end_info);
+		if (xr != XR_SUCCESS) {
+			free(projection_views);
+			free(located_views);
+			free(images);
+			ret = fail_xr("xrEndFrame", xr);
+			goto out;
+		}
 	}
 
 	fprintf(stdout,
-	        "OpenXR Vulkan probe created session, swapchain, and submitted one projection frame with %u images.\n",
-	        image_count);
+	        "OpenXR Vulkan probe created session, swapchain, and submitted %u projection frames with %u images.\n",
+	        frame_count, image_count);
 	free(projection_views);
 	free(located_views);
 	free(images);
