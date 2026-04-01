@@ -186,6 +186,20 @@ first Quest experiment should start by adapting the existing remote driver data
 path to the MVP pose/video contract, not by inventing a new host-side HMD
 abstraction.
 
+The branch now also has a first remote-pose validation tool on macOS:
+
+- `tests/tests_macos_remote_driver_pose_probe.c` connects to the remote-driver
+  TCP socket, consumes the reset/current handshake packets, and streams
+  synthetic head poses at 60 Hz
+- with `monado-service` running in `active=remote` mode, that pose probe can
+  stay connected while `tests/tests_macos_openxr_vulkan_probe.c` creates a
+  graphics-bound OpenXR session against `Remote HMD`
+- the Vulkan probe now logs `Head: 'Remote HMD'` and still submits projection
+  frames successfully on macOS when using the per-eye swapchain workaround
+
+That is the first proof on macOS that Monado's runtime can render through the
+remote-device path instead of only the simulated local HMD path.
+
 ## Likely next blocker classes
 
 After the first successful runtime probe, the next blocker classes are clearer:

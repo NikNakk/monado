@@ -65,6 +65,8 @@ SPDX-License-Identifier: BSL-1.0
   `SOCK_CLOEXEC` is unavailable
 - enabled `config_v0.json` loading on macOS so remote-builder settings can be
   selected through the normal config path instead of env-only overrides
+- added `tests/tests_macos_remote_driver_pose_probe.c` to feed synthetic head
+  poses into the remote-driver TCP path on macOS
 
 ## Still expected after this patch set
 
@@ -72,6 +74,7 @@ SPDX-License-Identifier: BSL-1.0
 - real OpenXR state-tracker validation on top of the now-working IPC image path
 - remote-driver validation on macOS as the first host-side remote-HMD stub
 - adapting the remote driver protocol/data model to the Quest MVP pose path
+- bridging Quest-side pose transport into the now-working remote-driver path
 - cleanup/teardown fixes for the service-backed probe shutdown path
 - deciding whether any additional WiVRn compositor patches should be ported, or
   only mined for design ideas
@@ -123,6 +126,11 @@ SPDX-License-Identifier: BSL-1.0
   - a macOS `config_v0.json` with `active=remote` is now honored
   - `monado-service` selects the remote builder, exposes `Remote HMD`, and
     listens on the configured TCP port
+  - `tests/tests_macos_remote_driver_pose_probe.c` can connect to that socket
+    and stream synthetic head poses
+  - with that probe connected,
+    `tests/tests_macos_openxr_vulkan_probe.c` now runs against `Remote HMD`
+    instead of the simulated device and still submits projection frames
 - with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
   into the older frame-submit path for deeper compositor debugging
 - the earlier branch result that the compute compositor consumes submitted
@@ -157,5 +165,7 @@ SPDX-License-Identifier: BSL-1.0
    sustained-render regression path on Apple Silicon.
 7. Use a macOS `config_v0.json` with `active=remote` when validating the
    remote-builder path on Apple Silicon
-8. Fix only the first blocker each round
-9. Keep notes here so the blocker order stays explicit
+8. Use `tests/tests_macos_remote_driver_pose_probe` to keep `Remote HMD`
+   fed with synthetic poses while validating OpenXR/runtime behavior
+9. Fix only the first blocker each round
+10. Keep notes here so the blocker order stays explicit
