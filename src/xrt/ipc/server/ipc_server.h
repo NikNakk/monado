@@ -306,6 +306,26 @@ struct ipc_server_mainloop
 #define XRT_IPC_GOT_IMPL
 #endif
 
+#if defined(XRT_OS_OSX) || defined(XRT_DOXYGEN)
+	/*!
+	 * @name Desktop macOS Mainloop Members
+	 * @{
+	 */
+
+	//! Socket that we accept connections on.
+	int listen_socket;
+
+	//! The socket filename we bound to, if any.
+	char *socket_filename;
+
+	//! Should console input trigger shutdown?
+	bool no_stdin;
+
+	/*! @} */
+
+#define XRT_IPC_GOT_IMPL
+#endif
+
 #if defined(XRT_OS_WINDOWS) || defined(XRT_DOXYGEN)
 	/*!
 	 * @name Desktop Windows Mainloop Members

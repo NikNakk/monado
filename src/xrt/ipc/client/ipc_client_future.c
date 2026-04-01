@@ -66,7 +66,7 @@ cancel(struct xrt_future *xft)
 }
 
 static xrt_result_t
-wait(struct xrt_future *xft, int64_t timeout_ns)
+wait_future(struct xrt_future *xft, int64_t timeout_ns)
 {
 	return XRT_ERROR_NOT_IMPLEMENTED;
 }
@@ -106,7 +106,7 @@ ipc_client_future_create(struct ipc_connection *ipc_c, uint32_t future_id)
 	xft->get_state = get_state;
 	xft->get_result = get_result;
 	xft->cancel = cancel;
-	xft->wait = wait;
+	xft->wait = wait_future;
 	xft->is_cancel_requested = is_cancel_requested;
 	xft->complete = complete;
 	xft->reference.count = 1;

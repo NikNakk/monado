@@ -26,7 +26,11 @@
 #include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#if defined(XRT_OS_ANDROID) || defined(XRT_OS_LINUX)
 #include <sys/epoll.h>
+#elif defined(XRT_OS_OSX)
+#include <poll.h>
+#endif
 #include <sys/socket.h>
 
 #endif // XRT_OS_WINDOWS
@@ -180,11 +184,14 @@ common_shutdown(volatile struct ipc_client_state *ics)
 #ifndef XRT_OS_WINDOWS // Linux & Android
 
 static int
-setup_epoll(volatile struct ipc_client_state *ics)
+setup_wait_handle(volatile struct ipc_client_state *ics)
 {
 	int listen_socket = ics->imc.ipc_handle;
 	assert(listen_socket >= 0);
 
+#if defined(XRT_OS_OSX)
+	return listen_socket;
+#else
 	int ret = epoll_create1(EPOLL_CLOEXEC);
 	if (ret < 0) {
 		return ret;
@@ -203,6 +210,7 @@ setup_epoll(volatile struct ipc_client_state *ics)
 	}
 
 	return epoll_fd;
+#endif
 }
 
 static void
@@ -217,35 +225,48 @@ client_loop(volatile struct ipc_client_state *ics)
 	    ics->server->callback_data);          //
 
 	// Claim the client fd.
-	int epoll_fd = setup_epoll(ics);
-	if (epoll_fd < 0) {
+	int wait_handle = setup_wait_handle(ics);
+	if (wait_handle < 0) {
 		return;
 	}
 
 	while (ics->server->running) {
 		const int half_a_second_ms = 500;
-		struct epoll_event event = XRT_STRUCT_INIT;
 		int ret = 0;
 
 		// On temporary failures retry.
 		do {
+#if defined(XRT_OS_OSX)
+			struct pollfd event = {
+			    .fd = wait_handle,
+			    .events = POLLIN | POLLHUP | POLLERR,
+			    .revents = 0,
+			};
+			ret = poll(&event, 1, half_a_second_ms);
+			if (ret > 0 && (event.revents & (POLLHUP | POLLERR | POLLNVAL)) != 0) {
+				break;
+			}
+			if (ret > 0 && (event.revents & POLLIN) == 0) {
+				continue;
+			}
+#else
+			struct epoll_event event = XRT_STRUCT_INIT;
 			// We use epoll here to be able to timeout.
-			ret = epoll_wait(epoll_fd, &event, 1, half_a_second_ms);
+			ret = epoll_wait(wait_handle, &event, 1, half_a_second_ms);
+			if (ret > 0 && (event.events & EPOLLHUP) != 0) {
+				break;
+			}
+#endif
 		} while (ret == -1 && errno == EINTR);
 
 		if (ret < 0) {
-			IPC_ERROR(ics->server, "Failed epoll_wait '%i', disconnecting client.", ret);
+			IPC_ERROR(ics->server, "Failed waiting on client socket '%i', disconnecting client.", ret);
 			break;
 		}
 
 		// Timed out, loop again.
 		if (ret == 0) {
 			continue;
-		}
-
-		// Detect clients disconnecting gracefully.
-		if (ret > 0 && (event.events & EPOLLHUP) != 0) {
-			break;
 		}
 
 		// Peek the first 4 bytes to get the command type
@@ -290,8 +311,10 @@ client_loop(volatile struct ipc_client_state *ics)
 		}
 	}
 
-	close(epoll_fd);
-	epoll_fd = -1;
+#if !defined(XRT_OS_OSX)
+	close(wait_handle);
+	wait_handle = -1;
+#endif
 
 	// Call the client disconnected callback.
 	ics->server->callbacks->client_disconnected( //

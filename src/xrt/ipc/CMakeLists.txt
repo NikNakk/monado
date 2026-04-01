@@ -175,6 +175,10 @@ elseif(XRT_HAVE_LINUX)
 	target_sources(
 		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_linux.c
 		)
+elseif(APPLE)
+	target_sources(
+		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
+		)
 elseif(WIN32)
 	target_sources(
 		ipc_server
