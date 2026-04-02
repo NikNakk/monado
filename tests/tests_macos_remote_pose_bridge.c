@@ -106,6 +106,27 @@ apply_packet_to_remote_data(const struct macos_remote_pose_packet_v0 *packet, st
 	}
 }
 
+static void
+apply_packet_v1_to_remote_data(const struct macos_remote_pose_packet_v1 *packet, struct r_remote_data *data)
+{
+	data->header = R_HEADER_VALUE;
+	data->head.per_view_data_valid = false;
+
+	if ((packet->flags & MACOS_REMOTE_POSE_PACKET_ORIENTATION_VALID) != 0) {
+		data->head.center.orientation = packet->orientation;
+	}
+	if ((packet->flags & MACOS_REMOTE_POSE_PACKET_POSITION_VALID) != 0) {
+		data->head.center.position = packet->position;
+	}
+	if ((packet->flags & MACOS_REMOTE_POSE_PACKET_PER_VIEW_VALID) != 0 && packet->view_count >= 2) {
+		for (uint32_t i = 0; i < 2; ++i) {
+			data->head.views[i].pose = packet->views[i].pose;
+			data->head.views[i].fov = packet->views[i].fov;
+		}
+		data->head.per_view_data_valid = true;
+	}
+}
+
 int
 main(void)
 {
@@ -146,7 +167,7 @@ main(void)
 
 	struct sockaddr_in addr = {0};
 	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	addr.sin_port = htons(udp_port);
 	if (bind(udp_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 		return fail_msg("Failed to bind UDP pose socket");
@@ -176,22 +197,36 @@ main(void)
 			break;
 		}
 
-		struct macos_remote_pose_packet_v0 packet = {0};
+		union {
+			struct macos_remote_pose_packet_v0 v0;
+			struct macos_remote_pose_packet_v1 v1;
+		} packet = {0};
 		ssize_t received = recvfrom(udp_fd, &packet, sizeof(packet), 0, NULL, NULL);
 		if (received < 0) {
 			ret = fail_msg("recvfrom() failed on UDP pose socket");
 			goto out;
 		}
-		if ((size_t)received != sizeof(packet)) {
-			ret = fail_msg("Received wrong-sized UDP pose packet");
-			goto out;
-		}
-		if (packet.magic != MACOS_REMOTE_POSE_PACKET_MAGIC || packet.version != MACOS_REMOTE_POSE_PACKET_VERSION) {
+		if (packet.v0.magic != MACOS_REMOTE_POSE_PACKET_MAGIC) {
 			ret = fail_msg("Received invalid UDP pose packet header");
 			goto out;
 		}
+		if (packet.v0.version == 0) {
+			if ((size_t)received != sizeof(packet.v0)) {
+				ret = fail_msg("Received wrong-sized UDP pose packet");
+				goto out;
+			}
+			apply_packet_to_remote_data(&packet.v0, &data);
+		} else if (packet.v0.version == 1) {
+			if ((size_t)received != sizeof(packet.v1)) {
+				ret = fail_msg("Received wrong-sized UDP pose packet");
+				goto out;
+			}
+			apply_packet_v1_to_remote_data(&packet.v1, &data);
+		} else {
+			ret = fail_msg("Received unknown UDP pose packet version");
+			goto out;
+		}
 
-		apply_packet_to_remote_data(&packet, &data);
 		if (r_remote_connection_write_one(&rc, &data) < 0) {
 			ret = fail_msg("Failed to forward packet to remote driver");
 			goto out;
