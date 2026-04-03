@@ -95,6 +95,9 @@ timewarp_identity_pre_transform(void)
 static void
 maybe_log_timewarp_inputs(uint64_t frame_id,
                           uint32_t eye,
+                          const struct xrt_fov *fov,
+                          const struct xrt_pose *src_pose,
+                          const struct xrt_pose *new_pose,
                           const struct xrt_normalized_rect *pre_transform,
                           const struct xrt_normalized_rect *post_transform,
                           const struct xrt_matrix_4x4 *begin,
@@ -111,11 +114,32 @@ maybe_log_timewarp_inputs(uint64_t frame_id,
 	}
 
 	fprintf(stderr,
-	        "atw-input frame=%llu eye=%u pre=(%.5f,%.5f,%.5f,%.5f) post=(%.5f,%.5f,%.5f,%.5f) "
+	        "atw-input frame=%llu eye=%u fov=(%.5f,%.5f,%.5f,%.5f) "
+	        "src-orient=(%.5f,%.5f,%.5f,%.5f) src-pos=(%.5f,%.5f,%.5f) "
+	        "new-orient=(%.5f,%.5f,%.5f,%.5f) new-pos=(%.5f,%.5f,%.5f) "
+	        "pre=(%.5f,%.5f,%.5f,%.5f) post=(%.5f,%.5f,%.5f,%.5f) "
 	        "begin0=(%.5f,%.5f,%.5f,%.5f) begin1=(%.5f,%.5f,%.5f,%.5f) "
 	        "end0=(%.5f,%.5f,%.5f,%.5f) end1=(%.5f,%.5f,%.5f,%.5f)\n",
 	        (unsigned long long)frame_id,
 	        eye,
+	        fov->angle_left,
+	        fov->angle_right,
+	        fov->angle_up,
+	        fov->angle_down,
+	        src_pose->orientation.x,
+	        src_pose->orientation.y,
+	        src_pose->orientation.z,
+	        src_pose->orientation.w,
+	        src_pose->position.x,
+	        src_pose->position.y,
+	        src_pose->position.z,
+	        new_pose->orientation.x,
+	        new_pose->orientation.y,
+	        new_pose->orientation.z,
+	        new_pose->orientation.w,
+	        new_pose->position.x,
+	        new_pose->position.y,
+	        new_pose->position.z,
 	        pre_transform->x,
 	        pre_transform->y,
 	        pre_transform->w,
@@ -820,7 +844,8 @@ render_compute_projection_timewarp(struct render_compute *render,
 		data->post_transforms[i] = src_norm_rects[i];
 
 #ifdef XRT_OS_OSX
-		maybe_log_timewarp_inputs(r->apple_target_debug.frame_id, i, &data->pre_transforms[i],
+		maybe_log_timewarp_inputs(r->apple_target_debug.frame_id, i, &src_fovs[i], &src_poses[i],
+		                          &new_poses_scanout_begin[i], &data->pre_transforms[i],
 		                          &data->post_transforms[i], &data->transform_timewarp_scanout_begin[i],
 		                          &data->transform_timewarp_scanout_end[i]);
 #endif
@@ -888,7 +913,8 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 		data->post_transforms[i] = src_rects[i];
 
 #ifdef XRT_OS_OSX
-		maybe_log_timewarp_inputs(r->apple_target_debug.frame_id, i, &data->pre_transforms[i],
+		maybe_log_timewarp_inputs(r->apple_target_debug.frame_id, i, &src_fovs[i], &new_poses_scanout_begin[i],
+		                          &new_poses_scanout_end[i], &data->pre_transforms[i],
 		                          &data->post_transforms[i], &data->transform_timewarp_scanout_begin[i],
 		                          &data->transform_timewarp_scanout_end[i]);
 #endif

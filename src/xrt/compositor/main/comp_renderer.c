@@ -1058,6 +1058,15 @@ dispatch_compute(struct comp_renderer *r,
 	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
 	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
+	calc_pose_data(                //
+	    r,                         //
+	    fov_source,                //
+	    fovs,                      //
+	    world_poses_scanout_begin, //
+	    world_poses_scanout_end,   //
+	    eye_poses,                 //
+	    render->r->view_count);    //
+
 	if (!c->base.frame_params.one_projection_layer_fast_path) {
 		struct comp_layer *proj_layer = get_projection_layer(&c->base.layer_accum);
 		int64_t predicted_display_time_ns = c->frame.rendering.predicted_display_time_ns;
@@ -1077,15 +1086,6 @@ dispatch_compute(struct comp_renderer *r,
 				c->base.frame_params.fovs[view] = data[view].fov;
 				c->base.frame_params.poses[view] = data[view].pose;
 			}
-		} else {
-			calc_pose_data(                //
-			    r,                         //
-			    fov_source,                //
-			    fovs,                      //
-			    world_poses_scanout_begin, //
-			    world_poses_scanout_end,   //
-			    eye_poses,                 //
-			    render->r->view_count);    //
 		}
 	}
 

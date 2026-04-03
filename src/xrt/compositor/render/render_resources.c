@@ -528,6 +528,9 @@ render_resources_init(struct render_resources *r,
 	r->mesh.src_binding = 0;
 	r->mesh.ubo_binding = 1;
 	struct xrt_hmd_parts *parts = xdev->hmd;
+	for (uint32_t i = 0; i < r->view_count; ++i) {
+		render_calc_uv_to_tangent_lengths_rect(&parts->distortion.fov[i], &r->distortion.uv_to_tanangle[i]);
+	}
 	r->mesh.vertex_count = parts->distortion.mesh.vertex_count;
 	r->mesh.stride = parts->distortion.mesh.stride;
 	r->mesh.index_count_total = parts->distortion.mesh.index_count_total;
