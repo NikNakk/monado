@@ -174,6 +174,12 @@ The branch now also reaches the first service-backed graphics submit on macOS:
   `clear_swapchain_image()` uses layout barriers plus `vkCmdClearColorImage`
   and bounded fence waits instead of the older render-pass/framebuffer/readback
   path that was wedging on MoltenVK
+- a fresh local rerun with rebuilt WiVRn artifacts in `/tmp` also showed that
+  this path still needs a real headset/client handshake before the new clear
+  logic can be judged:
+  with `wivrn-server-headless` still waiting for the initial TCP `9757`
+  connection, the probe blocks earlier in `xrCreateInstance()` while the
+  runtime waits for compositor shared-memory setup over IPC
 
 The branch now also validates the first host-side remote-HMD stub path on
 macOS:
