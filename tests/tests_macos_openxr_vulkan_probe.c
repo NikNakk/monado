@@ -107,6 +107,17 @@ skip_image_clear(void)
 	return strcmp(value, "0") != 0;
 }
 
+static bool
+use_color_attachment_clear(void)
+{
+	const char *value = getenv("MACOS_OPENXR_VULKAN_PROBE_COLOR_ATTACHMENT_CLEAR");
+	if (value == NULL || value[0] == '\0') {
+		return false;
+	}
+
+	return strcmp(value, "0") != 0;
+}
+
 struct probe_swapchain
 {
 	XrSwapchain handle;
@@ -158,6 +169,157 @@ submit_command_buffer_and_wait(VkDevice device,
 	}
 
 	return wait_for_fence(device, ctx->fence, wait_what);
+}
+
+static int
+clear_swapchain_image_with_color_attachment(VkDevice device,
+                                            struct probe_vk_context *ctx,
+                                            struct probe_swapchain *swapchain,
+                                            uint32_t image_index,
+                                            uint32_t array_layer,
+                                            const VkClearColorValue *color)
+{
+	const uint32_t array_size = swapchain->create_info.arraySize;
+	VkImageLayout *layout = &swapchain->layouts[image_index * array_size + array_layer];
+	VkImageView image_view = VK_NULL_HANDLE;
+	VkRenderPass render_pass = VK_NULL_HANDLE;
+	VkFramebuffer framebuffer = VK_NULL_HANDLE;
+	int ret = 1;
+
+	if (wait_for_fence(device, ctx->fence, "color_attachment_clear(pre-submit)") != 0) {
+		return 1;
+	}
+
+	VkResult vk = vkResetFences(device, 1, &ctx->fence);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkResetFences(color_attachment_clear)", vk);
+	}
+
+	vk = vkResetCommandPool(device, ctx->command_pool, 0);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkResetCommandPool(color_attachment_clear)", vk);
+	}
+
+	VkImageViewCreateInfo image_view_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+	    .image = swapchain->images[image_index].image,
+	    .viewType = VK_IMAGE_VIEW_TYPE_2D,
+	    .format = (VkFormat)swapchain->create_info.format,
+	    .subresourceRange =
+	        {
+	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	            .baseMipLevel = 0,
+	            .levelCount = 1,
+	            .baseArrayLayer = array_layer,
+	            .layerCount = 1,
+	        },
+	};
+	vk = vkCreateImageView(device, &image_view_info, NULL, &image_view);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkCreateImageView(color_attachment_clear)", vk);
+	}
+
+	VkAttachmentDescription attachment = {
+	    .format = (VkFormat)swapchain->create_info.format,
+	    .samples = VK_SAMPLE_COUNT_1_BIT,
+	    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+	    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+	    .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+	    .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+	    .initialLayout = *layout,
+	    .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+	};
+	VkAttachmentReference color_attachment_ref = {
+	    .attachment = 0,
+	    .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+	};
+	VkSubpassDescription subpass = {
+	    .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+	    .colorAttachmentCount = 1,
+	    .pColorAttachments = &color_attachment_ref,
+	};
+	VkRenderPassCreateInfo render_pass_info = {
+	    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+	    .attachmentCount = 1,
+	    .pAttachments = &attachment,
+	    .subpassCount = 1,
+	    .pSubpasses = &subpass,
+	};
+	vk = vkCreateRenderPass(device, &render_pass_info, NULL, &render_pass);
+	if (vk != VK_SUCCESS) {
+		ret = fail_vk("vkCreateRenderPass(color_attachment_clear)", vk);
+		goto out;
+	}
+
+	VkFramebufferCreateInfo framebuffer_info = {
+	    .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+	    .renderPass = render_pass,
+	    .attachmentCount = 1,
+	    .pAttachments = &image_view,
+	    .width = swapchain->create_info.width,
+	    .height = swapchain->create_info.height,
+	    .layers = 1,
+	};
+	vk = vkCreateFramebuffer(device, &framebuffer_info, NULL, &framebuffer);
+	if (vk != VK_SUCCESS) {
+		ret = fail_vk("vkCreateFramebuffer(color_attachment_clear)", vk);
+		goto out;
+	}
+
+	VkCommandBufferBeginInfo begin_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+	vk = vkBeginCommandBuffer(ctx->command_buffer, &begin_info);
+	if (vk != VK_SUCCESS) {
+		ret = fail_vk("vkBeginCommandBuffer(color_attachment_clear)", vk);
+		goto out;
+	}
+
+	VkClearValue clear_value = {
+	    .color = *color,
+	};
+	VkRenderPassBeginInfo render_pass_begin_info = {
+	    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+	    .renderPass = render_pass,
+	    .framebuffer = framebuffer,
+	    .renderArea =
+	        {
+	            .offset = {0, 0},
+	            .extent = {swapchain->create_info.width, swapchain->create_info.height},
+	        },
+	    .clearValueCount = 1,
+	    .pClearValues = &clear_value,
+	};
+	vkCmdBeginRenderPass(ctx->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdEndRenderPass(ctx->command_buffer);
+
+	vk = vkEndCommandBuffer(ctx->command_buffer);
+	if (vk != VK_SUCCESS) {
+		ret = fail_vk("vkEndCommandBuffer(color_attachment_clear)", vk);
+		goto out;
+	}
+
+	ret = submit_command_buffer_and_wait(device,
+	                                     ctx,
+	                                     "vkQueueSubmit(color_attachment_clear)",
+	                                     "color_attachment_clear(submit)");
+	if (ret == 0) {
+		*layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	}
+
+out:
+	if (framebuffer != VK_NULL_HANDLE) {
+		vkDestroyFramebuffer(device, framebuffer, NULL);
+	}
+	if (render_pass != VK_NULL_HANDLE) {
+		vkDestroyRenderPass(device, render_pass, NULL);
+	}
+	if (image_view != VK_NULL_HANDLE) {
+		vkDestroyImageView(device, image_view, NULL);
+	}
+
+	return ret;
 }
 
 static int
@@ -345,6 +507,11 @@ clear_swapchain_image(VkDevice device,
                       uint32_t array_layer,
                       const VkClearColorValue *color)
 {
+	if (use_color_attachment_clear()) {
+		return clear_swapchain_image_with_color_attachment(
+		    device, ctx, swapchain, image_index, array_layer, color);
+	}
+
 	const uint32_t array_size = swapchain->create_info.arraySize;
 	VkImageLayout *layout = &swapchain->layouts[image_index * array_size + array_layer];
 
