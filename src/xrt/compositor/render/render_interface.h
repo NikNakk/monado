@@ -560,6 +560,14 @@ struct render_resources
 		bool pending;
 		uint64_t log_count;
 	} apple_source_debug;
+
+	struct
+	{
+		struct render_buffer buffer;
+		uint64_t frame_id;
+		bool pending;
+		uint64_t log_count;
+	} apple_target_debug;
 #endif
 };
 

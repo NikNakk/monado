@@ -53,6 +53,7 @@
 #include <math.h>
 
 DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_WARN)
+DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
 /*
@@ -687,6 +688,30 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 		r->c->nr.apple_source_debug.pending = false;
 		r->c->nr.apple_source_debug.active_view_mask = 0;
 	}
+
+	if (r->c->nr.apple_target_debug.pending) {
+		r->c->nr.apple_target_debug.log_count++;
+		if (r->c->nr.apple_target_debug.log_count <= 5 || r->c->nr.apple_target_debug.log_count % 120 == 0) {
+			const uint8_t *sample = r->c->nr.apple_target_debug.buffer.mapped;
+			fprintf(stderr,
+			        "vk-target frame=%lld layer=0 rgbaL=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u) rgbaR=(%u,%u,%u,%u)\n",
+			        (long long)r->c->nr.apple_target_debug.frame_id,
+			        (unsigned)sample[0],
+			        (unsigned)sample[1],
+			        (unsigned)sample[2],
+			        (unsigned)sample[3],
+			        (unsigned)sample[4],
+			        (unsigned)sample[5],
+			        (unsigned)sample[6],
+			        (unsigned)sample[7],
+			        (unsigned)sample[8],
+			        (unsigned)sample[9],
+			        (unsigned)sample[10],
+			        (unsigned)sample[11]);
+		}
+
+		r->c->nr.apple_target_debug.pending = false;
+	}
 #endif
 
 	r->fenced_buffer = -1;
@@ -1148,6 +1173,12 @@ comp_renderer_draw(struct comp_renderer *r)
 	bool fast_path = c->base.frame_params.one_projection_layer_fast_path;
 	bool do_timewarp = !c->debug.atw_off;
 
+#ifdef XRT_OS_OSX
+	if (debug_get_bool_option_force_atw_off_on_apple()) {
+		do_timewarp = false;
+	}
+#endif
+
 	// Consistency check.
 	assert(!fast_path || c->base.layer_accum.layer_count >= 1);
 
@@ -1167,6 +1198,7 @@ comp_renderer_draw(struct comp_renderer *r)
 
 #ifdef XRT_OS_OSX
 	c->nr.apple_source_debug.frame_id = c->frame.rendering.id;
+	c->nr.apple_target_debug.frame_id = c->frame.rendering.id;
 #endif
 
 	VkResult res = VK_SUCCESS;

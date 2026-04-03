@@ -616,6 +616,19 @@ render_resources_init(struct render_resources *r,
 		ret = render_buffer_map(vk, &r->apple_source_debug.buffers[i]);
 		VK_CHK_WITH_RET(ret, "render_buffer_map", false);
 	}
+
+	ret = render_buffer_init(                      //
+	    vk,                                       //
+	    &r->apple_target_debug.buffer,            //
+	    VK_BUFFER_USAGE_TRANSFER_DST_BIT,         //
+	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |     //
+	        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+	        VK_MEMORY_PROPERTY_HOST_CACHED_BIT,   //
+	    12);                                      //
+	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+
+	ret = render_buffer_map(vk, &r->apple_target_debug.buffer);
+	VK_CHK_WITH_RET(ret, "render_buffer_map", false);
 #endif
 
 
@@ -1107,6 +1120,8 @@ render_resources_fini(struct render_resources *r)
 	for (uint32_t i = 0; i < r->view_count; ++i) {
 		render_buffer_fini(vk, &r->apple_source_debug.buffers[i]);
 	}
+
+	render_buffer_fini(vk, &r->apple_target_debug.buffer);
 #endif
 
 	D(Sampler, r->samplers.mock);
