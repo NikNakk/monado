@@ -53,9 +53,9 @@ get_frame_count(void)
 	errno = 0;
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
-	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 120) {
+	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 3600) {
 		fprintf(stderr,
-		        "Invalid MACOS_OPENXR_VULKAN_PROBE_FRAMES=%s, expected integer in [1,120]\n",
+		        "Invalid MACOS_OPENXR_VULKAN_PROBE_FRAMES=%s, expected integer in [1,3600]\n",
 		        value);
 		return 0;
 	}
@@ -79,7 +79,16 @@ struct probe_swapchain
 	XrSwapchain handle;
 	XrSwapchainCreateInfo create_info;
 	XrSwapchainImageVulkanKHR *images;
+	VkImageLayout *layouts;
 	uint32_t image_count;
+};
+
+struct probe_vk_context
+{
+	VkQueue queue;
+	VkCommandPool command_pool;
+	VkCommandBuffer command_buffer;
+	VkFence fence;
 };
 
 static int
@@ -204,6 +213,179 @@ find_graphics_queue_family(VkPhysicalDevice physical_device)
 	return found;
 }
 
+static int
+init_vk_context(VkDevice device, uint32_t queue_family_index, struct probe_vk_context *ctx)
+{
+	memset(ctx, 0, sizeof(*ctx));
+
+	vkGetDeviceQueue(device, queue_family_index, 0, &ctx->queue);
+	if (ctx->queue == VK_NULL_HANDLE) {
+		return fail_msg("vkGetDeviceQueue returned NULL queue");
+	}
+
+	VkCommandPoolCreateInfo pool_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+	    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+	    .queueFamilyIndex = queue_family_index,
+	};
+	VkResult vk = vkCreateCommandPool(device, &pool_info, NULL, &ctx->command_pool);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkCreateCommandPool", vk);
+	}
+
+	VkCommandBufferAllocateInfo cmd_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+	    .commandPool = ctx->command_pool,
+	    .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+	    .commandBufferCount = 1,
+	};
+	vk = vkAllocateCommandBuffers(device, &cmd_info, &ctx->command_buffer);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkAllocateCommandBuffers", vk);
+	}
+
+	VkFenceCreateInfo fence_info = {
+	    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+	    .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+	};
+	vk = vkCreateFence(device, &fence_info, NULL, &ctx->fence);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkCreateFence", vk);
+	}
+
+	return 0;
+}
+
+static void
+destroy_vk_context(VkDevice device, struct probe_vk_context *ctx)
+{
+	if (ctx->fence != VK_NULL_HANDLE) {
+		vkDestroyFence(device, ctx->fence, NULL);
+	}
+	if (ctx->command_pool != VK_NULL_HANDLE) {
+		vkDestroyCommandPool(device, ctx->command_pool, NULL);
+	}
+	memset(ctx, 0, sizeof(*ctx));
+}
+
+static int
+clear_swapchain_image(VkDevice device,
+                      struct probe_vk_context *ctx,
+                      struct probe_swapchain *swapchain,
+                      uint32_t image_index,
+                      uint32_t array_layer,
+                      const VkClearColorValue *color)
+{
+	const uint32_t array_size = swapchain->create_info.arraySize;
+	VkImageLayout *layout = &swapchain->layouts[image_index * array_size + array_layer];
+
+	VkResult vk = vkWaitForFences(device, 1, &ctx->fence, VK_TRUE, UINT64_MAX);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkWaitForFences", vk);
+	}
+
+	vk = vkResetFences(device, 1, &ctx->fence);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkResetFences", vk);
+	}
+
+	vk = vkResetCommandPool(device, ctx->command_pool, 0);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkResetCommandPool", vk);
+	}
+
+	VkCommandBufferBeginInfo begin_info = {
+	    .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+	    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+	};
+	vk = vkBeginCommandBuffer(ctx->command_buffer, &begin_info);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkBeginCommandBuffer", vk);
+	}
+
+	VkImageSubresourceRange range = {
+	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .baseMipLevel = 0,
+	    .levelCount = 1,
+	    .baseArrayLayer = array_layer,
+	    .layerCount = 1,
+	};
+
+	VkImageMemoryBarrier to_clear = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .srcAccessMask = 0,
+	    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+	    .oldLayout = *layout,
+	    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .image = swapchain->images[image_index].image,
+	    .subresourceRange = range,
+	};
+	vkCmdPipelineBarrier(ctx->command_buffer,
+	                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+	                     VK_PIPELINE_STAGE_TRANSFER_BIT,
+	                     0,
+	                     0,
+	                     NULL,
+	                     0,
+	                     NULL,
+	                     1,
+	                     &to_clear);
+
+	vkCmdClearColorImage(ctx->command_buffer,
+	                     swapchain->images[image_index].image,
+	                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	                     color,
+	                     1,
+	                     &range);
+
+	VkImageMemoryBarrier to_sample = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+	    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+	    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .image = swapchain->images[image_index].image,
+	    .subresourceRange = range,
+	};
+	vkCmdPipelineBarrier(ctx->command_buffer,
+	                     VK_PIPELINE_STAGE_TRANSFER_BIT,
+	                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+	                     0,
+	                     0,
+	                     NULL,
+	                     0,
+	                     NULL,
+	                     1,
+	                     &to_sample);
+
+	vk = vkEndCommandBuffer(ctx->command_buffer);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkEndCommandBuffer", vk);
+	}
+
+	VkSubmitInfo submit_info = {
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .commandBufferCount = 1,
+	    .pCommandBuffers = &ctx->command_buffer,
+	};
+	vk = vkQueueSubmit(ctx->queue, 1, &submit_info, ctx->fence);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkQueueSubmit", vk);
+	}
+
+	vk = vkWaitForFences(device, 1, &ctx->fence, VK_TRUE, UINT64_MAX);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkWaitForFences(submit)", vk);
+	}
+
+	*layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	return 0;
+}
+
 int
 main(void)
 {
@@ -214,6 +396,7 @@ main(void)
 	XrSpace local_space = XR_NULL_HANDLE;
 	VkInstance vk_instance = VK_NULL_HANDLE;
 	VkDevice vk_device = VK_NULL_HANDLE;
+	struct probe_vk_context vk_ctx = {0};
 	uint32_t frame_count = get_frame_count();
 	bool per_view_swapchains = use_per_view_swapchains();
 	struct probe_swapchain *swapchains = NULL;
@@ -540,6 +723,11 @@ main(void)
 		goto out;
 	}
 
+	if (init_vk_context(vk_device, queue_family_index, &vk_ctx) != 0) {
+		ret = 1;
+		goto out;
+	}
+
 	if (wait_for_session_state(xrPollEvent, instance, XR_SESSION_STATE_READY) != 0) {
 		ret = 1;
 		goto out;
@@ -630,7 +818,8 @@ main(void)
 		swapchains[i].create_info = (XrSwapchainCreateInfo){
 		    .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
 		    .createFlags = 0,
-		    .usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT,
+		    .usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT |
+		                  XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT,
 		    .format = formats[0],
 		    .sampleCount = views[i].recommendedSwapchainSampleCount,
 		    .width = views[i].recommendedImageRectWidth,
@@ -661,8 +850,17 @@ main(void)
 			ret = fail_msg("calloc(swapchain images) failed");
 			goto out;
 		}
+		swapchains[i].layouts =
+		    calloc(swapchains[i].image_count * swapchains[i].create_info.arraySize, sizeof(*swapchains[i].layouts));
+		if (swapchains[i].layouts == NULL) {
+			ret = fail_msg("calloc(swapchain layouts) failed");
+			goto out;
+		}
 		for (uint32_t j = 0; j < swapchains[i].image_count; ++j) {
 			swapchains[i].images[j].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
+			for (uint32_t layer = 0; layer < swapchains[i].create_info.arraySize; ++layer) {
+				swapchains[i].layouts[j * swapchains[i].create_info.arraySize + layer] = VK_IMAGE_LAYOUT_UNDEFINED;
+			}
 		}
 
 		xr = xrEnumerateSwapchainImages(swapchains[i].handle, swapchains[i].image_count, &swapchains[i].image_count,
@@ -737,6 +935,23 @@ main(void)
 				free(projection_views);
 				free(located_views);
 				ret = fail_xr("xrWaitSwapchainImage", xr);
+				goto out;
+			}
+
+			VkClearColorValue clear_color = {
+			    .float32 =
+			        {
+			            i == 0 ? 0.85f : 0.10f,
+			            i == 0 ? 0.15f : 0.35f,
+			            0.20f + 0.10f * (float)(frame % 2),
+			            1.0f,
+			        },
+			};
+			uint32_t layer = per_view_swapchains ? 0 : i;
+			if (clear_swapchain_image(vk_device, &vk_ctx, &swapchains[i], image_index, layer, &clear_color) != 0) {
+				free(projection_views);
+				free(located_views);
+				ret = 1;
 				goto out;
 			}
 		}
@@ -834,6 +1049,7 @@ main(void)
 out:
 	if (swapchains != NULL) {
 		for (uint32_t i = 0; i < swapchain_count; ++i) {
+			free(swapchains[i].layouts);
 			free(swapchains[i].images);
 			if (swapchains[i].handle != XR_NULL_HANDLE && xrDestroySwapchain != NULL) {
 				xrDestroySwapchain(swapchains[i].handle);
@@ -846,6 +1062,10 @@ out:
 	}
 	if (session != XR_NULL_HANDLE && xrDestroySession != NULL) {
 		xrDestroySession(session);
+	}
+	if (vk_device != VK_NULL_HANDLE) {
+		vkDeviceWaitIdle(vk_device);
+		destroy_vk_context(vk_device, &vk_ctx);
 	}
 	if (vk_device != VK_NULL_HANDLE) {
 		vkDestroyDevice(vk_device, NULL);

@@ -259,7 +259,7 @@ ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
 		ml->listen_socket = -1;
 	}
 	if (ml->socket_filename != NULL) {
-		unlink(ml->socket_filename);
+		U_LOG_W("Preserving Apple IPC socket path %s for WiVRn/macOS port bring-up", ml->socket_filename);
 		free(ml->socket_filename);
 		ml->socket_filename = NULL;
 	}
