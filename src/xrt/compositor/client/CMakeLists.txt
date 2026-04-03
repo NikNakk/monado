@@ -19,6 +19,11 @@ if(XRT_HAVE_VULKAN)
 	target_link_libraries(comp_client PRIVATE aux_vk)
 endif()
 
+if(APPLE)
+	target_sources(comp_client PRIVATE comp_metal_client.h comp_metal_client.m comp_metal_glue.c)
+	target_link_libraries(comp_client PRIVATE "-framework Metal")
+endif()
+
 if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
 	target_sources(
 		comp_client PRIVATE comp_gl_client.c comp_gl_client.h comp_gl_memobj_swapchain.c

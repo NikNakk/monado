@@ -2059,6 +2059,61 @@ xrt_compositor_vk(struct xrt_compositor *xc)
 	return (struct xrt_compositor_vk *)xc;
 }
 
+/*
+ *
+ * Metal interface.
+ *
+ */
+
+/*!
+ * Base class for a Metal client swapchain.
+ *
+ * @ingroup xrt_iface comp_client
+ * @extends xrt_swapchain
+ */
+struct xrt_swapchain_metal
+{
+	//! @public Base
+	struct xrt_swapchain base;
+
+	//! Images to be used by the caller.
+	void *images[XRT_MAX_SWAPCHAIN_IMAGES];
+};
+
+/*!
+ * Base class for a Metal client compositor.
+ *
+ * @ingroup xrt_iface comp_client
+ * @extends xrt_compositor
+ */
+struct xrt_compositor_metal
+{
+	//! @public Base
+	struct xrt_compositor base;
+};
+
+/*!
+ * Down-cast helper.
+ *
+ * @private @memberof xrt_swapchain_metal
+ */
+static inline struct xrt_swapchain_metal *
+xrt_swapchain_metal(struct xrt_swapchain *xsc)
+{
+	return (struct xrt_swapchain_metal *)xsc;
+}
+
+/*!
+ * Down-cast helper.
+ *
+ * @private @memberof xrt_compositor_metal
+ */
+static inline struct xrt_compositor_metal *
+xrt_compositor_metal(struct xrt_compositor *xc)
+{
+	return (struct xrt_compositor_metal *)xc;
+}
+
 #if defined(XRT_HAVE_D3D11) || defined(XRT_DOXYGEN)
 
 /*

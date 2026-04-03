@@ -890,6 +890,40 @@ oxr_session_populate_gles_android(struct oxr_logger *log,
 
 /*
  *
+ * Metal, located in various files.
+ *
+ */
+
+#ifdef XR_USE_GRAPHICS_API_METAL
+
+XrResult
+oxr_metal_get_requirements(struct oxr_logger *log,
+                           struct oxr_system *sys,
+                           XrGraphicsRequirementsMetalKHR *graphicsRequirements);
+
+XrResult
+oxr_metal_check_command_queue(struct oxr_logger *log, struct oxr_system *sys, void *command_queue);
+
+void
+oxr_metal_cleanup_system(struct oxr_system *sys);
+
+XrResult
+oxr_session_populate_metal(struct oxr_logger *log,
+                           struct oxr_system *sys,
+                           XrGraphicsBindingMetalKHR const *next,
+                           struct oxr_session *sess);
+
+XrResult
+oxr_swapchain_metal_create(struct oxr_logger *log,
+                           struct oxr_session *sess,
+                           const XrSwapchainCreateInfo *createInfo,
+                           struct oxr_swapchain **out_swapchain);
+
+#endif
+
+
+/*
+ *
  * Vulkan, located in various files.
  *
  */
@@ -1187,6 +1221,11 @@ struct oxr_system
 #if defined(XR_USE_GRAPHICS_API_D3D11) || defined(XR_USE_GRAPHICS_API_D3D12)
 	LUID suggested_d3d_luid;
 	bool suggested_d3d_luid_valid;
+#endif
+
+#ifdef XR_USE_GRAPHICS_API_METAL
+	void *suggested_metal_device;
+	bool suggested_metal_device_valid;
 #endif
 };
 

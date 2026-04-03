@@ -1253,6 +1253,37 @@ oxr_session_create_impl(struct oxr_logger *log,
 	}
 #endif
 
+#ifdef XR_USE_GRAPHICS_API_METAL
+	XrGraphicsBindingMetalKHR const *metal =
+	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_GRAPHICS_BINDING_METAL_KHR, XrGraphicsBindingMetalKHR);
+	if (metal != NULL) {
+		OXR_CHECK_XSYSC(log, sys);
+
+		if (!sys->gotten_requirements) {
+			return oxr_error(log, XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING,
+			                 "Has not called xrGetMetalGraphicsRequirementsKHR");
+		}
+
+		if (!sys->suggested_metal_device_valid) {
+			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+			                 "Has not called xrGetMetalGraphicsRequirementsKHR");
+		}
+
+		ret = oxr_metal_check_command_queue(log, sys, metal->commandQueue);
+		if (ret != XR_SUCCESS) {
+			return ret;
+		}
+
+		ret = oxr_session_allocate_and_init(log, sys, OXR_SESSION_GRAPHICS_EXT_METAL, out_session);
+		OXR_CHECK_XR_SUCCESS(log, ret, "Failed to allocate session");
+
+		ret = oxr_create_xrt_session_and_native_compositor(log, xsi, *out_session);
+		OXR_CHECK_XR_SUCCESS(log, ret, "Failed to create session/compositor");
+
+		return oxr_session_populate_metal(log, sys, metal, *out_session);
+	}
+#endif
+
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 	XrGraphicsBindingVulkanKHR const *vulkan =
 	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR, XrGraphicsBindingVulkanKHR);

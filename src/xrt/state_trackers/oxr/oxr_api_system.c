@@ -261,6 +261,36 @@ oxr_xrGetOpenGLGraphicsRequirementsKHR(XrInstance instance,
 
 /*
  *
+ * Metal
+ *
+ */
+
+#ifdef XR_USE_GRAPHICS_API_METAL
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetMetalGraphicsRequirementsKHR(XrInstance instance,
+                                      XrSystemId systemId,
+                                      XrGraphicsRequirementsMetalKHR *graphicsRequirements)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_instance *inst;
+	struct oxr_logger log;
+	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetMetalGraphicsRequirementsKHR");
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, graphicsRequirements, XR_TYPE_GRAPHICS_REQUIREMENTS_METAL_KHR);
+	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, systemId, sys);
+	OXR_VERIFY_XSYSC(&log, sys);
+
+	sys->gotten_requirements = true;
+
+	return oxr_metal_get_requirements(&log, sys, graphicsRequirements);
+}
+
+#endif
+
+
+/*
+ *
  * Vulkan
  *
  */

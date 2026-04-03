@@ -96,6 +96,10 @@ oxr_instance_destroy(struct oxr_logger *log, struct oxr_handle_base *hb)
 		inst->system.visibility_mask[i] = NULL;
 	}
 
+#ifdef XR_USE_GRAPHICS_API_METAL
+	oxr_metal_cleanup_system(&inst->system);
+#endif
+
 	os_mutex_destroy(&inst->system_init_lock);
 
 	xrt_space_overseer_destroy(&inst->system.xso);
