@@ -739,7 +739,12 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		    .oldLayout = barrier_optimal_layout,
 		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		    .srcQueueFamilyIndex = vk->main_queue->family_index,
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+		    // IOSurface-backed images stay within the same logical queue ownership model on Apple.
+		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+#else
 		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
+#endif
 		    .image = sc->base.images[i],
 		    .subresourceRange = subresource_range,
 		};
