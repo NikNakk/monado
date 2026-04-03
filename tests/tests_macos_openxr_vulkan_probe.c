@@ -85,6 +85,28 @@ use_quad_layer_submission(void)
 	return strcmp(value, "0") != 0;
 }
 
+static bool
+use_empty_submit_check(void)
+{
+	const char *value = getenv("MACOS_OPENXR_VULKAN_PROBE_EMPTY_SUBMIT_CHECK");
+	if (value == NULL || value[0] == '\0') {
+		return false;
+	}
+
+	return strcmp(value, "0") != 0;
+}
+
+static bool
+skip_image_clear(void)
+{
+	const char *value = getenv("MACOS_OPENXR_VULKAN_PROBE_SKIP_IMAGE_CLEAR");
+	if (value == NULL || value[0] == '\0') {
+		return false;
+	}
+
+	return strcmp(value, "0") != 0;
+}
+
 struct probe_swapchain
 {
 	XrSwapchain handle;
@@ -117,6 +139,25 @@ wait_for_fence(VkDevice device, VkFence fence, const char *what)
 	}
 
 	return fail_msg("Timed out waiting for Vulkan fence");
+}
+
+static int
+submit_command_buffer_and_wait(VkDevice device,
+                               struct probe_vk_context *ctx,
+                               const char *submit_what,
+                               const char *wait_what)
+{
+	VkSubmitInfo submit_info = {
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .commandBufferCount = 1,
+	    .pCommandBuffers = &ctx->command_buffer,
+	};
+	VkResult vk = vkQueueSubmit(ctx->queue, 1, &submit_info, ctx->fence);
+	if (vk != VK_SUCCESS) {
+		return fail_vk(submit_what, vk);
+	}
+
+	return wait_for_fence(device, ctx->fence, wait_what);
 }
 
 static int
@@ -330,6 +371,35 @@ clear_swapchain_image(VkDevice device,
 		return fail_vk("vkBeginCommandBuffer", vk);
 	}
 
+	if (use_empty_submit_check()) {
+		vk = vkEndCommandBuffer(ctx->command_buffer);
+		if (vk != VK_SUCCESS) {
+			return fail_vk("vkEndCommandBuffer(empty_submit_check)", vk);
+		}
+
+		if (submit_command_buffer_and_wait(device,
+		                                   ctx,
+		                                   "vkQueueSubmit(empty_submit_check)",
+		                                   "empty_submit_check(submit)") != 0) {
+			return 1;
+		}
+
+		vk = vkResetFences(device, 1, &ctx->fence);
+		if (vk != VK_SUCCESS) {
+			return fail_vk("vkResetFences(empty_submit_check)", vk);
+		}
+
+		vk = vkResetCommandPool(device, ctx->command_pool, 0);
+		if (vk != VK_SUCCESS) {
+			return fail_vk("vkResetCommandPool(empty_submit_check)", vk);
+		}
+
+		vk = vkBeginCommandBuffer(ctx->command_buffer, &begin_info);
+		if (vk != VK_SUCCESS) {
+			return fail_vk("vkBeginCommandBuffer(clear_after_empty_submit_check)", vk);
+		}
+	}
+
 	const VkPipelineStageFlags src_stage_mask =
 	    *layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT :
 	                                                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -365,19 +435,21 @@ clear_swapchain_image(VkDevice device,
 	                     1,
 	                     &to_transfer_dst);
 
-	VkImageSubresourceRange clear_range = {
-	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-	    .baseMipLevel = 0,
-	    .levelCount = 1,
-	    .baseArrayLayer = array_layer,
-	    .layerCount = 1,
-	};
-	vkCmdClearColorImage(ctx->command_buffer,
-	                     swapchain->images[image_index].image,
-	                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	                     color,
-	                     1,
-	                     &clear_range);
+	if (!skip_image_clear()) {
+		VkImageSubresourceRange clear_range = {
+		    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+		    .baseMipLevel = 0,
+		    .levelCount = 1,
+		    .baseArrayLayer = array_layer,
+		    .layerCount = 1,
+		};
+		vkCmdClearColorImage(ctx->command_buffer,
+		                     swapchain->images[image_index].image,
+		                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		                     color,
+		                     1,
+		                     &clear_range);
+	}
 
 	VkImageMemoryBarrier back_to_color_attachment = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -413,17 +485,10 @@ clear_swapchain_image(VkDevice device,
 		return fail_vk("vkEndCommandBuffer", vk);
 	}
 
-	VkSubmitInfo submit_info = {
-	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-	    .commandBufferCount = 1,
-	    .pCommandBuffers = &ctx->command_buffer,
-	};
-	vk = vkQueueSubmit(ctx->queue, 1, &submit_info, ctx->fence);
-	if (vk != VK_SUCCESS) {
-		return fail_vk("vkQueueSubmit", vk);
-	}
-
-	if (wait_for_fence(device, ctx->fence, "clear_swapchain_image(submit)") != 0) {
+	if (submit_command_buffer_and_wait(device,
+	                                   ctx,
+	                                   "vkQueueSubmit(clear_swapchain_image)",
+	                                   "clear_swapchain_image(submit)") != 0) {
 		return 1;
 	}
 

@@ -18,6 +18,8 @@
 
 #define WAIT_IN_ACQUIRE (true)
 
+DEBUG_GET_ONCE_BOOL_OPTION(vulkan_skip_barrier_to_app, "OXR_VULKAN_SKIP_BARRIER_TO_APP", false)
+
 
 static XrResult
 vk_implicit_acquire_image(struct oxr_logger *log,
@@ -47,8 +49,12 @@ vk_implicit_acquire_image(struct oxr_logger *log,
 	 * that we can only use the queue in xrAcquireSwapchainImage so must be
 	 * done here.
 	 */
-	xret = xrt_swapchain_barrier_image(xsc, XRT_BARRIER_TO_APP, index);
-	OXR_CHECK_XRET(log, sc->sess, xret, xrt_swapchain_barrier_image);
+	if (!debug_get_bool_option_vulkan_skip_barrier_to_app()) {
+		xret = xrt_swapchain_barrier_image(xsc, XRT_BARRIER_TO_APP, index);
+		OXR_CHECK_XRET(log, sc->sess, xret, xrt_swapchain_barrier_image);
+	} else {
+		oxr_warn(log, "Skipping Vulkan XRT_BARRIER_TO_APP due to OXR_VULKAN_SKIP_BARRIER_TO_APP");
+	}
 
 	*out_index = index;
 
