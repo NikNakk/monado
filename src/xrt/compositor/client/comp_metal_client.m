@@ -11,10 +11,15 @@
 #import <IOSurface/IOSurface.h>
 
 #include "client/comp_metal_client.h"
+#include "util/u_debug.h"
 
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+
+DEBUG_GET_ONCE_BOOL_OPTION(log_metal_swapchain_samples,
+                           "XRT_COMPOSITOR_LOG_METAL_SWAPCHAIN_SAMPLES",
+                           false)
 
 
 struct client_metal_compositor;
@@ -152,6 +157,10 @@ client_metal_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier
 static void
 client_metal_swapchain_log_iosurface_sample(struct client_metal_swapchain *sc, uint32_t index)
 {
+	if (!debug_get_bool_option_log_metal_swapchain_samples()) {
+		return;
+	}
+
 	if (index >= sc->base.base.image_count) {
 		return;
 	}
