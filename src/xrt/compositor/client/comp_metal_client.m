@@ -172,12 +172,6 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
                                          struct xrt_swapchain **out_xsc)
 {
 	struct client_metal_compositor *c = client_metal_compositor(xc);
-	struct xrt_swapchain_create_properties xsccp = XRT_STRUCT_INIT;
-	xrt_result_t xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, info, &xsccp);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
-
 	if (info->array_size != 1 || info->face_count != 1) {
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
@@ -189,6 +183,13 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 
 	struct xrt_swapchain_create_info native_info = *info;
 	native_info.format = vk_format;
+
+	struct xrt_swapchain_create_properties xsccp = XRT_STRUCT_INIT;
+	xrt_result_t xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, &native_info, &xsccp);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
 	native_info.bits |= xsccp.extra_bits;
 
 	struct xrt_swapchain_native *xscn = NULL;
