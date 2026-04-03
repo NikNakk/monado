@@ -22,6 +22,59 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+static struct xrt_quat
+rotate_y_180_quat(struct xrt_quat quat)
+{
+	quat.x = -quat.x;
+	quat.z = -quat.z;
+	return quat;
+}
+
+static struct xrt_vec3
+rotate_y_180_vec3(struct xrt_vec3 vec)
+{
+	vec.x = -vec.x;
+	vec.z = -vec.z;
+	return vec;
+}
+
+static struct xrt_pose
+rotate_y_180_pose(struct xrt_pose pose)
+{
+	pose.orientation = rotate_y_180_quat(pose.orientation);
+	pose.position = rotate_y_180_vec3(pose.position);
+	return pose;
+}
+
+static bool g_logged_v0_pose = false;
+static bool g_logged_v1_pose = false;
+static bool g_has_center_baseline = false;
+static struct xrt_vec3 g_center_baseline = {0};
+static bool g_logged_translation = false;
+
+static void
+maybe_log_translation(const struct xrt_vec3 *position)
+{
+	if (!g_has_center_baseline) {
+		g_center_baseline = *position;
+		g_has_center_baseline = true;
+		return;
+	}
+	if (g_logged_translation) {
+		return;
+	}
+
+	const float dx = position->x - g_center_baseline.x;
+	const float dy = position->y - g_center_baseline.y;
+	const float dz = position->z - g_center_baseline.z;
+	const float distance_squared = dx * dx + dy * dy + dz * dz;
+	if (distance_squared > (0.05f * 0.05f)) {
+		fprintf(stdout, "Bridge translation detected: dx=%0.4f dy=%0.4f dz=%0.4f\n", dx, dy, dz);
+		fflush(stdout);
+		g_logged_translation = true;
+	}
+}
+
 static int
 fail_msg(const char *what)
 {
@@ -104,6 +157,15 @@ apply_packet_to_remote_data(const struct macos_remote_pose_packet_v0 *packet, st
 	if ((packet->flags & MACOS_REMOTE_POSE_PACKET_POSITION_VALID) != 0) {
 		data->head.center.position = packet->position;
 	}
+	if (!g_logged_v0_pose) {
+		fprintf(stdout,
+		        "Bridge v0 center position: x=%0.4f y=%0.4f z=%0.4f\n",
+		        data->head.center.position.x,
+		        data->head.center.position.y,
+		        data->head.center.position.z);
+		g_logged_v0_pose = true;
+	}
+	maybe_log_translation(&data->head.center.position);
 }
 
 static void
@@ -125,11 +187,24 @@ apply_packet_v1_to_remote_data(const struct macos_remote_pose_packet_v1 *packet,
 		}
 		data->head.per_view_data_valid = true;
 	}
+	if (!g_logged_v1_pose) {
+		fprintf(stdout,
+		        "Bridge v1 center position: x=%0.4f y=%0.4f z=%0.4f views: left_x=%0.4f right_x=%0.4f\n",
+		        data->head.center.position.x,
+		        data->head.center.position.y,
+		        data->head.center.position.z,
+		        data->head.views[0].pose.position.x,
+		        data->head.views[1].pose.position.x);
+		g_logged_v1_pose = true;
+	}
+	maybe_log_translation(&data->head.center.position);
 }
 
 int
 main(void)
 {
+	setvbuf(stdout, NULL, _IOLBF, 0);
+
 	uint16_t udp_port = get_udp_port();
 	uint16_t remote_driver_port = get_remote_driver_port();
 	uint32_t idle_timeout_ms = get_idle_timeout_ms();
