@@ -118,6 +118,34 @@ use_color_attachment_clear(void)
 	return strcmp(value, "0") != 0;
 }
 
+static bool
+skip_runtime_barrier_to_app(void)
+{
+	const char *value = getenv("OXR_VULKAN_SKIP_BARRIER_TO_APP");
+	if (value == NULL || value[0] == '\0') {
+		return false;
+	}
+
+	return strcmp(value, "0") != 0;
+}
+
+static XrSwapchainUsageFlags
+get_swapchain_usage_flags(void)
+{
+	XrSwapchainUsageFlags usage = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+
+	/*
+	 * The color-attachment path is intended to match the runtime's normal
+	 * app-side usage more closely, so only request transfer-dst when the
+	 * probe is actually going to use that path.
+	 */
+	if (!use_color_attachment_clear()) {
+		usage |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+	}
+
+	return usage;
+}
+
 struct probe_swapchain
 {
 	XrSwapchain handle;
@@ -125,6 +153,7 @@ struct probe_swapchain
 	XrSwapchainImageVulkanKHR *images;
 	VkImageLayout *layouts;
 	uint32_t image_count;
+	int32_t inflight_index;
 };
 
 struct probe_vk_context
@@ -134,6 +163,46 @@ struct probe_vk_context
 	VkCommandBuffer command_buffer;
 	VkFence fence;
 };
+
+static VkImageLayout
+get_probe_app_layout(const struct probe_swapchain *swapchain)
+{
+	(void)swapchain;
+	return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+}
+
+static void
+set_swapchain_image_layout(struct probe_swapchain *swapchain, uint32_t image_index, VkImageLayout layout)
+{
+	const uint32_t array_size = swapchain->create_info.arraySize;
+	for (uint32_t layer = 0; layer < array_size; ++layer) {
+		swapchain->layouts[image_index * array_size + layer] = layout;
+	}
+}
+
+static VkPipelineStageFlags
+get_src_stage_mask_for_layout(VkImageLayout layout)
+{
+	switch (layout) {
+	case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: return VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: return VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: return VK_PIPELINE_STAGE_TRANSFER_BIT;
+	case VK_IMAGE_LAYOUT_UNDEFINED: return VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+	default: return VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	}
+}
+
+static VkAccessFlags
+get_src_access_mask_for_layout(VkImageLayout layout)
+{
+	switch (layout) {
+	case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: return VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL: return VK_ACCESS_SHADER_READ_BIT;
+	case VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL: return VK_ACCESS_TRANSFER_WRITE_BIT;
+	case VK_IMAGE_LAYOUT_UNDEFINED: return 0;
+	default: return 0;
+	}
+}
 
 static int
 wait_for_fence(VkDevice device, VkFence fence, const char *what)
@@ -226,7 +295,7 @@ clear_swapchain_image_with_color_attachment(VkDevice device,
 	    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 	    .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
 	    .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-	    .initialLayout = *layout,
+	    .initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 	    .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 	};
 	VkAttachmentReference color_attachment_ref = {
@@ -274,6 +343,37 @@ clear_swapchain_image_with_color_attachment(VkDevice device,
 	if (vk != VK_SUCCESS) {
 		ret = fail_vk("vkBeginCommandBuffer(color_attachment_clear)", vk);
 		goto out;
+	}
+
+	if (*layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) {
+		VkImageMemoryBarrier to_color_attachment = {
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		    .srcAccessMask = get_src_access_mask_for_layout(*layout),
+		    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+		    .oldLayout = *layout,
+		    .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+		    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		    .image = swapchain->images[image_index].image,
+		    .subresourceRange =
+		        {
+		            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+		            .baseMipLevel = 0,
+		            .levelCount = 1,
+		            .baseArrayLayer = array_layer,
+		            .layerCount = 1,
+		        },
+		};
+		vkCmdPipelineBarrier(ctx->command_buffer,
+		                     get_src_stage_mask_for_layout(*layout),
+		                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+		                     0,
+		                     0,
+		                     NULL,
+		                     0,
+		                     NULL,
+		                     1,
+		                     &to_color_attachment);
 	}
 
 	VkClearValue clear_value = {
@@ -567,15 +667,9 @@ clear_swapchain_image(VkDevice device,
 		}
 	}
 
-	const VkPipelineStageFlags src_stage_mask =
-	    *layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ? VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT :
-	                                                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-	const VkAccessFlags src_access_mask =
-	    *layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL ? VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT : 0;
-
 	VkImageMemoryBarrier to_transfer_dst = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-	    .srcAccessMask = src_access_mask,
+	    .srcAccessMask = get_src_access_mask_for_layout(*layout),
 	    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
 	    .oldLayout = *layout,
 	    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -592,7 +686,7 @@ clear_swapchain_image(VkDevice device,
 	        },
 	};
 	vkCmdPipelineBarrier(ctx->command_buffer,
-	                     src_stage_mask,
+	                     get_src_stage_mask_for_layout(*layout),
 	                     VK_PIPELINE_STAGE_TRANSFER_BIT,
 	                     0,
 	                     0,
@@ -1093,11 +1187,11 @@ main(void)
 
 	for (uint32_t i = 0; i < swapchain_count; ++i) {
 		swapchains[i].handle = XR_NULL_HANDLE;
+		swapchains[i].inflight_index = -1;
 		swapchains[i].create_info = (XrSwapchainCreateInfo){
 		    .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
 		    .createFlags = 0,
-		    .usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT |
-		                  XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT,
+		    .usageFlags = get_swapchain_usage_flags(),
 		    .format = formats[0],
 		    .sampleCount = views[i].recommendedSwapchainSampleCount,
 		    .width = views[i].recommendedImageRectWidth,
@@ -1215,6 +1309,10 @@ main(void)
 				ret = fail_xr("xrWaitSwapchainImage", xr);
 				goto out;
 			}
+			swapchains[i].inflight_index = (int32_t)image_index;
+			if (!skip_runtime_barrier_to_app()) {
+				set_swapchain_image_layout(&swapchains[i], image_index, get_probe_app_layout(&swapchains[i]));
+			}
 
 			const bool flash_phase = ((frame / 30) % 2) != 0;
 			VkClearColorValue clear_color = {
@@ -1277,6 +1375,11 @@ main(void)
 				free(located_views);
 				ret = fail_xr("xrReleaseSwapchainImage", xr);
 				goto out;
+			}
+			if (swapchains[i].inflight_index >= 0) {
+				set_swapchain_image_layout(
+				    &swapchains[i], (uint32_t)swapchains[i].inflight_index, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+				swapchains[i].inflight_index = -1;
 			}
 		}
 
