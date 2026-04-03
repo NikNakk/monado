@@ -175,11 +175,14 @@ The branch now also reaches the first service-backed graphics submit on macOS:
   and bounded fence waits instead of the older render-pass/framebuffer/readback
   path that was wedging on MoltenVK
 - a fresh local rerun with rebuilt WiVRn artifacts in `/tmp` also showed that
-  this path still needs a real headset/client handshake before the new clear
-  logic can be judged:
-  with `wivrn-server-headless` still waiting for the initial TCP `9757`
-  connection, the probe blocks earlier in `xrCreateInstance()` while the
-  runtime waits for compositor shared-memory setup over IPC
+  this path needed a real headset/client handshake before the new clear logic
+  could be judged
+- an ADB-assisted rerun now provides that handshake:
+  `wivrn-server-headless` reaches `Initial headset handshake completed`, the
+  probe reaches `clear_swapchain_image()`, and the current first explicit
+  failure is the bounded `clear_swapchain_image(submit)` fence timeout
+- after that timeout is reported, the same probe still hangs during cleanup in
+  `vkDeviceWaitIdle()` on MoltenVK
 
 The branch now also validates the first host-side remote-HMD stub path on
 macOS:

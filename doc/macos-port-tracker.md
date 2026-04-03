@@ -132,14 +132,19 @@ SPDX-License-Identifier: BSL-1.0
       clear step
     - fence waits in that helper are now bounded, so a stuck submit should
       fail with a concrete timeout instead of hanging forever
-  - a fresh rerun against rebuilt WiVRn macOS artifacts in `/tmp` showed that
-    the current no-headset local environment still blocks earlier than that:
-    with `wivrn-server-headless` waiting for the initial headset connection,
-    the probe hangs in `xrCreateInstance()` while the runtime waits for shared
-    memory over the compositor IPC socket
-  - a one-shot `sample` of that blocked probe shows the main thread in
-    `ipc_receive_handles_shmem -> recvmsg`, so that rerun did not yet re-enter
-    `clear_swapchain_image()`
+  - an ADB-assisted rerun against rebuilt WiVRn macOS artifacts in `/tmp`
+    confirms the real headset-connected path now reaches this helper again:
+    - Quest 3 attached over USB
+    - `adb reverse tcp:9757 tcp:9757` active
+    - `org.meumeu.wivrn.local` relaunched with
+      `wivrn+tcp://localhost:9757`
+    - `wivrn-server-headless` reaches
+      `Initial headset handshake completed`
+  - on that live path, the first explicit failure is now the bounded timeout in
+    `clear_swapchain_image(submit)`
+  - after that timeout is reported, the probe still hangs in teardown
+  - a one-shot `sample` of the timed-out probe shows the main thread in
+    `vkDeviceWaitIdle()` inside MoltenVK
 - the existing remote builder can now be brought up on macOS:
   - `XRT_BUILD_DRIVER_REMOTE=ON` now configures and builds cleanly on Apple
     Silicon
@@ -188,9 +193,10 @@ SPDX-License-Identifier: BSL-1.0
    `MACOS_OPENXR_VULKAN_PROBE_FRAMES=3` plus
    `MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS=1` is currently the useful
    sustained-render regression path on Apple Silicon.
-   If it still fails after a real headset/client handshake, the probe should
-   now return a bounded fence-timeout error instead of wedging indefinitely in
-   `clear_swapchain_image()`.
+   After a real headset/client handshake, the probe now does return a bounded
+   fence-timeout error in `clear_swapchain_image()`.
+   The next Apple-side follow-on blocker after that is teardown hanging in
+   `vkDeviceWaitIdle()`.
 7. Use a macOS `config_v0.json` with `active=remote` when validating the
    remote-builder path on Apple Silicon
 8. Use `tests/tests_macos_remote_driver_pose_probe` to keep `Remote HMD`
