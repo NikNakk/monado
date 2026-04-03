@@ -169,6 +169,11 @@ The branch now also reaches the first service-backed graphics submit on macOS:
   the `IOSurface` import/export path trips Metal validation on
   `MTLTextureType2DArray`, so the first real macOS remote-render path should be
   treated as per-eye 2D swapchains, not a Vulkan-style stereo array image
+- for that temporary per-eye validation path, the probe-side clear helper is
+  now intentionally simple:
+  `clear_swapchain_image()` uses layout barriers plus `vkCmdClearColorImage`
+  and bounded fence waits instead of the older render-pass/framebuffer/readback
+  path that was wedging on MoltenVK
 
 The branch now also validates the first host-side remote-HMD stub path on
 macOS:
