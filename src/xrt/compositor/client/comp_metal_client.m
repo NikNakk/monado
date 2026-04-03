@@ -8,10 +8,12 @@
  */
 
 #import <Metal/Metal.h>
+#import <IOSurface/IOSurface.h>
 
 #include "client/comp_metal_client.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
 
 
@@ -22,6 +24,7 @@ struct client_metal_swapchain
 	struct xrt_swapchain_metal base;
 	struct xrt_swapchain_native *xscn;
 	struct client_metal_compositor *c;
+	uint64_t debug_release_count;
 };
 
 struct client_metal_compositor
@@ -146,9 +149,69 @@ client_metal_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier
 	return xrt_swapchain_barrier_image(native_xsc, direction, index);
 }
 
+static void
+client_metal_swapchain_log_iosurface_sample(struct client_metal_swapchain *sc, uint32_t index)
+{
+	if (index >= sc->base.base.image_count) {
+		return;
+	}
+
+	sc->debug_release_count++;
+	if (sc->debug_release_count > 5 && (sc->debug_release_count % 120) != 0) {
+		return;
+	}
+
+	IOSurfaceRef surface = sc->xscn->images[index].handle;
+	if (!xrt_graphics_buffer_is_valid(surface)) {
+		return;
+	}
+
+	const size_t bytes_per_element = IOSurfaceGetBytesPerElement(surface);
+	const size_t bytes_per_row = IOSurfaceGetBytesPerRow(surface);
+	const size_t width = IOSurfaceGetWidth(surface);
+	const size_t height = IOSurfaceGetHeight(surface);
+	if (bytes_per_element < 4 || bytes_per_row < bytes_per_element || width == 0 || height == 0) {
+		return;
+	}
+
+	kern_return_t lock_result = IOSurfaceLock(surface, kIOSurfaceLockReadOnly, NULL);
+	if (lock_result != KERN_SUCCESS) {
+		return;
+	}
+
+	const uint8_t *base = IOSurfaceGetBaseAddress(surface);
+	if (base == NULL) {
+		IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
+		return;
+	}
+
+	const size_t center_x = width / 2;
+	const size_t center_y = height / 2;
+	const uint8_t *texel0 = base;
+	const uint8_t *texel_center = base + (center_y * bytes_per_row) + (center_x * bytes_per_element);
+
+	fprintf(stderr,
+	        "metal-iosurface swapchain=%llu image=%u surface=%u bpe=%zu rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)\n",
+	        (unsigned long long)sc->xscn->limited_unique_id.data,
+	        index,
+	        (unsigned)IOSurfaceGetID(surface),
+	        bytes_per_element,
+	        (unsigned)texel0[0],
+	        (unsigned)texel0[1],
+	        (unsigned)texel0[2],
+	        (unsigned)texel0[3],
+	        (unsigned)texel_center[0],
+	        (unsigned)texel_center[1],
+	        (unsigned)texel_center[2],
+	        (unsigned)texel_center[3]);
+
+	IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
+}
+
 static xrt_result_t
 client_metal_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
+	client_metal_swapchain_log_iosurface_sample(client_metal_swapchain(xsc), index);
 	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
 }
 
