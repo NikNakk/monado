@@ -74,6 +74,17 @@ use_per_view_swapchains(void)
 	return strcmp(value, "0") != 0;
 }
 
+static bool
+use_quad_layer_submission(void)
+{
+	const char *value = getenv("MACOS_OPENXR_VULKAN_PROBE_QUAD_LAYER");
+	if (value == NULL || value[0] == '\0') {
+		return false;
+	}
+
+	return strcmp(value, "0") != 0;
+}
+
 struct probe_swapchain
 {
 	XrSwapchain handle;
@@ -89,6 +100,7 @@ struct probe_vk_context
 	VkCommandPool command_pool;
 	VkCommandBuffer command_buffer;
 	VkFence fence;
+	VkPhysicalDeviceMemoryProperties memory_properties;
 };
 
 static int
@@ -213,10 +225,28 @@ find_graphics_queue_family(VkPhysicalDevice physical_device)
 	return found;
 }
 
+static uint32_t
+find_memory_type_index(const VkPhysicalDeviceMemoryProperties *memory_properties,
+                       uint32_t type_bits,
+                       VkMemoryPropertyFlags required_flags)
+{
+	for (uint32_t i = 0; i < memory_properties->memoryTypeCount; ++i) {
+		if ((type_bits & (1u << i)) == 0) {
+			continue;
+		}
+		if ((memory_properties->memoryTypes[i].propertyFlags & required_flags) == required_flags) {
+			return i;
+		}
+	}
+
+	return UINT32_MAX;
+}
+
 static int
-init_vk_context(VkDevice device, uint32_t queue_family_index, struct probe_vk_context *ctx)
+init_vk_context(VkPhysicalDevice physical_device, VkDevice device, uint32_t queue_family_index, struct probe_vk_context *ctx)
 {
 	memset(ctx, 0, sizeof(*ctx));
+	vkGetPhysicalDeviceMemoryProperties(physical_device, &ctx->memory_properties);
 
 	vkGetDeviceQueue(device, queue_family_index, 0, &ctx->queue);
 	if (ctx->queue == VK_NULL_HANDLE) {
@@ -303,27 +333,168 @@ clear_swapchain_image(VkDevice device,
 		return fail_vk("vkBeginCommandBuffer", vk);
 	}
 
-	VkImageSubresourceRange range = {
-	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-	    .baseMipLevel = 0,
-	    .levelCount = 1,
-	    .baseArrayLayer = array_layer,
-	    .layerCount = 1,
+	VkAttachmentDescription attachment = {
+	    .format = (VkFormat)swapchain->create_info.format,
+	    .samples = VK_SAMPLE_COUNT_1_BIT,
+	    .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+	    .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+	    .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+	    .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+	    .initialLayout = *layout,
+	    .finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 	};
+	VkAttachmentReference color_ref = {
+	    .attachment = 0,
+	    .layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+	};
+	VkSubpassDescription subpass = {
+	    .pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS,
+	    .colorAttachmentCount = 1,
+	    .pColorAttachments = &color_ref,
+	};
+	VkRenderPassCreateInfo render_pass_info = {
+	    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+	    .attachmentCount = 1,
+	    .pAttachments = &attachment,
+	    .subpassCount = 1,
+	    .pSubpasses = &subpass,
+	};
+	VkRenderPass render_pass = VK_NULL_HANDLE;
+	vk = vkCreateRenderPass(device, &render_pass_info, NULL, &render_pass);
+	if (vk != VK_SUCCESS) {
+		return fail_vk("vkCreateRenderPass", vk);
+	}
 
-	VkImageMemoryBarrier to_clear = {
+	VkImageViewCreateInfo view_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+	    .image = swapchain->images[image_index].image,
+	    .viewType = VK_IMAGE_VIEW_TYPE_2D,
+	    .format = (VkFormat)swapchain->create_info.format,
+	    .subresourceRange =
+	        {
+	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	            .baseMipLevel = 0,
+	            .levelCount = 1,
+	            .baseArrayLayer = array_layer,
+	            .layerCount = 1,
+	        },
+	};
+	VkImageView image_view = VK_NULL_HANDLE;
+	vk = vkCreateImageView(device, &view_info, NULL, &image_view);
+	if (vk != VK_SUCCESS) {
+		vkDestroyRenderPass(device, render_pass, NULL);
+		return fail_vk("vkCreateImageView", vk);
+	}
+
+	VkFramebufferCreateInfo framebuffer_info = {
+	    .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+	    .renderPass = render_pass,
+	    .attachmentCount = 1,
+	    .pAttachments = &image_view,
+	    .width = swapchain->create_info.width,
+	    .height = swapchain->create_info.height,
+	    .layers = 1,
+	};
+	VkFramebuffer framebuffer = VK_NULL_HANDLE;
+	vk = vkCreateFramebuffer(device, &framebuffer_info, NULL, &framebuffer);
+	if (vk != VK_SUCCESS) {
+		vkDestroyImageView(device, image_view, NULL);
+		vkDestroyRenderPass(device, render_pass, NULL);
+		return fail_vk("vkCreateFramebuffer", vk);
+	}
+
+	VkBufferCreateInfo readback_buffer_info = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+	    .size = 4,
+	    .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+	    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+	};
+	VkBuffer readback_buffer = VK_NULL_HANDLE;
+	vk = vkCreateBuffer(device, &readback_buffer_info, NULL, &readback_buffer);
+	if (vk != VK_SUCCESS) {
+		vkDestroyFramebuffer(device, framebuffer, NULL);
+		vkDestroyImageView(device, image_view, NULL);
+		vkDestroyRenderPass(device, render_pass, NULL);
+		return fail_vk("vkCreateBuffer", vk);
+	}
+
+	VkMemoryRequirements readback_requirements = {0};
+	vkGetBufferMemoryRequirements(device, readback_buffer, &readback_requirements);
+	uint32_t readback_memory_type = find_memory_type_index(
+	    &ctx->memory_properties,
+	    readback_requirements.memoryTypeBits,
+	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	if (readback_memory_type == UINT32_MAX) {
+		vkDestroyBuffer(device, readback_buffer, NULL);
+		vkDestroyFramebuffer(device, framebuffer, NULL);
+		vkDestroyImageView(device, image_view, NULL);
+		vkDestroyRenderPass(device, render_pass, NULL);
+		return fail_msg("Failed to find host-visible readback memory type");
+	}
+
+	VkMemoryAllocateInfo readback_alloc_info = {
+	    .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+	    .allocationSize = readback_requirements.size,
+	    .memoryTypeIndex = readback_memory_type,
+	};
+	VkDeviceMemory readback_memory = VK_NULL_HANDLE;
+	vk = vkAllocateMemory(device, &readback_alloc_info, NULL, &readback_memory);
+	if (vk != VK_SUCCESS) {
+		vkDestroyBuffer(device, readback_buffer, NULL);
+		vkDestroyFramebuffer(device, framebuffer, NULL);
+		vkDestroyImageView(device, image_view, NULL);
+		vkDestroyRenderPass(device, render_pass, NULL);
+		return fail_vk("vkAllocateMemory", vk);
+	}
+
+	vk = vkBindBufferMemory(device, readback_buffer, readback_memory, 0);
+	if (vk != VK_SUCCESS) {
+		vkFreeMemory(device, readback_memory, NULL);
+		vkDestroyBuffer(device, readback_buffer, NULL);
+		vkDestroyFramebuffer(device, framebuffer, NULL);
+		vkDestroyImageView(device, image_view, NULL);
+		vkDestroyRenderPass(device, render_pass, NULL);
+		return fail_vk("vkBindBufferMemory", vk);
+	}
+
+	VkClearValue clear_value = {
+	    .color = *color,
+	};
+	VkRenderPassBeginInfo render_pass_begin = {
+	    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+	    .renderPass = render_pass,
+	    .framebuffer = framebuffer,
+	    .renderArea =
+	        {
+	            .offset = {0, 0},
+	            .extent = {swapchain->create_info.width, swapchain->create_info.height},
+	        },
+	    .clearValueCount = 1,
+	    .pClearValues = &clear_value,
+	};
+	vkCmdBeginRenderPass(ctx->command_buffer, &render_pass_begin, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdEndRenderPass(ctx->command_buffer);
+
+	VkImageMemoryBarrier to_readback = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-	    .srcAccessMask = 0,
-	    .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-	    .oldLayout = *layout,
-	    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+	    .srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+	    .oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+	    .newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	    .image = swapchain->images[image_index].image,
-	    .subresourceRange = range,
+	    .subresourceRange =
+	        {
+	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	            .baseMipLevel = 0,
+	            .levelCount = 1,
+	            .baseArrayLayer = array_layer,
+	            .layerCount = 1,
+	        },
 	};
 	vkCmdPipelineBarrier(ctx->command_buffer,
-	                     VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+	                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 	                     VK_PIPELINE_STAGE_TRANSFER_BIT,
 	                     0,
 	                     0,
@@ -331,25 +502,46 @@ clear_swapchain_image(VkDevice device,
 	                     0,
 	                     NULL,
 	                     1,
-	                     &to_clear);
+	                     &to_readback);
 
-	vkCmdClearColorImage(ctx->command_buffer,
-	                     swapchain->images[image_index].image,
-	                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	                     color,
-	                     1,
-	                     &range);
+	VkBufferImageCopy readback_region = {
+	    .bufferOffset = 0,
+	    .bufferRowLength = 0,
+	    .bufferImageHeight = 0,
+	    .imageSubresource =
+	        {
+	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	            .mipLevel = 0,
+	            .baseArrayLayer = array_layer,
+	            .layerCount = 1,
+	        },
+	    .imageOffset = {0, 0, 0},
+	    .imageExtent = {1, 1, 1},
+	};
+	vkCmdCopyImageToBuffer(ctx->command_buffer,
+	                       swapchain->images[image_index].image,
+	                       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	                       readback_buffer,
+	                       1,
+	                       &readback_region);
 
-	VkImageMemoryBarrier to_sample = {
+	VkImageMemoryBarrier back_to_sample = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-	    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
-	    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	    .srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT,
+	    .dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+	    .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	    .newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 	    .image = swapchain->images[image_index].image,
-	    .subresourceRange = range,
+	    .subresourceRange =
+	        {
+	            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	            .baseMipLevel = 0,
+	            .levelCount = 1,
+	            .baseArrayLayer = array_layer,
+	            .layerCount = 1,
+	        },
 	};
 	vkCmdPipelineBarrier(ctx->command_buffer,
 	                     VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -360,10 +552,15 @@ clear_swapchain_image(VkDevice device,
 	                     0,
 	                     NULL,
 	                     1,
-	                     &to_sample);
+	                     &back_to_sample);
 
 	vk = vkEndCommandBuffer(ctx->command_buffer);
 	if (vk != VK_SUCCESS) {
+		vkFreeMemory(device, readback_memory, NULL);
+		vkDestroyBuffer(device, readback_buffer, NULL);
+		vkDestroyFramebuffer(device, framebuffer, NULL);
+		vkDestroyImageView(device, image_view, NULL);
+		vkDestroyRenderPass(device, render_pass, NULL);
 		return fail_vk("vkEndCommandBuffer", vk);
 	}
 
@@ -379,10 +576,38 @@ clear_swapchain_image(VkDevice device,
 
 	vk = vkWaitForFences(device, 1, &ctx->fence, VK_TRUE, UINT64_MAX);
 	if (vk != VK_SUCCESS) {
+		vkFreeMemory(device, readback_memory, NULL);
+		vkDestroyBuffer(device, readback_buffer, NULL);
+		vkDestroyFramebuffer(device, framebuffer, NULL);
+		vkDestroyImageView(device, image_view, NULL);
+		vkDestroyRenderPass(device, render_pass, NULL);
 		return fail_vk("vkWaitForFences(submit)", vk);
 	}
 
-	*layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	static uint32_t readback_log_count = 0;
+	if (readback_log_count < 8) {
+		void *mapped = NULL;
+		vk = vkMapMemory(device, readback_memory, 0, 4, 0, &mapped);
+		if (vk == VK_SUCCESS && mapped != NULL) {
+			const uint8_t *pixel = (const uint8_t *)mapped;
+			fprintf(stderr,
+			        "probe-readback layer=%u rgba=(%u,%u,%u,%u)\n",
+			        array_layer,
+			        (unsigned)pixel[0],
+			        (unsigned)pixel[1],
+			        (unsigned)pixel[2],
+			        (unsigned)pixel[3]);
+			++readback_log_count;
+			vkUnmapMemory(device, readback_memory);
+		}
+	}
+
+	vkFreeMemory(device, readback_memory, NULL);
+	vkDestroyBuffer(device, readback_buffer, NULL);
+	vkDestroyFramebuffer(device, framebuffer, NULL);
+	vkDestroyImageView(device, image_view, NULL);
+	vkDestroyRenderPass(device, render_pass, NULL);
+	*layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 	return 0;
 }
 
@@ -399,6 +624,7 @@ main(void)
 	struct probe_vk_context vk_ctx = {0};
 	uint32_t frame_count = get_frame_count();
 	bool per_view_swapchains = use_per_view_swapchains();
+	bool use_quad_layer = use_quad_layer_submission();
 	struct probe_swapchain *swapchains = NULL;
 	uint32_t swapchain_count = 0;
 
@@ -723,7 +949,7 @@ main(void)
 		goto out;
 	}
 
-	if (init_vk_context(vk_device, queue_family_index, &vk_ctx) != 0) {
+	if (init_vk_context(physical_device, vk_device, queue_family_index, &vk_ctx) != 0) {
 		ret = 1;
 		goto out;
 	}
@@ -938,12 +1164,13 @@ main(void)
 				goto out;
 			}
 
+			const bool flash_phase = ((frame / 30) % 2) != 0;
 			VkClearColorValue clear_color = {
 			    .float32 =
 			        {
-			            i == 0 ? 0.85f : 0.10f,
-			            i == 0 ? 0.15f : 0.35f,
-			            0.20f + 0.10f * (float)(frame % 2),
+			            i == 0 ? (flash_phase ? 1.00f : 0.95f) : (flash_phase ? 0.10f : 0.00f),
+			            i == 0 ? (flash_phase ? 0.95f : 0.15f) : (flash_phase ? 1.00f : 0.95f),
+			            i == 0 ? (flash_phase ? 0.10f : 0.00f) : (flash_phase ? 1.00f : 0.20f),
 			            1.0f,
 			        },
 			};
@@ -956,34 +1183,36 @@ main(void)
 			}
 		}
 
-		for (uint32_t i = 0; i < view_count; ++i) {
-			located_views[i].type = XR_TYPE_VIEW;
-			located_views[i].next = NULL;
-		}
+		if (!use_quad_layer) {
+			for (uint32_t i = 0; i < view_count; ++i) {
+				located_views[i].type = XR_TYPE_VIEW;
+				located_views[i].next = NULL;
+			}
 
-		XrViewLocateInfo locate_info = {
-		    .type = XR_TYPE_VIEW_LOCATE_INFO,
-		    .viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
-		    .displayTime = frame_state.predictedDisplayTime,
-		    .space = local_space,
-		};
-		XrViewState view_state = {
-		    .type = XR_TYPE_VIEW_STATE,
-		};
-		uint32_t located_view_count = 0;
-		xr = xrLocateViews(session, &locate_info, &view_state, view_count, &located_view_count, located_views);
-		if (xr != XR_SUCCESS) {
-			free(projection_views);
-			free(located_views);
-			ret = fail_xr("xrLocateViews", xr);
-			goto out;
-		}
+			XrViewLocateInfo locate_info = {
+			    .type = XR_TYPE_VIEW_LOCATE_INFO,
+			    .viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+			    .displayTime = frame_state.predictedDisplayTime,
+			    .space = local_space,
+			};
+			XrViewState view_state = {
+			    .type = XR_TYPE_VIEW_STATE,
+			};
+			uint32_t located_view_count = 0;
+			xr = xrLocateViews(session, &locate_info, &view_state, view_count, &located_view_count, located_views);
+			if (xr != XR_SUCCESS) {
+				free(projection_views);
+				free(located_views);
+				ret = fail_xr("xrLocateViews", xr);
+				goto out;
+			}
 
-		if (located_view_count != view_count) {
-			free(projection_views);
-			free(located_views);
-			ret = fail_msg("xrLocateViews returned unexpected view count");
-			goto out;
+			if (located_view_count != view_count) {
+				free(projection_views);
+				free(located_views);
+				ret = fail_msg("xrLocateViews returned unexpected view count");
+				goto out;
+			}
 		}
 
 		for (uint32_t i = 0; i < swapchain_count; ++i) {
@@ -999,30 +1228,56 @@ main(void)
 			}
 		}
 
-		for (uint32_t i = 0; i < view_count; ++i) {
-			projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-			projection_views[i].pose = located_views[i].pose;
-			projection_views[i].fov = located_views[i].fov;
-			projection_views[i].subImage.swapchain =
-			    per_view_swapchains ? swapchains[i].handle : swapchains[0].handle;
-			projection_views[i].subImage.imageRect.offset.x = 0;
-			projection_views[i].subImage.imageRect.offset.y = 0;
-			projection_views[i].subImage.imageRect.extent.width =
-			    (int32_t)(per_view_swapchains ? swapchains[i].create_info.width : swapchains[0].create_info.width);
-			projection_views[i].subImage.imageRect.extent.height =
-			    (int32_t)(per_view_swapchains ? swapchains[i].create_info.height : swapchains[0].create_info.height);
-			projection_views[i].subImage.imageArrayIndex = per_view_swapchains ? 0 : i;
-		}
-
+		const XrCompositionLayerBaseHeader *layers[1] = {0};
 		XrCompositionLayerProjection projection_layer = {
 		    .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
 		    .space = local_space,
 		    .viewCount = view_count,
 		    .views = projection_views,
 		};
-		const XrCompositionLayerBaseHeader *layers[] = {
-		    (const XrCompositionLayerBaseHeader *)&projection_layer,
+		XrCompositionLayerQuad quad_layer = {
+		    .type = XR_TYPE_COMPOSITION_LAYER_QUAD,
+		    .space = local_space,
+		    .eyeVisibility = XR_EYE_VISIBILITY_BOTH,
+		    .pose =
+		        {
+		            .orientation = {0.0f, 0.0f, 0.0f, 1.0f},
+		            .position = {0.0f, 0.0f, -2.0f},
+		        },
+		    .size = {2.0f, 2.0f},
+		    .subImage =
+		        {
+		            .swapchain = swapchains[0].handle,
+		            .imageRect =
+		                {
+		                    .offset = {0, 0},
+		                    .extent = {(int32_t)swapchains[0].create_info.width,
+		                               (int32_t)swapchains[0].create_info.height},
+		                },
+		            .imageArrayIndex = 0,
+		        },
 		};
+
+		if (use_quad_layer) {
+			layers[0] = (const XrCompositionLayerBaseHeader *)&quad_layer;
+		} else {
+			for (uint32_t i = 0; i < view_count; ++i) {
+				projection_views[i].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+				projection_views[i].pose = located_views[i].pose;
+				projection_views[i].fov = located_views[i].fov;
+				projection_views[i].subImage.swapchain =
+				    per_view_swapchains ? swapchains[i].handle : swapchains[0].handle;
+				projection_views[i].subImage.imageRect.offset.x = 0;
+				projection_views[i].subImage.imageRect.offset.y = 0;
+				projection_views[i].subImage.imageRect.extent.width =
+				    (int32_t)(per_view_swapchains ? swapchains[i].create_info.width : swapchains[0].create_info.width);
+				projection_views[i].subImage.imageRect.extent.height =
+				    (int32_t)(per_view_swapchains ? swapchains[i].create_info.height : swapchains[0].create_info.height);
+				projection_views[i].subImage.imageArrayIndex = per_view_swapchains ? 0 : i;
+			}
+			layers[0] = (const XrCompositionLayerBaseHeader *)&projection_layer;
+		}
+
 		XrFrameEndInfo frame_end_info = {
 		    .type = XR_TYPE_FRAME_END_INFO,
 		    .displayTime = frame_state.predictedDisplayTime,
@@ -1040,8 +1295,10 @@ main(void)
 	}
 
 	fprintf(stdout,
-	        "OpenXR Vulkan probe created session, %u swapchain(s), and submitted %u projection frames.\n",
-	        swapchain_count, frame_count);
+	        "OpenXR Vulkan probe created session, %u swapchain(s), and submitted %u %s frames.\n",
+	        swapchain_count,
+	        frame_count,
+	        use_quad_layer ? "quad-layer" : "projection");
 	free(projection_views);
 	free(located_views);
 	ret = 0;
