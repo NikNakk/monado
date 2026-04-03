@@ -658,6 +658,37 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 		COMP_ERROR(r->c, "vkWaitForFences: %s", vk_result_string(ret));
 	}
 
+#ifdef XRT_OS_OSX
+	if (r->c->nr.apple_source_debug.pending) {
+		r->c->nr.apple_source_debug.log_count++;
+		if (r->c->nr.apple_source_debug.log_count <= 5 || r->c->nr.apple_source_debug.log_count % 120 == 0) {
+			for (uint32_t i = 0; i < r->c->nr.view_count; ++i) {
+				if ((r->c->nr.apple_source_debug.active_view_mask & (1u << i)) == 0) {
+					continue;
+				}
+
+				const uint8_t *sample = r->c->nr.apple_source_debug.buffers[i].mapped;
+				fprintf(stderr,
+				        "vk-source frame=%lld eye=%u image=%u rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)\n",
+				        (long long)r->c->nr.apple_source_debug.frame_id,
+				        i,
+				        r->c->nr.apple_source_debug.image_indices[i],
+				        (unsigned)sample[0],
+				        (unsigned)sample[1],
+				        (unsigned)sample[2],
+				        (unsigned)sample[3],
+				        (unsigned)sample[4],
+				        (unsigned)sample[5],
+				        (unsigned)sample[6],
+				        (unsigned)sample[7]);
+			}
+		}
+
+		r->c->nr.apple_source_debug.pending = false;
+		r->c->nr.apple_source_debug.active_view_mask = 0;
+	}
+#endif
+
 	r->fenced_buffer = -1;
 }
 
@@ -1133,6 +1164,10 @@ comp_renderer_draw(struct comp_renderer *r)
 	bool use_compute = r->settings->use_compute;
 	struct render_gfx render_g = {0};
 	struct render_compute render_c = {0};
+
+#ifdef XRT_OS_OSX
+	c->nr.apple_source_debug.frame_id = c->frame.rendering.id;
+#endif
 
 	VkResult res = VK_SUCCESS;
 	if (use_compute) {

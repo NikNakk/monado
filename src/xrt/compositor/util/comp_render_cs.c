@@ -56,6 +56,134 @@ get_layer_depth_image(const struct comp_layer *layer, uint32_t swapchain_index, 
 	return &sc->images[image_index];
 }
 
+#ifdef XRT_OS_OSX
+static void
+cmd_sample_projection_source_image(struct render_compute *render,
+                                   const struct comp_layer *layer,
+                                   uint32_t swapchain_index,
+                                   uint32_t image_index,
+                                   uint32_t array_index)
+{
+	struct render_resources *r = render->r;
+	if (swapchain_index >= r->view_count) {
+		return;
+	}
+
+	struct render_buffer *buffer = &r->apple_source_debug.buffers[swapchain_index];
+	if (buffer->buffer == VK_NULL_HANDLE) {
+		return;
+	}
+
+	struct vk_bundle *vk = r->vk;
+	struct comp_swapchain *sc = (struct comp_swapchain *)comp_layer_get_swapchain(layer, swapchain_index);
+	const uint32_t base_array_layer = array_index * sc->vkic.info.face_count;
+	const VkImage image = sc->vkic.images[image_index].handle;
+	const VkImageSubresourceRange subresource_range = {
+	    .aspectMask = vk_csci_get_barrier_aspect_mask(sc->vkic.info.format),
+	    .baseMipLevel = 0,
+	    .levelCount = 1,
+	    .baseArrayLayer = base_array_layer,
+	    .layerCount = sc->vkic.info.face_count,
+	};
+	const VkBufferMemoryBarrier buffer_barrier = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .buffer = buffer->buffer,
+	    .offset = 0,
+	    .size = VK_WHOLE_SIZE,
+	};
+	const int32_t center_x = (int32_t)(sc->vkic.info.width / 2);
+	const int32_t center_y = (int32_t)(sc->vkic.info.height / 2);
+	const VkBufferImageCopy copies[2] = {
+	    {
+	        .bufferOffset = 0,
+	        .imageSubresource =
+	            {
+	                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	                .mipLevel = 0,
+	                .baseArrayLayer = base_array_layer,
+	                .layerCount = 1,
+	            },
+	        .imageExtent =
+	            {
+	                .width = 1,
+	                .height = 1,
+	                .depth = 1,
+	            },
+	    },
+	    {
+	        .bufferOffset = 4,
+	        .imageSubresource =
+	            {
+	                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	                .mipLevel = 0,
+	                .baseArrayLayer = base_array_layer,
+	                .layerCount = 1,
+	            },
+	        .imageOffset =
+	            {
+	                .x = center_x,
+	                .y = center_y,
+	                .z = 0,
+	            },
+	        .imageExtent =
+	            {
+	                .width = 1,
+	                .height = 1,
+	                .depth = 1,
+	            },
+	    },
+	};
+
+	vk_cmd_image_barrier_gpu_locked(              //
+	    vk,                                       //
+	    r->cmd,                                   //
+	    image,                                    //
+	    0,                                        //
+	    VK_ACCESS_TRANSFER_READ_BIT,              //
+	    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, //
+	    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,     //
+	    subresource_range);                       //
+
+	vk->vkCmdCopyImageToBuffer(        //
+	    r->cmd,                        //
+	    image,                         //
+	    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	    buffer->buffer,
+	    ARRAY_SIZE(copies),
+	    copies);
+
+	vk->vkCmdPipelineBarrier(          //
+	    r->cmd,                        //
+	    VK_PIPELINE_STAGE_TRANSFER_BIT,
+	    VK_PIPELINE_STAGE_HOST_BIT,
+	    0,
+	    0,
+	    NULL,
+	    1,
+	    &buffer_barrier,
+	    0,
+	    NULL);
+
+	vk_cmd_image_barrier_gpu_locked(              //
+	    vk,                                       //
+	    r->cmd,                                   //
+	    image,                                    //
+	    VK_ACCESS_TRANSFER_READ_BIT,              //
+	    VK_ACCESS_SHADER_READ_BIT,                //
+	    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,     //
+	    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, //
+	    subresource_range);                       //
+
+	r->apple_source_debug.image_indices[swapchain_index] = image_index;
+	r->apple_source_debug.active_view_mask |= (1u << swapchain_index);
+	r->apple_source_debug.pending = true;
+}
+#endif
+
 
 static inline uint32_t
 xrt_layer_to_cs_layer_type(const struct xrt_layer_data *data)
@@ -487,6 +615,10 @@ crc_distortion_fast_path(struct render_compute *render,
 		struct xrt_pose world_pose_scanout_end;
 		uint32_t array_index = vds[i]->sub.array_index;
 		const struct comp_swapchain_image *image = get_layer_image(layer, i, vds[i]->sub.image_index);
+
+#ifdef XRT_OS_OSX
+		cmd_sample_projection_source_image(render, layer, i, vds[i]->sub.image_index, array_index);
+#endif
 
 		// Gather data.
 		src_image_view = get_image_view(image, data->flags, array_index);

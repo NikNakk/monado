@@ -549,6 +549,18 @@ struct render_resources
 		//! Whether distortion images have been pre-rotated 90 degrees.
 		bool pre_rotated;
 	} distortion;
+
+#ifdef XRT_OS_OSX
+	struct
+	{
+		struct render_buffer buffers[XRT_MAX_VIEWS];
+		uint64_t frame_id;
+		uint32_t image_indices[XRT_MAX_VIEWS];
+		uint32_t active_view_mask;
+		bool pending;
+		uint64_t log_count;
+	} apple_source_debug;
+#endif
 };
 
 /*!
