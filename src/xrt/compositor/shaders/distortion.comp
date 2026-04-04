@@ -125,15 +125,15 @@ void main()
 	g_uv = transform_uv(g_uv, iz);
 	b_uv = transform_uv(b_uv, iz);
 
-	// Sample the source with distorted and chromatic-aberration corrected samples.
+	// Preserve source alpha instead of forcing the compositor target opaque.
 	vec4 colour = vec4(              //
 	    texture(source[iz], r_uv).r, //
 	    texture(source[iz], g_uv).g, //
 	    texture(source[iz], b_uv).b, //
-	    1);                          //
+	    texture(source[iz], g_uv).a); //
 
 	// Do colour correction here since there are no automatic conversion in hardware available.
-	colour = vec4(from_linear_to_srgb(colour.rgb), 1);
+	colour = vec4(from_linear_to_srgb(colour.rgb), colour.a);
 
 	imageStore(target, ivec3(offset.x + ix, offset.y + iy, int(iz)), colour);
 }
