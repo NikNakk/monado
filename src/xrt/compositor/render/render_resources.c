@@ -298,6 +298,7 @@ struct compute_distortion_params
 {
 	uint32_t distortion_texel_count;
 	VkBool32 do_timewarp;
+	VkBool32 use_identity_distortion;
 };
 
 XRT_CHECK_RESULT static VkResult
@@ -353,9 +354,10 @@ create_compute_distortion_pipeline(struct vk_bundle *vk,
 	    sizeof(params->FIELD),                                                                                     \
 	}
 
-	VkSpecializationMapEntry entries[2] = {
+	VkSpecializationMapEntry entries[3] = {
 	    ENTRY(0, distortion_texel_count),
 	    ENTRY(1, do_timewarp),
+	    ENTRY(2, use_identity_distortion),
 	};
 #undef ENTRY
 
@@ -986,6 +988,9 @@ render_resources_init(struct render_resources *r,
 	struct compute_distortion_params distortion_params = {
 	    .distortion_texel_count = RENDER_DISTORTION_IMAGE_DIMENSIONS,
 	    .do_timewarp = false,
+	    .use_identity_distortion = (xdev->hmd->distortion.models & XRT_DISTORTION_MODEL_NONE) != 0 &&
+	                               (xdev->hmd->distortion.models & XRT_DISTORTION_MODEL_COMPUTE) == 0 &&
+	                               xdev->compute_distortion == NULL,
 	};
 
 	ret = create_compute_distortion_pipeline(  //
@@ -1002,6 +1007,7 @@ render_resources_init(struct render_resources *r,
 	struct compute_distortion_params distortion_timewarp_params = {
 	    .distortion_texel_count = RENDER_DISTORTION_IMAGE_DIMENSIONS,
 	    .do_timewarp = true,
+	    .use_identity_distortion = distortion_params.use_identity_distortion,
 	};
 
 	ret = create_compute_distortion_pipeline(      //
