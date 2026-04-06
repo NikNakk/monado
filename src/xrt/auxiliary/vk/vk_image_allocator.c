@@ -174,27 +174,34 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	} while (false)
 
 	/*
+	 * Keep pNext chain nodes alive for the whole function. Using block-scoped
+	 * structs here is undefined behaviour once their enclosing block ends,
+	 * even if the call site is only a few lines later.
+	 */
+	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
+	};
+
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	VkExportMetalObjectCreateInfoEXT export_metal_object_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+	    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_IOSURFACE_BIT_EXT,
+	};
+#endif
+
+	/*
 	 * Create the image.
 	 */
 
 	VkExternalMemoryHandleTypeFlags memory_handle_type = 0;
 	if (use_external_memory_handles()) {
 		memory_handle_type = get_image_memory_handle_type();
-
-		VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
-		    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,
-		    .handleTypes = memory_handle_type,
-		    .pNext = next_chain,
-		};
+		external_memory_image_create_info.handleTypes = memory_handle_type;
 		CHAIN(external_memory_image_create_info);
 	}
 
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 	if (vk->has_EXT_metal_objects) {
-		VkExportMetalObjectCreateInfoEXT export_metal_object_create_info = {
-		    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
-		    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_IOSURFACE_BIT_EXT,
-		};
 		CHAIN(export_metal_object_create_info);
 	}
 #endif
@@ -366,16 +373,16 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	    .image = image,
 	    .buffer = VK_NULL_HANDLE,
 	};
+	VkExportMemoryAllocateInfo export_alloc_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
+	};
 	if (use_dedicated_allocation) {
 		CHAIN(dedicated_memory_info);
 	}
 
 	// In->pNext
 	if (use_external_memory_handles()) {
-		VkExportMemoryAllocateInfo export_alloc_info = {
-		    .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO_KHR,
-		    .handleTypes = memory_handle_type,
-		};
+		export_alloc_info.handleTypes = memory_handle_type;
 		CHAIN(export_alloc_info);
 	}
 
