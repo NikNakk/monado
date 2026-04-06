@@ -1097,7 +1097,10 @@ dispatch_compute(struct comp_renderer *r,
 
 	// Target Vulkan resources..
 	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
-	VkImageView target_storage_view = r->c->target->images[r->acquired_buffer].view;
+	VkImageView target_storage_view = r->c->target->images[r->acquired_buffer].storage_view;
+	if (target_storage_view == VK_NULL_HANDLE) {
+		target_storage_view = r->c->target->images[r->acquired_buffer].view;
+	}
 
 	// Target view information.
 	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
