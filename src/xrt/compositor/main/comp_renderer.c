@@ -181,11 +181,11 @@ renderer_wait_queue_idle(struct comp_renderer *r)
 
 #ifdef XRT_OS_OSX
 	/*
-	 * On MoltenVK, synchronous queue-idle waits here can wedge WiVRn bring-up:
+	 * On macOS, synchronous queue-idle waits here can wedge WiVRn bring-up:
 	 * the compositor render thread blocks inside vkQueueWaitIdle while a client
 	 * swapchain-create path is trying to submit its own one-shot init work on
 	 * the same queue. These waits are only to quiet validation around resource
-	 * lifetime, so skip them on Apple during this port spike.
+	 * lifetime, so skip them on Apple for this compositor path.
 	 */
 	return;
 #endif

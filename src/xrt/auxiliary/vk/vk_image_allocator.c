@@ -72,8 +72,10 @@ static bool
 use_external_memory_handles(void)
 {
 #if defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
-	// macOS currently compiles through the FD handle path, but MoltenVK does not support FD-based image export.
-	// Allow native compositor allocations to proceed without external-memory export metadata.
+	// macOS can still compile through the FD handle path in some configurations,
+	// but the current Apple backend does not support exporting swapchain images
+	// through that handle type. Allow native compositor allocations to proceed
+	// without external-memory export metadata.
 	return false;
 #elif defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 	// The macOS graphics buffer handle model is now IOSurface-based, but Vulkan shared-image import/export is not
