@@ -335,6 +335,10 @@ render_sub_alloc_ubo_alloc_and_write(struct vk_bundle *vk,
  */
 struct render_resources
 {
+#ifndef RENDER_FOVEATION_BUFFER_DIMENSIONS
+#define RENDER_FOVEATION_BUFFER_DIMENSIONS (4096 + 1)
+#endif
+
 	//! The count of views that we are rendering to.
 	uint32_t view_count;
 
@@ -524,6 +528,12 @@ struct render_resources
 
 	struct
 	{
+		//! Temporary WiVRn compatibility handle until the foveation path is ported.
+		VkBuffer buffer;
+
+		//! Temporary WiVRn compatibility memory handle until the foveation path is ported.
+		VkDeviceMemory device_memory;
+
 		//! Transform to go from UV to tangle angles.
 		struct xrt_normalized_rect uv_to_tanangle[XRT_MAX_VIEWS];
 
@@ -1313,6 +1323,17 @@ struct render_compute_distortion_ubo_data
 	struct xrt_normalized_rect post_transforms[XRT_MAX_VIEWS];
 	struct xrt_matrix_4x4 transform_timewarp_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_matrix_4x4 transform_timewarp_scanout_end[XRT_MAX_VIEWS];
+};
+
+/*!
+ * Temporary WiVRn compatibility UBO layout until the foveation path is ported.
+ *
+ * @relates render_compute
+ */
+struct render_compute_distortion_foveation_data
+{
+	uint32_t x[XRT_MAX_VIEWS * RENDER_FOVEATION_BUFFER_DIMENSIONS];
+	uint32_t y[XRT_MAX_VIEWS * RENDER_FOVEATION_BUFFER_DIMENSIONS];
 };
 
 /*!
