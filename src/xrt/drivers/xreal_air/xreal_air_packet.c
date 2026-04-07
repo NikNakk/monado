@@ -11,7 +11,11 @@
 
 #include "xreal_air_hmd.h"
 
+#ifdef CJSON_HIDE_SYMBOLS
+#include "../../../external/cjson/cjson/cJSON.h"
+#else
 #include <cjson/cJSON.h>
+#endif
 #include <string.h>
 
 
