@@ -74,6 +74,12 @@ destroy_image_views(struct comp_target_swapchain *cts)
 	struct vk_bundle *vk = get_vk(cts);
 
 	for (uint32_t i = 0; i < cts->base.image_count; i++) {
+		if (cts->base.images[i].storage_view != VK_NULL_HANDLE &&
+		    cts->base.images[i].storage_view != cts->base.images[i].view) {
+			vk->vkDestroyImageView(vk->device, cts->base.images[i].storage_view, NULL);
+			cts->base.images[i].storage_view = VK_NULL_HANDLE;
+		}
+
 		if (cts->base.images[i].view == VK_NULL_HANDLE) {
 			continue;
 		}
@@ -130,6 +136,7 @@ create_image_views(struct comp_target_swapchain *cts)
 		    subresource_range,          // subresource_range
 		    &cts->base.images[i].view); // out_view
 
+		cts->base.images[i].storage_view = cts->base.images[i].view;
 
 		VK_NAME_IMAGE_VIEW(vk, cts->base.images[i].view, "comp_target_swapchain image view");
 	}

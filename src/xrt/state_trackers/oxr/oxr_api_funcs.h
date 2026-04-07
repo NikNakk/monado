@@ -191,6 +191,14 @@ oxr_xrGetOpenGLESGraphicsRequirementsKHR(XrInstance instance,
                                          XrGraphicsRequirementsOpenGLESKHR *graphicsRequirements);
 #endif
 
+#ifdef XR_USE_GRAPHICS_API_METAL
+//! OpenXR API function @ep{xrGetMetalGraphicsRequirementsKHR}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetMetalGraphicsRequirementsKHR(XrInstance instance,
+                                      XrSystemId systemId,
+                                      XrGraphicsRequirementsMetalKHR *graphicsRequirements);
+#endif
+
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 //! OpenXR API function @ep{xrGetVulkanInstanceExtensionsKHR}
 XRAPI_ATTR XrResult XRAPI_CALL

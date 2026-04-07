@@ -147,6 +147,7 @@ target_create_images(struct comp_target *ct,
 	// Share the Vulkan handles of images and image views.
 	for (uint32_t i = 0; i < COMP_SCRATCH_NUM_IMAGES; i++) {
 		dit->images[i].handle = dit->target.images[i].image;
+		dit->images[i].storage_view = dit->target.images[i].unorm_view;
 		if (use_unorm) {
 			dit->images[i].view = dit->target.images[i].unorm_view;
 		}

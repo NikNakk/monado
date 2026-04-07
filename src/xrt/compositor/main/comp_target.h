@@ -63,6 +63,8 @@ struct comp_target_image
 {
 	VkImage handle;
 	VkImageView view;
+	//! Direct-value/storage view, falls back to @ref view when no split is needed.
+	VkImageView storage_view;
 	//! Temporary WiVRn compatibility field until the CbCr target path is ported.
 	VkImageView view_cbcr;
 };

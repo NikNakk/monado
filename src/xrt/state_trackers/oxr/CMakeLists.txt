@@ -102,6 +102,11 @@ if(XRT_HAVE_VULKAN)
 	target_link_libraries(st_oxr PUBLIC aux_vk)
 endif()
 
+if(APPLE)
+	target_sources(st_oxr PRIVATE oxr_metal.m oxr_session_gfx_metal.c oxr_swapchain_metal.c)
+	target_link_libraries(st_oxr PRIVATE "-framework Metal")
+endif()
+
 if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
 	target_sources(st_oxr PRIVATE oxr_swapchain_gl.c)
 	target_link_libraries(st_oxr PUBLIC aux_ogl)

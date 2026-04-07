@@ -514,6 +514,15 @@ oxr_verify_XrSessionCreateInfo(struct oxr_logger *log,
 	}
 #endif // defined(OXR_HAVE_KHR_opengl_enable) && defined(XR_USE_PLATFORM_WIN32)
 
+#if defined(OXR_HAVE_KHR_metal_enable)
+	XrGraphicsBindingMetalKHR const *metal =
+	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_GRAPHICS_BINDING_METAL_KHR, XrGraphicsBindingMetalKHR);
+	if (metal != NULL) {
+		OXR_VERIFY_EXTENSION(log, inst, KHR_metal_enable);
+		return oxr_verify_XrGraphicsBindingMetalKHR(log, metal);
+	}
+#endif // defined(OXR_HAVE_KHR_metal_enable)
+
 #if defined(OXR_HAVE_KHR_vulkan_enable) || defined(OXR_HAVE_KHR_vulkan_enable2)
 	/* XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR aliased to
 	 * XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR */
@@ -646,6 +655,25 @@ oxr_verify_XrGraphicsBindingOpenGLWin32KHR(struct oxr_logger *log, const XrGraph
 }
 
 #endif // defined(XR_USE_PLATFORM_WIN32) && defined(XR_USE_GRAPHICS_API_OPENGL)
+
+#ifdef XR_USE_GRAPHICS_API_METAL
+
+XrResult
+oxr_verify_XrGraphicsBindingMetalKHR(struct oxr_logger *log, const XrGraphicsBindingMetalKHR *next)
+{
+	if (next->type != XR_TYPE_GRAPHICS_BINDING_METAL_KHR) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, "Graphics binding has invalid type");
+	}
+
+	if (next->commandQueue == NULL) {
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "XrGraphicsBindingMetalKHR::commandQueue cannot be NULL");
+	}
+
+	return XR_SUCCESS;
+}
+
+#endif // XR_USE_GRAPHICS_API_METAL
 
 
 #ifdef XR_USE_GRAPHICS_API_VULKAN

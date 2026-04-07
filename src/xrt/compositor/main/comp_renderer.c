@@ -53,6 +53,7 @@
 #include <math.h>
 
 DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_WARN)
+DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
 /*
@@ -177,6 +178,17 @@ renderer_wait_queue_idle(struct comp_renderer *r)
 {
 	COMP_TRACE_MARKER();
 	struct vk_bundle *vk = &r->c->base.vk;
+
+#ifdef XRT_OS_OSX
+	/*
+	 * On macOS, synchronous queue-idle waits here can wedge WiVRn bring-up:
+	 * the compositor render thread blocks inside vkQueueWaitIdle while a client
+	 * swapchain-create path is trying to submit its own one-shot init work on
+	 * the same queue. These waits are only to quiet validation around resource
+	 * lifetime, so skip them on Apple for this compositor path.
+	 */
+	return;
+#endif
 
 	vk_queue_lock(vk->main_queue);
 	vk->vkQueueWaitIdle(vk->main_queue->queue);
@@ -647,6 +659,67 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 		COMP_ERROR(r->c, "vkWaitForFences: %s", vk_result_string(ret));
 	}
 
+#ifdef XRT_OS_OSX
+	if (r->c->nr.apple_source_debug.pending) {
+		if (debug_get_bool_option_log_apple_samples()) {
+			r->c->nr.apple_source_debug.log_count++;
+		}
+		if (debug_get_bool_option_log_apple_samples() &&
+		    (r->c->nr.apple_source_debug.log_count <= 5 || r->c->nr.apple_source_debug.log_count % 120 == 0)) {
+			for (uint32_t i = 0; i < r->c->nr.view_count; ++i) {
+				if ((r->c->nr.apple_source_debug.active_view_mask & (1u << i)) == 0) {
+					continue;
+				}
+
+				const uint8_t *sample = r->c->nr.apple_source_debug.buffers[i].mapped;
+				fprintf(stderr,
+				        "vk-source frame=%lld eye=%u image=%u rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)\n",
+				        (long long)r->c->nr.apple_source_debug.frame_id,
+				        i,
+				        r->c->nr.apple_source_debug.image_indices[i],
+				        (unsigned)sample[0],
+				        (unsigned)sample[1],
+				        (unsigned)sample[2],
+				        (unsigned)sample[3],
+				        (unsigned)sample[4],
+				        (unsigned)sample[5],
+				        (unsigned)sample[6],
+				        (unsigned)sample[7]);
+			}
+		}
+
+		r->c->nr.apple_source_debug.pending = false;
+		r->c->nr.apple_source_debug.active_view_mask = 0;
+	}
+
+	if (r->c->nr.apple_target_debug.pending) {
+		if (debug_get_bool_option_log_apple_samples()) {
+			r->c->nr.apple_target_debug.log_count++;
+		}
+		if (debug_get_bool_option_log_apple_samples() &&
+		    (r->c->nr.apple_target_debug.log_count <= 5 || r->c->nr.apple_target_debug.log_count % 120 == 0)) {
+			const uint8_t *sample = r->c->nr.apple_target_debug.buffer.mapped;
+			fprintf(stderr,
+			        "vk-target frame=%lld layer=0 rgbaL=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u) rgbaR=(%u,%u,%u,%u)\n",
+			        (long long)r->c->nr.apple_target_debug.frame_id,
+			        (unsigned)sample[0],
+			        (unsigned)sample[1],
+			        (unsigned)sample[2],
+			        (unsigned)sample[3],
+			        (unsigned)sample[4],
+			        (unsigned)sample[5],
+			        (unsigned)sample[6],
+			        (unsigned)sample[7],
+			        (unsigned)sample[8],
+			        (unsigned)sample[9],
+			        (unsigned)sample[10],
+			        (unsigned)sample[11]);
+		}
+
+		r->c->nr.apple_target_debug.pending = false;
+	}
+#endif
+
 	r->fenced_buffer = -1;
 }
 
@@ -991,6 +1064,15 @@ dispatch_compute(struct comp_renderer *r,
 	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
 	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
+	calc_pose_data(                //
+	    r,                         //
+	    fov_source,                //
+	    fovs,                      //
+	    world_poses_scanout_begin, //
+	    world_poses_scanout_end,   //
+	    eye_poses,                 //
+	    render->r->view_count);    //
+
 	if (!c->base.frame_params.one_projection_layer_fast_path) {
 		struct comp_layer *proj_layer = get_projection_layer(&c->base.layer_accum);
 		int64_t predicted_display_time_ns = c->frame.rendering.predicted_display_time_ns;
@@ -1010,21 +1092,15 @@ dispatch_compute(struct comp_renderer *r,
 				c->base.frame_params.fovs[view] = data[view].fov;
 				c->base.frame_params.poses[view] = data[view].pose;
 			}
-		} else {
-			calc_pose_data(                //
-			    r,                         //
-			    fov_source,                //
-			    fovs,                      //
-			    world_poses_scanout_begin, //
-			    world_poses_scanout_end,   //
-			    eye_poses,                 //
-			    render->r->view_count);    //
 		}
 	}
 
 	// Target Vulkan resources..
 	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
-	VkImageView target_storage_view = r->c->target->images[r->acquired_buffer].view;
+	VkImageView target_storage_view = r->c->target->images[r->acquired_buffer].storage_view;
+	if (target_storage_view == VK_NULL_HANDLE) {
+		target_storage_view = r->c->target->images[r->acquired_buffer].view;
+	}
 
 	// Target view information.
 	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
@@ -1106,6 +1182,15 @@ comp_renderer_draw(struct comp_renderer *r)
 	bool fast_path = c->base.frame_params.one_projection_layer_fast_path;
 	bool do_timewarp = !c->debug.atw_off;
 
+#ifdef XRT_OS_OSX
+	// On the WiVRn path the Quest client applies its own ATW.
+	// The WiVRn foveation patch (0005) removes server timewarp entirely,
+	// but that patch is not applied to this fork. Disable unconditionally
+	// to avoid double-timewarp (server + client) which causes roll/pitch
+	// axis confusion.
+	do_timewarp = false;
+#endif
+
 	// Consistency check.
 	assert(!fast_path || c->base.layer_accum.layer_count >= 1);
 
@@ -1122,6 +1207,11 @@ comp_renderer_draw(struct comp_renderer *r)
 	bool use_compute = r->settings->use_compute;
 	struct render_gfx render_g = {0};
 	struct render_compute render_c = {0};
+
+#ifdef XRT_OS_OSX
+	c->nr.apple_source_debug.frame_id = c->frame.rendering.id;
+	c->nr.apple_target_debug.frame_id = c->frame.rendering.id;
+#endif
 
 	VkResult res = VK_SUCCESS;
 	if (use_compute) {

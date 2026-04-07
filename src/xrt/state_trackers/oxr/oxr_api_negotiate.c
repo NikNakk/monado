@@ -358,6 +358,10 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 		return XR_ERROR_FUNCTION_UNSUPPORTED;
 	}
 
+#ifdef OXR_HAVE_KHR_metal_enable
+	ENTRY_IF_EXT(xrGetMetalGraphicsRequirementsKHR, KHR_metal_enable);
+#endif // OXR_HAVE_KHR_metal_enable
+
 #ifdef OXR_HAVE_KHR_visibility_mask
 	ENTRY_IF_EXT(xrGetVisibilityMaskKHR, KHR_visibility_mask);
 #endif // OXR_HAVE_KHR_visibility_mask

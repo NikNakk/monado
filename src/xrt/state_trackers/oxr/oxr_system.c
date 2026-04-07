@@ -271,6 +271,10 @@ oxr_system_fill_in(
 	U_ZERO(&(sys->suggested_d3d_luid));
 	sys->suggested_d3d_luid_valid = false;
 #endif
+#ifdef XR_USE_GRAPHICS_API_METAL
+	sys->suggested_metal_device = NULL;
+	sys->suggested_metal_device_valid = false;
+#endif
 
 	if (sys->xsysc != NULL) {
 		const struct xrt_system_compositor_info *info = &sys->xsysc->info;

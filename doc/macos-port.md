@@ -169,6 +169,20 @@ The branch now also reaches the first service-backed graphics submit on macOS:
   the `IOSurface` import/export path trips Metal validation on
   `MTLTextureType2DArray`, so the first real macOS remote-render path should be
   treated as per-eye 2D swapchains, not a Vulkan-style stereo array image
+- for that temporary per-eye validation path, the probe-side clear helper is
+  now intentionally simple:
+  `clear_swapchain_image()` uses layout barriers plus `vkCmdClearColorImage`
+  and bounded fence waits instead of the older render-pass/framebuffer/readback
+  path that was wedging on MoltenVK
+- a fresh local rerun with rebuilt WiVRn artifacts in `/tmp` also showed that
+  this path needed a real headset/client handshake before the new clear logic
+  could be judged
+- an ADB-assisted rerun now provides that handshake:
+  `wivrn-server-headless` reaches `Initial headset handshake completed`, the
+  probe reaches `clear_swapchain_image()`, and the current first explicit
+  failure is the bounded `clear_swapchain_image(submit)` fence timeout
+- after that timeout is reported, the same probe still hangs during cleanup in
+  `vkDeviceWaitIdle()` on MoltenVK
 
 The branch now also validates the first host-side remote-HMD stub path on
 macOS:

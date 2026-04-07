@@ -472,6 +472,11 @@ oxr_verify_XrGraphicsBindingOpenGLWin32KHR(struct oxr_logger * /*log*/,
                                            const XrGraphicsBindingOpenGLWin32KHR * /*next*/);
 #endif // defined(XR_USE_PLATFORM_WIN32) && defined(XR_USE_GRAPHICS_API_OPENGL)
 
+#if defined(XR_USE_GRAPHICS_API_METAL)
+XrResult
+oxr_verify_XrGraphicsBindingMetalKHR(struct oxr_logger * /*log*/, const XrGraphicsBindingMetalKHR * /*next*/);
+#endif // defined(XR_USE_GRAPHICS_API_METAL)
+
 #if defined(XR_USE_GRAPHICS_API_VULKAN)
 XrResult
 oxr_verify_XrGraphicsBindingVulkanKHR(struct oxr_logger * /*log*/, const XrGraphicsBindingVulkanKHR * /*next*/);

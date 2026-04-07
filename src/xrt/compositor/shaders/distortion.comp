@@ -13,12 +13,14 @@ layout(constant_id = 0) const int distortion_texel_count = 2;
 
 // Should we do timewarp.
 layout(constant_id = 1) const bool do_timewarp = false;
+// For NONE-distortion devices, bypass sampled distortion textures entirely.
+layout(constant_id = 2) const bool use_identity_distortion = false;
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0) uniform sampler2D source[2];
 layout(set = 0, binding = 1) uniform sampler2D distortion[6];
-layout(set = 0, binding = 2) uniform writeonly restrict image2D target;
+layout(set = 0, binding = 2) uniform writeonly restrict image2DArray target;
 layout(set = 0, binding = 3, std140) uniform restrict Config
 {
 	ivec4 views[2];
@@ -29,7 +31,7 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 }ubo;
 
 
-vec2 position_to_uv(ivec2 extent, uint ix, uint iy)
+vec2 position_to_subimage_uv(ivec2 extent, uint ix, uint iy)
 {
 	// Turn the index into floating point.
 	vec2 xy = vec2(float(ix), float(iy));
@@ -38,10 +40,17 @@ vec2 position_to_uv(ivec2 extent, uint ix, uint iy)
 	vec2 extent_pixel_size = vec2(1.0 / float(extent.x), 1.0 / float(extent.y));
 
 	// Per-target pixel we move the size of the pixels.
-	vec2 dist_uv = xy * extent_pixel_size;
+	vec2 uv = xy * extent_pixel_size;
 
 	// Emulate a triangle sample position by offset half target pixel size.
-	dist_uv = dist_uv + extent_pixel_size / 2.0;
+	uv = uv + extent_pixel_size / 2.0;
+
+	return uv;
+}
+
+vec2 position_to_distortion_uv(ivec2 extent, uint ix, uint iy)
+{
+	vec2 dist_uv = position_to_subimage_uv(extent, ix, iy);
 
 
 	// To correctly sample we need to put position (0, 0) in the
@@ -114,26 +123,27 @@ void main()
 		return;
 	}
 
-	vec2 dist_uv = position_to_uv(extent, ix, iy);
+	vec2 subimage_uv = position_to_subimage_uv(extent, ix, iy);
+	vec2 distortion_uv = position_to_distortion_uv(extent, ix, iy);
 
-	vec2 r_uv = texture(distortion[iz + 0], dist_uv).xy;
-	vec2 g_uv = texture(distortion[iz + 2], dist_uv).xy;
-	vec2 b_uv = texture(distortion[iz + 4], dist_uv).xy;
+	vec2 r_uv = use_identity_distortion ? subimage_uv : texture(distortion[iz + 0], distortion_uv).xy;
+	vec2 g_uv = use_identity_distortion ? subimage_uv : texture(distortion[iz + 2], distortion_uv).xy;
+	vec2 b_uv = use_identity_distortion ? subimage_uv : texture(distortion[iz + 4], distortion_uv).xy;
 
 	// Do any transformation needed.
 	r_uv = transform_uv(r_uv, iz);
 	g_uv = transform_uv(g_uv, iz);
 	b_uv = transform_uv(b_uv, iz);
 
-	// Sample the source with distorted and chromatic-aberration corrected samples.
+	// Preserve source alpha instead of forcing the compositor target opaque.
 	vec4 colour = vec4(              //
 	    texture(source[iz], r_uv).r, //
 	    texture(source[iz], g_uv).g, //
 	    texture(source[iz], b_uv).b, //
-	    1);                          //
+	    texture(source[iz], g_uv).a); //
 
 	// Do colour correction here since there are no automatic conversion in hardware available.
-	colour = vec4(from_linear_to_srgb(colour.rgb), 1);
+	colour = vec4(from_linear_to_srgb(colour.rgb), colour.a);
 
-	imageStore(target, ivec2(offset.x + ix, offset.y + iy), colour);
+	imageStore(target, ivec3(offset.x + ix, offset.y + iy, int(iz)), colour);
 }

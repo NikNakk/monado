@@ -298,6 +298,7 @@ struct compute_distortion_params
 {
 	uint32_t distortion_texel_count;
 	VkBool32 do_timewarp;
+	VkBool32 use_identity_distortion;
 };
 
 XRT_CHECK_RESULT static VkResult
@@ -353,9 +354,10 @@ create_compute_distortion_pipeline(struct vk_bundle *vk,
 	    sizeof(params->FIELD),                                                                                     \
 	}
 
-	VkSpecializationMapEntry entries[2] = {
+	VkSpecializationMapEntry entries[3] = {
 	    ENTRY(0, distortion_texel_count),
 	    ENTRY(1, do_timewarp),
+	    ENTRY(2, use_identity_distortion),
 	};
 #undef ENTRY
 
@@ -528,6 +530,9 @@ render_resources_init(struct render_resources *r,
 	r->mesh.src_binding = 0;
 	r->mesh.ubo_binding = 1;
 	struct xrt_hmd_parts *parts = xdev->hmd;
+	for (uint32_t i = 0; i < r->view_count; ++i) {
+		render_calc_uv_to_tangent_lengths_rect(&parts->distortion.fov[i], &r->distortion.uv_to_tanangle[i]);
+	}
 	r->mesh.vertex_count = parts->distortion.mesh.vertex_count;
 	r->mesh.stride = parts->distortion.mesh.stride;
 	r->mesh.index_count_total = parts->distortion.mesh.index_count_total;
@@ -600,6 +605,36 @@ render_resources_init(struct render_resources *r,
 	VK_CHK_WITH_RET(ret, "vkCreateCommandPool", false);
 
 	VK_NAME_COMMAND_POOL(vk, r->cmd_pool, "render_resources command pool");
+
+#ifdef XRT_OS_OSX
+	for (uint32_t i = 0; i < r->view_count; ++i) {
+		ret = render_buffer_init(                      //
+		    vk,                                       //
+		    &r->apple_source_debug.buffers[i],        //
+		    VK_BUFFER_USAGE_TRANSFER_DST_BIT,         //
+		    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |     //
+		        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+		        VK_MEMORY_PROPERTY_HOST_CACHED_BIT,   //
+		    8);                                       //
+		VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+
+		ret = render_buffer_map(vk, &r->apple_source_debug.buffers[i]);
+		VK_CHK_WITH_RET(ret, "render_buffer_map", false);
+	}
+
+	ret = render_buffer_init(                      //
+	    vk,                                       //
+	    &r->apple_target_debug.buffer,            //
+	    VK_BUFFER_USAGE_TRANSFER_DST_BIT,         //
+	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |     //
+	        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+	        VK_MEMORY_PROPERTY_HOST_CACHED_BIT,   //
+	    12);                                      //
+	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+
+	ret = render_buffer_map(vk, &r->apple_target_debug.buffer);
+	VK_CHK_WITH_RET(ret, "render_buffer_map", false);
+#endif
 
 
 	/*
@@ -953,6 +988,9 @@ render_resources_init(struct render_resources *r,
 	struct compute_distortion_params distortion_params = {
 	    .distortion_texel_count = RENDER_DISTORTION_IMAGE_DIMENSIONS,
 	    .do_timewarp = false,
+	    .use_identity_distortion = (xdev->hmd->distortion.models & XRT_DISTORTION_MODEL_NONE) != 0 &&
+	                               (xdev->hmd->distortion.models & XRT_DISTORTION_MODEL_COMPUTE) == 0 &&
+	                               xdev->compute_distortion == NULL,
 	};
 
 	ret = create_compute_distortion_pipeline(  //
@@ -969,6 +1007,7 @@ render_resources_init(struct render_resources *r,
 	struct compute_distortion_params distortion_timewarp_params = {
 	    .distortion_texel_count = RENDER_DISTORTION_IMAGE_DIMENSIONS,
 	    .do_timewarp = true,
+	    .use_identity_distortion = distortion_params.use_identity_distortion,
 	};
 
 	ret = create_compute_distortion_pipeline(      //
@@ -1085,6 +1124,14 @@ render_resources_fini(struct render_resources *r)
 	}
 
 	struct vk_bundle *vk = r->vk;
+
+#ifdef XRT_OS_OSX
+	for (uint32_t i = 0; i < r->view_count; ++i) {
+		render_buffer_fini(vk, &r->apple_source_debug.buffers[i]);
+	}
+
+	render_buffer_fini(vk, &r->apple_target_debug.buffer);
+#endif
 
 	D(Sampler, r->samplers.mock);
 	D(Sampler, r->samplers.repeat);

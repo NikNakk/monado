@@ -10,10 +10,18 @@
 #include "math/m_api.h"
 #include "math/m_matrix_4x4_f64.h"
 
+#include "util/u_debug.h"
+
 #include "vk/vk_mini_helpers.h"
 
 #include "render/render_interface.h"
 
+#include <stdio.h>
+
+
+DEBUG_GET_ONCE_BOOL_OPTION(log_timewarp_inputs, "XRT_COMPOSITOR_LOG_TIMEWARP_INPUTS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_IDENTITY", false)
+DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_PRETRANSFORM_IDENTITY", false)
 
 /*
  *
@@ -71,6 +79,91 @@ calc_dispatch_dims_views(const struct render_viewport_data views[XRT_MAX_VIEWS],
 
 	*out_w = w;
 	*out_h = h;
+}
+
+static struct xrt_normalized_rect
+timewarp_identity_pre_transform(void)
+{
+	return (struct xrt_normalized_rect){
+	    .x = 0.0f,
+	    .y = 0.0f,
+	    .w = 1.0f,
+	    .h = 1.0f,
+	};
+}
+
+static void
+maybe_log_timewarp_inputs(uint64_t frame_id,
+                          uint32_t eye,
+                          const struct xrt_fov *fov,
+                          const struct xrt_pose *src_pose,
+                          const struct xrt_pose *new_pose,
+                          const struct xrt_normalized_rect *pre_transform,
+                          const struct xrt_normalized_rect *post_transform,
+                          const struct xrt_matrix_4x4 *begin,
+                          const struct xrt_matrix_4x4 *end)
+{
+	if (!debug_get_bool_option_log_timewarp_inputs()) {
+		return;
+	}
+
+	static uint64_t log_count = 0;
+	log_count++;
+	if (log_count > 10 && log_count % 120 != 0) {
+		return;
+	}
+
+	fprintf(stderr,
+	        "atw-input frame=%llu eye=%u fov=(%.5f,%.5f,%.5f,%.5f) "
+	        "src-orient=(%.5f,%.5f,%.5f,%.5f) src-pos=(%.5f,%.5f,%.5f) "
+	        "new-orient=(%.5f,%.5f,%.5f,%.5f) new-pos=(%.5f,%.5f,%.5f) "
+	        "pre=(%.5f,%.5f,%.5f,%.5f) post=(%.5f,%.5f,%.5f,%.5f) "
+	        "begin0=(%.5f,%.5f,%.5f,%.5f) begin1=(%.5f,%.5f,%.5f,%.5f) "
+	        "end0=(%.5f,%.5f,%.5f,%.5f) end1=(%.5f,%.5f,%.5f,%.5f)\n",
+	        (unsigned long long)frame_id,
+	        eye,
+	        fov->angle_left,
+	        fov->angle_right,
+	        fov->angle_up,
+	        fov->angle_down,
+	        src_pose->orientation.x,
+	        src_pose->orientation.y,
+	        src_pose->orientation.z,
+	        src_pose->orientation.w,
+	        src_pose->position.x,
+	        src_pose->position.y,
+	        src_pose->position.z,
+	        new_pose->orientation.x,
+	        new_pose->orientation.y,
+	        new_pose->orientation.z,
+	        new_pose->orientation.w,
+	        new_pose->position.x,
+	        new_pose->position.y,
+	        new_pose->position.z,
+	        pre_transform->x,
+	        pre_transform->y,
+	        pre_transform->w,
+	        pre_transform->h,
+	        post_transform->x,
+	        post_transform->y,
+	        post_transform->w,
+	        post_transform->h,
+	        begin->v[0],
+	        begin->v[1],
+	        begin->v[2],
+	        begin->v[3],
+	        begin->v[4],
+	        begin->v[5],
+	        begin->v[6],
+	        begin->v[7],
+	        end->v[0],
+	        end->v[1],
+	        end->v[2],
+	        end->v[3],
+	        end->v[4],
+	        end->v[5],
+	        end->v[6],
+	        end->v[7]);
 }
 
 
@@ -376,6 +469,126 @@ dispatch_project_pipeline(struct render_compute *render,
 	    h,             // groupCountY
 	    2);            // groupCountZ
 
+#ifdef XRT_OS_OSX
+	{
+		struct render_buffer *buffer = &r->apple_target_debug.buffer;
+		if (buffer->buffer != VK_NULL_HANDLE) {
+			uint32_t target_width = 0;
+			uint32_t target_height = 0;
+			for (uint32_t i = 0; i < render->r->view_count; ++i) {
+				target_width = target_width > views[i].x + views[i].w ? target_width : views[i].x + views[i].w;
+				target_height =
+				    target_height > views[i].y + views[i].h ? target_height : views[i].y + views[i].h;
+			}
+
+			if (target_width > 0 && target_height > 0) {
+				const uint32_t max_x = target_width - 1;
+				const uint32_t max_y = target_height - 1;
+				const int32_t quarter_x = (int32_t)(target_width / 4 < max_x ? target_width / 4 : max_x);
+				const int32_t center_x = (int32_t)(target_width / 2 < max_x ? target_width / 2 : max_x);
+				const int32_t right_x = (int32_t)(((target_width * 3) / 4) < max_x ? (target_width * 3) / 4 : max_x);
+				const int32_t sample_y = (int32_t)(target_height / 2 < max_y ? target_height / 2 : max_y);
+				const VkImageSubresourceRange target_subresource_range = {
+				    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				    .baseMipLevel = 0,
+				    .levelCount = 1,
+				    .baseArrayLayer = 0,
+				    .layerCount = 1,
+				};
+				const VkBufferImageCopy copies[3] = {
+				    {
+				        .bufferOffset = 0,
+				        .imageSubresource =
+				            {
+				                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				                .mipLevel = 0,
+				                .baseArrayLayer = 0,
+				                .layerCount = 1,
+				            },
+				        .imageOffset = {.x = quarter_x, .y = sample_y, .z = 0},
+				        .imageExtent = {.width = 1, .height = 1, .depth = 1},
+				    },
+				    {
+				        .bufferOffset = 4,
+				        .imageSubresource =
+				            {
+				                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				                .mipLevel = 0,
+				                .baseArrayLayer = 0,
+				                .layerCount = 1,
+				            },
+				        .imageOffset = {.x = center_x, .y = sample_y, .z = 0},
+				        .imageExtent = {.width = 1, .height = 1, .depth = 1},
+				    },
+				    {
+				        .bufferOffset = 8,
+				        .imageSubresource =
+				            {
+				                .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+				                .mipLevel = 0,
+				                .baseArrayLayer = 0,
+				                .layerCount = 1,
+				            },
+				        .imageOffset = {.x = right_x, .y = sample_y, .z = 0},
+				        .imageExtent = {.width = 1, .height = 1, .depth = 1},
+				    },
+				};
+				const VkBufferMemoryBarrier buffer_barrier = {
+				    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+				    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+				    .dstAccessMask = VK_ACCESS_HOST_READ_BIT,
+				    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				    .buffer = buffer->buffer,
+				    .offset = 0,
+				    .size = VK_WHOLE_SIZE,
+				};
+
+				vk_cmd_image_barrier_gpu_locked(          //
+				    vk,                                   //
+				    r->cmd,                               //
+				    target_image,                         //
+				    VK_ACCESS_SHADER_WRITE_BIT,           //
+				    VK_ACCESS_TRANSFER_READ_BIT,          //
+				    VK_IMAGE_LAYOUT_GENERAL,              //
+				    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, //
+				    target_subresource_range);            //
+
+				vk->vkCmdCopyImageToBuffer( //
+				    r->cmd,                  //
+				    target_image,            //
+				    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				    buffer->buffer,
+				    ARRAY_SIZE(copies),
+				    copies);
+
+				vk->vkCmdPipelineBarrier(          //
+				    r->cmd,                        //
+				    VK_PIPELINE_STAGE_TRANSFER_BIT,
+				    VK_PIPELINE_STAGE_HOST_BIT,
+				    0,
+				    0,
+				    NULL,
+				    1,
+				    &buffer_barrier,
+				    0,
+				    NULL);
+
+				vk_cmd_image_barrier_gpu_locked(      //
+				    vk,                                //
+				    r->cmd,                            //
+				    target_image,                      //
+				    VK_ACCESS_TRANSFER_READ_BIT,       //
+				    VK_ACCESS_MEMORY_READ_BIT,         //
+				    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,   //
+				    target_subresource_range);         //
+
+				r->apple_target_debug.pending = true;
+			}
+		}
+	}
+#else
 	VkImageMemoryBarrier memoryBarrier = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
 	    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
@@ -399,6 +612,7 @@ dispatch_project_pipeline(struct render_compute *render,
 	    NULL,                                 //
 	    1,                                    //
 	    &memoryBarrier);                      //
+#endif
 }
 
 
@@ -610,14 +824,31 @@ render_compute_projection_timewarp(struct render_compute *render,
 		    &time_warp_matrix_scanout_end[i]); //
 	}
 
+	const bool force_timewarp_identity = debug_get_bool_option_force_timewarp_identity();
+	const bool force_timewarp_pretransform_identity =
+	    debug_get_bool_option_force_timewarp_pretransform_identity();
+	const struct xrt_normalized_rect identity_pre_transform = timewarp_identity_pre_transform();
 	struct render_compute_distortion_ubo_data *data =
 	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
+		if (force_timewarp_identity) {
+			math_matrix_4x4_identity(&time_warp_matrix_scanout_begin[i]);
+			math_matrix_4x4_identity(&time_warp_matrix_scanout_end[i]);
+		}
+
 		data->views[i] = views[i];
-		data->pre_transforms[i] = r->distortion.uv_to_tanangle[i];
+		data->pre_transforms[i] =
+		    force_timewarp_pretransform_identity ? identity_pre_transform : r->distortion.uv_to_tanangle[i];
 		data->transform_timewarp_scanout_begin[i] = time_warp_matrix_scanout_begin[i];
 		data->transform_timewarp_scanout_end[i] = time_warp_matrix_scanout_end[i];
 		data->post_transforms[i] = src_norm_rects[i];
+
+#ifdef XRT_OS_OSX
+		maybe_log_timewarp_inputs(r->apple_target_debug.frame_id, i, &src_fovs[i], &src_poses[i],
+		                          &new_poses_scanout_begin[i], &data->pre_transforms[i],
+		                          &data->post_transforms[i], &data->transform_timewarp_scanout_begin[i],
+		                          &data->transform_timewarp_scanout_end[i]);
+#endif
 	}
 
 	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, target_image,
@@ -662,14 +893,31 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 		    &time_warp_matrix_scanout_end[i]); //
 	}
 
+	const bool force_timewarp_identity = debug_get_bool_option_force_timewarp_identity();
+	const bool force_timewarp_pretransform_identity =
+	    debug_get_bool_option_force_timewarp_pretransform_identity();
+	const struct xrt_normalized_rect identity_pre_transform = timewarp_identity_pre_transform();
 	struct render_compute_distortion_ubo_data *data =
 	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
+		if (force_timewarp_identity) {
+			math_matrix_4x4_identity(&time_warp_matrix_scanout_begin[i]);
+			math_matrix_4x4_identity(&time_warp_matrix_scanout_end[i]);
+		}
+
 		data->views[i] = views[i];
-		data->pre_transforms[i] = r->distortion.uv_to_tanangle[i];
+		data->pre_transforms[i] =
+		    force_timewarp_pretransform_identity ? identity_pre_transform : r->distortion.uv_to_tanangle[i];
 		data->transform_timewarp_scanout_begin[i] = time_warp_matrix_scanout_begin[i];
 		data->transform_timewarp_scanout_end[i] = time_warp_matrix_scanout_end[i];
 		data->post_transforms[i] = src_rects[i];
+
+#ifdef XRT_OS_OSX
+		maybe_log_timewarp_inputs(r->apple_target_debug.frame_id, i, &src_fovs[i], &new_poses_scanout_begin[i],
+		                          &new_poses_scanout_end[i], &data->pre_transforms[i],
+		                          &data->post_transforms[i], &data->transform_timewarp_scanout_begin[i],
+		                          &data->transform_timewarp_scanout_end[i]);
+#endif
 	}
 
 	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, target_image, target_image_view,

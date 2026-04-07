@@ -311,7 +311,9 @@ do_post_create_vulkan_setup(struct vk_bundle *vk,
 {
 	xrt_result_t xret = XRT_SUCCESS;
 	uint32_t image_count = sc->vkic.image_count;
+#ifndef XRT_OS_OSX
 	VkCommandBuffer cmd_buffer;
+#endif
 	VkResult ret;
 
 	VkComponentMapping no_alpha_components = {
@@ -388,6 +390,7 @@ do_post_create_vulkan_setup(struct vk_bundle *vk,
 	 *
 	 */
 
+#ifndef XRT_OS_OSX
 	// To reduce the pointer chasing.
 	struct vk_cmd_pool *pool = &sc->cscs->pool;
 
@@ -431,6 +434,7 @@ do_post_create_vulkan_setup(struct vk_bundle *vk,
 
 	// Check results from submit.
 	VK_CHK_WITH_GOTO(ret, "vk_cmd_pool_end_submit_wait_and_free_cmd_buffer_locked", error);
+#endif
 
 	// Init all of the threading objects.
 	for (uint32_t i = 0; i < image_count; i++) {
@@ -458,8 +462,10 @@ do_post_create_vulkan_setup(struct vk_bundle *vk,
 
 	return xret;
 
+#ifndef XRT_OS_OSX
 error_unlock:
 	vk_cmd_pool_unlock(pool);
+#endif
 error:
 	cleanup_post_create_vulkan_setup(vk, sc);
 

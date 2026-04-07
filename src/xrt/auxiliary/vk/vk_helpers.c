@@ -1437,7 +1437,7 @@ vk_create_sampler(struct vk_bundle *vk, VkSamplerAddressMode clamp_mode, VkSampl
 	    .addressModeU = clamp_mode,
 	    .addressModeV = clamp_mode,
 	    .addressModeW = clamp_mode,
-	    .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
+	    .borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
 	    .unnormalizedCoordinates = VK_FALSE,
 	};
 
