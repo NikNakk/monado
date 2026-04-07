@@ -35,7 +35,11 @@
 #endif
 
 
+#ifdef CJSON_HIDE_SYMBOLS
+#include "../../../external/cjson/cjson/cJSON.h"
+#else
 #include <cjson/cJSON.h>
+#endif
 
 DEBUG_GET_ONCE_LOG_OPTION(ht_log, "HT_LOG", U_LOGGING_WARN)
 

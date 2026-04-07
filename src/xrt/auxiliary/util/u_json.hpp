@@ -11,7 +11,11 @@
 
 #include "util/u_file.h"
 #include "util/u_debug.h"
+#ifdef CJSON_HIDE_SYMBOLS
+#include "../../../external/cjson/cjson/cJSON.h"
+#else
 #include "cjson/cJSON.h"
+#endif
 
 #include <cassert>
 #include <stack>

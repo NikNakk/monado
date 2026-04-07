@@ -13,7 +13,11 @@
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_defines.h"
 
+#ifdef CJSON_HIDE_SYMBOLS
+#include "../../../external/cjson/cjson/cJSON.h" // IWYU pragma: export
+#else
 #include <cjson/cJSON.h> // IWYU pragma: export
+#endif
 
 
 #ifdef __cplusplus
