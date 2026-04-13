@@ -457,7 +457,11 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 	free(props);
 
 	struct u_extension_list *device_extension_list = u_extension_list_builder_build(&device_extension_builder);
+#ifdef VK_EXT_METAL_OBJECTS_EXTENSION_NAME
 	bool metal_objects_enabled = u_extension_list_contains(device_extension_list, VK_EXT_METAL_OBJECTS_EXTENSION_NAME);
+#else
+	bool metal_objects_enabled = false;
+#endif
 
 	VkPhysicalDeviceFeatures2KHR physical_device_features = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR,
