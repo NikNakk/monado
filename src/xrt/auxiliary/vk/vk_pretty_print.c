@@ -109,6 +109,9 @@ vk_str_result_or_null(VkResult code)
 #ifdef VK_EXT_image_compression_control
 		ENUM_TO_STR(VK_ERROR_COMPRESSION_EXHAUSTED_EXT);
 #endif
+#ifdef VK_EXT_present_timing
+		ENUM_TO_STR(VK_ERROR_PRESENT_TIMING_QUEUE_FULL_EXT);
+#endif
 #if defined(VK_KHR_maintenance1) && !defined(VK_VERSION_1_1)
 		ENUM_TO_STR(VK_ERROR_OUT_OF_POOL_MEMORY_KHR);
 #endif
