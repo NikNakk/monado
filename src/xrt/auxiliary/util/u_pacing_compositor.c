@@ -395,6 +395,13 @@ adjust_comp_time(struct pacing_compositor *pc, struct frame *f)
 		// Back off the present time.
 		pc->comp_time_ns += pc->adjust_non_miss_ns;
 	}
+
+	// Clamp to [0, comp_time_max_ns].
+	if (pc->comp_time_ns > pc->comp_time_max_ns) {
+		pc->comp_time_ns = pc->comp_time_max_ns;
+	} else if (pc->comp_time_ns < 0) {
+		pc->comp_time_ns = 0;
+	}
 }
 
 
