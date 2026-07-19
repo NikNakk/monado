@@ -86,6 +86,24 @@ destroy_old(struct comp_target_swapchain *cts, VkSwapchainKHR old)
 	}
 }
 
+/*!
+ * Only the first call creates the pacer, so a failed first swapchain creation
+ * locks in a pacer picked without any swapchain properties.
+ */
+static void
+ensure_pacer(struct comp_target_swapchain *cts, bool use_display_timing_if_available)
+{
+	struct vk_bundle *vk = get_vk(cts);
+
+	int64_t now_ns = os_monotonic_get_ns();
+	if (cts->upc == NULL && use_display_timing_if_available && vk->has_GOOGLE_display_timing) {
+		struct u_pc_display_timing_config config = u_pc_display_timing_get_default_config();
+		u_pc_display_timing_create(cts->base.c->frame_interval_ns, &config, &cts->upc);
+	} else if (cts->upc == NULL) {
+		u_pc_fake_create(cts->base.c->frame_interval_ns, now_ns, &cts->upc);
+	}
+}
+
 static void
 destroy_image_views(struct comp_target_swapchain *cts)
 {
@@ -705,16 +723,9 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 
 	assert(present_queue != NULL);
 
-	int64_t now_ns = os_monotonic_get_ns();
 	// Some platforms really don't like the pacing_compositor code.
 	bool use_display_timing_if_available =
 	    debug_get_bool_option_use_display_timing() && cts->timing_usage == COMP_TARGET_USE_DISPLAY_IF_AVAILABLE;
-	if (cts->upc == NULL && use_display_timing_if_available && vk->has_GOOGLE_display_timing) {
-		struct u_pc_display_timing_config config = u_pc_display_timing_get_default_config();
-		u_pc_display_timing_create(ct->c->frame_interval_ns, &config, &cts->upc);
-	} else if (cts->upc == NULL) {
-		u_pc_fake_create(ct->c->frame_interval_ns, now_ns, &cts->upc);
-	}
 
 	// Free old image views.
 	destroy_image_views(cts);
@@ -739,6 +750,7 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "vk_surface_info_fill_in: %s", vk_str_result(ret));
 		destroy_old(cts, old_swapchain_handle);
+		ensure_pacer(cts, use_display_timing_if_available);
 		return;
 	}
 
@@ -883,6 +895,7 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "vkCreateSwapchainKHR: %s", vk_str_result(ret));
+		ensure_pacer(cts, use_display_timing_if_available);
 		return;
 	}
 
@@ -927,6 +940,8 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 	}
 #endif
 
+	ensure_pacer(cts, use_display_timing_if_available);
+
 	// Done now.
 	return;
 
@@ -934,6 +949,7 @@ error_print_and_free:
 	vk_print_surface_info(vk, &info, U_LOGGING_ERROR);
 	destroy_old(cts, old_swapchain_handle);
 	vk_surface_info_destroy(&info);
+	ensure_pacer(cts, use_display_timing_if_available);
 }
 
 static bool
