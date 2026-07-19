@@ -608,9 +608,9 @@ render_distortion_images_fini(struct render_resources *r);
  * Behaviour for this function is undefined if the GPU has not completed before
  * calling this function, so make sure to call vkQueueWaitIdle or wait on the
  * fence that the work was submitted with have fully completed. See other
- * limitation mentioned for @ref vk_convert_timestamps_to_host_ns .
+ * limitation mentioned for @ref vk_convert_device_timestamps_to_host_ns .
  *
- * @see vk_convert_timestamps_to_host_ns
+ * @see vk_convert_device_timestamps_to_host_ns
  *
  * @public @memberof render_resources
  */
