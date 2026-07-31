@@ -31,7 +31,9 @@ extern "C" {
 static inline VkImageView
 get_image_view(const struct comp_swapchain_image *image, enum xrt_layer_composition_flags flags, uint32_t array_index)
 {
-	if (flags & XRT_LAYER_COMPOSITION_BLEND_TEXTURE_SOURCE_ALPHA_BIT) {
+	const uint32_t compare_flags =
+	    XRT_LAYER_COMPOSITION_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XRT_LAYER_COMPOSITION_ADVANCED_BLENDING_BIT;
+	if (flags & compare_flags) {
 		return image->views.alpha[array_index];
 	}
 
@@ -157,6 +159,22 @@ apply_bias_and_scale_from_layer(const struct xrt_layer_data *data,
 		*out_scale = XRT_C11_COMPOUND(struct xrt_colour_rgba_f32){1.0f, 1.0f, 1.0f, 1.0f};
 		*out_bias = XRT_C11_COMPOUND(struct xrt_colour_rgba_f32){0.0f, 0.0f, 0.0f, 0.0f};
 	}
+}
+
+static inline void
+apply_advanced_blend_from_layer(const struct xrt_layer_data *data,
+                                uint32_t *out_advanced_blending,
+                                struct render_advanced_blend_info *out_advanced_blend)
+{
+	*out_advanced_blending = (data->flags & XRT_LAYER_COMPOSITION_ADVANCED_BLENDING_BIT) != 0;
+	if (*out_advanced_blending == 0) {
+		return;
+	}
+
+	out_advanced_blend->src_factor_color = data->advanced_blend.src_factor_color;
+	out_advanced_blend->dst_factor_color = data->advanced_blend.dst_factor_color;
+	out_advanced_blend->src_factor_alpha = data->advanced_blend.src_factor_alpha;
+	out_advanced_blend->dst_factor_alpha = data->advanced_blend.dst_factor_alpha;
 }
 
 

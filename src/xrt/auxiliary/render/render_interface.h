@@ -1244,6 +1244,17 @@ struct render_chroma_key_info
 };
 
 /*!
+ * Advanced blend factors sent to the compute layer shader.
+ */
+struct render_advanced_blend_info
+{
+	uint32_t src_factor_color;
+	uint32_t dst_factor_color;
+	uint32_t src_factor_alpha;
+	uint32_t dst_factor_alpha;
+};
+
+/*!
  * UBO data that is sent to the compute layer shaders.
  *
  * @relates render_compute
@@ -1276,8 +1287,11 @@ struct render_compute_layer_ubo_data
 			uint32_t layer_type;
 			uint32_t unpremultiplied_alpha;
 			uint32_t inverted_alpha;
-			uint32_t _padding0;
+			uint32_t advanced_blending;
 		} layer_data;
+
+		//! Advanced blend factors.
+		struct render_advanced_blend_info advanced_blend;
 
 		/*!
 		 * Which image/sampler(s) correspond to each layer.

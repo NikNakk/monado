@@ -98,6 +98,7 @@
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS", "public", "\"xrt/xrt_config_build.h\"", "public"] },
+{ symbol: ["XRT_FEATURE_OPENXR_LAYER_MNDX_ALPHA_BLEND_SYSTEM_UI", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_OVERLAY", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_PLANE_DETECTION", "public", "\"xrt/xrt_config_build.h\"", "public"] },
 { symbol: ["XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR", "public", "\"xrt/xrt_config_build.h\"", "public"] },
