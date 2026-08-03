@@ -196,3 +196,8 @@ Checks:       |
 WarningsAsErrors: '*'
 HeaderFilterRegex: 'src/xrt/.*'
 FormatStyle:     file
+
+# We have GCC-only flags enabled for GCC builds, and clang-tidy is 
+# sometimes run on GCC configured build directories.
+ExtraArgs:
+    - -Wno-unknown-warning-option
