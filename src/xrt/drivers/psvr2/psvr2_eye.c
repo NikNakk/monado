@@ -252,8 +252,10 @@ psvr2_free_et_data(struct psvr2_hmd *hmd)
 {
 	u_var_remove_root(&hmd->et_data);
 
-	// stop the ET thread
-	os_thread_helper_destroy(&hmd->et_data.eye_tracking_thread);
+	// The minimal HMD path does not initialize the eye-tracking thread.
+	if (hmd->et_data.eye_tracking_thread.initialized) {
+		os_thread_helper_destroy(&hmd->et_data.eye_tracking_thread);
+	}
 
 	m_relation_history_destroy(&hmd->et_data.gaze_relation_history);
 

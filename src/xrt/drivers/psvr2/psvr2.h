@@ -180,6 +180,7 @@ struct psvr2_hmd
 	enum u_logging_level log_level;
 
 	struct os_mutex data_lock;
+	bool data_lock_initialized;
 
 	/* Device status */
 	uint8_t dprx_status;               //< DisplayPort receiver status
@@ -222,6 +223,8 @@ struct psvr2_hmd
 	/* USB communication */
 	libusb_context *ctx;
 	libusb_device_handle *dev;
+	/* Whether to claim and stream the camera, gaze, and other optional interfaces. */
+	bool auxiliary_streams_enabled;
 
 	struct os_thread_helper usb_thread;
 	int usb_complete;
