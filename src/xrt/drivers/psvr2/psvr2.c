@@ -66,6 +66,14 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS"
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 
+#ifdef XRT_OS_OSX
+#define PSVR2_AUXILIARY_STREAMS_DEFAULT false
+#else
+#define PSVR2_AUXILIARY_STREAMS_DEFAULT true
+#endif
+
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_auxiliary_streams, "PSVR2_AUXILIARY_STREAMS", PSVR2_AUXILIARY_STREAMS_DEFAULT)
+
 static void
 psvr2_usb_stop(struct psvr2_hmd *hmd);
 
@@ -79,10 +87,12 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 
 	psvr2_free_et_data(hmd);
 
-	os_thread_helper_lock(&hmd->usb_thread);
-	hmd->usb_complete = 1;
-	os_thread_helper_unlock(&hmd->usb_thread);
-	os_thread_helper_destroy(&hmd->usb_thread);
+	if (hmd->usb_thread.initialized) {
+		os_thread_helper_lock(&hmd->usb_thread);
+		hmd->usb_complete = 1;
+		os_thread_helper_unlock(&hmd->usb_thread);
+		os_thread_helper_destroy(&hmd->usb_thread);
+	}
 
 	psvr2_usb_destroy(hmd);
 
@@ -101,7 +111,9 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 
 	m_ff_vec3_f32_free(&hmd->ff_gyro);
 	m_relation_history_destroy(&hmd->slam_relation_history);
-	os_mutex_destroy(&hmd->data_lock);
+	if (hmd->data_lock_initialized) {
+		os_mutex_destroy(&hmd->data_lock);
+	}
 	u_device_free(&hmd->base);
 }
 
@@ -166,7 +178,12 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	switch (name) {
 	case XRT_INPUT_GENERIC_HEAD_POSE:
-	case XRT_INPUT_GENERIC_EYE_GAZE_POSE: break;
+		break;
+	case XRT_INPUT_GENERIC_EYE_GAZE_POSE:
+		if (!hmd->auxiliary_streams_enabled) {
+			return XRT_ERROR_INPUT_UNSUPPORTED;
+		}
+		break;
 	default: PSVR2_ERROR(hmd, "unknown input name"); return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
@@ -600,16 +617,17 @@ struct psvr2_interface_info
 	int interface_no;
 	int altmode;
 	const char *name;
+	bool auxiliary;
 };
 
-struct psvr2_interface_info interface_list[] = {
-    {.interface_no = PSVR2_STATUS_INTERFACE, .altmode = 1, .name = "status"},
-    {.interface_no = PSVR2_SLAM_INTERFACE, .altmode = 0, .name = "SLAM"},
-    {.interface_no = PSVR2_GAZE_INTERFACE, .altmode = 0, .name = "Gaze"},
-    {.interface_no = PSVR2_CAMERA_INTERFACE, .altmode = 0, .name = "Camera"},
-    {.interface_no = PSVR2_LD_INTERFACE, .altmode = 0, .name = "LED Detector"},
-    {.interface_no = PSVR2_RP_INTERFACE, .altmode = 0, .name = "Relocalizer"},
-    {.interface_no = PSVR2_VD_INTERFACE, .altmode = 0, .name = "VD"},
+static const struct psvr2_interface_info interface_list[] = {
+    {.interface_no = PSVR2_STATUS_INTERFACE, .altmode = 1, .name = "status", .auxiliary = false},
+    {.interface_no = PSVR2_SLAM_INTERFACE, .altmode = 0, .name = "SLAM", .auxiliary = false},
+    {.interface_no = PSVR2_GAZE_INTERFACE, .altmode = 0, .name = "Gaze", .auxiliary = true},
+    {.interface_no = PSVR2_CAMERA_INTERFACE, .altmode = 0, .name = "Camera", .auxiliary = true},
+    {.interface_no = PSVR2_LD_INTERFACE, .altmode = 0, .name = "LED Detector", .auxiliary = true},
+    {.interface_no = PSVR2_RP_INTERFACE, .altmode = 0, .name = "Relocalizer", .auxiliary = true},
+    {.interface_no = PSVR2_VD_INTERFACE, .altmode = 0, .name = "VD", .auxiliary = true},
 };
 
 static bool
@@ -630,6 +648,10 @@ psvr2_usb_open(struct psvr2_hmd *hmd, struct xrt_prober_device *xpdev)
 	}
 
 	for (size_t i = 0; i < sizeof(interface_list) / sizeof(interface_list[0]); i++) {
+		if (interface_list[i].auxiliary && !hmd->auxiliary_streams_enabled) {
+			continue;
+		}
+
 		int intf_no = interface_list[i].interface_no;
 		int altmode = interface_list[i].altmode;
 		const char *name = interface_list[i].name;
@@ -868,30 +890,33 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	}
 	hmd->usb_active_xfers++;
 
-	/* Camera data */
-	hmd->camera_enable = true;
+	/* Camera data is not needed for HMD tracking. */
+	hmd->camera_enable = hmd->auxiliary_streams_enabled;
 	hmd->camera_mode = PSVR2_CAMERA_MODE_10;
-	set_camera_mode(hmd, hmd->camera_mode);
+	if (hmd->auxiliary_streams_enabled) {
+		set_camera_mode(hmd, hmd->camera_mode);
 
-	for (int i = 0; i < NUM_CAM_XFERS; i++) {
-		hmd->camera_xfers[i] = libusb_alloc_transfer(0);
-		if (hmd->camera_xfers[i] == NULL) {
-			PSVR2_ERROR(hmd, "Could not alloc USB transfer %d for camera data", i);
-			goto out;
+		for (int i = 0; i < NUM_CAM_XFERS; i++) {
+			hmd->camera_xfers[i] = libusb_alloc_transfer(0);
+			if (hmd->camera_xfers[i] == NULL) {
+				PSVR2_ERROR(hmd, "Could not alloc USB transfer %d for camera data", i);
+				goto out;
+			}
+
+			uint8_t *recv_buf = malloc(USB_CAM_MODE10_XFER_SIZE);
+
+			libusb_fill_bulk_transfer(hmd->camera_xfers[i], hmd->dev,
+			                          LIBUSB_ENDPOINT_IN | PSVR2_CAMERA_ENDPOINT, recv_buf,
+			                          USB_CAM_MODE10_XFER_SIZE, img_xfer_cb, hmd, 0);
+			hmd->camera_xfers[i]->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+
+			res = libusb_submit_transfer(hmd->camera_xfers[i]);
+			if (res < 0) {
+				PSVR2_ERROR(hmd, "Could not submit USB transfer %d for camera data", i);
+				goto out;
+			}
+			hmd->usb_active_xfers++;
 		}
-
-		uint8_t *recv_buf = malloc(USB_CAM_MODE10_XFER_SIZE);
-
-		libusb_fill_bulk_transfer(hmd->camera_xfers[i], hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_CAMERA_ENDPOINT,
-		                          recv_buf, USB_CAM_MODE10_XFER_SIZE, img_xfer_cb, hmd, 0);
-		hmd->camera_xfers[i]->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
-
-		res = libusb_submit_transfer(hmd->camera_xfers[i]);
-		if (res < 0) {
-			PSVR2_ERROR(hmd, "Could not submit USB transfer %d for camera data", i);
-			goto out;
-		}
-		hmd->usb_active_xfers++;
 	}
 
 	/* SLAM endpoint */
@@ -911,6 +936,11 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 		goto out;
 	}
 	hmd->usb_active_xfers++;
+
+	if (!hmd->auxiliary_streams_enabled) {
+		result = true;
+		goto out;
+	}
 
 	/* LD endpoint */
 	hmd->led_detector_xfer = libusb_alloc_transfer(0);
@@ -1185,6 +1215,8 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 
 	struct psvr2_hmd *hmd = U_DEVICE_ALLOCATE(struct psvr2_hmd, flags, PSVR2_HMD_INPUT_COUNT, 1);
+	hmd->log_level = debug_get_log_option_psvr2_log();
+	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
 
 	snprintf(hmd->base.tracking_origin->name, XRT_TRACKING_NAME_LEN, "PS VR2 Tracking");
 	hmd->base.tracking_origin->type = XRT_TRACKING_TYPE_EXTERNAL_SLAM;
@@ -1194,6 +1226,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 		PSVR2_ERROR(hmd, "Failed to init data mutex!");
 		goto cleanup;
 	}
+	hmd->data_lock_initialized = true;
 
 	if (os_thread_helper_init(&hmd->usb_thread) != 0) {
 		PSVR2_ERROR(hmd, "Failed to initialise threading");
@@ -1220,12 +1253,13 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->base.set_brightness = psvr2_set_brightness;
 	hmd->base.set_output = psvr2_hmd_set_output;
 	hmd->base.get_compositor_info = psvr2_hmd_get_compositor_info;
-	hmd->base.begin_feature = psvr2_begin_feature;
-	hmd->base.end_feature = psvr2_end_feature;
-	hmd->base.get_face_tracking = psvr2_get_face_tracking;
+	if (hmd->auxiliary_streams_enabled) {
+		hmd->base.begin_feature = psvr2_begin_feature;
+		hmd->base.end_feature = psvr2_end_feature;
+		hmd->base.get_face_tracking = psvr2_get_face_tracking;
+	}
 
 	hmd->pose = (struct xrt_pose)XRT_POSE_IDENTITY;
-	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->T_imu_head = (struct xrt_pose){
 	    .position = {.x = 0.000247f, .y = -0.000273f, .z = 0.104826f},
 	    .orientation = XRT_QUAT_IDENTITY,
@@ -1249,16 +1283,21 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 
 	hmd->base.outputs[0].name = XRT_OUTPUT_NAME_PSVR2_HAPTIC;
 
-	hmd->base.binding_profiles = psvr2_binding_profiles;
-	hmd->base.binding_profile_count = ARRAY_SIZE(psvr2_binding_profiles);
+	if (hmd->auxiliary_streams_enabled) {
+		hmd->base.binding_profiles = psvr2_binding_profiles;
+		hmd->base.binding_profile_count = ARRAY_SIZE(psvr2_binding_profiles);
+	} else {
+		hmd->base.binding_profiles = &psvr2_binding_profiles[1];
+		hmd->base.binding_profile_count = ARRAY_SIZE(psvr2_binding_profiles) - 1;
+	}
 
 	hmd->base.supported.orientation_tracking = true;
 	hmd->base.supported.position_tracking = true;
 	hmd->base.supported.presence = true;
 	hmd->base.supported.brightness_control = true;
 	hmd->base.supported.compositor_info = true;
-	hmd->base.supported.eye_gaze = true;
-	hmd->base.supported.face_tracking = true;
+	hmd->base.supported.eye_gaze = hmd->auxiliary_streams_enabled;
+	hmd->base.supported.face_tracking = hmd->auxiliary_streams_enabled;
 
 	// Set up display details
 	// refresh rate
@@ -1337,22 +1376,24 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->brightness_btn.ptr = hmd;
 	u_var_add_button(hmd, &hmd->brightness_btn, "Set Brightness");
 
-	u_var_add_gui_header(hmd, NULL, "Camera data");
-	{
-		hmd->camera_enable_btn.cb = (void (*)(void *))toggle_camera_enable;
-		hmd->camera_enable_btn.ptr = hmd;
-		u_var_add_button(hmd, &hmd->camera_enable_btn, "Disable camera streams");
+	if (hmd->auxiliary_streams_enabled) {
+		u_var_add_gui_header(hmd, NULL, "Camera data");
+		{
+			hmd->camera_enable_btn.cb = (void (*)(void *))toggle_camera_enable;
+			hmd->camera_enable_btn.ptr = hmd;
+			u_var_add_button(hmd, &hmd->camera_enable_btn, "Disable camera streams");
 
-		hmd->camera_mode_btn.cb = (void (*)(void *))cycle_camera_mode;
-		hmd->camera_mode_btn.ptr = hmd;
-		u_var_add_button(hmd, &hmd->camera_mode_btn, "Camera Mode 0x10");
+			hmd->camera_mode_btn.cb = (void (*)(void *))cycle_camera_mode;
+			hmd->camera_mode_btn.ptr = hmd;
+			u_var_add_button(hmd, &hmd->camera_mode_btn, "Camera Mode 0x10");
+		}
+		for (int i = 0; i < 3; i++) {
+			char name[32];
+			sprintf(name, "Substream %d", i);
+			u_var_add_sink_debug(hmd, &hmd->debug_sinks[i], name);
+		}
+		u_var_add_sink_debug(hmd, &hmd->debug_sinks[3], "Mode 1 stream");
 	}
-	for (int i = 0; i < 3; i++) {
-		char name[32];
-		sprintf(name, "Substream %d", i);
-		u_var_add_sink_debug(hmd, &hmd->debug_sinks[i], name);
-	}
-	u_var_add_sink_debug(hmd, &hmd->debug_sinks[3], "Mode 1 stream");
 
 	u_var_add_gui_header(hmd, NULL, "Logging");
 	u_var_add_log_level(hmd, &hmd->log_level, "log_level");

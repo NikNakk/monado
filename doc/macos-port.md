@@ -24,6 +24,22 @@ It is not yet trying to deliver:
 - display direct mode
 - a packaged end-user build
 
+## PS VR2 HMD bring-up
+
+The PS VR2 HMD driver only requires libusb. The separate PS Sense controller
+driver still requires Monado's internal HID support and is not enabled on macOS.
+
+On macOS, the HMD driver starts in a conservative USB mode which claims and
+submits transfers only for the status and SLAM interfaces needed for headset
+tracking. Camera, gaze, LED detector, relocalizer, and VD interfaces are left
+untouched. This matches the smallest USB path already demonstrated to work on
+macOS and keeps controller and eye-tracking work out of the initial HMD
+bring-up.
+
+Set `PSVR2_AUXILIARY_STREAMS=1` to restore the full set of interfaces and
+streams. Other platforms retain the existing full-stream behaviour by default;
+setting the variable to `0` selects the same minimal mode there for testing.
+
 ## Current local build recipe
 
 The most useful local probe so far is:
