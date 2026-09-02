@@ -152,7 +152,9 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 
 	tbrh->head = head_xdev;
 	tbrh->eyes = head_xdev;
-	tbrh->face = head_xdev;
+	if (head_xdev != NULL && head_xdev->supported.face_tracking) {
+		tbrh->face = head_xdev;
+	}
 
 #ifdef XRT_BUILD_DRIVER_PSSENSE
 	struct xrt_device *left_xdev = NULL;

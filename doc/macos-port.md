@@ -40,6 +40,17 @@ Set `PSVR2_AUXILIARY_STREAMS=1` to restore the full set of interfaces and
 streams. Other platforms retain the existing full-stream behaviour by default;
 setting the variable to `0` selects the same minimal mode there for testing.
 
+After building `monado-cli` with the PSVR2 driver enabled, the hardware-backed
+discovery and pose probe can be run with GAV closed:
+
+```sh
+PSVR2_AUXILIARY_STREAMS=0 ./build-macos-psvr2-cli/src/xrt/targets/cli/monado-cli psvr2-pose 10
+```
+
+Move the headset during the probe. It succeeds only after receiving poses with
+valid and tracked position and orientation and observing a meaningful pose
+change. Conservative mode also leaves the system face-tracking role unassigned.
+
 ## Current local build recipe
 
 The most useful local probe so far is:
