@@ -51,6 +51,20 @@ Move the headset during the probe. It succeeds only after receiving poses with
 valid and tracked position and orientation and observing a meaningful pose
 change. Conservative mode also leaves the system face-tracking role unassigned.
 
+The local display compositor target is `macos`. It searches for an `NSScreen`
+named `PS VR2`, falling back to the first 4000-pixel-wide display, and creates a
+borderless window backed by `CAMetalLayer`. MoltenVK presents the existing
+Vulkan compositor through `VK_EXT_metal_surface`; accurate display-link pacing
+and refresh-rate control remain later work.
+
+With `tests_macos_runtime_probe` built, surface creation and a single compositor
+frame submission can be exercised directly:
+
+```sh
+VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \
+  ./build-macos-psvr2-display/tests/tests_macos_runtime_probe --submit-frame
+```
+
 ## Current local build recipe
 
 The most useful local probe so far is:

@@ -138,6 +138,19 @@ comp_window_mswin_create(struct comp_compositor *c);
 extern const struct comp_target_factory comp_target_factory_mswin;
 #endif // XRT_OS_WINDOWS
 
+#ifdef XRT_OS_OSX
+
+/*!
+ * Create a borderless CAMetalLayer-backed window on the PS VR2 display.
+ *
+ * @ingroup comp_main
+ */
+struct comp_target *
+comp_window_macos_create(struct comp_compositor *c);
+
+extern const struct comp_target_factory comp_target_factory_macos;
+#endif // XRT_OS_OSX
+
 #ifdef __cplusplus
 }
 #endif
