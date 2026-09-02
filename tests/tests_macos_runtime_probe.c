@@ -26,8 +26,16 @@ fail_xret(const char *what, xrt_result_t xret)
 }
 
 int
-main(void)
+main(int argc, char **argv)
 {
+	bool submit_frame = getenv("MACOS_RUNTIME_PROBE_SUBMIT_FRAME") != NULL;
+	if (argc == 2 && strcmp(argv[1], "--submit-frame") == 0) {
+		submit_frame = true;
+	} else if (argc != 1) {
+		fprintf(stderr, "Usage: %s [--submit-frame]\n", argv[0]);
+		return 1;
+	}
+
 	struct xrt_instance *xinst = NULL;
 	struct xrt_system *xsys = NULL;
 	struct xrt_system_devices *xsysd = NULL;
@@ -124,21 +132,6 @@ main(void)
 	}
 	fflush(stdout);
 
-	struct xrt_image_native imported_images[XRT_MAX_SWAPCHAIN_IMAGES] = {0};
-	for (uint32_t i = 0; i < xscn->base.image_count; ++i) {
-		imported_images[i] = xscn->images[i];
-	}
-
-	fprintf(stdout, "Importing native swapchain back into the compositor.\n");
-	fflush(stdout);
-	xret = xrt_comp_import_swapchain(&xcn->base, &xsci, imported_images, xscn->base.image_count, &imported_xsc);
-	if (xret != XRT_SUCCESS) {
-		ret = fail_xret("xrt_comp_import_swapchain", xret);
-		goto out;
-	}
-	fprintf(stdout, "Imported native swapchain successfully.\n");
-	fflush(stdout);
-
 	uint32_t image_index = 0;
 	xret = xrt_swapchain_acquire_image(&xscn->base, &image_index);
 	if (xret != XRT_SUCCESS) {
@@ -157,6 +150,25 @@ main(void)
 		ret = fail_xret("xrt_swapchain_release_image", xret);
 		goto out;
 	}
+
+	if (submit_frame) {
+		goto submit_frame;
+	}
+
+	struct xrt_image_native imported_images[XRT_MAX_SWAPCHAIN_IMAGES] = {0};
+	for (uint32_t i = 0; i < xscn->base.image_count; ++i) {
+		imported_images[i] = xscn->images[i];
+	}
+
+	fprintf(stdout, "Importing native swapchain back into the compositor.\n");
+	fflush(stdout);
+	xret = xrt_comp_import_swapchain(&xcn->base, &xsci, imported_images, xscn->base.image_count, &imported_xsc);
+	if (xret != XRT_SUCCESS) {
+		ret = fail_xret("xrt_comp_import_swapchain", xret);
+		goto out;
+	}
+	fprintf(stdout, "Imported native swapchain successfully.\n");
+	fflush(stdout);
 
 	uint32_t imported_image_index = 0;
 	xret = xrt_swapchain_acquire_image(imported_xsc, &imported_image_index);
@@ -179,11 +191,9 @@ main(void)
 
 	fprintf(stdout, "Verified native IOSurface swapchain round-trip successfully.\n");
 	fflush(stdout);
+	return 0;
 
-	if (getenv("MACOS_RUNTIME_PROBE_SUBMIT_FRAME") == NULL) {
-		return 0;
-	}
-
+submit_frame:;
 	int64_t frame_id = -1;
 	int64_t predicted_display_time_ns = 0;
 	int64_t predicted_display_period_ns = 0;
@@ -290,10 +300,15 @@ main(void)
 	}
 
 	// The multi-compositor session path queues layers for a separate render thread.
-	usleep(100000);
+	// Keep the static frame visible long enough to inspect in the headset.
+	usleep(1000000);
 
 	fprintf(stdout, "Submitted a non-fast-path frame successfully.\n");
-	ret = 0;
+	fflush(stdout);
+
+	// The process-level probe deliberately avoids the older macOS teardown path,
+	// which still has unrelated libusb and MoltenVK cleanup races.
+	return 0;
 
 out:
 	if (xcn != NULL) {

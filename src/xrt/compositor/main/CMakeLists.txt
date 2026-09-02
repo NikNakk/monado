@@ -55,6 +55,13 @@ endif()
 if(WIN32)
 	target_sources(comp_main PRIVATE comp_window_mswin.c)
 endif()
+if(APPLE)
+	target_sources(comp_main PRIVATE comp_window_macos.m)
+	target_link_libraries(
+		comp_main
+		PRIVATE "-framework AppKit" "-framework CoreGraphics" "-framework QuartzCore"
+		)
+endif()
 if(VK_USE_PLATFORM_DISPLAY_KHR)
 	target_sources(comp_main PRIVATE comp_window_vk_display.c)
 endif()
