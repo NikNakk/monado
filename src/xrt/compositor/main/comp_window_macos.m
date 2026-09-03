@@ -46,31 +46,11 @@ struct comp_window_macos
 	atomic_uint_fast64_t latest_vblank_ns;
 	atomic_bool metal_present_failed;
 	uint64_t last_vblank_ns;
-	uint64_t cadence_sample_count;
-	uint64_t cadence_total_ns;
-	uint64_t cadence_min_ns;
-	uint64_t cadence_max_ns;
 	bool pacer_vblank_synced;
-	uint64_t last_present_ns;
-	uint64_t present_sample_count;
-	uint64_t present_total_ns;
-	uint64_t present_min_ns;
-	uint64_t present_max_ns;
-	uint64_t present_missed_intervals;
-	uint64_t present_vk_wait_total_ns;
-	uint64_t present_drawable_wait_total_ns;
-	uint64_t present_metal_wait_total_ns;
 	int64_t display_period_ns;
 	uint32_t pixel_width;
 	uint32_t pixel_height;
 	uint32_t next_image;
-	bool logged_layer_state;
-	int64_t last_desired_present_time_ns;
-	uint64_t desired_present_sample_count;
-	int64_t desired_present_interval_total_ns;
-	int64_t desired_present_interval_min_ns;
-	int64_t desired_present_interval_max_ns;
-	int64_t desired_present_lead_total_ns;
 };
 
 static uint64_t
@@ -130,11 +110,11 @@ monotonic_ns_to_host_time(struct comp_window_macos *cwm, int64_t monotonic_ns)
 
 static CVReturn
 display_link_callback(CVDisplayLinkRef display_link,
-	                  const CVTimeStamp *in_now,
-	                  const CVTimeStamp *in_output_time,
-	                  CVOptionFlags flags_in,
-	                  CVOptionFlags *flags_out,
-	                  void *context)
+                      const CVTimeStamp *in_now,
+                      const CVTimeStamp *in_output_time,
+                      CVOptionFlags flags_in,
+                      CVOptionFlags *flags_out,
+                      void *context)
 {
 	(void)display_link;
 	(void)in_now;
@@ -364,10 +344,47 @@ comp_window_macos_free_images(struct comp_window_macos *cwm)
 	ct->final_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 }
 
+static bool
+comp_window_macos_ensure_render_complete_semaphore(struct comp_window_macos *cwm)
+{
+	struct comp_target *ct = &cwm->base.base;
+	struct vk_bundle *vk = get_vk(cwm);
+
+	if (ct->semaphores.render_complete != VK_NULL_HANDLE) {
+		return ct->semaphores.render_complete_is_timeline;
+	}
+
+	if (!vk->features.timeline_semaphore) {
+		COMP_WARN(ct->c, "Vulkan timeline semaphores unavailable; macOS presentation will use queue-idle fallback");
+		return false;
+	}
+
+	VkSemaphoreTypeCreateInfo type_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+	    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+	    .initialValue = 0,
+	};
+	VkSemaphoreCreateInfo info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+	    .pNext = &type_info,
+	};
+
+	VkResult ret = vk->vkCreateSemaphore(vk->device, &info, NULL, &ct->semaphores.render_complete);
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(ct->c, "Could not create macOS render-complete timeline semaphore: %s", vk_result_string(ret));
+		ct->semaphores.render_complete = VK_NULL_HANDLE;
+		return false;
+	}
+
+	ct->semaphores.render_complete_is_timeline = true;
+	VK_NAME_SEMAPHORE(vk, ct->semaphores.render_complete, "macOS compositor render complete");
+	return true;
+}
+
 static void
 comp_window_macos_create_images(struct comp_target *ct,
-	                            const struct comp_target_create_images_info *create_info,
-	                            struct vk_bundle_queue *present_queue)
+                                const struct comp_target_create_images_info *create_info,
+                                struct vk_bundle_queue *present_queue)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	struct vk_bundle *vk = get_vk(cwm);
@@ -384,6 +401,7 @@ comp_window_macos_create_images(struct comp_target *ct,
 		return;
 	}
 
+	comp_window_macos_ensure_render_complete_semaphore(cwm);
 	comp_window_macos_free_images(cwm);
 	struct xrt_swapchain_create_info info = {
 	    .create = 0,
@@ -457,9 +475,6 @@ comp_window_macos_create_images(struct comp_target *ct,
 	cwm->next_image = 0;
 	if (cwm->base.upc == NULL) {
 		u_pc_fake_create(ct->c->frame_interval_ns, os_monotonic_get_ns(), &cwm->base.upc);
-		COMP_INFO(ct->c,
-          "macOS creating pacer with frame interval %.3fms",
-          (double)ct->c->frame_interval_ns / 1000000.0);
 	}
 	if (cwm->display_link != NULL && !CVDisplayLinkIsRunning(cwm->display_link)) {
 		CVReturn cvret = CVDisplayLinkStart(cwm->display_link);
@@ -489,73 +504,46 @@ comp_window_macos_acquire(struct comp_target *ct, uint32_t *out_index)
 	return VK_SUCCESS;
 }
 
-static void
-comp_window_macos_record_completed_frame(struct comp_window_macos *cwm,
-	                                     uint64_t completed_ns,
-	                                     uint64_t metal_wait_ns)
-{
-	@synchronized(cwm->metal_layer) {
-		cwm->present_metal_wait_total_ns += metal_wait_ns;
-		if (cwm->last_present_ns != 0 && completed_ns > cwm->last_present_ns) {
-			uint64_t interval_ns = completed_ns - cwm->last_present_ns;
-			if (cwm->display_period_ns <= 0 || interval_ns <= (uint64_t)cwm->display_period_ns * 4) {
-				cwm->present_total_ns += interval_ns;
-				cwm->present_sample_count++;
-				if (cwm->present_min_ns == 0 || interval_ns < cwm->present_min_ns) {
-					cwm->present_min_ns = interval_ns;
-				}
-				if (interval_ns > cwm->present_max_ns) {
-					cwm->present_max_ns = interval_ns;
-				}
-				if (cwm->display_period_ns > 0 && interval_ns > (uint64_t)cwm->display_period_ns * 3 / 2) {
-					cwm->present_missed_intervals++;
-				}
-			}
-		}
-		cwm->last_present_ns = completed_ns;
-	}
-}
-
-static void
-comp_window_macos_log_present_stats(struct comp_window_macos *cwm)
+static VkResult
+comp_window_macos_wait_for_render_complete(struct comp_window_macos *cwm,
+                                           struct vk_bundle_queue *present_queue,
+                                           uint64_t timeline_semaphore_value)
 {
 	struct comp_target *ct = &cwm->base.base;
-	@synchronized(cwm->metal_layer) {
-		if (cwm->present_sample_count < 240) {
-			return;
-		}
+	struct vk_bundle *vk = get_vk(cwm);
 
-		double average_ms = (double)cwm->present_total_ns / (double)cwm->present_sample_count / 1000000.0;
-		COMP_INFO(ct->c, "macOS completed-frame cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/%llu",
-		          average_ms, (double)cwm->present_min_ns / 1000000.0, (double)cwm->present_max_ns / 1000000.0,
-		          (unsigned long long)cwm->present_missed_intervals,
-		          (unsigned long long)cwm->present_sample_count);
-		COMP_INFO(ct->c, "macOS presentation waits: Vulkan %.3fms, drawable %.3fms, Metal %.3fms",
-		          (double)cwm->present_vk_wait_total_ns / (double)cwm->present_sample_count / 1000000.0,
-		          (double)cwm->present_drawable_wait_total_ns / (double)cwm->present_sample_count / 1000000.0,
-		          (double)cwm->present_metal_wait_total_ns / (double)cwm->present_sample_count / 1000000.0);
-		cwm->present_sample_count = 0;
-		cwm->present_total_ns = 0;
-		cwm->present_min_ns = 0;
-		cwm->present_max_ns = 0;
-		cwm->present_missed_intervals = 0;
-		cwm->present_vk_wait_total_ns = 0;
-		cwm->present_drawable_wait_total_ns = 0;
-		cwm->present_metal_wait_total_ns = 0;
+	if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline) {
+		VkSemaphoreWaitInfo wait_info = {
+		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+		    .semaphoreCount = 1,
+		    .pSemaphores = &ct->semaphores.render_complete,
+		    .pValues = &timeline_semaphore_value,
+		};
+		VkResult ret = vk->vkWaitSemaphores(vk->device, &wait_info, UINT64_MAX);
+		if (ret != VK_SUCCESS) {
+			COMP_ERROR(ct->c, "Waiting for macOS render-complete semaphore failed: %s", vk_result_string(ret));
+		}
+		return ret;
 	}
+
+	vk_queue_lock(present_queue);
+	VkResult ret = vk->vkQueueWaitIdle(present_queue->queue);
+	vk_queue_unlock(present_queue);
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(ct->c, "vkQueueWaitIdle before Metal presentation: %s", vk_result_string(ret));
+	}
+	return ret;
 }
 
 static VkResult
 comp_window_macos_present(struct comp_target *ct,
-	                      struct vk_bundle_queue *present_queue,
-	                      uint32_t index,
-	                      uint64_t timeline_semaphore_value,
-	                      int64_t desired_present_time_ns,
-	                      int64_t present_slop_ns)
+                          struct vk_bundle_queue *present_queue,
+                          uint32_t index,
+                          uint64_t timeline_semaphore_value,
+                          int64_t desired_present_time_ns,
+                          int64_t present_slop_ns)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	struct vk_bundle *vk = get_vk(cwm);
-	(void)timeline_semaphore_value;
 	(void)present_slop_ns;
 	assert(present_queue != NULL);
 	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
@@ -565,66 +553,13 @@ comp_window_macos_present(struct comp_target *ct,
 		return VK_ERROR_DEVICE_LOST;
 	}
 
-	comp_window_macos_log_present_stats(cwm);
-
-	int64_t present_now_ns = os_monotonic_get_ns();
-
-	@synchronized(cwm->metal_layer) {
-		if (cwm->last_desired_present_time_ns != 0) {
-			int64_t interval_ns =
-				desired_present_time_ns - cwm->last_desired_present_time_ns;
-			int64_t lead_ns = desired_present_time_ns - present_now_ns;
-
-			cwm->desired_present_interval_total_ns += interval_ns;
-			cwm->desired_present_lead_total_ns += lead_ns;
-			cwm->desired_present_sample_count++;
-
-			if (cwm->desired_present_interval_min_ns == 0 ||
-				interval_ns < cwm->desired_present_interval_min_ns) {
-				cwm->desired_present_interval_min_ns = interval_ns;
-			}
-			if (interval_ns > cwm->desired_present_interval_max_ns) {
-				cwm->desired_present_interval_max_ns = interval_ns;
-			}
-
-			if (cwm->desired_present_sample_count == 240) {
-				COMP_INFO(
-					ct->c,
-					"macOS desired-present cadence: average %.3fms, "
-					"min %.3fms, max %.3fms, average lead %.3fms",
-					(double)cwm->desired_present_interval_total_ns /
-						240.0 / 1000000.0,
-					(double)cwm->desired_present_interval_min_ns /
-						1000000.0,
-					(double)cwm->desired_present_interval_max_ns /
-						1000000.0,
-					(double)cwm->desired_present_lead_total_ns /
-						240.0 / 1000000.0);
-
-				cwm->desired_present_sample_count = 0;
-				cwm->desired_present_interval_total_ns = 0;
-				cwm->desired_present_interval_min_ns = 0;
-				cwm->desired_present_interval_max_ns = 0;
-				cwm->desired_present_lead_total_ns = 0;
-			}
-		}
-
-		cwm->last_desired_present_time_ns = desired_present_time_ns;
-	}
-
-	uint64_t before_vk_wait_ns = os_monotonic_get_ns();
-	vk_queue_lock(present_queue);
-	VkResult ret = vk->vkQueueWaitIdle(present_queue->queue);
-	vk_queue_unlock(present_queue);
-	uint64_t after_vk_wait_ns = os_monotonic_get_ns();
+	VkResult ret = comp_window_macos_wait_for_render_complete(cwm, present_queue, timeline_semaphore_value);
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vkQueueWaitIdle before Metal presentation: %s", vk_result_string(ret));
 		return ret;
 	}
 
 	@autoreleasepool {
 		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
-		uint64_t after_drawable_ns = os_monotonic_get_ns();
 		if (drawable == nil) {
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
 			return VK_ERROR_OUT_OF_DATE_KHR;
@@ -647,16 +582,9 @@ comp_window_macos_present(struct comp_target *ct,
 		CFTimeInterval desired_host_time_seconds = host_time_to_seconds(cwm, desired_host_time);
 		[command_buffer presentDrawable:drawable atTime:desired_host_time_seconds];
 
-		@synchronized(cwm->metal_layer) {
-			cwm->present_vk_wait_total_ns += after_vk_wait_ns - before_vk_wait_ns;
-			cwm->present_drawable_wait_total_ns += after_drawable_ns - after_vk_wait_ns;
-		}
-
 		dispatch_group_enter(cwm->present_completion_group);
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {
 			@autoreleasepool {
-				uint64_t completed_ns = os_monotonic_get_ns();
-				comp_window_macos_record_completed_frame(cwm, completed_ns, completed_ns - after_drawable_ns);
 				if ([completed_buffer status] == MTLCommandBufferStatusError) {
 					COMP_ERROR(ct->c, "Metal presentation failed: %s",
 					           [[[completed_buffer error] localizedDescription] UTF8String]);
@@ -689,78 +617,15 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	}
 
 	/*
-	 * The macOS target uses the fake compositor pacer.
-	 *
-	 * update_vblank_from_display_control() on that pacer simply overwrites
-	 * last_present_time_ns. Re-anchoring it on every update_timings() call
-	 * can lock the pacer to a lower cadence if the compositor only observes
-	 * every second physical vblank.
-	 *
-	 * Sync the pacer phase once to a real CVDisplayLink timestamp, then let
-	 * it free-run at its configured frame_period_ns.
+	 * The fake pacer advances from its last present time by one frame period.
+	 * Continuously re-anchoring it to the latest CVDisplayLink sample can lock
+	 * it to a lower cadence if the compositor is already missing refreshes, so
+	 * only use the first real vblank to establish phase.
 	 */
 	if (!cwm->pacer_vblank_synced) {
 		u_pc_update_vblank_from_display_control(cwm->base.upc, (int64_t)vblank_ns);
 		cwm->pacer_vblank_synced = true;
-		COMP_INFO(ct->c, "macOS fake pacer phase synced to display vblank");
-	}
-
-	if (cwm->last_vblank_ns != 0 && vblank_ns > cwm->last_vblank_ns) {
-		uint64_t raw_interval_ns = vblank_ns - cwm->last_vblank_ns;
-
-		if (cwm->display_period_ns > 0) {
-			uint64_t period_ns = (uint64_t)cwm->display_period_ns;
-
-			if (raw_interval_ns > period_ns * 8) {
-				cwm->last_vblank_ns = vblank_ns;
-				return VK_SUCCESS;
-			}
-
-			/*
-			 * Log the reconstructed cadence rather than how frequently the
-			 * compositor happened to consume latest_vblank_ns.
-			 */
-			uint64_t intervals = (raw_interval_ns + period_ns / 2) / period_ns;
-			if (intervals < 1) {
-				intervals = 1;
-			}
-
-			for (uint64_t i = 0; i < intervals; i++) {
-				uint64_t interval_ns = period_ns;
-				cwm->cadence_total_ns += interval_ns;
-				cwm->cadence_sample_count++;
-
-				if (cwm->cadence_min_ns == 0 || interval_ns < cwm->cadence_min_ns) {
-					cwm->cadence_min_ns = interval_ns;
-				}
-				if (interval_ns > cwm->cadence_max_ns) {
-					cwm->cadence_max_ns = interval_ns;
-				}
-
-				if (cwm->cadence_sample_count == 240) {
-					double average_ms =
-					    (double)cwm->cadence_total_ns / (double)cwm->cadence_sample_count / 1000000.0;
-					COMP_INFO(ct->c,
-					          "PS VR2 display-link cadence: average %.3fms, min %.3fms, max %.3fms",
-					          average_ms, (double)cwm->cadence_min_ns / 1000000.0,
-					          (double)cwm->cadence_max_ns / 1000000.0);
-					cwm->cadence_sample_count = 0;
-					cwm->cadence_total_ns = 0;
-					cwm->cadence_min_ns = 0;
-					cwm->cadence_max_ns = 0;
-				}
-			}
-		} else {
-			/* Fallback if the nominal display period was unavailable. */
-			cwm->cadence_total_ns += raw_interval_ns;
-			cwm->cadence_sample_count++;
-			if (cwm->cadence_min_ns == 0 || raw_interval_ns < cwm->cadence_min_ns) {
-				cwm->cadence_min_ns = raw_interval_ns;
-			}
-			if (raw_interval_ns > cwm->cadence_max_ns) {
-				cwm->cadence_max_ns = raw_interval_ns;
-			}
-		}
+		COMP_DEBUG(ct->c, "macOS fake pacer phase synced to display vblank");
 	}
 
 	cwm->last_vblank_ns = vblank_ns;
@@ -786,8 +651,8 @@ comp_window_macos_get_current_refresh_rate(struct comp_target *ct, float *out_ra
 
 static VkResult
 comp_window_macos_queue_supports_present(struct comp_target *ct,
-	                                     struct vk_bundle_queue *queue,
-	                                     VkBool32 *out_supported)
+                                         struct vk_bundle_queue *queue,
+                                         VkBool32 *out_supported)
 {
 	(void)ct;
 	(void)queue;
@@ -798,16 +663,9 @@ comp_window_macos_queue_supports_present(struct comp_target *ct,
 static void
 comp_window_macos_flush(struct comp_target *ct)
 {
-	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	(void)ct;
 	@autoreleasepool {
 		[CATransaction flush];
-		if (!cwm->logged_layer_state) {
-			CGSize drawable_size = [cwm->metal_layer drawableSize];
-			COMP_INFO(ct->c, "macOS presentation: window visible=%s layer device=%s format=%lu drawable=%.0fx%.0f",
-			          [cwm->window isVisible] ? "true" : "false", [cwm->metal_layer device] != nil ? "set" : "nil",
-			          (unsigned long)[cwm->metal_layer pixelFormat], drawable_size.width, drawable_size.height);
-			cwm->logged_layer_state = true;
-		}
 	}
 }
 
@@ -824,6 +682,7 @@ static void
 comp_window_macos_destroy(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	struct vk_bundle *vk = get_vk(cwm);
 	if (cwm->display_link != NULL) {
 		CVDisplayLinkStop(cwm->display_link);
 		CVDisplayLinkRelease(cwm->display_link);
@@ -833,6 +692,11 @@ comp_window_macos_destroy(struct comp_target *ct)
 		dispatch_group_wait(cwm->present_completion_group, DISPATCH_TIME_FOREVER);
 	}
 	comp_window_macos_free_images(cwm);
+	if (ct->semaphores.render_complete != VK_NULL_HANDLE) {
+		vk->vkDestroySemaphore(vk->device, ct->semaphores.render_complete, NULL);
+		ct->semaphores.render_complete = VK_NULL_HANDLE;
+		ct->semaphores.render_complete_is_timeline = false;
+	}
 	u_pc_destroy(&cwm->base.upc);
 	@autoreleasepool {
 		[cwm->window orderOut:nil];
