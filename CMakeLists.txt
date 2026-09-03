@@ -427,7 +427,15 @@ option(XRT_FEATURE_OPENXR_INTERACTION_TOUCH_PLUS "Enable XR_META_touch_controlle
 option(XRT_FEATURE_OPENXR_INTERACTION_LOGITECH_MX_INK "Enable XR_LOGITECH_mx_ink_stylus_interaction" OFF)
 
 # Defaults for OpenXR layer support
-option(XRT_FEATURE_OPENXR_LAYER_DEPTH "Enable XR_KHR_composition_layer_depth" ON)
+if(APPLE)
+	# IOSurface-backed Metal textures cannot use depth or stencil pixel formats.
+	# Do not advertise depth layers until the macOS client compositor has a
+	# separate, supported depth-image path.
+	set(XRT_FEATURE_OPENXR_LAYER_DEPTH_DEFAULT OFF)
+else()
+	set(XRT_FEATURE_OPENXR_LAYER_DEPTH_DEFAULT ON)
+endif()
+option(XRT_FEATURE_OPENXR_LAYER_DEPTH "Enable XR_KHR_composition_layer_depth" ${XRT_FEATURE_OPENXR_LAYER_DEPTH_DEFAULT})
 option(XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS "Enable XR_KHR_composition_layer_color_scale_bias" ON)
 option(XRT_FEATURE_OPENXR_LAYER_CUBE "Enable XR_KHR_composition_layer_cube" OFF)
 option(XRT_FEATURE_OPENXR_LAYER_CYLINDER "Enable XR_KHR_composition_layer_cylinder" ON)

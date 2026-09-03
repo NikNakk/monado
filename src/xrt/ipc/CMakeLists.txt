@@ -179,6 +179,10 @@ elseif(APPLE)
 	target_sources(
 		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
 		)
+	set_source_files_properties(
+		${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE OBJC
+		)
+	target_link_libraries(ipc_server PRIVATE "-framework AppKit")
 elseif(WIN32)
 	target_sources(
 		ipc_server

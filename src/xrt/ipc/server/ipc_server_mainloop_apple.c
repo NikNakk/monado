@@ -24,6 +24,8 @@
 #include "shared/ipc_shmem.h"
 #include "server/ipc_server.h"
 
+#import <AppKit/AppKit.h>
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -92,7 +94,8 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 		U_LOG_E("Could not bind socket to path %s: %s. Is the service running already?", sock_file,
 		        strerror(errno));
 		if (errno == EADDRINUSE) {
-			U_LOG_E("If monado-service is not running, delete %s before starting a new instance", sock_file);
+			U_LOG_E("If monado-service is not running, delete %s before starting a new instance",
+			        sock_file);
 		}
 		close(fd);
 		return ret;
@@ -160,6 +163,25 @@ handle_listen(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 
 #define NO_SLEEP 0
 
+static void
+pump_appkit_events(void)
+{
+	if (NSApp == nil) {
+		return;
+	}
+
+	@autoreleasepool {
+		NSEvent *event = nil;
+		while ((event = [NSApp nextEventMatchingMask:NSEventMaskAny
+		                                   untilDate:[NSDate distantPast]
+		                                      inMode:NSDefaultRunLoopMode
+		                                     dequeue:YES]) != nil) {
+			[NSApp sendEvent:event];
+		}
+		[NSApp updateWindows];
+	}
+}
+
 
 /*
  *
@@ -171,6 +193,7 @@ void
 ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 {
 	IPC_TRACE_MARKER();
+	pump_appkit_events();
 
 	struct pollfd pollfds[2] = {0};
 	nfds_t nfds = 0;

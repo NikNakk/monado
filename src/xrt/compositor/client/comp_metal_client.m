@@ -37,6 +37,7 @@ struct client_metal_compositor
 	struct xrt_compositor_metal base;
 	struct xrt_compositor_native *xcn;
 	id<MTLDevice> device;
+	id<MTLCommandQueue> command_queue;
 };
 
 static inline struct client_metal_swapchain *
@@ -72,9 +73,7 @@ vk_format_to_metal(uint32_t format)
 	case 44: return MTLPixelFormatBGRA8Unorm;       // VK_FORMAT_B8G8R8A8_UNORM
 	case 50: return MTLPixelFormatBGRA8Unorm_sRGB;  // VK_FORMAT_B8G8R8A8_SRGB
 	case 64: return MTLPixelFormatBGR10A2Unorm;     // VK_FORMAT_A2B10G10R10_UNORM_PACK32
-	case 124: return MTLPixelFormatDepth16Unorm;    // VK_FORMAT_D16_UNORM
-	case 126: return MTLPixelFormatDepth32Float;    // VK_FORMAT_D32_SFLOAT
-	case 130: return MTLPixelFormatDepth32Float_Stencil8; // VK_FORMAT_D32_SFLOAT_S8_UINT
+	// IOSurface-backed Metal textures cannot use depth or stencil formats.
 	default: return 0;
 	}
 }
@@ -88,9 +87,6 @@ metal_format_to_vk(int64_t format)
 	case MTLPixelFormatBGRA8Unorm: return 44;      // VK_FORMAT_B8G8R8A8_UNORM
 	case MTLPixelFormatBGRA8Unorm_sRGB: return 50; // VK_FORMAT_B8G8R8A8_SRGB
 	case MTLPixelFormatBGR10A2Unorm: return 64;    // VK_FORMAT_A2B10G10R10_UNORM_PACK32
-	case MTLPixelFormatDepth16Unorm: return 124;   // VK_FORMAT_D16_UNORM
-	case MTLPixelFormatDepth32Float: return 126;   // VK_FORMAT_D32_SFLOAT
-	case MTLPixelFormatDepth32Float_Stencil8: return 130; // VK_FORMAT_D32_SFLOAT_S8_UINT
 	default: return 0;
 	}
 }
@@ -143,9 +139,35 @@ client_metal_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns,
 	return xrt_swapchain_wait_image(to_native_swapchain(xsc), timeout_ns, index);
 }
 
+static void
+client_metal_swapchain_log_iosurface_sample(struct client_metal_swapchain *sc, uint32_t index);
+
 static xrt_result_t
 client_metal_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction direction, uint32_t index)
 {
+	struct client_metal_swapchain *sc = client_metal_swapchain(xsc);
+
+	if (direction == XRT_BARRIER_TO_COMP) {
+		// Commands submitted to a Metal command queue execute in order. Waiting
+		// for this empty command buffer therefore makes all application rendering
+		// queued before xrReleaseSwapchainImage visible through the shared
+		// IOSurface before the separate Vulkan compositor transitions the image.
+		@autoreleasepool {
+			id<MTLCommandBuffer> command_buffer = [sc->c->command_queue commandBuffer];
+			if (command_buffer == nil) {
+				return XRT_ERROR_ALLOCATION;
+			}
+
+			[command_buffer commit];
+			[command_buffer waitUntilCompleted];
+			if ([command_buffer status] == MTLCommandBufferStatusError) {
+				return XRT_ERROR_NATIVE_HANDLE_FENCE_ERROR;
+			}
+		}
+
+		client_metal_swapchain_log_iosurface_sample(sc, index);
+	}
+
 	struct xrt_swapchain *native_xsc = to_native_swapchain(xsc);
 	if (native_xsc->barrier_image == NULL) {
 		return XRT_SUCCESS;
@@ -220,7 +242,6 @@ client_metal_swapchain_log_iosurface_sample(struct client_metal_swapchain *sc, u
 static xrt_result_t
 client_metal_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
-	client_metal_swapchain_log_iosurface_sample(client_metal_swapchain(xsc), index);
 	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
 }
 
@@ -559,15 +580,14 @@ static void
 client_metal_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct client_metal_compositor *c = client_metal_compositor(xc);
+	[c->command_queue release];
 	free(c);
 }
 
 struct xrt_compositor_metal *
 client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue)
 {
-	(void)command_queue;
-
-	if (xcn == NULL || metal_device == NULL) {
+	if (xcn == NULL || metal_device == NULL || command_queue == NULL) {
 		return NULL;
 	}
 
@@ -578,6 +598,7 @@ client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_de
 
 	c->xcn = xcn;
 	c->device = (__bridge id<MTLDevice>)metal_device;
+	c->command_queue = [(__bridge id<MTLCommandQueue>)command_queue retain];
 
 	c->base.base.get_swapchain_create_properties = client_metal_compositor_get_swapchain_create_properties;
 	c->base.base.create_swapchain = client_metal_compositor_create_swapchain;
