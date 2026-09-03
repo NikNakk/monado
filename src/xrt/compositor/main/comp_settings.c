@@ -72,13 +72,20 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 	s->use_compute = debug_get_bool_option_compute();
 
 	if (s->use_compute) {
+#if defined(XRT_OS_OSX)
+		// Match the BGRA8Unorm IOSurface and CAMetalLayer formats used by the macOS display target.
+		add_format(s, VK_FORMAT_B8G8R8A8_UNORM);
+#endif
+
 		// Tested working with a PSVR2 and a patched Mesa. Native format of the PSVR2. 10-bit formats should be
 		// preferred in all cases for lower colour banding.
 		add_format(s, VK_FORMAT_A2B10G10R10_UNORM_PACK32);
 
 		// Default 8-bit channel 32-bit pixel format, most commonly supported UNORM format across Windows and
 		// Linux.
+#if !defined(XRT_OS_OSX)
 		add_format(s, VK_FORMAT_B8G8R8A8_UNORM);
+#endif
 
 		// Next most common UNORM format.
 		add_format(s, VK_FORMAT_R8G8B8A8_UNORM);

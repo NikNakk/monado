@@ -53,9 +53,30 @@ change. Conservative mode also leaves the system face-tracking role unassigned.
 
 The local display compositor target is `macos`. It searches for an `NSScreen`
 named `PS VR2`, falling back to the first 4000-pixel-wide display, and creates a
-borderless window backed by `CAMetalLayer`. MoltenVK presents the existing
-Vulkan compositor through `VK_EXT_metal_surface`; accurate display-link pacing
-and refresh-rate control remain later work.
+borderless window backed by `CAMetalLayer`. MoltenVK's WSI swapchain reports
+successful presents but produces black scanout on the PS VR2. The target
+therefore allocates ordinary Vulkan compositor images backed by exportable
+`IOSurfaceRef` objects, exposes those same surfaces as Metal textures, and blits
+the completed image to a `CAMetalDrawable`. This keeps Monado's Vulkan
+distortion compositor while using native Metal only for the final display
+handoff. The current implementation waits for both queues and uses fake pacing;
+display-link pacing and explicit cross-API synchronization remain later work.
+
+The Khronos `hello_xr` sample now runs through the native Metal binding and
+produces distorted stereo output on the PS VR2. Build the OpenXR SDK sample,
+start `monado-service`, then run:
+
+```sh
+XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
+DYLD_LIBRARY_PATH=/path/to/OpenXR-SDK-build/src/loader \
+  /path/to/OpenXR-SDK-build/src/tests/hello_xr/hello_xr -g Metal -s Local -v
+```
+
+On Apple platforms the runtime does not currently advertise
+`XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
+swapchains do not support depth/stencil pixel formats. The Metal client also
+waits for application command-queue completion when releasing an image to the
+separate Vulkan compositor.
 
 With `tests_macos_runtime_probe` built, surface creation and a single compositor
 frame submission can be exercised directly:
