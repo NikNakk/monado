@@ -26,6 +26,7 @@
 #define MACOS_TARGET_IMAGE_COUNT 3
 
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
+DEBUG_GET_ONCE_BOOL_OPTION(present_timing, "XRT_MACOS_PRESENT_TIMING", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -51,6 +52,16 @@ struct comp_window_macos
 	uint32_t pixel_width;
 	uint32_t pixel_height;
 	uint32_t next_image;
+
+	CFTimeInterval last_presented_time_s;
+	CFTimeInterval presented_interval_total_s;
+	CFTimeInterval presented_interval_min_s;
+	CFTimeInterval presented_interval_max_s;
+	CFTimeInterval presented_target_error_total_s;
+	CFTimeInterval presented_target_error_min_s;
+	CFTimeInterval presented_target_error_max_s;
+	uint64_t presented_sample_count;
+	uint64_t presented_missed_intervals;
 };
 
 static uint64_t
@@ -535,6 +546,75 @@ comp_window_macos_wait_for_render_complete(struct comp_window_macos *cwm,
 	return ret;
 }
 
+static void
+comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
+                                         id<MTLDrawable> drawable,
+                                         CFTimeInterval desired_present_time_s)
+{
+	if (!debug_get_bool_option_present_timing()) {
+		return;
+	}
+
+	CFTimeInterval presented_time_s = [drawable presentedTime];
+	if (presented_time_s <= 0.0) {
+		return;
+	}
+
+	struct comp_target *ct = &cwm->base.base;
+	@synchronized(cwm->metal_layer) {
+		if (cwm->last_presented_time_s > 0.0 && presented_time_s > cwm->last_presented_time_s) {
+			CFTimeInterval interval_s = presented_time_s - cwm->last_presented_time_s;
+			CFTimeInterval target_error_s = presented_time_s - desired_present_time_s;
+
+			cwm->presented_interval_total_s += interval_s;
+			cwm->presented_target_error_total_s += target_error_s;
+			cwm->presented_sample_count++;
+
+			if (cwm->presented_interval_min_s == 0.0 || interval_s < cwm->presented_interval_min_s) {
+				cwm->presented_interval_min_s = interval_s;
+			}
+			if (interval_s > cwm->presented_interval_max_s) {
+				cwm->presented_interval_max_s = interval_s;
+			}
+			if (cwm->presented_sample_count == 1 || target_error_s < cwm->presented_target_error_min_s) {
+				cwm->presented_target_error_min_s = target_error_s;
+			}
+			if (cwm->presented_sample_count == 1 || target_error_s > cwm->presented_target_error_max_s) {
+				cwm->presented_target_error_max_s = target_error_s;
+			}
+
+			if (cwm->display_period_ns > 0) {
+				CFTimeInterval period_s = (CFTimeInterval)cwm->display_period_ns / (CFTimeInterval)U_TIME_1S_IN_NS;
+				if (interval_s > period_s * 1.5) {
+					cwm->presented_missed_intervals++;
+				}
+			}
+
+			if (cwm->presented_sample_count == 240) {
+				COMP_INFO(ct->c,
+				          "macOS drawable presentation: cadence avg %.3fms min %.3fms max %.3fms, missed %llu/240; target error avg %.3fms min %.3fms max %.3fms",
+				          cwm->presented_interval_total_s / 240.0 * 1000.0,
+				          cwm->presented_interval_min_s * 1000.0,
+				          cwm->presented_interval_max_s * 1000.0,
+				          (unsigned long long)cwm->presented_missed_intervals,
+				          cwm->presented_target_error_total_s / 240.0 * 1000.0,
+				          cwm->presented_target_error_min_s * 1000.0,
+				          cwm->presented_target_error_max_s * 1000.0);
+
+				cwm->presented_interval_total_s = 0.0;
+				cwm->presented_interval_min_s = 0.0;
+				cwm->presented_interval_max_s = 0.0;
+				cwm->presented_target_error_total_s = 0.0;
+				cwm->presented_target_error_min_s = 0.0;
+				cwm->presented_target_error_max_s = 0.0;
+				cwm->presented_sample_count = 0;
+				cwm->presented_missed_intervals = 0;
+			}
+		}
+		cwm->last_presented_time_s = presented_time_s;
+	}
+}
+
 static VkResult
 comp_window_macos_present(struct comp_target *ct,
                           struct vk_bundle_queue *present_queue,
@@ -580,6 +660,11 @@ comp_window_macos_present(struct comp_target *ct,
 
 		uint64_t desired_host_time = monotonic_ns_to_host_time(cwm, desired_present_time_ns);
 		CFTimeInterval desired_host_time_seconds = host_time_to_seconds(cwm, desired_host_time);
+		if (debug_get_bool_option_present_timing()) {
+			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
+				comp_window_macos_record_presented_frame(cwm, presented_drawable, desired_host_time_seconds);
+			}];
+		}
 		[command_buffer presentDrawable:drawable atTime:desired_host_time_seconds];
 
 		dispatch_group_enter(cwm->present_completion_group);
