@@ -12,6 +12,7 @@
 #import <Metal/Metal.h>
 #import <MetalKit/MetalKit.h>
 #import <QuartzCore/QuartzCore.h>
+#import <dispatch/dispatch.h>
 
 #include "main/comp_window.h"
 #include "util/u_debug.h"
@@ -41,7 +42,9 @@ struct comp_window_macos
 	struct vk_image_collection vkic;
 	CVDisplayLinkRef display_link;
 	mach_timebase_info_data_t mach_timebase;
+	dispatch_group_t present_completion_group;
 	atomic_uint_fast64_t latest_vblank_ns;
+	atomic_bool metal_present_failed;
 	uint64_t last_vblank_ns;
 	uint64_t cadence_sample_count;
 	uint64_t cadence_total_ns;
@@ -67,6 +70,19 @@ static uint64_t
 host_time_to_ns(struct comp_window_macos *cwm, uint64_t host_time)
 {
 	return (uint64_t)(((__uint128_t)host_time * cwm->mach_timebase.numer) / cwm->mach_timebase.denom);
+}
+
+static uint64_t
+ns_to_host_time(struct comp_window_macos *cwm, uint64_t ns)
+{
+	return (uint64_t)(((__uint128_t)ns * cwm->mach_timebase.denom) / cwm->mach_timebase.numer);
+}
+
+static CFTimeInterval
+host_time_to_seconds(struct comp_window_macos *cwm, uint64_t host_time)
+{
+	return (CFTimeInterval)((double)host_time * (double)cwm->mach_timebase.numer /
+	                        (double)cwm->mach_timebase.denom / (double)U_TIME_1S_IN_NS);
 }
 
 static CVReturn
@@ -213,6 +229,14 @@ comp_window_macos_init(struct comp_target *ct)
 		cwm->present_queue = present_queue;
 		cwm->pixel_width = (uint32_t)pixel_width;
 		cwm->pixel_height = (uint32_t)pixel_height;
+		cwm->present_completion_group = dispatch_group_create();
+		if (cwm->present_completion_group == NULL) {
+			[present_queue release];
+			[metal_layer release];
+			[window release];
+			COMP_ERROR(ct->c, "Failed to create macOS presentation completion group");
+			return false;
+		}
 
 		mach_timebase_info(&cwm->mach_timebase);
 		CVReturn cvret = CVDisplayLinkCreateWithCGDisplay(display_id, &cwm->display_link);
@@ -417,6 +441,62 @@ comp_window_macos_acquire(struct comp_target *ct, uint32_t *out_index)
 	return VK_SUCCESS;
 }
 
+static void
+comp_window_macos_record_completed_frame(struct comp_window_macos *cwm,
+	                                     uint64_t completed_ns,
+	                                     uint64_t metal_wait_ns)
+{
+	@synchronized(cwm->metal_layer) {
+		cwm->present_metal_wait_total_ns += metal_wait_ns;
+		if (cwm->last_present_ns != 0 && completed_ns > cwm->last_present_ns) {
+			uint64_t interval_ns = completed_ns - cwm->last_present_ns;
+			if (cwm->display_period_ns <= 0 || interval_ns <= (uint64_t)cwm->display_period_ns * 4) {
+				cwm->present_total_ns += interval_ns;
+				cwm->present_sample_count++;
+				if (cwm->present_min_ns == 0 || interval_ns < cwm->present_min_ns) {
+					cwm->present_min_ns = interval_ns;
+				}
+				if (interval_ns > cwm->present_max_ns) {
+					cwm->present_max_ns = interval_ns;
+				}
+				if (cwm->display_period_ns > 0 && interval_ns > (uint64_t)cwm->display_period_ns * 3 / 2) {
+					cwm->present_missed_intervals++;
+				}
+			}
+		}
+		cwm->last_present_ns = completed_ns;
+	}
+}
+
+static void
+comp_window_macos_log_present_stats(struct comp_window_macos *cwm)
+{
+	struct comp_target *ct = &cwm->base.base;
+	@synchronized(cwm->metal_layer) {
+		if (cwm->present_sample_count < 240) {
+			return;
+		}
+
+		double average_ms = (double)cwm->present_total_ns / (double)cwm->present_sample_count / 1000000.0;
+		COMP_INFO(ct->c, "macOS completed-frame cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/%llu",
+		          average_ms, (double)cwm->present_min_ns / 1000000.0, (double)cwm->present_max_ns / 1000000.0,
+		          (unsigned long long)cwm->present_missed_intervals,
+		          (unsigned long long)cwm->present_sample_count);
+		COMP_INFO(ct->c, "macOS presentation waits: Vulkan %.3fms, drawable %.3fms, Metal %.3fms",
+		          (double)cwm->present_vk_wait_total_ns / (double)cwm->present_sample_count / 1000000.0,
+		          (double)cwm->present_drawable_wait_total_ns / (double)cwm->present_sample_count / 1000000.0,
+		          (double)cwm->present_metal_wait_total_ns / (double)cwm->present_sample_count / 1000000.0);
+		cwm->present_sample_count = 0;
+		cwm->present_total_ns = 0;
+		cwm->present_min_ns = 0;
+		cwm->present_max_ns = 0;
+		cwm->present_missed_intervals = 0;
+		cwm->present_vk_wait_total_ns = 0;
+		cwm->present_drawable_wait_total_ns = 0;
+		cwm->present_metal_wait_total_ns = 0;
+	}
+}
+
 static VkResult
 comp_window_macos_present(struct comp_target *ct,
 	                      struct vk_bundle_queue *present_queue,
@@ -433,6 +513,11 @@ comp_window_macos_present(struct comp_target *ct,
 	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
+	if (atomic_exchange_explicit(&cwm->metal_present_failed, false, memory_order_acq_rel)) {
+		return VK_ERROR_DEVICE_LOST;
+	}
+
+	comp_window_macos_log_present_stats(cwm);
 
 	uint64_t before_vk_wait_ns = os_monotonic_get_ns();
 	vk_queue_lock(present_queue);
@@ -464,57 +549,32 @@ comp_window_macos_present(struct comp_target *ct,
 		        destinationLevel:0
 		       destinationOrigin:MTLOriginMake(0, 0, 0)];
 		[blit endEncoding];
-		(void)desired_present_time_ns;
-		[command_buffer presentDrawable:drawable];
-		[command_buffer commit];
-		[command_buffer waitUntilCompleted];
-		uint64_t after_metal_wait_ns = os_monotonic_get_ns();
-		if ([command_buffer status] == MTLCommandBufferStatusError) {
-			COMP_ERROR(ct->c, "Metal presentation failed: %s",
-			           [[[command_buffer error] localizedDescription] UTF8String]);
-			return VK_ERROR_DEVICE_LOST;
+
+		uint64_t desired_host_time = ns_to_host_time(cwm, (uint64_t)desired_present_time_ns);
+		CFTimeInterval desired_host_time_seconds = host_time_to_seconds(cwm, desired_host_time);
+		[command_buffer presentDrawable:drawable atTime:desired_host_time_seconds];
+
+		@synchronized(cwm->metal_layer) {
+			cwm->present_vk_wait_total_ns += after_vk_wait_ns - before_vk_wait_ns;
+			cwm->present_drawable_wait_total_ns += after_drawable_ns - after_vk_wait_ns;
 		}
-		cwm->present_vk_wait_total_ns += after_vk_wait_ns - before_vk_wait_ns;
-		cwm->present_drawable_wait_total_ns += after_drawable_ns - after_vk_wait_ns;
-		cwm->present_metal_wait_total_ns += after_metal_wait_ns - after_drawable_ns;
+
+		dispatch_group_enter(cwm->present_completion_group);
+		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {
+			@autoreleasepool {
+				uint64_t completed_ns = os_monotonic_get_ns();
+				comp_window_macos_record_completed_frame(cwm, completed_ns, completed_ns - after_drawable_ns);
+				if ([completed_buffer status] == MTLCommandBufferStatusError) {
+					COMP_ERROR(ct->c, "Metal presentation failed: %s",
+					           [[[completed_buffer error] localizedDescription] UTF8String]);
+					atomic_store_explicit(&cwm->metal_present_failed, true, memory_order_release);
+				}
+			}
+			dispatch_group_leave(cwm->present_completion_group);
+		}];
+		[command_buffer commit];
 	}
 
-	uint64_t now_ns = os_monotonic_get_ns();
-	if (cwm->last_present_ns != 0 && now_ns > cwm->last_present_ns) {
-		uint64_t interval_ns = now_ns - cwm->last_present_ns;
-		if (cwm->display_period_ns <= 0 || interval_ns <= (uint64_t)cwm->display_period_ns * 4) {
-			cwm->present_total_ns += interval_ns;
-			cwm->present_sample_count++;
-			if (cwm->present_min_ns == 0 || interval_ns < cwm->present_min_ns) {
-				cwm->present_min_ns = interval_ns;
-			}
-			if (interval_ns > cwm->present_max_ns) {
-				cwm->present_max_ns = interval_ns;
-			}
-			if (cwm->display_period_ns > 0 && interval_ns > (uint64_t)cwm->display_period_ns * 3 / 2) {
-				cwm->present_missed_intervals++;
-			}
-		}
-	}
-	cwm->last_present_ns = now_ns;
-	if (cwm->present_sample_count == 240) {
-		double average_ms = (double)cwm->present_total_ns / (double)cwm->present_sample_count / 1000000.0;
-		COMP_INFO(ct->c, "macOS completed-frame cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/240",
-		          average_ms, (double)cwm->present_min_ns / 1000000.0, (double)cwm->present_max_ns / 1000000.0,
-		          (unsigned long long)cwm->present_missed_intervals);
-		COMP_INFO(ct->c, "macOS presentation waits: Vulkan %.3fms, drawable %.3fms, Metal %.3fms",
-		          (double)cwm->present_vk_wait_total_ns / 240.0 / 1000000.0,
-		          (double)cwm->present_drawable_wait_total_ns / 240.0 / 1000000.0,
-		          (double)cwm->present_metal_wait_total_ns / 240.0 / 1000000.0);
-		cwm->present_sample_count = 0;
-		cwm->present_total_ns = 0;
-		cwm->present_min_ns = 0;
-		cwm->present_max_ns = 0;
-		cwm->present_missed_intervals = 0;
-		cwm->present_vk_wait_total_ns = 0;
-		cwm->present_drawable_wait_total_ns = 0;
-		cwm->present_metal_wait_total_ns = 0;
-	}
 	return VK_SUCCESS;
 }
 
@@ -627,6 +687,9 @@ comp_window_macos_destroy(struct comp_target *ct)
 		CVDisplayLinkRelease(cwm->display_link);
 		cwm->display_link = NULL;
 	}
+	if (cwm->present_completion_group != NULL) {
+		dispatch_group_wait(cwm->present_completion_group, DISPATCH_TIME_FOREVER);
+	}
 	comp_window_macos_free_images(cwm);
 	u_pc_destroy(&cwm->base.upc);
 	@autoreleasepool {
@@ -637,6 +700,11 @@ comp_window_macos_destroy(struct comp_target *ct)
 		[cwm->metal_layer release];
 		[cwm->screen release];
 	}
+#if !OS_OBJECT_USE_OBJC
+	if (cwm->present_completion_group != NULL) {
+		dispatch_release(cwm->present_completion_group);
+	}
+#endif
 	free(cwm);
 }
 
