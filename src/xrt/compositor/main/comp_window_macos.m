@@ -50,6 +50,7 @@ struct comp_window_macos
 	uint64_t cadence_total_ns;
 	uint64_t cadence_min_ns;
 	uint64_t cadence_max_ns;
+	bool pacer_vblank_synced;
 	uint64_t last_present_ns;
 	uint64_t present_sample_count;
 	uint64_t present_total_ns;
@@ -64,6 +65,12 @@ struct comp_window_macos
 	uint32_t pixel_height;
 	uint32_t next_image;
 	bool logged_layer_state;
+	int64_t last_desired_present_time_ns;
+	uint64_t desired_present_sample_count;
+	int64_t desired_present_interval_total_ns;
+	int64_t desired_present_interval_min_ns;
+	int64_t desired_present_interval_max_ns;
+	int64_t desired_present_lead_total_ns;
 };
 
 static uint64_t
@@ -450,6 +457,9 @@ comp_window_macos_create_images(struct comp_target *ct,
 	cwm->next_image = 0;
 	if (cwm->base.upc == NULL) {
 		u_pc_fake_create(ct->c->frame_interval_ns, os_monotonic_get_ns(), &cwm->base.upc);
+		COMP_INFO(ct->c,
+          "macOS creating pacer with frame interval %.3fms",
+          (double)ct->c->frame_interval_ns / 1000000.0);
 	}
 	if (cwm->display_link != NULL && !CVDisplayLinkIsRunning(cwm->display_link)) {
 		CVReturn cvret = CVDisplayLinkStart(cwm->display_link);
@@ -557,6 +567,51 @@ comp_window_macos_present(struct comp_target *ct,
 
 	comp_window_macos_log_present_stats(cwm);
 
+	int64_t present_now_ns = os_monotonic_get_ns();
+
+	@synchronized(cwm->metal_layer) {
+		if (cwm->last_desired_present_time_ns != 0) {
+			int64_t interval_ns =
+				desired_present_time_ns - cwm->last_desired_present_time_ns;
+			int64_t lead_ns = desired_present_time_ns - present_now_ns;
+
+			cwm->desired_present_interval_total_ns += interval_ns;
+			cwm->desired_present_lead_total_ns += lead_ns;
+			cwm->desired_present_sample_count++;
+
+			if (cwm->desired_present_interval_min_ns == 0 ||
+				interval_ns < cwm->desired_present_interval_min_ns) {
+				cwm->desired_present_interval_min_ns = interval_ns;
+			}
+			if (interval_ns > cwm->desired_present_interval_max_ns) {
+				cwm->desired_present_interval_max_ns = interval_ns;
+			}
+
+			if (cwm->desired_present_sample_count == 240) {
+				COMP_INFO(
+					ct->c,
+					"macOS desired-present cadence: average %.3fms, "
+					"min %.3fms, max %.3fms, average lead %.3fms",
+					(double)cwm->desired_present_interval_total_ns /
+						240.0 / 1000000.0,
+					(double)cwm->desired_present_interval_min_ns /
+						1000000.0,
+					(double)cwm->desired_present_interval_max_ns /
+						1000000.0,
+					(double)cwm->desired_present_lead_total_ns /
+						240.0 / 1000000.0);
+
+				cwm->desired_present_sample_count = 0;
+				cwm->desired_present_interval_total_ns = 0;
+				cwm->desired_present_interval_min_ns = 0;
+				cwm->desired_present_interval_max_ns = 0;
+				cwm->desired_present_lead_total_ns = 0;
+			}
+		}
+
+		cwm->last_desired_present_time_ns = desired_present_time_ns;
+	}
+
 	uint64_t before_vk_wait_ns = os_monotonic_get_ns();
 	vk_queue_lock(present_queue);
 	VkResult ret = vk->vkQueueWaitIdle(present_queue->queue);
@@ -633,32 +688,81 @@ comp_window_macos_update_timings(struct comp_target *ct)
 		return VK_SUCCESS;
 	}
 
-	u_pc_update_vblank_from_display_control(cwm->base.upc, (int64_t)vblank_ns);
-	if (cwm->last_vblank_ns != 0 && vblank_ns > cwm->last_vblank_ns) {
-		uint64_t interval_ns = vblank_ns - cwm->last_vblank_ns;
-		if (cwm->display_period_ns > 0 && interval_ns > (uint64_t)cwm->display_period_ns * 4) {
-			cwm->last_vblank_ns = vblank_ns;
-			return VK_SUCCESS;
-		}
-		cwm->cadence_total_ns += interval_ns;
-		cwm->cadence_sample_count++;
-		if (cwm->cadence_min_ns == 0 || interval_ns < cwm->cadence_min_ns) {
-			cwm->cadence_min_ns = interval_ns;
-		}
-		if (interval_ns > cwm->cadence_max_ns) {
-			cwm->cadence_max_ns = interval_ns;
-		}
+	/*
+	 * The macOS target uses the fake compositor pacer.
+	 *
+	 * update_vblank_from_display_control() on that pacer simply overwrites
+	 * last_present_time_ns. Re-anchoring it on every update_timings() call
+	 * can lock the pacer to a lower cadence if the compositor only observes
+	 * every second physical vblank.
+	 *
+	 * Sync the pacer phase once to a real CVDisplayLink timestamp, then let
+	 * it free-run at its configured frame_period_ns.
+	 */
+	if (!cwm->pacer_vblank_synced) {
+		u_pc_update_vblank_from_display_control(cwm->base.upc, (int64_t)vblank_ns);
+		cwm->pacer_vblank_synced = true;
+		COMP_INFO(ct->c, "macOS fake pacer phase synced to display vblank");
+	}
 
-		if (cwm->cadence_sample_count == 240) {
-			double average_ms = (double)cwm->cadence_total_ns / (double)cwm->cadence_sample_count / 1000000.0;
-			COMP_INFO(ct->c, "PS VR2 display-link cadence: average %.3fms, min %.3fms, max %.3fms", average_ms,
-			          (double)cwm->cadence_min_ns / 1000000.0, (double)cwm->cadence_max_ns / 1000000.0);
-			cwm->cadence_sample_count = 0;
-			cwm->cadence_total_ns = 0;
-			cwm->cadence_min_ns = 0;
-			cwm->cadence_max_ns = 0;
+	if (cwm->last_vblank_ns != 0 && vblank_ns > cwm->last_vblank_ns) {
+		uint64_t raw_interval_ns = vblank_ns - cwm->last_vblank_ns;
+
+		if (cwm->display_period_ns > 0) {
+			uint64_t period_ns = (uint64_t)cwm->display_period_ns;
+
+			if (raw_interval_ns > period_ns * 8) {
+				cwm->last_vblank_ns = vblank_ns;
+				return VK_SUCCESS;
+			}
+
+			/*
+			 * Log the reconstructed cadence rather than how frequently the
+			 * compositor happened to consume latest_vblank_ns.
+			 */
+			uint64_t intervals = (raw_interval_ns + period_ns / 2) / period_ns;
+			if (intervals < 1) {
+				intervals = 1;
+			}
+
+			for (uint64_t i = 0; i < intervals; i++) {
+				uint64_t interval_ns = period_ns;
+				cwm->cadence_total_ns += interval_ns;
+				cwm->cadence_sample_count++;
+
+				if (cwm->cadence_min_ns == 0 || interval_ns < cwm->cadence_min_ns) {
+					cwm->cadence_min_ns = interval_ns;
+				}
+				if (interval_ns > cwm->cadence_max_ns) {
+					cwm->cadence_max_ns = interval_ns;
+				}
+
+				if (cwm->cadence_sample_count == 240) {
+					double average_ms =
+					    (double)cwm->cadence_total_ns / (double)cwm->cadence_sample_count / 1000000.0;
+					COMP_INFO(ct->c,
+					          "PS VR2 display-link cadence: average %.3fms, min %.3fms, max %.3fms",
+					          average_ms, (double)cwm->cadence_min_ns / 1000000.0,
+					          (double)cwm->cadence_max_ns / 1000000.0);
+					cwm->cadence_sample_count = 0;
+					cwm->cadence_total_ns = 0;
+					cwm->cadence_min_ns = 0;
+					cwm->cadence_max_ns = 0;
+				}
+			}
+		} else {
+			/* Fallback if the nominal display period was unavailable. */
+			cwm->cadence_total_ns += raw_interval_ns;
+			cwm->cadence_sample_count++;
+			if (cwm->cadence_min_ns == 0 || raw_interval_ns < cwm->cadence_min_ns) {
+				cwm->cadence_min_ns = raw_interval_ns;
+			}
+			if (raw_interval_ns > cwm->cadence_max_ns) {
+				cwm->cadence_max_ns = raw_interval_ns;
+			}
 		}
 	}
+
 	cwm->last_vblank_ns = vblank_ns;
 	return VK_SUCCESS;
 }
