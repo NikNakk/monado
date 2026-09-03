@@ -62,6 +62,20 @@ struct comp_window_macos
 	CFTimeInterval presented_target_error_max_s;
 	uint64_t presented_sample_count;
 	uint64_t presented_missed_intervals;
+
+	uint64_t submission_sample_count;
+	uint64_t render_wait_total_ns;
+	uint64_t render_wait_min_ns;
+	uint64_t render_wait_max_ns;
+	uint64_t drawable_wait_total_ns;
+	uint64_t drawable_wait_min_ns;
+	uint64_t drawable_wait_max_ns;
+	uint64_t metal_submit_total_ns;
+	uint64_t metal_submit_min_ns;
+	uint64_t metal_submit_max_ns;
+	uint64_t submission_total_ns;
+	uint64_t submission_min_ns;
+	uint64_t submission_max_ns;
 };
 
 static uint64_t
@@ -615,6 +629,76 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 	}
 }
 
+static void
+comp_window_macos_record_submission(struct comp_window_macos *cwm,
+                                    uint64_t render_wait_ns,
+                                    uint64_t drawable_wait_ns,
+                                    uint64_t metal_submit_ns,
+                                    uint64_t total_ns)
+{
+	if (!debug_get_bool_option_present_timing()) {
+		return;
+	}
+
+	if (cwm->submission_sample_count == 0) {
+		cwm->render_wait_min_ns = render_wait_ns;
+		cwm->drawable_wait_min_ns = drawable_wait_ns;
+		cwm->metal_submit_min_ns = metal_submit_ns;
+		cwm->submission_min_ns = total_ns;
+	} else {
+		cwm->render_wait_min_ns =
+		    render_wait_ns < cwm->render_wait_min_ns ? render_wait_ns : cwm->render_wait_min_ns;
+		cwm->drawable_wait_min_ns =
+		    drawable_wait_ns < cwm->drawable_wait_min_ns ? drawable_wait_ns : cwm->drawable_wait_min_ns;
+		cwm->metal_submit_min_ns =
+		    metal_submit_ns < cwm->metal_submit_min_ns ? metal_submit_ns : cwm->metal_submit_min_ns;
+		cwm->submission_min_ns = total_ns < cwm->submission_min_ns ? total_ns : cwm->submission_min_ns;
+	}
+	cwm->render_wait_max_ns =
+	    render_wait_ns > cwm->render_wait_max_ns ? render_wait_ns : cwm->render_wait_max_ns;
+	cwm->drawable_wait_max_ns =
+	    drawable_wait_ns > cwm->drawable_wait_max_ns ? drawable_wait_ns : cwm->drawable_wait_max_ns;
+	cwm->metal_submit_max_ns =
+	    metal_submit_ns > cwm->metal_submit_max_ns ? metal_submit_ns : cwm->metal_submit_max_ns;
+	cwm->submission_max_ns = total_ns > cwm->submission_max_ns ? total_ns : cwm->submission_max_ns;
+
+	cwm->submission_sample_count++;
+	cwm->render_wait_total_ns += render_wait_ns;
+	cwm->drawable_wait_total_ns += drawable_wait_ns;
+	cwm->metal_submit_total_ns += metal_submit_ns;
+	cwm->submission_total_ns += total_ns;
+
+	if (cwm->submission_sample_count < 240) {
+		return;
+	}
+
+	struct comp_target *ct = &cwm->base.base;
+	COMP_INFO(ct->c,
+	          "macOS present submission: render wait avg %.3fms min %.3fms max %.3fms; drawable wait avg "
+	          "%.3fms min %.3fms max %.3fms; Metal CPU avg %.3fms min %.3fms max %.3fms; total avg "
+	          "%.3fms min %.3fms max %.3fms",
+	          time_ns_to_ms_f(cwm->render_wait_total_ns) / 240.0, time_ns_to_ms_f(cwm->render_wait_min_ns),
+	          time_ns_to_ms_f(cwm->render_wait_max_ns), time_ns_to_ms_f(cwm->drawable_wait_total_ns) / 240.0,
+	          time_ns_to_ms_f(cwm->drawable_wait_min_ns), time_ns_to_ms_f(cwm->drawable_wait_max_ns),
+	          time_ns_to_ms_f(cwm->metal_submit_total_ns) / 240.0, time_ns_to_ms_f(cwm->metal_submit_min_ns),
+	          time_ns_to_ms_f(cwm->metal_submit_max_ns), time_ns_to_ms_f(cwm->submission_total_ns) / 240.0,
+	          time_ns_to_ms_f(cwm->submission_min_ns), time_ns_to_ms_f(cwm->submission_max_ns));
+
+	cwm->submission_sample_count = 0;
+	cwm->render_wait_total_ns = 0;
+	cwm->render_wait_min_ns = 0;
+	cwm->render_wait_max_ns = 0;
+	cwm->drawable_wait_total_ns = 0;
+	cwm->drawable_wait_min_ns = 0;
+	cwm->drawable_wait_max_ns = 0;
+	cwm->metal_submit_total_ns = 0;
+	cwm->metal_submit_min_ns = 0;
+	cwm->metal_submit_max_ns = 0;
+	cwm->submission_total_ns = 0;
+	cwm->submission_min_ns = 0;
+	cwm->submission_max_ns = 0;
+}
+
 static VkResult
 comp_window_macos_present(struct comp_target *ct,
                           struct vk_bundle_queue *present_queue,
@@ -633,13 +717,18 @@ comp_window_macos_present(struct comp_target *ct,
 		return VK_ERROR_DEVICE_LOST;
 	}
 
+	uint64_t before_render_wait_ns = os_monotonic_get_ns();
 	VkResult ret = comp_window_macos_wait_for_render_complete(cwm, present_queue, timeline_semaphore_value);
+	uint64_t after_render_wait_ns = os_monotonic_get_ns();
 	if (ret != VK_SUCCESS) {
 		return ret;
 	}
 
+	uint64_t after_drawable_wait_ns = 0;
+	uint64_t after_metal_submit_ns = 0;
 	@autoreleasepool {
 		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
+		after_drawable_wait_ns = os_monotonic_get_ns();
 		if (drawable == nil) {
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
 			return VK_ERROR_OUT_OF_DATE_KHR;
@@ -679,7 +768,13 @@ comp_window_macos_present(struct comp_target *ct,
 			dispatch_group_leave(cwm->present_completion_group);
 		}];
 		[command_buffer commit];
+		after_metal_submit_ns = os_monotonic_get_ns();
 	}
+
+	comp_window_macos_record_submission(cwm, after_render_wait_ns - before_render_wait_ns,
+	                                      after_drawable_wait_ns - after_render_wait_ns,
+	                                      after_metal_submit_ns - after_drawable_wait_ns,
+	                                      after_metal_submit_ns - before_render_wait_ns);
 
 	return VK_SUCCESS;
 }
