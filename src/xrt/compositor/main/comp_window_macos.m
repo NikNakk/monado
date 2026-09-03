@@ -85,6 +85,42 @@ host_time_to_seconds(struct comp_window_macos *cwm, uint64_t host_time)
 	                        (double)cwm->mach_timebase.denom / (double)U_TIME_1S_IN_NS);
 }
 
+/*
+ * CLOCK_MONOTONIC and mach_absolute_time use different clock domains on
+ * macOS. Translate timestamps relative to a pair sampled "now" rather
+ * than assuming their epochs are identical.
+ */
+static int64_t
+host_time_to_monotonic_ns(struct comp_window_macos *cwm, uint64_t host_time)
+{
+	uint64_t host_now = mach_absolute_time();
+	int64_t monotonic_now_ns = os_monotonic_get_ns();
+
+	uint64_t host_ns = host_time_to_ns(cwm, host_time);
+	uint64_t host_now_ns = host_time_to_ns(cwm, host_now);
+
+	if (host_ns >= host_now_ns) {
+		return monotonic_now_ns + (int64_t)(host_ns - host_now_ns);
+	}
+
+	return monotonic_now_ns - (int64_t)(host_now_ns - host_ns);
+}
+
+static uint64_t
+monotonic_ns_to_host_time(struct comp_window_macos *cwm, int64_t monotonic_ns)
+{
+	uint64_t host_now = mach_absolute_time();
+	int64_t monotonic_now_ns = os_monotonic_get_ns();
+	int64_t delta_ns = monotonic_ns - monotonic_now_ns;
+
+	if (delta_ns >= 0) {
+		return host_now + ns_to_host_time(cwm, (uint64_t)delta_ns);
+	}
+
+	uint64_t delta_host_time = ns_to_host_time(cwm, (uint64_t)(-delta_ns));
+	return host_now > delta_host_time ? host_now - delta_host_time : 0;
+}
+
 static CVReturn
 display_link_callback(CVDisplayLinkRef display_link,
 	                  const CVTimeStamp *in_now,
@@ -99,8 +135,10 @@ display_link_callback(CVDisplayLinkRef display_link,
 	(void)flags_out;
 	struct comp_window_macos *cwm = context;
 	if ((in_output_time->flags & kCVTimeStampHostTimeValid) != 0) {
-		uint64_t output_ns = host_time_to_ns(cwm, in_output_time->hostTime);
-		atomic_store_explicit(&cwm->latest_vblank_ns, output_ns, memory_order_release);
+		int64_t output_ns = host_time_to_monotonic_ns(cwm, in_output_time->hostTime);
+		if (output_ns > 0) {
+			atomic_store_explicit(&cwm->latest_vblank_ns, (uint64_t)output_ns, memory_order_release);
+		}
 	}
 	return kCVReturnSuccess;
 }
@@ -550,7 +588,7 @@ comp_window_macos_present(struct comp_target *ct,
 		       destinationOrigin:MTLOriginMake(0, 0, 0)];
 		[blit endEncoding];
 
-		uint64_t desired_host_time = ns_to_host_time(cwm, (uint64_t)desired_present_time_ns);
+		uint64_t desired_host_time = monotonic_ns_to_host_time(cwm, desired_present_time_ns);
 		CFTimeInterval desired_host_time_seconds = host_time_to_seconds(cwm, desired_host_time);
 		[command_buffer presentDrawable:drawable atTime:desired_host_time_seconds];
 
