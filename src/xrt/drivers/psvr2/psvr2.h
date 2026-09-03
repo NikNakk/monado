@@ -264,6 +264,10 @@ struct psvr2_hmd
 	/* Tracking state */
 	struct m_relation_history *slam_relation_history;
 	struct m_ff_vec3_f32 *ff_gyro;
+	uint64_t timing_query_count;
+	time_duration_ns timing_prediction_total_ns;
+	time_duration_ns timing_imu_after_slam_total_ns;
+	time_duration_ns timing_prediction_after_imu_total_ns;
 
 	/* Eye State */
 	bool eye_feature_enabled;

@@ -53,6 +53,7 @@
 #include <math.h>
 
 DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_WARN)
+DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
@@ -1183,12 +1184,12 @@ comp_renderer_draw(struct comp_renderer *r)
 	bool do_timewarp = !c->debug.atw_off;
 
 #ifdef XRT_OS_OSX
-	// On the WiVRn path the Quest client applies its own ATW.
-	// The WiVRn foveation patch (0005) removes server timewarp entirely,
-	// but that patch is not applied to this fork. Disable unconditionally
-	// to avoid double-timewarp (server + client) which causes roll/pitch
-	// axis confusion.
-	do_timewarp = false;
+	// A WiVRn client applies its own ATW, but native OpenXR clients rely on
+	// Monado's compositor to perform late pose correction. Keep the WiVRn
+	// workaround available without disabling ATW for every macOS target.
+	if (debug_get_bool_option_force_atw_off_on_apple()) {
+		do_timewarp = false;
+	}
 #endif
 
 	// Consistency check.

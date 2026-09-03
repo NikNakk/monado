@@ -65,6 +65,7 @@
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS", 1.0f)
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
 
 #ifdef XRT_OS_OSX
 #define PSVR2_AUXILIARY_STREAMS_DEFAULT false
@@ -156,6 +157,37 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 		m_relation_history_get(hmd->slam_relation_history, at_timestamp_ns, out_relation);
 		return;
 	}
+
+	if (debug_get_bool_option_psvr2_timing_log()) {
+		uint64_t latest_imu_ts = 0;
+		if (m_ff_vec3_f32_get_timestamp(hmd->ff_gyro, 0, &latest_imu_ts)) {
+			hmd->timing_query_count++;
+			hmd->timing_prediction_total_ns += at_timestamp_ns - latest_relation_ts;
+			hmd->timing_imu_after_slam_total_ns += (int64_t)latest_imu_ts - latest_relation_ts;
+			hmd->timing_prediction_after_imu_total_ns += at_timestamp_ns - (int64_t)latest_imu_ts;
+			if (hmd->timing_query_count == 240) {
+				PSVR2_WARN(hmd,
+				             "Pose timing: prediction %.3fms after SLAM, latest IMU %.3fms after SLAM, target "
+				             "%.3fms after IMU",
+				             (double)hmd->timing_prediction_total_ns / 240.0 / 1000000.0,
+				             (double)hmd->timing_imu_after_slam_total_ns / 240.0 / 1000000.0,
+				             (double)hmd->timing_prediction_after_imu_total_ns / 240.0 / 1000000.0);
+				hmd->timing_query_count = 0;
+				hmd->timing_prediction_total_ns = 0;
+				hmd->timing_imu_after_slam_total_ns = 0;
+				hmd->timing_prediction_after_imu_total_ns = 0;
+			}
+		}
+	}
+
+	// Status and SLAM transfers are independent. A pose query can arrive after a
+	// new SLAM pose but just before the next status packet, leaving no gyro sample
+	// newer than the pose. Seed prediction with the most recent high-rate gyro in
+	// that case instead of relying on noisier velocity estimated from 60 Hz SLAM.
+	math_quat_rotate_derivative(&latest_relation.pose.orientation, &hmd->last_gyro,
+	                            &latest_relation.angular_velocity);
+	latest_relation.relation_flags = (enum xrt_space_relation_flags)(
+	    latest_relation.relation_flags | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
 
 	// Predict forward using dead reckoning
 	t_apply_dead_reckoning( //
@@ -520,7 +552,6 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read)
 	math_quat_rotate(&tmp.orientation, &hmd->last_slam_pose.orientation, &hmd->pose.orientation);
 	hmd->pose.position = hmd->last_slam_pose.position;
 	math_vec3_accum(&tmp.position, &hmd->pose.position);
-	os_mutex_unlock(&hmd->data_lock);
 
 	PSVR2_TRACE(hmd, "SLAM - %d leftover bytes", (int)sizeof(slam.remainder));
 	PSVR2_TRACE_HEX(hmd, slam.remainder, sizeof(slam.remainder));
@@ -538,6 +569,7 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read)
 	};
 
 	m_relation_history_push_with_motion_estimation(hmd->slam_relation_history, &relation, pose_sample.timestamp_ns);
+	os_mutex_unlock(&hmd->data_lock);
 }
 
 static void LIBUSB_CALL
