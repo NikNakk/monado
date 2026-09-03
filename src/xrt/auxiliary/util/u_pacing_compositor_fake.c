@@ -42,6 +42,7 @@ DEBUG_GET_ONCE_FLOAT_OPTION(present_to_display_offset_ms, "U_PACING_COMP_PRESENT
 DEBUG_GET_ONCE_FLOAT_OPTION(min_comp_time_ms, "U_PACING_COMP_MIN_TIME_MS", 3.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(comp_time_fraction_percent, "U_PACING_COMP_TIME_FRACTION_PERCENT", 20.0f)
 DEBUG_GET_ONCE_BOOL_OPTION(live_stats, "U_PACING_LIVE_STATS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(fake_prediction_stats, "U_PACING_FAKE_PREDICTION_STATS", false)
 
 // We keep track of this number of frames.
 #define FRAME_COUNT 8
@@ -95,6 +96,30 @@ struct frame
 	int64_t when_submit_end_ns;
 };
 
+struct fake_prediction_stats
+{
+	uint32_t sample_count;
+	uint32_t interval_count;
+	uint32_t target_advance_count;
+	uint32_t skipped_target_count;
+	uint32_t repeated_target_count;
+	uint32_t max_target_advance;
+	uint32_t max_search_periods;
+	int64_t last_predict_ns;
+	int64_t last_target_ns;
+	int64_t interval_total_ns;
+	int64_t interval_min_ns;
+	int64_t interval_max_ns;
+	int64_t pacer_age_total_ns;
+	int64_t pacer_age_min_ns;
+	int64_t pacer_age_max_ns;
+	uint64_t target_advance_total;
+	uint64_t search_periods_total;
+	int64_t target_lead_total_ns;
+	int64_t target_lead_min_ns;
+	int64_t target_lead_max_ns;
+};
+
 /*!
  * A very simple pacer that tries it best to pace a compositor. Used when the
  * compositor can't get any good or limited feedback from the presentation
@@ -132,6 +157,9 @@ struct fake_timing
 
 	//! Live stats we keep track off.
 	struct u_live_stats_ns cpu, draw, submit, gpu, gpu_delay, total_frame;
+
+	//! Aggregated, opt-in diagnostics for fake-pacer prediction cadence.
+	struct fake_prediction_stats prediction_stats;
 };
 
 
@@ -176,16 +204,103 @@ get_new_frame(struct fake_timing *ft)
 }
 
 static int64_t
-predict_next_frame_present_time(struct fake_timing *ft, int64_t now_ns)
+predict_next_frame_present_time(struct fake_timing *ft, int64_t now_ns, uint32_t *out_periods_ahead)
 {
 	int64_t time_needed_ns = ft->comp_time_ns;
 	int64_t predicted_present_time_ns = ft->last_present_time_ns + ft->frame_period_ns;
+	uint32_t periods_ahead = 1;
 
 	while (now_ns + time_needed_ns > predicted_present_time_ns) {
 		predicted_present_time_ns += ft->frame_period_ns;
+		periods_ahead++;
 	}
 
+	*out_periods_ahead = periods_ahead;
 	return predicted_present_time_ns;
+}
+
+static void
+log_prediction_stats(struct fake_timing *ft, int64_t now_ns, int64_t target_ns, uint32_t search_periods)
+{
+	if (!debug_get_bool_option_fake_prediction_stats()) {
+		return;
+	}
+
+	struct fake_prediction_stats *stats = &ft->prediction_stats;
+	int64_t pacer_age_ns = now_ns - ft->last_present_time_ns;
+	int64_t target_lead_ns = target_ns - now_ns;
+
+	if (stats->sample_count == 0) {
+		stats->interval_min_ns = INT64_MAX;
+		stats->pacer_age_min_ns = INT64_MAX;
+		stats->target_lead_min_ns = INT64_MAX;
+	}
+
+	if (stats->last_predict_ns != 0) {
+		int64_t interval_ns = now_ns - stats->last_predict_ns;
+		stats->interval_count++;
+		stats->interval_total_ns += interval_ns;
+		stats->interval_min_ns = interval_ns < stats->interval_min_ns ? interval_ns : stats->interval_min_ns;
+		stats->interval_max_ns = interval_ns > stats->interval_max_ns ? interval_ns : stats->interval_max_ns;
+	}
+	stats->last_predict_ns = now_ns;
+	if (stats->last_target_ns != 0) {
+		int64_t target_delta_ns = target_ns - stats->last_target_ns;
+		uint32_t target_advance = target_delta_ns > 0
+		                              ? (uint32_t)((target_delta_ns + ft->frame_period_ns / 2) /
+		                                           ft->frame_period_ns)
+		                              : 0;
+		stats->target_advance_count++;
+		stats->target_advance_total += target_advance;
+		stats->max_target_advance =
+		    target_advance > stats->max_target_advance ? target_advance : stats->max_target_advance;
+		stats->skipped_target_count += target_advance > 1 ? 1 : 0;
+		stats->repeated_target_count += target_advance == 0 ? 1 : 0;
+	}
+	stats->last_target_ns = target_ns;
+
+	stats->sample_count++;
+	stats->search_periods_total += search_periods;
+	stats->max_search_periods =
+	    search_periods > stats->max_search_periods ? search_periods : stats->max_search_periods;
+	stats->pacer_age_total_ns += pacer_age_ns;
+	stats->pacer_age_min_ns = pacer_age_ns < stats->pacer_age_min_ns ? pacer_age_ns : stats->pacer_age_min_ns;
+	stats->pacer_age_max_ns = pacer_age_ns > stats->pacer_age_max_ns ? pacer_age_ns : stats->pacer_age_max_ns;
+	stats->target_lead_total_ns += target_lead_ns;
+	stats->target_lead_min_ns =
+	    target_lead_ns < stats->target_lead_min_ns ? target_lead_ns : stats->target_lead_min_ns;
+	stats->target_lead_max_ns =
+	    target_lead_ns > stats->target_lead_max_ns ? target_lead_ns : stats->target_lead_max_ns;
+
+	if (stats->sample_count < 240) {
+		return;
+	}
+
+	double interval_avg_ms = stats->interval_count > 0
+	                             ? time_ns_to_ms_f(stats->interval_total_ns) / stats->interval_count
+	                             : 0.0;
+	UPC_LOG_I("Fake pacing (240 predictions): interval avg %.3fms min %.3fms max %.3fms; "
+	          "phase-anchor age avg %.3fms min %.3fms max %.3fms; comp %.3fms; "
+	          "search periods avg %.1f max %u; "
+	          "target advance avg %.2f periods max %u, skipped %u, repeated %u; "
+	          "target lead avg %.3fms min %.3fms max %.3fms",
+	          interval_avg_ms, time_ns_to_ms_f(stats->interval_min_ns), time_ns_to_ms_f(stats->interval_max_ns),
+	          time_ns_to_ms_f(stats->pacer_age_total_ns) / stats->sample_count,
+	          time_ns_to_ms_f(stats->pacer_age_min_ns), time_ns_to_ms_f(stats->pacer_age_max_ns),
+	          time_ns_to_ms_f(ft->comp_time_ns), (double)stats->search_periods_total / stats->sample_count,
+	          stats->max_search_periods,
+	          stats->target_advance_count > 0
+	              ? (double)stats->target_advance_total / stats->target_advance_count
+	              : 0.0,
+	          stats->max_target_advance, stats->skipped_target_count, stats->repeated_target_count,
+	          time_ns_to_ms_f(stats->target_lead_total_ns) / stats->sample_count,
+	          time_ns_to_ms_f(stats->target_lead_min_ns), time_ns_to_ms_f(stats->target_lead_max_ns));
+
+	int64_t last_predict_ns = stats->last_predict_ns;
+	int64_t last_target_ns = stats->last_target_ns;
+	U_ZERO(stats);
+	stats->last_predict_ns = last_predict_ns;
+	stats->last_target_ns = last_target_ns;
 }
 
 static int64_t
@@ -293,8 +408,10 @@ pc_predict(struct u_pacing_compositor *upc,
 	struct frame *f = get_new_frame(ft);
 
 	int64_t frame_id = f->frame_id;
-	int64_t desired_present_time_ns = predict_next_frame_present_time(ft, now_ns);
+	uint32_t periods_ahead = 0;
+	int64_t desired_present_time_ns = predict_next_frame_present_time(ft, now_ns, &periods_ahead);
 	int64_t predicted_display_time_ns = calc_display_time(ft, desired_present_time_ns);
+	log_prediction_stats(ft, now_ns, desired_present_time_ns, periods_ahead);
 
 	int64_t wake_up_time_ns = desired_present_time_ns - ft->comp_time_ns;
 	int64_t present_slop_ns = U_TIME_HALF_MS_IN_NS;
