@@ -161,6 +161,45 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 	if (debug_get_bool_option_psvr2_timing_log()) {
 		uint64_t latest_imu_ts = 0;
 		if (m_ff_vec3_f32_get_timestamp(hmd->ff_gyro, 0, &latest_imu_ts)) {
+			static timepoint_ns last_query_now_ns = 0;
+			static timepoint_ns last_slam_ts = 0;
+			static uint64_t last_imu_ts = 0;
+			static uint64_t query_interval_count = 0;
+			static int64_t query_interval_total_ns = 0;
+			static int64_t query_interval_min_ns = 0;
+			static int64_t query_interval_max_ns = 0;
+			static uint64_t slam_advance_count = 0;
+			static uint64_t imu_advance_count = 0;
+			static uint64_t imu_repeat_count = 0;
+
+			timepoint_ns query_now_ns = os_monotonic_get_ns();
+			if (last_query_now_ns != 0) {
+				int64_t query_interval_ns = query_now_ns - last_query_now_ns;
+				query_interval_count++;
+				query_interval_total_ns += query_interval_ns;
+				if (query_interval_min_ns == 0 || query_interval_ns < query_interval_min_ns) {
+					query_interval_min_ns = query_interval_ns;
+				}
+				if (query_interval_ns > query_interval_max_ns) {
+					query_interval_max_ns = query_interval_ns;
+				}
+			}
+			last_query_now_ns = query_now_ns;
+
+			if (last_slam_ts != 0 && latest_relation_ts != last_slam_ts) {
+				slam_advance_count++;
+			}
+			last_slam_ts = latest_relation_ts;
+
+			if (last_imu_ts != 0) {
+				if (latest_imu_ts != last_imu_ts) {
+					imu_advance_count++;
+				} else {
+					imu_repeat_count++;
+				}
+			}
+			last_imu_ts = latest_imu_ts;
+
 			hmd->timing_query_count++;
 			hmd->timing_prediction_total_ns += at_timestamp_ns - latest_relation_ts;
 			hmd->timing_imu_after_slam_total_ns += (int64_t)latest_imu_ts - latest_relation_ts;
@@ -172,10 +211,27 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 				             (double)hmd->timing_prediction_total_ns / 240.0 / 1000000.0,
 				             (double)hmd->timing_imu_after_slam_total_ns / 240.0 / 1000000.0,
 				             (double)hmd->timing_prediction_after_imu_total_ns / 240.0 / 1000000.0);
+				if (query_interval_count > 0) {
+					PSVR2_WARN(hmd,
+					             "Pose cadence: requests avg %.3fms, min %.3fms, max %.3fms; SLAM advanced "
+					             "%" PRIu64 "/%" PRIu64 "; IMU advanced %" PRIu64 "/%" PRIu64
+					             " (repeated %" PRIu64 ")",
+					             (double)query_interval_total_ns / (double)query_interval_count / 1000000.0,
+					             (double)query_interval_min_ns / 1000000.0,
+					             (double)query_interval_max_ns / 1000000.0, slam_advance_count,
+					             query_interval_count, imu_advance_count, query_interval_count, imu_repeat_count);
+				}
 				hmd->timing_query_count = 0;
 				hmd->timing_prediction_total_ns = 0;
 				hmd->timing_imu_after_slam_total_ns = 0;
 				hmd->timing_prediction_after_imu_total_ns = 0;
+				query_interval_count = 0;
+				query_interval_total_ns = 0;
+				query_interval_min_ns = 0;
+				query_interval_max_ns = 0;
+				slam_advance_count = 0;
+				imu_advance_count = 0;
+				imu_repeat_count = 0;
 			}
 		}
 	}
