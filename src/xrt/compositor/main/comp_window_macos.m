@@ -29,6 +29,7 @@ DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR"
 DEBUG_GET_ONCE_BOOL_OPTION(present_timing, "XRT_MACOS_PRESENT_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(async_present, "XRT_MACOS_ASYNC_PRESENT", false)
+DEBUG_GET_ONCE_BOOL_OPTION(present_feedback, "XRT_MACOS_PRESENT_FEEDBACK", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -50,10 +51,13 @@ struct comp_window_macos
 	dispatch_group_t present_work_group;
 	dispatch_semaphore_t image_available[MACOS_TARGET_IMAGE_COUNT];
 	atomic_uint_fast64_t latest_vblank_ns;
+	atomic_int_fast64_t measured_present_offset_ns;
+	atomic_int_fast64_t applied_present_offset_ns;
 	atomic_bool metal_present_failed;
 	uint64_t last_vblank_ns;
 	bool pacer_vblank_synced;
 	int64_t display_period_ns;
+	int64_t filtered_present_offset_ns;
 	uint32_t pixel_width;
 	uint32_t pixel_height;
 	uint32_t next_image;
@@ -593,7 +597,9 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
                                          id<MTLDrawable> drawable,
                                          CFTimeInterval desired_present_time_s)
 {
-	if (!debug_get_bool_option_present_timing()) {
+	bool log_timing = debug_get_bool_option_present_timing();
+	bool update_feedback = debug_get_bool_option_present_feedback();
+	if (!log_timing && !update_feedback) {
 		return;
 	}
 
@@ -607,6 +613,15 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 		if (cwm->last_presented_time_s > 0.0 && presented_time_s > cwm->last_presented_time_s) {
 			CFTimeInterval interval_s = presented_time_s - cwm->last_presented_time_s;
 			CFTimeInterval target_error_s = presented_time_s - desired_present_time_s;
+			if (update_feedback && target_error_s > 0.0 && target_error_s < 0.1) {
+				int64_t target_error_ns = (int64_t)(target_error_s * (CFTimeInterval)U_TIME_1S_IN_NS);
+				atomic_store_explicit(&cwm->measured_present_offset_ns, target_error_ns,
+				                      memory_order_release);
+			}
+			if (!log_timing) {
+				cwm->last_presented_time_s = presented_time_s;
+				return;
+			}
 
 			cwm->presented_interval_total_s += interval_s;
 			cwm->presented_target_error_total_s += target_error_s;
@@ -633,15 +648,28 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 			}
 
 			if (cwm->presented_sample_count == 240) {
-				COMP_INFO(ct->c,
-				          "macOS drawable presentation: cadence avg %.3fms min %.3fms max %.3fms, missed %llu/240; target error avg %.3fms min %.3fms max %.3fms",
-				          cwm->presented_interval_total_s / 240.0 * 1000.0,
-				          cwm->presented_interval_min_s * 1000.0,
-				          cwm->presented_interval_max_s * 1000.0,
-				          (unsigned long long)cwm->presented_missed_intervals,
-				          cwm->presented_target_error_total_s / 240.0 * 1000.0,
-				          cwm->presented_target_error_min_s * 1000.0,
-				          cwm->presented_target_error_max_s * 1000.0);
+				CFTimeInterval cadence_avg_ms = cwm->presented_interval_total_s / 240.0 * 1000.0;
+				CFTimeInterval target_error_avg_ms = cwm->presented_target_error_total_s / 240.0 * 1000.0;
+				if (update_feedback) {
+					int64_t applied_offset_ns = atomic_load_explicit(
+					    &cwm->applied_present_offset_ns, memory_order_acquire);
+					COMP_INFO(ct->c,
+					          "macOS drawable presentation: cadence avg %.3fms min %.3fms max %.3fms, missed %llu/240; target error avg %.3fms min %.3fms max %.3fms; feedback %.3fms",
+					          cadence_avg_ms, cwm->presented_interval_min_s * 1000.0,
+					          cwm->presented_interval_max_s * 1000.0,
+					          (unsigned long long)cwm->presented_missed_intervals,
+					          target_error_avg_ms, cwm->presented_target_error_min_s * 1000.0,
+					          cwm->presented_target_error_max_s * 1000.0,
+					          (double)applied_offset_ns / (double)U_TIME_1MS_IN_NS);
+				} else {
+					COMP_INFO(ct->c,
+					          "macOS drawable presentation: cadence avg %.3fms min %.3fms max %.3fms, missed %llu/240; target error avg %.3fms min %.3fms max %.3fms",
+					          cadence_avg_ms, cwm->presented_interval_min_s * 1000.0,
+					          cwm->presented_interval_max_s * 1000.0,
+					          (unsigned long long)cwm->presented_missed_intervals,
+					          target_error_avg_ms, cwm->presented_target_error_min_s * 1000.0,
+					          cwm->presented_target_error_max_s * 1000.0);
+				}
 
 				cwm->presented_interval_total_s = 0.0;
 				cwm->presented_interval_min_s = 0.0;
@@ -783,7 +811,7 @@ comp_window_macos_submit_present(struct comp_window_macos *cwm,
 
 		uint64_t desired_host_time = monotonic_ns_to_host_time(cwm, desired_present_time_ns);
 		CFTimeInterval desired_host_time_seconds = host_time_to_seconds(cwm, desired_host_time);
-		if (debug_get_bool_option_present_timing()) {
+		if (debug_get_bool_option_present_timing() || debug_get_bool_option_present_feedback()) {
 			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
 				comp_window_macos_record_presented_frame(cwm, presented_drawable, desired_host_time_seconds);
 			}];
@@ -869,6 +897,26 @@ static VkResult
 comp_window_macos_update_timings(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	if (debug_get_bool_option_present_feedback() && cwm->base.upc != NULL) {
+		int64_t measured_offset_ns =
+		    atomic_exchange_explicit(&cwm->measured_present_offset_ns, 0, memory_order_acquire);
+		if (measured_offset_ns > 0) {
+			if (measured_offset_ns < U_TIME_1MS_IN_NS) {
+				measured_offset_ns = U_TIME_1MS_IN_NS;
+			} else if (measured_offset_ns > 40 * U_TIME_1MS_IN_NS) {
+				measured_offset_ns = 40 * U_TIME_1MS_IN_NS;
+			}
+			if (cwm->filtered_present_offset_ns == 0) {
+				cwm->filtered_present_offset_ns = measured_offset_ns;
+			} else {
+				cwm->filtered_present_offset_ns +=
+				    (measured_offset_ns - cwm->filtered_present_offset_ns) / 32;
+			}
+			u_pc_update_present_offset(cwm->base.upc, 0, cwm->filtered_present_offset_ns);
+			atomic_store_explicit(&cwm->applied_present_offset_ns, cwm->filtered_present_offset_ns,
+			                      memory_order_release);
+		}
+	}
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
 	if (vblank_ns == 0 || vblank_ns == cwm->last_vblank_ns || cwm->base.upc == NULL) {
 		return VK_SUCCESS;
