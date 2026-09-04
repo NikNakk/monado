@@ -28,6 +28,7 @@
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(present_timing, "XRT_MACOS_PRESENT_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(async_present, "XRT_MACOS_ASYNC_PRESENT", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -45,6 +46,9 @@ struct comp_window_macos
 	CVDisplayLinkRef display_link;
 	mach_timebase_info_data_t mach_timebase;
 	dispatch_group_t present_completion_group;
+	dispatch_queue_t present_work_queue;
+	dispatch_group_t present_work_group;
+	dispatch_semaphore_t image_available[MACOS_TARGET_IMAGE_COUNT];
 	atomic_uint_fast64_t latest_vblank_ns;
 	atomic_bool metal_present_failed;
 	uint64_t last_vblank_ns;
@@ -288,6 +292,25 @@ comp_window_macos_init(struct comp_target *ct)
 			COMP_ERROR(ct->c, "Failed to create macOS presentation completion group");
 			return false;
 		}
+		if (debug_get_bool_option_async_present()) {
+			cwm->present_work_queue =
+			    dispatch_queue_create("org.monado.macos-present", DISPATCH_QUEUE_SERIAL);
+			cwm->present_work_group = dispatch_group_create();
+			for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+				cwm->image_available[i] = dispatch_semaphore_create(1);
+			}
+			if (cwm->present_work_queue == NULL || cwm->present_work_group == NULL) {
+				COMP_ERROR(ct->c, "Failed to create asynchronous macOS presentation worker");
+				return false;
+			}
+			for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+				if (cwm->image_available[i] == NULL) {
+					COMP_ERROR(ct->c, "Failed to create macOS compositor image semaphore");
+					return false;
+				}
+			}
+			COMP_INFO(ct->c, "Using asynchronous macOS Metal presentation worker");
+		}
 
 		mach_timebase_info(&cwm->mach_timebase);
 		CVReturn cvret = CVDisplayLinkCreateWithCGDisplay(display_id, &cwm->display_link);
@@ -525,7 +548,11 @@ comp_window_macos_acquire(struct comp_target *ct, uint32_t *out_index)
 	if (!comp_window_macos_has_images(ct)) {
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
-	*out_index = cwm->next_image;
+	uint32_t index = cwm->next_image;
+	if (debug_get_bool_option_async_present()) {
+		dispatch_semaphore_wait(cwm->image_available[index], DISPATCH_TIME_FOREVER);
+	}
+	*out_index = index;
 	cwm->next_image = (cwm->next_image + 1) % ct->image_count;
 	return VK_SUCCESS;
 }
@@ -701,22 +728,14 @@ comp_window_macos_record_submission(struct comp_window_macos *cwm,
 }
 
 static VkResult
-comp_window_macos_present(struct comp_target *ct,
-                          struct vk_bundle_queue *present_queue,
-                          uint32_t index,
-                          uint64_t timeline_semaphore_value,
-                          int64_t desired_present_time_ns,
-                          int64_t present_slop_ns)
+comp_window_macos_submit_present(struct comp_window_macos *cwm,
+                                 struct vk_bundle_queue *present_queue,
+                                 uint32_t index,
+                                 uint64_t timeline_semaphore_value,
+                                 int64_t desired_present_time_ns,
+                                 bool release_image_on_completion)
 {
-	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	(void)present_slop_ns;
-	assert(present_queue != NULL);
-	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
-		return VK_ERROR_INITIALIZATION_FAILED;
-	}
-	if (atomic_exchange_explicit(&cwm->metal_present_failed, false, memory_order_acq_rel)) {
-		return VK_ERROR_DEVICE_LOST;
-	}
+	struct comp_target *ct = &cwm->base.base;
 
 	uint64_t before_submission_ns = os_monotonic_get_ns();
 	uint64_t after_drawable_wait_ns = 0;
@@ -727,6 +746,9 @@ comp_window_macos_present(struct comp_target *ct,
 		after_drawable_wait_ns = os_monotonic_get_ns();
 		if (drawable == nil) {
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
+			if (release_image_on_completion) {
+				dispatch_semaphore_signal(cwm->image_available[index]);
+			}
 			return VK_ERROR_OUT_OF_DATE_KHR;
 		}
 
@@ -739,6 +761,9 @@ comp_window_macos_present(struct comp_target *ct,
 		    comp_window_macos_wait_for_render_complete(cwm, present_queue, timeline_semaphore_value);
 		after_render_wait_ns = os_monotonic_get_ns();
 		if (ret != VK_SUCCESS) {
+			if (release_image_on_completion) {
+				dispatch_semaphore_signal(cwm->image_available[index]);
+			}
 			return ret;
 		}
 
@@ -778,6 +803,9 @@ comp_window_macos_present(struct comp_target *ct,
 					atomic_store_explicit(&cwm->metal_present_failed, true, memory_order_release);
 				}
 			}
+			if (release_image_on_completion) {
+				dispatch_semaphore_signal(cwm->image_available[index]);
+			}
 			dispatch_group_leave(cwm->present_completion_group);
 		}];
 		[command_buffer commit];
@@ -788,6 +816,43 @@ comp_window_macos_present(struct comp_target *ct,
 	                                      after_drawable_wait_ns - before_submission_ns,
 	                                      after_metal_submit_ns - after_render_wait_ns,
 	                                      after_metal_submit_ns - before_submission_ns);
+
+	return VK_SUCCESS;
+}
+
+static VkResult
+comp_window_macos_present(struct comp_target *ct,
+                          struct vk_bundle_queue *present_queue,
+                          uint32_t index,
+                          uint64_t timeline_semaphore_value,
+                          int64_t desired_present_time_ns,
+                          int64_t present_slop_ns)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	(void)present_slop_ns;
+	assert(present_queue != NULL);
+	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+	if (atomic_exchange_explicit(&cwm->metal_present_failed, false, memory_order_acq_rel)) {
+		if (debug_get_bool_option_async_present()) {
+			dispatch_semaphore_signal(cwm->image_available[index]);
+		}
+		return VK_ERROR_DEVICE_LOST;
+	}
+
+	if (!debug_get_bool_option_async_present()) {
+		return comp_window_macos_submit_present(cwm, present_queue, index, timeline_semaphore_value,
+		                                        desired_present_time_ns, false);
+	}
+
+	dispatch_group_async(cwm->present_work_group, cwm->present_work_queue, ^{
+		VkResult ret = comp_window_macos_submit_present(cwm, present_queue, index, timeline_semaphore_value,
+		                                                   desired_present_time_ns, true);
+		if (ret != VK_SUCCESS) {
+			atomic_store_explicit(&cwm->metal_present_failed, true, memory_order_release);
+		}
+	});
 
 	return VK_SUCCESS;
 }
@@ -881,6 +946,9 @@ comp_window_macos_destroy(struct comp_target *ct)
 		CVDisplayLinkRelease(cwm->display_link);
 		cwm->display_link = NULL;
 	}
+	if (cwm->present_work_group != NULL) {
+		dispatch_group_wait(cwm->present_work_group, DISPATCH_TIME_FOREVER);
+	}
 	if (cwm->present_completion_group != NULL) {
 		dispatch_group_wait(cwm->present_completion_group, DISPATCH_TIME_FOREVER);
 	}
@@ -902,6 +970,17 @@ comp_window_macos_destroy(struct comp_target *ct)
 #if !OS_OBJECT_USE_OBJC
 	if (cwm->present_completion_group != NULL) {
 		dispatch_release(cwm->present_completion_group);
+	}
+	if (cwm->present_work_group != NULL) {
+		dispatch_release(cwm->present_work_group);
+	}
+	if (cwm->present_work_queue != NULL) {
+		dispatch_release(cwm->present_work_queue);
+	}
+	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+		if (cwm->image_available[i] != NULL) {
+			dispatch_release(cwm->image_available[i]);
+		}
 	}
 #endif
 	free(cwm);
