@@ -27,6 +27,7 @@
 
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(present_timing, "XRT_MACOS_PRESENT_TIMING", false)
+DEBUG_GET_ONCE_BOOL_OPTION(present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -762,7 +763,11 @@ comp_window_macos_present(struct comp_target *ct,
 				comp_window_macos_record_presented_frame(cwm, presented_drawable, desired_host_time_seconds);
 			}];
 		}
-		[command_buffer presentDrawable:drawable atTime:desired_host_time_seconds];
+		if (debug_get_bool_option_present_immediate()) {
+			[command_buffer presentDrawable:drawable];
+		} else {
+			[command_buffer presentDrawable:drawable atTime:desired_host_time_seconds];
+		}
 
 		dispatch_group_enter(cwm->present_completion_group);
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {
