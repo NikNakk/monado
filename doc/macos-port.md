@@ -112,6 +112,32 @@ feedback snapshot. Submit markers measure CPU submission, not GPU execution.
 Keep both phase and pipeline lines when sharing a log. These extra per-frame
 lines can add logging overhead; no pacing or feedback values are changed.
 
+### Experimental presentation worker gate
+
+With asynchronous presentation enabled, `XRT_MACOS_PRESENT_WORKER_GATE=1`
+waits for prior presentation worker jobs to finish CPU submission before the
+compositor's render-begin marker and pose sampling. It does not wait for Metal
+command-buffer completion or actual presentation. The current frame has not
+submitted GPU work at this point, so the prior jobs' render-complete waits do
+not depend on it. This gate is off by default and inactive with synchronous
+presentation. It leaves the serial queue, feedback, and frame predictions intact.
+
+The experiment moves worker queue waiting ahead of rendering to reduce the age
+of the compositor pose when a drawable is shown. It does not acquire the next
+drawable ahead of rendering, refresh the application's submitted images, or
+revise the already predicted display timestamp. Check actual cadence and
+`original_prediction_error` as well as frame age; a smaller reported age alone
+does not demonstrate lower end-to-end latency.
+
+With phase logging enabled, pipeline lines add `worker_gate_begin_ns`,
+`worker_gate_end_ns`, and `worker_gate_wait`. `render_begin_ns` is sampled after
+the gate, so `render_begin_to_actual` excludes the gate wait. Compare with
+`actual_ns - worker_gate_begin_ns` to include it. Zero gate timestamps mean the
+gate was inactive. A successful test should move waiting from `queue_wait` into
+`worker_gate_wait`, reduce render-to-presentation age, and preserve 120 Hz
+cadence. Drawable waiting may still remain. Set the option to `0` for the
+baseline comparison.
+
 On Apple platforms the runtime does not currently advertise
 `XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
 swapchains do not support depth/stencil pixel formats. The Metal client also
