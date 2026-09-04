@@ -72,6 +72,29 @@ DYLD_LIBRARY_PATH=/path/to/OpenXR-SDK-build/src/loader \
   /path/to/OpenXR-SDK-build/src/tests/hello_xr/hello_xr -g Metal -s Local -v
 ```
 
+Set `XRT_MACOS_PRESENT_PHASE_LOG=1` to log each presented drawable's integer
+refresh-offset class and fractional offset from the desired presentation time.
+`macOS presentation phase:` lines include `initial`, `steady`, `transition`, or
+`out-of-order`, the previous/current class, consecutive class run lengths, actual
+presentation interval, timeline semaphore value, drawable/render waits, and
+applied feedback sampled at submission and at the presentation callback. This
+diagnostic is independent of `XRT_MACOS_PRESENT_TIMING` and does not modify
+feedback or pacing. Per-frame logging can itself add overhead.
+
+Absolute `_ns` timestamps are in the monotonic clock domain; Metal's actual and
+previous presentation times are translated using the submission's desired-time
+clock anchor. `commit_call_ns` is a CPU marker immediately before registering the
+diagnostic handler and calling `commit`, not GPU completion. Positive
+`commit_minus_scheduled` means that marker was after the scheduled target.
+`period_ns` is the physical display period, unaffected by the pacing divisor.
+With `immediate 1`, the scheduled target is only a reference: no `atTime:` is
+passed to Metal. An initial sample has no previous interval; out-of-order
+callbacks are logged but do not advance diagnostic class history. Run lengths
+describe consecutive classes, not a hysteretic classification. Paste contiguous
+lines around transitions, plus the existing presentation/submission summaries
+and missed-frame warnings, to distinguish a persistent extra refresh from a
+single late frame. The timeline value can be zero with the queue-idle fallback.
+
 On Apple platforms the runtime does not currently advertise
 `XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
 swapchains do not support depth/stencil pixel formats. The Metal client also
