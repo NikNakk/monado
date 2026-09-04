@@ -69,6 +69,9 @@ struct comp_window_macos
 	CFTimeInterval presented_target_error_total_s;
 	CFTimeInterval presented_target_error_min_s;
 	CFTimeInterval presented_target_error_max_s;
+	CFTimeInterval presented_prediction_error_total_s;
+	CFTimeInterval presented_prediction_error_min_s;
+	CFTimeInterval presented_prediction_error_max_s;
 	uint64_t presented_sample_count;
 	uint64_t presented_missed_intervals;
 
@@ -595,7 +598,8 @@ comp_window_macos_wait_for_render_complete(struct comp_window_macos *cwm,
 static void
 comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
                                          id<MTLDrawable> drawable,
-                                         CFTimeInterval desired_present_time_s)
+                                         CFTimeInterval desired_present_time_s,
+                                         CFTimeInterval predicted_display_time_s)
 {
 	bool log_timing = debug_get_bool_option_present_timing();
 	bool update_feedback = debug_get_bool_option_present_feedback();
@@ -613,6 +617,7 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 		if (cwm->last_presented_time_s > 0.0 && presented_time_s > cwm->last_presented_time_s) {
 			CFTimeInterval interval_s = presented_time_s - cwm->last_presented_time_s;
 			CFTimeInterval target_error_s = presented_time_s - desired_present_time_s;
+			CFTimeInterval prediction_error_s = presented_time_s - predicted_display_time_s;
 			if (update_feedback && target_error_s > 0.0 && target_error_s < 0.1) {
 				int64_t target_error_ns = (int64_t)(target_error_s * (CFTimeInterval)U_TIME_1S_IN_NS);
 				atomic_store_explicit(&cwm->measured_present_offset_ns, target_error_ns,
@@ -625,6 +630,7 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 
 			cwm->presented_interval_total_s += interval_s;
 			cwm->presented_target_error_total_s += target_error_s;
+			cwm->presented_prediction_error_total_s += prediction_error_s;
 			cwm->presented_sample_count++;
 
 			if (cwm->presented_interval_min_s == 0.0 || interval_s < cwm->presented_interval_min_s) {
@@ -639,6 +645,12 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 			if (cwm->presented_sample_count == 1 || target_error_s > cwm->presented_target_error_max_s) {
 				cwm->presented_target_error_max_s = target_error_s;
 			}
+			if (cwm->presented_sample_count == 1 || prediction_error_s < cwm->presented_prediction_error_min_s) {
+				cwm->presented_prediction_error_min_s = prediction_error_s;
+			}
+			if (cwm->presented_sample_count == 1 || prediction_error_s > cwm->presented_prediction_error_max_s) {
+				cwm->presented_prediction_error_max_s = prediction_error_s;
+			}
 
 			if (cwm->display_period_ns > 0) {
 				CFTimeInterval period_s = (CFTimeInterval)cwm->display_period_ns / (CFTimeInterval)U_TIME_1S_IN_NS;
@@ -650,17 +662,21 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 			if (cwm->presented_sample_count == 240) {
 				CFTimeInterval cadence_avg_ms = cwm->presented_interval_total_s / 240.0 * 1000.0;
 				CFTimeInterval target_error_avg_ms = cwm->presented_target_error_total_s / 240.0 * 1000.0;
+				CFTimeInterval prediction_error_avg_ms =
+				    cwm->presented_prediction_error_total_s / 240.0 * 1000.0;
 				if (update_feedback) {
 					int64_t applied_offset_ns = atomic_load_explicit(
 					    &cwm->applied_present_offset_ns, memory_order_acquire);
 					COMP_INFO(ct->c,
-					          "macOS drawable presentation: cadence avg %.3fms min %.3fms max %.3fms, missed %llu/240; target error avg %.3fms min %.3fms max %.3fms; feedback %.3fms",
+					          "macOS drawable presentation: cadence avg %.3fms min %.3fms max %.3fms, missed %llu/240; target error avg %.3fms min %.3fms max %.3fms; feedback %.3fms; pose-time error avg %.3fms min %.3fms max %.3fms",
 					          cadence_avg_ms, cwm->presented_interval_min_s * 1000.0,
 					          cwm->presented_interval_max_s * 1000.0,
 					          (unsigned long long)cwm->presented_missed_intervals,
 					          target_error_avg_ms, cwm->presented_target_error_min_s * 1000.0,
 					          cwm->presented_target_error_max_s * 1000.0,
-					          (double)applied_offset_ns / (double)U_TIME_1MS_IN_NS);
+					          (double)applied_offset_ns / (double)U_TIME_1MS_IN_NS,
+					          prediction_error_avg_ms, cwm->presented_prediction_error_min_s * 1000.0,
+					          cwm->presented_prediction_error_max_s * 1000.0);
 				} else {
 					COMP_INFO(ct->c,
 					          "macOS drawable presentation: cadence avg %.3fms min %.3fms max %.3fms, missed %llu/240; target error avg %.3fms min %.3fms max %.3fms",
@@ -677,6 +693,9 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 				cwm->presented_target_error_total_s = 0.0;
 				cwm->presented_target_error_min_s = 0.0;
 				cwm->presented_target_error_max_s = 0.0;
+				cwm->presented_prediction_error_total_s = 0.0;
+				cwm->presented_prediction_error_min_s = 0.0;
+				cwm->presented_prediction_error_max_s = 0.0;
 				cwm->presented_sample_count = 0;
 				cwm->presented_missed_intervals = 0;
 			}
@@ -812,8 +831,13 @@ comp_window_macos_submit_present(struct comp_window_macos *cwm,
 		uint64_t desired_host_time = monotonic_ns_to_host_time(cwm, desired_present_time_ns);
 		CFTimeInterval desired_host_time_seconds = host_time_to_seconds(cwm, desired_host_time);
 		if (debug_get_bool_option_present_timing() || debug_get_bool_option_present_feedback()) {
+			int64_t applied_offset_ns =
+			    atomic_load_explicit(&cwm->applied_present_offset_ns, memory_order_acquire);
+			CFTimeInterval predicted_display_time_seconds =
+			    desired_host_time_seconds + (CFTimeInterval)applied_offset_ns / (CFTimeInterval)U_TIME_1S_IN_NS;
 			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
-				comp_window_macos_record_presented_frame(cwm, presented_drawable, desired_host_time_seconds);
+				comp_window_macos_record_presented_frame(
+				    cwm, presented_drawable, desired_host_time_seconds, predicted_display_time_seconds);
 			}];
 		}
 		if (debug_get_bool_option_present_immediate()) {
