@@ -30,6 +30,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(present_timing, "XRT_MACOS_PRESENT_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(async_present, "XRT_MACOS_ASYNC_PRESENT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_feedback, "XRT_MACOS_PRESENT_FEEDBACK", false)
+DEBUG_GET_ONCE_NUM_OPTION(present_advance_periods, "XRT_MACOS_PRESENT_ADVANCE_PERIODS", 0)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -618,8 +619,11 @@ comp_window_macos_record_presented_frame(struct comp_window_macos *cwm,
 			CFTimeInterval interval_s = presented_time_s - cwm->last_presented_time_s;
 			CFTimeInterval target_error_s = presented_time_s - desired_present_time_s;
 			CFTimeInterval prediction_error_s = presented_time_s - predicted_display_time_s;
-			if (update_feedback && target_error_s > 0.0 && target_error_s < 0.1) {
+			if (update_feedback && target_error_s > -0.01 && target_error_s < 0.1) {
 				int64_t target_error_ns = (int64_t)(target_error_s * (CFTimeInterval)U_TIME_1S_IN_NS);
+				if (target_error_ns < U_TIME_1MS_IN_NS) {
+					target_error_ns = U_TIME_1MS_IN_NS;
+				}
 				atomic_store_explicit(&cwm->measured_present_offset_ns, target_error_ns,
 				                      memory_order_release);
 			}
@@ -828,8 +832,24 @@ comp_window_macos_submit_present(struct comp_window_macos *cwm,
 		       destinationOrigin:MTLOriginMake(0, 0, 0)];
 		[blit endEncoding];
 
+		int64_t scheduled_present_time_ns = desired_present_time_ns;
+		int advance_periods = debug_get_num_option_present_advance_periods();
+		if (advance_periods < 0) {
+			advance_periods = 0;
+		} else if (advance_periods > 2) {
+			advance_periods = 2;
+		}
+		if (advance_periods > 0 && cwm->display_period_ns > 0) {
+			int64_t advance_ns = (int64_t)advance_periods * cwm->display_period_ns;
+			if (scheduled_present_time_ns > advance_ns) {
+				scheduled_present_time_ns -= advance_ns;
+			}
+		}
+
 		uint64_t desired_host_time = monotonic_ns_to_host_time(cwm, desired_present_time_ns);
 		CFTimeInterval desired_host_time_seconds = host_time_to_seconds(cwm, desired_host_time);
+		uint64_t scheduled_host_time = monotonic_ns_to_host_time(cwm, scheduled_present_time_ns);
+		CFTimeInterval scheduled_host_time_seconds = host_time_to_seconds(cwm, scheduled_host_time);
 		if (debug_get_bool_option_present_timing() || debug_get_bool_option_present_feedback()) {
 			int64_t applied_offset_ns =
 			    atomic_load_explicit(&cwm->applied_present_offset_ns, memory_order_acquire);
@@ -843,7 +863,7 @@ comp_window_macos_submit_present(struct comp_window_macos *cwm,
 		if (debug_get_bool_option_present_immediate()) {
 			[command_buffer presentDrawable:drawable];
 		} else {
-			[command_buffer presentDrawable:drawable atTime:desired_host_time_seconds];
+			[command_buffer presentDrawable:drawable atTime:scheduled_host_time_seconds];
 		}
 
 		dispatch_group_enter(cwm->present_completion_group);
