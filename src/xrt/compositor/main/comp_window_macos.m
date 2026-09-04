@@ -21,12 +21,14 @@
 #include "util/u_pacing.h"
 #include "vk/vk_image_allocator.h"
 
+#include <math.h>
 #include <stdatomic.h>
 
 #define MACOS_TARGET_IMAGE_COUNT 3
 
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(present_timing, "XRT_MACOS_PRESENT_TIMING", false)
+DEBUG_GET_ONCE_BOOL_OPTION(present_phase_log, "XRT_MACOS_PRESENT_PHASE_LOG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(async_present, "XRT_MACOS_ASYNC_PRESENT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_feedback, "XRT_MACOS_PRESENT_FEEDBACK", false)
@@ -75,6 +77,11 @@ struct comp_window_macos
 	CFTimeInterval presented_prediction_error_max_s;
 	uint64_t presented_sample_count;
 	uint64_t presented_missed_intervals;
+
+	/* Diagnostic state only, protected by @synchronized(metal_layer). */
+	CFTimeInterval phase_last_presented_time_s;
+	int64_t phase_last_class;
+	uint64_t phase_class_run;
 
 	uint64_t submission_sample_count;
 	uint64_t render_wait_total_ns;
@@ -778,6 +785,73 @@ comp_window_macos_record_submission(struct comp_window_macos *cwm,
 	cwm->submission_max_ns = 0;
 }
 
+/*
+ * Log every drawable so a class change retains its preceding/following frames.
+ * Keep this state separate from feedback and the aggregate timing diagnostic.
+ * Absolute timestamps use CLOCK_MONOTONIC; translate Metal time with the same
+ * desired-time anchor used for submission to avoid mixing clock epochs.
+ */
+static void
+comp_window_macos_record_phase(struct comp_window_macos *cwm,
+                               id<MTLDrawable> drawable,
+                               uint64_t timeline,
+                               int64_t desired_ns,
+                               int64_t scheduled_ns,
+                               CFTimeInterval desired_host_s,
+                               CFTimeInterval scheduled_host_s,
+                               uint64_t acquired_ns,
+                               uint64_t drawable_wait_ns,
+                               uint64_t render_wait_ns,
+                               uint64_t commit_call_ns,
+                               int64_t feedback_submit_ns,
+                               bool immediate)
+{
+	CFTimeInterval actual_s = [drawable presentedTime];
+	int64_t period_ns = cwm->display_period_ns;
+	if (actual_s <= 0.0 || period_ns <= 0) {
+		COMP_INFO(cwm->base.base.c, "macOS presentation phase: timeline %llu unavailable actual %.9fs period_ns %lld",
+		          (unsigned long long)timeline, actual_s, (long long)period_ns);
+		return;
+	}
+
+	double error_ns = (actual_s - desired_host_s) * U_TIME_1S_IN_NS;
+	double periods = error_ns / (double)period_ns;
+	int64_t offset_class = (int64_t)llround(periods);
+	int64_t actual_ns = desired_ns + (int64_t)llround(error_ns);
+	int64_t feedback_now_ns = atomic_load_explicit(&cwm->applied_present_offset_ns, memory_order_acquire);
+	@synchronized(cwm->metal_layer) {
+		CFTimeInterval previous_s = cwm->phase_last_presented_time_s;
+		bool first = previous_s == 0.0;
+		bool ordered = first || actual_s > previous_s;
+		bool transition = !first && ordered && offset_class != cwm->phase_last_class;
+		uint64_t prior_run = cwm->phase_class_run;
+		int64_t prior_class = first ? offset_class : cwm->phase_last_class;
+		if (ordered) {
+			cwm->phase_class_run = first || transition ? 1 : prior_run + 1;
+			cwm->phase_last_class = offset_class;
+			cwm->phase_last_presented_time_s = actual_s;
+		}
+		int64_t previous_ns = first ? 0 : desired_ns + (int64_t)llround((previous_s - desired_host_s) * U_TIME_1S_IN_NS);
+		COMP_INFO(cwm->base.base.c,
+		          "macOS presentation phase: timeline %llu %s class %lld -> %lld prior_run %llu run %llu; "
+		          "offset %.3fms = %.4f periods residual %.4f; interval %.3fms; "
+		          "desired_ns %lld scheduled_ns %lld acquired_ns %llu commit_call_ns %llu actual_ns %lld previous_ns %lld period_ns %lld; "
+		          "drawable_wait %.3fms render_wait %.3fms commit_minus_scheduled %.3fms actual_minus_scheduled %.3fms; "
+		          "feedback_submit %.3fms feedback_now %.3fms immediate %d",
+		          (unsigned long long)timeline, first ? "initial" : !ordered ? "out-of-order" : transition ? "transition" : "steady",
+		          (long long)prior_class, (long long)offset_class, (unsigned long long)prior_run,
+		          (unsigned long long)cwm->phase_class_run, error_ns / U_TIME_1MS_IN_NS, periods,
+		          periods - (double)offset_class, first ? 0.0 : (actual_s - previous_s) * 1000.0,
+		          (long long)desired_ns, (long long)scheduled_ns, (unsigned long long)acquired_ns,
+		          (unsigned long long)commit_call_ns, (long long)actual_ns, (long long)previous_ns,
+		          (long long)period_ns, (double)drawable_wait_ns / U_TIME_1MS_IN_NS,
+		          (double)render_wait_ns / U_TIME_1MS_IN_NS,
+		          (double)((int64_t)commit_call_ns - scheduled_ns) / U_TIME_1MS_IN_NS,
+		          (actual_s - scheduled_host_s) * 1000.0, (double)feedback_submit_ns / U_TIME_1MS_IN_NS,
+		          (double)feedback_now_ns / U_TIME_1MS_IN_NS, immediate);
+	}
+}
+
 static VkResult
 comp_window_macos_submit_present(struct comp_window_macos *cwm,
                                  struct vk_bundle_queue *present_queue,
@@ -880,6 +954,21 @@ comp_window_macos_submit_present(struct comp_window_macos *cwm,
 			}
 			dispatch_group_leave(cwm->present_completion_group);
 		}];
+		if (debug_get_bool_option_present_phase_log()) {
+			int64_t feedback_submit_ns =
+			    atomic_load_explicit(&cwm->applied_present_offset_ns, memory_order_acquire);
+			bool immediate = debug_get_bool_option_present_immediate();
+			/* CPU commit-call marker, sampled just before handler registration/commit. */
+			uint64_t commit_call_ns = os_monotonic_get_ns();
+			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
+				comp_window_macos_record_phase(cwm, presented_drawable, timeline_semaphore_value,
+				                               desired_present_time_ns, scheduled_present_time_ns,
+				                               desired_host_time_seconds, scheduled_host_time_seconds,
+				                               after_drawable_wait_ns, after_drawable_wait_ns - before_submission_ns,
+				                               after_render_wait_ns - after_drawable_wait_ns, commit_call_ns,
+				                               feedback_submit_ns, immediate);
+			}];
+		}
 		[command_buffer commit];
 		after_metal_submit_ns = os_monotonic_get_ns();
 	}
