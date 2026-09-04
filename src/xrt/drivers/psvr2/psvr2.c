@@ -67,6 +67,7 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS"
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_max_prediction_ms, "PSVR2_MAX_PREDICTION_MS", 0.0f)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_pose_step_log, "PSVR2_POSE_STEP_LOG", false)
 
 #ifdef XRT_OS_OSX
 #define PSVR2_AUXILIARY_STREAMS_DEFAULT false
@@ -266,6 +267,111 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 	    &latest_relation,         //
 	    latest_relation_ts,       //
 	    out_relation);            //
+
+	if (debug_get_bool_option_psvr2_pose_step_log() && have_latest_imu) {
+		static bool have_previous = false;
+		static timepoint_ns previous_prediction_ts = 0;
+		static timepoint_ns previous_slam_ts = 0;
+		static uint64_t previous_imu_ts = 0;
+		static struct xrt_quat previous_orientation;
+
+		static uint64_t step_count = 0;
+		static uint64_t slam_step_count = 0;
+		static uint64_t same_slam_step_count = 0;
+		static uint64_t imu_advance_step_count = 0;
+		static double interval_total_ms = 0.0;
+		static double angle_total_deg = 0.0;
+		static double angle_max_deg = 0.0;
+		static double speed_total_dps = 0.0;
+		static double speed_max_dps = 0.0;
+		static double slam_angle_total_deg = 0.0;
+		static double slam_speed_total_dps = 0.0;
+		static double same_slam_angle_total_deg = 0.0;
+		static double same_slam_speed_total_dps = 0.0;
+
+		if (!have_previous) {
+			previous_prediction_ts = prediction_timestamp_ns;
+			previous_slam_ts = latest_relation_ts;
+			previous_imu_ts = latest_imu_ts;
+			previous_orientation = out_relation->pose.orientation;
+			have_previous = true;
+		} else if (prediction_timestamp_ns > previous_prediction_ts) {
+			int64_t interval_ns = prediction_timestamp_ns - previous_prediction_ts;
+			double interval_s = (double)interval_ns / (double)U_TIME_1S_IN_NS;
+			double interval_ms = interval_s * 1000.0;
+			double dot = fabs((double)math_quat_dot(&previous_orientation, &out_relation->pose.orientation));
+			if (dot > 1.0) {
+				dot = 1.0;
+			}
+			double angle_deg = 2.0 * acos(dot) * 180.0 / M_PI;
+			double speed_dps = interval_s > 0.0 ? angle_deg / interval_s : 0.0;
+			bool slam_advanced = previous_slam_ts != 0 && latest_relation_ts != previous_slam_ts;
+			bool imu_advanced = previous_imu_ts != 0 && latest_imu_ts != previous_imu_ts;
+
+			step_count++;
+			interval_total_ms += interval_ms;
+			angle_total_deg += angle_deg;
+			speed_total_dps += speed_dps;
+			if (angle_deg > angle_max_deg) {
+				angle_max_deg = angle_deg;
+			}
+			if (speed_dps > speed_max_dps) {
+				speed_max_dps = speed_dps;
+			}
+			if (slam_advanced) {
+				slam_step_count++;
+				slam_angle_total_deg += angle_deg;
+				slam_speed_total_dps += speed_dps;
+			} else {
+				same_slam_step_count++;
+				same_slam_angle_total_deg += angle_deg;
+				same_slam_speed_total_dps += speed_dps;
+			}
+			if (imu_advanced) {
+				imu_advance_step_count++;
+			}
+
+			if (step_count == 240) {
+				double slam_angle_avg =
+				    slam_step_count > 0 ? slam_angle_total_deg / (double)slam_step_count : 0.0;
+				double slam_speed_avg =
+				    slam_step_count > 0 ? slam_speed_total_dps / (double)slam_step_count : 0.0;
+				double same_slam_angle_avg = same_slam_step_count > 0
+				                                 ? same_slam_angle_total_deg / (double)same_slam_step_count
+				                                 : 0.0;
+				double same_slam_speed_avg = same_slam_step_count > 0
+				                                 ? same_slam_speed_total_dps / (double)same_slam_step_count
+				                                 : 0.0;
+
+				PSVR2_WARN(hmd,
+				             "Pose steps: interval avg %.3fms; angle avg %.4fdeg max %.4fdeg; angular speed avg "
+				             "%.1fdeg/s max %.1fdeg/s; new-SLAM %" PRIu64 "/240 avg %.4fdeg %.1fdeg/s; "
+				             "same-SLAM %" PRIu64 "/240 avg %.4fdeg %.1fdeg/s; new-IMU %" PRIu64 "/240",
+				             interval_total_ms / 240.0, angle_total_deg / 240.0, angle_max_deg,
+				             speed_total_dps / 240.0, speed_max_dps, slam_step_count, slam_angle_avg, slam_speed_avg,
+				             same_slam_step_count, same_slam_angle_avg, same_slam_speed_avg, imu_advance_step_count);
+
+				step_count = 0;
+				slam_step_count = 0;
+				same_slam_step_count = 0;
+				imu_advance_step_count = 0;
+				interval_total_ms = 0.0;
+				angle_total_deg = 0.0;
+				angle_max_deg = 0.0;
+				speed_total_dps = 0.0;
+				speed_max_dps = 0.0;
+				slam_angle_total_deg = 0.0;
+				slam_speed_total_dps = 0.0;
+				same_slam_angle_total_deg = 0.0;
+				same_slam_speed_total_dps = 0.0;
+			}
+
+			previous_prediction_ts = prediction_timestamp_ns;
+			previous_slam_ts = latest_relation_ts;
+			previous_imu_ts = latest_imu_ts;
+			previous_orientation = out_relation->pose.orientation;
+		}
+	}
 }
 
 static xrt_result_t
