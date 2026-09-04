@@ -717,14 +717,9 @@ comp_window_macos_present(struct comp_target *ct,
 		return VK_ERROR_DEVICE_LOST;
 	}
 
-	uint64_t before_render_wait_ns = os_monotonic_get_ns();
-	VkResult ret = comp_window_macos_wait_for_render_complete(cwm, present_queue, timeline_semaphore_value);
-	uint64_t after_render_wait_ns = os_monotonic_get_ns();
-	if (ret != VK_SUCCESS) {
-		return ret;
-	}
-
+	uint64_t before_submission_ns = os_monotonic_get_ns();
 	uint64_t after_drawable_wait_ns = 0;
+	uint64_t after_render_wait_ns = 0;
 	uint64_t after_metal_submit_ns = 0;
 	@autoreleasepool {
 		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
@@ -733,6 +728,19 @@ comp_window_macos_present(struct comp_target *ct,
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
 			return VK_ERROR_OUT_OF_DATE_KHR;
 		}
+
+		/*
+		 * Vulkan rendering is already in flight. Acquire the independent Metal
+		 * drawable first so its availability wait overlaps GPU execution, then
+		 * wait for the IOSurface render to finish before encoding the blit.
+		 */
+		VkResult ret =
+		    comp_window_macos_wait_for_render_complete(cwm, present_queue, timeline_semaphore_value);
+		after_render_wait_ns = os_monotonic_get_ns();
+		if (ret != VK_SUCCESS) {
+			return ret;
+		}
+
 		id<MTLCommandBuffer> command_buffer = [cwm->present_queue commandBuffer];
 		id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
 		MTLSize size = MTLSizeMake(ct->width, ct->height, 1);
@@ -771,10 +779,10 @@ comp_window_macos_present(struct comp_target *ct,
 		after_metal_submit_ns = os_monotonic_get_ns();
 	}
 
-	comp_window_macos_record_submission(cwm, after_render_wait_ns - before_render_wait_ns,
-	                                      after_drawable_wait_ns - after_render_wait_ns,
-	                                      after_metal_submit_ns - after_drawable_wait_ns,
-	                                      after_metal_submit_ns - before_render_wait_ns);
+	comp_window_macos_record_submission(cwm, after_render_wait_ns - after_drawable_wait_ns,
+	                                      after_drawable_wait_ns - before_submission_ns,
+	                                      after_metal_submit_ns - after_render_wait_ns,
+	                                      after_metal_submit_ns - before_submission_ns);
 
 	return VK_SUCCESS;
 }
