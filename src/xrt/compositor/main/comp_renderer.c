@@ -57,6 +57,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_pose_log, "XRT_MACOS_COMPOSITOR_POSE_LOG", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_scanout_off, "XRT_MACOS_SCANOUT_OFF", false)
 #endif
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
@@ -317,6 +318,13 @@ calc_pose_data(struct comp_renderer *r,
 			          "Unable to apply scanout compensation as only DIRECTION_TOP_TO_BOTTOM is supported");
 		}
 	}
+
+#ifdef XRT_OS_OSX
+	// A/B scanout compensation independently of ordinary ATW and display prediction.
+	if (debug_get_bool_option_macos_scanout_off()) {
+		scanout_time_ns = 0;
+	}
+#endif
 
 	int64_t begin_timestamp_ns = r->c->frame.rendering.predicted_display_time_ns;
 	int64_t end_timestamp_ns = begin_timestamp_ns + scanout_time_ns;
@@ -628,6 +636,12 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 
 	r->c = c;
 	r->settings = &c->settings;
+
+#ifdef XRT_OS_OSX
+	if (debug_get_bool_option_macos_scanout_off()) {
+		COMP_INFO(c, "macOS scanout compensation disabled: using the beginning pose for both endpoints; ATW setting unchanged");
+	}
+#endif
 
 	r->acquired_buffer = -1;
 	r->fenced_buffer = -1;

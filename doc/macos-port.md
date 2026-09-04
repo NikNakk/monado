@@ -165,6 +165,23 @@ This diagnostic does not change pose selection or ATW gating. It adds several
 lines per frame and can affect timing. Keep the other experimental settings
 fixed when capturing it.
 
+### Scanout compensation A/B
+
+`XRT_MACOS_SCANOUT_OFF=1` disables scanout compensation on macOS by setting the
+pose-query scanout interval to zero. The existing zero-interval path copies the
+beginning head relation and eye poses to the end, avoiding the second device
+query. The predicted display time and ordinary ATW setting are unchanged. The
+compute compositor therefore receives identical target poses for both scanout
+endpoints. The graphics path already uses only the beginning pose.
+
+The option defaults to `0`, preserving the device-reported scanout interval and
+Linux behavior. Restart the service to change it. Compare `1` against `0` with
+the same application and smooth head rotations, keeping feedback, worker gate,
+and logging settings fixed. Startup logs confirm when the override is enabled;
+if pose logging is enabled, device `begin_ns` and `end_ns` and their orientations
+should match. Keep verbose pose/phase logging disabled for the subjective test.
+This is an experiment, not a change to the default timing model.
+
 On Apple platforms the runtime does not currently advertise
 `XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
 swapchains do not support depth/stencil pixel formats. The Metal client also
