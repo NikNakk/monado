@@ -66,6 +66,7 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS"
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_max_prediction_ms, "PSVR2_MAX_PREDICTION_MS", 0.0f)
 
 #ifdef XRT_OS_OSX
 #define PSVR2_AUXILIARY_STREAMS_DEFAULT false
@@ -158,9 +159,20 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 		return;
 	}
 
+	uint64_t latest_imu_ts = 0;
+	bool have_latest_imu = m_ff_vec3_f32_get_timestamp(hmd->ff_gyro, 0, &latest_imu_ts);
+	timepoint_ns prediction_timestamp_ns = at_timestamp_ns;
+	float max_prediction_ms = debug_get_float_option_psvr2_max_prediction_ms();
+	if (have_latest_imu && max_prediction_ms > 0.0f) {
+		int64_t max_prediction_ns = time_ms_f_to_ns(max_prediction_ms);
+		timepoint_ns latest_allowed_prediction_ns = (timepoint_ns)latest_imu_ts + max_prediction_ns;
+		if (prediction_timestamp_ns > latest_allowed_prediction_ns) {
+			prediction_timestamp_ns = latest_allowed_prediction_ns;
+		}
+	}
+
 	if (debug_get_bool_option_psvr2_timing_log()) {
-		uint64_t latest_imu_ts = 0;
-		if (m_ff_vec3_f32_get_timestamp(hmd->ff_gyro, 0, &latest_imu_ts)) {
+		if (have_latest_imu) {
 			static timepoint_ns last_query_now_ns = 0;
 			static timepoint_ns last_slam_ts = 0;
 			static uint64_t last_imu_ts = 0;
@@ -201,9 +213,9 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 			last_imu_ts = latest_imu_ts;
 
 			hmd->timing_query_count++;
-			hmd->timing_prediction_total_ns += at_timestamp_ns - latest_relation_ts;
+			hmd->timing_prediction_total_ns += prediction_timestamp_ns - latest_relation_ts;
 			hmd->timing_imu_after_slam_total_ns += (int64_t)latest_imu_ts - latest_relation_ts;
-			hmd->timing_prediction_after_imu_total_ns += at_timestamp_ns - (int64_t)latest_imu_ts;
+			hmd->timing_prediction_after_imu_total_ns += prediction_timestamp_ns - (int64_t)latest_imu_ts;
 			if (hmd->timing_query_count == 240) {
 				PSVR2_WARN(hmd,
 				             "Pose timing: prediction %.3fms after SLAM, latest IMU %.3fms after SLAM, target "
@@ -246,14 +258,14 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 	    latest_relation.relation_flags | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
 
 	// Predict forward using dead reckoning
-	t_apply_dead_reckoning( //
-	    hmd->ff_gyro,       //
-	    NULL,               //
-	    NULL,               //
-	    at_timestamp_ns,    //
-	    &latest_relation,   //
-	    latest_relation_ts, //
-	    out_relation);      //
+	t_apply_dead_reckoning(       //
+	    hmd->ff_gyro,             //
+	    NULL,                     //
+	    NULL,                     //
+	    prediction_timestamp_ns, //
+	    &latest_relation,         //
+	    latest_relation_ts,       //
+	    out_relation);            //
 }
 
 static xrt_result_t
