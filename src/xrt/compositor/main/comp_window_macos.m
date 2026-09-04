@@ -31,6 +31,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(present_timing, "XRT_MACOS_PRESENT_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_phase_log, "XRT_MACOS_PRESENT_PHASE_LOG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(async_present, "XRT_MACOS_ASYNC_PRESENT", false)
+DEBUG_GET_ONCE_BOOL_OPTION(present_worker_gate, "XRT_MACOS_PRESENT_WORKER_GATE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_feedback, "XRT_MACOS_PRESENT_FEEDBACK", false)
 DEBUG_GET_ONCE_NUM_OPTION(present_advance_periods, "XRT_MACOS_PRESENT_ADVANCE_PERIODS", 0)
 
@@ -46,6 +47,8 @@ struct macos_frame_timing
 	int64_t predicted_display_ns;
 	int64_t wake_ns;
 	int64_t render_begin_ns;
+	int64_t worker_gate_begin_ns;
+	int64_t worker_gate_end_ns;
 	int64_t submit_begin_ns;
 	int64_t submit_end_ns;
 	int64_t enqueue_ns;
@@ -803,7 +806,7 @@ comp_window_macos_record_submission(struct comp_window_macos *cwm,
 	cwm->submission_max_ns = 0;
 }
 
-/* These wrappers are installed only when phase logging is enabled. */
+/* Prediction capture is installed only when phase logging is enabled. */
 static void
 comp_window_macos_phase_predict(struct comp_target *ct,
                                 int64_t *frame_id,
@@ -833,7 +836,25 @@ comp_window_macos_phase_mark(struct comp_target *ct,
                              int64_t when_ns)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	int64_t gate_begin_ns = 0;
+	int64_t gate_end_ns = 0;
+	if (point == COMP_TARGET_TIMING_POINT_BEGIN && debug_get_bool_option_present_worker_gate() &&
+	    cwm->present_work_group != NULL) {
+		/*
+		 * Only prior frames have been dispatched at this point. Let their CPU
+		 * submission jobs finish before sampling this frame's compositor pose.
+		 * Do not wait for Metal completion or presented callbacks: those can
+		 * overlap rendering. The current frame has not submitted GPU work yet.
+		 */
+		gate_begin_ns = os_monotonic_get_ns();
+		dispatch_group_wait(cwm->present_work_group, DISPATCH_TIME_FOREVER);
+		gate_end_ns = os_monotonic_get_ns();
+		when_ns = gate_end_ns;
+	}
 	cwm->original_mark_timing_point(ct, point, frame_id, when_ns);
+	if (!debug_get_bool_option_present_phase_log()) {
+		return;
+	}
 	@synchronized(cwm->present_queue) {
 		struct macos_frame_timing *f = &cwm->phase_frame;
 		if (!f->valid || f->frame_id != frame_id) {
@@ -845,6 +866,8 @@ comp_window_macos_phase_mark(struct comp_target *ct,
 			break;
 		case COMP_TARGET_TIMING_POINT_BEGIN:
 			f->render_begin_ns = when_ns;
+			f->worker_gate_begin_ns = gate_begin_ns;
+			f->worker_gate_end_ns = gate_end_ns;
 			break;
 		case COMP_TARGET_TIMING_POINT_SUBMIT_BEGIN:
 			f->submit_begin_ns = when_ns;
@@ -928,6 +951,7 @@ comp_window_macos_record_phase(struct comp_window_macos *cwm,
 			          "macOS presentation pipeline: timeline %llu predict_call_ns %lld wake_target_ns %lld "
 			          "wake_ns %lld render_begin_ns %lld submit_begin_ns %lld submit_end_ns %lld "
 			          "predicted_display_ns %lld enqueue_ns %lld worker_start_ns %llu; "
+			          "worker_gate_begin_ns %lld worker_gate_end_ns %lld worker_gate_wait %.3fms; "
 			          "queue_wait %.3fms render_begin_to_actual %.3fms commit_to_actual %.3fms "
 			          "original_prediction_error %.3fms",
 			          (unsigned long long)timeline, (long long)frame.predict_call_ns,
@@ -935,6 +959,8 @@ comp_window_macos_record_phase(struct comp_window_macos *cwm,
 			          (long long)frame.render_begin_ns, (long long)frame.submit_begin_ns,
 			          (long long)frame.submit_end_ns, (long long)frame.predicted_display_ns,
 			          (long long)frame.enqueue_ns, (unsigned long long)worker_start_ns,
+			          (long long)frame.worker_gate_begin_ns, (long long)frame.worker_gate_end_ns,
+			          (double)(frame.worker_gate_end_ns - frame.worker_gate_begin_ns) / U_TIME_1MS_IN_NS,
 			          (double)((int64_t)worker_start_ns - frame.enqueue_ns) / U_TIME_1MS_IN_NS,
 			          frame.render_begin_ns != 0 ? (double)(actual_ns - frame.render_begin_ns) / U_TIME_1MS_IN_NS : NAN,
 			          (double)(actual_ns - (int64_t)commit_call_ns) / U_TIME_1MS_IN_NS,
@@ -1278,8 +1304,10 @@ comp_window_macos_create(struct comp_compositor *c)
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
 	if (debug_get_bool_option_present_phase_log()) {
 		cwm->original_calc_frame_pacing = cwm->base.base.calc_frame_pacing;
-		cwm->original_mark_timing_point = cwm->base.base.mark_timing_point;
 		cwm->base.base.calc_frame_pacing = comp_window_macos_phase_predict;
+	}
+	if (debug_get_bool_option_present_phase_log() || debug_get_bool_option_present_worker_gate()) {
+		cwm->original_mark_timing_point = cwm->base.base.mark_timing_point;
 		cwm->base.base.mark_timing_point = comp_window_macos_phase_mark;
 	}
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
@@ -1304,6 +1332,10 @@ comp_window_macos_create(struct comp_compositor *c)
 	cwm->base.base.get_current_refresh_rate = comp_window_macos_get_current_refresh_rate;
 	cwm->base.base.wait_for_present_supported = false;
 	cwm->base.base.c = c;
+	if (debug_get_bool_option_present_worker_gate()) {
+		COMP_INFO(c, "macOS presentation worker gate: %s",
+		          debug_get_bool_option_async_present() ? "enabled before render begin" : "inactive (requires async presentation)");
+	}
 	return &cwm->base.base;
 }
 
