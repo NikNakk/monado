@@ -95,6 +95,23 @@ lines around transitions, plus the existing presentation/submission summaries
 and missed-frame warnings, to distinguish a persistent extra refresh from a
 single late frame. The timeline value can be zero with the queue-idle fallback.
 
+The same option also emits `macOS presentation pipeline:` with the matching
+timeline/frame ID. It records the CPU prediction-call marker, requested and
+actual wake times, CPU render-begin and Vulkan submit-begin/end markers, the
+original predicted display time, and presentation enqueue/worker-start times.
+Frame history is copied before dispatch so subsequent predictions cannot change
+an outstanding job's diagnostic data. Missing history is explicitly reported;
+an absent render-begin marker produces `nan` for its derived age.
+
+`queue_wait` measures enqueue to worker entry (direct-call overhead in synchronous
+mode); `render_begin_to_actual` measures the age since CPU rendering began, not
+the sensor sample age; `commit_to_actual` measures the Metal commit-call marker
+to presentation. `original_prediction_error` compares actual presentation with
+the display time returned by the original frame prediction, rather than a later
+feedback snapshot. Submit markers measure CPU submission, not GPU execution.
+Keep both phase and pipeline lines when sharing a log. These extra per-frame
+lines can add logging overhead; no pacing or feedback values are changed.
+
 On Apple platforms the runtime does not currently advertise
 `XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
 swapchains do not support depth/stencil pixel formats. The Metal client also

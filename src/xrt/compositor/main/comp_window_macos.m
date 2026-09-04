@@ -37,6 +37,20 @@ DEBUG_GET_ONCE_NUM_OPTION(present_advance_periods, "XRT_MACOS_PRESENT_ADVANCE_PE
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
+struct macos_frame_timing
+{
+	bool valid;
+	int64_t frame_id;
+	int64_t predict_call_ns;
+	int64_t wake_target_ns;
+	int64_t predicted_display_ns;
+	int64_t wake_ns;
+	int64_t render_begin_ns;
+	int64_t submit_begin_ns;
+	int64_t submit_end_ns;
+	int64_t enqueue_ns;
+};
+
 struct comp_window_macos
 {
 	struct comp_target_swapchain base;
@@ -82,6 +96,10 @@ struct comp_window_macos
 	CFTimeInterval phase_last_presented_time_s;
 	int64_t phase_last_class;
 	uint64_t phase_class_run;
+	/* Use a separate lock from callback logging so log I/O cannot hold up snapshots. */
+	struct macos_frame_timing phase_frame;
+	void (*original_calc_frame_pacing)(struct comp_target *, int64_t *, int64_t *, int64_t *, int64_t *, int64_t *);
+	void (*original_mark_timing_point)(struct comp_target *, enum comp_target_timing_point, int64_t, int64_t);
 
 	uint64_t submission_sample_count;
 	uint64_t render_wait_total_ns;
@@ -785,6 +803,59 @@ comp_window_macos_record_submission(struct comp_window_macos *cwm,
 	cwm->submission_max_ns = 0;
 }
 
+/* These wrappers are installed only when phase logging is enabled. */
+static void
+comp_window_macos_phase_predict(struct comp_target *ct,
+                                int64_t *frame_id,
+                                int64_t *wake_ns,
+                                int64_t *desired_ns,
+                                int64_t *slop_ns,
+                                int64_t *display_ns)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	int64_t predict_call_ns = os_monotonic_get_ns();
+	cwm->original_calc_frame_pacing(ct, frame_id, wake_ns, desired_ns, slop_ns, display_ns);
+	@synchronized(cwm->present_queue) {
+		cwm->phase_frame = (struct macos_frame_timing){
+		    .valid = true,
+		    .frame_id = *frame_id,
+		    .predict_call_ns = predict_call_ns,
+		    .wake_target_ns = *wake_ns,
+		    .predicted_display_ns = *display_ns,
+		};
+	}
+}
+
+static void
+comp_window_macos_phase_mark(struct comp_target *ct,
+                             enum comp_target_timing_point point,
+                             int64_t frame_id,
+                             int64_t when_ns)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	cwm->original_mark_timing_point(ct, point, frame_id, when_ns);
+	@synchronized(cwm->present_queue) {
+		struct macos_frame_timing *f = &cwm->phase_frame;
+		if (!f->valid || f->frame_id != frame_id) {
+			return;
+		}
+		switch (point) {
+		case COMP_TARGET_TIMING_POINT_WAKE_UP:
+			f->wake_ns = when_ns;
+			break;
+		case COMP_TARGET_TIMING_POINT_BEGIN:
+			f->render_begin_ns = when_ns;
+			break;
+		case COMP_TARGET_TIMING_POINT_SUBMIT_BEGIN:
+			f->submit_begin_ns = when_ns;
+			break;
+		case COMP_TARGET_TIMING_POINT_SUBMIT_END:
+			f->submit_end_ns = when_ns;
+			break;
+		}
+	}
+}
+
 /*
  * Log every drawable so a class change retains its preceding/following frames.
  * Keep this state separate from feedback and the aggregate timing diagnostic.
@@ -804,7 +875,9 @@ comp_window_macos_record_phase(struct comp_window_macos *cwm,
                                uint64_t render_wait_ns,
                                uint64_t commit_call_ns,
                                int64_t feedback_submit_ns,
-                               bool immediate)
+                               bool immediate,
+                               struct macos_frame_timing frame,
+                               uint64_t worker_start_ns)
 {
 	CFTimeInterval actual_s = [drawable presentedTime];
 	int64_t period_ns = cwm->display_period_ns;
@@ -849,6 +922,27 @@ comp_window_macos_record_phase(struct comp_window_macos *cwm,
 		          (double)((int64_t)commit_call_ns - scheduled_ns) / U_TIME_1MS_IN_NS,
 		          (actual_s - scheduled_host_s) * 1000.0, (double)feedback_submit_ns / U_TIME_1MS_IN_NS,
 		          (double)feedback_now_ns / U_TIME_1MS_IN_NS, immediate);
+		/* Missing frame history is explicit; never calculate ages from zero timestamps. */
+		if (frame.valid) {
+			COMP_INFO(cwm->base.base.c,
+			          "macOS presentation pipeline: timeline %llu predict_call_ns %lld wake_target_ns %lld "
+			          "wake_ns %lld render_begin_ns %lld submit_begin_ns %lld submit_end_ns %lld "
+			          "predicted_display_ns %lld enqueue_ns %lld worker_start_ns %llu; "
+			          "queue_wait %.3fms render_begin_to_actual %.3fms commit_to_actual %.3fms "
+			          "original_prediction_error %.3fms",
+			          (unsigned long long)timeline, (long long)frame.predict_call_ns,
+			          (long long)frame.wake_target_ns, (long long)frame.wake_ns,
+			          (long long)frame.render_begin_ns, (long long)frame.submit_begin_ns,
+			          (long long)frame.submit_end_ns, (long long)frame.predicted_display_ns,
+			          (long long)frame.enqueue_ns, (unsigned long long)worker_start_ns,
+			          (double)((int64_t)worker_start_ns - frame.enqueue_ns) / U_TIME_1MS_IN_NS,
+			          frame.render_begin_ns != 0 ? (double)(actual_ns - frame.render_begin_ns) / U_TIME_1MS_IN_NS : NAN,
+			          (double)(actual_ns - (int64_t)commit_call_ns) / U_TIME_1MS_IN_NS,
+			          (double)(actual_ns - frame.predicted_display_ns) / U_TIME_1MS_IN_NS);
+		} else {
+			COMP_INFO(cwm->base.base.c, "macOS presentation pipeline: timeline %llu frame history unavailable",
+			          (unsigned long long)timeline);
+		}
 	}
 }
 
@@ -858,7 +952,8 @@ comp_window_macos_submit_present(struct comp_window_macos *cwm,
                                  uint32_t index,
                                  uint64_t timeline_semaphore_value,
                                  int64_t desired_present_time_ns,
-                                 bool release_image_on_completion)
+                                 bool release_image_on_completion,
+                                 struct macos_frame_timing phase_frame)
 {
 	struct comp_target *ct = &cwm->base.base;
 
@@ -966,7 +1061,7 @@ comp_window_macos_submit_present(struct comp_window_macos *cwm,
 				                               desired_host_time_seconds, scheduled_host_time_seconds,
 				                               after_drawable_wait_ns, after_drawable_wait_ns - before_submission_ns,
 				                               after_render_wait_ns - after_drawable_wait_ns, commit_call_ns,
-				                               feedback_submit_ns, immediate);
+				                               feedback_submit_ns, immediate, phase_frame, before_submission_ns);
 			}];
 		}
 		[command_buffer commit];
@@ -1002,14 +1097,23 @@ comp_window_macos_present(struct comp_target *ct,
 		return VK_ERROR_DEVICE_LOST;
 	}
 
+	/* Snapshot before dispatch: later predictions must not overwrite this job's history. */
+	struct macos_frame_timing phase_frame = {0};
+	if (debug_get_bool_option_present_phase_log()) {
+		@synchronized(cwm->present_queue) {
+			phase_frame = cwm->phase_frame;
+		}
+		phase_frame.valid = phase_frame.valid && phase_frame.frame_id == (int64_t)timeline_semaphore_value;
+		phase_frame.enqueue_ns = os_monotonic_get_ns();
+	}
 	if (!debug_get_bool_option_async_present()) {
 		return comp_window_macos_submit_present(cwm, present_queue, index, timeline_semaphore_value,
-		                                        desired_present_time_ns, false);
+		                                        desired_present_time_ns, false, phase_frame);
 	}
 
 	dispatch_group_async(cwm->present_work_group, cwm->present_work_queue, ^{
 		VkResult ret = comp_window_macos_submit_present(cwm, present_queue, index, timeline_semaphore_value,
-		                                                   desired_present_time_ns, true);
+		                                                   desired_present_time_ns, true, phase_frame);
 		if (ret != VK_SUCCESS) {
 			atomic_store_explicit(&cwm->metal_present_failed, true, memory_order_release);
 		}
@@ -1172,6 +1276,12 @@ comp_window_macos_create(struct comp_compositor *c)
 {
 	struct comp_window_macos *cwm = U_TYPED_CALLOC(struct comp_window_macos);
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
+	if (debug_get_bool_option_present_phase_log()) {
+		cwm->original_calc_frame_pacing = cwm->base.base.calc_frame_pacing;
+		cwm->original_mark_timing_point = cwm->base.base.mark_timing_point;
+		cwm->base.base.calc_frame_pacing = comp_window_macos_phase_predict;
+		cwm->base.base.mark_timing_point = comp_window_macos_phase_mark;
+	}
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
 		cwm->io_surfaces[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 	}
