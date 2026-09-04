@@ -138,6 +138,33 @@ gate was inactive. A successful test should move waiting from `queue_wait` into
 cadence. Drawable waiting may still remain. Set the option to `0` for the
 baseline comparison.
 
+### Compositor pose selection diagnostic
+
+`XRT_MACOS_COMPOSITOR_POSE_LOG=1` independently enables per-view pose input
+logging on macOS. `macOS compositor device pose:` records the world-space eye
+orientations returned by the existing device-query/eye-transform path, their
+requested scanout timestamps, and relation flags. It performs no extra device
+queries. `macOS compositor render pose:` records the view inputs after pose
+selection, including compute/graphics path, device/submitted source, ATW and
+fast-path flags, layer count, and the first projection layer's timestamp and
+orientation. `app_present 0` means the zero application quaternion is a missing
+value, not a pose. Projection-depth uses the shared projection view layout.
+
+Quaternion components are logged as x, y, z, w. Match `timeline` to the phase
+and pipeline logs and compare consecutive *presented* frames offline; this
+avoids deriving angular speeds from closely spaced device-query timestamps.
+The device timestamps are requested prediction times, not sensor sample times.
+The render log captures inputs to the high-level rendering pipeline, not a
+readback of final pixels or a measurement of photons. With ATW disabled, a
+device target input does not establish that the image was reprojected to it.
+Graphics uses one target pose, so its logged end equals begin; compute can use
+distinct scanout endpoints. Multiple projection layers are identified by the
+layer count, but only the first projection's application pose is logged.
+
+This diagnostic does not change pose selection or ATW gating. It adds several
+lines per frame and can affect timing. Keep the other experimental settings
+fixed when capturing it.
+
 On Apple platforms the runtime does not currently advertise
 `XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
 swapchains do not support depth/stencil pixel formats. The Metal client also
