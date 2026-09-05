@@ -30,6 +30,7 @@
 #include "math/m_space.h"
 
 #include "tracking/t_dead_reckoning.h"
+#include "psvr2_prediction_capture.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
@@ -68,6 +69,7 @@ DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_max_prediction_ms, "PSVR2_MAX_PREDICTION_MS", 0.0f)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_pose_step_log, "PSVR2_POSE_STEP_LOG", false)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_slam_correction_ms, "PSVR2_SLAM_CORRECTION_MS", 0.0f)
 
 #ifdef XRT_OS_OSX
 #define PSVR2_AUXILIARY_STREAMS_DEFAULT false
@@ -82,6 +84,81 @@ psvr2_usb_stop(struct psvr2_hmd *hmd);
 
 static void
 psvr2_usb_destroy(struct psvr2_hmd *hmd);
+
+struct psvr2_prediction_capture
+{
+	FILE *file;
+	uint32_t records;
+};
+
+/* Called under data_lock, after prediction, so the saved FIFO is the one used. */
+static void
+psvr2_capture_prediction(struct psvr2_hmd *hmd, int64_t requested_ns, int64_t target_ns,
+                         int64_t base_ns, const struct xrt_space_relation *base,
+                         const struct xrt_space_relation *result)
+{
+	if (!hmd->prediction_capture_checked) {
+		hmd->prediction_capture_checked = true;
+		const char *path = getenv("PSVR2_PREDICTION_CAPTURE");
+		if (path == NULL || path[0] == '\0') {
+			return;
+		}
+		FILE *file = fopen(path, "wbx"); // Never overwrite an existing capture.
+		if (file == NULL) {
+			PSVR2_WARN(hmd, "Cannot create prediction capture '%s'", path);
+			return;
+		}
+		struct psvr2_prediction_capture *capture = calloc(1, sizeof(*capture));
+		if (capture == NULL) {
+			fclose(file);
+			return;
+		}
+		capture->file = file;
+		hmd->prediction_capture = capture;
+		struct psvr2_capture_header header = {
+		    .endian = 0x01020304,
+		    .relation_size = sizeof(struct xrt_space_relation),
+		    .record_size = sizeof(struct psvr2_capture_record),
+		    .sample_size = sizeof(struct psvr2_capture_sample),
+		};
+		memcpy(header.magic, PSVR2_CAPTURE_MAGIC, sizeof(header.magic));
+		if (fwrite(&header, sizeof(header), 1, file) != 1) {
+			fclose(file);
+			capture->file = NULL;
+			PSVR2_WARN(hmd, "Prediction capture header write failed");
+			return;
+		}
+		PSVR2_WARN(hmd, "Prediction capture enabled: %s (bounded, diagnostic I/O affects timing)", path);
+	}
+	struct psvr2_prediction_capture *capture = hmd->prediction_capture;
+	if (capture == NULL || capture->file == NULL) {
+		return;
+	}
+	uint32_t count = (uint32_t)m_ff_vec3_f32_get_num(hmd->ff_gyro);
+	if (count == 0 || count > PSVR2_CAPTURE_MAX_SAMPLES) {
+		return;
+	}
+	struct psvr2_capture_record record = {
+	    .query_ns = os_monotonic_get_ns(), .requested_ns = requested_ns, .target_ns = target_ns,
+	    .base_ns = base_ns, .sample_count = count,
+	    .explicit_integration = psvr2_explicit_gyro_integration_enabled(),
+	    .base = *base, .result = *result,
+	};
+	struct psvr2_capture_sample samples[PSVR2_CAPTURE_MAX_SAMPLES] = {0};
+	for (uint32_t i = 0; i < count; i++) {
+		if (!m_ff_vec3_f32_get(hmd->ff_gyro, count - 1 - i, &samples[i].gyro, &samples[i].timestamp_ns)) {
+			return;
+		}
+	}
+	bool ok = fwrite(&record, sizeof(record), 1, capture->file) == 1 &&
+	          fwrite(samples, sizeof(samples[0]), count, capture->file) == count && fflush(capture->file) == 0;
+	capture->records++;
+	if (!ok || capture->records == PSVR2_CAPTURE_MAX_RECORDS) {
+		fclose(capture->file);
+		capture->file = NULL;
+		PSVR2_WARN(hmd, "Prediction capture %s after %u records", ok ? "complete" : "write failed", capture->records);
+	}
+}
 
 static void
 psvr2_hmd_destroy(struct xrt_device *xdev)
@@ -112,6 +189,12 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 	// Remove the variable tracking.
 	u_var_remove_root(hmd);
 
+	if (hmd->prediction_capture != NULL) {
+		if (hmd->prediction_capture->file != NULL) {
+			fclose(hmd->prediction_capture->file);
+		}
+		free(hmd->prediction_capture);
+	}
 	m_ff_vec3_f32_free(&hmd->ff_gyro);
 	m_relation_history_destroy(&hmd->slam_relation_history);
 	if (hmd->data_lock_initialized) {
@@ -158,6 +241,31 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 	if (at_timestamp_ns <= latest_relation_ts) {
 		m_relation_history_get(hmd->slam_relation_history, at_timestamp_ns, out_relation);
 		return;
+	}
+
+	/*
+	 * Optionally ease only the orientation correction introduced by a new SLAM
+	 * sample. The default is zero (disabled); position and all IMU data remain
+	 * untouched. This is intentionally a diagnostic experiment, since easing
+	 * SLAM corrections trades visible steps for a small amount of orientation
+	 * lag.
+	 */
+	float correction_ms = debug_get_float_option_psvr2_slam_correction_ms();
+	if (correction_ms > 0.0f && latest_relation_ts != hmd->smoothed_slam_timestamp_ns) {
+		if (!hmd->smoothed_slam_initialized) {
+			hmd->smoothed_slam_orientation = latest_relation.pose.orientation;
+			hmd->smoothed_slam_initialized = true;
+		} else {
+			int64_t interval_ns = latest_relation_ts - hmd->smoothed_slam_timestamp_ns;
+			float alpha = interval_ns > 0 ? (float)((double)interval_ns / (double)time_ms_f_to_ns(correction_ms)) : 1.0f;
+			alpha = CLAMP(alpha, 0.0f, 1.0f);
+			math_quat_slerp(&hmd->smoothed_slam_orientation, &latest_relation.pose.orientation, alpha,
+			                &hmd->smoothed_slam_orientation);
+		}
+		hmd->smoothed_slam_timestamp_ns = latest_relation_ts;
+		latest_relation.pose.orientation = hmd->smoothed_slam_orientation;
+	} else if (correction_ms > 0.0f && hmd->smoothed_slam_initialized) {
+		latest_relation.pose.orientation = hmd->smoothed_slam_orientation;
 	}
 
 	uint64_t latest_imu_ts = 0;
@@ -267,6 +375,9 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 	    &latest_relation,         //
 	    latest_relation_ts,       //
 	    out_relation);            //
+
+	psvr2_capture_prediction(hmd, at_timestamp_ns, prediction_timestamp_ns, latest_relation_ts,
+	                         &latest_relation, out_relation);
 
 	if (debug_get_bool_option_psvr2_pose_step_log() && have_latest_imu) {
 		static bool have_previous = false;

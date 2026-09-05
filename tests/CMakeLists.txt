@@ -124,6 +124,13 @@ add_executable(tests_macos_runtime_probe tests_macos_runtime_probe.c)
 target_link_libraries(tests_macos_runtime_probe PRIVATE target_instance xrt-interfaces aux_util)
 set_target_properties(tests_macos_runtime_probe PROPERTIES FOLDER monado_tests)
 
+if(XRT_BUILD_DRIVER_PSVR2)
+	add_executable(psvr2_prediction_replay psvr2_prediction_replay.c)
+	target_link_libraries(psvr2_prediction_replay PRIVATE aux_tracking aux_util xrt-interfaces)
+	target_include_directories(psvr2_prediction_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers/psvr2)
+	set_target_properties(psvr2_prediction_replay PROPERTIES FOLDER monado_tools)
+endif()
+
 if(APPLE)
 	add_executable(tests_macos_ipc_swapchain_probe tests_macos_ipc_swapchain_probe.c)
 	target_link_libraries(tests_macos_ipc_swapchain_probe PRIVATE ipc_client xrt-interfaces aux_util)
