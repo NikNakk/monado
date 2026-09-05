@@ -76,6 +76,19 @@ DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_filtered_linear_prediction, "PSVR2_FILTERED_LINEAR_PREDICTION", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_ALPHA", 0.25f)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_full_linear_horizon, "PSVR2_FULL_LINEAR_HORIZON", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", false)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_alpha, "PSVR2_ACCELERATION_ALPHA", 0.25f)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_gain, "PSVR2_ACCELERATION_GAIN", 0.5f)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_limit, "PSVR2_ACCELERATION_LIMIT", 2.0f)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_min_speed, "PSVR2_ACCELERATION_MIN_SPEED", 0.01f)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_horizon_ms, "PSVR2_ACCELERATION_HORIZON_MS", 80.0f)
+
+static float
+psvr2_prediction_parameter(float value, float fallback, float minimum, float maximum)
+{
+	return isfinite(value) ? fminf(maximum, fmaxf(minimum, value)) : fallback;
+}
 
 #ifdef XRT_OS_OSX
 #define PSVR2_PENDING_HORIZON_PREDICTIONS 256
@@ -92,6 +105,13 @@ struct psvr2_pending_horizon_prediction
 	struct xrt_vec3 filtered_velocity;
 	struct xrt_vec3 raw_predicted_position;
 	struct xrt_vec3 filtered_predicted_position;
+	struct xrt_vec3 acceleration_predicted_position;
+	struct xrt_vec3 acceleration;
+	bool acceleration_applied;
+	bool acceleration_enabled;
+	bool full_linear_horizon_enabled;
+	struct xrt_vec3 returned_position;
+	struct psvr2_linear_prediction_params acceleration_params;
 };
 
 struct psvr2_timing_trace_state
@@ -173,7 +193,10 @@ psvr2_timing_trace_open(void)
 	    "sequence,query_host_ns,source_slam_vts_ns,target_vts_ns,horizon_ns,score_slam_vts_ns,"
 	    "actual_x,actual_y,actual_z,raw_pred_x,raw_pred_y,raw_pred_z,filtered_pred_x,filtered_pred_y,filtered_pred_z,"
 	    "raw_error_mm,filtered_error_mm,raw_along_mm,filtered_along_mm,source_x,source_y,source_z,"
-	    "raw_vel_x,raw_vel_y,raw_vel_z,filtered_vel_x,filtered_vel_y,filtered_vel_z,filter_alpha,filter_enabled");
+	    "raw_vel_x,raw_vel_y,raw_vel_z,filtered_vel_x,filtered_vel_y,filtered_vel_z,filter_alpha,filter_enabled,"
+	    "accel_pred_x,accel_pred_y,accel_pred_z,accel_error_mm,accel_along_mm,accel_x,accel_y,accel_z,"
+	    "accel_applied,accel_enabled,accel_alpha,accel_gain,accel_limit,accel_min_speed,accel_horizon_ms,"
+	    "returned_pred_x,returned_pred_y,returned_pred_z,returned_error_mm,returned_along_mm,full_linear_horizon_enabled");
 }
 
 static void
@@ -345,7 +368,8 @@ psvr2_vec3_length(const struct xrt_vec3 *v)
 }
 
 static void
-psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_host_ns, timepoint_ns target_vts_ns)
+psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_host_ns, timepoint_ns target_vts_ns,
+                                    const struct xrt_vec3 *returned_position)
 {
 	if (g_psvr2_timing_trace.horizon == NULL) {
 		return;
@@ -383,6 +407,17 @@ psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_hos
 	        latest.pose.position.z + filtered_velocity.z * dt_s,
 	    },
 	};
+	pending.acceleration_predicted_position = pending.raw_predicted_position;
+	struct xrt_vec3 acceleration_velocity = latest.linear_velocity;
+	pending.acceleration_applied =
+	    hmd->linear_prediction.timestamp_ns == latest_ts &&
+	    psvr2_linear_predict(&hmd->linear_prediction, &hmd->linear_prediction_params, target_vts_ns,
+	                         &pending.acceleration_predicted_position, &acceleration_velocity);
+	pending.acceleration = hmd->linear_prediction.acceleration;
+	pending.acceleration_enabled = hmd->acceleration_prediction_enabled;
+	pending.acceleration_params = hmd->linear_prediction_params;
+	pending.returned_position = *returned_position;
+	pending.full_linear_horizon_enabled = hmd->full_linear_horizon_enabled || hmd->acceleration_prediction_enabled;
 	uint32_t slot = g_psvr2_timing_trace.horizon_next_slot++ % PSVR2_PENDING_HORIZON_PREDICTIONS;
 	g_psvr2_timing_trace.horizon_pending[slot] = pending;
 }
@@ -428,9 +463,20 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		struct xrt_vec3 filtered_error = {actual.x - p->filtered_predicted_position.x,
 		                                  actual.y - p->filtered_predicted_position.y,
 		                                  actual.z - p->filtered_predicted_position.z};
+		struct xrt_vec3 acceleration_error = {actual.x - p->acceleration_predicted_position.x,
+		                                     actual.y - p->acceleration_predicted_position.y,
+		                                     actual.z - p->acceleration_predicted_position.z};
+		struct xrt_vec3 returned_error = {actual.x - p->returned_position.x, actual.y - p->returned_position.y,
+		                                 actual.z - p->returned_position.z};
+		float returned_along_m = 0.0f;
+		float acceleration_along_m = 0.0f;
 		float raw_along_m = 0.0f;
 		float filtered_along_m = 0.0f;
 		if (segment_length > 0.0001f) {
+			returned_along_m = (returned_error.x * segment.x + returned_error.y * segment.y +
+			                    returned_error.z * segment.z) / segment_length;
+			acceleration_along_m = (acceleration_error.x * segment.x + acceleration_error.y * segment.y +
+			                        acceleration_error.z * segment.z) / segment_length;
 			raw_along_m = (raw_error.x * segment.x + raw_error.y * segment.y + raw_error.z * segment.z) /
 			              segment_length;
 			filtered_along_m =
@@ -443,7 +489,7 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		fprintf(file,
 		        "%" PRIu64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ","
 		        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
-		        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
+		        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,",
 		        p->sequence, (int64_t)p->query_host_ns, (int64_t)p->source_slam_vts_ns, (int64_t)p->target_vts_ns,
 		        (int64_t)(p->target_vts_ns - p->source_slam_vts_ns), (int64_t)current_slam_vts_ns, actual.x, actual.y,
 		        actual.z, p->raw_predicted_position.x, p->raw_predicted_position.y, p->raw_predicted_position.z,
@@ -453,6 +499,16 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		        p->source_position.z, p->raw_velocity.x, p->raw_velocity.y, p->raw_velocity.z,
 		        p->filtered_velocity.x, p->filtered_velocity.y, p->filtered_velocity.z, alpha,
 		        debug_get_bool_option_psvr2_filtered_linear_prediction() ? 1u : 0u);
+		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,",
+		        p->acceleration_predicted_position.x, p->acceleration_predicted_position.y,
+		        p->acceleration_predicted_position.z, psvr2_vec3_length(&acceleration_error) * 1000.0f,
+		        acceleration_along_m * 1000.0f, p->acceleration.x, p->acceleration.y, p->acceleration.z,
+		        p->acceleration_applied ? 1u : 0u, p->acceleration_enabled ? 1u : 0u,
+		        p->acceleration_params.alpha, p->acceleration_params.gain, p->acceleration_params.max_acceleration,
+		        p->acceleration_params.min_speed, p->acceleration_params.max_horizon_s * 1000.0f);
+		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%u\n", p->returned_position.x, p->returned_position.y,
+		        p->returned_position.z, psvr2_vec3_length(&returned_error) * 1000.0f, returned_along_m * 1000.0f,
+		        p->full_linear_horizon_enabled ? 1u : 0u);
 		g_psvr2_timing_trace.horizon_rows++;
 		p->valid = false;
 	}
@@ -578,7 +634,8 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 		}
 	}
 
-	if (debug_get_bool_option_psvr2_filtered_linear_prediction() && hmd->filtered_linear_velocity_initialized) {
+	if (!hmd->acceleration_prediction_enabled && debug_get_bool_option_psvr2_filtered_linear_prediction() &&
+	    hmd->filtered_linear_velocity_initialized) {
 		latest_relation.linear_velocity = hmd->filtered_linear_velocity;
 		latest_relation.relation_flags = (enum xrt_space_relation_flags)(
 		    latest_relation.relation_flags | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
@@ -602,6 +659,27 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 	    &latest_relation,   //
 	    latest_relation_ts, //
 	    out_relation);      //
+
+	// Gyro-only dead reckoning advances integ_rel_ts without advancing position.
+	// Opt in to predicting linear motion over the complete SLAM->target interval.
+	// Keep this independently selectable so acceleration can be compared fairly.
+	if ((hmd->full_linear_horizon_enabled || hmd->acceleration_prediction_enabled) &&
+	    (latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
+	    (latest_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
+		float dt = (float)((double)(at_timestamp_ns - latest_relation_ts) * 1e-9);
+		out_relation->pose.position = (struct xrt_vec3){
+		    latest_relation.pose.position.x + latest_relation.linear_velocity.x * dt,
+		    latest_relation.pose.position.y + latest_relation.linear_velocity.y * dt,
+		    latest_relation.pose.position.z + latest_relation.linear_velocity.z * dt};
+		out_relation->linear_velocity = latest_relation.linear_velocity;
+	}
+
+	if (hmd->acceleration_prediction_enabled && hmd->linear_prediction.timestamp_ns == latest_relation_ts &&
+	    (latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
+	    (latest_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
+		psvr2_linear_predict(&hmd->linear_prediction, &hmd->linear_prediction_params, at_timestamp_ns,
+		                     &out_relation->pose.position, &out_relation->linear_velocity);
+	}
 }
 
 static xrt_result_t
@@ -655,12 +733,14 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 	m_relation_chain_push_pose(&chain, &hmd->T_imu_head);
 
 	// Push the normal head pose
+	struct xrt_space_relation *tracker_relation = m_relation_chain_reserve(&chain);
+	hmd_get_raw_tracker_pose(hmd, prediction_ns_hw, tracker_relation);
 #ifdef XRT_OS_OSX
 	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
-		psvr2_timing_trace_enqueue_horizon(hmd, trace_host_query_ns, prediction_ns_hw);
+		psvr2_timing_trace_enqueue_horizon(hmd, trace_host_query_ns, prediction_ns_hw,
+		                                     &tracker_relation->pose.position);
 	}
 #endif
-	hmd_get_raw_tracker_pose(hmd, prediction_ns_hw, m_relation_chain_reserve(&chain));
 
 	os_mutex_unlock(&hmd->data_lock);
 
@@ -1026,6 +1106,10 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 	if (!m_relation_history_get_latest(hmd->slam_relation_history, &estimated_relation_ts, &estimated_relation)) {
 		estimated_relation = relation;
 	}
+	psvr2_linear_update(&hmd->linear_prediction, &hmd->linear_prediction_params, estimated_relation_ts,
+	                    estimated_relation.pose.position, estimated_relation.linear_velocity,
+	                    (estimated_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
+	                        (estimated_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0);
 	float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
 	if (alpha < 0.0f) alpha = 0.0f;
 	if (alpha > 1.0f) alpha = 1.0f;
@@ -1829,6 +1913,18 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->info.display.h_pixels = 2040;
 	hmd->info.display.w_meters = 0.13f;
 	hmd->info.display.h_meters = 0.07f;
+	hmd->full_linear_horizon_enabled = debug_get_bool_option_psvr2_full_linear_horizon();
+	hmd->acceleration_prediction_enabled = debug_get_bool_option_psvr2_acceleration_prediction();
+	hmd->linear_prediction_params = (struct psvr2_linear_prediction_params){
+	    .alpha = psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_alpha(), 0.25f, 0.0f, 1.0f),
+	    .gain = psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_gain(), 0.5f, 0.0f, 1.0f),
+	    .max_acceleration =
+	        psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_limit(), 2.0f, 0.0f, 20.0f),
+	    .min_speed =
+	        psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_min_speed(), 0.01f, 0.0f, 1.0f),
+	    .max_horizon_s =
+	        0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_horizon_ms(), 80.0f, 0.0f, 120.0f),
+	};
 	hmd->info.lens_horizontal_separation_meters = 0.13f / 2.0f;
 	hmd->info.lens_vertical_position_meters = 0.07f / 2.0f;
 	// These need to be set to avoid an error, but the fovs

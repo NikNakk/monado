@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/macos-psvr2-timing-diagnostics.yml
       - CMakeLists.txt
+      - tests/tests_psvr2_linear_prediction.c
       - src/xrt/drivers/**
       - src/xrt/compositor/**
       - src/xrt/auxiliary/**
@@ -51,6 +52,13 @@ jobs:
           -DXRT_BUILD_DRIVER_SIMULATED=OFF
       - name: Build PSVR2 driver
         run: cmake --build build-driver --target drv_psvr2 --parallel
+      - name: Test positional predictor
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -I src/xrt/include -I src/xrt/drivers/psvr2 \
+            tests/tests_psvr2_linear_prediction.c -o /tmp/tests_psvr2_linear_prediction
+          /tmp/tests_psvr2_linear_prediction
+
 
   build-compositor:
     runs-on: macos-15

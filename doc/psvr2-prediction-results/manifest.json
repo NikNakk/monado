@@ -1,0 +1,217 @@
+[
+  {
+    "trace": "monado_psvr2_3250_slam.csv",
+    "samples": 2045,
+    "queries": 8197,
+    "scored": 8197,
+    "excluded": 0,
+    "duration_s": 34.100253,
+    "horizon_ms": [
+      45.24467080000001,
+      61.273641000000005,
+      76.654442
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_3250_slam.csv": "fc58f880633af4cf559edfec0ce75b3d79080b152f82462015a7da89dd2a8434",
+      "/tmp/monado_psvr2_3250_pose.csv": "1e0f6caddff55b99ddcef404878611de614a172b0488ad60f37e24d95009186d"
+    },
+    "c_parity_max_difference_mm": 7.534494645810682e-05
+  },
+  {
+    "trace": "monado_psvr2_38153_slam.csv",
+    "samples": 1543,
+    "queries": 6709,
+    "scored": 6709,
+    "excluded": 0,
+    "duration_s": 25.725268000000003,
+    "horizon_ms": [
+      43.3926808,
+      59.821412,
+      76.369972
+    ],
+    "checks": {
+      "actual_max_difference_mm": 2.4445479021536013e-05,
+      "raw_max_difference_mm": 2.545292853370077e-05,
+      "ema_max_difference_mm": 2.48015477511712e-05,
+      "live_gyro_tail_max_difference_mm": 0.00011110451393383772
+    },
+    "sources": {
+      "/tmp/monado_psvr2_38153_slam.csv": "cd47e3c49b9df5ce4d5379aaf2e058d94c1404edc9df7f1798f9dc5cefd6f9fb",
+      "/tmp/monado_psvr2_38153_horizon.csv": "b0de6b7da818fcef03b145f82a9cf57b4027e168f4cef914ad9618bdf593f407",
+      "/tmp/monado_psvr2_38153_pose.csv": "390853d15a720acae41930eddb28c6400a0566fed8d5accafbb6083b9ba67fc6"
+    },
+    "c_parity_max_difference_mm": 4.273664661098947e-05
+  },
+  {
+    "trace": "monado_psvr2_43034_slam.csv",
+    "samples": 1381,
+    "queries": 5065,
+    "scored": 5064,
+    "excluded": 1,
+    "duration_s": 23.022647000000003,
+    "horizon_ms": [
+      26.57457,
+      44.576261,
+      53.459651900000004
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_43034_slam.csv": "edc6dc2fef74b92e4979dd67ddfbda30735f7697c789b698f5f341b1e17b4eb1",
+      "/tmp/monado_psvr2_43034_pose.csv": "4f7addee303f01492c71529b806b5ebb3716dbe028046df730717e9ce30ecb11"
+    },
+    "c_parity_max_difference_mm": 5.844176093268254e-05
+  },
+  {
+    "trace": "monado_psvr2_4761_slam.csv",
+    "samples": 19968,
+    "queries": 19456,
+    "scored": 19456,
+    "excluded": 0,
+    "duration_s": 333.110163,
+    "horizon_ms": [
+      44.05019875,
+      60.18058450000001,
+      76.42696825
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_4761_slam.csv": "3f52b1a82a3f1de9c566196c18b36f2f7105079ad7910343b3120a185f4fd2d2",
+      "/tmp/monado_psvr2_4761_pose.csv": "68764ad8fc154e402ff23bfdc3fdc27e871c0ad18c8d8ec3e8b81bae4f1b4982"
+    },
+    "c_parity_max_difference_mm": 7.601141599191022e-05
+  },
+  {
+    "trace": "monado_psvr2_68732_slam.csv",
+    "samples": 35205,
+    "queries": 10475,
+    "scored": 10475,
+    "excluded": 0,
+    "duration_s": 587.309827,
+    "horizon_ms": [
+      30.623914400000004,
+      47.22008100000001,
+      63.833308900000006
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_68732_slam.csv": "6570a0dd9a17e715048ae6208de49cd95f1281fd9f5c72c4af4cda71dba240b0",
+      "/tmp/monado_psvr2_68732_pose.csv": "2f2d9179644c11f856c0f404a74e8a135f3530c002f8494555937e759110be81"
+    },
+    "c_parity_max_difference_mm": 5.864711683873546e-05
+  },
+  {
+    "trace": "monado_psvr2_74882_slam.csv",
+    "samples": 2531,
+    "queries": 13639,
+    "scored": 13639,
+    "excluded": 0,
+    "duration_s": 42.2081,
+    "horizon_ms": [
+      30.065386900000004,
+      46.477506000000005,
+      62.836467000000006
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_74882_slam.csv": "ed5a7d355528ebcfa66bb687cc278b0127b3125d4009d58d088bfbbc74e35408",
+      "/tmp/monado_psvr2_74882_pose.csv": "dc419db779b17b41681af1c33822c7960f70cae602cfd840b6c425435dd75ff3"
+    },
+    "c_parity_max_difference_mm": 6.0490931398647185e-05
+  },
+  {
+    "trace": "monado_psvr2_79629_slam.csv",
+    "samples": 25275,
+    "queries": 12003,
+    "scored": 12003,
+    "excluded": 0,
+    "duration_s": 422.69812800000005,
+    "horizon_ms": [
+      30.486488,
+      46.959774,
+      63.54585230000001
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_79629_slam.csv": "8c1911d71b959fbdd0c6e3ce3138a743e8ec5731809e8fdf94f51378b1fc759d",
+      "/tmp/monado_psvr2_79629_pose.csv": "ff437002c6a9752ce76eefaaff6f6163595d57ea7c013091be95a32d5847488c"
+    },
+    "c_parity_max_difference_mm": 6.182728216794322e-05
+  },
+  {
+    "trace": "monado_psvr2_84285_slam.csv",
+    "samples": 2671,
+    "queries": 11053,
+    "scored": 11053,
+    "excluded": 0,
+    "duration_s": 44.827328,
+    "horizon_ms": [
+      30.074779600000003,
+      46.642718,
+      63.303176
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_84285_slam.csv": "600bfc3856c7a76a229fba3d7a1e5752b17d3dbf57ce10ba3a8104603d528e01",
+      "/tmp/monado_psvr2_84285_pose.csv": "8f42f72edf2edb2553dc9e7f6ae845d7efc8141a4c64d9bb4102031e05c9f8a8"
+    },
+    "c_parity_max_difference_mm": 6.27291993845886e-05
+  },
+  {
+    "trace": "monado_psvr2_88726_slam.csv",
+    "samples": 1622,
+    "queries": 9591,
+    "scored": 9591,
+    "excluded": 0,
+    "duration_s": 27.043212,
+    "horizon_ms": [
+      43.94792600000001,
+      60.166056000000005,
+      76.46225650000001
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_88726_slam.csv": "0f1a46164c3712ce2407bb967985b053fd09d5af11e7c0553f60f4da1bbb2ea3",
+      "/tmp/monado_psvr2_88726_pose.csv": "42148e5f506e02b062d6819b46d4410ed7e51e8a46e0e620cc57f5e072c2844f"
+    },
+    "c_parity_max_difference_mm": 6.076581779450495e-05
+  },
+  {
+    "trace": "monado_psvr2_94976_slam.csv",
+    "samples": 1415,
+    "queries": 8025,
+    "scored": 8025,
+    "excluded": 0,
+    "duration_s": 23.589847000000002,
+    "horizon_ms": [
+      43.854871,
+      60.05467900000001,
+      76.106469
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_94976_slam.csv": "fa7dcaa1056fec9cd2783433e214c1761b8b95d140876a6f757d8a389c4a6ef1",
+      "/tmp/monado_psvr2_94976_pose.csv": "7902c09dbc85db43f93fed41b6f41a0191a2b05d7f3dc7d0834a3ace52664311"
+    },
+    "c_parity_max_difference_mm": 6.030118106587624e-05
+  },
+  {
+    "trace": "monado_psvr2_96643_slam.csv",
+    "samples": 1533,
+    "queries": 6451,
+    "scored": 6449,
+    "excluded": 2,
+    "duration_s": 25.55842,
+    "horizon_ms": [
+      45.4593584,
+      60.807145000000006,
+      74.756341
+    ],
+    "checks": {},
+    "sources": {
+      "/tmp/monado_psvr2_96643_slam.csv": "64eabc26eb3ccdf1fff8eaf14f49e1ab3625f271723531e412c24f95c958d981",
+      "/tmp/monado_psvr2_96643_pose.csv": "925edc4c52d86ddbb1b3fd7bf845d7410e6072cda7a348b283a65b438bb257aa"
+    },
+    "c_parity_max_difference_mm": 5.8596927837632774e-05
+  }
+]
