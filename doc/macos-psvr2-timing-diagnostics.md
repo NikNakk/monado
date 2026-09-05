@@ -162,3 +162,12 @@ The prediction trace contains prior relation velocity, newly estimated velocity,
 ### CAMetalLayer drawable count
 
 `XRT_MACOS_MAX_DRAWABLES` selects the CAMetalLayer drawable-pool depth. Valid values are `2` and `3`; the default is `3`. The effective value is logged at startup. This is intended to test whether drawable buffering contributes to the observed one-refresh presentation latency.
+
+## Full-horizon translation and bounded acceleration
+
+See [PSVR2 positional prediction](psvr2-position-prediction.md) for the offline
+model comparison, a newly verified mismatch between gyro-only dead reckoning's
+linear horizon and `horizon.csv`, opt-in `PSVR2_FULL_LINEAR_HORIZON` and
+`PSVR2_ACCELERATION_PREDICTION` controls, appended diagnostic columns, and exact
+headset A/B commands. Both new controls default to zero. Test full-horizon raw
+first, then compare acceleration against that same horizon.
