@@ -81,7 +81,7 @@ vec2 transform_uv_subimage(vec2 uv, uint iz)
 	return values.xy;
 }
 
-vec2 transform_uv_timewarp(vec2 uv, uint iz)
+vec2 transform_uv_timewarp(vec2 uv, uint iz, float scanout_fraction)
 {
 	vec4 values = vec4(uv, -1, 1);
 
@@ -89,9 +89,10 @@ vec2 transform_uv_timewarp(vec2 uv, uint iz)
 	values.xy = values.xy * ubo.pre_transform[iz].zw + ubo.pre_transform[iz].xy;
 	values.y = -values.y; // Flip to OpenXR coordinate system.
 
-	// Timewarp including scanline timewarp for rolling refresh panels.
-	values = ubo.transform_timewarp_scanout_begin[iz] * values * (1 - uv.y) +
-	         ubo.transform_timewarp_scanout_end[iz] * values * uv.y;
+	// Scanout follows the output row, not the lens-distorted source coordinates.
+	// Use the same time for all colour channels at a given output pixel.
+	values = ubo.transform_timewarp_scanout_begin[iz] * values * (1 - scanout_fraction) +
+	         ubo.transform_timewarp_scanout_end[iz] * values * scanout_fraction;
 	values.xy = values.xy * (1.0 / max(values.w, 0.00001));
 
 	// From [-1, 1] to [0, 1]
@@ -101,10 +102,10 @@ vec2 transform_uv_timewarp(vec2 uv, uint iz)
 	return values.xy;
 }
 
-vec2 transform_uv(vec2 uv, uint iz)
+vec2 transform_uv(vec2 uv, uint iz, float scanout_fraction)
 {
 	if (do_timewarp) {
-		uv = transform_uv_timewarp(uv, iz);
+		uv = transform_uv_timewarp(uv, iz, scanout_fraction);
 	}
 
 	return transform_uv_subimage(uv, iz);
@@ -131,9 +132,9 @@ void main()
 	vec2 b_uv = use_identity_distortion ? subimage_uv : texture(distortion[iz + 4], distortion_uv).xy;
 
 	// Do any transformation needed.
-	r_uv = transform_uv(r_uv, iz);
-	g_uv = transform_uv(g_uv, iz);
-	b_uv = transform_uv(b_uv, iz);
+	r_uv = transform_uv(r_uv, iz, subimage_uv.y);
+	g_uv = transform_uv(g_uv, iz, subimage_uv.y);
+	b_uv = transform_uv(b_uv, iz, subimage_uv.y);
 
 	// Preserve source alpha instead of forcing the compositor target opaque.
 	vec4 colour = vec4(              //

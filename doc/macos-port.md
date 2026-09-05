@@ -182,6 +182,23 @@ if pose logging is enabled, device `begin_ns` and `end_ns` and their orientation
 should match. Keep verbose pose/phase logging disabled for the subjective test.
 This is an experiment, not a change to the default timing model.
 
+The compute distortion shader now weights scanout interpolation using the
+output viewport row at the pixel centre, shared by all colour channels.
+Previously it used each channel's lens-distorted source UV, which could assign
+different scanout times across a physical row or between colour channels of
+the same pixel. Source UVs still control image sampling; the output row controls
+scanout time. This corrects the existing top-to-bottom interpolation model
+without changing its endpoint timestamps, ATW matrices, or presentation pacing.
+It does not calibrate the physical scanout start time. The graphics path is
+unchanged. With identical scanout endpoint matrices (including
+`XRT_MACOS_SCANOUT_OFF=1`), the interpolation is mathematically unchanged.
+
+For hardware validation use `XRT_MACOS_SCANOUT_OFF=0` so the correction is active,
+three source IOSurfaces and two CAMetalLayer drawables, and keep the remaining
+settings from the source-pool baseline. This correction is separate from moving
+pose sampling after drawable acquisition, which would require changes to the
+render/presentation architecture.
+
 ### Source IOSurface pool A/B
 
 `XRT_MACOS_TARGET_IMAGE_COUNT=4` selects four compositor source IOSurfaces;
