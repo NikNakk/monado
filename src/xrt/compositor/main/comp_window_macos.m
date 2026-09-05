@@ -34,6 +34,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(async_present, "XRT_MACOS_ASYNC_PRESENT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_worker_gate, "XRT_MACOS_PRESENT_WORKER_GATE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(present_feedback, "XRT_MACOS_PRESENT_FEEDBACK", false)
 DEBUG_GET_ONCE_NUM_OPTION(present_advance_periods, "XRT_MACOS_PRESENT_ADVANCE_PERIODS", 0)
+DEBUG_GET_ONCE_BOOL_OPTION(metal_hud, "XRT_MACOS_METAL_HUD", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -292,6 +293,14 @@ comp_window_macos_init(struct comp_target *ct)
 		[metal_layer setDrawableSize:CGSizeMake(pixel_width, pixel_height)];
 		[metal_layer setOpaque:YES];
 		[metal_layer setDisplaySyncEnabled:YES];
+		if (debug_get_bool_option_metal_hud()) {
+			if ([metal_layer respondsToSelector:@selector(setDeveloperHUDProperties:)]) {
+				[metal_layer setDeveloperHUDProperties:@{@"mode" : @"default", @"logging" : @"default"}];
+				COMP_INFO(ct->c, "Enabled Metal performance HUD on PS VR2 CAMetalLayer");
+			} else {
+				COMP_WARN(ct->c, "XRT_MACOS_METAL_HUD requested, but CAMetalLayer developer HUD properties are unavailable");
+			}
+		}
 		id<MTLCommandQueue> present_queue = [[metal_layer device] newCommandQueue];
 		[metal_view release];
 		if (present_queue == nil) {
@@ -1178,8 +1187,8 @@ comp_window_macos_update_timings(struct comp_target *ct)
 			u_pc_update_present_offset(cwm->base.upc, 0, cwm->filtered_present_offset_ns);
 			atomic_store_explicit(&cwm->applied_present_offset_ns, cwm->filtered_present_offset_ns,
 			                      memory_order_release);
+			}
 		}
-	}
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
 	if (vblank_ns == 0 || vblank_ns == cwm->last_vblank_ns || cwm->base.upc == NULL) {
 		return VK_SUCCESS;
