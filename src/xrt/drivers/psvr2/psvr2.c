@@ -43,10 +43,17 @@
 #include "util/u_var.h"
 #include "util/u_debug.h"
 
-#include <stdio.h>
 #include <assert.h>
 #include <inttypes.h>
 #include <libusb.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef XRT_OS_OSX
+#include <unistd.h>
+#endif
 
 #include "psvr2.h"
 
@@ -66,6 +73,196 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS"
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+
+#ifdef XRT_OS_OSX
+struct psvr2_timing_trace_state
+{
+	bool attempted;
+	FILE *imu;
+	FILE *slam;
+	FILE *pose;
+	uint64_t imu_rows;
+	uint64_t slam_rows;
+	uint64_t pose_rows;
+	atomic_uint_fast32_t last_dp_scanout;
+};
+
+static struct psvr2_timing_trace_state g_psvr2_timing_trace;
+
+static FILE *
+psvr2_timing_trace_open_file(const char *suffix, const char *header)
+{
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_%s.csv", dir, separator, (int)getpid(), suffix);
+
+	FILE *file = fopen(path, "w");
+	if (file == NULL) {
+		return NULL;
+	}
+	setvbuf(file, NULL, _IOFBF, 64 * 1024);
+	fputs(header, file);
+	fputc('\n', file);
+	fflush(file);
+	return file;
+}
+
+static void
+psvr2_timing_trace_open(void)
+{
+	if (g_psvr2_timing_trace.attempted || !debug_get_bool_option_psvr2_timing_trace()) {
+		return;
+	}
+	g_psvr2_timing_trace.attempted = true;
+
+	g_psvr2_timing_trace.imu = psvr2_timing_trace_open_file(
+	    "imu",
+	    "host_estimated_sample_ns,vts_ns,imu_ns,vts_mapped_host_ns,imu_mapped_host_ns,vts_us,imu_ts_us,"
+	    "dp_frame_cnt,dp_line_cnt,status,hw2mono_vts_ns,hw2mono_imu_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,"
+	    "accel_z");
+	g_psvr2_timing_trace.slam = psvr2_timing_trace_open_file(
+	    "slam",
+	    "host_received_ns,slam_vts_ns,slam_mapped_host_ns,latest_imu_vts_ns,latest_imu_mapped_host_ns,"
+	    "dp_frame_cnt,dp_line_cnt,raw_pos_x,raw_pos_y,raw_pos_z,raw_qw,raw_qx,raw_qy,raw_qz,corrected_pos_x,"
+	    "corrected_pos_y,corrected_pos_z,corrected_qw,corrected_qx,corrected_qy,corrected_qz,linvel_x,linvel_y,"
+	    "linvel_z,angvel_x,angvel_y,angvel_z,relation_flags");
+	g_psvr2_timing_trace.pose = psvr2_timing_trace_open_file(
+	    "pose",
+	    "host_query_ns,requested_host_ns,requested_vts_ns,latest_slam_vts_ns,latest_imu_vts_ns,hw2mono_vts_ns,"
+	    "dp_frame_cnt,dp_line_cnt,pos_x,pos_y,pos_z,qw,qx,qy,qz,linvel_x,linvel_y,linvel_z,angvel_x,angvel_y,"
+	    "angvel_z,relation_flags");
+}
+
+static void
+psvr2_timing_trace_close(void)
+{
+	FILE *files[] = {g_psvr2_timing_trace.imu, g_psvr2_timing_trace.slam, g_psvr2_timing_trace.pose};
+	for (size_t i = 0; i < 3; i++) {
+		if (files[i] != NULL) {
+			fflush(files[i]);
+			fclose(files[i]);
+		}
+	}
+	g_psvr2_timing_trace.imu = NULL;
+	g_psvr2_timing_trace.slam = NULL;
+	g_psvr2_timing_trace.pose = NULL;
+}
+
+static void
+psvr2_timing_trace_maybe_flush(FILE *file, uint64_t rows, uint64_t interval)
+{
+	if (file != NULL && rows % interval == 0) {
+		fflush(file);
+	}
+}
+
+static void
+psvr2_timing_trace_store_scanout(uint16_t frame, uint16_t line)
+{
+	uint32_t packed = ((uint32_t)frame << 16) | (uint32_t)line;
+	atomic_store_explicit(&g_psvr2_timing_trace.last_dp_scanout, packed, memory_order_release);
+}
+
+static void
+psvr2_timing_trace_load_scanout(uint16_t *frame, uint16_t *line)
+{
+	uint32_t packed = (uint32_t)atomic_load_explicit(&g_psvr2_timing_trace.last_dp_scanout, memory_order_acquire);
+	*frame = (uint16_t)(packed >> 16);
+	*line = (uint16_t)(packed & 0xffffu);
+}
+
+static void
+psvr2_timing_trace_imu(struct psvr2_hmd *hmd,
+                       const struct imu_record *imu,
+                       timepoint_ns estimated_sample_time,
+                       timepoint_ns vts_ns,
+                       timepoint_ns imu_ns)
+{
+	psvr2_timing_trace_store_scanout(imu->dp_frame_cnt, imu->dp_line_cnt);
+	FILE *file = g_psvr2_timing_trace.imu;
+	if (file == NULL) {
+		return;
+	}
+
+	fprintf(file,
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,%u,%u,%u,%" PRIi64
+	        ",%" PRIi64 ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+	        (int64_t)estimated_sample_time, (int64_t)vts_ns, (int64_t)imu_ns, (int64_t)(vts_ns + hmd->hw2mono_vts),
+	        (int64_t)(imu_ns + hmd->hw2mono_imu), imu->vts_us, imu->imu_ts_us, imu->dp_frame_cnt, imu->dp_line_cnt,
+	        imu->status, (int64_t)hmd->hw2mono_vts, (int64_t)hmd->hw2mono_imu, hmd->last_gyro.x, hmd->last_gyro.y,
+	        hmd->last_gyro.z, hmd->last_accel.x, hmd->last_accel.y, hmd->last_accel.z);
+	g_psvr2_timing_trace.imu_rows++;
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.imu_rows, 2048);
+}
+
+static void
+psvr2_timing_trace_slam(struct psvr2_hmd *hmd,
+                        timepoint_ns received_ns,
+                        timepoint_ns vts_ns,
+                        const struct xrt_space_relation *relation)
+{
+	FILE *file = g_psvr2_timing_trace.slam;
+	if (file == NULL) {
+		return;
+	}
+	uint16_t dp_frame_cnt = 0;
+	uint16_t dp_line_cnt = 0;
+	psvr2_timing_trace_load_scanout(&dp_frame_cnt, &dp_line_cnt);
+
+	fprintf(file,
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,"
+	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
+	        (int64_t)received_ns, (int64_t)vts_ns, (int64_t)(vts_ns + hmd->hw2mono_vts),
+	        (int64_t)hmd->last_imu_vts_ns, (int64_t)(hmd->last_imu_vts_ns + hmd->hw2mono_vts), dp_frame_cnt,
+	        dp_line_cnt, hmd->last_slam_pose.position.x, hmd->last_slam_pose.position.y, hmd->last_slam_pose.position.z,
+	        hmd->last_slam_pose.orientation.w, hmd->last_slam_pose.orientation.x, hmd->last_slam_pose.orientation.y,
+	        hmd->last_slam_pose.orientation.z, hmd->pose.position.x, hmd->pose.position.y, hmd->pose.position.z,
+	        hmd->pose.orientation.w, hmd->pose.orientation.x, hmd->pose.orientation.y, hmd->pose.orientation.z,
+	        relation->linear_velocity.x, relation->linear_velocity.y, relation->linear_velocity.z,
+	        relation->angular_velocity.x, relation->angular_velocity.y, relation->angular_velocity.z,
+	        (unsigned int)relation->relation_flags);
+	g_psvr2_timing_trace.slam_rows++;
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.slam_rows, 256);
+}
+
+static void
+psvr2_timing_trace_pose(timepoint_ns host_query_ns,
+                        timepoint_ns requested_host_ns,
+                        timepoint_ns requested_vts_ns,
+                        timepoint_ns latest_slam_vts_ns,
+                        timepoint_ns latest_imu_vts_ns,
+                        time_duration_ns hw2mono_vts,
+                        const struct xrt_space_relation *relation)
+{
+	FILE *file = g_psvr2_timing_trace.pose;
+	if (file == NULL) {
+		return;
+	}
+	uint16_t dp_frame_cnt = 0;
+	uint16_t dp_line_cnt = 0;
+	psvr2_timing_trace_load_scanout(&dp_frame_cnt, &dp_line_cnt);
+
+	fprintf(file,
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,"
+	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
+	        (int64_t)host_query_ns, (int64_t)requested_host_ns, (int64_t)requested_vts_ns, (int64_t)latest_slam_vts_ns,
+	        (int64_t)latest_imu_vts_ns, (int64_t)hw2mono_vts, dp_frame_cnt, dp_line_cnt, relation->pose.position.x,
+	        relation->pose.position.y, relation->pose.position.z, relation->pose.orientation.w, relation->pose.orientation.x,
+	        relation->pose.orientation.y, relation->pose.orientation.z, relation->linear_velocity.x, relation->linear_velocity.y,
+	        relation->linear_velocity.z, relation->angular_velocity.x, relation->angular_velocity.y,
+	        relation->angular_velocity.z, (unsigned int)relation->relation_flags);
+	g_psvr2_timing_trace.pose_rows++;
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.pose_rows, 256);
+}
+#endif
 
 #ifdef XRT_OS_OSX
 #define PSVR2_AUXILIARY_STREAMS_DEFAULT false
@@ -96,6 +293,10 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 	}
 
 	psvr2_usb_destroy(hmd);
+
+#ifdef XRT_OS_OSX
+	psvr2_timing_trace_close();
+#endif
 
 	// @note We appear to be hitting a bug in libusb, so this is commented out
 	//       see: https://github.com/libusb/libusb/issues/1605
@@ -208,6 +409,10 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 {
 	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
 
+#ifdef XRT_OS_OSX
+	timepoint_ns trace_host_query_ns = os_monotonic_get_ns();
+#endif
+
 	switch (name) {
 	case XRT_INPUT_GENERIC_HEAD_POSE:
 		break;
@@ -229,6 +434,12 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	timepoint_ns prediction_ns_hw = at_timestamp_ns - hmd->hw2mono_vts;
 
+#ifdef XRT_OS_OSX
+	timepoint_ns trace_latest_slam_vts_ns = hmd->last_slam_vts_ns;
+	timepoint_ns trace_latest_imu_vts_ns = hmd->last_imu_vts_ns;
+	time_duration_ns trace_hw2mono_vts = hmd->hw2mono_vts;
+#endif
+
 	struct xrt_relation_chain chain = {0};
 
 	// Push the eye pose before the head pose if required, so that we're returning the gaze relative to the head
@@ -247,6 +458,13 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	// Resolve the final relation
 	m_relation_chain_resolve(&chain, out_relation);
+
+#ifdef XRT_OS_OSX
+	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
+		psvr2_timing_trace_pose(trace_host_query_ns, at_timestamp_ns, prediction_ns_hw, trace_latest_slam_vts_ns,
+		                         trace_latest_imu_vts_ns, trace_hw2mono_vts, out_relation);
+	}
+#endif
 
 	return XRT_SUCCESS;
 }
@@ -339,6 +557,10 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 
 	m_clock_offset_a2b(IMU_FREQ, now_vts, estimated_sample_time, &hmd->hw2mono_vts);
 	m_clock_offset_a2b(IMU_FREQ, now_imu, estimated_sample_time, &hmd->hw2mono_imu);
+
+#ifdef XRT_OS_OSX
+	psvr2_timing_trace_imu(hmd, &imu_data, estimated_sample_time, now_vts, now_imu);
+#endif
 
 	if (hmd->timestamp_samples < TIMESTAMP_SAMPLES) {
 		hmd->timestamp_samples++;
@@ -508,7 +730,7 @@ img_xfer_cb(struct libusb_transfer *xfer)
 }
 
 static void
-process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read)
+process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoint_ns received_ns)
 {
 	struct slam_usb_record slam;
 	assert(bytes_read >= (int)sizeof(struct slam_usb_record));
@@ -569,6 +791,16 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read)
 	};
 
 	m_relation_history_push_with_motion_estimation(hmd->slam_relation_history, &relation, pose_sample.timestamp_ns);
+
+#ifdef XRT_OS_OSX
+	struct xrt_space_relation traced_relation = relation;
+	timepoint_ns traced_relation_ts = 0;
+	if (!m_relation_history_get_latest(hmd->slam_relation_history, &traced_relation_ts, &traced_relation)) {
+		traced_relation = relation;
+	}
+	psvr2_timing_trace_slam(hmd, received_ns, vts_ns, &traced_relation);
+#endif
+
 	os_mutex_unlock(&hmd->data_lock);
 }
 
@@ -582,8 +814,9 @@ slam_xfer_cb(struct libusb_transfer *xfer)
 	}
 
 	struct psvr2_hmd *hmd = xfer->user_data;
+	timepoint_ns received_ns = os_monotonic_get_ns();
 	if (xfer->actual_length == sizeof(struct slam_usb_record)) {
-		process_slam_record(hmd, xfer->buffer, xfer->actual_length);
+		process_slam_record(hmd, xfer->buffer, xfer->actual_length, received_ns);
 	}
 
 	os_mutex_lock(&hmd->data_lock);
@@ -1249,6 +1482,10 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	struct psvr2_hmd *hmd = U_DEVICE_ALLOCATE(struct psvr2_hmd, flags, PSVR2_HMD_INPUT_COUNT, 1);
 	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
+
+#ifdef XRT_OS_OSX
+	psvr2_timing_trace_open();
+#endif
 
 	snprintf(hmd->base.tracking_origin->name, XRT_TRACKING_NAME_LEN, "PS VR2 Tracking");
 	hmd->base.tracking_origin->type = XRT_TRACKING_TYPE_EXTERNAL_SLAM;
