@@ -51,6 +51,26 @@ Move the headset during the probe. It succeeds only after receiving poses with
 valid and tracked position and orientation and observing a meaningful pose
 change. Conservative mode also leaves the system face-tracking role unassigned.
 
+To compare the driver's ordinary dead-reckoning predictor with the optional
+explicit gyro-integrating predictor, set `PSVR2_PREDICTION_CAPTURE` to a new
+file while running a pose workload. The bounded native capture contains the
+SLAM relation, complete gyro FIFO, requested and effective target timestamps,
+and the result used by each call. Replay it offline with:
+
+```sh
+PSVR2_PREDICTION_CAPTURE=/tmp/psvr2-prediction.bin ./build-macos-psvr2-display/monado-service
+./build-macos-psvr2-display/tests/psvr2_prediction_replay /tmp/psvr2-prediction.bin
+```
+
+The replay tool reports how many calls differ numerically between the two
+predictors and how closely the recorded result matches its selected mode. This
+is a predictor comparison, not a ground-truth tracking-accuracy test.
+
+For an opt-in visual experiment, `PSVR2_SLAM_CORRECTION_MS` eases incoming SLAM
+orientation corrections over the requested interval. It defaults to disabled;
+position and IMU prediction are unchanged. Values around `50` or `100` ms are
+reasonable first tests, but this trades reduced steps for orientation lag.
+
 The local display compositor target is `macos`. It searches for an `NSScreen`
 named `PS VR2`, falling back to the first 4000-pixel-wide display, and creates a
 borderless window backed by `CAMetalLayer`. MoltenVK's WSI swapchain reports
