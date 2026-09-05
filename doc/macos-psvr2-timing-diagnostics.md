@@ -114,3 +114,13 @@ The diagnostic branch now also fixes the timing defects exposed by the first cap
 - `XRT_MACOS_CVDISPLAYLINK_PACING=0` remains available as an A/B diagnostic to disable display-link feedback while keeping the trace enabled.
 
 A post-fix capture therefore produces six CSVs: `imu`, `slam`, `pose`, `present`, `presented`, and `vblank`.
+
+
+## Next-output scheduling and narrow render wait
+
+After the second capture showed presentation landing one output later than the upcoming CoreVideo slot, the macOS target now:
+
+- waits for the compositor's `render_complete` timeline semaphore at the exact frame value passed to `present()`, rather than idling the entire Vulkan queue; a queue-idle fallback remains for configurations without a timeline semaphore;
+- selects the latest CoreVideo `inOutputTime` as the presentation slot and advances by whole display periods only if that slot is stale or has less than the minimum lead time;
+- defaults to 2 ms minimum lead (`XRT_MACOS_PRESENT_MIN_LEAD_US=2000`) so Metal has enough time for the IOSurface-to-drawable blit without gratuitously adding a whole refresh;
+- records the selected `target_output_ns`, wait mode, and actual-present-minus-target error in the trace.
