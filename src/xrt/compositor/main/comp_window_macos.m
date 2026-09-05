@@ -35,6 +35,7 @@ DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR"
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_PACING", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
+DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -117,7 +118,8 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	cwm->trace_present = macos_timing_trace_open_file(
 	    "present",
 	    "frame_id,host_call_ns,desired_present_ns,desired_minus_call_ns,target_output_ns,target_minus_desired_ns,"
-	    "metal_request_ns,metal_request_minus_target_ns,scheduled_present_host_s,present_slop_ns,image_index,"
+	    "metal_request_ns,metal_request_minus_target_ns,metal_request_minus_call_ns,scheduled_present_host_s,"
+	    "present_slop_ns,image_index,"
 	    "timeline_value,wait_mode,after_vk_wait_ns,"
 	    "after_drawable_ns,before_present_call_ns,after_present_call_ns,after_commit_ns,after_metal_wait_ns,"
 	    "latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");
@@ -738,10 +740,12 @@ comp_window_macos_present(struct comp_target *ct,
 			}];
 		}
 
-		metal_request_ns = target_output_ns;
-		if (cwm->display_period_ns > 0 && target_output_ns > (uint64_t)cwm->display_period_ns) {
-			metal_request_ns = target_output_ns - (uint64_t)cwm->display_period_ns;
+		int64_t prelatch_us = debug_get_num_option_macos_present_prelatch_us();
+		if (prelatch_us < 0) {
+			prelatch_us = 0;
 		}
+		uint64_t prelatch_ns = (uint64_t)prelatch_us * 1000ULL;
+		metal_request_ns = target_output_ns > prelatch_ns ? target_output_ns - prelatch_ns : target_output_ns;
 		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)metal_request_ns);
 		if (scheduled_present_host_s > 0.0) {
 			[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
@@ -768,11 +772,12 @@ comp_window_macos_present(struct comp_target *ct,
 	if (cwm->trace_present != NULL) {
 		uint64_t latest_output_ns = atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
 		fprintf(cwm->trace_present,
-		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\n",
+		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\n",
 		        (unsigned long long)frame_id, (unsigned long long)before_vk_wait_ns, desired_present_time_ns,
 		        desired_present_time_ns - (int64_t)before_vk_wait_ns, (unsigned long long)target_output_ns,
 		        (int64_t)target_output_ns - desired_present_time_ns, (unsigned long long)metal_request_ns,
-		        (int64_t)metal_request_ns - (int64_t)target_output_ns, scheduled_present_host_s, present_slop_ns, index,
+		        (int64_t)metal_request_ns - (int64_t)target_output_ns,
+		        (int64_t)metal_request_ns - (int64_t)before_present_call_ns, scheduled_present_host_s, present_slop_ns, index,
 		        (unsigned long long)timeline_semaphore_value, wait_mode, (unsigned long long)after_vk_wait_ns,
 		        (unsigned long long)after_drawable_ns, (unsigned long long)before_present_call_ns,
 		        (unsigned long long)after_present_call_ns, (unsigned long long)after_commit_ns,
