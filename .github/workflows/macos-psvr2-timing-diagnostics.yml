@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers
+        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
       - name: Configure compositor build
         run: >-
           cmake -S . -B build-compositor -G Ninja
