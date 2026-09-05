@@ -30,31 +30,25 @@ jobs:
               if n!=1:
                   raise SystemExit(f'{label}: expected 1 match, got {n}')
               s=s.replace(old,new,1)
-
           one('DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)\n',
               'DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)\nDEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)\n',
-              'prelatch option')
-
+              'option')
           one('''\t    "metal_request_ns,metal_request_minus_target_ns,scheduled_present_host_s,present_slop_ns,image_index,"\n''',
               '''\t    "metal_request_ns,metal_request_minus_target_ns,metal_request_minus_call_ns,scheduled_present_host_s,"\n\t    "present_slop_ns,image_index,"\n''',
-              'trace header')
-
-          old='''\t\tif (cwm->display_period_ns > 0 && target_output_ns > (uint64_t)cwm->display_period_ns) {\n\t\t\tmetal_request_ns = target_output_ns - (uint64_t)cwm->display_period_ns;\n\t\t} else {\n\t\t\tmetal_request_ns = target_output_ns;\n\t\t}\n'''
-          new='''\t\tint64_t prelatch_us = debug_get_num_option_macos_present_prelatch_us();\n\t\tif (prelatch_us < 0) {\n\t\t\tprelatch_us = 0;\n\t\t}\n\t\tuint64_t prelatch_ns = (uint64_t)prelatch_us * 1000ULL;\n\t\tmetal_request_ns = target_output_ns > prelatch_ns ? target_output_ns - prelatch_ns : target_output_ns;\n'''
-          one(old,new,'prelatch scheduling')
-
-          oldfmt='''\t\t        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\\n",\n'''
-          newfmt='''\t\t        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\\n",\n'''
-          one(oldfmt,newfmt,'trace format')
-
-          oldargs='''\t\t        (unsigned long long)metal_request_ns, (int64_t)metal_request_ns - (int64_t)target_output_ns,\n\t\t        scheduled_present_host_s, present_slop_ns, index, (unsigned long long)timeline_semaphore_value, wait_mode,\n'''
-          newargs='''\t\t        (unsigned long long)metal_request_ns, (int64_t)metal_request_ns - (int64_t)target_output_ns,\n\t\t        (int64_t)metal_request_ns - (int64_t)before_present_call_ns, scheduled_present_host_s, present_slop_ns, index,\n\t\t        (unsigned long long)timeline_semaphore_value, wait_mode,\n'''
-          one(oldargs,newargs,'trace args')
-
+              'header')
+          one('''\t\tmetal_request_ns = target_output_ns;\n\t\tif (cwm->display_period_ns > 0 && target_output_ns > (uint64_t)cwm->display_period_ns) {\n\t\t\tmetal_request_ns = target_output_ns - (uint64_t)cwm->display_period_ns;\n\t\t}\n''',
+              '''\t\tint64_t prelatch_us = debug_get_num_option_macos_present_prelatch_us();\n\t\tif (prelatch_us < 0) {\n\t\t\tprelatch_us = 0;\n\t\t}\n\t\tuint64_t prelatch_ns = (uint64_t)prelatch_us * 1000ULL;\n\t\tmetal_request_ns = target_output_ns > prelatch_ns ? target_output_ns - prelatch_ns : target_output_ns;\n''',
+              'schedule')
+          one('''\t\t        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\\n",\n''',
+              '''\t\t        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\\n",\n''',
+              'format')
+          one('''\t\t        (int64_t)target_output_ns - desired_present_time_ns, (unsigned long long)metal_request_ns,\n\t\t        (int64_t)metal_request_ns - (int64_t)target_output_ns, scheduled_present_host_s, present_slop_ns, index,\n''',
+              '''\t\t        (int64_t)target_output_ns - desired_present_time_ns, (unsigned long long)metal_request_ns,\n\t\t        (int64_t)metal_request_ns - (int64_t)target_output_ns,\n\t\t        (int64_t)metal_request_ns - (int64_t)before_present_call_ns, scheduled_present_host_s, present_slop_ns, index,\n''',
+              'args')
           p.write_text(s)
           d=Path('doc/macos-psvr2-timing-diagnostics.md')
           txt=d.read_text()
-          txt += '''\n\n## Tunable Metal pre-latch bias\n\nThe fixed one-refresh Metal request bias was too early: the requested N-1 timestamp was already slightly in the past by the time `presentDrawable:atTime:` was called. The target now requests a tunable offset before the intended CoreVideo output slot instead.\n\n- `XRT_MACOS_PRESENT_PRELATCH_US` defaults to `2000` (2 ms).\n- `target_output_ns` remains the intended physical output slot.\n- `metal_request_ns = target_output_ns - prelatch`.\n- `metal_request_minus_call_ns` is traced so the request can be verified to remain in the future at the call site.\n\nThis makes 1/2/3/4 ms pre-latch experiments possible without recompilation.\n'''
+          txt += '''\n\n## Tunable Metal pre-latch bias\n\nThe fixed one-refresh bias was already in the past by the time Metal was called. The target now requests a tunable offset before the intended output slot. `XRT_MACOS_PRESENT_PRELATCH_US` defaults to 2000. `metal_request_minus_call_ns` records whether the requested Metal time is still in the future at the call site.\n'''
           d.write_text(txt)
           PY
           git diff --check
