@@ -43,10 +43,17 @@
 #include "util/u_var.h"
 #include "util/u_debug.h"
 
-#include <stdio.h>
 #include <assert.h>
 #include <inttypes.h>
 #include <libusb.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef XRT_OS_OSX
+#include <unistd.h>
+#endif
 
 #include "psvr2.h"
 
@@ -66,6 +73,393 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS"
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_filtered_linear_prediction, "PSVR2_FILTERED_LINEAR_PREDICTION", false)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_ALPHA", 0.25f)
+
+#ifdef XRT_OS_OSX
+#define PSVR2_PENDING_HORIZON_PREDICTIONS 256
+
+struct psvr2_pending_horizon_prediction
+{
+	bool valid;
+	uint64_t sequence;
+	timepoint_ns query_host_ns;
+	timepoint_ns source_slam_vts_ns;
+	timepoint_ns target_vts_ns;
+	struct xrt_vec3 source_position;
+	struct xrt_vec3 raw_velocity;
+	struct xrt_vec3 filtered_velocity;
+	struct xrt_vec3 raw_predicted_position;
+	struct xrt_vec3 filtered_predicted_position;
+};
+
+struct psvr2_timing_trace_state
+{
+	bool attempted;
+	FILE *imu;
+	FILE *slam;
+	FILE *pose;
+	FILE *prediction;
+	FILE *horizon;
+	uint64_t imu_rows;
+	uint64_t slam_rows;
+	uint64_t pose_rows;
+	uint64_t prediction_rows;
+	uint64_t horizon_rows;
+	uint64_t horizon_sequence;
+	uint32_t horizon_next_slot;
+	struct psvr2_pending_horizon_prediction horizon_pending[PSVR2_PENDING_HORIZON_PREDICTIONS];
+	atomic_uint_fast32_t last_dp_scanout;
+};
+
+static struct psvr2_timing_trace_state g_psvr2_timing_trace;
+
+static FILE *
+psvr2_timing_trace_open_file(const char *suffix, const char *header)
+{
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_%s.csv", dir, separator, (int)getpid(), suffix);
+
+	FILE *file = fopen(path, "w");
+	if (file == NULL) {
+		return NULL;
+	}
+	setvbuf(file, NULL, _IOFBF, 64 * 1024);
+	fputs(header, file);
+	fputc('\n', file);
+	fflush(file);
+	return file;
+}
+
+static void
+psvr2_timing_trace_open(void)
+{
+	if (g_psvr2_timing_trace.attempted || !debug_get_bool_option_psvr2_timing_trace()) {
+		return;
+	}
+	g_psvr2_timing_trace.attempted = true;
+
+	g_psvr2_timing_trace.imu = psvr2_timing_trace_open_file(
+	    "imu",
+	    "host_estimated_sample_ns,vts_ns,imu_ns,vts_mapped_host_ns,imu_mapped_host_ns,vts_us,imu_ts_us,"
+	    "dp_frame_cnt,dp_line_cnt,status,hw2mono_vts_ns,hw2mono_imu_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,"
+	    "accel_z");
+	g_psvr2_timing_trace.slam = psvr2_timing_trace_open_file(
+	    "slam",
+	    "host_received_ns,slam_vts_ns,slam_mapped_host_ns,latest_imu_vts_ns,latest_imu_mapped_host_ns,"
+	    "dp_frame_cnt,dp_line_cnt,raw_pos_x,raw_pos_y,raw_pos_z,raw_qw,raw_qx,raw_qy,raw_qz,corrected_pos_x,"
+	    "corrected_pos_y,corrected_pos_z,corrected_qw,corrected_qx,corrected_qy,corrected_qz,linvel_x,linvel_y,"
+	    "linvel_z,angvel_x,angvel_y,angvel_z,relation_flags");
+	g_psvr2_timing_trace.pose = psvr2_timing_trace_open_file(
+	    "pose",
+	    "host_query_ns,requested_host_ns,requested_vts_ns,latest_slam_vts_ns,latest_imu_vts_ns,hw2mono_vts_ns,"
+	    "dp_frame_cnt,dp_line_cnt,pos_x,pos_y,pos_z,qw,qx,qy,qz,linvel_x,linvel_y,linvel_z,angvel_x,angvel_y,"
+	    "angvel_z,relation_flags");
+	g_psvr2_timing_trace.prediction = psvr2_timing_trace_open_file(
+	    "prediction",
+	    "slam_vts_ns,dt_ns,actual_x,actual_y,actual_z,predicted_x,predicted_y,predicted_z,error_x,error_y,error_z,"
+	    "error_mm,error_along_mm,prior_vel_x,prior_vel_y,prior_vel_z,estimated_vel_x,estimated_vel_y,estimated_vel_z,"
+	    "filtered_vel_x,filtered_vel_y,filtered_vel_z,filter_alpha,filter_enabled");
+	g_psvr2_timing_trace.horizon = psvr2_timing_trace_open_file(
+	    "horizon",
+	    "sequence,query_host_ns,source_slam_vts_ns,target_vts_ns,horizon_ns,score_slam_vts_ns,"
+	    "actual_x,actual_y,actual_z,raw_pred_x,raw_pred_y,raw_pred_z,filtered_pred_x,filtered_pred_y,filtered_pred_z,"
+	    "raw_error_mm,filtered_error_mm,raw_along_mm,filtered_along_mm,source_x,source_y,source_z,"
+	    "raw_vel_x,raw_vel_y,raw_vel_z,filtered_vel_x,filtered_vel_y,filtered_vel_z,filter_alpha,filter_enabled");
+}
+
+static void
+psvr2_timing_trace_close(void)
+{
+	FILE *files[] = {g_psvr2_timing_trace.imu, g_psvr2_timing_trace.slam, g_psvr2_timing_trace.pose,
+	                 g_psvr2_timing_trace.prediction, g_psvr2_timing_trace.horizon};
+	for (size_t i = 0; i < 5; i++) {
+		if (files[i] != NULL) {
+			fflush(files[i]);
+			fclose(files[i]);
+		}
+	}
+	g_psvr2_timing_trace.imu = NULL;
+	g_psvr2_timing_trace.slam = NULL;
+	g_psvr2_timing_trace.pose = NULL;
+	g_psvr2_timing_trace.prediction = NULL;
+	g_psvr2_timing_trace.horizon = NULL;
+}
+
+static void
+psvr2_timing_trace_maybe_flush(FILE *file, uint64_t rows, uint64_t interval)
+{
+	if (file != NULL && rows % interval == 0) {
+		fflush(file);
+	}
+}
+
+static void
+psvr2_timing_trace_store_scanout(uint16_t frame, uint16_t line)
+{
+	uint32_t packed = ((uint32_t)frame << 16) | (uint32_t)line;
+	atomic_store_explicit(&g_psvr2_timing_trace.last_dp_scanout, packed, memory_order_release);
+}
+
+static void
+psvr2_timing_trace_load_scanout(uint16_t *frame, uint16_t *line)
+{
+	uint32_t packed = (uint32_t)atomic_load_explicit(&g_psvr2_timing_trace.last_dp_scanout, memory_order_acquire);
+	*frame = (uint16_t)(packed >> 16);
+	*line = (uint16_t)(packed & 0xffffu);
+}
+
+static void
+psvr2_timing_trace_imu(struct psvr2_hmd *hmd,
+                       const struct imu_record *imu,
+                       timepoint_ns estimated_sample_time,
+                       timepoint_ns vts_ns,
+                       timepoint_ns imu_ns)
+{
+	psvr2_timing_trace_store_scanout(imu->dp_frame_cnt, imu->dp_line_cnt);
+	FILE *file = g_psvr2_timing_trace.imu;
+	if (file == NULL) {
+		return;
+	}
+
+	fprintf(file,
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,%u,%u,%u,%" PRIi64
+	        ",%" PRIi64 ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+	        (int64_t)estimated_sample_time, (int64_t)vts_ns, (int64_t)imu_ns, (int64_t)(vts_ns + hmd->hw2mono_vts),
+	        (int64_t)(imu_ns + hmd->hw2mono_imu), imu->vts_us, imu->imu_ts_us, imu->dp_frame_cnt, imu->dp_line_cnt,
+	        imu->status, (int64_t)hmd->hw2mono_vts, (int64_t)hmd->hw2mono_imu, hmd->last_gyro.x, hmd->last_gyro.y,
+	        hmd->last_gyro.z, hmd->last_accel.x, hmd->last_accel.y, hmd->last_accel.z);
+	g_psvr2_timing_trace.imu_rows++;
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.imu_rows, 2048);
+}
+
+static void
+psvr2_timing_trace_slam(struct psvr2_hmd *hmd,
+                        timepoint_ns received_ns,
+                        timepoint_ns vts_ns,
+                        const struct xrt_space_relation *relation)
+{
+	FILE *file = g_psvr2_timing_trace.slam;
+	if (file == NULL) {
+		return;
+	}
+	uint16_t dp_frame_cnt = 0;
+	uint16_t dp_line_cnt = 0;
+	psvr2_timing_trace_load_scanout(&dp_frame_cnt, &dp_line_cnt);
+
+	fprintf(file,
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,"
+	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
+	        (int64_t)received_ns, (int64_t)vts_ns, (int64_t)(vts_ns + hmd->hw2mono_vts),
+	        (int64_t)hmd->last_imu_vts_ns, (int64_t)(hmd->last_imu_vts_ns + hmd->hw2mono_vts), dp_frame_cnt,
+	        dp_line_cnt, hmd->last_slam_pose.position.x, hmd->last_slam_pose.position.y, hmd->last_slam_pose.position.z,
+	        hmd->last_slam_pose.orientation.w, hmd->last_slam_pose.orientation.x, hmd->last_slam_pose.orientation.y,
+	        hmd->last_slam_pose.orientation.z, hmd->pose.position.x, hmd->pose.position.y, hmd->pose.position.z,
+	        hmd->pose.orientation.w, hmd->pose.orientation.x, hmd->pose.orientation.y, hmd->pose.orientation.z,
+	        relation->linear_velocity.x, relation->linear_velocity.y, relation->linear_velocity.z,
+	        relation->angular_velocity.x, relation->angular_velocity.y, relation->angular_velocity.z,
+	        (unsigned int)relation->relation_flags);
+	g_psvr2_timing_trace.slam_rows++;
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.slam_rows, 256);
+}
+
+static void
+psvr2_timing_trace_pose(timepoint_ns host_query_ns,
+                        timepoint_ns requested_host_ns,
+                        timepoint_ns requested_vts_ns,
+                        timepoint_ns latest_slam_vts_ns,
+                        timepoint_ns latest_imu_vts_ns,
+                        time_duration_ns hw2mono_vts,
+                        const struct xrt_space_relation *relation)
+{
+	FILE *file = g_psvr2_timing_trace.pose;
+	if (file == NULL) {
+		return;
+	}
+	uint16_t dp_frame_cnt = 0;
+	uint16_t dp_line_cnt = 0;
+	psvr2_timing_trace_load_scanout(&dp_frame_cnt, &dp_line_cnt);
+
+	fprintf(file,
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,"
+	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
+	        (int64_t)host_query_ns, (int64_t)requested_host_ns, (int64_t)requested_vts_ns, (int64_t)latest_slam_vts_ns,
+	        (int64_t)latest_imu_vts_ns, (int64_t)hw2mono_vts, dp_frame_cnt, dp_line_cnt, relation->pose.position.x,
+	        relation->pose.position.y, relation->pose.position.z, relation->pose.orientation.w, relation->pose.orientation.x,
+	        relation->pose.orientation.y, relation->pose.orientation.z, relation->linear_velocity.x, relation->linear_velocity.y,
+	        relation->linear_velocity.z, relation->angular_velocity.x, relation->angular_velocity.y,
+	        relation->angular_velocity.z, (unsigned int)relation->relation_flags);
+	g_psvr2_timing_trace.pose_rows++;
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.pose_rows, 256);
+}
+
+static void
+psvr2_timing_trace_prediction(struct psvr2_hmd *hmd,
+                               timepoint_ns slam_vts_ns,
+                               time_duration_ns dt_ns,
+                               const struct xrt_vec3 *actual,
+                               const struct xrt_vec3 *predicted,
+                               const struct xrt_vec3 *prior_velocity,
+                               const struct xrt_vec3 *estimated_velocity)
+{
+	FILE *file = g_psvr2_timing_trace.prediction;
+	if (file == NULL) {
+		return;
+	}
+	struct xrt_vec3 error = {actual->x - predicted->x, actual->y - predicted->y, actual->z - predicted->z};
+	float error_m = sqrtf(error.x * error.x + error.y * error.y + error.z * error.z);
+	float speed = sqrtf(prior_velocity->x * prior_velocity->x + prior_velocity->y * prior_velocity->y +
+	                    prior_velocity->z * prior_velocity->z);
+	float along_m = 0.0f;
+	if (speed > 0.001f) {
+		along_m = (error.x * prior_velocity->x + error.y * prior_velocity->y + error.z * prior_velocity->z) / speed;
+	}
+	float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
+	if (alpha < 0.0f) alpha = 0.0f;
+	if (alpha > 1.0f) alpha = 1.0f;
+	fprintf(file,
+	        "%" PRIi64 ",%" PRIi64 ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
+	        (int64_t)slam_vts_ns, (int64_t)dt_ns, actual->x, actual->y, actual->z, predicted->x, predicted->y,
+	        predicted->z, error.x, error.y, error.z, error_m * 1000.0f, along_m * 1000.0f, prior_velocity->x,
+	        prior_velocity->y, prior_velocity->z, estimated_velocity->x, estimated_velocity->y, estimated_velocity->z,
+	        hmd->filtered_linear_velocity.x, hmd->filtered_linear_velocity.y, hmd->filtered_linear_velocity.z, alpha,
+	        debug_get_bool_option_psvr2_filtered_linear_prediction() ? 1u : 0u);
+	g_psvr2_timing_trace.prediction_rows++;
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.prediction_rows, 256);
+}
+
+static float
+psvr2_vec3_length(const struct xrt_vec3 *v)
+{
+	return sqrtf(v->x * v->x + v->y * v->y + v->z * v->z);
+}
+
+static void
+psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_host_ns, timepoint_ns target_vts_ns)
+{
+	if (g_psvr2_timing_trace.horizon == NULL) {
+		return;
+	}
+	struct xrt_space_relation latest = XRT_SPACE_RELATION_ZERO;
+	timepoint_ns latest_ts = 0;
+	if (!m_relation_history_get_latest(hmd->slam_relation_history, &latest_ts, &latest) || target_vts_ns <= latest_ts) {
+		return;
+	}
+	if ((latest.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) == 0) {
+		return;
+	}
+
+	float dt_s = (float)((double)(target_vts_ns - latest_ts) / 1000000000.0);
+	struct xrt_vec3 filtered_velocity = hmd->filtered_linear_velocity_initialized
+	                                        ? hmd->filtered_linear_velocity
+	                                        : latest.linear_velocity;
+	struct psvr2_pending_horizon_prediction pending = {
+	    .valid = true,
+	    .sequence = ++g_psvr2_timing_trace.horizon_sequence,
+	    .query_host_ns = query_host_ns,
+	    .source_slam_vts_ns = latest_ts,
+	    .target_vts_ns = target_vts_ns,
+	    .source_position = latest.pose.position,
+	    .raw_velocity = latest.linear_velocity,
+	    .filtered_velocity = filtered_velocity,
+	    .raw_predicted_position = {
+	        latest.pose.position.x + latest.linear_velocity.x * dt_s,
+	        latest.pose.position.y + latest.linear_velocity.y * dt_s,
+	        latest.pose.position.z + latest.linear_velocity.z * dt_s,
+	    },
+	    .filtered_predicted_position = {
+	        latest.pose.position.x + filtered_velocity.x * dt_s,
+	        latest.pose.position.y + filtered_velocity.y * dt_s,
+	        latest.pose.position.z + filtered_velocity.z * dt_s,
+	    },
+	};
+	uint32_t slot = g_psvr2_timing_trace.horizon_next_slot++ % PSVR2_PENDING_HORIZON_PREDICTIONS;
+	g_psvr2_timing_trace.horizon_pending[slot] = pending;
+}
+
+static void
+psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
+                                 const struct xrt_vec3 *previous_position,
+                                 timepoint_ns current_slam_vts_ns,
+                                 const struct xrt_vec3 *current_position)
+{
+	FILE *file = g_psvr2_timing_trace.horizon;
+	if (file == NULL || current_slam_vts_ns <= previous_slam_vts_ns) {
+		return;
+	}
+
+	struct xrt_vec3 segment = {current_position->x - previous_position->x,
+	                           current_position->y - previous_position->y,
+	                           current_position->z - previous_position->z};
+	float segment_length = psvr2_vec3_length(&segment);
+
+	for (uint32_t i = 0; i < PSVR2_PENDING_HORIZON_PREDICTIONS; i++) {
+		struct psvr2_pending_horizon_prediction *p = &g_psvr2_timing_trace.horizon_pending[i];
+		if (!p->valid || p->target_vts_ns > current_slam_vts_ns) {
+			continue;
+		}
+		if (p->target_vts_ns < previous_slam_vts_ns) {
+			p->valid = false;
+			continue;
+		}
+
+		double fraction = (double)(p->target_vts_ns - previous_slam_vts_ns) /
+		                  (double)(current_slam_vts_ns - previous_slam_vts_ns);
+		if (fraction < 0.0) fraction = 0.0;
+		if (fraction > 1.0) fraction = 1.0;
+		struct xrt_vec3 actual = {
+		    previous_position->x + (float)fraction * segment.x,
+		    previous_position->y + (float)fraction * segment.y,
+		    previous_position->z + (float)fraction * segment.z,
+		};
+		struct xrt_vec3 raw_error = {actual.x - p->raw_predicted_position.x,
+		                             actual.y - p->raw_predicted_position.y,
+		                             actual.z - p->raw_predicted_position.z};
+		struct xrt_vec3 filtered_error = {actual.x - p->filtered_predicted_position.x,
+		                                  actual.y - p->filtered_predicted_position.y,
+		                                  actual.z - p->filtered_predicted_position.z};
+		float raw_along_m = 0.0f;
+		float filtered_along_m = 0.0f;
+		if (segment_length > 0.0001f) {
+			raw_along_m = (raw_error.x * segment.x + raw_error.y * segment.y + raw_error.z * segment.z) /
+			              segment_length;
+			filtered_along_m =
+			    (filtered_error.x * segment.x + filtered_error.y * segment.y + filtered_error.z * segment.z) /
+			    segment_length;
+		}
+		float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
+		if (alpha < 0.0f) alpha = 0.0f;
+		if (alpha > 1.0f) alpha = 1.0f;
+		fprintf(file,
+		        "%" PRIu64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ","
+		        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+		        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
+		        p->sequence, (int64_t)p->query_host_ns, (int64_t)p->source_slam_vts_ns, (int64_t)p->target_vts_ns,
+		        (int64_t)(p->target_vts_ns - p->source_slam_vts_ns), (int64_t)current_slam_vts_ns, actual.x, actual.y,
+		        actual.z, p->raw_predicted_position.x, p->raw_predicted_position.y, p->raw_predicted_position.z,
+		        p->filtered_predicted_position.x, p->filtered_predicted_position.y, p->filtered_predicted_position.z,
+		        psvr2_vec3_length(&raw_error) * 1000.0f, psvr2_vec3_length(&filtered_error) * 1000.0f,
+		        raw_along_m * 1000.0f, filtered_along_m * 1000.0f, p->source_position.x, p->source_position.y,
+		        p->source_position.z, p->raw_velocity.x, p->raw_velocity.y, p->raw_velocity.z,
+		        p->filtered_velocity.x, p->filtered_velocity.y, p->filtered_velocity.z, alpha,
+		        debug_get_bool_option_psvr2_filtered_linear_prediction() ? 1u : 0u);
+		g_psvr2_timing_trace.horizon_rows++;
+		p->valid = false;
+	}
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.horizon_rows, 256);
+}
+
+#endif
 
 #ifdef XRT_OS_OSX
 #define PSVR2_AUXILIARY_STREAMS_DEFAULT false
@@ -96,6 +490,10 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 	}
 
 	psvr2_usb_destroy(hmd);
+
+#ifdef XRT_OS_OSX
+	psvr2_timing_trace_close();
+#endif
 
 	// @note We appear to be hitting a bug in libusb, so this is commented out
 	//       see: https://github.com/libusb/libusb/issues/1605
@@ -180,6 +578,12 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 		}
 	}
 
+	if (debug_get_bool_option_psvr2_filtered_linear_prediction() && hmd->filtered_linear_velocity_initialized) {
+		latest_relation.linear_velocity = hmd->filtered_linear_velocity;
+		latest_relation.relation_flags = (enum xrt_space_relation_flags)(
+		    latest_relation.relation_flags | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
+	}
+
 	// Status and SLAM transfers are independent. A pose query can arrive after a
 	// new SLAM pose but just before the next status packet, leaving no gyro sample
 	// newer than the pose. Seed prediction with the most recent high-rate gyro in
@@ -208,6 +612,10 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 {
 	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
 
+#ifdef XRT_OS_OSX
+	timepoint_ns trace_host_query_ns = os_monotonic_get_ns();
+#endif
+
 	switch (name) {
 	case XRT_INPUT_GENERIC_HEAD_POSE:
 		break;
@@ -229,6 +637,12 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	timepoint_ns prediction_ns_hw = at_timestamp_ns - hmd->hw2mono_vts;
 
+#ifdef XRT_OS_OSX
+	timepoint_ns trace_latest_slam_vts_ns = hmd->last_slam_vts_ns;
+	timepoint_ns trace_latest_imu_vts_ns = hmd->last_imu_vts_ns;
+	time_duration_ns trace_hw2mono_vts = hmd->hw2mono_vts;
+#endif
+
 	struct xrt_relation_chain chain = {0};
 
 	// Push the eye pose before the head pose if required, so that we're returning the gaze relative to the head
@@ -241,12 +655,24 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 	m_relation_chain_push_pose(&chain, &hmd->T_imu_head);
 
 	// Push the normal head pose
+#ifdef XRT_OS_OSX
+	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
+		psvr2_timing_trace_enqueue_horizon(hmd, trace_host_query_ns, prediction_ns_hw);
+	}
+#endif
 	hmd_get_raw_tracker_pose(hmd, prediction_ns_hw, m_relation_chain_reserve(&chain));
 
 	os_mutex_unlock(&hmd->data_lock);
 
 	// Resolve the final relation
 	m_relation_chain_resolve(&chain, out_relation);
+
+#ifdef XRT_OS_OSX
+	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
+		psvr2_timing_trace_pose(trace_host_query_ns, at_timestamp_ns, prediction_ns_hw, trace_latest_slam_vts_ns,
+		                         trace_latest_imu_vts_ns, trace_hw2mono_vts, out_relation);
+	}
+#endif
 
 	return XRT_SUCCESS;
 }
@@ -339,6 +765,10 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 
 	m_clock_offset_a2b(IMU_FREQ, now_vts, estimated_sample_time, &hmd->hw2mono_vts);
 	m_clock_offset_a2b(IMU_FREQ, now_imu, estimated_sample_time, &hmd->hw2mono_imu);
+
+#ifdef XRT_OS_OSX
+	psvr2_timing_trace_imu(hmd, &imu_data, estimated_sample_time, now_vts, now_imu);
+#endif
 
 	if (hmd->timestamp_samples < TIMESTAMP_SAMPLES) {
 		hmd->timestamp_samples++;
@@ -508,7 +938,7 @@ img_xfer_cb(struct libusb_transfer *xfer)
 }
 
 static void
-process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read)
+process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoint_ns received_ns)
 {
 	struct slam_usb_record slam;
 	assert(bytes_read >= (int)sizeof(struct slam_usb_record));
@@ -568,7 +998,54 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read)
 	        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT),
 	};
 
+	struct xrt_space_relation prior_relation = XRT_SPACE_RELATION_ZERO;
+	timepoint_ns prior_relation_ts = 0;
+	bool have_prior_relation =
+	    m_relation_history_get_latest(hmd->slam_relation_history, &prior_relation_ts, &prior_relation);
+	struct xrt_vec3 predicted_position = relation.pose.position;
+	time_duration_ns prediction_dt_ns = 0;
+	if (have_prior_relation && pose_sample.timestamp_ns > prior_relation_ts) {
+		prediction_dt_ns = pose_sample.timestamp_ns - prior_relation_ts;
+		float dt_s = (float)((double)prediction_dt_ns / 1000000000.0);
+		predicted_position.x = prior_relation.pose.position.x + prior_relation.linear_velocity.x * dt_s;
+		predicted_position.y = prior_relation.pose.position.y + prior_relation.linear_velocity.y * dt_s;
+		predicted_position.z = prior_relation.pose.position.z + prior_relation.linear_velocity.z * dt_s;
+	}
+
+#ifdef XRT_OS_OSX
+	if (have_prior_relation) {
+		psvr2_timing_trace_score_horizon(prior_relation_ts, &prior_relation.pose.position, pose_sample.timestamp_ns,
+		                                 &relation.pose.position);
+	}
+#endif
+
 	m_relation_history_push_with_motion_estimation(hmd->slam_relation_history, &relation, pose_sample.timestamp_ns);
+
+	struct xrt_space_relation estimated_relation = relation;
+	timepoint_ns estimated_relation_ts = 0;
+	if (!m_relation_history_get_latest(hmd->slam_relation_history, &estimated_relation_ts, &estimated_relation)) {
+		estimated_relation = relation;
+	}
+	float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
+	if (alpha < 0.0f) alpha = 0.0f;
+	if (alpha > 1.0f) alpha = 1.0f;
+	if (!hmd->filtered_linear_velocity_initialized) {
+		hmd->filtered_linear_velocity = estimated_relation.linear_velocity;
+		hmd->filtered_linear_velocity_initialized = true;
+	} else {
+		hmd->filtered_linear_velocity.x += alpha * (estimated_relation.linear_velocity.x - hmd->filtered_linear_velocity.x);
+		hmd->filtered_linear_velocity.y += alpha * (estimated_relation.linear_velocity.y - hmd->filtered_linear_velocity.y);
+		hmd->filtered_linear_velocity.z += alpha * (estimated_relation.linear_velocity.z - hmd->filtered_linear_velocity.z);
+	}
+
+#ifdef XRT_OS_OSX
+	psvr2_timing_trace_slam(hmd, received_ns, vts_ns, &estimated_relation);
+	if (have_prior_relation) {
+		psvr2_timing_trace_prediction(hmd, vts_ns, prediction_dt_ns, &relation.pose.position, &predicted_position,
+		                              &prior_relation.linear_velocity, &estimated_relation.linear_velocity);
+	}
+#endif
+
 	os_mutex_unlock(&hmd->data_lock);
 }
 
@@ -582,8 +1059,9 @@ slam_xfer_cb(struct libusb_transfer *xfer)
 	}
 
 	struct psvr2_hmd *hmd = xfer->user_data;
+	timepoint_ns received_ns = os_monotonic_get_ns();
 	if (xfer->actual_length == sizeof(struct slam_usb_record)) {
-		process_slam_record(hmd, xfer->buffer, xfer->actual_length);
+		process_slam_record(hmd, xfer->buffer, xfer->actual_length, received_ns);
 	}
 
 	os_mutex_lock(&hmd->data_lock);
@@ -1249,6 +1727,10 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	struct psvr2_hmd *hmd = U_DEVICE_ALLOCATE(struct psvr2_hmd, flags, PSVR2_HMD_INPUT_COUNT, 1);
 	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
+
+#ifdef XRT_OS_OSX
+	psvr2_timing_trace_open();
+#endif
 
 	snprintf(hmd->base.tracking_origin->name, XRT_TRACKING_NAME_LEN, "PS VR2 Tracking");
 	hmd->base.tracking_origin->type = XRT_TRACKING_TYPE_EXTERNAL_SLAM;
