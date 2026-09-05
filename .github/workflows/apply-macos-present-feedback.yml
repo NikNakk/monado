@@ -1,0 +1,64 @@
+name: Apply macOS actual presentation feedback
+
+on:
+  push:
+    branches:
+      - macos-psvr2-timing-diagnostics
+    paths:
+      - .github/workflows/apply-macos-present-feedback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: macos-psvr2-timing-diagnostics
+          fetch-depth: 0
+      - name: Apply source edits
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/xrt/compositor/main/comp_window_macos.m')
+          s=p.read_text()
+          def one(old,new,label):
+              global s
+              n=s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {n}')
+              s=s.replace(old,new,1)
+
+          one('''\tatomic_int_fast64_t host_to_monotonic_offset_ns;\n\tuint64_t last_vblank_ns;\n''',
+              '''\tatomic_int_fast64_t host_to_monotonic_offset_ns;\n\tatomic_int_fast64_t latest_observed_present_offset_ns;\n\tatomic_uint_fast64_t present_offset_sample_serial;\n\tuint64_t consumed_present_offset_sample_serial;\n\tint64_t calibrated_present_offset_ns;\n\tuint32_t present_offset_sample_count;\n\tuint64_t last_vblank_ns;\n''',
+              'feedback fields')
+
+          one('''\t    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"\n\t    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns");\n''',
+              '''\t    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"\n\t    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns");\n''',
+              'presented trace header')
+
+          old='''\t\t\t\tint64_t presented_minus_target_ns =\n\t\t\t\t    presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns : 0;\n\t\t\t\tflockfile(trace_file);\n\t\t\t\tfprintf(trace_file,\n\t\t\t\t        "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\\n",\n\t\t\t\t        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,\n\t\t\t\t        (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,\n\t\t\t\t        presented_minus_desired_ns, presented_minus_target_ns);\n'''
+          new='''\t\t\t\tint64_t presented_minus_target_ns =\n\t\t\t\t    presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns : 0;\n\t\t\t\tint64_t observed_present_offset_ns =\n\t\t\t\t    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;\n\t\t\t\tif (observed_present_offset_ns > 0) {\n\t\t\t\t\tatomic_store_explicit(&cwm->latest_observed_present_offset_ns, observed_present_offset_ns,\n\t\t\t\t\t                      memory_order_release);\n\t\t\t\t\tatomic_fetch_add_explicit(&cwm->present_offset_sample_serial, 1, memory_order_release);\n\t\t\t\t}\n\t\t\t\tflockfile(trace_file);\n\t\t\t\tfprintf(trace_file,\n\t\t\t\t        "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\\n",\n\t\t\t\t        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,\n\t\t\t\t        (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,\n\t\t\t\t        presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns);\n'''
+          one(old,new,'present feedback capture')
+
+          anchor='''\tuint64_t displaylink_callback_ns = atomic_load_explicit(&cwm->latest_displaylink_callback_ns, memory_order_acquire);\n\tint64_t host_to_monotonic_offset_ns =\n\t    atomic_load_explicit(&cwm->host_to_monotonic_offset_ns, memory_order_acquire);\n'''
+          repl=anchor+'''\n\tuint64_t present_offset_serial =\n\t    atomic_load_explicit(&cwm->present_offset_sample_serial, memory_order_acquire);\n\tif (present_offset_serial != cwm->consumed_present_offset_sample_serial && cwm->display_period_ns > 0) {\n\t\tint64_t sample_ns =\n\t\t    atomic_load_explicit(&cwm->latest_observed_present_offset_ns, memory_order_acquire);\n\t\tcwm->consumed_present_offset_sample_serial = present_offset_serial;\n\t\tint64_t max_reasonable_ns = cwm->display_period_ns * 4;\n\t\tif (sample_ns > 0 && sample_ns <= max_reasonable_ns) {\n\t\t\tif (cwm->present_offset_sample_count == 0) {\n\t\t\t\tcwm->calibrated_present_offset_ns = sample_ns;\n\t\t\t} else {\n\t\t\t\t// 1/8 EMA: stable enough to reject callback/clock-conversion noise while adapting quickly.\n\t\t\t\tcwm->calibrated_present_offset_ns =\n\t\t\t\t    (cwm->calibrated_present_offset_ns * 7 + sample_ns) / 8;\n\t\t\t}\n\t\t\tif (cwm->present_offset_sample_count < UINT32_MAX) {\n\t\t\t\tcwm->present_offset_sample_count++;\n\t\t\t}\n\t\t\tif (cwm->present_offset_sample_count >= 8 && cwm->base.upc != NULL) {\n\t\t\t\tu_pc_update_present_offset(cwm->base.upc, 0, cwm->calibrated_present_offset_ns);\n\t\t\t}\n\t\t}\n\t}\n'''
+          one(anchor,repl,'apply feedback on compositor thread')
+
+          p.write_text(s)
+          d=Path('doc/macos-psvr2-timing-diagnostics.md')
+          txt=d.read_text()
+          txt += '''\n\n## Actual presentation feedback into fake pacing\n\n`CAMetalDrawable.presentedTime` is the observed onscreen host time, while the fake pacer previously retained its default 4 ms present-to-display offset. The macOS target now measures `presented_monotonic_ns - desired_present_time_ns` for completed frames and feeds a smoothed estimate back through `u_pc_update_present_offset`.\n\nThe Metal callback only publishes an atomic sample. The compositor thread consumes it in `update_timings`, applies a 1/8 EMA, rejects samples outside 0..4 display periods, and waits for eight samples before updating the pacer. This avoids calling the non-thread-safe pacing object from Metal's callback queue.\n\nThe intended effect is to align `predicted_display_time_ns` (and therefore late pose sampling/ATW prediction) with the display time actually reported by CAMetalLayer, even if CoreAnimation retains a stable one-refresh presentation pipeline. `presented.csv` now records `observed_present_offset_ns`.\n'''
+          d.write_text(txt)
+          PY
+          git diff --check
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-macos-present-feedback.yml
+          git add src/xrt/compositor/main/comp_window_macos.m doc/macos-psvr2-timing-diagnostics.md
+          git commit -m "fix: feed actual macOS presentation timing into pacer [present-feedback applied]"
+          git push origin HEAD:macos-psvr2-timing-diagnostics
