@@ -72,6 +72,159 @@ DYLD_LIBRARY_PATH=/path/to/OpenXR-SDK-build/src/loader \
   /path/to/OpenXR-SDK-build/src/tests/hello_xr/hello_xr -g Metal -s Local -v
 ```
 
+Set `XRT_MACOS_PRESENT_PHASE_LOG=1` to log each presented drawable's integer
+refresh-offset class and fractional offset from the desired presentation time.
+`macOS presentation phase:` lines include `initial`, `steady`, `transition`, or
+`out-of-order`, the previous/current class, consecutive class run lengths, actual
+presentation interval, timeline semaphore value, drawable/render waits, and
+applied feedback sampled at submission and at the presentation callback. This
+diagnostic is independent of `XRT_MACOS_PRESENT_TIMING` and does not modify
+feedback or pacing. Per-frame logging can itself add overhead.
+
+Absolute `_ns` timestamps are in the monotonic clock domain; Metal's actual and
+previous presentation times are translated using the submission's desired-time
+clock anchor. `commit_call_ns` is a CPU marker immediately before registering the
+diagnostic handler and calling `commit`, not GPU completion. Positive
+`commit_minus_scheduled` means that marker was after the scheduled target.
+`period_ns` is the physical display period, unaffected by the pacing divisor.
+With `immediate 1`, the scheduled target is only a reference: no `atTime:` is
+passed to Metal. An initial sample has no previous interval; out-of-order
+callbacks are logged but do not advance diagnostic class history. Run lengths
+describe consecutive classes, not a hysteretic classification. Paste contiguous
+lines around transitions, plus the existing presentation/submission summaries
+and missed-frame warnings, to distinguish a persistent extra refresh from a
+single late frame. The timeline value can be zero with the queue-idle fallback.
+
+The same option also emits `macOS presentation pipeline:` with the matching
+timeline/frame ID. It records the CPU prediction-call marker, requested and
+actual wake times, CPU render-begin and Vulkan submit-begin/end markers, the
+original predicted display time, and presentation enqueue/worker-start times.
+Frame history is copied before dispatch so subsequent predictions cannot change
+an outstanding job's diagnostic data. Missing history is explicitly reported;
+an absent render-begin marker produces `nan` for its derived age.
+
+`queue_wait` measures enqueue to worker entry (direct-call overhead in synchronous
+mode); `render_begin_to_actual` measures the age since CPU rendering began, not
+the sensor sample age; `commit_to_actual` measures the Metal commit-call marker
+to presentation. `original_prediction_error` compares actual presentation with
+the display time returned by the original frame prediction, rather than a later
+feedback snapshot. Submit markers measure CPU submission, not GPU execution.
+Keep both phase and pipeline lines when sharing a log. These extra per-frame
+lines can add logging overhead; no pacing or feedback values are changed.
+
+### Experimental presentation worker gate
+
+With asynchronous presentation enabled, `XRT_MACOS_PRESENT_WORKER_GATE=1`
+waits for prior presentation worker jobs to finish CPU submission before the
+compositor's render-begin marker and pose sampling. It does not wait for Metal
+command-buffer completion or actual presentation. The current frame has not
+submitted GPU work at this point, so the prior jobs' render-complete waits do
+not depend on it. This gate is off by default and inactive with synchronous
+presentation. It leaves the serial queue, feedback, and frame predictions intact.
+
+The experiment moves worker queue waiting ahead of rendering to reduce the age
+of the compositor pose when a drawable is shown. It does not acquire the next
+drawable ahead of rendering, refresh the application's submitted images, or
+revise the already predicted display timestamp. Check actual cadence and
+`original_prediction_error` as well as frame age; a smaller reported age alone
+does not demonstrate lower end-to-end latency.
+
+With phase logging enabled, pipeline lines add `worker_gate_begin_ns`,
+`worker_gate_end_ns`, and `worker_gate_wait`. `render_begin_ns` is sampled after
+the gate, so `render_begin_to_actual` excludes the gate wait. Compare with
+`actual_ns - worker_gate_begin_ns` to include it. Zero gate timestamps mean the
+gate was inactive. A successful test should move waiting from `queue_wait` into
+`worker_gate_wait`, reduce render-to-presentation age, and preserve 120 Hz
+cadence. Drawable waiting may still remain. Set the option to `0` for the
+baseline comparison.
+
+### Compositor pose selection diagnostic
+
+`XRT_MACOS_COMPOSITOR_POSE_LOG=1` independently enables per-view pose input
+logging on macOS. `macOS compositor device pose:` records the world-space eye
+orientations returned by the existing device-query/eye-transform path, their
+requested scanout timestamps, and relation flags. It performs no extra device
+queries. `macOS compositor render pose:` records the view inputs after pose
+selection, including compute/graphics path, device/submitted source, ATW and
+fast-path flags, layer count, and the first projection layer's timestamp and
+orientation. `app_present 0` means the zero application quaternion is a missing
+value, not a pose. Projection-depth uses the shared projection view layout.
+
+Quaternion components are logged as x, y, z, w. Match `timeline` to the phase
+and pipeline logs and compare consecutive *presented* frames offline; this
+avoids deriving angular speeds from closely spaced device-query timestamps.
+The device timestamps are requested prediction times, not sensor sample times.
+The render log captures inputs to the high-level rendering pipeline, not a
+readback of final pixels or a measurement of photons. With ATW disabled, a
+device target input does not establish that the image was reprojected to it.
+Graphics uses one target pose, so its logged end equals begin; compute can use
+distinct scanout endpoints. Multiple projection layers are identified by the
+layer count, but only the first projection's application pose is logged.
+
+This diagnostic does not change pose selection or ATW gating. It adds several
+lines per frame and can affect timing. Keep the other experimental settings
+fixed when capturing it.
+
+### Scanout compensation A/B
+
+`XRT_MACOS_SCANOUT_OFF=1` disables scanout compensation on macOS by setting the
+pose-query scanout interval to zero. The existing zero-interval path copies the
+beginning head relation and eye poses to the end, avoiding the second device
+query. The predicted display time and ordinary ATW setting are unchanged. The
+compute compositor therefore receives identical target poses for both scanout
+endpoints. The graphics path already uses only the beginning pose.
+
+The option defaults to `0`, preserving the device-reported scanout interval and
+Linux behavior. Restart the service to change it. Compare `1` against `0` with
+the same application and smooth head rotations, keeping feedback, worker gate,
+and logging settings fixed. Startup logs confirm when the override is enabled;
+if pose logging is enabled, device `begin_ns` and `end_ns` and their orientations
+should match. Keep verbose pose/phase logging disabled for the subjective test.
+This is an experiment, not a change to the default timing model.
+
+The compute distortion shader now weights scanout interpolation using the
+output viewport row at the pixel centre, shared by all colour channels.
+Previously it used each channel's lens-distorted source UV, which could assign
+different scanout times across a physical row or between colour channels of
+the same pixel. Source UVs still control image sampling; the output row controls
+scanout time. This corrects the existing top-to-bottom interpolation model
+without changing its endpoint timestamps, ATW matrices, or presentation pacing.
+It does not calibrate the physical scanout start time. The graphics path is
+unchanged. With identical scanout endpoint matrices (including
+`XRT_MACOS_SCANOUT_OFF=1`), the interpolation is mathematically unchanged.
+
+For hardware validation use `XRT_MACOS_SCANOUT_OFF=0` so the correction is active,
+three source IOSurfaces and two CAMetalLayer drawables, and keep the remaining
+settings from the source-pool baseline. This correction is separate from moving
+pose sampling after drawable acquisition, which would require changes to the
+render/presentation architecture.
+
+### Source IOSurface pool A/B
+
+`XRT_MACOS_TARGET_IMAGE_COUNT=4` selects four compositor source IOSurfaces;
+the default remains three. Only `3` and `4` are accepted; other values warn and
+fall back to three. Restart the service between runs. This option controls
+Vulkan image allocation, Metal source textures, and their reuse semaphores.
+It does not set the CAMetalLayer drawable count: keep
+`XRT_MACOS_DRAWABLE_COUNT=2` in both runs. Image release still occurs in the
+Metal command-buffer completion handler.
+
+Use `XRT_MACOS_PRESENT_TIMING=1` to collect `macOS source image acquire:`
+summaries (240 acquisitions each): average/maximum semaphore wait and the
+number exceeding 1 ms. Enable `U_PACING_FAKE_PREDICTION_STATS=1` to compare
+prediction cadence and target advances alongside drawable presentation
+summaries. First capture count `3`, then count `4`, preserving all other
+settings, including worker gating, fullscreen, late latch, gyro integration,
+and scanout override. Those options can change where waiting or prediction
+occurs; varying them would confound this comparison.
+
+Reduced source waits together with improved prediction cadence would support
+the source-reuse hypothesis. Low source waits in both runs would weaken it.
+Check actual presentation latency as well: a larger pool can allow older frames
+to queue. Command-buffer duration alone does not prove a source-pool bottleneck.
+Recycling before GPU blit completion is unsafe, so this experiment does not
+alter source lifetime or synchronization.
+
 On Apple platforms the runtime does not currently advertise
 `XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
 swapchains do not support depth/stencil pixel formats. The Metal client also
