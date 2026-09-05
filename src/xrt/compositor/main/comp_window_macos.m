@@ -34,6 +34,7 @@
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_PACING", true)
+DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -115,13 +116,14 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	}
 	cwm->trace_present = macos_timing_trace_open_file(
 	    "present",
-	    "frame_id,host_call_ns,desired_present_ns,desired_minus_call_ns,scheduled_present_host_s,present_slop_ns,"
-	    "image_index,timeline_value,after_vk_wait_ns,after_drawable_ns,before_present_call_ns,after_present_call_ns,"
-	    "after_commit_ns,after_metal_wait_ns,latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");
+	    "frame_id,host_call_ns,desired_present_ns,desired_minus_call_ns,target_output_ns,target_minus_desired_ns,"
+	    "scheduled_present_host_s,present_slop_ns,image_index,timeline_value,wait_mode,after_vk_wait_ns,"
+	    "after_drawable_ns,before_present_call_ns,after_present_call_ns,after_commit_ns,after_metal_wait_ns,"
+	    "latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");
 	cwm->trace_presented = macos_timing_trace_open_file(
 	    "presented",
-	    "frame_id,presented_handler_ns,desired_present_ns,presented_time_host_s,presented_monotonic_ns,"
-	    "presented_minus_desired_ns");
+	    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"
+	    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns");
 	cwm->trace_vblank = macos_timing_trace_open_file(
 	    "vblank",
 	    "host_consumed_ns,displaylink_callback_ns,displaylink_now_host_ns,displaylink_output_host_ns,"
@@ -598,6 +600,8 @@ comp_window_macos_present(struct comp_target *ct,
 	uint64_t after_present_call_ns = 0;
 	uint64_t after_commit_ns = 0;
 	uint64_t after_metal_wait_ns = 0;
+	uint64_t target_output_ns = 0;
+	const char *wait_mode = "queue_idle";
 	double scheduled_present_host_s = 0.0;
 	double gpu_start_time_s = 0.0;
 	double gpu_end_time_s = 0.0;
@@ -607,12 +611,25 @@ comp_window_macos_present(struct comp_target *ct,
 	}
 
 	uint64_t before_vk_wait_ns = os_monotonic_get_ns();
-	vk_queue_lock(present_queue);
-	VkResult ret = vk->vkQueueWaitIdle(present_queue->queue);
-	vk_queue_unlock(present_queue);
+	VkResult ret = VK_SUCCESS;
+	if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&
+	    vk->vkWaitSemaphores != NULL) {
+		VkSemaphoreWaitInfo wait_info = {
+		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+		    .semaphoreCount = 1,
+		    .pSemaphores = &ct->semaphores.render_complete,
+		    .pValues = &timeline_semaphore_value,
+		};
+		wait_mode = "timeline";
+		ret = vk->vkWaitSemaphores(vk->device, &wait_info, UINT64_MAX);
+	} else {
+		vk_queue_lock(present_queue);
+		ret = vk->vkQueueWaitIdle(present_queue->queue);
+		vk_queue_unlock(present_queue);
+	}
 	uint64_t after_vk_wait_ns = os_monotonic_get_ns();
 	if (ret != VK_SUCCESS) {
-		COMP_ERROR(ct->c, "vkQueueWaitIdle before Metal presentation: %s", vk_result_string(ret));
+		COMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));
 		return ret;
 	}
 
@@ -637,11 +654,33 @@ comp_window_macos_present(struct comp_target *ct,
 		       destinationOrigin:MTLOriginMake(0, 0, 0)];
 		[blit endEncoding];
 
+		before_present_call_ns = os_monotonic_get_ns();
+		uint64_t latest_output_ns =
+		    atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
+		int64_t min_lead_us = debug_get_num_option_macos_present_min_lead_us();
+		if (min_lead_us < 0) {
+			min_lead_us = 0;
+		}
+		uint64_t earliest_output_ns = before_present_call_ns + (uint64_t)min_lead_us * 1000ULL;
+		if (desired_present_time_ns > 0 && (uint64_t)desired_present_time_ns > earliest_output_ns) {
+			earliest_output_ns = (uint64_t)desired_present_time_ns;
+		}
+		target_output_ns = latest_output_ns;
+		if (target_output_ns == 0) {
+			target_output_ns = earliest_output_ns;
+		} else if (cwm->display_period_ns > 0) {
+			uint64_t period_ns = (uint64_t)cwm->display_period_ns;
+			while (target_output_ns < earliest_output_ns) {
+				target_output_ns += period_ns;
+			}
+		}
+
 		if (cwm->trace_presented != NULL && cwm->trace_present_group != NULL) {
 			FILE *trace_file = cwm->trace_presented;
 			dispatch_group_t trace_group = cwm->trace_present_group;
 			uint64_t traced_frame_id = frame_id;
 			int64_t traced_desired_present_ns = desired_present_time_ns;
+			uint64_t traced_target_output_ns = target_output_ns;
 			dispatch_group_enter(trace_group);
 			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
 				double presented_time_s = [presented_drawable presentedTime];
@@ -657,18 +696,21 @@ comp_window_macos_present(struct comp_target *ct,
 				    presented_host_ns != 0 ? presented_host_ns + handler_offset_ns : 0;
 				int64_t presented_minus_desired_ns =
 				    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
+				int64_t presented_minus_target_ns =
+				    presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns : 0;
 				flockfile(trace_file);
-				fprintf(trace_file, "%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%" PRIi64 "\n",
-				        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns, presented_time_s,
-				        presented_monotonic_ns, presented_minus_desired_ns);
+				fprintf(trace_file,
+				        "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n",
+				        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,
+				        (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,
+				        presented_minus_desired_ns, presented_minus_target_ns);
 				fflush(trace_file);
 				funlockfile(trace_file);
 				dispatch_group_leave(trace_group);
 			}];
 		}
 
-		before_present_call_ns = os_monotonic_get_ns();
-		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, desired_present_time_ns);
+		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)target_output_ns);
 		if (scheduled_present_host_s > 0.0) {
 			[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
 		} else {
@@ -694,10 +736,11 @@ comp_window_macos_present(struct comp_target *ct,
 	if (cwm->trace_present != NULL) {
 		uint64_t latest_output_ns = atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
 		fprintf(cwm->trace_present,
-		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\n",
+		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\n",
 		        (unsigned long long)frame_id, (unsigned long long)before_vk_wait_ns, desired_present_time_ns,
-		        desired_present_time_ns - (int64_t)before_vk_wait_ns, scheduled_present_host_s, present_slop_ns, index,
-		        (unsigned long long)timeline_semaphore_value, (unsigned long long)after_vk_wait_ns,
+		        desired_present_time_ns - (int64_t)before_vk_wait_ns, (unsigned long long)target_output_ns,
+		        (int64_t)target_output_ns - desired_present_time_ns, scheduled_present_host_s, present_slop_ns, index,
+		        (unsigned long long)timeline_semaphore_value, wait_mode, (unsigned long long)after_vk_wait_ns,
 		        (unsigned long long)after_drawable_ns, (unsigned long long)before_present_call_ns,
 		        (unsigned long long)after_present_call_ns, (unsigned long long)after_commit_ns,
 		        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s);
