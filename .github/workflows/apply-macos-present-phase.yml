@@ -1,0 +1,81 @@
+name: Apply macOS present phase fixes
+
+on:
+  push:
+    branches:
+      - macos-psvr2-timing-diagnostics
+    paths:
+      - .github/workflows/apply-macos-present-phase.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: macos-psvr2-timing-diagnostics
+          fetch-depth: 0
+      - name: Apply source edits
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/xrt/compositor/main/comp_window_macos.m')
+          s = p.read_text()
+          def one(old,new,label):
+              global s
+              n=s.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {n}')
+              s=s.replace(old,new,1)
+
+          one('DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_PACING", true)\n',
+              'DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_PACING", true)\nDEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)\n',
+              'lead option')
+
+          one('''\t    "present",\n\t    "frame_id,host_call_ns,desired_present_ns,desired_minus_call_ns,scheduled_present_host_s,present_slop_ns,"\n\t    "image_index,timeline_value,after_vk_wait_ns,after_drawable_ns,before_present_call_ns,after_present_call_ns,"\n\t    "after_commit_ns,after_metal_wait_ns,latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");\n''',
+              '''\t    "present",\n\t    "frame_id,host_call_ns,desired_present_ns,desired_minus_call_ns,target_output_ns,target_minus_desired_ns,"\n\t    "scheduled_present_host_s,present_slop_ns,image_index,timeline_value,wait_mode,after_vk_wait_ns,"\n\t    "after_drawable_ns,before_present_call_ns,after_present_call_ns,after_commit_ns,after_metal_wait_ns,"\n\t    "latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");\n''',
+              'present header')
+
+          one('''\t    "presented",\n\t    "frame_id,presented_handler_ns,desired_present_ns,presented_time_host_s,presented_monotonic_ns,"\n\t    "presented_minus_desired_ns");\n''',
+              '''\t    "presented",\n\t    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"\n\t    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns");\n''',
+              'presented header')
+
+          one('''\tuint64_t after_metal_wait_ns = 0;\n\tdouble scheduled_present_host_s = 0.0;\n''',
+              '''\tuint64_t after_metal_wait_ns = 0;\n\tuint64_t target_output_ns = 0;\n\tconst char *wait_mode = "queue_idle";\n\tdouble scheduled_present_host_s = 0.0;\n''',
+              'present locals')
+
+          one('''\tuint64_t before_vk_wait_ns = os_monotonic_get_ns();\n\tvk_queue_lock(present_queue);\n\tVkResult ret = vk->vkQueueWaitIdle(present_queue->queue);\n\tvk_queue_unlock(present_queue);\n\tuint64_t after_vk_wait_ns = os_monotonic_get_ns();\n\tif (ret != VK_SUCCESS) {\n\t\tCOMP_ERROR(ct->c, "vkQueueWaitIdle before Metal presentation: %s", vk_result_string(ret));\n\t\treturn ret;\n\t}\n''',
+              '''\tuint64_t before_vk_wait_ns = os_monotonic_get_ns();\n\tVkResult ret = VK_SUCCESS;\n\tif (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&\n\t    vk->vkWaitSemaphores != NULL) {\n\t\tVkSemaphoreWaitInfo wait_info = {\n\t\t    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,\n\t\t    .semaphoreCount = 1,\n\t\t    .pSemaphores = &ct->semaphores.render_complete,\n\t\t    .pValues = &timeline_semaphore_value,\n\t\t};\n\t\twait_mode = "timeline";\n\t\tret = vk->vkWaitSemaphores(vk->device, &wait_info, UINT64_MAX);\n\t} else {\n\t\tvk_queue_lock(present_queue);\n\t\tret = vk->vkQueueWaitIdle(present_queue->queue);\n\t\tvk_queue_unlock(present_queue);\n\t}\n\tuint64_t after_vk_wait_ns = os_monotonic_get_ns();\n\tif (ret != VK_SUCCESS) {\n\t\tCOMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));\n\t\treturn ret;\n\t}\n''',
+              'narrow wait')
+
+          one('''\t\t\tuint64_t traced_frame_id = frame_id;\n\t\t\tint64_t traced_desired_present_ns = desired_present_time_ns;\n\t\t\tdispatch_group_enter(trace_group);\n''',
+              '''\t\t\tuint64_t traced_frame_id = frame_id;\n\t\t\tint64_t traced_desired_present_ns = desired_present_time_ns;\n\t\t\tdispatch_group_enter(trace_group);\n''',
+              'presented handler anchor')
+
+          # Replace scheduling block and handler together so target_output is captured after it is selected.
+          old='''\t\tif (cwm->trace_presented != NULL && cwm->trace_present_group != NULL) {\n\t\t\tFILE *trace_file = cwm->trace_presented;\n\t\t\tdispatch_group_t trace_group = cwm->trace_present_group;\n\t\t\tuint64_t traced_frame_id = frame_id;\n\t\t\tint64_t traced_desired_present_ns = desired_present_time_ns;\n\t\t\tdispatch_group_enter(trace_group);\n\t\t\t[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {\n\t\t\t\tdouble presented_time_s = [presented_drawable presentedTime];\n\t\t\t\tint64_t handler_ns = os_monotonic_get_ns();\n\t\t\t\tdouble host_frequency = CVGetHostClockFrequency();\n\t\t\t\tuint64_t current_host_ticks = CVGetCurrentHostTime();\n\t\t\t\tint64_t current_host_ns =\n\t\t\t\t    host_frequency > 0.0 ? (int64_t)llround((double)current_host_ticks * 1e9 / host_frequency) : 0;\n\t\t\t\tint64_t handler_offset_ns = handler_ns - current_host_ns;\n\t\t\t\tint64_t presented_host_ns =\n\t\t\t\t    presented_time_s > 0.0 ? (int64_t)llround(presented_time_s * (double)U_TIME_1S_IN_NS) : 0;\n\t\t\t\tint64_t presented_monotonic_ns =\n\t\t\t\t    presented_host_ns != 0 ? presented_host_ns + handler_offset_ns : 0;\n\t\t\t\tint64_t presented_minus_desired_ns =\n\t\t\t\t    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;\n\t\t\t\tflockfile(trace_file);\n\t\t\t\tfprintf(trace_file, "%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%" PRIi64 "\\n",\n\t\t\t\t        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns, presented_time_s,\n\t\t\t\t        presented_monotonic_ns, presented_minus_desired_ns);\n\t\t\t\tfflush(trace_file);\n\t\t\t\tfunlockfile(trace_file);\n\t\t\t\tdispatch_group_leave(trace_group);\n\t\t\t}];\n\t\t}\n\n\t\tbefore_present_call_ns = os_monotonic_get_ns();\n\t\tscheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, desired_present_time_ns);\n\t\tif (scheduled_present_host_s > 0.0) {\n\t\t\t[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];\n\t\t} else {\n\t\t\t[command_buffer presentDrawable:drawable];\n\t\t}\n'''
+          new='''\t\tbefore_present_call_ns = os_monotonic_get_ns();\n\t\tuint64_t latest_output_ns =\n\t\t    atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);\n\t\tint64_t min_lead_us = debug_get_num_option_macos_present_min_lead_us();\n\t\tif (min_lead_us < 0) {\n\t\t\tmin_lead_us = 0;\n\t\t}\n\t\tuint64_t earliest_output_ns = before_present_call_ns + (uint64_t)min_lead_us * 1000ULL;\n\t\tif (desired_present_time_ns > 0 && (uint64_t)desired_present_time_ns > earliest_output_ns) {\n\t\t\tearliest_output_ns = (uint64_t)desired_present_time_ns;\n\t\t}\n\t\ttarget_output_ns = latest_output_ns;\n\t\tif (target_output_ns == 0) {\n\t\t\ttarget_output_ns = earliest_output_ns;\n\t\t} else if (cwm->display_period_ns > 0) {\n\t\t\tuint64_t period_ns = (uint64_t)cwm->display_period_ns;\n\t\t\twhile (target_output_ns < earliest_output_ns) {\n\t\t\t\ttarget_output_ns += period_ns;\n\t\t\t}\n\t\t}\n\n\t\tif (cwm->trace_presented != NULL && cwm->trace_present_group != NULL) {\n\t\t\tFILE *trace_file = cwm->trace_presented;\n\t\t\tdispatch_group_t trace_group = cwm->trace_present_group;\n\t\t\tuint64_t traced_frame_id = frame_id;\n\t\t\tint64_t traced_desired_present_ns = desired_present_time_ns;\n\t\t\tuint64_t traced_target_output_ns = target_output_ns;\n\t\t\tdispatch_group_enter(trace_group);\n\t\t\t[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {\n\t\t\t\tdouble presented_time_s = [presented_drawable presentedTime];\n\t\t\t\tint64_t handler_ns = os_monotonic_get_ns();\n\t\t\t\tdouble host_frequency = CVGetHostClockFrequency();\n\t\t\t\tuint64_t current_host_ticks = CVGetCurrentHostTime();\n\t\t\t\tint64_t current_host_ns =\n\t\t\t\t    host_frequency > 0.0 ? (int64_t)llround((double)current_host_ticks * 1e9 / host_frequency) : 0;\n\t\t\t\tint64_t handler_offset_ns = handler_ns - current_host_ns;\n\t\t\t\tint64_t presented_host_ns =\n\t\t\t\t    presented_time_s > 0.0 ? (int64_t)llround(presented_time_s * (double)U_TIME_1S_IN_NS) : 0;\n\t\t\t\tint64_t presented_monotonic_ns =\n\t\t\t\t    presented_host_ns != 0 ? presented_host_ns + handler_offset_ns : 0;\n\t\t\t\tint64_t presented_minus_desired_ns =\n\t\t\t\t    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;\n\t\t\t\tint64_t presented_minus_target_ns =\n\t\t\t\t    presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns : 0;\n\t\t\t\tflockfile(trace_file);\n\t\t\t\tfprintf(trace_file,\n\t\t\t\t        "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\\n",\n\t\t\t\t        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,\n\t\t\t\t        (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,\n\t\t\t\t        presented_minus_desired_ns, presented_minus_target_ns);\n\t\t\t\tfflush(trace_file);\n\t\t\t\tfunlockfile(trace_file);\n\t\t\t\tdispatch_group_leave(trace_group);\n\t\t\t}];\n\t\t}\n\n\t\tscheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)target_output_ns);\n\t\tif (scheduled_present_host_s > 0.0) {\n\t\t\t[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];\n\t\t} else {\n\t\t\t[command_buffer presentDrawable:drawable];\n\t\t}\n'''
+          one(old,new,'target output scheduling')
+
+          oldfmt='''\t\tfprintf(cwm->trace_present,\n\t\t        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\\n",\n\t\t        (unsigned long long)frame_id, (unsigned long long)before_vk_wait_ns, desired_present_time_ns,\n\t\t        desired_present_time_ns - (int64_t)before_vk_wait_ns, scheduled_present_host_s, present_slop_ns, index,\n\t\t        (unsigned long long)timeline_semaphore_value, (unsigned long long)after_vk_wait_ns,\n\t\t        (unsigned long long)after_drawable_ns, (unsigned long long)before_present_call_ns,\n\t\t        (unsigned long long)after_present_call_ns, (unsigned long long)after_commit_ns,\n\t\t        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s);\n'''
+          newfmt='''\t\tfprintf(cwm->trace_present,\n\t\t        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\\n",\n\t\t        (unsigned long long)frame_id, (unsigned long long)before_vk_wait_ns, desired_present_time_ns,\n\t\t        desired_present_time_ns - (int64_t)before_vk_wait_ns, (unsigned long long)target_output_ns,\n\t\t        (int64_t)target_output_ns - desired_present_time_ns, scheduled_present_host_s, present_slop_ns, index,\n\t\t        (unsigned long long)timeline_semaphore_value, wait_mode, (unsigned long long)after_vk_wait_ns,\n\t\t        (unsigned long long)after_drawable_ns, (unsigned long long)before_present_call_ns,\n\t\t        (unsigned long long)after_present_call_ns, (unsigned long long)after_commit_ns,\n\t\t        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s);\n'''
+          one(oldfmt,newfmt,'present trace row')
+
+          p.write_text(s)
+          d=Path('doc/macos-psvr2-timing-diagnostics.md')
+          txt=d.read_text()
+          txt += '''\n\n## Next-output scheduling and narrow render wait\n\nAfter the second capture showed presentation landing one output later than the upcoming CoreVideo slot, the macOS target now:\n\n- waits for the compositor's `render_complete` timeline semaphore at the exact frame value passed to `present()`, rather than idling the entire Vulkan queue; a queue-idle fallback remains for configurations without a timeline semaphore;\n- selects the latest CoreVideo `inOutputTime` as the presentation slot and advances by whole display periods only if that slot is stale or has less than the minimum lead time;\n- defaults to 2 ms minimum lead (`XRT_MACOS_PRESENT_MIN_LEAD_US=2000`) so Metal has enough time for the IOSurface-to-drawable blit without gratuitously adding a whole refresh;\n- records the selected `target_output_ns`, wait mode, and actual-present-minus-target error in the trace.\n'''
+          d.write_text(txt)
+          PY
+          git diff --check
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-macos-present-phase.yml
+          git add src/xrt/compositor/main/comp_window_macos.m doc/macos-psvr2-timing-diagnostics.md
+          git commit -m "fix: target next display output and wait on render timeline [present-phase applied]"
+          git push origin HEAD:macos-psvr2-timing-diagnostics
