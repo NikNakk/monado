@@ -117,7 +117,8 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	cwm->trace_present = macos_timing_trace_open_file(
 	    "present",
 	    "frame_id,host_call_ns,desired_present_ns,desired_minus_call_ns,target_output_ns,target_minus_desired_ns,"
-	    "scheduled_present_host_s,present_slop_ns,image_index,timeline_value,wait_mode,after_vk_wait_ns,"
+	    "metal_request_ns,metal_request_minus_target_ns,scheduled_present_host_s,present_slop_ns,image_index,"
+	    "timeline_value,wait_mode,after_vk_wait_ns,"
 	    "after_drawable_ns,before_present_call_ns,after_present_call_ns,after_commit_ns,after_metal_wait_ns,"
 	    "latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");
 	cwm->trace_presented = macos_timing_trace_open_file(
@@ -419,9 +420,35 @@ comp_window_macos_init(struct comp_target *ct)
 static bool
 comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, uint32_t preferred_height)
 {
-	(void)ct;
 	(void)preferred_width;
 	(void)preferred_height;
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	struct vk_bundle *vk = get_vk(cwm);
+
+	if (!vk->features.timeline_semaphore || vk->vkWaitSemaphores == NULL) {
+		COMP_WARN(ct->c, "Timeline semaphores unavailable; macOS presentation will fall back to queue-idle waits");
+		return true;
+	}
+
+	VkSemaphoreTypeCreateInfo type_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+	    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+	    .initialValue = 0,
+	};
+	VkSemaphoreCreateInfo create_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+	    .pNext = &type_info,
+	};
+	VkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &ct->semaphores.render_complete);
+	if (ret != VK_SUCCESS) {
+		COMP_WARN(ct->c, "Could not create macOS render-complete timeline semaphore: %s; using queue-idle fallback",
+		          vk_result_string(ret));
+		ct->semaphores.render_complete = VK_NULL_HANDLE;
+		ct->semaphores.render_complete_is_timeline = false;
+		return true;
+	}
+	ct->semaphores.render_complete_is_timeline = true;
+	COMP_INFO(ct->c, "macOS target using render-complete timeline semaphore");
 	return true;
 }
 
@@ -601,6 +628,7 @@ comp_window_macos_present(struct comp_target *ct,
 	uint64_t after_commit_ns = 0;
 	uint64_t after_metal_wait_ns = 0;
 	uint64_t target_output_ns = 0;
+	uint64_t metal_request_ns = 0;
 	const char *wait_mode = "queue_idle";
 	double scheduled_present_host_s = 0.0;
 	double gpu_start_time_s = 0.0;
@@ -710,7 +738,11 @@ comp_window_macos_present(struct comp_target *ct,
 			}];
 		}
 
-		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)target_output_ns);
+		metal_request_ns = target_output_ns;
+		if (cwm->display_period_ns > 0 && target_output_ns > (uint64_t)cwm->display_period_ns) {
+			metal_request_ns = target_output_ns - (uint64_t)cwm->display_period_ns;
+		}
+		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)metal_request_ns);
 		if (scheduled_present_host_s > 0.0) {
 			[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
 		} else {
@@ -736,10 +768,11 @@ comp_window_macos_present(struct comp_target *ct,
 	if (cwm->trace_present != NULL) {
 		uint64_t latest_output_ns = atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
 		fprintf(cwm->trace_present,
-		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\n",
+		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\n",
 		        (unsigned long long)frame_id, (unsigned long long)before_vk_wait_ns, desired_present_time_ns,
 		        desired_present_time_ns - (int64_t)before_vk_wait_ns, (unsigned long long)target_output_ns,
-		        (int64_t)target_output_ns - desired_present_time_ns, scheduled_present_host_s, present_slop_ns, index,
+		        (int64_t)target_output_ns - desired_present_time_ns, (unsigned long long)metal_request_ns,
+		        (int64_t)metal_request_ns - (int64_t)target_output_ns, scheduled_present_host_s, present_slop_ns, index,
 		        (unsigned long long)timeline_semaphore_value, wait_mode, (unsigned long long)after_vk_wait_ns,
 		        (unsigned long long)after_drawable_ns, (unsigned long long)before_present_call_ns,
 		        (unsigned long long)after_present_call_ns, (unsigned long long)after_commit_ns,
@@ -933,6 +966,12 @@ comp_window_macos_destroy(struct comp_target *ct)
 	}
 	macos_timing_trace_close(cwm);
 	comp_window_macos_free_images(cwm);
+	if (ct->semaphores.render_complete != VK_NULL_HANDLE) {
+		struct vk_bundle *vk = get_vk(cwm);
+		vk->vkDestroySemaphore(vk->device, ct->semaphores.render_complete, NULL);
+		ct->semaphores.render_complete = VK_NULL_HANDLE;
+		ct->semaphores.render_complete_is_timeline = false;
+	}
 	u_pc_destroy(&cwm->base.upc);
 	@autoreleasepool {
 		[cwm->window orderOut:nil];
