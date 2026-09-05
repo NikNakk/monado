@@ -1,0 +1,49 @@
+diff --git a/src/xrt/drivers/psvr2/psvr2.c b/src/xrt/drivers/psvr2/psvr2.c
+--- a/src/xrt/drivers/psvr2/psvr2.c
++++ b/src/xrt/drivers/psvr2/psvr2.c
+@@ -286,10 +286,6 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
+ {
+ 	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+ 
+-#ifdef XRT_OS_OSX
+-	psvr2_timing_trace_close();
+-#endif
+-
+ 	psvr2_free_et_data(hmd);
+@@ -301,6 +297,10 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
+ 
+ 	psvr2_usb_destroy(hmd);
++
++#ifdef XRT_OS_OSX
++	psvr2_timing_trace_close();
++#endif
+ 
+ 	// @note We appear to be hitting a bug in libusb, so this is commented out
+ 	//       see: https://github.com/libusb/libusb/issues/1605
+diff --git a/src/xrt/compositor/main/comp_window_macos.m b/src/xrt/compositor/main/comp_window_macos.m
+--- a/src/xrt/compositor/main/comp_window_macos.m
++++ b/src/xrt/compositor/main/comp_window_macos.m
+@@ -20,6 +20,7 @@
+ #include "util/u_pacing.h"
+ #include "vk/vk_image_allocator.h"
+ 
++#include <inttypes.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <stdatomic.h>
+@@ -641,12 +642,9 @@ comp_window_macos_update_timings(struct comp_target *ct)
+ {
+ 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+ 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
+-	uint64_t displaylink_now_ns =
+-	    atomic_exchange_explicit(&cwm->latest_displaylink_now_ns, 0, memory_order_acquire);
+-	uint64_t displaylink_output_ns =
+-	    atomic_exchange_explicit(&cwm->latest_displaylink_output_ns, 0, memory_order_acquire);
+-	uint64_t displaylink_callback_ns =
+-	    atomic_exchange_explicit(&cwm->latest_displaylink_callback_ns, 0, memory_order_acquire);
++	uint64_t displaylink_now_ns = atomic_load_explicit(&cwm->latest_displaylink_now_ns, memory_order_acquire);
++	uint64_t displaylink_output_ns = atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
++	uint64_t displaylink_callback_ns = atomic_load_explicit(&cwm->latest_displaylink_callback_ns, memory_order_acquire);
+ 	if (vblank_ns == 0 || vblank_ns == cwm->last_vblank_ns || cwm->base.upc == NULL) {
+ 		return VK_SUCCESS;
+ 	}
