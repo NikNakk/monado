@@ -37,6 +37,7 @@ DEBUG_GET_ONCE_NUM_OPTION(present_advance_periods, "XRT_MACOS_PRESENT_ADVANCE_PE
 DEBUG_GET_ONCE_BOOL_OPTION(metal_hud, "XRT_MACOS_METAL_HUD", false)
 DEBUG_GET_ONCE_BOOL_OPTION(native_fullscreen, "XRT_MACOS_NATIVE_FULLSCREEN", false)
 DEBUG_GET_ONCE_NUM_OPTION(drawable_count, "XRT_MACOS_DRAWABLE_COUNT", 0)
+DEBUG_GET_ONCE_NUM_OPTION(late_pose_lead_ms, "XRT_MACOS_LATE_POSE_LEAD_MS", -1)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -50,6 +51,7 @@ struct macos_frame_timing
 	int64_t predicted_display_ns;
 	int64_t wake_ns;
 	int64_t render_begin_ns;
+	int64_t late_pose_dispatch_ns;
 	int64_t worker_gate_begin_ns;
 	int64_t worker_gate_end_ns;
 	int64_t submit_begin_ns;
@@ -106,6 +108,8 @@ struct comp_window_macos
 	struct macos_frame_timing phase_frame;
 	void (*original_calc_frame_pacing)(struct comp_target *, int64_t *, int64_t *, int64_t *, int64_t *, int64_t *);
 	void (*original_mark_timing_point)(struct comp_target *, enum comp_target_timing_point, int64_t, int64_t);
+	uint32_t late_pose_update_count;
+	bool late_pose_waited;
 
 	uint64_t submission_sample_count;
 	uint64_t render_wait_total_ns;
@@ -892,7 +896,7 @@ comp_window_macos_record_submission(struct comp_window_macos *cwm,
 	cwm->submission_max_ns = 0;
 }
 
-/* Prediction capture is installed only when phase logging is enabled. */
+/* Prediction capture is installed for phase logging and late-pose dispatch. */
 static void
 comp_window_macos_phase_predict(struct comp_target *ct,
                                 int64_t *frame_id,
@@ -912,6 +916,8 @@ comp_window_macos_phase_predict(struct comp_target *ct,
 		    .wake_target_ns = *wake_ns,
 		    .predicted_display_ns = *display_ns,
 		};
+		cwm->late_pose_update_count = 0;
+		cwm->late_pose_waited = false;
 	}
 }
 
@@ -938,7 +944,7 @@ comp_window_macos_phase_mark(struct comp_target *ct,
 		when_ns = gate_end_ns;
 	}
 	cwm->original_mark_timing_point(ct, point, frame_id, when_ns);
-	if (!debug_get_bool_option_present_phase_log()) {
+	if (!debug_get_bool_option_present_phase_log() && debug_get_num_option_late_pose_lead_ms() < 0) {
 		return;
 	}
 	@synchronized(cwm->present_queue) {
@@ -962,6 +968,45 @@ comp_window_macos_phase_mark(struct comp_target *ct,
 			f->submit_end_ns = when_ns;
 			break;
 		}
+	}
+}
+
+static void
+comp_window_macos_maybe_wait_for_late_pose(struct comp_window_macos *cwm)
+{
+	int lead_ms = debug_get_num_option_late_pose_lead_ms();
+	if (lead_ms < 0 || lead_ms > 50) {
+		return;
+	}
+
+	int64_t predicted_display_ns = 0;
+	@synchronized(cwm->present_queue) {
+		if (cwm->late_pose_waited || !cwm->phase_frame.valid || cwm->phase_frame.render_begin_ns == 0) {
+			return;
+		}
+		cwm->late_pose_update_count++;
+		/*
+		 * comp_renderer_draw calls update_timings once before target-image
+		 * acquisition and once immediately afterwards. Wait on the second call
+		 * so target acquisition cannot consume the deliberately delayed window.
+		 */
+		if (cwm->late_pose_update_count < 2) {
+			return;
+		}
+		cwm->late_pose_waited = true;
+		predicted_display_ns = cwm->phase_frame.predicted_display_ns;
+	}
+
+	int64_t target_ns = predicted_display_ns - (int64_t)lead_ms * U_TIME_1MS_IN_NS;
+	int64_t now_ns = os_monotonic_get_ns();
+	if (target_ns > now_ns) {
+		uint64_t delta_ns = (uint64_t)(target_ns - now_ns);
+		uint64_t host_deadline = mach_absolute_time() + ns_to_host_time(cwm, delta_ns);
+		(void)mach_wait_until(host_deadline);
+	}
+	int64_t dispatch_ns = os_monotonic_get_ns();
+	@synchronized(cwm->present_queue) {
+		cwm->phase_frame.late_pose_dispatch_ns = dispatch_ns;
 	}
 }
 
@@ -1035,20 +1080,23 @@ comp_window_macos_record_phase(struct comp_window_macos *cwm,
 		if (frame.valid) {
 			COMP_INFO(cwm->base.base.c,
 			          "macOS presentation pipeline: timeline %llu predict_call_ns %lld wake_target_ns %lld "
-			          "wake_ns %lld render_begin_ns %lld submit_begin_ns %lld submit_end_ns %lld "
+			          "wake_ns %lld render_begin_ns %lld late_pose_dispatch_ns %lld submit_begin_ns %lld submit_end_ns %lld "
 			          "predicted_display_ns %lld enqueue_ns %lld worker_start_ns %llu; "
 			          "worker_gate_begin_ns %lld worker_gate_end_ns %lld worker_gate_wait %.3fms; "
-			          "queue_wait %.3fms render_begin_to_actual %.3fms commit_to_actual %.3fms "
-			          "original_prediction_error %.3fms",
+			          "queue_wait %.3fms render_begin_to_actual %.3fms late_pose_to_actual %.3fms "
+			          "late_pose_to_predicted %.3fms commit_to_actual %.3fms original_prediction_error %.3fms",
 			          (unsigned long long)timeline, (long long)frame.predict_call_ns,
 			          (long long)frame.wake_target_ns, (long long)frame.wake_ns,
-			          (long long)frame.render_begin_ns, (long long)frame.submit_begin_ns,
-			          (long long)frame.submit_end_ns, (long long)frame.predicted_display_ns,
-			          (long long)frame.enqueue_ns, (unsigned long long)worker_start_ns,
-			          (long long)frame.worker_gate_begin_ns, (long long)frame.worker_gate_end_ns,
+			          (long long)frame.render_begin_ns, (long long)frame.late_pose_dispatch_ns,
+			          (long long)frame.submit_begin_ns, (long long)frame.submit_end_ns,
+			          (long long)frame.predicted_display_ns, (long long)frame.enqueue_ns,
+			          (unsigned long long)worker_start_ns, (long long)frame.worker_gate_begin_ns,
+			          (long long)frame.worker_gate_end_ns,
 			          (double)(frame.worker_gate_end_ns - frame.worker_gate_begin_ns) / U_TIME_1MS_IN_NS,
 			          (double)((int64_t)worker_start_ns - frame.enqueue_ns) / U_TIME_1MS_IN_NS,
 			          frame.render_begin_ns != 0 ? (double)(actual_ns - frame.render_begin_ns) / U_TIME_1MS_IN_NS : NAN,
+			          frame.late_pose_dispatch_ns != 0 ? (double)(actual_ns - frame.late_pose_dispatch_ns) / U_TIME_1MS_IN_NS : NAN,
+			          frame.late_pose_dispatch_ns != 0 ? (double)(frame.predicted_display_ns - frame.late_pose_dispatch_ns) / U_TIME_1MS_IN_NS : NAN,
 			          (double)(actual_ns - (int64_t)commit_call_ns) / U_TIME_1MS_IN_NS,
 			          (double)(actual_ns - frame.predicted_display_ns) / U_TIME_1MS_IN_NS);
 		} else {
@@ -1266,6 +1314,9 @@ comp_window_macos_update_timings(struct comp_target *ct)
 			                      memory_order_release);
 		}
 	}
+
+	comp_window_macos_maybe_wait_for_late_pose(cwm);
+
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
 	if (vblank_ns == 0 || vblank_ns == cwm->last_vblank_ns || cwm->base.upc == NULL) {
 		return VK_SUCCESS;
@@ -1388,11 +1439,13 @@ comp_window_macos_create(struct comp_compositor *c)
 {
 	struct comp_window_macos *cwm = U_TYPED_CALLOC(struct comp_window_macos);
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
-	if (debug_get_bool_option_present_phase_log()) {
+	int late_pose_lead_ms = debug_get_num_option_late_pose_lead_ms();
+	if (debug_get_bool_option_present_phase_log() || late_pose_lead_ms >= 0) {
 		cwm->original_calc_frame_pacing = cwm->base.base.calc_frame_pacing;
 		cwm->base.base.calc_frame_pacing = comp_window_macos_phase_predict;
 	}
-	if (debug_get_bool_option_present_phase_log() || debug_get_bool_option_present_worker_gate()) {
+	if (debug_get_bool_option_present_phase_log() || debug_get_bool_option_present_worker_gate() ||
+	    late_pose_lead_ms >= 0) {
 		cwm->original_mark_timing_point = cwm->base.base.mark_timing_point;
 		cwm->base.base.mark_timing_point = comp_window_macos_phase_mark;
 	}
@@ -1421,6 +1474,11 @@ comp_window_macos_create(struct comp_compositor *c)
 	if (debug_get_bool_option_present_worker_gate()) {
 		COMP_INFO(c, "macOS presentation worker gate: %s",
 		          debug_get_bool_option_async_present() ? "enabled before render begin" : "inactive (requires async presentation)");
+	}
+	if (late_pose_lead_ms >= 0 && late_pose_lead_ms <= 50) {
+		COMP_INFO(c, "macOS late-pose dispatch enabled: target %dms before predicted display", late_pose_lead_ms);
+	} else if (late_pose_lead_ms > 50) {
+		COMP_WARN(c, "Ignoring XRT_MACOS_LATE_POSE_LEAD_MS=%d; valid values are 0-50", late_pose_lead_ms);
 	}
 	return &cwm->base.base;
 }
