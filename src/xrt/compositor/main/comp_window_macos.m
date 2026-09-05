@@ -24,7 +24,7 @@
 #include <math.h>
 #include <stdatomic.h>
 
-#define MACOS_TARGET_IMAGE_COUNT 3
+#define MACOS_TARGET_IMAGE_CAPACITY 4
 
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(present_timing, "XRT_MACOS_PRESENT_TIMING", false)
@@ -37,6 +37,7 @@ DEBUG_GET_ONCE_NUM_OPTION(present_advance_periods, "XRT_MACOS_PRESENT_ADVANCE_PE
 DEBUG_GET_ONCE_BOOL_OPTION(metal_hud, "XRT_MACOS_METAL_HUD", false)
 DEBUG_GET_ONCE_BOOL_OPTION(native_fullscreen, "XRT_MACOS_NATIVE_FULLSCREEN", false)
 DEBUG_GET_ONCE_NUM_OPTION(drawable_count, "XRT_MACOS_DRAWABLE_COUNT", 0)
+DEBUG_GET_ONCE_NUM_OPTION(target_image_count, "XRT_MACOS_TARGET_IMAGE_COUNT", 3)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -64,15 +65,15 @@ struct comp_window_macos
 	NSWindow *window;
 	CAMetalLayer *metal_layer;
 	id<MTLCommandQueue> present_queue;
-	id<MTLTexture> metal_images[MACOS_TARGET_IMAGE_COUNT];
-	xrt_graphics_buffer_handle_t io_surfaces[MACOS_TARGET_IMAGE_COUNT];
+	id<MTLTexture> metal_images[MACOS_TARGET_IMAGE_CAPACITY];
+	xrt_graphics_buffer_handle_t io_surfaces[MACOS_TARGET_IMAGE_CAPACITY];
 	struct vk_image_collection vkic;
 	CVDisplayLinkRef display_link;
 	mach_timebase_info_data_t mach_timebase;
 	dispatch_group_t present_completion_group;
 	dispatch_queue_t present_work_queue;
 	dispatch_group_t present_work_group;
-	dispatch_semaphore_t image_available[MACOS_TARGET_IMAGE_COUNT];
+	dispatch_semaphore_t image_available[MACOS_TARGET_IMAGE_CAPACITY];
 	atomic_uint_fast64_t latest_vblank_ns;
 	atomic_int_fast64_t measured_present_offset_ns;
 	atomic_int_fast64_t applied_present_offset_ns;
@@ -84,6 +85,11 @@ struct comp_window_macos
 	uint32_t pixel_width;
 	uint32_t pixel_height;
 	uint32_t next_image;
+	uint32_t target_image_count;
+	uint64_t acquire_samples;
+	uint64_t acquire_wait_total_ns;
+	uint64_t acquire_wait_max_ns;
+	uint64_t acquire_wait_over_1ms;
 
 	CFTimeInterval last_presented_time_s;
 	CFTimeInterval presented_interval_total_s;
@@ -418,14 +424,14 @@ comp_window_macos_init(struct comp_target *ct)
 			cwm->present_work_queue =
 			    dispatch_queue_create("org.monado.macos-present", DISPATCH_QUEUE_SERIAL);
 			cwm->present_work_group = dispatch_group_create();
-			for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+			for (uint32_t i = 0; i < cwm->target_image_count; i++) {
 				cwm->image_available[i] = dispatch_semaphore_create(1);
 			}
 			if (cwm->present_work_queue == NULL || cwm->present_work_group == NULL) {
 				COMP_ERROR(ct->c, "Failed to create asynchronous macOS presentation worker");
 				return false;
 			}
-			for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+			for (uint32_t i = 0; i < cwm->target_image_count; i++) {
 				if (cwm->image_available[i] == NULL) {
 					COMP_ERROR(ct->c, "Failed to create macOS compositor image semaphore");
 					return false;
@@ -490,7 +496,7 @@ comp_window_macos_free_images(struct comp_window_macos *cwm)
 {
 	struct comp_target *ct = &cwm->base.base;
 	struct vk_bundle *vk = get_vk(cwm);
-	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+	for (uint32_t i = 0; i < cwm->target_image_count; i++) {
 		[cwm->metal_images[i] release];
 		cwm->metal_images[i] = nil;
 		u_graphics_buffer_unref(&cwm->io_surfaces[i]);
@@ -586,25 +592,25 @@ comp_window_macos_create_images(struct comp_target *ct,
 	    .array_size = 1,
 	    .mip_count = 1,
 	};
-	VkResult ret = vk_ic_allocate(vk, &info, MACOS_TARGET_IMAGE_COUNT, &cwm->vkic);
+	VkResult ret = vk_ic_allocate(vk, &info, cwm->target_image_count, &cwm->vkic);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "Could not allocate macOS compositor images: %s", vk_result_string(ret));
 		return;
 	}
-	ret = vk_ic_get_handles(vk, &cwm->vkic, MACOS_TARGET_IMAGE_COUNT, cwm->io_surfaces);
+	ret = vk_ic_get_handles(vk, &cwm->vkic, cwm->target_image_count, cwm->io_surfaces);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "Could not export macOS compositor IOSurfaces: %s", vk_result_string(ret));
 		comp_window_macos_free_images(cwm);
 		return;
 	}
 
-	ct->images = U_TYPED_ARRAY_CALLOC(struct comp_target_image, MACOS_TARGET_IMAGE_COUNT);
+	ct->images = U_TYPED_ARRAY_CALLOC(struct comp_target_image, cwm->target_image_count);
 	if (ct->images == NULL) {
 		COMP_ERROR(ct->c, "Could not allocate macOS compositor image metadata");
 		comp_window_macos_free_images(cwm);
 		return;
 	}
-	ct->image_count = MACOS_TARGET_IMAGE_COUNT;
+	ct->image_count = cwm->target_image_count;
 	VkImageSubresourceRange range = {
 	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 	    .baseMipLevel = 0,
@@ -618,7 +624,7 @@ comp_window_macos_create_images(struct comp_target *ct,
 	                                                    height:cwm->pixel_height
 	                                                 mipmapped:NO];
 	[descriptor setUsage:MTLTextureUsageShaderRead];
-	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+	for (uint32_t i = 0; i < cwm->target_image_count; i++) {
 		ct->images[i].handle = cwm->vkic.images[i].handle;
 		ret = vk_create_view(vk, ct->images[i].handle, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_B8G8R8A8_UNORM, range,
 		                     &ct->images[i].view);
@@ -672,7 +678,28 @@ comp_window_macos_acquire(struct comp_target *ct, uint32_t *out_index)
 	}
 	uint32_t index = cwm->next_image;
 	if (debug_get_bool_option_async_present()) {
+		bool log_timing = debug_get_bool_option_present_timing();
+		uint64_t before_ns = log_timing ? os_monotonic_get_ns() : 0;
 		dispatch_semaphore_wait(cwm->image_available[index], DISPATCH_TIME_FOREVER);
+		if (log_timing) {
+			uint64_t wait_ns = os_monotonic_get_ns() - before_ns;
+			cwm->acquire_wait_total_ns += wait_ns;
+			if (wait_ns > cwm->acquire_wait_max_ns) {
+				cwm->acquire_wait_max_ns = wait_ns;
+			}
+			cwm->acquire_wait_over_1ms += wait_ns > U_TIME_1MS_IN_NS;
+			if (++cwm->acquire_samples == 240) {
+				COMP_INFO(ct->c,
+				          "macOS source image acquire: images %u wait avg %.3fms max %.3fms over_1ms %llu/240",
+				          cwm->target_image_count, (double)cwm->acquire_wait_total_ns / 240.0 / U_TIME_1MS_IN_NS,
+				          (double)cwm->acquire_wait_max_ns / U_TIME_1MS_IN_NS,
+				          (unsigned long long)cwm->acquire_wait_over_1ms);
+				cwm->acquire_samples = 0;
+				cwm->acquire_wait_total_ns = 0;
+				cwm->acquire_wait_max_ns = 0;
+				cwm->acquire_wait_over_1ms = 0;
+			}
+		}
 	}
 	*out_index = index;
 	cwm->next_image = (cwm->next_image + 1) % ct->image_count;
@@ -1374,7 +1401,7 @@ comp_window_macos_destroy(struct comp_target *ct)
 	if (cwm->present_work_queue != NULL) {
 		dispatch_release(cwm->present_work_queue);
 	}
-	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+	for (uint32_t i = 0; i < cwm->target_image_count; i++) {
 		if (cwm->image_available[i] != NULL) {
 			dispatch_release(cwm->image_available[i]);
 		}
@@ -1387,6 +1414,12 @@ struct comp_target *
 comp_window_macos_create(struct comp_compositor *c)
 {
 	struct comp_window_macos *cwm = U_TYPED_CALLOC(struct comp_window_macos);
+	int target_image_count = debug_get_num_option_target_image_count();
+	if (target_image_count != 3 && target_image_count != 4) {
+		COMP_WARN(c, "Ignoring XRT_MACOS_TARGET_IMAGE_COUNT=%d; valid values are 3 or 4 (using 3)", target_image_count);
+		target_image_count = 3;
+	}
+	cwm->target_image_count = (uint32_t)target_image_count;
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
 	if (debug_get_bool_option_present_phase_log()) {
 		cwm->original_calc_frame_pacing = cwm->base.base.calc_frame_pacing;
@@ -1396,7 +1429,7 @@ comp_window_macos_create(struct comp_compositor *c)
 		cwm->original_mark_timing_point = cwm->base.base.mark_timing_point;
 		cwm->base.base.mark_timing_point = comp_window_macos_phase_mark;
 	}
-	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+	for (uint32_t i = 0; i < cwm->target_image_count; i++) {
 		cwm->io_surfaces[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 	}
 	cwm->base.base.name = "macOS Metal";

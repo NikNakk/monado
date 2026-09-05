@@ -182,6 +182,32 @@ if pose logging is enabled, device `begin_ns` and `end_ns` and their orientation
 should match. Keep verbose pose/phase logging disabled for the subjective test.
 This is an experiment, not a change to the default timing model.
 
+### Source IOSurface pool A/B
+
+`XRT_MACOS_TARGET_IMAGE_COUNT=4` selects four compositor source IOSurfaces;
+the default remains three. Only `3` and `4` are accepted; other values warn and
+fall back to three. Restart the service between runs. This option controls
+Vulkan image allocation, Metal source textures, and their reuse semaphores.
+It does not set the CAMetalLayer drawable count: keep
+`XRT_MACOS_DRAWABLE_COUNT=2` in both runs. Image release still occurs in the
+Metal command-buffer completion handler.
+
+Use `XRT_MACOS_PRESENT_TIMING=1` to collect `macOS source image acquire:`
+summaries (240 acquisitions each): average/maximum semaphore wait and the
+number exceeding 1 ms. Enable `U_PACING_FAKE_PREDICTION_STATS=1` to compare
+prediction cadence and target advances alongside drawable presentation
+summaries. First capture count `3`, then count `4`, preserving all other
+settings, including worker gating, fullscreen, late latch, gyro integration,
+and scanout override. Those options can change where waiting or prediction
+occurs; varying them would confound this comparison.
+
+Reduced source waits together with improved prediction cadence would support
+the source-reuse hypothesis. Low source waits in both runs would weaken it.
+Check actual presentation latency as well: a larger pool can allow older frames
+to queue. Command-buffer duration alone does not prove a source-pool bottleneck.
+Recycling before GPU blit completion is unsafe, so this experiment does not
+alter source lifetime or synchronization.
+
 On Apple platforms the runtime does not currently advertise
 `XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
 swapchains do not support depth/stencil pixel formats. The Metal client also
