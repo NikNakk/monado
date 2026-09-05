@@ -234,6 +234,69 @@ find_psvr2_screen(struct comp_compositor *c)
 }
 
 static bool
+comp_window_macos_enter_native_fullscreen(struct comp_target *ct, NSWindow *window, NSScreen *target_screen)
+{
+	__block bool entered = false;
+	__block bool failed = false;
+	NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+	id entered_observer = [center addObserverForName:NSWindowDidEnterFullScreenNotification
+	                                       object:window
+	                                        queue:nil
+	                                   usingBlock:^(NSNotification *notification) {
+		(void)notification;
+		entered = true;
+	}];
+	id failed_observer = [center addObserverForName:NSWindowDidFailToEnterFullScreenNotification
+	                                      object:window
+	                                       queue:nil
+	                                  usingBlock:^(NSNotification *notification) {
+		(void)notification;
+		failed = true;
+	}];
+
+	[window makeKeyAndOrderFront:nil];
+	[NSApp activateIgnoringOtherApps:YES];
+	[window toggleFullScreen:nil];
+	COMP_INFO(ct->c, "Requested native AppKit fullscreen on PS VR2 display; waiting for transition");
+
+	NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:4.0];
+	while (!entered && !failed && [deadline timeIntervalSinceNow] > 0.0) {
+		NSDate *slice_deadline = [NSDate dateWithTimeIntervalSinceNow:0.01];
+		NSEvent *event = [NSApp nextEventMatchingMask:NSEventMaskAny
+		                               untilDate:slice_deadline
+		                                  inMode:NSDefaultRunLoopMode
+		                                 dequeue:YES];
+		if (event != nil) {
+			[NSApp sendEvent:event];
+		}
+		[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:slice_deadline];
+		[NSApp updateWindows];
+	}
+
+	[center removeObserver:entered_observer];
+	[center removeObserver:failed_observer];
+	bool style_fullscreen = ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
+	NSScreen *actual_screen = [window screen];
+	NSRect frame = [window frame];
+	NSRect content_frame = [[window contentView] frame];
+	const char *screen_name = actual_screen != nil ? [[actual_screen localizedName] UTF8String] : "<none>";
+	bool target_matches = actual_screen == target_screen;
+
+	if (entered && style_fullscreen && target_matches) {
+		COMP_INFO(ct->c,
+		          "macOS native fullscreen: entered successfully on '%s'; style_fullscreen=1 frame %.0fx%.0f content %.0fx%.0f",
+		          screen_name, frame.size.width, frame.size.height, content_frame.size.width, content_frame.size.height);
+		return true;
+	}
+
+	COMP_WARN(ct->c,
+	          "macOS native fullscreen: did not enter successfully; notification entered=%d failed=%d style_fullscreen=%d screen='%s' target_matches=%d frame %.0fx%.0f content %.0fx%.0f",
+	          entered, failed, style_fullscreen, screen_name, target_matches, frame.size.width, frame.size.height,
+	          content_frame.size.width, content_frame.size.height);
+	return false;
+}
+
+static bool
 comp_window_macos_init(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
@@ -260,8 +323,13 @@ comp_window_macos_init(struct comp_target *ct)
 			return false;
 		}
 
+		bool native_fullscreen = debug_get_bool_option_native_fullscreen();
+		NSWindowStyleMask style_mask = native_fullscreen
+		                                   ? (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+		                                      NSWindowStyleMaskResizable)
+		                                   : NSWindowStyleMaskBorderless;
 		NSWindow *window = [[NSWindow alloc] initWithContentRect:[screen frame]
-		                                                styleMask:NSWindowStyleMaskBorderless
+		                                                styleMask:style_mask
 		                                                  backing:NSBackingStoreBuffered
 		                                                    defer:NO
 		                                                   screen:screen];
@@ -311,7 +379,6 @@ comp_window_macos_init(struct comp_target *ct)
 			return false;
 		}
 
-		bool native_fullscreen = debug_get_bool_option_native_fullscreen();
 		[window setBackgroundColor:[NSColor blackColor]];
 		if (native_fullscreen) {
 			[window setCollectionBehavior:NSWindowCollectionBehaviorFullScreenPrimary |
@@ -327,10 +394,7 @@ comp_window_macos_init(struct comp_target *ct)
 		[window setLevel:native_fullscreen ? NSNormalWindowLevel : NSMainMenuWindowLevel + 1];
 		[window setFrame:[screen frame] display:YES];
 		if (native_fullscreen) {
-			[window makeKeyAndOrderFront:nil];
-			[NSApp activateIgnoringOtherApps:YES];
-			[window toggleFullScreen:nil];
-			COMP_INFO(ct->c, "Requested native AppKit fullscreen on PS VR2 display");
+			(void)comp_window_macos_enter_native_fullscreen(ct, window, screen);
 		} else {
 			[window orderFrontRegardless];
 			[NSApp activateIgnoringOtherApps:YES];
@@ -473,7 +537,7 @@ comp_window_macos_ensure_render_complete_semaphore(struct comp_window_macos *cwm
 	    .initialValue = 0,
 	};
 	VkSemaphoreCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
 	    .pNext = &type_info,
 	};
 
