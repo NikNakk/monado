@@ -5,8 +5,7 @@ on:
     branches:
       - macos-psvr2-timing-diagnostics
     paths:
-      - .github/macos-psvr2-timing-diagnostics.patch
-      - .github/macos-psvr2-timing-diagnostics-fixup.patch
+      - .github/scripts/apply_macos_psvr2_timing_diagnostics.py
       - .github/workflows/apply-macos-psvr2-timing-diagnostics.yml
 
 permissions:
@@ -22,10 +21,9 @@ jobs:
           ref: macos-psvr2-timing-diagnostics
           fetch-depth: 0
 
-      - name: Apply diagnostic patches
+      - name: Apply diagnostic source edits
         run: |
-          git apply .github/macos-psvr2-timing-diagnostics.patch
-          git apply .github/macos-psvr2-timing-diagnostics-fixup.patch
+          python3 .github/scripts/apply_macos_psvr2_timing_diagnostics.py
           git diff --check
 
       - name: Commit applied source changes
@@ -34,6 +32,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/macos-psvr2-timing-diagnostics.patch
           git rm .github/macos-psvr2-timing-diagnostics-fixup.patch
+          git rm .github/scripts/apply_macos_psvr2_timing_diagnostics.py
           git rm .github/workflows/apply-macos-psvr2-timing-diagnostics.yml
           git add src/xrt/drivers/psvr2/psvr2.c src/xrt/compositor/main/comp_window_macos.m
           git commit -m "diag: add macOS PSVR2 timing traces [timing-diag applied]"
