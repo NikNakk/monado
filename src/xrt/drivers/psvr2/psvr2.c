@@ -74,6 +74,8 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS"
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_filtered_linear_prediction, "PSVR2_FILTERED_LINEAR_PREDICTION", false)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_ALPHA", 0.25f)
 
 #ifdef XRT_OS_OSX
 struct psvr2_timing_trace_state
@@ -82,9 +84,11 @@ struct psvr2_timing_trace_state
 	FILE *imu;
 	FILE *slam;
 	FILE *pose;
+	FILE *prediction;
 	uint64_t imu_rows;
 	uint64_t slam_rows;
 	uint64_t pose_rows;
+	uint64_t prediction_rows;
 	atomic_uint_fast32_t last_dp_scanout;
 };
 
@@ -138,13 +142,19 @@ psvr2_timing_trace_open(void)
 	    "host_query_ns,requested_host_ns,requested_vts_ns,latest_slam_vts_ns,latest_imu_vts_ns,hw2mono_vts_ns,"
 	    "dp_frame_cnt,dp_line_cnt,pos_x,pos_y,pos_z,qw,qx,qy,qz,linvel_x,linvel_y,linvel_z,angvel_x,angvel_y,"
 	    "angvel_z,relation_flags");
+	g_psvr2_timing_trace.prediction = psvr2_timing_trace_open_file(
+	    "prediction",
+	    "slam_vts_ns,dt_ns,actual_x,actual_y,actual_z,predicted_x,predicted_y,predicted_z,error_x,error_y,error_z,"
+	    "error_mm,error_along_mm,prior_vel_x,prior_vel_y,prior_vel_z,estimated_vel_x,estimated_vel_y,estimated_vel_z,"
+	    "filtered_vel_x,filtered_vel_y,filtered_vel_z,filter_alpha,filter_enabled");
 }
 
 static void
 psvr2_timing_trace_close(void)
 {
-	FILE *files[] = {g_psvr2_timing_trace.imu, g_psvr2_timing_trace.slam, g_psvr2_timing_trace.pose};
-	for (size_t i = 0; i < 3; i++) {
+	FILE *files[] = {g_psvr2_timing_trace.imu, g_psvr2_timing_trace.slam, g_psvr2_timing_trace.pose,
+	                 g_psvr2_timing_trace.prediction};
+	for (size_t i = 0; i < 4; i++) {
 		if (files[i] != NULL) {
 			fflush(files[i]);
 			fclose(files[i]);
@@ -153,6 +163,7 @@ psvr2_timing_trace_close(void)
 	g_psvr2_timing_trace.imu = NULL;
 	g_psvr2_timing_trace.slam = NULL;
 	g_psvr2_timing_trace.pose = NULL;
+	g_psvr2_timing_trace.prediction = NULL;
 }
 
 static void
@@ -262,6 +273,43 @@ psvr2_timing_trace_pose(timepoint_ns host_query_ns,
 	g_psvr2_timing_trace.pose_rows++;
 	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.pose_rows, 256);
 }
+
+static void
+psvr2_timing_trace_prediction(struct psvr2_hmd *hmd,
+                               timepoint_ns slam_vts_ns,
+                               time_duration_ns dt_ns,
+                               const struct xrt_vec3 *actual,
+                               const struct xrt_vec3 *predicted,
+                               const struct xrt_vec3 *prior_velocity,
+                               const struct xrt_vec3 *estimated_velocity)
+{
+	FILE *file = g_psvr2_timing_trace.prediction;
+	if (file == NULL) {
+		return;
+	}
+	struct xrt_vec3 error = {actual->x - predicted->x, actual->y - predicted->y, actual->z - predicted->z};
+	float error_m = sqrtf(error.x * error.x + error.y * error.y + error.z * error.z);
+	float speed = sqrtf(prior_velocity->x * prior_velocity->x + prior_velocity->y * prior_velocity->y +
+	                    prior_velocity->z * prior_velocity->z);
+	float along_m = 0.0f;
+	if (speed > 0.001f) {
+		along_m = (error.x * prior_velocity->x + error.y * prior_velocity->y + error.z * prior_velocity->z) / speed;
+	}
+	float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
+	if (alpha < 0.0f) alpha = 0.0f;
+	if (alpha > 1.0f) alpha = 1.0f;
+	fprintf(file,
+	        "%" PRIi64 ",%" PRIi64 ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
+	        (int64_t)slam_vts_ns, (int64_t)dt_ns, actual->x, actual->y, actual->z, predicted->x, predicted->y,
+	        predicted->z, error.x, error.y, error.z, error_m * 1000.0f, along_m * 1000.0f, prior_velocity->x,
+	        prior_velocity->y, prior_velocity->z, estimated_velocity->x, estimated_velocity->y, estimated_velocity->z,
+	        hmd->filtered_linear_velocity.x, hmd->filtered_linear_velocity.y, hmd->filtered_linear_velocity.z, alpha,
+	        debug_get_bool_option_psvr2_filtered_linear_prediction() ? 1u : 0u);
+	g_psvr2_timing_trace.prediction_rows++;
+	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.prediction_rows, 256);
+}
+
 #endif
 
 #ifdef XRT_OS_OSX
@@ -379,6 +427,12 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, st
 				hmd->timing_prediction_after_imu_total_ns = 0;
 			}
 		}
+	}
+
+	if (debug_get_bool_option_psvr2_filtered_linear_prediction() && hmd->filtered_linear_velocity_initialized) {
+		latest_relation.linear_velocity = hmd->filtered_linear_velocity;
+		latest_relation.relation_flags = (enum xrt_space_relation_flags)(
+		    latest_relation.relation_flags | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
 	}
 
 	// Status and SLAM transfers are independent. A pose query can arrive after a
@@ -790,15 +844,45 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 	        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT),
 	};
 
+	struct xrt_space_relation prior_relation = XRT_SPACE_RELATION_ZERO;
+	timepoint_ns prior_relation_ts = 0;
+	bool have_prior_relation =
+	    m_relation_history_get_latest(hmd->slam_relation_history, &prior_relation_ts, &prior_relation);
+	struct xrt_vec3 predicted_position = relation.pose.position;
+	time_duration_ns prediction_dt_ns = 0;
+	if (have_prior_relation && pose_sample.timestamp_ns > prior_relation_ts) {
+		prediction_dt_ns = pose_sample.timestamp_ns - prior_relation_ts;
+		float dt_s = (float)((double)prediction_dt_ns / 1000000000.0);
+		predicted_position.x = prior_relation.pose.position.x + prior_relation.linear_velocity.x * dt_s;
+		predicted_position.y = prior_relation.pose.position.y + prior_relation.linear_velocity.y * dt_s;
+		predicted_position.z = prior_relation.pose.position.z + prior_relation.linear_velocity.z * dt_s;
+	}
+
 	m_relation_history_push_with_motion_estimation(hmd->slam_relation_history, &relation, pose_sample.timestamp_ns);
 
-#ifdef XRT_OS_OSX
-	struct xrt_space_relation traced_relation = relation;
-	timepoint_ns traced_relation_ts = 0;
-	if (!m_relation_history_get_latest(hmd->slam_relation_history, &traced_relation_ts, &traced_relation)) {
-		traced_relation = relation;
+	struct xrt_space_relation estimated_relation = relation;
+	timepoint_ns estimated_relation_ts = 0;
+	if (!m_relation_history_get_latest(hmd->slam_relation_history, &estimated_relation_ts, &estimated_relation)) {
+		estimated_relation = relation;
 	}
-	psvr2_timing_trace_slam(hmd, received_ns, vts_ns, &traced_relation);
+	float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
+	if (alpha < 0.0f) alpha = 0.0f;
+	if (alpha > 1.0f) alpha = 1.0f;
+	if (!hmd->filtered_linear_velocity_initialized) {
+		hmd->filtered_linear_velocity = estimated_relation.linear_velocity;
+		hmd->filtered_linear_velocity_initialized = true;
+	} else {
+		hmd->filtered_linear_velocity.x += alpha * (estimated_relation.linear_velocity.x - hmd->filtered_linear_velocity.x);
+		hmd->filtered_linear_velocity.y += alpha * (estimated_relation.linear_velocity.y - hmd->filtered_linear_velocity.y);
+		hmd->filtered_linear_velocity.z += alpha * (estimated_relation.linear_velocity.z - hmd->filtered_linear_velocity.z);
+	}
+
+#ifdef XRT_OS_OSX
+	psvr2_timing_trace_slam(hmd, received_ns, vts_ns, &estimated_relation);
+	if (have_prior_relation) {
+		psvr2_timing_trace_prediction(hmd, vts_ns, prediction_dt_ns, &relation.pose.position, &predicted_position,
+		                              &prior_relation.linear_velocity, &estimated_relation.linear_velocity);
+	}
 #endif
 
 	os_mutex_unlock(&hmd->data_lock);
