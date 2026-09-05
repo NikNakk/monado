@@ -264,6 +264,8 @@ struct psvr2_hmd
 	/* Tracking state */
 	struct m_relation_history *slam_relation_history;
 	struct m_ff_vec3_f32 *ff_gyro;
+	struct xrt_vec3 filtered_linear_velocity;
+	bool filtered_linear_velocity_initialized;
 	uint64_t timing_query_count;
 	time_duration_ns timing_prediction_total_ns;
 	time_duration_ns timing_imu_after_slam_total_ns;
