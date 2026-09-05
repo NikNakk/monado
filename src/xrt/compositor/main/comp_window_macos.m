@@ -20,7 +20,9 @@
 #include "util/u_pacing.h"
 #include "vk/vk_image_allocator.h"
 
+#include <dispatch/dispatch.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -31,6 +33,7 @@
 
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_PACING", true)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -48,9 +51,12 @@ struct comp_window_macos
 	CVDisplayLinkRef display_link;
 	mach_timebase_info_data_t mach_timebase;
 	atomic_uint_fast64_t latest_vblank_ns;
+	atomic_uint_fast64_t latest_displaylink_now_host_ns;
+	atomic_uint_fast64_t latest_displaylink_output_host_ns;
 	atomic_uint_fast64_t latest_displaylink_now_ns;
 	atomic_uint_fast64_t latest_displaylink_output_ns;
 	atomic_uint_fast64_t latest_displaylink_callback_ns;
+	atomic_int_fast64_t host_to_monotonic_offset_ns;
 	uint64_t last_vblank_ns;
 	uint64_t trace_frame_id;
 	uint64_t cadence_sample_count;
@@ -72,7 +78,9 @@ struct comp_window_macos
 	uint32_t next_image;
 	bool logged_layer_state;
 	FILE *trace_present;
+	FILE *trace_presented;
 	FILE *trace_vblank;
+	dispatch_group_t trace_present_group;
 	uint64_t trace_present_rows;
 	uint64_t trace_vblank_rows;
 };
@@ -107,22 +115,45 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	}
 	cwm->trace_present = macos_timing_trace_open_file(
 	    "present",
-	    "frame_id,host_call_ns,desired_present_ns,present_slop_ns,image_index,timeline_value,after_vk_wait_ns,"
-	    "after_drawable_ns,before_present_call_ns,after_present_call_ns,after_commit_ns,after_metal_wait_ns,"
-	    "latest_displaylink_output_ns,drawable_presented_time_s,gpu_start_time_s,gpu_end_time_s");
+	    "frame_id,host_call_ns,desired_present_ns,desired_minus_call_ns,scheduled_present_host_s,present_slop_ns,"
+	    "image_index,timeline_value,after_vk_wait_ns,after_drawable_ns,before_present_call_ns,after_present_call_ns,"
+	    "after_commit_ns,after_metal_wait_ns,latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");
+	cwm->trace_presented = macos_timing_trace_open_file(
+	    "presented",
+	    "frame_id,presented_handler_ns,desired_present_ns,presented_time_host_s,presented_monotonic_ns,"
+	    "presented_minus_desired_ns");
 	cwm->trace_vblank = macos_timing_trace_open_file(
 	    "vblank",
-	    "host_consumed_ns,displaylink_callback_ns,displaylink_now_ns,displaylink_output_ns,output_minus_now_ns,"
-	    "callback_minus_output_ns,interval_from_previous_output_ns,display_period_ns");
+	    "host_consumed_ns,displaylink_callback_ns,displaylink_now_host_ns,displaylink_output_host_ns,"
+	    "host_to_monotonic_offset_ns,displaylink_now_ns,displaylink_output_ns,derived_last_vblank_ns,"
+	    "output_minus_now_ns,callback_minus_output_ns,callback_minus_vblank_ns,interval_from_previous_vblank_ns,"
+	    "display_period_ns");
+	cwm->trace_present_group = dispatch_group_create();
 }
 
 static void
 macos_timing_trace_close(struct comp_window_macos *cwm)
 {
+	if (cwm->trace_present_group != NULL) {
+		long wait_result =
+		    dispatch_group_wait(cwm->trace_present_group, dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC));
+		if (wait_result != 0 && cwm->trace_presented != NULL) {
+			COMP_WARN(cwm->base.base.c,
+			          "Timed out waiting for Metal presented handlers; leaving presented trace open until process exit");
+			fflush(cwm->trace_presented);
+			cwm->trace_presented = NULL;
+		}
+		cwm->trace_present_group = NULL;
+	}
 	if (cwm->trace_present != NULL) {
 		fflush(cwm->trace_present);
 		fclose(cwm->trace_present);
 		cwm->trace_present = NULL;
+	}
+	if (cwm->trace_presented != NULL) {
+		fflush(cwm->trace_presented);
+		fclose(cwm->trace_presented);
+		cwm->trace_presented = NULL;
 	}
 	if (cwm->trace_vblank != NULL) {
 		fflush(cwm->trace_vblank);
@@ -137,28 +168,88 @@ host_time_to_ns(struct comp_window_macos *cwm, uint64_t host_time)
 	return (uint64_t)(((__uint128_t)host_time * cwm->mach_timebase.numer) / cwm->mach_timebase.denom);
 }
 
+static int64_t
+refresh_host_to_monotonic_offset_ns(struct comp_window_macos *cwm)
+{
+	uint64_t host_ns = host_time_to_ns(cwm, CVGetCurrentHostTime());
+	int64_t monotonic_ns = os_monotonic_get_ns();
+	int64_t offset_ns = monotonic_ns - (int64_t)host_ns;
+	atomic_store_explicit(&cwm->host_to_monotonic_offset_ns, offset_ns, memory_order_release);
+	return offset_ns;
+}
+
+static uint64_t
+host_ns_to_monotonic_ns(uint64_t host_ns, int64_t offset_ns)
+{
+	int64_t monotonic_ns = (int64_t)host_ns + offset_ns;
+	return monotonic_ns > 0 ? (uint64_t)monotonic_ns : 0;
+}
+
+static double
+monotonic_ns_to_host_seconds(struct comp_window_macos *cwm, int64_t monotonic_ns)
+{
+	int64_t offset_ns = atomic_load_explicit(&cwm->host_to_monotonic_offset_ns, memory_order_acquire);
+	int64_t host_ns = monotonic_ns - offset_ns;
+	return host_ns > 0 ? (double)host_ns / (double)U_TIME_1S_IN_NS : 0.0;
+}
+
+static uint64_t
+derive_last_vblank_ns(struct comp_window_macos *cwm, uint64_t output_ns, uint64_t now_ns)
+{
+	if (output_ns == 0 || now_ns == 0 || cwm->display_period_ns <= 0) {
+		return now_ns;
+	}
+
+	uint64_t period_ns = (uint64_t)cwm->display_period_ns;
+	if (output_ns > now_ns) {
+		uint64_t delta_ns = output_ns - now_ns;
+		uint64_t periods = (delta_ns + period_ns - 1) / period_ns;
+		uint64_t adjustment = periods * period_ns;
+		return output_ns > adjustment ? output_ns - adjustment : 0;
+	}
+
+	uint64_t periods = (now_ns - output_ns) / period_ns;
+	return output_ns + periods * period_ns;
+}
+
 static CVReturn
 display_link_callback(CVDisplayLinkRef display_link,
-	                  const CVTimeStamp *in_now,
-	                  const CVTimeStamp *in_output_time,
-	                  CVOptionFlags flags_in,
-	                  CVOptionFlags *flags_out,
-	                  void *context)
+                      const CVTimeStamp *in_now,
+                      const CVTimeStamp *in_output_time,
+                      CVOptionFlags flags_in,
+                      CVOptionFlags *flags_out,
+                      void *context)
 {
 	(void)display_link;
 	(void)flags_in;
 	(void)flags_out;
 	struct comp_window_macos *cwm = context;
-	if ((in_output_time->flags & kCVTimeStampHostTimeValid) != 0) {
-		uint64_t output_ns = host_time_to_ns(cwm, in_output_time->hostTime);
-		atomic_store_explicit(&cwm->latest_vblank_ns, output_ns, memory_order_release);
-		atomic_store_explicit(&cwm->latest_displaylink_output_ns, output_ns, memory_order_release);
-	}
+
+	int64_t offset_ns = refresh_host_to_monotonic_offset_ns(cwm);
+	uint64_t callback_ns = (uint64_t)os_monotonic_get_ns();
+	uint64_t now_host_ns = 0;
+	uint64_t output_host_ns = 0;
+	uint64_t now_ns = callback_ns;
+	uint64_t output_ns = 0;
+
 	if ((in_now->flags & kCVTimeStampHostTimeValid) != 0) {
-		uint64_t now_ns = host_time_to_ns(cwm, in_now->hostTime);
+		now_host_ns = host_time_to_ns(cwm, in_now->hostTime);
+		now_ns = host_ns_to_monotonic_ns(now_host_ns, offset_ns);
+		atomic_store_explicit(&cwm->latest_displaylink_now_host_ns, now_host_ns, memory_order_release);
 		atomic_store_explicit(&cwm->latest_displaylink_now_ns, now_ns, memory_order_release);
 	}
-	atomic_store_explicit(&cwm->latest_displaylink_callback_ns, os_monotonic_get_ns(), memory_order_release);
+	if ((in_output_time->flags & kCVTimeStampHostTimeValid) != 0) {
+		output_host_ns = host_time_to_ns(cwm, in_output_time->hostTime);
+		output_ns = host_ns_to_monotonic_ns(output_host_ns, offset_ns);
+		atomic_store_explicit(&cwm->latest_displaylink_output_host_ns, output_host_ns, memory_order_release);
+		atomic_store_explicit(&cwm->latest_displaylink_output_ns, output_ns, memory_order_release);
+	}
+
+	if (output_ns != 0) {
+		uint64_t last_vblank_ns = derive_last_vblank_ns(cwm, output_ns, now_ns);
+		atomic_store_explicit(&cwm->latest_vblank_ns, last_vblank_ns, memory_order_release);
+	}
+	atomic_store_explicit(&cwm->latest_displaylink_callback_ns, callback_ns, memory_order_release);
 	return kCVReturnSuccess;
 }
 
@@ -288,6 +379,7 @@ comp_window_macos_init(struct comp_target *ct)
 		cwm->pixel_height = (uint32_t)pixel_height;
 
 		mach_timebase_info(&cwm->mach_timebase);
+		refresh_host_to_monotonic_offset_ns(cwm);
 		CVReturn cvret = CVDisplayLinkCreateWithCGDisplay(display_id, &cwm->display_link);
 		if (cvret == kCVReturnSuccess) {
 			cvret = CVDisplayLinkSetOutputCallback(cwm->display_link, display_link_callback, cwm);
@@ -506,7 +598,7 @@ comp_window_macos_present(struct comp_target *ct,
 	uint64_t after_present_call_ns = 0;
 	uint64_t after_commit_ns = 0;
 	uint64_t after_metal_wait_ns = 0;
-	double drawable_presented_time_s = 0.0;
+	double scheduled_present_host_s = 0.0;
 	double gpu_start_time_s = 0.0;
 	double gpu_end_time_s = 0.0;
 	assert(present_queue != NULL);
@@ -544,14 +636,49 @@ comp_window_macos_present(struct comp_target *ct,
 		        destinationLevel:0
 		       destinationOrigin:MTLOriginMake(0, 0, 0)];
 		[blit endEncoding];
+
+		if (cwm->trace_presented != NULL && cwm->trace_present_group != NULL) {
+			FILE *trace_file = cwm->trace_presented;
+			dispatch_group_t trace_group = cwm->trace_present_group;
+			uint64_t traced_frame_id = frame_id;
+			int64_t traced_desired_present_ns = desired_present_time_ns;
+			dispatch_group_enter(trace_group);
+			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
+				double presented_time_s = [presented_drawable presentedTime];
+				int64_t handler_ns = os_monotonic_get_ns();
+				double host_frequency = CVGetHostClockFrequency();
+				uint64_t current_host_ticks = CVGetCurrentHostTime();
+				int64_t current_host_ns =
+				    host_frequency > 0.0 ? (int64_t)llround((double)current_host_ticks * 1e9 / host_frequency) : 0;
+				int64_t handler_offset_ns = handler_ns - current_host_ns;
+				int64_t presented_host_ns =
+				    presented_time_s > 0.0 ? (int64_t)llround(presented_time_s * (double)U_TIME_1S_IN_NS) : 0;
+				int64_t presented_monotonic_ns =
+				    presented_host_ns != 0 ? presented_host_ns + handler_offset_ns : 0;
+				int64_t presented_minus_desired_ns =
+				    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
+				flockfile(trace_file);
+				fprintf(trace_file, "%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%" PRIi64 "\n",
+				        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns, presented_time_s,
+				        presented_monotonic_ns, presented_minus_desired_ns);
+				fflush(trace_file);
+				funlockfile(trace_file);
+				dispatch_group_leave(trace_group);
+			}];
+		}
+
 		before_present_call_ns = os_monotonic_get_ns();
-		[command_buffer presentDrawable:drawable];
+		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, desired_present_time_ns);
+		if (scheduled_present_host_s > 0.0) {
+			[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
+		} else {
+			[command_buffer presentDrawable:drawable];
+		}
 		after_present_call_ns = os_monotonic_get_ns();
 		[command_buffer commit];
 		after_commit_ns = os_monotonic_get_ns();
 		[command_buffer waitUntilCompleted];
 		after_metal_wait_ns = os_monotonic_get_ns();
-		drawable_presented_time_s = [drawable presentedTime];
 		gpu_start_time_s = [command_buffer GPUStartTime];
 		gpu_end_time_s = [command_buffer GPUEndTime];
 		if ([command_buffer status] == MTLCommandBufferStatusError) {
@@ -567,13 +694,13 @@ comp_window_macos_present(struct comp_target *ct,
 	if (cwm->trace_present != NULL) {
 		uint64_t latest_output_ns = atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
 		fprintf(cwm->trace_present,
-		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g,%.17g\n",
+		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\n",
 		        (unsigned long long)frame_id, (unsigned long long)before_vk_wait_ns, desired_present_time_ns,
-		        present_slop_ns, index, (unsigned long long)timeline_semaphore_value, (unsigned long long)after_vk_wait_ns,
+		        desired_present_time_ns - (int64_t)before_vk_wait_ns, scheduled_present_host_s, present_slop_ns, index,
+		        (unsigned long long)timeline_semaphore_value, (unsigned long long)after_vk_wait_ns,
 		        (unsigned long long)after_drawable_ns, (unsigned long long)before_present_call_ns,
 		        (unsigned long long)after_present_call_ns, (unsigned long long)after_commit_ns,
-		        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns,
-		        drawable_presented_time_s, gpu_start_time_s, gpu_end_time_s);
+		        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s);
 		cwm->trace_present_rows++;
 		if (cwm->trace_present_rows % 256 == 0) {
 			fflush(cwm->trace_present);
@@ -632,9 +759,15 @@ comp_window_macos_update_timings(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
+	uint64_t displaylink_now_host_ns =
+	    atomic_load_explicit(&cwm->latest_displaylink_now_host_ns, memory_order_acquire);
+	uint64_t displaylink_output_host_ns =
+	    atomic_load_explicit(&cwm->latest_displaylink_output_host_ns, memory_order_acquire);
 	uint64_t displaylink_now_ns = atomic_load_explicit(&cwm->latest_displaylink_now_ns, memory_order_acquire);
 	uint64_t displaylink_output_ns = atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
 	uint64_t displaylink_callback_ns = atomic_load_explicit(&cwm->latest_displaylink_callback_ns, memory_order_acquire);
+	int64_t host_to_monotonic_offset_ns =
+	    atomic_load_explicit(&cwm->host_to_monotonic_offset_ns, memory_order_acquire);
 	if (vblank_ns == 0 || vblank_ns == cwm->last_vblank_ns || cwm->base.upc == NULL) {
 		return VK_SUCCESS;
 	}
@@ -642,11 +775,15 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	uint64_t consumed_ns = os_monotonic_get_ns();
 	uint64_t previous_vblank_ns = cwm->last_vblank_ns;
 	if (cwm->trace_vblank != NULL) {
-		fprintf(cwm->trace_vblank, "%llu,%llu,%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 "\n",
+		fprintf(cwm->trace_vblank,
+		        "%llu,%llu,%llu,%llu,%" PRIi64 ",%llu,%llu,%llu,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 "\n",
 		        (unsigned long long)consumed_ns, (unsigned long long)displaylink_callback_ns,
-		        (unsigned long long)displaylink_now_ns, (unsigned long long)displaylink_output_ns,
+		        (unsigned long long)displaylink_now_host_ns, (unsigned long long)displaylink_output_host_ns,
+		        host_to_monotonic_offset_ns, (unsigned long long)displaylink_now_ns,
+		        (unsigned long long)displaylink_output_ns, (unsigned long long)vblank_ns,
 		        (int64_t)displaylink_output_ns - (int64_t)displaylink_now_ns,
 		        (int64_t)displaylink_callback_ns - (int64_t)displaylink_output_ns,
+		        (int64_t)displaylink_callback_ns - (int64_t)vblank_ns,
 		        previous_vblank_ns != 0 && vblank_ns > previous_vblank_ns
 		            ? (unsigned long long)(vblank_ns - previous_vblank_ns)
 		            : 0ULL,
@@ -657,7 +794,9 @@ comp_window_macos_update_timings(struct comp_target *ct)
 		}
 	}
 
-	u_pc_update_vblank_from_display_control(cwm->base.upc, (int64_t)vblank_ns);
+	if (debug_get_bool_option_macos_cvdisplaylink_pacing()) {
+		u_pc_update_vblank_from_display_control(cwm->base.upc, (int64_t)vblank_ns);
+	}
 	if (cwm->last_vblank_ns != 0 && vblank_ns > cwm->last_vblank_ns) {
 		uint64_t interval_ns = vblank_ns - cwm->last_vblank_ns;
 		if (cwm->display_period_ns > 0 && interval_ns > (uint64_t)cwm->display_period_ns * 4) {
