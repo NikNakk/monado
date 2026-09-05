@@ -1,0 +1,74 @@
+name: macOS PSVR2 timing diagnostics
+
+on:
+  push:
+    branches:
+      - macos-psvr2-timing-diagnostics
+    paths:
+      - .github/workflows/macos-psvr2-timing-diagnostics.yml
+      - CMakeLists.txt
+      - src/xrt/drivers/**
+      - src/xrt/compositor/**
+      - src/xrt/auxiliary/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-driver:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install cmake eigen glslang libusb ninja
+      - name: Configure driver-only build
+        run: >-
+          cmake -S . -B build-driver -G Ninja
+          -DBUILD_TESTING=OFF
+          -DXRT_FEATURE_OPENXR=OFF
+          -DXRT_FEATURE_SERVICE=OFF
+          -DXRT_MODULE_COMPOSITOR=OFF
+          -DXRT_MODULE_COMPOSITOR_CLIENT=OFF
+          -DXRT_MODULE_COMPOSITOR_MAIN=OFF
+          -DXRT_MODULE_COMPOSITOR_MULTI=OFF
+          -DXRT_MODULE_COMPOSITOR_NULL=OFF
+          -DXRT_MODULE_COMPOSITOR_RENDER=OFF
+          -DXRT_MODULE_COMPOSITOR_SHADERS=OFF
+          -DXRT_MODULE_COMPOSITOR_UTIL=OFF
+          -DXRT_MODULE_COMPOSITOR_MOCK=OFF
+          -DXRT_MODULE_OPENXR_STATE_TRACKER=OFF
+          -DXRT_MODULE_IPC=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_MODULE_MONADO_CLI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_BUILD_DRIVER_PSSENSE=OFF
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_SIMULATED=OFF
+      - name: Build PSVR2 driver
+        run: cmake --build build-driver --target drv_psvr2 --parallel
+
+  build-compositor:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers
+      - name: Configure compositor build
+        run: >-
+          cmake -S . -B build-compositor -G Ninja
+          -DBUILD_TESTING=OFF
+          -DXRT_HAVE_OPENGLES=OFF
+          -DXRT_HAVE_SDL2=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_BUILD_DRIVER_PSSENSE=OFF
+      - name: Build macOS compositor target
+        run: cmake --build build-compositor --target comp_main --parallel
