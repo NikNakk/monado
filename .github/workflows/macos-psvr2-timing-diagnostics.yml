@@ -15,7 +15,7 @@ on:
 permissions:
   contents: read
 
-# This workflow compile-checks the CoreVideo/Metal timing bridge, timeline synchronization, and tunable pre-latch presentation path used by the diagnostic branch.
+# This workflow compile-checks the CoreVideo/Metal timing bridge, timeline synchronization, tunable pre-latch presentation, and actual-presentation pacing feedback used by the diagnostic branch.
 jobs:
   build-driver:
     runs-on: macos-15
