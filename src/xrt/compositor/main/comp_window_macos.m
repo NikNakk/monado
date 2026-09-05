@@ -36,6 +36,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false
 DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_PACING", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
+DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -359,6 +360,14 @@ comp_window_macos_init(struct comp_target *ct)
 		[metal_layer setDrawableSize:CGSizeMake(pixel_width, pixel_height)];
 		[metal_layer setOpaque:YES];
 		[metal_layer setDisplaySyncEnabled:YES];
+		int max_drawables = debug_get_num_option_macos_max_drawables();
+		if (max_drawables != 2 && max_drawables != 3) {
+			COMP_WARN(ct->c, "XRT_MACOS_MAX_DRAWABLES must be 2 or 3; using default 3 instead of %d", max_drawables);
+			max_drawables = 3;
+		}
+		[metal_layer setMaximumDrawableCount:(NSUInteger)max_drawables];
+		COMP_INFO(ct->c, "macOS CAMetalLayer maximumDrawableCount=%lu",
+		          (unsigned long)[metal_layer maximumDrawableCount]);
 		id<MTLCommandQueue> present_queue = [[metal_layer device] newCommandQueue];
 		[metal_view release];
 		if (present_queue == nil) {
