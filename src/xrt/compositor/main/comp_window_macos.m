@@ -35,6 +35,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(present_worker_gate, "XRT_MACOS_PRESENT_WORKER_GATE",
 DEBUG_GET_ONCE_BOOL_OPTION(present_feedback, "XRT_MACOS_PRESENT_FEEDBACK", false)
 DEBUG_GET_ONCE_NUM_OPTION(present_advance_periods, "XRT_MACOS_PRESENT_ADVANCE_PERIODS", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(metal_hud, "XRT_MACOS_METAL_HUD", false)
+DEBUG_GET_ONCE_BOOL_OPTION(native_fullscreen, "XRT_MACOS_NATIVE_FULLSCREEN", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -310,17 +311,30 @@ comp_window_macos_init(struct comp_target *ct)
 			return false;
 		}
 
+		bool native_fullscreen = debug_get_bool_option_native_fullscreen();
 		[window setBackgroundColor:[NSColor blackColor]];
-		[window setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
-		                              NSWindowCollectionBehaviorFullScreenAuxiliary |
-		                              NSWindowCollectionBehaviorStationary];
+		if (native_fullscreen) {
+			[window setCollectionBehavior:NSWindowCollectionBehaviorFullScreenPrimary |
+			                              NSWindowCollectionBehaviorFullScreenDisallowsTiling];
+		} else {
+			[window setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
+			                              NSWindowCollectionBehaviorFullScreenAuxiliary |
+			                              NSWindowCollectionBehaviorStationary];
+		}
 		[window setHasShadow:NO];
 		[window setHidesOnDeactivate:NO];
 		[window setIgnoresMouseEvents:YES];
-		[window setLevel:NSMainMenuWindowLevel + 1];
+		[window setLevel:native_fullscreen ? NSNormalWindowLevel : NSMainMenuWindowLevel + 1];
 		[window setFrame:[screen frame] display:YES];
-		[window orderFrontRegardless];
-		[NSApp activateIgnoringOtherApps:YES];
+		if (native_fullscreen) {
+			[window makeKeyAndOrderFront:nil];
+			[NSApp activateIgnoringOtherApps:YES];
+			[window toggleFullScreen:nil];
+			COMP_INFO(ct->c, "Requested native AppKit fullscreen on PS VR2 display");
+		} else {
+			[window orderFrontRegardless];
+			[NSApp activateIgnoringOtherApps:YES];
+		}
 		[CATransaction flush];
 
 		cwm->screen = [screen retain];
@@ -459,7 +473,7 @@ comp_window_macos_ensure_render_complete_semaphore(struct comp_window_macos *cwm
 	    .initialValue = 0,
 	};
 	VkSemaphoreCreateInfo info = {
-	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
 	    .pNext = &type_info,
 	};
 
@@ -1187,8 +1201,8 @@ comp_window_macos_update_timings(struct comp_target *ct)
 			u_pc_update_present_offset(cwm->base.upc, 0, cwm->filtered_present_offset_ns);
 			atomic_store_explicit(&cwm->applied_present_offset_ns, cwm->filtered_present_offset_ns,
 			                      memory_order_release);
-			}
 		}
+	}
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
 	if (vblank_ns == 0 || vblank_ns == cwm->last_vblank_ns || cwm->base.upc == NULL) {
 		return VK_SUCCESS;
