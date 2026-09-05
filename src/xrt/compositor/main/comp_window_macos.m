@@ -59,6 +59,11 @@ struct comp_window_macos
 	atomic_uint_fast64_t latest_displaylink_output_ns;
 	atomic_uint_fast64_t latest_displaylink_callback_ns;
 	atomic_int_fast64_t host_to_monotonic_offset_ns;
+	atomic_int_fast64_t latest_observed_present_offset_ns;
+	atomic_uint_fast64_t present_offset_sample_serial;
+	uint64_t consumed_present_offset_sample_serial;
+	int64_t calibrated_present_offset_ns;
+	uint32_t present_offset_sample_count;
 	uint64_t last_vblank_ns;
 	uint64_t trace_frame_id;
 	uint64_t cadence_sample_count;
@@ -126,7 +131,7 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	cwm->trace_presented = macos_timing_trace_open_file(
 	    "presented",
 	    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"
-	    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns");
+	    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns");
 	cwm->trace_vblank = macos_timing_trace_open_file(
 	    "vblank",
 	    "host_consumed_ns,displaylink_callback_ns,displaylink_now_host_ns,displaylink_output_host_ns,"
@@ -728,12 +733,19 @@ comp_window_macos_present(struct comp_target *ct,
 				    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
 				int64_t presented_minus_target_ns =
 				    presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns : 0;
+				int64_t observed_present_offset_ns =
+				    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
+				if (observed_present_offset_ns > 0) {
+					atomic_store_explicit(&cwm->latest_observed_present_offset_ns, observed_present_offset_ns,
+					                      memory_order_release);
+					atomic_fetch_add_explicit(&cwm->present_offset_sample_serial, 1, memory_order_release);
+				}
 				flockfile(trace_file);
 				fprintf(trace_file,
-				        "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n",
+				        "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n",
 				        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,
 				        (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,
-				        presented_minus_desired_ns, presented_minus_target_ns);
+				        presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns);
 				fflush(trace_file);
 				funlockfile(trace_file);
 				dispatch_group_leave(trace_group);
@@ -849,6 +861,30 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	uint64_t displaylink_callback_ns = atomic_load_explicit(&cwm->latest_displaylink_callback_ns, memory_order_acquire);
 	int64_t host_to_monotonic_offset_ns =
 	    atomic_load_explicit(&cwm->host_to_monotonic_offset_ns, memory_order_acquire);
+
+	uint64_t present_offset_serial =
+	    atomic_load_explicit(&cwm->present_offset_sample_serial, memory_order_acquire);
+	if (present_offset_serial != cwm->consumed_present_offset_sample_serial && cwm->display_period_ns > 0) {
+		int64_t sample_ns =
+		    atomic_load_explicit(&cwm->latest_observed_present_offset_ns, memory_order_acquire);
+		cwm->consumed_present_offset_sample_serial = present_offset_serial;
+		int64_t max_reasonable_ns = cwm->display_period_ns * 4;
+		if (sample_ns > 0 && sample_ns <= max_reasonable_ns) {
+			if (cwm->present_offset_sample_count == 0) {
+				cwm->calibrated_present_offset_ns = sample_ns;
+			} else {
+				// 1/8 EMA: stable enough to reject callback/clock-conversion noise while adapting quickly.
+				cwm->calibrated_present_offset_ns =
+				    (cwm->calibrated_present_offset_ns * 7 + sample_ns) / 8;
+			}
+			if (cwm->present_offset_sample_count < UINT32_MAX) {
+				cwm->present_offset_sample_count++;
+			}
+			if (cwm->present_offset_sample_count >= 8 && cwm->base.upc != NULL) {
+				u_pc_update_present_offset(cwm->base.upc, 0, cwm->calibrated_present_offset_ns);
+			}
+		}
+	}
 	if (vblank_ns == 0 || vblank_ns == cwm->last_vblank_ns || cwm->base.upc == NULL) {
 		return VK_SUCCESS;
 	}
