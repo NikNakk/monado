@@ -1,0 +1,48 @@
+name: Apply macOS drawable-count debug option
+on:
+  push:
+    branches: [macos-psvr2-timing-diagnostics]
+    paths: ['.github/workflows/apply-macos-max-drawables.yml']
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: macos-psvr2-timing-diagnostics
+          fetch-depth: 0
+      - name: Apply source edits
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/xrt/compositor/main/comp_window_macos.m')
+          s = p.read_text()
+          old = 'DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)\n'
+          new = old + 'DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)\n'
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''\t\t[metal_layer setOpaque:YES];\n\t\t[metal_layer setDisplaySyncEnabled:YES];\n'''
+          new = '''\t\t[metal_layer setOpaque:YES];\n\t\t[metal_layer setDisplaySyncEnabled:YES];\n\t\tint max_drawables = debug_get_num_option_macos_max_drawables();\n\t\tif (max_drawables != 2 && max_drawables != 3) {\n\t\t\tCOMP_WARN(ct->c, "XRT_MACOS_MAX_DRAWABLES must be 2 or 3; using default 3 instead of %d", max_drawables);\n\t\t\tmax_drawables = 3;\n\t\t}\n\t\t[metal_layer setMaximumDrawableCount:(NSUInteger)max_drawables];\n\t\tCOMP_INFO(ct->c, "macOS CAMetalLayer maximumDrawableCount=%lu",\n\t\t          (unsigned long)[metal_layer maximumDrawableCount]);\n'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          d = Path('doc/macos-psvr2-timing-diagnostics.md')
+          if d.exists():
+              text = d.read_text()
+              note = '''\n### CAMetalLayer drawable count\n\n`XRT_MACOS_MAX_DRAWABLES` selects the CAMetalLayer drawable-pool depth. Valid values are `2` and `3`; the default is `3`. The effective value is logged at startup. This is intended to test whether drawable buffering contributes to the observed one-refresh presentation latency.\n'''
+              if '### CAMetalLayer drawable count' not in text:
+                  d.write_text(text.rstrip() + '\n' + note)
+          PY
+      - name: Commit changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/xrt/compositor/main/comp_window_macos.m doc/macos-psvr2-timing-diagnostics.md
+          git commit -m 'feat: make macOS drawable count tunable [max-drawables applied]'
+          git rm .github/workflows/apply-macos-max-drawables.yml
+          git commit --amend --no-edit
+          git push origin HEAD:macos-psvr2-timing-diagnostics
