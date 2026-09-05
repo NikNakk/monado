@@ -36,6 +36,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(present_feedback, "XRT_MACOS_PRESENT_FEEDBACK", false
 DEBUG_GET_ONCE_NUM_OPTION(present_advance_periods, "XRT_MACOS_PRESENT_ADVANCE_PERIODS", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(metal_hud, "XRT_MACOS_METAL_HUD", false)
 DEBUG_GET_ONCE_BOOL_OPTION(native_fullscreen, "XRT_MACOS_NATIVE_FULLSCREEN", false)
+DEBUG_GET_ONCE_NUM_OPTION(drawable_count, "XRT_MACOS_DRAWABLE_COUNT", 0)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -353,6 +354,13 @@ comp_window_macos_init(struct comp_target *ct)
 		[metal_layer setDrawableSize:CGSizeMake(pixel_width, pixel_height)];
 		[metal_layer setOpaque:YES];
 		[metal_layer setDisplaySyncEnabled:YES];
+		int drawable_count = debug_get_num_option_drawable_count();
+		if (drawable_count == 2 || drawable_count == 3) {
+			[metal_layer setMaximumDrawableCount:(NSUInteger)drawable_count];
+			COMP_INFO(ct->c, "Set CAMetalLayer maximum drawable count to %d", drawable_count);
+		} else if (drawable_count != 0) {
+			COMP_WARN(ct->c, "Ignoring XRT_MACOS_DRAWABLE_COUNT=%d; valid values are 2 or 3", drawable_count);
+		}
 		if (debug_get_bool_option_metal_hud()) {
 			if ([metal_layer respondsToSelector:@selector(setDeveloperHUDProperties:)]) {
 				[metal_layer setDeveloperHUDProperties:@{@"mode" : @"default", @"logging" : @"default"}];
