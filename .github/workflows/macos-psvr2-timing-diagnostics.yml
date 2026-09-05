@@ -15,6 +15,7 @@ on:
 permissions:
   contents: read
 
+# This workflow also compile-checks the CoreVideo/Metal timing bridge used by the diagnostic branch.
 jobs:
   build-driver:
     runs-on: macos-15
