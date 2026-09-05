@@ -237,7 +237,6 @@ static bool
 comp_window_macos_enter_native_fullscreen(struct comp_target *ct, NSWindow *window, NSScreen *target_screen)
 {
 	__block bool entered = false;
-	__block bool failed = false;
 	NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
 	id entered_observer = [center addObserverForName:NSWindowDidEnterFullScreenNotification
 	                                       object:window
@@ -246,13 +245,6 @@ comp_window_macos_enter_native_fullscreen(struct comp_target *ct, NSWindow *wind
 		(void)notification;
 		entered = true;
 	}];
-	id failed_observer = [center addObserverForName:NSWindowDidFailToEnterFullScreenNotification
-	                                      object:window
-	                                       queue:nil
-	                                  usingBlock:^(NSNotification *notification) {
-		(void)notification;
-		failed = true;
-	}];
 
 	[window makeKeyAndOrderFront:nil];
 	[NSApp activateIgnoringOtherApps:YES];
@@ -260,7 +252,7 @@ comp_window_macos_enter_native_fullscreen(struct comp_target *ct, NSWindow *wind
 	COMP_INFO(ct->c, "Requested native AppKit fullscreen on PS VR2 display; waiting for transition");
 
 	NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:4.0];
-	while (!entered && !failed && [deadline timeIntervalSinceNow] > 0.0) {
+	while (!entered && [deadline timeIntervalSinceNow] > 0.0) {
 		NSDate *slice_deadline = [NSDate dateWithTimeIntervalSinceNow:0.01];
 		NSEvent *event = [NSApp nextEventMatchingMask:NSEventMaskAny
 		                               untilDate:slice_deadline
@@ -274,7 +266,6 @@ comp_window_macos_enter_native_fullscreen(struct comp_target *ct, NSWindow *wind
 	}
 
 	[center removeObserver:entered_observer];
-	[center removeObserver:failed_observer];
 	bool style_fullscreen = ([window styleMask] & NSWindowStyleMaskFullScreen) != 0;
 	NSScreen *actual_screen = [window screen];
 	NSRect frame = [window frame];
@@ -290,8 +281,8 @@ comp_window_macos_enter_native_fullscreen(struct comp_target *ct, NSWindow *wind
 	}
 
 	COMP_WARN(ct->c,
-	          "macOS native fullscreen: did not enter successfully; notification entered=%d failed=%d style_fullscreen=%d screen='%s' target_matches=%d frame %.0fx%.0f content %.0fx%.0f",
-	          entered, failed, style_fullscreen, screen_name, target_matches, frame.size.width, frame.size.height,
+	          "macOS native fullscreen: did not enter successfully; notification entered=%d style_fullscreen=%d screen='%s' target_matches=%d frame %.0fx%.0f content %.0fx%.0f",
+	          entered, style_fullscreen, screen_name, target_matches, frame.size.width, frame.size.height,
 	          content_frame.size.width, content_frame.size.height);
 	return false;
 }
