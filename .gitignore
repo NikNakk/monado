@@ -119,3 +119,6 @@ result/
 
 # Kotlin
 .kotlin
+
+# Mac
+.DS_Store
