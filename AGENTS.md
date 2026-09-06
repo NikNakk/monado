@@ -1,9 +1,9 @@
 # PS VR2 on macOS: Codex handover
 
 This repository contains experimental work toward using a wired Sony PS VR2 as
-a native OpenXR HMD on Apple Silicon macOS. Read this file and
-`doc/macos-port.md` before changing the macOS, PSVR2, compositor, or OpenXR
-paths.
+a native OpenXR HMD on Apple Silicon macOS. Read this file,
+`doc/macos-port.md`, and `doc/psvr2-macos-timing-diagnostics.md` before changing
+the macOS, PSVR2, compositor, or OpenXR paths.
 
 ## Objective and first acceptance test
 
@@ -64,6 +64,41 @@ Validation already completed:
   <https://github.com/NikNakk/monado/actions/runs/33572654233>
 - A Linux driver-only compile passed locally.
 - `git diff --check` passed before the commits were published.
+
+## Tracking timing findings (2026-09-06)
+
+A dedicated `monado-cli pose-dump` diagnostic was used to compare native macOS
+tracking with a Linux reference running **Ubuntu ARM64 as a VMware Fusion guest
+on the same Mac**, with the PS VR2 USB device passed through to the VM. The
+Linux comparison is therefore useful for implementation behaviour, but it is
+not a bare-metal Linux latency benchmark.
+
+The detailed methodology and numbers are in
+`doc/psvr2-macos-timing-diagnostics.md`. Current conclusions:
+
+- 0/+5/+10/+15/+20 ms pose prediction from
+  `xrt_device_get_tracked_pose()` is quantitatively very similar on macOS and
+  Linux/Fusion once movement speed is accounted for.
+- The PSVR2 SLAM stream is about 60 Hz on both platforms (median update interval
+  about 16.683 ms).
+- Newly published SLAM poses are already about 23-24 ms old when first observed
+  by the host-side diagnostic on both platforms.
+- Median first-seen SLAM latency was about 24.0 ms on Linux/Fusion and about
+  23.0 ms on macOS; p95 was about 28.3 ms and 27.9 ms respectively.
+- Latest IMU timestamps are roughly 22.5-23 ms newer than the newly observed
+  SLAM pose on both, consistent with forward dead reckoning using newer IMU
+  samples.
+- macOS shows no evidence of a substantial platform-specific SLAM availability
+  delay, and no tracking/prediction behaviour resembling the visible backwards
+  judder.
+
+These experiments substantially reduce the likelihood that the current visual
+judder originates in the PSVR2 SLAM/prediction path. They do not prove every
+tracking-side issue impossible, and the Linux reference is virtualized. Unless
+new tracking evidence appears, timing investigation should concentrate after
+pose selection: ATW/distortion rendering, Vulkan completion, IOSurface/Metal
+handoff, scheduled presentation, CVDisplayLink/vblank alignment, and actual
+scanout.
 
 ## Key architecture decision
 
