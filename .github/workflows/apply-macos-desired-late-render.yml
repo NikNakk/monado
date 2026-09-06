@@ -1,0 +1,367 @@
+name: Apply macOS desired-relative late-render experiment
+
+on:
+  push:
+    branches:
+      - macos-psvr2-timing-diagnostics
+    paths:
+      - .github/workflows/apply-macos-desired-late-render.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-commit:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: macos-psvr2-timing-diagnostics
+
+      - name: Apply desired-relative late-render patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/xrt/compositor/main/comp_renderer.c")
+          s = p.read_text()
+
+          def repl(old, new):
+              global s
+              if old not in s:
+                  raise SystemExit("Expected source fragment not found:\n" + old[:800])
+              s = s.replace(old, new, 1)
+
+          repl(
+          '''#ifdef XRT_OS_OSX
+          #include <stdint.h>
+          #include <time.h>
+          #include <unistd.h>
+          #endif
+          ''',
+          '''#ifdef XRT_OS_OSX
+          #include <stdint.h>
+          #include <limits.h>
+          #include <time.h>
+          #include <unistd.h>
+          #endif
+          ''')
+
+          repl(
+          '''#ifdef XRT_OS_OSX
+          DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)
+          DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+          #endif
+          ''',
+          '''#ifdef XRT_OS_OSX
+          DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)
+          DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", LONG_MIN)
+          DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+          #endif
+          ''')
+
+          repl(
+          '''static int64_t
+          renderer_get_macos_late_render_lead_us(void)
+          {
+          \tint64_t lead_us = debug_get_num_option_macos_late_render_lead_us();
+          \treturn lead_us > 0 ? lead_us : 0;
+          }
+
+          static void
+          renderer_late_render_trace_open(struct comp_renderer *r)
+          ''',
+          '''static int64_t
+          renderer_get_macos_late_render_lead_us(void)
+          {
+          \tint64_t lead_us = debug_get_num_option_macos_late_render_lead_us();
+          \treturn lead_us > 0 ? lead_us : 0;
+          }
+
+          static bool
+          renderer_get_macos_late_render_desired_offset_us(int64_t *out_offset_us)
+          {
+          \tlong value = debug_get_num_option_macos_late_render_desired_offset_us();
+          \tif (value == LONG_MIN) {
+          \t\t*out_offset_us = 0;
+          \t\treturn false;
+          \t}
+          \t*out_offset_us = (int64_t)value;
+          \treturn true;
+          }
+
+          static void
+          renderer_late_render_trace_open(struct comp_renderer *r)
+          ''')
+
+          repl(
+          '''\tfputs("frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
+          \t      "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
+          \t      "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns\\n",
+          \t      r->late_render_trace);
+          ''',
+          '''\tfputs("frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
+          \t      "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
+          \t      "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns,"
+          \t      "desired_offset_us,wait_mode,target_minus_desired_ns,pose_begin_minus_desired_ns\\n",
+          \t      r->late_render_trace);
+          ''')
+
+          old_wait = '''static void
+          renderer_late_render_wait(struct comp_renderer *r)
+          {
+          \tr->late_render_target_ns = 0;
+          \tr->late_render_pose_begin_ns = 0;
+          \tr->late_render_pose_end_ns = 0;
+          \tr->late_render_wait_begin_ns = (int64_t)os_monotonic_get_ns();
+          \tr->late_render_wait_end_ns = r->late_render_wait_begin_ns;
+
+          \tint64_t lead_us = renderer_get_macos_late_render_lead_us();
+          \tint64_t predicted_ns = r->c->frame.rendering.predicted_display_time_ns;
+          \tif (lead_us <= 0 || predicted_ns <= 0 || lead_us > INT64_MAX / 1000) {
+          \t\treturn;
+          \t}
+
+          \tint64_t lead_ns = lead_us * 1000;
+          \tif (predicted_ns <= lead_ns) {
+          \t\treturn;
+          \t}
+
+          \tint64_t target_ns = predicted_ns - lead_ns;
+          \tr->late_render_target_ns = target_ns;
+
+          \t/* Sleep most of the interval, then spin for the final 0.5 ms. */
+          \tconst int64_t spin_margin_ns = 500000;
+          \tfor (;;) {
+          \t\tint64_t now_ns = (int64_t)os_monotonic_get_ns();
+          \t\tif (now_ns >= target_ns) {
+          \t\t\tr->late_render_wait_end_ns = now_ns;
+          \t\t\tbreak;
+          \t\t}
+
+          \t\tint64_t remaining_ns = target_ns - now_ns;
+          \t\tif (remaining_ns > spin_margin_ns) {
+          \t\t\tint64_t sleep_ns = remaining_ns - spin_margin_ns;
+          \t\t\tstruct timespec ts = {
+          \t\t\t    .tv_sec = (time_t)(sleep_ns / 1000000000LL),
+          \t\t\t    .tv_nsec = (long)(sleep_ns % 1000000000LL),
+          \t\t\t};
+          \t\t\t(void)nanosleep(&ts, NULL);
+          \t\t}
+          \t}
+          }
+          '''
+
+          new_wait = '''static void
+          renderer_late_render_wait(struct comp_renderer *r)
+          {
+          \tr->late_render_target_ns = 0;
+          \tr->late_render_pose_begin_ns = 0;
+          \tr->late_render_pose_end_ns = 0;
+          \tr->late_render_wait_begin_ns = (int64_t)os_monotonic_get_ns();
+          \tr->late_render_wait_end_ns = r->late_render_wait_begin_ns;
+
+          \tint64_t desired_offset_us = 0;
+          \tbool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
+          \tint64_t lead_us = renderer_get_macos_late_render_lead_us();
+          \tint64_t target_ns = 0;
+
+          \tif (desired_mode) {
+          \t\tuint64_t desired_u64 = r->c->frame.rendering.desired_present_time_ns;
+          \t\tif (desired_u64 == 0 || desired_u64 > INT64_MAX || desired_offset_us > INT64_MAX / 1000 ||
+          \t\t    desired_offset_us < INT64_MIN / 1000) {
+          \t\t\treturn;
+          \t\t}
+
+          \t\tint64_t desired_ns = (int64_t)desired_u64;
+          \t\tint64_t offset_ns = desired_offset_us * 1000;
+          \t\tif ((offset_ns > 0 && desired_ns > INT64_MAX - offset_ns) ||
+          \t\t    (offset_ns < 0 && desired_ns < INT64_MIN - offset_ns)) {
+          \t\t\treturn;
+          \t\t}
+          \t\ttarget_ns = desired_ns + offset_ns;
+          \t} else {
+          \t\t/* Legacy predicted-display-relative mode: opt-in only. */
+          \t\tint64_t predicted_ns = r->c->frame.rendering.predicted_display_time_ns;
+          \t\tif (lead_us <= 0 || predicted_ns <= 0 || lead_us > INT64_MAX / 1000) {
+          \t\t\treturn;
+          \t\t}
+
+          \t\tint64_t lead_ns = lead_us * 1000;
+          \t\tif (predicted_ns <= lead_ns) {
+          \t\t\treturn;
+          \t\t}
+          \t\ttarget_ns = predicted_ns - lead_ns;
+          \t}
+
+          \tr->late_render_target_ns = target_ns;
+
+          \t/*
+          \t * Previous traces showed 2-3 ms scheduler overshoot with only a
+          \t * 0.5 ms spin margin. This diagnostics-only path trades one CPU
+          \t * core's time for repeatable wake timing around the latch cliff.
+          \t */
+          \tconst int64_t spin_margin_ns = 3000000;
+          \tfor (;;) {
+          \t\tint64_t now_ns = (int64_t)os_monotonic_get_ns();
+          \t\tif (now_ns >= target_ns) {
+          \t\t\tr->late_render_wait_end_ns = now_ns;
+          \t\t\tbreak;
+          \t\t}
+
+          \t\tint64_t remaining_ns = target_ns - now_ns;
+          \t\tif (remaining_ns > spin_margin_ns) {
+          \t\t\tint64_t sleep_ns = remaining_ns - spin_margin_ns;
+          \t\t\tstruct timespec ts = {
+          \t\t\t    .tv_sec = (time_t)(sleep_ns / 1000000000LL),
+          \t\t\t    .tv_nsec = (long)(sleep_ns % 1000000000LL),
+          \t\t\t};
+          \t\t\t(void)nanosleep(&ts, NULL);
+          \t\t}
+          \t}
+          }
+          '''
+          repl(old_wait, new_wait)
+
+          repl(
+          '''\tint64_t lead_us = renderer_get_macos_late_render_lead_us();
+          \tint64_t wait_requested_ns = r->late_render_target_ns > r->late_render_wait_begin_ns
+          ''',
+          '''\tint64_t lead_us = renderer_get_macos_late_render_lead_us();
+          \tint64_t desired_offset_us = 0;
+          \tbool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
+          \tconst char *wait_mode = desired_mode ? "desired" : (lead_us > 0 ? "predicted" : "none");
+          \tint64_t wait_requested_ns = r->late_render_target_ns > r->late_render_wait_begin_ns
+          ''')
+
+          repl(
+          '''\tint64_t pose_begin_to_predicted_ns = r->late_render_pose_begin_ns != 0
+          \t                                         ? r->c->frame.rendering.predicted_display_time_ns -
+          \t                                               r->late_render_pose_begin_ns
+          \t                                         : 0;
+
+          \tfprintf(r->late_render_trace,
+          \t        "%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld\\n",
+          ''',
+          '''\tint64_t pose_begin_to_predicted_ns = r->late_render_pose_begin_ns != 0
+          \t                                         ? r->c->frame.rendering.predicted_display_time_ns -
+          \t                                               r->late_render_pose_begin_ns
+          \t                                         : 0;
+          \tint64_t desired_present_ns = (int64_t)r->c->frame.rendering.desired_present_time_ns;
+          \tint64_t target_minus_desired_ns = r->late_render_target_ns != 0
+          \t                                          ? r->late_render_target_ns - desired_present_ns
+          \t                                          : 0;
+          \tint64_t pose_begin_minus_desired_ns = r->late_render_pose_begin_ns != 0
+          \t                                              ? r->late_render_pose_begin_ns - desired_present_ns
+          \t                                              : 0;
+
+          \tfprintf(r->late_render_trace,
+          \t        "%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%s,%lld,%lld\\n",
+          ''')
+
+          repl(
+          '''\t        (long long)pose_duration_ns, (long long)pose_begin_minus_target_ns,
+          \t        (long long)pose_begin_to_predicted_ns);
+          ''',
+          '''\t        (long long)pose_duration_ns, (long long)pose_begin_minus_target_ns,
+          \t        (long long)pose_begin_to_predicted_ns, (long long)desired_offset_us, wait_mode,
+          \t        (long long)target_minus_desired_ns, (long long)pose_begin_minus_desired_ns);
+          ''')
+
+          repl(
+          '''#ifdef XRT_OS_OSX
+          \trenderer_late_render_trace_open(r);
+          \tint64_t late_render_lead_us = renderer_get_macos_late_render_lead_us();
+          \tif (late_render_lead_us > 0) {
+          \t\tCOMP_INFO(c, "macOS late-render experiment enabled: pose/render dispatch lead %lld us",
+          \t\t          (long long)late_render_lead_us);
+          \t}
+          #endif
+          ''',
+          '''#ifdef XRT_OS_OSX
+          \trenderer_late_render_trace_open(r);
+          \tint64_t desired_offset_us = 0;
+          \tbool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
+          \tint64_t late_render_lead_us = renderer_get_macos_late_render_lead_us();
+          \tif (desired_mode) {
+          \t\tCOMP_INFO(c, "macOS desired-relative late-render experiment enabled: dispatch at desired present %+lld us",
+          \t\t          (long long)desired_offset_us);
+          \t\tif (late_render_lead_us > 0) {
+          \t\t\tCOMP_WARN(c, "Both desired-relative and legacy predicted-relative late-render options are set; using desired-relative mode");
+          \t\t}
+          \t} else if (late_render_lead_us > 0) {
+          \t\tCOMP_INFO(c, "macOS legacy predicted-relative late-render experiment enabled: dispatch lead %lld us",
+          \t\t          (long long)late_render_lead_us);
+          \t}
+          #endif
+          ''')
+
+          p.write_text(s)
+
+          d = Path("doc/macos-psvr2-timing-diagnostics.md")
+          text = d.read_text()
+          old = '''## macOS late-render / late-pose experiment
+
+          `XRT_MACOS_LATE_RENDER_LEAD_US` is a macOS-only diagnostic that deliberately holds the compositor immediately before its final graphics/compute dispatch. The default is `0`, which preserves the normal scheduling path. A positive value waits until approximately `predicted_display_time_ns - lead` before dispatch, so the existing `calc_pose_data()` call samples tracking later while still predicting to the same display timestamp.
+
+          For example:
+
+          ```sh
+          export PSVR2_TIMING_TRACE=1
+          export XRT_MACOS_LATE_RENDER_LEAD_US=14000
+          ```
+
+          The wait sleeps until 0.5 ms before the target and then spins to reduce scheduler wake jitter. `monado_psvr2_<PID>_late_render.csv` records the requested and actual wait, wake lateness, pose-query begin/end timestamps, and the remaining pose-query-to-predicted-display horizon. This is deliberately an A/B diagnostic rather than the final late-latching design.
+
+          A useful initial sweep at 120 Hz is `16000`, `14000`, `13000`, and `12000` microseconds, comparing pose-query horizon and missed-refresh rate against the default `0` baseline.'''
+          new = '''## macOS late-render / late-pose experiment
+
+          `XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US` is the preferred macOS-only late-render diagnostic. It is **disabled when unset**. When explicitly set, including to `0`, the compositor waits immediately before its final graphics/compute dispatch until approximately `desired_present_time_ns + offset`. This keeps the experiment anchored to the compositor's desired-present phase instead of the learned `predicted_display_time_ns`, avoiding the positive feedback seen when a missed frame increased the learned present offset and therefore made the next predicted-relative wait even longer.
+
+          For example:
+
+          ```sh
+          export PSVR2_TIMING_TRACE=1
+          export XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US=2000
+          ```
+
+          Signed offsets are accepted. A useful initial 120 Hz sweep is `0`, `1000`, `2000`, and `3000` microseconds, keeping `XRT_MACOS_PRESENT_MIN_LEAD_US=2000` unchanged. The default path remains unchanged when the variable is unset.
+
+          `XRT_MACOS_LATE_RENDER_LEAD_US` is retained only as the legacy predicted-display-relative diagnostic. Its default remains `0` (disabled), and the desired-relative option takes precedence if both are set.
+
+          Previous traces showed roughly 2-3 ms scheduler overshoot with a 0.5 ms spin margin, so the diagnostics-only wait now sleeps until 3 ms before its target and spins for the remainder. `monado_psvr2_<PID>_late_render.csv` retains the original columns and appends `desired_offset_us`, `wait_mode`, `target_minus_desired_ns`, and `pose_begin_minus_desired_ns` so the desired-relative and legacy modes can be distinguished without breaking column-name-based analysis. This remains an A/B diagnostic rather than the final late-latching design.'''
+          if old not in text:
+              raise SystemExit("Late-render documentation section not found")
+          d.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Install dependencies
+        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
+
+      - name: Configure compositor build
+        run: >-
+          cmake -S . -B build-compositor -G Ninja
+          -DBUILD_TESTING=OFF
+          -DXRT_HAVE_OPENGLES=OFF
+          -DXRT_HAVE_SDL2=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_BUILD_DRIVER_PSSENSE=OFF
+
+      - name: Build macOS compositor
+        run: cmake --build build-compositor --target comp_main --parallel
+
+      - name: Commit tested change
+        shell: bash
+        run: |
+          rm .github/workflows/apply-macos-desired-late-render.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/xrt/compositor/main/comp_renderer.c doc/macos-psvr2-timing-diagnostics.md .github/workflows/apply-macos-desired-late-render.yml
+          git commit -m "diag: add desired-relative macOS late-render experiment"
+          git push origin HEAD:macos-psvr2-timing-diagnostics
