@@ -24,6 +24,7 @@ The process ID is included in every filename. A normal service/compositor run sh
 - `monado_psvr2_<PID>_pose.csv`
 - `monado_psvr2_<PID>_present.csv`
 - `monado_psvr2_<PID>_vblank.csv`
+- `monado_psvr2_<PID>_late_render.csv`
 
 ### IMU / DisplayPort scanout
 
@@ -162,3 +163,19 @@ The prediction trace contains prior relation velocity, newly estimated velocity,
 ### CAMetalLayer drawable count
 
 `XRT_MACOS_MAX_DRAWABLES` selects the CAMetalLayer drawable-pool depth. Valid values are `2` and `3`; the default is `3`. The effective value is logged at startup. This is intended to test whether drawable buffering contributes to the observed one-refresh presentation latency.
+
+
+## macOS late-render / late-pose experiment
+
+`XRT_MACOS_LATE_RENDER_LEAD_US` is a macOS-only diagnostic that deliberately holds the compositor immediately before its final graphics/compute dispatch. The default is `0`, which preserves the normal scheduling path. A positive value waits until approximately `predicted_display_time_ns - lead` before dispatch, so the existing `calc_pose_data()` call samples tracking later while still predicting to the same display timestamp.
+
+For example:
+
+```sh
+export PSVR2_TIMING_TRACE=1
+export XRT_MACOS_LATE_RENDER_LEAD_US=14000
+```
+
+The wait sleeps until 0.5 ms before the target and then spins to reduce scheduler wake jitter. `monado_psvr2_<PID>_late_render.csv` records the requested and actual wait, wake lateness, pose-query begin/end timestamps, and the remaining pose-query-to-predicted-display horizon. This is deliberately an A/B diagnostic rather than the final late-latching design.
+
+A useful initial sweep at 120 Hz is `16000`, `14000`, `13000`, and `12000` microseconds, comparing pose-query horizon and missed-refresh rate against the default `0` baseline.
