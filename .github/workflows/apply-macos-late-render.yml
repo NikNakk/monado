@@ -1,0 +1,281 @@
+name: Apply macOS late-render experiment
+
+on:
+  push:
+    branches:
+      - macos-psvr2-timing-diagnostics
+    paths:
+      - .github/workflows/apply-macos-late-render.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-commit:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: macos-psvr2-timing-diagnostics
+
+      - name: Add late-render experiment and trace
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/xrt/compositor/main/comp_renderer.c')
+          s = p.read_text()
+
+          def repl(old, new):
+              global s
+              if old not in s:
+                  raise SystemExit('Expected source fragment not found:\n' + old[:500])
+              s = s.replace(old, new, 1)
+
+          repl(
+              '#include <math.h>\n',
+              '#include <math.h>\n\n#ifdef XRT_OS_OSX\n#include <time.h>\n#include <unistd.h>\n#endif\n')
+
+          repl(
+              'DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)\n#define LOG_FRAME_LAG',
+              'DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)\n#ifdef XRT_OS_OSX\nDEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)\nDEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)\n#endif\n#define LOG_FRAME_LAG')
+
+          repl(
+              '\tstruct comp_mirror_to_debug_gui mirror_to_debug_gui;\n\n\t//! @}\n',
+              '''\tstruct comp_mirror_to_debug_gui mirror_to_debug_gui;\n\n#ifdef XRT_OS_OSX\n\tFILE *late_render_trace;\n\tuint64_t late_render_trace_rows;\n\tint64_t late_render_target_ns;\n\tint64_t late_render_wait_begin_ns;\n\tint64_t late_render_wait_end_ns;\n\tint64_t late_render_pose_begin_ns;\n\tint64_t late_render_pose_end_ns;\n#endif\n\n\t//! @}\n''')
+
+          marker = '''static void\nrenderer_wait_queue_idle(struct comp_renderer *r)\n'''
+          helpers = r'''#ifdef XRT_OS_OSX
+static int64_t
+renderer_get_macos_late_render_lead_us(void)
+{
+	int64_t lead_us = debug_get_num_option_macos_late_render_lead_us();
+	return lead_us > 0 ? lead_us : 0;
+}
+
+static void
+renderer_late_render_trace_open(struct comp_renderer *r)
+{
+	if (!debug_get_bool_option_comp_psvr2_timing_trace()) {
+		return;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_late_render.csv", dir, separator, (int)getpid());
+
+	r->late_render_trace = fopen(path, "w");
+	if (r->late_render_trace == NULL) {
+		COMP_WARN(r->c, "Could not open macOS late-render trace '%s'", path);
+		return;
+	}
+
+	setvbuf(r->late_render_trace, NULL, _IOFBF, 64 * 1024);
+	fputs("frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
+	      "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
+	      "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns\n",
+	      r->late_render_trace);
+	fflush(r->late_render_trace);
+}
+
+static void
+renderer_late_render_trace_close(struct comp_renderer *r)
+{
+	if (r->late_render_trace == NULL) {
+		return;
+	}
+	fflush(r->late_render_trace);
+	fclose(r->late_render_trace);
+	r->late_render_trace = NULL;
+}
+
+static void
+renderer_late_render_wait(struct comp_renderer *r)
+{
+	r->late_render_target_ns = 0;
+	r->late_render_pose_begin_ns = 0;
+	r->late_render_pose_end_ns = 0;
+	r->late_render_wait_begin_ns = (int64_t)os_monotonic_get_ns();
+	r->late_render_wait_end_ns = r->late_render_wait_begin_ns;
+
+	int64_t lead_us = renderer_get_macos_late_render_lead_us();
+	int64_t predicted_ns = r->c->frame.rendering.predicted_display_time_ns;
+	if (lead_us <= 0 || predicted_ns <= 0 || lead_us > INT64_MAX / 1000) {
+		return;
+	}
+
+	int64_t lead_ns = lead_us * 1000;
+	if (predicted_ns <= lead_ns) {
+		return;
+	}
+
+	int64_t target_ns = predicted_ns - lead_ns;
+	r->late_render_target_ns = target_ns;
+
+	/* Sleep most of the interval, then spin for the final 0.5 ms. This is
+	 * deliberately a diagnostics-only path: it minimizes wake jitter without
+	 * changing normal compositor scheduling when the option is unset. */
+	const int64_t spin_margin_ns = 500000;
+	for (;;) {
+		int64_t now_ns = (int64_t)os_monotonic_get_ns();
+		if (now_ns >= target_ns) {
+			r->late_render_wait_end_ns = now_ns;
+			break;
+		}
+
+		int64_t remaining_ns = target_ns - now_ns;
+		if (remaining_ns > spin_margin_ns) {
+			int64_t sleep_ns = remaining_ns - spin_margin_ns;
+			struct timespec ts = {
+			    .tv_sec = (time_t)(sleep_ns / 1000000000LL),
+			    .tv_nsec = (long)(sleep_ns % 1000000000LL),
+			};
+			(void)nanosleep(&ts, NULL);
+		}
+	}
+}
+
+static void
+renderer_late_render_trace_frame(struct comp_renderer *r)
+{
+	if (r->late_render_trace == NULL) {
+		return;
+	}
+
+	int64_t lead_us = renderer_get_macos_late_render_lead_us();
+	int64_t wait_requested_ns =
+	    r->late_render_target_ns > r->late_render_wait_begin_ns
+	        ? r->late_render_target_ns - r->late_render_wait_begin_ns
+	        : 0;
+	int64_t wait_actual_ns =
+	    r->late_render_wait_end_ns >= r->late_render_wait_begin_ns
+	        ? r->late_render_wait_end_ns - r->late_render_wait_begin_ns
+	        : 0;
+	int64_t wake_lateness_ns =
+	    r->late_render_target_ns != 0 ? r->late_render_wait_end_ns - r->late_render_target_ns : 0;
+	int64_t pose_duration_ns =
+	    r->late_render_pose_begin_ns != 0 && r->late_render_pose_end_ns >= r->late_render_pose_begin_ns
+	        ? r->late_render_pose_end_ns - r->late_render_pose_begin_ns
+	        : 0;
+	int64_t pose_begin_minus_target_ns =
+	    r->late_render_target_ns != 0 && r->late_render_pose_begin_ns != 0
+	        ? r->late_render_pose_begin_ns - r->late_render_target_ns
+	        : 0;
+	int64_t pose_begin_to_predicted_ns =
+	    r->late_render_pose_begin_ns != 0
+	        ? r->c->frame.rendering.predicted_display_time_ns - r->late_render_pose_begin_ns
+	        : 0;
+
+	fprintf(r->late_render_trace,
+	        "%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld\n",
+	        (long long)r->c->frame.rendering.id, (long long)lead_us,
+	        (long long)r->c->frame.rendering.desired_present_time_ns,
+	        (long long)r->c->frame.rendering.predicted_display_time_ns, (long long)r->late_render_target_ns,
+	        (long long)r->late_render_wait_begin_ns, (long long)r->late_render_wait_end_ns,
+	        (long long)wait_requested_ns, (long long)wait_actual_ns, (long long)wake_lateness_ns,
+	        (long long)r->late_render_pose_begin_ns, (long long)r->late_render_pose_end_ns,
+	        (long long)pose_duration_ns, (long long)pose_begin_minus_target_ns,
+	        (long long)pose_begin_to_predicted_ns);
+
+	r->late_render_trace_rows++;
+	if (r->late_render_trace_rows % 256 == 0) {
+		fflush(r->late_render_trace);
+	}
+}
+#endif
+
+'''
+          repl(marker, helpers + marker)
+
+          repl(
+              '\t// Pose at beginning of scanout\n\txrt_result_t xret = xrt_device_get_view_poses( //\n',
+              '''\t// Pose at beginning of scanout\n#ifdef XRT_OS_OSX\n\tr->late_render_pose_begin_ns = (int64_t)os_monotonic_get_ns();\n#endif\n\txrt_result_t xret = xrt_device_get_view_poses( //\n''')
+
+          repl(
+              '\t    xdev_fovs,                                 // out_fovs\n\t    xdev_poses[0]);                            //\n\tif (xret != XRT_SUCCESS) {\n',
+              '''\t    xdev_fovs,                                 // out_fovs\n\t    xdev_poses[0]);                            //\n#ifdef XRT_OS_OSX\n\tr->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();\n#endif\n\tif (xret != XRT_SUCCESS) {\n''')
+
+          repl(
+              '\t\t    xdev_fovs,                    // out_fovs\n\t\t    xdev_poses[1]);               // out_poses\n\t\tif (xret != XRT_SUCCESS) {\n',
+              '''\t\t    xdev_fovs,                    // out_fovs\n\t\t    xdev_poses[1]);               // out_poses\n#ifdef XRT_OS_OSX\n\t\tr->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();\n#endif\n\t\tif (xret != XRT_SUCCESS) {\n''')
+
+          repl(
+              '\tr->c = c;\n\tr->settings = &c->settings;\n\n\tr->acquired_buffer = -1;\n',
+              '''\tr->c = c;\n\tr->settings = &c->settings;\n\n#ifdef XRT_OS_OSX\n\trenderer_late_render_trace_open(r);\n\tint64_t late_render_lead_us = renderer_get_macos_late_render_lead_us();\n\tif (late_render_lead_us > 0) {\n\t\tCOMP_INFO(c, "macOS late-render experiment enabled: pose/render dispatch lead %lld us",\n\t\t          (long long)late_render_lead_us);\n\t}\n#endif\n\n\tr->acquired_buffer = -1;\n''')
+
+          repl(
+              '\tVkResult res = VK_SUCCESS;\n\tif (use_compute) {\n',
+              '''#ifdef XRT_OS_OSX\n\trenderer_late_render_wait(r);\n#endif\n\n\tVkResult res = VK_SUCCESS;\n\tif (use_compute) {\n''')
+
+          repl(
+              '\tif (res != VK_SUCCESS) {\n\t\treturn XRT_ERROR_VULKAN;\n\t}\n\n#ifdef XRT_FEATURE_WINDOW_PEEK\n',
+              '''\tif (res != VK_SUCCESS) {\n\t\treturn XRT_ERROR_VULKAN;\n\t}\n\n#ifdef XRT_OS_OSX\n\trenderer_late_render_trace_frame(r);\n#endif\n\n#ifdef XRT_FEATURE_WINDOW_PEEK\n''')
+
+          repl(
+              'static void\nrenderer_fini(struct comp_renderer *r)\n{\n\tstruct vk_bundle *vk = &r->c->base.vk;\n',
+              '''static void\nrenderer_fini(struct comp_renderer *r)\n{\n\tstruct vk_bundle *vk = &r->c->base.vk;\n\n#ifdef XRT_OS_OSX\n\trenderer_late_render_trace_close(r);\n#endif\n''')
+
+          p.write_text(s)
+
+          d = Path('doc/macos-psvr2-timing-diagnostics.md')
+          text = d.read_text()
+          old = '- `monado_psvr2_<PID>_vblank.csv`\n'
+          if old not in text:
+              raise SystemExit('Trace-file list marker not found')
+          text = text.replace(old, old + '- `monado_psvr2_<PID>_late_render.csv`\n', 1)
+          text += r'''
+
+## macOS late-render / late-pose experiment
+
+`XRT_MACOS_LATE_RENDER_LEAD_US` is a macOS-only diagnostic that deliberately holds the compositor immediately before its final graphics/compute dispatch. The default is `0`, which preserves the normal scheduling path. A positive value waits until approximately `predicted_display_time_ns - lead` before dispatch, so the existing `calc_pose_data()` call samples tracking later while still predicting to the same display timestamp.
+
+For example:
+
+```sh
+export PSVR2_TIMING_TRACE=1
+export XRT_MACOS_LATE_RENDER_LEAD_US=14000
+```
+
+The wait sleeps until 0.5 ms before the target and then spins to reduce scheduler wake jitter. `monado_psvr2_<PID>_late_render.csv` records the requested and actual wait, wake lateness, pose-query begin/end timestamps, and the remaining pose-query-to-predicted-display horizon. This is deliberately an A/B diagnostic rather than the final late-latching design.
+
+A useful initial sweep at 120 Hz is `16000`, `14000`, `13000`, and `12000` microseconds, comparing pose-query horizon and missed-refresh rate against the default `0` baseline.
+'''
+          d.write_text(text)
+          PY
+
+      - name: Install dependencies
+        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
+
+      - name: Configure compositor build
+        run: >-
+          cmake -S . -B build-compositor -G Ninja
+          -DBUILD_TESTING=OFF
+          -DXRT_HAVE_OPENGLES=OFF
+          -DXRT_HAVE_SDL2=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_BUILD_DRIVER_PSSENSE=OFF
+
+      - name: Build macOS compositor and PSVR2 driver
+        run: cmake --build build-compositor --target comp_main drv_psvr2 --parallel
+
+      - name: Commit tested change
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-macos-late-render.yml
+          git add src/xrt/compositor/main/comp_renderer.c doc/macos-psvr2-timing-diagnostics.md
+          git commit -m "diag: add macOS late-render experiment"
+          git push
