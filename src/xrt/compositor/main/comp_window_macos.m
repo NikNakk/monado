@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <stdatomic.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MACOS_TARGET_IMAGE_COUNT 3
@@ -37,6 +38,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_metal_shared_event_wait, "XRT_MACOS_METAL_SHARED_EVENT_WAIT", true)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -49,6 +52,10 @@ struct comp_window_macos
 	CAMetalLayer *metal_layer;
 	id<MTLCommandQueue> present_queue;
 	id<MTLTexture> metal_images[MACOS_TARGET_IMAGE_COUNT];
+	id<MTLSharedEvent> render_complete_event;
+	atomic_bool image_in_flight[MACOS_TARGET_IMAGE_COUNT];
+	dispatch_group_t present_command_group;
+	uint64_t last_image_acquire_wait_ns;
 	xrt_graphics_buffer_handle_t io_surfaces[MACOS_TARGET_IMAGE_COUNT];
 	struct vk_image_collection vkic;
 	CVDisplayLinkRef display_link;
@@ -87,6 +94,7 @@ struct comp_window_macos
 	bool logged_layer_state;
 	FILE *trace_present;
 	FILE *trace_presented;
+	FILE *trace_present_complete;
 	FILE *trace_vblank;
 	dispatch_group_t trace_present_group;
 	uint64_t trace_present_rows;
@@ -128,11 +136,16 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	    "present_slop_ns,image_index,"
 	    "timeline_value,wait_mode,after_vk_wait_ns,"
 	    "after_drawable_ns,before_present_call_ns,after_present_call_ns,after_commit_ns,after_metal_wait_ns,"
-	    "latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");
+	    "latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s,"
+	    "async_present,shared_event_wait,image_reuse_wait_ns");
 	cwm->trace_presented = macos_timing_trace_open_file(
 	    "presented",
 	    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"
 	    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns");
+	cwm->trace_present_complete = macos_timing_trace_open_file(
+	    "present_complete",
+	    "frame_id,completion_handler_ns,image_index,timeline_value,status,commit_to_completion_ns,"
+	    "gpu_start_time_s,gpu_end_time_s,shared_event_wait");
 	cwm->trace_vblank = macos_timing_trace_open_file(
 	    "vblank",
 	    "host_consumed_ns,displaylink_callback_ns,displaylink_now_host_ns,displaylink_output_host_ns,"
@@ -165,6 +178,11 @@ macos_timing_trace_close(struct comp_window_macos *cwm)
 		fflush(cwm->trace_presented);
 		fclose(cwm->trace_presented);
 		cwm->trace_presented = NULL;
+	}
+	if (cwm->trace_present_complete != NULL) {
+		fflush(cwm->trace_present_complete);
+		fclose(cwm->trace_present_complete);
+		cwm->trace_present_complete = NULL;
 	}
 	if (cwm->trace_vblank != NULL) {
 		fflush(cwm->trace_vblank);
@@ -268,6 +286,27 @@ static inline struct vk_bundle *
 get_vk(struct comp_window_macos *cwm)
 {
 	return &cwm->base.base.c->base.vk;
+}
+
+static void
+macos_release_source_image(struct comp_window_macos *cwm, uint32_t index)
+{
+	if (index < MACOS_TARGET_IMAGE_COUNT) {
+		atomic_store_explicit(&cwm->image_in_flight[index], false, memory_order_release);
+	}
+}
+
+static void
+macos_wait_for_inflight_presents(struct comp_window_macos *cwm)
+{
+	if (cwm->present_command_group == NULL) {
+		return;
+	}
+	long result = dispatch_group_wait(cwm->present_command_group,
+	                                  dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));
+	if (result != 0 && cwm->base.base.c != NULL) {
+		COMP_WARN(cwm->base.base.c, "Timed out waiting for asynchronous Metal presentation work");
+	}
 }
 
 static CGDirectDisplayID
@@ -446,8 +485,18 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		return true;
 	}
 
+	bool want_shared_event = debug_get_bool_option_macos_async_present() &&
+	                         debug_get_bool_option_macos_metal_shared_event_wait() &&
+	                         vk->has_EXT_metal_objects && vk->vkExportMetalObjectsEXT != NULL;
+
+	VkExportMetalObjectCreateInfoEXT metal_export_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+	    .pNext = NULL,
+	    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_SHARED_EVENT_BIT_EXT,
+	};
 	VkSemaphoreTypeCreateInfo type_info = {
 	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+	    .pNext = want_shared_event ? &metal_export_info : NULL,
 	    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
 	    .initialValue = 0,
 	};
@@ -464,7 +513,33 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		return true;
 	}
 	ct->semaphores.render_complete_is_timeline = true;
-	COMP_INFO(ct->c, "macOS target using render-complete timeline semaphore");
+
+	if (want_shared_event) {
+		VkExportMetalSharedEventInfoEXT shared_event_info = {
+		    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_SHARED_EVENT_INFO_EXT,
+		    .pNext = NULL,
+		    .semaphore = ct->semaphores.render_complete,
+		    .event = VK_NULL_HANDLE,
+		    .mtlSharedEvent = nil,
+		};
+		VkExportMetalObjectsInfoEXT export_info = {
+		    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+		    .pNext = &shared_event_info,
+		};
+		vk->vkExportMetalObjectsEXT(vk->device, &export_info);
+		if (shared_event_info.mtlSharedEvent != nil) {
+			cwm->render_complete_event = [shared_event_info.mtlSharedEvent retain];
+			COMP_INFO(ct->c, "macOS target exported Vulkan render-complete timeline as MTLSharedEvent");
+		} else {
+			COMP_WARN(ct->c, "VK_EXT_metal_objects did not export an MTLSharedEvent; retaining CPU Vulkan wait fallback");
+		}
+	} else if (debug_get_bool_option_macos_async_present() &&
+	           debug_get_bool_option_macos_metal_shared_event_wait()) {
+		COMP_WARN(ct->c, "VK_EXT_metal_objects unavailable; asynchronous present will retain the CPU Vulkan wait");
+	}
+
+	COMP_INFO(ct->c, "macOS target using render-complete timeline semaphore%s",
+	          cwm->render_complete_event != nil ? " with Metal shared-event handoff" : "");
 	return true;
 }
 
@@ -478,6 +553,7 @@ comp_window_macos_check_ready(struct comp_target *ct)
 static void
 comp_window_macos_free_images(struct comp_window_macos *cwm)
 {
+	macos_wait_for_inflight_presents(cwm);
 	struct comp_target *ct = &cwm->base.base;
 	struct vk_bundle *vk = get_vk(cwm);
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
@@ -503,6 +579,9 @@ comp_window_macos_free_images(struct comp_window_macos *cwm)
 	ct->height = 0;
 	ct->format = VK_FORMAT_UNDEFINED;
 	ct->final_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
+		atomic_store_explicit(&cwm->image_in_flight[i], false, memory_order_release);
+	}
 }
 
 static void
@@ -622,9 +701,32 @@ comp_window_macos_acquire(struct comp_target *ct, uint32_t *out_index)
 	if (!comp_window_macos_has_images(ct)) {
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
-	*out_index = cwm->next_image;
-	cwm->next_image = (cwm->next_image + 1) % ct->image_count;
-	return VK_SUCCESS;
+
+	if (!debug_get_bool_option_macos_async_present()) {
+		*out_index = cwm->next_image;
+		cwm->next_image = (cwm->next_image + 1) % ct->image_count;
+		cwm->last_image_acquire_wait_ns = 0;
+		return VK_SUCCESS;
+	}
+
+	uint64_t wait_begin_ns = os_monotonic_get_ns();
+	for (;;) {
+		for (uint32_t n = 0; n < ct->image_count; n++) {
+			uint32_t index = (cwm->next_image + n) % ct->image_count;
+			bool expected = false;
+			if (atomic_compare_exchange_strong_explicit(&cwm->image_in_flight[index], &expected, true,
+			                                            memory_order_acq_rel, memory_order_acquire)) {
+				*out_index = index;
+				cwm->next_image = (index + 1) % ct->image_count;
+				cwm->last_image_acquire_wait_ns = os_monotonic_get_ns() - wait_begin_ns;
+				return VK_SUCCESS;
+			}
+		}
+
+		/* Three source images should normally hide this; yield briefly only under back-pressure. */
+		struct timespec ts = {.tv_sec = 0, .tv_nsec = 50000};
+		(void)nanosleep(&ts, NULL);
+	}
 }
 
 static VkResult
@@ -646,18 +748,27 @@ comp_window_macos_present(struct comp_target *ct,
 	uint64_t target_output_ns = 0;
 	uint64_t metal_request_ns = 0;
 	const char *wait_mode = "queue_idle";
+	bool async_present = debug_get_bool_option_macos_async_present();
+	bool shared_event_wait = async_present && debug_get_bool_option_macos_metal_shared_event_wait() &&
+	                         cwm->render_complete_event != nil;
+	uint64_t image_reuse_wait_ns = cwm->last_image_acquire_wait_ns;
 	double scheduled_present_host_s = 0.0;
 	double gpu_start_time_s = 0.0;
 	double gpu_end_time_s = 0.0;
 	assert(present_queue != NULL);
 	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
+		if (async_present) {
+			macos_release_source_image(cwm, index);
+		}
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
 	uint64_t before_vk_wait_ns = os_monotonic_get_ns();
 	VkResult ret = VK_SUCCESS;
-	if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&
-	    vk->vkWaitSemaphores != NULL) {
+	if (shared_event_wait) {
+		wait_mode = "metal_shared_event";
+	} else if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&
+	           vk->vkWaitSemaphores != NULL) {
 		VkSemaphoreWaitInfo wait_info = {
 		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
 		    .semaphoreCount = 1,
@@ -674,6 +785,9 @@ comp_window_macos_present(struct comp_target *ct,
 	uint64_t after_vk_wait_ns = os_monotonic_get_ns();
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));
+		if (async_present) {
+			macos_release_source_image(cwm, index);
+		}
 		return ret;
 	}
 
@@ -682,10 +796,30 @@ comp_window_macos_present(struct comp_target *ct,
 		after_drawable_ns = os_monotonic_get_ns();
 		if (drawable == nil) {
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
+			if (async_present) {
+				macos_release_source_image(cwm, index);
+			}
 			return VK_ERROR_OUT_OF_DATE_KHR;
 		}
 		id<MTLCommandBuffer> command_buffer = [cwm->present_queue commandBuffer];
+		if (command_buffer == nil) {
+			COMP_ERROR(ct->c, "Could not create a Metal presentation command buffer");
+			if (async_present) {
+				macos_release_source_image(cwm, index);
+			}
+			return VK_ERROR_DEVICE_LOST;
+		}
+		if (shared_event_wait) {
+			[command_buffer encodeWaitForEvent:cwm->render_complete_event value:timeline_semaphore_value];
+		}
 		id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
+		if (blit == nil) {
+			COMP_ERROR(ct->c, "Could not create Metal blit encoder");
+			if (async_present) {
+				macos_release_source_image(cwm, index);
+			}
+			return VK_ERROR_DEVICE_LOST;
+		}
 		MTLSize size = MTLSizeMake(ct->width, ct->height, 1);
 		[blit copyFromTexture:cwm->metal_images[index]
 		             sourceSlice:0
@@ -774,26 +908,63 @@ comp_window_macos_present(struct comp_target *ct,
 			[command_buffer presentDrawable:drawable];
 		}
 		after_present_call_ns = os_monotonic_get_ns();
-		[command_buffer commit];
-		after_commit_ns = os_monotonic_get_ns();
-		[command_buffer waitUntilCompleted];
-		after_metal_wait_ns = os_monotonic_get_ns();
-		gpu_start_time_s = [command_buffer GPUStartTime];
-		gpu_end_time_s = [command_buffer GPUEndTime];
-		if ([command_buffer status] == MTLCommandBufferStatusError) {
-			COMP_ERROR(ct->c, "Metal presentation failed: %s",
-			           [[[command_buffer error] localizedDescription] UTF8String]);
-			return VK_ERROR_DEVICE_LOST;
+		if (async_present) {
+			uint64_t traced_frame_id = frame_id;
+			uint32_t traced_index = index;
+			uint64_t traced_timeline_value = timeline_semaphore_value;
+			uint64_t commit_begin_ns = os_monotonic_get_ns();
+			bool traced_shared_event_wait = shared_event_wait;
+			dispatch_group_t command_group = cwm->present_command_group;
+			FILE *complete_trace = cwm->trace_present_complete;
+			dispatch_group_enter(command_group);
+			[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {
+				uint64_t completion_ns = os_monotonic_get_ns();
+				MTLCommandBufferStatus status = [completed_buffer status];
+				double completed_gpu_start_s = [completed_buffer GPUStartTime];
+				double completed_gpu_end_s = [completed_buffer GPUEndTime];
+				if (status == MTLCommandBufferStatusError) {
+					COMP_ERROR(cwm->base.base.c, "Asynchronous Metal presentation failed: %s",
+					           [[[completed_buffer error] localizedDescription] UTF8String]);
+				}
+				if (complete_trace != NULL) {
+					flockfile(complete_trace);
+					fprintf(complete_trace, "%llu,%llu,%u,%llu,%lu,%llu,%.17g,%.17g,%u\n",
+					        (unsigned long long)traced_frame_id, (unsigned long long)completion_ns,
+					        traced_index, (unsigned long long)traced_timeline_value, (unsigned long)status,
+					        (unsigned long long)(completion_ns - commit_begin_ns), completed_gpu_start_s,
+					        completed_gpu_end_s, traced_shared_event_wait ? 1u : 0u);
+					funlockfile(complete_trace);
+				}
+				macos_release_source_image(cwm, traced_index);
+				dispatch_group_leave(command_group);
+			}];
+			[command_buffer commit];
+			after_commit_ns = os_monotonic_get_ns();
+			after_metal_wait_ns = after_commit_ns;
+		} else {
+			[command_buffer commit];
+			after_commit_ns = os_monotonic_get_ns();
+			[command_buffer waitUntilCompleted];
+			after_metal_wait_ns = os_monotonic_get_ns();
+			gpu_start_time_s = [command_buffer GPUStartTime];
+			gpu_end_time_s = [command_buffer GPUEndTime];
+			if ([command_buffer status] == MTLCommandBufferStatusError) {
+				COMP_ERROR(ct->c, "Metal presentation failed: %s",
+				           [[[command_buffer error] localizedDescription] UTF8String]);
+				return VK_ERROR_DEVICE_LOST;
+			}
 		}
 		cwm->present_vk_wait_total_ns += after_vk_wait_ns - before_vk_wait_ns;
 		cwm->present_drawable_wait_total_ns += after_drawable_ns - after_vk_wait_ns;
-		cwm->present_metal_wait_total_ns += after_metal_wait_ns - after_drawable_ns;
+		if (!async_present) {
+			cwm->present_metal_wait_total_ns += after_metal_wait_ns - after_drawable_ns;
+		}
 	}
 
 	if (cwm->trace_present != NULL) {
 		uint64_t latest_output_ns = atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
 		fprintf(cwm->trace_present,
-		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\n",
+		        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g,%u,%u,%llu\n",
 		        (unsigned long long)frame_id, (unsigned long long)before_vk_wait_ns, desired_present_time_ns,
 		        desired_present_time_ns - (int64_t)before_vk_wait_ns, (unsigned long long)target_output_ns,
 		        (int64_t)target_output_ns - desired_present_time_ns, (unsigned long long)metal_request_ns,
@@ -802,7 +973,8 @@ comp_window_macos_present(struct comp_target *ct,
 		        (unsigned long long)timeline_semaphore_value, wait_mode, (unsigned long long)after_vk_wait_ns,
 		        (unsigned long long)after_drawable_ns, (unsigned long long)before_present_call_ns,
 		        (unsigned long long)after_present_call_ns, (unsigned long long)after_commit_ns,
-		        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s);
+		        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s,
+		        async_present ? 1u : 0u, shared_event_wait ? 1u : 0u, (unsigned long long)image_reuse_wait_ns);
 		cwm->trace_present_rows++;
 		if (cwm->trace_present_rows % 256 == 0) {
 			fflush(cwm->trace_present);
@@ -829,10 +1001,10 @@ comp_window_macos_present(struct comp_target *ct,
 	cwm->last_present_ns = now_ns;
 	if (cwm->present_sample_count == 240) {
 		double average_ms = (double)cwm->present_total_ns / (double)cwm->present_sample_count / 1000000.0;
-		COMP_INFO(ct->c, "macOS completed-frame cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/240",
+		COMP_INFO(ct->c, "macOS present-call return cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/240",
 		          average_ms, (double)cwm->present_min_ns / 1000000.0, (double)cwm->present_max_ns / 1000000.0,
 		          (unsigned long long)cwm->present_missed_intervals);
-		COMP_INFO(ct->c, "macOS presentation waits: Vulkan %.3fms, drawable %.3fms, Metal %.3fms",
+		COMP_INFO(ct->c, "macOS presentation CPU waits: Vulkan %.3fms, drawable %.3fms, synchronous Metal %.3fms",
 		          (double)cwm->present_vk_wait_total_ns / 240.0 / 1000000.0,
 		          (double)cwm->present_drawable_wait_total_ns / 240.0 / 1000000.0,
 		          (double)cwm->present_metal_wait_total_ns / 240.0 / 1000000.0);
@@ -1014,8 +1186,13 @@ comp_window_macos_destroy(struct comp_target *ct)
 		CVDisplayLinkRelease(cwm->display_link);
 		cwm->display_link = NULL;
 	}
+	macos_wait_for_inflight_presents(cwm);
 	macos_timing_trace_close(cwm);
 	comp_window_macos_free_images(cwm);
+	if (cwm->render_complete_event != nil) {
+		[cwm->render_complete_event release];
+		cwm->render_complete_event = nil;
+	}
 	if (ct->semaphores.render_complete != VK_NULL_HANDLE) {
 		struct vk_bundle *vk = get_vk(cwm);
 		vk->vkDestroySemaphore(vk->device, ct->semaphores.render_complete, NULL);
@@ -1038,6 +1215,7 @@ struct comp_target *
 comp_window_macos_create(struct comp_compositor *c)
 {
 	struct comp_window_macos *cwm = U_TYPED_CALLOC(struct comp_window_macos);
+	cwm->present_command_group = dispatch_group_create();
 	macos_timing_trace_open(cwm);
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
@@ -1087,6 +1265,10 @@ create_target(const struct comp_target_factory *ctf, struct comp_compositor *c, 
 	return true;
 }
 
+static const char *macos_optional_device_extensions[] = {
+	VK_EXT_METAL_OBJECTS_EXTENSION_NAME,
+};
+
 const struct comp_target_factory comp_target_factory_macos = {
 	.name = "macOS Metal Window",
 	.identifier = "macos",
@@ -1095,8 +1277,8 @@ const struct comp_target_factory comp_target_factory_macos = {
 	.required_instance_version = 0,
 	.required_instance_extensions = NULL,
 	.required_instance_extension_count = 0,
-	.optional_device_extensions = NULL,
-	.optional_device_extension_count = 0,
+	.optional_device_extensions = macos_optional_device_extensions,
+	.optional_device_extension_count = ARRAY_SIZE(macos_optional_device_extensions),
 	.detect = detect,
 	.create_target = create_target,
 };
