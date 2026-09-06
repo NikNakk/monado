@@ -1,0 +1,6 @@
+version: "Apple Swift version 6.1.2 (swiftlang-6.1.2.1.2 clang-1700.0.13.5)"
+options: "73bf16ced7fd352c815b01113b35a6f5451a7d90e984f3826342046e5dca38e3"
+build_start_time: [1788688452, 727081000]
+build_end_time: [1788688460, 536394000]
+inputs:
+  "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/Sources/MetalLatencyProbe/main.swift": [1788688446, 908133291]

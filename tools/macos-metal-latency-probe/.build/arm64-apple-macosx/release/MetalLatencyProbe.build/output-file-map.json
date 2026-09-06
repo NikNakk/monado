@@ -1,0 +1,12 @@
+{
+  "": {
+    "dependencies": "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/MetalLatencyProbe.d",
+    "object": "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/MetalLatencyProbe.o",
+    "swift-dependencies": "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/master.swiftdeps"
+  },
+  "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/Sources/MetalLatencyProbe/main.swift": {
+    "object": "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/main.swift.o",
+    "swiftmodule": "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/main.swiftdeps"
+  }
+}
