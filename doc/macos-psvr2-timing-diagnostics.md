@@ -103,7 +103,6 @@ The first comparisons to make are:
 - `desired_present_time_ns` versus actual Metal submission/completion/presented time;
 - whether CVDisplayLink `inOutputTime` is offset from the host monotonic clock or from the physical DP raster by approximately one refresh interval.
 
-
 ## Clock-domain and presentation fixes
 
 The diagnostic branch now also fixes the timing defects exposed by the first capture:
@@ -116,7 +115,6 @@ The diagnostic branch now also fixes the timing defects exposed by the first cap
 
 A post-fix capture therefore produces six CSVs: `imu`, `slam`, `pose`, `present`, `presented`, and `vblank`.
 
-
 ## Next-output scheduling and narrow render wait
 
 After the second capture showed presentation landing one output later than the upcoming CoreVideo slot, the macOS target now:
@@ -126,18 +124,15 @@ After the second capture showed presentation landing one output later than the u
 - defaults to 2 ms minimum lead (`XRT_MACOS_PRESENT_MIN_LEAD_US=2000`) so Metal has enough time for the IOSurface-to-drawable blit without gratuitously adding a whole refresh;
 - records the selected `target_output_ns`, wait mode, and actual-present-minus-target error in the trace.
 
-
 ## Timeline semaphore and Metal N-1 request
 
 The macOS target now creates a Vulkan timeline semaphore for `render_complete` during post-Vulkan initialization when timeline semaphores are available. The renderer signals the current frame ID and the Metal target waits only for that value before touching the IOSurface. The semaphore is destroyed with the target.
 
 The intended physical output remains `target_output_ns`, but Metal's `presentDrawable:atTime:` request is now one display period earlier (`metal_request_ns = target_output_ns - display_period_ns`). This is an evidence-driven calibration from the previous capture, where requesting output N landed on N+1 in ~90% of frames. Both timestamps are logged separately so the next capture can verify whether requesting N-1 lands on N.
 
-
 ## Tunable Metal pre-latch bias
 
 The fixed one-refresh bias was already in the past by the time Metal was called. The target now requests a tunable offset before the intended output slot. `XRT_MACOS_PRESENT_PRELATCH_US` defaults to 2000. `metal_request_minus_call_ns` records whether the requested Metal time is still in the future at the call site.
-
 
 ## Actual presentation feedback into fake pacing
 
@@ -147,6 +142,125 @@ The Metal callback only publishes an atomic sample. The compositor thread consum
 
 The intended effect is to align `predicted_display_time_ns` (and therefore late pose sampling/ATW prediction) with the display time actually reported by CAMetalLayer, even if CoreAnimation retains a stable one-refresh presentation pipeline. `presented.csv` now records `observed_present_offset_ns`.
 
+## Linux/Fusion tracking baseline and macOS comparison
+
+A separate `monado-cli pose-dump` diagnostic was used to test whether the visible macOS judder could originate before the compositor, for example because macOS receives older SLAM poses or because PSVR2 pose prediction behaves differently from Linux.
+
+### Test environments
+
+The same PS VR2 headset and diagnostic code were compared in two environments:
+
+- **macOS:** native Apple Silicon macOS build from this PSVR2 work;
+- **Linux reference:** **Ubuntu ARM64 running under VMware Fusion on the same Mac**, with the PS VR2 USB device passed through to the guest.
+
+The Linux result is therefore a useful implementation/reference comparison, not a bare-metal Linux latency benchmark. USB virtualization and guest scheduling can add latency and jitter of their own. The Linux VM was used only to exercise the PSVR2 USB/tracking path; it was not expected to drive the headset display through Fusion.
+
+### 200 Hz pose-prediction sweep
+
+The first diagnostic sampled `xrt_device_get_tracked_pose()` at 200 Hz. For each common base query time it requested poses at 0, +5, +10, +15, and +20 ms. This tests the boundary after the PSVR2 driver/SLAM/dead-reckoning path but before compositor presentation timing.
+
+The Linux/Fusion run contained 6,656 rows over 33.31 s. Its median sampling interval was 5.000 ms and p99 was about 5.18 ms. After initial tracking acquisition, calls succeeded and returned fully valid tracking. Translational prediction scaled almost perfectly with the requested horizon, and rotational prediction likewise matched angular velocity times horizon. At +20 ms, rotational correlation was about 0.99998.
+
+The comparable macOS run contained 6,203 rows over about 31 s. The headset was moved somewhat faster on macOS, so raw predicted displacement was larger, but after accounting for movement speed the prediction behaviour was very similar. Median sampling interval was about 4.996 ms. macOS had somewhat more ordinary scheduler jitter at 200 Hz, but no corresponding tracking discontinuity. Rotational prediction correlation was greater than 0.99997.
+
+Measurable backwards movement between increasing prediction horizons was negligible. The largest relevant macOS reversal was only around hundredths of a millimetre. Linux/Fusion actually showed a larger sequential-call update artefact in one row, confirming that tiny non-monotonic within-row changes can occur when a new underlying tracker state arrives between successive horizon queries.
+
+A further comparison of each +5 ms prediction against the subsequently observed 0 ms pose initially showed larger absolute corrections on macOS, but the macOS run used faster movements. Stratifying by translational speed made the two platforms very similar:
+
+| Translational speed | macOS median correction | Linux/Fusion median correction |
+| --- | ---: | ---: |
+| 0.02-0.10 m/s | ~0.54 mm | ~0.51 mm |
+| 0.10-0.20 m/s | ~1.22 mm | ~1.04 mm |
+| 0.20-0.40 m/s | ~2.04 mm | ~2.06 mm |
+| 0.40-0.80 m/s | ~3.34 mm | ~3.88 mm |
+
+The prediction sweep therefore did **not** find a macOS-specific defect in `xrt_device_get_tracked_pose()` prediction that resembles the visible backwards judder.
+
+### 1000 Hz SLAM availability diagnostic
+
+Prediction can look correct even when its underlying SLAM estimate is older on one platform. A second diagnostic therefore exposed the PSVR2 driver's raw VTS timing through a small diagnostics API and sampled it at 1000 Hz.
+
+For each sample the CLI recorded the latest SLAM VTS timestamp, that timestamp mapped into Monado's monotonic host clock, the latest IMU VTS timestamp in the same clock domain, the age of the latest SLAM pose at query time, and the latency when the polling CLI first observed a new SLAM timestamp.
+
+`slam_first_seen_latency_ns` is an upper bound on true availability latency because a newly published pose is discovered on the next poll. At 1000 Hz the observation uncertainty is approximately 1 ms apart from occasional scheduler stalls. Startup samples are excluded from the latency summary because the VTS-to-host mapping is still settling and can briefly produce impossible ages.
+
+The two platforms were essentially indistinguishable:
+
+| Metric | Linux/Fusion | macOS |
+| --- | ---: | ---: |
+| Median SLAM update interval | 16.683 ms | 16.683 ms |
+| p95 SLAM update interval | ~16.96 ms | ~17.00 ms |
+| Median first-seen SLAM latency | ~23.97-24.00 ms | ~22.95 ms |
+| p95 first-seen SLAM latency | ~28.27-28.28 ms | ~27.88-27.89 ms |
+| p99 first-seen SLAM latency | ~29.23 ms | ~28.52 ms |
+| Median latest-SLAM age at arbitrary query | ~31.95-32.0 ms | ~31.51 ms |
+| Median IMU timestamp lead over new SLAM pose | ~23.04 ms | ~22.5-22.6 ms |
+
+The 16.683 ms interval corresponds to approximately 60 Hz SLAM output on both platforms. The approximately 23-24 ms delay from SLAM pose timestamp to first observation is independently supported by the latest-IMU-minus-SLAM timestamp difference, which is also around 23 ms and is strongly correlated with the first-seen measurement. This is consistent with Monado receiving a SLAM pose that is already tens of milliseconds old and dead-reckoning it forward with newer IMU samples.
+
+The roughly 1 ms lower median first-seen latency on macOS is too small to treat as meaningful, particularly because the Linux reference is virtualized. The important result is that there is **no evidence for a substantial extra macOS SLAM delay**.
+
+Both systems sustained the 1 kHz poller adequately. Median polling interval was about 1.000 ms on both. macOS showed somewhat more ordinary p95/p99 scheduling jitter, while Linux/Fusion had a few larger rare stalls in these particular runs. These differences do not resemble the persistent visible headset judder and do not materially alter the latency conclusion.
+
+### Tracking-side interpretation
+
+Together, these experiments substantially reduce the likelihood that the visible macOS judder originates in the PSVR2 tracking path. The following stages look broadly comparable between native macOS and the Ubuntu/Fusion reference:
+
+```text
+PS VR2 SLAM/IMU data
+        |
+        v
+USB/PSVR2 driver
+        |
+        v
+SLAM relation history
+        |
+        v
+dead-reckoning prediction
+        |
+        v
+xrt_device_get_tracked_pose()
+```
+
+Specifically:
+
+1. macOS prediction over 0-20 ms horizons is smooth and quantitatively very similar to Linux/Fusion;
+2. macOS does not receive materially older SLAM poses than the Linux/Fusion reference;
+3. the PSVR2 SLAM stream is approximately 60 Hz on both;
+4. newly available SLAM poses are about 23-24 ms old on both, with newer IMU data available for forward prediction.
+
+This does **not** prove that every possible tracking-side issue is excluded, and the Linux reference is virtualized rather than bare metal. It does, however, make a large macOS-specific SLAM/prediction latency defect an unlikely explanation for the observed backwards judder.
+
+Unless new tracking evidence appears, investigation should therefore concentrate after pose selection:
+
+```text
+predicted/view pose used for frame
+        |
+        v
+ATW / distortion compositor
+        |
+        v
+Vulkan render completion
+        |
+        v
+IOSurface / Metal presentation handoff
+        |
+        v
+CAMetalDrawable scheduling
+        |
+        v
+actual PS VR2 presentation / vblank / scanout
+```
+
+The CLI prediction diagnostic can be run at 200 Hz; the SLAM availability comparison should use 1000 Hz for approximately 1 ms polling resolution:
+
+```sh
+./build/src/xrt/targets/cli/monado-cli pose-dump 1000 \
+  > slam-latency.csv \
+  2> slam-latency.log
+```
+
+The CLI accesses SLAM timing through a small PSVR2 diagnostics interface rather than including the private PSVR2 driver header, keeping libusb and other private driver dependencies confined to the driver target.
 
 ## Positional prediction diagnostics and filtered velocity A/B
 
