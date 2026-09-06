@@ -1,4 +1,4 @@
-name: Apply macOS late-render experiment v3
+name: Apply macOS late-render experiment v4
 
 on:
   push:
@@ -21,8 +21,341 @@ jobs:
       - name: Apply late-render patch
         shell: bash
         run: |
-          printf '%s' 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpwID0gUGF0aCgic3JjL3hydC9jb21wb3NpdG9yL21haW4vY29tcF9yZW5kZXJlci5jIikKcyA9IHAucmVhZF90ZXh0KCkKCmRlZiByZXBsKG9sZCwgbmV3KToKICAgIGdsb2JhbCBzCiAgICBpZiBvbGQgbm90IGluIHM6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiRXhwZWN0ZWQgc291cmNlIGZyYWdtZW50IG5vdCBmb3VuZDpcbiIgKyBvbGRbOjUwMF0pCiAgICBzID0gcy5yZXBsYWNlKG9sZCwgbmV3LCAxKQoKcmVwbCgKIiIiI2luY2x1ZGUgPG1hdGguaD4KCiIiIiwKIiIiI2luY2x1ZGUgPG1hdGguaD4KCiNpZmRlZiBYUlRfT1NfT1NYCiNpbmNsdWRlIDx0aW1lLmg+CiNpbmNsdWRlIDx1bmlzdGQuaD4KI2VuZGlmCgoiIiIpCgpyZXBsKAoiIiJERUJVR19HRVRfT05DRV9CT09MX09QVElPTihsb2dfYXBwbGVfc2FtcGxlcywgIlhSVF9DT01QT1NJVE9SX0xPR19BUFBMRV9TQU1QTEVTIiwgZmFsc2UpCiNkZWZpbmUgTE9HX0ZSQU1FX0xBRyIiIiwKIiIiREVCVUdfR0VUX09OQ0VfQk9PTF9PUFRJT04obG9nX2FwcGxlX3NhbXBsZXMsICJYUlRfQ09NUE9TSVRPUl9MT0dfQVBQTEVfU0FNUExFUyIsIGZhbHNlKQojaWZkZWYgWFJUX09TX09TWERFQlVHX0dFVF9PTkNFX05VTV9PUFRJT04obWFjb3NfbGF0ZV9yZW5kZXJfbGVhZF91cywgIlhSVF9NQUNPU19MQVRFX1JFTkRFUl9MRUFEX1VTIiwgMCkKREVCVUdfR0VUX09OQ0VfQk9PTF9PUFRJT04oY29tcF9wc3ZyMl90aW1pbmdfdHJhY2UsICJQU1ZSMl9USU1JTkdfVFJBQ0UiLCBmYWxzZSkKI2VuZGlmCiNkZWZpbmUgTE9HX0ZSQU1FX0xBRyIiIikKCnJlcGwoCiIiIgledHN0cnVjdCBjb21wX21pcnJvcl90b19kZWJ1Z19ndWkgbWlycm9yX3RvX2RlYnVnX2d1aTsKCi8vISBAfQoiIiIsCiIiIgledHN0cnVjdCBjb21wX21pcnJvcl90b19kZWJ1Z19ndWkgbWlycm9yX3RvX2RlYnVnX2d1aTsKCiNpZmRlZiBYUlRfT1NfT1NYCVNBVkUgKmZpbGU7CiNpZmRlZiBYUlRfT1NfT1NYCglGSUxFICpsYXRlX3JlbmRlcl90cmFjZTsKCXVpbnQ2NF90IGxhdGVfcmVuZGVyX3RyYWNlX3Jvd3M7CglpbnQ2NF90IGxhdGVfcmVuZGVyX3RhcmdldF9uczsKCWludDY0X3QgbGF0ZV9yZW5kZXJfd2FpdF9iZWdpbl9uczsKCWludDY0X3QgbGF0ZV9yZW5kZXJfd2FpdF9lbmRfbnM7CglpbnQ2NF90IGxhdGVfcmVuZGVyX3Bvc2VfYmVnaW5fbnM7CglpbnQ2NF90IGxhdGVfcmVuZGVyX3Bvc2VfZW5kX25zOwojZW5kaWYKCgkvLyEgQH0KIiIiKQoKbWFya2VyID0gIiIic3RhdGljIHZvaWQKcmVuZGVyZXJfd2FpdF9xdWV1ZV9pZGxlKHN0cnVjdCBjb21wX3JlbmRlcmVyICpyKQoiIiIKCmhlbHBlcnMgPSByIiIiI2lmZGVmIFhSVF9PU19PU1gKc3RhdGljIGludDY0X3QKcmVuZGVyZXJfZ2V0X21hY29zX2xhdGVfcmVuZGVyX2xlYWRfdXModm9pZCkKewoJaW50NjRfdCBsZWFkX3VzID0gZGVidWdfZ2V0X251bV9vcHRpb25fbWFjb3NfbGF0ZV9yZW5kZXJfbGVhZF91cygpOwoJcmV0dXJuIGxlYWRfdXMgPiAwID8gbGVhZF91cyA6IDA7Cn0KCnN0YXRpYyB2b2lkCnJlbmRlcmVyX2xhdGVfcmVuZGVyX3RyYWNlX29wZW4oc3RydWN0IGNvbXBfcmVuZGVyZXIgKnIpCnsKCWlmICghZGVidWdfZ2V0X2Jvb2xfb3B0aW9uX2NvbXBfcHN2cjJfdGltaW5nX3RyYWNlKCkpIHsKCQlyZXR1cm47Cgl9CgoJY29uc3QgY2hhciAqZGlyID0gZ2V0ZW52KCJQU1ZSMl9USU1JTkdfVFJBQ0VfRElSIik7CglpZiAoZGlyID09IE5VTEwgfHwgZGlyWzBdID09ICdcMCcpIHsKCQlkaXIgPSAiL3RtcCI7Cgl9CgoJY2hhciBwYXRoWzEwMjRdOwoJc2l6ZV90IGRpcl9sZW4gPSBzdHJsZW4oZGlyKTsKCWNvbnN0IGNoYXIgKnNlcGFyYXRvciA9IGRpcl9sZW4gPiAwICYmIGRpcltkaXJfbGVuIC0gMV0gPT0gJy8nID8gIiIgOiAiLyI7CglzbnByaW50ZihwYXRoLCBzaXplb2YocGF0aCksICIlcyVzbW9uYWRvX3BzdnIyXyVkX2xhdGVfcmVuZGVyLmNzdiIsIGRpciwgc2VwYXJhdG9yLCAoaW50KWdldHBpZCgpKTsKCglyLT5sYXRlX3JlbmRlcl90cmFjZSA9IGZvcGVuKHBhdGgsICJ3Iik7CglpZiAoci0+bGF0ZV9yZW5kZXJfdHJhY2UgPT0gTlVMTCkgewoJCUNPTVBfV0FSTihyLT5jLCAiQ291bGQgbm90IG9wZW4gbWFjT1MgbGF0ZS1yZW5kZXIgdHJhY2UgJyVzJyIsIHBhdGgpOwoJCXJldHVybjsKCX0KCXNldHZidWYoci0+bGF0ZV9yZW5kZXJfdHJhY2UsIE5VTEwsIF9JT0ZCRiwgNjQgKiAxMDI0KTsKCWZwdXRzKCJmcmFtZV9pZCxsZWFkX3VzLGRlc2lyZWRfcHJlc2VudF9ucyxwcmVkaWN0ZWRfZGlzcGxheV9ucyxsYXRlX3JlbmRlcl90YXJnZXRfbnMsd2FpdF9iZWdpbl9ucyx3YWl0X2VuZF9ucywiCgkgICAgICAid2FpdF9yZXF1ZXN0ZWRfbnMsd2FpdF9hY3R1YWxfbnMsd2FrZV9sYXRlbmVzc19ucyxwb3NlX3F1ZXJ5X2JlZ2luX25zLHBvc2VfcXVlcnlfZW5kX25zLCIKCSAgICAgICJwb3NlX3F1ZXJ5X2R1cmF0aW9uX25zLHBvc2VfYmVnaW5fbWludXNfdGFyZ2V0X25zLHBvc2VfYmVnaW5fdG9fcHJlZGljdGVkX25zXG4iLAoJICAgICAgci0+bGF0ZV9yZW5kZXJfdHJhY2UpOwoJZmZsdXNoKHItPmxhdGVfcmVuZGVyX3RyYWNlKTsKfQoKc3RhdGljIHZvaWQKcmVuZGVyZXJfbGF0ZV9yZW5kZXJfdHJhY2VfY2xvc2Uoc3RydWN0IGNvbXBfcmVuZGVyZXIgKnIpCnsKCWlmIChyLT5sYXRlX3JlbmRlcl90cmFjZSA9PSBOVUxMKSB7CgkJcmV0dXJuOwoJfQoJZmZsdXNoKHItPmxhdGVfcmVuZGVyX3RyYWNlKTsKCWZjbG9zZShyLT5sYXRlX3JlbmRlcl90cmFjZSk7CglyLT5sYXRlX3JlbmRlcl90cmFjZSA9IE5VTEw7Cn0KCnN0YXRpYyB2b2lkCnJlbmRlcmVyX2xhdGVfcmVuZGVyX3dhaXQoc3RydWN0IGNvbXBfcmVuZGVyZXIgKnIpCnsKCXItPmxhdGVfcmVuZGVyX3RhcmdldF9ucyA9IDA7CglyLT5sYXRlX3JlbmRlcl9wb3NlX2JlZ2luX25zID0gMDsKCXItPmxhdGVfcmVuZGVyX3Bvc2VfZW5kX25zID0gMDsKCXItPmxhdGVfcmVuZGVyX3dhaXRfYmVnaW5fbnMgPSAoaW50NjRfdClvc19tb25vdG9uaWNfZ2V0X25zKCk7CglyLT5sYXRlX3JlbmRlcl93YWl0X2VuZF9ucyA9IHItPmxhdGVfcmVuZGVyX3dhaXRfYmVnaW5fbnM7CgppbnQ2NF90IGxlYWRfdXMgPSByZW5kZXJlcl9nZXRfbWFjb3NfbGF0ZV9yZW5kZXJfbGVhZF91cygpOwoJaW50NjRfdCBwcmVkaWN0ZWRfbnMgPSByLT5jLT5mcmFtZS5yZW5kZXJpbmcucHJlZGljdGVkX2Rpc3BsYXlfdGltZV9uczsKCWlmIChsZWFkX3VzIDw9IDAgfHwgcHJlZGljdGVkX25zIDw9IDAgfHwgbGVhZF91cyA+IElOVDY0X01BWCAvIDEwMDApIHsKCQlyZXR1cm47Cgl9CgppbnQ2NF90IGxlYWRfbnMgPSBsZWFkX3VzICogMTAwMDsKCWlmIChwcmVkaWN0ZWRfbnMgPD0gbGVhZF9ucykgewoJCXJldHVybjsKCX0KCmludDY0X3QgdGFyZ2V0X25zID0gcHJlZGljdGVkX25zIC0gbGVhZF9uczsKCXItPmxhdGVfcmVuZGVyX3RhcmdldF9ucyA9IHRhcmdldF9uczsKCi8qCgkqIFNsZWVwIG1vc3Qgb2YgdGhlIGludGVydmFsLCB0aGVuIHNwaW4gZm9yIHRoZSBmaW5hbCAwLjUgbXMuIFRoaXMgaXMKCSAqIGRlbGliZXJhdGVseSBhIGRpYWdub3N0aWNzLW9ubHkgcGF0aDogaXQgbWluaW1pemVzIHdha2Ugaml0dGVyIHdpdGhvdXQKCSAqIGNoYW5naW5nIG5vcm1hbCBjb21wb3NpdG9yIHNjaGVkdWxpbmcgd2hlbiB0aGUgb3B0aW9uIGlzIHVuc2V0LgoJICovCgljb25zdCBpbnQ2NF90IHNwaW5fbWFyZ2luX25zID0gNTAwMDAwOwoJZm9yICg7OykgewoJCWludDY0X3Qgbm93X25zID0gKGludDY0X3Qpb3NfbW9ub3RvbmljX2dldF9ucygpOwoJCWlmIChub3dfbnMgPj0gdGFyZ2V0X25zKSB7CgkJCXItPmxhdGVfcmVuZGVyX3dhaXRfZW5kX25zID0gbm93X25zOwoJCQlicmVhazsKCQl9CgoJCWludDY0X3QgcmVtYWluaW5nX25zID0gdGFyZ2V0X25zIC0gbm93X25zOwoJCWlmIChyZW1haW5nX25zID4gc3Bpbl9tYXJnaW5fbnMpIHsKCQkJaW50NjRfdCBzbGVlcF9ucyA9IHJlbWFpbmluZ19ucyAtIHNwaW5fbWFyZ2luX25zOwoJCQlzdHJ1Y3QgdGltZXNwZWMgdHMgPSB7CgkJCSAgICAudHZfc2VjID0gKHRpbWVfdCkoc2xlZXBfbnMgLyAxMDAwMDAwMDAwTEwpLAoJCQkgICAgLnR2X25zZWMgPSAobG9uZykoc2xlZXBfbnMgJSAxMDAwMDAwMDAwTEwpLAoJCQl9OwoJCQkodm9pZCluYW5vc2xlZXAoJnRzLCBOVUxMKTsKCQl9Cgl9Cn0KCnN0YXRpYyB2b2lkCnJlbmRlcmVyX2xhdGVfcmVuZGVyX3RyYWNlX2ZyYW1lKHN0cnVjdCBjb21wX3JlbmRlcmVyICpyKQp7CglpZiAoci0+bGF0ZV9yZW5kZXJfdHJhY2UgPT0gTlVMTCkgewoJCXJldHVybjsKCX0KCmludDY0X3QgbGVhZF91cyA9IHJlbmRlcl9nZXRfbWFjb3NfbGF0ZV9yZW5kZXJfbGVhZF91cygpOwoJaW50NjRfdCB3YWl0X3JlcXVlc3RlZF9ucyA9CgkgICAgci0+bGF0ZV9yZW5kZXJfdGFyZ2V0X25zID4gci0+bGF0ZV9yZW5kZXJfd2FpdF9iZWdpbl9ucwoJICAgICAgICA/IHItPmxhdGVfcmVuZGVyX3RhcmdldF9ucyAtIHItPmxhdGVfcmVuZGVyX3dhaXRfYmVnaW5fbnMKCSAgICAgICAgOiAwOwoJaW50NjRfdCB3YWl0X2FjdHVhbF9ucyA9CgkgICAgci0+bGF0ZV9yZW5kZXJfd2FpdF9lbmRfbnMgPj0gci0+bGF0ZV9yZW5kZXJfd2FpdF9iZWdpbl9ucwoJICAgICAgICA/IHItPmxhdGVfcmVuZGVyX3dhaXRfZW5kX25zIC0gci0+bGF0ZV9yZW5kZXJfd2FpdF9iZWdpbl9ucwoJICAgICAgICA6IDA7CglpbnQ2NF90IHdha2VfbGF0ZW5lc3NfbnMgPQoJICAgIHItPmxhdGVfcmVuZGVyX3RhcmdldF9ucyAhPSAwID8gci0+bGF0ZV9yZW5kZXJfd2FpdF9lbmRfbnMgLSByLT5sYXRlX3JlbmRlcl90YXJnZXRfbnMgOiAwOwoJaW50NjRfdCBwb3NlX2R1cmF0aW9uX25zID0KCSAgICByLT5sYXRlX3JlbmRlcl9wb3NlX2JlZ2luX25zICE9IDAgJiYgci0+bGF0ZV9yZW5kZXJfcG9zZV9lbmRfbnMgPj0gci0+bGF0ZV9yZW5kZXJfcG9zZV9iZWdpbl9ucwoJICAgICAgICA/IHItPmxhdGVfcmVuZGVyX3Bvc2VfZW5kX25zIC0gci0+bGF0ZV9yZW5kZXJfcG9zZV9iZWdpbl9ucwoJICAgICAgICA6IDA7CglpbnQ2NF90IHBvc2VfYmVnaW5fbWludXNfdGFyZ2V0X25zID0KCSAgICByLT5sYXRlX3JlbmRlcl90YXJnZXRfbnMgIT0gMCAmJiByLT5sYXRlX3JlbmRlcl9wb3NlX2JlZ2luX25zICE9IDAKCSAgICAgICAgPyByLT5sYXRlX3JlbmRlcl9wb3NlX2JlZ2luX25zIC0gci0+bGF0ZV9yZW5kZXJfdGFyZ2V0X25zCgkgICAgICAgIDogMDsKCWludDY0X3QgcG9zZV9iZWdpbl90b19wcmVkaWN0ZWRfbnMgPQoJICAgIHItPmxhdGVfcmVuZGVyX3Bvc2VfYmVnaW5fbnMgIT0gMAoJICAgICAgICA/IHItPmMtPmZyYW1lLnJlbmRlcmluZy5wcmVkaWN0ZWRfZGlzcGxheV90aW1lX25zIC0gci0+bGF0ZV9yZW5kZXJfcG9zZV9iZWdpbl9ucwoJICAgICAgICA6IDA7CgpmcHJpbnRmKHItPmxhdGVfcmVuZGVyX3RyYWNlLAoJICAgICAgICAiJWx sZCwlbGxkLCVsbGQsJWx sZCwlbGxkLCVsbGQsJWx sZCwlbGxkLCVsbGQsJWx sZCwlbGxkLCVsbGQsJWx sZCwlbGxkLCVsbGQ XG4iLAoJICAgICAgICAobG9uZyBsb25nKXItPmMtPmZyYW1lLnJlbmRlcmluZy5pZCwgKGxvbmcgbG9uZylsZWFkX3VzLAoJICAgICAgICAobG9uZyBsb25nKXItPmMtPmZyYW1lLnJlbmRlcmluZy5kZXNpcmVkX3ByZXNlbnRfdGltZV9ucywKCSAgICAgICAgKGxvbmcgbG9uZylyLT5jLT5mcmFtZS5yZW5kZXJpbmcucHJlZGljdGVkX2Rpc3BsYXlfdGltZV9ucywgKGxvbmcgbG9uZylyLT5sYXRlX3JlbmRlcl90YXJnZXRfbnMsCgkgICAgICAgIChsb25nIGxvbmcpci0+bGF0ZV9yZW5kZXJfd2FpdF9iZWdpbl9ucywgKGxvbmcgbG9uZylyLT5sYXRlX3JlbmRlcl93YWl0X2VuZF9ucywKCSAgICAgICAgKGxvbmcgbG9uZyl3YWl0X3JlcXVlc3RlZF9ucywgKGxvbmcgbG9uZyl3YWl0X2FjdHVhbF9ucywgKGxvbmcgbG9uZyl3YWtlX2xhdGVuZXNzX25zLAoJICAgICAgICAobG9uZyBsb25nKXItPmxhdGVfcmVuZGVyX3Bvc2VfYmVnaW5fbnMsIChsb25nIGxvbmcpci0+bGF0ZV9yZW5kZXJfcG9zZV9lbmRfbnMsCgkgICAgICAgIChsb25nIGxvbmcpcG9zZV9kdXJhdGlvbl9ucywgKGxvbmcgbG9uZylwb3NlX2JlZ2luX21pbnVzX3RhcmdldF9ucywKCSAgICAgICAgKGxvbmcgbG9uZylwb3NlX2JlZ2luX3RvX3ByZWRpY3RlZF9ucyk7CgpyLT5sYXRlX3JlbmRlcl90cmFjZV9yb3dzKys7CglpZiAoci0+bGF0ZV9yZW5kZXJfdHJhY2Vfcm93cyAlIDI1NiA9PSAwKSB7CgkJZmZsdXNoKHItPmxhdGVfcmVuZGVyX3RyYWNlKTsKCX0KfQojZW5kaWYKCiIiIgoKcmVwbChtYXJrZXIsIGhlbHBlcnMgKyBtYXJrZXIpCgpyZXBsKAoiIiIJLy8gUG9zZSBhdCBiZWdpbm5pbmcgb2Ygc2Nhbm91dAoJeHJ0X3Jlc3VsdF90IHhyZXQgPSB4cnRfZGV2aWNlX2dldF92aWV3X3Bvc2VzKCAvLwoiIiIsCiIiIgkvLyBQb3NlIGF0IGJlZ2lubmluZyBvZiBzY2Fub3V0CiNpZmRlZiBYUlRfT1NfT1NYCXItPmxhdGVfcmVuZGVyX3Bvc2VfYmVnaW5fbnMgPSAoaW50NjRfdClvc19tb25vdG9uaWNfZ2V0X25zKCk7CiNlbmRpZgoJeHJ0X3Jlc3VsdF90IHhyZXQgPSB4cnRfZGV2aWNlX2dldF92aWV3X3Bvc2VzKCAvLwoiIiIpCgpyZXBsKAoiIiIgICAgIHhkZXZfZm92cywgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAvLyBvdXRfZm92cwogICAgeGRldl9wb3Nlc1swXSk7ICAgICAgICAgICAgICAgICAgICAgICAgICAgIC8vCglpZiAoeHJldCAhPSBYUlRfU1VDQ0VTUykgewoiIiIsCiIiIgkgICAgeGRldl9mb3ZzLCAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC8vIG91dF9mb3ZzCiAgICB4ZGV2X3Bvc2VzWzBdKTsgICAgICAgICAgICAgICAgICAgICAgICAgICAgLy8KI2lmZGVmIFhSVF9PU19PU1gJci0+bGF0ZV9yZW5kZXJfcG9zZV9lbmRfbnMgPSAoaW50NjRfdClvc19tb25vdG9uaWNfZ2V0X25zKCk7CiNlbmRpZgoJaWYgKHhyZXQgIT0gWFJUX1NVQ0NFU1MpIHsKIiIiKQoKcmVwbCgKIiIiCQkgICAgeGRldl9mb3ZzLCAgICAgICAgICAgICAgICAgICAgLy8gb3V0X2ZvdnM KCQkgICAgeGRldl9wb3Nlc1sxXSk7ICAgICAgICAgICAgICAgLy8gb3V0X3Bvc2VzCgkJaWYgKHhyZXQgIT0gWFJUX1NVQ0VTUykgewoiIiIsCiIiIgkJICAgIHhkZXZfZm92cywgICAgICAgICAgICAgICAgICAgIC8vIG91dF9mb3ZzCgkJICAgIHhkZXZfcG9zZXNbMV0pOyAgICAgICAgICAgICAgIC8vIG91dF9wb3NlcwojaWZkZWYgWFJUX09TX09TWAkJci0+bGF0ZV9yZW5kZXJfcG9zZV9lbmRfbnMgPSAoaW50NjRfdClvc19tb25vdG9uaWNfZ2V0X25zKCk7CiNlbmRpZgoJCWlmICh4cmV0ICE9IFhSVF9TVUNDRVNTKSB7CiIiIikKCnJlcGwoCiIiIglyLT5jID0gYzsKCSByLT5zZXR0aW5ncyA9ICZjLT5zZXR0aW5nczsKCglyLT5hY3F1aXJlZF9idWZmZXIgPSAtMTsKIiIiLAoiIiIJci0+YyA9IGM7CglyLT5zZXR0aW5ncyA9ICZjLT5zZXR0aW5nczsKCiNpZmRlZiBYUlRfT1NfT1NYCXJlbmRlcmVyX2xhdGVfcmVuZGVyX3RyYWNlX29wZW4ocik7CglpbnQ2NF90IGxhdGVfcmVuZGVyX2xlYWRfdXMgPSByZW5kZXJlcl9nZXRfbWFjb3NfbGF0ZV9yZW5kZXJfbGVhZF91cygpOwoJaWYgKGxhdGVfcmVuZGVyX2xlYWRfdXMgPiAwKSB7CgkJQ09NUF9JTkZPKGMsICJtYWNPUyBsYXRlLXJlbmRlciBleHBlcmltZW50IGVuYWJsZWQ6IHBvc2UvcmVuZGVyIGRpc3BhdGNoIGxlYWQgJWxsZCB1cyIsCgkJICAgICAgICAgIChsb25nIGxvbmcpbGF0ZV9yZW5kZXJfbGVhZF91cyk7Cgl9CiNlbmRpZgoKCSByLT5hY3F1aXJlZF9idWZmZXIgPSAtMTsKIiIiKQoKcmVwbCgKIiIiCVZrUmVzdWx0IHJlcyA9IFZLX1NVQ0NFU1M7CglpZiAodXNlX2NvbXB1dGUpIHsKIiIiLAoiIiIjaWZkZWYgWFJUX09TX09TWAlyZW5kZXJlcl9sYXRlX3JlbmRlcl93YWl0KHIpOw ojZW5kaWYKCiAgICAgVk tUmVzdWx0IHJlcyA9IFZLX1NVQ0NFU1M7CglpZiAodXNlX2NvbXB1dGUpIHsKIiIiKQoKcmVwbCgKIiIiCWlmIChyZXMgIT0gVktfU1VDQ0VTUykgewoJCXJldHVybiBYUlRfRVJST1JfVlVMS0FOOwoJfQoKI2lmZGVmIFhSVF9GRUFUVVJFX1dJTkRPV19QRUVLCiIiLAoiIiIJ aWYgKHJlcyAhPSBWS19TVUNDRVNTKSB7CgkJcmV0dXJuIFhSVF9FUlJPUl9WVUxLQU47Cgl9CgojaWZkZWYgWFJUX09TX09TWAlyZW5kZXJlcl9sYXRlX3JlbmRlcl90cmFjZV9mcmFtZShyKTsKI2VuZGlmCgojaWZkZWYgWFJUX0ZFQVRVUkVfV0lORE9XX1BFRUsKIiIiKQoKcmVwbCgKIiIic3RhdGljIHZvaWQKcmVuZGVyZXJfZmluaShzdHJ1Y3QgY29tcF9yZW5kZXJlciAqcikKewogICAgc3RydWN0IHZrX2J1bmRsZSAq dmsgPSAmci0+Yy0+YmFzZS52azsKIiIiLAoiIiJzdGF0aWMgdm9pZApyZW5kZXJlcl9maW5pKHN0cnVjdCBjb21wX3JlbmRlcmVyICpyKQp7CglzdHJ1Y3Qg dmtfYnVuZGxlICp2ayA9ICZyLT5jLT5iYXNlLnZrOwoKI2lmZGVmIFhSVF9PU19PU1gJcmVuZGVyZXJfbGF0ZV9yZW5kZXJfdHJhY2VfY2xvc2Uocik7CiNlbmRpZgoiIiIpCgpwLndyaXRlX3RleHQocykKCmQgPSBQYXRoKCJkb2MvbWFjb3MtcHN2cjItdGltaW5nLWRpYWdub3N0aWNzLm1kIikKdGV4dCA9IGQucmVhZF90ZXh0KCkKb2xkID0gIi0gYG1vbmFkb19wc3ZyMl88UElEPl92YmxhbmsuY3N2YFxuIgppZiBvbGQgbm90IGluIHRleHQ6CiAgICByYWlzZSBTeXN0ZW1FeGl0KCJUcmFjZS1maWxlIGxpc3QgbWFya2VyIG5vdCBmb3VuZCIpCnRleHQgPSB0ZXh0LnJlcGxhY2Uob2xkLCBvbGQgKyAiLSBgbW9uYWRvX3BzdnIyXzxQSUQ+X2xhdGVfcmVuZGVyLmNzdmBcbiIsIDEpCnRleHQgKz0gciciIiIKIyMgbWFjT1MgbGF0ZS1yZW5kZXIgLyBsYXRlLXBvc2UgZXhwZXJpbWVudAoKYFhSVF9NQUNPU19MQVRFX1JFTkRFUl9MRUFEX1VTYCBpcyBhIG1hY09TLW9ubHkgZGlhZ25vc3RpYyB0aGF0IGRlbGliZXJhdGVseSBob2xkcyB0aGUgY29tcG9zaXRvciBpbW1lZGlhdGVseSBiZWZvcmUgaXRzIGZpbmFsIGdyYXBoaWNzL2NvbXB1dGUgZGlzcGF0Y2guIFRoZSBkZWZhdWx0IGlzIGAwaWAsIHdoaWNoIHByZXNlcnZlcyB0aGUgbm9ybWFsIHNjaGVkdWxpbmcgcGF0aC4gQSBwb3NpdGl2ZSB2YWx1ZSB3YWl0cyB1bnRpbCBhcHByb3hpbWF0ZWx5IGBwcmVkaWN0ZWRfZGlzcGxheV90aW1lX25zIC0gbGVhZGAgYmVmb3JlIGRpc3BhdGNoLCBzbyB0aGUgZXhpc3RpbmcgYGNhbGNfcG9zZV9kYXRhKClgIGNhbGwgc2FtcGxlcyB0cmFja2luZyBsYXRlciB3aGlsZSBzdGlsbCBwcmVkaWN0aW5nIHRvIHRoZSBzYW1lIGRpc3BsYXkgdGltZXN0YW1wLgoKRm9yIGV4YW1wbGU6CgpgYGBzaApleHBvcnQgUFNWUjJfVElNSU5HX1RSQUNFPTEKZXhwb3J0IFhSVF9NQUNPU19MQVRFX1JFTkRFUl9MRUFEX1VTPTE0MDAwCmBgYAoKVGhlIHdhaXQgc2xlZXBzIHVudGlsIDAuNSBtcyBiZWZvcmUgdGhlIHRhcmdldCBhbmQgdGhlbiBzcGlucyB0byByZWR1Y2Ugc2NoZWR1bGVyIHdha2Ugaml0dGVyLiBgbW9uYWRvX3BzdnIyXzxQSUQ+X2xhdGVfcmVuZGVyLmNzdmAgcmVjb3JkcyB0aGUgcmVxdWVzdGVkIGFuZCBhY3R1YWwgd2FpdCwgd2FrZSBsYXRlbmVzcywgcG9zZS1xdWVyeSBiZWdpbi9lbmQgdGltZXN0YW1wcywgYW5kIHRoZSByZW1haW5pbmcgcG9zZS1xdWVyeS10by1wcmVkaWN0ZWQtZGlzcGxheSBob3Jpem9uLiBUaGlzIGlzIGRlbGliZXJhdGVseSBhbiBBL0IgZGlhZ25vc3RpYyByYXRoZXIgdGhhbiB0aGUgZmluYWwgbGF0ZS1sYXRjaGluZyBkZXNpZ24uCgpBIHVzZWZ1bCBpbml0aWFsIHN3ZWVwIGF0IDEyMCBIeiBpcyBgMTYwMDBgLCBgMTQwMDBgLCBgMTMwMDBgLCBhbmQgYDEyMDAwYCBtaWNyb3NlY29uZHMsIGNvbXBhcmluZyBwb3NlLXF1ZXJ5IGhvcml6b24gYW5kIG1pc3NlZC1yZWZyZXNoIHJhdGUgYWdhaW5zdCB0aGUgZGVmYXVsdCBgMGA gYmFzZWxpbmUuCiIiIgpkLndyaXRlX3RleHQodGV4dCkK' | base64 --decode > /tmp/apply-late-render.py
-          python3 /tmp/apply-late-render.py
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/xrt/compositor/main/comp_renderer.c")
+          s = p.read_text()
+
+          def repl(old, new):
+              global s
+              if old not in s:
+                  raise SystemExit("Expected source fragment not found:\n" + old[:500])
+              s = s.replace(old, new, 1)
+
+          repl(
+          """#include <math.h>
+
+          """,
+          """#include <math.h>
+
+          #ifdef XRT_OS_OSX
+          #include <stdint.h>
+          #include <time.h>
+          #include <unistd.h>
+          #endif
+
+          """)
+
+          repl(
+          """DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+          #define LOG_FRAME_LAG""",
+          """DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+          #ifdef XRT_OS_OSX
+          DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)
+          DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+          #endif
+          #define LOG_FRAME_LAG""")
+
+          repl(
+          """\tstruct comp_mirror_to_debug_gui mirror_to_debug_gui;
+
+          \t//! @}
+          """,
+          """\tstruct comp_mirror_to_debug_gui mirror_to_debug_gui;
+
+          #ifdef XRT_OS_OSX
+          \tFILE *late_render_trace;
+          \tuint64_t late_render_trace_rows;
+          \tint64_t late_render_target_ns;
+          \tint64_t late_render_wait_begin_ns;
+          \tint64_t late_render_wait_end_ns;
+          \tint64_t late_render_pose_begin_ns;
+          \tint64_t late_render_pose_end_ns;
+          #endif
+
+          \t//! @}
+          """)
+
+          marker = """static void
+          renderer_wait_queue_idle(struct comp_renderer *r)
+          """
+          helpers = r'''#ifdef XRT_OS_OSX
+          static int64_t
+          renderer_get_macos_late_render_lead_us(void)
+          {
+          	int64_t lead_us = debug_get_num_option_macos_late_render_lead_us();
+          	return lead_us > 0 ? lead_us : 0;
+          }
+
+          static void
+          renderer_late_render_trace_open(struct comp_renderer *r)
+          {
+          	if (!debug_get_bool_option_comp_psvr2_timing_trace()) {
+          		return;
+          	}
+
+          	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+          	if (dir == NULL || dir[0] == '\0') {
+          		dir = "/tmp";
+          	}
+
+          	char path[1024];
+          	size_t dir_len = strlen(dir);
+          	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+          	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_late_render.csv", dir, separator, (int)getpid());
+
+          	r->late_render_trace = fopen(path, "w");
+          	if (r->late_render_trace == NULL) {
+          		COMP_WARN(r->c, "Could not open macOS late-render trace '%s'", path);
+          		return;
+          	}
+
+          	setvbuf(r->late_render_trace, NULL, _IOFBF, 64 * 1024);
+          	fputs("frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
+          	      "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
+          	      "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns\n",
+          	      r->late_render_trace);
+          	fflush(r->late_render_trace);
+          }
+
+          static void
+          renderer_late_render_trace_close(struct comp_renderer *r)
+          {
+          	if (r->late_render_trace == NULL) {
+          		return;
+          	}
+          	fflush(r->late_render_trace);
+          	fclose(r->late_render_trace);
+          	r->late_render_trace = NULL;
+          }
+
+          static void
+          renderer_late_render_wait(struct comp_renderer *r)
+          {
+          	r->late_render_target_ns = 0;
+          	r->late_render_pose_begin_ns = 0;
+          	r->late_render_pose_end_ns = 0;
+          	r->late_render_wait_begin_ns = (int64_t)os_monotonic_get_ns();
+          	r->late_render_wait_end_ns = r->late_render_wait_begin_ns;
+
+          	int64_t lead_us = renderer_get_macos_late_render_lead_us();
+          	int64_t predicted_ns = r->c->frame.rendering.predicted_display_time_ns;
+          	if (lead_us <= 0 || predicted_ns <= 0 || lead_us > INT64_MAX / 1000) {
+          		return;
+          	}
+
+          	int64_t lead_ns = lead_us * 1000;
+          	if (predicted_ns <= lead_ns) {
+          		return;
+          	}
+
+          	int64_t target_ns = predicted_ns - lead_ns;
+          	r->late_render_target_ns = target_ns;
+
+          	/* Sleep most of the interval, then spin for the final 0.5 ms. */
+          	const int64_t spin_margin_ns = 500000;
+          	for (;;) {
+          		int64_t now_ns = (int64_t)os_monotonic_get_ns();
+          		if (now_ns >= target_ns) {
+          			r->late_render_wait_end_ns = now_ns;
+          			break;
+          		}
+
+          		int64_t remaining_ns = target_ns - now_ns;
+          		if (remaining_ns > spin_margin_ns) {
+          			int64_t sleep_ns = remaining_ns - spin_margin_ns;
+          			struct timespec ts = {
+          			    .tv_sec = (time_t)(sleep_ns / 1000000000LL),
+          			    .tv_nsec = (long)(sleep_ns % 1000000000LL),
+          			};
+          			(void)nanosleep(&ts, NULL);
+          		}
+          	}
+          }
+
+          static void
+          renderer_late_render_trace_frame(struct comp_renderer *r)
+          {
+          	if (r->late_render_trace == NULL) {
+          		return;
+          	}
+
+          	int64_t lead_us = renderer_get_macos_late_render_lead_us();
+          	int64_t wait_requested_ns = r->late_render_target_ns > r->late_render_wait_begin_ns
+          	                                ? r->late_render_target_ns - r->late_render_wait_begin_ns
+          	                                : 0;
+          	int64_t wait_actual_ns = r->late_render_wait_end_ns >= r->late_render_wait_begin_ns
+          	                             ? r->late_render_wait_end_ns - r->late_render_wait_begin_ns
+          	                             : 0;
+          	int64_t wake_lateness_ns = r->late_render_target_ns != 0
+          	                               ? r->late_render_wait_end_ns - r->late_render_target_ns
+          	                               : 0;
+          	int64_t pose_duration_ns = r->late_render_pose_begin_ns != 0 &&
+          	                                   r->late_render_pose_end_ns >= r->late_render_pose_begin_ns
+          	                               ? r->late_render_pose_end_ns - r->late_render_pose_begin_ns
+          	                               : 0;
+          	int64_t pose_begin_minus_target_ns = r->late_render_target_ns != 0 && r->late_render_pose_begin_ns != 0
+          	                                         ? r->late_render_pose_begin_ns - r->late_render_target_ns
+          	                                         : 0;
+          	int64_t pose_begin_to_predicted_ns = r->late_render_pose_begin_ns != 0
+          	                                         ? r->c->frame.rendering.predicted_display_time_ns -
+          	                                               r->late_render_pose_begin_ns
+          	                                         : 0;
+
+          	fprintf(r->late_render_trace,
+          	        "%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld\n",
+          	        (long long)r->c->frame.rendering.id, (long long)lead_us,
+          	        (long long)r->c->frame.rendering.desired_present_time_ns,
+          	        (long long)r->c->frame.rendering.predicted_display_time_ns,
+          	        (long long)r->late_render_target_ns, (long long)r->late_render_wait_begin_ns,
+          	        (long long)r->late_render_wait_end_ns, (long long)wait_requested_ns,
+          	        (long long)wait_actual_ns, (long long)wake_lateness_ns,
+          	        (long long)r->late_render_pose_begin_ns, (long long)r->late_render_pose_end_ns,
+          	        (long long)pose_duration_ns, (long long)pose_begin_minus_target_ns,
+          	        (long long)pose_begin_to_predicted_ns);
+
+          	r->late_render_trace_rows++;
+          	if (r->late_render_trace_rows % 256 == 0) {
+          		fflush(r->late_render_trace);
+          	}
+          }
+          #endif
+
+          '''
+          repl(marker, helpers + marker)
+
+          repl(
+          """\t// Pose at beginning of scanout
+          \txrt_result_t xret = xrt_device_get_view_poses( //
+          """,
+          """\t// Pose at beginning of scanout
+          #ifdef XRT_OS_OSX
+          \tr->late_render_pose_begin_ns = (int64_t)os_monotonic_get_ns();
+          #endif
+          \txrt_result_t xret = xrt_device_get_view_poses( //
+          """)
+
+          repl(
+          """\t    xdev_fovs,                                 // out_fovs
+          \t    xdev_poses[0]);                            //
+          \tif (xret != XRT_SUCCESS) {
+          """,
+          """\t    xdev_fovs,                                 // out_fovs
+          \t    xdev_poses[0]);                            //
+          #ifdef XRT_OS_OSX
+          \tr->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();
+          #endif
+          \tif (xret != XRT_SUCCESS) {
+          """)
+
+          repl(
+          """\t\t    xdev_fovs,                    // out_fovs
+          \t\t    xdev_poses[1]);               // out_poses
+          \t\tif (xret != XRT_SUCCESS) {
+          """,
+          """\t\t    xdev_fovs,                    // out_fovs
+          \t\t    xdev_poses[1]);               // out_poses
+          #ifdef XRT_OS_OSX
+          \t\tr->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();
+          #endif
+          \t\tif (xret != XRT_SUCCESS) {
+          """)
+
+          repl(
+          """\tr->c = c;
+          \tr->settings = &c->settings;
+
+          \tr->acquired_buffer = -1;
+          """,
+          """\tr->c = c;
+          \tr->settings = &c->settings;
+
+          #ifdef XRT_OS_OSX
+          \trenderer_late_render_trace_open(r);
+          \tint64_t late_render_lead_us = renderer_get_macos_late_render_lead_us();
+          \tif (late_render_lead_us > 0) {
+          \t\tCOMP_INFO(c, "macOS late-render experiment enabled: pose/render dispatch lead %lld us",
+          \t\t          (long long)late_render_lead_us);
+          \t}
+          #endif
+
+          \tr->acquired_buffer = -1;
+          """)
+
+          repl(
+          """\tVkResult res = VK_SUCCESS;
+          \tif (use_compute) {
+          """,
+          """#ifdef XRT_OS_OSX
+          \trenderer_late_render_wait(r);
+          #endif
+
+          \tVkResult res = VK_SUCCESS;
+          \tif (use_compute) {
+          """)
+
+          repl(
+          """\tif (res != VK_SUCCESS) {
+          \t\treturn XRT_ERROR_VULKAN;
+          \t}
+
+          #ifdef XRT_FEATURE_WINDOW_PEEK
+          """,
+          """\tif (res != VK_SUCCESS) {
+          \t\treturn XRT_ERROR_VULKAN;
+          \t}
+
+          #ifdef XRT_OS_OSX
+          \trenderer_late_render_trace_frame(r);
+          #endif
+
+          #ifdef XRT_FEATURE_WINDOW_PEEK
+          """)
+
+          repl(
+          """static void
+          renderer_fini(struct comp_renderer *r)
+          {
+          \tstruct vk_bundle *vk = &r->c->base.vk;
+          """,
+          """static void
+          renderer_fini(struct comp_renderer *r)
+          {
+          \tstruct vk_bundle *vk = &r->c->base.vk;
+
+          #ifdef XRT_OS_OSX
+          \trenderer_late_render_trace_close(r);
+          #endif
+          """)
+
+          p.write_text(s)
+
+          d = Path("doc/macos-psvr2-timing-diagnostics.md")
+          text = d.read_text()
+          marker = "- `monado_psvr2_<PID>_vblank.csv`\n"
+          if marker not in text:
+              raise SystemExit("Trace-file list marker not found")
+          text = text.replace(marker, marker + "- `monado_psvr2_<PID>_late_render.csv`\n", 1)
+          text += """
+
+          ## macOS late-render / late-pose experiment
+
+          `XRT_MACOS_LATE_RENDER_LEAD_US` is a macOS-only diagnostic that deliberately holds the compositor immediately before its final graphics/compute dispatch. The default is `0`, which preserves the normal scheduling path. A positive value waits until approximately `predicted_display_time_ns - lead` before dispatch, so the existing `calc_pose_data()` call samples tracking later while still predicting to the same display timestamp.
+
+          For example:
+
+          ```sh
+          export PSVR2_TIMING_TRACE=1
+          export XRT_MACOS_LATE_RENDER_LEAD_US=14000
+          ```
+
+          The wait sleeps until 0.5 ms before the target and then spins to reduce scheduler wake jitter. `monado_psvr2_<PID>_late_render.csv` records the requested and actual wait, wake lateness, pose-query begin/end timestamps, and the remaining pose-query-to-predicted-display horizon. This is deliberately an A/B diagnostic rather than the final late-latching design.
+
+          A useful initial sweep at 120 Hz is `16000`, `14000`, `13000`, and `12000` microseconds, comparing pose-query horizon and missed-refresh rate against the default `0` baseline.
+          """
+          d.write_text(text)
+          PY
 
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
