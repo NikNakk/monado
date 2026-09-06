@@ -11,7 +11,7 @@
 
 #include "os/os_time.h"
 
-#include "psvr2/psvr2.h"
+#include "psvr2/psvr2_interface.h"
 
 #include "cli_common.h"
 
@@ -20,22 +20,9 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 
 static volatile sig_atomic_t keep_running = 1;
-
-
-struct psvr2_slam_timing_snapshot
-{
-	bool valid;
-	int timestamp_samples;
-	timepoint_ns slam_vts_ns;
-	timepoint_ns slam_monotonic_ns;
-	timepoint_ns imu_vts_ns;
-	timepoint_ns imu_monotonic_ns;
-	time_duration_ns hw2mono_vts;
-};
 
 
 static void
@@ -43,42 +30,6 @@ handle_signal(int sig)
 {
 	(void)sig;
 	keep_running = 0;
-}
-
-
-static bool
-get_psvr2_slam_timing(struct xrt_device *xdev, struct psvr2_slam_timing_snapshot *out)
-{
-	*out = (struct psvr2_slam_timing_snapshot){0};
-
-	/*
-	 * This command is intended for the PSVR2 tracking diagnostics branch.
-	 * Avoid interpreting another driver's private xrt_device as psvr2_hmd.
-	 */
-	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
-		return false;
-	}
-
-	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
-
-	os_mutex_lock(&hmd->data_lock);
-	out->timestamp_samples = hmd->timestamp_samples;
-	out->slam_vts_ns = hmd->last_slam_vts_ns;
-	out->imu_vts_ns = hmd->last_imu_vts_ns;
-	out->hw2mono_vts = hmd->hw2mono_vts;
-
-	/*
-	 * last_slam_vts_ns and last_imu_vts_ns are in the headset VTS clock
-	 * domain. hw2mono_vts maps that clock into os_monotonic_get_ns().
-	 * This is the same conversion used in psvr2_hmd_get_tracked_pose(),
-	 * only in the opposite direction.
-	 */
-	out->slam_monotonic_ns = out->slam_vts_ns + out->hw2mono_vts;
-	out->imu_monotonic_ns = out->imu_vts_ns + out->hw2mono_vts;
-	out->valid = hmd->timestamp_samples >= TIMESTAMP_SAMPLES && hmd->last_slam_vts_ns != 0;
-	os_mutex_unlock(&hmd->data_lock);
-
-	return true;
 }
 
 
@@ -203,7 +154,6 @@ cli_cmd_pose_dump(int argc, const char **argv)
 
 	if (xret != XRT_SUCCESS || xsysd == NULL) {
 		fprintf(stderr, "Failed to create xrt system: %d\n", (int)xret);
-
 		xrt_instance_destroy(&xi);
 		return 1;
 	}
@@ -213,7 +163,6 @@ cli_cmd_pose_dump(int argc, const char **argv)
 	if (hmd == NULL) {
 		for (uint32_t i = 0; i < XRT_SYSTEM_MAX_DEVICES; i++) {
 			struct xrt_device *xdev = xsysd->static_xdevs[i];
-
 			if (xdev != NULL && xdev->hmd != NULL) {
 				hmd = xdev;
 				break;
@@ -223,19 +172,17 @@ cli_cmd_pose_dump(int argc, const char **argv)
 
 	if (hmd == NULL) {
 		fprintf(stderr, "No HMD found\n");
-
 		xrt_space_overseer_destroy(&xso);
 		xrt_system_devices_destroy(&xsysd);
 		xrt_system_destroy(&xsys);
 		xrt_instance_destroy(&xi);
-
 		return 1;
 	}
 
 	fprintf(stderr, "Using HMD: %s\n", hmd->str);
 
-	struct psvr2_slam_timing_snapshot initial_slam_timing;
-	bool have_psvr2_timing = get_psvr2_slam_timing(hmd, &initial_slam_timing);
+	struct psvr2_slam_timing initial_slam_timing = {0};
+	bool have_psvr2_timing = psvr2_get_slam_timing(hmd, &initial_slam_timing);
 	if (!have_psvr2_timing) {
 		fprintf(stderr, "HMD is not recognised as PSVR2; SLAM timing columns will be zero\n");
 	}
@@ -243,10 +190,6 @@ cli_cmd_pose_dump(int argc, const char **argv)
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 
-	/*
-	 * One row = one common query time plus the current raw PSVR2 SLAM
-	 * timestamp snapshot and five requested prediction horizons.
-	 */
 	printf("sample,query_time_ns,"
 	       "slam_valid,slam_new,slam_vts_ns,slam_monotonic_ns,slam_age_at_query_ns,"
 	       "slam_first_seen_latency_ns,"
@@ -263,22 +206,21 @@ cli_cmd_pose_dump(int argc, const char **argv)
 
 	uint64_t sample = 0;
 	int64_t next_ns = os_monotonic_get_ns();
-	timepoint_ns previous_slam_vts_ns = 0;
+	int64_t previous_slam_vts_ns = 0;
 
 	while (keep_running) {
 		const int64_t query_ns = os_monotonic_get_ns();
 
-		struct psvr2_slam_timing_snapshot slam_timing = {0};
+		struct psvr2_slam_timing slam_timing = {0};
 		if (have_psvr2_timing) {
-			(void)get_psvr2_slam_timing(hmd, &slam_timing);
+			(void)psvr2_get_slam_timing(hmd, &slam_timing);
 		}
 
 		bool slam_new = slam_timing.valid && slam_timing.slam_vts_ns != previous_slam_vts_ns;
-		int64_t slam_age_at_query_ns =
-		    slam_timing.valid ? query_ns - (int64_t)slam_timing.slam_monotonic_ns : -1;
+		int64_t slam_age_at_query_ns = slam_timing.valid ? query_ns - slam_timing.slam_monotonic_ns : -1;
 		int64_t slam_first_seen_latency_ns = slam_new ? slam_age_at_query_ns : -1;
 		int64_t imu_minus_slam_ns =
-		    slam_timing.valid ? (int64_t)slam_timing.imu_monotonic_ns - (int64_t)slam_timing.slam_monotonic_ns : 0;
+		    slam_timing.valid ? slam_timing.imu_monotonic_ns - slam_timing.slam_monotonic_ns : 0;
 
 		if (slam_new) {
 			previous_slam_vts_ns = slam_timing.slam_vts_ns;
@@ -287,12 +229,8 @@ cli_cmd_pose_dump(int argc, const char **argv)
 		struct xrt_space_relation relations[5] = {0};
 		xrt_result_t results[5] = {0};
 
-		/*
-		 * Deliberately make all five queries from the same base timestamp.
-		 */
 		for (size_t i = 0; i < prediction_count; i++) {
 			const int64_t requested_ns = query_ns + prediction_ns[i];
-
 			results[i] = xrt_device_get_tracked_pose(
 			    hmd, XRT_INPUT_GENERIC_HEAD_POSE, requested_ns, &relations[i]);
 		}
@@ -303,19 +241,18 @@ cli_cmd_pose_dump(int argc, const char **argv)
 		       query_ns,
 		       slam_timing.valid ? 1 : 0,
 		       slam_new ? 1 : 0,
-		       (int64_t)slam_timing.slam_vts_ns,
-		       (int64_t)slam_timing.slam_monotonic_ns,
+		       slam_timing.slam_vts_ns,
+		       slam_timing.slam_monotonic_ns,
 		       slam_age_at_query_ns,
 		       slam_first_seen_latency_ns,
-		       (int64_t)slam_timing.imu_vts_ns,
-		       (int64_t)slam_timing.imu_monotonic_ns,
+		       slam_timing.imu_vts_ns,
+		       slam_timing.imu_monotonic_ns,
 		       imu_minus_slam_ns,
-		       (int64_t)slam_timing.hw2mono_vts,
+		       slam_timing.hw2mono_vts_ns,
 		       slam_timing.timestamp_samples);
 
 		for (size_t i = 0; i < prediction_count; i++) {
 			const int64_t requested_ns = query_ns + prediction_ns[i];
-
 			printf(",%" PRIi64 ",", requested_ns);
 			print_relation(&relations[i], results[i]);
 		}
@@ -327,7 +264,6 @@ cli_cmd_pose_dump(int argc, const char **argv)
 		}
 
 		next_ns += interval_ns;
-
 		const int64_t now_ns = os_monotonic_get_ns();
 
 		if (next_ns > now_ns) {
