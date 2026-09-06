@@ -10,6 +10,7 @@ add_executable(
 	cli_cmd_info.c
 	cli_cmd_lighthouse.c
 	cli_cmd_probe.c
+	cli_cmd_pose_dump.c
 	cli_cmd_slambatch.c
 	cli_cmd_test.c
 	cli_common.h
