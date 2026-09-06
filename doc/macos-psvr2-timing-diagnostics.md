@@ -171,3 +171,9 @@ linear horizon and `horizon.csv`, opt-in `PSVR2_FULL_LINEAR_HORIZON` and
 `PSVR2_ACCELERATION_PREDICTION` controls, appended diagnostic columns, and exact
 headset A/B commands. Both new controls default to zero. Test full-horizon raw
 first, then compare acceleration against that same horizon.
+
+## Host-time continuity transition
+
+[Continuity experiment](psvr2-continuity-prediction.md) documents the next opt-in
+`PSVR2_CONTINUITY_PREDICTION=1` candidate, its 4 ms transition and 5 mm cap,
+paired accuracy/continuity replay, limitations, and headset test commands.
