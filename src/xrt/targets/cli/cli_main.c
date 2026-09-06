@@ -58,6 +58,7 @@ main(int argc, const char **argv)
 	}
 	if (strcmp(argv[1], "psvr2-pose") == 0) {
 		return cli_cmd_psvr2_pose(argc, argv);
+	}
 	if (strcmp(argv[1], "pose-dump") == 0) {
 		return cli_cmd_pose_dump(argc, argv);
 	}
