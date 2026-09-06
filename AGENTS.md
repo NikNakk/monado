@@ -2,7 +2,7 @@
 
 This repository contains experimental work toward using a wired Sony PS VR2 as
 a native OpenXR HMD on Apple Silicon macOS. Read this file,
-`doc/macos-port.md`, and `doc/psvr2-macos-timing-diagnostics.md` before changing
+`doc/macos-port.md`, and `doc/macos-psvr2-timing-diagnostics.md` before changing
 the macOS, PSVR2, compositor, or OpenXR paths.
 
 ## Objective and first acceptance test
@@ -74,7 +74,7 @@ Linux comparison is therefore useful for implementation behaviour, but it is
 not a bare-metal Linux latency benchmark.
 
 The detailed methodology and numbers are in
-`doc/psvr2-macos-timing-diagnostics.md`. Current conclusions:
+`doc/macos-psvr2-timing-diagnostics.md`. Current conclusions:
 
 - 0/+5/+10/+15/+20 ms pose prediction from
   `xrt_device_get_tracked_pose()` is quantitatively very similar on macOS and
