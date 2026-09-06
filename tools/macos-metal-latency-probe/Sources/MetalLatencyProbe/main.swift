@@ -33,6 +33,7 @@ private struct Options {
     var gpuBurnPasses = 0
     var waitCompleted = false
     var displaySync = true
+    var framebufferOnly = true
     var frameLimit = 0
     var refreshOverrideHz: Double? = nil
     var tracePath: String? = nil
@@ -48,7 +49,10 @@ private struct Options {
           --cpu-delay-ms N                       sleep after drawable acquisition before encoding/commit
           --gpu-burn-passes N                    synthetic compute passes before the visible clear
           --wait-completed                       call waitUntilCompleted() after commit
+          --vsync                                set CAMetalLayer.displaySyncEnabled = true (default)
           --no-vsync                             set CAMetalLayer.displaySyncEnabled = false
+          --framebuffer-only                     set CAMetalLayer.framebufferOnly = true (default)
+          --no-framebuffer-only                  set CAMetalLayer.framebufferOnly = false
           --frames N                             stop after N submitted frames (0 = run until Ctrl-C/Quit)
           --refresh-hz N                         override requested CAMetalDisplayLink frame-rate range
           --trace PATH                           CSV path (default: /tmp/metal_latency_probe_<pid>.csv)
@@ -86,7 +90,10 @@ private struct Options {
             case "--refresh-hz": o.refreshOverrideHz = Double(try value(arg))
             case "--trace": o.tracePath = try value(arg)
             case "--wait-completed": o.waitCompleted = true
+            case "--vsync": o.displaySync = true
             case "--no-vsync": o.displaySync = false
+            case "--framebuffer-only": o.framebufferOnly = true
+            case "--no-framebuffer-only": o.framebufferOnly = false
             case "--help", "-h":
                 print(usage())
                 exit(0)
@@ -125,6 +132,7 @@ private final class FrameRecord {
     let refreshHz: Double
     let drawableCount: Int
     let displaySync: Bool
+    let framebufferOnly: Bool
     let cpuDelayMs: Double
     let gpuBurnPasses: Int
     let waitCompleted: Bool
@@ -153,6 +161,7 @@ private final class FrameRecord {
         refreshHz: Double,
         drawableCount: Int,
         displaySync: Bool,
+        framebufferOnly: Bool,
         cpuDelayMs: Double,
         gpuBurnPasses: Int,
         waitCompleted: Bool,
@@ -174,6 +183,7 @@ private final class FrameRecord {
         self.refreshHz = refreshHz
         self.drawableCount = drawableCount
         self.displaySync = displaySync
+        self.framebufferOnly = framebufferOnly
         self.cpuDelayMs = cpuDelayMs
         self.gpuBurnPasses = gpuBurnPasses
         self.waitCompleted = waitCompleted
@@ -199,7 +209,7 @@ private final class CSVLogger {
     let path: String
 
     private static let header = [
-        "sequence", "mode", "refresh_hz", "drawable_count", "display_sync", "cpu_delay_ms", "gpu_burn_passes", "wait_completed",
+        "sequence", "mode", "refresh_hz", "drawable_count", "display_sync", "framebuffer_only", "cpu_delay_ms", "gpu_burn_passes", "wait_completed",
         "callback_time_s", "cv_now_s", "cv_output_s", "metal_target_deadline_s", "metal_target_presentation_s",
         "drawable_id", "next_drawable_start_s", "next_drawable_end_s", "next_drawable_wait_ms",
         "encode_start_s", "encode_end_s", "commit_time_s", "requested_present_time_s",
@@ -272,7 +282,7 @@ private final class CSVLogger {
 
         let fields: [String] = [
             "\(r.sequence)", r.mode, fmt(r.refreshHz), "\(r.drawableCount)", r.displaySync ? "1" : "0",
-            fmt(r.cpuDelayMs), "\(r.gpuBurnPasses)", r.waitCompleted ? "1" : "0",
+            r.framebufferOnly ? "1" : "0", fmt(r.cpuDelayMs), "\(r.gpuBurnPasses)", r.waitCompleted ? "1" : "0",
             fmt(r.callbackTime), fmt(r.cvNow), fmt(r.cvOutput), fmt(r.metalTargetDeadline), fmt(r.metalTargetPresentation),
             "\(r.drawableID)", fmt(r.nextDrawableStart), fmt(r.nextDrawableEnd), fmt(nextWait),
             fmt(r.encodeStart), fmt(r.encodeEnd), fmt(r.commitTime), fmt(r.requestedPresentTime),
@@ -380,6 +390,7 @@ private final class Renderer: NSObject, CAMetalDisplayLinkDelegate {
         print("  refresh: \(String(format: "%.3f", refreshHz)) Hz")
         print("  drawable count: \(layer.maximumDrawableCount)")
         print("  display sync: \(layer.displaySyncEnabled ? "on" : "off")")
+        print("  framebuffer only: \(layer.framebufferOnly ? "yes" : "no")")
         print("  CPU delay: \(options.cpuDelayMs) ms")
         print("  GPU burn passes: \(options.gpuBurnPasses)")
         print("  trace: \(logger.path)")
@@ -520,6 +531,7 @@ private final class Renderer: NSObject, CAMetalDisplayLinkDelegate {
             refreshHz: refreshHz,
             drawableCount: layer.maximumDrawableCount,
             displaySync: layer.displaySyncEnabled,
+            framebufferOnly: layer.framebufferOnly,
             cpuDelayMs: options.cpuDelayMs,
             gpuBurnPasses: options.gpuBurnPasses,
             waitCompleted: options.waitCompleted,
@@ -606,7 +618,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let metalLayer = CAMetalLayer()
         metalLayer.device = device
         metalLayer.pixelFormat = .bgra8Unorm
-        metalLayer.framebufferOnly = false
+        metalLayer.framebufferOnly = options.framebufferOnly
         metalLayer.maximumDrawableCount = options.drawableCount
         metalLayer.displaySyncEnabled = options.displaySync
         metalLayer.presentsWithTransaction = false
