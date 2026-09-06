@@ -1,0 +1,117 @@
+name: Apply Metal probe low-latency options
+
+on:
+  push:
+    branches:
+      - macos-psvr2-timing-diagnostics
+    paths:
+      - .github/workflows/apply-metal-probe-low-latency-options.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-commit:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: macos-psvr2-timing-diagnostics
+          fetch-depth: 0
+
+      - name: Add low-latency layer options
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('tools/macos-metal-latency-probe/Sources/MetalLatencyProbe/main.swift')
+          s = p.read_text()
+
+          def repl(old, new):
+              global s
+              if old not in s:
+                  raise SystemExit(f'missing expected source fragment:\n{old}')
+              s = s.replace(old, new, 1)
+
+          repl(
+              '    var waitCompleted = false\n    var displaySync = true\n    var frameLimit = 0\n',
+              '    var waitCompleted = false\n    var displaySync = true\n    var framebufferOnly = true\n    var frameLimit = 0\n'
+          )
+
+          repl(
+              '          --wait-completed                       call waitUntilCompleted() after commit\n          --no-vsync                             set CAMetalLayer.displaySyncEnabled = false\n          --frames N                             stop after N submitted frames (0 = run until Ctrl-C/Quit)\n',
+              '          --wait-completed                       call waitUntilCompleted() after commit\n          --vsync                                set CAMetalLayer.displaySyncEnabled = true (default)\n          --no-vsync                             set CAMetalLayer.displaySyncEnabled = false\n          --framebuffer-only                     set CAMetalLayer.framebufferOnly = true (default)\n          --no-framebuffer-only                  set CAMetalLayer.framebufferOnly = false\n          --frames N                             stop after N submitted frames (0 = run until Ctrl-C/Quit)\n'
+          )
+
+          repl(
+              '            case "--wait-completed": o.waitCompleted = true\n            case "--no-vsync": o.displaySync = false\n            case "--help", "-h":\n',
+              '            case "--wait-completed": o.waitCompleted = true\n            case "--vsync": o.displaySync = true\n            case "--no-vsync": o.displaySync = false\n            case "--framebuffer-only": o.framebufferOnly = true\n            case "--no-framebuffer-only": o.framebufferOnly = false\n            case "--help", "-h":\n'
+          )
+
+          repl(
+              '    let drawableCount: Int\n    let displaySync: Bool\n    let cpuDelayMs: Double\n',
+              '    let drawableCount: Int\n    let displaySync: Bool\n    let framebufferOnly: Bool\n    let cpuDelayMs: Double\n'
+          )
+
+          repl(
+              '        drawableCount: Int,\n        displaySync: Bool,\n        cpuDelayMs: Double,\n',
+              '        drawableCount: Int,\n        displaySync: Bool,\n        framebufferOnly: Bool,\n        cpuDelayMs: Double,\n'
+          )
+
+          repl(
+              '        self.drawableCount = drawableCount\n        self.displaySync = displaySync\n        self.cpuDelayMs = cpuDelayMs\n',
+              '        self.drawableCount = drawableCount\n        self.displaySync = displaySync\n        self.framebufferOnly = framebufferOnly\n        self.cpuDelayMs = cpuDelayMs\n'
+          )
+
+          repl(
+              '        "sequence", "mode", "refresh_hz", "drawable_count", "display_sync", "cpu_delay_ms", "gpu_burn_passes", "wait_completed",\n',
+              '        "sequence", "mode", "refresh_hz", "drawable_count", "display_sync", "framebuffer_only", "cpu_delay_ms", "gpu_burn_passes", "wait_completed",\n'
+          )
+
+          repl(
+              '            "\\(r.sequence)", r.mode, fmt(r.refreshHz), "\\(r.drawableCount)", r.displaySync ? "1" : "0",\n            fmt(r.cpuDelayMs), "\\(r.gpuBurnPasses)", r.waitCompleted ? "1" : "0",\n',
+              '            "\\(r.sequence)", r.mode, fmt(r.refreshHz), "\\(r.drawableCount)", r.displaySync ? "1" : "0",\n            r.framebufferOnly ? "1" : "0", fmt(r.cpuDelayMs), "\\(r.gpuBurnPasses)", r.waitCompleted ? "1" : "0",\n'
+          )
+
+          repl(
+              '        print("  display sync: \\(layer.displaySyncEnabled ? "on" : "off")")\n        print("  CPU delay: \\(options.cpuDelayMs) ms")\n',
+              '        print("  display sync: \\(layer.displaySyncEnabled ? "on" : "off")")\n        print("  framebuffer only: \\(layer.framebufferOnly ? "yes" : "no")")\n        print("  CPU delay: \\(options.cpuDelayMs) ms")\n'
+          )
+
+          repl(
+              '            drawableCount: layer.maximumDrawableCount,\n            displaySync: layer.displaySyncEnabled,\n            cpuDelayMs: options.cpuDelayMs,\n',
+              '            drawableCount: layer.maximumDrawableCount,\n            displaySync: layer.displaySyncEnabled,\n            framebufferOnly: layer.framebufferOnly,\n            cpuDelayMs: options.cpuDelayMs,\n'
+          )
+
+          repl(
+              '        metalLayer.pixelFormat = .bgra8Unorm\n        metalLayer.framebufferOnly = false\n        metalLayer.maximumDrawableCount = options.drawableCount\n',
+              '        metalLayer.pixelFormat = .bgra8Unorm\n        metalLayer.framebufferOnly = options.framebufferOnly\n        metalLayer.maximumDrawableCount = options.drawableCount\n'
+          )
+
+          p.write_text(s)
+
+          readme = Path('tools/macos-metal-latency-probe/README.md')
+          r = readme.read_text()
+          marker = '## Low-latency CAMetalLayer matrix'
+          if marker not in r:
+              r += r'''\n\n## Low-latency CAMetalLayer matrix\n\nThe probe now defaults to `CAMetalLayer.framebufferOnly = true`, because the drawable is only used as a render target. Use `--no-framebuffer-only` to reproduce the earlier configuration. Both `--vsync` and `--no-vsync` are explicit switches for `displaySyncEnabled`. The chosen values are recorded in each CSV as `framebuffer_only` and `display_sync`.\n\nSuggested comparison, with zero artificial delay/load and three drawables first:\n\n```bash\n$BIN --mode metal1 --framebuffer-only --vsync    --frames 2400 --trace /tmp/fb_sync.csv\n$BIN --mode metal1 --framebuffer-only --no-vsync --frames 2400 --trace /tmp/fb_nosync.csv\n$BIN --mode metal1 --no-framebuffer-only --vsync --frames 2400 --trace /tmp/nonfb_sync.csv\n$BIN --mode metal1 --no-framebuffer-only --no-vsync --frames 2400 --trace /tmp/nonfb_nosync.csv\n```\n\nIf `framebufferOnly=true` + `displaySyncEnabled=false` is promising, repeat with two drawables:\n\n```bash\n$BIN --mode metal1 --framebuffer-only --no-vsync --drawable-count 2 --frames 2400 --trace /tmp/fb_nosync_2.csv\n```\n\nAnd use immediate presentation as a control:\n\n```bash\n$BIN --mode immediate --framebuffer-only --no-vsync --frames 2400 --trace /tmp/immediate_fb_nosync.csv\n```\n\n`framebufferOnly=true` remains compatible with the probe because the visible pass renders directly into the drawable. If this mode proves materially better, Monado's final blit would need to be replaced by a render pass before the same optimization could be used there.\n'''
+              readme.write_text(r)
+          PY
+
+      - name: Compile standalone probe
+        shell: bash
+        run: |
+          cd tools/macos-metal-latency-probe
+          swift build -c release --scratch-path /tmp/metal-probe-build
+
+      - name: Commit tested source
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tools/macos-metal-latency-probe/Sources/MetalLatencyProbe/main.swift
+          git add tools/macos-metal-latency-probe/README.md
+          git rm .github/workflows/apply-metal-probe-low-latency-options.yml
+          git commit -m 'feat: add low-latency CAMetalLayer probe options'
+          git push
