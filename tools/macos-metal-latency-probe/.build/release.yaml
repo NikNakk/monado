@@ -1,0 +1,66 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "MetalLatencyProbe-arm64-apple-macosx15.0-release.module": ["<MetalLatencyProbe-arm64-apple-macosx15.0-release.module>"]
+  "PackageStructure": ["<PackageStructure>"]
+  "main": ["<MetalLatencyProbe-arm64-apple-macosx15.0-release.module>","<metal-latency-probe-arm64-apple-macosx15.0-release.exe>"]
+  "metal-latency-probe-arm64-apple-macosx15.0-release.exe": ["<metal-latency-probe-arm64-apple-macosx15.0-release.exe>"]
+  "test": ["<MetalLatencyProbe-arm64-apple-macosx15.0-release.module>","<metal-latency-probe-arm64-apple-macosx15.0-release.exe>"]
+default: "main"
+nodes:
+  "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/Sources/MetalLatencyProbe/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/Sources/MetalLatencyProbe/main.swift"]
+    outputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/sources"]
+    description: "Write auxiliary file /Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/sources"
+
+  "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/metal-latency-probe.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/main.swift.o"]
+    outputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/metal-latency-probe.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/metal-latency-probe.product/Objects.LinkFileList"
+
+  "/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/swift-version--79AA4F9932D1E87A.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/swift-version--79AA4F9932D1E87A.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/swift-version--79AA4F9932D1E87A.txt"
+
+  "<MetalLatencyProbe-arm64-apple-macosx15.0-release.module>":
+    tool: phony
+    inputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/main.swift.o","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/Modules/MetalLatencyProbe.swiftmodule"]
+    outputs: ["<MetalLatencyProbe-arm64-apple-macosx15.0-release.module>"]
+
+  "<metal-latency-probe-arm64-apple-macosx15.0-release.exe>":
+    tool: phony
+    inputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/metal-latency-probe"]
+    outputs: ["<metal-latency-probe-arm64-apple-macosx15.0-release.exe>"]
+
+  "C.MetalLatencyProbe-arm64-apple-macosx15.0-release.module":
+    tool: shell
+    inputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/Sources/MetalLatencyProbe/main.swift","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/swift-version--79AA4F9932D1E87A.txt","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/sources"]
+    outputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/main.swift.o","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/Modules/MetalLatencyProbe.swiftmodule"]
+    description: "Compiling Swift Module 'MetalLatencyProbe' (1 sources)"
+    args: ["/Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","MetalLatencyProbe","-emit-dependencies","-emit-module","-emit-module-path","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/Modules/MetalLatencyProbe.swiftmodule","-output-file-map","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/output-file-map.json","-whole-module-optimization","-num-threads","3","-c","@/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/sources","-I","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/Modules","-target","arm64-apple-macosx14.0","-O","-j3","-DSWIFT_PACKAGE","-module-cache-path","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","MetalLatencyProbe_main","-swift-version","6","-sdk","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-F","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-Xcc","-F","-Xcc","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","macos_metal_latency_probe"]
+
+  "C.metal-latency-probe-arm64-apple-macosx15.0-release.exe":
+    tool: shell
+    inputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/MetalLatencyProbe.build/main.swift.o","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/metal-latency-probe.product/Objects.LinkFileList"]
+    outputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/metal-latency-probe"]
+    description: "Linking ./.build/arm64-apple-macosx/release/metal-latency-probe"
+    args: ["/Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release","-o","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/metal-latency-probe","-module-name","metal_latency_probe","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-dead_strip","-Xlinker","-alias","-Xlinker","_MetalLatencyProbe_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/.build/arm64-apple-macosx/release/metal-latency-probe.product/Objects.LinkFileList","-target","arm64-apple-macosx14.0","-framework","AppKit","-framework","CoreGraphics","-framework","CoreVideo","-framework","Metal","-framework","QuartzCore","-sdk","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk","-F","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/Sources/MetalLatencyProbe/","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/Package.swift","/Users/runner/work/monado/monado/tools/macos-metal-latency-probe/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+
