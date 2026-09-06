@@ -24,6 +24,11 @@ private enum PresentMode: String {
     }
 }
 
+private enum WindowMode: String {
+    case borderless
+    case fullscreen
+}
+
 private struct Options {
     var mode: PresentMode = .immediate
     var displayName = "PS VR2"
@@ -34,6 +39,7 @@ private struct Options {
     var waitCompleted = false
     var displaySync = true
     var framebufferOnly = true
+    var windowMode: WindowMode = .borderless
     var frameLimit = 0
     var refreshOverrideHz: Double? = nil
     var tracePath: String? = nil
@@ -53,6 +59,7 @@ private struct Options {
           --no-vsync                             set CAMetalLayer.displaySyncEnabled = false
           --framebuffer-only                     set CAMetalLayer.framebufferOnly = true (default)
           --no-framebuffer-only                  set CAMetalLayer.framebufferOnly = false
+          --window-mode borderless|fullscreen    AppKit window path (default: borderless)
           --frames N                             stop after N submitted frames (0 = run until Ctrl-C/Quit)
           --refresh-hz N                         override requested CAMetalDisplayLink frame-rate range
           --trace PATH                           CSV path (default: /tmp/metal_latency_probe_<pid>.csv)
@@ -94,6 +101,10 @@ private struct Options {
             case "--no-vsync": o.displaySync = false
             case "--framebuffer-only": o.framebufferOnly = true
             case "--no-framebuffer-only": o.framebufferOnly = false
+            case "--window-mode":
+                let raw = try value(arg)
+                guard let m = WindowMode(rawValue: raw) else { throw ProbeError.argument("Unknown window mode: \(raw)") }
+                o.windowMode = m
             case "--help", "-h":
                 print(usage())
                 exit(0)
@@ -129,6 +140,7 @@ private enum ProbeError: Error, CustomStringConvertible {
 private final class FrameRecord {
     let sequence: UInt64
     let mode: String
+    let windowMode: String
     let refreshHz: Double
     let drawableCount: Int
     let displaySync: Bool
@@ -158,6 +170,7 @@ private final class FrameRecord {
     init(
         sequence: UInt64,
         mode: String,
+        windowMode: String,
         refreshHz: Double,
         drawableCount: Int,
         displaySync: Bool,
@@ -180,6 +193,7 @@ private final class FrameRecord {
     ) {
         self.sequence = sequence
         self.mode = mode
+        self.windowMode = windowMode
         self.refreshHz = refreshHz
         self.drawableCount = drawableCount
         self.displaySync = displaySync
@@ -209,7 +223,7 @@ private final class CSVLogger {
     let path: String
 
     private static let header = [
-        "sequence", "mode", "refresh_hz", "drawable_count", "display_sync", "framebuffer_only", "cpu_delay_ms", "gpu_burn_passes", "wait_completed",
+        "sequence", "mode", "window_mode", "refresh_hz", "drawable_count", "display_sync", "framebuffer_only", "cpu_delay_ms", "gpu_burn_passes", "wait_completed",
         "callback_time_s", "cv_now_s", "cv_output_s", "metal_target_deadline_s", "metal_target_presentation_s",
         "drawable_id", "next_drawable_start_s", "next_drawable_end_s", "next_drawable_wait_ms",
         "encode_start_s", "encode_end_s", "commit_time_s", "requested_present_time_s",
@@ -281,7 +295,7 @@ private final class CSVLogger {
         let targetToPresented = deltaMs(r.presentedTime, r.metalTargetPresentation)
 
         let fields: [String] = [
-            "\(r.sequence)", r.mode, fmt(r.refreshHz), "\(r.drawableCount)", r.displaySync ? "1" : "0",
+            "\(r.sequence)", r.mode, r.windowMode, fmt(r.refreshHz), "\(r.drawableCount)", r.displaySync ? "1" : "0",
             r.framebufferOnly ? "1" : "0", fmt(r.cpuDelayMs), "\(r.gpuBurnPasses)", r.waitCompleted ? "1" : "0",
             fmt(r.callbackTime), fmt(r.cvNow), fmt(r.cvOutput), fmt(r.metalTargetDeadline), fmt(r.metalTargetPresentation),
             "\(r.drawableID)", fmt(r.nextDrawableStart), fmt(r.nextDrawableEnd), fmt(nextWait),
@@ -391,6 +405,7 @@ private final class Renderer: NSObject, CAMetalDisplayLinkDelegate {
         print("  drawable count: \(layer.maximumDrawableCount)")
         print("  display sync: \(layer.displaySyncEnabled ? "on" : "off")")
         print("  framebuffer only: \(layer.framebufferOnly ? "yes" : "no")")
+        print("  window mode: \(options.windowMode.rawValue)")
         print("  CPU delay: \(options.cpuDelayMs) ms")
         print("  GPU burn passes: \(options.gpuBurnPasses)")
         print("  trace: \(logger.path)")
@@ -528,6 +543,7 @@ private final class Renderer: NSObject, CAMetalDisplayLinkDelegate {
         let record = FrameRecord(
             sequence: seq,
             mode: options.mode.rawValue,
+            windowMode: options.windowMode.rawValue,
             refreshHz: refreshHz,
             drawableCount: layer.maximumDrawableCount,
             displaySync: layer.displaySyncEnabled,
@@ -577,10 +593,11 @@ nonisolated(unsafe) private let cvOutputCallback: CVDisplayLinkOutputCallback = 
 }
 
 @MainActor
-private final class AppDelegate: NSObject, NSApplicationDelegate {
+private final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let options: Options
     private var renderer: Renderer?
     private var window: NSWindow?
+    private var rendererStarted = false
 
     init(options: Options) {
         self.options = options
@@ -597,6 +614,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         renderer?.stop()
+    }
+
+    func windowDidEnterFullScreen(_ notification: Notification) {
+        print("Native AppKit fullscreen entered")
+        startRendererIfNeeded()
+    }
+
+    private func startRendererIfNeeded() {
+        guard !rendererStarted, let renderer else { return }
+        do {
+            try renderer.start()
+            rendererStarted = true
+        } catch {
+            fputs("metal-latency-probe: \(error)\n", stderr)
+            NSApp.terminate(nil)
+        }
     }
 
     private func setup() throws {
@@ -630,22 +663,37 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         view.wantsLayer = true
         view.layer = metalLayer
 
+        view.autoresizingMask = [.width, .height]
+
+        let styleMask: NSWindow.StyleMask = options.windowMode == .fullscreen
+            ? [.titled, .closable, .miniaturizable, .resizable]
+            : .borderless
         let window = NSWindow(
             contentRect: screen.frame,
-            styleMask: .borderless,
+            styleMask: styleMask,
             backing: .buffered,
             defer: false,
             screen: screen
         )
         window.contentView = view
         window.backgroundColor = .black
+        window.isOpaque = true
         window.hasShadow = false
         window.hidesOnDeactivate = false
         window.ignoresMouseEvents = true
-        window.level = .mainMenu + 1
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         window.setFrame(screen.frame, display: true)
-        window.orderFrontRegardless()
+        window.delegate = self
+
+        if options.windowMode == .fullscreen {
+            window.collectionBehavior = [.fullScreenPrimary]
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            window.level = .mainMenu + 1
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+            window.orderFrontRegardless()
+        }
         self.window = window
 
         CATransaction.flush()
@@ -653,7 +701,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let renderer = try Renderer(options: options, layer: metalLayer, displayID: displayID, refreshHz: refreshHz)
         self.renderer = renderer
-        try renderer.start()
+        if options.windowMode == .fullscreen {
+            print("Requesting native AppKit fullscreen on \(screen.localizedName)...")
+            DispatchQueue.main.async { window.toggleFullScreen(nil) }
+        } else {
+            startRendererIfNeeded()
+        }
     }
 
     private func displayID(for screen: NSScreen) -> CGDirectDisplayID? {

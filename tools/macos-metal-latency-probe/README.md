@@ -147,4 +147,45 @@ Only after those four runs should you sweep CPU delay / GPU load / timed-present
 ## Safety / comfort
 
 The default visible frame alternates the full display black/white every submitted frame to make dropped/repeated frames and future photodiode testing unambiguous. Avoid wearing the headset while running this pattern if flicker is uncomfortable.
-\n\n## Low-latency CAMetalLayer matrix\n\nThe probe now defaults to `CAMetalLayer.framebufferOnly = true`, because the drawable is only used as a render target. Use `--no-framebuffer-only` to reproduce the earlier configuration. Both `--vsync` and `--no-vsync` are explicit switches for `displaySyncEnabled`. The chosen values are recorded in each CSV as `framebuffer_only` and `display_sync`.\n\nSuggested comparison, with zero artificial delay/load and three drawables first:\n\n```bash\n$BIN --mode metal1 --framebuffer-only --vsync    --frames 2400 --trace /tmp/fb_sync.csv\n$BIN --mode metal1 --framebuffer-only --no-vsync --frames 2400 --trace /tmp/fb_nosync.csv\n$BIN --mode metal1 --no-framebuffer-only --vsync --frames 2400 --trace /tmp/nonfb_sync.csv\n$BIN --mode metal1 --no-framebuffer-only --no-vsync --frames 2400 --trace /tmp/nonfb_nosync.csv\n```\n\nIf `framebufferOnly=true` + `displaySyncEnabled=false` is promising, repeat with two drawables:\n\n```bash\n$BIN --mode metal1 --framebuffer-only --no-vsync --drawable-count 2 --frames 2400 --trace /tmp/fb_nosync_2.csv\n```\n\nAnd use immediate presentation as a control:\n\n```bash\n$BIN --mode immediate --framebuffer-only --no-vsync --frames 2400 --trace /tmp/immediate_fb_nosync.csv\n```\n\n`framebufferOnly=true` remains compatible with the probe because the visible pass renders directly into the drawable. If this mode proves materially better, Monado's final blit would need to be replaced by a render pass before the same optimization could be used there.\n
+
+
+## Low-latency CAMetalLayer matrix
+
+The probe now defaults to `CAMetalLayer.framebufferOnly = true`, because the drawable is only used as a render target. Use `--no-framebuffer-only` to reproduce the earlier configuration. Both `--vsync` and `--no-vsync` are explicit switches for `displaySyncEnabled`. The chosen values are recorded in each CSV as `framebuffer_only` and `display_sync`.
+
+Suggested comparison, with zero artificial delay/load and three drawables first:
+
+```bash
+$BIN --mode metal1 --framebuffer-only --vsync    --frames 2400 --trace /tmp/fb_sync.csv
+$BIN --mode metal1 --framebuffer-only --no-vsync --frames 2400 --trace /tmp/fb_nosync.csv
+$BIN --mode metal1 --no-framebuffer-only --vsync --frames 2400 --trace /tmp/nonfb_sync.csv
+$BIN --mode metal1 --no-framebuffer-only --no-vsync --frames 2400 --trace /tmp/nonfb_nosync.csv
+```
+
+If `framebufferOnly=true` + `displaySyncEnabled=false` is promising, repeat with two drawables:
+
+```bash
+$BIN --mode metal1 --framebuffer-only --no-vsync --drawable-count 2 --frames 2400 --trace /tmp/fb_nosync_2.csv
+```
+
+And use immediate presentation as a control:
+
+```bash
+$BIN --mode immediate --framebuffer-only --no-vsync --frames 2400 --trace /tmp/immediate_fb_nosync.csv
+```
+
+`framebufferOnly=true` remains compatible with the probe because the visible pass renders directly into the drawable. If this mode proves materially better, Monado's final blit would need to be replaced by a render pass before the same optimization could be used there.
+
+
+## Native fullscreen / Direct-to-Display comparison
+
+`--window-mode borderless` preserves the original borderless screen-covering window. `--window-mode fullscreen` uses AppKit native fullscreen via `NSWindow.toggleFullScreen(_:)` and waits for `windowDidEnterFullScreen` before starting either display link, so transition frames are excluded from the trace. The requested mode is recorded as `window_mode` in every CSV row.
+
+For a clean comparison keep the Metal settings identical:
+
+```bash
+$BIN --mode metal1 --window-mode borderless --framebuffer-only --vsync --frames 2400 --trace /tmp/borderless_dtd.csv
+$BIN --mode metal1 --window-mode fullscreen --framebuffer-only --vsync --frames 2400 --trace /tmp/fullscreen_dtd.csv
+```
+
+Profile both with Instruments and compare Direct to Display, CPU-to-display latency, surface duration, GPU completion, and GPU-done-to-display/on-glass latency.
