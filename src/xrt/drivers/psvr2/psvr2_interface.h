@@ -13,6 +13,8 @@
 
 #pragma once
 
+#include "xrt/xrt_prober.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
