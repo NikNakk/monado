@@ -1,0 +1,183 @@
+name: Apply async macOS present experiment
+
+on:
+  push:
+    branches:
+      - macos-psvr2-timing-diagnostics
+    paths:
+      - .github/workflows/apply-macos-async-present.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-commit:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: macos-psvr2-timing-diagnostics
+
+      - name: Apply async Metal/shared-event patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('src/xrt/compositor/main/comp_window_macos.m')
+          s = p.read_text()
+
+          def repl(old, new, count=1):
+              global s
+              if old not in s:
+                  raise SystemExit('Expected source fragment not found:\n' + old[:1200])
+              s = s.replace(old, new, count)
+
+          repl(
+          '''DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)\n''',
+          '''DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)\nDEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", false)\nDEBUG_GET_ONCE_BOOL_OPTION(macos_metal_shared_event_wait, "XRT_MACOS_METAL_SHARED_EVENT_WAIT", true)\n''')
+
+          repl(
+          '''\tid<MTLTexture> metal_images[MACOS_TARGET_IMAGE_COUNT];\n''',
+          '''\tid<MTLTexture> metal_images[MACOS_TARGET_IMAGE_COUNT];\n\tid<MTLSharedEvent> render_complete_event;\n\tatomic_bool image_in_flight[MACOS_TARGET_IMAGE_COUNT];\n\tdispatch_group_t present_command_group;\n\tuint64_t last_image_acquire_wait_ns;\n''')
+
+          repl(
+          '''\tFILE *trace_present;\n\tFILE *trace_presented;\n''',
+          '''\tFILE *trace_present;\n\tFILE *trace_presented;\n\tFILE *trace_present_complete;\n''')
+
+          repl(
+          '''\t    "latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s");\n''',
+          '''\t    "latest_displaylink_output_ns,gpu_start_time_s,gpu_end_time_s,"\n\t    "async_present,shared_event_wait,image_reuse_wait_ns");\n''')
+
+          repl(
+          '''\tcwm->trace_presented = macos_timing_trace_open_file(\n\t    "presented",\n\t    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"\n\t    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns");\n''',
+          '''\tcwm->trace_presented = macos_timing_trace_open_file(\n\t    "presented",\n\t    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"\n\t    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns");\n\tcwm->trace_present_complete = macos_timing_trace_open_file(\n\t    "present_complete",\n\t    "frame_id,completion_handler_ns,image_index,timeline_value,status,commit_to_completion_ns,"\n\t    "gpu_start_time_s,gpu_end_time_s,shared_event_wait");\n''')
+
+          repl(
+          '''\tif (cwm->trace_presented != NULL) {\n\t\tfflush(cwm->trace_presented);\n\t\tfclose(cwm->trace_presented);\n\t\tcwm->trace_presented = NULL;\n\t}\n\tif (cwm->trace_vblank != NULL) {\n''',
+          '''\tif (cwm->trace_presented != NULL) {\n\t\tfflush(cwm->trace_presented);\n\t\tfclose(cwm->trace_presented);\n\t\tcwm->trace_presented = NULL;\n\t}\n\tif (cwm->trace_present_complete != NULL) {\n\t\tfflush(cwm->trace_present_complete);\n\t\tfclose(cwm->trace_present_complete);\n\t\tcwm->trace_present_complete = NULL;\n\t}\n\tif (cwm->trace_vblank != NULL) {\n''')
+
+          repl(
+          '''static inline struct vk_bundle *\nget_vk(struct comp_window_macos *cwm)\n{\n\treturn &cwm->base.base.c->base.vk;\n}\n''',
+          '''static inline struct vk_bundle *\nget_vk(struct comp_window_macos *cwm)\n{\n\treturn &cwm->base.base.c->base.vk;\n}\n\nstatic void\nmacos_release_source_image(struct comp_window_macos *cwm, uint32_t index)\n{\n\tif (index < MACOS_TARGET_IMAGE_COUNT) {\n\t\tatomic_store_explicit(&cwm->image_in_flight[index], false, memory_order_release);\n\t}\n}\n\nstatic void\nmacos_wait_for_inflight_presents(struct comp_window_macos *cwm)\n{\n\tif (cwm->present_command_group == NULL) {\n\t\treturn;\n\t}\n\tlong result = dispatch_group_wait(cwm->present_command_group,\n\t                                  dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC));\n\tif (result != 0 && cwm->base.base.c != NULL) {\n\t\tCOMP_WARN(cwm->base.base.c, "Timed out waiting for asynchronous Metal presentation work");\n\t}\n}\n''')
+
+          old_init = '''static bool\ncomp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, uint32_t preferred_height)\n{\n\t(void)preferred_width;\n\t(void)preferred_height;\n\tstruct comp_window_macos *cwm = (struct comp_window_macos *)ct;\n\tstruct vk_bundle *vk = get_vk(cwm);\n\n\tif (!vk->features.timeline_semaphore || vk->vkWaitSemaphores == NULL) {\n\t\tCOMP_WARN(ct->c, "Timeline semaphores unavailable; macOS presentation will fall back to queue-idle waits");\n\t\treturn true;\n\t}\n\n\tVkSemaphoreTypeCreateInfo type_info = {\n\t    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,\n\t    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,\n\t    .initialValue = 0,\n\t};\n\tVkSemaphoreCreateInfo create_info = {\n\t    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,\n\t    .pNext = &type_info,\n\t};\n\tVkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &ct->semaphores.render_complete);\n\tif (ret != VK_SUCCESS) {\n\t\tCOMP_WARN(ct->c, "Could not create macOS render-complete timeline semaphore: %s; using queue-idle fallback",\n\t\t          vk_result_string(ret));\n\t\tct->semaphores.render_complete = VK_NULL_HANDLE;\n\t\tct->semaphores.render_complete_is_timeline = false;\n\t\treturn true;\n\t}\n\tct->semaphores.render_complete_is_timeline = true;\n\tCOMP_INFO(ct->c, "macOS target using render-complete timeline semaphore");\n\treturn true;\n}\n'''
+
+          new_init = '''static bool\ncomp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, uint32_t preferred_height)\n{\n\t(void)preferred_width;\n\t(void)preferred_height;\n\tstruct comp_window_macos *cwm = (struct comp_window_macos *)ct;\n\tstruct vk_bundle *vk = get_vk(cwm);\n\n\tif (!vk->features.timeline_semaphore || vk->vkWaitSemaphores == NULL) {\n\t\tCOMP_WARN(ct->c, "Timeline semaphores unavailable; macOS presentation will fall back to queue-idle waits");\n\t\treturn true;\n\t}\n\n\tbool want_shared_event = debug_get_bool_option_macos_async_present() &&\n\t                         debug_get_bool_option_macos_metal_shared_event_wait() &&\n\t                         vk->has_EXT_metal_objects && vk->vkExportMetalObjectsEXT != NULL;\n\n\tVkExportMetalObjectCreateInfoEXT metal_export_info = {\n\t    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,\n\t    .pNext = NULL,\n\t    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_SHARED_EVENT_BIT_EXT,\n\t};\n\tVkSemaphoreTypeCreateInfo type_info = {\n\t    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,\n\t    .pNext = want_shared_event ? &metal_export_info : NULL,\n\t    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,\n\t    .initialValue = 0,\n\t};\n\tVkSemaphoreCreateInfo create_info = {\n\t    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,\n\t    .pNext = &type_info,\n\t};\n\tVkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &ct->semaphores.render_complete);\n\tif (ret != VK_SUCCESS) {\n\t\tCOMP_WARN(ct->c, "Could not create macOS render-complete timeline semaphore: %s; using queue-idle fallback",\n\t\t          vk_result_string(ret));\n\t\tct->semaphores.render_complete = VK_NULL_HANDLE;\n\t\tct->semaphores.render_complete_is_timeline = false;\n\t\treturn true;\n\t}\n\tct->semaphores.render_complete_is_timeline = true;\n\n\tif (want_shared_event) {\n\t\tVkExportMetalSharedEventInfoEXT shared_event_info = {\n\t\t    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_SHARED_EVENT_INFO_EXT,\n\t\t    .pNext = NULL,\n\t\t    .semaphore = ct->semaphores.render_complete,\n\t\t    .event = VK_NULL_HANDLE,\n\t\t    .mtlSharedEvent = nil,\n\t\t};\n\t\tVkExportMetalObjectsInfoEXT export_info = {\n\t\t    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,\n\t\t    .pNext = &shared_event_info,\n\t\t};\n\t\tvk->vkExportMetalObjectsEXT(vk->device, &export_info);\n\t\tif (shared_event_info.mtlSharedEvent != nil) {\n\t\t\tcwm->render_complete_event = [shared_event_info.mtlSharedEvent retain];\n\t\t\tCOMP_INFO(ct->c, "macOS target exported Vulkan render-complete timeline as MTLSharedEvent");\n\t\t} else {\n\t\t\tCOMP_WARN(ct->c, "VK_EXT_metal_objects did not export an MTLSharedEvent; retaining CPU Vulkan wait fallback");\n\t\t}\n\t} else if (debug_get_bool_option_macos_async_present() &&\n\t           debug_get_bool_option_macos_metal_shared_event_wait()) {\n\t\tCOMP_WARN(ct->c, "VK_EXT_metal_objects unavailable; asynchronous present will retain the CPU Vulkan wait");\n\t}\n\n\tCOMP_INFO(ct->c, "macOS target using render-complete timeline semaphore%s",\n\t          cwm->render_complete_event != nil ? " with Metal shared-event handoff" : "");\n\treturn true;\n}\n'''
+          repl(old_init, new_init)
+
+          repl(
+          '''static void\ncomp_window_macos_free_images(struct comp_window_macos *cwm)\n{\n\tstruct comp_target *ct = &cwm->base.base;\n''',
+          '''static void\ncomp_window_macos_free_images(struct comp_window_macos *cwm)\n{\n\tmacos_wait_for_inflight_presents(cwm);\n\tstruct comp_target *ct = &cwm->base.base;\n''')
+
+          repl(
+          '''\tct->final_layout = VK_IMAGE_LAYOUT_UNDEFINED;\n}\n\nstatic void\ncomp_window_macos_create_images''',
+          '''\tct->final_layout = VK_IMAGE_LAYOUT_UNDEFINED;\n\tfor (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {\n\t\tatomic_store_explicit(&cwm->image_in_flight[i], false, memory_order_release);\n\t}\n}\n\nstatic void\ncomp_window_macos_create_images''')
+
+          old_acquire = '''static VkResult\ncomp_window_macos_acquire(struct comp_target *ct, uint32_t *out_index)\n{\n\tstruct comp_window_macos *cwm = (struct comp_window_macos *)ct;\n\tif (!comp_window_macos_has_images(ct)) {\n\t\treturn VK_ERROR_INITIALIZATION_FAILED;\n\t}\n\t*out_index = cwm->next_image;\n\tcwm->next_image = (cwm->next_image + 1) % ct->image_count;\n\treturn VK_SUCCESS;\n}\n'''
+          new_acquire = '''static VkResult\ncomp_window_macos_acquire(struct comp_target *ct, uint32_t *out_index)\n{\n\tstruct comp_window_macos *cwm = (struct comp_window_macos *)ct;\n\tif (!comp_window_macos_has_images(ct)) {\n\t\treturn VK_ERROR_INITIALIZATION_FAILED;\n\t}\n\n\tif (!debug_get_bool_option_macos_async_present()) {\n\t\t*out_index = cwm->next_image;\n\t\tcwm->next_image = (cwm->next_image + 1) % ct->image_count;\n\t\tcwm->last_image_acquire_wait_ns = 0;\n\t\treturn VK_SUCCESS;\n\t}\n\n\tuint64_t wait_begin_ns = os_monotonic_get_ns();\n\tfor (;;) {\n\t\tfor (uint32_t n = 0; n < ct->image_count; n++) {\n\t\t\tuint32_t index = (cwm->next_image + n) % ct->image_count;\n\t\t\tbool expected = false;\n\t\t\tif (atomic_compare_exchange_strong_explicit(&cwm->image_in_flight[index], &expected, true,\n\t\t\t                                            memory_order_acq_rel, memory_order_acquire)) {\n\t\t\t\t*out_index = index;\n\t\t\t\tcwm->next_image = (index + 1) % ct->image_count;\n\t\t\t\tcwm->last_image_acquire_wait_ns = os_monotonic_get_ns() - wait_begin_ns;\n\t\t\t\treturn VK_SUCCESS;\n\t\t\t}\n\t\t}\n\n\t\t/* Three source images should normally hide this; yield briefly only under back-pressure. */\n\t\tstruct timespec ts = {.tv_sec = 0, .tv_nsec = 50000};\n\t\t(void)nanosleep(&ts, NULL);\n\t}\n}\n'''
+          repl(old_acquire, new_acquire)
+
+          # Add time.h for nanosleep if not already present.
+          repl(
+          '''#include <string.h>\n#include <unistd.h>\n''',
+          '''#include <string.h>\n#include <time.h>\n#include <unistd.h>\n''')
+
+          repl(
+          '''\tconst char *wait_mode = "queue_idle";\n\tdouble scheduled_present_host_s = 0.0;\n''',
+          '''\tconst char *wait_mode = "queue_idle";\n\tbool async_present = debug_get_bool_option_macos_async_present();\n\tbool shared_event_wait = async_present && debug_get_bool_option_macos_metal_shared_event_wait() &&\n\t                         cwm->render_complete_event != nil;\n\tuint64_t image_reuse_wait_ns = cwm->last_image_acquire_wait_ns;\n\tdouble scheduled_present_host_s = 0.0;\n''')
+
+          repl(
+          '''\tif (index >= ct->image_count || cwm->metal_images[index] == nil) {\n\t\treturn VK_ERROR_INITIALIZATION_FAILED;\n\t}\n\n\tuint64_t before_vk_wait_ns = os_monotonic_get_ns();\n\tVkResult ret = VK_SUCCESS;\n\tif (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&\n\t    vk->vkWaitSemaphores != NULL) {\n''',
+          '''\tif (index >= ct->image_count || cwm->metal_images[index] == nil) {\n\t\tif (async_present) {\n\t\t\tmacos_release_source_image(cwm, index);\n\t\t}\n\t\treturn VK_ERROR_INITIALIZATION_FAILED;\n\t}\n\n\tuint64_t before_vk_wait_ns = os_monotonic_get_ns();\n\tVkResult ret = VK_SUCCESS;\n\tif (shared_event_wait) {\n\t\twait_mode = "metal_shared_event";\n\t} else if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&\n\t           vk->vkWaitSemaphores != NULL) {\n''')
+
+          repl(
+          '''\tif (ret != VK_SUCCESS) {\n\t\tCOMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));\n\t\treturn ret;\n\t}\n\n\t@autoreleasepool {\n''',
+          '''\tif (ret != VK_SUCCESS) {\n\t\tCOMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));\n\t\tif (async_present) {\n\t\t\tmacos_release_source_image(cwm, index);\n\t\t}\n\t\treturn ret;\n\t}\n\n\t@autoreleasepool {\n''')
+
+          repl(
+          '''\t\tif (drawable == nil) {\n\t\t\tCOMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");\n\t\t\treturn VK_ERROR_OUT_OF_DATE_KHR;\n\t\t}\n\t\tid<MTLCommandBuffer> command_buffer = [cwm->present_queue commandBuffer];\n\t\tid<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];\n''',
+          '''\t\tif (drawable == nil) {\n\t\t\tCOMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");\n\t\t\tif (async_present) {\n\t\t\t\tmacos_release_source_image(cwm, index);\n\t\t\t}\n\t\t\treturn VK_ERROR_OUT_OF_DATE_KHR;\n\t\t}\n\t\tid<MTLCommandBuffer> command_buffer = [cwm->present_queue commandBuffer];\n\t\tif (command_buffer == nil) {\n\t\t\tCOMP_ERROR(ct->c, "Could not create a Metal presentation command buffer");\n\t\t\tif (async_present) {\n\t\t\t\tmacos_release_source_image(cwm, index);\n\t\t\t}\n\t\t\treturn VK_ERROR_DEVICE_LOST;\n\t\t}\n\t\tif (shared_event_wait) {\n\t\t\t[command_buffer encodeWaitForEvent:cwm->render_complete_event value:timeline_semaphore_value];\n\t\t}\n\t\tid<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];\n\t\tif (blit == nil) {\n\t\t\tCOMP_ERROR(ct->c, "Could not create Metal blit encoder");\n\t\t\tif (async_present) {\n\t\t\t\tmacos_release_source_image(cwm, index);\n\t\t\t}\n\t\t\treturn VK_ERROR_DEVICE_LOST;\n\t\t}\n''')
+
+          old_commit = '''\t\tafter_present_call_ns = os_monotonic_get_ns();\n\t\t[command_buffer commit];\n\t\tafter_commit_ns = os_monotonic_get_ns();\n\t\t[command_buffer waitUntilCompleted];\n\t\tafter_metal_wait_ns = os_monotonic_get_ns();\n\t\tgpu_start_time_s = [command_buffer GPUStartTime];\n\t\tgpu_end_time_s = [command_buffer GPUEndTime];\n\t\tif ([command_buffer status] == MTLCommandBufferStatusError) {\n\t\t\tCOMP_ERROR(ct->c, "Metal presentation failed: %s",\n\t\t\t           [[[command_buffer error] localizedDescription] UTF8String]);\n\t\t\treturn VK_ERROR_DEVICE_LOST;\n\t\t}\n\t\tcwm->present_vk_wait_total_ns += after_vk_wait_ns - before_vk_wait_ns;\n\t\tcwm->present_drawable_wait_total_ns += after_drawable_ns - after_vk_wait_ns;\n\t\tcwm->present_metal_wait_total_ns += after_metal_wait_ns - after_drawable_ns;\n'''
+
+          new_commit = '''\t\tafter_present_call_ns = os_monotonic_get_ns();\n\t\tif (async_present) {\n\t\t\tuint64_t traced_frame_id = frame_id;\n\t\t\tuint32_t traced_index = index;\n\t\t\tuint64_t traced_timeline_value = timeline_semaphore_value;\n\t\t\tuint64_t commit_begin_ns = os_monotonic_get_ns();\n\t\t\tbool traced_shared_event_wait = shared_event_wait;\n\t\t\tdispatch_group_t command_group = cwm->present_command_group;\n\t\t\tFILE *complete_trace = cwm->trace_present_complete;\n\t\t\tdispatch_group_enter(command_group);\n\t\t\t[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {\n\t\t\t\tuint64_t completion_ns = os_monotonic_get_ns();\n\t\t\t\tMTLCommandBufferStatus status = [completed_buffer status];\n\t\t\t\tdouble completed_gpu_start_s = [completed_buffer GPUStartTime];\n\t\t\t\tdouble completed_gpu_end_s = [completed_buffer GPUEndTime];\n\t\t\t\tif (status == MTLCommandBufferStatusError) {\n\t\t\t\t\tCOMP_ERROR(cwm->base.base.c, "Asynchronous Metal presentation failed: %s",\n\t\t\t\t\t           [[[completed_buffer error] localizedDescription] UTF8String]);\n\t\t\t\t}\n\t\t\t\tif (complete_trace != NULL) {\n\t\t\t\t\tflockfile(complete_trace);\n\t\t\t\t\tfprintf(complete_trace, "%llu,%llu,%u,%llu,%lu,%llu,%.17g,%.17g,%u\\n",\n\t\t\t\t\t        (unsigned long long)traced_frame_id, (unsigned long long)completion_ns,\n\t\t\t\t\t        traced_index, (unsigned long long)traced_timeline_value, (unsigned long)status,\n\t\t\t\t\t        (unsigned long long)(completion_ns - commit_begin_ns), completed_gpu_start_s,\n\t\t\t\t\t        completed_gpu_end_s, traced_shared_event_wait ? 1u : 0u);\n\t\t\t\t\tfunlockfile(complete_trace);\n\t\t\t\t}\n\t\t\t\tmacos_release_source_image(cwm, traced_index);\n\t\t\t\tdispatch_group_leave(command_group);\n\t\t\t}];\n\t\t\t[command_buffer commit];\n\t\t\tafter_commit_ns = os_monotonic_get_ns();\n\t\t\tafter_metal_wait_ns = after_commit_ns;\n\t\t} else {\n\t\t\t[command_buffer commit];\n\t\t\tafter_commit_ns = os_monotonic_get_ns();\n\t\t\t[command_buffer waitUntilCompleted];\n\t\t\tafter_metal_wait_ns = os_monotonic_get_ns();\n\t\t\tgpu_start_time_s = [command_buffer GPUStartTime];\n\t\t\tgpu_end_time_s = [command_buffer GPUEndTime];\n\t\t\tif ([command_buffer status] == MTLCommandBufferStatusError) {\n\t\t\t\tCOMP_ERROR(ct->c, "Metal presentation failed: %s",\n\t\t\t\t           [[[command_buffer error] localizedDescription] UTF8String]);\n\t\t\t\treturn VK_ERROR_DEVICE_LOST;\n\t\t\t}\n\t\t}\n\t\tcwm->present_vk_wait_total_ns += after_vk_wait_ns - before_vk_wait_ns;\n\t\tcwm->present_drawable_wait_total_ns += after_drawable_ns - after_vk_wait_ns;\n\t\tif (!async_present) {\n\t\t\tcwm->present_metal_wait_total_ns += after_metal_wait_ns - after_drawable_ns;\n\t\t}\n'''
+          repl(old_commit, new_commit)
+
+          old_printf = '''\t\tfprintf(cwm->trace_present,\n\t\t        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g\\n",\n'''
+          new_printf = '''\t\tfprintf(cwm->trace_present,\n\t\t        "%llu,%llu,%" PRIi64 ",%" PRIi64 ",%llu,%" PRIi64 ",%llu,%" PRIi64 ",%" PRIi64 ",%.17g,%" PRIi64 ",%u,%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.17g,%.17g,%u,%u,%llu\\n",\n'''
+          repl(old_printf, new_printf)
+
+          repl(
+          '''\t\t        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s);\n''',
+          '''\t\t        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s,\n\t\t        async_present ? 1u : 0u, shared_event_wait ? 1u : 0u, (unsigned long long)image_reuse_wait_ns);\n''')
+
+          repl(
+          '''\t\tCOMP_INFO(ct->c, "macOS completed-frame cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/240",\n''',
+          '''\t\tCOMP_INFO(ct->c, "macOS present-call return cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/240",\n''')
+
+          repl(
+          '''\t\tCOMP_INFO(ct->c, "macOS presentation waits: Vulkan %.3fms, drawable %.3fms, Metal %.3fms",\n''',
+          '''\t\tCOMP_INFO(ct->c, "macOS presentation CPU waits: Vulkan %.3fms, drawable %.3fms, synchronous Metal %.3fms",\n''')
+
+          repl(
+          '''\tif (cwm->display_link != NULL) {\n\t\tCVDisplayLinkStop(cwm->display_link);\n\t\tCVDisplayLinkRelease(cwm->display_link);\n\t\tcwm->display_link = NULL;\n\t}\n\tmacos_timing_trace_close(cwm);\n''',
+          '''\tif (cwm->display_link != NULL) {\n\t\tCVDisplayLinkStop(cwm->display_link);\n\t\tCVDisplayLinkRelease(cwm->display_link);\n\t\tcwm->display_link = NULL;\n\t}\n\tmacos_wait_for_inflight_presents(cwm);\n\tmacos_timing_trace_close(cwm);\n''')
+
+          repl(
+          '''\tif (ct->semaphores.render_complete != VK_NULL_HANDLE) {\n''',
+          '''\tif (cwm->render_complete_event != nil) {\n\t\t[cwm->render_complete_event release];\n\t\tcwm->render_complete_event = nil;\n\t}\n\tif (ct->semaphores.render_complete != VK_NULL_HANDLE) {\n''')
+
+          repl(
+          '''\tstruct comp_window_macos *cwm = U_TYPED_CALLOC(struct comp_window_macos);\n\tmacos_timing_trace_open(cwm);\n''',
+          '''\tstruct comp_window_macos *cwm = U_TYPED_CALLOC(struct comp_window_macos);\n\tcwm->present_command_group = dispatch_group_create();\n\tmacos_timing_trace_open(cwm);\n''')
+
+          repl(
+          '''const struct comp_target_factory comp_target_factory_macos = {\n''',
+          '''static const char *macos_optional_device_extensions[] = {\n\tVK_EXT_METAL_OBJECTS_EXTENSION_NAME,\n};\n\nconst struct comp_target_factory comp_target_factory_macos = {\n''')
+
+          repl(
+          '''\t.optional_device_extensions = NULL,\n\t.optional_device_extension_count = 0,\n''',
+          '''\t.optional_device_extensions = macos_optional_device_extensions,\n\t.optional_device_extension_count = ARRAY_SIZE(macos_optional_device_extensions),\n''')
+
+          p.write_text(s)
+
+          d = Path('doc/macos-psvr2-timing-diagnostics.md')
+          doc = d.read_text()
+          marker = '''Previous traces showed roughly 2-3 ms scheduler overshoot with a 0.5 ms spin margin, so the diagnostics-only wait now sleeps until 3 ms before its target and spins for the remainder. `monado_psvr2_<PID>_late_render.csv` retains the original columns and appends `desired_offset_us`, `wait_mode`, `target_minus_desired_ns`, and `pose_begin_minus_desired_ns` so the desired-relative and legacy modes can be distinguished without breaking column-name-based analysis. This remains an A/B diagnostic rather than the final late-latching design.\n'''
+          addition = marker + '''\n## Asynchronous Metal presentation / Vulkan-to-Metal shared event\n\n`XRT_MACOS_ASYNC_PRESENT=1` is an opt-in diagnostic that removes the synchronous Metal `waitUntilCompleted` from the compositor thread. Source IOSurfaces are marked in-flight on acquire and are not reused until the Metal blit command buffer completes; with three target images this should normally avoid blocking, while remaining correct if the GPU falls behind. The default is `0`, preserving the prior synchronous path.\n\nWhen async present is enabled, `XRT_MACOS_METAL_SHARED_EVENT_WAIT=1` (default) also requests `VK_EXT_metal_objects`, creates the render-complete Vulkan timeline semaphore as exportable to Metal, exports its underlying `MTLSharedEvent`, and encodes the timeline-value wait directly into the Metal command buffer. If the extension/event export is unavailable, presentation falls back to the existing CPU Vulkan timeline wait but still avoids the Metal completion wait. Set `XRT_MACOS_METAL_SHARED_EVENT_WAIT=0` to test that intermediate mode explicitly.\n\n`present.csv` appends `async_present`, `shared_event_wait`, and `image_reuse_wait_ns`. Async runs also produce `present_complete.csv`, recording the command-buffer completion callback, GPU start/end timestamps, source image, timeline value, and whether the shared-event handoff was used. In async mode the legacy `after_metal_wait_ns` field records the immediate post-commit timestamp rather than a completion wait; use `present_complete.csv` for actual Metal completion.\n\nA useful A/B at the previously favourable but cadence-limited `+3000 us` late-render setting is:\n\n```sh\n# Old synchronous control\nXRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US=3000 XRT_MACOS_ASYNC_PRESENT=0\n\n# Remove only the Metal completion wait\nXRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US=3000 XRT_MACOS_ASYNC_PRESENT=1 XRT_MACOS_METAL_SHARED_EVENT_WAIT=0\n\n# Fully asynchronous Vulkan -> Metal GPU handoff\nXRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US=3000 XRT_MACOS_ASYNC_PRESENT=1 XRT_MACOS_METAL_SHARED_EVENT_WAIT=1\n```\n'''
+          if marker not in doc:
+              raise SystemExit('Documentation marker not found')
+          doc = doc.replace(marker, addition, 1)
+          d.write_text(doc)
+          PY
+
+      - name: Install dependencies
+        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
+
+      - name: Configure compositor build
+        run: >-
+          cmake -S . -B build-compositor -G Ninja
+          -DBUILD_TESTING=OFF
+          -DXRT_HAVE_OPENGLES=OFF
+          -DXRT_HAVE_SDL2=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_BUILD_DRIVER_PSSENSE=OFF
+
+      - name: Build macOS compositor
+        run: cmake --build build-compositor --target comp_main --parallel
+
+      - name: Commit tested change
+        shell: bash
+        run: |
+          git rm .github/workflows/apply-macos-async-present.yml
+          git add src/xrt/compositor/main/comp_window_macos.m doc/macos-psvr2-timing-diagnostics.md
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "diag: add asynchronous macOS presentation handoff"
+          git push origin HEAD:macos-psvr2-timing-diagnostics
