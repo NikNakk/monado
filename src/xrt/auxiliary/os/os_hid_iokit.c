@@ -7,6 +7,7 @@
  */
 
 #include "os_hid.h"
+#include "os_time.h"
 
 #ifdef XRT_OS_OSX
 
@@ -20,12 +21,36 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #define IOKIT_HID_MAX_QUEUED_REPORTS 128
 #define IOKIT_HID_FALLBACK_MAX_REPORT_SIZE 1024
+
+/*
+ * PS VR2 Sense diagnostic constants.
+ *
+ * This deliberately lives in the macOS HID backend as a temporary diagnostic
+ * override: with PSSENSE_FORCE_IR=1, normal Sense Bluetooth output reports are
+ * left intact except for the tracking-LED fields and CRC. This lets us prove
+ * the controller output/camera path without changing the normal LED-sync
+ * algorithm in the pssense driver.
+ */
+#define PSSENSE_VID 0x054c
+#define PSSENSE_PID_LEFT 0x0e45
+#define PSSENSE_PID_RIGHT 0x0e46
+#define PSSENSE_BT_REPORT_ID 0x31
+#define PSSENSE_BT_REPORT_LENGTH 78
+#define PSSENSE_DEVICE_TIMESTAMP_OFFSET 49
+#define PSSENSE_LED_SETTINGS_OFFSET 22
+#define PSSENSE_PACKET_CRC_OFFSET 74
+#define PSSENSE_OUTPUT_CRC_SEED 0xa2
+#define PSSENSE_LED_PHASE_PRESCAN 1
+#define PSSENSE_LED_PERIOD_ID 42
+#define PSSENSE_FORCE_IR_CYCLE_NS 2000000ULL
+#define PSSENSE_FORCE_IR_LEAD_NS 50000000ULL
 
 struct iokit_input_report
 {
@@ -57,6 +82,18 @@ struct hid_iokit
 	struct iokit_input_report *reports_head;
 	struct iokit_input_report *reports_tail;
 	size_t report_count;
+
+	bool logged_output_success;
+
+	bool is_pssense;
+	bool force_pssense_ir;
+	bool force_pssense_ir_programmed;
+	bool force_pssense_ir_wait_logged;
+	uint8_t force_pssense_ir_led_sequence;
+	uint32_t force_pssense_ir_cycle_position;
+	bool have_pssense_device_timestamp;
+	uint32_t pssense_device_timestamp_ticks;
+	uint64_t pssense_device_timestamp_host_ns;
 };
 
 static CFIndex
@@ -73,6 +110,123 @@ iokit_get_int_property(IOHIDDeviceRef device, CFStringRef key)
 	}
 
 	return result;
+}
+
+static bool
+iokit_env_enabled(const char *name)
+{
+	const char *value = getenv(name);
+	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0 && strcmp(value, "false") != 0 &&
+	       strcmp(value, "FALSE") != 0;
+}
+
+static uint32_t
+iokit_read_le32(const uint8_t *data)
+{
+	return (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+}
+
+static void
+iokit_write_le32(uint8_t *data, uint32_t value)
+{
+	data[0] = (uint8_t)(value & 0xff);
+	data[1] = (uint8_t)((value >> 8) & 0xff);
+	data[2] = (uint8_t)((value >> 16) & 0xff);
+	data[3] = (uint8_t)((value >> 24) & 0xff);
+}
+
+static uint32_t
+iokit_crc32_le(uint32_t crc, const uint8_t *data, size_t length)
+{
+	crc ^= 0xffffffff;
+	while (length-- > 0) {
+		crc ^= *data++;
+		for (int i = 0; i < 8; i++) {
+			crc = (crc >> 1) ^ ((crc & 1) != 0 ? 0xedb88320U : 0U);
+		}
+	}
+	return crc ^ 0xffffffff;
+}
+
+static uint32_t
+iokit_pssense_crc(const uint8_t *report)
+{
+	uint32_t crc = iokit_crc32_le(0, (const uint8_t[]){PSSENSE_OUTPUT_CRC_SEED}, 1);
+	return iokit_crc32_le(crc, report, PSSENSE_PACKET_CRC_OFFSET);
+}
+
+static bool
+iokit_is_pssense_device(IOHIDDeviceRef device)
+{
+	CFIndex vendor = iokit_get_int_property(device, CFSTR(kIOHIDVendorIDKey));
+	CFIndex product = iokit_get_int_property(device, CFSTR(kIOHIDProductIDKey));
+	return vendor == PSSENSE_VID && (product == PSSENSE_PID_LEFT || product == PSSENSE_PID_RIGHT);
+}
+
+static void
+iokit_update_pssense_clock_locked(struct hid_iokit *hid, const uint8_t *report, size_t report_length)
+{
+	if (!hid->is_pssense || report_length < PSSENSE_DEVICE_TIMESTAMP_OFFSET + sizeof(uint32_t) ||
+	    report[0] != PSSENSE_BT_REPORT_ID) {
+		return;
+	}
+
+	hid->pssense_device_timestamp_ticks = iokit_read_le32(report + PSSENSE_DEVICE_TIMESTAMP_OFFSET);
+	hid->pssense_device_timestamp_host_ns = os_monotonic_get_ns();
+	hid->have_pssense_device_timestamp = true;
+}
+
+static bool
+iokit_force_pssense_ir_locked(struct hid_iokit *hid, uint8_t *report, size_t report_length)
+{
+	if (!hid->force_pssense_ir || !hid->is_pssense || report_length != PSSENSE_BT_REPORT_LENGTH ||
+	    report[0] != PSSENSE_BT_REPORT_ID) {
+		return false;
+	}
+
+	if (!hid->have_pssense_device_timestamp) {
+		if (!hid->force_pssense_ir_wait_logged) {
+			fprintf(stderr, "os_hid_iokit: PSSENSE_FORCE_IR waiting for controller device clock\n");
+			hid->force_pssense_ir_wait_logged = true;
+		}
+		return false;
+	}
+
+	if (!hid->force_pssense_ir_programmed) {
+		uint64_t now_ns = os_monotonic_get_ns();
+		uint64_t elapsed_ns = now_ns - hid->pssense_device_timestamp_host_ns;
+		uint64_t elapsed_ticks = (elapsed_ns * 3ULL) / 1000ULL;
+		uint64_t lead_ticks = (PSSENSE_FORCE_IR_LEAD_NS * 3ULL) / 1000ULL;
+		hid->force_pssense_ir_cycle_position =
+		    hid->pssense_device_timestamp_ticks + (uint32_t)elapsed_ticks + (uint32_t)lead_ticks;
+		hid->force_pssense_ir_led_sequence++;
+		hid->force_pssense_ir_programmed = true;
+		fprintf(stderr,
+		        "os_hid_iokit: PSSENSE_FORCE_IR programmed PRESCAN: period_id=%u cycle=%.3fms lead=%.1fms "
+		        "cycle_position=%u\n",
+		        PSSENSE_LED_PERIOD_ID, (double)PSSENSE_FORCE_IR_CYCLE_NS / 1000000.0,
+		        (double)PSSENSE_FORCE_IR_LEAD_NS / 1000000.0, hid->force_pssense_ir_cycle_position);
+	}
+
+	/*
+	 * Optically verified continuous-equivalent PRESCAN pattern:
+	 *  - period ID 42: ~2.1ms pulse
+	 *  - 2.0ms repeating cycle, giving slight pulse overlap
+	 *  - all four LED masks enabled
+	 *
+	 * cycle_length is encoded in thirds of a nanosecond; cycle_position is
+	 * encoded in controller IMU ticks (one third of a microsecond).
+	 */
+	report[PSSENSE_LED_SETTINGS_OFFSET] = PSSENSE_LED_PHASE_PRESCAN;
+	report[PSSENSE_LED_SETTINGS_OFFSET + 1] = hid->force_pssense_ir_led_sequence;
+	report[PSSENSE_LED_SETTINGS_OFFSET + 2] = PSSENSE_LED_PERIOD_ID;
+	iokit_write_le32(report + PSSENSE_LED_SETTINGS_OFFSET + 3, hid->force_pssense_ir_cycle_position);
+	iokit_write_le32(report + PSSENSE_LED_SETTINGS_OFFSET + 7, (uint32_t)(PSSENSE_FORCE_IR_CYCLE_NS * 3ULL));
+	memset(report + PSSENSE_LED_SETTINGS_OFFSET + 11, 0xff, 4);
+
+	uint32_t crc = iokit_pssense_crc(report);
+	iokit_write_le32(report + PSSENSE_PACKET_CRC_OFFSET, crc);
+	return true;
 }
 
 static void
@@ -142,6 +296,8 @@ iokit_input_report_callback(void *context,
 		iokit_free_report(queued);
 		return;
 	}
+
+	iokit_update_pssense_clock_locked(hid, report, (size_t)report_length);
 
 	while (hid->report_count >= IOKIT_HID_MAX_QUEUED_REPORTS) {
 		iokit_drop_oldest_report_locked(hid);
@@ -308,6 +464,17 @@ iokit_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int millis
 	return (int)copy_length;
 }
 
+static const char *
+iokit_report_type_name(IOHIDReportType type)
+{
+	switch (type) {
+	case kIOHIDReportTypeInput: return "input";
+	case kIOHIDReportTypeOutput: return "output";
+	case kIOHIDReportTypeFeature: return "feature";
+	default: return "unknown";
+	}
+}
+
 static int
 iokit_set_report(struct hid_iokit *hid, IOHIDReportType type, const uint8_t *data, size_t length)
 {
@@ -319,19 +486,51 @@ iokit_set_report(struct hid_iokit *hid, IOHIDReportType type, const uint8_t *dat
 	bool disconnected = hid->disconnected;
 	pthread_mutex_unlock(&hid->mutex);
 	if (disconnected) {
+		fprintf(stderr, "os_hid_iokit: refusing %s report write after device disconnect\n", iokit_report_type_name(type));
 		return -1;
 	}
 
-	uint8_t report_id = data[0];
-	const uint8_t *report = data;
+	uint8_t stack_report[PSSENSE_BT_REPORT_LENGTH];
+	const uint8_t *send_data = data;
+	if (type == kIOHIDReportTypeOutput && length == sizeof(stack_report)) {
+		memcpy(stack_report, data, sizeof(stack_report));
+		pthread_mutex_lock(&hid->mutex);
+		bool overridden = iokit_force_pssense_ir_locked(hid, stack_report, sizeof(stack_report));
+		pthread_mutex_unlock(&hid->mutex);
+		if (overridden) {
+			send_data = stack_report;
+		}
+	}
+
+	uint8_t report_id = send_data[0];
+	const uint8_t *report = send_data;
 	CFIndex report_length = (CFIndex)length;
 	if (report_id == 0) {
-		report = data + 1;
+		report = send_data + 1;
 		report_length--;
 	}
 
 	IOReturn ret = IOHIDDeviceSetReport(hid->device, type, report_id, report, report_length);
-	return ret == kIOReturnSuccess ? (int)length : -1;
+	if (ret != kIOReturnSuccess) {
+		fprintf(stderr,
+		        "os_hid_iokit: IOHIDDeviceSetReport failed: type=%s id=0x%02x app_length=%zu iokit_length=%ld "
+		        "IOReturn=0x%08x\n",
+		        iokit_report_type_name(type), report_id, length, (long)report_length, (unsigned int)ret);
+		return -1;
+	}
+
+	if (type == kIOHIDReportTypeOutput) {
+		pthread_mutex_lock(&hid->mutex);
+		if (!hid->logged_output_success) {
+			hid->logged_output_success = true;
+			fprintf(stderr,
+			        "os_hid_iokit: IOHIDDeviceSetReport output OK: id=0x%02x app_length=%zu iokit_length=%ld\n",
+			        report_id, length, (long)report_length);
+		}
+		pthread_mutex_unlock(&hid->mutex);
+	}
+
+	return (int)length;
 }
 
 static int
@@ -476,9 +675,17 @@ os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
 
 	hid->device = (IOHIDDeviceRef)native_device;
 	CFRetain(hid->device);
+	hid->is_pssense = iokit_is_pssense_device(hid->device);
+	hid->force_pssense_ir = hid->is_pssense && iokit_env_enabled("PSSENSE_FORCE_IR");
+	if (hid->force_pssense_ir) {
+		fprintf(stderr,
+		        "os_hid_iokit: PSSENSE_FORCE_IR=1 enabled for PS VR2 Sense controller; overriding tracking LED "
+		        "fields only\n");
+	}
 
 	IOReturn open_ret = IOHIDDeviceOpen(hid->device, kIOHIDOptionsTypeNone);
 	if (open_ret != kIOReturnSuccess) {
+		fprintf(stderr, "os_hid_iokit: IOHIDDeviceOpen failed: IOReturn=0x%08x\n", (unsigned int)open_ret);
 		CFRelease(hid->device);
 		pthread_cond_destroy(&hid->condition);
 		pthread_mutex_destroy(&hid->mutex);
