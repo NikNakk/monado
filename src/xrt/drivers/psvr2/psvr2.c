@@ -615,7 +615,9 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 		os_thread_helper_destroy(&hmd->usb_thread);
 	}
 
-	psvr2_usb_destroy(hmd);
+	if (hmd->usb_transfers_drained) {
+		psvr2_usb_destroy(hmd);
+	}
 
 #ifdef XRT_OS_OSX
 	psvr2_timing_trace_close();
@@ -627,7 +629,7 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 	// 	libusb_close(hmd->dev);
 	// }
 
-	if (hmd->ctx != NULL) {
+	if (hmd->ctx != NULL && hmd->usb_transfers_drained) {
 		libusb_exit(hmd->ctx);
 	}
 
@@ -1378,7 +1380,33 @@ psvr2_usb_thread(void *ptr)
 	// Shut down USB communication
 	psvr2_usb_stop(hmd);
 
-	libusb_handle_events(hmd->ctx);
+	/*
+	 * Cancelling a libusb transfer is asynchronous: every submitted transfer
+	 * must reach its callback before the transfer can be freed. In particular,
+	 * one event-handling pass is not sufficient for the multiple camera
+	 * transfers on macOS and can leave Darwin callbacks referring to freed
+	 * transfers during libusb_exit().
+	 */
+	int attempts = 0;
+	os_thread_helper_lock(&hmd->usb_thread);
+	while (hmd->usb_active_xfers > 0 && attempts < 10) {
+		os_thread_helper_unlock(&hmd->usb_thread);
+		int ret = libusb_handle_events_timeout_completed(
+		    hmd->ctx, &(struct timeval){.tv_sec = 0, .tv_usec = 100000}, NULL);
+		if (ret < 0 && ret != LIBUSB_ERROR_INTERRUPTED) {
+			PSVR2_WARN(hmd, "libusb_handle_events failed while stopping: %d", ret);
+			os_thread_helper_lock(&hmd->usb_thread);
+			break;
+		}
+		attempts++;
+		os_thread_helper_lock(&hmd->usb_thread);
+	}
+	hmd->usb_transfers_drained = hmd->usb_active_xfers == 0;
+	if (!hmd->usb_transfers_drained) {
+		PSVR2_WARN(hmd, "Leaving libusb resources allocated because %d transfers did not finish cancellation",
+		            hmd->usb_active_xfers);
+	}
+	os_thread_helper_unlock(&hmd->usb_thread);
 
 	return NULL;
 }
@@ -1664,6 +1692,7 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 		goto out;
 	}
 	hmd->usb_active_xfers++;
+	hmd->usb_transfers_drained = false;
 
 	/* Camera data is not needed for HMD tracking. */
 	hmd->camera_enable = hmd->camera_streams_enabled;
@@ -1989,6 +2018,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	    (enum u_device_alloc_flags)(U_DEVICE_ALLOC_HMD | U_DEVICE_ALLOC_TRACKING_NONE);
 
 	struct psvr2_hmd *hmd = U_DEVICE_ALLOCATE(struct psvr2_hmd, flags, PSVR2_HMD_INPUT_COUNT, 1);
+	hmd->usb_transfers_drained = true;
 	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
 	hmd->camera_streams_enabled =

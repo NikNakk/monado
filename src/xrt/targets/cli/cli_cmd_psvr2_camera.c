@@ -204,6 +204,7 @@ cli_cmd_psvr2_camera(int argc, const char **argv)
 		}
 	}
 
+	(void)psvr2_set_camera_frame_sinks(head, NULL);
 	camera_destroy_system(&xi, &xsys, &xsysd, &xso);
 	for (size_t i = 0; i < 4; i++) {
 		free(snapshot_sinks[i].data);
