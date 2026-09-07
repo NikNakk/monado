@@ -56,9 +56,76 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <libusb.h>
 
+#ifdef XRT_OS_OSX
+/*
+ * Diagnostic clock filter for the macOS PSVR2 path.
+ *
+ * m_clock_offset_a2b() is intentionally a simple exponential filter and its
+ * documentation says it expects low delay and small jitter. Camera mode 4 on
+ * macOS can heavily delay the libusb event loop: the camera VTS itself remains
+ * precise, while the host-side observation time can move by hundreds of
+ * milliseconds. Feeding those delayed observations into the normal exponential
+ * filter moves hw2mono_vts and therefore makes camera exposure timestamps
+ * jitter/backtrack even though the hardware clock is stable.
+ *
+ * With PSVR2_ROBUST_CLOCK=1, PSVR2 translation units use a minimum-delay style
+ * scalar filter instead: lower host-minus-device offsets are accepted
+ * immediately (they represent a less delayed observation), while movement
+ * toward larger offsets is limited to 2.5us per sample so queued USB work cannot
+ * drag the clock mapping around. This is deliberately env-gated for diagnosis.
+ */
+static inline bool
+psvr2_robust_clock_enabled(void)
+{
+	static int enabled = -1;
+	if (enabled < 0) {
+		const char *value = getenv("PSVR2_ROBUST_CLOCK");
+		enabled = value != NULL && value[0] != '\0' && strcmp(value, "0") != 0 && strcmp(value, "false") != 0 &&
+		          strcmp(value, "FALSE") != 0;
+		if (enabled) {
+			fprintf(stderr,
+			        "psvr2: PSVR2_ROBUST_CLOCK=1 enabled; using minimum-delay hardware clock filtering on macOS\n");
+		}
+	}
+	return enabled != 0;
+}
+
+static inline timepoint_ns
+psvr2_clock_offset_a2b_macos(float freq, timepoint_ns a, timepoint_ns b, time_duration_ns *inout_a2b)
+{
+	if (!psvr2_robust_clock_enabled()) {
+		return m_clock_offset_a2b(freq, a, b, inout_a2b);
+	}
+
+	(void)freq;
+	const time_duration_ns got_a2b = b - a;
+	const time_duration_ns old_a2b = *inout_a2b;
+	time_duration_ns new_a2b = got_a2b;
+
+	if (old_a2b != 0) {
+		if (got_a2b < old_a2b) {
+			/* Lower skew means a lower-latency observation: take it immediately. */
+			new_a2b = got_a2b;
+		} else {
+			/* Permit real clock drift, but do not follow USB queueing latency. */
+			const time_duration_ns max_upward_step_ns = 2500;
+			const time_duration_ns delta = got_a2b - old_a2b;
+			new_a2b = old_a2b + MIN(delta, max_upward_step_ns);
+		}
+	}
+
+	*inout_a2b = new_a2b;
+	return a + new_a2b;
+}
+
+/* psvr2.c includes this header before its m_clock_offset_a2b() call sites. */
+#define m_clock_offset_a2b(...) psvr2_clock_offset_a2b_macos(__VA_ARGS__)
+#endif
 
 #define NUM_CAM_XFERS 1
 
