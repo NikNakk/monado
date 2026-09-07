@@ -138,6 +138,14 @@ struct u_var_draggable_f32
 	float max;
 };
 
+struct u_var_draggable_u8
+{
+	uint8_t *val;
+	uint8_t step;
+	uint8_t min;
+	uint8_t max;
+};
+
 /*!
  * Draggable usingned 16-bit integer information.
  *
@@ -227,6 +235,7 @@ enum u_var_kind
 	U_VAR_KIND_RGB_U8,
 	U_VAR_KIND_RGB_F32,
 	U_VAR_KIND_U8,
+	U_VAR_KIND_DRAGGABLE_U8,
 	U_VAR_KIND_U16,
 	U_VAR_KIND_U16_ARR,
 	U_VAR_KIND_U64,
@@ -432,6 +441,7 @@ u_var_force_on(void);
 	ADD_FUNC(button, struct u_var_button, BUTTON)                                                                  \
 	ADD_FUNC(combo, struct u_var_combo, COMBO)                                                                     \
 	ADD_FUNC(draggable_f32, struct u_var_draggable_f32, DRAGGABLE_F32)                                             \
+	ADD_FUNC(draggable_u8, struct u_var_draggable_u8, DRAGGABLE_U8)                                                \
 	ADD_FUNC(draggable_u16, struct u_var_draggable_u16, DRAGGABLE_U16)                                             \
 	ADD_FUNC(histogram_f32, struct u_var_histogram_f32, HISTOGRAM_F32)                                             \
 	ADD_FUNC(curve, struct u_var_curve, CURVE)                                                                     \

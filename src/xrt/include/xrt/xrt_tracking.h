@@ -13,6 +13,10 @@
 #define XRT_TRACKING_NAME_LEN 256
 #define XRT_TRACKING_MAX_SLAM_CAMS 5
 
+/* Current constellation tracking supports up to eight cameras. Keep the
+ * legacy SLAM limit and sink layout intact on this branch. */
+#define XRT_TRACKING_MAX_CAMS 8
+
 #include "xrt/xrt_defines.h"
 
 
@@ -58,6 +62,9 @@ enum xrt_tracking_type
 
 	//! The device(s) are tracked by external SLAM
 	XRT_TRACKING_TYPE_EXTERNAL_SLAM,
+
+	//! The device(s) are tracked through a constellation of lights as seen by cameras.
+	XRT_TRACKING_TYPE_CONSTELLATION,
 
 	//! The device(s) are tracked by other methods.
 	XRT_TRACKING_TYPE_OTHER,

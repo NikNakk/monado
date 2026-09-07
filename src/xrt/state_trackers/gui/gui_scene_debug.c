@@ -607,6 +607,13 @@ on_draggable_f32_var(const char *name, void *ptr)
 }
 
 static void
+on_draggable_u8_var(const char *name, void *ptr)
+{
+	struct u_var_draggable_u8 *d = (struct u_var_draggable_u8 *)ptr;
+	igDragScalar(name, ImGuiDataType_U8, d->val, d->step, &d->min, &d->max, NULL, ImGuiSliderFlags_None);
+}
+
+static void
 on_draggable_u16_var(const char *name, void *ptr)
 {
 	struct u_var_draggable_u16 *d = (struct u_var_draggable_u16 *)ptr;
@@ -730,6 +737,7 @@ on_elem(struct u_var_info *info, void *priv)
 	case U_VAR_KIND_SINK_DEBUG: on_sink_debug_var(name, ptr, state); break;
 	case U_VAR_KIND_NATIVE_IMAGES_DEBUG: on_native_images_debug_var(name, ptr, state); break;
 	case U_VAR_KIND_DRAGGABLE_F32: on_draggable_f32_var(name, ptr); break;
+	case U_VAR_KIND_DRAGGABLE_U8: on_draggable_u8_var(name, ptr); break;
 	case U_VAR_KIND_BUTTON: on_button_var(name, ptr); break;
 	case U_VAR_KIND_COMBO: on_combo_var(name, ptr); break;
 	case U_VAR_KIND_DRAGGABLE_U16: on_draggable_u16_var(name, ptr); break;
