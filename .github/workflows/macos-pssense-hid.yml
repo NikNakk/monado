@@ -1,0 +1,55 @@
+name: macOS PS Sense HID
+
+on:
+  push:
+    branches:
+      - macos-pssense-hid
+    paths:
+      - .github/workflows/macos-pssense-hid.yml
+      - CMakeLists.txt
+      - src/xrt/auxiliary/os/**
+      - src/xrt/drivers/pssense/**
+      - src/xrt/drivers/CMakeLists.txt
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-hid-and-sense:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: brew install cmake eigen glslang libusb ninja
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DBUILD_TESTING=OFF
+          -DXRT_FEATURE_OPENXR=OFF
+          -DXRT_FEATURE_SERVICE=OFF
+          -DXRT_MODULE_COMPOSITOR=OFF
+          -DXRT_MODULE_COMPOSITOR_CLIENT=OFF
+          -DXRT_MODULE_COMPOSITOR_MAIN=OFF
+          -DXRT_MODULE_COMPOSITOR_MULTI=OFF
+          -DXRT_MODULE_COMPOSITOR_NULL=OFF
+          -DXRT_MODULE_COMPOSITOR_RENDER=OFF
+          -DXRT_MODULE_COMPOSITOR_SHADERS=OFF
+          -DXRT_MODULE_COMPOSITOR_UTIL=OFF
+          -DXRT_MODULE_COMPOSITOR_MOCK=OFF
+          -DXRT_MODULE_OPENXR_STATE_TRACKER=OFF
+          -DXRT_MODULE_IPC=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_MODULE_MONADO_CLI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_BUILD_DRIVER_PSSENSE=ON
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_SIMULATED=OFF
+
+      - name: Build macOS HID and Sense driver
+        run: cmake --build build --target aux_os drv_pssense --parallel
