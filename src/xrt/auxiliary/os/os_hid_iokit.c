@@ -43,6 +43,7 @@
 #define PSSENSE_PID_RIGHT 0x0e46
 #define PSSENSE_BT_REPORT_ID 0x31
 #define PSSENSE_BT_REPORT_LENGTH 78
+#define PSSENSE_HOST_TIMESTAMP_OFFSET 18
 #define PSSENSE_DEVICE_TIMESTAMP_OFFSET 49
 #define PSSENSE_LED_SETTINGS_OFFSET 22
 #define PSSENSE_PACKET_CRC_OFFSET 74
@@ -51,6 +52,7 @@
 #define PSSENSE_LED_PERIOD_ID 42
 #define PSSENSE_FORCE_IR_CYCLE_NS 2000000ULL
 #define PSSENSE_FORCE_IR_LEAD_NS 50000000ULL
+#define PSSENSE_PERIOD_ID_UNIT_NS 50000ULL
 
 struct iokit_input_report
 {
@@ -86,6 +88,7 @@ struct hid_iokit
 	bool logged_output_success;
 
 	bool is_pssense;
+	char pssense_side;
 	bool force_pssense_ir;
 	bool force_pssense_ir_programmed;
 	bool force_pssense_ir_wait_logged;
@@ -94,6 +97,13 @@ struct hid_iokit
 	bool have_pssense_device_timestamp;
 	uint32_t pssense_device_timestamp_ticks;
 	uint64_t pssense_device_timestamp_host_ns;
+
+	bool pssense_timing_diag;
+	bool pssense_timing_diag_have_last;
+	uint8_t pssense_timing_diag_last_phase;
+	uint8_t pssense_timing_diag_last_sequence;
+	uint8_t pssense_timing_diag_last_period_id;
+	uint32_t pssense_timing_diag_last_cycle_position;
 };
 
 static CFIndex
@@ -163,6 +173,19 @@ iokit_is_pssense_device(IOHIDDeviceRef device)
 	return vendor == PSSENSE_VID && (product == PSSENSE_PID_LEFT || product == PSSENSE_PID_RIGHT);
 }
 
+static char
+iokit_pssense_side(IOHIDDeviceRef device)
+{
+	CFIndex product = iokit_get_int_property(device, CFSTR(kIOHIDProductIDKey));
+	if (product == PSSENSE_PID_LEFT) {
+		return 'L';
+	}
+	if (product == PSSENSE_PID_RIGHT) {
+		return 'R';
+	}
+	return '?';
+}
+
 static void
 iokit_update_pssense_clock_locked(struct hid_iokit *hid, const uint8_t *report, size_t report_length)
 {
@@ -174,6 +197,66 @@ iokit_update_pssense_clock_locked(struct hid_iokit *hid, const uint8_t *report, 
 	hid->pssense_device_timestamp_ticks = iokit_read_le32(report + PSSENSE_DEVICE_TIMESTAMP_OFFSET);
 	hid->pssense_device_timestamp_host_ns = os_monotonic_get_ns();
 	hid->have_pssense_device_timestamp = true;
+}
+
+static void
+iokit_log_pssense_timing_locked(struct hid_iokit *hid,
+                                 const uint8_t *report,
+                                 size_t report_length,
+                                 bool force_ir_overridden)
+{
+	if (!hid->pssense_timing_diag || !hid->is_pssense || report_length != PSSENSE_BT_REPORT_LENGTH ||
+	    report[0] != PSSENSE_BT_REPORT_ID) {
+		return;
+	}
+
+	uint8_t phase = report[PSSENSE_LED_SETTINGS_OFFSET];
+	uint8_t sequence = report[PSSENSE_LED_SETTINGS_OFFSET + 1];
+	uint8_t period_id = report[PSSENSE_LED_SETTINGS_OFFSET + 2];
+	uint32_t cycle_position = iokit_read_le32(report + PSSENSE_LED_SETTINGS_OFFSET + 3);
+	uint32_t cycle_length_thirds_ns = iokit_read_le32(report + PSSENSE_LED_SETTINGS_OFFSET + 7);
+
+	if (hid->pssense_timing_diag_have_last && phase == hid->pssense_timing_diag_last_phase &&
+	    sequence == hid->pssense_timing_diag_last_sequence && period_id == hid->pssense_timing_diag_last_period_id &&
+	    cycle_position == hid->pssense_timing_diag_last_cycle_position) {
+		return;
+	}
+
+	hid->pssense_timing_diag_have_last = true;
+	hid->pssense_timing_diag_last_phase = phase;
+	hid->pssense_timing_diag_last_sequence = sequence;
+	hid->pssense_timing_diag_last_period_id = period_id;
+	hid->pssense_timing_diag_last_cycle_position = cycle_position;
+
+	uint64_t now_ns = os_monotonic_get_ns();
+	uint32_t host_timestamp_us = iokit_read_le32(report + PSSENSE_HOST_TIMESTAMP_OFFSET);
+	uint64_t pulse_ns = (uint64_t)period_id * PSSENSE_PERIOD_ID_UNIT_NS;
+	uint64_t cycle_ns = (uint64_t)cycle_length_thirds_ns / 3ULL;
+
+	uint32_t estimated_device_ticks = 0;
+	uint64_t clock_age_ns = 0;
+	int64_t blink_delta_ns = 0;
+	int64_t blink_host_est_ns = 0;
+	bool clock_valid = hid->have_pssense_device_timestamp;
+	if (clock_valid) {
+		clock_age_ns = now_ns - hid->pssense_device_timestamp_host_ns;
+		uint64_t elapsed_ticks = (clock_age_ns * 3ULL) / 1000ULL;
+		estimated_device_ticks = hid->pssense_device_timestamp_ticks + (uint32_t)elapsed_ticks;
+		int32_t blink_delta_ticks = (int32_t)(cycle_position - estimated_device_ticks);
+		blink_delta_ns = ((int64_t)blink_delta_ticks * 1000LL) / 3LL;
+		blink_host_est_ns = (int64_t)now_ns + blink_delta_ns;
+	}
+
+	fprintf(stderr,
+	        "os_hid_iokit: PSSENSE_TIMING side=%c force_ir=%u host_now_ns=%llu host_report_us=%u phase=%u "
+	        "led_seq=%u period_id=%u pulse_ns=%llu cycle_position=%u cycle_ns=%llu clock_valid=%u "
+	        "device_ticks_est=%u clock_age_ns=%llu blink_delta_ns=%lld blink_host_est_ns=%lld masks=%02x%02x%02x%02x\n",
+	        hid->pssense_side, force_ir_overridden ? 1U : 0U, (unsigned long long)now_ns, host_timestamp_us, phase,
+	        sequence, period_id, (unsigned long long)pulse_ns, cycle_position, (unsigned long long)cycle_ns,
+	        clock_valid ? 1U : 0U, estimated_device_ticks, (unsigned long long)clock_age_ns, (long long)blink_delta_ns,
+	        (long long)blink_host_est_ns, report[PSSENSE_LED_SETTINGS_OFFSET + 11],
+	        report[PSSENSE_LED_SETTINGS_OFFSET + 12], report[PSSENSE_LED_SETTINGS_OFFSET + 13],
+	        report[PSSENSE_LED_SETTINGS_OFFSET + 14]);
 }
 
 static bool
@@ -492,14 +575,21 @@ iokit_set_report(struct hid_iokit *hid, IOHIDReportType type, const uint8_t *dat
 
 	uint8_t stack_report[PSSENSE_BT_REPORT_LENGTH];
 	const uint8_t *send_data = data;
+	bool overridden = false;
 	if (type == kIOHIDReportTypeOutput && length == sizeof(stack_report)) {
 		memcpy(stack_report, data, sizeof(stack_report));
 		pthread_mutex_lock(&hid->mutex);
-		bool overridden = iokit_force_pssense_ir_locked(hid, stack_report, sizeof(stack_report));
+		overridden = iokit_force_pssense_ir_locked(hid, stack_report, sizeof(stack_report));
 		pthread_mutex_unlock(&hid->mutex);
 		if (overridden) {
 			send_data = stack_report;
 		}
+	}
+
+	if (type == kIOHIDReportTypeOutput) {
+		pthread_mutex_lock(&hid->mutex);
+		iokit_log_pssense_timing_locked(hid, send_data, length, overridden);
+		pthread_mutex_unlock(&hid->mutex);
 	}
 
 	uint8_t report_id = send_data[0];
@@ -676,11 +766,16 @@ os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
 	hid->device = (IOHIDDeviceRef)native_device;
 	CFRetain(hid->device);
 	hid->is_pssense = iokit_is_pssense_device(hid->device);
+	hid->pssense_side = iokit_pssense_side(hid->device);
 	hid->force_pssense_ir = hid->is_pssense && iokit_env_enabled("PSSENSE_FORCE_IR");
+	hid->pssense_timing_diag = hid->is_pssense && iokit_env_enabled("PSSENSE_TIMING_DIAG");
 	if (hid->force_pssense_ir) {
 		fprintf(stderr,
 		        "os_hid_iokit: PSSENSE_FORCE_IR=1 enabled for PS VR2 Sense controller; overriding tracking LED "
 		        "fields only\n");
+	}
+	if (hid->pssense_timing_diag) {
+		fprintf(stderr, "os_hid_iokit: PSSENSE_TIMING_DIAG=1 enabled for Sense %c\n", hid->pssense_side);
 	}
 
 	IOReturn open_ret = IOHIDDeviceOpen(hid->device, kIOHIDOptionsTypeNone);
