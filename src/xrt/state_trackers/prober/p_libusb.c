@@ -24,6 +24,10 @@ p_libusb_init(struct prober *p)
 void
 p_libusb_teardown(struct prober *p)
 {
+#ifdef XRT_OS_OSX
+	p_osx_hid_teardown(p);
+#endif
+
 	// Free all libusb resources.
 	if (p->usb.list != NULL) {
 		libusb_free_device_list(p->usb.list, 1);
@@ -90,6 +94,18 @@ p_libusb_probe(struct prober *p)
 		// Attach the libusb device to it.
 		pdev->usb.dev = device;
 	}
+
+#ifdef XRT_OS_OSX
+	// macOS has no udev/hidraw enumeration path. Add the paired PS VR2
+	// Sense Bluetooth HID devices through IOKit after the USB device list
+	// has been populated. The IOKit backend deliberately matches only the
+	// two Sense VID/PIDs rather than requesting access to all HID devices.
+	ret = p_osx_hid_probe(p);
+	if (ret != 0) {
+		P_ERROR(p, "Failed to enumerate macOS PS Sense HID devices");
+		return ret;
+	}
+#endif
 
 	return 0;
 }
