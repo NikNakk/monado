@@ -54,4 +54,13 @@ jobs:
           -DXRT_BUILD_DRIVER_SIMULATED=OFF
 
       - name: Build macOS HID, prober and Sense driver
-        run: cmake --build build --target aux_os pssense_hid_probe st_prober drv_pssense --parallel
+        run: |
+          set -o pipefail
+          cmake --build build --target aux_os pssense_hid_probe st_prober drv_pssense --parallel 2>&1 | tee build.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-pssense-build-log
+          path: build.log
