@@ -8,6 +8,7 @@ on:
       - .github/workflows/macos-pssense-hid.yml
       - CMakeLists.txt
       - src/xrt/auxiliary/os/**
+      - src/xrt/state_trackers/prober/**
       - src/xrt/drivers/pssense/**
       - src/xrt/drivers/CMakeLists.txt
   workflow_dispatch:
@@ -52,5 +53,5 @@ jobs:
           -DXRT_BUILD_DRIVER_QWERTY=OFF
           -DXRT_BUILD_DRIVER_SIMULATED=OFF
 
-      - name: Build macOS HID, probe utility and Sense driver
-        run: cmake --build build --target aux_os pssense_hid_probe drv_pssense --parallel
+      - name: Build macOS HID, prober and Sense driver
+        run: cmake --build build --target aux_os pssense_hid_probe st_prober drv_pssense --parallel
