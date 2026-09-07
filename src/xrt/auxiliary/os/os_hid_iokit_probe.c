@@ -75,6 +75,65 @@ print_prefix(const uint8_t *data, size_t length)
 	}
 }
 
+static CFMutableDictionaryRef
+create_sense_matching_dictionary(uint16_t product_id)
+{
+	CFMutableDictionaryRef matching = CFDictionaryCreateMutable(
+	    kCFAllocatorDefault, 2, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	if (matching == NULL) {
+		return NULL;
+	}
+
+	int32_t vendor_value = PSSENSE_VID;
+	int32_t product_value = product_id;
+	CFNumberRef vendor = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &vendor_value);
+	CFNumberRef product = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &product_value);
+	if (vendor == NULL || product == NULL) {
+		if (vendor != NULL) {
+			CFRelease(vendor);
+		}
+		if (product != NULL) {
+			CFRelease(product);
+		}
+		CFRelease(matching);
+		return NULL;
+	}
+
+	CFDictionarySetValue(matching, CFSTR(kIOHIDVendorIDKey), vendor);
+	CFDictionarySetValue(matching, CFSTR(kIOHIDProductIDKey), product);
+	CFRelease(vendor);
+	CFRelease(product);
+	return matching;
+}
+
+static bool
+set_sense_device_matching(IOHIDManagerRef manager)
+{
+	CFMutableDictionaryRef left = create_sense_matching_dictionary(PSSENSE_PID_LEFT);
+	CFMutableDictionaryRef right = create_sense_matching_dictionary(PSSENSE_PID_RIGHT);
+	if (left == NULL || right == NULL) {
+		if (left != NULL) {
+			CFRelease(left);
+		}
+		if (right != NULL) {
+			CFRelease(right);
+		}
+		return false;
+	}
+
+	const void *values[] = {left, right};
+	CFArrayRef matching = CFArrayCreate(kCFAllocatorDefault, values, 2, &kCFTypeArrayCallBacks);
+	CFRelease(left);
+	CFRelease(right);
+	if (matching == NULL) {
+		return false;
+	}
+
+	IOHIDManagerSetDeviceMatchingMultiple(manager, matching);
+	CFRelease(matching);
+	return true;
+}
+
 static int
 probe_controller(IOHIDDeviceRef device, uint16_t product_id, int read_count)
 {
@@ -160,7 +219,12 @@ main(int argc, char **argv)
 		return 1;
 	}
 
-	IOHIDManagerSetDeviceMatching(manager, NULL);
+	if (!set_sense_device_matching(manager)) {
+		fprintf(stderr, "Failed to create Sense HID matching criteria\n");
+		CFRelease(manager);
+		return 1;
+	}
+
 	IOReturn manager_ret = IOHIDManagerOpen(manager, kIOHIDOptionsTypeNone);
 	if (manager_ret != kIOReturnSuccess) {
 		fprintf(stderr, "Failed to open IOHIDManager: 0x%08x\n", manager_ret);
