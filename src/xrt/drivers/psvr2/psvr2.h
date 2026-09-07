@@ -49,6 +49,7 @@ extern "C" {
 #include "util/u_debug.h"
 
 #include "psvr2_protocol.h"
+#include "psvr2_interface.h"
 #include "psvr2_linear_prediction.h"
 #include "psvr2_continuity_prediction.h"
 
@@ -221,12 +222,20 @@ struct psvr2_hmd
 
 	/* Camera debug sinks */
 	struct u_sink_debug debug_sinks[4];
+	struct psvr2_camera_diagnostics camera_diagnostics;
+	struct t_timing_event_source camera_timing_source;
+	struct t_timing_event_sink *camera_timing_sinks[2];
+	struct xrt_frame_sink *camera_frame_sinks[4];
+	uint32_t last_camera_event_vts_us;
+	uint32_t last_camera_event_sequence;
 
 	/* USB communication */
 	libusb_context *ctx;
 	libusb_device_handle *dev;
 	/* Whether to claim and stream the camera, gaze, and other optional interfaces. */
 	bool auxiliary_streams_enabled;
+	/* Whether to claim and stream only the camera interface. Implied by auxiliary streams. */
+	bool camera_streams_enabled;
 
 	struct os_thread_helper usb_thread;
 	int usb_complete;
