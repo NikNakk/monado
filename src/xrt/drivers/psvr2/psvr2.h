@@ -240,6 +240,7 @@ struct psvr2_hmd
 	struct os_thread_helper usb_thread;
 	int usb_complete;
 	int usb_active_xfers;
+	bool usb_transfers_drained;
 
 	/* Status report */
 	struct libusb_transfer *status_xfer;
