@@ -355,7 +355,7 @@ public: // Fields
 	// clang-format off
 	t_constellation_search_model *search_model{nullptr};
 
-	// @todo These need to be pulled from the device and put into the sample. 
+	// @todo These need to be pulled from the device and put into the sample.
 	//       Right now we just hardcode them since we don't have any real sensor fusion.
 	xrt_vec3 prior_pos_error{MIN_POS_ERROR, MIN_POS_ERROR, MIN_POS_ERROR};
 	xrt_vec3 prior_rot_error{MIN_ROT_ERROR, MIN_ROT_ERROR, MIN_ROT_ERROR};
