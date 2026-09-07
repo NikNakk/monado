@@ -25,6 +25,11 @@ if(WIN32)
 	target_link_libraries(aux_os PRIVATE winmm)
 endif()
 
+if(APPLE)
+	target_sources(aux_os PRIVATE os_hid_iokit.c)
+	target_link_libraries(aux_os PRIVATE "-framework IOKit" "-framework CoreFoundation")
+endif()
+
 if(LINUX)
 	target_sources(aux_os PRIVATE os_serial_linux.c)
 else()
