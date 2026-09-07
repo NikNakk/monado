@@ -40,6 +40,8 @@
 #define USB_GAZE_XFER_SIZE 32768
 #define USB_CAM_MODE10_XFER_SIZE 1040640
 #define USB_CAM_MODE1_XFER_SIZE 819456
+#define USB_CAM_HEADER_SIZE 256
+#define USB_CAM_MAX_XFER_SIZE USB_CAM_MODE10_XFER_SIZE
 #define USB_LD_XFER_SIZE 36944
 #define USB_RP_XFER_SIZE 821120
 #define USB_VD_XFER_SIZE 32768
@@ -81,7 +83,8 @@ enum psvr2_camera_mode
 	PSVR2_CAMERA_MODE_2 = 2,
 	// 819456 byte 640x640x2 SBS interleaved bottom and top camera paired images
 	PSVR2_CAMERA_MODE_3 = 3,
-	// 520448 byte 512x508x2 Top-Bottom fisheye, *Controller Tracking* interleaved top and bottom camera pairs
+	// 520448 byte packet: 256-byte header + two contiguous 512x508 L8 controller-tracking images.
+	// Camera sets 4 and 5 are interleaved and share VTS/sequence values for each synchronized four-camera sample.
 	PSVR2_CAMERA_MODE_4 = 4,
 	// 80256 byte 400x200 nearly black (no value higher than 0x0f)
 	PSVR2_CAMERA_MODE_400_200_DARK = 5,
@@ -145,6 +148,22 @@ struct slam_usb_record
 	__lef32 pos[3];    //< 32-bit floats
 	__lef32 orient[4]; //< Orientation quaternion
 	uint8_t remainder[468];
+};
+
+/* Common prefix observed on camera packets beginning with "VI". */
+struct camera_usb_header
+{
+	char magic[2];
+	__le16 version;
+	__le32 packet_size;
+	__le32 vts_us;
+	__le32 sequence_id;
+	__le16 camera_set;
+	__le16 image_height;
+	__le16 active_height;
+	__le16 image_width;
+	__le16 active_width;
+	__le16 unknown2;
 };
 
 struct sie_ctrl_pkt

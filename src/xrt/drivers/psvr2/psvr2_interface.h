@@ -14,6 +14,8 @@
 #pragma once
 
 #include "xrt/xrt_prober.h"
+#include "xrt/xrt_frame.h"
+#include "tracking/t_time_sync.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -50,6 +52,42 @@ struct psvr2_slam_timing
 	int64_t hw2mono_vts_ns;
 };
 
+#define PSVR2_CAMERA_DIAGNOSTIC_HEADER_SIZE 256
+#define PSVR2_CAMERA_DIAGNOSTIC_SIZE_SLOTS 8
+
+struct psvr2_camera_packet_size_count
+{
+	uint32_t size;
+	uint64_t count;
+};
+
+/*!
+ * Snapshot of the raw PS VR2 camera stream for protocol diagnostics.
+ *
+ * Timestamps are USB completion times in Monado's monotonic clock domain.
+ * They are deliberately not presented as camera exposure timestamps.
+ */
+struct psvr2_camera_diagnostics
+{
+	bool enabled;
+	uint8_t configured_mode;
+	uint64_t frame_count;
+	uint64_t vi_signature_count;
+	uint32_t last_packet_size;
+	uint32_t last_vts_us;
+	uint32_t last_sequence_id;
+	int64_t last_vts_monotonic_ns;
+	uint16_t last_camera_set;
+	uint16_t last_image_width;
+	uint16_t last_image_height;
+	int64_t first_arrival_ns;
+	int64_t last_arrival_ns;
+	int64_t last_interval_ns;
+	uint32_t last_header_size;
+	uint8_t last_header[PSVR2_CAMERA_DIAGNOSTIC_HEADER_SIZE];
+	struct psvr2_camera_packet_size_count packet_sizes[PSVR2_CAMERA_DIAGNOSTIC_SIZE_SLOTS];
+};
+
 /*!
  * Create the PS VR2 HMD device
  *
@@ -69,6 +107,25 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev);
  */
 bool
 psvr2_get_slam_timing(struct xrt_device *xdev, struct psvr2_slam_timing *out);
+
+/*!
+ * Snapshot raw camera packet metadata. This never fabricates an exposure time.
+ */
+bool
+psvr2_get_camera_diagnostics(struct xrt_device *xdev, struct psvr2_camera_diagnostics *out);
+
+/*!
+ * Return the timing source backed by camera packet VTS timestamps.
+ */
+struct t_timing_event_source *
+psvr2_get_timing_event_source(struct xrt_device *xdev);
+
+/*!
+ * Attach four sinks for mode-4 L8 controller-tracking camera images.
+ * Camera-set 4 maps to sinks 0/1 and camera-set 5 maps to sinks 2/3.
+ */
+bool
+psvr2_set_camera_frame_sinks(struct xrt_device *xdev, struct xrt_frame_sink *const sinks[4]);
 
 /*!
  * Probing function for PlayStation VR2 devices.

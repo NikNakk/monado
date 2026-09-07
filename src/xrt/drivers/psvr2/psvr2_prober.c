@@ -51,6 +51,54 @@ psvr2_get_slam_timing(struct xrt_device *xdev, struct psvr2_slam_timing *out)
 	return true;
 }
 
+bool
+psvr2_get_camera_diagnostics(struct xrt_device *xdev, struct psvr2_camera_diagnostics *out)
+{
+	if (xdev == NULL || out == NULL) {
+		return false;
+	}
+
+	*out = (struct psvr2_camera_diagnostics){0};
+	if (strstr(xdev->str, "PS VR2") == NULL) {
+		return false;
+	}
+
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	os_mutex_lock(&hmd->data_lock);
+	*out = hmd->camera_diagnostics;
+	os_mutex_unlock(&hmd->data_lock);
+
+	return true;
+}
+
+struct t_timing_event_source *
+psvr2_get_timing_event_source(struct xrt_device *xdev)
+{
+	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
+		return NULL;
+	}
+
+	return &psvr2_hmd(xdev)->camera_timing_source;
+}
+
+bool
+psvr2_set_camera_frame_sinks(struct xrt_device *xdev, struct xrt_frame_sink *const sinks[4])
+{
+	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
+		return false;
+	}
+
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	os_mutex_lock(&hmd->data_lock);
+	if (sinks == NULL) {
+		memset(hmd->camera_frame_sinks, 0, sizeof(hmd->camera_frame_sinks));
+	} else {
+		memcpy(hmd->camera_frame_sinks, sinks, sizeof(hmd->camera_frame_sinks));
+	}
+	os_mutex_unlock(&hmd->data_lock);
+	return true;
+}
+
 
 int
 psvr2_found(struct xrt_prober *xp,

@@ -27,7 +27,9 @@ It is not yet trying to deliver:
 ## PS VR2 HMD bring-up
 
 The PS VR2 HMD driver only requires libusb. The separate PS Sense controller
-driver still requires Monado's internal HID support and is not enabled on macOS.
+driver uses Monado's native IOKit HID backend on macOS. It is restricted to the
+Sony Sense controller product IDs and supports Bluetooth discovery, factory IMU
+calibration, inputs, battery state, haptics, and 3-DoF orientation.
 
 On macOS, the HMD driver starts in a conservative USB mode which claims and
 submits transfers only for the status and SLAM interfaces needed for headset
@@ -39,6 +41,36 @@ bring-up.
 Set `PSVR2_AUXILIARY_STREAMS=1` to restore the full set of interfaces and
 streams. Other platforms retain the existing full-stream behaviour by default;
 setting the variable to `0` selects the same minimal mode there for testing.
+
+Controller-camera development has a narrower opt-in which leaves gaze, LED
+detector, relocalizer, and VD interfaces untouched:
+
+```sh
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 \
+  ./build-macos-psvr2-cli/src/xrt/targets/cli/monado-cli psvr2-camera 5 /tmp/psvr2-mode4
+```
+
+The diagnostic records raw packet sizes and headers plus USB completion times.
+When given the optional final path prefix, it also writes one lossless PGM
+snapshot from each of the four camera-image sinks.
+It also maps the camera VTS timestamp into Monado's monotonic clock, but does
+not pretend that the USB completion time is the exposure time. Hardware testing
+on macOS found that mode 4 delivers 520448-byte `VI` packets in camera-set 4/5
+pairs. Each pair shares a device timestamp and hardware sequence ID; successive
+pairs are 16683 us apart (about 60 Hz). Each packet describes two 512x508
+controller-tracking images in contiguous L8 planes, giving all four headset
+cameras across the pair. Four captured PGM snapshots were successfully decoded
+and visually inspected at 512x508.
+The first observed packet was roughly 13-27 ms newer in host time than its VTS
+timestamp. Mode 12 alternated 409856- and 260352-byte packets at only about 1 Hz
+in the same test, so mode 4 is the current tracking choice.
+
+When the camera-only stream is enabled, the PS VR2 builder forwards those real
+VTS exposure timestamps and hardware sequence IDs to both Sense controllers.
+The controller LED-sync refinement remains stable at a 16683000 ns period even
+when USB delivery skips frames, because gaps are derived from the hardware
+sequence counter. Camera streaming remains opt-in while image decoding,
+per-camera calibration, and constellation pose solving are unfinished.
 
 After building `monado-cli` with the PSVR2 driver enabled, the hardware-backed
 discovery and pose probe can be run with GAV closed:

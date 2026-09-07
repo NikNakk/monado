@@ -161,11 +161,17 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 	struct xrt_prober_device *left_xpdev =
 	    u_builder_find_prober_device(xpdevs, xpdev_count, PSSENSE_VID, PSSENSE_PID_LEFT, XRT_BUS_TYPE_BLUETOOTH);
 	if (left_xpdev != NULL) {
-		left_xdev = pssense_create(xp, left_xpdev, xfctx, NULL);
+		struct t_timing_event_sink *timing_sink = NULL;
+		left_xdev = pssense_create(xp, left_xpdev, xfctx, &timing_sink);
 		if (left_xdev == NULL) {
 			PSVR2_ERROR(psvr2_builder(xb), "PS Sense left controller device creation failed");
 		} else {
 			xsysd->static_xdevs[xsysd->static_xdev_count++] = left_xdev;
+			struct t_timing_event_source *timing_source = psvr2_get_timing_event_source(head_xdev);
+			if (timing_source != NULL && timing_sink != NULL &&
+			    t_timing_event_source_add_sink(timing_source, timing_sink) != 0) {
+				PSVR2_ERROR(psvr2_builder(xb), "Failed to connect left Sense camera timing");
+			}
 		}
 	}
 
@@ -173,11 +179,17 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 	struct xrt_prober_device *right_xpdev =
 	    u_builder_find_prober_device(xpdevs, xpdev_count, PSSENSE_VID, PSSENSE_PID_RIGHT, XRT_BUS_TYPE_BLUETOOTH);
 	if (right_xpdev != NULL) {
-		right_xdev = pssense_create(xp, right_xpdev, xfctx, NULL);
+		struct t_timing_event_sink *timing_sink = NULL;
+		right_xdev = pssense_create(xp, right_xpdev, xfctx, &timing_sink);
 		if (right_xdev == NULL) {
 			PSVR2_ERROR(psvr2_builder(xb), "PS Sense right controller device creation failed");
 		} else {
 			xsysd->static_xdevs[xsysd->static_xdev_count++] = right_xdev;
+			struct t_timing_event_source *timing_source = psvr2_get_timing_event_source(head_xdev);
+			if (timing_source != NULL && timing_sink != NULL &&
+			    t_timing_event_source_add_sink(timing_source, timing_sink) != 0) {
+				PSVR2_ERROR(psvr2_builder(xb), "Failed to connect right Sense camera timing");
+			}
 		}
 	}
 
