@@ -8,9 +8,17 @@ on:
       - .github/workflows/macos-pssense-hid.yml
       - CMakeLists.txt
       - src/xrt/auxiliary/os/**
+      - src/xrt/auxiliary/math/**
+      - src/xrt/auxiliary/tracking/**
+      - src/xrt/auxiliary/util/**
+      - src/xrt/include/tracking/**
+      - src/xrt/include/xrt/xrt_tracking.h
+      - src/xrt/tracking/constellation/**
       - src/xrt/state_trackers/prober/**
       - src/xrt/drivers/pssense/**
       - src/xrt/drivers/CMakeLists.txt
+      - src/xrt/targets/common/**
+      - src/xrt/targets/cli/**
   workflow_dispatch:
 
 permissions:
@@ -29,7 +37,6 @@ jobs:
         run: >-
           cmake -S . -B build -G Ninja
           -DBUILD_TESTING=OFF
-          -DXRT_HAVE_INTERNAL_HID=ON
           -DXRT_FEATURE_OPENXR=OFF
           -DXRT_FEATURE_SERVICE=OFF
           -DXRT_MODULE_COMPOSITOR=OFF
@@ -44,19 +51,19 @@ jobs:
           -DXRT_MODULE_OPENXR_STATE_TRACKER=OFF
           -DXRT_MODULE_IPC=OFF
           -DXRT_MODULE_MONADO_GUI=OFF
-          -DXRT_MODULE_MONADO_CLI=OFF
+          -DXRT_MODULE_MONADO_CLI=ON
           -DXRT_FEATURE_WINDOW_PEEK=OFF
           -DXRT_FEATURE_DEBUG_GUI=OFF
           -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
           -DXRT_BUILD_DRIVER_PSVR2=ON
           -DXRT_BUILD_DRIVER_PSSENSE=ON
           -DXRT_BUILD_DRIVER_QWERTY=OFF
-          -DXRT_BUILD_DRIVER_SIMULATED=OFF
+          -DXRT_BUILD_DRIVER_SIMULATED=ON
 
       - name: Build macOS HID, prober and Sense driver
         run: |
           set -o pipefail
-          cmake --build build --target aux_os pssense_hid_probe st_prober drv_pssense --parallel 2>&1 | tee build.log
+          cmake --build build --target aux_os pssense_hid_probe st_prober drv_pssense target_lists monado-cli --parallel 2>&1 | tee build.log
 
       - name: Upload build log
         if: always()
