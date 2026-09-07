@@ -120,6 +120,11 @@ struct prober_device
 	size_t num_hidraws;
 	struct prober_hidraw *hidraws;
 #endif
+
+#ifdef XRT_OS_OSX
+	/* Borrowed from the IOHIDManager/device set owned by struct prober. */
+	void *osx_hid_device;
+#endif
 };
 
 /*!
@@ -166,6 +171,10 @@ struct prober
 	} uvc;
 #endif
 
+#ifdef XRT_OS_OSX
+	void *osx_hid_manager;
+	void *osx_hid_device_set;
+#endif
 
 	struct xrt_auto_prober *auto_probers[XRT_MAX_AUTO_PROBERS];
 
@@ -227,54 +236,25 @@ p_dev_get_bluetooth_dev(struct prober *p,
  * @name Tracking systems
  * @{
  */
-/*!
- * Init the tracking factory.
- *
- * @private @memberof prober
- * @see xrt_tracking_factory
- */
 int
 p_tracking_init(struct prober *p);
 
-/*!
- * Teardown the tracking factory.
- *
- * @private @memberof prober
- * @see xrt_tracking_factory
- */
 void
 p_tracking_teardown(struct prober *p);
-
 /*!
  * @}
  */
 
 #ifdef XRT_HAVE_LIBUSB
-/*!
- * @name libusb
- * @{
- */
-/*!
- * @private @memberof prober
- */
 int
 p_libusb_init(struct prober *p);
 
-/*!
- * @private @memberof prober
- */
 void
 p_libusb_teardown(struct prober *p);
 
-/*!
- * @private @memberof prober
- */
 int
 p_libusb_probe(struct prober *p);
 
-/*!
- * @private @memberof prober
- */
 int
 p_libusb_get_string_descriptor(struct prober *p,
                                struct prober_device *pdev,
@@ -282,56 +262,30 @@ p_libusb_get_string_descriptor(struct prober *p,
                                unsigned char *buffer,
                                int length);
 
-/*!
- * @private @memberof prober
- */
 bool
 p_libusb_can_open(struct prober *p, struct prober_device *pdev);
-
-/*!
- * @}
- */
 #endif
 
 #ifdef XRT_HAVE_LIBUVC
-/*!
- * @name libuvc
- * @{
- */
-/*!
- * @private @memberof prober
- */
 int
 p_libuvc_init(struct prober *p);
 
-/*!
- * @private @memberof prober
- */
 void
 p_libuvc_teardown(struct prober *p);
 
-/*!
- * @private @memberof prober
- */
 int
 p_libuvc_probe(struct prober *p);
-
-/*!
- * @}
- */
 #endif
 
 #ifdef XRT_HAVE_LIBUDEV
-/*!
- * @name udev
- * @{
- */
-/*!
- * @private @memberof prober
- */
 int
 p_udev_probe(struct prober *p);
-/*!
- * @}
- */
+#endif
+
+#ifdef XRT_OS_OSX
+int
+p_osx_hid_probe(struct prober *p);
+
+void
+p_osx_hid_teardown(struct prober *p);
 #endif
