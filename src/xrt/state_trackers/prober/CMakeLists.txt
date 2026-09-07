@@ -22,6 +22,12 @@ target_link_libraries(
 		aux_tracking
 	)
 
+# Add macOS native HID probing for PS VR2 Sense controllers.
+if(APPLE)
+	target_sources(st_prober PRIVATE p_osx_hid.c)
+	target_link_libraries(st_prober PRIVATE "-framework IOKit" "-framework CoreFoundation")
+endif()
+
 # Add libudev
 if(XRT_HAVE_LIBUDEV)
 	target_sources(st_prober PRIVATE p_udev.c)
