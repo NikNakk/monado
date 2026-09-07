@@ -28,6 +28,7 @@ jobs:
         run: >-
           cmake -S . -B build -G Ninja
           -DBUILD_TESTING=OFF
+          -DXRT_HAVE_INTERNAL_HID=ON
           -DXRT_FEATURE_OPENXR=OFF
           -DXRT_FEATURE_SERVICE=OFF
           -DXRT_MODULE_COMPOSITOR=OFF
