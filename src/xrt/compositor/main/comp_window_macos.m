@@ -45,6 +45,56 @@ struct macos_present_job
 	struct vk_bundle_queue *present_queue;
 };
 
+/*
+ * Presented callbacks are not guaranteed to arrive promptly during layer/display
+ * teardown. Keep the callback-owned trace/feedback state independent of cwm so
+ * destroy never has to wait forever merely to prevent a use-after-free.
+ */
+struct macos_presented_state
+{
+	atomic_uint_fast64_t ref_count;
+	atomic_int_fast64_t latest_observed_present_offset_ns;
+	atomic_uint_fast64_t present_offset_sample_serial;
+	FILE *trace_presented;
+};
+
+static struct macos_presented_state *
+macos_presented_state_create(FILE *trace_presented)
+{
+	struct macos_presented_state *state = calloc(1, sizeof(*state));
+	if (state == NULL) {
+		return NULL;
+	}
+	atomic_init(&state->ref_count, 1);
+	atomic_init(&state->latest_observed_present_offset_ns, 0);
+	atomic_init(&state->present_offset_sample_serial, 0);
+	state->trace_presented = trace_presented;
+	return state;
+}
+
+static void
+macos_presented_state_retain(struct macos_presented_state *state)
+{
+	atomic_fetch_add_explicit(&state->ref_count, 1, memory_order_relaxed);
+}
+
+static void
+macos_presented_state_release(struct macos_presented_state *state)
+{
+	if (state == NULL) {
+		return;
+	}
+	if (atomic_fetch_sub_explicit(&state->ref_count, 1, memory_order_acq_rel) != 1) {
+		return;
+	}
+	if (state->trace_presented != NULL) {
+		fflush(state->trace_presented);
+		fclose(state->trace_presented);
+		state->trace_presented = NULL;
+	}
+	free(state);
+}
+
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_PACING", true)
@@ -53,6 +103,7 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH
 DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_metal_shared_event_wait, "XRT_MACOS_METAL_SHARED_EVENT_WAIT", true)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", true)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -76,6 +127,8 @@ struct comp_window_macos
 	bool present_worker_scheduled;
 	bool present_worker_shutdown;
 	bool async_present;
+	bool present_worker_enabled;
+	struct macos_presented_state *presented_state;
 	uint64_t last_image_acquire_wait_ns;
 	xrt_graphics_buffer_handle_t io_surfaces[MACOS_TARGET_IMAGE_COUNT];
 	struct vk_image_collection vkic;
@@ -172,6 +225,13 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	    "presented",
 	    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"
 	    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns");
+	if (cwm->trace_presented != NULL) {
+		cwm->presented_state = macos_presented_state_create(cwm->trace_presented);
+		if (cwm->presented_state == NULL) {
+			fclose(cwm->trace_presented);
+			cwm->trace_presented = NULL;
+		}
+	}
 	cwm->trace_present_complete = macos_timing_trace_open_file(
 	    "present_complete",
 	    "frame_id,completion_handler_ns,image_index,timeline_value,status,commit_to_completion_ns,"
@@ -180,19 +240,24 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	    "present_worker",
 	    "event,frame_id,event_ns,enqueue_ns,handoff_return_ns,worker_start_ns,next_drawable_begin_ns,"
 	    "next_drawable_end_ns,metal_commit_ns,worker_delay_ns,drawable_wait_ns,image_index,timeline_value,"
-	    "queue_depth,shared_event_wait");
+	    "queue_depth,shared_event_wait,newer_pending,pending_frame_id,pending_timeline_value");
 	cwm->trace_vblank = macos_timing_trace_open_file(
 	    "vblank",
 	    "host_consumed_ns,displaylink_callback_ns,displaylink_now_host_ns,displaylink_output_host_ns,"
 	    "host_to_monotonic_offset_ns,displaylink_now_ns,displaylink_output_ns,derived_last_vblank_ns,"
 	    "output_minus_now_ns,callback_minus_output_ns,callback_minus_vblank_ns,interval_from_previous_vblank_ns,"
 	    "display_period_ns");
-	cwm->trace_present_group = dispatch_group_create();
 }
 
 static void
 macos_timing_trace_close(struct comp_window_macos *cwm)
 {
+	if (cwm->presented_state != NULL) {
+		/* Ownership of trace_presented belongs to the ref-counted callback state. */
+		cwm->trace_presented = NULL;
+		macos_presented_state_release(cwm->presented_state);
+		cwm->presented_state = NULL;
+	}
 	if (cwm->trace_present_group != NULL) {
 		dispatch_group_wait(cwm->trace_present_group, DISPATCH_TIME_FOREVER);
 		cwm->trace_present_group = NULL;
@@ -348,15 +413,32 @@ macos_trace_present_worker(struct comp_window_macos *cwm,
 	uint64_t worker_delay_ns = worker_start_ns > job->enqueue_ns ? worker_start_ns - job->enqueue_ns : 0;
 	uint64_t drawable_wait_ns =
 	    next_drawable_end_ns > next_drawable_begin_ns ? next_drawable_end_ns - next_drawable_begin_ns : 0;
+	bool newer_pending = false;
+	uint64_t pending_frame_id = 0;
+	uint64_t pending_timeline_value = 0;
+	if (next_drawable_end_ns != 0 && cwm->present_worker_enabled) {
+		pthread_mutex_lock(&cwm->present_worker_mutex);
+		if (cwm->pending_present_job_valid && cwm->pending_present_job.frame_id > job->frame_id) {
+			newer_pending = true;
+			pending_frame_id = cwm->pending_present_job.frame_id;
+			pending_timeline_value = cwm->pending_present_job.timeline_value;
+			if (queue_depth == 0) {
+				queue_depth = 1;
+			}
+		}
+		pthread_mutex_unlock(&cwm->present_worker_mutex);
+	}
 	flockfile(cwm->trace_present_worker);
 	fprintf(cwm->trace_present_worker,
-	        "%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%u,%u\n", event,
+	        "%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%u,%u,%u,%llu,%llu\n", event,
 	        (unsigned long long)job->frame_id, (unsigned long long)event_ns,
 	        (unsigned long long)job->enqueue_ns, (unsigned long long)handoff_return_ns,
 	        (unsigned long long)worker_start_ns, (unsigned long long)next_drawable_begin_ns,
 	        (unsigned long long)next_drawable_end_ns, (unsigned long long)metal_commit_ns,
 	        (unsigned long long)worker_delay_ns, (unsigned long long)drawable_wait_ns, job->image_index,
-	        (unsigned long long)job->timeline_value, queue_depth, shared_event_wait ? 1u : 0u);
+	        (unsigned long long)job->timeline_value, queue_depth, shared_event_wait ? 1u : 0u,
+	        newer_pending ? 1u : 0u, (unsigned long long)pending_frame_id,
+	        (unsigned long long)pending_timeline_value);
 	cwm->trace_present_worker_rows++;
 	if (cwm->trace_present_worker_rows % 256 == 0) {
 		fflush(cwm->trace_present_worker);
@@ -875,6 +957,10 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		}
 		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
 		after_drawable_ns = os_monotonic_get_ns();
+		if (async_present) {
+			macos_trace_present_worker(cwm, "drawable_end", job, after_drawable_ns, 0, worker_start_ns,
+			                           next_drawable_begin_ns, after_drawable_ns, 0, 0, shared_event_wait);
+		}
 		if (drawable == nil) {
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
 			if (async_present) {
@@ -934,13 +1020,13 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			}
 		}
 
-		if (cwm->trace_presented != NULL && cwm->trace_present_group != NULL) {
-			FILE *trace_file = cwm->trace_presented;
-			dispatch_group_t trace_group = cwm->trace_present_group;
+		if (cwm->presented_state != NULL) {
+			struct macos_presented_state *presented_state = cwm->presented_state;
+			macos_presented_state_retain(presented_state);
+			FILE *trace_file = presented_state->trace_presented;
 			uint64_t traced_frame_id = frame_id;
 			int64_t traced_desired_present_ns = desired_present_time_ns;
 			uint64_t traced_target_output_ns = target_output_ns;
-			dispatch_group_enter(trace_group);
 			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
 				double presented_time_s = [presented_drawable presentedTime];
 				int64_t handler_ns = os_monotonic_get_ns();
@@ -960,9 +1046,10 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				int64_t observed_present_offset_ns =
 				    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
 				if (observed_present_offset_ns > 0) {
-					atomic_store_explicit(&cwm->latest_observed_present_offset_ns, observed_present_offset_ns,
-					                      memory_order_release);
-					atomic_fetch_add_explicit(&cwm->present_offset_sample_serial, 1, memory_order_release);
+					atomic_store_explicit(&presented_state->latest_observed_present_offset_ns,
+					                      observed_present_offset_ns, memory_order_release);
+					atomic_fetch_add_explicit(&presented_state->present_offset_sample_serial, 1,
+					                          memory_order_release);
 				}
 				flockfile(trace_file);
 				fprintf(trace_file,
@@ -972,7 +1059,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				        presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns);
 				fflush(trace_file);
 				funlockfile(trace_file);
-				dispatch_group_leave(trace_group);
+				macos_presented_state_release(presented_state);
 			}];
 		}
 
@@ -1115,8 +1202,12 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	cwm->last_present_ns = now_ns;
 	if (cwm->present_sample_count == 240) {
 		double average_ms = (double)cwm->present_total_ns / (double)cwm->present_sample_count / 1000000.0;
+		const char *cadence_label = cwm->present_worker_enabled
+		                                ? "macOS present-worker completion cadence"
+		                                : (async_present ? "macOS async present completion cadence"
+		                                                 : "macOS present-call return cadence");
 		COMP_INFO(ct->c, "%s: average %.3fms, min %.3fms, max %.3fms, late %llu/240",
-		          async_present ? "macOS present-worker completion cadence" : "macOS present-call return cadence",
+		          cadence_label,
 		          average_ms, (double)cwm->present_min_ns / 1000000.0, (double)cwm->present_max_ns / 1000000.0,
 		          (unsigned long long)cwm->present_missed_intervals);
 		COMP_INFO(ct->c, "macOS presentation CPU waits: Vulkan %.3fms, drawable %.3fms, synchronous Metal %.3fms",
@@ -1154,7 +1245,11 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 	 * acquirable again. These tasks are bounded by the three in-flight images.
 	 */
 	dispatch_group_enter(cwm->present_command_group);
-	dispatch_async(cwm->present_worker_queue, ^{
+	dispatch_queue_t retirement_queue = cwm->present_worker_queue;
+	if (retirement_queue == NULL) {
+		retirement_queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
+	}
+	dispatch_async(retirement_queue, ^{
 		@autoreleasepool {
 			bool released_by_metal = false;
 			if (shared_event_wait) {
@@ -1253,6 +1348,10 @@ comp_window_macos_present(struct comp_target *ct,
 	if (!cwm->async_present) {
 		return macos_execute_present_job(cwm, &job, false);
 	}
+	if (!cwm->present_worker_enabled) {
+		/* Diagnostic A/B: keep async Metal/shared-event handoff but acquire drawable on caller. */
+		return macos_execute_present_job(cwm, &job, true);
+	}
 	if (index >= ct->image_count || cwm->metal_images[index] == nil || present_queue == NULL) {
 		macos_retire_unpresented_job(cwm, &job, "invalid", 0);
 		return VK_ERROR_INITIALIZATION_FAILED;
@@ -1315,11 +1414,15 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	int64_t host_to_monotonic_offset_ns =
 	    atomic_load_explicit(&cwm->host_to_monotonic_offset_ns, memory_order_acquire);
 
-	uint64_t present_offset_serial =
-	    atomic_load_explicit(&cwm->present_offset_sample_serial, memory_order_acquire);
+	uint64_t present_offset_serial = 0;
+	int64_t sample_ns = 0;
+	if (cwm->presented_state != NULL) {
+		present_offset_serial =
+		    atomic_load_explicit(&cwm->presented_state->present_offset_sample_serial, memory_order_acquire);
+		sample_ns = atomic_load_explicit(&cwm->presented_state->latest_observed_present_offset_ns,
+		                                 memory_order_acquire);
+	}
 	if (present_offset_serial != cwm->consumed_present_offset_sample_serial && cwm->display_period_ns > 0) {
-		int64_t sample_ns =
-		    atomic_load_explicit(&cwm->latest_observed_present_offset_ns, memory_order_acquire);
 		cwm->consumed_present_offset_sample_serial = present_offset_serial;
 		int64_t max_reasonable_ns = cwm->display_period_ns * 4;
 		if (sample_ns > 0 && sample_ns <= max_reasonable_ns) {
@@ -1511,8 +1614,9 @@ comp_window_macos_create(struct comp_compositor *c)
 		return NULL;
 	}
 	cwm->async_present = debug_get_bool_option_macos_async_present();
+	cwm->present_worker_enabled = cwm->async_present && debug_get_bool_option_macos_present_worker();
 	cwm->present_command_group = dispatch_group_create();
-	if (cwm->async_present) {
+	if (cwm->present_worker_enabled) {
 		dispatch_queue_attr_t worker_attr =
 		    dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
 		cwm->present_worker_queue =
