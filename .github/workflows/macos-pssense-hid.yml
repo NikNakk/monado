@@ -16,6 +16,7 @@ on:
       - src/xrt/tracking/constellation/**
       - src/xrt/state_trackers/prober/**
       - src/xrt/drivers/pssense/**
+      - src/xrt/drivers/psvr2/**
       - src/xrt/drivers/CMakeLists.txt
       - src/xrt/targets/common/**
       - src/xrt/targets/cli/**
