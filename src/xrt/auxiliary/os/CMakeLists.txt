@@ -28,6 +28,12 @@ endif()
 if(APPLE)
 	target_sources(aux_os PRIVATE os_hid_iokit.c)
 	target_link_libraries(aux_os PRIVATE "-framework IOKit" "-framework CoreFoundation")
+
+	add_executable(pssense_hid_probe os_hid_iokit_probe.c)
+	target_link_libraries(
+		pssense_hid_probe
+		PRIVATE aux_os "-framework IOKit" "-framework CoreFoundation"
+		)
 endif()
 
 if(LINUX)
