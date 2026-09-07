@@ -173,7 +173,7 @@ struct prober
 
 #ifdef XRT_OS_OSX
 	void *osx_hid_manager;
-	void *osx_hid_device_set;
+	const void *osx_hid_device_set;
 #endif
 
 	struct xrt_auto_prober *auto_probers[XRT_MAX_AUTO_PROBERS];
