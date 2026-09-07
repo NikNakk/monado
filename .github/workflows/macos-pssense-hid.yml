@@ -52,5 +52,5 @@ jobs:
           -DXRT_BUILD_DRIVER_QWERTY=OFF
           -DXRT_BUILD_DRIVER_SIMULATED=OFF
 
-      - name: Build macOS HID and Sense driver
-        run: cmake --build build --target aux_os drv_pssense --parallel
+      - name: Build macOS HID, probe utility and Sense driver
+        run: cmake --build build --target aux_os pssense_hid_probe drv_pssense --parallel
