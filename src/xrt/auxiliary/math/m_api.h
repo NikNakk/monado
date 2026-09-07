@@ -193,6 +193,9 @@ math_vec3_translation_from_isometry(const struct xrt_matrix_4x4 *isometry, struc
 void
 math_vec3_normalize(struct xrt_vec3 *in);
 
+void
+math_vec3_convert_from_opencv(const struct xrt_vec3 *in, struct xrt_vec3 *out);
+
 
 /*
  *
@@ -217,6 +220,9 @@ math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, 
  */
 void
 math_vec3_f64_normalize(struct xrt_vec3_f64 *in);
+
+void
+math_vec3_f64_convert_opencv(const struct xrt_vec3_f64 *in, struct xrt_vec3_f64 *out);
 
 
 /*
@@ -827,6 +833,9 @@ math_pose_transform(const struct xrt_pose *transform, const struct xrt_pose *pos
  */
 void
 math_pose_transform_point(const struct xrt_pose *transform, const struct xrt_vec3 *point, struct xrt_vec3 *out_point);
+
+void
+math_pose_convert_from_opencv(const struct xrt_pose *in, struct xrt_pose *out);
 
 
 /*
