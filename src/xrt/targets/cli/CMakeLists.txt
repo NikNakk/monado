@@ -20,6 +20,7 @@ add_executable(
 	cli_main.c
 	)
 add_sanitizers(cli)
+target_include_directories(cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../tracking)
 
 if(NOT WIN32)
 	# No getline on Windows, so until we have a portable impl
@@ -39,6 +40,7 @@ target_link_libraries(
 		aux_os_ble
 		aux_util
 		aux_math
+		constellation
 		target_instance_no_comp
 		drv_includes
 	)
