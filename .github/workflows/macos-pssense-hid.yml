@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - macos-pssense-hid
+      - macos-psvr2-camera-calibration
     paths:
       - .github/workflows/macos-pssense-hid.yml
       - CMakeLists.txt
@@ -52,7 +53,6 @@ jobs:
           -DXRT_MODULE_OPENXR_STATE_TRACKER=OFF
           -DXRT_MODULE_IPC=OFF
           -DXRT_MODULE_MONADO_GUI=OFF
-          -DXRT_MODULE_MONADO_CLI=ON
           -DXRT_FEATURE_WINDOW_PEEK=OFF
           -DXRT_FEATURE_DEBUG_GUI=OFF
           -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
