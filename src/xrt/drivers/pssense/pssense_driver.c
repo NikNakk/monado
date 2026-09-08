@@ -40,8 +40,9 @@
 #include "pssense_protocol.h"
 #include "pssense_led_model.h"
 
-#include <stdio.h>
 #include <errno.h>
+#include <limits.h>
+#include <stdio.h>
 
 
 /*!
@@ -57,10 +58,17 @@
 #define PSSENSE_ERROR(p, ...) U_LOG_XDEV_IFL_E(&p->base, p->log_level, __VA_ARGS__)
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
-DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule, "PSSENSE_FUTURE_LED_SCHEDULE", false)
+#ifdef XRT_OS_OSX
+#define PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT true
+#else
+#define PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT false
+#endif
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
+                           "PSSENSE_FUTURE_LED_SCHEDULE",
+                           PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
-DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", 0)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -1212,7 +1220,9 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 	pssense->tracking.last_exposure_sequence_id = camera_exposure.sequence_id;
 	pssense->tracking.last_exposure_local_timestamp_ns = camera_exposure.timestamp_ns;
 
-	if (pssense->tracking.average_exposure_interval_ns > 0) {
+	bool future_led_schedule = debug_get_bool_option_pssense_future_led_schedule();
+	bool run_optical_refinement = !future_led_schedule || pssense->tracking.use_constellation;
+	if (pssense->tracking.average_exposure_interval_ns > 0 && run_optical_refinement) {
 		// Update the frame period to the one we're using internally and push the timing event
 		struct t_timing_event_camera_exposure_start led_sync_event = event->camera_exposure_start;
 		led_sync_event.frame_period_ns = pssense->tracking.average_exposure_interval_ns;
@@ -1224,7 +1234,8 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 	// update the LED settings
 	if (pssense->tracking.received_frames > 10 && pssense->timing.has_clock_offset) {
 		// Update the sample from the LED sync routine
-		if (t_led_sync_get_sample(&pssense->tracking.led_sync_refinement,
+		if (run_optical_refinement &&
+		    t_led_sync_get_sample(&pssense->tracking.led_sync_refinement,
 		                          &pssense->tracking.latest_led_sync_sample)) {
 			pssense->tracking.led_sync_sample_needs_sending = true;
 			pssense->tracking.period_id =
@@ -1244,8 +1255,7 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		timepoint_ns now_ns = os_monotonic_get_ns();
 		timepoint_ns schedule_host_ns = pssense->tracking.last_exposure_local_timestamp_ns;
 		uint64_t periods_forward = 0;
-		if (debug_get_bool_option_pssense_future_led_schedule() &&
-		    pssense->tracking.average_exposure_interval_ns > 0) {
+		if (future_led_schedule && pssense->tracking.average_exposure_interval_ns > 0) {
 			timepoint_ns target_host_ns = now_ns + PSSENSE_FUTURE_LED_LEAD_NS;
 			if (schedule_host_ns < target_host_ns) {
 				time_duration_ns delta_ns = target_host_ns - schedule_host_ns;
@@ -1684,7 +1694,15 @@ pssense_create(struct xrt_prober *xp,
 
 	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
-	pssense->tracking.timing_fudge_100us = (int32_t)debug_get_num_option_pssense_timing_fudge_100us();
+	long timing_fudge_100us = debug_get_num_option_pssense_timing_fudge_100us();
+	if (timing_fudge_100us == LONG_MIN) {
+#ifdef XRT_OS_OSX
+		timing_fudge_100us = debug_get_bool_option_pssense_future_led_schedule() ? 36 : 0;
+#else
+		timing_fudge_100us = 0;
+#endif
+	}
+	pssense->tracking.timing_fudge_100us = (int32_t)CLAMP(timing_fudge_100us, INT32_MIN, INT32_MAX);
 	pssense->tracking.increment_sequence_num = true;
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);

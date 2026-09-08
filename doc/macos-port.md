@@ -69,8 +69,25 @@ When the camera-only stream is enabled, the PS VR2 builder forwards those real
 VTS exposure timestamps and hardware sequence IDs to both Sense controllers.
 The controller LED-sync refinement remains stable at a 16683000 ns period even
 when USB delivery skips frames, because gaps are derived from the hardware
-sequence counter. Camera streaming remains opt-in while image decoding,
-per-camera calibration, and constellation pose solving are unfinished.
+sequence counter. On macOS, the driver projects delayed exposure phases at
+least 50 ms forward before programming the repeating Sense PRESCAN schedule.
+It also uses the IOKit input callback timestamp for the controller clock and a
+measured 3.6 ms mode-4 phase correction. `PSSENSE_FUTURE_LED_SCHEDULE=0`
+restores the older scheduling for comparison; `PSSENSE_TIMING_FUDGE_100US`
+overrides the phase correction and `PSSENSE_LED_PERIOD_ID` overrides the pulse
+width for diagnostics. Until a constellation tracker is attached, future
+scheduling holds the initial refinement offset instead of pointlessly scanning
+without optical samples.
+
+Sense output reports are assembled under the controller lock but the blocking
+IOKit write happens after releasing it. This prevents camera timing callbacks
+from stalling behind Bluetooth output. A six-second mode-4 capture with both
+controllers active consequently improved from roughly 64-107 packets to about
+719-721 packets, including 359-360 complete camera-set pairs, with median
+arrival age around 27 ms. Camera mode is explicitly turned off at teardown so
+rapid diagnostic restarts do not wedge the stream. Camera streaming remains
+opt-in while per-camera calibration and constellation pose solving are
+unfinished.
 
 After building `monado-cli` with the PSVR2 driver enabled, the hardware-backed
 discovery and pose probe can be run with GAV closed:
