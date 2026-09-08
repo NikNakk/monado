@@ -3,15 +3,13 @@
 # SPDX-License-Identifier: BSL-1.0
 """PSVR2 four-camera ChArUco calibration helper.
 
-Initial scope:
+Commands:
 - Generate the agreed A3 7x5 / 40 mm / 30 mm / DICT_4X4_50 target.
 - Validate four-camera datasets produced by the visible PyUSB recorder or the
   earlier Monado mode-4 recorder.
 - Detect ChArUco corners in all four synchronized camera streams.
-- Write repeatable per-corner observations for the later calibration stages.
-
-The fisheye intrinsics, multi-camera extrinsics and hand-eye solve come next,
-after a real target dataset has validated detection quality.
+- Solve fisheye intrinsics, a synchronized four-camera rig, per-frame board
+  poses, and explicit SLAM/rig hand-eye hypotheses from one or more datasets.
 """
 
 from __future__ import annotations
@@ -277,6 +275,30 @@ def command_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_solve(args: argparse.Namespace) -> int:
+    # Keep board/inspect startup and compatibility unchanged; the sizeable
+    # solver implementation is imported only for this command.
+    from psvr2_calibration_solver import print_summary, solve
+
+    if args.square_length_mm <= 0 or args.marker_length_mm <= 0:
+        raise SystemExit("target dimensions must be positive")
+    if args.marker_length_mm >= args.square_length_mm:
+        raise SystemExit("--marker-length-mm must be smaller than --square-length-mm")
+    result = solve(
+        [Path(path) for path in args.datasets],
+        args.square_length_mm / 1000.0,
+        args.marker_length_mm / 1000.0,
+        min_corners=args.min_corners,
+        min_common=args.min_common_corners,
+    )
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(result, indent=2) + "\n")
+    print_summary(result)
+    print(f"Wrote versioned calibration JSON to {output}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -293,6 +315,19 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--min-cameras", type=int, default=2, help="Strong camera observations required in a synchronized set")
     inspect.add_argument("--min-strong-sets", type=int, default=20, help="Minimum strong synchronized sets before returning success")
     inspect.set_defaults(func=command_inspect)
+
+    solve = subparsers.add_parser("solve", help="Solve a combined offline four-camera calibration")
+    solve.add_argument("datasets", nargs="+", help="One or more mode-3 dataset directories")
+    solve.add_argument("--square-length-mm", type=float, default=40.00,
+                       help="Measured square length in mm (default: 40.00)")
+    solve.add_argument("--marker-length-mm", type=float, default=30.0,
+                       help="Measured marker length in mm (default: 30.0)")
+    solve.add_argument("--min-corners", type=int, default=8,
+                       help="Minimum detected corners for a camera observation")
+    solve.add_argument("--min-common-corners", type=int, default=6,
+                       help="Minimum shared IDs for a synchronized stereo observation")
+    solve.add_argument("--output", required=True, help="Versioned calibration JSON output path")
+    solve.set_defaults(func=command_solve)
     return parser
 
 
