@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://monado.freedesktop.org/schema/psvr2-camera-calibration-v1.json",
+  "title": "PS VR2 offline camera calibration",
+  "type": "object",
+  "required": ["schema_version", "target", "visible_cameras", "rig", "slam", "tracking_readout", "quality"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "headset_serial": {"type": ["string", "null"]},
+    "target": {"type": "object", "required": ["squares_x", "squares_y", "measured_square_length_m", "marker_length_m", "dictionary"]},
+    "visible_cameras": {"type": "object", "required": ["camera0", "camera1", "camera2", "camera3"], "additionalProperties": {"$ref": "#/$defs/camera"}},
+    "rig": {"type": "object", "required": ["reference_camera", "pairwise", "closure_residuals"]},
+    "slam": {"type": "object", "required": ["transform_convention", "runtime_processing", "trusted_rotation", "trusted_translation"]},
+    "tracking_readout": {"type": "object"},
+    "quality": {"type": "object", "required": ["observation_counts", "accepted_views", "rejected_views", "warnings"]}
+  },
+  "$defs": {
+    "matrix3": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "number"}}},
+    "matrix4": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}}},
+    "camera": {
+      "type": "object",
+      "required": ["width", "height", "K", "D", "rms_px", "accepted_observations", "rejected_observations", "coverage", "per_view", "transform_to_rig_T_rig_camera"],
+      "properties": {
+        "width": {"type": "integer"}, "height": {"type": "integer"}, "K": {"$ref": "#/$defs/matrix3"},
+        "D": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"type": "number"}},
+        "rms_px": {"type": "number"}, "accepted_observations": {"type": "integer"}, "rejected_observations": {"type": "integer"},
+        "coverage": {"type": "object"}, "per_view": {"type": "array"}, "transform_to_rig_T_rig_camera": {"$ref": "#/$defs/matrix4"}
+      }
+    }
+  }
+}
