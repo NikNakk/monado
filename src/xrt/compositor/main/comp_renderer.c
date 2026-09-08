@@ -67,6 +67,7 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD
 DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", LONG_MIN)
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_skip_blocking_gpu_timestamps, "XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_defer_gpu_timestamps, "XRT_MACOS_DEFER_GPU_TIMESTAMPS", false)
 #endif
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
@@ -163,6 +164,9 @@ struct comp_renderer
 
 	//! Which buffer was last submitted and has a fence pending.
 	int32_t fenced_buffer;
+
+	//! Frame id associated with fenced_buffer, used for deferred GPU timing feedback.
+	int64_t fenced_frame_id;
 
 	/*!
 	 * The render pass used to render to the target, it depends on the
@@ -734,6 +738,7 @@ renderer_close_renderings_and_fences(struct comp_renderer *r)
 	r->buffer_count = 0;
 	r->acquired_buffer = -1;
 	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
 }
 
 /*!
@@ -851,11 +856,14 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	}
 	if (debug_get_bool_option_macos_skip_blocking_gpu_timestamps()) {
 		COMP_INFO(c, "macOS diagnostic: skipping blocking compositor GPU timestamp readback");
+	} else if (debug_get_bool_option_macos_defer_gpu_timestamps()) {
+		COMP_INFO(c, "macOS diagnostic: deferring compositor GPU timestamp readback until the previous frame fence signals");
 	}
 #endif
 
 	r->acquired_buffer = -1;
 	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
 	r->rtr_array = NULL;
 
 	// Setup the scratch images.
@@ -904,6 +912,22 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	}
 
 #ifdef XRT_OS_OSX
+	if (ret == VK_SUCCESS && debug_get_bool_option_macos_defer_gpu_timestamps() &&
+	    !debug_get_bool_option_macos_skip_blocking_gpu_timestamps() && r->fenced_frame_id >= 0) {
+		/*
+		 * The previous frame fence guarantees these query results are ready.
+		 * The current frame may already have recorded a vkCmdResetQueryPool,
+		 * but that reset cannot execute until after this function returns and
+		 * the current command buffer is submitted.
+		 */
+		uint64_t gpu_start_ns = 0;
+		uint64_t gpu_end_ns = 0;
+		if (render_resources_get_timestamps(&r->c->nr, &gpu_start_ns, &gpu_end_ns)) {
+			uint64_t now_ns = os_monotonic_get_ns();
+			comp_target_info_gpu(r->c->target, (uint64_t)r->fenced_frame_id, gpu_start_ns, gpu_end_ns, now_ns);
+		}
+	}
+
 	if (r->c->nr.apple_source_debug.pending) {
 		if (debug_get_bool_option_log_apple_samples()) {
 			r->c->nr.apple_source_debug.log_count++;
@@ -965,6 +989,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 #endif
 
 	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
 }
 
 static XRT_CHECK_RESULT VkResult
@@ -1035,6 +1060,7 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 
 	// This buffer now have a pending fence.
 	r->fenced_buffer = r->acquired_buffer;
+	r->fenced_frame_id = frame_id;
 
 	return ret;
 }
@@ -1568,7 +1594,8 @@ comp_renderer_draw(struct comp_renderer *r)
 
 	bool collect_gpu_timestamps = xret == XRT_SUCCESS;
 #ifdef XRT_OS_OSX
-	collect_gpu_timestamps = collect_gpu_timestamps && !debug_get_bool_option_macos_skip_blocking_gpu_timestamps();
+	collect_gpu_timestamps = collect_gpu_timestamps && !debug_get_bool_option_macos_skip_blocking_gpu_timestamps() &&
+	                         !debug_get_bool_option_macos_defer_gpu_timestamps();
 #endif
 
 	// Check timestamps.
