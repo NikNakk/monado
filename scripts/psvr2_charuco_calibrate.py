@@ -5,12 +5,13 @@
 
 Initial scope:
 - Generate the agreed A3 7x5 / 40 mm / 30 mm / DICT_4X4_50 target.
-- Validate a dataset produced by `monado-cli psvr2-calibration-record`.
+- Validate four-camera datasets produced by the visible PyUSB recorder or the
+  earlier Monado mode-4 recorder.
 - Detect ChArUco corners in all four synchronized camera streams.
 - Write repeatable per-corner observations for the later calibration stages.
 
-The fisheye intrinsics, multi-camera extrinsics and hand-eye solve intentionally
-come next, after we have a real target/dataset to validate detection quality.
+The fisheye intrinsics, multi-camera extrinsics and hand-eye solve come next,
+after a real target dataset has validated detection quality.
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,7 +32,6 @@ except ImportError as exc:  # pragma: no cover - environment dependent
         "This tool requires OpenCV with the aruco module and NumPy. "
         "Install an OpenCV build that includes cv2.aruco."
     ) from exc
-
 
 SQUARES_X = 7
 SQUARES_Y = 5
@@ -66,10 +65,7 @@ def create_board(square_length: float = SQUARE_LENGTH_MM, marker_length: float =
     try:
         return cv2.aruco.CharucoBoard(size, square_length, marker_length, dictionary)
     except (AttributeError, TypeError):
-        # OpenCV 4.x compatibility with older Python bindings.
-        return cv2.aruco.CharucoBoard_create(
-            SQUARES_X, SQUARES_Y, square_length, marker_length, dictionary
-        )
+        return cv2.aruco.CharucoBoard_create(SQUARES_X, SQUARES_Y, square_length, marker_length, dictionary)
 
 
 def render_board(board, size: tuple[int, int]):
@@ -148,9 +144,7 @@ def detect_charuco(image, board, detector):
     marker_corners, marker_ids, _rejected = cv2.aruco.detectMarkers(image, get_dictionary())
     if marker_ids is None or len(marker_ids) == 0:
         return None, None
-    _count, corners, ids = cv2.aruco.interpolateCornersCharuco(
-        marker_corners, marker_ids, image, board
-    )
+    _count, corners, ids = cv2.aruco.interpolateCornersCharuco(marker_corners, marker_ids, image, board)
     return corners, ids
 
 
@@ -177,8 +171,13 @@ def command_inspect(args: argparse.Namespace) -> int:
     if not metadata_path.exists():
         raise SystemExit(f"Missing {metadata_path}")
     metadata = json.loads(metadata_path.read_text())
-    if int(metadata.get("camera_mode", -1)) != 4 or int(metadata.get("camera_count", -1)) != 4:
-        raise SystemExit("Dataset is not a four-camera PSVR2 mode-4 calibration dataset")
+    camera_mode = int(metadata.get("camera_mode", -1))
+    camera_count = int(metadata.get("camera_count", -1))
+    if camera_count != 4 or camera_mode not in (3, 4):
+        raise SystemExit(
+            f"Dataset is not a supported four-camera PSVR2 calibration dataset "
+            f"(camera_mode={camera_mode}, camera_count={camera_count})"
+        )
 
     rows = load_manifest(dataset_dir)
     if not rows:
@@ -252,7 +251,7 @@ def command_inspect(args: argparse.Namespace) -> int:
                 ]
             )
 
-    print(f"Dataset sets: {len(rows)}")
+    print(f"Dataset mode: {camera_mode}; sets: {len(rows)}")
     for camera in range(CAMERA_COUNT):
         detected = camera_detected[camera]
         mean_corners = camera_corner_total[camera] / detected if detected else 0.0
@@ -287,8 +286,8 @@ def build_parser() -> argparse.ArgumentParser:
     board.add_argument("--dpi", type=float, default=300.0, help="Design resolution for the A3 page (default: 300)")
     board.set_defaults(func=command_board)
 
-    inspect = subparsers.add_parser("inspect", help="Detect ChArUco corners in a recorded calibration dataset")
-    inspect.add_argument("dataset", help="Dataset directory produced by psvr2-calibration-record")
+    inspect = subparsers.add_parser("inspect", help="Detect ChArUco corners in a recorded four-camera dataset")
+    inspect.add_argument("dataset", help="Dataset directory produced by a PSVR2 calibration recorder")
     inspect.add_argument("--output", help="Corner-observation CSV path (default: DATASET/charuco-detections.csv)")
     inspect.add_argument("--min-corners", type=int, default=8, help="Corners required for a camera observation to count as strong")
     inspect.add_argument("--min-cameras", type=int, default=2, help="Strong camera observations required in a synchronized set")
