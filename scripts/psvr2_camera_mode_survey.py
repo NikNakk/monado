@@ -2,8 +2,8 @@
 """Survey PS VR2 camera modes over libusb without starting Monado.
 
 The tool claims only interface 6 (camera), cycles selected modes, records packet
-metadata, preserves representative raw packets, and opportunistically decodes
-simple uncompressed L8 layouts using the VI packet header.
+metadata, preserves representative raw packets, and decodes known/simple L8
+layouts without assigning physical camera identities.
 
 For cross-mode registration, --sequence preserves repeated visits to the same
 mode with unique visit-numbered filenames. For example, --sequence 3,12,3
@@ -12,9 +12,6 @@ overwriting either mode-3 visit.
 
 Requires pyusb and a libusb backend. On macOS with Homebrew libusb:
     python3 -m pip install pyusb pillow
-
-Run with SteamVR/Monado/GAV closed:
-    python3 scripts/psvr2_camera_mode_survey.py /tmp/psvr2-mode-survey
 """
 
 from __future__ import annotations
@@ -42,9 +39,6 @@ REPORT_SET_CAMERA_MODE = 0x0B
 CAMERA_SUBCMD = 0x01
 USB_CAM_HEADER_SIZE = 256
 USB_CAM_MAX_XFER_SIZE = 1_040_640
-MODES = range(1, 17)
-
-# bmRequestType used by Monado: vendor | endpoint recipient | OUT.
 CAMERA_CTRL_REQUEST_TYPE = 0x42
 CAMERA_CTRL_REQUEST = 0x09
 
@@ -95,7 +89,7 @@ def parse_vi_header(packet: bytes) -> dict[str, int | bool]:
     return result
 
 
-def write_pgm(path: Path, width: int, height: int, pixels: bytes) -> None:
+def write_pgm(path: Path, width: int, height: int, pixels: bytes | bytearray) -> None:
     if len(pixels) != width * height:
         raise ValueError("PGM payload does not match dimensions")
     with path.open("wb") as f:
@@ -103,32 +97,51 @@ def write_pgm(path: Path, width: int, height: int, pixels: bytes) -> None:
         f.write(pixels)
 
 
-def opportunistic_decode(packet: bytes, header: dict[str, int | bool], out_prefix: Path) -> list[str]:
-    """Decode only layouts strongly implied by header dimensions and byte count.
+def decode_l8(packet: bytes, header: dict[str, int | bool], out_prefix: Path) -> tuple[list[str], str | None]:
+    """Decode layouts demonstrated by captures, otherwise only safe planar L8.
 
-    No assumptions about camera ordering are made. If the post-header payload is
-    exactly N * width * height bytes, save N contiguous L8 planes. This works
-    for mode 4 and reveals other simple planar modes without hard-coding them.
+    819456-byte 640x640x2 packets (modes 1/2/3/etc.) are a 1280x640
+    side-by-side raster: every row contains 640 pixels from plane 0 followed by
+    640 from plane 1. Treating the two images as contiguous planes produces
+    ghosted composites and is incorrect.
+
+    Other packets are decoded only when the payload exactly tiles as contiguous
+    width*height L8 planes. This covers mode 4 and mode-12 sets 8/9.
     """
     if not header.get("vi"):
-        return []
+        return [], None
     width = int(header.get("image_width", 0))
     height = int(header.get("image_height", 0))
     if width <= 0 or height <= 0 or len(packet) <= USB_CAM_HEADER_SIZE:
-        return []
+        return [], None
+
     payload = packet[USB_CAM_HEADER_SIZE:]
     plane_size = width * height
+    paths: list[str] = []
+
+    if len(packet) == 819456 and width == 640 and height == 640 and len(payload) == 2 * plane_size:
+        stride = width * 2
+        for plane in range(2):
+            pixels = bytearray(plane_size)
+            for y in range(height):
+                src = y * stride + plane * width
+                dst = y * width
+                pixels[dst : dst + width] = payload[src : src + width]
+            path = Path(f"{out_prefix}-plane{plane}.pgm")
+            write_pgm(path, width, height, pixels)
+            paths.append(path.name)
+        return paths, "sbs_l8"
+
     if plane_size == 0 or len(payload) % plane_size != 0:
-        return []
+        return [], None
     planes = len(payload) // plane_size
     if planes < 1 or planes > 8:
-        return []
-    paths: list[str] = []
-    for i in range(planes):
-        path = Path(f"{out_prefix}-plane{i}.pgm")
-        write_pgm(path, width, height, payload[i * plane_size : (i + 1) * plane_size])
+        return [], None
+    for plane in range(planes):
+        path = Path(f"{out_prefix}-plane{plane}.pgm")
+        write_pgm(path, width, height, payload[plane * plane_size : (plane + 1) * plane_size])
         paths.append(path.name)
-    return paths
+    return paths, "planar_l8"
 
 
 def read_packet(dev, timeout_ms: int) -> bytes | None:
@@ -167,6 +180,7 @@ def survey_mode(
     examples: dict[tuple[int, int], int] = defaultdict(int)
     rows: list[dict] = []
     decoded: list[str] = []
+    layouts: set[str] = set()
     packet_index = 0
     visit_prefix = f"visit-{visit_index:02d}-" if visit_index is not None else ""
 
@@ -199,9 +213,11 @@ def survey_mode(
             stem = out_dir / (
                 f"{visit_prefix}mode-{mode:02x}-size-{len(packet)}-set-{camera_set}-example-{example_no}"
             )
-            raw_path = Path(f"{stem}.bin")
-            raw_path.write_bytes(packet)
-            decoded.extend(opportunistic_decode(packet, header, stem))
+            Path(f"{stem}.bin").write_bytes(packet)
+            image_names, layout = decode_l8(packet, header, stem)
+            decoded.extend(image_names)
+            if layout is not None:
+                layouts.add(layout)
             examples[key] += 1
 
     csv_path = out_dir / f"{visit_prefix}mode-{mode:02x}-packets.csv"
@@ -233,6 +249,7 @@ def survey_mode(
             for (size, camera_set), count in sorted(counts.items())
         ],
         "decoded_images": decoded,
+        "decoded_layouts": sorted(layouts),
         "packets_csv": csv_path.name,
     }
     print(
@@ -299,21 +316,12 @@ def main() -> int:
     parser.add_argument("--sample", type=float, default=1.0, help="seconds to sample each mode visit")
     parser.add_argument("--examples", type=int, default=1, help="raw examples per packet-size/camera-set type per visit")
     parser.add_argument("--modes", default="1-16", help="normal survey, e.g. 1-16 or 1,2,3,4,12")
-    parser.add_argument(
-        "--sequence",
-        help="ordered mode visits for registration, preserving duplicates, e.g. 3,12,3",
-    )
-    parser.add_argument(
-        "--repeat",
-        type=int,
-        default=1,
-        help="repeat --sequence this many times (default 1)",
-    )
+    parser.add_argument("--sequence", help="ordered mode visits preserving duplicates, e.g. 3,12,3")
+    parser.add_argument("--repeat", type=int, default=1, help="repeat --sequence this many times")
     args = parser.parse_args()
 
     if args.repeat < 1:
         raise SystemExit("--repeat must be at least 1")
-
     sequence_capture = args.sequence is not None
     if sequence_capture:
         base_sequence = parse_mode_list(args.sequence)
@@ -330,10 +338,7 @@ def main() -> int:
         raise SystemExit("PS VR2 USB device not found")
 
     if sequence_capture:
-        print(
-            "Cross-mode sequence capture: keep the headset and scene completely stationary until the command finishes.",
-            flush=True,
-        )
+        print("Keep the headset and scene completely stationary until capture finishes.", flush=True)
         print("Capture plan: " + " -> ".join(f"0x{mode:02x}" for mode in modes), flush=True)
 
     claimed = False
@@ -342,7 +347,6 @@ def main() -> int:
         try:
             dev.set_configuration()
         except usb.core.USBError:
-            # Existing configuration is normally already correct on macOS.
             pass
         usb.util.claim_interface(dev, CAMERA_INTERFACE)
         claimed = True
@@ -368,13 +372,7 @@ def main() -> int:
             except Exception as exc:
                 print(f"mode 0x{mode:02x}: ERROR: {exc}", file=sys.stderr)
                 summaries.append(
-                    {
-                        "mode": mode,
-                        "visit_index": preserved_visit,
-                        "error": str(exc),
-                        "packet_count": 0,
-                        "packet_types": [],
-                    }
+                    {"mode": mode, "visit_index": preserved_visit, "error": str(exc), "packet_count": 0, "packet_types": []}
                 )
     finally:
         try:
@@ -390,7 +388,7 @@ def main() -> int:
 
     contact_sheet = build_contact_sheet(args.output_dir, summaries)
     result = {
-        "format": "psvr2-camera-mode-survey-v2",
+        "format": "psvr2-camera-mode-survey-v3",
         "created_unix_s": time.time(),
         "sequence_capture": sequence_capture,
         "base_sequence": base_sequence,
@@ -403,7 +401,8 @@ def main() -> int:
         "contact_sheet": contact_sheet,
         "notes": [
             "Raw .bin packets are authoritative for undocumented layouts.",
-            "PGMs are emitted only when VI header dimensions exactly tile the post-header payload as contiguous L8 planes.",
+            "819456-byte 640x640x2 packets are decoded as a 1280x640 side-by-side raster, not contiguous planes.",
+            "Other PGMs are emitted only for payloads demonstrated/safely inferred as contiguous L8 planes.",
             "Plane number is not assumed to identify a physical camera until cross-mode registration proves it.",
             "Sequence captures preserve repeated visits with visit-NN filename prefixes and require a stationary headset/scene.",
         ],
@@ -413,7 +412,7 @@ def main() -> int:
     if contact_sheet:
         print(f"wrote {args.output_dir / contact_sheet}")
     else:
-        print("no contact sheet generated (install Pillow, or no simple L8 layouts were decoded)")
+        print("no contact sheet generated (install Pillow, or no decodable L8 layouts were found)")
     return 0
 
 
