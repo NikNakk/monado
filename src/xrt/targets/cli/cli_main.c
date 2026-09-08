@@ -32,6 +32,9 @@ cli_print_help(int argc, const char **argv)
 	P("  probe      - Just probe and then exit.\n");
 	P("  psvr2-pose - Print and validate live PS VR2 head poses.\n");
 	P("  psvr2-camera - Dump raw PS VR2 camera packet metadata.\n");
+#ifndef XRT_OS_WINDOWS
+	P("  psvr2-calibration-record - Record synchronized mode-4 frames and HMD poses for offline calibration.\n");
+#endif
 	P("  pssense-test - Validate live PS Sense inputs, battery and 3DoF pose.\n");
 	P("  pose-dump  - Continuously dump the HMD xrt pose as CSV.\n");
 	P("  lighthouse - Control the power of lighthouses [on|off].\n");
@@ -64,6 +67,11 @@ main(int argc, const char **argv)
 	if (strcmp(argv[1], "psvr2-camera") == 0) {
 		return cli_cmd_psvr2_camera(argc, argv);
 	}
+#ifndef XRT_OS_WINDOWS
+	if (strcmp(argv[1], "psvr2-calibration-record") == 0) {
+		return cli_cmd_psvr2_calibration_record(argc, argv);
+	}
+#endif
 	if (strcmp(argv[1], "pssense-test") == 0) {
 		return cli_cmd_pssense_test(argc, argv);
 	}
