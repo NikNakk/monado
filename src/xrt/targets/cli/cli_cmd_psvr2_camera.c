@@ -12,8 +12,12 @@
 #include "xrt/xrt_space.h"
 #include "xrt/xrt_system.h"
 
+#include "constellation/t_rift_blobwatch.h"
 #include "os/os_time.h"
 #include "psvr2/psvr2_interface.h"
+#include "tracking/t_constellation.h"
+#include "util/u_debug.h"
+#include "util/u_sink.h"
 #include "util/u_time.h"
 
 #include <errno.h>
@@ -23,6 +27,18 @@
 #include <stdatomic.h>
 #include <string.h>
 
+
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_camera_blobs, "PSVR2_CAMERA_BLOBS", false)
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_blob_pixel_threshold, "PSVR2_BLOB_PIXEL_THRESHOLD", 0x50)
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_blob_required_threshold, "PSVR2_BLOB_REQUIRED_THRESHOLD", 0xb4)
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_blob_max_width, "PSVR2_BLOB_MAX_WIDTH", 50)
+
+
+static long
+clamp_long(long value, long minimum, long maximum)
+{
+	return value < minimum ? minimum : (value > maximum ? maximum : value);
+}
 
 static void
 camera_destroy_system(struct xrt_instance **xi,
@@ -47,6 +63,82 @@ struct camera_snapshot_sink
 	bool have_first_sequence;
 	uint64_t source_sequence;
 };
+
+struct camera_blob_sink
+{
+	struct t_blob_sink base;
+	atomic_uint_fast64_t observation_count;
+	atomic_uint_fast64_t observations_with_blobs;
+	atomic_uint_fast64_t total_blobs;
+	atomic_uint_fast32_t max_blobs;
+	FILE *file;
+};
+
+static void
+camera_blob_push(struct t_blob_sink *tbs, struct t_blob_observation *observation)
+{
+	struct camera_blob_sink *sink = container_of(tbs, struct camera_blob_sink, base);
+	atomic_fetch_add_explicit(&sink->observation_count, 1, memory_order_relaxed);
+	atomic_fetch_add_explicit(&sink->total_blobs, observation->num_blobs, memory_order_relaxed);
+	if (observation->num_blobs > 0) {
+		atomic_fetch_add_explicit(&sink->observations_with_blobs, 1, memory_order_relaxed);
+	}
+
+	uint_fast32_t old_max = atomic_load_explicit(&sink->max_blobs, memory_order_relaxed);
+	while (old_max < observation->num_blobs &&
+	       !atomic_compare_exchange_weak_explicit(&sink->max_blobs, &old_max, observation->num_blobs,
+	                                              memory_order_relaxed, memory_order_relaxed)) {}
+
+	if (sink->file == NULL) {
+		return;
+	}
+
+	if (observation->num_blobs == 0) {
+		fprintf(sink->file, "%" PRIi64 ",%" PRIu64 ",0,,,,,,,,\n", observation->timestamp_ns,
+		        observation->id);
+		return;
+	}
+
+	for (uint32_t i = 0; i < observation->num_blobs; i++) {
+		const struct t_blob *blob = &observation->blobs[i];
+		fprintf(sink->file, "%" PRIi64 ",%" PRIu64 ",%u,%u,%.3f,%.3f,%d,%d,%d,%d,%.6f\n",
+		        observation->timestamp_ns, observation->id, observation->num_blobs, blob->blob_id,
+		        blob->center.x, blob->center.y, blob->bounding_box.offset.w, blob->bounding_box.offset.h,
+		        blob->bounding_box.extent.w, blob->bounding_box.extent.h, blob->brightness);
+	}
+}
+
+static void
+camera_blob_files_open(const char *prefix, struct camera_blob_sink sinks[4])
+{
+	if (prefix == NULL) {
+		return;
+	}
+
+	for (size_t i = 0; i < 4; i++) {
+		char path[1024];
+		snprintf(path, sizeof(path), "%s-camera%zu-blobs.csv", prefix, i);
+		sinks[i].file = fopen(path, "w");
+		if (sinks[i].file == NULL) {
+			fprintf(stderr, "Could not open blob trace '%s'.\n", path);
+			continue;
+		}
+		fprintf(sinks[i].file,
+		        "timestamp_ns,observation_id,blob_count,blob_id,center_x,center_y,bbox_x,bbox_y,bbox_width,"
+		        "bbox_height,brightness\n");
+	}
+}
+
+static void
+camera_blob_files_close(struct camera_blob_sink sinks[4])
+{
+	for (size_t i = 0; i < 4; i++) {
+		if (sinks[i].file != NULL) {
+			fclose(sinks[i].file);
+			sinks[i].file = NULL;
+		}
+	}
+}
 
 static void
 camera_snapshot_push(struct xrt_frame_sink *xfs, struct xrt_frame *frame)
@@ -149,13 +241,47 @@ cli_cmd_psvr2_camera(int argc, const char **argv)
 	}
 
 	struct camera_snapshot_sink snapshot_sinks[4] = {0};
+	struct camera_blob_sink blob_sinks[4] = {0};
+	struct t_blobwatch *blobwatches[4] = {0};
+	struct xrt_frame_context blob_xfctx = {0};
 	struct xrt_frame_sink *frame_sinks[4] = {0};
+	bool blob_diag = debug_get_bool_option_psvr2_camera_blobs();
+	const char *snapshot_prefix = argc >= 4 ? argv[3] : NULL;
+	if (blob_diag) {
+		camera_blob_files_open(snapshot_prefix, blob_sinks);
+	}
 	for (size_t i = 0; i < 4; i++) {
 		snapshot_sinks[i].base.push_frame = camera_snapshot_push;
 		frame_sinks[i] = &snapshot_sinks[i].base;
+
+		if (blob_diag) {
+			blob_sinks[i].base.push_blobs = camera_blob_push;
+			struct t_rift_blobwatch_params params = {
+			    .pixel_threshold =
+			        (uint8_t)clamp_long(debug_get_num_option_psvr2_blob_pixel_threshold(), 0, 255),
+			    .blob_required_threshold =
+			        (uint8_t)clamp_long(debug_get_num_option_psvr2_blob_required_threshold(), 0, 255),
+			    .max_match_dist = 50.0f,
+			    .max_blob_width =
+			        (uint16_t)clamp_long(debug_get_num_option_psvr2_blob_max_width(), 1, UINT16_MAX),
+			};
+			struct xrt_frame_sink *blob_frame_sink = NULL;
+			if (t_rift_blobwatch_create(&params, &blob_xfctx, &blob_sinks[i].base, &blob_frame_sink,
+			                            &blobwatches[i]) != 0 ||
+			    !u_sink_simple_queue_create(&blob_xfctx, blob_frame_sink, &blob_frame_sink)) {
+				fprintf(stderr, "Failed to create blob detector pipeline for camera %zu.\n", i);
+				xrt_frame_context_destroy_nodes(&blob_xfctx);
+				camera_blob_files_close(blob_sinks);
+				camera_destroy_system(&xi, &xsys, &xsysd, &xso);
+				return EXIT_FAILURE;
+			}
+			u_sink_split_create(&blob_xfctx, frame_sinks[i], blob_frame_sink, &frame_sinks[i]);
+		}
 	}
 	if (!psvr2_set_camera_frame_sinks(head, frame_sinks)) {
 		fprintf(stderr, "Failed to attach PS VR2 camera snapshot sinks.\n");
+		xrt_frame_context_destroy_nodes(&blob_xfctx);
+		camera_blob_files_close(blob_sinks);
 		camera_destroy_system(&xi, &xsys, &xsysd, &xso);
 		return EXIT_FAILURE;
 	}
@@ -205,6 +331,21 @@ cli_cmd_psvr2_camera(int argc, const char **argv)
 	}
 
 	(void)psvr2_set_camera_frame_sinks(head, NULL);
+	xrt_frame_context_destroy_nodes(&blob_xfctx);
+	if (blob_diag) {
+		for (size_t i = 0; i < 4; i++) {
+			uint64_t observations = atomic_load_explicit(&blob_sinks[i].observation_count, memory_order_relaxed);
+			uint64_t with_blobs =
+			    atomic_load_explicit(&blob_sinks[i].observations_with_blobs, memory_order_relaxed);
+			uint64_t total = atomic_load_explicit(&blob_sinks[i].total_blobs, memory_order_relaxed);
+			uint32_t max_blobs = atomic_load_explicit(&blob_sinks[i].max_blobs, memory_order_relaxed);
+			fprintf(stderr,
+			        "Camera %zu blobs: %" PRIu64 " observations, %" PRIu64 " with blobs, %" PRIu64
+			        " total, %u maximum.\n",
+			        i, observations, with_blobs, total, max_blobs);
+		}
+	}
+	camera_blob_files_close(blob_sinks);
 	camera_destroy_system(&xi, &xsys, &xsysd, &xso);
 	for (size_t i = 0; i < 4; i++) {
 		free(snapshot_sinks[i].data);

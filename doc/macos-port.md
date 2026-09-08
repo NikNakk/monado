@@ -89,6 +89,26 @@ rapid diagnostic restarts do not wedge the stream. Camera streaming remains
 opt-in while per-camera calibration and constellation pose solving are
 unfinished.
 
+Set `PSVR2_CAMERA_BLOBS=1` on the `psvr2-camera` command to pass each of the
+four mode-4 L8 streams through Monado's existing IR blob detector on a separate
+queue. The command prints aggregate observation counts and, when a snapshot
+prefix is supplied, writes `*-cameraN-blobs.csv` traces containing blob centres,
+bounding boxes, and peak brightness. `PSVR2_BLOB_PIXEL_THRESHOLD` (default
+`80`), `PSVR2_BLOB_REQUIRED_THRESHOLD` (default `180`), and
+`PSVR2_BLOB_MAX_WIDTH` (default `50`) permit diagnostic tuning. This validates
+the optical input independently of pose solving. It does not enable
+constellation poses: the repository and GAV reference do not yet provide the
+four mode-4 cameras' calibrated intrinsics and poses required by the tracker.
+Hardware validation with both stationary controllers found 360 blob
+observations per camera in six seconds without reducing camera throughput. The
+normal 450 us schedule produced clearly visible controller rings in snapshots
+from all four cameras and mean blob counts of 5.04, 7.37, 5.24, and 5.94 per
+frame. With future scheduling disabled, the same fixed scene produced no rings
+in its four snapshots and means of 3.55, 5.88, 3.43, and 4.25. The latter is
+not a completely dark control because the legacy no-sample refinement sweep
+periodically crosses the camera phase; the saved observations retain the
+per-frame evidence needed to measure that behaviour.
+
 After building `monado-cli` with the PSVR2 driver enabled, the hardware-backed
 discovery and pose probe can be run with GAV closed:
 
