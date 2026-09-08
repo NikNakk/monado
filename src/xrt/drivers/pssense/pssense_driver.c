@@ -60,6 +60,7 @@ DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule, "PSSENSE_FUTURE_LED_SCHEDULE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", 0)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -465,10 +466,13 @@ pssense_device_ts_to_host(struct pssense_device *pssense,
  * Reads one packet from the device, wrapping no data as EAGAIN. Does not block.
  */
 static int
-pssense_read_packet_data(struct pssense_device *pssense, uint8_t *buffer, size_t size)
+pssense_read_packet_data(struct pssense_device *pssense,
+                         uint8_t *buffer,
+                         size_t size,
+                         timepoint_ns *out_receive_timestamp_ns)
 {
 	// Poll, don't block. Outer thread needs to run quick
-	int ret = os_hid_read(pssense->hid, buffer, size, 0);
+	int ret = os_hid_read_with_timestamp(pssense->hid, buffer, size, 0, out_receive_timestamp_ns);
 
 	// No data yet
 	if (ret == 0) {
@@ -688,10 +692,13 @@ pssense_handle_read(struct pssense_device *pssense)
 
 	// Report data
 	uint8_t buf[INPUT_REPORT_BLUETOOTH_LENGTH] = {0};
-	ret = pssense_read_packet_data(pssense, buf, sizeof(buf));
+	timepoint_ns recv_time_ns = 0;
+	ret = pssense_read_packet_data(pssense, buf, sizeof(buf), &recv_time_ns);
 
-	// Get the receive time as close to the packet read as possible
-	timepoint_ns recv_time_ns = os_monotonic_get_ns();
+	// Backends without receive timestamps use the dequeue time as before.
+	if (recv_time_ns == 0) {
+		recv_time_ns = os_monotonic_get_ns();
+	}
 
 	if (ret == -EAGAIN) {
 		// No data yet, not an error
@@ -798,8 +805,8 @@ pssense_set_output_report_settings_locked(struct pssense_device *pssense,
 	}
 }
 
-static int
-pssense_send_bluetooth_output_report_locked(struct pssense_device *pssense)
+static size_t
+pssense_prepare_bluetooth_output_report_locked(struct pssense_device *pssense, uint8_t *out_report)
 {
 	uint64_t timestamp_ns = os_monotonic_get_ns();
 
@@ -833,21 +840,16 @@ pssense_send_bluetooth_output_report_locked(struct pssense_device *pssense)
 	              "samples: %zu",
 	              pssense->output.vibration_amplitude, pssense->output.vibration_mode,
 	              pssense->output.trigger_feedback_mode, pssense->output.next_seq_no, read_pcm_samples);
-	int ret = os_hid_write(pssense->hid, (uint8_t *)&report, sizeof(report));
-	if (ret != sizeof(report)) {
-		PSSENSE_WARN(pssense, "Failed to send output report: %d", ret);
-		return ret < 0 ? ret : -EIO;
-	}
-
 #if 0
 	PSSENSE_DEBUG_HEX(pssense, (uint8_t *)&report, sizeof(report));
 #endif
 
-	return 0;
+	memcpy(out_report, &report, sizeof(report));
+	return sizeof(report);
 }
 
-static int
-pssense_send_usb_report_locked(struct pssense_device *pssense)
+static size_t
+pssense_prepare_usb_report_locked(struct pssense_device *pssense, uint8_t *out_report)
 {
 	uint64_t timestamp_ns = os_monotonic_get_ns();
 
@@ -857,22 +859,17 @@ pssense_send_usb_report_locked(struct pssense_device *pssense)
 
 	pssense_set_output_report_settings_locked(pssense, &report.settings, true, timestamp_ns);
 
-	int ret = os_hid_write(pssense->hid, (uint8_t *)&report, sizeof(report));
-	if (ret != sizeof(report)) {
-		PSSENSE_WARN(pssense, "Failed to send output report: %d", ret);
-		return ret < 0 ? ret : -EIO;
-	}
-
-	return 0;
+	memcpy(out_report, &report, sizeof(report));
+	return sizeof(report);
 }
 
-static int
-pssense_send_output_report_locked(struct pssense_device *pssense)
+static size_t
+pssense_prepare_output_report_locked(struct pssense_device *pssense, uint8_t *out_report)
 {
 	if (pssense->usb) {
-		return pssense_send_usb_report_locked(pssense);
+		return pssense_prepare_usb_report_locked(pssense, out_report);
 	} else {
-		return pssense_send_bluetooth_output_report_locked(pssense);
+		return pssense_prepare_bluetooth_output_report_locked(pssense, out_report);
 	}
 
 	assert(!"unreachable");
@@ -907,11 +904,21 @@ pssense_run_thread(void *ptr)
 			timepoint_ns now = os_monotonic_get_ns();
 
 			if (now >= next_output_ns) {
+				uint8_t output_report[sizeof(struct pssense_ps5_output_report)] = {0};
 				os_thread_helper_lock(&pssense->controller_thread);
-				result = pssense_send_output_report_locked(pssense);
+				size_t output_size = pssense_prepare_output_report_locked(pssense, output_report);
 				os_thread_helper_unlock(&pssense->controller_thread);
 
-				next_output_ns = next_output_ns + pcm_haptics_period_ns;
+				int written = os_hid_write(pssense->hid, output_report, output_size);
+				if (written != (int)output_size) {
+					PSSENSE_WARN(pssense, "Failed to send output report: %d", written);
+					result = written < 0 ? written : -EIO;
+				}
+
+				timepoint_ns write_done_ns = os_monotonic_get_ns();
+				do {
+					next_output_ns += pcm_haptics_period_ns;
+				} while (next_output_ns <= write_done_ns);
 			}
 		}
 
@@ -1272,11 +1279,12 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			bool controller_now_valid = pssense_host_ts_to_device(pssense, now_ns, &controller_now_ns);
 			bool blink_host_valid = pssense_device_ts_to_host(pssense, next_blink_time, &blink_host_est_ns);
 			PSSENSE_INFO(pssense,
-			             "LED_SCHEDULE now=%" PRIi64 " raw_exposure=%" PRIi64 " age=%" PRIi64
+			             "LED_SCHEDULE side=%c now=%" PRIi64 " raw_exposure=%" PRIi64 " age=%" PRIi64
 			             " period=%" PRIi64 " forward=%" PRIu64 " projected=%" PRIi64 " projected_lead=%" PRIi64
 			             " controller_now=%" PRIi64 " cycle_position=%u blink_host=%" PRIi64
 			             " blink_minus_projected=%" PRIi64 " period_id=%u pulse=%" PRIi64,
-			             now_ns, pssense->tracking.last_exposure_local_timestamp_ns,
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', now_ns,
+			             pssense->tracking.last_exposure_local_timestamp_ns,
 			             now_ns - pssense->tracking.last_exposure_local_timestamp_ns,
 			             pssense->tracking.average_exposure_interval_ns, periods_forward, schedule_host_ns,
 			             schedule_host_ns - now_ns, controller_now_valid ? controller_now_ns : -1, cycle_position,
@@ -1676,7 +1684,7 @@ pssense_create(struct xrt_prober *xp,
 
 	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
-	// pssense->tracking.timing_fudge_100us = 20; // 2.0ms fudge
+	pssense->tracking.timing_fudge_100us = (int32_t)debug_get_num_option_pssense_timing_fudge_100us();
 	pssense->tracking.increment_sequence_num = true;
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);

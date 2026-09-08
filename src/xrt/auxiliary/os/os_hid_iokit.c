@@ -58,6 +58,7 @@ struct iokit_input_report
 {
 	uint8_t *data;
 	size_t length;
+	int64_t timestamp_ns;
 	struct iokit_input_report *next;
 };
 
@@ -187,7 +188,10 @@ iokit_pssense_side(IOHIDDeviceRef device)
 }
 
 static void
-iokit_update_pssense_clock_locked(struct hid_iokit *hid, const uint8_t *report, size_t report_length)
+iokit_update_pssense_clock_locked(struct hid_iokit *hid,
+                                  const uint8_t *report,
+                                  size_t report_length,
+                                  int64_t timestamp_ns)
 {
 	if (!hid->is_pssense || report_length < PSSENSE_DEVICE_TIMESTAMP_OFFSET + sizeof(uint32_t) ||
 	    report[0] != PSSENSE_BT_REPORT_ID) {
@@ -195,7 +199,7 @@ iokit_update_pssense_clock_locked(struct hid_iokit *hid, const uint8_t *report, 
 	}
 
 	hid->pssense_device_timestamp_ticks = iokit_read_le32(report + PSSENSE_DEVICE_TIMESTAMP_OFFSET);
-	hid->pssense_device_timestamp_host_ns = os_monotonic_get_ns();
+	hid->pssense_device_timestamp_host_ns = timestamp_ns;
 	hid->have_pssense_device_timestamp = true;
 }
 
@@ -359,6 +363,7 @@ iokit_input_report_callback(void *context,
 	if (result != kIOReturnSuccess || report == NULL || report_length <= 0) {
 		return;
 	}
+	int64_t timestamp_ns = os_monotonic_get_ns();
 
 	struct iokit_input_report *queued = U_TYPED_CALLOC(struct iokit_input_report);
 	if (queued == NULL) {
@@ -372,6 +377,7 @@ iokit_input_report_callback(void *context,
 	}
 	memcpy(queued->data, report, (size_t)report_length);
 	queued->length = (size_t)report_length;
+	queued->timestamp_ns = timestamp_ns;
 
 	pthread_mutex_lock(&hid->mutex);
 	if (!hid->running || hid->disconnected) {
@@ -380,7 +386,7 @@ iokit_input_report_callback(void *context,
 		return;
 	}
 
-	iokit_update_pssense_clock_locked(hid, report, (size_t)report_length);
+	iokit_update_pssense_clock_locked(hid, report, (size_t)report_length, timestamp_ns);
 
 	while (hid->report_count >= IOKIT_HID_MAX_QUEUED_REPORTS) {
 		iokit_drop_oldest_report_locked(hid);
@@ -508,7 +514,11 @@ iokit_wait_for_report_locked(struct hid_iokit *hid, int milliseconds)
 }
 
 static int
-iokit_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds)
+iokit_read_with_timestamp(struct os_hid_device *ohdev,
+                          uint8_t *data,
+                          size_t length,
+                          int milliseconds,
+                          int64_t *out_timestamp_ns)
 {
 	struct hid_iokit *hid = (struct hid_iokit *)ohdev;
 	if (data == NULL || length == 0) {
@@ -542,9 +552,18 @@ iokit_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int millis
 
 	size_t copy_length = report->length < length ? report->length : length;
 	memcpy(data, report->data, copy_length);
+	if (out_timestamp_ns != NULL) {
+		*out_timestamp_ns = report->timestamp_ns;
+	}
 	iokit_free_report(report);
 
 	return (int)copy_length;
+}
+
+static int
+iokit_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds)
+{
+	return iokit_read_with_timestamp(ohdev, data, length, milliseconds, NULL);
 }
 
 static const char *
@@ -803,6 +822,7 @@ os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
 	}
 
 	hid->base.read = iokit_read;
+	hid->base.read_with_timestamp = iokit_read_with_timestamp;
 	hid->base.write = iokit_write;
 	hid->base.get_feature = iokit_get_feature;
 	hid->base.get_feature_timeout = iokit_get_feature_timeout;

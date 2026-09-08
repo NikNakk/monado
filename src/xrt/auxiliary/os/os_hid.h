@@ -28,6 +28,11 @@ extern "C" {
 struct os_hid_device
 {
 	int (*read)(struct os_hid_device *hid_dev, uint8_t *data, size_t size, int milliseconds);
+	int (*read_with_timestamp)(struct os_hid_device *hid_dev,
+	                           uint8_t *data,
+	                           size_t size,
+	                           int milliseconds,
+	                           int64_t *out_timestamp_ns);
 
 	int (*write)(struct os_hid_device *hid_dev, const uint8_t *data, size_t size);
 
@@ -53,6 +58,27 @@ struct os_hid_device
 static inline int
 os_hid_read(struct os_hid_device *hid_dev, uint8_t *data, size_t size, int milliseconds)
 {
+	return hid_dev->read(hid_dev, data, size, milliseconds);
+}
+
+/*!
+ * Read the next input report and, when supported by the backend, return the
+ * monotonic timestamp at which the report was received by the OS callback.
+ * A zero timestamp means the backend does not provide receive timestamps.
+ */
+static inline int
+os_hid_read_with_timestamp(struct os_hid_device *hid_dev,
+                           uint8_t *data,
+                           size_t size,
+                           int milliseconds,
+                           int64_t *out_timestamp_ns)
+{
+	if (out_timestamp_ns != NULL) {
+		*out_timestamp_ns = 0;
+	}
+	if (hid_dev->read_with_timestamp != NULL) {
+		return hid_dev->read_with_timestamp(hid_dev, data, size, milliseconds, out_timestamp_ns);
+	}
 	return hid_dev->read(hid_dev, data, size, milliseconds);
 }
 
