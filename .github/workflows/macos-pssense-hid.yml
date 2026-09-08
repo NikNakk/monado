@@ -9,6 +9,7 @@ on:
       - .github/workflows/macos-pssense-hid.yml
       - CMakeLists.txt
       - scripts/psvr2_charuco_calibrate.py
+      - scripts/psvr2_calibration_assess.py
       - scripts/psvr2_camera_mode_survey.py
       - scripts/psvr2_cross_mode_register.py
       - scripts/psvr2_visible_calibration_record.py
@@ -73,6 +74,7 @@ jobs:
         run: >-
           python3 -m py_compile
           scripts/psvr2_charuco_calibrate.py
+          scripts/psvr2_calibration_assess.py
           scripts/psvr2_camera_mode_survey.py
           scripts/psvr2_cross_mode_register.py
           scripts/psvr2_visible_calibration_record.py
