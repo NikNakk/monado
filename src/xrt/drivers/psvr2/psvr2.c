@@ -601,10 +601,17 @@ psvr2_usb_stop(struct psvr2_hmd *hmd);
 static void
 psvr2_usb_destroy(struct psvr2_hmd *hmd);
 
+static bool
+set_camera_mode(struct psvr2_hmd *hmd, enum psvr2_camera_mode mode);
+
 static void
 psvr2_hmd_destroy(struct xrt_device *xdev)
 {
 	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	if (hmd->dev != NULL && hmd->camera_enable) {
+		(void)set_camera_mode(hmd, PSVR2_CAMERA_MODE_OFF);
+		hmd->camera_enable = false;
+	}
 
 	psvr2_free_et_data(hmd);
 
