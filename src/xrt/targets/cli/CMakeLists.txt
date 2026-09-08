@@ -24,7 +24,7 @@ target_include_directories(cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../trackin
 
 if(NOT WIN32)
 	# No getline on Windows, so until we have a portable impl
-	target_sources(cli PRIVATE cli_cmd_calibrate.c)
+	target_sources(cli PRIVATE cli_cmd_calibrate.c cli_cmd_psvr2_calibration_record.c)
 endif()
 
 if(XRT_HAVE_OPENCV)
