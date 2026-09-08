@@ -105,6 +105,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", false
 DEBUG_GET_ONCE_BOOL_OPTION(macos_metal_shared_event_wait, "XRT_MACOS_METAL_SHARED_EVENT_WAIT", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_early_drawable, "XRT_MACOS_EARLY_DRAWABLE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -130,6 +131,7 @@ struct comp_window_macos
 	bool async_present;
 	bool present_worker_enabled;
 	bool early_drawable_enabled;
+	bool drawable_slot_enabled;
 	id<CAMetalDrawable> prefetched_drawable;
 	uint64_t prefetched_drawable_timeline_value;
 	uint64_t prefetched_drawable_begin_ns;
@@ -421,6 +423,7 @@ macos_trace_drawable_prefetch(struct comp_window_macos *cwm,
 		return;
 	}
 	uint64_t wait_ns = end_ns > begin_ns ? end_ns - begin_ns : 0;
+	flockfile(cwm->trace_drawable_prefetch);
 	fprintf(cwm->trace_drawable_prefetch, "%s,%llu,%llu,%llu,%llu,%llu\n", event,
 	        (unsigned long long)timeline_value, (unsigned long long)event_ns, (unsigned long long)begin_ns,
 	        (unsigned long long)end_ns, (unsigned long long)wait_ns);
@@ -428,6 +431,7 @@ macos_trace_drawable_prefetch(struct comp_window_macos *cwm,
 	if (cwm->trace_drawable_prefetch_rows % 256 == 0) {
 		fflush(cwm->trace_drawable_prefetch);
 	}
+	funlockfile(cwm->trace_drawable_prefetch);
 }
 
 static void
@@ -482,6 +486,54 @@ macos_prefetch_drawable_for_rendering_frame(struct comp_window_macos *cwm)
 		cwm->prefetched_drawable_end_ns = end_ns;
 		macos_trace_drawable_prefetch(cwm, "acquired", timeline_value, end_ns, begin_ns, end_ns);
 	}
+}
+
+static void
+macos_schedule_drawable_slot(struct comp_window_macos *cwm)
+{
+	if (!cwm->drawable_slot_enabled || cwm->present_worker_queue == NULL || cwm->present_worker_group == NULL ||
+	    cwm->render_complete_event == nil || cwm->metal_layer == nil) {
+		return;
+	}
+
+	pthread_mutex_lock(&cwm->present_worker_mutex);
+	if (cwm->present_worker_shutdown || cwm->present_worker_scheduled || cwm->prefetched_drawable != nil) {
+		pthread_mutex_unlock(&cwm->present_worker_mutex);
+		return;
+	}
+	cwm->present_worker_scheduled = true;
+	dispatch_group_enter(cwm->present_worker_group);
+	pthread_mutex_unlock(&cwm->present_worker_mutex);
+
+	dispatch_async(cwm->present_worker_queue, ^{
+		@autoreleasepool {
+			uint64_t begin_ns = os_monotonic_get_ns();
+			macos_trace_drawable_prefetch(cwm, "slot_acquire_begin", 0, begin_ns, begin_ns, 0);
+			id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
+			uint64_t end_ns = os_monotonic_get_ns();
+			id<CAMetalDrawable> retained_drawable = drawable != nil ? [drawable retain] : nil;
+			bool stored = false;
+
+			pthread_mutex_lock(&cwm->present_worker_mutex);
+			cwm->present_worker_scheduled = false;
+			if (!cwm->present_worker_shutdown && retained_drawable != nil && cwm->prefetched_drawable == nil) {
+				cwm->prefetched_drawable = retained_drawable;
+				cwm->prefetched_drawable_timeline_value = 0;
+				cwm->prefetched_drawable_begin_ns = begin_ns;
+				cwm->prefetched_drawable_end_ns = end_ns;
+				retained_drawable = nil;
+				stored = true;
+			}
+			pthread_mutex_unlock(&cwm->present_worker_mutex);
+
+			if (retained_drawable != nil) {
+				[retained_drawable release];
+			}
+			macos_trace_drawable_prefetch(cwm, stored ? "slot_ready" : (drawable == nil ? "slot_acquire_nil" : "slot_discard"),
+			                               0, end_ns, begin_ns, end_ns);
+			dispatch_group_leave(cwm->present_worker_group);
+		}
+	});
 }
 
 static void
@@ -637,6 +689,7 @@ comp_window_macos_init(struct comp_target *ct)
 		[metal_layer setDrawableSize:CGSizeMake(pixel_width, pixel_height)];
 		[metal_layer setOpaque:YES];
 		[metal_layer setDisplaySyncEnabled:YES];
+		[metal_layer setAllowsNextDrawableTimeout:YES];
 		int max_drawables = debug_get_num_option_macos_max_drawables();
 		if (max_drawables != 2 && max_drawables != 3) {
 			COMP_WARN(ct->c, "XRT_MACOS_MAX_DRAWABLES must be 2 or 3; using default 3 instead of %d", max_drawables);
@@ -780,6 +833,10 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		COMP_WARN(ct->c, "XRT_MACOS_EARLY_DRAWABLE requested but MTLSharedEvent handoff is unavailable; early drawable prefetch is disabled");
 		cwm->early_drawable_enabled = false;
 	}
+	if (cwm->drawable_slot_enabled && cwm->render_complete_event == nil) {
+		COMP_WARN(ct->c, "XRT_MACOS_DRAWABLE_SLOT requested but MTLSharedEvent handoff is unavailable; drawable slot is disabled");
+		cwm->drawable_slot_enabled = false;
+	}
 	return true;
 }
 
@@ -793,8 +850,8 @@ comp_window_macos_check_ready(struct comp_target *ct)
 static void
 comp_window_macos_free_images(struct comp_window_macos *cwm)
 {
-	macos_release_prefetched_drawable(cwm, "free_images_release");
 	macos_drain_present_worker(cwm);
+	macos_release_prefetched_drawable(cwm, "free_images_release");
 	struct comp_target *ct = &cwm->base.base;
 	struct vk_bundle *vk = get_vk(cwm);
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
@@ -925,6 +982,7 @@ comp_window_macos_create_images(struct comp_target *ct,
 			COMP_WARN(ct->c, "Could not start the PS VR2 display link (%d); using estimated pacing", cvret);
 		}
 	}
+	macos_schedule_drawable_slot(cwm);
 	COMP_INFO(ct->c, "Created %u IOSurface-backed macOS compositor images at %ux%u", ct->image_count, ct->width,
 	          ct->height);
 }
@@ -1046,8 +1104,34 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 
 	@autoreleasepool {
 		id<CAMetalDrawable> drawable = nil;
-		if (cwm->early_drawable_enabled && cwm->prefetched_drawable != nil &&
-		    cwm->prefetched_drawable_timeline_value == timeline_semaphore_value) {
+		if (cwm->drawable_slot_enabled) {
+			id<CAMetalDrawable> retained_drawable = nil;
+			pthread_mutex_lock(&cwm->present_worker_mutex);
+			if (cwm->prefetched_drawable != nil) {
+				retained_drawable = cwm->prefetched_drawable;
+				next_drawable_begin_ns = cwm->prefetched_drawable_begin_ns;
+				after_drawable_ns = cwm->prefetched_drawable_end_ns;
+				cwm->prefetched_drawable = nil;
+				cwm->prefetched_drawable_timeline_value = 0;
+				cwm->prefetched_drawable_begin_ns = 0;
+				cwm->prefetched_drawable_end_ns = 0;
+			}
+			pthread_mutex_unlock(&cwm->present_worker_mutex);
+
+			if (retained_drawable == nil) {
+				uint64_t drop_ns = os_monotonic_get_ns();
+				macos_trace_drawable_prefetch(cwm, "slot_drop", timeline_semaphore_value, drop_ns, 0, 0);
+				macos_schedule_drawable_slot(cwm);
+				macos_retire_unpresented_job(cwm, job, "drawable_slot_drop", 0);
+				return VK_SUCCESS;
+			}
+
+			drawable = [retained_drawable autorelease];
+			macos_trace_drawable_prefetch(cwm, "slot_consumed", timeline_semaphore_value, os_monotonic_get_ns(),
+			                               next_drawable_begin_ns, after_drawable_ns);
+			macos_schedule_drawable_slot(cwm);
+		} else if (cwm->early_drawable_enabled && cwm->prefetched_drawable != nil &&
+		           cwm->prefetched_drawable_timeline_value == timeline_semaphore_value) {
 			next_drawable_begin_ns = cwm->prefetched_drawable_begin_ns;
 			after_drawable_ns = cwm->prefetched_drawable_end_ns;
 			id<CAMetalDrawable> retained_drawable = cwm->prefetched_drawable;
@@ -1360,7 +1444,7 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 	 * acquirable again. These tasks are bounded by the three in-flight images.
 	 */
 	dispatch_group_enter(cwm->present_command_group);
-	dispatch_queue_t retirement_queue = cwm->present_worker_queue;
+	dispatch_queue_t retirement_queue = cwm->present_worker_enabled ? cwm->present_worker_queue : NULL;
 	if (retirement_queue == NULL) {
 		retirement_queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
 	}
@@ -1519,6 +1603,7 @@ comp_window_macos_update_timings(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	macos_prefetch_drawable_for_rendering_frame(cwm);
+	macos_schedule_drawable_slot(cwm);
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
 	uint64_t displaylink_now_host_ns =
 	    atomic_load_explicit(&cwm->latest_displaylink_now_host_ns, memory_order_acquire);
@@ -1692,8 +1777,8 @@ comp_window_macos_destroy(struct comp_target *ct)
 			macos_retire_unpresented_job(cwm, &pending_job, "shutdown_drop", 0);
 		}
 	}
-	macos_release_prefetched_drawable(cwm, "destroy_release");
 	macos_drain_present_worker(cwm);
+	macos_release_prefetched_drawable(cwm, "destroy_release");
 	macos_timing_trace_close(cwm);
 	comp_window_macos_free_images(cwm);
 	if (cwm->render_complete_event != nil) {
@@ -1732,18 +1817,30 @@ comp_window_macos_create(struct comp_compositor *c)
 	}
 	cwm->async_present = debug_get_bool_option_macos_async_present();
 	cwm->present_worker_enabled = cwm->async_present && debug_get_bool_option_macos_present_worker();
-	cwm->early_drawable_enabled =
-	    cwm->async_present && !cwm->present_worker_enabled && debug_get_bool_option_macos_early_drawable();
+	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
+	cwm->drawable_slot_enabled = cwm->async_present && !cwm->present_worker_enabled && want_drawable_slot;
+	cwm->early_drawable_enabled = cwm->async_present && !cwm->present_worker_enabled && !cwm->drawable_slot_enabled &&
+	                               debug_get_bool_option_macos_early_drawable();
 	cwm->present_command_group = dispatch_group_create();
-	if (cwm->present_worker_enabled) {
+	if (cwm->present_worker_enabled || cwm->drawable_slot_enabled) {
 		dispatch_queue_attr_t worker_attr =
 		    dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
-		cwm->present_worker_queue =
-		    dispatch_queue_create("org.monado.macos-present-worker", worker_attr);
+		cwm->present_worker_queue = dispatch_queue_create(cwm->present_worker_enabled ? "org.monado.macos-present-worker"
+		                                                                            : "org.monado.macos-drawable-slot",
+		                                                  worker_attr);
 		cwm->present_worker_group = dispatch_group_create();
 	}
+	if (want_drawable_slot) {
+		if (cwm->drawable_slot_enabled) {
+			COMP_INFO(c, "macOS diagnostic: asynchronous one-drawable slot enabled; frames drop rather than block when empty");
+		} else {
+			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT requires async presentation with XRT_MACOS_PRESENT_WORKER=0; slot is disabled");
+		}
+	}
 	if (debug_get_bool_option_macos_early_drawable()) {
-		if (cwm->early_drawable_enabled) {
+		if (cwm->drawable_slot_enabled) {
+			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT and XRT_MACOS_EARLY_DRAWABLE are both set; using drawable slot mode");
+		} else if (cwm->early_drawable_enabled) {
 			COMP_INFO(c, "macOS diagnostic: early CAMetalDrawable prefetch enabled");
 		} else {
 			COMP_WARN(c, "XRT_MACOS_EARLY_DRAWABLE requires async presentation with XRT_MACOS_PRESENT_WORKER=0; prefetch is disabled");
