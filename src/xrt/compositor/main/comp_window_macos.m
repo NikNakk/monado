@@ -104,6 +104,7 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_metal_shared_event_wait, "XRT_MACOS_METAL_SHARED_EVENT_WAIT", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", true)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_early_drawable, "XRT_MACOS_EARLY_DRAWABLE", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -128,6 +129,11 @@ struct comp_window_macos
 	bool present_worker_shutdown;
 	bool async_present;
 	bool present_worker_enabled;
+	bool early_drawable_enabled;
+	id<CAMetalDrawable> prefetched_drawable;
+	uint64_t prefetched_drawable_timeline_value;
+	uint64_t prefetched_drawable_begin_ns;
+	uint64_t prefetched_drawable_end_ns;
 	struct macos_presented_state *presented_state;
 	uint64_t last_image_acquire_wait_ns;
 	xrt_graphics_buffer_handle_t io_surfaces[MACOS_TARGET_IMAGE_COUNT];
@@ -170,10 +176,12 @@ struct comp_window_macos
 	FILE *trace_presented;
 	FILE *trace_present_complete;
 	FILE *trace_present_worker;
+	FILE *trace_drawable_prefetch;
 	FILE *trace_vblank;
 	dispatch_group_t trace_present_group;
 	uint64_t trace_present_rows;
 	uint64_t trace_present_worker_rows;
+	uint64_t trace_drawable_prefetch_rows;
 	uint64_t trace_vblank_rows;
 	uint64_t worker_jobs_enqueued;
 	uint64_t worker_jobs_submitted;
@@ -241,6 +249,8 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	    "event,frame_id,event_ns,enqueue_ns,handoff_return_ns,worker_start_ns,next_drawable_begin_ns,"
 	    "next_drawable_end_ns,metal_commit_ns,worker_delay_ns,drawable_wait_ns,image_index,timeline_value,"
 	    "queue_depth,shared_event_wait,newer_pending,pending_frame_id,pending_timeline_value");
+	cwm->trace_drawable_prefetch = macos_timing_trace_open_file(
+	    "drawable_prefetch", "event,timeline_value,event_ns,next_drawable_begin_ns,next_drawable_end_ns,drawable_wait_ns");
 	cwm->trace_vblank = macos_timing_trace_open_file(
 	    "vblank",
 	    "host_consumed_ns,displaylink_callback_ns,displaylink_now_host_ns,displaylink_output_host_ns,"
@@ -281,6 +291,11 @@ macos_timing_trace_close(struct comp_window_macos *cwm)
 		fflush(cwm->trace_present_worker);
 		fclose(cwm->trace_present_worker);
 		cwm->trace_present_worker = NULL;
+	}
+	if (cwm->trace_drawable_prefetch != NULL) {
+		fflush(cwm->trace_drawable_prefetch);
+		fclose(cwm->trace_drawable_prefetch);
+		cwm->trace_drawable_prefetch = NULL;
 	}
 	if (cwm->trace_vblank != NULL) {
 		fflush(cwm->trace_vblank);
@@ -391,6 +406,81 @@ macos_release_source_image(struct comp_window_macos *cwm, uint32_t index)
 {
 	if (index < MACOS_TARGET_IMAGE_COUNT) {
 		atomic_store_explicit(&cwm->image_in_flight[index], false, memory_order_release);
+	}
+}
+
+static void
+macos_trace_drawable_prefetch(struct comp_window_macos *cwm,
+                              const char *event,
+                              uint64_t timeline_value,
+                              uint64_t event_ns,
+                              uint64_t begin_ns,
+                              uint64_t end_ns)
+{
+	if (cwm->trace_drawable_prefetch == NULL) {
+		return;
+	}
+	uint64_t wait_ns = end_ns > begin_ns ? end_ns - begin_ns : 0;
+	fprintf(cwm->trace_drawable_prefetch, "%s,%llu,%llu,%llu,%llu,%llu\n", event,
+	        (unsigned long long)timeline_value, (unsigned long long)event_ns, (unsigned long long)begin_ns,
+	        (unsigned long long)end_ns, (unsigned long long)wait_ns);
+	cwm->trace_drawable_prefetch_rows++;
+	if (cwm->trace_drawable_prefetch_rows % 256 == 0) {
+		fflush(cwm->trace_drawable_prefetch);
+	}
+}
+
+static void
+macos_release_prefetched_drawable(struct comp_window_macos *cwm, const char *trace_event)
+{
+	if (cwm->prefetched_drawable == nil) {
+		return;
+	}
+	if (trace_event != NULL) {
+		macos_trace_drawable_prefetch(cwm, trace_event, cwm->prefetched_drawable_timeline_value,
+		                               os_monotonic_get_ns(), cwm->prefetched_drawable_begin_ns,
+		                               cwm->prefetched_drawable_end_ns);
+	}
+	[cwm->prefetched_drawable release];
+	cwm->prefetched_drawable = nil;
+	cwm->prefetched_drawable_timeline_value = 0;
+	cwm->prefetched_drawable_begin_ns = 0;
+	cwm->prefetched_drawable_end_ns = 0;
+}
+
+static void
+macos_prefetch_drawable_for_rendering_frame(struct comp_window_macos *cwm)
+{
+	if (!cwm->early_drawable_enabled || !cwm->async_present || cwm->present_worker_enabled ||
+	    cwm->render_complete_event == nil || cwm->metal_layer == nil) {
+		return;
+	}
+
+	int64_t rendering_frame_id = cwm->base.base.c->frame.rendering.id;
+	if (rendering_frame_id < 0) {
+		return;
+	}
+	uint64_t timeline_value = (uint64_t)rendering_frame_id;
+	if (cwm->prefetched_drawable != nil && cwm->prefetched_drawable_timeline_value == timeline_value) {
+		return;
+	}
+	if (cwm->prefetched_drawable != nil) {
+		macos_release_prefetched_drawable(cwm, "stale_release");
+	}
+
+	@autoreleasepool {
+		uint64_t begin_ns = os_monotonic_get_ns();
+		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
+		uint64_t end_ns = os_monotonic_get_ns();
+		if (drawable == nil) {
+			macos_trace_drawable_prefetch(cwm, "acquire_nil", timeline_value, end_ns, begin_ns, end_ns);
+			return;
+		}
+		cwm->prefetched_drawable = [drawable retain];
+		cwm->prefetched_drawable_timeline_value = timeline_value;
+		cwm->prefetched_drawable_begin_ns = begin_ns;
+		cwm->prefetched_drawable_end_ns = end_ns;
+		macos_trace_drawable_prefetch(cwm, "acquired", timeline_value, end_ns, begin_ns, end_ns);
 	}
 }
 
@@ -686,6 +776,10 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 
 	COMP_INFO(ct->c, "macOS target using render-complete timeline semaphore%s",
 	          cwm->render_complete_event != nil ? " with Metal shared-event handoff" : "");
+	if (cwm->early_drawable_enabled && cwm->render_complete_event == nil) {
+		COMP_WARN(ct->c, "XRT_MACOS_EARLY_DRAWABLE requested but MTLSharedEvent handoff is unavailable; early drawable prefetch is disabled");
+		cwm->early_drawable_enabled = false;
+	}
 	return true;
 }
 
@@ -699,6 +793,7 @@ comp_window_macos_check_ready(struct comp_target *ct)
 static void
 comp_window_macos_free_images(struct comp_window_macos *cwm)
 {
+	macos_release_prefetched_drawable(cwm, "free_images_release");
 	macos_drain_present_worker(cwm);
 	struct comp_target *ct = &cwm->base.base;
 	struct vk_bundle *vk = get_vk(cwm);
@@ -950,16 +1045,34 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	}
 
 	@autoreleasepool {
-		next_drawable_begin_ns = os_monotonic_get_ns();
-		if (async_present) {
-			macos_trace_present_worker(cwm, "drawable_begin", job, next_drawable_begin_ns, 0, worker_start_ns,
-			                           next_drawable_begin_ns, 0, 0, 0, shared_event_wait);
-		}
-		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
-		after_drawable_ns = os_monotonic_get_ns();
-		if (async_present) {
-			macos_trace_present_worker(cwm, "drawable_end", job, after_drawable_ns, 0, worker_start_ns,
-			                           next_drawable_begin_ns, after_drawable_ns, 0, 0, shared_event_wait);
+		id<CAMetalDrawable> drawable = nil;
+		if (cwm->early_drawable_enabled && cwm->prefetched_drawable != nil &&
+		    cwm->prefetched_drawable_timeline_value == timeline_semaphore_value) {
+			next_drawable_begin_ns = cwm->prefetched_drawable_begin_ns;
+			after_drawable_ns = cwm->prefetched_drawable_end_ns;
+			id<CAMetalDrawable> retained_drawable = cwm->prefetched_drawable;
+			cwm->prefetched_drawable = nil;
+			cwm->prefetched_drawable_timeline_value = 0;
+			cwm->prefetched_drawable_begin_ns = 0;
+			cwm->prefetched_drawable_end_ns = 0;
+			drawable = [retained_drawable autorelease];
+			macos_trace_drawable_prefetch(cwm, "consumed", timeline_semaphore_value, os_monotonic_get_ns(),
+			                               next_drawable_begin_ns, after_drawable_ns);
+		} else {
+			if (cwm->prefetched_drawable != nil) {
+				macos_release_prefetched_drawable(cwm, "present_mismatch_release");
+			}
+			next_drawable_begin_ns = os_monotonic_get_ns();
+			if (async_present) {
+				macos_trace_present_worker(cwm, "drawable_begin", job, next_drawable_begin_ns, 0, worker_start_ns,
+				                           next_drawable_begin_ns, 0, 0, 0, shared_event_wait);
+			}
+			drawable = [cwm->metal_layer nextDrawable];
+			after_drawable_ns = os_monotonic_get_ns();
+			if (async_present) {
+				macos_trace_present_worker(cwm, "drawable_end", job, after_drawable_ns, 0, worker_start_ns,
+				                           next_drawable_begin_ns, after_drawable_ns, 0, 0, shared_event_wait);
+			}
 		}
 		if (drawable == nil) {
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
@@ -1115,7 +1228,8 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			pthread_mutex_lock(&cwm->present_worker_mutex);
 			cwm->worker_jobs_submitted++;
 			uint64_t worker_delay_ns = worker_start_ns - job->enqueue_ns;
-			uint64_t drawable_wait_ns = after_drawable_ns - next_drawable_begin_ns;
+			uint64_t drawable_wait_ns =
+			    after_drawable_ns > next_drawable_begin_ns ? after_drawable_ns - next_drawable_begin_ns : 0;
 			cwm->worker_queue_delay_total_ns += worker_delay_ns;
 			if (worker_delay_ns > cwm->worker_queue_delay_max_ns) {
 				cwm->worker_queue_delay_max_ns = worker_delay_ns;
@@ -1156,7 +1270,8 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			}
 		}
 		cwm->present_vk_wait_total_ns += after_vk_wait_ns - before_vk_wait_ns;
-		cwm->present_drawable_wait_total_ns += after_drawable_ns - after_vk_wait_ns;
+		cwm->present_drawable_wait_total_ns +=
+		    after_drawable_ns > next_drawable_begin_ns ? after_drawable_ns - next_drawable_begin_ns : 0;
 		if (!async_present) {
 			cwm->present_metal_wait_total_ns += after_metal_wait_ns - after_drawable_ns;
 		}
@@ -1403,6 +1518,7 @@ static VkResult
 comp_window_macos_update_timings(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	macos_prefetch_drawable_for_rendering_frame(cwm);
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
 	uint64_t displaylink_now_host_ns =
 	    atomic_load_explicit(&cwm->latest_displaylink_now_host_ns, memory_order_acquire);
@@ -1576,6 +1692,7 @@ comp_window_macos_destroy(struct comp_target *ct)
 			macos_retire_unpresented_job(cwm, &pending_job, "shutdown_drop", 0);
 		}
 	}
+	macos_release_prefetched_drawable(cwm, "destroy_release");
 	macos_drain_present_worker(cwm);
 	macos_timing_trace_close(cwm);
 	comp_window_macos_free_images(cwm);
@@ -1615,6 +1732,8 @@ comp_window_macos_create(struct comp_compositor *c)
 	}
 	cwm->async_present = debug_get_bool_option_macos_async_present();
 	cwm->present_worker_enabled = cwm->async_present && debug_get_bool_option_macos_present_worker();
+	cwm->early_drawable_enabled =
+	    cwm->async_present && !cwm->present_worker_enabled && debug_get_bool_option_macos_early_drawable();
 	cwm->present_command_group = dispatch_group_create();
 	if (cwm->present_worker_enabled) {
 		dispatch_queue_attr_t worker_attr =
@@ -1622,6 +1741,13 @@ comp_window_macos_create(struct comp_compositor *c)
 		cwm->present_worker_queue =
 		    dispatch_queue_create("org.monado.macos-present-worker", worker_attr);
 		cwm->present_worker_group = dispatch_group_create();
+	}
+	if (debug_get_bool_option_macos_early_drawable()) {
+		if (cwm->early_drawable_enabled) {
+			COMP_INFO(c, "macOS diagnostic: early CAMetalDrawable prefetch enabled");
+		} else {
+			COMP_WARN(c, "XRT_MACOS_EARLY_DRAWABLE requires async presentation with XRT_MACOS_PRESENT_WORKER=0; prefetch is disabled");
+		}
 	}
 	macos_timing_trace_open(cwm);
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
