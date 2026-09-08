@@ -34,6 +34,8 @@ cli_cmd_psvr2_pose(int argc, const char **argv);
 int
 cli_cmd_psvr2_camera(int argc, const char **argv);
 int
+cli_cmd_psvr2_calibration_record(int argc, const char **argv);
+int
 cli_cmd_pssense_test(int argc, const char **argv);
 int
 cli_cmd_pose_dump(int argc, const char **argv);
