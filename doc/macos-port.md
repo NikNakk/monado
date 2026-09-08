@@ -89,6 +89,83 @@ rapid diagnostic restarts do not wedge the stream. Camera streaming remains
 opt-in while per-camera calibration and constellation pose solving are
 unfinished.
 
+### PS VR2 four-camera calibration
+
+Hardware captures establish the mode-3 physical ordering and raster layout:
+
+| Solver camera | Mode-3 source | Physical camera |
+| --- | --- | --- |
+| 0 | set 0, left SBS half | lower-left |
+| 1 | set 0, right SBS half | lower-right |
+| 2 | set 3, left SBS half | upper-left |
+| 3 | set 3, right SBS half | upper-right |
+
+Each packet contains one 1280x640 L8 side-by-side raster, not two contiguous
+640x640 planes. Sets 0 and 3 have identical VTS and hardware sequence values,
+so all four images are synchronized. Mode-12 visible 320x320 images are exact
+0.5x versions of corresponding mode-3 images with the same ordering, no flip,
+and no translation (ZNCC about 0.996--0.999). Mode-12 set-9 tracking images map
+camera-for-camera to mode-4 512x508 images at exactly half the dimensions.
+Mode-12 visible-to-tracking geometry remains estimated rather than final.
+
+Four captures used a rigid 7x5-square `DICT_4X4_50` ChArUco target with 30 mm
+markers and a square length measured with digital calipers as **40.00 mm**.
+Together they provide 520, 529, 116, and 156 strong views for cameras 0--3:
+
+```sh
+.venv/bin/python scripts/psvr2_charuco_calibrate.py solve \
+  /tmp/psvr2-charuco /tmp/psvr2-charuco-top \
+  /tmp/psvr2-charuco-2 /tmp/psvr2-charuco-3 \
+  --square-length-mm 40.00 \
+  --output /tmp/psvr2-camera-calibration.json
+```
+
+The solver fits four fisheye models, performs one conservative MAD rejection
+pass capped at 10%, calibrates pairs after fisheye undistortion, builds a
+camera-0 rig graph, estimates multi-camera board poses, and tests explicit SLAM
+transform hypotheses. The versioned JSON retains per-view reprojection results,
+coverage, pairwise baselines, closure, board-pose residuals, and SLAM
+fixed-board and relative-motion residuals. Low RMS alone is insufficient:
+coverage warnings, closure, baseline plausibility, and accepted/rejected counts
+must be reviewed together. Lengths are SI units except fields ending `_px` or
+`_deg`; `scripts/psvr2_camera_calibration.schema.json` describes the shape.
+
+The four-run fit gives fisheye RMS values of about 0.418, 0.459, 0.371, and
+0.385 px. Camera-0-to-1 and camera-0-to-2 baselines are about 78.6 and 74.9 mm;
+camera-1-to-3 is about 74.5 mm. Diagonals are about 123--127 mm. Redundant
+paths disagree by at most about 0.19 degrees and 3.4 mm. These are measured
+results, not hard-coded priors.
+
+The recorder stores the wire-remapped SLAM pose before runtime correction.
+`process_slam_record()` maps position to `(wire_z, wire_y, -wire_x)` and
+quaternion XYZW to `(-wire_qy, -wire_qx, wire_qz, wire_qw)`, enforces quaternion
+continuity, then applies the default +90-degree Z `slam_correction_pose` to
+orientation while only adding its position. The corrected relation is stored
+and interpolated/predicted in `slam_relation_history`. The relation chain later
+returns `T_slam_head = T_slam_tracker * T_tracker_head`; current `T_imu_head`
+(that is, `T_tracker_head`) translates by approximately
+`(0.000247, -0.000273, 0.104826)` metres.
+
+With `T_A_B` meaning B coordinates transformed into A, fixed-board consistency
+is `T_slam_tracker * T_tracker_rig * T_rig_board = T_slam_board`. Applying the
+exact runtime orientation correction reduces the original two-run translation
+residual from about 209 mm to about 46 mm while retaining roughly 0.44-degree
+median rotation consistency. `T_imu_head` changes the recovered transform but
+not residuals, as a complete hand-eye solve must absorb it. A full rigid
++90-degree correction does not improve the raw result: the runtime's
+orientation-only correction matters because position is already in remapped
+tracker axes.
+
+The remaining failure is capture-specific. Three captures have about 2.8--4.7
+mm median fixed-board translation residual. The first has about 86 mm and a
+smooth apparent fixed-board drift dominated by about 258 mm on one axis. A
+0.6--1.4 SLAM scale sweep leaves it poor (best median about 76 mm at 0.75x),
+while every good capture selects exactly 1.0x. This rejects a global unit-scale,
+transform-direction, `T_imu_head`, or quaternion-convention explanation and
+identifies anomalous SLAM translation drift in the first capture. Rotation is
+trustworthy; translation remains conservatively untrusted because one complete
+session contradicts the other three. Runtime behavior remains unchanged.
+
 Set `PSVR2_CAMERA_BLOBS=1` on the `psvr2-camera` command to pass each of the
 four mode-4 L8 streams through Monado's existing IR blob detector on a separate
 queue. The command prints aggregate observation counts and, when a snapshot
