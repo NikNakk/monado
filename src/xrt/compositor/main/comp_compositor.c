@@ -80,7 +80,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef XRT_GRAPHICS_SYNC_HANDLE_IS_FD
+#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD) || defined(XRT_OS_OSX)
 #include <unistd.h>
 #endif
 
@@ -93,6 +93,9 @@
 #define WINDOW_TITLE "Monado"
 
 DEBUG_GET_ONCE_BOOL_OPTION(disable_deferred, "XRT_COMPOSITOR_DISABLE_DEFERRED", false)
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_frame_pipeline_trace, "PSVR2_TIMING_TRACE", false)
+#endif
 
 
 /*
@@ -120,6 +123,81 @@ get_vk(struct comp_compositor *c)
 {
 	return &c->base.vk;
 }
+
+#ifdef XRT_OS_OSX
+static FILE *g_macos_frame_pipeline_trace = NULL;
+static uint64_t g_macos_frame_pipeline_trace_rows = 0;
+static bool g_macos_frame_pipeline_trace_failed = false;
+
+static FILE *
+macos_frame_pipeline_trace_get(void)
+{
+	if (!debug_get_bool_option_macos_psvr2_frame_pipeline_trace() || g_macos_frame_pipeline_trace_failed) {
+		return NULL;
+	}
+	if (g_macos_frame_pipeline_trace != NULL) {
+		return g_macos_frame_pipeline_trace;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_frame_pipeline.csv", dir, separator, (int)getpid());
+
+	g_macos_frame_pipeline_trace = fopen(path, "w");
+	if (g_macos_frame_pipeline_trace == NULL) {
+		g_macos_frame_pipeline_trace_failed = true;
+		return NULL;
+	}
+	setvbuf(g_macos_frame_pipeline_trace, NULL, _IOFBF, 64 * 1024);
+	fputs("event,frame_id,event_ns,point_ns,wake_time_ns,desired_present_ns,predicted_display_ns,present_slop_ns\n",
+	      g_macos_frame_pipeline_trace);
+	fflush(g_macos_frame_pipeline_trace);
+	return g_macos_frame_pipeline_trace;
+}
+
+static void
+macos_frame_pipeline_trace_event(const char *event,
+                                 int64_t frame_id,
+                                 int64_t event_ns,
+                                 int64_t point_ns,
+                                 int64_t wake_time_ns,
+                                 int64_t desired_present_ns,
+                                 int64_t predicted_display_ns,
+                                 int64_t present_slop_ns)
+{
+	FILE *file = macos_frame_pipeline_trace_get();
+	if (file == NULL) {
+		return;
+	}
+
+	flockfile(file);
+	fprintf(file, "%s,%lld,%lld,%lld,%lld,%lld,%lld,%lld\n", event, (long long)frame_id, (long long)event_ns,
+	        (long long)point_ns, (long long)wake_time_ns, (long long)desired_present_ns,
+	        (long long)predicted_display_ns, (long long)present_slop_ns);
+	g_macos_frame_pipeline_trace_rows++;
+	if (g_macos_frame_pipeline_trace_rows % 512 == 0) {
+		fflush(file);
+	}
+	funlockfile(file);
+}
+
+static void
+macos_frame_pipeline_trace_close(void)
+{
+	if (g_macos_frame_pipeline_trace == NULL) {
+		return;
+	}
+	fflush(g_macos_frame_pipeline_trace);
+	fclose(g_macos_frame_pipeline_trace);
+	g_macos_frame_pipeline_trace = NULL;
+	g_macos_frame_pipeline_trace_rows = 0;
+}
+#endif
 
 
 /*
@@ -189,6 +267,9 @@ compositor_predict_frame(struct xrt_compositor *xc,
 	COMP_TRACE_MARKER();
 
 	struct comp_compositor *c = comp_compositor(xc);
+#ifdef XRT_OS_OSX
+	int64_t predict_entry_ns = os_monotonic_get_ns();
+#endif
 
 	COMP_SPEW(c, "PREDICT_FRAME");
 
@@ -220,6 +301,14 @@ compositor_predict_frame(struct xrt_compositor *xc,
 	*out_predicted_display_time_ns = predicted_display_time_ns;
 	*out_predicted_display_period_ns = c->frame_interval_ns;
 
+#ifdef XRT_OS_OSX
+	int64_t predict_result_ns = os_monotonic_get_ns();
+	macos_frame_pipeline_trace_event("predict_entry", frame_id, predict_entry_ns, 0, wake_up_time_ns,
+	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);
+	macos_frame_pipeline_trace_event("predict_result", frame_id, predict_result_ns, 0, wake_up_time_ns,
+	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);
+#endif
+
 	return XRT_SUCCESS;
 }
 
@@ -237,6 +326,16 @@ compositor_mark_frame(struct xrt_compositor *xc,
 
 	switch (point) {
 	case XRT_COMPOSITOR_FRAME_POINT_WOKE:
+#ifdef XRT_OS_OSX
+		macos_frame_pipeline_trace_event("mark_woke", frame_id, os_monotonic_get_ns(), when_ns, 0,
+		                                 c->frame.waited.id == frame_id
+		                                     ? (int64_t)c->frame.waited.desired_present_time_ns
+		                                     : 0,
+		                                 c->frame.waited.id == frame_id
+		                                     ? (int64_t)c->frame.waited.predicted_display_time_ns
+		                                     : 0,
+		                                 c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.present_slop_ns : 0);
+#endif
 		comp_target_mark_wake_up(c->target, frame_id, when_ns);
 		return XRT_SUCCESS;
 	default: assert(false);
@@ -250,6 +349,14 @@ compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_SPEW(c, "BEGIN_FRAME");
 	c->app_profiling.last_begin = os_monotonic_get_ns();
+#ifdef XRT_OS_OSX
+	macos_frame_pipeline_trace_event("begin_frame", frame_id, c->app_profiling.last_begin, 0, 0,
+	                                 c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.desired_present_time_ns : 0,
+	                                 c->frame.waited.id == frame_id
+	                                     ? (int64_t)c->frame.waited.predicted_display_time_ns
+	                                     : 0,
+	                                 c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.present_slop_ns : 0);
+#endif
 	return XRT_SUCCESS;
 }
 
@@ -258,6 +365,9 @@ compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_SPEW(c, "DISCARD_FRAME at %8.3fms", ts_ms());
+#ifdef XRT_OS_OSX
+	macos_frame_pipeline_trace_event("discard_frame", frame_id, os_monotonic_get_ns(), 0, 0, 0, 0, 0);
+#endif
 	return XRT_SUCCESS;
 }
 
@@ -290,6 +400,14 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	COMP_TRACE_MARKER();
 
 	struct comp_compositor *c = comp_compositor(xc);
+	int64_t frame_id = c->frame.waited.id;
+	int64_t desired_present_time_ns = frame_id >= 0 ? (int64_t)c->frame.waited.desired_present_time_ns : 0;
+	int64_t predicted_display_time_ns = frame_id >= 0 ? (int64_t)c->frame.waited.predicted_display_time_ns : 0;
+	int64_t present_slop_ns = frame_id >= 0 ? (int64_t)c->frame.waited.present_slop_ns : 0;
+#ifdef XRT_OS_OSX
+	macos_frame_pipeline_trace_event("layer_commit_entry", frame_id, os_monotonic_get_ns(), 0, 0,
+	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);
+#endif
 
 	COMP_SPEW(c, "LAYER_COMMIT at %8.3fms", ts_ms());
 
@@ -306,9 +424,19 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 
 	u_graphics_sync_unref(&sync_handle);
+#ifdef XRT_OS_OSX
+	macos_frame_pipeline_trace_event("layer_commit_after_sync_unref", frame_id, os_monotonic_get_ns(), 0, 0,
+	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);
+	macos_frame_pipeline_trace_event("layer_commit_before_renderer", frame_id, os_monotonic_get_ns(), 0, 0,
+	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);
+#endif
 
 	// Do the drawing
 	xrt_result_t xret = comp_renderer_draw(c->r);
+#ifdef XRT_OS_OSX
+	macos_frame_pipeline_trace_event("layer_commit_after_renderer", frame_id, os_monotonic_get_ns(), 0, 0,
+	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);
+#endif
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -324,6 +452,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 	// Now is a good point to garbage collect.
 	comp_swapchain_shared_garbage_collect(&c->base.cscs);
+#ifdef XRT_OS_OSX
+	macos_frame_pipeline_trace_event("layer_commit_return", frame_id, os_monotonic_get_ns(), 0, 0,
+	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);
+#endif
 
 	return XRT_SUCCESS;
 }
@@ -443,6 +575,9 @@ compositor_destroy(struct xrt_compositor *xc)
 
 	comp_base_fini(&c->base);
 
+#ifdef XRT_OS_OSX
+	macos_frame_pipeline_trace_close();
+#endif
 	free(c);
 }
 
@@ -489,7 +624,7 @@ compositor_check_and_prepare_xdev(struct comp_compositor *c, struct xrt_device *
 		return true;
 	}
 
-	COMP_ERROR(c, "Failed to fill in meshuv on the xdev '%s'.", xdev->str);
+	COMP_ERROR(c, "Failed to fill in meshuv on xdev '%s'.", xdev->str);
 
 	return false;
 }
