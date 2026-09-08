@@ -66,6 +66,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES"
 DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)
 DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", LONG_MIN)
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_skip_blocking_gpu_timestamps, "XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS", false)
 #endif
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
@@ -641,7 +642,7 @@ renderer_build_rendering_target_resources(struct comp_renderer *r,
 
 	render_gfx_target_resources_init( //
 	    rtr,                          //
-	    &c->nr,                       //
+	    &c->nr,                       // struct render_resources
 	    &r->target_render_pass,       //
 	    image_view,                   //
 	    extent);                      //
@@ -847,6 +848,9 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	} else if (late_render_lead_us > 0) {
 		COMP_INFO(c, "macOS legacy predicted-relative late-render experiment enabled: dispatch lead %lld us",
 		          (long long)late_render_lead_us);
+	}
+	if (debug_get_bool_option_macos_skip_blocking_gpu_timestamps()) {
+		COMP_INFO(c, "macOS diagnostic: skipping blocking compositor GPU timestamp readback");
 	}
 #endif
 
@@ -1562,8 +1566,13 @@ comp_renderer_draw(struct comp_renderer *r)
 	 */
 	chl_frame_state_fini(&frame_state);
 
+	bool collect_gpu_timestamps = xret == XRT_SUCCESS;
+#ifdef XRT_OS_OSX
+	collect_gpu_timestamps = collect_gpu_timestamps && !debug_get_bool_option_macos_skip_blocking_gpu_timestamps();
+#endif
+
 	// Check timestamps.
-	if (xret == XRT_SUCCESS) {
+	if (collect_gpu_timestamps) {
 		/*
 		 * Get timestamps of GPU work (if available).
 		 */
