@@ -52,10 +52,16 @@
 #define PSSENSE_TRACE(p, ...) U_LOG_XDEV_IFL_T(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_DEBUG(p, ...) U_LOG_XDEV_IFL_D(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_DEBUG_HEX(p, data, data_size) U_LOG_XDEV_IFL_D_HEX(&p->base, p->log_level, data, data_size)
+#define PSSENSE_INFO(p, ...) U_LOG_XDEV_IFL_I(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_WARN(p, ...) U_LOG_XDEV_IFL_W(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_ERROR(p, ...) U_LOG_XDEV_IFL_E(&p->base, p->log_level, __VA_ARGS__)
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule, "PSSENSE_FUTURE_LED_SCHEDULE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
+
+#define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
 static struct xrt_binding_input_pair touch_inputs_pssense[] = {
     {XRT_INPUT_TOUCH_X_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
@@ -1220,13 +1226,29 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		}
 
 		uint8_t period_id = pssense->tracking.period_id;
+		long requested_period_id = debug_get_num_option_pssense_led_period_id();
+		if (requested_period_id > 0 && requested_period_id <= UINT8_MAX) {
+			period_id = (uint8_t)requested_period_id;
+		}
 
 		// We don't need the = 0 in theory but the assert going away in release confuses the compiler. It will
 		// always be initialized.
 		timepoint_ns next_blink_time = 0;
+		timepoint_ns now_ns = os_monotonic_get_ns();
+		timepoint_ns schedule_host_ns = pssense->tracking.last_exposure_local_timestamp_ns;
+		uint64_t periods_forward = 0;
+		if (debug_get_bool_option_pssense_future_led_schedule() &&
+		    pssense->tracking.average_exposure_interval_ns > 0) {
+			timepoint_ns target_host_ns = now_ns + PSSENSE_FUTURE_LED_LEAD_NS;
+			if (schedule_host_ns < target_host_ns) {
+				time_duration_ns delta_ns = target_host_ns - schedule_host_ns;
+				time_duration_ns period_ns = pssense->tracking.average_exposure_interval_ns;
+				periods_forward = (uint64_t)((delta_ns + period_ns - 1) / period_ns);
+				schedule_host_ns += (time_duration_ns)periods_forward * period_ns;
+			}
+		}
 		// Convert the timestamp, latency offset will be applied within here
-		bool ts_valid = pssense_host_ts_to_device(pssense, pssense->tracking.last_exposure_local_timestamp_ns,
-		                                          &next_blink_time);
+		bool ts_valid = pssense_host_ts_to_device(pssense, schedule_host_ns, &next_blink_time);
 		// We check if we have a clock offset above, so this will always return true
 		assert(ts_valid);
 		(void)ts_valid; // Silence unused variable in release
@@ -1243,6 +1265,25 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
 		// in IMU ticks
 		uint32_t cycle_position = NS_TO_IMU_TICKS(next_blink_time);
+
+		if (debug_get_bool_option_pssense_timing_diag()) {
+			timepoint_ns controller_now_ns = 0;
+			timepoint_ns blink_host_est_ns = 0;
+			bool controller_now_valid = pssense_host_ts_to_device(pssense, now_ns, &controller_now_ns);
+			bool blink_host_valid = pssense_device_ts_to_host(pssense, next_blink_time, &blink_host_est_ns);
+			PSSENSE_INFO(pssense,
+			             "LED_SCHEDULE now=%" PRIi64 " raw_exposure=%" PRIi64 " age=%" PRIi64
+			             " period=%" PRIi64 " forward=%" PRIu64 " projected=%" PRIi64 " projected_lead=%" PRIi64
+			             " controller_now=%" PRIi64 " cycle_position=%u blink_host=%" PRIi64
+			             " blink_minus_projected=%" PRIi64 " period_id=%u pulse=%" PRIi64,
+			             now_ns, pssense->tracking.last_exposure_local_timestamp_ns,
+			             now_ns - pssense->tracking.last_exposure_local_timestamp_ns,
+			             pssense->tracking.average_exposure_interval_ns, periods_forward, schedule_host_ns,
+			             schedule_host_ns - now_ns, controller_now_valid ? controller_now_ns : -1, cycle_position,
+			             blink_host_valid ? blink_host_est_ns : -1,
+			             blink_host_valid ? blink_host_est_ns - schedule_host_ns : 0, period_id,
+			             PERIOD_ID_TO_DURATION_NS(period_id));
+		}
 
 #if 0
 		static int64_t jitter_integration = 0;
