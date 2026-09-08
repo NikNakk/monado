@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/macos-pssense-hid.yml
       - CMakeLists.txt
+      - scripts/psvr2_charuco_calibrate.py
       - src/xrt/auxiliary/os/**
       - src/xrt/auxiliary/math/**
       - src/xrt/auxiliary/tracking/**
@@ -65,6 +66,9 @@ jobs:
         run: |
           set -o pipefail
           cmake --build build --target aux_os pssense_hid_probe st_prober drv_pssense target_lists monado-cli --parallel 2>&1 | tee build.log
+
+      - name: Check calibration helper syntax
+        run: python3 -m py_compile scripts/psvr2_charuco_calibrate.py
 
       - name: Upload build log
         if: always()
