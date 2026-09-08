@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 """Record PSVR2 mode-3 visible cameras plus SLAM pose in the shared VTS clock.
 
 This is intended for the ChArUco calibration capture. It talks directly to the
@@ -7,6 +9,12 @@ camera mode 3, pairs camera sets 0 and 3 by hardware sequence/VTS, and writes
 four 640x640 L8 images asynchronously. A second reader records the onboard SLAM
 stream; the writer interpolates the remapped SLAM tracker pose at each camera
 VTS and stores both the interpolated pose and the bracketing SLAM timestamps.
+
+The SLAM parser intentionally follows Monado's runtime behaviour: an exact
+512-byte transfer from endpoint 0x83 is treated as a slam_usb_record by fixed
+offsets. The nominal "SLA" magic and packet-size fields are recorded as
+ diagnostics but are not required for acceptance, because the working Monado
+ driver does not gate parsing on them either.
 
 Close Monado, GAV and SteamVR before running.
 Requires: python3 -m pip install pyusb
@@ -50,6 +58,7 @@ CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 640
 CAMERA_PLANE_SIZE = CAMERA_WIDTH * CAMERA_HEIGHT
 CAMERA_READ_SIZE = 1_040_640
+SLAM_PACKET_SIZE = 512
 SLAM_READ_SIZE = 1024
 UINT32_MOD = 1 << 32
 
@@ -112,6 +121,9 @@ class SlamSample:
     host_arrival_ns: int
     vts_us: int
     unknown1: int
+    magic: bytes
+    const1: int
+    packet_size_field: int
     position: tuple[float, float, float]
     orientation: tuple[float, float, float, float]  # x,y,z,w, Monado-remapped tracker frame
 
@@ -123,18 +135,41 @@ def normalize_quat(q: tuple[float, float, float, float]) -> tuple[float, float, 
     return tuple(v / n for v in q)  # type: ignore[return-value]
 
 
-def parse_slam(packet: bytes, host_arrival_ns: int) -> SlamSample | None:
-    if len(packet) < 44 or packet[:3] != b"SLA":
-        return None
+def parse_slam(packet: bytes, host_arrival_ns: int) -> tuple[SlamSample | None, str | None]:
+    """Parse exactly the fixed-offset record used by Monado's process_slam_record()."""
+    if len(packet) != SLAM_PACKET_SIZE:
+        return None, "bad_length"
+
     magic, const1, packet_size, vts_us, unknown1, px, py, pz, qw, qx, qy, qz = struct.unpack_from(
         "<3sBIII3f4f", packet, 0
     )
-    if magic != b"SLA" or packet_size < 44:
-        return None
+
+    values = (px, py, pz, qw, qx, qy, qz)
+    if not all(math.isfinite(v) for v in values):
+        return None, "nonfinite_pose"
+
+    raw_quat_norm = math.sqrt(qw * qw + qx * qx + qy * qy + qz * qz)
+    # A valid tracking quaternion should be near unit length. This broad range
+    # rejects obviously mis-decoded data without over-constraining the device.
+    if raw_quat_norm < 0.25 or raw_quat_norm > 4.0:
+        return None, "bad_quaternion"
+
     # Match the wire->Monado tracker-axis remap in psvr2.c process_slam_record().
     position = (pz, py, -px)
     orientation = normalize_quat((-qy, -qx, qz, qw))
-    return SlamSample(host_arrival_ns, vts_us, unknown1, position, orientation)
+    return (
+        SlamSample(
+            host_arrival_ns=host_arrival_ns,
+            vts_us=vts_us,
+            unknown1=unknown1,
+            magic=magic,
+            const1=const1,
+            packet_size_field=packet_size,
+            position=position,
+            orientation=orientation,
+        ),
+        None,
+    )
 
 
 def slerp(q0, q1, t: float):
@@ -249,11 +284,18 @@ class Recorder:
             "camera_pair_vts_mismatch": 0,
             "slam_packets": 0,
             "slam_valid": 0,
+            "slam_bad_length": 0,
+            "slam_nonfinite_pose": 0,
+            "slam_bad_quaternion": 0,
+            "slam_magic_mismatch": 0,
+            "slam_packet_size_mismatch": 0,
+            "slam_unknown1_not3": 0,
             "written_sets": 0,
             "pose_failures": 0,
         }
         self.stats_lock = threading.Lock()
         self.manifest = None
+        self.manifest_writer = None
         self.slam_csv = None
         self.slam_writer = None
 
@@ -277,11 +319,13 @@ class Recorder:
         self.slam_csv = (self.output_dir / "slam.csv").open("w", newline="")
         self.slam_writer = csv.writer(self.slam_csv)
         self.slam_writer.writerow(
-            ["host_arrival_ns", "vts_us", "unknown1", "tracker_px", "tracker_py", "tracker_pz",
-             "tracker_qx", "tracker_qy", "tracker_qz", "tracker_qw"]
+            [
+                "host_arrival_ns", "vts_us", "unknown1", "magic_hex", "const1", "packet_size_field",
+                "tracker_px", "tracker_py", "tracker_pz", "tracker_qx", "tracker_qy", "tracker_qz", "tracker_qw",
+            ]
         )
         metadata = {
-            "schema_version": 2,
+            "schema_version": 3,
             "purpose": "psvr2_four_camera_visible_charuco_calibration",
             "camera_mode": 3,
             "camera_count": 4,
@@ -296,7 +340,10 @@ class Recorder:
             "image_height": CAMERA_HEIGHT,
             "sequence_stride": self.stride,
             "time_domain": "raw PSVR2 VTS microseconds shared by camera and SLAM streams",
-            "slam_pose": "wire pose remapped to Monado tracker axes; no host-clock conversion or head-offset transform applied",
+            "slam_pose": (
+                "fixed-offset 512-byte endpoint-0x83 pose remapped to Monado tracker axes; "
+                "nominal magic/packet-size fields are diagnostic only; no host-clock conversion or head-offset transform applied"
+            ),
             "manifest": "manifest.csv",
             "slam_samples": "slam.csv",
             "charuco_target": {
@@ -362,6 +409,7 @@ class Recorder:
                 self.inc("camera_sets_dropped")
 
     def slam_reader(self, dev):
+        first_bad_prefix_printed = False
         while not self.stop.is_set():
             try:
                 data = dev.read(SLAM_ENDPOINT_IN, SLAM_READ_SIZE, timeout=100)
@@ -375,13 +423,42 @@ class Recorder:
             if not packet:
                 continue
             self.inc("slam_packets")
-            sample = parse_slam(packet, time.monotonic_ns())
+            sample, error = parse_slam(packet, time.monotonic_ns())
             if sample is None:
+                if error == "bad_length":
+                    self.inc("slam_bad_length")
+                elif error == "nonfinite_pose":
+                    self.inc("slam_nonfinite_pose")
+                elif error == "bad_quaternion":
+                    self.inc("slam_bad_quaternion")
+                if not first_bad_prefix_printed:
+                    print(
+                        f"First rejected SLAM transfer: length={len(packet)} prefix={packet[:32].hex()} reason={error}",
+                        file=sys.stderr,
+                    )
+                    first_bad_prefix_printed = True
                 continue
+
+            if sample.magic != b"SLA":
+                self.inc("slam_magic_mismatch")
+            if sample.packet_size_field != SLAM_PACKET_SIZE:
+                self.inc("slam_packet_size_mismatch")
+            if sample.unknown1 != 3:
+                self.inc("slam_unknown1_not3")
+
             self.inc("slam_valid")
             self.slam.push(sample)
             self.slam_writer.writerow(
-                [sample.host_arrival_ns, sample.vts_us, sample.unknown1, *sample.position, *sample.orientation]
+                [
+                    sample.host_arrival_ns,
+                    sample.vts_us,
+                    sample.unknown1,
+                    sample.magic.hex(),
+                    sample.const1,
+                    sample.packet_size_field,
+                    *sample.position,
+                    *sample.orientation,
+                ]
             )
             self.slam_csv.flush()
 
@@ -477,7 +554,8 @@ def main() -> int:
                 print(
                     f"  camera_packets={stats['camera_packets']} complete={stats['camera_sets_complete']} "
                     f"written={stats['written_sets']} queue={recorder.jobs.qsize()} "
-                    f"slam={stats['slam_valid']} pose_failures={stats['pose_failures']}",
+                    f"slam={stats['slam_valid']}/{stats['slam_packets']} pose_failures={stats['pose_failures']} "
+                    f"slam_bad_len={stats['slam_bad_length']} magic_mismatch={stats['slam_magic_mismatch']}",
                     file=sys.stderr,
                 )
                 next_status += 2.0
