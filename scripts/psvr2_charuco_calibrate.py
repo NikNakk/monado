@@ -290,6 +290,7 @@ def command_solve(args: argparse.Namespace) -> int:
         args.marker_length_mm / 1000.0,
         min_corners=args.min_corners,
         min_common=args.min_common_corners,
+        handeye_min_cameras=args.handeye_min_cameras,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -326,6 +327,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Minimum detected corners for a camera observation")
     solve.add_argument("--min-common-corners", type=int, default=6,
                        help="Minimum shared IDs for a synchronized stereo observation")
+    solve.add_argument("--handeye-min-cameras", type=int, default=2, choices=range(1, 5),
+                       help="Minimum cameras in a jointly refined board pose used for hand-eye (default: 2)")
     solve.add_argument("--output", required=True, help="Versioned calibration JSON output path")
     solve.set_defaults(func=command_solve)
     return parser

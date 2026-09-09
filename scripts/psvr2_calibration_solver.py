@@ -11,6 +11,7 @@ point expressed in frame B into frame A.  OpenCV ``solvePnP`` therefore returns
 from __future__ import annotations
 
 import csv
+import hashlib
 import heapq
 import json
 import math
@@ -23,7 +24,7 @@ import cv2
 import numpy as np
 
 CAMERA_COUNT = 4
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def fisheye_flag(name):
@@ -235,10 +236,28 @@ def calibrate_camera(camera, obs_list, corners, size):
         "width": size[0], "height": size[1], "K": final[1], "D": final[2].reshape(4),
         "rms": final[0], "accepted": len(accepted), "rejected": len(rejected),
         "per_view": per_view,
+        "accepted_keys": {obs_list[i].key for i in accepted},
         "coverage": {"convex_hull_fraction": float(hull_area), "grid_4x4_cells": occupied,
                      "board_normal_angle_deg": stats(normals), "depth_m": stats(depths),
                      "K_condition_number": float(np.linalg.cond(final[1]))},
         "warnings": warnings,
+    }
+
+
+def dataset_provenance(dataset: Dataset):
+    files = {}
+    combined = hashlib.sha256()
+    for name in ("dataset.json", "manifest.csv", "charuco-detections.csv"):
+        path = dataset.path / name
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        files[name] = {"sha256": digest, "size_bytes": path.stat().st_size}
+        combined.update(name.encode("utf-8") + b"\0" + bytes.fromhex(digest))
+    return {
+        "path": str(dataset.path.resolve()),
+        "dataset_schema_version": dataset.metadata.get("schema_version"),
+        "headset_serial": dataset.metadata.get("headset_serial"),
+        "files": files,
+        "combined_sha256": combined.hexdigest(),
     }
 
 
@@ -329,28 +348,90 @@ def pnp_pose(obs, corners, intrinsic):
     return T, rms_px
 
 
+def _pose_params(T):
+    rvec, _ = cv2.Rodrigues(T[:3, :3])
+    return np.concatenate((rvec.reshape(3), T[:3, 3]))
+
+
+def _params_pose(params):
+    R, _ = cv2.Rodrigues(np.asarray(params[:3], dtype=np.float64))
+    return transform(R, params[3:])
+
+
+def _joint_board_residual(params, candidates, corners, intrinsics, T_R_C):
+    T_R_B = _params_pose(params)
+    residuals = []
+    for camera, obs, _initial_pose, _initial_rms in candidates:
+        T_C_B = invert(T_R_C[camera]) @ T_R_B
+        rvec, _ = cv2.Rodrigues(T_C_B[:3, :3])
+        predicted, _ = cv2.fisheye.projectPoints(
+            object_points(obs, corners).reshape(1, -1, 3), rvec, T_C_B[:3, 3],
+            intrinsics[camera]["K"], intrinsics[camera]["D"].reshape(4, 1))
+        residuals.append((predicted.reshape(-1, 2) - obs.image_points).reshape(-1))
+    return np.concatenate(residuals)
+
+
+def _huber_loss(residual, delta=1.5):
+    norms = np.linalg.norm(residual.reshape(-1, 2), axis=1)
+    return float(np.sum(np.where(norms <= delta, .5 * norms**2, delta * (norms - .5 * delta))))
+
+
+def refine_joint_board_pose(initial, candidates, corners, intrinsics, T_R_C):
+    """Jointly minimize every observed corner in all cameras for one rig pose."""
+    params = _pose_params(initial)
+    damping = 1e-3
+    for _iteration in range(25):
+        residual = _joint_board_residual(params, candidates, corners, intrinsics, T_R_C)
+        corner_norm = np.linalg.norm(residual.reshape(-1, 2), axis=1)
+        corner_weight = np.minimum(1.0, 1.5 / np.maximum(corner_norm, 1e-12))
+        weights = np.repeat(np.sqrt(corner_weight), 2)
+        jacobian = np.empty((len(residual), 6), dtype=np.float64)
+        for axis in range(6):
+            step = 1e-6 if axis < 3 else 1e-5
+            shifted = params.copy(); shifted[axis] += step
+            jacobian[:, axis] = (
+                _joint_board_residual(shifted, candidates, corners, intrinsics, T_R_C) - residual) / step
+        J = jacobian * weights[:, None]; r = residual * weights
+        normal = J.T @ J
+        update = np.linalg.solve(normal + damping * (np.diag(np.diag(normal)) + np.eye(6)), -J.T @ r)
+        candidate_params = params + update
+        if _huber_loss(_joint_board_residual(candidate_params, candidates, corners, intrinsics, T_R_C)) < _huber_loss(residual):
+            params = candidate_params; damping = max(1e-8, damping * .3)
+            if np.linalg.norm(update) < 1e-9: break
+        else:
+            damping = min(1e8, damping * 10.0)
+    final_residual = _joint_board_residual(params, candidates, corners, intrinsics, T_R_C)
+    return _params_pose(params), final_residual
+
+
 def solve_board_poses(observations, corners, intrinsics, T_R_C):
     grouped = defaultdict(list)
     for (d, s, c), obs in observations.items():
         solved = pnp_pose(obs, corners, intrinsics[c])
         if solved and solved[1] < 2.0:
-            grouped[(d,s)].append((c, T_R_C[c] @ solved[0], solved[1], len(obs.ids)))
-    poses, diagnostics = {}, []
+            grouped[(d,s)].append((c, obs, T_R_C[c] @ solved[0], solved[1]))
+    poses, camera_counts, diagnostics = {}, {}, []
     for key, candidates in grouped.items():
-        rotations = [x[1][:3,:3] for x in candidates]
-        translations = np.array([x[1][:3,3] for x in candidates])
+        rotations = [x[2][:3,:3] for x in candidates]
+        translations = np.array([x[2][:3,3] for x in candidates])
         R = rotation_mean(rotations); t = np.median(translations, axis=0)
         rot_res = [rotation_angle_deg(R.T @ x) for x in rotations]
         trans_res = np.linalg.norm(translations - t, axis=1)
-        if np.median(rot_res) > 2.0 or np.median(trans_res) > .02:
+        refined, corner_residual = refine_joint_board_pose(
+            transform(R, t), candidates, corners, intrinsics, T_R_C)
+        joint_rms = float(np.sqrt(np.mean(corner_residual**2)))
+        if np.median(rot_res) > 2.0 or np.median(trans_res) > .02 or joint_rms > 1.5:
             continue
-        poses[key] = transform(R, t)
+        poses[key] = refined
+        camera_counts[key] = len(candidates)
         diagnostics.append({"dataset": key[0], "set_index": key[1], "camera_count": len(candidates),
                             "T_rig_board": matrix_json(poses[key]),
-                            "rotation_residual_deg": stats(rot_res),
-                            "translation_residual_m": stats(trans_res),
-                            "camera_reprojection_rms_px": stats([x[2] for x in candidates])})
-    return poses, diagnostics, {"candidate_frames": len(grouped),
+                            "initial_pose_rotation_residual_deg": stats(rot_res),
+                            "initial_pose_translation_residual_m": stats(trans_res),
+                            "initial_camera_reprojection_rms_px": stats([x[3] for x in candidates]),
+                            "joint_reprojection_rms_px": joint_rms,
+                            "joint_corner_residual_px": stats(np.linalg.norm(corner_residual.reshape(-1, 2), axis=1))})
+    return poses, camera_counts, diagnostics, {"candidate_frames": len(grouped),
                                 "accepted_frames": len(poses),
                                 "rejected_frames": len(grouped) - len(poses)}
 
@@ -478,9 +559,11 @@ def handeye_once(slam_poses, board_poses, method=None, groups=None):
     return handeye_park_explicit(slam_poses, board_poses, groups)
 
 
-def solve_handeye(datasets, board_by_key):
+def solve_handeye(datasets, board_by_key, board_camera_counts, min_camera_count):
     samples = []
     for key, board in sorted(board_by_key.items()):
+        if board_camera_counts[key] < min_camera_count:
+            continue
         d, s = key; raw = manifest_slam_pose(datasets[d].manifest[s])
         if raw is not None: samples.append((d, raw, board))
     if hasattr(cv2, "calibrateHandEye"):
@@ -556,20 +639,31 @@ def serializable_intrinsic(value, T_R_C):
             "transform_to_rig_T_rig_camera": matrix_json(T_R_C)}
 
 
-def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_common=6):
+def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_common=6,
+          handeye_min_cameras=2):
     datasets, observations = load_inputs(dataset_paths, min_corners)
     corners = board_points(7, 5, square_length_m); size = (640, 640)
     by_camera = {c: sorted([o for (_,_,camera), o in observations.items() if camera == c], key=lambda o:o.key)
                  for c in range(CAMERA_COUNT)}
     intrinsics = {c: calibrate_camera(c, by_camera[c], corners, size) for c in range(CAMERA_COUNT)}
+    accepted_observations = {
+        key: obs for key, obs in observations.items()
+        if obs.key in intrinsics[obs.camera]["accepted_keys"]
+    }
     pairwise = []
     for a in range(CAMERA_COUNT):
         for b in range(a + 1, CAMERA_COUNT):
-            result = pair_extrinsic(a, b, observations, corners, intrinsics, size, min_common)
+            result = pair_extrinsic(a, b, accepted_observations, corners, intrinsics, size, min_common)
             if result: pairwise.append(result)
     T_R_C, closures = build_rig(pairwise)
-    board_poses, board_diag, board_quality = solve_board_poses(observations, corners, intrinsics, T_R_C)
-    samples, hypotheses, nominal, method_spread, scale_diagnostics = solve_handeye(datasets, board_poses)
+    board_poses, board_camera_counts, board_diag, board_quality = solve_board_poses(
+        accepted_observations, corners, intrinsics, T_R_C)
+    board_quality["camera_count_histogram"] = {
+        str(count): sum(value == count for value in board_camera_counts.values())
+        for count in range(1, CAMERA_COUNT + 1)
+    }
+    samples, hypotheses, nominal, method_spread, scale_diagnostics = solve_handeye(
+        datasets, board_poses, board_camera_counts, handeye_min_cameras)
     warnings = [f"camera {c}: {w}" for c,v in intrinsics.items() for w in v["warnings"]]
     translation_trusted = bool(
         nominal and nominal["translation_residual_m"]["p95"] < .05 and
@@ -584,6 +678,13 @@ def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_co
     for closure in closures:
         if closure["rotation_deg"] > .5 or closure["translation_m"] > .005:
             warnings.append(f"camera pair {closure['pair']} rig closure exceeds 0.5 deg or 5 mm")
+    serials = sorted({str(d.metadata["headset_serial"]) for d in datasets if d.metadata.get("headset_serial")})
+    if len(serials) > 1:
+        raise ValueError(f"datasets contain multiple headset serials: {serials}")
+    if not serials:
+        warnings.append("input datasets predate headset serial capture; output is not bound to a headset identity")
+    elif any(not d.metadata.get("headset_serial") for d in datasets):
+        warnings.append("some input datasets lack a headset serial and cannot be verified against the identified headset")
     slam_json = {
         "transform_convention": "T_A_B maps coordinates in B into A; recorded pose is the pre-correction T_slam_tracker sample and the nominal hypothesis reproduces runtime correction",
         "runtime_processing": {
@@ -593,6 +694,9 @@ def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_co
             "head_pose": "T_slam_head=T_slam_tracker*T_tracker_head; T_tracker_head translation=(0.000247,-0.000273,0.104826)m",
         },
         "sample_count": len(samples), "tested_hypothesis_count": len(hypotheses),
+        "minimum_board_cameras": handeye_min_cameras,
+        "available_board_pose_count": len(board_poses),
+        "excluded_board_pose_count": len(board_poses) - len(samples),
         "opencv_methods": sorted({x["method"] for x in hypotheses}), "method_spread": method_spread,
         "slam_translation_scale_test": scale_diagnostics,
         "opencv_calibrate_handeye_available": hasattr(cv2, "calibrateHandEye"),
@@ -613,10 +717,10 @@ def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_co
     pair_json = [{k:(matrix_json(v) if k.startswith("T_") else v) for k,v in e.items() if k != "frame_keys"} for e in pairwise]
     return {
         "schema_version": SCHEMA_VERSION,
-        "headset_serial": next((d.metadata.get("headset_serial") for d in datasets if d.metadata.get("headset_serial")), None),
+        "headset_serial": serials[0] if serials else None,
         "target": {"squares_x":7,"squares_y":5,"measured_square_length_m":square_length_m,
                    "marker_length_m":marker_length_m,"dictionary":"DICT_4X4_50"},
-        "datasets": [str(d.path) for d in datasets],
+        "datasets": [dataset_provenance(d) for d in datasets],
         "visible_cameras": {f"camera{c}": serializable_intrinsic(intrinsics[c], T_R_C[c]) for c in range(CAMERA_COUNT)},
         "rig": {"reference_camera":0,"pairwise":pair_json,"closure_residuals":closures,
                 "board_pose_frames":len(board_poses),"board_pose_quality":board_quality,
@@ -624,7 +728,12 @@ def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_co
         "slam": slam_json,
         "tracking_readout": {
             "mode3_to_mode12_visible": {"scale_x":.5,"scale_y":.5,"same_camera_order":True,"flip":False,"translation_px":[0,0],"status":"experimentally_exact"},
-            "mode12_tracking_to_mode4": {"scale_x":2.0,"scale_y":2.0,"same_camera_order":True,"status":"experimentally_exact"},
+            "mode12_tracking_to_mode4": {
+                "dimension_scale": [2.0, 2.0], "same_camera_order": True,
+                "dimension_and_order_status": "experimentally_established",
+                "pixel_center_transform": None,
+                "pixel_center_transform_status": "unresolved",
+                "note": "dimensions and ordering do not prove the exact sub-pixel mapping; a half-pixel sampling offset remains possible"},
             "mode12_visible_to_tracking": {"status":"estimated_unresolved","transform":None,
                 "note":"preliminary affine registration is bootstrap data, not runtime calibration"}},
         "quality": {"observation_counts":{f"camera{c}":len(by_camera[c]) for c in range(CAMERA_COUNT)},
