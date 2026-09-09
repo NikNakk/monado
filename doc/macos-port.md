@@ -121,11 +121,15 @@ Together they provide 520, 529, 116, and 156 strong views for cameras 0--3:
 ```
 
 The solver fits four fisheye models, performs one conservative MAD rejection
-pass capped at 10%, calibrates pairs after fisheye undistortion, builds a
-camera-0 rig graph, estimates multi-camera board poses, and tests explicit SLAM
-transform hypotheses. The versioned JSON retains per-view reprojection results,
-coverage, pairwise baselines, closure, board-pose residuals, and SLAM
-fixed-board and relative-motion residuals. Low RMS alone is insufficient:
+pass capped at 10%, calibrates pairs after fisheye undistortion, and builds a
+camera-0 rig graph. Per-camera PnP results only initialize a final six-parameter
+board pose which jointly minimizes every observed ChArUco corner across the
+fixed rig. Single-camera poses remain in the diagnostics, but hand-eye defaults
+to board poses constrained by at least two cameras. Intrinsically rejected
+views cannot re-enter stereo or board solving. The versioned JSON retains
+per-view reprojection results, coverage, pairwise baselines, closure, joint
+board-pose residuals, hashed input provenance, and SLAM fixed-board and
+relative-motion residuals. Low RMS alone is insufficient:
 coverage warnings, closure, baseline plausibility, and accepted/rejected counts
 must be reviewed together. Lengths are SI units except fields ending `_px` or
 `_deg`; `scripts/psvr2_camera_calibration.schema.json` describes the shape.
@@ -156,15 +160,28 @@ not residuals, as a complete hand-eye solve must absorb it. A full rigid
 orientation-only correction matters because position is already in remapped
 tracker axes.
 
-The remaining failure is capture-specific. Three captures have about 2.8--4.7
-mm median fixed-board translation residual. The first has about 86 mm and a
-smooth apparent fixed-board drift dominated by about 258 mm on one axis. A
+The remaining failure is capture-specific. With jointly refined, at-least-two-
+camera board poses, three captures have about 2.0--3.9 mm median fixed-board
+translation residual. The first has about 83 mm in the four-run solve and a
+smooth apparent fixed-board drift dominated by about 253 mm on one axis. On the
+original two captures alone, the corresponding combined and first-session
+medians are about 30 and 60 mm; this confirms that exact translation residuals
+are somewhat sensitive to camera coverage and rig construction even though the
+qualitative session diagnosis is stable. A
 0.6--1.4 SLAM scale sweep leaves it poor (best median about 76 mm at 0.75x),
 while every good capture selects exactly 1.0x. This rejects a global unit-scale,
 transform-direction, `T_imu_head`, or quaternion-convention explanation and
 identifies anomalous SLAM translation drift in the first capture. Rotation is
 trustworthy; translation remains conservatively untrusted because one complete
 session contradicts the other three. Runtime behavior remains unchanged.
+
+New visible captures record `headset_serial` from the USB descriptor. If that
+descriptor is unavailable, the recorder requires `--headset-serial`; the
+solver rejects multiple non-null serials and warns about legacy unbound input.
+For mode-12 tracking to mode-4, only the 2x dimensions and camera ordering are
+currently marked established. The calibration JSON deliberately leaves the
+pixel-centre transform unresolved because a half-pixel sampling offset or other
+sub-pixel readout mapping has not yet been measured.
 
 Set `PSVR2_CAMERA_BLOBS=1` on the `psvr2-camera` command to pass each of the
 four mode-4 L8 streams through Monado's existing IR blob detector on a separate
