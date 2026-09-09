@@ -267,10 +267,12 @@ class CameraJob:
 
 
 class Recorder:
-    def __init__(self, output_dir: Path, stride: int):
+    def __init__(self, output_dir: Path, stride: int, headset_serial: str, serial_source: str):
         self.output_dir = output_dir
         self.frames_dir = output_dir / "frames"
         self.stride = stride
+        self.headset_serial = headset_serial
+        self.serial_source = serial_source
         self.stop = threading.Event()
         self.slam = SlamStore()
         self.jobs: queue.Queue[CameraJob | None] = queue.Queue(maxsize=32)
@@ -325,8 +327,10 @@ class Recorder:
             ]
         )
         metadata = {
-            "schema_version": 3,
+            "schema_version": 4,
             "purpose": "psvr2_four_camera_visible_charuco_calibration",
+            "headset_serial": self.headset_serial,
+            "headset_serial_source": self.serial_source,
             "camera_mode": 3,
             "camera_count": 4,
             "camera_mapping": {
@@ -504,17 +508,32 @@ def main() -> int:
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("--duration", type=float, default=60.0, help="capture duration in seconds (default 60)")
     parser.add_argument("--stride", type=int, default=6, help="keep every Nth hardware sequence (default 6 ~=10 Hz)")
+    parser.add_argument("--headset-serial", help="Explicit headset serial if the USB descriptor is unavailable")
     args = parser.parse_args()
     if args.duration <= 0 or args.duration > 900:
         raise SystemExit("--duration must be >0 and <=900 seconds")
     if args.stride < 1 or args.stride > 120:
         raise SystemExit("--stride must be between 1 and 120")
 
-    recorder = Recorder(args.output_dir, args.stride)
-    recorder.setup_files()
     dev = usb.core.find(idVendor=PSVR2_VID, idProduct=PSVR2_PID)
     if dev is None:
         raise SystemExit("PS VR2 USB device not found")
+
+    headset_serial = args.headset_serial
+    serial_source = "command_line"
+    if not headset_serial:
+        try:
+            headset_serial = usb.util.get_string(dev, dev.iSerialNumber) if dev.iSerialNumber else None
+        except usb.core.USBError as exc:
+            raise SystemExit(
+                f"Could not read the headset USB serial ({exc}); pass --headset-serial explicitly"
+            ) from exc
+        serial_source = "usb_descriptor"
+    if not headset_serial or not headset_serial.strip():
+        raise SystemExit("Headset has no readable USB serial; pass --headset-serial explicitly")
+
+    recorder = Recorder(args.output_dir, args.stride, headset_serial.strip(), serial_source)
+    recorder.setup_files()
 
     claimed = []
     camera_thread = slam_thread = writer_thread = None
