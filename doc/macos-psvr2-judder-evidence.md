@@ -20,6 +20,12 @@ The second mechanism is now directly demonstrated by the drawable-slot experimen
 | Hypothesis / intervention | Evidence | Current status |
 | --- | --- | --- |
 | PSVR2 is not being driven as a direct display, so ordinary desktop presentation is the missing architectural step | The macOS target already drives the directly connected PS VR2 display and the persistent judder remains. Direct display does not remove `CAMetalLayer` / CoreAnimation from the current presentation path. | **Direct-display omission ruled out**; macOS presentation path still in scope |
+| The visible cadence is simply a gross 60 Hz compositor lock | A one-time pacer phase-sync defect was fixed and good runs subsequently reached approximately 120 Hz, but the head-motion judder remained. | **Gross 60 Hz lock ruled out as the continuing root cause** |
+| Increasing the drawable pool from 2 to 3 will solve the problem | Three-drawable testing did not materially improve the visual judder. | **Not sufficient**; drawable availability remains relevant for a different reason |
+| Concurrent / earlier drawable acquisition will hide the problem | Concurrent acquisition was subjectively worse rather than better. Later diagnostics therefore separated early prefetch, worker, and slot modes rather than assuming more concurrency was beneficial. | **Disfavoured** |
+| Clamping prediction horizon to 10 or 20 ms will remove the snap | 10/20 ms prediction-cap A/Bs produced little subjective change. | **Disfavoured as main cause/fix** |
+| ATW/distortion reprojection is itself the dominant cause | Disabling ATW did not produce the dramatic improvement expected if ATW were the primary source. | **Weakened, not absolutely excluded** |
+| Every new 60 Hz SLAM publication causes the visible backwards jump | Measured new-SLAM correction steps were only modestly larger (roughly 5–10%) than ordinary frame-to-frame changes, not the large discontinuity implied by the visual symptom. | **Unlikely as primary explanation** |
 | macOS receives materially older PSVR2 SLAM than Linux | 1000 Hz diagnostic: median SLAM interval 16.683 ms on both macOS and Ubuntu ARM64/Fusion; median first-seen latency ~22.95 ms macOS vs ~23.97–24.00 ms Linux/Fusion; p95 ~27.9 vs ~28.3 ms. | **Unlikely** |
 | Generic PSVR2 `xrt_device_get_tracked_pose()` prediction behaves differently or reverses on macOS | 200 Hz 0/+5/+10/+15/+20 ms sweep was quantitatively very similar on macOS and Linux/Fusion after accounting for movement speed. Backwards movement across increasing horizons was negligible. | **Unlikely** |
 | The Linux/Fusion comparison proves bare-metal Linux latency is identical | Linux was Ubuntu ARM64 in VMware Fusion on the same Mac with USB passthrough. It is an implementation reference, not a bare-metal latency benchmark. | **Not established**; retain this caveat |
@@ -68,7 +74,7 @@ Interpretation: this directly demonstrates a presentation-side starvation mechan
 
 ## What not to spend the next iteration on
 
-Unless new evidence appears, do not make another wholesale pose-predictor replacement the next experiment. In particular, do not return to the GAV predictor, generic velocity-EMA tuning, or the premise that macOS simply receives much older SLAM than Linux.
+Unless new evidence appears, do not make another wholesale pose-predictor replacement the next experiment. In particular, do not return to the GAV predictor, generic velocity-EMA tuning, prediction caps, increasing drawable count alone, or the premise that macOS simply receives much older SLAM than Linux.
 
 Likewise, do not treat the nonblocking drawable slot as a production solution: dropping rather than blocking was deliberately chosen to expose hidden back-pressure.
 
