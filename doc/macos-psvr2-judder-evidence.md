@@ -21,7 +21,7 @@ The second mechanism is now directly demonstrated by the drawable-slot experimen
 | --- | --- | --- |
 | PSVR2 is not being driven as a direct display, so ordinary desktop presentation is the missing architectural step | The macOS target already drives the directly connected PS VR2 display and the persistent judder remains. Direct display does not remove `CAMetalLayer` / CoreAnimation from the current presentation path. | **Direct-display omission ruled out**; macOS presentation path still in scope |
 | The visible cadence is simply a gross 60 Hz compositor lock | A one-time pacer phase-sync defect was fixed and good runs subsequently reached approximately 120 Hz, but the head-motion judder remained. | **Gross 60 Hz lock ruled out as the continuing root cause** |
-| Increasing the drawable pool from 2 to 3 will solve the problem | Three-drawable testing did not materially improve the visual judder. | **Not sufficient**; drawable availability remains relevant for a different reason |
+| Reducing the drawable pool from 3 to 2 will improve the experience by reducing buffering latency | Two drawables shortened measured CPU-to-display/presentation latency, but made the headset visually worse / more juddery. Three drawables added some buffering/latency but were visually more stable. | **Real latency-versus-stability trade-off**; changing pool depth alone does not solve the underlying presentation problem |
 | Concurrent / earlier drawable acquisition will hide the problem | Concurrent acquisition was subjectively worse rather than better. Later diagnostics therefore separated early prefetch, worker, and slot modes rather than assuming more concurrency was beneficial. | **Disfavoured** |
 | Clamping prediction horizon to 10 or 20 ms will remove the snap | 10/20 ms prediction-cap A/Bs produced little subjective change. | **Disfavoured as main cause/fix** |
 | ATW/distortion reprojection is itself the dominant cause | Disabling ATW did not produce the dramatic improvement expected if ATW were the primary source. | **Weakened, not absolutely excluded** |
@@ -72,9 +72,11 @@ Key measurements:
 
 Interpretation: this directly demonstrates a presentation-side starvation mechanism capable of producing whole-frame judder independently of small pose-prediction errors. It does **not** yet prove that eliminating drawable starvation will remove continuous motion instability, because the approximately one-refresh pose/output phase discrepancy remains unresolved.
 
+The earlier 2-versus-3 drawable A/B is consistent with this result: a two-drawable pool reduced latency but also reduced buffering headroom and was visually worse. Three drawables are therefore the safer current baseline while the underlying starvation/scheduling mechanism is investigated.
+
 ## What not to spend the next iteration on
 
-Unless new evidence appears, do not make another wholesale pose-predictor replacement the next experiment. In particular, do not return to the GAV predictor, generic velocity-EMA tuning, prediction caps, increasing drawable count alone, or the premise that macOS simply receives much older SLAM than Linux.
+Unless new evidence appears, do not make another wholesale pose-predictor replacement the next experiment. In particular, do not return to the GAV predictor, generic velocity-EMA tuning, prediction caps, changing drawable count alone, or the premise that macOS simply receives much older SLAM than Linux.
 
 Likewise, do not treat the nonblocking drawable slot as a production solution: dropping rather than blocking was deliberately chosen to expose hidden back-pressure.
 
