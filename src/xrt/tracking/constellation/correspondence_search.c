@@ -192,23 +192,26 @@ correspondence_search_project_pose(struct correspondence_search *cs,
 
 	// See if we need to make a gravity vector alignment check
 	if (mi->search_flags & CS_FLAG_MATCH_GRAVITY) {
-		struct xrt_quat pose_gravity_swing, pose_gravity_twist;
+		struct xrt_quat T_pose_cam_orientation, T_prior_cam_orientation;
+		struct xrt_vec3 pose_gravity, prior_gravity;
 
-		math_quat_decompose_swing_twist(&pose->orientation, &mi->gravity_vector, &pose_gravity_swing,
-		                                &pose_gravity_twist);
+		math_quat_invert(&pose->orientation, &T_pose_cam_orientation);
+		math_quat_invert(&mi->pose_prior.orientation, &T_prior_cam_orientation);
+		math_quat_rotate_vec3(&T_pose_cam_orientation, &mi->gravity_vector, &pose_gravity);
+		math_quat_rotate_vec3(&T_prior_cam_orientation, &mi->gravity_vector, &prior_gravity);
+		math_vec3_normalize(&pose_gravity);
+		math_vec3_normalize(&prior_gravity);
 
-		// Calculate the difference between the amount of gravity swing, ignoring axis
-		float pose_angle = fabsf(acosf(pose_gravity_swing.w)) - fabsf(acosf(mi->gravity_swing.w));
+		float gravity_dot = CLAMP(m_vec3_dot(pose_gravity, prior_gravity), -1.0f, 1.0f);
+		float pose_angle = acosf(gravity_dot);
 		if (pose_angle > mi->gravity_tolerance_rad) {
 			CS_FULL_DEBUG(
 			    cs,
-			    "model %d failed pose match - orientation was not within tolerance (error %f deg > %f "
-			    "deg) gravity vec %f %f %f pose %f %f %f %f swing %f %f %f %f prior swing %f %f %f %f",
+			    "model %d failed pose match - gravity direction was not within tolerance (error %f deg > %f "
+			    "deg) camera gravity %f %f %f pose gravity %f %f %f prior gravity %f %f %f",
 			    mi->id, RAD_TO_DEG(pose_angle), RAD_TO_DEG(mi->gravity_tolerance_rad), mi->gravity_vector.x,
-			    mi->gravity_vector.y, mi->gravity_vector.z, pose->orientation.x, pose->orientation.y,
-			    pose->orientation.z, pose->orientation.w, pose_gravity_swing.x, pose_gravity_swing.y,
-			    pose_gravity_swing.z, pose_gravity_swing.w, mi->gravity_swing.x, mi->gravity_swing.y,
-			    mi->gravity_swing.z, mi->gravity_swing.w);
+			    mi->gravity_vector.y, mi->gravity_vector.z, pose_gravity.x, pose_gravity.y, pose_gravity.z,
+			    prior_gravity.x, prior_gravity.y, prior_gravity.z);
 			return false;
 		}
 	}
@@ -667,7 +670,7 @@ check_led_match(struct correspondence_search *cs,
 
 /*
  * Select k constellation_led entries from the n provided in candidate_list into output_list, then call
- * check_led_match() with the result_list.
+ * check_led_match() with the result_list
  * */
 static void
 select_k_leds_from_n(struct correspondence_search *cs,
@@ -981,17 +984,12 @@ correspondence_search_find_one_pose(struct correspondence_search *cs,
 	}
 
 	if (search_flags & CS_FLAG_MATCH_GRAVITY) {
-		struct xrt_quat pose_gravity_twist;
-
-		// We need a pose prior to extract the gravity swing to match
-		assert((search_flags & CS_FLAG_HAVE_POSE_PRIOR) != 0);
 		assert(gravity_vector != NULL);
 
+		// Gravity matching only needs the prior orientation, not a valid prior position.
+		mi.pose_prior.orientation = pose->orientation;
 		mi.gravity_vector = *gravity_vector;
 		mi.gravity_tolerance_rad = gravity_tolerance_rad;
-
-		math_quat_decompose_swing_twist(&pose->orientation, gravity_vector, &mi.gravity_swing,
-		                                &pose_gravity_twist);
 	}
 
 	if (search_pose_for_model(cs, &mi) && (mi.match_flags & POSE_MATCH_GOOD)) {

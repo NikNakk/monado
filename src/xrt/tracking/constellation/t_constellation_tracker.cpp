@@ -441,6 +441,8 @@ Camera::processSampleSlow(CameraSample &sample)
 			}
 
 			xrt_pose Tcv_cam_device = XRT_POSE_IDENTITY;
+			bool have_orientation_prior = false;
+			bool orientation_prior_from_tracking_source = false;
 			if (device_state->Txr_world_device_prior.has_value() && Txr_world_cam.has_value()) {
 				xrt_pose Txr_cam_world;
 				math_pose_invert(&Txr_world_cam.value(), &Txr_cam_world);
@@ -452,28 +454,56 @@ Camera::processSampleSlow(CameraSample &sample)
 				math_pose_convert_from_opencv(&Txr_cam_device, &Tcv_cam_device);
 
 				search_flags = (correspondence_search_flags)(search_flags | CS_FLAG_HAVE_POSE_PRIOR);
+				have_orientation_prior = true;
+			} else if (Txr_world_cam.has_value() && device->params.tracking_source != nullptr) {
+				// Bootstrap from an orientation-only tracking source (for example a controller IMU) even before
+				// optical position exists. Put the device at the camera position solely so the pose transform gives
+				// us the correct camera-relative orientation; CS_FLAG_HAVE_POSE_PRIOR intentionally remains unset.
+				xrt_space_relation orientation_relation = XRT_SPACE_RELATION_ZERO;
+				t_constellation_tracker_tracking_source_get_tracked_pose(
+				    device->params.tracking_source, sample.timestamp_ns, &orientation_relation);
+				const xrt_space_relation_flags required_orientation_flags =
+				    (xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+				                               XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+				if ((orientation_relation.relation_flags & required_orientation_flags) == required_orientation_flags) {
+					xrt_pose Txr_world_device_orientation_only = XRT_POSE_IDENTITY;
+					Txr_world_device_orientation_only.orientation = orientation_relation.pose.orientation;
+					Txr_world_device_orientation_only.position = Txr_world_cam->position;
+
+					xrt_pose Txr_cam_world;
+					math_pose_invert(&Txr_world_cam.value(), &Txr_cam_world);
+					xrt_pose Txr_cam_device_orientation_only;
+					math_pose_transform(&Txr_cam_world, &Txr_world_device_orientation_only,
+					                    &Txr_cam_device_orientation_only);
+					math_pose_convert_from_opencv(&Txr_cam_device_orientation_only, &Tcv_cam_device);
+
+					have_orientation_prior = true;
+					orientation_prior_from_tracking_source = true;
+				}
 			}
 
 			// Arbitrary threshold to prevent trusting a gravity vector if the device itself isn't confident
-			// in it's own gravity.
+			// in it's own gravity. A tracked orientation-only source is already declaring confidence, and uses
+			// the existing generic 30-degree rotational prior as its bootstrap gravity tolerance.
 			const float gravity_error_threshold_deg = 25.f;
+			float gravity_tolerance_rad = device->gravity_error_rad;
+			bool gravity_prior_confident = device->gravity_error_rad < DEG_TO_RAD(gravity_error_threshold_deg);
+			if (orientation_prior_from_tracking_source) {
+				gravity_tolerance_rad = MIN_ROT_ERROR;
+				gravity_prior_confident = true;
+			}
 
 			xrt_vec3 cv_camera_gravity_vector = {0.0, 1.0, 0.0};
-			if ((search_flags & CS_FLAG_HAVE_POSE_PRIOR) != 0 &&
-			    device->gravity_error_rad < DEG_TO_RAD(gravity_error_threshold_deg)) {
-				// If we have a pose for the camera and we have a prior pose
-				// (required by correspondence for search gravity matching)
-				if (Txr_world_cam.has_value()) {
-					xrt_pose Tcv_world_cam;
-					math_pose_convert_from_opencv(&Txr_world_cam.value(), &Tcv_world_cam);
+			if (have_orientation_prior && gravity_prior_confident && Txr_world_cam.has_value()) {
+				xrt_pose Tcv_world_cam;
+				math_pose_convert_from_opencv(&Txr_world_cam.value(), &Tcv_world_cam);
 
-					// Acquire the camera's gravity vector under the processing lock
-					get_pose_gravity_vector(Tcv_world_cam, cv_camera_gravity_vector);
+				// Acquire the camera's gravity vector under the processing lock
+				get_pose_gravity_vector(Tcv_world_cam, cv_camera_gravity_vector);
 
-					// Add in to check gravity
-					search_flags =
-					    (correspondence_search_flags)(search_flags | CS_FLAG_MATCH_GRAVITY);
-				}
+				// Add in to check gravity. This only consumes Tcv_cam_device.orientation, so an optical
+				// position prior is not required.
+				search_flags = (correspondence_search_flags)(search_flags | CS_FLAG_MATCH_GRAVITY);
 			}
 
 			pose_metrics score;
@@ -485,7 +515,7 @@ Camera::processSampleSlow(CameraSample &sample)
 			    &device->prior_pos_error,                          //
 			    &device->prior_rot_error,                          //
 			    &cv_camera_gravity_vector,                         //
-			    device->gravity_error_rad,                         //
+			    gravity_tolerance_rad,                             //
 			    &score);                                           //
 			if (found_pose) {
 				this->pushPose(sample,         //
@@ -1082,7 +1112,6 @@ constellation_tracker_camera_fast_thread(void *ptr)
 				         (void *)camera);
 				camera->deferSampleToSlowThread(*sample);
 			}
-		}
 
 		os_thread_helper_lock(&camera->fast_processing_thread);
 	}
@@ -1154,7 +1183,6 @@ constellation_tracker_node_break_apart(xrt_frame_node *node)
 			if (camera->slow_processing_thread.initialized) {
 				os_thread_helper_stop_and_wait(&camera->slow_processing_thread);
 			}
-
 			if (camera->fast_processing_thread.initialized) {
 				os_thread_helper_stop_and_wait(&camera->fast_processing_thread);
 			}
