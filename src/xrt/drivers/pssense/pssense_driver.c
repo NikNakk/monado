@@ -1418,6 +1418,15 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	if (sample->camera_index < PSSENSE_CONSTELLATION_CAMERA_COUNT) {
 		pssense->tracking.camera_candidate_count[sample->camera_index]++;
 	}
+	PSSENSE_INFO(pssense,
+	             "CONSTELLATION_CANDIDATE side=%c ts=%" PRIi64
+	             " cam=%zu pos=(%.6f,%.6f,%.6f) quat=(%.6f,%.6f,%.6f,%.6f) matched=%u visible=%u reproj=%.3f "
+	             "brightness=%.3f",
+	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns, sample->camera_index,
+	             sample->pose.position.x, sample->pose.position.y, sample->pose.position.z,
+	             sample->pose.orientation.x, sample->pose.orientation.y, sample->pose.orientation.z,
+	             sample->pose.orientation.w, sample->metrics.matched_blob_count, sample->metrics.visible_led_count,
+	             sample->metrics.reprojection_error, sample->average_brightness);
 	if (sample->camera_index >= PSSENSE_CONSTELLATION_CAMERA_COUNT || sample->metrics.matched_blob_count < 3 ||
 	    !isfinite(sample->metrics.reprojection_error) || sample->metrics.reprojection_error > 5.0) {
 		pssense->tracking.disagreement_count++;
@@ -1484,6 +1493,35 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 		if (present_count >= 2 && !group->disagreement_recorded) {
 			group->disagreement_recorded = true;
 			pssense->tracking.disagreement_count++;
+			for (uint32_t camera_a = 0; camera_a < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera_a++) {
+				if (!group->present[camera_a]) {
+					continue;
+				}
+				for (uint32_t camera_b = camera_a + 1; camera_b < PSSENSE_CONSTELLATION_CAMERA_COUNT;
+				     camera_b++) {
+					if (!group->present[camera_b]) {
+						continue;
+					}
+					struct t_constellation_tracker_sample *candidate_a = &group->samples[camera_a];
+					struct t_constellation_tracker_sample *candidate_b = &group->samples[camera_b];
+					float dx = candidate_a->pose.position.x - candidate_b->pose.position.x;
+					float dy = candidate_a->pose.position.y - candidate_b->pose.position.y;
+					float dz = candidate_a->pose.position.z - candidate_b->pose.position.z;
+					float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+					float dot = fabsf(candidate_a->pose.orientation.x * candidate_b->pose.orientation.x +
+					                  candidate_a->pose.orientation.y * candidate_b->pose.orientation.y +
+					                  candidate_a->pose.orientation.z * candidate_b->pose.orientation.z +
+					                  candidate_a->pose.orientation.w * candidate_b->pose.orientation.w);
+					float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
+					PSSENSE_INFO(pssense,
+					             "CONSTELLATION_PAIR_REJECT side=%c ts=%" PRIi64
+					             " cams=%u/%u dt_us=%.1f pos_delta_mm=%.1f orientation_delta_deg=%.1f",
+					             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', group->timestamp_ns, camera_a,
+					             camera_b,
+					             (double)llabs(candidate_a->timestamp_ns - candidate_b->timestamp_ns) / 1000.0,
+					             position_delta * 1000.0f, orientation_delta * 180.0f / (float)M_PI);
+				}
+			}
 			PSSENSE_INFO(pssense,
 			             "Rejecting synchronized constellation candidates at %" PRIi64
 			             ": %u cameras but no pair agrees within %.0f mm / %.0f deg",
@@ -1776,7 +1814,7 @@ pssense_set_output(struct xrt_device *xdev, enum xrt_output_name name, const str
 	}
 
 	if (send_trigger_feedback && trigger_feedback_mode != pssense->output.trigger_feedback_mode) {
-		pssense->output.send_trigger_feedback = true;
+		pssense->output.send_vibration = true;
 		pssense->output.trigger_feedback_mode = trigger_feedback_mode;
 	}
 	os_thread_helper_unlock(&pssense->controller_thread);
@@ -1992,7 +2030,6 @@ pssense_create(struct xrt_prober *xp,
 	SET_INPUT(TRIGGER_TOUCH);
 	SET_INPUT(TRIGGER_VALUE);
 	SET_INPUT(TRIGGER_PROXIMITY);
-	SET_INPUT(TRIGGER_PROXIMITY_FLOAT);
 	SET_INPUT(THUMBSTICK);
 	SET_INPUT(THUMBSTICK_CLICK);
 	SET_INPUT(THUMBSTICK_TOUCH);
