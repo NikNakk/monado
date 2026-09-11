@@ -14,6 +14,7 @@ on:
       - scripts/psvr2_calibration_assess.py
       - tests/test_psvr2_calibration_solver.py
       - tests/test_psvr2_camera_mode_survey.py
+      - tests/test_psvr2_cross_mode_register.py
       - scripts/psvr2_camera_mode_survey.py
       - scripts/psvr2_cross_mode_register.py
       - scripts/psvr2_visible_calibration_record.py
@@ -89,6 +90,7 @@ jobs:
           python3 -m unittest
           tests/test_psvr2_calibration_solver.py
           tests/test_psvr2_camera_mode_survey.py
+          tests/test_psvr2_cross_mode_register.py
 
       - name: Upload build log
         if: always()

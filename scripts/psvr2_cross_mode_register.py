@@ -4,7 +4,9 @@
 The preferred input is a stationary --sequence 3,12,3 --repeat N capture from
 psvr2_camera_mode_survey.py. Mode-3 819456-byte packets are decoded from their
 raw .bin files as 1280x640 side-by-side L8: the older contiguous-plane decode
-is intentionally not used.
+is intentionally not used. Stationary 12,4,12 Sense LED captures may be pooled
+with --additional-capture to test the tracking readouts' exact pixel-centre
+mapping.
 """
 
 from __future__ import annotations
@@ -141,6 +143,15 @@ def mode12_visit(root: Path, visit: int, camera_set: int, example: int) -> dict[
         if path.exists():
             result[plane] = read_gray(path)
     return result
+
+
+MODE4_CAMERA_PLANES = {0: (4, 0), 1: (4, 1), 2: (5, 0), 3: (5, 1)}
+
+
+def mode4_camera(root: Path, visit: int, example: int, camera: int) -> np.ndarray | None:
+    camera_set, plane = MODE4_CAMERA_PLANES[camera]
+    path = root / f"visit-{visit:02d}-mode-04-size-520448-set-{camera_set}-example-{example}-plane{plane}.pgm"
+    return read_gray(path) if path.exists() else None
 
 
 def available_examples(root: Path, visit: int, mode: int, camera_set: int | None = None) -> list[int]:
@@ -287,6 +298,170 @@ def affine_inliers(src_points: np.ndarray, dst_points: np.ndarray) -> tuple[int,
     return int(mask.sum()), matrix, mask
 
 
+def blinking_centroids(images: list[np.ndarray], min_area: int, max_area: int) -> np.ndarray:
+    """Find compact sources which change intensity during a stationary LED capture."""
+    if len(images) < 2:
+        return np.empty((0, 2), np.float32)
+    stack = np.stack(images)
+    intensity_range = stack.max(axis=0).astype(np.int16) - stack.min(axis=0).astype(np.int16)
+    count, _, stats, centroids = cv2.connectedComponentsWithStats((intensity_range >= 80).astype(np.uint8), 8)
+    return np.float32(
+        [centroids[i] for i in range(1, count) if min_area <= int(stats[i, cv2.CC_STAT_AREA]) <= max_area]
+    )
+
+
+def match_scaled_centroids(
+    mode12_points: np.ndarray,
+    mode4_points: np.ndarray,
+    offset_px: np.ndarray | tuple[float, float] = (0.5, 0.5),
+    max_error_px: float = 2.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Match unique LED blobs near a proposed 2x transform."""
+    offset = np.asarray(offset_px, dtype=np.float32)
+    candidates = []
+    for source_index, source in enumerate(mode12_points):
+        expected = 2.0 * source + offset
+        for target_index, target in enumerate(mode4_points):
+            error = float(np.linalg.norm(target - expected))
+            if error < max_error_px:
+                candidates.append((error, source_index, target_index))
+
+    used_sources = set()
+    used_targets = set()
+    pairs = []
+    for _, source_index, target_index in sorted(candidates):
+        if source_index in used_sources or target_index in used_targets:
+            continue
+        used_sources.add(source_index)
+        used_targets.add(target_index)
+        pairs.append((mode12_points[source_index], mode4_points[target_index]))
+
+    if not pairs:
+        empty = np.empty((0, 2), np.float32)
+        return empty, empty.copy()
+    return np.float32([pair[0] for pair in pairs]), np.float32([pair[1] for pair in pairs])
+
+
+def estimate_scaled_centroid_matches(
+    mode12_points: np.ndarray, mode4_points: np.ndarray, max_offset_px: float = 8.0, max_error_px: float = 2.0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Estimate translation and correspondences without assuming a pixel-centre offset."""
+    best = None
+    for source in mode12_points:
+        for target in mode4_points:
+            offset = target - 2.0 * source
+            if float(np.max(np.abs(offset))) > max_offset_px:
+                continue
+            matched_source, matched_target = match_scaled_centroids(
+                mode12_points, mode4_points, offset_px=offset, max_error_px=max_error_px
+            )
+            if not len(matched_source):
+                continue
+            errors = np.linalg.norm(matched_target - (2.0 * matched_source + offset), axis=1)
+            score = (len(matched_source), -float(np.mean(errors)))
+            if best is None or score > best[0]:
+                best = (score, matched_source, matched_target, offset)
+
+    if best is None:
+        empty = np.empty((0, 2), np.float32)
+        return empty, empty.copy(), None
+    return best[1], best[2], best[3]
+
+
+def analyze_mode12_tracking_to_mode4(captures: list[tuple[Path, dict]]) -> dict:
+    per_camera = []
+    total_matches = 0
+    supported = True
+    standard_matrix = [[2.0, 0.0, 0.5], [0.0, 2.0, 0.5], [0.0, 0.0, 1.0]]
+
+    for camera in range(4):
+        all_source = []
+        all_target = []
+        capture_counts = []
+        for root, survey in captures:
+            plan = survey.get("capture_plan", [])
+            mode12_images = []
+            mode4_images = []
+            for visit, mode in enumerate(plan):
+                if mode == 12:
+                    for example in available_examples(root, visit, 12, 9):
+                        images = mode12_visit(root, visit, 9, example)
+                        if camera in images:
+                            mode12_images.append(images[camera])
+                elif mode == 4:
+                    for example in available_examples(root, visit, 4):
+                        image = mode4_camera(root, visit, example, camera)
+                        if image is not None:
+                            mode4_images.append(image)
+
+            source_points = blinking_centroids(mode12_images, 2, 100)
+            target_points = blinking_centroids(mode4_images, 4, 400)
+            matched_source, matched_target, estimated_offset = estimate_scaled_centroid_matches(
+                source_points, target_points
+            )
+            capture_counts.append(
+                {
+                    "source": str(root),
+                    "mode12_blobs": len(source_points),
+                    "mode4_blobs": len(target_points),
+                    "matched_blobs": len(matched_source),
+                    "independently_estimated_offset_px": None
+                    if estimated_offset is None
+                    else estimated_offset.tolist(),
+                }
+            )
+            if len(matched_source):
+                all_source.append(matched_source)
+                all_target.append(matched_target)
+
+        if not all_source:
+            supported = False
+            per_camera.append({"camera": camera, "matched_blobs": 0, "captures": capture_counts})
+            continue
+
+        source = np.vstack(all_source)
+        target = np.vstack(all_target)
+        offsets = target - 2.0 * source
+        standard_errors = np.linalg.norm(offsets - 0.5, axis=1)
+        inliers, affine, mask = affine_inliers(source, target)
+        camera_supported = (
+            len(source) >= 15
+            and float(np.percentile(standard_errors, 95)) <= 1.0
+            and affine is not None
+            and abs(float(affine[0, 0]) - 2.0) <= 0.01
+            and abs(float(affine[1, 1]) - 2.0) <= 0.01
+            and abs(float(affine[0, 1])) <= 0.01
+            and abs(float(affine[1, 0])) <= 0.01
+        )
+        supported = supported and camera_supported
+        total_matches += len(source)
+        per_camera.append(
+            {
+                "camera": camera,
+                "matched_blobs": len(source),
+                "ransac_inliers": inliers,
+                "observed_offset_median_px": np.median(offsets, axis=0).tolist(),
+                "observed_offset_p05_px": np.percentile(offsets, 5, axis=0).tolist(),
+                "observed_offset_p95_px": np.percentile(offsets, 95, axis=0).tolist(),
+                "standard_model_error_median_px": float(np.median(standard_errors)),
+                "standard_model_error_p95_px": float(np.percentile(standard_errors, 95)),
+                "fitted_affine": None if affine is None else affine.tolist(),
+                "standard_model_supported": camera_supported,
+                "captures": capture_counts,
+            }
+        )
+
+    return {
+        "same_camera_order": True,
+        "dimension_scale": [2.0, 2.0],
+        "pixel_center_transform_mode12_to_mode4": standard_matrix if supported else None,
+        "status": "experimentally_established" if supported else "insufficient_evidence",
+        "matched_blinking_led_blobs": total_matches,
+        "per_camera": per_camera,
+        "note": "Pixel coordinates address pixel centres; the standard 2x transform is (u4,v4)=2*(u12,v12)+(0.5,0.5).",
+    }
+
+
 def analyze_mode12_bridge(root: Path, survey: dict) -> dict:
     plan = survey.get("capture_plan", [])
     visits = [i for i, mode in enumerate(plan) if mode == 12]
@@ -369,18 +544,27 @@ def analyze_mode12_bridge(root: Path, survey: dict) -> dict:
     }
 
 
-def analyze_burst(root: Path, survey: dict) -> dict:
+def analyze_burst(root: Path, survey: dict, additional_captures: list[tuple[Path, dict]] | None = None) -> dict:
+    captures = [(root, survey), *(additional_captures or [])]
     return {
-        "format": "psvr2-cross-mode-registration-v2",
+        "format": "psvr2-cross-mode-registration-v3",
         "source": str(root),
+        "sources": [str(capture_root) for capture_root, _ in captures],
         "visible_mode3_to_mode12": analyze_visible_burst(root, survey),
         "mode12_visible_to_tracking": analyze_mode12_bridge(root, survey),
+        "mode12_tracking_to_mode4": analyze_mode12_tracking_to_mode4(captures),
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("capture_dir", help="Stationary camera survey/burst directory")
+    parser.add_argument("capture_dir", help="Primary stationary camera survey/burst directory")
+    parser.add_argument(
+        "--additional-capture",
+        action="append",
+        default=[],
+        help="additional stationary mode-12/mode-4 capture; may be repeated to pool LED positions",
+    )
     parser.add_argument("--output", default="psvr2-cross-mode-registration.json")
     args = parser.parse_args()
 
@@ -390,9 +574,17 @@ def main() -> None:
         raise SystemExit(f"Missing {survey_path}")
     survey = json.loads(survey_path.read_text())
     if not survey.get("sequence_capture"):
-        raise SystemExit("This version expects a v2/v3 stationary --sequence capture (recommended: 3,12,3 --repeat 3).")
+        raise SystemExit("This version expects a stationary --sequence capture (for example, 3,12,3 or 12,4,12).")
 
-    report = analyze_burst(root, survey)
+    additional_captures = []
+    for capture_dir in args.additional_capture:
+        capture_root = Path(capture_dir)
+        capture_survey_path = capture_root / "survey.json"
+        if not capture_survey_path.exists():
+            raise SystemExit(f"Missing {capture_survey_path}")
+        additional_captures.append((capture_root, json.loads(capture_survey_path.read_text())))
+
+    report = analyze_burst(root, survey, additional_captures)
     Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 
