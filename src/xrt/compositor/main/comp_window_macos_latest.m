@@ -105,9 +105,16 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 			macos_release_prefetched_drawable(cwm, "present_mismatch_release");
 		}
 
+		uint64_t drawable_trace_begin_ns = os_monotonic_get_ns();
+		/*
+		 * Trace before acquisition, but start the measured nextDrawable interval
+		 * only after the trace write. This prevents stdio/flush latency from being
+		 * mistaken for CAMetalLayer drawable starvation and from triggering stale
+		 * substitution.
+		 */
+		macos_trace_present_worker(cwm, "drawable_trace_begin", &active_job, drawable_trace_begin_ns, 0,
+		                           worker_start_ns, 0, 0, 0, 0, true);
 		next_drawable_begin_ns = os_monotonic_get_ns();
-		macos_trace_present_worker(cwm, "drawable_begin", &active_job, next_drawable_begin_ns, 0,
-		                           worker_start_ns, next_drawable_begin_ns, 0, 0, 0, true);
 		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
 		after_drawable_ns = os_monotonic_get_ns();
 		macos_trace_present_worker(cwm, "drawable_end", &active_job, after_drawable_ns, 0,

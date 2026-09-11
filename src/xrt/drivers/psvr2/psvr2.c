@@ -74,6 +74,7 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS"
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_driver_timing_trace, "PSVR2_DRIVER_TIMING_TRACE", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_filtered_linear_prediction, "PSVR2_FILTERED_LINEAR_PREDICTION", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_ALPHA", 0.25f)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", false)
@@ -169,7 +170,8 @@ psvr2_timing_trace_open_file(const char *suffix, const char *header)
 static void
 psvr2_timing_trace_open(void)
 {
-	if (g_psvr2_timing_trace.attempted || !debug_get_bool_option_psvr2_timing_trace()) {
+	if (g_psvr2_timing_trace.attempted || !debug_get_bool_option_psvr2_timing_trace() ||
+	    !debug_get_bool_option_psvr2_driver_timing_trace()) {
 		return;
 	}
 	g_psvr2_timing_trace.attempted = true;
