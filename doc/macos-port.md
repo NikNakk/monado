@@ -137,6 +137,7 @@ Together they provide 520, 529, 116, and 156 strong views for cameras 0--3:
   /tmp/psvr2-charuco /tmp/psvr2-charuco-top \
   /tmp/psvr2-charuco-2 /tmp/psvr2-charuco-3 \
   --square-length-mm 40.00 \
+  --cross-mode-registration /tmp/psvr2-crossmode-registration.json \
   --output /tmp/psvr2-camera-calibration.json
 ```
 
@@ -204,8 +205,41 @@ captures at different controller/headset poses supplied 126 uniquely matched
 blinking LED centroids across the four cameras. The measured relationship is
 `(u4, v4) = 2 * (u12, v12) + (0.5, 0.5)`; per-camera median residual was
 0.31--0.40 mode-4 pixels and p95 was 0.64--0.92 pixels. The registration tool
-can pool these captures with repeated `--additional-capture` options. This does
-not resolve the separate mode-12 visible-to-tracking mapping.
+can pool these captures with repeated `--additional-capture` options.
+
+The visible-to-tracking estimator now pools independent stationary mode-12
+viewpoints, records RANSAC inlier hulls, and performs leave-one-capture-out
+checks. Use `--bridge-capture` for ordinary illuminated captures which should
+contribute cross-spectral scene features but not LED evidence for the exact
+mode-12-to-mode-4 mapping. For example:
+
+```sh
+.venv/bin/python scripts/psvr2_cross_mode_register.py \
+  /tmp/psvr2-crossmode-burst \
+  --bridge-capture /tmp/psvr2-crossmode-12-4-pose-03 \
+  --bridge-capture /tmp/psvr2-crossmode-12-4-pose-04 \
+  --bridge-capture /tmp/psvr2-crossmode-12-4-pose-05 \
+  --additional-capture /tmp/psvr2-crossmode-12-4-sense-test \
+  --additional-capture /tmp/psvr2-crossmode-12-4-sense-pose-02 \
+  --additional-capture /tmp/psvr2-crossmode-12-4-sense-pose-03 \
+  --additional-capture /tmp/psvr2-crossmode-12-4-sense-pose-04 \
+  --additional-capture /tmp/psvr2-crossmode-12-4-sense-pose-05 \
+  --output /tmp/psvr2-crossmode-registration.json
+```
+
+Across those nine viewpoints, cameras 0--3 have 90, 94, 66, and 38 affine
+RANSAC inliers. In-fit p95 error is about 1.21--1.39 tracking pixels, but the
+camera-3 leave-one-capture-out p95 rises to about 8.75 pixels. More
+importantly, the inlier convex hulls cover only about 14--16% of each visible
+image and 6--7% of each tracking image. Direct inspection also shows the
+tracking readout seeing the controller outside the corresponding visible
+frame. The v4 report therefore labels these matrices `estimated_overlap_only`
+and `runtime_usable: false`. The calibration JSON can embed the complete report
+for provenance, but deliberately leaves mode-4 intrinsics unresolved: applying
+the affine outside its measured hull or composing it with the visible fisheye
+model would fabricate calibration for the tracking-only field of view. A
+direct IR calibration, for example a bundle adjustment using identified Sense
+LEDs and their known 3D model, is still required before constellation tracking.
 
 Set `PSVR2_CAMERA_BLOBS=1` on the `psvr2-camera` command to pass each of the
 four mode-4 L8 streams through Monado's existing IR blob detector on a separate
