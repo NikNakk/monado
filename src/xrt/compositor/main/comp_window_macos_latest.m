@@ -28,6 +28,27 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_display_sync, "XRT_MACOS_DISABLE_DISPLA
 
 static FILE *macos_stale_substitute_trace = NULL;
 
+static bool
+comp_window_macos_init_display_sync_diagnostic(struct comp_target *ct)
+{
+	bool ret = comp_window_macos_init(ct);
+	if (!ret) {
+		return false;
+	}
+	if (debug_get_bool_option_macos_disable_display_sync()) {
+		struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+		BOOL previous_display_sync_enabled = [cwm->metal_layer displaySyncEnabled];
+		[cwm->metal_layer setDisplaySyncEnabled:NO];
+		BOOL current_display_sync_enabled = [cwm->metal_layer displaySyncEnabled];
+		COMP_INFO(ct->c,
+		          "macOS diagnostic: CAMetalLayer.displaySyncEnabled changed after layer init: was %s; now %s; "
+		          "presentation remains otherwise unchanged",
+		          previous_display_sync_enabled ? "enabled" : "disabled",
+		          current_display_sync_enabled ? "enabled" : "disabled");
+	}
+	return true;
+}
+
 static void
 macos_trace_stale_substitute(uint64_t event_ns,
                              uint64_t drawable_wait_ns,
@@ -538,18 +559,12 @@ comp_window_macos_create(struct comp_compositor *c)
 		return NULL;
 	}
 
+	/* The CAMetalLayer is created by init_pre_vulkan, so apply display-sync diagnostics there. */
+	ct->init_pre_vulkan = comp_window_macos_init_display_sync_diagnostic;
+
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	bool want_stale_substitute = debug_get_bool_option_macos_present_stale_substitute();
 	bool want_immediate_present = debug_get_bool_option_macos_present_immediate();
-	bool want_disable_display_sync = debug_get_bool_option_macos_disable_display_sync();
-	if (want_disable_display_sync) {
-		BOOL previous_display_sync_enabled = cwm->metal_layer.displaySyncEnabled;
-		cwm->metal_layer.displaySyncEnabled = NO;
-		COMP_INFO(c,
-		          "macOS diagnostic: CAMetalLayer.displaySyncEnabled disabled (was %s); presentation remains "
-		          "otherwise unchanged",
-		          previous_display_sync_enabled ? "enabled" : "disabled");
-	}
 	if (want_stale_substitute && cwm->async_present && cwm->present_worker_enabled) {
 		ct->present = comp_window_macos_present_stale;
 		ct->destroy = comp_window_macos_destroy_stale;
