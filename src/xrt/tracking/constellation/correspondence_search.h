@@ -103,6 +103,32 @@ struct cs_model_info
 		uint32_t best_failed_visible_leds;
 		float best_failed_reprojection_error;
 	} gravity_diag;
+
+	/* Detailed diagnostics for hypotheses which pass the active gravity tolerance. */
+	struct
+	{
+		bool enabled;
+		uint32_t evaluated;
+		uint32_t matched_lt3;
+		uint32_t matched_lt5;
+		uint32_t visible_lt5;
+		uint32_t reprojection_fail;
+		uint32_t coverage_fail;
+		uint32_t shape_ok;
+		uint32_t shape_reprojection_ok;
+		uint32_t shape_reprojection_coverage_ok;
+		uint32_t prior_match;
+		uint32_t good;
+
+		bool have_closest_gravity_pose;
+		float closest_gravity_error_rad;
+		struct xrt_pose closest_gravity_pose;
+
+		bool have_best_failed_pose;
+		float best_failed_gravity_error_rad;
+		struct xrt_pose best_failed_pose;
+		struct pose_metrics best_failed_score;
+	} score_diag;
 };
 
 struct correspondence_search

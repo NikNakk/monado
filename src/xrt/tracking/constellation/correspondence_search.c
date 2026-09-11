@@ -25,6 +25,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdarg.h>
 #include <assert.h>
 #include <math.h>
 
@@ -74,6 +75,7 @@
 #define CS_ERROR(cs, ...) U_LOG_IFL_E((*((cs)->ct_log_level)), __VA_ARGS__)
 
 DEBUG_GET_ONCE_BOOL_OPTION(correspondence_search_gravity_diag, "CONSTELLATION_TRACKER_GRAVITY_DIAG", false)
+DEBUG_GET_ONCE_BOOL_OPTION(correspondence_search_score_diag, "CONSTELLATION_TRACKER_SCORE_DIAG", false)
 
 // @note These should never be upstreamed while set to 1, these are purely for very verbose debugging.
 #define DUMP_SCENE 0
@@ -174,6 +176,183 @@ dump_pose(struct correspondence_search *cs,
 #endif
 }
 
+static const char *
+score_diag_phase_name(enum correspondence_search_flags search_flags)
+{
+	if ((search_flags & CS_FLAG_SHALLOW_SEARCH) != 0 && (search_flags & CS_FLAG_DEEP_SEARCH) == 0) {
+		return "shallow";
+	}
+	if ((search_flags & CS_FLAG_DEEP_SEARCH) != 0 && (search_flags & CS_FLAG_SHALLOW_SEARCH) == 0) {
+		return "deep";
+	}
+	return "full";
+}
+
+static bool
+score_diag_coverage_ok(const struct pose_metrics *score)
+{
+	return score->unmatched_blobs * 4 <= score->matched_blobs ||
+	       2 * score->visible_leds <= 3 * score->matched_blobs;
+}
+
+static double
+score_diag_error_per_match(const struct pose_metrics *score)
+{
+	return score->matched_blobs > 0 ? score->reprojection_error / (double)score->matched_blobs : INFINITY;
+}
+
+static void
+score_diag_classify(struct cs_model_info *mi, const struct pose_metrics *score)
+{
+	mi->score_diag.evaluated++;
+
+	if (score->matched_blobs < 3) {
+		mi->score_diag.matched_lt3++;
+	}
+	if (score->matched_blobs < 5) {
+		mi->score_diag.matched_lt5++;
+	}
+	if (score->visible_leds < 5) {
+		mi->score_diag.visible_lt5++;
+	}
+
+	bool prior_match = POSE_HAS_FLAGS(score, POSE_MATCH_POSITION | POSE_MATCH_ORIENT);
+	bool coverage_ok = score_diag_coverage_ok(score);
+	double error_per_match = score_diag_error_per_match(score);
+	double reprojection_limit = prior_match ? 2.0 : 3.0;
+
+	if (prior_match) {
+		mi->score_diag.prior_match++;
+	}
+	if (!(error_per_match < reprojection_limit)) {
+		mi->score_diag.reprojection_fail++;
+	}
+	if (!coverage_ok) {
+		mi->score_diag.coverage_fail++;
+	}
+
+	if (!prior_match) {
+		bool shape_ok = score->matched_blobs > 4 && score->visible_leds > 4;
+		if (shape_ok) {
+			mi->score_diag.shape_ok++;
+			if (error_per_match < 3.0) {
+				mi->score_diag.shape_reprojection_ok++;
+				if (coverage_ok) {
+					mi->score_diag.shape_reprojection_coverage_ok++;
+				}
+			}
+		}
+	}
+
+	if (POSE_HAS_FLAGS(score, POSE_MATCH_GOOD)) {
+		mi->score_diag.good++;
+	}
+}
+
+static size_t
+score_diag_append(char *buffer, size_t capacity, size_t offset, const char *format, ...)
+{
+	if (offset >= capacity) {
+		return offset;
+	}
+
+	va_list args;
+	va_start(args, format);
+	int ret = vsnprintf(buffer + offset, capacity - offset, format, args);
+	va_end(args);
+
+	if (ret < 0) {
+		return offset;
+	}
+
+	size_t written = (size_t)ret;
+	if (written >= capacity - offset) {
+		return capacity - 1;
+	}
+
+	return offset + written;
+}
+
+static void
+score_diag_dump_pose(struct correspondence_search *cs,
+                     struct t_constellation_search_model *model,
+                     struct cs_model_info *mi,
+                     const char *phase,
+                     const char *tag,
+                     const struct xrt_pose *pose,
+                     float gravity_error_rad)
+{
+	struct pose_metrics score;
+	if (mi->search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
+		pose_metrics_evaluate_pose_with_prior(&score, pose, false, &mi->pose_prior, mi->pos_error_thresh,
+		                                      mi->rot_error_thresh, cs->blobs, cs->num_points, model->led_model,
+		                                      model->device_id, cs->calib, NULL);
+	} else {
+		pose_metrics_evaluate_pose(&score, pose, cs->blobs, cs->num_points, model->led_model, model->device_id,
+		                           cs->calib, NULL);
+	}
+
+	struct pose_metrics_blob_match_info match_info;
+	pose_metrics_match_pose_to_blobs(pose, cs->blobs, cs->num_points, model->led_model, model->device_id,
+	                                cs->calib, &match_info);
+
+	uint32_t unique_matched_leds = 0;
+	for (int i = 0; i < match_info.num_visible_leds; i++) {
+		if (match_info.visible_leds[i].matched_blob != NULL) {
+			unique_matched_leds++;
+		}
+	}
+	uint32_t duplicate_matches =
+	    score.matched_blobs > unique_matched_leds ? score.matched_blobs - unique_matched_leds : 0;
+	double rms_px = score.matched_blobs > 0 ? sqrt(score.reprojection_error / (double)score.matched_blobs) : -1.0;
+
+	char line[32768];
+	size_t offset = 0;
+	offset = score_diag_append(
+	    line, sizeof(line), offset,
+	    "CONSTELLATION_SCORE_GEOM camera_key=%p model=%u phase=%s tag=%s gravity_deg=%.2f "
+	    "pos=(%.6f,%.6f,%.6f) quat=(%.6f,%.6f,%.6f,%.6f) flags=0x%x matched=%u unique_matched=%u "
+	    "duplicate_matches=%u visible=%u unmatched=%u rms_px=%.3f coverage_ok=%u bounds=(%.1f,%.1f,%.1f,%.1f) "
+	    "leds=[",
+	    (void *)cs->calib, (unsigned)mi->id, phase, tag, RAD_TO_DEG(gravity_error_rad), pose->position.x,
+	    pose->position.y, pose->position.z, pose->orientation.x, pose->orientation.y, pose->orientation.z,
+	    pose->orientation.w, (unsigned)score.match_flags, score.matched_blobs, unique_matched_leds,
+	    duplicate_matches, score.visible_leds, score.unmatched_blobs, rms_px, score_diag_coverage_ok(&score) ? 1u : 0u,
+	    match_info.bounds.left, match_info.bounds.top, match_info.bounds.right, match_info.bounds.bottom);
+
+	for (int i = 0; i < match_info.num_visible_leds; i++) {
+		struct pose_metrics_visible_led_info *led_info = &match_info.visible_leds[i];
+		struct t_blob *blob = led_info->matched_blob;
+		if (blob != NULL) {
+			double dx = (double)led_info->pos_px.x - blob->center.x;
+			double dy = (double)led_info->pos_px.y - blob->center.y;
+			double error_px = sqrt(dx * dx + dy * dy);
+			offset = score_diag_append(
+			    line, sizeof(line), offset,
+			    "%sL%u@(%.1f,%.1f)/r%.1f/f%.3f->B%u@(%.1f,%.1f)/e%.2f",
+			    i == 0 ? "" : ";", (unsigned)led_info->led->id, led_info->pos_px.x, led_info->pos_px.y,
+			    led_info->led_radius_px, led_info->facing_dot, (unsigned)blob->blob_id, blob->center.x,
+			    blob->center.y, error_px);
+		} else {
+			offset = score_diag_append(line, sizeof(line), offset, "%sL%u@(%.1f,%.1f)/r%.1f/f%.3f->-",
+			                           i == 0 ? "" : ";", (unsigned)led_info->led->id, led_info->pos_px.x,
+			                           led_info->pos_px.y, led_info->led_radius_px, led_info->facing_dot);
+		}
+	}
+
+	offset = score_diag_append(line, sizeof(line), offset, "] blobs=[");
+	for (int i = 0; i < cs->num_points; i++) {
+		struct t_blob *blob = &cs->blobs[i];
+		offset = score_diag_append(
+		    line, sizeof(line), offset, "%sB%u@(%.1f,%.1f)/%.1fx%.1f/a%u:%u", i == 0 ? "" : ";",
+		    (unsigned)blob->blob_id, blob->center.x, blob->center.y, blob->size.x, blob->size.y,
+		    (unsigned)blob->matched_device_id, (unsigned)blob->matched_device_led_id);
+	}
+	score_diag_append(line, sizeof(line), offset, "]");
+
+	fprintf(stderr, "%s\n", line);
+}
+
 static bool
 correspondence_search_project_pose(struct correspondence_search *cs,
                                    struct t_constellation_search_model *model,
@@ -194,6 +373,8 @@ correspondence_search_project_pose(struct correspondence_search *cs,
 		return false;
 	}
 
+	float gravity_error_rad = INFINITY;
+
 	// See if we need to make a gravity vector alignment check
 	if (mi->search_flags & CS_FLAG_MATCH_GRAVITY) {
 		struct xrt_quat T_pose_cam_orientation, T_prior_cam_orientation;
@@ -208,12 +389,20 @@ correspondence_search_project_pose(struct correspondence_search *cs,
 
 		float gravity_dot = CLAMP(m_vec3_dot(pose_gravity, prior_gravity), -1.0f, 1.0f);
 		float pose_angle = acosf(gravity_dot);
+		gravity_error_rad = pose_angle;
 
 		mi->gravity_diag.gravity_checked++;
 		mi->gravity_diag.min_error_rad = MIN(mi->gravity_diag.min_error_rad, pose_angle);
 		mi->gravity_diag.within_30_deg += pose_angle <= DEG_TO_RAD(30.0f) ? 1 : 0;
 		mi->gravity_diag.within_45_deg += pose_angle <= DEG_TO_RAD(45.0f) ? 1 : 0;
 		mi->gravity_diag.within_60_deg += pose_angle <= DEG_TO_RAD(60.0f) ? 1 : 0;
+
+		if (mi->score_diag.enabled &&
+		    (!mi->score_diag.have_closest_gravity_pose || pose_angle < mi->score_diag.closest_gravity_error_rad)) {
+			mi->score_diag.have_closest_gravity_pose = true;
+			mi->score_diag.closest_gravity_error_rad = pose_angle;
+			mi->score_diag.closest_gravity_pose = *pose;
+		}
 
 		if (pose_angle > mi->gravity_tolerance_rad) {
 			CS_FULL_DEBUG(
@@ -240,6 +429,18 @@ correspondence_search_project_pose(struct correspondence_search *cs,
 	} else {
 		pose_metrics_evaluate_pose(&score, pose, cs->blobs, cs->num_points, leds, model->device_id, cs->calib,
 		                           NULL);
+	}
+
+	if (mi->score_diag.enabled && (mi->search_flags & CS_FLAG_MATCH_GRAVITY) != 0) {
+		score_diag_classify(mi, &score);
+		if (!POSE_HAS_FLAGS(&score, POSE_MATCH_GOOD) &&
+		    (!mi->score_diag.have_best_failed_pose ||
+		     pose_metrics_score_is_better_pose(&mi->score_diag.best_failed_score, &score))) {
+			mi->score_diag.have_best_failed_pose = true;
+			mi->score_diag.best_failed_gravity_error_rad = gravity_error_rad;
+			mi->score_diag.best_failed_pose = *pose;
+			mi->score_diag.best_failed_score = score;
+		}
 	}
 
 	if ((mi->search_flags & CS_FLAG_MATCH_GRAVITY) != 0 && !POSE_HAS_FLAGS(&score, POSE_MATCH_GOOD)) {
@@ -1005,7 +1206,13 @@ correspondence_search_find_one_pose(struct correspondence_search *cs,
 	            .min_error_rad = INFINITY,
 	            .best_failed_reprojection_error = INFINITY,
 	        },
+	    .score_diag =
+	        {
+	            .closest_gravity_error_rad = INFINITY,
+	            .best_failed_gravity_error_rad = INFINITY,
+	        },
 	};
+	mi.score_diag.enabled = debug_get_bool_option_correspondence_search_score_diag();
 
 	if (search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
 		assert(pos_error_thresh != NULL);
@@ -1026,16 +1233,10 @@ correspondence_search_find_one_pose(struct correspondence_search *cs,
 	}
 
 	bool found_pose = search_pose_for_model(cs, &mi) && (mi.match_flags & POSE_MATCH_GOOD);
+	const char *phase = score_diag_phase_name(search_flags);
 
 	if (debug_get_bool_option_correspondence_search_gravity_diag() &&
 	    (search_flags & CS_FLAG_MATCH_GRAVITY) != 0) {
-		const char *phase = "full";
-		if ((search_flags & CS_FLAG_SHALLOW_SEARCH) != 0 && (search_flags & CS_FLAG_DEEP_SEARCH) == 0) {
-			phase = "shallow";
-		} else if ((search_flags & CS_FLAG_DEEP_SEARCH) != 0 && (search_flags & CS_FLAG_SHALLOW_SEARCH) == 0) {
-			phase = "deep";
-		}
-
 		float min_error_deg =
 		    mi.gravity_diag.gravity_checked > 0 ? RAD_TO_DEG(mi.gravity_diag.min_error_rad) : -1.0f;
 		float best_failed_rms_px = -1.0f;
@@ -1055,6 +1256,45 @@ correspondence_search_find_one_pose(struct correspondence_search *cs,
 		        RAD_TO_DEG(mi.gravity_tolerance_rad), mi.gravity_diag.passed_active_tolerance,
 		        mi.gravity_diag.passed_gravity_failed_scoring, mi.gravity_diag.best_failed_matched_blobs,
 		        mi.gravity_diag.best_failed_visible_leds, best_failed_rms_px, found_pose ? 1u : 0u);
+	}
+
+	if (mi.score_diag.enabled && (search_flags & CS_FLAG_MATCH_GRAVITY) != 0) {
+		float closest_deg = mi.score_diag.have_closest_gravity_pose
+		                        ? RAD_TO_DEG(mi.score_diag.closest_gravity_error_rad)
+		                        : -1.0f;
+		float best_failed_deg =
+		    mi.score_diag.have_best_failed_pose ? RAD_TO_DEG(mi.score_diag.best_failed_gravity_error_rad) : -1.0f;
+		double best_failed_rms =
+		    mi.score_diag.have_best_failed_pose && mi.score_diag.best_failed_score.matched_blobs > 0
+		        ? sqrt(mi.score_diag.best_failed_score.reprojection_error /
+		               (double)mi.score_diag.best_failed_score.matched_blobs)
+		        : -1.0;
+
+		fprintf(stderr,
+		        "CONSTELLATION_SCORE_DIAG camera_key=%p model=%u phase=%s blobs=%d full_prior=%u active_eval=%u "
+		        "matched_lt3=%u matched_lt5=%u visible_lt5=%u reproj_fail=%u coverage_fail=%u shape_ok=%u "
+		        "shape_reproj_ok=%u shape_reproj_coverage_ok=%u prior_match=%u good=%u closest_deg=%.2f "
+		        "best_fail_gravity_deg=%.2f best_fail_matched=%u best_fail_visible=%u best_fail_unmatched=%u "
+		        "best_fail_rms_px=%.3f found=%u\n",
+		        (void *)cs->calib, (unsigned)mi.id, phase, cs->num_points,
+		        (search_flags & CS_FLAG_HAVE_POSE_PRIOR) != 0 ? 1u : 0u, mi.score_diag.evaluated,
+		        mi.score_diag.matched_lt3, mi.score_diag.matched_lt5, mi.score_diag.visible_lt5,
+		        mi.score_diag.reprojection_fail, mi.score_diag.coverage_fail, mi.score_diag.shape_ok,
+		        mi.score_diag.shape_reprojection_ok, mi.score_diag.shape_reprojection_coverage_ok,
+		        mi.score_diag.prior_match, mi.score_diag.good, closest_deg, best_failed_deg,
+		        mi.score_diag.have_best_failed_pose ? mi.score_diag.best_failed_score.matched_blobs : 0u,
+		        mi.score_diag.have_best_failed_pose ? mi.score_diag.best_failed_score.visible_leds : 0u,
+		        mi.score_diag.have_best_failed_pose ? mi.score_diag.best_failed_score.unmatched_blobs : 0u,
+		        best_failed_rms, found_pose ? 1u : 0u);
+
+		if (mi.score_diag.have_closest_gravity_pose && mi.score_diag.closest_gravity_error_rad <= DEG_TO_RAD(60.0f)) {
+			score_diag_dump_pose(cs, model, &mi, phase, "closest", &mi.score_diag.closest_gravity_pose,
+			                     mi.score_diag.closest_gravity_error_rad);
+		}
+		if (mi.score_diag.have_best_failed_pose) {
+			score_diag_dump_pose(cs, model, &mi, phase, "best_failed", &mi.score_diag.best_failed_pose,
+			                     mi.score_diag.best_failed_gravity_error_rad);
+		}
 	}
 
 	if (found_pose) {
