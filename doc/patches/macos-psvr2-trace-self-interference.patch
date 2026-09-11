@@ -1,13 +1,9 @@
 diff --git a/src/xrt/compositor/main/comp_window_macos.m b/src/xrt/compositor/main/comp_window_macos.m
 --- a/src/xrt/compositor/main/comp_window_macos.m
 +++ b/src/xrt/compositor/main/comp_window_macos.m
-@@ -1,3 +1,3 @@
-@@
--			next_drawable_begin_ns = os_monotonic_get_ns();
+@@ -1149,8 +1149,14 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_prese
 +			uint64_t drawable_trace_begin_ns = os_monotonic_get_ns();
- 			if (async_present) {
--				macos_trace_present_worker(cwm, "drawable_begin", job, next_drawable_begin_ns, 0, worker_start_ns,
--				                           next_drawable_begin_ns, 0, 0, 0, shared_event_wait);
++			if (async_present) {
 +				/*
 +				 * Do not include trace-writing latency in the nextDrawable measurement.
 +				 * The actual call start is captured only after this row has been written;
@@ -15,8 +11,12 @@ diff --git a/src/xrt/compositor/main/comp_window_macos.m b/src/xrt/compositor/ma
 +				 */
 +				macos_trace_present_worker(cwm, "drawable_trace_begin", job, drawable_trace_begin_ns, 0,
 +				                           worker_start_ns, 0, 0, 0, 0, shared_event_wait);
- 			}
-+			next_drawable_begin_ns = os_monotonic_get_ns();
++			}
+ 			next_drawable_begin_ns = os_monotonic_get_ns();
+-			if (async_present) {
+-				macos_trace_present_worker(cwm, "drawable_begin", job, next_drawable_begin_ns, 0, worker_start_ns,
+-				                           next_drawable_begin_ns, 0, 0, 0, shared_event_wait);
+-			}
  			drawable = [cwm->metal_layer nextDrawable];
  			after_drawable_ns = os_monotonic_get_ns();
  			if (async_present) {
@@ -26,10 +26,7 @@ diff --git a/src/xrt/compositor/main/comp_window_macos.m b/src/xrt/compositor/ma
 diff --git a/src/xrt/compositor/main/comp_window_macos_latest.m b/src/xrt/compositor/main/comp_window_macos_latest.m
 --- a/src/xrt/compositor/main/comp_window_macos_latest.m
 +++ b/src/xrt/compositor/main/comp_window_macos_latest.m
-@@
--		next_drawable_begin_ns = os_monotonic_get_ns();
--		macos_trace_present_worker(cwm, "drawable_begin", &active_job, next_drawable_begin_ns, 0,
--		                           worker_start_ns, next_drawable_begin_ns, 0, 0, 0, true);
+@@ -108,6 +108,13 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 +		uint64_t drawable_trace_begin_ns = os_monotonic_get_ns();
 +		/*
 +		 * Trace before acquisition, but start the measured nextDrawable interval
@@ -39,7 +36,9 @@ diff --git a/src/xrt/compositor/main/comp_window_macos_latest.m b/src/xrt/compos
 +		 */
 +		macos_trace_present_worker(cwm, "drawable_trace_begin", &active_job, drawable_trace_begin_ns, 0,
 +		                           worker_start_ns, 0, 0, 0, 0, true);
-+		next_drawable_begin_ns = os_monotonic_get_ns();
+ 		next_drawable_begin_ns = os_monotonic_get_ns();
+-		macos_trace_present_worker(cwm, "drawable_begin", &active_job, next_drawable_begin_ns, 0,
+-		                           worker_start_ns, next_drawable_begin_ns, 0, 0, 0, true);
  		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
  		after_drawable_ns = os_monotonic_get_ns();
  		macos_trace_present_worker(cwm, "drawable_end", &active_job, after_drawable_ns, 0,
@@ -47,13 +46,13 @@ diff --git a/src/xrt/compositor/main/comp_window_macos_latest.m b/src/xrt/compos
 diff --git a/src/xrt/drivers/psvr2/psvr2.c b/src/xrt/drivers/psvr2/psvr2.c
 --- a/src/xrt/drivers/psvr2/psvr2.c
 +++ b/src/xrt/drivers/psvr2/psvr2.c
-@@
+@@ -75,4 +75,5 @@
  DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
  DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
  DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 +DEBUG_GET_ONCE_BOOL_OPTION(psvr2_driver_timing_trace, "PSVR2_DRIVER_TIMING_TRACE", true)
  DEBUG_GET_ONCE_BOOL_OPTION(psvr2_filtered_linear_prediction, "PSVR2_FILTERED_LINEAR_PREDICTION", false)
-@@
+@@ -169,7 +170,8 @@
  static void
  psvr2_timing_trace_open(void)
  {
@@ -62,3 +61,4 @@ diff --git a/src/xrt/drivers/psvr2/psvr2.c b/src/xrt/drivers/psvr2/psvr2.c
 +	    !debug_get_bool_option_psvr2_driver_timing_trace()) {
  		return;
  	}
+ 	g_psvr2_timing_trace.attempted = true;
