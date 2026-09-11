@@ -301,6 +301,7 @@ def survey_mode(
             row = {
                 "packet_index": packet_index,
                 "host_monotonic_ns": time.monotonic_ns(),
+                "host_realtime_ns": time.time_ns(),
                 "size": len(packet),
                 "vi": 1,
                 "vts_us": header["vts_us"],
@@ -337,6 +338,7 @@ def survey_mode(
             fieldnames=[
                 "packet_index",
                 "host_monotonic_ns",
+                "host_realtime_ns",
                 "size",
                 "vi",
                 "vts_us",

@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from psvr2_camera_mode_survey import CameraPacketFramer, parse_vi_header  # noqa: E402
-from psvr2_tracking_mask_analyze import compact_bright_centroids, segment_for_time  # noqa: E402
+from psvr2_tracking_mask_analyze import centroid_match_fraction, compact_bright_centroids, segment_for_time  # noqa: E402
 
 
 def camera_packet(size, sequence, camera_set=8, width=4, height=3):
@@ -50,6 +50,11 @@ class CameraPacketFramerTests(unittest.TestCase):
         centroids = compact_bright_centroids(difference, 40)
         self.assertEqual(len(centroids), 1)
         np.testing.assert_allclose(centroids[0], [21.0, 11.0])
+
+    def test_centroid_matching_recognizes_shared_constellation(self):
+        points = [[10.0, 10.0], [20.0, 20.0], [100.0, 100.0]]
+        reference = [[20.5, 19.5], [9.5, 10.5], [200.0, 200.0]]
+        self.assertAlmostEqual(centroid_match_fraction(points, reference), 2 / 3)
 
     def test_fragmented_and_coalesced_packets(self):
         first = camera_packet(320, 10)

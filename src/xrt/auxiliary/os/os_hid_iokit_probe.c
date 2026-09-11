@@ -42,6 +42,16 @@ struct led_output_state
 	uint8_t counter;
 };
 
+static int64_t
+realtime_get_ns(void)
+{
+	struct timespec ts = {0};
+	if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+		return 0;
+	}
+	return (int64_t)ts.tv_sec * INT64_C(1000000000) + ts.tv_nsec;
+}
+
 static int32_t
 get_int_property(IOHIDDeviceRef device, CFStringRef key)
 {
@@ -211,7 +221,8 @@ scan_tracking_led_masks(struct os_hid_device *hid, const char *manifest_path, in
 	}
 
 	struct led_output_state state = {0};
-	fprintf(manifest, "segment_index,label,mask_hex,start_monotonic_ns,end_monotonic_ns\n");
+	fprintf(manifest,
+	        "segment_index,label,mask_hex,start_monotonic_ns,end_monotonic_ns,start_realtime_ns,end_realtime_ns\n");
 	printf("  scanning Sense LED masks: %d ms per segment, manifest=%s\n", segment_ms, manifest_path);
 
 	const int segment_count = 21;
@@ -230,6 +241,7 @@ scan_tracking_led_masks(struct os_hid_device *hid, const char *manifest_path, in
 		}
 
 		timepoint_ns start_ns = os_monotonic_get_ns();
+		int64_t start_realtime_ns = realtime_get_ns();
 		printf("  segment %02d/%02d %-8s mask=%08" PRIx32 "\n", segment + 1, segment_count, label, mask);
 		fflush(stdout);
 		if (hold_tracking_led_mask(hid, &state, mask, (time_duration_ns)segment_ms * 1000000LL) != 0) {
@@ -237,8 +249,9 @@ scan_tracking_led_masks(struct os_hid_device *hid, const char *manifest_path, in
 			return 1;
 		}
 		timepoint_ns end_ns = os_monotonic_get_ns();
-		fprintf(manifest, "%d,%s,%08" PRIx32 ",%" PRIi64 ",%" PRIi64 "\n", segment, label, mask,
-		        start_ns, end_ns);
+		int64_t end_realtime_ns = realtime_get_ns();
+		fprintf(manifest, "%d,%s,%08" PRIx32 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n",
+		        segment, label, mask, start_ns, end_ns, start_realtime_ns, end_realtime_ns);
 		fflush(manifest);
 	}
 

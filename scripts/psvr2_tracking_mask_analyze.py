@@ -17,17 +17,35 @@ import numpy as np
 MODE4_CAMERA_PLANES = {4: {0: 0, 1: 1}, 5: {0: 2, 1: 3}}
 
 
-def segment_for_time(timestamp_ns: int, segments: list[dict], margin_ns: int) -> dict | None:
+def segment_for_time(
+    timestamp_ns: int,
+    segments: list[dict],
+    margin_ns: int,
+    start_key: str = "start_monotonic_ns",
+    end_key: str = "end_monotonic_ns",
+) -> dict | None:
     for segment in segments:
-        if int(segment["start_monotonic_ns"]) + margin_ns <= timestamp_ns:
-            if timestamp_ns <= int(segment["end_monotonic_ns"]) - margin_ns:
+        if int(segment[start_key]) + margin_ns <= timestamp_ns:
+            if timestamp_ns <= int(segment[end_key]) - margin_ns:
                 return segment
     return None
 
 
-def read_segments(path: Path) -> list[dict]:
+def read_segments(path: Path) -> tuple[list[dict], str]:
     with path.open(newline="") as file:
-        return list(csv.DictReader(file))
+        segments = list(csv.DictReader(file))
+    if segments and segments[0].get("start_realtime_ns"):
+        return segments, "recorded_realtime"
+
+    # v1 manifests recorded the C CLOCK_MONOTONIC domain, which is not the
+    # same epoch as Python's monotonic_ns() on macOS. Recover those captures
+    # from the manifest close time and image modification times.
+    if segments:
+        offset = path.stat().st_mtime_ns - int(segments[-1]["end_monotonic_ns"])
+        for segment in segments:
+            segment["start_realtime_ns"] = str(int(segment["start_monotonic_ns"]) + offset)
+            segment["end_realtime_ns"] = str(int(segment["end_monotonic_ns"]) + offset)
+    return segments, "realtime_estimated_from_manifest_mtime"
 
 
 def read_images(capture_dir: Path, segments: list[dict], margin_ns: int) -> dict[int, dict[str, list[np.ndarray]]]:
@@ -37,12 +55,19 @@ def read_images(capture_dir: Path, segments: list[dict], margin_ns: int) -> dict
             for row in csv.DictReader(file):
                 if not row.get("decoded_files"):
                     continue
-                segment = segment_for_time(int(row["host_monotonic_ns"]), segments, margin_ns)
+                names = row["decoded_files"].split(";")
+                if row.get("host_realtime_ns"):
+                    timestamp_ns = int(row["host_realtime_ns"])
+                else:
+                    timestamp_ns = (capture_dir / names[0]).stat().st_mtime_ns
+                segment = segment_for_time(
+                    timestamp_ns, segments, margin_ns, "start_realtime_ns", "end_realtime_ns"
+                )
                 if segment is None:
                     continue
                 camera_set = int(row["camera_set"])
                 planes = MODE4_CAMERA_PLANES.get(camera_set, {})
-                for name in row["decoded_files"].split(";"):
+                for name in names:
                     if "-plane" not in name:
                         continue
                     plane = int(name.rsplit("-plane", 1)[1].split(".", 1)[0])
@@ -66,6 +91,21 @@ def compact_bright_centroids(difference: np.ndarray, threshold: int) -> list[lis
     ]
 
 
+def centroid_match_fraction(points: list[list[float]], reference: list[list[float]], max_distance_px: float = 4.0) -> float:
+    if not points or not reference:
+        return 0.0
+    available = set(range(len(reference)))
+    matched = 0
+    for point in points:
+        candidates = sorted(
+            (float(np.linalg.norm(np.asarray(point) - np.asarray(reference[index]))), index) for index in available
+        )
+        if candidates and candidates[0][0] <= max_distance_px:
+            matched += 1
+            available.remove(candidates[0][1])
+    return matched / len(points)
+
+
 def median_image(images: list[np.ndarray]) -> np.ndarray | None:
     if not images:
         return None
@@ -73,13 +113,17 @@ def median_image(images: list[np.ndarray]) -> np.ndarray | None:
 
 
 def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: int) -> dict:
-    segments = read_segments(manifest_path)
+    segments, timing_basis = read_segments(manifest_path)
     grouped = read_images(capture_dir, segments, margin_ms * 1_000_000)
     cameras = []
     observed_bits = set()
     for camera in range(4):
         labels = grouped.get(camera, {})
         off = median_image(labels.get("all_off", []))
+        all_on = median_image(labels.get("all_on", []))
+        all_on_centroids = []
+        if off is not None and all_on is not None:
+            all_on_centroids = compact_bright_centroids(cv2.subtract(all_on, off), threshold)
         per_bit = []
         for bit in range(17):
             label = f"bit_{bit:02d}"
@@ -96,13 +140,10 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
                     "frame_count": len(labels.get(label, [])),
                     "bright_component_count": len(centroids),
                     "centroids_px": centroids,
+                    "fraction_matching_all_on_components": centroid_match_fraction(centroids, all_on_centroids),
                 }
             )
 
-        all_on = median_image(labels.get("all_on", []))
-        all_on_centroids = []
-        if off is not None and all_on is not None:
-            all_on_centroids = compact_bright_centroids(cv2.subtract(all_on, off), threshold)
         cameras.append(
             {
                 "camera": camera,
@@ -122,19 +163,27 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
             if entry["bright_component_count"] > 1
         }
     )
+    temporal_waveform_evidence = [
+        {"camera": camera["camera"], "bit": entry["bit"], "component_count": entry["bright_component_count"]}
+        for camera in cameras
+        for entry in camera["bits"]
+        if entry["bright_component_count"] >= 2 and entry["fraction_matching_all_on_components"] >= 0.75
+    ]
     return {
         "format": "psvr2-sense-led-mask-analysis-v1",
         "capture_dir": str(capture_dir),
         "mask_manifest": str(manifest_path),
         "threshold": threshold,
         "segment_edge_margin_ms": margin_ms,
+        "timing_alignment_basis": timing_basis,
         "observed_bits": sorted(observed_bits),
         "bits_with_multiple_components_in_one_camera": bits_with_multiple_components,
-        "mask_semantics_status": "consistent_with_individual_bits"
-        if len(observed_bits) >= 4 and not bits_with_multiple_components
-        else "inconclusive_or_grouped",
+        "led_blink_semantics_status": "temporal_waveform_supported"
+        if temporal_waveform_evidence
+        else "inconclusive",
+        "temporal_waveform_evidence": temporal_waveform_evidence,
         "cameras": cameras,
-        "note": "This first experiment tests mask semantics only. Bit-to-LED-model identity still requires geometric validation.",
+        "note": "Multiple all-on constellation points responding together to one bit indicates a shared temporal blink waveform, not a spatial per-LED mask. Bit-to-LED-model identity therefore requires geometric constellation matching.",
     }
 
 
@@ -154,7 +203,7 @@ def main() -> int:
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(
         f"Observed {len(result['observed_bits'])}/17 candidate bits; "
-        f"mask semantics={result['mask_semantics_status']}"
+        f"led_blink semantics={result['led_blink_semantics_status']}"
     )
     print(f"Wrote {args.output}")
     return 0

@@ -109,11 +109,14 @@ enough for this diagnostic; selecting a hand also avoids serial LED holds when
 both are awake. The `--force-ir-seconds` option is diagnostic-only and does not
 alter the normal Sense LED scheduling path.
 
-Before using the Sense ring as a direct mode-4 calibration target, verify that
-the four `led_blink` bytes really select individual LEDs. This is intentionally
-a separate hardware gate: their mask-like interpretation is plausible but not
-yet treated as established. Keep the controller and headset rigidly stationary
-and start a 16-second sparse mode-4 recording in one terminal:
+The four `led_blink` bytes initially looked like possible spatial LED masks.
+They are instead a shared temporal waveform: in a stationary hardware scan,
+one asserted bit illuminated the same four to six constellation points
+together, and several different bits selected the same complete set at
+different camera exposure phases. They therefore cannot identify individual
+LEDs. The following 16-second sparse mode-4 recording preserves the experiment
+as a reproducible protocol test. Keep the controller and headset rigidly
+stationary and start it in one terminal:
 
 ```sh
 .venv/bin/python scripts/psvr2_camera_mode_survey.py \
@@ -133,10 +136,11 @@ segments. Each segment lasts 500 ms:
   --mask-segment-ms 500
 ```
 
-The camera CSV now records `host_monotonic_ns` and the names of every saved raw
-and decoded frame. Both processes use the macOS monotonic clock, so the
-analyser can discard the 100 ms transition edges and associate retained images
-with mask segments:
+The camera CSV and mask manifest record both process-local monotonic and shared
+realtime nanoseconds plus the names of every saved raw and decoded frame. The
+first capture predated the realtime fields and is recoverable from image and
+manifest modification times. The analyser discards 100 ms transition edges
+before associating retained images with waveform segments:
 
 ```sh
 .venv/bin/python scripts/psvr2_tracking_mask_analyze.py \
@@ -145,13 +149,15 @@ with mask segments:
   --output /tmp/psvr2-mode4-mask-test/mask-analysis.json
 ```
 
-This first run establishes only the mask semantics. Do not move the controller
-during it. If one bit produces at most one compact source per camera and the
-17 bits collectively reproduce the all-on constellation, the next recorder
-can use five binary-coded mask exposures per stationary pose to identify LED
-IDs efficiently. If bits instead control groups or temporal phases, inspect
-the saved evidence and revise the coding scheme before collecting calibration
-poses.
+The measured result is `led_blink_semantics_status:
+temporal_waveform_supported`: bits 0, 1, 2, and 7--11 were observed at the
+tested exposure phases, and every detected bit produced multiple all-on
+constellation points rather than one LED. Direct calibration must consequently
+obtain LED identities geometrically. The preferred bootstrap is Monado's
+existing neighbour/P3P constellation search using approximate rays composed
+from the measured central-overlap mapping. Candidate poses must agree across
+the synchronized cameras in the fixed rig before their blob-to-model matches
+are admitted to a subsequent mode-4 fisheye refinement.
 
 ### PS VR2 four-camera calibration
 
