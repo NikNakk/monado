@@ -18,6 +18,10 @@
 #undef comp_target_factory_macos
 #undef comp_window_macos_create
 
+struct comp_target *
+comp_window_macos_create(struct comp_compositor *c);
+extern const struct comp_target_factory comp_target_factory_macos;
+
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_latest_frame, "XRT_MACOS_PRESENT_LATEST_FRAME", false)
 
 static FILE *macos_latest_drawable_trace = NULL;
