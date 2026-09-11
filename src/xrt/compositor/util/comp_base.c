@@ -54,10 +54,9 @@ base_create_swapchain(struct xrt_compositor *xc,
 	struct comp_base *cb = comp_base(xc);
 
 #ifdef XRT_OS_OSX
-	// Diagnostic-only Stage 1 probe. By the time swapchain creation is
-	// reachable the native compositor's Vulkan bundle is fully initialized.
-	// The probe is process-once and its result deliberately does not affect
-	// swapchain creation or the existing blocking Metal release handoff.
+	// Probe and register the in-process Vulkan bundle before the Metal client
+	// asks for its long-lived Stage-2 timeline semaphore/shared-event pair.
+	// Failure is diagnostic only and never changes swapchain creation.
 	comp_metal_semaphore_probe(&cb->vk);
 #endif
 
@@ -251,6 +250,12 @@ comp_base_init(struct comp_base *cb)
 void
 comp_base_fini(struct comp_base *cb)
 {
+#ifdef XRT_OS_OSX
+	// Stop handing this Vulkan bundle to new in-process Metal client semaphore
+	// requests before the subclass tears the Vulkan device down.
+	comp_metal_semaphore_provider_clear(&cb->vk);
+#endif
+
 	os_precise_sleeper_deinit(&cb->sleeper);
 
 	u_threading_stack_fini(&cb->cscs.destroy_swapchains);
