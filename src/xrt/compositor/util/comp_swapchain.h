@@ -127,6 +127,64 @@ comp_swapchain(struct xrt_swapchain *xsc)
 	return (struct comp_swapchain *)xsc;
 }
 
+#ifdef XRT_OS_OSX
+/*!
+ * Export the MoltenVK backing MTLTexture for a compositor-owned VkImage.
+ * The returned Objective-C object is not retained; callers that keep it must
+ * retain it for at least as long as their client swapchain wrapper.
+ */
+XRT_CHECK_RESULT static inline VkResult
+comp_swapchain_export_metal_texture(struct xrt_swapchain_native *xscn,
+                                    uint32_t image_index,
+                                    void **out_texture,
+                                    VkImage *out_vk_image)
+{
+	if (xscn == NULL || out_texture == NULL) {
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	*out_texture = NULL;
+	if (out_vk_image != NULL) {
+		*out_vk_image = VK_NULL_HANDLE;
+	}
+
+	struct comp_swapchain *sc = (struct comp_swapchain *)xscn;
+	if (image_index >= sc->vkic.image_count) {
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	struct vk_bundle *vk = sc->vk;
+	if (vk == NULL || !vk->has_EXT_metal_objects || vk->vkExportMetalObjectsEXT == NULL) {
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+
+	VkImage image = sc->vkic.images[image_index].handle;
+	if (out_vk_image != NULL) {
+		*out_vk_image = image;
+	}
+
+	VkExportMetalTextureInfoEXT texture_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_TEXTURE_INFO_EXT,
+	    .image = image,
+	    .plane = VK_IMAGE_ASPECT_PLANE_0_BIT,
+	};
+	VkExportMetalObjectsInfoEXT export_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+	    .pNext = &texture_info,
+	};
+
+	// vkExportMetalObjectsEXT returns void. A NULL exported object is the only
+	// direct failure indication available from this API.
+	vk->vkExportMetalObjectsEXT(vk->device, &export_info);
+	if (texture_info.mtlTexture == NULL) {
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	*out_texture = texture_info.mtlTexture;
+	return VK_SUCCESS;
+}
+#endif
+
 
 /*
  *
