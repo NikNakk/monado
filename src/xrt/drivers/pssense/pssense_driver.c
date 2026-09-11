@@ -66,7 +66,7 @@
 #define PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M 0.08f
 #define PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD (35.0f * (float)M_PI / 180.0f)
 #define PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M 0.15f
-#define PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_DELTA_RAD (60.0f * (float)M_PI / 180.0f)
+#define PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD (60.0f * (float)M_PI / 180.0f)
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 #ifdef XRT_OS_OSX
@@ -1597,7 +1597,7 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 		float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
 		if (sample->timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
 		    position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
-		    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_DELTA_RAD) {
+		    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD) {
 			group->emitted = true;
 			pssense->tracking.jump_rejection_count++;
 			os_thread_helper_unlock(&pssense->controller_thread);
