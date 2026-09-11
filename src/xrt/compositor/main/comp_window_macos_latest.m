@@ -58,6 +58,71 @@ macos_latest_trace(const char *event,
 	funlockfile(macos_latest_drawable_trace);
 }
 
+/*
+ * In newest-frame mode the presentation queue is deliberately allowed to block
+ * in nextDrawable. Retirement must therefore never be queued behind that block:
+ * otherwise superseded source images remain in-flight and can stall compositor
+ * image acquisition. Prefer a Metal shared-event wait, falling back to a global
+ * CPU wait only if the exported event is unexpectedly unavailable.
+ */
+static void
+macos_latest_retire_job(struct comp_window_macos *cwm,
+                        const struct macos_present_job *job,
+                        const char *trace_event,
+                        uint32_t queue_depth)
+{
+	struct macos_present_job retired_job = *job;
+	bool shared_event_wait = cwm->render_complete_event != nil;
+	uint64_t event_ns = os_monotonic_get_ns();
+	macos_trace_present_worker(cwm, trace_event, &retired_job, event_ns, 0, 0, 0, 0, 0, queue_depth,
+	                           shared_event_wait);
+
+	dispatch_group_enter(cwm->present_command_group);
+	if (shared_event_wait) {
+		@autoreleasepool {
+			id<MTLCommandBuffer> command_buffer = [cwm->present_queue commandBuffer];
+			if (command_buffer != nil) {
+				[command_buffer encodeWaitForEvent:cwm->render_complete_event value:retired_job.timeline_value];
+				[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {
+					if ([completed_buffer status] == MTLCommandBufferStatusError) {
+						COMP_ERROR(cwm->base.base.c, "Metal newest-frame retirement wait failed: %s",
+						           [[[completed_buffer error] localizedDescription] UTF8String]);
+					}
+					macos_release_source_image(cwm, retired_job.image_index);
+					dispatch_group_leave(cwm->present_command_group);
+				}];
+				[command_buffer commit];
+				return;
+			}
+		}
+	}
+
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
+		struct comp_target *ct = &cwm->base.base;
+		struct vk_bundle *vk = get_vk(cwm);
+		VkResult ret = VK_SUCCESS;
+		if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&
+		    vk->vkWaitSemaphores != NULL) {
+			VkSemaphoreWaitInfo wait_info = {
+			    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+			    .semaphoreCount = 1,
+			    .pSemaphores = &ct->semaphores.render_complete,
+			    .pValues = &retired_job.timeline_value,
+			};
+			ret = vk->vkWaitSemaphores(vk->device, &wait_info, UINT64_MAX);
+		} else {
+			vk_queue_lock(retired_job.present_queue);
+			ret = vk->vkQueueWaitIdle(retired_job.present_queue->queue);
+			vk_queue_unlock(retired_job.present_queue);
+		}
+		if (ret != VK_SUCCESS) {
+			COMP_ERROR(ct->c, "Vulkan wait while retiring newest-frame macOS job: %s", vk_result_string(ret));
+		}
+		macos_release_source_image(cwm, retired_job.image_index);
+		dispatch_group_leave(cwm->present_command_group);
+	});
+}
+
 static void
 macos_latest_present_worker_run_one(struct comp_window_macos *cwm)
 {
@@ -83,20 +148,18 @@ macos_latest_present_worker_run_one(struct comp_window_macos *cwm)
 		                   &initial_job, 0);
 		macos_trace_present_worker(cwm, "latest_drawable_begin", &initial_job, acquire_begin_ns, 0,
 		                           acquire_begin_ns, acquire_begin_ns, 0, 0, 0,
-		                           debug_get_bool_option_macos_metal_shared_event_wait() &&
-		                               cwm->render_complete_event != nil);
+		                           cwm->render_complete_event != nil);
 
 		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
 		uint64_t acquire_end_ns = os_monotonic_get_ns();
 		macos_trace_present_worker(cwm, "latest_drawable_end", &initial_job, acquire_end_ns, 0,
 		                           acquire_begin_ns, acquire_begin_ns, acquire_end_ns, 0, 0,
-		                           debug_get_bool_option_macos_metal_shared_event_wait() &&
-		                               cwm->render_complete_event != nil);
+		                           cwm->render_complete_event != nil);
 		macos_latest_trace(drawable != nil ? "acquired" : "acquire_nil", acquire_end_ns, drawable,
 		                   acquire_begin_ns, acquire_end_ns, &initial_job, &initial_job, 0);
 
 		if (drawable == nil) {
-			macos_retire_unpresented_job(cwm, &initial_job, "latest_drawable_error", 0);
+			macos_latest_retire_job(cwm, &initial_job, "latest_drawable_error", 0);
 		} else {
 			/*
 			 * The key difference from the legacy present worker: nextDrawable is
@@ -117,16 +180,16 @@ macos_latest_present_worker_run_one(struct comp_window_macos *cwm)
 			if (shutdown) {
 				macos_latest_trace("shutdown_release", os_monotonic_get_ns(), drawable, acquire_begin_ns,
 				                   acquire_end_ns, &initial_job, &selected_job, 0);
-				macos_retire_unpresented_job(cwm, &initial_job, "shutdown_drop", 0);
+				macos_latest_retire_job(cwm, &initial_job, "shutdown_drop", 0);
 				if (selected_newer) {
-					macos_retire_unpresented_job(cwm, &selected_job, "shutdown_drop", 0);
+					macos_latest_retire_job(cwm, &selected_job, "shutdown_drop", 0);
 				}
 			} else {
 				if (selected_newer) {
 					macos_latest_trace("supersede_active", os_monotonic_get_ns(), drawable,
 					                   acquire_begin_ns, acquire_end_ns, &initial_job, &selected_job,
 					                   initial_job.frame_id);
-					macos_retire_unpresented_job(cwm, &initial_job, "active_superseded_after_drawable", 0);
+					macos_latest_retire_job(cwm, &initial_job, "active_superseded_after_drawable", 0);
 				}
 
 				macos_latest_trace("selected", os_monotonic_get_ns(), drawable, acquire_begin_ns,
@@ -167,7 +230,8 @@ macos_latest_present_worker_run_one(struct comp_window_macos *cwm)
 
 	/*
 	 * Keep the serial worker fair to retirement work: each iteration queues at
-	 * most one successor, so source images from superseded jobs can be released.
+	 * most one successor. Retirements themselves use Metal/global work and are
+	 * therefore not held behind the next nextDrawable block.
 	 */
 	pthread_mutex_lock(&cwm->present_worker_mutex);
 	if (!cwm->present_worker_shutdown && cwm->pending_present_job_valid) {
@@ -188,7 +252,7 @@ comp_window_macos_present_latest(struct comp_target *ct,
                                  int64_t present_slop_ns)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	if (!cwm->async_present || !cwm->present_worker_enabled ||
+	if (!cwm->async_present || !cwm->present_worker_enabled || cwm->render_complete_event == nil ||
 	    !debug_get_bool_option_macos_present_latest_frame()) {
 		return comp_window_macos_present(ct, present_queue, index, timeline_semaphore_value,
 		                                 desired_present_time_ns, present_slop_ns);
@@ -205,7 +269,7 @@ comp_window_macos_present_latest(struct comp_target *ct,
 	    .present_queue = present_queue,
 	};
 	if (index >= ct->image_count || cwm->metal_images[index] == nil || present_queue == NULL) {
-		macos_retire_unpresented_job(cwm, &job, "invalid", 0);
+		macos_latest_retire_job(cwm, &job, "invalid", 0);
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
@@ -214,7 +278,7 @@ comp_window_macos_present_latest(struct comp_target *ct,
 	pthread_mutex_lock(&cwm->present_worker_mutex);
 	if (cwm->present_worker_shutdown) {
 		pthread_mutex_unlock(&cwm->present_worker_mutex);
-		macos_retire_unpresented_job(cwm, &job, "shutdown_drop", 0);
+		macos_latest_retire_job(cwm, &job, "shutdown_drop", 0);
 		return VK_ERROR_DEVICE_LOST;
 	}
 	if (cwm->pending_present_job_valid) {
@@ -233,25 +297,46 @@ comp_window_macos_present_latest(struct comp_target *ct,
 	pthread_mutex_unlock(&cwm->present_worker_mutex);
 
 	if (superseded) {
-		macos_retire_unpresented_job(cwm, &superseded_job, "superseded_pending", 1);
+		macos_latest_retire_job(cwm, &superseded_job, "superseded_pending", 1);
 	}
 	uint64_t handoff_return_ns = os_monotonic_get_ns();
 	macos_trace_present_worker(cwm, "latest_enqueued", &job, handoff_return_ns, handoff_return_ns, 0,
-	                           0, 0, 0, 1,
-	                           debug_get_bool_option_macos_metal_shared_event_wait() &&
-	                               cwm->render_complete_event != nil);
+	                           0, 0, 0, 1, cwm->render_complete_event != nil);
 	return VK_SUCCESS;
+}
+
+static bool
+comp_window_macos_init_vulkan_latest(struct comp_target *ct, uint32_t preferred_width, uint32_t preferred_height)
+{
+	bool ret = comp_window_macos_init_vulkan(ct, preferred_width, preferred_height);
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	if (!ret || !debug_get_bool_option_macos_present_latest_frame()) {
+		return ret;
+	}
+
+	if (cwm->async_present && cwm->present_worker_enabled && cwm->render_complete_event != nil) {
+		/* macos_execute_present_job consumes the drawable through this existing path. */
+		cwm->early_drawable_enabled = true;
+		COMP_INFO(ct->c, "macOS newest-frame worker ready with Metal shared-event render completion");
+	} else {
+		cwm->early_drawable_enabled = false;
+		COMP_WARN(ct->c,
+		          "macOS newest-frame worker requires async present, present worker, and exported MTLSharedEvent; "
+		          "falling back to legacy worker");
+	}
+	return ret;
 }
 
 static void
 comp_window_macos_destroy_latest(struct comp_target *ct)
 {
+	/* Legacy destroy stops and drains all worker/callback activity first. */
+	comp_window_macos_destroy(ct);
 	if (macos_latest_drawable_trace != NULL) {
 		fflush(macos_latest_drawable_trace);
 		fclose(macos_latest_drawable_trace);
 		macos_latest_drawable_trace = NULL;
 	}
-	comp_window_macos_destroy(ct);
 }
 
 struct comp_target *
@@ -265,8 +350,7 @@ comp_window_macos_create(struct comp_compositor *c)
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	bool want_latest = debug_get_bool_option_macos_present_latest_frame();
 	if (want_latest && cwm->async_present && cwm->present_worker_enabled) {
-		/* Enable consumption of the worker's already-acquired drawable. */
-		cwm->early_drawable_enabled = true;
+		ct->init_post_vulkan = comp_window_macos_init_vulkan_latest;
 		ct->present = comp_window_macos_present_latest;
 		ct->destroy = comp_window_macos_destroy_latest;
 		if (debug_get_bool_option_macos_psvr2_timing_trace()) {
@@ -277,8 +361,8 @@ comp_window_macos_create(struct comp_compositor *c)
 			    "selected_image_index,selected_enqueue_ns,source_age_ns");
 		}
 		COMP_INFO(c,
-		          "macOS diagnostic: newest-frame drawable worker enabled; nextDrawable blocks off-compositor and "
-		          "binds to newest pending frame after acquisition");
+		          "macOS diagnostic: newest-frame drawable worker requested; nextDrawable will block "
+		          "off-compositor and bind to newest pending frame after acquisition");
 	} else if (want_latest) {
 		COMP_WARN(c,
 		          "XRT_MACOS_PRESENT_LATEST_FRAME requires XRT_MACOS_ASYNC_PRESENT=1 and "
