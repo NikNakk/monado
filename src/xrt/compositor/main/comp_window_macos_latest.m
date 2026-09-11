@@ -24,6 +24,7 @@ extern const struct comp_target_factory comp_target_factory_macos;
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_stale_substitute, "XRT_MACOS_PRESENT_STALE_SUBSTITUTE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_display_sync, "XRT_MACOS_DISABLE_DISPLAY_SYNC", false)
 
 static FILE *macos_stale_substitute_trace = NULL;
 
@@ -540,6 +541,15 @@ comp_window_macos_create(struct comp_compositor *c)
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	bool want_stale_substitute = debug_get_bool_option_macos_present_stale_substitute();
 	bool want_immediate_present = debug_get_bool_option_macos_present_immediate();
+	bool want_disable_display_sync = debug_get_bool_option_macos_disable_display_sync();
+	if (want_disable_display_sync) {
+		BOOL previous_display_sync_enabled = cwm->metal_layer.displaySyncEnabled;
+		cwm->metal_layer.displaySyncEnabled = NO;
+		COMP_INFO(c,
+		          "macOS diagnostic: CAMetalLayer.displaySyncEnabled disabled (was %s); presentation remains "
+		          "otherwise unchanged",
+		          previous_display_sync_enabled ? "enabled" : "disabled");
+	}
 	if (want_stale_substitute && cwm->async_present && cwm->present_worker_enabled) {
 		ct->present = comp_window_macos_present_stale;
 		ct->destroy = comp_window_macos_destroy_stale;
