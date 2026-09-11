@@ -248,6 +248,7 @@ def survey_mode(
     settle_s: float,
     sample_s: float,
     max_examples: int,
+    save_every: int = 1,
     visit_index: int | None = None,
 ) -> dict:
     visit_text = f" visit {visit_index}" if visit_index is not None else ""
@@ -297,28 +298,33 @@ def survey_mode(
             packet_index += 1
             key = (len(packet), camera_set)
             counts[key] += 1
-            rows.append(
-                {
-                    "packet_index": packet_index,
-                    "size": len(packet),
-                    "vi": 1,
-                    "vts_us": header["vts_us"],
-                    "sequence_id": header["sequence_id"],
-                    "camera_set": header["camera_set"],
-                    "image_width": header["image_width"],
-                    "image_height": header["image_height"],
-                    "active_width": header["active_width"],
-                    "active_height": header["active_height"],
-                }
-            )
+            row = {
+                "packet_index": packet_index,
+                "host_monotonic_ns": time.monotonic_ns(),
+                "size": len(packet),
+                "vi": 1,
+                "vts_us": header["vts_us"],
+                "sequence_id": header["sequence_id"],
+                "camera_set": header["camera_set"],
+                "image_width": header["image_width"],
+                "image_height": header["image_height"],
+                "active_width": header["active_width"],
+                "active_height": header["active_height"],
+                "raw_file": "",
+                "decoded_files": "",
+            }
+            rows.append(row)
 
-            if examples[key] < max_examples:
+            if examples[key] < max_examples and (counts[key] - 1) % save_every == 0:
                 example_no = examples[key]
                 stem = out_dir / (
                     f"{visit_prefix}mode-{mode:02x}-size-{len(packet)}-set-{camera_set}-example-{example_no}"
                 )
-                Path(f"{stem}.bin").write_bytes(packet)
+                raw_path = Path(f"{stem}.bin")
+                raw_path.write_bytes(packet)
                 image_names, layout = decode_l8(packet, header, stem)
+                row["raw_file"] = raw_path.name
+                row["decoded_files"] = ";".join(image_names)
                 decoded.extend(image_names)
                 if layout is not None:
                     layouts.add(layout)
@@ -330,6 +336,7 @@ def survey_mode(
             f,
             fieldnames=[
                 "packet_index",
+                "host_monotonic_ns",
                 "size",
                 "vi",
                 "vts_us",
@@ -339,6 +346,8 @@ def survey_mode(
                 "image_height",
                 "active_width",
                 "active_height",
+                "raw_file",
+                "decoded_files",
             ],
         )
         writer.writeheader()
@@ -434,6 +443,10 @@ def main() -> int:
     parser.add_argument("--settle", type=float, default=0.35, help="seconds to discard after changing mode")
     parser.add_argument("--sample", type=float, default=1.0, help="seconds to sample each mode visit")
     parser.add_argument("--examples", type=int, default=1, help="raw examples per packet-size/camera-set type per visit")
+    parser.add_argument("--save-every", type=int, default=1,
+                        help="save every Nth packet of each type (default: 1; CSV still records every packet)")
+    parser.add_argument("--no-contact-sheet", action="store_true",
+                        help="skip contact-sheet generation, useful for long calibration captures")
     parser.add_argument("--modes", default="1-16", help="normal survey, e.g. 1-16 or 1,2,3,4,12")
     parser.add_argument("--sequence", help="ordered mode visits preserving duplicates, e.g. 3,12,3")
     parser.add_argument("--repeat", type=int, default=1, help="repeat --sequence this many times")
@@ -444,6 +457,10 @@ def main() -> int:
 
     if args.repeat < 1:
         raise SystemExit("--repeat must be at least 1")
+    if args.examples < 1:
+        raise SystemExit("--examples must be at least 1")
+    if args.save_every < 1:
+        raise SystemExit("--save-every must be at least 1")
     sequence_capture = args.sequence is not None
     if sequence_capture:
         base_sequence = parse_mode_list(args.sequence)
@@ -488,6 +505,7 @@ def main() -> int:
                         args.settle,
                         args.sample,
                         args.examples,
+                        args.save_every,
                         visit_index=preserved_visit,
                     )
                 )
@@ -508,7 +526,10 @@ def main() -> int:
                 pass
         usb.util.dispose_resources(dev)
 
-    contact_sheet, contact_sheet_error = build_contact_sheet(args.output_dir, summaries)
+    if args.no_contact_sheet:
+        contact_sheet, contact_sheet_error = None, "disabled by --no-contact-sheet"
+    else:
+        contact_sheet, contact_sheet_error = build_contact_sheet(args.output_dir, summaries)
     result = {
         "format": "psvr2-camera-mode-survey-v4",
         "created_unix_s": time.time(),
@@ -519,6 +540,7 @@ def main() -> int:
         "settle_s": args.settle,
         "sample_s": args.sample,
         "examples_per_packet_type": args.examples,
+        "save_every_per_packet_type": args.save_every,
         "modes": summaries,
         "contact_sheet": contact_sheet,
         "notes": [

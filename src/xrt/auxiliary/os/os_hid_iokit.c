@@ -299,7 +299,7 @@ iokit_force_pssense_ir_locked(struct hid_iokit *hid, uint8_t *report, size_t rep
 	 * Optically verified continuous-equivalent PRESCAN pattern:
 	 *  - period ID 42: ~2.1ms pulse
 	 *  - 2.0ms repeating cycle, giving slight pulse overlap
-	 *  - all four LED masks enabled
+	 *  - the caller-provided LED mask is preserved
 	 *
 	 * cycle_length is encoded in thirds of a nanosecond; cycle_position is
 	 * encoded in controller IMU ticks (one third of a microsecond).
@@ -309,7 +309,11 @@ iokit_force_pssense_ir_locked(struct hid_iokit *hid, uint8_t *report, size_t rep
 	report[PSSENSE_LED_SETTINGS_OFFSET + 2] = PSSENSE_LED_PERIOD_ID;
 	iokit_write_le32(report + PSSENSE_LED_SETTINGS_OFFSET + 3, hid->force_pssense_ir_cycle_position);
 	iokit_write_le32(report + PSSENSE_LED_SETTINGS_OFFSET + 7, (uint32_t)(PSSENSE_FORCE_IR_CYCLE_NS * 3ULL));
-	memset(report + PSSENSE_LED_SETTINGS_OFFSET + 11, 0xff, 4);
+	/*
+	 * The diagnostic probe normally supplies ff:ff:ff:ff. Preserving these
+	 * four bytes also lets its calibration mode test one bit at a time without
+	 * teaching the generic HID backend about a particular LED model.
+	 */
 
 	uint32_t crc = iokit_pssense_crc(report);
 	iokit_write_le32(report + PSSENSE_PACKET_CRC_OFFSET, crc);

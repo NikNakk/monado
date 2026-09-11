@@ -7,8 +7,11 @@ import sys
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from psvr2_camera_mode_survey import CameraPacketFramer, parse_vi_header  # noqa: E402
+from psvr2_tracking_mask_analyze import compact_bright_centroids, segment_for_time  # noqa: E402
 
 
 def camera_packet(size, sequence, camera_set=8, width=4, height=3):
@@ -33,6 +36,21 @@ def camera_packet(size, sequence, camera_set=8, width=4, height=3):
 
 
 class CameraPacketFramerTests(unittest.TestCase):
+    def test_mask_segment_assignment_excludes_transition_edges(self):
+        segments = [{"start_monotonic_ns": "1000", "end_monotonic_ns": "2000", "label": "bit_00"}]
+        self.assertIsNone(segment_for_time(1099, segments, 100))
+        self.assertEqual(segment_for_time(1100, segments, 100)["label"], "bit_00")
+        self.assertEqual(segment_for_time(1900, segments, 100)["label"], "bit_00")
+        self.assertIsNone(segment_for_time(1901, segments, 100))
+
+    def test_mask_analyzer_finds_compact_source_and_rejects_large_region(self):
+        difference = np.zeros((80, 80), dtype=np.uint8)
+        difference[10:13, 20:23] = 100
+        difference[30:75, 30:75] = 100
+        centroids = compact_bright_centroids(difference, 40)
+        self.assertEqual(len(centroids), 1)
+        np.testing.assert_allclose(centroids[0], [21.0, 11.0])
+
     def test_fragmented_and_coalesced_packets(self):
         first = camera_packet(320, 10)
         second = camera_packet(384, 11, camera_set=9)

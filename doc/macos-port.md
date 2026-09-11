@@ -109,6 +109,50 @@ enough for this diagnostic; selecting a hand also avoids serial LED holds when
 both are awake. The `--force-ir-seconds` option is diagnostic-only and does not
 alter the normal Sense LED scheduling path.
 
+Before using the Sense ring as a direct mode-4 calibration target, verify that
+the four `led_blink` bytes really select individual LEDs. This is intentionally
+a separate hardware gate: their mask-like interpretation is plausible but not
+yet treated as established. Keep the controller and headset rigidly stationary
+and start a 16-second sparse mode-4 recording in one terminal:
+
+```sh
+.venv/bin/python scripts/psvr2_camera_mode_survey.py \
+  /tmp/psvr2-mode4-mask-test \
+  --sequence 4 --settle 0.5 --sample 16 \
+  --examples 200 --save-every 10 --no-contact-sheet
+```
+
+Immediately start the mask scan in a second terminal. It records all-off,
+all-on, bits 0--16 individually, then repeated all-on/all-off reference
+segments. Each segment lasts 500 ms:
+
+```sh
+./build-sense/src/xrt/auxiliary/os/pssense_hid_probe \
+  --hand left \
+  --force-ir-mask-scan /tmp/psvr2-mode4-mask-test/led-mask-schedule.csv \
+  --mask-segment-ms 500
+```
+
+The camera CSV now records `host_monotonic_ns` and the names of every saved raw
+and decoded frame. Both processes use the macOS monotonic clock, so the
+analyser can discard the 100 ms transition edges and associate retained images
+with mask segments:
+
+```sh
+.venv/bin/python scripts/psvr2_tracking_mask_analyze.py \
+  /tmp/psvr2-mode4-mask-test \
+  /tmp/psvr2-mode4-mask-test/led-mask-schedule.csv \
+  --output /tmp/psvr2-mode4-mask-test/mask-analysis.json
+```
+
+This first run establishes only the mask semantics. Do not move the controller
+during it. If one bit produces at most one compact source per camera and the
+17 bits collectively reproduce the all-on constellation, the next recorder
+can use five binary-coded mask exposures per stationary pose to identify LED
+IDs efficiently. If bits instead control groups or temporal phases, inspect
+the saved evidence and revise the coding scheme before collecting calibration
+poses.
+
 ### PS VR2 four-camera calibration
 
 Hardware captures establish the mode-3 physical ordering and raster layout:

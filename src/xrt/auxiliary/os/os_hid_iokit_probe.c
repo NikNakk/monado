@@ -33,7 +33,14 @@
 #define PSSENSE_OUTPUT_REPORT_ID 0x31
 #define PSSENSE_OUTPUT_REPORT_TAG 0x10
 #define PSSENSE_OUTPUT_COUNTER_OFFSET 41
+#define PSSENSE_LED_MASK_OFFSET 33
 #define PSSENSE_OUTPUT_PERIOD_NS 10000000ULL
+
+struct led_output_state
+{
+	uint8_t sequence;
+	uint8_t counter;
+};
 
 static int32_t
 get_int_property(IOHIDDeviceRef device, CFStringRef key)
@@ -142,36 +149,52 @@ set_sense_device_matching(IOHIDManagerRef manager)
 }
 
 static int
-hold_tracking_leds_on(struct os_hid_device *hid, int seconds)
+write_tracking_led_report(struct os_hid_device *hid, struct led_output_state *state, uint32_t mask)
 {
-	uint8_t sequence = 0;
-	uint8_t counter = 0;
-	timepoint_ns end_ns = os_monotonic_get_ns() + (time_duration_ns)seconds * 1000000000LL;
-	const struct timespec interval = {
-	    .tv_sec = 0,
-	    .tv_nsec = (long)PSSENSE_OUTPUT_PERIOD_NS,
-	};
+	uint8_t report[PSSENSE_OUTPUT_REPORT_LENGTH] = {0};
+	report[0] = PSSENSE_OUTPUT_REPORT_ID;
+	report[1] = (uint8_t)((state->sequence++ & 0x0f) << 4);
+	report[2] = PSSENSE_OUTPUT_REPORT_TAG;
+	report[PSSENSE_OUTPUT_COUNTER_OFFSET] = state->counter++;
+	report[PSSENSE_LED_MASK_OFFSET + 0] = (uint8_t)(mask >> 0);
+	report[PSSENSE_LED_MASK_OFFSET + 1] = (uint8_t)(mask >> 8);
+	report[PSSENSE_LED_MASK_OFFSET + 2] = (uint8_t)(mask >> 16);
+	report[PSSENSE_LED_MASK_OFFSET + 3] = (uint8_t)(mask >> 24);
 
-	printf("  holding tracking LEDs on for %d second%s...\n", seconds, seconds == 1 ? "" : "s");
+	/* The macOS backend inserts PRESCAN timing and fixes the Bluetooth CRC. */
+	int written = os_hid_write(hid, report, sizeof(report));
+	if (written != (int)sizeof(report)) {
+		fprintf(stderr, "  tracking LED output write failed: %d\n", written);
+		return 1;
+	}
+	return 0;
+}
+
+static int
+hold_tracking_led_mask(struct os_hid_device *hid,
+                       struct led_output_state *state,
+                       uint32_t mask,
+                       time_duration_ns duration_ns)
+{
+	timepoint_ns end_ns = os_monotonic_get_ns() + duration_ns;
+	const struct timespec interval = {.tv_sec = 0, .tv_nsec = (long)PSSENSE_OUTPUT_PERIOD_NS};
 	while (os_monotonic_get_ns() < end_ns) {
-		uint8_t report[PSSENSE_OUTPUT_REPORT_LENGTH] = {0};
-		report[0] = PSSENSE_OUTPUT_REPORT_ID;
-		report[1] = (uint8_t)((sequence++ & 0x0f) << 4);
-		report[2] = PSSENSE_OUTPUT_REPORT_TAG;
-		report[PSSENSE_OUTPUT_COUNTER_OFFSET] = counter++;
-
-		/*
-		 * PSSENSE_FORCE_IR is applied by the macOS HID backend. It inserts the
-		 * optically verified continuous-equivalent PRESCAN schedule and fixes
-		 * the Bluetooth CRC before this otherwise idle output report is sent.
-		 */
-		int written = os_hid_write(hid, report, sizeof(report));
-		if (written != (int)sizeof(report)) {
-			fprintf(stderr, "  tracking LED output write failed: %d\n", written);
+		if (write_tracking_led_report(hid, state, mask) != 0) {
 			return 1;
 		}
-
 		(void)nanosleep(&interval, NULL);
+	}
+	return 0;
+}
+
+static int
+hold_tracking_leds_on(struct os_hid_device *hid, int seconds)
+{
+	struct led_output_state state = {0};
+
+	printf("  holding tracking LEDs on for %d second%s...\n", seconds, seconds == 1 ? "" : "s");
+	if (hold_tracking_led_mask(hid, &state, UINT32_MAX, (time_duration_ns)seconds * 1000000000LL) != 0) {
+		return 1;
 	}
 
 	printf("  tracking LED hold complete; power the controller off when capture is finished\n");
@@ -179,7 +202,58 @@ hold_tracking_leds_on(struct os_hid_device *hid, int seconds)
 }
 
 static int
-probe_controller(IOHIDDeviceRef device, uint16_t product_id, int read_count, int force_ir_seconds)
+scan_tracking_led_masks(struct os_hid_device *hid, const char *manifest_path, int segment_ms)
+{
+	FILE *manifest = fopen(manifest_path, "w");
+	if (manifest == NULL) {
+		perror("Could not open LED mask manifest");
+		return 1;
+	}
+
+	struct led_output_state state = {0};
+	fprintf(manifest, "segment_index,label,mask_hex,start_monotonic_ns,end_monotonic_ns\n");
+	printf("  scanning Sense LED masks: %d ms per segment, manifest=%s\n", segment_ms, manifest_path);
+
+	const int segment_count = 21;
+	for (int segment = 0; segment < segment_count; segment++) {
+		uint32_t mask = 0;
+		char label[32] = {0};
+		if (segment == 0 || segment == segment_count - 1) {
+			strcpy(label, "all_off");
+		} else if (segment == 1 || segment == segment_count - 2) {
+			strcpy(label, "all_on");
+			mask = UINT32_MAX;
+		} else {
+			int bit = segment - 2;
+			snprintf(label, sizeof(label), "bit_%02d", bit);
+			mask = UINT32_C(1) << bit;
+		}
+
+		timepoint_ns start_ns = os_monotonic_get_ns();
+		printf("  segment %02d/%02d %-8s mask=%08" PRIx32 "\n", segment + 1, segment_count, label, mask);
+		fflush(stdout);
+		if (hold_tracking_led_mask(hid, &state, mask, (time_duration_ns)segment_ms * 1000000LL) != 0) {
+			fclose(manifest);
+			return 1;
+		}
+		timepoint_ns end_ns = os_monotonic_get_ns();
+		fprintf(manifest, "%d,%s,%08" PRIx32 ",%" PRIi64 ",%" PRIi64 "\n", segment, label, mask,
+		        start_ns, end_ns);
+		fflush(manifest);
+	}
+
+	fclose(manifest);
+	printf("  LED mask scan complete\n");
+	return 0;
+}
+
+static int
+probe_controller(IOHIDDeviceRef device,
+                 uint16_t product_id,
+                 int read_count,
+                 int force_ir_seconds,
+                 const char *mask_scan_manifest,
+                 int mask_segment_ms)
 {
 	char product[128] = {0};
 	char serial[128] = {0};
@@ -241,6 +315,11 @@ probe_controller(IOHIDDeviceRef device, uint16_t product_id, int read_count, int
 		os_hid_destroy(hid);
 		return 1;
 	}
+	if (mask_scan_manifest != NULL && received > 0 &&
+	    scan_tracking_led_masks(hid, mask_scan_manifest, mask_segment_ms) != 0) {
+		os_hid_destroy(hid);
+		return 1;
+	}
 
 	os_hid_destroy(hid);
 	printf("  result: %d/%d expected full input reports received\n", received, read_count);
@@ -252,6 +331,8 @@ main(int argc, char **argv)
 {
 	int read_count = 5;
 	int force_ir_seconds = 0;
+	int mask_segment_ms = 500;
+	const char *mask_scan_manifest = NULL;
 	uint16_t requested_product_id = 0;
 	bool have_read_count = false;
 	for (int i = 1; i < argc; i++) {
@@ -263,6 +344,22 @@ main(int argc, char **argv)
 			force_ir_seconds = atoi(argv[i]);
 			if (force_ir_seconds < 1 || force_ir_seconds > 600) {
 				fprintf(stderr, "--force-ir-seconds must be between 1 and 600\n");
+				return 2;
+			}
+		} else if (strcmp(argv[i], "--force-ir-mask-scan") == 0) {
+			if (++i >= argc) {
+				fprintf(stderr, "--force-ir-mask-scan requires an output CSV path\n");
+				return 2;
+			}
+			mask_scan_manifest = argv[i];
+		} else if (strcmp(argv[i], "--mask-segment-ms") == 0) {
+			if (++i >= argc) {
+				fprintf(stderr, "--mask-segment-ms requires a value\n");
+				return 2;
+			}
+			mask_segment_ms = atoi(argv[i]);
+			if (mask_segment_ms < 200 || mask_segment_ms > 5000) {
+				fprintf(stderr, "--mask-segment-ms must be between 200 and 5000\n");
 				return 2;
 			}
 		} else if (strcmp(argv[i], "--hand") == 0) {
@@ -287,14 +384,23 @@ main(int argc, char **argv)
 			}
 		} else {
 			fprintf(stderr,
-			        "Usage: %s [--hand left|right] [--force-ir-seconds 1..600] "
+			        "Usage: %s [--hand left|right] [--force-ir-seconds 1..600 | "
+			        "--force-ir-mask-scan output.csv [--mask-segment-ms 200..5000]] "
 			        "[input-report-count: 1..1000]\n",
 			        argv[0]);
 			return 2;
 		}
 	}
 
-	if (force_ir_seconds > 0) {
+	if (force_ir_seconds > 0 && mask_scan_manifest != NULL) {
+		fprintf(stderr, "--force-ir-seconds and --force-ir-mask-scan are mutually exclusive\n");
+		return 2;
+	}
+	if (mask_scan_manifest != NULL && requested_product_id == 0) {
+		fprintf(stderr, "--force-ir-mask-scan requires --hand left or --hand right\n");
+		return 2;
+	}
+	if (force_ir_seconds > 0 || mask_scan_manifest != NULL) {
 		if (setenv("PSSENSE_FORCE_IR", "1", 1) != 0) {
 			fprintf(stderr, "Failed to enable PSSENSE_FORCE_IR\n");
 			return 1;
@@ -352,7 +458,8 @@ main(int argc, char **argv)
 		}
 
 		found++;
-		if (probe_controller(device, (uint16_t)product_id, read_count, force_ir_seconds) != 0) {
+		if (probe_controller(device, (uint16_t)product_id, read_count, force_ir_seconds, mask_scan_manifest,
+		                     mask_segment_ms) != 0) {
 			failed++;
 		}
 	}
