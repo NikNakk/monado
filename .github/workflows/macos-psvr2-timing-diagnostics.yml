@@ -11,12 +11,14 @@ on:
       - src/xrt/drivers/**
       - src/xrt/compositor/**
       - src/xrt/auxiliary/**
+      - src/xrt/targets/**
+      - src/external/openxr_includes/**
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# This workflow compile-checks the CoreVideo/Metal timing bridge, timeline synchronization, presentation feedback, and PSVR2 short- and long-horizon positional predictor diagnostics used by the diagnostic branch.
+# This workflow compile-checks the CoreVideo/Metal timing bridge, timeline synchronization, presentation feedback, PSVR2 short- and long-horizon positional predictor diagnostics, and the standalone OpenXR/Metal diagnostic scene used by the diagnostic branch.
 jobs:
   build-driver:
     runs-on: macos-15
@@ -79,5 +81,5 @@ jobs:
           -DXRT_BUILD_DRIVER_QWERTY=OFF
           -DXRT_BUILD_DRIVER_PSVR2=ON
           -DXRT_BUILD_DRIVER_PSSENSE=OFF
-      - name: Build macOS compositor target
-        run: cmake --build build-compositor --target comp_main --parallel
+      - name: Build macOS compositor and OpenXR diagnostic app
+        run: cmake --build build-compositor --target comp_main psvr2-openxr-test --parallel
