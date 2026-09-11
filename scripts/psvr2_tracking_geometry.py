@@ -358,6 +358,7 @@ def bootstrap_pose(cameras, positions, normals, observations, neighbour_depth=5)
         "matched_blobs": best[0],
         "supporting_cameras": best[1],
         "rms_px": best[2],
+        "best_candidate_T_rig_controller": best[3].tolist(),
         "per_camera": public_cameras,
     }
 
