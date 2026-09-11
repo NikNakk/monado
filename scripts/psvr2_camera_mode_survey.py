@@ -28,8 +28,9 @@ from pathlib import Path
 try:
     import usb.core
     import usb.util
-except ImportError as exc:
-    raise SystemExit("pyusb is required: python3 -m pip install pyusb") from exc
+except ImportError:
+    # Keep the stream framer importable for dependency-free unit tests.
+    usb = None
 
 PSVR2_VID = 0x054C
 PSVR2_PID = 0x0CDE
@@ -39,8 +40,21 @@ REPORT_SET_CAMERA_MODE = 0x0B
 CAMERA_SUBCMD = 0x01
 USB_CAM_HEADER_SIZE = 256
 USB_CAM_MAX_XFER_SIZE = 1_040_640
+# macOS/libusb may wait for a large requested transfer until its timeout and
+# return only the bytes received so far.  Keep reads below the observed Darwin
+# transfer fragment limit, then frame the bulk byte stream ourselves.
+USB_CAM_READ_SIZE = 64 * 1024
 CAMERA_CTRL_REQUEST_TYPE = 0x42
 CAMERA_CTRL_REQUEST = 0x09
+# These set numbers are established packet-format identifiers, not physical
+# camera assignments.  They let sequence captures reject queued frames from
+# the previous high-bandwidth mode before starting the visit timer.
+EXPECTED_CAMERA_SETS = {
+    3: {0, 3},
+    4: {4, 5},
+    12: {8, 9},
+}
+CAMERA_MODE_SYNC_TIMEOUT_S = 3.0
 
 
 def set_camera_mode(dev, mode: int) -> None:
@@ -87,6 +101,72 @@ def parse_vi_header(packet: bytes) -> dict[str, int | bool]:
         unknown2=unknown2,
     )
     return result
+
+
+class CameraPacketFramer:
+    """Reassemble complete VI camera packets from arbitrary USB read chunks."""
+
+    def __init__(self) -> None:
+        self.buffer = bytearray()
+        self.discarded_bytes = 0
+        self.invalid_headers = 0
+
+    @staticmethod
+    def _valid_header(header: dict[str, int | bool]) -> bool:
+        packet_size = int(header.get("header_packet_size", 0))
+        width = int(header.get("image_width", 0))
+        height = int(header.get("image_height", 0))
+        return (
+            bool(header.get("vi"))
+            and int(header.get("version", 0)) == 0x200
+            and packet_size >= USB_CAM_HEADER_SIZE
+            and packet_size <= USB_CAM_MAX_XFER_SIZE
+            and width > 0
+            and height > 0
+            and width <= 4096
+            and height <= 4096
+        )
+
+    def feed(self, chunk: bytes) -> list[bytes]:
+        if chunk:
+            self.buffer.extend(chunk)
+
+        packets = []
+        while True:
+            signature = self.buffer.find(b"VI")
+            if signature < 0:
+                # Preserve a trailing V in case the signature straddles reads.
+                keep = 1 if self.buffer.endswith(b"V") else 0
+                discard = len(self.buffer) - keep
+                if discard > 0:
+                    del self.buffer[:discard]
+                    self.discarded_bytes += discard
+                break
+            if signature > 0:
+                del self.buffer[:signature]
+                self.discarded_bytes += signature
+
+            if len(self.buffer) < 30:
+                break
+            header = parse_vi_header(self.buffer)
+            if not self._valid_header(header):
+                # This was an incidental VI byte pair in image data.
+                del self.buffer[:2]
+                self.discarded_bytes += 2
+                self.invalid_headers += 1
+                continue
+
+            packet_size = int(header["header_packet_size"])
+            if len(self.buffer) < packet_size:
+                break
+            packets.append(bytes(self.buffer[:packet_size]))
+            del self.buffer[:packet_size]
+
+        return packets
+
+    def reset(self) -> None:
+        self.discarded_bytes += len(self.buffer)
+        self.buffer.clear()
 
 
 def write_pgm(path: Path, width: int, height: int, pixels: bytes | bytearray) -> None:
@@ -144,9 +224,9 @@ def decode_l8(packet: bytes, header: dict[str, int | bool], out_prefix: Path) ->
     return paths, "planar_l8"
 
 
-def read_packet(dev, timeout_ms: int) -> bytes | None:
+def read_chunk(dev, timeout_ms: int) -> bytes | None:
     try:
-        data = dev.read(CAMERA_ENDPOINT_IN, USB_CAM_MAX_XFER_SIZE, timeout=timeout_ms)
+        data = dev.read(CAMERA_ENDPOINT_IN, USB_CAM_READ_SIZE, timeout=timeout_ms)
     except usb.core.USBTimeoutError:
         return None
     return bytes(data)
@@ -156,7 +236,7 @@ def drain(dev, duration_s: float = 0.25) -> None:
     deadline = time.monotonic() + duration_s
     while time.monotonic() < deadline:
         try:
-            dev.read(CAMERA_ENDPOINT_IN, USB_CAM_MAX_XFER_SIZE, timeout=20)
+            dev.read(CAMERA_ENDPOINT_IN, USB_CAM_READ_SIZE, timeout=20)
         except usb.core.USBTimeoutError:
             pass
 
@@ -175,50 +255,74 @@ def survey_mode(
     set_camera_mode(dev, mode)
     drain(dev, settle_s)
 
-    deadline = time.monotonic() + sample_s
+    expected_camera_sets = EXPECTED_CAMERA_SETS.get(mode)
+    synchronized = expected_camera_sets is None
+    sync_deadline = time.monotonic() + CAMERA_MODE_SYNC_TIMEOUT_S
+    deadline = time.monotonic() + sample_s if synchronized else None
     counts: dict[tuple[int, int], int] = defaultdict(int)
     examples: dict[tuple[int, int], int] = defaultdict(int)
     rows: list[dict] = []
     decoded: list[str] = []
     layouts: set[str] = set()
     packet_index = 0
+    usb_chunk_count = 0
+    usb_byte_count = 0
+    empty_read_count = 0
+    pre_sync_discarded_frames = 0
+    framer = CameraPacketFramer()
     visit_prefix = f"visit-{visit_index:02d}-" if visit_index is not None else ""
 
-    while time.monotonic() < deadline:
-        packet = read_packet(dev, 100)
-        if packet is None:
+    while deadline is None or time.monotonic() < deadline:
+        if deadline is None and time.monotonic() >= sync_deadline:
+            break
+        chunk = read_chunk(dev, 100)
+        if chunk is None:
             continue
-        packet_index += 1
-        header = parse_vi_header(packet)
-        camera_set = int(header.get("camera_set", -1))
-        key = (len(packet), camera_set)
-        counts[key] += 1
-        rows.append(
-            {
-                "packet_index": packet_index,
-                "size": len(packet),
-                "vi": int(bool(header.get("vi"))),
-                "vts_us": header.get("vts_us", ""),
-                "sequence_id": header.get("sequence_id", ""),
-                "camera_set": header.get("camera_set", ""),
-                "image_width": header.get("image_width", ""),
-                "image_height": header.get("image_height", ""),
-                "active_width": header.get("active_width", ""),
-                "active_height": header.get("active_height", ""),
-            }
-        )
+        usb_chunk_count += 1
+        usb_byte_count += len(chunk)
+        if not chunk:
+            empty_read_count += 1
+            continue
 
-        if examples[key] < max_examples:
-            example_no = examples[key]
-            stem = out_dir / (
-                f"{visit_prefix}mode-{mode:02x}-size-{len(packet)}-set-{camera_set}-example-{example_no}"
+        for packet in framer.feed(chunk):
+            header = parse_vi_header(packet)
+            camera_set = int(header["camera_set"])
+            if not synchronized:
+                if camera_set not in expected_camera_sets:
+                    pre_sync_discarded_frames += 1
+                    continue
+                synchronized = True
+                deadline = time.monotonic() + sample_s
+
+            packet_index += 1
+            key = (len(packet), camera_set)
+            counts[key] += 1
+            rows.append(
+                {
+                    "packet_index": packet_index,
+                    "size": len(packet),
+                    "vi": 1,
+                    "vts_us": header["vts_us"],
+                    "sequence_id": header["sequence_id"],
+                    "camera_set": header["camera_set"],
+                    "image_width": header["image_width"],
+                    "image_height": header["image_height"],
+                    "active_width": header["active_width"],
+                    "active_height": header["active_height"],
+                }
             )
-            Path(f"{stem}.bin").write_bytes(packet)
-            image_names, layout = decode_l8(packet, header, stem)
-            decoded.extend(image_names)
-            if layout is not None:
-                layouts.add(layout)
-            examples[key] += 1
+
+            if examples[key] < max_examples:
+                example_no = examples[key]
+                stem = out_dir / (
+                    f"{visit_prefix}mode-{mode:02x}-size-{len(packet)}-set-{camera_set}-example-{example_no}"
+                )
+                Path(f"{stem}.bin").write_bytes(packet)
+                image_names, layout = decode_l8(packet, header, stem)
+                decoded.extend(image_names)
+                if layout is not None:
+                    layouts.add(layout)
+                examples[key] += 1
 
     csv_path = out_dir / f"{visit_prefix}mode-{mode:02x}-packets.csv"
     with csv_path.open("w", newline="") as f:
@@ -251,20 +355,35 @@ def survey_mode(
         "decoded_images": decoded,
         "decoded_layouts": sorted(layouts),
         "packets_csv": csv_path.name,
+        "usb_chunk_count": usb_chunk_count,
+        "usb_byte_count": usb_byte_count,
+        "empty_read_count": empty_read_count,
+        "discarded_prefix_bytes": framer.discarded_bytes,
+        "invalid_header_count": framer.invalid_headers,
+        "partial_bytes_at_end": len(framer.buffer),
+        "expected_camera_sets": sorted(expected_camera_sets) if expected_camera_sets is not None else None,
+        "mode_synchronized": synchronized,
+        "pre_sync_discarded_frames": pre_sync_discarded_frames,
     }
     print(
         f"mode 0x{mode:02x}{visit_text}: {len(rows)} packets, "
         + ", ".join(f"{size}B/set{camera_set}={count}" for (size, camera_set), count in sorted(counts.items())),
         flush=True,
     )
+    if not synchronized:
+        print(
+            f"mode 0x{mode:02x}{visit_text}: did not observe expected camera sets "
+            f"{sorted(expected_camera_sets)} within {CAMERA_MODE_SYNC_TIMEOUT_S:.1f}s",
+            file=sys.stderr,
+        )
     return summary
 
 
-def build_contact_sheet(out_dir: Path, summaries: list[dict]) -> str | None:
+def build_contact_sheet(out_dir: Path, summaries: list[dict]) -> tuple[str | None, str | None]:
     try:
         from PIL import Image, ImageDraw, ImageOps
-    except ImportError:
-        return None
+    except ImportError as exc:
+        return None, f"Pillow is not installed: {exc}"
 
     image_paths: list[tuple[int, int | None, Path]] = []
     for summary in summaries:
@@ -275,7 +394,7 @@ def build_contact_sheet(out_dir: Path, summaries: list[dict]) -> str | None:
             if path.exists():
                 image_paths.append((mode, visit_index, path))
     if not image_paths:
-        return None
+        return None, "no decodable L8 images were captured"
 
     thumb_w, thumb_h = 320, 220
     label_h = 28
@@ -294,7 +413,7 @@ def build_contact_sheet(out_dir: Path, summaries: list[dict]) -> str | None:
         draw.text((i % cols * thumb_w + 4, y0 + 5), f"mode 0x{mode:02x}{visit_label}  {path.name}", fill=0)
     path = out_dir / "contact-sheet.png"
     sheet.save(path)
-    return path.name
+    return path.name, None
 
 
 def parse_mode_list(text: str) -> list[int]:
@@ -319,6 +438,9 @@ def main() -> int:
     parser.add_argument("--sequence", help="ordered mode visits preserving duplicates, e.g. 3,12,3")
     parser.add_argument("--repeat", type=int, default=1, help="repeat --sequence this many times")
     args = parser.parse_args()
+
+    if usb is None:
+        raise SystemExit("pyusb is required: python3 -m pip install pyusb")
 
     if args.repeat < 1:
         raise SystemExit("--repeat must be at least 1")
@@ -386,9 +508,9 @@ def main() -> int:
                 pass
         usb.util.dispose_resources(dev)
 
-    contact_sheet = build_contact_sheet(args.output_dir, summaries)
+    contact_sheet, contact_sheet_error = build_contact_sheet(args.output_dir, summaries)
     result = {
-        "format": "psvr2-camera-mode-survey-v3",
+        "format": "psvr2-camera-mode-survey-v4",
         "created_unix_s": time.time(),
         "sequence_capture": sequence_capture,
         "base_sequence": base_sequence,
@@ -403,6 +525,7 @@ def main() -> int:
             "Raw .bin packets are authoritative for undocumented layouts.",
             "819456-byte 640x640x2 packets are decoded as a 1280x640 side-by-side raster, not contiguous planes.",
             "Other PGMs are emitted only for payloads demonstrated/safely inferred as contiguous L8 planes.",
+            "USB reads are byte-stream fragments; packet rows and raw examples contain reassembled VI frames.",
             "Plane number is not assumed to identify a physical camera until cross-mode registration proves it.",
             "Sequence captures preserve repeated visits with visit-NN filename prefixes and require a stationary headset/scene.",
         ],
@@ -412,7 +535,7 @@ def main() -> int:
     if contact_sheet:
         print(f"wrote {args.output_dir / contact_sheet}")
     else:
-        print("no contact sheet generated (install Pillow, or no decodable L8 layouts were found)")
+        print(f"no contact sheet generated ({contact_sheet_error})")
     return 0
 
 

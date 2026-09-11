@@ -13,6 +13,7 @@ on:
       - scripts/psvr2_camera_calibration.schema.json
       - scripts/psvr2_calibration_assess.py
       - tests/test_psvr2_calibration_solver.py
+      - tests/test_psvr2_camera_mode_survey.py
       - scripts/psvr2_camera_mode_survey.py
       - scripts/psvr2_cross_mode_register.py
       - scripts/psvr2_visible_calibration_record.py
@@ -83,8 +84,11 @@ jobs:
           scripts/psvr2_cross_mode_register.py
           scripts/psvr2_visible_calibration_record.py
 
-      - name: Test calibration transform and hand-eye plumbing
-        run: python3 -m unittest tests/test_psvr2_calibration_solver.py
+      - name: Test calibration and camera-capture plumbing
+        run: >-
+          python3 -m unittest
+          tests/test_psvr2_calibration_solver.py
+          tests/test_psvr2_camera_mode_survey.py
 
       - name: Upload build log
         if: always()
