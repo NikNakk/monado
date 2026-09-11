@@ -159,6 +159,38 @@ from the measured central-overlap mapping. Candidate poses must agree across
 the synchronized cameras in the fixed rig before their blob-to-model matches
 are admitted to a subsequent mode-4 fisheye refinement.
 
+`psvr2_tracking_geometry.py` implements that offline bootstrap. It parses the
+authoritative 17-point controller model from the driver, generates
+neighbour-limited AP3P candidates, checks one-to-one matches and LED-facing
+constraints across the fixed four-camera rig, and jointly refines the rig pose.
+It deliberately exits with status 2 unless at least 12 blobs match, at least two
+cameras contribute three matches, and the refined RMS is at most 5 px:
+
+```sh
+.venv/bin/python scripts/psvr2_tracking_geometry.py \
+  /tmp/psvr2-camera-calibration-reviewed.json \
+  /tmp/psvr2-crossmode-12-4-sense-pose-03 \
+  --hand left \
+  --output /tmp/psvr2-crossmode-12-4-sense-pose-03/geometry-bootstrap-left.json
+```
+
+The output hashes the calibration, camera images, survey, and LED-model source,
+and preserves each admitted LED ID with its observed and projected mode-4
+pixel. It always says `runtime_usable: false`: the visible-to-tracking overlap
+only supplies approximate central rays, and the wider mode-4 field remains
+uncalibrated.
+
+On the five stationary left-controller captures, poses 03 and 04 pass with 14
+matches each at 1.975 px and 2.997 px RMS. Pose 03 uses both front cameras plus
+one upper-camera point; pose 04 uses the two front cameras. The other three
+captures and the mask-waveform capture fail the guardrails. The mirrored right
+model is worse (13 matches at 4.524 px for pose 03 and rejection for pose 04),
+which supports but does not independently prove the recovered left-hand
+identities. These two admitted poses are seeds for a multi-pose mode-4 fisheye
+bundle adjustment, not a final tracking calibration. Peripheral observations
+from the outward cameras cannot be judged by the central-overlap bootstrap and
+must be recovered during that refinement.
+
 ### PS VR2 four-camera calibration
 
 Hardware captures establish the mode-3 physical ordering and raster layout:
