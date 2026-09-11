@@ -17,10 +17,12 @@ on:
       - tests/test_psvr2_cross_mode_register.py
       - tests/test_psvr2_tracking_geometry.py
       - tests/test_psvr2_tracking_affine_refine.py
+      - tests/test_psvr2_tracking_intrinsics_refine.py
       - scripts/psvr2_camera_mode_survey.py
       - scripts/psvr2_tracking_mask_analyze.py
       - scripts/psvr2_tracking_geometry.py
       - scripts/psvr2_tracking_affine_refine.py
+      - scripts/psvr2_tracking_intrinsics_refine.py
       - scripts/psvr2_cross_mode_register.py
       - scripts/psvr2_visible_calibration_record.py
       - src/xrt/auxiliary/os/**
@@ -90,6 +92,7 @@ jobs:
           scripts/psvr2_tracking_mask_analyze.py
           scripts/psvr2_tracking_geometry.py
           scripts/psvr2_tracking_affine_refine.py
+          scripts/psvr2_tracking_intrinsics_refine.py
           scripts/psvr2_cross_mode_register.py
           scripts/psvr2_visible_calibration_record.py
 
@@ -101,6 +104,7 @@ jobs:
           tests/test_psvr2_cross_mode_register.py
           tests/test_psvr2_tracking_geometry.py
           tests/test_psvr2_tracking_affine_refine.py
+          tests/test_psvr2_tracking_intrinsics_refine.py
 
       - name: Upload build log
         if: always()

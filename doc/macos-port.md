@@ -227,6 +227,45 @@ Selected-camera refinement and validation are intentionally explicit:
   --output /tmp/psvr2-mode4-affine-refined.json
 ```
 
+The affine failure motivates a stricter camera model rather than a looser fit.
+`psvr2_tracking_intrinsics_refine.py` replaces one selected affine bridge with
+a native mode-4 fisheye `K`, keeps that physical camera's visible-mode
+distortion coefficients and rig transform fixed, and refines the shared
+training poses. Each of the four cameras passes an independently excluded
+named-camera capture:
+
+| Camera | Training RMS | Held-out capture | Joint validation RMS |
+| --- | ---: | --- | ---: |
+| 0 | 2.722 px | 13 | 2.811 px |
+| 1 | 3.104 px | 13 | 3.845 px |
+| 2 | 2.483 px | 13 | 3.776 px |
+| 3 | 2.578 px | 12 | 3.926 px |
+
+Combining the four independently fitted models accepts fully excluded capture
+08 with 12 matches at 3.076 px RMS, but only one of those matches is from an
+outward camera. Capture 06 remains one match short and far-right capture 11
+lacks the two-camera overlap needed to disambiguate its pose. The four models
+therefore remain provisional and `runtime_usable: false`; individual validation
+does not yet establish a complete runtime calibration.
+
+For example, the camera-2 fit excludes capture 13 and requires camera 2 itself
+to contribute to the resulting validation pose:
+
+```sh
+.venv/bin/python scripts/psvr2_tracking_intrinsics_refine.py \
+  /tmp/psvr2-camera-calibration-reviewed.json --hand left --camera 2 \
+  --geometry /tmp/psvr2-crossmode-12-4-sense-pose-03/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-crossmode-12-4-sense-pose-04/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-crossmode-12-4-sense-test/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-mode4-sense-cal-07/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-mode4-sense-cal-09/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-mode4-sense-cal-10/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-mode4-sense-cal-12/geometry-bootstrap-left.json \
+  --candidate-geometry /tmp/psvr2-crossmode-12-4-sense-pose-02/geometry-bootstrap-left.json \
+  --validation-capture /tmp/psvr2-mode4-sense-cal-13 \
+  --output /tmp/psvr2-mode4-camera2-intrinsics.json
+```
+
 ### PS VR2 four-camera calibration
 
 Hardware captures establish the mode-3 physical ordering and raster layout:
