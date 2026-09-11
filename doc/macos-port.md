@@ -222,6 +222,7 @@ The complete invocation used for that result is intentionally explicit:
   --candidate-geometry /tmp/psvr2-mode4-sense-cal-08/geometry-bootstrap-left.json \
   --candidate-geometry /tmp/psvr2-mode4-sense-cal-10/geometry-bootstrap-left.json \
   --validation-capture /tmp/psvr2-mode4-sense-cal-12 \
+  --require-validation-camera 3 \
   --output /tmp/psvr2-mode4-affine-refined.json
 ```
 

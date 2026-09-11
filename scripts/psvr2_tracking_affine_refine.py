@@ -176,12 +176,32 @@ def score_training_view(view, pose, cameras, positions, normals):
     }
 
 
+def required_camera_validation(diagnostics: dict, required_cameras: list[int], minimum_matches=3) -> dict:
+    counts = {entry["camera"]: len(entry["matches"]) for entry in diagnostics.get("per_camera", [])}
+    passed = all(counts.get(camera, 0) >= minimum_matches for camera in required_cameras)
+    return {
+        "status": "passed" if passed else "failed",
+        "minimum_matches": minimum_matches,
+        "required_cameras": [
+            {"camera": camera, "matches": counts.get(camera, 0)} for camera in required_cameras
+        ],
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("calibration", type=Path)
     parser.add_argument("--geometry", action="append", type=Path, default=[], help="accepted bootstrap JSON")
     parser.add_argument("--candidate-geometry", action="append", type=Path, default=[], help="explicit rejected near-miss JSON")
     parser.add_argument("--validation-capture", type=Path)
+    parser.add_argument(
+        "--require-validation-camera",
+        action="append",
+        type=int,
+        choices=range(4),
+        default=[],
+        help="require at least three held-out matches from this camera",
+    )
     parser.add_argument("--hand", choices=("left", "right"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -210,6 +230,9 @@ def main() -> int:
             "blob_counts": [len(points) for points in observations],
             "diagnostics": diagnostics,
             "T_rig_controller": None if validation_pose is None else validation_pose.tolist(),
+            "required_camera_validation": required_camera_validation(
+                diagnostics, args.require_validation_camera
+            ),
         }
 
     result = {
@@ -247,7 +270,14 @@ def main() -> int:
             f"Validation: {diagnostics['status']}; matches={diagnostics.get('matched_blobs', 0)} "
             f"cameras={diagnostics.get('supporting_cameras', 0)} RMS={diagnostics.get('rms_px', float('inf')):.3f}px"
         )
+        if args.require_validation_camera:
+            print(f"Required-camera validation: {validation['required_camera_validation']['status']}")
     print(f"Wrote {args.output}")
+    if validation is not None and (
+        validation["diagnostics"]["status"] != "bootstrap_accepted"
+        or validation["required_camera_validation"]["status"] != "passed"
+    ):
+        return 2
     return 0
 
 

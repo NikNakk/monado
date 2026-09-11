@@ -13,12 +13,25 @@ from psvr2_tracking_affine_refine import (  # noqa: E402
     TrainingView,
     fixed_residuals,
     initial_parameters,
+    required_camera_validation,
     robust_cost,
 )
 from psvr2_tracking_geometry import CameraModel, project_model  # noqa: E402
 
 
 class TrackingAffineRefinementTests(unittest.TestCase):
+    def test_required_camera_must_contribute_three_matches(self):
+        diagnostics = {
+            "per_camera": [
+                {"camera": 0, "matches": [1, 2, 3]},
+                {"camera": 1, "matches": []},
+                {"camera": 2, "matches": [1, 2]},
+                {"camera": 3, "matches": [1, 2, 3, 4]},
+            ]
+        }
+        self.assertEqual(required_camera_validation(diagnostics, [3])["status"], "passed")
+        self.assertEqual(required_camera_validation(diagnostics, [2])["status"], "failed")
+
     def test_robust_cost_limits_outlier_influence(self):
         residuals = np.float64([1.0, 10.0, 2.0])
         self.assertAlmostEqual(robust_cost(residuals, 2), 34.5)
