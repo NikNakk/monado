@@ -191,6 +191,40 @@ bundle adjustment, not a final tracking calibration. Peripheral observations
 from the outward cameras cannot be judged by the central-overlap bootstrap and
 must be recovered during that refinement.
 
+`psvr2_tracking_affine_refine.py` performs the next provisional step while
+keeping the visible fisheye intrinsics and fixed physical rig untouched. It
+jointly adjusts the four affine mode-3-to-mode-4 readout transforms and one
+controller pose per training capture. Rejected near-misses are never consumed
+implicitly: each must be named with `--candidate-geometry`. The output records
+input hashes, initial and refined matrices, per-view residuals, optimization
+history, and an optional independently bootstrapped validation capture.
+
+Training on accepted poses 03, 04, 06, 07, and 09 plus explicit near-misses 08
+and 10 gives a 2.376 px fixed-correspondence RMS. Capture 12 was excluded from
+that fit and then accepted as held-out validation with 21 matches across three
+cameras at 4.051 px RMS, including seven upper-right-camera matches. This is
+the first evidence that the provisional upper-right affine mapping generalizes
+beyond its seed frame. The result remains `runtime_usable: false`: the
+upper-left camera is weakly constrained, capture 11 lies outside the shared
+front-camera bootstrap region, and broader held-out coverage is still needed
+before replacing the overlap-only camera model.
+
+The complete invocation used for that result is intentionally explicit:
+
+```sh
+.venv/bin/python scripts/psvr2_tracking_affine_refine.py \
+  /tmp/psvr2-camera-calibration-reviewed.json --hand left \
+  --geometry /tmp/psvr2-crossmode-12-4-sense-pose-03/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-crossmode-12-4-sense-pose-04/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-mode4-sense-cal-06/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-mode4-sense-cal-07/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-mode4-sense-cal-09/geometry-bootstrap-left.json \
+  --candidate-geometry /tmp/psvr2-mode4-sense-cal-08/geometry-bootstrap-left.json \
+  --candidate-geometry /tmp/psvr2-mode4-sense-cal-10/geometry-bootstrap-left.json \
+  --validation-capture /tmp/psvr2-mode4-sense-cal-12 \
+  --output /tmp/psvr2-mode4-affine-refined.json
+```
+
 ### PS VR2 four-camera calibration
 
 Hardware captures establish the mode-3 physical ordering and raster layout:
