@@ -134,13 +134,19 @@ static void
 print_relation(const char *hand, struct xrt_device *controller, int64_t now_ns, bool *out_saw_position)
 {
 	struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
+	struct pssense_constellation_diagnostics diagnostics = {0};
 	xrt_device_get_tracked_pose(controller, XRT_INPUT_PSSENSE_AIM_POSE, now_ns, &relation);
-	bool positioned = (relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0;
+	(void)pssense_get_constellation_diagnostics(controller, &diagnostics);
+	bool positioned = (relation.relation_flags & XRT_SPACE_RELATION_POSITION_TRACKED_BIT) != 0;
 	*out_saw_position |= positioned;
-	printf("%" PRIi64 ",%s,0x%x,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", now_ns, hand,
-	       (unsigned)relation.relation_flags, relation.pose.position.x, relation.pose.position.y,
+	int64_t pose_age_ns = diagnostics.last_fused_timestamp_ns > 0 ? now_ns - diagnostics.last_fused_timestamp_ns : -1;
+	printf("%" PRIi64 ",%s,0x%x,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%" PRIi64 ",%" PRIu64
+	       ",%u,%" PRIu64 ",%" PRIu64 ",%" PRIu64 "\n",
+	       now_ns, hand, (unsigned)relation.relation_flags, relation.pose.position.x, relation.pose.position.y,
 	       relation.pose.position.z, relation.pose.orientation.x, relation.pose.orientation.y,
-	       relation.pose.orientation.z, relation.pose.orientation.w);
+	       relation.pose.orientation.z, relation.pose.orientation.w, pose_age_ns, diagnostics.fused_pose_count,
+	       diagnostics.last_fused_camera_count, diagnostics.candidate_count, diagnostics.disagreement_count,
+	       diagnostics.jump_rejection_count);
 }
 
 int
@@ -228,7 +234,8 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 		}
 	}
 
-	printf("timestamp_ns,hand,relation_flags,px,py,pz,qx,qy,qz,qw\n");
+	printf("timestamp_ns,hand,relation_flags,px,py,pz,qx,qy,qz,qw,pose_age_ns,fused_pose_count,"
+	       "fused_camera_count,candidate_count,disagreement_count,jump_rejection_count\n");
 	bool saw_position[2] = {false};
 	int64_t end_ns = os_monotonic_get_ns() + duration_s * U_TIME_1S_IN_NS;
 	int64_t next_print_ns = 0;
@@ -243,15 +250,38 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 		os_nanosleep(U_TIME_1MS_IN_NS);
 	}
 	(void)psvr2_set_camera_frame_sinks(head, NULL);
+	struct pssense_constellation_diagnostics final_diagnostics[2] = {0};
+	for (size_t i = 0; i < 2; i++) {
+		if (controllers[i] != NULL) {
+			(void)pssense_get_constellation_diagnostics(controllers[i], &final_diagnostics[i]);
+		}
+	}
 	for (size_t i = 0; i < 2; i++) if (controllers[i] != NULL) pssense_remove_from_constellation_tracker(controllers[i]);
 	xrt_frame_context_destroy_nodes(&tracking_xfctx);
 	(void)psvr2_get_camera_diagnostics(head, &diag);
 	destroy_system(&xi, &xsys, &xsysd, &xso);
 	bool pass = diag.frame_count > 0;
-	for (size_t i = 0; i < 2; i++) if (controllers[i] != NULL) pass &= saw_position[i];
-	fprintf(stderr, "%s: mode-4 frames=%" PRIu64 ", left-position=%s, right-position=%s.\n",
+	for (size_t i = 0; i < 2; i++) {
+		if (controllers[i] != NULL) {
+			pass &= saw_position[i] && final_diagnostics[i].fused_pose_count >= 2;
+		}
+	}
+	fprintf(stderr, "%s: mode-4 frames=%" PRIu64 ", left-position=%s (%" PRIu64
+	                " candidates [%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 "], %" PRIu64
+	                " fused, %" PRIu64 " disagree, %" PRIu64 " jumps), right-position=%s (%" PRIu64
+	                " candidates [%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 "], %" PRIu64
+	                " fused, %" PRIu64 " disagree, %" PRIu64 " jumps).\n",
 	        pass ? "PASS" : "INCOMPLETE", diag.frame_count, saw_position[0] ? "yes" : "no",
-	        saw_position[1] ? "yes" : "no");
+	        final_diagnostics[0].candidate_count, final_diagnostics[0].camera_candidate_count[0],
+	        final_diagnostics[0].camera_candidate_count[1], final_diagnostics[0].camera_candidate_count[2],
+	        final_diagnostics[0].camera_candidate_count[3],
+	        final_diagnostics[0].fused_pose_count, final_diagnostics[0].disagreement_count,
+	        final_diagnostics[0].jump_rejection_count, saw_position[1] ? "yes" : "no",
+	        final_diagnostics[1].candidate_count, final_diagnostics[1].camera_candidate_count[0],
+	        final_diagnostics[1].camera_candidate_count[1], final_diagnostics[1].camera_candidate_count[2],
+	        final_diagnostics[1].camera_candidate_count[3],
+	        final_diagnostics[1].fused_pose_count, final_diagnostics[1].disagreement_count,
+	        final_diagnostics[1].jump_rejection_count);
 	return pass ? EXIT_SUCCESS : 2;
 
 fail:

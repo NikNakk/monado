@@ -350,10 +350,11 @@ struct t_constellation_tracker_device
 	 * pose as it tracks it.
 	 *
 	 * @param connection The device to push the sample to.
-	 * @param sample     The sample containing the current pose of the device and the timestamp of
-	 *                   the original blobservation that led to this pose being computed.
+	 * @param sample     The camera-local sample. The device may replace it with a fused sample.
+	 * @return true if the sample was accepted and may seed tracker state, false if it was rejected
+	 *         or is still waiting for other synchronized-camera candidates.
 	 */
-	void (*push_constellation_tracker_sample)(struct t_constellation_tracker_device *connection,
+	bool (*push_constellation_tracker_sample)(struct t_constellation_tracker_device *connection,
 	                                          struct t_constellation_tracker_sample *sample);
 };
 
@@ -364,11 +365,11 @@ struct t_constellation_tracker_device
  *
  * @public @memberof t_constellation_tracker_device
  */
-XRT_NONNULL_ALL static inline void
+XRT_NONNULL_ALL static inline bool
 t_constellation_tracker_device_push_sample(struct t_constellation_tracker_device *device,
                                            struct t_constellation_tracker_sample *sample)
 {
-	device->push_constellation_tracker_sample(device, sample);
+	return device->push_constellation_tracker_sample(device, sample);
 }
 
 #ifdef __cplusplus
