@@ -102,7 +102,8 @@ def robust_cost(residuals: np.ndarray, data_count: int, huber_px=4.0) -> float:
     return float(cost + 0.5 * np.square(residuals[data_count:]).sum())
 
 
-def refine_affines(cameras, positions, normals, views, iterations=30):
+def refine_affines(cameras, positions, normals, views, refine_cameras=None, iterations=30):
+    refine_cameras = set(range(4) if refine_cameras is None else refine_cameras)
     parameters = initial_parameters(cameras, views)
     initial = parameters.copy()
     initial_affines = initial[:24].copy()
@@ -133,6 +134,8 @@ def refine_affines(cameras, positions, normals, views, iterations=30):
             delta = np.linalg.solve(lhs, rhs)
         except np.linalg.LinAlgError:
             break
+        for camera in set(range(4)) - refine_cameras:
+            delta[camera * 6 : camera * 6 + 6] = 0.0
         baseline = robust_cost(residual, data_count)
         improved = False
         for scale in (1.0, 0.5, 0.25, 0.125):
@@ -195,6 +198,13 @@ def main() -> int:
     parser.add_argument("--candidate-geometry", action="append", type=Path, default=[], help="explicit rejected near-miss JSON")
     parser.add_argument("--validation-capture", type=Path)
     parser.add_argument(
+        "--refine-camera",
+        action="append",
+        type=int,
+        choices=range(4),
+        help="camera affine to refine; repeat as needed (default: all four)",
+    )
+    parser.add_argument(
         "--require-validation-camera",
         action="append",
         type=int,
@@ -215,7 +225,10 @@ def main() -> int:
     positions, normals = load_led_model(repo_root, args.hand)
     views = [load_view(path, args.hand, False, calibration_sha256) for path in args.geometry]
     views.extend(load_view(path, args.hand, True, calibration_sha256) for path in args.candidate_geometry)
-    (refined_cameras, refined_poses), history = refine_affines(cameras, positions, normals, views)
+    refine_cameras = sorted(set(args.refine_camera if args.refine_camera is not None else range(4)))
+    (refined_cameras, refined_poses), history = refine_affines(
+        cameras, positions, normals, views, refine_cameras=refine_cameras
+    )
 
     validation = None
     if args.validation_capture is not None:
@@ -252,6 +265,7 @@ def main() -> int:
         "cameras": [
             {
                 "camera": index,
+                "refined": index in refine_cameras,
                 "initial_H_mode3_to_mode4": cameras[index].H_mode3_to_mode4.tolist(),
                 "refined_H_mode3_to_mode4": camera.H_mode3_to_mode4.tolist(),
             }
