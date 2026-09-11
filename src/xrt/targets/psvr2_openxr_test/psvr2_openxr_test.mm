@@ -317,70 +317,85 @@ initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 	}
 	scene.right = simd_normalize(simd_cross(scene.forward, scene.up));
 
-	const simd_float4 grid_color = make_float4(0.12f, 0.38f, 0.42f, 1.0f);
+	const simd_float4 ground_color = make_float4(0.12f, 0.38f, 0.42f, 1.0f);
 	const simd_float4 marker_color = make_float4(0.82f, 0.86f, 0.90f, 1.0f);
-	const simd_float4 center_color = make_float4(1.0f, 0.78f, 0.16f, 1.0f);
+	const simd_float4 front_color = make_float4(1.0f, 0.78f, 0.16f, 1.0f);
+	const simd_float4 right_color = make_float4(0.28f, 0.92f, 0.46f, 1.0f);
+	const simd_float4 back_color = make_float4(0.22f, 0.64f, 1.0f, 1.0f);
+	const simd_float4 left_color = make_float4(0.86f, 0.42f, 0.98f, 1.0f);
 	const simd_float4 near_color = make_float4(0.28f, 0.92f, 0.46f, 1.0f);
 	const simd_float4 mid_color = make_float4(0.22f, 0.64f, 1.0f, 1.0f);
 	const simd_float4 far_color = make_float4(0.86f, 0.42f, 0.98f, 1.0f);
 
-	// Dotted-looking floor grid made from very thin boxes. It gives strong
-	// translation/parallax cues without using textures or line rendering.
+	// Two circular ground-reference bands make translation/parallax visible in
+	// every yaw direction without a forward-only floor grid.
 	const float floor_y = -0.80f;
-	for (int x_step = -5; x_step <= 5; ++x_step) {
-		add_world_box(scene, 0.5f * (float)x_step, floor_y, 3.25f, make_float3(0.008f, 0.008f, 5.5f),
-		              grid_color);
-	}
-	for (int z_step = 1; z_step <= 12; ++z_step) {
-		add_world_box(scene, 0.0f, floor_y, 0.5f * (float)z_step, make_float3(5.0f, 0.008f, 0.008f),
-		              grid_color);
-	}
-
-	// Symmetric equal-radius markers. During yaw these give comparable centre
-	// and peripheral targets on the left and right sides of the display.
-	for (int angle_degrees = -40; angle_degrees <= 40; angle_degrees += 10) {
+	for (int angle_degrees = 0; angle_degrees < 360; angle_degrees += 15) {
 		const float radians = (float)angle_degrees * (float)M_PI / 180.0f;
-		const float radius = 2.4f;
-		const float x = sinf(radians) * radius;
-		const float z = cosf(radians) * radius;
-		for (int y_step = -2; y_step <= 2; ++y_step) {
-			const bool centre = angle_degrees == 0 && y_step == 0;
-			add_world_box(scene, x, 0.30f * (float)y_step, z,
-			              make_float3(centre ? 0.085f : 0.050f, centre ? 0.085f : 0.050f,
-			                          centre ? 0.085f : 0.050f),
-			              centre ? center_color : marker_color);
+		for (float radius : {1.25f, 3.75f}) {
+			add_world_box(scene, sinf(radians) * radius, floor_y, cosf(radians) * radius,
+			              make_float3(0.045f, 0.010f, 0.045f), ground_color);
 		}
 	}
 
-	// Constant-angular-size depth targets at three azimuths. Their physical
-	// size grows with distance so translation can be compared without an obvious
-	// size cue dominating the observation.
+	// A complete 360-degree marker ring. Five markers at each 15-degree sector
+	// make the scene equally useful for central and peripheral comparisons even
+	// after a 90-, 180-, or 270-degree yaw from the starting orientation.
+	const float marker_radius = 2.4f;
+	for (int angle_degrees = 0; angle_degrees < 360; angle_degrees += 15) {
+		const float radians = (float)angle_degrees * (float)M_PI / 180.0f;
+		const float x = sinf(radians) * marker_radius;
+		const float z = cosf(radians) * marker_radius;
+		simd_float4 sector_color = marker_color;
+		if (angle_degrees == 0) {
+			sector_color = front_color;
+		} else if (angle_degrees == 90) {
+			sector_color = right_color;
+		} else if (angle_degrees == 180) {
+			sector_color = back_color;
+		} else if (angle_degrees == 270) {
+			sector_color = left_color;
+		}
+		for (int y_step = -2; y_step <= 2; ++y_step) {
+			const bool cardinal_centre = y_step == 0 && (angle_degrees % 90) == 0;
+			const float size = cardinal_centre ? 0.085f : 0.050f;
+			add_world_box(scene, x, 0.30f * (float)y_step, z, make_float3(size, size, size), sector_color);
+		}
+	}
+
+	// Constant-angular-size depth targets every 60 degrees. Their physical size
+	// grows with distance, giving the same near/far diagnostic anywhere around
+	// a broad yaw sweep rather than only around initial forward.
 	const std::array<float, 4> distances = {0.75f, 1.5f, 3.0f, 6.0f};
-	const std::array<float, 3> angles = {-25.0f, 0.0f, 25.0f};
 	for (size_t distance_index = 0; distance_index < distances.size(); ++distance_index) {
 		const float distance = distances[distance_index];
 		const float size = std::max(0.026f, distance * 0.035f);
 		const simd_float4 color = distance_index == 0 ? near_color
 		                              : distance_index < 3 ? mid_color
 		                                                   : far_color;
-		for (float angle_degrees : angles) {
-			const float radians = angle_degrees * (float)M_PI / 180.0f;
-			add_world_box(scene, sinf(radians) * distance, 0.58f, cosf(radians) * distance,
+		for (int angle_degrees = 0; angle_degrees < 360; angle_degrees += 60) {
+			const float radians = (float)angle_degrees * (float)M_PI / 180.0f;
+			add_world_box(scene, sinf(radians) * distance, 0.72f, cosf(radians) * distance,
 			              make_float3(size, size, size), color);
 		}
 	}
 
-	// World-locked fixation cross and symmetric peripheral vertical references.
-	add_world_box(scene, 0.0f, 0.0f, 2.0f, make_float3(0.30f, 0.018f, 0.018f), center_color);
-	add_world_box(scene, 0.0f, 0.0f, 2.0f, make_float3(0.018f, 0.30f, 0.018f), center_color);
-	for (float angle_degrees : {-45.0f, 45.0f}) {
-		const float radians = angle_degrees * (float)M_PI / 180.0f;
-		add_world_box(scene, sinf(radians) * 2.5f, 0.0f, cosf(radians) * 2.5f,
-		              make_float3(0.035f, 1.35f, 0.035f), marker_color);
+	// Tall cardinal references make the initial forward/right/back/left axes
+	// easy to reacquire during large yaw sweeps. Colour encodes the sector.
+	const std::array<simd_float4, 4> cardinal_colors = {front_color, right_color, back_color, left_color};
+	for (size_t cardinal = 0; cardinal < cardinal_colors.size(); ++cardinal) {
+		const float radians = (float)(cardinal * 90) * (float)M_PI / 180.0f;
+		add_world_box(scene, sinf(radians) * 2.65f, 0.0f, cosf(radians) * 2.65f,
+		              make_float3(0.035f, 1.25f, 0.035f), cardinal_colors[cardinal]);
 	}
 
+	// Retain a world-locked fixation cross on the initial forward axis. The
+	// magenta head-locked cross remains available independently in every view.
+	add_world_box(scene, 0.0f, 0.0f, 2.0f, make_float3(0.30f, 0.018f, 0.018f), front_color);
+	add_world_box(scene, 0.0f, 0.0f, 2.0f, make_float3(0.018f, 0.30f, 0.018f), front_color);
+
 	scene.initialized = true;
-	fprintf(stderr, "psvr2-openxr-test: diagnostic world contains %zu world-locked boxes\n",
+	fprintf(stderr, "psvr2-openxr-test: diagnostic world contains %zu world-locked boxes over 360 degrees\n",
 	        scene.world_instances.size());
 }
 
