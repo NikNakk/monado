@@ -11,6 +11,7 @@
 #import <IOSurface/IOSurface.h>
 
 #include "client/comp_metal_client.h"
+#include "util/comp_swapchain.h"
 #include "util/u_debug.h"
 
 #include <assert.h>
@@ -178,8 +179,8 @@ client_metal_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier
 	if (direction == XRT_BARRIER_TO_COMP) {
 		// Commands submitted to a Metal command queue execute in order. Waiting
 		// for this empty command buffer therefore makes all application rendering
-		// queued before xrReleaseSwapchainImage visible through the shared
-		// IOSurface before the separate Vulkan compositor transitions the image.
+		// queued before xrReleaseSwapchainImage visible in the shared Metal/Vulkan
+		// resource before the Vulkan compositor accesses it.
 		@autoreleasepool {
 			id<MTLCommandBuffer> command_buffer = [sc->c->command_queue commandBuffer];
 			if (command_buffer == nil) {
@@ -305,13 +306,16 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 
 	MTLTextureType texture_type = info->array_size > 1 ? MTLTextureType2DArray : MTLTextureType2D;
 	MTLTextureUsage texture_usage = usage_flags_to_metal(info->bits);
-	U_LOG_I("Metal swapchain create: size=%ux%u array_size=%u face_count=%u mip_count=%u sample_count=%u metal_format=%lld texture_type=%s(%lu) usage=0x%lx",
+	const char *path = info->array_size > 1 ? "vk-ext-metal-objects" : "iosurface-2d";
+	U_LOG_I("Metal swapchain create: path=%s size=%ux%u array_size=%u face_count=%u mip_count=%u sample_count=%u vk_format=%u metal_format=%lld texture_type=%s(%lu) expected_usage=0x%lx",
+	        path,
 	        info->width,
 	        info->height,
 	        info->array_size,
 	        info->face_count,
 	        info->mip_count,
 	        info->sample_count,
+	        vk_format,
 	        (long long)info->format,
 	        metal_texture_type_string(texture_type),
 	        (unsigned long)texture_type,
@@ -347,7 +351,8 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 		        native_info.bits);
 		return xret;
 	}
-	U_LOG_I("Metal swapchain native Vulkan allocation succeeded: images=%u array_size=%u vk_format=%u",
+	U_LOG_I("Metal swapchain native Vulkan allocation succeeded: path=%s images=%u array_size=%u vk_format=%u",
+	        path,
 	        xscn->base.image_count,
 	        info->array_size,
 	        vk_format);
@@ -368,61 +373,137 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	sc->xscn = xscn;
 	sc->c = c;
 
-	MTLTextureDescriptor *descriptor =
-	    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)info->format
-	                                                      width:info->width
-	                                                     height:info->height
-	                                                  mipmapped:info->mip_count > 1];
-	descriptor.usage = texture_usage;
 	if (info->array_size > 1) {
-		descriptor.textureType = MTLTextureType2DArray;
-		descriptor.arrayLength = info->array_size;
-	}
+		for (uint32_t i = 0; i < xscn->base.image_count; i++) {
+			void *raw_texture = NULL;
+			VkImage vk_image = VK_NULL_HANDLE;
+			VkResult vk_ret = comp_swapchain_export_metal_texture(xscn, i, &raw_texture, &vk_image);
+			if (vk_ret != VK_SUCCESS || raw_texture == NULL) {
+				U_LOG_E("Metal array swapchain export failed: image=%u vk_image=%p helper_result=%d; vkExportMetalObjectsEXT returns void and produced no MTLTexture",
+				        i,
+				        (void *)vk_image,
+				        (int)vk_ret);
+				client_metal_swapchain_destroy(&sc->base.base);
+				return XRT_ERROR_VULKAN;
+			}
 
-	for (uint32_t i = 0; i < xscn->base.image_count; i++) {
-		IOSurfaceRef surface = xscn->images[i].handle;
-		if (!xrt_graphics_buffer_is_valid(surface)) {
-			U_LOG_E("Metal swapchain native image %u has an invalid IOSurface handle (array_size=%u)",
+			id<MTLTexture> texture = (__bridge id<MTLTexture>)raw_texture;
+			if (texture.textureType != MTLTextureType2DArray || texture.arrayLength != info->array_size) {
+				U_LOG_E("Metal array swapchain export incompatible: image=%u vk_image=%p texture=%p type=%s(%lu) array_length=%lu expected_array_size=%u",
+				        i,
+				        (void *)vk_image,
+				        (__bridge void *)texture,
+				        metal_texture_type_string(texture.textureType),
+				        (unsigned long)texture.textureType,
+				        (unsigned long)texture.arrayLength,
+				        info->array_size);
+				client_metal_swapchain_destroy(&sc->base.base);
+				return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+			}
+
+			if (texture.width != info->width || texture.height != info->height ||
+			    texture.mipmapLevelCount != info->mip_count || texture.pixelFormat != (MTLPixelFormat)info->format) {
+				U_LOG_E("Metal array swapchain export geometry/format mismatch: image=%u vk_image=%p texture=%p size=%lux%lu expected=%ux%u mip_levels=%lu expected_mips=%u pixel_format=%lu expected_format=%lld",
+				        i,
+				        (void *)vk_image,
+				        (__bridge void *)texture,
+				        (unsigned long)texture.width,
+				        (unsigned long)texture.height,
+				        info->width,
+				        info->height,
+				        (unsigned long)texture.mipmapLevelCount,
+				        info->mip_count,
+				        (unsigned long)texture.pixelFormat,
+				        (long long)info->format);
+				client_metal_swapchain_destroy(&sc->base.base);
+				return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+			}
+
+			MTLTextureUsage required_usage = texture_usage;
+			if ((texture.usage & required_usage) != required_usage) {
+				U_LOG_E("Metal array swapchain export usage mismatch: image=%u vk_image=%p texture=%p actual_usage=0x%lx required_usage=0x%lx",
+				        i,
+				        (void *)vk_image,
+				        (__bridge void *)texture,
+				        (unsigned long)texture.usage,
+				        (unsigned long)required_usage);
+				client_metal_swapchain_destroy(&sc->base.base);
+				return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+			}
+
+			// VkExportMetalTextureInfoEXT exposes an unretained Objective-C object.
+			// Retain it while the client wrapper exposes it to the OpenXR app.
+			texture = [texture retain];
+			sc->base.images[i] = (__bridge void *)texture;
+
+			U_LOG_I("Metal swapchain texture: path=vk-ext-metal-objects image=%u vk_image=%p texture=%p type=%s(%lu) size=%lux%lu array_length=%lu mip_levels=%lu sample_count=%lu pixel_format=%lu usage=0x%lx",
 			        i,
-			        info->array_size);
-			client_metal_swapchain_destroy(&sc->base.base);
-			return XRT_ERROR_ALLOCATION;
+			        (void *)vk_image,
+			        (__bridge void *)texture,
+			        metal_texture_type_string(texture.textureType),
+			        (unsigned long)texture.textureType,
+			        (unsigned long)texture.width,
+			        (unsigned long)texture.height,
+			        (unsigned long)texture.arrayLength,
+			        (unsigned long)texture.mipmapLevelCount,
+			        (unsigned long)texture.sampleCount,
+			        (unsigned long)texture.pixelFormat,
+			        (unsigned long)texture.usage);
 		}
+	} else {
+		MTLTextureDescriptor *descriptor =
+		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)info->format
+		                                                      width:info->width
+		                                                     height:info->height
+		                                                  mipmapped:info->mip_count > 1];
+		descriptor.usage = texture_usage;
 
-		client_metal_log_iosurface_info(i, surface);
+		for (uint32_t i = 0; i < xscn->base.image_count; i++) {
+			IOSurfaceRef surface = xscn->images[i].handle;
+			if (!xrt_graphics_buffer_is_valid(surface)) {
+				U_LOG_E("Metal swapchain native image %u has an invalid IOSurface handle (array_size=%u)",
+				        i,
+				        info->array_size);
+				client_metal_swapchain_destroy(&sc->base.base);
+				return XRT_ERROR_ALLOCATION;
+			}
 
-		id<MTLTexture> texture = [c->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
-		if (texture == nil) {
-			U_LOG_E("Metal IOSurface texture creation failed: image=%u array_size=%u texture_type=%s(%lu) metal_format=%lld usage=0x%lx IOSurface{id=%u size=%zux%zu bpr=%zu bpe=%zu alloc=%zu planes=%zu pixel_format=0x%08x}",
+			client_metal_log_iosurface_info(i, surface);
+
+			id<MTLTexture> texture = [c->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
+			if (texture == nil) {
+				U_LOG_E("Metal IOSurface texture creation failed: image=%u array_size=%u texture_type=%s(%lu) metal_format=%lld usage=0x%lx IOSurface{id=%u size=%zux%zu bpr=%zu bpe=%zu alloc=%zu planes=%zu pixel_format=0x%08x}",
+				        i,
+				        info->array_size,
+				        metal_texture_type_string(descriptor.textureType),
+				        (unsigned long)descriptor.textureType,
+				        (long long)descriptor.pixelFormat,
+				        (unsigned long)descriptor.usage,
+				        (unsigned)IOSurfaceGetID(surface),
+				        IOSurfaceGetWidth(surface),
+				        IOSurfaceGetHeight(surface),
+				        IOSurfaceGetBytesPerRow(surface),
+				        IOSurfaceGetBytesPerElement(surface),
+				        IOSurfaceGetAllocSize(surface),
+				        IOSurfaceGetPlaneCount(surface),
+				        (unsigned)IOSurfaceGetPixelFormat(surface));
+				client_metal_swapchain_destroy(&sc->base.base);
+				return XRT_ERROR_ALLOCATION;
+			}
+
+			U_LOG_I("Metal swapchain texture: path=iosurface-2d image=%u type=%s(%lu) size=%lux%lu array_length=%lu mip_levels=%lu sample_count=%lu pixel_format=%lu usage=0x%lx",
 			        i,
-			        info->array_size,
-			        metal_texture_type_string(descriptor.textureType),
-			        (unsigned long)descriptor.textureType,
-			        (long long)descriptor.pixelFormat,
-			        (unsigned long)descriptor.usage,
-			        (unsigned)IOSurfaceGetID(surface),
-			        IOSurfaceGetWidth(surface),
-			        IOSurfaceGetHeight(surface),
-			        IOSurfaceGetBytesPerRow(surface),
-			        IOSurfaceGetBytesPerElement(surface),
-			        IOSurfaceGetAllocSize(surface),
-			        IOSurfaceGetPlaneCount(surface),
-			        (unsigned)IOSurfaceGetPixelFormat(surface));
-			client_metal_swapchain_destroy(&sc->base.base);
-			return XRT_ERROR_ALLOCATION;
+			        metal_texture_type_string(texture.textureType),
+			        (unsigned long)texture.textureType,
+			        (unsigned long)texture.width,
+			        (unsigned long)texture.height,
+			        (unsigned long)texture.arrayLength,
+			        (unsigned long)texture.mipmapLevelCount,
+			        (unsigned long)texture.sampleCount,
+			        (unsigned long)texture.pixelFormat,
+			        (unsigned long)texture.usage);
+			sc->base.images[i] = (__bridge void *)texture;
 		}
-
-		U_LOG_I("Metal swapchain texture image=%u type=%s(%lu) size=%lux%lu array_length=%lu mip_levels=%lu pixel_format=%lu usage=0x%lx",
-		        i,
-		        metal_texture_type_string(texture.textureType),
-		        (unsigned long)texture.textureType,
-		        (unsigned long)texture.width,
-		        (unsigned long)texture.height,
-		        (unsigned long)texture.arrayLength,
-		        (unsigned long)texture.mipmapLevelCount,
-		        (unsigned long)texture.pixelFormat,
-		        (unsigned long)texture.usage);
-		sc->base.images[i] = texture;
 	}
 
 	*out_xsc = &sc->base.base;
