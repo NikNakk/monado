@@ -14,6 +14,14 @@ Its first headset run appeared to regress to ~71.5 fps with ~8 ms renderer time.
 
 The experiment therefore needs a corrected rerun against the current best stale-substitution baseline.
 
+The active `macos-psvr2-timing-diagnostics` branch now uses the wrapper translation unit for the successful stale-substitution implementation, so the old latest-frame code is intentionally preserved on a separate test branch:
+
+```text
+macos-psvr2-latest-frame-deferred-rerun
+```
+
+That branch points at the original newest-frame implementation commit `b96d424b98b0acd8361323d45df1fa13c118ac49`. A compare against the current diagnostics head confirmed that the only code file changed since then is the experimental wrapper itself; the other differences are documentation. This makes it suitable for a clean corrected rerun without disturbing the current best baseline.
+
 ## Design
 
 The mode requires:
@@ -71,9 +79,11 @@ Important events include:
 
 ## Corrected headset rerun
 
-Rebuild after pulling the branch:
+Switch to the dedicated test branch and rebuild:
 
 ```sh
+git fetch origin
+git switch macos-psvr2-latest-frame-deferred-rerun
 cmake --build build-macos-psvr2-display --target comp_main monado-service --parallel 4
 ```
 
