@@ -89,6 +89,26 @@ rapid diagnostic restarts do not wedge the stream. Camera streaming remains
 opt-in while per-camera calibration and constellation pose solving are
 unfinished.
 
+For a standalone cross-mode capture, the macOS HID probe can hold the Sense
+tracking LEDs in the same opt-in, continuous-equivalent PRESCAN pattern without
+claiming the headset camera interface. Run it in one terminal for slightly
+longer than the camera survey, then run the survey in another terminal:
+
+```sh
+./build-sense/src/xrt/auxiliary/os/pssense_hid_probe \
+  --hand left --force-ir-seconds 40
+
+.venv/bin/python scripts/psvr2_camera_mode_survey.py \
+  /tmp/psvr2-crossmode-12-4-sense-test \
+  --sequence 12,4,12 --repeat 2 --settle 0.5 --sample 4 --examples 4
+```
+
+Pair and wake the selected controller first, do not run the Monado service
+concurrently, and power the controller off after capture. One controller is
+enough for this diagnostic; selecting a hand also avoids serial LED holds when
+both are awake. The `--force-ir-seconds` option is diagnostic-only and does not
+alter the normal Sense LED scheduling path.
+
 ### PS VR2 four-camera calibration
 
 Hardware captures establish the mode-3 physical ordering and raster layout:

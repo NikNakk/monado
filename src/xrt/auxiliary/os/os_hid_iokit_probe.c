@@ -6,6 +6,7 @@
  */
 
 #include "os_hid.h"
+#include "os_time.h"
 
 #ifdef XRT_OS_OSX
 
@@ -19,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define PSSENSE_VID 0x054c
 #define PSSENSE_PID_LEFT 0x0e45
@@ -27,6 +29,11 @@
 #define PSSENSE_CALIBRATION_REPORT_LENGTH 64
 #define PSSENSE_INPUT_REPORT_LENGTH 78
 #define PSSENSE_INPUT_REPORT_ID 0x31
+#define PSSENSE_OUTPUT_REPORT_LENGTH 78
+#define PSSENSE_OUTPUT_REPORT_ID 0x31
+#define PSSENSE_OUTPUT_REPORT_TAG 0x10
+#define PSSENSE_OUTPUT_COUNTER_OFFSET 41
+#define PSSENSE_OUTPUT_PERIOD_NS 10000000ULL
 
 static int32_t
 get_int_property(IOHIDDeviceRef device, CFStringRef key)
@@ -135,7 +142,44 @@ set_sense_device_matching(IOHIDManagerRef manager)
 }
 
 static int
-probe_controller(IOHIDDeviceRef device, uint16_t product_id, int read_count)
+hold_tracking_leds_on(struct os_hid_device *hid, int seconds)
+{
+	uint8_t sequence = 0;
+	uint8_t counter = 0;
+	timepoint_ns end_ns = os_monotonic_get_ns() + (time_duration_ns)seconds * 1000000000LL;
+	const struct timespec interval = {
+	    .tv_sec = 0,
+	    .tv_nsec = (long)PSSENSE_OUTPUT_PERIOD_NS,
+	};
+
+	printf("  holding tracking LEDs on for %d second%s...\n", seconds, seconds == 1 ? "" : "s");
+	while (os_monotonic_get_ns() < end_ns) {
+		uint8_t report[PSSENSE_OUTPUT_REPORT_LENGTH] = {0};
+		report[0] = PSSENSE_OUTPUT_REPORT_ID;
+		report[1] = (uint8_t)((sequence++ & 0x0f) << 4);
+		report[2] = PSSENSE_OUTPUT_REPORT_TAG;
+		report[PSSENSE_OUTPUT_COUNTER_OFFSET] = counter++;
+
+		/*
+		 * PSSENSE_FORCE_IR is applied by the macOS HID backend. It inserts the
+		 * optically verified continuous-equivalent PRESCAN schedule and fixes
+		 * the Bluetooth CRC before this otherwise idle output report is sent.
+		 */
+		int written = os_hid_write(hid, report, sizeof(report));
+		if (written != (int)sizeof(report)) {
+			fprintf(stderr, "  tracking LED output write failed: %d\n", written);
+			return 1;
+		}
+
+		(void)nanosleep(&interval, NULL);
+	}
+
+	printf("  tracking LED hold complete; power the controller off when capture is finished\n");
+	return 0;
+}
+
+static int
+probe_controller(IOHIDDeviceRef device, uint16_t product_id, int read_count, int force_ir_seconds)
 {
 	char product[128] = {0};
 	char serial[128] = {0};
@@ -193,6 +237,11 @@ probe_controller(IOHIDDeviceRef device, uint16_t product_id, int read_count)
 		}
 	}
 
+	if (force_ir_seconds > 0 && received > 0 && hold_tracking_leds_on(hid, force_ir_seconds) != 0) {
+		os_hid_destroy(hid);
+		return 1;
+	}
+
 	os_hid_destroy(hid);
 	printf("  result: %d/%d expected full input reports received\n", received, read_count);
 	return received > 0 ? 0 : 1;
@@ -202,15 +251,54 @@ int
 main(int argc, char **argv)
 {
 	int read_count = 5;
-	if (argc == 2) {
-		read_count = atoi(argv[1]);
-		if (read_count < 1 || read_count > 1000) {
-			fprintf(stderr, "Usage: %s [input-report-count: 1..1000]\n", argv[0]);
+	int force_ir_seconds = 0;
+	uint16_t requested_product_id = 0;
+	bool have_read_count = false;
+	for (int i = 1; i < argc; i++) {
+		if (strcmp(argv[i], "--force-ir-seconds") == 0) {
+			if (++i >= argc) {
+				fprintf(stderr, "--force-ir-seconds requires a value\n");
+				return 2;
+			}
+			force_ir_seconds = atoi(argv[i]);
+			if (force_ir_seconds < 1 || force_ir_seconds > 600) {
+				fprintf(stderr, "--force-ir-seconds must be between 1 and 600\n");
+				return 2;
+			}
+		} else if (strcmp(argv[i], "--hand") == 0) {
+			if (++i >= argc) {
+				fprintf(stderr, "--hand requires left or right\n");
+				return 2;
+			}
+			if (strcmp(argv[i], "left") == 0) {
+				requested_product_id = PSSENSE_PID_LEFT;
+			} else if (strcmp(argv[i], "right") == 0) {
+				requested_product_id = PSSENSE_PID_RIGHT;
+			} else {
+				fprintf(stderr, "--hand requires left or right\n");
+				return 2;
+			}
+		} else if (!have_read_count) {
+			read_count = atoi(argv[i]);
+			have_read_count = true;
+			if (read_count < 1 || read_count > 1000) {
+				fprintf(stderr, "input-report-count must be between 1 and 1000\n");
+				return 2;
+			}
+		} else {
+			fprintf(stderr,
+			        "Usage: %s [--hand left|right] [--force-ir-seconds 1..600] "
+			        "[input-report-count: 1..1000]\n",
+			        argv[0]);
 			return 2;
 		}
-	} else if (argc > 2) {
-		fprintf(stderr, "Usage: %s [input-report-count: 1..1000]\n", argv[0]);
-		return 2;
+	}
+
+	if (force_ir_seconds > 0) {
+		if (setenv("PSSENSE_FORCE_IR", "1", 1) != 0) {
+			fprintf(stderr, "Failed to enable PSSENSE_FORCE_IR\n");
+			return 1;
+		}
 	}
 
 	IOHIDManagerRef manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
@@ -259,9 +347,12 @@ main(int argc, char **argv)
 		if (vendor_id != PSSENSE_VID || (product_id != PSSENSE_PID_LEFT && product_id != PSSENSE_PID_RIGHT)) {
 			continue;
 		}
+		if (requested_product_id != 0 && product_id != requested_product_id) {
+			continue;
+		}
 
 		found++;
-		if (probe_controller(device, (uint16_t)product_id, read_count) != 0) {
+		if (probe_controller(device, (uint16_t)product_id, read_count, force_ir_seconds) != 0) {
 			failed++;
 		}
 	}
@@ -272,7 +363,12 @@ main(int argc, char **argv)
 	CFRelease(manager);
 
 	if (found == 0) {
-		printf("No paired PS VR2 Sense controllers found (Sony 054c:0e45 / 054c:0e46).\n");
+		if (requested_product_id != 0) {
+			printf("No active %s PS VR2 Sense controller found. Pair and wake it first.\n",
+			       hand_name(requested_product_id));
+		} else {
+			printf("No paired PS VR2 Sense controllers found (Sony 054c:0e45 / 054c:0e46).\n");
+		}
 		return 1;
 	}
 
