@@ -59,6 +59,12 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO);
 	OXR_VERIFY_ARG_NOT_NULL(&log, out_swapchain);
 
+	fprintf(stderr,
+	        "xrCreateSwapchain: createFlags=0x%" PRIx64 " usageFlags=0x%" PRIx64 " format=%" PRIi64
+	        " size=%ux%u arraySize=%u sampleCount=%u\n",
+	        (uint64_t)createInfo->createFlags, (uint64_t)createInfo->usageFlags, createInfo->format, createInfo->width,
+	        createInfo->height, createInfo->arraySize, createInfo->sampleCount);
+
 	// Save people from shooting themselves in the foot.
 	OXR_VERIFY_ARG_NOT_ZERO(&log, createInfo->arraySize);
 	OXR_VERIFY_ARG_NOT_ZERO(&log, createInfo->width);
