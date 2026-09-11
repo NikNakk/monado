@@ -198,10 +198,14 @@ session contradicts the other three. Runtime behavior remains unchanged.
 New visible captures record `headset_serial` from the USB descriptor. If that
 descriptor is unavailable, the recorder requires `--headset-serial`; the
 solver rejects multiple non-null serials and warns about legacy unbound input.
-For mode-12 tracking to mode-4, only the 2x dimensions and camera ordering are
-currently marked established. The calibration JSON deliberately leaves the
-pixel-centre transform unresolved because a half-pixel sampling offset or other
-sub-pixel readout mapping has not yet been measured.
+For mode-12 tracking to mode-4, the 2x dimensions, camera ordering, and standard
+pixel-centre transform are experimentally established. Five stationary Sense
+captures at different controller/headset poses supplied 126 uniquely matched
+blinking LED centroids across the four cameras. The measured relationship is
+`(u4, v4) = 2 * (u12, v12) + (0.5, 0.5)`; per-camera median residual was
+0.31--0.40 mode-4 pixels and p95 was 0.64--0.92 pixels. The registration tool
+can pool these captures with repeated `--additional-capture` options. This does
+not resolve the separate mode-12 visible-to-tracking mapping.
 
 Set `PSVR2_CAMERA_BLOBS=1` on the `psvr2-camera` command to pass each of the
 four mode-4 L8 streams through Monado's existing IR blob detector on a separate

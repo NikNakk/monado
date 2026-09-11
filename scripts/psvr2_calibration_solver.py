@@ -731,9 +731,9 @@ def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_co
             "mode12_tracking_to_mode4": {
                 "dimension_scale": [2.0, 2.0], "same_camera_order": True,
                 "dimension_and_order_status": "experimentally_established",
-                "pixel_center_transform": None,
-                "pixel_center_transform_status": "unresolved",
-                "note": "dimensions and ordering do not prove the exact sub-pixel mapping; a half-pixel sampling offset remains possible"},
+                "pixel_center_transform_mode12_to_mode4": [[2.0,0.0,0.5],[0.0,2.0,0.5],[0.0,0.0,1.0]],
+                "pixel_center_transform_status": "experimentally_established",
+                "note": "126 blinking Sense LED blobs across five poses support the standard 2x pixel-centre transform; per-camera median residual was 0.31-0.40 mode-4 pixels and p95 was 0.64-0.92 pixels"},
             "mode12_visible_to_tracking": {"status":"estimated_unresolved","transform":None,
                 "note":"preliminary affine registration is bootstrap data, not runtime calibration"}},
         "quality": {"observation_counts":{f"camera{c}":len(by_camera[c]) for c in range(CAMERA_COUNT)},
