@@ -74,7 +74,7 @@ endif()
 if(XRT_HAVE_WAYLAND)
 	target_sources(comp_main PRIVATE comp_window_wayland.c)
 	pkg_get_variable(WL_PROTOS_PKG_DIR wayland-protocols pkgdatadir)
-	pkg_get_variable(WL_SCANNER wayland_scanner)
+	pkg_get_variable(WL_SCANNER wayland-scanner wayland_scanner)
 
 	set(WL_PROTOS_DIR "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols")
 	file(MAKE_DIRECTORY "${WL_PROTOS_DIR}")
@@ -96,6 +96,7 @@ if(XRT_HAVE_WAYLAND)
 
 	foreach(wl_proto_xml ${WL_PROTOS_XML})
 		get_filename_component(WL_PROTO ${wl_proto_xml} NAME_WE)
+
 		set(WL_PROTO_C "${WL_PROTOS_DIR}/${WL_PROTO}.c")
 		set(WL_PROTO_H "${WL_PROTOS_DIR}/${WL_PROTO}-client-protocol.h")
 
