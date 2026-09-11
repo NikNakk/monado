@@ -11,6 +11,7 @@ add_executable(
 	cli_cmd_lighthouse.c
 	cli_cmd_pssense_test.c
 	cli_cmd_psvr2_camera.c
+	cli_cmd_psvr2_constellation.c
 	cli_cmd_psvr2_pose.c
 	cli_cmd_probe.c
 	cli_cmd_pose_dump.c

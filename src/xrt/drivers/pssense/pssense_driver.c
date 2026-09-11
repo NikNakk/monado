@@ -278,6 +278,7 @@ struct pssense_device
 
 		bool use_constellation;
 		struct t_constellation_tracker *constellation_tracker;
+		struct xrt_tracking_origin *tracking_origin_before_constellation;
 		t_constellation_device_id_t constellation_device_id;
 		struct xrt_imu_sink *constellation_imu_sink;
 		struct m_relation_history *constellation_relation_history;
@@ -1383,7 +1384,24 @@ pssense_get_constellation_tracking_source_pose(struct t_constellation_tracker_tr
 	struct pssense_device *pssense = from_constellation_tracking_source(tracking_source);
 
 	os_thread_helper_lock(&pssense->controller_thread);
-	pssense_get_constellation_pose(pssense, when_ns, out_relation);
+	struct xrt_space_relation optical = XRT_SPACE_RELATION_ZERO;
+	struct xrt_space_relation imu = XRT_SPACE_RELATION_ZERO;
+	pssense_get_constellation_pose(pssense, when_ns, &optical);
+	pssense_get_imu_fusion_pose(pssense, when_ns, &imu);
+
+	/* Optical history supplies translation; the continuously integrated IMU is the orientation prior. */
+	*out_relation = optical;
+	if ((imu.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
+		out_relation->pose.orientation = imu.pose.orientation;
+		out_relation->angular_velocity = imu.angular_velocity;
+		out_relation->relation_flags &=
+		    ~(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		      XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+		out_relation->relation_flags |=
+		    imu.relation_flags &
+		    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		     XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+	}
 	os_thread_helper_unlock(&pssense->controller_thread);
 }
 
@@ -1899,6 +1917,10 @@ int
 pssense_add_to_constellation_tracker(struct xrt_device *xdev, struct t_constellation_tracker *tracker)
 {
 	struct pssense_device *pssense = from_device(xdev);
+	if (pssense->tracking.constellation_tracker != NULL) {
+		PSSENSE_ERROR(pssense, "Controller is already attached to a constellation tracker");
+		return -1;
+	}
 
 	struct t_constellation_tracker_device_params params = {
 	    .led_model = pssense->led_model,
@@ -1909,16 +1931,45 @@ pssense_add_to_constellation_tracker(struct xrt_device *xdev, struct t_constella
 	if (ret < 0) {
 		PSSENSE_ERROR(pssense, "Failed to add device to constellation tracker: %d", ret);
 		return -1;
-	} else {
-		pssense->tracking.use_constellation = true;
 	}
 
+	os_thread_helper_lock(&pssense->controller_thread);
 	pssense->tracking.constellation_imu_sink = params.imu_sink;
 	pssense->tracking.constellation_tracker = tracker;
+	pssense->tracking.use_constellation = true;
+	os_thread_helper_unlock(&pssense->controller_thread);
 
+	pssense->tracking.tracking_origin_before_constellation = pssense->base.tracking_origin;
 	pssense->base.tracking_origin = t_constellation_tracker_get_tracking_origin(tracker);
 
 	return 0;
+}
+
+void
+pssense_remove_from_constellation_tracker(struct xrt_device *xdev)
+{
+	struct pssense_device *pssense = from_device(xdev);
+	struct t_constellation_tracker *tracker = NULL;
+	t_constellation_device_id_t device_id = XRT_CONSTELLATION_INVALID_DEVICE_ID;
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	tracker = pssense->tracking.constellation_tracker;
+	if (tracker == NULL) {
+		os_thread_helper_unlock(&pssense->controller_thread);
+		return;
+	}
+	device_id = pssense->tracking.constellation_device_id;
+	pssense->tracking.constellation_imu_sink = NULL;
+	pssense->tracking.constellation_tracker = NULL;
+	pssense->tracking.constellation_device_id = XRT_CONSTELLATION_INVALID_DEVICE_ID;
+	pssense->tracking.use_constellation = false;
+	os_thread_helper_unlock(&pssense->controller_thread);
+	pssense->base.tracking_origin = pssense->tracking.tracking_origin_before_constellation;
+	pssense->tracking.tracking_origin_before_constellation = NULL;
+
+	if (tracker != NULL && device_id != XRT_CONSTELLATION_INVALID_DEVICE_ID) {
+		(void)t_constellation_tracker_remove_device(tracker, device_id);
+	}
 }
 
 /*!
