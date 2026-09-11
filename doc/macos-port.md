@@ -163,8 +163,9 @@ are admitted to a subsequent mode-4 fisheye refinement.
 authoritative 17-point controller model from the driver, generates
 neighbour-limited AP3P candidates, checks one-to-one matches and LED-facing
 constraints across the fixed four-camera rig, and jointly refines the rig pose.
-It deliberately exits with status 2 unless at least 12 blobs match, at least two
-cameras contribute three matches, and the refined RMS is at most 5 px:
+It deliberately exits with status 2 unless at least 12 blobs match within 8 px,
+at least two cameras contribute three matches, and the refined RMS is at most
+5 px:
 
 ```sh
 .venv/bin/python scripts/psvr2_tracking_geometry.py \
@@ -180,47 +181,47 @@ pixel. It always says `runtime_usable: false`: the visible-to-tracking overlap
 only supplies approximate central rays, and the wider mode-4 field remains
 uncalibrated.
 
-On the five stationary left-controller captures, poses 03 and 04 pass with 14
-matches each at 1.975 px and 2.997 px RMS. Pose 03 uses both front cameras plus
-one upper-camera point; pose 04 uses the two front cameras. The other three
-captures and the mask-waveform capture fail the guardrails. The mirrored right
-model is worse (13 matches at 4.524 px for pose 03 and rejection for pose 04),
-which supports but does not independently prove the recovered left-hand
-identities. These two admitted poses are seeds for a multi-pose mode-4 fisheye
-bundle adjustment, not a final tracking calibration. Peripheral observations
-from the outward cameras cannot be judged by the central-overlap bootstrap and
-must be recovered during that refinement.
+On the first five stationary left-controller captures, poses 03 and 04 pass
+with 14 matches each at 1.975 px and 2.997 px RMS. The original test capture
+also passes with 12 matches at 4.044 px, including seven camera-2 points. Poses
+02 and 05 fail the guardrails. Later captures 10, 12, and 13 provide accepted
+three-camera poses toward the sides of the rig. The mirrored right model is
+less consistent across poses, which supports but does not independently prove
+the recovered left-hand identities. These admitted poses are seeds for
+calibration experiments, not a final tracking calibration.
 
 `psvr2_tracking_affine_refine.py` performs the next provisional step while
 keeping the visible fisheye intrinsics and fixed physical rig untouched. It
-jointly adjusts the four affine mode-3-to-mode-4 readout transforms and one
-controller pose per training capture. Rejected near-misses are never consumed
-implicitly: each must be named with `--candidate-geometry`. The output records
-input hashes, initial and refined matrices, per-view residuals, optimization
-history, and an optional independently bootstrapped validation capture.
+jointly adjusts explicitly selected affine mode-3-to-mode-4 readout transforms
+and one controller pose per training capture; `--refine-camera` can hold the
+other camera mappings fixed as pose anchors. Rejected near-misses are never
+consumed implicitly: each must be named with `--candidate-geometry`. The output
+records input hashes, initial and refined matrices, per-view residuals,
+optimization history, and an optional independently bootstrapped validation
+capture.
 
-Training on accepted poses 03, 04, 06, 07, and 09 plus explicit near-misses 08
-and 10 gives a 2.376 px fixed-correspondence RMS. Capture 12 was excluded from
-that fit and then accepted as held-out validation with 21 matches across three
-cameras at 4.051 px RMS, including seven upper-right-camera matches. This is
-the first evidence that the provisional upper-right affine mapping generalizes
-beyond its seed frame. The result remains `runtime_usable: false`: the
-upper-left camera is weakly constrained, capture 11 lies outside the shared
-front-camera bootstrap region, and broader held-out coverage is still needed
-before replacing the overlap-only camera model.
+A camera-3-only fit passes its named held-out camera gate on capture 12 with
+seven camera-3 matches. However, the unchanged overlap mapping already gives
+six camera-3 matches at lower per-camera RMS, so the fitted matrix is not
+promoted. The symmetric camera-2 fit fails its named-camera validation:
+excluded capture 13 falls from five camera-2 matches with the original mapping
+to two after refinement. This indicates inconsistent seed identities or a
+non-affine peripheral mapping. Both experiments remain `runtime_usable: false`,
+and the original overlap matrices remain the least-bad bootstrap
+rather than a runtime calibration.
 
-The complete invocation used for that result is intentionally explicit:
+Selected-camera refinement and validation are intentionally explicit:
 
 ```sh
 .venv/bin/python scripts/psvr2_tracking_affine_refine.py \
-  /tmp/psvr2-camera-calibration-reviewed.json --hand left \
+  /tmp/psvr2-camera-calibration-reviewed.json --hand left --refine-camera 3 \
   --geometry /tmp/psvr2-crossmode-12-4-sense-pose-03/geometry-bootstrap-left.json \
   --geometry /tmp/psvr2-crossmode-12-4-sense-pose-04/geometry-bootstrap-left.json \
-  --geometry /tmp/psvr2-mode4-sense-cal-06/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-crossmode-12-4-sense-test/geometry-bootstrap-left.json \
   --geometry /tmp/psvr2-mode4-sense-cal-07/geometry-bootstrap-left.json \
   --geometry /tmp/psvr2-mode4-sense-cal-09/geometry-bootstrap-left.json \
+  --geometry /tmp/psvr2-mode4-sense-cal-10/geometry-bootstrap-left.json \
   --candidate-geometry /tmp/psvr2-mode4-sense-cal-08/geometry-bootstrap-left.json \
-  --candidate-geometry /tmp/psvr2-mode4-sense-cal-10/geometry-bootstrap-left.json \
   --validation-capture /tmp/psvr2-mode4-sense-cal-12 \
   --require-validation-camera 3 \
   --output /tmp/psvr2-mode4-affine-refined.json

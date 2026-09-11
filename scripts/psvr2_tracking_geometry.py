@@ -318,7 +318,7 @@ def bootstrap_pose(cameras, positions, normals, observations, neighbour_depth=5)
 
     ranked = []
     for candidate in candidates:
-        score = score_pose(candidate, cameras, positions, normals, observations, use_facing=True)
+        score = score_pose(candidate, cameras, positions, normals, observations, limit_px=8.0, use_facing=True)
         supporting = sum(len(entry["matches"]) >= 3 for entry in score["per_camera"])
         ranked.append((score["matched"], supporting, score["rms_px"], candidate, score))
     ranked.sort(key=lambda item: (-item[0], -item[1], item[2]))
@@ -327,8 +327,9 @@ def bootstrap_pose(cameras, positions, normals, observations, neighbour_depth=5)
 
     refined = []
     for item in ranked[:20]:
+        refined.append(item)
         transform = refine_pose(item[3], cameras, positions, normals, observations)
-        score = score_pose(transform, cameras, positions, normals, observations, use_facing=True)
+        score = score_pose(transform, cameras, positions, normals, observations, limit_px=8.0, use_facing=True)
         supporting = sum(len(entry["matches"]) >= 3 for entry in score["per_camera"])
         refined.append((score["matched"], supporting, score["rms_px"], transform, score))
     refined.sort(key=lambda item: (-item[0], -item[1], item[2]))
@@ -358,6 +359,7 @@ def bootstrap_pose(cameras, positions, normals, observations, neighbour_depth=5)
         "matched_blobs": best[0],
         "supporting_cameras": best[1],
         "rms_px": best[2],
+        "match_limit_px": 8.0,
         "best_candidate_T_rig_controller": best[3].tolist(),
         "per_camera": public_cameras,
     }
