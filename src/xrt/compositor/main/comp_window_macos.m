@@ -1146,11 +1146,17 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			if (cwm->prefetched_drawable != nil) {
 				macos_release_prefetched_drawable(cwm, "present_mismatch_release");
 			}
-			next_drawable_begin_ns = os_monotonic_get_ns();
+			uint64_t drawable_trace_begin_ns = os_monotonic_get_ns();
 			if (async_present) {
-				macos_trace_present_worker(cwm, "drawable_begin", job, next_drawable_begin_ns, 0, worker_start_ns,
-				                           next_drawable_begin_ns, 0, 0, 0, shared_event_wait);
+				/*
+				 * Do not include trace-writing latency in the nextDrawable measurement.
+				 * The actual call start is captured only after this row has been written;
+				 * drawable_end records both the real call begin and end timestamps.
+				 */
+				macos_trace_present_worker(cwm, "drawable_trace_begin", job, drawable_trace_begin_ns, 0,
+				                           worker_start_ns, 0, 0, 0, 0, shared_event_wait);
 			}
+			next_drawable_begin_ns = os_monotonic_get_ns();
 			drawable = [cwm->metal_layer nextDrawable];
 			after_drawable_ns = os_monotonic_get_ns();
 			if (async_present) {
