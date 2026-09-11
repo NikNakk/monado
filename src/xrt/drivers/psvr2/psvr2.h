@@ -49,6 +49,8 @@ extern "C" {
 #include "util/u_debug.h"
 
 #include "psvr2_protocol.h"
+#include "psvr2_linear_prediction.h"
+#include "psvr2_continuity_prediction.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -264,6 +266,15 @@ struct psvr2_hmd
 	/* Tracking state */
 	struct m_relation_history *slam_relation_history;
 	struct m_ff_vec3_f32 *ff_gyro;
+	struct psvr2_continuity_prediction continuity_prediction;
+	struct psvr2_continuity_params continuity_params;
+	bool continuity_prediction_enabled;
+	struct psvr2_linear_prediction linear_prediction;
+	struct psvr2_linear_prediction_params linear_prediction_params;
+	bool acceleration_prediction_enabled;
+	bool full_linear_horizon_enabled;
+	struct xrt_vec3 filtered_linear_velocity;
+	bool filtered_linear_velocity_initialized;
 	uint64_t timing_query_count;
 	time_duration_ns timing_prediction_total_ns;
 	time_duration_ns timing_imu_after_slam_total_ns;

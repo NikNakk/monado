@@ -52,9 +52,23 @@
 #include <assert.h>
 #include <math.h>
 
+#ifdef XRT_OS_OSX
+#include <stdint.h>
+#include <limits.h>
+#include <time.h>
+#include <unistd.h>
+#endif
+
 DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)
+DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", LONG_MIN)
+DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_skip_blocking_gpu_timestamps, "XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_defer_gpu_timestamps, "XRT_MACOS_DEFER_GPU_TIMESTAMPS", false)
+#endif
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
 /*
@@ -130,6 +144,16 @@ struct comp_renderer
 
 	struct comp_mirror_to_debug_gui mirror_to_debug_gui;
 
+#ifdef XRT_OS_OSX
+	FILE *late_render_trace;
+	uint64_t late_render_trace_rows;
+	int64_t late_render_target_ns;
+	int64_t late_render_wait_begin_ns;
+	int64_t late_render_wait_end_ns;
+	int64_t late_render_pose_begin_ns;
+	int64_t late_render_pose_end_ns;
+#endif
+
 	//! @}
 
 	//! @name Image-dependent members
@@ -140,6 +164,9 @@ struct comp_renderer
 
 	//! Which buffer was last submitted and has a fence pending.
 	int32_t fenced_buffer;
+
+	//! Frame id associated with fenced_buffer, used for deferred GPU timing feedback.
+	int64_t fenced_frame_id;
 
 	/*!
 	 * The render pass used to render to the target, it depends on the
@@ -173,6 +200,197 @@ struct comp_renderer
  * Functions.
  *
  */
+
+#ifdef XRT_OS_OSX
+static int64_t
+renderer_get_macos_late_render_lead_us(void)
+{
+	int64_t lead_us = debug_get_num_option_macos_late_render_lead_us();
+	return lead_us > 0 ? lead_us : 0;
+}
+
+static bool
+renderer_get_macos_late_render_desired_offset_us(int64_t *out_offset_us)
+{
+	long value = debug_get_num_option_macos_late_render_desired_offset_us();
+	if (value == LONG_MIN) {
+		*out_offset_us = 0;
+		return false;
+	}
+	*out_offset_us = (int64_t)value;
+	return true;
+}
+
+static void
+renderer_late_render_trace_open(struct comp_renderer *r)
+{
+	if (!debug_get_bool_option_comp_psvr2_timing_trace()) {
+		return;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_late_render.csv", dir, separator, (int)getpid());
+
+	r->late_render_trace = fopen(path, "w");
+	if (r->late_render_trace == NULL) {
+		COMP_WARN(r->c, "Could not open macOS late-render trace '%s'", path);
+		return;
+	}
+
+	setvbuf(r->late_render_trace, NULL, _IOFBF, 64 * 1024);
+	fputs("frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
+	      "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
+	      "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns,"
+	      "desired_offset_us,wait_mode,target_minus_desired_ns,pose_begin_minus_desired_ns\n",
+	      r->late_render_trace);
+	fflush(r->late_render_trace);
+}
+
+static void
+renderer_late_render_trace_close(struct comp_renderer *r)
+{
+	if (r->late_render_trace == NULL) {
+		return;
+	}
+	fflush(r->late_render_trace);
+	fclose(r->late_render_trace);
+	r->late_render_trace = NULL;
+}
+
+static void
+renderer_late_render_wait(struct comp_renderer *r)
+{
+	r->late_render_target_ns = 0;
+	r->late_render_pose_begin_ns = 0;
+	r->late_render_pose_end_ns = 0;
+	r->late_render_wait_begin_ns = (int64_t)os_monotonic_get_ns();
+	r->late_render_wait_end_ns = r->late_render_wait_begin_ns;
+
+	int64_t desired_offset_us = 0;
+	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
+	int64_t lead_us = renderer_get_macos_late_render_lead_us();
+	int64_t target_ns = 0;
+
+	if (desired_mode) {
+		uint64_t desired_u64 = r->c->frame.rendering.desired_present_time_ns;
+		if (desired_u64 == 0 || desired_u64 > INT64_MAX || desired_offset_us > INT64_MAX / 1000 ||
+		    desired_offset_us < INT64_MIN / 1000) {
+			return;
+		}
+
+		int64_t desired_ns = (int64_t)desired_u64;
+		int64_t offset_ns = desired_offset_us * 1000;
+		if ((offset_ns > 0 && desired_ns > INT64_MAX - offset_ns) ||
+		    (offset_ns < 0 && desired_ns < INT64_MIN - offset_ns)) {
+			return;
+		}
+		target_ns = desired_ns + offset_ns;
+	} else {
+		/* Legacy predicted-display-relative mode: opt-in only. */
+		int64_t predicted_ns = r->c->frame.rendering.predicted_display_time_ns;
+		if (lead_us <= 0 || predicted_ns <= 0 || lead_us > INT64_MAX / 1000) {
+			return;
+		}
+
+		int64_t lead_ns = lead_us * 1000;
+		if (predicted_ns <= lead_ns) {
+			return;
+		}
+		target_ns = predicted_ns - lead_ns;
+	}
+
+	r->late_render_target_ns = target_ns;
+
+	/*
+	 * Previous traces showed 2-3 ms scheduler overshoot with only a
+	 * 0.5 ms spin margin. This diagnostics-only path trades one CPU
+	 * core's time for repeatable wake timing around the latch cliff.
+	 */
+	const int64_t spin_margin_ns = 3000000;
+	for (;;) {
+		int64_t now_ns = (int64_t)os_monotonic_get_ns();
+		if (now_ns >= target_ns) {
+			r->late_render_wait_end_ns = now_ns;
+			break;
+		}
+
+		int64_t remaining_ns = target_ns - now_ns;
+		if (remaining_ns > spin_margin_ns) {
+			int64_t sleep_ns = remaining_ns - spin_margin_ns;
+			struct timespec ts = {
+			    .tv_sec = (time_t)(sleep_ns / 1000000000LL),
+			    .tv_nsec = (long)(sleep_ns % 1000000000LL),
+			};
+			(void)nanosleep(&ts, NULL);
+		}
+	}
+}
+
+static void
+renderer_late_render_trace_frame(struct comp_renderer *r)
+{
+	if (r->late_render_trace == NULL) {
+		return;
+	}
+
+	int64_t lead_us = renderer_get_macos_late_render_lead_us();
+	int64_t desired_offset_us = 0;
+	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
+	const char *wait_mode = desired_mode ? "desired" : (lead_us > 0 ? "predicted" : "none");
+	int64_t wait_requested_ns = r->late_render_target_ns > r->late_render_wait_begin_ns
+	                                ? r->late_render_target_ns - r->late_render_wait_begin_ns
+	                                : 0;
+	int64_t wait_actual_ns = r->late_render_wait_end_ns >= r->late_render_wait_begin_ns
+	                             ? r->late_render_wait_end_ns - r->late_render_wait_begin_ns
+	                             : 0;
+	int64_t wake_lateness_ns = r->late_render_target_ns != 0
+	                               ? r->late_render_wait_end_ns - r->late_render_target_ns
+	                               : 0;
+	int64_t pose_duration_ns = r->late_render_pose_begin_ns != 0 &&
+	                                   r->late_render_pose_end_ns >= r->late_render_pose_begin_ns
+	                               ? r->late_render_pose_end_ns - r->late_render_pose_begin_ns
+	                               : 0;
+	int64_t pose_begin_minus_target_ns = r->late_render_target_ns != 0 && r->late_render_pose_begin_ns != 0
+	                                         ? r->late_render_pose_begin_ns - r->late_render_target_ns
+	                                         : 0;
+	int64_t pose_begin_to_predicted_ns = r->late_render_pose_begin_ns != 0
+	                                         ? r->c->frame.rendering.predicted_display_time_ns -
+	                                               r->late_render_pose_begin_ns
+	                                         : 0;
+	int64_t desired_present_ns = (int64_t)r->c->frame.rendering.desired_present_time_ns;
+	int64_t target_minus_desired_ns = r->late_render_target_ns != 0
+	                                          ? r->late_render_target_ns - desired_present_ns
+	                                          : 0;
+	int64_t pose_begin_minus_desired_ns = r->late_render_pose_begin_ns != 0
+	                                              ? r->late_render_pose_begin_ns - desired_present_ns
+	                                              : 0;
+
+	fprintf(r->late_render_trace,
+	        "%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%s,%lld,%lld\n",
+	        (long long)r->c->frame.rendering.id, (long long)lead_us,
+	        (long long)r->c->frame.rendering.desired_present_time_ns,
+	        (long long)r->c->frame.rendering.predicted_display_time_ns,
+	        (long long)r->late_render_target_ns, (long long)r->late_render_wait_begin_ns,
+	        (long long)r->late_render_wait_end_ns, (long long)wait_requested_ns,
+	        (long long)wait_actual_ns, (long long)wake_lateness_ns,
+	        (long long)r->late_render_pose_begin_ns, (long long)r->late_render_pose_end_ns,
+	        (long long)pose_duration_ns, (long long)pose_begin_minus_target_ns,
+	        (long long)pose_begin_to_predicted_ns, (long long)desired_offset_us, wait_mode,
+	        (long long)target_minus_desired_ns, (long long)pose_begin_minus_desired_ns);
+
+	r->late_render_trace_rows++;
+	if (r->late_render_trace_rows % 256 == 0) {
+		fflush(r->late_render_trace);
+	}
+}
+#endif
 
 static void
 renderer_wait_queue_idle(struct comp_renderer *r)
@@ -319,6 +537,9 @@ calc_pose_data(struct comp_renderer *r,
 	int64_t end_timestamp_ns = begin_timestamp_ns + scanout_time_ns;
 
 	// Pose at beginning of scanout
+#ifdef XRT_OS_OSX
+	r->late_render_pose_begin_ns = (int64_t)os_monotonic_get_ns();
+#endif
 	xrt_result_t xret = xrt_device_get_view_poses( //
 	    r->c->xdev,                                //
 	    &default_eye_relation,                     //
@@ -328,6 +549,9 @@ calc_pose_data(struct comp_renderer *r,
 	    &head_relation[0],                         // out_head_relation
 	    xdev_fovs,                                 // out_fovs
 	    xdev_poses[0]);                            //
+#ifdef XRT_OS_OSX
+	r->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();
+#endif
 	if (xret != XRT_SUCCESS) {
 		struct u_pp_sink_stack_only sink;
 		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
@@ -347,6 +571,9 @@ calc_pose_data(struct comp_renderer *r,
 		    &head_relation[1],            // out_head_relation
 		    xdev_fovs,                    // out_fovs
 		    xdev_poses[1]);               // out_poses
+#ifdef XRT_OS_OSX
+		r->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();
+#endif
 		if (xret != XRT_SUCCESS) {
 			struct u_pp_sink_stack_only sink;
 			u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
@@ -419,7 +646,7 @@ renderer_build_rendering_target_resources(struct comp_renderer *r,
 
 	render_gfx_target_resources_init( //
 	    rtr,                          //
-	    &c->nr,                       //
+	    &c->nr,                       // struct render_resources
 	    &r->target_render_pass,       //
 	    image_view,                   //
 	    extent);                      //
@@ -511,6 +738,7 @@ renderer_close_renderings_and_fences(struct comp_renderer *r)
 	r->buffer_count = 0;
 	r->acquired_buffer = -1;
 	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
 }
 
 /*!
@@ -611,8 +839,31 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	r->c = c;
 	r->settings = &c->settings;
 
+#ifdef XRT_OS_OSX
+	renderer_late_render_trace_open(r);
+	int64_t desired_offset_us = 0;
+	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
+	int64_t late_render_lead_us = renderer_get_macos_late_render_lead_us();
+	if (desired_mode) {
+		COMP_INFO(c, "macOS desired-relative late-render experiment enabled: dispatch at desired present %+lld us",
+		          (long long)desired_offset_us);
+		if (late_render_lead_us > 0) {
+			COMP_WARN(c, "Both desired-relative and legacy predicted-relative late-render options are set; using desired-relative mode");
+		}
+	} else if (late_render_lead_us > 0) {
+		COMP_INFO(c, "macOS legacy predicted-relative late-render experiment enabled: dispatch lead %lld us",
+		          (long long)late_render_lead_us);
+	}
+	if (debug_get_bool_option_macos_skip_blocking_gpu_timestamps()) {
+		COMP_INFO(c, "macOS diagnostic: skipping blocking compositor GPU timestamp readback");
+	} else if (debug_get_bool_option_macos_defer_gpu_timestamps()) {
+		COMP_INFO(c, "macOS diagnostic: deferring compositor GPU timestamp readback until the previous frame fence signals");
+	}
+#endif
+
 	r->acquired_buffer = -1;
 	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
 	r->rtr_array = NULL;
 
 	// Setup the scratch images.
@@ -661,6 +912,22 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	}
 
 #ifdef XRT_OS_OSX
+	if (ret == VK_SUCCESS && debug_get_bool_option_macos_defer_gpu_timestamps() &&
+	    !debug_get_bool_option_macos_skip_blocking_gpu_timestamps() && r->fenced_frame_id >= 0) {
+		/*
+		 * The previous frame fence guarantees these query results are ready.
+		 * The current frame may already have recorded a vkCmdResetQueryPool,
+		 * but that reset cannot execute until after this function returns and
+		 * the current command buffer is submitted.
+		 */
+		uint64_t gpu_start_ns = 0;
+		uint64_t gpu_end_ns = 0;
+		if (render_resources_get_timestamps(&r->c->nr, &gpu_start_ns, &gpu_end_ns)) {
+			uint64_t now_ns = os_monotonic_get_ns();
+			comp_target_info_gpu(r->c->target, (uint64_t)r->fenced_frame_id, gpu_start_ns, gpu_end_ns, now_ns);
+		}
+	}
+
 	if (r->c->nr.apple_source_debug.pending) {
 		if (debug_get_bool_option_log_apple_samples()) {
 			r->c->nr.apple_source_debug.log_count++;
@@ -722,6 +989,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 #endif
 
 	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
 }
 
 static XRT_CHECK_RESULT VkResult
@@ -792,6 +1060,7 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 
 	// This buffer now have a pending fence.
 	r->fenced_buffer = r->acquired_buffer;
+	r->fenced_frame_id = frame_id;
 
 	return ret;
 }
@@ -933,6 +1202,10 @@ static void
 renderer_fini(struct comp_renderer *r)
 {
 	struct vk_bundle *vk = &r->c->base.vk;
+
+#ifdef XRT_OS_OSX
+	renderer_late_render_trace_close(r);
+#endif
 
 	// Command buffers
 	renderer_close_renderings_and_fences(r);
@@ -1214,6 +1487,10 @@ comp_renderer_draw(struct comp_renderer *r)
 	c->nr.apple_target_debug.frame_id = c->frame.rendering.id;
 #endif
 
+#ifdef XRT_OS_OSX
+	renderer_late_render_wait(r);
+#endif
+
 	VkResult res = VK_SUCCESS;
 	if (use_compute) {
 		render_compute_init(&render_c, &c->nr);
@@ -1225,6 +1502,10 @@ comp_renderer_draw(struct comp_renderer *r)
 	if (res != VK_SUCCESS) {
 		return XRT_ERROR_VULKAN;
 	}
+
+#ifdef XRT_OS_OSX
+	renderer_late_render_trace_frame(r);
+#endif
 
 #ifdef XRT_FEATURE_WINDOW_PEEK
 	if (c->peek) {
@@ -1311,8 +1592,14 @@ comp_renderer_draw(struct comp_renderer *r)
 	 */
 	chl_frame_state_fini(&frame_state);
 
+	bool collect_gpu_timestamps = xret == XRT_SUCCESS;
+#ifdef XRT_OS_OSX
+	collect_gpu_timestamps = collect_gpu_timestamps && !debug_get_bool_option_macos_skip_blocking_gpu_timestamps() &&
+	                         !debug_get_bool_option_macos_defer_gpu_timestamps();
+#endif
+
 	// Check timestamps.
-	if (xret == XRT_SUCCESS) {
+	if (collect_gpu_timestamps) {
 		/*
 		 * Get timestamps of GPU work (if available).
 		 */

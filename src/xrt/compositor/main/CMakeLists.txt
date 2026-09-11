@@ -56,7 +56,11 @@ if(WIN32)
 	target_sources(comp_main PRIVATE comp_window_mswin.c)
 endif()
 if(APPLE)
-	target_sources(comp_main PRIVATE comp_window_macos.m)
+	target_sources(comp_main PRIVATE comp_window_macos_latest.m)
+	set_source_files_properties(
+		comp_window_macos_latest.m
+		PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h"
+		)
 	target_link_libraries(
 		comp_main
 		PRIVATE "-framework AppKit" "-framework CoreGraphics" "-framework CoreVideo" "-framework Metal" "-framework MetalKit"
