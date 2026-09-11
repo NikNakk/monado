@@ -87,6 +87,22 @@ struct cs_model_info
 	struct xrt_vec3 gravity_vector;
 	struct xrt_quat gravity_swing;
 	float gravity_tolerance_rad;
+
+	/* Diagnostic counters for orientation/gravity-constrained bootstrap searches. */
+	struct
+	{
+		uint32_t p3p_solutions;
+		uint32_t gravity_checked;
+		uint32_t within_30_deg;
+		uint32_t within_45_deg;
+		uint32_t within_60_deg;
+		uint32_t passed_active_tolerance;
+		uint32_t passed_gravity_failed_scoring;
+		float min_error_rad;
+		uint32_t best_failed_matched_blobs;
+		uint32_t best_failed_visible_leds;
+		float best_failed_reprojection_error;
+	} gravity_diag;
 };
 
 struct correspondence_search
