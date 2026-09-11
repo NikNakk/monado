@@ -18,6 +18,11 @@ if(XRT_FEATURE_OPENXR)
 	add_subdirectory(openxr)
 endif()
 
+# Standalone OpenXR/Metal diagnostic scene for the native macOS PS VR2 path.
+if(APPLE AND XRT_FEATURE_OPENXR)
+	add_subdirectory(psvr2_openxr_test)
+endif()
+
 if(XRT_MODULE_MONADO_CLI)
 	add_subdirectory(cli)
 endif()
