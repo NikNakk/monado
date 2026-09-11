@@ -7,7 +7,7 @@
  * The proven legacy worker is intentionally preserved for ordinary frames. The
  * only behavioural change in the opt-in mode below happens after a blocking
  * CAMetalLayer nextDrawable call has already completed. If that acquisition took
- * at least one display refresh and a newer compositor frame is pending, the stale
+ * at least 1.25 display refreshes and a newer compositor frame is pending, the stale
  * active source is retired and the acquired drawable is bound to the newer frame.
  */
 
@@ -122,9 +122,10 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 		uint64_t drawable_wait_ns = after_drawable_ns > next_drawable_begin_ns
 		                                ? after_drawable_ns - next_drawable_begin_ns
 		                                : 0;
-		uint64_t stale_threshold_ns = cwm->display_period_ns > 0
-		                                  ? (uint64_t)cwm->display_period_ns
-		                                  : (uint64_t)ct->c->frame_interval_ns;
+		uint64_t stale_period_ns = cwm->display_period_ns > 0
+		                               ? (uint64_t)cwm->display_period_ns
+		                               : (uint64_t)ct->c->frame_interval_ns;
+		uint64_t stale_threshold_ns = stale_period_ns + stale_period_ns / 4;
 		struct macos_present_job stale_job;
 		struct macos_present_job replacement_job;
 		bool substitute = false;
@@ -528,7 +529,7 @@ comp_window_macos_create(struct comp_compositor *c)
 		}
 		COMP_INFO(c,
 		          "macOS diagnostic: legacy present-worker stale substitution enabled; normal drawable waits are "
-		          "unchanged and active frames are replaced only after waits of at least one refresh");
+		          "unchanged and active frames are replaced only after waits of at least 1.25 refreshes");
 	} else if (want_stale_substitute) {
 		COMP_WARN(c,
 		          "XRT_MACOS_PRESENT_STALE_SUBSTITUTE requires XRT_MACOS_ASYNC_PRESENT=1 and "
