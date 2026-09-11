@@ -2,14 +2,17 @@
 
 ## Rationale
 
-The 2026-09-09 and 2026-09-11 traces demonstrate two failure modes around `CAMetalLayer::nextDrawable`:
+The macOS traces demonstrate several distinct `CAMetalLayer::nextDrawable` failure modes:
 
-- synchronous / slot-off acquisition blocks the compositor. In the slot-off A/B, every drawable wait over 1 ms was followed by a skipped desired-present interval; ordinary waits around 6.5-7 ms were enough to push the path beyond the 8.34 ms 120 Hz budget;
-- the asynchronous one-drawable slot prevents that compositor block, but explicitly drops the current frame whenever a prefetched drawable is unavailable.
+- synchronous acquisition on the compositor thread blocks frame production and deterministically causes missed refreshes;
+- the asynchronous one-drawable slot avoids that block but explicitly drops the current frame whenever a prefetched drawable is unavailable;
+- the legacy off-thread present worker sustains near-120 Hz cadence, and conservative post-acquisition stale substitution now fixes its rare long-stall one-frame latency backlog.
 
-The existing present worker improves decoupling but still binds a presentation job **before** calling `nextDrawable`. If `nextDrawable` blocks, a newer compositor frame can arrive while the worker remains committed to the older active frame. When acquisition finally returns, that stale frame can still be presented.
+`XRT_MACOS_PRESENT_LATEST_FRAME=1` is a more architectural alternative: decouple drawable availability from frame selection by acquiring a drawable first, then bind the newest suitable pending compositor frame.
 
-`XRT_MACOS_PRESENT_LATEST_FRAME=1` adds an opt-in diagnostic mode intended to separate drawable availability from frame selection.
+Its first headset run appeared to regress to ~71.5 fps with ~8 ms renderer time. That result is now **invalid as an architecture comparison**, because the run omitted `XRT_MACOS_DEFER_GPU_TIMESTAMPS=1`. Later A/Bs showed that omission adds roughly 3.7 ms of blocking current-frame Vulkan GPU timestamp readback and independently produces the same ~70–73 fps state.
+
+The experiment therefore needs a corrected rerun against the current best stale-substitution baseline.
 
 ## Design
 
@@ -23,16 +26,23 @@ XRT_MACOS_METAL_SHARED_EVENT_WAIT=1
 
 and an exported Vulkan render-complete `MTLSharedEvent`.
 
+For a clean A/B, also require:
+
+```text
+XRT_MACOS_PRESENT_STALE_SUBSTITUTE=0
+XRT_MACOS_DEFER_GPU_TIMESTAMPS=1
+```
+
 The worker does the following:
 
 1. take the current pending presentation job as an initial candidate;
 2. call `nextDrawable` on the serial presentation worker, where it may block without blocking the compositor thread;
 3. after the drawable arrives, atomically inspect the one-deep pending slot again;
 4. if a newer frame is pending, select that newer frame for the acquired drawable and retire the older active source image;
-5. encode the existing Metal shared-event wait, IOSurface-to-drawable blit, scheduled present and completion handling for the selected frame;
-6. retire overwritten or superseded source images independently of the blocking drawable worker, using a Metal shared-event wait where available. This prevents stale source images from filling the three-image compositor pool while `nextDrawable` is blocked.
+5. encode the Metal shared-event wait, IOSurface-to-drawable blit, scheduled present and completion handling for the selected frame;
+6. retire overwritten or superseded source images independently of the blocking drawable worker, using a Metal shared-event wait where available.
 
-The existing modes remain available for A/B comparison. The new mode is disabled unless `XRT_MACOS_PRESENT_LATEST_FRAME=1` is explicitly set.
+The mode is disabled unless `XRT_MACOS_PRESENT_LATEST_FRAME=1` is explicitly set.
 
 ## Trace
 
@@ -42,7 +52,7 @@ With `PSVR2_TIMING_TRACE=1`, the mode adds:
 monado_psvr2_<PID>_latest_drawable.csv
 ```
 
-Columns are:
+Columns:
 
 ```text
 event,event_ns,drawable_ptr,acquire_begin_ns,acquire_end_ns,acquire_wait_ns,
@@ -52,22 +62,22 @@ selected_image_index,selected_enqueue_ns,source_age_ns
 
 Important events include:
 
-- `acquire_begin` / `acquired`: duration and identity of each drawable acquisition;
-- `supersede_active`: acquisition began for one frame but a newer pending frame was selected after the drawable became available;
-- `selected`: frame actually bound to the acquired drawable;
-- `execute_return` / `execute_error`: return from the existing Metal copy/present path.
+- `acquire_begin` / `acquired` — drawable acquisition duration and identity;
+- `supersede_active` — acquisition began for one frame but a newer pending frame was selected after drawable availability;
+- `selected` — frame actually bound to the acquired drawable;
+- `execute_return` / `execute_error` — result from Metal copy/present.
 
-`present_worker.csv` also gains mode-specific event names such as `latest_enqueued`, `latest_drawable_begin`, `latest_drawable_end`, `active_superseded_after_drawable`, and `superseded_pending` through the existing worker trace schema.
+`present_worker.csv` also gains mode-specific events such as `latest_enqueued`, `latest_drawable_begin`, `latest_drawable_end`, `active_superseded_after_drawable`, and `superseded_pending`.
 
-## First headset test
+## Corrected headset rerun
 
-Rebuild the existing macOS PSVR2 display tree after pulling the branch:
+Rebuild after pulling the branch:
 
 ```sh
 cmake --build build-macos-psvr2-display --target comp_main monado-service --parallel 4
 ```
 
-For the first A/B, retain the previous run-1 pre-latch value so the only intentional presentation-architecture change is the newest-frame worker:
+Use the same predictor, late-render and presentation settings as the current best baseline, but disable stale substitution and enable newest-frame selection:
 
 ```sh
 PSVR2_FILTERED_LINEAR_PREDICTION=0 \
@@ -83,37 +93,43 @@ XRT_MACOS_PRESENT_PRELATCH_US=2000 \
 XRT_MACOS_ASYNC_PRESENT=1 \
 XRT_MACOS_METAL_SHARED_EVENT_WAIT=1 \
 XRT_MACOS_PRESENT_WORKER=1 \
+XRT_MACOS_PRESENT_STALE_SUBSTITUTE=0 \
 XRT_MACOS_PRESENT_LATEST_FRAME=1 \
 XRT_MACOS_EARLY_DRAWABLE=0 \
 XRT_MACOS_DRAWABLE_SLOT=0 \
 XRT_MACOS_MAX_DRAWABLES=3 \
+XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS=0 \
+XRT_MACOS_DEFER_GPU_TIMESTAMPS=1 \
 ./build-macos-psvr2-display/src/xrt/targets/service/monado-service
 ```
 
-Use the same `hello_xr` invocation as the preceding tests.
+Use the same `hello_xr` invocation and broadly comparable head movement as the baseline tests.
 
-## Expected evidence if the design is working
+## What constitutes success now
 
-A useful run should show all of the following:
+The current stale-substitution baseline is already strong: ~119.48 fps, ~0.34% physical intervals >12 ms, renderer ~4.239 ms, and almost complete elimination of the >30 ms backlog state. The acquire-first mode therefore needs to offer a real benefit rather than merely become functional.
 
-1. `nextDrawable` may still block for ~6-7 ms or occasionally longer, but frame generation/rendering should continue rather than inheriting that wait on the compositor thread.
-2. During a long acquisition, `latest_enqueued` should continue to record newer frames.
-3. When a newer frame arrived during the wait, `latest_drawable.csv` should show `selected_frame_id > initial_frame_id` and a corresponding `supersede_active` event.
-4. The older source image should be retired without causing a large `image_reuse_wait_ns` or exhausting all three compositor images.
-5. The selected frame's `source_age_ns` at binding should remain low compared with the legacy worker's stale active-frame age after long drawable waits.
-6. `presentedTime` should ideally remain valid, allowing actual presentation cadence to be compared with the slot-off runs.
+A useful corrected run should show:
 
-The primary perceptual question is not whether drawable waits disappear — CoreAnimation may still impose them — but whether those waits cease to produce the characteristic stale-frame hold/catch-up motion.
+1. renderer median remains near ~4.2–4.3 ms with residual CPU renderer time near ~0.1 ms, confirming the timestamp confound is absent;
+2. physical cadence stays near 120 Hz and >12 ms intervals do not materially exceed the stale-substitution baseline;
+3. `latest_drawable.csv` shows sensible `selected_frame_id >= initial_frame_id` behavior and active supersession when newer frames arrive during acquisition;
+4. source-frame age and desired-to-physical latency are at least as good as the stale-substitution baseline;
+5. source-image reuse waits remain negligible and all three compositor images are not exhausted;
+6. `presentedTime` remains valid;
+7. subjectively, motion is at least as smooth as the stale-substitution baseline.
+
+If it only matches the current baseline while adding substantially more machinery, the conservative stale-substitution worker remains the preferred design.
 
 ## Failure modes to watch
 
-Stop and preserve the trace if any of these occur:
+Preserve the trace if any of these occur:
 
 - service deadlock or compositor image acquisition stalls;
 - repeated `latest_drawable_error` or `execute_error` events;
-- source-image reuse waits grow to approximately a refresh or more;
-- `selected_frame_id` stops advancing while newer jobs are being enqueued;
-- `presentedTime` becomes consistently zero as it did in the one-drawable-slot experiment;
+- source-image reuse waits approach a refresh;
+- `selected_frame_id` stops advancing while newer jobs are enqueued;
+- `presentedTime` becomes consistently zero;
 - visual output freezes while tracking/service logging continues.
 
-This is deliberately a diagnostic architecture. If it improves cadence and perceptual stability, the next step should be to fold the logic cleanly into `comp_window_macos.m` rather than retaining the wrapper/include arrangement used to keep this experiment isolated and reversible.
+This remains a diagnostic architecture. A genuinely superior result would justify folding the logic cleanly into `comp_window_macos.m`; otherwise the successful conservative legacy-worker stale substitution is the stronger current production direction.
