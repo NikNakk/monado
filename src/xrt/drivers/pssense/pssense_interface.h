@@ -61,6 +61,10 @@ pssense_create(struct xrt_prober *xp,
 int
 pssense_add_to_constellation_tracker(struct xrt_device *xdev, struct t_constellation_tracker *tracker);
 
+/* Detach a controller before destroying an externally-owned tracker. */
+void
+pssense_remove_from_constellation_tracker(struct xrt_device *xdev);
+
 /*!
  * @dir drivers/pssense
  *

@@ -266,6 +266,44 @@ to contribute to the resulting validation pose:
   --output /tmp/psvr2-mode4-camera2-intrinsics.json
 ```
 
+The four independently validated fits can be assembled into one strict,
+Monado-shaped four-camera artifact. The assembler checks the common base
+calibration hash, exact camera coverage, fixed distortion vectors, and each
+named-camera held-out result. It also converts the OpenCV rig transforms into
+the XRT camera poses expected by the constellation tracker and records both
+left and right 17-LED model provenance:
+
+```sh
+.venv/bin/python scripts/psvr2_tracking_calibration_assemble.py \
+  /tmp/psvr2-camera-calibration-reviewed.json \
+  /tmp/psvr2-mode4-camera0-intrinsics.json \
+  /tmp/psvr2-mode4-camera1-intrinsics.json \
+  /tmp/psvr2-mode4-camera2-intrinsics.json \
+  /tmp/psvr2-mode4-camera3-intrinsics.json \
+  --output /tmp/psvr2-mode4-tracking-calibration-provisional.json
+```
+
+The output remains `runtime_usable: false`. For bounded hardware experiments,
+`psvr2-constellation` is an explicit opt-in probe: it loads only that strict
+artifact format, requires camera mode 4, feeds all four images through the
+existing blob detector and constellation tracker, attaches whichever Sense
+controllers are connected, and emits their relative poses as CSV. It does not
+alter normal Monado startup or install the provisional calibration:
+
+```sh
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 \
+  build/src/xrt/targets/cli/monado-cli psvr2-constellation \
+  /tmp/psvr2-mode4-tracking-calibration-provisional.json 30
+```
+
+The same physical camera calibration applies to both hands. The right Sense
+uses its own mirrored 17-point model already present in the driver. A right
+controller can therefore be exercised by the same command, but remains
+explicitly marked as not independently held-out validated until a right-hand
+capture passes the offline geometry gate. The controller tracking prior merges
+the last optical translation with current Sense IMU orientation; before the
+first optical pose, the tracker must still perform its normal full search.
+
 ### PS VR2 four-camera calibration
 
 Hardware captures establish the mode-3 physical ordering and raster layout:
