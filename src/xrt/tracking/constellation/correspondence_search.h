@@ -36,7 +36,7 @@ enum correspondence_search_flags
 	CS_FLAG_MATCH_ALL_BLOBS = 0x8,
 	//! If the input obj_cam_pose contains a valid prior
 	CS_FLAG_HAVE_POSE_PRIOR = 0x10,
-	//! Use the provided gravity vector to check pose verticality. Depends on CS_FLAG_HAVE_POSE_PRIOR.
+	//! Use the input pose orientation and provided gravity vector to check pose verticality.
 	CS_FLAG_MATCH_GRAVITY = 0x20,
 };
 
@@ -77,7 +77,8 @@ struct cs_model_info
 	int min_led_depth, max_led_depth;
 	int max_blob_depth;
 
-	/* Valid when CS_FLAG_HAVE_POSE_PRIOR is set */
+	/* Full pose prior fields are valid when CS_FLAG_HAVE_POSE_PRIOR is set. */
+	/* pose_prior.orientation is also valid when CS_FLAG_MATCH_GRAVITY is set. */
 	struct xrt_pose pose_prior;
 	struct xrt_vec3 *pos_error_thresh;
 	struct xrt_vec3 *rot_error_thresh;
