@@ -1062,7 +1062,7 @@ ConstellationTracker::removeDevice(t_constellation_device_id_t device_id)
 	this->devices.erase(this->devices.begin() + index);
 }
 
-}; // namespace xrt::tracking::constellation
+}; // namespace xrt::tracking::constellation;
 
 using namespace xrt::tracking::constellation;
 
@@ -1112,6 +1112,7 @@ constellation_tracker_camera_fast_thread(void *ptr)
 				         (void *)camera);
 				camera->deferSampleToSlowThread(*sample);
 			}
+		}
 
 		os_thread_helper_lock(&camera->fast_processing_thread);
 	}
@@ -1183,6 +1184,7 @@ constellation_tracker_node_break_apart(xrt_frame_node *node)
 			if (camera->slow_processing_thread.initialized) {
 				os_thread_helper_stop_and_wait(&camera->slow_processing_thread);
 			}
+
 			if (camera->fast_processing_thread.initialized) {
 				os_thread_helper_stop_and_wait(&camera->fast_processing_thread);
 			}
