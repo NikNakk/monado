@@ -2,15 +2,13 @@
 
 ## Motivation
 
-The 2026-09-11 legacy present-worker control was substantially smoother than the earlier acquire-first newest-frame worker experiment and was objectively close to a true 120 Hz presentation cadence.
-
-The legacy worker has one narrow weakness: after a rare long `CAMetalLayer nextDrawable` stall (roughly 15 ms rather than the normal ~6.5–8.4 ms), a newer compositor frame can become pending while the worker is blocked. The worker then presents the old active frame and can remain one compositor frame behind for many subsequent 120 Hz presentations.
+The 2026-09-11 legacy present-worker control was objectively close to a true 120 Hz presentation cadence and subjectively one of the best runs, but it had one narrow weakness: after a rare long `CAMetalLayer nextDrawable` stall (roughly 15 ms rather than the normal ~6.5–8.4 ms), a newer compositor frame could become pending while the worker was blocked. The worker could then remain one compositor frame behind for many subsequent 120 Hz presentations.
 
 This experiment preserves the legacy worker's useful pacing and changes only that long-stall case.
 
-A later clean baseline also established an important experimental requirement: use deferred compositor GPU timestamp readback while judging cadence. Omitting `XRT_MACOS_DEFER_GPU_TIMESTAMPS=1` caused roughly 3.7 ms of current-frame renderer blocking and produced misleading ~70–73 fps / ~8 ms renderer runs. Those runs must not be used to judge the presentation architecture.
+A clean baseline also established an important experimental requirement: use deferred compositor GPU timestamp readback while judging cadence. Omitting `XRT_MACOS_DEFER_GPU_TIMESTAMPS=1` caused roughly 3.7 ms of current-frame renderer blocking and produced misleading ~70–73 fps / ~8 ms renderer runs.
 
-## New diagnostic mode
+## Diagnostic mode
 
 Enable:
 
@@ -49,11 +47,11 @@ The substitution is deliberately restricted to the exported `MTLSharedEvent` pat
 
 ## Why this differs from the acquire-first newest-frame worker
 
-The earlier `XRT_MACOS_PRESENT_LATEST_FRAME=1` experiment acquired a drawable in a separate wrapper path and then handed that drawable into the existing Metal copy/present code. Active-frame supersession worked, but the first test appeared to show roughly doubled renderer time and mixed 60/120 Hz presentation.
+`XRT_MACOS_PRESENT_LATEST_FRAME=1` acquires a drawable first and chooses the newest suitable frame after acquisition. Its first headset test appeared to regress to ~71.5 fps with ~8 ms renderer duration.
 
-That conclusion is now **confounded**: the test omitted `XRT_MACOS_DEFER_GPU_TIMESTAMPS=1`, and later A/Bs showed that omission alone adds roughly 3.7 ms of blocking current-frame GPU timestamp readback and drives the compositor into the same ~70–73 fps regime. The acquire-first architecture therefore needs a clean rerun before it can be accepted or rejected.
+That result is now known to be **confounded**: the run omitted `XRT_MACOS_DEFER_GPU_TIMESTAMPS=1`, and later A/Bs showed that omission alone adds roughly 3.7 ms of blocking current-frame GPU timestamp readback and produces the same ~70–73 fps regime. The acquire-first architecture therefore still needs a clean rerun.
 
-The stale-substitution mode remains the more conservative next experiment because it does **not** move drawable acquisition. It leaves `nextDrawable` exactly where it was in the smooth legacy worker and substitutes only after an unusually long wait has already happened.
+Stale substitution is more conservative because it leaves `nextDrawable` in exactly the legacy worker position and changes frame selection only after an exceptional stall has already occurred.
 
 ## Trace events
 
@@ -63,7 +61,7 @@ Existing `present_worker.csv` gains these event names when a substitution occurs
 - `stale_substitute_new`
 - `active_stale_substituted`
 
-A new file is also written when `PSVR2_TIMING_TRACE=1`:
+With `PSVR2_TIMING_TRACE=1`, a new file is written:
 
 ```text
 monado_psvr2_<pid>_stale_substitute.csv
@@ -77,21 +75,41 @@ old_timeline_value,new_timeline_value,old_image_index,new_image_index,
 old_enqueue_ns,new_enqueue_ns,new_source_age_ns
 ```
 
-The `threshold_ns` column records the exact 1.25-refresh cutoff used for that run.
+The `threshold_ns` column records the exact 1.25-refresh cutoff used.
 
-For the next headset run, the key questions are:
+## Successful headset result — 2026-09-11
 
-- does renderer time stay near the corrected baseline (~4.25 ms total, of which ~4.16 ms is the intentional late-render wait);
-- does physical cadence remain near 120 Hz;
-- do ordinary ~8.35–8.4 ms drawable waits remain untouched;
-- do rare ~15–16.8 ms waits generate one `stale_substitute` row;
-- does the substitution immediately prevent the prolonged one-frame backlog seen in the legacy control;
-- does `presentedTime - desired_present` remain near the normal ~25 ms rather than stepping to ~33 ms for many frames;
-- does source-image reuse remain effectively unblocked.
+`new-stale.zip` (PID 4385) behaved as intended and was subjectively reported as probably even better than the preceding known-good baseline.
 
-## Recommended next run
+Measured result:
 
-Use the corrected known-good predictor and presentation baseline, adding only stale substitution:
+- physical cadence ~119.48 fps;
+- 12/3560 physical intervals >12 ms (~0.34%);
+- renderer median ~4.239 ms;
+- intentional late-render wait median ~4.163 ms;
+- renderer residual after subtracting that wait ~0.073 ms;
+- `nextDrawable` median ~6.699 ms;
+- Metal commit-to-complete ~1.366 ms;
+- exactly **9 stale substitutions**;
+- all 9 waits were ~14.9–15.1 ms against the ~10.43 ms threshold;
+- ordinary ~6–8.4 ms waits did not trigger;
+- every substitution advanced the selected source by one frame, N → N+1.
+
+The important backlog measurements improved dramatically versus the preceding corrected legacy baseline:
+
+- `drawable_end` with a newer pending frame: **1,679 → 9**;
+- desired-to-physical latency >30 ms: **1,708 frames (~41.1%) → 19 frames (~0.53%)**;
+- the previous long ~33 ms latency episodes lasting hundreds of frames were replaced by brief ~two-frame recovery episodes back to the normal ~25 ms region.
+
+Head angular speed was somewhat higher than in the preceding baseline, so the subjective improvement is not explained by gentler motion.
+
+### Interpretation
+
+The conservative threshold cleanly separates normal worker pacing from genuine drawable starvation. It preserves the near-120 Hz cadence while preventing a rare long drawable stall from leaving presentation one compositor frame behind indefinitely.
+
+This is the **best current presentation baseline** and should be retained as the reference until another architecture demonstrates a measurable advantage.
+
+## Reference command
 
 ```sh
 PSVR2_FILTERED_LINEAR_PREDICTION=0 \
@@ -116,4 +134,4 @@ XRT_MACOS_DEFER_GPU_TIMESTAMPS=1 \
 ./build-macos-psvr2-display/src/xrt/targets/service/monado-service
 ```
 
-The earlier `XRT_MACOS_PRESENT_LATEST_FRAME` mode is not part of this experiment. It should be rerun separately with deferred GPU timestamps before drawing any further conclusion about that architecture.
+The next architecture A/B is the acquire-first `XRT_MACOS_PRESENT_LATEST_FRAME=1` mode with stale substitution disabled and deferred GPU timestamps explicitly enabled.
