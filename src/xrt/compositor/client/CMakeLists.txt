@@ -21,6 +21,9 @@ endif()
 
 if(APPLE)
 	target_sources(comp_client PRIVATE comp_metal_client.h comp_metal_client.m comp_metal_glue.c)
+	if(XRT_MODULE_COMPOSITOR_UTIL)
+		target_sources(comp_client PRIVATE comp_metal_release_sync.h comp_metal_release_sync.m)
+	endif()
 	target_link_libraries(comp_client PRIVATE "-framework Metal")
 endif()
 
