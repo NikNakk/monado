@@ -105,8 +105,36 @@ usage_flags_to_metal(enum xrt_swapchain_usage_bits bits)
 	if ((bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) {
 		usage |= MTLTextureUsageShaderWrite;
 	}
+	if ((bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT) != 0) {
+		usage |= MTLTextureUsagePixelFormatView;
+	}
 
 	return usage;
+}
+
+static const char *
+metal_texture_type_string(MTLTextureType type)
+{
+	switch (type) {
+	case MTLTextureType2D: return "2D";
+	case MTLTextureType2DArray: return "2DArray";
+	default: return "unknown";
+	}
+}
+
+static void
+client_metal_log_iosurface_info(uint32_t image_index, IOSurfaceRef surface)
+{
+	U_LOG_I("Metal swapchain IOSurface image=%u id=%u size=%zux%zu bpr=%zu bpe=%zu alloc=%zu planes=%zu pixel_format=0x%08x",
+	        image_index,
+	        (unsigned)IOSurfaceGetID(surface),
+	        IOSurfaceGetWidth(surface),
+	        IOSurfaceGetHeight(surface),
+	        IOSurfaceGetBytesPerRow(surface),
+	        IOSurfaceGetBytesPerElement(surface),
+	        IOSurfaceGetAllocSize(surface),
+	        IOSurfaceGetPlaneCount(surface),
+	        (unsigned)IOSurfaceGetPixelFormat(surface));
 }
 
 static void
@@ -265,7 +293,8 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
                                          struct xrt_swapchain **out_xsc)
 {
 	struct client_metal_compositor *c = client_metal_compositor(xc);
-	if (info->array_size != 1 || info->face_count != 1) {
+	if (info->face_count != 1) {
+		U_LOG_W("Metal swapchain face_count=%u is not supported (array_size=%u)", info->face_count, info->array_size);
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
 
@@ -274,12 +303,30 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	}
 
+	MTLTextureType texture_type = info->array_size > 1 ? MTLTextureType2DArray : MTLTextureType2D;
+	MTLTextureUsage texture_usage = usage_flags_to_metal(info->bits);
+	U_LOG_I("Metal swapchain create: size=%ux%u array_size=%u face_count=%u mip_count=%u sample_count=%u metal_format=%lld texture_type=%s(%lu) usage=0x%lx",
+	        info->width,
+	        info->height,
+	        info->array_size,
+	        info->face_count,
+	        info->mip_count,
+	        info->sample_count,
+	        (long long)info->format,
+	        metal_texture_type_string(texture_type),
+	        (unsigned long)texture_type,
+	        (unsigned long)texture_usage);
+
 	struct xrt_swapchain_create_info native_info = *info;
 	native_info.format = vk_format;
 
 	struct xrt_swapchain_create_properties xsccp = XRT_STRUCT_INIT;
 	xrt_result_t xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, &native_info, &xsccp);
 	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Metal swapchain native create-properties failed: result=%d array_size=%u vk_format=%u",
+		        xret,
+		        info->array_size,
+		        vk_format);
 		return xret;
 	}
 
@@ -288,8 +335,22 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	struct xrt_swapchain_native *xscn = NULL;
 	xret = xrt_comp_native_create_swapchain(c->xcn, &native_info, &xscn);
 	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Metal swapchain native Vulkan allocation failed: result=%d size=%ux%u array_size=%u face_count=%u mip_count=%u sample_count=%u vk_format=%u bits=0x%x",
+		        xret,
+		        info->width,
+		        info->height,
+		        info->array_size,
+		        info->face_count,
+		        info->mip_count,
+		        info->sample_count,
+		        vk_format,
+		        native_info.bits);
 		return xret;
 	}
+	U_LOG_I("Metal swapchain native Vulkan allocation succeeded: images=%u array_size=%u vk_format=%u",
+	        xscn->base.image_count,
+	        info->array_size,
+	        vk_format);
 
 	struct client_metal_swapchain *sc = calloc(1, sizeof(*sc));
 	if (sc == NULL) {
@@ -312,21 +373,55 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	                                                      width:info->width
 	                                                     height:info->height
 	                                                  mipmapped:info->mip_count > 1];
-	descriptor.usage = usage_flags_to_metal(info->bits);
+	descriptor.usage = texture_usage;
+	if (info->array_size > 1) {
+		descriptor.textureType = MTLTextureType2DArray;
+		descriptor.arrayLength = info->array_size;
+	}
 
 	for (uint32_t i = 0; i < xscn->base.image_count; i++) {
 		IOSurfaceRef surface = xscn->images[i].handle;
 		if (!xrt_graphics_buffer_is_valid(surface)) {
+			U_LOG_E("Metal swapchain native image %u has an invalid IOSurface handle (array_size=%u)",
+			        i,
+			        info->array_size);
 			client_metal_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_ALLOCATION;
 		}
+
+		client_metal_log_iosurface_info(i, surface);
 
 		id<MTLTexture> texture = [c->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
 		if (texture == nil) {
+			U_LOG_E("Metal IOSurface texture creation failed: image=%u array_size=%u texture_type=%s(%lu) metal_format=%lld usage=0x%lx IOSurface{id=%u size=%zux%zu bpr=%zu bpe=%zu alloc=%zu planes=%zu pixel_format=0x%08x}",
+			        i,
+			        info->array_size,
+			        metal_texture_type_string(descriptor.textureType),
+			        (unsigned long)descriptor.textureType,
+			        (long long)descriptor.pixelFormat,
+			        (unsigned long)descriptor.usage,
+			        (unsigned)IOSurfaceGetID(surface),
+			        IOSurfaceGetWidth(surface),
+			        IOSurfaceGetHeight(surface),
+			        IOSurfaceGetBytesPerRow(surface),
+			        IOSurfaceGetBytesPerElement(surface),
+			        IOSurfaceGetAllocSize(surface),
+			        IOSurfaceGetPlaneCount(surface),
+			        (unsigned)IOSurfaceGetPixelFormat(surface));
 			client_metal_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_ALLOCATION;
 		}
 
+		U_LOG_I("Metal swapchain texture image=%u type=%s(%lu) size=%lux%lu array_length=%lu mip_levels=%lu pixel_format=%lu usage=0x%lx",
+		        i,
+		        metal_texture_type_string(texture.textureType),
+		        (unsigned long)texture.textureType,
+		        (unsigned long)texture.width,
+		        (unsigned long)texture.height,
+		        (unsigned long)texture.arrayLength,
+		        (unsigned long)texture.mipmapLevelCount,
+		        (unsigned long)texture.pixelFormat,
+		        (unsigned long)texture.usage);
 		sc->base.images[i] = texture;
 	}
 
