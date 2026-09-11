@@ -25,6 +25,7 @@ extern const struct comp_target_factory comp_target_factory_macos;
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_stale_substitute, "XRT_MACOS_PRESENT_STALE_SUBSTITUTE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_display_sync, "XRT_MACOS_DISABLE_DISPLAY_SYNC", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_framebuffer_only, "XRT_MACOS_DISABLE_FRAMEBUFFER_ONLY", false)
 
 static FILE *macos_stale_substitute_trace = NULL;
 
@@ -35,17 +36,49 @@ comp_window_macos_init_display_sync_diagnostic(struct comp_target *ct)
 	if (!ret) {
 		return false;
 	}
+
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	CAMetalLayer *layer = cwm->metal_layer;
+	if (layer == nil) {
+		COMP_WARN(ct->c, "macOS diagnostic: CAMetalLayer missing after init_pre_vulkan");
+		return true;
+	}
+
+	COMP_INFO(ct->c,
+	          "macOS CAMetalLayer after init: framebufferOnly=%s displaySyncEnabled=%s presentsWithTransaction=%s "
+	          "maximumDrawableCount=%lu allowsNextDrawableTimeout=%s",
+	          [layer framebufferOnly] ? "true" : "false", [layer displaySyncEnabled] ? "true" : "false",
+	          [layer presentsWithTransaction] ? "true" : "false", (unsigned long)[layer maximumDrawableCount],
+	          [layer allowsNextDrawableTimeout] ? "true" : "false");
+
+	if (debug_get_bool_option_macos_disable_framebuffer_only()) {
+		BOOL previous_framebuffer_only = [layer framebufferOnly];
+		[layer setFramebufferOnly:NO];
+		BOOL current_framebuffer_only = [layer framebufferOnly];
+		COMP_INFO(ct->c,
+		          "macOS diagnostic: CAMetalLayer.framebufferOnly changed after layer init: was %s; now %s; "
+		          "presentation remains otherwise unchanged",
+		          previous_framebuffer_only ? "enabled" : "disabled",
+		          current_framebuffer_only ? "enabled" : "disabled");
+	}
+
 	if (debug_get_bool_option_macos_disable_display_sync()) {
-		struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-		BOOL previous_display_sync_enabled = [cwm->metal_layer displaySyncEnabled];
-		[cwm->metal_layer setDisplaySyncEnabled:NO];
-		BOOL current_display_sync_enabled = [cwm->metal_layer displaySyncEnabled];
+		BOOL previous_display_sync_enabled = [layer displaySyncEnabled];
+		[layer setDisplaySyncEnabled:NO];
+		BOOL current_display_sync_enabled = [layer displaySyncEnabled];
 		COMP_INFO(ct->c,
 		          "macOS diagnostic: CAMetalLayer.displaySyncEnabled changed after layer init: was %s; now %s; "
 		          "presentation remains otherwise unchanged",
 		          previous_display_sync_enabled ? "enabled" : "disabled",
 		          current_display_sync_enabled ? "enabled" : "disabled");
 	}
+
+	COMP_INFO(ct->c,
+	          "macOS CAMetalLayer diagnostic state: framebufferOnly=%s displaySyncEnabled=%s "
+	          "presentsWithTransaction=%s maximumDrawableCount=%lu allowsNextDrawableTimeout=%s",
+	          [layer framebufferOnly] ? "true" : "false", [layer displaySyncEnabled] ? "true" : "false",
+	          [layer presentsWithTransaction] ? "true" : "false", (unsigned long)[layer maximumDrawableCount],
+	          [layer allowsNextDrawableTimeout] ? "true" : "false");
 	return true;
 }
 
@@ -559,7 +592,7 @@ comp_window_macos_create(struct comp_compositor *c)
 		return NULL;
 	}
 
-	/* The CAMetalLayer is created by init_pre_vulkan, so apply display-sync diagnostics there. */
+	/* The CAMetalLayer is created by init_pre_vulkan, so apply layer diagnostics there. */
 	ct->init_pre_vulkan = comp_window_macos_init_display_sync_diagnostic;
 
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
