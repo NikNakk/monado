@@ -1,7 +1,10 @@
 # Copyright 2026, Nick Kennedy
 # SPDX-License-Identifier: BSL-1.0
 
-add_executable(psvr2-openxr-test psvr2_openxr_test.mm)
+# Build the controlled comparison wrapper. It includes the base diagnostic app
+# and adds a small distance/elevation/projected-size panel while preserving the
+# same OpenXR and Metal rendering path.
+add_executable(psvr2-openxr-test psvr2_openxr_test_matrix.mm)
 
 target_compile_features(psvr2-openxr-test PRIVATE cxx_std_17)
 target_link_libraries(
