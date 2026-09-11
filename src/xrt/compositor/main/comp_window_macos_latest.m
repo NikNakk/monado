@@ -23,6 +23,7 @@ comp_window_macos_create(struct comp_compositor *c);
 extern const struct comp_target_factory comp_target_factory_macos;
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_stale_substitute, "XRT_MACOS_PRESENT_STALE_SUBSTITUTE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
 
 static FILE *macos_stale_substitute_trace = NULL;
 
@@ -91,6 +92,7 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 	uint64_t after_vk_wait_ns = before_vk_wait_ns;
 	const char *wait_mode = "metal_shared_event";
 	double scheduled_present_host_s = 0.0;
+	bool immediate_present = debug_get_bool_option_macos_present_immediate();
 
 	macos_trace_present_worker(cwm, "worker_start", &active_job, worker_start_ns, 0, worker_start_ns,
 	                           0, 0, 0, 0, true);
@@ -274,17 +276,29 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 			}];
 		}
 
-		int64_t prelatch_us = debug_get_num_option_macos_present_prelatch_us();
-		if (prelatch_us < 0) {
-			prelatch_us = 0;
-		}
-		uint64_t prelatch_ns = (uint64_t)prelatch_us * 1000ULL;
-		metal_request_ns = target_output_ns > prelatch_ns ? target_output_ns - prelatch_ns : target_output_ns;
-		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)metal_request_ns);
-		if (scheduled_present_host_s > 0.0) {
-			[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
-		} else {
+		if (immediate_present) {
+			/*
+			 * Diagnostic A/B: keep the same target-output calculation and feedback,
+			 * but let CAMetalLayer choose the next display opportunity instead of
+			 * requesting a host-clock presentation time. A negative scheduled time in
+			 * present.csv marks this path without changing the existing trace schema.
+			 */
+			metal_request_ns = os_monotonic_get_ns();
+			scheduled_present_host_s = -1.0;
 			[command_buffer presentDrawable:drawable];
+		} else {
+			int64_t prelatch_us = debug_get_num_option_macos_present_prelatch_us();
+			if (prelatch_us < 0) {
+				prelatch_us = 0;
+			}
+			uint64_t prelatch_ns = (uint64_t)prelatch_us * 1000ULL;
+			metal_request_ns = target_output_ns > prelatch_ns ? target_output_ns - prelatch_ns : target_output_ns;
+			scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)metal_request_ns);
+			if (scheduled_present_host_s > 0.0) {
+				[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
+			} else {
+				[command_buffer presentDrawable:drawable];
+			}
 		}
 		after_present_call_ns = os_monotonic_get_ns();
 
@@ -525,6 +539,7 @@ comp_window_macos_create(struct comp_compositor *c)
 
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	bool want_stale_substitute = debug_get_bool_option_macos_present_stale_substitute();
+	bool want_immediate_present = debug_get_bool_option_macos_present_immediate();
 	if (want_stale_substitute && cwm->async_present && cwm->present_worker_enabled) {
 		ct->present = comp_window_macos_present_stale;
 		ct->destroy = comp_window_macos_destroy_stale;
@@ -537,10 +552,21 @@ comp_window_macos_create(struct comp_compositor *c)
 		COMP_INFO(c,
 		          "macOS diagnostic: legacy present-worker stale substitution enabled; normal drawable waits are "
 		          "unchanged and active frames are replaced only after waits of at least 1.25 refreshes");
+		if (want_immediate_present) {
+			COMP_INFO(c,
+			          "macOS diagnostic: immediate Metal presentation enabled; using presentDrawable: instead of "
+			          "presentDrawable:atTime: on the stale-substitution path");
+		}
 	} else if (want_stale_substitute) {
 		COMP_WARN(c,
 		          "XRT_MACOS_PRESENT_STALE_SUBSTITUTE requires XRT_MACOS_ASYNC_PRESENT=1 and "
 		          "XRT_MACOS_PRESENT_WORKER=1; using legacy presentation path");
+	}
+	if (want_immediate_present && !(want_stale_substitute && cwm->async_present && cwm->present_worker_enabled)) {
+		COMP_WARN(c,
+		          "XRT_MACOS_PRESENT_IMMEDIATE is currently a stale-substitution diagnostic and requires "
+		          "XRT_MACOS_PRESENT_STALE_SUBSTITUTE=1, XRT_MACOS_ASYNC_PRESENT=1 and XRT_MACOS_PRESENT_WORKER=1; "
+		          "using the legacy scheduled presentation path");
 	}
 	return ct;
 }
