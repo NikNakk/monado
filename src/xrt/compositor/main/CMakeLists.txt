@@ -74,7 +74,7 @@ endif()
 if(XRT_HAVE_WAYLAND)
 	target_sources(comp_main PRIVATE comp_window_wayland.c)
 	pkg_get_variable(WL_PROTOS_PKG_DIR wayland-protocols pkgdatadir)
-	pkg_get_variable(WL_SCANNER wayland-protocols wayland_scanner)
+	pkg_get_variable(WL_SCANNER wayland_scanner)
 
 	set(WL_PROTOS_DIR "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols")
 	file(MAKE_DIRECTORY "${WL_PROTOS_DIR}")
@@ -95,26 +95,33 @@ if(XRT_HAVE_WAYLAND)
 	endif()
 
 	foreach(wl_proto_xml ${WL_PROTOS_XML})
-		get_filename_component(wl_proto_name ${wl_proto_xml} NAME_WE)
-		set(wl_proto_client_header ${WL_PROTOS_DIR}/${wl_proto_name}-client-protocol.h)
-		set(wl_proto_private_code ${WL_PROTOS_DIR}/${wl_proto_name}-protocol.c)
+		get_filename_component(WL_PROTO ${wl_proto_xml} NAME_WE)
+		set(WL_PROTO_C "${WL_PROTOS_DIR}/${WL_PROTO}.c")
+		set(WL_PROTO_H "${WL_PROTOS_DIR}/${WL_PROTO}-client-protocol.h")
 
 		add_custom_command(
-			OUTPUT ${wl_proto_client_header}
-			COMMAND ${WL_SCANNER} client-header ${wl_proto_xml} ${wl_proto_client_header}
-			DEPENDS ${wl_proto_xml}
+			OUTPUT "${WL_PROTO_C}"
+			COMMAND "${WL_SCANNER}" private-code "${wl_proto_xml}" "${WL_PROTO_C}"
 			VERBATIM
+			DEPENDS "${WL_SCANNER}" "${wl_proto_xml}"
+			COMMENT "Generating ${WL_PROTO_C}"
 			)
+
 		add_custom_command(
-			OUTPUT ${wl_proto_private_code}
-			COMMAND ${WL_SCANNER} private-code ${wl_proto_xml} ${wl_proto_private_code}
-			DEPENDS ${wl_proto_xml}
+			OUTPUT "${WL_PROTO_H}"
+			COMMAND "${WL_SCANNER}" client-header "${wl_proto_xml}" "${WL_PROTO_H}"
 			VERBATIM
+			DEPENDS "${WL_SCANNER}" "${wl_proto_xml}"
+			COMMENT "Generating ${WL_PROTO_H}"
 			)
-		target_sources(comp_main PRIVATE ${wl_proto_client_header} ${wl_proto_private_code})
+
+		target_sources(comp_main PRIVATE ${WL_PROTO_C} ${WL_PROTO_H})
 	endforeach()
-endif()
 
+endif()
 if(ANDROID)
 	target_sources(comp_main PRIVATE comp_window_android.c)
+	target_link_libraries(comp_main PRIVATE aux_ogl aux_android)
 endif()
+
+target_link_libraries(comp_main PRIVATE comp_multi)
