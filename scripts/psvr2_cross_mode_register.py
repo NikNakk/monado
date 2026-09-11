@@ -6,7 +6,8 @@ psvr2_camera_mode_survey.py. Mode-3 819456-byte packets are decoded from their
 raw .bin files as 1280x640 side-by-side L8: the older contiguous-plane decode
 is intentionally not used. Stationary 12,4,12 Sense LED captures may be pooled
 with --additional-capture to test the tracking readouts' exact pixel-centre
-mapping.
+mapping. Other illuminated mode-12 viewpoints may be added with
+--bridge-capture to constrain only the visible/tracking overlap.
 """
 
 from __future__ import annotations
@@ -462,15 +463,36 @@ def analyze_mode12_tracking_to_mode4(captures: list[tuple[Path, dict]]) -> dict:
     }
 
 
-def analyze_mode12_bridge(root: Path, survey: dict) -> dict:
-    plan = survey.get("capture_plan", [])
-    visits = [i for i, mode in enumerate(plan) if mode == 12]
-    visit_assignments = []
-    matched_points: dict[tuple[int, int], list[tuple[np.ndarray, np.ndarray]]] = defaultdict(list)
+def hull_fraction(points: np.ndarray, width: int, height: int) -> float:
+    if len(points) < 3:
+        return 0.0
+    return float(cv2.contourArea(cv2.convexHull(points.astype(np.float32))) / (width * height))
 
-    for visit in visits:
-        visible = mode12_visit(root, visit, 8, 0)
-        tracking = mode12_visit(root, visit, 9, 0)
+
+def analyze_mode12_bridge(captures: list[tuple[Path, dict]]) -> dict:
+    """Estimate the visible/tracking mapping only where both readouts overlap.
+
+    SIFT is deliberately used only as cross-spectral evidence.  The tracking
+    readout has a wider field of view than the visible readout, so an affine
+    fit cannot establish tracking-camera intrinsics or validate extrapolation
+    beyond the reported source/destination hulls.
+    """
+    visit_assignments = []
+    capture_points: dict[int, list[dict]] = defaultdict(list)
+
+    for root, survey in captures:
+        plan = survey.get("capture_plan", [])
+        visits = [i for i, mode in enumerate(plan) if mode == 12]
+        complete = None
+        for visit in visits:
+            visible = mode12_visit(root, visit, 8, 0)
+            tracking = mode12_visit(root, visit, 9, 0)
+            if len(visible) == 4 and len(tracking) == 4:
+                complete = (visit, visible, tracking)
+                break
+        if complete is None:
+            continue
+        visit, visible, tracking = complete
         if len(visible) != 4 or len(tracking) != 4:
             continue
         scores = {i: {} for i in range(4)}
@@ -483,10 +505,26 @@ def analyze_mode12_bridge(root: Path, survey: dict) -> dict:
                 point_cache[(vis_plane, track_plane)] = (p1, p2)
         total, pairs = unique_assignment(scores, value_key="inliers")
         visit_assignments.append(
-            {"visit": visit, "total_inliers": total, "pairs": [{"visible_plane": a, "tracking_plane": b, "inliers": scores[a][b]["inliers"]} for a, b in pairs]}
+            {
+                "source": str(root),
+                "visit": visit,
+                "total_inliers": total,
+                "pairs": [
+                    {"visible_plane": a, "tracking_plane": b, "inliers": scores[a][b]["inliers"]}
+                    for a, b in pairs
+                ],
+            }
         )
-        for pair in pairs:
-            matched_points[pair].append(point_cache[pair])
+        for visible_plane, tracking_plane in pairs:
+            source, target = point_cache[(visible_plane, tracking_plane)]
+            capture_points[visible_plane].append(
+                {
+                    "source": str(root),
+                    "tracking_plane": tracking_plane,
+                    "visible_points": source,
+                    "tracking_points": target,
+                }
+            )
 
     consensus = {}
     for vis_plane in range(4):
@@ -500,26 +538,48 @@ def analyze_mode12_bridge(root: Path, survey: dict) -> dict:
 
     affine_models = []
     for vis_plane, track_plane in sorted(consensus.items()):
-        all_src = []
-        all_dst = []
-        for visit in visits:
-            visible = mode12_visit(root, visit, 8, 0)
-            tracking = mode12_visit(root, visit, 9, 0)
-            if vis_plane not in visible or track_plane not in tracking:
-                continue
-            p1, p2 = sift_matches(visible[vis_plane], tracking[track_plane])
-            all_src.append(p1)
-            all_dst.append(p2)
-        if not all_src:
+        groups = [group for group in capture_points[vis_plane] if group["tracking_plane"] == track_plane]
+        if not groups:
             continue
-        src = np.vstack(all_src)
-        dst = np.vstack(all_dst)
+        src = np.vstack([group["visible_points"] for group in groups])
+        dst = np.vstack([group["tracking_points"] for group in groups])
         inlier_count, matrix, mask = affine_inliers(src, dst)
         if matrix is None or mask is None:
             continue
         predicted = cv2.transform(src.reshape(-1, 1, 2), matrix).reshape(-1, 2)
-        errors = np.linalg.norm(predicted - dst, axis=1)
+        fit_errors = np.linalg.norm(predicted - dst, axis=1)
         inlier_mask = mask.ravel().astype(bool)
+        inlier_source = src[inlier_mask]
+        inlier_target = dst[inlier_mask]
+
+        held_out_errors = []
+        capture_diagnostics = []
+        offset = 0
+        for held_index, group in enumerate(groups):
+            count = len(group["visible_points"])
+            group_inliers = inlier_mask[offset : offset + count]
+            offset += count
+            other_source = [g["visible_points"] for i, g in enumerate(groups) if i != held_index]
+            other_target = [g["tracking_points"] for i, g in enumerate(groups) if i != held_index]
+            held_errors = np.empty(0, dtype=np.float32)
+            if group_inliers.any() and other_source:
+                _, held_matrix, _ = affine_inliers(np.vstack(other_source), np.vstack(other_target))
+                if held_matrix is not None:
+                    held_source = group["visible_points"][group_inliers]
+                    held_target = group["tracking_points"][group_inliers]
+                    held_prediction = cv2.transform(held_source.reshape(-1, 1, 2), held_matrix).reshape(-1, 2)
+                    held_errors = np.linalg.norm(held_prediction - held_target, axis=1)
+                    held_out_errors.extend(held_errors.tolist())
+            capture_diagnostics.append(
+                {
+                    "source": group["source"],
+                    "matches": count,
+                    "global_model_inliers": int(group_inliers.sum()),
+                    "held_out_error_median_px": None if not len(held_errors) else float(np.median(held_errors)),
+                    "held_out_error_p95_px": None if not len(held_errors) else float(np.percentile(held_errors, 95)),
+                }
+            )
+
         affine_models.append(
             {
                 "visible_plane": vis_plane,
@@ -527,31 +587,59 @@ def analyze_mode12_bridge(root: Path, survey: dict) -> dict:
                 "matches": int(len(src)),
                 "inliers": inlier_count,
                 "matrix_visible_to_tracking": matrix.tolist(),
-                "inlier_error_median_px": float(np.median(errors[inlier_mask])),
-                "inlier_error_p95_px": float(np.percentile(errors[inlier_mask], 95)),
+                "inlier_error_median_px": float(np.median(fit_errors[inlier_mask])),
+                "inlier_error_p95_px": float(np.percentile(fit_errors[inlier_mask], 95)),
+                "visible_inlier_bounds_px": {
+                    "minimum": inlier_source.min(axis=0).tolist(),
+                    "maximum": inlier_source.max(axis=0).tolist(),
+                    "convex_hull_image_fraction": hull_fraction(inlier_source, 320, 320),
+                },
+                "tracking_inlier_bounds_px": {
+                    "minimum": inlier_target.min(axis=0).tolist(),
+                    "maximum": inlier_target.max(axis=0).tolist(),
+                    "convex_hull_image_fraction": hull_fraction(inlier_target, 256, 254),
+                },
+                "leave_one_capture_out_error_median_px": None
+                if not held_out_errors
+                else float(np.median(held_out_errors)),
+                "leave_one_capture_out_error_p95_px": None
+                if not held_out_errors
+                else float(np.percentile(held_out_errors, 95)),
+                "captures": capture_diagnostics,
             }
         )
 
     identity_order = len(consensus) == 4 and all(consensus.get(i) == i for i in range(4))
     return {
+        "status": "estimated_overlap_only" if identity_order and len(affine_models) == 4 else "insufficient_evidence",
         "visit_assignments": visit_assignments,
         "identity_order_supported": identity_order,
         "affine_bootstrap_models": affine_models,
+        "runtime_usable": False,
         "note": (
-            "These cross-spectral affine fits are a bootstrap relationship only. Residual lens/readout non-linearity must be "
-            "measured during calibration before treating them as an exact intrinsic-coordinate transform."
+            "Cross-spectral affine fits constrain only the measured central overlap. The 256x254 tracking readout has "
+            "a wider field of view than the 320x320 visible readout, and held-out viewpoint consistency is not yet "
+            "sufficient to extrapolate visible fisheye intrinsics into the unobserved tracking region. Held-out errors "
+            "are evaluated on correspondences selected as inliers by the all-capture model and are consistency "
+            "diagnostics, not fully independent validation."
         ),
     }
 
 
-def analyze_burst(root: Path, survey: dict, additional_captures: list[tuple[Path, dict]] | None = None) -> dict:
+def analyze_burst(
+    root: Path,
+    survey: dict,
+    additional_captures: list[tuple[Path, dict]] | None = None,
+    bridge_captures: list[tuple[Path, dict]] | None = None,
+) -> dict:
     captures = [(root, survey), *(additional_captures or [])]
+    all_bridge_captures = [*captures, *(bridge_captures or [])]
     return {
-        "format": "psvr2-cross-mode-registration-v3",
+        "format": "psvr2-cross-mode-registration-v4",
         "source": str(root),
-        "sources": [str(capture_root) for capture_root, _ in captures],
+        "sources": [str(capture_root) for capture_root, _ in all_bridge_captures],
         "visible_mode3_to_mode12": analyze_visible_burst(root, survey),
-        "mode12_visible_to_tracking": analyze_mode12_bridge(root, survey),
+        "mode12_visible_to_tracking": analyze_mode12_bridge(all_bridge_captures),
         "mode12_tracking_to_mode4": analyze_mode12_tracking_to_mode4(captures),
     }
 
@@ -564,6 +652,12 @@ def main() -> None:
         action="append",
         default=[],
         help="additional stationary mode-12/mode-4 capture; may be repeated to pool LED positions",
+    )
+    parser.add_argument(
+        "--bridge-capture",
+        action="append",
+        default=[],
+        help="additional mode-12 capture used only for visible/tracking overlap; may be repeated",
     )
     parser.add_argument("--output", default="psvr2-cross-mode-registration.json")
     args = parser.parse_args()
@@ -584,7 +678,15 @@ def main() -> None:
             raise SystemExit(f"Missing {capture_survey_path}")
         additional_captures.append((capture_root, json.loads(capture_survey_path.read_text())))
 
-    report = analyze_burst(root, survey, additional_captures)
+    bridge_captures = []
+    for capture_dir in args.bridge_capture:
+        capture_root = Path(capture_dir)
+        capture_survey_path = capture_root / "survey.json"
+        if not capture_survey_path.exists():
+            raise SystemExit(f"Missing {capture_survey_path}")
+        bridge_captures.append((capture_root, json.loads(capture_survey_path.read_text())))
+
+    report = analyze_burst(root, survey, additional_captures, bridge_captures)
     Path(args.output).write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

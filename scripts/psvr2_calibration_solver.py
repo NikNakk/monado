@@ -24,7 +24,7 @@ import cv2
 import numpy as np
 
 CAMERA_COUNT = 4
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def fisheye_flag(name):
@@ -640,7 +640,7 @@ def serializable_intrinsic(value, T_R_C):
 
 
 def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_common=6,
-          handeye_min_cameras=2):
+          handeye_min_cameras=2, cross_mode_registration=None):
     datasets, observations = load_inputs(dataset_paths, min_corners)
     corners = board_points(7, 5, square_length_m); size = (640, 640)
     by_camera = {c: sorted([o for (_,_,camera), o in observations.items() if camera == c], key=lambda o:o.key)
@@ -670,6 +670,9 @@ def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_co
         all(v["translation_residual_m"]["median"] < .03 for v in nominal["per_dataset"].values()))
     if not translation_trusted:
         warnings.append("SLAM-to-rig translation is untrusted: at least one session exceeds the 30 mm median or combined 50 mm p95 guardrail")
+    warnings.append(
+        "mode-4 tracking-camera intrinsics remain unresolved: visible/tracking registration constrains only their central overlap"
+    )
     if not hasattr(cv2, "calibrateHandEye"):
         warnings.append("OpenCV calibrateHandEye Python binding unavailable; used explicit Park AX=XB solver")
     for edge in pairwise:
@@ -715,6 +718,27 @@ def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_co
         "interpretation": "T_imu_head is a fixed right-side transform and is absorbed by hand-eye. The runtime's orientation-only +90deg slam correction materially changes translation consistency because the recorded pre-correction pose combines a position already in tracker axes with an orientation that still needs correction; a full rigid +90deg correction does not help.",
     }
     pair_json = [{k:(matrix_json(v) if k.startswith("T_") else v) for k,v in e.items() if k != "frame_keys"} for e in pairwise]
+    default_tracking_to_mode4 = {
+        "dimension_scale": [2.0, 2.0], "same_camera_order": True,
+        "dimension_and_order_status": "experimentally_established",
+        "pixel_center_transform_mode12_to_mode4": [[2.0,0.0,0.5],[0.0,2.0,0.5],[0.0,0.0,1.0]],
+        "pixel_center_transform_status": "experimentally_established",
+        "note": "126 blinking Sense LED blobs across five poses support the standard 2x pixel-centre transform; per-camera median residual was 0.31-0.40 mode-4 pixels and p95 was 0.64-0.92 pixels",
+    }
+    visible_to_tracking = {
+        "status": "estimated_unresolved", "runtime_usable": False, "affine_bootstrap_models": [],
+        "note": "No cross-mode registration report was supplied; preliminary affine registration is not runtime calibration",
+    }
+    registration_format = None
+    registration_sources = []
+    tracking_to_mode4 = default_tracking_to_mode4
+    if cross_mode_registration is not None:
+        registration_format = cross_mode_registration.get("format")
+        if registration_format != "psvr2-cross-mode-registration-v4":
+            raise ValueError(f"unsupported cross-mode registration format: {registration_format}")
+        registration_sources = cross_mode_registration.get("sources", [])
+        visible_to_tracking = cross_mode_registration["mode12_visible_to_tracking"]
+        tracking_to_mode4 = cross_mode_registration["mode12_tracking_to_mode4"]
     return {
         "schema_version": SCHEMA_VERSION,
         "headset_serial": serials[0] if serials else None,
@@ -727,15 +751,16 @@ def solve(dataset_paths, square_length_m, marker_length_m, min_corners=8, min_co
                 "board_pose_diagnostics":board_diag},
         "slam": slam_json,
         "tracking_readout": {
+            "registration_format": registration_format,
+            "registration_sources": registration_sources,
             "mode3_to_mode12_visible": {"scale_x":.5,"scale_y":.5,"same_camera_order":True,"flip":False,"translation_px":[0,0],"status":"experimentally_exact"},
-            "mode12_tracking_to_mode4": {
-                "dimension_scale": [2.0, 2.0], "same_camera_order": True,
-                "dimension_and_order_status": "experimentally_established",
-                "pixel_center_transform_mode12_to_mode4": [[2.0,0.0,0.5],[0.0,2.0,0.5],[0.0,0.0,1.0]],
-                "pixel_center_transform_status": "experimentally_established",
-                "note": "126 blinking Sense LED blobs across five poses support the standard 2x pixel-centre transform; per-camera median residual was 0.31-0.40 mode-4 pixels and p95 was 0.64-0.92 pixels"},
-            "mode12_visible_to_tracking": {"status":"estimated_unresolved","transform":None,
-                "note":"preliminary affine registration is bootstrap data, not runtime calibration"}},
+            "mode12_tracking_to_mode4": tracking_to_mode4,
+            "mode12_visible_to_tracking": visible_to_tracking,
+            "mode4_intrinsics": {
+                "status": "unresolved",
+                "runtime_usable": False,
+                "reason": "the wider tracking field of view is not observed by the visible readout; composing an overlap-only affine would extrapolate the visible fisheye model",
+            }},
         "quality": {"observation_counts":{f"camera{c}":len(by_camera[c]) for c in range(CAMERA_COUNT)},
                     "accepted_views":{f"camera{c}":intrinsics[c]["accepted"] for c in range(CAMERA_COUNT)},
                     "rejected_views":{f"camera{c}":intrinsics[c]["rejected"] for c in range(CAMERA_COUNT)},

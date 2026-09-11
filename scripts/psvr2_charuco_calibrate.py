@@ -284,6 +284,13 @@ def command_solve(args: argparse.Namespace) -> int:
         raise SystemExit("target dimensions must be positive")
     if args.marker_length_mm >= args.square_length_mm:
         raise SystemExit("--marker-length-mm must be smaller than --square-length-mm")
+    cross_mode_registration = None
+    if args.cross_mode_registration:
+        registration_path = Path(args.cross_mode_registration)
+        try:
+            cross_mode_registration = json.loads(registration_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Could not read cross-mode registration {registration_path}: {exc}") from exc
     result = solve(
         [Path(path) for path in args.datasets],
         args.square_length_mm / 1000.0,
@@ -291,6 +298,7 @@ def command_solve(args: argparse.Namespace) -> int:
         min_corners=args.min_corners,
         min_common=args.min_common_corners,
         handeye_min_cameras=args.handeye_min_cameras,
+        cross_mode_registration=cross_mode_registration,
     )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -329,6 +337,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Minimum shared IDs for a synchronized stereo observation")
     solve.add_argument("--handeye-min-cameras", type=int, default=2, choices=range(1, 5),
                        help="Minimum cameras in a jointly refined board pose used for hand-eye (default: 2)")
+    solve.add_argument("--cross-mode-registration",
+                       help="v4 JSON from psvr2_cross_mode_register.py to embed with its coverage limitations")
     solve.add_argument("--output", required=True, help="Versioned calibration JSON output path")
     solve.set_defaults(func=command_solve)
     return parser
