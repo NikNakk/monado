@@ -118,3 +118,85 @@ comp_semaphore_create(struct vk_bundle *vk,
 	return XRT_ERROR_VULKAN;
 #endif
 }
+
+#ifdef XRT_OS_OSX
+xrt_result_t
+comp_semaphore_create_metal_shared_event(struct vk_bundle *vk,
+                                         struct xrt_compositor_semaphore **out_xcsem,
+                                         void **out_mtl_shared_event)
+{
+#ifdef VK_KHR_timeline_semaphore
+	if (!vk->features.timeline_semaphore || !vk->has_EXT_metal_objects || vk->vkExportMetalObjectsEXT == NULL) {
+		return XRT_ERROR_VULKAN;
+	}
+
+	VkSemaphoreTypeCreateInfo type_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+	    .pNext = NULL,
+	    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+	    .initialValue = 0,
+	};
+
+	VkExportMetalObjectCreateInfoEXT metal_export_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+	    .pNext = &type_info,
+	    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_SHARED_EVENT_BIT_EXT,
+	};
+
+	VkSemaphoreCreateInfo create_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+	    .pNext = &metal_export_info,
+	    .flags = 0,
+	};
+
+	VkSemaphore semaphore = VK_NULL_HANDLE;
+	VkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &semaphore);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vkCreateSemaphore for Metal shared event: %s", vk_result_string(ret));
+		return XRT_ERROR_VULKAN;
+	}
+
+	VK_NAME_SEMAPHORE(vk, semaphore, "comp_semaphore Metal shared-event timeline");
+
+	VkExportMetalSharedEventInfoEXT shared_event_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_SHARED_EVENT_INFO_EXT,
+	    .pNext = NULL,
+	    .semaphore = semaphore,
+	    .event = VK_NULL_HANDLE,
+	    .mtlSharedEvent = NULL,
+	};
+	VkExportMetalObjectsInfoEXT export_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+	    .pNext = &shared_event_info,
+	};
+
+	vk->vkExportMetalObjectsEXT(vk->device, &export_info);
+	if (shared_event_info.mtlSharedEvent == NULL) {
+		VK_ERROR(vk, "vkExportMetalObjectsEXT returned no MTLSharedEvent for timeline semaphore");
+		vk->vkDestroySemaphore(vk->device, semaphore, NULL);
+		return XRT_ERROR_VULKAN;
+	}
+
+	struct comp_semaphore *csem = U_TYPED_CALLOC(struct comp_semaphore);
+	if (csem == NULL) {
+		vk->vkDestroySemaphore(vk->device, semaphore, NULL);
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	csem->base.reference.count = 1;
+	csem->base.destroy = comp_semaphore_destroy;
+	csem->base.wait = comp_semaphore_wait;
+	csem->semaphore = semaphore;
+	csem->handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
+	csem->vk = vk;
+
+	*out_xcsem = &csem->base;
+	*out_mtl_shared_event = (void *)shared_event_info.mtlSharedEvent;
+
+	return XRT_SUCCESS;
+#else
+	VK_ERROR(vk, "No compile time support for VK_KHR_timeline_semaphore!");
+	return XRT_ERROR_VULKAN;
+#endif
+}
+#endif

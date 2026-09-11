@@ -18,6 +18,10 @@
 #include "util/comp_semaphore.h"
 #include "xrt/xrt_compositor.h"
 
+#ifdef XRT_OS_OSX
+#include "util/comp_metal_semaphore_probe.h"
+#endif
+
 
 /*
  *
@@ -48,6 +52,14 @@ base_create_swapchain(struct xrt_compositor *xc,
                       struct xrt_swapchain **out_xsc)
 {
 	struct comp_base *cb = comp_base(xc);
+
+#ifdef XRT_OS_OSX
+	// Diagnostic-only Stage 1 probe. By the time swapchain creation is
+	// reachable the native compositor's Vulkan bundle is fully initialized.
+	// The probe is process-once and its result deliberately does not affect
+	// swapchain creation or the existing blocking Metal release handoff.
+	comp_metal_semaphore_probe(&cb->vk);
+#endif
 
 	/*
 	 * In case the default get properties function have been overridden

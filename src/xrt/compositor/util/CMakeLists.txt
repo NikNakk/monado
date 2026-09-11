@@ -36,3 +36,8 @@ target_link_libraries(
 	PUBLIC xrt-interfaces comp_includes
 	PRIVATE aux_util aux_os aux_vk comp_render
 	)
+
+if(APPLE)
+	target_sources(comp_util PRIVATE comp_metal_semaphore_probe.h comp_metal_semaphore_probe.m)
+	target_link_libraries(comp_util PRIVATE "-framework Metal")
+endif()

@@ -78,6 +78,23 @@ comp_semaphore_create(struct vk_bundle *vk,
                       xrt_graphics_sync_handle_t *out_handle,
                       struct xrt_compositor_semaphore **out_xcsem);
 
+#ifdef XRT_OS_OSX
+/*!
+ * Creates an in-process timeline semaphore backed by an exportable Metal
+ * MTLSharedEvent. No native/IPC synchronization handle is created.
+ *
+ * The returned Metal object is an unsafe-unretained Vulkan export and remains
+ * backed by the returned semaphore. Objective-C callers that keep it must
+ * retain it explicitly.
+ *
+ * @ingroup comp_util
+ */
+xrt_result_t
+comp_semaphore_create_metal_shared_event(struct vk_bundle *vk,
+                                         struct xrt_compositor_semaphore **out_xcsem,
+                                         void **out_mtl_shared_event);
+#endif
+
 
 #ifdef __cplusplus
 }
