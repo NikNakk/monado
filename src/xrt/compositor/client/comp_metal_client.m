@@ -11,16 +11,57 @@
 #import <IOSurface/IOSurface.h>
 
 #include "client/comp_metal_client.h"
+#include "os/os_time.h"
 #include "util/comp_swapchain.h"
 #include "util/u_debug.h"
 
 #include <assert.h>
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(log_metal_swapchain_samples,
                            "XRT_COMPOSITOR_LOG_METAL_SWAPCHAIN_SAMPLES",
                            false)
+DEBUG_GET_ONCE_BOOL_OPTION(metal_release_timing_trace, "PSVR2_TIMING_TRACE", false)
+
+#define METAL_RELEASE_TRACE_WINDOW 240
+
+struct client_metal_release_trace
+{
+	FILE *file;
+	pthread_mutex_t mutex;
+	bool mutex_initialized;
+	uint64_t rows;
+	uint32_t window_count;
+	uint64_t wait_samples_ns[METAL_RELEASE_TRACE_WINDOW];
+	uint64_t wait_sum_ns;
+	uint64_t total_sum_ns;
+	uint64_t total_min_ns;
+	uint64_t total_max_ns;
+	uint32_t over_4_17_ms;
+	uint32_t over_8_34_ms;
+	uint32_t over_12_50_ms;
+};
+
+struct client_metal_release_sample
+{
+	uint64_t swapchain_id;
+	uint32_t image_index;
+	uint64_t barrier_entry_ns;
+	uint64_t command_buffer_created_ns;
+	uint64_t before_commit_ns;
+	uint64_t after_commit_ns;
+	uint64_t after_wait_ns;
+	int64_t metal_status;
+	double gpu_start_time_s;
+	double gpu_end_time_s;
+	uint64_t gpu_duration_ns;
+};
 
 
 struct client_metal_compositor;
@@ -39,6 +80,7 @@ struct client_metal_compositor
 	struct xrt_compositor_native *xcn;
 	id<MTLDevice> device;
 	id<MTLCommandQueue> command_queue;
+	struct client_metal_release_trace release_trace;
 };
 
 static inline struct client_metal_swapchain *
@@ -63,6 +105,213 @@ static inline struct xrt_compositor *
 to_native_compositor(struct xrt_compositor *xc)
 {
 	return &client_metal_compositor(xc)->xcn->base;
+}
+
+static int
+compare_u64(const void *a, const void *b)
+{
+	const uint64_t lhs = *(const uint64_t *)a;
+	const uint64_t rhs = *(const uint64_t *)b;
+	return (lhs > rhs) - (lhs < rhs);
+}
+
+static double
+release_trace_ns_to_ms(uint64_t ns)
+{
+	return (double)ns / 1000000.0;
+}
+
+static void
+client_metal_release_trace_reset_window(struct client_metal_release_trace *trace)
+{
+	trace->window_count = 0;
+	trace->wait_sum_ns = 0;
+	trace->total_sum_ns = 0;
+	trace->total_min_ns = UINT64_MAX;
+	trace->total_max_ns = 0;
+	trace->over_4_17_ms = 0;
+	trace->over_8_34_ms = 0;
+	trace->over_12_50_ms = 0;
+}
+
+static void
+client_metal_release_trace_open(struct client_metal_compositor *c)
+{
+	if (!debug_get_bool_option_metal_release_timing_trace()) {
+		return;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path,
+	         sizeof(path),
+	         "%s%smonado_psvr2_%d_metal_release_barrier.csv",
+	         dir,
+	         separator,
+	         (int)getpid());
+
+	c->release_trace.file = fopen(path, "w");
+	if (c->release_trace.file == NULL) {
+		U_LOG_W("Could not open Metal release-barrier timing trace '%s'", path);
+		return;
+	}
+
+	if (pthread_mutex_init(&c->release_trace.mutex, NULL) != 0) {
+		U_LOG_W("Could not initialize Metal release-barrier timing trace mutex");
+		fclose(c->release_trace.file);
+		c->release_trace.file = NULL;
+		return;
+	}
+	c->release_trace.mutex_initialized = true;
+	client_metal_release_trace_reset_window(&c->release_trace);
+
+	setvbuf(c->release_trace.file, NULL, _IOFBF, 64 * 1024);
+	fputs("sequence,swapchain_id,image_index,barrier_entry_ns,command_buffer_created_ns,before_commit_ns,"
+	      "after_commit_ns,after_wait_ns,create_duration_ns,commit_duration_ns,wait_duration_ns,"
+	      "total_barrier_duration_ns,metal_status,gpu_start_time_s,gpu_end_time_s,gpu_duration_ns\n",
+	      c->release_trace.file);
+	fflush(c->release_trace.file);
+	U_LOG_I("Metal app-queue release-barrier timing trace: %s", path);
+}
+
+static void
+client_metal_release_trace_close(struct client_metal_compositor *c)
+{
+	struct client_metal_release_trace *trace = &c->release_trace;
+	if (!trace->mutex_initialized) {
+		return;
+	}
+
+	pthread_mutex_lock(&trace->mutex);
+	if (trace->file != NULL) {
+		fflush(trace->file);
+		fclose(trace->file);
+		trace->file = NULL;
+	}
+	pthread_mutex_unlock(&trace->mutex);
+	pthread_mutex_destroy(&trace->mutex);
+	trace->mutex_initialized = false;
+}
+
+static void
+client_metal_release_trace_log_window(struct client_metal_release_trace *trace)
+{
+	uint64_t sorted[METAL_RELEASE_TRACE_WINDOW];
+	memcpy(sorted, trace->wait_samples_ns, sizeof(sorted));
+	qsort(sorted, METAL_RELEASE_TRACE_WINDOW, sizeof(sorted[0]), compare_u64);
+
+	const uint32_t p95_index = (95 * METAL_RELEASE_TRACE_WINDOW + 99) / 100 - 1;
+	const uint32_t p99_index = (99 * METAL_RELEASE_TRACE_WINDOW + 99) / 100 - 1;
+	const uint64_t wait_average_ns = trace->wait_sum_ns / METAL_RELEASE_TRACE_WINDOW;
+	const uint64_t total_average_ns = trace->total_sum_ns / METAL_RELEASE_TRACE_WINDOW;
+
+	U_LOG_I("Metal app-queue release barrier: average %.3fms, min %.3fms, max %.3fms, p95 %.3fms, p99 %.3fms, >4.17ms %u/%u, >8.34ms %u/%u, >12.50ms %u/%u",
+	        release_trace_ns_to_ms(wait_average_ns),
+	        release_trace_ns_to_ms(sorted[0]),
+	        release_trace_ns_to_ms(sorted[METAL_RELEASE_TRACE_WINDOW - 1]),
+	        release_trace_ns_to_ms(sorted[p95_index]),
+	        release_trace_ns_to_ms(sorted[p99_index]),
+	        trace->over_4_17_ms,
+	        METAL_RELEASE_TRACE_WINDOW,
+	        trace->over_8_34_ms,
+	        METAL_RELEASE_TRACE_WINDOW,
+	        trace->over_12_50_ms,
+	        METAL_RELEASE_TRACE_WINDOW);
+
+	if (total_average_ns > wait_average_ns + 50000) {
+		U_LOG_I("Metal app-queue release barrier total: average %.3fms, min %.3fms, max %.3fms (+%.3fms average outside wait)",
+		        release_trace_ns_to_ms(total_average_ns),
+		        release_trace_ns_to_ms(trace->total_min_ns),
+		        release_trace_ns_to_ms(trace->total_max_ns),
+		        release_trace_ns_to_ms(total_average_ns - wait_average_ns));
+	}
+}
+
+static void
+client_metal_release_trace_record(struct client_metal_compositor *c, const struct client_metal_release_sample *sample)
+{
+	struct client_metal_release_trace *trace = &c->release_trace;
+	if (trace->file == NULL || !trace->mutex_initialized) {
+		return;
+	}
+
+	const uint64_t create_duration_ns =
+	    sample->command_buffer_created_ns >= sample->barrier_entry_ns
+	        ? sample->command_buffer_created_ns - sample->barrier_entry_ns
+	        : 0;
+	const uint64_t commit_duration_ns = sample->after_commit_ns >= sample->before_commit_ns && sample->before_commit_ns != 0
+	                                        ? sample->after_commit_ns - sample->before_commit_ns
+	                                        : 0;
+	const uint64_t wait_duration_ns = sample->after_wait_ns >= sample->after_commit_ns && sample->after_commit_ns != 0
+	                                      ? sample->after_wait_ns - sample->after_commit_ns
+	                                      : 0;
+	const uint64_t total_duration_ns = sample->after_wait_ns >= sample->barrier_entry_ns && sample->after_wait_ns != 0
+	                                       ? sample->after_wait_ns - sample->barrier_entry_ns
+	                                       : 0;
+
+	pthread_mutex_lock(&trace->mutex);
+	if (trace->file == NULL) {
+		pthread_mutex_unlock(&trace->mutex);
+		return;
+	}
+
+	const uint64_t sequence = ++trace->rows;
+	fprintf(trace->file,
+	        "%llu,%llu,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lld,%.9f,%.9f,%llu\n",
+	        (unsigned long long)sequence,
+	        (unsigned long long)sample->swapchain_id,
+	        sample->image_index,
+	        (unsigned long long)sample->barrier_entry_ns,
+	        (unsigned long long)sample->command_buffer_created_ns,
+	        (unsigned long long)sample->before_commit_ns,
+	        (unsigned long long)sample->after_commit_ns,
+	        (unsigned long long)sample->after_wait_ns,
+	        (unsigned long long)create_duration_ns,
+	        (unsigned long long)commit_duration_ns,
+	        (unsigned long long)wait_duration_ns,
+	        (unsigned long long)total_duration_ns,
+	        (long long)sample->metal_status,
+	        sample->gpu_start_time_s,
+	        sample->gpu_end_time_s,
+	        (unsigned long long)sample->gpu_duration_ns);
+
+	if (sample->after_wait_ns != 0) {
+		const uint32_t slot = trace->window_count++;
+		trace->wait_samples_ns[slot] = wait_duration_ns;
+		trace->wait_sum_ns += wait_duration_ns;
+		trace->total_sum_ns += total_duration_ns;
+		if (total_duration_ns < trace->total_min_ns) {
+			trace->total_min_ns = total_duration_ns;
+		}
+		if (total_duration_ns > trace->total_max_ns) {
+			trace->total_max_ns = total_duration_ns;
+		}
+		if (wait_duration_ns > 4170000) {
+			trace->over_4_17_ms++;
+		}
+		if (wait_duration_ns > 8340000) {
+			trace->over_8_34_ms++;
+		}
+		if (wait_duration_ns > 12500000) {
+			trace->over_12_50_ms++;
+		}
+
+		if (trace->window_count == METAL_RELEASE_TRACE_WINDOW) {
+			client_metal_release_trace_log_window(trace);
+			client_metal_release_trace_reset_window(trace);
+		}
+	}
+
+	if (trace->rows % METAL_RELEASE_TRACE_WINDOW == 0) {
+		fflush(trace->file);
+	}
+	pthread_mutex_unlock(&trace->mutex);
 }
 
 static int64_t
@@ -177,19 +426,55 @@ client_metal_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier
 	struct client_metal_swapchain *sc = client_metal_swapchain(xsc);
 
 	if (direction == XRT_BARRIER_TO_COMP) {
+		const bool trace_enabled = sc->c->release_trace.file != NULL;
+		struct client_metal_release_sample sample = {
+		    .swapchain_id = sc->xscn->limited_unique_id.data,
+		    .image_index = index,
+		    .barrier_entry_ns = trace_enabled ? os_monotonic_get_ns() : 0,
+		    .metal_status = -1,
+		};
+
 		// Commands submitted to a Metal command queue execute in order. Waiting
 		// for this empty command buffer therefore makes all application rendering
 		// queued before xrReleaseSwapchainImage visible in the shared Metal/Vulkan
 		// resource before the Vulkan compositor accesses it.
 		@autoreleasepool {
 			id<MTLCommandBuffer> command_buffer = [sc->c->command_queue commandBuffer];
+			if (trace_enabled) {
+				sample.command_buffer_created_ns = os_monotonic_get_ns();
+			}
 			if (command_buffer == nil) {
+				if (trace_enabled) {
+					client_metal_release_trace_record(sc->c, &sample);
+				}
 				return XRT_ERROR_ALLOCATION;
 			}
 
+			if (trace_enabled) {
+				sample.before_commit_ns = os_monotonic_get_ns();
+			}
 			[command_buffer commit];
+			if (trace_enabled) {
+				sample.after_commit_ns = os_monotonic_get_ns();
+			}
 			[command_buffer waitUntilCompleted];
-			if ([command_buffer status] == MTLCommandBufferStatusError) {
+			if (trace_enabled) {
+				sample.after_wait_ns = os_monotonic_get_ns();
+			}
+
+			MTLCommandBufferStatus status = [command_buffer status];
+			if (trace_enabled) {
+				sample.metal_status = (int64_t)status;
+				sample.gpu_start_time_s = [command_buffer GPUStartTime];
+				sample.gpu_end_time_s = [command_buffer GPUEndTime];
+				if (sample.gpu_start_time_s > 0.0 && sample.gpu_end_time_s >= sample.gpu_start_time_s) {
+					sample.gpu_duration_ns =
+					    (uint64_t)((sample.gpu_end_time_s - sample.gpu_start_time_s) * 1000000000.0 + 0.5);
+				}
+				client_metal_release_trace_record(sc->c, &sample);
+			}
+
+			if (status == MTLCommandBufferStatusError) {
 				return XRT_ERROR_NATIVE_HANDLE_FENCE_ERROR;
 			}
 		}
@@ -756,6 +1041,7 @@ static void
 client_metal_compositor_destroy(struct xrt_compositor *xc)
 {
 	struct client_metal_compositor *c = client_metal_compositor(xc);
+	client_metal_release_trace_close(c);
 	[c->command_queue release];
 	free(c);
 }
@@ -775,6 +1061,7 @@ client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_de
 	c->xcn = xcn;
 	c->device = (__bridge id<MTLDevice>)metal_device;
 	c->command_queue = [(__bridge id<MTLCommandQueue>)command_queue retain];
+	client_metal_release_trace_open(c);
 
 	c->base.base.get_swapchain_create_properties = client_metal_compositor_get_swapchain_create_properties;
 	c->base.base.create_swapchain = client_metal_compositor_create_swapchain;
