@@ -736,7 +736,7 @@ Camera::pushPose(CameraSample &camera_sample,
 	    .reprojection_error = score.matched_blobs > 0 ? sqrtf(score.reprojection_error / score.matched_blobs) : 0.0,
 	};
 
-	// Push the sample to the device
+	// Let the device accept, reject, or replace the camera-local sample (for example with multi-camera fusion).
 	t_constellation_tracker_sample sample = {
 	    .timestamp_ns = camera_sample.timestamp_ns,
 	    .pose = Txr_world_device,
@@ -745,7 +745,11 @@ Camera::pushPose(CameraSample &camera_sample,
 	    .average_brightness = average_brightness, // @todo compute this
 	    .metrics = metrics,
 	};
-	t_constellation_tracker_device_push_sample(device->device, &sample);
+	bool accepted = t_constellation_tracker_device_push_sample(device->device, &sample);
+	if (!accepted) {
+		CT_DEBUG(tracker, "Device %d rejected camera %zu pose candidate", device->id, this->index);
+		return;
+	}
 
 	{
 		std::unique_lock<os::Mutex> lock(device->data_lock);
@@ -760,7 +764,7 @@ Camera::pushPose(CameraSample &camera_sample,
 			t_blobwatch_mark_blob_device(camera_sample.source, &tbo, device->id);
 		}
 
-		device->locked_data.last_known_pose = DeviceLastPose(Txr_world_device, camera_sample.timestamp_ns);
+		device->locked_data.last_known_pose = DeviceLastPose(sample.pose, sample.timestamp_ns);
 	}
 
 	CT_DEBUG(tracker, "Found pose for device %d", device->id);

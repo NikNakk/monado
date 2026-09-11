@@ -30,6 +30,7 @@
 #include "util/u_trace_marker.h"
 #include "util/u_linux.h"
 #include "util/u_resampler.h"
+#include "util/u_time.h"
 
 #include "math/m_mathinclude.h"
 #include "math/m_space.h"
@@ -41,6 +42,7 @@
 #include "pssense_led_model.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
 
@@ -56,6 +58,15 @@
 #define PSSENSE_INFO(p, ...) U_LOG_XDEV_IFL_I(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_WARN(p, ...) U_LOG_XDEV_IFL_W(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_ERROR(p, ...) U_LOG_XDEV_IFL_E(&p->base, p->log_level, __VA_ARGS__)
+
+#define PSSENSE_CONSTELLATION_GROUP_COUNT 32
+#define PSSENSE_CONSTELLATION_CAMERA_COUNT 4
+#define PSSENSE_CONSTELLATION_SYNC_TOLERANCE_NS U_TIME_1MS_IN_NS
+#define PSSENSE_CONSTELLATION_STALE_NS (250 * U_TIME_1MS_IN_NS)
+#define PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M 0.08f
+#define PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD (35.0f * (float)M_PI / 180.0f)
+#define PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M 0.15f
+#define PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD (60.0f * (float)M_PI / 180.0f)
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 #ifdef XRT_OS_OSX
@@ -259,6 +270,25 @@ struct pssense_device
 
 	struct
 	{
+		struct pssense_constellation_candidate_group
+		{
+			int64_t timestamp_ns;
+			bool emitted;
+			bool disagreement_recorded;
+			bool present[PSSENSE_CONSTELLATION_CAMERA_COUNT];
+			struct t_constellation_tracker_sample samples[PSSENSE_CONSTELLATION_CAMERA_COUNT];
+		} candidate_groups[PSSENSE_CONSTELLATION_GROUP_COUNT];
+		uint32_t next_candidate_group;
+		uint64_t candidate_count;
+		uint64_t camera_candidate_count[PSSENSE_CONSTELLATION_CAMERA_COUNT];
+		uint64_t fused_pose_count;
+		uint64_t disagreement_count;
+		uint64_t jump_rejection_count;
+		int64_t last_fused_timestamp_ns;
+		uint32_t last_fused_camera_count;
+		struct xrt_pose last_fused_pose;
+		bool have_last_fused_pose;
+
 		struct m_relation_history *imu_relation_history;
 		struct m_imu_3dof fusion;
 		struct xrt_pose pose;
@@ -980,7 +1010,38 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 		return;
 	}
 
-	m_relation_history_get(pssense->tracking.constellation_relation_history, device_ts, out_relation);
+	struct xrt_space_relation optical = XRT_SPACE_RELATION_ZERO;
+	struct xrt_space_relation imu = XRT_SPACE_RELATION_ZERO;
+	m_relation_history_get(pssense->tracking.constellation_relation_history, device_ts, &optical);
+	m_relation_history_get(pssense->tracking.imu_relation_history, device_ts, &imu);
+	struct xrt_relation_chain imu_chain = {0};
+	struct xrt_pose imu_correction = XRT_POSE_IDENTITY;
+	imu_correction.orientation = pssense->tracking.T_led_imu.orientation;
+	m_relation_chain_push_pose(&imu_chain, &imu_correction);
+	*m_relation_chain_reserve(&imu_chain) = imu;
+	m_relation_chain_resolve(&imu_chain, &imu);
+	*out_relation = optical;
+	bool optical_fresh = pssense->tracking.last_fused_timestamp_ns > 0 &&
+	                     at_timestamp_ns >= pssense->tracking.last_fused_timestamp_ns &&
+	                     at_timestamp_ns - pssense->tracking.last_fused_timestamp_ns <=
+	                         PSSENSE_CONSTELLATION_STALE_NS;
+	if (!optical_fresh) {
+		out_relation->relation_flags &=
+		    ~(XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
+		      XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
+	}
+	/* Optical history supplies translation; the continuously integrated IMU supplies orientation. */
+	if ((imu.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
+		out_relation->pose.orientation = imu.pose.orientation;
+		out_relation->angular_velocity = imu.angular_velocity;
+		out_relation->relation_flags &=
+		    ~(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		      XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+		out_relation->relation_flags |=
+		    imu.relation_flags &
+		    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		     XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+	}
 }
 
 static void
@@ -1345,29 +1406,193 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
  *
  */
 
-static void
+static bool
 pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device *device,
                                           struct t_constellation_tracker_sample *sample)
 {
 	struct pssense_device *pssense = from_constellation_device(device);
+	struct t_constellation_tracker_sample fused = {0};
 
-	t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, sample);
+	os_thread_helper_lock(&pssense->controller_thread);
+	pssense->tracking.candidate_count++;
+	if (sample->camera_index < PSSENSE_CONSTELLATION_CAMERA_COUNT) {
+		pssense->tracking.camera_candidate_count[sample->camera_index]++;
+	}
+	if (sample->camera_index >= PSSENSE_CONSTELLATION_CAMERA_COUNT || sample->metrics.matched_blob_count < 3 ||
+	    !isfinite(sample->metrics.reprojection_error) || sample->metrics.reprojection_error > 5.0) {
+		pssense->tracking.disagreement_count++;
+		os_thread_helper_unlock(&pssense->controller_thread);
+		return false;
+	}
+
+	struct pssense_constellation_candidate_group *group = NULL;
+	for (size_t i = 0; i < PSSENSE_CONSTELLATION_GROUP_COUNT; i++) {
+		if (llabs(pssense->tracking.candidate_groups[i].timestamp_ns - sample->timestamp_ns) <=
+		    PSSENSE_CONSTELLATION_SYNC_TOLERANCE_NS) {
+			group = &pssense->tracking.candidate_groups[i];
+			break;
+		}
+	}
+	if (group == NULL) {
+		group = &pssense->tracking.candidate_groups[pssense->tracking.next_candidate_group];
+		pssense->tracking.next_candidate_group =
+		    (pssense->tracking.next_candidate_group + 1) % PSSENSE_CONSTELLATION_GROUP_COUNT;
+		*group = (struct pssense_constellation_candidate_group){.timestamp_ns = sample->timestamp_ns};
+	}
+	group->samples[sample->camera_index] = *sample;
+	group->present[sample->camera_index] = true;
+	if (group->emitted) {
+		os_thread_helper_unlock(&pssense->controller_thread);
+		return false;
+	}
+
+	uint32_t best_anchor = 0;
+	uint32_t best_camera_count = 0;
+	for (uint32_t anchor = 0; anchor < PSSENSE_CONSTELLATION_CAMERA_COUNT; anchor++) {
+		if (!group->present[anchor]) {
+			continue;
+		}
+		uint32_t compatible = 0;
+		for (uint32_t camera = 0; camera < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera++) {
+			if (!group->present[camera]) {
+				continue;
+			}
+			struct xrt_pose *a = &group->samples[anchor].pose;
+			struct xrt_pose *b = &group->samples[camera].pose;
+			float dx = a->position.x - b->position.x;
+			float dy = a->position.y - b->position.y;
+			float dz = a->position.z - b->position.z;
+			float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+			float dot = fabsf(a->orientation.x * b->orientation.x + a->orientation.y * b->orientation.y +
+			                  a->orientation.z * b->orientation.z + a->orientation.w * b->orientation.w);
+			float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
+			if (position_delta <= PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M &&
+			    orientation_delta <= PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD) {
+				compatible++;
+			}
+		}
+		if (compatible > best_camera_count) {
+			best_camera_count = compatible;
+			best_anchor = anchor;
+		}
+	}
+	if (best_camera_count < 2) {
+		uint32_t present_count = 0;
+		for (uint32_t camera = 0; camera < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera++) {
+			present_count += group->present[camera] ? 1 : 0;
+		}
+		if (present_count >= 2 && !group->disagreement_recorded) {
+			group->disagreement_recorded = true;
+			pssense->tracking.disagreement_count++;
+			PSSENSE_INFO(pssense,
+			             "Rejecting synchronized constellation candidates at %" PRIi64
+			             ": %u cameras but no pair agrees within %.0f mm / %.0f deg",
+			             sample->timestamp_ns, present_count,
+			             PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M * 1000.0f,
+			             PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD * 180.0f / (float)M_PI);
+		}
+		os_thread_helper_unlock(&pssense->controller_thread);
+		return false;
+	}
+
+	fused = group->samples[best_anchor];
+	fused.pose = (struct xrt_pose)XRT_POSE_IDENTITY;
+	fused.metrics = (struct t_constellation_tracker_sample_metrics){0};
+	float quaternion[4] = {0};
+	float total_weight = 0.0f;
+	uint32_t fused_camera_count = 0;
+	struct xrt_pose *anchor_pose = &group->samples[best_anchor].pose;
+	for (uint32_t camera = 0; camera < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera++) {
+		if (!group->present[camera]) {
+			continue;
+		}
+		struct t_constellation_tracker_sample *candidate = &group->samples[camera];
+		float dx = anchor_pose->position.x - candidate->pose.position.x;
+		float dy = anchor_pose->position.y - candidate->pose.position.y;
+		float dz = anchor_pose->position.z - candidate->pose.position.z;
+		float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+		float dot = anchor_pose->orientation.x * candidate->pose.orientation.x +
+		            anchor_pose->orientation.y * candidate->pose.orientation.y +
+		            anchor_pose->orientation.z * candidate->pose.orientation.z +
+		            anchor_pose->orientation.w * candidate->pose.orientation.w;
+		float orientation_delta = 2.0f * acosf(CLAMP(fabsf(dot), 0.0f, 1.0f));
+		if (position_delta > PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M ||
+		    orientation_delta > PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD) {
+			continue;
+		}
+		float weight = (float)candidate->metrics.matched_blob_count /
+		               (1.0f + (float)(candidate->metrics.reprojection_error * candidate->metrics.reprojection_error));
+		float sign = dot < 0.0f ? -1.0f : 1.0f;
+		fused.pose.position.x += weight * candidate->pose.position.x;
+		fused.pose.position.y += weight * candidate->pose.position.y;
+		fused.pose.position.z += weight * candidate->pose.position.z;
+		quaternion[0] += weight * sign * candidate->pose.orientation.x;
+		quaternion[1] += weight * sign * candidate->pose.orientation.y;
+		quaternion[2] += weight * sign * candidate->pose.orientation.z;
+		quaternion[3] += weight * sign * candidate->pose.orientation.w;
+		fused.metrics.matched_blob_count += candidate->metrics.matched_blob_count;
+		fused.metrics.visible_led_count += candidate->metrics.visible_led_count;
+		fused.metrics.reprojection_error += weight * candidate->metrics.reprojection_error;
+		fused.timestamp_ns = MAX(fused.timestamp_ns, candidate->timestamp_ns);
+		total_weight += weight;
+		fused_camera_count++;
+	}
+	fused.pose.position.x /= total_weight;
+	fused.pose.position.y /= total_weight;
+	fused.pose.position.z /= total_weight;
+	fused.metrics.reprojection_error /= total_weight;
+	float quaternion_norm = sqrtf(quaternion[0] * quaternion[0] + quaternion[1] * quaternion[1] +
+	                              quaternion[2] * quaternion[2] + quaternion[3] * quaternion[3]);
+	fused.pose.orientation = (struct xrt_quat){quaternion[0] / quaternion_norm, quaternion[1] / quaternion_norm,
+	                                           quaternion[2] / quaternion_norm, quaternion[3] / quaternion_norm};
+
+	if (pssense->tracking.have_last_fused_pose) {
+		struct xrt_pose *last = &pssense->tracking.last_fused_pose;
+		float dx = last->position.x - fused.pose.position.x;
+		float dy = last->position.y - fused.pose.position.y;
+		float dz = last->position.z - fused.pose.position.z;
+		float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+		float dot = fabsf(last->orientation.x * fused.pose.orientation.x +
+		                  last->orientation.y * fused.pose.orientation.y +
+		                  last->orientation.z * fused.pose.orientation.z +
+		                  last->orientation.w * fused.pose.orientation.w);
+		float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
+		if (sample->timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
+		    position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
+		    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD) {
+			group->emitted = true;
+			pssense->tracking.jump_rejection_count++;
+			os_thread_helper_unlock(&pssense->controller_thread);
+			return false;
+		}
+	}
+	group->emitted = true;
+	pssense->tracking.last_fused_pose = fused.pose;
+	pssense->tracking.have_last_fused_pose = true;
+	pssense->tracking.last_fused_timestamp_ns = fused.timestamp_ns;
+	pssense->tracking.last_fused_camera_count = fused_camera_count;
+	pssense->tracking.fused_pose_count++;
+	os_thread_helper_unlock(&pssense->controller_thread);
+
+	t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, &fused);
 
 	os_thread_helper_lock(&pssense->controller_thread);
 	timepoint_ns device_ts;
-	if (!pssense_host_ts_to_device(pssense, sample->timestamp_ns, &device_ts)) {
+	if (!pssense_host_ts_to_device(pssense, fused.timestamp_ns, &device_ts)) {
 		os_thread_helper_unlock(&pssense->controller_thread);
-		return;
+		return false;
 	}
 	os_thread_helper_unlock(&pssense->controller_thread);
 
 	struct xrt_space_relation relation = {
-	    .pose = sample->pose,
+	    .pose = fused.pose,
 	    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
 	                      XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
 	};
 
 	m_relation_history_push(pssense->tracking.constellation_relation_history, &relation, device_ts);
+	*sample = fused;
+	return true;
 }
 
 /*
@@ -1384,24 +1609,7 @@ pssense_get_constellation_tracking_source_pose(struct t_constellation_tracker_tr
 	struct pssense_device *pssense = from_constellation_tracking_source(tracking_source);
 
 	os_thread_helper_lock(&pssense->controller_thread);
-	struct xrt_space_relation optical = XRT_SPACE_RELATION_ZERO;
-	struct xrt_space_relation imu = XRT_SPACE_RELATION_ZERO;
-	pssense_get_constellation_pose(pssense, when_ns, &optical);
-	pssense_get_imu_fusion_pose(pssense, when_ns, &imu);
-
-	/* Optical history supplies translation; the continuously integrated IMU is the orientation prior. */
-	*out_relation = optical;
-	if ((imu.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
-		out_relation->pose.orientation = imu.pose.orientation;
-		out_relation->angular_velocity = imu.angular_velocity;
-		out_relation->relation_flags &=
-		    ~(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-		      XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
-		out_relation->relation_flags |=
-		    imu.relation_flags &
-		    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-		     XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
-	}
+	pssense_get_constellation_pose(pssense, when_ns, out_relation);
 	os_thread_helper_unlock(&pssense->controller_thread);
 }
 
@@ -1970,6 +2178,30 @@ pssense_remove_from_constellation_tracker(struct xrt_device *xdev)
 	if (tracker != NULL && device_id != XRT_CONSTELLATION_INVALID_DEVICE_ID) {
 		(void)t_constellation_tracker_remove_device(tracker, device_id);
 	}
+}
+
+bool
+pssense_get_constellation_diagnostics(struct xrt_device *xdev,
+                                     struct pssense_constellation_diagnostics *out_diagnostics)
+{
+	if (xdev == NULL || xdev->name != XRT_DEVICE_PSSENSE || out_diagnostics == NULL) {
+		return false;
+	}
+	struct pssense_device *pssense = from_device(xdev);
+	os_thread_helper_lock(&pssense->controller_thread);
+	*out_diagnostics = (struct pssense_constellation_diagnostics){
+	    .attached = pssense->tracking.constellation_tracker != NULL,
+	    .candidate_count = pssense->tracking.candidate_count,
+	    .fused_pose_count = pssense->tracking.fused_pose_count,
+	    .disagreement_count = pssense->tracking.disagreement_count,
+	    .jump_rejection_count = pssense->tracking.jump_rejection_count,
+	    .last_fused_timestamp_ns = pssense->tracking.last_fused_timestamp_ns,
+	    .last_fused_camera_count = pssense->tracking.last_fused_camera_count,
+	};
+	memcpy(out_diagnostics->camera_candidate_count, pssense->tracking.camera_candidate_count,
+	       sizeof(out_diagnostics->camera_candidate_count));
+	os_thread_helper_unlock(&pssense->controller_thread);
+	return true;
 }
 
 /*!

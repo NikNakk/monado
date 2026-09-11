@@ -65,6 +65,22 @@ pssense_add_to_constellation_tracker(struct xrt_device *xdev, struct t_constella
 void
 pssense_remove_from_constellation_tracker(struct xrt_device *xdev);
 
+struct pssense_constellation_diagnostics
+{
+	bool attached;
+	uint64_t candidate_count;
+	uint64_t camera_candidate_count[4];
+	uint64_t fused_pose_count;
+	uint64_t disagreement_count;
+	uint64_t jump_rejection_count;
+	int64_t last_fused_timestamp_ns;
+	uint32_t last_fused_camera_count;
+};
+
+bool
+pssense_get_constellation_diagnostics(struct xrt_device *xdev,
+                                     struct pssense_constellation_diagnostics *out_diagnostics);
+
 /*!
  * @dir drivers/pssense
  *
