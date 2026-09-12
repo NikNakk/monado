@@ -7,6 +7,7 @@
  */
 
 #include "util/comp_metal_swapchain_import.h"
+#include "util/comp_metal_texture_device.h"
 
 #include "util/u_logging.h"
 #include "util/u_misc.h"
@@ -117,6 +118,16 @@ create_direct_image(struct vk_bundle *vk,
 		flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 	}
 
+	void *import_texture = NULL;
+	bool import_texture_needs_release = false;
+	if (!comp_metal_texture_prepare_for_vk_device(
+	        vk, metal_texture, &import_texture, &import_texture_needs_release)) {
+		U_LOG_E("Metal direct import could not prepare texture for Vulkan device: image=%u source=%p",
+		        image_index,
+		        metal_texture);
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
 	VkExportMetalObjectCreateInfoEXT export_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
 	    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_TEXTURE_BIT_EXT,
@@ -143,7 +154,7 @@ create_direct_image(struct vk_bundle *vk,
 	    .pNext = &export_info,
 #endif
 	    .plane = VK_IMAGE_ASPECT_PLANE_0_BIT,
-	    .mtlTexture = metal_texture,
+	    .mtlTexture = import_texture,
 	};
 
 	VkImageCreateInfo create_info = {
@@ -164,6 +175,15 @@ create_direct_image(struct vk_bundle *vk,
 
 	VkResult ret = vk->vkCreateImage(vk->device, &create_info, NULL, &out_image->handle);
 	if (ret != VK_SUCCESS) {
+		U_LOG_E("Metal direct vkCreateImage failed: image=%u result=%d source=%p import=%p array_layers=%u format=%u usage=0x%x",
+		        image_index,
+		        (int)ret,
+		        metal_texture,
+		        import_texture,
+		        info->array_size * info->face_count,
+		        (unsigned)format,
+		        (unsigned)usage);
+		comp_metal_texture_finish_for_vk_device(import_texture, import_texture_needs_release);
 		return ret;
 	}
 
@@ -181,23 +201,28 @@ create_direct_image(struct vk_bundle *vk,
 	    .pNext = &texture_info,
 	};
 	vk->vkExportMetalObjectsEXT(vk->device, &objects_info);
-	if (texture_info.mtlTexture == NULL || texture_info.mtlTexture != metal_texture) {
-		U_LOG_E("Metal direct import round-trip mismatch: image=%u imported=%p exported=%p",
+	if (texture_info.mtlTexture == NULL || texture_info.mtlTexture != import_texture) {
+		U_LOG_E("Metal direct import round-trip mismatch: image=%u source=%p imported=%p exported=%p",
 		        image_index,
 		        metal_texture,
+		        import_texture,
 		        texture_info.mtlTexture);
 		vk->vkDestroyImage(vk->device, out_image->handle, NULL);
 		out_image->handle = VK_NULL_HANDLE;
+		comp_metal_texture_finish_for_vk_device(import_texture, import_texture_needs_release);
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
-	U_LOG_I("Metal direct VkImage import: image=%u texture=%p VkImage=%p array_layers=%u format=%u usage=0x%x",
+	U_LOG_I("Metal direct VkImage import: image=%u source_texture=%p import_texture=%p VkImage=%p array_layers=%u format=%u usage=0x%x",
 	        image_index,
 	        metal_texture,
+	        import_texture,
 	        (void *)out_image->handle,
 	        info->array_size * info->face_count,
 	        (unsigned)format,
 	        (unsigned)usage);
+
+	comp_metal_texture_finish_for_vk_device(import_texture, import_texture_needs_release);
 	return VK_SUCCESS;
 }
 
