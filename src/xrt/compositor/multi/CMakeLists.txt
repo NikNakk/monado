@@ -13,5 +13,5 @@ add_library(
 target_link_libraries(
 	comp_multi
 	PUBLIC xrt-interfaces comp_includes
-	PRIVATE aux_util aux_os
+	PRIVATE aux_util aux_os comp_util
 	)

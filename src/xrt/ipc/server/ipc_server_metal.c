@@ -13,6 +13,7 @@
 #ifdef XRT_OS_OSX
 #include "util/comp_metal_semaphore_provider.h"
 #include "util/comp_metal_swapchain_handoff.h"
+#include "util/comp_swapchain_gpu_reuse.h"
 #endif
 
 static xrt_result_t
@@ -112,6 +113,19 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 		          xsc != NULL ? xsc->image_count : 0);
 		xrt_swapchain_reference(&xsc, NULL);
 		return XRT_ERROR_VULKAN;
+	}
+
+	/*
+	 * Cross-process Metal textures need an explicit service-GPU completion
+	 * barrier before xrWaitSwapchainImage can return them to the producer.
+	 */
+	xret = comp_swapchain_gpu_reuse_enable(xsc);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server,
+		          "Failed to enable Metal IPC swapchain GPU reuse tracking: result=%d",
+		          xret);
+		xrt_swapchain_reference(&xsc, NULL);
+		return xret;
 	}
 
 	ics->swapchain_count++;
