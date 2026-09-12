@@ -30,6 +30,8 @@ except ImportError as exc:
 
 ACTIVE_W = 508
 MODE4 = {0: (4, 0), 1: (4, 1), 2: (5, 0), 3: (5, 1)}
+SEARCH_TRANSLATION_RADIUS_M = 0.18
+ACCEPT_TRANSLATION_RADIUS_M = 0.12
 
 
 @dataclass
@@ -289,7 +291,7 @@ def bootstrap_T(base, K, clouds, observations):
                 T = np.linalg.inv(pose_matrix(rvec.reshape(3), tvec.reshape(3)))
                 translation_delta = float(np.linalg.norm(T[:3, 3] - base.T[:3, 3]))
                 rotation_delta = math.degrees(rot_delta(base.T, T))
-                if translation_delta > 0.18 or np.linalg.norm(T[:3, 3]) > 0.35:
+                if translation_delta > SEARCH_TRANSLATION_RADIUS_M or np.linalg.norm(T[:3, 3]) > 0.35:
                     continue
                 count, rms, _ = score_camera(Camera(K, base.D, T), clouds, observations, 50)
                 if count < 10:
@@ -318,16 +320,25 @@ def optimize(base, T0, K0, clouds, observations, included=None):
         -np.pi,
         -np.pi,
         -np.pi,
-        base.T[:3, 3] - 0.12,
+        base.T[:3, 3] - SEARCH_TRANSLATION_RADIUS_M,
         [80, 80, 40, 40],
     ]
     upper = np.r_[
         np.pi,
         np.pi,
         np.pi,
-        base.T[:3, 3] + 0.12,
+        base.T[:3, 3] + SEARCH_TRANSLATION_RADIUS_M,
         [300, 300, 468, 468],
     ]
+    if np.any(K0 < lower[6:]) or np.any(K0 > upper[6:]):
+        raise ValueError(
+            "intrinsic starting point outside solver bounds: "
+            f"K={K0.tolist()}, lower={lower[6:].tolist()}, upper={upper[6:].tolist()}"
+        )
+    # bootstrap_T deliberately searches a broad basin. Keep the optimiser basin
+    # equally broad, and guard against tiny round-off at an exact bound.
+    eps = 1e-10
+    x = np.minimum(np.maximum(x, lower + eps), upper - eps)
     history = []
     for outer, limit in enumerate((40, 25, 15, 10)):
         camera = Camera(
@@ -429,7 +440,7 @@ def fit_upper(index, base, K_starts, clouds, observations):
             }
         )
     accepted = (
-        translation_delta <= 0.12
+        translation_delta <= ACCEPT_TRANSLATION_RADIUS_M
         and rotation_delta <= 60
         and count >= 18
         and rms < 8
@@ -448,6 +459,8 @@ def fit_upper(index, base, K_starts, clouds, observations):
         "rms_px": rms,
         "translation_delta_m": translation_delta,
         "rotation_delta_deg": rotation_delta,
+        "search_translation_radius_m": SEARCH_TRANSLATION_RADIUS_M,
+        "accept_translation_radius_m": ACCEPT_TRANSLATION_RADIUS_M,
         "per_pose_matches": [len(row) for row in per_pose],
         "leave_one_out": leave_one_out,
         "optimization": history,
