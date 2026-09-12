@@ -16,13 +16,23 @@
 extern "C" {
 #endif
 
+/*
+ * In the in-process macOS Metal-first experiment, rename the implementation in
+ * comp_metal_client.m so comp_metal_array_import_experiment.m can wrap the
+ * public constructor without changing the large client implementation file.
+ */
+#if defined(__OBJC__) && defined(XRT_OS_OSX) && defined(XRT_MODULE_COMPOSITOR_UTIL) && !defined(XRT_FEATURE_SERVICE)
+#define client_metal_compositor_create client_metal_compositor_create_vanilla
+#endif
+
 struct xrt_compositor_metal *
 client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue);
 
 /*
  * Experiment-only hook for the in-process macOS compositor. It intercepts the
- * one native swapchain creation in comp_metal_client.m so layered swapchains
- * can be created Metal-first and imported into Vulkan. Service builds are
+ * native swapchain creation in comp_metal_client.m so Metal can own the
+ * swapchain textures for both ordinary 2D and layered 2D-array swapchains,
+ * with those same MTLTexture objects imported into Vulkan. Service builds are
  * deliberately excluded because the implementation casts the native swapchain
  * to comp_swapchain and is therefore intentionally in-process only.
  */
