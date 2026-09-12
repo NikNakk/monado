@@ -83,7 +83,8 @@ enum psvr2_camera_mode
 	PSVR2_CAMERA_MODE_2 = 2,
 	// 819456 byte 640x640x2 SBS interleaved bottom and top camera paired images
 	PSVR2_CAMERA_MODE_3 = 3,
-	// 520448 byte packet: 256-byte header + two contiguous 512x508 L8 controller-tracking images.
+	// 520448 byte packet: 256-byte header + two contiguous 512x508 L8 controller-tracking planes.
+	// Each row contains 508 image pixels followed by four bytes of transport padding.
 	// Camera sets 4 and 5 are interleaved and share VTS/sequence values for each synchronized four-camera sample.
 	PSVR2_CAMERA_MODE_4 = 4,
 	// 80256 byte 400x200 nearly black (no value higher than 0x0f)
