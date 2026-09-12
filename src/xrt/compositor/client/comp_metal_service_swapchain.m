@@ -229,6 +229,24 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
+
+	/*
+	 * The service multi-compositor can retain separate generations in its
+	 * progress, scheduled, and delivered slots. With strict cross-process
+	 * Metal reuse tracking, a normal three-image swapchain can therefore have
+	 * all three images legitimately unavailable to the producer at once.
+	 *
+	 * Keep one additional producer spare for dynamic service-Metal swapchains.
+	 * Static-image swapchains intentionally remain single-image resources.
+	 */
+	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) == 0 && xsccp.image_count < 4) {
+		uint32_t original_image_count = xsccp.image_count;
+		xsccp.image_count = 4;
+		U_LOG_I("Metal service swapchain image depth increased from %u to %u to preserve a producer spare across multi-compositor staging",
+		        original_image_count,
+		        xsccp.image_count);
+	}
+
 	if (xsccp.image_count == 0 || xsccp.image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return XRT_ERROR_ALLOCATION;
 	}
