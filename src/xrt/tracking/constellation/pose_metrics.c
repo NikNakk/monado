@@ -12,6 +12,7 @@
 #include "math/m_api.h"
 #include "math/m_vec3.h"
 
+#include "util/u_debug.h"
 #include "util/u_logging.h"
 
 #include "tracking/t_camera_models.h"
@@ -31,6 +32,16 @@
 #else
 #define LOG_SPEW(...)
 #endif
+
+DEBUG_GET_ONCE_FLOAT_OPTION(constellation_tracker_led_match_radius_scale,
+                            "CONSTELLATION_TRACKER_LED_MATCH_RADIUS_SCALE",
+                            1.0f)
+
+static double
+get_led_match_radius_scale(void)
+{
+	return CLAMP((double)debug_get_float_option_constellation_tracker_led_match_radius_scale(), 1.0, 4.0);
+}
 
 static void
 expand_rect(struct pose_rect *bounds, double x, double y, double w, double h)
@@ -210,7 +221,14 @@ get_visible_leds_and_bounds(const struct xrt_pose *T_cam_obj,
 		}
 
 		// Calculate the expected size of an LED at this distance
-		const double led_radius_px = focal_length * led->radius_m / led_pos_m->z;
+		/*
+		 * Experimental camera calibrations can opt into a wider gate so their
+		 * residual projection error does not prevent pose refinement from ever
+		 * receiving an initial hypothesis. The physical radius remains the
+		 * default.
+		 */
+		const double led_radius_px =
+		    focal_length * led->radius_m / led_pos_m->z * get_led_match_radius_scale();
 
 		LOG_SPEW("LED id %d led_radius_px %f = focal length %f led_radius %f Z = %f m", led_model->leds[i].id,
 		         led_radius_px, focal_length, led->radius_m, led_pos_m->z);
