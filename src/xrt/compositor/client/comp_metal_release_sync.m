@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Diagnostic app-release Metal shared-event synchronization wrapper.
+ * @brief  Experimental app-release Metal shared-event synchronization wrapper.
  * @ingroup comp_client
  */
 
@@ -11,8 +11,10 @@
 #include "client/comp_metal_release_sync.h"
 #include "os/os_time.h"
 #include "util/comp_metal_semaphore_probe.h"
+#include "util/comp_semaphore.h"
 #include "util/u_debug.h"
 #include "util/u_logging.h"
+#include "vk/vk_cmd.h"
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -23,6 +25,9 @@
 #include <unistd.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(metal_app_release_shared_event, "XRT_MACOS_APP_RELEASE_SHARED_EVENT", false)
+DEBUG_GET_ONCE_BOOL_OPTION(metal_app_release_shared_event_gpu_wait,
+                           "XRT_MACOS_APP_RELEASE_SHARED_EVENT_GPU_WAIT",
+                           false)
 DEBUG_GET_ONCE_BOOL_OPTION(metal_release_sync_trace, "PSVR2_TIMING_TRACE", false)
 
 #define METAL_RELEASE_SYNC_LOG_WINDOW 240
@@ -50,11 +55,14 @@ struct client_metal_release_sync_context
 	pthread_mutex_t trace_mutex;
 	bool trace_mutex_initialized;
 
+	bool gpu_wait_enabled;
 	bool pair_attempted;
 	bool pair_ready;
 	uint64_t next_value;
 	uint64_t last_submitted_value;
+	uint64_t last_committed_value;
 	uint64_t signal_count;
+	uint64_t gpu_wait_submit_count;
 
 	FILE *trace_file;
 	uint64_t trace_rows;
@@ -62,6 +70,7 @@ struct client_metal_release_sync_context
 	xrt_result_t (*original_create_swapchain)(struct xrt_compositor *,
 	                                          const struct xrt_swapchain_create_info *,
 	                                          struct xrt_swapchain **);
+	xrt_result_t (*original_layer_commit)(struct xrt_compositor *, xrt_graphics_sync_handle_t);
 	void (*original_destroy)(struct xrt_compositor *);
 
 	struct client_metal_release_sync_context *next;
@@ -123,11 +132,11 @@ trace_open(struct client_metal_release_sync_context *c)
 
 	setvbuf(c->trace_file, NULL, _IOFBF, 64 * 1024);
 	fputs("sequence,swapchain_ptr,image_index,signal_value,event_value_before,before_signal_ns,after_signal_commit_ns,"
-	      "after_blocking_barrier_ns,event_value_after,signal_submit_duration_ns,blocking_barrier_duration_ns,"
-	      "signal_command_status,barrier_result\n",
+	      "after_handoff_ns,event_value_after,signal_submit_duration_ns,handoff_duration_ns,"
+	      "signal_command_status,handoff_result,gpu_wait_mode\n",
 	      c->trace_file);
 	fflush(c->trace_file);
-	U_LOG_I("Metal app-release shared-event diagnostic trace: %s", path);
+	U_LOG_I("Metal app-release shared-event trace: %s", path);
 }
 
 static void
@@ -138,10 +147,10 @@ trace_record(struct client_metal_release_sync_context *c,
              uint64_t event_value_before,
              uint64_t before_signal_ns,
              uint64_t after_signal_commit_ns,
-             uint64_t after_blocking_barrier_ns,
+             uint64_t after_handoff_ns,
              uint64_t event_value_after,
              MTLCommandBufferStatus signal_status,
-             xrt_result_t barrier_result)
+             xrt_result_t handoff_result)
 {
 	if (c->trace_file == NULL || !c->trace_mutex_initialized) {
 		return;
@@ -150,14 +159,14 @@ trace_record(struct client_metal_release_sync_context *c,
 	const uint64_t signal_submit_duration_ns = after_signal_commit_ns >= before_signal_ns
 	                                               ? after_signal_commit_ns - before_signal_ns
 	                                               : 0;
-	const uint64_t blocking_barrier_duration_ns = after_blocking_barrier_ns >= after_signal_commit_ns
-	                                                  ? after_blocking_barrier_ns - after_signal_commit_ns
-	                                                  : 0;
+	const uint64_t handoff_duration_ns = after_handoff_ns >= after_signal_commit_ns
+	                                         ? after_handoff_ns - after_signal_commit_ns
+	                                         : 0;
 
 	pthread_mutex_lock(&c->trace_mutex);
 	const uint64_t sequence = ++c->trace_rows;
 	fprintf(c->trace_file,
-	        "%llu,%p,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%ld,%d\n",
+	        "%llu,%p,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%ld,%d,%u\n",
 	        (unsigned long long)sequence,
 	        (void *)xsc,
 	        image_index,
@@ -165,12 +174,13 @@ trace_record(struct client_metal_release_sync_context *c,
 	        (unsigned long long)event_value_before,
 	        (unsigned long long)before_signal_ns,
 	        (unsigned long long)after_signal_commit_ns,
-	        (unsigned long long)after_blocking_barrier_ns,
+	        (unsigned long long)after_handoff_ns,
 	        (unsigned long long)event_value_after,
 	        (unsigned long long)signal_submit_duration_ns,
-	        (unsigned long long)blocking_barrier_duration_ns,
+	        (unsigned long long)handoff_duration_ns,
 	        (long)signal_status,
-	        (int)barrier_result);
+	        (int)handoff_result,
+	        c->gpu_wait_enabled ? 1u : 0u);
 	if ((sequence % METAL_RELEASE_SYNC_LOG_WINDOW) == 0) {
 		fflush(c->trace_file);
 	}
@@ -208,8 +218,7 @@ ensure_pair(struct client_metal_release_sync_context *c)
 	void *raw_shared_event = NULL;
 	xrt_result_t xret = comp_metal_semaphore_create_client_pair(&xcsem, &raw_shared_event);
 	if (xret != XRT_SUCCESS || xcsem == NULL || raw_shared_event == NULL) {
-		U_LOG_W("Metal app-release shared-event diagnostic unavailable: result=%d; blocking release handoff unchanged",
-		        xret);
+		U_LOG_W("Metal app-release shared-event unavailable: result=%d; blocking release handoff unchanged", xret);
 		if (xcsem != NULL) {
 			xrt_compositor_semaphore_reference(&xcsem, NULL);
 		}
@@ -219,7 +228,7 @@ ensure_pair(struct client_metal_release_sync_context *c)
 
 	id<MTLSharedEvent> shared_event = [(__bridge id<MTLSharedEvent>)raw_shared_event retain];
 	if (shared_event == nil) {
-		U_LOG_W("Metal app-release shared-event diagnostic export produced nil event; blocking release handoff unchanged");
+		U_LOG_W("Metal app-release shared-event export produced nil event; blocking release handoff unchanged");
 		xrt_compositor_semaphore_reference(&xcsem, NULL);
 		pthread_mutex_unlock(&c->signal_mutex);
 		return false;
@@ -229,12 +238,69 @@ ensure_pair(struct client_metal_release_sync_context *c)
 	c->shared_event = shared_event;
 	c->next_value = shared_event.signaledValue;
 	c->last_submitted_value = c->next_value;
+	c->last_committed_value = c->next_value;
 	c->pair_ready = true;
-	U_LOG_I("Metal app-release shared-event Stage 2 ready: event=%p initial_value=%llu; CPU wait remains active",
-	        (__bridge void *)shared_event,
-	        (unsigned long long)c->next_value);
+
+	if (c->gpu_wait_enabled) {
+		U_LOG_I("Metal app-release shared-event Stage 3 ready: event=%p initial_value=%llu; app CPU barrier will be bypassed and Vulkan queue will wait on the same timeline",
+		        (__bridge void *)shared_event,
+		        (unsigned long long)c->next_value);
+	} else {
+		U_LOG_I("Metal app-release shared-event Stage 2 ready: event=%p initial_value=%llu; CPU wait remains active",
+		        (__bridge void *)shared_event,
+		        (unsigned long long)c->next_value);
+	}
+
 	pthread_mutex_unlock(&c->signal_mutex);
 	return true;
+}
+
+static xrt_result_t
+submit_vulkan_timeline_wait(struct client_metal_release_sync_context *c, uint64_t value)
+{
+#ifdef VK_KHR_timeline_semaphore
+	if (c == NULL || c->xcsem == NULL || value == 0) {
+		return XRT_ERROR_VULKAN;
+	}
+
+	struct comp_semaphore *csem = comp_semaphore(c->xcsem);
+	if (csem == NULL || csem->vk == NULL || csem->semaphore == VK_NULL_HANDLE || csem->vk->main_queue == NULL) {
+		return XRT_ERROR_VULKAN;
+	}
+
+	struct vk_bundle *vk = csem->vk;
+	VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkTimelineSemaphoreSubmitInfo timeline_info = {
+	    .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+	    .waitSemaphoreValueCount = 1,
+	    .pWaitSemaphoreValues = &value,
+	};
+	VkSubmitInfo submit_info = {
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .pNext = &timeline_info,
+	    .waitSemaphoreCount = 1,
+	    .pWaitSemaphores = &csem->semaphore,
+	    .pWaitDstStageMask = &wait_stage,
+	    .commandBufferCount = 0,
+	    .pCommandBuffers = NULL,
+	    .signalSemaphoreCount = 0,
+	    .pSignalSemaphores = NULL,
+	};
+
+	VkResult ret = vk_cmd_submit_locked(vk, vk->main_queue, 1, &submit_info, VK_NULL_HANDLE);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("Metal app-release Stage 3 Vulkan timeline wait submit failed at value %llu: %s",
+		        (unsigned long long)value,
+		        vk_result_string(ret));
+		return XRT_ERROR_VULKAN;
+	}
+
+	return XRT_SUCCESS;
+#else
+	(void)c;
+	(void)value;
+	return XRT_ERROR_VULKAN;
+#endif
 }
 
 static xrt_result_t
@@ -261,9 +327,9 @@ wrapped_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction dire
 		uint64_t before_signal_ns = os_monotonic_get_ns();
 		uint64_t after_signal_commit_ns = before_signal_ns;
 
-		// Serialize command-buffer creation, timeline value allocation and commit.
-		// Metal command queues execute committed command buffers in order, so this
-		// ensures timeline values increase in exactly the order they are queued.
+		// The signal is submitted to the same application Metal queue supplied
+		// with XR_KHR_metal_enable. Queue ordering therefore places it after all
+		// application rendering committed before xrReleaseSwapchainImage.
 		pthread_mutex_lock(&c->signal_mutex);
 		signal_buffer = [c->command_queue commandBuffer];
 		if (signal_buffer != nil) {
@@ -278,15 +344,35 @@ wrapped_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction dire
 		pthread_mutex_unlock(&c->signal_mutex);
 
 		if (signal_buffer == nil) {
-			U_LOG_W("Metal app-release shared-event diagnostic could not allocate signal command buffer; using blocking handoff only");
+			U_LOG_W("Metal app-release shared-event could not allocate signal command buffer; using blocking handoff");
 			return original_barrier(xsc, direction, index);
 		}
 
-		// Stage 2 deliberately preserves the original barrier. It submits its own
-		// marker on this same queue and blocks until it completes, so application
-		// visibility semantics are unchanged while we validate the shared event.
+		if (c->gpu_wait_enabled) {
+			// Stage 3: do not wait for Metal on the CPU here. xrEndFrame will enqueue
+			// a Vulkan timeline wait for the latest value before the compositor's
+			// normal Vulkan draw submission on that same VkQueue.
+			const uint64_t after_handoff_ns = os_monotonic_get_ns();
+			const uint64_t event_value_after = c->shared_event.signaledValue;
+			const MTLCommandBufferStatus signal_status = signal_buffer.status;
+			trace_record(c,
+			             xsc,
+			             index,
+			             signal_value,
+			             event_value_before,
+			             before_signal_ns,
+			             after_signal_commit_ns,
+			             after_handoff_ns,
+			             event_value_after,
+			             signal_status,
+			             XRT_SUCCESS);
+			return XRT_SUCCESS;
+		}
+
+		// Stage 2 control path: preserve the original blocking barrier while
+		// validating that the timeline signal reaches the shared event.
 		xrt_result_t xret = original_barrier(xsc, direction, index);
-		const uint64_t after_blocking_barrier_ns = os_monotonic_get_ns();
+		const uint64_t after_handoff_ns = os_monotonic_get_ns();
 		const uint64_t event_value_after = c->shared_event.signaledValue;
 		const MTLCommandBufferStatus signal_status = signal_buffer.status;
 
@@ -297,7 +383,7 @@ wrapped_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction dire
 		             event_value_before,
 		             before_signal_ns,
 		             after_signal_commit_ns,
-		             after_blocking_barrier_ns,
+		             after_handoff_ns,
 		             event_value_after,
 		             signal_status,
 		             xret);
@@ -320,6 +406,71 @@ wrapped_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction dire
 
 		return xret;
 	}
+}
+
+static xrt_result_t
+wrapped_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
+{
+	pthread_mutex_lock(&g_contexts_mutex);
+	struct client_metal_release_sync_context *c = find_context_locked(xc);
+	xrt_result_t (*original_layer_commit)(struct xrt_compositor *, xrt_graphics_sync_handle_t) =
+	    c != NULL ? c->original_layer_commit : NULL;
+	pthread_mutex_unlock(&g_contexts_mutex);
+
+	if (c == NULL || original_layer_commit == NULL) {
+		u_graphics_sync_unref(&sync_handle);
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	if (!c->gpu_wait_enabled || !c->pair_ready) {
+		return original_layer_commit(xc, sync_handle);
+	}
+
+	uint64_t wait_value = 0;
+	pthread_mutex_lock(&c->signal_mutex);
+	if (c->last_submitted_value > c->last_committed_value) {
+		wait_value = c->last_submitted_value;
+	}
+	pthread_mutex_unlock(&c->signal_mutex);
+
+	if (wait_value == 0) {
+		return original_layer_commit(xc, sync_handle);
+	}
+
+	// A wait-only Vulkan queue submission is enough: queue submissions are
+	// ordered, and comp_main will submit its compositor command buffer to this
+	// same queue later in the ordinary layer_commit path.
+	xrt_result_t wait_submit_result = submit_vulkan_timeline_wait(c, wait_value);
+	if (wait_submit_result != XRT_SUCCESS) {
+		// Stage 3 has already bypassed the per-image CPU barrier, so a failed GPU
+		// wait submit must fall back to a CPU timeline wait before compositing.
+		U_LOG_W("Metal app-release Stage 3 falling back to CPU timeline wait for value %llu",
+		        (unsigned long long)wait_value);
+		xrt_result_t cpu_wait = xrt_compositor_semaphore_wait(c->xcsem, wait_value, UINT64_MAX);
+		if (cpu_wait != XRT_SUCCESS) {
+			u_graphics_sync_unref(&sync_handle);
+			return cpu_wait;
+		}
+	}
+
+	xrt_result_t xret = original_layer_commit(xc, sync_handle);
+	if (xret == XRT_SUCCESS) {
+		pthread_mutex_lock(&c->signal_mutex);
+		if (wait_value > c->last_committed_value) {
+			c->last_committed_value = wait_value;
+		}
+		c->gpu_wait_submit_count++;
+		const uint64_t count = c->gpu_wait_submit_count;
+		pthread_mutex_unlock(&c->signal_mutex);
+
+		if ((count % METAL_RELEASE_SYNC_LOG_WINDOW) == 0) {
+			U_LOG_I("Metal app-release shared-event Stage 3: Vulkan GPU waits submitted=%llu latest_value=%llu observed_event=%llu; per-image CPU barrier bypassed",
+			        (unsigned long long)count,
+			        (unsigned long long)wait_value,
+			        (unsigned long long)c->shared_event.signaledValue);
+		}
+	}
+
+	return xret;
 }
 
 static void
@@ -355,7 +506,7 @@ wrap_swapchain(struct client_metal_release_sync_context *c, struct xrt_swapchain
 
 	struct client_metal_release_sync_swapchain *link = calloc(1, sizeof(*link));
 	if (link == NULL) {
-		U_LOG_W("Could not allocate Metal app-release shared-event swapchain diagnostic wrapper");
+		U_LOG_W("Could not allocate Metal app-release shared-event swapchain wrapper");
 		return;
 	}
 
@@ -392,8 +543,6 @@ wrapped_create_swapchain(struct xrt_compositor *xc,
 		return xret;
 	}
 
-	// The native swapchain creation inside the Metal client has now reached
-	// comp_base_create_swapchain, which registers the Stage-1 Vulkan provider.
 	if (ensure_pair(c)) {
 		wrap_swapchain(c, *out_xsc);
 	}
@@ -438,8 +587,6 @@ wrapped_compositor_destroy(struct xrt_compositor *xc)
 		[c->shared_event release];
 		c->shared_event = nil;
 	}
-	// Destroy the backing Vulkan semaphore only after releasing its exported
-	// Objective-C representation.
 	xrt_compositor_semaphore_reference(&c->xcsem, NULL);
 	[c->command_queue release];
 	c->command_queue = nil;
@@ -460,13 +607,15 @@ wrapped_compositor_destroy(struct xrt_compositor *xc)
 struct xrt_compositor_metal *
 client_metal_release_sync_attach(struct xrt_compositor_metal *xcm, void *command_queue)
 {
-	if (xcm == NULL || command_queue == NULL || !debug_get_bool_option_metal_app_release_shared_event()) {
+	const bool stage2_enabled = debug_get_bool_option_metal_app_release_shared_event();
+	const bool stage3_enabled = debug_get_bool_option_metal_app_release_shared_event_gpu_wait();
+	if (xcm == NULL || command_queue == NULL || (!stage2_enabled && !stage3_enabled)) {
 		return xcm;
 	}
 
 	struct client_metal_release_sync_context *c = calloc(1, sizeof(*c));
 	if (c == NULL) {
-		U_LOG_W("Could not allocate Metal app-release shared-event diagnostic context; blocking handoff unchanged");
+		U_LOG_W("Could not allocate Metal app-release shared-event context; blocking handoff unchanged");
 		return xcm;
 	}
 
@@ -486,8 +635,10 @@ client_metal_release_sync_attach(struct xrt_compositor_metal *xcm, void *command
 	c->trace_mutex_initialized = true;
 
 	c->xc = &xcm->base;
+	c->gpu_wait_enabled = stage3_enabled;
 	c->command_queue = [(__bridge id<MTLCommandQueue>)command_queue retain];
 	c->original_create_swapchain = xcm->base.create_swapchain;
+	c->original_layer_commit = xcm->base.layer_commit;
 	c->original_destroy = xcm->base.destroy;
 	trace_open(c);
 
@@ -495,9 +646,14 @@ client_metal_release_sync_attach(struct xrt_compositor_metal *xcm, void *command
 	c->next = g_contexts;
 	g_contexts = c;
 	xcm->base.create_swapchain = wrapped_create_swapchain;
+	xcm->base.layer_commit = wrapped_layer_commit;
 	xcm->base.destroy = wrapped_compositor_destroy;
 	pthread_mutex_unlock(&g_contexts_mutex);
 
-	U_LOG_I("Metal app-release shared-event Stage 2 enabled; original blocking barrier remains authoritative");
+	if (stage3_enabled) {
+		U_LOG_I("Metal app-release shared-event Stage 3 enabled; per-image CPU barrier will be replaced by a Vulkan timeline GPU wait");
+	} else {
+		U_LOG_I("Metal app-release shared-event Stage 2 enabled; original blocking barrier remains authoritative");
+	}
 	return xcm;
 }
