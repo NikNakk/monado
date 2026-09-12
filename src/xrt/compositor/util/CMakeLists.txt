@@ -42,6 +42,7 @@ if(APPLE)
 		comp_util
 		PRIVATE comp_metal_semaphore_probe.h
 			comp_metal_semaphore_probe.m
+			comp_metal_swapchain_handoff.h
 			comp_metal_swapchain_import.h
 			comp_metal_swapchain_import.c
 			comp_metal_swapchain_import_override.h
