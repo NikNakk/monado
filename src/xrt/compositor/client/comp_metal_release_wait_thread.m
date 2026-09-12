@@ -19,9 +19,20 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+/*
+ * Service-mode Metal swapchains have a proven cross-process shared-event path,
+ * so use the non-blocking wait-thread handoff unless explicitly disabled.
+ * Keep non-service builds opt-in while that path remains independently staged.
+ */
+#if defined(XRT_FEATURE_SERVICE)
+#define METAL_APP_RELEASE_WAIT_THREAD_DEFAULT true
+#else
+#define METAL_APP_RELEASE_WAIT_THREAD_DEFAULT false
+#endif
+
 DEBUG_GET_ONCE_BOOL_OPTION(metal_app_release_wait_thread,
                            "XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD",
-                           false)
+                           METAL_APP_RELEASE_WAIT_THREAD_DEFAULT)
 
 #define METAL_WAIT_THREAD_LOG_WINDOW 240
 
