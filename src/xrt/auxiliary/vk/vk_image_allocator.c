@@ -240,6 +240,19 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	}
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	VkImageTilingControlCreateInfoEXT image_tiling_control_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_TILING_CONTROL_CREATE_INFO_EXT,
+	    .tilingControl = VK_IMAGE_TILING_CONTROL_MAX_PERFORMANCE_EXT,
+	};
+
+	bool tiling_control =
+	    (info->create & XRT_SWAPCHAIN_CREATE_TILING_MAX_PERFORMANCE) != 0 && vk->features.image_tiling_control;
+	if (tiling_control) {
+		CHAIN(image_tiling_control_create_info);
+	}
+#endif
+
 	if (info->face_count == 6) {
 		image_create_flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
 	}

@@ -652,6 +652,9 @@ static const char *optional_device_extensions[] = {
 #ifdef VK_KHR_shared_presentable_image
     VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME,
 #endif
+#ifdef VK_EXT_image_tiling_control
+    VK_EXT_IMAGE_TILING_CONTROL_EXTENSION_NAME,
+#endif
 };
 
 static bool

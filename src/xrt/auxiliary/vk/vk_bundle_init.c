@@ -649,6 +649,13 @@ filter_device_features(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	VkPhysicalDeviceImageTilingControlFeaturesEXT image_tiling_control_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_TILING_CONTROL_FEATURES_EXT,
+	    .pNext = NULL,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures2 physical_device_features = {
 	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
 	    .pNext = NULL,
@@ -716,6 +723,13 @@ filter_device_features(struct vk_bundle *vk,
 	}
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	if (vk->has_EXT_image_tiling_control) {
+		vk_append_to_pnext_chain((VkBaseInStructure *)&physical_device_features,
+		                         (VkBaseInStructure *)&image_tiling_control_info);
+	}
+#endif
+
 	vk->vkGetPhysicalDeviceFeatures2( //
 	    physical_device,              // physicalDevice
 	    &physical_device_features);   // pFeatures
@@ -768,6 +782,10 @@ filter_device_features(struct vk_bundle *vk,
 	CHECK(ext_fmt_resolve, ext_fmt_resolve_info.externalFormatResolve);
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	CHECK(image_tiling_control, image_tiling_control_info.imageTilingControl);
+#endif
+
 	CHECK(shader_image_gather_extended, physical_device_features.features.shaderImageGatherExtended);
 
 	CHECK(shader_storage_image_write_without_format,
@@ -787,7 +805,8 @@ filter_device_features(struct vk_bundle *vk,
 	         "\n\tstorage_buffer_8bit_access: %i"
 	         "\n\tsynchronization_2: %i"
 	         "\n\ttimeline_semaphore: %i"
-	         "\n\tvideo_maintenance_1: %i",                              //
+	         "\n\tvideo_maintenance_1: %i"
+	         "\n\timage_tiling_control: %i",                             //
 	         device_features->ext_fmt_resolve,                           //
 	         device_features->null_descriptor,                           //
 	         device_features->present_wait,                              //
@@ -797,7 +816,8 @@ filter_device_features(struct vk_bundle *vk,
 	         device_features->storage_buffer_8bit_access,                //
 	         device_features->synchronization_2,                         //
 	         device_features->timeline_semaphore,                        //
-	         device_features->video_maintenance_1);                      //
+	         device_features->video_maintenance_1,                       //
+	         device_features->image_tiling_control);                     //
 }
 
 static inline void
@@ -908,6 +928,7 @@ vk_create_device(struct vk_bundle *vk,
 	vk->features.present_wait = device_features.present_wait;
 	vk->features.present_wait2 = device_features.present_wait2;
 	vk->features.video_maintenance_1 = device_features.video_maintenance_1;
+	vk->features.image_tiling_control = device_features.image_tiling_control;
 
 
 	/*
@@ -1075,6 +1096,14 @@ vk_create_device(struct vk_bundle *vk,
 	};
 #endif
 
+#ifdef VK_EXT_image_tiling_control
+	VkPhysicalDeviceImageTilingControlFeaturesEXT image_tiling_control_info = {
+	    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_TILING_CONTROL_FEATURES_EXT,
+	    .pNext = NULL,
+	    .imageTilingControl = device_features.image_tiling_control,
+	};
+#endif
+
 	VkPhysicalDeviceFeatures enabled_features = {
 	    .shaderImageGatherExtended = device_features.shader_image_gather_extended,
 	    .shaderStorageImageWriteWithoutFormat = device_features.shader_storage_image_write_without_format,
@@ -1150,6 +1179,13 @@ vk_create_device(struct vk_bundle *vk,
 	if (vk->has_ANDROID_external_format_resolve) {
 		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
 		                         (VkBaseInStructure *)&ext_fmt_resolve_info);
+	}
+#endif
+
+#ifdef VK_EXT_image_tiling_control
+	if (vk->has_EXT_image_tiling_control) {
+		vk_append_to_pnext_chain((VkBaseInStructure *)&device_create_info,
+		                         (VkBaseInStructure *)&image_tiling_control_info);
 	}
 #endif
 

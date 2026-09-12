@@ -348,6 +348,7 @@ create_device(struct vk_bundle *vk, const struct comp_vulkan_arguments *vk_args)
 	    .present_wait = true,
 	    .present_wait2 = true,
 	    .video_maintenance_1 = true,
+	    .image_tiling_control = true,
 	};
 
 	ret = vk_init_mutex(vk);

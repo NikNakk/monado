@@ -16,6 +16,7 @@
  * @ingroup aux_vk
  */
 
+#include "xrt/xrt_compositor.h"
 #include "xrt/xrt_handles.h"
 
 #include "util/u_debug.h"
@@ -142,6 +143,17 @@ create_image_simple(struct vk_bundle *vk,
                     VkDeviceMemory *out_mem,
                     VkImage *out_image)
 {
+#ifdef VK_EXT_image_tiling_control
+	VkImageTilingControlCreateInfoEXT image_tiling_control_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_TILING_CONTROL_CREATE_INFO_EXT,
+	    .tilingControl = VK_IMAGE_TILING_CONTROL_MAX_PERFORMANCE_EXT,
+	};
+	if (vk->features.image_tiling_control) {
+		image_tiling_control_create_info.pNext = next_chain;
+		next_chain = (VkBaseInStructure *)&image_tiling_control_create_info;
+	}
+#endif
+
 	VkImageCreateInfo image_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
 	    .pNext = next_chain,
@@ -265,9 +277,22 @@ vk_create_image_advanced(struct vk_bundle *vk,
 	VkResult ret = VK_SUCCESS;
 	VkImage image = VK_NULL_HANDLE;
 	VkDeviceMemory device_memory = VK_NULL_HANDLE;
+	VkBaseInStructure *next_chain = NULL;
+
+#ifdef VK_EXT_image_tiling_control
+	VkImageTilingControlCreateInfoEXT image_tiling_control_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_TILING_CONTROL_CREATE_INFO_EXT,
+	    .tilingControl = VK_IMAGE_TILING_CONTROL_MAX_PERFORMANCE_EXT,
+	};
+	if (vk->features.image_tiling_control) {
+		image_tiling_control_create_info.pNext = next_chain;
+		next_chain = (VkBaseInStructure *)&image_tiling_control_create_info;
+	}
+#endif
 
 	VkImageCreateInfo image_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+	    .pNext = next_chain,
 	    .imageType = extent.depth > 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D,
 	    .format = format,
 	    .extent = extent,
@@ -434,7 +459,21 @@ vk_create_image_from_native(struct vk_bundle *vk,
 	const bool has_mutable_format_list =
 	    has_mutable_usage && vk->has_KHR_image_format_list && info->format_count > 0;
 	if (has_mutable_format_list) {
+		image_format_list_create_info.pNext = external_memory_image_create_info.pNext;
 		external_memory_image_create_info.pNext = &image_format_list_create_info;
+	}
+#endif
+
+#ifdef VK_EXT_image_tiling_control
+	VkImageTilingControlCreateInfoEXT image_tiling_control_create_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMAGE_TILING_CONTROL_CREATE_INFO_EXT,
+	    .tilingControl = VK_IMAGE_TILING_CONTROL_MAX_PERFORMANCE_EXT,
+	};
+	const bool has_tiling_control =
+	    (info->create & XRT_SWAPCHAIN_CREATE_TILING_MAX_PERFORMANCE) != 0 && vk->features.image_tiling_control;
+	if (has_tiling_control) {
+		image_tiling_control_create_info.pNext = external_memory_image_create_info.pNext;
+		external_memory_image_create_info.pNext = &image_tiling_control_create_info;
 	}
 #endif
 

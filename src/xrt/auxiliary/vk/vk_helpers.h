@@ -213,6 +213,9 @@ struct vk_bundle
 
 		//! Was KHR_video_maintenance1 requested, available, and enabled?
 		bool video_maintenance_1;
+
+		//! Was EXT_image_tiling_control requested, available, and enabled?
+		bool image_tiling_control;
 	} features;
 
 	struct
@@ -778,6 +781,7 @@ struct vk_device_features
 	bool present_wait;
 	bool present_wait2;
 	bool video_maintenance_1;
+	bool image_tiling_control;
 };
 
 /*!

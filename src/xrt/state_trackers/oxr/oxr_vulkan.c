@@ -171,6 +171,10 @@ static const char *optional_device_extensions[] = {
 #endif
 #ifdef VK_KHR_timeline_semaphore
     VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
+#endif
+
+#ifdef VK_EXT_image_tiling_control
+    VK_EXT_IMAGE_TILING_CONTROL_EXTENSION_NAME,
 #else
     NULL, // avoid zero sized array with UB
 #endif

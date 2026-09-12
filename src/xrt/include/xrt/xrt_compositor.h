@@ -554,6 +554,14 @@ enum xrt_swapchain_create_flags
 	 * both formats in the format list.
 	 */
 	XRT_SWAPCHAIN_CREATE_SAMPLE_AS_SRGB = (1u << 2u),
+	/*!
+	 * Signals that the allocator should prefer maximum performance when choosing the tiling
+	 * layout of the image.
+	 *
+	 * This flag must be mirrored when importing the image, either explicitly by specifying
+	 * the flag or implicitly by providing the drm format modifier to the receiving API.
+	 */
+	XRT_SWAPCHAIN_CREATE_TILING_MAX_PERFORMANCE = (1u << 3u),
 };
 
 /*!

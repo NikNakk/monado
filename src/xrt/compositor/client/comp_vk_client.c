@@ -16,6 +16,7 @@
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
 #include "util/u_debug.h"
+#include "xrt/xrt_compositor.h"
 
 #include "comp_vk_client.h"
 
@@ -674,6 +675,10 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	// Update the create info.
 	struct xrt_swapchain_create_info xinfo = *info;
 	xinfo.bits |= xsccp.extra_bits;
+
+	if (vk->features.image_tiling_control) {
+		xinfo.create |= XRT_SWAPCHAIN_CREATE_TILING_MAX_PERFORMANCE;
+	}
 
 	struct xrt_swapchain_native *xscn = NULL; // Has to be NULL.
 	xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);

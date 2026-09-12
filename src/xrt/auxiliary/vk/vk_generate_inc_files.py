@@ -338,6 +338,7 @@ DEVICE_EXTENSIONS_TO_CHECK = [
     "VK_EXT_external_memory_host",
     "VK_EXT_global_priority",
     "VK_EXT_image_drm_format_modifier",
+    "VK_EXT_image_tiling_control",
     "VK_EXT_metal_objects",
     "VK_EXT_robustness2",
     "VK_ANDROID_external_format_resolve",
