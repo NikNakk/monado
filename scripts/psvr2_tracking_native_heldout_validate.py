@@ -35,6 +35,8 @@ NORMAL_RMS_LIMIT_PX = 5.0
 WEAK_ANCHOR_RMS_LIMIT_PX = 6.0
 WEAK_ANCHOR_PAIR_ERROR_M = 0.005
 WEAK_ANCHOR_RAY_RMS = 0.008
+MIN_USABLE_VALIDATION_POSES = 4
+MAX_STEREO_DROPPED_BLOBS = 2
 
 
 def validation_dirs(root: Path) -> list[Path]:
@@ -56,6 +58,49 @@ def weak_anchor(anchor: dict) -> bool:
     return (
         float(anchor["model_pair_error_m"]) >= WEAK_ANCHOR_PAIR_ERROR_M
         or float(anchor["normalized_ray_rms"]) >= WEAK_ANCHOR_RAY_RMS
+    )
+
+
+def robust_stereo_cloud(cam0, cam1, obs0, obs1, model_distances):
+    """Build a lower-camera cloud without requiring every detected blob.
+
+    The normal full-observation solution is always tried first. If it has no
+    physically plausible assignment, search same-size subsets after dropping at
+    most two blobs from each lower camera. Selection uses only lower-camera
+    stereo/model geometry; upper-camera observations are never consulted.
+    """
+    maximum = min(len(obs0), len(obs1))
+    minimum = max(4, maximum - MAX_STEREO_DROPPED_BLOBS)
+    failures = 0
+
+    for count in range(maximum, minimum - 1, -1):
+        candidates = []
+        for ids0 in itertools.combinations(range(len(obs0)), count):
+            subset0 = obs0[list(ids0)]
+            for ids1 in itertools.combinations(range(len(obs1)), count):
+                subset1 = obs1[list(ids1)]
+                try:
+                    solution = stereo_cloud(cam0, cam1, subset0, subset1, model_distances)
+                except RuntimeError:
+                    failures += 1
+                    continue
+                # stereo_cloud's first element is its lower-camera-only objective.
+                candidates.append((float(solution[0]), tuple(ids0), tuple(ids1), solution))
+
+        if candidates:
+            candidates.sort(key=lambda item: item[0])
+            objective, ids0, ids1, solution = candidates[0]
+            return solution, {
+                "input_blob_counts": [int(len(obs0)), int(len(obs1))],
+                "used_blob_count": int(count),
+                "dropped_camera0": [i for i in range(len(obs0)) if i not in ids0],
+                "dropped_camera1": [i for i in range(len(obs1)) if i not in ids1],
+                "lower_stereo_objective": objective,
+                "failed_subset_attempts": failures,
+            }
+
+    raise RuntimeError(
+        f"no physically plausible camera0/1 stereo assignment after trying {maximum}..{minimum} blobs"
     )
 
 
@@ -102,7 +147,7 @@ def candidate_assessment(scores: dict, anchors: list[dict], possible: list[int])
     if score10["rms_px"] is None or score10["rms_px"] > NORMAL_RMS_LIMIT_PX:
         reasons.append(f"aggregate held-out RMS is {score10['rms_px']!r}, expected <=5 px")
 
-    for index, (row, anchor, max_matches) in enumerate(zip(score10["per_pose"], anchors, possible)):
+    for row, anchor, max_matches in zip(score10["per_pose"], anchors, possible):
         required_matches = min(2, max_matches)
         if row["matches"] < required_matches:
             reasons.append(
@@ -154,15 +199,24 @@ def main() -> int:
     )
 
     directories = validation_dirs(args.validation_root)
-    names = [path.name for path in directories]
-    observations = [[merged_blinks(directory, camera) for camera in range(4)] for directory in directories]
+    all_observations = [[merged_blinks(directory, camera) for camera in range(4)] for directory in directories]
 
+    names = []
+    observations = []
     clouds = []
     anchors = []
+    skipped = []
     print("blob counts:")
-    for name, row in zip(names, observations):
+    for directory, row in zip(directories, all_observations):
+        name = directory.name
         print(f"  {name}: " + "/".join(str(len(points)) for points in row))
-        solution = stereo_cloud(source[0], source[1], row[0], row[1], model_distances)
+        try:
+            solution, selection = robust_stereo_cloud(source[0], source[1], row[0], row[1], model_distances)
+        except RuntimeError as exc:
+            skipped.append({"pose": name, "reason": str(exc), "blob_counts": [len(points) for points in row]})
+            print(f"  {name}: SKIP: {exc}")
+            continue
+
         cloud = solution[1]
         anchor = {
             "pose": name,
@@ -170,16 +224,32 @@ def main() -> int:
             "diameter_m": float(solution[2]),
             "model_pair_error_m": float(solution[3]),
             "normalized_ray_rms": float(solution[4]),
+            "stereo_subset_selection": selection,
         }
+        names.append(name)
+        observations.append(row)
         clouds.append(cloud)
         anchors.append(anchor)
+        subset_note = ""
+        if selection["used_blob_count"] < min(selection["input_blob_counts"]):
+            subset_note = (
+                f", subset={selection['used_blob_count']}/{selection['input_blob_counts'][0]}+"
+                f"{selection['input_blob_counts'][1]}"
+            )
         print(
             f"  {name}: stereo {len(cloud)} points, diameter={1000.0*solution[2]:.1f}mm, "
-            f"pair-error={1000.0*solution[3]:.2f}mm, ray-rms={solution[4]:.4f}"
+            f"pair-error={1000.0*solution[3]:.2f}mm, ray-rms={solution[4]:.4f}{subset_note}"
+        )
+
+    enough_poses = len(clouds) >= MIN_USABLE_VALIDATION_POSES
+    if not enough_poses:
+        print(
+            f"FAIL: only {len(clouds)} usable held-out stereo anchors; "
+            f"need at least {MIN_USABLE_VALIDATION_POSES}"
         )
 
     cameras = {}
-    overall_pass = True
+    overall_pass = enough_poses
     for camera_index in (2, 3):
         camera_observations = [row[camera_index] for row in observations]
         old_scores = summarize_score(source[camera_index], clouds, camera_observations, names)
@@ -211,7 +281,7 @@ def main() -> int:
             print(f"  FAIL: {reason}")
 
     result = {
-        "format": "psvr2-tracking-native-heldout-validation-v1",
+        "format": "psvr2-tracking-native-heldout-validation-v2",
         "runtime_usable": False,
         "status": "passed" if overall_pass else "failed",
         "source_calibration": {
@@ -225,8 +295,11 @@ def main() -> int:
         "validation_root": str(args.validation_root),
         "hand": args.hand,
         "poses": anchors,
+        "skipped_poses": skipped,
         "cameras": cameras,
         "criteria": {
+            "minimum_usable_validation_poses": MIN_USABLE_VALIDATION_POSES,
+            "max_stereo_dropped_blobs_per_camera": MAX_STEREO_DROPPED_BLOBS,
             "aggregate_10px_match_fraction": 0.75,
             "aggregate_rms_px": NORMAL_RMS_LIMIT_PX,
             "per_pose_minimum_matches": 2,
@@ -236,8 +309,10 @@ def main() -> int:
             "weak_anchor_normalized_ray_rms": WEAK_ANCHOR_RAY_RMS,
         },
         "note": (
-            "Strictly held-out comparison: no model parameter is fitted from V* data. Cameras 0/1 must be identical "
-            "between source and candidate and are used only to reconstruct the validation point clouds."
+            "Strictly held-out comparison: no upper-camera model parameter is fitted from V* data. Cameras 0/1 must "
+            "be identical between source and candidate and are used only to reconstruct validation point clouds. If a "
+            "full lower-stereo assignment is impossible, up to two lower-camera blobs may be discarded using only "
+            "lower-camera stereo/model geometry; upper-camera observations never influence that subset selection."
         ),
     }
     args.output.write_text(json.dumps(result, indent=2) + "\n")
