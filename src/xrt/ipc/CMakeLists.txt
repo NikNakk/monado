@@ -76,15 +76,28 @@ else()
 	target_sources(ipc_shared PRIVATE shared/ipc_message_channel_unix.c)
 endif()
 
-if(APPLE AND XRT_FEATURE_SERVICE)
-	add_executable(ipc_metal_xpc_probe shared/ipc_metal_xpc_probe.m)
-	set_target_properties(
-		ipc_metal_xpc_probe PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-probe PREFIX ""
-		)
-	target_compile_options(ipc_metal_xpc_probe PRIVATE -fblocks)
-	target_link_libraries(
-		ipc_metal_xpc_probe PRIVATE xrt-interfaces "-framework Foundation" "-framework Metal"
-		)
+if(APPLE)
+	target_sources(ipc_shared PRIVATE shared/ipc_metal_xpc.h shared/ipc_metal_xpc.m)
+	target_link_libraries(ipc_shared PRIVATE "-framework Foundation" "-framework Metal")
+
+	if(XRT_FEATURE_SERVICE)
+		add_executable(ipc_metal_xpc_probe shared/ipc_metal_xpc_probe.m)
+		set_target_properties(
+			ipc_metal_xpc_probe PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-probe PREFIX ""
+			)
+		target_link_libraries(
+			ipc_metal_xpc_probe PRIVATE xrt-interfaces "-framework Foundation" "-framework Metal"
+			)
+
+		add_executable(ipc_metal_xpc_broker shared/ipc_metal_xpc_broker.m)
+		set_target_properties(
+			ipc_metal_xpc_broker PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-broker PREFIX ""
+			)
+		target_link_libraries(
+			ipc_metal_xpc_broker
+			PRIVATE xrt-interfaces ipc_shared "-framework Foundation" "-framework Metal"
+			)
+	endif()
 endif()
 
 target_link_libraries(ipc_shared PRIVATE aux_util)
