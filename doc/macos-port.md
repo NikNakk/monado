@@ -474,6 +474,21 @@ For bounded tests with the provisional calibration,
 correspondence gate from its default `1.0`, clamped to at most `4.0`. This is a
 diagnostic tolerance for calibration residuals, not a substitute for refining
 the camera model; normal tracking behavior is unchanged unless it is set.
+Live centered-controller testing on 2026-09-12 confirmed that this tolerance
+does not resolve the bootstrap. The default gate reached at most two unique LED
+matches, while `2.0` and `3.0` reached at most four; no pose was accepted. A
+retained stationary sequence contained 1, 2, 5, and 5 temporally isolated
+constellation points in cameras 0 through 3. Offline joint-rig scoring found a
+tight five-point camera-3 interpretation (1.90 px RMS), but it projected no
+matching points into camera 2 even though camera 2 visibly observed the same
+controller. Testing every observation against each camera calibration did not
+reveal a simple index permutation. This localizes the next work to joint
+mode-4 camera/constellation calibration and pose refinement, rather than LED
+control, camera routing, or further correspondence-gate relaxation.
+Homebrew OpenCV 5 also renamed the `calib3d` and `features2d` CMake components
+to `calib` and `features`, with PnP in `geometry`. Monado now selects the
+version-appropriate component names; otherwise CMake silently disables
+`XRT_HAVE_OPENCV` and the constellation tracker's RANSAC-PnP refinement.
 Hardware validation with both stationary controllers found 360 blob
 observations per camera in six seconds without reducing camera throughput. The
 normal 450 us schedule produced clearly visible controller rings in snapshots

@@ -20,6 +20,10 @@
 #include "tracking/t_calibration_opencv.hpp"
 
 #include <opencv2/opencv.hpp>
+#if CV_MAJOR_VERSION >= 5
+#include <opencv2/geometry/2d.hpp>
+#include <opencv2/geometry/3d.hpp>
+#endif
 #include <sys/stat.h>
 #include <utility>
 #include <stdexcept>
