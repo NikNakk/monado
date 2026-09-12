@@ -14,6 +14,7 @@ set(tests
     tests_lowpass_float
     tests_lowpass_integer
     tests_pacing
+    tests_pose_metrics
     tests_quatexpmap
     tests_quat_change_of_basis
     tests_quat_swing_twist
@@ -67,6 +68,8 @@ target_link_libraries(tests_quatexpmap PRIVATE aux_math)
 target_link_libraries(tests_rational PRIVATE aux_math)
 target_link_libraries(tests_relation_chain PRIVATE aux_math)
 target_link_libraries(tests_pose PRIVATE aux_math)
+target_link_libraries(tests_pose_metrics PRIVATE constellation)
+target_include_directories(tests_pose_metrics PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
 target_link_libraries(tests_quat_change_of_basis PRIVATE aux_math)
 target_link_libraries(tests_quat_swing_twist PRIVATE aux_math)
 target_link_libraries(tests_vec3_angle PRIVATE aux_math)

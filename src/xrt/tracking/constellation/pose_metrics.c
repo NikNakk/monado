@@ -41,70 +41,66 @@ expand_rect(struct pose_rect *bounds, double x, double y, double w, double h)
 	bounds->bottom = MAX(bounds->bottom, y + h);
 }
 
-static int
-find_best_matching_led(struct pose_metrics_visible_led_info *led_points,
-                       int num_leds,
-                       struct t_blob *blob,
-                       double *out_sqerror)
+static bool
+blob_matches_led(const struct pose_metrics_visible_led_info *led_info, const struct t_blob *blob, double *out_sqerror)
 {
-	double best_z;
-	int best_led_index = -1;
-	double best_sqerror = 1e20;
-	int leds_within_range = 0;
+	// If the blob is much larger than the LED in either dimension, don't match.
+	if (blob->size.x > led_info->led_radius_px * 4 || blob->size.y > led_info->led_radius_px * 4) {
+		return false;
+	}
 
-	for (int i = 0; i < num_leds; i++) {
-		struct pose_metrics_visible_led_info *led_info = led_points + i;
-		struct xrt_vec2 *pos_px = &led_info->pos_px;
-		double led_radius_px = led_info->led_radius_px;
-		double dx = fabs((double)pos_px->x - blob->center.x);
-		double dy = fabs((double)pos_px->y - blob->center.y);
-		double sqerror = dx * dx + dy * dy;
+	double dx = (double)led_info->pos_px.x - blob->center.x;
+	double dy = (double)led_info->pos_px.y - blob->center.y;
+	double sqerror = dx * dx + dy * dy;
+	*out_sqerror = sqerror;
+	return sqerror < led_info->led_radius_px * led_info->led_radius_px;
+}
 
-		// If the blob is much larger than the LED in either dimension, don't match
-		if (blob->size.x > led_info->led_radius_px * 4 || blob->size.y > led_info->led_radius_px * 4) {
-			continue;
-		}
+/*
+ * Find an augmenting path in the blob/LED compatibility graph. Trying LEDs in
+ * increasing reprojection-error order gives a low-error maximum-cardinality
+ * one-to-one assignment without allowing two image blobs to inflate one LED's
+ * match count.
+ */
+static bool
+assign_blob_to_led(int blob_index,
+                   struct t_blob **blobs,
+                   struct pose_metrics_visible_led_info *leds,
+                   int num_leds,
+                   int *blob_to_led,
+                   int *led_to_blob,
+                   bool *visited_leds)
+{
+	for (int candidate = 0; candidate < num_leds; candidate++) {
+		int best_led = -1;
+		double best_sqerror = INFINITY;
+		for (int led_index = 0; led_index < num_leds; led_index++) {
+			if (visited_leds[led_index]) {
+				continue;
+			}
 
-		// Check if the LED falls within the bounding box is closer to the camera (smaller Z),
-		// or is at least ed_radius closer to the blob center
-		if (sqerror < (led_radius_px * led_radius_px)) {
-			leds_within_range++;
-
-			if (best_led_index < 0 || best_z > led_info->pos_m.z ||
-			    (sqerror + led_radius_px) < best_sqerror) {
-				best_z = led_info->pos_m.z;
-				best_led_index = i;
+			double sqerror = 0.0;
+			if (blob_matches_led(&leds[led_index], blobs[blob_index], &sqerror) && sqerror < best_sqerror) {
+				best_led = led_index;
 				best_sqerror = sqerror;
 			}
 		}
-	}
 
-	if (leds_within_range > 1 && u_log_get_global_level() >= U_LOGGING_TRACE) {
-		U_LOG_T("Multiple LEDs match blob @ %f, %f. best_sqerror %f LED %d z %f", blob->center.x,
-		        blob->center.y, best_sqerror, best_led_index, led_points[best_led_index].pos_m.z);
+		if (best_led < 0) {
+			break;
+		}
 
-		for (int i = 0; i < num_leds; i++) {
-			struct pose_metrics_visible_led_info *led_info = led_points + i;
-			struct xrt_vec2 *pos_px = &led_info->pos_px;
-			struct xrt_vec3 *pos_m = &led_info->pos_m;
-			double led_radius_px = led_info->led_radius_px;
-			double dx = fabs((double)pos_px->x - blob->center.x);
-			double dy = fabs((double)pos_px->y - blob->center.y);
-			double sqerror = dx * dx + dy * dy;
-
-			// Check if the LED falls within the bounding box has smaller error distance,
-			// or is closer to the camera (smaller Z)
-			if (sqerror < (led_radius_px * led_radius_px)) {
-				U_LOG_T("LED %d sqerror %f pos px %f %f radius %f metres %f %f %f", i, sqerror,
-				        pos_px->x, pos_px->y, led_radius_px, pos_m->x, pos_m->y, pos_m->z);
-			}
+		visited_leds[best_led] = true;
+		int displaced_blob = led_to_blob[best_led];
+		if (displaced_blob < 0 ||
+		    assign_blob_to_led(displaced_blob, blobs, leds, num_leds, blob_to_led, led_to_blob, visited_leds)) {
+			blob_to_led[blob_index] = best_led;
+			led_to_blob[best_led] = blob_index;
+			return true;
 		}
 	}
 
-	if (out_sqerror) {
-		*out_sqerror = best_sqerror;
-	}
-	return best_led_index;
+	return false;
 }
 
 static void
@@ -294,8 +290,10 @@ pose_metrics_match_pose_to_blobs(const struct xrt_pose *pose,
 
 	LOG_SPEW("Bounding box for pose is %f,%f -> %f,%f", bounds->left, bounds->top, bounds->right, bounds->bottom);
 
-	// Iterate the blobs and see which ones are within the bounding box and have a matching LED
-	bool all_led_ids_matched = true;
+	// Collect blobs within the projected constellation bounds, then compute a
+	// maximum-cardinality one-to-one assignment to compatible visible LEDs.
+	struct t_blob *candidate_blobs[XRT_CONSTELLATION_MAX_BLOBS_PER_FRAME];
+	int num_candidate_blobs = 0;
 	int blobs_outside_bounds = 0;
 
 	for (int i = 0; i < num_blobs; i++) {
@@ -314,33 +312,46 @@ pose_metrics_match_pose_to_blobs(const struct xrt_pose *pose,
 			continue;
 		}
 
-		double sqerror;
+		candidate_blobs[num_candidate_blobs++] = b;
+	}
 
-		int match_led_index = find_best_matching_led(match_info->visible_leds,     //
-		                                             match_info->num_visible_leds, //
-		                                             b,                            //
-		                                             &sqerror);
+	int blob_to_led[XRT_CONSTELLATION_MAX_BLOBS_PER_FRAME];
+	int led_to_blob[MAX_OBJECT_LEDS];
+	for (int i = 0; i < num_candidate_blobs; i++) {
+		blob_to_led[i] = -1;
+	}
+	for (int i = 0; i < match_info->num_visible_leds; i++) {
+		led_to_blob[i] = -1;
+	}
+	for (int blob_index = 0; blob_index < num_candidate_blobs; blob_index++) {
+		bool visited_leds[MAX_OBJECT_LEDS] = {false};
+		(void)assign_blob_to_led(blob_index, candidate_blobs, match_info->visible_leds,
+		                         match_info->num_visible_leds, blob_to_led, led_to_blob, visited_leds);
+	}
 
-		if (match_led_index < 0) {
+	bool all_led_ids_matched = true;
+	for (int blob_index = 0; blob_index < num_candidate_blobs; blob_index++) {
+		struct t_blob *blob = candidate_blobs[blob_index];
+		int led_index = blob_to_led[blob_index];
+		if (led_index < 0) {
 			match_info->unmatched_blobs++;
 			continue;
 		}
 
+		struct pose_metrics_visible_led_info *led_info = &match_info->visible_leds[led_index];
+		double sqerror = 0.0;
+		bool compatible = blob_matches_led(led_info, blob, &sqerror);
+		assert(compatible);
+		(void)compatible;
 		match_info->reprojection_error += sqerror;
 		match_info->matched_blobs++;
+		led_info->matched_blob = blob;
 
-		struct pose_metrics_visible_led_info *led_info = match_info->visible_leds + match_led_index;
-		led_info->matched_blob = b;
-
-		if (b->matched_device_led_id != XRT_CONSTELLATION_INVALID_LED_ID) {
-			struct t_constellation_tracker_led *match_led = led_info->led;
-			t_constellation_led_id_it led_id = match_led->id;
-			if (b->matched_device_led_id != led_id || b->matched_device_id != device_id) {
-				LOG_SPEW("mismatched LED id %d blob %d (@ %f,%f) has %d/%d", led_id, i, b->center.x,
-				         b->center.y, b->matched_device_id, b->matched_device_led_id);
-
-				all_led_ids_matched = false;
-			}
+		if (blob->matched_device_led_id != XRT_CONSTELLATION_INVALID_LED_ID &&
+		    (blob->matched_device_led_id != led_info->led->id || blob->matched_device_id != device_id)) {
+			LOG_SPEW("mismatched LED id %d blob %d (@ %f,%f) has %d/%d", led_info->led->id, blob_index,
+			         blob->center.x, blob->center.y, blob->matched_device_id, blob->matched_device_led_id);
+			all_led_ids_matched = false;
 		}
 	}
 
