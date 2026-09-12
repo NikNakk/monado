@@ -297,6 +297,26 @@ PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 \
   /tmp/psvr2-mode4-tracking-calibration-provisional.json 30
 ```
 
+An optional final argument retains raw mode-4 images while the probe runs. Set
+`CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT` at the same time to preserve the
+blob observations and camera-space pose/IMU-prior context used by the tracker.
+This makes later threshold and correspondence work reproducible without a new
+hardware capture:
+
+```sh
+CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT=/tmp/psvr2-constellation-capture/tracker.dat \
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 \
+  build/src/xrt/targets/cli/monado-cli psvr2-constellation \
+  /tmp/psvr2-mode4-tracking-calibration-provisional.json 20 \
+  /tmp/psvr2-constellation-capture
+```
+
+Image writing uses independent single-frame queues so slow storage cannot stall
+live tracking. Consequently, the recorder may skip images when it cannot keep
+up; the four per-camera manifests identify exactly which source sequences were
+retained. `PSVR2_CONSTELLATION_CAPTURE_STRIDE` can deliberately retain every
+Nth sequence (default `1`) to reduce disk use.
+
 The same physical camera calibration applies to both hands. The right Sense
 uses its own mirrored 17-point model already present in the driver. A right
 controller can therefore be exercised by the same command, but remains
