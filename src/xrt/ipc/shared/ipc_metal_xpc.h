@@ -32,20 +32,13 @@ extern "C" {
 
 /*!
  * Publish borrowed MTLTexture objects to the per-user Metal XPC broker.
- *
- * The broker retains the corresponding MTLSharedTextureHandle objects until
- * the token is taken/discarded. The returned token is deliberately plain data
- * so it can travel through Monado's existing Unix-socket IPC protocol.
  */
 xrt_result_t
 ipc_metal_xpc_publish_textures(void *const *metal_textures, uint32_t image_count, uint64_t *out_token);
 
 /*!
  * Recreate textures previously published under @p token.
- *
- * Each returned pointer is a retained id<MTLTexture> and must be released with
- * ipc_metal_xpc_release_textures(). On success the token is discarded from the
- * broker after all textures have been reconstructed.
+ * Each returned pointer is a retained id<MTLTexture>.
  */
 xrt_result_t
 ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_metal_textures);
@@ -53,6 +46,43 @@ ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_
 /*! Release textures returned by ipc_metal_xpc_take_textures(). */
 void
 ipc_metal_xpc_release_textures(void **metal_textures, uint32_t image_count);
+
+/*!
+ * Publish a borrowed MTLSharedEvent through the broker and return its token.
+ */
+xrt_result_t
+ipc_metal_xpc_publish_shared_event(void *metal_shared_event, uint64_t *out_token);
+
+/*!
+ * Recreate an MTLSharedEvent published under @p token using the supplied
+ * receiving-process MTLDevice. The returned pointer owns one Objective-C
+ * reference.
+ */
+xrt_result_t
+ipc_metal_xpc_take_shared_event(uint64_t token, void *metal_device, void **out_metal_shared_event);
+
+/*! Release an event returned by ipc_metal_xpc_take_shared_event(). */
+void
+ipc_metal_xpc_release_shared_event(void *metal_shared_event);
+
+/*
+ * Thread-local marker used only while the Metal Stage-4 wrapper asks the IPC
+ * compositor to create its service-side timeline semaphore. The source-local
+ * IPC override consumes the returned broker token and stores the reconstructed
+ * event here so the ordinary xrt_comp_create_semaphore call can still return
+ * the normal IPC semaphore proxy.
+ */
+void
+ipc_metal_xpc_begin_shared_event_request(void *metal_device);
+
+bool
+ipc_metal_xpc_shared_event_request_active(void);
+
+xrt_result_t
+ipc_metal_xpc_resolve_shared_event_request(uint64_t token);
+
+bool
+ipc_metal_xpc_end_shared_event_request(void **out_metal_shared_event);
 
 /*! Best-effort removal of a token from the broker. */
 void
@@ -94,6 +124,13 @@ ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images,
 - (void)takeTextureHandleForToken:(uint64_t)token
                             index:(uint32_t)index
                             reply:(void (^)(MTLSharedTextureHandle *handle))reply;
+
+- (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
+                           token:(uint64_t)token
+                           reply:(void (^)(BOOL success))reply;
+
+- (void)takeSharedEventHandleForToken:(uint64_t)token
+                                reply:(void (^)(MTLSharedEventHandle *handle))reply;
 
 - (void)discardToken:(uint64_t)token reply:(void (^)(void))reply;
 

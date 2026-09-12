@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief macOS Metal shared-texture swapchain import for IPC server.
+ * @brief macOS Metal resource import for IPC server.
  * @ingroup ipc_server
  */
 
@@ -11,6 +11,7 @@
 #include "util/u_trace_marker.h"
 
 #ifdef XRT_OS_OSX
+#include "util/comp_metal_semaphore_provider.h"
 #include "util/comp_metal_swapchain_handoff.h"
 #endif
 
@@ -25,6 +26,20 @@ find_free_swapchain_index(volatile struct ipc_client_state *ics, uint32_t *out_i
 	}
 
 	IPC_ERROR(ics->server, "Too many swapchains!");
+	return XRT_ERROR_IPC_FAILURE;
+}
+
+static xrt_result_t
+find_free_semaphore_index(volatile struct ipc_client_state *ics, uint32_t *out_index)
+{
+	for (uint32_t index = 0; index < IPC_MAX_CLIENT_SEMAPHORES; index++) {
+		if (ics->xcsems[index] == NULL) {
+			*out_index = index;
+			return XRT_SUCCESS;
+		}
+	}
+
+	IPC_ERROR(ics->server, "Too many compositor semaphores alive!");
 	return XRT_ERROR_IPC_FAILURE;
 }
 
@@ -116,6 +131,64 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 	         info->height,
 	         info->array_size,
 	         (unsigned long long)token);
+
+	return XRT_SUCCESS;
+#endif
+}
+
+xrt_result_t
+ipc_handle_compositor_semaphore_create_metal(volatile struct ipc_client_state *ics,
+                                             uint32_t *out_id,
+                                             uint64_t *out_token)
+{
+	IPC_TRACE_MARKER();
+
+#ifndef XRT_OS_OSX
+	(void)ics;
+	(void)out_id;
+	(void)out_token;
+	return XRT_ERROR_NOT_IMPLEMENTED;
+#else
+	if (ics == NULL || out_id == NULL || out_token == NULL || ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+
+	uint32_t id = 0;
+	xrt_result_t xret = find_free_semaphore_index(ics, &id);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	struct xrt_compositor_semaphore *xcsem = NULL;
+	void *raw_shared_event = NULL;
+	xret = comp_metal_semaphore_create_client_pair(&xcsem, &raw_shared_event);
+	if (xret != XRT_SUCCESS || xcsem == NULL || raw_shared_event == NULL) {
+		IPC_ERROR(ics->server,
+		          "Failed to create Metal shared-event compositor semaphore: result=%d",
+		          xret);
+		if (xcsem != NULL) {
+			xrt_compositor_semaphore_reference(&xcsem, NULL);
+		}
+		return xret != XRT_SUCCESS ? xret : XRT_ERROR_VULKAN;
+	}
+
+	uint64_t token = 0;
+	xret = ipc_metal_xpc_publish_shared_event(raw_shared_event, &token);
+	if (xret != XRT_SUCCESS) {
+		xrt_compositor_semaphore_reference(&xcsem, NULL);
+		return xret;
+	}
+
+	ics->xcsems[id] = xcsem;
+	ics->compositor_semaphore_count++;
+	*out_id = id;
+	*out_token = token;
+
+	IPC_INFO(ics->server,
+	         "Metal IPC Stage 4 semaphore active: id=%u token=0x%016llx event=%p",
+	         id,
+	         (unsigned long long)token,
+	         raw_shared_event);
 
 	return XRT_SUCCESS;
 #endif

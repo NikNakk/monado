@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "util/comp_metal_semaphore_provider.h"
 #include "vk/vk_helpers.h"
 
 #ifdef __cplusplus
@@ -18,19 +19,11 @@ extern "C" {
 
 /*!
  * Probe Vulkan timeline semaphore export to an MTLSharedEvent and register the
- * compositor Vulkan bundle for the in-process Metal client path.
+ * compositor Vulkan bundle for the Metal client path.
  * Failure is diagnostic only and does not change compositor behaviour.
  */
 void
 comp_metal_semaphore_probe(struct vk_bundle *vk);
-
-/*!
- * Create a Metal-exportable timeline semaphore for one in-process Metal client.
- * This is available only after @ref comp_metal_semaphore_probe has succeeded.
- * The returned MTLSharedEvent is not retained for the caller.
- */
-xrt_result_t
-comp_metal_semaphore_create_client_pair(struct xrt_compositor_semaphore **out_xcsem, void **out_mtl_shared_event);
 
 /*!
  * Clear the registered Vulkan bundle before its compositor is torn down.
