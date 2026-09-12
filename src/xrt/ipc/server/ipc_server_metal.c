@@ -14,6 +14,227 @@
 #include "util/comp_metal_semaphore_provider.h"
 #include "util/comp_metal_swapchain_handoff.h"
 #include "util/comp_swapchain_gpu_reuse.h"
+
+#include <pthread.h>
+#include <stdlib.h>
+#endif
+
+#ifdef XRT_OS_OSX
+/*
+ * OpenXR permits acquire_image() to return an image that is not writable yet;
+ * wait_image() is the operation that establishes availability. The default
+ * compositor swapchain therefore returns the oldest FIFO image without looking
+ * at its use state.
+ *
+ * For cross-process Metal swapchains that is unnecessarily expensive: GPU
+ * reuse tracking can know that the oldest image still has a pending compositor
+ * consumer or an unsignalled GPU-use timeline value while a newer FIFO image is
+ * already reusable. A client such as GAV then blocks in xrWaitSwapchainImage()
+ * despite another image being immediately available.
+ *
+ * Keep the authoritative wait_image() synchronization unchanged. This wrapper
+ * only changes which already-released FIFO image acquire_image() prefers. Each
+ * candidate is probed with a zero-timeout wait; busy candidates are rotated to
+ * the back of the FIFO. If no candidate is immediately reusable, the oldest
+ * candidate is returned exactly as before and the real wait happens in the
+ * subsequent xrWaitSwapchainImage().
+ */
+struct metal_ipc_smart_acquire_tracker
+{
+	struct xrt_swapchain *xsc;
+	xrt_result_t (*original_acquire_image)(struct xrt_swapchain *, uint32_t *);
+	void (*original_destroy)(struct xrt_swapchain *);
+	struct metal_ipc_smart_acquire_tracker *next;
+};
+
+static pthread_mutex_t g_metal_ipc_smart_acquire_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct metal_ipc_smart_acquire_tracker *g_metal_ipc_smart_acquire_trackers = NULL;
+
+static struct metal_ipc_smart_acquire_tracker *
+metal_ipc_smart_acquire_find_locked(struct xrt_swapchain *xsc)
+{
+	for (struct metal_ipc_smart_acquire_tracker *tracker = g_metal_ipc_smart_acquire_trackers;
+	     tracker != NULL;
+	     tracker = tracker->next) {
+		if (tracker->xsc == xsc) {
+			return tracker;
+		}
+	}
+
+	return NULL;
+}
+
+static xrt_result_t
+metal_ipc_smart_acquire_requeue(struct xrt_swapchain *xsc, const uint32_t *indices, uint32_t count)
+{
+	for (uint32_t i = 0; i < count; i++) {
+		xrt_result_t xret = xrt_swapchain_release_image(xsc, indices[i]);
+		if (xret != XRT_SUCCESS) {
+			return xret;
+		}
+	}
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+metal_ipc_smart_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
+{
+	if (xsc == NULL || out_index == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	pthread_mutex_lock(&g_metal_ipc_smart_acquire_mutex);
+	struct metal_ipc_smart_acquire_tracker *tracker = metal_ipc_smart_acquire_find_locked(xsc);
+	if (tracker == NULL || tracker->original_acquire_image == NULL) {
+		pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+		return XRT_ERROR_VULKAN;
+	}
+
+	uint32_t skipped[XRT_MAX_SWAPCHAIN_IMAGES] = {0};
+	uint32_t skipped_count = 0;
+	uint32_t selected_index = 0;
+	bool selected_ready = false;
+	xrt_result_t acquire_result = XRT_ERROR_NO_IMAGE_AVAILABLE;
+
+	/*
+	 * Only images currently present in the native FIFO can be returned by
+	 * acquire_image(). At most image_count probes are therefore needed.
+	 */
+	for (uint32_t i = 0; i < xsc->image_count; i++) {
+		uint32_t candidate = 0;
+		acquire_result = tracker->original_acquire_image(xsc, &candidate);
+		if (acquire_result != XRT_SUCCESS) {
+			break;
+		}
+
+		/*
+		 * GPU-reuse tracking wraps wait_image(), so a zero-timeout probe tests
+		 * all three relevant domains without weakening any of them:
+		 * normal Monado image use, pending compositor consumers, and the
+		 * compositor GPU-use timeline.
+		 */
+		xrt_result_t probe_result = xrt_swapchain_wait_image(xsc, 0, candidate);
+		if (probe_result == XRT_SUCCESS) {
+			selected_index = candidate;
+			selected_ready = true;
+			break;
+		}
+
+		/*
+		 * XRT_TIMEOUT is the expected busy result. Treat any other probe
+		 * failure conservatively as busy too: acquire itself should not gain a
+		 * new failure mode from this optimization, and the real wait will
+		 * report the error if this image ultimately has to be used.
+		 */
+		skipped[skipped_count++] = candidate;
+	}
+
+	if (selected_ready) {
+		/*
+		 * Leave the ready candidate acquired. Requeue skipped busy images in
+		 * their original order behind any candidates we did not need to scan.
+		 */
+		xrt_result_t xret = metal_ipc_smart_acquire_requeue(xsc, skipped, skipped_count);
+		if (xret != XRT_SUCCESS) {
+			/* Best effort: do not silently leave the selected candidate acquired. */
+			xrt_swapchain_release_image(xsc, selected_index);
+			pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+			return xret;
+		}
+
+		*out_index = selected_index;
+		pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+		return XRT_SUCCESS;
+	}
+
+	if (skipped_count > 0) {
+		/*
+		 * Nothing was immediately reusable. Preserve the old behaviour
+		 * exactly: keep the oldest candidate acquired and put every later
+		 * candidate back in FIFO order. xrWaitSwapchainImage() will block on
+		 * the oldest image just as it did before smart acquisition.
+		 */
+		selected_index = skipped[0];
+		xrt_result_t xret = metal_ipc_smart_acquire_requeue(xsc, &skipped[1], skipped_count - 1);
+		if (xret != XRT_SUCCESS) {
+			xrt_swapchain_release_image(xsc, selected_index);
+			pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+			return xret;
+		}
+
+		*out_index = selected_index;
+		pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+		return XRT_SUCCESS;
+	}
+
+	pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+	return acquire_result;
+}
+
+static void
+metal_ipc_smart_acquire_destroy(struct xrt_swapchain *xsc)
+{
+	void (*original_destroy)(struct xrt_swapchain *) = NULL;
+	struct metal_ipc_smart_acquire_tracker *removed = NULL;
+
+	pthread_mutex_lock(&g_metal_ipc_smart_acquire_mutex);
+	struct metal_ipc_smart_acquire_tracker **tracker_ptr = &g_metal_ipc_smart_acquire_trackers;
+	while (*tracker_ptr != NULL) {
+		if ((*tracker_ptr)->xsc == xsc) {
+			removed = *tracker_ptr;
+			*tracker_ptr = removed->next;
+			break;
+		}
+		tracker_ptr = &(*tracker_ptr)->next;
+	}
+
+	if (removed != NULL) {
+		xsc->acquire_image = removed->original_acquire_image;
+		xsc->destroy = removed->original_destroy;
+		original_destroy = removed->original_destroy;
+	}
+	pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+
+	free(removed);
+
+	if (original_destroy != NULL) {
+		original_destroy(xsc);
+	}
+}
+
+static xrt_result_t
+metal_ipc_smart_acquire_enable(struct xrt_swapchain *xsc)
+{
+	if (xsc == NULL || xsc->acquire_image == NULL || xsc->wait_image == NULL || xsc->release_image == NULL ||
+	    xsc->destroy == NULL || xsc->image_count == 0 || xsc->image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct metal_ipc_smart_acquire_tracker *tracker = calloc(1, sizeof(*tracker));
+	if (tracker == NULL) {
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	pthread_mutex_lock(&g_metal_ipc_smart_acquire_mutex);
+	if (metal_ipc_smart_acquire_find_locked(xsc) != NULL) {
+		pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+		free(tracker);
+		return XRT_SUCCESS;
+	}
+
+	tracker->xsc = xsc;
+	tracker->original_acquire_image = xsc->acquire_image;
+	tracker->original_destroy = xsc->destroy;
+	tracker->next = g_metal_ipc_smart_acquire_trackers;
+	g_metal_ipc_smart_acquire_trackers = tracker;
+
+	xsc->acquire_image = metal_ipc_smart_acquire_image;
+	xsc->destroy = metal_ipc_smart_acquire_destroy;
+	pthread_mutex_unlock(&g_metal_ipc_smart_acquire_mutex);
+
+	return XRT_SUCCESS;
+}
 #endif
 
 static xrt_result_t
@@ -126,6 +347,24 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 		          xret);
 		xrt_swapchain_reference(&xsc, NULL);
 		return xret;
+	}
+
+	/*
+	 * Prefer an already-reusable released image rather than blindly handing
+	 * the client the oldest FIFO image and making its subsequent wait block.
+	 * This does not replace or relax GPU reuse tracking: wait_image() remains
+	 * the final authority before the application can write the image.
+	 */
+	xret = metal_ipc_smart_acquire_enable(xsc);
+	if (xret != XRT_SUCCESS) {
+		IPC_WARN(ics->server,
+		         "Could not enable Metal IPC smart swapchain acquire; keeping safe FIFO behaviour: result=%d",
+		         xret);
+	} else {
+		IPC_INFO(ics->server,
+		         "Metal IPC smart swapchain acquire enabled: images=%u swapchain=%p",
+		         xsc->image_count,
+		         (void *)xsc);
 	}
 
 	ics->swapchain_count++;
