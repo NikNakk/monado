@@ -469,6 +469,11 @@ defaults. This validates
 the optical input independently of pose solving. It does not enable
 constellation poses: the repository and GAV reference do not yet provide the
 four mode-4 cameras' calibrated intrinsics and poses required by the tracker.
+For bounded tests with the provisional calibration,
+`CONSTELLATION_TRACKER_LED_MATCH_RADIUS_SCALE` widens the physical LED-radius
+correspondence gate from its default `1.0`, clamped to at most `4.0`. This is a
+diagnostic tolerance for calibration residuals, not a substitute for refining
+the camera model; normal tracking behavior is unchanged unless it is set.
 Hardware validation with both stationary controllers found 360 blob
 observations per camera in six seconds without reducing camera throughput. The
 normal 450 us schedule produced clearly visible controller rings in snapshots
