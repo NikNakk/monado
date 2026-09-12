@@ -13,6 +13,7 @@
 #include "xrt/xrt_results.h"
 
 #include "util/u_misc.h"
+#include "util/u_debug.h"
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
 #include "util/u_limited_unique_id.h"
@@ -28,6 +29,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+
+DEBUG_GET_ONCE_BOOL_OPTION(wait_image_queue_idle, "XRT_COMPOSITOR_WAIT_IMAGE_QUEUE_IDLE", false)
 
 
 /*
@@ -106,6 +109,27 @@ swapchain_dec_image_use(struct xrt_swapchain *xsc, uint32_t index)
 }
 
 static xrt_result_t
+debug_wait_for_compositor_queue_idle(struct comp_swapchain *sc, uint32_t index)
+{
+	if (!debug_get_bool_option_wait_image_queue_idle()) {
+		return XRT_SUCCESS;
+	}
+
+	struct vk_bundle *vk = sc->vk;
+
+	vk_queue_lock(vk->main_queue);
+	VkResult ret = vk->vkQueueWaitIdle(vk->main_queue->queue);
+	vk_queue_unlock(vk->main_queue);
+
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "Diagnostic vkQueueWaitIdle before reuse of image %u: %s", index, vk_result_string(ret));
+		return XRT_ERROR_VULKAN;
+	}
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t index)
 {
 	struct comp_swapchain *sc = comp_swapchain(xsc);
@@ -119,10 +143,12 @@ swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t ind
 	if (sc->images[index].use_count == 0) {
 		VK_TRACE(sc->vk, "%p WAIT_IMAGE %d: NO WAIT", (void *)sc, index);
 		os_mutex_unlock(&sc->images[index].use_mutex);
+
+		debug_wait_for_compositor_queue_idle(sc, index);
+
 		SWAPCHAIN_TRACE_END(swapchain_wait_image);
 		return XRT_SUCCESS;
 	}
-
 	// on windows pthread_cond_timedwait can not be used with monotonic time
 	int64_t start_wait_rt = os_realtime_get_ns();
 
@@ -155,6 +181,7 @@ swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t ind
 				VK_TRACE(sc->vk, "%p WAIT_IMAGE %d: success at %" PRIu64 " after %fms", (void *)sc,
 				         index, now_rt, diff);
 				os_mutex_unlock(&sc->images[index].use_mutex);
+				debug_wait_for_compositor_queue_idle(sc, index);
 				SWAPCHAIN_TRACE_END(swapchain_wait_image);
 				return XRT_SUCCESS;
 			}
@@ -193,6 +220,7 @@ swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t ind
 	VK_TRACE(sc->vk, "%p WAIT_IMAGE %d: became available before spurious wakeup %d", (void *)sc, index, ret);
 
 	os_mutex_unlock(&sc->images[index].use_mutex);
+	debug_wait_for_compositor_queue_idle(sc, index);
 	SWAPCHAIN_TRACE_END(swapchain_wait_image);
 
 	return XRT_SUCCESS;
