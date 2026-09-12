@@ -2,13 +2,14 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  Diagnostic app-release Metal shared-event synchronization wrapper.
+ * @brief  Experimental app-release Metal shared-event synchronization wrapper.
  * @ingroup comp_client
  */
 
 #pragma once
 
 #include "xrt/xrt_compositor.h"
+#include "util/u_handles.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,8 +18,10 @@ extern "C" {
 #ifdef XRT_OS_OSX
 
 /*!
- * Optionally attach the Stage-2 Metal app-release shared-event diagnostic to a
- * Metal client compositor. Returns @p xcm unchanged.
+ * Optionally attach the Metal app-release shared-event synchronization
+ * experiments to a Metal client compositor. Stage 2 keeps the blocking CPU
+ * release barrier; Stage 3 replaces it with a Vulkan timeline GPU wait.
+ * Returns @p xcm unchanged.
  */
 struct xrt_compositor_metal *
 client_metal_release_sync_attach(struct xrt_compositor_metal *xcm, void *command_queue);
