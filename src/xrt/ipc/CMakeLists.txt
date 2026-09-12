@@ -86,7 +86,7 @@ if(APPLE)
 			ipc_metal_handle_probe PROPERTIES OUTPUT_NAME monado-ipc-metal-handle-probe PREFIX ""
 			)
 		target_link_libraries(
-			ipc_metal_handle_probe PRIVATE ipc_shared "-framework Foundation" "-framework Metal"
+			ipc_metal_handle_probe PRIVATE xrt-interfaces ipc_shared "-framework Foundation" "-framework Metal"
 			)
 	endif()
 endif()
