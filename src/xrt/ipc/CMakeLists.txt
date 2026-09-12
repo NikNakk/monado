@@ -76,6 +76,11 @@ else()
 	target_sources(ipc_shared PRIVATE shared/ipc_message_channel_unix.c)
 endif()
 
+if(APPLE)
+	target_sources(ipc_shared PRIVATE shared/ipc_metal_handle.h shared/ipc_metal_handle.m)
+	target_link_libraries(ipc_shared PRIVATE "-framework Foundation" "-framework Metal")
+endif()
+
 target_link_libraries(ipc_shared PRIVATE aux_util)
 
 if(RT_LIBRARY)
