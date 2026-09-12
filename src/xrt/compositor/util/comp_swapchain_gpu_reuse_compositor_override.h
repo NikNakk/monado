@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief Source-local compositor draw cleanup for swapchain GPU reuse tracking.
+ * @brief Source-local compositor draw scope for swapchain GPU reuse tracking.
  * @ingroup comp_util
  */
 
@@ -15,14 +15,9 @@
 static inline xrt_result_t
 comp_swapchain_gpu_reuse_renderer_draw(struct comp_renderer *r, struct comp_layer_accum *cla)
 {
+	comp_swapchain_gpu_reuse_renderer_enter(cla);
 	xrt_result_t xret = comp_renderer_draw(r);
-
-	/*
-	 * The normal renderer submit hook releases these claims immediately after
-	 * vkQueueSubmit. This is a no-op then, but also covers renderer error/early
-	 * return paths that never reached a queue submit.
-	 */
-	comp_swapchain_gpu_reuse_native_accum_release(cla);
+	comp_swapchain_gpu_reuse_renderer_leave(cla);
 	return xret;
 }
 

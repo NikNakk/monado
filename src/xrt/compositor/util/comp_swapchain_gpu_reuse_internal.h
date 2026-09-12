@@ -10,6 +10,7 @@
 
 #include "util/comp_layer_accum.h"
 #include "vk/vk_cmd.h"
+#include "vk/vk_submit_helpers.h"
 
 #include <errno.h>
 
@@ -17,14 +18,7 @@
 extern "C" {
 #endif
 
-/*
- * Native comp_layer_accum bridge claims.
- *
- * The multi compositor keeps a claim while a layer sits in one of its slots.
- * When that layer is copied into the native compositor, these helpers take an
- * overlapping claim so slot retirement can never expose the image before the
- * renderer has published the actual GPU-consumer submission value.
- */
+/* Native comp_layer_accum bridge claims. */
 void
 comp_swapchain_gpu_reuse_native_accum_begin(struct comp_layer_accum *cla);
 
@@ -34,14 +28,29 @@ comp_swapchain_gpu_reuse_native_accum_claim_layer(struct comp_layer_accum *cla, 
 void
 comp_swapchain_gpu_reuse_native_accum_release(struct comp_layer_accum *cla);
 
+/* Scope the renderer translation unit's submit interception to one comp_renderer_draw(). */
+void
+comp_swapchain_gpu_reuse_renderer_enter(struct comp_layer_accum *cla);
+
+void
+comp_swapchain_gpu_reuse_renderer_leave(struct comp_layer_accum *cla);
+
 /*
- * Source-local replacement for comp_renderer.c's vk_cmd_submit_locked call.
- * It appends the reuse timeline signal to the exact VkSubmitInfo that samples
- * the current comp_layer_accum images, then performs the ordinary queue submit.
+ * Source-local replacements used only while compiling comp_renderer.c. The
+ * prepare hook arms tracking for the exact VkSubmitInfo built by
+ * renderer_submit_queue(); the submit hook only augments/finalizes that armed
+ * submission. Unrelated inline Vulkan submissions pass through unchanged.
  */
+void
+comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_builder *builder,
+                                                     const struct vk_semaphore_list_wait *wait_semaphores,
+                                                     const VkCommandBuffer *command_buffers,
+                                                     uint32_t command_buffer_count,
+                                                     const struct vk_semaphore_list_signal *signal_semaphores,
+                                                     const void *next);
+
 VkResult
-comp_swapchain_gpu_reuse_vk_cmd_submit_locked(struct comp_layer_accum *cla,
-                                              struct vk_bundle *vk,
+comp_swapchain_gpu_reuse_vk_cmd_submit_locked(struct vk_bundle *vk,
                                               struct vk_bundle_queue *queue,
                                               uint32_t count,
                                               const VkSubmitInfo *infos,
