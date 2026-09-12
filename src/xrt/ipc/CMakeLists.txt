@@ -144,6 +144,22 @@ if(WIN32)
 endif()
 target_link_libraries(ipc_client PRIVATE aux_util ipc_shared base)
 
+if(APPLE AND XRT_FEATURE_SERVICE)
+	target_sources(
+		ipc_client
+		PRIVATE client/ipc_metal_swapchain_import.c
+			client/ipc_metal_swapchain_import.h
+			client/ipc_metal_swapchain_import_override.h
+		)
+	set_property(
+		SOURCE client/ipc_client_compositor.c
+		APPEND
+		PROPERTY COMPILE_OPTIONS
+			"-include"
+			"${CMAKE_CURRENT_SOURCE_DIR}/client/ipc_metal_swapchain_import_override.h"
+		)
+endif()
+
 if(ANDROID)
 	# Need android_instance_base on the client side too.
 	target_link_libraries(ipc_client PRIVATE aux_android)
@@ -201,12 +217,16 @@ elseif(XRT_HAVE_LINUX)
 		)
 elseif(APPLE)
 	target_sources(
-		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
+		ipc_server
+		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
+			server/ipc_server_metal.c
 		)
 	set_source_files_properties(
 		${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE OBJC
 		)
-	target_link_libraries(ipc_server PRIVATE "-framework AppKit")
+	target_link_libraries(
+		ipc_server PRIVATE comp_util "-framework AppKit" "-framework Foundation" "-framework Metal"
+		)
 elseif(WIN32)
 	target_sources(
 		ipc_server
