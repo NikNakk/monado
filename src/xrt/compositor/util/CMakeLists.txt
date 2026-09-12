@@ -38,6 +38,23 @@ target_link_libraries(
 	)
 
 if(APPLE)
-	target_sources(comp_util PRIVATE comp_metal_semaphore_probe.h comp_metal_semaphore_probe.m)
+	target_sources(
+		comp_util
+		PRIVATE comp_metal_semaphore_probe.h
+			comp_metal_semaphore_probe.m
+			comp_metal_swapchain_import.h
+			comp_metal_swapchain_import.c
+			comp_metal_swapchain_import_override.h
+		)
+
+	# Redirect the two vk_image_allocator calls in comp_swapchain.c only. The
+	# override falls straight through to the ordinary allocator unless the
+	# current thread carries a matching in-process Metal-first request.
+	set_property(
+		SOURCE comp_swapchain.c
+		APPEND
+		PROPERTY COMPILE_OPTIONS "-include" "${CMAKE_CURRENT_SOURCE_DIR}/comp_metal_swapchain_import_override.h"
+		)
+
 	target_link_libraries(comp_util PRIVATE "-framework Metal")
 endif()

@@ -17,9 +17,10 @@ extern "C" {
 #endif
 
 /*
- * In the in-process macOS Metal-first experiment, rename the implementation in
- * comp_metal_client.m so comp_metal_array_import_experiment.m can wrap the
- * public constructor without changing the large client implementation file.
+ * The in-process macOS build wraps the ordinary Metal client constructor with
+ * the direct Metal-first swapchain implementation. Service builds keep the
+ * ordinary constructor: MTLTexture objects are process-local and service
+ * transport remains a separate implementation step.
  */
 #if defined(__OBJC__) && defined(XRT_OS_OSX) && defined(XRT_MODULE_COMPOSITOR_UTIL) && !defined(XRT_FEATURE_SERVICE)
 #define client_metal_compositor_create client_metal_compositor_create_vanilla
@@ -27,25 +28,6 @@ extern "C" {
 
 struct xrt_compositor_metal *
 client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue);
-
-/*
- * Experiment-only hook for the in-process macOS compositor. It intercepts the
- * native swapchain creation in comp_metal_client.m so Metal can own the
- * swapchain textures for both ordinary 2D and layered 2D-array swapchains,
- * with those same MTLTexture objects imported into Vulkan. Service builds are
- * deliberately excluded because the implementation casts the native swapchain
- * to comp_swapchain and is therefore intentionally in-process only.
- */
-#if defined(__OBJC__) && defined(XRT_OS_OSX) && defined(XRT_MODULE_COMPOSITOR_UTIL) && !defined(XRT_FEATURE_SERVICE)
-xrt_result_t
-client_metal_array_import_experiment_create_swapchain(struct xrt_compositor_native *xcn,
-                                                       const struct xrt_swapchain_create_info *info,
-                                                       struct xrt_swapchain_native **out_xscn,
-                                                       void *metal_device);
-
-#define xrt_comp_native_create_swapchain(XCN, INFO, OUT_XSCN)                                                          \
-	client_metal_array_import_experiment_create_swapchain((XCN), (INFO), (OUT_XSCN), (__bridge void *)c->device)
-#endif
 
 #ifdef __cplusplus
 }
