@@ -26,6 +26,11 @@ add_library(
 	comp_semaphore.c
 	comp_swapchain.h
 	comp_swapchain.c
+	comp_swapchain_gpu_reuse.h
+	comp_swapchain_gpu_reuse_internal.h
+	comp_swapchain_gpu_reuse_renderer_override.h
+	comp_swapchain_gpu_reuse_compositor_override.h
+	comp_swapchain_gpu_reuse.c
 	comp_sync.h
 	comp_sync.c
 	comp_vulkan.h
