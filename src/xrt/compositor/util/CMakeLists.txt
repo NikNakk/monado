@@ -46,6 +46,8 @@ if(APPLE)
 			comp_metal_swapchain_import.h
 			comp_metal_swapchain_import.c
 			comp_metal_swapchain_import_override.h
+			comp_metal_texture_device.h
+			comp_metal_texture_device.m
 		)
 
 	# Redirect the two vk_image_allocator calls in comp_swapchain.c only. The
