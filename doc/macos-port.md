@@ -442,7 +442,9 @@ queue. The command prints aggregate observation counts and, when a snapshot
 prefix is supplied, writes `*-cameraN-blobs.csv` traces containing blob centres,
 bounding boxes, and peak brightness. `PSVR2_BLOB_PIXEL_THRESHOLD` (default
 `80`), `PSVR2_BLOB_REQUIRED_THRESHOLD` (default `180`), and
-`PSVR2_BLOB_MAX_WIDTH` (default `50`) permit diagnostic tuning. This validates
+`PSVR2_BLOB_MAX_WIDTH` (default `50`) permit diagnostic tuning. The
+`psvr2-constellation` probe accepts the same overrides while retaining those
+defaults. This validates
 the optical input independently of pose solving. It does not enable
 constellation poses: the repository and GAV reference do not yet provide the
 four mode-4 cameras' calibrated intrinsics and poses required by the tracker.

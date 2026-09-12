@@ -19,6 +19,7 @@
 #include "os/os_time.h"
 #include "pssense/pssense_interface.h"
 #include "psvr2/psvr2_interface.h"
+#include "util/u_debug.h"
 #include "util/u_file.h"
 #include "util/u_json.h"
 #include "util/u_sink.h"
@@ -29,6 +30,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_constellation_blob_pixel_threshold, "PSVR2_BLOB_PIXEL_THRESHOLD", 0x50)
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_constellation_blob_required_threshold, "PSVR2_BLOB_REQUIRED_THRESHOLD", 0xb4)
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_constellation_blob_max_width, "PSVR2_BLOB_MAX_WIDTH", 50)
+
+
+static long
+clamp_long(long value, long minimum, long maximum)
+{
+	return value < minimum ? minimum : (value > maximum ? maximum : value);
+}
 
 
 static void
@@ -207,14 +220,24 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	struct t_constellation_tracker *tracker = NULL;
 	struct t_blobwatch *blobwatches[4] = {0};
 	struct xrt_frame_sink *frame_sinks[4] = {0};
+	uint8_t blob_pixel_threshold = (uint8_t)clamp_long(
+	    debug_get_num_option_psvr2_constellation_blob_pixel_threshold(), 0, UINT8_MAX);
+	uint8_t blob_required_threshold = (uint8_t)clamp_long(
+	    debug_get_num_option_psvr2_constellation_blob_required_threshold(), 0, UINT8_MAX);
+	uint16_t blob_max_width = (uint16_t)clamp_long(
+	    debug_get_num_option_psvr2_constellation_blob_max_width(), 1, UINT16_MAX);
+	fprintf(stderr, "Blob detector: pixel threshold=%u, required threshold=%u, max width=%u.\n",
+	        blob_pixel_threshold, blob_required_threshold, blob_max_width);
 	if (t_constellation_tracker_create(&tracking_xfctx, &params, &tracker) != 0) {
 		fprintf(stderr, "Failed to create constellation tracker.\n");
 		goto fail;
 	}
 	for (size_t i = 0; i < 4; i++) {
 		struct t_rift_blobwatch_params blob_params = {
-		    .pixel_threshold = 0x50, .blob_required_threshold = 0xb4,
-		    .max_match_dist = 50.0f, .max_blob_width = 50,
+		    .pixel_threshold = blob_pixel_threshold,
+		    .blob_required_threshold = blob_required_threshold,
+		    .max_match_dist = 50.0f,
+		    .max_blob_width = blob_max_width,
 		};
 		if (t_rift_blobwatch_create(&blob_params, &tracking_xfctx, params.mosaics[0].cameras[i].blob_sink,
 		                            &frame_sinks[i], &blobwatches[i]) != 0 ||
