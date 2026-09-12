@@ -11,6 +11,7 @@
  */
 
 #include "comp_layer_accum.h"
+#include "util/comp_swapchain_gpu_reuse_internal.h"
 #include "util/u_misc.h"
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_limits.h"
@@ -25,6 +26,11 @@ push_single_swapchain_layer(struct comp_layer_accum *cla, struct xrt_swapchain *
 	U_ZERO_ARRAY(layer->sc_array);
 	layer->sc_array[0] = xsc;
 	layer->data = *data;
+
+	xrt_result_t xret = comp_swapchain_gpu_reuse_native_accum_claim_layer(cla, layer);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	cla->layer_count++;
 
@@ -49,6 +55,9 @@ comp_layer_get_depth_swapchain(const struct comp_layer *cl, uint32_t swapchain_i
 xrt_result_t
 comp_layer_accum_begin(struct comp_layer_accum *cla, const struct xrt_layer_frame_data *data)
 {
+	/* Clean up a previous renderer early-return before replacing its layer set. */
+	comp_swapchain_gpu_reuse_native_accum_begin(cla);
+
 	cla->data = *data;
 	cla->layer_count = 0;
 
@@ -71,6 +80,11 @@ comp_layer_accum_projection(struct comp_layer_accum *cla,
 	}
 	layer->data = *data;
 
+	xrt_result_t xret = comp_swapchain_gpu_reuse_native_accum_claim_layer(cla, layer);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
 	cla->layer_count++;
 
 	return XRT_SUCCESS;
@@ -92,6 +106,11 @@ comp_layer_accum_projection_depth(struct comp_layer_accum *cla,
 		layer->sc_array[i + data->view_count] = d_xsc[i];
 	}
 	layer->data = *data;
+
+	xrt_result_t xret = comp_swapchain_gpu_reuse_native_accum_claim_layer(cla, layer);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 
 	cla->layer_count++;
 
