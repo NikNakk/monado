@@ -20,8 +20,13 @@ extern "C" {
 #endif
 
 #define IPC_METAL_XPC_SERVICE_NAME "org.freedesktop.monado.metal-ipc"
-#define IPC_METAL_XPC_TOKEN_MAGIC UINT64_C(0x4d58000000000000)
-#define IPC_METAL_XPC_TOKEN_MASK UINT64_C(0xffff000000000000)
+/*
+ * Keep tokens representable in the legacy uint32_t ipc_arg_swapchain_from_native::sizes[]
+ * field used by swapchain_import. The upper byte is a Metal-XPC tag and the lower
+ * 24 bits are random. The mask also requires all bits above bit 31 to be zero.
+ */
+#define IPC_METAL_XPC_TOKEN_MAGIC UINT64_C(0x000000004d000000)
+#define IPC_METAL_XPC_TOKEN_MASK UINT64_C(0xffffffffff000000)
 
 #ifdef XRT_OS_OSX
 
