@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief Experimental Metal app-release handoff through Monado's compositor wait thread.
+ * @brief Metal app-release handoff through Monado's compositor wait thread.
  * @ingroup comp_client
  */
 
@@ -112,7 +112,7 @@ ensure_pair(struct client_metal_wait_thread_context *c)
 	void *raw_shared_event = NULL;
 	xrt_result_t xret = comp_metal_semaphore_create_client_pair(&xcsem, &raw_shared_event);
 	if (xret != XRT_SUCCESS || xcsem == NULL || raw_shared_event == NULL) {
-		U_LOG_W("Metal app-release wait-thread experiment unavailable: result=%d; blocking release handoff unchanged",
+		U_LOG_W("Metal app-release wait-thread handoff unavailable: result=%d; blocking release handoff unchanged",
 		        xret);
 		if (xcsem != NULL) {
 			xrt_compositor_semaphore_reference(&xcsem, NULL);
@@ -123,7 +123,7 @@ ensure_pair(struct client_metal_wait_thread_context *c)
 
 	id<MTLSharedEvent> event = [(__bridge id<MTLSharedEvent>)raw_shared_event retain];
 	if (event == nil) {
-		U_LOG_W("Metal app-release wait-thread experiment exported a nil MTLSharedEvent");
+		U_LOG_W("Metal app-release wait-thread handoff exported a nil MTLSharedEvent");
 		xrt_compositor_semaphore_reference(&xcsem, NULL);
 		pthread_mutex_unlock(&c->signal_mutex);
 		return false;

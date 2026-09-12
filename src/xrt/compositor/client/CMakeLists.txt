@@ -24,9 +24,7 @@ if(APPLE)
 	if(XRT_MODULE_COMPOSITOR_UTIL)
 		target_sources(
 			comp_client
-			PRIVATE comp_metal_release_sync.h
-				comp_metal_release_sync.m
-				comp_metal_release_wait_thread.h
+			PRIVATE comp_metal_release_wait_thread.h
 				comp_metal_release_wait_thread.m
 			)
 	endif()
