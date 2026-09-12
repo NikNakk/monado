@@ -11,7 +11,7 @@
 #include "util/u_trace_marker.h"
 
 #ifdef XRT_OS_OSX
-#include "util/comp_metal_swapchain_import.h"
+#include "util/comp_metal_swapchain_handoff.h"
 #endif
 
 static xrt_result_t
