@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief Experimental Metal app-release handoff through Monado's compositor wait thread.
+ * @brief Metal app-release handoff through Monado's compositor wait thread.
  * @ingroup comp_client
  */
 

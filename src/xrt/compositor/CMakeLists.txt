@@ -34,9 +34,10 @@ if(XRT_MODULE_COMPOSITOR_UTIL)
 	add_subdirectory(util)
 endif()
 
-# The macOS Metal client Stage-2 release-sync diagnostic calls compositor-util
-# helpers. Add this dependency only after comp_util has been defined: client/
-# is intentionally configured earlier in this file.
+# The macOS Metal client uses compositor-util helpers for direct Metal-owned
+# swapchain import and shared-event app-release handoff. Add this dependency
+# only after comp_util has been defined: client/ is intentionally configured
+# earlier in this file.
 if(APPLE AND XRT_MODULE_COMPOSITOR_CLIENT AND XRT_MODULE_COMPOSITOR_UTIL)
 	target_link_libraries(comp_client PRIVATE comp_util)
 endif()

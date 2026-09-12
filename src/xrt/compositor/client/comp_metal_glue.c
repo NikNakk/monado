@@ -10,7 +10,6 @@
 #include "xrt/xrt_config_build.h"
 #include "client/comp_metal_client.h"
 #ifdef XRT_MODULE_COMPOSITOR_UTIL
-#include "client/comp_metal_release_sync.h"
 #include "client/comp_metal_release_wait_thread.h"
 #endif
 
@@ -19,10 +18,7 @@ xrt_gfx_metal_provider_create(struct xrt_compositor_native *xcn, void *metal_dev
 {
 	struct xrt_compositor_metal *xcm = client_metal_compositor_create(xcn, metal_device, command_queue);
 #ifdef XRT_MODULE_COMPOSITOR_UTIL
-	if (client_metal_release_wait_thread_enabled()) {
-		return client_metal_release_wait_thread_attach(xcm, command_queue);
-	}
-	return client_metal_release_sync_attach(xcm, command_queue);
+	return client_metal_release_wait_thread_attach(xcm, command_queue);
 #else
 	return xcm;
 #endif

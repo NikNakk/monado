@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief Direct Metal-first swapchains for the in-process macOS Metal client.
+ * @brief Metal-owned swapchains for the in-process macOS Metal client.
  * @author OpenAI
  * @ingroup comp_client
  */
@@ -13,15 +13,12 @@
 #include "xrt/xrt_gfx_metal.h"
 #include "util/comp_metal_swapchain_import.h"
 #include "util/comp_swapchain.h"
-#include "util/u_debug.h"
 #include "util/u_logging.h"
 
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-DEBUG_GET_ONCE_BOOL_OPTION(metal_direct_swapchain, "XRT_MACOS_METAL_ARRAY_IMPORT", true)
 
 /* comp_metal_client.m is renamed to this symbol by comp_metal_client.h. */
 struct xrt_compositor_metal *
@@ -497,7 +494,7 @@ struct xrt_compositor_metal *
 client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue)
 {
 	struct xrt_compositor_metal *xcm = client_metal_compositor_create_vanilla(xcn, metal_device, command_queue);
-	if (xcm == NULL || !debug_get_bool_option_metal_direct_swapchain()) {
+	if (xcm == NULL) {
 		return xcm;
 	}
 
@@ -527,6 +524,6 @@ client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_de
 	xcm->base.destroy = metal_direct_compositor_destroy;
 	pthread_mutex_unlock(&g_contexts_mutex);
 
-	U_LOG_I("Metal direct-swapchain wrapper installed; XRT_MACOS_METAL_ARRAY_IMPORT=1 now creates Metal-owned VkImages directly for arraySize=1 and arraySize>1");
+	U_LOG_I("Metal swapchain path installed: Metal-owned textures are imported directly into Vulkan for arraySize=1 and arraySize>1");
 	return xcm;
 }
