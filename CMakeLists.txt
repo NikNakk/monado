@@ -106,18 +106,23 @@ find_package(Vulkan MODULE)
 find_package(HIDAPI MODULE)
 find_package(bluetooth MODULE)
 find_package(OpenHMD MODULE)
-find_package(
-	OpenCV
-	COMPONENTS
-		core
-		calib3d
-		highgui
-		imgproc
-		imgcodecs
-		features2d
-		video
+# OpenCV 5 renamed the calib3d/features2d components to calib/features and
+# moved solvePnP into geometry. Probe the package version first so both module
+# layouts remain supported.
+find_package(OpenCV CONFIG QUIET)
+if(OpenCV_FOUND AND OpenCV_VERSION VERSION_GREATER_EQUAL "5")
+	find_package(
+		OpenCV
+		COMPONENTS core calib geometry highgui imgproc imgcodecs features video
 		CONFIG
-	)
+		)
+else()
+	find_package(
+		OpenCV
+		COMPONENTS core calib3d highgui imgproc imgcodecs features2d video
+		CONFIG
+		)
+endif()
 find_package(Libusb1 MODULE)
 find_package(JPEG MODULE)
 find_package(realsense2 CONFIG)
