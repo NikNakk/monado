@@ -40,7 +40,8 @@ target_link_libraries(
 if(APPLE)
 	target_sources(
 		comp_util
-		PRIVATE comp_metal_semaphore_probe.h
+		PRIVATE comp_metal_semaphore_provider.h
+			comp_metal_semaphore_probe.h
 			comp_metal_semaphore_probe.m
 			comp_metal_swapchain_handoff.h
 			comp_metal_swapchain_import.h

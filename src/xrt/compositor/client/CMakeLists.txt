@@ -28,9 +28,22 @@ if(APPLE)
 				comp_metal_release_wait_thread.m
 			)
 		if(XRT_FEATURE_SERVICE)
-			target_sources(comp_client PRIVATE comp_metal_service_swapchain.m)
+			target_sources(
+				comp_client
+				PRIVATE comp_metal_service_swapchain.m
+					comp_metal_service_semaphore.c
+					comp_metal_service_semaphore.h
+				)
 			target_include_directories(comp_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../ipc)
 			target_link_libraries(comp_client PRIVATE ipc_shared)
+			# Reuse the proven Stage-4 wrapper unchanged, but create its
+			# semaphore/event pair through monado-service in service builds.
+			set_property(
+				SOURCE comp_metal_release_wait_thread.m
+				APPEND
+				PROPERTY COMPILE_DEFINITIONS
+					"comp_metal_semaphore_create_client_pair=client_metal_service_semaphore_create_pair"
+				)
 		else()
 			target_sources(comp_client PRIVATE comp_metal_direct_swapchain.m)
 		endif()
@@ -62,9 +75,7 @@ if(XRT_HAVE_EGL)
 endif()
 
 if(XRT_HAVE_OPENGL_GLX AND XRT_HAVE_XLIB)
-	target_sources(
-		comp_client PRIVATE comp_gl_xlib_client.c comp_gl_xlib_client.h comp_gl_xlib_glue.c
-		)
+	target_sources(comp_client PRIVATE comp_gl_xlib_client.c comp_gl_xlib_client.h comp_gl_xlib_glue.c)
 	target_link_libraries(comp_client PRIVATE OpenGL::GLX)
 endif()
 

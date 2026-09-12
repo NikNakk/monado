@@ -30,6 +30,7 @@ extern char **environ;
 	NSLock *_lock;
 	NSMutableDictionary *_handlesByToken;
 	NSMutableDictionary *_countsByToken;
+	NSMutableDictionary *_eventsByToken;
 }
 @end
 
@@ -42,12 +43,14 @@ extern char **environ;
 		_lock = [[NSLock alloc] init];
 		_handlesByToken = [[NSMutableDictionary alloc] init];
 		_countsByToken = [[NSMutableDictionary alloc] init];
+		_eventsByToken = [[NSMutableDictionary alloc] init];
 	}
 	return self;
 }
 
 - (void)dealloc
 {
+	[_eventsByToken release];
 	[_countsByToken release];
 	[_handlesByToken release];
 	[_lock release];
@@ -106,12 +109,43 @@ extern char **environ;
 	[handle release];
 }
 
+- (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
+                           token:(uint64_t)token
+                           reply:(void (^)(BOOL success))reply
+{
+	BOOL success = NO;
+	if (handle != nil && (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC) {
+		NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
+		[_lock lock];
+		if ([_eventsByToken objectForKey:key] == nil) {
+			[_eventsByToken setObject:handle forKey:key];
+			success = YES;
+		}
+		[_lock unlock];
+	}
+	reply(success);
+}
+
+- (void)takeSharedEventHandleForToken:(uint64_t)token
+                                reply:(void (^)(MTLSharedEventHandle *handle))reply
+{
+	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
+	MTLSharedEventHandle *handle = nil;
+	[_lock lock];
+	handle = [[_eventsByToken objectForKey:key] retain];
+	[_lock unlock];
+
+	reply(handle);
+	[handle release];
+}
+
 - (void)discardToken:(uint64_t)token reply:(void (^)(void))reply
 {
 	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
 	[_lock lock];
 	[_handlesByToken removeObjectForKey:key];
 	[_countsByToken removeObjectForKey:key];
+	[_eventsByToken removeObjectForKey:key];
 	[_lock unlock];
 	reply();
 }

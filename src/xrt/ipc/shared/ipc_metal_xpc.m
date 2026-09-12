@@ -18,6 +18,10 @@
 
 #define IPC_METAL_XPC_TIMEOUT_NS (5LL * NSEC_PER_SEC)
 
+static __thread bool g_shared_event_request_active = false;
+static __thread void *g_shared_event_request_event = NULL;
+static __thread void *g_shared_event_request_device = NULL;
+
 NSXPCInterface *
 ipc_metal_xpc_create_interface(void)
 {
@@ -49,11 +53,11 @@ make_token(void)
 }
 
 static bool
-publish_one(NSXPCConnection *connection,
-            MTLSharedTextureHandle *handle,
-            uint64_t token,
-            uint32_t index,
-            uint32_t image_count)
+publish_texture_one(NSXPCConnection *connection,
+                    MTLSharedTextureHandle *handle,
+                    uint64_t token,
+                    uint32_t index,
+                    uint32_t image_count)
 {
 	__block BOOL success = NO;
 	__block BOOL replied = NO;
@@ -62,7 +66,7 @@ publish_one(NSXPCConnection *connection,
 	id<IPCMetalXPCBrokerProtocol> proxy =
 	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
 		    const char *message = error.localizedDescription.UTF8String;
-		    U_LOG_E("Metal XPC publish failed: %s", message != NULL ? message : "unknown error");
+		    U_LOG_E("Metal XPC texture publish failed: %s", message != NULL ? message : "unknown error");
 		    dispatch_semaphore_signal(semaphore);
 	    }];
 
@@ -82,7 +86,7 @@ publish_one(NSXPCConnection *connection,
 }
 
 static MTLSharedTextureHandle *
-take_one(NSXPCConnection *connection, uint64_t token, uint32_t index)
+take_texture_one(NSXPCConnection *connection, uint64_t token, uint32_t index)
 {
 	__block MTLSharedTextureHandle *result = nil;
 	__block BOOL replied = NO;
@@ -91,7 +95,7 @@ take_one(NSXPCConnection *connection, uint64_t token, uint32_t index)
 	id<IPCMetalXPCBrokerProtocol> proxy =
 	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
 		    const char *message = error.localizedDescription.UTF8String;
-		    U_LOG_E("Metal XPC take failed: %s", message != NULL ? message : "unknown error");
+		    U_LOG_E("Metal XPC texture take failed: %s", message != NULL ? message : "unknown error");
 		    dispatch_semaphore_signal(semaphore);
 	    }];
 
@@ -104,6 +108,65 @@ take_one(NSXPCConnection *connection, uint64_t token, uint32_t index)
 		                          replied = YES;
 		                          dispatch_semaphore_signal(semaphore);
 	                          }];
+
+	long wait_result =
+	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
+	if (wait_result != 0 || !replied) {
+		[result release];
+		return nil;
+	}
+	return result;
+}
+
+static bool
+publish_event_one(NSXPCConnection *connection, MTLSharedEventHandle *handle, uint64_t token)
+{
+	__block BOOL success = NO;
+	__block BOOL replied = NO;
+	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+	id<IPCMetalXPCBrokerProtocol> proxy =
+	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+		    const char *message = error.localizedDescription.UTF8String;
+		    U_LOG_E("Metal XPC shared-event publish failed: %s", message != NULL ? message : "unknown error");
+		    dispatch_semaphore_signal(semaphore);
+	    }];
+
+	[proxy publishSharedEventHandle:handle
+	                          token:token
+	                          reply:^(BOOL remote_success) {
+		                          success = remote_success;
+		                          replied = YES;
+		                          dispatch_semaphore_signal(semaphore);
+	                          }];
+
+	long wait_result =
+	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
+	return wait_result == 0 && replied && success;
+}
+
+static MTLSharedEventHandle *
+take_event_one(NSXPCConnection *connection, uint64_t token)
+{
+	__block MTLSharedEventHandle *result = nil;
+	__block BOOL replied = NO;
+	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+	id<IPCMetalXPCBrokerProtocol> proxy =
+	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+		    const char *message = error.localizedDescription.UTF8String;
+		    U_LOG_E("Metal XPC shared-event take failed: %s", message != NULL ? message : "unknown error");
+		    dispatch_semaphore_signal(semaphore);
+	    }];
+
+	[proxy takeSharedEventHandleForToken:token
+	                              reply:^(MTLSharedEventHandle *handle) {
+		                              if (handle != nil) {
+			                              result = [handle retain];
+		                              }
+		                              replied = YES;
+		                              dispatch_semaphore_signal(semaphore);
+	                              }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
@@ -171,7 +234,7 @@ ipc_metal_xpc_publish_textures(void *const *metal_textures, uint32_t image_count
 				break;
 			}
 
-			ok = publish_one(connection, handle, token, i, image_count);
+			ok = publish_texture_one(connection, handle, token, i, image_count);
 			[handle release];
 			if (!ok) {
 				break;
@@ -214,7 +277,7 @@ ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_
 
 		xrt_result_t xret = XRT_SUCCESS;
 		for (uint32_t i = 0; i < expected_count; i++) {
-			MTLSharedTextureHandle *handle = take_one(connection, token, i);
+			MTLSharedTextureHandle *handle = take_texture_one(connection, token, i);
 			if (handle == nil) {
 				U_LOG_E("Metal XPC broker had no texture handle for token=0x%016llx image=%u",
 				        (unsigned long long)token,
@@ -267,6 +330,167 @@ ipc_metal_xpc_release_textures(void **metal_textures, uint32_t image_count)
 			metal_textures[i] = NULL;
 		}
 	}
+}
+
+xrt_result_t
+ipc_metal_xpc_publish_shared_event(void *metal_shared_event, uint64_t *out_token)
+{
+	if (metal_shared_event == NULL || out_token == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	*out_token = 0;
+
+	@autoreleasepool {
+		id<MTLSharedEvent> event = (__bridge id<MTLSharedEvent>)metal_shared_event;
+		MTLSharedEventHandle *handle = [event newSharedEventHandle];
+		if (handle == nil) {
+			U_LOG_E("Metal XPC could not create MTLSharedEventHandle");
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		NSXPCConnection *connection = create_connection();
+		if (connection == nil) {
+			[handle release];
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		uint64_t token = make_token();
+		bool ok = publish_event_one(connection, handle, token);
+		[handle release];
+		if (!ok) {
+			(void)discard_sync(connection, token);
+			[connection invalidate];
+			[connection release];
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		[connection invalidate];
+		[connection release];
+		*out_token = token;
+		U_LOG_I("Metal XPC published shared event token=0x%016llx value=%llu",
+		        (unsigned long long)token,
+		        (unsigned long long)event.signaledValue);
+		return XRT_SUCCESS;
+	}
+}
+
+xrt_result_t
+ipc_metal_xpc_take_shared_event(uint64_t token, void *metal_device, void **out_metal_shared_event)
+{
+	if (!token_is_valid(token) || metal_device == NULL || out_metal_shared_event == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	*out_metal_shared_event = NULL;
+
+	@autoreleasepool {
+		NSXPCConnection *connection = create_connection();
+		if (connection == nil) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		MTLSharedEventHandle *handle = take_event_one(connection, token);
+		if (handle == nil) {
+			(void)discard_sync(connection, token);
+			[connection invalidate];
+			[connection release];
+			U_LOG_E("Metal XPC broker had no shared-event handle for token=0x%016llx",
+			        (unsigned long long)token);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		id<MTLDevice> device = (__bridge id<MTLDevice>)metal_device;
+		id<MTLSharedEvent> event = [device newSharedEventWithHandle:handle];
+		[handle release];
+		(void)discard_sync(connection, token);
+		[connection invalidate];
+		[connection release];
+
+		if (event == nil) {
+			U_LOG_E("Metal XPC could not recreate shared event token=0x%016llx on device=%p",
+			        (unsigned long long)token,
+			        metal_device);
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		*out_metal_shared_event = (__bridge void *)event;
+		U_LOG_I("Metal XPC took and recreated shared event token=0x%016llx device=%p value=%llu",
+		        (unsigned long long)token,
+		        metal_device,
+		        (unsigned long long)event.signaledValue);
+		return XRT_SUCCESS;
+	}
+}
+
+void
+ipc_metal_xpc_release_shared_event(void *metal_shared_event)
+{
+	id<MTLSharedEvent> event = (__bridge id<MTLSharedEvent>)metal_shared_event;
+	[event release];
+}
+
+void
+ipc_metal_xpc_begin_shared_event_request(void *metal_device)
+{
+	if (g_shared_event_request_event != NULL) {
+		ipc_metal_xpc_release_shared_event(g_shared_event_request_event);
+		g_shared_event_request_event = NULL;
+	}
+	g_shared_event_request_device = metal_device;
+	g_shared_event_request_active = true;
+}
+
+bool
+ipc_metal_xpc_shared_event_request_active(void)
+{
+	return g_shared_event_request_active;
+}
+
+xrt_result_t
+ipc_metal_xpc_resolve_shared_event_request(uint64_t token)
+{
+	if (!g_shared_event_request_active || g_shared_event_request_device == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	void *raw_event = NULL;
+	xrt_result_t xret =
+	    ipc_metal_xpc_take_shared_event(token, g_shared_event_request_device, &raw_event);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	if (g_shared_event_request_event != NULL) {
+		ipc_metal_xpc_release_shared_event(g_shared_event_request_event);
+	}
+	g_shared_event_request_event = raw_event;
+	return XRT_SUCCESS;
+}
+
+bool
+ipc_metal_xpc_end_shared_event_request(void **out_metal_shared_event)
+{
+	if (out_metal_shared_event == NULL) {
+		return false;
+	}
+	*out_metal_shared_event = NULL;
+
+	void *raw_event = g_shared_event_request_event;
+	g_shared_event_request_event = NULL;
+	bool had_request = g_shared_event_request_active;
+	g_shared_event_request_active = false;
+	g_shared_event_request_device = NULL;
+
+	if (!had_request || raw_event == NULL) {
+		if (raw_event != NULL) {
+			ipc_metal_xpc_release_shared_event(raw_event);
+		}
+		return false;
+	}
+
+	/* Match the borrowed-object contract of the in-process provider. */
+	id<MTLSharedEvent> event = (__bridge id<MTLSharedEvent>)raw_event;
+	*out_metal_shared_event = (__bridge void *)[event autorelease];
+	return true;
 }
 
 void
