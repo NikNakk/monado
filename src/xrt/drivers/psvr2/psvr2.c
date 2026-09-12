@@ -89,6 +89,8 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_horizon_ms, "PSVR2_ACCELERATION_H
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_camera_streams, "PSVR2_CAMERA_STREAMS", false)
 DEBUG_GET_ONCE_NUM_OPTION(psvr2_camera_mode, "PSVR2_CAMERA_MODE", -1)
 
+#define PSVR2_MODE4_ACTIVE_IMAGE_WIDTH 508
+
 static float
 psvr2_prediction_parameter(float value, float fallback, float minimum, float maximum)
 {
@@ -1129,6 +1131,12 @@ img_xfer_cb(struct libusb_transfer *xfer)
 			u_frame_create_one_off(XRT_FORMAT_L8, camera_width, camera_height, &frame);
 			memcpy(frame->data, xfer->buffer + USB_CAM_HEADER_SIZE + i * camera_width * camera_height,
 			       camera_width * camera_height);
+			// Mode 4 stores 508 image pixels in a 512-byte row. The final four bytes are transport padding,
+			// usually 0xff but occasionally patterned, and must not be exposed as bright optical blobs.
+			for (uint32_t y = 0; y < camera_height; y++) {
+				memset(frame->data + y * frame->stride + PSVR2_MODE4_ACTIVE_IMAGE_WIDTH, 0,
+				       camera_width - PSVR2_MODE4_ACTIVE_IMAGE_WIDTH);
+			}
 			frame->timestamp = camera_timestamp_ns;
 			frame->source_timestamp = (int64_t)camera_vts_us * U_TIME_1US_IN_NS;
 			frame->source_sequence = camera_sequence_id;

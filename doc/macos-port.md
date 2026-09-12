@@ -57,10 +57,11 @@ It also maps the camera VTS timestamp into Monado's monotonic clock, but does
 not pretend that the USB completion time is the exposure time. Hardware testing
 on macOS found that mode 4 delivers 520448-byte `VI` packets in camera-set 4/5
 pairs. Each pair shares a device timestamp and hardware sequence ID; successive
-pairs are 16683 us apart (about 60 Hz). Each packet describes two 512x508
-controller-tracking images in contiguous L8 planes, giving all four headset
-cameras across the pair. Four captured PGM snapshots were successfully decoded
-and visually inspected at 512x508.
+pairs are 16683 us apart (about 60 Hz). Each packet describes two 512x508 L8
+planes, giving all four headset cameras across the pair. Each row contains 508
+image pixels and four trailing transport-padding bytes; the driver clears that
+padding before publishing camera frames. Four captured PGM snapshots were
+successfully decoded and visually inspected at 512x508.
 The first observed packet was roughly 13-27 ms newer in host time than its VTS
 timestamp. Mode 12 alternated 409856- and 260352-byte packets at only about 1 Hz
 in the same test, so mode 4 is the current tracking choice.
