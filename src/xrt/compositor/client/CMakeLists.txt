@@ -22,7 +22,13 @@ endif()
 if(APPLE)
 	target_sources(comp_client PRIVATE comp_metal_client.h comp_metal_client.m comp_metal_glue.c)
 	if(XRT_MODULE_COMPOSITOR_UTIL)
-		target_sources(comp_client PRIVATE comp_metal_release_sync.h comp_metal_release_sync.m)
+		target_sources(
+			comp_client
+			PRIVATE comp_metal_release_sync.h
+				comp_metal_release_sync.m
+				comp_metal_release_wait_thread.h
+				comp_metal_release_wait_thread.m
+			)
 	endif()
 	if(XRT_MODULE_COMPOSITOR_UTIL AND NOT XRT_FEATURE_SERVICE)
 		target_sources(comp_client PRIVATE comp_metal_array_import_experiment.m)
