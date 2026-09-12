@@ -22,6 +22,7 @@
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
 #include "util/u_distortion_mesh.h"
+#include "util/comp_swapchain_gpu_reuse.h"
 
 #include "multi/comp_multi_private.h"
 
@@ -50,6 +51,79 @@ DEBUG_GET_ONCE_LOG_OPTION(app_frame_lag_level, "XRT_APP_FRAME_LAG_LOG_AS_LEVEL",
  *
  */
 
+static void
+layer_gpu_reuse_claim(struct multi_layer_entry *layer)
+{
+	const struct xrt_layer_data *data = &layer->data;
+
+	switch (data->type) {
+	case XRT_LAYER_PROJECTION:
+		for (uint32_t i = 0; i < data->view_count; i++) {
+			(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[i], data->proj.v[i].sub.image_index);
+		}
+		break;
+	case XRT_LAYER_PROJECTION_DEPTH:
+		for (uint32_t i = 0; i < data->view_count; i++) {
+			(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[i], data->depth.v[i].sub.image_index);
+			(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[i + data->view_count],
+			                                            data->depth.d[i].sub.image_index);
+		}
+		break;
+	case XRT_LAYER_QUAD:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->quad.sub.image_index);
+		break;
+	case XRT_LAYER_CUBE:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->cube.sub.image_index);
+		break;
+	case XRT_LAYER_CYLINDER:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->cylinder.sub.image_index);
+		break;
+	case XRT_LAYER_EQUIRECT1:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->equirect1.sub.image_index);
+		break;
+	case XRT_LAYER_EQUIRECT2:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->equirect2.sub.image_index);
+		break;
+	case XRT_LAYER_PASSTHROUGH: break;
+	}
+}
+
+static void
+layer_gpu_reuse_release(struct multi_layer_entry *layer)
+{
+	const struct xrt_layer_data *data = &layer->data;
+
+	switch (data->type) {
+	case XRT_LAYER_PROJECTION:
+		for (uint32_t i = 0; i < data->view_count; i++) {
+			comp_swapchain_gpu_reuse_release_image(layer->xscs[i], data->proj.v[i].sub.image_index);
+		}
+		break;
+	case XRT_LAYER_PROJECTION_DEPTH:
+		for (uint32_t i = 0; i < data->view_count; i++) {
+			comp_swapchain_gpu_reuse_release_image(layer->xscs[i], data->depth.v[i].sub.image_index);
+			comp_swapchain_gpu_reuse_release_image(layer->xscs[i + data->view_count],
+			                                      data->depth.d[i].sub.image_index);
+		}
+		break;
+	case XRT_LAYER_QUAD:
+		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->quad.sub.image_index);
+		break;
+	case XRT_LAYER_CUBE:
+		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->cube.sub.image_index);
+		break;
+	case XRT_LAYER_CYLINDER:
+		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->cylinder.sub.image_index);
+		break;
+	case XRT_LAYER_EQUIRECT1:
+		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->equirect1.sub.image_index);
+		break;
+	case XRT_LAYER_EQUIRECT2:
+		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->equirect2.sub.image_index);
+		break;
+	case XRT_LAYER_PASSTHROUGH: break;
+	}
+}
 
 /*!
  * Clear a slot, need to have the list_and_timing_lock held.
@@ -63,6 +137,7 @@ slot_clear_locked(struct multi_compositor *mc, struct multi_layer_slot *slot)
 	}
 
 	for (size_t i = 0; i < slot->layer_count; i++) {
+		layer_gpu_reuse_release(&slot->layers[i]);
 		for (size_t k = 0; k < ARRAY_SIZE(slot->layers[i].xscs); k++) {
 			xrt_swapchain_reference(&slot->layers[i].xscs[k], NULL);
 		}
@@ -661,7 +736,6 @@ multi_compositor_layer_projection(struct xrt_compositor *xc,
                                   const struct xrt_layer_data *data)
 {
 	struct multi_compositor *mc = multi_compositor(xc);
-	(void)mc;
 
 	size_t index = mc->progress.layer_count++;
 	mc->progress.layers[index].xdev = xdev;
@@ -669,6 +743,7 @@ multi_compositor_layer_projection(struct xrt_compositor *xc,
 		xrt_swapchain_reference(&mc->progress.layers[index].xscs[i], xsc[i]);
 	}
 	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
 
 	return XRT_SUCCESS;
 }
@@ -690,6 +765,7 @@ multi_compositor_layer_projection_depth(struct xrt_compositor *xc,
 		xrt_swapchain_reference(&mc->progress.layers[index].xscs[i + data->view_count], d_xsc[i]);
 	}
 	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
 
 	return XRT_SUCCESS;
 }
@@ -706,6 +782,7 @@ multi_compositor_layer_quad(struct xrt_compositor *xc,
 	mc->progress.layers[index].xdev = xdev;
 	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
 	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
 
 	return XRT_SUCCESS;
 }
@@ -722,6 +799,7 @@ multi_compositor_layer_cube(struct xrt_compositor *xc,
 	mc->progress.layers[index].xdev = xdev;
 	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
 	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
 
 	return XRT_SUCCESS;
 }
@@ -738,6 +816,7 @@ multi_compositor_layer_cylinder(struct xrt_compositor *xc,
 	mc->progress.layers[index].xdev = xdev;
 	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
 	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
 
 	return XRT_SUCCESS;
 }
@@ -754,6 +833,7 @@ multi_compositor_layer_equirect1(struct xrt_compositor *xc,
 	mc->progress.layers[index].xdev = xdev;
 	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
 	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
 
 	return XRT_SUCCESS;
 }
@@ -770,6 +850,7 @@ multi_compositor_layer_equirect2(struct xrt_compositor *xc,
 	mc->progress.layers[index].xdev = xdev;
 	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
 	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
 
 	return XRT_SUCCESS;
 }
