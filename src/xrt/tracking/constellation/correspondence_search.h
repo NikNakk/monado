@@ -63,6 +63,7 @@ struct cs_model_info
 	int best_pose_blob_depth;    /* Blob neighbor depth the best pose is from */
 	int best_pose_led_depth;     /* LED neighbour depth the best pose is from */
 	struct xrt_pose best_pose;
+	float best_pose_gravity_error_rad;
 	enum pose_match_flags match_flags;
 
 	struct pose_metrics best_score;

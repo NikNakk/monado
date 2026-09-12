@@ -459,6 +459,7 @@ correspondence_search_project_pose(struct correspondence_search *cs,
 		if (pose_metrics_score_is_better_pose(&mi->best_score, &score)) {
 			mi->best_score = score;
 			mi->best_pose = *pose;
+			mi->best_pose_gravity_error_rad = gravity_error_rad;
 #if DUMP_TIMING
 			mi->best_pose_found_time = os_monotonic_get_ns();
 #endif
@@ -1294,6 +1295,10 @@ correspondence_search_find_one_pose(struct correspondence_search *cs,
 		if (mi.score_diag.have_best_failed_pose) {
 			score_diag_dump_pose(cs, model, &mi, phase, "best_failed", &mi.score_diag.best_failed_pose,
 			                     mi.score_diag.best_failed_gravity_error_rad);
+		}
+		if (found_pose) {
+			score_diag_dump_pose(cs, model, &mi, phase, "accepted", &mi.best_pose,
+			                     mi.best_pose_gravity_error_rad);
 		}
 	}
 
