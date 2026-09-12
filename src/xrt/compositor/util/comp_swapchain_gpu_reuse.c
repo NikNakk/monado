@@ -15,9 +15,8 @@
 
 #include "os/os_time.h"
 
-#include "vk/vk_submit_helpers.h"
-
 #include <assert.h>
+#include <errno.h>
 #include <limits.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -25,15 +24,6 @@
 #include <string.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(log_swapchain_gpu_reuse, "XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE", false)
-
-#define GPU_REUSE_LOG(...)                                                                                             \
-	do {                                                                                                           \
-		if (debug_get_bool_option_log_swapchain_gpu_reuse()) {                                                 \
-			U_LOG_I(__VA_ARGS__);                                                                              \
-		} else {                                                                                               \
-			U_LOG_D(__VA_ARGS__);                                                                              \
-		}                                                                                                      \
-	} while (false)
 
 #define GPU_REUSE_MAX_IMAGES_PER_SUBMIT (XRT_MAX_LAYERS * XRT_MAX_VIEWS * 2)
 
@@ -90,10 +80,37 @@ struct gpu_reuse_submit
 	struct gpu_reuse_submit_image images[GPU_REUSE_MAX_IMAGES_PER_SUBMIT];
 };
 
+struct gpu_reuse_renderer_tls
+{
+	struct comp_layer_accum *cla;
+	struct gpu_reuse_submit submit;
+	struct vk_semaphore_list_signal signal_sems;
+	const VkSubmitInfo *expected_submit_info;
+	const VkSubmitInfo *rejected_submit_info;
+	VkResult rejected_result;
+	bool submit_active;
+};
+
 static pthread_mutex_t g_gpu_reuse_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_gpu_reuse_cond = PTHREAD_COND_INITIALIZER;
 static struct gpu_reuse_context *g_gpu_reuse_contexts = NULL;
 static struct gpu_reuse_native_accum *g_gpu_reuse_native_accums = NULL;
+static __thread struct gpu_reuse_renderer_tls g_renderer = {0};
+
+static void
+reuse_log(const char *what, struct xrt_swapchain *xsc, uint32_t image_index, uint64_t value, int64_t extra_ns)
+{
+	if (!debug_get_bool_option_log_swapchain_gpu_reuse()) {
+		return;
+	}
+
+	U_LOG_I("Swapchain GPU reuse %s: swapchain=%p image=%u timeline=%llu extra_ns=%lld",
+	        what,
+	        (void *)xsc,
+	        image_index,
+	        (unsigned long long)value,
+	        (long long)extra_ns);
+}
 
 static struct gpu_reuse_context *
 find_context_locked(struct vk_bundle *vk)
@@ -114,20 +131,6 @@ find_tracker_locked(struct xrt_swapchain *xsc)
 			if (t->xsc == xsc) {
 				return t;
 			}
-	}
-	}
-	return NULL;
-}
-
-static struct gpu_reuse_tracker *
-find_tracker_in_context_locked(struct gpu_reuse_context *context, struct xrt_swapchain *xsc)
-{
-	if (context == NULL) {
-		return NULL;
-	}
-	for (struct gpu_reuse_tracker *t = context->trackers; t != NULL; t = t->next) {
-		if (t->xsc == xsc) {
-			return t;
 		}
 	}
 	return NULL;
@@ -230,6 +233,10 @@ wait_pending_consumers_locked(struct gpu_reuse_tracker *tracker,
 		if (ret == ETIMEDOUT && remaining_timeout_ns(timeout_ns, start_ns) <= 0) {
 			return false;
 		}
+		if (ret != 0 && ret != ETIMEDOUT) {
+			U_LOG_E("Swapchain GPU reuse condition wait failed: %d", ret);
+			return false;
+		}
 	}
 	return true;
 }
@@ -285,18 +292,8 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 		}
 
 		remaining_ns = remaining_timeout_ns(timeout_ns, start_ns);
-		uint64_t completed_value = 0;
-		bool have_completed_value = vk->vkGetSemaphoreCounterValue != NULL &&
-		                            vk->vkGetSemaphoreCounterValue(vk->device, timeline, &completed_value) == VK_SUCCESS;
-		bool needs_wait = !have_completed_value || completed_value < value;
-		if (needs_wait) {
-			GPU_REUSE_LOG("Swapchain GPU reuse wait: swapchain=%p image=%u timeline=%llu completed=%llu timeout_ns=%lld",
-			              (void *)xsc,
-			              image_index,
-			              (unsigned long long)value,
-			              (unsigned long long)completed_value,
-			              (long long)remaining_ns);
-		}
+		int64_t wait_start_ns = os_monotonic_get_ns();
+		reuse_log("wait", xsc, image_index, value, remaining_ns);
 
 		VkSemaphoreWaitInfo wait_info = {
 		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
@@ -318,18 +315,8 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 			return XRT_ERROR_VULKAN;
 		}
 
-		if (needs_wait) {
-			GPU_REUSE_LOG("Swapchain GPU reuse wait complete: swapchain=%p image=%u timeline=%llu",
-			              (void *)xsc,
-			              image_index,
-			              (unsigned long long)value);
-		}
+		reuse_log("wait complete", xsc, image_index, value, os_monotonic_get_ns() - wait_start_ns);
 
-		/*
-		 * A new compositor claim cannot normally appear after OpenXR has handed
-		 * the image to the app, but recheck both domains so correctness does not
-		 * depend on that external ownership invariant.
-		 */
 		pthread_mutex_lock(&g_gpu_reuse_mutex);
 		tracker = find_tracker_locked(xsc);
 		if (tracker == NULL) {
@@ -608,7 +595,6 @@ comp_swapchain_gpu_reuse_native_accum_release(struct comp_layer_accum *cla)
 void
 comp_swapchain_gpu_reuse_native_accum_begin(struct comp_layer_accum *cla)
 {
-	/* Release an error/early-return frame that never reached renderer submit. */
 	comp_swapchain_gpu_reuse_native_accum_release(cla);
 }
 
@@ -666,9 +652,15 @@ submit_add_image_locked(struct gpu_reuse_submit *submit, struct xrt_swapchain *x
 		return true;
 	}
 
-	struct gpu_reuse_tracker *tracker = find_tracker_in_context_locked(submit->context, xsc);
+	struct gpu_reuse_tracker *tracker = find_tracker_locked(xsc);
 	if (tracker == NULL) {
 		return true;
+	}
+	if (submit->context == NULL) {
+		submit->context = tracker->context;
+	} else if (submit->context != tracker->context) {
+		U_LOG_E("Tracked swapchains from different Vulkan devices reached one compositor submit");
+		return false;
 	}
 
 	for (uint32_t i = 0; i < submit->image_count; i++) {
@@ -695,11 +687,7 @@ submit_add_image_locked(struct gpu_reuse_submit *submit, struct xrt_swapchain *x
 	image->image_index = image_index;
 	image->previous_value = tracker->last_gpu_use[image_index];
 	tracker->last_gpu_use[image_index] = submit->value;
-
-	GPU_REUSE_LOG("Swapchain GPU reuse submit assignment: swapchain=%p image=%u timeline=%llu",
-	              (void *)xsc,
-	              image_index,
-	              (unsigned long long)submit->value);
+	reuse_log("submit assignment", xsc, image_index, submit->value, 0);
 	return true;
 }
 
@@ -750,130 +738,146 @@ submit_rollback_locked(struct gpu_reuse_submit *submit)
 	}
 }
 
-VkResult
-comp_swapchain_gpu_reuse_vk_cmd_submit_locked(struct comp_layer_accum *cla,
-                                              struct vk_bundle *vk,
-                                              struct vk_bundle_queue *queue,
-                                              uint32_t count,
-                                              const VkSubmitInfo *infos,
-                                              VkFence fence)
+static void
+renderer_submit_abort_locked(void)
 {
-	if (cla == NULL || vk == NULL || queue == NULL || infos == NULL || count != 1) {
-		VkResult ret = vk_cmd_submit_locked(vk, queue, count, infos, fence);
-		comp_swapchain_gpu_reuse_native_accum_release(cla);
-		return ret;
-	}
-
-#ifndef VK_KHR_timeline_semaphore
-	VkResult ret = vk_cmd_submit_locked(vk, queue, count, infos, fence);
-	comp_swapchain_gpu_reuse_native_accum_release(cla);
-	return ret;
-#else
-	struct gpu_reuse_submit submit = {0};
-
-	pthread_mutex_lock(&g_gpu_reuse_mutex);
-	submit.context = find_context_locked(vk);
-	if (submit.context == NULL) {
+	if (g_renderer.submit_active) {
+		submit_rollback_locked(&g_renderer.submit);
+		g_renderer.submit_active = false;
+		g_renderer.expected_submit_info = NULL;
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
-		VkResult ret = vk_cmd_submit_locked(vk, queue, count, infos, fence);
-		comp_swapchain_gpu_reuse_native_accum_release(cla);
-		return ret;
 	}
+}
+
+void
+comp_swapchain_gpu_reuse_renderer_enter(struct comp_layer_accum *cla)
+{
+	/* A previous draw must have left no armed queue submit behind. */
+	if (g_renderer.submit_active) {
+		renderer_submit_abort_locked();
+	}
+	g_renderer.cla = cla;
+	g_renderer.rejected_submit_info = NULL;
+	g_renderer.rejected_result = VK_SUCCESS;
+}
+
+void
+comp_swapchain_gpu_reuse_renderer_leave(struct comp_layer_accum *cla)
+{
+	if (g_renderer.submit_active) {
+		renderer_submit_abort_locked();
+	}
+	g_renderer.expected_submit_info = NULL;
+	g_renderer.rejected_submit_info = NULL;
+	g_renderer.rejected_result = VK_SUCCESS;
+	g_renderer.cla = NULL;
+
+	/* Covers both successful rendering and all pre-submit/early-return paths. */
+	comp_swapchain_gpu_reuse_native_accum_release(cla);
+}
+
+void
+comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_builder *builder,
+                                                     const struct vk_semaphore_list_wait *wait_semaphores,
+                                                     const VkCommandBuffer *command_buffers,
+                                                     uint32_t command_buffer_count,
+                                                     const struct vk_semaphore_list_signal *signal_semaphores,
+                                                     const void *next)
+{
+	if (g_renderer.cla == NULL || g_renderer.submit_active) {
+		vk_submit_info_builder_prepare(
+		    builder, wait_semaphores, command_buffers, command_buffer_count, signal_semaphores, next);
+		return;
+	}
+
+	U_ZERO(&g_renderer.submit);
+	pthread_mutex_lock(&g_gpu_reuse_mutex);
 
 	bool collected = true;
-	for (uint32_t i = 0; i < cla->layer_count; i++) {
-		if (!submit_add_layer_locked(&submit, &cla->layers[i])) {
+	for (uint32_t i = 0; i < g_renderer.cla->layer_count; i++) {
+		if (!submit_add_layer_locked(&g_renderer.submit, &g_renderer.cla->layers[i])) {
 			collected = false;
 			break;
 		}
 	}
 
 	if (!collected) {
-		submit_rollback_locked(&submit);
+		submit_rollback_locked(&g_renderer.submit);
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
-		comp_swapchain_gpu_reuse_native_accum_release(cla);
-		return VK_ERROR_TOO_MANY_OBJECTS;
+		vk_submit_info_builder_prepare(
+		    builder, wait_semaphores, command_buffers, command_buffer_count, signal_semaphores, next);
+		g_renderer.rejected_submit_info = &builder->submit_info;
+		g_renderer.rejected_result = VK_ERROR_TOO_MANY_OBJECTS;
+		return;
 	}
 
-	if (submit.image_count == 0) {
+	if (g_renderer.submit.image_count == 0) {
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
-		VkResult ret = vk_cmd_submit_locked(vk, queue, count, infos, fence);
-		comp_swapchain_gpu_reuse_native_accum_release(cla);
+		vk_submit_info_builder_prepare(
+		    builder, wait_semaphores, command_buffers, command_buffer_count, signal_semaphores, next);
+		return;
+	}
+
+	U_ZERO(&g_renderer.signal_sems);
+	if (signal_semaphores != NULL) {
+		g_renderer.signal_sems = *signal_semaphores;
+	}
+	if (g_renderer.signal_sems.count >= VK_SEMAPHORE_LIST_MAX_COUNT) {
+		U_LOG_E("No renderer signal-semaphore slot available for swapchain GPU reuse timeline");
+		submit_rollback_locked(&g_renderer.submit);
+		pthread_mutex_unlock(&g_gpu_reuse_mutex);
+		vk_submit_info_builder_prepare(
+		    builder, wait_semaphores, command_buffers, command_buffer_count, signal_semaphores, next);
+		g_renderer.rejected_submit_info = &builder->submit_info;
+		g_renderer.rejected_result = VK_ERROR_TOO_MANY_OBJECTS;
+		return;
+	}
+
+	vk_semaphore_list_signal_add_timeline(
+	    &g_renderer.signal_sems, g_renderer.submit.context->timeline, g_renderer.submit.value);
+	vk_submit_info_builder_prepare(
+	    builder, wait_semaphores, command_buffers, command_buffer_count, &g_renderer.signal_sems, next);
+
+	/*
+	 * Keep the publication mutex held until this exact VkSubmitInfo has been
+	 * accepted by Vulkan, so wait_image() cannot observe last_gpu_use=V before
+	 * the submission that will signal V exists on the queue.
+	 */
+	g_renderer.expected_submit_info = &builder->submit_info;
+	g_renderer.submit_active = true;
+}
+
+VkResult
+comp_swapchain_gpu_reuse_vk_cmd_submit_locked(struct vk_bundle *vk,
+                                              struct vk_bundle_queue *queue,
+                                              uint32_t count,
+                                              const VkSubmitInfo *infos,
+                                              VkFence fence)
+{
+	if (vk == NULL || queue == NULL || infos == NULL) {
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	if (g_renderer.rejected_submit_info != NULL && count == 1 && infos == g_renderer.rejected_submit_info) {
+		VkResult ret = g_renderer.rejected_result;
+		g_renderer.rejected_submit_info = NULL;
+		g_renderer.rejected_result = VK_SUCCESS;
 		return ret;
 	}
 
-	const VkSubmitInfo *original = &infos[0];
-	if (original->waitSemaphoreCount > VK_SEMAPHORE_LIST_MAX_COUNT ||
-	    original->signalSemaphoreCount >= VK_SEMAPHORE_LIST_MAX_COUNT + 1) {
-		U_LOG_E("Renderer semaphore list too large for swapchain GPU reuse timeline");
-		submit_rollback_locked(&submit);
-		pthread_mutex_unlock(&g_gpu_reuse_mutex);
-		comp_swapchain_gpu_reuse_native_accum_release(cla);
-		return VK_ERROR_TOO_MANY_OBJECTS;
+	if (!g_renderer.submit_active || count != 1 || infos != g_renderer.expected_submit_info) {
+		return vk_cmd_submit_locked(vk, queue, count, infos, fence);
 	}
 
-	const VkTimelineSemaphoreSubmitInfoKHR *original_timeline = NULL;
-	if (original->pNext != NULL) {
-		const VkBaseInStructure *base = (const VkBaseInStructure *)original->pNext;
-		if (base->sType != VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO_KHR || base->pNext != NULL) {
-			U_LOG_E("Unexpected renderer VkSubmitInfo pNext chain while adding swapchain GPU reuse timeline");
-			submit_rollback_locked(&submit);
-			pthread_mutex_unlock(&g_gpu_reuse_mutex);
-			comp_swapchain_gpu_reuse_native_accum_release(cla);
-			return VK_ERROR_INITIALIZATION_FAILED;
-		}
-		original_timeline = (const VkTimelineSemaphoreSubmitInfoKHR *)base;
-	}
-
-	VkSemaphore signal_semaphores[VK_SEMAPHORE_LIST_MAX_COUNT + 1] = {0};
-	uint64_t signal_values[VK_SEMAPHORE_LIST_MAX_COUNT + 1] = {0};
-	uint64_t wait_values[VK_SEMAPHORE_LIST_MAX_COUNT] = {0};
-
-	for (uint32_t i = 0; i < original->waitSemaphoreCount; i++) {
-		if (original_timeline != NULL && i < original_timeline->waitSemaphoreValueCount) {
-			wait_values[i] = original_timeline->pWaitSemaphoreValues[i];
-		}
-	}
-	for (uint32_t i = 0; i < original->signalSemaphoreCount; i++) {
-		signal_semaphores[i] = original->pSignalSemaphores[i];
-		if (original_timeline != NULL && i < original_timeline->signalSemaphoreValueCount) {
-			signal_values[i] = original_timeline->pSignalSemaphoreValues[i];
-		}
-	}
-
-	uint32_t signal_count = original->signalSemaphoreCount;
-	signal_semaphores[signal_count] = submit.context->timeline;
-	signal_values[signal_count] = submit.value;
-	signal_count++;
-
-	VkTimelineSemaphoreSubmitInfoKHR timeline_info = {
-	    .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO_KHR,
-	    .pNext = NULL,
-	    .waitSemaphoreValueCount = original->waitSemaphoreCount,
-	    .pWaitSemaphoreValues = wait_values,
-	    .signalSemaphoreValueCount = signal_count,
-	    .pSignalSemaphoreValues = signal_values,
-	};
-	VkSubmitInfo submit_info = *original;
-	submit_info.pNext = &timeline_info;
-	submit_info.signalSemaphoreCount = signal_count;
-	submit_info.pSignalSemaphores = signal_semaphores;
-
-	/*
-	 * Keep publication serialized through the queue submit. wait_image() cannot
-	 * observe the new last_gpu_use value until the submission that will signal it
-	 * has actually been accepted by Vulkan.
-	 */
-	VkResult ret = vk_cmd_submit_locked(vk, queue, 1, &submit_info, fence);
+	VkResult ret = vk_cmd_submit_locked(vk, queue, count, infos, fence);
 	if (ret == VK_SUCCESS) {
-		submit.context->last_submitted_value = submit.value;
+		g_renderer.submit.context->last_submitted_value = g_renderer.submit.value;
 	} else {
-		submit_rollback_locked(&submit);
+		submit_rollback_locked(&g_renderer.submit);
 	}
-	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 
-	/* Native bridge claim is no longer needed once publication+submit is complete. */
-	comp_swapchain_gpu_reuse_native_accum_release(cla);
+	g_renderer.submit_active = false;
+	g_renderer.expected_submit_info = NULL;
+	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 	return ret;
-#endif
 }
