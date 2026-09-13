@@ -38,7 +38,16 @@ t_apply_dead_reckoning(struct m_ff_vec3_f32 *gyro_ff,
 	// Find oldest imu index i that is newer than latest SLAM pose (or -1)
 	int i = 0;
 	uint64_t imu_ts = UINT64_MAX;
-	while (m_ff_vec3_f32_get_timestamp(gyro_ff, i, &imu_ts)) {
+	for (;;) {
+		if (!m_ff_vec3_f32_get_timestamp(gyro_ff, i, &imu_ts)) {
+			/*
+			 * If every retained IMU sample is newer than the SLAM pose, i is
+			 * now one past the FIFO. Back up to the oldest retained sample.
+			 * For an actually empty FIFO this correctly leaves i at -1.
+			 */
+			i--;
+			break;
+		}
 		if ((int64_t)imu_ts < base_rel_ts) {
 			i--; // Back to the oldest newer-than-SLAM IMU index (or -1)
 			break;
