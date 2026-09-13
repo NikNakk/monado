@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - macos-psvr2-timing-diagnostics
+      - macos-drawable-slot-newest
     paths:
       - .github/workflows/macos-psvr2-timing-diagnostics.yml
       - CMakeLists.txt
