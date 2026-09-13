@@ -402,11 +402,10 @@ client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_de
 	pthread_mutex_lock(&g_contexts_mutex);
 	link->next = g_contexts;
 	g_contexts = link;
-	pthread_mutex_unlock(&g_contexts_mutex);
-
 	xcm->base.create_swapchain = metal_service_create_swapchain;
 	xcm->base.destroy = metal_service_compositor_destroy;
+	pthread_mutex_unlock(&g_contexts_mutex);
 
-	U_LOG_I("Metal service swapchain wrapper active: client allocates shared Metal textures before service import");
+	U_LOG_I("Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images");
 	return xcm;
 }
