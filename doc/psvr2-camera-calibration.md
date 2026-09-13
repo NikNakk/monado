@@ -260,8 +260,9 @@ light in each image must be inferred from those images rather than assumed.
 First confirm framing with a short continuous-IR control. Keep only the left
 controller awake, place it where the second continuous-IR live run tracked
 well, and keep the headset and controller rigidly stationary through both
-commands. The first command must show camera candidates; if it does not,
-reposition before starting the sweep.
+commands. The first command must show several clearly lit controller LEDs in
+the saved images; pose candidates are not required for a brightness scan. If
+the ring is absent, reposition before starting the sweep.
 
 ```sh
 PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 PSSENSE_FORCE_IR=1 \
@@ -272,7 +273,7 @@ build-sense/src/xrt/targets/cli/monado-cli psvr2-constellation \
   2>&1 | tee /tmp/psvr2-static-ir-control.log
 ```
 
-After confirming candidates without moving either device, run the full sweep:
+After confirming LED visibility without moving either device, run the full sweep:
 
 ```sh
 PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 PSSENSE_FORCE_IR=0 \
@@ -306,3 +307,23 @@ headset and visibly forming a broad arc before committing to the 75-second
 static phase sweep. The sampled illumination is intermittent even under the
 force-IR override, as it was in the earlier successful capture; this also
 deserves separate timing analysis once the framing control passes.
+
+The second static control (`/tmp/psvr2-static-ir-control-2.log`, SHA-256
+`a0f921f42ba7158f348f15e55b6fd569c77acc95687dc54302538f41226f7e4c`)
+wrote 80 frames per camera under `/tmp/psvr2-static-ir-control-capture-2`.
+All four cameras again see the illuminated LEDs, but the cluster is smaller,
+dimmer, and nearly edge-on compared with the successful continuous-IR `-2`
+capture. It yielded just one accepted camera-local candidate (cam0, five
+matches, 0.127 px reprojection error) near the end and no fused pose. The
+tracker logged 329 `Dropping slow sample` warnings in eight seconds, versus
+16 in the 15-second successful `-2` run. That warning comes from
+`Camera::deferSampleToSlowThread`: a new deferred image replaces an older one
+while the slow correspondence search has not caught up. This loses possible
+pose candidates but does not mean the raw camera capture failed (480 processed
+and 80 saved frames per camera, zero write failures). Sparse/flattened ring
+geometry makes bootstrap harder; slow-search overload can further reduce its
+opportunities. Neither this control nor the previous one establishes whether
+normal-pulse phase assumptions are correct. Because multiple LEDs are visible
+in all four cameras, the current placement is sufficient for an image
+brightness phase sweep independent of candidate/fusion counts. It is not a
+good pose-solver control until the ring presents a broader arc.
