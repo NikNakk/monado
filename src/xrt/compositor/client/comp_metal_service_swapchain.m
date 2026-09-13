@@ -230,23 +230,6 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 		return xret;
 	}
 
-	/*
-	 * The service multi-compositor can retain separate generations in its
-	 * progress, scheduled, and delivered slots. With strict cross-process
-	 * Metal reuse tracking, a normal three-image swapchain can therefore have
-	 * all three images legitimately unavailable to the producer at once.
-	 *
-	 * Keep one additional producer spare for dynamic service-Metal swapchains.
-	 * Static-image swapchains intentionally remain single-image resources.
-	 */
-	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) == 0 && xsccp.image_count < 4) {
-		uint32_t original_image_count = xsccp.image_count;
-		xsccp.image_count = 4;
-		U_LOG_I("Metal service swapchain image depth increased from %u to %u to preserve a producer spare across multi-compositor staging",
-		        original_image_count,
-		        xsccp.image_count);
-	}
-
 	if (xsccp.image_count == 0 || xsccp.image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return XRT_ERROR_ALLOCATION;
 	}
@@ -419,10 +402,11 @@ client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_de
 	pthread_mutex_lock(&g_contexts_mutex);
 	link->next = g_contexts;
 	g_contexts = link;
-	xcm->base.create_swapchain = metal_service_create_swapchain;
-	xcm->base.destroy = metal_service_compositor_destroy;
 	pthread_mutex_unlock(&g_contexts_mutex);
 
-	U_LOG_I("Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images");
+	xcm->base.create_swapchain = metal_service_create_swapchain;
+	xcm->base.destroy = metal_service_compositor_destroy;
+
+	U_LOG_I("Metal service swapchain wrapper active: client allocates shared Metal textures before service import");
 	return xcm;
 }
