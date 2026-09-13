@@ -360,6 +360,14 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 
 #ifdef OXR_HAVE_KHR_metal_enable
 	ENTRY_IF_EXT(xrGetMetalGraphicsRequirementsKHR, KHR_metal_enable);
+	if (strcmp(name, "xrGetMetalGraphicsRequirementsKHRX2") == 0) {
+		if (inst->extensions.KHR_metal_enable) {
+			PFN_xrGetMetalGraphicsRequirementsKHR ret = &oxr_xrGetMetalGraphicsRequirementsKHR;
+			*out_function = (PFN_xrVoidFunction)(ret);
+			return XR_SUCCESS;
+		}
+		return XR_ERROR_FUNCTION_UNSUPPORTED;
+	}
 #endif // OXR_HAVE_KHR_metal_enable
 
 #ifdef OXR_HAVE_KHR_visibility_mask
