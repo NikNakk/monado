@@ -8,12 +8,14 @@
 
 #include "util/comp_metal_swapchain_import.h"
 #include "util/comp_metal_texture_device.h"
+#include "util/comp_swapchain.h"
 
 #include "util/u_logging.h"
 #include "util/u_misc.h"
 #include "vk/vk_helpers.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -232,9 +234,16 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
                                                 uint32_t image_count,
                                                 struct vk_image_collection *out_vkic)
 {
-	if (!g_request.active || g_request.consumed || g_request.image_count != image_count ||
-	    !create_info_matches(&g_request.info, info)) {
+	if (!g_request.active || g_request.consumed || !create_info_matches(&g_request.info, info)) {
 		return vk_ic_allocate(vk, info, image_count, out_vkic);
+	}
+
+	const uint32_t direct_image_count = g_request.image_count;
+	if (direct_image_count == 0 || direct_image_count > ARRAY_SIZE(out_vkic->images)) {
+		U_LOG_E("Metal direct swapchain image count invalid: requested=%u max=%zu",
+		        direct_image_count,
+		        ARRAY_SIZE(out_vkic->images));
+		return VK_ERROR_TOO_MANY_OBJECTS;
 	}
 
 	g_request.consumed = true;
@@ -247,9 +256,9 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 
 	memset(out_vkic, 0, sizeof(*out_vkic));
 	out_vkic->info = *info;
-	out_vkic->image_count = image_count;
+	out_vkic->image_count = direct_image_count;
 
-	for (uint32_t i = 0; i < image_count; i++) {
+	for (uint32_t i = 0; i < direct_image_count; i++) {
 		VkResult ret = create_direct_image(vk, info, i, g_request.textures[i], &out_vkic->images[i]);
 		if (ret != VK_SUCCESS) {
 			destroy_direct_images(vk, out_vkic);
@@ -257,7 +266,20 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 		}
 	}
 
-	U_LOG_I("Metal direct swapchain allocator consumed %u pre-created Metal texture(s); no Vulkan-first image allocation performed",
+	/*
+	 * This allocator override is injected into comp_swapchain.c only, and the
+	 * output collection passed there is &sc->vkic. The direct import request is
+	 * authoritative for its image count: post-create setup already keys all
+	 * per-image views, synchronization objects, and FIFO entries from
+	 * vkic.image_count, so publish the same count through xrt_swapchain before
+	 * the completed swapchain can escape to the IPC server.
+	 */
+	struct comp_swapchain *sc =
+	    (struct comp_swapchain *)((char *)out_vkic - offsetof(struct comp_swapchain, vkic));
+	sc->base.base.image_count = direct_image_count;
+
+	U_LOG_I("Metal direct swapchain allocator consumed %u pre-created Metal texture(s) (compositor default=%u); no Vulkan-first image allocation performed",
+	        direct_image_count,
 	        image_count);
 	return VK_SUCCESS;
 }
