@@ -5,6 +5,7 @@ on:
     branches:
       - macos-psvr2-timing-diagnostics
       - macos-drawable-slot-newest
+      - macos-client-cadence-stabilizer
     paths:
       - .github/workflows/macos-psvr2-timing-diagnostics.yml
       - CMakeLists.txt
