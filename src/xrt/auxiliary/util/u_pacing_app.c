@@ -33,6 +33,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(immediate_wait_frame_return_below_refresh,
 DEBUG_GET_ONCE_BOOL_OPTION(align_predicted_display_time_to_app_period,
                            "U_PACING_APP_ALIGN_PREDICTED_DISPLAY_TIME_TO_APP_PERIOD",
                            false)
+DEBUG_GET_ONCE_NUM_OPTION(forced_frame_divisor, "U_PACING_APP_FORCED_FRAME_DIVISOR", 0)
 
 #define UPA_LOG_T(...) U_LOG_IFL_T(debug_get_log_option_log_level(), __VA_ARGS__)
 #define UPA_LOG_D(...) U_LOG_IFL_D(debug_get_log_option_log_level(), __VA_ARGS__)
@@ -240,6 +241,19 @@ display_period(const struct pacing_app *pa)
 	return pa->last_input.predicted_display_period_ns;
 }
 
+static int
+forced_frame_divisor(void)
+{
+	int divisor = debug_get_num_option_forced_frame_divisor();
+	if (divisor <= 0) {
+		return 0;
+	}
+	if (divisor > XRT_MAX_SUPPORTED_REFRESH_RATES) {
+		divisor = XRT_MAX_SUPPORTED_REFRESH_RATES;
+	}
+	return divisor;
+}
+
 static int64_t
 min_app_time(const struct pacing_app *pa)
 {
@@ -292,6 +306,11 @@ total_app_and_compositor_time_ns(const struct pacing_app *pa)
 static int64_t
 calc_app_period(const struct pacing_app *pa, int64_t display_period_ns)
 {
+	int forced_divisor = forced_frame_divisor();
+	if (forced_divisor > 0) {
+		return display_period_ns * forced_divisor;
+	}
+
 	// Calculate the using both values separately.
 	int64_t app_period_ns = display_period_ns;
 
@@ -322,9 +341,23 @@ calc_app_period(const struct pacing_app *pa, int64_t display_period_ns)
 static int64_t
 predict_display_time(const struct pacing_app *pa, int64_t now_ns, int64_t display_period_ns, int64_t app_period_ns)
 {
-
 	// Total app and compositor time to produce a frame
 	int64_t app_and_compositor_time_ns = total_app_and_compositor_time_ns(pa);
+
+	/*
+	 * Diagnostic phase-locked cadence. Once the first prediction has been
+	 * anchored to a real system display time, advance only by whole app
+	 * periods. If the app misses a slot we skip a complete app interval rather
+	 * than catching up one headset refresh later. This makes divisor=2 a true
+	 * 60-on-120 cadence instead of the 25ms/8ms phase-slip pattern.
+	 */
+	if (forced_frame_divisor() > 0 && last_return_predicted_display(pa) > 0) {
+		int64_t val = last_return_predicted_display(pa) + app_period_ns;
+		while ((val - app_and_compositor_time_ns) <= now_ns) {
+			val += app_period_ns;
+		}
+		return val;
+	}
 
 	// Start from the last time that the driver displayed something.
 	int64_t val = last_sample_displayed(pa);
@@ -395,7 +428,7 @@ do_metrics(struct pacing_app *pa, struct u_pa_frame *f, bool discarded)
 	    .when_predicted_ns = f->when.predicted_ns,
 	    .when_wait_woke_ns = f->when.wait_woke_ns,
 	    .when_begin_ns = f->when.begin_ns,
-	    .when_delivered_ns = f->when.delivered_ns,
+	    .when.delivered_ns = f->when.delivered_ns,
 	    .when_gpu_done_ns = f->when.gpu_done_ns,
 	    .discarded = discarded,
 	};
@@ -735,6 +768,11 @@ pa_info(struct u_pacing_app *upa,
 {
 	struct pacing_app *pa = pacing_app(upa);
 
+	if (forced_frame_divisor() > 0 && pa->last_input.predicted_display_period_ns != 0 &&
+	    pa->last_input.predicted_display_period_ns != predicted_display_period_ns) {
+		/* Re-anchor the forced cadence after a physical refresh-rate change. */
+		pa->last_returned_ns = 0;
+	}
 	pa->last_input.predicted_display_time_ns = predicted_display_time_ns;
 	pa->last_input.predicted_display_period_ns = predicted_display_period_ns;
 	pa->last_input.extra_ns = extra_ns;
@@ -764,6 +802,11 @@ pa_create(int64_t session_id, struct u_pacing_app **out_upa)
 	pa->session_id = session_id;
 	pa->app.cpu_time_ns = U_TIME_1MS_IN_NS * 2;
 	pa->app.draw_time_ns = U_TIME_1MS_IN_NS * 2;
+
+	int divisor = forced_frame_divisor();
+	if (divisor > 0) {
+		U_LOG_I("App pacing diagnostic: forcing phase-locked 1:%d cadence relative to the system display", divisor);
+	}
 
 	pa->min_margin_ms = (struct u_var_draggable_f32){
 	    .val = debug_get_float_option_min_margin_ms(),
