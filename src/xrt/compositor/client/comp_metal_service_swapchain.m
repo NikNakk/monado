@@ -230,6 +230,25 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 		return xret;
 	}
 
+	/*
+	 * Strict service-GPU reuse tracking can keep separate generations alive in
+	 * the multi-compositor's progress, scheduled, and delivered slots. With the
+	 * ordinary three-image depth that can leave no immediately writable image
+	 * even though synchronization is behaving correctly. Keep one producer
+	 * spare for dynamic service-Metal swapchains; static images remain single.
+	 *
+	 * The service direct-Metal allocator treats this imported image count as
+	 * authoritative for the matching TLS request, so all four textures become
+	 * real compositor VkImages rather than falling back to the ordinary count.
+	 */
+	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) == 0 && xsccp.image_count < 4) {
+		uint32_t original_image_count = xsccp.image_count;
+		xsccp.image_count = 4;
+		U_LOG_I("Metal service swapchain image depth increased from %u to %u to preserve a producer spare across multi-compositor staging",
+		        original_image_count,
+		        xsccp.image_count);
+	}
+
 	if (xsccp.image_count == 0 || xsccp.image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return XRT_ERROR_ALLOCATION;
 	}
