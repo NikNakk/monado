@@ -33,19 +33,22 @@
  * PS VR2 Sense diagnostic constants.
  *
  * This deliberately lives in the macOS HID backend as a temporary diagnostic
- * override: with PSSENSE_FORCE_IR=1, normal Sense Bluetooth output reports are
- * left intact except for the tracking-LED fields and CRC. This lets us prove
- * the controller output/camera path without changing the normal LED-sync
- * algorithm in the pssense driver.
+ * override. With PSSENSE_FORCE_IR=1, runtime Sense Bluetooth output reports are
+ * replaced by the same zeroed, all-LED packet shape used by pssense_hid_probe,
+ * then PRESCAN timing and CRC are inserted here. Probe-originated packets keep
+ * their requested mask so the standalone LED-mask scan continues to work.
  */
 #define PSSENSE_VID 0x054c
 #define PSSENSE_PID_LEFT 0x0e45
 #define PSSENSE_PID_RIGHT 0x0e46
 #define PSSENSE_BT_REPORT_ID 0x31
 #define PSSENSE_BT_REPORT_LENGTH 78
+#define PSSENSE_OUTPUT_REPORT_TAG 0x10
 #define PSSENSE_HOST_TIMESTAMP_OFFSET 18
 #define PSSENSE_DEVICE_TIMESTAMP_OFFSET 49
 #define PSSENSE_LED_SETTINGS_OFFSET 22
+#define PSSENSE_LED_MASK_OFFSET 33
+#define PSSENSE_OUTPUT_COUNTER_OFFSET 41
 #define PSSENSE_PACKET_CRC_OFFSET 74
 #define PSSENSE_OUTPUT_CRC_SEED 0xa2
 #define PSSENSE_LED_PHASE_PRESCAN 1
@@ -93,6 +96,8 @@ struct hid_iokit
 	bool force_pssense_ir;
 	bool force_pssense_ir_programmed;
 	bool force_pssense_ir_wait_logged;
+	uint8_t force_pssense_ir_output_sequence;
+	uint8_t force_pssense_ir_output_counter;
 	uint8_t force_pssense_ir_led_sequence;
 	uint32_t force_pssense_ir_cycle_position;
 	bool have_pssense_device_timestamp;
@@ -279,6 +284,26 @@ iokit_force_pssense_ir_locked(struct hid_iokit *hid, uint8_t *report, size_t rep
 		return false;
 	}
 
+	/*
+	 * pssense_hid_probe constructs an otherwise-zeroed 78-byte report with
+	 * report ID 0x31, PS5 tag 0x10, an incrementing Bluetooth sequence nibble
+	 * and packet counter, plus the requested four-byte tracking-LED mask.
+	 *
+	 * Runtime pssense reports carry a non-zero host timestamp. In forced-IR
+	 * mode replace those with the exact probe packet shape and force all LEDs
+	 * on. Probe-originated reports have a zero host timestamp, so preserve
+	 * their caller-selected mask to keep --mask-scan-manifest functional.
+	 */
+	bool probe_style_input = iokit_read_le32(report + PSSENSE_HOST_TIMESTAMP_OFFSET) == 0;
+	uint32_t requested_mask = iokit_read_le32(report + PSSENSE_LED_MASK_OFFSET);
+
+	memset(report, 0, report_length);
+	report[0] = PSSENSE_BT_REPORT_ID;
+	report[1] = (uint8_t)((hid->force_pssense_ir_output_sequence++ & 0x0f) << 4);
+	report[2] = PSSENSE_OUTPUT_REPORT_TAG;
+	report[PSSENSE_OUTPUT_COUNTER_OFFSET] = hid->force_pssense_ir_output_counter++;
+	iokit_write_le32(report + PSSENSE_LED_MASK_OFFSET, probe_style_input ? requested_mask : UINT32_MAX);
+
 	if (!hid->force_pssense_ir_programmed) {
 		uint64_t now_ns = os_monotonic_get_ns();
 		uint64_t elapsed_ns = now_ns - hid->pssense_device_timestamp_host_ns;
@@ -289,17 +314,16 @@ iokit_force_pssense_ir_locked(struct hid_iokit *hid, uint8_t *report, size_t rep
 		hid->force_pssense_ir_led_sequence++;
 		hid->force_pssense_ir_programmed = true;
 		fprintf(stderr,
-		        "os_hid_iokit: PSSENSE_FORCE_IR programmed PRESCAN: period_id=%u cycle=%.3fms lead=%.1fms "
-		        "cycle_position=%u\n",
+		        "os_hid_iokit: PSSENSE_FORCE_IR programmed calibration-probe PRESCAN: period_id=%u "
+		        "cycle=%.3fms lead=%.1fms cycle_position=%u\n",
 		        PSSENSE_LED_PERIOD_ID, (double)PSSENSE_FORCE_IR_CYCLE_NS / 1000000.0,
 		        (double)PSSENSE_FORCE_IR_LEAD_NS / 1000000.0, hid->force_pssense_ir_cycle_position);
 	}
 
 	/*
-	 * Optically verified continuous-equivalent PRESCAN pattern:
+	 * Optically verified PRESCAN timing used by the calibration probe:
 	 *  - period ID 42: ~2.1ms pulse
 	 *  - 2.0ms repeating cycle, giving slight pulse overlap
-	 *  - the caller-provided LED mask is preserved
 	 *
 	 * cycle_length is encoded in thirds of a nanosecond; cycle_position is
 	 * encoded in controller IMU ticks (one third of a microsecond).
@@ -309,11 +333,6 @@ iokit_force_pssense_ir_locked(struct hid_iokit *hid, uint8_t *report, size_t rep
 	report[PSSENSE_LED_SETTINGS_OFFSET + 2] = PSSENSE_LED_PERIOD_ID;
 	iokit_write_le32(report + PSSENSE_LED_SETTINGS_OFFSET + 3, hid->force_pssense_ir_cycle_position);
 	iokit_write_le32(report + PSSENSE_LED_SETTINGS_OFFSET + 7, (uint32_t)(PSSENSE_FORCE_IR_CYCLE_NS * 3ULL));
-	/*
-	 * The diagnostic probe normally supplies ff:ff:ff:ff. Preserving these
-	 * four bytes also lets its calibration mode test one bit at a time without
-	 * teaching the generic HID backend about a particular LED model.
-	 */
 
 	uint32_t crc = iokit_pssense_crc(report);
 	iokit_write_le32(report + PSSENSE_PACKET_CRC_OFFSET, crc);
@@ -794,8 +813,8 @@ os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
 	hid->pssense_timing_diag = hid->is_pssense && iokit_env_enabled("PSSENSE_TIMING_DIAG");
 	if (hid->force_pssense_ir) {
 		fprintf(stderr,
-		        "os_hid_iokit: PSSENSE_FORCE_IR=1 enabled for PS VR2 Sense controller; overriding tracking LED "
-		        "fields only\n");
+		        "os_hid_iokit: PSSENSE_FORCE_IR=1 enabled for PS VR2 Sense controller; replacing runtime "
+		        "output with calibration-probe all-LED hold packets\n");
 	}
 	if (hid->pssense_timing_diag) {
 		fprintf(stderr, "os_hid_iokit: PSSENSE_TIMING_DIAG=1 enabled for Sense %c\n", hid->pssense_side);
