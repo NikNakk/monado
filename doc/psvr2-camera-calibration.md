@@ -98,3 +98,58 @@ The next implementation steps are deliberately offline so they can be tested rep
 5. Add an opt-in Monado runtime loader that attaches the calibrated four-camera streams to the constellation tracker. Invalid or absent calibration must leave the existing 3-DoF controller fallback unchanged.
 
 Do not tune controller constellation pose solving against uncalibrated camera geometry. The calibration JSON is the boundary between the acquisition/calibration work and runtime 6-DoF integration.
+
+## Direct native mode-4 ChArUco alignment (2026-09-13)
+
+The 21 static mode-4 captures under `/tmp/char-mode-12` use eight frames per
+camera per pose. Cameras 0/1 are set 4 planes 0/1; cameras 2/3 are set 5
+planes 0/1. Columns 508–511 of each 512 x 508 transport frame are padding.
+Greyscale averaging and stretching aid detection only; the 508 x 508 native
+pixel coordinates are unchanged. Reproduce the solve and validation with:
+
+```sh
+.venv/bin/python scripts/psvr2_tracking_charuco_direct.py \
+  /tmp/char-mode-12 --output /tmp/psvr2-mode4-charuco-direct.json
+.venv/bin/python scripts/psvr2_tracking_charuco_align.py \
+  /tmp/psvr2-mode4-charuco-direct.json \
+  /private/tmp/psvr2-camera-calibration-reviewed.json \
+  /tmp/psvr2-mode4-tracking-calibration-provisional.json \
+  --output /tmp/psvr2-mode4-charuco-aligned-candidate.json
+.venv/bin/python scripts/psvr2_tracking_charuco_sense_validate.py \
+  /tmp/psvr2-mode4-charuco-aligned-candidate.json /tmp/sense-validation \
+  --source /tmp/psvr2-mode4-tracking-calibration-provisional.json \
+  --output /tmp/psvr2-mode4-charuco-sense-validation.json \
+  --validated-output /tmp/psvr2-mode4-charuco-validated-opt-in.json
+```
+
+The direct solver estimates `T_camera0_camera`, mapping each OpenCV camera
+frame into native camera0. The reviewed calibration stores `T_rig_camera` in
+visible camera0. Both are camera-to-rig transforms. OpenCV camera axes are +x
+right, +y down, +z forward. The standard candidate converts OpenCV transforms
+to XRT poses by `C T C`, with `C = diag(1,-1,-1,1)`, for +x right, +y up,
+-z forward. Its runtime image size is 512 x 508; K/D retain the active native
+508 x 508 coordinate system.
+
+The direct lower baseline is 80.585 mm versus 78.579 mm in the reviewed
+calibration. Before alignment their translation vectors differ by 23.081 mm
+and relative rotations by 30.997°. No single rigid transform can make both
+native camera axes equal the visible axes. The alignment estimates one common
+rotation from both lower orientations, then a least-squares translation from
+both camera centres, and applies it to all four direct poses. Each lower camera
+retains a 15.499° axis difference and 1.270 mm centre difference. The candidate
+records those residuals. This is a plausible frame placement for an opt-in
+test, not proof of absolute HMD-frame accuracy. The reviewed calibration's
+SLAM hand-eye rotation is marked trusted but its translation is not. Its
+diagnostic `T_tracker_rig` is preserved in candidate provenance but is not
+applied; the candidate uses the existing visible-camera0 tracking origin.
+
+On six independent left-Sense `V*` poses, native cam0/1 stereo reconstructed
+30 points. The sparse V04/V05 poses used three-point lower anchors and are
+flagged in the validation JSON. At 5, 10, and 20 px thresholds, cam2 matched
+all 28 possible blobs at 1.303 px RMS and cam3 matched all 30 at 1.637 px RMS.
+Combined upper-camera RMS was 1.485 px. V03 cam2 matched 5/5 at 0.890 px RMS.
+The Sense data did not change ChArUco K/D or rig poses. This validates
+multi-camera geometric consistency offline; right-controller performance,
+dynamic behavior, and absolute HMD-frame accuracy remain unverified. Both
+candidate files retain `runtime_usable: false`. The validated copy is for an
+explicit opt-in `monado-cli psvr2-constellation` live test only.
