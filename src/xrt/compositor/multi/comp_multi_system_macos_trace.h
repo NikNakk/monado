@@ -32,6 +32,7 @@
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_client_frame_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_divisor, "XRT_MACOS_CLIENT_FRAME_DIVISOR", 0)
+DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_min_hold, "XRT_MACOS_CLIENT_FRAME_MIN_HOLD", 0)
 
 static FILE *g_macos_client_frame_trace = NULL;
 static uint64_t g_macos_client_frame_trace_rows = 0;
@@ -40,6 +41,11 @@ static bool g_macos_client_frame_trace_atexit_registered = false;
 static bool g_macos_client_frame_trace_have_last[MULTI_MAX_CLIENTS];
 static int64_t g_macos_client_frame_trace_last_frame[MULTI_MAX_CLIENTS];
 static uint32_t g_macos_client_frame_trace_source_use_ordinal[MULTI_MAX_CLIENTS];
+
+/* Elastic minimum-hold state, indexed by multi-system client slot. */
+static bool g_macos_client_frame_hold_initialized[MULTI_MAX_CLIENTS];
+static int64_t g_macos_client_frame_hold_frame_id[MULTI_MAX_CLIENTS];
+static int64_t g_macos_client_frame_hold_first_system_frame[MULTI_MAX_CLIENTS];
 
 static int
 macos_client_frame_divisor(void)
@@ -52,6 +58,33 @@ macos_client_frame_divisor(void)
 		divisor = 16;
 	}
 	return divisor;
+}
+
+static int
+macos_client_frame_min_hold(void)
+{
+	int hold = debug_get_num_option_macos_client_frame_min_hold();
+	if (hold <= 1) {
+		return 0;
+	}
+	if (hold > 16) {
+		hold = 16;
+	}
+	return hold;
+}
+
+static size_t
+macos_client_slot_for_mc(struct multi_compositor *mc)
+{
+	if (mc == NULL || mc->msc == NULL) {
+		return MULTI_MAX_CLIENTS;
+	}
+	for (size_t i = 0; i < MULTI_MAX_CLIENTS; i++) {
+		if (mc->msc->clients[i] == mc) {
+			return i;
+		}
+	}
+	return MULTI_MAX_CLIENTS;
 }
 
 static void
@@ -111,32 +144,70 @@ macos_client_frame_trace_get(void)
 }
 
 /*
- * Optional source-cadence stabiliser. This deliberately does not alter the
- * application's xrWaitFrame pacing or the system compositor's physical cadence.
- * It only controls when a GPU-complete scheduled client layer set is promoted to
- * delivered. With divisor=2 on a 120 Hz display, delivered source imagery may
- * change only on every second system frame. A source frame that misses its phase
- * boundary is therefore held for another complete pair instead of producing a
- * visually uneven 1/3-refresh cadence. The first source frame is delivered
- * immediately so startup never waits for a phase boundary.
+ * Optional source-cadence stabilisers. Neither alters the application's
+ * xrWaitFrame pacing or the system compositor's physical cadence.
+ *
+ * XRT_MACOS_CLIENT_FRAME_MIN_HOLD=2 is the preferred elastic experiment. A
+ * newly delivered client frame must remain delivered for at least two system
+ * compositor ticks. Once that minimum has elapsed, the next GPU-complete frame
+ * is accepted immediately, so a late 60 Hz source frame produces a 3-refresh
+ * hold and shifts phase instead of being forced to wait for a fixed even/odd
+ * boundary and becoming a 4-refresh hold.
+ *
+ * XRT_MACOS_CLIENT_FRAME_DIVISOR=2 retains the older fixed-phase experiment for
+ * A/B comparison. MIN_HOLD takes precedence when both variables are set.
  */
 static inline void
 macos_deliver_client_frame_cadenced(struct multi_compositor *mc,
                                     int64_t display_time_ns,
                                     int64_t system_frame_id)
 {
+	int min_hold = macos_client_frame_min_hold();
+	if (min_hold != 0 && mc != NULL) {
+		size_t client_slot = macos_client_slot_for_mc(mc);
+		if (client_slot == MULTI_MAX_CLIENTS) {
+			multi_compositor_deliver_any_frames(mc, display_time_ns);
+			return;
+		}
+
+		bool active_before = mc->delivered.active;
+		int64_t frame_before = active_before ? mc->delivered.data.frame_id : -1;
+
+		if (!g_macos_client_frame_hold_initialized[client_slot]) {
+			multi_compositor_deliver_any_frames(mc, display_time_ns);
+			if (mc->delivered.active) {
+				g_macos_client_frame_hold_initialized[client_slot] = true;
+				g_macos_client_frame_hold_frame_id[client_slot] = mc->delivered.data.frame_id;
+				g_macos_client_frame_hold_first_system_frame[client_slot] = system_frame_id;
+			}
+			return;
+		}
+
+		/* Recover cleanly if delivered changed outside this diagnostic wrapper. */
+		if (active_before && frame_before != g_macos_client_frame_hold_frame_id[client_slot]) {
+			g_macos_client_frame_hold_frame_id[client_slot] = frame_before;
+			g_macos_client_frame_hold_first_system_frame[client_slot] = system_frame_id;
+		}
+
+		int64_t first_system_frame = g_macos_client_frame_hold_first_system_frame[client_slot];
+		if (!active_before || system_frame_id - first_system_frame >= min_hold) {
+			multi_compositor_deliver_any_frames(mc, display_time_ns);
+			if (mc->delivered.active &&
+			    (!active_before || mc->delivered.data.frame_id != frame_before)) {
+				g_macos_client_frame_hold_frame_id[client_slot] = mc->delivered.data.frame_id;
+				g_macos_client_frame_hold_first_system_frame[client_slot] = system_frame_id;
+			}
+		}
+		return;
+	}
+
 	int divisor = macos_client_frame_divisor();
 	if (divisor == 0 || mc == NULL || !mc->delivered.active) {
 		multi_compositor_deliver_any_frames(mc, display_time_ns);
 		return;
 	}
 
-	/*
-	 * System frame IDs are the 120 Hz compositor clock. Use a fixed global
-	 * phase so the cadence cannot drift with the client's limiter. If no new
-	 * scheduled frame is ready on this boundary the previous delivered frame
-	 * remains valid and the next opportunity is one whole source period later.
-	 */
+	/* Fixed global phase retained as the original diagnostic A/B path. */
 	if ((system_frame_id % divisor) == 0) {
 		multi_compositor_deliver_any_frames(mc, display_time_ns);
 	}
@@ -156,13 +227,7 @@ macos_trace_multi_compositor_latch_frame_locked(struct multi_compositor *mc,
 		return;
 	}
 
-	size_t client_slot = MULTI_MAX_CLIENTS;
-	for (size_t i = 0; i < MULTI_MAX_CLIENTS; i++) {
-		if (mc->msc->clients[i] == mc) {
-			client_slot = i;
-			break;
-		}
-	}
+	size_t client_slot = macos_client_slot_for_mc(mc);
 	if (client_slot == MULTI_MAX_CLIENTS) {
 		return;
 	}
