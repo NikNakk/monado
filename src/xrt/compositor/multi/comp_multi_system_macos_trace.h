@@ -13,6 +13,12 @@
 
 #pragma once
 
+/*
+ * This header is force-included before comp_multi_system.c's normal include list.
+ * Bring in xrt_session.h first so union xrt_session_event has file scope before
+ * comp_multi_private.h declares multi_compositor_push_event().
+ */
+#include "xrt/xrt_session.h"
 #include "multi/comp_multi_private.h"
 #include "os/os_time.h"
 #include "util/u_debug.h"
