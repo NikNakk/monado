@@ -11,11 +11,14 @@
  * teardown. The enlarged buffers are intended for short (roughly 30-60 second)
  * diagnostic captures so stdio writes do not perturb presentation timing.
  *
- * XRT_MACOS_UNIQUE_PRESENT_SLOTS=1 also enables an experimental final-stage
+ * XRT_MACOS_UNIQUE_PRESENT_SLOTS=1 enables an experimental final-stage
  * presentation invariant: successive timed Metal presents are never submitted
- * less than one learned physical refresh period apart. This is deliberately
- * applied at presentDrawable:atTime: so all existing compositor prediction,
- * drawable-slot and trace behaviour remains unchanged for the A/B test.
+ * less than one learned physical refresh period apart.
+ *
+ * XRT_MACOS_PRESENT_MIN_DURATION_US=<us> instead replaces the absolute timed
+ * present with Metal's relative presentDrawable:afterMinimumDuration: primitive.
+ * This lets Core Animation preserve a regular minimum visible duration without
+ * accumulating absolute presentation-time debt when an earlier slot is missed.
  */
 
 #pragma once
@@ -55,6 +58,31 @@ macos_unique_present_slots_enabled(void)
 		}
 	}
 	return enabled;
+}
+
+static inline uint64_t
+macos_present_min_duration_us(void)
+{
+	static int initialized = 0;
+	static uint64_t duration_us = 0;
+	if (!initialized) {
+		const char *value = getenv("XRT_MACOS_PRESENT_MIN_DURATION_US");
+		if (value != NULL && value[0] != '\0') {
+			char *end = NULL;
+			unsigned long long parsed = strtoull(value, &end, 10);
+			if (end != value && *end == '\0') {
+				duration_us = (uint64_t)parsed;
+			}
+		}
+		if (duration_us != 0) {
+			fprintf(stderr,
+			        "macOS diagnostic: Metal afterMinimumDuration presentation enabled at %llu us; "
+			        "absolute present-at-time scheduling is bypassed\n",
+			        (unsigned long long)duration_us);
+		}
+		initialized = 1;
+	}
+	return duration_us;
 }
 
 /*
@@ -137,6 +165,13 @@ macos_reserve_present_slot_host_ns(uint_fast64_t requested_ns)
 
 - (void)monadoPresentDrawable:(id<MTLDrawable>)drawable atTime:(CFTimeInterval)presentationTime
 {
+	uint64_t minimum_duration_us = macos_present_min_duration_us();
+	if (minimum_duration_us != 0) {
+		CFTimeInterval minimum_duration_s = (CFTimeInterval)((double)minimum_duration_us / 1000000.0);
+		[(id<MTLCommandBuffer>)self presentDrawable:drawable afterMinimumDuration:minimum_duration_s];
+		return;
+	}
+
 	if (!macos_unique_present_slots_enabled() || !(presentationTime > 0.0)) {
 		[(id<MTLCommandBuffer>)self presentDrawable:drawable atTime:presentationTime];
 		return;
