@@ -153,3 +153,36 @@ multi-camera geometric consistency offline; right-controller performance,
 dynamic behavior, and absolute HMD-frame accuracy remain unverified. Both
 candidate files retain `runtime_usable: false`. The validated copy is for an
 explicit opt-in `monado-cli psvr2-constellation` live test only.
+
+### Opt-in live diagnostics
+
+The second continuous-IR run (`PSSENSE_FORCE_IR=1`) is retained at
+`/tmp/psvr2-charuco-force-ir-2.log` (SHA-256
+`061db76c3b08230457cbefa1a65c7a253efc628c544cfae1982d60cb7942977f`)
+with frames in `/tmp/psvr2-charuco-force-ir-capture-2`. It recorded 1,290
+candidates by camera `[371,373,292,254]`, 366 fused poses, 42 disagreements,
+and one jump rejection over 15 seconds. Position tracking appeared in 148/150
+CLI samples. All reported fused poses used only two cameras: the current
+device callback emits a group as soon as two candidates agree and marks it
+emitted, so later synchronized cameras cannot join that pose. Independently
+grouping the candidate log by timestamps within 1 ms found 181 groups with
+all four cameras; 146 had every pair within the current 80 mm / 35° fusion
+limits. Across all 181 groups, the median worst-pair difference was 4.96 mm
+and 1.71°. Thus the live data support four-camera *candidate* consistency,
+but the runtime has not yet demonstrated four-camera fused output.
+
+The normal-pulse follow-up, without `PSSENSE_FORCE_IR`, is
+`/tmp/psvr2-charuco-force-ir-3.log` (SHA-256
+`89e426bf653ed789e835a413b30936bcc403e9ae28c51909cd15a1cdb1121968`)
+with frames in `/tmp/psvr2-charuco-force-ir-capture-3`. It recorded 236
+candidates `[79,76,76,5]`, four fused poses in the first half-second, one
+disagreement, and 72 jump rejections. Normal illumination can therefore
+produce candidates and initial fusion at the improved position. The later
+cam0/1/2 candidate groups around seconds 3–4 agreed within a median worst-pair
+1.95 mm / 1.01° but were about 181 mm from the stale first fused pose, beyond
+the current 150 mm jump gate. The search stayed in phase 1; sampled later
+frames show the ring unlit despite remaining in view. This is a timing and
+reacquisition problem, not evidence to refit ChArUco intrinsics or per-camera
+extrinsics. The normal-pulse run's final CLI `PASS` means its minimum two-pose
+criterion was met; it does not mean tracking persisted through the 15 seconds.
+The calibration remains `runtime_usable: false`.
