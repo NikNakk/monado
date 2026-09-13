@@ -384,3 +384,50 @@ and try an opt-in bootstrap scan that covers the whole camera period or starts
 with a longer pulse, then checks whether a narrow-pulse lock persists. The
 static scan does not justify changing default runtime timing or declaring the
 calibration runtime usable.
+
+### Opt-in full-period wide-to-narrow bootstrap
+
+`PSSENSE_FULL_PERIOD_LED_BOOTSTRAP=1` widens the existing LED refinement
+search cap from 8 ms to one 16.683 ms mode-4 frame period. On macOS, it also
+disables the default 3.6 ms phase correction for this run, so the search starts
+near zero and the observed light window lies inside the search interval.
+The bootstrap pulse is 2.1 ms, matching the static sweep's strong candidate
+yield. The existing LED-sync edge searches then run at that width. Only when
+refinement reaches its maintain phase does the driver program a 450 us pulse;
+it retains the wide-pulse-derived center while shortening the physical pulse.
+If refinement returns to initial search after losing visibility, the driver
+reverts to the 2.1 ms bootstrap pulse. It logs each `stage=wide` / `stage=narrow`
+transition with the camera sequence, plus effective cap, starting pulse, and
+correction. An explicit `PSSENSE_TIMING_FUDGE_100US` or
+`PSSENSE_LED_PERIOD_ID` override takes precedence. With this mode unset, the
+8 ms cap, 450 us pulse, and normal macOS correction remain unchanged. Do not
+combine this mode with `PSSENSE_LED_PHASE_SWEEP`.
+
+Keep the headset and left controller static in a shared view for the first
+40 seconds, with the Sense ring broad enough that at least cams0 and 2/3 can
+solve it. Then move through a few positions for several seconds each. Leave
+the right controller asleep. This run uses live recovery so synchronized
+three-/four-camera fusion and stale-pose reacquisition can be measured if the
+LED scan first yields optical samples:
+
+```sh
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 PSSENSE_FORCE_IR=0 \
+PSSENSE_FUTURE_LED_SCHEDULE=1 PSSENSE_FULL_PERIOD_LED_BOOTSTRAP=1 \
+PSSENSE_CONSTELLATION_LIVE_RECOVERY=1 PSSENSE_TIMING_DIAG=1 \
+PSVR2_CONSTELLATION_CAPTURE_STRIDE=6 \
+build-sense/src/xrt/targets/cli/monado-cli psvr2-constellation \
+  /tmp/psvr2-mode4-charuco-validated-opt-in.json 75 \
+  /tmp/psvr2-full-period-bootstrap-capture \
+  2>&1 | tee /tmp/psvr2-full-period-bootstrap.log
+```
+
+Inspect the `Entering search phase` transitions, `LED_SCHEDULE`
+`blink_minus_projected`, camera-local candidate counts, fused-pose counts,
+CLI position flags and pose age over time, and saved LED pixels. A CLI `PASS`
+alone remains insufficient. If the search never yields a credible optical
+sample, the camera images can distinguish missed illumination from poor ring
+visibility or slow pose-solver throughput. If it enters maintain phase, compare
+candidate and fusion rates before and after the logged `stage=narrow` event;
+the remaining run tests whether 450 us illumination and multi-camera fusion
+persist. This opt-in timing experiment does not alter the calibration file or
+default tracker behavior.
