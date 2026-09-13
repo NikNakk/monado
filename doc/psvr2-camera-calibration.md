@@ -224,3 +224,19 @@ change the ChArUco K/D, aligned rig poses, calibration JSON, or default
 runtime. Offline geometry validation remains the independent calibration
 evidence; sustained normal-pulse tracking and absolute HMD-frame accuracy
 still require hardware verification.
+
+The first 30-second recovery run is `/tmp/psvr2-charuco-recovery.log`
+(SHA-256 `17fea608c19533bbbdc1ac8c413a11042db0149ff3de7f825f8e0025936ef212`)
+with capture `/tmp/psvr2-charuco-recovery-capture`. It yielded 3,605 mode-4
+frames, zero camera candidates, zero fused poses, zero optical-seen events,
+and zero reacquisitions. The controller output used normal 450 us pulses
+(`force_ir=0`), and search stayed in phase 1. The scheduled blink offset
+cycled through its approximately 3.825–11.813 ms search range twice and
+partway through a third time. Each camera wrote 300 sampled PGM frames with
+no capture failures. A simple diagnostic count of threshold-80 connected
+components with peak intensity at least 180 and width/height at most 50
+found no frame with five such components in any camera. Sampled frames show
+no illuminated Sense ring. This run never exercised collection or stale-pose
+reacquisition; it cannot judge whether the recovery patch works. A
+continuous-IR positive control at the *same physical placement* should
+separate poor shared-camera visibility from normal-pulse timing failure.
