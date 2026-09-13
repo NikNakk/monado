@@ -240,3 +240,52 @@ no illuminated Sense ring. This run never exercised collection or stale-pose
 reacquisition; it cannot judge whether the recovery patch works. A
 continuous-IR positive control at the *same physical placement* should
 separate poor shared-camera visibility from normal-pulse timing failure.
+
+### Static LED phase sweep
+
+The static scan is deliberately independent of pose fusion. With
+`PSSENSE_LED_PHASE_SWEEP=1` and an attached constellation tracker, the Sense
+driver holds LEDs off for 120 camera sequences (about two seconds), then
+commands all LEDs through 67 phases at 250 us increments from 0 through
+16.5 ms. Each phase lasts 30 camera sequences (about 0.5 seconds). It repeats
+the full scan at 450 us and 2.1 ms pulse widths, then returns to LEDs off.
+The normal optical phase search and 3.6 ms macOS phase correction are disabled
+only for this diagnostic. The sequence, nominal phase, pulse width, and off
+state are logged as `LED_PHASE_SWEEP`; `PSSENSE_TIMING_DIAG=1` also records
+programmed and estimated controller-clock timing. Camera CSVs preserve the
+hardware sequence and exposure timestamp so image brightness can be grouped
+by each commanded phase. This is a commanded-phase scan; the phase of actual
+light in each image must be inferred from those images rather than assumed.
+
+First confirm framing with a short continuous-IR control. Keep only the left
+controller awake, place it where the second continuous-IR live run tracked
+well, and keep the headset and controller rigidly stationary through both
+commands. The first command must show camera candidates; if it does not,
+reposition before starting the sweep.
+
+```sh
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 PSSENSE_FORCE_IR=1 \
+PSSENSE_TIMING_DIAG=1 PSVR2_CONSTELLATION_CAPTURE_STRIDE=6 \
+build-sense/src/xrt/targets/cli/monado-cli psvr2-constellation \
+  /tmp/psvr2-mode4-charuco-validated-opt-in.json 8 \
+  /tmp/psvr2-static-ir-control-capture \
+  2>&1 | tee /tmp/psvr2-static-ir-control.log
+```
+
+After confirming candidates without moving either device, run the full sweep:
+
+```sh
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 PSSENSE_FORCE_IR=0 \
+PSSENSE_FUTURE_LED_SCHEDULE=1 \
+PSSENSE_LED_PHASE_SWEEP=1 PSSENSE_TIMING_DIAG=1 \
+PSVR2_CONSTELLATION_CAPTURE_STRIDE=6 \
+build-sense/src/xrt/targets/cli/monado-cli psvr2-constellation \
+  /tmp/psvr2-mode4-charuco-validated-opt-in.json 75 \
+  /tmp/psvr2-static-phase-sweep-capture \
+  2>&1 | tee /tmp/psvr2-static-phase-sweep.log
+```
+
+The CLI may report `INCOMPLETE` during this diagnostic because many commanded
+phases deliberately leave the LEDs dark. Its outcome is the per-phase image
+brightness and logged controller schedule, not sustained pose tracking. The
+ChArUco calibration and default LED schedule are unchanged.

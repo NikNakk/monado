@@ -84,6 +84,12 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
+#define PSSENSE_LED_PHASE_SWEEP_OFF_FRAMES 120
+#define PSSENSE_LED_PHASE_SWEEP_FRAMES_PER_STEP 30
+#define PSSENSE_LED_PHASE_SWEEP_STEPS 67
+#define PSSENSE_LED_PHASE_SWEEP_STEP_NS (250 * U_TIME_1US_IN_NS)
+
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_phase_sweep, "PSSENSE_LED_PHASE_SWEEP", false)
 
 static struct xrt_binding_input_pair touch_inputs_pssense[] = {
     {XRT_INPUT_TOUCH_X_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
@@ -301,6 +307,9 @@ struct pssense_device
 		struct xrt_pose pose;
 
 		uint32_t received_frames;
+		bool led_phase_sweep_started;
+		uint32_t led_phase_sweep_start_sequence_id;
+		int32_t led_phase_sweep_last_step;
 		uint32_t last_exposure_sequence_id;
 		timepoint_ns last_exposure_local_timestamp_ns;
 		time_duration_ns average_exposure_interval_ns;
@@ -1290,7 +1299,8 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 	pssense->tracking.last_exposure_local_timestamp_ns = camera_exposure.timestamp_ns;
 
 	bool future_led_schedule = debug_get_bool_option_pssense_future_led_schedule();
-	bool run_optical_refinement = !future_led_schedule || pssense->tracking.use_constellation;
+	bool phase_sweep = debug_get_bool_option_pssense_led_phase_sweep() && pssense->tracking.use_constellation;
+	bool run_optical_refinement = (!future_led_schedule || pssense->tracking.use_constellation) && !phase_sweep;
 	if (pssense->tracking.average_exposure_interval_ns > 0 && run_optical_refinement) {
 		// Update the frame period to the one we're using internally and push the timing event
 		struct t_timing_event_camera_exposure_start led_sync_event = event->camera_exposure_start;
@@ -1317,6 +1327,38 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		if (requested_period_id > 0 && requested_period_id <= UINT8_MAX) {
 			period_id = (uint8_t)requested_period_id;
 		}
+		bool sweep_off = false;
+		time_duration_ns sweep_phase_ns = 0;
+		if (phase_sweep) {
+			if (!pssense->tracking.led_phase_sweep_started) {
+				pssense->tracking.led_phase_sweep_started = true;
+				pssense->tracking.led_phase_sweep_start_sequence_id = camera_exposure.sequence_id;
+				pssense->tracking.led_phase_sweep_last_step = INT32_MIN;
+			}
+			uint32_t elapsed = camera_exposure.sequence_id - pssense->tracking.led_phase_sweep_start_sequence_id;
+			int32_t step = -1;
+			if (elapsed >= PSSENSE_LED_PHASE_SWEEP_OFF_FRAMES) {
+				step = (int32_t)((elapsed - PSSENSE_LED_PHASE_SWEEP_OFF_FRAMES) /
+				                 PSSENSE_LED_PHASE_SWEEP_FRAMES_PER_STEP);
+			}
+			if (step < 0 || step >= 2 * PSSENSE_LED_PHASE_SWEEP_STEPS) {
+				sweep_off = true;
+				step = step < 0 ? -1 : 2 * PSSENSE_LED_PHASE_SWEEP_STEPS;
+			} else {
+				period_id = step < PSSENSE_LED_PHASE_SWEEP_STEPS ? 9 : 42;
+				sweep_phase_ns = (step % PSSENSE_LED_PHASE_SWEEP_STEPS) *
+				                 PSSENSE_LED_PHASE_SWEEP_STEP_NS;
+			}
+			if (step != pssense->tracking.led_phase_sweep_last_step) {
+				pssense->tracking.led_phase_sweep_last_step = step;
+				PSSENSE_INFO(pssense,
+				             "LED_PHASE_SWEEP side=%c seq=%u step=%d phase_us=%" PRIi64
+				             " pulse_us=%u off=%u",
+				             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', camera_exposure.sequence_id,
+				             step, sweep_phase_ns / U_TIME_1US_IN_NS, (unsigned)period_id * 50,
+				             sweep_off ? 1U : 0U);
+			}
+		}
 
 		// We don't need the = 0 in theory but the assert going away in release confuses the compiler. It will
 		// always be initialized.
@@ -1339,9 +1381,15 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		assert(ts_valid);
 		(void)ts_valid; // Silence unused variable in release
 
-		next_blink_time += (int64_t)pssense->tracking.timing_fudge_100us * 100 * U_TIME_1US_IN_NS;
-		// Apply the fudge offset, which will line up the blink center with exposure center
-		next_blink_time += (int64_t)pssense->tracking.latest_led_sync_sample.fudge_offset_ns;
+		if (phase_sweep) {
+			// Sweep the commanded pulse phase directly, without the optical refinement search
+			// or the normal macOS timing fudge. The actual optical phase is measured from images.
+			next_blink_time += sweep_phase_ns;
+		} else {
+			next_blink_time += (int64_t)pssense->tracking.timing_fudge_100us * 100 * U_TIME_1US_IN_NS;
+			// Apply the fudge offset, which will line up the blink center with exposure center
+			next_blink_time += (int64_t)pssense->tracking.latest_led_sync_sample.fudge_offset_ns;
+		}
 
 		// PSSENSE cycle position on the wire is the *center* of the exposure, but our LED sync assumes it's the
 		// start of the exposure, so we need to make it blink later to account
@@ -1392,6 +1440,11 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		    .led_blink = {0xFF, 0xFF, 0xFF, 0xFF},
 		    .period_id = period_id,
 		};
+		if (sweep_off) {
+			pssense->tracking.led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
+			memset(pssense->tracking.led_settings.led_blink, 0,
+			       sizeof(pssense->tracking.led_settings.led_blink));
+		}
 
 		if (pssense->tracking.increment_sequence_num) {
 			pssense->tracking.led_sequence_num += 1;
