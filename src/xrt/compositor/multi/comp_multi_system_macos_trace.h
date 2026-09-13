@@ -23,6 +23,7 @@
 #include "os/os_time.h"
 #include "util/u_debug.h"
 
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -33,6 +34,7 @@
 DEBUG_GET_ONCE_BOOL_OPTION(macos_client_frame_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_divisor, "XRT_MACOS_CLIENT_FRAME_DIVISOR", 0)
 DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_min_hold, "XRT_MACOS_CLIENT_FRAME_MIN_HOLD", 0)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_qos, "XRT_MACOS_COMPOSITOR_QOS", false)
 
 static FILE *g_macos_client_frame_trace = NULL;
 static uint64_t g_macos_client_frame_trace_rows = 0;
@@ -265,11 +267,40 @@ macos_trace_multi_compositor_latch_frame_locked(struct multi_compositor *mc,
 }
 
 /*
+ * The macOS system compositor's real 120 Hz render loop is the thread that calls
+ * os_thread_helper_name() in multi_main_loop(). Linux already tries to promote
+ * that exact thread to realtime priority. Keep the macOS experiment local to
+ * this translation unit and opt-in so default scheduling remains unchanged.
+ */
+static inline void
+macos_os_thread_helper_name_with_qos(struct os_thread_helper *oth, const char *name)
+{
+	os_thread_helper_name(oth, name);
+
+	if (!debug_get_bool_option_macos_compositor_qos()) {
+		return;
+	}
+
+	int ret = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+	if (ret == 0) {
+		fprintf(stderr,
+		        "INFO: macOS diagnostic: Multi Client Module compositor thread promoted to USER_INTERACTIVE QoS\n");
+	} else {
+		fprintf(stderr,
+		        "WARN: macOS diagnostic: failed to promote Multi Client Module compositor thread to USER_INTERACTIVE "
+		        "QoS: %s (%d)\n",
+		        strerror(ret), ret);
+	}
+}
+
+/*
  * comp_multi_system.c has exactly one delivery call and one latch call, both
  * inside transfer_layers_locked where system_frame_id and display_time_ns are
- * available. Keep the public multi-compositor interface unchanged and wrap only
- * this Apple build translation unit.
+ * available. It also names the render loop once at multi_main_loop() entry.
+ * Keep the public multi-compositor interface unchanged and wrap only this Apple
+ * build translation unit.
  */
+#define os_thread_helper_name(oth, name) macos_os_thread_helper_name_with_qos((oth), (name))
 #define multi_compositor_deliver_any_frames(mc, display_time_ns)                                                     \
 	macos_deliver_client_frame_cadenced((mc), (display_time_ns), system_frame_id)
 #define multi_compositor_latch_frame_locked(mc, when_ns, system_frame_id)                                            \
