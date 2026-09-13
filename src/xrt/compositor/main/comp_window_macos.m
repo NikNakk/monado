@@ -127,6 +127,7 @@ struct comp_window_macos
 	struct macos_present_job pending_present_job;
 	bool pending_present_job_valid;
 	bool present_worker_scheduled;
+	bool drawable_slot_acquire_scheduled;
 	bool present_worker_shutdown;
 	bool async_present;
 	bool present_worker_enabled;
@@ -489,6 +490,9 @@ macos_prefetch_drawable_for_rendering_frame(struct comp_window_macos *cwm)
 }
 
 static void
+macos_present_worker_run_one(struct comp_window_macos *cwm);
+
+static void
 macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 {
 	if (!cwm->drawable_slot_enabled || cwm->present_worker_queue == NULL || cwm->present_worker_group == NULL ||
@@ -497,11 +501,11 @@ macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 	}
 
 	pthread_mutex_lock(&cwm->present_worker_mutex);
-	if (cwm->present_worker_shutdown || cwm->present_worker_scheduled || cwm->prefetched_drawable != nil) {
+	if (cwm->present_worker_shutdown || cwm->drawable_slot_acquire_scheduled || cwm->prefetched_drawable != nil) {
 		pthread_mutex_unlock(&cwm->present_worker_mutex);
 		return;
 	}
-	cwm->present_worker_scheduled = true;
+	cwm->drawable_slot_acquire_scheduled = true;
 	dispatch_group_enter(cwm->present_worker_group);
 	pthread_mutex_unlock(&cwm->present_worker_mutex);
 
@@ -513,9 +517,11 @@ macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 			uint64_t end_ns = os_monotonic_get_ns();
 			id<CAMetalDrawable> retained_drawable = drawable != nil ? [drawable retain] : nil;
 			bool stored = false;
+			bool schedule_present = false;
+			bool retry_acquire = false;
 
 			pthread_mutex_lock(&cwm->present_worker_mutex);
-			cwm->present_worker_scheduled = false;
+			cwm->drawable_slot_acquire_scheduled = false;
 			if (!cwm->present_worker_shutdown && retained_drawable != nil && cwm->prefetched_drawable == nil) {
 				cwm->prefetched_drawable = retained_drawable;
 				cwm->prefetched_drawable_timeline_value = 0;
@@ -523,6 +529,13 @@ macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 				cwm->prefetched_drawable_end_ns = end_ns;
 				retained_drawable = nil;
 				stored = true;
+				if (cwm->pending_present_job_valid && !cwm->present_worker_scheduled) {
+					cwm->present_worker_scheduled = true;
+					dispatch_group_enter(cwm->present_worker_group);
+					schedule_present = true;
+				}
+			} else if (!cwm->present_worker_shutdown && drawable == nil && cwm->prefetched_drawable == nil) {
+				retry_acquire = true;
 			}
 			pthread_mutex_unlock(&cwm->present_worker_mutex);
 
@@ -532,6 +545,13 @@ macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 			macos_trace_drawable_prefetch(cwm, stored ? "slot_ready" : (drawable == nil ? "slot_acquire_nil" : "slot_discard"),
 			                               0, end_ns, begin_ns, end_ns);
 			dispatch_group_leave(cwm->present_worker_group);
+
+			if (schedule_present) {
+				dispatch_async(cwm->present_worker_queue, ^{ macos_present_worker_run_one(cwm); });
+			}
+			if (retry_acquire) {
+				macos_schedule_drawable_slot(cwm);
+			}
 		}
 	});
 }
@@ -884,8 +904,8 @@ comp_window_macos_free_images(struct comp_window_macos *cwm)
 
 static void
 comp_window_macos_create_images(struct comp_target *ct,
-	                            const struct comp_target_create_images_info *create_info,
-	                            struct vk_bundle_queue *present_queue)
+                                const struct comp_target_create_images_info *create_info,
+                                struct vk_bundle_queue *present_queue)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	struct vk_bundle *vk = get_vk(cwm);
@@ -1119,17 +1139,26 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			pthread_mutex_unlock(&cwm->present_worker_mutex);
 
 			if (retained_drawable == nil) {
-				uint64_t drop_ns = os_monotonic_get_ns();
-				macos_trace_drawable_prefetch(cwm, "slot_drop", timeline_semaphore_value, drop_ns, 0, 0);
+				/*
+				 * This should only be a race/failure fallback: slot mode schedules the
+				 * present worker only after a prefetched drawable is ready. If the
+				 * slot disappears, block this background worker rather than dropping
+				 * a rendered frame. The producer remains free to replace the one
+				 * pending job with a newer frame while nextDrawable blocks.
+				 */
+				next_drawable_begin_ns = os_monotonic_get_ns();
+				macos_trace_drawable_prefetch(cwm, "slot_fallback_begin", timeline_semaphore_value,
+				                               next_drawable_begin_ns, next_drawable_begin_ns, 0);
+				drawable = [cwm->metal_layer nextDrawable];
+				after_drawable_ns = os_monotonic_get_ns();
+				macos_trace_drawable_prefetch(cwm, "slot_fallback_end", timeline_semaphore_value,
+				                               after_drawable_ns, next_drawable_begin_ns, after_drawable_ns);
+			} else {
+				drawable = [retained_drawable autorelease];
+				macos_trace_drawable_prefetch(cwm, "slot_consumed", timeline_semaphore_value, os_monotonic_get_ns(),
+				                               next_drawable_begin_ns, after_drawable_ns);
 				macos_schedule_drawable_slot(cwm);
-				macos_retire_unpresented_job(cwm, job, "drawable_slot_drop", 0);
-				return VK_SUCCESS;
 			}
-
-			drawable = [retained_drawable autorelease];
-			macos_trace_drawable_prefetch(cwm, "slot_consumed", timeline_semaphore_value, os_monotonic_get_ns(),
-			                               next_drawable_begin_ns, after_drawable_ns);
-			macos_schedule_drawable_slot(cwm);
 		} else if (cwm->early_drawable_enabled && cwm->prefetched_drawable != nil &&
 		           cwm->prefetched_drawable_timeline_value == timeline_semaphore_value) {
 			next_drawable_begin_ns = cwm->prefetched_drawable_begin_ns;
@@ -1317,7 +1346,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			                           shared_event_wait);
 			pthread_mutex_lock(&cwm->present_worker_mutex);
 			cwm->worker_jobs_submitted++;
-			uint64_t worker_delay_ns = worker_start_ns - job->enqueue_ns;
+			uint64_t worker_delay_ns = worker_start_ns > job->enqueue_ns ? worker_start_ns - job->enqueue_ns : 0;
 			uint64_t drawable_wait_ns =
 			    after_drawable_ns > next_drawable_begin_ns ? after_drawable_ns - next_drawable_begin_ns : 0;
 			cwm->worker_queue_delay_total_ns += worker_delay_ns;
@@ -1447,10 +1476,13 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 	/*
 	 * Dropping presentation does not mean Vulkan has stopped writing the source.
 	 * Retire it behind the captured render-complete value before making it
-	 * acquirable again. These tasks are bounded by the three in-flight images.
+	 * acquirable again. In drawable-slot mode use a global queue: the serial
+	 * slot/present queue may itself be blocked in nextDrawable, and retirement
+	 * must not wait behind that acquisition before returning source images.
 	 */
 	dispatch_group_enter(cwm->present_command_group);
-	dispatch_queue_t retirement_queue = cwm->present_worker_enabled ? cwm->present_worker_queue : NULL;
+	dispatch_queue_t retirement_queue =
+	    cwm->present_worker_enabled && !cwm->drawable_slot_enabled ? cwm->present_worker_queue : NULL;
 	if (retirement_queue == NULL) {
 		retirement_queue = dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0);
 	}
@@ -1507,11 +1539,26 @@ static void
 macos_present_worker_run_one(struct comp_window_macos *cwm)
 {
 	struct macos_present_job job;
+	bool need_slot = false;
 	pthread_mutex_lock(&cwm->present_worker_mutex);
 	if (cwm->present_worker_shutdown || !cwm->pending_present_job_valid) {
 		cwm->present_worker_scheduled = false;
 		pthread_mutex_unlock(&cwm->present_worker_mutex);
 		dispatch_group_leave(cwm->present_worker_group);
+		return;
+	}
+	if (cwm->drawable_slot_enabled && cwm->prefetched_drawable == nil) {
+		/*
+		 * Leave the newest job pending until the asynchronous nextDrawable
+		 * finishes. New frames may continue replacing it in the meantime.
+		 */
+		cwm->present_worker_scheduled = false;
+		need_slot = true;
+		pthread_mutex_unlock(&cwm->present_worker_mutex);
+		dispatch_group_leave(cwm->present_worker_group);
+		if (need_slot) {
+			macos_schedule_drawable_slot(cwm);
+		}
 		return;
 	}
 	job = cwm->pending_present_job;
@@ -1533,11 +1580,11 @@ macos_present_worker_run_one(struct comp_window_macos *cwm)
 
 static VkResult
 comp_window_macos_present(struct comp_target *ct,
-	                      struct vk_bundle_queue *present_queue,
-	                      uint32_t index,
-	                      uint64_t timeline_semaphore_value,
-	                      int64_t desired_present_time_ns,
-	                      int64_t present_slop_ns)
+                          struct vk_bundle_queue *present_queue,
+                          uint32_t index,
+                          uint64_t timeline_semaphore_value,
+                          int64_t desired_present_time_ns,
+                          int64_t present_slop_ns)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	struct macos_present_job job = {
@@ -1564,6 +1611,7 @@ comp_window_macos_present(struct comp_target *ct,
 
 	struct macos_present_job superseded_job;
 	bool superseded = false;
+	bool schedule_present = false;
 	pthread_mutex_lock(&cwm->present_worker_mutex);
 	if (cwm->present_worker_shutdown) {
 		pthread_mutex_unlock(&cwm->present_worker_mutex);
@@ -1579,13 +1627,20 @@ comp_window_macos_present(struct comp_target *ct,
 	cwm->pending_present_job = job;
 	cwm->pending_present_job_valid = true;
 	cwm->worker_jobs_enqueued++;
-	if (!cwm->present_worker_scheduled) {
+	if (!cwm->present_worker_scheduled &&
+	    (!cwm->drawable_slot_enabled || cwm->prefetched_drawable != nil)) {
 		cwm->present_worker_scheduled = true;
 		dispatch_group_enter(cwm->present_worker_group);
-		dispatch_async(cwm->present_worker_queue, ^{ macos_present_worker_run_one(cwm); });
+		schedule_present = true;
 	}
 	pthread_mutex_unlock(&cwm->present_worker_mutex);
 
+	if (schedule_present) {
+		dispatch_async(cwm->present_worker_queue, ^{ macos_present_worker_run_one(cwm); });
+	}
+	if (cwm->drawable_slot_enabled) {
+		macos_schedule_drawable_slot(cwm);
+	}
 	if (superseded) {
 		macos_retire_unpresented_job(cwm, &superseded_job, "superseded", 1);
 	}
@@ -1725,8 +1780,8 @@ comp_window_macos_get_current_refresh_rate(struct comp_target *ct, float *out_ra
 
 static VkResult
 comp_window_macos_queue_supports_present(struct comp_target *ct,
-	                                     struct vk_bundle_queue *queue,
-	                                     VkBool32 *out_supported)
+                                         struct vk_bundle_queue *queue,
+                                         VkBool32 *out_supported)
 {
 	(void)ct;
 	(void)queue;
@@ -1822,25 +1877,34 @@ comp_window_macos_create(struct comp_compositor *c)
 		return NULL;
 	}
 	cwm->async_present = debug_get_bool_option_macos_async_present();
-	cwm->present_worker_enabled = cwm->async_present && debug_get_bool_option_macos_present_worker();
+	bool want_present_worker = debug_get_bool_option_macos_present_worker();
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
-	cwm->drawable_slot_enabled = cwm->async_present && !cwm->present_worker_enabled && want_drawable_slot;
+	cwm->drawable_slot_enabled = cwm->async_present && want_drawable_slot;
+	/*
+	 * Slot mode is itself a newest-frame presentation worker. The producer may
+	 * keep rendering and replace the single pending job while asynchronous
+	 * nextDrawable acquisition blocks; a missing slot is no longer a reason to
+	 * drop the just-rendered frame on the caller thread.
+	 */
+	cwm->present_worker_enabled = cwm->async_present && (want_present_worker || cwm->drawable_slot_enabled);
 	cwm->early_drawable_enabled = cwm->async_present && !cwm->present_worker_enabled && !cwm->drawable_slot_enabled &&
 	                               debug_get_bool_option_macos_early_drawable();
 	cwm->present_command_group = dispatch_group_create();
-	if (cwm->present_worker_enabled || cwm->drawable_slot_enabled) {
+	if (cwm->present_worker_enabled) {
 		dispatch_queue_attr_t worker_attr =
 		    dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0);
-		cwm->present_worker_queue = dispatch_queue_create(cwm->present_worker_enabled ? "org.monado.macos-present-worker"
-		                                                                            : "org.monado.macos-drawable-slot",
+		cwm->present_worker_queue = dispatch_queue_create(cwm->drawable_slot_enabled
+		                                                      ? "org.monado.macos-drawable-slot-newest"
+		                                                      : "org.monado.macos-present-worker",
 		                                                  worker_attr);
 		cwm->present_worker_group = dispatch_group_create();
 	}
 	if (want_drawable_slot) {
 		if (cwm->drawable_slot_enabled) {
-			COMP_INFO(c, "macOS diagnostic: asynchronous one-drawable slot enabled; frames drop rather than block when empty");
+			COMP_INFO(c,
+			          "macOS diagnostic: asynchronous drawable slot with newest-frame worker enabled; nextDrawable stalls supersede pending frames instead of dropping them");
 		} else {
-			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT requires async presentation with XRT_MACOS_PRESENT_WORKER=0; slot is disabled");
+			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT requires asynchronous presentation; slot is disabled");
 		}
 	}
 	if (debug_get_bool_option_macos_early_drawable()) {
@@ -1849,7 +1913,7 @@ comp_window_macos_create(struct comp_compositor *c)
 		} else if (cwm->early_drawable_enabled) {
 			COMP_INFO(c, "macOS diagnostic: early CAMetalDrawable prefetch enabled");
 		} else {
-			COMP_WARN(c, "XRT_MACOS_EARLY_DRAWABLE requires async presentation with XRT_MACOS_PRESENT_WORKER=0; prefetch is disabled");
+			COMP_WARN(c, "XRT_MACOS_EARLY_DRAWABLE requires async presentation without the present worker; prefetch is disabled");
 		}
 	}
 	macos_timing_trace_open(cwm);
