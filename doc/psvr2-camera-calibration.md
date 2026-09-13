@@ -186,3 +186,41 @@ reacquisition problem, not evidence to refit ChArUco intrinsics or per-camera
 extrinsics. The normal-pulse run's final CLI `PASS` means its minimum two-pose
 criterion was met; it does not mean tracking persisted through the 15 seconds.
 The calibration remains `runtime_usable: false`.
+
+### Opt-in live recovery experiment
+
+`PSSENSE_CONSTELLATION_LIVE_RECOVERY=1` enables three narrow changes to the
+Sense constellation callback for a live A/B test. Once two synchronized camera
+candidates agree, the callback waits about 4 ms for candidates from the same
+exposure before fusing; it can now fuse three or four cameras. An agreeing
+multi-camera optical sample informs LED pulse timing even if the fresh-pose
+jump gate rejects it. When the last accepted optical pose is more than 250 ms
+old, the next agreeing multi-camera group can reacquire at a new position
+without the 150 mm / 60° fresh-pose jump limits. Samples with non-increasing
+timestamps remain rejected. The existing matched-blob, reprojection, camera
+agreement, and fresh-pose jump limits remain in force. With the variable unset,
+the prior callback behavior is unchanged.
+
+The CLI CSV appends `reacquisition_count`, `optical_seen_count`, and cumulative
+three-/four-camera fusion counts. Its original `PASS` criterion is still only a
+minimum smoke test; inspect position flags, pose age, timing phase transitions,
+and fusion counts throughout the run. For the next normal-pulse test, keep the
+headset fixed, hold the controller in the common camera view for about five
+seconds, then move it between a few positions and hold each for several
+seconds. Do not set `PSSENSE_FORCE_IR` for this run:
+
+```sh
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=4 PSSENSE_FORCE_IR=0 \
+PSSENSE_TIMING_DIAG=1 PSSENSE_CONSTELLATION_LIVE_RECOVERY=1 \
+PSVR2_CONSTELLATION_CAPTURE_STRIDE=6 \
+build-sense/src/xrt/targets/cli/monado-cli psvr2-constellation \
+  /tmp/psvr2-mode4-charuco-validated-opt-in.json 30 \
+  /tmp/psvr2-charuco-recovery-capture \
+  2>&1 | tee /tmp/psvr2-charuco-recovery.log
+```
+
+This experiment changes only the opt-in live tracking path. It does not
+change the ChArUco K/D, aligned rig poses, calibration JSON, or default
+runtime. Offline geometry validation remains the independent calibration
+evidence; sustained normal-pulse tracking and absolute HMD-frame accuracy
+still require hardware verification.

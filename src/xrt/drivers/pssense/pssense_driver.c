@@ -67,6 +67,7 @@
 #define PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD (35.0f * (float)M_PI / 180.0f)
 #define PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M 0.15f
 #define PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD (60.0f * (float)M_PI / 180.0f)
+#define PSSENSE_CONSTELLATION_COLLECT_NS (4 * U_TIME_1MS_IN_NS)
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 #ifdef XRT_OS_OSX
@@ -78,6 +79,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
                            "PSSENSE_FUTURE_LED_SCHEDULE",
                            PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_constellation_live_recovery, "PSSENSE_CONSTELLATION_LIVE_RECOVERY", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
 
@@ -274,6 +276,7 @@ struct pssense_device
 		{
 			int64_t timestamp_ns;
 			bool emitted;
+			bool collecting;
 			bool disagreement_recorded;
 			bool present[PSSENSE_CONSTELLATION_CAMERA_COUNT];
 			struct t_constellation_tracker_sample samples[PSSENSE_CONSTELLATION_CAMERA_COUNT];
@@ -282,8 +285,12 @@ struct pssense_device
 		uint64_t candidate_count;
 		uint64_t camera_candidate_count[PSSENSE_CONSTELLATION_CAMERA_COUNT];
 		uint64_t fused_pose_count;
+		uint64_t fused_three_camera_count;
+		uint64_t fused_four_camera_count;
 		uint64_t disagreement_count;
 		uint64_t jump_rejection_count;
+		uint64_t reacquisition_count;
+		uint64_t optical_seen_count;
 		int64_t last_fused_timestamp_ns;
 		uint32_t last_fused_camera_count;
 		struct xrt_pose last_fused_pose;
@@ -1450,11 +1457,14 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	}
 	group->samples[sample->camera_index] = *sample;
 	group->present[sample->camera_index] = true;
-	if (group->emitted) {
+	if (group->emitted || group->collecting) {
 		os_thread_helper_unlock(&pssense->controller_thread);
 		return false;
 	}
 
+	bool collected = false;
+	int64_t group_timestamp_ns = group->timestamp_ns;
+score_group:;
 	uint32_t best_anchor = 0;
 	uint32_t best_camera_count = 0;
 	for (uint32_t anchor = 0; anchor < PSSENSE_CONSTELLATION_CAMERA_COUNT; anchor++) {
@@ -1485,11 +1495,11 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 			best_anchor = anchor;
 		}
 	}
+	uint32_t present_count = 0;
+	for (uint32_t camera = 0; camera < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera++) {
+		present_count += group->present[camera] ? 1 : 0;
+	}
 	if (best_camera_count < 2) {
-		uint32_t present_count = 0;
-		for (uint32_t camera = 0; camera < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera++) {
-			present_count += group->present[camera] ? 1 : 0;
-		}
 		if (present_count >= 2 && !group->disagreement_recorded) {
 			group->disagreement_recorded = true;
 			pssense->tracking.disagreement_count++;
@@ -1531,6 +1541,22 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 		}
 		os_thread_helper_unlock(&pssense->controller_thread);
 		return false;
+	}
+	// Camera solvers run on separate threads. Give other cameras from the same exposure a
+	// short window to join before finalizing this group. Only one callback waits.
+	if (debug_get_bool_option_pssense_constellation_live_recovery() && !collected &&
+	    present_count < PSSENSE_CONSTELLATION_CAMERA_COUNT) {
+		group->collecting = true;
+		os_thread_helper_unlock(&pssense->controller_thread);
+		os_nanosleep(PSSENSE_CONSTELLATION_COLLECT_NS);
+		os_thread_helper_lock(&pssense->controller_thread);
+		if (group->timestamp_ns != group_timestamp_ns || group->emitted) {
+			os_thread_helper_unlock(&pssense->controller_thread);
+			return false;
+		}
+		group->collecting = false;
+		collected = true;
+		goto score_group;
 	}
 
 	fused = group->samples[best_anchor];
@@ -1584,6 +1610,7 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	fused.pose.orientation = (struct xrt_quat){quaternion[0] / quaternion_norm, quaternion[1] / quaternion_norm,
 	                                           quaternion[2] / quaternion_norm, quaternion[3] / quaternion_norm};
 
+	bool stale_reacquisition = false;
 	if (pssense->tracking.have_last_fused_pose) {
 		struct xrt_pose *last = &pssense->tracking.last_fused_pose;
 		float dx = last->position.x - fused.pose.position.x;
@@ -1595,13 +1622,35 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 		                  last->orientation.z * fused.pose.orientation.z +
 		                  last->orientation.w * fused.pose.orientation.w);
 		float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
-		if (sample->timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
-		    position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
-		    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD) {
+		stale_reacquisition = debug_get_bool_option_pssense_constellation_live_recovery() &&
+		                      fused.timestamp_ns > pssense->tracking.last_fused_timestamp_ns &&
+		                      fused.timestamp_ns - pssense->tracking.last_fused_timestamp_ns >
+		                          PSSENSE_CONSTELLATION_STALE_NS;
+		if (fused.timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
+		    (!stale_reacquisition &&
+		     (position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
+		      orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD))) {
 			group->emitted = true;
 			pssense->tracking.jump_rejection_count++;
+			bool optically_seen = debug_get_bool_option_pssense_constellation_live_recovery() &&
+			                      fused.timestamp_ns > pssense->tracking.last_fused_timestamp_ns;
+			pssense->tracking.optical_seen_count += optically_seen ? 1 : 0;
 			os_thread_helper_unlock(&pssense->controller_thread);
+			// A synchronized optical match still informs pulse timing when the pose jump gate rejects it.
+			if (optically_seen) {
+				t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, &fused);
+			}
 			return false;
+		}
+		if (stale_reacquisition) {
+			pssense->tracking.reacquisition_count++;
+			PSSENSE_INFO(pssense,
+			             "CONSTELLATION_REACQUIRED side=%c ts=%" PRIi64
+			             " gap_ms=%.1f cameras=%u pos_delta_mm=%.1f orientation_delta_deg=%.1f",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', fused.timestamp_ns,
+			             (double)(fused.timestamp_ns - pssense->tracking.last_fused_timestamp_ns) / 1e6,
+			             fused_camera_count, position_delta * 1000.0f,
+			             orientation_delta * 180.0f / (float)M_PI);
 		}
 	}
 	group->emitted = true;
@@ -1610,6 +1659,9 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	pssense->tracking.last_fused_timestamp_ns = fused.timestamp_ns;
 	pssense->tracking.last_fused_camera_count = fused_camera_count;
 	pssense->tracking.fused_pose_count++;
+	pssense->tracking.fused_three_camera_count += fused_camera_count == 3 ? 1 : 0;
+	pssense->tracking.fused_four_camera_count += fused_camera_count == 4 ? 1 : 0;
+	pssense->tracking.optical_seen_count++;
 	os_thread_helper_unlock(&pssense->controller_thread);
 
 	t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, &fused);
@@ -2231,8 +2283,12 @@ pssense_get_constellation_diagnostics(struct xrt_device *xdev,
 	    .attached = pssense->tracking.constellation_tracker != NULL,
 	    .candidate_count = pssense->tracking.candidate_count,
 	    .fused_pose_count = pssense->tracking.fused_pose_count,
+	    .fused_three_camera_count = pssense->tracking.fused_three_camera_count,
+	    .fused_four_camera_count = pssense->tracking.fused_four_camera_count,
 	    .disagreement_count = pssense->tracking.disagreement_count,
 	    .jump_rejection_count = pssense->tracking.jump_rejection_count,
+	    .reacquisition_count = pssense->tracking.reacquisition_count,
+	    .optical_seen_count = pssense->tracking.optical_seen_count,
 	    .last_fused_timestamp_ns = pssense->tracking.last_fused_timestamp_ns,
 	    .last_fused_camera_count = pssense->tracking.last_fused_camera_count,
 	};
