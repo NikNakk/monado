@@ -31,6 +31,7 @@
 #include <unistd.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_client_frame_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_divisor, "XRT_MACOS_CLIENT_FRAME_DIVISOR", 0)
 
 static FILE *g_macos_client_frame_trace = NULL;
 static uint64_t g_macos_client_frame_trace_rows = 0;
@@ -39,6 +40,19 @@ static bool g_macos_client_frame_trace_atexit_registered = false;
 static bool g_macos_client_frame_trace_have_last[MULTI_MAX_CLIENTS];
 static int64_t g_macos_client_frame_trace_last_frame[MULTI_MAX_CLIENTS];
 static uint32_t g_macos_client_frame_trace_source_use_ordinal[MULTI_MAX_CLIENTS];
+
+static int
+macos_client_frame_divisor(void)
+{
+	int divisor = debug_get_num_option_macos_client_frame_divisor();
+	if (divisor <= 1) {
+		return 0;
+	}
+	if (divisor > 16) {
+		divisor = 16;
+	}
+	return divisor;
+}
 
 static void
 macos_client_frame_trace_close(void)
@@ -94,6 +108,38 @@ macos_client_frame_trace_get(void)
 	}
 
 	return g_macos_client_frame_trace;
+}
+
+/*
+ * Optional source-cadence stabiliser. This deliberately does not alter the
+ * application's xrWaitFrame pacing or the system compositor's physical cadence.
+ * It only controls when a GPU-complete scheduled client layer set is promoted to
+ * delivered. With divisor=2 on a 120 Hz display, delivered source imagery may
+ * change only on every second system frame. A source frame that misses its phase
+ * boundary is therefore held for another complete pair instead of producing a
+ * visually uneven 1/3-refresh cadence. The first source frame is delivered
+ * immediately so startup never waits for a phase boundary.
+ */
+static inline void
+macos_deliver_client_frame_cadenced(struct multi_compositor *mc,
+                                    int64_t display_time_ns,
+                                    int64_t system_frame_id)
+{
+	int divisor = macos_client_frame_divisor();
+	if (divisor == 0 || mc == NULL || !mc->delivered.active) {
+		multi_compositor_deliver_any_frames(mc, display_time_ns);
+		return;
+	}
+
+	/*
+	 * System frame IDs are the 120 Hz compositor clock. Use a fixed global
+	 * phase so the cadence cannot drift with the client's limiter. If no new
+	 * scheduled frame is ready on this boundary the previous delivered frame
+	 * remains valid and the next opportunity is one whole source period later.
+	 */
+	if ((system_frame_id % divisor) == 0) {
+		multi_compositor_deliver_any_frames(mc, display_time_ns);
+	}
 }
 
 static inline void
@@ -154,9 +200,12 @@ macos_trace_multi_compositor_latch_frame_locked(struct multi_compositor *mc,
 }
 
 /*
- * comp_multi_system.c has exactly one latch call, inside transfer_layers_locked,
- * where display_time_ns is the target system refresh timestamp. Capture it without
- * changing the public multi-compositor interface.
+ * comp_multi_system.c has exactly one delivery call and one latch call, both
+ * inside transfer_layers_locked where system_frame_id and display_time_ns are
+ * available. Keep the public multi-compositor interface unchanged and wrap only
+ * this Apple build translation unit.
  */
+#define multi_compositor_deliver_any_frames(mc, display_time_ns)                                                     \
+	macos_deliver_client_frame_cadenced((mc), (display_time_ns), system_frame_id)
 #define multi_compositor_latch_frame_locked(mc, when_ns, system_frame_id)                                            \
 	macos_trace_multi_compositor_latch_frame_locked((mc), (when_ns), (system_frame_id), display_time_ns)
