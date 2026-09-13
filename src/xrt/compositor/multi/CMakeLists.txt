@@ -8,10 +8,23 @@
 
 add_library(
 	comp_multi STATIC comp_multi_compositor.c comp_multi_interface.h comp_multi_private.h
-			  comp_multi_system.c
+			  comp_multi_system.c comp_multi_system_macos_trace.h
 	)
 target_link_libraries(
 	comp_multi
 	PUBLIC xrt-interfaces comp_includes
 	PRIVATE aux_util aux_os comp_util
 	)
+
+if(APPLE)
+	# Diagnostic-only mapping from each 120 Hz system-compositor frame to the
+	# delivered client frame that supplied it. The wrapper preserves the normal
+	# latch call and only emits CSV rows when PSVR2_TIMING_TRACE=1.
+	set_property(
+		SOURCE comp_multi_system.c
+		APPEND
+		PROPERTY COMPILE_OPTIONS
+			"-include"
+			"${CMAKE_CURRENT_SOURCE_DIR}/comp_multi_system_macos_trace.h"
+		)
+endif()
