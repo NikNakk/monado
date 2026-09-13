@@ -29,6 +29,102 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_framebuffer_only, "XRT_MACOS_DISABLE_FR
 
 static FILE *macos_stale_substitute_trace = NULL;
 
+static void
+macos_log_refresh_mode_candidates(struct comp_target *ct)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	if (cwm->screen == nil) {
+		return;
+	}
+
+	CGDirectDisplayID display_id = get_display_id(cwm->screen);
+	if (display_id == kCGNullDirectDisplay) {
+		COMP_WARN(ct->c, "Could not enumerate PS VR2 refresh modes: display ID is unavailable");
+		return;
+	}
+
+	CGDisplayModeRef current_mode = CGDisplayCopyDisplayMode(display_id);
+	if (current_mode == NULL) {
+		COMP_WARN(ct->c, "Could not enumerate PS VR2 refresh modes: current display mode is unavailable");
+		return;
+	}
+
+	size_t current_width = CGDisplayModeGetWidth(current_mode);
+	size_t current_height = CGDisplayModeGetHeight(current_mode);
+	size_t current_pixel_width = CGDisplayModeGetPixelWidth(current_mode);
+	size_t current_pixel_height = CGDisplayModeGetPixelHeight(current_mode);
+	double current_refresh_hz = CGDisplayModeGetRefreshRate(current_mode);
+	COMP_INFO(ct->c,
+	          "PS VR2 current CoreGraphics mode: logical %zux%zu, pixels %zux%zu, refresh %.3f Hz",
+	          current_width, current_height, current_pixel_width, current_pixel_height, current_refresh_hz);
+
+	CFArrayRef modes = CGDisplayCopyAllDisplayModes(display_id, NULL);
+	if (modes == NULL) {
+		CGDisplayModeRelease(current_mode);
+		COMP_WARN(ct->c, "Could not enumerate CoreGraphics display modes for PS VR2");
+		return;
+	}
+
+	float refresh_rates[XRT_MAX_SUPPORTED_REFRESH_RATES] = {0};
+	uint32_t refresh_rate_count = 0;
+	CFIndex mode_count = CFArrayGetCount(modes);
+	for (CFIndex i = 0; i < mode_count; i++) {
+		CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
+		if (mode == NULL || CGDisplayModeGetWidth(mode) != current_width ||
+		    CGDisplayModeGetHeight(mode) != current_height || CGDisplayModeGetPixelWidth(mode) != current_pixel_width ||
+		    CGDisplayModeGetPixelHeight(mode) != current_pixel_height) {
+			continue;
+		}
+
+		double refresh_hz = CGDisplayModeGetRefreshRate(mode);
+		if (!(refresh_hz > 1.0)) {
+			continue;
+		}
+
+		COMP_INFO(ct->c, "PS VR2 matching CoreGraphics display mode: %.3f Hz", refresh_hz);
+		bool duplicate = false;
+		for (uint32_t j = 0; j < refresh_rate_count; j++) {
+			if (fabs((double)refresh_rates[j] - refresh_hz) < 0.05) {
+				duplicate = true;
+				break;
+			}
+		}
+		if (!duplicate && refresh_rate_count < XRT_MAX_SUPPORTED_REFRESH_RATES) {
+			refresh_rates[refresh_rate_count++] = (float)refresh_hz;
+		}
+	}
+
+	for (uint32_t i = 1; i < refresh_rate_count; i++) {
+		float value = refresh_rates[i];
+		uint32_t j = i;
+		while (j > 0 && refresh_rates[j - 1] > value) {
+			refresh_rates[j] = refresh_rates[j - 1];
+			j--;
+		}
+		refresh_rates[j] = value;
+	}
+
+	if (refresh_rate_count == 0) {
+		COMP_WARN(ct->c,
+		          "PS VR2 CoreGraphics mode enumeration found no positive refresh rates matching the active geometry");
+	} else {
+		char summary[256] = {0};
+		size_t used = 0;
+		for (uint32_t i = 0; i < refresh_rate_count && used < sizeof(summary); i++) {
+			int written = snprintf(summary + used, sizeof(summary) - used, "%s%.3f", i == 0 ? "" : ", ",
+			                       (double)refresh_rates[i]);
+			if (written < 0 || (size_t)written >= sizeof(summary) - used) {
+				break;
+			}
+			used += (size_t)written;
+		}
+		COMP_INFO(ct->c, "PS VR2 candidate physical refresh rates for active mode: [%s] Hz", summary);
+	}
+
+	CFRelease(modes);
+	CGDisplayModeRelease(current_mode);
+}
+
 static bool
 comp_window_macos_init_display_sync_diagnostic(struct comp_target *ct)
 {
@@ -36,6 +132,8 @@ comp_window_macos_init_display_sync_diagnostic(struct comp_target *ct)
 	if (!ret) {
 		return false;
 	}
+
+	macos_log_refresh_mode_candidates(ct);
 
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	CAMetalLayer *layer = cwm->metal_layer;
