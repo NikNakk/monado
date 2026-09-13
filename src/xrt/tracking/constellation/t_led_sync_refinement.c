@@ -664,6 +664,17 @@ t_led_sync_get_sample(struct t_led_sync_refinement *refinement, struct t_led_syn
 	return true;
 }
 
+enum t_led_sync_phase
+t_led_sync_get_phase(struct t_led_sync_refinement *refinement)
+{
+	assert(refinement->initialized);
+
+	os_mutex_lock(&refinement->lock);
+	enum t_led_sync_phase phase = refinement->phase;
+	os_mutex_unlock(&refinement->lock);
+	return phase;
+}
+
 void
 t_led_sync_mark_latest_sample_applied(struct t_led_sync_refinement *refinement, timepoint_ns apply_time_ns)
 {
