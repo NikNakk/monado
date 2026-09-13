@@ -327,3 +327,60 @@ normal-pulse phase assumptions are correct. Because multiple LEDs are visible
 in all four cameras, the current placement is sufficient for an image
 brightness phase sweep independent of candidate/fusion counts. It is not a
 good pose-solver control until the ring presents a broader arc.
+
+The subsequent 75-second sweep used a closer headset/controller placement, so
+it is not a controlled same-pose comparison with the earlier static controls.
+Its log is `/tmp/psvr2-static-phase-sweep.log` (SHA-256
+`d5c3c7bd6d08c66051429746c9d46725f8abaa3adcb9e459f314261c62fcbb7e`),
+its captured frames are in `/tmp/psvr2-static-phase-sweep-capture`, and the
+reproducible image analysis is `/tmp/psvr2-static-phase-sweep-analysis.json`.
+Each camera wrote 749–750 stride-six images with zero failures. The sweep
+logged every intended stage: initial off, 67 phases with 450 us pulses, 67
+phases with 2.1 ms pulses, and final off. Analysis uses only the active
+508×508 pixels, compares each image with the median initial-off image, ignores
+the first six camera sequences after each stage transition, and counts pixels
+at least 80 grey levels above that baseline within the LED cluster ROI. Its
+command and selected native-pixel ROIs are:
+
+```sh
+.venv/bin/python scripts/psvr2_tracking_led_phase_analyze.py \
+  /tmp/psvr2-static-phase-sweep-capture /tmp/psvr2-static-phase-sweep.log \
+  --roi 265 130 345 175 --roi 135 130 215 175 \
+  --roi 360 225 425 290 --roi 55 220 130 265 \
+  --output /tmp/psvr2-static-phase-sweep-analysis.json
+```
+
+All four cameras show the same sustained short-pulse window at commanded
+phases 2.25, 2.50, and 2.75 ms. Across those three stages, 11 of 12 sampled
+images per camera have at least ten bright ROI pixels; the peak median count
+is 63–79 pixels depending on camera. In the 3–11 ms part of the 450 us scan,
+only one of 132 sampled images per camera reaches that threshold. The wide
+2.1 ms pulse lights all four cameras over phases 15.75–16.5 ms and 0–2.0 ms,
+wrapping the approximately 16.683 ms camera period: 49 of 52 images per
+camera have at least ten bright pixels in that interval. The initial off
+stage is dark in all sampled ROIs. There was a separate two-frame flash at
+13.0 ms, and one at 13.25 ms, in every camera during the wide-pulse pass;
+adjacent stages were dark. Preserve these frame-level outliers for clock/
+scheduling diagnosis, but do not interpret them as a stable second window.
+
+The driver programs the controller's pulse **center** at commanded phase plus
+half the pulse width. The short-pulse sustained phases therefore correspond
+to programmed center offsets 2.475–2.975 ms after the projected exposure.
+The failed normal-pulse recovery run searched programmed center offsets
+3.825–11.8125 ms, missing this observed window at the sweep placement. This
+is direct evidence that the present bootstrap phase range can miss the light;
+it does not prove a universal 2.7 ms setting because placement, device clock
+mapping, or scheduling may differ across runs. The wider pulse's broader
+window is consistent after accounting for its 1.05 ms center offset and
+period wrap. The sweep recorded 958 pose candidates by camera
+`[328, 0, 328, 302]` and 327 two-camera fused poses, almost entirely during
+the wide-pulse pass. Cam1's raw LED pixels are clearly visible despite zero
+accepted cam1 pose candidates, so pose-solver yield and slow-thread drops must
+not be used as the brightness measure. The CLI `PASS` is only its minimum
+pose-count smoke test, not evidence of sustained narrow-pulse tracking.
+
+The next timing experiment should keep the native ChArUco calibration fixed
+and try an opt-in bootstrap scan that covers the whole camera period or starts
+with a longer pulse, then checks whether a narrow-pulse lock persists. The
+static scan does not justify changing default runtime timing or declaring the
+calibration runtime usable.
