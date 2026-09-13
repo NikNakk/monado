@@ -71,8 +71,12 @@ struct pssense_constellation_diagnostics
 	uint64_t candidate_count;
 	uint64_t camera_candidate_count[4];
 	uint64_t fused_pose_count;
+	uint64_t fused_three_camera_count;
+	uint64_t fused_four_camera_count;
 	uint64_t disagreement_count;
 	uint64_t jump_rejection_count;
+	uint64_t reacquisition_count;
+	uint64_t optical_seen_count;
 	int64_t last_fused_timestamp_ns;
 	uint32_t last_fused_camera_count;
 };

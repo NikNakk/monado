@@ -310,12 +310,13 @@ print_relation(const char *hand, struct xrt_device *controller, int64_t now_ns, 
 	*out_saw_position |= positioned;
 	int64_t pose_age_ns = diagnostics.last_fused_timestamp_ns > 0 ? now_ns - diagnostics.last_fused_timestamp_ns : -1;
 	printf("%" PRIi64 ",%s,0x%x,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%" PRIi64 ",%" PRIu64
-	       ",%u,%" PRIu64 ",%" PRIu64 ",%" PRIu64 "\n",
+	       ",%u,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 "\n",
 	       now_ns, hand, (unsigned)relation.relation_flags, relation.pose.position.x, relation.pose.position.y,
 	       relation.pose.position.z, relation.pose.orientation.x, relation.pose.orientation.y,
 	       relation.pose.orientation.z, relation.pose.orientation.w, pose_age_ns, diagnostics.fused_pose_count,
 	       diagnostics.last_fused_camera_count, diagnostics.candidate_count, diagnostics.disagreement_count,
-	       diagnostics.jump_rejection_count);
+	       diagnostics.jump_rejection_count, diagnostics.reacquisition_count, diagnostics.optical_seen_count,
+	       diagnostics.fused_three_camera_count, diagnostics.fused_four_camera_count);
 }
 
 int
@@ -438,7 +439,8 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	}
 
 	printf("timestamp_ns,hand,relation_flags,px,py,pz,qx,qy,qz,qw,pose_age_ns,fused_pose_count,"
-	       "fused_camera_count,candidate_count,disagreement_count,jump_rejection_count\n");
+	       "fused_camera_count,candidate_count,disagreement_count,jump_rejection_count,"
+	       "reacquisition_count,optical_seen_count,fused_three_camera_count,fused_four_camera_count\n");
 	bool saw_position[2] = {false};
 	int64_t end_ns = os_monotonic_get_ns() + duration_s * U_TIME_1S_IN_NS;
 	int64_t next_print_ns = 0;
@@ -494,6 +496,17 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	        final_diagnostics[1].camera_candidate_count[3],
 	        final_diagnostics[1].fused_pose_count, final_diagnostics[1].disagreement_count,
 	        final_diagnostics[1].jump_rejection_count);
+	for (size_t i = 0; i < 2; i++) {
+		if (controllers[i] == NULL) {
+			continue;
+		}
+		fprintf(stderr,
+		        "%s optical-seen=%" PRIu64 ", reacquired=%" PRIu64 ", fused-3=%" PRIu64
+		        ", fused-4=%" PRIu64 ".\n",
+		        i == 0 ? "left" : "right", final_diagnostics[i].optical_seen_count,
+		        final_diagnostics[i].reacquisition_count, final_diagnostics[i].fused_three_camera_count,
+		        final_diagnostics[i].fused_four_camera_count);
+	}
 	return pass ? EXIT_SUCCESS : 2;
 
 fail:
