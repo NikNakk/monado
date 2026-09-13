@@ -289,3 +289,20 @@ The CLI may report `INCOMPLETE` during this diagnostic because many commanded
 phases deliberately leave the LEDs dark. Its outcome is the per-phase image
 brightness and logged controller schedule, not sustained pose tracking. The
 ChArUco calibration and default LED schedule are unchanged.
+
+The first static continuous-IR control is
+`/tmp/psvr2-static-ir-control.log` (SHA-256
+`06c328c6c07132a9a647baf1ee2bddfbeaf43144c42988b7b5f54c85a36b6691`)
+with capture `/tmp/psvr2-static-ir-control-capture`. It recorded 479 processed
+frames and 80 saved images per camera, but zero pose candidates. The images
+do show the Sense LEDs in all four cameras around seconds 2–3 and 6–7.
+Compared with the successful `/tmp/psvr2-charuco-force-ir-capture-2`, this
+placement exposes only a shallow, partly hidden arc: roughly four to five
+controller LED points per camera in a representative bright frame, compared
+with a broad six-to-eight-point arc in the successful capture. The lower
+views are nearly edge-on. Therefore the failed positive control does not yet
+isolate a pulse-timing fault; repeat it with the controller ring facing the
+headset and visibly forming a broad arc before committing to the 75-second
+static phase sweep. The sampled illumination is intermittent even under the
+force-IR override, as it was in the earlier successful capture; this also
+deserves separate timing analysis once the framing control passes.
