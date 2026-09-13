@@ -215,6 +215,9 @@ t_led_sync_push_constellation_sample(struct t_led_sync_refinement *refinement,
 bool
 t_led_sync_get_sample(struct t_led_sync_refinement *refinement, struct t_led_sync_sample *out_sample);
 
+enum t_led_sync_phase
+t_led_sync_get_phase(struct t_led_sync_refinement *refinement);
+
 void
 t_led_sync_mark_latest_sample_applied(struct t_led_sync_refinement *refinement, timepoint_ns apply_time_ns);
 

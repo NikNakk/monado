@@ -80,10 +80,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
                            PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_constellation_live_recovery, "PSSENSE_CONSTELLATION_LIVE_RECOVERY", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_full_period_led_bootstrap, "PSSENSE_FULL_PERIOD_LED_BOOTSTRAP", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
+#define PSSENSE_MODE4_FRAME_PERIOD_NS (16683 * U_TIME_1US_IN_NS)
 #define PSSENSE_LED_PHASE_SWEEP_OFF_FRAMES 120
 #define PSSENSE_LED_PHASE_SWEEP_FRAMES_PER_STEP 30
 #define PSSENSE_LED_PHASE_SWEEP_STEPS 67
@@ -308,6 +310,7 @@ struct pssense_device
 
 		uint32_t received_frames;
 		bool led_phase_sweep_started;
+		bool led_bootstrap_narrow_active;
 		uint32_t led_phase_sweep_start_sequence_id;
 		int32_t led_phase_sweep_last_step;
 		uint32_t last_exposure_sequence_id;
@@ -1327,6 +1330,19 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		if (requested_period_id > 0 && requested_period_id <= UINT8_MAX) {
 			period_id = (uint8_t)requested_period_id;
 		}
+		bool narrow_bootstrap = debug_get_bool_option_pssense_full_period_led_bootstrap() &&
+		                        pssense->tracking.use_constellation && requested_period_id <= 0 &&
+		                        !phase_sweep &&
+		                        t_led_sync_get_phase(&pssense->tracking.led_sync_refinement) ==
+		                            T_LED_SYNC_SEARCH_PHASE_MAINTAIN_OFFSET;
+		if (narrow_bootstrap != pssense->tracking.led_bootstrap_narrow_active) {
+			pssense->tracking.led_bootstrap_narrow_active = narrow_bootstrap;
+			PSSENSE_INFO(pssense, "FULL_PERIOD_LED_BOOTSTRAP stage=%s seq=%u",
+			             narrow_bootstrap ? "narrow" : "wide", camera_exposure.sequence_id);
+		}
+		if (narrow_bootstrap) {
+			period_id = 9;
+		}
 		bool sweep_off = false;
 		time_duration_ns sweep_phase_ns = 0;
 		if (phase_sweep) {
@@ -1391,9 +1407,10 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			next_blink_time += (int64_t)pssense->tracking.latest_led_sync_sample.fudge_offset_ns;
 		}
 
-		// PSSENSE cycle position on the wire is the *center* of the exposure, but our LED sync assumes it's the
-		// start of the exposure, so we need to make it blink later to account
-		next_blink_time += PERIOD_ID_TO_DURATION_NS(period_id) / 2;
+		// PSSENSE cycle position is the pulse center. Keep the center found with the wide bootstrap pulse
+		// when trying the narrow pulse, without changing the LED-sync refinement's internal duration.
+		next_blink_time += narrow_bootstrap ? pssense->tracking.latest_led_sync_sample.blink_duration_ns / 2
+		                                    : PERIOD_ID_TO_DURATION_NS(period_id) / 2;
 
 		// inside thirds of a nanosecond
 		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
@@ -2066,7 +2083,10 @@ pssense_create(struct xrt_prober *xp,
 	long timing_fudge_100us = debug_get_num_option_pssense_timing_fudge_100us();
 	if (timing_fudge_100us == LONG_MIN) {
 #ifdef XRT_OS_OSX
-		timing_fudge_100us = debug_get_bool_option_pssense_future_led_schedule() ? 36 : 0;
+		timing_fudge_100us = debug_get_bool_option_pssense_future_led_schedule() &&
+		                              !debug_get_bool_option_pssense_full_period_led_bootstrap()
+		                          ? 36
+		                          : 0;
 #else
 		timing_fudge_100us = 0;
 #endif
@@ -2159,14 +2179,26 @@ pssense_create(struct xrt_prober *xp,
 	struct t_led_sync_refinement_options led_sync_refinement_options = {
 	    // @todo Once LED blink refinement is fixed, enable that again
 	    .flags = T_LED_SYNC_REFINEMENT_FLAGS_OPTICAL_DRIVEN_OFFSET | T_LED_SYNC_REFINEMENT_FLAGS_HAS_LATENCY_CAP,
-	    .initial_blink_duration_ns = PERIOD_ID_TO_DURATION_NS(9),
+	    .initial_blink_duration_ns = debug_get_bool_option_pssense_full_period_led_bootstrap()
+	                                     ? PERIOD_ID_TO_DURATION_NS(42)
+	                                     : PERIOD_ID_TO_DURATION_NS(9),
 	    .min_blink_duration_ns = PERIOD_ID_TO_DURATION_NS(1),
 	    .max_blink_duration_ns = PERIOD_ID_TO_DURATION_NS(MAX_PERIOD_ID),
 	    .time_to_resync_ns = T_LED_SYNC_DEFAULT_RESYNC_TIME,
 	    .settle_frames = 7,
-	    // 8ms latency cap, something a bit overboard for bluetooth but better than searching the whole range
-	    .latency_cap_ns = U_TIME_1MS_IN_NS * 8LL,
+	    // Keep the normal 8 ms search cap; the opt-in mode-4 experiment scans one full camera period.
+	    .latency_cap_ns = debug_get_bool_option_pssense_full_period_led_bootstrap()
+	                          ? PSSENSE_MODE4_FRAME_PERIOD_NS
+	                          : U_TIME_1MS_IN_NS * 8LL,
 	};
+	if (debug_get_bool_option_pssense_full_period_led_bootstrap()) {
+		PSSENSE_INFO(pssense,
+		             "FULL_PERIOD_LED_BOOTSTRAP cap_ns=%" PRId64 " pulse_ns=%" PRId64
+		             " timing_fudge_100us=%d",
+		             led_sync_refinement_options.latency_cap_ns,
+		             led_sync_refinement_options.initial_blink_duration_ns,
+		             pssense->tracking.timing_fudge_100us);
+	}
 	ret = t_led_sync_refinement_init(&pssense->tracking.led_sync_refinement, &led_sync_refinement_options);
 	if (ret != 0) {
 		PSSENSE_ERROR(pssense, "Failed to init LED sync refinement!");
