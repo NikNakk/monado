@@ -92,8 +92,7 @@ macos_trace_stale_substitute(uint64_t event_ns,
 	if (macos_stale_substitute_trace == NULL) {
 		return;
 	}
-	uint64_t new_source_age_ns =
-	    event_ns > new_job->enqueue_ns ? event_ns - new_job->enqueue_ns : 0;
+	uint64_t new_source_age_ns = event_ns > new_job->enqueue_ns ? event_ns - new_job->enqueue_ns : 0;
 	flockfile(macos_stale_substitute_trace);
 	fprintf(macos_stale_substitute_trace,
 	        "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%u,%llu,%llu,%llu\n",
@@ -149,8 +148,8 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 	double scheduled_present_host_s = 0.0;
 	bool immediate_present = debug_get_bool_option_macos_present_immediate();
 
-	macos_trace_present_worker(cwm, "worker_start", &active_job, worker_start_ns, 0, worker_start_ns,
-	                           0, 0, 0, 0, true);
+	macos_trace_present_worker(cwm, "worker_start", &active_job, worker_start_ns, 0, worker_start_ns, 0, 0, 0, 0,
+	                           true);
 	assert(present_queue != NULL);
 	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
 		macos_retire_unpresented_job(cwm, &active_job, "invalid", 0);
@@ -174,8 +173,8 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 		next_drawable_begin_ns = os_monotonic_get_ns();
 		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
 		after_drawable_ns = os_monotonic_get_ns();
-		macos_trace_present_worker(cwm, "drawable_end", &active_job, after_drawable_ns, 0,
-		                           worker_start_ns, next_drawable_begin_ns, after_drawable_ns, 0, 0, true);
+		macos_trace_present_worker(cwm, "drawable_end", &active_job, after_drawable_ns, 0, worker_start_ns,
+		                           next_drawable_begin_ns, after_drawable_ns, 0, 0, true);
 
 		if (drawable == nil) {
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
@@ -183,12 +182,10 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 			return VK_ERROR_OUT_OF_DATE_KHR;
 		}
 
-		uint64_t drawable_wait_ns = after_drawable_ns > next_drawable_begin_ns
-		                                ? after_drawable_ns - next_drawable_begin_ns
-		                                : 0;
-		uint64_t stale_period_ns = cwm->display_period_ns > 0
-		                               ? (uint64_t)cwm->display_period_ns
-		                               : (uint64_t)ct->c->frame_interval_ns;
+		uint64_t drawable_wait_ns =
+		    after_drawable_ns > next_drawable_begin_ns ? after_drawable_ns - next_drawable_begin_ns : 0;
+		uint64_t stale_period_ns =
+		    cwm->display_period_ns > 0 ? (uint64_t)cwm->display_period_ns : (uint64_t)ct->c->frame_interval_ns;
 		uint64_t stale_threshold_ns = stale_period_ns + stale_period_ns / 4;
 		struct macos_present_job stale_job;
 		struct macos_present_job replacement_job;
@@ -209,10 +206,10 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 
 		if (substitute) {
 			uint64_t substitute_ns = os_monotonic_get_ns();
-			macos_trace_stale_substitute(substitute_ns, drawable_wait_ns, stale_threshold_ns,
-			                             &stale_job, &replacement_job);
-			macos_trace_present_worker(cwm, "stale_substitute_old", &stale_job, substitute_ns, 0,
-			                           worker_start_ns, next_drawable_begin_ns, after_drawable_ns, 0, 0, true);
+			macos_trace_stale_substitute(substitute_ns, drawable_wait_ns, stale_threshold_ns, &stale_job,
+			                             &replacement_job);
+			macos_trace_present_worker(cwm, "stale_substitute_old", &stale_job, substitute_ns, 0, worker_start_ns,
+			                           next_drawable_begin_ns, after_drawable_ns, 0, 0, true);
 			macos_trace_present_worker(cwm, "stale_substitute_new", &replacement_job, substitute_ns, 0,
 			                           worker_start_ns, next_drawable_begin_ns, after_drawable_ns, 0, 0, true);
 
@@ -268,8 +265,7 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 		[blit endEncoding];
 
 		before_present_call_ns = os_monotonic_get_ns();
-		uint64_t latest_output_ns =
-		    atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
+		uint64_t latest_output_ns = atomic_load_explicit(&cwm->latest_displaylink_output_ns, memory_order_acquire);
 		int64_t min_lead_us = debug_get_num_option_macos_present_min_lead_us();
 		if (min_lead_us < 0) {
 			min_lead_us = 0;
@@ -316,8 +312,7 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 				if (observed_present_offset_ns > 0) {
 					atomic_store_explicit(&presented_state->latest_observed_present_offset_ns,
 					                      observed_present_offset_ns, memory_order_release);
-					atomic_fetch_add_explicit(&presented_state->present_offset_sample_serial, 1,
-					                          memory_order_release);
+					atomic_fetch_add_explicit(&presented_state->present_offset_sample_serial, 1, memory_order_release);
 				}
 				flockfile(trace_file);
 				fprintf(trace_file,
@@ -376,8 +371,8 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 			if (complete_trace != NULL) {
 				flockfile(complete_trace);
 				fprintf(complete_trace, "%llu,%llu,%u,%llu,%lu,%llu,%.17g,%.17g,%u\n",
-				        (unsigned long long)traced_frame_id, (unsigned long long)completion_ns,
-				        traced_index, (unsigned long long)traced_timeline_value, (unsigned long)status,
+				        (unsigned long long)traced_frame_id, (unsigned long long)completion_ns, traced_index,
+				        (unsigned long long)traced_timeline_value, (unsigned long)status,
 				        (unsigned long long)(completion_ns - commit_begin_ns), completed_gpu_start_s,
 				        completed_gpu_end_s, 1u);
 				funlockfile(complete_trace);
@@ -418,8 +413,7 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 			          "%llu, queue delay avg %.3fms max %.3fms",
 			          (unsigned long long)submitted, (unsigned long long)superseded,
 			          (unsigned long long)half_refresh_stalls, (unsigned long long)stalls,
-			          (double)average_delay_ns / 1000000.0,
-			          (double)max_delay_ns / 1000000.0);
+			          (double)average_delay_ns / 1000000.0, (double)max_delay_ns / 1000000.0);
 		}
 	}
 
@@ -437,8 +431,7 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 		        (unsigned long long)after_vk_wait_ns, (unsigned long long)after_drawable_ns,
 		        (unsigned long long)before_present_call_ns, (unsigned long long)after_present_call_ns,
 		        (unsigned long long)after_commit_ns, (unsigned long long)after_commit_ns,
-		        (unsigned long long)latest_output_ns, 0.0, 0.0, 1u, 1u,
-		        (unsigned long long)image_reuse_wait_ns);
+		        (unsigned long long)latest_output_ns, 0.0, 0.0, 1u, 1u, (unsigned long long)image_reuse_wait_ns);
 		cwm->trace_present_rows++;
 		if (cwm->trace_present_rows % 256 == 0) {
 			fflush(cwm->trace_present);
@@ -466,11 +459,12 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
 	cwm->last_present_ns = now_ns;
 	if (cwm->present_sample_count == 240) {
 		double average_ms = (double)cwm->present_total_ns / (double)cwm->present_sample_count / 1000000.0;
-		COMP_INFO(ct->c, "macOS present-worker completion cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/240",
-		          average_ms, (double)cwm->present_min_ns / 1000000.0,
-		          (double)cwm->present_max_ns / 1000000.0,
+		COMP_INFO(ct->c,
+		          "macOS present-worker completion cadence: average %.3fms, min %.3fms, max %.3fms, late %llu/240",
+		          average_ms, (double)cwm->present_min_ns / 1000000.0, (double)cwm->present_max_ns / 1000000.0,
 		          (unsigned long long)cwm->present_missed_intervals);
-		COMP_INFO(ct->c, "macOS presentation CPU waits: Vulkan %.3fms, drawable %.3fms, synchronous Metal 0.000ms",
+		COMP_INFO(ct->c,
+		          "macOS presentation CPU waits: Vulkan %.3fms, drawable %.3fms, synchronous Metal 0.000ms",
 		          (double)cwm->present_vk_wait_total_ns / 240.0 / 1000000.0,
 		          (double)cwm->present_drawable_wait_total_ns / 240.0 / 1000000.0);
 		cwm->present_sample_count = 0;
@@ -523,8 +517,8 @@ comp_window_macos_present_stale(struct comp_target *ct,
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	if (!cwm->async_present || !cwm->present_worker_enabled || cwm->render_complete_event == nil ||
 	    !debug_get_bool_option_macos_present_stale_substitute()) {
-		return comp_window_macos_present(ct, present_queue, index, timeline_semaphore_value,
-		                                 desired_present_time_ns, present_slop_ns);
+		return comp_window_macos_present(ct, present_queue, index, timeline_semaphore_value, desired_present_time_ns,
+		                                 present_slop_ns);
 	}
 
 	struct macos_present_job job = {
@@ -596,7 +590,8 @@ comp_window_macos_create(struct comp_compositor *c)
 	ct->init_pre_vulkan = comp_window_macos_init_display_sync_diagnostic;
 
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	bool want_stale_substitute = debug_get_bool_option_macos_present_stale_substitute();
+	bool requested_stale_substitute = debug_get_bool_option_macos_present_stale_substitute();
+	bool want_stale_substitute = requested_stale_substitute && !cwm->drawable_slot_enabled;
 	bool want_immediate_present = debug_get_bool_option_macos_present_immediate();
 	if (want_stale_substitute && cwm->async_present && cwm->present_worker_enabled) {
 		ct->present = comp_window_macos_present_stale;
@@ -615,16 +610,26 @@ comp_window_macos_create(struct comp_compositor *c)
 			          "macOS diagnostic: immediate Metal presentation enabled; using presentDrawable: instead of "
 			          "presentDrawable:atTime: on the stale-substitution path");
 		}
-	} else if (want_stale_substitute) {
+	} else if (requested_stale_substitute && cwm->drawable_slot_enabled) {
+		COMP_INFO(c,
+		          "macOS diagnostic: XRT_MACOS_PRESENT_STALE_SUBSTITUTE ignored because drawable-slot newest-frame "
+		          "mode owns stale-frame replacement");
+	} else if (requested_stale_substitute) {
 		COMP_WARN(c,
 		          "XRT_MACOS_PRESENT_STALE_SUBSTITUTE requires XRT_MACOS_ASYNC_PRESENT=1 and "
 		          "XRT_MACOS_PRESENT_WORKER=1; using legacy presentation path");
 	}
-	if (want_immediate_present && !(want_stale_substitute && cwm->async_present && cwm->present_worker_enabled)) {
-		COMP_WARN(c,
-		          "XRT_MACOS_PRESENT_IMMEDIATE is currently a stale-substitution diagnostic and requires "
-		          "XRT_MACOS_PRESENT_STALE_SUBSTITUTE=1, XRT_MACOS_ASYNC_PRESENT=1 and XRT_MACOS_PRESENT_WORKER=1; "
-		          "using the legacy scheduled presentation path");
+	if (want_immediate_present &&
+	    !(want_stale_substitute && cwm->async_present && cwm->present_worker_enabled)) {
+		if (cwm->drawable_slot_enabled) {
+			COMP_INFO(c,
+			          "macOS diagnostic: XRT_MACOS_PRESENT_IMMEDIATE ignored in drawable-slot newest-frame mode");
+		} else {
+			COMP_WARN(c,
+			          "XRT_MACOS_PRESENT_IMMEDIATE is currently a stale-substitution diagnostic and requires "
+			          "XRT_MACOS_PRESENT_STALE_SUBSTITUTE=1, XRT_MACOS_ASYNC_PRESENT=1 and "
+			          "XRT_MACOS_PRESENT_WORKER=1; using the legacy scheduled presentation path");
+		}
 	}
 	return ct;
 }
