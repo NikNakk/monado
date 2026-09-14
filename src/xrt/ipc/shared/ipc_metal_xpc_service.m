@@ -16,6 +16,7 @@
 #include <dispatch/dispatch.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define IPC_METAL_XPC_ACTIVATION_TIMEOUT_NS (15LL * NSEC_PER_SEC)
 
@@ -211,6 +212,20 @@ get_service_lock(void)
 	return g_service_lock;
 }
 
+static bool
+token_is_valid(uint64_t token)
+{
+	return (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC;
+}
+
+static uint64_t
+make_token(void)
+{
+	uint64_t random_bits = 0;
+	arc4random_buf(&random_bits, sizeof(random_bits));
+	return IPC_METAL_XPC_TOKEN_MAGIC | (random_bits & ~IPC_METAL_XPC_TOKEN_MASK);
+}
+
 xrt_result_t
 ipc_metal_xpc_service_start(void)
 {
@@ -321,5 +336,136 @@ ipc_metal_xpc_activate_service(void)
 
 		U_LOG_I("Monado launchd XPC activation ready");
 		return XRT_SUCCESS;
+	}
+}
+
+xrt_result_t
+ipc_metal_xpc_service_take_textures(uint64_t token, uint32_t expected_count, void **out_metal_textures)
+{
+	if (!token_is_valid(token) || out_metal_textures == NULL || expected_count == 0 ||
+	    expected_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	for (uint32_t i = 0; i < expected_count; i++) {
+		out_metal_textures[i] = NULL;
+	}
+
+	@autoreleasepool {
+		NSLock *service_lock = get_service_lock();
+		[service_lock lock];
+		IPCMetalXPCServiceObject *service = [g_service_object retain];
+		[service_lock unlock];
+		if (service == nil) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		xrt_result_t xret = XRT_SUCCESS;
+		for (uint32_t i = 0; i < expected_count; i++) {
+			__block MTLSharedTextureHandle *handle = nil;
+			[service takeTextureHandleForToken:token
+			                             index:i
+			                             reply:^(MTLSharedTextureHandle *remote_handle) {
+				                             if (remote_handle != nil) {
+					                             handle = [remote_handle retain];
+				                             }
+			                             }];
+
+			if (handle == nil) {
+				U_LOG_E("Metal XPC local registry had no texture handle for token=0x%016llx image=%u",
+				        (unsigned long long)token,
+				        i);
+				xret = XRT_ERROR_IPC_FAILURE;
+				break;
+			}
+
+			id<MTLDevice> device = handle.device;
+			id<MTLTexture> texture = device != nil ? [device newSharedTextureWithHandle:handle] : nil;
+			[handle release];
+			if (texture == nil) {
+				U_LOG_E("Metal XPC local registry could not recreate texture token=0x%016llx image=%u",
+				        (unsigned long long)token,
+				        i);
+				xret = XRT_ERROR_ALLOCATION;
+				break;
+			}
+
+			out_metal_textures[i] = (__bridge void *)texture;
+		}
+
+		[service discardToken:token reply:^{}];
+		[service release];
+
+		if (xret != XRT_SUCCESS) {
+			ipc_metal_xpc_release_textures(out_metal_textures, expected_count);
+			return xret;
+		}
+
+		U_LOG_I("Metal XPC consumed %u texture handle(s) from in-process registry token=0x%016llx",
+		        expected_count,
+		        (unsigned long long)token);
+		return XRT_SUCCESS;
+	}
+}
+
+xrt_result_t
+ipc_metal_xpc_service_publish_shared_event(void *metal_shared_event, uint64_t *out_token)
+{
+	if (metal_shared_event == NULL || out_token == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	*out_token = 0;
+
+	@autoreleasepool {
+		NSLock *service_lock = get_service_lock();
+		[service_lock lock];
+		IPCMetalXPCServiceObject *service = [g_service_object retain];
+		[service_lock unlock];
+		if (service == nil) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		id<MTLSharedEvent> event = (__bridge id<MTLSharedEvent>)metal_shared_event;
+		MTLSharedEventHandle *handle = [event newSharedEventHandle];
+		if (handle == nil) {
+			[service release];
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		uint64_t token = make_token();
+		__block BOOL success = NO;
+		[service publishSharedEventHandle:handle
+		                            token:token
+		                            reply:^(BOOL remote_success) { success = remote_success; }];
+		[handle release];
+		[service release];
+
+		if (!success) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		*out_token = token;
+		U_LOG_I("Metal XPC published shared event directly into in-process registry token=0x%016llx",
+		        (unsigned long long)token);
+		return XRT_SUCCESS;
+	}
+}
+
+void
+ipc_metal_xpc_service_discard_token(uint64_t token)
+{
+	if (!token_is_valid(token)) {
+		return;
+	}
+
+	@autoreleasepool {
+		NSLock *service_lock = get_service_lock();
+		[service_lock lock];
+		IPCMetalXPCServiceObject *service = [g_service_object retain];
+		[service_lock unlock];
+		if (service != nil) {
+			[service discardToken:token reply:^{}];
+			[service release];
+		}
 	}
 }
