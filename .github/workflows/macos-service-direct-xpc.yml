@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - macos-service-direct-xpc
+      - macos-service-direct-xpc-owned-resources
     paths:
       - .github/workflows/macos-service-direct-xpc.yml
       - src/xrt/ipc/**
