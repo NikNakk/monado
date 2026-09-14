@@ -25,7 +25,8 @@ if(APPLE)
 		)
 	target_compile_options(monado_service_xpc_control PRIVATE -fblocks)
 	target_link_libraries(
-		monado_service_xpc_control PRIVATE ipc_shared "-framework Foundation"
+		monado_service_xpc_control
+		PRIVATE xrt-interfaces ipc_shared "-framework Foundation" "-framework Metal"
 		)
 endif()
 
