@@ -82,6 +82,11 @@ if(APPLE)
 	target_link_libraries(ipc_shared PRIVATE "-framework Foundation" "-framework Metal")
 
 	if(XRT_FEATURE_SERVICE)
+		target_sources(
+			ipc_shared
+			PRIVATE shared/ipc_metal_xpc_service.h shared/ipc_metal_xpc_service.m
+			)
+
 		add_executable(ipc_metal_xpc_probe shared/ipc_metal_xpc_probe.m)
 		set_target_properties(
 			ipc_metal_xpc_probe PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-probe PREFIX ""
@@ -232,8 +237,7 @@ elseif(APPLE)
 		)
 elseif(WIN32)
 	target_sources(
-		ipc_server
-		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_windows.cpp
+		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_windows.cpp
 		)
 
 	target_link_libraries(ipc_server PRIVATE winmm)
