@@ -5,7 +5,7 @@
  * @file
  * @brief  Just the client connection setup/teardown bits.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author Rylie Pavlik <rpavlik@collabora.com>
  * @ingroup ipc_client
  */
 
@@ -29,7 +29,7 @@
 
 #include "shared/ipc_utils.h"
 #include "shared/ipc_protocol.h"
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
 #include "shared/ipc_metal_xpc_service.h"
 #endif
 #include "client/ipc_client_connection.h"
@@ -270,7 +270,7 @@ ipc_client_socket_connect_once(struct ipc_connection *ipc_c)
 	return true;
 }
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
 static bool
 ipc_client_socket_connect(struct ipc_connection *ipc_c)
 {
