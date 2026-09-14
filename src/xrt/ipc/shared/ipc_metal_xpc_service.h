@@ -11,6 +11,8 @@
 #include "xrt/xrt_config_os.h"
 #include "xrt/xrt_results.h"
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,6 +44,27 @@ ipc_metal_xpc_service_stop(void);
  */
 xrt_result_t
 ipc_metal_xpc_activate_service(void);
+
+/*!
+ * Consume client-published texture handles directly from the registry hosted
+ * by this process and recreate MTLTexture objects for compositor import.
+ *
+ * This is the in-process counterpart of ipc_metal_xpc_take_textures(). It
+ * avoids making monado-service connect through XPC to its own Mach service.
+ */
+xrt_result_t
+ipc_metal_xpc_service_take_textures(uint64_t token, uint32_t expected_count, void **out_metal_textures);
+
+/*!
+ * Publish a service-created MTLSharedEvent directly into the local registry so
+ * that the client can retrieve its MTLSharedEventHandle over XPC.
+ */
+xrt_result_t
+ipc_metal_xpc_service_publish_shared_event(void *metal_shared_event, uint64_t *out_token);
+
+/*! Drop any locally hosted resources associated with a transport token. */
+void
+ipc_metal_xpc_service_discard_token(uint64_t token);
 
 #endif // XRT_OS_OSX
 
