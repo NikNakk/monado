@@ -1,13 +1,13 @@
 # macOS direct service XPC activation
 
-This branch moves the macOS Metal XPC endpoint from the standalone
-`monado-ipc-metal-xpc-broker` process into `monado-service` and adds a first
-on-demand launchd activation path.
+This work moves the macOS Metal XPC endpoint from the standalone
+`monado-ipc-metal-xpc-broker` process into `monado-service` and adds on-demand
+launchd activation.
 
-## Goal
+## Architecture
 
-Keep Monado's existing Unix-socket IPC as the primary protocol while using a
-small launchd/XPC control and Metal-object side channel on macOS:
+Monado's existing Unix-socket IPC remains the primary protocol. XPC is a small
+macOS-specific control and Metal-object side channel:
 
 ```text
 OpenXR application
@@ -31,18 +31,56 @@ launchd-managed `monado-service` is then started on demand. The XPC activation
 reply is sent only after the service's Unix socket is listening, after which the
 client retries the ordinary connection.
 
-## First implementation milestone
+## Metal resource transport
 
-The direct XPC endpoint deliberately implements the same token-based protocol
-as the previous standalone broker. Existing texture and shared-event call sites
-therefore do not need to change in the first milestone.
+The external XPC protocol remains token based. An OpenXR client publishes
+`MTLSharedTextureHandle` objects through XPC and passes only the compact token
+through ordinary Monado IPC. Service-created `MTLSharedEventHandle` objects use
+the reverse direction.
 
-This means `monado-service` can currently make an XPC request back to its own
-in-process endpoint when the server side resolves a texture token or publishes
-a shared event. That is intentional scaffolding: it proves direct service
-ownership and launchd activation without simultaneously changing the Metal
-resource protocol. A later cleanup can make server-side accesses use the local
-store directly and leave XPC only for cross-process client-to-service transfer.
+The service no longer connects through XPC to its own Mach endpoint. Server-side
+texture consumption and shared-event publication access the in-process registry
+directly, while genuine cross-process client/service transfer still uses XPC.
+
+```text
+client process                         monado-service
+--------------                         --------------
+MTLTexture
+   |
+   +-- MTLSharedTextureHandle --XPC--> in-process registry
+   |
+   +-- token ----------------Unix IPC-----------------> local registry lookup
+                                                   |
+                                                   +--> MTLTexture recreation
+
+service MTLSharedEvent
+   |
+   +--> local registry -- token via Unix IPC --> client
+                                   |
+                                   +-- XPC --> MTLSharedEventHandle
+```
+
+### Per-client ownership
+
+Registry tokens are scoped to the application process that owns them.
+
+- The XPC endpoint obtains the publisher/retriever PID from
+  `NSXPCConnection.processIdentifier`.
+- Ordinary Monado IPC already receives the application's PID in
+  `instance_describe_client` and stores it in `ics->client_state.pid`.
+- A server-side texture import is accepted only when the token's XPC owner PID
+  matches that Unix IPC client PID.
+- A client can retrieve a service-created shared event only when its XPC PID
+  matches the PID for which the service published the event.
+- Discard operations are owner checked as well.
+
+This gives separate OpenXR applications independent Metal-resource namespaces
+without adding a new OpenXR or Monado IPC protocol field. It is the first
+resource-isolation step needed for a persistent launcher plus temporary VR apps.
+
+PID reuse is not relied upon as token identity: tokens retain random bits and
+must also match the stored owner. Cleanup of any token stranded by a client
+crash is still a follow-on item.
 
 The standalone broker target is retained temporarily for comparison and
 fallback testing.
@@ -94,14 +132,13 @@ To return to the old broker during development:
 build-dir/src/xrt/ipc/monado-ipc-metal-xpc-broker bootstrap
 ```
 
-## Suggested validation
+## Validation
 
-Build the service, launchd helper, and OpenXR runtime from this branch. Register
-the direct service with the helper, make sure no manually started
-`monado-service` remains, then start a known-working OpenXR application without
-starting the service by hand.
+Build the service, launchd helper, and OpenXR runtime, bootstrap the direct
+service, and make sure no manually started `monado-service` or legacy broker is
+running.
 
-Expected client-side sequence when cold-starting is:
+A cold-started application should show this client-side sequence:
 
 ```text
 initial Unix socket connection fails
@@ -110,28 +147,28 @@ Monado launchd XPC activation ready
 Connected to launchd-activated Monado service
 ```
 
-The launchd service log should include:
+The service log should include a line similar to:
 
 ```text
-Monado service is hosting Metal XPC endpoint 'org.freedesktop.monado.metal-ipc' directly
+Monado service is hosting PID-scoped Metal XPC endpoint 'org.freedesktop.monado.metal-ipc' directly
 ```
 
-After basic OpenXR startup succeeds, verify a Metal-array application such as
-the known-working Godot/Unity path. Existing Metal XPC texture/event logging
-should remain present even though the standalone broker process is no longer
-running.
+For a Metal array swapchain, the service should log direct in-process texture
+consumption including the application PID. Shared-event publication should also
+include that PID. No `monado-ipc-metal-xpc-broker` process should be required.
 
-## Deliberately not done yet
+After single-application validation, run two supported OpenXR applications in
+sequence while keeping `monado-service` alive. A token produced by one process
+must never be accepted for the other process.
 
-This milestone does not yet:
+## Follow-on work
 
-- remove the legacy broker target;
-- eliminate the service-to-self XPC hop;
-- pair XPC connections explicitly with individual Unix IPC clients;
-- implement launcher/home-shell policy;
-- automatically start a launcher when the last foreground VR app exits;
-- install a reboot-persistent LaunchAgent;
-- add idle-shutdown policy.
+The next steps are:
 
-Those are follow-on steps after the direct endpoint and cold-start path have
-been validated on macOS.
+- clean stranded registry entries when a Unix IPC client dies unexpectedly;
+- keep a persistent launcher/home application while foreground applications
+  come and go;
+- exercise Monado's existing multi-client active/focused application switching;
+- remove the legacy standalone broker once the direct path has enough soak time;
+- install a reboot-persistent LaunchAgent using a stable installed executable;
+- define idle-shutdown / explicit `Quit VR` policy.
