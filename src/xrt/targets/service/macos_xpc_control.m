@@ -123,6 +123,64 @@ run_launchctl(const char *verb, const char *arg1, const char *arg2)
 }
 
 static bool
+should_forward_environment_key(NSString *key)
+{
+	if (key == nil) {
+		return false;
+	}
+
+	static NSArray<NSString *> *prefixes = nil;
+	static NSSet<NSString *> *exact_keys = nil;
+	static dispatch_once_t once_token;
+	dispatch_once(&once_token, ^{
+		prefixes = [[NSArray alloc] initWithObjects:@"XRT_",
+		                                              @"PSVR2_",
+		                                              @"IPC_",
+		                                              @"VK_",
+		                                              @"MVK_",
+		                                              @"MOLTENVK_",
+		                                              @"METAL_",
+		                                              @"MTL_",
+		                                              nil];
+		exact_keys = [[NSSet alloc] initWithObjects:@"PATH", @"DYLD_LIBRARY_PATH", @"DYLD_FRAMEWORK_PATH", nil];
+	});
+
+	if ([exact_keys containsObject:key]) {
+		return true;
+	}
+
+	for (NSString *prefix in prefixes) {
+		if ([key hasPrefix:prefix]) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static NSDictionary *
+make_launch_environment(void)
+{
+	NSDictionary *current = [[NSProcessInfo processInfo] environment];
+	NSMutableDictionary *filtered = [NSMutableDictionary dictionary];
+
+	for (NSString *key in current) {
+		if (!should_forward_environment_key(key)) {
+			continue;
+		}
+
+		NSString *value = [current objectForKey:key];
+		if (value != nil) {
+			[filtered setObject:value forKey:key];
+		}
+	}
+
+	/* A launchd service must never treat its inherited stdin as a quit trigger. */
+	[filtered setObject:@"1" forKey:@"XRT_NO_STDIN"];
+	return filtered;
+}
+
+static bool
 write_launch_agent_plist(const char *path, const char *service_executable)
 {
 	@autoreleasepool {
@@ -136,9 +194,10 @@ write_launch_agent_plist(const char *path, const char *service_executable)
 		get_log_paths(stdout_path, stderr_path);
 		NSString *stdout_string = [NSString stringWithUTF8String:stdout_path];
 		NSString *stderr_string = [NSString stringWithUTF8String:stderr_path];
+		NSDictionary *launch_environment = make_launch_environment();
 
 		if (exe == nil || plist_path == nil || label == nil || mach_service == nil || stdout_string == nil ||
-		    stderr_string == nil) {
+		    stderr_string == nil || launch_environment == nil) {
 			return false;
 		}
 
@@ -148,7 +207,7 @@ write_launch_agent_plist(const char *path, const char *service_executable)
 			@"MachServices" : @{ mach_service : @YES },
 			@"RunAtLoad" : @NO,
 			@"ProcessType" : @"Interactive",
-			@"EnvironmentVariables" : @{ @"XRT_NO_STDIN" : @"1" },
+			@"EnvironmentVariables" : launch_environment,
 			@"StandardOutPath" : stdout_string,
 			@"StandardErrorPath" : stderr_string,
 		};
@@ -214,6 +273,7 @@ bootstrap_service(void)
 	printf("Mach service: %s\n", IPC_METAL_XPC_SERVICE_NAME);
 	printf("Executable: %s\n", service_executable);
 	printf("LaunchAgent plist: %s\n", plist_path);
+	printf("Relevant XRT/PSVR2/Vulkan environment captured from this shell\n");
 	printf("stdout: %s\n", stdout_path);
 	printf("stderr: %s\n", stderr_path);
 	return 0;
