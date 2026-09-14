@@ -82,6 +82,11 @@ if(APPLE)
 	target_link_libraries(ipc_shared PRIVATE "-framework Foundation" "-framework Metal")
 
 	if(XRT_FEATURE_SERVICE)
+		target_sources(
+			ipc_shared
+			PRIVATE shared/ipc_metal_xpc_service.h shared/ipc_metal_xpc_service.m
+			)
+
 		add_executable(ipc_metal_xpc_probe shared/ipc_metal_xpc_probe.m)
 		set_target_properties(
 			ipc_metal_xpc_probe PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-probe PREFIX ""
@@ -224,16 +229,48 @@ elseif(APPLE)
 		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
 			server/ipc_server_metal.c
 		)
-	set_source_files_properties(
-		${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE OBJC
-		)
+
+	if(XRT_FEATURE_SERVICE)
+		target_sources(
+			ipc_server
+			PRIVATE server/ipc_server_mainloop_apple_xpc.m
+				server/ipc_metal_service_local_override.h
+				server/ipc_metal_client_cleanup.c
+				server/ipc_metal_client_cleanup.h
+			)
+		set_source_files_properties(
+			${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
+			PROPERTIES
+				LANGUAGE OBJC
+				COMPILE_DEFINITIONS
+					"ipc_server_mainloop_init=ipc_server_mainloop_init_apple_vanilla;ipc_server_mainloop_deinit=ipc_server_mainloop_deinit_apple_vanilla"
+			)
+		set_property(
+			SOURCE server/ipc_server_metal.c
+			APPEND
+			PROPERTY COMPILE_OPTIONS
+				"-include"
+				"${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_metal_service_local_override.h"
+			)
+		set_property(
+			SOURCE server/ipc_server_per_client_thread.c
+			APPEND
+			PROPERTY COMPILE_OPTIONS
+				"-include"
+				"${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_metal_client_cleanup.h"
+			)
+	else()
+		set_source_files_properties(
+			${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE OBJC
+			)
+	endif()
+
 	target_link_libraries(
 		ipc_server PRIVATE comp_util "-framework AppKit" "-framework Foundation" "-framework Metal"
 		)
 elseif(WIN32)
 	target_sources(
-		ipc_server
-		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_windows.cpp
+		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_windows.cpp
 		)
 
 	target_link_libraries(ipc_server PRIVATE winmm)
