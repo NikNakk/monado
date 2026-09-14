@@ -65,6 +65,16 @@ ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event,
 void
 ipc_metal_xpc_service_discard_token_for_pid(uint64_t token, pid_t owner_pid);
 
+/*!
+ * Drop every still-pending registry entry owned by a process.
+ *
+ * Call this only after the last ordinary Monado IPC client for that PID has
+ * disconnected. XPC connections themselves are deliberately short-lived and
+ * are not a resource-lifetime signal.
+ */
+void
+ipc_metal_xpc_service_discard_all_for_pid(pid_t owner_pid);
+
 #endif // XRT_OS_OSX
 
 #ifdef __cplusplus
