@@ -231,13 +231,24 @@ elseif(APPLE)
 		)
 
 	if(XRT_FEATURE_SERVICE)
-		target_sources(ipc_server PRIVATE server/ipc_server_mainloop_apple_xpc.m)
+		target_sources(
+			ipc_server
+			PRIVATE server/ipc_server_mainloop_apple_xpc.m
+				server/ipc_metal_service_local_override.h
+			)
 		set_source_files_properties(
 			${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
 			PROPERTIES
 				LANGUAGE OBJC
 				COMPILE_DEFINITIONS
 					"ipc_server_mainloop_init=ipc_server_mainloop_init_apple_vanilla;ipc_server_mainloop_deinit=ipc_server_mainloop_deinit_apple_vanilla"
+			)
+		set_property(
+			SOURCE server/ipc_server_metal.c
+			APPEND
+			PROPERTY COMPILE_OPTIONS
+				"-include"
+				"${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_metal_service_local_override.h"
 			)
 	else()
 		set_source_files_properties(
