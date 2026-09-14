@@ -8,6 +8,12 @@
 
 #pragma once
 
+/*
+ * Include the ordinary declarations before defining the source-local aliases.
+ * This header is force-included by CMake, so defining the function-like macros
+ * first would otherwise rewrite the declarations in ipc_metal_xpc.h itself.
+ */
+#include "shared/ipc_metal_xpc.h"
 #include "shared/ipc_metal_xpc_service.h"
 
 /*
@@ -16,7 +22,7 @@
  * back to its own Mach service. Keep the existing server implementation and
  * substitute only the resource-registry operations.
  *
- * The generated Unix IPC client state already records the application's PID.
+ * The ordinary Unix IPC client state already records the application's PID.
  * Inject that PID here so the local registry can verify that a token published
  * over XPC belongs to the same process that is asking to import it over normal
  * Monado IPC.
