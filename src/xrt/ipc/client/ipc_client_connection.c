@@ -29,6 +29,9 @@
 
 #include "shared/ipc_utils.h"
 #include "shared/ipc_protocol.h"
+#ifdef XRT_OS_OSX
+#include "shared/ipc_metal_xpc_service.h"
+#endif
 #include "client/ipc_client_connection.h"
 
 #include "ipc_client_generated.h"
@@ -208,7 +211,7 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 #else
 
 static bool
-ipc_client_socket_connect(struct ipc_connection *ipc_c)
+ipc_client_socket_connect_once(struct ipc_connection *ipc_c)
 {
 #ifdef SOCK_CLOEXEC
 	// Make sure the socket is not inherited by child processes. For one, when there is an fd to the socket
@@ -237,6 +240,7 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 	ssize_t size = u_file_get_path_in_runtime_dir(XRT_IPC_MSG_SOCK_FILENAME, sock_file, PATH_MAX);
 	if (size == -1) {
 		IPC_ERROR(ipc_c, "Could not get socket file name");
+		close(socket);
 		return false;
 	}
 
@@ -244,6 +248,7 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 	const int dst_size = (int)ARRAY_SIZE(addr.sun_path);
 	if (size >= dst_size) {
 		IPC_ERROR(ipc_c, "Total IPC path too long (%i > %i)", (int)size, dst_size);
+		close(socket);
 		return false;
 	}
 
@@ -264,6 +269,42 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 
 	return true;
 }
+
+#ifdef XRT_OS_OSX
+static bool
+ipc_client_socket_connect(struct ipc_connection *ipc_c)
+{
+	/* Preserve the existing manual-service path with no XPC dependency. */
+	if (ipc_client_socket_connect_once(ipc_c)) {
+		return true;
+	}
+
+	IPC_INFO(ipc_c, "Monado service socket is unavailable; asking launchd to activate the macOS service");
+	xrt_result_t xret = ipc_metal_xpc_activate_service();
+	if (xret != XRT_SUCCESS) {
+		IPC_DEBUG(ipc_c, "launchd XPC activation was unavailable: result=%d", xret);
+		return false;
+	}
+
+	/*
+	 * The service does not answer activateWithReply until its Unix socket is
+	 * already listening, so this retry should not require polling or sleeps.
+	 */
+	if (!ipc_client_socket_connect_once(ipc_c)) {
+		IPC_ERROR(ipc_c, "Monado service reported ready over XPC but its Unix socket still could not be reached");
+		return false;
+	}
+
+	IPC_INFO(ipc_c, "Connected to launchd-activated Monado service");
+	return true;
+}
+#else
+static bool
+ipc_client_socket_connect(struct ipc_connection *ipc_c)
+{
+	return ipc_client_socket_connect_once(ipc_c);
+}
+#endif
 
 #endif
 
