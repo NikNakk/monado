@@ -17,6 +17,17 @@ target_link_libraries(
 
 install(TARGETS monado-service RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+if(APPLE)
+	add_executable(monado_service_xpc_control macos_xpc_control.m)
+	set_target_properties(
+		monado_service_xpc_control
+		PROPERTIES OUTPUT_NAME monado-service-xpc-control PREFIX ""
+		)
+	target_link_libraries(
+		monado_service_xpc_control PRIVATE ipc_shared "-framework Foundation"
+		)
+endif()
+
 if(XRT_HAVE_SYSTEMD)
 	set(SERVICE_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/monado.in.service")
 	set(SOCKET_INPUT "${CMAKE_CURRENT_SOURCE_DIR}/monado.in.socket")
