@@ -43,6 +43,7 @@
 - (BOOL)storeSharedEventHandle:(MTLSharedEventHandle *)handle token:(uint64_t)token ownerPID:(pid_t)ownerPID;
 - (MTLSharedEventHandle *)copySharedEventHandleForToken:(uint64_t)token ownerPID:(pid_t)ownerPID;
 - (void)discardToken:(uint64_t)token ownerPID:(pid_t)ownerPID;
+- (NSUInteger)discardAllForPID:(pid_t)ownerPID;
 @end
 
 static bool
@@ -210,6 +211,35 @@ current_xpc_pid(void)
 		[_ownersByToken removeObjectForKey:key];
 	}
 	[_lock unlock];
+}
+
+- (NSUInteger)discardAllForPID:(pid_t)ownerPID
+{
+	if (ownerPID <= 0) {
+		return 0;
+	}
+
+	NSNumber *owner = [NSNumber numberWithInt:ownerPID];
+	NSMutableArray *keys = [NSMutableArray array];
+
+	[_lock lock];
+	for (NSNumber *key in _ownersByToken) {
+		NSNumber *known_owner = [_ownersByToken objectForKey:key];
+		if ([known_owner isEqualToNumber:owner]) {
+			[keys addObject:key];
+		}
+	}
+
+	for (NSNumber *key in keys) {
+		[_handlesByToken removeObjectForKey:key];
+		[_countsByToken removeObjectForKey:key];
+		[_eventsByToken removeObjectForKey:key];
+		[_ownersByToken removeObjectForKey:key];
+	}
+	NSUInteger count = keys.count;
+	[_lock unlock];
+
+	return count;
 }
 
 - (void)activateWithReply:(void (^)(BOOL ready))reply
@@ -564,6 +594,29 @@ ipc_metal_xpc_service_discard_token_for_pid(uint64_t token, pid_t owner_pid)
 		if (service != nil) {
 			[service discardToken:token ownerPID:owner_pid];
 			[service release];
+		}
+	}
+}
+
+void
+ipc_metal_xpc_service_discard_all_for_pid(pid_t owner_pid)
+{
+	if (owner_pid <= 0) {
+		return;
+	}
+
+	@autoreleasepool {
+		IPCMetalXPCServiceObject *service = copy_service_object();
+		if (service == nil) {
+			return;
+		}
+
+		NSUInteger count = [service discardAllForPID:owner_pid];
+		[service release];
+		if (count > 0) {
+			U_LOG_I("Metal XPC discarded %lu pending resource token(s) for disconnected pid=%d",
+			        (unsigned long)count,
+			        (int)owner_pid);
 		}
 	}
 }
