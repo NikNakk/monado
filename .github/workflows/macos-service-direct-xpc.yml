@@ -1,0 +1,44 @@
+name: macOS direct service XPC
+
+on:
+  push:
+    branches:
+      - macos-service-direct-xpc
+      - macos-service-direct-xpc-owned-resources
+    paths:
+      - .github/workflows/macos-service-direct-xpc.yml
+      - src/xrt/ipc/**
+      - src/xrt/targets/service/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-service-xpc:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
+
+      - name: Configure service build
+        run: >-
+          cmake -S . -B build-service -G Ninja
+          -DBUILD_TESTING=OFF
+          -DXRT_FEATURE_SERVICE=ON
+          -DXRT_HAVE_OPENGLES=OFF
+          -DXRT_HAVE_SDL2=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_BUILD_DRIVER_PSSENSE=OFF
+
+      - name: Build service, launchd helper, and OpenXR runtime
+        run: >-
+          cmake --build build-service --parallel
+          --target monado-service monado_service_xpc_control openxr_monado
