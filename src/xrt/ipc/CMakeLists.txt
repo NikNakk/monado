@@ -235,6 +235,8 @@ elseif(APPLE)
 			ipc_server
 			PRIVATE server/ipc_server_mainloop_apple_xpc.m
 				server/ipc_metal_service_local_override.h
+				server/ipc_metal_client_cleanup.c
+				server/ipc_metal_client_cleanup.h
 			)
 		set_source_files_properties(
 			${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
@@ -249,6 +251,13 @@ elseif(APPLE)
 			PROPERTY COMPILE_OPTIONS
 				"-include"
 				"${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_metal_service_local_override.h"
+			)
+		set_property(
+			SOURCE server/ipc_server_per_client_thread.c
+			APPEND
+			PROPERTY COMPILE_OPTIONS
+				"-include"
+				"${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_metal_client_cleanup.h"
 			)
 	else()
 		set_source_files_properties(
