@@ -15,6 +15,7 @@ import cv2
 import numpy as np
 
 MODE4_CAMERA_PLANES = {4: {0: 0, 1: 1}, 5: {0: 2, 1: 3}}
+LED_MASK_BIT_COUNT = 32
 
 
 def segment_for_time(
@@ -125,14 +126,16 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
         if off is not None and all_on is not None:
             all_on_centroids = compact_bright_centroids(cv2.subtract(all_on, off), threshold)
         per_bit = []
-        for bit in range(17):
+        for bit in range(LED_MASK_BIT_COUNT):
             label = f"bit_{bit:02d}"
             image = median_image(labels.get(label, []))
             centroids = []
             if off is not None and image is not None:
                 difference = cv2.subtract(image, off)
                 centroids = compact_bright_centroids(difference, threshold)
-            if centroids:
+            match_fraction = centroid_match_fraction(centroids, all_on_centroids)
+            matching_component_count = round(len(centroids) * match_fraction)
+            if matching_component_count > 0:
                 observed_bits.add(bit)
             per_bit.append(
                 {
@@ -140,7 +143,8 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
                     "frame_count": len(labels.get(label, [])),
                     "bright_component_count": len(centroids),
                     "centroids_px": centroids,
-                    "fraction_matching_all_on_components": centroid_match_fraction(centroids, all_on_centroids),
+                    "fraction_matching_all_on_components": match_fraction,
+                    "matching_all_on_component_count": matching_component_count,
                 }
             )
 
@@ -155,35 +159,53 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
             }
         )
 
-    bits_with_multiple_components = sorted(
+    bits_with_multiple_matching_components = sorted(
         {
             entry["bit"]
             for camera in cameras
             for entry in camera["bits"]
-            if entry["bright_component_count"] > 1
+            if entry["matching_all_on_component_count"] > 1
         }
     )
-    temporal_waveform_evidence = [
-        {"camera": camera["camera"], "bit": entry["bit"], "component_count": entry["bright_component_count"]}
-        for camera in cameras
-        for entry in camera["bits"]
-        if entry["bright_component_count"] >= 2 and entry["fraction_matching_all_on_components"] >= 0.75
-    ]
+    bits_with_single_matching_component = sorted(
+        {
+            entry["bit"]
+            for camera in cameras
+            for entry in camera["bits"]
+            if entry["matching_all_on_component_count"] == 1
+        }
+    )
+    unused_or_unseen_bits = sorted(set(range(LED_MASK_BIT_COUNT)) - observed_bits)
+
+    spatial_mask_evidence = bool(observed_bits) and not bits_with_multiple_matching_components
+    grouped_or_shared_evidence = bool(bits_with_multiple_matching_components)
+    if grouped_or_shared_evidence:
+        semantics = "grouped_or_shared_mask_supported"
+    elif spatial_mask_evidence:
+        semantics = "spatial_mask_supported"
+    else:
+        semantics = "inconclusive"
+
     return {
-        "format": "psvr2-sense-led-mask-analysis-v1",
+        "format": "psvr2-sense-led-mask-analysis-v2",
         "capture_dir": str(capture_dir),
         "mask_manifest": str(manifest_path),
         "threshold": threshold,
         "segment_edge_margin_ms": margin_ms,
         "timing_alignment_basis": timing_basis,
+        "candidate_mask_bit_count": LED_MASK_BIT_COUNT,
         "observed_bits": sorted(observed_bits),
-        "bits_with_multiple_components_in_one_camera": bits_with_multiple_components,
-        "led_blink_semantics_status": "temporal_waveform_supported"
-        if temporal_waveform_evidence
-        else "inconclusive",
-        "temporal_waveform_evidence": temporal_waveform_evidence,
+        "unused_or_unseen_bits": unused_or_unseen_bits,
+        "bits_with_single_matching_component": bits_with_single_matching_component,
+        "bits_with_multiple_matching_components_in_one_camera": bits_with_multiple_matching_components,
+        "led_blink_semantics_status": semantics,
         "cameras": cameras,
-        "note": "Multiple all-on constellation points responding together to one bit indicates a shared temporal blink waveform, not a spatial per-LED mask. Bit-to-LED-model identity therefore requires geometric constellation matching.",
+        "note": (
+            "A responsive bit producing at most one all-on-matching compact source per camera supports a spatial LED mask. "
+            "A bit producing multiple simultaneous all-on-matching sources in one camera supports grouped/shared control. "
+            "Bits with no matched response may be unused/reserved or may control emitters not visible in this pose. "
+            "Physical mask-bit to LED-model ID still requires geometric matching across suitable stationary poses."
+        ),
     }
 
 
@@ -202,7 +224,7 @@ def main() -> int:
     result = analyze(args.capture_dir, args.mask_manifest, args.threshold, args.segment_edge_margin_ms)
     args.output.write_text(json.dumps(result, indent=2) + "\n")
     print(
-        f"Observed {len(result['observed_bits'])}/17 candidate bits; "
+        f"Observed {len(result['observed_bits'])}/{LED_MASK_BIT_COUNT} candidate bits; "
         f"led_blink semantics={result['led_blink_semantics_status']}"
     )
     print(f"Wrote {args.output}")
