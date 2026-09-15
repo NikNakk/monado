@@ -13,6 +13,11 @@
 #include "xrt/xrt_config_os.h"
 #include "os/os_time.h"
 
+#if defined(XRT_OS_OSX)
+#include <stdio.h>
+#include <stdlib.h>
+#endif
+
 #if defined(XRT_DOXYGEN)
 
 /*!
@@ -55,5 +60,24 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 
 	// Sufficiently in the future.
 	uint32_t delay = (uint32_t)(until_ns - now_ns - U_WAIT_MEASURED_SCHEDULER_LATENCY_NS);
+
+#if defined(XRT_OS_OSX)
+	const char *wait_timing_env = getenv("XRT_MACOS_WAIT_TIMING");
+	bool trace_wait = wait_timing_env != NULL && wait_timing_env[0] != '\0' && wait_timing_env[0] != '0';
+	uint64_t wait_begin_ns = trace_wait ? os_monotonic_get_ns() : 0;
+#endif
+
 	os_precise_sleeper_nanosleep(sleeper, delay);
+
+#if defined(XRT_OS_OSX)
+	if (trace_wait) {
+		uint64_t wait_end_ns = os_monotonic_get_ns();
+		uint64_t actual_ns = wait_end_ns >= wait_begin_ns ? wait_end_ns - wait_begin_ns : 0;
+		int64_t lateness_ns = (int64_t)wait_end_ns - (int64_t)until_ns;
+		fprintf(stderr,
+		        "MACOS_WAIT_TIMING requested_ns=%u actual_ns=%llu lateness_ns=%lld until_ns=%llu begin_ns=%llu end_ns=%llu\n",
+		        delay, (unsigned long long)actual_ns, (long long)lateness_ns, (unsigned long long)until_ns,
+		        (unsigned long long)wait_begin_ns, (unsigned long long)wait_end_ns);
+	}
+#endif
 }
