@@ -67,6 +67,8 @@
 #define PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD (35.0f * (float)M_PI / 180.0f)
 #define PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M 0.15f
 #define PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD (60.0f * (float)M_PI / 180.0f)
+#define PSSENSE_CONSTELLATION_CONTINUE_POSITION_M 0.04f
+#define PSSENSE_CONSTELLATION_CONTINUE_ORIENTATION_RAD (20.0f * (float)M_PI / 180.0f)
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 #ifdef XRT_OS_OSX
@@ -78,9 +80,24 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
                            "PSSENSE_FUTURE_LED_SCHEDULE",
                            PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_constellation_stale_ms,
+                          "PSSENSE_CONSTELLATION_STALE_MS",
+                          250)
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_force_ir_probe_cadence, "PSSENSE_FORCE_IR", false)
+#endif
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_fused_prior_after_first_fusion,
+                           "PSSENSE_FUSED_PRIOR_AFTER_FIRST_FUSION",
+                           false)
 
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_fused_only_full_prior,
+                           "PSSENSE_FUSED_ONLY_FULL_PRIOR",
+                           false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_trusted_monocular_continuation,
+                           "PSSENSE_TRUSTED_MONOCULAR_CONTINUATION",
+                           false)
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
 static struct xrt_binding_input_pair touch_inputs_pssense[] = {
@@ -289,6 +306,9 @@ struct pssense_device
 		uint32_t last_fused_camera_count;
 		struct xrt_pose last_fused_pose;
 		bool have_last_fused_pose;
+		struct xrt_pose trusted_prior_pose;
+		int64_t trusted_prior_timestamp_ns;
+		bool have_trusted_prior_pose;
 
 		struct m_relation_history *imu_relation_history;
 		struct m_imu_3dof fusion;
@@ -931,6 +951,14 @@ pssense_run_thread(void *ptr)
 
 	// 32/3000hz (PCM haptic rate), this will *technically* run slightly fast, but like, that's fine.
 	const time_duration_ns pcm_haptics_period_ns = 10666666;
+	time_duration_ns output_period_ns = pcm_haptics_period_ns;
+#ifdef XRT_OS_OSX
+	if (debug_get_bool_option_pssense_force_ir_probe_cadence()) {
+		// Match pssense_hid_probe --force-ir-seconds exactly for this diagnostic.
+		output_period_ns = 10 * U_TIME_1MS_IN_NS;
+		PSSENSE_INFO(pssense, "PSSENSE_FORCE_IR calibration-probe output cadence: 10.000ms");
+	}
+#endif
 
 	timepoint_ns next_output_ns = os_monotonic_get_ns();
 
@@ -957,7 +985,7 @@ pssense_run_thread(void *ptr)
 
 				timepoint_ns write_done_ns = os_monotonic_get_ns();
 				do {
-					next_output_ns += pcm_haptics_period_ns;
+					next_output_ns += output_period_ns;
 				} while (next_output_ns <= write_done_ns);
 			}
 		}
@@ -1025,23 +1053,54 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 	bool optical_fresh = pssense->tracking.last_optical_timestamp_ns > 0 &&
 	                     at_timestamp_ns >= pssense->tracking.last_optical_timestamp_ns &&
 	                     at_timestamp_ns - pssense->tracking.last_optical_timestamp_ns <=
-	                         PSSENSE_CONSTELLATION_STALE_NS;
+	                         ((int64_t)debug_get_num_option_pssense_constellation_stale_ms() * U_TIME_1MS_IN_NS);
 	if (!optical_fresh) {
 		out_relation->relation_flags &=
 		    ~(XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
 		      XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
 	}
-	/* Optical history supplies translation; the continuously integrated IMU supplies orientation. */
-	if ((imu.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
+
+	/*
+	 * Diagnostic: while a fresh optical pose exists, keep its orientation as well as its
+	 * translation. The corrected IMU orientation is currently inconsistent with the optical
+	 * LED frame and would otherwise poison the full-pose prior used by the other cameras.
+	 *
+	 * If optical orientation is stale/invalid, preserve the existing IMU orientation fallback.
+	 * IMU angular velocity remains useful in either case.
+	 */
+	bool optical_orientation_fresh =
+	    optical_fresh && (out_relation->relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0;
+	if (!optical_orientation_fresh &&
+	    (imu.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
 		out_relation->pose.orientation = imu.pose.orientation;
-		out_relation->angular_velocity = imu.angular_velocity;
 		out_relation->relation_flags &=
-		    ~(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-		      XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+		    ~(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 		out_relation->relation_flags |=
 		    imu.relation_flags &
-		    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-		     XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+		    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	}
+
+	if ((imu.relation_flags & XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT) != 0) {
+		out_relation->angular_velocity = imu.angular_velocity;
+		out_relation->relation_flags |= XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT;
+	}
+
+	/* PSSENSE_FUSED_ONLY_FULL_PRIOR_GATE
+	 *
+	 * During fused-prior diagnostics, monocular optical poses are still
+	 * written before the first fusion to preserve bootstrap learning.
+	 * Do not advertise those provisional poses to the constellation tracker
+	 * as a full position+orientation prior: that would make the all-camera
+	 * trusted-prior policy lock to the first monocular branch. Once the
+	 * first accepted fusion exists, the relation history is fusion-owned and
+	 * full position validity is exposed normally.
+	 */
+	if (debug_get_bool_option_pssense_fused_only_full_prior() &&
+	    !pssense->tracking.have_last_fused_pose) {
+		out_relation->relation_flags &=
+		    ~(XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		      XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
+		      XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
 	}
 }
 
@@ -1421,12 +1480,94 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	 */
 	t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, sample);
 
+	bool fused_prior_after_first_fusion =
+	    debug_get_bool_option_pssense_fused_prior_after_first_fusion();
+
 	os_thread_helper_lock(&pssense->controller_thread);
 	timepoint_ns optical_device_ts;
 	bool have_optical_device_ts = pssense_host_ts_to_device(pssense, sample->timestamp_ns, &optical_device_ts);
+	bool fused_prior_locked =
+	    fused_prior_after_first_fusion && pssense->tracking.have_last_fused_pose;
 	os_thread_helper_unlock(&pssense->controller_thread);
 
-	if (have_optical_device_ts) {
+	/* PSSENSE_TRUSTED_MONOCULAR_CONTINUATION
+	 *
+	 * After multi-camera fusion establishes a trusted branch, allow only
+	 * cameras 0/1 to advance that optical prior monocularly, and only by a
+	 * small step. Cameras 2/3 can observe and fuse but never move it alone.
+	 */
+	if (debug_get_bool_option_pssense_trusted_monocular_continuation() &&
+	    have_optical_device_ts && sample->camera_index < 2) {
+		bool can_continue = false;
+		struct xrt_pose trusted_pose = {0};
+
+		os_thread_helper_lock(&pssense->controller_thread);
+		if (pssense->tracking.have_last_fused_pose &&
+		    pssense->tracking.have_trusted_prior_pose &&
+		    sample->timestamp_ns > pssense->tracking.trusted_prior_timestamp_ns) {
+			trusted_pose = pssense->tracking.trusted_prior_pose;
+			can_continue = true;
+		}
+		os_thread_helper_unlock(&pssense->controller_thread);
+
+		if (can_continue) {
+			float dx = sample->pose.position.x - trusted_pose.position.x;
+			float dy = sample->pose.position.y - trusted_pose.position.y;
+			float dz = sample->pose.position.z - trusted_pose.position.z;
+			float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+			float dot = fabsf(sample->pose.orientation.x * trusted_pose.orientation.x +
+			                  sample->pose.orientation.y * trusted_pose.orientation.y +
+			                  sample->pose.orientation.z * trusted_pose.orientation.z +
+			                  sample->pose.orientation.w * trusted_pose.orientation.w);
+			float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
+
+			if (position_delta <= PSSENSE_CONSTELLATION_CONTINUE_POSITION_M &&
+			    orientation_delta <= PSSENSE_CONSTELLATION_CONTINUE_ORIENTATION_RAD) {
+				struct xrt_space_relation continuation_relation = {
+				    .pose = sample->pose,
+				    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+				                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+				                      XRT_SPACE_RELATION_POSITION_VALID_BIT |
+				                      XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
+				};
+
+				/* Leave the exact exposure timestamp free for a later
+				 * same-exposure fused pose.
+				 */
+				timepoint_ns continuation_device_ts =
+				    optical_device_ts > 0 ? optical_device_ts - 1 : optical_device_ts;
+
+				if (m_relation_history_push(pssense->tracking.constellation_relation_history,
+				                            &continuation_relation, continuation_device_ts)) {
+					bool accepted = false;
+
+					os_thread_helper_lock(&pssense->controller_thread);
+					if (sample->timestamp_ns > pssense->tracking.trusted_prior_timestamp_ns) {
+						pssense->tracking.trusted_prior_pose = sample->pose;
+						pssense->tracking.trusted_prior_timestamp_ns = sample->timestamp_ns;
+						pssense->tracking.have_trusted_prior_pose = true;
+						pssense->tracking.last_optical_timestamp_ns =
+						    MAX(pssense->tracking.last_optical_timestamp_ns, sample->timestamp_ns);
+						accepted = true;
+					}
+					os_thread_helper_unlock(&pssense->controller_thread);
+
+					if (accepted) {
+						PSSENSE_INFO(pssense,
+						             "CONSTELLATION_MONOCULAR_CONTINUE side=%c ts=%" PRIi64
+						             " cam=%zu pos_delta_mm=%.1f orientation_delta_deg=%.1f",
+						             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+						             sample->timestamp_ns, sample->camera_index,
+						             position_delta * 1000.0f,
+						             orientation_delta * 180.0f / (float)M_PI);
+					}
+				}
+			}
+		}
+	}
+
+
+	if (have_optical_device_ts && !fused_prior_locked) {
 		struct xrt_space_relation optical_relation = {
 		    .pose = sample->pose,
 		    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
@@ -1625,25 +1766,79 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 		                  last->orientation.z * fused.pose.orientation.z +
 		                  last->orientation.w * fused.pose.orientation.w);
 		float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
-		if (sample->timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
+		int64_t fusion_age_ns =
+		    sample->timestamp_ns - pssense->tracking.last_fused_timestamp_ns;
+		bool last_fusion_recent =
+		    fusion_age_ns > 0 && fusion_age_ns <= PSSENSE_CONSTELLATION_STALE_NS;
+		bool exceeds_jump_gate =
 		    position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
-		    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD) {
+		    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD;
+
+		if (sample->timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
+		    (last_fusion_recent && exceeds_jump_gate)) {
 			group->emitted = true;
 			pssense->tracking.jump_rejection_count++;
 			os_thread_helper_unlock(&pssense->controller_thread);
 			return true;
 		}
+		if (!last_fusion_recent && exceeds_jump_gate) {
+			PSSENSE_INFO(pssense,
+			             "CONSTELLATION_FUSION_REACQUIRE side=%c ts=%" PRIi64
+			             " age_ms=%.1f pos_delta_mm=%.1f orientation_delta_deg=%.1f cameras=%u",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', fused.timestamp_ns,
+			             (double)fusion_age_ns / 1000000.0, position_delta * 1000.0f,
+			             orientation_delta * 180.0f / (float)M_PI, fused_camera_count);
+		}
+
 	}
+	bool first_accepted_fusion = !pssense->tracking.have_last_fused_pose;
 	group->emitted = true;
 	pssense->tracking.last_fused_pose = fused.pose;
 	pssense->tracking.have_last_fused_pose = true;
 	pssense->tracking.last_fused_timestamp_ns = fused.timestamp_ns;
+	pssense->tracking.trusted_prior_pose = fused.pose;
+	pssense->tracking.trusted_prior_timestamp_ns = fused.timestamp_ns;
+	pssense->tracking.have_trusted_prior_pose = true;
 	pssense->tracking.last_fused_camera_count = fused_camera_count;
 	pssense->tracking.fused_pose_count++;
+
+	timepoint_ns fused_device_ts = 0;
+	bool have_fused_device_ts = false;
+	if (fused_prior_after_first_fusion) {
+		int64_t fused_history_host_ts =
+		    fused.timestamp_ns + (first_accepted_fusion ? 1 : 0);
+		have_fused_device_ts =
+		    pssense_host_ts_to_device(pssense, fused_history_host_ts, &fused_device_ts);
+	}
 	os_thread_helper_unlock(&pssense->controller_thread);
 
+	if (fused_prior_after_first_fusion && have_fused_device_ts) {
+		struct xrt_space_relation fused_relation = {
+		    .pose = fused.pose,
+		    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+		                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		                      XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		                      XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
+		};
+		if (m_relation_history_push(pssense->tracking.constellation_relation_history,
+		                            &fused_relation, fused_device_ts)) {
+			os_thread_helper_lock(&pssense->controller_thread);
+			pssense->tracking.last_optical_timestamp_ns =
+			    MAX(pssense->tracking.last_optical_timestamp_ns, fused.timestamp_ns);
+			os_thread_helper_unlock(&pssense->controller_thread);
+		}
 
-	/* Fusion is diagnostic only; leave this camera's sample untouched for tracker learning. */
+		if (first_accepted_fusion) {
+			PSSENSE_INFO(pssense,
+			             "CONSTELLATION_PRIOR_LOCK side=%c ts=%" PRIi64
+			             " cameras=%u: global optical prior now accepts fused poses only",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+			             fused.timestamp_ns, fused_camera_count);
+		}
+	}
+
+
+	/* Per-camera samples still feed tracker/LED-sync learning; only the global prior is fusion-gated. */
 	return true;
 }
 

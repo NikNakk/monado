@@ -422,9 +422,35 @@ correspondence_search_project_pose(struct correspondence_search *cs,
 
 	// Check how many LEDs have matching blobs in this pose, if there's enough we have a good match
 	// @todo: It would be better to be able to pass a list of undistorted blob points
+	if ((mi->search_flags & (CS_FLAG_HAVE_POSE_PRIOR | CS_FLAG_REQUIRE_POSE_PRIOR)) ==
+	    (CS_FLAG_HAVE_POSE_PRIOR | CS_FLAG_REQUIRE_POSE_PRIOR)) {
+		/* CONSTELLATION_STRICT_PRIOR_TOTAL_GATE
+		 *
+		 * The legacy prior test is component-wise (100 mm on each translation axis
+		 * and 30 deg on each quaternion-log component). For a diagnostic which says
+		 * the full pose prior is REQUIRED, also enforce the same total-pose geometry
+		 * used by PS Sense multi-camera fusion: <=80 mm Euclidean translation and
+		 * <=35 deg total quaternion angle.
+		 */
+		struct xrt_vec3 prior_pos_delta = m_vec3_sub(pose->position, mi->pose_prior.position);
+		float prior_position_delta = m_vec3_len(prior_pos_delta);
+		float prior_dot = fabsf(pose->orientation.x * mi->pose_prior.orientation.x +
+		                        pose->orientation.y * mi->pose_prior.orientation.y +
+		                        pose->orientation.z * mi->pose_prior.orientation.z +
+		                        pose->orientation.w * mi->pose_prior.orientation.w);
+		float prior_orientation_delta = 2.0f * acosf(CLAMP(prior_dot, 0.0f, 1.0f));
+
+		if (prior_position_delta > 0.08f || prior_orientation_delta > DEG_TO_RAD(35.0f)) {
+			return false;
+		}
+	}
+
 	if (mi->search_flags & CS_FLAG_HAVE_POSE_PRIOR) {
-		pose_metrics_evaluate_pose_with_prior(&score, pose, false, &mi->pose_prior, mi->pos_error_thresh,
-		                                      mi->rot_error_thresh, cs->blobs, cs->num_points, leds,
+		bool prior_must_match =
+		    (mi->search_flags & CS_FLAG_REQUIRE_POSE_PRIOR) != 0;
+		pose_metrics_evaluate_pose_with_prior(&score, pose, prior_must_match, &mi->pose_prior,
+		                                      mi->pos_error_thresh, mi->rot_error_thresh,
+		                                      cs->blobs, cs->num_points, leds,
 		                                      model->device_id, cs->calib, NULL);
 	} else {
 		pose_metrics_evaluate_pose(&score, pose, cs->blobs, cs->num_points, leds, model->device_id, cs->calib,
