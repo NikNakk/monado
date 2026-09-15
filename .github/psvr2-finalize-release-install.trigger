@@ -1,1 +1,1 @@
-finalize release defaults, diagnostics gating, macOS manifest, warnings, and persistent install - final
+finalize release defaults, diagnostics gating, macOS manifest, warnings, docs, and persistent install - rerun
