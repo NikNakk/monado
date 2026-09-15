@@ -101,11 +101,11 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_metal_shared_event_wait, "XRT_MACOS_METAL_SHARED_EVENT_WAIT", true)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", true)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_early_drawable, "XRT_MACOS_EARLY_DRAWABLE", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"

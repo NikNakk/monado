@@ -2,6 +2,17 @@
 # Copyright 2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
+# High-frequency macOS/PSVR2 CSV timing diagnostics are useful during cadence
+# investigations, but they add work to IMU, pose, and compositor hot paths.
+option(
+	XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	"Compile high-frequency macOS/PSVR2 timing diagnostics"
+	OFF
+	)
+if(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+	add_compile_definitions(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+endif()
+
 # Order matters.
 add_subdirectory(include)
 add_subdirectory(auxiliary)

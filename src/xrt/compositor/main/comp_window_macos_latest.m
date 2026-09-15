@@ -22,7 +22,7 @@ struct comp_target *
 comp_window_macos_create(struct comp_compositor *c);
 extern const struct comp_target_factory comp_target_factory_macos;
 
-DEBUG_GET_ONCE_BOOL_OPTION(macos_present_stale_substitute, "XRT_MACOS_PRESENT_STALE_SUBSTITUTE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_present_stale_substitute, "XRT_MACOS_PRESENT_STALE_SUBSTITUTE", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_immediate, "XRT_MACOS_PRESENT_IMMEDIATE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_display_sync, "XRT_MACOS_DISABLE_DISPLAY_SYNC", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_framebuffer_only, "XRT_MACOS_DISABLE_FRAMEBUFFER_ONLY", false)

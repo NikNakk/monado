@@ -64,7 +64,7 @@ static inline uint64_t
 macos_present_min_duration_us(void)
 {
 	static int initialized = 0;
-	static uint64_t duration_us = 0;
+	static uint64_t duration_us = 8000;
 	if (!initialized) {
 		const char *value = getenv("XRT_MACOS_PRESENT_MIN_DURATION_US");
 		if (value != NULL && value[0] != '\0') {
