@@ -92,6 +92,7 @@ t_apply_dead_reckoning(struct m_ff_vec3_f32 *gyro_ff,
 		if (using_accel) {
 			assert(got && gyro_ts == accel_ts && "Failure getting synced gyro and accel samples");
 		}
+		(void)got;
 		assert(ts >= base_rel_ts && "Accessing imu sample that is older than latest SLAM pose");
 
 		// Update time

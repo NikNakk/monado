@@ -489,7 +489,7 @@ main(int argc, char **argv)
 	}
 
 	fprintf(stderr, "usage: %s {bootstrap|bootout|install|uninstall}\n", argv[0]);
-	fprintf(stderr, "  bootstrap/unbootout are development registration controls using /tmp\n");
+	fprintf(stderr, "  bootstrap/bootout are development registration controls using /tmp\n");
 	fprintf(stderr, "  install/uninstall manage the persistent per-user LaunchAgent\n");
 	return 64;
 }

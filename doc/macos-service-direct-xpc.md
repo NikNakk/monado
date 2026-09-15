@@ -79,8 +79,9 @@ without adding a new OpenXR or Monado IPC protocol field. It is the first
 resource-isolation step needed for a persistent launcher plus temporary VR apps.
 
 PID reuse is not relied upon as token identity: tokens retain random bits and
-must also match the stored owner. Cleanup of any token stranded by a client
-crash is still a follow-on item.
+must also match the stored owner. When the last ordinary IPC connection for an
+application PID closes, the service discards any texture or shared-event tokens
+still owned by that PID, covering normal exit and client crashes.
 
 The standalone broker target is retained temporarily for comparison and
 fallback testing.
@@ -117,8 +118,7 @@ If those environment variables change, run `bootstrap` again so the generated
 plist is refreshed.
 
 This `/tmp` registration is for development and is not intended to survive a
-reboot. A later installation step should use a stable installed executable and
-persistent per-user LaunchAgent registration.
+reboot. Use the persistent installation mode below for normal use.
 
 Remove the development job with:
 
@@ -131,6 +131,38 @@ To return to the old broker during development:
 ```sh
 build-dir/src/xrt/ipc/monado-ipc-metal-xpc-broker bootstrap
 ```
+
+## Persistent per-user installation
+
+For normal use, install Monado to a stable prefix so `monado-service` and
+`monado-service-xpc-control` remain side by side, then register the service:
+
+```sh
+cmake --install build-dir
+installed-prefix/bin/monado-service-xpc-control install
+```
+
+`install` writes `~/Library/LaunchAgents/org.freedesktop.monado.service.plist`,
+registers it in the current per-user launchd domain, and keeps the same on-demand
+Mach service `org.freedesktop.monado.metal-ipc`. Logs go to
+`~/Library/Logs/Monado/monado-service.{out,err}.log`.
+
+Unlike development `bootstrap`, persistent installation does **not** snapshot
+XRT/PSVR2/Vulkan tuning variables from the invoking shell. The proven runtime
+behaviour is supplied by source defaults; the LaunchAgent carries only service
+lifecycle settings such as no-stdin, idle exit, and display-loss shutdown. The
+LaunchAgent is available again after the next login following logout or reboot.
+
+The plist stores the absolute path of its sibling `monado-service`. If the
+installed prefix is moved or replaced at a different path, run `install` again.
+Remove the persistent registration with:
+
+```sh
+installed-prefix/bin/monado-service-xpc-control uninstall
+```
+
+Development `bootstrap` remains useful for A/B testing because it captures the
+current shell's relevant runtime environment into a temporary `/tmp` plist.
 
 ## Validation
 
@@ -165,10 +197,9 @@ must never be accepted for the other process.
 
 The next steps are:
 
-- clean stranded registry entries when a Unix IPC client dies unexpectedly;
 - keep a persistent launcher/home application while foreground applications
   come and go;
 - exercise Monado's existing multi-client active/focused application switching;
 - remove the legacy standalone broker once the direct path has enough soak time;
-- install a reboot-persistent LaunchAgent using a stable installed executable;
-- define idle-shutdown / explicit `Quit VR` policy.
+- refine the user-facing `Quit VR` policy on top of the implemented idle and
+  display-loss shutdown lifecycle.
