@@ -243,7 +243,7 @@ elseif(APPLE)
 			PROPERTIES
 				LANGUAGE OBJC
 				COMPILE_DEFINITIONS
-					"ipc_server_mainloop_init=ipc_server_mainloop_init_apple_vanilla;ipc_server_mainloop_deinit=ipc_server_mainloop_deinit_apple_vanilla"
+					"ipc_server_mainloop_init=ipc_server_mainloop_init_apple_vanilla;ipc_server_mainloop_poll=ipc_server_mainloop_poll_apple_vanilla;ipc_server_mainloop_deinit=ipc_server_mainloop_deinit_apple_vanilla"
 			)
 		set_property(
 			SOURCE server/ipc_server_metal.c
@@ -266,7 +266,7 @@ elseif(APPLE)
 	endif()
 
 	target_link_libraries(
-		ipc_server PRIVATE comp_util "-framework AppKit" "-framework Foundation" "-framework Metal"
+		ipc_server PRIVATE comp_util "-framework AppKit" "-framework CoreGraphics" "-framework Foundation" "-framework Metal"
 		)
 elseif(WIN32)
 	target_sources(
