@@ -4,6 +4,14 @@
 add_executable(monado-service main.c)
 add_sanitizers(monado-service)
 
+if(APPLE)
+	# The macOS service links Homebrew libraries by absolute install name, so it
+	# does not need CMake's inferred build-tree RPATH. Omitting it also avoids
+	# CMake generating a non-idempotent install_name_tool -delete_rpath step on
+	# repeated `cmake --install` invocations.
+	set_target_properties(monado-service PROPERTIES SKIP_BUILD_RPATH TRUE)
+endif()
+
 target_link_libraries(
 	monado-service
 	PRIVATE
