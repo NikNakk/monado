@@ -100,6 +100,8 @@ struct hid_iokit
 	uint8_t force_pssense_ir_output_counter;
 	uint8_t force_pssense_ir_led_sequence;
 	uint32_t force_pssense_ir_cycle_position;
+	bool force_pssense_ir_have_mask;
+	uint32_t force_pssense_ir_mask;
 	bool have_pssense_device_timestamp;
 	uint32_t pssense_device_timestamp_ticks;
 	uint64_t pssense_device_timestamp_host_ns;
@@ -292,17 +294,18 @@ iokit_force_pssense_ir_locked(struct hid_iokit *hid, uint8_t *report, size_t rep
 	 * Runtime pssense reports carry a non-zero host timestamp. In forced-IR
 	 * mode replace those with the exact probe packet shape and force all LEDs
 	 * on. Probe-originated reports have a zero host timestamp, so preserve
-	 * their caller-selected mask to keep --mask-scan-manifest functional.
+	 * their caller-selected mask to keep --force-ir-mask-scan functional.
 	 */
 	bool probe_style_input = iokit_read_le32(report + PSSENSE_HOST_TIMESTAMP_OFFSET) == 0;
 	uint32_t requested_mask = iokit_read_le32(report + PSSENSE_LED_MASK_OFFSET);
+	uint32_t effective_mask = probe_style_input ? requested_mask : UINT32_MAX;
 
 	memset(report, 0, report_length);
 	report[0] = PSSENSE_BT_REPORT_ID;
 	report[1] = (uint8_t)((hid->force_pssense_ir_output_sequence++ & 0x0f) << 4);
 	report[2] = PSSENSE_OUTPUT_REPORT_TAG;
 	report[PSSENSE_OUTPUT_COUNTER_OFFSET] = hid->force_pssense_ir_output_counter++;
-	iokit_write_le32(report + PSSENSE_LED_MASK_OFFSET, probe_style_input ? requested_mask : UINT32_MAX);
+	iokit_write_le32(report + PSSENSE_LED_MASK_OFFSET, effective_mask);
 
 	if (!hid->force_pssense_ir_programmed) {
 		uint64_t now_ns = os_monotonic_get_ns();
@@ -311,13 +314,26 @@ iokit_force_pssense_ir_locked(struct hid_iokit *hid, uint8_t *report, size_t rep
 		uint64_t lead_ticks = (PSSENSE_FORCE_IR_LEAD_NS * 3ULL) / 1000ULL;
 		hid->force_pssense_ir_cycle_position =
 		    hid->pssense_device_timestamp_ticks + (uint32_t)elapsed_ticks + (uint32_t)lead_ticks;
-		hid->force_pssense_ir_led_sequence++;
 		hid->force_pssense_ir_programmed = true;
 		fprintf(stderr,
 		        "os_hid_iokit: PSSENSE_FORCE_IR programmed calibration-probe PRESCAN: period_id=%u "
 		        "cycle=%.3fms lead=%.1fms cycle_position=%u\n",
 		        PSSENSE_LED_PERIOD_ID, (double)PSSENSE_FORCE_IR_CYCLE_NS / 1000000.0,
 		        (double)PSSENSE_FORCE_IR_LEAD_NS / 1000000.0, hid->force_pssense_ir_cycle_position);
+	}
+
+	/*
+	 * The controller latches LED settings when led_sequence changes. Keep the
+	 * same sequence for 10ms keepalive writes and advance it only when the
+	 * effective LED mask changes. This lets the standalone mask scan test one
+	 * stable mask per segment without repeatedly re-latching at packet rate.
+	 */
+	if (!hid->force_pssense_ir_have_mask || effective_mask != hid->force_pssense_ir_mask) {
+		hid->force_pssense_ir_mask = effective_mask;
+		hid->force_pssense_ir_have_mask = true;
+		hid->force_pssense_ir_led_sequence++;
+		fprintf(stderr, "os_hid_iokit: PSSENSE_FORCE_IR latched LED mask=%08x led_seq=%u\n", effective_mask,
+		        hid->force_pssense_ir_led_sequence);
 	}
 
 	/*
