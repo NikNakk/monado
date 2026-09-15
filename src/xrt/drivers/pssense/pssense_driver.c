@@ -1415,33 +1415,10 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	struct t_constellation_tracker_sample fused = {0};
 
 	/*
-	 * Restore upstream acquisition semantics: every solved per-camera pose is useful
-	 * immediately for LED/exposure refinement and optical tracking. Multi-camera fusion
-	 * below remains diagnostic and must not gate tracker acquisition.
+	 * Camera-local solves are candidates only. Do not let one sparse or incorrect
+	 * correspondence update LED timing, optical history, or the tracker's persistent
+	 * pose prior before a synchronized multi-camera consensus exists.
 	 */
-	t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, sample);
-
-	os_thread_helper_lock(&pssense->controller_thread);
-	timepoint_ns optical_device_ts;
-	bool have_optical_device_ts = pssense_host_ts_to_device(pssense, sample->timestamp_ns, &optical_device_ts);
-	os_thread_helper_unlock(&pssense->controller_thread);
-
-	if (have_optical_device_ts) {
-		struct xrt_space_relation optical_relation = {
-		    .pose = sample->pose,
-		    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-		                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-		                      XRT_SPACE_RELATION_POSITION_VALID_BIT |
-		                      XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
-		};
-		if (m_relation_history_push(pssense->tracking.constellation_relation_history, &optical_relation,
-		                            optical_device_ts)) {
-			os_thread_helper_lock(&pssense->controller_thread);
-			pssense->tracking.last_optical_timestamp_ns =
-			    MAX(pssense->tracking.last_optical_timestamp_ns, sample->timestamp_ns);
-			os_thread_helper_unlock(&pssense->controller_thread);
-		}
-	}
 
 	os_thread_helper_lock(&pssense->controller_thread);
 	pssense->tracking.candidate_count++;
@@ -1461,7 +1438,7 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	    !isfinite(sample->metrics.reprojection_error) || sample->metrics.reprojection_error > 5.0) {
 		pssense->tracking.disagreement_count++;
 		os_thread_helper_unlock(&pssense->controller_thread);
-		return true;
+		return false;
 	}
 
 	struct pssense_constellation_candidate_group *group = NULL;
@@ -1482,7 +1459,7 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	group->present[sample->camera_index] = true;
 	if (group->emitted) {
 		os_thread_helper_unlock(&pssense->controller_thread);
-		return true;
+		return false;
 	}
 
 	uint32_t best_anchor = 0;
@@ -1560,7 +1537,7 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 			             PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD * 180.0f / (float)M_PI);
 		}
 		os_thread_helper_unlock(&pssense->controller_thread);
-		return true;
+		return false;
 	}
 
 	fused = group->samples[best_anchor];
@@ -1625,13 +1602,13 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 		                  last->orientation.z * fused.pose.orientation.z +
 		                  last->orientation.w * fused.pose.orientation.w);
 		float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
-		if (sample->timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
+		if (fused.timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
 		    position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
 		    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD) {
 			group->emitted = true;
 			pssense->tracking.jump_rejection_count++;
 			os_thread_helper_unlock(&pssense->controller_thread);
-			return true;
+			return false;
 		}
 	}
 	group->emitted = true;
@@ -1642,8 +1619,40 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	pssense->tracking.fused_pose_count++;
 	os_thread_helper_unlock(&pssense->controller_thread);
 
+	/*
+	 * The device callback contract allows replacing the camera-local solve. Only the
+	 * synchronized fused pose is authoritative: it seeds tracker state, LED timing,
+	 * and optical translation history exactly once for this camera epoch.
+	 */
+	*sample = fused;
+	t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, sample);
 
-	/* Fusion is diagnostic only; leave this camera's sample untouched for tracker learning. */
+	os_thread_helper_lock(&pssense->controller_thread);
+	timepoint_ns optical_device_ts;
+	bool have_optical_device_ts = pssense_host_ts_to_device(pssense, sample->timestamp_ns, &optical_device_ts);
+	os_thread_helper_unlock(&pssense->controller_thread);
+
+	if (have_optical_device_ts) {
+		struct xrt_space_relation optical_relation = {
+		    .pose = sample->pose,
+		    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+		                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		                      XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		                      XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
+		};
+		if (m_relation_history_push(pssense->tracking.constellation_relation_history, &optical_relation,
+		                            optical_device_ts)) {
+			os_thread_helper_lock(&pssense->controller_thread);
+			pssense->tracking.last_optical_timestamp_ns =
+			    MAX(pssense->tracking.last_optical_timestamp_ns, sample->timestamp_ns);
+			os_thread_helper_unlock(&pssense->controller_thread);
+		}
+	}
+
+	PSSENSE_INFO(pssense,
+	             "CONSTELLATION_FUSED_ACCEPT side=%c ts=%" PRIi64 " cameras=%u matched=%u reproj=%.3f",
+	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns, fused_camera_count,
+	             sample->metrics.matched_blob_count, sample->metrics.reprojection_error);
 	return true;
 }
 
