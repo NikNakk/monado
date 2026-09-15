@@ -50,6 +50,7 @@ static CGDirectDisplayID g_compositor_display_id = kCGNullDirectDisplay;
 static uint64_t g_display_loss_since_ns = 0;
 static bool g_display_loss_hidden = false;
 static bool g_display_loss_shutdown_requested = false;
+static bool g_application_icon_attempted = false;
 
 static CGDirectDisplayID
 screen_display_id(NSScreen *screen)
@@ -84,6 +85,41 @@ is_compositor_window(NSWindow *window)
 }
 
 static void
+set_monado_application_icon(void)
+{
+	if (NSApp == nil || g_application_icon_attempted) {
+		return;
+	}
+	g_application_icon_attempted = true;
+
+	/*
+	 * This is the canonical Monado icon artwork from
+	 * src/xrt/targets/android_common/src/main/res/drawable/ic_monado_icon_fullsize.xml,
+	 * converted from Android vector XML to equivalent SVG so AppKit can consume
+	 * it without requiring a macOS application bundle or an external resource.
+	 *
+	 * Artwork copyright 2023 Collabora, Ltd.; SPDX-License-Identifier: CC-BY-4.0.
+	 * The square viewBox only adds transparent vertical padding for a macOS icon
+	 * slot; the path data and #782b90 fill are unchanged.
+	 */
+	NSString *svg =
+	    @"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 150.72 150.72\">"
+	     "<g transform=\"translate(0 3.16)\">"
+	     "<path fill=\"#782b90\" d=\"m143.23,19.75L79.85,0.66c-2.93,-0.88 -6.05,-0.88 -8.97,0L7.49,19.75c-4.45,1.34 -7.49,5.43 -7.49,10.08v85.07c0,4.66 3.07,8.77 7.54,10.09l63.43,18.77c2.87,0.85 5.92,0.85 8.79,0l63.43,-18.77c4.47,-1.32 7.54,-5.43 7.54,-10.09L150.72,29.83c0,-4.64 -3.04,-8.74 -7.49,-10.08ZM49.02,104l-17.99,-5.35c-2.52,-0.75 -4.24,-3.06 -4.24,-5.68v-36.81l22.23,30.57v17.28ZM75.36,108.15v0l-0,-0 -0,0v-0L26.79,41.84l17.99,-5.35c2.35,-0.7 4.88,0.12 6.38,2.06l24.19,31.33 24.19,-31.33c1.5,-1.94 4.04,-2.76 6.38,-2.06l17.99,5.35 -48.56,66.3ZM123.93,92.96c0,2.62 -1.72,4.94 -4.24,5.68l-17.99,5.35v-17.28l22.23,-30.57v36.81Z\"/>"
+	     "</g></svg>";
+	NSData *data = [svg dataUsingEncoding:NSUTF8StringEncoding];
+	NSImage *image = data != nil ? [[NSImage alloc] initWithData:data] : nil;
+	if (image == nil) {
+		U_LOG_W("Could not create AppKit image from the embedded Monado project icon");
+		return;
+	}
+
+	[NSApp setApplicationIconImage:image];
+	[image release];
+	U_LOG_I("Set macOS service application icon to the Monado project icon");
+}
+
+static void
 reset_compositor_window_tracking(void)
 {
 	[g_compositor_window release];
@@ -100,6 +136,8 @@ discover_compositor_window(void)
 	if (NSApp == nil) {
 		return;
 	}
+
+	set_monado_application_icon();
 
 	if (g_compositor_window != nil) {
 		if ([[NSApp windows] containsObject:g_compositor_window]) {
