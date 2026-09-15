@@ -5,6 +5,7 @@ on:
     branches:
       - macos-service-direct-xpc
       - macos-service-direct-xpc-owned-resources
+      - macos-service-direct-xpc-cadence
     paths:
       - .github/workflows/macos-service-direct-xpc.yml
       - src/xrt/ipc/**
