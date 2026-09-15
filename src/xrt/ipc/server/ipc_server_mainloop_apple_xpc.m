@@ -9,6 +9,8 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 
+#include <dispatch/dispatch.h>
+
 #include "server/ipc_server.h"
 #include "shared/ipc_metal_xpc_service.h"
 #include "os/os_time.h"
@@ -16,9 +18,12 @@
 #include "util/u_logging.h"
 
 #include <stdint.h>
+#include <stdio.h>
+#include <unistd.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_exit_on_display_loss, "XRT_MACOS_EXIT_ON_DISPLAY_LOSS", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_display_loss_delay_ms, "XRT_MACOS_DISPLAY_LOSS_DELAY_MS", 3000)
+DEBUG_GET_ONCE_NUM_OPTION(macos_display_loss_shutdown_watchdog_ms, "XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS", 5000)
 
 /*
  * ipc_server_mainloop_apple.c is compiled with source-local symbol redirects
@@ -115,7 +120,8 @@ discover_compositor_window(void)
 
 		g_compositor_window = [window retain];
 		g_compositor_display_id = display_id;
-		U_LOG_I("Tracking macOS compositor window on display id=%u", (unsigned)display_id);
+		U_LOG_I("Tracking macOS compositor window on display id=%u (service pid=%d)", (unsigned)display_id,
+		        (int)getpid());
 		return;
 	}
 }
@@ -144,6 +150,32 @@ get_display_loss_delay_ns(void)
 		delay_ms = 0;
 	}
 	return (uint64_t)delay_ms * 1000000ULL;
+}
+
+static void
+schedule_display_loss_shutdown_watchdog(void)
+{
+	int64_t watchdog_ms = debug_get_num_option_macos_display_loss_shutdown_watchdog_ms();
+	if (watchdog_ms <= 0) {
+		return;
+	}
+
+	pid_t pid = getpid();
+	dispatch_time_t when = dispatch_time(DISPATCH_TIME_NOW, watchdog_ms * (int64_t)NSEC_PER_MSEC);
+	dispatch_after(when, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+		/*
+		 * Reaching this block means normal shutdown did not terminate the
+		 * process in time. The service is launchd-disposable, and process exit
+		 * is safer than leaving a Metal/CAMetalLayer teardown indefinitely
+		 * wedged after its original display has disappeared.
+		 */
+		fprintf(stderr,
+		        "ERROR: macOS display-loss shutdown watchdog expired after %lld ms for monado-service pid=%d; "
+		        "forcing process exit\n",
+		        (long long)watchdog_ms, (int)pid);
+		fflush(stderr);
+		_exit(0);
+	});
 }
 
 static void
@@ -216,8 +248,9 @@ poll_compositor_display_lifecycle(struct ipc_server *vs)
 			return;
 		}
 
-		U_LOG_I("Selected macOS compositor display remains unavailable for %llu ms; shutting down service",
-		        (unsigned long long)(delay_ns / 1000000ULL));
+		U_LOG_I("Selected macOS compositor display remains unavailable for %llu ms; requesting service shutdown (pid=%d)",
+		        (unsigned long long)(delay_ns / 1000000ULL), (int)getpid());
+		schedule_display_loss_shutdown_watchdog();
 		ipc_server_handle_shutdown_signal(vs);
 	}
 }
