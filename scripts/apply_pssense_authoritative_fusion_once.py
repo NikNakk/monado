@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""One-shot repository maintenance helper: make PS Sense multicamera fusion authoritative."""
+
+from pathlib import Path
+
+path = Path("src/xrt/drivers/pssense/pssense_driver.c")
+text = path.read_text()
+start = text.index("static bool\npssense_push_constellation_tracker_sample(")
+end = text.index("/*\n *\n * Constellation tracking source implementations", start)
+func = text[start:end]
+
+old_prefix = """\t/*
+\t * Restore upstream acquisition semantics: every solved per-camera pose is useful
+\t * immediately for LED/exposure refinement and optical tracking. Multi-camera fusion
+\t * below remains diagnostic and must not gate tracker acquisition.
+\t */
+\tt_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, sample);
+
+\tos_thread_helper_lock(&pssense->controller_thread);
+\ttimepoint_ns optical_device_ts;
+\tbool have_optical_device_ts = pssense_host_ts_to_device(pssense, sample->timestamp_ns, &optical_device_ts);
+\tos_thread_helper_unlock(&pssense->controller_thread);
+
+\tif (have_optical_device_ts) {
+\t\tstruct xrt_space_relation optical_relation = {
+\t\t    .pose = sample->pose,
+\t\t    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+\t\t                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+\t\t                      XRT_SPACE_RELATION_POSITION_VALID_BIT |
+\t\t                      XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
+\t\t};
+\t\tif (m_relation_history_push(pssense->tracking.constellation_relation_history, &optical_relation,
+\t\t                            optical_device_ts)) {
+\t\t\tos_thread_helper_lock(&pssense->controller_thread);
+\t\t\tpssense->tracking.last_optical_timestamp_ns =
+\t\t\t    MAX(pssense->tracking.last_optical_timestamp_ns, sample->timestamp_ns);
+\t\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\t}
+\t}
+
+"""
+new_prefix = """\t/*
+\t * Camera-local solves are candidates only. Do not let one sparse or incorrect
+\t * correspondence update LED timing, optical history, or the tracker's persistent
+\t * pose prior before a synchronized multi-camera consensus exists.
+\t */
+
+"""
+if func.count(old_prefix) != 1:
+    raise SystemExit("expected per-camera optical-history prefix not found exactly once")
+func = func.replace(old_prefix, new_prefix, 1)
+
+replacements = [
+    (
+        """\t\tpssense->tracking.disagreement_count++;
+\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\treturn true;
+\t}
+
+\tstruct pssense_constellation_candidate_group *group = NULL;""",
+        """\t\tpssense->tracking.disagreement_count++;
+\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\treturn false;
+\t}
+
+\tstruct pssense_constellation_candidate_group *group = NULL;""",
+    ),
+    (
+        """\tif (group->emitted) {
+\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\treturn true;
+\t}""",
+        """\tif (group->emitted) {
+\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\treturn false;
+\t}""",
+    ),
+    (
+        """\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\treturn true;
+\t}
+
+\tfused = group->samples[best_anchor];""",
+        """\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\treturn false;
+\t}
+
+\tfused = group->samples[best_anchor];""",
+    ),
+    (
+        """\t\tif (sample->timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||""",
+        """\t\tif (fused.timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||""",
+    ),
+    (
+        """\t\t\tpssense->tracking.jump_rejection_count++;
+\t\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\t\treturn true;
+\t\t}""",
+        """\t\t\tpssense->tracking.jump_rejection_count++;
+\t\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\t\treturn false;
+\t\t}""",
+    ),
+]
+for old, new in replacements:
+    if func.count(old) != 1:
+        raise SystemExit(f"expected replacement target not found exactly once:\n{old}")
+    func = func.replace(old, new, 1)
+
+old_tail = """\tos_thread_helper_unlock(&pssense->controller_thread);
+
+
+\t/* Fusion is diagnostic only; leave this camera's sample untouched for tracker learning. */
+\treturn true;
+}
+
+"""
+new_tail = """\tos_thread_helper_unlock(&pssense->controller_thread);
+
+\t/*
+\t * The device callback contract allows replacing the camera-local solve. Only the
+\t * synchronized fused pose is authoritative: it seeds tracker state, LED timing,
+\t * and optical translation history exactly once for this camera epoch.
+\t */
+\t*sample = fused;
+\tt_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, sample);
+
+\tos_thread_helper_lock(&pssense->controller_thread);
+\ttimepoint_ns optical_device_ts;
+\tbool have_optical_device_ts = pssense_host_ts_to_device(pssense, sample->timestamp_ns, &optical_device_ts);
+\tos_thread_helper_unlock(&pssense->controller_thread);
+
+\tif (have_optical_device_ts) {
+\t\tstruct xrt_space_relation optical_relation = {
+\t\t    .pose = sample->pose,
+\t\t    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+\t\t                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+\t\t                      XRT_SPACE_RELATION_POSITION_VALID_BIT |
+\t\t                      XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
+\t\t};
+\t\tif (m_relation_history_push(pssense->tracking.constellation_relation_history, &optical_relation,
+\t\t                            optical_device_ts)) {
+\t\t\tos_thread_helper_lock(&pssense->controller_thread);
+\t\t\tpssense->tracking.last_optical_timestamp_ns =
+\t\t\t    MAX(pssense->tracking.last_optical_timestamp_ns, sample->timestamp_ns);
+\t\t\tos_thread_helper_unlock(&pssense->controller_thread);
+\t\t}
+\t}
+
+\tPSSENSE_INFO(pssense,
+\t             "CONSTELLATION_FUSED_ACCEPT side=%c ts=%" PRIi64 " cameras=%u matched=%u reproj=%.3f",
+\t             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns, fused_camera_count,
+\t             sample->metrics.matched_blob_count, sample->metrics.reprojection_error);
+\treturn true;
+}
+
+"""
+if func.count(old_tail) != 1:
+    raise SystemExit("expected diagnostic-only function tail not found exactly once")
+func = func.replace(old_tail, new_tail, 1)
+
+text = text[:start] + func + text[end:]
+path.write_text(text)
+print("patched", path)
