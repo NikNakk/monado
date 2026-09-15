@@ -66,7 +66,7 @@ extern "C" {
 
 /*!
  * @defgroup aux_os_time Portable Timekeeping
- * @ingroup aux_os_time
+ * @ingroup aux_os
  *
  * @brief Unifying wrapper around system time retrieval functions.
  */
