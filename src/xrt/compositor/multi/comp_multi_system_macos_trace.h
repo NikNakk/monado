@@ -34,7 +34,7 @@
 DEBUG_GET_ONCE_BOOL_OPTION(macos_client_frame_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_divisor, "XRT_MACOS_CLIENT_FRAME_DIVISOR", 0)
 DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_min_hold, "XRT_MACOS_CLIENT_FRAME_MIN_HOLD", 0)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_qos, "XRT_MACOS_COMPOSITOR_QOS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_qos, "XRT_MACOS_COMPOSITOR_QOS", true)
 
 static FILE *g_macos_client_frame_trace = NULL;
 static uint64_t g_macos_client_frame_trace_rows = 0;
@@ -303,5 +303,7 @@ macos_os_thread_helper_name_with_qos(struct os_thread_helper *oth, const char *n
 #define os_thread_helper_name(oth, name) macos_os_thread_helper_name_with_qos((oth), (name))
 #define multi_compositor_deliver_any_frames(mc, display_time_ns)                                                     \
 	macos_deliver_client_frame_cadenced((mc), (display_time_ns), system_frame_id)
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 #define multi_compositor_latch_frame_locked(mc, when_ns, system_frame_id)                                            \
 	macos_trace_multi_compositor_latch_frame_locked((mc), (when_ns), (system_frame_id), display_time_ns)
+#endif

@@ -73,20 +73,22 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_default_brightness, "PSVR2_DEFAULT_BRIGHTNESS"
 
 DEBUG_GET_ONCE_LOG_OPTION(psvr2_log, "PSVR2_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_driver_timing_trace, "PSVR2_DRIVER_TIMING_TRACE", true)
+#endif
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_filtered_linear_prediction, "PSVR2_FILTERED_LINEAR_PREDICTION", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_ALPHA", 0.25f)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", true)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_tau_ms, "PSVR2_CONTINUITY_TAU_MS", 4.0f)
-DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_MM", 5.0f)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_full_linear_horizon, "PSVR2_FULL_LINEAR_HORIZON", false)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", false)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_MM", 7.5f)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_full_linear_horizon, "PSVR2_FULL_LINEAR_HORIZON", true)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", true)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_alpha, "PSVR2_ACCELERATION_ALPHA", 0.25f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_gain, "PSVR2_ACCELERATION_GAIN", 0.5f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_limit, "PSVR2_ACCELERATION_LIMIT", 2.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_min_speed, "PSVR2_ACCELERATION_MIN_SPEED", 0.01f)
-DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_horizon_ms, "PSVR2_ACCELERATION_HORIZON_MS", 80.0f)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_horizon_ms, "PSVR2_ACCELERATION_HORIZON_MS", 90.0f)
 
 static float
 psvr2_prediction_parameter(float value, float fallback, float minimum, float maximum)
@@ -94,7 +96,7 @@ psvr2_prediction_parameter(float value, float fallback, float minimum, float max
 	return isfinite(value) ? fminf(maximum, fmaxf(minimum, value)) : fallback;
 }
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 #define PSVR2_PENDING_HORIZON_PREDICTIONS 256
 
 struct psvr2_pending_horizon_prediction
@@ -578,7 +580,7 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 
 	psvr2_usb_destroy(hmd);
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	psvr2_timing_trace_close();
 #endif
 
@@ -749,7 +751,7 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	timepoint_ns prediction_ns_hw = at_timestamp_ns - hmd->hw2mono_vts;
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	timepoint_ns trace_latest_slam_vts_ns = hmd->last_slam_vts_ns;
 	timepoint_ns trace_latest_imu_vts_ns = hmd->last_imu_vts_ns;
 	time_duration_ns trace_hw2mono_vts = hmd->hw2mono_vts;
@@ -769,7 +771,7 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 	// Push the normal head pose
 	struct xrt_space_relation *tracker_relation = m_relation_chain_reserve(&chain);
 	hmd_get_raw_tracker_pose(hmd, prediction_ns_hw, trace_host_query_ns, tracker_relation);
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
 		psvr2_timing_trace_enqueue_horizon(hmd, trace_host_query_ns, prediction_ns_hw,
 		                                     &tracker_relation->pose.position);
@@ -781,7 +783,7 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 	// Resolve the final relation
 	m_relation_chain_resolve(&chain, out_relation);
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
 		psvr2_timing_trace_pose(trace_host_query_ns, at_timestamp_ns, prediction_ns_hw, trace_latest_slam_vts_ns,
 		                         trace_latest_imu_vts_ns, trace_hw2mono_vts, out_relation);
@@ -880,7 +882,7 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 	m_clock_offset_a2b(IMU_FREQ, now_vts, estimated_sample_time, &hmd->hw2mono_vts);
 	m_clock_offset_a2b(IMU_FREQ, now_imu, estimated_sample_time, &hmd->hw2mono_imu);
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	psvr2_timing_trace_imu(hmd, &imu_data, estimated_sample_time, now_vts, now_imu);
 #endif
 
@@ -1126,7 +1128,7 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 		predicted_position.z = prior_relation.pose.position.z + prior_relation.linear_velocity.z * dt_s;
 	}
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	if (have_prior_relation) {
 		psvr2_timing_trace_score_horizon(prior_relation_ts, &prior_relation.pose.position, pose_sample.timestamp_ns,
 		                                 &relation.pose.position);
@@ -1158,7 +1160,7 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 		hmd->filtered_linear_velocity.z += alpha * (estimated_relation.linear_velocity.z - hmd->filtered_linear_velocity.z);
 	}
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	psvr2_timing_trace_slam(hmd, received_ns, vts_ns, &estimated_relation);
 	if (have_prior_relation) {
 		psvr2_timing_trace_prediction(hmd, vts_ns, prediction_dt_ns, &relation.pose.position, &predicted_position,
@@ -1848,7 +1850,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
 
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	psvr2_timing_trace_open();
 #endif
 
@@ -1956,7 +1958,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	    debug_get_bool_option_psvr2_acceleration_prediction() || hmd->continuity_prediction_enabled;
 	hmd->continuity_params = (struct psvr2_continuity_params){
 	    .tau_s = 0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_continuity_tau_ms(), 4.0f, 0.5f, 20.0f),
-	    .limit_m = 0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_continuity_limit_mm(), 5.0f, 0.0f, 20.0f),
+	    .limit_m = 0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_continuity_limit_mm(), 7.5f, 0.0f, 20.0f),
 	};
 	hmd->linear_prediction_params = (struct psvr2_linear_prediction_params){
 	    .alpha = psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_alpha(), 0.25f, 0.0f, 1.0f),
@@ -1966,7 +1968,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	    .min_speed =
 	        psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_min_speed(), 0.01f, 0.0f, 1.0f),
 	    .max_horizon_s =
-	        0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_horizon_ms(), 80.0f, 0.0f, 120.0f),
+	        0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_horizon_ms(), 90.0f, 0.0f, 120.0f),
 	};
 	hmd->info.lens_horizontal_separation_meters = 0.13f / 2.0f;
 	hmd->info.lens_vertical_position_meters = 0.07f / 2.0f;

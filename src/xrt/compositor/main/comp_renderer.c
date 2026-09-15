@@ -64,10 +64,10 @@ DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)
-DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", LONG_MIN)
+DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", 2000)
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_skip_blocking_gpu_timestamps, "XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_defer_gpu_timestamps, "XRT_MACOS_DEFER_GPU_TIMESTAMPS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_defer_gpu_timestamps, "XRT_MACOS_DEFER_GPU_TIMESTAMPS", true)
 #endif
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
@@ -267,11 +267,13 @@ renderer_late_render_trace_close(struct comp_renderer *r)
 static void
 renderer_late_render_wait(struct comp_renderer *r)
 {
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	r->late_render_target_ns = 0;
 	r->late_render_pose_begin_ns = 0;
 	r->late_render_pose_end_ns = 0;
 	r->late_render_wait_begin_ns = (int64_t)os_monotonic_get_ns();
 	r->late_render_wait_end_ns = r->late_render_wait_begin_ns;
+#endif
 
 	int64_t desired_offset_us = 0;
 	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
@@ -306,7 +308,9 @@ renderer_late_render_wait(struct comp_renderer *r)
 		target_ns = predicted_ns - lead_ns;
 	}
 
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	r->late_render_target_ns = target_ns;
+#endif
 
 	/*
 	 * Previous traces showed 2-3 ms scheduler overshoot with only a
@@ -317,7 +321,9 @@ renderer_late_render_wait(struct comp_renderer *r)
 	for (;;) {
 		int64_t now_ns = (int64_t)os_monotonic_get_ns();
 		if (now_ns >= target_ns) {
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 			r->late_render_wait_end_ns = now_ns;
+#endif
 			break;
 		}
 
@@ -537,7 +543,7 @@ calc_pose_data(struct comp_renderer *r,
 	int64_t end_timestamp_ns = begin_timestamp_ns + scanout_time_ns;
 
 	// Pose at beginning of scanout
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	r->late_render_pose_begin_ns = (int64_t)os_monotonic_get_ns();
 #endif
 	xrt_result_t xret = xrt_device_get_view_poses( //
@@ -549,7 +555,7 @@ calc_pose_data(struct comp_renderer *r,
 	    &head_relation[0],                         // out_head_relation
 	    xdev_fovs,                                 // out_fovs
 	    xdev_poses[0]);                            //
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	r->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();
 #endif
 	if (xret != XRT_SUCCESS) {
@@ -571,7 +577,7 @@ calc_pose_data(struct comp_renderer *r,
 		    &head_relation[1],            // out_head_relation
 		    xdev_fovs,                    // out_fovs
 		    xdev_poses[1]);               // out_poses
-#ifdef XRT_OS_OSX
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 		r->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();
 #endif
 		if (xret != XRT_SUCCESS) {
@@ -840,7 +846,9 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	r->settings = &c->settings;
 
 #ifdef XRT_OS_OSX
+	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_open(r);
+#endif
 	int64_t desired_offset_us = 0;
 	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
 	int64_t late_render_lead_us = renderer_get_macos_late_render_lead_us();
@@ -1204,7 +1212,9 @@ renderer_fini(struct comp_renderer *r)
 	struct vk_bundle *vk = &r->c->base.vk;
 
 #ifdef XRT_OS_OSX
+	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_close(r);
+#endif
 #endif
 
 	// Command buffers
@@ -1504,7 +1514,9 @@ comp_renderer_draw(struct comp_renderer *r)
 	}
 
 #ifdef XRT_OS_OSX
+	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_frame(r);
+#endif
 #endif
 
 #ifdef XRT_FEATURE_WINDOW_PEEK
