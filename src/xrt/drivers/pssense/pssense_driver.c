@@ -290,6 +290,11 @@ struct pssense_device
 		struct xrt_pose last_fused_pose;
 		bool have_last_fused_pose;
 
+		/* World-space rotation that aligns the corrected IMU orientation to trusted optical orientation. */
+		struct xrt_quat optical_from_imu_orientation;
+		bool have_optical_from_imu_orientation;
+		int64_t optical_from_imu_timestamp_ns;
+
 		struct m_relation_history *imu_relation_history;
 		struct m_imu_3dof fusion;
 		struct xrt_pose pose;
@@ -1001,6 +1006,22 @@ pssense_get_imu_fusion_pose(struct pssense_device *pssense,
 }
 
 static void
+pssense_get_corrected_imu_pose(struct pssense_device *pssense,
+                               int64_t at_timestamp_ns,
+                               struct xrt_space_relation *out_relation)
+{
+	pssense_get_imu_fusion_pose(pssense, at_timestamp_ns, out_relation);
+
+	/* Put the IMU orientation in the same LED-model coordinate frame used by optical tracking. */
+	struct xrt_relation_chain imu_chain = {0};
+	struct xrt_pose imu_correction = XRT_POSE_IDENTITY;
+	imu_correction.orientation = pssense->tracking.T_led_imu.orientation;
+	m_relation_chain_push_pose(&imu_chain, &imu_correction);
+	*m_relation_chain_reserve(&imu_chain) = *out_relation;
+	m_relation_chain_resolve(&imu_chain, out_relation);
+}
+
+static void
 pssense_get_constellation_pose(struct pssense_device *pssense,
                                int64_t at_timestamp_ns,
                                struct xrt_space_relation *out_relation)
@@ -1014,13 +1035,7 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 	struct xrt_space_relation optical = XRT_SPACE_RELATION_ZERO;
 	struct xrt_space_relation imu = XRT_SPACE_RELATION_ZERO;
 	m_relation_history_get(pssense->tracking.constellation_relation_history, device_ts, &optical);
-	m_relation_history_get(pssense->tracking.imu_relation_history, device_ts, &imu);
-	struct xrt_relation_chain imu_chain = {0};
-	struct xrt_pose imu_correction = XRT_POSE_IDENTITY;
-	imu_correction.orientation = pssense->tracking.T_led_imu.orientation;
-	m_relation_chain_push_pose(&imu_chain, &imu_correction);
-	*m_relation_chain_reserve(&imu_chain) = imu;
-	m_relation_chain_resolve(&imu_chain, &imu);
+	pssense_get_corrected_imu_pose(pssense, at_timestamp_ns, &imu);
 	*out_relation = optical;
 	bool optical_fresh = pssense->tracking.last_optical_timestamp_ns > 0 &&
 	                     at_timestamp_ns >= pssense->tracking.last_optical_timestamp_ns &&
@@ -1429,18 +1444,34 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	 * this residual yet.
 	 */
 	struct xrt_space_relation imu_orientation_relation = XRT_SPACE_RELATION_ZERO;
-	pssense_get_constellation_pose(pssense, sample->timestamp_ns, &imu_orientation_relation);
+	pssense_get_corrected_imu_pose(pssense, sample->timestamp_ns, &imu_orientation_relation);
 	bool have_imu_orientation =
 	    (imu_orientation_relation.relation_flags &
 	     (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT)) ==
 	    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 	float imu_delta_deg = NAN;
+	float imu_aligned_delta_deg = NAN;
+	double imu_alignment_age_ms = NAN;
 	if (have_imu_orientation) {
 		float imu_dot = fabsf(sample->pose.orientation.x * imu_orientation_relation.pose.orientation.x +
 		                      sample->pose.orientation.y * imu_orientation_relation.pose.orientation.y +
 		                      sample->pose.orientation.z * imu_orientation_relation.pose.orientation.z +
 		                      sample->pose.orientation.w * imu_orientation_relation.pose.orientation.w);
 		imu_delta_deg = 2.0f * acosf(CLAMP(imu_dot, 0.0f, 1.0f)) * 180.0f / (float)M_PI;
+
+		if (pssense->tracking.have_optical_from_imu_orientation) {
+			struct xrt_quat aligned_imu_orientation;
+			math_quat_rotate(&pssense->tracking.optical_from_imu_orientation,
+			                 &imu_orientation_relation.pose.orientation, &aligned_imu_orientation);
+			float aligned_dot = fabsf(sample->pose.orientation.x * aligned_imu_orientation.x +
+			                           sample->pose.orientation.y * aligned_imu_orientation.y +
+			                           sample->pose.orientation.z * aligned_imu_orientation.z +
+			                           sample->pose.orientation.w * aligned_imu_orientation.w);
+			imu_aligned_delta_deg =
+			    2.0f * acosf(CLAMP(aligned_dot, 0.0f, 1.0f)) * 180.0f / (float)M_PI;
+			imu_alignment_age_ms =
+			    (double)(sample->timestamp_ns - pssense->tracking.optical_from_imu_timestamp_ns) / 1000000.0;
+		}
 	}
 
 	pssense->tracking.candidate_count++;
@@ -1450,14 +1481,17 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	PSSENSE_INFO(pssense,
 	             "CONSTELLATION_CANDIDATE side=%c ts=%" PRIi64
 	             " cam=%zu pos=(%.6f,%.6f,%.6f) quat=(%.6f,%.6f,%.6f,%.6f) matched=%u visible=%u reproj=%.3f "
-	             "brightness=%.3f imu_valid=%u imu_quat=(%.6f,%.6f,%.6f,%.6f) imu_delta_deg=%.2f",
+	             "brightness=%.3f imu_valid=%u imu_quat=(%.6f,%.6f,%.6f,%.6f) imu_delta_deg=%.2f "
+	             "imu_aligned_valid=%u imu_aligned_delta_deg=%.2f imu_alignment_age_ms=%.1f",
 	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns, sample->camera_index,
 	             sample->pose.position.x, sample->pose.position.y, sample->pose.position.z,
 	             sample->pose.orientation.x, sample->pose.orientation.y, sample->pose.orientation.z,
 	             sample->pose.orientation.w, sample->metrics.matched_blob_count, sample->metrics.visible_led_count,
 	             sample->metrics.reprojection_error, sample->average_brightness, have_imu_orientation ? 1u : 0u,
 	             imu_orientation_relation.pose.orientation.x, imu_orientation_relation.pose.orientation.y,
-	             imu_orientation_relation.pose.orientation.z, imu_orientation_relation.pose.orientation.w, imu_delta_deg);
+	             imu_orientation_relation.pose.orientation.z, imu_orientation_relation.pose.orientation.w, imu_delta_deg,
+	             have_imu_orientation && pssense->tracking.have_optical_from_imu_orientation ? 1u : 0u,
+	             imu_aligned_delta_deg, imu_alignment_age_ms);
 	if (sample->camera_index >= PSSENSE_CONSTELLATION_CAMERA_COUNT || sample->metrics.matched_blob_count < 3 ||
 	    !isfinite(sample->metrics.reprojection_error) || sample->metrics.reprojection_error > 5.0) {
 		pssense->tracking.disagreement_count++;
@@ -1615,7 +1649,15 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	fused.pose.orientation = (struct xrt_quat){quaternion[0] / quaternion_norm, quaternion[1] / quaternion_norm,
 	                                           quaternion[2] / quaternion_norm, quaternion[3] / quaternion_norm};
 
+	bool reacquiring = false;
 	if (pssense->tracking.have_last_fused_pose) {
+		if (fused.timestamp_ns <= pssense->tracking.last_fused_timestamp_ns) {
+			group->emitted = true;
+			pssense->tracking.jump_rejection_count++;
+			os_thread_helper_unlock(&pssense->controller_thread);
+			return false;
+		}
+
 		struct xrt_pose *last = &pssense->tracking.last_fused_pose;
 		float dx = last->position.x - fused.pose.position.x;
 		float dy = last->position.y - fused.pose.position.y;
@@ -1626,15 +1668,44 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 		                  last->orientation.z * fused.pose.orientation.z +
 		                  last->orientation.w * fused.pose.orientation.w);
 		float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
-		if (fused.timestamp_ns <= pssense->tracking.last_fused_timestamp_ns ||
-		    position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
-		    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD) {
-			group->emitted = true;
-			pssense->tracking.jump_rejection_count++;
-			os_thread_helper_unlock(&pssense->controller_thread);
-			return false;
+		int64_t age_ns = fused.timestamp_ns - pssense->tracking.last_fused_timestamp_ns;
+
+		if (age_ns <= PSSENSE_CONSTELLATION_STALE_NS) {
+			if (position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
+			    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD) {
+				group->emitted = true;
+				pssense->tracking.jump_rejection_count++;
+				os_thread_helper_unlock(&pssense->controller_thread);
+				return false;
+			}
+		} else {
+			reacquiring = true;
+			PSSENSE_INFO(pssense,
+			             "CONSTELLATION_REACQUIRE side=%c ts=%" PRIi64
+			             " gap_ms=%.1f cameras=%u pos_delta_mm=%.1f orientation_delta_deg=%.1f",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', fused.timestamp_ns,
+			             (double)age_ns / 1000000.0, fused_camera_count, position_delta * 1000.0f,
+			             orientation_delta * 180.0f / (float)M_PI);
 		}
 	}
+
+	/* Refresh the optical<-IMU orientation alignment from every trusted fused pose. */
+	struct xrt_space_relation fused_imu_relation = XRT_SPACE_RELATION_ZERO;
+	pssense_get_corrected_imu_pose(pssense, fused.timestamp_ns, &fused_imu_relation);
+	bool have_fused_imu_orientation =
+	    (fused_imu_relation.relation_flags &
+	     (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT)) ==
+	    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	if (have_fused_imu_orientation) {
+		struct xrt_quat inverse_imu_orientation;
+		math_quat_invert(&fused_imu_relation.pose.orientation, &inverse_imu_orientation);
+		math_quat_rotate(&fused.pose.orientation, &inverse_imu_orientation,
+		                 &pssense->tracking.optical_from_imu_orientation);
+		math_quat_normalize(&pssense->tracking.optical_from_imu_orientation);
+		pssense->tracking.have_optical_from_imu_orientation = true;
+		pssense->tracking.optical_from_imu_timestamp_ns = fused.timestamp_ns;
+	}
+
 	group->emitted = true;
 	pssense->tracking.last_fused_pose = fused.pose;
 	pssense->tracking.have_last_fused_pose = true;
@@ -1674,9 +1745,11 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	}
 
 	PSSENSE_INFO(pssense,
-	             "CONSTELLATION_FUSED_ACCEPT side=%c ts=%" PRIi64 " cameras=%u matched=%u reproj=%.3f",
+	             "CONSTELLATION_FUSED_ACCEPT side=%c ts=%" PRIi64
+	             " cameras=%u matched=%u reproj=%.3f reacquired=%u imu_alignment_valid=%u",
 	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns, fused_camera_count,
-	             sample->metrics.matched_blob_count, sample->metrics.reprojection_error);
+	             sample->metrics.matched_blob_count, sample->metrics.reprojection_error, reacquiring ? 1u : 0u,
+	             have_fused_imu_orientation ? 1u : 0u);
 	return true;
 }
 
