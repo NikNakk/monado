@@ -195,6 +195,7 @@ make_launch_environment(void)
 	set_default_environment_value(filtered, @"IPC_EXIT_WHEN_IDLE_DELAY_MS", @"5000");
 	set_default_environment_value(filtered, @"XRT_MACOS_EXIT_ON_DISPLAY_LOSS", @"1");
 	set_default_environment_value(filtered, @"XRT_MACOS_DISPLAY_LOSS_DELAY_MS", @"3000");
+	set_default_environment_value(filtered, @"XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS", @"5000");
 
 	return filtered;
 }
@@ -293,7 +294,7 @@ bootstrap_service(void)
 	printf("Executable: %s\n", service_executable);
 	printf("LaunchAgent plist: %s\n", plist_path);
 	printf("Relevant XRT/PSVR2/Vulkan environment captured from this shell\n");
-	printf("Lifecycle defaults: idle exit after 5000 ms; display-loss exit after 3000 ms (explicit environment overrides preserved)\n");
+	printf("Lifecycle defaults: idle exit after 5000 ms; display-loss exit after 3000 ms; forced-exit watchdog after a further 5000 ms (explicit environment overrides preserved)\n");
 	printf("stdout: %s\n", stdout_path);
 	printf("stderr: %s\n", stderr_path);
 	return 0;
