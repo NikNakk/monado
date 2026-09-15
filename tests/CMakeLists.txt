@@ -31,7 +31,13 @@ if(XRT_HAVE_D3D12)
 	list(APPEND tests tests_aux_d3d_d3d12 tests_comp_client_d3d12)
 endif()
 if(XRT_HAVE_VULKAN)
-	list(APPEND tests tests_comp_client_vulkan tests_uv_to_tangent)
+	# The generic Vulkan client test only implements FD, Android hardware
+	# buffer, and Win32 external handles. macOS uses the IOSurface/Metal path
+	# and has dedicated macOS Vulkan/OpenXR probes below instead.
+	if(NOT APPLE)
+		list(APPEND tests tests_comp_client_vulkan)
+	endif()
+	list(APPEND tests tests_uv_to_tangent)
 endif()
 if(XRT_FEATURE_OPENXR)
 	list(APPEND tests tests_input_transform)
@@ -94,9 +100,11 @@ if(XRT_HAVE_D3D12)
 endif()
 
 if(XRT_HAVE_VULKAN)
-	target_link_libraries(
-		tests_comp_client_vulkan PRIVATE comp_client comp_mock comp_util aux_vk
-		)
+	if(NOT APPLE)
+		target_link_libraries(
+			tests_comp_client_vulkan PRIVATE comp_client comp_mock comp_util aux_vk
+			)
+	endif()
 	target_link_libraries(tests_uv_to_tangent PRIVATE comp_render)
 endif()
 
