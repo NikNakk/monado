@@ -28,6 +28,7 @@ if(APPLE)
 		monado_service_xpc_control
 		PRIVATE xrt-interfaces ipc_shared "-framework Foundation" "-framework Metal"
 		)
+	install(TARGETS monado_service_xpc_control RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 if(XRT_HAVE_SYSTEMD)
