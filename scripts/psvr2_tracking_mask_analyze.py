@@ -107,17 +107,33 @@ def centroid_match_fraction(points: list[list[float]], reference: list[list[floa
     return matched / len(points)
 
 
+def matching_component_count(points: list[list[float]], reference: list[list[float]]) -> int:
+    return round(len(points) * centroid_match_fraction(points, reference))
+
+
 def median_image(images: list[np.ndarray]) -> np.ndarray | None:
     if not images:
         return None
     return np.median(np.stack(images), axis=0).astype(np.uint8)
 
 
+def classify_led_blink_semantics(
+    observed_bits: set[int], bits_with_multiple_matching_components: list[int], bits_with_temporal_toggle: list[int]
+) -> str:
+    if bits_with_temporal_toggle:
+        return "temporal_waveform_supported"
+    if bits_with_multiple_matching_components:
+        return "grouped_or_shared_mask_supported"
+    if observed_bits:
+        return "spatial_mask_supported"
+    return "inconclusive"
+
+
 def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: int) -> dict:
     segments, timing_basis = read_segments(manifest_path)
     grouped = read_images(capture_dir, segments, margin_ms * 1_000_000)
     cameras = []
-    observed_bits = set()
+    observed_bits: set[int] = set()
     for camera in range(4):
         labels = grouped.get(camera, {})
         off = median_image(labels.get("all_off", []))
@@ -128,23 +144,43 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
         per_bit = []
         for bit in range(LED_MASK_BIT_COUNT):
             label = f"bit_{bit:02d}"
-            image = median_image(labels.get(label, []))
+            frames = labels.get(label, [])
+            image = median_image(frames)
             centroids = []
             if off is not None and image is not None:
                 difference = cv2.subtract(image, off)
                 centroids = compact_bright_centroids(difference, threshold)
             match_fraction = centroid_match_fraction(centroids, all_on_centroids)
-            matching_component_count = round(len(centroids) * match_fraction)
-            if matching_component_count > 0:
+            median_matching_component_count = round(len(centroids) * match_fraction)
+
+            frame_matching_counts: list[int] = []
+            if off is not None and all_on_centroids:
+                for frame in frames:
+                    frame_centroids = compact_bright_centroids(cv2.subtract(frame, off), threshold)
+                    frame_matching_counts.append(matching_component_count(frame_centroids, all_on_centroids))
+
+            # A single held bit producing both dark frames and frames containing
+            # several of the same constellation points as all-on is direct
+            # evidence of temporal modulation. A spatial selection bit cannot
+            # change which emitters are enabled while its value is unchanged.
+            lit_frame_count = sum(count >= 2 for count in frame_matching_counts)
+            dark_frame_count = sum(count == 0 for count in frame_matching_counts)
+            temporal_toggle = lit_frame_count > 0 and dark_frame_count > 0
+
+            if median_matching_component_count > 0 or any(count > 0 for count in frame_matching_counts):
                 observed_bits.add(bit)
             per_bit.append(
                 {
                     "bit": bit,
-                    "frame_count": len(labels.get(label, [])),
+                    "frame_count": len(frames),
                     "bright_component_count": len(centroids),
                     "centroids_px": centroids,
                     "fraction_matching_all_on_components": match_fraction,
-                    "matching_all_on_component_count": matching_component_count,
+                    "matching_all_on_component_count": median_matching_component_count,
+                    "matching_all_on_component_counts_per_frame": frame_matching_counts,
+                    "lit_frame_count": lit_frame_count,
+                    "dark_frame_count": dark_frame_count,
+                    "temporal_toggle_with_constant_bit": temporal_toggle,
                 }
             )
 
@@ -165,6 +201,7 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
             for camera in cameras
             for entry in camera["bits"]
             if entry["matching_all_on_component_count"] > 1
+            or max(entry["matching_all_on_component_counts_per_frame"], default=0) > 1
         }
     )
     bits_with_single_matching_component = sorted(
@@ -175,19 +212,27 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
             if entry["matching_all_on_component_count"] == 1
         }
     )
+    temporal_waveform_evidence = [
+        {
+            "camera": camera["camera"],
+            "bit": entry["bit"],
+            "frame_count": entry["frame_count"],
+            "lit_frame_count": entry["lit_frame_count"],
+            "dark_frame_count": entry["dark_frame_count"],
+            "matching_all_on_component_counts_per_frame": entry["matching_all_on_component_counts_per_frame"],
+        }
+        for camera in cameras
+        for entry in camera["bits"]
+        if entry["temporal_toggle_with_constant_bit"]
+    ]
+    bits_with_temporal_toggle = sorted({entry["bit"] for entry in temporal_waveform_evidence})
     unused_or_unseen_bits = sorted(set(range(LED_MASK_BIT_COUNT)) - observed_bits)
-
-    spatial_mask_evidence = bool(observed_bits) and not bits_with_multiple_matching_components
-    grouped_or_shared_evidence = bool(bits_with_multiple_matching_components)
-    if grouped_or_shared_evidence:
-        semantics = "grouped_or_shared_mask_supported"
-    elif spatial_mask_evidence:
-        semantics = "spatial_mask_supported"
-    else:
-        semantics = "inconclusive"
+    semantics = classify_led_blink_semantics(
+        observed_bits, bits_with_multiple_matching_components, bits_with_temporal_toggle
+    )
 
     return {
-        "format": "psvr2-sense-led-mask-analysis-v2",
+        "format": "psvr2-sense-led-mask-analysis-v3",
         "capture_dir": str(capture_dir),
         "mask_manifest": str(manifest_path),
         "threshold": threshold,
@@ -198,13 +243,15 @@ def analyze(capture_dir: Path, manifest_path: Path, threshold: int, margin_ms: i
         "unused_or_unseen_bits": unused_or_unseen_bits,
         "bits_with_single_matching_component": bits_with_single_matching_component,
         "bits_with_multiple_matching_components_in_one_camera": bits_with_multiple_matching_components,
+        "bits_with_temporal_toggle": bits_with_temporal_toggle,
+        "temporal_waveform_evidence": temporal_waveform_evidence,
         "led_blink_semantics_status": semantics,
         "cameras": cameras,
         "note": (
-            "A responsive bit producing at most one all-on-matching compact source per camera supports a spatial LED mask. "
-            "A bit producing multiple simultaneous all-on-matching sources in one camera supports grouped/shared control. "
-            "Bits with no matched response may be unused/reserved or may control emitters not visible in this pose. "
-            "Physical mask-bit to LED-model ID still requires geometric matching across suitable stationary poses."
+            "The strongest temporal-waveform evidence is a single unchanged led_blink bit producing both dark camera "
+            "frames and lit frames containing several of the same spatial constellation points as the all-on reference. "
+            "That cannot be explained by a static per-LED spatial mask. Multiple simultaneous all-on-matching points "
+            "without an in-segment toggle support grouped/shared control but are weaker evidence on their own."
         ),
     }
 
@@ -227,6 +274,8 @@ def main() -> int:
         f"Observed {len(result['observed_bits'])}/{LED_MASK_BIT_COUNT} candidate bits; "
         f"led_blink semantics={result['led_blink_semantics_status']}"
     )
+    if result["bits_with_temporal_toggle"]:
+        print(f"Constant-bit temporal toggles: {result['bits_with_temporal_toggle']}")
     print(f"Wrote {args.output}")
     return 0
 
