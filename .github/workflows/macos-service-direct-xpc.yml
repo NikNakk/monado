@@ -9,7 +9,8 @@ on:
     paths:
       - .github/workflows/macos-service-direct-xpc.yml
       - src/xrt/ipc/**
-      - src/xrt/targets/service/**
+      - src/xrt/targets/**
+      - tests/**
   workflow_dispatch:
 
 permissions:
@@ -53,3 +54,35 @@ jobs:
         run: |
           cmake --install build-service
           cmake --install build-service
+
+  build-full-release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install cmake eigen glslang jpeg-turbo libusb molten-vk ninja pkgconf sdl2-compat vulkan-headers vulkan-loader
+
+      - name: Configure full Release build
+        run: >-
+          cmake -S . -B build-release -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX="${{ runner.temp }}/monado-full-install"
+          -DXRT_FEATURE_SERVICE=ON
+          -DXRT_HAVE_OPENGLES=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_BUILD_DRIVER_PSSENSE=OFF
+
+      - name: Build full Release target set
+        run: cmake --build build-release --parallel
+
+      - name: Verify main installed targets were built
+        run: |
+          test -x build-release/src/xrt/targets/cli/monado-cli
+          test -x build-release/src/xrt/targets/service/monado-service
+          test -x build-release/src/xrt/targets/service/monado-service-xpc-control
+
+      - name: Verify repeatable full install
+        run: |
+          cmake --install build-release
+          cmake --install build-release
