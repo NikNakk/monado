@@ -21,6 +21,25 @@ jobs:
 
       - name: Audit and apply defaults and diagnostic gating
         run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          script = Path('.github/scripts/apply_psvr2_release_defaults.py')
+          text = script.read_text()
+          option_line = '    "XRT_MACOS_PRESENT_MIN_DURATION_US": "8000",\n'
+          if text.count(option_line) != 1:
+              raise SystemExit('Expected one PRESENT_MIN_DURATION entry in migration script')
+          script.write_text(text.replace(option_line, '', 1))
+
+          header = Path('src/xrt/compositor/main/comp_window_macos_trace_buffer.h')
+          text = header.read_text()
+          old = 'static uint64_t duration_us = 0;'
+          new = 'static uint64_t duration_us = 8000;'
+          if text.count(old) != 1:
+              raise SystemExit('Expected one Metal minimum-duration cached default')
+          header.write_text(text.replace(old, new, 1))
+          print('XRT_MACOS_PRESENT_MIN_DURATION_US: custom cached default 0 -> 8000')
+          PY
           python3 .github/scripts/apply_psvr2_release_defaults.py
           git diff --check
           echo '--- resulting diff ---'
