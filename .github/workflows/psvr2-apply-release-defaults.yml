@@ -29,7 +29,19 @@ jobs:
           option_line = '    "XRT_MACOS_PRESENT_MIN_DURATION_US": "8000",\n'
           if text.count(option_line) != 1:
               raise SystemExit('Expected one PRESENT_MIN_DURATION entry in migration script')
-          script.write_text(text.replace(option_line, '', 1))
+          text = text.replace(option_line, '', 1)
+
+          # The large XRT_OS_OSX renderer helper block contains diagnostic state
+          # initialisation as well as the real late-render wait implementation.
+          # Match only the actual os_monotonic_get_ns() pose timestamp blocks so
+          # the behavioural wait helpers stay compiled in normal builds.
+          old_markers = '("late_render_pose_begin_ns =", "late_render_pose_end_ns =")'
+          new_markers = ('("late_render_pose_begin_ns = (int64_t)os_monotonic_get_ns();", '
+                         '"late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();")')
+          if text.count(old_markers) != 1:
+              raise SystemExit('Expected one broad renderer pose-marker tuple')
+          text = text.replace(old_markers, new_markers, 1)
+          script.write_text(text)
 
           header = Path('src/xrt/compositor/main/comp_window_macos_trace_buffer.h')
           text = header.read_text()
