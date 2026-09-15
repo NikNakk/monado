@@ -11,7 +11,12 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from psvr2_camera_mode_survey import CameraPacketFramer, parse_vi_header  # noqa: E402
-from psvr2_tracking_mask_analyze import centroid_match_fraction, compact_bright_centroids, segment_for_time  # noqa: E402
+from psvr2_tracking_mask_analyze import (  # noqa: E402
+    centroid_match_fraction,
+    classify_led_blink_semantics,
+    compact_bright_centroids,
+    segment_for_time,
+)
 
 
 def camera_packet(size, sequence, camera_set=8, width=4, height=3):
@@ -55,6 +60,20 @@ class CameraPacketFramerTests(unittest.TestCase):
         points = [[10.0, 10.0], [20.0, 20.0], [100.0, 100.0]]
         reference = [[20.5, 19.5], [9.5, 10.5], [200.0, 200.0]]
         self.assertAlmostEqual(centroid_match_fraction(points, reference), 2 / 3)
+
+    def test_constant_bit_toggle_takes_precedence_as_temporal_waveform_evidence(self):
+        self.assertEqual(
+            classify_led_blink_semantics({5}, [5], [5]),
+            "temporal_waveform_supported",
+        )
+        self.assertEqual(
+            classify_led_blink_semantics({5}, [5], []),
+            "grouped_or_shared_mask_supported",
+        )
+        self.assertEqual(
+            classify_led_blink_semantics({5}, [], []),
+            "spatial_mask_supported",
+        )
 
     def test_fragmented_and_coalesced_packets(self):
         first = camera_packet(320, 10)
