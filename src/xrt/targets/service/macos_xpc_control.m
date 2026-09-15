@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief Development launchd registration for on-demand monado-service.
+ * @brief launchd registration for on-demand monado-service on macOS.
  * @ingroup ipc
  */
 
@@ -94,6 +94,65 @@ get_log_paths(char out_stdout[PATH_MAX], char out_stderr[PATH_MAX])
 	snprintf(out_stderr, PATH_MAX, "/tmp/monado-service-launchd.%u.err.log", (unsigned)getuid());
 }
 
+static bool
+copy_ns_path(NSString *path, char out_path[PATH_MAX])
+{
+	if (path == nil) {
+		return false;
+	}
+	const char *filesystem_path = path.fileSystemRepresentation;
+	if (filesystem_path == NULL) {
+		return false;
+	}
+	int written = snprintf(out_path, PATH_MAX, "%s", filesystem_path);
+	return written >= 0 && written < PATH_MAX;
+}
+
+static bool
+get_persistent_plist_path(char out_path[PATH_MAX])
+{
+	@autoreleasepool {
+		NSString *path = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/LaunchAgents"]
+		    stringByAppendingPathComponent:@MONADO_XPC_LAUNCHD_LABEL ".plist"];
+		return copy_ns_path(path, out_path);
+	}
+}
+
+static bool
+get_persistent_log_paths(char out_stdout[PATH_MAX], char out_stderr[PATH_MAX])
+{
+	@autoreleasepool {
+		NSString *dir = [[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs"]
+		    stringByAppendingPathComponent:@"Monado"];
+		NSString *stdout_path = [dir stringByAppendingPathComponent:@"monado-service.out.log"];
+		NSString *stderr_path = [dir stringByAppendingPathComponent:@"monado-service.err.log"];
+		return copy_ns_path(stdout_path, out_stdout) && copy_ns_path(stderr_path, out_stderr);
+	}
+}
+
+static bool
+ensure_persistent_directories(void)
+{
+	@autoreleasepool {
+		NSFileManager *fm = [NSFileManager defaultManager];
+		NSArray<NSString *> *directories = @[
+			[NSHomeDirectory() stringByAppendingPathComponent:@"Library/LaunchAgents"],
+			[[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs"]
+			    stringByAppendingPathComponent:@"Monado"],
+		];
+		for (NSString *directory in directories) {
+			NSError *error = nil;
+			if (![fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&error]) {
+				const char *message = error != nil ? error.localizedDescription.UTF8String : "unknown error";
+				fprintf(stderr, "Could not create '%s': %s\n", directory.fileSystemRepresentation,
+				        message != NULL ? message : "unknown error");
+				return false;
+			}
+		}
+		return true;
+	}
+}
+
 static int
 run_launchctl(const char *verb, const char *arg1, const char *arg2)
 {
@@ -167,19 +226,20 @@ set_default_environment_value(NSMutableDictionary *environment, NSString *key, N
 }
 
 static NSDictionary *
-make_launch_environment(void)
+make_launch_environment(bool capture_current_environment)
 {
-	NSDictionary *current = [[NSProcessInfo processInfo] environment];
 	NSMutableDictionary *filtered = [NSMutableDictionary dictionary];
+	if (capture_current_environment) {
+		NSDictionary *current = [[NSProcessInfo processInfo] environment];
+		for (NSString *key in current) {
+			if (!should_forward_environment_key(key)) {
+				continue;
+			}
 
-	for (NSString *key in current) {
-		if (!should_forward_environment_key(key)) {
-			continue;
-		}
-
-		NSString *value = [current objectForKey:key];
-		if (value != nil) {
-			[filtered setObject:value forKey:key];
+			NSString *value = [current objectForKey:key];
+			if (value != nil) {
+				[filtered setObject:value forKey:key];
+			}
 		}
 	}
 
@@ -189,7 +249,8 @@ make_launch_environment(void)
 	/*
 	 * launchd keeps the registration around after the process exits, so the
 	 * service itself should be disposable. These are launchd-only defaults:
-	 * explicit values exported by the developer/user are preserved.
+	 * explicit values exported by the developer/user are preserved in the
+	 * development bootstrap mode.
 	 */
 	set_default_environment_value(filtered, @"IPC_EXIT_WHEN_IDLE", @"1");
 	set_default_environment_value(filtered, @"IPC_EXIT_WHEN_IDLE_DELAY_MS", @"5000");
@@ -201,7 +262,8 @@ make_launch_environment(void)
 }
 
 static bool
-write_launch_agent_plist(const char *path, const char *service_executable)
+write_launch_agent_plist(const char *path, const char *service_executable, bool capture_current_environment,
+                         bool persistent_logs)
 {
 	@autoreleasepool {
 		NSString *exe = [NSString stringWithUTF8String:service_executable];
@@ -211,10 +273,11 @@ write_launch_agent_plist(const char *path, const char *service_executable)
 
 		char stdout_path[PATH_MAX] = {0};
 		char stderr_path[PATH_MAX] = {0};
-		get_log_paths(stdout_path, stderr_path);
-		NSString *stdout_string = [NSString stringWithUTF8String:stdout_path];
-		NSString *stderr_string = [NSString stringWithUTF8String:stderr_path];
-		NSDictionary *launch_environment = make_launch_environment();
+		bool have_log_paths = persistent_logs ? get_persistent_log_paths(stdout_path, stderr_path)
+		                                      : (get_log_paths(stdout_path, stderr_path), true);
+		NSString *stdout_string = have_log_paths ? [NSString stringWithUTF8String:stdout_path] : nil;
+		NSString *stderr_string = have_log_paths ? [NSString stringWithUTF8String:stderr_path] : nil;
+		NSDictionary *launch_environment = make_launch_environment(capture_current_environment);
 
 		if (exe == nil || plist_path == nil || label == nil || mach_service == nil || stdout_string == nil ||
 		    stderr_string == nil || launch_environment == nil) {
@@ -248,6 +311,17 @@ write_launch_agent_plist(const char *path, const char *service_executable)
 	}
 }
 
+static void
+remove_development_registrations(const char *legacy_target, const char *direct_target, const char *legacy_plist_path,
+                                 const char *plist_path)
+{
+	/* The old broker and the service intentionally advertise the same Mach name. */
+	(void)run_launchctl("bootout", legacy_target, NULL);
+	(void)run_launchctl("bootout", direct_target, NULL);
+	unlink(legacy_plist_path);
+	unlink(plist_path);
+}
+
 static int
 bootstrap_service(void)
 {
@@ -268,13 +342,9 @@ bootstrap_service(void)
 	get_plist_path(plist_path);
 	get_legacy_plist_path(legacy_plist_path);
 
-	/* The old broker and the service intentionally advertise the same Mach name. */
-	(void)run_launchctl("bootout", legacy_target, NULL);
-	(void)run_launchctl("bootout", direct_target, NULL);
-	unlink(legacy_plist_path);
-	unlink(plist_path);
+	remove_development_registrations(legacy_target, direct_target, legacy_plist_path, plist_path);
 
-	if (!write_launch_agent_plist(plist_path, service_executable)) {
+	if (!write_launch_agent_plist(plist_path, service_executable, true, false)) {
 		return 2;
 	}
 
@@ -288,13 +358,77 @@ bootstrap_service(void)
 	char stderr_path[PATH_MAX] = {0};
 	get_log_paths(stdout_path, stderr_path);
 
-	printf("monado-service registered for on-demand XPC activation\n");
+	printf("monado-service registered for on-demand XPC activation (development mode)\n");
 	printf("LaunchAgent label: %s\n", MONADO_XPC_LAUNCHD_LABEL);
 	printf("Mach service: %s\n", IPC_METAL_XPC_SERVICE_NAME);
 	printf("Executable: %s\n", service_executable);
 	printf("LaunchAgent plist: %s\n", plist_path);
 	printf("Relevant XRT/PSVR2/Vulkan environment captured from this shell\n");
 	printf("Lifecycle defaults: idle exit after 5000 ms; display-loss exit after 3000 ms; forced-exit watchdog after a further 5000 ms (explicit environment overrides preserved)\n");
+	printf("stdout: %s\n", stdout_path);
+	printf("stderr: %s\n", stderr_path);
+	return 0;
+}
+
+static int
+install_service(void)
+{
+	char service_executable[PATH_MAX] = {0};
+	if (!get_service_executable(service_executable)) {
+		fprintf(stderr, "Could not find executable sibling 'monado-service' next to this control tool\n");
+		return 1;
+	}
+	if (!ensure_persistent_directories()) {
+		return 2;
+	}
+
+	char domain[64] = {0};
+	char direct_target[256] = {0};
+	char legacy_target[256] = {0};
+	char plist_path[PATH_MAX] = {0};
+	char legacy_plist_path[PATH_MAX] = {0};
+	char persistent_plist_path[PATH_MAX] = {0};
+	get_domain(domain);
+	get_direct_target(direct_target);
+	get_legacy_broker_target(legacy_target);
+	get_plist_path(plist_path);
+	get_legacy_plist_path(legacy_plist_path);
+	if (!get_persistent_plist_path(persistent_plist_path)) {
+		fprintf(stderr, "Could not determine persistent LaunchAgent path\n");
+		return 3;
+	}
+
+	remove_development_registrations(legacy_target, direct_target, legacy_plist_path, plist_path);
+	unlink(persistent_plist_path);
+
+	/*
+	 * Persistent installs intentionally do not snapshot the invoking shell's
+	 * tuning/debug environment. Proven runtime behaviour belongs in source
+	 * defaults; the LaunchAgent only carries lifecycle settings.
+	 */
+	if (!write_launch_agent_plist(persistent_plist_path, service_executable, false, true)) {
+		return 4;
+	}
+
+	int ret = run_launchctl("bootstrap", domain, persistent_plist_path);
+	if (ret != 0) {
+		fprintf(stderr, "launchctl bootstrap failed with status %d\n", ret);
+		return 5;
+	}
+
+	char stdout_path[PATH_MAX] = {0};
+	char stderr_path[PATH_MAX] = {0};
+	if (!get_persistent_log_paths(stdout_path, stderr_path)) {
+		return 6;
+	}
+
+	printf("monado-service installed as a persistent per-user LaunchAgent\n");
+	printf("LaunchAgent label: %s\n", MONADO_XPC_LAUNCHD_LABEL);
+	printf("Mach service: %s\n", IPC_METAL_XPC_SERVICE_NAME);
+	printf("Executable: %s\n", service_executable);
+	printf("LaunchAgent plist: %s\n", persistent_plist_path);
+	printf("The LaunchAgent will be available again after logout/login or reboot and starts on demand via XPC\n");
+	printf("No development XRT/PSVR2/Vulkan environment was captured\n");
 	printf("stdout: %s\n", stdout_path);
 	printf("stderr: %s\n", stderr_path);
 	return 0;
@@ -316,6 +450,28 @@ bootout_service(void)
 	return ret == 0 ? 0 : 1;
 }
 
+static int
+uninstall_service(void)
+{
+	char direct_target[256] = {0};
+	char persistent_plist_path[PATH_MAX] = {0};
+	get_direct_target(direct_target);
+	if (!get_persistent_plist_path(persistent_plist_path)) {
+		fprintf(stderr, "Could not determine persistent LaunchAgent path\n");
+		return 1;
+	}
+
+	/* It is fine if the service is not currently loaded. */
+	(void)run_launchctl("bootout", direct_target, NULL);
+	if (unlink(persistent_plist_path) != 0 && errno != ENOENT) {
+		fprintf(stderr, "Could not remove '%s': %s\n", persistent_plist_path, strerror(errno));
+		return 2;
+	}
+
+	printf("Removed persistent monado-service LaunchAgent: %s\n", persistent_plist_path);
+	return 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -325,7 +481,15 @@ main(int argc, char **argv)
 	if (argc == 2 && strcmp(argv[1], "bootout") == 0) {
 		return bootout_service();
 	}
+	if (argc == 2 && strcmp(argv[1], "install") == 0) {
+		return install_service();
+	}
+	if (argc == 2 && strcmp(argv[1], "uninstall") == 0) {
+		return uninstall_service();
+	}
 
-	fprintf(stderr, "usage: %s {bootstrap|bootout}\n", argv[0]);
+	fprintf(stderr, "usage: %s {bootstrap|bootout|install|uninstall}\n", argv[0]);
+	fprintf(stderr, "  bootstrap/unbootout are development registration controls using /tmp\n");
+	fprintf(stderr, "  install/uninstall manage the persistent per-user LaunchAgent\n");
 	return 64;
 }
