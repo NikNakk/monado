@@ -35,6 +35,7 @@
 #define PSSENSE_OUTPUT_COUNTER_OFFSET 41
 #define PSSENSE_LED_MASK_OFFSET 33
 #define PSSENSE_OUTPUT_PERIOD_NS 10000000ULL
+#define PSSENSE_LED_MASK_BIT_COUNT 32
 
 struct led_output_state
 {
@@ -223,9 +224,10 @@ scan_tracking_led_masks(struct os_hid_device *hid, const char *manifest_path, in
 	struct led_output_state state = {0};
 	fprintf(manifest,
 	        "segment_index,label,mask_hex,start_monotonic_ns,end_monotonic_ns,start_realtime_ns,end_realtime_ns\n");
-	printf("  scanning Sense LED masks: %d ms per segment, manifest=%s\n", segment_ms, manifest_path);
+	printf("  scanning all %d Sense LED mask bits: %d ms per segment, manifest=%s\n", PSSENSE_LED_MASK_BIT_COUNT,
+	       segment_ms, manifest_path);
 
-	const int segment_count = 21;
+	const int segment_count = PSSENSE_LED_MASK_BIT_COUNT + 4;
 	for (int segment = 0; segment < segment_count; segment++) {
 		uint32_t mask = 0;
 		char label[32] = {0};
