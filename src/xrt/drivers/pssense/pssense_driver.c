@@ -1421,6 +1421,28 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	 */
 
 	os_thread_helper_lock(&pssense->controller_thread);
+
+	/*
+	 * Diagnostic only: sample the same corrected IMU orientation used by the
+	 * constellation tracking source at this camera exposure timestamp, then
+	 * measure the camera-local optical candidate against it. Do not gate on
+	 * this residual yet.
+	 */
+	struct xrt_space_relation imu_orientation_relation = XRT_SPACE_RELATION_ZERO;
+	pssense_get_constellation_pose(pssense, sample->timestamp_ns, &imu_orientation_relation);
+	bool have_imu_orientation =
+	    (imu_orientation_relation.relation_flags &
+	     (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT)) ==
+	    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	float imu_delta_deg = NAN;
+	if (have_imu_orientation) {
+		float imu_dot = fabsf(sample->pose.orientation.x * imu_orientation_relation.pose.orientation.x +
+		                      sample->pose.orientation.y * imu_orientation_relation.pose.orientation.y +
+		                      sample->pose.orientation.z * imu_orientation_relation.pose.orientation.z +
+		                      sample->pose.orientation.w * imu_orientation_relation.pose.orientation.w);
+		imu_delta_deg = 2.0f * acosf(CLAMP(imu_dot, 0.0f, 1.0f)) * 180.0f / (float)M_PI;
+	}
+
 	pssense->tracking.candidate_count++;
 	if (sample->camera_index < PSSENSE_CONSTELLATION_CAMERA_COUNT) {
 		pssense->tracking.camera_candidate_count[sample->camera_index]++;
@@ -1428,12 +1450,14 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	PSSENSE_INFO(pssense,
 	             "CONSTELLATION_CANDIDATE side=%c ts=%" PRIi64
 	             " cam=%zu pos=(%.6f,%.6f,%.6f) quat=(%.6f,%.6f,%.6f,%.6f) matched=%u visible=%u reproj=%.3f "
-	             "brightness=%.3f",
+	             "brightness=%.3f imu_valid=%u imu_quat=(%.6f,%.6f,%.6f,%.6f) imu_delta_deg=%.2f",
 	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns, sample->camera_index,
 	             sample->pose.position.x, sample->pose.position.y, sample->pose.position.z,
 	             sample->pose.orientation.x, sample->pose.orientation.y, sample->pose.orientation.z,
 	             sample->pose.orientation.w, sample->metrics.matched_blob_count, sample->metrics.visible_led_count,
-	             sample->metrics.reprojection_error, sample->average_brightness);
+	             sample->metrics.reprojection_error, sample->average_brightness, have_imu_orientation ? 1u : 0u,
+	             imu_orientation_relation.pose.orientation.x, imu_orientation_relation.pose.orientation.y,
+	             imu_orientation_relation.pose.orientation.z, imu_orientation_relation.pose.orientation.w, imu_delta_deg);
 	if (sample->camera_index >= PSSENSE_CONSTELLATION_CAMERA_COUNT || sample->metrics.matched_blob_count < 3 ||
 	    !isfinite(sample->metrics.reprojection_error) || sample->metrics.reprojection_error > 5.0) {
 		pssense->tracking.disagreement_count++;
