@@ -21,99 +21,11 @@ jobs:
 
       - name: Apply final release fixes
         run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          latest = Path('src/xrt/compositor/main/comp_window_macos_latest.m')
-          text = latest.read_text()
-          old = 'DEBUG_GET_ONCE_BOOL_OPTION(macos_present_stale_substitute, "XRT_MACOS_PRESENT_STALE_SUBSTITUTE", true)'
-          new = 'DEBUG_GET_ONCE_BOOL_OPTION(macos_present_stale_substitute, "XRT_MACOS_PRESENT_STALE_SUBSTITUTE", false)'
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected exactly one stale-substitute true default, found {text.count(old)}')
-          latest.write_text(text.replace(old, new, 1))
-
-          renderer = Path('src/xrt/compositor/main/comp_renderer.c')
-          text = renderer.read_text()
-          feature = 'XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS'
-
-          timing_option = 'DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)'
-          if text.count(timing_option) != 1:
-              raise SystemExit(f'Expected exactly one renderer timing option, found {text.count(timing_option)}')
-          text = text.replace(timing_option, f'#ifdef {feature}\n{timing_option}\n#endif', 1)
-
-          open_anchor = 'static void\nrenderer_late_render_trace_open(struct comp_renderer *r)'
-          wait_anchor = 'static void\nrenderer_late_render_wait(struct comp_renderer *r)'
-          frame_anchor = 'static void\nrenderer_late_render_trace_frame(struct comp_renderer *r)'
-          renderer_end_anchor = '\n#endif\n\nstatic void\nrenderer_wait_queue_idle(struct comp_renderer *r)'
-          for anchor in (open_anchor, wait_anchor, frame_anchor, renderer_end_anchor):
-              if text.count(anchor) != 1:
-                  raise SystemExit(f'Expected exactly one renderer anchor: {anchor!r}; found {text.count(anchor)}')
-
-          text = text.replace(open_anchor, f'#ifdef {feature}\n{open_anchor}', 1)
-          text = text.replace(wait_anchor, f'#endif\n\n{wait_anchor}', 1)
-          text = text.replace(frame_anchor, f'#ifdef {feature}\n{frame_anchor}', 1)
-          text = text.replace(renderer_end_anchor, f'\n#endif\n{renderer_end_anchor}', 1)
-          renderer.write_text(text)
-
-          control = Path('src/xrt/targets/service/macos_xpc_control.m')
-          text = control.read_text()
-          old = 'bootstrap/unbootout are development registration controls using /tmp'
-          new = 'bootstrap/bootout are development registration controls using /tmp'
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected one usage typo to fix, found {text.count(old)}')
-          control.write_text(text.replace(old, new, 1))
-
-          manifest = Path('cmake/GenerateKhrManifest.cmake')
-          text = manifest.read_text()
-          old = '''    set(TARGET_FILENAME
-        "${CMAKE_SHARED_MODULE_PREFIX}${_genmanifest_TARGET}${CMAKE_SHARED_MODULE_SUFFIX}"
-    )'''
-          new = '''    get_target_property(_genmanifest_TARGET_TYPE "${_genmanifest_TARGET}" TYPE)
-    if(_genmanifest_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
-        set(_genmanifest_TARGET_PREFIX "${CMAKE_SHARED_LIBRARY_PREFIX}")
-        set(_genmanifest_TARGET_SUFFIX "${CMAKE_SHARED_LIBRARY_SUFFIX}")
-    else()
-        set(_genmanifest_TARGET_PREFIX "${CMAKE_SHARED_MODULE_PREFIX}")
-        set(_genmanifest_TARGET_SUFFIX "${CMAKE_SHARED_MODULE_SUFFIX}")
-    endif()
-    set(TARGET_FILENAME
-        "${_genmanifest_TARGET_PREFIX}${_genmanifest_TARGET}${_genmanifest_TARGET_SUFFIX}"
-    )'''
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected one install-manifest target filename block, found {text.count(old)}')
-          manifest.write_text(text.replace(old, new, 1))
-
-          dead_reckoning = Path('src/xrt/auxiliary/tracking/t_dead_reckoning.c')
-          text = dead_reckoning.read_text()
-          old = '''\t\tif (using_accel) {
-\t\t\tassert(got && gyro_ts == accel_ts && "Failure getting synced gyro and accel samples");
-\t\t}
-\t\tassert(ts >= base_rel_ts && "Accessing imu sample that is older than latest SLAM pose");'''
-          new = '''\t\tif (using_accel) {
-\t\t\tassert(got && gyro_ts == accel_ts && "Failure getting synced gyro and accel samples");
-\t\t}
-\t\t(void)got; // Keep the release build warning-free when assert() is compiled out.
-\t\tassert(ts >= base_rel_ts && "Accessing imu sample that is older than latest SLAM pose");'''
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected one dead-reckoning assertion block, found {text.count(old)}')
-          dead_reckoning.write_text(text.replace(old, new, 1))
-
-          psvr2 = Path('src/xrt/drivers/psvr2/psvr2.c')
-          text = psvr2.read_text()
-          old = '''\t\tret = libusb_cancel_transfer(xfer);                                                                    \\
-\t\tassert(ret == 0 || ret == LIBUSB_ERROR_NOT_FOUND);                                                     \\
-\t}'''
-          new = '''\t\tret = libusb_cancel_transfer(xfer);                                                                    \\
-\t\tassert(ret == 0 || ret == LIBUSB_ERROR_NOT_FOUND);                                                     \\
-\t\t(void)ret;                                                                                              \\
-\t}'''
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected one PSVR2 transfer-cancel macro body, found {text.count(old)}')
-          psvr2.write_text(text.replace(old, new, 1))
-          PY
+          python3 .github/scripts/finalize_psvr2_release.py
           git diff --check
           git diff -- \
             cmake/GenerateKhrManifest.cmake \
+            doc/macos-service-direct-xpc.md \
             src/xrt/auxiliary/tracking/t_dead_reckoning.c \
             src/xrt/compositor/main/comp_window_macos_latest.m \
             src/xrt/compositor/main/comp_renderer.c \
@@ -162,20 +74,11 @@ jobs:
           test -f stage/lib/libopenxr_monado.dylib
           test -f stage/share/openxr/1/openxr_monado.json
           cat stage/share/openxr/1/openxr_monado.json
-          python3 <<'PY'
-          import json
-          from pathlib import Path
-
-          path = Path('stage/share/openxr/1/openxr_monado.json')
-          data = json.loads(path.read_text())
-          runtime_path = data['runtime']['library_path']
-          expected = '../../../lib/libopenxr_monado.dylib'
-          if runtime_path != expected:
-              raise SystemExit(f'Installed macOS runtime manifest has {runtime_path!r}, expected {expected!r}')
-          forbidden = ('/Users/', 'build-release', 'build-macos', '/private/var/folders/')
-          if any(token in path.read_text() for token in forbidden):
-              raise SystemExit('Installed OpenXR manifest contains a build/user-specific path')
-          PY
+          grep -Fq '"library_path": "../../../lib/libopenxr_monado.dylib"' stage/share/openxr/1/openxr_monado.json
+          if grep -E -q '/Users/|build-release|build-macos|/private/var/folders/' stage/share/openxr/1/openxr_monado.json; then
+            echo 'installed OpenXR manifest contains a build/user-specific path'
+            exit 1
+          fi
           echo '--- monado-service dependencies ---'
           otool -L stage/bin/monado-service
           echo '--- XPC helper dependencies ---'
@@ -184,7 +87,12 @@ jobs:
           otool -L stage/lib/libopenxr_monado.dylib
           echo '--- OpenXR runtime load commands ---'
           otool -l stage/lib/libopenxr_monado.dylib | grep -A3 -E 'LC_ID_DYLIB|LC_RPATH'
-          stage/bin/monado-service-xpc-control 2>&1 | grep -q 'bootstrap|bootout|install|uninstall' || test ${PIPESTATUS[0]} -eq 64
+          set +e
+          helper_usage="$(stage/bin/monado-service-xpc-control 2>&1)"
+          helper_status=$?
+          set -e
+          test "$helper_status" -eq 64
+          printf '%s\n' "$helper_usage" | grep -Fq 'bootstrap|bootout|install|uninstall'
 
       - name: Configure diagnostics-enabled build
         run: >-
@@ -213,6 +121,7 @@ jobs:
           rm -f .github/psvr2-finalize-release-install.trigger
           git add \
             cmake/GenerateKhrManifest.cmake \
+            doc/macos-service-direct-xpc.md \
             src/xrt/auxiliary/tracking/t_dead_reckoning.c \
             src/xrt/compositor/main/comp_window_macos_latest.m \
             src/xrt/compositor/main/comp_renderer.c \
