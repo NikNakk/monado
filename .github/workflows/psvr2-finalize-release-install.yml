@@ -36,6 +36,11 @@ jobs:
           text = renderer.read_text()
           feature = 'XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS'
 
+          timing_option = 'DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)'
+          if text.count(timing_option) != 1:
+              raise SystemExit(f'Expected exactly one renderer timing option, found {text.count(timing_option)}')
+          text = text.replace(timing_option, f'#ifdef {feature}\n{timing_option}\n#endif', 1)
+
           open_anchor = 'static void\nrenderer_late_render_trace_open(struct comp_renderer *r)'
           wait_anchor = 'static void\nrenderer_late_render_wait(struct comp_renderer *r)'
           frame_anchor = 'static void\nrenderer_late_render_trace_frame(struct comp_renderer *r)'
@@ -81,15 +86,17 @@ jobs:
           -DXRT_BUILD_DRIVER_PSVR2=ON
           -DXRT_BUILD_DRIVER_PSSENSE=OFF
 
-      - name: Build release-like service/runtime
-        run: >-
-          cmake --build build-release --parallel
-          --target monado-service monado_service_xpc_control openxr_monado
+      - name: Build complete release-like install set
+        run: cmake --build build-release --parallel
 
       - name: Verify diagnostics are compiled out
         run: |
           if nm -a build-release/src/xrt/targets/service/monado-service | grep -q 'renderer_late_render_trace_frame'; then
             echo 'diagnostics-only renderer symbol unexpectedly present in release build'
+            exit 1
+          fi
+          if nm -a build-release/src/xrt/targets/service/monado-service | grep -q 'debug_get_bool_option_comp_psvr2_timing_trace'; then
+            echo 'diagnostics-only PSVR2 timing option unexpectedly present in release build'
             exit 1
           fi
 
@@ -143,6 +150,6 @@ jobs:
           git add -u .github/psvr2-finalize-release-install.trigger
           git diff --cached --check
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.email '4189826+github-actions[bot]@users.noreply.github.com'
           git commit -m 'macos: finalize release defaults and install helper'
           git push origin HEAD:macos-service-direct-xpc-cadence
