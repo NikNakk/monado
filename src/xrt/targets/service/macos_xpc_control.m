@@ -158,6 +158,14 @@ should_forward_environment_key(NSString *key)
 	return false;
 }
 
+static void
+set_default_environment_value(NSMutableDictionary *environment, NSString *key, NSString *value)
+{
+	if ([environment objectForKey:key] == nil) {
+		[environment setObject:value forKey:key];
+	}
+}
+
 static NSDictionary *
 make_launch_environment(void)
 {
@@ -177,6 +185,17 @@ make_launch_environment(void)
 
 	/* A launchd service must never treat its inherited stdin as a quit trigger. */
 	[filtered setObject:@"1" forKey:@"XRT_NO_STDIN"];
+
+	/*
+	 * launchd keeps the registration around after the process exits, so the
+	 * service itself should be disposable. These are launchd-only defaults:
+	 * explicit values exported by the developer/user are preserved.
+	 */
+	set_default_environment_value(filtered, @"IPC_EXIT_WHEN_IDLE", @"1");
+	set_default_environment_value(filtered, @"IPC_EXIT_WHEN_IDLE_DELAY_MS", @"5000");
+	set_default_environment_value(filtered, @"XRT_MACOS_EXIT_ON_DISPLAY_LOSS", @"1");
+	set_default_environment_value(filtered, @"XRT_MACOS_DISPLAY_LOSS_DELAY_MS", @"3000");
+
 	return filtered;
 }
 
@@ -274,6 +293,7 @@ bootstrap_service(void)
 	printf("Executable: %s\n", service_executable);
 	printf("LaunchAgent plist: %s\n", plist_path);
 	printf("Relevant XRT/PSVR2/Vulkan environment captured from this shell\n");
+	printf("Lifecycle defaults: idle exit after 5000 ms; display-loss exit after 3000 ms (explicit environment overrides preserved)\n");
 	printf("stdout: %s\n", stdout_path);
 	printf("stderr: %s\n", stderr_path);
 	return 0;
