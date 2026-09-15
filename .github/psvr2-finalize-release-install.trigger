@@ -1,1 +1,1 @@
-finalize release defaults, diagnostics gating, and staged install - retry 2
+finalize release defaults, diagnostics gating, macOS manifest, warnings, and persistent install - final
