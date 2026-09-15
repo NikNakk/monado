@@ -64,10 +64,20 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 #if defined(XRT_OS_OSX)
 	const char *wait_timing_env = getenv("XRT_MACOS_WAIT_TIMING");
 	bool trace_wait = wait_timing_env != NULL && wait_timing_env[0] != '\0' && wait_timing_env[0] != '0';
-	uint64_t wait_begin_ns = trace_wait ? os_monotonic_get_ns() : 0;
-#endif
+	const char *wait_spin_env = getenv("XRT_MACOS_WAIT_SPIN");
+	bool spin_wait = wait_spin_env != NULL && wait_spin_env[0] != '\0' && wait_spin_env[0] != '0';
+	uint64_t wait_begin_ns = (trace_wait || spin_wait) ? os_monotonic_get_ns() : 0;
 
+	if (spin_wait) {
+		while (os_monotonic_get_ns() < until_ns) {
+			/* Diagnostic only: stay runnable instead of parking in mach_wait_until(). */
+		}
+	} else {
+		os_precise_sleeper_nanosleep(sleeper, delay);
+	}
+#else
 	os_precise_sleeper_nanosleep(sleeper, delay);
+#endif
 
 #if defined(XRT_OS_OSX)
 	if (trace_wait) {
@@ -75,9 +85,9 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 		uint64_t actual_ns = wait_end_ns >= wait_begin_ns ? wait_end_ns - wait_begin_ns : 0;
 		int64_t lateness_ns = (int64_t)wait_end_ns - (int64_t)until_ns;
 		fprintf(stderr,
-		        "MACOS_WAIT_TIMING requested_ns=%u actual_ns=%llu lateness_ns=%lld until_ns=%llu begin_ns=%llu end_ns=%llu\n",
-		        delay, (unsigned long long)actual_ns, (long long)lateness_ns, (unsigned long long)until_ns,
-		        (unsigned long long)wait_begin_ns, (unsigned long long)wait_end_ns);
+		        "MACOS_WAIT_TIMING mode=%s requested_ns=%u actual_ns=%llu lateness_ns=%lld until_ns=%llu begin_ns=%llu end_ns=%llu\n",
+		        spin_wait ? "spin" : "mach", delay, (unsigned long long)actual_ns, (long long)lateness_ns,
+		        (unsigned long long)until_ns, (unsigned long long)wait_begin_ns, (unsigned long long)wait_end_ns);
 	}
 #endif
 }
