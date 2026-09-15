@@ -144,8 +144,16 @@ function(generate_khr_manifest_at_install)
         "${CMAKE_CURRENT_BINARY_DIR}/${_genmanifest_OUT_FILENAME}")
     set(_genmanifest_IS_INSTALL ON)
     # Template value
+    get_target_property(_genmanifest_TARGET_TYPE "${_genmanifest_TARGET}" TYPE)
+    if(_genmanifest_TARGET_TYPE STREQUAL "SHARED_LIBRARY")
+        set(_genmanifest_TARGET_PREFIX "${CMAKE_SHARED_LIBRARY_PREFIX}")
+        set(_genmanifest_TARGET_SUFFIX "${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    else()
+        set(_genmanifest_TARGET_PREFIX "${CMAKE_SHARED_MODULE_PREFIX}")
+        set(_genmanifest_TARGET_SUFFIX "${CMAKE_SHARED_MODULE_SUFFIX}")
+    endif()
     set(TARGET_FILENAME
-        "${CMAKE_SHARED_MODULE_PREFIX}${_genmanifest_TARGET}${CMAKE_SHARED_MODULE_SUFFIX}"
+        "${_genmanifest_TARGET_PREFIX}${_genmanifest_TARGET}${_genmanifest_TARGET_SUFFIX}"
     )
     if(_genmanifest_LIBMONADO)
         set(LIBMONADO "${CMAKE_SHARED_MODULE_PREFIX}${_genmanifest_LIBMONADO}${CMAKE_SHARED_MODULE_SUFFIX}")

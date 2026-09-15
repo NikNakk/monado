@@ -1683,6 +1683,7 @@ psvr2_usb_stop(struct psvr2_hmd *hmd)
 	if (xfer) {                                                                                                    \
 		ret = libusb_cancel_transfer(xfer);                                                                    \
 		assert(ret == 0 || ret == LIBUSB_ERROR_NOT_FOUND);                                                     \
+		(void)ret;                                                                                              \
 	}
 
 	os_mutex_lock(&hmd->data_lock);

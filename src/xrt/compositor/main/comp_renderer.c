@@ -65,7 +65,9 @@ DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES"
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)
 DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", 2000)
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+#endif
 DEBUG_GET_ONCE_BOOL_OPTION(macos_skip_blocking_gpu_timestamps, "XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_defer_gpu_timestamps, "XRT_MACOS_DEFER_GPU_TIMESTAMPS", true)
 #endif
@@ -221,6 +223,7 @@ renderer_get_macos_late_render_desired_offset_us(int64_t *out_offset_us)
 	return true;
 }
 
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 static void
 renderer_late_render_trace_open(struct comp_renderer *r)
 {
@@ -263,6 +266,8 @@ renderer_late_render_trace_close(struct comp_renderer *r)
 	fclose(r->late_render_trace);
 	r->late_render_trace = NULL;
 }
+
+#endif
 
 static void
 renderer_late_render_wait(struct comp_renderer *r)
@@ -339,6 +344,7 @@ renderer_late_render_wait(struct comp_renderer *r)
 	}
 }
 
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 static void
 renderer_late_render_trace_frame(struct comp_renderer *r)
 {
@@ -396,6 +402,8 @@ renderer_late_render_trace_frame(struct comp_renderer *r)
 		fflush(r->late_render_trace);
 	}
 }
+#endif
+
 #endif
 
 static void
