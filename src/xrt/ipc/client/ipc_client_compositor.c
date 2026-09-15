@@ -29,6 +29,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #if !defined(XRT_OS_WINDOWS)
 #include <unistd.h>
 #include <sys/socket.h>
@@ -74,6 +75,9 @@ struct ipc_client_compositor
 
 		uint32_t layer_count;
 	} layers;
+
+	//! Most recent frame id passed to begin_frame, for diagnostics.
+	int64_t last_begin_frame_id;
 
 	//! Has the native compositor been created, only supports one for now.
 	bool compositor_created;
@@ -136,6 +140,23 @@ static inline struct ipc_client_compositor_semaphore *
 ipc_client_compositor_semaphore(struct xrt_compositor_semaphore *xcsem)
 {
 	return (struct ipc_client_compositor_semaphore *)xcsem;
+}
+
+static bool
+ipc_frame_timing_enabled(void)
+{
+	static int enabled = -1;
+	if (enabled < 0) {
+		const char *value = getenv("XRT_IPC_FRAME_TIMING");
+		enabled = value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+	}
+	return enabled != 0;
+}
+
+static double
+ipc_elapsed_ms(int64_t start_ns, int64_t end_ns)
+{
+	return (double)(end_ns - start_ns) / 1000000.0;
 }
 
 
@@ -543,6 +564,7 @@ ipc_compositor_wait_frame(struct xrt_compositor *xc,
 	int64_t frame_id = -1;
 	int64_t predicted_display_time = 0;
 	int64_t predicted_display_period = 0;
+	int64_t timing_start_ns = os_monotonic_get_ns();
 
 #ifdef XRT_OS_OSX
 	xret = ipc_call_compositor_wait_frame( //
@@ -569,6 +591,14 @@ ipc_compositor_wait_frame(struct xrt_compositor *xc,
 	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_compositor_wait_woke");
 #endif
 
+	int64_t timing_end_ns = os_monotonic_get_ns();
+	if (ipc_frame_timing_enabled()) {
+		fprintf(stderr,
+		        "IPC_FRAME_TIMING client wait_frame frame=%" PRId64 " duration_ms=%.3f predicted_period_ms=%.3f\n",
+		        frame_id, ipc_elapsed_ms(timing_start_ns, timing_end_ns),
+		        (double)predicted_display_period / 1000000.0);
+	}
+
 	// Only write arguments once we have fully waited.
 	*out_frame_id = frame_id;
 	*out_predicted_display_time = predicted_display_time;
@@ -582,8 +612,15 @@ ipc_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 {
 	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
 	xrt_result_t xret;
+	int64_t timing_start_ns = os_monotonic_get_ns();
 
 	xret = ipc_call_compositor_begin_frame(icc->ipc_c, frame_id);
+	int64_t timing_end_ns = os_monotonic_get_ns();
+	icc->last_begin_frame_id = frame_id;
+	if (ipc_frame_timing_enabled()) {
+		fprintf(stderr, "IPC_FRAME_TIMING client begin_frame frame=%" PRId64 " duration_ms=%.3f result=%d\n",
+		        frame_id, ipc_elapsed_ms(timing_start_ns, timing_end_ns), (int)xret);
+	}
 	IPC_CHK_ALWAYS_RET(icc->ipc_c, xret, "ipc_call_compositor_begin_frame");
 }
 
@@ -763,16 +800,29 @@ ipc_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 
 	struct ipc_shared_memory *ism = icc->ipc_c->ism;
 	struct ipc_layer_slot *slot = &ism->slots[icc->layers.slot_id];
+	uint32_t submitted_slot_id = icc->layers.slot_id;
+	uint32_t submitted_layer_count = icc->layers.layer_count;
+	int64_t frame_id = icc->last_begin_frame_id;
 
 	// Last bit of data to put in the shared memory area.
 	slot->layer_count = icc->layers.layer_count;
 
+	int64_t timing_start_ns = os_monotonic_get_ns();
 	xret = ipc_call_compositor_layer_sync( //
 	    icc->ipc_c,                        //
 	    icc->layers.slot_id,               //
 	    &sync_handle,                      //
 	    valid_sync ? 1 : 0,                //
 	    &icc->layers.slot_id);             //
+	int64_t timing_end_ns = os_monotonic_get_ns();
+
+	if (ipc_frame_timing_enabled()) {
+		fprintf(stderr,
+		        "IPC_FRAME_TIMING client layer_commit frame=%" PRId64
+		        " slot=%u next_slot=%u layers=%u sync=%d duration_ms=%.3f result=%d\n",
+		        frame_id, submitted_slot_id, icc->layers.slot_id, submitted_layer_count, valid_sync ? 1 : 0,
+		        ipc_elapsed_ms(timing_start_ns, timing_end_ns), (int)xret);
+	}
 
 	/*
 	 * We are probably in a really bad state if we fail, at
@@ -1093,6 +1143,7 @@ ipc_syscomp_destroy(struct xrt_system_compositor *xsc)
 xrt_result_t
 ipc_client_create_native_compositor(struct xrt_system_compositor *xsysc,
                                     const struct xrt_session_info *xsi,
+                                    struct xrt_session_event_sink *xses,
                                     struct xrt_compositor_native **out_xcn)
 {
 	struct ipc_client_compositor *icc = container_of(xsysc, struct ipc_client_compositor, system);
