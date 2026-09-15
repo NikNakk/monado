@@ -711,8 +711,7 @@ os_thread_helper_is_running_locked(struct os_thread_helper *oth)
  * Must be called with the helper locked.
  *
  * As this wraps a cond-var wait, once the wait begins, the helper is
- * unlocked, to allow another thread access to change the thing you're
- * monitoring. By the time this returns, you once again own the lock.
+ * unlocked, to allow another thread access to change the thing you're monitoring. By the time this returns, you once again own the lock.
  *
  * @public @memberof os_thread_helper
  */
@@ -751,11 +750,6 @@ os_thread_helper_name(struct os_thread_helper *oth, const char *name)
 	pthread_setname_np(oth->thread, name);
 #elif defined(XRT_OS_OSX)
 	(void)oth;
-
-	if (name != NULL) {
-		/* macOS only permits naming the calling thread with pthread_setname_np. */
-		(void)pthread_setname_np(name);
-	}
 
 	const char *qos_env = getenv("XRT_MACOS_COMPOSITOR_QOS");
 	if (name != NULL && strcmp(name, "Multi Client Module") == 0 && qos_env != NULL && strcmp(qos_env, "1") == 0) {
