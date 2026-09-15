@@ -66,7 +66,7 @@ extern "C" {
 
 /*!
  * @defgroup aux_os_time Portable Timekeeping
- * @ingroup aux_os
+ * @ingroup aux_os_time
  *
  * @brief Unifying wrapper around system time retrieval functions.
  */
@@ -219,6 +219,8 @@ struct os_precise_sleeper
 {
 #if defined(XRT_OS_WINDOWS)
 	HANDLE timer;
+#elif defined(XRT_OS_OSX)
+	mach_timebase_info_data_t timebase;
 #else
 	int unused_;
 #endif
@@ -229,6 +231,8 @@ os_precise_sleeper_init(struct os_precise_sleeper *ops)
 {
 #if defined(XRT_OS_WINDOWS)
 	ops->timer = CreateWaitableTimer(NULL, TRUE, NULL);
+#elif defined(XRT_OS_OSX)
+	(void)mach_timebase_info(&ops->timebase);
 #endif
 }
 
@@ -240,6 +244,8 @@ os_precise_sleeper_deinit(struct os_precise_sleeper *ops)
 		CloseHandle(ops->timer);
 		ops->timer = NULL;
 	}
+#else
+	(void)ops;
 #endif
 }
 
@@ -258,6 +264,27 @@ os_precise_sleeper_nanosleep(struct os_precise_sleeper *ops, int32_t nsec)
 			return;
 		}
 	}
+#elif defined(XRT_OS_OSX)
+	if (nsec <= 0) {
+		return;
+	}
+
+	/*
+	 * nanosleep() is subject to aggressive timer coalescing on macOS and
+	 * can oversleep compositor-scale waits by many display periods under
+	 * load. mach_wait_until() uses the Mach absolute-time clock directly
+	 * and avoids that coalescing while retaining a blocking wait.
+	 */
+	uint64_t numerator = ops->timebase.numer != 0 ? ops->timebase.numer : 1;
+	uint64_t denominator = ops->timebase.denom != 0 ? ops->timebase.denom : 1;
+	uint64_t ticks = (uint64_t)((((__uint128_t)(uint32_t)nsec * denominator) + numerator - 1) / numerator);
+	uint64_t now = mach_absolute_time();
+	uint64_t deadline = now + ticks;
+	if (deadline < now) {
+		deadline = UINT64_MAX;
+	}
+	(void)mach_wait_until(deadline);
+	return;
 #endif
 	// If we fall through from an implementation, or there's no implementation needed for a platform, we
 	// delegate to the regular os_nanosleep.
