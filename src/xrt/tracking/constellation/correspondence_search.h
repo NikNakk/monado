@@ -38,6 +38,8 @@ enum correspondence_search_flags
 	CS_FLAG_HAVE_POSE_PRIOR = 0x10,
 	//! Use the input pose orientation and provided gravity vector to check pose verticality.
 	CS_FLAG_MATCH_GRAVITY = 0x20,
+	//! When a full pose prior is present, reject hypotheses which do not match it.
+	CS_FLAG_REQUIRE_POSE_PRIOR = 0x40,
 };
 
 struct cs_image_point

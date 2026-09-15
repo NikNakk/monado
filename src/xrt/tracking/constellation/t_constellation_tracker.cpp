@@ -23,9 +23,21 @@ namespace xrt::tracking::constellation {
 
 DEBUG_GET_ONCE_LOG_OPTION(constellation_tracker_log, "CONSTELLATION_TRACKER_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_OPTION(constellation_tracker_data_recorder_output, "CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT", "")
+DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_require_side_full_prior,
+                           "CONSTELLATION_TRACKER_REQUIRE_SIDE_FULL_PRIOR",
+                           false)
+DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_trust_full_prior_all_cameras,
+                           "CONSTELLATION_TRACKER_TRUST_FULL_PRIOR_ALL_CAMERAS",
+                           false)
+DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_disable_bootstrap_gravity,
+                           "CONSTELLATION_TRACKER_DISABLE_BOOTSTRAP_GRAVITY",
+                           false)
 
 // Unconditionally present to allow warning that the feature is not enabled.
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_enable_rerun, "CONSTELLATION_TRACKER_RERUN_ENABLE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_disable_side_last_known_with_prior,
+                           "CONSTELLATION_TRACKER_DISABLE_SIDE_LAST_KNOWN_WITH_PRIOR",
+                           false)
 #ifdef XRT_FEATURE_RERUN
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_rerun_spawn, "CONSTELLATION_TRACKER_RERUN_SPAWN", true)
 #endif
@@ -454,6 +466,17 @@ Camera::processSampleSlow(CameraSample &sample)
 				math_pose_convert_from_opencv(&Txr_cam_device, &Tcv_cam_device);
 
 				search_flags = (correspondence_search_flags)(search_flags | CS_FLAG_HAVE_POSE_PRIOR);
+				bool require_full_prior_for_this_camera =
+				    debug_get_bool_option_constellation_tracker_trust_full_prior_all_cameras() ||
+				    (this->index >= 2 &&
+				     debug_get_bool_option_constellation_tracker_require_side_full_prior());
+				if (require_full_prior_for_this_camera) {
+					search_flags = (correspondence_search_flags)(
+					    search_flags | CS_FLAG_REQUIRE_POSE_PRIOR);
+					CT_TRACE(tracker,
+					         "Camera %zu requiring full-pose prior match for slow search of device %d",
+					         this->index, device->id);
+				}
 				have_orientation_prior = true;
 			} else if (Txr_world_cam.has_value() && device->params.tracking_source != nullptr) {
 				// Bootstrap from an orientation-only tracking source (for example a controller IMU) even before
@@ -491,6 +514,12 @@ Camera::processSampleSlow(CameraSample &sample)
 			if (orientation_prior_from_tracking_source) {
 				gravity_tolerance_rad = MIN_ROT_ERROR;
 				gravity_prior_confident = true;
+			}
+			if (orientation_prior_from_tracking_source &&
+			    debug_get_bool_option_constellation_tracker_disable_bootstrap_gravity()) {
+				// Diagnostic only: retain the IMU orientation estimate but do not use it as a gravity gate
+				// during orientation-only optical bootstrap.
+				gravity_prior_confident = false;
 			}
 
 			xrt_vec3 cv_camera_gravity_vector = {0.0, 1.0, 0.0};
@@ -624,8 +653,21 @@ Camera::processSampleFast(CameraSample &sample)
 			}
 		}
 
-		if (has_last_known && this->tryDevicePose(device, sample, device_state, Tcv_cam_world,
-		                                          Tcv_world_device_predicted, Tcv_world_device_last_known)) {
+		bool skip_side_last_known_with_prior =
+		    Tcv_world_device_predicted.has_value() &&
+		    (debug_get_bool_option_constellation_tracker_trust_full_prior_all_cameras() ||
+		     (this->index >= 2 &&
+		      debug_get_bool_option_constellation_tracker_disable_side_last_known_with_prior()));
+
+		if (skip_side_last_known_with_prior && has_last_known) {
+			CT_TRACE(tracker,
+			         "Camera %zu skipping last-known pose fallback for device %d because a trusted full external prior is valid",
+			         this->index, device->id);
+		}
+
+		if (has_last_known && !skip_side_last_known_with_prior &&
+		    this->tryDevicePose(device, sample, device_state, Tcv_cam_world,
+		                        Tcv_world_device_predicted, Tcv_world_device_last_known)) {
 			CT_DEBUG(tracker, "Fast processing for device %d succeeded with last known pose", device->id);
 			continue; // try the next device, we found a pose!
 		}
@@ -1127,7 +1169,15 @@ constellation_tracker_camera_push_blobs(t_blob_sink *tbs, t_blob_observation *tb
 	Camera *camera = Camera::Get(tbs);
 	ConstellationTracker *tracker = camera->tracker;
 
-	CT_TRACE(tracker, "Received blob observation with %u blobs", tbo->num_blobs);
+	CT_TRACE(tracker,
+	         "BLOB_FRAME camera=%zu id=%" PRIu64 " ts=%" PRIi64 " blobs=%u",
+	         camera->index, tbo->id, tbo->timestamp_ns, tbo->num_blobs);
+	for (uint32_t i = 0; i < tbo->num_blobs; i++) {
+		const t_blob &blob = tbo->blobs[i];
+		CT_TRACE(tracker,
+		         "BLOB_POINT camera=%zu id=%" PRIu64 " blob=%u x=%.3f y=%.3f",
+		         camera->index, tbo->id, i, blob.center.x, blob.center.y);
+	}
 
 	if (tbo->num_blobs == 0) {
 		CT_TRACE(tracker, "No blobs in observation, skipping processing");
