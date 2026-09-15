@@ -27,6 +27,8 @@ jobs:
       - name: Configure service build
         run: >-
           cmake -S . -B build-service -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX="${{ runner.temp }}/monado-install"
           -DBUILD_TESTING=OFF
           -DXRT_FEATURE_SERVICE=ON
           -DXRT_HAVE_OPENGLES=OFF
@@ -39,7 +41,15 @@ jobs:
           -DXRT_BUILD_DRIVER_PSVR2=ON
           -DXRT_BUILD_DRIVER_PSSENSE=OFF
 
-      - name: Build service, launchd helper, and OpenXR runtime
-        run: >-
-          cmake --build build-service --parallel
-          --target monado-service monado_service_xpc_control openxr_monado
+      - name: Build default Release target set
+        run: cmake --build build-service --parallel
+
+      - name: Verify service targets were built
+        run: |
+          test -x build-service/src/xrt/targets/service/monado-service
+          test -x build-service/src/xrt/targets/service/monado-service-xpc-control
+
+      - name: Verify repeatable install
+        run: |
+          cmake --install build-service
+          cmake --install build-service
