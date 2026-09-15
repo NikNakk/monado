@@ -47,9 +47,12 @@ if(XRT_FEATURE_STEAMVR_PLUGIN)
 	add_subdirectory(steamvr_drv)
 endif()
 
+# sdl-test has external-memory/synchronisation implementations for FD,
+# Android hardware buffers, and Win32 handles, but not macOS IOSurface/Metal.
 if(XRT_FEATURE_SERVICE
    AND XRT_HAVE_SDL2
    AND XRT_HAVE_VULKAN
+   AND NOT APPLE
 	)
 	add_subdirectory(sdl_test)
 endif()
