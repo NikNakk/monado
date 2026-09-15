@@ -61,6 +61,8 @@ class CameraPacketFramerTests(unittest.TestCase):
         reference = [[20.5, 19.5], [9.5, 10.5], [200.0, 200.0]]
         self.assertAlmostEqual(centroid_match_fraction(points, reference), 2 / 3)
 
+    # A constant held bit toggling the whole matched constellation is stronger
+    # evidence than median-image grouped/shared-mask behaviour alone.
     def test_constant_bit_toggle_takes_precedence_as_temporal_waveform_evidence(self):
         self.assertEqual(
             classify_led_blink_semantics({5}, [5], [5]),
