@@ -105,7 +105,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_metal_shared_event_wait, "XRT_MACOS_METAL_SHARED_EVENT_WAIT", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_early_drawable, "XRT_MACOS_EARLY_DRAWABLE", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", false)
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -1817,6 +1817,7 @@ comp_window_macos_set_title(struct comp_target *ct, const char *title)
 static void
 comp_window_macos_destroy(struct comp_target *ct)
 {
+	macos_cametal_drive_stop();
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	if (cwm->display_link != NULL) {
 		CVDisplayLinkStop(cwm->display_link);

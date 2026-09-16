@@ -132,6 +132,16 @@ add_executable(tests_macos_runtime_probe tests_macos_runtime_probe.c)
 target_link_libraries(tests_macos_runtime_probe PRIVATE target_instance xrt-interfaces aux_util)
 set_target_properties(tests_macos_runtime_probe PROPERTIES FOLDER monado_tests)
 
+if(APPLE AND XRT_MODULE_COMPOSITOR_MULTI)
+	add_executable(tests_macos_displaylink tests_macos_displaylink.cpp)
+	target_link_libraries(tests_macos_displaylink PRIVATE comp_multi aux_os)
+	add_test(NAME tests_macos_displaylink_default
+		COMMAND ${CMAKE_COMMAND} -E env --unset=XRT_MACOS_CAMETALDISPLAYLINK_DRIVE $<TARGET_FILE:tests_macos_displaylink>)
+	add_test(NAME tests_macos_displaylink_disabled
+		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_DRIVE=0 $<TARGET_FILE:tests_macos_displaylink> disabled)
+	set_tests_properties(tests_macos_displaylink_default tests_macos_displaylink_disabled PROPERTIES TIMEOUT 10)
+endif()
+
 if(APPLE)
 	add_executable(tests_macos_ipc_swapchain_probe tests_macos_ipc_swapchain_probe.c)
 	target_link_libraries(tests_macos_ipc_swapchain_probe PRIVATE ipc_client xrt-interfaces aux_util)
