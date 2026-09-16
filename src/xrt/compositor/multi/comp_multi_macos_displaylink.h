@@ -23,7 +23,7 @@ bool
 comp_multi_macos_displaylink_enabled(void);
 
 /* Called by the CAMetalDisplayLink delegate. Returns true iff a compositor frame
- * consumed the tick and completed before the callback returns. */
+ * consumed the tick and presentation was scheduled before the callback returns. */
 bool
 comp_multi_macos_displaylink_submit_tick(void *drawable,
                                          uint64_t callback_monotonic_ns,
@@ -31,17 +31,23 @@ comp_multi_macos_displaylink_submit_tick(void *drawable,
                                          uint64_t presentation_monotonic_ns);
 
 /* Called from the Multi Client Module's predict-frame wrapper. Blocks until one
- * CAMetalDisplayLink tick is available. Returns false when the experiment is off. */
+ * CAMetalDisplayLink tick is available. Returns false on the bounded failure/
+ * teardown escape path or when the experiment is off. */
 bool
 comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
                                        uint64_t *out_target_monotonic_ns,
                                        uint64_t *out_presentation_monotonic_ns);
 
-/* Completes the currently consumed tick and releases the delegate callback. */
+/* Called once Metal has scheduled the supplied drawable for presentation. */
 void
 comp_multi_macos_displaylink_complete_tick(void);
 
-/* Opaque CAMetalDrawable pointer valid from wait_tick() through complete_tick(). */
+/* Teardown escape: release any delegate callback currently waiting for a
+ * presentation that can no longer complete. */
+void
+comp_multi_macos_displaylink_cancel_pending_tick(void);
+
+/* Opaque CAMetalDrawable pointer valid while the current callback-owned tick is active. */
 void *
 comp_multi_macos_displaylink_current_drawable(void);
 
