@@ -46,6 +46,18 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
                                        uint64_t *out_target_monotonic_ns,
                                        uint64_t *out_presentation_monotonic_ns);
 
+/* Snapshot the consumed, not-yet-completed callback in Monado's monotonic
+ * clock domain. Never returns an unconsumed, cancelled or previous tick. */
+struct comp_multi_macos_displaylink_timing
+{
+	int64_t callback_ns;
+	int64_t deadline_ns;
+	int64_t presentation_ns;
+};
+
+bool
+comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing);
+
 /* Called once Metal has scheduled the supplied drawable for presentation. */
 void
 comp_multi_macos_displaylink_complete_tick(void);

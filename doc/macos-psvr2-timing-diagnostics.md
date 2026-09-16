@@ -15,8 +15,31 @@ Older macOS versions use the legacy path. Set this variable to `0` to opt out.
 The driven path consumes the callback's drawable, holds the callback until Metal
 schedules presentation, suppresses CVDisplayLink callbacks and the multi-compositor's
 legacy timed wait, and uses plain `presentDrawable:`. Idle drawables are cleared
-to black. Native prediction bookkeeping remains unchanged; this integration does
-not replace predicted pose times with CAMetalDisplayLink timestamps.
+to black. Frame IDs and pacing statistics retain Monado's native bookkeeping. For each
+consumed callback, `targetTimestamp` supplies the GPU completion deadline and
+`targetPresentationTimestamp` supplies the predicted display time. Both are
+converted from Core Animation media time to Monado's monotonic clock by the
+callback's existing clock bridge. The native compositor stores these values
+before returning its prediction, so renderer/timewarp pose selection, client
+frame selection, and client pacing all use the same display-time reference.
+The physical display period remains the target's configured refresh period;
+missed callbacks do not redefine that period.
+
+In driven mode, `presented.csv` compares the drawable's actual presentation with
+that callback's presentation timestamp (`target_output_ns`), and
+`desired_present_ns` is the callback's rendering deadline. No absolute Metal
+presentation request is made (`metal_request_ns=0`). The old learned
+present-to-display offset is not applied in driven mode, even with tracing
+enabled. Tracing therefore does not retune driven pose prediction. The legacy
+path retains its existing feedback behaviour.
+
+To validate rotational stability, compare `frame_pipeline.csv`'s predicted
+display time and `late_render.csv`'s `predicted_display_ns` with `present.csv`'s
+`target_output_ns` (join the native frame ID to `present.csv`'s `timeline_value`).
+Then join `present.csv` and `presented.csv` by their presentation `frame_id` and
+inspect `presented_minus_target_ns`.
+These should share the same predicted timestamp; actual missed presentations
+remain observable rather than being folded into a learned pose offset.
 
 The conflicting presentation experiments now default off:
 
@@ -382,3 +405,86 @@ XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US=3000 XRT_MACOS_ASYNC_PRESENT=1 XRT_MACOS
 # Fully asynchronous Vulkan -> Metal GPU handoff
 XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US=3000 XRT_MACOS_ASYNC_PRESENT=1 XRT_MACOS_METAL_SHARED_EVENT_WAIT=1
 ```
+
+
+## CAMetalDisplayLink yaw capture, 2026-09-17 (PID 47307)
+
+The user recorded slow yaw while looking at SwiftXRShell's panel with the latest
+Release build and `PSVR2_TIMING_TRACE=1`. Files were
+`/tmp/monado_psvr2_47307_{frame_pipeline,present,presented,present_complete}.csv`.
+All four streams contain matching data for 3,013 submitted frames over 28.274 s;
+frame_pipeline has nine events per frame. The interval includes a roughly 2 s
+gap, so its aggregate FPS is not a steady-state rate.
+
+Joining native `predict_result.frame_id` to `present.timeline_value` gives zero
+mismatches between `predicted_display_ns` and `target_output_ns`. The new
+callback-to-prediction plumbing is active. Median prediction horizon is 16.175 ms.
+
+Joining the presentation streams by `frame_id` gives:
+
+| Outcome | Frames | Share |
+| --- | ---: | ---: |
+| Nonzero actual presentation, within 1 ms of target | 2,661 | 88.3% |
+| Nonzero actual presentation, more than 1 ms late | 161 | 5.3% |
+| Zero actual presentation timestamp | 191 | 6.3% |
+
+Zero `presentedTime` means not presented or dropped according to Apple's
+MTLDrawable documentation. The callback has already fired here, so these are
+consistent with skipped drawables; they must not be counted as zero-error
+presentations. For nonzero timestamps, median target error is -0.014749 ms,
+p95 is +8.309292 ms, and maximum is +31.466709 ms. There are no backwards actual
+presentation timestamps after sorting by frame ID and excluding zero timestamps.
+
+All Metal command buffers report completed status (4). Completion callbacks
+arrived before the CA rendering deadline for 152/161 late frames and 173/191
+zero-timestamp frames. Their median completion lead was 4.632 ms and 4.530 ms,
+respectively. Since callbacks can arrive after actual GPU completion, this is
+strong evidence that these particular frames finished GPU work before the
+reported deadline. Ordinary GPU overruns cannot explain most anomalies.
+
+This capture establishes presentation irregularity despite correctly matched
+prediction targets. It does not prove that every perceived backward step is
+caused by presentation, nor identify which CA/Metal handoff stage drops frames.
+There are no driver pose, late-render, or client-frame-map CSVs for this PID in
+the supplied capture, so rotational pose continuity and repeated client content
+cannot be assessed from it. Next instrumentation should correlate drawable IDs,
+display-link callback return/Metal scheduling, and idle/stale-drain presents with
+actual presentation, before changing prediction offsets again.
+
+## CAMetalDisplayLink yaw capture with poses, 2026-09-17 (PID 57866)
+
+The follow-up slow-yaw capture contains 2,425 complete compositor frames plus
+PSVR2 pose, SLAM, IMU, prediction, horizon, late-render, client-frame-map, and
+CAMetalDisplayLink traces. Joining `late_render.csv` to `pose.csv` isolates two
+compositor pose requests for 2,421 frames and three for four frames. The normal
+pair requests the beginning and end of scanout, separated by a median 7.735 ms.
+
+The beginning-of-scanout orientation sequence agrees strongly with the reported
+angular velocity. During motion, only two inter-frame changes greater than
+0.01 degrees oppose the reported angular velocity. Both coincide with a new
+SLAM update; the larger correction is 0.0919 degrees. No beginning-to-end
+scanout change greater than 0.001 degrees opposes angular velocity. The capture
+therefore does not show a repeated backward rotational correction in the poses
+used by compositor distortion/timewarp.
+
+Presentation remains irregular:
+
+| Outcome | Frames | Share |
+| --- | ---: | ---: |
+| Nonzero actual presentation, within 1 ms of target | 2,149 | 88.6% |
+| Nonzero actual presentation, more than 1 ms late | 103 | 4.2% |
+| Zero actual presentation timestamp (skipped/dropped) | 173 | 7.1% |
+
+Of the anomalous frames, 271/276 have the ordinary approximately 8.342 ms
+CAMetalDisplayLink target interval. They are not primarily explained by missed
+callbacks. Client-frame mapping contains only 27 reused frames out of 2,415,
+while presentation anomalies total 276; reuse is likewise not the main cause.
+The anomaly rate is present across angular-speed bands rather than appearing
+only during rapid yaw.
+
+The evidence now separates the paths: CAMetalDisplayLink target timestamps reach
+the compositor correctly, and the PSVR2 poses selected for those timestamps are
+rotationally continuous, but Core Animation reports about 11.4% of submitted
+drawables as late by more than 1 ms or not presented. Instrument drawable IDs and
+the scheduling/presentation lifecycle next. Avoid further pose-offset or
+prediction changes unless new pose evidence contradicts this capture.

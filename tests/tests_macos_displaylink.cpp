@@ -34,6 +34,8 @@ main(int argc, char **argv)
 
 	comp_multi_macos_displaylink_set_active(true);
 	CHECK(comp_multi_macos_displaylink_active());
+	struct comp_multi_macos_displaylink_timing timing = {};
+	CHECK(!comp_multi_macos_displaylink_current_timing(&timing));
 	int drawable = 0;
 	for (bool cancel : {false, true}) {
 		std::atomic<bool> returned{false};
@@ -44,6 +46,10 @@ main(int argc, char **argv)
 		});
 		uint64_t cb = 0, target = 0, presentation = 0;
 		CHECK(comp_multi_macos_displaylink_wait_tick(&cb, &target, &presentation));
+		CHECK(comp_multi_macos_displaylink_current_timing(&timing));
+		CHECK(timing.callback_ns == (int64_t)now);
+		CHECK(timing.deadline_ns == (int64_t)now + 1000000000);
+		CHECK(timing.presentation_ns == (int64_t)now + 1008000000);
 		CHECK(cb == now && target == now + 1000000000 && presentation == now + 1008000000);
 		CHECK(comp_multi_macos_displaylink_current_drawable() == &drawable);
 		std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -53,12 +59,14 @@ main(int argc, char **argv)
 		} else {
 			comp_multi_macos_displaylink_complete_tick();
 		}
+		CHECK(!comp_multi_macos_displaylink_current_timing(&timing));
 		callback.join();
 		CHECK(returned && comp_multi_macos_displaylink_current_drawable() == nullptr);
 	}
 	uint64_t now = os_monotonic_get_ns();
 	CHECK(!comp_multi_macos_displaylink_submit_tick(&drawable, now, now + 1000000, now + 9000000));
 	CHECK(comp_multi_macos_displaylink_current_drawable() == nullptr);
+	CHECK(!comp_multi_macos_displaylink_current_timing(&timing));
 	comp_multi_macos_displaylink_set_active(false);
 	CHECK(!comp_multi_macos_displaylink_active());
 	return 0;
