@@ -40,7 +40,7 @@ if(XRT_HAVE_XCB)
 	target_include_directories(comp_main SYSTEM PRIVATE ${XCB_INCLUDE_DIRS})
 	target_link_libraries(comp_main PRIVATE ${XCB_LIBRARIES})
 	if(XRT_HAVE_EGL)
-		target_include_directories(comp_main SYSTEM PRIVATE ${EGL_INCLUDE_DIRS})
+		target_include_directories(comp_main SYSTEM PRIVATE ${XCB_INCLUDE_DIRS})
 		target_link_libraries(comp_main PRIVATE ${XCB_LIBRARIES})
 	endif()
 endif()
@@ -60,7 +60,7 @@ if(APPLE)
 	set_source_files_properties(
 		comp_window_macos_latest.m
 		PROPERTIES COMPILE_OPTIONS
-			"-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_probe.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_drive.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_drive_cv.h"
+			"-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_probe.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_idle_black.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_drive_cv.h"
 		)
 
 	# Add the service-Metal reuse timeline to the exact renderer queue submit
@@ -105,7 +105,7 @@ if(XRT_HAVE_WAYLAND)
 	set(WL_PROTOS_XML ${WL_PROTOS_PKG_DIR}/stable/xdg-shell/xdg-shell.xml)
 
 	target_include_directories(
-		comp_main SYSTEM PRIVATE ${WL_PROTOS_DIR} ${WAYLAND_INCLUDE_DIRS}
+		comp_main SYSTEM PRIVATE ${WAYLAND_PROTO_INCLUDE_DIRS}
 		)
 	target_link_libraries(comp_main PRIVATE ${WAYLAND_LIBRARIES})
 
@@ -118,34 +118,16 @@ if(XRT_HAVE_WAYLAND)
 	endif()
 
 	foreach(wl_proto_xml ${WL_PROTOS_XML})
-		get_filename_component(WL_PROTO ${wl_proto_xml} NAME_WE)
-
-		set(WL_PROTO_C "${WL_PROTOS_DIR}/${WL_PROTO}.c")
-		set(WL_PROTO_H "${WL_PROTOS_DIR}/${WL_PROTO}-client-protocol.h")
-
+		get_filename_component(wl_proto_name ${wl_proto_xml} NAME_WE)
+		set(wl_proto_c "${CMAKE_CURRENT_BINARY_DIR}/${wl_proto_name}-protocol.c")
+		set(wl_proto_h "${CMAKE_CURRENT_BINARY_DIR}/${wl_proto_name}-client-protocol.h")
 		add_custom_command(
-			OUTPUT "${WL_PROTO_C}"
-			COMMAND "${WL_SCANNER}" private-code "${wl_proto_xml}" "${WL_PROTO_C}"
+			OUTPUT ${wl_proto_c} ${wl_proto_h}
+			COMMAND ${WAYLAND_SCANNER} private-code ${wl_proto_xml} ${wl_proto_c}
+			COMMAND ${WAYLAND_SCANNER} client-header ${wl_proto_xml} ${wl_proto_h}
+			DEPENDS ${wl_proto_xml}
 			VERBATIM
-			DEPENDS "${WL_SCANNER}" "${wl_proto_xml}"
-			COMMENT "Generating ${WL_PROTO_C}"
 			)
-
-		add_custom_command(
-			OUTPUT "${WL_PROTO_H}"
-			COMMAND "${WL_SCANNER}" client-header "${wl_proto_xml}" "${WL_PROTO_H}"
-			VERBATIM
-			DEPENDS "${WL_SCANNER}" "${wl_proto_xml}"
-			COMMENT "Generating ${WL_PROTO_H}"
-			)
-
-		target_sources(comp_main PRIVATE ${WL_PROTO_C} ${WL_PROTO_H})
+		target_sources(comp_main PRIVATE ${wl_proto_c} ${wl_proto_h})
 	endforeach()
-
 endif()
-if(ANDROID)
-	target_sources(comp_main PRIVATE comp_window_android.c)
-	target_link_libraries(comp_main PRIVATE aux_ogl aux_android)
-endif()
-
-target_link_libraries(comp_main PRIVATE comp_multi)
