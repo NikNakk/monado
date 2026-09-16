@@ -59,7 +59,8 @@ if(APPLE)
 	target_sources(comp_main PRIVATE comp_window_macos_latest.m)
 	set_source_files_properties(
 		comp_window_macos_latest.m
-		PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h"
+		PROPERTIES COMPILE_OPTIONS
+			"-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_probe.h"
 		)
 
 	# Add the service-Metal reuse timeline to the exact renderer queue submit
@@ -99,10 +100,7 @@ endif()
 if(XRT_HAVE_WAYLAND)
 	target_sources(comp_main PRIVATE comp_window_wayland.c)
 	pkg_get_variable(WL_PROTOS_PKG_DIR wayland-protocols pkgdatadir)
-	pkg_get_variable(WL_SCANNER wayland-scanner wayland_scanner)
-
-	set(WL_PROTOS_DIR "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols")
-	file(MAKE_DIRECTORY "${WL_PROTOS_DIR}")
+	file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols")
 
 	set(WL_PROTOS_XML ${WL_PROTOS_PKG_DIR}/stable/xdg-shell/xdg-shell.xml)
 
@@ -126,24 +124,19 @@ if(XRT_HAVE_WAYLAND)
 		set(WL_PROTO_H "${WL_PROTOS_DIR}/${WL_PROTO}-client-protocol.h")
 
 		add_custom_command(
-			OUTPUT "${WL_PROTO_C}"
-			COMMAND "${WL_SCANNER}" private-code "${wl_proto_xml}" "${WL_PROTO_C}"
-			VERBATIM
-			DEPENDS "${WL_SCANNER}" "${wl_proto_xml}"
-			COMMENT "Generating ${WL_PROTO_C}"
+			OUTPUT ${WL_PROTO_C}
+			COMMAND ${WAYLAND_SCANNER} private-code ${wl_protos_dir}/${wl_proto_xml} ${WL_PROTO_C}
+			DEPENDS ${wl_protos_dir}/${wl_proto_xml}
 			)
 
 		add_custom_command(
-			OUTPUT "${WL_PROTO_H}"
-			COMMAND "${WL_SCANNER}" client-header "${wl_proto_xml}" "${WL_PROTO_H}"
-			VERBATIM
-			DEPENDS "${WL_SCANNER}" "${wl_proto_xml}"
-			COMMENT "Generating ${WL_PROTO_H}"
+			OUTPUT ${WL_PROTO_H}
+			COMMAND ${WAYLAND_SCANNER} client-header ${wl_protos_dir}/${wl_proto_xml} ${WL_PROTO_H}
+			DEPENDS ${wl_protos_dir}/${wl_proto_xml}
 			)
 
 		target_sources(comp_main PRIVATE ${WL_PROTO_C} ${WL_PROTO_H})
 	endforeach()
-
 endif()
 if(ANDROID)
 	target_sources(comp_main PRIVATE comp_window_android.c)
