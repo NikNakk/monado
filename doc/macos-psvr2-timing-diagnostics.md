@@ -32,6 +32,12 @@ The conflicting presentation experiments now default off:
 | `XRT_MACOS_COMPOSITOR_QOS`, `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `0` |
 | `XRT_MACOS_WAIT_SPIN`, `XRT_MACOS_WAIT_HYBRID_US` | `0` |
 
+CAMetalDisplayLink mode explicitly disables the presentation worker, drawable-slot
+worker, and early drawable prefetch, including when old environment overrides
+request them. Presentation submission runs on the compositor thread. The
+`present_worker` CSV is opened only when a legacy worker is actually enabled;
+inline asynchronous GPU submission does not produce worker events.
+
 Async presentation and Metal shared-event synchronization remain enabled. The
 CVDisplayLink pacing option remains available for the legacy fallback, but its
 callback is suppressed in driven mode. Clear old environment overrides when
