@@ -64,6 +64,27 @@ realtime_deadline_ms(long milliseconds)
 	return ts;
 }
 
+/*
+ * pthread_cond_timedwait() uses CLOCK_REALTIME for the statically initialized
+ * condition variable. Convert CAMetalDisplayLink's monotonic target deadline to
+ * a realtime absolute deadline without making realtime itself a cadence source.
+ */
+static struct timespec
+realtime_deadline_for_monotonic_ns(uint64_t target_monotonic_ns)
+{
+	struct timespec mono = {0};
+	struct timespec real = {0};
+	clock_gettime(CLOCK_MONOTONIC, &mono);
+	clock_gettime(CLOCK_REALTIME, &real);
+
+	uint64_t now_monotonic_ns = (uint64_t)mono.tv_sec * 1000000000ULL + (uint64_t)mono.tv_nsec;
+	uint64_t remaining_ns = target_monotonic_ns > now_monotonic_ns ? target_monotonic_ns - now_monotonic_ns : 0;
+	uint64_t real_ns = (uint64_t)real.tv_nsec + remaining_ns;
+	real.tv_sec += (time_t)(real_ns / 1000000000ULL);
+	real.tv_nsec = (long)(real_ns % 1000000000ULL);
+	return real;
+}
+
 bool
 comp_multi_macos_displaylink_submit_tick(void *drawable,
                                          uint64_t callback_monotonic_ns,
@@ -85,12 +106,14 @@ comp_multi_macos_displaylink_submit_tick(void *drawable,
 
 	/*
 	 * In steady state the Multi Client Module is already blocked in wait_tick().
-	 * If there is no active native session, do not hold the CA callback indefinitely:
-	 * give the render thread 2 ms to consume this opportunity, then drain it.
+	 * Do not use the old arbitrary 2 ms hand-off timeout: under UE load that could
+	 * discard a perfectly usable callback merely because the compositor thread was
+	 * briefly descheduled. Give it the whole CAMetalDisplayLink target window. If
+	 * there is no active native session, the callback is drained at that deadline.
 	 */
-	struct timespec deadline = realtime_deadline_ms(2);
+	struct timespec consume_deadline = realtime_deadline_for_monotonic_ns(target_monotonic_ns);
 	while (g_bridge.consumed_serial < serial) {
-		int ret = pthread_cond_timedwait(&g_bridge.cond, &g_bridge.mutex, &deadline);
+		int ret = pthread_cond_timedwait(&g_bridge.cond, &g_bridge.mutex, &consume_deadline);
 		if (ret == ETIMEDOUT && g_bridge.consumed_serial < serial) {
 			g_bridge.cancelled_serial = serial;
 			if (g_bridge.published_serial == serial) {
@@ -103,9 +126,12 @@ comp_multi_macos_displaylink_submit_tick(void *drawable,
 	}
 
 	/*
-	 * Once consumed, the delegate deliberately waits without a timeout. The
-	 * supplied drawable must remain valid until the corresponding compositor
-	 * iteration has called comp_target_present().
+	 * Once consumed, keep the delegate callback and its retained update.drawable
+	 * alive until the macOS target has actually scheduled that exact drawable for
+	 * presentation. In particular, xrt_comp_layer_commit() is not sufficient here:
+	 * the existing async-present worker may return from layer_commit before it has
+	 * touched the drawable. The target calls complete_tick() from its plain present
+	 * path once Metal owns the presentation request.
 	 */
 	while (g_bridge.completed_serial < serial) {
 		pthread_cond_wait(&g_bridge.cond, &g_bridge.mutex);
@@ -130,9 +156,9 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 	pthread_mutex_lock(&g_bridge.mutex);
 	for (;;) {
 		/*
-		 * Do not make service shutdown depend on another CA callback arriving.
-		 * Normal callbacks are ~8.34 ms apart; 100 ms is therefore only a teardown/
-		 * failure escape hatch, not a pacing source during a healthy run.
+		 * Do not make service shutdown depend forever on another CA callback. This
+		 * timeout is only a failure/teardown escape hatch; healthy driven cadence is
+		 * released exclusively by CAMetalDisplayLink callbacks.
 		 */
 		while (g_bridge.published_serial <= g_bridge.consumed_serial) {
 			struct timespec deadline = realtime_deadline_ms(100);
