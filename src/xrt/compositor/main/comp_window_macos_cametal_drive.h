@@ -24,7 +24,11 @@
 
 #include "multi/comp_multi_macos_displaylink.h"
 
+#include <mach/mach.h>
+#include <mach/mach_time.h>
+#include <mach/thread_policy.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -64,6 +68,100 @@ macos_cametal_drive_delta_to_monotonic_ns(uint64_t callback_ns,
 	return magnitude >= (double)callback_ns ? 0 : callback_ns - (uint64_t)llround(magnitude);
 }
 
+enum macos_cametal_drive_thread_priority
+{
+	MACOS_CAMETAL_DRIVE_THREAD_NORMAL = 0,
+	MACOS_CAMETAL_DRIVE_THREAD_INTERACTIVE,
+	MACOS_CAMETAL_DRIVE_THREAD_REALTIME,
+};
+
+static inline int
+macos_cametal_drive_preferred_frame_latency(void)
+{
+	const char *value = getenv("XRT_MACOS_CAMETALDISPLAYLINK_LATENCY");
+	if (value == NULL || value[0] == '\0') {
+		return 1;
+	}
+
+	char *end = NULL;
+	long latency = strtol(value, &end, 10);
+	if (end == value || *end != '\0' || (latency != 1 && latency != 2)) {
+		fprintf(stderr,
+		        "WARN: XRT_MACOS_CAMETALDISPLAYLINK_LATENCY='%s' is invalid; expected 1 or 2, using 1\n",
+		        value);
+		return 1;
+	}
+	return (int)latency;
+}
+
+static inline enum macos_cametal_drive_thread_priority
+macos_cametal_drive_thread_priority(void)
+{
+	const char *value = getenv("XRT_MACOS_CAMETALDISPLAYLINK_THREAD_PRIORITY");
+	if (value == NULL || value[0] == '\0' || strcmp(value, "interactive") == 0) {
+		return MACOS_CAMETAL_DRIVE_THREAD_INTERACTIVE;
+	}
+	if (strcmp(value, "normal") == 0) {
+		return MACOS_CAMETAL_DRIVE_THREAD_NORMAL;
+	}
+	if (strcmp(value, "realtime") == 0) {
+		return MACOS_CAMETAL_DRIVE_THREAD_REALTIME;
+	}
+	fprintf(stderr,
+	        "WARN: XRT_MACOS_CAMETALDISPLAYLINK_THREAD_PRIORITY='%s' is invalid; expected normal, interactive, or realtime; using interactive\n",
+	        value);
+	return MACOS_CAMETAL_DRIVE_THREAD_INTERACTIVE;
+}
+
+static inline const char *
+macos_cametal_drive_thread_priority_name(enum macos_cametal_drive_thread_priority priority)
+{
+	switch (priority) {
+	case MACOS_CAMETAL_DRIVE_THREAD_NORMAL: return "normal";
+	case MACOS_CAMETAL_DRIVE_THREAD_REALTIME: return "realtime";
+	case MACOS_CAMETAL_DRIVE_THREAD_INTERACTIVE:
+	default: return "interactive";
+	}
+}
+
+static inline uint32_t
+macos_cametal_drive_ns_to_absolute_time(uint64_t ns)
+{
+	mach_timebase_info_data_t timebase = {0};
+	if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.numer == 0) {
+		return 0;
+	}
+	__uint128_t ticks = (__uint128_t)ns * timebase.denom / timebase.numer;
+	return ticks > UINT32_MAX ? UINT32_MAX : (uint32_t)ticks;
+}
+
+static inline bool
+macos_cametal_drive_apply_realtime_policy(void)
+{
+	thread_time_constraint_policy_data_t policy = {
+	    .period = macos_cametal_drive_ns_to_absolute_time(8333333ULL),
+	    .computation = macos_cametal_drive_ns_to_absolute_time(1000000ULL),
+	    .constraint = macos_cametal_drive_ns_to_absolute_time(2000000ULL),
+	    .preemptible = TRUE,
+	};
+	if (policy.period == 0 || policy.computation == 0 || policy.constraint == 0) {
+		fprintf(stderr, "WARN: CAMetalDisplayLink realtime scheduling could not convert Mach time units\n");
+		return false;
+	}
+
+	thread_port_t thread = pthread_mach_thread_np(pthread_self());
+	kern_return_t ret = thread_policy_set(thread, THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&policy,
+	                                      THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+	if (ret != KERN_SUCCESS) {
+		fprintf(stderr, "WARN: CAMetalDisplayLink realtime scheduling failed: %d\n", ret);
+		return false;
+	}
+
+	fprintf(stderr,
+	        "macOS CAMetalDisplayLink thread: Mach realtime period=8.333ms computation=1.000ms constraint=2.000ms\n");
+	return true;
+}
+
 @interface MonadoCAMetalDisplayLinkDriver : NSObject <CAMetalDisplayLinkDelegate>
 {
 @private
@@ -72,6 +170,8 @@ macos_cametal_drive_delta_to_monotonic_ns(uint64_t callback_ns,
 	NSThread *_thread;
 	FILE *_trace;
 	atomic_bool _stopping;
+	int _preferredFrameLatency;
+	enum macos_cametal_drive_thread_priority _threadPriority;
 	uint64_t _callbackCount;
 	uint64_t _consumedCount;
 	uint64_t _staleCount;
@@ -122,6 +222,8 @@ macos_cametal_drive_teardown(void)
 	}
 	_layer = [layer retain];
 	atomic_init(&_stopping, false);
+	_preferredFrameLatency = macos_cametal_drive_preferred_frame_latency();
+	_threadPriority = macos_cametal_drive_thread_priority();
 
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	const char *trace_enabled = getenv("PSVR2_TIMING_TRACE");
@@ -161,7 +263,11 @@ macos_cametal_drive_teardown(void)
 {
 	_thread = [[NSThread alloc] initWithTarget:self selector:@selector(threadMain) object:nil];
 	[_thread setName:@"Monado CAMetalDisplayLink compositor"];
-	[_thread setQualityOfService:NSQualityOfServiceUserInteractive];
+	if (_threadPriority == MACOS_CAMETAL_DRIVE_THREAD_NORMAL) {
+		[_thread setQualityOfService:NSQualityOfServiceDefault];
+	} else {
+		[_thread setQualityOfService:NSQualityOfServiceUserInteractive];
+	}
 	[_thread start];
 }
 
@@ -212,15 +318,19 @@ macos_cametal_drive_teardown(void)
 - (void)threadMain
 {
 	@autoreleasepool {
+		if (_threadPriority == MACOS_CAMETAL_DRIVE_THREAD_REALTIME) {
+			(void)macos_cametal_drive_apply_realtime_policy();
+		}
 		if (@available(macOS 14.0, *)) {
 			_displayLink = [[CAMetalDisplayLink alloc] initWithMetalLayer:_layer];
 			[_displayLink setDelegate:self];
-			[_displayLink setPreferredFrameLatency:1.0f];
+			[_displayLink setPreferredFrameLatency:(float)_preferredFrameLatency];
 			[_displayLink setPreferredFrameRateRange:CAFrameRateRangeMake(120.0f, 120.0f, 120.0f)];
 			[_displayLink addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
 			fprintf(stderr,
 			        "macOS CAMetalDisplayLink driver attached to real compositor layer; requesting 120 Hz, "
-			        "preferredFrameLatency=1\n");
+			        "preferredFrameLatency=%d threadPriority=%s\n",
+			        _preferredFrameLatency, macos_cametal_drive_thread_priority_name(_threadPriority));
 			while (![[NSThread currentThread] isCancelled]) {
 				@autoreleasepool {
 					[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
