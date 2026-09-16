@@ -23,8 +23,6 @@
 #include "os/os_time.h"
 #include "util/u_wait.h"
 
-static _Thread_local bool g_macos_displaylink_tick_active = false;
-
 /* The trace header has already defined its predict wrapper and source macro. */
 #ifdef xrt_comp_predict_frame
 #undef xrt_comp_predict_frame
@@ -42,7 +40,6 @@ macos_xrt_comp_predict_frame_from_displaylink(struct xrt_compositor *xc,
 	uint64_t target_ns = 0;
 	uint64_t presentation_ns = 0;
 	bool driven = comp_multi_macos_displaylink_wait_tick(&callback_ns, &target_ns, &presentation_ns);
-	g_macos_displaylink_tick_active = driven;
 
 	/* Preserve Monado's native frame-id/pacing bookkeeping for the first A/B. */
 	macos_xrt_comp_predict_frame_with_time_constraint(xc, out_frame_id, out_wake_up_time_ns,
