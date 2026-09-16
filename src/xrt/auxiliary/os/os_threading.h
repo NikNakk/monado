@@ -21,11 +21,7 @@
 #if defined(XRT_OS_OSX)
 #include <unistd.h>
 #include <pthread.h>
-#include <pthread/qos.h>
 #include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #elif defined(XRT_OS_LINUX) || defined(XRT_ENV_MINGW)
 #include <unistd.h>
@@ -711,7 +707,8 @@ os_thread_helper_is_running_locked(struct os_thread_helper *oth)
  * Must be called with the helper locked.
  *
  * As this wraps a cond-var wait, once the wait begins, the helper is
- * unlocked, to allow another thread access to change the thing you're monitoring. By the time this returns, you once again own the lock.
+ * unlocked, to allow another thread access to change the thing you're
+ * monitoring. By the time this returns, you once again own the lock.
  *
  * @public @memberof os_thread_helper
  */
@@ -737,10 +734,6 @@ os_thread_helper_signal_locked(struct os_thread_helper *oth)
 /*!
  * Make a best effort to name our thread.
  *
- * On macOS, the helper is also the point where the timing-critical multi-client
- * compositor thread can opt into user-interactive QoS. This call is made from
- * inside that thread, which is required by pthread_set_qos_class_self_np().
- *
  * @public @memberof os_thread_helper
  */
 static inline void
@@ -748,20 +741,6 @@ os_thread_helper_name(struct os_thread_helper *oth, const char *name)
 {
 #ifdef OS_THREAD_HAVE_SETNAME
 	pthread_setname_np(oth->thread, name);
-#elif defined(XRT_OS_OSX)
-	(void)oth;
-
-	const char *qos_env = getenv("XRT_MACOS_COMPOSITOR_QOS");
-	if (name != NULL && strcmp(name, "Multi Client Module") == 0 && qos_env != NULL && strcmp(qos_env, "1") == 0) {
-		int ret = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
-		if (ret == 0) {
-			fprintf(stderr, "INFO [os_thread_helper_name] macOS Multi Client Module QoS: USER_INTERACTIVE\n");
-		} else {
-			fprintf(stderr,
-			        "WARN [os_thread_helper_name] failed to set macOS Multi Client Module QoS: %s (%d)\n",
-			        strerror(ret), ret);
-		}
-	}
 #else
 	(void)oth;
 	(void)name;
