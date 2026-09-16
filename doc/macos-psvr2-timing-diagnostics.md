@@ -1,5 +1,51 @@
 # macOS PS VR2 timing diagnostics
 
+## Current presentation defaults
+
+The release-preparation branch incorporates `macos-cametallink-driven-compositor`
+through `47a14a169`, preserving direct service XPC and per-process Metal resource
+ownership, launchd registration/lifecycle handling, repeatable installation,
+Release build fixes, and the default-off timing-diagnostics build option. The
+incoming branch also enables libmonado on macOS and adds the independent
+CAMetalDisplayLink probe, Mach wait experiments, and IPC stall diagnostics.
+
+`XRT_MACOS_CAMETALDISPLAYLINK_DRIVE` defaults to `1` on macOS 14 and later.
+The local Metal target activates the bridge; other targets retain normal pacing.
+Older macOS versions use the legacy path. Set this variable to `0` to opt out.
+The driven path consumes the callback's drawable, holds the callback until Metal
+schedules presentation, suppresses CVDisplayLink callbacks and the multi-compositor's
+legacy timed wait, and uses plain `presentDrawable:`. Idle drawables are cleared
+to black. Native prediction bookkeeping remains unchanged; this integration does
+not replace predicted pose times with CAMetalDisplayLink timestamps.
+
+The conflicting presentation experiments now default off:
+
+| Control | Default |
+| --- | --- |
+| `XRT_MACOS_DRAWABLE_SLOT` | `0` |
+| `XRT_MACOS_PRESENT_WORKER`, `XRT_MACOS_EARLY_DRAWABLE` | `0` |
+| `XRT_MACOS_PRESENT_MIN_DURATION_US` | `0` |
+| `XRT_MACOS_UNIQUE_PRESENT_SLOTS`, `XRT_MACOS_PRESENT_STALE_SUBSTITUTE` | `0` |
+| `XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US` | unset (disabled; explicit `0` still enables the experiment) |
+| `XRT_MACOS_LATE_RENDER_LEAD_US` | `0` |
+| `XRT_MACOS_CLIENT_FRAME_DIVISOR`, `XRT_MACOS_CLIENT_FRAME_MIN_HOLD` | `0` |
+| `XRT_MACOS_COMPOSITOR_QOS`, `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `0` |
+| `XRT_MACOS_WAIT_SPIN`, `XRT_MACOS_WAIT_HYBRID_US` | `0` |
+
+Async presentation and Metal shared-event synchronization remain enabled. The
+CVDisplayLink pacing option remains available for the legacy fallback, but its
+callback is suppressed in driven mode. Clear old environment overrides when
+testing these defaults; disable drive mode before comparing legacy experiments.
+The LaunchAgent adds lifecycle settings only, so direct and installed launches
+use the same source defaults.
+
+The driven CSV trace requires a build with
+`-DXRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=ON` and either `PSVR2_TIMING_TRACE=1`
+or an explicit `XRT_MACOS_CAMETALDISPLAYLINK_DRIVE_TRACE_PATH`. The independent
+child-layer probe remains opt-in via `XRT_MACOS_CAMETALDISPLAYLINK_PROBE=1`.
+The sections below record earlier experiments and their historical defaults.
+
+
 This branch adds passive timing traces for comparing the macOS Monado PS VR2 path with Sony's Windows SteamVR driver. The trace is disabled by default and does not change pose prediction or presentation scheduling.
 
 Enable it for a run with:

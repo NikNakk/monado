@@ -17,14 +17,23 @@ target_link_libraries(
 	)
 
 if(APPLE)
+	target_sources(
+		comp_multi PRIVATE
+		comp_multi_macos_displaylink.c
+		comp_multi_macos_displaylink.h
+		comp_multi_system_macos_displaylink_drive.h
+		)
+
 	# Diagnostic-only mapping from each 120 Hz system-compositor frame to the
-	# delivered client frame that supplied it. The wrapper preserves the normal
-	# latch call and only emits CSV rows when PSVR2_TIMING_TRACE=1.
+	# delivered client frame that supplied it. The displaylink experiment header
+	# is included after it so the existing trace/QoS wrappers remain available.
 	set_property(
 		SOURCE comp_multi_system.c
 		APPEND
 		PROPERTY COMPILE_OPTIONS
 			"-include"
 			"${CMAKE_CURRENT_SOURCE_DIR}/comp_multi_system_macos_trace.h"
+			"-include"
+			"${CMAKE_CURRENT_SOURCE_DIR}/comp_multi_system_macos_displaylink_drive.h"
 		)
 endif()

@@ -59,8 +59,10 @@ therefore allocates ordinary Vulkan compositor images backed by exportable
 `IOSurfaceRef` objects, exposes those same surfaces as Metal textures, and blits
 the completed image to a `CAMetalDrawable`. This keeps Monado's Vulkan
 distortion compositor while using native Metal only for the final display
-handoff. The current implementation waits for both queues and uses fake pacing;
-display-link pacing and explicit cross-API synchronization remain later work.
+handoff. On macOS 14 and later, CAMetalDisplayLink now drives compositor cadence
+and supplies the drawable; asynchronous presentation uses a Metal shared-event
+wait when available. See [current presentation defaults](macos-psvr2-timing-diagnostics.md#current-presentation-defaults)
+for fallback and diagnostic controls.
 
 The Khronos `hello_xr` sample now runs through the native Metal binding and
 produces distorted stereo output on the PS VR2. Build the OpenXR SDK sample,

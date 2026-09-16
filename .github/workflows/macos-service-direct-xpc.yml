@@ -8,6 +8,10 @@ on:
       - macos-service-direct-xpc-cadence
     paths:
       - .github/workflows/macos-service-direct-xpc.yml
+      - CMakeLists.txt
+      - src/xrt/CMakeLists.txt
+      - src/xrt/auxiliary/**
+      - src/xrt/compositor/**
       - src/xrt/ipc/**
       - src/xrt/targets/**
       - tests/**

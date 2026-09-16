@@ -45,6 +45,23 @@
 DEBUG_GET_ONCE_LOG_OPTION(app_frame_lag_level, "XRT_APP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_DEBUG)
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_app_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
+static bool
+ipc_frame_timing_enabled(void)
+{
+	static int enabled = -1;
+	if (enabled < 0) {
+		const char *value = getenv("XRT_IPC_FRAME_TIMING");
+		enabled = value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+	}
+	return enabled != 0;
+}
+
+static double
+ipc_elapsed_ms(int64_t start_ns, int64_t end_ns)
+{
+	return (double)(end_ns - start_ns) / 1000000.0;
+}
+
 /*
  *
  * Slot management functions.
@@ -256,6 +273,9 @@ static void
 wait_for_scheduled_free(struct multi_compositor *mc)
 {
 	COMP_TRACE_MARKER();
+	int64_t timing_start_ns = os_monotonic_get_ns();
+	int64_t timing_frame_id = mc->progress.data.frame_id;
+	uint32_t sleep_count = 0;
 
 	os_mutex_lock(&mc->slot_lock);
 
@@ -295,6 +315,7 @@ wait_for_scheduled_free(struct multi_compositor *mc)
 
 		os_mutex_unlock(&mc->slot_lock);
 
+		++sleep_count;
 		os_precise_sleeper_nanosleep(&mc->scheduled_sleeper, U_TIME_1MS_IN_NS);
 
 		os_mutex_lock(&mc->slot_lock);
@@ -312,6 +333,13 @@ wait_for_scheduled_free(struct multi_compositor *mc)
 	slot_move_and_clear_locked(mc, &mc->scheduled, &mc->progress);
 	os_mutex_unlock(&mc->slot_lock);
 	os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+	if (ipc_frame_timing_enabled()) {
+		int64_t timing_end_ns = os_monotonic_get_ns();
+		fprintf(stderr,
+		        "IPC_FRAME_TIMING server scheduled_free frame=%" PRId64 " duration_ms=%.3f sleeps=%u\n",
+		        timing_frame_id, ipc_elapsed_ms(timing_start_ns, timing_end_ns), sleep_count);
+	}
 }
 
 static void *
@@ -718,7 +746,14 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
 	 * the GPU for this frame. This should have very little impact on GPU
 	 * utilisation, if any.
 	 */
+	int64_t wait_start_ns = os_monotonic_get_ns();
 	wait_for_wait_thread(mc);
+	int64_t wait_end_ns = os_monotonic_get_ns();
+	if (ipc_frame_timing_enabled()) {
+		fprintf(stderr,
+		        "IPC_FRAME_TIMING server layer_begin_wait frame=%" PRId64 " duration_ms=%.3f\n",
+		        data->frame_id, ipc_elapsed_ms(wait_start_ns, wait_end_ns));
+	}
 
 	assert(mc->progress.layer_count == 0);
 	U_ZERO(&mc->progress);
@@ -863,6 +898,8 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	struct multi_compositor *mc = multi_compositor(xc);
 	struct xrt_compositor_fence *xcf = NULL;
 	int64_t frame_id = mc->progress.data.frame_id;
+	int64_t commit_start_ns = os_monotonic_get_ns();
+	int64_t import_start_ns = commit_start_ns;
 
 	do {
 		if (!xrt_graphics_sync_handle_is_valid(sync_handle)) {
@@ -884,6 +921,7 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 
 		u_graphics_sync_unref(&sync_handle);
 	} while (false); // Goto without the labels.
+	int64_t import_end_ns = os_monotonic_get_ns();
 
 	if (xcf != NULL) {
 		push_fence_to_wait_thread(mc, frame_id, xcf);
@@ -896,6 +934,15 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 		os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
 		wait_for_scheduled_free(mc);
+	}
+
+	if (ipc_frame_timing_enabled()) {
+		int64_t commit_end_ns = os_monotonic_get_ns();
+		fprintf(stderr,
+		        "IPC_FRAME_TIMING server layer_commit frame=%" PRId64
+		        " sync_handle=%d imported_fence=%d import_ms=%.3f total_ms=%.3f\n",
+		        frame_id, xrt_graphics_sync_handle_is_valid(sync_handle) ? 1 : 0, xcf != NULL ? 1 : 0,
+		        ipc_elapsed_ms(import_start_ns, import_end_ns), ipc_elapsed_ms(commit_start_ns, commit_end_ns));
 	}
 
 	return XRT_SUCCESS;
