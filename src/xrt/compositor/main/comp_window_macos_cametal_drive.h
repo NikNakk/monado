@@ -161,6 +161,14 @@ macos_cametal_drive_teardown(void)
 	if (atomic_exchange_explicit(&_stopping, true, memory_order_acq_rel)) {
 		return;
 	}
+
+	/*
+	 * A callback may be synchronously waiting for the compositor/present worker to
+	 * schedule its supplied drawable. Release that wait before joining the NSThread
+	 * so service/process teardown can always reach fclose() for fully buffered traces.
+	 */
+	comp_multi_macos_displaylink_cancel_pending_tick();
+
 	if (_thread != nil) {
 		[_thread cancel];
 		if ([NSThread currentThread] != _thread) {
@@ -270,7 +278,9 @@ macos_cametal_drive_teardown(void)
 		} else {
 			/* No active compositor consumer before the CA deadline: keep its pool flowing. */
 			_unconsumedCount++;
-			[drawable present];
+			if (!atomic_load_explicit(&_stopping, memory_order_acquire)) {
+				[drawable present];
+			}
 		}
 	}
 
