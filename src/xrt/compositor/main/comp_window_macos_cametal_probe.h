@@ -65,11 +65,24 @@ macos_cametal_probe_monotonic_ns(void)
 }
 - (instancetype)initWithParentLayer:(CAMetalLayer *)parentLayer;
 - (void)start;
+- (void)stop;
 - (void)probeThreadMain;
 @end
 
 static MonadoCAMetalDisplayLinkProbe *g_macos_cametal_probe = nil;
 static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
+
+static void
+macos_cametal_probe_teardown(void)
+{
+	@autoreleasepool {
+		if (g_macos_cametal_probe != nil) {
+			[g_macos_cametal_probe stop];
+			[g_macos_cametal_probe release];
+			g_macos_cametal_probe = nil;
+		}
+	}
+}
 
 @implementation MonadoCAMetalDisplayLinkProbe
 
@@ -109,24 +122,29 @@ static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
 		[self release];
 		return nil;
 	}
+
 	/*
-	 * Use line buffering deliberately. The timing-trace force-include suppresses
-	 * fflush() when PSVR2_TIMING_TRACE_FULLY_BUFFERED=1, but it passes non-_IOFBF
-	 * setvbuf() requests through to libc unchanged. Each newline therefore makes
-	 * this independent probe visible on disk without changing the buffering policy
-	 * of the existing compositor timing CSVs.
+	 * Match the rest of the macOS timing diagnostics. In fully-buffered mode the
+	 * force-included trace shim expands this _IOFBF request to 16 MiB and suppresses
+	 * explicit fflush() calls. fclose() at teardown still performs the real flush.
+	 * With fully-buffered mode disabled, line buffering makes an interrupted probe
+	 * useful without adding an explicit flush to each callback.
 	 */
-	setvbuf(_trace, NULL, _IOLBF, 0);
+	if (macos_trace_fully_buffered_enabled()) {
+		setvbuf(_trace, NULL, _IOFBF, 4u * 1024u * 1024u);
+	} else {
+		setvbuf(_trace, NULL, _IOLBF, 0);
+	}
 	fputs("sample,callback_monotonic_ns,callback_media_s,callback_delta_ms,target_timestamp_s,target_delta_ms,"
 	      "target_presentation_timestamp_s,presentation_delta_ms,target_minus_callback_ms,"
 	      "presentation_minus_callback_ms,presentation_minus_target_ms\n",
 	      _trace);
-	/* Harmless when the global timing-trace shim suppresses explicit fflush(). */
 	fflush(_trace);
 
 	fprintf(stderr,
-	        "macOS CAMetalDisplayLink probe enabled on an independent 1x1 child layer; trace: %s\n",
-	        requested_path);
+	        "macOS CAMetalDisplayLink probe enabled on an independent 1x1 child layer; trace: %s%s\n",
+	        requested_path,
+	        macos_trace_fully_buffered_enabled() ? " (fully buffered; written at teardown)" : "");
 	return self;
 }
 
@@ -136,6 +154,45 @@ static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
 	[_thread setName:@"Monado CAMetalDisplayLink probe"];
 	[_thread setQualityOfService:NSQualityOfServiceUserInteractive];
 	[_thread start];
+}
+
+- (void)stop
+{
+	/*
+	 * Stop callback production before closing the FILE. The probe thread owns the
+	 * CAMetalDisplayLink and invalidates/releases it as it exits, so waiting for the
+	 * NSThread here makes fclose() race-free with the delegate's fprintf().
+	 */
+	if (_thread != nil) {
+		[_thread cancel];
+		if ([NSThread currentThread] != _thread) {
+			while (![_thread isFinished]) {
+				[NSThread sleepForTimeInterval:0.001];
+			}
+		}
+		[_thread release];
+		_thread = nil;
+	}
+
+	if (_trace != NULL) {
+		/* fclose is deliberately not wrapped by the fully-buffered trace shim. */
+		fclose(_trace);
+		_trace = NULL;
+		fprintf(stderr, "macOS CAMetalDisplayLink probe closed after %llu callbacks\n",
+		        (unsigned long long)_sampleCount);
+	}
+
+	if (_probeLayer != nil) {
+		[_probeLayer removeFromSuperlayer];
+		[_probeLayer release];
+		_probeLayer = nil;
+	}
+}
+
+- (void)dealloc
+{
+	[self stop];
+	[super dealloc];
 }
 
 - (void)probeThreadMain
@@ -210,7 +267,7 @@ static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
 	_lastTargetTimestamp = target_s;
 	_lastTargetPresentationTimestamp = presentation_s;
 
-	/* Explicit flush is redundant for the line-buffered probe, but harmless. */
+	/* Suppressed intentionally when PSVR2_TIMING_TRACE_FULLY_BUFFERED=1. */
 	if ((_sampleCount % 120ULL) == 0) {
 		fflush(_trace);
 	}
@@ -231,7 +288,11 @@ macos_cametal_probe_start_for_layer(CAMetalLayer *parentLayer)
 	}
 	if (@available(macOS 14.0, *)) {
 		g_macos_cametal_probe = [[MonadoCAMetalDisplayLinkProbe alloc] initWithParentLayer:parentLayer];
-		[g_macos_cametal_probe start];
+		if (g_macos_cametal_probe != nil) {
+			/* Service/process teardown always closes the fully-buffered probe trace. */
+			atexit(macos_cametal_probe_teardown);
+			[g_macos_cametal_probe start];
+		}
 	} else {
 		fprintf(stderr, "macOS CAMetalDisplayLink probe requires macOS 14 or later\n");
 	}
