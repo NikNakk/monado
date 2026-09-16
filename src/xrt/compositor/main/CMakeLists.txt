@@ -100,43 +100,48 @@ endif()
 if(XRT_HAVE_WAYLAND)
 	target_sources(comp_main PRIVATE comp_window_wayland.c)
 	pkg_get_variable(WL_PROTOS_PKG_DIR wayland-protocols pkgdatadir)
-	file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols")
+	pkg_get_variable(WL_SCANNER_PKG_DATA wayland-scanner pkgdatadir)
+	find_program(WAYLAND_SCANNER NAMES wayland-scanner PATHS ${WL_SCANNER_PKG_DATA})
 
-	set(WL_PROTOS_XML ${WL_PROTOS_PKG_DIR}/stable/xdg-shell/xdg-shell.xml)
+	file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols)
 
-	target_include_directories(
-		comp_main SYSTEM PRIVATE ${WL_PROTOS_DIR} ${WAYLAND_INCLUDE_DIRS}
+	set(wl_protos_dir ${WL_PROTOS_PKG_DIR})
+	list(
+		APPEND
+		wl_proto_xml
+		stable/xdg-shell/xdg-shell.xml
+		unstable/tablet/tablet-unstable-v2.xml
 		)
-	target_link_libraries(comp_main PRIVATE ${WAYLAND_LIBRARIES})
 
 	if(XRT_HAVE_WAYLAND_DIRECT)
-		list(APPEND WL_PROTOS_XML ${WL_PROTOS_PKG_DIR}/staging/drm-lease/drm-lease-v1.xml)
-
-		target_sources(comp_main PRIVATE comp_window_direct_wayland.c)
-
-		target_link_libraries(comp_main PRIVATE PkgConfig::LIBDRM)
+		list(APPEND wl_proto_xml stable/linux-dmabuf/linux-dmabuf-v1.xml)
 	endif()
 
-	foreach(wl_proto_xml ${WL_PROTOS_XML})
-		get_filename_component(WL_PROTO ${wl_proto_xml} NAME_WE)
-
-		set(WL_PROTO_C "${WL_PROTOS_DIR}/${WL_PROTO}.c")
-		set(WL_PROTO_H "${WL_PROTOS_DIR}/${WL_PROTO}-client-protocol.h")
+	foreach(wl_proto ${wl_proto_xml})
+		get_filename_component(proto_name ${wl_proto} NAME_WE)
+		set(generated_file ${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols/${proto_name})
 
 		add_custom_command(
-			OUTPUT ${WL_PROTO_C}
-			COMMAND ${WAYLAND_SCANNER} private-code ${wl_protos_dir}/${wl_proto_xml} ${WL_PROTO_C}
-			DEPENDS ${wl_protos_dir}/${wl_proto_xml}
+			OUTPUT ${generated_file}-client-protocol.h
+			COMMAND ${WAYLAND_SCANNER} client-header ${wl_protos_dir}/${wl_proto}
+				${generated_file}-client-protocol.h
+			DEPENDS ${wl_protos_dir}/${wl_proto}
 			)
 
 		add_custom_command(
-			OUTPUT ${WL_PROTO_H}
-			COMMAND ${WAYLAND_SCANNER} client-header ${wl_protos_dir}/${wl_proto_xml} ${WL_PROTO_H}
-			DEPENDS ${wl_protos_dir}/${wl_proto_xml}
+			OUTPUT ${generated_file}-protocol.c
+			COMMAND ${WAYLAND_SCANNER} private-code ${wl_protos_dir}/${wl_proto}
+				${generated_file}-protocol.c
+			DEPENDS ${wl_protos_dir}/${wl_proto}
 			)
 
-		target_sources(comp_main PRIVATE ${WL_PROTO_C} ${WL_PROTO_H})
+		target_sources(
+			comp_main
+			PRIVATE ${generated_file}-client-protocol.h ${generated_file}-protocol.c
+			)
 	endforeach()
+
+	target_include_directories(comp_main PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols)
 endif()
 if(ANDROID)
 	target_sources(comp_main PRIVATE comp_window_android.c)
