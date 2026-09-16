@@ -247,11 +247,11 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	    "present_complete",
 	    "frame_id,completion_handler_ns,image_index,timeline_value,status,commit_to_completion_ns,"
 	    "gpu_start_time_s,gpu_end_time_s,shared_event_wait");
-	cwm->trace_present_worker = macos_timing_trace_open_file(
+	cwm->trace_present_worker = cwm->present_worker_enabled ? macos_timing_trace_open_file(
 	    "present_worker",
 	    "event,frame_id,event_ns,enqueue_ns,handoff_return_ns,worker_start_ns,next_drawable_begin_ns,"
 	    "next_drawable_end_ns,metal_commit_ns,worker_delay_ns,drawable_wait_ns,image_index,timeline_value,"
-	    "queue_depth,shared_event_wait,newer_pending,pending_frame_id,pending_timeline_value");
+	    "queue_depth,shared_event_wait,newer_pending,pending_frame_id,pending_timeline_value") : NULL;
 	cwm->trace_drawable_prefetch = macos_timing_trace_open_file(
 	    "drawable_prefetch", "event,timeline_value,event_ns,next_drawable_begin_ns,next_drawable_end_ns,drawable_wait_ns");
 	cwm->trace_vblank = macos_timing_trace_open_file(
@@ -1601,7 +1601,7 @@ comp_window_macos_present(struct comp_target *ct,
 		return macos_execute_present_job(cwm, &job, false);
 	}
 	if (!cwm->present_worker_enabled) {
-		/* Diagnostic A/B: keep async Metal/shared-event handoff but acquire drawable on caller. */
+		/* Submit on the compositor thread; async GPU completion does not need a worker. */
 		return macos_execute_present_job(cwm, &job, true);
 	}
 	if (index >= ct->image_count || cwm->metal_images[index] == nil || present_queue == NULL) {
@@ -1880,6 +1880,20 @@ comp_window_macos_create(struct comp_compositor *c)
 	cwm->async_present = debug_get_bool_option_macos_async_present();
 	bool want_present_worker = debug_get_bool_option_macos_present_worker();
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
+	bool want_early_drawable = debug_get_bool_option_macos_early_drawable();
+	/* The display link supplies this frame's drawable. Never hand it to a
+	 * legacy worker or prefetch a drawable for a different callback, even when
+	 * an old launch environment still requests these experiments. The bridge
+	 * is not active yet: target creation precedes display-link attachment. */
+	bool displaylink_driven = macos_cametal_drive_enabled();
+	if (displaylink_driven) {
+		if (want_present_worker || want_drawable_slot || want_early_drawable) {
+			COMP_WARN(c, "CAMetalDisplayLink ignores XRT_MACOS_PRESENT_WORKER, XRT_MACOS_DRAWABLE_SLOT and XRT_MACOS_EARLY_DRAWABLE; presentation runs on the compositor thread");
+		}
+		want_present_worker = false;
+		want_drawable_slot = false;
+		want_early_drawable = false;
+	}
 	cwm->drawable_slot_enabled = cwm->async_present && want_drawable_slot;
 	/*
 	 * Slot mode is itself a newest-frame presentation worker. The producer may
@@ -1889,7 +1903,7 @@ comp_window_macos_create(struct comp_compositor *c)
 	 */
 	cwm->present_worker_enabled = cwm->async_present && (want_present_worker || cwm->drawable_slot_enabled);
 	cwm->early_drawable_enabled = cwm->async_present && !cwm->present_worker_enabled && !cwm->drawable_slot_enabled &&
-	                               debug_get_bool_option_macos_early_drawable();
+	                               want_early_drawable;
 	cwm->present_command_group = dispatch_group_create();
 	if (cwm->present_worker_enabled) {
 		dispatch_queue_attr_t worker_attr =
@@ -1908,7 +1922,7 @@ comp_window_macos_create(struct comp_compositor *c)
 			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT requires asynchronous presentation; slot is disabled");
 		}
 	}
-	if (debug_get_bool_option_macos_early_drawable()) {
+	if (want_early_drawable) {
 		if (cwm->drawable_slot_enabled) {
 			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT and XRT_MACOS_EARLY_DRAWABLE are both set; using drawable slot mode");
 		} else if (cwm->early_drawable_enabled) {
