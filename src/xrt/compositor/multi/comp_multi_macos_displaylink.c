@@ -212,6 +212,29 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 	}
 }
 
+bool
+comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing)
+{
+	pthread_mutex_lock(&g_bridge.mutex);
+	bool valid = g_active && g_bridge.drawable != NULL &&
+	             g_bridge.published_serial == g_bridge.consumed_serial &&
+	             g_bridge.consumed_serial > g_bridge.completed_serial &&
+	             g_bridge.consumed_serial > g_bridge.cancelled_serial &&
+	             g_bridge.callback_monotonic_ns > 0 &&
+	             g_bridge.target_monotonic_ns > g_bridge.callback_monotonic_ns &&
+	             g_bridge.presentation_monotonic_ns >= g_bridge.target_monotonic_ns &&
+	             g_bridge.presentation_monotonic_ns <= INT64_MAX;
+	if (valid) {
+		*out_timing = (struct comp_multi_macos_displaylink_timing){
+		    .callback_ns = (int64_t)g_bridge.callback_monotonic_ns,
+		    .deadline_ns = (int64_t)g_bridge.target_monotonic_ns,
+		    .presentation_ns = (int64_t)g_bridge.presentation_monotonic_ns,
+		};
+	}
+	pthread_mutex_unlock(&g_bridge.mutex);
+	return valid;
+}
+
 void
 comp_multi_macos_displaylink_complete_tick(void)
 {
@@ -300,6 +323,13 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 	(void)out_callback_monotonic_ns;
 	(void)out_target_monotonic_ns;
 	(void)out_presentation_monotonic_ns;
+	return false;
+}
+
+bool
+comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing)
+{
+	(void)out_timing;
 	return false;
 }
 

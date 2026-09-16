@@ -36,31 +36,15 @@ macos_xrt_comp_predict_frame_from_displaylink(struct xrt_compositor *xc,
                                               int64_t *out_predicted_display_time_ns,
                                               int64_t *out_predicted_display_period_ns)
 {
-	uint64_t callback_ns = 0;
-	uint64_t target_ns = 0;
-	uint64_t presentation_ns = 0;
-	bool driven = comp_multi_macos_displaylink_active() && comp_multi_macos_displaylink_wait_tick(&callback_ns, &target_ns, &presentation_ns);
-
-	/* Preserve Monado's native frame-id/pacing bookkeeping for the first A/B. */
+	if (comp_multi_macos_displaylink_active()) {
+		/* The native compositor reads the consumed tick before saving its frame
+		 * state, so its renderer and these client-facing outputs stay aligned. */
+		(void)comp_multi_macos_displaylink_wait_tick(NULL, NULL, NULL);
+	}
 	macos_xrt_comp_predict_frame_with_time_constraint(xc, out_frame_id, out_wake_up_time_ns,
 	                                                  out_predicted_gpu_time_ns,
 	                                                  out_predicted_display_time_ns,
 	                                                  out_predicted_display_period_ns);
-
-	if (!driven) {
-		return;
-	}
-
-	/*
-	 * CAMetalDisplayLink is the cadence primitive. Keep the native compositor's
-	 * predicted-display bookkeeping unchanged in this first experiment so that
-	 * the only behavioural changes are cadence and drawable ownership. The CA
-	 * target/presentation timestamps remain available in the driver trace for a
-	 * follow-up experiment that can replace Monado prediction explicitly.
-	 */
-	(void)target_ns;
-	(void)presentation_ns;
-	*out_wake_up_time_ns = (int64_t)(callback_ns != 0 ? callback_ns : os_monotonic_get_ns());
 }
 
 #define xrt_comp_predict_frame(xc, out_frame_id, out_wake_up_time_ns, out_predicted_gpu_time_ns,                     \

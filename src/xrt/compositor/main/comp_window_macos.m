@@ -1252,6 +1252,14 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			}
 		}
 
+		struct comp_multi_macos_displaylink_timing displaylink_timing;
+		bool displaylink_driven = comp_multi_macos_displaylink_current_timing(&displaylink_timing);
+		if (displaylink_driven) {
+			/* The trace's target must match the drawable's CA presentation time,
+			 * not the unused legacy CVDisplayLink/minimum-lead calculation. */
+			target_output_ns = (uint64_t)displaylink_timing.presentation_ns;
+		}
+
 		if (cwm->presented_state != NULL) {
 			struct macos_presented_state *presented_state = cwm->presented_state;
 			macos_presented_state_retain(presented_state);
@@ -1277,7 +1285,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				    presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns : 0;
 				int64_t observed_present_offset_ns =
 				    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
-				if (observed_present_offset_ns > 0) {
+				if (!displaylink_driven && observed_present_offset_ns > 0) {
 					atomic_store_explicit(&presented_state->latest_observed_present_offset_ns,
 					                      observed_present_offset_ns, memory_order_release);
 					atomic_fetch_add_explicit(&presented_state->present_offset_sample_serial, 1,
@@ -1302,7 +1310,11 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		uint64_t prelatch_ns = (uint64_t)prelatch_us * 1000ULL;
 		metal_request_ns = target_output_ns > prelatch_ns ? target_output_ns - prelatch_ns : target_output_ns;
 		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)metal_request_ns);
-		if (scheduled_present_host_s > 0.0) {
+		if (displaylink_driven) {
+			metal_request_ns = 0;
+			scheduled_present_host_s = 0.0;
+			[command_buffer presentDrawable:drawable];
+		} else if (scheduled_present_host_s > 0.0) {
 			[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
 		} else {
 			[command_buffer presentDrawable:drawable];
@@ -1684,7 +1696,8 @@ comp_window_macos_update_timings(struct comp_target *ct)
 		sample_ns = atomic_load_explicit(&cwm->presented_state->latest_observed_present_offset_ns,
 		                                 memory_order_acquire);
 	}
-	if (present_offset_serial != cwm->consumed_present_offset_sample_serial && cwm->display_period_ns > 0) {
+	if (!macos_cametal_drive_enabled() &&
+	    present_offset_serial != cwm->consumed_present_offset_sample_serial && cwm->display_period_ns > 0) {
 		cwm->consumed_present_offset_sample_serial = present_offset_serial;
 		int64_t max_reasonable_ns = cwm->display_period_ns * 4;
 		if (sample_ns > 0 && sample_ns <= max_reasonable_ns) {
