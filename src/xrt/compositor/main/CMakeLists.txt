@@ -60,7 +60,7 @@ if(APPLE)
 	set_source_files_properties(
 		comp_window_macos_latest.m
 		PROPERTIES COMPILE_OPTIONS
-			"-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_probe.h"
+			"-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_probe.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_drive.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_drive_cv.h"
 		)
 
 	# Add the service-Metal reuse timeline to the exact renderer queue submit
@@ -100,9 +100,6 @@ endif()
 if(XRT_HAVE_WAYLAND)
 	target_sources(comp_main PRIVATE comp_window_wayland.c)
 	pkg_get_variable(WL_PROTOS_PKG_DIR wayland-protocols pkgdatadir)
-	pkg_get_variable(WL_SCANNER wayland-scanner wayland_scanner)
-
-	set(WL_PROTOS_DIR "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols")
 	file(MAKE_DIRECTORY "${WL_PROTOS_DIR}")
 
 	set(WL_PROTOS_XML ${WL_PROTOS_PKG_DIR}/stable/xdg-shell/xdg-shell.xml)
