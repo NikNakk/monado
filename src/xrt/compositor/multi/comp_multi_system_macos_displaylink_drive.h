@@ -7,9 +7,8 @@
  * Force-include this after comp_multi_system_macos_trace.h. It does not replace
  * multi_main_loop(): it replaces that loop's predict-frame call with a blocking
  * wait for one CAMetalDisplayLink tick and suppresses the loop's u_wait_until()
- * only for a frame that actually consumed such a tick. The existing layer
- * transfer and native compositor render stay on the established Multi Client
- * Module thread.
+ * while the experiment is enabled. The existing layer transfer and native
+ * compositor render stay on the established Multi Client Module thread.
  *
  * Tick completion is deliberately NOT signalled from xrt_comp_layer_commit().
  * On macOS that call may hand presentation to an asynchronous present worker.
@@ -75,16 +74,16 @@ macos_xrt_comp_predict_frame_from_displaylink(struct xrt_compositor *xc,
 	                                              (out_predicted_display_period_ns))
 
 /*
- * This is the strict steady-state "no mach_wait_until/no full spin" part of the
- * experiment. comp_multi_system.c has one u_wait_until() in its render loop. A
- * frame released by CAMetalDisplayLink must run immediately; the callback itself
- * is the pacing primitive. The bridge retains a bounded failure/teardown escape,
- * so only a failed/stopped display link can fall back to the ordinary wait path.
+ * Strict experiment invariant: when CAMetalDisplayLink drive mode is enabled,
+ * comp_multi_system.c must never enter its legacy u_wait_until()/mach_wait_until
+ * path. The bridge's condition-variable wait is the only CPU pacing primitive.
+ * If callbacks stop, its bounded failure/teardown timeout may produce a dropped
+ * frame, but must not silently fall back to the old display scheduler.
  */
 static inline void
 macos_u_wait_until_displaylink(struct os_precise_sleeper *sleeper, int64_t wake_up_time_ns)
 {
-	if (g_macos_displaylink_tick_active) {
+	if (comp_multi_macos_displaylink_enabled()) {
 		(void)sleeper;
 		(void)wake_up_time_ns;
 		return;
