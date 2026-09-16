@@ -109,12 +109,19 @@ static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
 		[self release];
 		return nil;
 	}
-	setvbuf(_trace, NULL, _IOFBF, 4u * 1024u * 1024u);
+	/*
+	 * Use line buffering deliberately. The timing-trace force-include suppresses
+	 * fflush() when PSVR2_TIMING_TRACE_FULLY_BUFFERED=1, but it passes non-_IOFBF
+	 * setvbuf() requests through to libc unchanged. Each newline therefore makes
+	 * this independent probe visible on disk without changing the buffering policy
+	 * of the existing compositor timing CSVs.
+	 */
+	setvbuf(_trace, NULL, _IOLBF, 0);
 	fputs("sample,callback_monotonic_ns,callback_media_s,callback_delta_ms,target_timestamp_s,target_delta_ms,"
 	      "target_presentation_timestamp_s,presentation_delta_ms,target_minus_callback_ms,"
 	      "presentation_minus_callback_ms,presentation_minus_target_ms\n",
 	      _trace);
-	/* Make probe creation distinguishable from 'file opened but callback never fired'. */
+	/* Harmless when the global timing-trace shim suppresses explicit fflush(). */
 	fflush(_trace);
 
 	fprintf(stderr,
@@ -203,7 +210,7 @@ static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
 	_lastTargetTimestamp = target_s;
 	_lastTargetPresentationTimestamp = presentation_s;
 
-	/* Flush once per nominal second: low overhead, but useful during/after a failed run. */
+	/* Explicit flush is redundant for the line-buffered probe, but harmless. */
 	if ((_sampleCount % 120ULL) == 0) {
 		fflush(_trace);
 	}
