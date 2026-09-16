@@ -114,6 +114,8 @@ static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
 	      "target_presentation_timestamp_s,presentation_delta_ms,target_minus_callback_ms,"
 	      "presentation_minus_callback_ms,presentation_minus_target_ms\n",
 	      _trace);
+	/* Make probe creation distinguishable from 'file opened but callback never fired'. */
+	fflush(_trace);
 
 	fprintf(stderr,
 	        "macOS CAMetalDisplayLink probe enabled on an independent 1x1 child layer; trace: %s\n",
@@ -191,12 +193,18 @@ static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
 		[drawable present];
 	}
 
+	if (_sampleCount == 1) {
+		fprintf(stderr,
+		        "macOS CAMetalDisplayLink probe received first callback: target lead %.3fms, presentation lead %.3fms\n",
+		        (target_s - callback_media_s) * 1000.0, (presentation_s - callback_media_s) * 1000.0);
+	}
+
 	_lastCallbackNs = callback_ns;
 	_lastTargetTimestamp = target_s;
 	_lastTargetPresentationTimestamp = presentation_s;
 
-	/* A rare flush gives partial data after an abnormal run without perturbing each callback. */
-	if ((_sampleCount % 1200ULL) == 0) {
+	/* Flush once per nominal second: low overhead, but useful during/after a failed run. */
+	if ((_sampleCount % 120ULL) == 0) {
 		fflush(_trace);
 	}
 }
