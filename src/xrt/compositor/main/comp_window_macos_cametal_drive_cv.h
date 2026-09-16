@@ -36,31 +36,28 @@ macos_cametal_drive_cvdisplaylink_start(CVDisplayLinkRef display_link)
 #define CVDisplayLinkStart(display_link) macos_cametal_drive_cvdisplaylink_start((display_link))
 
 /*
- * The driven header normally returns the callback-owned drawable. Its bridge has
- * a bounded 100-ms wait solely so service teardown or a failed display link cannot
- * deadlock the Multi Client Module. If such a fallback frame occurs there is no
- * callback-owned drawable, so let that exceptional frame use the real nextDrawable
- * path rather than fail with a null drawable. Healthy driven frames never take it.
+ * Strict experiment invariant: while CAMetalDisplayLink drive mode is enabled,
+ * the real compositor layer may consume only update.drawable from the active
+ * callback. Do not silently fall back to CAMetalLayer nextDrawable if the bridge
+ * has no supplied drawable: returning nil makes that exceptional frame fail/drop
+ * visibly instead of contaminating the A/B with the legacy acquisition path.
  */
 #ifdef nextDrawable
 #undef nextDrawable
 #endif
 
-@interface NSObject (MonadoCAMetalDisplayLinkDriveDrawableFallback)
-- (id<CAMetalDrawable>)monadoCAMetalDrivenNextDrawableWithFallback;
+@interface NSObject (MonadoCAMetalDisplayLinkDriveDrawableStrict)
+- (id<CAMetalDrawable>)monadoCAMetalDrivenNextDrawableStrict;
 @end
 
-@implementation NSObject (MonadoCAMetalDisplayLinkDriveDrawableFallback)
-- (id<CAMetalDrawable>)monadoCAMetalDrivenNextDrawableWithFallback
+@implementation NSObject (MonadoCAMetalDisplayLinkDriveDrawableStrict)
+- (id<CAMetalDrawable>)monadoCAMetalDrivenNextDrawableStrict
 {
 	if (macos_cametal_drive_enabled() && self == g_macos_cametal_driver_layer) {
-		id<CAMetalDrawable> supplied = (id<CAMetalDrawable>)comp_multi_macos_displaylink_current_drawable();
-		if (supplied != nil) {
-			return supplied;
-		}
+		return (id<CAMetalDrawable>)comp_multi_macos_displaylink_current_drawable();
 	}
 	return [(CAMetalLayer *)self nextDrawable];
 }
 @end
 
-#define nextDrawable monadoCAMetalDrivenNextDrawableWithFallback
+#define nextDrawable monadoCAMetalDrivenNextDrawableStrict
