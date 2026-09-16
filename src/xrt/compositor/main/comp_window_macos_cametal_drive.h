@@ -12,6 +12,7 @@
  * In this mode:
  *  - no target nextDrawable acquisition is performed;
  *  - presentDrawable:atTime: is converted to plain presentDrawable:;
+ *  - the callback remains alive until Metal has scheduled the supplied drawable;
  *  - stale callbacks whose target/presentation deadline is already past are
  *    drained without triggering a compositor frame.
  */
@@ -267,7 +268,7 @@ macos_cametal_drive_teardown(void)
 			_consumedCount++;
 			outcome = "consumed";
 		} else {
-			/* No active compositor consumer (or it was still busy): keep CA's pool flowing. */
+			/* No active compositor consumer before the CA deadline: keep its pool flowing. */
 			_unconsumedCount++;
 			[drawable present];
 		}
@@ -349,8 +350,9 @@ macos_cametal_drive_start_for_layer(CAMetalLayer *layer)
 
 /*
  * Replace target nextDrawable only for the real CAMetalLayer in drive mode. The
- * CAMetalDisplayLink delegate retains update.drawable until the synchronous multi
- * iteration has completed, so this borrowed reference is valid for the present.
+ * CAMetalDisplayLink delegate retains update.drawable until Metal has scheduled
+ * its presentation, so this borrowed reference remains valid across an existing
+ * async present-worker handoff.
  */
 @interface NSObject (MonadoCAMetalDisplayLinkDriveDrawable)
 - (id<CAMetalDrawable>)monadoCAMetalDrivenNextDrawable;
@@ -372,10 +374,32 @@ macos_cametal_drive_start_for_layer(CAMetalLayer *layer)
  * The trace-buffer header has already installed monadoPresentDrawable wrappers.
  * Re-wrap source-level calls so drive mode discards absolute atTime scheduling,
  * while every non-drive path retains the previous diagnostic behaviour exactly.
+ *
+ * Crucially, a driven tick is completed only when the Metal command buffer that
+ * owns the supplied drawable reaches the scheduled state. At that point Metal
+ * owns the presentation request and the CAMetalDisplayLink delegate can safely
+ * return/release its extra drawable retain, even when the target used its normal
+ * asynchronous present-worker path.
  */
 #ifdef presentDrawable
 #undef presentDrawable
 #endif
+
+static inline void
+macos_cametal_drive_complete_when_scheduled(id<MTLCommandBuffer> command_buffer, id<MTLDrawable> drawable)
+{
+	if (!macos_cametal_drive_enabled() || command_buffer == nil || drawable == nil) {
+		return;
+	}
+	void *current = comp_multi_macos_displaylink_current_drawable();
+	if (current == NULL || current != (void *)drawable) {
+		return;
+	}
+	[command_buffer addScheduledHandler:^(id<MTLCommandBuffer> scheduled_buffer) {
+		(void)scheduled_buffer;
+		comp_multi_macos_displaylink_complete_tick();
+	}];
+}
 
 @interface NSObject (MonadoCAMetalDisplayLinkDrivePresent)
 - (void)monadoCAMetalDrivenPresentDrawable:(id<MTLDrawable>)drawable;
@@ -385,16 +409,21 @@ macos_cametal_drive_start_for_layer(CAMetalLayer *layer)
 @implementation NSObject (MonadoCAMetalDisplayLinkDrivePresent)
 - (void)monadoCAMetalDrivenPresentDrawable:(id<MTLDrawable>)drawable
 {
-	[(id<MTLCommandBuffer>)self monadoPresentDrawable:drawable];
+	id<MTLCommandBuffer> command_buffer = (id<MTLCommandBuffer>)self;
+	[command_buffer monadoPresentDrawable:drawable];
+	macos_cametal_drive_complete_when_scheduled(command_buffer, drawable);
 }
 
 - (void)monadoCAMetalDrivenPresentDrawable:(id<MTLDrawable>)drawable atTime:(CFTimeInterval)presentationTime
 {
+	id<MTLCommandBuffer> command_buffer = (id<MTLCommandBuffer>)self;
 	if (macos_cametal_drive_enabled()) {
-		[(id<MTLCommandBuffer>)self monadoPresentDrawable:drawable];
+		/* CAMetalDisplayLink supplies the timing; never schedule this drawable at an absolute time. */
+		[command_buffer monadoPresentDrawable:drawable];
+		macos_cametal_drive_complete_when_scheduled(command_buffer, drawable);
 		return;
 	}
-	[(id<MTLCommandBuffer>)self monadoPresentDrawable:drawable atTime:presentationTime];
+	[command_buffer monadoPresentDrawable:drawable atTime:presentationTime];
 }
 @end
 
