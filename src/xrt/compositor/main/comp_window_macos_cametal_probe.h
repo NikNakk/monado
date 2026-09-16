@@ -181,11 +181,15 @@ static atomic_bool g_macos_cametal_probe_started = ATOMIC_VAR_INIT(false);
 	        (presentation_s - target_s) * 1000.0);
 
 	/*
-	 * Intentionally do not present update.drawable. The update object owns the
-	 * probe drawable for the callback lifetime; returning lets Core Animation
-	 * recycle it without touching the real compositor layer or its drawable pool.
+	 * CAMetalDisplayLink supplies this drawable specifically for the callback and
+	 * expects present() before the callback deadline. Presenting the independent
+	 * 1x1 probe drawable keeps the probe's own drawable pool flowing without
+	 * touching the real compositor layer or changing HMD presentation behaviour.
 	 */
-	(void)[update drawable];
+	id<CAMetalDrawable> drawable = [update drawable];
+	if (drawable != nil) {
+		[drawable present];
+	}
 
 	_lastCallbackNs = callback_ns;
 	_lastTargetTimestamp = target_s;
