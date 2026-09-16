@@ -205,6 +205,27 @@ comp_multi_macos_displaylink_complete_tick(void)
 	pthread_mutex_unlock(&g_bridge.mutex);
 }
 
+void
+comp_multi_macos_displaylink_cancel_pending_tick(void)
+{
+	if (!comp_multi_macos_displaylink_enabled()) {
+		return;
+	}
+	pthread_mutex_lock(&g_bridge.mutex);
+	/*
+	 * Only teardown calls this. If a callback is blocked after its tick was
+	 * consumed but before Metal could schedule presentation, release that callback
+	 * so the display-link NSThread can invalidate and the fully buffered trace can
+	 * be closed. The callback itself still owns an explicit retain on the drawable.
+	 */
+	if (g_bridge.completed_serial < g_bridge.published_serial) {
+		g_bridge.completed_serial = g_bridge.published_serial;
+		g_bridge.drawable = NULL;
+	}
+	pthread_cond_broadcast(&g_bridge.cond);
+	pthread_mutex_unlock(&g_bridge.mutex);
+}
+
 void *
 comp_multi_macos_displaylink_current_drawable(void)
 {
@@ -251,6 +272,10 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 
 void
 comp_multi_macos_displaylink_complete_tick(void)
+{}
+
+void
+comp_multi_macos_displaylink_cancel_pending_tick(void)
 {}
 
 void *
