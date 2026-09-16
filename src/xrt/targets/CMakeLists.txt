@@ -9,8 +9,9 @@
 add_subdirectory(helpers)
 add_subdirectory(common)
 
-# Monado management library
-if(XRT_FEATURE_SERVICE AND XRT_HAVE_LINUX)
+# Monado management library. The implementation uses the portable IPC client
+# layer and is useful on macOS as well as Linux for runtime/client management.
+if(XRT_FEATURE_SERVICE AND (XRT_HAVE_LINUX OR APPLE))
 	add_subdirectory(libmonado)
 endif()
 
