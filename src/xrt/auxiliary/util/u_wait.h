@@ -14,9 +14,6 @@
 #include "os/os_time.h"
 
 #if defined(XRT_OS_OSX)
-#include <mach/mach.h>
-#include <mach/mach_time.h>
-#include <mach/thread_policy.h>
 #include <stdio.h>
 #include <stdlib.h>
 #endif
@@ -62,79 +59,6 @@ u_wait_macos_env_u64(const char *name, uint64_t default_value)
 	unsigned long long parsed = strtoull(value, &end, 10);
 	return end != value && *end == '\0' ? (uint64_t)parsed : default_value;
 }
-
-static inline uint32_t
-u_wait_macos_ns_to_mach_ticks(uint64_t ns, const mach_timebase_info_data_t *timebase)
-{
-	__uint128_t ticks = (__uint128_t)ns * (__uint128_t)timebase->denom / (__uint128_t)timebase->numer;
-	return ticks > UINT32_MAX ? UINT32_MAX : (uint32_t)ticks;
-}
-
-/*
- * Diagnostic macOS real-time scheduling experiment. This is intentionally tied
- * to the process environment: in service-mode testing the variable is supplied
- * only to monado-service, where u_wait_until() is used by the timing-critical
- * Multi Client Module loop. Keep the full-spin mode available as the known-good
- * control while evaluating whether a real time constraint lets us park safely.
- */
-static inline void
-u_wait_macos_apply_time_constraint_if_requested(void)
-{
-	static bool checked = false;
-	if (checked) {
-		return;
-	}
-	checked = true;
-
-	if (!u_wait_macos_env_enabled("XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT")) {
-		return;
-	}
-
-	uint64_t period_us = u_wait_macos_env_u64("XRT_MACOS_COMPOSITOR_PERIOD_US", 8342);
-	uint64_t computation_us = u_wait_macos_env_u64("XRT_MACOS_COMPOSITOR_COMPUTATION_US", 3000);
-	uint64_t constraint_us = u_wait_macos_env_u64("XRT_MACOS_COMPOSITOR_CONSTRAINT_US", 6000);
-
-	if (period_us == 0 || computation_us == 0 || constraint_us == 0 || computation_us > constraint_us ||
-	    constraint_us > period_us || period_us > UINT64_MAX / 1000 || computation_us > UINT64_MAX / 1000 ||
-	    constraint_us > UINT64_MAX / 1000) {
-		fprintf(stderr,
-		        "WARN [u_wait] invalid macOS time constraint: period_us=%llu computation_us=%llu constraint_us=%llu\n",
-		        (unsigned long long)period_us, (unsigned long long)computation_us,
-		        (unsigned long long)constraint_us);
-		return;
-	}
-
-	mach_timebase_info_data_t timebase = {0};
-	kern_return_t kr = mach_timebase_info(&timebase);
-	if (kr != KERN_SUCCESS || timebase.numer == 0 || timebase.denom == 0) {
-		fprintf(stderr, "WARN [u_wait] mach_timebase_info failed for macOS time constraint: %d\n", kr);
-		return;
-	}
-
-	thread_time_constraint_policy_data_t policy = {
-	    .period = u_wait_macos_ns_to_mach_ticks(period_us * 1000, &timebase),
-	    .computation = u_wait_macos_ns_to_mach_ticks(computation_us * 1000, &timebase),
-	    .constraint = u_wait_macos_ns_to_mach_ticks(constraint_us * 1000, &timebase),
-	    .preemptible = TRUE,
-	};
-
-	thread_t thread = mach_thread_self();
-	kr = thread_policy_set(thread, THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t)&policy,
-	                       THREAD_TIME_CONSTRAINT_POLICY_COUNT);
-	mach_port_deallocate(mach_task_self(), thread);
-
-	if (kr == KERN_SUCCESS) {
-		fprintf(stderr,
-		        "INFO [u_wait] macOS compositor time constraint enabled: period_us=%llu computation_us=%llu constraint_us=%llu\n",
-		        (unsigned long long)period_us, (unsigned long long)computation_us,
-		        (unsigned long long)constraint_us);
-	} else {
-		fprintf(stderr,
-		        "WARN [u_wait] failed to set macOS THREAD_TIME_CONSTRAINT_POLICY: kr=%d period_us=%llu computation_us=%llu constraint_us=%llu\n",
-		        kr, (unsigned long long)period_us, (unsigned long long)computation_us,
-		        (unsigned long long)constraint_us);
-	}
-}
 #endif
 
 /*!
@@ -146,10 +70,6 @@ static inline void
 u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 {
 	uint64_t now_ns = os_monotonic_get_ns();
-
-#if defined(XRT_OS_OSX)
-	u_wait_macos_apply_time_constraint_if_requested();
-#endif
 
 	// Lets hope its not to late.
 	bool fuzzy_in_the_past = time_is_less_then_or_within_range(until_ns, now_ns, U_TIME_1MS_IN_NS);
