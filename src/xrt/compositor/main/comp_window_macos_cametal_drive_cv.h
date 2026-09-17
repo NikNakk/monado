@@ -36,6 +36,29 @@ macos_cametal_drive_cvdisplaylink_start(CVDisplayLinkRef display_link)
 #define CVDisplayLinkStart(display_link) macos_cametal_drive_cvdisplaylink_start((display_link))
 
 /*
+ * comp_compositor.c needs the consumed CAMetal timing in both driven and hybrid
+ * modes so renderer prediction follows the callback that woke the frame. The HMD
+ * target is different: only driven mode may use that timing as the callback-owned
+ * drawable's presentation target. Hybrid must keep the normal real-CVDisplayLink
+ * target selection and presentDrawable:atTime: path.
+ *
+ * This force-included wrapper is local to the macOS target translation unit, so
+ * it hides CAMetal timing from comp_window_macos.m in hybrid mode without changing
+ * what comp_compositor.c sees.
+ */
+static inline bool
+macos_target_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing)
+{
+	if (!comp_multi_macos_displaylink_driven_mode()) {
+		return false;
+	}
+	return comp_multi_macos_displaylink_current_timing(out_timing);
+}
+
+#define comp_multi_macos_displaylink_current_timing(out_timing) \
+	macos_target_displaylink_current_timing((out_timing))
+
+/*
  * Strict driven-mode invariant: the real compositor layer may consume only
  * update.drawable from its active CAMetalDisplayLink callback. Hybrid and legacy
  * modes pass through to the real CAMetalLayer nextDrawable implementation.
