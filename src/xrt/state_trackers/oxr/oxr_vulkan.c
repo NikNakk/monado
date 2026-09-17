@@ -158,8 +158,7 @@ static const char *required_vk_device_extensions[] = {
 
 static const char *optional_device_extensions[] = {
 #if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
-    VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME,
-    VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
+    VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME, VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME,
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE) // Not optional
 
