@@ -12,7 +12,6 @@
 #include <dispatch/dispatch.h>
 
 #include "server/ipc_server.h"
-#include "server/ipc_server_macos_activity.h"
 #include "shared/ipc_metal_xpc_service.h"
 #include "os/os_time.h"
 #include "util/u_debug.h"
@@ -46,96 +45,6 @@ ipc_server_mainloop_deinit_apple_vanilla(struct ipc_server_mainloop *ml);
  * original display rather than any HMD- or driver-specific identity so display
  * loss handling stays generic for direct-display HMDs.
  */
-static NSLock *g_process_activity_lock = nil;
-static id<NSObject> g_process_activity_token = nil;
-
-static NSLock *
-get_process_activity_lock(void)
-{
-	@synchronized([NSProcessInfo class]) {
-		if (g_process_activity_lock == nil) {
-			g_process_activity_lock = [[NSLock alloc] init];
-		}
-	}
-	return g_process_activity_lock;
-}
-
-static bool
-process_activity_options_from_env(NSActivityOptions *out_options, const char **out_mode)
-{
-	const char *value = getenv("XRT_MACOS_PROCESS_ACTIVITY");
-	if (value == NULL || value[0] == '\0' || strcmp(value, "0") == 0 || strcmp(value, "off") == 0) {
-		return false;
-	}
-
-	if (strcmp(value, "user-interactive") == 0) {
-		*out_options = NSActivityUserInteractive;
-		*out_mode = "user-interactive";
-		return true;
-	}
-
-	if (strcmp(value, "latency-critical") == 0) {
-		*out_options = NSActivityUserInteractive | NSActivityLatencyCritical;
-		*out_mode = "latency-critical";
-		return true;
-	}
-
-	U_LOG_W("Unknown XRT_MACOS_PROCESS_ACTIVITY='%s'; expected 'user-interactive' or 'latency-critical'", value);
-	return false;
-}
-
-void
-ipc_server_macos_process_activity_update(bool any_session_active)
-{
-	@autoreleasepool {
-		NSLock *lock = get_process_activity_lock();
-		[lock lock];
-
-		if (!any_session_active) {
-			if (g_process_activity_token != nil) {
-				[[NSProcessInfo processInfo] endActivity:g_process_activity_token];
-				[g_process_activity_token release];
-				g_process_activity_token = nil;
-				U_LOG_I("Ended macOS XR process activity assertion");
-			}
-			[lock unlock];
-			return;
-		}
-
-		if (g_process_activity_token != nil) {
-			[lock unlock];
-			return;
-		}
-
-		NSActivityOptions options = 0;
-		const char *mode = NULL;
-		if (!process_activity_options_from_env(&options, &mode)) {
-			[lock unlock];
-			return;
-		}
-
-		id<NSObject> token =
-		    [[NSProcessInfo processInfo] beginActivityWithOptions:options reason:@"Monado active XR session"];
-		if (token == nil) {
-			U_LOG_W("Failed to begin macOS XR process activity assertion mode=%s", mode);
-			[lock unlock];
-			return;
-		}
-
-		g_process_activity_token = [token retain];
-		U_LOG_I("Began macOS XR process activity assertion mode=%s options=0x%llx",
-		        mode,
-		        (unsigned long long)options);
-		[lock unlock];
-	}
-}
-
-void
-ipc_server_macos_process_activity_shutdown(void)
-{
-	ipc_server_macos_process_activity_update(false);
-}
-
 static NSWindow *g_compositor_window = nil;
 static CGDirectDisplayID g_compositor_display_id = kCGNullDirectDisplay;
 static uint64_t g_display_loss_since_ns = 0;
@@ -399,13 +308,6 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 		return ret;
 	}
 
-	NSActivityOptions activity_options = 0;
-	const char *activity_mode = NULL;
-	if (process_activity_options_from_env(&activity_options, &activity_mode)) {
-		U_LOG_I("macOS XR process activity diagnostic configured mode=%s; assertion begins with first active XR session",
-		        activity_mode);
-	}
-
 	/*
 	 * The Unix socket is already listening at this point. The XPC activation
 	 * reply therefore acts as a readiness barrier before a client retries its
@@ -433,7 +335,6 @@ void
 ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
 {
 	reset_compositor_window_tracking();
-	ipc_server_macos_process_activity_shutdown();
 	ipc_metal_xpc_service_stop();
 	ipc_server_mainloop_deinit_apple_vanilla(ml);
 }

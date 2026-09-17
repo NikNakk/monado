@@ -228,14 +228,14 @@ elseif(APPLE)
 		ipc_server
 		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
 			server/ipc_server_metal.c
+			server/ipc_server_macos_activity.h
+			server/ipc_server_macos_activity.m
 		)
 
 	if(XRT_FEATURE_SERVICE)
-		target_compile_definitions(ipc_server PRIVATE XRT_FEATURE_SERVICE_ENABLED=1)
 		target_sources(
 			ipc_server
 			PRIVATE server/ipc_server_mainloop_apple_xpc.m
-				server/ipc_server_macos_activity.h
 				server/ipc_metal_service_local_override.h
 				server/ipc_metal_client_cleanup.c
 				server/ipc_metal_client_cleanup.h
