@@ -135,11 +135,13 @@ set_target_properties(tests_macos_runtime_probe PROPERTIES FOLDER monado_tests)
 if(APPLE AND XRT_MODULE_COMPOSITOR_MULTI)
 	add_executable(tests_macos_displaylink tests_macos_displaylink.cpp)
 	target_link_libraries(tests_macos_displaylink PRIVATE comp_multi aux_os)
-	add_test(NAME tests_macos_displaylink_default
-		COMMAND ${CMAKE_COMMAND} -E env --unset=XRT_MACOS_CAMETALDISPLAYLINK_DRIVE $<TARGET_FILE:tests_macos_displaylink>)
-	add_test(NAME tests_macos_displaylink_disabled
-		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_DRIVE=0 $<TARGET_FILE:tests_macos_displaylink> disabled)
-	set_tests_properties(tests_macos_displaylink_default tests_macos_displaylink_disabled PROPERTIES TIMEOUT 10)
+	add_test(NAME tests_macos_displaylink_legacy
+		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_MODE=legacy $<TARGET_FILE:tests_macos_displaylink> legacy)
+	add_test(NAME tests_macos_displaylink_driven
+		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_MODE=driven $<TARGET_FILE:tests_macos_displaylink> driven)
+	add_test(NAME tests_macos_displaylink_hybrid
+		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_MODE=hybrid $<TARGET_FILE:tests_macos_displaylink> hybrid)
+	set_tests_properties(tests_macos_displaylink_legacy tests_macos_displaylink_driven tests_macos_displaylink_hybrid PROPERTIES TIMEOUT 10)
 endif()
 
 if(APPLE)
