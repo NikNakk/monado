@@ -9,13 +9,13 @@
 #include "multi/comp_multi_macos_displaylink.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 
 /*
  * Keep the normal target's CVDisplayLink object/nominal-period discovery intact.
  * Only real-layer driven mode suppresses its callback: hybrid deliberately keeps
- * the real display's CVDisplayLink running so normal timed HMD presentation keeps
- * the same phase source as the proven legacy path.
+ * the real display's CVDisplayLink running for independent phase/diagnostic data.
  */
 static inline CVReturn
 macos_cametal_drive_cvdisplaylink_start(CVDisplayLinkRef display_link)
@@ -36,27 +36,41 @@ macos_cametal_drive_cvdisplaylink_start(CVDisplayLinkRef display_link)
 #define CVDisplayLinkStart(display_link) macos_cametal_drive_cvdisplaylink_start((display_link))
 
 /*
- * comp_compositor.c needs the consumed CAMetal timing in both driven and hybrid
- * modes so renderer prediction follows the callback that woke the frame. The HMD
- * target is different: only driven mode may use that timing as the callback-owned
- * drawable's presentation target. Hybrid must keep the normal real-CVDisplayLink
- * target selection and presentDrawable:atTime: path.
+ * comp_compositor.c needs the stable consumed CAMetal timing in both driven and
+ * hybrid modes so pose prediction follows the callback that woke that frame.
  *
- * This force-included wrapper is local to the macOS target translation unit, so
- * it hides CAMetal timing from comp_window_macos.m in hybrid mode without changing
- * what comp_compositor.c sees.
+ * The HMD target needs a deliberately different interpretation:
+ *   - driven: return true, causing comp_window_macos.m to use the callback-owned
+ *     drawable and plain presentDrawable: semantics;
+ *   - hybrid: copy the consumed callback's presentation timestamp into the
+ *     target's existing target_output_ns local, then return false. The source
+ *     therefore continues through its proven pre-latch + presentDrawable:atTime:
+ *     path, but schedules the real-layer drawable for the CAMetal-derived vblank.
+ *
+ * This macro is force-included only into the macOS target translation unit. The
+ * call site in macos_execute_present_job() has a target_output_ns local, which is
+ * intentionally captured here. This preserves the source's existing timing trace
+ * fields as well as its host-clock conversion.
  */
 static inline bool
-macos_target_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing)
+macos_target_displaylink_current_timing(uint64_t *target_output_ns,
+                                        struct comp_multi_macos_displaylink_timing *out_timing)
 {
-	if (!comp_multi_macos_displaylink_driven_mode()) {
+	bool valid = comp_multi_macos_displaylink_current_timing(out_timing);
+	if (!valid) {
 		return false;
 	}
-	return comp_multi_macos_displaylink_current_timing(out_timing);
+	if (comp_multi_macos_displaylink_hybrid_mode()) {
+		if (target_output_ns != NULL && out_timing->presentation_ns > 0) {
+			*target_output_ns = (uint64_t)out_timing->presentation_ns;
+		}
+		return false;
+	}
+	return comp_multi_macos_displaylink_driven_mode();
 }
 
 #define comp_multi_macos_displaylink_current_timing(out_timing) \
-	macos_target_displaylink_current_timing((out_timing))
+	macos_target_displaylink_current_timing(&target_output_ns, (out_timing))
 
 /*
  * Strict driven-mode invariant: the real compositor layer may consume only
