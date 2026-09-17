@@ -79,9 +79,11 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
                                        uint64_t *out_target_monotonic_ns,
                                        uint64_t *out_presentation_monotonic_ns);
 
-/* Snapshot the callback-owned timing used by the real-layer driven path. Hybrid
- * intentionally returns false here so the HMD target retains its legacy
- * CVDisplayLink-derived timed-presentation behaviour. */
+/* Snapshot the last consumed callback timing. This is stable until wait_tick()
+ * consumes another callback, so native compositor prediction can use it in both
+ * driven and hybrid modes without racing a newer published callback. The macOS
+ * HMD target locally restricts use of this timing to driven mode; hybrid keeps
+ * real-CVDisplayLink timed presentation semantics. */
 struct comp_multi_macos_displaylink_timing
 {
 	int64_t callback_ns;
