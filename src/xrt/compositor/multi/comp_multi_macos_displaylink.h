@@ -11,27 +11,59 @@
 extern "C" {
 #endif
 
+enum comp_multi_macos_displaylink_mode
+{
+	COMP_MULTI_MACOS_DISPLAYLINK_LEGACY = 0,
+	COMP_MULTI_MACOS_DISPLAYLINK_DRIVEN,
+	COMP_MULTI_MACOS_DISPLAYLINK_HYBRID,
+};
+
 /*
  * Experimental macOS-only cadence bridge.
  *
- * The CAMetalDisplayLink delegate publishes one drawable/timing opportunity and
- * waits synchronously while the existing Multi Client Module thread performs one
- * compositor iteration. This keeps Vulkan/Monado rendering on its established
- * thread while making CAMetalDisplayLink the sole frame trigger.
+ * XRT_MACOS_CAMETALDISPLAYLINK_MODE selects one of three architectures:
+ *
+ *   legacy  - no CAMetalDisplayLink cadence bridge; retain the existing Monado
+ *             pacing and normal CAMetalLayer nextDrawable/timed presentation.
+ *   driven  - CAMetalDisplayLink is attached to the real HMD layer. Its callback
+ *             drawable is synchronously consumed and presented by Monado.
+ *   hybrid  - CAMetalDisplayLink runs on an independent child layer and publishes
+ *             timing only. The callback returns immediately; the real HMD layer
+ *             retains normal nextDrawable/timed presentation semantics.
+ *
+ * The default remains driven for compatibility with the current branch. If MODE
+ * is unset, the older XRT_MACOS_CAMETALDISPLAYLINK_DRIVE=0 escape hatch still
+ * selects legacy mode.
  */
+enum comp_multi_macos_displaylink_mode
+comp_multi_macos_displaylink_get_mode(void);
+
 bool
 comp_multi_macos_displaylink_enabled(void);
 
+bool
+comp_multi_macos_displaylink_driven_mode(void);
+
+bool
+comp_multi_macos_displaylink_hybrid_mode(void);
+
 /* Only the local Metal target activates the bridge. Null and other compositor
- * targets keep normal pacing even when CAMetalDisplayLink is the macOS default. */
+ * targets keep normal pacing even when CAMetalDisplayLink cadence is selected. */
 void
 comp_multi_macos_displaylink_set_active(bool active);
 
 bool
 comp_multi_macos_displaylink_active(void);
 
-/* Called by the CAMetalDisplayLink delegate. Returns true iff a compositor frame
- * consumed the tick and presentation was scheduled before the callback returns. */
+/*
+ * Called by the CAMetalDisplayLink delegate.
+ *
+ * Driven mode requires a non-NULL callback-owned drawable and returns only after
+ * the compositor has consumed the tick and Metal has scheduled that drawable.
+ * Hybrid mode ignores drawable, publishes the newest timing opportunity, signals
+ * the compositor and returns immediately. Therefore hybrid callback execution is
+ * never coupled to compositor or presentation-worker scheduling latency.
+ */
 bool
 comp_multi_macos_displaylink_submit_tick(void *drawable,
                                          uint64_t callback_monotonic_ns,
@@ -39,15 +71,17 @@ comp_multi_macos_displaylink_submit_tick(void *drawable,
                                          uint64_t presentation_monotonic_ns);
 
 /* Called from the Multi Client Module's predict-frame wrapper. Blocks until one
- * CAMetalDisplayLink tick is available. Returns false on the bounded failure/
- * teardown escape path or when the experiment is off. */
+ * CAMetalDisplayLink tick is available. In hybrid mode, if the compositor fell
+ * behind, the newest published tick wins. Returns false on the bounded failure/
+ * teardown escape path or when CAMetalDisplayLink cadence is disabled. */
 bool
 comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
                                        uint64_t *out_target_monotonic_ns,
                                        uint64_t *out_presentation_monotonic_ns);
 
-/* Snapshot the consumed, not-yet-completed callback in Monado's monotonic
- * clock domain. Never returns an unconsumed, cancelled or previous tick. */
+/* Snapshot the callback-owned timing used by the real-layer driven path. Hybrid
+ * intentionally returns false here so the HMD target retains its legacy
+ * CVDisplayLink-derived timed-presentation behaviour. */
 struct comp_multi_macos_displaylink_timing
 {
 	int64_t callback_ns;
@@ -58,16 +92,15 @@ struct comp_multi_macos_displaylink_timing
 bool
 comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing);
 
-/* Called once Metal has scheduled the supplied drawable for presentation. */
+/* Driven mode only: called once Metal has scheduled the callback-supplied drawable. */
 void
 comp_multi_macos_displaylink_complete_tick(void);
 
-/* Teardown escape: release any delegate callback currently waiting for a
- * presentation that can no longer complete. */
+/* Driven-mode teardown escape for a delegate callback waiting on presentation. */
 void
 comp_multi_macos_displaylink_cancel_pending_tick(void);
 
-/* Opaque CAMetalDrawable pointer valid while the current callback-owned tick is active. */
+/* Driven mode only: callback-owned CAMetalDrawable for the currently consumed tick. */
 void *
 comp_multi_macos_displaylink_current_drawable(void);
 
