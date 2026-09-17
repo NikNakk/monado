@@ -231,6 +231,7 @@ elseif(APPLE)
 		)
 
 	if(XRT_FEATURE_SERVICE)
+		target_compile_definitions(ipc_server PRIVATE XRT_FEATURE_SERVICE_ENABLED=1)
 		target_sources(
 			ipc_server
 			PRIVATE server/ipc_server_mainloop_apple_xpc.m

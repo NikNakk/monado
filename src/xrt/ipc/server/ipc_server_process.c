@@ -36,7 +36,7 @@
 #include "server/ipc_server.h"
 #include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE_ENABLED)
 #include "server/ipc_server_macos_activity.h"
 #endif
 
@@ -400,7 +400,7 @@ main_loop(struct ipc_server *s)
  *
  */
 
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE_ENABLED)
 static bool
 macos_any_session_active_locked(struct ipc_server *s)
 {
@@ -802,7 +802,7 @@ ipc_server_activate_session(volatile struct ipc_client_state *ics)
 		set_active_client_locked(s, ics->client_state.id);
 	}
 
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE_ENABLED)
 	ipc_server_macos_process_activity_update(macos_any_session_active_locked(s));
 #endif
 
@@ -821,7 +821,7 @@ ipc_server_deactivate_session(volatile struct ipc_client_state *ics)
 
 	update_server_state_locked(s);
 
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE_ENABLED)
 	ipc_server_macos_process_activity_update(macos_any_session_active_locked(s));
 #endif
 

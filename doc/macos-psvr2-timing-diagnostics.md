@@ -547,3 +547,16 @@ Multi Client Module compositor TID in Instruments and
 `compositor_rt.csv`. The key outcome is whether the explicit
 realtime-to-timeshare mode change and `97 -> 4` MAXPRI_THROTTLE clamp still
 occur.
+
+
+#### Process activity diagnostic build-guard correction
+
+The initial process-activity diagnostic commit used the CMake option name
+`XRT_FEATURE_SERVICE` as though it were a C preprocessor definition around the
+session-lifecycle calls in `ipc_server_process.c`. Monado does not export that
+CMake option as a C macro, so those calls were compiled out even though the
+Objective-C implementation was present. The service now defines
+`XRT_FEATURE_SERVICE_ENABLED=1` for `ipc_server` when the CMake service feature
+is enabled, and the lifecycle hooks use that build definition. A configured
+activity mode is also logged during service startup; the assertion itself is
+still acquired only when the first XR session becomes active.
