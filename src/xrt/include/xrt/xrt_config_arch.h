@@ -32,6 +32,15 @@
 #define XRT_ARCH_WAS_AUTODETECTED
 #endif
 
+#if defined(__riscv)
+#if __riscv_xlen == 64
+#define XRT_ARCH_RISCV64
+#elif __riscv_xlen == 32
+#define XRT_ARCH_RISCV32
+#endif
+#define XRT_ARCH_WAS_AUTODETECTED
+#endif
+
 #ifndef XRT_ARCH_WAS_AUTODETECTED
 #error "Arch could not be detected!"
 #endif
