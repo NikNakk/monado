@@ -42,35 +42,40 @@ macos_cametal_drive_cvdisplaylink_start(CVDisplayLinkRef display_link)
  * The HMD target needs a deliberately different interpretation:
  *   - driven: return true, causing comp_window_macos.m to use the callback-owned
  *     drawable and plain presentDrawable: semantics;
- *   - hybrid: copy the consumed callback's presentation timestamp into the
- *     target's existing target_output_ns local, then return false. The source
+ *   - hybrid: recover the timing belonging to this present job's captured
+ *     desired_present_time_ns (the callback target/deadline), copy that frame's
+ *     presentation timestamp into target_output_ns, then return false. The source
  *     therefore continues through its proven pre-latch + presentDrawable:atTime:
- *     path, but schedules the real-layer drawable for the CAMetal-derived vblank.
+ *     path while remaining immune to newer callbacks consumed before an async
+ *     presentation worker gets to this frame.
  *
  * This macro is force-included only into the macOS target translation unit. The
- * call site in macos_execute_present_job() has a target_output_ns local, which is
- * intentionally captured here. This preserves the source's existing timing trace
- * fields as well as its host-clock conversion.
+ * call site in macos_execute_present_job() has target_output_ns and
+ * desired_present_time_ns locals, intentionally captured here. This preserves the
+ * source's existing host-clock conversion and timing trace fields.
  */
 static inline bool
 macos_target_displaylink_current_timing(uint64_t *target_output_ns,
+                                        int64_t desired_present_time_ns,
                                         struct comp_multi_macos_displaylink_timing *out_timing)
 {
-	bool valid = comp_multi_macos_displaylink_current_timing(out_timing);
-	if (!valid) {
-		return false;
-	}
 	if (comp_multi_macos_displaylink_hybrid_mode()) {
-		if (target_output_ns != NULL && out_timing->presentation_ns > 0) {
+		bool valid = comp_multi_macos_displaylink_timing_for_deadline(desired_present_time_ns, out_timing);
+		if (valid && target_output_ns != NULL && out_timing->presentation_ns > 0) {
 			*target_output_ns = (uint64_t)out_timing->presentation_ns;
 		}
+		/* Always retain the legacy real-layer timed-presentation branch. */
 		return false;
 	}
-	return comp_multi_macos_displaylink_driven_mode();
+
+	if (!comp_multi_macos_displaylink_driven_mode()) {
+		return false;
+	}
+	return comp_multi_macos_displaylink_current_timing(out_timing);
 }
 
 #define comp_multi_macos_displaylink_current_timing(out_timing) \
-	macos_target_displaylink_current_timing(&target_output_ns, (out_timing))
+	macos_target_displaylink_current_timing(&target_output_ns, desired_present_time_ns, (out_timing))
 
 /*
  * Strict driven-mode invariant: the real compositor layer may consume only
