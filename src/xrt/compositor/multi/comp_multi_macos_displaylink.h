@@ -26,11 +26,13 @@ enum comp_multi_macos_displaylink_mode
  *   legacy  - no CAMetalDisplayLink cadence bridge; retain the existing Monado
  *             pacing and normal CAMetalLayer nextDrawable/timed presentation.
  *   driven  - CAMetalDisplayLink is attached to the real HMD layer. Its callback
- *             drawable and timing are synchronously consumed by Monado.
+ *             drawable and timing are synchronously consumed by Monado before
+ *             native frame prediction.
  *   hybrid  - CAMetalDisplayLink runs on an independent child layer and is used
- *             only as an event source that releases the compositor wait. Native
- *             HMD prediction, real nextDrawable acquisition and timed presentation
- *             remain exactly on the legacy path.
+ *             only as an event source at the legacy wait point: native prediction
+ *             runs first, then the child callback replaces u_wait_until(). Real
+ *             HMD nextDrawable acquisition and timed presentation remain exactly
+ *             on the legacy path.
  *
  * The default remains driven for compatibility with the current branch. If MODE
  * is unset, the older XRT_MACOS_CAMETALDISPLAYLINK_DRIVE=0 escape hatch still
@@ -71,10 +73,11 @@ comp_multi_macos_displaylink_submit_tick(void *drawable,
                                          uint64_t target_monotonic_ns,
                                          uint64_t presentation_monotonic_ns);
 
-/* Called from the Multi Client Module's predict-frame wrapper. Blocks until one
- * CAMetalDisplayLink tick is available. In hybrid mode, if the compositor fell
- * behind, the newest published tick wins. Returns false on the bounded failure/
- * teardown escape path or when CAMetalDisplayLink cadence is disabled. */
+/* Wait until one CAMetalDisplayLink tick is available. Driven calls this before
+ * native predict_frame so the consumed callback supplies timing/drawable state.
+ * Hybrid calls it instead of u_wait_until() after native prediction. If hybrid
+ * falls behind, the newest published tick wins. Returns false on the bounded
+ * failure/teardown escape path or when CAMetalDisplayLink cadence is disabled. */
 bool
 comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
                                        uint64_t *out_target_monotonic_ns,
