@@ -26,10 +26,11 @@ enum comp_multi_macos_displaylink_mode
  *   legacy  - no CAMetalDisplayLink cadence bridge; retain the existing Monado
  *             pacing and normal CAMetalLayer nextDrawable/timed presentation.
  *   driven  - CAMetalDisplayLink is attached to the real HMD layer. Its callback
- *             drawable is synchronously consumed and presented by Monado.
- *   hybrid  - CAMetalDisplayLink runs on an independent child layer and publishes
- *             timing only. The callback returns immediately; the real HMD layer
- *             retains normal nextDrawable/timed presentation semantics.
+ *             drawable and timing are synchronously consumed by Monado.
+ *   hybrid  - CAMetalDisplayLink runs on an independent child layer and is used
+ *             only as an event source that releases the compositor wait. Native
+ *             HMD prediction, real nextDrawable acquisition and timed presentation
+ *             remain exactly on the legacy path.
  *
  * The default remains driven for compatibility with the current branch. If MODE
  * is unset, the older XRT_MACOS_CAMETALDISPLAYLINK_DRIVE=0 escape hatch still
@@ -56,13 +57,13 @@ bool
 comp_multi_macos_displaylink_active(void);
 
 /*
- * Called by the CAMetalDisplayLink delegate.
+ * Called by a CAMetalDisplayLink delegate.
  *
  * Driven mode requires a non-NULL callback-owned drawable and returns only after
  * the compositor has consumed the tick and Metal has scheduled that drawable.
- * Hybrid mode ignores drawable, publishes the newest timing opportunity, signals
- * the compositor and returns immediately. Therefore hybrid callback execution is
- * never coupled to compositor or presentation-worker scheduling latency.
+ * Hybrid mode ignores drawable, publishes a wake event and returns immediately.
+ * Its timestamps are retained internally only for diagnostics; they do not replace
+ * the native compositor's HMD prediction or presentation timing.
  */
 bool
 comp_multi_macos_displaylink_submit_tick(void *drawable,
@@ -86,19 +87,11 @@ struct comp_multi_macos_displaylink_timing
 	int64_t presentation_ns;
 };
 
-/* Snapshot the last consumed callback timing. Native compositor prediction calls
- * this immediately after wait_tick(), so it follows the exact callback that woke
- * the frame rather than the latest callback merely published by the delegate. */
+/* Driven mode only: snapshot timing belonging to the callback-owned HMD drawable.
+ * Hybrid intentionally returns false so comp_compositor and the HMD target retain
+ * their legacy prediction and timed-presentation calculations. */
 bool
 comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing);
-
-/* Recover the timing for a previously consumed callback by its unique deadline.
- * Hybrid asynchronous presentation uses this to associate a delayed present
- * worker job with the same callback that predicted/rendered that frame, even if
- * newer display-link callbacks have since been consumed. */
-bool
-comp_multi_macos_displaylink_timing_for_deadline(int64_t deadline_ns,
-                                                 struct comp_multi_macos_displaylink_timing *out_timing);
 
 /* Driven mode only: called once Metal has scheduled the callback-supplied drawable. */
 void
