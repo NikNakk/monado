@@ -399,6 +399,13 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 		return ret;
 	}
 
+	NSActivityOptions activity_options = 0;
+	const char *activity_mode = NULL;
+	if (process_activity_options_from_env(&activity_options, &activity_mode)) {
+		U_LOG_I("macOS XR process activity diagnostic configured mode=%s; assertion begins with first active XR session",
+		        activity_mode);
+	}
+
 	/*
 	 * The Unix socket is already listening at this point. The XPC activation
 	 * reply therefore acts as a readiness barrier before a client retries its
