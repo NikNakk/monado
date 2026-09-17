@@ -36,7 +36,7 @@
 #include "server/ipc_server.h"
 #include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE_ENABLED)
+#if defined(XRT_OS_OSX)
 #include "server/ipc_server_macos_activity.h"
 #endif
 
@@ -399,22 +399,6 @@ main_loop(struct ipc_server *s)
  * Client management functions.
  *
  */
-
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE_ENABLED)
-static bool
-macos_any_session_active_locked(struct ipc_server *s)
-{
-	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
-		volatile struct ipc_client_state *candidate = &s->threads[i].ics;
-		if (candidate->server_thread_index >= 0 && candidate->client_state.session_active) {
-			return true;
-		}
-	}
-
-	return false;
-}
-#endif
-
 
 static void
 handle_overlay_client_events(volatile struct ipc_client_state *ics, int active_id, int prev_active_id)
@@ -802,9 +786,6 @@ ipc_server_activate_session(volatile struct ipc_client_state *ics)
 		set_active_client_locked(s, ics->client_state.id);
 	}
 
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE_ENABLED)
-	ipc_server_macos_process_activity_update(macos_any_session_active_locked(s));
-#endif
 
 	os_mutex_unlock(&s->global_state.lock);
 }
@@ -821,9 +802,6 @@ ipc_server_deactivate_session(volatile struct ipc_client_state *ics)
 
 	update_server_state_locked(s);
 
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE_ENABLED)
-	ipc_server_macos_process_activity_update(macos_any_session_active_locked(s));
-#endif
 
 	os_mutex_unlock(&s->global_state.lock);
 }
@@ -966,6 +944,15 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 	// Log very early who we are.
 	U_LOG_IFL_I(log_level, "%s '%s' starting up...", u_runtime_description, u_git_tag);
 
+#if defined(XRT_OS_OSX)
+	/*
+	 * Diagnostic process-lifetime activity assertion. Acquire it before Monado
+	 * creates the compositor so RunningBoard policy cannot race ahead of a
+	 * later session-lifecycle hook.
+	 */
+	ipc_server_macos_process_activity_startup();
+#endif
+
 	// Allocate the server itself.
 	struct ipc_server *s = U_TYPED_CALLOC(struct ipc_server);
 
@@ -990,6 +977,9 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 		callbacks->init_failed(xret, data);
 		u_debug_gui_stop(&s->debug_gui);
 		free(s);
+#if defined(XRT_OS_OSX)
+		ipc_server_macos_process_activity_shutdown();
+#endif
 		return -1;
 	}
 
@@ -1016,6 +1006,11 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 
 	// Stop the UI before tearing everything down.
 	u_debug_gui_stop(&s->debug_gui);
+
+	// End the diagnostic assertion before tearing the process down.
+#if defined(XRT_OS_OSX)
+	ipc_server_macos_process_activity_shutdown();
+#endif
 
 	// Done after UI stopped.
 	teardown_all(s);

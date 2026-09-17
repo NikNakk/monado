@@ -2,29 +2,28 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief Diagnostic macOS process activity assertion for active XR sessions.
+ * @brief Diagnostic macOS process activity assertion.
  * @ingroup ipc_server
  */
 
 #pragma once
-
-#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /*!
- * Update the process activity assertion to match aggregate XR session state.
+ * Read XRT_MACOS_PROCESS_ACTIVITY and, when configured, acquire a supported
+ * NSProcessInfo activity assertion for the lifetime of monado-service.
  *
- * This diagnostic is disabled unless XRT_MACOS_PROCESS_ACTIVITY is set to a
- * supported value. Callers serialize updates with the IPC server global-state
- * lock so begin/end transitions cannot be reordered across client threads.
+ * This is intentionally process-lifetime for the current RunningBoard
+ * diagnostic so the assertion is active before compositor creation and cannot
+ * race a later XR session transition.
  */
 void
-ipc_server_macos_process_activity_update(bool any_session_active);
+ipc_server_macos_process_activity_startup(void);
 
-/*! End any still-held diagnostic process activity assertion during shutdown. */
+/*! End and release any diagnostic process activity assertion. */
 void
 ipc_server_macos_process_activity_shutdown(void);
 

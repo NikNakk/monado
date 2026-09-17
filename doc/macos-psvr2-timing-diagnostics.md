@@ -560,3 +560,30 @@ Objective-C implementation was present. The service now defines
 is enabled, and the lifecycle hooks use that build definition. A configured
 activity mode is also logged during service startup; the assertion itself is
 still acquired only when the first XR session becomes active.
+
+
+#### Process-lifetime activity diagnostic, 2026-09-18
+
+For the RunningBoard A/B, the activity assertion is now deliberately acquired
+from `ipc_server_main_common()` before compositor creation and held until
+service shutdown. This replaces the earlier active-session lifetime experiment:
+the kernel can apply its background throttle before the first client
+`wait_frame`, so session activation was an unnecessarily late and ambiguous
+point for this diagnostic.
+
+Every macOS service start now writes an unconditional stderr line:
+
+```
+MACOS_PROCESS_ACTIVITY startup raw=<value-or-unset>
+```
+
+If the value is `user-interactive` or `latency-critical`, a successful
+assertion immediately adds:
+
+```
+MACOS_PROCESS_ACTIVITY began mode=<mode> options=0x... process_lifetime=1
+```
+
+This logging bypasses Monado's logging level and the XPC mainloop wrapper. It
+therefore distinguishes an unexported environment variable from a build or
+execution-path problem directly.
