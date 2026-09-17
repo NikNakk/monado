@@ -234,6 +234,7 @@ elseif(APPLE)
 		target_sources(
 			ipc_server
 			PRIVATE server/ipc_server_mainloop_apple_xpc.m
+				server/ipc_server_macos_activity.h
 				server/ipc_metal_service_local_override.h
 				server/ipc_metal_client_cleanup.c
 				server/ipc_metal_client_cleanup.h

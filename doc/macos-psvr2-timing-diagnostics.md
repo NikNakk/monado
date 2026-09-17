@@ -521,3 +521,29 @@ diagnostic mode the service skips its direct Mach-service listener and routes
 texture import, shared-event publication, and token discard through the
 standalone broker. Normal direct-XPC behaviour is unchanged when the variable is
 unset.
+
+
+### Active-session NSProcessInfo activity diagnostic
+
+To test whether RunningBoard's Darwin-background / `lowpri_cpu` clamp can be
+prevented using a supported Foundation process activity assertion, the service
+now has an opt-in active-session diagnostic:
+
+- `XRT_MACOS_PROCESS_ACTIVITY=user-interactive` holds
+  `NSActivityUserInteractive` while at least one XR session is active.
+- `XRT_MACOS_PROCESS_ACTIVITY=latency-critical` holds
+  `NSActivityUserInteractive | NSActivityLatencyCritical` over the same
+  lifetime.
+
+The assertion is acquired on the first active XR session and released when the
+last active session stops; mere IPC connection lifetime does not hold it. The
+normal path is unchanged when the variable is unset. The latency-critical mode
+is deliberately diagnostic and should be used only to determine whether the
+extra timer/I/O precision changes behaviour after the RunningBoard background
+clamp is addressed.
+
+The immediate A/B is to repeat the Unreal/Game Mode workload and inspect the
+Multi Client Module compositor TID in Instruments and
+`compositor_rt.csv`. The key outcome is whether the explicit
+realtime-to-timeshare mode change and `97 -> 4` MAXPRI_THROTTLE clamp still
+occur.
