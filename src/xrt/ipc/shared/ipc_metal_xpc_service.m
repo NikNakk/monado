@@ -52,6 +52,13 @@ token_is_valid(uint64_t token)
 	return (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC;
 }
 
+bool
+ipc_metal_xpc_external_broker_enabled(void)
+{
+	const char *value = getenv("XRT_MACOS_METAL_XPC_EXTERNAL_BROKER");
+	return value != NULL && value[0] != '\0' && !(value[0] == '0' && value[1] == '\0');
+}
+
 static uint64_t
 make_token(void)
 {
@@ -377,6 +384,11 @@ copy_service_object(void)
 xrt_result_t
 ipc_metal_xpc_service_start(void)
 {
+	if (ipc_metal_xpc_external_broker_enabled()) {
+		U_LOG_I("External Metal XPC broker diagnostic enabled; skipping direct in-process Mach-service listener");
+		return XRT_SUCCESS;
+	}
+
 	@autoreleasepool {
 		NSLock *lock = get_service_lock();
 		[lock lock];

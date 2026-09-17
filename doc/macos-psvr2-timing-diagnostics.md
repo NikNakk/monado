@@ -488,3 +488,36 @@ rotationally continuous, but Core Animation reports about 11.4% of submitted
 drawables as late by more than 1 ms or not presented. Instrument drawable IDs and
 the scheduling/presentation lifecycle next. Avoid further pose-offset or
 prediction changes unless new pose evidence contradicts this capture.
+
+
+## macOS compositor scheduler mode-change finding, 2026-09-17
+
+A Game Performance / System Trace capture of the service compositor thread
+(Mach TID `0x2d2c7e5`, decimal `47368165`) materially changes the realtime
+scheduler diagnosis.
+
+At trace-relative time `00:14.881852`, the relevant scheduler event is
+`MACH_SCHED_MODE_CHANGE`, not `MACH_MODE_DEMOTE_FAILSAFE`,
+`MACH_MODE_DEMOTE_RT_DISALLOWED`, or `MACH_MODE_DEMOTE_THROTTLED`. Its
+arguments identify the exact compositor TID and show scheduler mode
+`1 (realtime) -> 3 (timeshare)`. Approximately 41 ns later the same thread's
+effective priority changes `97 -> 4`. Instruments subsequently shows it
+running predominantly on E cores, with occasional temporary User Interactive
+priority inheritance, while its requested QoS remains Unspecified and its
+effective QoS can become Background.
+
+This means the current evidence does **not** support treating the transition as
+a conventional RT failsafe or RT-disallowed demotion tracepoint. Investigation
+should instead determine what policy update causes the explicit realtime to
+timeshare mode replacement, including whether work-interval/workgroup policy,
+task backgrounding, or another effective-policy update is responsible. The
+recovery window should be checked for the inverse direct
+`MACH_SCHED_MODE_CHANGE`.
+
+For a launchd-vs-manual-service A/B without losing the Metal handle transport,
+set `XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1` in a manually-started
+`monado-service` and run the legacy standalone Metal XPC broker. In this
+diagnostic mode the service skips its direct Mach-service listener and routes
+texture import, shared-event publication, and token discard through the
+standalone broker. Normal direct-XPC behaviour is unchanged when the variable is
+unset.
