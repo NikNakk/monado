@@ -12,6 +12,14 @@
 
 #ifdef __APPLE__
 
+#define MACOS_DISPLAYLINK_TIMING_HISTORY_COUNT 64
+
+struct macos_displaylink_timing_history_entry
+{
+	uint64_t serial;
+	struct comp_multi_macos_displaylink_timing timing;
+};
+
 struct macos_displaylink_bridge
 {
 	pthread_mutex_t mutex;
@@ -28,6 +36,7 @@ struct macos_displaylink_bridge
 	uint64_t consumed_callback_monotonic_ns;
 	uint64_t consumed_target_monotonic_ns;
 	uint64_t consumed_presentation_monotonic_ns;
+	struct macos_displaylink_timing_history_entry history[MACOS_DISPLAYLINK_TIMING_HISTORY_COUNT];
 };
 
 static struct macos_displaylink_bridge g_bridge = {
@@ -257,6 +266,16 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 		g_bridge.consumed_callback_monotonic_ns = g_bridge.published_callback_monotonic_ns;
 		g_bridge.consumed_target_monotonic_ns = g_bridge.published_target_monotonic_ns;
 		g_bridge.consumed_presentation_monotonic_ns = g_bridge.published_presentation_monotonic_ns;
+
+		struct comp_multi_macos_displaylink_timing consumed_timing = {
+		    .callback_ns = (int64_t)g_bridge.consumed_callback_monotonic_ns,
+		    .deadline_ns = (int64_t)g_bridge.consumed_target_monotonic_ns,
+		    .presentation_ns = (int64_t)g_bridge.consumed_presentation_monotonic_ns,
+		};
+		size_t history_index = (size_t)(serial % MACOS_DISPLAYLINK_TIMING_HISTORY_COUNT);
+		g_bridge.history[history_index].serial = serial;
+		g_bridge.history[history_index].timing = consumed_timing;
+
 		if (out_callback_monotonic_ns != NULL) {
 			*out_callback_monotonic_ns = g_bridge.consumed_callback_monotonic_ns;
 		}
@@ -299,6 +318,27 @@ comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_
 	}
 	pthread_mutex_unlock(&g_bridge.mutex);
 	return valid;
+}
+
+bool
+comp_multi_macos_displaylink_timing_for_deadline(int64_t deadline_ns,
+                                                 struct comp_multi_macos_displaylink_timing *out_timing)
+{
+	if (!comp_multi_macos_displaylink_enabled() || deadline_ns <= 0 || out_timing == NULL) {
+		return false;
+	}
+	pthread_mutex_lock(&g_bridge.mutex);
+	bool found = false;
+	for (size_t i = 0; i < MACOS_DISPLAYLINK_TIMING_HISTORY_COUNT; i++) {
+		const struct macos_displaylink_timing_history_entry *entry = &g_bridge.history[i];
+		if (entry->serial != 0 && entry->timing.deadline_ns == deadline_ns) {
+			*out_timing = entry->timing;
+			found = true;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&g_bridge.mutex);
+	return found;
 }
 
 void
@@ -407,6 +447,15 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 bool
 comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing)
 {
+	(void)out_timing;
+	return false;
+}
+
+bool
+comp_multi_macos_displaylink_timing_for_deadline(int64_t deadline_ns,
+                                                 struct comp_multi_macos_displaylink_timing *out_timing)
+{
+	(void)deadline_ns;
 	(void)out_timing;
 	return false;
 }
