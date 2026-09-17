@@ -4,17 +4,13 @@
  * @file
  * @brief Experimental real-layer CAMetalDisplayLink compositor driver.
  *
- * Force-included after comp_window_macos_trace_buffer.h and the independent
- * timing probe. XRT_MACOS_CAMETALDISPLAYLINK_DRIVE=1 attaches CAMetalDisplayLink
- * to the real PS VR2 CAMetalLayer, hands update.drawable synchronously to the
- * Multi Client Module, and makes the target consume that supplied drawable.
+ * XRT_MACOS_CAMETALDISPLAYLINK_MODE=driven attaches CAMetalDisplayLink to the
+ * real PS VR2 CAMetalLayer, hands update.drawable synchronously to the Multi
+ * Client Module, and makes the target consume that supplied drawable.
  *
- * In this mode:
- *  - no target nextDrawable acquisition is performed;
- *  - presentDrawable:atTime: is converted to plain presentDrawable:;
- *  - the callback remains alive until Metal has scheduled the supplied drawable;
- *  - stale callbacks whose target/presentation deadline is already past are
- *    drained without triggering a compositor frame.
+ * Hybrid mode is deliberately excluded from every interception in this file: it
+ * uses the independent child-layer driver as cadence only and leaves real-layer
+ * drawable acquisition and timed presentation on the legacy path.
  */
 #pragma once
 
@@ -40,7 +36,7 @@
 static inline bool
 macos_cametal_drive_enabled(void)
 {
-	return comp_multi_macos_displaylink_enabled();
+	return comp_multi_macos_displaylink_driven_mode();
 }
 
 static inline uint64_t
@@ -109,7 +105,7 @@ macos_cametal_drive_thread_priority(void)
 	}
 	fprintf(stderr,
 	        "WARN: XRT_MACOS_CAMETALDISPLAYLINK_THREAD_PRIORITY='%s' is invalid; expected normal, interactive, or realtime; using interactive\n",
-	        value);
+		        value);
 	return MACOS_CAMETAL_DRIVE_THREAD_INTERACTIVE;
 }
 
@@ -194,6 +190,13 @@ static atomic_bool g_macos_cametal_driver_atexit_registered = ATOMIC_VAR_INIT(fa
 static inline void
 macos_cametal_drive_stop(void)
 {
+	/* comp_window_macos_destroy() already calls this hook. Reuse it to stop the
+	 * hybrid child-layer cadence source before the real HMD layer is destroyed. */
+	if (comp_multi_macos_displaylink_hybrid_mode()) {
+		macos_cametal_probe_teardown();
+		return;
+	}
+
 	@autoreleasepool {
 		if (g_macos_cametal_driver != nil) {
 			[g_macos_cametal_driver stop];
@@ -254,7 +257,6 @@ macos_cametal_drive_teardown(void)
 	} else {
 		fprintf(stderr, "WARN: macOS CAMetalDisplayLink driver could not open trace '%s'\n", requested_path);
 	}
-
 #endif
 	return self;
 }
@@ -276,12 +278,6 @@ macos_cametal_drive_teardown(void)
 	if (atomic_exchange_explicit(&_stopping, true, memory_order_acq_rel)) {
 		return;
 	}
-
-	/*
-	 * A callback may be synchronously waiting for the compositor/present worker to
-	 * schedule its supplied drawable. Release that wait before joining the NSThread
-	 * so service/process teardown can always reach fclose() for fully buffered traces.
-	 */
 	comp_multi_macos_displaylink_cancel_pending_tick();
 
 	if (_thread != nil) {
@@ -295,7 +291,6 @@ macos_cametal_drive_teardown(void)
 		_thread = nil;
 	}
 	if (_trace != NULL) {
-		/* fclose is intentionally not wrapped by the fully-buffered trace shim. */
 		fclose(_trace);
 		_trace = NULL;
 	}
@@ -328,7 +323,7 @@ macos_cametal_drive_teardown(void)
 			[_displayLink setPreferredFrameRateRange:CAFrameRateRangeMake(120.0f, 120.0f, 120.0f)];
 			[_displayLink addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
 			fprintf(stderr,
-			        "macOS CAMetalDisplayLink driver attached to real compositor layer; requesting 120 Hz, "
+			        "macOS CAMetalDisplayLink driven mode attached to real compositor layer; requesting 120 Hz, "
 			        "preferredFrameLatency=%d threadPriority=%s\n",
 			        _preferredFrameLatency, macos_cametal_drive_thread_priority_name(_threadPriority));
 			while (![[NSThread currentThread] isCancelled]) {
@@ -378,11 +373,6 @@ macos_cametal_drive_teardown(void)
 	_callbackCount++;
 	const char *outcome = "unconsumed";
 
-	/*
-	 * The probe found rare catch-up callbacks that arrived after their own target
-	 * timestamp. Rendering such an update would intentionally start a stale frame,
-	 * even if Core Animation still reports a later presentation timestamp.
-	 */
 	if (target_s <= callback_media_s || presentation_s <= callback_media_s || target_ns <= callback_ns ||
 	    presentation_ns <= callback_ns) {
 		_staleCount++;
@@ -395,7 +385,6 @@ macos_cametal_drive_teardown(void)
 			_consumedCount++;
 			outcome = "consumed";
 		} else {
-			/* No active compositor consumer before the CA deadline: keep its pool flowing. */
 			_unconsumedCount++;
 			if (!atomic_load_explicit(&_stopping, memory_order_acquire)) {
 				[drawable present];
@@ -453,11 +442,6 @@ macos_cametal_drive_start_for_layer(CAMetalLayer *layer)
 	}
 }
 
-/*
- * Chain after the independent probe's setDrawableSize interception. That method
- * calls the real selector first and starts only the child-layer probe when its
- * own PROBE environment flag is enabled.
- */
 #ifdef setDrawableSize
 #undef setDrawableSize
 #endif
@@ -478,12 +462,6 @@ macos_cametal_drive_start_for_layer(CAMetalLayer *layer)
 
 #define setDrawableSize monadoDriveSetDrawableSize
 
-/*
- * Replace target nextDrawable only for the real CAMetalLayer in drive mode. The
- * CAMetalDisplayLink delegate retains update.drawable until Metal has scheduled
- * its presentation, so this borrowed reference remains valid across an existing
- * async present-worker handoff.
- */
 @interface NSObject (MonadoCAMetalDisplayLinkDriveDrawable)
 - (id<CAMetalDrawable>)monadoCAMetalDrivenNextDrawable;
 @end
@@ -500,17 +478,6 @@ macos_cametal_drive_start_for_layer(CAMetalLayer *layer)
 
 #define nextDrawable monadoCAMetalDrivenNextDrawable
 
-/*
- * The trace-buffer header has already installed monadoPresentDrawable wrappers.
- * Re-wrap source-level calls so drive mode discards absolute atTime scheduling,
- * while every non-drive path retains the previous diagnostic behaviour exactly.
- *
- * Crucially, a driven tick is completed only when the Metal command buffer that
- * owns the supplied drawable reaches the scheduled state. At that point Metal
- * owns the presentation request and the CAMetalDisplayLink delegate can safely
- * return/release its extra drawable retain, even when the target used its normal
- * asynchronous present-worker path.
- */
 #ifdef presentDrawable
 #undef presentDrawable
 #endif
@@ -548,7 +515,6 @@ macos_cametal_drive_complete_when_scheduled(id<MTLCommandBuffer> command_buffer,
 {
 	id<MTLCommandBuffer> command_buffer = (id<MTLCommandBuffer>)self;
 	if (macos_cametal_drive_enabled()) {
-		/* CAMetalDisplayLink supplies the timing; never schedule this drawable at an absolute time. */
 		[command_buffer monadoPresentDrawable:drawable];
 		macos_cametal_drive_complete_when_scheduled(command_buffer, drawable);
 		return;
