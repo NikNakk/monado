@@ -36,6 +36,9 @@
 #include "server/ipc_server.h"
 #include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+#include "server/ipc_server_macos_activity.h"
+#endif
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -396,6 +399,22 @@ main_loop(struct ipc_server *s)
  * Client management functions.
  *
  */
+
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+static bool
+macos_any_session_active_locked(struct ipc_server *s)
+{
+	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
+		volatile struct ipc_client_state *candidate = &s->threads[i].ics;
+		if (candidate->server_thread_index >= 0 && candidate->client_state.session_active) {
+			return true;
+		}
+	}
+
+	return false;
+}
+#endif
+
 
 static void
 handle_overlay_client_events(volatile struct ipc_client_state *ics, int active_id, int prev_active_id)
@@ -783,6 +802,10 @@ ipc_server_activate_session(volatile struct ipc_client_state *ics)
 		set_active_client_locked(s, ics->client_state.id);
 	}
 
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+	ipc_server_macos_process_activity_update(macos_any_session_active_locked(s));
+#endif
+
 	os_mutex_unlock(&s->global_state.lock);
 }
 
@@ -797,6 +820,10 @@ ipc_server_deactivate_session(volatile struct ipc_client_state *ics)
 	ics->client_state.session_active = false;
 
 	update_server_state_locked(s);
+
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+	ipc_server_macos_process_activity_update(macos_any_session_active_locked(s));
+#endif
 
 	os_mutex_unlock(&s->global_state.lock);
 }
