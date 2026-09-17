@@ -22,9 +22,12 @@ struct macos_displaylink_bridge
 	uint64_t completed_serial;
 	uint64_t cancelled_serial;
 	void *drawable;
-	uint64_t callback_monotonic_ns;
-	uint64_t target_monotonic_ns;
-	uint64_t presentation_monotonic_ns;
+	uint64_t published_callback_monotonic_ns;
+	uint64_t published_target_monotonic_ns;
+	uint64_t published_presentation_monotonic_ns;
+	uint64_t consumed_callback_monotonic_ns;
+	uint64_t consumed_target_monotonic_ns;
+	uint64_t consumed_presentation_monotonic_ns;
 };
 
 static struct macos_displaylink_bridge g_bridge = {
@@ -32,26 +35,71 @@ static struct macos_displaylink_bridge g_bridge = {
     .cond = PTHREAD_COND_INITIALIZER,
 };
 
-static pthread_once_t g_enabled_once = PTHREAD_ONCE_INIT;
-static bool g_enabled = false;
+static pthread_once_t g_mode_once = PTHREAD_ONCE_INIT;
+static enum comp_multi_macos_displaylink_mode g_mode = COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
 static bool g_active = false;
 
 static void
-macos_displaylink_init_enabled(void)
+macos_displaylink_init_mode(void)
 {
-	/* Older macOS versions retain the legacy target instead of waiting for callbacks
-	 * from an API they cannot create. */
-	if (__builtin_available(macOS 14.0, *)) {
-		const char *value = getenv("XRT_MACOS_CAMETALDISPLAYLINK_DRIVE");
-		g_enabled = value == NULL || strcmp(value, "1") == 0;
+	if (!__builtin_available(macOS 14.0, *)) {
+		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
+		return;
 	}
+
+	const char *mode = getenv("XRT_MACOS_CAMETALDISPLAYLINK_MODE");
+	if (mode != NULL && mode[0] != '\0') {
+		if (strcmp(mode, "legacy") == 0) {
+			g_mode = COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
+			return;
+		}
+		if (strcmp(mode, "driven") == 0) {
+			g_mode = COMP_MULTI_MACOS_DISPLAYLINK_DRIVEN;
+			return;
+		}
+		if (strcmp(mode, "hybrid") == 0) {
+			g_mode = COMP_MULTI_MACOS_DISPLAYLINK_HYBRID;
+			return;
+		}
+		fprintf(stderr,
+		        "WARN: XRT_MACOS_CAMETALDISPLAYLINK_MODE='%s' is invalid; expected legacy, driven, or hybrid; using driven\n",
+		        mode);
+		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_DRIVEN;
+		return;
+	}
+
+	/* Backward-compatible escape hatch used by earlier revisions of this branch. */
+	const char *drive = getenv("XRT_MACOS_CAMETALDISPLAYLINK_DRIVE");
+	if (drive != NULL && strcmp(drive, "0") == 0) {
+		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
+	} else {
+		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_DRIVEN;
+	}
+}
+
+enum comp_multi_macos_displaylink_mode
+comp_multi_macos_displaylink_get_mode(void)
+{
+	pthread_once(&g_mode_once, macos_displaylink_init_mode);
+	return g_mode;
 }
 
 bool
 comp_multi_macos_displaylink_enabled(void)
 {
-	pthread_once(&g_enabled_once, macos_displaylink_init_enabled);
-	return g_enabled;
+	return comp_multi_macos_displaylink_get_mode() != COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
+}
+
+bool
+comp_multi_macos_displaylink_driven_mode(void)
+{
+	return comp_multi_macos_displaylink_get_mode() == COMP_MULTI_MACOS_DISPLAYLINK_DRIVEN;
+}
+
+bool
+comp_multi_macos_displaylink_hybrid_mode(void)
+{
+	return comp_multi_macos_displaylink_get_mode() == COMP_MULTI_MACOS_DISPLAYLINK_HYBRID;
 }
 
 void
@@ -59,6 +107,7 @@ comp_multi_macos_displaylink_set_active(bool active)
 {
 	pthread_mutex_lock(&g_bridge.mutex);
 	g_active = active;
+	pthread_cond_broadcast(&g_bridge.cond);
 	pthread_mutex_unlock(&g_bridge.mutex);
 }
 
@@ -85,11 +134,9 @@ realtime_deadline_ms(long milliseconds)
 	return ts;
 }
 
-/*
- * pthread_cond_timedwait() uses CLOCK_REALTIME for the statically initialized
- * condition variable. Convert CAMetalDisplayLink's monotonic target deadline to
- * a realtime absolute deadline without making realtime itself a cadence source.
- */
+/* pthread_cond_timedwait() uses CLOCK_REALTIME for this statically initialized
+ * condition variable. Convert the CAMetalDisplayLink monotonic deadline without
+ * making realtime itself a cadence source. */
 static struct timespec
 realtime_deadline_for_monotonic_ns(uint64_t target_monotonic_ns)
 {
@@ -112,26 +159,42 @@ comp_multi_macos_displaylink_submit_tick(void *drawable,
                                          uint64_t target_monotonic_ns,
                                          uint64_t presentation_monotonic_ns)
 {
-	if (!comp_multi_macos_displaylink_enabled() || drawable == NULL) {
+	if (!comp_multi_macos_displaylink_enabled()) {
+		return false;
+	}
+	if (callback_monotonic_ns == 0 || target_monotonic_ns <= callback_monotonic_ns ||
+	    presentation_monotonic_ns < target_monotonic_ns) {
+		return false;
+	}
+	bool hybrid = comp_multi_macos_displaylink_hybrid_mode();
+	if (!hybrid && drawable == NULL) {
 		return false;
 	}
 
 	pthread_mutex_lock(&g_bridge.mutex);
+	if (!g_active) {
+		pthread_mutex_unlock(&g_bridge.mutex);
+		return false;
+	}
+
 	uint64_t serial = ++g_bridge.next_serial;
 	g_bridge.published_serial = serial;
-	g_bridge.drawable = drawable;
-	g_bridge.callback_monotonic_ns = callback_monotonic_ns;
-	g_bridge.target_monotonic_ns = target_monotonic_ns;
-	g_bridge.presentation_monotonic_ns = presentation_monotonic_ns;
+	g_bridge.drawable = hybrid ? NULL : drawable;
+	g_bridge.published_callback_monotonic_ns = callback_monotonic_ns;
+	g_bridge.published_target_monotonic_ns = target_monotonic_ns;
+	g_bridge.published_presentation_monotonic_ns = presentation_monotonic_ns;
 	pthread_cond_broadcast(&g_bridge.cond);
 
-	/*
-	 * In steady state the Multi Client Module is already blocked in wait_tick().
-	 * Do not use the old arbitrary 2 ms hand-off timeout: under UE load that could
-	 * discard a perfectly usable callback merely because the compositor thread was
-	 * briefly descheduled. Give it the whole CAMetalDisplayLink target window. If
-	 * there is no active native session, the callback is drained at that deadline.
-	 */
+	if (hybrid) {
+		/* Cadence-only mode: never hold the CA callback open waiting for Monado. If
+		 * the compositor is behind, wait_tick() will consume the newest published
+		 * serial and intentionally skip older callbacks. */
+		pthread_mutex_unlock(&g_bridge.mutex);
+		return true;
+	}
+
+	/* Driven mode owns update.drawable, so retain the original synchronous handoff
+	 * semantics until the compositor consumes this tick. */
 	struct timespec consume_deadline = realtime_deadline_for_monotonic_ns(target_monotonic_ns);
 	while (g_bridge.consumed_serial < serial) {
 		int ret = pthread_cond_timedwait(&g_bridge.cond, &g_bridge.mutex, &consume_deadline);
@@ -146,14 +209,7 @@ comp_multi_macos_displaylink_submit_tick(void *drawable,
 		}
 	}
 
-	/*
-	 * Once consumed, keep the delegate callback and its retained update.drawable
-	 * alive until the macOS target has actually scheduled that exact drawable for
-	 * presentation. In particular, xrt_comp_layer_commit() is not sufficient here:
-	 * the existing async-present worker may return from layer_commit before it has
-	 * touched the drawable. The target calls complete_tick() from its plain present
-	 * path once Metal owns the presentation request.
-	 */
+	/* Keep the callback-owned drawable alive until Metal has scheduled it. */
 	while (g_bridge.completed_serial < serial) {
 		pthread_cond_wait(&g_bridge.cond, &g_bridge.mutex);
 	}
@@ -176,12 +232,7 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 
 	pthread_mutex_lock(&g_bridge.mutex);
 	for (;;) {
-		/*
-		 * Do not make service shutdown depend forever on another CA callback. This
-		 * timeout is only a failure/teardown escape hatch; healthy driven cadence is
-		 * released exclusively by CAMetalDisplayLink callbacks.
-		 */
-		while (g_bridge.published_serial <= g_bridge.consumed_serial) {
+		while (g_active && g_bridge.published_serial <= g_bridge.consumed_serial) {
 			struct timespec deadline = realtime_deadline_ms(100);
 			int ret = pthread_cond_timedwait(&g_bridge.cond, &g_bridge.mutex, &deadline);
 			if (ret == ETIMEDOUT && g_bridge.published_serial <= g_bridge.consumed_serial) {
@@ -189,22 +240,31 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 				return false;
 			}
 		}
+		if (!g_active) {
+			pthread_mutex_unlock(&g_bridge.mutex);
+			return false;
+		}
 
+		/* In hybrid mode published_serial may have advanced several times while the
+		 * compositor was busy. Consume the newest callback, not a stale queue. */
 		uint64_t serial = g_bridge.published_serial;
-		if (g_bridge.cancelled_serial >= serial) {
+		if (comp_multi_macos_displaylink_driven_mode() && g_bridge.cancelled_serial >= serial) {
 			g_bridge.consumed_serial = serial;
 			continue;
 		}
 
 		g_bridge.consumed_serial = serial;
+		g_bridge.consumed_callback_monotonic_ns = g_bridge.published_callback_monotonic_ns;
+		g_bridge.consumed_target_monotonic_ns = g_bridge.published_target_monotonic_ns;
+		g_bridge.consumed_presentation_monotonic_ns = g_bridge.published_presentation_monotonic_ns;
 		if (out_callback_monotonic_ns != NULL) {
-			*out_callback_monotonic_ns = g_bridge.callback_monotonic_ns;
+			*out_callback_monotonic_ns = g_bridge.consumed_callback_monotonic_ns;
 		}
 		if (out_target_monotonic_ns != NULL) {
-			*out_target_monotonic_ns = g_bridge.target_monotonic_ns;
+			*out_target_monotonic_ns = g_bridge.consumed_target_monotonic_ns;
 		}
 		if (out_presentation_monotonic_ns != NULL) {
-			*out_presentation_monotonic_ns = g_bridge.presentation_monotonic_ns;
+			*out_presentation_monotonic_ns = g_bridge.consumed_presentation_monotonic_ns;
 		}
 		pthread_cond_broadcast(&g_bridge.cond);
 		pthread_mutex_unlock(&g_bridge.mutex);
@@ -215,20 +275,23 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 bool
 comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing)
 {
+	if (!comp_multi_macos_displaylink_driven_mode()) {
+		return false;
+	}
 	pthread_mutex_lock(&g_bridge.mutex);
 	bool valid = g_active && g_bridge.drawable != NULL &&
 	             g_bridge.published_serial == g_bridge.consumed_serial &&
 	             g_bridge.consumed_serial > g_bridge.completed_serial &&
 	             g_bridge.consumed_serial > g_bridge.cancelled_serial &&
-	             g_bridge.callback_monotonic_ns > 0 &&
-	             g_bridge.target_monotonic_ns > g_bridge.callback_monotonic_ns &&
-	             g_bridge.presentation_monotonic_ns >= g_bridge.target_monotonic_ns &&
-	             g_bridge.presentation_monotonic_ns <= INT64_MAX;
+	             g_bridge.consumed_callback_monotonic_ns > 0 &&
+	             g_bridge.consumed_target_monotonic_ns > g_bridge.consumed_callback_monotonic_ns &&
+	             g_bridge.consumed_presentation_monotonic_ns >= g_bridge.consumed_target_monotonic_ns &&
+	             g_bridge.consumed_presentation_monotonic_ns <= INT64_MAX;
 	if (valid) {
 		*out_timing = (struct comp_multi_macos_displaylink_timing){
-		    .callback_ns = (int64_t)g_bridge.callback_monotonic_ns,
-		    .deadline_ns = (int64_t)g_bridge.target_monotonic_ns,
-		    .presentation_ns = (int64_t)g_bridge.presentation_monotonic_ns,
+		    .callback_ns = (int64_t)g_bridge.consumed_callback_monotonic_ns,
+		    .deadline_ns = (int64_t)g_bridge.consumed_target_monotonic_ns,
+		    .presentation_ns = (int64_t)g_bridge.consumed_presentation_monotonic_ns,
 		};
 	}
 	pthread_mutex_unlock(&g_bridge.mutex);
@@ -238,7 +301,7 @@ comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_
 void
 comp_multi_macos_displaylink_complete_tick(void)
 {
-	if (!comp_multi_macos_displaylink_enabled()) {
+	if (!comp_multi_macos_displaylink_driven_mode()) {
 		return;
 	}
 	pthread_mutex_lock(&g_bridge.mutex);
@@ -252,16 +315,10 @@ comp_multi_macos_displaylink_complete_tick(void)
 void
 comp_multi_macos_displaylink_cancel_pending_tick(void)
 {
-	if (!comp_multi_macos_displaylink_enabled()) {
+	if (!comp_multi_macos_displaylink_driven_mode()) {
 		return;
 	}
 	pthread_mutex_lock(&g_bridge.mutex);
-	/*
-	 * Only teardown calls this. If a callback is blocked after its tick was
-	 * consumed but before Metal could schedule presentation, release that callback
-	 * so the display-link NSThread can invalidate and the fully buffered trace can
-	 * be closed. The callback itself still owns an explicit retain on the drawable.
-	 */
 	if (g_bridge.completed_serial < g_bridge.published_serial) {
 		g_bridge.completed_serial = g_bridge.published_serial;
 		g_bridge.drawable = NULL;
@@ -273,7 +330,7 @@ comp_multi_macos_displaylink_cancel_pending_tick(void)
 void *
 comp_multi_macos_displaylink_current_drawable(void)
 {
-	if (!comp_multi_macos_displaylink_enabled()) {
+	if (!comp_multi_macos_displaylink_driven_mode()) {
 		return NULL;
 	}
 	pthread_mutex_lock(&g_bridge.mutex);
@@ -284,6 +341,30 @@ comp_multi_macos_displaylink_current_drawable(void)
 
 #else
 
+enum comp_multi_macos_displaylink_mode
+comp_multi_macos_displaylink_get_mode(void)
+{
+	return COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
+}
+
+bool
+comp_multi_macos_displaylink_enabled(void)
+{
+	return false;
+}
+
+bool
+comp_multi_macos_displaylink_driven_mode(void)
+{
+	return false;
+}
+
+bool
+comp_multi_macos_displaylink_hybrid_mode(void)
+{
+	return false;
+}
+
 void
 comp_multi_macos_displaylink_set_active(bool active)
 {
@@ -292,12 +373,6 @@ comp_multi_macos_displaylink_set_active(bool active)
 
 bool
 comp_multi_macos_displaylink_active(void)
-{
-	return false;
-}
-
-bool
-comp_multi_macos_displaylink_enabled(void)
 {
 	return false;
 }
