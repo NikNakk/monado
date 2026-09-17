@@ -5,17 +5,24 @@
  * @brief Experimental CAMetalDisplayLink trigger for the Multi Client Module.
  *
  * Force-include this after comp_multi_system_macos_trace.h. It does not replace
- * multi_main_loop(): it replaces that loop's predict-frame call with a blocking
- * wait for one CAMetalDisplayLink tick and suppresses the loop's u_wait_until()
- * while the experiment is enabled. The existing layer transfer and native
- * compositor render stay on the established Multi Client Module thread.
+ * multi_main_loop(): it changes only where CAMetalDisplayLink participates in
+ * the established predict/wait/render sequence.
+ *
+ * Driven mode must consume the CAMetal tick before xrt_comp_predict_frame(): the
+ * native compositor uses that callback's target/presentation timestamps and its
+ * callback-owned drawable for the frame.
+ *
+ * Hybrid mode is deliberately narrower. Prediction remains completely native/
+ * legacy. The ordinary u_wait_until(wake_up_time_ns) call inside wait_frame() is
+ * replaced with a condition-variable wait for the independent child-layer
+ * CAMetalDisplayLink callback. Thus the only intended difference from legacy is
+ * the CPU wake primitive at the existing wake point.
  *
  * Tick completion is deliberately NOT signalled from xrt_comp_layer_commit().
- * On macOS that call may hand presentation to an asynchronous present worker.
- * The CAMetalDisplayLink callback must retain update.drawable until the target
- * has actually scheduled that exact drawable for presentation; the macOS target
- * therefore calls comp_multi_macos_displaylink_complete_tick() from its plain
- * presentation path instead.
+ * In driven mode that call may hand presentation to an asynchronous present
+ * worker, so the callback must retain update.drawable until the target has
+ * actually scheduled that exact drawable. Hybrid owns no HMD drawable and its
+ * callback returns immediately.
  */
 #pragma once
 
@@ -36,9 +43,9 @@ macos_xrt_comp_predict_frame_from_displaylink(struct xrt_compositor *xc,
                                               int64_t *out_predicted_display_time_ns,
                                               int64_t *out_predicted_display_period_ns)
 {
-	if (comp_multi_macos_displaylink_active()) {
-		/* The native compositor reads the consumed tick before saving its frame
-		 * state, so its renderer and these client-facing outputs stay aligned. */
+	/* Driven mode needs the callback timing before native prediction. Hybrid does
+	 * not: it predicts first and substitutes its callback for u_wait_until below. */
+	if (comp_multi_macos_displaylink_active() && comp_multi_macos_displaylink_driven_mode()) {
 		(void)comp_multi_macos_displaylink_wait_tick(NULL, NULL, NULL);
 	}
 	macos_xrt_comp_predict_frame_with_time_constraint(xc, out_frame_id, out_wake_up_time_ns,
@@ -55,16 +62,24 @@ macos_xrt_comp_predict_frame_from_displaylink(struct xrt_compositor *xc,
 	                                              (out_predicted_display_period_ns))
 
 /*
- * Strict experiment invariant: when CAMetalDisplayLink drive mode is enabled,
- * comp_multi_system.c must never enter its legacy u_wait_until()/mach_wait_until
- * path. The bridge's condition-variable wait is the only CPU pacing primitive.
- * If callbacks stop, its bounded failure/teardown timeout may produce a dropped
- * frame, but must not silently fall back to the old display scheduler.
+ * Preserve the source-level wait point so hybrid differs from legacy only in the
+ * primitive used to release wait_frame():
+ *
+ *   legacy: u_wait_until(sleeper, native_wake_time)
+ *   hybrid: predict native timing, then wait for the child CAMetal callback here
+ *   driven: callback was already consumed before prediction, so do not wait twice
+ *
+ * The bridge's 100 ms condition-variable timeout remains only a failure/teardown
+ * escape hatch; healthy CAMetal cadence is callback-driven.
  */
 static inline void
 macos_u_wait_until_displaylink(struct os_precise_sleeper *sleeper, int64_t wake_up_time_ns)
 {
 	if (comp_multi_macos_displaylink_active()) {
+		if (comp_multi_macos_displaylink_hybrid_mode()) {
+			(void)comp_multi_macos_displaylink_wait_tick(NULL, NULL, NULL);
+		}
+		/* Driven already waited before prediction. Hybrid just waited above. */
 		(void)sleeper;
 		(void)wake_up_time_ns;
 		return;
