@@ -275,18 +275,21 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
 bool
 comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing)
 {
-	if (!comp_multi_macos_displaylink_driven_mode()) {
+	if (!comp_multi_macos_displaylink_enabled()) {
 		return false;
 	}
 	pthread_mutex_lock(&g_bridge.mutex);
-	bool valid = g_active && g_bridge.drawable != NULL &&
-	             g_bridge.published_serial == g_bridge.consumed_serial &&
-	             g_bridge.consumed_serial > g_bridge.completed_serial &&
-	             g_bridge.consumed_serial > g_bridge.cancelled_serial &&
+	bool valid = g_active && g_bridge.consumed_serial != 0 &&
 	             g_bridge.consumed_callback_monotonic_ns > 0 &&
 	             g_bridge.consumed_target_monotonic_ns > g_bridge.consumed_callback_monotonic_ns &&
 	             g_bridge.consumed_presentation_monotonic_ns >= g_bridge.consumed_target_monotonic_ns &&
 	             g_bridge.consumed_presentation_monotonic_ns <= INT64_MAX;
+	if (valid && comp_multi_macos_displaylink_driven_mode()) {
+		valid = g_bridge.drawable != NULL &&
+		        g_bridge.published_serial == g_bridge.consumed_serial &&
+		        g_bridge.consumed_serial > g_bridge.completed_serial &&
+		        g_bridge.consumed_serial > g_bridge.cancelled_serial;
+	}
 	if (valid) {
 		*out_timing = (struct comp_multi_macos_displaylink_timing){
 		    .callback_ns = (int64_t)g_bridge.consumed_callback_monotonic_ns,
