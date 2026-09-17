@@ -79,11 +79,6 @@ comp_multi_macos_displaylink_wait_tick(uint64_t *out_callback_monotonic_ns,
                                        uint64_t *out_target_monotonic_ns,
                                        uint64_t *out_presentation_monotonic_ns);
 
-/* Snapshot the last consumed callback timing. This is stable until wait_tick()
- * consumes another callback, so native compositor prediction can use it in both
- * driven and hybrid modes without racing a newer published callback. The macOS
- * HMD target locally restricts use of this timing to driven mode; hybrid keeps
- * real-CVDisplayLink timed presentation semantics. */
 struct comp_multi_macos_displaylink_timing
 {
 	int64_t callback_ns;
@@ -91,8 +86,19 @@ struct comp_multi_macos_displaylink_timing
 	int64_t presentation_ns;
 };
 
+/* Snapshot the last consumed callback timing. Native compositor prediction calls
+ * this immediately after wait_tick(), so it follows the exact callback that woke
+ * the frame rather than the latest callback merely published by the delegate. */
 bool
 comp_multi_macos_displaylink_current_timing(struct comp_multi_macos_displaylink_timing *out_timing);
+
+/* Recover the timing for a previously consumed callback by its unique deadline.
+ * Hybrid asynchronous presentation uses this to associate a delayed present
+ * worker job with the same callback that predicted/rendered that frame, even if
+ * newer display-link callbacks have since been consumed. */
+bool
+comp_multi_macos_displaylink_timing_for_deadline(int64_t deadline_ns,
+                                                 struct comp_multi_macos_displaylink_timing *out_timing);
 
 /* Driven mode only: called once Metal has scheduled the callback-supplied drawable. */
 void
