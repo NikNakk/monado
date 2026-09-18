@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <sys/types.h>
 
 #define IPC_METAL_XPC_ACTIVATION_TIMEOUT_NS (15LL * NSEC_PER_SEC)
@@ -77,6 +78,12 @@ current_xpc_pid(void)
 {
 	NSXPCConnection *connection = [NSXPCConnection currentConnection];
 	return connection != nil ? connection.processIdentifier : (pid_t)0;
+}
+
+static NSString *
+importance_lease_key(pid_t ownerPID, uint64_t sessionID)
+{
+	return [NSString stringWithFormat:@"%d:%016llx", (int)ownerPID, (unsigned long long)sessionID];
 }
 
 @implementation IPCMetalXPCServiceObject
@@ -255,13 +262,6 @@ current_xpc_pid(void)
 	[_lock unlock];
 
 	return count;
-}
-
-
-static NSString *
-importance_lease_key(pid_t ownerPID, uint64_t sessionID)
-{
-	return [NSString stringWithFormat:@"%d:%016llx", (int)ownerPID, (unsigned long long)sessionID];
 }
 
 - (BOOL)storeImportanceReply:(void (^)(void))reply
