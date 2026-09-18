@@ -24,6 +24,9 @@
 #include "util/u_limited_unique_id.h"
 
 #include "shared/ipc_protocol.h"
+#if defined(XRT_OS_OSX)
+#include "shared/ipc_metal_xpc.h"
+#endif
 #include "client/ipc_client.h"
 #include "ipc_client_generated.h"
 
@@ -80,6 +83,11 @@ struct ipc_client_compositor
 
 	//! To get better wake up in wait frame.
 	struct os_precise_sleeper sleeper;
+
+#if defined(XRT_OS_OSX)
+	//! Optional long-lived XPC request carrying foreground XR-session provenance.
+	struct ipc_metal_xpc_importance_lease *macos_importance_lease;
+#endif
 
 #ifdef IPC_USE_LOOPBACK_IMAGE_ALLOCATOR
 	//! To test image allocator.
@@ -512,7 +520,24 @@ ipc_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_s
 
 	IPC_TRACE(icc->ipc_c, "Compositor begin session.");
 
+#if defined(XRT_OS_OSX)
+	if (ipc_metal_xpc_importance_enabled() && icc->macos_importance_lease == NULL) {
+		xrt_result_t importance_ret =
+		    ipc_metal_xpc_importance_acquire(&icc->macos_importance_lease);
+		if (importance_ret != XRT_SUCCESS) {
+			IPC_WARN(icc->ipc_c,
+			         "Could not establish XR XPC importance lease before session begin: result=%d",
+			         importance_ret);
+		}
+	}
+#endif
+
 	xret = ipc_call_session_begin(icc->ipc_c);
+#if defined(XRT_OS_OSX)
+	if (xret != XRT_SUCCESS) {
+		ipc_metal_xpc_importance_release(&icc->macos_importance_lease);
+	}
+#endif
 	IPC_CHK_ALWAYS_RET(icc->ipc_c, xret, "ipc_call_session_begin");
 }
 
@@ -527,6 +552,9 @@ ipc_compositor_end_session(struct xrt_compositor *xc)
 	IPC_TRACE(icc->ipc_c, "Compositor end session.");
 
 	xret = ipc_call_session_end(icc->ipc_c);
+#if defined(XRT_OS_OSX)
+	ipc_metal_xpc_importance_release(&icc->macos_importance_lease);
+#endif
 	IPC_CHK_ALWAYS_RET(icc->ipc_c, xret, "ipc_call_session_end");
 }
 
@@ -885,6 +913,11 @@ ipc_compositor_destroy(struct xrt_compositor *xc)
 	struct ipc_client_compositor *icc = ipc_client_compositor(xc);
 
 	assert(icc->compositor_created);
+
+#if defined(XRT_OS_OSX)
+	/* Crash/error paths may destroy a compositor without a matching end_session. */
+	ipc_metal_xpc_importance_release(&icc->macos_importance_lease);
+#endif
 
 	os_precise_sleeper_deinit(&icc->sleeper);
 

@@ -88,6 +88,25 @@ ipc_metal_xpc_end_shared_event_request(void **out_metal_shared_event);
 void
 ipc_metal_xpc_discard_token(uint64_t token);
 
+/*
+ * Optional macOS XPC importance side-channel.
+ *
+ * This leaves Monado's high-frequency Unix-domain IPC untouched. When enabled,
+ * an OpenXR client keeps one XPC request outstanding for the lifetime of an XR
+ * session so launchd/RunningBoard can see that monado-service is doing work on
+ * behalf of the foreground client process.
+ */
+struct ipc_metal_xpc_importance_lease;
+
+bool
+ipc_metal_xpc_importance_enabled(void);
+
+xrt_result_t
+ipc_metal_xpc_importance_acquire(struct ipc_metal_xpc_importance_lease **out_lease);
+
+void
+ipc_metal_xpc_importance_release(struct ipc_metal_xpc_importance_lease **lease_ptr);
+
 /*!
  * Encode a broker token in xrt_image_native metadata for the existing
  * client-side import_swapchain call. The native handles remain invalid; a
@@ -133,6 +152,23 @@ ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images,
                                 reply:(void (^)(MTLSharedEventHandle *handle))reply;
 
 - (void)discardToken:(uint64_t)token reply:(void (^)(void))reply;
+
+@end
+
+/*
+ * Direct monado-service protocol. The importance methods intentionally keep the
+ * acquire reply outstanding until release, creating one long-lived XPC request
+ * from the foreground OpenXR client to the service.
+ */
+@protocol IPCMetalXPCServiceProtocol <IPCMetalXPCBrokerProtocol>
+
+- (void)activateWithReply:(void (^)(BOOL ready))reply;
+
+- (void)acquireXRSessionImportance:(uint64_t)sessionID reply:(void (^)(void))reply;
+
+- (void)importanceLeaseBarrier:(uint64_t)sessionID reply:(void (^)(BOOL active))reply;
+
+- (void)releaseXRSessionImportance:(uint64_t)sessionID reply:(void (^)(BOOL released))reply;
 
 @end
 
