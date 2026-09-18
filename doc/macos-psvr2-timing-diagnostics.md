@@ -587,3 +587,54 @@ MACOS_PROCESS_ACTIVITY began mode=<mode> options=0x... process_lifetime=1
 This logging bypasses Monado's logging level and the XPC mainloop wrapper. It
 therefore distinguishes an unexported environment variable from a build or
 execution-path problem directly.
+
+
+## Foreground-client XPC importance lease / Game Mode diagnostic, 2026-09-18
+
+The current macOS service architecture uses an ordinary Unix-domain socket and
+shared memory for the high-frequency Monado protocol. The existing XPC endpoint
+was used only for service activation and Metal object transfer, so RunningBoard
+had no long-lived XPC relationship showing that compositor work was performed on
+behalf of the foreground game.
+
+An opt-in diagnostic now adds that relationship without moving frame traffic to
+XPC:
+
+- launchd registration uses `ProcessType=Adaptive`;
+- `XRT_MACOS_XPC_IMPORTANCE=1` in the OpenXR **client process** enables the
+  side-channel;
+- immediately before the ordinary IPC `session_begin`, the client opens a
+  persistent connection to the existing `org.freedesktop.monado.metal-ipc`
+  Mach service;
+- it sends `acquireXRSessionImportance`; the service retains that method's
+  reply block instead of replying immediately;
+- a second request on the same connection acts as a synchronous barrier so
+  `xrBeginSession` does not continue until the server confirms the lease is
+  installed;
+- all normal prediction, frame, layer and shared-memory traffic still uses the
+  existing Monado Unix IPC path;
+- `session_end` completes the held acquire reply, waits for a release
+  acknowledgement, then invalidates the XPC connection;
+- compositor destruction also releases the lease as a fallback;
+- service-side XPC connection invalidation releases any leases owned by that
+  exact connection, covering client crash/abnormal teardown.
+
+The service derives the owner PID from `NSXPCConnection.currentConnection`;
+the client does not supply or authenticate its own PID for this mechanism.
+
+A valid test must use the launchd-managed direct service. Do **not** set
+`XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1`, because that diagnostic deliberately
+removes the direct service Mach endpoint needed for the foreground relationship.
+
+Expected service log markers are:
+
+```
+XR_XPC_IMPORTANCE acquired pid=<game-pid> session=0x...
+XR_XPC_IMPORTANCE released pid=<game-pid> session=0x...
+```
+
+The decisive A/B is UE with Game Mode enabled and the same compositor
+time-constraint instrumentation, comparing `XRT_MACOS_XPC_IMPORTANCE=0` with
+`=1`. The desired signal is removal of the RunningBoard
+realtime-to-timeshare / priority `97 -> 4` clamp while leaving the compositor's
+existing requested time-constraint policy unchanged.

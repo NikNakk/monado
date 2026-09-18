@@ -21,10 +21,6 @@
 
 #define IPC_METAL_XPC_ACTIVATION_TIMEOUT_NS (15LL * NSEC_PER_SEC)
 
-@protocol IPCMetalXPCServiceProtocol <IPCMetalXPCBrokerProtocol>
-- (void)activateWithReply:(void (^)(BOOL ready))reply;
-@end
-
 @interface IPCMetalXPCServiceObject : NSObject <IPCMetalXPCServiceProtocol>
 {
 	NSLock *_lock;
@@ -32,6 +28,7 @@
 	NSMutableDictionary *_countsByToken;
 	NSMutableDictionary *_eventsByToken;
 	NSMutableDictionary *_ownersByToken;
+	NSMutableDictionary *_importanceLeasesByKey;
 }
 
 - (BOOL)storeTextureHandle:(MTLSharedTextureHandle *)handle
@@ -44,6 +41,14 @@
 - (MTLSharedEventHandle *)copySharedEventHandleForToken:(uint64_t)token ownerPID:(pid_t)ownerPID;
 - (void)discardToken:(uint64_t)token ownerPID:(pid_t)ownerPID;
 - (NSUInteger)discardAllForPID:(pid_t)ownerPID;
+- (BOOL)storeImportanceReply:(void (^)(void))reply
+                   sessionID:(uint64_t)sessionID
+                    ownerPID:(pid_t)ownerPID
+               connectionKey:(uintptr_t)connectionKey;
+- (BOOL)hasImportanceSession:(uint64_t)sessionID ownerPID:(pid_t)ownerPID connectionKey:(uintptr_t)connectionKey;
+- (BOOL)releaseImportanceSession:(uint64_t)sessionID ownerPID:(pid_t)ownerPID connectionKey:(uintptr_t)connectionKey;
+- (NSUInteger)releaseImportanceForConnectionKey:(uintptr_t)connectionKey ownerPID:(pid_t)ownerPID;
+- (NSUInteger)releaseAllImportanceLeases;
 @end
 
 static bool
@@ -85,12 +90,15 @@ current_xpc_pid(void)
 		_countsByToken = [[NSMutableDictionary alloc] init];
 		_eventsByToken = [[NSMutableDictionary alloc] init];
 		_ownersByToken = [[NSMutableDictionary alloc] init];
+		_importanceLeasesByKey = [[NSMutableDictionary alloc] init];
 	}
 	return self;
 }
 
 - (void)dealloc
 {
+	[self releaseAllImportanceLeases];
+	[_importanceLeasesByKey release];
 	[_ownersByToken release];
 	[_eventsByToken release];
 	[_countsByToken release];
@@ -249,9 +257,210 @@ current_xpc_pid(void)
 	return count;
 }
 
+
+static NSString *
+importance_lease_key(pid_t ownerPID, uint64_t sessionID)
+{
+	return [NSString stringWithFormat:@"%d:%016llx", (int)ownerPID, (unsigned long long)sessionID];
+}
+
+- (BOOL)storeImportanceReply:(void (^)(void))reply
+                   sessionID:(uint64_t)sessionID
+                    ownerPID:(pid_t)ownerPID
+               connectionKey:(uintptr_t)connectionKey
+{
+	if (reply == nil || sessionID == 0 || ownerPID <= 0 || connectionKey == 0) {
+		return NO;
+	}
+
+	NSString *key = importance_lease_key(ownerPID, sessionID);
+	BOOL stored = NO;
+	[_lock lock];
+	if ([_importanceLeasesByKey objectForKey:key] == nil) {
+		void (^reply_copy)(void) = [reply copy];
+		NSDictionary *entry = @{
+			@"reply" : reply_copy,
+			@"owner" : [NSNumber numberWithInt:ownerPID],
+			@"connection" : [NSNumber numberWithUnsignedLongLong:(unsigned long long)connectionKey],
+		};
+		[_importanceLeasesByKey setObject:entry forKey:key];
+		[reply_copy release];
+		stored = YES;
+	}
+	[_lock unlock];
+	return stored;
+}
+
+- (BOOL)hasImportanceSession:(uint64_t)sessionID ownerPID:(pid_t)ownerPID connectionKey:(uintptr_t)connectionKey
+{
+	if (sessionID == 0 || ownerPID <= 0 || connectionKey == 0) {
+		return NO;
+	}
+
+	NSString *key = importance_lease_key(ownerPID, sessionID);
+	BOOL active = NO;
+	[_lock lock];
+	NSDictionary *entry = [_importanceLeasesByKey objectForKey:key];
+	if (entry != nil) {
+		NSNumber *connection = [entry objectForKey:@"connection"];
+		active = connection.unsignedLongLongValue == (unsigned long long)connectionKey;
+	}
+	[_lock unlock];
+	return active;
+}
+
+- (BOOL)releaseImportanceSession:(uint64_t)sessionID ownerPID:(pid_t)ownerPID connectionKey:(uintptr_t)connectionKey
+{
+	if (sessionID == 0 || ownerPID <= 0 || connectionKey == 0) {
+		return NO;
+	}
+
+	NSString *key = importance_lease_key(ownerPID, sessionID);
+	void (^completion)(void) = nil;
+
+	[_lock lock];
+	NSDictionary *entry = [_importanceLeasesByKey objectForKey:key];
+	NSNumber *connection = [entry objectForKey:@"connection"];
+	if (entry != nil && connection.unsignedLongLongValue == (unsigned long long)connectionKey) {
+		completion = [[entry objectForKey:@"reply"] retain];
+		[_importanceLeasesByKey removeObjectForKey:key];
+	}
+	[_lock unlock];
+
+	if (completion != nil) {
+		completion();
+		[completion release];
+		return YES;
+	}
+	return NO;
+}
+
+- (NSUInteger)releaseImportanceForConnectionKey:(uintptr_t)connectionKey ownerPID:(pid_t)ownerPID
+{
+	if (connectionKey == 0 || ownerPID <= 0) {
+		return 0;
+	}
+
+	NSMutableArray *completions = [NSMutableArray array];
+	NSMutableArray *keys = [NSMutableArray array];
+
+	[_lock lock];
+	for (NSString *key in _importanceLeasesByKey) {
+		NSDictionary *entry = [_importanceLeasesByKey objectForKey:key];
+		NSNumber *owner = [entry objectForKey:@"owner"];
+		NSNumber *connection = [entry objectForKey:@"connection"];
+		if (owner.intValue == ownerPID &&
+		    connection.unsignedLongLongValue == (unsigned long long)connectionKey) {
+			id reply = [entry objectForKey:@"reply"];
+			if (reply != nil) {
+				[completions addObject:reply];
+			}
+			[keys addObject:key];
+		}
+	}
+	for (NSString *key in keys) {
+		[_importanceLeasesByKey removeObjectForKey:key];
+	}
+	[_lock unlock];
+
+	for (id reply in completions) {
+		((void (^)(void))reply)();
+	}
+	return keys.count;
+}
+
+- (NSUInteger)releaseAllImportanceLeases
+{
+	NSArray *entries = nil;
+	[_lock lock];
+	entries = [[_importanceLeasesByKey allValues] retain];
+	[_importanceLeasesByKey removeAllObjects];
+	[_lock unlock];
+
+	for (NSDictionary *entry in entries) {
+		id reply = [entry objectForKey:@"reply"];
+		if (reply != nil) {
+			((void (^)(void))reply)();
+		}
+	}
+	NSUInteger count = entries.count;
+	[entries release];
+	return count;
+}
+
 - (void)activateWithReply:(void (^)(BOOL ready))reply
 {
 	reply(YES);
+}
+
+- (void)acquireXRSessionImportance:(uint64_t)sessionID reply:(void (^)(void))reply
+{
+	NSXPCConnection *connection = [NSXPCConnection currentConnection];
+	pid_t pid = connection != nil ? connection.processIdentifier : (pid_t)0;
+	uintptr_t connection_key = (uintptr_t)connection;
+	BOOL stored = [self storeImportanceReply:reply
+	                              sessionID:sessionID
+	                               ownerPID:pid
+	                          connectionKey:connection_key];
+	if (!stored) {
+		U_LOG_W("Rejected XR XPC importance acquire pid=%d session=0x%016llx connection=%p",
+		        (int)pid,
+		        (unsigned long long)sessionID,
+		        connection);
+		/* Never strand a rejected request with an outstanding reply. */
+		reply();
+		return;
+	}
+
+	U_LOG_I("XR XPC importance acquired pid=%d session=0x%016llx connection=%p",
+	        (int)pid,
+	        (unsigned long long)sessionID,
+	        connection);
+	fprintf(stderr,
+	        "XR_XPC_IMPORTANCE acquired pid=%d session=0x%016llx connection=%p\n",
+	        (int)pid,
+	        (unsigned long long)sessionID,
+	        connection);
+	fflush(stderr);
+	/* Deliberately do not invoke reply until release. */
+}
+
+- (void)importanceLeaseBarrier:(uint64_t)sessionID reply:(void (^)(BOOL active))reply
+{
+	NSXPCConnection *connection = [NSXPCConnection currentConnection];
+	pid_t pid = connection != nil ? connection.processIdentifier : (pid_t)0;
+	uintptr_t connection_key = (uintptr_t)connection;
+	BOOL active = [self hasImportanceSession:sessionID ownerPID:pid connectionKey:connection_key];
+	reply(active);
+}
+
+- (void)releaseXRSessionImportance:(uint64_t)sessionID reply:(void (^)(BOOL released))reply
+{
+	NSXPCConnection *connection = [NSXPCConnection currentConnection];
+	pid_t pid = connection != nil ? connection.processIdentifier : (pid_t)0;
+	uintptr_t connection_key = (uintptr_t)connection;
+	BOOL released =
+	    [self releaseImportanceSession:sessionID ownerPID:pid connectionKey:connection_key];
+
+	if (released) {
+		U_LOG_I("XR XPC importance released pid=%d session=0x%016llx connection=%p",
+		        (int)pid,
+		        (unsigned long long)sessionID,
+		        connection);
+		fprintf(stderr,
+		        "XR_XPC_IMPORTANCE released pid=%d session=0x%016llx connection=%p\n",
+		        (int)pid,
+		        (unsigned long long)sessionID,
+		        connection);
+		fflush(stderr);
+	} else {
+		U_LOG_W("XR XPC importance release had no matching lease pid=%d session=0x%016llx connection=%p",
+		        (int)pid,
+		        (unsigned long long)sessionID,
+		        connection);
+	}
+
+	reply(released);
 }
 
 - (void)publishTextureHandle:(MTLSharedTextureHandle *)handle
@@ -349,6 +558,24 @@ current_xpc_pid(void)
 	(void)listener;
 	newConnection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCServiceProtocol)];
 	newConnection.exportedObject = _service;
+
+	const uintptr_t connection_key = (uintptr_t)newConnection;
+	const pid_t pid = newConnection.processIdentifier;
+	IPCMetalXPCServiceObject *service = _service;
+	newConnection.invalidationHandler = ^{
+		NSUInteger released = [service releaseImportanceForConnectionKey:connection_key ownerPID:pid];
+		if (released > 0) {
+			U_LOG_I("XR XPC importance connection invalidated pid=%d released=%lu",
+			        (int)pid,
+			        (unsigned long)released);
+			fprintf(stderr,
+			        "XR_XPC_IMPORTANCE invalidated pid=%d released=%lu\n",
+			        (int)pid,
+			        (unsigned long)released);
+			fflush(stderr);
+		}
+	};
+
 	[newConnection resume];
 	return YES;
 }

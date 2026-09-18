@@ -15,8 +15,16 @@
 #include <dispatch/dispatch.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define IPC_METAL_XPC_TIMEOUT_NS (5LL * NSEC_PER_SEC)
+#define IPC_XPC_IMPORTANCE_TIMEOUT_NS (5LL * NSEC_PER_SEC)
+
+struct ipc_metal_xpc_importance_lease
+{
+	NSXPCConnection *connection;
+	uint64_t session_id;
+};
 
 static __thread bool g_shared_event_request_active = false;
 static __thread void *g_shared_event_request_event = NULL;
@@ -36,6 +44,26 @@ create_connection(void)
 	connection.remoteObjectInterface = ipc_metal_xpc_create_interface();
 	[connection resume];
 	return connection;
+}
+
+static NSXPCConnection *
+create_service_connection(void)
+{
+	NSString *service_name = [NSString stringWithUTF8String:IPC_METAL_XPC_SERVICE_NAME];
+	NSXPCConnection *connection = [[NSXPCConnection alloc] initWithMachServiceName:service_name options:0];
+	connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCServiceProtocol)];
+	[connection resume];
+	return connection;
+}
+
+static uint64_t
+make_importance_session_id(void)
+{
+	uint64_t session_id = 0;
+	while (session_id == 0) {
+		arc4random_buf(&session_id, sizeof(session_id));
+	}
+	return session_id;
 }
 
 static bool
@@ -199,6 +227,166 @@ discard_sync(NSXPCConnection *connection, uint64_t token)
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
 	return wait_result == 0 && replied;
+}
+
+
+bool
+ipc_metal_xpc_importance_enabled(void)
+{
+	const char *value = getenv("XRT_MACOS_XPC_IMPORTANCE");
+	if (value == NULL || value[0] == '\0' || strcmp(value, "0") == 0 || strcmp(value, "off") == 0 ||
+	    strcmp(value, "false") == 0) {
+		return false;
+	}
+	return true;
+}
+
+xrt_result_t
+ipc_metal_xpc_importance_acquire(struct ipc_metal_xpc_importance_lease **out_lease)
+{
+	if (out_lease == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	*out_lease = NULL;
+
+	if (!ipc_metal_xpc_importance_enabled()) {
+		return XRT_SUCCESS;
+	}
+
+	@autoreleasepool {
+		NSXPCConnection *connection = create_service_connection();
+		if (connection == nil) {
+			U_LOG_E("XR XPC importance could not create service connection");
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		uint64_t session_id = make_importance_session_id();
+		__block BOOL barrier_replied = NO;
+		__block BOOL barrier_active = NO;
+		dispatch_semaphore_t barrier = dispatch_semaphore_create(0);
+
+		connection.interruptionHandler = ^{
+			U_LOG_W("XR XPC importance connection interrupted session=0x%016llx",
+			        (unsigned long long)session_id);
+		};
+		connection.invalidationHandler = ^{
+			U_LOG_D("XR XPC importance connection invalidated session=0x%016llx",
+			        (unsigned long long)session_id);
+		};
+
+		id<IPCMetalXPCServiceProtocol> proxy =
+		    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+			    const char *message = error.localizedDescription.UTF8String;
+			    U_LOG_E("XR XPC importance request failed session=0x%016llx: %s",
+			            (unsigned long long)session_id,
+			            message != NULL ? message : "unknown error");
+			    dispatch_semaphore_signal(barrier);
+		    }];
+
+		/*
+		 * The service deliberately keeps this reply block outstanding until
+		 * release. That long-lived request is the foreground-client provenance
+		 * signal this diagnostic is testing.
+		 */
+		[proxy acquireXRSessionImportance:session_id
+		                           reply:^{
+			                           U_LOG_D("XR XPC importance acquire reply completed session=0x%016llx",
+			                                   (unsigned long long)session_id);
+		                           }];
+
+		/*
+		 * A second message on the same connection is a readiness barrier. When
+		 * it replies, the acquire message has already run and the server has
+		 * retained its outstanding reply.
+		 */
+		[proxy importanceLeaseBarrier:session_id
+		                       reply:^(BOOL active) {
+			                       barrier_active = active;
+			                       barrier_replied = YES;
+			                       dispatch_semaphore_signal(barrier);
+		                       }];
+
+		long wait_result =
+		    dispatch_semaphore_wait(barrier, dispatch_time(DISPATCH_TIME_NOW, IPC_XPC_IMPORTANCE_TIMEOUT_NS));
+		if (wait_result != 0 || !barrier_replied || !barrier_active) {
+			U_LOG_E("XR XPC importance barrier failed session=0x%016llx replied=%s active=%s",
+			        (unsigned long long)session_id,
+			        barrier_replied ? "true" : "false",
+			        barrier_active ? "true" : "false");
+			[connection invalidate];
+			[connection release];
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		struct ipc_metal_xpc_importance_lease *lease =
+		    calloc(1, sizeof(struct ipc_metal_xpc_importance_lease));
+		if (lease == NULL) {
+			[connection invalidate];
+			[connection release];
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		lease->connection = connection;
+		lease->session_id = session_id;
+		*out_lease = lease;
+
+		U_LOG_I("XR XPC importance lease established pid=%d session=0x%016llx",
+		        (int)getpid(),
+		        (unsigned long long)session_id);
+		return XRT_SUCCESS;
+	}
+}
+
+void
+ipc_metal_xpc_importance_release(struct ipc_metal_xpc_importance_lease **lease_ptr)
+{
+	if (lease_ptr == NULL || *lease_ptr == NULL) {
+		return;
+	}
+
+	struct ipc_metal_xpc_importance_lease *lease = *lease_ptr;
+	*lease_ptr = NULL;
+
+	@autoreleasepool {
+		NSXPCConnection *connection = lease->connection;
+		uint64_t session_id = lease->session_id;
+
+		__block BOOL release_replied = NO;
+		__block BOOL released = NO;
+		dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+		id<IPCMetalXPCServiceProtocol> proxy =
+		    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+			    const char *message = error.localizedDescription.UTF8String;
+			    U_LOG_W("XR XPC importance release failed session=0x%016llx: %s",
+			            (unsigned long long)session_id,
+			            message != NULL ? message : "unknown error");
+			    dispatch_semaphore_signal(semaphore);
+		    }];
+
+		[proxy releaseXRSessionImportance:session_id
+		                           reply:^(BOOL remote_released) {
+			                           released = remote_released;
+			                           release_replied = YES;
+			                           dispatch_semaphore_signal(semaphore);
+		                           }];
+
+		long wait_result =
+		    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_XPC_IMPORTANCE_TIMEOUT_NS));
+		if (wait_result != 0 || !release_replied || !released) {
+			U_LOG_W("XR XPC importance release not acknowledged session=0x%016llx replied=%s released=%s",
+			        (unsigned long long)session_id,
+			        release_replied ? "true" : "false",
+			        released ? "true" : "false");
+		} else {
+			U_LOG_I("XR XPC importance lease released pid=%d session=0x%016llx",
+			        (int)getpid(),
+			        (unsigned long long)session_id);
+		}
+
+		[connection invalidate];
+		[connection release];
+		free(lease);
+	}
 }
 
 xrt_result_t

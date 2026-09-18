@@ -289,7 +289,7 @@ write_launch_agent_plist(const char *path, const char *service_executable, bool 
 			@"ProgramArguments" : @[ exe ],
 			@"MachServices" : @{ mach_service : @YES },
 			@"RunAtLoad" : @NO,
-			@"ProcessType" : @"Interactive",
+			@"ProcessType" : @"Adaptive",
 			@"EnvironmentVariables" : launch_environment,
 			@"StandardOutPath" : stdout_string,
 			@"StandardErrorPath" : stderr_string,
@@ -361,6 +361,7 @@ bootstrap_service(void)
 	printf("monado-service registered for on-demand XPC activation (development mode)\n");
 	printf("LaunchAgent label: %s\n", MONADO_XPC_LAUNCHD_LABEL);
 	printf("Mach service: %s\n", IPC_METAL_XPC_SERVICE_NAME);
+	printf("ProcessType: Adaptive (foreground XPC provenance enabled when the client requests an importance lease)\n");
 	printf("Executable: %s\n", service_executable);
 	printf("LaunchAgent plist: %s\n", plist_path);
 	printf("Relevant XRT/PSVR2/Vulkan environment captured from this shell\n");
