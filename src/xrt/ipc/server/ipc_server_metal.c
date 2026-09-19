@@ -17,6 +17,7 @@
 
 #include <pthread.h>
 #include <stdlib.h>
+#include <string.h>
 #endif
 
 #ifdef XRT_OS_OSX
@@ -470,6 +471,55 @@ ipc_handle_swapchain_import_iosurface(volatile struct ipc_client_state *ics,
 	IPC_INFO(ics->server,
 	         "External IOSurface swapchain active: id=%u images=%u size=%ux%u array_size=%u first_surface=%u",
 	         index, image_count, info->width, info->height, info->array_size, args->ids[0]);
+	return XRT_SUCCESS;
+#endif
+}
+
+xrt_result_t
+ipc_handle_compositor_semaphore_import_metal_bootstrap(volatile struct ipc_client_state *ics,
+                                                       const struct ipc_metal_bootstrap_name *bootstrap,
+                                                       uint32_t *out_id)
+{
+	IPC_TRACE_MARKER();
+
+#ifndef XRT_OS_OSX
+	(void)ics;
+	(void)bootstrap;
+	(void)out_id;
+	return XRT_ERROR_NOT_IMPLEMENTED;
+#else
+	if (ics == NULL || bootstrap == NULL || out_id == NULL || ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	if (bootstrap->name[0] == '\0' ||
+	    memchr(bootstrap->name, '\0', sizeof(bootstrap->name)) == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	uint32_t id = 0;
+	xrt_result_t xret = find_free_semaphore_index(ics, &id);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	struct xrt_compositor_semaphore *xcsem = NULL;
+	xret = comp_metal_semaphore_import_bootstrap_event(bootstrap->name, &xcsem);
+	if (xret != XRT_SUCCESS || xcsem == NULL) {
+		IPC_WARN(ics->server,
+		         "DXMT shared-event semaphore import unavailable: name='%s' result=%d",
+		         bootstrap->name,
+		         xret);
+		return xret != XRT_SUCCESS ? xret : XRT_ERROR_VULKAN;
+	}
+
+	ics->xcsems[id] = xcsem;
+	ics->compositor_semaphore_count++;
+	*out_id = id;
+
+	IPC_INFO(ics->server,
+	         "DXMT shared-event compositor semaphore active: id=%u name='%s'",
+	         id,
+	         bootstrap->name);
 	return XRT_SUCCESS;
 #endif
 }
