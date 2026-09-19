@@ -181,6 +181,27 @@ run_launchctl(const char *verb, const char *arg1, const char *arg2)
 	return WEXITSTATUS(status);
 }
 
+static int
+run_launchctl_bootstrap_with_retry(const char *domain, const char *plist_path)
+{
+	int ret = 0;
+	for (int attempt = 0; attempt < 5; attempt++) {
+		ret = run_launchctl("bootstrap", domain, plist_path);
+		if (ret == 0) {
+			return 0;
+		}
+		/*
+		 * launchd can briefly retain the old Mach-service registration after
+		 * bootout. Status 5 (EIO) is commonly returned during that teardown
+		 * window, so give it a short bounded chance to settle.
+		 */
+		if (attempt < 4) {
+			usleep((useconds_t)(200000 * (attempt + 1)));
+		}
+	}
+	return ret;
+}
+
 static bool
 should_forward_environment_key(NSString *key)
 {
@@ -348,7 +369,7 @@ bootstrap_service(void)
 		return 2;
 	}
 
-	int ret = run_launchctl("bootstrap", domain, plist_path);
+	int ret = run_launchctl_bootstrap_with_retry(domain, plist_path);
 	if (ret != 0) {
 		fprintf(stderr, "launchctl bootstrap failed with status %d\n", ret);
 		return 3;
@@ -411,7 +432,7 @@ install_service(void)
 		return 4;
 	}
 
-	int ret = run_launchctl("bootstrap", domain, persistent_plist_path);
+	int ret = run_launchctl_bootstrap_with_retry(domain, persistent_plist_path);
 	if (ret != 0) {
 		fprintf(stderr, "launchctl bootstrap failed with status %d\n", ret);
 		return 5;
