@@ -28,6 +28,9 @@ DEBUG_GET_ONCE_BOOL_OPTION(depth_disocclusion_fill, "XRT_COMPOSITOR_DEPTH_DISOCC
 DEBUG_GET_ONCE_BOOL_OPTION(depth_per_channel, "XRT_COMPOSITOR_DEPTH_PER_CHANNEL", false)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_occlusion_search, "XRT_COMPOSITOR_DEPTH_OCCLUSION_SEARCH", true)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_forward_visibility, "XRT_COMPOSITOR_DEPTH_FORWARD_VISIBILITY", true)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_forward_hole_fill, "XRT_COMPOSITOR_DEPTH_FORWARD_HOLE_FILL", true)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_chroma_edge_lock, "XRT_COMPOSITOR_DEPTH_CHROMA_EDGE_LOCK", true)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_monochrome_distortion, "XRT_COMPOSITOR_DEPTH_MONOCHROME_DISTORTION", false)
 
 /*
  *
@@ -1119,6 +1122,9 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 		data->target_to_source_orientation_scanout_begin[i] = target_begin_in_source.orientation;
 		data->target_to_source_orientation_scanout_end[i] = target_end_in_source.orientation;
 		data->has_depth[i].value = 1;
+		data->has_depth[i].padding0 = debug_get_bool_option_depth_chroma_edge_lock() ? 1u : 0u;
+		data->has_depth[i].padding1 = debug_get_bool_option_depth_forward_hole_fill() ? 1u : 0u;
+		data->has_depth[i].padding2 = debug_get_bool_option_depth_monochrome_distortion() ? 1u : 0u;
 
 #ifdef XRT_OS_OSX
 		maybe_log_timewarp_inputs(r->apple_target_debug.frame_id, i, &src_fovs[i], &src_poses[i],
@@ -1129,7 +1135,7 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	}
 
 	dispatch_depth_visibility(render, src_samplers, src_image_views, depth_samplers, depth_image_views);
-		dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, depth_samplers, depth_image_views,
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, depth_samplers, depth_image_views,
 	                          target_image, target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
