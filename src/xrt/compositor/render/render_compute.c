@@ -23,6 +23,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(log_timewarp_inputs, "XRT_COMPOSITOR_LOG_TIMEWARP_INP
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_IDENTITY", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_PRETRANSFORM_IDENTITY", false)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_reprojection, "XRT_COMPOSITOR_DEPTH_REPROJECTION", true)
+DEBUG_GET_ONCE_NUM_OPTION(depth_reprojection_debug, "XRT_COMPOSITOR_DEPTH_DEBUG", 0)
 
 /*
  *
@@ -917,6 +918,14 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 
 	struct render_compute_distortion_ubo_data *data =
 	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
+	long depth_debug_mode = debug_get_num_option_depth_reprojection_debug();
+	if (depth_debug_mode < 0 || depth_debug_mode > 3) {
+		depth_debug_mode = 0;
+	}
+	data->depth_debug.value = (uint32_t)depth_debug_mode;
+	data->depth_debug.padding0 = 0;
+	data->depth_debug.padding1 = 0;
+	data->depth_debug.padding2 = 0;
 
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
 		render_calc_time_warp_matrix(
