@@ -874,7 +874,7 @@ render_compute_projection_timewarp(struct render_compute *render,
 }
 
 
-static inline struct xrt_vec4
+static inline struct xrt_vec3
 calc_new_origin_in_source_view(const struct xrt_pose *source_pose, const struct xrt_pose *new_pose)
 {
 	struct xrt_pose world_to_source;
@@ -882,13 +882,7 @@ calc_new_origin_in_source_view(const struct xrt_pose *source_pose, const struct 
 
 	struct xrt_vec3 origin;
 	math_pose_transform_point(&world_to_source, &new_pose->position, &origin);
-
-	return (struct xrt_vec4){
-	    .x = origin.x,
-	    .y = origin.y,
-	    .z = origin.z,
-	    .w = 0.0f,
-	};
+	return origin;
 }
 
 void
@@ -942,10 +936,12 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 		data->projection_depth[i].max_depth = depth_data[i].max_depth;
 		data->projection_depth[i].near_z = depth_data[i].near_z;
 		data->projection_depth[i].far_z = depth_data[i].far_z;
-		data->new_origin_in_source_view_scanout_begin[i] =
+		data->new_origin_in_source_view_scanout_begin[i].val =
 		    calc_new_origin_in_source_view(&src_poses[i], &new_poses_scanout_begin[i]);
-		data->new_origin_in_source_view_scanout_end[i] =
+		data->new_origin_in_source_view_scanout_begin[i].padding = 0.0f;
+		data->new_origin_in_source_view_scanout_end[i].val =
 		    calc_new_origin_in_source_view(&src_poses[i], &new_poses_scanout_end[i]);
+		data->new_origin_in_source_view_scanout_end[i].padding = 0.0f;
 		data->has_depth[i].value = 1;
 
 #ifdef XRT_OS_OSX
