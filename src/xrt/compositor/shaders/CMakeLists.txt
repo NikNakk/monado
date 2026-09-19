@@ -10,6 +10,7 @@ set(SHADERS
     blit.comp
     clear.comp
     distortion.comp
+    depth_visibility.comp
     layer.comp
     mesh.frag
     mesh.vert
