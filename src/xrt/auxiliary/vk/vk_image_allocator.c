@@ -303,6 +303,30 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
 	    .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
 	};
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	if ((info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+		VkImageFormatProperties depth_props = {0};
+		VkResult depth_probe = vk->vkGetPhysicalDeviceImageFormatProperties(
+		    vk->physical_device,
+		    image_format,
+		    VK_IMAGE_TYPE_2D,
+		    VK_IMAGE_TILING_OPTIMAL,
+		    image_usage,
+		    image_create_flags,
+		    &depth_props);
+		U_LOG_I("macOS depth image probe: format=%u usage=0x%x flags=0x%x size=%ux%u result=%d maxExtent=%ux%u maxLayers=%u exportType=0x%x",
+		        (uint32_t)image_format,
+		        (uint32_t)image_usage,
+		        (uint32_t)image_create_flags,
+		        info->width,
+		        info->height,
+		        (int)depth_probe,
+		        depth_probe == VK_SUCCESS ? depth_props.maxExtent.width : 0,
+		        depth_probe == VK_SUCCESS ? depth_props.maxExtent.height : 0,
+		        depth_probe == VK_SUCCESS ? depth_props.maxArrayLayers : 0,
+		        vk->has_EXT_metal_objects ? (uint32_t)export_metal_object_create_info.exportObjectType : 0);
+	}
+#endif
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER)
 	// VUID-VkImageCreateInfo-pNext-01974
 	if (format_android.externalFormat != 0) {
@@ -312,6 +336,17 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 #endif
 
 	ret = vk->vkCreateImage(vk->device, &create_info, NULL, &image);
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	if (ret != VK_SUCCESS && (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+		U_LOG_E("macOS depth vkCreateImage failed: result=%d format=%u usage=0x%x flags=0x%x pNext=%p exportType=0x%x",
+		        (int)ret,
+		        (uint32_t)image_format,
+		        (uint32_t)image_usage,
+		        (uint32_t)image_create_flags,
+		        create_info.pNext,
+		        vk->has_EXT_metal_objects ? (uint32_t)export_metal_object_create_info.exportObjectType : 0);
+	}
+#endif
 	VK_CHK_AND_RET(ret, "vkCreateImage");
 
 	// In
