@@ -39,7 +39,14 @@ if [[ -z "${runtime_dll}" ]]; then
 	exit 1
 fi
 
-if [[ "${port}" != <-> ]] || (( port < 1 || port > 65535 )); then
+case "${port}" in
+	''|*[!0-9]*)
+		print -u2 "MONADO_WINE_TCP_PORT must be an integer from 1 to 65535."
+		exit 2
+		;;
+esac
+
+if (( port < 1 || port > 65535 )); then
 	print -u2 "MONADO_WINE_TCP_PORT must be an integer from 1 to 65535."
 	exit 2
 fi
