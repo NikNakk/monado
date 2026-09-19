@@ -974,8 +974,17 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 			struct ipc_layer_single_payload payload = {0};
 			payload.size = (uint32_t)total_size;
 			memcpy(payload.data, slot, total_size);
-			xret = ipc_call_compositor_layer_sync_single_semaphore(
-			    icc->ipc_c, &payload, iccs->id, value, &icc->layers.slot_id);
+
+			/*
+			 * Wine has no shared layer-slot mapping to recycle: the complete
+			 * active layer is in this message. Send it without waiting for a
+			 * reply so native compositor work falls behind the next pacing
+			 * call instead of blocking xrEndFrame.
+			 */
+			os_mutex_lock(&icc->ipc_c->mutex);
+			xret = ipc_send_compositor_layer_sync_single_semaphore_async_locked(
+			    icc->ipc_c, &payload, iccs->id, value);
+			os_mutex_unlock(&icc->ipc_c->mutex);
 		} else {
 			const uint8_t *src = (const uint8_t *)slot;
 			xret = XRT_SUCCESS;
