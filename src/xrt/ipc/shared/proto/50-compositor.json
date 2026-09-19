@@ -52,6 +52,15 @@
 		]
 	},
 
+	"compositor_layer_sync_copy": {
+		"in": [
+			{"name": "slot", "type": "struct ipc_layer_slot"}
+		],
+		"out": [
+			{"name": "free_slot_id", "type": "uint32_t"}
+		]
+	},
+
 	"compositor_layer_sync_with_semaphore": {
 		"in": [
 			{"name": "slot_id", "type": "uint32_t"},
