@@ -478,6 +478,9 @@ struct render_resources
 		//! Uniform data binding.
 		uint32_t ubo_binding;
 
+		//! Forward-reprojected target-view depth visibility buffer.
+		uint32_t visibility_binding;
+
 		struct
 		{
 			//! Descriptor set layout for compute.
@@ -516,6 +519,15 @@ struct render_resources
 			//! Target info.
 			struct render_buffer ubo;
 		} distortion;
+
+		struct
+		{
+			//! Frontmost target-view depth, one uint per projection pixel/view.
+			struct render_buffer buffer;
+			uint32_t width;
+			uint32_t height;
+			VkPipeline pipeline;
+		} depth_visibility;
 
 		struct
 		{
@@ -1395,6 +1407,12 @@ struct render_compute_distortion_ubo_data
 		float padding;
 	} new_origin_in_source_view_scanout_begin[XRT_MAX_VIEWS],
 	    new_origin_in_source_view_scanout_end[XRT_MAX_VIEWS];
+
+	// Rotation taking a target/scanout-view vector into the submitted source
+	// view. Together with the origins above this is the full target->source
+	// relative pose and allows reconstruction from a target-view depth.
+	struct xrt_quat target_to_source_orientation_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_quat target_to_source_orientation_scanout_end[XRT_MAX_VIEWS];
 	struct
 	{
 		uint32_t value;
@@ -1415,6 +1433,14 @@ struct render_compute_distortion_ubo_data
 		uint32_t padding1;
 		uint32_t padding2;
 	} depth_debug;
+	// width, height, view_count, forward-visibility enabled.
+	struct
+	{
+		uint32_t width;
+		uint32_t height;
+		uint32_t view_count;
+		uint32_t enabled;
+	} depth_visibility;
 };
 
 /*!
