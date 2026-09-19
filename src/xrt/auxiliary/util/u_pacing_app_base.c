@@ -21,6 +21,12 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef XRT_OS_OSX
+#include <unistd.h>
+#endif
 
 DEBUG_GET_ONCE_LOG_OPTION(log_level, "U_PACING_APP_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_FLOAT_OPTION(min_app_time_ms, "U_PACING_APP_MIN_TIME_MS", 1.0f)
@@ -67,6 +73,104 @@ DEBUG_GET_ONCE_BOOL_OPTION(align_predicted_display_time_to_app_period,
  * option is enabled.
  */
 #define IMMEDIATE_WAIT_FRAME_RETURN_MARGIN_NS U_TIME_HALF_MS_IN_NS
+
+#ifdef XRT_OS_OSX
+static FILE *g_macos_app_pacing_trace = NULL;
+static bool g_macos_app_pacing_trace_failed = false;
+static bool g_macos_app_pacing_trace_atexit_registered = false;
+static uint64_t g_macos_app_pacing_trace_rows = 0;
+
+static bool
+macos_app_pacing_trace_enabled(void)
+{
+	const char *value = getenv("PSVR2_TIMING_TRACE");
+	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+}
+
+static void
+macos_app_pacing_trace_close(void)
+{
+	if (g_macos_app_pacing_trace == NULL) {
+		return;
+	}
+	fflush(g_macos_app_pacing_trace);
+	fclose(g_macos_app_pacing_trace);
+	g_macos_app_pacing_trace = NULL;
+}
+
+static FILE *
+macos_app_pacing_trace_get(void)
+{
+	if (!macos_app_pacing_trace_enabled() || g_macos_app_pacing_trace_failed) {
+		return NULL;
+	}
+	if (g_macos_app_pacing_trace != NULL) {
+		return g_macos_app_pacing_trace;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_app_pacing.csv", dir, separator, (int)getpid());
+
+	g_macos_app_pacing_trace = fopen(path, "w");
+	if (g_macos_app_pacing_trace == NULL) {
+		g_macos_app_pacing_trace_failed = true;
+		return NULL;
+	}
+	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
+	size_t buffer_size =
+	    fully_buffered != NULL && strcmp(fully_buffered, "1") == 0 ? 16u * 1024u * 1024u : 64u * 1024u;
+	setvbuf(g_macos_app_pacing_trace, NULL, _IOFBF, buffer_size);
+	fputs("event,session_id,client_frame_id,event_ns,wake_ns,predicted_display_ns,predicted_period_ns,display_time_ns,"
+	      "cpu_est_ns,draw_est_ns,gpu_est_ns,cpu_actual_ns,draw_actual_ns,gpu_actual_ns\n",
+	      g_macos_app_pacing_trace);
+	if (!g_macos_app_pacing_trace_atexit_registered) {
+		atexit(macos_app_pacing_trace_close);
+		g_macos_app_pacing_trace_atexit_registered = true;
+	}
+	return g_macos_app_pacing_trace;
+}
+
+static void
+macos_app_pacing_trace_event(const char *event,
+                             int64_t session_id,
+                             int64_t frame_id,
+                             int64_t event_ns,
+                             int64_t wake_ns,
+                             int64_t predicted_display_ns,
+                             int64_t predicted_period_ns,
+                             int64_t display_time_ns,
+                             int64_t cpu_est_ns,
+                             int64_t draw_est_ns,
+                             int64_t gpu_est_ns,
+                             int64_t cpu_actual_ns,
+                             int64_t draw_actual_ns,
+                             int64_t gpu_actual_ns)
+{
+	FILE *file = macos_app_pacing_trace_get();
+	if (file == NULL) {
+		return;
+	}
+	flockfile(file);
+	fprintf(file,
+	        "%s,%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64
+	        ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "\n",
+	        event, session_id, frame_id, event_ns, wake_ns, predicted_display_ns, predicted_period_ns, display_time_ns,
+	        cpu_est_ns, draw_est_ns, gpu_est_ns, cpu_actual_ns, draw_actual_ns, gpu_actual_ns);
+	g_macos_app_pacing_trace_rows++;
+	if (g_macos_app_pacing_trace_rows % 512 == 0) {
+		fflush(file);
+	}
+	funlockfile(file);
+}
+#else
+#define macos_app_pacing_trace_event(...) ((void)0)
+#endif
 
 enum u_pa_state
 {
@@ -538,6 +642,11 @@ pa_predict(struct u_pacing_app *upa,
 	f->predicted_display_period_ns = app_period_ns;
 	f->when.predicted_ns = now_ns;
 
+	macos_app_pacing_trace_event("predict", pa->session_id, frame_id, now_ns,
+	                             wake_up_time_ns, predict_ns, app_period_ns, 0,
+	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns,
+	                             0, 0, 0);
+
 #ifdef U_TRACE_TRACY // Uses Tracy specific things.
 	TracyCPlot("App time(ms)", time_ns_to_ms_f(total_app_time_ns(pa)));
 #endif
@@ -620,6 +729,14 @@ pa_mark_delivered(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns, i
 	f->when.delivered_ns = when_ns;
 	f->display_time_ns = display_time_ns;
 	f->state = U_RT_DELIVERED;
+
+	int64_t cpu_actual_ns = f->when.begin_ns - f->when.wait_woke_ns;
+	int64_t draw_actual_ns = f->when.delivered_ns - f->when.begin_ns;
+	macos_app_pacing_trace_event("delivered", pa->session_id, frame_id, when_ns,
+	                             f->predicted_wake_up_time_ns, f->predicted_display_time_ns,
+	                             f->predicted_display_period_ns, display_time_ns,
+	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns,
+	                             cpu_actual_ns, draw_actual_ns, 0);
 }
 
 static void
@@ -670,6 +787,12 @@ pa_mark_gpu_done(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns)
 	do_iir_filter(&pa->app.cpu_time_ns, IIR_ALPHA_LT, IIR_ALPHA_GT, diff_cpu_ns);
 	do_iir_filter(&pa->app.draw_time_ns, IIR_ALPHA_LT, IIR_ALPHA_GT, diff_draw_ns);
 	do_iir_filter(&pa->app.gpu_time_ns, IIR_ALPHA_LT, IIR_ALPHA_GT, diff_gpu_ns);
+
+	macos_app_pacing_trace_event("gpu_done", pa->session_id, frame_id, when_ns,
+	                             f->predicted_wake_up_time_ns, f->predicted_display_time_ns,
+	                             f->predicted_display_period_ns, f->display_time_ns,
+	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns,
+	                             diff_cpu_ns, diff_draw_ns, diff_gpu_ns);
 
 	// Write out metrics and tracing data.
 	do_metrics(pa, f, false);
