@@ -68,6 +68,7 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_R
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_reprojection_trace, "XRT_MACOS_REPROJECTION_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(renderer_depth_reprojection, "XRT_COMPOSITOR_DEPTH_REPROJECTION", true)
 #endif
 DEBUG_GET_ONCE_BOOL_OPTION(macos_skip_blocking_gpu_timestamps, "XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_defer_gpu_timestamps, "XRT_MACOS_DEFER_GPU_TIMESTAMPS", true)
@@ -154,6 +155,9 @@ struct comp_renderer
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	FILE *reprojection_trace;
 	uint64_t reprojection_trace_rows;
+	FILE *depth_gpu_trace;
+	uint64_t depth_gpu_trace_rows;
+	bool fenced_depth_reprojection_active;
 	bool reprojection_prev_source_valid;
 	int64_t reprojection_prev_layer_timestamp_ns;
 	uint32_t reprojection_prev_image_index[2];
@@ -300,6 +304,47 @@ renderer_reprojection_trace_close(struct comp_renderer *r)
 	fflush(r->reprojection_trace);
 	fclose(r->reprojection_trace);
 	r->reprojection_trace = NULL;
+}
+
+static void
+renderer_depth_gpu_trace_open(struct comp_renderer *r)
+{
+	if (!renderer_reprojection_trace_enabled()) {
+		return;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_depth_gpu.csv", dir, separator, (int)getpid());
+
+	r->depth_gpu_trace = fopen(path, "w");
+	if (r->depth_gpu_trace == NULL) {
+		COMP_WARN(r->c, "Could not open macOS depth GPU trace '%s'", path);
+		return;
+	}
+
+	setvbuf(r->depth_gpu_trace, NULL, _IOFBF, 64 * 1024);
+	fputs("system_frame_id,depth_reprojection_active,gpu_start_ns,gpu_end_ns,gpu_duration_ns\n",
+	      r->depth_gpu_trace);
+	fflush(r->depth_gpu_trace);
+	COMP_INFO(r->c, "macOS depth GPU trace enabled: %s", path);
+}
+
+static void
+renderer_depth_gpu_trace_close(struct comp_renderer *r)
+{
+	if (r->depth_gpu_trace == NULL) {
+		return;
+	}
+	fflush(r->depth_gpu_trace);
+	fclose(r->depth_gpu_trace);
+	r->depth_gpu_trace = NULL;
 }
 
 static const struct comp_layer *
@@ -1135,6 +1180,7 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_open(r);
 	renderer_reprojection_trace_open(r);
+	renderer_depth_gpu_trace_open(r);
 #endif
 	int64_t desired_offset_us = 0;
 	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
@@ -1220,6 +1266,22 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 		if (render_resources_get_timestamps(&r->c->nr, &gpu_start_ns, &gpu_end_ns)) {
 			uint64_t now_ns = os_monotonic_get_ns();
 			comp_target_info_gpu(r->c->target, (uint64_t)r->fenced_frame_id, gpu_start_ns, gpu_end_ns, now_ns);
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+			if (r->depth_gpu_trace != NULL) {
+				uint64_t gpu_duration_ns = gpu_end_ns >= gpu_start_ns ? gpu_end_ns - gpu_start_ns : 0;
+				fprintf(r->depth_gpu_trace,
+				        "%lld,%d,%llu,%llu,%llu\n",
+				        (long long)r->fenced_frame_id,
+				        r->fenced_depth_reprojection_active ? 1 : 0,
+				        (unsigned long long)gpu_start_ns,
+				        (unsigned long long)gpu_end_ns,
+				        (unsigned long long)gpu_duration_ns);
+				r->depth_gpu_trace_rows++;
+				if ((r->depth_gpu_trace_rows % 240) == 0) {
+					fflush(r->depth_gpu_trace);
+				}
+			}
+#endif
 		}
 	}
 
@@ -1502,6 +1564,7 @@ renderer_fini(struct comp_renderer *r)
 	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_close(r);
 	renderer_reprojection_trace_close(r);
+	renderer_depth_gpu_trace_close(r);
 #endif
 #endif
 
@@ -1595,6 +1658,11 @@ dispatch_graphics(struct comp_renderer *r,
 
 	// Everything is ready, submit to the queue.
 	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	if (ret == VK_SUCCESS) {
+		r->fenced_depth_reprojection_active = false;
+	}
+#endif
 	VK_CHK_AND_RET(ret, "renderer_submit_queue");
 
 	return ret;
@@ -1721,7 +1789,17 @@ dispatch_compute(struct comp_renderer *r,
 	    target_viewport_datas);          //
 
 	// Everything is ready, submit to the queue.
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	const bool depth_reprojection_active =
+	    frame_state->data.fast_path && frame_state->data.do_timewarp && layer_count > 0 &&
+	    layers[0].data.type == XRT_LAYER_PROJECTION_DEPTH && debug_get_bool_option_renderer_depth_reprojection();
+#endif
 	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	if (ret == VK_SUCCESS) {
+		r->fenced_depth_reprojection_active = depth_reprojection_active;
+	}
+#endif
 	VK_CHK_AND_RET(ret, "renderer_submit_queue");
 
 	return ret;
