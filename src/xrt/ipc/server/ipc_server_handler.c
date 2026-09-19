@@ -11,6 +11,7 @@
  */
 
 #include <inttypes.h>
+#include <stddef.h>
 #include "util/u_misc.h"
 #include "util/u_handles.h"
 #include "util/u_pretty_print.h"
@@ -1585,31 +1586,80 @@ ipc_handle_compositor_layer_sync(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
-ipc_handle_compositor_layer_sync_copy(volatile struct ipc_client_state *ics,
-                                      const struct ipc_layer_slot *slot,
-                                      uint32_t *out_free_slot_id)
+ipc_handle_compositor_layer_copy_chunk(volatile struct ipc_client_state *ics,
+                                       uint32_t offset,
+                                       uint32_t total_size,
+                                       const struct ipc_layer_copy_chunk *chunk)
 {
 	IPC_TRACE_MARKER();
 
-	if (ics == NULL || slot == NULL || out_free_slot_id == NULL) {
+	if (ics == NULL || chunk == NULL || chunk->size == 0 || chunk->size > IPC_LAYER_COPY_CHUNK_SIZE) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	if (total_size == 0 || total_size > sizeof(struct ipc_layer_slot)) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	if (offset == 0) {
+		memset((void *)&ics->wine_layer_slot_upload, 0, sizeof(ics->wine_layer_slot_upload));
+		ics->wine_layer_slot_received = 0;
+		ics->wine_layer_slot_total_size = total_size;
+	}
+	if (ics->wine_layer_slot_total_size != total_size || offset != ics->wine_layer_slot_received) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	if ((size_t)offset + chunk->size > total_size) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	memcpy(((uint8_t *)(void *)&ics->wine_layer_slot_upload) + offset, chunk->data, chunk->size);
+	ics->wine_layer_slot_received += chunk->size;
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_handle_compositor_layer_sync_copy_commit(volatile struct ipc_client_state *ics,
+                                             uint32_t total_size,
+                                             uint32_t *out_free_slot_id)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics == NULL || out_free_slot_id == NULL) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 	if (ics->xc == NULL) {
 		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
 	}
+	if (total_size != ics->wine_layer_slot_total_size || total_size != ics->wine_layer_slot_received) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct ipc_layer_slot *slot = (struct ipc_layer_slot *)(void *)&ics->wine_layer_slot_upload;
 	if (slot->layer_count > IPC_MAX_LAYERS) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
-	struct ipc_layer_slot copy = *slot;
-	xrt_comp_layer_begin(ics->xc, &copy.data);
-	if (!_update_layers(ics, ics->xc, &copy)) {
+	const size_t expected_size =
+	    offsetof(struct ipc_layer_slot, layers) + ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
+	if ((size_t)total_size != expected_size) {
+		IPC_ERROR(ics->server,
+		          "Wine layer wire-layout mismatch: received=%u expected_native=%zu layers=%u",
+		          total_size,
+		          expected_size,
+		          slot->layer_count);
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	xrt_comp_layer_begin(ics->xc, &slot->data);
+	if (!_update_layers(ics, ics->xc, slot)) {
 		return XRT_ERROR_IPC_FAILURE;
 	}
 	xrt_result_t xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
+
+	ics->wine_layer_slot_received = 0;
+	ics->wine_layer_slot_total_size = 0;
 
 	os_mutex_lock(&ics->server->global_state.lock);
 	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
