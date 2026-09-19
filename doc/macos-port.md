@@ -74,11 +74,32 @@ DYLD_LIBRARY_PATH=/path/to/OpenXR-SDK-build/src/loader \
   /path/to/OpenXR-SDK-build/src/tests/hello_xr/hello_xr -g Metal -s Local -v
 ```
 
-On Apple platforms the runtime does not currently advertise
-`XR_KHR_composition_layer_depth`, because the IOSurface-backed Metal client
-swapchains do not support depth/stencil pixel formats. The Metal client also
-waits for application command-queue completion when releasing an image to the
-separate Vulkan compositor.
+The macOS Metal client now advertises `XR_KHR_composition_layer_depth`.
+`MTLPixelFormatDepth32Float` and `MTLPixelFormatDepth16Unorm` swapchains are
+backed by MoltenVK `MTLTexture` objects exported directly with
+`VK_EXT_metal_objects`; they deliberately bypass IOSurface, which cannot back
+Metal depth/stencil textures.
+
+Projection-depth layers also have an experimental low-cost positional
+reprojection path in the compute compositor. The one-projection fast path stays
+in the existing distortion/timewarp dispatch: it samples depth once per output
+pixel at the central/green chromatic coordinate, reuses the existing rotational
+timewarp for orientation, and applies only the remaining scanout-time camera
+translation in source-view space. No intermediate image or extra full-frame
+dispatch is introduced. Set `XRT_COMPOSITOR_DEPTH_REPROJECTION=0` on the
+compositor/service process for an A/B comparison with the existing
+rotation-only timewarp.
+
+The native diagnostic app can create real OpenXR depth swapchains and submit
+`XrCompositionLayerDepthInfoKHR` with:
+
+```sh
+XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
+  ./build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --depth-layer
+```
+
+The Metal client also waits for application command-queue completion when
+releasing an image to the separate Vulkan compositor.
 
 With `tests_macos_runtime_probe` built, surface creation and a single compositor
 frame submission can be exercised directly:
