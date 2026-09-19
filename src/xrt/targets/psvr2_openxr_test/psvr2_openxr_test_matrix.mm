@@ -126,6 +126,7 @@ initialize_reprojection_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 	const simd_float4 mid_color = make_float4(1.0f, 0.38f, 0.18f, 1.0f);
 	const simd_float4 far_color = make_float4(0.15f, 0.82f, 1.0f, 1.0f);
 	const simd_float4 thin_color = make_float4(1.0f, 0.16f, 0.62f, 1.0f);
+	const simd_float4 volume_color = make_float4(0.72f, 0.42f, 0.96f, 1.0f);
 
 	// Continuous background at 6 m. The wall ensures a translated view reveals
 	// known background content instead of the swapchain clear colour.
@@ -142,17 +143,25 @@ initialize_reprojection_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 		}
 	}
 
-	// Three constant-angular-size foreground targets. Their different depths
-	// should produce clearly different translational parallax while remaining
-	// similarly easy to inspect visually.
+	// Three constant-angular-size foreground cards. Keep them almost planar so
+	// every surface needed for lateral reprojection is already present in the
+	// frozen source frame. The previous full cubes were a poor correctness test:
+	// lateral motion legitimately reveals side faces that a single-layer
+	// colour+depth frame never captured.
 	const std::array<float, 3> distances = {0.85f, 1.6f, 3.0f};
 	const std::array<float, 3> xs = {-0.42f, 0.0f, 0.58f};
 	const std::array<simd_float4, 3> colors = {near_color, mid_color, far_color};
 	for (size_t i = 0; i < distances.size(); ++i) {
 		const float size = comparison_target_size(distances[i], 7.0f);
 		add_world_box(scene, xs[i], -0.05f, distances[i],
-		              make_float3(size, size, size), colors[i]);
+		              make_float3(size, size, 0.008f), colors[i]);
 	}
+
+	// One deliberately volumetric control. This one is expected to become
+	// incomplete under sufficiently large frozen-frame translation because
+	// hidden side faces are absent from a single submitted depth layer.
+	add_world_box(scene, 0.95f, -0.62f, 1.8f,
+	              make_float3(0.18f, 0.18f, 0.18f), volume_color);
 
 	// One thin world-locked target is useful for revealing sub-pixel/edge
 	// disagreement, but unlike the old magenta cross it does not move with the
@@ -162,7 +171,8 @@ initialize_reprojection_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 
 	scene.initialized = true;
 	fprintf(stderr,
-	        "psvr2-openxr-test: minimal frozen-frame reprojection scene contains %zu world-locked boxes\n",
+	        "psvr2-openxr-test: minimal frozen-frame reprojection scene contains %zu world-locked boxes "
+	        "(green/orange/cyan=planar cards, purple=volumetric control)\n",
 	        scene.world_instances.size());
 }
 
