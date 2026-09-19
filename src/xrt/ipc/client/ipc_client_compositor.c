@@ -259,6 +259,52 @@ ipc_client_compositor_semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
 }
 
 
+xrt_result_t
+ipc_client_compositor_import_metal_bootstrap_semaphore(
+    struct xrt_compositor_native *xcn,
+    const char *bootstrap_name,
+    struct xrt_compositor_semaphore **out_xcsem)
+{
+	if (xcn == NULL || bootstrap_name == NULL || bootstrap_name[0] == '\0' || out_xcsem == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	*out_xcsem = NULL;
+
+	struct ipc_client_compositor *icc = ipc_client_compositor(&xcn->base);
+	if (!icc->ipc_c->imc.stream_socket) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+
+	size_t len = strlen(bootstrap_name);
+	if (len >= IPC_METAL_BOOTSTRAP_NAME_SIZE) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct ipc_metal_bootstrap_name bootstrap = {0};
+	memcpy(bootstrap.name, bootstrap_name, len + 1);
+
+	uint32_t id = 0;
+	xrt_result_t xret =
+	    ipc_call_compositor_semaphore_import_metal_bootstrap(icc->ipc_c, &bootstrap, &id);
+	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_compositor_semaphore_import_metal_bootstrap");
+
+	struct ipc_client_compositor_semaphore *iccs =
+	    U_TYPED_CALLOC(struct ipc_client_compositor_semaphore);
+	if (iccs == NULL) {
+		(void)ipc_call_compositor_semaphore_destroy(icc->ipc_c, id);
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	iccs->base.reference.count = 1;
+	iccs->base.wait = ipc_client_compositor_semaphore_wait;
+	iccs->base.destroy = ipc_client_compositor_semaphore_destroy;
+	iccs->id = id;
+	iccs->icc = icc;
+
+	*out_xcsem = &iccs->base;
+	return XRT_SUCCESS;
+}
+
 /*
  *
  * Compositor functions.
