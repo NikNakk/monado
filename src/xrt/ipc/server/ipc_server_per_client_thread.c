@@ -293,12 +293,26 @@ client_loop(volatile struct ipc_client_state *ics)
 			break;
 		}
 
-		// Read the whole command now that we know its size
+		// Read the whole command now that we know its size. Unix-domain
+		// sockets commonly return the complete small write in one recv(), but
+		// the Wine bridge is a TCP stream and may split a request arbitrarily.
 		uint8_t buf[IPC_BUF_SIZE] = {0};
-
-		len = recv(ics->imc.ipc_handle, &buf, cmd_size, 0);
-		if (len != (ssize_t)cmd_size) {
-			IPC_ERROR(ics->server, "Invalid packet received, disconnecting client.");
+		size_t received = 0;
+		while (received < cmd_size) {
+			len = recv(ics->imc.ipc_handle, buf + received, cmd_size - received, 0);
+			if (len < 0 && errno == EINTR) {
+				continue;
+			}
+			if (len <= 0) {
+				break;
+			}
+			received += (size_t)len;
+		}
+		if (received != cmd_size) {
+			IPC_ERROR(ics->server,
+			          "Invalid/short packet received (%zu/%zu bytes), disconnecting client.",
+			          received,
+			          cmd_size);
 			break;
 		}
 
