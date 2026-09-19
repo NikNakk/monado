@@ -45,6 +45,16 @@
 		]
 	},
 
+	"swapchain_import_iosurface": {
+		"in": [
+			{"name": "info", "type": "struct xrt_swapchain_create_info"},
+			{"name": "args", "type": "struct ipc_arg_swapchain_iosurface"}
+		],
+		"out": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	},
+
 	"swapchain_wait_image": {
 		"in": [
 			{"name": "id", "type": "uint32_t"},
