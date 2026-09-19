@@ -11,6 +11,7 @@ set(SHADERS
     clear.comp
     distortion.comp
     depth_visibility.comp
+    depth_visibility_clear.comp
     layer.comp
     mesh.frag
     mesh.vert
