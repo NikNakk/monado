@@ -24,6 +24,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_identity, "XRT_COMPOSITOR_FORCE_TIMEWA
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_PRETRANSFORM_IDENTITY", false)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_reprojection, "XRT_COMPOSITOR_DEPTH_REPROJECTION", true)
 DEBUG_GET_ONCE_NUM_OPTION(depth_reprojection_debug, "XRT_COMPOSITOR_DEPTH_DEBUG", 0)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_disocclusion_fill, "XRT_COMPOSITOR_DEPTH_DISOCCLUSION_FILL", true)
 
 /*
  *
@@ -923,7 +924,9 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 		depth_debug_mode = 0;
 	}
 	data->depth_debug.value = (uint32_t)depth_debug_mode;
-	data->depth_debug.padding0 = 0;
+	// Reuse the std140 padding lane as a compact runtime control consumed by
+	// the shader: 1 enables background-biased handling of A<->B depth cycles.
+	data->depth_debug.padding0 = debug_get_bool_option_depth_disocclusion_fill() ? 1u : 0u;
 	data->depth_debug.padding1 = 0;
 	data->depth_debug.padding2 = 0;
 
