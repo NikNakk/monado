@@ -1402,6 +1402,16 @@ struct render_compute_distortion_ubo_data
 		uint32_t padding1;
 		uint32_t padding2;
 	} has_depth[XRT_MAX_VIEWS];
+	// Debug visualization for the projection-depth fast path.
+	// 0=normal, 1=linearized depth, 2=surface-switch mask,
+	// 3=first-to-refined UV displacement heatmap.
+	struct
+	{
+		uint32_t value;
+		uint32_t padding0;
+		uint32_t padding1;
+		uint32_t padding2;
+	} depth_debug;
 };
 
 /*!
