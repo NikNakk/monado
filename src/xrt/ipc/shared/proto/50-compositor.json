@@ -61,6 +61,17 @@
 		]
 	},
 
+	"compositor_layer_sync_single_semaphore": {
+		"in": [
+			{"name": "payload", "type": "struct ipc_layer_single_payload"},
+			{"name": "semaphore_id", "type": "uint32_t"},
+			{"name": "semaphore_value", "type": "uint64_t"}
+		],
+		"out": [
+			{"name": "free_slot_id", "type": "uint32_t"}
+		]
+	},
+
 	"compositor_layer_copy_chunk": {
 		"in": [
 			{"name": "offset", "type": "uint32_t"},
@@ -72,6 +83,17 @@
 	"compositor_layer_sync_copy_commit": {
 		"in": [
 			{"name": "total_size", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "free_slot_id", "type": "uint32_t"}
+		]
+	},
+
+	"compositor_layer_sync_copy_commit_semaphore": {
+		"in": [
+			{"name": "total_size", "type": "uint32_t"},
+			{"name": "semaphore_id", "type": "uint32_t"},
+			{"name": "semaphore_value", "type": "uint64_t"}
 		],
 		"out": [
 			{"name": "free_slot_id", "type": "uint32_t"}
