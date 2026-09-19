@@ -1695,6 +1695,59 @@ ipc_handle_compositor_layer_sync_single_semaphore(volatile struct ipc_client_sta
 }
 
 xrt_result_t
+ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_client_state *ics,
+                                                        const struct ipc_layer_single_payload *payload,
+                                                        uint32_t semaphore_id,
+                                                        uint64_t semaphore_value)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics == NULL || payload == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	if (ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	if (semaphore_id >= IPC_MAX_CLIENT_SEMAPHORES || ics->xcsems[semaphore_id] == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	if (payload->size == 0 || payload->size > IPC_LAYER_SINGLE_PAYLOAD_SIZE ||
+	    payload->size > sizeof(struct ipc_layer_slot)) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct ipc_layer_slot slot = {0};
+	memcpy(&slot, payload->data, payload->size);
+	if (slot.layer_count != 1) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	const size_t expected_size =
+	    offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
+	if ((size_t)payload->size != expected_size) {
+		IPC_ERROR(ics->server,
+		          "Wine async single-layer semaphore wire-layout mismatch: received=%u expected_native=%zu",
+		          payload->size,
+		          expected_size);
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	xrt_comp_layer_begin(ics->xc, &slot.data);
+	if (!_update_layers(ics, ics->xc, &slot)) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	/*
+	 * No IPC reply is sent for this command. The TCP stream itself preserves
+	 * ordering, and Wine copied the complete active layer into this request,
+	 * so there is no shared-memory slot to return to the client. If the native
+	 * compositor needs time here, the next synchronous request (normally
+	 * wait_frame) naturally queues behind it instead of stalling xrEndFrame.
+	 */
+	return xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
+}
+
+xrt_result_t
 ipc_handle_compositor_layer_copy_chunk(volatile struct ipc_client_state *ics,
                                        uint32_t offset,
                                        uint32_t total_size,
