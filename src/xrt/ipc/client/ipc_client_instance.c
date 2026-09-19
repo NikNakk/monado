@@ -136,7 +136,14 @@ ipc_client_instance_is_system_available(struct xrt_instance *xinst, bool *out_av
 {
 	struct ipc_client_instance *ii = ipc_client_instance(xinst);
 	xrt_result_t xret = ipc_call_instance_is_system_available(&ii->ipc_c, out_available);
-	IPC_CHK_ALWAYS_RET(&ii->ipc_c, xret, "ipc_call_instance_is_system_available");
+	IPC_CHK_AND_RET(&ii->ipc_c, xret, "ipc_call_instance_is_system_available");
+
+	if (*out_available) {
+		xret = ipc_client_connection_refresh_shm_copy(&ii->ipc_c);
+		IPC_CHK_ALWAYS_RET(&ii->ipc_c, xret, "ipc_client_connection_refresh_shm_copy");
+	}
+
+	return XRT_SUCCESS;
 }
 
 static xrt_result_t
