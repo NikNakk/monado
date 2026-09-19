@@ -145,6 +145,15 @@
 		"out_handles": {"type": "xrt_graphics_sync_handle_t"}
 	},
 
+	"compositor_semaphore_import_metal_bootstrap": {
+		"in": [
+			{"name": "bootstrap", "type": "struct ipc_metal_bootstrap_name"}
+		],
+		"out": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	},
+
 	"compositor_semaphore_create_metal": {
 		"out": [
 			{"name": "id", "type": "uint32_t"},
