@@ -1572,6 +1572,41 @@ ipc_handle_compositor_layer_sync(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_compositor_layer_sync_copy(volatile struct ipc_client_state *ics,
+                                      const struct ipc_layer_slot *slot,
+                                      uint32_t *out_free_slot_id)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics == NULL || slot == NULL || out_free_slot_id == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	if (ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	if (slot->layer_count > IPC_MAX_LAYERS) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct ipc_layer_slot copy = *slot;
+	xrt_comp_layer_begin(ics->xc, &copy.data);
+	if (!_update_layers(ics, ics->xc, &copy)) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	xrt_result_t xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	os_mutex_lock(&ics->server->global_state.lock);
+	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
+	ics->server->current_slot_index = *out_free_slot_id;
+	os_mutex_unlock(&ics->server->global_state.lock);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_handle_compositor_layer_sync_with_semaphore(volatile struct ipc_client_state *ics,
                                                 uint32_t slot_id,
                                                 uint32_t semaphore_id,
