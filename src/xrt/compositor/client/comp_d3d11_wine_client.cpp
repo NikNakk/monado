@@ -15,7 +15,6 @@
 
 #include "util/u_logging.h"
 #include "util/u_misc.h"
-#include "xrt/xrt_vulkan_includes.h"
 
 #include <d3d11_4.h>
 #include <dxgi1_2.h>
@@ -72,14 +71,27 @@ native_swapchain(struct xrt_swapchain *xsc)
 	return as_swapchain(xsc)->native;
 }
 
+/*
+ * Vulkan wire-format values used by native Monado. Keep the PE client free of
+ * a Vulkan loader/runtime dependency: these four VkFormat values are stable
+ * API enum values from the Vulkan specification.
+ */
+enum wine_bridge_vk_format
+{
+	WINE_VK_FORMAT_R8G8B8A8_UNORM = 37,
+	WINE_VK_FORMAT_R8G8B8A8_SRGB = 43,
+	WINE_VK_FORMAT_B8G8R8A8_UNORM = 44,
+	WINE_VK_FORMAT_B8G8R8A8_SRGB = 50,
+};
+
 static int64_t
 dxgi_to_vk(DXGI_FORMAT format)
 {
 	switch (format) {
-	case DXGI_FORMAT_B8G8R8A8_UNORM: return VK_FORMAT_B8G8R8A8_UNORM;
-	case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return VK_FORMAT_B8G8R8A8_SRGB;
-	case DXGI_FORMAT_R8G8B8A8_UNORM: return VK_FORMAT_R8G8B8A8_UNORM;
-	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return VK_FORMAT_R8G8B8A8_SRGB;
+	case DXGI_FORMAT_B8G8R8A8_UNORM: return WINE_VK_FORMAT_B8G8R8A8_UNORM;
+	case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return WINE_VK_FORMAT_B8G8R8A8_SRGB;
+	case DXGI_FORMAT_R8G8B8A8_UNORM: return WINE_VK_FORMAT_R8G8B8A8_UNORM;
+	case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return WINE_VK_FORMAT_R8G8B8A8_SRGB;
 	default: return 0;
 	}
 }
@@ -87,11 +99,11 @@ dxgi_to_vk(DXGI_FORMAT format)
 static DXGI_FORMAT
 vk_to_dxgi(int64_t format)
 {
-	switch ((VkFormat)format) {
-	case VK_FORMAT_B8G8R8A8_UNORM: return DXGI_FORMAT_B8G8R8A8_UNORM;
-	case VK_FORMAT_B8G8R8A8_SRGB: return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
-	case VK_FORMAT_R8G8B8A8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
-	case VK_FORMAT_R8G8B8A8_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+	switch (format) {
+	case WINE_VK_FORMAT_B8G8R8A8_UNORM: return DXGI_FORMAT_B8G8R8A8_UNORM;
+	case WINE_VK_FORMAT_B8G8R8A8_SRGB: return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+	case WINE_VK_FORMAT_R8G8B8A8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM;
+	case WINE_VK_FORMAT_R8G8B8A8_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
 	default: return DXGI_FORMAT_UNKNOWN;
 	}
 }
