@@ -456,7 +456,11 @@ signal_producer(struct client_d3d11_compositor *c, uint64_t *out_value)
 	if (FAILED(hr)) {
 		return XRT_ERROR_D3D11;
 	}
-	c->context->Flush();
+	/*
+	 * DXMT's immediate-context Signal() already invalidates the current pass,
+	 * enqueues the MTLSharedEvent signal, and calls Flush() itself. A second
+	 * Flush() here needlessly commits an empty/next chunk every frame.
+	 */
 	if (out_value != NULL) {
 		*out_value = value;
 	}
