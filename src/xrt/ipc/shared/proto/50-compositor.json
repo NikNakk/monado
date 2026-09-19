@@ -52,9 +52,17 @@
 		]
 	},
 
-	"compositor_layer_sync_copy": {
+	"compositor_layer_copy_chunk": {
 		"in": [
-			{"name": "slot", "type": "struct ipc_layer_slot"}
+			{"name": "offset", "type": "uint32_t"},
+			{"name": "total_size", "type": "uint32_t"},
+			{"name": "chunk", "type": "struct ipc_layer_copy_chunk"}
+		]
+	},
+
+	"compositor_layer_sync_copy_commit": {
+		"in": [
+			{"name": "total_size", "type": "uint32_t"}
 		],
 		"out": [
 			{"name": "free_slot_id", "type": "uint32_t"}
