@@ -334,23 +334,21 @@ do_cs_equirect2_layer(const struct comp_layer *layer,
 }
 
 static inline void
-calc_source_to_new_view_matrix(const struct xrt_pose *source_pose,
+calc_new_to_source_view_matrix(const struct xrt_pose *source_pose,
                                const struct xrt_pose *new_pose,
                                struct xrt_matrix_4x4 *out_matrix)
 {
 	const struct xrt_vec3 unit_scale = {1.0f, 1.0f, 1.0f};
 
-	// OpenXR view poses are view-to-world transforms. Convert the destination
-	// pose to a world-to-view matrix and compose it with the submitted source
-	// view-to-world transform. The result maps source-view points directly into
-	// the view coordinates used at scanout begin.
-	struct xrt_matrix_4x4 source_to_world;
+	// OpenXR view poses are view-to-world transforms. Compose the scanout-begin
+	// view-to-world transform with the submitted source world-to-view transform.
+	// The result maps a ray/point in the new view directly into source-view
+	// coordinates, including the translational component needed for parallax.
 	struct xrt_matrix_4x4 new_to_world;
-	struct xrt_matrix_4x4 world_to_new;
-	math_matrix_4x4_model(source_pose, &unit_scale, &source_to_world);
+	struct xrt_matrix_4x4 world_to_source;
 	math_matrix_4x4_model(new_pose, &unit_scale, &new_to_world);
-	math_matrix_4x4_inverse(&new_to_world, &world_to_new);
-	math_matrix_4x4_multiply(&world_to_new, &source_to_world, out_matrix);
+	math_matrix_4x4_view_from_pose(source_pose, &world_to_source);
+	math_matrix_4x4_multiply(&world_to_source, &new_to_world, out_matrix);
 }
 
 /// Data setup for a projection layer
@@ -386,6 +384,8 @@ do_cs_projection_layer(const struct comp_layer *layer,
 	src_samplers[cur_image] = clamp_to_border_black;
 	src_image_views[cur_image] = get_image_view(image, layer_data->flags, array_index);
 	ubo_data->layers[cur_layer + 0].image_info.color_image_index = cur_image++;
+	ubo_data->layers[cur_layer].image_info.depth_image_index = 0;
+	ubo_data->layers[cur_layer].image_info.has_depth = 0;
 
 	// Depth
 	if (layer_data->type == XRT_LAYER_PROJECTION_DEPTH) {
@@ -396,14 +396,21 @@ do_cs_projection_layer(const struct comp_layer *layer,
 		src_samplers[cur_image] = clamp_to_edge; // Edge to keep depth stable at edges.
 		src_image_views[cur_image] = get_image_view(d_image, layer_data->flags, d_array_index);
 		ubo_data->layers[cur_layer + 0].image_info.depth_image_index = cur_image++;
+		ubo_data->layers[cur_layer].image_info.has_depth = 1;
 
 		ubo_data->layers[cur_layer].projection_depth.min_depth = dvd->min_depth;
 		ubo_data->layers[cur_layer].projection_depth.max_depth = dvd->max_depth;
 		ubo_data->layers[cur_layer].projection_depth.near_z = dvd->near_z;
 		ubo_data->layers[cur_layer].projection_depth.far_z = dvd->far_z;
 
-		calc_source_to_new_view_matrix(
-		    &vd->pose, world_pose_scanout_begin, &ubo_data->layers[cur_layer].projection_source_to_new_view);
+		set_post_transform_rect(layer_data,
+		                        &dvd->sub.norm_rect,
+		                        false,
+		                        &ubo_data->layers[cur_layer].projection_depth_post_transform);
+		render_calc_uv_to_tangent_lengths_rect(&vd->fov,
+		                                       &ubo_data->layers[cur_layer].projection_source_uv_to_tanangle);
+		calc_new_to_source_view_matrix(
+		    &vd->pose, world_pose_scanout_begin, &ubo_data->layers[cur_layer].projection_new_to_source_view);
 	}
 
 	set_post_transform_rect(                           //

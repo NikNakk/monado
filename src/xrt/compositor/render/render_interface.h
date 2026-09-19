@@ -1257,10 +1257,8 @@ struct render_compute_layer_ubo_data
 		{
 			uint32_t color_image_index;
 			uint32_t depth_image_index;
-
-			//! @todo Implement separated samplers and images (and change to samplers[2])
+			uint32_t has_depth;
 			uint32_t _padding0;
-			uint32_t _padding1;
 		} image_info;
 
 		//! Shared between cylinder and equirect2.
@@ -1313,13 +1311,19 @@ struct render_compute_layer_ubo_data
 			float far_z;
 		} projection_depth;
 
+		//! Subimage transform for the depth image, which may differ from color.
+		struct xrt_normalized_rect projection_depth_post_transform;
+
+		//! Source projection UV [0,1] to source tangent-plane coordinates.
+		struct xrt_normalized_rect projection_source_uv_to_tanangle;
+
 		/*!
-		 * Full rigid transform from the application's submitted source-view
-		 * coordinates into the scanout-begin view coordinates. Unlike the
-		 * existing timewarp matrix this preserves translation as well as
-		 * rotation, ready for depth-aware positional reprojection.
+		 * Full rigid transform from scanout-begin view coordinates into the
+		 * application's submitted source-view coordinates. This preserves
+		 * translation as well as rotation and lets the shader solve the source
+		 * ray/depth intersection in a single pass.
 		 */
-		struct xrt_matrix_4x4 projection_source_to_new_view;
+		struct xrt_matrix_4x4 projection_new_to_source_view;
 
 		/*!
 		 * For quad layers

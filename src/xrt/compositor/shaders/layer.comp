@@ -28,10 +28,10 @@ struct image_info
 {
 	uint color_image_index;
 	uint depth_image_index;
+	uint has_depth;
 
 	// This struct is used in an array, gets padded to vec4.
 	uint _padding0;
-	uint _padding1;
 };
 
 
@@ -78,10 +78,11 @@ struct Layer {
 	// XrCompositionLayerDepthInfoKHR values: minDepth, maxDepth, nearZ, farZ.
 	vec4 projection_depth;
 
-	// Full source-view -> scanout-begin-view rigid transform. This is kept
-	// separate from the existing projection/timewarp matrix so depth-aware
-	// reprojection can use metric translation without adding another pass.
-	mat4 projection_source_to_new_view;
+	// Depth subimage mapping, source UV-to-tangent mapping, and full rigid
+	// scanout-begin-view -> submitted-source-view transform.
+	vec4 projection_depth_post_transform;
+	vec4 projection_source_uv_to_tanangle;
+	mat4 projection_new_to_source_view;
 
 
 	// for quad layers
@@ -136,7 +137,7 @@ vec2 transform_uv_subimage(vec2 uv, uint layer)
 	return values.xy;
 }
 
-vec2 transform_uv_timewarp(vec2 uv, uint layer)
+vec2 transform_uv_timewarp_projection(vec2 uv, uint layer)
 {
 	vec4 values = vec4(uv, -1, 1);
 
@@ -144,18 +145,19 @@ vec2 transform_uv_timewarp(vec2 uv, uint layer)
 	values.xy = fma(values.xy, ubo.pre_transform.zw, ubo.pre_transform.xy);
 	values.y = -values.y; // Flip to OpenXR coordinate system.
 
-	// Timewarp.
+	// Existing rotation-only timewarp. Return projection UV before applying the
+	// color subimage transform so the same candidate can address the depth map.
 	values = LAYER.transform * values;
 	values.xy = values.xy * (1.0 / max(values.w, 0.00001));
 
-	// From [-1, 1] to [0, 1]
-	values.xy = values.xy * 0.5 + 0.5;
+	// From [-1, 1] to [0, 1].
+	return values.xy * 0.5 + 0.5;
+}
 
-	// To deal with OpenGL flip and sub image view.
-	values.xy = fma(values.xy, LAYER.post_transform.zw, LAYER.post_transform.xy);
-
-	// Done.
-	return values.xy;
+vec2 transform_uv_timewarp(vec2 uv, uint layer)
+{
+	vec2 projection_uv = transform_uv_timewarp_projection(uv, layer);
+	return fma(projection_uv, LAYER.post_transform.zw, LAYER.post_transform.xy);
 }
 
 vec2 transform_uv(vec2 uv, uint layer)
@@ -371,17 +373,100 @@ vec4 do_equirect2(vec2 view_uv, uint layer)
 	return out_color;
 }
 
+float projection_depth_to_view_z_distance(float window_depth, vec4 depth_info)
+{
+	const float min_depth = depth_info.x;
+	const float max_depth = depth_info.y;
+	const float near_z = depth_info.z;
+	const float far_z = depth_info.w;
+
+	const float range = max_depth - min_depth;
+	if (!(range > 0.0) || !(near_z > 0.0) || !(far_z > 0.0)) {
+		return 0.0;
+	}
+
+	// Perspective depth is linear in reciprocal view-space Z distance.
+	// This also naturally handles an infinite near/far value (1/inf -> 0)
+	// and the OpenXR reversed-depth convention where nearZ > farZ.
+	const float t = clamp((window_depth - min_depth) / range, 0.0, 1.0);
+	const float inverse_distance = mix(1.0 / near_z, 1.0 / far_z, t);
+	return inverse_distance > 1e-8 ? 1.0 / inverse_distance : 0.0;
+}
+
+vec2 transform_uv_projection_depth(vec2 view_uv, uint layer)
+{
+	// First obtain the source location from the existing rotation-only timewarp.
+	// For the small inter-frame translations expected at headset refresh rates,
+	// this is a good location at which to make the single depth lookup.
+	vec2 source_projection_uv = transform_uv_timewarp_projection(view_uv, layer);
+	vec2 fallback_uv = fma(source_projection_uv, LAYER.post_transform.zw, LAYER.post_transform.xy);
+
+	if (any(lessThan(source_projection_uv, vec2(0.0))) ||
+	    any(greaterThan(source_projection_uv, vec2(1.0)))) {
+		return fallback_uv;
+	}
+
+	vec2 depth_uv =
+	    fma(source_projection_uv, LAYER.projection_depth_post_transform.zw,
+	        LAYER.projection_depth_post_transform.xy);
+	float window_depth = texture(source[LAYER.image_info.depth_image_index], depth_uv).r;
+	float source_z_distance = projection_depth_to_view_z_distance(window_depth, LAYER.projection_depth);
+	if (!(source_z_distance > 0.0)) {
+		// Infinite-depth content has no translational parallax; the rotational
+		// result is therefore already the desired fallback.
+		return fallback_uv;
+	}
+
+	// Construct the output pixel's ray in scanout-begin view coordinates.
+	vec2 new_tan = fma(view_uv, ubo.pre_transform.zw, ubo.pre_transform.xy);
+	vec3 new_ray = vec3(new_tan.x, -new_tan.y, -1.0);
+
+	// Transform both the ray and its origin into the submitted source view.
+	vec3 source_origin = (LAYER.projection_new_to_source_view * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+	vec3 source_ray = (LAYER.projection_new_to_source_view * vec4(new_ray, 0.0)).xyz;
+	if (abs(source_ray.z) < 1e-6) {
+		return fallback_uv;
+	}
+
+	// The OpenXR depth value describes source-view Z, not Euclidean ray length.
+	// Intersect the transformed output ray with that source-Z plane.
+	float ray_scale = (-source_z_distance - source_origin.z) / source_ray.z;
+	if (!(ray_scale > 0.0)) {
+		return fallback_uv;
+	}
+
+	vec3 source_point = source_origin + source_ray * ray_scale;
+	float z_distance = -source_point.z;
+	if (!(z_distance > 1e-6)) {
+		return fallback_uv;
+	}
+
+	// Project the reconstructed source-view point back onto the source
+	// projection plane. The tangent rect uses image-space Y, hence the sign.
+	vec2 source_tan = vec2(source_point.x / z_distance, -source_point.y / z_distance);
+	vec2 tangent_extent = LAYER.projection_source_uv_to_tanangle.zw;
+	if (abs(tangent_extent.x) < 1e-6 || abs(tangent_extent.y) < 1e-6) {
+		return fallback_uv;
+	}
+
+	vec2 corrected_projection_uv =
+	    (source_tan - LAYER.projection_source_uv_to_tanangle.xy) / tangent_extent;
+
+	return fma(corrected_projection_uv, LAYER.post_transform.zw, LAYER.post_transform.xy);
+}
+
 vec4 do_projection(vec2 view_uv, uint layer)
 {
 	uint source_image_index = LAYER.image_info.color_image_index;
 
-	// Do any transformation needed.
-	vec2 uv = transform_uv(view_uv, layer);
+	vec2 uv;
+	if (do_timewarp && LAYER.image_info.has_depth != 0) {
+		uv = transform_uv_projection_depth(view_uv, layer);
+	} else {
+		uv = transform_uv(view_uv, layer);
+	}
 
-	// Sample the source.
-	vec4 colour = vec4(texture(source[source_image_index], uv).rgba);
-
-	return colour;
+	return vec4(texture(source[source_image_index], uv).rgba);
 }
 
 vec3 get_direction(vec2 uv)
