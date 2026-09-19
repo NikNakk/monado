@@ -32,6 +32,13 @@ struct ipc_message_channel
 	enum u_logging_level log_level;
 	bool frame_reads;
 	bool frame_writes;
+
+	/*
+	 * Windows normally uses named pipes. The Wine/macOS bridge instead uses a
+	 * loopback TCP socket stored in ipc_handle and sets this flag so the
+	 * Windows message-channel implementation uses Winsock send/recv.
+	 */
+	bool stream_socket;
 };
 
 /*!
