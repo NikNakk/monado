@@ -231,6 +231,15 @@ option(XRT_HAVE_TRACY "Enable Tracy support for tracing, make sure to set XRT_FE
 # normal Windows D3D implementation because that path depends on Microsoft WIL.
 option(XRT_FEATURE_WINE_D3D11_BRIDGE "Build the MinGW D3D11 OpenXR client for a native macOS Monado service" OFF)
 
+# The Wine/macOS bridge uses MinGW import libraries directly and deliberately
+# bypasses the normal WIL/Vulkan-backed Windows D3D client. Define these before
+# option_with_deps() so repeated CMake configuration sees the libraries, but do
+# not persist XRT_HAVE_DXGI/XRT_HAVE_D3D11 as forced cache values.
+if(XRT_FEATURE_WINE_D3D11_BRIDGE)
+	set(D3D11_LIBRARY d3d11)
+	set(DXGI_LIBRARY dxgi)
+endif()
+
 # Graphics deps to use (sorted in each group, groups thematic and ordered to handle internal deps: e.g. EGL and SDL2 need OpenGL/GLES)
 option_with_deps(XRT_HAVE_OPENGL "Enable OpenGL Graphics API support" DEPENDS OPENGL_WITHOUT_GLX_FOUND)
 option_with_deps(XRT_HAVE_OPENGL_GLX "Enable OpenGL Graphics API support on X11 (GLX)" DEPENDS XRT_HAVE_OPENGL OpenGL_GLX_FOUND)
@@ -248,18 +257,13 @@ option_with_deps(XRT_HAVE_D3D11 "Enable Direct3D 11 Graphics API support" DEPEND
 option_with_deps(XRT_HAVE_D3D12 "Enable Direct3D 12 Graphics API support" DEPENDS D3D12_LIBRARY XRT_HAVE_D3D11 XRT_HAVE_VULKAN XRT_HAVE_DXGI XRT_HAVE_WIL)
 
 if(XRT_FEATURE_WINE_D3D11_BRIDGE)
-	set(D3D11_LIBRARY d3d11)
-	set(DXGI_LIBRARY dxgi)
-
-	# option_with_deps() sets unavailable options to a normal parent-scope
-	# variable, which shadows any cache value. Override both for this explicit
-	# MinGW-only client path.
+	# The generic Monado D3D11 option is intentionally unavailable under MinGW
+	# because it requires WIL and Vulkan. This bridge has its own raw-COM D3D11
+	# implementation, so expose D3D11/DXGI to downstream CMake logic only as
+	# normal variables for this configure; never poison the cache.
 	set(XRT_HAVE_DXGI ON)
 	set(XRT_HAVE_D3D11 ON)
 	set(XRT_HAVE_D3D12 OFF)
-	set(XRT_HAVE_DXGI ON CACHE BOOL "Use DXGI APIs for the Wine bridge" FORCE)
-	set(XRT_HAVE_D3D11 ON CACHE BOOL "Enable Direct3D 11 for the Wine bridge" FORCE)
-	set(XRT_HAVE_D3D12 OFF CACHE BOOL "D3D12 is not part of the Wine bridge" FORCE)
 endif()
 
 option_with_deps(XRT_HAVE_WAYLAND "Enable Wayland support" DEPENDS WAYLAND_FOUND WAYLAND_SCANNER_FOUND WAYLAND_PROTOCOLS_FOUND LIBDRM_FOUND)
