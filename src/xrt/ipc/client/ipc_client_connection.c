@@ -39,6 +39,10 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#if defined(XRT_OS_WINDOWS)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
 #if !defined(XRT_OS_WINDOWS)
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -117,12 +121,12 @@ ipc_client_tcp_connect(struct ipc_connection *ipc_c, const char *port_text)
 		return false;
 	}
 
-	sockaddr_in addr = {};
+	struct sockaddr_in addr = {0};
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons((u_short)port);
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-	if (connect(sock, (sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+	if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
 		IPC_ERROR(ipc_c, "Wine bridge connect(127.0.0.1:%ld) failed: %d", port, WSAGetLastError());
 		closesocket(sock);
 		WSACleanup();
