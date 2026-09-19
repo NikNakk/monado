@@ -387,6 +387,56 @@ swapchain_server_import(struct ipc_client_compositor *icc,
 	return XRT_SUCCESS;
 }
 
+xrt_result_t
+ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
+                                           const struct xrt_swapchain_create_info *info,
+                                           uint32_t image_count,
+                                           const uint32_t *iosurface_ids,
+                                           struct xrt_swapchain **out_xsc)
+{
+	if (xcn == NULL || info == NULL || iosurface_ids == NULL || out_xsc == NULL || image_count == 0 ||
+	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct ipc_client_compositor *icc = ipc_client_compositor(&xcn->base);
+	if (!icc->ipc_c->imc.stream_socket) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+
+	struct ipc_arg_swapchain_iosurface args = {0};
+	args.image_count = image_count;
+	for (uint32_t i = 0; i < image_count; i++) {
+		if (iosurface_ids[i] == 0) {
+			return XRT_ERROR_INVALID_ARGUMENT;
+		}
+		args.ids[i] = iosurface_ids[i];
+	}
+
+	uint32_t id = 0;
+	xrt_result_t xret = ipc_call_swapchain_import_iosurface(icc->ipc_c, info, &args, &id);
+	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_swapchain_import_iosurface");
+
+	struct ipc_client_swapchain *ics = U_TYPED_CALLOC(struct ipc_client_swapchain);
+	if (ics == NULL) {
+		(void)ipc_call_swapchain_destroy(icc->ipc_c, id);
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	ics->base.base.image_count = image_count;
+	ics->base.base.wait_image = ipc_compositor_swapchain_wait_image;
+	ics->base.base.acquire_image = ipc_compositor_swapchain_acquire_image;
+	ics->base.base.release_image = ipc_compositor_swapchain_release_image;
+	ics->base.base.destroy = ipc_compositor_swapchain_destroy;
+	ics->base.base.reference.count = 1;
+	ics->base.limited_unique_id = u_limited_unique_id_get();
+	ics->icc = icc;
+	ics->id = id;
+
+	*out_xsc = &ics->base.base;
+	return XRT_SUCCESS;
+}
+
 static xrt_result_t
 swapchain_allocator_create(struct ipc_client_compositor *icc,
                            struct xrt_image_native_allocator *xina,
