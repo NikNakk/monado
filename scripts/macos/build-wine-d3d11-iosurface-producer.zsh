@@ -15,7 +15,7 @@ if [[ -z ${cxx} ]]; then
 fi
 
 mkdir -p "${out_dir}"
-"${cxx}" 	-std=c++17 	-O2 	-Wall 	-Wextra 	-Wpedantic 	-static-libgcc 	-static-libstdc++ 	-o "${output}" 	"${source_file}" 	-ld3d11 	-ldxgi 	-luuid
+"${cxx}" 	-std=c++17 	-O2 	-Wall 	-Wextra 	-Wpedantic 	-static 	-static-libgcc 	-static-libstdc++ 	-o "${output}" 	"${source_file}" 	-ld3d11 	-ldxgi 	-ldxguid
 
 description=$(file "${output}")
 if [[ ${description} != *"PE32+ executable"*"x86-64"* ]]; then
