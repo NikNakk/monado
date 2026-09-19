@@ -1,0 +1,22 @@
+#!/bin/zsh
+set -euo pipefail
+
+script_dir=${0:A:h}
+repo_root=${script_dir:h:h}
+root=${MONADO_WINE_DXMT_ROOT:-${repo_root}/build-wine-dxmt}
+out_dir=${MONADO_OPENVR_SMOKE_BUILD:-${repo_root}/build-wine-openvr}
+source_file=${repo_root}/tests/windows/openvr_opencomposite_smoke.cpp
+
+compiler=${CXX_MINGW:-x86_64-w64-mingw32-g++}
+if ! command -v "${compiler}" >/dev/null 2>&1; then
+	print -u2 "Missing ${compiler}. Install mingw-w64 first."
+	exit 1
+fi
+
+mkdir -p "${out_dir}"
+"${compiler}" -std=c++17 -O2 -static-libgcc -static-libstdc++ \
+	"${source_file}" \
+	-o "${out_dir}/openvr_opencomposite_smoke.exe"
+
+file "${out_dir}/openvr_opencomposite_smoke.exe"
+print "Built: ${out_dir}/openvr_opencomposite_smoke.exe"
