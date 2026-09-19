@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir=${0:A:h}
 repo_root=${script_dir:h:h}
-build_dir=${MONADO_WINE_OPENXR_BUILD_DIR:-${repo_root}/build-wine}
+build_dir=${MONADO_WINE_OPENXR_BUILD_DIR:-${repo_root}/build-wine-openxr}
 
 cc=${CC_MINGW:-$(command -v x86_64-w64-mingw32-gcc || true)}
 cxx=${CXX_MINGW:-$(command -v x86_64-w64-mingw32-g++ || true)}
