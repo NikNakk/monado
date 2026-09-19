@@ -379,6 +379,12 @@ struct ipc_arg_swapchain_from_native
 	uint32_t sizes[XRT_MAX_SWAPCHAIN_IMAGES];
 };
 
+struct ipc_arg_swapchain_iosurface
+{
+	uint32_t image_count;
+	uint32_t ids[XRT_MAX_SWAPCHAIN_IMAGES];
+};
+
 /*!
  * Arguments for xrt_device::get_view_poses with two views.
  */
