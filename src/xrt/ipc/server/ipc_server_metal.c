@@ -390,6 +390,91 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_swapchain_import_iosurface(volatile struct ipc_client_state *ics,
+                                      const struct xrt_swapchain_create_info *info,
+                                      const struct ipc_arg_swapchain_iosurface *args,
+                                      uint32_t *out_id)
+{
+	IPC_TRACE_MARKER();
+
+#ifndef XRT_OS_OSX
+	(void)ics;
+	(void)info;
+	(void)args;
+	(void)out_id;
+	return XRT_ERROR_NOT_IMPLEMENTED;
+#else
+	if (ics == NULL || info == NULL || args == NULL || out_id == NULL || ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	const uint32_t image_count = args->image_count;
+	if (image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	for (uint32_t i = 0; i < image_count; i++) {
+		if (args->ids[i] == 0) {
+			return XRT_ERROR_INVALID_ARGUMENT;
+		}
+	}
+
+	uint32_t index = 0;
+	xrt_result_t xret = find_free_swapchain_index(ics, &index);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	if (!comp_metal_swapchain_import_begin_iosurface_ids(info, image_count, args->ids)) {
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	struct xrt_swapchain *xsc = NULL;
+	xret = xrt_comp_create_swapchain(ics->xc, info, &xsc);
+	bool consumed = comp_metal_swapchain_import_was_consumed();
+	comp_metal_swapchain_import_end();
+
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	if (!consumed || xsc == NULL || xsc->image_count != image_count) {
+		IPC_ERROR(ics->server,
+		          "External IOSurface allocator mismatch: consumed=%s expected=%u actual=%u",
+		          consumed ? "true" : "false",
+		          image_count,
+		          xsc != NULL ? xsc->image_count : 0);
+		xrt_swapchain_reference(&xsc, NULL);
+		return XRT_ERROR_VULKAN;
+	}
+
+	xret = comp_swapchain_gpu_reuse_enable(xsc);
+	if (xret != XRT_SUCCESS) {
+		xrt_swapchain_reference(&xsc, NULL);
+		return xret;
+	}
+
+	xret = metal_ipc_smart_acquire_enable(xsc);
+	if (xret != XRT_SUCCESS) {
+		IPC_WARN(ics->server,
+		         "External IOSurface smart acquire unavailable; retaining safe FIFO behaviour: result=%d",
+		         xret);
+	}
+
+	ics->swapchain_count++;
+	ics->xscs[index] = xsc;
+	ics->swapchain_data[index].active = true;
+	ics->swapchain_data[index].width = info->width;
+	ics->swapchain_data[index].height = info->height;
+	ics->swapchain_data[index].format = info->format;
+	ics->swapchain_data[index].image_count = xsc->image_count;
+	*out_id = index;
+
+	IPC_INFO(ics->server,
+	         "External IOSurface swapchain active: id=%u images=%u size=%ux%u array_size=%u first_surface=%u",
+	         index, image_count, info->width, info->height, info->array_size, args->ids[0]);
+	return XRT_SUCCESS;
+#endif
+}
+
+xrt_result_t
 ipc_handle_compositor_semaphore_create_metal(volatile struct ipc_client_state *ics,
                                              uint32_t *out_id,
                                              uint64_t *out_token)
