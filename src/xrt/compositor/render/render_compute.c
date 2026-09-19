@@ -242,8 +242,8 @@ update_compute_layer_descriptor_set(struct vk_bundle *vk,
 XRT_MAYBE_UNUSED static void
 update_compute_shared_descriptor_set(struct vk_bundle *vk,
                                      uint32_t src_binding,
-                                     VkSampler src_samplers[XRT_MAX_VIEWS],
-                                     VkImageView src_image_views[XRT_MAX_VIEWS],
+                                     VkSampler src_samplers[2 * XRT_MAX_VIEWS],
+                                     VkImageView src_image_views[2 * XRT_MAX_VIEWS],
                                      uint32_t distortion_binding,
                                      VkSampler distortion_samplers[3 * XRT_MAX_VIEWS],
                                      VkImageView distortion_image_views[3 * XRT_MAX_VIEWS],
@@ -255,8 +255,8 @@ update_compute_shared_descriptor_set(struct vk_bundle *vk,
                                      VkDescriptorSet descriptor_set,
                                      uint32_t view_count)
 {
-	VkDescriptorImageInfo src_image_info[XRT_MAX_VIEWS];
-	for (uint32_t i = 0; i < view_count; ++i) {
+	VkDescriptorImageInfo src_image_info[2 * XRT_MAX_VIEWS];
+	for (uint32_t i = 0; i < 2 * view_count; ++i) {
 		src_image_info[i].sampler = src_samplers[i];
 		src_image_info[i].imageView = src_image_views[i];
 		src_image_info[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -285,7 +285,7 @@ update_compute_shared_descriptor_set(struct vk_bundle *vk,
 	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 	        .dstSet = descriptor_set,
 	        .dstBinding = src_binding,
-	        .descriptorCount = view_count,
+	        .descriptorCount = 2 * view_count,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
 	        .pImageInfo = src_image_info,
 	    },
@@ -376,6 +376,8 @@ dispatch_project_pipeline(struct render_compute *render,
                           VkSampler src_samplers[XRT_MAX_VIEWS],
                           VkImageView src_image_views[XRT_MAX_VIEWS],
                           const struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS],
+                          VkSampler depth_samplers[XRT_MAX_VIEWS],
+                          VkImageView depth_image_views[XRT_MAX_VIEWS],
                           VkImage target_image,
                           VkImageView target_image_view,
                           const struct render_viewport_data views[XRT_MAX_VIEWS],
@@ -427,11 +429,25 @@ dispatch_project_pipeline(struct render_compute *render,
 		distortion_samplers[3 * i + 2] = sampler;
 	}
 
+	VkSampler combined_src_samplers[2 * XRT_MAX_VIEWS];
+	VkImageView combined_src_image_views[2 * XRT_MAX_VIEWS];
+	for (uint32_t i = 0; i < render->r->view_count; ++i) {
+		combined_src_samplers[i] = src_samplers[i];
+		combined_src_image_views[i] = src_image_views[i];
+
+		// Keep all descriptors valid on the ordinary color-only path. The depth
+		// slots are sampled only when has_depth is set in the UBO.
+		combined_src_samplers[XRT_MAX_VIEWS + i] =
+		    depth_samplers != NULL ? depth_samplers[i] : src_samplers[i];
+		combined_src_image_views[XRT_MAX_VIEWS + i] =
+		    depth_image_views != NULL ? depth_image_views[i] : src_image_views[i];
+	}
+
 	update_compute_shared_descriptor_set( //
 	    vk,                               //
 	    r->compute.src_binding,           //
-	    src_samplers,                     //
-	    src_image_views,                  //
+	    combined_src_samplers,            //
+	    combined_src_image_views,         //
 	    r->compute.distortion_binding,    //
 	    distortion_samplers,              //
 	    r->distortion.image_views,        //
@@ -837,6 +853,7 @@ render_compute_projection_timewarp(struct render_compute *render,
 		}
 
 		data->views[i] = views[i];
+		data->has_depth[i].value = 0;
 		data->pre_transforms[i] =
 		    force_timewarp_pretransform_identity ? identity_pre_transform : r->distortion.uv_to_tanangle[i];
 		data->transform_timewarp_scanout_begin[i] = time_warp_matrix_scanout_begin[i];
@@ -851,8 +868,85 @@ render_compute_projection_timewarp(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, target_image,
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, NULL, NULL, target_image,
 	                          target_image_view, views, r->compute.distortion.timewarp_pipeline);
+}
+
+
+static inline void
+calc_new_to_source_view_matrix(const struct xrt_pose *source_pose,
+                               const struct xrt_pose *new_pose,
+                               struct xrt_matrix_4x4 *out_matrix)
+{
+	const struct xrt_vec3 unit_scale = {1.0f, 1.0f, 1.0f};
+	struct xrt_matrix_4x4 new_to_world;
+	struct xrt_matrix_4x4 world_to_source;
+
+	math_matrix_4x4_model(new_pose, &unit_scale, &new_to_world);
+	math_matrix_4x4_view_from_pose(source_pose, &world_to_source);
+	math_matrix_4x4_multiply(&world_to_source, &new_to_world, out_matrix);
+}
+
+void
+render_compute_projection_timewarp_depth(struct render_compute *render,
+                                         VkSampler src_samplers[XRT_MAX_VIEWS],
+                                         VkImageView src_image_views[XRT_MAX_VIEWS],
+                                         const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                         VkSampler depth_samplers[XRT_MAX_VIEWS],
+                                         VkImageView depth_image_views[XRT_MAX_VIEWS],
+                                         const struct xrt_normalized_rect depth_rects[XRT_MAX_VIEWS],
+                                         const struct xrt_layer_depth_data depth_data[XRT_MAX_VIEWS],
+                                         const struct xrt_pose src_poses[XRT_MAX_VIEWS],
+                                         const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
+                                         const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
+                                         const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
+                                         VkImage target_image,
+                                         VkImageView target_image_view,
+                                         const struct render_viewport_data views[XRT_MAX_VIEWS])
+{
+	assert(render->r != NULL);
+	struct render_resources *r = render->r;
+
+	struct xrt_matrix_4x4 time_warp_matrix_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_matrix_4x4 time_warp_matrix_scanout_end[XRT_MAX_VIEWS];
+
+	struct render_compute_distortion_ubo_data *data =
+	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
+
+	for (uint32_t i = 0; i < render->r->view_count; ++i) {
+		render_calc_time_warp_matrix(
+		    &src_poses[i], &src_fovs[i], &new_poses_scanout_begin[i], &time_warp_matrix_scanout_begin[i]);
+		render_calc_time_warp_matrix(
+		    &src_poses[i], &src_fovs[i], &new_poses_scanout_end[i], &time_warp_matrix_scanout_end[i]);
+
+		data->views[i] = views[i];
+		data->pre_transforms[i] = r->distortion.uv_to_tanangle[i];
+		data->post_transforms[i] = src_rects[i];
+		data->transform_timewarp_scanout_begin[i] = time_warp_matrix_scanout_begin[i];
+		data->transform_timewarp_scanout_end[i] = time_warp_matrix_scanout_end[i];
+
+		data->depth_post_transforms[i] = depth_rects[i];
+		render_calc_uv_to_tangent_lengths_rect(&src_fovs[i], &data->source_uv_to_tanangle[i]);
+		data->projection_depth[i].min_depth = depth_data[i].min_depth;
+		data->projection_depth[i].max_depth = depth_data[i].max_depth;
+		data->projection_depth[i].near_z = depth_data[i].near_z;
+		data->projection_depth[i].far_z = depth_data[i].far_z;
+		calc_new_to_source_view_matrix(
+		    &src_poses[i], &new_poses_scanout_begin[i], &data->new_to_source_view_scanout_begin[i]);
+		calc_new_to_source_view_matrix(
+		    &src_poses[i], &new_poses_scanout_end[i], &data->new_to_source_view_scanout_end[i]);
+		data->has_depth[i].value = 1;
+
+#ifdef XRT_OS_OSX
+		maybe_log_timewarp_inputs(r->apple_target_debug.frame_id, i, &src_fovs[i], &src_poses[i],
+		                          &new_poses_scanout_begin[i], &data->pre_transforms[i],
+		                          &data->post_transforms[i], &data->transform_timewarp_scanout_begin[i],
+		                          &data->transform_timewarp_scanout_end[i]);
+#endif
+	}
+
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, depth_samplers, depth_image_views,
+	                          target_image, target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
 
@@ -906,6 +1000,7 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 		}
 
 		data->views[i] = views[i];
+		data->has_depth[i].value = 0;
 		data->pre_transforms[i] =
 		    force_timewarp_pretransform_identity ? identity_pre_transform : r->distortion.uv_to_tanangle[i];
 		data->transform_timewarp_scanout_begin[i] = time_warp_matrix_scanout_begin[i];
@@ -920,8 +1015,8 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, target_image, target_image_view,
-	                          views, r->compute.distortion.timewarp_pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, NULL, target_image,
+	                          target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
 void
@@ -936,8 +1031,8 @@ render_compute_projection_no_timewarp(struct render_compute *render,
 	assert(render->r != NULL);
 	struct render_resources *r = render->r;
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, target_image, target_image_view,
-	                          views, r->compute.distortion.pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, NULL, target_image,
+	                          target_image_view, views, r->compute.distortion.pipeline);
 }
 
 void
