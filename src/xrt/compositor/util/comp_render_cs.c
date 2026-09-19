@@ -693,7 +693,9 @@ crc_distortion_fast_path(struct render_compute *render,
 			const struct comp_swapchain_image *d_image =
 			    get_layer_depth_image(layer, i, dvd->sub.image_index);
 			depth_image_views[i] = get_image_view(d_image, data->flags, d_array_index);
-			depth_samplers[i] = render->r->samplers.clamp_to_edge;
+			// Never interpolate depth across geometry boundaries: fabricated
+			// intermediate Z values are most damaging exactly at disocclusions.
+			depth_samplers[i] = render->r->samplers.nearest_clamp_to_edge;
 			set_post_transform_rect(data, &dvd->sub.norm_rect, false, &depth_norm_rects[i]);
 			depth_datas[i] = *dvd;
 		}
