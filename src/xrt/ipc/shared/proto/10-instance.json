@@ -5,6 +5,12 @@
 		"out_handles": {"type": "xrt_shmem_handle_t"}
 	},
 
+	"instance_get_shm_copy": {
+		"out": [
+			{"name": "ism", "type": "struct ipc_shared_memory"}
+		]
+	},
+
 	"instance_describe_client": {
 		"in": [
 			{"name": "desc", "type": "struct ipc_client_description"}
