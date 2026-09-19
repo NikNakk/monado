@@ -1702,6 +1702,11 @@ ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
 
 	struct ipc_layer_slot slot = {0};
 	memcpy(&slot, payload->data, payload->size);
+	const int64_t trace_frame_id = slot.data.frame_id;
+	const int64_t trace_display_time_ns = slot.data.display_time_ns;
+	const uint32_t trace_layer_count = slot.layer_count;
+	wine_submit_trace_event("handler_entry", trace_frame_id, 0, trace_display_time_ns,
+	                        trace_layer_count, XRT_SUCCESS);
 	if (slot.layer_count != 1) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
@@ -1716,11 +1721,23 @@ ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	xrt_comp_layer_begin(ics->xc, &slot.data);
+	xrt_result_t xret = xrt_comp_layer_begin(ics->xc, &slot.data);
+	wine_submit_trace_event("after_layer_begin", trace_frame_id, 0, trace_display_time_ns,
+	                        trace_layer_count, xret);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 	if (!_update_layers(ics, ics->xc, &slot)) {
+		wine_submit_trace_event("update_layers_failed", trace_frame_id, 0, trace_display_time_ns,
+		                        trace_layer_count, XRT_ERROR_IPC_FAILURE);
 		return XRT_ERROR_IPC_FAILURE;
 	}
-	xrt_result_t xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	wine_submit_trace_event("after_update_layers", trace_frame_id, 0, trace_display_time_ns,
+	                        trace_layer_count, XRT_SUCCESS);
+
+	xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	wine_submit_trace_event("after_commit", trace_frame_id, 0, trace_display_time_ns,
+	                        trace_layer_count, xret);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
