@@ -30,6 +30,13 @@
 static const GUID kBasaltIOSurfaceIdGuid = {
     0xdd807311, 0x529e, 0x4856, {0xa5, 0xc0, 0x48, 0xbe, 0xd2, 0x04, 0x81, 0x29}};
 
+/*
+ * Private-data GUID added by the Monado v0.80 DXMT patch. Shared D3D11 fences
+ * expose the bootstrap registration name of their backing MTLSharedEvent.
+ */
+static const GUID kMonadoSharedFenceBootstrapNameGuid = {
+    0x8a1e78d5, 0x9762, 0x4f7a, {0xb0, 0xad, 0x1d, 0x62, 0xf6, 0xa4, 0x9d, 0x31}};
+
 struct client_d3d11_compositor
 {
 	struct xrt_compositor_d3d11 base;
@@ -40,6 +47,8 @@ struct client_d3d11_compositor
 	ID3D11Fence *fence;
 	HANDLE fence_event;
 	uint64_t fence_value;
+	struct xrt_compositor_semaphore *gpu_semaphore;
+	bool gpu_sync_active;
 
 	LARGE_INTEGER qpc_frequency;
 	FILE *timing_trace;
@@ -83,9 +92,10 @@ trace_frame_timing(struct client_d3d11_compositor *c,
 	}
 
 	fprintf(c->timing_trace,
-	        "%" PRId64 ",%" PRIu64 ",%.3f,%.3f,%.3f,%.3f\n",
+	        "%" PRId64 ",%" PRIu64 ",%u,%.3f,%.3f,%.3f,%.3f\n",
 	        c->timing_frame_id,
 	        c->fence_value,
+	        c->gpu_sync_active ? 1u : 0u,
 	        c->last_wait_frame_us,
 	        producer_wait_us,
 	        ipc_commit_us,
@@ -112,7 +122,7 @@ init_timing_trace(struct client_d3d11_compositor *c)
 	}
 
 	fprintf(c->timing_trace,
-	        "frame_id,fence_value,wait_frame_us,producer_wait_us,ipc_commit_us,layer_commit_total_us\n");
+	        "frame_id,fence_value,gpu_sync,wait_frame_us,producer_wait_us,ipc_commit_us,layer_commit_total_us\n");
 	fflush(c->timing_trace);
 	U_LOG_I("Wine D3D11 timing trace: %s", path);
 }
@@ -435,6 +445,25 @@ layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev, const stru
 }
 
 static xrt_result_t
+signal_producer(struct client_d3d11_compositor *c, uint64_t *out_value)
+{
+	if (c->fence == NULL || c->context4 == NULL) {
+		return XRT_ERROR_D3D11;
+	}
+
+	const uint64_t value = ++c->fence_value;
+	HRESULT hr = c->context4->Signal(c->fence, value);
+	if (FAILED(hr)) {
+		return XRT_ERROR_D3D11;
+	}
+	c->context->Flush();
+	if (out_value != NULL) {
+		*out_value = value;
+	}
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 wait_for_producer(struct client_d3d11_compositor *c)
 {
 	if (c->fence == NULL || c->context4 == NULL || c->fence_event == NULL) {
@@ -443,16 +472,15 @@ wait_for_producer(struct client_d3d11_compositor *c)
 		return XRT_ERROR_D3D11;
 	}
 
-	const uint64_t value = ++c->fence_value;
+	uint64_t value = 0;
+	xrt_result_t xret = signal_producer(c, &value);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 	HRESULT hr = c->fence->SetEventOnCompletion(value, c->fence_event);
 	if (FAILED(hr)) {
 		return XRT_ERROR_D3D11;
 	}
-	hr = c->context4->Signal(c->fence, value);
-	if (FAILED(hr)) {
-		return XRT_ERROR_D3D11;
-	}
-	c->context->Flush();
 
 	DWORD result = WaitForSingleObject(c->fence_event, 5000);
 	return result == WAIT_OBJECT_0 ? XRT_SUCCESS : XRT_ERROR_D3D11;
@@ -466,15 +494,28 @@ layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 
 	LARGE_INTEGER total_start = qpc_now();
 	LARGE_INTEGER producer_start = total_start;
-	xrt_result_t xret = wait_for_producer(c);
+	xrt_result_t xret;
+	uint64_t signal_value = 0;
+
+	if (c->gpu_sync_active && c->gpu_semaphore != NULL) {
+		xret = signal_producer(c, &signal_value);
+	} else {
+		xret = wait_for_producer(c);
+		signal_value = c->fence_value;
+	}
+
 	LARGE_INTEGER producer_end = qpc_now();
 	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Wine D3D11 producer fence wait failed: %d", xret);
+		U_LOG_E("Wine D3D11 producer synchronization failed: %d", xret);
 		return xret;
 	}
 
 	LARGE_INTEGER ipc_start = qpc_now();
-	xret = xrt_comp_layer_commit(&c->xcn->base, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	if (c->gpu_sync_active && c->gpu_semaphore != NULL) {
+		xret = xrt_comp_layer_commit_with_semaphore(&c->xcn->base, c->gpu_semaphore, signal_value);
+	} else {
+		xret = xrt_comp_layer_commit(&c->xcn->base, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	}
 	LARGE_INTEGER ipc_end = qpc_now();
 
 	double producer_us = qpc_elapsed_us(c, producer_start, producer_end);
@@ -524,6 +565,9 @@ destroy_compositor(struct xrt_compositor *xc)
 		fclose(c->timing_trace);
 		c->timing_trace = NULL;
 	}
+	if (c->gpu_semaphore != NULL) {
+		xrt_compositor_semaphore_reference(&c->gpu_semaphore, NULL);
+	}
 	if (c->fence_event != NULL) CloseHandle(c->fence_event);
 	if (c->fence != NULL) c->fence->Release();
 	if (c->context4 != NULL) c->context4->Release();
@@ -556,10 +600,53 @@ client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *
 		ID3D11Device5 *device5 = NULL;
 		hr = c->device->QueryInterface(IID_ID3D11Device5, (void **)&device5);
 		if (SUCCEEDED(hr) && device5 != NULL) {
-			hr = device5->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_ID3D11Fence, (void **)&c->fence);
+			/*
+			 * DXMT shared fences are backed by bootstrap-registered
+			 * MTLSharedEvents. The Monado DXMT patch exposes that bootstrap
+			 * name through GetPrivateData so native Monado can import the same
+			 * event as a Vulkan timeline semaphore.
+			 */
+			hr = device5->CreateFence(0, D3D11_FENCE_FLAG_SHARED, IID_ID3D11Fence, (void **)&c->fence);
+			if (FAILED(hr) || c->fence == NULL) {
+				U_LOG_W("DXMT shared D3D11 fence unavailable (hr=0x%08lx); falling back to local fence",
+				        (unsigned long)hr);
+				hr = device5->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_ID3D11Fence, (void **)&c->fence);
+			}
 			device5->Release();
+
 			if (SUCCEEDED(hr) && c->fence != NULL) {
 				c->fence_event = CreateEventW(NULL, FALSE, FALSE, NULL);
+
+				char gpu_sync_env[16] = {};
+				DWORD env_len = GetEnvironmentVariableA(
+				    "MONADO_WINE_GPU_SYNC", gpu_sync_env, (DWORD)sizeof(gpu_sync_env));
+				bool allow_gpu_sync = !(env_len > 0 && strcmp(gpu_sync_env, "0") == 0);
+
+				if (allow_gpu_sync) {
+					char bootstrap_name[IPC_METAL_BOOTSTRAP_NAME_SIZE] = {};
+					UINT bootstrap_size = sizeof(bootstrap_name);
+					HRESULT private_hr = c->fence->GetPrivateData(
+					    kMonadoSharedFenceBootstrapNameGuid, &bootstrap_size, bootstrap_name);
+					if (SUCCEEDED(private_hr) && bootstrap_size > 0 &&
+					    bootstrap_size <= sizeof(bootstrap_name)) {
+						bootstrap_name[sizeof(bootstrap_name) - 1] = '\0';
+						xrt_result_t sync_ret =
+						    ipc_client_compositor_import_metal_bootstrap_semaphore(
+						        c->xcn, bootstrap_name, &c->gpu_semaphore);
+						if (sync_ret == XRT_SUCCESS && c->gpu_semaphore != NULL) {
+							c->gpu_sync_active = true;
+							U_LOG_I("Wine D3D11 GPU-only shared-event sync active: '%s'",
+							        bootstrap_name);
+						} else {
+							U_LOG_W("Native DXMT shared-event import failed: result=%d; CPU fence fallback active",
+							        sync_ret);
+						}
+					} else {
+						U_LOG_I("DXMT fence does not expose Monado shared-event metadata; CPU fence fallback active");
+					}
+				} else {
+					U_LOG_I("Wine D3D11 GPU-only sync disabled by MONADO_WINE_GPU_SYNC=0");
+				}
 			}
 		}
 	}
