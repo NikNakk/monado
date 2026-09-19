@@ -557,8 +557,12 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 	// Data to fill in.
 	VkImageView src_image_views[XRT_MAX_VIEWS];
 	VkSampler src_samplers[XRT_MAX_VIEWS];
+	VkImageView depth_image_views[XRT_MAX_VIEWS];
+	VkSampler depth_samplers[XRT_MAX_VIEWS];
 	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
 	struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS];
+	struct xrt_normalized_rect depth_norm_rects[XRT_MAX_VIEWS];
+	struct xrt_layer_depth_data depth_datas[XRT_MAX_VIEWS];
 	struct xrt_fov src_fovs[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
@@ -679,6 +683,20 @@ crc_distortion_fast_path(struct render_compute *render,
 		src_poses[i] = src_pose;
 		world_poses_scanout_begin[i] = world_pose_scanout_begin;
 		world_poses_scanout_end[i] = world_pose_scanout_end;
+
+		if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
+			const struct xrt_layer_depth_data *dvd = NULL;
+			const struct xrt_layer_projection_view_data *unused_vd = NULL;
+			view_index_to_depth_data(i, data, &unused_vd, &dvd);
+
+			const uint32_t d_array_index = dvd->sub.array_index;
+			const struct comp_swapchain_image *d_image =
+			    get_layer_depth_image(layer, i, dvd->sub.image_index);
+			depth_image_views[i] = get_image_view(d_image, data->flags, d_array_index);
+			depth_samplers[i] = render->r->samplers.clamp_to_edge;
+			set_post_transform_rect(data, &dvd->sub.norm_rect, false, &depth_norm_rects[i]);
+			depth_datas[i] = *dvd;
+		}
 	}
 
 	if (!d->do_timewarp) {
@@ -690,6 +708,23 @@ crc_distortion_fast_path(struct render_compute *render,
 		    d->target.cs.image,                //
 		    d->target.cs.storage_view,         //
 		    target_viewport_datas);            //
+	} else if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
+		render_compute_projection_timewarp_depth( //
+		    render,                               //
+		    src_samplers,                         //
+		    src_image_views,                      //
+		    src_norm_rects,                       //
+		    depth_samplers,                       //
+		    depth_image_views,                    //
+		    depth_norm_rects,                     //
+		    depth_datas,                          //
+		    src_poses,                            //
+		    src_fovs,                             //
+		    world_poses_scanout_begin,            //
+		    world_poses_scanout_end,              //
+		    d->target.cs.image,                   //
+		    d->target.cs.storage_view,            //
+		    target_viewport_datas);               //
 	} else {
 		render_compute_projection_timewarp( //
 		    render,                         //

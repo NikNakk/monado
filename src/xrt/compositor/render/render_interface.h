@@ -1370,6 +1370,27 @@ struct render_compute_distortion_ubo_data
 	struct xrt_normalized_rect post_transforms[XRT_MAX_VIEWS];
 	struct xrt_matrix_4x4 transform_timewarp_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_matrix_4x4 transform_timewarp_scanout_end[XRT_MAX_VIEWS];
+
+	// Projection-depth fast path. Kept in the existing distortion UBO so
+	// positional reprojection does not require another dispatch or image.
+	struct xrt_normalized_rect depth_post_transforms[XRT_MAX_VIEWS];
+	struct xrt_normalized_rect source_uv_to_tanangle[XRT_MAX_VIEWS];
+	struct
+	{
+		float min_depth;
+		float max_depth;
+		float near_z;
+		float far_z;
+	} projection_depth[XRT_MAX_VIEWS];
+	struct xrt_matrix_4x4 new_to_source_view_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_matrix_4x4 new_to_source_view_scanout_end[XRT_MAX_VIEWS];
+	struct
+	{
+		uint32_t value;
+		uint32_t padding0;
+		uint32_t padding1;
+		uint32_t padding2;
+	} has_depth[XRT_MAX_VIEWS];
 };
 
 /*!
@@ -1455,6 +1476,29 @@ render_compute_projection_timewarp(struct render_compute *render,
                                    VkImage target_image,
                                    VkImageView target_image_view,
                                    const struct render_viewport_data views[XRT_MAX_VIEWS]);
+
+/*!
+ * Single-pass projection-depth fast path. Depth is sampled by the existing
+ * distortion/timewarp compute dispatch; no intermediate image is produced.
+ *
+ * @public @memberof render_compute
+ */
+void
+render_compute_projection_timewarp_depth(struct render_compute *render,
+                                         VkSampler src_samplers[XRT_MAX_VIEWS],
+                                         VkImageView src_image_views[XRT_MAX_VIEWS],
+                                         const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                         VkSampler depth_samplers[XRT_MAX_VIEWS],
+                                         VkImageView depth_image_views[XRT_MAX_VIEWS],
+                                         const struct xrt_normalized_rect depth_rects[XRT_MAX_VIEWS],
+                                         const struct xrt_layer_depth_data depth_data[XRT_MAX_VIEWS],
+                                         const struct xrt_pose src_poses[XRT_MAX_VIEWS],
+                                         const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
+                                         const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
+                                         const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
+                                         VkImage target_image,
+                                         VkImageView target_image_view,
+                                         const struct render_viewport_data views[XRT_MAX_VIEWS]);
 
 /*!
  * @public @memberof render_compute

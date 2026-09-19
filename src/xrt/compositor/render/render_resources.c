@@ -245,7 +245,10 @@ create_compute_distortion_descriptor_set_layout(struct vk_bundle *vk,
 	    {
 	        .binding = src_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-	        .descriptorCount = 2,
+	        // Two color views followed by two depth views. Non-depth paths bind
+	        // their color views again in the depth slots so every descriptor is
+	        // valid without requiring partially-bound descriptor features.
+	        .descriptorCount = 2 * XRT_MAX_VIEWS,
 	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 	    },
 	    {
