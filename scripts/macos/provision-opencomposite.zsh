@@ -9,40 +9,37 @@ out=${oc_dir}/openvr_api.dll
 
 mkdir -p "${oc_dir}"
 
-# Current OpenComposite's Windows CI remains AppVeyor-based, but the moving
-# "latest artifact" endpoint has become unreliable. Allow a local artifact or
-# URL to be pinned explicitly; otherwise try the moving openxr artifact first
-# and then a known-good x64 build-job artifact.
+# OpenComposite's own RuntimeSwitcher downloads the Windows DLLs from the
+# project's build server via znix.xyz. The old public AppVeyor artifact URLs
+# now return 404, so use the same upstream feed as the launcher.
+#
+# MONADO_OPENCOMPOSITE_DLL_SOURCE remains available for a local DLL or a
+# specific URL when a fully pinned artifact is desired.
 source=${MONADO_OPENCOMPOSITE_DLL_SOURCE:-}
-latest_url='https://ci.appveyor.com/api/projects/ZNix/openovr/artifacts/x64/openvr_api.dll?branch=openxr&job=Platform%3A+x64&pr=false'
-# OpenComposite build 48846091, x64 job qe2t44iw3o0550rm.
-# This build is also referenced from upstream issue #399.
-pinned_url='https://ci.appveyor.com/api/buildjobs/qe2t44iw3o0550rm/artifacts/x64/openvr_api.dll'
+upstream_url='https://znix.xyz/OpenComposite/download.php?arch=x64&branch=openxr'
 resolved_source=
+
+rm -f "${out}.partial"
 
 if [[ -n ${source} && -f ${source} ]]; then
 	cp -f "${source}" "${out}"
+	resolved_source=${source}
 elif [[ -n ${source} ]]; then
+	print "Downloading explicitly requested OpenComposite DLL..."
 	curl --fail --location --progress-bar --output "${out}.partial" "${source}"
 	mv "${out}.partial" "${out}"
+	resolved_source=${source}
 else
-	print "Downloading current OpenComposite x64 openxr-branch artifact from AppVeyor..."
-	if curl --fail --location --progress-bar --output "${out}.partial" "${latest_url}"; then
-		resolved_source=${latest_url}
-	else
+	print "Downloading current OpenComposite x64 openxr build using the upstream launcher feed..."
+	if ! curl --fail --location --progress-bar --output "${out}.partial" "${upstream_url}"; then
 		rm -f "${out}.partial"
-		print "Latest-artifact endpoint unavailable; trying pinned OpenComposite x64 build 48846091..."
-		if curl --fail --location --progress-bar --output "${out}.partial" "${pinned_url}"; then
-			resolved_source=${pinned_url}
-		else
-			rm -f "${out}.partial"
-			print -u2 "Both OpenComposite AppVeyor artifact endpoints were unavailable."
-			print -u2 "Set MONADO_OPENCOMPOSITE_DLL_SOURCE to a local x64 openvr_api.dll"
-			print -u2 "or to a specific OpenComposite artifact URL and rerun."
-			exit 1
-		fi
+		print -u2 "The OpenComposite launcher download feed was unavailable."
+		print -u2 "Set MONADO_OPENCOMPOSITE_DLL_SOURCE to a local x64 openvr_api.dll"
+		print -u2 "or to a specific OpenComposite artifact URL and rerun."
+		exit 1
 	fi
 	mv "${out}.partial" "${out}"
+	resolved_source=${upstream_url}
 fi
 
 description=$(file "${out}")
@@ -56,7 +53,7 @@ sha=$(shasum -a 256 "${out}" | awk '{print $1}')
 cat > "${oc_dir}/manifest.txt" <<EOF
 OpenComposite Windows x64 external artifact
 SHA-256: ${sha}
-Source: ${source:-${resolved_source}}
+Source: ${resolved_source}
 Installed: ${out}
 Licence: OpenComposite GPLv3; kept external to Monado.
 EOF
