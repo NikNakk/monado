@@ -257,6 +257,112 @@ bool depth_solve_projection(float scanout_fraction,
 	return true;
 }
 
+bool depth_find_nearer_occluder(vec2 rotational_source_uv,
+                                  uint iz,
+                                  vec3 source_origin,
+                                  float current_z_distance,
+                                  out vec2 out_uv,
+                                  out float out_z_distance)
+{
+	out_uv = rotational_source_uv;
+	out_z_distance = current_z_distance;
+
+	if (ubo.depth_debug.w == 0u || !(current_z_distance > 0.0)) {
+		return false;
+	}
+
+	vec2 tangent_extent = ubo.source_uv_to_tanangle[iz].zw;
+	if (abs(tangent_extent.x) < 1e-6 || abs(tangent_extent.y) < 1e-6) {
+		return false;
+	}
+
+	vec2 source_tan =
+	    fma(rotational_source_uv, tangent_extent, ubo.source_uv_to_tanangle[iz].xy);
+
+	/*
+	 * The source-image displacement produced by translation is proportional to
+	 * 1/depth. Its direction is therefore independent of depth:
+	 *
+	 *   delta_tan = (origin.xy + origin.z * ray.xy) / depth
+	 *
+	 * Search only along that epipolar/translation direction. Four probes are
+	 * enough to discover a nearer surface over the displacement range expected
+	 * from one or two missed compositor frames without turning this into a full
+	 * neighbourhood search.
+	 */
+	vec2 delta_uv_per_inv_m = vec2(
+	    source_origin.x + source_origin.z * source_tan.x,
+	    -source_origin.y + source_origin.z * source_tan.y) / tangent_extent;
+
+	vec2 source_size = vec2(textureSize(source[2 + iz], 0));
+	vec2 delta_px_per_inv_m = delta_uv_per_inv_m * source_size;
+	float delta_len = length(delta_px_per_inv_m);
+	if (delta_len < 0.25) {
+		return false;
+	}
+
+	vec2 direction_px = delta_px_per_inv_m / delta_len;
+	// Search as though surfaces as near as 0.40 m may occlude the current
+	// candidate, but cap the work/coverage at 64 source pixels.
+	float min_search_z = max(ubo.projection_depth[iz].z, 0.40);
+	float max_shift_px = clamp(delta_len / min_search_z, 1.0, 64.0);
+	const float fractions[4] = float[4](0.20, 0.40, 0.70, 1.00);
+
+	bool found = false;
+	float best_z = current_z_distance;
+	vec2 best_uv = rotational_source_uv;
+
+	for (int i = 0; i < 4; ++i) {
+		vec2 probe_uv = rotational_source_uv +
+		                direction_px * (max_shift_px * fractions[i]) / source_size;
+		if (any(lessThan(probe_uv, vec2(0.0))) ||
+		    any(greaterThan(probe_uv, vec2(1.0)))) {
+			continue;
+		}
+
+		vec2 probe_depth_uv =
+		    fma(probe_uv, ubo.depth_post_transform[iz].zw, ubo.depth_post_transform[iz].xy);
+		float probe_window_depth = texture(source[2 + iz], probe_depth_uv).r;
+		float probe_z =
+		    projection_depth_to_view_z_distance(probe_window_depth, ubo.projection_depth[iz]);
+
+		float nearer_margin = max(0.02, 0.03 * best_z);
+		if (!(probe_z > 0.0) || !(probe_z + nearer_margin < best_z)) {
+			continue;
+		}
+
+		vec2 candidate_uv =
+		    depth_translate_projection_uv(rotational_source_uv, probe_z, source_origin, iz);
+		if (any(lessThan(candidate_uv, vec2(0.0))) ||
+		    any(greaterThan(candidate_uv, vec2(1.0)))) {
+			continue;
+		}
+
+		// The probe only discovers a possible surface depth. Require the exact
+		// source location implied by that depth to land on the same surface.
+		vec2 candidate_depth_uv =
+		    fma(candidate_uv, ubo.depth_post_transform[iz].zw, ubo.depth_post_transform[iz].xy);
+		float candidate_window_depth = texture(source[2 + iz], candidate_depth_uv).r;
+		float candidate_z =
+		    projection_depth_to_view_z_distance(candidate_window_depth, ubo.projection_depth[iz]);
+		float consistency_tolerance = max(0.025, 0.06 * min(probe_z, candidate_z));
+		if (!(candidate_z > 0.0) ||
+		    abs(candidate_z - probe_z) > consistency_tolerance) {
+			continue;
+		}
+
+		best_z = candidate_z;
+		best_uv = candidate_uv;
+		found = true;
+	}
+
+	if (found) {
+		out_uv = best_uv;
+		out_z_distance = best_z;
+	}
+	return found;
+}
+
 vec2 depth_resolve_projection_uv(float scanout_fraction,
                                  vec2 rotational_source_uv,
                                  uint iz)
@@ -283,15 +389,29 @@ vec2 depth_resolve_projection_uv(float scanout_fraction,
 		return rotational_source_uv;
 	}
 
-	// Background-biased handling of A<->B cycles: if the original ray was
-	// already on the farther surface, keep it. Otherwise corrected_uv is the
-	// first translated sample, which is the farther/background candidate.
+	vec2 base_uv = corrected_uv;
+	float base_z = solved_z_distance;
+
+	// Background-biased handling of A<->B cycles. This remains the hole-fill
+	// fallback, but a valid nearer/frontmost candidate found below overrides it.
 	if (ubo.depth_debug.y != 0u && refinement_oscillated &&
 	    initial_z_distance > refined_z_distance) {
-		return rotational_source_uv;
+		base_uv = rotational_source_uv;
+		base_z = initial_z_distance;
 	}
 
-	return corrected_uv;
+	vec2 occluder_uv;
+	float occluder_z;
+	if (depth_find_nearer_occluder(rotational_source_uv,
+	                               iz,
+	                               source_origin,
+	                               base_z,
+	                               occluder_uv,
+	                               occluder_z)) {
+		return occluder_uv;
+	}
+
+	return base_uv;
 }
 
 vec2 transform_uv(vec2 uv, uint iz)
