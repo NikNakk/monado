@@ -23,7 +23,10 @@ else()
 endif()
 
 # Note: Order may matter in these lists!
-target_link_libraries(${RUNTIME_TARGET} PUBLIC aux_vk aux_os aux_util aux_math)
+target_link_libraries(${RUNTIME_TARGET} PUBLIC aux_os aux_util aux_math)
+if(XRT_HAVE_VULKAN)
+	target_link_libraries(${RUNTIME_TARGET} PUBLIC aux_vk)
+endif()
 
 if(XRT_FEATURE_IPC_CLIENT)
 	target_link_libraries(${RUNTIME_TARGET} PUBLIC st_oxr ipc_client comp_client)
