@@ -210,12 +210,6 @@ create_compute_layer_descriptor_set_layout(struct vk_bundle *vk,
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 	    },
-	    {
-	        .binding = visibility_binding,
-	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-	        .descriptorCount = 1,
-	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-	    },
 	};
 
 	VkDescriptorSetLayoutCreateInfo set_layout_info = {
@@ -273,6 +267,12 @@ create_compute_distortion_descriptor_set_layout(struct vk_bundle *vk,
 	    {
 	        .binding = ubo_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+	    },
+	    {
+	        .binding = visibility_binding,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 	    },
