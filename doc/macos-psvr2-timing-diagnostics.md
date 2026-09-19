@@ -638,3 +638,45 @@ time-constraint instrumentation, comparing `XRT_MACOS_XPC_IMPORTANCE=0` with
 `=1`. The desired signal is removal of the RunningBoard
 realtime-to-timeshare / priority `97 -> 4` clamp while leaving the compositor's
 existing requested time-constraint policy unchanged.
+
+
+## Per-frame reprojection/source handoff trace, 2026-09-19
+
+To diagnose a small apparent backwards reset when a low-rate client source frame
+replaces a repeatedly timewarped frame, macOS timing diagnostics now emit two
+joinable CSVs whenever `PSVR2_TIMING_TRACE=1` (or explicitly
+`XRT_MACOS_REPROJECTION_TRACE=1`).
+
+`monado_psvr2_<service-pid>_reprojection_source.csv` is emitted in the
+multi-client compositor before the original app frame id is replaced by the
+120-Hz native/system frame id. One row is written for every system compositor
+frame. For the focused projection client it records:
+
+- `system_frame_id` and target display time;
+- the original client `frame_id` and client display time;
+- `source_changed`, based on the actual delivered client frame;
+- projection layer timestamp/type;
+- left/right swapchain image and array indices;
+- the exact submitted left/right projection source poses.
+
+`monado_psvr2_<service-pid>_reprojection.csv` is emitted from the native
+renderer for the same `system_frame_id`. It records every compositor pass,
+including:
+
+- predicted/desired display times and compute/graphics path;
+- fast-path and ATW state;
+- independently detected projection source changes;
+- source layer timestamp and age at the compositor prediction;
+- submitted source poses and fresh scanout-begin/end poses for both eyes;
+- angular source-to-scanout deltas;
+- the angular step between distinct submitted source poses at a handoff;
+- frame-to-frame scanout-pose angular motion;
+- the exact 4x4 left-eye timewarp matrices for scanout begin and end.
+
+The two files should be joined on `system_frame_id`. In the UE 12-fps test,
+rows with `source_changed=1` are the key events: they let us test whether the
+submitted source pose itself steps inconsistently when a new UE image arrives,
+whether the fresh scanout pose stays continuous, and whether the exact timewarp
+transform has a discontinuity at the handoff. No rendering, prediction,
+synchronization, scheduling, or presentation behaviour is changed by this
+instrumentation.
