@@ -1093,12 +1093,17 @@ render_compute_clear(struct render_compute *render,
 	    subresource_range);          //
 
 	VkSampler sampler = r->samplers.mock;
-	VkSampler src_samplers[XRT_MAX_VIEWS];
-	VkImageView src_image_views[XRT_MAX_VIEWS];
+	VkSampler src_samplers[2 * XRT_MAX_VIEWS];
+	VkImageView src_image_views[2 * XRT_MAX_VIEWS];
 	VkSampler distortion_samplers[3 * XRT_MAX_VIEWS];
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
 		src_samplers[i] = sampler;
 		src_image_views[i] = r->mock.color.image_view;
+		// The shared layout always includes a depth descriptor for each view.
+		// Clear does not sample depth, so keep those descriptors valid by
+		// binding the same mock color image used by the color slots.
+		src_samplers[XRT_MAX_VIEWS + i] = sampler;
+		src_image_views[XRT_MAX_VIEWS + i] = r->mock.color.image_view;
 		distortion_samplers[3 * i + 0] = sampler;
 		distortion_samplers[3 * i + 1] = sampler;
 		distortion_samplers[3 * i + 2] = sampler;
