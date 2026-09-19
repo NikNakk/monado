@@ -7,6 +7,7 @@ on:
       - macos-service-direct-xpc-owned-resources
       - macos-service-direct-xpc-cadence
       - macos-depth-aware-reprojection
+      - macos-wine-iosurface-import
     paths:
       - .github/workflows/macos-service-direct-xpc.yml
       - CMakeLists.txt
@@ -87,6 +88,8 @@ jobs:
           test -x build-release/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
           test -x build-release/src/xrt/targets/service/monado-service
           test -x build-release/src/xrt/targets/service/monado-service-xpc-control
+          test -x build-release/tests/tests_macos_iosurface_producer
+          test -x build-release/tests/tests_macos_iosurface_import_probe
 
       - name: Verify repeatable full install
         run: |
