@@ -22,6 +22,9 @@
 #undef render_views
 #undef initialize_scene
 
+static bool g_freeze_frame = false;
+static bool g_freeze_frame_ready = false;
+
 static float
 comparison_target_size(float distance, float angular_size_degrees)
 {
@@ -233,39 +236,51 @@ render_frame(application &app)
 		         "xrLocateViews");
 		const XrViewStateFlags required = XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
 		if (view_count == app.views.size() && (view_state.viewStateFlags & required) == required) {
-			@autoreleasepool {
-				render_views(app, frame_state.predictedDisplayTime);
-			}
-			for (size_t i = 0; i < app.projection_views.size(); ++i) {
-				XrCompositionLayerProjectionView &projection_view = app.projection_views[i];
-				projection_view = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
-				projection_view.pose = app.views[i].pose;
-				projection_view.fov = app.views[i].fov;
-				projection_view.subImage.swapchain = app.swapchains[i].handle;
-				projection_view.subImage.imageRect.offset = {0, 0};
-				projection_view.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
-				                                            (int32_t)app.swapchains[i].height};
-				projection_view.subImage.imageArrayIndex = 0;
+			const bool render_new_source = !g_freeze_frame || !g_freeze_frame_ready;
+			if (render_new_source) {
+				@autoreleasepool {
+					render_views(app, frame_state.predictedDisplayTime);
+				}
+				for (size_t i = 0; i < app.projection_views.size(); ++i) {
+					XrCompositionLayerProjectionView &projection_view = app.projection_views[i];
+					projection_view = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+					projection_view.pose = app.views[i].pose;
+					projection_view.fov = app.views[i].fov;
+					projection_view.subImage.swapchain = app.swapchains[i].handle;
+					projection_view.subImage.imageRect.offset = {0, 0};
+					projection_view.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
+					                                            (int32_t)app.swapchains[i].height};
+					projection_view.subImage.imageArrayIndex = 0;
 
-				if (app.submit_depth_layer) {
-					XrCompositionLayerDepthInfoKHR &depth_info = app.depth_infos[i];
-					depth_info = {XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR};
-					depth_info.subImage.swapchain = app.swapchains[i].depth_handle;
-					depth_info.subImage.imageRect.offset = {0, 0};
-					depth_info.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
-					                                          (int32_t)app.swapchains[i].height};
-					depth_info.subImage.imageArrayIndex = 0;
-					depth_info.minDepth = 0.0f;
-					depth_info.maxDepth = 1.0f;
-					depth_info.nearZ = 0.05f;
-					depth_info.farZ = 100.0f;
-					projection_view.next = &depth_info;
+					if (app.submit_depth_layer) {
+						XrCompositionLayerDepthInfoKHR &depth_info = app.depth_infos[i];
+						depth_info = {XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR};
+						depth_info.subImage.swapchain = app.swapchains[i].depth_handle;
+						depth_info.subImage.imageRect.offset = {0, 0};
+						depth_info.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
+						                                          (int32_t)app.swapchains[i].height};
+						depth_info.subImage.imageArrayIndex = 0;
+						depth_info.minDepth = 0.0f;
+						depth_info.maxDepth = 1.0f;
+						depth_info.nearZ = 0.05f;
+						depth_info.farZ = 100.0f;
+						projection_view.next = &depth_info;
+					}
+				}
+				if (g_freeze_frame) {
+					g_freeze_frame_ready = true;
+					fprintf(stderr,
+					        "psvr2-openxr-test: source frame frozen; keep translating/rotating the HMD while the "
+					        "same submitted colour/depth frame is reused\n");
 				}
 			}
-			layer.space = app.app_space;
-			layer.viewCount = (uint32_t)app.projection_views.size();
-			layer.views = app.projection_views.data();
-			submit_projection = true;
+
+			if (!g_freeze_frame || g_freeze_frame_ready) {
+				layer.space = app.app_space;
+				layer.viewCount = (uint32_t)app.projection_views.size();
+				layer.views = app.projection_views.data();
+				submit_projection = true;
+			}
 		}
 	}
 
@@ -285,16 +300,21 @@ run(int argc, char **argv)
 {
 	const char *loader_path = nullptr;
 	bool submit_depth_layer = false;
+	bool freeze_frame = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
 		} else if (strcmp(argv[i], "--depth-layer") == 0) {
 			submit_depth_layer = true;
+		} else if (strcmp(argv[i], "--freeze-frame") == 0) {
+			freeze_frame = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
-			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer]\n"
+			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] [--freeze-frame]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
+			        "  --freeze-frame renders/releases one source frame, then keeps submitting its fixed "
+			        "poses and swapchain images for reprojection testing.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader.\n",
 			        argv[0]);
 			return EXIT_SUCCESS;
@@ -303,6 +323,9 @@ run(int argc, char **argv)
 			return EXIT_FAILURE;
 		}
 	}
+
+	g_freeze_frame = freeze_frame;
+	g_freeze_frame_ready = false;
 
 	application app;
 	app.submit_depth_layer = submit_depth_layer;
