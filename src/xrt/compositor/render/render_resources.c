@@ -210,6 +210,12 @@ create_compute_layer_descriptor_set_layout(struct vk_bundle *vk,
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 	    },
+	    {
+	        .binding = visibility_binding,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+	    },
 	};
 
 	VkDescriptorSetLayoutCreateInfo set_layout_info = {
@@ -237,11 +243,12 @@ create_compute_distortion_descriptor_set_layout(struct vk_bundle *vk,
                                                 uint32_t distortion_binding,
                                                 uint32_t target_binding,
                                                 uint32_t ubo_binding,
+                                                uint32_t visibility_binding,
                                                 VkDescriptorSetLayout *out_descriptor_set_layout)
 {
 	VkResult ret;
 
-	VkDescriptorSetLayoutBinding set_layout_bindings[4] = {
+	VkDescriptorSetLayoutBinding set_layout_bindings[5] = {
 	    {
 	        .binding = src_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -547,6 +554,7 @@ render_resources_init(struct render_resources *r,
 	r->compute.distortion_binding = 1;
 	r->compute.target_binding = 2;
 	r->compute.ubo_binding = 3;
+	r->compute.visibility_binding = 4;
 
 	r->compute.layer.image_array_size =
 	    MIN(vk->limits.max_per_stage_descriptor_sampled_images, RENDER_MAX_IMAGES_SIZE);
@@ -750,7 +758,7 @@ render_resources_init(struct render_resources *r,
 		    .uniform_per_descriptor_count = 1,
 		    .sampler_per_descriptor_count = 1,
 		    .storage_image_per_descriptor_count = 0,
-		    .storage_buffer_per_descriptor_count = 0,
+		    .storage_buffer_per_descriptor_count = 1,
 		    .descriptor_count = layer_shader_count + mesh_shader_count,
 		    .freeable = false,
 		};
@@ -983,6 +991,7 @@ render_resources_init(struct render_resources *r,
 	    r->compute.distortion_binding,                     // distortion_binding,
 	    r->compute.target_binding,                         // target_binding,
 	    r->compute.ubo_binding,                            // ubo_binding,
+	    r->compute.visibility_binding,                     // visibility_binding,
 	    &r->compute.distortion.descriptor_set_layout);     // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_compute_distortion_descriptor_set_layout", false);
 
@@ -1049,6 +1058,41 @@ render_resources_init(struct render_resources *r,
 	    vk,                          // vk_bundle
 	    &r->compute.distortion.ubo); // buffer
 	VK_CHK_WITH_RET(ret, "render_buffer_map", false);
+
+	/*
+	 * Forward depth visibility buffer. Allocate for the maximum per-view client
+	 * display extent; the active region may be smaller and is recorded in the
+	 * distortion UBO each frame.
+	 */
+	uint32_t visibility_width = 1;
+	uint32_t visibility_height = 1;
+	for (uint32_t i = 0; i < r->view_count; ++i) {
+		visibility_width = MAX(visibility_width, parts->views[i].display.w_pixels);
+		visibility_height = MAX(visibility_height, parts->views[i].display.h_pixels);
+	}
+	r->compute.depth_visibility.width = visibility_width;
+	r->compute.depth_visibility.height = visibility_height;
+	VkDeviceSize visibility_size =
+	    (VkDeviceSize)visibility_width * (VkDeviceSize)visibility_height *
+	    (VkDeviceSize)r->view_count * sizeof(uint32_t);
+	ret = render_buffer_init( //
+	    vk,
+	    &r->compute.depth_visibility.buffer,
+	    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+	    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+	    visibility_size);
+	VK_CHK_WITH_RET(ret, "render_buffer_init(depth_visibility)", false);
+	VK_NAME_BUFFER(vk, r->compute.depth_visibility.buffer.buffer, "render_resources depth visibility");
+
+	ret = vk_create_compute_pipeline(
+	    vk,
+	    r->pipeline_cache,
+	    r->shaders->depth_visibility_comp,
+	    r->compute.distortion.pipeline_layout,
+	    NULL,
+	    &r->compute.depth_visibility.pipeline);
+	VK_CHK_WITH_RET(ret, "vk_create_compute_pipeline(depth_visibility)", false);
+	VK_NAME_PIPELINE(vk, r->compute.depth_visibility.pipeline, "render_resources depth visibility pipeline");
 
 
 	/*
@@ -1182,12 +1226,14 @@ render_resources_fini(struct render_resources *r)
 	D(DescriptorSetLayout, r->compute.distortion.descriptor_set_layout);
 	D(Pipeline, r->compute.distortion.pipeline);
 	D(Pipeline, r->compute.distortion.timewarp_pipeline);
+	D(Pipeline, r->compute.depth_visibility.pipeline);
 	D(PipelineLayout, r->compute.distortion.pipeline_layout);
 
 	D(Pipeline, r->compute.clear.pipeline);
 
 	render_distortion_images_fini(r);
 	render_buffer_fini(vk, &r->compute.clear.ubo);
+	render_buffer_fini(vk, &r->compute.depth_visibility.buffer);
 	for (uint32_t i = 0; i < r->view_count; i++) {
 		render_buffer_fini(vk, &r->compute.layer.ubos[i]);
 	}
