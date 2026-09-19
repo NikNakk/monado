@@ -686,7 +686,6 @@ void main()
 		vec2 r_projection_uv = transform_uv_timewarp(r_target_uv, iz);
 		vec2 g_projection_uv = transform_uv_timewarp(g_target_uv, iz);
 		vec2 b_projection_uv = transform_uv_timewarp(b_target_uv, iz);
-		bool used_forward_visibility = false;
 		bool forward_enabled =
 		    ubo.has_depth[iz].x != 0u &&
 		    ubo.depth_visibility.w != 0u &&
@@ -733,13 +732,6 @@ void main()
 						}
 					}
 
-					used_forward_visibility =
-					    all(greaterThanEqual(r_projection_uv, vec2(0.0))) &&
-					    all(lessThanEqual(r_projection_uv, vec2(1.0))) &&
-					    all(greaterThanEqual(g_projection_uv, vec2(0.0))) &&
-					    all(lessThanEqual(g_projection_uv, vec2(1.0))) &&
-					    all(greaterThanEqual(b_projection_uv, vec2(0.0))) &&
-					    all(lessThanEqual(b_projection_uv, vec2(1.0)));
 				}
 			}
 		}
@@ -847,10 +839,9 @@ void main()
 		}
 
 		// If forward visibility was enabled but no trustworthy correspondence
-		// could be reconstructed, keep the already-computed rotation-only UVs.
-		// This is deliberately conservative: a small stale patch is preferable
-		// to inventing a duplicate foreground surface.
-		(void)used_forward_visibility;
+		// could be reconstructed, the UVs remain at the already-computed
+		// rotation-only positions. This is deliberately conservative: a small
+		// stale patch is preferable to inventing a duplicate foreground surface.
 
 		r_uv = transform_uv_subimage(r_projection_uv, iz);
 		g_uv = transform_uv_subimage(g_projection_uv, iz);
