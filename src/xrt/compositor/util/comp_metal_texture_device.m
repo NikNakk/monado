@@ -7,10 +7,12 @@
  */
 
 #import <Metal/Metal.h>
+#import <IOSurface/IOSurface.h>
 
 #include "util/comp_metal_texture_device.h"
 #include "util/u_logging.h"
 #include "vk/vk_helpers.h"
+#include "xrt/xrt_compositor.h"
 
 bool
 comp_metal_texture_prepare_for_vk_device(struct vk_bundle *vk,
@@ -90,6 +92,111 @@ comp_metal_texture_prepare_for_vk_device(struct vk_bundle *vk,
 		*out_needs_release = true;
 		return true;
 	}
+}
+
+static bool
+get_vk_metal_device(struct vk_bundle *vk, id<MTLDevice> *out_device)
+{
+	if (vk == NULL || out_device == NULL || vk->vkExportMetalObjectsEXT == NULL) {
+		return false;
+	}
+	VkExportMetalDeviceInfoEXT device_info = {.sType = VK_STRUCTURE_TYPE_EXPORT_METAL_DEVICE_INFO_EXT};
+	VkExportMetalObjectsInfoEXT objects_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+	    .pNext = &device_info,
+	};
+	vk->vkExportMetalObjectsEXT(vk->device, &objects_info);
+	id<MTLDevice> device = (__bridge id<MTLDevice>)device_info.mtlDevice;
+	if (device == nil) {
+		return false;
+	}
+	*out_device = device;
+	return true;
+}
+
+static MTLPixelFormat
+vk_format_to_metal_color_format(int64_t format)
+{
+	switch ((uint32_t)format) {
+	case 37: return MTLPixelFormatRGBA8Unorm;
+	case 43: return MTLPixelFormatRGBA8Unorm_sRGB;
+	case 44: return MTLPixelFormatBGRA8Unorm;
+	case 50: return MTLPixelFormatBGRA8Unorm_sRGB;
+	default: return MTLPixelFormatInvalid;
+	}
+}
+
+static MTLTextureUsage
+xrt_usage_to_metal(enum xrt_swapchain_usage_bits bits)
+{
+	MTLTextureUsage usage = MTLTextureUsageUnknown;
+	if ((bits & XRT_SWAPCHAIN_USAGE_COLOR) != 0) usage |= MTLTextureUsageRenderTarget;
+	if ((bits & XRT_SWAPCHAIN_USAGE_SAMPLED) != 0 || (bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0)
+		usage |= MTLTextureUsageShaderRead;
+	if ((bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) usage |= MTLTextureUsageShaderWrite;
+	if ((bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT) != 0) usage |= MTLTextureUsagePixelFormatView;
+	return usage;
+}
+
+bool
+comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
+                                                          const struct xrt_swapchain_create_info *info,
+                                                          uint32_t iosurface_id,
+                                                          void **out_texture)
+{
+	if (vk == NULL || info == NULL || iosurface_id == 0 || out_texture == NULL) return false;
+	*out_texture = NULL;
+	if (info->array_size != 1 || info->face_count != 1 || info->mip_count != 1 || info->sample_count != 1) {
+		U_LOG_E("IOSurface-ID import only supports 2D single-mip single-sample images: id=%u", iosurface_id);
+		return false;
+	}
+	MTLPixelFormat pixel_format = vk_format_to_metal_color_format(info->format);
+	if (pixel_format == MTLPixelFormatInvalid) {
+		U_LOG_E("IOSurface-ID import unsupported Vulkan format: id=%u format=%lld", iosurface_id, (long long)info->format);
+		return false;
+	}
+	id<MTLDevice> vk_device = nil;
+	if (!get_vk_metal_device(vk, &vk_device)) return false;
+
+	@autoreleasepool {
+		IOSurfaceRef surface = IOSurfaceLookup((IOSurfaceID)iosurface_id);
+		if (surface == NULL) {
+			U_LOG_E("IOSurfaceLookup failed for external id=%u", iosurface_id);
+			return false;
+		}
+		if (IOSurfaceGetWidth(surface) != info->width || IOSurfaceGetHeight(surface) != info->height ||
+		    IOSurfaceGetBytesPerElement(surface) < 4) {
+			U_LOG_E("External IOSurface geometry mismatch: id=%u got=%zux%zu expected=%ux%u",
+			        iosurface_id, IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), info->width, info->height);
+			CFRelease(surface);
+			return false;
+		}
+		MTLTextureDescriptor *descriptor =
+		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixel_format width:info->width height:info->height mipmapped:NO];
+		descriptor.storageMode = MTLStorageModeShared;
+		descriptor.usage = xrt_usage_to_metal(info->bits);
+		id<MTLTexture> texture = [vk_device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
+		CFRelease(surface);
+		if (texture == nil) {
+			U_LOG_E("Could not create MTLTexture from external IOSurface id=%u", iosurface_id);
+			return false;
+		}
+		if (texture.device != vk_device || texture.width != info->width || texture.height != info->height ||
+		    texture.arrayLength != 1 || texture.mipmapLevelCount != 1 || texture.sampleCount != 1 ||
+		    texture.pixelFormat != pixel_format || texture.textureType != MTLTextureType2D) {
+			[texture release];
+			return false;
+		}
+		U_LOG_I("External IOSurface imported on MoltenVK device: id=%u texture=%p", iosurface_id, (__bridge void *)texture);
+		*out_texture = (__bridge void *)texture;
+		return true;
+	}
+}
+
+void
+comp_metal_texture_release(void *texture)
+{
+	if (texture != NULL) [(__bridge id<MTLTexture>)texture release];
 }
 
 void
