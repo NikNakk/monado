@@ -53,6 +53,7 @@
 #include "os/os_time.h"
 #ifdef XRT_OS_OSX
 #include "multi/comp_multi_macos_displaylink.h"
+#include "util/comp_metal_semaphore_probe.h"
 #endif
 
 #include "util/u_var.h"
@@ -930,6 +931,18 @@ compositor_init_vulkan(struct comp_compositor *c)
 	if (xret != XRT_SUCCESS) {
 		return false;
 	}
+
+#ifdef XRT_OS_OSX
+	/*
+	 * Register the compositor Vulkan bundle as soon as it is valid. Wine's
+	 * DXMT/IOSurface path imports externally-created swapchains and therefore
+	 * never necessarily calls base_create_swapchain(), where this probe used
+	 * to be performed lazily. Without this eager registration a fresh service
+	 * falls back to CPU fence waits until some unrelated native client happens
+	 * to create a swapchain first.
+	 */
+	comp_metal_semaphore_probe(vk);
+#endif
 
 	return true;
 }
