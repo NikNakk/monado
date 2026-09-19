@@ -116,8 +116,14 @@ comp_metal_semaphore_import_bootstrap_event(const char *bootstrap_name,
 
 	pthread_mutex_lock(&g_provider.mutex);
 	struct vk_bundle *vk = g_provider.vk;
-	if (vk == NULL || vk->vkExportMetalObjectsEXT == NULL) {
+	if (vk == NULL) {
 		pthread_mutex_unlock(&g_provider.mutex);
+		U_LOG_E("DXMT shared-event import unavailable: Metal semaphore provider is not registered");
+		return XRT_ERROR_VULKAN;
+	}
+	if (vk->vkExportMetalObjectsEXT == NULL) {
+		pthread_mutex_unlock(&g_provider.mutex);
+		U_LOG_E("DXMT shared-event import unavailable: vkExportMetalObjectsEXT is not available");
 		return XRT_ERROR_VULKAN;
 	}
 
@@ -132,6 +138,7 @@ comp_metal_semaphore_import_bootstrap_event(const char *bootstrap_name,
 	id<MTLDevice> device = (__bridge id<MTLDevice>)device_info.mtlDevice;
 	if (device == nil) {
 		pthread_mutex_unlock(&g_provider.mutex);
+		U_LOG_E("DXMT shared-event import unavailable: Vulkan Metal device export returned nil");
 		return XRT_ERROR_VULKAN;
 	}
 
