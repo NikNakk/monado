@@ -403,6 +403,17 @@ struct ipc_shm_copy_chunk
 };
 
 /*!
+ * Bounded active-layer upload chunk for the Wine compositor bridge.
+ * Keep the generated command comfortably below IPC_BUF_SIZE (2048).
+ */
+#define IPC_LAYER_COPY_CHUNK_SIZE 1900
+struct ipc_layer_copy_chunk
+{
+	uint32_t size;
+	uint8_t data[IPC_LAYER_COPY_CHUNK_SIZE];
+};
+
+/*!
  * Arguments for xrt_device::get_view_poses with two views.
  */
 struct ipc_info_get_view_poses_2
