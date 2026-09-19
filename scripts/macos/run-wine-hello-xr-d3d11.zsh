@@ -51,18 +51,18 @@ if (( port < 1 || port > 65535 )); then
 	exit 2
 fi
 
-if ! nc -z 127.0.0.1 "${port}" >/dev/null 2>&1; then
-	print -u2 "Native Monado is not listening on 127.0.0.1:${port}."
-	print -u2 ""
-	print -u2 "Start the matching native service with the Wine bridge enabled."
-	print -u2 "For a manual service:"
-	print -u2 "  IPC_WINE_TCP_PORT=${port} <native-build>/src/xrt/targets/service/monado-service"
-	print -u2 ""
-	print -u2 "For the development launchd service, re-bootstrap with the port in its captured environment,"
-	print -u2 "then kickstart it:"
-	print -u2 "  IPC_WINE_TCP_PORT=${port} IPC_EXIT_WHEN_IDLE=0 <native-build>/src/xrt/targets/service/monado-service-xpc-control bootstrap"
-	print -u2 "  launchctl kickstart -k gui/\$(id -u)/org.freedesktop.monado.service"
-	exit 1
+# Do not use nc -z here: the service interprets every accepted TCP socket as
+# a Monado IPC client, so a port probe creates an unnecessary connect/teardown
+# immediately before the real Wine client. Inspect LISTEN state without connecting.
+if command -v lsof >/dev/null 2>&1; then
+	if ! lsof -nP -iTCP@"127.0.0.1:${port}" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+		print -u2 "Native Monado is not listening on 127.0.0.1:${port}."
+		print -u2 ""
+		print -u2 "Start the matching native service with the Wine bridge enabled:"
+		print -u2 "  IPC_WINE_TCP_PORT=${port} IPC_EXIT_WHEN_IDLE=0 <native-build>/src/xrt/targets/service/monado-service-xpc-control bootstrap"
+		print -u2 "  launchctl kickstart -k gui/\$(id -u)/org.freedesktop.monado.service"
+		exit 1
+	fi
 fi
 
 run_dir=${runtime_build}/wine-run
