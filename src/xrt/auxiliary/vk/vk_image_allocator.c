@@ -305,15 +305,19 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	};
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 	if ((info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
-		VkImageFormatProperties depth_props = {0};
-		VkResult depth_probe = vk->vkGetPhysicalDeviceImageFormatProperties(
-		    vk->physical_device,
-		    image_format,
-		    VK_IMAGE_TYPE_2D,
-		    VK_IMAGE_TILING_OPTIMAL,
-		    image_usage,
-		    image_create_flags,
-		    &depth_props);
+		VkPhysicalDeviceImageFormatInfo2 depth_info = {
+		    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+		    .format = image_format,
+		    .type = VK_IMAGE_TYPE_2D,
+		    .tiling = VK_IMAGE_TILING_OPTIMAL,
+		    .usage = image_usage,
+		    .flags = image_create_flags,
+		};
+		VkImageFormatProperties2 depth_props = {
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+		};
+		VkResult depth_probe =
+		    vk->vkGetPhysicalDeviceImageFormatProperties2(vk->physical_device, &depth_info, &depth_props);
 		U_LOG_I("macOS depth image probe: format=%u usage=0x%x flags=0x%x size=%ux%u result=%d maxExtent=%ux%u maxLayers=%u exportType=0x%x",
 		        (uint32_t)image_format,
 		        (uint32_t)image_usage,
@@ -321,9 +325,9 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 		        info->width,
 		        info->height,
 		        (int)depth_probe,
-		        depth_probe == VK_SUCCESS ? depth_props.maxExtent.width : 0,
-		        depth_probe == VK_SUCCESS ? depth_props.maxExtent.height : 0,
-		        depth_probe == VK_SUCCESS ? depth_props.maxArrayLayers : 0,
+		        depth_probe == VK_SUCCESS ? depth_props.imageFormatProperties.maxExtent.width : 0,
+		        depth_probe == VK_SUCCESS ? depth_props.imageFormatProperties.maxExtent.height : 0,
+		        depth_probe == VK_SUCCESS ? depth_props.imageFormatProperties.maxArrayLayers : 0,
 		        vk->has_EXT_metal_objects ? (uint32_t)export_metal_object_create_info.exportObjectType : 0);
 	}
 #endif
