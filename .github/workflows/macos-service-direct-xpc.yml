@@ -37,6 +37,7 @@ jobs:
           zsh -n scripts/macos/run-wine-d3d11-iosurface-import.zsh
           zsh -n scripts/macos/build-wine-openxr-d3d11.zsh
           zsh -n scripts/macos/build-wine-hello-xr-d3d11.zsh
+          zsh -n scripts/macos/run-wine-hello-xr-d3d11.zsh
 
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
@@ -110,7 +111,7 @@ jobs:
           test -x build-release/tests/tests_macos_iosurface_producer
           test -x build-release/tests/tests_macos_iosurface_import_probe
           test -f build-wine-dxmt/bin/macos_wine_d3d11_iosurface_producer.exe
-          test -f build-wine/openxr_monado-dev.json
+          test -f build-wine-openxr/openxr_monado-dev.json
           test -f build-wine-hello-xr/khr_hello_xr_d3d11.exe
 
       - name: Verify repeatable full install
