@@ -786,12 +786,22 @@ ipc_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 	// Last bit of data to put in the shared memory area.
 	slot->layer_count = icc->layers.layer_count;
 
-	xret = ipc_call_compositor_layer_sync( //
-	    icc->ipc_c,                        //
-	    icc->layers.slot_id,               //
-	    &sync_handle,                      //
-	    valid_sync ? 1 : 0,                //
-	    &icc->layers.slot_id);             //
+	if (icc->ipc_c->imc.stream_socket) {
+		/*
+		 * The Wine bridge owns a private metadata snapshot rather than the
+		 * service's shared-memory mapping. Send the completed slot inline.
+		 * Producer GPU completion must already have been established by the
+		 * D3D11 client compositor before entering this path.
+		 */
+		xret = ipc_call_compositor_layer_sync_copy(icc->ipc_c, slot, &icc->layers.slot_id);
+	} else {
+		xret = ipc_call_compositor_layer_sync( //
+		    icc->ipc_c,                        //
+		    icc->layers.slot_id,               //
+		    &sync_handle,                      //
+		    valid_sync ? 1 : 0,                //
+		    &icc->layers.slot_id);             //
+	}
 
 	/*
 	 * We are probably in a really bad state if we fail, at
