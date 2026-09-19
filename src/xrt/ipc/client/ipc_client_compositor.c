@@ -852,6 +852,11 @@ ipc_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 		    offsetof(struct ipc_layer_slot, layers) + ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
 		if (total_size > UINT32_MAX) {
 			xret = XRT_ERROR_IPC_FAILURE;
+		} else if (slot->layer_count == 1 && total_size <= IPC_LAYER_SINGLE_PAYLOAD_SIZE) {
+			struct ipc_layer_single_payload payload = {0};
+			payload.size = (uint32_t)total_size;
+			memcpy(payload.data, slot, total_size);
+			xret = ipc_call_compositor_layer_sync_single(icc->ipc_c, &payload, &icc->layers.slot_id);
 		} else {
 			const uint8_t *src = (const uint8_t *)slot;
 			xret = XRT_SUCCESS;
