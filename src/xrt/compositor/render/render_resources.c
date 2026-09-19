@@ -758,7 +758,7 @@ render_resources_init(struct render_resources *r,
 		    .uniform_per_descriptor_count = 1,
 		    .sampler_per_descriptor_count = 1,
 		    .storage_image_per_descriptor_count = 0,
-		    .storage_buffer_per_descriptor_count = 1,
+		    .storage_buffer_per_descriptor_count = 0,
 		    .descriptor_count = layer_shader_count + mesh_shader_count,
 		    .freeable = false,
 		};
@@ -890,7 +890,7 @@ render_resources_init(struct render_resources *r,
 	    // layer images
 	    .sampler_per_descriptor_count = r->compute.layer.image_array_size + RENDER_DISTORTION_IMAGES_COUNT(r),
 	    .storage_image_per_descriptor_count = 1,
-	    .storage_buffer_per_descriptor_count = 0,
+	    .storage_buffer_per_descriptor_count = 1,
 	    .descriptor_count = compute_descriptor_count,
 	    .freeable = false,
 	};
