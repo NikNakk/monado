@@ -38,6 +38,10 @@ jobs:
           zsh -n scripts/macos/build-wine-openxr-d3d11.zsh
           zsh -n scripts/macos/build-wine-hello-xr-d3d11.zsh
           zsh -n scripts/macos/run-wine-hello-xr-d3d11.zsh
+          zsh -n scripts/macos/build-wine-dxmt-gpu-sync.zsh
+          zsh -n scripts/macos/build-wine-openvr-smoke.zsh
+          zsh -n scripts/macos/provision-opencomposite.zsh
+          zsh -n scripts/macos/run-wine-openvr-opencomposite-smoke.zsh
 
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
@@ -89,6 +93,15 @@ jobs:
       - name: Cross-build Wine OpenXR D3D11 runtime
         run: scripts/macos/build-wine-openxr-d3d11.zsh
 
+      - name: Cross-build OpenVR/OpenComposite smoke test
+        run: scripts/macos/build-wine-openvr-smoke.zsh
+
+      - name: Check Monado DXMT shared-fence patch
+        run: |
+          git clone --quiet https://github.com/3Shain/dxmt.git "${RUNNER_TEMP}/dxmt-v080"
+          git -C "${RUNNER_TEMP}/dxmt-v080" checkout --quiet 589adb780354b461645b29999cefaf533594ee99
+          git -C "${RUNNER_TEMP}/dxmt-v080" apply --check "${GITHUB_WORKSPACE}/scripts/macos/dxmt-patches/0005-monado-shared-fence-bootstrap-name.patch"
+
       - name: Configure full Release build
         run: >-
           cmake -S . -B build-release -G Ninja
@@ -113,6 +126,7 @@ jobs:
           test -f build-wine-dxmt/bin/macos_wine_d3d11_iosurface_producer.exe
           test -f build-wine-openxr/openxr_monado-dev.json
           test -f build-wine-hello-xr/khr_hello_xr_d3d11.exe
+          test -f build-wine-openvr/openvr_opencomposite_smoke.exe
 
       - name: Verify repeatable full install
         run: |
