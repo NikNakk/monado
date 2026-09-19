@@ -303,18 +303,26 @@ bool depth_find_nearer_occluder(vec2 rotational_source_uv,
 
 	vec2 direction_px = delta_px_per_inv_m / delta_len;
 	// Search as though surfaces as near as 0.40 m may occlude the current
-	// candidate, but cap the work/coverage at 64 source pixels.
+	// candidate. Use roughly one probe per eight source pixels, capped at
+	// sixteen probes and 384 pixels. Normal late-reprojection motion therefore
+	// stays cheap, while the frozen-frame stress test can cover much larger
+	// translations than the old fixed 64-pixel window.
 	float min_search_z = max(ubo.projection_depth[iz].z, 0.40);
-	float max_shift_px = clamp(delta_len / min_search_z, 1.0, 64.0);
-	const float fractions[4] = float[4](0.20, 0.40, 0.70, 1.00);
+	float max_shift_px = clamp(delta_len / min_search_z, 1.0, 384.0);
+	int probe_count = int(clamp(ceil(max_shift_px / 8.0), 1.0, 16.0));
+	float probe_step_px = max_shift_px / float(probe_count);
 
 	bool found = false;
 	float best_z = current_z_distance;
 	vec2 best_uv = rotational_source_uv;
 
-	for (int i = 0; i < 4; ++i) {
+	for (int i = 0; i < 16; ++i) {
+		if (i >= probe_count) {
+			break;
+		}
+		float probe_distance_px = probe_step_px * float(i + 1);
 		vec2 probe_uv = rotational_source_uv +
-		                direction_px * (max_shift_px * fractions[i]) / source_size;
+		                direction_px * probe_distance_px / source_size;
 		if (any(lessThan(probe_uv, vec2(0.0))) ||
 		    any(greaterThan(probe_uv, vec2(1.0)))) {
 			continue;
@@ -363,14 +371,16 @@ bool depth_find_nearer_occluder(vec2 rotational_source_uv,
 	return found;
 }
 
-vec2 depth_resolve_projection_uv(float scanout_fraction,
-                                 vec2 rotational_source_uv,
-                                 uint iz)
+bool depth_resolve_visibility(float scanout_fraction,
+                              vec2 rotational_source_uv,
+                              uint iz,
+                              out float selected_z_distance,
+                              out vec3 source_origin,
+                              out vec2 selected_uv)
 {
 	float solved_z_distance;
 	float initial_z_distance;
 	float refined_z_distance;
-	vec3 source_origin;
 	vec2 corrected_uv;
 	vec2 first_corrected_uv;
 	bool refinement_oscillated;
@@ -386,32 +396,55 @@ vec2 depth_resolve_projection_uv(float scanout_fraction,
 	                                          first_corrected_uv,
 	                                          refinement_oscillated);
 	if (!depth_solved) {
-		return rotational_source_uv;
+		selected_z_distance = 0.0;
+		selected_uv = rotational_source_uv;
+		return false;
 	}
 
-	vec2 base_uv = corrected_uv;
-	float base_z = solved_z_distance;
+	selected_z_distance = solved_z_distance;
+	selected_uv = corrected_uv;
 
-	// Background-biased handling of A<->B cycles. This remains the hole-fill
-	// fallback, but a valid nearer/frontmost candidate found below overrides it.
+	// Background-biased handling of A<->B cycles.
 	if (ubo.depth_debug.y != 0u && refinement_oscillated &&
 	    initial_z_distance > refined_z_distance) {
-		base_uv = rotational_source_uv;
-		base_z = initial_z_distance;
+		selected_z_distance = initial_z_distance;
+		selected_uv = rotational_source_uv;
 	}
 
+	// Recover foreground that has moved into this output pixel. This is a
+	// single geometric visibility decision and is intentionally performed on
+	// the green/central ray when shared visibility is enabled.
 	vec2 occluder_uv;
 	float occluder_z;
 	if (depth_find_nearer_occluder(rotational_source_uv,
 	                               iz,
 	                               source_origin,
-	                               base_z,
+	                               selected_z_distance,
 	                               occluder_uv,
 	                               occluder_z)) {
-		return occluder_uv;
+		selected_z_distance = occluder_z;
+		selected_uv = occluder_uv;
 	}
 
-	return base_uv;
+	return true;
+}
+
+vec2 depth_resolve_projection_uv(float scanout_fraction,
+                                 vec2 rotational_source_uv,
+                                 uint iz)
+{
+	float selected_z_distance;
+	vec3 source_origin;
+	vec2 selected_uv;
+	if (!depth_resolve_visibility(scanout_fraction,
+	                              rotational_source_uv,
+	                              iz,
+	                              selected_z_distance,
+	                              source_origin,
+	                              selected_uv)) {
+		return rotational_source_uv;
+	}
+	return selected_uv;
 }
 
 vec2 transform_uv(vec2 uv, uint iz)
@@ -523,43 +556,32 @@ void main()
 				b_projection_uv =
 				    depth_resolve_projection_uv(subimage_uv.y, b_projection_uv, iz);
 			} else {
-				// Previous lower-cost approximation retained for A/B and profiling:
-				// solve green fully, then apply its chosen surface depth to R/B.
-				float solved_z_distance;
-				float initial_z_distance;
-				float refined_z_distance;
+				// Default path: visibility is geometric, so choose one frontmost
+				// surface using the green/central ray, then apply that same surface
+				// depth to the chromatic sampling rays. R/G/B may sample different
+				// source coordinates for lens correction, but they must not disagree
+				// about which object is in front.
+				float selected_z_distance;
 				vec3 source_origin;
-				vec2 corrected_g;
-				vec2 first_corrected_g;
-				bool refinement_oscillated;
-				bool depth_solved = depth_solve_projection(subimage_uv.y,
-				                                           g_projection_uv,
-				                                           iz,
-				                                           solved_z_distance,
-				                                           source_origin,
-				                                           corrected_g,
-				                                           initial_z_distance,
-				                                           refined_z_distance,
-				                                           first_corrected_g,
-				                                           refinement_oscillated);
-				if (depth_solved) {
-					bool use_rotation_only_background =
-					    ubo.depth_debug.y != 0u && refinement_oscillated &&
-					    initial_z_distance > refined_z_distance;
-					if (!use_rotation_only_background) {
-						vec2 corrected_r =
-						    depth_translate_projection_uv(r_projection_uv, solved_z_distance, source_origin, iz);
-						vec2 corrected_b =
-						    depth_translate_projection_uv(b_projection_uv, solved_z_distance, source_origin, iz);
-						if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
-						    all(lessThanEqual(corrected_r, vec2(1.0)))) {
-							r_projection_uv = corrected_r;
-						}
-						g_projection_uv = corrected_g;
-						if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
-						    all(lessThanEqual(corrected_b, vec2(1.0)))) {
-							b_projection_uv = corrected_b;
-						}
+				vec2 selected_g;
+				if (depth_resolve_visibility(subimage_uv.y,
+				                             g_projection_uv,
+				                             iz,
+				                             selected_z_distance,
+				                             source_origin,
+				                             selected_g)) {
+					vec2 corrected_r =
+					    depth_translate_projection_uv(r_projection_uv, selected_z_distance, source_origin, iz);
+					vec2 corrected_b =
+					    depth_translate_projection_uv(b_projection_uv, selected_z_distance, source_origin, iz);
+					if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
+					    all(lessThanEqual(corrected_r, vec2(1.0)))) {
+						r_projection_uv = corrected_r;
+					}
+					g_projection_uv = selected_g;
+					if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
+					    all(lessThanEqual(corrected_b, vec2(1.0)))) {
+						b_projection_uv = corrected_b;
 					}
 				}
 			}
