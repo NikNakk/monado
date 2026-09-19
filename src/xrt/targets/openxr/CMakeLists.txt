@@ -43,6 +43,11 @@ else()
 		)
 endif()
 
+if(XRT_FEATURE_WINE_D3D11_BRIDGE)
+	# Keep the PE runtime self-contained inside the private Wine bottle.
+	target_link_options(${RUNTIME_TARGET} PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+
 if(APPLE)
 	# Only expose the negotiate symbol.
 	set_property(
