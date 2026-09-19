@@ -38,6 +38,7 @@
 
 
 #include <stdio.h>
+#include <stdlib.h>
 #if !defined(XRT_OS_WINDOWS)
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -92,6 +93,49 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c, struct _JavaVM *vm, void
 }
 
 #elif defined(XRT_OS_WINDOWS)
+
+static bool
+ipc_client_tcp_connect(struct ipc_connection *ipc_c, const char *port_text)
+{
+	char *end = NULL;
+	long port = strtol(port_text, &end, 10);
+	if (end == port_text || *end != '\0' || port <= 0 || port > 65535) {
+		IPC_ERROR(ipc_c, "Invalid MONADO_WINE_TCP_PORT value '%s'", port_text);
+		return false;
+	}
+
+	WSADATA wsa = {};
+	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+		IPC_ERROR(ipc_c, "WSAStartup failed");
+		return false;
+	}
+
+	SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (sock == INVALID_SOCKET) {
+		IPC_ERROR(ipc_c, "Wine bridge socket() failed: %d", WSAGetLastError());
+		WSACleanup();
+		return false;
+	}
+
+	sockaddr_in addr = {};
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons((u_short)port);
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+	if (connect(sock, (sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
+		IPC_ERROR(ipc_c, "Wine bridge connect(127.0.0.1:%ld) failed: %d", port, WSAGetLastError());
+		closesocket(sock);
+		WSACleanup();
+		return false;
+	}
+
+	ipc_c->imc.ipc_handle = (xrt_ipc_handle_t)(uintptr_t)sock;
+	ipc_c->imc.stream_socket = true;
+	ipc_c->imc.frame_reads = true;
+	ipc_c->imc.frame_writes = false;
+	IPC_INFO(ipc_c, "Connected to native macOS Monado service over Wine TCP bridge on 127.0.0.1:%ld", port);
+	return true;
+}
 
 #if defined(NO_XRT_SERVICE_LAUNCH) || !defined(XRT_SERVICE_EXECUTABLE)
 static HANDLE
@@ -180,6 +224,11 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 static bool
 ipc_client_socket_connect(struct ipc_connection *ipc_c)
 {
+	const char *wine_tcp_port = getenv("MONADO_WINE_TCP_PORT");
+	if (wine_tcp_port != NULL && wine_tcp_port[0] != '\0') {
+		return ipc_client_tcp_connect(ipc_c, wine_tcp_port);
+	}
+
 	const char pipe_prefix[] = "\\\\.\\pipe\\";
 #define prefix_len sizeof(pipe_prefix) - 1
 	char pipe_name[MAX_PATH + prefix_len];
@@ -312,6 +361,26 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 static xrt_result_t
 ipc_client_setup_shm(struct ipc_connection *ipc_c)
 {
+#ifdef XRT_OS_WINDOWS
+	if (ipc_c->imc.stream_socket) {
+		ipc_c->ism = U_TYPED_CALLOC(struct ipc_shared_memory);
+		if (ipc_c->ism == NULL) {
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		xrt_result_t xret = ipc_call_instance_get_shm_copy(ipc_c, ipc_c->ism);
+		if (xret != XRT_SUCCESS) {
+			free(ipc_c->ism);
+			ipc_c->ism = NULL;
+			IPC_ERROR(ipc_c, "Failed to retrieve shared-memory snapshot over Wine bridge");
+			return xret;
+		}
+
+		ipc_c->ism_is_copy = true;
+		return XRT_SUCCESS;
+	}
+#endif
+
 	/*
 	 * Get our shared memory area from the server.
 	 */
@@ -472,6 +541,12 @@ err_fini:
 void
 ipc_client_connection_fini(struct ipc_connection *ipc_c)
 {
+	if (ipc_c->ism_is_copy) {
+		free(ipc_c->ism);
+		ipc_c->ism = NULL;
+		ipc_c->ism_is_copy = false;
+	}
+
 	if (ipc_c->ism_handle != XRT_SHMEM_HANDLE_INVALID) {
 		/// @todo how to tear down the shared memory?
 	}
