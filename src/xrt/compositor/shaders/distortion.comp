@@ -163,7 +163,8 @@ bool depth_solve_projection(float scanout_fraction,
                             out vec2 corrected_green_uv,
                             out float initial_z_distance,
                             out float refined_z_distance,
-                            out vec2 first_corrected_uv)
+                            out vec2 first_corrected_uv,
+                            out bool refinement_oscillated)
 {
 	solved_z_distance = 0.0;
 	source_origin = vec3(0.0);
@@ -171,6 +172,7 @@ bool depth_solve_projection(float scanout_fraction,
 	initial_z_distance = 0.0;
 	refined_z_distance = 0.0;
 	first_corrected_uv = rotational_green_uv;
+	refinement_oscillated = false;
 
 	if (any(lessThan(rotational_green_uv, vec2(0.0))) ||
 	    any(greaterThan(rotational_green_uv, vec2(1.0)))) {
@@ -213,8 +215,40 @@ bool depth_solve_projection(float scanout_fraction,
 		    depth_translate_projection_uv(rotational_green_uv, refined_z_distance, source_origin, iz);
 		if (all(greaterThanEqual(refined_uv, vec2(0.0))) &&
 		    all(lessThanEqual(refined_uv, vec2(1.0)))) {
-			corrected_uv = refined_uv;
-			source_z_distance = refined_z_distance;
+			/*
+			 * A foreground/background boundary can produce a two-cycle:
+			 * z0 -> UV1 lands on z1, then z1 -> UV2 lands back on z0.
+			 * Accepting UV2 while assuming z1 gives exactly the moving
+			 * outline/shadow seen in the diagnostic scene. Only pay for a
+			 * third depth fetch when the refinement actually changed
+			 * surfaces, and accept the refined candidate only if its own
+			 * landing point agrees with z1.
+			 */
+			float reference_z = min(source_z_distance, refined_z_distance);
+			float switch_tolerance = max(0.05, 0.20 * reference_z);
+			bool surface_switch =
+			    abs(refined_z_distance - source_z_distance) > switch_tolerance;
+			bool accept_refined = true;
+
+			if (surface_switch) {
+				vec2 verify_depth_uv =
+				    fma(refined_uv, ubo.depth_post_transform[iz].zw, ubo.depth_post_transform[iz].xy);
+				float verify_window_depth = texture(source[2 + iz], verify_depth_uv).r;
+				float verify_z_distance =
+				    projection_depth_to_view_z_distance(verify_window_depth, ubo.projection_depth[iz]);
+				float verify_reference_z =
+				    verify_z_distance > 0.0 ? min(refined_z_distance, verify_z_distance) : refined_z_distance;
+				float verify_tolerance = max(0.05, 0.20 * verify_reference_z);
+				accept_refined =
+				    verify_z_distance > 0.0 &&
+				    abs(verify_z_distance - refined_z_distance) <= verify_tolerance;
+				refinement_oscillated = !accept_refined;
+			}
+
+			if (accept_refined) {
+				corrected_uv = refined_uv;
+				source_z_distance = refined_z_distance;
+			}
 		}
 	}
 
@@ -269,6 +303,7 @@ void main()
 			vec3 source_origin;
 			vec2 corrected_g;
 			vec2 first_corrected_g;
+			bool refinement_oscillated;
 			bool depth_solved = depth_solve_projection(subimage_uv.y,
 			                                           g_projection_uv,
 			                                           iz,
@@ -277,7 +312,8 @@ void main()
 			                                           corrected_g,
 			                                           initial_z_distance,
 			                                           refined_z_distance,
-			                                           first_corrected_g);
+			                                           first_corrected_g,
+			                                           refinement_oscillated);
 
 			if (ubo.depth_debug.x != 0u) {
 				vec4 debug_colour = vec4(0.0, 0.0, 1.0, 1.0);
@@ -292,8 +328,9 @@ void main()
 						debug_colour = vec4(vec3(depth_level), 1.0);
 					}
 				} else if (ubo.depth_debug.x == 2u) {
-					// Grey = same surface, magenta = refinement jumped to a
-					// materially different depth surface, blue = invalid solve.
+					// Grey = same surface, yellow = a surface switch converged,
+					// magenta = the refinement formed an A<->B two-cycle and was
+					// rejected, blue = invalid solve.
 					if (depth_solved) {
 						float reference_z =
 						    refined_z_distance > 0.0 ? min(initial_z_distance, refined_z_distance) : initial_z_distance;
@@ -301,8 +338,13 @@ void main()
 						bool surface_switch =
 						    refined_z_distance > 0.0 &&
 						    abs(refined_z_distance - initial_z_distance) > allowed_jump;
-						debug_colour =
-						    surface_switch ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(0.35, 0.35, 0.35, 1.0);
+						if (refinement_oscillated) {
+							debug_colour = vec4(1.0, 0.0, 1.0, 1.0);
+						} else if (surface_switch) {
+							debug_colour = vec4(1.0, 1.0, 0.0, 1.0);
+						} else {
+							debug_colour = vec4(0.35, 0.35, 0.35, 1.0);
+						}
 					}
 				} else if (ubo.depth_debug.x == 3u) {
 					// Heat-map the first-to-refined correction in source pixels:
