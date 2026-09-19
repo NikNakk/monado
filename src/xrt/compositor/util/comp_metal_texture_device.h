@@ -9,12 +9,14 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 struct vk_bundle;
+struct xrt_swapchain_create_info;
 
 /*
  * Return a Metal texture that belongs to the exact MTLDevice underlying @p vk.
@@ -28,6 +30,15 @@ comp_metal_texture_prepare_for_vk_device(struct vk_bundle *vk,
                                          void *source_texture,
                                          void **out_texture,
                                          bool *out_needs_release);
+
+bool
+comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
+                                                          const struct xrt_swapchain_create_info *info,
+                                                          uint32_t iosurface_id,
+                                                          void **out_texture);
+
+void
+comp_metal_texture_release(void *texture);
 
 /* Release a texture returned with out_needs_release=true. */
 void
