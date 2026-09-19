@@ -50,8 +50,9 @@ For the Wine bridge:
   transferring an OS shared-memory handle;
 - completed composition-layer slots are copied inline at frame submission;
 - D3D11 swapchain resources are transferred by process-independent IOSurface IDs;
-- producer GPU completion initially uses a local D3D11 fence before native
-  layer commit.
+- producer GPU completion uses the same DXMT-backed `MTLSharedEvent` as a
+  native Vulkan timeline semaphore when the GPU-sync DXMT patch is installed;
+  the original CPU fence wait remains as a diagnostic fallback.
 
 This deliberately preserves Monado's existing OpenXR state tracker rather than
 creating a second OpenXR implementation.
@@ -150,13 +151,15 @@ The first implementation intentionally supports:
 - simple 2D color swapchains;
 - BGRA8/RGBA8 linear and sRGB;
 - no transported depth swapchain;
-- D3D11 fence + CPU wait for producer completion;
-- copied layer slots rather than shared cross-OS memory;
+- GPU-only D3D11 fence / Metal shared-event / Vulkan timeline synchronization
+  when using the patched private DXMT, with CPU-wait fallback;
+- one-RPC single-projection submission, with compact chunk fallback for
+  multi-layer frames;
 - development loopback TCP without authentication.
 
-The intended next optimization is DXMT `MTLSharedEvent` export so the Windows
-client can feed Monado's existing compositor timeline semaphore path without a
-CPU fence waiter.
+The principal remaining performance work is measurement and tuning: compare
+the GPU-only path with `MONADO_WINE_GPU_SYNC=0`, inspect the timing CSV, and
+correlate any remaining stalls with the native compositor/presentation trace.
 
 
 ## Performance instrumentation
@@ -242,9 +245,14 @@ MONADO_WINE_TCP_PORT=4242 \
 scripts/macos/run-wine-openvr-opencomposite-smoke.zsh
 ```
 
-The smoke executable dynamically loads OpenComposite directly, so it cannot
-accidentally initialize SteamVR. It requests an OpenVR scene application,
-`IVRSystem`, and `IVRCompositor` through the Monado Windows OpenXR runtime.
+The smoke executables dynamically load OpenComposite directly, so they cannot
+accidentally initialize SteamVR. The first requests an OpenVR scene
+application, `IVRSystem`, and `IVRCompositor`. The second creates D3D11
+render targets at OpenVR's recommended eye size and submits visible left/right
+frames through `IVRCompositor::Submit`, exercising the full
+OpenVR -> OpenComposite -> OpenXR -> DXMT -> IOSurface -> native Monado path.
+It renders 360 frames by default; override with
+`MONADO_OPENVR_SMOKE_FRAMES`.
 
 For a real OpenVR game, use the reversible per-game replacement:
 
