@@ -93,6 +93,17 @@ xrt_result_t
 comp_semaphore_create_metal_shared_event(struct vk_bundle *vk,
                                          struct xrt_compositor_semaphore **out_xcsem,
                                          void **out_mtl_shared_event);
+
+/*!
+ * Create a Vulkan timeline semaphore backed by an existing MTLSharedEvent.
+ * The Metal object remains owned by the caller; Vulkan retains the imported
+ * shared event for the lifetime of the semaphore.
+ */
+xrt_result_t
+comp_semaphore_import_metal_shared_event(struct vk_bundle *vk,
+                                         void *mtl_shared_event,
+                                         uint64_t initial_value,
+                                         struct xrt_compositor_semaphore **out_xcsem);
 #endif
 
 
