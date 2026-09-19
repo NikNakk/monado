@@ -176,6 +176,10 @@ struct ipc_client_state
 
 	struct ipc_app_state client_state;
 
+	//! Staging area for compact Wine/TCP layer uploads.
+	struct ipc_layer_slot wine_layer_slot_upload;
+	uint32_t wine_layer_slot_received;
+	uint32_t wine_layer_slot_total_size;
 
 	uint64_t plane_detection_size;
 	uint64_t plane_detection_count;
