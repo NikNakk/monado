@@ -238,7 +238,6 @@ renderer_get_macos_late_render_desired_offset_us(int64_t *out_offset_us)
 
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 
-#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 static bool
 renderer_reprojection_trace_enabled(void)
 {
@@ -385,7 +384,7 @@ renderer_reprojection_trace_frame(struct comp_renderer *r,
 	    layer != NULL ? renderer_projection_views(&layer->data) : NULL;
 	if (layer == NULL || views == NULL || layer->data.view_count == 0 || view_count == 0) {
 		fprintf(r->reprojection_trace,
-		        "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,0,0,0,0,0,0,0,0,0,0\n",
+		        "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,0,0,0,0,0,0,0,0,0,0",
 		        (long long)r->c->frame.rendering.id,
 		        (long long)os_monotonic_get_ns(),
 		        (unsigned long long)r->c->frame.rendering.predicted_display_time_ns,
@@ -394,6 +393,14 @@ renderer_reprojection_trace_frame(struct comp_renderer *r,
 		        path,
 		        fast_path ? 1 : 0,
 		        do_timewarp ? 1 : 0);
+		/*
+		 * Header has 100 columns total. The prefix above writes 18;
+		 * preserve a rectangular CSV through warm-start/teardown frames.
+		 */
+		for (uint32_t i = 18; i < 100; ++i) {
+			fputs(",nan", r->reprojection_trace);
+		}
+		fputc('\n', r->reprojection_trace);
 		r->reprojection_prev_source_valid = false;
 		r->reprojection_prev_scanout_valid = false;
 		goto flush_maybe;
@@ -494,7 +501,6 @@ flush_maybe:
 		fflush(r->reprojection_trace);
 	}
 }
-#endif
 
 static void
 renderer_late_render_trace_open(struct comp_renderer *r)
