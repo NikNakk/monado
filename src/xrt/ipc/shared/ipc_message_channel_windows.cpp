@@ -28,6 +28,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <assert.h>
+#include <winsock2.h>
 
 #include <vector>
 
@@ -88,6 +89,38 @@ open_target_process_dup_handle(struct ipc_message_channel *imc)
 }
 
 
+static xrt_result_t
+stream_send_exact(struct ipc_message_channel *imc, const void *data, size_t size)
+{
+	const char *ptr = static_cast<const char *>(data);
+	size_t total = 0;
+	while (total < size) {
+		int sent = send((SOCKET)(uintptr_t)imc->ipc_handle, ptr + total, (int)(size - total), 0);
+		if (sent <= 0) {
+			IPC_ERROR(imc, "send() on Wine bridge socket failed: %d", WSAGetLastError());
+			return XRT_ERROR_IPC_FAILURE;
+		}
+		total += (size_t)sent;
+	}
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+stream_recv_exact(struct ipc_message_channel *imc, void *data, size_t size)
+{
+	char *ptr = static_cast<char *>(data);
+	size_t total = 0;
+	while (total < size) {
+		int got = recv((SOCKET)(uintptr_t)imc->ipc_handle, ptr + total, (int)(size - total), 0);
+		if (got <= 0) {
+			IPC_ERROR(imc, "recv() on Wine bridge socket failed: %d", WSAGetLastError());
+			return XRT_ERROR_IPC_FAILURE;
+		}
+		total += (size_t)got;
+	}
+	return XRT_SUCCESS;
+}
+
 /*
  *
  * 'Exported' functions.
@@ -97,15 +130,24 @@ open_target_process_dup_handle(struct ipc_message_channel *imc)
 void
 ipc_message_channel_close(struct ipc_message_channel *imc)
 {
-	if (imc->ipc_handle != INVALID_HANDLE_VALUE) {
-		CloseHandle(imc->ipc_handle);
-		imc->ipc_handle = INVALID_HANDLE_VALUE;
+	if (imc->ipc_handle == INVALID_HANDLE_VALUE) {
+		return;
 	}
+	if (imc->stream_socket) {
+		closesocket((SOCKET)(uintptr_t)imc->ipc_handle);
+	} else {
+		CloseHandle(imc->ipc_handle);
+	}
+	imc->ipc_handle = INVALID_HANDLE_VALUE;
 }
 
 xrt_result_t
 ipc_send(struct ipc_message_channel *imc, const void *data, size_t size)
 {
+	if (imc->stream_socket) {
+		return stream_send_exact(imc, data, size);
+	}
+
 	DWORD len;
 	if (!WriteFile(imc->ipc_handle, data, DWORD(size), &len, NULL)) {
 		DWORD err = GetLastError();
@@ -118,6 +160,19 @@ ipc_send(struct ipc_message_channel *imc, const void *data, size_t size)
 xrt_result_t
 ipc_receive(struct ipc_message_channel *imc, void *out_data, size_t size)
 {
+	if (imc->stream_socket) {
+		uint32_t framed_size = 0;
+		xrt_result_t xret = stream_recv_exact(imc, &framed_size, sizeof(framed_size));
+		if (xret != XRT_SUCCESS) {
+			return xret;
+		}
+		if ((size_t)framed_size != size) {
+			IPC_ERROR(imc, "Wine bridge framed response size %u, expected %zu", framed_size, size);
+			return XRT_ERROR_IPC_FAILURE;
+		}
+		return stream_recv_exact(imc, out_data, size);
+	}
+
 	DWORD len;
 	if (!ReadFile(imc->ipc_handle, out_data, DWORD(size), &len, NULL)) {
 		DWORD err = GetLastError();
