@@ -927,23 +927,6 @@ dispatch_depth_visibility(struct render_compute *render,
 	VkDeviceSize active_size =
 	    (VkDeviceSize)width * (VkDeviceSize)height * (VkDeviceSize)view_count * sizeof(uint32_t);
 
-	// Positive finite float bit patterns preserve ordering, so filling with
-	// FLT_MAX bits lets atomicMin implement a frontmost target-depth z-buffer.
-	vk->vkCmdFillBuffer(r->cmd, r->compute.depth_visibility.buffer.buffer, 0, active_size, 0x7f7fffffu);
-
-	VkBufferMemoryBarrier fill_barrier = {
-	    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-	    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .buffer = r->compute.depth_visibility.buffer.buffer,
-	    .offset = 0,
-	    .size = active_size,
-	};
-	vk->vkCmdPipelineBarrier(r->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-	                         NULL, 1, &fill_barrier, 0, NULL);
-
 	VkSampler combined_src_samplers[2 * XRT_MAX_VIEWS];
 	VkImageView combined_src_image_views[2 * XRT_MAX_VIEWS];
 	for (uint32_t i = 0; i < view_count; ++i) {
@@ -997,9 +980,27 @@ dispatch_depth_visibility(struct render_compute *render,
 	};
 	vk->vkUpdateDescriptorSets(vk->device, ARRAY_SIZE(writes), writes, 0, NULL);
 
-	vk->vkCmdBindPipeline(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.depth_visibility.pipeline);
+	// Clear the active visibility region on-GPU before the forward splat.
+	vk->vkCmdBindPipeline(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.depth_visibility.clear_pipeline);
 	vk->vkCmdBindDescriptorSets(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.distortion.pipeline_layout, 0, 1,
 	                            &render->shared_descriptor_set, 0, NULL);
+	uint64_t visibility_count = (uint64_t)width * (uint64_t)height * (uint64_t)view_count;
+	vk->vkCmdDispatch(r->cmd, uint_divide_and_round_up((uint32_t)visibility_count, 256), 1, 1);
+
+	VkBufferMemoryBarrier clear_barrier = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .buffer = r->compute.depth_visibility.buffer.buffer,
+	    .offset = 0,
+	    .size = active_size,
+	};
+	vk->vkCmdPipelineBarrier(r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+	                         NULL, 1, &clear_barrier, 0, NULL);
+
+	vk->vkCmdBindPipeline(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.depth_visibility.pipeline);
 	vk->vkCmdDispatch(r->cmd, uint_divide_and_round_up(width, 8), uint_divide_and_round_up(height, 8), view_count);
 
 	VkBufferMemoryBarrier visibility_barrier = {
