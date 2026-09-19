@@ -12,6 +12,11 @@
 
 #include <inttypes.h>
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "os/os_time.h"
 #include "util/u_misc.h"
 #include "util/u_handles.h"
 #include "util/u_pretty_print.h"
@@ -35,6 +40,78 @@
  * Helper functions.
  *
  */
+#ifdef XRT_OS_OSX
+static FILE *g_wine_submit_trace = NULL;
+static bool g_wine_submit_trace_failed = false;
+static uint64_t g_wine_submit_trace_rows = 0;
+
+static bool
+wine_submit_trace_enabled(void)
+{
+	const char *value = getenv("PSVR2_TIMING_TRACE");
+	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+}
+
+static FILE *
+wine_submit_trace_get(void)
+{
+	if (!wine_submit_trace_enabled() || g_wine_submit_trace_failed) {
+		return NULL;
+	}
+	if (g_wine_submit_trace != NULL) {
+		return g_wine_submit_trace;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_wine_submit.csv", dir, separator, (int)getpid());
+
+	g_wine_submit_trace = fopen(path, "w");
+	if (g_wine_submit_trace == NULL) {
+		g_wine_submit_trace_failed = true;
+		return NULL;
+	}
+
+	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
+	size_t buffer_size = fully_buffered != NULL && strcmp(fully_buffered, "1") == 0 ? 16u * 1024u * 1024u : 64u * 1024u;
+	setvbuf(g_wine_submit_trace, NULL, _IOFBF, buffer_size);
+	fputs("event,client_frame_id,event_ns,semaphore_value,display_time_ns,layer_count,result\n",
+	      g_wine_submit_trace);
+	return g_wine_submit_trace;
+}
+
+static void
+wine_submit_trace_event(const char *event,
+                        int64_t frame_id,
+                        uint64_t semaphore_value,
+                        int64_t display_time_ns,
+                        uint32_t layer_count,
+                        xrt_result_t result)
+{
+	FILE *file = wine_submit_trace_get();
+	if (file == NULL) {
+		return;
+	}
+
+	flockfile(file);
+	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 ",%u,%d\n",
+	        event, frame_id, os_monotonic_get_ns(), semaphore_value, display_time_ns, layer_count, (int)result);
+	g_wine_submit_trace_rows++;
+	if (g_wine_submit_trace_rows % 512 == 0) {
+		fflush(file);
+	}
+	funlockfile(file);
+}
+#else
+#define wine_submit_trace_event(...) ((void)0)
+#endif
+
 
 #define GET_XTRACK_OR_RETURN(ICS, ID, XTRACK)                                                                          \
 	do {                                                                                                           \
@@ -1605,6 +1682,11 @@ ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
 
 	struct ipc_layer_slot slot = {0};
 	memcpy(&slot, payload->data, payload->size);
+	trace_frame_id = slot.data.frame_id;
+	trace_display_time_ns = slot.data.display_time_ns;
+	trace_layer_count = slot.layer_count;
+	wine_submit_trace_event("handler_entry", trace_frame_id, semaphore_value, trace_display_time_ns,
+	                        trace_layer_count, XRT_SUCCESS);
 	if (slot.layer_count != 1) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
@@ -1702,6 +1784,10 @@ ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_clie
 {
 	IPC_TRACE_MARKER();
 
+	int64_t trace_frame_id = -1;
+	int64_t trace_display_time_ns = 0;
+	uint32_t trace_layer_count = 0;
+
 	if (ics == NULL || payload == NULL) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
@@ -1732,10 +1818,19 @@ ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_clie
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	xrt_comp_layer_begin(ics->xc, &slot.data);
+	xrt_result_t xret = xrt_comp_layer_begin(ics->xc, &slot.data);
+	wine_submit_trace_event("after_layer_begin", trace_frame_id, semaphore_value, trace_display_time_ns,
+	                        trace_layer_count, xret);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
 	if (!_update_layers(ics, ics->xc, &slot)) {
+		wine_submit_trace_event("update_layers_failed", trace_frame_id, semaphore_value, trace_display_time_ns,
+		                        trace_layer_count, XRT_ERROR_IPC_FAILURE);
 		return XRT_ERROR_IPC_FAILURE;
 	}
+	wine_submit_trace_event("after_update_layers", trace_frame_id, semaphore_value, trace_display_time_ns,
+	                        trace_layer_count, XRT_SUCCESS);
 
 	/*
 	 * No IPC reply is sent for this command. The TCP stream itself preserves
@@ -1744,7 +1839,10 @@ ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_clie
 	 * compositor needs time here, the next synchronous request (normally
 	 * wait_frame) naturally queues behind it instead of stalling xrEndFrame.
 	 */
-	return xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
+	xret = xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
+	wine_submit_trace_event("after_commit", trace_frame_id, semaphore_value, trace_display_time_ns,
+	                        trace_layer_count, xret);
+	return xret;
 }
 
 xrt_result_t
