@@ -56,6 +56,12 @@ if(WIN32)
 	target_sources(comp_main PRIVATE comp_window_mswin.c)
 endif()
 if(APPLE)
+	# comp_renderer.c contains macOS-only timing/reprojection diagnostics gated
+	# at runtime by PSVR2_TIMING_TRACE / XRT_MACOS_REPROJECTION_TRACE. Keep the
+	# code compiled in on Apple builds so those runtime switches actually
+	# produce the renderer-side CSVs.
+	target_compile_definitions(comp_main PRIVATE XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=1)
+
 	target_sources(comp_main PRIVATE comp_window_macos_latest.m)
 	set_source_files_properties(
 		comp_window_macos_latest.m
