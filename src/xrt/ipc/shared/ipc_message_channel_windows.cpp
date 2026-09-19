@@ -11,6 +11,8 @@
  * @ingroup ipc_shared
  */
 
+#include <winsock2.h>
+
 #include "xrt/xrt_config_os.h"
 
 #ifndef XRT_OS_WINDOWS
@@ -28,8 +30,6 @@
 #include <string.h>
 #include <stdint.h>
 #include <assert.h>
-#include <winsock2.h>
-
 #include <vector>
 
 
@@ -135,6 +135,7 @@ ipc_message_channel_close(struct ipc_message_channel *imc)
 	}
 	if (imc->stream_socket) {
 		closesocket((SOCKET)(uintptr_t)imc->ipc_handle);
+		WSACleanup();
 	} else {
 		CloseHandle(imc->ipc_handle);
 	}
