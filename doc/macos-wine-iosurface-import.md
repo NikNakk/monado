@@ -79,6 +79,50 @@ source build-wine-dxmt/env.zsh
 No system Wine, Whisky, CrossOver, GPTK installation, or existing Wine prefix is
 modified.
 
+## Windows D3D11 producer probe
+
+After provisioning the pinned Wine/DXMT stack, build the small Windows producer:
+
+```sh
+scripts/macos/build-wine-d3d11-iosurface-producer.zsh
+```
+
+It cross-compiles `tests/windows/macos_wine_d3d11_iosurface_producer.cpp` as an
+x86-64 PE executable with MinGW. The producer creates three 64x64 BGRA8
+`D3D11_RESOURCE_MISC_SHARED_NTHANDLE` textures, writes a distinct colour into
+each, waits an `ID3D11Fence` covering those GPU writes, reads the Basalt
+`BASALT_GUID_IOSURFACE_ID` private data, and keeps all three D3D11 resources
+alive while Monado imports them.
+
+With `monado-service` running, the complete graphics-boundary probe is one
+command:
+
+```sh
+scripts/macos/run-wine-d3d11-iosurface-import.zsh
+```
+
+The harness starts the Windows producer through the pinned
+`build-wine-dxmt/bin/wine-dxmt` wrapper, captures its three IOSurface IDs, runs
+`tests_macos_iosurface_import_probe` against those same surfaces, and only then
+signals the Wine process to release its D3D11 resources.
+
+A pass establishes this boundary:
+
+```text
+Windows D3D11
+  -> Wine 11.10
+  -> Basalt DXMT v0.80-basalt.1
+  -> IOSurface-backed shared texture
+  -> IOSurfaceID
+  -> monado-service
+  -> MTLTexture on MoltenVK's MTLDevice
+  -> VkImportMetalTextureInfoEXT
+  -> normal Monado compositor swapchain
+```
+
+The build helper requires `x86_64-w64-mingw32-g++` (Homebrew package
+`mingw-w64`).
+
 ## Cross-process native probe
 
 Build the service and tests, start `monado-service`, then run:
