@@ -919,6 +919,15 @@ struct xrt_swapchain_create_properties
 };
 
 /*!
+ * Runtime-internal application pacing hints carried with session creation.
+ */
+enum xrt_session_pacing_flags
+{
+	XRT_SESSION_PACING_DEFAULT = 0,
+	XRT_SESSION_PACING_USE_MIN_FRAME_PERIOD_BIT = 1u << 0,
+};
+
+/*!
  * Session information, mostly overlay extension data.
  */
 struct xrt_session_info
@@ -927,6 +936,15 @@ struct xrt_session_info
 	//! alignas for 32 bit client support, see @ref ipc-design
 	XRT_ALIGNAS(8) uint64_t flags;
 	uint32_t z_order;
+
+	/*!
+	 * Runtime-internal pacing hints. These are not OpenXR session flags.
+	 *
+	 * The Wine/macOS TCP bridge uses the minimum-period hint to avoid a
+	 * positive feedback loop where runtime-induced swapchain waits are
+	 * mistaken for slow application rendering.
+	 */
+	uint32_t pacing_flags;
 };
 
 /*!

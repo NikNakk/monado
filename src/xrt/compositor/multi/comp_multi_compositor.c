@@ -1252,6 +1252,9 @@ multi_compositor_create(struct multi_system_compositor *msc,
 
 	// This is safe to do without a lock since we are not on the list yet.
 	u_paf_create(msc->upaf, &mc->upa);
+	if ((xsi->pacing_flags & XRT_SESSION_PACING_USE_MIN_FRAME_PERIOD_BIT) != 0) {
+		u_pa_set_use_min_frame_period(mc->upa, true);
+	}
 
 	os_mutex_lock(&msc->list_and_timing_lock);
 
