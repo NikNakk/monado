@@ -159,11 +159,13 @@ main(int argc, char **argv)
 	vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount] = {};
 
 	compositor->SetTrackingSpace(vr::TrackingUniverseStanding);
+	bool render_ok = true;
 	for (int frame = 0; frame < frames; ++frame) {
 		vr::EVRCompositorError e =
 		    compositor->WaitGetPoses(poses, vr::k_unMaxTrackedDeviceCount, nullptr, 0);
 		if (e != vr::VRCompositorError_None) {
 			std::fprintf(stderr, "WaitGetPoses failed frame=%d error=%d\n", frame, (int)e);
+			render_ok = false;
 			break;
 		}
 
@@ -176,11 +178,13 @@ main(int argc, char **argv)
 		e = compositor->Submit(vr::Eye_Left, &left_texture);
 		if (e != vr::VRCompositorError_None) {
 			std::fprintf(stderr, "Submit left failed frame=%d error=%d\n", frame, (int)e);
+			render_ok = false;
 			break;
 		}
 		e = compositor->Submit(vr::Eye_Right, &right_texture);
 		if (e != vr::VRCompositorError_None) {
 			std::fprintf(stderr, "Submit right failed frame=%d error=%d\n", frame, (int)e);
+			render_ok = false;
 			break;
 		}
 		compositor->PostPresentHandoff();
@@ -202,6 +206,10 @@ main(int argc, char **argv)
 
 	vr_shutdown();
 	FreeLibrary(module);
+	if (!render_ok) {
+		std::fprintf(stderr, "FAIL: OpenVR D3D11 frame submission did not complete\n");
+		return 11;
+	}
 	std::printf("PASS: rendered OpenVR D3D11 frames through OpenComposite -> Monado OpenXR\n");
 	return 0;
 }
