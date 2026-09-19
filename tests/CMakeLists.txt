@@ -145,6 +145,14 @@ if(APPLE AND XRT_MODULE_COMPOSITOR_MULTI)
 endif()
 
 if(APPLE)
+	add_executable(tests_macos_iosurface_producer tests_macos_iosurface_producer.c)
+	target_link_libraries(tests_macos_iosurface_producer PRIVATE "-framework CoreFoundation" "-framework IOSurface")
+	set_target_properties(tests_macos_iosurface_producer PROPERTIES FOLDER monado_tests)
+
+	add_executable(tests_macos_iosurface_import_probe tests_macos_iosurface_import_probe.c)
+	target_link_libraries(tests_macos_iosurface_import_probe PRIVATE ipc_client xrt-interfaces aux_util)
+	set_target_properties(tests_macos_iosurface_import_probe PROPERTIES FOLDER monado_tests)
+
 	add_executable(tests_macos_ipc_swapchain_probe tests_macos_ipc_swapchain_probe.c)
 	target_link_libraries(tests_macos_ipc_swapchain_probe PRIVATE ipc_client xrt-interfaces aux_util)
 	set_target_properties(tests_macos_ipc_swapchain_probe PROPERTIES FOLDER monado_tests)
