@@ -9,6 +9,11 @@
  * @ingroup ipc_client
  */
 
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#endif
+
 #include "os/os_threading.h"
 #include "xrt/xrt_results.h"
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
@@ -39,10 +44,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#if defined(XRT_OS_WINDOWS)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif
 #if !defined(XRT_OS_WINDOWS)
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -108,7 +109,7 @@ ipc_client_tcp_connect(struct ipc_connection *ipc_c, const char *port_text)
 		return false;
 	}
 
-	WSADATA wsa = {};
+	WSADATA wsa = {0};
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
 		IPC_ERROR(ipc_c, "WSAStartup failed");
 		return false;
