@@ -1407,6 +1407,7 @@ struct render_compute_distortion_ubo_data
 	//          3=first-to-refined UV displacement heatmap.
 	// padding0/y: background-biased disocclusion fill enabled.
 	// padding1/z: solve projection depth independently for R/G/B rays.
+	// padding2/w: bounded epipolar search for nearer occluding surfaces.
 	struct
 	{
 		uint32_t value;
