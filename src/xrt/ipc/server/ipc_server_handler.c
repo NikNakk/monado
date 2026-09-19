@@ -1698,11 +1698,6 @@ ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
 
 	struct ipc_layer_slot slot = {0};
 	memcpy(&slot, payload->data, payload->size);
-	trace_frame_id = slot.data.frame_id;
-	trace_display_time_ns = slot.data.display_time_ns;
-	trace_layer_count = slot.layer_count;
-	wine_submit_trace_event("handler_entry", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                        trace_layer_count, XRT_SUCCESS);
 	if (slot.layer_count != 1) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
@@ -1820,6 +1815,11 @@ ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_clie
 
 	struct ipc_layer_slot slot = {0};
 	memcpy(&slot, payload->data, payload->size);
+	trace_frame_id = slot.data.frame_id;
+	trace_display_time_ns = slot.data.display_time_ns;
+	trace_layer_count = slot.layer_count;
+	wine_submit_trace_event("handler_entry", trace_frame_id, semaphore_value, trace_display_time_ns,
+	                        trace_layer_count, XRT_SUCCESS);
 	if (slot.layer_count != 1) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
