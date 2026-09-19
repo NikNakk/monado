@@ -373,12 +373,34 @@ ipc_client_setup_shm(struct ipc_connection *ipc_c)
 			return XRT_ERROR_ALLOCATION;
 		}
 
-		xrt_result_t xret = ipc_call_instance_get_shm_copy(ipc_c, ipc_c->ism);
-		if (xret != XRT_SUCCESS) {
-			free(ipc_c->ism);
-			ipc_c->ism = NULL;
-			IPC_ERROR(ipc_c, "Failed to retrieve shared-memory snapshot over Wine bridge");
-			return xret;
+		uint8_t *dst = (uint8_t *)ipc_c->ism;
+		const size_t total_size = sizeof(struct ipc_shared_memory);
+		for (size_t offset = 0; offset < total_size; offset += IPC_SHM_COPY_CHUNK_SIZE) {
+			struct ipc_shm_copy_chunk chunk = {0};
+			xrt_result_t xret = ipc_call_instance_get_shm_chunk(ipc_c, (uint32_t)offset, &chunk);
+			if (xret != XRT_SUCCESS) {
+				free(ipc_c->ism);
+				ipc_c->ism = NULL;
+				IPC_ERROR(ipc_c, "Failed to retrieve shared-memory chunk at offset %zu", offset);
+				return xret;
+			}
+
+			size_t expected = total_size - offset;
+			if (expected > IPC_SHM_COPY_CHUNK_SIZE) {
+				expected = IPC_SHM_COPY_CHUNK_SIZE;
+			}
+			if (chunk.size != expected) {
+				free(ipc_c->ism);
+				ipc_c->ism = NULL;
+				IPC_ERROR(ipc_c,
+				          "Invalid shared-memory chunk size at offset %zu: got %u expected %zu",
+				          offset,
+				          chunk.size,
+				          expected);
+				return XRT_ERROR_IPC_FAILURE;
+			}
+
+			memcpy(dst + offset, chunk.data, expected);
 		}
 
 		ipc_c->ism_is_copy = true;
