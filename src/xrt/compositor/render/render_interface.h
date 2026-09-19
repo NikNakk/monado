@@ -1414,6 +1414,11 @@ struct render_compute_distortion_ubo_data
 	// relative pose and allows reconstruction from a target-view depth.
 	struct xrt_quat target_to_source_orientation_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_quat target_to_source_orientation_scanout_end[XRT_MAX_VIEWS];
+	// Projection depth state/control packed into one std140 uvec4 per view.
+	// value/x: depth layer present.
+	// padding0/y: keep chromatic samples on the selected depth surface at edges.
+	// padding1/z: fill narrow holes in the forward visibility map from background.
+	// padding2/w: diagnostic only, use the green distortion ray for R/G/B.
 	struct
 	{
 		uint32_t value;
