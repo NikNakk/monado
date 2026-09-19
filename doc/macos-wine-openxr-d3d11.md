@@ -128,9 +128,11 @@ The runner:
 3. verifies the native loopback bridge is listening;
 4. creates a Wine-readable OpenXR runtime manifest pointing at
    `openxr_monado.dll`;
-5. sets `MONADO_WINE_TCP_PORT`, `XR_RUNTIME_JSON`, and
-   `DXMT_BASALT_IOSURFACE=1`;
-6. launches the pinned official sample as:
+5. registers that manifest as `HKLM\\SOFTWARE\\Khronos\\OpenXR\\1\\ActiveRuntime`
+   inside the private Wine prefix (the Windows loader ignores `XR_RUNTIME_JSON`
+   when Wine reports a high-integrity process);
+6. sets `MONADO_WINE_TCP_PORT` and `DXMT_BASALT_IOSURFACE=1`;
+7. launches the pinned official sample as:
 
 ```text
 khr_hello_xr_d3d11.exe --graphics D3D11 --space Local --verbose
