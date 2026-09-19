@@ -386,6 +386,18 @@ struct ipc_arg_swapchain_iosurface
 };
 
 /*!
+ * Bounded byte chunk used to copy the large ipc_shared_memory structure to
+ * Wine clients without placing the whole structure in a generated IPC reply
+ * on the Windows thread stack.
+ */
+#define IPC_SHM_COPY_CHUNK_SIZE 4096
+struct ipc_shm_copy_chunk
+{
+	uint32_t size;
+	uint8_t data[IPC_SHM_COPY_CHUNK_SIZE];
+};
+
+/*!
  * Arguments for xrt_device::get_view_poses with two views.
  */
 struct ipc_info_get_view_poses_2
