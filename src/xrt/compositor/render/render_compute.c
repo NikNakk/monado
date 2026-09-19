@@ -235,14 +235,6 @@ update_compute_layer_descriptor_set(struct vk_bundle *vk,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 	        .pBufferInfo = &buffer_info,
 	    },
-	    {
-	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-	        .dstSet = descriptor_set,
-	        .dstBinding = visibility_binding,
-	        .descriptorCount = 1,
-	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-	        .pBufferInfo = &visibility_buffer_info,
-	    },
 	};
 
 	vk->vkUpdateDescriptorSets(            //
