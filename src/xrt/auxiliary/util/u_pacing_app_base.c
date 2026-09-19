@@ -277,6 +277,9 @@ struct pacing_app
 	} last_input;
 
 	int64_t last_returned_ns;
+
+	//! Per-client policy; initialized from U_PACING_APP_USE_MIN_FRAME_PERIOD.
+	bool use_min_frame_period;
 };
 
 
@@ -404,7 +407,7 @@ calc_app_period(const struct pacing_app *pa, int64_t display_period_ns)
 	 * depends on it's total frame time. Or we try to use the minimal frame
 	 * period, aka the compositor's frame period. This will use more power.
 	 */
-	if (debug_get_bool_option_use_min_frame_period()) {
+	if (pa->use_min_frame_period) {
 		return app_period_ns;
 	}
 
@@ -864,6 +867,13 @@ pa_info(struct u_pacing_app *upa,
 }
 
 static void
+pa_set_use_min_frame_period(struct u_pacing_app *upa, bool enabled)
+{
+	struct pacing_app *pa = pacing_app(upa);
+	pa->use_min_frame_period = enabled;
+}
+
+static void
 pa_destroy(struct u_pacing_app *upa)
 {
 	u_var_remove_root(upa);
@@ -883,10 +893,12 @@ pa_create(int64_t session_id, struct u_pacing_app **out_upa)
 	pa->base.latched = pa_latched;
 	pa->base.retired = pa_retired;
 	pa->base.info = pa_info;
+	pa->base.set_use_min_frame_period = pa_set_use_min_frame_period;
 	pa->base.destroy = pa_destroy;
 	pa->session_id = session_id;
 	pa->app.cpu_time_ns = U_TIME_1MS_IN_NS * 2;
 	pa->app.draw_time_ns = U_TIME_1MS_IN_NS * 2;
+	pa->use_min_frame_period = debug_get_bool_option_use_min_frame_period();
 
 	pa->min_margin_ms = (struct u_var_draggable_f32){
 	    .val = debug_get_float_option_min_margin_ms(),

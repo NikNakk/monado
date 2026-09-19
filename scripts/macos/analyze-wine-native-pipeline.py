@@ -308,6 +308,7 @@ def main() -> int:
     native_present_submit_us: list[float] = []
     presented_minus_target_us: list[float] = []
     presented_minus_desired_us: list[float] = []
+    target_minus_desired_us: list[float] = []
     shared_event_wait_count = 0
 
     for sf in mapped_system_frames:
@@ -320,6 +321,10 @@ def main() -> int:
                 drawable_stage_us.append((after_drawable - host_call) / 1000.0)
             if host_call and after_commit and after_commit >= host_call:
                 native_present_submit_us.append((after_commit - host_call) / 1000.0)
+            desired_ns = i(prow, "desired_present_ns")
+            target_ns = i(prow, "target_output_ns")
+            if desired_ns and target_ns:
+                target_minus_desired_us.append((target_ns - desired_ns) / 1000.0)
             shared_event_wait_count += 1 if i(prow, "shared_event_wait") else 0
 
         arow = presented_by_system.get(sf)
@@ -330,8 +335,9 @@ def main() -> int:
     print("System compositor -> Metal presentation")
     describe("present call -> drawable", drawable_stage_us)
     describe("present call -> commit", native_present_submit_us)
+    describe("target - desired/deadline", target_minus_desired_us)
     describe("presented - target", presented_minus_target_us)
-    describe("presented - desired", presented_minus_desired_us)
+    describe("presented - desired/deadline", presented_minus_desired_us)
     if mapped_system_frames:
         print(f"Present rows using shared-event wait: {shared_event_wait_count}/{len(mapped_system_frames)}")
     for threshold_ms in (1, 4, 8):

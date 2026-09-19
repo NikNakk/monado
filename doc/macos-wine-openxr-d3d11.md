@@ -331,3 +331,41 @@ scripts/macos/install-opencomposite-game.zsh restore \
 The installer also writes an `opencomposite.ini` with
 `initUsingVulkan=false`, keeping OpenComposite on the D3D11-first path
 currently supported by this Wine bridge.
+
+## Wine/TCP pacing feedback and CAMetalDisplayLink timing
+
+The OpenComposite timing capture from 2026-09-19 exposed a positive feedback
+loop in the ordinary adaptive app pacer. With the default policy, the second
+OpenXR eye swapchain could block in `xrWaitSwapchainImage` for tens of
+milliseconds. Because that runtime-controlled wait occurs between
+`xrBeginFrame` and `xrEndFrame`, the app pacer counted it as draw time,
+selected a many-refresh application period, and thereby kept swapchain images
+in use for longer. In the failing capture the median predicted app period was
+about 75 ms and the compositor reused each client frame for about eight
+120-Hz refreshes.
+
+Forcing `U_PACING_APP_USE_MIN_FRAME_PERIOD=1` broke the loop: the predicted
+period became 8.3417 ms, the problematic swapchain wait fell from about 61 ms
+to about 6 ms median, and mapped client frames were normally used for one
+system refresh. That experiment is now represented as a per-session pacing
+hint. IPC clients using the Wine/macOS framed TCP transport request minimum
+display-period pacing automatically; native Unix-domain-socket clients retain
+Monado's adaptive app-period policy. The environment option remains available
+as a global diagnostic override.
+
+The same capture also clarified the apparent one-refresh
+`presented - desired` offset in CAMetalDisplayLink-driven mode. In this mode
+the compositor intentionally maps:
+
+- `desired_present_time_ns` to CAMetalDisplayLink `targetTimestamp`, the
+  deadline associated with the current update;
+- `predicted_display_time_ns` and the Metal presentation target to
+  `targetPresentationTimestamp`, the expected display time.
+
+At 120 Hz those values are separated by one 8.3417 ms refresh period. Actual
+Metal `presentedTime` was typically within tens of microseconds of the latter
+target, so the +8.3 ms relative to `desired_present_time_ns` is expected
+deadline-to-presentation separation, not evidence that Metal missed a frame.
+The Wine timing analyzer therefore reports `target - desired/deadline`
+explicitly and labels the latter comparison accordingly.
+

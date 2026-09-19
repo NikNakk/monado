@@ -457,6 +457,17 @@ struct u_pacing_app
 	             int64_t extra_ns);
 
 	/*!
+	 * Select whether this client should always be offered the minimum display
+	 * frame period instead of deriving an integer divisor from measured app
+	 * CPU/draw/GPU intervals.
+	 *
+	 * This is useful when runtime-controlled waits are included inside the
+	 * application's BeginFrame-to-EndFrame interval and would otherwise feed
+	 * back into the adaptive period selection.
+	 */
+	void (*set_use_min_frame_period)(struct u_pacing_app *upa, bool enabled);
+
+	/*!
 	 * Destroy this u_pacing_app.
 	 */
 	void (*destroy)(struct u_pacing_app *upa);
@@ -553,6 +564,20 @@ u_pa_info(struct u_pacing_app *upa,
           int64_t extra_ns)
 {
 	upa->info(upa, predicted_display_time_ns, predicted_display_period_ns, extra_ns);
+}
+
+/*!
+ * @copydoc u_pacing_app::set_use_min_frame_period
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof u_pacing_app
+ * @ingroup aux_pacing
+ */
+static inline void
+u_pa_set_use_min_frame_period(struct u_pacing_app *upa, bool enabled)
+{
+	upa->set_use_min_frame_period(upa, enabled);
 }
 
 /*!
