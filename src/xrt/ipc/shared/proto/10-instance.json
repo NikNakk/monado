@@ -5,9 +5,12 @@
 		"out_handles": {"type": "xrt_shmem_handle_t"}
 	},
 
-	"instance_get_shm_copy": {
+	"instance_get_shm_chunk": {
+		"in": [
+			{"name": "offset", "type": "uint32_t"}
+		],
 		"out": [
-			{"name": "ism", "type": "struct ipc_shared_memory"}
+			{"name": "chunk", "type": "struct ipc_shm_copy_chunk"}
 		]
 	},
 
