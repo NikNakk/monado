@@ -42,6 +42,8 @@ jobs:
           zsh -n scripts/macos/build-wine-openvr-smoke.zsh
           zsh -n scripts/macos/provision-opencomposite.zsh
           zsh -n scripts/macos/run-wine-openvr-opencomposite-smoke.zsh
+          zsh -n scripts/macos/install-opencomposite-game.zsh
+          zsh -n scripts/macos/run-wine-openvr-game.zsh
 
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
