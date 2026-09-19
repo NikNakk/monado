@@ -16,13 +16,13 @@ root=${MONADO_WINE_DXMT_ROOT:-${repo_root}/build-wine-dxmt}
 
 readonly basalt_commit=6da06cd3fb391bbe1b430015146ba5df76cb78d6
 readonly basalt_repo=https://github.com/frenchbaguetteman/BasaltVR.git
-readonly monado_patch_name=0005-monado-shared-fence-bootstrap-name.patch
+readonly monado_patch_glob="${repo_root}/scripts/macos/dxmt-patches/*.patch"
 
 wine_root=${root}/engine/wine-11.10/Wine\ Devel.app/Contents/Resources/wine
 prefix=${MONADO_WINEPREFIX:-${root}/prefix}
 basalt_checkout=${root}/sources/BasaltVR-${basalt_commit[1,12]}
 build_dir=${root}/dxmt-gpu-sync-build
-patch_source=${repo_root}/scripts/macos/dxmt-patches/${monado_patch_name}
+patch_sources=(${~monado_patch_glob})
 
 if [[ ! -x ${wine_root}/bin/wine ]]; then
 	print "Private Wine/DXMT stack is not provisioned yet; provisioning it first."
@@ -37,10 +37,16 @@ for tool in git meson ninja cmake curl shasum tar x86_64-w64-mingw32-g++ cmp fil
 	fi
 done
 
-if [[ ! -f ${patch_source} ]]; then
-	print -u2 "Missing Monado DXMT patch: ${patch_source}"
+if (( ${#patch_sources[@]} == 0 )); then
+	print -u2 "No Monado DXMT patches found under scripts/macos/dxmt-patches."
 	exit 1
 fi
+for patch_source in "${patch_sources[@]}"; do
+	if [[ ! -f ${patch_source} ]]; then
+		print -u2 "Missing Monado DXMT patch: ${patch_source}"
+		exit 1
+	fi
+done
 
 mkdir -p "${root}/sources"
 
@@ -62,12 +68,14 @@ if [[ $(git -C "${basalt_checkout}" rev-parse HEAD) != ${basalt_commit} ]]; then
 	exit 1
 fi
 
-patch_target=${basalt_checkout}/runtime/dxmt-fork/patches/${monado_patch_name}
-if [[ ! -f ${patch_target} ]] || ! cmp -s "${patch_source}" "${patch_target}"; then
-	cp -f "${patch_source}" "${patch_target}"
-fi
+for patch_source in "${patch_sources[@]}"; do
+	patch_target=${basalt_checkout}/runtime/dxmt-fork/patches/${patch_source:t}
+	if [[ ! -f ${patch_target} ]] || ! cmp -s "${patch_source}" "${patch_target}"; then
+		cp -f "${patch_source}" "${patch_target}"
+	fi
+done
 
-print "Building matched DXMT v0.80 + Basalt IOSurface + Monado GPU-sync patch..."
+print "Building matched DXMT v0.80 + Basalt IOSurface + Monado compatibility/GPU-sync patches..."
 BUILD_DIR="${build_dir}" "${basalt_checkout}/runtime/scripts/build-dxmt-fork.zsh"
 
 install_dir=${build_dir}/dxmt/fork-install
@@ -117,7 +125,7 @@ cat > "${stamp}" <<EOF
 DXMT base: v0.80 (MIT)
 BasaltVR build harness: ${basalt_commit}
 Basalt patches: 0001-0004 from BasaltVR v0.1.0
-Monado patch: ${monado_patch_name}
+Monado patches: ${patch_sources:t}
 Monado shared-fence GUID: 8a1e78d5-9762-4f7a-b0ad-1d62f6a49d31
 Build output: ${install_dir}
 EOF
