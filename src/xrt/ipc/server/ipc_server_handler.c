@@ -43,6 +43,7 @@
 #ifdef XRT_OS_OSX
 static FILE *g_wine_submit_trace = NULL;
 static bool g_wine_submit_trace_failed = false;
+static bool g_wine_submit_trace_atexit_registered = false;
 static uint64_t g_wine_submit_trace_rows = 0;
 
 static bool
@@ -50,6 +51,17 @@ wine_submit_trace_enabled(void)
 {
 	const char *value = getenv("PSVR2_TIMING_TRACE");
 	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+}
+
+static void
+wine_submit_trace_close(void)
+{
+	if (g_wine_submit_trace == NULL) {
+		return;
+	}
+	fflush(g_wine_submit_trace);
+	fclose(g_wine_submit_trace);
+	g_wine_submit_trace = NULL;
 }
 
 static FILE *
@@ -83,6 +95,10 @@ wine_submit_trace_get(void)
 	setvbuf(g_wine_submit_trace, NULL, _IOFBF, buffer_size);
 	fputs("event,client_frame_id,event_ns,semaphore_value,display_time_ns,layer_count,result\n",
 	      g_wine_submit_trace);
+	if (!g_wine_submit_trace_atexit_registered) {
+		atexit(wine_submit_trace_close);
+		g_wine_submit_trace_atexit_registered = true;
+	}
 	return g_wine_submit_trace;
 }
 
