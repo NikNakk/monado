@@ -487,14 +487,14 @@ static xrt_result_t
 ipc_client_describe_client(struct ipc_connection *ipc_c, const struct xrt_application_info *a_info)
 {
 #ifdef XRT_OS_WINDOWS
-	DWORD pid = GetCurrentProcessId();
+	int64_t pid = (int64_t)GetCurrentProcessId();
 #else
-	pid_t pid = getpid();
+	int64_t pid = (int64_t)getpid();
 #endif
 
 	struct ipc_client_description desc = {0};
 	desc.info = *a_info;
-	desc.pid = pid; // Extra info.
+	desc.pid = pid; // Fixed-width wire value.
 
 	xrt_result_t xret = ipc_call_instance_describe_client(ipc_c, &desc);
 	if (xret != XRT_SUCCESS) {
