@@ -67,6 +67,7 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD
 DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", LONG_MIN)
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_reprojection_trace, "XRT_MACOS_REPROJECTION_TRACE", false)
 #endif
 DEBUG_GET_ONCE_BOOL_OPTION(macos_skip_blocking_gpu_timestamps, "XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_defer_gpu_timestamps, "XRT_MACOS_DEFER_GPU_TIMESTAMPS", true)
@@ -149,6 +150,18 @@ struct comp_renderer
 #ifdef XRT_OS_OSX
 	FILE *late_render_trace;
 	uint64_t late_render_trace_rows;
+
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	FILE *reprojection_trace;
+	uint64_t reprojection_trace_rows;
+	bool reprojection_prev_source_valid;
+	int64_t reprojection_prev_layer_timestamp_ns;
+	uint32_t reprojection_prev_image_index[2];
+	struct xrt_pose reprojection_prev_source_pose[2];
+	bool reprojection_prev_scanout_valid;
+	struct xrt_pose reprojection_prev_scanout_begin[2];
+#endif
+
 	int64_t late_render_target_ns;
 	int64_t late_render_wait_begin_ns;
 	int64_t late_render_wait_end_ns;
@@ -224,6 +237,265 @@ renderer_get_macos_late_render_desired_offset_us(int64_t *out_offset_us)
 }
 
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+static bool
+renderer_reprojection_trace_enabled(void)
+{
+	return debug_get_bool_option_comp_psvr2_timing_trace() || debug_get_bool_option_macos_reprojection_trace();
+}
+
+static void
+renderer_reprojection_trace_open(struct comp_renderer *r)
+{
+	if (!renderer_reprojection_trace_enabled()) {
+		return;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_reprojection.csv", dir, separator, (int)getpid());
+
+	r->reprojection_trace = fopen(path, "w");
+	if (r->reprojection_trace == NULL) {
+		COMP_WARN(r->c, "Could not open macOS reprojection trace '%s'", path);
+		return;
+	}
+
+	setvbuf(r->reprojection_trace, NULL, _IOFBF, 256 * 1024);
+	fputs("system_frame_id,sample_ns,predicted_display_ns,desired_present_ns,system_layer_display_ns,"
+	      "path,fast_path,do_timewarp,source_valid,source_changed,layer_type,layer_timestamp_ns,"
+	      "layer_age_to_predicted_ns,view_count,left_image_index,left_array_index,right_image_index,right_array_index,"
+	      "left_src_qx,left_src_qy,left_src_qz,left_src_qw,left_src_px,left_src_py,left_src_pz,"
+	      "left_begin_qx,left_begin_qy,left_begin_qz,left_begin_qw,left_begin_px,left_begin_py,left_begin_pz,"
+	      "left_end_qx,left_end_qy,left_end_qz,left_end_qw,left_end_px,left_end_py,left_end_pz,"
+	      "right_src_qx,right_src_qy,right_src_qz,right_src_qw,right_src_px,right_src_py,right_src_pz,"
+	      "right_begin_qx,right_begin_qy,right_begin_qz,right_begin_qw,right_begin_px,right_begin_py,right_begin_pz,"
+	      "right_end_qx,right_end_qy,right_end_qz,right_end_qw,right_end_px,right_end_py,right_end_pz,"
+	      "left_src_to_begin_deg,left_src_to_end_deg,right_src_to_begin_deg,right_src_to_end_deg,"
+	      "left_source_step_deg,right_source_step_deg,left_scanout_step_deg,right_scanout_step_deg",
+	      r->reprojection_trace);
+	for (uint32_t i = 0; i < 16; ++i) {
+		fprintf(r->reprojection_trace, ",left_tw_begin_m%02u", i);
+	}
+	for (uint32_t i = 0; i < 16; ++i) {
+		fprintf(r->reprojection_trace, ",left_tw_end_m%02u", i);
+	}
+	fputc('\n', r->reprojection_trace);
+	fflush(r->reprojection_trace);
+	COMP_INFO(r->c, "macOS reprojection trace enabled: %s", path);
+}
+
+static void
+renderer_reprojection_trace_close(struct comp_renderer *r)
+{
+	if (r->reprojection_trace == NULL) {
+		return;
+	}
+	fflush(r->reprojection_trace);
+	fclose(r->reprojection_trace);
+	r->reprojection_trace = NULL;
+}
+
+static const struct comp_layer *
+renderer_find_projection_layer(const struct comp_layer *layers, uint32_t layer_count)
+{
+	for (uint32_t i = 0; i < layer_count; ++i) {
+		if (layers[i].data.type == XRT_LAYER_PROJECTION || layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
+			return &layers[i];
+		}
+	}
+	return NULL;
+}
+
+static const struct xrt_layer_projection_view_data *
+renderer_projection_views(const struct xrt_layer_data *data)
+{
+	if (data->type == XRT_LAYER_PROJECTION) {
+		return data->proj.v;
+	}
+	if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
+		return data->depth.v;
+	}
+	return NULL;
+}
+
+static double
+renderer_quat_distance_deg(const struct xrt_quat *a, const struct xrt_quat *b)
+{
+	double dot = (double)a->x * b->x + (double)a->y * b->y + (double)a->z * b->z + (double)a->w * b->w;
+	double an = sqrt((double)a->x * a->x + (double)a->y * a->y + (double)a->z * a->z + (double)a->w * a->w);
+	double bn = sqrt((double)b->x * b->x + (double)b->y * b->y + (double)b->z * b->z + (double)b->w * b->w);
+	double denom = an * bn;
+	if (denom <= 1e-12) {
+		return NAN;
+	}
+	double value = fabs(dot / denom);
+	if (value > 1.0) {
+		value = 1.0;
+	}
+	return 2.0 * acos(value) * (180.0 / 3.14159265358979323846);
+}
+
+static void
+renderer_trace_pose(FILE *f, const struct xrt_pose *p)
+{
+	fprintf(f,
+	        ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
+	        p->orientation.x,
+	        p->orientation.y,
+	        p->orientation.z,
+	        p->orientation.w,
+	        p->position.x,
+	        p->position.y,
+	        p->position.z);
+}
+
+static void
+renderer_trace_matrix(FILE *f, const struct xrt_matrix_4x4 *m)
+{
+	for (uint32_t i = 0; i < 16; ++i) {
+		fprintf(f, ",%.9g", m->v[i]);
+	}
+}
+
+static void
+renderer_reprojection_trace_frame(struct comp_renderer *r,
+                                  const char *path,
+                                  const struct comp_layer *layers,
+                                  uint32_t layer_count,
+                                  const struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS],
+                                  const struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS],
+                                  uint32_t view_count,
+                                  bool fast_path,
+                                  bool do_timewarp)
+{
+	if (r->reprojection_trace == NULL) {
+		return;
+	}
+
+	const struct comp_layer *layer = renderer_find_projection_layer(layers, layer_count);
+	const struct xrt_layer_projection_view_data *views =
+	    layer != NULL ? renderer_projection_views(&layer->data) : NULL;
+	if (layer == NULL || views == NULL || layer->data.view_count == 0 || view_count == 0) {
+		fprintf(r->reprojection_trace,
+		        "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,0,0,0,0,0,0,0,0,0,0\n",
+		        (long long)r->c->frame.rendering.id,
+		        (long long)os_monotonic_get_ns(),
+		        (unsigned long long)r->c->frame.rendering.predicted_display_time_ns,
+		        (unsigned long long)r->c->frame.rendering.desired_present_time_ns,
+		        (long long)r->c->base.layer_accum.data.display_time_ns,
+		        path,
+		        fast_path ? 1 : 0,
+		        do_timewarp ? 1 : 0);
+		r->reprojection_prev_source_valid = false;
+		r->reprojection_prev_scanout_valid = false;
+		goto flush_maybe;
+	}
+
+	const struct xrt_layer_projection_view_data *left = &views[0];
+	const struct xrt_layer_projection_view_data *right =
+	    layer->data.view_count > 1 && view_count > 1 ? &views[1] : &views[0];
+	const struct xrt_pose *left_begin = &world_poses_scanout_begin[0];
+	const struct xrt_pose *left_end = &world_poses_scanout_end[0];
+	const struct xrt_pose *right_begin = view_count > 1 ? &world_poses_scanout_begin[1] : left_begin;
+	const struct xrt_pose *right_end = view_count > 1 ? &world_poses_scanout_end[1] : left_end;
+
+	bool source_changed = !r->reprojection_prev_source_valid ||
+	                      layer->data.timestamp != r->reprojection_prev_layer_timestamp_ns ||
+	                      left->sub.image_index != r->reprojection_prev_image_index[0] ||
+	                      right->sub.image_index != r->reprojection_prev_image_index[1];
+
+	double left_source_step_deg = NAN;
+	double right_source_step_deg = NAN;
+	if (source_changed && r->reprojection_prev_source_valid) {
+		left_source_step_deg =
+		    renderer_quat_distance_deg(&r->reprojection_prev_source_pose[0].orientation, &left->pose.orientation);
+		right_source_step_deg =
+		    renderer_quat_distance_deg(&r->reprojection_prev_source_pose[1].orientation, &right->pose.orientation);
+	}
+
+	double left_scanout_step_deg = NAN;
+	double right_scanout_step_deg = NAN;
+	if (r->reprojection_prev_scanout_valid) {
+		left_scanout_step_deg = renderer_quat_distance_deg(
+		    &r->reprojection_prev_scanout_begin[0].orientation, &left_begin->orientation);
+		right_scanout_step_deg = renderer_quat_distance_deg(
+		    &r->reprojection_prev_scanout_begin[1].orientation, &right_begin->orientation);
+	}
+
+	struct xrt_matrix_4x4 left_tw_begin;
+	struct xrt_matrix_4x4 left_tw_end;
+	render_calc_time_warp_matrix(&left->pose, &left->fov, left_begin, &left_tw_begin);
+	render_calc_time_warp_matrix(&left->pose, &left->fov, left_end, &left_tw_end);
+
+	fprintf(r->reprojection_trace,
+	        "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,1,%d,%u,%lld,%lld,%u,%u,%u,%u,%u",
+	        (long long)r->c->frame.rendering.id,
+	        (long long)os_monotonic_get_ns(),
+	        (unsigned long long)r->c->frame.rendering.predicted_display_time_ns,
+	        (unsigned long long)r->c->frame.rendering.desired_present_time_ns,
+	        (long long)r->c->base.layer_accum.data.display_time_ns,
+	        path,
+	        fast_path ? 1 : 0,
+	        do_timewarp ? 1 : 0,
+	        source_changed ? 1 : 0,
+	        (unsigned)layer->data.type,
+	        (long long)layer->data.timestamp,
+	        (long long)((int64_t)r->c->frame.rendering.predicted_display_time_ns - layer->data.timestamp),
+	        layer->data.view_count,
+	        left->sub.image_index,
+	        left->sub.array_index,
+	        right->sub.image_index,
+	        right->sub.array_index);
+
+	renderer_trace_pose(r->reprojection_trace, &left->pose);
+	renderer_trace_pose(r->reprojection_trace, left_begin);
+	renderer_trace_pose(r->reprojection_trace, left_end);
+	renderer_trace_pose(r->reprojection_trace, &right->pose);
+	renderer_trace_pose(r->reprojection_trace, right_begin);
+	renderer_trace_pose(r->reprojection_trace, right_end);
+
+	fprintf(r->reprojection_trace,
+	        ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
+	        renderer_quat_distance_deg(&left->pose.orientation, &left_begin->orientation),
+	        renderer_quat_distance_deg(&left->pose.orientation, &left_end->orientation),
+	        renderer_quat_distance_deg(&right->pose.orientation, &right_begin->orientation),
+	        renderer_quat_distance_deg(&right->pose.orientation, &right_end->orientation),
+	        left_source_step_deg,
+	        right_source_step_deg,
+	        left_scanout_step_deg,
+	        right_scanout_step_deg);
+	renderer_trace_matrix(r->reprojection_trace, &left_tw_begin);
+	renderer_trace_matrix(r->reprojection_trace, &left_tw_end);
+	fputc('\n', r->reprojection_trace);
+
+	if (source_changed) {
+		r->reprojection_prev_source_pose[0] = left->pose;
+		r->reprojection_prev_source_pose[1] = right->pose;
+		r->reprojection_prev_layer_timestamp_ns = layer->data.timestamp;
+		r->reprojection_prev_image_index[0] = left->sub.image_index;
+		r->reprojection_prev_image_index[1] = right->sub.image_index;
+		r->reprojection_prev_source_valid = true;
+	}
+	r->reprojection_prev_scanout_begin[0] = *left_begin;
+	r->reprojection_prev_scanout_begin[1] = *right_begin;
+	r->reprojection_prev_scanout_valid = true;
+
+flush_maybe:
+	r->reprojection_trace_rows++;
+	if ((r->reprojection_trace_rows % 240) == 0) {
+		fflush(r->reprojection_trace);
+	}
+}
+#endif
+
 static void
 renderer_late_render_trace_open(struct comp_renderer *r)
 {
@@ -856,6 +1128,7 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 #ifdef XRT_OS_OSX
 	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_open(r);
+	renderer_reprojection_trace_open(r);
 #endif
 	int64_t desired_offset_us = 0;
 	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
@@ -1222,6 +1495,7 @@ renderer_fini(struct comp_renderer *r)
 #ifdef XRT_OS_OSX
 	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_close(r);
+	renderer_reprojection_trace_close(r);
 #endif
 #endif
 
@@ -1285,6 +1559,20 @@ dispatch_graphics(struct comp_renderer *r,
 	    world_poses_scanout_end,   //
 	    eye_poses,                 //
 	    render->r->view_count);    //
+
+#ifdef XRT_OS_OSX
+	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	renderer_reprojection_trace_frame(r,
+	                                  "graphics",
+	                                  layers,
+	                                  layer_count,
+	                                  world_poses_scanout_begin,
+	                                  world_poses_scanout_end,
+	                                  render->r->view_count,
+	                                  frame_state->data.fast_path,
+	                                  frame_state->data.do_timewarp);
+#endif
+#endif
 
 	// Does everything.
 	chl_frame_state_gfx_default_pipeline( //
@@ -1386,6 +1674,20 @@ dispatch_compute(struct comp_renderer *r,
 			}
 		}
 	}
+
+#ifdef XRT_OS_OSX
+	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	renderer_reprojection_trace_frame(r,
+	                                  "compute",
+	                                  layers,
+	                                  layer_count,
+	                                  world_poses_scanout_begin,
+	                                  world_poses_scanout_end,
+	                                  render->r->view_count,
+	                                  frame_state->data.fast_path,
+	                                  frame_state->data.do_timewarp);
+#endif
+#endif
 
 	// Target Vulkan resources..
 	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
