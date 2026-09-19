@@ -37,6 +37,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef XRT_OS_OSX
+#include <unistd.h>
+#endif
+
 #ifdef XRT_OS_ANDROID
 #include "android/android_custom_surface.h"
 #include "android/android_globals.h"
@@ -61,6 +65,93 @@ ipc_elapsed_ms(int64_t start_ns, int64_t end_ns)
 {
 	return (double)(end_ns - start_ns) / 1000000.0;
 }
+
+#ifdef XRT_OS_OSX
+static FILE *g_macos_client_gpu_trace = NULL;
+static bool g_macos_client_gpu_trace_failed = false;
+static uint64_t g_macos_client_gpu_trace_rows = 0;
+static bool g_macos_client_gpu_trace_atexit_registered = false;
+
+static bool
+macos_client_gpu_trace_enabled(void)
+{
+	const char *value = getenv("PSVR2_TIMING_TRACE");
+	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+}
+
+static void
+macos_client_gpu_trace_close(void)
+{
+	if (g_macos_client_gpu_trace == NULL) {
+		return;
+	}
+	fflush(g_macos_client_gpu_trace);
+	fclose(g_macos_client_gpu_trace);
+	g_macos_client_gpu_trace = NULL;
+}
+
+static FILE *
+macos_client_gpu_trace_get(void)
+{
+	if (!macos_client_gpu_trace_enabled() || g_macos_client_gpu_trace_failed) {
+		return NULL;
+	}
+	if (g_macos_client_gpu_trace != NULL) {
+		return g_macos_client_gpu_trace;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_client_gpu.csv", dir, separator, (int)getpid());
+
+	g_macos_client_gpu_trace = fopen(path, "w");
+	if (g_macos_client_gpu_trace == NULL) {
+		g_macos_client_gpu_trace_failed = true;
+		return NULL;
+	}
+
+	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
+	size_t buffer_size = fully_buffered != NULL && strcmp(fully_buffered, "1") == 0 ? 16u * 1024u * 1024u : 64u * 1024u;
+	setvbuf(g_macos_client_gpu_trace, NULL, _IOFBF, buffer_size);
+	fputs("event,client_frame_id,event_ns,semaphore_value,duration_ns\n", g_macos_client_gpu_trace);
+
+	if (!g_macos_client_gpu_trace_atexit_registered) {
+		atexit(macos_client_gpu_trace_close);
+		g_macos_client_gpu_trace_atexit_registered = true;
+	}
+
+	return g_macos_client_gpu_trace;
+}
+
+static void
+macos_client_gpu_trace_event(const char *event,
+                             int64_t frame_id,
+                             uint64_t semaphore_value,
+                             int64_t duration_ns)
+{
+	FILE *file = macos_client_gpu_trace_get();
+	if (file == NULL) {
+		return;
+	}
+
+	flockfile(file);
+	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 "\n",
+	        event, frame_id, os_monotonic_get_ns(), semaphore_value, duration_ns);
+	g_macos_client_gpu_trace_rows++;
+	if (g_macos_client_gpu_trace_rows % 512 == 0) {
+		fflush(file);
+	}
+	funlockfile(file);
+}
+#else
+#define macos_client_gpu_trace_event(...) ((void)0)
+#endif
 
 /*
  *
@@ -396,7 +487,12 @@ run_func(void *ptr)
 		os_thread_helper_unlock(&mc->wait_thread.oth);
 
 		if (xcsem != NULL) {
+			int64_t semaphore_wait_start_ns = os_monotonic_get_ns();
+			macos_client_gpu_trace_event("semaphore_wait_start", frame_id, value, 0);
 			wait_semaphore(mc, &xcsem, value);
+			int64_t semaphore_wait_end_ns = os_monotonic_get_ns();
+			macos_client_gpu_trace_event("semaphore_ready", frame_id, value,
+			                            semaphore_wait_end_ns - semaphore_wait_start_ns);
 		}
 		if (xcf != NULL) {
 			wait_fence(mc, &xcf);
@@ -410,7 +506,11 @@ run_func(void *ptr)
 		os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
 		// Wait for the delivery slot.
+		int64_t scheduled_wait_start_ns = os_monotonic_get_ns();
 		wait_for_scheduled_free(mc);
+		int64_t scheduled_wait_end_ns = os_monotonic_get_ns();
+		macos_client_gpu_trace_event("scheduled", frame_id, value,
+		                            scheduled_wait_end_ns - scheduled_wait_start_ns);
 
 		os_thread_helper_lock(&mc->wait_thread.oth);
 
@@ -729,6 +829,7 @@ static xrt_result_t
 multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	struct multi_compositor *mc = multi_compositor(xc);
+	macos_client_gpu_trace_event("layer_begin_entry", data->frame_id, 0, 0);
 
 	// As early as possible.
 	int64_t now_ns = os_monotonic_get_ns();
@@ -749,6 +850,7 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
 	int64_t wait_start_ns = os_monotonic_get_ns();
 	wait_for_wait_thread(mc);
 	int64_t wait_end_ns = os_monotonic_get_ns();
+	macos_client_gpu_trace_event("layer_begin_after_previous", data->frame_id, 0, wait_end_ns - wait_start_ns);
 	if (ipc_frame_timing_enabled()) {
 		fprintf(stderr,
 		        "IPC_FRAME_TIMING server layer_begin_wait frame=%" PRId64 " duration_ms=%.3f\n",
@@ -959,6 +1061,7 @@ multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 	int64_t frame_id = mc->progress.data.frame_id;
 
 	push_semaphore_to_wait_thread(mc, frame_id, xcsem, value);
+	macos_client_gpu_trace_event("semaphore_pushed", frame_id, value, 0);
 
 	return XRT_SUCCESS;
 }
