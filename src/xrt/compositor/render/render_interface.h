@@ -1406,7 +1406,7 @@ struct render_compute_distortion_ubo_data
 	// value/x: 0=normal, 1=linearized depth, 2=surface-switch mask,
 	//          3=first-to-refined UV displacement heatmap.
 	// padding0/y: background-biased disocclusion fill enabled.
-	// padding1/z: solve projection depth independently for R/G/B rays.
+	// padding1/z: experimental independent R/G/B visibility solve (default off).
 	// padding2/w: bounded epipolar search for nearer occluding surfaces.
 	struct
 	{
