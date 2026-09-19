@@ -10,8 +10,8 @@ frames=${MONADO_OPENVR_SMOKE_FRAMES:-3600}
 stamp=$(date +%Y%m%d-%H%M%S)
 trace_dir=${MONADO_WINE_NATIVE_TRACE_DIR:-/tmp/monado-wine-openvr-${stamp}}
 label=org.freedesktop.monado.service
-domain="gui/$(id -u)"
-target="${domain}/${label}"
+target="gui/$(id -u)/${label}"
+plist="/tmp/${label}.$(id -u).plist"
 
 if [[ ! -x "${control}" ]]; then
 	print -u2 "Missing native service control helper:"
@@ -29,82 +29,22 @@ print "  TCP port:     ${port}"
 print "  OpenVR frames:${frames}"
 print ""
 
-# A previous version of this helper could boot the job out and then lose a
-# bootstrap race. Repair that state if necessary, but never replace a healthy
-# registration merely to enable tracing.
-if ! launchctl print "${target}" >/dev/null 2>&1; then
-	print "No loaded Monado LaunchAgent found; restoring the development registration..."
-	IPC_WINE_TCP_PORT="${port}" \
-	IPC_EXIT_WHEN_IDLE=0 \
-		"${control}" bootstrap
-fi
-
-typeset -A previous_env
-typeset -A previous_env_set
-trace_keys=(
-	PSVR2_TIMING_TRACE
-	PSVR2_TIMING_TRACE_DIR
-	PSVR2_TIMING_TRACE_FULLY_BUFFERED
-	IPC_WINE_TCP_PORT
-)
-
-for key in "${trace_keys[@]}"; do
-	value=$(launchctl getenv "${key}" 2>/dev/null || true)
-	if [[ -n "${value}" ]]; then
-		previous_env_set[${key}]=1
-		previous_env[${key}]="${value}"
-	else
-		previous_env_set[${key}]=0
-		previous_env[${key}]=""
-	fi
-done
-
-restore_launchd_env()
-{
-	for key in "${trace_keys[@]}"; do
-		if [[ "${previous_env_set[${key}]}" == 1 ]]; then
-			launchctl setenv "${key}" "${previous_env[${key}]}" >/dev/null
-		else
-			launchctl unsetenv "${key}" >/dev/null 2>&1 || true
-		fi
-	done
-}
-
-wait_for_listener()
-{
-	for _ in {1..100}; do
-		if command -v lsof >/dev/null 2>&1 && \
-		   lsof -nP -iTCP@"127.0.0.1:${port}" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
-			return 0
-		fi
-		sleep 0.1
-	done
-	return 1
-}
-
-cleanup()
+restore_service()
 {
 	local status=$?
 	trap - EXIT INT TERM
 
 	print ""
-	print "Stopping traced LaunchAgent process to flush CSVs..."
-	launchctl kill SIGTERM "${target}" >/dev/null 2>&1 || true
+	print "Stopping traced service to flush CSVs..."
+	"${control}" bootout >/dev/null 2>&1 || true
 
-	# The macOS service handles SIGTERM cooperatively, so allow teardown_all()
-	# and atexit trace writers to close their streams before restarting it.
-	for _ in {1..100}; do
-		if ! command -v lsof >/dev/null 2>&1 || \
-		   ! lsof -nP -iTCP@"127.0.0.1:${port}" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
-			break
-		fi
-		sleep 0.1
-	done
-	sleep 0.25
+	print "Restoring ordinary development service registration..."
+	IPC_WINE_TCP_PORT="${port}" \
+	IPC_EXIT_WHEN_IDLE=0 \
+		"${control}" bootstrap >/dev/null
 
-	restore_launchd_env
-
-	print "Restarting Monado with its previous launchd environment..."
+	# Preserve the behaviour expected by the ordinary smoke runner: a TCP
+	# listener is ready rather than waiting for a separate XPC activation.
 	launchctl kickstart -k "${target}" >/dev/null 2>&1 || true
 
 	print ""
@@ -112,21 +52,56 @@ cleanup()
 	print "  ${trace_dir}"
 	return ${status}
 }
-trap cleanup EXIT INT TERM
+trap restore_service EXIT INT TERM
 
-# launchctl's per-user environment is inherited by a newly started LaunchAgent.
-# The service's normal registration remains loaded throughout.
-launchctl setenv PSVR2_TIMING_TRACE 1
-launchctl setenv PSVR2_TIMING_TRACE_DIR "${trace_dir}"
-launchctl setenv PSVR2_TIMING_TRACE_FULLY_BUFFERED 1
-launchctl setenv IPC_WINE_TCP_PORT "${port}"
+# bootstrap captures the invoking shell's XRT_/PSVR2_/IPC_ environment into
+# the development LaunchAgent plist. This is deliberately used instead of
+# launchctl setenv: an already-loaded job keeps its registered environment
+# across kickstart restarts.
+PSVR2_TIMING_TRACE=1 \
+PSVR2_TIMING_TRACE_DIR="${trace_dir}" \
+PSVR2_TIMING_TRACE_FULLY_BUFFERED=1 \
+IPC_WINE_TCP_PORT="${port}" \
+IPC_EXIT_WHEN_IDLE=0 \
+	"${control}" bootstrap
 
-print "Restarting the existing LaunchAgent with tracing enabled..."
+if [[ ! -f "${plist}" ]]; then
+	print -u2 "Trace bootstrap succeeded but the development LaunchAgent plist is missing:"
+	print -u2 "  ${plist}"
+	exit 1
+fi
+
+trace_enabled=$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PSVR2_TIMING_TRACE' "${plist}" 2>/dev/null || true)
+trace_path=$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PSVR2_TIMING_TRACE_DIR' "${plist}" 2>/dev/null || true)
+trace_buffered=$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:PSVR2_TIMING_TRACE_FULLY_BUFFERED' "${plist}" 2>/dev/null || true)
+trace_port=$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:IPC_WINE_TCP_PORT' "${plist}" 2>/dev/null || true)
+
+if [[ "${trace_enabled}" != "1" || "${trace_path}" != "${trace_dir}" || "${trace_buffered}" != "1" || "${trace_port}" != "${port}" ]]; then
+	print -u2 "Trace LaunchAgent environment verification failed:"
+	print -u2 "  PSVR2_TIMING_TRACE=${trace_enabled:-<missing>}"
+	print -u2 "  PSVR2_TIMING_TRACE_DIR=${trace_path:-<missing>}"
+	print -u2 "  PSVR2_TIMING_TRACE_FULLY_BUFFERED=${trace_buffered:-<missing>}"
+	print -u2 "  IPC_WINE_TCP_PORT=${trace_port:-<missing>}"
+	exit 1
+fi
+
+print "Verified trace environment in LaunchAgent plist."
 launchctl kickstart -k "${target}"
 
-if ! wait_for_listener; then
+ready=0
+for _ in {1..100}; do
+	if command -v lsof >/dev/null 2>&1 && \
+	   lsof -nP -iTCP@"127.0.0.1:${port}" -sTCP:LISTEN 2>/dev/null | grep -q LISTEN; then
+		ready=1
+		break
+	fi
+	sleep 0.1
+done
+
+if (( ! ready )); then
 	print -u2 "Traced Monado did not listen on 127.0.0.1:${port}."
-	print -u2 "Inspect the service log from your existing LaunchAgent registration."
+	print -u2 "LaunchAgent plist: ${plist}"
+	print -u2 "Service stderr: /tmp/monado-service-launchd.$(id -u).err.log"
 	exit 1
 fi
 
@@ -139,4 +114,22 @@ MONADO_WINE_TIMING_TRACE_HOST="${trace_dir}/wine.csv" \
 	"${script_dir}/run-wine-openvr-opencomposite-smoke.zsh"
 
 print ""
-print "Capture complete. The traced service will now be stopped cleanly so fully-buffered CSVs are flushed."
+print "Capture complete. Stopping the traced service so fully-buffered CSVs are flushed..."
+
+# Stop now rather than waiting for EXIT cleanup, so we can validate the trace
+# before restoring the ordinary service.
+"${control}" bootout >/dev/null 2>&1 || true
+sleep 0.5
+
+submit_files=("${trace_dir}"/monado_psvr2_*_wine_submit.csv(N))
+if (( ${#submit_files[@]} == 0 )); then
+	print -u2 "Native Wine submit trace was not created despite verified trace environment."
+	print -u2 "Trace directory contents:"
+	ls -la "${trace_dir}" >&2 || true
+	print -u2 "Service stderr tail:"
+	tail -n 80 "/tmp/monado-service-launchd.$(id -u).err.log" >&2 2>/dev/null || true
+	exit 1
+fi
+
+print "Native Wine submit trace:"
+print "  ${submit_files[1]}"
