@@ -132,6 +132,84 @@ wine_submit_trace_event(const char *event,
 #define wine_submit_trace_event(...) ((void)0)
 #endif
 
+#ifdef XRT_OS_OSX
+static FILE *g_wine_swapchain_trace = NULL;
+static bool g_wine_swapchain_trace_failed = false;
+static bool g_wine_swapchain_trace_atexit_registered = false;
+static uint64_t g_wine_swapchain_trace_rows = 0;
+
+static void
+wine_swapchain_trace_close(void)
+{
+	if (g_wine_swapchain_trace == NULL) {
+		return;
+	}
+	fflush(g_wine_swapchain_trace);
+	fclose(g_wine_swapchain_trace);
+	g_wine_swapchain_trace = NULL;
+}
+
+static FILE *
+wine_swapchain_trace_get(void)
+{
+	if (!wine_submit_trace_enabled() || g_wine_swapchain_trace_failed) {
+		return NULL;
+	}
+	if (g_wine_swapchain_trace != NULL) {
+		return g_wine_swapchain_trace;
+	}
+
+	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
+	if (dir == NULL || dir[0] == '\0') {
+		dir = "/tmp";
+	}
+	char path[1024];
+	size_t dir_len = strlen(dir);
+	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
+	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_wine_swapchain.csv", dir, separator, (int)getpid());
+
+	g_wine_swapchain_trace = fopen(path, "w");
+	if (g_wine_swapchain_trace == NULL) {
+		g_wine_swapchain_trace_failed = true;
+		return NULL;
+	}
+	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
+	size_t buffer_size =
+	    fully_buffered != NULL && strcmp(fully_buffered, "1") == 0 ? 16u * 1024u * 1024u : 64u * 1024u;
+	setvbuf(g_wine_swapchain_trace, NULL, _IOFBF, buffer_size);
+	fputs("event,swapchain_id,image_index,event_ns,duration_ns,timeout_ns,result\n", g_wine_swapchain_trace);
+	if (!g_wine_swapchain_trace_atexit_registered) {
+		atexit(wine_swapchain_trace_close);
+		g_wine_swapchain_trace_atexit_registered = true;
+	}
+	return g_wine_swapchain_trace;
+}
+
+static void
+wine_swapchain_trace_event(const char *event,
+                           uint32_t swapchain_id,
+                           uint32_t image_index,
+                           int64_t duration_ns,
+                           int64_t timeout_ns,
+                           xrt_result_t result)
+{
+	FILE *file = wine_swapchain_trace_get();
+	if (file == NULL) {
+		return;
+	}
+	flockfile(file);
+	fprintf(file, "%s,%u,%u,%" PRId64 ",%" PRId64 ",%" PRId64 ",%d\n",
+	        event, swapchain_id, image_index, os_monotonic_get_ns(), duration_ns, timeout_ns, (int)result);
+	g_wine_swapchain_trace_rows++;
+	if (g_wine_swapchain_trace_rows % 512 == 0) {
+		fflush(file);
+	}
+	funlockfile(file);
+}
+#else
+#define wine_swapchain_trace_event(...) ((void)0)
+#endif
+
 
 #define GET_XTRACK_OR_RETURN(ICS, ID, XTRACK)                                                                          \
 	do {                                                                                                           \
@@ -2392,7 +2470,10 @@ ipc_handle_swapchain_wait_image(volatile struct ipc_client_state *ics, uint32_t 
 	uint32_t sc_index = id;
 	struct xrt_swapchain *xsc = ics->xscs[sc_index];
 
-	return xrt_swapchain_wait_image(xsc, timeout_ns, index);
+	int64_t start_ns = os_monotonic_get_ns();
+	xrt_result_t xret = xrt_swapchain_wait_image(xsc, timeout_ns, index);
+	wine_swapchain_trace_event("wait", id, index, os_monotonic_get_ns() - start_ns, timeout_ns, xret);
+	return xret;
 }
 
 xrt_result_t
@@ -2406,9 +2487,11 @@ ipc_handle_swapchain_acquire_image(volatile struct ipc_client_state *ics, uint32
 	uint32_t sc_index = id;
 	struct xrt_swapchain *xsc = ics->xscs[sc_index];
 
-	xrt_swapchain_acquire_image(xsc, out_index);
-
-	return XRT_SUCCESS;
+	int64_t start_ns = os_monotonic_get_ns();
+	xrt_result_t xret = xrt_swapchain_acquire_image(xsc, out_index);
+	uint32_t traced_index = xret == XRT_SUCCESS ? *out_index : UINT32_MAX;
+	wine_swapchain_trace_event("acquire", id, traced_index, os_monotonic_get_ns() - start_ns, 0, xret);
+	return xret;
 }
 
 xrt_result_t
@@ -2422,9 +2505,10 @@ ipc_handle_swapchain_release_image(volatile struct ipc_client_state *ics, uint32
 	uint32_t sc_index = id;
 	struct xrt_swapchain *xsc = ics->xscs[sc_index];
 
-	xrt_swapchain_release_image(xsc, index);
-
-	return XRT_SUCCESS;
+	int64_t start_ns = os_monotonic_get_ns();
+	xrt_result_t xret = xrt_swapchain_release_image(xsc, index);
+	wine_swapchain_trace_event("release", id, index, os_monotonic_get_ns() - start_ns, 0, xret);
+	return xret;
 }
 
 xrt_result_t
