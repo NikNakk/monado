@@ -542,9 +542,11 @@ struct metal_renderer
 struct view_swapchain
 {
 	XrSwapchain handle = XR_NULL_HANDLE;
+	XrSwapchain depth_handle = XR_NULL_HANDLE;
 	uint32_t width = 0;
 	uint32_t height = 0;
 	std::vector<XrSwapchainImageMetalKHR> images;
+	std::vector<XrSwapchainImageMetalKHR> depth_images;
 	id<MTLTexture> depth_texture = nil;
 };
 
@@ -560,11 +562,13 @@ struct application
 	XrSessionState session_state = XR_SESSION_STATE_UNKNOWN;
 	bool session_running = false;
 	bool exit_requested = false;
+	bool submit_depth_layer = false;
 	id<MTLCommandQueue> command_queue = nil;
 	MTLPixelFormat color_format = MTLPixelFormatInvalid;
 	std::vector<XrViewConfigurationView> view_configuration;
 	std::vector<XrView> views;
 	std::vector<XrCompositionLayerProjectionView> projection_views;
+	std::vector<XrCompositionLayerDepthInfoKHR> depth_infos;
 	std::vector<view_swapchain> swapchains;
 	metal_renderer renderer;
 	diagnostic_scene scene;
@@ -597,15 +601,23 @@ create_instance(application &app)
 	if (!has_extension(app.xr, XR_KHR_METAL_ENABLE_EXTENSION_NAME)) {
 		fatal("runtime does not expose XR_KHR_metal_enable");
 	}
-	const char *extensions[] = {XR_KHR_METAL_ENABLE_EXTENSION_NAME};
+	if (app.submit_depth_layer && !has_extension(app.xr, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME)) {
+		fatal("runtime does not expose XR_KHR_composition_layer_depth");
+	}
+
+	std::vector<const char *> extensions = {XR_KHR_METAL_ENABLE_EXTENSION_NAME};
+	if (app.submit_depth_layer) {
+		extensions.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
+	}
+
 	XrInstanceCreateInfo create_info{XR_TYPE_INSTANCE_CREATE_INFO};
 	snprintf(create_info.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "%s", "PSVR2 OpenXR Test");
 	create_info.applicationInfo.applicationVersion = 1;
 	snprintf(create_info.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "%s", "Monado diagnostic");
 	create_info.applicationInfo.engineVersion = 1;
 	create_info.applicationInfo.apiVersion = XR_MAKE_VERSION(1, 0, 0);
-	create_info.enabledExtensionCount = 1;
-	create_info.enabledExtensionNames = extensions;
+	create_info.enabledExtensionCount = (uint32_t)extensions.size();
+	create_info.enabledExtensionNames = extensions.data();
 	check_xr(app.xr.create_instance(&create_info, &app.instance), "xrCreateInstance");
 	load_instance_xr_functions(app.xr, app.instance);
 
@@ -683,6 +695,22 @@ choose_swapchain_format(application &app)
 	fatal("runtime did not expose a supported 8-bit Metal swapchain format");
 }
 
+static MTLPixelFormat
+choose_depth_swapchain_format(application &app)
+{
+	uint32_t format_count = 0;
+	check_xr(app.xr.enumerate_swapchain_formats(app.session, 0, &format_count, nullptr),
+	         "xrEnumerateSwapchainFormats(depth count)");
+	std::vector<int64_t> formats(format_count);
+	check_xr(app.xr.enumerate_swapchain_formats(app.session, format_count, &format_count, formats.data()),
+	         "xrEnumerateSwapchainFormats(depth list)");
+
+	if (std::find(formats.begin(), formats.end(), (int64_t)MTLPixelFormatDepth32Float) != formats.end()) {
+		return MTLPixelFormatDepth32Float;
+	}
+	fatal("runtime did not expose MTLPixelFormatDepth32Float for an OpenXR depth swapchain");
+}
+
 static void
 create_swapchains(application &app)
 {
@@ -734,30 +762,59 @@ create_swapchains(application &app)
 		             reinterpret_cast<XrSwapchainImageBaseHeader *>(swapchain.images.data())),
 		         "xrEnumerateSwapchainImages(list)");
 
-		MTLTextureDescriptor *depth_descriptor =
-		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-		                                                      width:swapchain.width
-		                                                     height:swapchain.height
-		                                                  mipmapped:NO];
-		depth_descriptor.usage = MTLTextureUsageRenderTarget;
-		depth_descriptor.storageMode = MTLStorageModePrivate;
-		swapchain.depth_texture = [device newTextureWithDescriptor:depth_descriptor];
-		if (swapchain.depth_texture == nil) {
-			fatal("could not create per-view Metal depth texture");
+		if (app.submit_depth_layer) {
+			XrSwapchainCreateInfo depth_create_info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+			depth_create_info.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+			depth_create_info.format = (int64_t)choose_depth_swapchain_format(app);
+			depth_create_info.sampleCount = 1;
+			depth_create_info.width = swapchain.width;
+			depth_create_info.height = swapchain.height;
+			depth_create_info.faceCount = 1;
+			depth_create_info.arraySize = 1;
+			depth_create_info.mipCount = 1;
+			check_xr(app.xr.create_swapchain(app.session, &depth_create_info, &swapchain.depth_handle),
+			         "xrCreateSwapchain(depth)");
+
+			uint32_t depth_image_count = 0;
+			check_xr(app.xr.enumerate_swapchain_images(swapchain.depth_handle, 0, &depth_image_count, nullptr),
+			         "xrEnumerateSwapchainImages(depth count)");
+			swapchain.depth_images.resize(depth_image_count);
+			for (XrSwapchainImageMetalKHR &image : swapchain.depth_images) {
+				image = {XR_TYPE_SWAPCHAIN_IMAGE_METAL_KHR};
+			}
+			check_xr(app.xr.enumerate_swapchain_images(
+			             swapchain.depth_handle, depth_image_count, &depth_image_count,
+			             reinterpret_cast<XrSwapchainImageBaseHeader *>(swapchain.depth_images.data())),
+			         "xrEnumerateSwapchainImages(depth list)");
+		} else {
+			MTLTextureDescriptor *depth_descriptor =
+			    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+			                                                      width:swapchain.width
+			                                                     height:swapchain.height
+			                                                  mipmapped:NO];
+			depth_descriptor.usage = MTLTextureUsageRenderTarget;
+			depth_descriptor.storageMode = MTLStorageModePrivate;
+			swapchain.depth_texture = [device newTextureWithDescriptor:depth_descriptor];
+			if (swapchain.depth_texture == nil) {
+				fatal("could not create per-view Metal depth texture");
+			}
 		}
 	}
 
 	app.views.resize(view_count);
 	app.projection_views.resize(view_count);
+	app.depth_infos.resize(view_count);
 	for (uint32_t i = 0; i < view_count; ++i) {
 		app.views[i] = {XR_TYPE_VIEW};
 		app.projection_views[i] = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+		app.depth_infos[i] = {XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR};
 	}
 	app.frame_instances.reserve(app.renderer.max_instances);
 	app.renderer.initialize(device, app.color_format);
 
-	fprintf(stderr, "psvr2-openxr-test: %u views, %ux%u per eye, Metal format %lld\n", view_count,
-	        app.swapchains[0].width, app.swapchains[0].height, (long long)app.color_format);
+	fprintf(stderr, "psvr2-openxr-test: %u views, %ux%u per eye, Metal format %lld%s\n", view_count,
+	        app.swapchains[0].width, app.swapchains[0].height, (long long)app.color_format,
+	        app.submit_depth_layer ? ", XR_KHR_composition_layer_depth enabled" : "");
 }
 
 static XrPosef
@@ -794,6 +851,7 @@ render_views(application &app, XrTime predicted_display_time)
 	       app.frame_instances.size() * sizeof(instance_data));
 
 	std::vector<uint32_t> image_indices(app.swapchains.size(), 0);
+	std::vector<uint32_t> depth_image_indices(app.swapchains.size(), 0);
 	for (size_t i = 0; i < app.swapchains.size(); ++i) {
 		XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
 		check_xr(app.xr.acquire_swapchain_image(app.swapchains[i].handle, &acquire_info, &image_indices[i]),
@@ -801,6 +859,14 @@ render_views(application &app, XrTime predicted_display_time)
 		XrSwapchainImageWaitInfo wait_info{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
 		wait_info.timeout = XR_INFINITE_DURATION;
 		check_xr(app.xr.wait_swapchain_image(app.swapchains[i].handle, &wait_info), "xrWaitSwapchainImage");
+
+		if (app.submit_depth_layer) {
+			check_xr(app.xr.acquire_swapchain_image(app.swapchains[i].depth_handle, &acquire_info,
+			                                         &depth_image_indices[i]),
+			         "xrAcquireSwapchainImage(depth)");
+			check_xr(app.xr.wait_swapchain_image(app.swapchains[i].depth_handle, &wait_info),
+			         "xrWaitSwapchainImage(depth)");
+		}
 	}
 
 	id<MTLCommandBuffer> command_buffer = [app.command_queue commandBuffer];
@@ -823,9 +889,20 @@ render_views(application &app, XrTime predicted_display_time)
 		render_pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 		render_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
 		render_pass.colorAttachments[0].clearColor = MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
-		render_pass.depthAttachment.texture = swapchain.depth_texture;
+		id<MTLTexture> depth_texture = swapchain.depth_texture;
+		if (app.submit_depth_layer) {
+			if (depth_image_indices[i] >= swapchain.depth_images.size()) {
+				fatal("OpenXR returned an out-of-range depth swapchain image index");
+			}
+			depth_texture = (__bridge id<MTLTexture>)swapchain.depth_images[depth_image_indices[i]].texture;
+			if (depth_texture == nil) {
+				fatal("OpenXR returned a nil Metal depth swapchain texture");
+			}
+		}
+		render_pass.depthAttachment.texture = depth_texture;
 		render_pass.depthAttachment.loadAction = MTLLoadActionClear;
-		render_pass.depthAttachment.storeAction = MTLStoreActionDontCare;
+		render_pass.depthAttachment.storeAction =
+		    app.submit_depth_layer ? MTLStoreActionStore : MTLStoreActionDontCare;
 		render_pass.depthAttachment.clearDepth = 1.0;
 
 		id<MTLRenderCommandEncoder> encoder = [command_buffer renderCommandEncoderWithDescriptor:render_pass];
@@ -853,6 +930,10 @@ render_views(application &app, XrTime predicted_display_time)
 	for (view_swapchain &swapchain : app.swapchains) {
 		XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
 		check_xr(app.xr.release_swapchain_image(swapchain.handle, &release_info), "xrReleaseSwapchainImage");
+		if (app.submit_depth_layer) {
+			check_xr(app.xr.release_swapchain_image(swapchain.depth_handle, &release_info),
+			         "xrReleaseSwapchainImage(depth)");
+		}
 	}
 }
 
@@ -925,6 +1006,21 @@ render_frame(application &app)
 				projection_view.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
 				                                            (int32_t)app.swapchains[i].height};
 				projection_view.subImage.imageArrayIndex = 0;
+
+				if (app.submit_depth_layer) {
+					XrCompositionLayerDepthInfoKHR &depth_info = app.depth_infos[i];
+					depth_info = {XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR};
+					depth_info.subImage.swapchain = app.swapchains[i].depth_handle;
+					depth_info.subImage.imageRect.offset = {0, 0};
+					depth_info.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
+					                                          (int32_t)app.swapchains[i].height};
+					depth_info.subImage.imageArrayIndex = 0;
+					depth_info.minDepth = 0.0f;
+					depth_info.maxDepth = 1.0f;
+					depth_info.nearZ = 0.05f;
+					depth_info.farZ = 100.0f;
+					projection_view.next = &depth_info;
+				}
 			}
 			layer.space = app.app_space;
 			layer.viewCount = (uint32_t)app.projection_views.size();
@@ -951,6 +1047,10 @@ cleanup(application &app)
 	for (view_swapchain &swapchain : app.swapchains) {
 		[swapchain.depth_texture release];
 		swapchain.depth_texture = nil;
+		if (swapchain.depth_handle != XR_NULL_HANDLE && app.xr.destroy_swapchain != nullptr) {
+			app.xr.destroy_swapchain(swapchain.depth_handle);
+			swapchain.depth_handle = XR_NULL_HANDLE;
+		}
 		if (swapchain.handle != XR_NULL_HANDLE && app.xr.destroy_swapchain != nullptr) {
 			app.xr.destroy_swapchain(swapchain.handle);
 			swapchain.handle = XR_NULL_HANDLE;
@@ -984,12 +1084,17 @@ static int
 run(int argc, char **argv)
 {
 	const char *loader_path = nullptr;
+	bool submit_depth_layer = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
+		} else if (strcmp(argv[i], "--depth-layer") == 0) {
+			submit_depth_layer = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
-			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib]\n"
+			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer]\n"
+			        "  --depth-layer submits the rendered Depth32Float attachment through "
+			        "XR_KHR_composition_layer_depth.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader.\n",
 			        argv[0]);
 			return EXIT_SUCCESS;
@@ -1000,6 +1105,7 @@ run(int argc, char **argv)
 	}
 
 	application app;
+	app.submit_depth_layer = submit_depth_layer;
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
