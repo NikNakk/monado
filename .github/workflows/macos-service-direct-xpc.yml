@@ -6,6 +6,7 @@ on:
       - macos-service-direct-xpc
       - macos-service-direct-xpc-owned-resources
       - macos-service-direct-xpc-cadence
+      - macos-depth-aware-reprojection
     paths:
       - .github/workflows/macos-service-direct-xpc.yml
       - CMakeLists.txt
