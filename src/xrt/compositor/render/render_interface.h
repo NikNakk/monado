@@ -1382,8 +1382,10 @@ struct render_compute_distortion_ubo_data
 		float near_z;
 		float far_z;
 	} projection_depth[XRT_MAX_VIEWS];
-	struct xrt_matrix_4x4 new_to_source_view_scanout_begin[XRT_MAX_VIEWS];
-	struct xrt_matrix_4x4 new_to_source_view_scanout_end[XRT_MAX_VIEWS];
+	// Scanout-time camera origin expressed in the submitted source view.
+	// Orientation is already handled by the existing rotational timewarp.
+	struct xrt_vec4 new_origin_in_source_view_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_vec4 new_origin_in_source_view_scanout_end[XRT_MAX_VIEWS];
 	struct
 	{
 		uint32_t value;
