@@ -1093,6 +1093,18 @@ vk_create_image_advanced(struct vk_bundle *vk,
 VkResult
 vk_create_sampler(struct vk_bundle *vk, VkSamplerAddressMode clamp_mode, VkSampler *out_sampler);
 
+/*!
+ * Creates a sampler with an explicit min/mag filter. Useful for data textures
+ * such as depth where interpolation across discontinuities is undesirable.
+ *
+ * @ingroup aux_vk
+ */
+VkResult
+vk_create_sampler_with_filter(struct vk_bundle *vk,
+                              VkSamplerAddressMode clamp_mode,
+                              VkFilter filter,
+                              VkSampler *out_sampler);
+
 
 /*
  *

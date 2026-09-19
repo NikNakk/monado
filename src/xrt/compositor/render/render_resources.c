@@ -580,6 +580,16 @@ render_resources_init(struct render_resources *r,
 
 	VK_NAME_SAMPLER(vk, r->samplers.clamp_to_edge, "render_resources sampler clamp_to_edge");
 
+	ret = vk_create_sampler_with_filter(         //
+	    vk,                                      // vk_bundle
+	    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,   // clamp_mode
+	    VK_FILTER_NEAREST,                       // filter
+	    &r->samplers.nearest_clamp_to_edge);     // out_sampler
+	VK_CHK_WITH_RET(ret, "vk_create_sampler_with_filter", false);
+
+	VK_NAME_SAMPLER(vk, r->samplers.nearest_clamp_to_edge,
+	                "render_resources sampler nearest_clamp_to_edge");
+
 	ret = vk_create_sampler(                     //
 	    vk,                                      // vk_bundle
 	    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, // clamp_mode
@@ -1139,6 +1149,7 @@ render_resources_fini(struct render_resources *r)
 	D(Sampler, r->samplers.mock);
 	D(Sampler, r->samplers.repeat);
 	D(Sampler, r->samplers.clamp_to_edge);
+	D(Sampler, r->samplers.nearest_clamp_to_edge);
 	D(Sampler, r->samplers.clamp_to_border_black);
 
 	D(ImageView, r->mock.color.image_view);

@@ -386,6 +386,9 @@ struct render_resources
 		//! Sampler that clamps the coordinates to the edge in all directions.
 		VkSampler clamp_to_edge;
 
+		//! Nearest-neighbour edge-clamped sampler for depth/data textures.
+		VkSampler nearest_clamp_to_edge;
+
 		//! Sampler that clamps color samples to black in all directions.
 		VkSampler clamp_to_border_black;
 	} samplers;

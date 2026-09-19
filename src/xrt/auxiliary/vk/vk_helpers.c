@@ -1424,16 +1424,19 @@ vk_get_native_handle_from_device_memory(struct vk_bundle *vk,
 }
 
 VkResult
-vk_create_sampler(struct vk_bundle *vk, VkSamplerAddressMode clamp_mode, VkSampler *out_sampler)
+vk_create_sampler_with_filter(struct vk_bundle *vk,
+                              VkSamplerAddressMode clamp_mode,
+                              VkFilter filter,
+                              VkSampler *out_sampler)
 {
 	VkSampler sampler;
 	VkResult ret;
 
 	VkSamplerCreateInfo info = {
 	    .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
-	    .magFilter = VK_FILTER_LINEAR,
-	    .minFilter = VK_FILTER_LINEAR,
-	    .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+	    .magFilter = filter,
+	    .minFilter = filter,
+	    .mipmapMode = filter == VK_FILTER_NEAREST ? VK_SAMPLER_MIPMAP_MODE_NEAREST : VK_SAMPLER_MIPMAP_MODE_LINEAR,
 	    .addressModeU = clamp_mode,
 	    .addressModeV = clamp_mode,
 	    .addressModeW = clamp_mode,
@@ -1450,6 +1453,12 @@ vk_create_sampler(struct vk_bundle *vk, VkSamplerAddressMode clamp_mode, VkSampl
 	*out_sampler = sampler;
 
 	return VK_SUCCESS;
+}
+
+VkResult
+vk_create_sampler(struct vk_bundle *vk, VkSamplerAddressMode clamp_mode, VkSampler *out_sampler)
+{
+	return vk_create_sampler_with_filter(vk, clamp_mode, VK_FILTER_LINEAR, out_sampler);
 }
 
 
