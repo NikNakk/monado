@@ -191,6 +191,44 @@ For a direct A/B comparison, run once normally (GPU sync) and once with
 `MONADO_WINE_GPU_SYNC=0`, using a different
 `MONADO_WINE_TIMING_TRACE_HOST` for each run.
 
+### End-to-end native Wine/OpenVR timing capture
+
+To correlate the Wine frame with DXMT GPU readiness, the multi-compositor,
+CAMetalDisplayLink and Metal presentation traces, use the traced runner:
+
+```sh
+git pull
+cmake --build build-wine --parallel
+scripts/macos/build-wine-openxr-d3d11.zsh
+
+zsh scripts/macos/run-wine-openvr-native-trace.zsh
+```
+
+The helper temporarily re-bootstraps the development launchd service with
+`PSVR2_TIMING_TRACE=1`, writes Wine and native traces into one timestamped
+directory under `/tmp`, stops the traced service so fully-buffered CSVs are
+flushed, then restores the normal development service registration.
+
+The native trace set includes:
+- `wine_submit.csv`: arrival, layer reconstruction and commit of the copied
+  Wine frame, keyed by client frame ID and shared-event timeline value.
+- `client_gpu.csv`: previous-frame blocking, shared-event wait/ready and
+  scheduled-slot timing.
+- `client_frame_map.csv`: client frame -> system compositor frame mapping.
+- `frame_pipeline.csv`: system compositor prediction/render stages.
+- `present.csv`, `presented.csv`, `present_complete.csv`: drawable,
+  Metal command-buffer and actual presentation timing.
+- `wine.csv`: PE/Wine-side wait, producer and IPC timings.
+
+Analyze the whole capture with:
+
+```sh
+python3 scripts/macos/analyze-wine-native-pipeline.py /tmp/monado-wine-openvr-YYYYMMDD-HHMMSS
+```
+
+Use `MONADO_WINE_NATIVE_TRACE_DIR=/path` to choose a fixed output directory and
+`MONADO_OPENVR_SMOKE_FRAMES=N` to change capture length.
+
 The common one-projection-layer submission path uses one TCP request/reply.
 Multi-layer frames retain the compact chunked fallback.
 
