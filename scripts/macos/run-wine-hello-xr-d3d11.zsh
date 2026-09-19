@@ -17,6 +17,13 @@ if [[ ! -x "${wine}" ]]; then
 	exit 1
 fi
 
+if [[ -f "${wine_root}/dxmt-gpu-sync.txt" ]]; then
+	print "GPU-sync-capable DXMT overlay detected."
+else
+	print -u2 "NOTE: GPU-sync DXMT overlay not detected; hello_xr will use the CPU fence fallback."
+	print -u2 "      Build it once with: scripts/macos/build-wine-dxmt-gpu-sync.zsh"
+fi
+
 if [[ ! -f "${runtime_build}/openxr_monado-dev.json" ]]; then
 	"${script_dir}/build-wine-openxr-d3d11.zsh"
 fi
