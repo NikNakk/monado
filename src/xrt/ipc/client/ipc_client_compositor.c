@@ -965,12 +965,46 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 	// Last bit of data to put in the shared memory area.
 	slot->layer_count = icc->layers.layer_count;
 
-	xret = ipc_call_compositor_layer_sync_with_semaphore( //
-	    icc->ipc_c,                                       //
-	    icc->layers.slot_id,                              //
-	    iccs->id,                                         //
-	    value,                                            //
-	    &icc->layers.slot_id);                            //
+	if (icc->ipc_c->imc.stream_socket) {
+		const size_t total_size =
+		    offsetof(struct ipc_layer_slot, layers) + ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
+		if (total_size > UINT32_MAX) {
+			xret = XRT_ERROR_IPC_FAILURE;
+		} else if (slot->layer_count == 1 && total_size <= IPC_LAYER_SINGLE_PAYLOAD_SIZE) {
+			struct ipc_layer_single_payload payload = {0};
+			payload.size = (uint32_t)total_size;
+			memcpy(payload.data, slot, total_size);
+			xret = ipc_call_compositor_layer_sync_single_semaphore(
+			    icc->ipc_c, &payload, iccs->id, value, &icc->layers.slot_id);
+		} else {
+			const uint8_t *src = (const uint8_t *)slot;
+			xret = XRT_SUCCESS;
+			for (size_t offset = 0; offset < total_size; offset += IPC_LAYER_COPY_CHUNK_SIZE) {
+				struct ipc_layer_copy_chunk chunk = {0};
+				size_t remaining = total_size - offset;
+				size_t copy_size = remaining < IPC_LAYER_COPY_CHUNK_SIZE ? remaining : IPC_LAYER_COPY_CHUNK_SIZE;
+				chunk.size = (uint32_t)copy_size;
+				memcpy(chunk.data, src + offset, copy_size);
+
+				xret = ipc_call_compositor_layer_copy_chunk(
+				    icc->ipc_c, (uint32_t)offset, (uint32_t)total_size, &chunk);
+				if (xret != XRT_SUCCESS) {
+					break;
+				}
+			}
+			if (xret == XRT_SUCCESS) {
+				xret = ipc_call_compositor_layer_sync_copy_commit_semaphore(
+				    icc->ipc_c, (uint32_t)total_size, iccs->id, value, &icc->layers.slot_id);
+			}
+		}
+	} else {
+		xret = ipc_call_compositor_layer_sync_with_semaphore( //
+		    icc->ipc_c,                                       //
+		    icc->layers.slot_id,                              //
+		    iccs->id,                                         //
+		    value,                                            //
+		    &icc->layers.slot_id);                            //
+	}
 
 	/*
 	 * We are probably in a really bad state if we fail, at
