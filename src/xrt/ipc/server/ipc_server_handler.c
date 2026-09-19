@@ -424,15 +424,27 @@ ipc_handle_instance_get_shm_fd(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
-ipc_handle_instance_get_shm_copy(volatile struct ipc_client_state *ics, struct ipc_shared_memory *out_ism)
+ipc_handle_instance_get_shm_chunk(volatile struct ipc_client_state *ics,
+                                  uint32_t offset,
+                                  struct ipc_shm_copy_chunk *out_chunk)
 {
 	IPC_TRACE_MARKER();
 
-	if (ics == NULL || out_ism == NULL) {
+	if (ics == NULL || out_chunk == NULL) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
-	memcpy(out_ism, get_ism(ics), sizeof(*out_ism));
+	const size_t total_size = sizeof(struct ipc_shared_memory);
+	if ((size_t)offset >= total_size) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	size_t remaining = total_size - (size_t)offset;
+	size_t copy_size = remaining < IPC_SHM_COPY_CHUNK_SIZE ? remaining : IPC_SHM_COPY_CHUNK_SIZE;
+
+	memset(out_chunk, 0, sizeof(*out_chunk));
+	out_chunk->size = (uint32_t)copy_size;
+	memcpy(out_chunk->data, ((const uint8_t *)get_ism(ics)) + offset, copy_size);
 	return XRT_SUCCESS;
 }
 
