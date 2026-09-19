@@ -53,7 +53,7 @@ if ! nc -z 127.0.0.1 "${port}" >/dev/null 2>&1; then
 	print -u2 ""
 	print -u2 "For the development launchd service, re-bootstrap with the port in its captured environment,"
 	print -u2 "then kickstart it:"
-	print -u2 "  IPC_WINE_TCP_PORT=${port} <native-build>/src/xrt/targets/service/monado-service-xpc-control bootstrap"
+	print -u2 "  IPC_WINE_TCP_PORT=${port} IPC_EXIT_WHEN_IDLE=0 <native-build>/src/xrt/targets/service/monado-service-xpc-control bootstrap"
 	print -u2 "  launchctl kickstart -k gui/\$(id -u)/org.freedesktop.monado.service"
 	exit 1
 fi
