@@ -1586,6 +1586,57 @@ ipc_handle_compositor_layer_sync(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
+                                        const struct ipc_layer_single_payload *payload,
+                                        uint32_t *out_free_slot_id)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics == NULL || payload == NULL || out_free_slot_id == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	if (ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	if (payload->size == 0 || payload->size > IPC_LAYER_SINGLE_PAYLOAD_SIZE ||
+	    payload->size > sizeof(struct ipc_layer_slot)) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct ipc_layer_slot slot = {0};
+	memcpy(&slot, payload->data, payload->size);
+	if (slot.layer_count != 1) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	const size_t expected_size =
+	    offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
+	if ((size_t)payload->size != expected_size) {
+		IPC_ERROR(ics->server,
+		          "Wine single-layer wire-layout mismatch: received=%u expected_native=%zu",
+		          payload->size,
+		          expected_size);
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	xrt_comp_layer_begin(ics->xc, &slot.data);
+	if (!_update_layers(ics, ics->xc, &slot)) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	xrt_result_t xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	os_mutex_lock(&ics->server->global_state.lock);
+	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
+	ics->server->current_slot_index = *out_free_slot_id;
+	os_mutex_unlock(&ics->server->global_state.lock);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_handle_compositor_layer_copy_chunk(volatile struct ipc_client_state *ics,
                                        uint32_t offset,
                                        uint32_t total_size,
