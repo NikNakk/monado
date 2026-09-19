@@ -1,0 +1,41 @@
+// Copyright 2026, Collabora Ltd.
+// SPDX-License-Identifier: BSL-1.0
+
+#version 460
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+layout(set = 0, binding = 4, std430) buffer Visibility
+{
+	uint depth_bits[];
+} visibility;
+
+layout(set = 0, binding = 3, std140) uniform restrict Config
+{
+	ivec4 views[2];
+	vec4 pre_transform[2];
+	vec4 post_transform[2];
+	mat4 transform_timewarp_scanout_begin[2];
+	mat4 transform_timewarp_scanout_end[2];
+
+	vec4 depth_post_transform[2];
+	vec4 source_uv_to_tanangle[2];
+	vec4 projection_depth[2];
+	vec4 new_origin_in_source_view_scanout_begin[2];
+	vec4 new_origin_in_source_view_scanout_end[2];
+	vec4 target_to_source_orientation_scanout_begin[2];
+	vec4 target_to_source_orientation_scanout_end[2];
+	uvec4 has_depth[2];
+	uvec4 depth_debug;
+	uvec4 depth_visibility;
+} ubo;
+
+void main()
+{
+	uint index = gl_GlobalInvocationID.x;
+	uint count = ubo.depth_visibility.x * ubo.depth_visibility.y * ubo.depth_visibility.z;
+	if (index >= count) {
+		return;
+	}
+	visibility.depth_bits[index] = 0x7f7fffffu;
+}
