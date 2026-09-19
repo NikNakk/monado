@@ -84,6 +84,7 @@ jobs:
       - name: Verify main installed targets were built
         run: |
           test -x build-release/src/xrt/targets/cli/monado-cli
+          test -x build-release/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
           test -x build-release/src/xrt/targets/service/monado-service
           test -x build-release/src/xrt/targets/service/monado-service-xpc-control
 
