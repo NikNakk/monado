@@ -114,7 +114,7 @@ main()
 	                                   nullptr,
 	                                   D3D11_CREATE_DEVICE_BGRA_SUPPORT,
 	                                   requested_feature_levels,
-	                                   static_cast<UINT>(std::size(requested_feature_levels)),
+	                                   static_cast<UINT>(sizeof(requested_feature_levels) / sizeof(requested_feature_levels[0])),
 	                                   D3D11_SDK_VERSION,
 	                                   &device,
 	                                   &selected_feature_level,
