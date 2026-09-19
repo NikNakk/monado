@@ -19,14 +19,23 @@
 #include <stdint.h>
 #include <string.h>
 
+enum metal_swapchain_import_source
+{
+	METAL_SWAPCHAIN_IMPORT_NONE = 0,
+	METAL_SWAPCHAIN_IMPORT_TEXTURES,
+	METAL_SWAPCHAIN_IMPORT_IOSURFACE_IDS,
+};
+
 struct metal_swapchain_import_request
 {
 	bool active;
 	bool consumed;
+	enum metal_swapchain_import_source source;
 	const struct vk_image_collection *direct_vkic;
 	struct xrt_swapchain_create_info info;
 	uint32_t image_count;
 	void *textures[XRT_MAX_SWAPCHAIN_IMAGES];
+	uint32_t iosurface_ids[XRT_MAX_SWAPCHAIN_IMAGES];
 };
 
 static __thread struct metal_swapchain_import_request g_request = {0};
@@ -60,6 +69,7 @@ comp_metal_swapchain_import_begin(const struct xrt_swapchain_create_info *info,
 
 	memset(&g_request, 0, sizeof(g_request));
 	g_request.active = true;
+	g_request.source = METAL_SWAPCHAIN_IMPORT_TEXTURES;
 	g_request.info = *info;
 	g_request.image_count = image_count;
 	for (uint32_t i = 0; i < image_count; i++) {
@@ -68,6 +78,30 @@ comp_metal_swapchain_import_begin(const struct xrt_swapchain_create_info *info,
 			return false;
 		}
 		g_request.textures[i] = metal_textures[i];
+	}
+	return true;
+}
+
+bool
+comp_metal_swapchain_import_begin_iosurface_ids(const struct xrt_swapchain_create_info *info,
+                                                uint32_t image_count,
+                                                const uint32_t *iosurface_ids)
+{
+	if (info == NULL || iosurface_ids == NULL || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES ||
+	    g_request.active) {
+		return false;
+	}
+	memset(&g_request, 0, sizeof(g_request));
+	g_request.active = true;
+	g_request.source = METAL_SWAPCHAIN_IMPORT_IOSURFACE_IDS;
+	g_request.info = *info;
+	g_request.image_count = image_count;
+	for (uint32_t i = 0; i < image_count; i++) {
+		if (iosurface_ids[i] == 0) {
+			memset(&g_request, 0, sizeof(g_request));
+			return false;
+		}
+		g_request.iosurface_ids[i] = iosurface_ids[i];
 	}
 	return true;
 }
@@ -259,7 +293,28 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 	out_vkic->image_count = direct_image_count;
 
 	for (uint32_t i = 0; i < direct_image_count; i++) {
-		VkResult ret = create_direct_image(vk, info, i, g_request.textures[i], &out_vkic->images[i]);
+		void *source_texture = NULL;
+		bool source_texture_owned = false;
+		if (g_request.source == METAL_SWAPCHAIN_IMPORT_TEXTURES) {
+			source_texture = g_request.textures[i];
+		} else if (g_request.source == METAL_SWAPCHAIN_IMPORT_IOSURFACE_IDS) {
+			if (!comp_metal_texture_create_from_iosurface_id_for_vk_device(
+			        vk, info, g_request.iosurface_ids[i], &source_texture)) {
+				U_LOG_E("Could not create texture for external IOSurface id=%u image=%u",
+				        g_request.iosurface_ids[i], i);
+				destroy_direct_images(vk, out_vkic);
+				return VK_ERROR_INITIALIZATION_FAILED;
+			}
+			source_texture_owned = true;
+		} else {
+			destroy_direct_images(vk, out_vkic);
+			return VK_ERROR_INITIALIZATION_FAILED;
+		}
+
+		VkResult ret = create_direct_image(vk, info, i, source_texture, &out_vkic->images[i]);
+		if (source_texture_owned) {
+			comp_metal_texture_release(source_texture);
+		}
 		if (ret != VK_SUCCESS) {
 			destroy_direct_images(vk, out_vkic);
 			return ret;
@@ -278,8 +333,9 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 	    (struct comp_swapchain *)((char *)out_vkic - offsetof(struct comp_swapchain, vkic));
 	sc->base.base.image_count = direct_image_count;
 
-	U_LOG_I("Metal direct swapchain allocator consumed %u pre-created Metal texture(s) (compositor default=%u); no Vulkan-first image allocation performed",
+	U_LOG_I("Metal direct swapchain allocator consumed %u external image(s) source=%s (compositor default=%u); no Vulkan-first image allocation performed",
 	        direct_image_count,
+	        g_request.source == METAL_SWAPCHAIN_IMPORT_IOSURFACE_IDS ? "iosurface-id" : "metal-texture",
 	        image_count);
 	return VK_SUCCESS;
 }
