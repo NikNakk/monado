@@ -557,12 +557,8 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 	// Data to fill in.
 	VkImageView src_image_views[XRT_MAX_VIEWS];
 	VkSampler src_samplers[XRT_MAX_VIEWS];
-	VkImageView depth_image_views[XRT_MAX_VIEWS];
-	VkSampler depth_samplers[XRT_MAX_VIEWS];
 	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
 	struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS];
-	struct xrt_normalized_rect depth_norm_rects[XRT_MAX_VIEWS];
-	struct xrt_layer_depth_data depth_datas[XRT_MAX_VIEWS];
 	struct xrt_fov src_fovs[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
@@ -636,8 +632,12 @@ crc_distortion_fast_path(struct render_compute *render,
 	// Data to fill in.
 	VkImageView src_image_views[XRT_MAX_VIEWS];
 	VkSampler src_samplers[XRT_MAX_VIEWS];
+	VkImageView depth_image_views[XRT_MAX_VIEWS];
+	VkSampler depth_samplers[XRT_MAX_VIEWS];
 	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
 	struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS];
+	struct xrt_normalized_rect depth_norm_rects[XRT_MAX_VIEWS];
+	struct xrt_layer_depth_data depth_datas[XRT_MAX_VIEWS];
 	struct xrt_fov src_fovs[XRT_MAX_VIEWS];
 	struct xrt_pose src_poses[XRT_MAX_VIEWS];
 	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
