@@ -72,6 +72,7 @@ target_include_directories(
 
 if(WIN32)
 	target_sources(ipc_shared PRIVATE shared/ipc_message_channel_windows.cpp)
+	target_link_libraries(ipc_shared PRIVATE ws2_32)
 else()
 	target_sources(ipc_shared PRIVATE shared/ipc_message_channel_unix.c)
 endif()
@@ -148,7 +149,7 @@ if(WIN32)
 			)
 	endif()
 
-	target_link_libraries(ipc_client PRIVATE winmm)
+	target_link_libraries(ipc_client PRIVATE winmm ws2_32)
 endif()
 target_link_libraries(ipc_client PRIVATE aux_util ipc_shared base)
 
