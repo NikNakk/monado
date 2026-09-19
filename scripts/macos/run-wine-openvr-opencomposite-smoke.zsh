@@ -87,6 +87,7 @@ print "Launching OpenVR/OpenComposite smoke test"
 print "  OpenComposite: ${oc_dll}"
 print "  OpenXR runtime: ${runtime_dll}"
 print "  service: 127.0.0.1:${port}"
+print "  timing trace: ${trace_host}"
 print ""
 
 (
