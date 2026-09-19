@@ -126,7 +126,7 @@ float projection_depth_to_view_z_distance(float window_depth, vec4 depth_info)
 	return inverse_distance > 1e-8 ? 1.0 / inverse_distance : 0.0;
 }
 
-vec2 depth_correct_projection_uv(vec2 output_uv,
+vec2 depth_correct_projection_uv(float scanout_fraction,
                                  vec2 rotational_source_uv,
                                  uint iz)
 {
@@ -149,7 +149,7 @@ vec2 depth_correct_projection_uv(vec2 output_uv,
 	// new camera origin expressed in source-view coordinates.
 	vec3 source_origin =
 	    mix(ubo.new_origin_in_source_view_scanout_begin[iz].xyz,
-	        ubo.new_origin_in_source_view_scanout_end[iz].xyz, output_uv.y);
+	        ubo.new_origin_in_source_view_scanout_end[iz].xyz, scanout_fraction);
 
 	vec2 tangent_extent = ubo.source_uv_to_tanangle[iz].zw;
 	if (abs(tangent_extent.x) < 1e-6 || abs(tangent_extent.y) < 1e-6) {
@@ -171,7 +171,38 @@ vec2 depth_correct_projection_uv(vec2 output_uv,
 	    (source_origin.x + ray_scale * source_tan.x) / source_z_distance,
 	    (-source_origin.y + ray_scale * source_tan.y) / source_z_distance);
 
-	return (corrected_tan - ubo.source_uv_to_tanangle[iz].xy) / tangent_extent;
+	vec2 corrected_uv =
+	    (corrected_tan - ubo.source_uv_to_tanangle[iz].xy) / tangent_extent;
+
+	/*
+	 * A single-depth planar extrapolation is deliberately cheap, but at a
+	 * foreground silhouette it can pull that foreground surface across newly
+	 * exposed background. Only when translation moves the sample far enough to
+	 * matter, verify the destination against one additional depth fetch. A large
+	 * depth jump means we crossed a surface boundary: keep the robust
+	 * rotation-only result for that pixel instead of stretching the silhouette.
+	 */
+	vec2 corrected_depth_uv =
+	    fma(corrected_uv, ubo.depth_post_transform[iz].zw, ubo.depth_post_transform[iz].xy);
+	ivec2 depth_size_i = textureSize(source[2 + iz], 0);
+	vec2 depth_pixel_shift =
+	    (corrected_depth_uv - depth_uv) * vec2(depth_size_i);
+	if (max(abs(depth_pixel_shift.x), abs(depth_pixel_shift.y)) >= 0.75 &&
+	    all(greaterThanEqual(corrected_uv, vec2(0.0))) &&
+	    all(lessThanEqual(corrected_uv, vec2(1.0)))) {
+		float corrected_window_depth = texture(source[2 + iz], corrected_depth_uv).r;
+		float corrected_z_distance =
+		    projection_depth_to_view_z_distance(corrected_window_depth, ubo.projection_depth[iz]);
+		if (corrected_z_distance > 0.0) {
+			float nearer_distance = min(source_z_distance, corrected_z_distance);
+			float allowed_jump = max(0.05, 0.20 * nearer_distance);
+			if (abs(corrected_z_distance - source_z_distance) > allowed_jump) {
+				return rotational_source_uv;
+			}
+		}
+	}
+
+	return corrected_uv;
 }
 
 vec2 transform_uv(vec2 uv, uint iz)
@@ -213,7 +244,7 @@ void main()
 
 		if (ubo.has_depth[iz].x != 0) {
 			vec2 corrected_g =
-			    depth_correct_projection_uv(g_uv, g_projection_uv, iz);
+			    depth_correct_projection_uv(subimage_uv.y, g_projection_uv, iz);
 			vec2 positional_delta = corrected_g - g_projection_uv;
 			r_projection_uv += positional_delta;
 			g_projection_uv = corrected_g;
