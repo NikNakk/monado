@@ -91,7 +91,7 @@ if(XRT_FEATURE_WINE_D3D11_BRIDGE)
 		comp_client PRIVATE comp_d3d11_wine_client.cpp comp_d3d11_client.h comp_d3d11_glue.c
 		)
 	target_include_directories(comp_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../ipc)
-	target_link_libraries(comp_client PRIVATE d3d11 dxgi)
+	target_link_libraries(comp_client PRIVATE d3d11 dxgi dxguid)
 else()
 	if(XRT_HAVE_D3D11 OR XRT_HAVE_D3D12)
 		target_link_libraries(comp_client PRIVATE aux_d3d)
