@@ -151,6 +151,16 @@ ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
                                            const uint32_t *iosurface_ids,
                                            struct xrt_swapchain **out_xsc);
 
+/*!
+ * Wine/macOS bridge helper: bind an already-existing DXMT MTLSharedEvent to a
+ * native compositor semaphore by its bootstrap registration name.
+ */
+xrt_result_t
+ipc_client_compositor_import_metal_bootstrap_semaphore(
+    struct xrt_compositor_native *xcn,
+    const char *bootstrap_name,
+    struct xrt_compositor_semaphore **out_xcsem);
+
 uint32_t
 ipc_client_space_get_id(struct xrt_space *space);
 
