@@ -26,6 +26,11 @@ comp_metal_swapchain_import_begin(const struct xrt_swapchain_create_info *info,
                                   uint32_t image_count,
                                   void *const *metal_textures);
 
+bool
+comp_metal_swapchain_import_begin_iosurface_ids(const struct xrt_swapchain_create_info *info,
+                                                uint32_t image_count,
+                                                const uint32_t *iosurface_ids);
+
 /* True after the normal compositor allocator has consumed the active request. */
 bool
 comp_metal_swapchain_import_was_consumed(void);
