@@ -257,6 +257,43 @@ bool depth_solve_projection(float scanout_fraction,
 	return true;
 }
 
+vec2 depth_resolve_projection_uv(float scanout_fraction,
+                                 vec2 rotational_source_uv,
+                                 uint iz)
+{
+	float solved_z_distance;
+	float initial_z_distance;
+	float refined_z_distance;
+	vec3 source_origin;
+	vec2 corrected_uv;
+	vec2 first_corrected_uv;
+	bool refinement_oscillated;
+
+	bool depth_solved = depth_solve_projection(scanout_fraction,
+	                                          rotational_source_uv,
+	                                          iz,
+	                                          solved_z_distance,
+	                                          source_origin,
+	                                          corrected_uv,
+	                                          initial_z_distance,
+	                                          refined_z_distance,
+	                                          first_corrected_uv,
+	                                          refinement_oscillated);
+	if (!depth_solved) {
+		return rotational_source_uv;
+	}
+
+	// Background-biased handling of A<->B cycles: if the original ray was
+	// already on the farther surface, keep it. Otherwise corrected_uv is the
+	// first translated sample, which is the farther/background candidate.
+	if (ubo.depth_debug.y != 0u && refinement_oscillated &&
+	    initial_z_distance > refined_z_distance) {
+		return rotational_source_uv;
+	}
+
+	return corrected_uv;
+}
+
 vec2 transform_uv(vec2 uv, uint iz)
 {
 	if (do_timewarp) {
@@ -297,29 +334,28 @@ void main()
 		vec2 b_projection_uv = transform_uv_timewarp(b_uv, iz);
 
 		if (ubo.has_depth[iz].x != 0) {
-			float solved_z_distance;
-			float initial_z_distance;
-			float refined_z_distance;
-			vec3 source_origin;
-			vec2 corrected_g;
-			vec2 first_corrected_g;
-			bool refinement_oscillated;
-			bool depth_solved = depth_solve_projection(subimage_uv.y,
-			                                           g_projection_uv,
-			                                           iz,
-			                                           solved_z_distance,
-			                                           source_origin,
-			                                           corrected_g,
-			                                           initial_z_distance,
-			                                           refined_z_distance,
-			                                           first_corrected_g,
-			                                           refinement_oscillated);
-
 			if (ubo.depth_debug.x != 0u) {
+				// Debug modes intentionally inspect the green/central ray only.
+				float solved_z_distance;
+				float initial_z_distance;
+				float refined_z_distance;
+				vec3 source_origin;
+				vec2 corrected_g;
+				vec2 first_corrected_g;
+				bool refinement_oscillated;
+				bool depth_solved = depth_solve_projection(subimage_uv.y,
+				                                           g_projection_uv,
+				                                           iz,
+				                                           solved_z_distance,
+				                                           source_origin,
+				                                           corrected_g,
+				                                           initial_z_distance,
+				                                           refined_z_distance,
+				                                           first_corrected_g,
+				                                           refinement_oscillated);
+
 				vec4 debug_colour = vec4(0.0, 0.0, 1.0, 1.0);
 				if (ubo.depth_debug.x == 1u) {
-					// Log-scale the large 0.05-100 m test range so nearby
-					// geometry remains visually distinguishable.
 					if (initial_z_distance > 0.0) {
 						float near_z = max(ubo.projection_depth[iz].z, 1e-4);
 						float far_z = max(ubo.projection_depth[iz].w, near_z + 1e-4);
@@ -328,9 +364,6 @@ void main()
 						debug_colour = vec4(vec3(depth_level), 1.0);
 					}
 				} else if (ubo.depth_debug.x == 2u) {
-					// Grey = same surface, yellow = a surface switch converged,
-					// magenta = the refinement formed an A<->B two-cycle and was
-					// rejected, blue = invalid solve.
 					if (depth_solved) {
 						float reference_z =
 						    refined_z_distance > 0.0 ? min(initial_z_distance, refined_z_distance) : initial_z_distance;
@@ -347,8 +380,6 @@ void main()
 						}
 					}
 				} else if (ubo.depth_debug.x == 3u) {
-					// Heat-map the first-to-refined correction in source pixels:
-					// black ~= no change, bright red >= 4 pixels.
 					if (depth_solved) {
 						vec2 source_size = vec2(textureSize(source[iz], 0));
 						float delta_px = length((corrected_g - first_corrected_g) * source_size);
@@ -360,38 +391,55 @@ void main()
 				return;
 			}
 
-			if (depth_solved) {
-				/*
-				 * A detected A<->B two-cycle is a disocclusion ambiguity, not a
-				 * converged geometric solution. Prefer the farther/background
-				 * surface so foreground silhouettes do not get dragged across
-				 * newly revealed background:
-				 *
-				 * - if the initial rotational sample is farther, keep the
-				 *   rotation-only RGB coordinates (they already sample background);
-				 * - if the first corrected sample is farther, keep the first-pass
-				 *   translated coordinates, which land on that background sample.
-				 *
-				 * depth_debug.y is the runtime disocclusion-fill toggle.
-				 */
-				bool use_rotation_only_background =
-				    ubo.depth_debug.y != 0u && refinement_oscillated &&
-				    initial_z_distance > refined_z_distance;
-
-				if (!use_rotation_only_background) {
-					vec2 corrected_r =
-					    depth_translate_projection_uv(r_projection_uv, solved_z_distance, source_origin, iz);
-					vec2 corrected_b =
-					    depth_translate_projection_uv(b_projection_uv, solved_z_distance, source_origin, iz);
-
-					if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
-					    all(lessThanEqual(corrected_r, vec2(1.0)))) {
-						r_projection_uv = corrected_r;
-					}
-					g_projection_uv = corrected_g;
-					if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
-					    all(lessThanEqual(corrected_b, vec2(1.0)))) {
-						b_projection_uv = corrected_b;
+			if (ubo.depth_debug.z != 0u) {
+				// Correctness path: each chromatic distortion ray owns its own
+				// depth correspondence. At silhouettes the R/G/B rays can land on
+				// different surfaces, so sharing green's depth lets geometry slide
+				// inside the chromatic fringe envelope during translation.
+				r_projection_uv =
+				    depth_resolve_projection_uv(subimage_uv.y, r_projection_uv, iz);
+				g_projection_uv =
+				    depth_resolve_projection_uv(subimage_uv.y, g_projection_uv, iz);
+				b_projection_uv =
+				    depth_resolve_projection_uv(subimage_uv.y, b_projection_uv, iz);
+			} else {
+				// Previous lower-cost approximation retained for A/B and profiling:
+				// solve green fully, then apply its chosen surface depth to R/B.
+				float solved_z_distance;
+				float initial_z_distance;
+				float refined_z_distance;
+				vec3 source_origin;
+				vec2 corrected_g;
+				vec2 first_corrected_g;
+				bool refinement_oscillated;
+				bool depth_solved = depth_solve_projection(subimage_uv.y,
+				                                           g_projection_uv,
+				                                           iz,
+				                                           solved_z_distance,
+				                                           source_origin,
+				                                           corrected_g,
+				                                           initial_z_distance,
+				                                           refined_z_distance,
+				                                           first_corrected_g,
+				                                           refinement_oscillated);
+				if (depth_solved) {
+					bool use_rotation_only_background =
+					    ubo.depth_debug.y != 0u && refinement_oscillated &&
+					    initial_z_distance > refined_z_distance;
+					if (!use_rotation_only_background) {
+						vec2 corrected_r =
+						    depth_translate_projection_uv(r_projection_uv, solved_z_distance, source_origin, iz);
+						vec2 corrected_b =
+						    depth_translate_projection_uv(b_projection_uv, solved_z_distance, source_origin, iz);
+						if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
+						    all(lessThanEqual(corrected_r, vec2(1.0)))) {
+							r_projection_uv = corrected_r;
+						}
+						g_projection_uv = corrected_g;
+						if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
+						    all(lessThanEqual(corrected_b, vec2(1.0)))) {
+							b_projection_uv = corrected_b;
+						}
 					}
 				}
 			}
