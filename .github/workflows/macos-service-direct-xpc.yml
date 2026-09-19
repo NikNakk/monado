@@ -8,6 +8,7 @@ on:
       - macos-service-direct-xpc-cadence
       - macos-depth-aware-reprojection
       - macos-wine-iosurface-import
+      - macos-wine-openxr-d3d11
     paths:
       - .github/workflows/macos-service-direct-xpc.yml
       - CMakeLists.txt
@@ -34,6 +35,7 @@ jobs:
           zsh -n scripts/macos/provision-wine-dxmt.zsh
           zsh -n scripts/macos/build-wine-d3d11-iosurface-producer.zsh
           zsh -n scripts/macos/run-wine-d3d11-iosurface-import.zsh
+          zsh -n scripts/macos/build-wine-openxr-d3d11.zsh
 
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
@@ -79,6 +81,9 @@ jobs:
       - name: Cross-build Windows D3D11 IOSurface producer
         run: scripts/macos/build-wine-d3d11-iosurface-producer.zsh
 
+      - name: Cross-build Wine OpenXR D3D11 runtime
+        run: scripts/macos/build-wine-openxr-d3d11.zsh
+
       - name: Configure full Release build
         run: >-
           cmake -S . -B build-release -G Ninja
@@ -101,6 +106,7 @@ jobs:
           test -x build-release/tests/tests_macos_iosurface_producer
           test -x build-release/tests/tests_macos_iosurface_import_probe
           test -f build-wine-dxmt/bin/macos_wine_d3d11_iosurface_producer.exe
+          test -f build-wine/openxr_monado-dev.json
 
       - name: Verify repeatable full install
         run: |
