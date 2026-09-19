@@ -135,6 +135,18 @@ ipc_client_system_create(struct ipc_connection *ipc_c, struct xrt_system_composi
 struct xrt_space_overseer *
 ipc_client_space_overseer_create(struct ipc_connection *ipc_c);
 
+/*!
+ * Wine/macOS bridge helper: import externally-owned IOSurface-backed images
+ * into the native service compositor without pretending IOSurface IDs are
+ * Windows graphics handles.
+ */
+xrt_result_t
+ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
+                                           const struct xrt_swapchain_create_info *info,
+                                           uint32_t image_count,
+                                           const uint32_t *iosurface_ids,
+                                           struct xrt_swapchain **out_xsc);
+
 uint32_t
 ipc_client_space_get_id(struct xrt_space *space);
 
