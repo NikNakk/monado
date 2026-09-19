@@ -7,6 +7,7 @@ wine_root=${MONADO_WINE_DXMT_ROOT:-${repo_root}/build-wine-dxmt}
 wine=${wine_root}/bin/wine-dxmt
 runtime_build=${MONADO_WINE_OPENXR_BUILD_DIR:-${repo_root}/build-wine-openxr}
 smoke_build=${MONADO_OPENVR_SMOKE_BUILD:-${repo_root}/build-wine-openvr}
+graphics_frames=${MONADO_OPENVR_SMOKE_FRAMES:-360}
 oc_root=${MONADO_OPENCOMPOSITE_ROOT:-${wine_root}/opencomposite}
 oc_dll=${MONADO_OPENCOMPOSITE_DLL:-${oc_root}/openvr_api.dll}
 port=${MONADO_WINE_TCP_PORT:-4242}
@@ -20,7 +21,8 @@ fi
 if [[ ! -f "${runtime_build}/openxr_monado-dev.json" ]]; then
 	"${script_dir}/build-wine-openxr-d3d11.zsh"
 fi
-if [[ ! -x "${smoke_build}/openvr_opencomposite_smoke.exe" ]]; then
+if [[ ! -x "${smoke_build}/openvr_opencomposite_smoke.exe" || \
+      ! -x "${smoke_build}/openvr_opencomposite_d3d11_smoke.exe" ]]; then
 	"${script_dir}/build-wine-openvr-smoke.zsh"
 fi
 if [[ ! -f "${oc_dll}" ]]; then
@@ -93,4 +95,12 @@ print ""
 	MONADO_WINE_TIMING_TRACE="${trace_windows}" \
 	DXMT_BASALT_IOSURFACE=1 \
 		"${wine}" "${smoke_build}/openvr_opencomposite_smoke.exe" "${windows_oc_dll}"
+
+	print ""
+	print "Running visible D3D11 OpenVR submission smoke (${graphics_frames} frames)..."
+	MONADO_WINE_TCP_PORT="${port}" \
+	MONADO_WINE_TIMING_TRACE="${trace_windows}" \
+	DXMT_BASALT_IOSURFACE=1 \
+		"${wine}" "${smoke_build}/openvr_opencomposite_d3d11_smoke.exe" \
+			"${windows_oc_dll}" "${graphics_frames}"
 )
