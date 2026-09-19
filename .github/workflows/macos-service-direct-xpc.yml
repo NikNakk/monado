@@ -16,6 +16,7 @@ on:
       - src/xrt/compositor/**
       - src/xrt/ipc/**
       - src/xrt/targets/**
+      - scripts/macos/**
       - tests/**
   workflow_dispatch:
 
@@ -27,6 +28,9 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Check Wine/DXMT provisioner syntax
+        run: zsh -n scripts/macos/provision-wine-dxmt.zsh
 
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
