@@ -2,10 +2,18 @@
 # Copyright 2025-2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
+if(XRT_FEATURE_WINE_D3D11_BRIDGE)
+	# The Wine client uses raw COM and only needs the public interface target
+	# to exist for dependency compatibility. Do not pull Microsoft WIL into
+	# the MinGW build.
+	add_library(aux_d3d INTERFACE)
+	target_link_libraries(aux_d3d INTERFACE aux-includes xrt-interfaces xrt-external-vulkan-headers)
+	return()
+endif()
+
 add_library(aux_d3d STATIC d3d_dxgi_formats.h d3d_dxgi_helpers.cpp d3d_dxgi_helpers.hpp)
 target_link_libraries(aux_d3d PUBLIC aux-includes xrt-interfaces ${DXGI_LIBRARY} WIL::WIL)
 
-# needed for format includes
 target_link_libraries(aux_d3d PUBLIC xrt-external-vulkan-headers)
 
 if(XRT_HAVE_D3D11)
