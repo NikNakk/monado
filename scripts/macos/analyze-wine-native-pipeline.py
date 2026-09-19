@@ -253,7 +253,17 @@ def main() -> int:
             layer_begin_previous_us.append(val)
             per_frame[frame]["layer_begin_previous_us"] = val
 
+    submit_display_lead_us = []
+    for frame, events in submit_ev.items():
+        row = events.get("handler_entry")
+        if row:
+            event_ns = i(row, "event_ns")
+            display_ns = i(row, "display_time_ns")
+            if event_ns and display_ns:
+                submit_display_lead_us.append((display_ns - event_ns) / 1000.0)
+
     print("Client submit -> GPU-ready path")
+    describe("display lead at native submit", submit_display_lead_us)
     describe("native handler", handler_us)
     describe("submit -> semaphore ready", submit_to_ready_us)
     describe("semaphore wait", semaphore_wait_us)
