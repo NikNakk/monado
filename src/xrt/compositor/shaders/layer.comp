@@ -72,8 +72,16 @@ struct Layer {
 
 	// for projection layers
 
-	// timewarp matrices
+	// Rotation-only timewarp matrix used by the existing projection path.
 	mat4 transform;
+
+	// XrCompositionLayerDepthInfoKHR values: minDepth, maxDepth, nearZ, farZ.
+	vec4 projection_depth;
+
+	// Full source-view -> scanout-begin-view rigid transform. This is kept
+	// separate from the existing projection/timewarp matrix so depth-aware
+	// reprojection can use metric translation without adding another pass.
+	mat4 projection_source_to_new_view;
 
 
 	// for quad layers

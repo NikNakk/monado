@@ -1295,8 +1295,31 @@ struct render_compute_layer_ubo_data
 		 * For projection layers
 		 */
 
-		//! Timewarp matrices
+		//! Rotation-only timewarp matrix used by the existing projection path.
 		struct xrt_matrix_4x4 transforms_timewarp;
+
+		/*!
+		 * OpenXR depth mapping for projection-depth layers.
+		 *
+		 * These are the XrCompositionLayerDepthInfoKHR values carried through
+		 * xrt_layer_depth_data. Keeping them in the generic compute UBO lets the
+		 * shader reconstruct metric view-space depth without a separate pass.
+		 */
+		struct
+		{
+			float min_depth;
+			float max_depth;
+			float near_z;
+			float far_z;
+		} projection_depth;
+
+		/*!
+		 * Full rigid transform from the application's submitted source-view
+		 * coordinates into the scanout-begin view coordinates. Unlike the
+		 * existing timewarp matrix this preserves translation as well as
+		 * rotation, ready for depth-aware positional reprojection.
+		 */
+		struct xrt_matrix_4x4 projection_source_to_new_view;
 
 		/*!
 		 * For quad layers
