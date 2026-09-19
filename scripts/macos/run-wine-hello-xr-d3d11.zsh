@@ -82,13 +82,36 @@ cat > "${manifest}" <<EOF
 }
 EOF
 
+#
+# Wine currently presents this process to the Khronos Windows OpenXR loader as
+# high integrity. The loader deliberately ignores XR_RUNTIME_JSON in that
+# context, so install ActiveRuntime in HKLM inside our private Wine prefix
+# instead. This modifies only build-wine-dxmt/prefix (or MONADO_WINEPREFIX).
+#
+openxr_registry_key='HKLM\\SOFTWARE\\Khronos\\OpenXR\\1'
+
+if ! DXMT_BASALT_IOSURFACE=1 "${wine}" reg.exe add "${openxr_registry_key}" \
+	/v ActiveRuntime /t REG_SZ /d "${windows_manifest}" /f >/dev/null; then
+	print -u2 "Failed to register the Wine OpenXR ActiveRuntime."
+	exit 1
+fi
+
+registered_manifest=$(DXMT_BASALT_IOSURFACE=1 "${wine}" reg.exe query "${openxr_registry_key}" \
+	/v ActiveRuntime 2>/dev/null || true)
+
+if [[ "${registered_manifest}" != *"${windows_manifest}"* ]]; then
+	print -u2 "Wine OpenXR ActiveRuntime registry verification failed."
+	print -u2 "${registered_manifest}"
+	exit 1
+fi
+
 print "Launching pinned Khronos hello_xr D3D11 against Wine Monado runtime"
 print "  runtime: ${runtime_dll}"
+print "  manifest: ${windows_manifest}"
 print "  service: 127.0.0.1:${port}"
 print ""
 
 MONADO_WINE_TCP_PORT="${port}" \
-XR_RUNTIME_JSON="${windows_manifest}" \
 DXMT_BASALT_IOSURFACE=1 \
 	"${wine}" "${hello_build}/khr_hello_xr_d3d11.exe" \
 		--graphics D3D11 --space Local --verbose
