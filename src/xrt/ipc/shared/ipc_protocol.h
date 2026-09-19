@@ -390,6 +390,12 @@ struct ipc_arg_swapchain_iosurface
 	uint32_t ids[XRT_MAX_SWAPCHAIN_IMAGES];
 };
 
+#define IPC_METAL_BOOTSTRAP_NAME_SIZE 64
+struct ipc_metal_bootstrap_name
+{
+	char name[IPC_METAL_BOOTSTRAP_NAME_SIZE];
+};
+
 /*!
  * Bounded byte chunk used to copy the large ipc_shared_memory structure to
  * Wine clients without placing the whole structure in a generated IPC reply
