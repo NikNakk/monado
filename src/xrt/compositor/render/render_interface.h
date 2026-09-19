@@ -526,6 +526,7 @@ struct render_resources
 			struct render_buffer buffer;
 			uint32_t width;
 			uint32_t height;
+			VkPipeline clear_pipeline;
 			VkPipeline pipeline;
 		} depth_visibility;
 
