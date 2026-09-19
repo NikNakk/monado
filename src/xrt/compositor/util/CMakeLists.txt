@@ -65,5 +65,5 @@ if(APPLE)
 		PROPERTY COMPILE_OPTIONS "-include" "${CMAKE_CURRENT_SOURCE_DIR}/comp_metal_swapchain_import_override.h"
 		)
 
-	target_link_libraries(comp_util PRIVATE "-framework Metal")
+	target_link_libraries(comp_util PRIVATE "-framework Metal" "-framework IOSurface")
 endif()
