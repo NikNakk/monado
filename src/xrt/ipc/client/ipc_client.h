@@ -65,6 +65,9 @@ struct ipc_connection
 	struct ipc_shared_memory *ism;
 	xrt_shmem_handle_t ism_handle;
 
+	/* Wine bridge clients own a heap snapshot instead of a mapped OS handle. */
+	bool ism_is_copy;
+
 	struct os_mutex mutex;
 
 #ifdef XRT_OS_ANDROID
