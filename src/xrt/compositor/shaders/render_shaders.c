@@ -31,6 +31,7 @@
 #include "layer.comp.h"
 #include "distortion.comp.h"
 #include "depth_visibility.comp.h"
+#include "depth_visibility_clear.comp.h"
 #include "layer_cylinder.frag.h"
 #include "layer_cylinder.vert.h"
 #include "layer_equirect2.frag.h"
@@ -112,6 +113,7 @@ render_shaders_load(struct render_shaders *s, struct vk_bundle *vk)
 	LOAD(distortion_comp);
 
 	LOAD(depth_visibility_comp);
+	LOAD(depth_visibility_clear_comp);
 
 	LOAD(mesh_vert);
 	LOAD(mesh_frag);
@@ -137,6 +139,7 @@ render_shaders_fini(struct render_shaders *s, struct vk_bundle *vk)
 	D(ShaderModule, s->clear_comp);
 	D(ShaderModule, s->distortion_comp);
 	D(ShaderModule, s->depth_visibility_comp);
+	D(ShaderModule, s->depth_visibility_clear_comp);
 	D(ShaderModule, s->layer_comp);
 	D(ShaderModule, s->mesh_vert);
 	D(ShaderModule, s->mesh_frag);
