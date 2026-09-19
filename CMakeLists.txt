@@ -227,6 +227,10 @@ endif()
 option_with_deps(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable inter-procedural (link-time) optimization" DEFAULT OFF DEPENDS HAS_IPO)
 option(XRT_HAVE_TRACY "Enable Tracy support for tracing, make sure to set XRT_FEATURE_TRACING as well." OFF)
 
+# Wine/macOS client-only D3D11 path. This is intentionally separate from the
+# normal Windows D3D implementation because that path depends on Microsoft WIL.
+option(XRT_FEATURE_WINE_D3D11_BRIDGE "Build the MinGW D3D11 OpenXR client for a native macOS Monado service" OFF)
+
 # Graphics deps to use (sorted in each group, groups thematic and ordered to handle internal deps: e.g. EGL and SDL2 need OpenGL/GLES)
 option_with_deps(XRT_HAVE_OPENGL "Enable OpenGL Graphics API support" DEPENDS OPENGL_WITHOUT_GLX_FOUND)
 option_with_deps(XRT_HAVE_OPENGL_GLX "Enable OpenGL Graphics API support on X11 (GLX)" DEPENDS XRT_HAVE_OPENGL OpenGL_GLX_FOUND)
@@ -242,6 +246,15 @@ option_with_deps(XRT_HAVE_WINRT "Use WinRT APIs for some Windows-specific functi
 option_with_deps(XRT_HAVE_VULKAN "Enable Vulkan Graphics API support (also needed for compositor)" DEPENDS VULKAN_FOUND)
 option_with_deps(XRT_HAVE_D3D11 "Enable Direct3D 11 Graphics API support" DEPENDS D3D11_LIBRARY XRT_HAVE_VULKAN XRT_HAVE_DXGI XRT_HAVE_WIL)
 option_with_deps(XRT_HAVE_D3D12 "Enable Direct3D 12 Graphics API support" DEPENDS D3D12_LIBRARY XRT_HAVE_D3D11 XRT_HAVE_VULKAN XRT_HAVE_DXGI XRT_HAVE_WIL)
+
+if(MINGW AND XRT_FEATURE_WINE_D3D11_BRIDGE)
+	set(D3D11_LIBRARY d3d11)
+	set(DXGI_LIBRARY dxgi)
+	set(XRT_HAVE_DXGI ON CACHE BOOL "Use DXGI APIs for the Wine bridge" FORCE)
+	set(XRT_HAVE_D3D11 ON CACHE BOOL "Enable Direct3D 11 for the Wine bridge" FORCE)
+	set(XRT_HAVE_D3D12 OFF CACHE BOOL "D3D12 is not part of the Wine bridge" FORCE)
+endif()
+
 option_with_deps(XRT_HAVE_WAYLAND "Enable Wayland support" DEPENDS WAYLAND_FOUND WAYLAND_SCANNER_FOUND WAYLAND_PROTOCOLS_FOUND LIBDRM_FOUND)
 option_with_deps(XRT_HAVE_WAYLAND_DIRECT "Enable Wayland direct support" DEPENDS XRT_HAVE_WAYLAND LIBDRM_FOUND "WAYLAND_PROTOCOLS_VERSION VERSION_GREATER_EQUAL 1.22")
 option_with_deps(XRT_HAVE_XCB "Enable xcb support" DEPENDS XCB_FOUND)
@@ -286,7 +299,7 @@ option(XRT_MODULE_OPENXR_STATE_TRACKER "Build OpenXR State Tracker" ON)
 # Feature configuration (sorted)
 option_with_deps(XRT_FEATURE_AHARDWARE_BUFFER "Enable AHardwareBuffer for XrSwapchain images on Android (API-level 26+) platforms" DEPENDS ANDROID)
 option_with_deps(XRT_FEATURE_COLOR_LOG "Enable logging in color on supported platforms" DEPENDS XRT_HAVE_LINUX)
-option_with_deps(XRT_FEATURE_OPENXR "Build OpenXR runtime target" DEPENDS XRT_MODULE_OPENXR_STATE_TRACKER "XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL")
+option_with_deps(XRT_FEATURE_OPENXR "Build OpenXR runtime target" DEPENDS XRT_MODULE_OPENXR_STATE_TRACKER "XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL OR XRT_FEATURE_WINE_D3D11_BRIDGE")
 set(XRT_FEATURE_OPENXR_DEBUG_UTILS OFF) # Has never been enabled
 option_with_deps(XRT_FEATURE_RENDERDOC "Enable RenderDoc API" DEPENDS "RT_LIBRARY OR WIN32 OR ANDROID")
 option_with_deps(XRT_FEATURE_SERVICE "Enable separate service module for OpenXR runtime" DEPENDS XRT_MODULE_IPC XRT_FEATURE_OPENXR)
