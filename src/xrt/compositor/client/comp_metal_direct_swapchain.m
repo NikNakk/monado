@@ -74,7 +74,9 @@ metal_format_to_vk(MTLPixelFormat format)
 	case MTLPixelFormatRGBA8Unorm_sRGB: return 43; // VK_FORMAT_R8G8B8A8_SRGB
 	case MTLPixelFormatBGRA8Unorm: return 44;      // VK_FORMAT_B8G8R8A8_UNORM
 	case MTLPixelFormatBGRA8Unorm_sRGB: return 50; // VK_FORMAT_B8G8R8A8_SRGB
-	case MTLPixelFormatBGR10A2Unorm: return 64;    // VK_FORMAT_A2B10G10R10_UNORM_PACK32
+	case MTLPixelFormatBGR10A2Unorm: return 64;
+	case MTLPixelFormatDepth16Unorm: return 124;   // VK_FORMAT_D16_UNORM
+	case MTLPixelFormatDepth32Float: return 126;   // VK_FORMAT_D32_SFLOAT    // VK_FORMAT_A2B10G10R10_UNORM_PACK32
 	default: return 0;
 	}
 }
