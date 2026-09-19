@@ -44,6 +44,41 @@ IOSurface IDs are treated as untrusted. The service validates non-zero IDs, imag
 geometry, simple 2D/single-mip/single-sample constraints, and the supported color
 format before creating a texture.
 
+## Pinned Wine/DXMT toolchain
+
+Provision the exact known-good Windows graphics stack with:
+
+```sh
+scripts/macos/provision-wine-dxmt.zsh
+```
+
+By default it creates an isolated tree at `build-wine-dxmt/` containing:
+
+- Gcenx macOS Wine 11.10 x86_64, SHA-256 verified
+- a private win64 prefix
+- the matched BasaltVR v0.1.0 `v0.80-basalt.1` DXMT DLL/`winemetal.so` set
+- a wrapper that enables `DXMT_BASALT_IOSURFACE=1`
+
+The script consumes BasaltVR's published developer-preview archive rather than
+copying its DXMT patchset into Monado. Basalt's release workflow builds and verifies
+those matched artifacts before packaging them.
+
+Run a Windows executable with:
+
+```sh
+build-wine-dxmt/bin/wine-dxmt program.exe
+```
+
+or load the generated environment:
+
+```sh
+source build-wine-dxmt/env.zsh
+"$WINE" program.exe
+```
+
+No system Wine, Whisky, CrossOver, GPTK installation, or existing Wine prefix is
+modified.
+
 ## Cross-process native probe
 
 Build the service and tests, start `monado-service`, then run:
@@ -80,7 +115,11 @@ underlying Metal shared event and connect it to Monado's existing
 
 ## BasaltVR fork
 
-A BasaltVR fork is not required for this milestone. We can consume its published
-MIT DXMT patch unchanged. A fork becomes useful when we change that patch, most
-likely for Metal shared-event export, additional formats/array handling, or
-Monado-specific DXMT integration.
+A BasaltVR fork is not required for this milestone. The provisioner consumes the
+prebuilt matched DXMT artifacts in BasaltVR v0.1.0, while pinning and verifying the
+published archive. This keeps attribution and the upstream patch history intact
+without duplicating Basalt's fork in Monado.
+
+A fork becomes useful when we need to change that patchset ourselves, most likely
+for Metal shared-event export, additional formats/array handling, or Monado-specific
+DXMT integration.
