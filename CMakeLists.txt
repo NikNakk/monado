@@ -250,6 +250,13 @@ option_with_deps(XRT_HAVE_D3D12 "Enable Direct3D 12 Graphics API support" DEPEND
 if(XRT_FEATURE_WINE_D3D11_BRIDGE)
 	set(D3D11_LIBRARY d3d11)
 	set(DXGI_LIBRARY dxgi)
+
+	# option_with_deps() sets unavailable options to a normal parent-scope
+	# variable, which shadows any cache value. Override both for this explicit
+	# MinGW-only client path.
+	set(XRT_HAVE_DXGI ON)
+	set(XRT_HAVE_D3D11 ON)
+	set(XRT_HAVE_D3D12 OFF)
 	set(XRT_HAVE_DXGI ON CACHE BOOL "Use DXGI APIs for the Wine bridge" FORCE)
 	set(XRT_HAVE_D3D11 ON CACHE BOOL "Enable Direct3D 11 for the Wine bridge" FORCE)
 	set(XRT_HAVE_D3D12 OFF CACHE BOOL "D3D12 is not part of the Wine bridge" FORCE)
