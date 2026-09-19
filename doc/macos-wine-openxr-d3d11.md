@@ -181,6 +181,16 @@ frame_id,fence_value,gpu_sync,wait_frame_us,producer_wait_us,ipc_commit_us,layer
 The runtime also logs a `Wine frame stall` warning when either producer
 synchronization or frame-submit IPC exceeds 1.5 ms.
 
+Summarise a run with:
+
+```sh
+scripts/macos/summarize-wine-timing.py /tmp/monado_wine_d3d11_timing.csv
+```
+
+For a direct A/B comparison, run once normally (GPU sync) and once with
+`MONADO_WINE_GPU_SYNC=0`, using a different
+`MONADO_WINE_TIMING_TRACE_HOST` for each run.
+
 The common one-projection-layer submission path uses one TCP request/reply.
 Multi-layer frames retain the compact chunked fallback.
 
@@ -252,7 +262,8 @@ render targets at OpenVR's recommended eye size and submits visible left/right
 frames through `IVRCompositor::Submit`, exercising the full
 OpenVR -> OpenComposite -> OpenXR -> DXMT -> IOSurface -> native Monado path.
 It renders 360 frames by default; override with
-`MONADO_OPENVR_SMOKE_FRAMES`.
+`MONADO_OPENVR_SMOKE_FRAMES`. In-headset success is alternating/animated
+left/right solid colours with valid HMD poses reported by the smoke program.
 
 For a real OpenVR game, use the reversible per-game replacement:
 
