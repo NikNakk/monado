@@ -29,8 +29,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check Wine/DXMT provisioner syntax
-        run: zsh -n scripts/macos/provision-wine-dxmt.zsh
+      - name: Check Wine/DXMT helper syntax
+        run: |
+          zsh -n scripts/macos/provision-wine-dxmt.zsh
+          zsh -n scripts/macos/build-wine-d3d11-iosurface-producer.zsh
+          zsh -n scripts/macos/run-wine-d3d11-iosurface-import.zsh
 
       - name: Install dependencies
         run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
@@ -71,7 +74,10 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: brew install cmake eigen glslang jpeg-turbo libusb molten-vk ninja pkgconf sdl2-compat vulkan-headers vulkan-loader
+        run: brew install cmake eigen glslang jpeg-turbo libusb mingw-w64 molten-vk ninja pkgconf sdl2-compat vulkan-headers vulkan-loader
+
+      - name: Cross-build Windows D3D11 IOSurface producer
+        run: scripts/macos/build-wine-d3d11-iosurface-producer.zsh
 
       - name: Configure full Release build
         run: >-
@@ -94,6 +100,7 @@ jobs:
           test -x build-release/src/xrt/targets/service/monado-service-xpc-control
           test -x build-release/tests/tests_macos_iosurface_producer
           test -x build-release/tests/tests_macos_iosurface_import_probe
+          test -f build-wine-dxmt/bin/macos_wine_d3d11_iosurface_producer.exe
 
       - name: Verify repeatable full install
         run: |
