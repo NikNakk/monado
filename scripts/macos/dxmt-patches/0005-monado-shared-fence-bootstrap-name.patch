@@ -1,0 +1,50 @@
+diff --git a/src/d3d11/d3d11_fence.cpp b/src/d3d11/d3d11_fence.cpp
+--- a/src/d3d11/d3d11_fence.cpp
++++ b/src/d3d11/d3d11_fence.cpp
+@@ -4,6 +4,10 @@
+ 
+ namespace dxmt {
+ 
++static const GUID kMonadoSharedFenceBootstrapNameGuid = {
++    0x8a1e78d5, 0x9762, 0x4f7a,
++    {0xb0, 0xad, 0x1d, 0x62, 0xf6, 0xa4, 0x9d, 0x31}};
++
+ class MTLD3D11FenceImpl : public MTLD3D11DeviceChild<MTLD3D11Fence> {
+ public:
+   MTLD3D11FenceImpl(MTLD3D11Device *pDevice, WMT::Reference<WMT::SharedEvent> event, D3DKMT_HANDLE handle) :
+@@ -65,6 +69,7 @@ CreateFence(MTLD3D11Device *pDevice, UINT64 InitialValue, D3D11_FENCE_FLAG Flag
+   bool shared = !!(Flags & (D3D11_FENCE_FLAG_SHARED | D3D11_FENCE_FLAG_SHARED_CROSS_ADAPTER));
+   auto event = pDevice->GetMTLDevice().newSharedEvent();
+   D3DKMT_HANDLE local_kmt = 0;
++  char mach_port_name[54] = {};
+   if (shared) {
+     if (!(pDevice->GetLocalD3DKMT() & 0xc0000000)) {
+       ERR("D3D11Fence: Invalid device handle");
+@@ -87,7 +92,6 @@ CreateFence(MTLD3D11Device *pDevice, UINT64 InitialValue, D3D11_FENCE_FLAG Flag
+       ERR("D3D11Fence: Failed to create mach port for shared fence");
+       return E_FAIL;
+     }
+-    char mach_port_name[54];
+     MakeUniqueSharedName(mach_port_name);
+     if (!WMTBootstrapRegister(mach_port_name, mach_port)) {
+       ERR("D3D11Fence: Failed to register mach port for shared fence");
+@@ -106,6 +110,10 @@ CreateFence(MTLD3D11Device *pDevice, UINT64 InitialValue, D3D11_FENCE_FLAG Flag
+   }
+   event.signalValue(InitialValue);
+   auto fence = new MTLD3D11FenceImpl(pDevice, std::move(event), local_kmt);
++  if (shared) {
++    fence->SetPrivateData(kMonadoSharedFenceBootstrapNameGuid,
++                          sizeof(mach_port_name), mach_port_name);
++  }
+   return fence->QueryInterface(riid, ppFence);
+ }
+ 
+@@ -158,6 +166,8 @@ OpenSharedFence(MTLD3D11Device *pDevice, HANDLE hResource,
+       pDevice,
+       pDevice->GetMTLDevice().newSharedEventWithMachPort(mach_port),
+       open.hSyncObject);
++  fence->SetPrivateData(kMonadoSharedFenceBootstrapNameGuid,
++                        sizeof(mach_port_name), mach_port_name);
+   return fence->QueryInterface(riid, ppFence);
+ }
+ 
