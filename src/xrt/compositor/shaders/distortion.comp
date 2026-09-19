@@ -36,6 +36,7 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	vec4 new_origin_in_source_view_scanout_begin[2];
 	vec4 new_origin_in_source_view_scanout_end[2];
 	uvec4 has_depth[2];
+	uvec4 depth_debug;
 }ubo;
 
 
@@ -159,11 +160,17 @@ bool depth_solve_projection(float scanout_fraction,
                             uint iz,
                             out float solved_z_distance,
                             out vec3 source_origin,
-                            out vec2 corrected_green_uv)
+                            out vec2 corrected_green_uv,
+                            out float initial_z_distance,
+                            out float refined_z_distance,
+                            out vec2 first_corrected_uv)
 {
 	solved_z_distance = 0.0;
 	source_origin = vec3(0.0);
 	corrected_green_uv = rotational_green_uv;
+	initial_z_distance = 0.0;
+	refined_z_distance = 0.0;
+	first_corrected_uv = rotational_green_uv;
 
 	if (any(lessThan(rotational_green_uv, vec2(0.0))) ||
 	    any(greaterThan(rotational_green_uv, vec2(1.0)))) {
@@ -175,6 +182,7 @@ bool depth_solve_projection(float scanout_fraction,
 	float window_depth = texture(source[2 + iz], depth_uv).r;
 	float source_z_distance =
 	    projection_depth_to_view_z_distance(window_depth, ubo.projection_depth[iz]);
+	initial_z_distance = source_z_distance;
 	if (!(source_z_distance > 0.0)) {
 		return false;
 	}
@@ -185,6 +193,7 @@ bool depth_solve_projection(float scanout_fraction,
 
 	vec2 corrected_uv =
 	    depth_translate_projection_uv(rotational_green_uv, source_z_distance, source_origin, iz);
+	first_corrected_uv = corrected_uv;
 	if (any(lessThan(corrected_uv, vec2(0.0))) ||
 	    any(greaterThan(corrected_uv, vec2(1.0)))) {
 		return false;
@@ -197,7 +206,7 @@ bool depth_solve_projection(float scanout_fraction,
 	vec2 corrected_depth_uv =
 	    fma(corrected_uv, ubo.depth_post_transform[iz].zw, ubo.depth_post_transform[iz].xy);
 	float refined_window_depth = texture(source[2 + iz], corrected_depth_uv).r;
-	float refined_z_distance =
+	refined_z_distance =
 	    projection_depth_to_view_z_distance(refined_window_depth, ubo.projection_depth[iz]);
 	if (refined_z_distance > 0.0) {
 		vec2 refined_uv =
@@ -255,14 +264,60 @@ void main()
 
 		if (ubo.has_depth[iz].x != 0) {
 			float solved_z_distance;
+			float initial_z_distance;
+			float refined_z_distance;
 			vec3 source_origin;
 			vec2 corrected_g;
-			if (depth_solve_projection(subimage_uv.y,
-			                           g_projection_uv,
-			                           iz,
-			                           solved_z_distance,
-			                           source_origin,
-			                           corrected_g)) {
+			vec2 first_corrected_g;
+			bool depth_solved = depth_solve_projection(subimage_uv.y,
+			                                           g_projection_uv,
+			                                           iz,
+			                                           solved_z_distance,
+			                                           source_origin,
+			                                           corrected_g,
+			                                           initial_z_distance,
+			                                           refined_z_distance,
+			                                           first_corrected_g);
+
+			if (ubo.depth_debug.x != 0u) {
+				vec4 debug_colour = vec4(0.0, 0.0, 1.0, 1.0);
+				if (ubo.depth_debug.x == 1u) {
+					// Log-scale the large 0.05-100 m test range so nearby
+					// geometry remains visually distinguishable.
+					if (initial_z_distance > 0.0) {
+						float near_z = max(ubo.projection_depth[iz].z, 1e-4);
+						float far_z = max(ubo.projection_depth[iz].w, near_z + 1e-4);
+						float depth_level =
+						    clamp(log(initial_z_distance / near_z) / log(far_z / near_z), 0.0, 1.0);
+						debug_colour = vec4(vec3(depth_level), 1.0);
+					}
+				} else if (ubo.depth_debug.x == 2u) {
+					// Grey = same surface, magenta = refinement jumped to a
+					// materially different depth surface, blue = invalid solve.
+					if (depth_solved) {
+						float reference_z = min(initial_z_distance, max(refined_z_distance, initial_z_distance));
+						float allowed_jump = max(0.05, 0.20 * reference_z);
+						bool surface_switch =
+						    refined_z_distance > 0.0 &&
+						    abs(refined_z_distance - initial_z_distance) > allowed_jump;
+						debug_colour =
+						    surface_switch ? vec4(1.0, 0.0, 1.0, 1.0) : vec4(0.35, 0.35, 0.35, 1.0);
+					}
+				} else if (ubo.depth_debug.x == 3u) {
+					// Heat-map the first-to-refined correction in source pixels:
+					// black ~= no change, bright red >= 4 pixels.
+					if (depth_solved) {
+						vec2 source_size = vec2(textureSize(source[iz], 0));
+						float delta_px = length((corrected_g - first_corrected_g) * source_size);
+						float heat = clamp(delta_px / 4.0, 0.0, 1.0);
+						debug_colour = vec4(heat, 0.0, 0.0, 1.0);
+					}
+				}
+				imageStore(target, ivec2(offset.x + ix, offset.y + iy), debug_colour);
+				return;
+			}
+
+			if (depth_solved) {
 				vec2 corrected_r =
 				    depth_translate_projection_uv(r_projection_uv, solved_z_distance, source_origin, iz);
 				vec2 corrected_b =
