@@ -8,6 +8,8 @@ wine=${wine_root}/bin/wine-dxmt
 runtime_build=${MONADO_WINE_OPENXR_BUILD_DIR:-${repo_root}/build-wine-openxr}
 hello_build=${MONADO_WINE_HELLO_XR_BUILD_DIR:-${repo_root}/build-wine-hello-xr}
 port=${MONADO_WINE_TCP_PORT:-4242}
+trace_host=${MONADO_WINE_TIMING_TRACE_HOST:-/tmp/monado_wine_d3d11_timing.csv}
+trace_windows="Z:${trace_host//\//\\}"
 
 if [[ ! -x "${wine}" ]]; then
 	print -u2 "Missing pinned Wine/DXMT stack. Run:"
@@ -109,9 +111,11 @@ print "Launching pinned Khronos hello_xr D3D11 against Wine Monado runtime"
 print "  runtime: ${runtime_dll}"
 print "  manifest: ${windows_manifest}"
 print "  service: 127.0.0.1:${port}"
+print "  timing trace: ${trace_host}"
 print ""
 
 MONADO_WINE_TCP_PORT="${port}" \
+MONADO_WINE_TIMING_TRACE="${trace_windows}" \
 DXMT_BASALT_IOSURFACE=1 \
 	"${wine}" "${hello_build}/khr_hello_xr_d3d11.exe" \
 		--graphics D3D11 --space Local --verbose
