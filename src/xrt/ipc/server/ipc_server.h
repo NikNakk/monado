@@ -318,6 +318,10 @@ struct ipc_server_mainloop
 	//! The socket filename we bound to, if any.
 	char *socket_filename;
 
+	//! Optional loopback TCP listener for Wine/Windows clients.
+	int wine_tcp_listen_socket;
+	uint16_t wine_tcp_port;
+
 	//! Should console input trigger shutdown?
 	bool no_stdin;
 
