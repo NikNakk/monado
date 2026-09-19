@@ -424,6 +424,19 @@ ipc_handle_instance_get_shm_fd(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_instance_get_shm_copy(volatile struct ipc_client_state *ics, struct ipc_shared_memory *out_ism)
+{
+	IPC_TRACE_MARKER();
+
+	if (ics == NULL || out_ism == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	memcpy(out_ism, get_ism(ics), sizeof(*out_ism));
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
                                     const struct ipc_client_description *client_desc)
 {
