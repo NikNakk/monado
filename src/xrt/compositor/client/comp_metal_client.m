@@ -323,7 +323,8 @@ vk_format_to_metal(uint32_t format)
 	case 44: return MTLPixelFormatBGRA8Unorm;       // VK_FORMAT_B8G8R8A8_UNORM
 	case 50: return MTLPixelFormatBGRA8Unorm_sRGB;  // VK_FORMAT_B8G8R8A8_SRGB
 	case 64: return MTLPixelFormatBGR10A2Unorm;     // VK_FORMAT_A2B10G10R10_UNORM_PACK32
-	// IOSurface-backed Metal textures cannot use depth or stencil formats.
+	case 124: return MTLPixelFormatDepth16Unorm;    // VK_FORMAT_D16_UNORM
+	case 126: return MTLPixelFormatDepth32Float;    // VK_FORMAT_D32_SFLOAT
 	default: return 0;
 	}
 }
@@ -337,6 +338,8 @@ metal_format_to_vk(int64_t format)
 	case MTLPixelFormatBGRA8Unorm: return 44;      // VK_FORMAT_B8G8R8A8_UNORM
 	case MTLPixelFormatBGRA8Unorm_sRGB: return 50; // VK_FORMAT_B8G8R8A8_SRGB
 	case MTLPixelFormatBGR10A2Unorm: return 64;    // VK_FORMAT_A2B10G10R10_UNORM_PACK32
+	case MTLPixelFormatDepth16Unorm: return 124;  // VK_FORMAT_D16_UNORM
+	case MTLPixelFormatDepth32Float: return 126;  // VK_FORMAT_D32_SFLOAT
 	default: return 0;
 	}
 }
@@ -589,9 +592,11 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	}
 
+	const bool depth_swapchain = (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
+	const bool direct_metal_texture = info->array_size > 1 || depth_swapchain;
 	MTLTextureType texture_type = info->array_size > 1 ? MTLTextureType2DArray : MTLTextureType2D;
 	MTLTextureUsage texture_usage = usage_flags_to_metal(info->bits);
-	const char *path = info->array_size > 1 ? "vk-ext-metal-objects" : "iosurface-2d";
+	const char *path = direct_metal_texture ? "vk-ext-metal-objects" : "iosurface-2d";
 	U_LOG_I("Metal swapchain create: path=%s size=%ux%u array_size=%u face_count=%u mip_count=%u sample_count=%u vk_format=%u metal_format=%lld texture_type=%s(%lu) expected_usage=0x%lx",
 	        path,
 	        info->width,
@@ -658,13 +663,13 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	sc->xscn = xscn;
 	sc->c = c;
 
-	if (info->array_size > 1) {
+	if (direct_metal_texture) {
 		for (uint32_t i = 0; i < xscn->base.image_count; i++) {
 			void *raw_texture = NULL;
 			VkImage vk_image = VK_NULL_HANDLE;
 			VkResult vk_ret = comp_swapchain_export_metal_texture(xscn, i, &raw_texture, &vk_image);
 			if (vk_ret != VK_SUCCESS || raw_texture == NULL) {
-				U_LOG_E("Metal array swapchain export failed: image=%u vk_image=%p helper_result=%d; vkExportMetalObjectsEXT returns void and produced no MTLTexture",
+				U_LOG_E("Metal direct swapchain export failed: image=%u vk_image=%p helper_result=%d; vkExportMetalObjectsEXT returns void and produced no MTLTexture",
 				        i,
 				        (void *)vk_image,
 				        (int)vk_ret);
@@ -673,13 +678,16 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 			}
 
 			id<MTLTexture> texture = (__bridge id<MTLTexture>)raw_texture;
-			if (texture.textureType != MTLTextureType2DArray || texture.arrayLength != info->array_size) {
-				U_LOG_E("Metal array swapchain export incompatible: image=%u vk_image=%p texture=%p type=%s(%lu) array_length=%lu expected_array_size=%u",
+			if (texture.textureType != texture_type ||
+			    (info->array_size > 1 && texture.arrayLength != info->array_size)) {
+				U_LOG_E("Metal direct swapchain export incompatible: image=%u vk_image=%p texture=%p type=%s(%lu) expected_type=%s(%lu) array_length=%lu expected_array_size=%u",
 				        i,
 				        (void *)vk_image,
 				        (__bridge void *)texture,
 				        metal_texture_type_string(texture.textureType),
 				        (unsigned long)texture.textureType,
+				        metal_texture_type_string(texture_type),
+				        (unsigned long)texture_type,
 				        (unsigned long)texture.arrayLength,
 				        info->array_size);
 				client_metal_swapchain_destroy(&sc->base.base);
@@ -688,7 +696,7 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 
 			if (texture.width != info->width || texture.height != info->height ||
 			    texture.mipmapLevelCount != info->mip_count || texture.pixelFormat != (MTLPixelFormat)info->format) {
-				U_LOG_E("Metal array swapchain export geometry/format mismatch: image=%u vk_image=%p texture=%p size=%lux%lu expected=%ux%u mip_levels=%lu expected_mips=%u pixel_format=%lu expected_format=%lld",
+				U_LOG_E("Metal direct swapchain export geometry/format mismatch: image=%u vk_image=%p texture=%p size=%lux%lu expected=%ux%u mip_levels=%lu expected_mips=%u pixel_format=%lu expected_format=%lld",
 				        i,
 				        (void *)vk_image,
 				        (__bridge void *)texture,
@@ -706,7 +714,7 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 
 			MTLTextureUsage required_usage = texture_usage;
 			if ((texture.usage & required_usage) != required_usage) {
-				U_LOG_E("Metal array swapchain export usage mismatch: image=%u vk_image=%p texture=%p actual_usage=0x%lx required_usage=0x%lx",
+				U_LOG_E("Metal direct swapchain export usage mismatch: image=%u vk_image=%p texture=%p actual_usage=0x%lx required_usage=0x%lx",
 				        i,
 				        (void *)vk_image,
 				        (__bridge void *)texture,

@@ -185,11 +185,13 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	};
 
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	const bool direct_metal_texture =
+	    info->array_size > 1 || (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
 	VkExportMetalObjectCreateInfoEXT export_metal_object_create_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
-	    // IOSurface cannot back a Metal 2D-array texture. Layered swapchains
-	    // therefore export MoltenVK's native backing MTLTexture directly.
-	    .exportObjectType = info->array_size > 1 ? VK_EXPORT_METAL_OBJECT_TYPE_METAL_TEXTURE_BIT_EXT
+	    // IOSurface cannot back Metal 2D-array or depth/stencil textures.
+	    // Export MoltenVK's native backing MTLTexture directly for both.
+	    .exportObjectType = direct_metal_texture ? VK_EXPORT_METAL_OBJECT_TYPE_METAL_TEXTURE_BIT_EXT
 	                                             : VK_EXPORT_METAL_OBJECT_TYPE_METAL_IOSURFACE_BIT_EXT,
 	};
 #endif
@@ -614,10 +616,11 @@ vk_ic_get_handles(struct vk_bundle *vk,
 #endif
 
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
-	if (vkic->info.array_size > 1) {
-		// IOSurface-backed Metal textures must be ordinary 2D textures. Layered
-		// macOS swapchains are consumed in-process through VK_EXT_metal_objects,
-		// so there is deliberately no IOSurface native handle for these images.
+	if (vkic->info.array_size > 1 || (vkic->info.bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+		// IOSurface-backed Metal textures must be ordinary color 2D textures.
+		// Layered and depth/stencil macOS swapchains are consumed directly
+		// through VK_EXT_metal_objects, so there is deliberately no IOSurface
+		// native handle for these images.
 		for (size_t i = 0; i < vkic->image_count && i < max_handles; i++) {
 			out_handles[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 		}
