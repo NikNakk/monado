@@ -33,8 +33,8 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	vec4 depth_post_transform[2];
 	vec4 source_uv_to_tanangle[2];
 	vec4 projection_depth[2];
-	mat4 new_to_source_view_scanout_begin[2];
-	mat4 new_to_source_view_scanout_end[2];
+	vec4 new_origin_in_source_view_scanout_begin[2];
+	vec4 new_origin_in_source_view_scanout_end[2];
 	uvec4 has_depth[2];
 }ubo;
 
@@ -144,38 +144,34 @@ vec2 depth_correct_projection_uv(vec2 output_uv,
 		return rotational_source_uv;
 	}
 
-	vec2 new_tan = fma(output_uv, ubo.pre_transform[iz].zw, ubo.pre_transform[iz].xy);
-	vec3 new_ray = vec3(new_tan.x, -new_tan.y, -1.0);
+	// The existing rotational timewarp has already transformed the ray into
+	// source-view orientation. Positional reprojection therefore only needs the
+	// new camera origin expressed in source-view coordinates.
+	vec3 source_origin =
+	    mix(ubo.new_origin_in_source_view_scanout_begin[iz].xyz,
+	        ubo.new_origin_in_source_view_scanout_end[iz].xyz, output_uv.y);
 
-	// Match the existing rolling-scanout interpolation, but retain translation.
-	mat4 new_to_source =
-	    ubo.new_to_source_view_scanout_begin[iz] * (1.0 - output_uv.y) +
-	    ubo.new_to_source_view_scanout_end[iz] * output_uv.y;
-
-	vec3 source_origin = (new_to_source * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
-	vec3 source_ray = (new_to_source * vec4(new_ray, 0.0)).xyz;
-	if (abs(source_ray.z) < 1e-6) {
-		return rotational_source_uv;
-	}
-
-	float ray_scale = (-source_z_distance - source_origin.z) / source_ray.z;
-	if (!(ray_scale > 0.0)) {
-		return rotational_source_uv;
-	}
-
-	vec3 source_point = source_origin + source_ray * ray_scale;
-	float z_distance = -source_point.z;
-	if (!(z_distance > 1e-6)) {
-		return rotational_source_uv;
-	}
-
-	vec2 source_tan = vec2(source_point.x / z_distance, -source_point.y / z_distance);
 	vec2 tangent_extent = ubo.source_uv_to_tanangle[iz].zw;
 	if (abs(tangent_extent.x) < 1e-6 || abs(tangent_extent.y) < 1e-6) {
 		return rotational_source_uv;
 	}
 
-	return (source_tan - ubo.source_uv_to_tanangle[iz].xy) / tangent_extent;
+	vec2 source_tan =
+	    fma(rotational_source_uv, tangent_extent, ubo.source_uv_to_tanangle[iz].xy);
+
+	// Source-view rays are (tanX, -tanY, -1), so intersecting the plane
+	// z=-source_z_distance reduces to this scalar. This avoids any per-pixel
+	// matrix multiply on the depth path.
+	float ray_scale = source_z_distance + source_origin.z;
+	if (!(ray_scale > 0.0)) {
+		return rotational_source_uv;
+	}
+
+	vec2 corrected_tan = vec2(
+	    (source_origin.x + ray_scale * source_tan.x) / source_z_distance,
+	    (-source_origin.y + ray_scale * source_tan.y) / source_z_distance);
+
+	return (corrected_tan - ubo.source_uv_to_tanangle[iz].xy) / tangent_extent;
 }
 
 vec2 transform_uv(vec2 uv, uint iz)

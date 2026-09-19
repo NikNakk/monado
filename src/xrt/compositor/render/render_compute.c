@@ -874,18 +874,21 @@ render_compute_projection_timewarp(struct render_compute *render,
 }
 
 
-static inline void
-calc_new_to_source_view_matrix(const struct xrt_pose *source_pose,
-                               const struct xrt_pose *new_pose,
-                               struct xrt_matrix_4x4 *out_matrix)
+static inline struct xrt_vec4
+calc_new_origin_in_source_view(const struct xrt_pose *source_pose, const struct xrt_pose *new_pose)
 {
-	const struct xrt_vec3 unit_scale = {1.0f, 1.0f, 1.0f};
-	struct xrt_matrix_4x4 new_to_world;
-	struct xrt_matrix_4x4 world_to_source;
+	struct xrt_pose world_to_source;
+	math_pose_invert(source_pose, &world_to_source);
 
-	math_matrix_4x4_model(new_pose, &unit_scale, &new_to_world);
-	math_matrix_4x4_view_from_pose(source_pose, &world_to_source);
-	math_matrix_4x4_multiply(&world_to_source, &new_to_world, out_matrix);
+	struct xrt_vec3 origin;
+	math_pose_transform_point(&world_to_source, &new_pose->position, &origin);
+
+	return (struct xrt_vec4){
+	    .x = origin.x,
+	    .y = origin.y,
+	    .z = origin.z,
+	    .w = 0.0f,
+	};
 }
 
 void
@@ -939,10 +942,10 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 		data->projection_depth[i].max_depth = depth_data[i].max_depth;
 		data->projection_depth[i].near_z = depth_data[i].near_z;
 		data->projection_depth[i].far_z = depth_data[i].far_z;
-		calc_new_to_source_view_matrix(
-		    &src_poses[i], &new_poses_scanout_begin[i], &data->new_to_source_view_scanout_begin[i]);
-		calc_new_to_source_view_matrix(
-		    &src_poses[i], &new_poses_scanout_end[i], &data->new_to_source_view_scanout_end[i]);
+		data->new_origin_in_source_view_scanout_begin[i] =
+		    calc_new_origin_in_source_view(&src_poses[i], &new_poses_scanout_begin[i]);
+		data->new_origin_in_source_view_scanout_end[i] =
+		    calc_new_origin_in_source_view(&src_poses[i], &new_poses_scanout_end[i]);
 		data->has_depth[i].value = 1;
 
 #ifdef XRT_OS_OSX
