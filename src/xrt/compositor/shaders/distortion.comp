@@ -471,11 +471,9 @@ bool depth_visibility_decode(uint encoded, out float target_z)
 
 bool depth_visibility_target_z(vec2 target_projection_uv,
                                uint iz,
-                               out float target_z,
-                               out bool hole_filled)
+                               out float target_z)
 {
 	target_z = 0.0;
-	hole_filled = false;
 	if (ubo.depth_visibility.w == 0u ||
 	    any(lessThan(target_projection_uv, vec2(0.0))) ||
 	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
@@ -528,7 +526,6 @@ bool depth_visibility_target_z(vec2 target_projection_uv,
 
 	if (found) {
 		target_z = farthest_z;
-		hole_filled = true;
 	}
 	return found;
 }
@@ -693,8 +690,7 @@ void main()
 
 		if (forward_enabled) {
 			float target_z;
-			bool hole_filled;
-			if (depth_visibility_target_z(g_target_uv, iz, target_z, hole_filled)) {
+			if (depth_visibility_target_z(g_target_uv, iz, target_z)) {
 				float expected_r_z;
 				float expected_g_z;
 				float expected_b_z;
