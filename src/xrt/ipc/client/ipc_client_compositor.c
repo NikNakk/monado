@@ -9,6 +9,7 @@
  * @ingroup ipc_client
  */
 
+#include <stddef.h>
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_defines.h"
@@ -839,11 +840,39 @@ ipc_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 	if (icc->ipc_c->imc.stream_socket) {
 		/*
 		 * The Wine bridge owns a private metadata snapshot rather than the
-		 * service's shared-memory mapping. Send the completed slot inline.
-		 * Producer GPU completion must already have been established by the
-		 * D3D11 client compositor before entering this path.
+		 * service's shared-memory mapping. Upload only the active prefix of
+		 * the slot: frame header + layer_count + active layer entries.
+		 * This avoids sending the ~50 KiB full IPC_MAX_LAYERS allocation on
+		 * every frame while keeping each command below IPC_BUF_SIZE.
+		 *
+		 * Producer GPU completion has already been established by the D3D11
+		 * client compositor before entering this path.
 		 */
-		xret = ipc_call_compositor_layer_sync_copy(icc->ipc_c, slot, &icc->layers.slot_id);
+		const size_t total_size =
+		    offsetof(struct ipc_layer_slot, layers) + ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
+		if (total_size > UINT32_MAX) {
+			xret = XRT_ERROR_IPC_FAILURE;
+		} else {
+			const uint8_t *src = (const uint8_t *)slot;
+			xret = XRT_SUCCESS;
+			for (size_t offset = 0; offset < total_size; offset += IPC_LAYER_COPY_CHUNK_SIZE) {
+				struct ipc_layer_copy_chunk chunk = {0};
+				size_t remaining = total_size - offset;
+				size_t copy_size = remaining < IPC_LAYER_COPY_CHUNK_SIZE ? remaining : IPC_LAYER_COPY_CHUNK_SIZE;
+				chunk.size = (uint32_t)copy_size;
+				memcpy(chunk.data, src + offset, copy_size);
+
+				xret = ipc_call_compositor_layer_copy_chunk(
+				    icc->ipc_c, (uint32_t)offset, (uint32_t)total_size, &chunk);
+				if (xret != XRT_SUCCESS) {
+					break;
+				}
+			}
+			if (xret == XRT_SUCCESS) {
+				xret = ipc_call_compositor_layer_sync_copy_commit(
+				    icc->ipc_c, (uint32_t)total_size, &icc->layers.slot_id);
+			}
+		}
 	} else {
 		xret = ipc_call_compositor_layer_sync( //
 		    icc->ipc_c,                        //
