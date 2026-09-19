@@ -32,7 +32,7 @@
 
 
 #define IPC_CRED_SIZE 1    // auth not implemented
-#define IPC_BUF_SIZE 2048  // must be >= largest message length in bytes
+#define IPC_BUF_SIZE 4096  // must be >= largest message length in bytes
 #define IPC_MAX_VIEWS 8    // max views we will return configs for
 #define IPC_MAX_FORMATS 32 // max formats our server-side compositor supports
 #define IPC_MAX_DEVICES 8  // max number of devices we will map using shared mem
@@ -411,6 +411,18 @@ struct ipc_layer_copy_chunk
 {
 	uint32_t size;
 	uint8_t data[IPC_LAYER_COPY_CHUNK_SIZE];
+};
+
+/*!
+ * Fast path for the overwhelmingly common one-layer frame. The byte array is
+ * fixed-width on the wire, while size describes the active native prefix:
+ * frame data + layer_count + one ipc_layer_entry.
+ */
+#define IPC_LAYER_SINGLE_PAYLOAD_SIZE 4000
+struct ipc_layer_single_payload
+{
+	uint32_t size;
+	uint8_t data[IPC_LAYER_SINGLE_PAYLOAD_SIZE];
 };
 
 /*!
