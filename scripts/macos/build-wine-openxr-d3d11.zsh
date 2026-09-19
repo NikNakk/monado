@@ -15,7 +15,13 @@ if [[ -z "${cc}" || -z "${cxx}" || -z "${windres}" ]]; then
 	exit 1
 fi
 
+# Older revisions of this branch forced the Wine D3D capability flags into
+# CMakeCache.txt. -U removes those stale entries so an existing build directory
+# can be reconfigured safely after updating.
 cmake -S "${repo_root}" -B "${build_dir}" -G Ninja \
+	-UXRT_HAVE_DXGI \
+	-UXRT_HAVE_D3D11 \
+	-UXRT_HAVE_D3D12 \
 	-DCMAKE_SYSTEM_NAME=Windows \
 	-DCMAKE_SYSTEM_PROCESSOR=x86_64 \
 	-DCMAKE_C_COMPILER="${cc}" \
