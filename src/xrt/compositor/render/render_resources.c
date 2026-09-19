@@ -1087,6 +1087,17 @@ render_resources_init(struct render_resources *r,
 	ret = vk_create_compute_pipeline(
 	    vk,
 	    r->pipeline_cache,
+	    r->shaders->depth_visibility_clear_comp,
+	    r->compute.distortion.pipeline_layout,
+	    NULL,
+	    &r->compute.depth_visibility.clear_pipeline);
+	VK_CHK_WITH_RET(ret, "vk_create_compute_pipeline(depth_visibility_clear)", false);
+	VK_NAME_PIPELINE(vk, r->compute.depth_visibility.clear_pipeline,
+	                 "render_resources depth visibility clear pipeline");
+
+	ret = vk_create_compute_pipeline(
+	    vk,
+	    r->pipeline_cache,
 	    r->shaders->depth_visibility_comp,
 	    r->compute.distortion.pipeline_layout,
 	    NULL,
@@ -1226,6 +1237,7 @@ render_resources_fini(struct render_resources *r)
 	D(DescriptorSetLayout, r->compute.distortion.descriptor_set_layout);
 	D(Pipeline, r->compute.distortion.pipeline);
 	D(Pipeline, r->compute.distortion.timewarp_pipeline);
+	D(Pipeline, r->compute.depth_visibility.clear_pipeline);
 	D(Pipeline, r->compute.depth_visibility.pipeline);
 	D(PipelineLayout, r->compute.distortion.pipeline_layout);
 
