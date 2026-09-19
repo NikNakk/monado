@@ -108,10 +108,31 @@ fi
 print "Traced service is listening."
 print ""
 
+set +e
 MONADO_OPENVR_SMOKE_FRAMES="${frames}" \
 MONADO_WINE_TCP_PORT="${port}" \
 MONADO_WINE_TIMING_TRACE_HOST="${trace_dir}/wine.csv" \
-	"${script_dir}/run-wine-openvr-opencomposite-smoke.zsh"
+	"${script_dir}/run-wine-openvr-opencomposite-smoke.zsh" 2>&1 | tee "${trace_dir}/smoke.log"
+smoke_status=${pipestatus[1]}
+set -e
+
+if [[ -f "${trace_dir}/wine.csv" ]]; then
+	gpu_frames=$(awk -F, 'NR > 1 && $3 == 1 {n++} END {print n+0}' "${trace_dir}/wine.csv")
+	total_frames=$(awk -F, 'NR > 1 {n++} END {print n+0}' "${trace_dir}/wine.csv")
+	print ""
+	print "Wine GPU-sync frames: ${gpu_frames}/${total_frames}"
+	if (( total_frames > 0 && gpu_frames == 0 )); then
+		print -u2 "WARNING: capture ran entirely on the CPU fence fallback path."
+		print -u2 "Relevant GPU-sync initialization messages:"
+		grep -E 'GPU-only|shared-event|shared D3D11 fence|CPU fence fallback|MONADO_WINE_GPU_SYNC' \
+			"${trace_dir}/smoke.log" >&2 || true
+	fi
+fi
+
+if (( smoke_status != 0 )); then
+	print -u2 "OpenVR/OpenComposite smoke exited with status ${smoke_status}."
+	exit ${smoke_status}
+fi
 
 print ""
 print "Capture complete. Stopping the traced service so fully-buffered CSVs are flushed..."
