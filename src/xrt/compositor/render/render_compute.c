@@ -26,6 +26,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(depth_reprojection, "XRT_COMPOSITOR_DEPTH_REPROJECTIO
 DEBUG_GET_ONCE_NUM_OPTION(depth_reprojection_debug, "XRT_COMPOSITOR_DEPTH_DEBUG", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_disocclusion_fill, "XRT_COMPOSITOR_DEPTH_DISOCCLUSION_FILL", true)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_per_channel, "XRT_COMPOSITOR_DEPTH_PER_CHANNEL", true)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_occlusion_search, "XRT_COMPOSITOR_DEPTH_OCCLUSION_SEARCH", true)
 
 /*
  *
@@ -929,7 +930,7 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	// the shader: 1 enables background-biased handling of A<->B depth cycles.
 	data->depth_debug.padding0 = debug_get_bool_option_depth_disocclusion_fill() ? 1u : 0u;
 	data->depth_debug.padding1 = debug_get_bool_option_depth_per_channel() ? 1u : 0u;
-	data->depth_debug.padding2 = 0;
+	data->depth_debug.padding2 = debug_get_bool_option_depth_occlusion_search() ? 1u : 0u;
 
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
 		render_calc_time_warp_matrix(
