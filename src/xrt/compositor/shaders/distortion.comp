@@ -182,22 +182,42 @@ vec2 depth_correct_projection_uv(float scanout_fraction,
 	 * depth jump means we crossed a surface boundary: keep the robust
 	 * rotation-only result for that pixel instead of stretching the silhouette.
 	 */
+	// Never let positional reprojection turn missing source content into the
+	// sampler's black border. Rotation-only remains a safe fallback.
+	if (any(lessThan(corrected_uv, vec2(0.0))) ||
+	    any(greaterThan(corrected_uv, vec2(1.0)))) {
+		return rotational_source_uv;
+	}
+
+	/*
+	 * The first depth sample is only a fixed-point estimate: at a silhouette it
+	 * may describe the foreground while the translated ray actually reveals
+	 * background (or vice versa). If translation moved the lookup enough to
+	 * matter, take one additional nearest depth sample at the corrected
+	 * coordinate and perform one refinement iteration. This avoids the hard
+	 * foreground/background switch that produced visible seam lines while
+	 * keeping the ordinary small-motion path to a single depth fetch.
+	 */
 	vec2 corrected_depth_uv =
 	    fma(corrected_uv, ubo.depth_post_transform[iz].zw, ubo.depth_post_transform[iz].xy);
 	ivec2 depth_size_i = textureSize(source[2 + iz], 0);
-	vec2 depth_pixel_shift =
-	    (corrected_depth_uv - depth_uv) * vec2(depth_size_i);
-	if (max(abs(depth_pixel_shift.x), abs(depth_pixel_shift.y)) >= 0.75 &&
-	    all(greaterThanEqual(corrected_uv, vec2(0.0))) &&
-	    all(lessThanEqual(corrected_uv, vec2(1.0)))) {
-		float corrected_window_depth = texture(source[2 + iz], corrected_depth_uv).r;
-		float corrected_z_distance =
-		    projection_depth_to_view_z_distance(corrected_window_depth, ubo.projection_depth[iz]);
-		if (corrected_z_distance > 0.0) {
-			float nearer_distance = min(source_z_distance, corrected_z_distance);
-			float allowed_jump = max(0.05, 0.20 * nearer_distance);
-			if (abs(corrected_z_distance - source_z_distance) > allowed_jump) {
-				return rotational_source_uv;
+	vec2 depth_pixel_shift = (corrected_depth_uv - depth_uv) * vec2(depth_size_i);
+	if (max(abs(depth_pixel_shift.x), abs(depth_pixel_shift.y)) >= 0.75) {
+		float refined_window_depth = texture(source[2 + iz], corrected_depth_uv).r;
+		float refined_z_distance =
+		    projection_depth_to_view_z_distance(refined_window_depth, ubo.projection_depth[iz]);
+		if (refined_z_distance > 0.0) {
+			float refined_ray_scale = refined_z_distance + source_origin.z;
+			if (refined_ray_scale > 0.0) {
+				vec2 refined_tan = vec2(
+				    (source_origin.x + refined_ray_scale * source_tan.x) / refined_z_distance,
+				    (-source_origin.y + refined_ray_scale * source_tan.y) / refined_z_distance);
+				vec2 refined_uv =
+				    (refined_tan - ubo.source_uv_to_tanangle[iz].xy) / tangent_extent;
+				if (all(greaterThanEqual(refined_uv, vec2(0.0))) &&
+				    all(lessThanEqual(refined_uv, vec2(1.0)))) {
+					corrected_uv = refined_uv;
+				}
 			}
 		}
 	}
