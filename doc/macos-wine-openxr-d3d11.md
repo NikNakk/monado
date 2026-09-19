@@ -157,3 +157,112 @@ The first implementation intentionally supports:
 The intended next optimization is DXMT `MTLSharedEvent` export so the Windows
 client can feed Monado's existing compositor timeline semaphore path without a
 CPU fence waiter.
+
+
+## Performance instrumentation
+
+The Wine D3D11 compositor records a client-side timing CSV when
+`MONADO_WINE_TIMING_TRACE` is set. The hello_xr runner enables this by default
+and writes:
+
+```text
+/tmp/monado_wine_d3d11_timing.csv
+```
+
+Columns are:
+
+```text
+frame_id,fence_value,gpu_sync,wait_frame_us,producer_wait_us,ipc_commit_us,layer_commit_total_us
+```
+
+The runtime also logs a `Wine frame stall` warning when either producer
+synchronization or frame-submit IPC exceeds 1.5 ms.
+
+The common one-projection-layer submission path uses one TCP request/reply.
+Multi-layer frames retain the compact chunked fallback.
+
+## GPU-only DXMT synchronization
+
+The original bridge intentionally used a conservative D3D11 fence CPU wait:
+
+```text
+ID3D11DeviceContext4::Signal
+ -> Flush
+ -> SetEventOnCompletion
+ -> WaitForSingleObject
+ -> layer commit
+```
+
+A patched DXMT v0.80 build can instead expose the bootstrap registration name of
+the shared fence's existing `MTLSharedEvent`. Native Monado resolves that Mach
+port, reconstructs the event on the MoltenVK Metal device, imports it through
+`VkImportMetalSharedEventInfoEXT`, and submits the layer with a Vulkan timeline
+semaphore value. No Wine CPU fence wait is required.
+
+Build and install the matched private DXMT set with:
+
+```sh
+scripts/macos/build-wine-dxmt-gpu-sync.zsh
+```
+
+This uses the pinned BasaltVR v0.1.0 build harness, its MIT v0.80 DXMT patches,
+and `scripts/macos/dxmt-patches/0005-monado-shared-fence-bootstrap-name.patch`.
+Only the private `build-wine-dxmt` Wine tree/prefix is modified.
+
+GPU-only sync is selected automatically when the patched fence metadata is
+available. For an A/B comparison, force the old CPU path with:
+
+```sh
+MONADO_WINE_GPU_SYNC=0 \
+MONADO_WINE_TCP_PORT=4242 \
+scripts/macos/run-wine-hello-xr-d3d11.zsh
+```
+
+## OpenComposite / OpenVR
+
+OpenComposite remains an external GPLv3 component. No OpenComposite code is
+linked into or vendored by Monado.
+
+Provision an x64 OpenComposite `openvr_api.dll`:
+
+```sh
+scripts/macos/provision-opencomposite.zsh
+```
+
+The provisioner accepts a specific local DLL or artifact URL via
+`MONADO_OPENCOMPOSITE_DLL_SOURCE`. Without an override it asks OpenComposite's
+AppVeyor project for the current x64 `openxr`-branch artifact and records the
+downloaded SHA-256.
+
+Build and run the isolated OpenVR initialization smoke test:
+
+```sh
+scripts/macos/build-wine-openvr-smoke.zsh
+MONADO_WINE_TCP_PORT=4242 \
+scripts/macos/run-wine-openvr-opencomposite-smoke.zsh
+```
+
+The smoke executable dynamically loads OpenComposite directly, so it cannot
+accidentally initialize SteamVR. It requests an OpenVR scene application,
+`IVRSystem`, and `IVRCompositor` through the Monado Windows OpenXR runtime.
+
+For a real OpenVR game, use the reversible per-game replacement:
+
+```sh
+scripts/macos/install-opencomposite-game.zsh install \
+  '/path/to/game/openvr_api.dll'
+
+MONADO_WINE_TCP_PORT=4242 \
+scripts/macos/run-wine-openvr-game.zsh '/path/to/game/game.exe'
+```
+
+Restore the game's original DLL with:
+
+```sh
+scripts/macos/install-opencomposite-game.zsh restore \
+  '/path/to/game/openvr_api.dll'
+```
+
+The installer also writes an `opencomposite.ini` with
+`initUsingVulkan=false`, keeping OpenComposite on the D3D11-first path
+currently supported by this Wine bridge.
