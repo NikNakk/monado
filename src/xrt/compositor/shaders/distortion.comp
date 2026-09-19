@@ -361,19 +361,38 @@ void main()
 			}
 
 			if (depth_solved) {
-				vec2 corrected_r =
-				    depth_translate_projection_uv(r_projection_uv, solved_z_distance, source_origin, iz);
-				vec2 corrected_b =
-				    depth_translate_projection_uv(b_projection_uv, solved_z_distance, source_origin, iz);
+				/*
+				 * A detected A<->B two-cycle is a disocclusion ambiguity, not a
+				 * converged geometric solution. Prefer the farther/background
+				 * surface so foreground silhouettes do not get dragged across
+				 * newly revealed background:
+				 *
+				 * - if the initial rotational sample is farther, keep the
+				 *   rotation-only RGB coordinates (they already sample background);
+				 * - if the first corrected sample is farther, keep the first-pass
+				 *   translated coordinates, which land on that background sample.
+				 *
+				 * depth_debug.y is the runtime disocclusion-fill toggle.
+				 */
+				bool use_rotation_only_background =
+				    ubo.depth_debug.y != 0u && refinement_oscillated &&
+				    initial_z_distance > refined_z_distance;
 
-				if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
-				    all(lessThanEqual(corrected_r, vec2(1.0)))) {
-					r_projection_uv = corrected_r;
-				}
-				g_projection_uv = corrected_g;
-				if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
-				    all(lessThanEqual(corrected_b, vec2(1.0)))) {
-					b_projection_uv = corrected_b;
+				if (!use_rotation_only_background) {
+					vec2 corrected_r =
+					    depth_translate_projection_uv(r_projection_uv, solved_z_distance, source_origin, iz);
+					vec2 corrected_b =
+					    depth_translate_projection_uv(b_projection_uv, solved_z_distance, source_origin, iz);
+
+					if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
+					    all(lessThanEqual(corrected_r, vec2(1.0)))) {
+						r_projection_uv = corrected_r;
+					}
+					g_projection_uv = corrected_g;
+					if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
+					    all(lessThanEqual(corrected_b, vec2(1.0)))) {
+						b_projection_uv = corrected_b;
+					}
 				}
 			}
 		}
