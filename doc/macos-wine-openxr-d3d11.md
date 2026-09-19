@@ -204,13 +204,18 @@ scripts/macos/build-wine-openxr-d3d11.zsh
 zsh scripts/macos/run-wine-openvr-native-trace.zsh
 ```
 
-The helper leaves the existing launchd registration intact. It temporarily
-sets the trace variables in the per-user launchd environment, restarts the
-registered service with `kickstart -k`, writes Wine and native traces into one
-timestamped directory under `/tmp`, sends the service SIGTERM so its
-fully-buffered CSVs are flushed cleanly, restores the previous launchd
-environment, and restarts the normal service. If an older trace-helper run left
-the job unloaded, it first repairs the development registration.
+For Wine/DXMT tracing the helper temporarily unloads the normal LaunchAgent
+and starts `monado-service` directly from the invoking shell. This deliberately
+keeps the service in the same Mach bootstrap namespace as Wine/DXMT so the
+current bootstrap-name MTLSharedEvent bridge remains usable. The direct capture
+disables the native Metal XPC listener, which the IOSurface-ID Wine path does
+not require. After the smoke run it stops the service cleanly to flush
+fully-buffered CSVs and restores the ordinary development LaunchAgent.
+
+The runner also saves `smoke.log` and reports the fraction of Wine frames that
+actually used GPU shared-event synchronization. A zero fraction is treated as
+a diagnostic warning and the relevant shared-event/fallback messages are
+printed automatically.
 
 The native trace set includes:
 - `wine_submit.csv`: arrival, layer reconstruction and commit of the copied
