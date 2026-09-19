@@ -22,6 +22,10 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0) uniform sampler2D source[4];
 layout(set = 0, binding = 1) uniform sampler2D distortion[6];
 layout(set = 0, binding = 2) uniform writeonly restrict image2D target;
+layout(set = 0, binding = 4, std430) readonly buffer Visibility
+{
+	uint depth_bits[];
+} visibility;
 layout(set = 0, binding = 3, std140) uniform restrict Config
 {
 	ivec4 views[2];
@@ -35,8 +39,11 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	vec4 projection_depth[2];
 	vec4 new_origin_in_source_view_scanout_begin[2];
 	vec4 new_origin_in_source_view_scanout_end[2];
+	vec4 target_to_source_orientation_scanout_begin[2];
+	vec4 target_to_source_orientation_scanout_end[2];
 	uvec4 has_depth[2];
 	uvec4 depth_debug;
+	uvec4 depth_visibility;
 }ubo;
 
 
@@ -447,6 +454,72 @@ vec2 depth_resolve_projection_uv(float scanout_fraction,
 	return selected_uv;
 }
 
+vec3 quat_rotate(vec4 q, vec3 v)
+{
+	return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
+bool depth_visibility_target_z(vec2 target_projection_uv, uint iz, out float target_z)
+{
+	target_z = 0.0;
+	if (ubo.depth_visibility.w == 0u ||
+	    any(lessThan(target_projection_uv, vec2(0.0))) ||
+	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
+		return false;
+	}
+
+	uint width = ubo.depth_visibility.x;
+	uint height = ubo.depth_visibility.y;
+	if (width == 0u || height == 0u || iz >= ubo.depth_visibility.z) {
+		return false;
+	}
+
+	uvec2 pixel = min(uvec2(target_projection_uv * vec2(width, height)),
+	                  uvec2(width - 1u, height - 1u));
+	uint index = iz * width * height + pixel.y * width + pixel.x;
+	uint encoded = visibility.depth_bits[index];
+	if (encoded == 0x7f7fffffu) {
+		return false;
+	}
+
+	target_z = uintBitsToFloat(encoded);
+	return target_z > 0.0 && target_z < 1e20;
+}
+
+vec2 depth_source_uv_from_target_z(vec2 target_projection_uv,
+                                   float target_z,
+                                   float scanout_fraction,
+                                   uint iz)
+{
+	vec2 target_extent = ubo.pre_transform[iz].zw;
+	vec2 source_extent = ubo.source_uv_to_tanangle[iz].zw;
+	if (abs(target_extent.x) < 1e-6 || abs(target_extent.y) < 1e-6 ||
+	    abs(source_extent.x) < 1e-6 || abs(source_extent.y) < 1e-6 ||
+	    !(target_z > 0.0)) {
+		return vec2(-1.0);
+	}
+
+	vec2 target_tan =
+	    fma(target_projection_uv, target_extent, ubo.pre_transform[iz].xy);
+	vec3 target_point =
+	    vec3(target_tan.x * target_z, -target_tan.y * target_z, -target_z);
+
+	vec4 q = normalize(mix(ubo.target_to_source_orientation_scanout_begin[iz],
+	                       ubo.target_to_source_orientation_scanout_end[iz],
+	                       scanout_fraction));
+	vec3 origin = mix(ubo.new_origin_in_source_view_scanout_begin[iz].xyz,
+	                  ubo.new_origin_in_source_view_scanout_end[iz].xyz,
+	                  scanout_fraction);
+	vec3 source_point = quat_rotate(q, target_point) + origin;
+	float source_z = -source_point.z;
+	if (!(source_z > 1e-6)) {
+		return vec2(-1.0);
+	}
+
+	vec2 source_tan = vec2(source_point.x / source_z, -source_point.y / source_z);
+	return (source_tan - ubo.source_uv_to_tanangle[iz].xy) / source_extent;
+}
+
 vec2 transform_uv(vec2 uv, uint iz)
 {
 	if (do_timewarp) {
@@ -476,112 +549,145 @@ void main()
 	vec2 g_uv = use_identity_distortion ? subimage_uv : texture(distortion[iz + 2], distortion_uv).xy;
 	vec2 b_uv = use_identity_distortion ? subimage_uv : texture(distortion[iz + 4], distortion_uv).xy;
 
-	// Keep projection UVs separate from the subimage mapping. Depth is solved
-	// once on the green/central ray, but positional translation is then applied
-	// to each chromatic ray independently. Reusing one green UV delta for all
-	// channels creates coloured/shadow outlines when the RGB distortion rays
-	// diverge, especially during fore/aft translation.
+	// Keep target projection UVs separate from source/subimage mapping.
 	if (do_timewarp) {
-		vec2 r_projection_uv = transform_uv_timewarp(r_uv, iz);
-		vec2 g_projection_uv = transform_uv_timewarp(g_uv, iz);
-		vec2 b_projection_uv = transform_uv_timewarp(b_uv, iz);
+		vec2 r_target_uv = r_uv;
+		vec2 g_target_uv = g_uv;
+		vec2 b_target_uv = b_uv;
 
-		if (ubo.has_depth[iz].x != 0) {
-			if (ubo.depth_debug.x != 0u) {
-				// Debug modes intentionally inspect the green/central ray only.
-				float solved_z_distance;
-				float initial_z_distance;
-				float refined_z_distance;
-				vec3 source_origin;
-				vec2 corrected_g;
-				vec2 first_corrected_g;
-				bool refinement_oscillated;
-				bool depth_solved = depth_solve_projection(subimage_uv.y,
-				                                           g_projection_uv,
-				                                           iz,
-				                                           solved_z_distance,
-				                                           source_origin,
-				                                           corrected_g,
-				                                           initial_z_distance,
-				                                           refined_z_distance,
-				                                           first_corrected_g,
-				                                           refinement_oscillated);
+		vec2 r_projection_uv;
+		vec2 g_projection_uv;
+		vec2 b_projection_uv;
+		bool used_forward_visibility = false;
 
-				vec4 debug_colour = vec4(0.0, 0.0, 1.0, 1.0);
-				if (ubo.depth_debug.x == 1u) {
-					if (initial_z_distance > 0.0) {
-						float near_z = max(ubo.projection_depth[iz].z, 1e-4);
-						float far_z = max(ubo.projection_depth[iz].w, near_z + 1e-4);
-						float depth_level =
-						    clamp(log(initial_z_distance / near_z) / log(far_z / near_z), 0.0, 1.0);
-						debug_colour = vec4(vec3(depth_level), 1.0);
-					}
-				} else if (ubo.depth_debug.x == 2u) {
-					if (depth_solved) {
-						float reference_z =
-						    refined_z_distance > 0.0 ? min(initial_z_distance, refined_z_distance) : initial_z_distance;
-						float allowed_jump = max(0.05, 0.20 * reference_z);
-						bool surface_switch =
-						    refined_z_distance > 0.0 &&
-						    abs(refined_z_distance - initial_z_distance) > allowed_jump;
-						if (refinement_oscillated) {
-							debug_colour = vec4(1.0, 0.0, 1.0, 1.0);
-						} else if (surface_switch) {
-							debug_colour = vec4(1.0, 1.0, 0.0, 1.0);
-						} else {
-							debug_colour = vec4(0.35, 0.35, 0.35, 1.0);
+		// Preferred depth path: visibility was established by forward-projecting
+		// the submitted depth image with an atomic frontmost z-buffer. One common
+		// geometric target depth is then reconstructed through each chromatic ray,
+		// so colour correction can differ without allowing R/G/B to disagree about
+		// which surface is visible.
+		if (ubo.has_depth[iz].x != 0u && ubo.depth_visibility.w != 0u &&
+		    ubo.depth_debug.x == 0u) {
+			float target_z;
+			if (depth_visibility_target_z(g_target_uv, iz, target_z)) {
+				r_projection_uv =
+				    depth_source_uv_from_target_z(r_target_uv, target_z, subimage_uv.y, iz);
+				g_projection_uv =
+				    depth_source_uv_from_target_z(g_target_uv, target_z, subimage_uv.y, iz);
+				b_projection_uv =
+				    depth_source_uv_from_target_z(b_target_uv, target_z, subimage_uv.y, iz);
+				used_forward_visibility =
+				    all(greaterThanEqual(r_projection_uv, vec2(0.0))) &&
+				    all(lessThanEqual(r_projection_uv, vec2(1.0))) &&
+				    all(greaterThanEqual(g_projection_uv, vec2(0.0))) &&
+				    all(lessThanEqual(g_projection_uv, vec2(1.0))) &&
+				    all(greaterThanEqual(b_projection_uv, vec2(0.0))) &&
+				    all(lessThanEqual(b_projection_uv, vec2(1.0)));
+			}
+		}
+
+		if (!used_forward_visibility) {
+			// Fallback/A-B path: the previous inverse pull warp and bounded
+			// epipolar search. This remains useful for diagnosing forward-map holes
+			// and for direct performance comparisons.
+			r_projection_uv = transform_uv_timewarp(r_target_uv, iz);
+			g_projection_uv = transform_uv_timewarp(g_target_uv, iz);
+			b_projection_uv = transform_uv_timewarp(b_target_uv, iz);
+
+			if (ubo.has_depth[iz].x != 0u) {
+				if (ubo.depth_debug.x != 0u) {
+					float solved_z_distance;
+					float initial_z_distance;
+					float refined_z_distance;
+					vec3 source_origin;
+					vec2 corrected_g;
+					vec2 first_corrected_g;
+					bool refinement_oscillated;
+					bool depth_solved = depth_solve_projection(subimage_uv.y,
+					                                           g_projection_uv,
+					                                           iz,
+					                                           solved_z_distance,
+					                                           source_origin,
+					                                           corrected_g,
+					                                           initial_z_distance,
+					                                           refined_z_distance,
+					                                           first_corrected_g,
+					                                           refinement_oscillated);
+
+					vec4 debug_colour = vec4(0.0, 0.0, 1.0, 1.0);
+					if (ubo.depth_debug.x == 1u) {
+						if (initial_z_distance > 0.0) {
+							float near_z = max(ubo.projection_depth[iz].z, 1e-4);
+							float far_z = max(ubo.projection_depth[iz].w, near_z + 1e-4);
+							float depth_level =
+							    clamp(log(initial_z_distance / near_z) / log(far_z / near_z), 0.0, 1.0);
+							debug_colour = vec4(vec3(depth_level), 1.0);
+						}
+					} else if (ubo.depth_debug.x == 2u) {
+						if (depth_solved) {
+							float reference_z =
+							    refined_z_distance > 0.0 ? min(initial_z_distance, refined_z_distance)
+							                             : initial_z_distance;
+							float allowed_jump = max(0.05, 0.20 * reference_z);
+							bool surface_switch =
+							    refined_z_distance > 0.0 &&
+							    abs(refined_z_distance - initial_z_distance) > allowed_jump;
+							if (refinement_oscillated) {
+								debug_colour = vec4(1.0, 0.0, 1.0, 1.0);
+							} else if (surface_switch) {
+								debug_colour = vec4(1.0, 1.0, 0.0, 1.0);
+							} else {
+								debug_colour = vec4(0.35, 0.35, 0.35, 1.0);
+							}
+						}
+					} else if (ubo.depth_debug.x == 3u) {
+						if (depth_solved) {
+							vec2 source_size = vec2(textureSize(source[iz], 0));
+							float delta_px =
+							    length((corrected_g - first_corrected_g) * source_size);
+							float heat = clamp(delta_px / 4.0, 0.0, 1.0);
+							debug_colour = vec4(heat, 0.0, 0.0, 1.0);
 						}
 					}
-				} else if (ubo.depth_debug.x == 3u) {
-					if (depth_solved) {
-						vec2 source_size = vec2(textureSize(source[iz], 0));
-						float delta_px = length((corrected_g - first_corrected_g) * source_size);
-						float heat = clamp(delta_px / 4.0, 0.0, 1.0);
-						debug_colour = vec4(heat, 0.0, 0.0, 1.0);
-					}
+					imageStore(target, ivec2(offset.x + ix, offset.y + iy), debug_colour);
+					return;
 				}
-				imageStore(target, ivec2(offset.x + ix, offset.y + iy), debug_colour);
-				return;
-			}
 
-			if (ubo.depth_debug.z != 0u) {
-				// Correctness path: each chromatic distortion ray owns its own
-				// depth correspondence. At silhouettes the R/G/B rays can land on
-				// different surfaces, so sharing green's depth lets geometry slide
-				// inside the chromatic fringe envelope during translation.
-				r_projection_uv =
-				    depth_resolve_projection_uv(subimage_uv.y, r_projection_uv, iz);
-				g_projection_uv =
-				    depth_resolve_projection_uv(subimage_uv.y, g_projection_uv, iz);
-				b_projection_uv =
-				    depth_resolve_projection_uv(subimage_uv.y, b_projection_uv, iz);
-			} else {
-				// Default path: visibility is geometric, so choose one frontmost
-				// surface using the green/central ray, then apply that same surface
-				// depth to the chromatic sampling rays. R/G/B may sample different
-				// source coordinates for lens correction, but they must not disagree
-				// about which object is in front.
-				float selected_z_distance;
-				vec3 source_origin;
-				vec2 selected_g;
-				if (depth_resolve_visibility(subimage_uv.y,
-				                             g_projection_uv,
-				                             iz,
-				                             selected_z_distance,
-				                             source_origin,
-				                             selected_g)) {
-					vec2 corrected_r =
-					    depth_translate_projection_uv(r_projection_uv, selected_z_distance, source_origin, iz);
-					vec2 corrected_b =
-					    depth_translate_projection_uv(b_projection_uv, selected_z_distance, source_origin, iz);
-					if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
-					    all(lessThanEqual(corrected_r, vec2(1.0)))) {
-						r_projection_uv = corrected_r;
-					}
-					g_projection_uv = selected_g;
-					if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
-					    all(lessThanEqual(corrected_b, vec2(1.0)))) {
-						b_projection_uv = corrected_b;
+				if (ubo.depth_debug.z != 0u) {
+					r_projection_uv =
+					    depth_resolve_projection_uv(subimage_uv.y, r_projection_uv, iz);
+					g_projection_uv =
+					    depth_resolve_projection_uv(subimage_uv.y, g_projection_uv, iz);
+					b_projection_uv =
+					    depth_resolve_projection_uv(subimage_uv.y, b_projection_uv, iz);
+				} else {
+					float selected_z_distance;
+					vec3 source_origin;
+					vec2 selected_g;
+					if (depth_resolve_visibility(subimage_uv.y,
+					                             g_projection_uv,
+					                             iz,
+					                             selected_z_distance,
+					                             source_origin,
+					                             selected_g)) {
+						vec2 corrected_r =
+						    depth_translate_projection_uv(r_projection_uv,
+						                                  selected_z_distance,
+						                                  source_origin,
+						                                  iz);
+						vec2 corrected_b =
+						    depth_translate_projection_uv(b_projection_uv,
+						                                  selected_z_distance,
+						                                  source_origin,
+						                                  iz);
+						if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
+						    all(lessThanEqual(corrected_r, vec2(1.0)))) {
+							r_projection_uv = corrected_r;
+						}
+						g_projection_uv = selected_g;
+						if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
+						    all(lessThanEqual(corrected_b, vec2(1.0)))) {
+							b_projection_uv = corrected_b;
+						}
 					}
 				}
 			}
