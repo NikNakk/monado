@@ -204,10 +204,13 @@ scripts/macos/build-wine-openxr-d3d11.zsh
 zsh scripts/macos/run-wine-openvr-native-trace.zsh
 ```
 
-The helper temporarily re-bootstraps the development launchd service with
-`PSVR2_TIMING_TRACE=1`, writes Wine and native traces into one timestamped
-directory under `/tmp`, stops the traced service so fully-buffered CSVs are
-flushed, then restores the normal development service registration.
+The helper leaves the existing launchd registration intact. It temporarily
+sets the trace variables in the per-user launchd environment, restarts the
+registered service with `kickstart -k`, writes Wine and native traces into one
+timestamped directory under `/tmp`, sends the service SIGTERM so its
+fully-buffered CSVs are flushed cleanly, restores the previous launchd
+environment, and restarts the normal service. If an older trace-helper run left
+the job unloaded, it first repairs the development registration.
 
 The native trace set includes:
 - `wine_submit.csv`: arrival, layer reconstruction and commit of the copied
