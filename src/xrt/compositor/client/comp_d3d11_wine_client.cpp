@@ -21,7 +21,9 @@
 #include <windows.h>
 
 #include <assert.h>
+#include <inttypes.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -38,6 +40,11 @@ struct client_d3d11_compositor
 	ID3D11Fence *fence;
 	HANDLE fence_event;
 	uint64_t fence_value;
+
+	LARGE_INTEGER qpc_frequency;
+	FILE *timing_trace;
+	int64_t timing_frame_id;
+	double last_wait_frame_us;
 };
 
 struct client_d3d11_swapchain
@@ -46,6 +53,69 @@ struct client_d3d11_swapchain
 	struct xrt_swapchain *native;
 	struct client_d3d11_compositor *c;
 };
+
+
+static double
+qpc_elapsed_us(struct client_d3d11_compositor *c, LARGE_INTEGER start, LARGE_INTEGER end)
+{
+	if (c->qpc_frequency.QuadPart <= 0) {
+		return 0.0;
+	}
+	return ((double)(end.QuadPart - start.QuadPart) * 1000000.0) / (double)c->qpc_frequency.QuadPart;
+}
+
+static LARGE_INTEGER
+qpc_now(void)
+{
+	LARGE_INTEGER now = {};
+	QueryPerformanceCounter(&now);
+	return now;
+}
+
+static void
+trace_frame_timing(struct client_d3d11_compositor *c,
+                   double producer_wait_us,
+                   double ipc_commit_us,
+                   double layer_commit_total_us)
+{
+	if (c->timing_trace == NULL) {
+		return;
+	}
+
+	fprintf(c->timing_trace,
+	        "%" PRId64 ",%" PRIu64 ",%.3f,%.3f,%.3f,%.3f\n",
+	        c->timing_frame_id,
+	        c->fence_value,
+	        c->last_wait_frame_us,
+	        producer_wait_us,
+	        ipc_commit_us,
+	        layer_commit_total_us);
+	fflush(c->timing_trace);
+}
+
+static void
+init_timing_trace(struct client_d3d11_compositor *c)
+{
+	QueryPerformanceFrequency(&c->qpc_frequency);
+	c->timing_frame_id = -1;
+
+	char path[2048] = {};
+	DWORD len = GetEnvironmentVariableA("MONADO_WINE_TIMING_TRACE", path, (DWORD)sizeof(path));
+	if (len == 0 || len >= sizeof(path) || strcmp(path, "0") == 0) {
+		return;
+	}
+
+	c->timing_trace = fopen(path, "w");
+	if (c->timing_trace == NULL) {
+		U_LOG_W("Could not open Wine timing trace '%s'", path);
+		return;
+	}
+
+	fprintf(c->timing_trace,
+	        "frame_id,fence_value,wait_frame_us,producer_wait_us,ipc_commit_us,layer_commit_total_us\n");
+	fflush(c->timing_trace);
+	U_LOG_I("Wine D3D11 timing trace: %s", path);
+}
 
 static struct client_d3d11_compositor *
 as_compositor(struct xrt_compositor *xc)
@@ -286,7 +356,15 @@ static xrt_result_t end_session(struct xrt_compositor *xc) { return xrt_comp_end
 static xrt_result_t
 wait_frame(struct xrt_compositor *xc, int64_t *id, int64_t *display, int64_t *period)
 {
-	return xrt_comp_wait_frame(native_compositor(xc), id, display, period);
+	struct client_d3d11_compositor *c = as_compositor(xc);
+	LARGE_INTEGER start = qpc_now();
+	xrt_result_t xret = xrt_comp_wait_frame(native_compositor(xc), id, display, period);
+	LARGE_INTEGER end = qpc_now();
+	c->last_wait_frame_us = qpc_elapsed_us(c, start, end);
+	if (xret == XRT_SUCCESS && id != NULL) {
+		c->timing_frame_id = *id;
+	}
+	return xret;
 }
 static xrt_result_t begin_frame(struct xrt_compositor *xc, int64_t id) { return xrt_comp_begin_frame(native_compositor(xc), id); }
 static xrt_result_t discard_frame(struct xrt_compositor *xc, int64_t id) { return xrt_comp_discard_frame(native_compositor(xc), id); }
@@ -386,13 +464,30 @@ layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
 	struct client_d3d11_compositor *c = as_compositor(xc);
 	(void)sync_handle;
 
+	LARGE_INTEGER total_start = qpc_now();
+	LARGE_INTEGER producer_start = total_start;
 	xrt_result_t xret = wait_for_producer(c);
+	LARGE_INTEGER producer_end = qpc_now();
 	if (xret != XRT_SUCCESS) {
 		U_LOG_E("Wine D3D11 producer fence wait failed: %d", xret);
 		return xret;
 	}
 
-	return xrt_comp_layer_commit(&c->xcn->base, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	LARGE_INTEGER ipc_start = qpc_now();
+	xret = xrt_comp_layer_commit(&c->xcn->base, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+	LARGE_INTEGER ipc_end = qpc_now();
+
+	double producer_us = qpc_elapsed_us(c, producer_start, producer_end);
+	double ipc_us = qpc_elapsed_us(c, ipc_start, ipc_end);
+	double total_us = qpc_elapsed_us(c, total_start, ipc_end);
+	trace_frame_timing(c, producer_us, ipc_us, total_us);
+
+	if (producer_us > 1500.0 || ipc_us > 1500.0) {
+		U_LOG_W("Wine frame stall: frame=%" PRId64 " producer=%.3fus ipc=%.3fus total=%.3fus",
+		        c->timing_frame_id, producer_us, ipc_us, total_us);
+	}
+
+	return xret;
 }
 
 static xrt_result_t
@@ -425,6 +520,10 @@ static void
 destroy_compositor(struct xrt_compositor *xc)
 {
 	struct client_d3d11_compositor *c = as_compositor(xc);
+	if (c->timing_trace != NULL) {
+		fclose(c->timing_trace);
+		c->timing_trace = NULL;
+	}
 	if (c->fence_event != NULL) CloseHandle(c->fence_event);
 	if (c->fence != NULL) c->fence->Release();
 	if (c->context4 != NULL) c->context4->Release();
@@ -444,6 +543,7 @@ client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *
 
 	c->xcn = xcn;
 	c->device = device;
+	init_timing_trace(c);
 	c->device->AddRef();
 	c->device->GetImmediateContext(&c->context);
 	if (c->context == NULL) {
