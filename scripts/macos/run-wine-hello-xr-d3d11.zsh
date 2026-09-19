@@ -88,7 +88,7 @@ EOF
 # context, so install ActiveRuntime in HKLM inside our private Wine prefix
 # instead. This modifies only build-wine-dxmt/prefix (or MONADO_WINEPREFIX).
 #
-openxr_registry_key='HKLM\\SOFTWARE\\Khronos\\OpenXR\\1'
+openxr_registry_key='HKLM\SOFTWARE\Khronos\OpenXR\1'
 
 if ! DXMT_BASALT_IOSURFACE=1 "${wine}" reg.exe add "${openxr_registry_key}" \
 	/v ActiveRuntime /t REG_SZ /d "${windows_manifest}" /f >/dev/null; then
