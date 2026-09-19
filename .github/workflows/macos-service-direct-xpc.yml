@@ -98,11 +98,14 @@ jobs:
       - name: Cross-build OpenVR/OpenComposite smoke test
         run: scripts/macos/build-wine-openvr-smoke.zsh
 
-      - name: Check Monado DXMT shared-fence patch
+      - name: Check Monado DXMT patch series
         run: |
           git clone --quiet https://github.com/3Shain/dxmt.git "${RUNNER_TEMP}/dxmt-v080"
           git -C "${RUNNER_TEMP}/dxmt-v080" checkout --quiet 589adb780354b461645b29999cefaf533594ee99
-          git -C "${RUNNER_TEMP}/dxmt-v080" apply --check "${GITHUB_WORKSPACE}/scripts/macos/dxmt-patches/0005-monado-shared-fence-bootstrap-name.patch"
+          for patch in "${GITHUB_WORKSPACE}"/scripts/macos/dxmt-patches/*.patch; do
+            git -C "${RUNNER_TEMP}/dxmt-v080" apply --check "${patch}"
+            git -C "${RUNNER_TEMP}/dxmt-v080" apply "${patch}"
+          done
 
       - name: Configure full Release build
         run: >-
