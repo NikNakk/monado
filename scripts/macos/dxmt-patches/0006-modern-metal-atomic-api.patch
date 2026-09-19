@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Sat, 19 Sep 2026 22:20:00 +0100
+Subject: [PATCH] airconv: use public Metal atomic API for modern Xcode
+
+DXMT v0.80 calls the private __metal_atomic_fetch_add_explicit builtin
+directly. Current Metal compilers use a different private builtin signature,
+so that source no longer compiles on macOS 26 / Xcode 26.
+
+Backport the current DXMT implementation, which uses Metal's public
+atomic_fetch_add_explicit API with an explicit threadgroup atomic_int cast.
+
+---
+ src/airconv/shaders/air_tessellation.metal | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/airconv/shaders/air_tessellation.metal b/src/airconv/shaders/air_tessellation.metal
+index 7d0cf56..69b2e9e 100644
+--- a/src/airconv/shaders/air_tessellation.metal
++++ b/src/airconv/shaders/air_tessellation.metal
+@@ -150,7 +150,8 @@ struct TessMeshWorkload {
+ 
+ int
+ get_next_index(threadgroup int *out_count) {
+-  return __metal_atomic_fetch_add_explicit(out_count, 1, int(memory_order_relaxed), __METAL_MEMORY_SCOPE_THREADGROUP__);
++  return atomic_fetch_add_explicit(
++      reinterpret_cast<threadgroup atomic_int *>(out_count), 1, memory_order_relaxed);
+ }
+ 
+ template <partitioning partition>
+-- 
+2.39.5
