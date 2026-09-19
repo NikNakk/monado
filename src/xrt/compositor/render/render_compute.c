@@ -22,6 +22,7 @@
 DEBUG_GET_ONCE_BOOL_OPTION(log_timewarp_inputs, "XRT_COMPOSITOR_LOG_TIMEWARP_INPUTS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_IDENTITY", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_PRETRANSFORM_IDENTITY", false)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_reprojection, "XRT_COMPOSITOR_DEPTH_REPROJECTION", true)
 
 /*
  *
@@ -906,6 +907,13 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 {
 	assert(render->r != NULL);
 	struct render_resources *r = render->r;
+
+	if (!debug_get_bool_option_depth_reprojection()) {
+		render_compute_projection_timewarp(render, src_samplers, src_image_views, src_rects, src_poses, src_fovs,
+		                                   new_poses_scanout_begin, new_poses_scanout_end, target_image,
+		                                   target_image_view, views);
+		return;
+	}
 
 	struct xrt_matrix_4x4 time_warp_matrix_scanout_begin[XRT_MAX_VIEWS];
 	struct xrt_matrix_4x4 time_warp_matrix_scanout_end[XRT_MAX_VIEWS];
