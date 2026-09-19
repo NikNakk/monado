@@ -20,6 +20,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(openxr_sdk_source)
 
+if(MINGW)
+	# OpenXR-SDK 1.1.61 tests this Windows partition macro with
+	# -Werror=undef, while MinGW does not define it.
+	target_compile_definitions(openxr_loader PRIVATE WINAPI_PARTITION_SYSTEM=0)
+endif()
+
 FetchContent_Declare(
 	directxmath
 	URL https://github.com/microsoft/DirectXMath/archive/93e6399d6d15e1e57f80b5cea04d5a8eb892d693.tar.gz
