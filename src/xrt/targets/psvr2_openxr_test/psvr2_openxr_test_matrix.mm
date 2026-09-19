@@ -103,8 +103,77 @@ add_shimmer_comparison_panel(diagnostic_scene &scene)
 }
 
 static void
+initialize_reprojection_scene(diagnostic_scene &scene, const XrPosef &head_pose)
+{
+	// Keep this scene intentionally sparse: the purpose is to isolate
+	// positional reprojection and disocclusion behaviour, not exercise the
+	// general 360-degree diagnostic world.
+	scene.origin = xr_position(head_pose.position);
+	scene.up = make_float3(0.0f, 1.0f, 0.0f);
+	scene.forward = rotate_vector(head_pose.orientation, make_float3(0.0f, 0.0f, -1.0f));
+	scene.forward.y = 0.0f;
+	if (simd_length(scene.forward) < 0.001f) {
+		scene.forward = make_float3(0.0f, 0.0f, -1.0f);
+	} else {
+		scene.forward = simd_normalize(scene.forward);
+	}
+	scene.right = simd_normalize(simd_cross(scene.forward, scene.up));
+	scene.world_instances.clear();
+
+	const simd_float4 wall_color = make_float4(0.08f, 0.11f, 0.14f, 1.0f);
+	const simd_float4 marker_color = make_float4(0.70f, 0.74f, 0.78f, 1.0f);
+	const simd_float4 near_color = make_float4(0.20f, 0.95f, 0.36f, 1.0f);
+	const simd_float4 mid_color = make_float4(1.0f, 0.38f, 0.18f, 1.0f);
+	const simd_float4 far_color = make_float4(0.15f, 0.82f, 1.0f, 1.0f);
+	const simd_float4 thin_color = make_float4(1.0f, 0.16f, 0.62f, 1.0f);
+
+	// Continuous background at 6 m. The wall ensures a translated view reveals
+	// known background content instead of the swapchain clear colour.
+	add_world_box(scene, 0.0f, 0.0f, 6.0f, make_float3(4.5f, 2.6f, 0.05f), wall_color);
+
+	// Sparse markers just in front of the wall make background correspondence
+	// obvious without creating another dense field of foreground silhouettes.
+	for (int y = -2; y <= 2; ++y) {
+		for (int x = -4; x <= 4; ++x) {
+			if ((x + y) % 2 == 0) {
+				add_world_box(scene, 0.65f * (float)x, 0.45f * (float)y, 5.88f,
+				              make_float3(0.055f, 0.055f, 0.025f), marker_color);
+			}
+		}
+	}
+
+	// Three constant-angular-size foreground targets. Their different depths
+	// should produce clearly different translational parallax while remaining
+	// similarly easy to inspect visually.
+	const std::array<float, 3> distances = {0.85f, 1.6f, 3.0f};
+	const std::array<float, 3> xs = {-0.42f, 0.0f, 0.58f};
+	const std::array<simd_float4, 3> colors = {near_color, mid_color, far_color};
+	for (size_t i = 0; i < distances.size(); ++i) {
+		const float size = comparison_target_size(distances[i], 7.0f);
+		add_world_box(scene, xs[i], -0.05f, distances[i],
+		              make_float3(size, size, size), colors[i]);
+	}
+
+	// One thin world-locked target is useful for revealing sub-pixel/edge
+	// disagreement, but unlike the old magenta cross it does not move with the
+	// head and therefore does not confound frozen-frame reprojection.
+	add_world_box(scene, 0.05f, 0.52f, 2.2f, make_float3(0.32f, 0.012f, 0.018f), thin_color);
+	add_world_box(scene, 0.05f, 0.52f, 2.2f, make_float3(0.012f, 0.32f, 0.018f), thin_color);
+
+	scene.initialized = true;
+	fprintf(stderr,
+	        "psvr2-openxr-test: minimal frozen-frame reprojection scene contains %zu world-locked boxes\n",
+	        scene.world_instances.size());
+}
+
+static void
 initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 {
+	if (g_freeze_frame) {
+		initialize_reprojection_scene(scene, head_pose);
+		return;
+	}
+
 	initialize_scene_base(scene, head_pose);
 	add_shimmer_comparison_panel(scene);
 	fprintf(stderr, "psvr2-openxr-test: controlled scene now contains %zu world-locked boxes\n",
@@ -119,7 +188,9 @@ render_views(application &app, XrTime predicted_display_time)
 		initialize_scene(app.scene, head_pose);
 	}
 	app.frame_instances = app.scene.world_instances;
-	append_head_locked_cross(app.frame_instances, head_pose);
+	if (!g_freeze_frame) {
+		append_head_locked_cross(app.frame_instances, head_pose);
+	}
 	if (app.frame_instances.size() > app.renderer.max_instances) {
 		fatal("diagnostic scene exceeded Metal instance buffer capacity");
 	}
