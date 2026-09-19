@@ -295,7 +295,8 @@ void main()
 					// Grey = same surface, magenta = refinement jumped to a
 					// materially different depth surface, blue = invalid solve.
 					if (depth_solved) {
-						float reference_z = min(initial_z_distance, max(refined_z_distance, initial_z_distance));
+						float reference_z =
+						    refined_z_distance > 0.0 ? min(initial_z_distance, refined_z_distance) : initial_z_distance;
 						float allowed_jump = max(0.05, 0.20 * reference_z);
 						bool surface_switch =
 						    refined_z_distance > 0.0 &&
