@@ -27,6 +27,7 @@ DEBUG_GET_ONCE_NUM_OPTION(depth_reprojection_debug, "XRT_COMPOSITOR_DEPTH_DEBUG"
 DEBUG_GET_ONCE_BOOL_OPTION(depth_disocclusion_fill, "XRT_COMPOSITOR_DEPTH_DISOCCLUSION_FILL", true)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_per_channel, "XRT_COMPOSITOR_DEPTH_PER_CHANNEL", false)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_occlusion_search, "XRT_COMPOSITOR_DEPTH_OCCLUSION_SEARCH", true)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_forward_visibility, "XRT_COMPOSITOR_DEPTH_FORWARD_VISIBILITY", true)
 
 /*
  *
@@ -234,6 +235,14 @@ update_compute_layer_descriptor_set(struct vk_bundle *vk,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 	        .pBufferInfo = &buffer_info,
 	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = descriptor_set,
+	        .dstBinding = visibility_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .pBufferInfo = &visibility_buffer_info,
+	    },
 	};
 
 	vk->vkUpdateDescriptorSets(            //
@@ -257,6 +266,8 @@ update_compute_shared_descriptor_set(struct vk_bundle *vk,
                                      uint32_t ubo_binding,
                                      VkBuffer ubo_buffer,
                                      VkDeviceSize ubo_size,
+                                     uint32_t visibility_binding,
+                                     VkBuffer visibility_buffer,
                                      VkDescriptorSet descriptor_set,
                                      uint32_t view_count)
 {
@@ -284,8 +295,13 @@ update_compute_shared_descriptor_set(struct vk_bundle *vk,
 	    .offset = 0,
 	    .range = ubo_size,
 	};
+	VkDescriptorBufferInfo visibility_buffer_info = {
+	    .buffer = visibility_buffer,
+	    .offset = 0,
+	    .range = VK_WHOLE_SIZE,
+	};
 
-	VkWriteDescriptorSet write_descriptor_sets[4] = {
+	VkWriteDescriptorSet write_descriptor_sets[5] = {
 	    {
 	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 	        .dstSet = descriptor_set,
@@ -458,11 +474,13 @@ dispatch_project_pipeline(struct render_compute *render,
 	    r->distortion.image_views,        //
 	    r->compute.target_binding,        //
 	    target_image_view,                //
-	    r->compute.ubo_binding,           //
-	    r->compute.distortion.ubo.buffer, //
-	    VK_WHOLE_SIZE,                    //
-	    render->shared_descriptor_set,    //
-	    render->r->view_count);           //
+	    r->compute.ubo_binding,                    //
+	    r->compute.distortion.ubo.buffer,          //
+	    VK_WHOLE_SIZE,                             //
+	    r->compute.visibility_binding,             //
+	    r->compute.depth_visibility.buffer.buffer, //
+	    render->shared_descriptor_set,             //
+	    render->r->view_count);                    //
 
 	vk->vkCmdBindPipeline(              //
 	    r->cmd,                         //
@@ -878,15 +896,132 @@ render_compute_projection_timewarp(struct render_compute *render,
 }
 
 
-static inline struct xrt_vec3
-calc_new_origin_in_source_view(const struct xrt_pose *source_pose, const struct xrt_pose *new_pose)
+static inline struct xrt_pose
+calc_target_pose_in_source_view(const struct xrt_pose *source_pose, const struct xrt_pose *target_pose)
 {
 	struct xrt_pose world_to_source;
 	math_pose_invert(source_pose, &world_to_source);
 
-	struct xrt_vec3 origin;
-	math_pose_transform_point(&world_to_source, &new_pose->position, &origin);
-	return origin;
+	struct xrt_pose target_in_source;
+	math_pose_transform(&world_to_source, target_pose, &target_in_source);
+	return target_in_source;
+}
+
+static inline float
+quat_dot(const struct xrt_quat *a, const struct xrt_quat *b)
+{
+	return a->x * b->x + a->y * b->y + a->z * b->z + a->w * b->w;
+}
+
+static void
+dispatch_depth_visibility(struct render_compute *render,
+                          VkSampler src_samplers[XRT_MAX_VIEWS],
+                          VkImageView src_image_views[XRT_MAX_VIEWS],
+                          VkSampler depth_samplers[XRT_MAX_VIEWS],
+                          VkImageView depth_image_views[XRT_MAX_VIEWS])
+{
+	struct render_resources *r = render->r;
+	struct vk_bundle *vk = vk_from_render(render);
+	struct render_compute_distortion_ubo_data *data =
+	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
+
+	if (data->depth_visibility.enabled == 0) {
+		return;
+	}
+
+	uint32_t width = data->depth_visibility.width;
+	uint32_t height = data->depth_visibility.height;
+	uint32_t view_count = data->depth_visibility.view_count;
+	VkDeviceSize active_size =
+	    (VkDeviceSize)width * (VkDeviceSize)height * (VkDeviceSize)view_count * sizeof(uint32_t);
+
+	// Positive finite float bit patterns preserve ordering, so filling with
+	// FLT_MAX bits lets atomicMin implement a frontmost target-depth z-buffer.
+	vk->vkCmdFillBuffer(r->cmd, r->compute.depth_visibility.buffer.buffer, 0, active_size, 0x7f7fffffu);
+
+	VkBufferMemoryBarrier fill_barrier = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	    .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .buffer = r->compute.depth_visibility.buffer.buffer,
+	    .offset = 0,
+	    .size = active_size,
+	};
+	vk->vkCmdPipelineBarrier(r->cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+	                         NULL, 1, &fill_barrier, 0, NULL);
+
+	VkSampler combined_src_samplers[2 * XRT_MAX_VIEWS];
+	VkImageView combined_src_image_views[2 * XRT_MAX_VIEWS];
+	for (uint32_t i = 0; i < view_count; ++i) {
+		combined_src_samplers[i] = src_samplers[i];
+		combined_src_image_views[i] = src_image_views[i];
+		combined_src_samplers[XRT_MAX_VIEWS + i] = depth_samplers[i];
+		combined_src_image_views[XRT_MAX_VIEWS + i] = depth_image_views[i];
+	}
+
+	VkDescriptorImageInfo src_image_info[2 * XRT_MAX_VIEWS];
+	for (uint32_t i = 0; i < 2 * view_count; ++i) {
+		src_image_info[i].sampler = combined_src_samplers[i];
+		src_image_info[i].imageView = combined_src_image_views[i];
+		src_image_info[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	}
+	VkDescriptorBufferInfo ubo_info = {
+	    .buffer = r->compute.distortion.ubo.buffer,
+	    .offset = 0,
+	    .range = VK_WHOLE_SIZE,
+	};
+	VkDescriptorBufferInfo visibility_info = {
+	    .buffer = r->compute.depth_visibility.buffer.buffer,
+	    .offset = 0,
+	    .range = VK_WHOLE_SIZE,
+	};
+	VkWriteDescriptorSet writes[3] = {
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = render->shared_descriptor_set,
+	        .dstBinding = r->compute.src_binding,
+	        .descriptorCount = 2 * view_count,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+	        .pImageInfo = src_image_info,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = render->shared_descriptor_set,
+	        .dstBinding = r->compute.ubo_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .pBufferInfo = &ubo_info,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = render->shared_descriptor_set,
+	        .dstBinding = r->compute.visibility_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .pBufferInfo = &visibility_info,
+	    },
+	};
+	vk->vkUpdateDescriptorSets(vk->device, ARRAY_SIZE(writes), writes, 0, NULL);
+
+	vk->vkCmdBindPipeline(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.depth_visibility.pipeline);
+	vk->vkCmdBindDescriptorSets(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.distortion.pipeline_layout, 0, 1,
+	                            &render->shared_descriptor_set, 0, NULL);
+	vk->vkCmdDispatch(r->cmd, uint_divide_and_round_up(width, 8), uint_divide_and_round_up(height, 8), view_count);
+
+	VkBufferMemoryBarrier visibility_barrier = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .buffer = r->compute.depth_visibility.buffer.buffer,
+	    .offset = 0,
+	    .size = active_size,
+	};
+	vk->vkCmdPipelineBarrier(r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+	                         NULL, 1, &visibility_barrier, 0, NULL);
 }
 
 void
@@ -932,6 +1067,21 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	data->depth_debug.padding1 = debug_get_bool_option_depth_per_channel() ? 1u : 0u;
 	data->depth_debug.padding2 = debug_get_bool_option_depth_occlusion_search() ? 1u : 0u;
 
+	uint32_t visibility_width = 0;
+	uint32_t visibility_height = 0;
+	for (uint32_t i = 0; i < render->r->view_count; ++i) {
+		visibility_width = MAX(visibility_width, views[i].w);
+		visibility_height = MAX(visibility_height, views[i].h);
+	}
+	bool visibility_fits =
+	    visibility_width <= r->compute.depth_visibility.width &&
+	    visibility_height <= r->compute.depth_visibility.height;
+	data->depth_visibility.width = visibility_width;
+	data->depth_visibility.height = visibility_height;
+	data->depth_visibility.view_count = render->r->view_count;
+	data->depth_visibility.enabled =
+	    debug_get_bool_option_depth_forward_visibility() && visibility_fits ? 1u : 0u;
+
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
 		render_calc_time_warp_matrix(
 		    &src_poses[i], &src_fovs[i], &new_poses_scanout_begin[i], &time_warp_matrix_scanout_begin[i]);
@@ -950,12 +1100,23 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 		data->projection_depth[i].max_depth = depth_data[i].max_depth;
 		data->projection_depth[i].near_z = depth_data[i].near_z;
 		data->projection_depth[i].far_z = depth_data[i].far_z;
-		data->new_origin_in_source_view_scanout_begin[i].val =
-		    calc_new_origin_in_source_view(&src_poses[i], &new_poses_scanout_begin[i]);
+		struct xrt_pose target_begin_in_source =
+		    calc_target_pose_in_source_view(&src_poses[i], &new_poses_scanout_begin[i]);
+		struct xrt_pose target_end_in_source =
+		    calc_target_pose_in_source_view(&src_poses[i], &new_poses_scanout_end[i]);
+		// Keep quaternion interpolation on the shortest arc.
+		if (quat_dot(&target_begin_in_source.orientation, &target_end_in_source.orientation) < 0.0f) {
+			target_end_in_source.orientation.x = -target_end_in_source.orientation.x;
+			target_end_in_source.orientation.y = -target_end_in_source.orientation.y;
+			target_end_in_source.orientation.z = -target_end_in_source.orientation.z;
+			target_end_in_source.orientation.w = -target_end_in_source.orientation.w;
+		}
+		data->new_origin_in_source_view_scanout_begin[i].val = target_begin_in_source.position;
 		data->new_origin_in_source_view_scanout_begin[i].padding = 0.0f;
-		data->new_origin_in_source_view_scanout_end[i].val =
-		    calc_new_origin_in_source_view(&src_poses[i], &new_poses_scanout_end[i]);
+		data->new_origin_in_source_view_scanout_end[i].val = target_end_in_source.position;
 		data->new_origin_in_source_view_scanout_end[i].padding = 0.0f;
+		data->target_to_source_orientation_scanout_begin[i] = target_begin_in_source.orientation;
+		data->target_to_source_orientation_scanout_end[i] = target_end_in_source.orientation;
 		data->has_depth[i].value = 1;
 
 #ifdef XRT_OS_OSX
@@ -966,7 +1127,8 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, depth_samplers, depth_image_views,
+	dispatch_depth_visibility(render, src_samplers, src_image_views, depth_samplers, depth_image_views);
+		dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, depth_samplers, depth_image_views,
 	                          target_image, target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
@@ -1133,11 +1295,13 @@ render_compute_clear(struct render_compute *render,
 	    r->distortion.image_views,        //
 	    r->compute.target_binding,        //
 	    target_image_view,                //
-	    r->compute.ubo_binding,           //
-	    r->compute.clear.ubo.buffer,      //
-	    VK_WHOLE_SIZE,                    // ubo_size
-	    render->shared_descriptor_set,    // descriptor_set
-	    render->r->view_count);           //
+	    r->compute.ubo_binding,                    //
+	    r->compute.clear.ubo.buffer,               //
+	    VK_WHOLE_SIZE,                             // ubo_size
+	    r->compute.visibility_binding,             //
+	    r->compute.depth_visibility.buffer.buffer, //
+	    render->shared_descriptor_set,             // descriptor_set
+	    render->r->view_count);                    //
 
 	vk->vkCmdBindPipeline(              //
 	    r->cmd,                         //
