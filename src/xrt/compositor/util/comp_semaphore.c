@@ -71,71 +71,6 @@ comp_semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
 }
 
 
-xrt_result_t
-comp_semaphore_import_metal_shared_event(struct vk_bundle *vk,
-                                         void *mtl_shared_event,
-                                         uint64_t initial_value,
-                                         struct xrt_compositor_semaphore **out_xcsem)
-{
-#ifdef VK_KHR_timeline_semaphore
-	if (vk == NULL || mtl_shared_event == NULL || out_xcsem == NULL ||
-	    !vk->features.timeline_semaphore || !vk->has_EXT_metal_objects) {
-		return XRT_ERROR_VULKAN;
-	}
-
-	*out_xcsem = NULL;
-
-	VkSemaphoreTypeCreateInfo type_info = {
-	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
-	    .pNext = NULL,
-	    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
-	    .initialValue = initial_value,
-	};
-
-	VkImportMetalSharedEventInfoEXT import_info = {
-	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_SHARED_EVENT_INFO_EXT,
-	    .pNext = &type_info,
-	    .mtlSharedEvent = (MTLSharedEvent_id)mtl_shared_event,
-	};
-
-	VkSemaphoreCreateInfo create_info = {
-	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-	    .pNext = &import_info,
-	    .flags = 0,
-	};
-
-	VkSemaphore semaphore = VK_NULL_HANDLE;
-	VkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &semaphore);
-	if (ret != VK_SUCCESS) {
-		VK_ERROR(vk, "vkCreateSemaphore importing MTLSharedEvent: %s", vk_result_string(ret));
-		return XRT_ERROR_VULKAN;
-	}
-
-	VK_NAME_SEMAPHORE(vk, semaphore, "comp_semaphore imported Metal shared-event timeline");
-
-	struct comp_semaphore *csem = U_TYPED_CALLOC(struct comp_semaphore);
-	if (csem == NULL) {
-		vk->vkDestroySemaphore(vk->device, semaphore, NULL);
-		return XRT_ERROR_ALLOCATION;
-	}
-
-	csem->base.reference.count = 1;
-	csem->base.destroy = comp_semaphore_destroy;
-	csem->base.wait = comp_semaphore_wait;
-	csem->semaphore = semaphore;
-	csem->handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
-	csem->vk = vk;
-
-	*out_xcsem = &csem->base;
-	return XRT_SUCCESS;
-#else
-	(void)vk;
-	(void)mtl_shared_event;
-	(void)initial_value;
-	(void)out_xcsem;
-	return XRT_ERROR_VULKAN;
-#endif
-}
 
 #endif
 
@@ -267,4 +202,71 @@ comp_semaphore_create_metal_shared_event(struct vk_bundle *vk,
 	return XRT_ERROR_VULKAN;
 #endif
 }
+
+xrt_result_t
+comp_semaphore_import_metal_shared_event(struct vk_bundle *vk,
+                                         void *mtl_shared_event,
+                                         uint64_t initial_value,
+                                         struct xrt_compositor_semaphore **out_xcsem)
+{
+#ifdef VK_KHR_timeline_semaphore
+	if (vk == NULL || mtl_shared_event == NULL || out_xcsem == NULL ||
+	    !vk->features.timeline_semaphore || !vk->has_EXT_metal_objects) {
+		return XRT_ERROR_VULKAN;
+	}
+
+	*out_xcsem = NULL;
+
+	VkSemaphoreTypeCreateInfo type_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+	    .pNext = NULL,
+	    .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+	    .initialValue = initial_value,
+	};
+
+	VkImportMetalSharedEventInfoEXT import_info = {
+	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_SHARED_EVENT_INFO_EXT,
+	    .pNext = &type_info,
+	    .mtlSharedEvent = (MTLSharedEvent_id)mtl_shared_event,
+	};
+
+	VkSemaphoreCreateInfo create_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+	    .pNext = &import_info,
+	    .flags = 0,
+	};
+
+	VkSemaphore semaphore = VK_NULL_HANDLE;
+	VkResult ret = vk->vkCreateSemaphore(vk->device, &create_info, NULL, &semaphore);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vkCreateSemaphore importing MTLSharedEvent: %s", vk_result_string(ret));
+		return XRT_ERROR_VULKAN;
+	}
+
+	VK_NAME_SEMAPHORE(vk, semaphore, "comp_semaphore imported Metal shared-event timeline");
+
+	struct comp_semaphore *csem = U_TYPED_CALLOC(struct comp_semaphore);
+	if (csem == NULL) {
+		vk->vkDestroySemaphore(vk->device, semaphore, NULL);
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	csem->base.reference.count = 1;
+	csem->base.destroy = comp_semaphore_destroy;
+	csem->base.wait = comp_semaphore_wait;
+	csem->semaphore = semaphore;
+	csem->handle = XRT_GRAPHICS_SYNC_HANDLE_INVALID;
+	csem->vk = vk;
+
+	*out_xcsem = &csem->base;
+	return XRT_SUCCESS;
+#else
+	(void)vk;
+	(void)mtl_shared_event;
+	(void)initial_value;
+	(void)out_xcsem;
+	return XRT_ERROR_VULKAN;
+#endif
+}
+
 #endif
