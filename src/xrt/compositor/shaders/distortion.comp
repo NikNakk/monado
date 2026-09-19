@@ -126,42 +126,22 @@ float projection_depth_to_view_z_distance(float window_depth, vec4 depth_info)
 	return inverse_distance > 1e-8 ? 1.0 / inverse_distance : 0.0;
 }
 
-vec2 depth_correct_projection_uv(float scanout_fraction,
-                                 vec2 rotational_source_uv,
-                                 uint iz)
+vec2 depth_translate_projection_uv(vec2 rotational_source_uv,
+                                  float source_z_distance,
+                                  vec3 source_origin,
+                                  uint iz)
 {
-	if (any(lessThan(rotational_source_uv, vec2(0.0))) ||
-	    any(greaterThan(rotational_source_uv, vec2(1.0)))) {
-		return rotational_source_uv;
-	}
-
-	vec2 depth_uv = fma(rotational_source_uv, ubo.depth_post_transform[iz].zw,
-	                    ubo.depth_post_transform[iz].xy);
-	float window_depth = texture(source[2 + iz], depth_uv).r;
-	float source_z_distance =
-	    projection_depth_to_view_z_distance(window_depth, ubo.projection_depth[iz]);
-	if (!(source_z_distance > 0.0)) {
-		return rotational_source_uv;
-	}
-
-	// The existing rotational timewarp has already transformed the ray into
-	// source-view orientation. Positional reprojection therefore only needs the
-	// new camera origin expressed in source-view coordinates.
-	vec3 source_origin =
-	    mix(ubo.new_origin_in_source_view_scanout_begin[iz].xyz,
-	        ubo.new_origin_in_source_view_scanout_end[iz].xyz, scanout_fraction);
-
 	vec2 tangent_extent = ubo.source_uv_to_tanangle[iz].zw;
-	if (abs(tangent_extent.x) < 1e-6 || abs(tangent_extent.y) < 1e-6) {
+	if (abs(tangent_extent.x) < 1e-6 || abs(tangent_extent.y) < 1e-6 ||
+	    !(source_z_distance > 0.0)) {
 		return rotational_source_uv;
 	}
 
 	vec2 source_tan =
 	    fma(rotational_source_uv, tangent_extent, ubo.source_uv_to_tanangle[iz].xy);
 
-	// Source-view rays are (tanX, -tanY, -1), so intersecting the plane
-	// z=-source_z_distance reduces to this scalar. This avoids any per-pixel
-	// matrix multiply on the depth path.
+	// Source-view rays are (tanX, -tanY, -1). Orientation has already been
+	// handled by rotational timewarp; only the translated camera origin remains.
 	float ray_scale = source_z_distance + source_origin.z;
 	if (!(ray_scale > 0.0)) {
 		return rotational_source_uv;
@@ -171,31 +151,48 @@ vec2 depth_correct_projection_uv(float scanout_fraction,
 	    (source_origin.x + ray_scale * source_tan.x) / source_z_distance,
 	    (-source_origin.y + ray_scale * source_tan.y) / source_z_distance);
 
-	vec2 corrected_uv =
-	    (corrected_tan - ubo.source_uv_to_tanangle[iz].xy) / tangent_extent;
+	return (corrected_tan - ubo.source_uv_to_tanangle[iz].xy) / tangent_extent;
+}
 
-	/*
-	 * A single-depth planar extrapolation is deliberately cheap, but at a
-	 * foreground silhouette it can pull that foreground surface across newly
-	 * exposed background. Only when translation moves the sample far enough to
-	 * matter, verify the destination against one additional depth fetch. A large
-	 * depth jump means we crossed a surface boundary: keep the robust
-	 * rotation-only result for that pixel instead of stretching the silhouette.
-	 */
-	// Never let positional reprojection turn missing source content into the
-	// sampler's black border. Rotation-only remains a safe fallback.
+bool depth_solve_projection(float scanout_fraction,
+                            vec2 rotational_green_uv,
+                            uint iz,
+                            out float solved_z_distance,
+                            out vec3 source_origin,
+                            out vec2 corrected_green_uv)
+{
+	solved_z_distance = 0.0;
+	source_origin = vec3(0.0);
+	corrected_green_uv = rotational_green_uv;
+
+	if (any(lessThan(rotational_green_uv, vec2(0.0))) ||
+	    any(greaterThan(rotational_green_uv, vec2(1.0)))) {
+		return false;
+	}
+
+	vec2 depth_uv = fma(rotational_green_uv, ubo.depth_post_transform[iz].zw,
+	                    ubo.depth_post_transform[iz].xy);
+	float window_depth = texture(source[2 + iz], depth_uv).r;
+	float source_z_distance =
+	    projection_depth_to_view_z_distance(window_depth, ubo.projection_depth[iz]);
+	if (!(source_z_distance > 0.0)) {
+		return false;
+	}
+
+	source_origin =
+	    mix(ubo.new_origin_in_source_view_scanout_begin[iz].xyz,
+	        ubo.new_origin_in_source_view_scanout_end[iz].xyz, scanout_fraction);
+
+	vec2 corrected_uv =
+	    depth_translate_projection_uv(rotational_green_uv, source_z_distance, source_origin, iz);
 	if (any(lessThan(corrected_uv, vec2(0.0))) ||
 	    any(greaterThan(corrected_uv, vec2(1.0)))) {
-		return rotational_source_uv;
+		return false;
 	}
 
 	/*
-	 * The first depth sample is only a fixed-point estimate: at a silhouette it
-	 * may describe the foreground while the translated ray actually reveals
-	 * background (or vice versa). Always take exactly one additional nearest
-	 * depth sample at the corrected coordinate and perform one refinement
-	 * iteration. Keeping this uniform across the image avoids a moving contour
-	 * where neighbouring pixels switch between one and two solves.
+	 * One fixed-point refinement: sample the depth surface reached by the first
+	 * translated estimate, then solve the same green ray against that surface.
 	 */
 	vec2 corrected_depth_uv =
 	    fma(corrected_uv, ubo.depth_post_transform[iz].zw, ubo.depth_post_transform[iz].xy);
@@ -203,21 +200,18 @@ vec2 depth_correct_projection_uv(float scanout_fraction,
 	float refined_z_distance =
 	    projection_depth_to_view_z_distance(refined_window_depth, ubo.projection_depth[iz]);
 	if (refined_z_distance > 0.0) {
-		float refined_ray_scale = refined_z_distance + source_origin.z;
-		if (refined_ray_scale > 0.0) {
-			vec2 refined_tan = vec2(
-			    (source_origin.x + refined_ray_scale * source_tan.x) / refined_z_distance,
-			    (-source_origin.y + refined_ray_scale * source_tan.y) / refined_z_distance);
-			vec2 refined_uv =
-			    (refined_tan - ubo.source_uv_to_tanangle[iz].xy) / tangent_extent;
-			if (all(greaterThanEqual(refined_uv, vec2(0.0))) &&
-			    all(lessThanEqual(refined_uv, vec2(1.0)))) {
-				corrected_uv = refined_uv;
-			}
+		vec2 refined_uv =
+		    depth_translate_projection_uv(rotational_green_uv, refined_z_distance, source_origin, iz);
+		if (all(greaterThanEqual(refined_uv, vec2(0.0))) &&
+		    all(lessThanEqual(refined_uv, vec2(1.0)))) {
+			corrected_uv = refined_uv;
+			source_z_distance = refined_z_distance;
 		}
 	}
 
-	return corrected_uv;
+	solved_z_distance = source_z_distance;
+	corrected_green_uv = corrected_uv;
+	return true;
 }
 
 vec2 transform_uv(vec2 uv, uint iz)
@@ -249,21 +243,41 @@ void main()
 	vec2 g_uv = use_identity_distortion ? subimage_uv : texture(distortion[iz + 2], distortion_uv).xy;
 	vec2 b_uv = use_identity_distortion ? subimage_uv : texture(distortion[iz + 4], distortion_uv).xy;
 
-	// Keep projection UVs separate from the subimage mapping. For depth layers
-	// use a single depth fetch at the green/central chromatic sample, then apply
-	// the resulting positional delta to all channels.
+	// Keep projection UVs separate from the subimage mapping. Depth is solved
+	// once on the green/central ray, but positional translation is then applied
+	// to each chromatic ray independently. Reusing one green UV delta for all
+	// channels creates coloured/shadow outlines when the RGB distortion rays
+	// diverge, especially during fore/aft translation.
 	if (do_timewarp) {
 		vec2 r_projection_uv = transform_uv_timewarp(r_uv, iz);
 		vec2 g_projection_uv = transform_uv_timewarp(g_uv, iz);
 		vec2 b_projection_uv = transform_uv_timewarp(b_uv, iz);
 
 		if (ubo.has_depth[iz].x != 0) {
-			vec2 corrected_g =
-			    depth_correct_projection_uv(subimage_uv.y, g_projection_uv, iz);
-			vec2 positional_delta = corrected_g - g_projection_uv;
-			r_projection_uv += positional_delta;
-			g_projection_uv = corrected_g;
-			b_projection_uv += positional_delta;
+			float solved_z_distance;
+			vec3 source_origin;
+			vec2 corrected_g;
+			if (depth_solve_projection(subimage_uv.y,
+			                           g_projection_uv,
+			                           iz,
+			                           solved_z_distance,
+			                           source_origin,
+			                           corrected_g)) {
+				vec2 corrected_r =
+				    depth_translate_projection_uv(r_projection_uv, solved_z_distance, source_origin, iz);
+				vec2 corrected_b =
+				    depth_translate_projection_uv(b_projection_uv, solved_z_distance, source_origin, iz);
+
+				if (all(greaterThanEqual(corrected_r, vec2(0.0))) &&
+				    all(lessThanEqual(corrected_r, vec2(1.0)))) {
+					r_projection_uv = corrected_r;
+				}
+				g_projection_uv = corrected_g;
+				if (all(greaterThanEqual(corrected_b, vec2(0.0))) &&
+				    all(lessThanEqual(corrected_b, vec2(1.0)))) {
+					b_projection_uv = corrected_b;
+				}
+			}
 		}
 
 		r_uv = transform_uv_subimage(r_projection_uv, iz);
