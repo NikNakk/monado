@@ -41,8 +41,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 
+
+DEBUG_GET_ONCE_NUM_OPTION(wine_tcp_port, "IPC_WINE_TCP_PORT", 0)
 
 /*
  *
@@ -128,6 +132,65 @@ init_listen_socket(struct ipc_server_mainloop *ml)
 	return fd;
 }
 
+static int
+init_wine_tcp_listener(struct ipc_server_mainloop *ml)
+{
+	uint64_t requested = debug_get_num_option_wine_tcp_port();
+	ml->wine_tcp_listen_socket = -1;
+	ml->wine_tcp_port = 0;
+
+	if (requested == 0) {
+		return 0;
+	}
+	if (requested > 65535) {
+		U_LOG_E("IPC_WINE_TCP_PORT must be between 1 and 65535");
+		return -1;
+	}
+
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (fd < 0) {
+		U_LOG_E("Wine TCP bridge socket() failed: %s", strerror(errno));
+		return -1;
+	}
+
+	int one = 1;
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+
+	struct sockaddr_in addr = {0};
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons((uint16_t)requested);
+	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		U_LOG_E("Could not bind Wine TCP bridge to 127.0.0.1:%llu: %s",
+		        (unsigned long long)requested,
+		        strerror(errno));
+		close(fd);
+		return -1;
+	}
+	if (listen(fd, IPC_MAX_CLIENTS) < 0) {
+		U_LOG_E("Wine TCP bridge listen() failed: %s", strerror(errno));
+		close(fd);
+		return -1;
+	}
+
+	ml->wine_tcp_listen_socket = fd;
+	ml->wine_tcp_port = (uint16_t)requested;
+	U_LOG_I("Wine OpenXR IPC bridge listening on 127.0.0.1:%u", ml->wine_tcp_port);
+	return 0;
+}
+
+static void
+handle_wine_tcp_listen(struct ipc_server *vs, struct ipc_server_mainloop *ml)
+{
+	int fd = accept(ml->wine_tcp_listen_socket, NULL, NULL);
+	if (fd < 0) {
+		U_LOG_E("Wine TCP bridge accept() failed: %s", strerror(errno));
+		return;
+	}
+	ipc_server_handle_client_connected(vs, fd);
+}
+
 static volatile sig_atomic_t got_shutdown_signal = 0;
 
 static void
@@ -195,7 +258,7 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 	IPC_TRACE_MARKER();
 	pump_appkit_events();
 
-	struct pollfd pollfds[2] = {0};
+	struct pollfd pollfds[3] = {0};
 	nfds_t nfds = 0;
 
 	if (!ml->no_stdin) {
@@ -207,6 +270,12 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 	pollfds[nfds].fd = ml->listen_socket;
 	pollfds[nfds].events = POLLIN;
 	nfds++;
+
+	if (ml->wine_tcp_listen_socket >= 0) {
+		pollfds[nfds].fd = ml->wine_tcp_listen_socket;
+		pollfds[nfds].events = POLLIN;
+		nfds++;
+	}
 
 	int ret = poll(pollfds, nfds, NO_SLEEP);
 	if (ret < 0) {
@@ -231,6 +300,12 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 				ipc_server_handle_failure(vs);
 				return;
 			}
+			if (pollfds[i].fd == ml->wine_tcp_listen_socket) {
+				U_LOG_E("Wine TCP bridge listener poll error; disabling bridge.");
+				close(ml->wine_tcp_listen_socket);
+				ml->wine_tcp_listen_socket = -1;
+				continue;
+			}
 			ipc_server_handle_shutdown_signal(vs);
 			return;
 		}
@@ -246,6 +321,8 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 
 		if (pollfds[i].fd == ml->listen_socket) {
 			handle_listen(vs, ml);
+		} else if (pollfds[i].fd == ml->wine_tcp_listen_socket) {
+			handle_wine_tcp_listen(vs, ml);
 		}
 	}
 }
@@ -260,6 +337,12 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 	ml->no_stdin = no_stdin;
 
 	int ret = init_listen_socket(ml);
+	if (ret < 0) {
+		ipc_server_mainloop_deinit(ml);
+		return ret;
+	}
+
+	ret = init_wine_tcp_listener(ml);
 	if (ret < 0) {
 		ipc_server_mainloop_deinit(ml);
 		return ret;
@@ -280,6 +363,10 @@ ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
 	if (ml->listen_socket > 0) {
 		close(ml->listen_socket);
 		ml->listen_socket = -1;
+	}
+	if (ml->wine_tcp_listen_socket >= 0) {
+		close(ml->wine_tcp_listen_socket);
+		ml->wine_tcp_listen_socket = -1;
 	}
 	if (ml->socket_filename != NULL) {
 		U_LOG_W("Preserving Apple IPC socket path %s for WiVRn/macOS port bring-up", ml->socket_filename);
