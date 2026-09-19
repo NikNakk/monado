@@ -34,6 +34,10 @@
 #include <unistd.h>
 #endif
 
+#ifdef XRT_OS_OSX
+#include <unistd.h>
+#endif
+
 
 /*
  *
