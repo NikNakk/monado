@@ -5,7 +5,7 @@ script_dir=${0:A:h}
 repo_root=${script_dir:h:h}
 wine_root=${MONADO_WINE_DXMT_ROOT:-${repo_root}/build-wine-dxmt}
 wine=${wine_root}/bin/wine-dxmt
-runtime_build=${MONADO_WINE_OPENXR_BUILD_DIR:-${repo_root}/build-wine}
+runtime_build=${MONADO_WINE_OPENXR_BUILD_DIR:-${repo_root}/build-wine-openxr}
 hello_build=${MONADO_WINE_HELLO_XR_BUILD_DIR:-${repo_root}/build-wine-hello-xr}
 port=${MONADO_WINE_TCP_PORT:-4242}
 
