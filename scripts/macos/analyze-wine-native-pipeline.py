@@ -101,6 +101,8 @@ def main() -> int:
     present_path = companion("present")
     presented_path = companion("presented")
     complete_path = companion("present_complete")
+    swapchain_path = companion("wine_swapchain")
+    pacing_path = companion("app_pacing")
     wine_path = directory / "wine.csv"
 
     submit = load(submit_path)
@@ -110,6 +112,8 @@ def main() -> int:
     present = load(present_path)
     presented = load(presented_path)
     complete = load(complete_path)
+    swapchain = load(swapchain_path)
+    pacing = load(pacing_path)
     wine = load(wine_path)
 
     print(f"Trace directory: {directory}")
@@ -123,9 +127,86 @@ def main() -> int:
         ("Present", present_path, present),
         ("Presented", presented_path, presented),
         ("Present complete", complete_path, complete),
+        ("Wine swapchain", swapchain_path, swapchain),
+        ("App pacing", pacing_path, pacing),
     ]:
         print(f"  {name:20s} {len(rows):6d} rows  {path.name}{'' if rows else ' [missing/empty]'}")
     print()
+
+    if wine:
+        print("Wine client timing")
+        for key, label in [
+            ("wait_frame_us", "xrWaitFrame"),
+            ("producer_wait_us", "DXMT signal/flush"),
+            ("ipc_commit_us", "IPC submit"),
+            ("layer_commit_total_us", "layer submit total"),
+        ]:
+            describe(label, [f(row, key) for row in wine])
+        gpu_count = sum(1 for row in wine if i(row, "gpu_sync") != 0)
+        print(f"GPU-sync Wine frames: {gpu_count}/{len(wine)}")
+        print()
+
+    if swapchain:
+        waits = [i(row, "duration_ns") / 1000.0 for row in swapchain if row.get("event") == "wait"]
+        acquires = [i(row, "duration_ns") / 1000.0 for row in swapchain if row.get("event") == "acquire"]
+        releases = [i(row, "duration_ns") / 1000.0 for row in swapchain if row.get("event") == "release"]
+        print("OpenComposite OpenXR swapchain operations")
+        describe("xrAcquireSwapchainImage native", acquires)
+        describe("xrWaitSwapchainImage native", waits)
+        describe("xrReleaseSwapchainImage native", releases)
+        for threshold_ms in (1, 4, 8, 16, 32):
+            if waits:
+                threshold_us = threshold_ms * 1000.0
+                count = sum(v >= threshold_us for v in waits)
+                print(f"swapchain waits >= {threshold_ms:2d} ms: {count:5d} ({100*count/len(waits):6.2f}%)")
+        by_sc: dict[int, list[float]] = defaultdict(list)
+        for row in swapchain:
+            if row.get("event") == "wait":
+                by_sc[i(row, "swapchain_id")].append(i(row, "duration_ns") / 1000.0)
+        for sc, vals in sorted(by_sc.items()):
+            print(f"  swapchain {sc}: waits={len(vals)} p50={percentile(vals,.50):.1f}us p95={percentile(vals,.95):.1f}us max={max(vals):.1f}us")
+        print()
+
+    if pacing:
+        pred = [row for row in pacing if row.get("event") == "predict"]
+        delivered = [row for row in pacing if row.get("event") == "delivered"]
+        gpu_done = [row for row in pacing if row.get("event") == "gpu_done"]
+
+        period_us = [i(row, "predicted_period_ns") / 1000.0 for row in pred]
+        predict_lead_us = [
+            (i(row, "predicted_display_ns") - i(row, "event_ns")) / 1000.0
+            for row in pred
+            if i(row, "predicted_display_ns") and i(row, "event_ns")
+        ]
+        submit_lead_us = [
+            (i(row, "display_time_ns") - i(row, "event_ns")) / 1000.0
+            for row in delivered
+            if i(row, "display_time_ns") and i(row, "event_ns")
+        ]
+        draw_actual_us = [i(row, "draw_actual_ns") / 1000.0 for row in gpu_done]
+        gpu_actual_us = [i(row, "gpu_actual_ns") / 1000.0 for row in gpu_done]
+        draw_est_us = [i(row, "draw_est_ns") / 1000.0 for row in pred]
+        gpu_est_us = [i(row, "gpu_est_ns") / 1000.0 for row in pred]
+        cpu_est_us = [i(row, "cpu_est_ns") / 1000.0 for row in pred]
+
+        print("Monado client pacing")
+        describe("predicted app period", period_us)
+        describe("predicted display lead", predict_lead_us)
+        describe("display lead at delivery", submit_lead_us)
+        describe("CPU estimate", cpu_est_us)
+        describe("draw estimate", draw_est_us)
+        describe("GPU estimate", gpu_est_us)
+        describe("actual Begin->End draw", draw_actual_us)
+        describe("actual delivered->GPU", gpu_actual_us)
+
+        if period_us:
+            refresh_us = 1_000_000.0 / 120.0
+            rounded_divisors: dict[int, int] = defaultdict(int)
+            for value in period_us:
+                rounded_divisors[max(1, int(round(value / refresh_us)))] += 1
+            print("Predicted-period refresh divisors:")
+            print("  " + ", ".join(f"{k}x={v}" for k, v in sorted(rounded_divisors.items())))
+        print()
 
     submit_ev = event_index(submit)
     gpu_ev = event_index(gpu)
@@ -265,6 +346,19 @@ def main() -> int:
             f"sem_wait={vals.get('semaphore_wait_us', 0):8.1f} "
             f"ready_to_latch={vals.get('ready_to_first_latch_us', 0):8.1f}"
         )
+
+    if swapchain:
+        worst_waits = sorted(
+            (
+                (i(row, "duration_ns") / 1000.0, i(row, "swapchain_id"), i(row, "image_index"))
+                for row in swapchain
+                if row.get("event") == "wait"
+            ),
+            reverse=True,
+        )[:10]
+        print("\nWorst native xrWaitSwapchainImage calls:")
+        for value, sc, image in worst_waits:
+            print(f"  swapchain={sc:3d} image={image:2d} wait={value:9.1f} us")
 
     if presented_minus_target_us:
         late = sorted(
