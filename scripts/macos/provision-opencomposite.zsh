@@ -9,11 +9,16 @@ out=${oc_dir}/openvr_api.dll
 
 mkdir -p "${oc_dir}"
 
-# Current OpenComposite's Windows CI remains AppVeyor-based. Allow a local
-# artifact or URL to be pinned explicitly; otherwise request the latest x64
-# artifact from the project's openxr branch.
+# Current OpenComposite's Windows CI remains AppVeyor-based, but the moving
+# "latest artifact" endpoint has become unreliable. Allow a local artifact or
+# URL to be pinned explicitly; otherwise try the moving openxr artifact first
+# and then a known-good x64 build-job artifact.
 source=${MONADO_OPENCOMPOSITE_DLL_SOURCE:-}
-default_url='https://ci.appveyor.com/api/projects/ZNix/openovr/artifacts/x64/openvr_api.dll?branch=openxr&job=Platform%3A+x64&pr=false'
+latest_url='https://ci.appveyor.com/api/projects/ZNix/openovr/artifacts/x64/openvr_api.dll?branch=openxr&job=Platform%3A+x64&pr=false'
+# OpenComposite build 48846091, x64 job qe2t44iw3o0550rm.
+# This build is also referenced from upstream issue #399.
+pinned_url='https://ci.appveyor.com/api/buildjobs/qe2t44iw3o0550rm/artifacts/x64/openvr_api.dll'
+resolved_source=
 
 if [[ -n ${source} && -f ${source} ]]; then
 	cp -f "${source}" "${out}"
@@ -22,12 +27,20 @@ elif [[ -n ${source} ]]; then
 	mv "${out}.partial" "${out}"
 else
 	print "Downloading current OpenComposite x64 openxr-branch artifact from AppVeyor..."
-	if ! curl --fail --location --progress-bar --output "${out}.partial" "${default_url}"; then
+	if curl --fail --location --progress-bar --output "${out}.partial" "${latest_url}"; then
+		resolved_source=${latest_url}
+	else
 		rm -f "${out}.partial"
-		print -u2 "The AppVeyor latest-artifact endpoint was unavailable."
-		print -u2 "Set MONADO_OPENCOMPOSITE_DLL_SOURCE to a local x64 openvr_api.dll"
-		print -u2 "or to a specific OpenComposite artifact URL and rerun."
-		exit 1
+		print "Latest-artifact endpoint unavailable; trying pinned OpenComposite x64 build 48846091..."
+		if curl --fail --location --progress-bar --output "${out}.partial" "${pinned_url}"; then
+			resolved_source=${pinned_url}
+		else
+			rm -f "${out}.partial"
+			print -u2 "Both OpenComposite AppVeyor artifact endpoints were unavailable."
+			print -u2 "Set MONADO_OPENCOMPOSITE_DLL_SOURCE to a local x64 openvr_api.dll"
+			print -u2 "or to a specific OpenComposite artifact URL and rerun."
+			exit 1
+		fi
 	fi
 	mv "${out}.partial" "${out}"
 fi
@@ -43,7 +56,7 @@ sha=$(shasum -a 256 "${out}" | awk '{print $1}')
 cat > "${oc_dir}/manifest.txt" <<EOF
 OpenComposite Windows x64 external artifact
 SHA-256: ${sha}
-Source: ${source:-${default_url}}
+Source: ${source:-${resolved_source}}
 Installed: ${out}
 Licence: OpenComposite GPLv3; kept external to Monado.
 EOF
