@@ -359,6 +359,7 @@ do_cs_projection_layer(const struct comp_layer *layer,
                        uint32_t cur_layer,
                        uint32_t cur_image,
                        VkSampler clamp_to_edge,
+                       VkSampler nearest_clamp_to_edge,
                        VkSampler clamp_to_border_black,
                        VkSampler src_samplers[RENDER_MAX_IMAGES_SIZE],
                        VkImageView src_image_views[RENDER_MAX_IMAGES_SIZE],
@@ -393,7 +394,7 @@ do_cs_projection_layer(const struct comp_layer *layer,
 		const struct comp_swapchain_image *d_image =
 		    get_layer_depth_image(layer, sc_array_index, dvd->sub.image_index);
 
-		src_samplers[cur_image] = clamp_to_edge; // Edge to keep depth stable at edges.
+		src_samplers[cur_image] = nearest_clamp_to_edge; // Do not interpolate across depth discontinuities.
 		src_image_views[cur_image] = get_image_view(d_image, layer_data->flags, d_array_index);
 		ubo_data->layers[cur_layer + 0].image_info.depth_image_index = cur_image++;
 		ubo_data->layers[cur_layer].image_info.has_depth = 1;
@@ -765,6 +766,7 @@ comp_render_cs_layer(struct render_compute *render,
                      bool do_timewarp)
 {
 	VkSampler clamp_to_edge = render->r->samplers.clamp_to_edge;
+	VkSampler nearest_clamp_to_edge = render->r->samplers.nearest_clamp_to_edge;
 	VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
 
 	// Not the transform of the views, but the inverse: actual view matrices.
@@ -858,6 +860,7 @@ comp_render_cs_layer(struct render_compute *render,
 			    cur_layer,                // cur_layer
 			    cur_image,                // cur_image
 			    clamp_to_edge,            // clamp_to_edge
+			    nearest_clamp_to_edge,    // nearest_clamp_to_edge
 			    clamp_to_border_black,    // clamp_to_border_black
 			    src_samplers,             // src_samplers
 			    src_image_views,          // src_image_views
