@@ -25,6 +25,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity, "XRT_COMPOSITOR
 DEBUG_GET_ONCE_BOOL_OPTION(depth_reprojection, "XRT_COMPOSITOR_DEPTH_REPROJECTION", true)
 DEBUG_GET_ONCE_NUM_OPTION(depth_reprojection_debug, "XRT_COMPOSITOR_DEPTH_DEBUG", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_disocclusion_fill, "XRT_COMPOSITOR_DEPTH_DISOCCLUSION_FILL", true)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_per_channel, "XRT_COMPOSITOR_DEPTH_PER_CHANNEL", true)
 
 /*
  *
@@ -927,7 +928,7 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	// Reuse the std140 padding lane as a compact runtime control consumed by
 	// the shader: 1 enables background-biased handling of A<->B depth cycles.
 	data->depth_debug.padding0 = debug_get_bool_option_depth_disocclusion_fill() ? 1u : 0u;
-	data->depth_debug.padding1 = 0;
+	data->depth_debug.padding1 = debug_get_bool_option_depth_per_channel() ? 1u : 0u;
 	data->depth_debug.padding2 = 0;
 
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
