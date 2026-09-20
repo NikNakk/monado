@@ -5,7 +5,6 @@
 // Wine's own IMMDevice enumeration and registry conventions rather than
 // reimplementing endpoint-ID generation on macOS.
 
-#define COBJMACROS
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <propsys.h>
@@ -85,7 +84,7 @@ int wmain(int argc, wchar_t **argv)
     if (!wcscmp(argv[1], L"restore")) {
         if (argc != 5) {
             fwprintf(stderr, L"restore requires driver, output, voice-output\n");
-            IMMDeviceEnumerator_Release(enumerator);
+            enumerator->Release();
             CoUninitialize();
             return 2;
         }
@@ -95,21 +94,21 @@ int wmain(int argc, wchar_t **argv)
         const wchar_t *voice = wcscmp(argv[4], L"-") ? argv[4] : L"";
         bool ok = write_reg_string(HKEY_CURRENT_USER, path, L"DefaultOutput", out) &&
                   write_reg_string(HKEY_CURRENT_USER, path, L"DefaultVoiceOutput", voice);
-        IMMDeviceEnumerator_Release(enumerator);
+        enumerator->Release();
         CoUninitialize();
         return ok ? 0 : 5;
     }
 
     IMMDeviceCollection *collection = nullptr;
-    hr = IMMDeviceEnumerator_EnumAudioEndpoints(enumerator, eRender, DEVICE_STATE_ACTIVE, &collection);
+    hr = enumerator->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &collection);
     if (FAILED(hr) || !collection) {
-        IMMDeviceEnumerator_Release(enumerator);
+        enumerator->Release();
         CoUninitialize();
         return 6;
     }
 
     UINT count = 0;
-    IMMDeviceCollection_GetCount(collection, &count);
+    collection->GetCount(&count);
     bool select = !wcscmp(argv[1], L"select");
     const wchar_t *match = (select && argc >= 3) ? argv[2] : nullptr;
     int result = select ? 7 : 0;
@@ -122,11 +121,11 @@ int wmain(int argc, wchar_t **argv)
         PropVariantInit(&friendly);
         PropVariantInit(&driver);
 
-        if (FAILED(IMMDeviceCollection_Item(collection, i, &device))) continue;
-        IMMDevice_GetId(device, &id);
-        if (SUCCEEDED(IMMDevice_OpenPropertyStore(device, STGM_READ, &props))) {
-            IPropertyStore_GetValue(props, DEVPKEY_Device_FriendlyName, &friendly);
-            IPropertyStore_GetValue(props, DEVPKEY_Device_Driver, &driver);
+        if (FAILED(collection->Item(i, &device))) continue;
+        device->GetId(&id);
+        if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &props))) {
+            props->GetValue(DEVPKEY_Device_FriendlyName, &friendly);
+            props->GetValue(DEVPKEY_Device_Driver, &driver);
         }
 
         const wchar_t *name = friendly.vt == VT_LPWSTR ? friendly.pwszVal : L"";
@@ -154,23 +153,23 @@ int wmain(int argc, wchar_t **argv)
                 result = 8;
             }
 
-            if (props) IPropertyStore_Release(props);
+            if (props) props->Release();
             if (id) CoTaskMemFree(id);
             PropVariantClear(&friendly);
             PropVariantClear(&driver);
-            IMMDevice_Release(device);
+            device->Release();
             break;
         }
 
-        if (props) IPropertyStore_Release(props);
+        if (props) props->Release();
         if (id) CoTaskMemFree(id);
         PropVariantClear(&friendly);
         PropVariantClear(&driver);
-        IMMDevice_Release(device);
+        device->Release();
     }
 
-    IMMDeviceCollection_Release(collection);
-    IMMDeviceEnumerator_Release(enumerator);
+    collection->Release();
+    enumerator->Release();
     CoUninitialize();
     return result;
 }
