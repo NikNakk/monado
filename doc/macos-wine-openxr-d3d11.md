@@ -332,6 +332,43 @@ The installer also writes an `opencomposite.ini` with
 `initUsingVulkan=false`, keeping OpenComposite on the D3D11-first path
 currently supported by this Wine bridge.
 
+### xrizer and Half-Life: Alyx
+
+The Win64 build from `NikNakk/xrizer` can be provisioned as an alternative
+OpenVR-to-OpenXR runtime:
+
+```sh
+scripts/macos/provision-xrizer.zsh
+scripts/macos/install-xrizer-game.zsh install \
+  build-wine-dxmt/games/Alyx/game/bin/win64/openvr_api.dll
+```
+
+Unlike the ordinary OpenComposite installation, Alyx must retain Valve's
+game-local `openvr_api.dll`: `vr.dll` imports Valve's private
+`VRControlPanel` export. The helper preserves that DLL, installs xrizer as
+`build-wine-dxmt/xrizer/bin/vrclient_x64.dll`, and registers that directory in
+the private Wine prefix's `openvrpaths.vrpath`. It also installs the Khronos
+Win64 OpenXR loader next to the game DLL.
+
+With an authenticated Windows Steam client already running in the same prefix,
+launch Alyx with:
+
+```sh
+IPC_IGNORE_VERSION=1 scripts/macos/run-wine-alyx.zsh
+```
+
+`IPC_IGNORE_VERSION=1` is needed only when the native service and Windows
+client were built from different Monado revisions.
+
+xrizer exposes one two-layer D3D11 swapchain to OpenXR. The macOS native
+transport can import array textures, but DXMT currently provides a Basalt
+IOSurface ID only for a non-array D3D11 texture. The Wine client therefore
+keeps xrizer's app-facing array swapchain, copies each layer side-by-side into
+a hidden wide IOSurface texture on release, and translates projection layer
+rectangles before sending them to native Monado. This preserves the existing
+IOSurface and presentation/pacing path rather than falling back to two
+app-facing swapchains.
+
 ## Wine/TCP pacing feedback and CAMetalDisplayLink timing
 
 The OpenComposite timing capture from 2026-09-19 exposed a positive feedback
@@ -370,4 +407,3 @@ target, so the +8.3 ms relative to `desired_present_time_ns` is expected
 deadline-to-presentation separation, not evidence that Metal missed a frame.
 The Wine timing analyzer therefore reports `target - desired/deadline`
 explicitly and labels the latter comparison accordingly.
-
