@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
-#include <mutex>
 
 namespace
 {
@@ -41,7 +40,6 @@ vr::VRTextureBounds_t g_bounds[2] = {
 };
 vr::EVRSubmitFlags g_submit_flags = vr::Submit_Default;
 vr::EColorSpace g_color_space = vr::ColorSpace_Auto;
-std::mutex g_mutex;
 
 void
 log_line(const char *message)
@@ -53,7 +51,6 @@ log_line(const char *message)
 HMODULE
 ensure_real()
 {
-    std::lock_guard<std::mutex> lock(g_mutex);
     if (g_real != nullptr) {
         return g_real;
     }
