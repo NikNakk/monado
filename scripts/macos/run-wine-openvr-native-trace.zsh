@@ -8,7 +8,7 @@ control=${native_build}/src/xrt/targets/service/monado-service-xpc-control
 service=${native_build}/src/xrt/targets/service/monado-service
 port=${MONADO_WINE_TCP_PORT:-4242}
 frames=${MONADO_OPENVR_SMOKE_FRAMES:-3600}
-displaylink_mode=${XRT_MACOS_CAMETALDISPLAYLINK_MODE:-legacy}
+displaylink_mode=${XRT_MACOS_CAMETALDISPLAYLINK_MODE:-hybrid}
 present_prelatch_us=${XRT_MACOS_PRESENT_PRELATCH_US:-2000}
 stamp=$(date +%Y%m%d-%H%M%S)
 trace_dir=${MONADO_WINE_NATIVE_TRACE_DIR:-/tmp/monado-wine-openvr-${stamp}}
@@ -106,6 +106,8 @@ XRT_NO_STDIN=1 \
 XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1 \
 XRT_MACOS_CAMETALDISPLAYLINK_MODE="${displaylink_mode}" \
 XRT_MACOS_PRESENT_PRELATCH_US="${present_prelatch_us}" \
+XRT_MACOS_CAMETALDISPLAYLINK_TRACE_PATH="${trace_dir}/cametal_probe.csv" \
+XRT_MACOS_CAMETALDISPLAYLINK_DRIVE_TRACE_PATH="${trace_dir}/cametal_drive.csv" \
 	"${service}" >"${trace_dir}/service.out.log" 2>"${trace_dir}/service.err.log" &
 service_pid=$!
 
