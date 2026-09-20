@@ -303,12 +303,24 @@ def main() -> int:
 
     present_by_system = {i(row, "frame_id", -1): row for row in present}
     presented_by_system = {i(row, "frame_id", -1): row for row in presented}
+    complete_by_system = {i(row, "frame_id", -1): row for row in complete}
+
+    system_reused: dict[int, bool] = {}
+    for row in fmap:
+        sf = i(row, "system_frame_id", -1)
+        if sf >= 0:
+            system_reused[sf] = system_reused.get(sf, False) or i(row, "reused") != 0
 
     drawable_stage_us: list[float] = []
     native_present_submit_us: list[float] = []
     presented_minus_target_us: list[float] = []
     presented_minus_desired_us: list[float] = []
     target_minus_desired_us: list[float] = []
+    commit_lead_us: list[float] = []
+    gpu_end_minus_target_us: list[float] = []
+    completion_minus_target_us: list[float] = []
+    presented_minus_gpu_end_us: list[float] = []
+    presentation_frame_metrics: dict[int, dict[str, float | bool]] = {}
     shared_event_wait_count = 0
 
     for sf in mapped_system_frames:
@@ -329,15 +341,87 @@ def main() -> int:
 
         arow = presented_by_system.get(sf)
         if arow:
-            presented_minus_target_us.append(i(arow, "presented_minus_target_ns") / 1000.0)
+            late_us = i(arow, "presented_minus_target_ns") / 1000.0
+            presented_minus_target_us.append(late_us)
             presented_minus_desired_us.append(i(arow, "presented_minus_desired_ns") / 1000.0)
+
+            metrics: dict[str, float | bool] = {
+                "presented_minus_target_us": late_us,
+                "reused": system_reused.get(sf, False),
+            }
+            if prow:
+                target_ns = i(prow, "target_output_ns")
+                after_commit_ns = i(prow, "after_commit_ns")
+                if target_ns and after_commit_ns:
+                    value = (target_ns - after_commit_ns) / 1000.0
+                    commit_lead_us.append(value)
+                    metrics["commit_lead_us"] = value
+
+            crow = complete_by_system.get(sf)
+            if crow:
+                target_ns = i(prow, "target_output_ns") if prow else 0
+                completion_ns = i(crow, "completion_handler_ns")
+                if target_ns and completion_ns:
+                    value = (completion_ns - target_ns) / 1000.0
+                    completion_minus_target_us.append(value)
+                    metrics["completion_minus_target_us"] = value
+
+                gpu_end_s = f(crow, "gpu_end_time_s")
+                presented_host_s = f(arow, "presented_time_host_s")
+                if gpu_end_s > 0.0 and presented_host_s > 0.0:
+                    # presented_minus_target is already in the monotonic domain,
+                    # but the delta is clock-domain independent. Recover the intended
+                    # CA target in host seconds and compare Metal GPU completion to it.
+                    target_host_s = presented_host_s - i(arow, "presented_minus_target_ns") / 1e9
+                    value = (gpu_end_s - target_host_s) * 1e6
+                    gpu_end_minus_target_us.append(value)
+                    metrics["gpu_end_minus_target_us"] = value
+                    value = (presented_host_s - gpu_end_s) * 1e6
+                    presented_minus_gpu_end_us.append(value)
+                    metrics["presented_minus_gpu_end_us"] = value
+
+            presentation_frame_metrics[sf] = metrics
 
     print("System compositor -> Metal presentation")
     describe("present call -> drawable", drawable_stage_us)
     describe("present call -> commit", native_present_submit_us)
     describe("target - desired/deadline", target_minus_desired_us)
+    describe("commit lead to CA target", commit_lead_us)
+    describe("Metal GPU end - CA target", gpu_end_minus_target_us)
+    describe("completion handler - target", completion_minus_target_us)
+    describe("presented - Metal GPU end", presented_minus_gpu_end_us)
     describe("presented - target", presented_minus_target_us)
     describe("presented - desired/deadline", presented_minus_desired_us)
+
+    if presentation_frame_metrics:
+        late_cutoff_us = 1000.0
+        late_frames = {sf for sf, m in presentation_frame_metrics.items()
+                       if float(m["presented_minus_target_us"]) > late_cutoff_us}
+        reused_frames = {sf for sf, m in presentation_frame_metrics.items() if bool(m["reused"])}
+        both = late_frames & reused_frames
+        print("Presentation miss / client-frame reuse correlation:")
+        print(f"  late >1ms and reused: {len(both):5d}")
+        print(f"  late >1ms, fresh:     {len(late_frames - reused_frames):5d}")
+        print(f"  on-time, reused:      {len(reused_frames - late_frames):5d}")
+        print(f"  on-time, fresh:       {len(presentation_frame_metrics) - len(late_frames | reused_frames):5d}")
+
+        def classified_values(frames: set[int], key: str) -> list[float]:
+            return [float(presentation_frame_metrics[sf][key])
+                    for sf in frames if key in presentation_frame_metrics[sf]]
+
+        if late_frames:
+            print("  late-frame timing:")
+            describe("    commit lead", classified_values(late_frames, "commit_lead_us"))
+            describe("    GPU end - target", classified_values(late_frames, "gpu_end_minus_target_us"))
+            describe("    completion - target", classified_values(late_frames, "completion_minus_target_us"))
+        on_time_frames = set(presentation_frame_metrics) - late_frames
+        if on_time_frames:
+            print("  on-time-frame timing:")
+            describe("    commit lead", classified_values(on_time_frames, "commit_lead_us"))
+            describe("    GPU end - target", classified_values(on_time_frames, "gpu_end_minus_target_us"))
+            describe("    completion - target", classified_values(on_time_frames, "completion_minus_target_us"))
+        print()
+
     if mapped_system_frames:
         print(f"Present rows using shared-event wait: {shared_event_wait_count}/{len(mapped_system_frames)}")
     for threshold_ms in (1, 4, 8):
@@ -387,7 +471,18 @@ def main() -> int:
         )[:10]
         print("\nWorst actual presentations vs target:")
         for value, frame in late:
-            print(f"  system_frame={frame:6d} presented_minus_target={value:9.1f} us")
+            metrics = presentation_frame_metrics.get(frame, {})
+            commit_lead = metrics.get("commit_lead_us")
+            gpu_end = metrics.get("gpu_end_minus_target_us")
+            completion = metrics.get("completion_minus_target_us")
+            reused = bool(metrics.get("reused", False))
+            def fmt(v: float | bool | None) -> str:
+                return "      n/a" if v is None else f"{float(v):9.1f}"
+            print(
+                f"  system_frame={frame:6d} presented_minus_target={value:9.1f} us "
+                f"reused={int(reused)} commit_lead={fmt(commit_lead)} us "
+                f"gpu_end_minus_target={fmt(gpu_end)} us completion_minus_target={fmt(completion)} us"
+            )
 
     return 0
 
