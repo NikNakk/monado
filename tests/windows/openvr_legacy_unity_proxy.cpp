@@ -40,6 +40,8 @@ vr::VRTextureBounds_t g_bounds[2] = {
 };
 vr::EVRSubmitFlags g_submit_flags = vr::Submit_Default;
 vr::EColorSpace g_color_space = vr::ColorSpace_Auto;
+bool g_submitted_left = false;
+bool g_submitted_right = false;
 
 void
 log_line(const char *message)
@@ -193,7 +195,13 @@ legacy_render_event(int event_id)
         vr::EVRCompositorError e =
             compositor->Submit(eye, &submitted, &g_bounds[index], g_submit_flags);
         texture->Release();
-        if (e != vr::VRCompositorError_None) {
+        if (e == vr::VRCompositorError_None) {
+            if (eye == vr::Eye_Left) {
+                g_submitted_left = true;
+            } else {
+                g_submitted_right = true;
+            }
+        } else {
             std::fprintf(stderr,
                          "[legacy-unity-openvr] Submit eye=%u error=%d\n",
                          index,
@@ -213,7 +221,15 @@ legacy_render_event(int event_id)
         }
         break;
     case kEventPostPresentHandoff:
-        compositor->PostPresentHandoff();
+        // Old Unity 5.x SteamVR integrations can emit this plugin event far
+        // more often than actual rendered frames. Forwarding every event to
+        // OpenComposite causes a pathological handoff storm. A handoff is
+        // meaningful only after a complete stereo frame has been submitted.
+        if (g_submitted_left && g_submitted_right) {
+            compositor->PostPresentHandoff();
+            g_submitted_left = false;
+            g_submitted_right = false;
+        }
         break;
     default:
         std::fprintf(stderr, "[legacy-unity-openvr] Unknown render event %d\n", event_id);
