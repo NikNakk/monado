@@ -19,6 +19,7 @@ out=${build_dir}/wine-hmd-audio.exe
     -std=c++17 \
     -O2 \
     -static \
+    -municode \
     -static-libgcc \
     -static-libstdc++ \
     "${repo_root}/tests/windows/wine_hmd_audio.cpp" \
