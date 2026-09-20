@@ -263,6 +263,10 @@ update_compute_shared_descriptor_set(struct vk_bundle *vk,
                                      VkDeviceSize ubo_size,
                                      uint32_t visibility_binding,
                                      VkBuffer visibility_buffer,
+                                     uint32_t donor_a_binding,
+                                     VkBuffer donor_a_buffer,
+                                     uint32_t donor_b_binding,
+                                     VkBuffer donor_b_buffer,
                                      VkDescriptorSet descriptor_set,
                                      uint32_t view_count)
 {
@@ -295,8 +299,18 @@ update_compute_shared_descriptor_set(struct vk_bundle *vk,
 	    .offset = 0,
 	    .range = VK_WHOLE_SIZE,
 	};
+	VkDescriptorBufferInfo donor_a_buffer_info = {
+	    .buffer = donor_a_buffer,
+	    .offset = 0,
+	    .range = VK_WHOLE_SIZE,
+	};
+	VkDescriptorBufferInfo donor_b_buffer_info = {
+	    .buffer = donor_b_buffer,
+	    .offset = 0,
+	    .range = VK_WHOLE_SIZE,
+	};
 
-	VkWriteDescriptorSet write_descriptor_sets[5] = {
+	VkWriteDescriptorSet write_descriptor_sets[7] = {
 	    {
 	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 	        .dstSet = descriptor_set,
@@ -336,6 +350,22 @@ update_compute_shared_descriptor_set(struct vk_bundle *vk,
 	        .descriptorCount = 1,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 	        .pBufferInfo = &visibility_buffer_info,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = descriptor_set,
+	        .dstBinding = donor_a_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .pBufferInfo = &donor_a_buffer_info,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = descriptor_set,
+	        .dstBinding = donor_b_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .pBufferInfo = &donor_b_buffer_info,
 	    },
 	};
 
@@ -480,10 +510,14 @@ dispatch_project_pipeline(struct render_compute *render,
 	    r->compute.ubo_binding,                    //
 	    r->compute.distortion.ubo.buffer,          //
 	    VK_WHOLE_SIZE,                             //
-	    r->compute.visibility_binding,             //
-	    r->compute.depth_visibility.buffer.buffer, //
-	    render->shared_descriptor_set,             //
-	    render->r->view_count);                    //
+	    r->compute.visibility_binding,                    //
+	    r->compute.depth_visibility.buffer.buffer,        //
+	    r->compute.donor_a_binding,                       //
+	    r->compute.depth_donor.buffers[0].buffer,         //
+	    r->compute.donor_b_binding,                       //
+	    r->compute.depth_donor.buffers[1].buffer,         //
+	    render->shared_descriptor_set,                    //
+	    render->r->view_count);                           //
 
 	vk->vkCmdBindPipeline(              //
 	    r->cmd,                         //
@@ -1305,10 +1339,14 @@ render_compute_clear(struct render_compute *render,
 	    r->compute.ubo_binding,                    //
 	    r->compute.clear.ubo.buffer,               //
 	    VK_WHOLE_SIZE,                             // ubo_size
-	    r->compute.visibility_binding,             //
-	    r->compute.depth_visibility.buffer.buffer, //
-	    render->shared_descriptor_set,             // descriptor_set
-	    render->r->view_count);                    //
+	    r->compute.visibility_binding,                    //
+	    r->compute.depth_visibility.buffer.buffer,        //
+	    r->compute.donor_a_binding,                       //
+	    r->compute.depth_donor.buffers[0].buffer,         //
+	    r->compute.donor_b_binding,                       //
+	    r->compute.depth_donor.buffers[1].buffer,         //
+	    render->shared_descriptor_set,                    // descriptor_set
+	    render->r->view_count);                           //
 
 	vk->vkCmdBindPipeline(              //
 	    r->cmd,                         //
