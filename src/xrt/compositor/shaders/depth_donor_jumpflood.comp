@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: BSL-1.0
+//
+// Jump-flood propagation of packed target-space donor coordinates.
+
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 4, std430) readonly buffer Visibility
+{
+	uint depth_bits[];
+} visibility;
+
+layout(set = 0, binding = 5, std430) buffer DonorA
+{
+	uint packed_xy[];
+} donor_a;
+
+layout(set = 0, binding = 6, std430) buffer DonorB
+{
+	uint packed_xy[];
+} donor_b;
+
+layout(set = 0, binding = 3, std140) uniform restrict Config
+{
+	ivec4 views[2];
+	vec4 pre_transform[2];
+	vec4 post_transform[2];
+	mat4 transform_timewarp_scanout_begin[2];
+	mat4 transform_timewarp_scanout_end[2];
+
+	vec4 depth_post_transform[2];
+	vec4 source_uv_to_tanangle[2];
+	vec4 projection_depth[2];
+	vec4 new_origin_in_source_view_scanout_begin[2];
+	vec4 new_origin_in_source_view_scanout_end[2];
+	vec4 target_to_source_orientation_scanout_begin[2];
+	vec4 target_to_source_orientation_scanout_end[2];
+	uvec4 has_depth[2];
+	uvec4 depth_debug;
+	uvec4 depth_visibility;
+	uvec4 depth_donor;
+} ubo;
+
+layout(push_constant) uniform Push
+{
+	uint step;
+	uint parity; // 0: A->B, 1: B->A
+} pc;
+
+const uint INVALID_DONOR = 0xffffffffu;
+
+uvec2 unpack_xy(uint packed)
+{
+	return uvec2(packed & 0xffffu, packed >> 16);
+}
+
+uint load_donor(uint index)
+{
+	return pc.parity == 0u ? donor_a.packed_xy[index] : donor_b.packed_xy[index];
+}
+
+void store_donor(uint index, uint value)
+{
+	if (pc.parity == 0u) {
+		donor_b.packed_xy[index] = value;
+	} else {
+		donor_a.packed_xy[index] = value;
+	}
+}
+
+float donor_depth(uint base, uint width, uvec2 donor)
+{
+	uint encoded = visibility.depth_bits[base + donor.y * width + donor.x];
+	if (encoded == 0x7f7fffffu) {
+		return 0.0;
+	}
+	return uintBitsToFloat(encoded);
+}
+
+void consider_candidate(uint packed,
+                        ivec2 pixel,
+                        uint base,
+                        uint width,
+                        uint height,
+                        inout uint best_packed,
+                        inout uint best_distance2,
+                        inout float best_depth)
+{
+	if (packed == INVALID_DONOR) {
+		return;
+	}
+	uvec2 donor = unpack_xy(packed);
+	if (donor.x >= width || donor.y >= height) {
+		return;
+	}
+
+	ivec2 delta = ivec2(donor) - pixel;
+	uint distance2 = uint(delta.x * delta.x + delta.y * delta.y);
+	float z = donor_depth(base, width, donor);
+	if (!(z > 0.0)) {
+		return;
+	}
+
+	// Nearest donor is primary. At effectively tied distances, prefer the
+	// farther surface so a disocclusion is biased towards background.
+	bool better = best_packed == INVALID_DONOR || distance2 < best_distance2;
+	if (!better && distance2 == best_distance2 && z > best_depth) {
+		better = true;
+	}
+	if (better) {
+		best_packed = packed;
+		best_distance2 = distance2;
+		best_depth = z;
+	}
+}
+
+void main()
+{
+	uint x = gl_GlobalInvocationID.x;
+	uint y = gl_GlobalInvocationID.y;
+	uint view = gl_GlobalInvocationID.z;
+	uint width = ubo.depth_visibility.x;
+	uint height = ubo.depth_visibility.y;
+	uint view_count = ubo.depth_visibility.z;
+
+	if (view >= view_count || x >= width || y >= height) {
+		return;
+	}
+
+	uint base = view * width * height;
+	uint index = base + y * width + x;
+	ivec2 pixel = ivec2(int(x), int(y));
+	ivec2 max_pixel = ivec2(int(width) - 1, int(height) - 1);
+
+	uint best_packed = load_donor(index);
+	uint best_distance2 = 0xffffffffu;
+	float best_depth = 0.0;
+	if (best_packed != INVALID_DONOR) {
+		uvec2 donor = unpack_xy(best_packed);
+		ivec2 delta = ivec2(donor) - pixel;
+		best_distance2 = uint(delta.x * delta.x + delta.y * delta.y);
+		best_depth = donor_depth(base, width, donor);
+	}
+
+	const ivec2 directions[8] = ivec2[8](
+	    ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
+	    ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1));
+
+	int step = int(pc.step);
+	for (int d = 0; d < 8; ++d) {
+		ivec2 p = pixel + directions[d] * step;
+		if (any(lessThan(p, ivec2(0))) || any(greaterThan(p, max_pixel))) {
+			continue;
+		}
+		uint neighbour_index = base + uint(p.y) * width + uint(p.x);
+		consider_candidate(load_donor(neighbour_index),
+		                   pixel,
+		                   base,
+		                   width,
+		                   height,
+		                   best_packed,
+		                   best_distance2,
+		                   best_depth);
+	}
+
+	store_donor(index, best_packed);
+}
