@@ -9,7 +9,7 @@
 #include <mmdeviceapi.h>
 #include <propsys.h>
 #include <propkey.h>
-#include <devpkey.h>
+#include <functiondiscoverykeys_devpkey.h>
 
 #include <cwchar>
 #include <cstdio>
