@@ -79,6 +79,89 @@ if command -v lsof >/dev/null 2>&1 && \
 	exit 1
 fi
 
+audio_routed=0
+audio_previous_id=
+audio_previous_name=
+audio_headset_name=
+if [[ ${MONADO_WINE_ROUTE_PSVR2_AUDIO:-1} != 0 ]]; then
+	audio_source="${script_dir}/psvr2-audio-route.swift"
+	audio_helper="${run_dir}/psvr2-audio-route"
+	if [[ -f "${audio_source}" ]]; then
+		if [[ ! -x "${audio_helper}" || "${audio_source}" -nt "${audio_helper}" ]]; then
+			if command -v xcrun >/dev/null 2>&1; then
+				xcrun swiftc -O -framework CoreAudio "${audio_source}" -o "${audio_helper}"
+			else
+				print -u2 "Warning: xcrun not found; leaving macOS audio output unchanged."
+			fi
+		fi
+
+		if [[ -x "${audio_helper}" ]]; then
+			previous=$("${audio_helper}" get-default 2>/dev/null || true)
+			if [[ -n "${previous}" ]]; then
+				audio_previous_id=${previous%%print "Launching OpenVR game through OpenComposite -> Monado OpenXR"
+print "  game:    ${game}"
+print "  runtime: ${runtime_dll}"
+print "  service: 127.0.0.1:${port}"
+print "  trace:   ${trace_host}"
+if (( audio_routed )); then
+	print "  audio:   ${audio_headset_name} (temporary macOS default)"
+	if [[ -n "${audio_previous_name}" ]]; then
+		print "           restore on exit: ${audio_previous_name}"
+	fi
+else
+	print "  audio:   current macOS default (PS VR2 auto-route unavailable or disabled)"
+fi
+print ""
+
+cd "${game:h}"
+MONADO_WINE_TCP_PORT="${port}" \
+MONADO_WINE_TIMING_TRACE="${trace_windows}" \
+DXMT_BASALT_IOSURFACE=1 \
+	"${wine}" "${game}" "$@"
+\t'*}
+				audio_previous_name=${previous#*print "Launching OpenVR game through OpenComposite -> Monado OpenXR"
+print "  game:    ${game}"
+print "  runtime: ${runtime_dll}"
+print "  service: 127.0.0.1:${port}"
+print "  trace:   ${trace_host}"
+print ""
+
+cd "${game:h}"
+MONADO_WINE_TCP_PORT="${port}" \
+MONADO_WINE_TIMING_TRACE="${trace_windows}" \
+DXMT_BASALT_IOSURFACE=1 \
+	"${wine}" "${game}" "$@"
+\t'}
+			fi
+			routed=$("${audio_helper}" route-psvr2 2>/dev/null || true)
+			if [[ -n "${routed}" ]]; then
+				audio_routed=1
+				audio_headset_name=${routed#*print "Launching OpenVR game through OpenComposite -> Monado OpenXR"
+print "  game:    ${game}"
+print "  runtime: ${runtime_dll}"
+print "  service: 127.0.0.1:${port}"
+print "  trace:   ${trace_host}"
+print ""
+
+cd "${game:h}"
+MONADO_WINE_TCP_PORT="${port}" \
+MONADO_WINE_TIMING_TRACE="${trace_windows}" \
+DXMT_BASALT_IOSURFACE=1 \
+	"${wine}" "${game}" "$@"
+\t'}
+			fi
+		fi
+	fi
+fi
+
+restore_audio()
+{
+	if (( audio_routed )) && [[ -n "${audio_previous_id}" ]] && [[ -x "${audio_helper:-}" ]]; then
+		"${audio_helper}" set-default "${audio_previous_id}" >/dev/null 2>&1 || true
+	fi
+}
+trap restore_audio EXIT INT TERM
+
 print "Launching OpenVR game through OpenComposite -> Monado OpenXR"
 print "  game:    ${game}"
 print "  runtime: ${runtime_dll}"
