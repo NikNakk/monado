@@ -238,11 +238,13 @@ create_compute_distortion_descriptor_set_layout(struct vk_bundle *vk,
                                                 uint32_t target_binding,
                                                 uint32_t ubo_binding,
                                                 uint32_t visibility_binding,
+                                                uint32_t donor_a_binding,
+                                                uint32_t donor_b_binding,
                                                 VkDescriptorSetLayout *out_descriptor_set_layout)
 {
 	VkResult ret;
 
-	VkDescriptorSetLayoutBinding set_layout_bindings[5] = {
+	VkDescriptorSetLayoutBinding set_layout_bindings[7] = {
 	    {
 	        .binding = src_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -272,6 +274,18 @@ create_compute_distortion_descriptor_set_layout(struct vk_bundle *vk,
 	    },
 	    {
 	        .binding = visibility_binding,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+	    },
+	    {
+	        .binding = donor_a_binding,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+	    },
+	    {
+	        .binding = donor_b_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -555,6 +569,8 @@ render_resources_init(struct render_resources *r,
 	r->compute.target_binding = 2;
 	r->compute.ubo_binding = 3;
 	r->compute.visibility_binding = 4;
+	r->compute.donor_a_binding = 5;
+	r->compute.donor_b_binding = 6;
 
 	r->compute.layer.image_array_size =
 	    MIN(vk->limits.max_per_stage_descriptor_sampled_images, RENDER_MAX_IMAGES_SIZE);
@@ -890,7 +906,7 @@ render_resources_init(struct render_resources *r,
 	    // layer images
 	    .sampler_per_descriptor_count = r->compute.layer.image_array_size + RENDER_DISTORTION_IMAGES_COUNT(r),
 	    .storage_image_per_descriptor_count = 1,
-	    .storage_buffer_per_descriptor_count = 1,
+	    .storage_buffer_per_descriptor_count = 3,
 	    .descriptor_count = compute_descriptor_count,
 	    .freeable = false,
 	};
@@ -992,6 +1008,8 @@ render_resources_init(struct render_resources *r,
 	    r->compute.target_binding,                         // target_binding,
 	    r->compute.ubo_binding,                            // ubo_binding,
 	    r->compute.visibility_binding,                     // visibility_binding,
+	    r->compute.donor_a_binding,                        // donor_a_binding,
+	    r->compute.donor_b_binding,                        // donor_b_binding,
 	    &r->compute.distortion.descriptor_set_layout);     // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_compute_distortion_descriptor_set_layout", false);
 
