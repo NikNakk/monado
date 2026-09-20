@@ -35,9 +35,9 @@ install)
     if [[ ! -f "${oc_dll}" ]]; then
         "${script_dir}/provision-opencomposite.zsh"
     fi
-    if [[ ! -f "${proxy}" ]]; then
-        "${script_dir}/build-wine-openvr-legacy-unity-proxy.zsh"
-    fi
+    # This compatibility target is experimental: rebuild on every install so
+    # source updates cannot leave a stale proxy DLL in the build directory.
+    "${script_dir}/build-wine-openvr-legacy-unity-proxy.zsh"
     if [[ ! -f "${target}" ]]; then
         print -u2 "Game OpenVR DLL not found: ${target}"
         exit 1
