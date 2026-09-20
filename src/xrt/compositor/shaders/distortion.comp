@@ -701,34 +701,47 @@ void main()
 				vec2 candidate_b =
 				    depth_source_uv_from_target_z(b_target_uv, target_z, subimage_uv.y, iz, expected_b_z);
 
+				// Never fall back to the stale rotation-only foreground when the
+				// forward visibility map has selected a surface. Source-depth
+				// validation may refine the coordinates, but failure to refine does
+				// not resurrect the old card position.
+				g_projection_uv = candidate_g;
+				r_projection_uv = candidate_r;
+				b_projection_uv = candidate_b;
+
 				vec2 snapped_g;
 				bool green_matches =
 				    depth_snap_source_uv_to_surface(candidate_g, expected_g_z, iz, snapped_g);
 				if (green_matches) {
 					g_projection_uv = snapped_g;
-					r_projection_uv = candidate_r;
-					b_projection_uv = candidate_b;
-
-					// A chromatic ray is allowed its optical offset only while it
-					// remains on the same geometric surface. At a depth edge, locking
-					// the offending channel to green prevents a neighbouring cyan/wall
-					// surface leaking through an orange silhouette.
-					if (ubo.has_depth[iz].y != 0u) {
-						vec2 snapped_r;
-						vec2 snapped_b;
-						if (!depth_snap_source_uv_to_surface(candidate_r, expected_r_z, iz, snapped_r)) {
-							r_projection_uv = snapped_g;
-						} else {
-							r_projection_uv = snapped_r;
-						}
-						if (!depth_snap_source_uv_to_surface(candidate_b, expected_b_z, iz, snapped_b)) {
-							b_projection_uv = snapped_g;
-						} else {
-							b_projection_uv = snapped_b;
-						}
-					}
-
 				}
+
+				// A chromatic ray is allowed its optical offset only while it
+				// remains on the same geometric surface. At a depth edge, locking
+				// the offending channel to green prevents a neighbouring cyan/wall
+				// surface leaking through an orange silhouette.
+				if (ubo.has_depth[iz].y != 0u) {
+					vec2 snapped_r;
+					vec2 snapped_b;
+					if (depth_snap_source_uv_to_surface(candidate_r, expected_r_z, iz, snapped_r)) {
+						r_projection_uv = snapped_r;
+					} else {
+						r_projection_uv = g_projection_uv;
+					}
+					if (depth_snap_source_uv_to_surface(candidate_b, expected_b_z, iz, snapped_b)) {
+						b_projection_uv = snapped_b;
+					} else {
+						b_projection_uv = g_projection_uv;
+					}
+				}
+			} else {
+				// No forward-visible depth even after local background-biased hole
+				// fill: sample outside the source image instead of retaining stale
+				// foreground at its old position. This should be rare and makes
+				// missing data obvious without creating a duplicate object.
+				r_projection_uv = vec2(-1.0);
+				g_projection_uv = vec2(-1.0);
+				b_projection_uv = vec2(-1.0);
 			}
 		}
 
@@ -834,10 +847,7 @@ void main()
 			}
 		}
 
-		// If forward visibility was enabled but no trustworthy correspondence
-		// could be reconstructed, the UVs remain at the already-computed
-		// rotation-only positions. This is deliberately conservative: a small
-		// stale patch is preferable to inventing a duplicate foreground surface.
+		// Forward depth never falls back to stale rotation-only foreground.
 
 		r_uv = transform_uv_subimage(r_projection_uv, iz);
 		g_uv = transform_uv_subimage(g_projection_uv, iz);
