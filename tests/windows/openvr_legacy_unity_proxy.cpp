@@ -281,7 +281,7 @@ UnityHooks_EventWriteString(const wchar_t *event)
 extern "C" __declspec(dllexport) ret name args { \
     using Fn = ret (__cdecl *) args; \
     Fn fn = real_proc<Fn>(#name); \
-    if (fn == nullptr) return ret(); \
+    if (fn == nullptr) return {}; \
     return fn callargs; \
 }
 
