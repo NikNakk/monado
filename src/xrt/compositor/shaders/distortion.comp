@@ -471,9 +471,13 @@ bool depth_visibility_decode(uint encoded, out float target_z)
 
 bool depth_visibility_target_z(vec2 target_projection_uv,
                                uint iz,
-                               out float target_z)
+                               out float target_z,
+                               out vec2 donor_target_uv,
+                               out bool hole_filled)
 {
 	target_z = 0.0;
+	donor_target_uv = target_projection_uv;
+	hole_filled = false;
 	if (ubo.depth_visibility.w == 0u ||
 	    any(lessThan(target_projection_uv, vec2(0.0))) ||
 	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
@@ -491,6 +495,7 @@ bool depth_visibility_target_z(vec2 target_projection_uv,
 	uint base = iz * width * height;
 	uint encoded = visibility.depth_bits[base + pixel.y * width + pixel.x];
 	if (depth_visibility_decode(encoded, target_z)) {
+		donor_target_uv = (vec2(pixel) + vec2(0.5)) / vec2(width, height);
 		return true;
 	}
 
@@ -514,6 +519,7 @@ bool depth_visibility_target_z(vec2 target_projection_uv,
 
 	for (int r = 0; r < 9; ++r) {
 		float ring_farthest_z = 0.0;
+		ivec2 ring_donor_pixel = ivec2(pixel);
 		bool ring_found = false;
 		for (int d = 0; d < 8; ++d) {
 			ivec2 p = clamp(ivec2(pixel) + directions[d] * radii[r], ivec2(0), max_pixel);
@@ -523,11 +529,14 @@ bool depth_visibility_target_z(vec2 target_projection_uv,
 			if (depth_visibility_decode(neighbour_encoded, neighbour_z) &&
 			    (!ring_found || neighbour_z > ring_farthest_z)) {
 				ring_farthest_z = neighbour_z;
+				ring_donor_pixel = p;
 				ring_found = true;
 			}
 		}
 		if (ring_found) {
 			target_z = ring_farthest_z;
+			donor_target_uv = (vec2(ring_donor_pixel) + vec2(0.5)) / vec2(width, height);
+			hole_filled = true;
 			return true;
 		}
 	}
@@ -699,48 +708,71 @@ void main()
 
 		if (forward_enabled) {
 			float target_z;
-			if (depth_visibility_target_z(g_target_uv, iz, target_z)) {
-				float expected_r_z;
-				float expected_g_z;
-				float expected_b_z;
-				vec2 candidate_r =
-				    depth_source_uv_from_target_z(r_target_uv, target_z, subimage_uv.y, iz, expected_r_z);
-				vec2 candidate_g =
-				    depth_source_uv_from_target_z(g_target_uv, target_z, subimage_uv.y, iz, expected_g_z);
-				vec2 candidate_b =
-				    depth_source_uv_from_target_z(b_target_uv, target_z, subimage_uv.y, iz, expected_b_z);
-
-				// Never fall back to the stale rotation-only foreground when the
-				// forward visibility map has selected a surface. Source-depth
-				// validation may refine the coordinates, but failure to refine does
-				// not resurrect the old card position.
-				g_projection_uv = candidate_g;
-				r_projection_uv = candidate_r;
-				b_projection_uv = candidate_b;
-
-				vec2 snapped_g;
-				bool green_matches =
-				    depth_snap_source_uv_to_surface(candidate_g, expected_g_z, iz, snapped_g);
-				if (green_matches) {
-					g_projection_uv = snapped_g;
-				}
-
-				// A chromatic ray is allowed its optical offset only while it
-				// remains on the same geometric surface. At a depth edge, locking
-				// the offending channel to green prevents a neighbouring cyan/wall
-				// surface leaking through an orange silhouette.
-				if (ubo.has_depth[iz].y != 0u) {
-					vec2 snapped_r;
-					vec2 snapped_b;
-					if (depth_snap_source_uv_to_surface(candidate_r, expected_r_z, iz, snapped_r)) {
-						r_projection_uv = snapped_r;
-					} else {
-						r_projection_uv = g_projection_uv;
+			vec2 donor_target_uv;
+			bool hole_filled;
+			if (depth_visibility_target_z(g_target_uv, iz, target_z, donor_target_uv, hole_filled)) {
+				if (hole_filled) {
+					/*
+					 * True disocclusion: the requested background texel was hidden
+					 * in the submitted frame, so geometric back-projection cannot
+					 * recover its colour. Inpaint from the visible background donor
+					 * that supplied the target depth instead of casting the hole ray
+					 * through the old foreground footprint. Sampling one donor UV for
+					 * all channels also avoids chromatic/card-shaped contours in the
+					 * synthesized region.
+					 */
+					float donor_source_z;
+					vec2 donor_source_uv =
+					    depth_source_uv_from_target_z(donor_target_uv,
+					                                  target_z,
+					                                  donor_target_uv.y,
+					                                  iz,
+					                                  donor_source_z);
+					vec2 snapped_donor;
+					if (depth_snap_source_uv_to_surface(donor_source_uv,
+					                                    donor_source_z,
+					                                    iz,
+					                                    snapped_donor)) {
+						donor_source_uv = snapped_donor;
 					}
-					if (depth_snap_source_uv_to_surface(candidate_b, expected_b_z, iz, snapped_b)) {
-						b_projection_uv = snapped_b;
-					} else {
-						b_projection_uv = g_projection_uv;
+					r_projection_uv = donor_source_uv;
+					g_projection_uv = donor_source_uv;
+					b_projection_uv = donor_source_uv;
+				} else {
+					float expected_r_z;
+					float expected_g_z;
+					float expected_b_z;
+					vec2 candidate_r =
+					    depth_source_uv_from_target_z(r_target_uv, target_z, subimage_uv.y, iz, expected_r_z);
+					vec2 candidate_g =
+					    depth_source_uv_from_target_z(g_target_uv, target_z, subimage_uv.y, iz, expected_g_z);
+					vec2 candidate_b =
+					    depth_source_uv_from_target_z(b_target_uv, target_z, subimage_uv.y, iz, expected_b_z);
+
+					g_projection_uv = candidate_g;
+					r_projection_uv = candidate_r;
+					b_projection_uv = candidate_b;
+
+					vec2 snapped_g;
+					bool green_matches =
+					    depth_snap_source_uv_to_surface(candidate_g, expected_g_z, iz, snapped_g);
+					if (green_matches) {
+						g_projection_uv = snapped_g;
+					}
+
+					if (ubo.has_depth[iz].y != 0u) {
+						vec2 snapped_r;
+						vec2 snapped_b;
+						if (depth_snap_source_uv_to_surface(candidate_r, expected_r_z, iz, snapped_r)) {
+							r_projection_uv = snapped_r;
+						} else {
+							r_projection_uv = g_projection_uv;
+						}
+						if (depth_snap_source_uv_to_surface(candidate_b, expected_b_z, iz, snapped_b)) {
+							b_projection_uv = snapped_b;
+						} else {
+							b_projection_uv = g_projection_uv;
+						}
 					}
 				}
 			} else {
