@@ -58,6 +58,19 @@ install)
 
     cp -f "${oc_dll}" "${real_oc}"
     cp -f "${proxy}" "${target}"
+
+    objdump_cmd=${OBJDUMP_MINGW:-$(command -v x86_64-w64-mingw32-objdump || true)}
+    if [[ -n "${objdump_cmd}" ]]; then
+        exports=$("${objdump_cmd}" -p "${target}" 2>/dev/null || true)
+        if [[ "${exports}" != *"UnityHooks_SetSubmitParams"* ||
+              "${exports}" != *"UnityHooks_GetRenderEventFunc"* ||
+              "${exports}" != *"UnitySetGraphicsDevice"* ]]; then
+            print -u2 "Installed openvr_api.dll is not the legacy Unity compatibility proxy:"
+            print -u2 "  ${target}"
+            print -u2 "Expected UnityHooks_SetSubmitParams, UnityHooks_GetRenderEventFunc and UnitySetGraphicsDevice exports."
+            exit 1
+        fi
+    fi
     cat > "${config}" <<'EOF'
 ; Managed by Monado Wine/OpenComposite legacy Unity helper.
 initUsingVulkan=false
