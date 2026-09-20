@@ -61,6 +61,9 @@ struct client_d3d11_swapchain
 	struct xrt_swapchain_d3d11 base;
 	struct xrt_swapchain *native;
 	struct client_d3d11_compositor *c;
+	ID3D11Texture2D *transport_images[XRT_MAX_SWAPCHAIN_IMAGES];
+	uint32_t array_size;
+	uint32_t layer_width;
 };
 
 
@@ -212,6 +215,24 @@ swapchain_barrier(struct xrt_swapchain *xsc, enum xrt_barrier_direction directio
 static xrt_result_t
 swapchain_release(struct xrt_swapchain *xsc, uint32_t index)
 {
+	struct client_d3d11_swapchain *sc = as_swapchain(xsc);
+	if (sc->array_size > 1) {
+		if (index >= sc->base.base.image_count || sc->base.images[index] == NULL ||
+		    sc->transport_images[index] == NULL) {
+			return XRT_ERROR_INVALID_ARGUMENT;
+		}
+
+		for (uint32_t layer = 0; layer < sc->array_size; ++layer) {
+			sc->c->context->CopySubresourceRegion(sc->transport_images[index],
+			                                      0,
+			                                      layer * sc->layer_width,
+			                                      0,
+			                                      0,
+			                                      sc->base.images[index],
+			                                      layer,
+			                                      NULL);
+		}
+	}
 	return xrt_swapchain_release_image(native_swapchain(xsc), index);
 }
 
@@ -220,6 +241,10 @@ swapchain_destroy(struct xrt_swapchain *xsc)
 {
 	struct client_d3d11_swapchain *sc = as_swapchain(xsc);
 	for (uint32_t i = 0; i < sc->base.base.image_count; ++i) {
+		if (sc->transport_images[i] != NULL) {
+			sc->transport_images[i]->Release();
+			sc->transport_images[i] = NULL;
+		}
 		if (sc->base.images[i] != NULL) {
 			sc->base.images[i]->Release();
 			sc->base.images[i] = NULL;
@@ -227,6 +252,22 @@ swapchain_destroy(struct xrt_swapchain *xsc)
 	}
 	xrt_swapchain_reference(&sc->native, NULL);
 	free(sc);
+}
+
+static bool
+translate_native_swapchain_info(const struct xrt_swapchain_create_info *info,
+                                struct xrt_swapchain_create_info *out_info)
+{
+	*out_info = *info;
+	if (info->array_size <= 1) {
+		return true;
+	}
+	if (info->width > UINT32_MAX / info->array_size) {
+		return false;
+	}
+	out_info->width = info->width * info->array_size;
+	out_info->array_size = 1;
+	return true;
 }
 
 static xrt_result_t
@@ -238,7 +279,10 @@ get_swapchain_create_properties(struct xrt_compositor *xc,
 	if (vk_format == 0) {
 		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	}
-	struct xrt_swapchain_create_info native_info = *info;
+	struct xrt_swapchain_create_info native_info = {};
+	if (!translate_native_swapchain_info(info, &native_info)) {
+		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+	}
 	native_info.format = vk_format;
 	return xrt_comp_get_swapchain_create_properties(native_compositor(xc), &native_info, out);
 }
@@ -268,8 +312,8 @@ create_swapchain(struct xrt_compositor *xc,
 	if (info == NULL || out_xsc == NULL) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
-	if (info->array_size != 1 || info->face_count != 1 || info->mip_count != 1 || info->sample_count != 1) {
-		U_LOG_W("Wine D3D11 bridge currently supports simple 2D swapchains only");
+	if (info->array_size == 0 || info->face_count != 1 || info->mip_count != 1 || info->sample_count != 1) {
+		U_LOG_W("Wine D3D11 bridge requires a non-empty 2D, single-mip, single-sample swapchain");
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
 	if ((info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
@@ -281,7 +325,10 @@ create_swapchain(struct xrt_compositor *xc,
 		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	}
 
-	struct xrt_swapchain_create_info native_info = *info;
+	struct xrt_swapchain_create_info native_info = {};
+	if (!translate_native_swapchain_info(info, &native_info)) {
+		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+	}
 	native_info.format = vk_format;
 	struct xrt_swapchain_create_properties props = {0};
 	xrt_result_t xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, &native_info, &props);
@@ -299,6 +346,9 @@ create_swapchain(struct xrt_compositor *xc,
 		return XRT_ERROR_ALLOCATION;
 	}
 	sc->c = c;
+	sc->array_size = info->array_size;
+	sc->layer_width = info->width;
+	sc->base.base.image_count = props.image_count;
 
 	uint32_t ids[XRT_MAX_SWAPCHAIN_IMAGES] = {0};
 	for (uint32_t i = 0; i < props.image_count; ++i) {
@@ -306,12 +356,12 @@ create_swapchain(struct xrt_compositor *xc,
 		desc.Width = info->width;
 		desc.Height = info->height;
 		desc.MipLevels = 1;
-		desc.ArraySize = 1;
+		desc.ArraySize = info->array_size;
 		desc.Format = (DXGI_FORMAT)info->format;
 		desc.SampleDesc.Count = 1;
 		desc.Usage = D3D11_USAGE_DEFAULT;
 		desc.BindFlags = usage_to_bind_flags(native_info.bits);
-		desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+		desc.MiscFlags = info->array_size == 1 ? D3D11_RESOURCE_MISC_SHARED_NTHANDLE : 0;
 
 		ID3D11Texture2D *texture = NULL;
 		HRESULT hr = c->device->CreateTexture2D(&desc, NULL, &texture);
@@ -321,12 +371,37 @@ create_swapchain(struct xrt_compositor *xc,
 			return XRT_ERROR_D3D11;
 		}
 
+		ID3D11Texture2D *transport = texture;
+		if (info->array_size > 1) {
+			D3D11_TEXTURE2D_DESC transport_desc = desc;
+			transport_desc.Width = native_info.width;
+			transport_desc.ArraySize = 1;
+			transport_desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+			hr = c->device->CreateTexture2D(&transport_desc, NULL, &transport);
+			if (FAILED(hr) || transport == NULL) {
+				U_LOG_E("Wine D3D11 transport texture creation failed image=%u hr=0x%08lx",
+				        i,
+				        (unsigned long)hr);
+				texture->Release();
+				swapchain_destroy(&sc->base.base);
+				return XRT_ERROR_D3D11;
+			}
+			sc->transport_images[i] = transport;
+		}
+
 		UINT size = sizeof(ids[i]);
-		hr = texture->GetPrivateData(kBasaltIOSurfaceIdGuid, &size, &ids[i]);
+		hr = transport->GetPrivateData(kBasaltIOSurfaceIdGuid, &size, &ids[i]);
 		if (FAILED(hr) || size != sizeof(ids[i]) || ids[i] == 0) {
-			U_LOG_E("DXMT texture did not expose a Basalt IOSurface ID: image=%u hr=0x%08lx size=%u id=%u",
-			        i, (unsigned long)hr, size, ids[i]);
+			U_LOG_E("DXMT transport texture did not expose a Basalt IOSurface ID: image=%u hr=0x%08lx size=%u id=%u",
+			        i,
+			        (unsigned long)hr,
+			        size,
+			        ids[i]);
 			texture->Release();
+			if (info->array_size > 1) {
+				transport->Release();
+				sc->transport_images[i] = NULL;
+			}
 			swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_D3D11;
 		}
@@ -347,10 +422,16 @@ create_swapchain(struct xrt_compositor *xc,
 	sc->base.base.barrier_image = swapchain_barrier;
 	sc->base.base.release_image = swapchain_release;
 	sc->base.base.reference.count = 1;
-	sc->base.base.image_count = props.image_count;
 
-	U_LOG_I("Wine D3D11 swapchain imported: images=%u size=%ux%u dxgi_format=%lld ids=%u,%u,%u",
-	        props.image_count, info->width, info->height, (long long)info->format,
+	U_LOG_I("Wine D3D11 swapchain imported: images=%u app_size=%ux%u app_array_size=%u transport_size=%ux%u transport_array_size=%u dxgi_format=%lld ids=%u,%u,%u",
+	        props.image_count,
+	        info->width,
+	        info->height,
+	        info->array_size,
+	        native_info.width,
+	        native_info.height,
+	        native_info.array_size,
+	        (long long)info->format,
 	        ids[0], props.image_count > 1 ? ids[1] : 0, props.image_count > 2 ? ids[2] : 0);
 
 	*out_xsc = &sc->base.base;
@@ -391,10 +472,22 @@ layer_projection(struct xrt_compositor *xc,
                  const struct xrt_layer_data *data)
 {
 	struct xrt_swapchain *native[XRT_MAX_VIEWS] = {0};
+	struct xrt_layer_data translated = *data;
 	for (uint32_t i = 0; i < data->view_count; ++i) {
-		native[i] = native_swapchain(xsc[i]);
+		struct client_d3d11_swapchain *sc = as_swapchain(xsc[i]);
+		native[i] = sc->native;
+		if (sc->array_size > 1) {
+			struct xrt_sub_image *sub = &translated.proj.v[i].sub;
+			if (sub->array_index >= sc->array_size) {
+				return XRT_ERROR_INVALID_ARGUMENT;
+			}
+			sub->rect.offset.w += (int32_t)(sub->array_index * sc->layer_width);
+			sub->norm_rect.x = (sub->array_index + sub->norm_rect.x) / sc->array_size;
+			sub->norm_rect.w /= sc->array_size;
+			sub->array_index = 0;
+		}
 	}
-	return xrt_comp_layer_projection(native_compositor(xc), xdev, native, data);
+	return xrt_comp_layer_projection(native_compositor(xc), xdev, native, &translated);
 }
 
 static xrt_result_t
