@@ -8,6 +8,8 @@ control=${native_build}/src/xrt/targets/service/monado-service-xpc-control
 service=${native_build}/src/xrt/targets/service/monado-service
 port=${MONADO_WINE_TCP_PORT:-4242}
 frames=${MONADO_OPENVR_SMOKE_FRAMES:-3600}
+displaylink_mode=${XRT_MACOS_CAMETALDISPLAYLINK_MODE:-legacy}
+present_prelatch_us=${XRT_MACOS_PRESENT_PRELATCH_US:-2000}
 stamp=$(date +%Y%m%d-%H%M%S)
 trace_dir=${MONADO_WINE_NATIVE_TRACE_DIR:-/tmp/monado-wine-openvr-${stamp}}
 label=org.freedesktop.monado.service
@@ -28,6 +30,8 @@ print "  native build: ${native_build}"
 print "  trace dir:    ${trace_dir}"
 print "  TCP port:     ${port}"
 print "  OpenVR frames:${frames}"
+print "  display mode: ${displaylink_mode}"
+print "  pre-latch:    ${present_prelatch_us} us"
 print ""
 
 wait_for_listener()
@@ -100,6 +104,8 @@ IPC_WINE_TCP_PORT="${port}" \
 IPC_EXIT_WHEN_IDLE=0 \
 XRT_NO_STDIN=1 \
 XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1 \
+XRT_MACOS_CAMETALDISPLAYLINK_MODE="${displaylink_mode}" \
+XRT_MACOS_PRESENT_PRELATCH_US="${present_prelatch_us}" \
 	"${service}" >"${trace_dir}/service.out.log" 2>"${trace_dir}/service.err.log" &
 service_pid=$!
 
