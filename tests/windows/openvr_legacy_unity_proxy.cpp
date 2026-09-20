@@ -47,6 +47,10 @@ double g_event_total_ms[5] = {};
 double g_event_max_ms[5] = {};
 LARGE_INTEGER g_qpc_frequency = {};
 
+using LegacyGetFrameTimingFn = bool (__stdcall *)(vr::Compositor_FrameTiming *, uint32_t);
+LegacyGetFrameTimingFn g_real_get_frame_timing = nullptr;
+bool g_compositor_fn_table_patched = false;
+
 double
 elapsed_ms(LARGE_INTEGER begin, LARGE_INTEGER end)
 {
@@ -125,6 +129,59 @@ ensure_real()
         std::fflush(stderr);
     }
     return g_real;
+}
+
+bool __stdcall
+legacy_get_frame_timing(vr::Compositor_FrameTiming *timing, uint32_t frames_ago)
+{
+    if (g_real_get_frame_timing == nullptr) {
+        return false;
+    }
+
+    const bool ok = g_real_get_frame_timing(timing, frames_ago);
+    if (ok && timing != nullptr && timing->m_nNumFramePresents == 0) {
+        timing->m_nNumFramePresents = 1;
+    }
+    return ok;
+}
+
+void
+patch_legacy_compositor_fn_table(void *table_ptr, const char *version)
+{
+    if (g_compositor_fn_table_patched || table_ptr == nullptr) {
+        return;
+    }
+
+    // In the legacy OpenVR compositor function tables used by Unity 5.0-5.3,
+    // GetFrameTiming is entry 8:
+    // SetTrackingSpace, GetTrackingSpace, WaitGetPoses, GetLastPoses,
+    // GetLastPoseForTrackedDeviceIndex, Submit, ClearLastSubmittedFrame,
+    // PostPresentHandoff, GetFrameTiming.
+    auto **table = reinterpret_cast<void **>(table_ptr);
+    void **slot = &table[8];
+
+    DWORD old_protect = 0;
+    if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old_protect)) {
+        std::fprintf(stderr,
+                     "[legacy-unity-openvr] Could not patch %s GetFrameTiming table slot: %lu\n",
+                     version ? version : "<unknown>",
+                     static_cast<unsigned long>(GetLastError()));
+        std::fflush(stderr);
+        return;
+    }
+
+    g_real_get_frame_timing = reinterpret_cast<LegacyGetFrameTimingFn>(*slot);
+    *slot = reinterpret_cast<void *>(&legacy_get_frame_timing);
+
+    DWORD ignored = 0;
+    VirtualProtect(slot, sizeof(void *), old_protect, &ignored);
+    FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void *));
+
+    g_compositor_fn_table_patched = true;
+    std::fprintf(stderr,
+                 "[legacy-unity-openvr] Patched legacy compositor GetFrameTiming (%s)\n",
+                 version ? version : "<unknown>");
+    std::fflush(stderr);
 }
 
 template <typename T>
@@ -357,9 +414,24 @@ FORWARD_RET(VR_InitInternal, uint32_t,
             (vr::EVRInitError *error, vr::EVRApplicationType type),
             (error, type))
 FORWARD_VOID(VR_ShutdownInternal, (), ())
-FORWARD_RET(VR_GetGenericInterface, void *,
-            (const char *version, vr::EVRInitError *error),
-            (version, error))
+extern "C" __declspec(dllexport) void *
+VR_GetGenericInterface(const char *version, vr::EVRInitError *error)
+{
+    using Fn = void *(__cdecl *)(const char *, vr::EVRInitError *);
+    Fn fn = real_proc<Fn>("VR_GetGenericInterface");
+    if (fn == nullptr) {
+        return nullptr;
+    }
+
+    void *result = fn(version, error);
+
+    if (result != nullptr && version != nullptr &&
+        std::strncmp(version, "FnTable:IVRCompositor_", 22) == 0) {
+        patch_legacy_compositor_fn_table(result, version);
+    }
+
+    return result;
+}
 FORWARD_RET(VR_IsInterfaceVersionValid, bool, (const char *version), (version))
 FORWARD_RET(VR_IsHmdPresent, bool, (), ())
 FORWARD_RET(VR_IsRuntimeInstalled, bool, (), ())
