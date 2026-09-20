@@ -42,6 +42,42 @@ vr::EVRSubmitFlags g_submit_flags = vr::Submit_Default;
 vr::EColorSpace g_color_space = vr::ColorSpace_Auto;
 bool g_submitted_left = false;
 bool g_submitted_right = false;
+uint64_t g_event_counts[5] = {};
+double g_event_total_ms[5] = {};
+double g_event_max_ms[5] = {};
+LARGE_INTEGER g_qpc_frequency = {};
+
+double
+elapsed_ms(LARGE_INTEGER begin, LARGE_INTEGER end)
+{
+    if (g_qpc_frequency.QuadPart == 0) {
+        QueryPerformanceFrequency(&g_qpc_frequency);
+    }
+    return 1000.0 * static_cast<double>(end.QuadPart - begin.QuadPart) /
+           static_cast<double>(g_qpc_frequency.QuadPart);
+}
+
+void
+record_event_timing(unsigned slot, const char *name, LARGE_INTEGER begin)
+{
+    LARGE_INTEGER end = {};
+    QueryPerformanceCounter(&end);
+    const double ms = elapsed_ms(begin, end);
+    ++g_event_counts[slot];
+    g_event_total_ms[slot] += ms;
+    if (ms > g_event_max_ms[slot]) g_event_max_ms[slot] = ms;
+
+    if (ms >= 20.0 || (g_event_counts[slot] % 120) == 0) {
+        std::fprintf(stderr,
+                     "[legacy-unity-openvr] timing %s count=%llu last=%.3fms avg=%.3fms max=%.3fms\n",
+                     name,
+                     static_cast<unsigned long long>(g_event_counts[slot]),
+                     ms,
+                     g_event_total_ms[slot] / static_cast<double>(g_event_counts[slot]),
+                     g_event_max_ms[slot]);
+        std::fflush(stderr);
+    }
+}
 
 void
 log_line(const char *message)
@@ -169,6 +205,9 @@ legacy_render_event(int event_id)
     vr::IVRCompositor *compositor = get_compositor();
     if (compositor == nullptr) return;
 
+    LARGE_INTEGER begin = {};
+    QueryPerformanceCounter(&begin);
+
     switch (event_id) {
     case kEventWaitGetPoses: {
         vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount] = {};
@@ -178,6 +217,7 @@ legacy_render_event(int event_id)
             std::fprintf(stderr, "[legacy-unity-openvr] WaitGetPoses error=%d\n", static_cast<int>(e));
             std::fflush(stderr);
         }
+        record_event_timing(0, "WaitGetPoses", begin);
         break;
     }
     case kEventSubmitL:
@@ -208,6 +248,9 @@ legacy_render_event(int event_id)
                          static_cast<int>(e));
             std::fflush(stderr);
         }
+        record_event_timing(eye == vr::Eye_Left ? 1u : 2u,
+                            eye == vr::Eye_Left ? "SubmitL" : "SubmitR",
+                            begin);
         break;
     }
     case kEventFlush:
@@ -219,6 +262,7 @@ legacy_render_event(int event_id)
                 context->Release();
             }
         }
+        record_event_timing(3, "Flush", begin);
         break;
     case kEventPostPresentHandoff:
         // Old Unity 5.x SteamVR integrations can emit this plugin event far
@@ -230,6 +274,7 @@ legacy_render_event(int event_id)
             g_submitted_left = false;
             g_submitted_right = false;
         }
+        record_event_timing(4, "PostPresentHandoff", begin);
         break;
     default:
         std::fprintf(stderr, "[legacy-unity-openvr] Unknown render event %d\n", event_id);
