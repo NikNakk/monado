@@ -116,8 +116,17 @@ def main() -> int:
     pacing = load(pacing_path)
     wine = load(wine_path)
 
+    presentation_mode = "unknown"
+    if present:
+        metal_requests = [i(row, "metal_request_ns") for row in present]
+        if metal_requests and all(v == 0 for v in metal_requests):
+            presentation_mode = "CAMetalDisplayLink-driven"
+        elif any(v > 0 for v in metal_requests):
+            presentation_mode = "legacy timed presentDrawable:atTime:"
+
     print(f"Trace directory: {directory}")
     print(f"Native service PID: {pid}")
+    print(f"Presentation path: {presentation_mode}")
     for name, path, rows in [
         ("Wine client", wine_path, wine),
         ("Wine native submit", submit_path, submit),
@@ -316,6 +325,7 @@ def main() -> int:
     presented_minus_target_us: list[float] = []
     presented_minus_desired_us: list[float] = []
     target_minus_desired_us: list[float] = []
+    timed_request_advance_us: list[float] = []
     commit_lead_us: list[float] = []
     gpu_end_minus_target_us: list[float] = []
     completion_minus_target_us: list[float] = []
@@ -335,8 +345,11 @@ def main() -> int:
                 native_present_submit_us.append((after_commit - host_call) / 1000.0)
             desired_ns = i(prow, "desired_present_ns")
             target_ns = i(prow, "target_output_ns")
+            metal_request_ns = i(prow, "metal_request_ns")
             if desired_ns and target_ns:
                 target_minus_desired_us.append((target_ns - desired_ns) / 1000.0)
+            if target_ns and metal_request_ns:
+                timed_request_advance_us.append((target_ns - metal_request_ns) / 1000.0)
             shared_event_wait_count += 1 if i(prow, "shared_event_wait") else 0
 
         arow = presented_by_system.get(sf)
@@ -385,13 +398,15 @@ def main() -> int:
     print("System compositor -> Metal presentation")
     describe("present call -> drawable", drawable_stage_us)
     describe("present call -> commit", native_present_submit_us)
-    describe("target - desired/deadline", target_minus_desired_us)
+    describe("target - desired present", target_minus_desired_us)
+    if timed_request_advance_us:
+        describe("timed request before target", timed_request_advance_us)
     describe("commit lead to CA target", commit_lead_us)
     describe("Metal GPU end - CA target", gpu_end_minus_target_us)
     describe("completion handler - target", completion_minus_target_us)
     describe("presented - Metal GPU end", presented_minus_gpu_end_us)
     describe("presented - target", presented_minus_target_us)
-    describe("presented - desired/deadline", presented_minus_desired_us)
+    describe("presented - desired present", presented_minus_desired_us)
 
     if presentation_frame_metrics:
         late_cutoff_us = 1000.0
