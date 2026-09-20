@@ -180,6 +180,8 @@ def main() -> int:
             print(f"  swapchain {sc}: waits={len(vals)} p50={percentile(vals,.50):.1f}us p95={percentile(vals,.95):.1f}us max={max(vals):.1f}us")
         print()
 
+    refresh_period_us = 1_000_000.0 / 120.0
+
     if pacing:
         pred = [row for row in pacing if row.get("event") == "predict"]
         delivered = [row for row in pacing if row.get("event") == "delivered"]
@@ -213,10 +215,10 @@ def main() -> int:
         describe("actual delivered->GPU", gpu_actual_us)
 
         if period_us:
-            refresh_us = 1_000_000.0 / 120.0
+            refresh_period_us = statistics.median(period_us)
             rounded_divisors: dict[int, int] = defaultdict(int)
             for value in period_us:
-                rounded_divisors[max(1, int(round(value / refresh_us)))] += 1
+                rounded_divisors[max(1, int(round(value / refresh_period_us)))] += 1
             print("Predicted-period refresh divisors:")
             print("  " + ", ".join(f"{k}x={v}" for k, v in sorted(rounded_divisors.items())))
         print()
@@ -412,42 +414,74 @@ def main() -> int:
     describe("presented - target", presented_minus_target_us)
     describe("presented - desired present", presented_minus_desired_us)
 
+    baseline_phase_refreshes = 0
+    phase_adjusted_present_us: list[float] = []
+    extra_slip_frames: set[int] = set()
+
     if presentation_frame_metrics:
-        late_cutoff_us = 1000.0
-        late_frames = {sf for sf, m in presentation_frame_metrics.items()
-                       if float(m["presented_minus_target_us"]) > late_cutoff_us}
+        phase_counts: dict[int, int] = defaultdict(int)
+        for m in presentation_frame_metrics.values():
+            phase = int(round(float(m["presented_minus_target_us"]) / refresh_period_us))
+            phase_counts[phase] += 1
+        baseline_phase_refreshes = max(phase_counts, key=phase_counts.get)
+        baseline_phase_us = baseline_phase_refreshes * refresh_period_us
+
+        for sf, m in presentation_frame_metrics.items():
+            adjusted = float(m["presented_minus_target_us"]) - baseline_phase_us
+            m["phase_adjusted_present_us"] = adjusted
+            phase_adjusted_present_us.append(adjusted)
+
+        print("Presentation phase relative to target:")
+        print("  refresh offsets: " + ", ".join(f"{k:+d}x={v}" for k, v in sorted(phase_counts.items())))
+        print(
+            f"  normal phase: {baseline_phase_refreshes:+d} refresh(es) "
+            f"({baseline_phase_us:+.1f} us relative to traced target)"
+        )
+        describe("phase-adjusted presented-target", phase_adjusted_present_us)
+
+        slip_cutoff_us = 1000.0
+        extra_slip_frames = {
+            sf for sf, m in presentation_frame_metrics.items()
+            if float(m["phase_adjusted_present_us"]) > slip_cutoff_us
+        }
         reused_frames = {sf for sf, m in presentation_frame_metrics.items() if bool(m["reused"])}
-        both = late_frames & reused_frames
-        print("Presentation miss / client-frame reuse correlation:")
-        print(f"  late >1ms and reused: {len(both):5d}")
-        print(f"  late >1ms, fresh:     {len(late_frames - reused_frames):5d}")
-        print(f"  on-time, reused:      {len(reused_frames - late_frames):5d}")
-        print(f"  on-time, fresh:       {len(presentation_frame_metrics) - len(late_frames | reused_frames):5d}")
+        both = extra_slip_frames & reused_frames
+        print("Extra presentation slip / client-frame reuse correlation:")
+        print(f"  extra slip >1ms and reused: {len(both):5d}")
+        print(f"  extra slip >1ms, fresh:     {len(extra_slip_frames - reused_frames):5d}")
+        print(f"  normal phase, reused:       {len(reused_frames - extra_slip_frames):5d}")
+        print(
+            f"  normal phase, fresh:        "
+            f"{len(presentation_frame_metrics) - len(extra_slip_frames | reused_frames):5d}"
+        )
 
         def classified_values(frames: set[int], key: str) -> list[float]:
             return [float(presentation_frame_metrics[sf][key])
                     for sf in frames if key in presentation_frame_metrics[sf]]
 
-        if late_frames:
-            print("  late-frame timing:")
-            describe("    commit lead", classified_values(late_frames, "commit_lead_us"))
-            describe("    GPU end - target", classified_values(late_frames, "gpu_end_minus_target_us"))
-            describe("    completion - target", classified_values(late_frames, "completion_minus_target_us"))
-        on_time_frames = set(presentation_frame_metrics) - late_frames
-        if on_time_frames:
-            print("  on-time-frame timing:")
-            describe("    commit lead", classified_values(on_time_frames, "commit_lead_us"))
-            describe("    GPU end - target", classified_values(on_time_frames, "gpu_end_minus_target_us"))
-            describe("    completion - target", classified_values(on_time_frames, "completion_minus_target_us"))
+        if extra_slip_frames:
+            print("  extra-slip-frame timing:")
+            describe("    commit lead", classified_values(extra_slip_frames, "commit_lead_us"))
+            describe("    GPU end - target", classified_values(extra_slip_frames, "gpu_end_minus_target_us"))
+            describe("    completion - target", classified_values(extra_slip_frames, "completion_minus_target_us"))
+        normal_phase_frames = set(presentation_frame_metrics) - extra_slip_frames
+        if normal_phase_frames:
+            print("  normal-phase-frame timing:")
+            describe("    commit lead", classified_values(normal_phase_frames, "commit_lead_us"))
+            describe("    GPU end - target", classified_values(normal_phase_frames, "gpu_end_minus_target_us"))
+            describe("    completion - target", classified_values(normal_phase_frames, "completion_minus_target_us"))
         print()
 
     if mapped_system_frames:
         print(f"Present rows using shared-event wait: {shared_event_wait_count}/{len(mapped_system_frames)}")
-    for threshold_ms in (1, 4, 8):
-        if presented_minus_target_us:
+    if phase_adjusted_present_us:
+        for threshold_ms in (1, 4, 8):
             threshold_us = threshold_ms * 1000.0
-            count = sum(v > threshold_us for v in presented_minus_target_us)
-            print(f"presented > target +{threshold_ms}ms: {count:5d} ({100*count/len(presented_minus_target_us):6.2f}%)")
+            count = sum(v > threshold_us for v in phase_adjusted_present_us)
+            print(
+                f"extra presentation slip > baseline +{threshold_ms}ms: "
+                f"{count:5d} ({100*count/len(phase_adjusted_present_us):6.2f}%)"
+            )
     print()
 
     worst_ready = sorted(
@@ -479,26 +513,28 @@ def main() -> int:
         for value, sc, image in worst_waits:
             print(f"  swapchain={sc:3d} image={image:2d} wait={value:9.1f} us")
 
-    if presented_minus_target_us:
+    if presentation_frame_metrics:
         late = sorted(
             (
-                (i(row, "presented_minus_target_ns") / 1000.0, i(row, "frame_id", -1))
-                for row in presented
-                if i(row, "frame_id", -1) in mapped_system_frames
+                (float(metrics.get("phase_adjusted_present_us", 0.0)), frame)
+                for frame, metrics in presentation_frame_metrics.items()
             ),
             reverse=True,
         )[:10]
-        print("\nWorst actual presentations vs target:")
-        for value, frame in late:
+        print("\nWorst extra presentation slips beyond normal phase:")
+        for adjusted, frame in late:
             metrics = presentation_frame_metrics.get(frame, {})
+            raw = float(metrics.get("presented_minus_target_us", 0.0))
             commit_lead = metrics.get("commit_lead_us")
             gpu_end = metrics.get("gpu_end_minus_target_us")
             completion = metrics.get("completion_minus_target_us")
             reused = bool(metrics.get("reused", False))
+
             def fmt(v: float | bool | None) -> str:
                 return "      n/a" if v is None else f"{float(v):9.1f}"
+
             print(
-                f"  system_frame={frame:6d} presented_minus_target={value:9.1f} us "
+                f"  system_frame={frame:6d} excess={adjusted:9.1f} us raw_target_offset={raw:9.1f} us "
                 f"reused={int(reused)} commit_lead={fmt(commit_lead)} us "
                 f"gpu_end_minus_target={fmt(gpu_end)} us completion_minus_target={fmt(completion)} us"
             )
