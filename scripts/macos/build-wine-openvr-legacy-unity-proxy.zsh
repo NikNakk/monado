@@ -23,15 +23,15 @@ out=${build_dir}/openvr_api.dll
     -shared \
     -static-libgcc \
     -static-libstdc++ \
-    -Wl,-Bstatic \
-    -lwinpthread \
-    -Wl,-Bdynamic \
     -I "${repo_root}/src/external/openvr_includes" \
     "${repo_root}/tests/windows/openvr_legacy_unity_proxy.cpp" \
     -o "${out}" \
     -ld3d11 \
     -ldxgi \
-    -ldxguid
+    -ldxguid \
+    -Wl,-Bstatic \
+    -lwinpthread \
+    -Wl,-Bdynamic
 
 description=$(file "${out}")
 if [[ "${description}" != *"PE32+ executable (DLL)"*"x86-64"* ]]; then
