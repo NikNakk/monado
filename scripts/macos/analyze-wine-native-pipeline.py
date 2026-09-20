@@ -101,6 +101,7 @@ def main() -> int:
     present_path = companion("present")
     presented_path = companion("presented")
     complete_path = companion("present_complete")
+    present_worker_path = companion("present_worker")
     swapchain_path = companion("wine_swapchain")
     pacing_path = companion("app_pacing")
     wine_path = directory / "wine.csv"
@@ -112,6 +113,7 @@ def main() -> int:
     present = load(present_path)
     presented = load(presented_path)
     complete = load(complete_path)
+    present_worker = load(present_worker_path)
     swapchain = load(swapchain_path)
     pacing = load(pacing_path)
     wine = load(wine_path)
@@ -140,6 +142,7 @@ def main() -> int:
         ("Present", present_path, present),
         ("Presented", presented_path, presented),
         ("Present complete", complete_path, complete),
+        ("Present worker", present_worker_path, present_worker),
         ("Wine swapchain", swapchain_path, swapchain),
         ("App pacing", pacing_path, pacing),
     ]:
@@ -320,6 +323,23 @@ def main() -> int:
     presented_by_system = {i(row, "frame_id", -1): row for row in presented}
     complete_by_system = {i(row, "frame_id", -1): row for row in complete}
 
+    worker_drawable_wait_us: dict[int, float] = {}
+    worker_queue_delay_us: dict[int, float] = {}
+    for row in present_worker:
+        if row.get("event") != "submitted":
+            continue
+        sf = i(row, "frame_id", -1)
+        if sf < 0:
+            continue
+        begin_ns = i(row, "next_drawable_begin_ns")
+        end_ns = i(row, "next_drawable_end_ns")
+        worker_start_ns = i(row, "worker_start_ns")
+        enqueue_ns = i(row, "enqueue_ns")
+        if begin_ns and end_ns and end_ns >= begin_ns:
+            worker_drawable_wait_us[sf] = (end_ns - begin_ns) / 1000.0
+        if worker_start_ns and enqueue_ns and worker_start_ns >= enqueue_ns:
+            worker_queue_delay_us[sf] = (worker_start_ns - enqueue_ns) / 1000.0
+
     system_reused: dict[int, bool] = {}
     for row in fmap:
         sf = i(row, "system_frame_id", -1)
@@ -368,7 +388,17 @@ def main() -> int:
                 "presented_minus_target_us": late_us,
                 "reused": system_reused.get(sf, False),
             }
+            if sf in worker_drawable_wait_us:
+                metrics["drawable_wait_us"] = worker_drawable_wait_us[sf]
+            if sf in worker_queue_delay_us:
+                metrics["worker_queue_delay_us"] = worker_queue_delay_us[sf]
             if prow:
+                host_call_ns = i(prow, "host_call_ns")
+                after_drawable_ns = i(prow, "after_drawable_ns")
+                if host_call_ns and after_drawable_ns and after_drawable_ns >= host_call_ns:
+                    metrics["enqueue_to_drawable_us"] = (after_drawable_ns - host_call_ns) / 1000.0
+                metrics["target_minus_desired_us"] = i(prow, "target_output_ns") / 1000.0 - i(prow, "desired_present_ns") / 1000.0
+                metrics["image_reuse_wait_us"] = i(prow, "image_reuse_wait_ns") / 1000.0
                 target_ns = i(prow, "target_output_ns")
                 after_commit_ns = i(prow, "after_commit_ns")
                 if target_ns and after_commit_ns:
@@ -470,6 +500,101 @@ def main() -> int:
             describe("    commit lead", classified_values(normal_phase_frames, "commit_lead_us"))
             describe("    GPU end - target", classified_values(normal_phase_frames, "gpu_end_minus_target_us"))
             describe("    completion - target", classified_values(normal_phase_frames, "completion_minus_target_us"))
+            describe("    drawable wait", classified_values(normal_phase_frames, "drawable_wait_us"))
+            describe("    enqueue -> drawable", classified_values(normal_phase_frames, "enqueue_to_drawable_us"))
+            describe("    worker queue delay", classified_values(normal_phase_frames, "worker_queue_delay_us"))
+        if extra_slip_frames:
+            describe("    slip drawable wait", classified_values(extra_slip_frames, "drawable_wait_us"))
+            describe("    slip enqueue -> drawable", classified_values(extra_slip_frames, "enqueue_to_drawable_us"))
+            describe("    slip worker queue delay", classified_values(extra_slip_frames, "worker_queue_delay_us"))
+
+        # Extra slips often matter most as bursts and by the back-pressure they
+        # create on the immediately following frame.
+        ordered_frames = sorted(presentation_frame_metrics)
+        slip_runs: list[list[int]] = []
+        current_run: list[int] = []
+        for sf in ordered_frames:
+            if sf in extra_slip_frames:
+                if current_run and sf != current_run[-1] + 1:
+                    slip_runs.append(current_run)
+                    current_run = []
+                current_run.append(sf)
+            elif current_run:
+                slip_runs.append(current_run)
+                current_run = []
+        if current_run:
+            slip_runs.append(current_run)
+
+        if slip_runs:
+            run_lengths: dict[int, int] = defaultdict(int)
+            for run in slip_runs:
+                run_lengths[len(run)] += 1
+            print("Extra-slip bursts:")
+            print("  run lengths: " + ", ".join(f"{length}f={count}" for length, count in sorted(run_lengths.items())))
+            print(f"  bursts: {len(slip_runs)}, frames in bursts: {sum(len(run) for run in slip_runs)}")
+
+        phase_by_frame = {
+            sf: int(round(float(m["presented_minus_target_us"]) / refresh_period_us))
+            for sf, m in presentation_frame_metrics.items()
+        }
+        transitions: dict[tuple[int, int], int] = defaultdict(int)
+        prev_sf: int | None = None
+        for sf in ordered_frames:
+            if prev_sf is not None and sf == prev_sf + 1:
+                transitions[(phase_by_frame[prev_sf], phase_by_frame[sf])] += 1
+            prev_sf = sf
+        if transitions:
+            print("Presentation-phase transitions:")
+            common_transitions = sorted(transitions.items(), key=lambda kv: (-kv[1], kv[0]))[:12]
+            print("  " + ", ".join(f"{a:+d}x->{b:+d}x={count}" for (a, b), count in common_transitions))
+
+        successor_frames = {
+            sf + 1 for sf in extra_slip_frames if sf + 1 in presentation_frame_metrics
+        }
+        non_slip_successors = {
+            sf + 1 for sf in normal_phase_frames
+            if sf + 1 in presentation_frame_metrics and sf + 1 not in successor_frames
+        }
+        if successor_frames:
+            print("Frame immediately after an extra slip:")
+            describe("    drawable wait", classified_values(successor_frames, "drawable_wait_us"))
+            describe("    enqueue -> drawable", classified_values(successor_frames, "enqueue_to_drawable_us"))
+            describe("    worker queue delay", classified_values(successor_frames, "worker_queue_delay_us"))
+            successor_reused = sum(bool(presentation_frame_metrics[sf]["reused"]) for sf in successor_frames)
+            print(f"    reused: {successor_reused}/{len(successor_frames)}")
+        if non_slip_successors:
+            print("Frame after a normal-phase frame:")
+            describe("    drawable wait", classified_values(non_slip_successors, "drawable_wait_us"))
+            describe("    enqueue -> drawable", classified_values(non_slip_successors, "enqueue_to_drawable_us"))
+            successor_reused = sum(bool(presentation_frame_metrics[sf]["reused"]) for sf in non_slip_successors)
+            print(f"    reused: {successor_reused}/{len(non_slip_successors)}")
+
+        # Compare target and actual presentation intervals. A transition from the
+        # normal phase to +1 extra refresh should create a ~2x presented interval;
+        # recovery may then show a short/same-vblank interval.
+        target_intervals_x: list[float] = []
+        presented_intervals_x: list[float] = []
+        same_or_short_present_intervals = 0
+        prev_row = None
+        for sf in ordered_frames:
+            row = presented_by_system.get(sf)
+            if row is None:
+                continue
+            if prev_row is not None:
+                target_delta = i(row, "target_output_ns") - i(prev_row, "target_output_ns")
+                presented_delta = i(row, "presented_monotonic_ns") - i(prev_row, "presented_monotonic_ns")
+                if target_delta > 0:
+                    target_intervals_x.append(target_delta / (refresh_period_us * 1000.0))
+                if presented_delta >= 0:
+                    presented_intervals_x.append(presented_delta / (refresh_period_us * 1000.0))
+                    if presented_delta < refresh_period_us * 1000.0 * 0.5:
+                        same_or_short_present_intervals += 1
+            prev_row = row
+        if target_intervals_x or presented_intervals_x:
+            print("Consecutive presentation intervals:")
+            describe("    target interval", target_intervals_x, "x")
+            describe("    actual presented interval", presented_intervals_x, "x")
+            print(f"    <0.5-refresh actual intervals: {same_or_short_present_intervals}")
         print()
 
     if mapped_system_frames:
