@@ -75,7 +75,7 @@ install)
 ; Managed by Monado Wine/OpenComposite legacy Unity helper.
 initUsingVulkan=false
 logAllOpenVRCalls=false
-logGetTrackedProperty=true
+logGetTrackedProperty=false
 EOF
 
     print "Installed legacy Unity OpenVR compatibility proxy:"
