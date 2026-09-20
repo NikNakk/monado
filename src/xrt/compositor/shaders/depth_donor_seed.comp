@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: BSL-1.0
+//
+// Seed a packed nearest-background donor map from the forward visibility map.
+
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 4, std430) readonly buffer Visibility
+{
+	uint depth_bits[];
+} visibility;
+
+layout(set = 0, binding = 5, std430) buffer DonorA
+{
+	uint packed_xy[];
+} donor_a;
+
+layout(set = 0, binding = 3, std140) uniform restrict Config
+{
+	ivec4 views[2];
+	vec4 pre_transform[2];
+	vec4 post_transform[2];
+	mat4 transform_timewarp_scanout_begin[2];
+	mat4 transform_timewarp_scanout_end[2];
+
+	vec4 depth_post_transform[2];
+	vec4 source_uv_to_tanangle[2];
+	vec4 projection_depth[2];
+	vec4 new_origin_in_source_view_scanout_begin[2];
+	vec4 new_origin_in_source_view_scanout_end[2];
+	vec4 target_to_source_orientation_scanout_begin[2];
+	vec4 target_to_source_orientation_scanout_end[2];
+	uvec4 has_depth[2];
+	uvec4 depth_debug;
+	uvec4 depth_visibility;
+	uvec4 depth_donor;
+} ubo;
+
+const uint INVALID_DONOR = 0xffffffffu;
+
+bool decode_depth(uint encoded, out float z)
+{
+	if (encoded == 0x7f7fffffu) {
+		z = 0.0;
+		return false;
+	}
+	z = uintBitsToFloat(encoded);
+	return z > 0.0 && z < 1e20;
+}
+
+uint pack_xy(uvec2 p)
+{
+	return (p.y << 16) | p.x;
+}
+
+void main()
+{
+	uint x = gl_GlobalInvocationID.x;
+	uint y = gl_GlobalInvocationID.y;
+	uint view = gl_GlobalInvocationID.z;
+	uint width = ubo.depth_visibility.x;
+	uint height = ubo.depth_visibility.y;
+	uint view_count = ubo.depth_visibility.z;
+
+	if (view >= view_count || x >= width || y >= height) {
+		return;
+	}
+
+	uint base = view * width * height;
+	uint index = base + y * width + x;
+	float own_z;
+	if (!decode_depth(visibility.depth_bits[index], own_z)) {
+		donor_a.packed_xy[index] = INVALID_DONOR;
+		return;
+	}
+
+	// Suppress obvious foreground-edge seeds. Hole filling should propagate
+	// the background behind a displaced foreground surface, not grow that
+	// foreground back into the hole. A visible pixel that can see a
+	// substantially farther neighbour within 16 px is treated as foreground
+	// for donor purposes only; normal rendering still uses it directly.
+	const ivec2 directions[8] = ivec2[8](
+	    ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
+	    ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1));
+	const int radii[3] = int[3](4, 8, 16);
+	ivec2 origin = ivec2(int(x), int(y));
+	ivec2 max_pixel = ivec2(int(width) - 1, int(height) - 1);
+	float farther_margin = max(0.05, 0.08 * own_z);
+	bool background_seed = true;
+
+	for (int r = 0; r < 3 && background_seed; ++r) {
+		for (int d = 0; d < 8; ++d) {
+			ivec2 p = clamp(origin + directions[d] * radii[r], ivec2(0), max_pixel);
+			uint neighbour_index = base + uint(p.y) * width + uint(p.x);
+			float neighbour_z;
+			if (decode_depth(visibility.depth_bits[neighbour_index], neighbour_z) &&
+			    neighbour_z > own_z + farther_margin) {
+				background_seed = false;
+				break;
+			}
+		}
+	}
+
+	donor_a.packed_xy[index] = background_seed ? pack_xy(uvec2(x, y)) : INVALID_DONOR;
+}
