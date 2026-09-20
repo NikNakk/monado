@@ -15,6 +15,7 @@
 #include <d3d11.h>
 
 #include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <mutex>
 
