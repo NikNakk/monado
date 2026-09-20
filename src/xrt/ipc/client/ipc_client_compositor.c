@@ -1314,20 +1314,12 @@ ipc_client_create_native_compositor(struct xrt_system_compositor *xsysc,
 	 * the session does. But we create it here in case any extra arguments
 	 * that only the compositor knows about needs to be sent.
 	 *
-	 * The macOS Wine bridge uses a framed loopback TCP stream. Its swapchain
-	 * back-pressure happens inside the application's BeginFrame-to-EndFrame
-	 * interval, so allowing that interval to select a slower app cadence can
-	 * become self-reinforcing. Request minimum-period pacing only for stream
-	 * IPC clients; ordinary native IPC clients retain adaptive pacing.
+	 * Transport-specific pacing policy is applied by the native server from
+	 * the accepted connection type rather than inferred by the client.
 	 */
-	struct xrt_session_info ipc_xsi = *xsi;
-	if (icc->ipc_c->imc.stream_socket) {
-		ipc_xsi.pacing_flags |= XRT_SESSION_PACING_USE_MIN_FRAME_PERIOD_BIT;
-	}
-
 	xret = ipc_call_session_create( //
 	    icc->ipc_c,                 // ipc_c
-	    &ipc_xsi,                   // xsi
+	    xsi,                        // xsi
 	    true);                      // create_native_compositor
 	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_session_create");
 

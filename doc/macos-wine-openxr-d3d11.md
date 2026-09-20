@@ -348,10 +348,12 @@ Forcing `U_PACING_APP_USE_MIN_FRAME_PERIOD=1` broke the loop: the predicted
 period became 8.3417 ms, the problematic swapchain wait fell from about 61 ms
 to about 6 ms median, and mapped client frames were normally used for one
 system refresh. That experiment is now represented as a per-session pacing
-hint. IPC clients using the Wine/macOS framed TCP transport request minimum
-display-period pacing automatically; native Unix-domain-socket clients retain
-Monado's adaptive app-period policy. The environment option remains available
-as a global diagnostic override.
+hint. The native macOS IPC server now tags connections accepted from the Wine/TCP
+listener and applies minimum display-period pacing to those sessions
+automatically. Native Unix-domain-socket clients retain Monado's adaptive
+app-period policy. Making the accepted transport authoritative avoids relying
+on an internal pacing hint surviving client-side IPC serialization. The
+environment option remains available as a global diagnostic override.
 
 The same capture also clarified the apparent one-refresh
 `presented - desired` offset in CAMetalDisplayLink-driven mode. In this mode

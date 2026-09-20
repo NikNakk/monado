@@ -188,7 +188,7 @@ handle_wine_tcp_listen(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 		U_LOG_E("Wine TCP bridge accept() failed: %s", strerror(errno));
 		return;
 	}
-	ipc_server_handle_client_connected(vs, fd);
+	ipc_server_handle_stream_client_connected(vs, fd);
 }
 
 static volatile sig_atomic_t got_shutdown_signal = 0;

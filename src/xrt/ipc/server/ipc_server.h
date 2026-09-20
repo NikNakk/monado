@@ -573,6 +573,13 @@ void
 ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle);
 
 /*!
+ * Variant used for byte-stream IPC transports that need transport-specific
+ * server policy. On macOS this is the loopback Wine/TCP bridge.
+ */
+void
+ipc_server_handle_stream_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle);
+
+/*!
  * Perform whatever needs to be done when the mainloop polling encounters a failure.
  * @memberof ipc_server
  */
