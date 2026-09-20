@@ -830,8 +830,8 @@ ipc_server_handle_shutdown_signal(struct ipc_server *vs)
 	vs->running = false;
 }
 
-void
-ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle)
+static void
+ipc_server_handle_client_connected_internal(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle, bool stream_socket)
 {
 	volatile struct ipc_client_state *ics = NULL;
 	int32_t cs_index = -1;
@@ -895,6 +895,7 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 	ics->local_space_overseer_index = UINT32_MAX;
 	ics->client_state.id = id;
 	ics->imc.ipc_handle = ipc_handle;
+	ics->imc.stream_socket = stream_socket;
 #ifdef XRT_OS_OSX
 	ics->imc.frame_reads = false;
 	ics->imc.frame_writes = true;
@@ -921,6 +922,18 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 
 	// Unlock when we are done.
 	os_mutex_unlock(&vs->global_state.lock);
+}
+
+void
+ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle)
+{
+	ipc_server_handle_client_connected_internal(vs, ipc_handle, false);
+}
+
+void
+ipc_server_handle_stream_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle)
+{
+	ipc_server_handle_client_connected_internal(vs, ipc_handle, true);
 }
 
 xrt_result_t

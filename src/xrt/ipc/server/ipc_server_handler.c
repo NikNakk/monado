@@ -717,7 +717,14 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 		IPC_INFO(ics->server, "App asked for headless session, creating native compositor anyways");
 	}
 
-	xrt_result_t xret = xrt_system_create_session(ics->server->xsys, xsi, &xs, &xcn);
+	struct xrt_session_info server_xsi = *xsi;
+	if (ics->imc.stream_socket) {
+		server_xsi.pacing_flags |= XRT_SESSION_PACING_USE_MIN_FRAME_PERIOD_BIT;
+		IPC_INFO(ics->server,
+		         "Wine/TCP session: enabling minimum-display-period application pacing");
+	}
+
+	xrt_result_t xret = xrt_system_create_session(ics->server->xsys, &server_xsi, &xs, &xcn);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
