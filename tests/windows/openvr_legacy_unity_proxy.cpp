@@ -50,6 +50,7 @@ LARGE_INTEGER g_qpc_frequency = {};
 using LegacyGetFrameTimingFn = bool (__stdcall *)(vr::Compositor_FrameTiming *, uint32_t);
 LegacyGetFrameTimingFn g_real_get_frame_timing = nullptr;
 bool g_compositor_fn_table_patched = false;
+uint64_t g_get_frame_timing_calls = 0;
 
 double
 elapsed_ms(LARGE_INTEGER begin, LARGE_INTEGER end)
@@ -139,6 +140,21 @@ legacy_get_frame_timing(vr::Compositor_FrameTiming *timing, uint32_t frames_ago)
     }
 
     const bool ok = g_real_get_frame_timing(timing, frames_ago);
+    ++g_get_frame_timing_calls;
+
+    const uint32_t raw_presents =
+        (timing != nullptr) ? timing->m_nNumFramePresents : 0xffffffffu;
+    if (g_get_frame_timing_calls <= 20 || (g_get_frame_timing_calls % 120) == 0) {
+        std::fprintf(stderr,
+                     "[legacy-unity-openvr] GetFrameTiming count=%llu ok=%d framesAgo=%u size=%u rawPresents=%u\n",
+                     static_cast<unsigned long long>(g_get_frame_timing_calls),
+                     ok ? 1 : 0,
+                     frames_ago,
+                     timing != nullptr ? timing->m_nSize : 0u,
+                     raw_presents);
+        std::fflush(stderr);
+    }
+
     if (ok && timing != nullptr && timing->m_nNumFramePresents == 0) {
         timing->m_nNumFramePresents = 1;
     }
