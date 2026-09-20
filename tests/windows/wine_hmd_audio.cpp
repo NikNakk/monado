@@ -124,8 +124,8 @@ int wmain(int argc, wchar_t **argv)
         if (FAILED(collection->Item(i, &device))) continue;
         device->GetId(&id);
         if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, &props))) {
-            props->GetValue(DEVPKEY_Device_FriendlyName, &friendly);
-            props->GetValue(DEVPKEY_Device_Driver, &driver);
+            props->GetValue(PKEY_Device_FriendlyName, &friendly);
+            props->GetValue(PKEY_Device_Driver, &driver);
         }
 
         const wchar_t *name = friendly.vt == VT_LPWSTR ? friendly.pwszVal : L"";
