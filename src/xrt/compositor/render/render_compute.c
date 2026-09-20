@@ -997,7 +997,17 @@ dispatch_depth_visibility(struct render_compute *render,
 	    .offset = 0,
 	    .range = VK_WHOLE_SIZE,
 	};
-	VkWriteDescriptorSet writes[3] = {
+	VkDescriptorBufferInfo donor_a_info = {
+	    .buffer = r->compute.depth_donor.buffers[0].buffer,
+	    .offset = 0,
+	    .range = VK_WHOLE_SIZE,
+	};
+	VkDescriptorBufferInfo donor_b_info = {
+	    .buffer = r->compute.depth_donor.buffers[1].buffer,
+	    .offset = 0,
+	    .range = VK_WHOLE_SIZE,
+	};
+	VkWriteDescriptorSet writes[5] = {
 	    {
 	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 	        .dstSet = render->shared_descriptor_set,
@@ -1021,6 +1031,22 @@ dispatch_depth_visibility(struct render_compute *render,
 	        .descriptorCount = 1,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 	        .pBufferInfo = &visibility_info,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = render->shared_descriptor_set,
+	        .dstBinding = r->compute.donor_a_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .pBufferInfo = &donor_a_info,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = render->shared_descriptor_set,
+	        .dstBinding = r->compute.donor_b_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+	        .pBufferInfo = &donor_b_info,
 	    },
 	};
 	vk->vkUpdateDescriptorSets(vk->device, ARRAY_SIZE(writes), writes, 0, NULL);
@@ -1060,6 +1086,143 @@ dispatch_depth_visibility(struct render_compute *render,
 	};
 	vk->vkCmdPipelineBarrier(r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
 	                         NULL, 1, &visibility_barrier, 0, NULL);
+}
+
+static void
+dispatch_depth_donor_propagation(struct render_compute *render)
+{
+	struct render_resources *r = render->r;
+	struct vk_bundle *vk = vk_from_render(render);
+	struct render_compute_distortion_ubo_data *data =
+	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
+
+	if (data->depth_donor.enabled == 0) {
+		data->depth_donor.final_index = 0;
+		return;
+	}
+
+	uint32_t width = data->depth_visibility.width;
+	uint32_t height = data->depth_visibility.height;
+	uint32_t view_count = data->depth_visibility.view_count;
+	VkDeviceSize active_size =
+	    (VkDeviceSize)width * (VkDeviceSize)height * (VkDeviceSize)view_count * sizeof(uint32_t);
+
+	vk->vkCmdBindDescriptorSets(r->cmd,
+	                            VK_PIPELINE_BIND_POINT_COMPUTE,
+	                            r->compute.depth_donor.pipeline_layout,
+	                            0,
+	                            1,
+	                            &render->shared_descriptor_set,
+	                            0,
+	                            NULL);
+
+	// Seed visible background candidates into donor A.
+	vk->vkCmdBindPipeline(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.depth_donor.seed_pipeline);
+	vk->vkCmdDispatch(r->cmd, uint_divide_and_round_up(width, 8), uint_divide_and_round_up(height, 8), view_count);
+
+	VkBufferMemoryBarrier donor_barriers[2] = {
+	    {
+	        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+	        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+	        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	        .buffer = r->compute.depth_donor.buffers[0].buffer,
+	        .offset = 0,
+	        .size = active_size,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+	        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+	        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	        .buffer = r->compute.depth_donor.buffers[1].buffer,
+	        .offset = 0,
+	        .size = active_size,
+	    },
+	};
+	vk->vkCmdPipelineBarrier(r->cmd,
+	                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	                         0,
+	                         0,
+	                         NULL,
+	                         2,
+	                         donor_barriers,
+	                         0,
+	                         NULL);
+
+	uint32_t max_dim = MAX(width, height);
+	uint32_t step = 1;
+	while (step <= max_dim / 2) {
+		step <<= 1;
+	}
+
+	vk->vkCmdBindPipeline(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.depth_donor.jumpflood_pipeline);
+
+	uint32_t parity = 0; // donor A is the seed/source.
+	while (step >= 1) {
+		struct render_compute_depth_donor_push_data push = {
+		    .step = step,
+		    .parity = parity,
+		};
+		vk->vkCmdPushConstants(r->cmd,
+		                       r->compute.depth_donor.pipeline_layout,
+		                       VK_SHADER_STAGE_COMPUTE_BIT,
+		                       0,
+		                       sizeof(push),
+		                       &push);
+		vk->vkCmdDispatch(r->cmd,
+		                  uint_divide_and_round_up(width, 8),
+		                  uint_divide_and_round_up(height, 8),
+		                  view_count);
+
+		vk->vkCmdPipelineBarrier(r->cmd,
+		                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		                         0,
+		                         0,
+		                         NULL,
+		                         2,
+		                         donor_barriers,
+		                         0,
+		                         NULL);
+
+		parity ^= 1u;
+		step >>= 1;
+	}
+
+	// One extra step-1 relaxation reduces the small approximation errors of
+	// standard JFA at little cost relative to the full propagation.
+	struct render_compute_depth_donor_push_data refine = {
+	    .step = 1,
+	    .parity = parity,
+	};
+	vk->vkCmdPushConstants(r->cmd,
+	                       r->compute.depth_donor.pipeline_layout,
+	                       VK_SHADER_STAGE_COMPUTE_BIT,
+	                       0,
+	                       sizeof(refine),
+	                       &refine);
+	vk->vkCmdDispatch(r->cmd,
+	                  uint_divide_and_round_up(width, 8),
+	                  uint_divide_and_round_up(height, 8),
+	                  view_count);
+	vk->vkCmdPipelineBarrier(r->cmd,
+	                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	                         0,
+	                         0,
+	                         NULL,
+	                         2,
+	                         donor_barriers,
+	                         0,
+	                         NULL);
+	parity ^= 1u;
+
+	// parity now names the buffer containing the final donor field.
+	data->depth_donor.final_index = parity;
 }
 
 void
@@ -1119,6 +1282,11 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	data->depth_visibility.view_count = render->r->view_count;
 	data->depth_visibility.enabled =
 	    debug_get_bool_option_depth_forward_visibility() && visibility_fits ? 1u : 0u;
+	data->depth_donor.enabled =
+	    data->depth_visibility.enabled != 0 && debug_get_bool_option_depth_forward_hole_fill() ? 1u : 0u;
+	data->depth_donor.final_index = 0;
+	data->depth_donor.padding0 = 0;
+	data->depth_donor.padding1 = 0;
 
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
 		render_calc_time_warp_matrix(
@@ -1169,6 +1337,7 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	}
 
 	dispatch_depth_visibility(render, src_samplers, src_image_views, depth_samplers, depth_image_views);
+	dispatch_depth_donor_propagation(render);
 	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, depth_samplers, depth_image_views,
 	                          target_image, target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
