@@ -91,13 +91,47 @@ if command -v lsof >/dev/null 2>&1 && \
     exit 1
 fi
 
+audio_mode=${MONADO_WINE_AUDIO_MODE:-system-default}
 audio_routed=0
 audio_previous_id=
 audio_previous_name=
 audio_headset_name=
 audio_helper=
+wine_audio_helper=
+wine_audio_driver=
+wine_audio_previous_output=
+wine_audio_previous_voice=
 
-if [[ ${MONADO_WINE_ROUTE_PSVR2_AUDIO:-1} != 0 ]]; then
+case "${audio_mode}" in
+wine-endpoint)
+    audio_match=${MONADO_WINE_AUDIO_DEVICE_MATCH:-}
+    if [[ -z "${audio_match}" ]]; then
+        print -u2 "MONADO_WINE_AUDIO_MODE=wine-endpoint requires MONADO_WINE_AUDIO_DEVICE_MATCH for now."
+        print -u2 "Example: MONADO_WINE_AUDIO_DEVICE_MATCH='PS VR2'"
+        exit 1
+    fi
+
+    wine_audio_helper="${MONADO_WINE_AUDIO_BUILD_DIR:-${repo_root}/build-wine-audio}/wine-hmd-audio.exe"
+    if [[ ! -f "${wine_audio_helper}" ]]; then
+        "${script_dir}/build-wine-hmd-audio-helper.zsh"
+    fi
+
+    selection=$(DXMT_BASALT_IOSURFACE=1 "${wine}" "${wine_audio_helper}" select "${audio_match}" 2>/dev/null || true)
+    selected_line=$(print -r -- "${selection}" | grep '^SELECTED' | head -n 1 || true)
+    if [[ -z "${selected_line}" ]]; then
+        print -u2 "Could not find a Wine render endpoint matching: ${audio_match}"
+        print -u2 "Available endpoints:"
+        DXMT_BASALT_IOSURFACE=1 "${wine}" "${wine_audio_helper}" list || true
+        exit 1
+    fi
+
+    wine_audio_driver=$(print -r -- "${selected_line}" | cut -f2)
+    wine_audio_previous_output=$(print -r -- "${selected_line}" | cut -f4)
+    wine_audio_previous_voice=$(print -r -- "${selected_line}" | cut -f5)
+    audio_headset_name=$(print -r -- "${selected_line}" | cut -f6-)
+    audio_routed=2
+    ;;
+system-default)
     audio_source="${script_dir}/psvr2-audio-route.swift"
     audio_helper="${run_dir}/psvr2-audio-route"
 
@@ -124,11 +158,24 @@ if [[ ${MONADO_WINE_ROUTE_PSVR2_AUDIO:-1} != 0 ]]; then
             fi
         fi
     fi
-fi
+    ;;
+unchanged)
+    ;;
+*)
+    print -u2 "Unknown MONADO_WINE_AUDIO_MODE: ${audio_mode}"
+    print -u2 "Expected: wine-endpoint, system-default, or unchanged"
+    exit 2
+    ;;
+esac
 
 restore_audio()
 {
-    if (( audio_routed )) && [[ -n "${audio_previous_id}" ]] && [[ -x "${audio_helper}" ]]; then
+    if (( audio_routed == 2 )) && [[ -n "${wine_audio_driver}" ]] && [[ -f "${wine_audio_helper}" ]]; then
+        DXMT_BASALT_IOSURFACE=1 "${wine}" "${wine_audio_helper}" restore \
+            "${wine_audio_driver}" \
+            "${wine_audio_previous_output:--}" \
+            "${wine_audio_previous_voice:--}" >/dev/null 2>&1 || true
+    elif (( audio_routed == 1 )) && [[ -n "${audio_previous_id}" ]] && [[ -x "${audio_helper}" ]]; then
         "${audio_helper}" set-default "${audio_previous_id}" >/dev/null 2>&1 || true
     fi
 }
@@ -140,13 +187,15 @@ print "  runtime: ${runtime_dll}"
 print "  service: 127.0.0.1:${port}"
 print "  trace:   ${trace_host}"
 
-if (( audio_routed )); then
+if (( audio_routed == 2 )); then
+    print "  audio:   ${audio_headset_name} (Wine endpoint pin; macOS default unchanged)"
+elif (( audio_routed == 1 )); then
     print "  audio:   ${audio_headset_name} (temporary macOS default)"
     if [[ -n "${audio_previous_name}" ]]; then
         print "           restore on exit: ${audio_previous_name}"
     fi
 else
-    print "  audio:   current macOS default (PS VR2 auto-route unavailable or disabled)"
+    print "  audio:   unchanged"
 fi
 print ""
 
