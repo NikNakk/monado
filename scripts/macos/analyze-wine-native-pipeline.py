@@ -117,12 +117,16 @@ def main() -> int:
     wine = load(wine_path)
 
     presentation_mode = "unknown"
+    hybrid_phase_files = list(directory.glob("monado_psvr2_*_hybrid_phase.csv"))
     if present:
         metal_requests = [i(row, "metal_request_ns") for row in present]
         if metal_requests and all(v == 0 for v in metal_requests):
             presentation_mode = "CAMetalDisplayLink-driven"
         elif any(v > 0 for v in metal_requests):
-            presentation_mode = "legacy timed presentDrawable:atTime:"
+            if hybrid_phase_files:
+                presentation_mode = "hybrid cadence + legacy timed presentDrawable:atTime:"
+            else:
+                presentation_mode = "true legacy CVDisplayLink + timed presentDrawable:atTime:"
 
     print(f"Trace directory: {directory}")
     print(f"Native service PID: {pid}")
