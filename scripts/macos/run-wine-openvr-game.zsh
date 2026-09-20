@@ -29,9 +29,11 @@ fi
 
 configured_openvr=$(find "${game:h}" -maxdepth 6 -type f -name 'openvr_api.dll.monado-original' -print -quit 2>/dev/null || true)
 if [[ -z "${configured_openvr}" ]]; then
-    print -u2 "This game tree is not configured by the Monado OpenComposite helper."
+    print -u2 "This game tree is not configured by a Monado OpenVR helper."
     print -u2 "Locate the game's openvr_api.dll and run:"
     print -u2 "  scripts/macos/install-opencomposite-game.zsh install '/path/to/openvr_api.dll'"
+    print -u2 "or:"
+    print -u2 "  scripts/macos/install-xrizer-game.zsh install '/path/to/openvr_api.dll'"
     exit 1
 fi
 
@@ -181,7 +183,7 @@ restore_audio()
 }
 trap restore_audio EXIT INT TERM
 
-print "Launching OpenVR game through OpenComposite -> Monado OpenXR"
+print "Launching OpenVR game through its configured compatibility runtime -> Monado OpenXR"
 print "  game:    ${game}"
 print "  runtime: ${runtime_dll}"
 print "  service: 127.0.0.1:${port}"
