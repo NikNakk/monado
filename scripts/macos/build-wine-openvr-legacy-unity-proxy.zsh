@@ -15,7 +15,19 @@ fi
 mkdir -p "${build_dir}"
 out=${build_dir}/openvr_api.dll
 
-"${cxx}"     -std=c++17     -O2     -shared     -static-libgcc     -static-libstdc++     -I "${repo_root}/src/external/openvr_includes"     "${repo_root}/tests/windows/openvr_legacy_unity_proxy.cpp"     -o "${out}"     -ld3d11     -ldxgi     -ldxguid
+"${cxx}" \
+    -std=c++17 \
+    -O2 \
+    -shared \
+    -static \
+    -static-libgcc \
+    -static-libstdc++ \
+    -I "${repo_root}/src/external/openvr_includes" \
+    "${repo_root}/tests/windows/openvr_legacy_unity_proxy.cpp" \
+    -o "${out}" \
+    -ld3d11 \
+    -ldxgi \
+    -ldxguid
 
 description=$(file "${out}")
 if [[ "${description}" != *"PE32+ executable (DLL)"*"x86-64"* ]]; then
@@ -27,11 +39,8 @@ fi
 objdump_cmd=${OBJDUMP_MINGW:-$(command -v x86_64-w64-mingw32-objdump || true)}
 if [[ -n "${objdump_cmd}" ]]; then
     imports=$("${objdump_cmd}" -p "${out}" | awk '/DLL Name:/ {print $3}')
-    unexpected=$(print -r -- "${imports}" | grep -Eiv '^(KERNEL32\.dll|USER32\.dll|D3D11\.dll|DXGI\.dll|OLE32\.dll|ADVAPI32\.dll|msvcrt\.dll)print "  ${out}"
-print ""
-print "The proxy expects a sibling file named:"
-print "  openvr_api_opencomposite.dll"
- || true)
+    unexpected=$(print -r -- "${imports}" | \
+        grep -Eiv '^(KERNEL32\.dll|USER32\.dll|D3D11\.dll|DXGI\.dll|OLE32\.dll|ADVAPI32\.dll|msvcrt\.dll)$' || true)
     if [[ -n "${unexpected}" ]]; then
         print -u2 "Legacy proxy has unexpected runtime DLL dependencies:"
         print -u2 -- "${unexpected}"
