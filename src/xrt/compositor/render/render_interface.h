@@ -481,6 +481,10 @@ struct render_resources
 		//! Forward-reprojected target-view depth visibility buffer.
 		uint32_t visibility_binding;
 
+		//! Packed nearest-background donor ping-pong buffers.
+		uint32_t donor_a_binding;
+		uint32_t donor_b_binding;
+
 		struct
 		{
 			//! Descriptor set layout for compute.
@@ -529,6 +533,15 @@ struct render_resources
 			VkPipeline clear_pipeline;
 			VkPipeline pipeline;
 		} depth_visibility;
+
+		struct
+		{
+			//! Packed donor x/y coordinates, ping-ponged by jump flooding.
+			struct render_buffer buffers[2];
+			VkPipelineLayout pipeline_layout;
+			VkPipeline seed_pipeline;
+			VkPipeline jumpflood_pipeline;
+		} depth_donor;
 
 		struct
 		{
@@ -1229,6 +1242,15 @@ struct render_compute_blit_push_data
 };
 
 /*!
+ * Push data for jump-flood donor propagation.
+ */
+struct render_compute_depth_donor_push_data
+{
+	uint32_t step;
+	uint32_t parity;
+};
+
+/*!
  * UBO data that is sent to the compute layer shaders.
  *
  * @relates render_compute
@@ -1447,6 +1469,14 @@ struct render_compute_distortion_ubo_data
 		uint32_t view_count;
 		uint32_t enabled;
 	} depth_visibility;
+	// Donor propagation state: enabled, final ping-pong buffer index.
+	struct
+	{
+		uint32_t enabled;
+		uint32_t final_index;
+		uint32_t padding0;
+		uint32_t padding1;
+	} depth_donor;
 };
 
 /*!
