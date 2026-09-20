@@ -26,6 +26,16 @@ layout(set = 0, binding = 4, std430) readonly buffer Visibility
 {
 	uint depth_bits[];
 } visibility;
+
+layout(set = 0, binding = 5, std430) readonly buffer DonorA
+{
+	uint packed_xy[];
+} donor_a;
+
+layout(set = 0, binding = 6, std430) readonly buffer DonorB
+{
+	uint packed_xy[];
+} donor_b;
 layout(set = 0, binding = 3, std140) uniform restrict Config
 {
 	ivec4 views[2];
@@ -44,6 +54,7 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	uvec4 has_depth[2];
 	uvec4 depth_debug;
 	uvec4 depth_visibility;
+	uvec4 depth_donor;
 }ubo;
 
 
@@ -471,13 +482,9 @@ bool depth_visibility_decode(uint encoded, out float target_z)
 
 bool depth_visibility_target_z(vec2 target_projection_uv,
                                uint iz,
-                               out float target_z,
-                               out vec2 donor_target_uv,
-                               out bool hole_filled)
+                               out float target_z)
 {
 	target_z = 0.0;
-	donor_target_uv = target_projection_uv;
-	hole_filled = false;
 	if (ubo.depth_visibility.w == 0u ||
 	    any(lessThan(target_projection_uv, vec2(0.0))) ||
 	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
@@ -494,104 +501,49 @@ bool depth_visibility_target_z(vec2 target_projection_uv,
 	                  uvec2(width - 1u, height - 1u));
 	uint base = iz * width * height;
 	uint encoded = visibility.depth_bits[base + pixel.y * width + pixel.x];
-	if (depth_visibility_decode(encoded, target_z)) {
-		donor_target_uv = (vec2(pixel) + vec2(0.5)) / vec2(width, height);
-		return true;
-	}
+	return depth_visibility_decode(encoded, target_z);
+}
 
-	if (ubo.has_depth[iz].z == 0u) {
+bool depth_donor_target(vec2 target_projection_uv,
+                        uint iz,
+                        out vec2 donor_target_uv,
+                        out float donor_target_z)
+{
+	donor_target_uv = target_projection_uv;
+	donor_target_z = 0.0;
+	if (ubo.depth_donor.x == 0u ||
+	    any(lessThan(target_projection_uv, vec2(0.0))) ||
+	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
 		return false;
 	}
 
-	// Forward splatting cannot reconstruct background that was hidden behind
-	// foreground in the submitted frame. For a hole, find the nearest visible
-	// donor independently along eight directions. We first bracket the edge
-	// exponentially, then refine that bracket to pixel precision. Finally choose
-	// the farthest-depth donor among those nearest directional candidates.
-	//
-	// This preserves the cheap logarithmic reach of the old 1,2,4,8... search
-	// without quantising the chosen donor distance to powers of two (which
-	// produced the visible nested square/card contours).
-	const ivec2 directions[8] = ivec2[8](
-	    ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
-	    ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1));
-	ivec2 origin_pixel = ivec2(pixel);
-	ivec2 max_pixel = ivec2(int(width) - 1, int(height) - 1);
-	float best_background_z = 0.0;
-	ivec2 best_donor_pixel = origin_pixel;
-	bool found_background = false;
-
-	for (int d = 0; d < 8; ++d) {
-		int low = 0;   // known hole/invalid
-		int high = 1;  // candidate valid bracket
-		bool bracketed = false;
-
-		for (int step = 0; step < 9; ++step) {
-			ivec2 p = origin_pixel + directions[d] * high;
-			if (any(lessThan(p, ivec2(0))) || any(greaterThan(p, max_pixel))) {
-				break;
-			}
-
-			float probe_z;
-			uint probe_encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
-			if (depth_visibility_decode(probe_encoded, probe_z)) {
-				bracketed = true;
-				break;
-			}
-
-			low = high;
-			high *= 2;
-		}
-
-		if (!bracketed) {
-			continue;
-		}
-
-		// Hole interiors are contiguous in the forward map, so once the
-		// exponential probe reaches visible geometry the invalid->valid
-		// transition can be refined to the nearest pixel.
-		int lo = low + 1;
-		int hi = high;
-		for (int refine = 0; refine < 9; ++refine) {
-			if (lo >= hi) {
-				break;
-			}
-			int mid = (lo + hi) / 2;
-			ivec2 p = origin_pixel + directions[d] * mid;
-			float probe_z;
-			uint probe_encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
-			if (depth_visibility_decode(probe_encoded, probe_z)) {
-				hi = mid;
-			} else {
-				lo = mid + 1;
-			}
-		}
-
-		ivec2 donor_pixel = origin_pixel + directions[d] * hi;
-		float donor_z;
-		uint donor_encoded =
-		    visibility.depth_bits[base + uint(donor_pixel.y) * width + uint(donor_pixel.x)];
-		if (!depth_visibility_decode(donor_encoded, donor_z)) {
-			continue;
-		}
-
-		// Among the nearest candidates, prefer the farthest surface so a
-		// disocclusion reveals background rather than the displaced foreground.
-		if (!found_background || donor_z > best_background_z) {
-			best_background_z = donor_z;
-			best_donor_pixel = donor_pixel;
-			found_background = true;
-		}
+	uint width = ubo.depth_visibility.x;
+	uint height = ubo.depth_visibility.y;
+	if (width == 0u || height == 0u || iz >= ubo.depth_visibility.z) {
+		return false;
 	}
 
-	if (found_background) {
-		target_z = best_background_z;
-		donor_target_uv = (vec2(best_donor_pixel) + vec2(0.5)) / vec2(width, height);
-		hole_filled = true;
-		return true;
+	uvec2 pixel = min(uvec2(target_projection_uv * vec2(width, height)),
+	                  uvec2(width - 1u, height - 1u));
+	uint base = iz * width * height;
+	uint index = base + pixel.y * width + pixel.x;
+	uint packed = ubo.depth_donor.y == 0u ? donor_a.packed_xy[index] : donor_b.packed_xy[index];
+	if (packed == 0xffffffffu) {
+		return false;
 	}
 
-	return false;
+	uvec2 donor = uvec2(packed & 0xffffu, packed >> 16);
+	if (donor.x >= width || donor.y >= height) {
+		return false;
+	}
+
+	uint donor_encoded = visibility.depth_bits[base + donor.y * width + donor.x];
+	if (!depth_visibility_decode(donor_encoded, donor_target_z)) {
+		return false;
+	}
+
+	donor_target_uv = (vec2(donor) + vec2(0.5)) / vec2(width, height);
+	return true;
 }
 
 float depth_source_z_at_projection_uv(vec2 projection_uv, uint iz)
@@ -635,13 +587,11 @@ bool depth_snap_source_uv_to_surface(vec2 candidate_uv,
 	const ivec2 directions[8] = ivec2[8](
 	    ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
 	    ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1));
-	const int radii[9] = int[9](1, 2, 4, 8, 16, 32, 64, 128, 256);
+	const int radii[4] = int[4](1, 2, 4, 8);
 
-	// If the reconstructed source position lies behind an occluder, find the
-	// nearest visible sample belonging to the same depth surface. Stopping at
-	// the first ring with a valid depth match gives a nearest-background
-	// extrapolation rather than copying arbitrary distant texture.
-	for (int r = 0; r < 9; ++r) {
+	// Only a small local correction belongs here. Large disocclusions are
+	// handled coherently by the propagated target-space donor field.
+	for (int r = 0; r < 4; ++r) {
 		float ring_best_error = 1e30;
 		vec2 ring_best_uv = candidate_uv;
 		for (int d = 0; d < 8; ++d) {
@@ -758,23 +708,51 @@ void main()
 
 		if (forward_enabled) {
 			float target_z;
-			vec2 donor_target_uv;
-			bool hole_filled;
-			if (depth_visibility_target_z(g_target_uv, iz, target_z, donor_target_uv, hole_filled)) {
-				if (hole_filled) {
-					/*
-					 * True disocclusion: the requested background texel was hidden
-					 * in the submitted frame, so geometric back-projection cannot
-					 * recover its colour. Inpaint from the visible background donor
-					 * that supplied the target depth instead of casting the hole ray
-					 * through the old foreground footprint. Sampling one donor UV for
-					 * all channels also avoids chromatic/card-shaped contours in the
-					 * synthesized region.
-					 */
+			if (depth_visibility_target_z(g_target_uv, iz, target_z)) {
+				float expected_r_z;
+				float expected_g_z;
+				float expected_b_z;
+				vec2 candidate_r =
+				    depth_source_uv_from_target_z(r_target_uv, target_z, subimage_uv.y, iz, expected_r_z);
+				vec2 candidate_g =
+				    depth_source_uv_from_target_z(g_target_uv, target_z, subimage_uv.y, iz, expected_g_z);
+				vec2 candidate_b =
+				    depth_source_uv_from_target_z(b_target_uv, target_z, subimage_uv.y, iz, expected_b_z);
+
+				r_projection_uv = candidate_r;
+				g_projection_uv = candidate_g;
+				b_projection_uv = candidate_b;
+
+				vec2 snapped_g;
+				if (depth_snap_source_uv_to_surface(candidate_g, expected_g_z, iz, snapped_g)) {
+					g_projection_uv = snapped_g;
+				}
+
+				if (ubo.has_depth[iz].y != 0u) {
+					vec2 snapped_r;
+					vec2 snapped_b;
+					if (depth_snap_source_uv_to_surface(candidate_r, expected_r_z, iz, snapped_r)) {
+						r_projection_uv = snapped_r;
+					} else {
+						r_projection_uv = g_projection_uv;
+					}
+					if (depth_snap_source_uv_to_surface(candidate_b, expected_b_z, iz, snapped_b)) {
+						b_projection_uv = snapped_b;
+					} else {
+						b_projection_uv = g_projection_uv;
+					}
+				}
+			} else {
+				vec2 donor_target_uv;
+				float donor_target_z;
+				if (depth_donor_target(g_target_uv, iz, donor_target_uv, donor_target_z)) {
+					// True disocclusion: use one propagated visible-background
+					// donor coherently for all channels. This is inpainting, not
+					// geometric reconstruction of a hidden source texel.
 					float donor_source_z;
 					vec2 donor_source_uv =
 					    depth_source_uv_from_target_z(donor_target_uv,
-					                                  target_z,
+					                                  donor_target_z,
 					                                  donor_target_uv.y,
 					                                  iz,
 					                                  donor_source_z);
@@ -789,53 +767,14 @@ void main()
 					g_projection_uv = donor_source_uv;
 					b_projection_uv = donor_source_uv;
 				} else {
-					float expected_r_z;
-					float expected_g_z;
-					float expected_b_z;
-					vec2 candidate_r =
-					    depth_source_uv_from_target_z(r_target_uv, target_z, subimage_uv.y, iz, expected_r_z);
-					vec2 candidate_g =
-					    depth_source_uv_from_target_z(g_target_uv, target_z, subimage_uv.y, iz, expected_g_z);
-					vec2 candidate_b =
-					    depth_source_uv_from_target_z(b_target_uv, target_z, subimage_uv.y, iz, expected_b_z);
-
-					g_projection_uv = candidate_g;
-					r_projection_uv = candidate_r;
-					b_projection_uv = candidate_b;
-
-					vec2 snapped_g;
-					bool green_matches =
-					    depth_snap_source_uv_to_surface(candidate_g, expected_g_z, iz, snapped_g);
-					if (green_matches) {
-						g_projection_uv = snapped_g;
-					}
-
-					if (ubo.has_depth[iz].y != 0u) {
-						vec2 snapped_r;
-						vec2 snapped_b;
-						if (depth_snap_source_uv_to_surface(candidate_r, expected_r_z, iz, snapped_r)) {
-							r_projection_uv = snapped_r;
-						} else {
-							r_projection_uv = g_projection_uv;
-						}
-						if (depth_snap_source_uv_to_surface(candidate_b, expected_b_z, iz, snapped_b)) {
-							b_projection_uv = snapped_b;
-						} else {
-							b_projection_uv = g_projection_uv;
-						}
-					}
+					// No propagated background donor: expose missing data rather
+					// than preserving stale foreground or inventing a duplicate.
+					r_projection_uv = vec2(-1.0);
+					g_projection_uv = vec2(-1.0);
+					b_projection_uv = vec2(-1.0);
 				}
-			} else {
-				// No forward-visible depth even after local background-biased hole
-				// fill: sample outside the source image instead of retaining stale
-				// foreground at its old position. This should be rare and makes
-				// missing data obvious without creating a duplicate object.
-				r_projection_uv = vec2(-1.0);
-				g_projection_uv = vec2(-1.0);
-				b_projection_uv = vec2(-1.0);
 			}
 		}
-
 		if (!forward_enabled && ubo.has_depth[iz].x != 0u) {
 			// Legacy inverse-search path retained only for A/B testing and depth
 			// diagnostics. The normal forward path deliberately never drops into
