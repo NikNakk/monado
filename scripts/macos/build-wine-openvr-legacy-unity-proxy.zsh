@@ -24,6 +24,21 @@ if [[ "${description}" != *"PE32+ executable (DLL)"*"x86-64"* ]]; then
     exit 1
 fi
 
+objdump_cmd=${OBJDUMP_MINGW:-$(command -v x86_64-w64-mingw32-objdump || true)}
+if [[ -n "${objdump_cmd}" ]]; then
+    imports=$("${objdump_cmd}" -p "${out}" | awk '/DLL Name:/ {print $3}')
+    unexpected=$(print -r -- "${imports}" | grep -Eiv '^(KERNEL32\.dll|USER32\.dll|D3D11\.dll|DXGI\.dll|OLE32\.dll|ADVAPI32\.dll|msvcrt\.dll)print "  ${out}"
+print ""
+print "The proxy expects a sibling file named:"
+print "  openvr_api_opencomposite.dll"
+ || true)
+    if [[ -n "${unexpected}" ]]; then
+        print -u2 "Legacy proxy has unexpected runtime DLL dependencies:"
+        print -u2 -- "${unexpected}"
+        exit 1
+    fi
+fi
+
 print "Built legacy Unity OpenVR proxy:"
 print "  ${out}"
 print ""
