@@ -25,10 +25,11 @@ if [[ ! -x "${wine}" ]]; then
 	print -u2 "Missing private Wine/DXMT stack."
 	exit 1
 fi
-if [[ ! -f "${game:h}/openvr_api.dll.monado-original" ]]; then
-	print -u2 "This game directory is not configured by the Monado OpenComposite helper."
-	print -u2 "Run:"
-	print -u2 "  scripts/macos/install-opencomposite-game.zsh install '${game:h}/openvr_api.dll'"
+configured_openvr=$(find "${game:h}" -maxdepth 6 -type f -name 'openvr_api.dll.monado-original' -print -quit 2>/dev/null || true)
+if [[ -z "${configured_openvr}" ]]; then
+	print -u2 "This game tree is not configured by the Monado OpenComposite helper."
+	print -u2 "Locate the game's openvr_api.dll and run:"
+	print -u2 "  scripts/macos/install-opencomposite-game.zsh install '/path/to/openvr_api.dll'"
 	exit 1
 fi
 
