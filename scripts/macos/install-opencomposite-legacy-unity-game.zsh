@@ -61,7 +61,7 @@ install)
     cat > "${config}" <<'EOF'
 ; Managed by Monado Wine/OpenComposite legacy Unity helper.
 initUsingVulkan=false
-logAllOpenVRCalls=true
+logAllOpenVRCalls=false
 logGetTrackedProperty=true
 EOF
 
