@@ -30,6 +30,8 @@ struct render_shaders
 	VkShaderModule distortion_comp;
 	VkShaderModule depth_visibility_comp;
 	VkShaderModule depth_visibility_clear_comp;
+	VkShaderModule depth_donor_seed_comp;
+	VkShaderModule depth_donor_jumpflood_comp;
 
 	VkShaderModule mesh_vert;
 	VkShaderModule mesh_frag;
