@@ -12,6 +12,8 @@ set(SHADERS
     distortion.comp
     depth_visibility.comp
     depth_visibility_clear.comp
+    depth_donor_seed.comp
+    depth_donor_jumpflood.comp
     layer.comp
     mesh.frag
     mesh.vert
