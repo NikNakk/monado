@@ -504,41 +504,91 @@ bool depth_visibility_target_z(vec2 target_projection_uv,
 	}
 
 	// Forward splatting cannot reconstruct background that was hidden behind
-	// foreground in the submitted frame. For a missing target pixel, expand
-	// outwards until we reach visible geometry and choose the farthest surface
-	// on that first populated ring. This is deliberately background-biased.
+	// foreground in the submitted frame. For a hole, find the nearest visible
+	// donor independently along eight directions. We first bracket the edge
+	// exponentially, then refine that bracket to pixel precision. Finally choose
+	// the farthest-depth donor among those nearest directional candidates.
 	//
-	// The exponential radii keep normal late-reprojection holes cheap (usually
-	// resolved at 1-4 px) while allowing the frozen-frame stress test to bridge
-	// an entire card footprint without falling back to stale foreground.
+	// This preserves the cheap logarithmic reach of the old 1,2,4,8... search
+	// without quantising the chosen donor distance to powers of two (which
+	// produced the visible nested square/card contours).
 	const ivec2 directions[8] = ivec2[8](
 	    ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
 	    ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1));
-	const int radii[9] = int[9](1, 2, 4, 8, 16, 32, 64, 128, 256);
+	ivec2 origin_pixel = ivec2(pixel);
 	ivec2 max_pixel = ivec2(int(width) - 1, int(height) - 1);
+	float best_background_z = 0.0;
+	ivec2 best_donor_pixel = origin_pixel;
+	bool found_background = false;
 
-	for (int r = 0; r < 9; ++r) {
-		float ring_farthest_z = 0.0;
-		ivec2 ring_donor_pixel = ivec2(pixel);
-		bool ring_found = false;
-		for (int d = 0; d < 8; ++d) {
-			ivec2 p = clamp(ivec2(pixel) + directions[d] * radii[r], ivec2(0), max_pixel);
-			uint neighbour_encoded =
-			    visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
-			float neighbour_z;
-			if (depth_visibility_decode(neighbour_encoded, neighbour_z) &&
-			    (!ring_found || neighbour_z > ring_farthest_z)) {
-				ring_farthest_z = neighbour_z;
-				ring_donor_pixel = p;
-				ring_found = true;
+	for (int d = 0; d < 8; ++d) {
+		int low = 0;   // known hole/invalid
+		int high = 1;  // candidate valid bracket
+		bool bracketed = false;
+
+		for (int step = 0; step < 9; ++step) {
+			ivec2 p = origin_pixel + directions[d] * high;
+			if (any(lessThan(p, ivec2(0))) || any(greaterThan(p, max_pixel))) {
+				break;
+			}
+
+			float probe_z;
+			uint probe_encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
+			if (depth_visibility_decode(probe_encoded, probe_z)) {
+				bracketed = true;
+				break;
+			}
+
+			low = high;
+			high *= 2;
+		}
+
+		if (!bracketed) {
+			continue;
+		}
+
+		// Hole interiors are contiguous in the forward map, so once the
+		// exponential probe reaches visible geometry the invalid->valid
+		// transition can be refined to the nearest pixel.
+		int lo = low + 1;
+		int hi = high;
+		for (int refine = 0; refine < 9; ++refine) {
+			if (lo >= hi) {
+				break;
+			}
+			int mid = (lo + hi) / 2;
+			ivec2 p = origin_pixel + directions[d] * mid;
+			float probe_z;
+			uint probe_encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
+			if (depth_visibility_decode(probe_encoded, probe_z)) {
+				hi = mid;
+			} else {
+				lo = mid + 1;
 			}
 		}
-		if (ring_found) {
-			target_z = ring_farthest_z;
-			donor_target_uv = (vec2(ring_donor_pixel) + vec2(0.5)) / vec2(width, height);
-			hole_filled = true;
-			return true;
+
+		ivec2 donor_pixel = origin_pixel + directions[d] * hi;
+		float donor_z;
+		uint donor_encoded =
+		    visibility.depth_bits[base + uint(donor_pixel.y) * width + uint(donor_pixel.x)];
+		if (!depth_visibility_decode(donor_encoded, donor_z)) {
+			continue;
 		}
+
+		// Among the nearest candidates, prefer the farthest surface so a
+		// disocclusion reveals background rather than the displaced foreground.
+		if (!found_background || donor_z > best_background_z) {
+			best_background_z = donor_z;
+			best_donor_pixel = donor_pixel;
+			found_background = true;
+		}
+	}
+
+	if (found_background) {
+		target_z = best_background_z;
+		donor_target_uv = (vec2(best_donor_pixel) + vec2(0.5)) / vec2(width, height);
+		hole_filled = true;
+		return true;
 	}
 
 	return false;
