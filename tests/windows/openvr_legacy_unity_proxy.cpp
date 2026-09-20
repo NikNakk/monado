@@ -155,9 +155,24 @@ legacy_get_frame_timing(vr::Compositor_FrameTiming *timing, uint32_t frames_ago)
         std::fflush(stderr);
     }
 
-    if (ok && timing != nullptr && timing->m_nNumFramePresents == 0) {
+    if (timing != nullptr && timing->m_nNumFramePresents == 0) {
+        // SteamVR's Unity 5.x integration uses m_nNumFramePresents to derive
+        // Time.maximumDeltaTime but does not robustly handle GetFrameTiming()
+        // returning false before a compositor timing sample exists. A zero
+        // value drives maximumDeltaTime to zero and causes a runaway
+        // FixedUpdate/PostPresentHandoff loop. Supply the minimal sane value
+        // expected for a normally presented frame.
         timing->m_nNumFramePresents = 1;
     }
+
+    if (!ok && timing != nullptr) {
+        // For this legacy compatibility path the Unity script only needs a
+        // usable frame-present count here. Report success once we have
+        // supplied that fallback so the caller does not treat the timing
+        // structure as unavailable.
+        return true;
+    }
+
     return ok;
 }
 
