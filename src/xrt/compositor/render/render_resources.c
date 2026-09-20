@@ -1123,6 +1123,62 @@ render_resources_init(struct render_resources *r,
 	VK_CHK_WITH_RET(ret, "vk_create_compute_pipeline(depth_visibility)", false);
 	VK_NAME_PIPELINE(vk, r->compute.depth_visibility.pipeline, "render_resources depth visibility pipeline");
 
+	/*
+	 * Packed nearest-background donor field. Two uint-per-pixel buffers are
+	 * ping-ponged by jump flooding. Coordinates are packed as x | (y << 16).
+	 */
+	for (uint32_t i = 0; i < 2; ++i) {
+		ret = render_buffer_init(
+		    vk,
+		    &r->compute.depth_donor.buffers[i],
+		    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+		    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		    visibility_size);
+		VK_CHK_WITH_RET(ret, "render_buffer_init(depth_donor)", false);
+	}
+	VK_NAME_BUFFER(vk, r->compute.depth_donor.buffers[0].buffer, "render_resources depth donor A");
+	VK_NAME_BUFFER(vk, r->compute.depth_donor.buffers[1].buffer, "render_resources depth donor B");
+
+	VkPushConstantRange donor_push_range = {
+	    .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+	    .offset = 0,
+	    .size = sizeof(struct render_compute_depth_donor_push_data),
+	};
+	VkPipelineLayoutCreateInfo donor_layout_info = {
+	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+	    .setLayoutCount = 1,
+	    .pSetLayouts = &r->compute.distortion.descriptor_set_layout,
+	    .pushConstantRangeCount = 1,
+	    .pPushConstantRanges = &donor_push_range,
+	};
+	ret = vk->vkCreatePipelineLayout(
+	    vk->device, &donor_layout_info, NULL, &r->compute.depth_donor.pipeline_layout);
+	VK_CHK_WITH_RET(ret, "vkCreatePipelineLayout(depth_donor)", false);
+	VK_NAME_PIPELINE_LAYOUT(vk, r->compute.depth_donor.pipeline_layout,
+	                        "render_resources depth donor pipeline layout");
+
+	ret = vk_create_compute_pipeline(
+	    vk,
+	    r->pipeline_cache,
+	    r->shaders->depth_donor_seed_comp,
+	    r->compute.depth_donor.pipeline_layout,
+	    NULL,
+	    &r->compute.depth_donor.seed_pipeline);
+	VK_CHK_WITH_RET(ret, "vk_create_compute_pipeline(depth_donor_seed)", false);
+	VK_NAME_PIPELINE(vk, r->compute.depth_donor.seed_pipeline,
+	                 "render_resources depth donor seed pipeline");
+
+	ret = vk_create_compute_pipeline(
+	    vk,
+	    r->pipeline_cache,
+	    r->shaders->depth_donor_jumpflood_comp,
+	    r->compute.depth_donor.pipeline_layout,
+	    NULL,
+	    &r->compute.depth_donor.jumpflood_pipeline);
+	VK_CHK_WITH_RET(ret, "vk_create_compute_pipeline(depth_donor_jumpflood)", false);
+	VK_NAME_PIPELINE(vk, r->compute.depth_donor.jumpflood_pipeline,
+	                 "render_resources depth donor jumpflood pipeline");
+
 
 	/*
 	 * Clear pipeline.
@@ -1257,6 +1313,9 @@ render_resources_fini(struct render_resources *r)
 	D(Pipeline, r->compute.distortion.timewarp_pipeline);
 	D(Pipeline, r->compute.depth_visibility.clear_pipeline);
 	D(Pipeline, r->compute.depth_visibility.pipeline);
+	D(Pipeline, r->compute.depth_donor.seed_pipeline);
+	D(Pipeline, r->compute.depth_donor.jumpflood_pipeline);
+	D(PipelineLayout, r->compute.depth_donor.pipeline_layout);
 	D(PipelineLayout, r->compute.distortion.pipeline_layout);
 
 	D(Pipeline, r->compute.clear.pipeline);
@@ -1264,6 +1323,8 @@ render_resources_fini(struct render_resources *r)
 	render_distortion_images_fini(r);
 	render_buffer_fini(vk, &r->compute.clear.ubo);
 	render_buffer_fini(vk, &r->compute.depth_visibility.buffer);
+	render_buffer_fini(vk, &r->compute.depth_donor.buffers[0]);
+	render_buffer_fini(vk, &r->compute.depth_donor.buffers[1]);
 	for (uint32_t i = 0; i < r->view_count; i++) {
 		render_buffer_fini(vk, &r->compute.layer.ubos[i]);
 	}
