@@ -43,24 +43,25 @@ fi
 objdump_cmd=${OBJDUMP_MINGW:-$(command -v x86_64-w64-mingw32-objdump || true)}
 if [[ -n "${objdump_cmd}" ]]; then
     imports=$("${objdump_cmd}" -p "${out}" | awk '/DLL Name:/ {print $3}')
-    unexpected=$(print -r -- "${imports}" | \
-        grep -Eiv '^(KERNEL32\.dll|USER32\.dll|D3D11\.dll|DXGI\.dll|OLE32\.dll|ADVAPI32\.dll|msvcrt\.dll|api-ms-win-crt-[A-Za-z0-9-]+\.dll))
-    if [[ -n "${unexpected}" ]]; then
-        print -u2 "Legacy proxy has unexpected runtime DLL dependencies:"
-        print -u2 -- "${unexpected}"
-        exit 1
-    fi
-fi
+    unexpected=()
 
-print "Built legacy Unity OpenVR proxy:"
-print "  ${out}"
-print ""
-print "The proxy expects a sibling file named:"
-print "  openvr_api_opencomposite.dll"
- || true)
-    if [[ -n "${unexpected}" ]]; then
+    while IFS= read -r dll; do
+        [[ -n "${dll}" ]] || continue
+
+        case "${dll:l}" in
+            kernel32.dll|user32.dll|d3d11.dll|dxgi.dll|ole32.dll|advapi32.dll|msvcrt.dll)
+                ;;
+            api-ms-win-crt-*.dll)
+                ;;
+            *)
+                unexpected+=("${dll}")
+                ;;
+        esac
+    done <<< "${imports}"
+
+    if (( ${#unexpected[@]} != 0 )); then
         print -u2 "Legacy proxy has unexpected runtime DLL dependencies:"
-        print -u2 -- "${unexpected}"
+        printf '%s\n' "${unexpected[@]}" >&2
         exit 1
     fi
 fi
