@@ -504,6 +504,43 @@ bool depth_visibility_target_z(vec2 target_projection_uv,
 	return depth_visibility_decode(encoded, target_z);
 }
 
+bool depth_source_provenance(vec2 target_projection_uv,
+                             uint iz,
+                             out vec2 source_projection_uv)
+{
+	source_projection_uv = vec2(-1.0);
+	if (ubo.depth_visibility.w == 0u ||
+	    any(lessThan(target_projection_uv, vec2(0.0))) ||
+	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
+		return false;
+	}
+
+	uint width = ubo.depth_visibility.x;
+	uint height = ubo.depth_visibility.y;
+	if (width == 0u || height == 0u || width > 4095u || height > 4095u ||
+	    iz >= ubo.depth_visibility.z) {
+		return false;
+	}
+
+	uvec2 pixel = min(uvec2(target_projection_uv * vec2(width, height)),
+	                  uvec2(width - 1u, height - 1u));
+	uint base = iz * width * height;
+	uint packed = donor_a.packed_xy[base + pixel.y * width + pixel.x];
+	if (packed == 0xffffffffu) {
+		return false;
+	}
+
+	uint source_x = packed & 0xfffu;
+	uint source_y = (packed >> 12) & 0xfffu;
+	if (source_x >= width || source_y >= height) {
+		return false;
+	}
+
+	source_projection_uv =
+	    (vec2(source_x, source_y) + vec2(0.5)) / vec2(width, height);
+	return true;
+}
+
 bool depth_donor_target(vec2 target_projection_uv,
                         uint iz,
                         out vec2 donor_target_uv,
@@ -712,7 +749,7 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 	ivec2 last_pos = ivec2(-32768);
 	ivec2 last_neg = ivec2(-32768);
 
-	for (uint step = 1u; step <= 64u; ++step) {
+	for (uint step = 2u; step <= 64u; step += 2u) {
 		if (step > max_fill_px || (found_pos && found_neg)) {
 			break;
 		}
@@ -728,6 +765,20 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 				float z;
 				uint encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
 				if (depth_visibility_decode(encoded, z)) {
+					if (step > 1u) {
+						ivec2 refined = origin + ivec2(round(direction * float(step - 1u)));
+						if (all(greaterThanEqual(refined, ivec2(0))) &&
+						    all(lessThanEqual(refined, max_pixel))) {
+							float refined_z;
+							uint refined_encoded =
+							    visibility.depth_bits[base + uint(refined.y) * width + uint(refined.x)];
+							if (depth_visibility_decode(refined_encoded, refined_z)) {
+								p = refined;
+								z = refined_z;
+								step -= 1u;
+							}
+						}
+					}
 					found_pos = true;
 					pos_pixel = p;
 					pos_z = z;
@@ -745,6 +796,20 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 				float z;
 				uint encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
 				if (depth_visibility_decode(encoded, z)) {
+					if (step > 1u) {
+						ivec2 refined = origin - ivec2(round(direction * float(step - 1u)));
+						if (all(greaterThanEqual(refined, ivec2(0))) &&
+						    all(lessThanEqual(refined, max_pixel))) {
+							float refined_z;
+							uint refined_encoded =
+							    visibility.depth_bits[base + uint(refined.y) * width + uint(refined.x)];
+							if (depth_visibility_decode(refined_encoded, refined_z)) {
+								p = refined;
+								z = refined_z;
+								step -= 1u;
+							}
+						}
+					}
 					found_neg = true;
 					neg_pixel = p;
 					neg_z = z;
@@ -877,9 +942,15 @@ void main()
 				g_projection_uv = candidate_g;
 				b_projection_uv = candidate_b;
 
-				vec2 snapped_g;
-				if (depth_snap_source_uv_to_surface(candidate_g, expected_g_z, iz, snapped_g)) {
-					g_projection_uv = snapped_g;
+				vec2 exact_g;
+				bool have_exact_g = depth_source_provenance(g_target_uv, iz, exact_g);
+				if (have_exact_g) {
+					g_projection_uv = exact_g;
+				} else {
+					vec2 snapped_g;
+					if (depth_snap_source_uv_to_surface(candidate_g, expected_g_z, iz, snapped_g)) {
+						g_projection_uv = snapped_g;
+					}
 				}
 
 				if (ubo.has_depth[iz].y != 0u) {
@@ -913,20 +984,19 @@ void main()
 				}
 
 				if (have_donor) {
-					float donor_source_z;
-					vec2 donor_source_uv =
-					    depth_source_uv_from_target_z(donor_target_uv,
-					                                  donor_target_z,
-					                                  donor_target_uv.y,
-					                                  iz,
-					                                  donor_source_z);
-					// The donor is already a visible target-space sample selected
-					// along the pose-derived parallax axis. Do not run a second
-					// radial source-space snap here: that would let synthesized
-					// background wander sideways and recreate the trail artefact.
-					r_projection_uv = donor_source_uv;
-					g_projection_uv = donor_source_uv;
-					b_projection_uv = donor_source_uv;
+					vec2 donor_source_uv;
+					if (depth_source_provenance(donor_target_uv, iz, donor_source_uv)) {
+						// Use the exact submitted source texel that forward-projected
+						// into the visible background donor. This avoids reconstructing
+						// the donor ray through the old foreground footprint.
+						r_projection_uv = donor_source_uv;
+						g_projection_uv = donor_source_uv;
+						b_projection_uv = donor_source_uv;
+					} else {
+						r_projection_uv = vec2(-1.0);
+						g_projection_uv = vec2(-1.0);
+						b_projection_uv = vec2(-1.0);
+					}
 				} else {
 					// A larger hole represents genuinely unseen colour. Leave it
 					// missing rather than spend many passes fabricating a structured
