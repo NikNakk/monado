@@ -721,7 +721,7 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 
 		if (!found_pos) {
 			ivec2 p = origin + offset;
-			if (p != last_pos &&
+			if (any(notEqual(p, last_pos)) &&
 			    all(greaterThanEqual(p, ivec2(0))) &&
 			    all(lessThanEqual(p, max_pixel))) {
 				last_pos = p;
@@ -738,7 +738,7 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 
 		if (!found_neg) {
 			ivec2 p = origin - offset;
-			if (p != last_neg &&
+			if (any(notEqual(p, last_neg)) &&
 			    all(greaterThanEqual(p, ivec2(0))) &&
 			    all(lessThanEqual(p, max_pixel))) {
 				last_neg = p;
