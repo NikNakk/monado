@@ -366,9 +366,14 @@ ipc_client_xdev_get_plane_detections_ext(struct xrt_device *xdev,
 	struct ipc_connection *ipc_c = icx->ipc_c;
 
 	ipc_client_connection_lock(ipc_c);
+	ipc_client_connection_send_lock(ipc_c);
 
 	xrt_result_t xret = ipc_send_device_get_plane_detections_ext_locked(ipc_c, icx->device_id, plane_detection_id);
-	IPC_CHK_WITH_GOTO(icx->ipc_c, xret, "ipc_send_device_get_plane_detections_ext_locked", out);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto out;
+	}
+	ipc_client_connection_send_unlock(ipc_c);
 
 	// in this case, size == count
 	uint32_t location_size = 0;
@@ -501,10 +506,15 @@ ipc_client_xdev_init(struct ipc_client_xdev *icx,
 
 	// Lock the connection so we can do varlen IPC calls.
 	ipc_client_connection_lock(ipc_c);
+	ipc_client_connection_send_lock(ipc_c);
 
-	// Call IPC to get device info with varlen data
+	// Call IPC to get device info with varlen data.
 	xret = ipc_send_device_get_info_locked(ipc_c, device_id);
-	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send_device_get_info_locked", out_free_and_unlock);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto out_free_and_unlock;
+	}
+	ipc_client_connection_send_unlock(ipc_c);
 
 	struct ipc_device_info info = {0};
 	xret = ipc_receive_device_get_info_locked(ipc_c, &info);
