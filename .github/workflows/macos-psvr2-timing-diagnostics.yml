@@ -6,6 +6,7 @@ on:
       - macos-psvr2-timing-diagnostics
       - macos-drawable-slot-newest
       - macos-client-cadence-stabilizer
+      - macos-wine-openvr-legacy-unity
     paths:
       - .github/workflows/macos-psvr2-timing-diagnostics.yml
       - CMakeLists.txt
