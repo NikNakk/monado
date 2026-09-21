@@ -84,6 +84,13 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_tau_ms, "PSVR2_CONTINUITY_TAU_MS", 
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_MM", 7.5f)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_full_linear_horizon, "PSVR2_FULL_LINEAR_HORIZON", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", true)
+
+/*
+ * PSVR2 SLAM normally updates at about 60 Hz. If it has not produced a pose
+ * for half a second, stop extrapolating it and report the last pose as valid
+ * but no longer actively tracked.
+ */
+#define PSVR2_SLAM_STALE_NS (500 * U_TIME_1MS_IN_NS)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_alpha, "PSVR2_ACCELERATION_ALPHA", 0.25f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_gain, "PSVR2_ACCELERATION_GAIN", 0.5f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_limit, "PSVR2_ACCELERATION_LIMIT", 2.0f)
@@ -648,6 +655,26 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 		return;
 	}
 
+	/*
+	 * Do not dead-reckon indefinitely from a dead SLAM stream. Convert the
+	 * latest hardware-domain SLAM timestamp back to monotonic host time using
+	 * the same VTS offset used for pose queries, then clear TRACKED once it is
+	 * stale. Keeping VALID preserves the last known pose for applications that
+	 * choose to display it while correctly signalling tracking loss.
+	 */
+	timepoint_ns latest_relation_host_ns = latest_relation_ts + hmd->hw2mono_vts;
+	if (latest_relation_host_ns > 0 && query_host_ns > latest_relation_host_ns &&
+	    query_host_ns - latest_relation_host_ns > PSVR2_SLAM_STALE_NS) {
+		latest_relation.relation_flags = (enum xrt_space_relation_flags)(
+		    latest_relation.relation_flags &
+		    ~(XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
+		      XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT));
+		latest_relation.angular_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
+		latest_relation.linear_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
+		*out_relation = latest_relation;
+		return;
+	}
+
 	if (debug_get_bool_option_psvr2_timing_log()) {
 		uint64_t latest_imu_ts = 0;
 		if (m_ff_vec3_f32_get_timestamp(hmd->ff_gyro, 0, &latest_imu_ts)) {
@@ -881,6 +908,19 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 	const timepoint_ns now_vts = hmd->last_imu_vts_ns;
 	const timepoint_ns now_imu = hmd->last_imu_ns;
 
+	/*
+	 * The headset produces gyro samples at 2 kHz, but vts_us only ticks at
+	 * 1 kHz: the two samples in each pair therefore carry the same VTS value.
+	 * imu_ts_us does preserve the 500 us separation. Keep the coarse VTS clock
+	 * for clock-offset estimation, but give the dead-reckoning FIFO a
+	 * sub-millisecond timestamp in the same VTS domain so neither sample gets
+	 * a zero integration interval.
+	 */
+	timepoint_ns sample_vts_ns = now_vts;
+	if (imu_vts_delta_us == 0 && imu_delta_us == 500) {
+		sample_vts_ns += 500 * U_TIME_1US_IN_NS;
+	}
+
 	m_clock_offset_a2b(IMU_FREQ, now_vts, estimated_sample_time, &hmd->hw2mono_vts);
 	m_clock_offset_a2b(IMU_FREQ, now_imu, estimated_sample_time, &hmd->hw2mono_imu);
 
@@ -898,7 +938,7 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 	    .gyro_rad_secs = {hmd->last_gyro.x, hmd->last_gyro.y, hmd->last_gyro.z},
 	};
 
-	m_ff_vec3_f32_push(hmd->ff_gyro, &hmd->last_gyro, sample.timestamp_ns);
+	m_ff_vec3_f32_push(hmd->ff_gyro, &hmd->last_gyro, sample_vts_ns);
 }
 
 static void
