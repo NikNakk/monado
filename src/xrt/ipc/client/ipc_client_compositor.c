@@ -981,11 +981,22 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 			 * reply so native compositor work falls behind the next pacing
 			 * call instead of blocking xrEndFrame.
 			 */
+			uint64_t lock_start_ns = os_monotonic_get_ns();
 			os_mutex_lock(&icc->ipc_c->mutex);
+			uint64_t send_start_ns = os_monotonic_get_ns();
 			xret = ipc_send_compositor_layer_sync_single_semaphore_async_locked(
 			    icc->ipc_c, &payload, iccs->id, value);
+			uint64_t send_end_ns = os_monotonic_get_ns();
 			os_mutex_unlock(&icc->ipc_c->mutex);
+
+			double lock_wait_us = (double)(send_start_ns - lock_start_ns) / 1000.0;
+			double send_us = (double)(send_end_ns - send_start_ns) / 1000.0;
+			if (lock_wait_us > 1000.0 || send_us > 1000.0) {
+				U_LOG_W("Wine async IPC submit stall: layers=%u bytes=%zu lock=%.3fus send=%.3fus",
+				        slot->layer_count, total_size, lock_wait_us, send_us);
+			}
 		} else {
+			uint64_t copy_start_ns = os_monotonic_get_ns();
 			const uint8_t *src = (const uint8_t *)slot;
 			xret = XRT_SUCCESS;
 			for (size_t offset = 0; offset < total_size; offset += IPC_LAYER_COPY_CHUNK_SIZE) {
@@ -1004,6 +1015,12 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 			if (xret == XRT_SUCCESS) {
 				xret = ipc_call_compositor_layer_sync_copy_commit_semaphore(
 				    icc->ipc_c, (uint32_t)total_size, iccs->id, value, &icc->layers.slot_id);
+			}
+			uint64_t copy_end_ns = os_monotonic_get_ns();
+			double copy_us = (double)(copy_end_ns - copy_start_ns) / 1000.0;
+			if (copy_us > 1000.0) {
+				U_LOG_W("Wine synchronous IPC layer submit: layers=%u bytes=%zu duration=%.3fus",
+				        slot->layer_count, total_size, copy_us);
 			}
 		}
 	} else {
