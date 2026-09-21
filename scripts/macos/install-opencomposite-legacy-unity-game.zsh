@@ -64,10 +64,11 @@ install)
         exports=$("${objdump_cmd}" -p "${target}" 2>/dev/null || true)
         if [[ "${exports}" != *"UnityHooks_SetSubmitParams"* ||
               "${exports}" != *"UnityHooks_GetRenderEventFunc"* ||
-              "${exports}" != *"UnitySetGraphicsDevice"* ]]; then
-            print -u2 "Installed openvr_api.dll is not the legacy Unity compatibility proxy:"
+              "${exports}" != *"UnitySetGraphicsDevice"* ||
+              "${exports}" != *"VRControlPanel"* ]]; then
+            print -u2 "Installed openvr_api.dll is not the expected legacy compatibility proxy:"
             print -u2 "  ${target}"
-            print -u2 "Expected UnityHooks_SetSubmitParams, UnityHooks_GetRenderEventFunc and UnitySetGraphicsDevice exports."
+            print -u2 "Expected UnityHooks_SetSubmitParams, UnityHooks_GetRenderEventFunc, UnitySetGraphicsDevice and VRControlPanel exports."
             exit 1
         fi
     fi
