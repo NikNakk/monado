@@ -117,6 +117,20 @@ The helper:
 If those environment variables change, run `bootstrap` again so the generated
 plist is refreshed.
 
+The launchd `ProcessType` defaults to `Adaptive`. For scheduler/Game Mode
+A/B testing, select the original interactive service classification when
+bootstrapping:
+
+```sh
+XRT_MACOS_LAUNCHD_PROCESS_TYPE=Interactive \
+build-dir/src/xrt/targets/service/monado-service-xpc-control bootstrap
+```
+
+Accepted values are `Adaptive` and `Interactive` (case-insensitive). Invalid
+values fall back to `Adaptive` with a warning. The helper prints the selected
+`ProcessType` after registration; because the setting is part of the launchd
+plist, changing it requires another `bootstrap`.
+
 This `/tmp` registration is for development and is not intended to survive a
 reboot. Use the persistent installation mode below for normal use.
 
