@@ -72,7 +72,19 @@ struct ipc_connection
 	/* Wine bridge clients own a heap snapshot instead of a mapped OS handle. */
 	bool ism_is_copy;
 
+	/*
+	 * Serializes request/reply transactions so responses cannot be consumed by
+	 * the wrong synchronous caller.
+	 */
 	struct os_mutex mutex;
+
+	/*
+	 * Serializes bytes written to the IPC transport. Unlike mutex above, this
+	 * is held only while a request is actually being written (except for the
+	 * special input-handle handshake). One-way Wine frame submissions can
+	 * therefore write while another thread is waiting for a synchronous reply.
+	 */
+	struct os_mutex send_mutex;
 
 #ifdef XRT_OS_ANDROID
 	struct ipc_client_android *ica;
