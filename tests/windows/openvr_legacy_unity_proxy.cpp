@@ -5,9 +5,11 @@
 //
 // Old SteamVR Unity packages expected four UnityHooks_* exports from
 // openvr_api.dll and issued render-thread events for WaitGetPoses/Submit.
-// Modern OpenComposite intentionally implements only the standard OpenVR API,
-// so this proxy forwards those exports to a sibling OpenComposite DLL while
-// restoring the legacy Unity render hook ABI for D3D11.
+// Older native OpenVR applications can also import legacy global accessors
+// which modern OpenComposite no longer exports (for example VRControlPanel).
+// This proxy forwards the normal OpenVR API to a sibling OpenComposite DLL,
+// restores the legacy Unity render hook ABI for D3D11, and supplies narrowly
+// scoped compatibility exports for older OpenVR applications.
 
 #include "openvr.h"
 
@@ -411,6 +413,23 @@ FORWARD_RET(VR_GetVRInitErrorAsEnglishDescription, const char *, (vr::EVRInitErr
 FORWARD_RET(VR_GetStringForHmdError, const char *, (vr::EVRInitError error), (error))
 FORWARD_RET(VR_GetInitToken, uint32_t, (), ())
 FORWARD_RET(VR_RuntimePath, const char *, (), ())
+
+extern "C" __declspec(dllexport) void *
+VRControlPanel()
+{
+    // VRControlPanel was a legacy global accessor. If a future/pinned
+    // OpenComposite build provides it, preserve that implementation. Current
+    // OpenComposite does not, and older clients are permitted to receive a
+    // null control-panel interface when that optional interface is unavailable.
+    using Fn = void *(__cdecl *)();
+    Fn fn = real_proc<Fn>("VRControlPanel");
+    if (fn != nullptr) {
+        return fn();
+    }
+
+    log_line("VRControlPanel requested; OpenComposite has no implementation, returning nullptr");
+    return nullptr;
+}
 
 BOOL WINAPI
 DllMain(HINSTANCE instance, DWORD reason, LPVOID)
