@@ -142,6 +142,20 @@ int
 os_hid_open_hidraw(const char *path, struct os_hid_device **out_hid);
 #endif
 
+#ifdef XRT_OS_OSX
+/*!
+ * Wrap an IOHIDDeviceRef as an os_hid_device.
+ *
+ * The native device is retained by this function. The returned os_hid_device
+ * owns that retain until os_hid_destroy() is called.
+ *
+ * void * is used here so IOKit types do not leak into the platform-neutral
+ * os_hid.h interface.
+ */
+int
+os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid);
+#endif
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
