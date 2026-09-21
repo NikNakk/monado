@@ -546,6 +546,62 @@ bool depth_donor_target(vec2 target_projection_uv,
 	return true;
 }
 
+bool depth_local_background_target(vec2 target_projection_uv,
+                                   uint iz,
+                                   out vec2 donor_target_uv,
+                                   out float donor_target_z)
+{
+	donor_target_uv = target_projection_uv;
+	donor_target_z = 0.0;
+	if (ubo.has_depth[iz].z == 0u ||
+	    any(lessThan(target_projection_uv, vec2(0.0))) ||
+	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
+		return false;
+	}
+
+	uint width = ubo.depth_visibility.x;
+	uint height = ubo.depth_visibility.y;
+	if (width == 0u || height == 0u || iz >= ubo.depth_visibility.z) {
+		return false;
+	}
+
+	uvec2 pixel = min(uvec2(target_projection_uv * vec2(width, height)),
+	                  uvec2(width - 1u, height - 1u));
+	uint base = iz * width * height;
+	ivec2 origin = ivec2(pixel);
+	ivec2 max_pixel = ivec2(int(width) - 1, int(height) - 1);
+	const ivec2 directions[8] = ivec2[8](
+	    ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
+	    ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1));
+	const int radii[3] = int[3](1, 2, 4);
+
+	for (int r = 0; r < 3; ++r) {
+		bool found = false;
+		float farthest_z = 0.0;
+		ivec2 farthest_pixel = origin;
+		for (int d = 0; d < 8; ++d) {
+			ivec2 p = origin + directions[d] * radii[r];
+			if (any(lessThan(p, ivec2(0))) || any(greaterThan(p, max_pixel))) {
+				continue;
+			}
+			float z;
+			uint encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
+			if (depth_visibility_decode(encoded, z) && (!found || z > farthest_z)) {
+				found = true;
+				farthest_z = z;
+				farthest_pixel = p;
+			}
+		}
+		if (found) {
+			donor_target_z = farthest_z;
+			donor_target_uv = (vec2(farthest_pixel) + vec2(0.5)) / vec2(width, height);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 float depth_source_z_at_projection_uv(vec2 projection_uv, uint iz)
 {
 	if (any(lessThan(projection_uv, vec2(0.0))) ||
@@ -745,10 +801,16 @@ void main()
 			} else {
 				vec2 donor_target_uv;
 				float donor_target_z;
-				if (depth_donor_target(g_target_uv, iz, donor_target_uv, donor_target_z)) {
-					// True disocclusion: use one propagated visible-background
-					// donor coherently for all channels. This is inpainting, not
-					// geometric reconstruction of a hidden source texel.
+				bool have_donor =
+				    depth_local_background_target(g_target_uv, iz, donor_target_uv, donor_target_z);
+
+				// Experimental only: if explicitly enabled, allow the full JFA
+				// field to fill holes that exceed the cheap 4-pixel local radius.
+				if (!have_donor) {
+					have_donor = depth_donor_target(g_target_uv, iz, donor_target_uv, donor_target_z);
+				}
+
+				if (have_donor) {
 					float donor_source_z;
 					vec2 donor_source_uv =
 					    depth_source_uv_from_target_z(donor_target_uv,
@@ -767,8 +829,9 @@ void main()
 					g_projection_uv = donor_source_uv;
 					b_projection_uv = donor_source_uv;
 				} else {
-					// No propagated background donor: expose missing data rather
-					// than preserving stale foreground or inventing a duplicate.
+					// A larger hole represents genuinely unseen colour. Leave it
+					// missing rather than spend many passes fabricating a structured
+					// trail from distant donors.
 					r_projection_uv = vec2(-1.0);
 					g_projection_uv = vec2(-1.0);
 					b_projection_uv = vec2(-1.0);
