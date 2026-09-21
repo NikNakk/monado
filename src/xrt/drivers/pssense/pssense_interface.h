@@ -35,6 +35,13 @@ struct xrt_device *
 pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev);
 
 /*!
+ * Give a Sense controller access to the HMD pose for synthetic 6DoF arm-model
+ * positioning. The HMD pointer is borrowed and remains owned by the system.
+ */
+void
+pssense_set_head_device(struct xrt_device *controller, struct xrt_device *head);
+
+/*!
  * Probing function for PlayStation Sense devices.
  *
  * @ingroup drv_pssense
