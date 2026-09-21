@@ -11,6 +11,7 @@
 
 #include "shared/ipc_metal_xpc.h"
 #include "shared/ipc_metal_xpc_service.h"
+#include "os/os_macos_xpc_context.h"
 #include "util/u_logging.h"
 
 #include <dispatch/dispatch.h>
@@ -352,6 +353,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 		 * reply. The incoming-request transaction remains represented by the
 		 * reply itself until completion() sends it.
 		 */
+		os_macos_xpc_context_release();
 		xpc_transaction_end();
 		fprintf(stderr,
 		        "XR_XPC_TRANSACTION end pid=%d session=0x%016llx reason=release\n",
@@ -399,6 +401,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 	 * Connection loss must balance them just like an orderly session end.
 	 */
 	for (NSUInteger i = 0; i < released_count; i++) {
+		os_macos_xpc_context_release();
 		xpc_transaction_end();
 	}
 	if (released_count > 0) {
@@ -425,6 +428,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 
 	NSUInteger count = entries.count;
 	for (NSUInteger i = 0; i < count; i++) {
+		os_macos_xpc_context_release();
 		xpc_transaction_end();
 	}
 	if (count > 0) {
@@ -467,6 +471,13 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 		reply();
 		return;
 	}
+
+	/*
+	 * Capture the foreground client's current XPC request properties while
+	 * still executing inside the acquire handler. The compositor's custom
+	 * pthread applies this carrier around each native frame.
+	 */
+	os_macos_xpc_context_acquire_current();
 
 	U_LOG_I("XR XPC importance acquired pid=%d session=0x%016llx connection=%p",
 	        (int)pid,
