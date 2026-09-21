@@ -219,7 +219,7 @@ set(ILLIXR_PATH
 # This one is named differently because that's what CTest uses
 option(BUILD_TESTING "Enable building of the test suite?" ON)
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR APPLE)
 	set(XRT_HAVE_INTERNAL_HID ON)
 endif()
 
