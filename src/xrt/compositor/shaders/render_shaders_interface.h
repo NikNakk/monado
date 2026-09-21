@@ -29,6 +29,7 @@ struct render_shaders
 	VkShaderModule layer_comp;
 	VkShaderModule distortion_comp;
 	VkShaderModule depth_visibility_comp;
+	VkShaderModule depth_visibility_resolve_comp;
 	VkShaderModule depth_visibility_clear_comp;
 	VkShaderModule depth_donor_seed_comp;
 	VkShaderModule depth_donor_jumpflood_comp;
