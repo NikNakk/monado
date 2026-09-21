@@ -215,6 +215,7 @@ should_forward_environment_key(NSString *key)
 	dispatch_once(&once_token, ^{
 		prefixes = [[NSArray alloc] initWithObjects:@"XRT_",
 		                                              @"PSVR2_",
+		                                              @"PSSENSE_",
 		                                              @"IPC_",
 		                                              @"VK_",
 		                                              @"MVK_",
