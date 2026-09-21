@@ -12,6 +12,7 @@
 #include <dispatch/dispatch.h>
 #include <pthread.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 static pthread_mutex_t g_context_mutex = PTHREAD_MUTEX_INITIALIZER;
