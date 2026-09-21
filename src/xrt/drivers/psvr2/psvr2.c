@@ -911,21 +911,22 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 	/*
 	 * The headset produces gyro samples at 2 kHz, but vts_us only ticks at
 	 * 1 kHz: the two samples in each pair therefore carry the same VTS value.
-	 * imu_ts_us does preserve the 500 us separation. Keep the coarse VTS clock
-	 * for clock-offset estimation, but give the dead-reckoning FIFO a
-	 * sub-millisecond timestamp in the same VTS domain so neither sample gets
-	 * a zero integration interval.
+	 * imu_ts_us does preserve the 500 us separation. Keep last_imu_vts_ns as
+	 * the unwrapped raw VTS tick, but reconstruct the actual sample time in
+	 * that same VTS domain. Feed the fine timestamp both to clock-offset
+	 * estimation and to dead reckoning so the two 2 kHz samples do not look
+	 * simultaneous.
 	 */
 	timepoint_ns sample_vts_ns = now_vts;
 	if (imu_vts_delta_us == 0 && imu_delta_us == 500) {
 		sample_vts_ns += 500 * U_TIME_1US_IN_NS;
 	}
 
-	m_clock_offset_a2b(IMU_FREQ, now_vts, estimated_sample_time, &hmd->hw2mono_vts);
+	m_clock_offset_a2b(IMU_FREQ, sample_vts_ns, estimated_sample_time, &hmd->hw2mono_vts);
 	m_clock_offset_a2b(IMU_FREQ, now_imu, estimated_sample_time, &hmd->hw2mono_imu);
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
-	psvr2_timing_trace_imu(hmd, &imu_data, estimated_sample_time, now_vts, now_imu);
+	psvr2_timing_trace_imu(hmd, &imu_data, estimated_sample_time, sample_vts_ns, now_imu);
 #endif
 
 	if (hmd->timestamp_samples < TIMESTAMP_SAMPLES) {
@@ -933,7 +934,7 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 	}
 
 	struct xrt_imu_sample sample = {
-	    .timestamp_ns = hmd->last_imu_vts_ns,
+	    .timestamp_ns = sample_vts_ns,
 	    .accel_m_s2 = {hmd->last_accel.x, hmd->last_accel.y, hmd->last_accel.z},
 	    .gyro_rad_secs = {hmd->last_gyro.x, hmd->last_gyro.y, hmd->last_gyro.z},
 	};
