@@ -84,6 +84,7 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_tau_ms, "PSVR2_CONTINUITY_TAU_MS", 
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_MM", 7.5f)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_full_linear_horizon, "PSVR2_FULL_LINEAR_HORIZON", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", true)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_recenter_on_first_pose, "PSVR2_RECENTER_ON_FIRST_POSE", false)
 
 /*
  * PSVR2 SLAM normally updates at about 60 Hz. If it has not produced a pose
@@ -749,6 +750,71 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 	}
 }
 
+static void
+psvr2_apply_first_pose_recenter(struct psvr2_hmd *hmd, struct xrt_space_relation *relation)
+{
+	if (!hmd->recenter_on_first_pose ||
+	    (relation->relation_flags &
+	     (XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT)) !=
+	        (XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT)) {
+		return;
+	}
+
+	struct xrt_pose transform = XRT_POSE_IDENTITY;
+
+	os_mutex_lock(&hmd->data_lock);
+	if (!hmd->recenter_initialized) {
+		/*
+		 * Build a yaw-only correction that makes the first valid HMD forward
+		 * direction point along OpenXR -Z. Pitch and roll are intentionally
+		 * preserved.
+		 */
+		struct xrt_vec3 local_forward = {0.0f, 0.0f, -1.0f};
+		struct xrt_vec3 first_forward;
+		math_quat_rotate_vec3(&relation->pose.orientation, &local_forward, &first_forward);
+		first_forward.y = 0.0f;
+		float forward_len = sqrtf(first_forward.x * first_forward.x + first_forward.z * first_forward.z);
+
+		if (forward_len > 0.01f) {
+			first_forward.x /= forward_len;
+			first_forward.z /= forward_len;
+			struct xrt_vec3 target_forward = {0.0f, 0.0f, -1.0f};
+			math_quat_from_vec_a_to_vec_b(
+			    &first_forward, &target_forward, &hmd->recenter_transform.orientation);
+
+			struct xrt_vec3 rotated_first_position;
+			math_quat_rotate_vec3(
+			    &hmd->recenter_transform.orientation, &relation->pose.position, &rotated_first_position);
+			hmd->recenter_transform.position = (struct xrt_vec3){
+			    -rotated_first_position.x,
+			    1.6f - rotated_first_position.y,
+			    -rotated_first_position.z,
+			};
+			hmd->recenter_initialized = true;
+			PSVR2_WARN(hmd,
+			            "PSVR2_RECENTER_ON_FIRST_POSE: centred first HMD pose at (0, 1.6, 0) with forward -Z");
+		}
+	}
+	transform = hmd->recenter_transform;
+	bool initialized = hmd->recenter_initialized;
+	os_mutex_unlock(&hmd->data_lock);
+
+	if (!initialized) {
+		return;
+	}
+
+	math_pose_transform(&transform, &relation->pose, &relation->pose);
+
+	struct xrt_vec3 transformed_linear_velocity;
+	struct xrt_vec3 transformed_angular_velocity;
+	math_quat_rotate_vec3(
+	    &transform.orientation, &relation->linear_velocity, &transformed_linear_velocity);
+	math_quat_rotate_vec3(
+	    &transform.orientation, &relation->angular_velocity, &transformed_angular_velocity);
+	relation->linear_velocity = transformed_linear_velocity;
+	relation->angular_velocity = transformed_angular_velocity;
+}
+
 static xrt_result_t
 psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
                            enum xrt_input_name name,
@@ -811,6 +877,7 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 	// Resolve the final relation
 	m_relation_chain_resolve(&chain, out_relation);
+	psvr2_apply_first_pose_recenter(hmd, out_relation);
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
@@ -2024,6 +2091,11 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->info.display.h_meters = 0.07f;
 	hmd->full_linear_horizon_enabled = debug_get_bool_option_psvr2_full_linear_horizon();
 	hmd->continuity_prediction_enabled = debug_get_bool_option_psvr2_continuity_prediction();
+	hmd->recenter_on_first_pose = debug_get_bool_option_psvr2_recenter_on_first_pose();
+	hmd->recenter_transform = (struct xrt_pose)XRT_POSE_IDENTITY;
+	if (hmd->recenter_on_first_pose) {
+		PSVR2_WARN(hmd, "PSVR2_RECENTER_ON_FIRST_POSE enabled; waiting for first valid HMD pose");
+	}
 	// Continuity transitions the bounded-acceleration candidate, including raw fallback.
 	hmd->acceleration_prediction_enabled =
 	    debug_get_bool_option_psvr2_acceleration_prediction() || hmd->continuity_prediction_enabled;
