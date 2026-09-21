@@ -531,7 +531,13 @@ ipc_client_connection_init(struct ipc_connection *ipc_c,
 	// Must be done first.
 	int ret = os_mutex_init(&ipc_c->mutex);
 	if (ret != 0) {
-		U_LOG_E("Failed to init mutex!");
+		U_LOG_E("Failed to init transaction mutex!");
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	ret = os_mutex_init(&ipc_c->send_mutex);
+	if (ret != 0) {
+		U_LOG_E("Failed to init IPC send mutex!");
+		os_mutex_destroy(&ipc_c->mutex);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
@@ -555,6 +561,7 @@ ipc_client_connection_init(struct ipc_connection *ipc_c,
 		          "\"build-dir/src/xrt/targets/service/monado-service\"\n"
 		          "#\n"
 		          "###");
+		os_mutex_destroy(&ipc_c->send_mutex);
 		os_mutex_destroy(&ipc_c->mutex);
 		return XRT_ERROR_IPC_FAILURE;
 	}
@@ -598,6 +605,7 @@ ipc_client_connection_fini(struct ipc_connection *ipc_c)
 		/// @todo how to tear down the shared memory?
 	}
 	ipc_message_channel_close(&ipc_c->imc);
+	os_mutex_destroy(&ipc_c->send_mutex);
 	os_mutex_destroy(&ipc_c->mutex);
 
 #ifdef XRT_OS_ANDROID
