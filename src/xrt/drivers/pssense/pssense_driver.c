@@ -43,6 +43,7 @@
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_synthetic_position, "PSSENSE_SYNTHETIC_POSITION", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_index_profile, "PSSENSE_INDEX_PROFILE", false)
 
 static struct xrt_binding_input_pair simple_inputs_pssense[4] = {
     {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_PSSENSE_TRIGGER_CLICK},
@@ -55,13 +56,77 @@ static struct xrt_binding_output_pair simple_outputs_pssense[1] = {
     {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_PSSENSE_VIBRATION},
 };
 
-static struct xrt_binding_profile binding_profiles_pssense[1] = {
+static struct xrt_binding_input_pair index_inputs_pssense_left[] = {
+    {XRT_INPUT_INDEX_SYSTEM_CLICK, XRT_INPUT_PSSENSE_PS_CLICK},
+    {XRT_INPUT_INDEX_A_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
+    {XRT_INPUT_INDEX_A_TOUCH, XRT_INPUT_PSSENSE_SQUARE_TOUCH},
+    {XRT_INPUT_INDEX_B_CLICK, XRT_INPUT_PSSENSE_TRIANGLE_CLICK},
+    {XRT_INPUT_INDEX_B_TOUCH, XRT_INPUT_PSSENSE_TRIANGLE_TOUCH},
+    {XRT_INPUT_INDEX_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_PROXIMITY_FLOAT},
+    {XRT_INPUT_INDEX_SQUEEZE_FORCE, XRT_INPUT_PSSENSE_SQUEEZE_PROXIMITY_FLOAT},
+    {XRT_INPUT_INDEX_TRIGGER_CLICK, XRT_INPUT_PSSENSE_TRIGGER_CLICK},
+    {XRT_INPUT_INDEX_TRIGGER_TOUCH, XRT_INPUT_PSSENSE_TRIGGER_TOUCH},
+    {XRT_INPUT_INDEX_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
+    {XRT_INPUT_INDEX_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
+    {XRT_INPUT_INDEX_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
+    {XRT_INPUT_INDEX_THUMBSTICK_TOUCH, XRT_INPUT_PSSENSE_THUMBSTICK_TOUCH},
+    {XRT_INPUT_INDEX_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
+    {XRT_INPUT_INDEX_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
+};
+
+static struct xrt_binding_input_pair index_inputs_pssense_right[] = {
+    {XRT_INPUT_INDEX_SYSTEM_CLICK, XRT_INPUT_PSSENSE_PS_CLICK},
+    {XRT_INPUT_INDEX_A_CLICK, XRT_INPUT_PSSENSE_CROSS_CLICK},
+    {XRT_INPUT_INDEX_A_TOUCH, XRT_INPUT_PSSENSE_CROSS_TOUCH},
+    {XRT_INPUT_INDEX_B_CLICK, XRT_INPUT_PSSENSE_CIRCLE_CLICK},
+    {XRT_INPUT_INDEX_B_TOUCH, XRT_INPUT_PSSENSE_CIRCLE_TOUCH},
+    {XRT_INPUT_INDEX_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_PROXIMITY_FLOAT},
+    {XRT_INPUT_INDEX_SQUEEZE_FORCE, XRT_INPUT_PSSENSE_SQUEEZE_PROXIMITY_FLOAT},
+    {XRT_INPUT_INDEX_TRIGGER_CLICK, XRT_INPUT_PSSENSE_TRIGGER_CLICK},
+    {XRT_INPUT_INDEX_TRIGGER_TOUCH, XRT_INPUT_PSSENSE_TRIGGER_TOUCH},
+    {XRT_INPUT_INDEX_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
+    {XRT_INPUT_INDEX_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
+    {XRT_INPUT_INDEX_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
+    {XRT_INPUT_INDEX_THUMBSTICK_TOUCH, XRT_INPUT_PSSENSE_THUMBSTICK_TOUCH},
+    {XRT_INPUT_INDEX_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
+    {XRT_INPUT_INDEX_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair index_outputs_pssense[] = {
+    {XRT_OUTPUT_NAME_INDEX_HAPTIC, XRT_OUTPUT_NAME_PSSENSE_VIBRATION},
+};
+
+static struct xrt_binding_profile binding_profiles_pssense_left[] = {
     {
         .name = XRT_DEVICE_SIMPLE_CONTROLLER,
         .inputs = simple_inputs_pssense,
         .input_count = ARRAY_SIZE(simple_inputs_pssense),
         .outputs = simple_outputs_pssense,
         .output_count = ARRAY_SIZE(simple_outputs_pssense),
+    },
+    {
+        .name = XRT_DEVICE_INDEX_CONTROLLER,
+        .inputs = index_inputs_pssense_left,
+        .input_count = ARRAY_SIZE(index_inputs_pssense_left),
+        .outputs = index_outputs_pssense,
+        .output_count = ARRAY_SIZE(index_outputs_pssense),
+    },
+};
+
+static struct xrt_binding_profile binding_profiles_pssense_right[] = {
+    {
+        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
+        .inputs = simple_inputs_pssense,
+        .input_count = ARRAY_SIZE(simple_inputs_pssense),
+        .outputs = simple_outputs_pssense,
+        .output_count = ARRAY_SIZE(simple_outputs_pssense),
+    },
+    {
+        .name = XRT_DEVICE_INDEX_CONTROLLER,
+        .inputs = index_inputs_pssense_right,
+        .input_count = ARRAY_SIZE(index_inputs_pssense_right),
+        .outputs = index_outputs_pssense,
+        .output_count = ARRAY_SIZE(index_outputs_pssense),
     },
 };
 
@@ -916,13 +981,11 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 	pssense->base.supported.orientation_tracking = true;
 	pssense->base.supported.battery_status = true;
 
-	pssense->base.binding_profiles = binding_profiles_pssense;
-	pssense->base.binding_profile_count = ARRAY_SIZE(binding_profiles_pssense);
-
 	m_imu_3dof_init(&pssense->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
 	pssense->log_level = debug_get_log_option_pssense_log();
 	pssense->synthetic_position = debug_get_bool_option_pssense_synthetic_position();
+	bool index_profile = debug_get_bool_option_pssense_index_profile();
 	pssense->hid = hid;
 
 	if (pssense->synthetic_position) {
@@ -931,12 +994,21 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 		             "tracking-origin position");
 	}
 
+	if (index_profile) {
+		PSSENSE_WARN(pssense,
+		             "PSSENSE_INDEX_PROFILE enabled: advertising Valve Index bindings backed by Sense inputs");
+	}
+
 	if (xpdev->product_id == PSSENSE_PID_LEFT) {
 		pssense->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
 		pssense->hand = PSSENSE_HAND_LEFT;
+		pssense->base.binding_profiles = binding_profiles_pssense_left;
+		pssense->base.binding_profile_count = index_profile ? ARRAY_SIZE(binding_profiles_pssense_left) : 1;
 	} else if (xpdev->product_id == PSSENSE_PID_RIGHT) {
 		pssense->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
 		pssense->hand = PSSENSE_HAND_RIGHT;
+		pssense->base.binding_profiles = binding_profiles_pssense_right;
+		pssense->base.binding_profile_count = index_profile ? ARRAY_SIZE(binding_profiles_pssense_right) : 1;
 	} else {
 		PSSENSE_ERROR(pssense, "Unable to determine controller type");
 		pssense_device_destroy(&pssense->base);
