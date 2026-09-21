@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
+#include <xpc/xpc.h>
 
 #define IPC_METAL_XPC_ACTIVATION_TIMEOUT_NS (15LL * NSEC_PER_SEC)
 
@@ -288,6 +289,24 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 		stored = YES;
 	}
 	[_lock unlock];
+
+	/*
+	 * ProcessType=Adaptive launchd jobs are promoted based on XPC activity.
+	 * NSXPC keeps the reply outstanding below, but explicitly extending the
+	 * XPC transaction makes the service's active-work lifetime unambiguous to
+	 * launchd/RunningBoard while the foreground XR session is alive.
+	 *
+	 * One manual transaction is paired with every successfully stored lease.
+	 */
+	if (stored) {
+		xpc_transaction_begin();
+		fprintf(stderr,
+		        "XR_XPC_TRANSACTION begin pid=%d session=0x%016llx\n",
+		        (int)ownerPID,
+		        (unsigned long long)sessionID);
+		fflush(stderr);
+	}
+
 	return stored;
 }
 
@@ -328,6 +347,17 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 	[_lock unlock];
 
 	if (completion != nil) {
+		/*
+		 * End the manual transaction before completing the retained NSXPC
+		 * reply. The incoming-request transaction remains represented by the
+		 * reply itself until completion() sends it.
+		 */
+		xpc_transaction_end();
+		fprintf(stderr,
+		        "XR_XPC_TRANSACTION end pid=%d session=0x%016llx reason=release\n",
+		        (int)ownerPID,
+		        (unsigned long long)sessionID);
+		fflush(stderr);
 		completion();
 		[completion release];
 		return YES;
@@ -361,12 +391,28 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 	for (NSString *key in keys) {
 		[_importanceLeasesByKey removeObjectForKey:key];
 	}
+	NSUInteger released_count = keys.count;
 	[_lock unlock];
+
+	/*
+	 * Every stored lease owns one explicit xpc_transaction_begin().
+	 * Connection loss must balance them just like an orderly session end.
+	 */
+	for (NSUInteger i = 0; i < released_count; i++) {
+		xpc_transaction_end();
+	}
+	if (released_count > 0) {
+		fprintf(stderr,
+		        "XR_XPC_TRANSACTION end pid=%d count=%lu reason=connection-invalidated\n",
+		        (int)ownerPID,
+		        (unsigned long)released_count);
+		fflush(stderr);
+	}
 
 	for (id reply in completions) {
 		((void (^)(void))reply)();
 	}
-	return keys.count;
+	return released_count;
 }
 
 - (NSUInteger)releaseAllImportanceLeases
@@ -377,13 +423,23 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 	[_importanceLeasesByKey removeAllObjects];
 	[_lock unlock];
 
+	NSUInteger count = entries.count;
+	for (NSUInteger i = 0; i < count; i++) {
+		xpc_transaction_end();
+	}
+	if (count > 0) {
+		fprintf(stderr,
+		        "XR_XPC_TRANSACTION end count=%lu reason=service-teardown\n",
+		        (unsigned long)count);
+		fflush(stderr);
+	}
+
 	for (NSDictionary *entry in entries) {
 		id reply = [entry objectForKey:@"reply"];
 		if (reply != nil) {
 			((void (^)(void))reply)();
 		}
 	}
-	NSUInteger count = entries.count;
 	[entries release];
 	return count;
 }
