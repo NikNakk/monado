@@ -31,6 +31,7 @@
 #include "layer.comp.h"
 #include "distortion.comp.h"
 #include "depth_visibility.comp.h"
+#include "depth_visibility_resolve.comp.h"
 #include "depth_visibility_clear.comp.h"
 #include "depth_donor_seed.comp.h"
 #include "depth_donor_jumpflood.comp.h"
@@ -115,6 +116,7 @@ render_shaders_load(struct render_shaders *s, struct vk_bundle *vk)
 	LOAD(distortion_comp);
 
 	LOAD(depth_visibility_comp);
+	LOAD(depth_visibility_resolve_comp);
 	LOAD(depth_visibility_clear_comp);
 	LOAD(depth_donor_seed_comp);
 	LOAD(depth_donor_jumpflood_comp);
@@ -143,6 +145,7 @@ render_shaders_fini(struct render_shaders *s, struct vk_bundle *vk)
 	D(ShaderModule, s->clear_comp);
 	D(ShaderModule, s->distortion_comp);
 	D(ShaderModule, s->depth_visibility_comp);
+	D(ShaderModule, s->depth_visibility_resolve_comp);
 	D(ShaderModule, s->depth_visibility_clear_comp);
 	D(ShaderModule, s->depth_donor_seed_comp);
 	D(ShaderModule, s->depth_donor_jumpflood_comp);
