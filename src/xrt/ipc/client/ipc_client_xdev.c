@@ -40,12 +40,18 @@ ipc_client_xdev_update_inputs(struct xrt_device *xdev)
 	struct ipc_connection *ipc_c = icx->ipc_c;
 	xrt_result_t xret;
 
-	// Lock connection for varlen IPC
+	// Lock connection for varlen IPC replies.
 	ipc_client_connection_lock(ipc_c);
 
-	// Send the request
+	// Only serialize the actual request write: async frame submits may use the
+	// transport while we wait for the input-state reply.
+	ipc_client_connection_send_lock(ipc_c);
 	xret = ipc_send_device_update_input_locked(ipc_c, icx->device_id);
-	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send_device_update_input_locked", out_unlock);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto out_unlock;
+	}
+	ipc_client_connection_send_unlock(ipc_c);
 
 	// Receive the reply (standard reply struct)
 	struct ipc_result_reply reply = {0};
@@ -222,17 +228,23 @@ ipc_client_xdev_set_output(struct xrt_device *xdev, enum xrt_output_name name, c
 		};
 
 		ipc_client_connection_lock(ipc_c);
+		ipc_client_connection_send_lock(ipc_c);
 
 		xret = ipc_send_device_set_haptic_output_locked(ipc_c, icx->device_id, name, &samples);
-		IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send_device_set_haptic_output_locked", send_haptic_output_end);
+		if (xret != XRT_SUCCESS) {
+			ipc_client_connection_send_unlock(ipc_c);
+			goto send_haptic_output_end;
+		}
 
 		xrt_result_t alloc_xret;
 		xret = ipc_receive(&ipc_c->imc, &alloc_xret, sizeof alloc_xret);
 		if (xret != XRT_SUCCESS || alloc_xret != XRT_SUCCESS) {
+			ipc_client_connection_send_unlock(ipc_c);
 			goto send_haptic_output_end;
 		}
 
 		xret = ipc_send(&ipc_c->imc, value->pcm_vibration.buffer, sizeof(float) * samples_sent);
+		ipc_client_connection_send_unlock(ipc_c);
 		if (xret != XRT_SUCCESS) {
 			goto send_haptic_output_end;
 		}
