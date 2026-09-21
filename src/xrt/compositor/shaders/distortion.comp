@@ -546,62 +546,6 @@ bool depth_donor_target(vec2 target_projection_uv,
 	return true;
 }
 
-bool depth_local_background_target(vec2 target_projection_uv,
-                                   uint iz,
-                                   out vec2 donor_target_uv,
-                                   out float donor_target_z)
-{
-	donor_target_uv = target_projection_uv;
-	donor_target_z = 0.0;
-	if (ubo.has_depth[iz].z == 0u ||
-	    any(lessThan(target_projection_uv, vec2(0.0))) ||
-	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
-		return false;
-	}
-
-	uint width = ubo.depth_visibility.x;
-	uint height = ubo.depth_visibility.y;
-	if (width == 0u || height == 0u || iz >= ubo.depth_visibility.z) {
-		return false;
-	}
-
-	uvec2 pixel = min(uvec2(target_projection_uv * vec2(width, height)),
-	                  uvec2(width - 1u, height - 1u));
-	uint base = iz * width * height;
-	ivec2 origin = ivec2(pixel);
-	ivec2 max_pixel = ivec2(int(width) - 1, int(height) - 1);
-	const ivec2 directions[8] = ivec2[8](
-	    ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1),
-	    ivec2(1, 1), ivec2(-1, 1), ivec2(1, -1), ivec2(-1, -1));
-	const int radii[3] = int[3](1, 2, 4);
-
-	for (int r = 0; r < 3; ++r) {
-		bool found = false;
-		float farthest_z = 0.0;
-		ivec2 farthest_pixel = origin;
-		for (int d = 0; d < 8; ++d) {
-			ivec2 p = origin + directions[d] * radii[r];
-			if (any(lessThan(p, ivec2(0))) || any(greaterThan(p, max_pixel))) {
-				continue;
-			}
-			float z;
-			uint encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
-			if (depth_visibility_decode(encoded, z) && (!found || z > farthest_z)) {
-				found = true;
-				farthest_z = z;
-				farthest_pixel = p;
-			}
-		}
-		if (found) {
-			donor_target_z = farthest_z;
-			donor_target_uv = (vec2(farthest_pixel) + vec2(0.5)) / vec2(width, height);
-			return true;
-		}
-	}
-
-	return false;
-}
-
 float depth_source_z_at_projection_uv(vec2 projection_uv, uint iz)
 {
 	if (any(lessThan(projection_uv, vec2(0.0))) ||
@@ -711,6 +655,160 @@ vec2 depth_source_uv_from_target_z(vec2 target_projection_uv,
 	return (source_tan - ubo.source_uv_to_tanangle[iz].xy) / source_extent;
 }
 
+bool depth_directional_background_target(vec2 target_projection_uv,
+                                         float scanout_fraction,
+                                         uint iz,
+                                         out vec2 donor_target_uv,
+                                         out float donor_target_z)
+{
+	donor_target_uv = target_projection_uv;
+	donor_target_z = 0.0;
+	if (ubo.has_depth[iz].z == 0u ||
+	    any(lessThan(target_projection_uv, vec2(0.0))) ||
+	    any(greaterThanEqual(target_projection_uv, vec2(1.0)))) {
+		return false;
+	}
+
+	uint width = ubo.depth_visibility.x;
+	uint height = ubo.depth_visibility.y;
+	uint max_fill_px = min(ubo.depth_donor.z, 64u);
+	if (width == 0u || height == 0u || max_fill_px == 0u ||
+	    iz >= ubo.depth_visibility.z) {
+		return false;
+	}
+
+	/*
+	 * Translation-induced parallax is one-dimensional to first order. Derive
+	 * that axis from the current target->source pose by comparing where the
+	 * same target ray would have appeared in the submitted image at a near and
+	 * effectively-infinite depth. Search along that axis only.
+	 */
+	float ignored_z;
+	vec2 source_near =
+	    depth_source_uv_from_target_z(target_projection_uv, 0.5, scanout_fraction, iz, ignored_z);
+	vec2 source_far =
+	    depth_source_uv_from_target_z(target_projection_uv, 1000.0, scanout_fraction, iz, ignored_z);
+	vec2 parallax_px = (source_near - source_far) * vec2(width, height);
+	float parallax_len = length(parallax_px);
+	if (!(parallax_len > 0.25)) {
+		return false;
+	}
+	vec2 direction = parallax_px / parallax_len;
+
+	uvec2 pixel = min(uvec2(target_projection_uv * vec2(width, height)),
+	                  uvec2(width - 1u, height - 1u));
+	uint base = iz * width * height;
+	ivec2 origin = ivec2(pixel);
+	ivec2 max_pixel = ivec2(int(width) - 1, int(height) - 1);
+
+	bool found_pos = false;
+	bool found_neg = false;
+	ivec2 pos_pixel = origin;
+	ivec2 neg_pixel = origin;
+	float pos_z = 0.0;
+	float neg_z = 0.0;
+	uint pos_distance = 0u;
+	uint neg_distance = 0u;
+	ivec2 last_pos = ivec2(-32768);
+	ivec2 last_neg = ivec2(-32768);
+
+	for (uint step = 1u; step <= 64u; ++step) {
+		if (step > max_fill_px || (found_pos && found_neg)) {
+			break;
+		}
+
+		ivec2 offset = ivec2(round(direction * float(step)));
+
+		if (!found_pos) {
+			ivec2 p = origin + offset;
+			if (p != last_pos &&
+			    all(greaterThanEqual(p, ivec2(0))) &&
+			    all(lessThanEqual(p, max_pixel))) {
+				last_pos = p;
+				float z;
+				uint encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
+				if (depth_visibility_decode(encoded, z)) {
+					found_pos = true;
+					pos_pixel = p;
+					pos_z = z;
+					pos_distance = step;
+				}
+			}
+		}
+
+		if (!found_neg) {
+			ivec2 p = origin - offset;
+			if (p != last_neg &&
+			    all(greaterThanEqual(p, ivec2(0))) &&
+			    all(lessThanEqual(p, max_pixel))) {
+				last_neg = p;
+				float z;
+				uint encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
+				if (depth_visibility_decode(encoded, z)) {
+					found_neg = true;
+					neg_pixel = p;
+					neg_z = z;
+					neg_distance = step;
+				}
+			}
+		}
+	}
+
+	// Requiring visible geometry on both sides prevents the fill from growing
+	// arbitrarily into large genuinely unseen regions or beyond the source FOV.
+	if (!found_pos || !found_neg) {
+		return false;
+	}
+
+	float same_surface_tolerance = max(0.04, 0.06 * min(pos_z, neg_z));
+	if (abs(pos_z - neg_z) <= same_surface_tolerance) {
+		// This is most likely a forward-splat crack within one surface.
+		bool use_pos = pos_distance <= neg_distance;
+		ivec2 donor = use_pos ? pos_pixel : neg_pixel;
+		donor_target_z = use_pos ? pos_z : neg_z;
+		donor_target_uv = (vec2(donor) + vec2(0.5)) / vec2(width, height);
+		return true;
+	}
+
+	// Different depths on the two sides describe a foreground/background
+	// disocclusion. The farther side is the only permissible donor.
+	bool pos_is_background = pos_z > neg_z;
+	ivec2 background_pixel = pos_is_background ? pos_pixel : neg_pixel;
+	float background_z = pos_is_background ? pos_z : neg_z;
+	float foreground_z = pos_is_background ? neg_z : pos_z;
+	uint background_distance = pos_is_background ? pos_distance : neg_distance;
+
+	// Estimate the expected target-space gap from the actual pose and the two
+	// observed depths. This is the relative parallax between foreground and
+	// background for the current ray.
+	float near_source_z;
+	float far_source_z;
+	vec2 foreground_source =
+	    depth_source_uv_from_target_z(target_projection_uv,
+	                                  foreground_z,
+	                                  scanout_fraction,
+	                                  iz,
+	                                  near_source_z);
+	vec2 background_source =
+	    depth_source_uv_from_target_z(target_projection_uv,
+	                                  background_z,
+	                                  scanout_fraction,
+	                                  iz,
+	                                  far_source_z);
+	float predicted_gap_px =
+	    length((foreground_source - background_source) * vec2(width, height));
+	float allowed_distance = min(float(max_fill_px), ceil(predicted_gap_px) + 2.0);
+
+	if (!(predicted_gap_px > 0.5) || float(background_distance) > allowed_distance) {
+		return false;
+	}
+
+	donor_target_z = background_z;
+	donor_target_uv = (vec2(background_pixel) + vec2(0.5)) / vec2(width, height);
+	return true;
+}
+
+
 vec2 transform_uv(vec2 uv, uint iz)
 {
 	if (do_timewarp) {
@@ -802,7 +900,11 @@ void main()
 				vec2 donor_target_uv;
 				float donor_target_z;
 				bool have_donor =
-				    depth_local_background_target(g_target_uv, iz, donor_target_uv, donor_target_z);
+				    depth_directional_background_target(g_target_uv,
+				                                        subimage_uv.y,
+				                                        iz,
+				                                        donor_target_uv,
+				                                        donor_target_z);
 
 				// Experimental only: if explicitly enabled, allow the full JFA
 				// field to fill holes that exceed the cheap 4-pixel local radius.
