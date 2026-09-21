@@ -1,0 +1,175 @@
+// Copyright 2026, Collabora Ltd.
+// SPDX-License-Identifier: BSL-1.0
+//
+// Resolve the actual submitted source texel that won the forward target-depth
+// z-buffer. The packed key is:
+//   bits 31..24: quantized projected-centre error (smaller is better)
+//   bits 23..12: source y
+//   bits 11..0 : source x
+// atomicMin therefore picks the closest projected source texel among all
+// same-depth candidates touching a target pixel.
+
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D source[4];
+
+layout(set = 0, binding = 4, std430) readonly buffer Visibility
+{
+	uint depth_bits[];
+} visibility;
+
+layout(set = 0, binding = 5, std430) buffer SourceProvenance
+{
+	uint packed_source[];
+} provenance;
+
+layout(set = 0, binding = 3, std140) uniform restrict Config
+{
+	ivec4 views[2];
+	vec4 pre_transform[2];
+	vec4 post_transform[2];
+	mat4 transform_timewarp_scanout_begin[2];
+	mat4 transform_timewarp_scanout_end[2];
+
+	vec4 depth_post_transform[2];
+	vec4 source_uv_to_tanangle[2];
+	vec4 projection_depth[2];
+	vec4 new_origin_in_source_view_scanout_begin[2];
+	vec4 new_origin_in_source_view_scanout_end[2];
+	vec4 target_to_source_orientation_scanout_begin[2];
+	vec4 target_to_source_orientation_scanout_end[2];
+	uvec4 has_depth[2];
+	uvec4 depth_debug;
+	uvec4 depth_visibility;
+	uvec4 depth_donor;
+} ubo;
+
+float
+projection_depth_to_view_z_distance(float window_depth, vec4 depth_info)
+{
+	const float min_depth = depth_info.x;
+	const float max_depth = depth_info.y;
+	const float near_z = depth_info.z;
+	const float far_z = depth_info.w;
+
+	const float range = max_depth - min_depth;
+	if (!(range > 0.0) || !(near_z > 0.0) || !(far_z > 0.0)) {
+		return 0.0;
+	}
+
+	const float t = clamp((window_depth - min_depth) / range, 0.0, 1.0);
+	const float inverse_distance = mix(1.0 / near_z, 1.0 / far_z, t);
+	return inverse_distance > 1e-8 ? 1.0 / inverse_distance : 0.0;
+}
+
+vec3
+quat_rotate(vec4 q, vec3 v)
+{
+	return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v);
+}
+
+vec3
+source_to_target(vec3 source_point, vec4 target_to_source_q, vec3 target_origin_in_source)
+{
+	vec4 source_to_target_q = vec4(-target_to_source_q.xyz, target_to_source_q.w);
+	return quat_rotate(source_to_target_q, source_point - target_origin_in_source);
+}
+
+vec2
+project_target_uv(vec3 target_point, uint view)
+{
+	float z_distance = -target_point.z;
+	if (!(z_distance > 1e-6)) {
+		return vec2(-1.0);
+	}
+
+	vec2 tangent = vec2(target_point.x / z_distance, -target_point.y / z_distance);
+	vec2 extent = ubo.pre_transform[view].zw;
+	if (abs(extent.x) < 1e-6 || abs(extent.y) < 1e-6) {
+		return vec2(-1.0);
+	}
+	return (tangent - ubo.pre_transform[view].xy) / extent;
+}
+
+void
+main()
+{
+	uint ix = gl_GlobalInvocationID.x;
+	uint iy = gl_GlobalInvocationID.y;
+	uint view = gl_GlobalInvocationID.z;
+
+	uint width = ubo.depth_visibility.x;
+	uint height = ubo.depth_visibility.y;
+	uint view_count = ubo.depth_visibility.z;
+	if (view >= view_count || ix >= width || iy >= height ||
+	    ubo.has_depth[view].x == 0u || width > 4095u || height > 4095u) {
+		return;
+	}
+
+	vec2 source_uv = (vec2(ix, iy) + vec2(0.5)) / vec2(width, height);
+	vec2 depth_uv =
+	    fma(source_uv, ubo.depth_post_transform[view].zw, ubo.depth_post_transform[view].xy);
+	float window_depth = texture(source[2 + view], depth_uv).r;
+	float source_z =
+	    projection_depth_to_view_z_distance(window_depth, ubo.projection_depth[view]);
+	if (!(source_z > 0.0)) {
+		return;
+	}
+
+	vec2 source_tan =
+	    fma(source_uv, ubo.source_uv_to_tanangle[view].zw, ubo.source_uv_to_tanangle[view].xy);
+	vec3 source_point = vec3(source_tan.x * source_z, -source_tan.y * source_z, -source_z);
+
+	vec4 q_begin = ubo.target_to_source_orientation_scanout_begin[view];
+	vec4 q_end = ubo.target_to_source_orientation_scanout_end[view];
+	vec3 o_begin = ubo.new_origin_in_source_view_scanout_begin[view].xyz;
+	vec3 o_end = ubo.new_origin_in_source_view_scanout_end[view].xyz;
+
+	vec4 q_mid = normalize(mix(q_begin, q_end, 0.5));
+	vec3 o_mid = mix(o_begin, o_end, 0.5);
+	vec3 target_point = source_to_target(source_point, q_mid, o_mid);
+	vec2 target_uv = project_target_uv(target_point, view);
+	if (any(lessThan(target_uv, vec2(0.0))) || any(greaterThanEqual(target_uv, vec2(1.0)))) {
+		return;
+	}
+
+	float scanout_fraction = clamp(target_uv.y, 0.0, 1.0);
+	vec4 q_scan = normalize(mix(q_begin, q_end, scanout_fraction));
+	vec3 o_scan = mix(o_begin, o_end, scanout_fraction);
+	target_point = source_to_target(source_point, q_scan, o_scan);
+	target_uv = project_target_uv(target_point, view);
+	if (any(lessThan(target_uv, vec2(0.0))) || any(greaterThanEqual(target_uv, vec2(1.0)))) {
+		return;
+	}
+
+	float target_z = -target_point.z;
+	if (!(target_z > 0.0)) {
+		return;
+	}
+
+	uint base = view * width * height;
+	vec2 projected_pixel = target_uv * vec2(width, height) - vec2(0.5);
+	uvec2 base_pixel =
+	    min(uvec2(target_uv * vec2(width, height)), uvec2(width - 1u, height - 1u));
+
+	for (uint dy = 0u; dy < 2u; ++dy) {
+		for (uint dx = 0u; dx < 2u; ++dx) {
+			uvec2 p = min(base_pixel + uvec2(dx, dy), uvec2(width - 1u, height - 1u));
+			uint index = base + p.y * width + p.x;
+			float winner_z = uintBitsToFloat(visibility.depth_bits[index]);
+			float tolerance = max(1e-5, 1e-5 * target_z);
+			if (!(winner_z > 0.0) || abs(winner_z - target_z) > tolerance) {
+				continue;
+			}
+
+			vec2 delta = projected_pixel - vec2(p);
+			float error2 = dot(delta, delta);
+			uint quality = uint(clamp(round(error2 * 48.0), 0.0, 255.0));
+			uint packed_xy = (iy << 12) | ix;
+			uint key = (quality << 24) | packed_xy;
+			atomicMin(provenance.packed_source[index], key);
+		}
+	}
+}
