@@ -1469,7 +1469,8 @@ struct render_compute_distortion_ubo_data
 		uint32_t view_count;
 		uint32_t enabled;
 	} depth_visibility;
-	// Experimental JFA donor propagation state: enabled, final ping-pong buffer index.
+	// Donor propagation/fill state: x=JFA enabled, y=final ping-pong index,
+	// z=max directional fill radius in target pixels.
 	struct
 	{
 		uint32_t enabled;
