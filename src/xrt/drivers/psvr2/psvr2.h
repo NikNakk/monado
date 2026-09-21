@@ -216,6 +216,12 @@ struct psvr2_hmd
 
 	struct xrt_pose T_imu_head; //< Constant transform from SLAM tracker pose to head pose
 
+	/* Optional compatibility recenter: first valid HMD pose becomes
+	 * x=0, z=0, y=1.6m with its initial yaw facing OpenXR -Z. */
+	bool recenter_on_first_pose;
+	bool recenter_initialized;
+	struct xrt_pose recenter_transform;
+
 	/* Display parameters */
 	struct u_device_simple_info info;
 
