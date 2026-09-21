@@ -93,6 +93,7 @@ enum pssense_input_index
 	PSSENSE_INDEX_THUMBSTICK_TOUCH,
 	PSSENSE_INDEX_GRIP_POSE,
 	PSSENSE_INDEX_AIM_POSE,
+	PSSENSE_INPUT_COUNT,
 };
 
 const uint8_t INPUT_REPORT_ID = 0x31;
@@ -648,7 +649,7 @@ pssense_device_update_inputs(struct xrt_device *xdev)
 	// Lock the data.
 	os_mutex_lock(&pssense->lock);
 
-	for (uint32_t i = 0; i < (uint32_t)sizeof(enum pssense_input_index); i++) {
+	for (uint32_t i = 0; i < PSSENSE_INPUT_COUNT; i++) {
 		pssense->base.inputs[i].timestamp = (int64_t)pssense->state.timestamp_ns;
 	}
 	pssense->base.inputs[PSSENSE_INDEX_PS_CLICK].value.boolean = pssense->state.ps_click;
@@ -902,7 +903,7 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 	}
 
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_TRACKING_NONE;
-	struct pssense_device *pssense = U_DEVICE_ALLOCATE(struct pssense_device, flags, 23, 2);
+	struct pssense_device *pssense = U_DEVICE_ALLOCATE(struct pssense_device, flags, PSSENSE_INPUT_COUNT, 2);
 	PSSENSE_DEBUG(pssense, "PlayStation Sense controller found");
 
 	pssense->base.name = XRT_DEVICE_PSSENSE;
