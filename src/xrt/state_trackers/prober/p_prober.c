@@ -630,6 +630,10 @@ teardown(struct prober *p)
 
 	teardown_devices(p);
 
+#ifdef XRT_OS_OSX
+	p_osx_hid_teardown(p);
+#endif
+
 #ifdef XRT_HAVE_LIBUVC
 	p_libuvc_teardown(p);
 #endif
@@ -931,6 +935,14 @@ p_probe(struct xrt_prober *xp)
 	ret = p_libusb_probe(p);
 	if (ret != 0) {
 		P_ERROR(p, "Failed to enumerate libusb devices\n");
+		return XRT_ERROR_PROBING_FAILED;
+	}
+#endif
+
+#ifdef XRT_OS_OSX
+	ret = p_osx_hid_probe(p);
+	if (ret != 0) {
+		P_ERROR(p, "Failed to enumerate macOS PS Sense HID devices\n");
 		return XRT_ERROR_PROBING_FAILED;
 	}
 #endif
