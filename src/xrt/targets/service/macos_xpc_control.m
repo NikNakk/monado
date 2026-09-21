@@ -282,6 +282,23 @@ make_launch_environment(bool capture_current_environment)
 	return filtered;
 }
 
+static NSString *
+get_launchd_process_type(void)
+{
+	const char *raw = getenv("XRT_MACOS_LAUNCHD_PROCESS_TYPE");
+	if (raw == NULL || raw[0] == '\0' || strcasecmp(raw, "Adaptive") == 0) {
+		return @"Adaptive";
+	}
+	if (strcasecmp(raw, "Interactive") == 0) {
+		return @"Interactive";
+	}
+
+	fprintf(stderr,
+	        "Invalid XRT_MACOS_LAUNCHD_PROCESS_TYPE='%s' (expected Adaptive or Interactive); using Adaptive\n",
+	        raw);
+	return @"Adaptive";
+}
+
 static bool
 write_launch_agent_plist(const char *path, const char *service_executable, bool capture_current_environment,
                          bool persistent_logs)
@@ -299,9 +316,10 @@ write_launch_agent_plist(const char *path, const char *service_executable, bool 
 		NSString *stdout_string = have_log_paths ? [NSString stringWithUTF8String:stdout_path] : nil;
 		NSString *stderr_string = have_log_paths ? [NSString stringWithUTF8String:stderr_path] : nil;
 		NSDictionary *launch_environment = make_launch_environment(capture_current_environment);
+		NSString *process_type = get_launchd_process_type();
 
 		if (exe == nil || plist_path == nil || label == nil || mach_service == nil || stdout_string == nil ||
-		    stderr_string == nil || launch_environment == nil) {
+		    stderr_string == nil || launch_environment == nil || process_type == nil) {
 			return false;
 		}
 
@@ -310,7 +328,7 @@ write_launch_agent_plist(const char *path, const char *service_executable, bool 
 			@"ProgramArguments" : @[ exe ],
 			@"MachServices" : @{ mach_service : @YES },
 			@"RunAtLoad" : @NO,
-			@"ProcessType" : @"Adaptive",
+			@"ProcessType" : process_type,
 			@"EnvironmentVariables" : launch_environment,
 			@"StandardOutPath" : stdout_string,
 			@"StandardErrorPath" : stderr_string,
@@ -382,7 +400,7 @@ bootstrap_service(void)
 	printf("monado-service registered for on-demand XPC activation (development mode)\n");
 	printf("LaunchAgent label: %s\n", MONADO_XPC_LAUNCHD_LABEL);
 	printf("Mach service: %s\n", IPC_METAL_XPC_SERVICE_NAME);
-	printf("ProcessType: Adaptive (foreground XPC provenance enabled when the client requests an importance lease)\n");
+	printf("ProcessType: %s\n", get_launchd_process_type().UTF8String);
 	printf("Executable: %s\n", service_executable);
 	printf("LaunchAgent plist: %s\n", plist_path);
 	printf("Relevant XRT/PSVR2/Vulkan environment captured from this shell\n");
@@ -447,6 +465,7 @@ install_service(void)
 	printf("monado-service installed as a persistent per-user LaunchAgent\n");
 	printf("LaunchAgent label: %s\n", MONADO_XPC_LAUNCHD_LABEL);
 	printf("Mach service: %s\n", IPC_METAL_XPC_SERVICE_NAME);
+	printf("ProcessType: %s\n", get_launchd_process_type().UTF8String);
 	printf("Executable: %s\n", service_executable);
 	printf("LaunchAgent plist: %s\n", persistent_plist_path);
 	printf("The LaunchAgent will be available again after logout/login or reboot and starts on demand via XPC\n");
