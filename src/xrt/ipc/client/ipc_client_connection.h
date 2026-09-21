@@ -56,6 +56,22 @@ ipc_client_connection_unlock(struct ipc_connection *ipc_c)
 }
 
 /*!
+ * Serialize bytes written to the IPC transport without holding the broader
+ * synchronous request/reply transaction lock.
+ */
+static inline void
+ipc_client_connection_send_lock(struct ipc_connection *ipc_c)
+{
+	os_mutex_lock(&ipc_c->send_mutex);
+}
+
+static inline void
+ipc_client_connection_send_unlock(struct ipc_connection *ipc_c)
+{
+	os_mutex_unlock(&ipc_c->send_mutex);
+}
+
+/*!
  * Tear down the basics of the client connection: socket and shared mem
  * @param ipc_c initialized IPC connection struct
  *
