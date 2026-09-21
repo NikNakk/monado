@@ -69,19 +69,31 @@ def write_call_definition(f, call):
     write_reply_struct(f, call, '\t')
 
     f.write("""
-\t// Other threads must not read/write the fd while we wait for reply
+\t// Serialize synchronous request/reply transactions so one caller cannot
+\t// consume another caller's reply.
 \tos_mutex_lock(&ipc_c->mutex);
-""")
-    cleanup = "os_mutex_unlock(&ipc_c->mutex);"
 
-    # Prepare initial sending
+\t// Serialize only the bytes written to the transport separately. This is
+\t// intentionally shorter lived than the transaction mutex: one-way frame
+\t// submissions may write while this caller waits for its reply.
+\tos_mutex_lock(&ipc_c->send_mutex);
+""")
+    cleanup_transaction = "os_mutex_unlock(&ipc_c->mutex);"
+    cleanup_send_and_transaction = (
+        "os_mutex_unlock(&ipc_c->send_mutex);\n"
+        "\t\tos_mutex_unlock(&ipc_c->mutex);"
+    )
+
+    # Prepare initial sending.
     write_msg_send(f, 'xrt_result_t ret', indent="\t")
-    write_result_handler(f, 'ret', cleanup, indent="\t")
+    write_result_handler(f, 'ret', cleanup_send_and_transaction, indent="\t")
 
     if call.in_handles:
         f.write("\n\t// Send our handles separately\n")
         f.write("\n\t// Wait for server sync")
-        # Must sync with the server so it's expecting the next message.
+        # Keep send_mutex held across this handshake: after seeing the initial
+        # request the server expects the handle payload to be the next client
+        # message on the wire.
         write_invocation(
             f,
             'ret',
@@ -94,7 +106,7 @@ def write_call_definition(f, call):
             indent="\t"
         )
         f.write(';')
-        write_result_handler(f, 'ret', cleanup, indent="\t")
+        write_result_handler(f, 'ret', cleanup_send_and_transaction, indent="\t")
 
         # Must send these in a second message
         # since the server doesn't know how many to expect.
@@ -116,7 +128,11 @@ def write_call_definition(f, call):
             indent="\t"
         )
         f.write(';')
-        write_result_handler(f, 'ret', cleanup, indent="\t")
+        write_result_handler(f, 'ret', cleanup_send_and_transaction, indent="\t")
+
+    # For normal calls this is immediately after the request bytes are sent.
+    # For input-handle calls it is after the complete handshake above.
+    f.write("\n\tos_mutex_unlock(&ipc_c->send_mutex);")
 
     f.write("\n\t// Await the reply")
     func = 'ipc_receive'
@@ -126,11 +142,11 @@ def write_call_definition(f, call):
         args.extend(call.out_handles.arg_names)
     write_invocation(f, 'ret', func, args, indent="\t")
     f.write(';')
-    write_result_handler(f, 'ret', cleanup, indent="\t")
+    write_result_handler(f, 'ret', cleanup_transaction, indent="\t")
 
     for arg in call.out_args:
         f.write("\t*out_" + arg.name + " = _reply." + arg.name + ";\n")
-    f.write("\n\t" + cleanup)
+    f.write("\n\t" + cleanup_transaction)
     f.write("\n\treturn _reply.result;\n}\n")
 
 
