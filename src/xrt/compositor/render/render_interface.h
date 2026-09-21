@@ -532,6 +532,7 @@ struct render_resources
 			uint32_t height;
 			VkPipeline clear_pipeline;
 			VkPipeline pipeline;
+			VkPipeline resolve_pipeline;
 		} depth_visibility;
 
 		struct
