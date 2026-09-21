@@ -11,6 +11,7 @@ set(SHADERS
     clear.comp
     distortion.comp
     depth_visibility.comp
+    depth_visibility_resolve.comp
     depth_visibility_clear.comp
     depth_donor_seed.comp
     depth_donor_jumpflood.comp
