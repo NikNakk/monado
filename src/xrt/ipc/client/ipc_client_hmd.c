@@ -76,6 +76,7 @@ call_get_view_poses_raw(ipc_client_hmd_t *ich,
 	xrt_result_t xret;
 
 	ipc_client_connection_lock(ipc_c);
+	ipc_client_connection_send_lock(ipc_c);
 
 	// Using the raw send helper is the only one that is required.
 	xret = ipc_send_device_get_view_poses_locked( //
@@ -85,7 +86,11 @@ call_get_view_poses_raw(ipc_client_hmd_t *ich,
 	    at_timestamp_ns,                          //
 	    view_type,                                //
 	    view_count);                              //
-	IPC_CHK_WITH_GOTO(ich->ipc_c, xret, "ipc_send_device_get_view_poses_locked", out);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto out;
+	}
+	ipc_client_connection_send_unlock(ipc_c);
 
 	// This is the data we get back in the provided reply.
 	uint32_t returned_view_count = 0;
@@ -227,9 +232,14 @@ ipc_client_hmd_get_visibility_mask(struct xrt_device *xdev,
 	xrt_result_t xret;
 
 	ipc_client_connection_lock(ipc_c);
+	ipc_client_connection_send_lock(ipc_c);
 
 	xret = ipc_send_device_get_visibility_mask_locked(ipc_c, ich->device_id, type, view_index);
-	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send_device_get_visibility_mask_locked", err_mask_unlock);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto err_mask_unlock;
+	}
+	ipc_client_connection_send_unlock(ipc_c);
 
 	uint32_t mask_size;
 	xret = ipc_receive_device_get_visibility_mask_locked(ipc_c, &mask_size);
