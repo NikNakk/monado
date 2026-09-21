@@ -39,6 +39,7 @@
 #include <string.h>
 
 #ifdef XRT_OS_OSX
+#include "os/os_macos_xpc_context.h"
 #include <unistd.h>
 #endif
 
@@ -699,6 +700,56 @@ update_session_state_locked(struct multi_system_compositor *msc)
 	}
 }
 
+struct multi_frame_work
+{
+	struct multi_system_compositor *msc;
+	struct os_precise_sleeper *sleeper;
+};
+
+static void
+multi_run_frame_work(void *ptr)
+{
+	struct multi_frame_work *work = (struct multi_frame_work *)ptr;
+	struct multi_system_compositor *msc = work->msc;
+	struct xrt_compositor *xc = &msc->xcn->base;
+
+	int64_t frame_id = -1;
+	int64_t wake_up_time_ns = 0;
+	int64_t predicted_gpu_time_ns = 0;
+	int64_t predicted_display_time_ns = 0;
+	int64_t predicted_display_period_ns = 0;
+
+	// Get the information for the next frame.
+	xrt_comp_predict_frame(            //
+	    xc,                            //
+	    &frame_id,                     //
+	    &wake_up_time_ns,              //
+	    &predicted_gpu_time_ns,        //
+	    &predicted_display_time_ns,    //
+	    &predicted_display_period_ns); //
+
+	// Do this as soon as we have the new display time.
+	broadcast_timings_to_clients(msc, predicted_display_time_ns);
+
+	// Now we can wait.
+	wait_frame(work->sleeper, xc, frame_id, wake_up_time_ns);
+
+	int64_t now_ns = os_monotonic_get_ns();
+	int64_t diff_ns = predicted_display_time_ns - now_ns;
+
+	// Now we know the diff, broadcast to pacers.
+	broadcast_timings_to_pacers(msc, predicted_display_time_ns, predicted_display_period_ns, diff_ns);
+
+	xrt_comp_begin_frame(xc, frame_id);
+
+	// Make sure that the clients doesn't go away while we transfer layers.
+	os_mutex_lock(&msc->list_and_timing_lock);
+	transfer_layers_locked(msc, predicted_display_time_ns, frame_id);
+	os_mutex_unlock(&msc->list_and_timing_lock);
+
+	xrt_comp_layer_commit(xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+}
+
 static int
 multi_main_loop(struct multi_system_compositor *msc)
 {
@@ -735,41 +786,23 @@ multi_main_loop(struct multi_system_compositor *msc)
 		// Unlock the thread after the checks has been done.
 		os_thread_helper_unlock(&msc->oth);
 
-		int64_t frame_id = -1;
-		int64_t wake_up_time_ns = 0;
-		int64_t predicted_gpu_time_ns = 0;
-		int64_t predicted_display_time_ns = 0;
-		int64_t predicted_display_period_ns = 0;
+		struct multi_frame_work work = {
+		    .msc = msc,
+		    .sleeper = &sleeper,
+		};
 
-		// Get the information for the next frame.
-		xrt_comp_predict_frame(            //
-		    xc,                            //
-		    &frame_id,                     //
-		    &wake_up_time_ns,              //
-		    &predicted_gpu_time_ns,        //
-		    &predicted_display_time_ns,    //
-		    &predicted_display_period_ns); //
-
-		// Do this as soon as we have the new display time.
-		broadcast_timings_to_clients(msc, predicted_display_time_ns);
-
-		// Now we can wait.
-		wait_frame(&sleeper, xc, frame_id, wake_up_time_ns);
-
-		int64_t now_ns = os_monotonic_get_ns();
-		int64_t diff_ns = predicted_display_time_ns - now_ns;
-
-		// Now we know the diff, broadcast to pacers.
-		broadcast_timings_to_pacers(msc, predicted_display_time_ns, predicted_display_period_ns, diff_ns);
-
-		xrt_comp_begin_frame(xc, frame_id);
-
-		// Make sure that the clients doesn't go away while we transfer layers.
-		os_mutex_lock(&msc->list_and_timing_lock);
-		transfer_layers_locked(msc, predicted_display_time_ns, frame_id);
-		os_mutex_unlock(&msc->list_and_timing_lock);
-
-		xrt_comp_layer_commit(xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
+#ifdef XRT_OS_OSX
+		/*
+		 * The compositor is a custom pthread, not GCD work dispatched directly
+		 * from the XPC handler. Apply the foreground client's captured XPC
+		 * execution context for the whole predict -> wait -> latch -> commit
+		 * frame so macOS can associate this timing-critical work with the
+		 * foreground/Game Mode process.
+		 */
+		os_macos_xpc_context_run(multi_run_frame_work, &work);
+#else
+		multi_run_frame_work(&work);
+#endif
 
 		// Re-lock the thread for check in while statement.
 		os_thread_helper_lock(&msc->oth);
