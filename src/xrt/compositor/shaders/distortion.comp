@@ -907,7 +907,7 @@ void main()
 				                                        donor_target_z);
 
 				// Experimental only: if explicitly enabled, allow the full JFA
-				// field to fill holes that exceed the cheap 4-pixel local radius.
+				// field to fill holes that exceed the bounded directional search.
 				if (!have_donor) {
 					have_donor = depth_donor_target(g_target_uv, iz, donor_target_uv, donor_target_z);
 				}
@@ -920,13 +920,10 @@ void main()
 					                                  donor_target_uv.y,
 					                                  iz,
 					                                  donor_source_z);
-					vec2 snapped_donor;
-					if (depth_snap_source_uv_to_surface(donor_source_uv,
-					                                    donor_source_z,
-					                                    iz,
-					                                    snapped_donor)) {
-						donor_source_uv = snapped_donor;
-					}
+					// The donor is already a visible target-space sample selected
+					// along the pose-derived parallax axis. Do not run a second
+					// radial source-space snap here: that would let synthesized
+					// background wander sideways and recreate the trail artefact.
 					r_projection_uv = donor_source_uv;
 					g_projection_uv = donor_source_uv;
 					b_projection_uv = donor_source_uv;
