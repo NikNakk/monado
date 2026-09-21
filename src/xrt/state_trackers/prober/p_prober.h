@@ -120,6 +120,11 @@ struct prober_device
 	size_t num_hidraws;
 	struct prober_hidraw *hidraws;
 #endif
+
+#ifdef XRT_OS_OSX
+	/* Borrowed from the IOHIDManager/device set owned by struct prober. */
+	void *osx_hid_device;
+#endif
 };
 
 /*!
@@ -166,6 +171,10 @@ struct prober
 	} uvc;
 #endif
 
+#ifdef XRT_OS_OSX
+	void *osx_hid_manager;
+	const void *osx_hid_device_set;
+#endif
 
 	struct xrt_auto_prober *auto_probers[XRT_MAX_AUTO_PROBERS];
 
@@ -334,4 +343,12 @@ p_udev_probe(struct prober *p);
 /*!
  * @}
  */
+#endif
+
+#ifdef XRT_OS_OSX
+int
+p_osx_hid_probe(struct prober *p);
+
+void
+p_osx_hid_teardown(struct prober *p);
 #endif
