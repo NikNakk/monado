@@ -181,18 +181,33 @@ locate_spaces(struct xrt_space_overseer *xso,
 	}
 
 	ipc_client_connection_lock(ipc_c);
+	/*
+	 * This varlen exchange has a server handshake followed by two client
+	 * payloads. Keep the wire-send mutex across that whole client-write phase
+	 * so an async frame submit cannot be mistaken for the expected arrays.
+	 */
+	ipc_client_connection_send_lock(ipc_c);
 
 	xret =
 	    ipc_send_space_locate_spaces_locked(ipc_c, icsp_base_space->id, base_offset, space_count, at_timestamp_ns);
-	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send_space_locate_spaces_locked", locate_spaces_out);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto locate_spaces_out;
+	}
 
 	enum xrt_result received_result = XRT_SUCCESS;
 	xret = ipc_receive(&ipc_c->imc, &received_result, sizeof(enum xrt_result));
-	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive: Receive spaces allocation result", locate_spaces_out);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto locate_spaces_out;
+	}
 
 	// now check if the service sent a success code or an error code about allocating memory for spaces.
 	xret = received_result;
-	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive: service side spaces allocation failed", locate_spaces_out);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto locate_spaces_out;
+	}
 
 	for (uint32_t i = 0; i < space_count; i++) {
 		if (spaces[i] == NULL) {
@@ -207,7 +222,11 @@ locate_spaces(struct xrt_space_overseer *xso,
 	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send: Send spaces ids", locate_spaces_out);
 
 	xret = ipc_send(&ipc_c->imc, offsets, sizeof(struct xrt_pose) * space_count);
-	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_send: Send spaces offsets", locate_spaces_out);
+	if (xret != XRT_SUCCESS) {
+		ipc_client_connection_send_unlock(ipc_c);
+		goto locate_spaces_out;
+	}
+	ipc_client_connection_send_unlock(ipc_c);
 
 	xret = ipc_receive(&ipc_c->imc, out_relations, sizeof(struct xrt_space_relation) * space_count);
 	IPC_CHK_WITH_GOTO(ipc_c, xret, "ipc_receive: Receive spaces relations", locate_spaces_out);
