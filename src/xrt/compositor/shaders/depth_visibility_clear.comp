@@ -10,6 +10,11 @@ layout(set = 0, binding = 4, std430) buffer Visibility
 	uint depth_bits[];
 } visibility;
 
+layout(set = 0, binding = 5, std430) buffer SourceProvenance
+{
+	uint packed_source[];
+} provenance;
+
 layout(set = 0, binding = 3, std140) uniform restrict Config
 {
 	ivec4 views[2];
@@ -28,6 +33,7 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	uvec4 has_depth[2];
 	uvec4 depth_debug;
 	uvec4 depth_visibility;
+	uvec4 depth_donor;
 } ubo;
 
 void main()
@@ -38,4 +44,5 @@ void main()
 		return;
 	}
 	visibility.depth_bits[index] = 0x7f7fffffu;
+	provenance.packed_source[index] = 0xffffffffu;
 }
