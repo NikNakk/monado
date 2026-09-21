@@ -235,7 +235,8 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	cwm->trace_presented = macos_timing_trace_open_file(
 	    "presented",
 	    "frame_id,presented_handler_ns,desired_present_ns,target_output_ns,presented_time_host_s,"
-	    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns");
+	    "presented_monotonic_ns,presented_minus_desired_ns,presented_minus_target_ns,observed_present_offset_ns,"
+	    "present_queue_depth");
 	if (cwm->trace_presented != NULL) {
 		cwm->presented_state = macos_presented_state_create(cwm->trace_presented);
 		if (cwm->presented_state == NULL) {
@@ -1267,6 +1268,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			uint64_t traced_frame_id = frame_id;
 			int64_t traced_desired_present_ns = desired_present_time_ns;
 			uint64_t traced_target_output_ns = target_output_ns;
+			int64_t traced_display_period_ns = cwm->display_period_ns;
 			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
 				double presented_time_s = [presented_drawable presentedTime];
 				int64_t handler_ns = os_monotonic_get_ns();
@@ -1285,6 +1287,20 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				    presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns : 0;
 				int64_t observed_present_offset_ns =
 				    presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
+				/*
+				 * Diagnostic equivalent of GAV's present-queue measurement:
+				 * how many refresh periods after the compositor's chosen
+				 * output slot did Core Animation actually present this
+				 * drawable? 0 is on the selected slot, +1 is one refresh
+				 * later, +2 identifies the persistent deep-queue condition
+				 * seen by GAV. No active queue draining is performed here.
+				 */
+				int64_t present_queue_depth = -1;
+				if (presented_monotonic_ns != 0 && traced_target_output_ns != 0 && traced_display_period_ns > 0) {
+					present_queue_depth =
+					    (int64_t)llround((double)(presented_monotonic_ns - (int64_t)traced_target_output_ns) /
+					                     (double)traced_display_period_ns);
+				}
 				if (!displaylink_driven && observed_present_offset_ns > 0) {
 					atomic_store_explicit(&presented_state->latest_observed_present_offset_ns,
 					                      observed_present_offset_ns, memory_order_release);
@@ -1293,10 +1309,12 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				}
 				flockfile(trace_file);
 				fprintf(trace_file,
-				        "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n",
+				        "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
+				        ",%" PRIi64 "\n",
 				        (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,
 				        (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,
-				        presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns);
+				        presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns,
+				        present_queue_depth);
 				fflush(trace_file);
 				funlockfile(trace_file);
 				macos_presented_state_release(presented_state);
