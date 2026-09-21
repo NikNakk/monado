@@ -1439,7 +1439,7 @@ struct render_compute_distortion_ubo_data
 	// Projection depth state/control packed into one std140 uvec4 per view.
 	// value/x: depth layer present.
 	// padding0/y: keep chromatic samples on the selected depth surface at edges.
-	// padding1/z: fill narrow holes in the forward visibility map from background.
+	// padding1/z: cheap local (<=4 px) background fill for forward-map holes.
 	// padding2/w: diagnostic only, use the green distortion ray for R/G/B.
 	struct
 	{
@@ -1469,7 +1469,7 @@ struct render_compute_distortion_ubo_data
 		uint32_t view_count;
 		uint32_t enabled;
 	} depth_visibility;
-	// Donor propagation state: enabled, final ping-pong buffer index.
+	// Experimental JFA donor propagation state: enabled, final ping-pong buffer index.
 	struct
 	{
 		uint32_t enabled;
