@@ -29,6 +29,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(depth_per_channel, "XRT_COMPOSITOR_DEPTH_PER_CHANNEL"
 DEBUG_GET_ONCE_BOOL_OPTION(depth_occlusion_search, "XRT_COMPOSITOR_DEPTH_OCCLUSION_SEARCH", true)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_forward_visibility, "XRT_COMPOSITOR_DEPTH_FORWARD_VISIBILITY", true)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_forward_hole_fill, "XRT_COMPOSITOR_DEPTH_FORWARD_HOLE_FILL", true)
+DEBUG_GET_ONCE_BOOL_OPTION(depth_jfa_fill, "XRT_COMPOSITOR_DEPTH_JFA_FILL", false)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_chroma_edge_lock, "XRT_COMPOSITOR_DEPTH_CHROMA_EDGE_LOCK", true)
 DEBUG_GET_ONCE_BOOL_OPTION(depth_monochrome_distortion, "XRT_COMPOSITOR_DEPTH_MONOCHROME_DISTORTION", false)
 
@@ -1283,7 +1284,7 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	data->depth_visibility.enabled =
 	    debug_get_bool_option_depth_forward_visibility() && visibility_fits ? 1u : 0u;
 	data->depth_donor.enabled =
-	    data->depth_visibility.enabled != 0 && debug_get_bool_option_depth_forward_hole_fill() ? 1u : 0u;
+	    data->depth_visibility.enabled != 0 && debug_get_bool_option_depth_jfa_fill() ? 1u : 0u;
 	data->depth_donor.final_index = 0;
 	data->depth_donor.padding0 = 0;
 	data->depth_donor.padding1 = 0;
