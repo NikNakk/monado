@@ -982,18 +982,18 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 			 * call instead of blocking xrEndFrame.
 			 */
 			uint64_t lock_start_ns = os_monotonic_get_ns();
-			os_mutex_lock(&icc->ipc_c->mutex);
+			os_mutex_lock(&icc->ipc_c->send_mutex);
 			uint64_t send_start_ns = os_monotonic_get_ns();
 			xret = ipc_send_compositor_layer_sync_single_semaphore_async_locked(
 			    icc->ipc_c, &payload, iccs->id, value);
 			uint64_t send_end_ns = os_monotonic_get_ns();
-			os_mutex_unlock(&icc->ipc_c->mutex);
+			os_mutex_unlock(&icc->ipc_c->send_mutex);
 
-			double lock_wait_us = (double)(send_start_ns - lock_start_ns) / 1000.0;
+			double wire_lock_us = (double)(send_start_ns - lock_start_ns) / 1000.0;
 			double send_us = (double)(send_end_ns - send_start_ns) / 1000.0;
-			if (lock_wait_us > 1000.0 || send_us > 1000.0) {
-				U_LOG_W("Wine async IPC submit stall: layers=%u bytes=%zu lock=%.3fus send=%.3fus",
-				        slot->layer_count, total_size, lock_wait_us, send_us);
+			if (wire_lock_us > 1000.0 || send_us > 1000.0) {
+				U_LOG_W("Wine async IPC submit stall: layers=%u bytes=%zu wire_lock=%.3fus send=%.3fus",
+				        slot->layer_count, total_size, wire_lock_us, send_us);
 			}
 		} else {
 			uint64_t copy_start_ns = os_monotonic_get_ns();
