@@ -1060,18 +1060,38 @@ dispatch_depth_visibility(struct render_compute *render,
 	uint64_t visibility_count = (uint64_t)width * (uint64_t)height * (uint64_t)view_count;
 	vk->vkCmdDispatch(r->cmd, uint_divide_and_round_up((uint32_t)visibility_count, 256), 1, 1);
 
-	VkBufferMemoryBarrier clear_barrier = {
-	    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-	    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-	    .buffer = r->compute.depth_visibility.buffer.buffer,
-	    .offset = 0,
-	    .size = active_size,
+	VkBufferMemoryBarrier clear_barriers[2] = {
+	    {
+	        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+	        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+	        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	        .buffer = r->compute.depth_visibility.buffer.buffer,
+	        .offset = 0,
+	        .size = active_size,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	        .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+	        .dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+	        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	        .buffer = r->compute.depth_donor.buffers[0].buffer,
+	        .offset = 0,
+	        .size = active_size,
+	    },
 	};
-	vk->vkCmdPipelineBarrier(r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-	                         NULL, 1, &clear_barrier, 0, NULL);
+	vk->vkCmdPipelineBarrier(r->cmd,
+	                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	                         0,
+	                         0,
+	                         NULL,
+	                         2,
+	                         clear_barriers,
+	                         0,
+	                         NULL);
 
 	vk->vkCmdBindPipeline(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.depth_visibility.pipeline);
 	vk->vkCmdDispatch(r->cmd, uint_divide_and_round_up(width, 8), uint_divide_and_round_up(height, 8), view_count);
@@ -1088,6 +1108,34 @@ dispatch_depth_visibility(struct render_compute *render,
 	};
 	vk->vkCmdPipelineBarrier(r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
 	                         NULL, 1, &visibility_barrier, 0, NULL);
+
+	// Second regular forward pass: for each target z-buffer winner, record the
+	// actual submitted source texel that produced it. This avoids reconstructing
+	// a source UV from target depth near silhouettes, where the 2x2 splat can
+	// otherwise land back inside the old foreground.
+	vk->vkCmdBindPipeline(r->cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->compute.depth_visibility.resolve_pipeline);
+	vk->vkCmdDispatch(r->cmd, uint_divide_and_round_up(width, 8), uint_divide_and_round_up(height, 8), view_count);
+
+	VkBufferMemoryBarrier provenance_barrier = {
+	    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+	    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+	    .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+	    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+	    .buffer = r->compute.depth_donor.buffers[0].buffer,
+	    .offset = 0,
+	    .size = active_size,
+	};
+	vk->vkCmdPipelineBarrier(r->cmd,
+	                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+	                         0,
+	                         0,
+	                         NULL,
+	                         1,
+	                         &provenance_barrier,
+	                         0,
+	                         NULL);
 }
 
 static void
