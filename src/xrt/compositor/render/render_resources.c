@@ -1123,6 +1123,17 @@ render_resources_init(struct render_resources *r,
 	VK_CHK_WITH_RET(ret, "vk_create_compute_pipeline(depth_visibility)", false);
 	VK_NAME_PIPELINE(vk, r->compute.depth_visibility.pipeline, "render_resources depth visibility pipeline");
 
+	ret = vk_create_compute_pipeline(
+	    vk,
+	    r->pipeline_cache,
+	    r->shaders->depth_visibility_resolve_comp,
+	    r->compute.distortion.pipeline_layout,
+	    NULL,
+	    &r->compute.depth_visibility.resolve_pipeline);
+	VK_CHK_WITH_RET(ret, "vk_create_compute_pipeline(depth_visibility_resolve)", false);
+	VK_NAME_PIPELINE(vk, r->compute.depth_visibility.resolve_pipeline,
+	                 "render_resources depth visibility source resolve pipeline");
+
 	/*
 	 * Packed nearest-background donor field. Two uint-per-pixel buffers are
 	 * ping-ponged by jump flooding. Coordinates are packed as x | (y << 16).
@@ -1313,6 +1324,7 @@ render_resources_fini(struct render_resources *r)
 	D(Pipeline, r->compute.distortion.timewarp_pipeline);
 	D(Pipeline, r->compute.depth_visibility.clear_pipeline);
 	D(Pipeline, r->compute.depth_visibility.pipeline);
+	D(Pipeline, r->compute.depth_visibility.resolve_pipeline);
 	D(Pipeline, r->compute.depth_donor.seed_pipeline);
 	D(Pipeline, r->compute.depth_donor.jumpflood_pipeline);
 	D(PipelineLayout, r->compute.depth_donor.pipeline_layout);
