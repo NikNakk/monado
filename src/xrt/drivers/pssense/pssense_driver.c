@@ -44,6 +44,8 @@
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_synthetic_position, "PSSENSE_SYNTHETIC_POSITION", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_index_profile, "PSSENSE_INDEX_PROFILE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_synthetic_arm_model, "PSSENSE_SYNTHETIC_ARM_MODEL", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_input_diagnostics, "PSSENSE_INPUT_DIAGNOSTICS", false)
 
 static struct xrt_binding_input_pair simple_inputs_pssense[4] = {
     {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_PSSENSE_TRIGGER_CLICK},
@@ -376,9 +378,22 @@ struct pssense_device
 	struct m_imu_3dof fusion;
 	struct xrt_pose pose;
 
-	//! Compatibility mode: report the tracking-origin offset as a valid/tracked
-	//! controller position while retaining real IMU orientation and real inputs.
+	//! Compatibility mode: report a valid/tracked synthetic controller position
+	//! while retaining real IMU orientation and real inputs.
 	bool synthetic_position;
+	//! Move the synthetic controller from a head-relative shoulder using the
+	//! controller orientation as a simple arm model.
+	bool synthetic_arm_model;
+	//! Borrowed HMD device used by the synthetic arm model.
+	struct xrt_device *head_xdev;
+	//! Align the independent Sense IMU yaw frame to the HMD/world frame.
+	bool orientation_alignment_initialized;
+	struct xrt_quat orientation_alignment;
+
+	//! Optional raw-input edge diagnostics for OpenVR/OpenXR binding debugging.
+	bool input_diagnostics;
+	bool diagnostic_trigger_initialized;
+	bool diagnostic_trigger_click;
 
 	struct
 	{
@@ -739,6 +754,19 @@ pssense_device_update_inputs(struct xrt_device *xdev)
 	pssense->base.inputs[PSSENSE_INDEX_THUMBSTICK_CLICK].value.boolean = pssense->state.thumbstick_click;
 	pssense->base.inputs[PSSENSE_INDEX_THUMBSTICK_TOUCH].value.boolean = pssense->state.thumbstick_touch;
 
+	if (pssense->input_diagnostics &&
+	    (!pssense->diagnostic_trigger_initialized ||
+	     pssense->diagnostic_trigger_click != pssense->state.trigger_click)) {
+		PSSENSE_WARN(pssense,
+		             "raw trigger edge: hand=%s click=%d touch=%d value=%.3f",
+		             pssense->hand == PSSENSE_HAND_LEFT ? "left" : "right",
+		             pssense->state.trigger_click ? 1 : 0,
+		             pssense->state.trigger_touch ? 1 : 0,
+		             pssense->state.trigger_value);
+		pssense->diagnostic_trigger_click = pssense->state.trigger_click;
+		pssense->diagnostic_trigger_initialized = true;
+	}
+
 	// Done now.
 	os_mutex_unlock(&pssense->lock);
 
@@ -844,6 +872,99 @@ pssense_get_fusion_pose(struct pssense_device *pssense,
 	}
 }
 
+static void
+pssense_apply_synthetic_arm_model(struct pssense_device *pssense,
+                                  int64_t at_timestamp_ns,
+                                  struct xrt_space_relation *out_relation)
+{
+	if (!pssense->synthetic_position || !pssense->synthetic_arm_model || pssense->head_xdev == NULL) {
+		return;
+	}
+
+	struct xrt_space_relation head_relation = XRT_SPACE_RELATION_ZERO;
+	xrt_result_t xret = pssense->head_xdev->get_tracked_pose(
+	    pssense->head_xdev, XRT_INPUT_GENERIC_HEAD_POSE, at_timestamp_ns, &head_relation);
+	if (xret != XRT_SUCCESS ||
+	    (head_relation.relation_flags &
+	     (XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT)) !=
+	        (XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT)) {
+		return;
+	}
+
+	/*
+	 * Sense IMU yaw and PSVR2 SLAM yaw are independent. On the first valid
+	 * arm-model query, align the controller's horizontal forward direction to
+	 * the HMD's horizontal forward direction. Thereafter the alignment remains
+	 * fixed so controller rotations continue to move naturally in room space.
+	 */
+	if (!pssense->orientation_alignment_initialized) {
+		struct xrt_vec3 local_forward = {0.0f, 0.0f, -1.0f};
+		struct xrt_vec3 controller_forward;
+		struct xrt_vec3 head_forward;
+		math_quat_rotate_vec3(&out_relation->pose.orientation, &local_forward, &controller_forward);
+		math_quat_rotate_vec3(&head_relation.pose.orientation, &local_forward, &head_forward);
+		controller_forward.y = 0.0f;
+		head_forward.y = 0.0f;
+
+		float controller_len =
+		    sqrtf(controller_forward.x * controller_forward.x + controller_forward.z * controller_forward.z);
+		float head_len = sqrtf(head_forward.x * head_forward.x + head_forward.z * head_forward.z);
+		if (controller_len > 0.01f && head_len > 0.01f) {
+			controller_forward.x /= controller_len;
+			controller_forward.z /= controller_len;
+			head_forward.x /= head_len;
+			head_forward.z /= head_len;
+			math_quat_from_vec_a_to_vec_b(
+			    &controller_forward, &head_forward, &pssense->orientation_alignment);
+			pssense->orientation_alignment_initialized = true;
+			PSSENSE_WARN(pssense, "synthetic arm model aligned to HMD/world yaw");
+		}
+	}
+
+	if (pssense->orientation_alignment_initialized) {
+		struct xrt_quat aligned_orientation;
+		math_quat_rotate(
+		    &pssense->orientation_alignment, &out_relation->pose.orientation, &aligned_orientation);
+		out_relation->pose.orientation = aligned_orientation;
+
+		struct xrt_vec3 aligned_angvel;
+		math_quat_rotate_vec3(
+		    &pssense->orientation_alignment, &out_relation->angular_velocity, &aligned_angvel);
+		out_relation->angular_velocity = aligned_angvel;
+	}
+
+	/*
+	 * Very small 3DoF arm model: put a virtual shoulder below and slightly
+	 * behind each side of the HMD, then extend the hand along the controller's
+	 * corrected forward direction. This gives useful positional movement from
+	 * the real Sense orientation without pretending we have optical 6DoF.
+	 */
+	struct xrt_vec3 shoulder_local = {
+	    pssense->hand == PSSENSE_HAND_LEFT ? -0.18f : 0.18f,
+	    -0.18f,
+	    -0.05f,
+	};
+	struct xrt_vec3 shoulder_world;
+	math_quat_rotate_vec3(&head_relation.pose.orientation, &shoulder_local, &shoulder_world);
+
+	struct xrt_vec3 local_forward = {0.0f, 0.0f, -1.0f};
+	struct xrt_vec3 hand_forward;
+	math_quat_rotate_vec3(&out_relation->pose.orientation, &local_forward, &hand_forward);
+
+	const float arm_length_m = 0.45f;
+	out_relation->pose.position.x =
+	    head_relation.pose.position.x + shoulder_world.x + hand_forward.x * arm_length_m;
+	out_relation->pose.position.y =
+	    head_relation.pose.position.y + shoulder_world.y + hand_forward.y * arm_length_m;
+	out_relation->pose.position.z =
+	    head_relation.pose.position.z + shoulder_world.z + hand_forward.z * arm_length_m;
+
+	out_relation->linear_velocity = head_relation.linear_velocity;
+	out_relation->relation_flags = (enum xrt_space_relation_flags)(
+	    out_relation->relation_flags | XRT_SPACE_RELATION_POSITION_VALID_BIT |
+	    XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+}
+
 static xrt_result_t
 pssense_get_tracked_pose(struct xrt_device *xdev,
                          enum xrt_input_name name,
@@ -872,6 +993,7 @@ pssense_get_tracked_pose(struct xrt_device *xdev,
 	os_mutex_unlock(&pssense->lock);
 
 	m_relation_chain_resolve(&xrc, out_relation);
+	pssense_apply_synthetic_arm_model(pssense, at_timestamp_ns, out_relation);
 
 	return XRT_SUCCESS;
 }
@@ -985,13 +1107,20 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 
 	pssense->log_level = debug_get_log_option_pssense_log();
 	pssense->synthetic_position = debug_get_bool_option_pssense_synthetic_position();
+	pssense->synthetic_arm_model =
+	    pssense->synthetic_position && debug_get_bool_option_pssense_synthetic_arm_model();
+	pssense->input_diagnostics = debug_get_bool_option_pssense_input_diagnostics();
+	pssense->base.supported.position_tracking = pssense->synthetic_position;
 	bool index_profile = debug_get_bool_option_pssense_index_profile();
 	pssense->hid = hid;
 
 	if (pssense->synthetic_position) {
 		PSSENSE_WARN(pssense,
-		             "PSSENSE_SYNTHETIC_POSITION enabled: using real Sense orientation/input with a fixed "
-		             "tracking-origin position");
+		             "PSSENSE_SYNTHETIC_POSITION enabled: reporting a valid/tracked synthetic position");
+	}
+	if (pssense->synthetic_arm_model) {
+		PSSENSE_WARN(pssense,
+		             "PSSENSE_SYNTHETIC_ARM_MODEL enabled: hand position follows HMD and Sense orientation");
 	}
 
 	if (index_profile) {
@@ -1105,6 +1234,30 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 	u_var_add_pose(pssense, &pssense->pose, "Pose");
 
 	return &pssense->base;
+}
+
+void
+pssense_set_head_device(struct xrt_device *controller, struct xrt_device *head)
+{
+	if (controller == NULL) {
+		return;
+	}
+
+	struct pssense_device *pssense = (struct pssense_device *)controller;
+	pssense->head_xdev = head;
+
+	/*
+	 * When the arm model returns positions in the HMD's world coordinates, do
+	 * not let the generic builder add the old fixed (-/+0.2, 1.3, -0.5) origin.
+	 */
+	if (pssense->synthetic_position && pssense->synthetic_arm_model &&
+	    controller->tracking_origin != NULL && head != NULL && head->tracking_origin != NULL) {
+		controller->tracking_origin->type = head->tracking_origin->type;
+		controller->tracking_origin->initial_offset = (struct xrt_pose)XRT_POSE_IDENTITY;
+		snprintf(controller->tracking_origin->name,
+		         XRT_TRACKING_NAME_LEN,
+		         "PS VR2 synthetic Sense tracking");
+	}
 }
 
 int
