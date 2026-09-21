@@ -765,6 +765,7 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 				float z;
 				uint encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
 				if (depth_visibility_decode(encoded, z)) {
+					uint hit_distance = step;
 					if (step > 1u) {
 						ivec2 refined = origin + ivec2(round(direction * float(step - 1u)));
 						if (all(greaterThanEqual(refined, ivec2(0))) &&
@@ -775,14 +776,14 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 							if (depth_visibility_decode(refined_encoded, refined_z)) {
 								p = refined;
 								z = refined_z;
-								step -= 1u;
+								hit_distance = step - 1u;
 							}
 						}
 					}
 					found_pos = true;
 					pos_pixel = p;
 					pos_z = z;
-					pos_distance = step;
+					pos_distance = hit_distance;
 				}
 			}
 		}
@@ -796,6 +797,7 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 				float z;
 				uint encoded = visibility.depth_bits[base + uint(p.y) * width + uint(p.x)];
 				if (depth_visibility_decode(encoded, z)) {
+					uint hit_distance = step;
 					if (step > 1u) {
 						ivec2 refined = origin - ivec2(round(direction * float(step - 1u)));
 						if (all(greaterThanEqual(refined, ivec2(0))) &&
@@ -806,14 +808,14 @@ bool depth_directional_background_target(vec2 target_projection_uv,
 							if (depth_visibility_decode(refined_encoded, refined_z)) {
 								p = refined;
 								z = refined_z;
-								step -= 1u;
+								hit_distance = step - 1u;
 							}
 						}
 					}
 					found_neg = true;
 					neg_pixel = p;
 					neg_z = z;
-					neg_distance = step;
+					neg_distance = hit_distance;
 				}
 			}
 		}
