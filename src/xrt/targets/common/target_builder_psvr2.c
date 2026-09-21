@@ -181,6 +181,13 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 		}
 	}
 
+	if (left_xdev != NULL) {
+		pssense_set_head_device(left_xdev, head_xdev);
+	}
+	if (right_xdev != NULL) {
+		pssense_set_head_device(right_xdev, head_xdev);
+	}
+
 	tbrh->left = left_xdev;
 	tbrh->right = right_xdev;
 #endif
