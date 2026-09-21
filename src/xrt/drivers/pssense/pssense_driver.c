@@ -42,6 +42,7 @@
 #define PSSENSE_ERROR(p, ...) U_LOG_XDEV_IFL_E(&p->base, p->log_level, __VA_ARGS__)
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_synthetic_position, "PSSENSE_SYNTHETIC_POSITION", false)
 
 static struct xrt_binding_input_pair simple_inputs_pssense[4] = {
     {XRT_INPUT_SIMPLE_SELECT_CLICK, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
@@ -308,6 +309,10 @@ struct pssense_device
 
 	struct m_imu_3dof fusion;
 	struct xrt_pose pose;
+
+	//! Compatibility mode: report the tracking-origin offset as a valid/tracked
+	//! controller position while retaining real IMU orientation and real inputs.
+	bool synthetic_position;
 
 	struct
 	{
@@ -755,6 +760,22 @@ pssense_get_fusion_pose(struct pssense_device *pssense,
 	out_relation->relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
 	    XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
+
+	if (pssense->synthetic_position) {
+		/*
+		 * The PSVR2 builder already gives untracked left/right controller
+		 * origins stable offsets (-/+0.2, 1.3, -0.5 m). The Sense driver has
+		 * real 3DoF orientation but no optical position yet, so normally the
+		 * position flags remain unset. Some OpenVR applications (notably older
+		 * Alyx through OpenComposite) reject a controller pose unless position
+		 * is also valid/tracked. In this opt-in compatibility mode, leave the
+		 * device-local position at zero so the builder's tracking-origin offset
+		 * supplies the synthetic translation, and advertise it as tracked.
+		 */
+		out_relation->relation_flags = (enum xrt_space_relation_flags)(
+		    out_relation->relation_flags | XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		    XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+	}
 }
 
 static xrt_result_t
@@ -900,7 +921,14 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 	m_imu_3dof_init(&pssense->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
 	pssense->log_level = debug_get_log_option_pssense_log();
+	pssense->synthetic_position = debug_get_bool_option_pssense_synthetic_position();
 	pssense->hid = hid;
+
+	if (pssense->synthetic_position) {
+		PSSENSE_WARN(pssense,
+		             "PSSENSE_SYNTHETIC_POSITION enabled: using real Sense orientation/input with a fixed "
+		             "tracking-origin position");
+	}
 
 	if (xpdev->product_id == PSSENSE_PID_LEFT) {
 		pssense->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
