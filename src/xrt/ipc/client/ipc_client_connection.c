@@ -134,6 +134,28 @@ ipc_client_tcp_connect(struct ipc_connection *ipc_c, const char *port_text)
 		return false;
 	}
 
+	/*
+	 * Frame-submit messages are tiny and latency-sensitive. Avoid delayed
+	 * small-packet coalescing, and give the Wine/Winsock side enough buffering
+	 * that a short native compositor scheduling delay does not make send()
+	 * block the OpenXR application thread.
+	 */
+	BOOL no_delay = TRUE;
+	if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&no_delay, sizeof(no_delay)) == SOCKET_ERROR) {
+		IPC_WARN(ipc_c, "Could not enable TCP_NODELAY on Wine bridge socket: %d", WSAGetLastError());
+	}
+
+	int send_buffer = 1024 * 1024;
+	if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char *)&send_buffer, sizeof(send_buffer)) == SOCKET_ERROR) {
+		IPC_WARN(ipc_c, "Could not enlarge Wine bridge send buffer: %d", WSAGetLastError());
+	}
+
+	int actual_send_buffer = 0;
+	int actual_send_buffer_len = sizeof(actual_send_buffer);
+	if (getsockopt(sock, SOL_SOCKET, SO_SNDBUF, (char *)&actual_send_buffer, &actual_send_buffer_len) == 0) {
+		IPC_INFO(ipc_c, "Wine bridge TCP send buffer: %d bytes", actual_send_buffer);
+	}
+
 	ipc_c->imc.ipc_handle = (xrt_ipc_handle_t)(uintptr_t)sock;
 	ipc_c->imc.stream_socket = true;
 	ipc_c->imc.frame_reads = true;
