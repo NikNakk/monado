@@ -49,10 +49,15 @@ install)
 	else
 		print "Keeping existing original backup: ${backup}"
 	fi
-	# Undo an older direct xrizer replacement if necessary. Alyx uses a
-	# Valve-private export from openvr_api.dll, so it needs Valve's loader with
-	# xrizer registered as the active OpenVR runtime.
-	if cmp -s "${xrizer_dll}" "${target}"; then
+	# Alyx needs Valve's own OpenVR loader in the game directory, with
+	# xrizer registered as the active OpenVR runtime. The target may currently
+	# be xrizer, OpenComposite, or one of our compatibility proxies, so do not
+	# condition restoration on the current replacement being xrizer.
+	#
+	# The .monado-original backup is deliberately shared by the OpenComposite
+	# and xrizer installers: once it exists, it is the authoritative game DLL
+	# to restore before configuring xrizer.
+	if ! cmp -s "${backup}" "${target}"; then
 		cp -p "${backup}" "${target}"
 	fi
 	if [[ -f "${loader}" && ! -f "${loader_backup}" ]]; then
