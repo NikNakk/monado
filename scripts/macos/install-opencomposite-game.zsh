@@ -46,10 +46,27 @@ install)
 	fi
 
 	cp -f "${oc_dll}" "${target}"
-	cat > "${config}" <<'EOF'
+
+	trace_openvr=${MONADO_OPENCOMPOSITE_TRACE:-0}
+	case "${trace_openvr:l}" in
+	1|true|yes|on)
+		log_all=true
+		log_props=true
+		;;
+	*)
+		log_all=false
+		log_props=false
+		;;
+	esac
+
+	cat > "${config}" <<EOF
 ; Managed by Monado Wine/OpenComposite helper.
 ; Keep OpenComposite's bootstrap graphics path on D3D11 for this port.
 initUsingVulkan=false
+; Set MONADO_OPENCOMPOSITE_TRACE=1 when running this installer to capture
+; the OpenVR API call stream for comparison with xrizer.
+logAllOpenVRCalls=${log_all}
+logGetTrackedProperty=${log_props}
 EOF
 	print "Installed OpenComposite for this game only:"
 	print "  replacement: ${target}"
