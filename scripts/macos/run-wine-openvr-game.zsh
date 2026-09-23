@@ -5,6 +5,7 @@ script_dir=${0:A:h}
 repo_root=${script_dir:h:h}
 wine_root=${MONADO_WINE_DXMT_ROOT:-${repo_root}/build-wine-dxmt}
 wine=${wine_root}/bin/wine-dxmt
+wineserver=${wine_root}/bin/wineserver-dxmt
 runtime_build=${MONADO_WINE_OPENXR_BUILD_DIR:-${repo_root}/build-wine-openxr}
 port=${MONADO_WINE_TCP_PORT:-4242}
 trace_host=${MONADO_WINE_TIMING_TRACE_HOST:-/tmp/monado_wine_openvr_timing.csv}
@@ -181,7 +182,29 @@ restore_audio()
         "${audio_helper}" set-default "${audio_previous_id}" >/dev/null 2>&1 || true
     fi
 }
-trap restore_audio EXIT INT TERM
+
+terminate_wine_prefix_on_signal()
+{
+    local signal_name=$1
+    local status=$2
+
+    # A signal trap replaces the shell's default termination behaviour. Do not
+    # let SIGINT/SIGTERM return to the foreground Wine command: explicitly tear
+    # down this Wine prefix, then exit with the conventional signal status.
+    trap - INT TERM
+
+    print -u2 "Received ${signal_name}; terminating Wine processes for this prefix..."
+    if [[ -x "${wineserver}" ]]; then
+        "${wineserver}" -k >/dev/null 2>&1 || true
+    fi
+
+    # The EXIT trap below restores any temporary audio routing exactly once.
+    exit "${status}"
+}
+
+trap restore_audio EXIT
+trap 'terminate_wine_prefix_on_signal INT 130' INT
+trap 'terminate_wine_prefix_on_signal TERM 143' TERM
 
 print "Launching OpenVR game through its configured compatibility runtime -> Monado OpenXR"
 print "  game:    ${game}"
