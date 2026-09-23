@@ -51,7 +51,7 @@ MONADO_WINE_TIMING_TRACE_HOST="${trace_dir}/alyx-wine.csv" \
 	-steam \
 	-noasserts \
 	-nopassiveasserts \
-	+map a1_intro_world \
+	+map startup \
 	-novid -nowindow -console -vconsole +vr_fidelity_level_auto 0 +vr_fidelity_level 3 \
 	"$@" 2>&1 | tee "${trace_dir}/alyx-launch.log"
 
