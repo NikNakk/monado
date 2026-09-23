@@ -72,11 +72,25 @@ install)
             exit 1
         fi
     fi
-    cat > "${config}" <<'EOF'
+    trace_openvr=${MONADO_OPENCOMPOSITE_TRACE:-0}
+    case "${trace_openvr:l}" in
+    1|true|yes|on)
+        log_all=true
+        log_props=true
+        ;;
+    *)
+        log_all=false
+        log_props=false
+        ;;
+    esac
+
+    cat > "${config}" <<EOF
 ; Managed by Monado Wine/OpenComposite legacy Unity helper.
 initUsingVulkan=false
-logAllOpenVRCalls=false
-logGetTrackedProperty=false
+; Set MONADO_OPENCOMPOSITE_TRACE=1 when running this installer to capture
+; the OpenVR API call stream for comparison with xrizer.
+logAllOpenVRCalls=${log_all}
+logGetTrackedProperty=${log_props}
 EOF
 
     print "Installed legacy Unity OpenVR compatibility proxy:"
