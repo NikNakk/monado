@@ -93,9 +93,12 @@ action_types = {
     for item in manifest.get("actions", [])
 }
 
-changed = 0
-for action_set in bindings.get("bindings", {}).values():
-    for source in action_set.get("sources", []):
+changed = []
+for action_set_name, action_set in bindings.get("bindings", {}).items():
+    sources = action_set.get("sources", [])
+    extra_sources = []
+
+    for source in list(sources):
         path = str(source.get("path", "")).lower()
         if not path.endswith("/input/trigger"):
             continue
@@ -111,21 +114,39 @@ for action_set in bindings.get("bindings", {}).values():
             if action_types.get(output) != "boolean":
                 continue
 
-            # OpenComposite's KHR simple profile translates trigger/click to
-            # select/click. Do not replace a binding the game already supplied.
-            inputs.setdefault("click", item)
-            del inputs[source_name]
-            changed += 1
+            # Do NOT remove or replace the game's original binding. A single
+            # SteamVR source can already have a click binding for another action,
+            # and replacing it would silently lose one of the actions.
+            #
+            # Instead append a second source for the same physical trigger whose
+            # click component drives this boolean action. OpenComposite's
+            # khr/simple_controller profile translates trigger/click to
+            # select/click, which is what Monado exposes for the Sense trigger.
+            extra_sources.append({
+                "path": source.get("path"),
+                "mode": "button",
+                "inputs": {
+                    "click": dict(item),
+                },
+            })
+            changed.append(output)
+
+    sources.extend(extra_sources)
 
 with open(output_path, "w", encoding="utf-8") as f:
     json.dump(bindings, f, indent=2)
     f.write("\n")
 
-print(changed)
+print(",".join(changed))
 PY
 )
         : > "${custom_touch_marker}"
-        print "  Alyx input:     ${custom_touch_bindings} (${changed} boolean trigger bindings adapted for simple_controller)"
+        if [[ -n "${changed}" ]]; then
+            print "  Alyx input:     ${custom_touch_bindings}"
+            print "                  added trigger/click fallbacks for: ${changed}"
+        else
+            print -u2 "Warning: no Alyx boolean trigger/value bindings were found to adapt."
+        fi
     fi
 
     objdump_cmd=${OBJDUMP_MINGW:-$(command -v x86_64-w64-mingw32-objdump || true)}
