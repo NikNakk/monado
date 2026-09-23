@@ -39,10 +39,11 @@ trace_windows="Z:${trace_dir//\//\\}"
 xrizer_windows="Z:${xrizer_root//\//\\}"
 
 print "Alyx xrizer logs: ${trace_dir}"
-RUST_LOG=${RUST_LOG:-xrizer=trace,openvr_calls=trace,tracked_property=trace,unknown_interfaces=trace} \
+RUST_LOG=${RUST_LOG:-xrizer=info,openvr=warn,tracked_property=warn,unknown_interfaces=info} \
+XRIZER_ALYX_INPUT_DIAGNOSTICS=${XRIZER_ALYX_INPUT_DIAGNOSTICS:-1} \
 XDG_STATE_HOME="${trace_windows}" \
 VR_OVERRIDE="${xrizer_windows}" \
-WINEDEBUG=${WINEDEBUG:-warn+module,warn+seh,err+all} \
+WINEDEBUG=${WINEDEBUG:--all} \
 XRIZER_PREFER_APPLICATION_PROJECTION=${XRIZER_PREFER_APPLICATION_PROJECTION:-1} \
 MONADO_WINE_TIMING_TRACE_HOST="${trace_dir}/alyx-wine.csv" \
 	"${script_dir}/run-wine-openvr-game.zsh" \
