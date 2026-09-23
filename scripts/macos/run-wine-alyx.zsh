@@ -40,6 +40,7 @@ xrizer_windows="Z:${xrizer_root//\//\\}"
 
 print "Alyx xrizer logs: ${trace_dir}"
 RUST_LOG=${RUST_LOG:-xrizer=trace,openvr_calls=trace,tracked_property=trace,unknown_interfaces=trace} \
+XRIZER_ALYX_INPUT_DIAGNOSTICS=${XRIZER_ALYX_INPUT_DIAGNOSTICS:-1} \
 XDG_STATE_HOME="${trace_windows}" \
 VR_OVERRIDE="${xrizer_windows}" \
 WINEDEBUG=${WINEDEBUG:-warn+module,warn+seh,err+all} \
