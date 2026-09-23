@@ -94,7 +94,9 @@ action_types = {
 }
 
 changed = []
-for action_set_name, action_set in bindings.get("bindings", {}).items():
+
+# Preserve the generic conversion for boolean trigger value/pull bindings.
+for action_set in bindings.get("bindings", {}).values():
     sources = action_set.get("sources", [])
     extra_sources = []
 
@@ -114,24 +116,48 @@ for action_set_name, action_set in bindings.get("bindings", {}).items():
             if action_types.get(output) != "boolean":
                 continue
 
-            # Do NOT remove or replace the game's original binding. A single
-            # SteamVR source can already have a click binding for another action,
-            # and replacing it would silently lose one of the actions.
-            #
-            # Instead append a second source for the same physical trigger whose
-            # click component drives this boolean action. OpenComposite's
-            # khr/simple_controller profile translates trigger/click to
-            # select/click, which is what Monado exposes for the Sense trigger.
             extra_sources.append({
                 "path": source.get("path"),
                 "mode": "button",
-                "inputs": {
-                    "click": dict(item),
-                },
+                "inputs": {"click": dict(item)},
             })
-            changed.append(output)
+            changed.append(f"trigger-click:{output}")
 
     sources.extend(extra_sources)
+
+# Alyx's dev menu is the immediate compatibility requirement. OpenComposite
+# loads the Touch binding file as its backup for khr/simple_controller, so add
+# native simple-controller select/click mappings explicitly instead of relying
+# on profile translation or the schema of Alyx's trigger source.
+dev = bindings.setdefault("bindings", {}).setdefault("/actions/dev", {})
+dev_sources = dev.setdefault("sources", [])
+
+required = []
+for hand in ("left", "right"):
+    for action in ("menuinteract", "menudismiss"):
+        output = f"/actions/dev/in/{action}"
+        entry = {
+            "path": f"/user/hand/{hand}/input/select",
+            "mode": "button",
+            "inputs": {"click": {"output": output}},
+        }
+        dev_sources.append(entry)
+        required.append((entry["path"], output))
+        changed.append(f"select-click:{hand}:{action}")
+
+# Validate exactly what OpenComposite's KHR simple profile needs. Fail the
+# installer rather than silently launching with another ineffective override.
+seen = set()
+for source in dev_sources:
+    path = str(source.get("path", "")).lower()
+    item = source.get("inputs", {}).get("click")
+    if isinstance(item, dict):
+        output = str(item.get("output", "")).lower()
+        seen.add((path, output))
+
+missing = [(path, output) for path, output in required if (path, output) not in seen]
+if missing:
+    raise SystemExit(f"failed to generate Alyx simple-controller menu bindings: {missing}")
 
 with open(output_path, "w", encoding="utf-8") as f:
     json.dump(bindings, f, indent=2)
