@@ -24,6 +24,13 @@ backup=${target}.monado-original
 real_oc=${target:h}/openvr_api_opencomposite.dll
 config=${target:h}/opencomposite.ini
 config_backup=${config}.monado-original
+custom_bindings_dir=${target:h}/OpenComposite
+custom_touch_bindings=${custom_bindings_dir}/oculus_touch.json
+custom_touch_backup=${custom_touch_bindings}.monado-original
+custom_touch_marker=${custom_touch_bindings}.monado-generated
+alyx_cfg_dir=${target:h:h:h}/hlvr/cfg
+alyx_actions=${alyx_cfg_dir}/actions.json
+alyx_touch_bindings=${alyx_cfg_dir}/bindings_touch.json
 
 if [[ ${target:t} != openvr_api.dll ]]; then
     print -u2 "Target must be the game's openvr_api.dll: ${target}"
@@ -58,6 +65,68 @@ install)
 
     cp -f "${oc_dll}" "${real_oc}"
     cp -f "${proxy}" "${target}"
+
+    # Half-Life: Alyx's Touch bindings use trigger/value for several boolean
+    # actions (including menuinteract/menudismiss). OpenComposite's
+    # khr/simple_controller fallback cannot bind trigger/value, although it can
+    # translate trigger/click to the real simple-controller select/click path.
+    # Generate a per-game override that changes only boolean trigger value/pull
+    # bindings to click; analogue trigger actions are deliberately preserved.
+    if [[ -f "${alyx_actions}" && -f "${alyx_touch_bindings}" ]]; then
+        mkdir -p "${custom_bindings_dir}"
+        if [[ -f "${custom_touch_bindings}" && ! -f "${custom_touch_marker}" && ! -f "${custom_touch_backup}" ]]; then
+            cp -p "${custom_touch_bindings}" "${custom_touch_backup}"
+        fi
+
+        changed=$(python3 - "${alyx_actions}" "${alyx_touch_bindings}" "${custom_touch_bindings}" <<'PY'
+import json
+import sys
+
+actions_path, bindings_path, output_path = sys.argv[1:4]
+with open(actions_path, "r", encoding="utf-8-sig") as f:
+    manifest = json.load(f)
+with open(bindings_path, "r", encoding="utf-8-sig") as f:
+    bindings = json.load(f)
+
+action_types = {
+    str(item.get("name", "")).lower(): str(item.get("type", "")).lower()
+    for item in manifest.get("actions", [])
+}
+
+changed = 0
+for action_set in bindings.get("bindings", {}).values():
+    for source in action_set.get("sources", []):
+        path = str(source.get("path", "")).lower()
+        if not path.endswith("/input/trigger"):
+            continue
+        inputs = source.get("inputs")
+        if not isinstance(inputs, dict):
+            continue
+
+        for source_name in ("value", "pull"):
+            item = inputs.get(source_name)
+            if not isinstance(item, dict):
+                continue
+            output = str(item.get("output", "")).lower()
+            if action_types.get(output) != "boolean":
+                continue
+
+            # OpenComposite's KHR simple profile translates trigger/click to
+            # select/click. Do not replace a binding the game already supplied.
+            inputs.setdefault("click", item)
+            del inputs[source_name]
+            changed += 1
+
+with open(output_path, "w", encoding="utf-8") as f:
+    json.dump(bindings, f, indent=2)
+    f.write("\n")
+
+print(changed)
+PY
+)
+        : > "${custom_touch_marker}"
+        print "  Alyx input:     ${custom_touch_bindings} (${changed} boolean trigger bindings adapted for simple_controller)"
+    fi
 
     objdump_cmd=${OBJDUMP_MINGW:-$(command -v x86_64-w64-mingw32-objdump || true)}
     if [[ -n "${objdump_cmd}" ]]; then
@@ -107,6 +176,15 @@ restore)
 
     mv -f "${backup}" "${target}"
     rm -f "${real_oc}"
+
+    if [[ -f "${custom_touch_marker}" ]]; then
+        if [[ -f "${custom_touch_backup}" ]]; then
+            mv -f "${custom_touch_backup}" "${custom_touch_bindings}"
+        else
+            rm -f "${custom_touch_bindings}"
+        fi
+        rm -f "${custom_touch_marker}"
+    fi
 
     if [[ -f "${config_backup}" ]]; then
         mv -f "${config_backup}" "${config}"
