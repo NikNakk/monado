@@ -43,6 +43,7 @@ RUST_LOG=${RUST_LOG:-xrizer=trace,openvr_calls=trace,tracked_property=trace} \
 XDG_STATE_HOME="${trace_windows}" \
 VR_OVERRIDE="${xrizer_windows}" \
 WINEDEBUG=${WINEDEBUG:-warn+module,warn+seh,err+all} \
+XRIZER_PREFER_APPLICATION_PROJECTION=${XRIZER_PREFER_APPLICATION_PROJECTION:-1} \
 MONADO_WINE_TIMING_TRACE_HOST="${trace_dir}/alyx-wine.csv" \
 	"${script_dir}/run-wine-openvr-game.zsh" \
 	"${exe}" \
@@ -50,7 +51,8 @@ MONADO_WINE_TIMING_TRACE_HOST="${trace_dir}/alyx-wine.csv" \
 	-steam \
 	-noasserts \
 	-nopassiveasserts \
-	+map startup \
+	+map a1_intro_world \
+	-novid -nowindow -console -vconsole +vr_fidelity_level_auto 0 +vr_fidelity_level 3 \
 	"$@" 2>&1 | tee "${trace_dir}/alyx-launch.log"
 
 exit ${pipestatus[1]}
