@@ -48,9 +48,21 @@
 @end
 
 static bool
-token_is_valid(uint64_t token)
+standard_token_is_valid(uint64_t token)
 {
 	return (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC;
+}
+
+static bool
+external_texture_token_is_valid(uint64_t token)
+{
+	return (token & IPC_METAL_XPC_EXTERNAL_TOKEN_MASK) == IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC;
+}
+
+static bool
+texture_token_is_valid(uint64_t token)
+{
+	return standard_token_is_valid(token) || external_texture_token_is_valid(token);
 }
 
 static uint64_t
@@ -119,7 +131,7 @@ current_xpc_pid(void)
                 imageCount:(uint32_t)imageCount
                   ownerPID:(pid_t)ownerPID
 {
-	if (handle == nil || !token_is_valid(token) || imageCount == 0 || imageCount > XRT_MAX_SWAPCHAIN_IMAGES ||
+	if (handle == nil || !texture_token_is_valid(token) || imageCount == 0 || imageCount > XRT_MAX_SWAPCHAIN_IMAGES ||
 	    index >= imageCount || ownerPID <= 0) {
 		return NO;
 	}
@@ -148,7 +160,7 @@ current_xpc_pid(void)
 
 - (MTLSharedTextureHandle *)copyTextureHandleForToken:(uint64_t)token index:(uint32_t)index ownerPID:(pid_t)ownerPID
 {
-	if (!token_is_valid(token) || ownerPID <= 0) {
+	if (!texture_token_is_valid(token) || ownerPID <= 0) {
 		return nil;
 	}
 
@@ -176,7 +188,7 @@ current_xpc_pid(void)
 
 - (BOOL)storeSharedEventHandle:(MTLSharedEventHandle *)handle token:(uint64_t)token ownerPID:(pid_t)ownerPID
 {
-	if (handle == nil || !token_is_valid(token) || ownerPID <= 0) {
+	if (handle == nil || !standard_token_is_valid(token) || ownerPID <= 0) {
 		return NO;
 	}
 
@@ -193,7 +205,7 @@ current_xpc_pid(void)
 
 - (MTLSharedEventHandle *)copySharedEventHandleForToken:(uint64_t)token ownerPID:(pid_t)ownerPID
 {
-	if (!token_is_valid(token) || ownerPID <= 0) {
+	if (!standard_token_is_valid(token) || ownerPID <= 0) {
 		return nil;
 	}
 
@@ -209,7 +221,7 @@ current_xpc_pid(void)
 
 - (void)discardToken:(uint64_t)token ownerPID:(pid_t)ownerPID
 {
-	if (!token_is_valid(token) || ownerPID <= 0) {
+	if (!texture_token_is_valid(token) || ownerPID <= 0) {
 		return;
 	}
 
@@ -294,7 +306,7 @@ current_xpc_pid(void)
                             reply:(void (^)(BOOL success))reply
 {
 	pid_t pid = current_xpc_pid();
-	if (!token_is_valid(token) || pid <= 0) {
+	if (!external_texture_token_is_valid(token) || pid <= 0) {
 		reply(NO);
 		return;
 	}
@@ -528,7 +540,7 @@ ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
                                              void **out_metal_textures,
                                              pid_t owner_pid)
 {
-	if (!token_is_valid(token) || out_metal_textures == NULL || expected_count == 0 ||
+	if (!standard_token_is_valid(token) || out_metal_textures == NULL || expected_count == 0 ||
 	    expected_count > XRT_MAX_SWAPCHAIN_IMAGES || owner_pid <= 0) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
@@ -624,7 +636,7 @@ ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event,
 void
 ipc_metal_xpc_service_discard_token_for_pid(uint64_t token, pid_t owner_pid)
 {
-	if (!token_is_valid(token) || owner_pid <= 0) {
+	if (!standard_token_is_valid(token) || owner_pid <= 0) {
 		return;
 	}
 
