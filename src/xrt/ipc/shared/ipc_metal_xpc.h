@@ -37,6 +37,16 @@ xrt_result_t
 ipc_metal_xpc_publish_textures(void *const *metal_textures, uint32_t image_count, uint64_t *out_token);
 
 /*!
+ * Publish borrowed MTLTexture objects under a one-time token that may be
+ * claimed by a different process. Intended for Chromium's XR-process to
+ * GPU-process handoff; ordinary Monado texture tokens remain PID-scoped.
+ */
+xrt_result_t
+ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures,
+                                         uint32_t image_count,
+                                         uint64_t *out_token);
+
+/*!
  * Recreate textures previously published under @p token.
  * Each returned pointer is a retained id<MTLTexture>.
  */
@@ -124,6 +134,9 @@ ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images,
 - (void)takeTextureHandleForToken:(uint64_t)token
                             index:(uint32_t)index
                             reply:(void (^)(MTLSharedTextureHandle *handle))reply;
+
+- (void)markTextureTokenClaimable:(uint64_t)token
+                            reply:(void (^)(BOOL success))reply;
 
 - (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
                            token:(uint64_t)token
