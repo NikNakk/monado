@@ -625,6 +625,26 @@ includes a position (so it rests on optical history and is aligned); otherwise i
 without an orientation prior. The same recording then replays to 2998 / 2410 poses (3–4 cameras, 0.40 / 0.62 px,
 110 µs per exposure), and the other recordings are unchanged.
 
+**Second live M3 run, `sessions/20260925-001537-joint-both-grip-2`** (commit `065b31fde`). Better but still low:
+177 left and 39 right joint poses, 176 of the left's logged as re-acquisitions. `JOINT_STATUS`: tracked=400,
+bootstrapped=2791. The recorded predictions show why: **the Sense driver's predicted position is right (p50 3.8 mm) but
+its predicted orientation is 50–110° off.** `pssense_get_constellation_pose` takes orientation from
+`pssense_get_corrected_imu_pose`, which applies only the fixed `T_led_imu` body correction and never the optical-world
+alignment. `optical_from_imu_orientation` is computed on every fused pose but used only in diagnostic logs. So the
+driver's predicted pose, and probably the orientation it reports to applications, mixes an optical-frame position with
+an IMU-world orientation. **This must be fixed before 6DoF goes to OpenXR (plan item 5)**; it also degraded the
+per-camera path's priors.
+
+Joint-path fix: keep a per-device alignment from every solve (`align = q_solved · q_predicted⁻¹`) and predict
+orientation as `align · q_predicted(t)`. That carries the IMU's rotation between exposures into the optical world,
+whatever world the driver uses. The replay's fake device now behaves like the driver (IMU-world orientation from the
+recording, optical position while fresh). With the previous code it reproduces this run (400 / 78 poses, against
+`tracked=400` live), and with the fix gives 2812 / 559. Other recordings: unchanged within 3%.
+
+This run also had host-timing trouble: exposure timestamp residual p5/p95 ±7 ms, and both controllers' clock offsets
+crept ~15 ms with 33–35 snaps, the same pattern as the 1 ms/s excursion in `231910`. The worker averaged ≤ 0.5 ms per
+exposure (3% of a core), so it is unlikely to be the cause; keep watching.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

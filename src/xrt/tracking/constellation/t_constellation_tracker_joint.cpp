@@ -188,9 +188,22 @@ JointProcessor::process(JointExposure &exposure)
 
 	std::shared_lock device_lock(ct->device_lock);
 
+	// The device's prediction for this exposure, by device (filled in phase 1).
+	std::map<t_constellation_device_id_t, xrt_space_relation> predictions;
+
 	// Accept a solve: claim its blobs, update the device state and push the pose.
 	auto commit = [&](Device *device, const JointSolveResult &result, bool bootstrapped) {
 		JointDeviceState &state = this->devices[device->id];
+		const xrt_space_relation &predicted = predictions[device->id];
+		if (relation_has(predicted, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT)) {
+			xrt_pose Tcv_predicted;
+			math_pose_convert_from_opencv(&predicted.pose, &Tcv_predicted);
+			xrt_quat inverse;
+			math_quat_invert(&Tcv_predicted.orientation, &inverse);
+			math_quat_rotate(&result.Tcv_world_device.orientation, &inverse, &state.align);
+			math_quat_normalize(&state.align);
+			state.have_align = true;
+		}
 		state.tracking = true;
 		state.consecutive_failures = 0;
 		state.confirmations = bootstrapped ? 1 : state.confirmations + 1;
@@ -272,6 +285,7 @@ JointProcessor::process(JointExposure &exposure)
 			t_constellation_tracker_tracking_source_get_tracked_pose(device->params.tracking_source,
 			                                                         exposure.timestamp_ns, &predicted);
 		}
+		predictions[device->id] = predicted;
 		if (ct->data_recorder && !samples.empty()) {
 			ct->data_recorder->recordDeviceTracking(*samples[0], device->id, predicted);
 		}
@@ -284,22 +298,30 @@ JointProcessor::process(JointExposure &exposure)
 		}
 
 		/*
-		 * Use the device's prediction only when it includes a position: then it is built on optical history and its
-		 * orientation is aligned to this world. An orientation-only prediction is the device's raw IMU orientation,
-		 * which is not aligned until optical poses have reached the device. Anchoring to it (as the first live joint
-		 * run did) makes every tentative track fail its second solve, so none is ever confirmed.
+		 * Position comes from the prediction when it has one (it is built on the optical poses pushed so far),
+		 * otherwise from the last solve. Orientation is the predicted (IMU) orientation carried into this world by the
+		 * alignment from earlier solves: the Sense driver's predicted orientation is its IMU's own world, 50-110 deg
+		 * from the optical one, and anchoring to it directly (3-deg prior) stopped live tracking after every bootstrap.
 		 */
 		xrt_pose Tcv_predicted;
 		math_pose_convert_from_opencv(&predicted.pose, &Tcv_predicted);
-		const bool have_pose =
-		    relation_has(predicted, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-		                                XRT_SPACE_RELATION_POSITION_VALID_BIT);
+		const bool have_position = relation_has(predicted, XRT_SPACE_RELATION_POSITION_VALID_BIT);
+		const bool have_orientation =
+		    state.have_align &&
+		    relation_has(predicted, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 
-		xrt_pose prior = have_pose ? Tcv_predicted : state.Tcv_world_device;
+		xrt_pose prior = state.Tcv_world_device;
+		if (have_position) {
+			prior.position = Tcv_predicted.position;
+		}
+		if (have_orientation) {
+			math_quat_rotate(&state.align, &Tcv_predicted.orientation, &prior.orientation);
+			math_quat_normalize(&prior.orientation);
+		}
 		JointSolveResult result;
 		bool ok = timed([&] {
 			JointSolveParams params;
-			if (have_pose) {
+			if (have_orientation) {
 				params.orientation_prior_sigma_deg = kOrientationPriorSigmaDeg;
 				return joint_solve_refine(cameras, device->params.led_model, prior, prior.orientation, params,
 				                          result);
