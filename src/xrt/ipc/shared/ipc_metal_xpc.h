@@ -53,6 +53,17 @@ ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures,
 xrt_result_t
 ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_metal_textures);
 
+/*!
+ * Recreate textures on a specific receiving-process MTLDevice. This is needed
+ * by external clients such as Chromium/ANGLE, which require imported textures
+ * to belong to the exact Metal device backing their EGLDisplay.
+ */
+xrt_result_t
+ipc_metal_xpc_take_textures_on_device(uint64_t token,
+                                      uint32_t expected_count,
+                                      void *metal_device,
+                                      void **out_metal_textures);
+
 /*! Release textures returned by ipc_metal_xpc_take_textures(). */
 void
 ipc_metal_xpc_release_textures(void **metal_textures, uint32_t image_count);
