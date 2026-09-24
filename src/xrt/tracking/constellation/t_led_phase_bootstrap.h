@@ -114,8 +114,13 @@ struct t_led_phase_bootstrap_options
 	 * rather than the lit test are compared, so another controller's steady light cancels out.
 	 */
 	uint32_t track_interval_frames;
-	//! Probe offset as a fraction of half the measured lit span of the lock pulse.
+	//! Probe offset as a fraction of half the measured lit span of the lock pulse, capped at track_max_probe_ns.
 	float track_probe_fraction;
+	/*!
+	 * Largest probe offset. A narrow scan that loses a camera measures an inflated lit span, and probes scaled from it
+	 * step past the real window: in the 25 Sep fast-motion run the ring went dark for each 0.6 s probe side at +-690 us.
+	 */
+	time_duration_ns track_max_probe_ns;
 	//! Fraction of the probe offset to move per unit of normalised early/late imbalance.
 	float track_gain;
 	//! Largest single correction.

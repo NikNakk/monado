@@ -31,6 +31,12 @@ constexpr int64_t kTrackingTimeoutNs = 250'000'000;
 constexpr uint32_t kMaxTrackingFailures = 3;
 //! Orientation prior from the device's predicted pose (IMU-propagated), in degrees.
 constexpr float kOrientationPriorSigmaDeg = 3.0f;
+/*!
+ * Solves a freshly bootstrapped track needs, in a row, before its poses reach the device. A mirror-image ring can
+ * bootstrap just under the limits (in replay the right model fitted the left ring for two frames at 0.80 and 0.93 px)
+ * but rarely persists; a real re-acquisition does. Costs two exposures (33 ms) of latency on re-acquisition.
+ */
+constexpr uint32_t kConfirmSolves = 3;
 //! Status log interval.
 constexpr int64_t kStatusIntervalNs = 5'000'000'000;
 
@@ -182,80 +188,12 @@ JointProcessor::process(JointExposure &exposure)
 
 	std::shared_lock device_lock(ct->device_lock);
 
-	// Devices that are being tracked go first, so a lost device cannot claim a tracked ring's blobs.
-	std::vector<Device *> order;
-	for (std::unique_ptr<Device> &device : ct->devices) {
-		order.push_back(device.get());
-	}
-	std::stable_sort(order.begin(), order.end(), [this](Device *a, Device *b) {
-		return this->devices[a->id].tracking && !this->devices[b->id].tracking;
-	});
-
-	for (Device *device : order) {
+	// Accept a solve: claim its blobs, update the device state and push the pose.
+	auto commit = [&](Device *device, const JointSolveResult &result, bool bootstrapped) {
 		JointDeviceState &state = this->devices[device->id];
-
-		xrt_space_relation predicted = XRT_SPACE_RELATION_ZERO;
-		if (device->params.tracking_source != nullptr) {
-			t_constellation_tracker_tracking_source_get_tracked_pose(device->params.tracking_source,
-			                                                         exposure.timestamp_ns, &predicted);
-		}
-		if (ct->data_recorder && !samples.empty()) {
-			ct->data_recorder->recordDeviceTracking(*samples[0], device->id, predicted);
-		}
-		if (cameras.empty()) {
-			continue;
-		}
-
-		xrt_pose Tcv_predicted;
-		math_pose_convert_from_opencv(&predicted.pose, &Tcv_predicted);
-		const bool have_orientation =
-		    relation_has(predicted, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-		const bool have_pose = have_orientation && relation_has(predicted, XRT_SPACE_RELATION_POSITION_VALID_BIT);
-
-		auto start = std::chrono::steady_clock::now();
-		JointSolveResult result;
-		bool ok = false;
-		bool bootstrapped = false;
-
-		if (state.tracking && exposure.timestamp_ns - state.last_solved_ns < kTrackingTimeoutNs) {
-			xrt_pose prior = state.Tcv_world_device;
-			if (have_pose) {
-				prior = Tcv_predicted;
-			} else if (have_orientation) {
-				prior.orientation = Tcv_predicted.orientation;
-			}
-			JointSolveParams params;
-			if (have_orientation) {
-				params.orientation_prior_sigma_deg = kOrientationPriorSigmaDeg;
-				ok = joint_solve_refine(cameras, device->params.led_model, prior, prior.orientation, params,
-				                        result);
-			} else {
-				ok = joint_solve_refine(cameras, device->params.led_model, prior, params, result);
-			}
-		}
-		if (!ok) {
-			StereoBootstrapResult bootstrap;
-			ok = stereo_bootstrap(cameras, device->params.led_model, StereoBootstrapParams{}, bootstrap);
-			if (ok) {
-				result = bootstrap.refined;
-				bootstrapped = true;
-			}
-		}
-
-		double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
-		this->solve_us_total += us;
-		this->solve_us_max = std::max(this->solve_us_max, us);
-
-		if (!ok) {
-			this->device_failed++;
-			if (state.tracking && ++state.consecutive_failures > kMaxTrackingFailures) {
-				state.tracking = false;
-			}
-			continue;
-		}
-
 		state.tracking = true;
 		state.consecutive_failures = 0;
+		state.confirmations = bootstrapped ? 1 : state.confirmations + 1;
 		state.Tcv_world_device = result.Tcv_world_device;
 		state.last_solved_ns = exposure.timestamp_ns;
 		if (bootstrapped) {
@@ -272,6 +210,12 @@ JointProcessor::process(JointExposure &exposure)
 			first_camera = std::min(first_camera, (size_t)camera_of[m.camera]->index);
 		}
 		brightness = result.correspondences.empty() ? 1.0f : brightness / (float)result.correspondences.size();
+
+		// Tentative tracks claim their blobs and keep tracking, but stay private until confirmed.
+		if (state.confirmations < kConfirmSolves) {
+			this->unconfirmed_dropped++;
+			return;
+		}
 
 		xrt_pose Txr_world_device;
 		math_pose_convert_from_opencv(&result.Tcv_world_device, &Txr_world_device);
@@ -294,6 +238,116 @@ JointProcessor::process(JointExposure &exposure)
 			std::unique_lock<os::Mutex> lock(device->data_lock);
 			device->locked_data.last_known_pose = DeviceLastPose(sample.pose, sample.timestamp_ns);
 		}
+	};
+
+	auto failed = [&](Device *device) {
+		JointDeviceState &state = this->devices[device->id];
+		this->device_failed++;
+		if (state.tracking && ++state.consecutive_failures > kMaxTrackingFailures) {
+			state.tracking = false;
+		}
+		// A tentative track that fails is dropped at once, so its blobs are free for the other models.
+		if (state.confirmations < kConfirmSolves) {
+			state.tracking = false;
+		}
+	};
+
+	auto timed = [&](auto &&fn) {
+		auto start = std::chrono::steady_clock::now();
+		auto value = fn();
+		double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+		this->solve_us_total += us;
+		this->solve_us_max = std::max(this->solve_us_max, us);
+		return value;
+	};
+
+	// Phase 1: devices being tracked refine from their predicted pose and claim their blobs first.
+	std::vector<Device *> need_bootstrap;
+	for (std::unique_ptr<Device> &owned : ct->devices) {
+		Device *device = owned.get();
+		JointDeviceState &state = this->devices[device->id];
+
+		xrt_space_relation predicted = XRT_SPACE_RELATION_ZERO;
+		if (device->params.tracking_source != nullptr) {
+			t_constellation_tracker_tracking_source_get_tracked_pose(device->params.tracking_source,
+			                                                         exposure.timestamp_ns, &predicted);
+		}
+		if (ct->data_recorder && !samples.empty()) {
+			ct->data_recorder->recordDeviceTracking(*samples[0], device->id, predicted);
+		}
+		if (cameras.empty()) {
+			continue;
+		}
+		if (!state.tracking || exposure.timestamp_ns - state.last_solved_ns >= kTrackingTimeoutNs) {
+			need_bootstrap.push_back(device);
+			continue;
+		}
+
+		xrt_pose Tcv_predicted;
+		math_pose_convert_from_opencv(&predicted.pose, &Tcv_predicted);
+		const bool have_orientation =
+		    relation_has(predicted, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+		const bool have_pose = have_orientation && relation_has(predicted, XRT_SPACE_RELATION_POSITION_VALID_BIT);
+
+		xrt_pose prior = state.Tcv_world_device;
+		if (have_pose) {
+			prior = Tcv_predicted;
+		} else if (have_orientation) {
+			prior.orientation = Tcv_predicted.orientation;
+		}
+		JointSolveResult result;
+		bool ok = timed([&] {
+			JointSolveParams params;
+			if (have_orientation) {
+				params.orientation_prior_sigma_deg = kOrientationPriorSigmaDeg;
+				return joint_solve_refine(cameras, device->params.led_model, prior, prior.orientation, params,
+				                          result);
+			}
+			return joint_solve_refine(cameras, device->params.led_model, prior, params, result);
+		});
+		if (ok) {
+			commit(device, result, false);
+		} else {
+			need_bootstrap.push_back(device);
+		}
+	}
+
+	/*
+	 * Phase 2: a contest between everything left. Every candidate bootstraps against the same free blobs and the
+	 * best fit wins, claims its blobs, and the rest try again on what remains. Mirror-image rings (left and right
+	 * Sense) can each fit the other's blobs just under the acceptance limits; in replay the right model took the
+	 * left ring at 0.80 px while the left's tracking had lapsed. The true model always fits its own ring better.
+	 */
+	while (!need_bootstrap.empty() && !cameras.empty()) {
+		int best = -1;
+		StereoBootstrapResult best_result;
+		for (size_t i = 0; i < need_bootstrap.size(); i++) {
+			StereoBootstrapResult result;
+			bool ok = timed([&] {
+				return stereo_bootstrap(cameras, need_bootstrap[i]->params.led_model, StereoBootstrapParams{},
+				                        result);
+			});
+			if (!ok) {
+				continue;
+			}
+			const JointSolveResult &r = result.refined;
+			const JointSolveResult &b = best_result.refined;
+			// Prefer clearly more matches, then the lower RMS.
+			bool better = best < 0 || r.matches > b.matches + 2 ||
+			              (r.matches + 2 >= b.matches && r.rms_px < b.rms_px);
+			if (better) {
+				best = (int)i;
+				best_result = result;
+			}
+		}
+		if (best < 0) {
+			break;
+		}
+		commit(need_bootstrap[best], best_result.refined, true);
+		need_bootstrap.erase(need_bootstrap.begin() + best);
+	}
+	for (Device *device : need_bootstrap) {
+		failed(device);
 	}
 
 	if (ct->data_recorder) {
@@ -312,9 +366,11 @@ JointProcessor::process(JointExposure &exposure)
 		uint64_t solves = this->device_tracked + this->device_bootstrapped + this->device_failed;
 		CT_INFO(ct,
 		        "JOINT_STATUS exposures=%" PRIu64 " processed=%" PRIu64 " skipped=%" PRIu64 " late_samples=%" PRIu64
-		        " tracked=%" PRIu64 " bootstrapped=%" PRIu64 " failed=%" PRIu64 " mean_solve_us=%.0f max_solve_us=%.0f",
+		        " tracked=%" PRIu64 " bootstrapped=%" PRIu64 " failed=%" PRIu64 " unconfirmed=%" PRIu64
+		        " mean_solve_us=%.0f max_solve_us=%.0f",
 		        assembled, this->processed, skipped, late, this->device_tracked, this->device_bootstrapped,
-		        this->device_failed, solves ? this->solve_us_total / (double)solves : 0.0, this->solve_us_max);
+		        this->device_failed, this->unconfirmed_dropped, solves ? this->solve_us_total / (double)solves : 0.0,
+		        this->solve_us_max);
 		this->last_status_ns = exposure.timestamp_ns;
 		this->solve_us_max = 0.0;
 	}

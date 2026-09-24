@@ -613,6 +613,7 @@ struct FakeDevice
 	std::map<uint32_t, uint32_t> joint_cameras;
 	Stats rms_px;
 	std::vector<std::pair<int64_t, xrt_vec3>> positions;
+	FILE *csv{nullptr};
 };
 
 FakeDevice *
@@ -629,6 +630,13 @@ fake_device_push(t_constellation_tracker_device *device, t_constellation_tracker
 	fake->joint_cameras[sample->joint_camera_count]++;
 	fake->rms_px.add(sample->metrics.reprojection_error);
 	fake->positions.push_back({sample->timestamp_ns, sample->pose.position});
+	if (fake->csv) {
+		const xrt_pose &p = sample->pose;
+		std::fprintf(fake->csv, "%" PRIi64 ",%d,%u,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", sample->timestamp_ns,
+		             (int)fake->id, sample->joint_camera_count, sample->metrics.matched_blob_count,
+		             sample->metrics.reprojection_error, p.position.x, p.position.y, p.position.z, p.orientation.x,
+		             p.orientation.y, p.orientation.z, p.orientation.w);
+	}
 	fake->last = *sample;
 	fake->have_last = true;
 	return true;
@@ -648,8 +656,12 @@ fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 }
 
 int
-replay_tracker(const DatasetReader &dataset)
+replay_tracker(const DatasetReader &dataset, const char *csv_path)
 {
+	FILE *csv = csv_path ? std::fopen(csv_path, "w") : nullptr;
+	if (csv) {
+		std::fprintf(csv, "timestamp_ns,device,cameras,matches,rms_px,px,py,pz,qx,qy,qz,qw\n");
+	}
 	if (dataset.mosaics.empty() || dataset.samples.empty()) {
 		std::fprintf(stderr, "nothing to replay\n");
 		return 1;
@@ -716,6 +728,7 @@ replay_tracker(const DatasetReader &dataset)
 		fake->base.push_constellation_tracker_sample = fake_device_push;
 		fake->base.push_camera_blob_count = nullptr;
 		fake->source.get_tracked_pose = fake_device_get;
+		fake->csv = csv;
 		// The recorded model is in the tracker's OpenCV convention; drivers hand over OpenXR.
 		fake->leds = device.leds;
 		for (t_constellation_tracker_led &led : fake->leds) {
@@ -766,6 +779,9 @@ replay_tracker(const DatasetReader &dataset)
 	double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 
 	xrt_frame_context_destroy_nodes(&xfctx);
+	if (csv) {
+		std::fclose(csv);
+	}
 
 	std::printf("tracker replay (joint path): %zu frames in %.2f s (%.0f us per exposure)\n", order.size(), seconds,
 	            1e6 * seconds / (double)std::max<size_t>(1, exposures.size()));
@@ -786,11 +802,12 @@ int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
 	bool tracker = false;
+	const char *tracker_csv = nullptr;
 	bool seed_recorded = false;
 	const char *csv = nullptr;
 	for (int i = 2; i < argc; i++) {
@@ -799,6 +816,9 @@ main(int argc, char **argv)
 			m1 = true;
 		} else if (arg == "--tracker") {
 			tracker = true;
+		} else if (arg == "--tracker-csv" && i + 1 < argc) {
+			tracker = true;
+			tracker_csv = argv[++i];
 		} else if (arg == "--seed-recorded") {
 			seed_recorded = true;
 		} else if (arg == "--csv" && i + 1 < argc) {
@@ -813,7 +833,7 @@ main(int argc, char **argv)
 			status = replay_m1(dataset, csv, seed_recorded) != 0 ? 1 : status;
 		}
 		if (tracker) {
-			status = replay_tracker(dataset) != 0 ? 1 : status;
+			status = replay_tracker(dataset, tracker_csv) != 0 ? 1 : status;
 		}
 		return status;
 	} catch (const std::exception &e) {

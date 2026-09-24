@@ -254,6 +254,9 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 	b->ring_blobs = b->steps[peak_index].mean_blobs / (float)MAX(b->options.camera_count, 1u) -
 	                background / (float)MAX(b->options.camera_count, 1u);
 	b->track_offset_ns = (time_duration_ns)((float)half_span * b->options.track_probe_fraction);
+	if (b->options.track_max_probe_ns > 0) {
+		b->track_offset_ns = MIN(b->track_offset_ns, b->options.track_max_probe_ns);
+	}
 	b->track_stage = T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
 	b->track_countdown = 0;
 	b->track_wants_probe = false;
@@ -463,9 +466,11 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .max_failed_backoff_frames = 600,
 	    .track_interval_frames = 0,
 	    .track_probe_fraction = 0.6f,
-	    .track_gain = 1.0f,
+	    .track_gain = 1.5f,
 	    .track_max_step_ns = 400 * U_TIME_1US_IN_NS,
-	    .track_deadband = 0.1f,
+	    // Blob counts of a moving ring change on their own between probe windows 0.6 s apart.
+	    .track_deadband = 0.2f,
+	    .track_max_probe_ns = 300 * U_TIME_1US_IN_NS,
 	    .track_min_ring_blobs = 1.0f,
 	};
 }

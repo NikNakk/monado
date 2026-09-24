@@ -402,6 +402,8 @@ struct JointDeviceState
 	xrt_pose Tcv_world_device{};
 	int64_t last_solved_ns{0};
 	uint32_t consecutive_failures{0};
+	//! Consecutive solves since the last bootstrap; poses are only pushed once this confirms the track.
+	uint32_t confirmations{0};
 };
 
 //! The camera samples of one synchronised exposure, indexed by camera.
@@ -438,6 +440,7 @@ struct JointProcessor
 	uint64_t device_tracked{0};
 	uint64_t device_bootstrapped{0};
 	uint64_t device_failed{0};
+	uint64_t unconfirmed_dropped{0};
 	double solve_us_total{0.0};
 	double solve_us_max{0.0};
 	int64_t last_status_ns{0};
