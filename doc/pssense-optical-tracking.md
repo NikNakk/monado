@@ -347,6 +347,9 @@ issue.
 - Unexplained: after the right controller locked (26.6 s), its locked lit fraction was only 0.12, with 8–14
   candidates per 5 s until 35 s and 138–160 afterwards. The two locks were 250 µs apart, so both controllers
   were pulsing in the same exposures.
+- Both status LEDs stayed on (user). So far the always-lit/status-LED-off fault has appeared only in
+  two-controller runs that yielded with `LED_ALL_OFF` (`224851`, `225515`, `230002`); it didn't appear in the
+  right-only run or in this one.
 - The empty-mask option is removed. It is replaced by `PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1`: a locked
   controller stays lit (and keeps tracking) while the other scans; a controller without a lock stays
   dark. This avoids switching a lit controller to `LED_ALL_OFF` and back.
