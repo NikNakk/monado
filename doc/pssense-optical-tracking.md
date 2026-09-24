@@ -58,20 +58,20 @@ is solved, which now means a multi-camera fused pose. Its search range on macOS 
 blob count every camera reports. The constellation tracker reports blob counts for every frame through the
 optional `push_camera_blob_count` device callback.
 
-0. **Dark baseline.** The LEDs are held off for one step (20 exposures) and each camera's highest blob count
-   is recorded. A frame counts as lit only with at least 3 blobs above its camera's baseline.
+0. **Dark baseline.** The LEDs are held off for 24 exposures to let any controller that was just lit go dark,
+   then each camera's median blob count over 8 exposures is recorded. A frame counts as lit only with at least 3 blobs above its camera's baseline.
 1. **Wide scan.** A 2.1 ms pulse is stepped in 1 ms steps across the whole camera period (17 steps). Each
    step waits 8 exposures to settle, measures 8, then allows 4 of grace for late reports. That is 20
    exposures, about 0.33 s per step.
 2. The best step (circularly smoothed) must score at least 1.0 and beat the median step by 0.75. The score
    is the sum over cameras of the fraction of lit frames. Otherwise the scan fails and
-   the controller idles for 60 exposures.
+   the controller idles for 60 exposures, doubling per consecutive failure up to 600 (10 s).
 3. **Narrow scan.** A 450 µs pulse is stepped in 250 µs steps from 1.5 ms before to 1.5 ms after the best
    wide pulse (21 steps). The lit run is the contiguous set of steps at or above half the peak score.
 4. **Lock.** The pulse is centred in the lit run, 1.0 ms wide by default (`PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID`,
    50 µs per id, default 20). If no camera sees at least 3 blobs for 300 exposures (~5 s), it rescans.
 
-A full bootstrap takes about 13.5 s. Only one controller scans at a time, because blob counts cannot tell
+A full bootstrap takes about 14 s. Only one controller scans at a time, because blob counts cannot tell
 the controllers apart. The other controller holds its LEDs off, and its own state is frozen, until the scan
 finishes. The fixed macOS `PSSENSE_TIMING_FUDGE_100US` (3.6 ms) is still added, but it doesn't matter
 because the scan covers the whole period. With the variable unset, behaviour is unchanged.
@@ -243,6 +243,31 @@ with the 18:05 run: it was evening (baseline `3,1,5,1`, window panes dimmer) and
 - Lock positions so far with the robust clock (fudge µs): 15350 (static), 14725 (background-biased,
   discard), 15850 and 15350. That is within ±250 µs of 15600 across four restarts, well inside the 1 ms
   lock pulse. The two-controller and dedicated restart runs are still to come.
+
+**2026-09-24 22:48, `sessions/20260924-224851-bootstrap-both`** (both controllers, 30 s still, then slow
+moves; commit `320ed19be`). **Left passes; right never locked**, and its retries starved the left.
+
+- Left: baseline `3,1,5,1`, one clean wide peak (14000–16000 µs at 3.0), narrow window 15750–66 µs
+  (1450 µs, across the period wrap), locked at fudge 15975 µs at 13.2 s. Locked lit 1192/1196 whenever it
+  was allowed to be lit. The exposure timestamp residual was p5/p95 −30/+31 µs, the tightest so far.
+- Right: 9 scans, 0 locks (7 `wide_peak_below_minimum`, 1 `wide_peak_not_distinct`). Its baselines were
+  `11,10,11,1`, then 17–21 blobs per camera on the next scans. The right controller really was lit during
+  its scans (170–237 candidates/s at 35–49 s), but nothing could reach baseline + 3.
+- Cause: the left controller yields correctly. It produced 0 candidates in every second where it was only
+  sent `LED_ALL_OFF`. But its light persists **90–256 ms** after the first off command (latest left
+  candidate exposure after the off was sent, per handover), from the ~58 ms look-ahead LED schedule plus
+  Bluetooth latency. The baseline settled for only 8 exposures (133 ms) and took the per-camera maximum, so
+  one leaked frame poisoned it. The 1 s failed-scan backoff then let the right retry every ~7 s, keeping the
+  left dark ~85% of the time (left position tracked 16.2%).
+- Fixes (bootstrap, opt-in):
+  - The baseline now settles for 24 exposures (400 ms, `baseline_settle_frames`) and takes the per-camera
+    **median**.
+  - After consecutive failed scans the backoff doubles (60, 120, 240, 480, then capped at 600 exposures,
+    10 s) and resets on a lock.
+  - A scan now takes about 14 s.
+- The same 90–256 ms off-latency probably exceeds the 8-exposure settle between *scan steps* too, and may
+  explain the weak partial steps at the edges of some narrow scans. Not changed yet; check the step pattern
+  before lengthening the scan.
 
 ## Session tools
 

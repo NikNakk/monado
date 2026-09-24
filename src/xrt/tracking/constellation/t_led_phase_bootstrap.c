@@ -19,9 +19,6 @@
 #define LOG_I(b, ...) U_LOG_IFL_I((b)->options.log_level, __VA_ARGS__)
 #define LOG_W(b, ...) U_LOG_IFL_W((b)->options.log_level, __VA_ARGS__)
 
-//! Exposures to stay idle after a failed scan, so another controller can take a turn.
-#define FAILED_SCAN_BACKOFF_FRAMES 60
-
 
 /*
  *
@@ -128,8 +125,19 @@ fail_scan(struct t_led_phase_bootstrap *b, const char *reason)
 	LOG_W(b, "LED_BOOTSTRAP side=%c event=scan_failed stage=%s reason=%s", b->options.label, state_name(b->state),
 	      reason);
 	b->state = T_LED_PHASE_BOOTSTRAP_IDLE;
-	b->idle_backoff_frames = FAILED_SCAN_BACKOFF_FRAMES;
+	uint32_t shift = MIN(b->consecutive_failures, 16u);
+	uint64_t backoff = (uint64_t)b->options.failed_backoff_frames << shift;
+	b->idle_backoff_frames = (uint32_t)MIN(backoff, (uint64_t)b->options.max_failed_backoff_frames);
+	b->consecutive_failures++;
 	b->output_generation++;
+}
+
+static int
+compare_u32(const void *a, const void *b)
+{
+	uint32_t ua = *(const uint32_t *)a;
+	uint32_t ub = *(const uint32_t *)b;
+	return (ua > ub) - (ua < ub);
 }
 
 static int
@@ -228,6 +236,7 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 	b->state = T_LED_PHASE_BOOTSTRAP_LOCKED;
 	b->have_lock = true;
 	b->locks_acquired++;
+	b->consecutive_failures = 0;
 	b->frames_since_lit = 0;
 	b->locked_reports = 0;
 	b->locked_lit_reports = 0;
@@ -253,6 +262,16 @@ begin_wide_scan(struct t_led_phase_bootstrap *b)
 static void
 finish_baseline(struct t_led_phase_bootstrap *b)
 {
+	// The median ignores a stray lit frame from a controller that has not finished going dark.
+	for (uint32_t c = 0; c < b->options.camera_count; c++) {
+		uint32_t n = MIN(b->baseline_reported[c], (uint32_t)T_LED_PHASE_BOOTSTRAP_MAX_BASELINE_REPORTS);
+		if (n == 0) {
+			b->baseline_blobs[c] = 0;
+			continue;
+		}
+		qsort(b->baseline_samples[c], n, sizeof(uint32_t), compare_u32);
+		b->baseline_blobs[c] = b->baseline_samples[c][n / 2];
+	}
 	LOG_I(b,
 	      "LED_BOOTSTRAP side=%c event=baseline blobs=%u,%u,%u,%u reported=%u,%u,%u,%u", b->options.label,
 	      b->baseline_blobs[0], b->baseline_blobs[1], b->baseline_blobs[2], b->baseline_blobs[3],
@@ -325,12 +344,15 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    // Period id 20, the protocol's stable minimum; more tolerant of clock wander than 450 us.
 	    .lock_blink_ns = 1000 * U_TIME_1US_IN_NS,
 	    .settle_frames = 8,
+	    .baseline_settle_frames = 24,
 	    .measure_frames = 8,
 	    .grace_frames = 4,
 	    .min_blobs_per_camera = 3,
 	    .min_peak_score = 1.0f,
 	    .min_peak_contrast = 0.75f,
 	    .lost_frames = 300,
+	    .failed_backoff_frames = 60,
+	    .max_failed_backoff_frames = 600,
 	};
 }
 
@@ -359,6 +381,7 @@ t_led_phase_bootstrap_start(struct t_led_phase_bootstrap *b, time_duration_ns pe
 	b->state = T_LED_PHASE_BOOTSTRAP_BASELINE;
 	memset(b->baseline_blobs, 0, sizeof(b->baseline_blobs));
 	memset(b->baseline_reported, 0, sizeof(b->baseline_reported));
+	memset(b->baseline_samples, 0, sizeof(b->baseline_samples));
 	reset_step_window(b);
 	b->output_generation++;
 }
@@ -396,18 +419,20 @@ t_led_phase_bootstrap_push_exposure(struct t_led_phase_bootstrap *b, int64_t exp
 
 	case T_LED_PHASE_BOOTSTRAP_BASELINE:
 	case T_LED_PHASE_BOOTSTRAP_WIDE_SCAN:
-	case T_LED_PHASE_BOOTSTRAP_NARROW_SCAN:
+	case T_LED_PHASE_BOOTSTRAP_NARROW_SCAN: {
+		uint32_t settle = b->state == T_LED_PHASE_BOOTSTRAP_BASELINE ? b->options.baseline_settle_frames
+		                                                              : b->options.settle_frames;
 		b->exposures_in_step++;
-		if (b->exposures_in_step == b->options.settle_frames + 1) {
+		if (b->exposures_in_step == settle + 1) {
 			// Open the measurement window on the next blob report rather than on this exposure's
 			// timestamp, so the timing-event clock and the frame clock never need to agree.
 			b->window_pending = true;
 		}
-		if (b->exposures_in_step >=
-		    b->options.settle_frames + b->options.measure_frames + b->options.grace_frames) {
+		if (b->exposures_in_step >= settle + b->options.measure_frames + b->options.grace_frames) {
 			finish_step(b);
 		}
 		break;
+	}
 	}
 
 	return generation != b->output_generation;
@@ -453,8 +478,10 @@ t_led_phase_bootstrap_push_blob_count(struct t_led_phase_bootstrap *b,
 	}
 
 	if (b->state == T_LED_PHASE_BOOTSTRAP_BASELINE) {
-		b->baseline_reported[camera_index]++;
-		b->baseline_blobs[camera_index] = MAX(b->baseline_blobs[camera_index], blob_count);
+		uint32_t i = b->baseline_reported[camera_index]++;
+		if (i < T_LED_PHASE_BOOTSTRAP_MAX_BASELINE_REPORTS) {
+			b->baseline_samples[camera_index][i] = blob_count;
+		}
 		return;
 	}
 
