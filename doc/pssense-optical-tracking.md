@@ -645,6 +645,15 @@ This run also had host-timing trouble: exposure timestamp residual p5/p95 ±7 ms
 crept ~15 ms with 33–35 snaps, the same pattern as the 1 ms/s excursion in `231910`. The worker averaged ≤ 0.5 ms per
 exposure (3% of a core), so it is unlikely to be the cause; keep watching.
 
+**Driver-side fix, `PSSENSE_ALIGN_IMU_ORIENTATION=1`** (opt-in, default off). When set, and once an optical pose
+has been committed, `pssense_get_constellation_pose` turns the corrected IMU orientation into the optical world as
+`optical_from_imu_orientation · q_imu(t)`, and rotates the angular velocity the same way. That function is used
+both for the tracker's prediction (the constellation tracking source) and for `pssense_get_tracked_pose`, the grip
+and aim poses OpenXR apps get. So with the option on, both report optical position with aligned orientation.
+The alignment itself is still computed from the unaligned corrected IMU pose, so it doesn't feed back on itself.
+The per-camera candidate diagnostics are unchanged. Before the first optical commit, and with the option off, the
+orientation stays unaligned as before. Not yet tested on hardware.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
