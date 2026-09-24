@@ -10,6 +10,8 @@
 #   run.log      stderr of monado-cli psvr2-constellation
 #   poses.csv    stdout (10 Hz pose + diagnostics rows)
 #   capture/     stride-sampled camera frames (PSVR2_CONSTELLATION_CAPTURE_STRIDE, default 6; 0 disables)
+#   constellation.ctd  every camera's blobs, camera poses and device priors for offline solver replay
+#                (set PSVR2_SENSE_RECORD_BLOBS=0 to skip)
 #   env.txt      every PSVR2_/PSSENSE_/CONSTELLATION_/T_LED_ variable in effect
 #   git.txt      commit, branch and dirty state of the monado checkout
 #   calibration.json, note.txt, score.txt, score.json
@@ -21,7 +23,7 @@
 set -euo pipefail
 
 if [ $# -lt 2 ]; then
-	sed -n '4,20p' "$0" | sed 's/^# \{0,1\}//'
+	sed -n '4,22p' "$0" | sed 's/^# \{0,1\}//'
 	exit 1
 fi
 
@@ -62,6 +64,10 @@ export PSVR2_ROBUST_CLOCK="${PSVR2_ROBUST_CLOCK:-1}"
 export PSVR2_ROBUST_CLOCK_MAX_PPM="${PSVR2_ROBUST_CLOCK_MAX_PPM:-200}"
 STRIDE="${PSVR2_CONSTELLATION_CAPTURE_STRIDE:-6}"
 
+if [ "${PSVR2_SENSE_RECORD_BLOBS:-1}" != "0" ]; then
+	export CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT="$SESSION/constellation.ctd"
+fi
+
 cp "$CALIBRATION" "$SESSION/calibration.json"
 [ -n "$NOTE" ] && printf '%s\n' "$NOTE" > "$SESSION/note.txt"
 env | grep -E '^(PSVR2_|PSSENSE_|CONSTELLATION_|T_LED_)' | sort > "$SESSION/env.txt" || true
@@ -96,7 +102,7 @@ if command -v shasum > /dev/null; then
 else
 	SUM="sha256sum"
 fi
-(cd "$DATASETS" && for f in "sessions/$(basename "$SESSION")"/{run.log,poses.csv,calibration.json,score.json}; do
+(cd "$DATASETS" && for f in "sessions/$(basename "$SESSION")"/{run.log,poses.csv,calibration.json,score.json,constellation.ctd}; do
 	[ -f "$f" ] && $SUM "$f"
 done) >> "$DATASETS/SHA256SUMS"
 

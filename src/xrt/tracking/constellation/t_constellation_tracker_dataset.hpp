@@ -142,6 +142,11 @@ public: // Methods
 
 	void
 	recordDeviceInfo(const Device &device);
+
+	void
+	recordDeviceTracking(const CameraSample &sample,
+	                     t_constellation_device_id_t device_id,
+	                     const xrt_space_relation &relation);
 };
 
 struct DatasetMosaic
@@ -157,6 +162,17 @@ struct DatasetDevice
 	t_constellation_tracker_led_model led_model;
 };
 
+struct DatasetDeviceTracking
+{
+	uint64_t sample_id;
+	int64_t timestamp_ns;
+	uint32_t mosaic_index;
+	uint32_t camera_index;
+	t_constellation_device_id_t device_id;
+	xrt_space_relation_flags relation_flags;
+	xrt_pose pose;
+};
+
 struct DatasetReader
 {
 private: // Fields
@@ -167,6 +183,7 @@ public: // Fields
 	std::vector<DatasetDevice> devices;
 
 	std::vector<CameraSample> samples;
+	std::vector<DatasetDeviceTracking> device_tracking;
 
 public: // Methods
 	DatasetReader(std::string filename);

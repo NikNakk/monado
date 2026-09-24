@@ -22,6 +22,11 @@ enum PacketType
 {
 	PACKET_TYPE_CAMERA_SAMPLE = 1,
 	PACKET_TYPE_DEVICE_INFO = 2,
+	/*!
+	 * A device's tracking-source relation at a camera sample's exposure, including orientation-only relations
+	 * that @ref DeviceState::Txr_world_device_prior leaves out. Needed to replay IMU gravity priors.
+	 */
+	PACKET_TYPE_DEVICE_TRACKING = 3,
 };
 
 namespace {
@@ -490,6 +495,24 @@ DataRecorder::recordSample(const CameraSample &sample)
 }
 
 void
+DataRecorder::recordDeviceTracking(const CameraSample &sample,
+                                   t_constellation_device_id_t device_id,
+                                   const xrt_space_relation &relation)
+{
+	std::lock_guard<std::mutex> guard(this->lock);
+
+	this->serializer.write(static_cast<uint8_t>(PACKET_TYPE_DEVICE_TRACKING));
+	this->serializer.write(static_cast<uint64_t>(sample.id));
+	this->serializer.write(static_cast<uint64_t>(sample.timestamp_ns));
+	this->serializer.write(static_cast<uint32_t>(sample.mosaic_index));
+	this->serializer.write(static_cast<uint32_t>(sample.camera_index));
+	this->serializer.write(static_cast<uint8_t>(device_id));
+	this->serializer.write(static_cast<uint32_t>(relation.relation_flags));
+	this->serializer.write(relation.pose);
+	this->serializer.flush();
+}
+
+void
 DataRecorder::recordDeviceInfo(const Device &device)
 {
 	std::lock_guard<std::mutex> guard(this->lock);
@@ -553,6 +576,23 @@ DatasetReader::DatasetReader(std::string filename) : serializer(filename, false)
 
 				this->serializer.read(device.leds, device.led_model);
 
+				break;
+			}
+			case PACKET_TYPE_DEVICE_TRACKING: {
+				DatasetDeviceTracking &tracking = this->device_tracking.emplace_back();
+				uint64_t timestamp_ns;
+				uint8_t device_id;
+				uint32_t flags;
+				this->serializer.read(tracking.sample_id);
+				this->serializer.read(timestamp_ns);
+				this->serializer.read(tracking.mosaic_index);
+				this->serializer.read(tracking.camera_index);
+				this->serializer.read(device_id);
+				this->serializer.read(flags);
+				this->serializer.read(tracking.pose);
+				tracking.timestamp_ns = static_cast<int64_t>(timestamp_ns);
+				tracking.device_id = static_cast<t_constellation_device_id_t>(device_id);
+				tracking.relation_flags = static_cast<xrt_space_relation_flags>(flags);
 				break;
 			}
 			default: {

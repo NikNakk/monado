@@ -589,6 +589,10 @@ Camera::processSampleFast(CameraSample &sample)
 			                              &Tcv_world_device_predicted.value());
 		}
 
+		if (tracker->data_recorder) {
+			tracker->data_recorder->recordDeviceTracking(sample, device->id, device_predicted_relation);
+		}
+
 		auto &device_state = sample.putDeviceState(device->id);
 		device_state.Txr_world_device_prior = Tcv_world_device_predicted.has_value()
 		                                          ? std::optional<xrt_pose>(device_predicted_relation.pose)
