@@ -383,6 +383,34 @@ issue.
   of the host clock mappings. The lock needs closed-loop phase tracking from brightness, and the tracker
   needs the plan item 3 work.
 
+**2026-09-24 23:19, `sessions/20260924-231910-bootstrap-both-track`** (both power-cycled, still, full ring, 60 s,
+`PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1 PSSENSE_LED_BOOTSTRAP_TRACK=1`, commit `35cc29382`). **Two-controller
+illumination passes.** Both status LEDs stayed on.
+
+- Left: baseline `0,0,3,0`, lock at 15600 µs (13.4 s). Locked lit reports per 5 s window: 1192/1196,
+  1200/1200, 1196/1200 and 1200/1200 (median 1.00). **Captured frames lit while locked: 339/339 on every
+  camera.** Tracking: 7 probes, 4 moves (+230, +88, −400, +400 µs), final lock 15918 µs.
+- Right: baseline `12,5,11,3` (includes the left ring), clean wide peak and narrow window (1450 µs), lock at
+  15725 µs (26.7 s). Tracking: 6 probes, 4 moves, net +146 µs. Its lit-test fraction (79, 74, 68, 62%) is
+  confounded by the left ring in its baseline. Its probe reference windows averaged 11–13 blobs per camera,
+  about both rings (ring sizes 4.6 and 5.7) plus background, so the ring was present most of the time.
+- 0 candidates while commanded off on either side, and no always-lit fault.
+- Host timing under load: the tracker dropped over 1000 slow samples per 5 s from 15 s, and exposure ages
+  peaked at 94 ms. From 47 s **both controllers' clock offsets rose together by ~1 ms/s** (10.4 ms by the end,
+  66 snaps of +250–670 µs). Receive times are stamped in the IOKit callback, so the samples are genuine: the
+  controllers' device time ran fast relative to the host. The likely mechanism is the controllers
+  disciplining their clocks from the host timestamps in our output reports, which became irregular under
+  load; unconfirmed. The snap followed it, and tracking made the ±400 µs corrections at 45–60 s. The
+  left's lit fraction didn't drop.
+- Latent bug spotted: `device_ticks - device_ticks_last` is computed in `uint32_t` before widening, so the
+  "went backwards" branch can't fire. An out-of-order report would add ~1431 s to device time. Not seen in
+  this data.
+- Pose tracking remains the blocker: 353 left and 116 right candidates in 60 s, with the slow thread saturated.
+
+**Illumination status:** passes for one controller static and under slow movement, and for two controllers
+static with `KEEP_LOCK` + `TRACK`. Still to confirm: two controllers moving, and both options' behaviour
+across restarts.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
