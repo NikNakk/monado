@@ -118,6 +118,10 @@ public: // Methods
 
 	void
 	flush();
+
+	//! True when reading has consumed the whole file (checked between packets).
+	bool
+	atEnd();
 };
 
 struct DataRecorder
@@ -184,6 +188,9 @@ public: // Fields
 
 	std::vector<CameraSample> samples;
 	std::vector<DatasetDeviceTracking> device_tracking;
+
+	//! Why reading stopped: empty at a clean end of file; anything else means the file is truncated or corrupt.
+	std::string stop_reason;
 
 public: // Methods
 	DatasetReader(std::string filename);

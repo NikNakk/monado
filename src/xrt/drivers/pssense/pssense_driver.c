@@ -1158,9 +1158,17 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 {
 	struct pssense_calibration_data calibration_data = {0};
 
+	// A read occasionally returns something other than a calibration part (seen on macOS: part ID 49, i.e. the 0x31
+	// input report ID), which used to fail device creation outright. Retry it like a bad CRC, a bounded number of times.
+	const int max_attempts = 5;
+	int attempt = 0;
 	bool invalid_crc;
 	do {
 		invalid_crc = false;
+		if (++attempt > max_attempts) {
+			PSSENSE_ERROR(pssense, "Giving up on calibration data after %d attempts", max_attempts);
+			return false;
+		}
 
 		// Calibration has to be read in two parts with two feature reads.
 		for (int i = 0; i < 2; i++) {
@@ -1190,8 +1198,10 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 				break;
 			}
 			default: {
-				PSSENSE_ERROR(pssense, "Unknown calibration data part ID %u", report_buffer.part_id);
-				return false;
+				PSSENSE_WARN(pssense, "Unknown calibration data part ID %u (attempt %d), retrying",
+				             report_buffer.part_id, attempt);
+				invalid_crc = true;
+				continue;
 			}
 			}
 
