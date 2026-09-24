@@ -78,7 +78,31 @@ extern "C" {
  * immediately (they represent a less delayed observation), while movement
  * toward larger offsets is limited to 2.5us per sample so queued USB work cannot
  * drag the clock mapping around. This is deliberately env-gated for diagnosis.
+ *
+ * At the 2 kHz IMU rate 2.5us per sample still lets the offset climb 5 ms per
+ * second, so USB delays lasting a few hundred milliseconds under CPU load leak
+ * into camera exposure timestamps. PSVR2_ROBUST_CLOCK_MAX_PPM > 0 instead caps the
+ * upward movement at that clock drift rate (the headset and host clocks differ
+ * by ~20 ppm).
  */
+static inline double
+psvr2_robust_clock_max_ppm(void)
+{
+	static double ppm = -1.0;
+	if (ppm < 0.0) {
+		const char *value = getenv("PSVR2_ROBUST_CLOCK_MAX_PPM");
+		ppm = value != NULL ? atof(value) : 0.0;
+		if (ppm < 0.0) {
+			ppm = 0.0;
+		}
+		if (ppm > 0.0) {
+			fprintf(stderr, "psvr2: PSVR2_ROBUST_CLOCK_MAX_PPM=%.1f caps upward hardware clock offset drift\n",
+			        ppm);
+		}
+	}
+	return ppm;
+}
+
 static inline bool
 psvr2_robust_clock_enabled(void)
 {
@@ -102,7 +126,6 @@ psvr2_clock_offset_a2b_macos(float freq, timepoint_ns a, timepoint_ns b, time_du
 		return m_clock_offset_a2b(freq, a, b, inout_a2b);
 	}
 
-	(void)freq;
 	const time_duration_ns got_a2b = b - a;
 	const time_duration_ns old_a2b = *inout_a2b;
 	time_duration_ns new_a2b = got_a2b;
@@ -113,7 +136,9 @@ psvr2_clock_offset_a2b_macos(float freq, timepoint_ns a, timepoint_ns b, time_du
 			new_a2b = got_a2b;
 		} else {
 			/* Permit real clock drift, but do not follow USB queueing latency. */
-			const time_duration_ns max_upward_step_ns = 2500;
+			const double max_ppm = psvr2_robust_clock_max_ppm();
+			const time_duration_ns max_upward_step_ns =
+			    max_ppm > 0.0 ? MAX((time_duration_ns)(1e9 / freq * max_ppm * 1e-6), 1) : 2500;
 			const time_duration_ns delta = got_a2b - old_a2b;
 			new_a2b = old_a2b + MIN(delta, max_upward_step_ns);
 		}
