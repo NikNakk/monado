@@ -31,6 +31,7 @@
 	NSMutableDictionary *_countsByToken;
 	NSMutableDictionary *_eventsByToken;
 	NSMutableDictionary *_ownersByToken;
+	NSMutableSet *_claimableTextureTokens;
 	NSMutableDictionary *_importanceLeasesByKey;
 }
 
@@ -55,9 +56,21 @@
 @end
 
 static bool
-token_is_valid(uint64_t token)
+standard_token_is_valid(uint64_t token)
 {
 	return (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC;
+}
+
+static bool
+external_texture_token_is_valid(uint64_t token)
+{
+	return (token & IPC_METAL_XPC_EXTERNAL_TOKEN_MASK) == IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC;
+}
+
+static bool
+texture_token_is_valid(uint64_t token)
+{
+	return standard_token_is_valid(token) || external_texture_token_is_valid(token);
 }
 
 bool
@@ -99,6 +112,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 		_countsByToken = [[NSMutableDictionary alloc] init];
 		_eventsByToken = [[NSMutableDictionary alloc] init];
 		_ownersByToken = [[NSMutableDictionary alloc] init];
+		_claimableTextureTokens = [[NSMutableSet alloc] init];
 		_importanceLeasesByKey = [[NSMutableDictionary alloc] init];
 	}
 	return self;
@@ -108,6 +122,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 {
 	[self releaseAllImportanceLeases];
 	[_importanceLeasesByKey release];
+	[_claimableTextureTokens release];
 	[_ownersByToken release];
 	[_eventsByToken release];
 	[_countsByToken release];
@@ -140,7 +155,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
                 imageCount:(uint32_t)imageCount
                   ownerPID:(pid_t)ownerPID
 {
-	if (handle == nil || !token_is_valid(token) || imageCount == 0 || imageCount > XRT_MAX_SWAPCHAIN_IMAGES ||
+	if (handle == nil || !texture_token_is_valid(token) || imageCount == 0 || imageCount > XRT_MAX_SWAPCHAIN_IMAGES ||
 	    index >= imageCount || ownerPID <= 0) {
 		return NO;
 	}
@@ -169,14 +184,22 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 
 - (MTLSharedTextureHandle *)copyTextureHandleForToken:(uint64_t)token index:(uint32_t)index ownerPID:(pid_t)ownerPID
 {
-	if (!token_is_valid(token) || ownerPID <= 0) {
+	if (!texture_token_is_valid(token) || ownerPID <= 0) {
 		return nil;
 	}
 
 	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
 	MTLSharedTextureHandle *handle = nil;
 	[_lock lock];
-	if ([self token:key belongsToPIDLocked:ownerPID allowClaim:NO]) {
+	BOOL permitted = [self token:key belongsToPIDLocked:ownerPID allowClaim:NO];
+	if (!permitted && [_claimableTextureTokens containsObject:key]) {
+		// Claim exactly once for the receiving process. From this point on the
+		// token is PID-scoped again, now to the recipient rather than publisher.
+		[_ownersByToken setObject:[NSNumber numberWithInt:ownerPID] forKey:key];
+		[_claimableTextureTokens removeObject:key];
+		permitted = YES;
+	}
+	if (permitted) {
 		NSNumber *count = [_countsByToken objectForKey:key];
 		NSMutableDictionary *images = [_handlesByToken objectForKey:key];
 		if (count != nil && index < count.unsignedIntValue) {
@@ -189,7 +212,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 
 - (BOOL)storeSharedEventHandle:(MTLSharedEventHandle *)handle token:(uint64_t)token ownerPID:(pid_t)ownerPID
 {
-	if (handle == nil || !token_is_valid(token) || ownerPID <= 0) {
+	if (handle == nil || !standard_token_is_valid(token) || ownerPID <= 0) {
 		return NO;
 	}
 
@@ -206,7 +229,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 
 - (MTLSharedEventHandle *)copySharedEventHandleForToken:(uint64_t)token ownerPID:(pid_t)ownerPID
 {
-	if (!token_is_valid(token) || ownerPID <= 0) {
+	if (!standard_token_is_valid(token) || ownerPID <= 0) {
 		return nil;
 	}
 
@@ -222,7 +245,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 
 - (void)discardToken:(uint64_t)token ownerPID:(pid_t)ownerPID
 {
-	if (!token_is_valid(token) || ownerPID <= 0) {
+	if (!texture_token_is_valid(token) || ownerPID <= 0) {
 		return;
 	}
 
@@ -233,6 +256,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 		[_countsByToken removeObjectForKey:key];
 		[_eventsByToken removeObjectForKey:key];
 		[_ownersByToken removeObjectForKey:key];
+		[_claimableTextureTokens removeObject:key];
 	}
 	[_lock unlock];
 }
@@ -259,6 +283,7 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 		[_countsByToken removeObjectForKey:key];
 		[_eventsByToken removeObjectForKey:key];
 		[_ownersByToken removeObjectForKey:key];
+		[_claimableTextureTokens removeObject:key];
 	}
 	NSUInteger count = keys.count;
 	[_lock unlock];
@@ -560,6 +585,32 @@ importance_lease_key(pid_t ownerPID, uint64_t sessionID)
 	[handle release];
 }
 
+- (void)markTextureTokenClaimable:(uint64_t)token
+                            reply:(void (^)(BOOL success))reply
+{
+	pid_t pid = current_xpc_pid();
+	if (!external_texture_token_is_valid(token) || pid <= 0) {
+		reply(NO);
+		return;
+	}
+
+	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
+	BOOL success = NO;
+	[_lock lock];
+	if ([self token:key belongsToPIDLocked:pid allowClaim:NO] &&
+	    [_handlesByToken objectForKey:key] != nil) {
+		[_claimableTextureTokens addObject:key];
+		success = YES;
+	}
+	[_lock unlock];
+
+	if (!success) {
+		U_LOG_W("Rejected mark-claimable Metal token=0x%016llx for XPC pid=%d",
+		        (unsigned long long)token, (int)pid);
+	}
+	reply(success);
+}
+
 - (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
                            token:(uint64_t)token
                            reply:(void (^)(BOOL success))reply
@@ -795,7 +846,7 @@ ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
                                              void **out_metal_textures,
                                              pid_t owner_pid)
 {
-	if (!token_is_valid(token) || out_metal_textures == NULL || expected_count == 0 ||
+	if (!standard_token_is_valid(token) || out_metal_textures == NULL || expected_count == 0 ||
 	    expected_count > XRT_MAX_SWAPCHAIN_IMAGES || owner_pid <= 0) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
@@ -891,7 +942,7 @@ ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event,
 void
 ipc_metal_xpc_service_discard_token_for_pid(uint64_t token, pid_t owner_pid)
 {
-	if (!token_is_valid(token) || owner_pid <= 0) {
+	if (!standard_token_is_valid(token) || owner_pid <= 0) {
 		return;
 	}
 
