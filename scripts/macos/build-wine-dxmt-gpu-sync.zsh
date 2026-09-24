@@ -75,6 +75,20 @@ for patch_source in "${patch_sources[@]}"; do
 	fi
 done
 
+# The Basalt helper applies its patch series with git apply --index. A failed
+# sequential apply can therefore leave this disposable generated checkout with
+# staged changes even though the helper's preliminary --check pass succeeded.
+# Reset only this build-owned checkout before retrying; never touch the user's
+# Monado or Basalt working tree.
+dxmt_generated_src=${build_dir}/dxmt/src
+if [[ -d ${dxmt_generated_src}/.git ]] &&
+   { ! git -C "${dxmt_generated_src}" diff --quiet ||
+     ! git -C "${dxmt_generated_src}" diff --cached --quiet; }; then
+	print "Resetting interrupted generated DXMT checkout..."
+	git -C "${dxmt_generated_src}" reset --hard HEAD
+	git -C "${dxmt_generated_src}" clean -fd
+fi
+
 print "Building matched DXMT v0.80 + Basalt IOSurface + Monado compatibility/GPU-sync patches..."
 BUILD_DIR="${build_dir}" "${basalt_checkout}/runtime/scripts/build-dxmt-fork.zsh"
 
