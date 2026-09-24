@@ -178,6 +178,32 @@ take_event_one(NSXPCConnection *connection, uint64_t token)
 }
 
 static bool
+mark_texture_token_claimable_sync(NSXPCConnection *connection, uint64_t token)
+{
+	__block BOOL success = NO;
+	__block BOOL replied = NO;
+	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+	id<IPCMetalXPCBrokerProtocol> proxy =
+	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+		    const char *message = error.localizedDescription.UTF8String;
+		    U_LOG_E("Metal XPC mark-claimable failed: %s", message != NULL ? message : "unknown error");
+		    dispatch_semaphore_signal(semaphore);
+	    }];
+
+	[proxy markTextureTokenClaimable:token
+	                          reply:^(BOOL remote_success) {
+		                          success = remote_success;
+		                          replied = YES;
+		                          dispatch_semaphore_signal(semaphore);
+	                          }];
+
+	long wait_result =
+	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
+	return wait_result == 0 && replied && success;
+}
+
+static bool
 discard_sync(NSXPCConnection *connection, uint64_t token)
 {
 	__block BOOL replied = NO;
@@ -255,6 +281,36 @@ ipc_metal_xpc_publish_textures(void *const *metal_textures, uint32_t image_count
 		U_LOG_I("Metal XPC published %u shared texture handle(s) token=0x%016llx",
 		        image_count,
 		        (unsigned long long)token);
+		return XRT_SUCCESS;
+	}
+}
+
+xrt_result_t
+ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures,
+                                         uint32_t image_count,
+                                         uint64_t *out_token)
+{
+	xrt_result_t xret = ipc_metal_xpc_publish_textures(metal_textures, image_count, out_token);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	@autoreleasepool {
+		NSXPCConnection *connection = create_connection();
+		if (connection == nil || !mark_texture_token_claimable_sync(connection, *out_token)) {
+			if (connection != nil) {
+				(void)discard_sync(connection, *out_token);
+				[connection invalidate];
+				[connection release];
+			}
+			*out_token = 0;
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		[connection invalidate];
+		[connection release];
+		U_LOG_I("Metal XPC marked texture token claimable token=0x%016llx",
+		        (unsigned long long)*out_token);
 		return XRT_SUCCESS;
 	}
 }
