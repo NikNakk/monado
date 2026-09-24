@@ -648,21 +648,23 @@ fake_device_push(t_constellation_tracker_device *device, t_constellation_tracker
 void
 fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns, xrt_space_relation *out)
 {
+	/*
+	 * Like the Sense driver: orientation is the IMU's (the recorded relation's orientation, in the IMU's own world),
+	 * position is the last optical pose while it is fresh. Before any push there is only the orientation.
+	 */
 	FakeDevice *fake = fake_device_of_source(source);
 	*out = XRT_SPACE_RELATION_ZERO;
-	if (fake->have_last && std::llabs(when_ns - fake->last.timestamp_ns) < 100'000'000) {
-		out->pose = fake->last.pose;
-		out->relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_POSITION_VALID_BIT |
-		                                                 XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-		                                                 XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-		return;
-	}
-	// Nearest recorded orientation-only relation (the live driver's IMU pose before optical tracking).
 	auto it = std::lower_bound(fake->recorded.begin(), fake->recorded.end(), when_ns,
 	                           [](const auto &p, int64_t t) { return p.first < t; });
 	if (it != fake->recorded.end() && std::llabs(it->first - when_ns) < 5'000'000 &&
-	    (it->second.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0) {
-		*out = it->second;
+	    (it->second.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
+		out->pose.orientation = it->second.pose.orientation;
+		out->relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+		                                                 XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	}
+	if (fake->have_last && std::llabs(when_ns - fake->last.timestamp_ns) < 100'000'000) {
+		out->pose.position = fake->last.pose.position;
+		out->relation_flags = (xrt_space_relation_flags)(out->relation_flags | XRT_SPACE_RELATION_POSITION_VALID_BIT);
 	}
 }
 
@@ -829,6 +831,7 @@ main(int argc, char **argv)
 	bool m1 = false;
 	bool tracker = false;
 	const char *tracker_csv = nullptr;
+	const char *tracking_csv = nullptr;
 	bool seed_recorded = false;
 	const char *csv = nullptr;
 	for (int i = 2; i < argc; i++) {
@@ -837,6 +840,8 @@ main(int argc, char **argv)
 			m1 = true;
 		} else if (arg == "--tracker") {
 			tracker = true;
+		} else if (arg == "--tracking-csv" && i + 1 < argc) {
+			tracking_csv = argv[++i];
 		} else if (arg == "--tracker-csv" && i + 1 < argc) {
 			tracker = true;
 			tracker_csv = argv[++i];
@@ -850,6 +855,18 @@ main(int argc, char **argv)
 	try {
 		DatasetReader dataset(argv[1]);
 		int status = summarise(dataset);
+		if (tracking_csv) {
+			// Every recorded tracking-source relation (what the device predicted at each exposure), XR convention.
+			FILE *f = std::fopen(tracking_csv, "w");
+			std::fprintf(f, "timestamp_ns,device,camera,flags,px,py,pz,qx,qy,qz,qw\n");
+			for (const DatasetDeviceTracking &t : dataset.device_tracking) {
+				std::fprintf(f, "%" PRIi64 ",%d,%u,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", t.timestamp_ns,
+				             (int)t.device_id, t.camera_index, (unsigned)t.relation_flags, t.pose.position.x,
+				             t.pose.position.y, t.pose.position.z, t.pose.orientation.x, t.pose.orientation.y,
+				             t.pose.orientation.z, t.pose.orientation.w);
+			}
+			std::fclose(f);
+		}
 		if (m1) {
 			status = replay_m1(dataset, csv, seed_recorded) != 0 ? 1 : status;
 		}

@@ -404,6 +404,13 @@ struct JointDeviceState
 	uint32_t consecutive_failures{0};
 	//! Consecutive solves since the last bootstrap; poses are only pushed once this confirms the track.
 	uint32_t confirmations{0};
+	/*!
+	 * Rotation from the device's predicted-orientation world into this world, refreshed from every solve
+	 * (align = solved * predicted^-1). The predicted orientation is the device's IMU orientation, which need not be
+	 * in the optical world (the Sense driver's is not), but it rotates consistently between exposures.
+	 */
+	bool have_align{false};
+	xrt_quat align{0.0f, 0.0f, 0.0f, 1.0f};
 };
 
 //! The camera samples of one synchronised exposure, indexed by camera.
