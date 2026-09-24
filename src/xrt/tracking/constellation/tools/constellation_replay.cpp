@@ -609,6 +609,9 @@ struct FakeDevice
 
 	bool have_last{false};
 	t_constellation_tracker_sample last{};
+	//! The recorded tracking-source relations for this device, returned when there is no recent push, as a driver
+	//! returns its (unaligned) IMU orientation before it has optical history.
+	std::vector<std::pair<int64_t, xrt_space_relation>> recorded;
 	uint32_t pushes{0};
 	std::map<uint32_t, uint32_t> joint_cameras;
 	Stats rms_px;
@@ -652,6 +655,14 @@ fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 		out->relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_POSITION_VALID_BIT |
 		                                                 XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
 		                                                 XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+		return;
+	}
+	// Nearest recorded orientation-only relation (the live driver's IMU pose before optical tracking).
+	auto it = std::lower_bound(fake->recorded.begin(), fake->recorded.end(), when_ns,
+	                           [](const auto &p, int64_t t) { return p.first < t; });
+	if (it != fake->recorded.end() && std::llabs(it->first - when_ns) < 5'000'000 &&
+	    (it->second.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0) {
+		*out = it->second;
 	}
 }
 
@@ -729,6 +740,16 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path)
 		fake->base.push_camera_blob_count = nullptr;
 		fake->source.get_tracked_pose = fake_device_get;
 		fake->csv = csv;
+		for (const DatasetDeviceTracking &t : dataset.device_tracking) {
+			if (t.device_id == device.id) {
+				xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
+				relation.pose = t.pose;
+				relation.relation_flags = t.relation_flags;
+				fake->recorded.push_back({t.timestamp_ns, relation});
+			}
+		}
+		std::sort(fake->recorded.begin(), fake->recorded.end(),
+		          [](const auto &a, const auto &b) { return a.first < b.first; });
 		// The recorded model is in the tracker's OpenCV convention; drivers hand over OpenXR.
 		fake->leds = device.leds;
 		for (t_constellation_tracker_led &led : fake->leds) {

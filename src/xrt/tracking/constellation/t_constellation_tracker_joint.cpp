@@ -283,22 +283,23 @@ JointProcessor::process(JointExposure &exposure)
 			continue;
 		}
 
+		/*
+		 * Use the device's prediction only when it includes a position: then it is built on optical history and its
+		 * orientation is aligned to this world. An orientation-only prediction is the device's raw IMU orientation,
+		 * which is not aligned until optical poses have reached the device. Anchoring to it (as the first live joint
+		 * run did) makes every tentative track fail its second solve, so none is ever confirmed.
+		 */
 		xrt_pose Tcv_predicted;
 		math_pose_convert_from_opencv(&predicted.pose, &Tcv_predicted);
-		const bool have_orientation =
-		    relation_has(predicted, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
-		const bool have_pose = have_orientation && relation_has(predicted, XRT_SPACE_RELATION_POSITION_VALID_BIT);
+		const bool have_pose =
+		    relation_has(predicted, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		                                XRT_SPACE_RELATION_POSITION_VALID_BIT);
 
-		xrt_pose prior = state.Tcv_world_device;
-		if (have_pose) {
-			prior = Tcv_predicted;
-		} else if (have_orientation) {
-			prior.orientation = Tcv_predicted.orientation;
-		}
+		xrt_pose prior = have_pose ? Tcv_predicted : state.Tcv_world_device;
 		JointSolveResult result;
 		bool ok = timed([&] {
 			JointSolveParams params;
-			if (have_orientation) {
+			if (have_pose) {
 				params.orientation_prior_sigma_deg = kOrientationPriorSigmaDeg;
 				return joint_solve_refine(cameras, device->params.led_model, prior, prior.orientation, params,
 				                          result);
