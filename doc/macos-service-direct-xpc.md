@@ -60,6 +60,53 @@ service MTLSharedEvent
                                    +-- XPC --> MTLSharedEventHandle
 ```
 
+### External client-to-client texture handoff
+
+The Chromium macOS WebXR port has one additional process boundary: Chromium's
+isolated XR process owns the OpenXR session, while Chromium's GPU process owns
+the SharedImage/ANGLE context that renders into the texture.
+
+Monado keeps this transport out of Chromium by building a small helper library:
+
+```text
+libmonado_metal_xpc_client.dylib
+```
+
+Its external ABI is intentionally limited to opaque texture objects/tokens:
+
+```text
+monado_metal_xpc_publish_claimable_texture(...)
+monado_metal_xpc_take_texture_on_device(...)
+monado_metal_xpc_release_texture(...)
+```
+
+Ordinary texture tokens are still PID scoped and remain in the legacy
+32-bit-compatible namespace (24 random bits). Claimable external texture tokens
+use a separate 64-bit namespace with 56 random bits because they are not carried
+through the legacy `xrt_image_native` metadata transport.
+
+A publisher may explicitly mark an **external texture** token claimable for a
+one-time cross-process handoff. The first different PID that retrieves it becomes
+the token owner and the claimable flag is cleared. The token is then PID scoped
+again and is consumed when the texture is taken.
+
+The receiving helper accepts an `MTLDevice`. This is important for ANGLE:
+`EGL_ANGLE_metal_texture_client_buffer` requires the imported `MTLTexture`
+to belong to the exact device backing the receiving EGL display. The XPC helper
+therefore recreates the texture with the receiving process's supplied device
+rather than assuming `MTLSharedTextureHandle.device` is the required object.
+
+The helper installs to `${CMAKE_INSTALL_PREFIX}/lib`. The current Chromium
+development port expects:
+
+```text
+/usr/local/lib/libmonado_metal_xpc_client.dylib
+```
+
+The old standalone broker also implements the claimable-token method for
+development compatibility; because that broker predates PID ownership, marking
+an existing external token claimable is effectively a no-op there.
+
 ### Per-client ownership
 
 Registry tokens are scoped to the application process that owns them.
