@@ -25,6 +25,19 @@
 
 extern char **environ;
 
+static bool
+texture_token_is_valid(uint64_t token)
+{
+	return (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC ||
+	       (token & IPC_METAL_XPC_EXTERNAL_TOKEN_MASK) == IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC;
+}
+
+static bool
+external_texture_token_is_valid(uint64_t token)
+{
+	return (token & IPC_METAL_XPC_EXTERNAL_TOKEN_MASK) == IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC;
+}
+
 @interface IPCMetalXPCBrokerService : NSObject <IPCMetalXPCBrokerProtocol>
 {
 	NSLock *_lock;
@@ -66,7 +79,7 @@ extern char **environ;
 	BOOL success = NO;
 
 	if (handle != nil && imageCount > 0 && imageCount <= XRT_MAX_SWAPCHAIN_IMAGES && index < imageCount &&
-	    (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC) {
+	    texture_token_is_valid(token)) {
 		NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
 
 		[_lock lock];
@@ -107,6 +120,22 @@ extern char **environ;
 
 	reply(handle);
 	[handle release];
+}
+
+- (void)markTextureTokenClaimable:(uint64_t)token
+                            reply:(void (^)(BOOL success))reply
+{
+	// The legacy standalone broker predates PID-scoped ownership and its
+	// texture tokens are already cross-process. Treat an existing texture token
+	// as claimable so clients using the new helper ABI remain compatible.
+	BOOL success = NO;
+	if (external_texture_token_is_valid(token)) {
+		NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
+		[_lock lock];
+		success = [_handlesByToken objectForKey:key] != nil;
+		[_lock unlock];
+	}
+	reply(success);
 }
 
 - (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
