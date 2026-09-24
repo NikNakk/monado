@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSL-1.0
 """Direct native mode-4 ChArUco calibration for the four PSVR2 tracking cameras."""
 from __future__ import annotations
-import argparse,json,math
+import argparse,hashlib,json,math
 from pathlib import Path
 import cv2,numpy as np
 from scipy.optimize import least_squares
@@ -21,6 +21,14 @@ def dirs(root):
  out=sorted({p.parent for p in root.rglob('mode-04-size-*-set-4-example-*-plane0.pgm') if '__MACOSX' not in p.parts})
  if not out:raise ValueError('no mode-4 captures found')
  return out
+
+def image_provenance(root):
+ h=hashlib.sha256();files=sorted(p for p in root.rglob('mode-04-size-*-set-*-example-*-plane*.pgm') if '__MACOSX' not in p.parts)
+ for p in files:
+  h.update(p.relative_to(root).as_posix().encode()+b'\0')
+  with p.open('rb') as f:
+   for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
+ return {'image_count':len(files),'images_sha256':h.hexdigest()}
 
 def detect(d,cam,det):
  s,p=MODE[cam];ims=[]
@@ -78,7 +86,7 @@ def init_rig(poses):
   for n,x in vals:
    dt=1000*np.linalg.norm(x[:3,3]-med[:3,3]);dr=rdelta(med,x);ok=dt<30 and dr<8
    if ok:good.append(x)
-   samples.append({'pose':n,'translation_mm':(1000*x[:3,3]).tolist(),'delta_mm':float(dt),'delta_deg':float(dr),'accepted':ok})
+   samples.append({'pose':n,'translation_mm':(1000*x[:3,3]).tolist(),'delta_mm':float(dt),'delta_deg':float(dr),'accepted':bool(ok)})
   R=Rotation.from_matrix(np.array([x[:3,:3] for x in good])).mean().as_matrix();t=np.median(np.array([x[:3,3] for x in good]),0);x=np.eye(4);x[:3,:3]=R;x[:3,3]=t;C[c]=x;diag[str(c)]={'samples':samples,'accepted':len(good)}
  return C,diag
 
@@ -120,5 +128,5 @@ def main():
   if cv:print('  LOO',cv['rms_px'],cv['median_px'],cv['p95_px'])
  C,rf=fit_rig(M,G,P,obj);print('rig',rf['rms_px'],rf['median_px'],rf['p95_px'])
  for c in range(4):print('T',c,C[c])
- out={'format':'psvr2-mode4-charuco-direct-calibration-v1','runtime_usable':False,'capture_root':str(z.capture_root),'board':{'squares':[7,5],'square_mm':40,'marker_mm':30,'dictionary':'DICT_4X4_50'},'cameras':R,'native_relative_rig':{'origin':'mode4_camera0_native_opencv','transforms_T_camera0_camera':{str(c):C[c].tolist() for c in range(4)},'fit':rf},'note':'Direct native mode-4 calibration. Absolute alignment of native camera0 to the headset/visible frame remains separate.'};z.output.write_text(json.dumps(out,indent=2)+'\n');print('wrote',z.output)
+ out={'format':'psvr2-mode4-charuco-direct-calibration-v1','runtime_usable':False,'capture_root':str(z.capture_root),'capture_images':image_provenance(z.capture_root),'board':{'squares':[7,5],'square_mm':40,'marker_mm':30,'dictionary':'DICT_4X4_50'},'cameras':R,'native_relative_rig':{'origin':'mode4_camera0_native_opencv','transforms_T_camera0_camera':{str(c):C[c].tolist() for c in range(4)},'fit':rf},'note':'Direct native mode-4 calibration. Absolute alignment of native camera0 to the headset/visible frame remains separate.'};z.output.write_text(json.dumps(out,indent=2)+'\n');print('wrote',z.output)
 if __name__=='__main__':raise SystemExit(main())
