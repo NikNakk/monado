@@ -28,6 +28,14 @@ extern "C" {
 #define IPC_METAL_XPC_TOKEN_MAGIC UINT64_C(0x000000004d000000)
 #define IPC_METAL_XPC_TOKEN_MASK UINT64_C(0xffffffffff000000)
 
+/*
+ * Cross-process claimable texture tokens are not constrained by the legacy
+ * uint32_t image metadata transport. Reserve a separate namespace with 56 bits
+ * of entropy so the token itself is a strong one-shot capability.
+ */
+#define IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC UINT64_C(0xc700000000000000)
+#define IPC_METAL_XPC_EXTERNAL_TOKEN_MASK UINT64_C(0xff00000000000000)
+
 #ifdef XRT_OS_OSX
 
 /*!
@@ -37,11 +45,32 @@ xrt_result_t
 ipc_metal_xpc_publish_textures(void *const *metal_textures, uint32_t image_count, uint64_t *out_token);
 
 /*!
+ * Publish borrowed MTLTexture objects under a one-time token that may be
+ * claimed by a different process. Intended for Chromium's XR-process to
+ * GPU-process handoff; ordinary Monado texture tokens remain PID-scoped.
+ */
+xrt_result_t
+ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures,
+                                         uint32_t image_count,
+                                         uint64_t *out_token);
+
+/*!
  * Recreate textures previously published under @p token.
  * Each returned pointer is a retained id<MTLTexture>.
  */
 xrt_result_t
 ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_metal_textures);
+
+/*!
+ * Recreate textures on a specific receiving-process MTLDevice. This is needed
+ * by external clients such as Chromium/ANGLE, which require imported textures
+ * to belong to the exact Metal device backing their EGLDisplay.
+ */
+xrt_result_t
+ipc_metal_xpc_take_textures_on_device(uint64_t token,
+                                      uint32_t expected_count,
+                                      void *metal_device,
+                                      void **out_metal_textures);
 
 /*! Release textures returned by ipc_metal_xpc_take_textures(). */
 void
@@ -143,6 +172,9 @@ ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images,
 - (void)takeTextureHandleForToken:(uint64_t)token
                             index:(uint32_t)index
                             reply:(void (^)(MTLSharedTextureHandle *handle))reply;
+
+- (void)markTextureTokenClaimable:(uint64_t)token
+                            reply:(void (^)(BOOL success))reply;
 
 - (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
                            token:(uint64_t)token
