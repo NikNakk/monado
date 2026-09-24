@@ -16,7 +16,7 @@
 static bool
 token_is_valid(uint64_t token)
 {
-	return (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC;
+	return (token & IPC_METAL_XPC_EXTERNAL_TOKEN_MASK) == IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC;
 }
 
 static uint64_t
@@ -24,7 +24,8 @@ make_token(void)
 {
 	uint64_t random_bits = 0;
 	arc4random_buf(&random_bits, sizeof(random_bits));
-	return IPC_METAL_XPC_TOKEN_MAGIC | (random_bits & ~IPC_METAL_XPC_TOKEN_MASK);
+	return IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC |
+	       (random_bits & ~IPC_METAL_XPC_EXTERNAL_TOKEN_MASK);
 }
 
 static NSXPCConnection *
