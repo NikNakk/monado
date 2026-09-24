@@ -206,6 +206,9 @@ Work in this order unless hardware findings force a change:
    prediction, and latency.
 6. Treat Sense controllers as a separate project: buttons/IMU first, optical
    tracking later.
+   Sense optical tracking is now in progress on `macos-pssense-6dof`; read
+   `doc/pssense-optical-tracking.md` first. Record hardware runs with
+   `scripts/psvr2_sense_session.sh` into `~/Code/psvr2-datasets`, never `/tmp`.
 7. Explore CrossOver/OpenVR game compatibility only after native OpenXR is
    stable.
 
