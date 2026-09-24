@@ -354,6 +354,25 @@ issue.
   controller stays lit (and keeps tracking) while the other scans; a controller without a lock stays
   dark. This avoids switching a lit controller to `LED_ALL_OFF` and back.
 
+**2026-09-24 23:11, `sessions/20260924-231119-bootstrap-both-keeplock`** (both power-cycled, still, full ring,
+`PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1`, commit `ebf28f129`). **The handover works; the lock drifts.**
+
+- Both controllers locked once with clean scans and **0 candidates while off** on either side. Left: baseline
+  `2,2,3,1`, lock at 16408 µs. Right: baseline `5,8,8,2` (includes the left ring, which stayed lit), clean
+  wide peak 14000–16000 µs, narrow window 1450 µs, lock at 16225 µs. No always-lit fault.
+- Locked lit per 5 s window: left 81, 68 and 45%; right 42, 37 and 7%. With both lit, the right controller's
+  figure is confounded (the left ring is in its baseline, so any dip in the left counts against the right),
+  but the left's own decline is real.
+- Cause of the decline: slow wander in the timing chain, not jitter. The exposure timestamp residual is steady
+  within each second, but its per-second median went +636 µs (13 s) → +49 µs (33 s) → −448 µs (36 s).
+  The controllers' clock offsets moved −253 µs (left) and +524 µs (right) over the run. Together that
+  exceeds the ~±400 µs margin of a 1 ms lock pulse around a ~0.5 ms lit window.
+- Pose tracking: almost no left candidates after 14 s despite the ring being lit (81% in its first
+  locked window), with 50–200 slow-sample drops per second. Tracker saturation again, now with two rings.
+- Conclusion: an open-loop lock (a fixed fudge after one scan) isn't robust to the millisecond-scale wander
+  of the host clock mappings. The lock needs closed-loop phase tracking from brightness, and the tracker
+  needs the plan item 3 work.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
