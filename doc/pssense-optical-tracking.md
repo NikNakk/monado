@@ -109,6 +109,32 @@ a bonus at this stage:
 If the wide scan never finds a peak, check `PSSENSE_FORCE_IR=1` at the same placement. If that doesn't
 show a lit ring either, the problem is framing, not timing.
 
+### Hardware results
+
+**2026-09-24, `sessions/20260924-174601-bootstrap-static-left`** (left only, static, ring facing headset,
+45 s, commit `0a2cd3902`). Failed acceptance, but the cause is the clock mapping, not the bootstrap.
+
+- First lock at 12.9 s. The wide scan's best step was at 0–1 ms, and the narrow scan found a lit window at
+  2250–2500 µs (lock fudge 2100 µs). The first 5 s of lock were lit 808/1196 camera reports (68%), then
+  dropped to 0 lit and were declared lost at 22.2 s. The rescan locked at fudge 15725 µs (about 3 ms
+  earlier), lit only 117/1200, and was lost again at 42.9 s. Median locked lit fraction was 0.10. All four
+  cameras saw the ring whenever the pulse was in phase (captured frames: 39–41 of 174 lit per camera while
+  locked). Placement was fine.
+- Cause: the scheduling clock offset (controller minus host, `controller_now - now` in `LED_SCHEDULE`)
+  rose linearly by 5460 µs over the first 32.7 s (about 165 µs/s), then went flat. Every per-frame
+  step during the ramp is an exact multiple of 2.5 µs. That's the `±2.5 µs per sample` slew clamp in
+  `pssense_add_clock_offset_sample` catching up after the first HID report arrived about 5.4 ms late,
+  with about 66 input reports/s. It isn't real clock drift.
+- The lit position is constant in *fudge + offset* coordinates: 2375 + 1830 = 4205 µs at 11 s and
+  15750 + 5125 − 16683 = 4192 µs at 31 s. So the bootstrap measured the right phase, the ramp carried the
+  lock away, and the second narrow scan ran during the tail of the ramp. That makes it ragged and biased.
+- Fix: `PSSENSE_CLOCK_OFFSET_SNAP_US` (default 0, off) lets the smoothed offset jump to the max-tracked
+  offset when the gap exceeds the threshold, logging `CLOCK_OFFSET side=L event=snap`.
+  `psvr2_sense_session.sh` sets it to 250. `score.txt` now reports `clock offset: creep`, the settle time
+  and the snap count. A creep of more than ~100 µs after the first lock invalidates the run.
+- Also seen: occasional partially lit steps away from the main window (for example narrow 3000–3250 µs at
+  12 s, and 14000 µs at 29 s). These may be ramp artefacts; recheck them once the offset is stable.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

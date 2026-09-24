@@ -83,6 +83,7 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lock_period_id, "PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", 20)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_clock_offset_snap_us, "PSSENSE_CLOCK_OFFSET_SNAP_US", 0)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -460,7 +461,20 @@ pssense_add_clock_offset_sample(struct pssense_device *pssense, double offset_ns
 
 		// Smooth: limit rate of change to ±2500ns (±2.5µs) per sample.
 		double delta = pssense->timing.timestamp_offset_ns - pssense->timing.filtered_offset_ns;
-		delta = CLAMP(delta, -2500.0, 2500.0);
+
+		/*
+		 * Opt-in (PSSENSE_CLOCK_OFFSET_SNAP_US > 0): jump straight to the max-tracked offset when the
+		 * smoothed one lags it by more than the threshold. The first report can arrive milliseconds late,
+		 * and at ±2.5µs per sample the smoothed offset then creeps for tens of seconds, sliding every
+		 * scheduled LED pulse against the camera exposures by the same amount.
+		 */
+		long snap_us = debug_get_num_option_pssense_clock_offset_snap_us();
+		if (snap_us > 0 && fabs(delta) > (double)snap_us * 1000.0) {
+			PSSENSE_INFO(pssense, "CLOCK_OFFSET side=%c event=snap delta_us=%.1f",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', delta / 1000.0);
+		} else {
+			delta = CLAMP(delta, -2500.0, 2500.0);
+		}
 
 		pssense->timing.filtered_offset_ns += delta;
 

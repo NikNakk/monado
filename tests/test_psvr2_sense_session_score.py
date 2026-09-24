@@ -59,6 +59,22 @@ class SessionScoreTest(unittest.TestCase):
         self.assertEqual(result["sides"]["R"]["bootstrap"]["scans_failed"], ["wide_peak_below_minimum"])
         self.assertEqual(result["counts"]["dropped_slow_samples"], 1)
 
+    def test_parse_log_measures_clock_offset_creep(self):
+        # Offset creeps 2.5 us per 16.7 ms frame for 1 s, then holds: the slew-limited startup seen on 24 Sep.
+        lines = []
+        for i in range(180):
+            now = 1_000_000_000_000 + i * 16_683_000
+            offset = 50_000_000 + min(i, 60) * 2_500
+            lines.append(
+                f" INFO [x] LED_SCHEDULE side=L now={now} raw_exposure=0 controller_now={now + offset} period_id=20\n"
+            )
+        lines.append(" INFO [x] CLOCK_OFFSET side=L event=snap delta_us=5400.0\n")
+        clock = parse_log(lines)["sides"]["L"]["clock_offset"]
+        self.assertAlmostEqual(clock["creep_us"], 150.0)
+        self.assertAlmostEqual(clock["range_us"], 150.0)
+        self.assertAlmostEqual(clock["settled_s"], 20 * 0.016683, places=3)
+        self.assertEqual(clock["snaps"], 1)
+
     def test_score_session_end_to_end(self):
         with tempfile.TemporaryDirectory() as tmp:
             session = Path(tmp)
