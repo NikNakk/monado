@@ -71,6 +71,12 @@ DataSerializer::write(uint8_t value)
 	throw_if_stream_failed(this->file, "Failed to write dataset file.");
 }
 
+bool
+DataSerializer::atEnd()
+{
+	return this->file.peek() == std::char_traits<char>::eof();
+}
+
 void
 DataSerializer::read(uint8_t &value)
 {
@@ -556,7 +562,7 @@ DatasetReader::DatasetReader(std::string filename) : serializer(filename, false)
 		this->mosaics.push_back(mosaic);
 	}
 
-	while (true) {
+	while (!this->serializer.atEnd()) {
 		try {
 			uint8_t packet_type;
 			this->serializer.read(packet_type);
@@ -601,6 +607,7 @@ DatasetReader::DatasetReader(std::string filename) : serializer(filename, false)
 			}
 			}
 		} catch (const std::exception &e) {
+			this->stop_reason = e.what();
 			break;
 		}
 	}
