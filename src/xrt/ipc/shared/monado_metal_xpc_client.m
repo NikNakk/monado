@@ -32,6 +32,25 @@ monado_metal_xpc_take_texture(uint64_t token, void **out_metal_texture)
 	return (int)xret;
 }
 
+int
+monado_metal_xpc_take_texture_on_device(uint64_t token,
+                                        void *metal_device,
+                                        void **out_metal_texture)
+{
+	if (metal_device == NULL || out_metal_texture == NULL) {
+		return (int)XRT_ERROR_INVALID_ARGUMENT;
+	}
+	void *textures[1] = {NULL};
+	xrt_result_t xret =
+	    ipc_metal_xpc_take_textures_on_device(token, 1, metal_device, textures);
+	if (xret == XRT_SUCCESS) {
+		*out_metal_texture = textures[0];
+	} else {
+		*out_metal_texture = NULL;
+	}
+	return (int)xret;
+}
+
 void
 monado_metal_xpc_release_texture(void *metal_texture)
 {
