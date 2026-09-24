@@ -132,7 +132,13 @@ show a lit ring either, the problem is framing, not timing.
 > slow-left run, all two-controller runs and the right-only run). Their host timing figures (exposure timestamp
 > residuals and ages, controller clock creep and snaps, slow-sample drops) include that load. That probably
 > includes the 1 ms/s clock excursion at 47–60 s in `231910`. The illumination passes in those runs held despite
-> it. The afternoon sessions (17:46–18:05) had no load reported. Record future runs without background builds
+> it. Whether the afternoon sessions (17:46–18:05) had background load is unknown.
+>
+> The logs can't separate the two cases. Late exposures (schedule age over 30 ms) track the tracker's own slow-sample
+> drops, not the background build: `224609` (build running, 1504 drops) had 0.1% late with p99 26 ms, while
+> `180557` (afternoon, 5240 drops) had 22.5% late with p99 110 ms and `231910` (build, 9756 drops) 9.5% with p99
+> 47 ms. **The tracker's own CPU use is the largest measured timing disturbance**, so bounding its cost (plan item
+> 3) is also the main timing-robustness fix. Record future runs without background builds
 > unless the run is a deliberate stress test, and note the load in the session note.
 >
 > `20260924-175814-bootstrap-static-left` is a failed start (no Sense controller connected, exit status 1, no data);
