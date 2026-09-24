@@ -32,6 +32,7 @@
 	NSMutableDictionary *_countsByToken;
 	NSMutableDictionary *_eventsByToken;
 	NSMutableDictionary *_ownersByToken;
+	NSMutableSet *_claimableTextureTokens;
 }
 
 - (BOOL)storeTextureHandle:(MTLSharedTextureHandle *)handle
@@ -78,12 +79,14 @@ current_xpc_pid(void)
 		_countsByToken = [[NSMutableDictionary alloc] init];
 		_eventsByToken = [[NSMutableDictionary alloc] init];
 		_ownersByToken = [[NSMutableDictionary alloc] init];
+		_claimableTextureTokens = [[NSMutableSet alloc] init];
 	}
 	return self;
 }
 
 - (void)dealloc
 {
+	[_claimableTextureTokens release];
 	[_ownersByToken release];
 	[_eventsByToken release];
 	[_countsByToken release];
@@ -152,7 +155,15 @@ current_xpc_pid(void)
 	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
 	MTLSharedTextureHandle *handle = nil;
 	[_lock lock];
-	if ([self token:key belongsToPIDLocked:ownerPID allowClaim:NO]) {
+	BOOL permitted = [self token:key belongsToPIDLocked:ownerPID allowClaim:NO];
+	if (!permitted && [_claimableTextureTokens containsObject:key]) {
+		// Claim exactly once for the receiving process. From this point on the
+		// token is PID-scoped again, now to the recipient rather than publisher.
+		[_ownersByToken setObject:[NSNumber numberWithInt:ownerPID] forKey:key];
+		[_claimableTextureTokens removeObject:key];
+		permitted = YES;
+	}
+	if (permitted) {
 		NSNumber *count = [_countsByToken objectForKey:key];
 		NSMutableDictionary *images = [_handlesByToken objectForKey:key];
 		if (count != nil && index < count.unsignedIntValue) {
@@ -209,6 +220,7 @@ current_xpc_pid(void)
 		[_countsByToken removeObjectForKey:key];
 		[_eventsByToken removeObjectForKey:key];
 		[_ownersByToken removeObjectForKey:key];
+		[_claimableTextureTokens removeObject:key];
 	}
 	[_lock unlock];
 }
@@ -235,6 +247,7 @@ current_xpc_pid(void)
 		[_countsByToken removeObjectForKey:key];
 		[_eventsByToken removeObjectForKey:key];
 		[_ownersByToken removeObjectForKey:key];
+		[_claimableTextureTokens removeObject:key];
 	}
 	NSUInteger count = keys.count;
 	[_lock unlock];
@@ -275,6 +288,32 @@ current_xpc_pid(void)
 	}
 	reply(handle);
 	[handle release];
+}
+
+- (void)markTextureTokenClaimable:(uint64_t)token
+                            reply:(void (^)(BOOL success))reply
+{
+	pid_t pid = current_xpc_pid();
+	if (!token_is_valid(token) || pid <= 0) {
+		reply(NO);
+		return;
+	}
+
+	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
+	BOOL success = NO;
+	[_lock lock];
+	if ([self token:key belongsToPIDLocked:pid allowClaim:NO] &&
+	    [_handlesByToken objectForKey:key] != nil) {
+		[_claimableTextureTokens addObject:key];
+		success = YES;
+	}
+	[_lock unlock];
+
+	if (!success) {
+		U_LOG_W("Rejected mark-claimable Metal token=0x%016llx for XPC pid=%d",
+		        (unsigned long long)token, (int)pid);
+	}
+	reply(success);
 }
 
 - (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
