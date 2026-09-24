@@ -28,6 +28,14 @@ extern "C" {
 #define IPC_METAL_XPC_TOKEN_MAGIC UINT64_C(0x000000004d000000)
 #define IPC_METAL_XPC_TOKEN_MASK UINT64_C(0xffffffffff000000)
 
+/*
+ * Cross-process claimable texture tokens are not constrained by the legacy
+ * uint32_t image metadata transport. Reserve a separate namespace with 56 bits
+ * of entropy so the token itself is a strong one-shot capability.
+ */
+#define IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC UINT64_C(0xc700000000000000)
+#define IPC_METAL_XPC_EXTERNAL_TOKEN_MASK UINT64_C(0xff00000000000000)
+
 #ifdef XRT_OS_OSX
 
 /*!
