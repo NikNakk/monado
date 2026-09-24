@@ -80,6 +80,9 @@ def parse_log(lines) -> dict:
             kv = parse_kv(line.split("PSSENSE_TIMING", 1)[1])
             host, phase = to_float(kv.get("host_now_ns")), kv.get("phase")
             if host is not None and phase is not None:
+                # An empty blink mask (PSSENSE_LED_BOOTSTRAP_YIELD_MASK) is "off" too.
+                if kv.get("masks") == "00000000":
+                    phase = "5"
                 commands[kv.get("side", "?")].append((host, phase))
         if "LED_BOOTSTRAP" in line:
             kv = parse_kv(line.split("LED_BOOTSTRAP", 1)[1])
@@ -134,7 +137,8 @@ def parse_log(lines) -> dict:
 
 
 def lit_while_off(commands: list[tuple[float, str]], candidates: list[float], settle_ms: float = 400.0) -> dict | None:
-    """Pose candidates for a controller exposed while it had been commanded LED_ALL_OFF (phase 5) for at least
+    """Pose candidates for a controller exposed while it had been commanded dark (LED_ALL_OFF, phase 5, or an empty
+    blink mask) for at least
     settle_ms. A controller that obeys produces none; on 24 Sep the right Sense stayed lit through minutes of
     off commands, which poisoned every bootstrap baseline.
     """

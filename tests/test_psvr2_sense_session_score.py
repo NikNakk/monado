@@ -93,6 +93,12 @@ class SessionScoreTest(unittest.TestCase):
         self.assertEqual(off["candidates"], 120 - 60 - 24)
         self.assertEqual(off["seconds"], [1])
 
+        masked = [
+            line.replace("phase=5", "phase=1 masks=00000000").replace("phase=1\n", "phase=1 masks=ffffffff\n")
+            for line in lines
+        ]
+        self.assertEqual(parse_log(masked)["sides"]["R"]["lit_while_off"]["candidates"], 120 - 60 - 24)
+
     def test_score_session_end_to_end(self):
         with tempfile.TemporaryDirectory() as tmp:
             session = Path(tmp)

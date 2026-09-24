@@ -78,6 +78,9 @@ because the scan covers the whole period. With the variable unset, behaviour is 
 
 Log lines use the form `LED_BOOTSTRAP side=L event=...`. The events are `baseline`, `scan_start`, `step`,
 `wide_result`, `locked`, `locked_status` (every 300 exposures), `scan_failed` and `lost`. The
+`PSSENSE_LED_BOOTSTRAP_YIELD_MASK=1` (experimental) makes a controller that should be dark (yielding, idle or in
+its own baseline) stay in PRESCAN with an empty blink mask (`masks=00000000`) instead of switching to
+`LED_ALL_OFF`, to avoid the two-controller fault described under the hardware results. The
 `psvr2-constellation` CSV gains the columns `led_bootstrap_state` (0 idle, 1 wide, 2 narrow, 3 locked, 4 baseline),
 `led_bootstrap_fudge_us`, `led_bootstrap_pulse_us`, `led_bootstrap_scans` and `led_bootstrap_locks`.
 
