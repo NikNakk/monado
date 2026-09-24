@@ -4,6 +4,7 @@
 #include "catch_amalgamated.hpp"
 #include "t_led_phase_bootstrap.h"
 
+#include <array>
 #include <cmath>
 #include <deque>
 
@@ -25,6 +26,8 @@ struct Sim
 	uint32_t dark_blobs = 1;
 	bool visible = true;
 	uint32_t visible_cameras = 4;
+	//! Blobs each camera sees from other light sources (windows, lamps) whatever the LEDs do.
+	std::array<uint32_t, 4> background{};
 
 	std::deque<std::pair<int64_t, int64_t>> pending_outputs{}; // (fudge, blink) queued for delayed application
 	int64_t applied_fudge = 0;
@@ -73,7 +76,8 @@ struct Sim
 				reports.pop_front();
 				for (uint32_t c = 0; c < 4; c++) {
 					bool cam_lit = rlit && c < visible_cameras;
-					t_led_phase_bootstrap_push_blob_count(&b, c, rts, cam_lit ? lit_blobs : dark_blobs);
+					t_led_phase_bootstrap_push_blob_count(&b, c, rts,
+					                                      background[c] + (cam_lit ? lit_blobs : dark_blobs));
 				}
 			}
 		}
@@ -111,7 +115,9 @@ TEST_CASE("LED phase bootstrap locks the pulse centre onto the exposure centre")
 		t_led_phase_bootstrap_init(&b, &options);
 		REQUIRE(t_led_phase_bootstrap_ready_to_scan(&b));
 		t_led_phase_bootstrap_start(&b, kPeriod);
-		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN);
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_BASELINE);
+		REQUIRE_FALSE(t_led_phase_bootstrap_leds_enabled(&b));
+		REQUIRE(t_led_phase_bootstrap_is_scanning(&b));
 
 		Sim sim{.latency_ns = latency};
 		uint32_t frame = 0;
@@ -129,6 +135,37 @@ TEST_CASE("LED phase bootstrap locks the pulse centre onto the exposure centre")
 		sim.run(b, 1000, frame);
 		CHECK(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
 		CHECK(b.locks_acquired == 1);
+	}
+}
+
+TEST_CASE("LED phase bootstrap measures against each camera's background")
+{
+	// 24 Sep slow-movement run: windows put 3-7 blobs in cameras 0 and 2 with the LEDs dark, which made those
+	// cameras count as lit at every phase and widened the measured lit window to 5.4 ms.
+	for (int64_t latency : {int64_t(0), int64_t(14000000)}) {
+		CAPTURE(latency);
+		t_led_phase_bootstrap_options options = test_options();
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+
+		Sim sim{.latency_ns = latency};
+		sim.background = {6, 0, 7, 0};
+		uint32_t frame = 0;
+		sim.run(b, 2000, frame);
+
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		CHECK(b.baseline_blobs[0] == 7);
+		CHECK(b.baseline_blobs[1] == 1);
+		CHECK(b.baseline_blobs[2] == 8);
+		int64_t pulse_centre = b.fudge_offset_ns + latency + b.blink_ns / 2;
+		int64_t exposure_centre = sim.exposure_start_ns + sim.exposure_ns / 2;
+		CHECK(circular_distance(pulse_centre, exposure_centre) <= options.narrow_step_ns);
+
+		// Loss must still be detected: the background alone is not a lit controller.
+		sim.visible = false;
+		sim.run(b, options.lost_frames + 50, frame);
+		CHECK(b.state != T_LED_PHASE_BOOTSTRAP_LOCKED);
 	}
 }
 
@@ -157,8 +194,8 @@ TEST_CASE("LED phase bootstrap fails and backs off when the controller is never 
 	Sim sim{.latency_ns = 0};
 	sim.visible = false;
 	uint32_t frame = 0;
-	// 17 wide steps of 20 exposures each.
-	sim.run(b, 350, frame);
+	// One dark baseline step, then 17 wide steps, of 20 exposures each.
+	sim.run(b, 370, frame);
 
 	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_IDLE);
 	REQUIRE_FALSE(b.have_lock);
