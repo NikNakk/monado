@@ -104,6 +104,10 @@ if(APPLE)
 	set_target_properties(
 		monado_metal_xpc_client PROPERTIES OUTPUT_NAME monado_metal_xpc_client
 		)
+	install(
+		TARGETS monado_metal_xpc_client
+		LIBRARY DESTINATION lib
+		)
 
 	if(XRT_FEATURE_SERVICE)
 		target_sources(
