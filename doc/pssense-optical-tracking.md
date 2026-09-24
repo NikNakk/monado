@@ -78,6 +78,16 @@ because the scan covers the whole period. With the variable unset, behaviour is 
 
 Log lines use the form `LED_BOOTSTRAP side=L event=...`. The events are `baseline`, `scan_start`, `step`,
 `wide_result`, `locked`, `locked_status` (every 300 exposures), `scan_failed` and `lost`. The
+`PSSENSE_LED_BOOTSTRAP_TRACK=1` (experimental) adds closed-loop phase tracking while locked. Every 120
+exposures (`PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES`) the controller takes the scan token, measures the mean blob count
+at its lock (12 exposures), then with the pulse moved earlier and later by 60% of half the measured lit span (each
+settling 24 exposures, then measuring 8). The normalised imbalance (late − early) / ring size at lock time moves
+the lock towards the brighter side (gain 1.0, at most 400 µs, deadband 0.1). Blob counts rather than the lit test
+are compared, so another controller's steady light cancels out. A cycle takes about 3.4 s. Log lines are
+`event=track result=moved|centred|ring_too_small`, and `score.txt` summarises probes, moves and the net shift. In
+the unit simulator, with the latency drifting 60 µs/s for 50 s (3 ms in all, 1.5× the worst drift seen on hardware),
+tracking keeps 91–92% of frames lit against 46–47% open loop. With no drift it stays put at 100% lit.
+
 `PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1` (experimental) keeps a locked controller lit while another scans, instead of
 yielding. Its steady light is absorbed into the scanning controller's dark baseline. A controller without a
 lock still stays dark. (An earlier empty-blink-mask yield did not darken a lit controller; see the hardware

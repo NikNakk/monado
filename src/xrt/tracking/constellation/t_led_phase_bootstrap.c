@@ -242,6 +242,22 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 	b->locked_lit_reports = 0;
 	set_output(b, lock_fudge, b->options.lock_blink_ns);
 
+	// Half the span of lock-pulse starts that light the exposure, from the narrow run plus the wider pulse.
+	time_duration_ns half_span = (b->lit_end_ns - b->lit_start_ns + b->options.narrow_step_ns +
+	                              b->options.lock_blink_ns - b->options.narrow_blink_ns) /
+	                             2;
+	b->lock_fudge_ns = b->fudge_offset_ns;
+	float background = 0.0f;
+	for (uint32_t c = 0; c < b->options.camera_count; c++) {
+		background += (float)b->baseline_blobs[c];
+	}
+	b->ring_blobs = b->steps[peak_index].mean_blobs / (float)MAX(b->options.camera_count, 1u) -
+	                background / (float)MAX(b->options.camera_count, 1u);
+	b->track_offset_ns = (time_duration_ns)((float)half_span * b->options.track_probe_fraction);
+	b->track_stage = T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
+	b->track_countdown = 0;
+	b->track_wants_probe = false;
+
 	LOG_I(b,
 	      "LED_BOOTSTRAP side=%c event=locked lit_start_us=%.1f lit_end_us=%.1f window_us=%.1f centre_us=%.1f "
 	      "lock_fudge_us=%.1f lock_pulse_us=%.1f peak=%.3f",
@@ -250,6 +266,98 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 	      (double)(b->lit_end_ns - b->lit_start_ns + b->options.narrow_blink_ns) / 1000.0,
 	      (double)t_led_phase_bootstrap_wrap(centre, b->period_ns) / 1000.0, (double)b->fudge_offset_ns / 1000.0,
 	      (double)b->options.lock_blink_ns / 1000.0, peak);
+}
+
+static void
+begin_track_stage(struct t_led_phase_bootstrap *b, enum t_led_phase_bootstrap_track_stage stage)
+{
+	b->track_stage = stage;
+	b->track_blob_sum = 0;
+	b->track_reports = 0;
+	reset_step_window(b);
+
+	switch (stage) {
+	case T_LED_PHASE_BOOTSTRAP_TRACK_EARLY:
+		set_output(b, b->lock_fudge_ns - b->track_offset_ns, b->options.lock_blink_ns);
+		break;
+	case T_LED_PHASE_BOOTSTRAP_TRACK_LATE:
+		set_output(b, b->lock_fudge_ns + b->track_offset_ns, b->options.lock_blink_ns);
+		break;
+	default: break;
+	}
+}
+
+static void
+finish_track(struct t_led_phase_bootstrap *b)
+{
+	float ref = b->track_means[0];
+	float early = b->track_means[1];
+	float late = b->track_means[2];
+
+	// Normalise by the ring's size at lock time, not by the current background: another controller that lit
+	// up after this one's baseline would otherwise make the ring look larger and shrink every correction.
+	float ring = b->ring_blobs;
+	float imbalance = 0.0f;
+	time_duration_ns shift = 0;
+	const char *result = "centred";
+	if (ring < b->options.track_min_ring_blobs) {
+		result = "ring_too_small";
+	} else {
+		imbalance = (late - early) / ring;
+		imbalance = imbalance > 1.0f ? 1.0f : (imbalance < -1.0f ? -1.0f : imbalance);
+		if (imbalance > b->options.track_deadband || imbalance < -b->options.track_deadband) {
+			shift = (time_duration_ns)(b->options.track_gain * imbalance * (float)b->track_offset_ns);
+			shift = CLAMP(shift, -b->options.track_max_step_ns, b->options.track_max_step_ns);
+			result = "moved";
+		}
+	}
+
+	b->track_cycles++;
+	if (shift != 0) {
+		b->track_moves++;
+		b->track_total_shift_ns += shift;
+		b->lock_fudge_ns = t_led_phase_bootstrap_wrap(b->lock_fudge_ns + shift, b->period_ns);
+	}
+
+	LOG_I(b,
+	      "LED_BOOTSTRAP side=%c event=track result=%s ref=%.2f early=%.2f late=%.2f ring=%.2f "
+	      "imbalance=%.3f shift_us=%.1f lock_fudge_us=%.1f offset_us=%.1f total_shift_us=%.1f",
+	      b->options.label, result, ref, early, late, ring, imbalance, (double)shift / 1000.0,
+	      (double)b->lock_fudge_ns / 1000.0, (double)b->track_offset_ns / 1000.0,
+	      (double)b->track_total_shift_ns / 1000.0);
+
+	b->track_stage = T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
+	b->track_countdown = 0;
+	b->track_wants_probe = false;
+	set_output(b, b->lock_fudge_ns, b->options.lock_blink_ns);
+}
+
+static void
+finish_track_stage(struct t_led_phase_bootstrap *b)
+{
+	uint32_t index = (uint32_t)b->track_stage - 1;
+	b->track_means[index] = b->track_reports ? (float)b->track_blob_sum / (float)b->track_reports : 0.0f;
+
+	switch (b->track_stage) {
+	case T_LED_PHASE_BOOTSTRAP_TRACK_REF: begin_track_stage(b, T_LED_PHASE_BOOTSTRAP_TRACK_EARLY); break;
+	case T_LED_PHASE_BOOTSTRAP_TRACK_EARLY: begin_track_stage(b, T_LED_PHASE_BOOTSTRAP_TRACK_LATE); break;
+	default: finish_track(b); break;
+	}
+}
+
+static bool
+window_accepts(struct t_led_phase_bootstrap *b, int64_t exposure_timestamp_ns)
+{
+	if (b->window_pending) {
+		// Reports lag exposures by far less than the settle time, so this frame was exposed after the new
+		// setting took effect. Half a period of slack keeps the other cameras' copies of it in the window.
+		b->window_start_ns = exposure_timestamp_ns - b->period_ns / 2;
+		b->window_end_ns = b->window_start_ns + (int64_t)b->options.measure_frames * b->period_ns;
+		b->window_open = true;
+		b->window_pending = false;
+	}
+	return b->window_open && exposure_timestamp_ns >= b->window_start_ns &&
+	       exposure_timestamp_ns < b->window_end_ns;
 }
 
 static void
@@ -353,6 +461,12 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .lost_frames = 300,
 	    .failed_backoff_frames = 60,
 	    .max_failed_backoff_frames = 600,
+	    .track_interval_frames = 0,
+	    .track_probe_fraction = 0.6f,
+	    .track_gain = 1.0f,
+	    .track_max_step_ns = 400 * U_TIME_1US_IN_NS,
+	    .track_deadband = 0.1f,
+	    .track_min_ring_blobs = 1.0f,
 	};
 }
 
@@ -379,6 +493,8 @@ t_led_phase_bootstrap_start(struct t_led_phase_bootstrap *b, time_duration_ns pe
 
 	// Measure the background with the LEDs dark before scanning.
 	b->state = T_LED_PHASE_BOOTSTRAP_BASELINE;
+	b->track_stage = T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
+	b->track_wants_probe = false;
 	memset(b->baseline_blobs, 0, sizeof(b->baseline_blobs));
 	memset(b->baseline_reported, 0, sizeof(b->baseline_reported));
 	memset(b->baseline_samples, 0, sizeof(b->baseline_samples));
@@ -393,6 +509,18 @@ t_led_phase_bootstrap_stop(struct t_led_phase_bootstrap *b)
 		b->state = T_LED_PHASE_BOOTSTRAP_IDLE;
 		b->output_generation++;
 	}
+	b->track_stage = T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
+	b->track_wants_probe = false;
+}
+
+void
+t_led_phase_bootstrap_begin_probe(struct t_led_phase_bootstrap *b)
+{
+	if (!t_led_phase_bootstrap_wants_probe(b)) {
+		return;
+	}
+	b->track_wants_probe = false;
+	begin_track_stage(b, T_LED_PHASE_BOOTSTRAP_TRACK_REF);
 }
 
 bool
@@ -414,6 +542,26 @@ t_led_phase_bootstrap_push_exposure(struct t_led_phase_bootstrap *b, int64_t exp
 			      "LED_BOOTSTRAP side=%c event=lost frames_since_lit=%u locked_lit=%u/%u, rescanning",
 			      b->options.label, b->frames_since_lit, b->locked_lit_reports, b->locked_reports);
 			t_led_phase_bootstrap_start(b, b->period_ns);
+			break;
+		}
+		if (b->track_stage == T_LED_PHASE_BOOTSTRAP_TRACK_NONE) {
+			if (b->options.track_interval_frames > 0 && !b->track_wants_probe &&
+			    ++b->track_countdown >= b->options.track_interval_frames) {
+				b->track_wants_probe = true;
+			}
+			break;
+		} else {
+			// The reference window measures the unchanged lock, so it needs no settling.
+			uint32_t settle = b->track_stage == T_LED_PHASE_BOOTSTRAP_TRACK_REF
+			                      ? 0
+			                      : b->options.baseline_settle_frames;
+			b->exposures_in_step++;
+			if (b->exposures_in_step == settle + 1) {
+				b->window_pending = true;
+			}
+			if (b->exposures_in_step >= settle + b->options.measure_frames + b->options.grace_frames) {
+				finish_track_stage(b);
+			}
 		}
 		break;
 
@@ -456,24 +604,17 @@ t_led_phase_bootstrap_push_blob_count(struct t_led_phase_bootstrap *b,
 			b->locked_lit_reports++;
 			b->frames_since_lit = 0;
 		}
+		if (t_led_phase_bootstrap_is_probing(b) && window_accepts(b, exposure_timestamp_ns)) {
+			b->track_blob_sum += blob_count;
+			b->track_reports++;
+		}
 		return;
 	}
 
 	if (!t_led_phase_bootstrap_is_scanning(b)) {
 		return;
 	}
-	if (b->window_pending) {
-		// Reports lag exposures by far less than the settle time, so this frame was exposed after the new
-		// setting took effect. Half a period of slack keeps the other cameras' copies of it in the window.
-		b->window_start_ns = exposure_timestamp_ns - b->period_ns / 2;
-		b->window_end_ns = b->window_start_ns + (int64_t)b->options.measure_frames * b->period_ns;
-		b->window_open = true;
-		b->window_pending = false;
-	}
-	if (!b->window_open) {
-		return;
-	}
-	if (exposure_timestamp_ns < b->window_start_ns || exposure_timestamp_ns >= b->window_end_ns) {
+	if (!window_accepts(b, exposure_timestamp_ns)) {
 		return;
 	}
 

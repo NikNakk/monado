@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <deque>
 
 
@@ -28,6 +29,12 @@ struct Sim
 	uint32_t visible_cameras = 4;
 	//! Blobs each camera sees from other light sources (windows, lamps) whatever the LEDs do.
 	std::array<uint32_t, 4> background{};
+	//! Latency change per frame, as the host clock mappings wander.
+	int64_t latency_drift_ns_per_frame = 0;
+	//! Grant tracking probes as soon as they are wanted, as the driver does when no other controller scans.
+	bool grant_probes = true;
+	uint32_t frames_run = 0;
+	uint32_t frames_lit = 0;
 
 	std::deque<std::pair<int64_t, int64_t>> pending_outputs{}; // (fudge, blink) queued for delayed application
 	int64_t applied_fudge = 0;
@@ -67,8 +74,15 @@ struct Sim
 				pending_outputs.pop_front();
 			}
 
-			reports.emplace_back(ts, lit(applied_fudge, applied_blink));
+			bool frame_lit = lit(applied_fudge, applied_blink);
+			frames_run++;
+			frames_lit += frame_lit ? 1 : 0;
+			reports.emplace_back(ts, frame_lit);
 			t_led_phase_bootstrap_push_exposure(&b, ts);
+			if (grant_probes && t_led_phase_bootstrap_wants_probe(&b)) {
+				t_led_phase_bootstrap_begin_probe(&b);
+			}
+			latency_ns += latency_drift_ns_per_frame;
 
 			// Blob reports lag the exposure event.
 			while (reports.size() > report_delay_frames) {
@@ -212,6 +226,85 @@ TEST_CASE("LED phase bootstrap backs off longer after each consecutive failure")
 		sim.run(b, expect, frame);
 	}
 	CHECK(b.consecutive_failures == 6);
+}
+
+namespace {
+
+//! Locks, then drifts the latency for @p frames and returns the fraction of those frames that were lit.
+float
+run_drifting_lock(t_led_phase_bootstrap &b, Sim &sim, int64_t drift_ns_per_frame, uint32_t frames)
+{
+	uint32_t frame = 0;
+	t_led_phase_bootstrap_start(&b, kPeriod);
+	sim.run(b, 1000, frame);
+	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	sim.latency_drift_ns_per_frame = drift_ns_per_frame;
+	sim.frames_run = 0;
+	sim.frames_lit = 0;
+	sim.run(b, frames, frame);
+	return (float)sim.frames_lit / (float)sim.frames_run;
+}
+
+} // namespace
+
+TEST_CASE("LED phase bootstrap tracking follows a drifting lit window")
+{
+	// 24 Sep keep-lock run: the host clock mappings wandered ~1 ms in 25 s and the open-loop locks faded
+	// from 81% to 45% lit. Here the latency drifts 60 us/s (1 us per frame) for 50 s, 3 ms in all.
+	for (int64_t drift : {int64_t(1000), int64_t(-1000)}) {
+		CAPTURE(drift);
+
+		t_led_phase_bootstrap_options open_loop = test_options();
+		t_led_phase_bootstrap b_open;
+		t_led_phase_bootstrap_init(&b_open, &open_loop);
+		Sim sim_open{.latency_ns = 5000000};
+		float open_fraction = run_drifting_lock(b_open, sim_open, drift, 3000);
+
+		t_led_phase_bootstrap_options tracked = test_options();
+		tracked.track_interval_frames = 120;
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &tracked);
+		Sim sim{.latency_ns = 5000000};
+		float tracked_fraction = run_drifting_lock(b, sim, drift, 3000);
+
+		CHECK(open_fraction < 0.5f);
+		CHECK(tracked_fraction > 0.9f);
+		CHECK(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		CHECK(b.locks_acquired == 1);
+		CHECK(b.track_moves > 0);
+		// The lock followed the drift: 3 ms of latency means the fudge moved about -3 ms.
+		CHECK(std::llabs(b.track_total_shift_ns + drift * 3000) < 700000);
+	}
+}
+
+TEST_CASE("LED phase bootstrap tracking holds still without drift and ignores another controller's light")
+{
+	t_led_phase_bootstrap_options options = test_options();
+	options.track_interval_frames = 120;
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+	Sim sim{.latency_ns = 9000000};
+	uint32_t frame = 0;
+	t_led_phase_bootstrap_start(&b, kPeriod);
+	sim.run(b, 1000, frame);
+	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	int64_t lock = b.lock_fudge_ns;
+
+	// A second controller locks and stays lit after this one's baseline was measured.
+	sim.background = {6, 7, 6, 0};
+	sim.frames_run = 0;
+	sim.frames_lit = 0;
+	sim.run(b, 2000, frame);
+	CHECK(b.track_cycles >= 5);
+	CHECK(circular_distance(b.lock_fudge_ns, lock) <= options.narrow_step_ns);
+	CHECK((float)sim.frames_lit / (float)sim.frames_run > 0.95f);
+
+	// It still follows drift with that light present.
+	sim.latency_drift_ns_per_frame = 1000;
+	sim.frames_run = 0;
+	sim.frames_lit = 0;
+	sim.run(b, 3000, frame);
+	CHECK((float)sim.frames_lit / (float)sim.frames_run > 0.85f);
 }
 
 TEST_CASE("LED phase bootstrap tolerates cameras that cannot see the controller")

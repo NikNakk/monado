@@ -85,6 +85,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lock_period_id, "PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", 20)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_clock_offset_snap_us, "PSSENSE_CLOCK_OFFSET_SNAP_US", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -1338,12 +1340,20 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 
 	(void)t_led_phase_bootstrap_push_exposure(b, exposure_timestamp_ns);
 
+	// A tracking probe changes this controller's light, so like a scan it needs the LEDs to itself.
+	if (t_led_phase_bootstrap_wants_probe(b) && (owner == me || (owner == 0 && xrt_atomic_s32_cmpxchg(
+	                                                                              &pssense_led_bootstrap_owner,
+	                                                                              0, me) == 0))) {
+		owner = me;
+		t_led_phase_bootstrap_begin_probe(b);
+	}
+
 	if (t_led_phase_bootstrap_is_scanning(b) && owner != me) {
 		// A locked controller lost its LEDs and wants to rescan; it needs the token first.
 		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) != 0) {
 			t_led_phase_bootstrap_stop(b);
 		}
-	} else if (!t_led_phase_bootstrap_is_scanning(b) && owner == me) {
+	} else if (!t_led_phase_bootstrap_is_scanning(b) && !t_led_phase_bootstrap_is_probing(b) && owner == me) {
 		pssense_led_bootstrap_release(pssense);
 	}
 
@@ -2353,6 +2363,10 @@ pssense_create(struct xrt_prober *xp,
 		long lock_period_id = debug_get_num_option_pssense_led_bootstrap_lock_period_id();
 		lock_period_id = CLAMP(lock_period_id, 1, MAX_PERIOD_ID);
 		bootstrap_options.lock_blink_ns = PERIOD_ID_TO_DURATION_NS(lock_period_id);
+		if (debug_get_bool_option_pssense_led_bootstrap_track()) {
+			long frames = debug_get_num_option_pssense_led_bootstrap_track_frames();
+			bootstrap_options.track_interval_frames = frames > 0 ? (uint32_t)frames : 120;
+		}
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
 		// Force the first update to program the bootstrap's output, replacing any refinement sample.
 		pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
