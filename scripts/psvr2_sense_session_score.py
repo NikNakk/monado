@@ -66,6 +66,8 @@ def parse_log(lines) -> dict:
     fused_cameras: dict[str, Counter] = defaultdict(Counter)
     reacquire: Counter = Counter()
     imu_aligned: dict[str, list] = defaultdict(list)
+    clock: dict[str, list] = defaultdict(list)
+    snaps: Counter = Counter()
     counts = Counter()
 
     for raw in lines:
@@ -74,6 +76,13 @@ def parse_log(lines) -> dict:
             kv = parse_kv(line.split("LED_BOOTSTRAP", 1)[1])
             side = kv.get("side", "?")
             bootstrap[side].append(kv)
+        elif "LED_SCHEDULE" in line:
+            kv = parse_kv(line.split("LED_SCHEDULE", 1)[1])
+            now, controller_now = to_float(kv.get("now")), to_float(kv.get("controller_now"))
+            if now is not None and controller_now is not None and controller_now >= 0:
+                clock[kv.get("side", "?")].append((now, controller_now - now))
+        elif "CLOCK_OFFSET" in line and "event=snap" in line:
+            snaps[parse_kv(line.split("CLOCK_OFFSET", 1)[1]).get("side", "?")] += 1
         elif "CONSTELLATION_CANDIDATE" in line:
             kv = parse_kv(line.split("CONSTELLATION_CANDIDATE", 1)[1])
             side = kv.get("side", "?")
@@ -93,7 +102,7 @@ def parse_log(lines) -> dict:
         if "Dropping fast sample" in line:
             counts["dropped_fast_samples"] += 1
 
-    sides = sorted(set(bootstrap) | set(candidates) | set(fused_cameras) | set(reacquire))
+    sides = sorted(set(bootstrap) | set(candidates) | set(fused_cameras) | set(reacquire) | set(clock))
     out = {"sides": {}, "counts": dict(counts)}
     for side in sides:
         out["sides"][side] = {
@@ -102,8 +111,29 @@ def parse_log(lines) -> dict:
             "fused_by_camera_count": dict(sorted(fused_cameras[side].items())),
             "reacquisitions": reacquire[side],
             "imu_aligned_delta_deg": describe(imu_aligned[side]),
+            "clock_offset": summarise_clock(clock.get(side, []), snaps[side]),
         }
     return out
+
+
+def summarise_clock(samples: list[tuple[float, float]], snaps: int, settle_us: float = 100.0) -> dict | None:
+    """How far the scheduling clock offset (controller minus host) moved during the run, and when it settled.
+
+    Every microsecond it creeps slides the scheduled LED pulse against the camera exposures by the same amount.
+    """
+    if not samples:
+        return None
+    t0, first = samples[0]
+    offsets = [o for _, o in samples]
+    final = statistics.median(offsets[-120:])
+    outside = [i for i, o in enumerate(offsets) if abs(o - final) > settle_us * 1000.0]
+    settled_s = 0.0 if not outside else (samples[min(outside[-1] + 1, len(samples) - 1)][0] - t0) / 1e9
+    return {
+        "creep_us": (final - first) / 1000.0,
+        "range_us": (max(offsets) - min(offsets)) / 1000.0,
+        "settled_s": settled_s,
+        "snaps": snaps,
+    }
 
 
 def summarise_bootstrap(events: list[dict]) -> dict:
@@ -390,6 +420,12 @@ def render_text(result: dict) -> str:
         lines.append(f"    candidates by camera: {s['candidates_by_camera'] or '-'}")
         lines.append(f"    fused poses by camera count: {s['fused_by_camera_count'] or '-'}")
         lines.append(f"    reacquisitions: {s['reacquisitions']}")
+        c = s.get("clock_offset")
+        if c:
+            lines.append(
+                f"    clock offset: creep {fmt(c['creep_us'], 1)} us (range {fmt(c['range_us'], 1)} us), "
+                f"settled within 100 us at {fmt(c['settled_s'], 1)} s, snaps {c['snaps']}"
+            )
         if s["imu_aligned_delta_deg"]:
             lines.append(f"    optical vs aligned IMU deg: median {fmt(s['imu_aligned_delta_deg']['median'])}")
     counts = result.get("log", {}).get("counts", {})
