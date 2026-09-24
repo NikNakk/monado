@@ -293,6 +293,23 @@ its LED commands.**
   `224851` R 665 in 11 s, `225515` R 4731 in 25 s, every left run 0–1. A flagged run's baselines and scans
   must not be used.
 
+**2026-09-24 23:00, `sessions/20260924-230002-bootstrap-both-static`** (both still, full ring; right controller
+power-cycled first; commit `3c1e722ac`). **The right-controller fault reproduced.**
+
+- Left: baseline `1,1,4,1`, locked at 13.4 s at fudge 15475 µs (window 1450 µs), 1.00 lit while allowed.
+  Lock positions so far: 15350, 15850, 15350, 15975, 15975, 15475 µs.
+- Right: its first baseline was clean (`2,1,3,1`). Wide steps 1–2 (fudge 0 and 1000 µs) were dark as
+  expected. **From step 3 (fudge 2000 µs, about 14.6 s) it was lit in every frame (about 38 blobs across four
+  cameras) at every phase and under `LED_ALL_OFF`.** The scorer flagged 620 candidates while commanded off.
+  Its later baselines were `10,9,9,10` and similar, so every scan failed.
+- The user saw the right controller's **status LED go off at about 20–30 s**.
+- The link stayed healthy: the right controller's input reports kept arriving every ~17 ms (clock sample age
+  ≤ 31 ms throughout, the same as the left), and its output reports went out normally. Nothing in the
+  commands changed at step 3 (phase 1, `period_id` 42, schedule 50–70 ms ahead, sequence number
+  advancing). The left controller receives the same command types and has never done this.
+- Working hypothesis: a controller-side fallback or fault mode (LEDs always on, status LED off). The
+  trigger is unknown. The next run isolates the right controller alone.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
