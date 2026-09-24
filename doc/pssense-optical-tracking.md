@@ -428,6 +428,24 @@ illumination passes.** Both status LEDs stayed on.
 static with `KEEP_LOCK` + `TRACK`. Still to confirm: two controllers moving, and both options' behaviour
 across restarts.
 
+**2026-09-24 23:36, `sessions/20260924-233615-replay-both-static`** (both still, full ring, keep-lock + tracking,
+no background load, commit `7a5a963d1`, first `.ctd` replay recording with both controllers). **The right-controller
+fault recurred without any yield.**
+
+- Left: 1.00 lit, lock at 15975 µs, 1983 fused poses, exposure residual ±40 µs. Tracking made 3 moves (net −257 µs).
+- Right: baseline `11,10,10,1` (includes the lit left ring). The wide scan found the correct peak (14000–16000 µs,
+  mean blobs 62–65 against ~33 elsewhere). **From narrow step 9 (fudge 15500 µs, 450 µs pulse, 22.5 s) every step
+  had ~60–65 mean blobs**, so the right controller was lit continuously. It then locked on a meaningless 3.45 ms
+  window (fudge 42 µs), and the tracker found it only 3 times. The user saw its status LED go off about halfway
+  through the run.
+- So the fault doesn't need the `LED_ALL_OFF` yield: with keep-lock the right controller was never switched off
+  after lighting. Every occurrence so far (`224851`, `225515`, `230002`, `233615`) is on the right controller, while
+  it was scanning (settings changing every 20 exposures), with the left controller also connected. It hasn't occurred in
+  the right-only run or on the left controller. The triggering commands differ (wide fudge 0, wide 2000 µs, narrow
+  15500 µs).
+- Open question: role (the second controller to scan) or device (this right controller). Test: make the right
+  controller scan first.
+
 ## Joint multi-camera solve (plan item 3)
 
 Why the current tracker fails even with good light: each camera solves on its own (a fast path from
