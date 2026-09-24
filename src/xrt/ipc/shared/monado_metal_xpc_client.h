@@ -17,6 +17,11 @@ monado_metal_xpc_publish_claimable_texture(void *metal_texture,
 __attribute__((visibility("default"))) int
 monado_metal_xpc_take_texture(uint64_t token, void **out_metal_texture);
 
+__attribute__((visibility("default"))) int
+monado_metal_xpc_take_texture_on_device(uint64_t token,
+                                        void *metal_device,
+                                        void **out_metal_texture);
+
 __attribute__((visibility("default"))) void
 monado_metal_xpc_release_texture(void *metal_texture);
 
