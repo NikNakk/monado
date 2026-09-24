@@ -456,7 +456,7 @@ tracking, `PSSENSE_LED_BOOTSTRAP_FIRST=R`, no background load, commit `4ace64d83
 - Left (second): baseline `11,6,11,7` (includes the right ring), plateau 2–3 (lower because of the baseline),
   lock at 15350 µs, 0 candidates while off. Narrow steps outside the window stayed at 0.00, so it wasn't stuck
   on. Its 0.64 lit fraction is confounded by the right ring.
-- Neither controller faulted with the right controller scanning first. That fits a right-scans-second trigger,
+- Neither controller faulted with the right controller scanning first (both status LEDs stayed on, per the user). That fits a right-scans-second trigger,
   but the fault has been intermittent, so this isn't conclusive. Replay recordings use `FIRST=R`.
 - **Tracker collapse with two lit rings:** 0 fused poses in 45 s (left 8 candidates, right 108), 5854 slow-sample
   drops, while 186/188 captured frames were lit. At the same placement in `233615` the left alone had 1983
