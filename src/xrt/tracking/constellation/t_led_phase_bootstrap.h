@@ -32,6 +32,7 @@ extern "C" {
 
 #define T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS 8
 #define T_LED_PHASE_BOOTSTRAP_MAX_STEPS 128
+#define T_LED_PHASE_BOOTSTRAP_MAX_BASELINE_REPORTS 32
 
 enum t_led_phase_bootstrap_state
 {
@@ -71,6 +72,9 @@ struct t_led_phase_bootstrap_options
 
 	//! Exposures to ignore after changing the phase, while the new setting reaches the controller.
 	uint32_t settle_frames;
+	//! Exposures to wait with the LEDs dark before measuring the baseline. A controller that was lit a moment
+	//! ago (this one, or another that just yielded) keeps emitting for up to ~250 ms after being told to stop.
+	uint32_t baseline_settle_frames;
 	//! Exposures measured for each step.
 	uint32_t measure_frames;
 	//! Extra exposures to wait for late blob reports before scoring a step.
@@ -85,6 +89,11 @@ struct t_led_phase_bootstrap_options
 
 	//! Once locked, rescan after this many exposures without any lit camera frame.
 	uint32_t lost_frames;
+
+	//! Exposures to stay idle after a failed scan; doubled for each further consecutive failure, up to the max,
+	//! so a controller that cannot lock does not keep every other controller dark.
+	uint32_t failed_backoff_frames;
+	uint32_t max_failed_backoff_frames;
 };
 
 //! Result of one scan step, for logging and tests.
@@ -129,9 +138,10 @@ struct t_led_phase_bootstrap
 	int64_t window_end_ns;
 	uint64_t blob_sum[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
 
-	//! Largest blob count each camera reported during the dark baseline step of the current scan.
+	//! Median blob count each camera reported during the dark baseline step of the current scan.
 	uint32_t baseline_blobs[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
 	uint32_t baseline_reported[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+	uint32_t baseline_samples[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS][T_LED_PHASE_BOOTSTRAP_MAX_BASELINE_REPORTS];
 
 	//! Result of the last completed bootstrap.
 	bool have_lock;
@@ -142,6 +152,8 @@ struct t_led_phase_bootstrap
 
 	//! Exposures left before a failed scan may be retried.
 	uint32_t idle_backoff_frames;
+	//! Failed scans since the last lock.
+	uint32_t consecutive_failures;
 
 	//! Locked-state monitoring.
 	uint32_t frames_since_lit;

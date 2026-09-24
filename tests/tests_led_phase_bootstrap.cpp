@@ -169,6 +169,51 @@ TEST_CASE("LED phase bootstrap measures against each camera's background")
 	}
 }
 
+TEST_CASE("LED phase bootstrap baseline ignores a controller that is still going dark")
+{
+	// 24 Sep two-controller run: the left controller kept emitting for up to ~250 ms after yielding, which set
+	// the right controller's baseline to 17-21 blobs so that none of its own lit frames could ever count.
+	t_led_phase_bootstrap_options options = test_options();
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+	t_led_phase_bootstrap_start(&b, kPeriod);
+
+	Sim sim{.latency_ns = 3000000};
+	uint32_t frame = 0;
+	sim.background = {12, 12, 12, 1};
+	sim.run(b, 16, frame); // ~270 ms of the other controller's light
+	sim.background = {};
+	sim.run(b, 2000, frame);
+
+	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	for (uint32_t c = 0; c < 4; c++) {
+		CHECK(b.baseline_blobs[c] == sim.dark_blobs);
+	}
+}
+
+TEST_CASE("LED phase bootstrap backs off longer after each consecutive failure")
+{
+	t_led_phase_bootstrap_options options = test_options();
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+
+	Sim sim{.latency_ns = 0};
+	sim.visible = false;
+	uint32_t frame = 0;
+	uint32_t expected[] = {60, 120, 240, 480, 600, 600};
+	for (uint32_t expect : expected) {
+		CAPTURE(expect);
+		REQUIRE(t_led_phase_bootstrap_ready_to_scan(&b));
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		while (b.state != T_LED_PHASE_BOOTSTRAP_IDLE) {
+			sim.run(b, 1, frame);
+		}
+		CHECK(b.idle_backoff_frames == expect);
+		sim.run(b, expect, frame);
+	}
+	CHECK(b.consecutive_failures == 6);
+}
+
 TEST_CASE("LED phase bootstrap tolerates cameras that cannot see the controller")
 {
 	t_led_phase_bootstrap_options options = test_options();
@@ -194,8 +239,8 @@ TEST_CASE("LED phase bootstrap fails and backs off when the controller is never 
 	Sim sim{.latency_ns = 0};
 	sim.visible = false;
 	uint32_t frame = 0;
-	// One dark baseline step, then 17 wide steps, of 20 exposures each.
-	sim.run(b, 370, frame);
+	// One dark baseline step (36 exposures), then 17 wide steps of 20 exposures each.
+	sim.run(b, 386, frame);
 
 	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_IDLE);
 	REQUIRE_FALSE(b.have_lock);
