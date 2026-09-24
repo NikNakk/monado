@@ -223,6 +223,27 @@ pose tracking is not.
   slow search can't keep up with a moving target and never re-acquires. This is the tracker, not
   illumination, and belongs with plan item 3 (joint multi-camera solve seeded by the IMU).
 
+**2026-09-24 22:46, `sessions/20260924-224609-bootstrap-slow-left`** (slow moves, commit `dc266c4ee`,
+`PSVR2_ROBUST_CLOCK_MAX_PPM=200`). **Illumination under slow movement passes.** Not a controlled comparison
+with the 18:05 run: it was evening (baseline `3,1,5,1`, window panes dimmer) and the moves differed.
+
+- 1 scan, 1 lock, 0 lost, first lock at 13.2 s. The wide scan had one peak (13000–15000 µs; every other
+  step 0 except 16000 at 0.38). Narrow lit window 15000–16250 µs (reported 1700 µs; camera 3 couldn't see
+  the controller during the narrow scan, which flattens the plateau at 3.0), locked at fudge 15350 µs.
+- Locked lit reports per 5 s window were 85, 98, 89, 95, 90, 89, 88, 99 and 92% (median 0.90). Captured
+  frames lit while locked: 466/467 on cameras 0–2, and 384/467 on camera 3, which is visibility.
+- Exposure timestamp residual std fell to 190 µs, with p99 +159 µs (18:05 run: std 372 µs, p99
+  +1159 µs); p5/median/p95 were −376/89/138 µs. Schedules projected 5 periods forward, apart from 3 frames
+  at 6 periods (the 18:05 run needed up to 12). The remaining negative tail (p1 −755 µs) is the minimum
+  filter stepping down.
+- Poses: position tracked 83.6% (18:05 run: 26.4%), median pose age 39 ms, 2778 two-camera fused poses,
+  231 disagreements, 12 jumps, 1504 slow-sample drops (18:05 run: 5240). Some candidates still flip about
+  80° (for example camera 0 at `imu_aligned_delta_deg=78`) and get rejected by the pair-agreement gate. This
+  is a correspondence ambiguity for the joint solver to settle.
+- Lock positions so far with the robust clock (fudge µs): 15350 (static), 14725 (background-biased,
+  discard), 15850 and 15350. That is within ±250 µs of 15600 across four restarts, well inside the 1 ms
+  lock pulse. The two-controller and dedicated restart runs are still to come.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
