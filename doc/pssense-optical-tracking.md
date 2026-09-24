@@ -88,6 +88,9 @@ are compared, so another controller's steady light cancels out. A cycle takes ab
 the unit simulator, with the latency drifting 60 µs/s for 50 s (3 ms in all, 1.5× the worst drift seen on hardware),
 tracking keeps 91–92% of frames lit against 46–47% open loop. With no drift it stays put at 100% lit.
 
+`PSSENSE_LED_BOOTSTRAP_FIRST=L|R` (diagnostic) lets only the named side start the first scan; the other waits
+until it has locked (or 1200 exposures, logging `event=first_wait_timeout`).
+
 `PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1` (experimental) keeps a locked controller lit while another scans, instead of
 yielding. Its steady light is absorbed into the scanning controller's dark baseline. A controller without a
 lock still stays dark. (An earlier empty-blink-mask yield did not darken a lit controller; see the hardware

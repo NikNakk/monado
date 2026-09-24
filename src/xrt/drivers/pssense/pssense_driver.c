@@ -87,6 +87,7 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_clock_offset_snap_us, "PSSENSE_CLOCK_OFFSET_SN
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
+DEBUG_GET_ONCE_OPTION(pssense_led_bootstrap_first, "PSSENSE_LED_BOOTSTRAP_FIRST", "")
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -344,6 +345,8 @@ struct pssense_device
 		//! Held dark (and frozen) because another controller owns the scan.
 		bool led_bootstrap_yielding;
 		uint32_t led_bootstrap_status_frames;
+		//! Exposures spent waiting for the PSSENSE_LED_BOOTSTRAP_FIRST side to lock before our first scan.
+		uint32_t led_bootstrap_first_wait_frames;
 
 		struct xrt_pose T_led_imu;
 	} tracking;
@@ -1258,6 +1261,38 @@ pssense_node_break_apart(struct xrt_frame_node *node)
  * controller holds its LEDs off while a scan runs. 0 = free, otherwise 1 + hand.
  */
 static xrt_atomic_s32_t pssense_led_bootstrap_owner = 0;
+//! Set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has locked.
+static xrt_atomic_s32_t pssense_led_bootstrap_first_locked = 0;
+
+//! Waiting longer than this (~20 s) for the preferred side gives up, in case it never connects.
+#define PSSENSE_LED_BOOTSTRAP_FIRST_WAIT_FRAMES 1200
+
+/*!
+ * Opt-in (PSSENSE_LED_BOOTSTRAP_FIRST=L or R): only the named side may start the first scan. The right Sense has
+ * repeatedly fallen into an always-lit, status-LED-off state while scanning second; scanning it first separates a
+ * role effect from a device one.
+ */
+static bool
+pssense_led_bootstrap_may_start_first_scan(struct pssense_device *pssense)
+{
+	const char *first = debug_get_option_pssense_led_bootstrap_first();
+	if (first == NULL || (first[0] != 'L' && first[0] != 'R' && first[0] != 'l' && first[0] != 'r')) {
+		return true;
+	}
+	char mine = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+	char wanted = (first[0] == 'l' || first[0] == 'L') ? 'L' : 'R';
+	if (mine == wanted || xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_first_locked, 1, 1) == 1 ||
+	    pssense->tracking.led_bootstrap.locks_acquired > 0) {
+		return true;
+	}
+	if (++pssense->tracking.led_bootstrap_first_wait_frames > PSSENSE_LED_BOOTSTRAP_FIRST_WAIT_FRAMES) {
+		if (pssense->tracking.led_bootstrap_first_wait_frames == PSSENSE_LED_BOOTSTRAP_FIRST_WAIT_FRAMES + 1) {
+			PSSENSE_WARN(pssense, "LED_BOOTSTRAP side=%c event=first_wait_timeout waiting_for=%c", mine, wanted);
+		}
+		return true;
+	}
+	return false;
+}
 
 static int32_t
 pssense_led_bootstrap_token(struct pssense_device *pssense)
@@ -1343,7 +1378,7 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	}
 	pssense->tracking.led_bootstrap_yielding = false;
 
-	if (owner == 0 && t_led_phase_bootstrap_ready_to_scan(b)) {
+	if (owner == 0 && t_led_phase_bootstrap_ready_to_scan(b) && pssense_led_bootstrap_may_start_first_scan(pssense)) {
 		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
 			owner = me;
 			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
@@ -1351,6 +1386,14 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	}
 
 	(void)t_led_phase_bootstrap_push_exposure(b, exposure_timestamp_ns);
+
+	if (b->locks_acquired > 0) {
+		const char *first = debug_get_option_pssense_led_bootstrap_first();
+		char mine = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+		if (first != NULL && (first[0] == mine || first[0] == mine + ('a' - 'A'))) {
+			xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_first_locked, 0, 1);
+		}
+	}
 
 	// A tracking probe changes this controller's light, so like a scan it needs the LEDs to itself.
 	if (t_led_phase_bootstrap_wants_probe(b) && (owner == me || (owner == 0 && xrt_atomic_s32_cmpxchg(
