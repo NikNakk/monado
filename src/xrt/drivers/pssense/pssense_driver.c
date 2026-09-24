@@ -88,6 +88,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTR
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
 DEBUG_GET_ONCE_OPTION(pssense_led_bootstrap_first, "PSSENSE_LED_BOOTSTRAP_FIRST", "")
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_align_imu_orientation, "PSSENSE_ALIGN_IMU_ORIENTATION", false)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -1085,6 +1086,18 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 	}
 	/* Optical history supplies translation; the continuously integrated IMU supplies orientation. */
 	if ((imu.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
+		/* Opt-in: rotate the IMU-world orientation into the optical world that the position is in. */
+		if (debug_get_bool_option_pssense_align_imu_orientation() &&
+		    pssense->tracking.have_optical_from_imu_orientation) {
+			const struct xrt_quat *align = &pssense->tracking.optical_from_imu_orientation;
+			struct xrt_quat aligned_orientation;
+			struct xrt_vec3 aligned_angular_velocity;
+			math_quat_rotate(align, &imu.pose.orientation, &aligned_orientation);
+			math_quat_normalize(&aligned_orientation);
+			math_quat_rotate_vec3(align, &imu.angular_velocity, &aligned_angular_velocity);
+			imu.pose.orientation = aligned_orientation;
+			imu.angular_velocity = aligned_angular_velocity;
+		}
 		out_relation->pose.orientation = imu.pose.orientation;
 		out_relation->angular_velocity = imu.angular_velocity;
 		out_relation->relation_flags &=
