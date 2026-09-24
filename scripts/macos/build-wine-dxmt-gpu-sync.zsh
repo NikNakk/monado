@@ -1,7 +1,7 @@
 #!/bin/zsh
 #
 # Build the pinned MIT DXMT v0.80 + Basalt IOSurface patches + Monado shared
-# D3D11-fence metadata patch, then overlay the matched artifacts into the
+# D3D11 fence/texture metadata patches, then overlay the matched artifacts into the
 # private Wine tree provisioned by provision-wine-dxmt.zsh.
 #
 # The Basalt build helper pins DXMT v0.80, LLVM 15.0.7, and its Wine build
@@ -127,6 +127,7 @@ BasaltVR build harness: ${basalt_commit}
 Basalt patches: 0001-0004 from BasaltVR v0.1.0
 Monado patches: ${patch_sources:t}
 Monado shared-fence GUID: 8a1e78d5-9762-4f7a-b0ad-1d62f6a49d31
+Monado shared-texture GUID: 6f5ee9b2-e42a-4f4d-9782-1c730f5464b9
 Build output: ${install_dir}
 EOF
 

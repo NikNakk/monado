@@ -9,6 +9,7 @@ on:
       - macos-depth-aware-reprojection
       - macos-wine-iosurface-import
       - macos-wine-openxr-d3d11
+      - macos-wine-openvr-legacy-unity
     paths:
       - .github/workflows/macos-service-direct-xpc.yml
       - CMakeLists.txt

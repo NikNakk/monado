@@ -20,13 +20,13 @@ openxr_monado.dll (PE x86-64)
         v
 Wine D3D11 client compositor
         |
-        +-- D3D11 textures --> DXMT --> IOSurfaceID[]
+        +-- D3D11 textures --> DXMT --> IOSurfaceID[] / shared-Metal bootstrap names
         |
         +-- Monado scalar IPC over 127.0.0.1 TCP
         v
 native arm64 monado-service
         |
-        | IOSurface -> MTLTexture -> VkImportMetalTextureInfoEXT
+        | IOSurface or MTLSharedTextureHandle -> MTLTexture -> VkImportMetalTextureInfoEXT
         v
 existing compositor / reprojection / presentation
         v
@@ -49,7 +49,8 @@ For the Wine bridge:
 - the initial static `ipc_shared_memory` metadata is copied once instead of
   transferring an OS shared-memory handle;
 - completed composition-layer slots are copied inline at frame submission;
-- D3D11 swapchain resources are transferred by process-independent IOSurface IDs;
+- simple D3D11 swapchain resources are transferred by process-independent IOSurface IDs;
+- D3D11 array swapchains use DXMT's existing MTLSharedTextureHandle Mach-port bootstrap registration for direct zero-copy import;
 - producer GPU completion uses the same DXMT-backed `MTLSharedEvent` as a
   native Vulkan timeline semaphore when the GPU-sync DXMT patch is installed;
   the original CPU fence wait remains as a diagnostic fallback.
@@ -360,14 +361,20 @@ IPC_IGNORE_VERSION=1 scripts/macos/run-wine-alyx.zsh
 `IPC_IGNORE_VERSION=1` is needed only when the native service and Windows
 client were built from different Monado revisions.
 
-xrizer exposes one two-layer D3D11 swapchain to OpenXR. The macOS native
-transport can import array textures, but DXMT currently provides a Basalt
-IOSurface ID only for a non-array D3D11 texture. The Wine client therefore
-keeps xrizer's app-facing array swapchain, copies each layer side-by-side into
-a hidden wide IOSurface texture on release, and translates projection layer
-rectangles before sending them to native Monado. This preserves the existing
-IOSurface and presentation/pacing path rather than falling back to two
-app-facing swapchains.
+xrizer exposes one two-layer D3D11 swapchain to OpenXR. Array swapchains now
+use a zero-copy DXMT/Metal transport when the matched patched DXMT build is
+installed. DXMT already creates these shared resources as
+`MTLTextureType2DArray` objects backed by an `MTLSharedTextureHandle`; the
+Monado DXMT patch publishes the existing bootstrap registration name through
+D3D11 private data. The Wine client sends those small names over scalar IPC and
+native Monado reopens each shared texture directly on MoltenVK's `MTLDevice`
+before importing it with `VkImportMetalTextureInfoEXT`.
+
+This removes the previous per-frame pair of `CopySubresourceRegion` calls
+that repacked xrizer's left/right array slices into a hidden wide IOSurface.
+If the DXMT metadata or native import is unavailable, the old side-by-side
+IOSurface path remains as a compatibility fallback. Set
+`MONADO_WINE_DIRECT_ARRAY=0` to force that fallback for A/B testing.
 
 ## Wine/TCP pacing feedback and CAMetalDisplayLink timing
 
