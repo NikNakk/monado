@@ -5,9 +5,10 @@
  * @brief Minimal D3D11 client compositor for Wine/DXMT on macOS.
  *
  * This intentionally avoids WIL and Windows shared-handle import. D3D11
- * textures are created on the application's DXMT device, their Basalt
- * IOSurface IDs are imported into the native macOS Monado service, and a local
- * D3D11 fence establishes producer completion before layer commit.
+ * textures are created on the application's DXMT device. Simple 2D images use
+ * Basalt IOSurface IDs; array textures use DXMT's existing shared-Metal Mach
+ * port registration so native Monado can import the same MTLTexture directly.
+ * A local D3D11 fence establishes producer completion before layer commit.
  */
 
 #include "client/comp_d3d11_client.h"
@@ -29,6 +30,9 @@
 
 static const GUID kBasaltIOSurfaceIdGuid = {
     0xdd807311, 0x529e, 0x4856, {0xa5, 0xc0, 0x48, 0xbe, 0xd2, 0x04, 0x81, 0x29}};
+
+static const GUID kMonadoSharedTextureBootstrapNameGuid = {
+    0x6f5ee9b2, 0xe42a, 0x4f4d, {0x97, 0x82, 0x1c, 0x73, 0x0f, 0x54, 0x64, 0xb9}};
 
 /*
  * Private-data GUID added by the Monado v0.80 DXMT patch. Shared D3D11 fences
@@ -64,6 +68,7 @@ struct client_d3d11_swapchain
 	ID3D11Texture2D *transport_images[XRT_MAX_SWAPCHAIN_IMAGES];
 	uint32_t array_size;
 	uint32_t layer_width;
+	bool direct_array_transport;
 };
 
 
@@ -216,7 +221,7 @@ static xrt_result_t
 swapchain_release(struct xrt_swapchain *xsc, uint32_t index)
 {
 	struct client_d3d11_swapchain *sc = as_swapchain(xsc);
-	if (sc->array_size > 1) {
+	if (sc->array_size > 1 && !sc->direct_array_transport) {
 		if (index >= sc->base.base.image_count || sc->base.images[index] == NULL ||
 		    sc->transport_images[index] == NULL) {
 			return XRT_ERROR_INVALID_ARGUMENT;
@@ -255,6 +260,14 @@ swapchain_destroy(struct xrt_swapchain *xsc)
 }
 
 static bool
+direct_array_transport_enabled(void)
+{
+	char value[16] = {};
+	DWORD len = GetEnvironmentVariableA("MONADO_WINE_DIRECT_ARRAY", value, (DWORD)sizeof(value));
+	return !(len > 0 && strcmp(value, "0") == 0);
+}
+
+static bool
 translate_native_swapchain_info(const struct xrt_swapchain_create_info *info,
                                 struct xrt_swapchain_create_info *out_info)
 {
@@ -279,7 +292,16 @@ get_swapchain_create_properties(struct xrt_compositor *xc,
 	if (vk_format == 0) {
 		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 	}
-	struct xrt_swapchain_create_info native_info = {};
+	struct xrt_swapchain_create_info native_info = *info;
+	if (info->array_size > 1 && direct_array_transport_enabled()) {
+		native_info.format = vk_format;
+		xrt_result_t direct_ret =
+		    xrt_comp_get_swapchain_create_properties(native_compositor(xc), &native_info, out);
+		if (direct_ret == XRT_SUCCESS) {
+			return XRT_SUCCESS;
+		}
+	}
+
 	if (!translate_native_swapchain_info(info, &native_info)) {
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
@@ -303,6 +325,115 @@ usage_to_bind_flags(enum xrt_swapchain_usage_bits bits)
 	return flags;
 }
 
+static void
+finish_swapchain_setup(struct client_d3d11_swapchain *sc)
+{
+	sc->base.base.destroy = swapchain_destroy;
+	sc->base.base.acquire_image = swapchain_acquire;
+	sc->base.base.wait_image = swapchain_wait;
+	sc->base.base.barrier_image = swapchain_barrier;
+	sc->base.base.release_image = swapchain_release;
+	sc->base.base.reference.count = 1;
+}
+
+static xrt_result_t
+try_create_direct_array_swapchain(struct client_d3d11_compositor *c,
+                                  const struct xrt_swapchain_create_info *info,
+                                  int64_t vk_format,
+                                  struct xrt_swapchain **out_xsc)
+{
+	if (info->array_size <= 1 || !direct_array_transport_enabled()) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+
+	struct xrt_swapchain_create_info native_info = *info;
+	native_info.format = vk_format;
+	struct xrt_swapchain_create_properties props = {0};
+	xrt_result_t xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, &native_info, &props);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	if (props.image_count == 0 || props.image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_ALLOCATION;
+	}
+	native_info.bits = (enum xrt_swapchain_usage_bits)(native_info.bits | props.extra_bits);
+
+	struct client_d3d11_swapchain *sc =
+	    (struct client_d3d11_swapchain *)calloc(1, sizeof(struct client_d3d11_swapchain));
+	if (sc == NULL) {
+		return XRT_ERROR_ALLOCATION;
+	}
+	sc->c = c;
+	sc->array_size = info->array_size;
+	sc->layer_width = info->width;
+	sc->direct_array_transport = true;
+	sc->base.base.image_count = props.image_count;
+
+	struct ipc_metal_bootstrap_name bootstrap_names[XRT_MAX_SWAPCHAIN_IMAGES] = {};
+	for (uint32_t i = 0; i < props.image_count; ++i) {
+		D3D11_TEXTURE2D_DESC desc = {};
+		desc.Width = info->width;
+		desc.Height = info->height;
+		desc.MipLevels = 1;
+		desc.ArraySize = info->array_size;
+		desc.Format = (DXGI_FORMAT)info->format;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = usage_to_bind_flags(native_info.bits);
+		desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+
+		ID3D11Texture2D *texture = NULL;
+		HRESULT hr = c->device->CreateTexture2D(&desc, NULL, &texture);
+		if (FAILED(hr) || texture == NULL) {
+			U_LOG_W("Wine D3D11 direct array texture creation failed image=%u hr=0x%08lx",
+			        i,
+			        (unsigned long)hr);
+			swapchain_destroy(&sc->base.base);
+			return XRT_ERROR_NOT_IMPLEMENTED;
+		}
+
+		UINT bootstrap_size = sizeof(bootstrap_names[i].name);
+		hr = texture->GetPrivateData(
+		    kMonadoSharedTextureBootstrapNameGuid, &bootstrap_size, bootstrap_names[i].name);
+		if (FAILED(hr) || bootstrap_size == 0 || bootstrap_size > sizeof(bootstrap_names[i].name)) {
+			U_LOG_W("DXMT array texture does not expose shared Metal bootstrap metadata: image=%u hr=0x%08lx size=%u",
+			        i,
+			        (unsigned long)hr,
+			        bootstrap_size);
+			texture->Release();
+			swapchain_destroy(&sc->base.base);
+			return XRT_ERROR_NOT_IMPLEMENTED;
+		}
+		bootstrap_names[i].name[sizeof(bootstrap_names[i].name) - 1] = '\0';
+		if (bootstrap_names[i].name[0] == '\0') {
+			texture->Release();
+			swapchain_destroy(&sc->base.base);
+			return XRT_ERROR_NOT_IMPLEMENTED;
+		}
+
+		sc->base.images[i] = texture;
+	}
+
+	xret = ipc_client_compositor_import_metal_bootstrap_textures(
+	    c->xcn, &native_info, props.image_count, bootstrap_names, &sc->native);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_W("Wine D3D11 direct Metal array import failed: result=%d; using side-by-side fallback", xret);
+		swapchain_destroy(&sc->base.base);
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+
+	finish_swapchain_setup(sc);
+	U_LOG_I("Wine D3D11 direct Metal array swapchain imported: images=%u size=%ux%u array_size=%u dxgi_format=%lld first_name='%s' (zero-copy transport)",
+	        props.image_count,
+	        info->width,
+	        info->height,
+	        info->array_size,
+	        (long long)info->format,
+	        bootstrap_names[0].name);
+	*out_xsc = &sc->base.base;
+	return XRT_SUCCESS;
+}
+
 static xrt_result_t
 create_swapchain(struct xrt_compositor *xc,
                  const struct xrt_swapchain_create_info *info,
@@ -323,6 +454,19 @@ create_swapchain(struct xrt_compositor *xc,
 	int64_t vk_format = dxgi_to_vk((DXGI_FORMAT)info->format);
 	if (vk_format == 0) {
 		return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+	}
+
+	if (info->array_size > 1 && direct_array_transport_enabled()) {
+		xrt_result_t direct_ret = try_create_direct_array_swapchain(c, info, vk_format, out_xsc);
+		if (direct_ret == XRT_SUCCESS) {
+			return XRT_SUCCESS;
+		}
+		if (direct_ret != XRT_ERROR_NOT_IMPLEMENTED) {
+			U_LOG_W("Wine D3D11 direct array path failed with result=%d; falling back to side-by-side transport",
+			        direct_ret);
+		}
+	} else if (info->array_size > 1) {
+		U_LOG_I("Wine D3D11 direct array transport disabled by MONADO_WINE_DIRECT_ARRAY=0");
 	}
 
 	struct xrt_swapchain_create_info native_info = {};
@@ -416,12 +560,7 @@ create_swapchain(struct xrt_compositor *xc,
 		return xret;
 	}
 
-	sc->base.base.destroy = swapchain_destroy;
-	sc->base.base.acquire_image = swapchain_acquire;
-	sc->base.base.wait_image = swapchain_wait;
-	sc->base.base.barrier_image = swapchain_barrier;
-	sc->base.base.release_image = swapchain_release;
-	sc->base.base.reference.count = 1;
+	finish_swapchain_setup(sc);
 
 	U_LOG_I("Wine D3D11 swapchain imported: images=%u app_size=%ux%u app_array_size=%u transport_size=%ux%u transport_array_size=%u dxgi_format=%lld ids=%u,%u,%u",
 	        props.image_count,
@@ -476,7 +615,7 @@ layer_projection(struct xrt_compositor *xc,
 	for (uint32_t i = 0; i < data->view_count; ++i) {
 		struct client_d3d11_swapchain *sc = as_swapchain(xsc[i]);
 		native[i] = sc->native;
-		if (sc->array_size > 1) {
+		if (sc->array_size > 1 && !sc->direct_array_transport) {
 			struct xrt_sub_image *sub = &translated.proj.v[i].sub;
 			if (sub->array_index >= sc->array_size) {
 				return XRT_ERROR_INVALID_ARGUMENT;
