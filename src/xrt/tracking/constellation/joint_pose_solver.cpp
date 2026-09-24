@@ -67,7 +67,8 @@ project_led(const JointSolveCamera &camera,
             const t_constellation_tracker_led &led,
             const Rigid &device,
             bool check_visibility,
-            Eigen::Vector2d &out_px)
+            Eigen::Vector2d &out_px,
+            double visibility_margin_rad = 0.0)
 {
 	Eigen::Vector3d p_device(led.position.x, led.position.y, led.position.z);
 	Eigen::Vector3d p_cam = frame.R_cam_world * (device.q * p_device + device.t - frame.t_world_cam);
@@ -80,7 +81,7 @@ project_led(const JointSolveCamera &camera,
 		Eigen::Vector3d n_cam = frame.R_cam_world * (device.q * n_device);
 		// The view ray points away from the camera and the normal towards it (see pose_metrics.c).
 		double facing = p_cam.normalized().dot(n_cam);
-		if (facing > std::cos(M_PI - led.visibility_angle)) {
+		if (facing > std::cos(M_PI - (led.visibility_angle - visibility_margin_rad))) {
 			return false;
 		}
 	}
@@ -316,11 +317,22 @@ refine_impl(const std::vector<JointSolveCamera> &cameras,
 		    JointSolveMatch{matches[i].camera, matches[i].blob, matches[i].led, (float)std::sqrt(e2)});
 	}
 
+	// Coverage counts only LEDs that face a camera comfortably: edge-on LEDs, and ones the ring hides from itself
+	// (which a normal test cannot know about), are often missing on a correct pose.
+	const double margin = params.coverage_margin_deg * M_PI / 180.0;
+	uint32_t covered = 0;
 	for (uint32_t ci = 0; ci < cameras.size(); ci++) {
 		for (uint32_t li = 0; li < model.led_count; li++) {
 			Eigen::Vector2d px;
-			if (project_led(cameras[ci], frames[ci], model.leds[li], device, true, px)) {
-				out.visible_leds++;
+			if (!project_led(cameras[ci], frames[ci], model.leds[li], device, true, px, margin)) {
+				continue;
+			}
+			out.visible_leds++;
+			for (const Correspondence &m : matches) {
+				if (m.camera == ci && m.led == li) {
+					covered++;
+					break;
+				}
 			}
 		}
 	}
@@ -329,7 +341,7 @@ refine_impl(const std::vector<JointSolveCamera> &cameras,
 	out.matches = (uint32_t)matches.size();
 	out.cameras_used = (uint32_t)std::count(camera_used.begin(), camera_used.end(), true);
 	out.rms_px = matches.empty() ? INFINITY : (float)std::sqrt(sum2 / (double)matches.size());
-	out.coverage = out.visible_leds > 0 ? (float)out.matches / (float)out.visible_leds : 0.0f;
+	out.coverage = out.visible_leds > 0 ? (float)covered / (float)out.visible_leds : 0.0f;
 	out.ok = out.matches >= params.min_matches && out.rms_px <= params.max_rms_px &&
 	         out.coverage >= params.min_coverage &&
 	         (float)out.outliers <= params.max_outlier_fraction * (float)out.matches;
