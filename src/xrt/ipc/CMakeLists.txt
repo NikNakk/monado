@@ -87,7 +87,6 @@ if(APPLE)
 	# in Monado.
 	add_library(
 		monado_metal_xpc_client SHARED
-		shared/ipc_metal_xpc.m
 		shared/ipc_metal_xpc.h
 		shared/monado_metal_xpc_client.m
 		shared/monado_metal_xpc_client.h
@@ -99,7 +98,7 @@ if(APPLE)
 	target_compile_options(monado_metal_xpc_client PRIVATE -fblocks)
 	target_link_libraries(
 		monado_metal_xpc_client
-		PRIVATE aux_util "-framework Foundation" "-framework Metal"
+		PRIVATE xrt-interfaces "-framework Foundation" "-framework Metal"
 		)
 	set_target_properties(
 		monado_metal_xpc_client PROPERTIES OUTPUT_NAME monado_metal_xpc_client
