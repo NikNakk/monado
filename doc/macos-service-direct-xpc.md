@@ -60,6 +60,49 @@ service MTLSharedEvent
                                    +-- XPC --> MTLSharedEventHandle
 ```
 
+### External client-to-client texture handoff
+
+The Chromium macOS WebXR port has one additional process boundary: Chromium's
+isolated XR process owns the OpenXR session, while Chromium's GPU process owns
+the SharedImage/ANGLE context that renders into the texture.
+
+Monado keeps this transport out of Chromium by building a small helper library:
+
+```text
+libmonado_metal_xpc_client.dylib
+```
+
+Its external ABI is intentionally limited to opaque texture objects/tokens:
+
+```text
+monado_metal_xpc_publish_claimable_texture(...)
+monado_metal_xpc_take_texture_on_device(...)
+monado_metal_xpc_release_texture(...)
+```
+
+Ordinary texture tokens are still PID scoped. A publisher may explicitly mark a
+**texture** token claimable for a one-time cross-process handoff. The first
+different PID to retrieve it becomes the token owner and the claimable flag is
+cleared. The token is then PID scoped again and is consumed when the texture is
+taken.
+
+The receiving helper accepts an `MTLDevice`. This is important for ANGLE:
+`EGL_ANGLE_metal_texture_client_buffer` requires the imported `MTLTexture`
+to belong to the exact device backing the receiving EGL display. The XPC helper
+therefore recreates the texture with the receiving process's supplied device
+rather than assuming `MTLSharedTextureHandle.device` is the required object.
+
+The helper installs to `${CMAKE_INSTALL_PREFIX}/lib`. The current Chromium
+development port expects:
+
+```text
+/usr/local/lib/libmonado_metal_xpc_client.dylib
+```
+
+The old standalone broker also implements the claimable-token method for
+development compatibility; because that broker predates PID ownership, marking
+an existing legacy token claimable is effectively a no-op there.
+
 ### Per-client ownership
 
 Registry tokens are scoped to the application process that owns them.
@@ -79,8 +122,9 @@ without adding a new OpenXR or Monado IPC protocol field. It is the first
 resource-isolation step needed for a persistent launcher plus temporary VR apps.
 
 PID reuse is not relied upon as token identity: tokens retain random bits and
-must also match the stored owner. Cleanup of any token stranded by a client
-crash is still a follow-on item.
+must also match the stored owner. On ordinary Monado IPC teardown the service
+drops pending Metal-XPC entries after the last live IPC client for that PID has
+disconnected.
 
 The standalone broker target is retained temporarily for comparison and
 fallback testing.
@@ -165,7 +209,6 @@ must never be accepted for the other process.
 
 The next steps are:
 
-- clean stranded registry entries when a Unix IPC client dies unexpectedly;
 - keep a persistent launcher/home application while foreground applications
   come and go;
 - exercise Monado's existing multi-client active/focused application switching;
