@@ -134,6 +134,9 @@ show a lit ring either, the problem is framing, not timing.
 > includes the 1 ms/s clock excursion at 47–60 s in `231910`. The illumination passes in those runs held despite
 > it. The afternoon sessions (17:46–18:05) had no load reported. Record future runs without background builds
 > unless the run is a deliberate stress test, and note the load in the session note.
+>
+> `20260924-175814-bootstrap-static-left` is a failed start (no Sense controller connected, exit status 1, no data);
+> `175831` is the rerun.
 
 **2026-09-24, `sessions/20260924-174601-bootstrap-static-left`** (left only, static, ring facing headset,
 45 s, commit `0a2cd3902`). Failed acceptance, but the cause is the clock mapping, not the bootstrap.
