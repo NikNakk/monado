@@ -48,6 +48,18 @@ enum t_led_phase_bootstrap_state
 	T_LED_PHASE_BOOTSTRAP_BASELINE = 4,
 };
 
+//! Stages of closed-loop phase tracking while locked.
+enum t_led_phase_bootstrap_track_stage
+{
+	T_LED_PHASE_BOOTSTRAP_TRACK_NONE = 0,
+	//! Measuring blob counts at the lock itself.
+	T_LED_PHASE_BOOTSTRAP_TRACK_REF = 1,
+	//! Pulse moved earlier by the probe offset.
+	T_LED_PHASE_BOOTSTRAP_TRACK_EARLY = 2,
+	//! Pulse moved later by the probe offset.
+	T_LED_PHASE_BOOTSTRAP_TRACK_LATE = 3,
+};
+
 struct t_led_phase_bootstrap_options
 {
 	//! Logging level and a short label (e.g. "L"/"R") used in log lines.
@@ -94,6 +106,24 @@ struct t_led_phase_bootstrap_options
 	//! so a controller that cannot lock does not keep every other controller dark.
 	uint32_t failed_backoff_frames;
 	uint32_t max_failed_backoff_frames;
+
+	/*!
+	 * Closed-loop phase tracking while locked; 0 disables it. After this many locked exposures the bootstrap
+	 * asks to probe (@ref t_led_phase_bootstrap_wants_probe). A probe measures the mean blob count at the lock,
+	 * with the pulse moved earlier, then later, and moves the lock towards the brighter side. Blob counts
+	 * rather than the lit test are compared, so another controller's steady light cancels out.
+	 */
+	uint32_t track_interval_frames;
+	//! Probe offset as a fraction of half the measured lit span of the lock pulse.
+	float track_probe_fraction;
+	//! Fraction of the probe offset to move per unit of normalised early/late imbalance.
+	float track_gain;
+	//! Largest single correction.
+	time_duration_ns track_max_step_ns;
+	//! Imbalances (as a fraction of the ring's blob count) below this are ignored.
+	float track_deadband;
+	//! Skip tracking unless the ring added at least this many mean blobs per camera at lock time.
+	float track_min_ring_blobs;
 };
 
 //! Result of one scan step, for logging and tests.
@@ -159,6 +189,21 @@ struct t_led_phase_bootstrap
 	uint32_t frames_since_lit;
 	uint32_t locked_reports;
 	uint32_t locked_lit_reports;
+
+	//! Phase tracking.
+	time_duration_ns lock_fudge_ns;
+	time_duration_ns track_offset_ns;
+	//! Mean blobs per camera the ring added at the narrow scan's peak: normalises the early/late imbalance.
+	float ring_blobs;
+	enum t_led_phase_bootstrap_track_stage track_stage;
+	uint32_t track_countdown;
+	bool track_wants_probe;
+	uint64_t track_blob_sum;
+	uint32_t track_reports;
+	float track_means[3];
+	uint32_t track_cycles;
+	uint32_t track_moves;
+	time_duration_ns track_total_shift_ns;
 };
 
 //! Fills in the defaults used by the PS Sense driver (PS VR2 mode-4 cameras).
@@ -212,6 +257,25 @@ t_led_phase_bootstrap_is_scanning(const struct t_led_phase_bootstrap *b)
 	return b->state == T_LED_PHASE_BOOTSTRAP_BASELINE || b->state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN ||
 	       b->state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
 }
+
+//! True while locked and due a tracking probe. The caller must get exclusive use of the LEDs (no other controller
+//! scanning or probing) and then call @ref t_led_phase_bootstrap_begin_probe.
+static inline bool
+t_led_phase_bootstrap_wants_probe(const struct t_led_phase_bootstrap *b)
+{
+	return b->state == T_LED_PHASE_BOOTSTRAP_LOCKED && b->track_wants_probe;
+}
+
+//! True while a tracking probe is in progress (this controller must be the only one changing its light).
+static inline bool
+t_led_phase_bootstrap_is_probing(const struct t_led_phase_bootstrap *b)
+{
+	return b->state == T_LED_PHASE_BOOTSTRAP_LOCKED && b->track_stage != T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
+}
+
+//! Start the tracking probe requested by @ref t_led_phase_bootstrap_wants_probe.
+void
+t_led_phase_bootstrap_begin_probe(struct t_led_phase_bootstrap *b);
 
 //! Wrap an offset into [0, period).
 time_duration_ns

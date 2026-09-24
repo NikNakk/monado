@@ -211,6 +211,7 @@ def summarise_bootstrap(events: list[dict]) -> dict:
         "locked_status": [],
         "last_scan_steps": {},
         "baselines": [],
+        "track": [],
     }
     steps: dict[str, list] = defaultdict(list)
     for kv in events:
@@ -227,6 +228,15 @@ def summarise_bootstrap(events: list[dict]) -> dict:
                     "score": to_float(kv.get("score")),
                     "mean_blobs": to_float(kv.get("mean_blobs")),
                     "lit": kv.get("lit"),
+                }
+            )
+        elif event == "track":
+            summary["track"].append(
+                {
+                    "result": kv.get("result"),
+                    "shift_us": to_float(kv.get("shift_us")),
+                    "lock_fudge_us": to_float(kv.get("lock_fudge_us")),
+                    "imbalance": to_float(kv.get("imbalance")),
                 }
             )
         elif event == "baseline":
@@ -480,6 +490,14 @@ def render_text(result: dict) -> str:
             )
         if b.get("baselines"):
             lines.append(f"    dark baseline blobs per camera: {', '.join(b['baselines'])}")
+        if b.get("track"):
+            t = b["track"]
+            moved = [x for x in t if x["result"] == "moved"]
+            total = sum(x["shift_us"] or 0.0 for x in t)
+            lines.append(
+                f"    phase tracking: {len(t)} probes, {len(moved)} moves, net shift {fmt(total, 0)} us, "
+                f"final lock {fmt(t[-1]['lock_fudge_us'], 0)} us, results {dict(Counter(x['result'] for x in t))}"
+            )
         if b["locked_lit_fraction"]:
             lines.append(f"    locked lit fraction: median {fmt(b['locked_lit_fraction']['median'])}")
         for stage, steps in b["last_scan_steps"].items():

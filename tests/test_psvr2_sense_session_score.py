@@ -23,6 +23,7 @@ LOG = """\
  INFO [finish_step] LED_BOOTSTRAP side=L event=step stage=narrow step=1/21 fudge_us=16183.0 pulse_us=450.0 score=0.000 mean_blobs=0.00 lit=0/8,0/8,0/8,0/8
  INFO [finish_step] LED_BOOTSTRAP side=L event=step stage=narrow step=2/21 fudge_us=16433.0 pulse_us=450.0 score=4.000 mean_blobs=20.00 lit=8/8,8/8,8/8,8/8
  INFO [finish_narrow_scan] LED_BOOTSTRAP side=L event=locked lit_start_us=16433.0 lit_end_us=16683.0 window_us=700.0 centre_us=16783.0 lock_fudge_us=16283.0 lock_pulse_us=1000.0 peak=4.000
+ INFO [finish_track] LED_BOOTSTRAP side=L event=track result=moved ref=9.00 early=5.00 late=9.00 ring=5.00 imbalance=0.800 shift_us=150.0 lock_fudge_us=16433.0 offset_us=420.0 total_shift_us=150.0
  INFO [pssense_led_bootstrap_update_locked] LED_BOOTSTRAP side=L event=locked_status fudge_us=16283.0 pulse_us=1000.0 lit_reports=900/1200 frames_since_lit=0
  WARN [fail_scan] LED_BOOTSTRAP side=R event=scan_failed stage=wide reason=wide_peak_below_minimum
  INFO [pssense_push_constellation_tracker_sample] CONSTELLATION_CANDIDATE side=L ts=1 cam=0 pos=(0.1,0.2,0.3) quat=(0,0,0,1) matched=5 visible=6 reproj=0.5 brightness=1.0 imu_valid=1 imu_quat=(0,0,0,1) imu_delta_deg=3.00 imu_aligned_valid=1 imu_aligned_delta_deg=1.50 imu_alignment_age_ms=10.0
@@ -49,6 +50,8 @@ class SessionScoreTest(unittest.TestCase):
         left = result["sides"]["L"]
         self.assertEqual(left["bootstrap"]["scans_started"], 1)
         self.assertEqual(left["bootstrap"]["baselines"], ["7,0,8,1"])
+        self.assertEqual(left["bootstrap"]["track"][0]["result"], "moved")
+        self.assertAlmostEqual(left["bootstrap"]["track"][0]["shift_us"], 150.0)
         self.assertEqual(len(left["bootstrap"]["locks"]), 1)
         self.assertAlmostEqual(left["bootstrap"]["locks"][0]["lock_fudge_us"], 16283.0)
         self.assertEqual(len(left["bootstrap"]["last_scan_steps"]["wide"]), 2)
