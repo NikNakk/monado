@@ -316,7 +316,10 @@ ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures,
 }
 
 xrt_result_t
-ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_metal_textures)
+ipc_metal_xpc_take_textures_on_device(uint64_t token,
+                                      uint32_t expected_count,
+                                      void *metal_device,
+                                      void **out_metal_textures)
 {
 	if (!token_is_valid(token) || out_metal_textures == NULL || expected_count == 0 ||
 	    expected_count > XRT_MAX_SWAPCHAIN_IMAGES) {
@@ -342,8 +345,11 @@ ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_
 				break;
 			}
 
-			id<MTLDevice> device = handle.device;
-			id<MTLTexture> texture = device != nil ? [device newSharedTextureWithHandle:handle] : nil;
+			id<MTLDevice> device = metal_device != NULL
+			                           ? (__bridge id<MTLDevice>)metal_device
+			                           : handle.device;
+			id<MTLTexture> texture =
+			    device != nil ? [device newSharedTextureWithHandle:handle] : nil;
 			[handle release];
 			if (texture == nil) {
 				U_LOG_E("Metal XPC could not recreate shared texture token=0x%016llx image=%u",
@@ -370,6 +376,12 @@ ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_
 		        (unsigned long long)token);
 		return XRT_SUCCESS;
 	}
+}
+
+xrt_result_t
+ipc_metal_xpc_take_textures(uint64_t token, uint32_t expected_count, void **out_metal_textures)
+{
+	return ipc_metal_xpc_take_textures_on_device(token, expected_count, NULL, out_metal_textures);
 }
 
 void
