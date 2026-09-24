@@ -355,7 +355,7 @@ replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded
 	FILE *csv = csv_path ? std::fopen(csv_path, "w") : nullptr;
 	if (csv) {
 		std::fprintf(csv, "timestamp_ns,device,solved,seeded,cameras,matches,rms_px,coverage,outliers,solve_us,"
-		                  "px,py,pz,qx,qy,qz,qw\n");
+		                  "px,py,pz,qx,qy,qz,qw,rms_cam0,rms_cam1,rms_cam2,rms_cam3,n_cam0,n_cam1,n_cam2,n_cam3\n");
 	}
 
 	JointSolveParams params;
@@ -365,6 +365,7 @@ replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded
 	for (const Exposure &exposure : exposures) {
 		// Cameras of this exposure, blob ownership shared between devices.
 		std::vector<JointSolveCamera> cameras;
+		std::vector<uint32_t> camera_index_of;
 		std::vector<std::vector<t_constellation_device_id_t>> owners;
 		owners.reserve(exposure.samples.size());
 		for (const CameraSample *sample : exposure.samples) {
@@ -375,6 +376,7 @@ replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded
 			math_pose_convert_from_opencv(&sample->Txr_world_cam.value(), &Tcv_world_cam);
 			const t_camera_calibration &cal = mosaic.camera_calibrations[sample->camera_index];
 			owners.emplace_back(sample->blob_count, XRT_CONSTELLATION_INVALID_DEVICE_ID);
+			camera_index_of.push_back(sample->camera_index);
 			cameras.push_back(JointSolveCamera{Tcv_world_cam, &models[sample->camera_index],
 			                                   (int)cal.image_size_pixels.w, (int)cal.image_size_pixels.h,
 			                                   sample->blobs, sample->blob_count, nullptr});
@@ -446,11 +448,28 @@ replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded
 
 			if (csv) {
 				const xrt_pose &p = result.Tcv_world_device;
-				std::fprintf(csv, "%" PRIi64 ",%d,%d,%d,%u,%u,%.4f,%.3f,%u,%.1f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+				// Per recorded camera index: RMS and count of this solve's correspondences.
+				double sum2[4] = {0, 0, 0, 0};
+				int count[4] = {0, 0, 0, 0};
+				for (const JointSolveMatch &m : result.correspondences) {
+					uint32_t cam = camera_index_of[m.camera];
+					if (cam < 4) {
+						sum2[cam] += (double)m.residual_px * m.residual_px;
+						count[cam]++;
+					}
+				}
+				std::fprintf(csv, "%" PRIi64 ",%d,%d,%d,%u,%u,%.4f,%.3f,%u,%.1f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f",
 				             exposure.timestamp_ns, (int)id, ok ? 1 : 0, seeded ? 1 : 0, result.cameras_used,
 				             result.matches, result.rms_px, result.coverage, result.outliers, us, p.position.x,
 				             p.position.y, p.position.z, p.orientation.x, p.orientation.y, p.orientation.z,
 				             p.orientation.w);
+				for (int c = 0; c < 4; c++) {
+					std::fprintf(csv, ",%.4f", count[c] ? std::sqrt(sum2[c] / count[c]) : NAN);
+				}
+				for (int c = 0; c < 4; c++) {
+					std::fprintf(csv, ",%d", count[c]);
+				}
+				std::fprintf(csv, "\n");
 			}
 
 			if (!ok) {
