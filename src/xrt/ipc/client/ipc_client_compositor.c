@@ -435,6 +435,59 @@ swapchain_server_import(struct ipc_client_compositor *icc,
 }
 
 xrt_result_t
+ipc_client_compositor_import_metal_bootstrap_textures(
+    struct xrt_compositor_native *xcn,
+    const struct xrt_swapchain_create_info *info,
+    uint32_t image_count,
+    const struct ipc_metal_bootstrap_name *bootstrap_names,
+    struct xrt_swapchain **out_xsc)
+{
+	if (xcn == NULL || info == NULL || bootstrap_names == NULL || out_xsc == NULL || image_count == 0 ||
+	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct ipc_client_compositor *icc = ipc_client_compositor(&xcn->base);
+	if (!icc->ipc_c->imc.stream_socket) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+
+	struct ipc_arg_swapchain_metal_bootstrap args = {0};
+	args.image_count = image_count;
+	for (uint32_t i = 0; i < image_count; i++) {
+		const char *nul = memchr(bootstrap_names[i].name, '\0', sizeof(bootstrap_names[i].name));
+		if (nul == NULL || nul == bootstrap_names[i].name) {
+			return XRT_ERROR_INVALID_ARGUMENT;
+		}
+		size_t len = (size_t)(nul - bootstrap_names[i].name);
+		memcpy(args.names[i].name, bootstrap_names[i].name, len + 1);
+	}
+
+	uint32_t id = 0;
+	xrt_result_t xret = ipc_call_swapchain_import_metal_bootstrap(icc->ipc_c, info, &args, &id);
+	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_swapchain_import_metal_bootstrap");
+
+	struct ipc_client_swapchain *ics = U_TYPED_CALLOC(struct ipc_client_swapchain);
+	if (ics == NULL) {
+		(void)ipc_call_swapchain_destroy(icc->ipc_c, id);
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	ics->base.base.image_count = image_count;
+	ics->base.base.wait_image = ipc_compositor_swapchain_wait_image;
+	ics->base.base.acquire_image = ipc_compositor_swapchain_acquire_image;
+	ics->base.base.release_image = ipc_compositor_swapchain_release_image;
+	ics->base.base.destroy = ipc_compositor_swapchain_destroy;
+	ics->base.base.reference.count = 1;
+	ics->base.limited_unique_id = u_limited_unique_id_get();
+	ics->icc = icc;
+	ics->id = id;
+
+	*out_xsc = &ics->base.base;
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
 ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
                                            const struct xrt_swapchain_create_info *info,
                                            uint32_t image_count,

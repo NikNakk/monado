@@ -164,6 +164,18 @@ ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
                                            struct xrt_swapchain **out_xsc);
 
 /*!
+ * Wine/macOS bridge helper: import DXMT shared Metal textures directly by the
+ * bootstrap names of their MTLSharedTextureHandle Mach ports.
+ */
+xrt_result_t
+ipc_client_compositor_import_metal_bootstrap_textures(
+    struct xrt_compositor_native *xcn,
+    const struct xrt_swapchain_create_info *info,
+    uint32_t image_count,
+    const struct ipc_metal_bootstrap_name *bootstrap_names,
+    struct xrt_swapchain **out_xsc);
+
+/*!
  * Wine/macOS bridge helper: bind an already-existing DXMT MTLSharedEvent to a
  * native compositor semaphore by its bootstrap registration name.
  */
