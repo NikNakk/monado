@@ -82,6 +82,33 @@ if(APPLE)
 	target_compile_options(ipc_shared PRIVATE -fblocks)
 	target_link_libraries(ipc_shared PRIVATE "-framework Foundation" "-framework Metal")
 
+	# Small standalone client ABI for external processes (notably Chromium's XR
+	# and GPU processes). It deliberately exposes only opaque texture tokens and
+	# void* Metal texture objects; all NSXPC/MTLSharedTextureHandle details stay
+	# in Monado.
+	add_library(
+		monado_metal_xpc_client SHARED
+		shared/ipc_metal_xpc.h
+		shared/monado_metal_xpc_client.m
+		shared/monado_metal_xpc_client.h
+		)
+	target_include_directories(
+		monado_metal_xpc_client
+		PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
+		)
+	target_compile_options(monado_metal_xpc_client PRIVATE -fblocks)
+	target_link_libraries(
+		monado_metal_xpc_client
+		PRIVATE xrt-interfaces "-framework Foundation" "-framework Metal"
+		)
+	set_target_properties(
+		monado_metal_xpc_client PROPERTIES OUTPUT_NAME monado_metal_xpc_client
+		)
+	install(
+		TARGETS monado_metal_xpc_client
+		LIBRARY DESTINATION lib
+		)
+
 	if(XRT_FEATURE_SERVICE)
 		target_sources(
 			ipc_shared
