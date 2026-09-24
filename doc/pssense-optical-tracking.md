@@ -449,6 +449,19 @@ fault recurred without any yield.**
 - Open question: role (the second controller to scan) or device (this right controller). Test: make the right
   controller scan first.
 
+**2026-09-24 23:39, `sessions/20260924-233900-both-static-right-first`** (both still, full ring, keep-lock +
+tracking, `PSSENSE_LED_BOOTSTRAP_FIRST=R`, no background load, commit `4ace64d83`). **No fault either side.**
+
+- Right (first): baseline `2,1,3,1`, clean scans, lock at 16475 µs, 0.97 lit, 0 candidates while off.
+- Left (second): baseline `11,6,11,7` (includes the right ring), plateau 2–3 (lower because of the baseline),
+  lock at 15350 µs, 0 candidates while off. Narrow steps outside the window stayed at 0.00, so it wasn't stuck
+  on. Its 0.64 lit fraction is confounded by the right ring.
+- Neither controller faulted with the right controller scanning first. That fits a right-scans-second trigger,
+  but the fault has been intermittent, so this isn't conclusive. Replay recordings use `FIRST=R`.
+- **Tracker collapse with two lit rings:** 0 fused poses in 45 s (left 8 candidates, right 108), 5854 slow-sample
+  drops, while 186/188 captured frames were lit. At the same placement in `233615` the left alone had 1983
+  fused poses. The headline replay case for M1/M2.
+
 ## Joint multi-camera solve (plan item 3)
 
 Why the current tracker fails even with good light: each camera solves on its own (a fast path from
