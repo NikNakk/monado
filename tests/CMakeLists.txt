@@ -14,6 +14,7 @@ set(tests
     tests_lowpass_float
     tests_lowpass_integer
     tests_led_phase_bootstrap
+    tests_joint_pose_solver
     tests_pacing
     tests_pose_metrics
     tests_quatexpmap
@@ -71,6 +72,8 @@ target_link_libraries(tests_relation_chain PRIVATE aux_math)
 target_link_libraries(tests_pose PRIVATE aux_math)
 target_link_libraries(tests_pose_metrics PRIVATE constellation)
 target_link_libraries(tests_led_phase_bootstrap PRIVATE constellation)
+target_link_libraries(tests_joint_pose_solver PRIVATE constellation aux_math aux_tracking)
+target_include_directories(tests_joint_pose_solver PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
 target_include_directories(tests_led_phase_bootstrap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
 target_include_directories(tests_pose_metrics PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
 target_link_libraries(tests_quat_change_of_basis PRIVATE aux_math)

@@ -9,6 +9,8 @@ add_library(
 	correspondence_search.h
 	image_point_sort.cpp
 	image_point_sort.h
+	joint_pose_solver.cpp
+	joint_pose_solver.hpp
 	led_search_model.c
 	led_search_model.h
 	pose_metrics.c
