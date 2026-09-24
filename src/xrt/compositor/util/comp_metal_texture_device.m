@@ -9,6 +9,13 @@
 #import <Metal/Metal.h>
 #import <IOSurface/IOSurface.h>
 
+#include <mach/mach.h>
+#include <servers/bootstrap.h>
+
+@interface MTLSharedTextureHandle (MonadoMachPort)
+- (instancetype)initWithMachPort:(mach_port_t)port;
+@end
+
 #include "util/comp_metal_texture_device.h"
 #include "util/u_logging.h"
 #include "vk/vk_helpers.h"
@@ -136,6 +143,91 @@ xrt_usage_to_metal(enum xrt_swapchain_usage_bits bits)
 	if ((bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) usage |= MTLTextureUsageShaderWrite;
 	if ((bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT) != 0) usage |= MTLTextureUsagePixelFormatView;
 	return usage;
+}
+
+bool
+comp_metal_texture_create_from_bootstrap_name_for_vk_device(struct vk_bundle *vk,
+                                                            const struct xrt_swapchain_create_info *info,
+                                                            const char *bootstrap_name,
+                                                            void **out_texture)
+{
+	if (vk == NULL || info == NULL || bootstrap_name == NULL || bootstrap_name[0] == '\0' || out_texture == NULL) {
+		return false;
+	}
+	*out_texture = NULL;
+	if (info->array_size == 0 || info->face_count != 1 || info->mip_count != 1 || info->sample_count != 1) {
+		U_LOG_E("Metal bootstrap import only supports 2D single-mip single-sample textures: array_size=%u",
+		        info->array_size);
+		return false;
+	}
+
+	MTLPixelFormat pixel_format = vk_format_to_metal_color_format(info->format);
+	if (pixel_format == MTLPixelFormatInvalid) {
+		U_LOG_E("Metal bootstrap import unsupported Vulkan format=%lld", (long long)info->format);
+		return false;
+	}
+
+	id<MTLDevice> vk_device = nil;
+	if (!get_vk_metal_device(vk, &vk_device)) {
+		return false;
+	}
+
+	mach_port_t bootstrap = MACH_PORT_NULL;
+	if (task_get_bootstrap_port(mach_task_self(), &bootstrap) != KERN_SUCCESS || bootstrap == MACH_PORT_NULL) {
+		U_LOG_E("Metal bootstrap import could not obtain bootstrap port for '%s'", bootstrap_name);
+		return false;
+	}
+
+	mach_port_t texture_port = MACH_PORT_NULL;
+	kern_return_t kr = bootstrap_look_up(bootstrap, (char *)bootstrap_name, &texture_port);
+	mach_port_deallocate(mach_task_self(), bootstrap);
+	if (kr != KERN_SUCCESS || texture_port == MACH_PORT_NULL) {
+		U_LOG_E("Metal bootstrap lookup failed for '%s': kr=%d", bootstrap_name, (int)kr);
+		return false;
+	}
+
+	@autoreleasepool {
+		MTLSharedTextureHandle *handle = [[MTLSharedTextureHandle alloc] initWithMachPort:texture_port];
+		if (handle == nil) {
+			mach_port_deallocate(mach_task_self(), texture_port);
+			U_LOG_E("Could not reconstruct MTLSharedTextureHandle for '%s'", bootstrap_name);
+			return false;
+		}
+
+		id<MTLTexture> texture = [vk_device newSharedTextureWithHandle:handle];
+		[handle release];
+		if (texture == nil) {
+			U_LOG_E("Could not reopen DXMT shared texture '%s' on Vulkan MTLDevice", bootstrap_name);
+			return false;
+		}
+
+		MTLTextureType expected_type = info->array_size > 1 ? MTLTextureType2DArray : MTLTextureType2D;
+		if (texture.device != vk_device || texture.width != info->width || texture.height != info->height ||
+		    texture.arrayLength != info->array_size || texture.mipmapLevelCount != 1 || texture.sampleCount != 1 ||
+		    texture.pixelFormat != pixel_format || texture.textureType != expected_type) {
+			U_LOG_E("DXMT shared texture geometry mismatch for '%s': got=%lux%lu array=%lu type=%lu format=%lu expected=%ux%u array=%u type=%lu format=%lu",
+			        bootstrap_name,
+			        (unsigned long)texture.width,
+			        (unsigned long)texture.height,
+			        (unsigned long)texture.arrayLength,
+			        (unsigned long)texture.textureType,
+			        (unsigned long)texture.pixelFormat,
+			        info->width,
+			        info->height,
+			        info->array_size,
+			        (unsigned long)expected_type,
+			        (unsigned long)pixel_format);
+			[texture release];
+			return false;
+		}
+
+		U_LOG_I("DXMT shared Metal texture imported by bootstrap name: '%s' texture=%p array_size=%u",
+		        bootstrap_name,
+		        (__bridge void *)texture,
+		        info->array_size);
+		*out_texture = (__bridge void *)texture;
+		return true;
+	}
 }
 
 bool

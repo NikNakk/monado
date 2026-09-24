@@ -45,6 +45,16 @@
 		]
 	},
 
+	"swapchain_import_metal_bootstrap": {
+		"in": [
+			{"name": "info", "type": "struct xrt_swapchain_create_info"},
+			{"name": "args", "type": "struct ipc_arg_swapchain_metal_bootstrap"}
+		],
+		"out": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	},
+
 	"swapchain_import_iosurface": {
 		"in": [
 			{"name": "info", "type": "struct xrt_swapchain_create_info"},

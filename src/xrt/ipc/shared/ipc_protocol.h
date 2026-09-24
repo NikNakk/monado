@@ -397,6 +397,17 @@ struct ipc_metal_bootstrap_name
 };
 
 /*!
+ * Wine/DXMT array-texture transport. Each name identifies the Mach port of an
+ * existing MTLSharedTextureHandle registered by DXMT in the user's bootstrap
+ * namespace. The service reopens the same storage; no pixel copy is involved.
+ */
+struct ipc_arg_swapchain_metal_bootstrap
+{
+	uint32_t image_count;
+	struct ipc_metal_bootstrap_name names[XRT_MAX_SWAPCHAIN_IMAGES];
+};
+
+/*!
  * Bounded byte chunk used to copy the large ipc_shared_memory structure to
  * Wine clients without placing the whole structure in a generated IPC reply
  * on the Windows thread stack.

@@ -37,6 +37,12 @@ comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
                                                           uint32_t iosurface_id,
                                                           void **out_texture);
 
+bool
+comp_metal_texture_create_from_bootstrap_name_for_vk_device(struct vk_bundle *vk,
+                                                            const struct xrt_swapchain_create_info *info,
+                                                            const char *bootstrap_name,
+                                                            void **out_texture);
+
 void
 comp_metal_texture_release(void *texture);
 
