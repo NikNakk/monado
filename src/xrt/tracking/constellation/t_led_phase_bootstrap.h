@@ -11,7 +11,8 @@
  * This bootstrap instead scores each commanded LED phase by the raw blob counts reported by every camera.
  * It first scans the whole camera period with a wide pulse, then scans the neighbourhood of the best wide
  * phase with a narrow pulse to find the edges of the lit window, and finally locks the pulse centre in the
- * middle of that window. It holds no locks of its own; the caller serialises every call.
+ * middle of that window. Each scan starts with one step with the LEDs dark to measure every camera's background
+ * blob count (windows, lamps, reflections); a frame is lit only when it sees enough blobs above that. It holds no locks of its own; the caller serialises every call.
  *
  * @author Nick Kennedy
  * @ingroup tracking
@@ -42,6 +43,8 @@ enum t_led_phase_bootstrap_state
 	T_LED_PHASE_BOOTSTRAP_NARROW_SCAN = 2,
 	//! Holding the pulse centred in the measured lit window.
 	T_LED_PHASE_BOOTSTRAP_LOCKED = 3,
+	//! LEDs held dark for one step at the start of a scan, measuring each camera's background blob count.
+	T_LED_PHASE_BOOTSTRAP_BASELINE = 4,
 };
 
 struct t_led_phase_bootstrap_options
@@ -73,7 +76,7 @@ struct t_led_phase_bootstrap_options
 	//! Extra exposures to wait for late blob reports before scoring a step.
 	uint32_t grace_frames;
 
-	//! A camera frame counts as lit when it reports at least this many blobs.
+	//! A camera frame counts as lit when it reports at least this many blobs above that camera's background.
 	uint32_t min_blobs_per_camera;
 	//! The best step must reach this score (camera-equivalents of lit frames) to be accepted.
 	float min_peak_score;
@@ -126,6 +129,10 @@ struct t_led_phase_bootstrap
 	int64_t window_end_ns;
 	uint64_t blob_sum[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
 
+	//! Largest blob count each camera reported during the dark baseline step of the current scan.
+	uint32_t baseline_blobs[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+	uint32_t baseline_reported[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+
 	//! Result of the last completed bootstrap.
 	bool have_lock;
 	time_duration_ns lit_start_ns;
@@ -172,11 +179,11 @@ t_led_phase_bootstrap_push_blob_count(struct t_led_phase_bootstrap *b,
                                       int64_t exposure_timestamp_ns,
                                       uint32_t blob_count);
 
-//! True while the bootstrap wants the IR emitters lit (scanning or locked).
+//! True while the bootstrap wants the IR emitters lit (scanning with a pulse, or locked).
 static inline bool
 t_led_phase_bootstrap_leds_enabled(const struct t_led_phase_bootstrap *b)
 {
-	return b->state != T_LED_PHASE_BOOTSTRAP_IDLE;
+	return b->state != T_LED_PHASE_BOOTSTRAP_IDLE && b->state != T_LED_PHASE_BOOTSTRAP_BASELINE;
 }
 
 //! True when idle and not backing off after a failed scan, i.e. the caller may call start.
@@ -190,7 +197,8 @@ t_led_phase_bootstrap_ready_to_scan(const struct t_led_phase_bootstrap *b)
 static inline bool
 t_led_phase_bootstrap_is_scanning(const struct t_led_phase_bootstrap *b)
 {
-	return b->state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN || b->state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
+	return b->state == T_LED_PHASE_BOOTSTRAP_BASELINE || b->state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN ||
+	       b->state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
 }
 
 //! Wrap an offset into [0, period).

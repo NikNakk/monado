@@ -14,6 +14,7 @@ from psvr2_sense_session_score import parse_log, render_text, score_session  # n
 
 LOG = """\
  INFO [pssense_create] LED phase bootstrap enabled (replaces pose-driven LED sync refinement)
+ INFO [finish_baseline] LED_BOOTSTRAP side=L event=baseline blobs=7,0,8,1 reported=8,8,8,8
 \x1b[32m INFO \x1b[0m[begin_scan] LED_BOOTSTRAP side=L event=scan_start stage=wide steps=17 start_us=0.0 step_us=1000.0 pulse_us=2100.0 period_us=16683.0
  INFO [finish_step] LED_BOOTSTRAP side=L event=step stage=wide step=1/17 fudge_us=0.0 pulse_us=2100.0 score=0.000 mean_blobs=0.50 lit=0/8,0/8,0/8,0/8
  INFO [finish_step] LED_BOOTSTRAP side=L event=step stage=wide step=2/17 fudge_us=1000.0 pulse_us=2100.0 score=3.750 mean_blobs=19.00 lit=8/8,8/8,7/8,7/8
@@ -47,6 +48,7 @@ class SessionScoreTest(unittest.TestCase):
         result = parse_log(LOG.splitlines(True))
         left = result["sides"]["L"]
         self.assertEqual(left["bootstrap"]["scans_started"], 1)
+        self.assertEqual(left["bootstrap"]["baselines"], ["7,0,8,1"])
         self.assertEqual(len(left["bootstrap"]["locks"]), 1)
         self.assertAlmostEqual(left["bootstrap"]["locks"][0]["lock_fudge_us"], 16283.0)
         self.assertEqual(len(left["bootstrap"]["last_scan_steps"]["wide"]), 2)

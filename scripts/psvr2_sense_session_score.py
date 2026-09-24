@@ -34,7 +34,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 POSITION_TRACKED_BIT = 1 << 5
-BOOTSTRAP_STATES = {0: "idle", 1: "wide", 2: "narrow", 3: "locked"}
+BOOTSTRAP_STATES = {0: "idle", 1: "wide", 2: "narrow", 3: "locked", 4: "baseline"}
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 KV_RE = re.compile(r"(\w+)=(\([^)]*\)|\S+)")
@@ -166,6 +166,7 @@ def summarise_bootstrap(events: list[dict]) -> dict:
         "lost": 0,
         "locked_status": [],
         "last_scan_steps": {},
+        "baselines": [],
     }
     steps: dict[str, list] = defaultdict(list)
     for kv in events:
@@ -184,6 +185,8 @@ def summarise_bootstrap(events: list[dict]) -> dict:
                     "lit": kv.get("lit"),
                 }
             )
+        elif event == "baseline":
+            summary["baselines"].append(kv.get("blobs"))
         elif event == "scan_failed":
             summary["scans_failed"].append(kv.get("reason"))
         elif event == "locked":
@@ -431,6 +434,8 @@ def render_text(result: dict) -> str:
                 f"({fmt(lock.get('window_us'), 0)} us), centre {fmt(lock.get('centre_us'), 0)} us, "
                 f"fudge {fmt(lock.get('lock_fudge_us'), 0)} us, pulse {fmt(lock.get('lock_pulse_us'), 0)} us"
             )
+        if b.get("baselines"):
+            lines.append(f"    dark baseline blobs per camera: {', '.join(b['baselines'])}")
         if b["locked_lit_fraction"]:
             lines.append(f"    locked lit fraction: median {fmt(b['locked_lit_fraction']['median'])}")
         for stage, steps in b["last_scan_steps"].items():

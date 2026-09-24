@@ -58,25 +58,27 @@ is solved, which now means a multi-camera fused pose. Its search range on macOS 
 blob count every camera reports. The constellation tracker reports blob counts for every frame through the
 optional `push_camera_blob_count` device callback.
 
+0. **Dark baseline.** The LEDs are held off for one step (20 exposures) and each camera's highest blob count
+   is recorded. A frame counts as lit only with at least 3 blobs above its camera's baseline.
 1. **Wide scan.** A 2.1 ms pulse is stepped in 1 ms steps across the whole camera period (17 steps). Each
    step waits 8 exposures to settle, measures 8, then allows 4 of grace for late reports. That is 20
    exposures, about 0.33 s per step.
 2. The best step (circularly smoothed) must score at least 1.0 and beat the median step by 0.75. The score
-   is the sum over cameras of the fraction of frames with at least 3 blobs. Otherwise the scan fails and
+   is the sum over cameras of the fraction of lit frames. Otherwise the scan fails and
    the controller idles for 60 exposures.
 3. **Narrow scan.** A 450 µs pulse is stepped in 250 µs steps from 1.5 ms before to 1.5 ms after the best
    wide pulse (21 steps). The lit run is the contiguous set of steps at or above half the peak score.
 4. **Lock.** The pulse is centred in the lit run, 1.0 ms wide by default (`PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID`,
    50 µs per id, default 20). If no camera sees at least 3 blobs for 300 exposures (~5 s), it rescans.
 
-A full bootstrap takes about 13 s. Only one controller scans at a time, because blob counts cannot tell
+A full bootstrap takes about 13.5 s. Only one controller scans at a time, because blob counts cannot tell
 the controllers apart. The other controller holds its LEDs off, and its own state is frozen, until the scan
 finishes. The fixed macOS `PSSENSE_TIMING_FUDGE_100US` (3.6 ms) is still added, but it doesn't matter
 because the scan covers the whole period. With the variable unset, behaviour is unchanged.
 
-Log lines use the form `LED_BOOTSTRAP side=L event=...`. The events are `scan_start`, `step`,
+Log lines use the form `LED_BOOTSTRAP side=L event=...`. The events are `baseline`, `scan_start`, `step`,
 `wide_result`, `locked`, `locked_status` (every 300 exposures), `scan_failed` and `lost`. The
-`psvr2-constellation` CSV gains the columns `led_bootstrap_state` (0 idle, 1 wide, 2 narrow, 3 locked),
+`psvr2-constellation` CSV gains the columns `led_bootstrap_state` (0 idle, 1 wide, 2 narrow, 3 locked, 4 baseline),
 `led_bootstrap_fudge_us`, `led_bootstrap_pulse_us`, `led_bootstrap_scans` and `led_bootstrap_locks`.
 
 Unit tests: `tests/tests_led_phase_bootstrap.cpp` simulates a controller with unknown latency, including
@@ -175,6 +177,26 @@ plus `PSVR2_ROBUST_CLOCK=1`). **Passes the static acceptance criteria.**
 - The lock fudge was 14350 µs in the previous run and 15350 µs here. Robust clock changes the absolute
   `hw2mono_vts` mapping (minimum-delay instead of exponential), so a shift between these two configurations
   is expected. Repeatability still has to be judged across restarts with the same configuration.
+
+**2026-09-24, `sessions/20260924-180054-bootstrap-slow-left`** (60 s: still for 15 s, then slow moves between
+held positions; commit `6f62ebf11`). The lock held (1 scan, 1 lock, 0 lost), but it was **placed about 1 ms
+off-centre**, because a background source fooled the scoring.
+
+- Cameras 0 and 2 could see bright window panes, which gave 3–7 compact blobs with the LEDs dark. Camera 2
+  was "lit" in 56/56 wide-scan frames and in the idle frames. Every wide and narrow step therefore scored
+  at least 2.0, and the narrow "half the peak" rule accepted the whole floor: lit window 12500–817 µs
+  (5450 µs, `narrow_edge_unbounded`), lock at 14725 µs. The real plateau was 15750–16250 µs.
+- Locked lit reports per 5 s window were 76, 85, 87, 79, 80, 51, 71, 91 and 78% (median 0.79). This is
+  inflated by the two background cameras. Captured lit frames while locked: camera 1 at 355/469 and
+  camera 3 at 195/468. The movement took the controller out of some views.
+- The tracker dropped 3219 slow samples (about 100 in the static runs). Correspondence search can't keep
+  up with a moving controller; this has to be addressed with the pose-solver work.
+- Fix (bootstrap, still opt-in): every scan now starts with a **dark baseline step**. The LEDs are held off
+  for one 20-exposure step (state 4, `baseline` in the CSV), and each camera's highest blob count is
+  logged as `event=baseline blobs=...`. From then on a frame is lit only when it has at least 3 blobs above
+  that camera's baseline. This applies to scan scoring, the locked lit fraction and loss detection alike.
+  A scan now takes about 13.5 s. The baseline is fixed for the scan and the lock that follows; if the
+  headset turns so the background changes, it is only re-measured on the next rescan.
 
 ## Session tools
 

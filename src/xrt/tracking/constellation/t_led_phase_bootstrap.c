@@ -47,6 +47,7 @@ state_name(enum t_led_phase_bootstrap_state state)
 	case T_LED_PHASE_BOOTSTRAP_WIDE_SCAN: return "wide";
 	case T_LED_PHASE_BOOTSTRAP_NARROW_SCAN: return "narrow";
 	case T_LED_PHASE_BOOTSTRAP_LOCKED: return "locked";
+	case T_LED_PHASE_BOOTSTRAP_BASELINE: return "baseline";
 	default: return "unknown";
 	}
 }
@@ -57,6 +58,21 @@ set_output(struct t_led_phase_bootstrap *b, time_duration_ns fudge_offset_ns, ti
 	b->fudge_offset_ns = t_led_phase_bootstrap_wrap(fudge_offset_ns, b->period_ns);
 	b->blink_ns = blink_ns;
 	b->output_generation++;
+}
+
+static void
+reset_step_window(struct t_led_phase_bootstrap *b)
+{
+	memset(b->blob_sum, 0, sizeof(b->blob_sum));
+	b->exposures_in_step = 0;
+	b->window_open = false;
+	b->window_pending = false;
+}
+
+static bool
+frame_lit(const struct t_led_phase_bootstrap *b, uint32_t camera_index, uint32_t blob_count)
+{
+	return blob_count >= b->baseline_blobs[camera_index] + b->options.min_blobs_per_camera;
 }
 
 static time_duration_ns
@@ -79,10 +95,7 @@ begin_step(struct t_led_phase_bootstrap *b)
 	step->fudge_offset_ns = step_fudge(b, b->step_index);
 	step->blink_ns = current_scan_blink(b);
 
-	memset(b->blob_sum, 0, sizeof(b->blob_sum));
-	b->exposures_in_step = 0;
-	b->window_open = false;
-	b->window_pending = false;
+	reset_step_window(b);
 
 	set_output(b, step->fudge_offset_ns, step->blink_ns);
 }
@@ -231,8 +244,30 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 }
 
 static void
+begin_wide_scan(struct t_led_phase_bootstrap *b)
+{
+	uint32_t count = (uint32_t)((b->period_ns + b->options.wide_step_ns - 1) / b->options.wide_step_ns);
+	begin_scan(b, T_LED_PHASE_BOOTSTRAP_WIDE_SCAN, 0, b->options.wide_step_ns, count);
+}
+
+static void
+finish_baseline(struct t_led_phase_bootstrap *b)
+{
+	LOG_I(b,
+	      "LED_BOOTSTRAP side=%c event=baseline blobs=%u,%u,%u,%u reported=%u,%u,%u,%u", b->options.label,
+	      b->baseline_blobs[0], b->baseline_blobs[1], b->baseline_blobs[2], b->baseline_blobs[3],
+	      b->baseline_reported[0], b->baseline_reported[1], b->baseline_reported[2], b->baseline_reported[3]);
+	begin_wide_scan(b);
+}
+
+static void
 finish_step(struct t_led_phase_bootstrap *b)
 {
+	if (b->state == T_LED_PHASE_BOOTSTRAP_BASELINE) {
+		finish_baseline(b);
+		return;
+	}
+
 	struct t_led_phase_bootstrap_step *step = &b->steps[b->step_index];
 
 	step->score = 0.0f;
@@ -320,8 +355,12 @@ t_led_phase_bootstrap_start(struct t_led_phase_bootstrap *b, time_duration_ns pe
 	b->scans_attempted++;
 	b->idle_backoff_frames = 0;
 
-	uint32_t count = (uint32_t)((period_ns + b->options.wide_step_ns - 1) / b->options.wide_step_ns);
-	begin_scan(b, T_LED_PHASE_BOOTSTRAP_WIDE_SCAN, 0, b->options.wide_step_ns, count);
+	// Measure the background with the LEDs dark before scanning.
+	b->state = T_LED_PHASE_BOOTSTRAP_BASELINE;
+	memset(b->baseline_blobs, 0, sizeof(b->baseline_blobs));
+	memset(b->baseline_reported, 0, sizeof(b->baseline_reported));
+	reset_step_window(b);
+	b->output_generation++;
 }
 
 void
@@ -355,6 +394,7 @@ t_led_phase_bootstrap_push_exposure(struct t_led_phase_bootstrap *b, int64_t exp
 		}
 		break;
 
+	case T_LED_PHASE_BOOTSTRAP_BASELINE:
 	case T_LED_PHASE_BOOTSTRAP_WIDE_SCAN:
 	case T_LED_PHASE_BOOTSTRAP_NARROW_SCAN:
 		b->exposures_in_step++;
@@ -383,7 +423,7 @@ t_led_phase_bootstrap_push_blob_count(struct t_led_phase_bootstrap *b,
 		return;
 	}
 
-	bool lit = blob_count >= b->options.min_blobs_per_camera;
+	bool lit = frame_lit(b, camera_index, blob_count);
 
 	if (b->state == T_LED_PHASE_BOOTSTRAP_LOCKED) {
 		b->locked_reports++;
@@ -409,6 +449,12 @@ t_led_phase_bootstrap_push_blob_count(struct t_led_phase_bootstrap *b,
 		return;
 	}
 	if (exposure_timestamp_ns < b->window_start_ns || exposure_timestamp_ns >= b->window_end_ns) {
+		return;
+	}
+
+	if (b->state == T_LED_PHASE_BOOTSTRAP_BASELINE) {
+		b->baseline_reported[camera_index]++;
+		b->baseline_blobs[camera_index] = MAX(b->baseline_blobs[camera_index], blob_count);
 		return;
 	}
 
