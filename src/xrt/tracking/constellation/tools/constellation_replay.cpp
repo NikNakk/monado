@@ -14,6 +14,9 @@
 #include "t_constellation_tracker_dataset.hpp"
 #include "joint_pose_solver.hpp"
 #include "stereo_bootstrap.hpp"
+#include "t_constellation_tracker.h"
+
+#include "xrt/xrt_frame.h"
 
 #include "math/m_api.h"
 
@@ -563,22 +566,239 @@ replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded
 	return 0;
 }
 
+/*
+ *
+ * Tracker replay: recorded blobs through the real ConstellationTracker (joint path, deterministic).
+ *
+ */
+
+struct FakeOrigin
+{
+	t_constellation_tracker_tracking_source base;
+	//! Camera 0's recorded world pose by timestamp; the origin is placed at camera 0.
+	std::vector<std::pair<int64_t, xrt_pose>> poses;
+};
+
+void
+fake_origin_get(t_constellation_tracker_tracking_source *source, int64_t when_ns, xrt_space_relation *out)
+{
+	FakeOrigin *origin = (FakeOrigin *)source;
+	*out = XRT_SPACE_RELATION_ZERO;
+	if (origin->poses.empty()) {
+		return;
+	}
+	auto it = std::lower_bound(origin->poses.begin(), origin->poses.end(), when_ns,
+	                           [](const std::pair<int64_t, xrt_pose> &p, int64_t t) { return p.first < t; });
+	if (it == origin->poses.end() || (it != origin->poses.begin() && when_ns - (it - 1)->first < it->first - when_ns)) {
+		it = it == origin->poses.begin() ? it : it - 1;
+	}
+	out->pose = it->second;
+	out->relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_POSITION_VALID_BIT |
+	                                                 XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	                                                 XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
+	                                                 XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+}
+
+//! Stands in for the device driver: accepts every pushed sample and predicts the last one while it is recent.
+struct FakeDevice
+{
+	t_constellation_tracker_device base;
+	t_constellation_tracker_tracking_source source;
+	std::vector<t_constellation_tracker_led> leds; // XR convention, as a driver provides them
+	t_constellation_device_id_t id{XRT_CONSTELLATION_INVALID_DEVICE_ID};
+
+	bool have_last{false};
+	t_constellation_tracker_sample last{};
+	uint32_t pushes{0};
+	std::map<uint32_t, uint32_t> joint_cameras;
+	Stats rms_px;
+	std::vector<std::pair<int64_t, xrt_vec3>> positions;
+};
+
+FakeDevice *
+fake_device_of_source(t_constellation_tracker_tracking_source *source)
+{
+	return (FakeDevice *)((char *)source - offsetof(FakeDevice, source));
+}
+
+bool
+fake_device_push(t_constellation_tracker_device *device, t_constellation_tracker_sample *sample)
+{
+	FakeDevice *fake = (FakeDevice *)device;
+	fake->pushes++;
+	fake->joint_cameras[sample->joint_camera_count]++;
+	fake->rms_px.add(sample->metrics.reprojection_error);
+	fake->positions.push_back({sample->timestamp_ns, sample->pose.position});
+	fake->last = *sample;
+	fake->have_last = true;
+	return true;
+}
+
+void
+fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns, xrt_space_relation *out)
+{
+	FakeDevice *fake = fake_device_of_source(source);
+	*out = XRT_SPACE_RELATION_ZERO;
+	if (fake->have_last && std::llabs(when_ns - fake->last.timestamp_ns) < 100'000'000) {
+		out->pose = fake->last.pose;
+		out->relation_flags = (xrt_space_relation_flags)(XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		                                                 XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+		                                                 XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	}
+}
+
+int
+replay_tracker(const DatasetReader &dataset)
+{
+	if (dataset.mosaics.empty() || dataset.samples.empty()) {
+		std::fprintf(stderr, "nothing to replay\n");
+		return 1;
+	}
+	const DatasetMosaic &mosaic = dataset.mosaics[0];
+	const size_t camera_count = mosaic.camera_calibrations.size();
+
+	// Rig geometry from the first exposure that has every camera's pose.
+	std::vector<Exposure> exposures = group_exposures(dataset.samples);
+	std::vector<std::optional<xrt_pose>> first_world(camera_count);
+	for (const Exposure &exposure : exposures) {
+		size_t have = 0;
+		std::vector<std::optional<xrt_pose>> world(camera_count);
+		for (const CameraSample *sample : exposure.samples) {
+			if (sample->camera_index < camera_count && sample->Txr_world_cam.has_value()) {
+				world[sample->camera_index] = sample->Txr_world_cam;
+				have++;
+			}
+		}
+		if (have == camera_count && world[0].has_value()) {
+			first_world = world;
+			break;
+		}
+	}
+	if (!first_world[0].has_value()) {
+		std::fprintf(stderr, "no exposure with every camera's pose\n");
+		return 1;
+	}
+
+	FakeOrigin origin{};
+	origin.base.get_tracked_pose = fake_origin_get;
+	for (const CameraSample &sample : dataset.samples) {
+		if (sample.camera_index == 0 && sample.Txr_world_cam.has_value()) {
+			origin.poses.push_back({sample.timestamp_ns, sample.Txr_world_cam.value()});
+		}
+	}
+	std::sort(origin.poses.begin(), origin.poses.end(),
+	          [](const auto &a, const auto &b) { return a.first < b.first; });
+
+	t_constellation_tracker_params params{};
+	params.flags = T_CONSTELLATION_TRACKER_FLAGS_DETERMINISTIC;
+	params.num_mosaics = 1;
+	params.mosaics[0].tracking_origin = &origin.base;
+	params.mosaics[0].num_cameras = camera_count;
+	xrt_pose inverse_cam0;
+	math_pose_invert(&first_world[0].value(), &inverse_cam0);
+	for (size_t c = 0; c < camera_count; c++) {
+		params.mosaics[0].cameras[c].calibration = mosaic.camera_calibrations[c];
+		math_pose_transform(&inverse_cam0, &first_world[c].value(), &params.mosaics[0].cameras[c].pose_in_origin);
+		params.mosaics[0].cameras[c].has_concrete_pose = true;
+	}
+
+	setenv("CONSTELLATION_TRACKER_JOINT", "1", 1);
+	xrt_frame_context xfctx{};
+	t_constellation_tracker *tracker = nullptr;
+	if (t_constellation_tracker_create(&xfctx, &params, &tracker) != 0) {
+		std::fprintf(stderr, "failed to create tracker\n");
+		return 1;
+	}
+
+	std::vector<std::unique_ptr<FakeDevice>> fakes;
+	for (const DatasetDevice &device : dataset.devices) {
+		auto fake = std::make_unique<FakeDevice>();
+		fake->base.push_constellation_tracker_sample = fake_device_push;
+		fake->base.push_camera_blob_count = nullptr;
+		fake->source.get_tracked_pose = fake_device_get;
+		// The recorded model is in the tracker's OpenCV convention; drivers hand over OpenXR.
+		fake->leds = device.leds;
+		for (t_constellation_tracker_led &led : fake->leds) {
+			led.position.y = -led.position.y;
+			led.position.z = -led.position.z;
+			led.normal.y = -led.normal.y;
+			led.normal.z = -led.normal.z;
+		}
+		t_constellation_tracker_device_params dparams{};
+		dparams.led_model = device.led_model;
+		dparams.led_model.leds = fake->leds.data();
+		dparams.led_model.led_count = fake->leds.size();
+		dparams.led_model.compute_led_visibility = nullptr;
+		dparams.tracking_source = &fake->source;
+		t_constellation_tracker_add_device(tracker, &dparams, &fake->base, &fake->id);
+		fakes.push_back(std::move(fake));
+	}
+
+	// Feed every camera's frames in time order through the normal blob sinks.
+	std::vector<const CameraSample *> order;
+	for (const CameraSample &sample : dataset.samples) {
+		order.push_back(&sample);
+	}
+	std::stable_sort(order.begin(), order.end(), [](const CameraSample *a, const CameraSample *b) {
+		return a->timestamp_ns != b->timestamp_ns ? a->timestamp_ns < b->timestamp_ns
+		                                          : a->camera_index < b->camera_index;
+	});
+	auto start = std::chrono::steady_clock::now();
+	std::vector<t_blob> blobs;
+	for (const CameraSample *sample : order) {
+		if (sample->camera_index >= camera_count) {
+			continue;
+		}
+		blobs.assign(sample->blobs, sample->blobs + sample->blob_count);
+		for (t_blob &b : blobs) {
+			b.matched_device_id = XRT_CONSTELLATION_INVALID_DEVICE_ID;
+			b.matched_device_led_id = XRT_CONSTELLATION_INVALID_LED_ID;
+		}
+		t_blob_observation observation{};
+		observation.source = nullptr;
+		observation.id = sample->id;
+		observation.timestamp_ns = sample->timestamp_ns;
+		observation.blobs = blobs.data();
+		observation.num_blobs = (uint32_t)blobs.size();
+		t_blob_sink *sink = params.mosaics[0].cameras[sample->camera_index].blob_sink;
+		sink->push_blobs(sink, &observation);
+	}
+	double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+
+	xrt_frame_context_destroy_nodes(&xfctx);
+
+	std::printf("tracker replay (joint path): %zu frames in %.2f s (%.0f us per exposure)\n", order.size(), seconds,
+	            1e6 * seconds / (double)std::max<size_t>(1, exposures.size()));
+	for (auto &fake : fakes) {
+		std::printf("  device %d: %u pushed of %zu exposures; cameras:", (int)fake->id, fake->pushes,
+		            exposures.size());
+		for (const auto &[cams, count] : fake->joint_cameras) {
+			std::printf(" %u:%u", cams, count);
+		}
+		std::printf("; rms px p50 %.3f p95 %.3f\n", fake->rms_px.pct(0.5), fake->rms_px.pct(0.95));
+	}
+	return 0;
+}
+
 } // namespace
 
 int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
+	bool tracker = false;
 	bool seed_recorded = false;
 	const char *csv = nullptr;
 	for (int i = 2; i < argc; i++) {
 		std::string arg = argv[i];
 		if (arg == "--m1") {
 			m1 = true;
+		} else if (arg == "--tracker") {
+			tracker = true;
 		} else if (arg == "--seed-recorded") {
 			seed_recorded = true;
 		} else if (arg == "--csv" && i + 1 < argc) {
@@ -591,6 +811,9 @@ main(int argc, char **argv)
 		int status = summarise(dataset);
 		if (m1) {
 			status = replay_m1(dataset, csv, seed_recorded) != 0 ? 1 : status;
+		}
+		if (tracker) {
+			status = replay_tracker(dataset) != 0 ? 1 : status;
 		}
 		return status;
 	} catch (const std::exception &e) {
