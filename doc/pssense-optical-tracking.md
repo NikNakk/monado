@@ -14,8 +14,20 @@ Background and earlier results: `doc/psvr2-camera-calibration.md` and `doc/pssen
     accepts it. It is fine for LED illumination work, but it is the calibration that could not bootstrap
     poses.
   - `psvr2-mode4-forced-joint-rig.{json,log}` and `psvr2-native-model-comparison.json`: diagnostics only.
-- The mode-4 ChArUco calibration therefore has to be recaptured before pose work resumes. Record everything
-  under `~/Code/psvr2-datasets`, never `/tmp`.
+- The original 21-pose mode-4 ChArUco capture (`char-mode-12`) was later recovered from a zip. It is unpacked
+  at `~/Code/psvr2-datasets/calibration/20260913-char-mode-12/`, and the direct solve was re-run there on
+  2026-09-24 (`psvr2-mode4-charuco-direct.json`, `direct-solve.log`). Fisheye RMS was 0.44 / 0.45 / 0.45 /
+  0.35 px, and the upper cameras' leave-one-pose-out RMS was 0.47 / 0.38 px. The joint rig reached 0.50 px
+  RMS (median 0.30, p95 0.93). The lower baseline is 81.0 mm and the lower-to-upper baselines are 75.3 and
+  74.9 mm.
+- The reviewed visible-mode rig is still lost, so the candidate can't be aligned into visible camera0 as on
+  13 September. `scripts/psvr2_tracking_charuco_native_origin.py` builds a `psvr2-constellation` calibration
+  with **native mode-4 camera0 as the tracking origin** instead:
+  `psvr2-mode4-charuco-native-origin-candidate.json`. The geometry between cameras, and so every
+  camera-relative controller pose, matches the aligned candidate; only the origin's placement relative to
+  the headset differs. That placement was never trusted anyway. Sense held-out validation must be repeated,
+  because the `sense-validation` captures were lost. Use this candidate, not the provisional file, for pose
+  work. Record everything under `~/Code/psvr2-datasets`, never `/tmp`.
 - The immediate blocker for live tracking is illumination. The controller LEDs are usually dark when the
   cameras expose (see "Static LED phase sweep" in the calibration doc).
 
@@ -78,14 +90,14 @@ cameras can see it:
 ```sh
 cmake --build build-sense --target cli
 scripts/psvr2_sense_session.sh bootstrap-static-left \
-  ~/Code/psvr2-datasets/old/psvr2-mode4-tracking-calibration-provisional.json 45 \
+  ~/Code/psvr2-datasets/calibration/20260913-char-mode-12/psvr2-mode4-charuco-native-origin-candidate.json 45 \
   "left only, static, ring facing headset"
 ```
 
 Then repeat with slow movement between held positions, and then with both controllers awake.
 
-Acceptance, judged from `score.txt`. Pose numbers don't matter yet, because this calibration is known to be
-poor:
+Acceptance, judged from `score.txt`. The LED bootstrap does not use the calibration at all; pose numbers are
+a bonus at this stage:
 
 - the first lock arrives within about 15 s;
 - the wide scan shows one clear peak, and the narrow scan's lit window is roughly 0.5–1.5 ms wide;
