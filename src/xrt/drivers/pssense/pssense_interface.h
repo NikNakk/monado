@@ -75,6 +75,14 @@ struct pssense_constellation_diagnostics
 	uint64_t jump_rejection_count;
 	int64_t last_fused_timestamp_ns;
 	uint32_t last_fused_camera_count;
+
+	//! PSSENSE_LED_BOOTSTRAP state: 0 idle, 1 wide scan, 2 narrow scan, 3 locked.
+	bool led_bootstrap_enabled;
+	uint32_t led_bootstrap_state;
+	int64_t led_bootstrap_fudge_ns;
+	int64_t led_bootstrap_pulse_ns;
+	uint32_t led_bootstrap_scans;
+	uint32_t led_bootstrap_locks;
 };
 
 bool

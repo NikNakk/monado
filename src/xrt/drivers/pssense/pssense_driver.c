@@ -22,6 +22,7 @@
 
 #include "constellation/t_constellation_tracker.h"
 #include "constellation/t_led_sync_refinement.h"
+#include "constellation/t_led_phase_bootstrap.h"
 
 #include "util/u_var.h"
 #include "util/u_debug.h"
@@ -80,6 +81,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lock_period_id, "PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", 20)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -325,6 +328,18 @@ struct pssense_device
 		bool led_sync_sample_needs_marking;
 		bool led_sync_sample_needs_sending;
 		struct t_led_sync_sample latest_led_sync_sample;
+
+		/*!
+		 * Opt-in brightness-driven LED phase bootstrap (PSSENSE_LED_BOOTSTRAP=1). Replaces the pose-driven
+		 * @ref t_led_sync_refinement while enabled. Locked by controller_thread.
+		 */
+		bool use_led_bootstrap;
+		struct t_led_phase_bootstrap led_bootstrap;
+		//! Output generation last programmed into the LED settings.
+		uint32_t led_bootstrap_programmed_generation;
+		//! Held dark (and frozen) because another controller owns the scan.
+		bool led_bootstrap_yielding;
+		uint32_t led_bootstrap_status_frames;
 
 		struct xrt_pose T_led_imu;
 	} tracking;
@@ -1209,6 +1224,24 @@ pssense_node_break_apart(struct xrt_frame_node *node)
 	os_thread_helper_stop_and_wait(&pssense->controller_thread);
 }
 
+/*!
+ * Only one controller may scan at a time: blob counts cannot tell the controllers apart, so every other
+ * controller holds its LEDs off while a scan runs. 0 = free, otherwise 1 + hand.
+ */
+static xrt_atomic_s32_t pssense_led_bootstrap_owner = 0;
+
+static int32_t
+pssense_led_bootstrap_token(struct pssense_device *pssense)
+{
+	return pssense->hand == XRT_HAND_LEFT ? 1 : 2;
+}
+
+static void
+pssense_led_bootstrap_release(struct pssense_device *pssense)
+{
+	(void)xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, pssense_led_bootstrap_token(pssense), 0);
+}
+
 static void
 pssense_node_destroy(struct xrt_frame_node *node)
 {
@@ -1238,6 +1271,7 @@ pssense_node_destroy(struct xrt_frame_node *node)
 
 	// LED sync is used on the frame context lifecycle, so it needs to be destroyed in here.
 	t_led_sync_refinement_destroy(&pssense->tracking.led_sync_refinement);
+	pssense_led_bootstrap_release(pssense);
 
 	// Remove the variable tracking.
 	u_var_remove_root(pssense);
@@ -1251,6 +1285,73 @@ pssense_node_destroy(struct xrt_frame_node *node)
  * Timing event sink implementation
  *
  */
+
+/*!
+ * Advance the LED bootstrap for one exposure. Must be called with controller_thread locked.
+ *
+ * @return true if this controller's LEDs should be lit.
+ */
+static bool
+pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
+{
+	struct t_led_phase_bootstrap *b = &pssense->tracking.led_bootstrap;
+	const int32_t me = pssense_led_bootstrap_token(pssense);
+	int32_t owner = xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, 0);
+
+	if (owner != 0 && owner != me) {
+		// Another controller is scanning. Stay dark and do not advance, so our own lock is not declared
+		// lost merely because we were asked to go dark.
+		pssense->tracking.led_bootstrap_yielding = true;
+		return false;
+	}
+	pssense->tracking.led_bootstrap_yielding = false;
+
+	if (owner == 0 && t_led_phase_bootstrap_ready_to_scan(b)) {
+		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
+			owner = me;
+			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
+		}
+	}
+
+	(void)t_led_phase_bootstrap_push_exposure(b, exposure_timestamp_ns);
+
+	if (t_led_phase_bootstrap_is_scanning(b) && owner != me) {
+		// A locked controller lost its LEDs and wants to rescan; it needs the token first.
+		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) != 0) {
+			t_led_phase_bootstrap_stop(b);
+		}
+	} else if (!t_led_phase_bootstrap_is_scanning(b) && owner == me) {
+		pssense_led_bootstrap_release(pssense);
+	}
+
+	if (b->output_generation != pssense->tracking.led_bootstrap_programmed_generation) {
+		pssense->tracking.led_bootstrap_programmed_generation = b->output_generation;
+		// All timing is absorbed into the fudge offset; the driver's own clock sync handles device time.
+		pssense->tracking.latest_led_sync_sample = (struct t_led_sync_sample){
+		    .timestamp.device_host_latency_ns = 0,
+		    .timestamp_mode = T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_DEVICE_HOST_LATENCY,
+		    .fudge_offset_ns = b->fudge_offset_ns,
+		    .blink_duration_ns = b->blink_ns,
+		};
+		pssense->tracking.period_id = DURATION_NS_TO_PERIOD_ID(b->blink_ns);
+		pssense->tracking.led_sync_sample_needs_sending = true;
+		pssense->tracking.led_sequence_num += 1;
+	}
+
+	if (b->state == T_LED_PHASE_BOOTSTRAP_LOCKED && ++pssense->tracking.led_bootstrap_status_frames >= 300) {
+		pssense->tracking.led_bootstrap_status_frames = 0;
+		PSSENSE_INFO(pssense,
+		             "LED_BOOTSTRAP side=%c event=locked_status fudge_us=%.1f pulse_us=%.1f lit_reports=%u/%u "
+		             "frames_since_lit=%u",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', (double)b->fudge_offset_ns / 1000.0,
+		             (double)b->blink_ns / 1000.0, b->locked_lit_reports, b->locked_reports,
+		             b->frames_since_lit);
+		b->locked_lit_reports = 0;
+		b->locked_reports = 0;
+	}
+
+	return t_led_phase_bootstrap_leds_enabled(b);
+}
 
 static void
 pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_timing_event *event)
@@ -1299,7 +1400,9 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 	pssense->tracking.last_exposure_local_timestamp_ns = camera_exposure.timestamp_ns;
 
 	bool future_led_schedule = debug_get_bool_option_pssense_future_led_schedule();
-	bool run_optical_refinement = !future_led_schedule || pssense->tracking.use_constellation;
+	bool use_led_bootstrap = pssense->tracking.use_led_bootstrap && pssense->tracking.use_constellation;
+	bool run_optical_refinement =
+	    !use_led_bootstrap && (!future_led_schedule || pssense->tracking.use_constellation);
 	if (pssense->tracking.average_exposure_interval_ns > 0 && run_optical_refinement) {
 		// Update the frame period to the one we're using internally and push the timing event
 		struct t_timing_event_camera_exposure_start led_sync_event = event->camera_exposure_start;
@@ -1311,6 +1414,11 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 
 	// update the LED settings
 	if (pssense->tracking.received_frames > 10 && pssense->timing.has_clock_offset) {
+		bool leds_lit = true;
+		if (use_led_bootstrap && pssense->tracking.average_exposure_interval_ns > 0) {
+			leds_lit = pssense_led_bootstrap_update_locked(pssense, camera_exposure.timestamp_ns);
+		}
+
 		// Update the sample from the LED sync routine
 		if (run_optical_refinement &&
 		    t_led_sync_get_sample(&pssense->tracking.led_sync_refinement,
@@ -1401,6 +1509,9 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		    .led_blink = {0xFF, 0xFF, 0xFF, 0xFF},
 		    .period_id = period_id,
 		};
+		if (!leds_lit) {
+			pssense->tracking.led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
+		}
 
 		if (pssense->tracking.increment_sequence_num) {
 			pssense->tracking.led_sequence_num += 1;
@@ -1421,6 +1532,22 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
  * Constellation tracker device implementations
  *
  */
+
+static void
+pssense_push_camera_blob_count(struct t_constellation_tracker_device *device,
+                               size_t camera_index,
+                               int64_t timestamp_ns,
+                               uint32_t blob_count)
+{
+	struct pssense_device *pssense = from_constellation_device(device);
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	if (pssense->tracking.use_led_bootstrap && !pssense->tracking.led_bootstrap_yielding) {
+		t_led_phase_bootstrap_push_blob_count(&pssense->tracking.led_bootstrap, (uint32_t)camera_index,
+		                                      timestamp_ns, blob_count);
+	}
+	os_thread_helper_unlock(&pssense->controller_thread);
+}
 
 static bool
 pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device *device,
@@ -2056,6 +2183,7 @@ pssense_create(struct xrt_prober *xp,
 	pssense->timing_event_sink.push_timing_event = pssense_timing_event_sink_push;
 
 	pssense->constellation_device.push_constellation_tracker_sample = pssense_push_constellation_tracker_sample;
+	pssense->constellation_device.push_camera_blob_count = pssense_push_camera_blob_count;
 
 	pssense->constellation_tracking_source.get_tracked_pose = pssense_get_constellation_tracking_source_pose;
 
@@ -2190,6 +2318,23 @@ pssense_create(struct xrt_prober *xp,
 	}
 
 	pssense->tracking.period_id = DURATION_NS_TO_PERIOD_ID(led_sync_refinement_options.initial_blink_duration_ns);
+
+	pssense->tracking.use_led_bootstrap = debug_get_bool_option_pssense_led_bootstrap();
+	{
+		struct t_led_phase_bootstrap_options bootstrap_options;
+		t_led_phase_bootstrap_default_options(&bootstrap_options);
+		bootstrap_options.log_level = pssense->log_level;
+		bootstrap_options.label = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+		bootstrap_options.wide_blink_ns = PERIOD_ID_TO_DURATION_NS(MAX_PERIOD_ID);
+		bootstrap_options.narrow_blink_ns = PERIOD_ID_TO_DURATION_NS(9);
+		long lock_period_id = debug_get_num_option_pssense_led_bootstrap_lock_period_id();
+		lock_period_id = CLAMP(lock_period_id, 1, MAX_PERIOD_ID);
+		bootstrap_options.lock_blink_ns = PERIOD_ID_TO_DURATION_NS(lock_period_id);
+		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
+	}
+	if (pssense->tracking.use_led_bootstrap) {
+		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)");
+	}
 
 	ret = os_thread_helper_init(&pssense->controller_thread);
 	if (ret != 0) {
@@ -2329,6 +2474,8 @@ pssense_remove_from_constellation_tracker(struct xrt_device *xdev)
 	pssense->tracking.constellation_tracker = NULL;
 	pssense->tracking.constellation_device_id = XRT_CONSTELLATION_INVALID_DEVICE_ID;
 	pssense->tracking.use_constellation = false;
+	t_led_phase_bootstrap_stop(&pssense->tracking.led_bootstrap);
+	pssense_led_bootstrap_release(pssense);
 	os_thread_helper_unlock(&pssense->controller_thread);
 	pssense->base.tracking_origin = pssense->tracking.tracking_origin_before_constellation;
 	pssense->tracking.tracking_origin_before_constellation = NULL;
@@ -2355,6 +2502,12 @@ pssense_get_constellation_diagnostics(struct xrt_device *xdev,
 	    .jump_rejection_count = pssense->tracking.jump_rejection_count,
 	    .last_fused_timestamp_ns = pssense->tracking.last_fused_timestamp_ns,
 	    .last_fused_camera_count = pssense->tracking.last_fused_camera_count,
+	    .led_bootstrap_enabled = pssense->tracking.use_led_bootstrap,
+	    .led_bootstrap_state = (uint32_t)pssense->tracking.led_bootstrap.state,
+	    .led_bootstrap_fudge_ns = pssense->tracking.led_bootstrap.fudge_offset_ns,
+	    .led_bootstrap_pulse_ns = pssense->tracking.led_bootstrap.blink_ns,
+	    .led_bootstrap_scans = pssense->tracking.led_bootstrap.scans_attempted,
+	    .led_bootstrap_locks = pssense->tracking.led_bootstrap.locks_acquired,
 	};
 	memcpy(out_diagnostics->camera_candidate_count, pssense->tracking.camera_candidate_count,
 	       sizeof(out_diagnostics->camera_candidate_count));
