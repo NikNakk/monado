@@ -2331,6 +2331,8 @@ pssense_create(struct xrt_prober *xp,
 		lock_period_id = CLAMP(lock_period_id, 1, MAX_PERIOD_ID);
 		bootstrap_options.lock_blink_ns = PERIOD_ID_TO_DURATION_NS(lock_period_id);
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
+		// Force the first update to program the bootstrap's output, replacing any refinement sample.
+		pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
 	}
 	if (pssense->tracking.use_led_bootstrap) {
 		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)");
