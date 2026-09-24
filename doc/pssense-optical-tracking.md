@@ -135,6 +135,28 @@ show a lit ring either, the problem is framing, not timing.
 - Also seen: occasional partially lit steps away from the main window (for example narrow 3000–3250 µs at
   12 s, and 14000 µs at 29 s). These may be ramp artefacts; recheck them once the offset is stable.
 
+**2026-09-24, `sessions/20260924-175254-bootstrap-static-left`** (same placement, commit `af05d7ed2`,
+`PSSENSE_CLOCK_OFFSET_SNAP_US=250`). The snap works: two snaps at start-up (507 µs and 380 µs), and the offset
+then stays within ±150 µs. Close, but not yet a pass.
+
+- The wide scan had one clean peak at 12–14 ms (8/8, 8/8, 7/8). The narrow lit window was 14500–14750 µs
+  (700 µs), with the lock at fudge 14350 µs at 12.9 s. **It held for the whole run with no rescans.**
+  Lit reports per 5 s window were 78, 70, 99, 74, 80 and 99%, with a median of 0.79. Captured frames while
+  locked were about 85% lit (274/321 on camera 0). Position was tracked 77.9% of the time, against 26.4%
+  before; median pose age was 39 ms. There were 1743 two-camera fused poses and static jitter was 0.85 mm
+  median.
+- The dark frames are shared by all four cameras and come in episodes, including a 1 s blackout at 19 s.
+  They follow the **host-time exposure timestamps**, not the controller clock. `raw_exposure` in
+  `LED_SCHEDULE` has a residual of std 0.9 ms against the camera grid, with excursions of +1 to +5 ms, and
+  its per-second median wanders by ±600 µs. The ~100% lit stretches (23–26 s, 38–44 s) are exactly the
+  seconds where that residual is tight. The captured VTS exposure times sit on a 16683.03 µs grid to
+  0.4 µs, so the noise is entirely in the VTS→host mapping (`hw2mono_vts`, the exponential
+  `m_clock_offset_a2b` fed by delayed libusb IMU observations).
+- `PSVR2_ROBUST_CLOCK=1`, the existing minimum-delay `hw2mono_vts` filter already used for calibration
+  capture, targets exactly this. `psvr2_sense_session.sh` now sets it by default. `score.txt` gains an
+  `exposure timestamp residual` line: p5/median/p95 were −1081/−466/3077 µs for the first run and
+  −718/−230/1532 µs for this one.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

@@ -66,7 +66,8 @@ class SessionScoreTest(unittest.TestCase):
             now = 1_000_000_000_000 + i * 16_683_000
             offset = 50_000_000 + min(i, 60) * 2_500
             lines.append(
-                f" INFO [x] LED_SCHEDULE side=L now={now} raw_exposure=0 controller_now={now + offset} period_id=20\n"
+                f" INFO [x] LED_SCHEDULE side=L now={now} raw_exposure={now - 20_000_000 + (3_000_000 if i == 90 else 0)} "
+                f"period=16683000 controller_now={now + offset} period_id=20\n"
             )
         lines.append(" INFO [x] CLOCK_OFFSET side=L event=snap delta_us=5400.0\n")
         clock = parse_log(lines)["sides"]["L"]["clock_offset"]
@@ -74,6 +75,9 @@ class SessionScoreTest(unittest.TestCase):
         self.assertAlmostEqual(clock["range_us"], 150.0)
         self.assertAlmostEqual(clock["settled_s"], 20 * 0.016683, places=3)
         self.assertEqual(clock["snaps"], 1)
+        jitter = parse_log(lines)["sides"]["L"]["exposure_jitter_us"]
+        self.assertAlmostEqual(jitter["median"], 0.0, delta=20.0)
+        self.assertAlmostEqual(jitter["max"], 3000.0, delta=20.0)
 
     def test_score_session_end_to_end(self):
         with tempfile.TemporaryDirectory() as tmp:
