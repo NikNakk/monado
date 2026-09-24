@@ -127,6 +127,14 @@ show a lit ring either, the problem is framing, not timing.
 
 ### Hardware results
 
+> **Load caveat (reported by the user):** a large compilation was running in the background during every session
+> from the evening of 24 September, i.e. `20260924-224609-bootstrap-slow-left` onwards (22:46–23:19: the drift-capped
+> slow-left run, all two-controller runs and the right-only run). Their host timing figures (exposure timestamp
+> residuals and ages, controller clock creep and snaps, slow-sample drops) include that load. That probably
+> includes the 1 ms/s clock excursion at 47–60 s in `231910`. The illumination passes in those runs held despite
+> it. The afternoon sessions (17:46–18:05) had no load reported. Record future runs without background builds
+> unless the run is a deliberate stress test, and note the load in the session note.
+
 **2026-09-24, `sessions/20260924-174601-bootstrap-static-left`** (left only, static, ring facing headset,
 45 s, commit `0a2cd3902`). Failed acceptance, but the cause is the clock mapping, not the bootstrap.
 
