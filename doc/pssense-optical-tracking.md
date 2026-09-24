@@ -157,6 +157,25 @@ then stays within ±150 µs. Close, but not yet a pass.
   `exposure timestamp residual` line: p5/median/p95 were −1081/−466/3077 µs for the first run and
   −718/−230/1532 µs for this one.
 
+**2026-09-24, `sessions/20260924-175831-bootstrap-static-left`** (same placement, commit `adb03d70c`, snap 250 µs
+plus `PSVR2_ROBUST_CLOCK=1`). **Passes the static acceptance criteria.**
+
+- First lock at 12.9 s, with no losses and no rescans. The wide scan had one clean peak at 13–15 ms (3.5, 4.0,
+  4.0; every other step 0.0 except 16000 at 0.5). The narrow lit window was 15250–16000 µs (1200 µs), locked
+  at fudge 15350 µs. The narrow scan still has weak partial steps at its edges (14750 µs at 1.75,
+  16500 µs at 2.07).
+- Locked lit reports per 5 s window were 93, 99, 100, 100, 100 and 100%, median 1.00. Captured frames while
+  locked were 319/320 lit on every camera.
+- The exposure timestamp residual (p5/median/p95) fell from −718/−230/1532 µs to −348/−22/416 µs. Three
+  controller offset snaps at start-up (3536, 304 and 293 µs); the offset then drifted −289 µs over the run
+  without losing light.
+- Poses (bonus): position tracked 79.2%, median pose age 38 ms, static jitter 0.52 mm median (0.78 p95).
+  There were 2047 fused poses, all two-camera, because `PSSENSE_CONSTELLATION_LIVE_RECOVERY` was unset.
+  107 slow and 25 fast tracker sample drops.
+- The lock fudge was 14350 µs in the previous run and 15350 µs here. Robust clock changes the absolute
+  `hw2mono_vts` mapping (minimum-delay instead of exponential), so a shift between these two configurations
+  is expected. Repeatability still has to be judged across restarts with the same configuration.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
