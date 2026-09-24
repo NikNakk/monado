@@ -515,6 +515,20 @@ ring every frame. Its real cross-camera RMS (0.30 px) is close to the synthetic 
 is consistent across cameras. M1 differs from the live per-camera candidates by 1.9 mm / 3.3° p50 (13 mm / 23° p95).
 Those candidates include the rejected single-camera solves, whose tilt is weakly constrained.
 
+**M1 coverage fix and two-controller seeds.** Coverage now counts only LEDs at least 20° inside their visibility
+cone. Edge-on LEDs, and LEDs the ring hides from itself (the Sense model's occlusion callback can't be recorded), had
+rejected correct poses at 0.73–0.79 coverage with 0.5 px RMS. On `234059` (left, slow moves) M1 then solves 2896 of
+3596 exposures, about every lit one, with 4 cameras in 2282 of them. It needed 5 recorded seeds, down from 24.
+RMS was 0.48 px p50, static jitter 0.99 mm p50 and CPU 58 µs p50. On `233900` (two rings, live collapse) there are no seeds:
+the recorder only writes fast-path per-camera poses, and every live candidate there came from the slow search.
+
+**The recorded tracking-source orientation is not a clean IMU signal.** The optical-from-IMU alignment contains
+27–54° of tilt that varies between sessions and with orientation. Fitting a fixed IMU-to-model body rotation B
+(`q_opt = A q_imu B`) still leaves the world alignment varying by 26° p50. When optical tracking is active the driver
+returns its fused, optically corrected pose (11524 of 14061 packets in `234059` were full poses). So M2 is purely
+geometric for now: stereo triangulation plus 3-point rigid registration, no gravity prior. A raw IMU orientation
+should be recorded separately before gravity is used.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

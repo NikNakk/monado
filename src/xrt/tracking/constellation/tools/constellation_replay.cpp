@@ -15,6 +15,9 @@
 #include "joint_pose_solver.hpp"
 
 #include "math/m_api.h"
+
+#include <Eigen/Geometry>
+#include <Eigen/SVD>
 #include "tracking/t_camera_models.h"
 
 #include <algorithm>
@@ -207,6 +210,10 @@ struct DeviceTrack
 	uint32_t seeds{0};
 	std::map<uint32_t, uint32_t> cameras_used;
 	Stats rms_px, coverage, matches, solve_us, recorded_delta_mm, recorded_delta_deg;
+	//! Tilt of the optical-from-IMU alignment: how far it moves the vertical. ~0 if both worlds agree on gravity.
+	Stats align_tilt_deg;
+	//! (optical, IMU) orientation pairs from solved exposures, for estimating the IMU-to-model body offset.
+	std::vector<std::pair<Eigen::Quaterniond, Eigen::Quaterniond>> orientation_pairs;
 	std::vector<std::pair<int64_t, xrt_vec3>> positions;
 };
 
@@ -255,6 +262,67 @@ recorded_pose(const Exposure &exposure, t_constellation_device_id_t device_id, x
 		}
 	}
 	return false;
+}
+
+/*!
+ * Estimate the fixed rotation B between the IMU body frame and the LED model frame, from q_opt = A q_imu B with A a
+ * constant world alignment. Body-frame relative rotations satisfy q_opt,rel = B^-1 q_imu,rel B, so B^-1 maps each IMU
+ * relative-rotation axis onto the optical one (Kabsch). With B known, A = q_opt B^-1 q_imu^-1 should be constant and,
+ * if both worlds are gravity-aligned, a pure rotation about the vertical.
+ */
+void
+report_imu_offset(const DeviceTrack &track)
+{
+	const auto &pairs = track.orientation_pairs;
+	if (pairs.size() < 50) {
+		return;
+	}
+
+	Eigen::Matrix3d H = Eigen::Matrix3d::Zero();
+	uint32_t used = 0;
+	const size_t stride = std::max<size_t>(1, pairs.size() / 400);
+	for (size_t i = 0; i < pairs.size(); i += stride) {
+		for (size_t j = i + stride; j < pairs.size(); j += stride) {
+			Eigen::AngleAxisd opt_rel(pairs[j].first.conjugate() * pairs[i].first);
+			Eigen::AngleAxisd imu_rel(pairs[j].second.conjugate() * pairs[i].second);
+			if (opt_rel.angle() < 10.0 * M_PI / 180.0 || imu_rel.angle() < 10.0 * M_PI / 180.0) {
+				continue;
+			}
+			double weight = std::min(opt_rel.angle(), imu_rel.angle());
+			H += weight * imu_rel.axis() * opt_rel.axis().transpose();
+			used++;
+		}
+	}
+	if (used < 20) {
+		std::printf("  IMU body offset: not enough rotation to estimate (%u pairs over 10 degrees)\n", used);
+		return;
+	}
+	Eigen::JacobiSVD<Eigen::Matrix3d> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
+	Eigen::Matrix3d D = Eigen::Matrix3d::Identity();
+	D(2, 2) = (svd.matrixV() * svd.matrixU().transpose()).determinant() < 0 ? -1.0 : 1.0;
+	// R maps IMU axes to optical axes: axis_opt = R axis_imu, and R = B^-1.
+	Eigen::Matrix3d R = svd.matrixV() * D * svd.matrixU().transpose();
+	Eigen::Quaterniond B_inv(R);
+	Eigen::Quaterniond B = B_inv.conjugate();
+
+	Stats axis_residual_deg, tilt_deg, align_spread_deg;
+	std::vector<Eigen::Quaterniond> aligns;
+	for (size_t i = 0; i < pairs.size(); i += stride) {
+		Eigen::Quaterniond A = pairs[i].first * B_inv * pairs[i].second.conjugate();
+		aligns.push_back(A);
+		Eigen::Vector3d up(0, -1, 0);
+		double c = std::max(-1.0, std::min(1.0, up.dot(A * up)));
+		tilt_deg.add(std::acos(c) * 180.0 / M_PI);
+	}
+	for (const auto &A : aligns) {
+		align_spread_deg.add(A.angularDistance(aligns[aligns.size() / 2]) * 180.0 / M_PI);
+	}
+	Eigen::AngleAxisd b(B);
+	std::printf("  IMU body offset B: %.1f deg about (%.3f, %.3f, %.3f) from %u relative rotations; quat "
+	            "(x %.4f, y %.4f, z %.4f, w %.4f)\n",
+	            b.angle() * 180.0 / M_PI, b.axis().x(), b.axis().y(), b.axis().z(), used, B.x(), B.y(), B.z(), B.w());
+	std::printf("  with B: world alignment tilt deg p50 %.2f p95 %.2f; alignment spread deg p50 %.2f p95 %.2f\n",
+	            tilt_deg.pct(0.5), tilt_deg.pct(0.95), align_spread_deg.pct(0.5), align_spread_deg.pct(0.95));
 }
 
 int
@@ -381,11 +449,19 @@ replay_m1(const DatasetReader &dataset, const char *csv_path)
 			track->matches.add(result.matches);
 			track->positions.push_back({exposure.timestamp_ns, result.Tcv_world_device.position});
 			if (have_imu) {
+				const xrt_quat &o = result.Tcv_world_device.orientation;
+				track->orientation_pairs.push_back({Eigen::Quaterniond(o.w, o.x, o.y, o.z).normalized(),
+				                                    Eigen::Quaterniond(imu.w, imu.x, imu.y, imu.z).normalized()});
 				xrt_quat inverse_imu;
 				math_quat_invert(&imu, &inverse_imu);
 				math_quat_rotate(&result.Tcv_world_device.orientation, &inverse_imu, &track->align);
 				math_quat_normalize(&track->align);
 				track->have_align = true;
+				// Vertical in the OpenCV-convention world is -y.
+				xrt_vec3 up{0.0f, -1.0f, 0.0f}, rotated;
+				math_quat_rotate_vec3(&track->align, &up, &rotated);
+				double c = std::max(-1.0, std::min(1.0, (double)(-rotated.y)));
+				track->align_tilt_deg.add(std::acos(c) * 180.0 / M_PI);
 			}
 			for (const JointSolveMatch &m : result.correspondences) {
 				owners[m.camera][m.blob] = id;
@@ -449,10 +525,15 @@ replay_m1(const DatasetReader &dataset, const char *csv_path)
 		            track.solve_us.pct(1.0));
 		std::printf("  static jitter mm (1 s windows) p50 %.2f p95 %.2f over %zu windows\n", jitter_mm.pct(0.5),
 		            jitter_mm.pct(0.95), jitter_mm.values.size());
+		std::printf("  optical-from-IMU alignment tilt deg p50 %.2f p95 %.2f\n", track.align_tilt_deg.pct(0.5),
+		            track.align_tilt_deg.pct(0.95));
 		std::printf("  vs recorded per-camera poses: mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f (n=%zu)\n",
 		            track.recorded_delta_mm.pct(0.5), track.recorded_delta_mm.pct(0.95),
 		            track.recorded_delta_deg.pct(0.5), track.recorded_delta_deg.pct(0.95),
 		            track.recorded_delta_mm.values.size());
+	}
+	for (DeviceTrack &track : tracks) {
+		report_imu_offset(track);
 	}
 	return 0;
 }

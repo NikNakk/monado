@@ -61,6 +61,8 @@ struct JointSolveParams
 	 * slipped round the ring predicts LEDs where there are none, which RMS alone does not catch.
 	 */
 	float min_coverage{0.8f};
+	//! Coverage only counts LEDs at least this far inside their visibility cone.
+	float coverage_margin_deg{20.0f};
 	/*!
 	 * A correspondence with a residual above @ref outlier_px counts as an outlier; more than @ref max_outlier_fraction
 	 * of them rejects the pose. A wrong pose concentrates its error in a few correspondences, while calibration error
@@ -92,7 +94,7 @@ struct JointSolveResult
 	uint32_t matches{0};
 	uint32_t cameras_used{0};
 	float rms_px{0.0f};
-	//! LEDs predicted visible (in any camera) at the solved pose, and matches / visible.
+	//! LEDs predicted clearly visible (see @ref JointSolveParams::coverage_margin_deg), and the fraction matched.
 	uint32_t visible_leds{0};
 	float coverage{0.0f};
 	uint32_t outliers{0};
