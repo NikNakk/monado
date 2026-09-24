@@ -490,6 +490,31 @@ Milestones:
   samples, try M1, and fall back to M2. Push one joint pose per exposure, which the driver accepts without the
   candidate-fusion gates. Exposures that miss the budget are skipped, not queued.
 
+### M1 replay results and an unoptimised build (2026-09-25)
+
+**Every build directory in this checkout, including `build-sense`, has an empty `CMAKE_BUILD_TYPE`,** so the whole
+tracking stack (correspondence search, blobwatch, PnP, the PSVR2 and Sense drivers) has been built without
+optimisation. Only 32 of 422 translation units carry any `-O` flag. Every live session so far used that
+`monado-cli`. `build-sense-rel` is configured with the same options and `CMAKE_BUILD_TYPE=RelWithDebInfo`
+(`-O2 -g -DNDEBUG`). The same M1 replay runs 90× faster there, so the live tracker's slow-thread saturation (thousands of dropped
+samples per run), and some of the CPU-load timing disturbance, were probably inflated by `-O0` code.
+
+M1 on `20260924-233615-replay-both-static`, left controller (`constellation_replay --m1`):
+
+| | `build-sense` (-O0) | `build-sense-rel` (-O2) |
+|---|---|---|
+| exposures solved | 1950 / 2698 (the rest are before the first LED lock at 13.4 s) | same |
+| cameras per solve | 3 (camera 3 barely sees it) | same |
+| RMS px p50 / p95 | 0.299 / 0.349 | same |
+| LED coverage p50 / p05 | 0.95 / 0.85 | same |
+| static jitter (1 s windows) p50 / p95 | 1.11 / 4.32 mm | same |
+| **CPU per solve p50 / p95 / max** | 4388 / 4544 / 4898 µs | **48 / 52 / 76 µs** |
+
+Live, the same run fused 1983 two-camera poses with 1.37 mm static jitter p50. M1 uses all three cameras that see the
+ring every frame. Its real cross-camera RMS (0.30 px) is close to the synthetic noise floor, so the rig calibration
+is consistent across cameras. M1 differs from the live per-camera candidates by 1.9 mm / 3.3° p50 (13 mm / 23° p95).
+Those candidates include the rejected single-camera solves, whose tilt is weakly constrained.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

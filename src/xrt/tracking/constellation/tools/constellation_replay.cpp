@@ -12,9 +12,15 @@
  */
 
 #include "t_constellation_tracker_dataset.hpp"
+#include "joint_pose_solver.hpp"
+
+#include "math/m_api.h"
+#include "tracking/t_camera_models.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cinttypes>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
@@ -143,19 +149,341 @@ summarise(const DatasetReader &dataset)
 	return dataset.stop_reason.empty() ? 0 : 1;
 }
 
+/*
+ *
+ * M1 replay: joint multi-camera tracking from recorded blobs.
+ *
+ */
+
+struct Stats
+{
+	std::vector<double> values;
+
+	void
+	add(double v)
+	{
+		values.push_back(v);
+	}
+
+	double
+	pct(double p)
+	{
+		if (values.empty()) {
+			return NAN;
+		}
+		std::sort(values.begin(), values.end());
+		return values[std::min(values.size() - 1, (size_t)(p * (double)(values.size() - 1) + 0.5))];
+	}
+};
+
+double
+quat_angle_deg(const xrt_quat &a, const xrt_quat &b)
+{
+	double dot = std::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
+	return 2.0 * std::acos(std::min(1.0, dot)) * 180.0 / M_PI;
+}
+
+double
+distance_m(const xrt_vec3 &a, const xrt_vec3 &b)
+{
+	return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z));
+}
+
+struct DeviceTrack
+{
+	const DatasetDevice *device;
+	bool tracking{false};
+	xrt_pose Tcv_world_device{};
+	int64_t last_solved_ns{0};
+	uint32_t consecutive_failures{0};
+
+	//! optical = align * imu, refreshed from every solve (as the driver's optical_from_imu_orientation).
+	bool have_align{false};
+	xrt_quat align{0, 0, 0, 1};
+
+	// Results.
+	uint32_t exposures_with_blobs{0};
+	uint32_t solved{0};
+	uint32_t seeds{0};
+	std::map<uint32_t, uint32_t> cameras_used;
+	Stats rms_px, coverage, matches, solve_us, recorded_delta_mm, recorded_delta_deg;
+	std::vector<std::pair<int64_t, xrt_vec3>> positions;
+};
+
+//! The device's recorded tracking-source orientation at @p timestamp_ns (OpenCV convention), if any.
+bool
+imu_orientation_at(const DatasetReader &dataset,
+                   t_constellation_device_id_t device_id,
+                   int64_t timestamp_ns,
+                   xrt_quat &out)
+{
+	const DatasetDeviceTracking *best = nullptr;
+	for (const DatasetDeviceTracking &t : dataset.device_tracking) {
+		if (t.device_id != device_id || (t.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) == 0) {
+			continue;
+		}
+		if (best == nullptr || std::llabs(t.timestamp_ns - timestamp_ns) < std::llabs(best->timestamp_ns - timestamp_ns)) {
+			best = &t;
+		}
+	}
+	if (best == nullptr || std::llabs(best->timestamp_ns - timestamp_ns) > kExposureToleranceNs) {
+		return false;
+	}
+	xrt_pose cv;
+	math_pose_convert_from_opencv(&best->pose, &cv);
+	out = cv.orientation;
+	return true;
+}
+
+//! A recorded per-camera pose for the device in this exposure (the live tracker's candidate), in the CV world.
+bool
+recorded_pose(const Exposure &exposure, t_constellation_device_id_t device_id, xrt_pose &out)
+{
+	for (const CameraSample *sample : exposure.samples) {
+		if (!sample->Txr_world_cam.has_value()) {
+			continue;
+		}
+		for (uint32_t d = 0; d < sample->device_count; d++) {
+			const DeviceState &state = sample->device_states[d];
+			if (state.device_id != device_id || !state.found_pose.has_value()) {
+				continue;
+			}
+			xrt_pose Tcv_world_cam;
+			math_pose_convert_from_opencv(&sample->Txr_world_cam.value(), &Tcv_world_cam);
+			math_pose_transform(&Tcv_world_cam, &state.found_pose->Tcv_cam_device, &out);
+			return true;
+		}
+	}
+	return false;
+}
+
+int
+replay_m1(const DatasetReader &dataset, const char *csv_path)
+{
+	if (dataset.mosaics.empty()) {
+		std::fprintf(stderr, "no cameras in dataset\n");
+		return 1;
+	}
+	const DatasetMosaic &mosaic = dataset.mosaics[0];
+	std::vector<t_camera_model_params> models(mosaic.camera_calibrations.size());
+	for (size_t c = 0; c < models.size(); c++) {
+		t_camera_model_params_from_t_camera_calibration(&mosaic.camera_calibrations[c], &models[c]);
+	}
+
+	std::vector<DeviceTrack> tracks;
+	for (const DatasetDevice &device : dataset.devices) {
+		DeviceTrack track;
+		track.device = &device;
+		tracks.push_back(track);
+	}
+
+	FILE *csv = csv_path ? std::fopen(csv_path, "w") : nullptr;
+	if (csv) {
+		std::fprintf(csv, "timestamp_ns,device,solved,seeded,cameras,matches,rms_px,coverage,outliers,solve_us,"
+		                  "px,py,pz,qx,qy,qz,qw\n");
+	}
+
+	JointSolveParams params;
+	params.orientation_prior_sigma_deg = 3.0f;
+
+	std::vector<Exposure> exposures = group_exposures(dataset.samples);
+	for (const Exposure &exposure : exposures) {
+		// Cameras of this exposure, blob ownership shared between devices.
+		std::vector<JointSolveCamera> cameras;
+		std::vector<std::vector<t_constellation_device_id_t>> owners;
+		owners.reserve(exposure.samples.size());
+		for (const CameraSample *sample : exposure.samples) {
+			if (!sample->Txr_world_cam.has_value() || sample->camera_index >= models.size()) {
+				continue;
+			}
+			xrt_pose Tcv_world_cam;
+			math_pose_convert_from_opencv(&sample->Txr_world_cam.value(), &Tcv_world_cam);
+			const t_camera_calibration &cal = mosaic.camera_calibrations[sample->camera_index];
+			owners.emplace_back(sample->blob_count, XRT_CONSTELLATION_INVALID_DEVICE_ID);
+			cameras.push_back(JointSolveCamera{Tcv_world_cam, &models[sample->camera_index],
+			                                   (int)cal.image_size_pixels.w, (int)cal.image_size_pixels.h,
+			                                   sample->blobs, sample->blob_count, nullptr});
+		}
+		for (size_t i = 0; i < cameras.size(); i++) {
+			cameras[i].blob_owner = owners[i].data();
+		}
+		bool any_blobs = false;
+		for (const JointSolveCamera &cam : cameras) {
+			any_blobs |= cam.blob_count > 0;
+		}
+
+		// Tracked devices first, so a lost device cannot claim a tracked ring's blobs.
+		std::vector<DeviceTrack *> order;
+		for (DeviceTrack &t : tracks) {
+			order.push_back(&t);
+		}
+		std::stable_sort(order.begin(), order.end(),
+		                 [](const DeviceTrack *a, const DeviceTrack *b) { return a->tracking && !b->tracking; });
+
+		for (DeviceTrack *track : order) {
+			t_constellation_device_id_t id = track->device->id;
+			if (any_blobs) {
+				track->exposures_with_blobs++;
+			}
+
+			xrt_quat imu;
+			bool have_imu = imu_orientation_at(dataset, id, exposure.timestamp_ns, imu);
+
+			xrt_pose prior;
+			bool seeded = false;
+			if (track->tracking) {
+				prior = track->Tcv_world_device;
+				if (have_imu && track->have_align) {
+					math_quat_rotate(&track->align, &imu, &prior.orientation);
+				}
+			} else if (recorded_pose(exposure, id, prior)) {
+				seeded = true;
+			} else {
+				continue;
+			}
+
+			JointSolveResult result;
+			auto start = std::chrono::steady_clock::now();
+			bool ok = (have_imu && track->have_align && track->tracking)
+			              ? joint_solve_refine(cameras, track->device->led_model, prior, prior.orientation,
+			                                   params, result)
+			              : joint_solve_refine(cameras, track->device->led_model, prior, JointSolveParams{},
+			                                   result);
+			double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
+			                .count();
+			track->solve_us.add(us);
+
+			if (csv) {
+				const xrt_pose &p = result.Tcv_world_device;
+				std::fprintf(csv, "%" PRIi64 ",%d,%d,%d,%u,%u,%.4f,%.3f,%u,%.1f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+				             exposure.timestamp_ns, (int)id, ok ? 1 : 0, seeded ? 1 : 0, result.cameras_used,
+				             result.matches, result.rms_px, result.coverage, result.outliers, us, p.position.x,
+				             p.position.y, p.position.z, p.orientation.x, p.orientation.y, p.orientation.z,
+				             p.orientation.w);
+			}
+
+			if (!ok) {
+				if (track->tracking && ++track->consecutive_failures > 3) {
+					track->tracking = false;
+				}
+				continue;
+			}
+
+			track->solved++;
+			track->seeds += seeded ? 1 : 0;
+			track->tracking = true;
+			track->consecutive_failures = 0;
+			track->Tcv_world_device = result.Tcv_world_device;
+			track->last_solved_ns = exposure.timestamp_ns;
+			track->cameras_used[result.cameras_used]++;
+			track->rms_px.add(result.rms_px);
+			track->coverage.add(result.coverage);
+			track->matches.add(result.matches);
+			track->positions.push_back({exposure.timestamp_ns, result.Tcv_world_device.position});
+			if (have_imu) {
+				xrt_quat inverse_imu;
+				math_quat_invert(&imu, &inverse_imu);
+				math_quat_rotate(&result.Tcv_world_device.orientation, &inverse_imu, &track->align);
+				math_quat_normalize(&track->align);
+				track->have_align = true;
+			}
+			for (const JointSolveMatch &m : result.correspondences) {
+				owners[m.camera][m.blob] = id;
+			}
+
+			xrt_pose recorded;
+			if (!seeded && recorded_pose(exposure, id, recorded)) {
+				track->recorded_delta_mm.add(1000.0 * distance_m(recorded.position, result.Tcv_world_device.position));
+				track->recorded_delta_deg.add(quat_angle_deg(recorded.orientation, result.Tcv_world_device.orientation));
+			}
+		}
+	}
+	if (csv) {
+		std::fclose(csv);
+	}
+
+	for (DeviceTrack &track : tracks) {
+		// Static jitter: position spread within 1 s windows whose motion stays under 20 mm.
+		Stats jitter_mm;
+		size_t begin = 0;
+		for (size_t i = 0; i < track.positions.size(); i++) {
+			if (track.positions[i].first - track.positions[begin].first < 1'000'000'000 &&
+			    i + 1 < track.positions.size()) {
+				continue;
+			}
+			size_t n = i - begin;
+			if (n >= 20) {
+				double mx = 0, my = 0, mz = 0;
+				for (size_t k = begin; k < i; k++) {
+					mx += track.positions[k].second.x;
+					my += track.positions[k].second.y;
+					mz += track.positions[k].second.z;
+				}
+				mx /= n, my /= n, mz /= n;
+				double worst = 0, sum2 = 0;
+				for (size_t k = begin; k < i; k++) {
+					double d = std::sqrt(std::pow(track.positions[k].second.x - mx, 2) +
+					                     std::pow(track.positions[k].second.y - my, 2) +
+					                     std::pow(track.positions[k].second.z - mz, 2));
+					worst = std::max(worst, d);
+					sum2 += d * d;
+				}
+				if (worst < 0.02) {
+					jitter_mm.add(1000.0 * std::sqrt(sum2 / n));
+				}
+			}
+			begin = i;
+		}
+
+		std::printf("M1 device %d: solved %u of %u exposures with blobs (%.1f%%), %u from recorded seeds\n",
+		            (int)track.device->id, track.solved, track.exposures_with_blobs,
+		            track.exposures_with_blobs ? 100.0 * track.solved / track.exposures_with_blobs : 0.0, track.seeds);
+		std::printf("  cameras used:");
+		for (const auto &[cams, count] : track.cameras_used) {
+			std::printf(" %u:%u", cams, count);
+		}
+		std::printf("\n  matches p50 %.0f; rms px p50 %.3f p95 %.3f; coverage p50 %.2f p05 %.2f\n",
+		            track.matches.pct(0.5), track.rms_px.pct(0.5), track.rms_px.pct(0.95), track.coverage.pct(0.5),
+		            track.coverage.pct(0.05));
+		std::printf("  solve us p50 %.0f p95 %.0f max %.0f\n", track.solve_us.pct(0.5), track.solve_us.pct(0.95),
+		            track.solve_us.pct(1.0));
+		std::printf("  static jitter mm (1 s windows) p50 %.2f p95 %.2f over %zu windows\n", jitter_mm.pct(0.5),
+		            jitter_mm.pct(0.95), jitter_mm.values.size());
+		std::printf("  vs recorded per-camera poses: mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f (n=%zu)\n",
+		            track.recorded_delta_mm.pct(0.5), track.recorded_delta_mm.pct(0.95),
+		            track.recorded_delta_deg.pct(0.5), track.recorded_delta_deg.pct(0.95),
+		            track.recorded_delta_mm.values.size());
+	}
+	return 0;
+}
+
 } // namespace
 
 int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--csv OUT.csv]\n", argv[0]);
 		return 2;
+	}
+	bool m1 = false;
+	const char *csv = nullptr;
+	for (int i = 2; i < argc; i++) {
+		std::string arg = argv[i];
+		if (arg == "--m1") {
+			m1 = true;
+		} else if (arg == "--csv" && i + 1 < argc) {
+			csv = argv[++i];
+		}
 	}
 
 	try {
 		DatasetReader dataset(argv[1]);
-		return summarise(dataset);
+		int status = summarise(dataset);
+		if (m1) {
+			status = replay_m1(dataset, csv) != 0 ? 1 : status;
+		}
+		return status;
 	} catch (const std::exception &e) {
 		std::fprintf(stderr, "failed to load %s: %s\n", argv[1], e.what());
 		return 1;
