@@ -11,6 +11,8 @@ add_library(
 	image_point_sort.h
 	joint_pose_solver.cpp
 	joint_pose_solver.hpp
+	stereo_bootstrap.cpp
+	stereo_bootstrap.hpp
 	led_search_model.c
 	led_search_model.h
 	pose_metrics.c

@@ -529,6 +529,36 @@ returns its fused, optically corrected pose (11524 of 14061 packets in `234059` 
 geometric for now: stereo triangulation plus 3-point rigid registration, no gravity prior. A raw IMU orientation
 should be recorded separately before gravity is used.
 
+### M2 stereo bootstrap: replay results (2026-09-25)
+
+`stereo_bootstrap()` (`stereo_bootstrap.{hpp,cpp}`) finds a device with no prior. It pairs blob rays across cameras
+that pass within 4 mm, merges points seen by several pairs, and registers them against the LED model with a
+three-point RANSAC on pairwise distances (Kabsch). The explaining LED must face a camera that saw the point. The best
+hypotheses are refined with M1, with a stricter 0.8 px RMS limit. Synthetic tests: 30/30 found from no prior, two
+mirror-image rings separated, and 0/30 mirror-image acceptances (one appeared at 0.96 px before the stricter limit).
+
+`constellation_replay --m1` now bootstraps with M2 whenever a device isn't tracked (`--seed-recorded` keeps the old
+recorded-pose seeding). Build: `build-sense-rel`.
+
+| session | device | live (-O0 tracker) | M1 + M2 replay |
+|---|---|---|---|
+| `233900` two rings, right first | left | 8 candidates, 0 fused | 1297 solved, 3 bootstraps, 3 cameras, 0.30 px, jitter 1.0 mm |
+| | right | 108 candidates, 0 fused | 1571 solved, 25 bootstraps, 4 cameras, 0.54 px, jitter 1.4 mm |
+| `233615` two rings, right faulted always-on | left | 1983 fused (2 cameras) | 2048 solved, 3 cameras, 0.30 px, jitter 1.1 mm |
+| | right | 3 candidates | 1411 solved, 4 cameras, 0.62 px, jitter 1.5 mm |
+| `234059` left, slow moves | left | 2841 fused (2 cameras) | 2896 solved, 5 bootstraps, 4 cameras in 2284, 0.48 px, jitter 0.96 mm |
+
+Cost per exposure and device: tracking 49–58 µs p50 (≤ 173 µs max). A bootstrap attempt takes about 1 µs when
+nothing is visible, and at most 0.67 ms.
+
+Identity check: on `233615` M1's left pose matches the live left candidates to 2 mm (XR −0.086, −0.051, −0.266
+against −0.084, −0.052, −0.265), and the right ring is 25 cm to the right. On `233900` the live tracker's 8 "left"
+candidates were at the **right** ring's position (x +0.19 m): it had fitted the left model to the mirror-image
+ring. M2 places the left ring at x −0.06 and the right at x +0.19.
+
+Still missing: M3 (live integration), and the remaining recordings (two rings in the normal grip while moving; left,
+faster with occlusion) to test tracking through motion and occlusion.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

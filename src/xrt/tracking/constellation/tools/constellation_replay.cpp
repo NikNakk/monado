@@ -13,6 +13,7 @@
 
 #include "t_constellation_tracker_dataset.hpp"
 #include "joint_pose_solver.hpp"
+#include "stereo_bootstrap.hpp"
 
 #include "math/m_api.h"
 
@@ -208,6 +209,9 @@ struct DeviceTrack
 	uint32_t exposures_with_blobs{0};
 	uint32_t solved{0};
 	uint32_t seeds{0};
+	uint32_t bootstrap_attempts{0};
+	uint32_t bootstraps{0};
+	Stats bootstrap_us;
 	std::map<uint32_t, uint32_t> cameras_used;
 	Stats rms_px, coverage, matches, solve_us, recorded_delta_mm, recorded_delta_deg;
 	//! Tilt of the optical-from-IMU alignment: how far it moves the vertical. ~0 if both worlds agree on gravity.
@@ -326,7 +330,7 @@ report_imu_offset(const DeviceTrack &track)
 }
 
 int
-replay_m1(const DatasetReader &dataset, const char *csv_path)
+replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded)
 {
 	if (dataset.mosaics.empty()) {
 		std::fprintf(stderr, "no cameras in dataset\n");
@@ -399,27 +403,43 @@ replay_m1(const DatasetReader &dataset, const char *csv_path)
 
 			xrt_pose prior;
 			bool seeded = false;
+			bool bootstrapped = false;
+			JointSolveResult result;
+			bool ok = false;
+			double us = 0.0;
 			if (track->tracking) {
 				prior = track->Tcv_world_device;
 				if (have_imu && track->have_align) {
 					math_quat_rotate(&track->align, &imu, &prior.orientation);
 				}
-			} else if (recorded_pose(exposure, id, prior)) {
+				auto start = std::chrono::steady_clock::now();
+				ok = have_imu && track->have_align
+				         ? joint_solve_refine(cameras, track->device->led_model, prior, prior.orientation,
+				                              params, result)
+				         : joint_solve_refine(cameras, track->device->led_model, prior, JointSolveParams{},
+				                              result);
+				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+				track->solve_us.add(us);
+			} else if (seed_recorded) {
+				if (!recorded_pose(exposure, id, prior)) {
+					continue;
+				}
 				seeded = true;
+				auto start = std::chrono::steady_clock::now();
+				ok = joint_solve_refine(cameras, track->device->led_model, prior, JointSolveParams{}, result);
+				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+				track->solve_us.add(us);
 			} else {
-				continue;
+				StereoBootstrapResult bootstrap;
+				auto start = std::chrono::steady_clock::now();
+				ok = stereo_bootstrap(cameras, track->device->led_model, StereoBootstrapParams{}, bootstrap);
+				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+				track->bootstrap_attempts++;
+				track->bootstrap_us.add(us);
+				result = bootstrap.refined;
+				bootstrapped = ok;
+				seeded = true;
 			}
-
-			JointSolveResult result;
-			auto start = std::chrono::steady_clock::now();
-			bool ok = (have_imu && track->have_align && track->tracking)
-			              ? joint_solve_refine(cameras, track->device->led_model, prior, prior.orientation,
-			                                   params, result)
-			              : joint_solve_refine(cameras, track->device->led_model, prior, JointSolveParams{},
-			                                   result);
-			double us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
-			                .count();
-			track->solve_us.add(us);
 
 			if (csv) {
 				const xrt_pose &p = result.Tcv_world_device;
@@ -438,7 +458,8 @@ replay_m1(const DatasetReader &dataset, const char *csv_path)
 			}
 
 			track->solved++;
-			track->seeds += seeded ? 1 : 0;
+			track->seeds += seeded && !bootstrapped ? 1 : 0;
+			track->bootstraps += bootstrapped ? 1 : 0;
 			track->tracking = true;
 			track->consecutive_failures = 0;
 			track->Tcv_world_device = result.Tcv_world_device;
@@ -511,9 +532,13 @@ replay_m1(const DatasetReader &dataset, const char *csv_path)
 			begin = i;
 		}
 
-		std::printf("M1 device %d: solved %u of %u exposures with blobs (%.1f%%), %u from recorded seeds\n",
+		std::printf("M1 device %d: solved %u of %u exposures with blobs (%.1f%%), %u from recorded seeds, %u "
+		            "bootstraps from %u attempts\n",
 		            (int)track.device->id, track.solved, track.exposures_with_blobs,
-		            track.exposures_with_blobs ? 100.0 * track.solved / track.exposures_with_blobs : 0.0, track.seeds);
+		            track.exposures_with_blobs ? 100.0 * track.solved / track.exposures_with_blobs : 0.0, track.seeds,
+		            track.bootstraps, track.bootstrap_attempts);
+		std::printf("  bootstrap us p50 %.0f p95 %.0f max %.0f\n", track.bootstrap_us.pct(0.5),
+		            track.bootstrap_us.pct(0.95), track.bootstrap_us.pct(1.0));
 		std::printf("  cameras used:");
 		for (const auto &[cams, count] : track.cameras_used) {
 			std::printf(" %u:%u", cams, count);
@@ -544,15 +569,18 @@ int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--csv OUT.csv]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
+	bool seed_recorded = false;
 	const char *csv = nullptr;
 	for (int i = 2; i < argc; i++) {
 		std::string arg = argv[i];
 		if (arg == "--m1") {
 			m1 = true;
+		} else if (arg == "--seed-recorded") {
+			seed_recorded = true;
 		} else if (arg == "--csv" && i + 1 < argc) {
 			csv = argv[++i];
 		}
@@ -562,7 +590,7 @@ main(int argc, char **argv)
 		DatasetReader dataset(argv[1]);
 		int status = summarise(dataset);
 		if (m1) {
-			status = replay_m1(dataset, csv) != 0 ? 1 : status;
+			status = replay_m1(dataset, csv, seed_recorded) != 0 ? 1 : status;
 		}
 		return status;
 	} catch (const std::exception &e) {
