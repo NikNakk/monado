@@ -613,6 +613,18 @@ Findings on the way:
 - **Right-controller fault.** It recurred in `234425`, which scanned without `FIRST=R`: 3657 candidates while off.
   That makes four occurrences, all with the right controller scanning second; none in three right-first runs.
 
+**First live M3 run, `sessions/20260925-001238-joint-both-grip`** (both, right first, 30 s still then grip and moves,
+`CONSTELLATION_TRACKER_JOINT=1`, -O2, commit `553ea0159`). **It failed: 0 left poses and 21 right poses**, while
+488/488 captured frames were lit. `JOINT_STATUS` showed `tracked=0` throughout and 1935 bootstraps, all
+unconfirmed. Tentative tracks push nothing, so the driver had no optical history, and its prediction was the
+orientation-only, *unaligned* IMU pose. M1 was anchored to that orientation with a 3° prior, failed, and the next
+bootstrap reset the confirmation count. The replay's fake device returned nothing before its first push, so it
+missed this. It now returns the recorded orientation-only relation as the driver does, which reproduces the
+failure offline exactly (0 / 21 poses, 852 µs per exposure). Fix: the joint path uses the device's prediction only when it
+includes a position (so it rests on optical history and is aligned); otherwise it tracks from its own last pose
+without an orientation prior. The same recording then replays to 2998 / 2410 poses (3–4 cameras, 0.40 / 0.62 px,
+110 µs per exposure), and the other recordings are unchanged.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
