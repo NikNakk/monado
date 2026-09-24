@@ -84,7 +84,8 @@ at its lock (12 exposures), then with the pulse moved earlier and later by 60% o
 settling 24 exposures, then measuring 8). The normalised imbalance (late − early) / ring size at lock time moves
 the lock towards the brighter side (gain 1.0, at most 400 µs, deadband 0.1). Blob counts rather than the lit test
 are compared, so another controller's steady light cancels out. A cycle takes about 3.4 s. Log lines are
-`event=track result=moved|centred|ring_too_small`, and `score.txt` summarises probes, moves and the net shift. In
+`event=track result=moved|centred|ring_too_small`. The probe offset is capped at 300 µs, the gain is 1.5 and the
+dead band is 0.2 (see "M3" below for why), and `score.txt` summarises probes, moves and the net shift. In
 the unit simulator, with the latency drifting 60 µs/s for 50 s (3 ms in all, 1.5× the worst drift seen on hardware),
 tracking keeps 91–92% of frames lit against 46–47% open loop. With no drift it stays put at 100% lit.
 
@@ -558,6 +559,59 @@ ring. M2 places the left ring at x −0.06 and the right at x +0.19.
 
 Still missing: M3 (live integration), and the remaining recordings (two rings in the normal grip while moving; left,
 faster with occlusion) to test tracking through motion and occlusion.
+
+### M3: joint path in the live tracker (2026-09-25)
+
+`CONSTELLATION_TRACKER_JOINT=1` (opt-in, `t_constellation_tracker_joint.cpp`) replaces per-camera fast/slow
+processing. Camera threads deposit every frame, empty ones included, into an exposure assembler. One worker, keeping
+only the newest exposure, runs two phases:
+
+1. Tracked devices refine with M1 from the driver's predicted pose (3° orientation prior) and claim their blobs.
+2. Everything else enters a **bootstrap contest**: each candidate model bootstraps against the same free blobs, the
+   best fit (more matches, then lower RMS) wins and claims its blobs, and the rest retry.
+
+A freshly bootstrapped track is **tentative** until 3 consecutive solves, which adds 33 ms on re-acquisition. It claims
+blobs but pushes nothing. The Sense driver accepts `joint_camera_count > 0` samples directly: no per-camera grouping,
+agreement gate, averaging or fresh-pose jump gate. They share the fused acceptance tail
+(`pssense_commit_optical_pose_locked`: IMU alignment, LED sync, relation history), and the log gets `joint=1` on
+`CONSTELLATION_FUSED_ACCEPT`. In joint mode the recorder writes every camera sample, closing the gaps where slow
+cameras dropped out of recordings.
+
+`constellation_replay DATASET --tracker[-csv OUT]` runs a recording through the real `ConstellationTracker`
+(deterministic, fake origin and device sources), exercising assembly, the worker and pushes. Poses pushed, against the
+live per-camera fusion of the same session:
+
+| session | build (live) | live fused L / R | joint path L / R | µs per exposure |
+|---|---|---|---|---|
+| `233615` both still (right faulted) | -O0 | 1983 / 0 | 2042 / 1407 | 71 |
+| `233900` both still, right first | -O0 | 0 / 0 | 1290 / 1530 | 61 |
+| `234059` left slow | -O0 | 2841 | 2886 | 50 |
+| `234425` both grip (no FIRST=R, right faulted) | -O0 | 611 / 1598 | 604 / 3549 | 107 |
+| `000029` both grip, right first | -O2 | 2723 / 799 | 2582 / 1788 | 105 |
+| `234623` left fast | -O0 | 1186 | ~1340 | 29 |
+| `000212` left fast (right on, off-screen) | -O2 | 1649 / 174 | 2584 / 0 | 71 |
+| `000423` left fast `-2` (left only) | -O2 | 1772 | 2548 | 51 |
+
+Joint poses use 3–4 cameras. RMS p50 is 0.30–0.50 px for the left and 0.54–0.66 px for the right; the right's rig
+residual is consistently higher, worth a calibration look.
+
+Findings on the way:
+
+- **Mirror false positive.** On `000212` the right model bootstrapped the left ring (0.80 px) while the left's
+  tracking had lapsed, and tracked it for one more frame (0.93 px). The contest alone didn't stop it because the
+  left's own bootstrap failed in that exposure. Tentative confirmation removes it (right: 0 poses). It costs 0.3–2%
+  of poses on most runs, and 9% on the grip run, which needed 126 re-acquisitions.
+- **Phase-tracking probes darkened the ring.** On `000423` the narrow scan measured an inflated 1950 µs window, so
+  probes stepped ±690 µs past the real edges. The ring went dark for each 0.6 s probe side: joint-path gaps of
+  650–670 ms every ~3.4 s. Blob counts of a moving ring also change on their own between probe windows, so the lock
+  wandered ±300–400 µs. Now the offset is capped at 300 µs, the dead band is 0.2 and the gain 1.5. Simulator: 92%
+  lit under 60 µs/s drift (the gate is 90%), 100% with no drift, 92.6% with another controller lit. The proper fix is
+  to drive phase tracking from each joint pose's matched/visible LED ratio. That is per ring, and independent of
+  motion and of the other controller's light.
+- **Optimised build, live.** Slow-sample drops fell from 6514 (-O0, both grip) to 649 (-O2), and on the
+  left-only fast run from 370 to 19.
+- **Right-controller fault.** It recurred in `234425`, which scanned without `FIRST=R`: 3657 candidates while off.
+  That makes four occurrences, all with the right controller scanning second; none in three right-first runs.
 
 ## Session tools
 
