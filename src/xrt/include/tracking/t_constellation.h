@@ -334,6 +334,11 @@ struct t_constellation_tracker_sample
 	float average_brightness;
 	//! Metrics about the sample, such as reprojection error and matched LED count.
 	struct t_constellation_tracker_sample_metrics metrics;
+	/*!
+	 * 0 for a camera-local candidate (solved from @ref camera_index alone). Otherwise the pose was solved jointly
+	 * against this many synchronised cameras' blobs and is already the tracker's consensus for the exposure.
+	 */
+	uint32_t joint_camera_count;
 };
 
 /*!

@@ -23,6 +23,7 @@ namespace xrt::tracking::constellation {
 
 DEBUG_GET_ONCE_LOG_OPTION(constellation_tracker_log, "CONSTELLATION_TRACKER_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_OPTION(constellation_tracker_data_recorder_output, "CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT", "")
+DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_joint, "CONSTELLATION_TRACKER_JOINT", false)
 
 // Unconditionally present to allow warning that the feature is not enabled.
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_enable_rerun, "CONSTELLATION_TRACKER_RERUN_ENABLE", false)
@@ -778,6 +779,7 @@ Camera::pushPose(CameraSample &camera_sample,
 	    .camera_index = this->index,
 	    .average_brightness = average_brightness, // @todo compute this
 	    .metrics = metrics,
+	    .joint_camera_count = 0,
 	};
 	bool accepted = t_constellation_tracker_device_push_sample(device->device, &sample);
 	if (!accepted) {
@@ -957,6 +959,12 @@ ConstellationTracker::ConstellationTracker(t_constellation_tracker_params *param
 	}
 
 	this->params = *params;
+
+	if (debug_get_bool_option_constellation_tracker_joint() && !this->mosaics.empty()) {
+		this->joint = std::make_unique<JointProcessor>(this, this->mosaics[0]->cameras.size());
+		CT_INFO(this, "Constellation tracker joint multi-camera path enabled (%zu cameras)",
+		        this->mosaics[0]->cameras.size());
+	}
 
 	std::string data_recorder_output = debug_get_option_constellation_tracker_data_recorder_output();
 	if (!data_recorder_output.empty()) {
@@ -1145,6 +1153,12 @@ constellation_tracker_camera_push_blobs(t_blob_sink *tbs, t_blob_observation *tb
 		}
 	}
 
+	// The joint path wants every camera's frame, empty ones included, so it knows when an exposure is complete.
+	if (tracker->joint) {
+		tracker->joint->push(CameraSample(*tbo, camera));
+		return;
+	}
+
 	if (tbo->num_blobs == 0) {
 		CT_TRACE(tracker, "No blobs in observation, skipping processing");
 		return;
@@ -1193,6 +1207,10 @@ constellation_tracker_node_break_apart(xrt_frame_node *node)
 	ConstellationTracker *tracker = ConstellationTracker::Get(node);
 
 	tracker->running = false;
+
+	if (tracker->joint && tracker->joint->thread.initialized) {
+		os_thread_helper_stop_and_wait(&tracker->joint->thread);
+	}
 
 	// Stop all the threads
 	for (auto &mosaic : tracker->mosaics) {

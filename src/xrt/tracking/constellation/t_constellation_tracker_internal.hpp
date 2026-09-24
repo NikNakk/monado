@@ -34,6 +34,7 @@
 #include <stdexcept>
 #include <array>
 #include <fstream>
+#include <map>
 
 #include "correspondence_search.h"
 #include "led_search_model.h"
@@ -387,6 +388,76 @@ public: // Methods
 	pushImuSample(const xrt_imu_sample &sample);
 };
 
+/*
+ *
+ * Joint multi-camera path (CONSTELLATION_TRACKER_JOINT=1, t_constellation_tracker_joint.cpp)
+ *
+ */
+
+//! Per-device state of the joint path, owned by its worker thread.
+struct JointDeviceState
+{
+	bool tracking{false};
+	//! Last joint solve, in the tracker's OpenCV-convention world.
+	xrt_pose Tcv_world_device{};
+	int64_t last_solved_ns{0};
+	uint32_t consecutive_failures{0};
+};
+
+//! The camera samples of one synchronised exposure, indexed by camera.
+struct JointExposure
+{
+	int64_t timestamp_ns{0};
+	std::vector<std::optional<CameraSample>> samples;
+	uint32_t received{0};
+};
+
+/*!
+ * Replaces per-camera fast/slow processing with one solve per exposure. Camera threads deposit samples here; once
+ * every camera has reported (or the next exposure starts) the exposure goes to a single worker, which tracks each
+ * device with @ref joint_solve_refine from its predicted pose and re-acquires lost devices with
+ * @ref stereo_bootstrap. The worker keeps only the newest exposure: a slow solve skips exposures instead of queueing
+ * them.
+ */
+struct JointProcessor
+{
+	ConstellationTracker *tracker;
+	size_t camera_count;
+
+	//! Its lock also guards @ref building, @ref ready and the assembly counters.
+	os_thread_helper thread{};
+	std::optional<JointExposure> building{std::nullopt};
+	std::optional<JointExposure> ready{std::nullopt};
+	uint64_t exposures_assembled{0};
+	uint64_t exposures_skipped{0};
+	uint64_t late_samples{0};
+
+	// Worker-only.
+	std::map<t_constellation_device_id_t, JointDeviceState> devices;
+	uint64_t processed{0};
+	uint64_t device_tracked{0};
+	uint64_t device_bootstrapped{0};
+	uint64_t device_failed{0};
+	double solve_us_total{0.0};
+	double solve_us_max{0.0};
+	int64_t last_status_ns{0};
+
+	JointProcessor(ConstellationTracker *tracker, size_t camera_count);
+	~JointProcessor();
+
+	//! Called from camera threads with each camera's sample (including frames with no blobs).
+	void
+	push(CameraSample &&sample);
+
+	void
+	process(JointExposure &exposure);
+
+private:
+	//! Moves @ref building to @ref ready and wakes the worker. Called with the thread lock held.
+	void
+	finishBuildingLocked();
+};
+
 // Separate base struct with our interface implementations so that `ConstellationTrackerBase` remains a standard layout
 // type and we can safely use `container_of` on it.
 struct ConstellationTrackerBase
@@ -422,6 +493,9 @@ public: // Fields
 	t_constellation_device_id_t next_device_id{0};
 
 	std::unique_ptr<DataRecorder> data_recorder{};
+
+	//! Joint multi-camera path, when CONSTELLATION_TRACKER_JOINT=1.
+	std::unique_ptr<JointProcessor> joint{};
 
 #ifdef XRT_FEATURE_RERUN
 	std::unique_ptr<struct RerunContext> rerun_stream{};
