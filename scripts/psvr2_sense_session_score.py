@@ -68,6 +68,7 @@ def parse_log(lines) -> dict:
     imu_aligned: dict[str, list] = defaultdict(list)
     clock: dict[str, list] = defaultdict(list)
     snaps: Counter = Counter()
+    exposures: dict[str, list] = defaultdict(list)
     counts = Counter()
 
     for raw in lines:
@@ -81,6 +82,9 @@ def parse_log(lines) -> dict:
             now, controller_now = to_float(kv.get("now")), to_float(kv.get("controller_now"))
             if now is not None and controller_now is not None and controller_now >= 0:
                 clock[kv.get("side", "?")].append((now, controller_now - now))
+            raw_exposure, period = to_float(kv.get("raw_exposure")), to_float(kv.get("period"))
+            if raw_exposure and period:
+                exposures[kv.get("side", "?")].append((raw_exposure, period))
         elif "CLOCK_OFFSET" in line and "event=snap" in line:
             snaps[parse_kv(line.split("CLOCK_OFFSET", 1)[1]).get("side", "?")] += 1
         elif "CONSTELLATION_CANDIDATE" in line:
@@ -112,8 +116,26 @@ def parse_log(lines) -> dict:
             "reacquisitions": reacquire[side],
             "imu_aligned_delta_deg": describe(imu_aligned[side]),
             "clock_offset": summarise_clock(clock.get(side, []), snaps[side]),
+            "exposure_jitter_us": exposure_jitter_us(exposures.get(side, [])),
         }
     return out
+
+
+def exposure_jitter_us(samples: list[tuple[float, float]]) -> dict | None:
+    """Residuals of the host-time exposure timestamps the LED schedule starts from, against the camera's grid.
+
+    The camera runs on a fixed period, so anything here is host clock-mapping noise (hw2mono_vts), and it moves
+    the scheduled LED pulse one for one.
+    """
+    unique = sorted({t for t, _ in samples})
+    if len(unique) < 10:
+        return None
+    period = statistics.median(p for _, p in samples)
+    k = [round((t - unique[0]) / period) for t in unique]
+    mean_k, mean_t = statistics.fmean(k), statistics.fmean(unique)
+    slope = sum((a - mean_k) * (b - mean_t) for a, b in zip(k, unique)) / sum((a - mean_k) ** 2 for a in k)
+    residuals = [(t - mean_t - slope * (a - mean_k)) / 1000.0 for a, t in zip(k, unique)]
+    return describe(residuals)
 
 
 def summarise_clock(samples: list[tuple[float, float]], snaps: int, settle_us: float = 100.0) -> dict | None:
@@ -425,6 +447,12 @@ def render_text(result: dict) -> str:
             lines.append(
                 f"    clock offset: creep {fmt(c['creep_us'], 1)} us (range {fmt(c['range_us'], 1)} us), "
                 f"settled within 100 us at {fmt(c['settled_s'], 1)} s, snaps {c['snaps']}"
+            )
+        j = s.get("exposure_jitter_us")
+        if j:
+            lines.append(
+                f"    exposure timestamp residual us: p5 {fmt(j['p05'], 0)}, median {fmt(j['median'], 0)}, "
+                f"p95 {fmt(j['p95'], 0)}"
             )
         if s["imu_aligned_delta_deg"]:
             lines.append(f"    optical vs aligned IMU deg: median {fmt(s['imu_aligned_delta_deg']['median'])}")
