@@ -80,11 +80,15 @@ monado_metal_xpc_take_texture_on_device(...)
 monado_metal_xpc_release_texture(...)
 ```
 
-Ordinary texture tokens are still PID scoped. A publisher may explicitly mark a
-**texture** token claimable for a one-time cross-process handoff. The first
-different PID to retrieve it becomes the token owner and the claimable flag is
-cleared. The token is then PID scoped again and is consumed when the texture is
-taken.
+Ordinary texture tokens are still PID scoped and remain in the legacy
+32-bit-compatible namespace (24 random bits). Claimable external texture tokens
+use a separate 64-bit namespace with 56 random bits because they are not carried
+through the legacy `xrt_image_native` metadata transport.
+
+A publisher may explicitly mark an **external texture** token claimable for a
+one-time cross-process handoff. The first different PID to retrieve it becomes
+the token owner and the claimable flag is cleared. The token is then PID scoped
+again and is consumed when the texture is taken.
 
 The receiving helper accepts an `MTLDevice`. This is important for ANGLE:
 `EGL_ANGLE_metal_texture_client_buffer` requires the imported `MTLTexture`
