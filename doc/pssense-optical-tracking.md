@@ -198,6 +198,31 @@ off-centre**, because a background source fooled the scoring.
   A scan now takes about 13.5 s. The baseline is fixed for the scan and the lock that follows; if the
   headset turns so the background changes, it is only re-measured on the next rescan.
 
+**2026-09-24, `sessions/20260924-180557-bootstrap-slow-left`** (same placement with the windows in view, slow
+moves, commit `8a87ece6b`). **The dark baseline works.** Illumination under movement is close to passing;
+pose tracking is not.
+
+- Baseline `1,0,8,0`. The wide scan had one clean peak (13000: 1.0, 14000 and 15000: 4.0, 16000: 3.5, all
+  other steps ≤ 0.12). Narrow lit window 15750–16500 µs (1200 µs), centred at 16350 µs, locked at fudge
+  15850 µs. That is where the plateau really was in the previous run. 1 scan, 1 lock, 0 lost.
+- Locked lit reports per 5 s window were 69, 83, 90, 84, 64, 58, 77, 72 and 60% (median 0.72). The
+  image-based per-second lit counts, with camera 2 measured against its baseline, show two causes:
+  - Visibility: the controller left camera 3 for 12–18 s, 31–40 s and 53–57 s, and camera 2 for 21–26 s.
+  - Timing (37–49 s): lit fell to 5–8/10 on every camera at once. The exposure timestamp residual
+    swung by −0.7 to +1.5 ms within single seconds, and 749 schedules saw exposure ages over 30 ms
+    (normally ~24 ms). The machine was loaded (below). `PSVR2_ROBUST_CLOCK` limits upward offset movement
+    to 2.5 µs per IMU sample, but at 2 kHz that is 5 ms/s, so sustained USB delays still leak into the
+    mapping. Fix: `PSVR2_ROBUST_CLOCK_MAX_PPM` (default 0, unchanged) caps upward movement at a clock-drift
+    rate instead. The two clocks differ by ~20 ppm here (host fit 16683.42 µs vs VTS 16683.03 µs per
+    frame). `psvr2_sense_session.sh` sets 200 ppm.
+- **Pose tracking collapsed:** 26% of samples position-tracked, median pose age 4.5 s, 5240 slow-sample
+  drops. From 31 s to the end, cameras 0–2 were lit in 5–10 of 10 frames per second, but the tracker
+  produced almost no candidates (a handful per second at most) and no fused poses. Meanwhile the slow
+  correspondence thread dropped 20–35 samples per second in each of its five slots. The same pattern, in
+  a shorter form, appeared at 16–17 s and recovered at 18 s. Once the fast path loses the controller, the
+  slow search can't keep up with a moving target and never re-acquires. This is the tracker, not
+  illumination, and belongs with plan item 3 (joint multi-camera solve seeded by the IMU).
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
