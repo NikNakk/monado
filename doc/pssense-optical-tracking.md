@@ -428,6 +428,34 @@ illumination passes.** Both status LEDs stayed on.
 static with `KEEP_LOCK` + `TRACK`. Still to confirm: two controllers moving, and both options' behaviour
 across restarts.
 
+## Joint multi-camera solve (plan item 3)
+
+Why the current tracker fails even with good light: each camera solves on its own (a fast path from
+last-frame blob labels or the predicted pose, then a slow 2D–3D correspondence search per camera). The driver
+accepts a pose only when two per-camera candidates agree within 80 mm / 35°, and then averages them. After
+optical loss only an IMU orientation prior remains. The per-camera slow searches then saturate: each keeps
+only its newest sample, and thousands of samples are dropped per run. They rarely re-acquire a moving
+controller, and they load the host enough to disturb USB/HID timing.
+
+Milestones:
+
+- **M0 – offline replay.** `psvr2_sense_session.sh` records the tracker input as `constellation.ctd`:
+  every camera's blobs, the camera world poses, each device's prior, and (packet type 3) each device's
+  tracking-source relation at every sample, including orientation-only ones. A replay tool regroups the
+  samples into exposures and runs a solver on identical input. It reports solve rate, cameras and blobs used,
+  reprojection error, static jitter, jumps and CPU time per exposure.
+- **M1 – joint tracking solve.** From a prior (last solution propagated with the IMU), project the LEDs into
+  all four cameras, associate blobs with gating, and run one robust Gauss–Newton over 6DoF on every camera's
+  correspondences together, re-associating between iterations. This replaces per-camera PnP, the pairwise
+  agreement gate and averaging. Target cost well under 1 ms per exposure.
+- **M2 – bootstrap.** Match blobs across the lower (0/1) and upper (2/3) stereo pairs by epipolar
+  distance, triangulate them to 3D, and register against the ring model with the IMU gravity prior (roughly one
+  free rotation) using a small RANSAC over 3D–3D correspondences, respecting LED normals. Then refine with M1.
+  Runs under a fixed time budget per exposure.
+- **M3 – integration.** An opt-in exposure-level path in the tracker: collect the four synchronised camera
+  samples, try M1, and fall back to M2. Push one joint pose per exposure, which the driver accepts without the
+  candidate-fusion gates. Exposures that miss the budget are skipped, not queued.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
