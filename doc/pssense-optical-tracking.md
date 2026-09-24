@@ -310,6 +310,25 @@ power-cycled first; commit `3c1e722ac`). **The right-controller fault reproduced
 - Working hypothesis: a controller-side fallback or fault mode (LEDs always on, status LED off). The
   trigger is unknown. The next run isolates the right controller alone.
 
+**2026-09-24 23:02, `sessions/20260924-230238-bootstrap-static-right`** (right only, power-cycled, full ring,
+still; commit `1ce3c7fff`). **The right controller passes on its own.**
+
+- Baseline `1,0,3,1`. One peak (14000–16000 µs, wrapping into the 0 step at 2.88). Narrow window 1450 µs,
+  locked at fudge 15725 µs at 13.5 s: the same as the left controller's locks. Locked lit reports median
+  0.87 (the tracker's reports). Captured frames lit while locked: 314/315 on every camera. **0 candidates
+  while commanded off**, and the user saw the status LED stay on throughout.
+- So the always-on / status-LED-off fault needs both controllers running. It isn't a faulty right
+  controller.
+- Pose tracking failed despite good light: 77 candidates (76 from camera 2), 0 fused poses, 4860 slow-sample
+  drops. Frames show the ring clearly (6 compact blobs on camera 0, 8+ on camera 2), but also two bright
+  ceiling lamps in view (blob areas ~100 and ~1150 px). A tracker problem for plan item 3; the lamps may be
+  feeding the correspondence search.
+
+Illumination status after these runs: a single controller passes, static and under slow movement (left
+static, left slow twice, right static). Lock positions across runs and controllers: 15350–15975 µs. With
+both controllers, the handover sequence triggers a controller-side fault. That is the open illumination
+issue.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
