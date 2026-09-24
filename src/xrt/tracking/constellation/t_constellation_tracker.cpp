@@ -1129,6 +1129,18 @@ constellation_tracker_camera_push_blobs(t_blob_sink *tbs, t_blob_observation *tb
 
 	CT_TRACE(tracker, "Received blob observation with %u blobs", tbo->num_blobs);
 
+	// Report raw per-camera blob counts before any pose work, so devices can judge LED illumination even
+	// when no pose can be solved. This runs for empty frames too.
+	{
+		std::shared_lock lock(tracker->device_lock);
+		for (std::unique_ptr<Device> &device : tracker->devices) {
+			if (device->device->push_camera_blob_count != nullptr) {
+				device->device->push_camera_blob_count(device->device, camera->index, tbo->timestamp_ns,
+				                                       tbo->num_blobs);
+			}
+		}
+	}
+
 	if (tbo->num_blobs == 0) {
 		CT_TRACE(tracker, "No blobs in observation, skipping processing");
 		return;

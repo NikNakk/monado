@@ -356,6 +356,21 @@ struct t_constellation_tracker_device
 	 */
 	bool (*push_constellation_tracker_sample)(struct t_constellation_tracker_device *connection,
 	                                          struct t_constellation_tracker_sample *sample);
+
+	/*!
+	 * Optional, may be NULL. Called once per camera frame, before any pose solving, with the number of
+	 * blobs the camera's blob detector found. Frames with no blobs are reported too. Devices use this to
+	 * judge LED illumination independently of whether a pose could be solved.
+	 *
+	 * @param connection   The device.
+	 * @param camera_index Index of the camera within its mosaic, matching sample camera_index.
+	 * @param timestamp_ns Exposure timestamp of the frame.
+	 * @param blob_count   Number of blobs detected in the frame.
+	 */
+	void (*push_camera_blob_count)(struct t_constellation_tracker_device *connection,
+	                               size_t camera_index,
+	                               int64_t timestamp_ns,
+	                               uint32_t blob_count);
 };
 
 /*!

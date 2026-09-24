@@ -310,12 +310,14 @@ print_relation(const char *hand, struct xrt_device *controller, int64_t now_ns, 
 	*out_saw_position |= positioned;
 	int64_t pose_age_ns = diagnostics.last_fused_timestamp_ns > 0 ? now_ns - diagnostics.last_fused_timestamp_ns : -1;
 	printf("%" PRIi64 ",%s,0x%x,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%" PRIi64 ",%" PRIu64
-	       ",%u,%" PRIu64 ",%" PRIu64 ",%" PRIu64 "\n",
+	       ",%u,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%u,%.1f,%.1f,%u,%u\n",
 	       now_ns, hand, (unsigned)relation.relation_flags, relation.pose.position.x, relation.pose.position.y,
 	       relation.pose.position.z, relation.pose.orientation.x, relation.pose.orientation.y,
 	       relation.pose.orientation.z, relation.pose.orientation.w, pose_age_ns, diagnostics.fused_pose_count,
 	       diagnostics.last_fused_camera_count, diagnostics.candidate_count, diagnostics.disagreement_count,
-	       diagnostics.jump_rejection_count);
+	       diagnostics.jump_rejection_count, diagnostics.led_bootstrap_state,
+	       (double)diagnostics.led_bootstrap_fudge_ns / 1000.0, (double)diagnostics.led_bootstrap_pulse_ns / 1000.0,
+	       diagnostics.led_bootstrap_scans, diagnostics.led_bootstrap_locks);
 }
 
 int
@@ -438,7 +440,9 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	}
 
 	printf("timestamp_ns,hand,relation_flags,px,py,pz,qx,qy,qz,qw,pose_age_ns,fused_pose_count,"
-	       "fused_camera_count,candidate_count,disagreement_count,jump_rejection_count\n");
+	       "fused_camera_count,candidate_count,disagreement_count,jump_rejection_count,"
+	       "led_bootstrap_state,led_bootstrap_fudge_us,led_bootstrap_pulse_us,led_bootstrap_scans,"
+	       "led_bootstrap_locks\n");
 	bool saw_position[2] = {false};
 	int64_t end_ns = os_monotonic_get_ns() + duration_s * U_TIME_1S_IN_NS;
 	int64_t next_print_ns = 0;
