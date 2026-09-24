@@ -78,9 +78,10 @@ because the scan covers the whole period. With the variable unset, behaviour is 
 
 Log lines use the form `LED_BOOTSTRAP side=L event=...`. The events are `baseline`, `scan_start`, `step`,
 `wide_result`, `locked`, `locked_status` (every 300 exposures), `scan_failed` and `lost`. The
-`PSSENSE_LED_BOOTSTRAP_YIELD_MASK=1` (experimental) makes a controller that should be dark (yielding, idle or in
-its own baseline) stay in PRESCAN with an empty blink mask (`masks=00000000`) instead of switching to
-`LED_ALL_OFF`, to avoid the two-controller fault described under the hardware results. The
+`PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1` (experimental) keeps a locked controller lit while another scans, instead of
+yielding. Its steady light is absorbed into the scanning controller's dark baseline. A controller without a
+lock still stays dark. (An earlier empty-blink-mask yield did not darken a lit controller; see the hardware
+results.) The
 `psvr2-constellation` CSV gains the columns `led_bootstrap_state` (0 idle, 1 wide, 2 narrow, 3 locked, 4 baseline),
 `led_bootstrap_fudge_us`, `led_bootstrap_pulse_us`, `led_bootstrap_scans` and `led_bootstrap_locks`.
 
@@ -331,6 +332,24 @@ Illumination status after these runs: a single controller passes, static and und
 static, left slow twice, right static). Lock positions across runs and controllers: 15350–15975 µs. With
 both controllers, the handover sequence triggers a controller-side fault. That is the open illumination
 issue.
+
+**2026-09-24 23:07, `sessions/20260924-230720-bootstrap-both-yieldmask`** (both power-cycled, still, full ring,
+`PSSENSE_LED_BOOTSTRAP_YIELD_MASK=1`, commit `87af35d88`). **An empty blink mask is not an off command.**
+
+- Left scanned first. Baseline `5,3,7,2`. The wide scan had an unexpected floor (1.0–2.5 across 5000–13000 µs;
+  previous both-static run: all 0), but it still locked at 15350 µs, with a noisy narrow window (4700 µs).
+- While yielding with `masks=00000000` during the right controller's scan (13–26 s), the **left kept
+  emitting** at full rate (~900 candidates per 5 s at x ≈ −0.03 m; the scorer flagged 2311 in 14 s).
+  Positions confirm these were the left ring, not a mirror-image fit to the right ring (right at x ≈ +0.17 m).
+- The right controller, with the left steadily lit, still **scanned cleanly**: baseline `8,9,10,2` (window
+  background plus the left ring), wide peak 13000–15000 µs, narrow window 1200 µs, lock at 15600 µs, and 0
+  candidates while off. The steady light of another controller is absorbed by the dark baseline.
+- Unexplained: after the right controller locked (26.6 s), its locked lit fraction was only 0.12, with 8–14
+  candidates per 5 s until 35 s and 138–160 afterwards. The two locks were 250 µs apart, so both controllers
+  were pulsing in the same exposures.
+- The empty-mask option is removed. It is replaced by `PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1`: a locked
+  controller stays lit (and keeps tracking) while the other scans; a controller without a lock stays
+  dark. This avoids switching a lit controller to `LED_ALL_OFF` and back.
 
 ## Session tools
 

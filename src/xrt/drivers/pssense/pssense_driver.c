@@ -84,7 +84,7 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100U
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lock_period_id, "PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", 20)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_clock_offset_snap_us, "PSSENSE_CLOCK_OFFSET_SNAP_US", 0)
-DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_yield_mask, "PSSENSE_LED_BOOTSTRAP_YIELD_MASK", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -1314,9 +1314,17 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	int32_t owner = xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, 0);
 
 	if (owner != 0 && owner != me) {
-		// Another controller is scanning. Stay dark and do not advance, so our own lock is not declared
-		// lost merely because we were asked to go dark.
+		// Another controller is scanning. Do not advance, so our own lock is not declared lost meanwhile.
 		pssense->tracking.led_bootstrap_yielding = true;
+		if (debug_get_bool_option_pssense_led_bootstrap_keep_lock() && b->state == T_LED_PHASE_BOOTSTRAP_LOCKED) {
+			/*
+			 * Opt-in: keep a locked controller lit. Its steady light becomes part of the scanning
+			 * controller's dark baseline, which then scans cleanly (24 Sep, 230720), and it keeps
+			 * tracking. Yielding means switching a lit controller to LED_ALL_OFF and back, and in the
+			 * two-controller runs one controller repeatedly fell into an always-lit, status-LED-off state.
+			 */
+			return true;
+		}
 		return false;
 	}
 	pssense->tracking.led_bootstrap_yielding = false;
@@ -1525,18 +1533,7 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		    .period_id = period_id,
 		};
 		if (!leds_lit) {
-			if (use_led_bootstrap && debug_get_bool_option_pssense_led_bootstrap_yield_mask()) {
-				/*
-				 * Opt-in: stay in PRESCAN with every temporal slot empty instead of switching to
-				 * LED_ALL_OFF. With two controllers, the right Sense repeatedly fell into an always-lit
-				 * state (status LED off) that ignored every later command, partway through its first scan
-				 * after sitting in LED_ALL_OFF while the other controller scanned.
-				 */
-				memset(pssense->tracking.led_settings.led_blink, 0,
-				       sizeof(pssense->tracking.led_settings.led_blink));
-			} else {
-				pssense->tracking.led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
-			}
+			pssense->tracking.led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
 		}
 
 		if (pssense->tracking.increment_sequence_num) {
