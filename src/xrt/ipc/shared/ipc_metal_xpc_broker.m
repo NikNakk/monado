@@ -109,6 +109,22 @@ extern char **environ;
 	[handle release];
 }
 
+- (void)markTextureTokenClaimable:(uint64_t)token
+                            reply:(void (^)(BOOL success))reply
+{
+	// The legacy standalone broker predates PID-scoped ownership and its
+	// texture tokens are already cross-process. Treat an existing texture token
+	// as claimable so clients using the new helper ABI remain compatible.
+	BOOL success = NO;
+	if ((token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC) {
+		NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
+		[_lock lock];
+		success = [_handlesByToken objectForKey:key] != nil;
+		[_lock unlock];
+	}
+	reply(success);
+}
+
 - (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
                            token:(uint64_t)token
                            reply:(void (^)(BOOL success))reply
