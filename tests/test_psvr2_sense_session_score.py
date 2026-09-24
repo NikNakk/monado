@@ -81,6 +81,18 @@ class SessionScoreTest(unittest.TestCase):
         self.assertAlmostEqual(jitter["median"], 0.0, delta=20.0)
         self.assertAlmostEqual(jitter["max"], 3000.0, delta=20.0)
 
+    def test_parse_log_flags_candidates_while_commanded_off(self):
+        lines = []
+        for i in range(120):  # 2 s of output reports: on for 1 s, then LED_ALL_OFF
+            host = 1_000_000_000_000 + i * 16_683_000
+            phase = 1 if i < 60 else 5
+            lines.append(f"os_hid_iokit: PSSENSE_TIMING side=R force_ir=0 host_now_ns={host} phase={phase}\n")
+            lines.append(f" INFO [x] CONSTELLATION_CANDIDATE side=R ts={host} cam=0 matched=5\n")
+        off = parse_log(lines)["sides"]["R"]["lit_while_off"]
+        # Off from report 60; candidates count once they are 400 ms (24 reports) into the off run.
+        self.assertEqual(off["candidates"], 120 - 60 - 24)
+        self.assertEqual(off["seconds"], [1])
+
     def test_score_session_end_to_end(self):
         with tempfile.TemporaryDirectory() as tmp:
             session = Path(tmp)

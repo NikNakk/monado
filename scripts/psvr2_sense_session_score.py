@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import bisect
 import csv
 import json
 import math
@@ -69,10 +70,17 @@ def parse_log(lines) -> dict:
     clock: dict[str, list] = defaultdict(list)
     snaps: Counter = Counter()
     exposures: dict[str, list] = defaultdict(list)
+    commands: dict[str, list] = defaultdict(list)  # (host_ns, phase) of each LED output report
+    candidate_ts: dict[str, list] = defaultdict(list)
     counts = Counter()
 
     for raw in lines:
         line = ANSI_RE.sub("", raw).rstrip("\n")
+        if "PSSENSE_TIMING" in line and "os_hid_iokit" in line:
+            kv = parse_kv(line.split("PSSENSE_TIMING", 1)[1])
+            host, phase = to_float(kv.get("host_now_ns")), kv.get("phase")
+            if host is not None and phase is not None:
+                commands[kv.get("side", "?")].append((host, phase))
         if "LED_BOOTSTRAP" in line:
             kv = parse_kv(line.split("LED_BOOTSTRAP", 1)[1])
             side = kv.get("side", "?")
@@ -91,6 +99,9 @@ def parse_log(lines) -> dict:
             kv = parse_kv(line.split("CONSTELLATION_CANDIDATE", 1)[1])
             side = kv.get("side", "?")
             candidates[side][kv.get("cam", "?")] += 1
+            ts = to_float(kv.get("ts"))
+            if ts is not None:
+                candidate_ts[side].append(ts)
             if kv.get("imu_aligned_valid") == "1":
                 value = to_float(kv.get("imu_aligned_delta_deg"))
                 if value is not None:
@@ -117,8 +128,37 @@ def parse_log(lines) -> dict:
             "imu_aligned_delta_deg": describe(imu_aligned[side]),
             "clock_offset": summarise_clock(clock.get(side, []), snaps[side]),
             "exposure_jitter_us": exposure_jitter_us(exposures.get(side, [])),
+            "lit_while_off": lit_while_off(commands.get(side, []), candidate_ts.get(side, [])),
         }
     return out
+
+
+def lit_while_off(commands: list[tuple[float, str]], candidates: list[float], settle_ms: float = 400.0) -> dict | None:
+    """Pose candidates for a controller exposed while it had been commanded LED_ALL_OFF (phase 5) for at least
+    settle_ms. A controller that obeys produces none; on 24 Sep the right Sense stayed lit through minutes of
+    off commands, which poisoned every bootstrap baseline.
+    """
+    if not commands:
+        return None
+    commands = sorted(commands)
+    off_since = []  # (host_ns, start of the current run of phase-5 commands or None)
+    start = None
+    for host, phase in commands:
+        start = (start if start is not None else host) if phase == "5" else None
+        off_since.append((host, start))
+    hosts = [h for h, _ in off_since]
+
+
+    hits = []
+    for ts in candidates:
+        i = bisect.bisect_right(hosts, ts) - 1
+        if i < 0:
+            continue
+        start = off_since[i][1]
+        if start is not None and ts - start >= settle_ms * 1e6:
+            hits.append(ts)
+    seconds = sorted({int((ts - commands[0][0]) / 1e9) for ts in hits})
+    return {"candidates": len(hits), "seconds": seconds}
 
 
 def exposure_jitter_us(samples: list[tuple[float, float]]) -> dict | None:
@@ -452,6 +492,12 @@ def render_text(result: dict) -> str:
             lines.append(
                 f"    clock offset: creep {fmt(c['creep_us'], 1)} us (range {fmt(c['range_us'], 1)} us), "
                 f"settled within 100 us at {fmt(c['settled_s'], 1)} s, snaps {c['snaps']}"
+            )
+        w = s.get("lit_while_off")
+        if w:
+            flag = "  <-- controller ignored LED_ALL_OFF" if w["candidates"] > 20 else ""
+            lines.append(
+                f"    candidates while commanded off > 400 ms: {w['candidates']} in {len(w['seconds'])} s{flag}"
             )
         j = s.get("exposure_jitter_us")
         if j:

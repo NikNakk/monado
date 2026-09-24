@@ -269,6 +269,30 @@ moves; commit `320ed19be`). **Left passes; right never locked**, and its retries
   explain the weak partial steps at the edges of some narrow scans. Not changed yet; check the step pattern
   before lengthening the scan.
 
+**2026-09-24 22:55, `sessions/20260924-225515-bootstrap-both`** (both; full ring held still, then normal grip
+and slow moves after ~30 s; commit `76601136a`). **Invalid as a bootstrap test: the right controller ignored
+its LED commands.**
+
+- The right Sense emitted continuously from t=0 to 47.75 s (190–240 candidates/s, i.e. every frame) even
+  though it was sent `LED_ALL_OFF` (phase 5) most of that time. Its light was in every baseline: left
+  `11,9,11,8`, right `10,9,10,8` and so on, against the `3,1,5,1` window-only background. The left still
+  locked (fudge 15975 µs, the same as the previous run), but its locked lit fraction was 0.74. The right
+  failed 3 wide scans and then locked on a bogus flat window (12500–15500 µs, 3450 µs).
+- The state began in the *previous* run (`224851`) at 34.0 s, on the right controller's first wide-scan
+  command after a baseline (phase 1, `period_id` 42, fudge 0). It persisted through all later commands and
+  across the monado restart. It ended at 47.75 s here, on a narrow-scan command (phase 1, `period_id` 9,
+  fudge 13750 µs). Its output reports were delivered normally (about 3,900 per run, no `SetReport` failures,
+  sequence number advancing). The left controller received the same command types and always obeyed
+  (0 candidates while off).
+- The user noticed the right controller's **visible status LED was off**. The driver never sets `flag2`,
+  `STATUS_LED_SET_ENABLE` or `status_led_enable`, so this is the controller's own state, probably the same
+  abnormal firmware mode. Cause unknown.
+- After ~48 s neither controller produced many candidates while commanded lit (slow-sample drops 6776).
+  That's the same tracker saturation seen in the slow-movement run, made worse by the grip change.
+- The scorer now reports `candidates while commanded off > 400 ms` per side and flags more than 20:
+  `224851` R 665 in 11 s, `225515` R 4731 in 25 s, every left run 0–1. A flagged run's baselines and scans
+  must not be used.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
