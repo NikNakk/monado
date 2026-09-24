@@ -669,9 +669,11 @@ pssense_handle_packet(struct pssense_device *pssense,
 
 	// Update IMU data
 	uint32_t imu_ticks = __le32_to_cpu(data->imu_ticks);
-	int64_t imu_ticks_delta = imu_ticks - pssense->timing.imu_ticks_last;
-	if (imu_ticks_delta >= 0) {
-		pssense->timing.imu_ticks_total += imu_ticks_delta;
+	// Wrap-aware signed delta; negative means an out-of-order report. The first
+	// sample is always accepted since there is no previous tick to compare with.
+	int32_t imu_ticks_delta = (int32_t)(imu_ticks - pssense->timing.imu_ticks_last);
+	if (imu_ticks_delta >= 0 || pssense->timing.imu_ticks_total == 0) {
+		pssense->timing.imu_ticks_total += (uint32_t)(imu_ticks - pssense->timing.imu_ticks_last);
 		pssense->timing.imu_ticks_last = imu_ticks;
 
 		pssense->timing.latest_imu_time_ns = IMU_TICKS_TO_NS(pssense->timing.imu_ticks_total);
@@ -688,9 +690,9 @@ pssense_handle_packet(struct pssense_device *pssense,
 	}
 
 	uint32_t device_ticks = __le32_to_cpu(data->device_timestamp_ticks);
-	int64_t device_ticks_delta = device_ticks - pssense->timing.device_ticks_last;
-	if (device_ticks_delta >= 0) {
-		pssense->timing.device_ticks_total += device_ticks_delta;
+	int32_t device_ticks_delta = (int32_t)(device_ticks - pssense->timing.device_ticks_last);
+	if (device_ticks_delta >= 0 || pssense->timing.device_ticks_total == 0) {
+		pssense->timing.device_ticks_total += (uint32_t)(device_ticks - pssense->timing.device_ticks_last);
 		pssense->timing.device_ticks_last = device_ticks;
 
 		pssense->timing.latest_device_time_ns = IMU_TICKS_TO_NS(pssense->timing.device_ticks_total);
