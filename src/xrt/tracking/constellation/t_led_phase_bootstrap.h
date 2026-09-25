@@ -185,6 +185,8 @@ struct t_led_phase_bootstrap_options
 	 */
 	time_duration_ns hint_fudge_ns;
 	time_duration_ns hint_span_ns;
+	//! Failed hinted scans retried (after a dark failed_backoff_frames pause) before falling back to the full scan.
+	uint32_t hint_retries;
 };
 
 //! Result of one scan step, for logging and tests.
@@ -274,6 +276,8 @@ struct t_led_phase_bootstrap
 	//! Where rescans start: the hint option, then the last lock. Negative for none.
 	time_duration_ns next_hint_ns;
 	uint32_t stuck_detections;
+	//! Hinted scans failed since the last lock.
+	uint32_t hint_failures;
 	uint32_t track_reports;
 	float track_means[3];
 	//! Mean blob count per camera frame for each probe stage (also kept in coverage mode, to cross-check it).
