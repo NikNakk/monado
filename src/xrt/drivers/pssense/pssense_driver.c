@@ -272,6 +272,19 @@ struct pssense_input_state
  * @implements t_constellation_tracker_led_model
  * @implements t_constellation_tracker_device
  */
+//! Online gyro bias state (PSSENSE_GYRO_BIAS_AUTO): exponential statistics of the factory-corrected IMU.
+struct pssense_gyro_bias
+{
+	bool enabled;
+	bool have_stats;
+	double gyro_mean[3], gyro_sq[3], accel_mean[3], accel_sq[3];
+	timepoint_ns last_ns;
+	timepoint_ns still_since_ns;
+	bool still_logged;
+	uint32_t updates;
+	struct xrt_vec3 bias;
+};
+
 struct pssense_device
 {
 	struct xrt_device base;
@@ -341,17 +354,7 @@ struct pssense_device
 		struct m_imu_3dof fusion;
 
 		//! Online gyro bias (PSSENSE_GYRO_BIAS_AUTO): exponential statistics of the factory-corrected IMU.
-		struct
-		{
-			bool enabled;
-			bool have_stats;
-			double gyro_mean[3], gyro_sq[3], accel_mean[3], accel_sq[3];
-			timepoint_ns last_ns;
-			timepoint_ns still_since_ns;
-			bool still_logged;
-			uint32_t updates;
-			struct xrt_vec3 bias;
-		} gyro_bias;
+		struct pssense_gyro_bias gyro_bias;
 		struct xrt_pose pose;
 
 		uint32_t received_frames;
@@ -388,6 +391,8 @@ struct pssense_device
 		bool use_led_bootstrap;
 		//! Feed the bootstrap LED-shaped per-controller counts rather than raw blob counts.
 		bool led_bootstrap_led_blobs;
+		//! PSSENSE_LED_BOOTSTRAP_STRICT is set.
+		bool led_bootstrap_strict;
 		struct t_led_phase_bootstrap led_bootstrap;
 		//! Output generation last programmed into the LED settings.
 		uint32_t led_bootstrap_programmed_generation;
@@ -627,7 +632,7 @@ pssense_update_gyro_bias(struct pssense_device *pssense,
                          const struct xrt_vec3 *gyro,
                          const struct xrt_vec3 *accel)
 {
-	__typeof__(pssense->tracking.gyro_bias) *b = &pssense->tracking.gyro_bias;
+	struct pssense_gyro_bias *b = &pssense->tracking.gyro_bias;
 	const double g[3] = {gyro->x, gyro->y, gyro->z};
 	const double a[3] = {accel->x, accel->y, accel->z};
 	if (!b->have_stats || now_ns <= b->last_ns) {
@@ -1516,6 +1521,25 @@ pssense_node_destroy(struct xrt_frame_node *node)
  *
  * @return true if this controller's LEDs should be lit.
  */
+/*!
+ * With strict mode and the online gyro bias, probe only while the controller turns slower than this. A probe compares
+ * three consecutive ~0.2 s stages; a moving, turning or covered ring changes its light between them. On 26 Sep (003433)
+ * probes taken in normal movement read patterns like 1.6/5.3/4.9 blobs (dark in the middle) and walked the left's lock
+ * 1 ms off its window.
+ */
+#define PSSENSE_LED_PROBE_MAX_ROTATION_RAD_S 0.35
+
+static bool
+pssense_led_bootstrap_steady_for_probe(struct pssense_device *pssense)
+{
+	struct pssense_gyro_bias *g = &pssense->tracking.gyro_bias;
+	if (!pssense->tracking.led_bootstrap_strict || !g->enabled || !g->have_stats) {
+		return true;
+	}
+	double x = g->gyro_mean[0] - g->bias.x, y = g->gyro_mean[1] - g->bias.y, z = g->gyro_mean[2] - g->bias.z;
+	return sqrt(x * x + y * y + z * z) < PSSENSE_LED_PROBE_MAX_ROTATION_RAD_S;
+}
+
 static bool
 pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
 {
@@ -1558,7 +1582,8 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	}
 
 	// A tracking probe changes this controller's light, so like a scan it needs the LEDs to itself.
-	if (t_led_phase_bootstrap_wants_probe(b) && (owner == me || (owner == 0 && xrt_atomic_s32_cmpxchg(
+	if (t_led_phase_bootstrap_wants_probe(b) && pssense_led_bootstrap_steady_for_probe(pssense) &&
+	    (owner == me || (owner == 0 && xrt_atomic_s32_cmpxchg(
 	                                                                              &pssense_led_bootstrap_owner,
 	                                                                              0, me) == 0))) {
 		owner = me;
@@ -2671,8 +2696,12 @@ pssense_create(struct xrt_prober *xp,
 			bootstrap_options.track_interval_frames = frames > 0 ? (uint32_t)frames : 120;
 		}
 		pssense->tracking.led_bootstrap_led_blobs = debug_get_bool_option_pssense_led_bootstrap_led_blobs();
+		pssense->tracking.led_bootstrap_strict = debug_get_bool_option_pssense_led_bootstrap_strict();
 		if (debug_get_bool_option_pssense_led_bootstrap_strict()) {
 			bootstrap_options.min_lock_peak_score = 2.0f;
+			// One probe moves the lock at most 200 us: a noisy probe cannot take a centred lock (+-700 us) out of its
+			// window, and three consistent probes still follow ~60 us/s.
+			bootstrap_options.track_max_step_ns = 200 * U_TIME_1US_IN_NS;
 			// Needs the joint tracker's per-device matched counts (push_camera_led_blob_count).
 			bootstrap_options.detect_stuck_lit = true;
 			// LED-shaped counts are nearly background-free, but average over every camera: a ring three of four

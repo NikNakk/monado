@@ -35,7 +35,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 POSITION_TRACKED_BIT = 1 << 5
-BOOTSTRAP_STATES = {0: "idle", 1: "wide", 2: "narrow", 3: "locked", 4: "baseline"}
+BOOTSTRAP_STATES = {0: "idle", 1: "wide", 2: "narrow", 3: "locked", 4: "baseline", 5: "stuck_lit"}
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 KV_RE = re.compile(r"(\w+)=(\([^)]*\)|\S+)")
@@ -415,7 +415,7 @@ def analyse_capture(capture: Path, poses_path: Path | None, min_blobs: int) -> d
             for row in csv.DictReader(f):
                 if row.get("led_bootstrap_state") not in (None, ""):
                     timeline.append((int(row["timestamp_ns"]), BOOTSTRAP_STATES.get(int(row["led_bootstrap_state"]))))
-        timeline.sort()
+        timeline.sort(key=lambda entry: entry[0])
 
     def state_at(ts):
         lo, hi = 0, len(timeline)

@@ -1017,6 +1017,25 @@ disagreements. The blob-count fallback steered the left (6 `blob_moved`, net +17
   sent to the tracker. It logs `GYRO_BIAS side=… event=still bias_deg_s=…` once per still spell. Stillness is judged
   from the spread of the readings, not their size, so any bias can be learnt.
 
+**2026-09-26 00:34, `sessions/20260926-003433-world-gyro-bias`** (`PSSENSE_GYRO_BIAS_AUTO=1`, world frame; both
+controllers resting in view for the first seconds).
+
+- **Gyro bias learnt as predicted:** R 19.9°/s (6.0, −18.2, 5.5), L 1.8°/s (−0.5, −0.3, −1.7), steady across every still
+  spell. With it subtracted, both controllers' resting IMU rotation (lowest decile) is ~0°/s. The right now yields rests:
+  one of 22.4 s while the head turned up to 63°, during which its world position stayed within 3.7 mm p50 / 10.7 mm p95
+  under the live head_from_camera0. A third, right-only fit gives (−48.1, −16.3, −95.3) mm and 32.2°, within ~6 mm and
+  0.6° of the first two.
+- **`stuck_lit` fired on the right** (`own_ring_lit_across_narrow_scan`) after a weak hinted scan and a failed wide pass.
+  The session carried on: the right tracked 71% (3463 poses) with its stuck-lit ring, and the left then scanned and
+  locked (at 32 s). (The scorer crashed on the unknown state 5; fixed.)
+- **Probes in normal movement did harm.** The left locked at a 0.79 lit fraction. One coverage probe, confirmed by blobs
+  (late coverage 0.11, blobs 6.5/7.3/2.9), moved it 400 µs early, and later probes read patterns a single window cannot
+  produce, e.g. 1.6/5.3/4.9 blobs (dark in the middle). The lock ended 1.04 ms off, at a 0.3 lit fraction; the left
+  tracked 27%. Stages are consecutive ~0.2 s windows, and a moving, turning or covered ring changes its light between
+  them. Now, in strict mode: probes start only while the controller turns slower than 20°/s (bias-corrected gyro,
+  0.25 s mean; needs `PSSENSE_GYRO_BIAS_AUTO`), and one probe moves the lock at most 200 µs (was 400), so a noisy probe
+  cannot take a centred lock (±700 µs) out of its window.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
