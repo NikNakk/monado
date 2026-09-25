@@ -757,6 +757,37 @@ Use `20260925-charuco-mode4-combined-native-origin-candidate.json` (`runtime_usa
 at the image centre no longer move with the calibration, so the remaining floor is probably the LED model or blob
 centroids rather than the rig.
 
+## Background light and the other controller in the LED bootstrap (25 Sep)
+
+**The failure** (`20260925-083326-joint-both-grip-newcal`): the right locked at 13.5 s and stayed lit (keep-lock)
+while the left measured its dark baseline. The left's baseline was 9,8,6,8 blobs per camera, against 6,5,2,4 the night
+before. The blob dump shows 5.4 blobs per camera of the right's ring during it (grip-3: 2.6); the room lighting was the
+same (blinds closed, two lamps). The inflated baseline hid the left's ring. Its narrow scan peaked at 1.9 of 4 cameras,
+it locked on a 950 µs window about 600 µs late, and its ring normaliser was only 2.9 blobs. Every probe then saturated
+the imbalance at ±1 and moved ±400 µs (9 moves in 10 probes, net +778 µs). The lock left the lit window and the left
+was lit in 49% of frames (grip-3: 85%). The right's lock landed within 50 µs of the night before, so the timing itself
+had not changed.
+
+**What background blobs look like.** `constellation_replay --blobs-csv` dumps every blob with its joint-solve owner. Blobs
+matched to Sense LEDs are small and round: median 6×8 px, area p95 132 px², aspect p95 2.5. Blobs with every LED dark
+(lamps, and light round the blinds of the two windows in the left cameras' view) are large or elongated: median area
+966 px², aspect up to 6. A filter keeping blobs with longest side ≤ 16 px, area ≤ 200 px² and aspect ≤ 3 keeps 98.3–99.7%
+of LED blobs and 0–4% of dark blobs. It is `t_constellation_blob_is_led_shaped()`.
+
+**Fixes (opt-in):**
+
+- The tracker now reports a per-controller count to a new optional device callback, `push_camera_led_blob_count`. The
+  count is LED-shaped blobs no other device has claimed, plus the device's own matches. On the joint path it is sent after
+  the exposure is solved, so a tracked controller's ring is excluded. The per-camera path only has the shape filter.
+  `PSSENSE_LED_BOOTSTRAP_LED_BLOBS=1` feeds this to the bootstrap instead of raw counts; it needs
+  `CONSTELLATION_TRACKER_JOINT=1` to exclude the other ring. Offline on the failed run, during the left's baseline the
+  raw count was ~7.3 blobs per camera, 5.4 of them the right ring's. The left's LED count was ~0.3.
+- `PSSENSE_LED_BOOTSTRAP_STRICT=1` fails a narrow scan whose peak is below 2 cameras' worth of lit frames
+  (`event=narrow_peak_weak`, then the usual back-off and rescan). It also skips phase tracking when the ring added fewer
+  than 3 blobs per camera at lock.
+- Requiring two agreeing probes before moving was tried and dropped. In simulation it was worse under changing
+  background (83% lit against 97%) and could not follow 60 µs/s drift.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
