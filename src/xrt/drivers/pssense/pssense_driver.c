@@ -1290,6 +1290,16 @@ pssense_node_break_apart(struct xrt_frame_node *node)
 static xrt_atomic_s32_t pssense_led_bootstrap_owner = 0;
 //! Set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has locked.
 static xrt_atomic_s32_t pssense_led_bootstrap_first_locked = 0;
+//! Exposure time (ms, wrapping) at which a controller last released the scan token; 0 before any release.
+static xrt_atomic_s32_t pssense_led_bootstrap_release_ms = 0;
+
+/*!
+ * With LED-blob counts, a controller that has just locked stays lit (keep-lock), but the joint tracker needs a moment
+ * to bootstrap and confirm its ring before its blobs are claimed. Until then they count as the next scanner's
+ * background: on 25 Sep (212653) the right locked at 13.5 s, was tracked from ~15 s, and the left's baseline in
+ * between took 3-5 of its blobs per camera on cameras 2 and 3, which then never reached the lit threshold.
+ */
+#define PSSENSE_LED_BOOTSTRAP_HANDOFF_MS 1500
 
 //! Waiting longer than this (~20 s) for the preferred side gives up, in case it never connects.
 #define PSSENSE_LED_BOOTSTRAP_FIRST_WAIT_FRAMES 1200
@@ -1328,9 +1338,30 @@ pssense_led_bootstrap_token(struct pssense_device *pssense)
 }
 
 static void
-pssense_led_bootstrap_release(struct pssense_device *pssense)
+pssense_led_bootstrap_release(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
 {
-	(void)xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, pssense_led_bootstrap_token(pssense), 0);
+	if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, pssense_led_bootstrap_token(pssense), 0) ==
+	        pssense_led_bootstrap_token(pssense) &&
+	    exposure_timestamp_ns > 0) {
+		int32_t ms = (int32_t)(exposure_timestamp_ns / U_TIME_1MS_IN_NS);
+		xrt_atomic_s32_store(&pssense_led_bootstrap_release_ms, ms == 0 ? 1 : ms);
+	}
+}
+
+//! Whether enough time has passed since another controller released the scan token (LED-blob counts only).
+static bool
+pssense_led_bootstrap_handoff_settled(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
+{
+	if (!pssense->tracking.led_bootstrap_led_blobs) {
+		return true;
+	}
+	int32_t released = xrt_atomic_s32_load(&pssense_led_bootstrap_release_ms);
+	if (released == 0) {
+		return true;
+	}
+	int32_t now_ms = (int32_t)(exposure_timestamp_ns / U_TIME_1MS_IN_NS);
+	int32_t elapsed = (int32_t)((uint32_t)now_ms - (uint32_t)released);
+	return elapsed < 0 || elapsed >= PSSENSE_LED_BOOTSTRAP_HANDOFF_MS;
 }
 
 static void
@@ -1362,7 +1393,7 @@ pssense_node_destroy(struct xrt_frame_node *node)
 
 	// LED sync is used on the frame context lifecycle, so it needs to be destroyed in here.
 	t_led_sync_refinement_destroy(&pssense->tracking.led_sync_refinement);
-	pssense_led_bootstrap_release(pssense);
+	pssense_led_bootstrap_release(pssense, 0);
 
 	// Remove the variable tracking.
 	u_var_remove_root(pssense);
@@ -1405,7 +1436,8 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	}
 	pssense->tracking.led_bootstrap_yielding = false;
 
-	if (owner == 0 && t_led_phase_bootstrap_ready_to_scan(b) && pssense_led_bootstrap_may_start_first_scan(pssense)) {
+	if (owner == 0 && t_led_phase_bootstrap_ready_to_scan(b) && pssense_led_bootstrap_may_start_first_scan(pssense) &&
+	    pssense_led_bootstrap_handoff_settled(pssense, exposure_timestamp_ns)) {
 		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
 			owner = me;
 			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
@@ -1436,7 +1468,7 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 			t_led_phase_bootstrap_stop(b);
 		}
 	} else if (!t_led_phase_bootstrap_is_scanning(b) && !t_led_phase_bootstrap_is_probing(b) && owner == me) {
-		pssense_led_bootstrap_release(pssense);
+		pssense_led_bootstrap_release(pssense, exposure_timestamp_ns);
 	}
 
 	if (b->output_generation != pssense->tracking.led_bootstrap_programmed_generation) {
@@ -2689,7 +2721,7 @@ pssense_remove_from_constellation_tracker(struct xrt_device *xdev)
 	pssense->tracking.constellation_device_id = XRT_CONSTELLATION_INVALID_DEVICE_ID;
 	pssense->tracking.use_constellation = false;
 	t_led_phase_bootstrap_stop(&pssense->tracking.led_bootstrap);
-	pssense_led_bootstrap_release(pssense);
+	pssense_led_bootstrap_release(pssense, 0);
 	os_thread_helper_unlock(&pssense->controller_thread);
 	pssense->base.tracking_origin = pssense->tracking.tracking_origin_before_constellation;
 	pssense->tracking.tracking_origin_before_constellation = NULL;

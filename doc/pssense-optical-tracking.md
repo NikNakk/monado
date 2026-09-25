@@ -829,6 +829,25 @@ status LED go off.
   second scan.
 - The coverage probes went untested: neither controller locked.
 
+**2026-09-25 21:26, `sessions/20260925-212653-joint-both-coverage`** (right power-cycled; LED-blob counts, strict,
+coverage probes; right in view during the left's scan, both moving afterwards). No fault, 4201/4201 exposures, no
+`JOINT_SLOW`.
+
+- **Right: its best run yet.** Scan peak 4.0, 1700 µs window, lit fraction 0.98, 3598 fused poses (3410 of them with four
+  cameras), 0 disagreements. Coverage probes: 6 `centred`, 3 `reference_not_tracked`, and 1 move of +394 µs. That move
+  came from a single probe whose early stage solved in only 1 of 8 exposures while the hand moved. The lock stayed in
+  the window.
+- **Left:** 2151 poses (grip-3: 1972). It locked on a weak scan (narrow peak 2.0, exactly the strict minimum; window
+  700 µs), but at the usual centre of 16350 µs. Its coverage probes moved it twice (−129, −225 µs) on imbalances of
+  0.12–0.25; the other probes were `centred`, or `reference_not_tracked` once it left view. The lit fraction of 0.40 is an
+  artefact of its baseline.
+- **Why the left's scan was weak:** its dark baseline was 3,3,8,8. The blob dump shows cameras 2 and 3 saw 3–5
+  LED-shaped blobs per frame that no device owned between 13 and 14.5 s. They were the right ring, which locked at
+  13.5 s and was only picked up by the joint tracker at ~15 s (7 right-owned blobs per camera, 0.4–0.9 unowned). So
+  cameras 2 and 3 never passed the left's lit test, and only cameras 0 and 1 scored its scan.
+- Fix: with LED-blob counts, a controller now waits 1.5 s after another releases the scan token before starting its
+  own scan (`PSSENSE_LED_BOOTSTRAP_HANDOFF_MS`), so the joint tracker can claim the newly locked ring first.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
