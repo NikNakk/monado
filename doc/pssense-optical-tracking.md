@@ -882,6 +882,16 @@ scored ~3.0 across all 21 steps (a 5.45 ms "window"), whereas the right's narrow
 scanning. With a stuck-on ring, coverage probes read the same at every offset, so the left's 10 `centred` results are
 uninformative. Its handoff baseline was clean (`0,0,0,0`), so the 1.5 s hand-off delay worked.
 
+**Probing the stuck left controller (25 Sep, 23:31, after the sweep; `experiments/*-stuck-left-*`).** With the ring
+in view of the headset and Monado closed, `scripts/pssense_led_poke.py` showed the ring lit (8, 6, 4, 5 LED blobs per
+camera). It stayed lit, with unchanged brightness, through ~2.5 s each of: `LED_ALL_OFF`, status-LED set-enable on and
+off, phase `INIT`, `LED_ALL_ON` then off, `PRESCAN` then off, `DEBUG` then off, a re-read of calibration feature report
+0x05, and the calibration probe's force-IR hold (`pssense_hid_probe --force-ir-seconds 10`). The same tool's off
+command had darkened the healthy ring earlier that evening. **A vibration command in the same reports worked** (the user
+felt it). So in this state the controller still receives and acts on output reports, and only its tracking-LED control
+is stuck on. Nothing short of a power cycle has cleared it so far. A stuck controller keeps its ring lit, so it stays
+trackable: the sweep's left tracked 88%.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

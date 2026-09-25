@@ -24,6 +24,7 @@ prints the LED-shaped blobs each camera saw. Steps:
     forced_on  PRESCAN, 2.1 ms pulses every 2.0 ms: lit continuously (the PSSENSE_FORCE_IR recipe)
     prescan    phase PRESCAN (1), period id 42, all LEDs, 16.683 ms cycle
     debug      phase DEBUG (7)
+    rumble     LED_ALL_OFF plus vibration at half amplitude (feel for it)
     calib      re-read calibration feature report 0x05 (no capture). The controller ignored every LED command until
                this had been read once after connecting: on 25 Sep the left stayed dark under forced_on without it.
 """
@@ -163,12 +164,13 @@ class Sender:
         self.zero_host_timestamp = True
 
     def report(self, phase: int, period_id: int = 0, cycle_position: int = 0, masks: bytes = b"\x00" * 4,
-               flag2: int = 0, status_led: int = 0, cycle_ns: int = 16683000) -> bytes:
+               flag2: int = 0, status_led: int = 0, cycle_ns: int = 16683000, flag1: int = 0,
+               vibration: int = 0) -> bytes:
         led = struct.pack("<BBBII4s", phase, self.led_seq & 0xFF, period_id, cycle_position & 0xFFFFFFFF,
                           cycle_ns * 3, masks)
         # Zero, as the calibration probe sends: its reports are the ones known to light the ring outside Monado.
         host_us = 0 if self.zero_host_timestamp else (time.monotonic_ns() // 1000) & 0xFFFFFFFF
-        settings = struct.pack("<BBBB11sI", 0, flag2, 0, 0, b"\x00" * 11, host_us) + led + struct.pack(
+        settings = struct.pack("<BBBB11sI", flag1, flag2, vibration, 0, b"\x00" * 11, host_us) + led + struct.pack(
             "<BB2s", 0, status_led, b"\x00\x00")
         assert len(settings) == 38, len(settings)
         body = struct.pack("<BBB", 0x31, (self.seq << 4) & 0xF0, 0x10) + settings + struct.pack("<B", self.counter) + (
@@ -195,6 +197,9 @@ STEPS = {
     "status_on": dict(phase=5, flag2=1 << 2, status_led=1),
     "status_off": dict(phase=5, flag2=1 << 2, status_led=0),
     "init": dict(phase=0),
+    # LED_ALL_OFF plus vibration (flag1 bits 0-1, amplitude 0x80): tells whether the controller acts on output
+    # reports at all while its LEDs ignore them.
+    "rumble": dict(phase=5, flag1=0x03, vibration=0x80),
     "all_on": dict(phase=6, period_id=42, masks=b"\xff" * 4),
     # The calibration probe's optically verified "always lit": 2.1 ms pulses every 2.0 ms (PSSENSE_FORCE_IR).
     "forced_on": dict(phase=1, period_id=42, masks=b"\xff" * 4, cycle_ns=2000000),
