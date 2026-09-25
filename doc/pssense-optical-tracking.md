@@ -938,6 +938,26 @@ LED-blob counts, strict, coverage probes; both moving after lock). No fault and 
   (it did before), and ±60 µs/s drift is still followed. The track log now includes each stage's blob means.
 - The scorer counts hinted scans (it counts dark baselines) and reports `stuck_lit` and hint fall-backs.
 
+**2026-09-25 23:46, `sessions/20260925-234624-head-motion`** (headset worn; 0–30 s lock, 30–60 s controllers resting
+on the desk while only the head moved, 60–90 s natural movement). Two findings.
+
+- **Controller poses are head-relative, not world poses.** The CLI creates the tracker with `params = {0}`, so the mosaic
+  has no `tracking_origin`, `CameraMosaic::getTrackingOriginPose` returns identity, and every camera pose is fixed in
+  the calibration's native camera-0 frame (the recorded camera-0 pose has zero spread over the run). Resting
+  controllers therefore "moved" 23–30 cm (median) and up to 66 cm as the head turned. It also undermines tracking during
+  head motion: the joint path's orientation prior is `align · q_IMU`, which assumes a non-rotating frame. The right had 60
+  re-acquisitions in this run. World-frame tracking needs (a) the PS VR2 head pose at each exposure as the mosaic's
+  tracking origin, and (b) the camera-0-to-head-pose transform (hand-eye), which the calibration has never had. The
+  poses and dataset do not record the head pose, so this run cannot estimate (b). A resting-controller head-motion run
+  recorded with the head pose can: world = H_i · X · C_i must stay constant.
+- **The left's LED timing slid out of its window 8 s after locking,** with its lock setting unchanged. Its host↔controller
+  clock-offset estimate rose ~900 µs between 12 and 22 s (~2.5 ms over the run), more than the ±~700 µs lit window. At
+  24–27 s the camera frames show the left ring on the desk, in view and dark, next to the lit right ring. Coverage probes
+  cannot recover this: they need the controller tracked at the reference, and 14 of 16 left probes were
+  `reference_not_tracked`. The lock never counts as lost either, because a few lit camera frames keep resetting
+  `frames_since_lit`. The left made 1401 fused poses (tracked 36%); the right made 3214. In the previous (hinted) run
+  both controllers' offset estimates jumped ~3.5 ms together at 60–65 s, which points to the host side of the mapping.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
