@@ -24,6 +24,8 @@ add_library(
 	t_constellation_tracker_dataset.hpp
 	t_constellation_tracker_internal.hpp
 	t_constellation_tracker_joint.cpp
+	t_imu_optical_filter.cpp
+	t_imu_optical_filter.h
 	t_led_phase_bootstrap.c
 	t_led_phase_bootstrap.h
 	t_led_sync_refinement.c
