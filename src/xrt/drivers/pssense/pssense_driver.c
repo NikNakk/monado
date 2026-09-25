@@ -2704,6 +2704,7 @@ pssense_create(struct xrt_prober *xp,
 			bootstrap_options.track_max_step_ns = 200 * U_TIME_1US_IN_NS;
 			// Needs the joint tracker's per-device matched counts (push_camera_led_blob_count).
 			bootstrap_options.detect_stuck_lit = true;
+			bootstrap_options.hint_retries = 1;
 			// LED-shaped counts are nearly background-free, but average over every camera: a ring three of four
 			// cameras saw added 2.9 per camera on 25 Sep. Raw counts need more margin over their noise.
 			bootstrap_options.track_min_ring_blobs = pssense->tracking.led_bootstrap_led_blobs ? 1.5f : 3.0f;

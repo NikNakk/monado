@@ -695,18 +695,30 @@ TEST_CASE("LED phase bootstrap hinted scan locks with far fewer setting changes,
 		CHECK(changes <= 16);
 	}
 
-	// A hint 5 ms off finds nothing and falls back to the full scan, which still locks.
+	// A hint 5 ms off finds nothing and falls back to the full scan, which still locks; with a retry, after a
+	// second short scan.
+	for (uint32_t retries : {0u, 1u}) {
+	CAPTURE(retries);
 	t_led_phase_bootstrap_options options = test_options();
+	options.hint_retries = retries;
 	options.hint_fudge_ns = t_led_phase_bootstrap_wrap(true_hint + 5000000, kPeriod);
 	t_led_phase_bootstrap b;
 	t_led_phase_bootstrap_init(&b, &options);
 	t_led_phase_bootstrap_start(&b, kPeriod);
 	Sim sim{.latency_ns = 5000000};
 	frame = 0;
-	sim.run(b, 3000, frame);
+	// Restart whenever the bootstrap is idle and ready, as the driver does.
+	for (int chunk = 0; chunk < 60 && b.state != T_LED_PHASE_BOOTSTRAP_LOCKED; chunk++) {
+		if (t_led_phase_bootstrap_ready_to_scan(&b)) {
+			t_led_phase_bootstrap_start(&b, kPeriod);
+		}
+		sim.run(b, 100, frame);
+	}
 	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
 	CHECK(circular_distance(b.lock_fudge_ns, reference.lock_fudge_ns) <= full.narrow_step_ns);
 	CHECK(b.consecutive_failures == 0);
+	CHECK(b.scans_attempted == 1 + retries);
+	}
 }
 
 TEST_CASE("LED phase bootstrap wraps offsets into the period")

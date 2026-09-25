@@ -260,6 +260,21 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		weak = "narrow_peak_weak";
 	}
 	if (weak != NULL) {
+		if (b->hinted_scan && b->hint_failures < b->options.hint_retries) {
+			/*
+			 * Retry the short scan after a dark pause before trying the long one. On 26 Sep the right's failed
+			 * hinted scans lit only briefly after each setting change (3/8 then 1/8 frames, the same on every
+			 * camera), and twice the full scan that followed put it into the always-lit fault.
+			 */
+			b->hint_failures++;
+			LOG_W(b, "LED_BOOTSTRAP side=%c event=hint_failed reason=%s, retrying the hinted scan after a pause (%u/%u)",
+			      b->options.label, weak, b->hint_failures, b->options.hint_retries);
+			b->hinted_scan = false;
+			b->state = T_LED_PHASE_BOOTSTRAP_IDLE;
+			b->idle_backoff_frames = b->options.failed_backoff_frames;
+			b->output_generation++;
+			return;
+		}
 		if (b->hinted_scan) {
 			// The window has moved from the hint (or the ring was out of view): fall back to the full scan.
 			LOG_W(b, "LED_BOOTSTRAP side=%c event=hint_failed reason=%s, falling back to the full scan",
@@ -316,6 +331,7 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		b->next_hint_ns = centre - b->options.narrow_blink_ns / 2;
 	}
 	b->hinted_scan = false;
+	b->hint_failures = 0;
 	float background = 0.0f;
 	for (uint32_t c = 0; c < b->options.camera_count; c++) {
 		background += (float)b->baseline_blobs[c];
@@ -618,6 +634,7 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .stuck_wide_step_fraction = 0.6f,
 	    .hint_fudge_ns = -1,
 	    .hint_span_ns = 1500 * U_TIME_1US_IN_NS,
+	    .hint_retries = 0,
 	};
 }
 

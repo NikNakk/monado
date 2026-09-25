@@ -1051,6 +1051,20 @@ world frame). No fault.
   blocks the moves made on 1–2 blobs and keeps those where a stage saw 5–9. In simulation an out-of-view ring with a
   stray blob now never moves the lock, and a lock whose window slid 0.9 ms is still recovered.
 
+**2026-09-26 00:48, `sessions/20260926-004811-world-confirm`** (same settings as 004424).
+
+- Left: tracked 69% (3323 poses), lit 0.82, 17 probes (13 `centred`, net +313 µs), static jitter 2.0 mm p50.
+- Right: `stuck_lit` again (`own_ring_lit_at_every_phase`, from wide step 2), and it tracked 86% (4288 poses) on its
+  stuck-lit ring.
+- **The right's failed hinted scans share a signature.** In 002244, 003433 and 004811 the steps at the right timing
+  were lit in the same few frames on every camera: 3/8 at 15625 µs, then 1/8 at 15875 and 16125 µs. The ring lit
+  briefly after each setting change and then went dark, rather than the pulse missing the exposures. In the
+  successful 004424 scan the same steps were lit 8/8. Twice the full scan that followed put the right into the
+  always-lit fault (at wide steps 3 and 2). The right's hinted scan succeeded in the first run after each power cycle
+  (234101, 004424), and in 234624.
+- Mitigation (strict mode, `hint_retries = 1`): a failed hinted scan is retried once, after a 1 s dark pause, before
+  the full scan. Whether that avoids the fault is untested.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
