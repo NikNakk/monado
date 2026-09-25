@@ -1037,6 +1037,20 @@ controllers resting in view for the first seconds).
   0.25 s mean; needs `PSSENSE_GYRO_BIAS_AUTO`), and one probe moves the lock at most 200 µs (was 400), so a noisy probe
   cannot take a centred lock (±700 µs) out of its window.
 
+**2026-09-26 00:44, `sessions/20260926-004424-world-steady-probes`** (steady-only probes, 200 µs steps; gyro bias,
+world frame). No fault.
+
+- **Left: its best world-frame run.** Tracked 76% (3718 poses), lit fraction 0.70, 11 probes with a net shift of only
+  +186 µs, static jitter 1.9 mm p50. Gyro biases were learnt again: R 19.9 → 20.1°/s, matching the previous run.
+- **Right: tracked 36%, lit 0.26, but not because of its LED timing.** Its lit fraction fell to 188/1200 before any
+  probe had moved anything, so the ring was out of view or covered for long stretches. During them, the blob-count
+  fallback moved the lock on stray blobs: 1.0/2.0/0.1 against a 4.9-blob ring cleared the 0.2 deadband. That added
+  −610 µs in six moves of at most 200 µs (the new cap held).
+- Fix: the fallback moves only if its brighter probe stage saw at least half the ring above the dark baseline
+  (`track_blob_fallback_min_fraction`, 0.5); otherwise it logs `blob_too_dim`. Applied to this run's right probes, it
+  blocks the moves made on 1–2 blobs and keeps those where a stage saw 5–9. In simulation an out-of-view ring with a
+  stray blob now never moves the lock, and a lock whose window slid 0.9 ms is still recovered.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

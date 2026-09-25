@@ -159,6 +159,8 @@ struct t_led_phase_bootstrap_options
 	 * the lock is dark or half lit, so it is not tracked, and coverage probes alone can never bring it back.
 	 */
 	bool track_blob_fallback;
+	//! The fallback moves only if the brighter probe stage saw at least this fraction of the ring's blobs at lock.
+	float track_blob_fallback_min_fraction;
 	//! With track_use_pose_coverage: skip tracking unless the reference stage scored at least this.
 	float track_min_reference_coverage;
 
