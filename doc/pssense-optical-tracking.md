@@ -734,6 +734,29 @@ The left's 30–35 s blackout is gone (0 → 241 poses in that 5 s bin). The lef
 start and spells when the ring was out of view. The right controller's camera 1 went from the worst camera to one of the
 best. It still needs a live run, and the held-out Sense validation from plan item 2 is still outstanding.
 
+**Live run with the new calibration** (`20260925-083326-joint-both-grip-newcal`, same moves as grip-3): R 3289 fused
+(2396 with four cameras, reproj p50 0.57 px; grip-3 had 3118, 1815 and 0.72), 0 disagreements. The left got only 1288.
+That was illumination, not calibration: its first lock came at 26.8 s, the locked lit fraction was 0.49, and the dark
+baseline was 9,8,6,8 blobs. Replaying the recording gives ~1310 left poses whatever the calibration.
+
+**The new set alone is not better everywhere.** On `grip-newcal` its per-camera residuals are 0.05–0.13 px *worse*
+than the old set's for the left (e.g. camera 0 0.43 → 0.50 px p50). The 22 new poses concentrate on the image edges,
+and camera 0's fx (192.7) overshoots. Solving the **old and new poses together** (43 poses; directory of symlinks
+`20260925-charuco-mode4-combined/`; the direct solver now follows symlinks) gives fisheye RMS
+0.34 / 0.30 / 0.32 / 0.27 px, rig 0.38 px, camera 0 fx 190.4. It is the best of the three on grip-3 and ties the old
+set on grip-newcal:
+
+| replay (joint tracker), pushed / RMS p50 | old | new | combined |
+| --- | --- | --- | --- |
+| grip-3 left | 1974 / 0.47 | 2268 / 0.38 | 2296 / 0.32 |
+| grip-3 right | 3337 / 0.69 | 3392 / 0.47 | 3443 / 0.43 |
+| grip-newcal left | 1314 / 0.40 | 1306 / 0.48 | 1318 / 0.41 |
+| grip-newcal right (4-camera) | 3166 (1959) / 0.55 | 3289 (2396) / 0.57 | 3290 (2340) / 0.55 |
+
+Use `20260925-charuco-mode4-combined-native-origin-candidate.json` (`runtime_usable: false`). Residuals of ~0.4–0.5 px
+at the image centre no longer move with the calibration, so the remaining floor is probably the LED model or blob
+centroids rather than the rig.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

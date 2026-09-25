@@ -18,12 +18,12 @@ def board_detector():
  return b,cv2.aruco.CharucoDetector(b,c,p)
 
 def dirs(root):
- out=sorted({p.parent for p in root.rglob('mode-04-size-*-set-4-example-*-plane0.pgm') if '__MACOSX' not in p.parts})
+ out=sorted({p.parent for p in root.rglob('mode-04-size-*-set-4-example-*-plane0.pgm', recurse_symlinks=True) if '__MACOSX' not in p.parts})
  if not out:raise ValueError('no mode-4 captures found')
  return out
 
 def image_provenance(root):
- h=hashlib.sha256();files=sorted(p for p in root.rglob('mode-04-size-*-set-*-example-*-plane*.pgm') if '__MACOSX' not in p.parts)
+ h=hashlib.sha256();files=sorted(p for p in root.rglob('mode-04-size-*-set-*-example-*-plane*.pgm', recurse_symlinks=True) if '__MACOSX' not in p.parts)
  for p in files:
   h.update(p.relative_to(root).as_posix().encode()+b'\0')
   with p.open('rb') as f:
