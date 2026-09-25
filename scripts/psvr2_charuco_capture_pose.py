@@ -7,7 +7,7 @@
     .venv/bin/python scripts/psvr2_charuco_capture_pose.py SESSION_DIR --report     # coverage only
 
 Each call captures SESSION_DIR/Pnn-LABEL with the same survey settings as the 13 September char-mode-12 capture
-(mode 4, 0.5 s settle, 1 s sample, 8 frames per camera), then detects the board in each camera with the direct
+(mode 4, 0.5 s settle, 1 s sample, 8 frames per camera by default), then detects the board in each camera with the direct
 solver's own detector and prints the whole session's coverage:
 
 - corners per camera for this pose (>= 6 makes the pose usable for that camera);
@@ -39,6 +39,24 @@ SIZE = direct.W
 
 def detect_pose(pose_dir: Path, detector) -> list[dict]:
     return [direct.detect(pose_dir, camera, detector) for camera in range(4)]
+
+
+def board_levels(pose_dir: Path, found: list[dict]) -> list[str]:
+    """Dark and light square levels (DN of 255) inside each camera's detected board, from the averaged frames."""
+    import cv2
+
+    out = []
+    for camera, f in enumerate(found):
+        if f["corners"] < MIN_CORNERS:
+            out.append(f"cam{camera} -")
+            continue
+        s, plane = direct.MODE[camera]
+        frames = [cv2.imread(str(x), 0)[:, :SIZE].astype(np.float32)
+                  for x in sorted(pose_dir.glob(f"mode-04-size-*-set-{s}-example-*-plane{plane}.pgm"))]
+        (x0, y0), (x1, y1) = f["points"].min(0).astype(int), f["points"].max(0).astype(int)
+        lo, hi = np.percentile(np.mean(frames, 0)[y0:y1, x0:x1], [10, 90])
+        out.append(f"cam{camera} {lo:.0f}/{hi:.0f}")
+    return out
 
 
 def cell_of(points: np.ndarray) -> tuple[int, int]:
@@ -87,6 +105,7 @@ def main() -> int:
     parser.add_argument("session", type=Path)
     parser.add_argument("label", nargs="?", help="short description of the pose, e.g. board-left-near")
     parser.add_argument("--report", action="store_true", help="only print the session's coverage")
+    parser.add_argument("--frames", type=int, default=8, help="frames per camera to average (default 8)")
     args = parser.parse_args()
 
     session = args.session.expanduser().resolve()
@@ -103,8 +122,8 @@ def main() -> int:
         existing = [int(p.name[1:3]) for p in session.iterdir() if p.is_dir() and re.match(r"P\d\d", p.name)]
         pose = session / f"P{(max(existing) + 1 if existing else 0):02d}-{label}"
         survey = Path(__file__).resolve().parent / "psvr2_camera_mode_survey.py"
-        cmd = [sys.executable, str(survey), str(pose), "--modes", "4", "--settle", "0.5", "--sample", "1.0",
-               "--examples", "8", "--save-every", "4", "--no-contact-sheet"]
+        cmd = [sys.executable, str(survey), str(pose), "--modes", "4", "--settle", "0.5", "--sample", f"{max(1.0, args.frames * 4 / 50):.1f}",
+               "--examples", str(args.frames), "--save-every", "4", "--no-contact-sheet"]
         print("capturing", pose.name, "- hold still")
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -112,6 +131,8 @@ def main() -> int:
             return result.returncode
         found = detect_pose(pose, detector)
         print("this pose, corners per camera: " + "  ".join(f"cam{c} {f['corners']}" for c, f in enumerate(found)))
+        print("board dark/light level (DN of 255; want light >= 20 and nothing saturated): "
+              + "  ".join(board_levels(pose, found)))
         if not any(f["corners"] >= MIN_CORNERS for f in found):
             print("  no camera sees enough of the board: check lighting and placement (pose kept; delete it if useless)")
 
