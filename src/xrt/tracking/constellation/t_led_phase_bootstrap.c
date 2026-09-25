@@ -282,6 +282,7 @@ begin_track_stage(struct t_led_phase_bootstrap *b, enum t_led_phase_bootstrap_tr
 {
 	b->track_stage = stage;
 	b->track_blob_sum = 0;
+	b->track_coverage_sum = 0.0f;
 	b->track_reports = 0;
 	reset_step_window(b);
 
@@ -305,11 +306,13 @@ finish_track(struct t_led_phase_bootstrap *b)
 
 	// Normalise by the ring's size at lock time, not by the current background: another controller that lit
 	// up after this one's baseline would otherwise make the ring look larger and shrink every correction.
-	float ring = b->ring_blobs;
+	float ring = b->options.track_use_pose_coverage ? ref : b->ring_blobs;
 	float imbalance = 0.0f;
 	time_duration_ns shift = 0;
 	const char *result = "centred";
-	if (ring < b->options.track_min_ring_blobs) {
+	if (b->options.track_use_pose_coverage && ref < b->options.track_min_reference_coverage) {
+		result = "reference_not_tracked";
+	} else if (!b->options.track_use_pose_coverage && ring < b->options.track_min_ring_blobs) {
 		result = "ring_too_small";
 	} else {
 		imbalance = (late - early) / ring;
@@ -345,7 +348,12 @@ static void
 finish_track_stage(struct t_led_phase_bootstrap *b)
 {
 	uint32_t index = (uint32_t)b->track_stage - 1;
-	b->track_means[index] = b->track_reports ? (float)b->track_blob_sum / (float)b->track_reports : 0.0f;
+	if (b->options.track_use_pose_coverage) {
+		// Per exposure of the window, so exposures that did not solve count as dark.
+		b->track_means[index] = b->track_coverage_sum / (float)MAX(b->options.measure_frames, 1u);
+	} else {
+		b->track_means[index] = b->track_reports ? (float)b->track_blob_sum / (float)b->track_reports : 0.0f;
+	}
 
 	switch (b->track_stage) {
 	case T_LED_PHASE_BOOTSTRAP_TRACK_REF: begin_track_stage(b, T_LED_PHASE_BOOTSTRAP_TRACK_EARLY); break;
@@ -478,6 +486,8 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .track_deadband = 0.2f,
 	    .track_max_probe_ns = 300 * U_TIME_1US_IN_NS,
 	    .track_min_ring_blobs = 1.0f,
+	    .track_use_pose_coverage = false,
+	    .track_min_reference_coverage = 0.5f,
 	};
 }
 
@@ -595,6 +605,17 @@ t_led_phase_bootstrap_push_exposure(struct t_led_phase_bootstrap *b, int64_t exp
 	}
 
 	return generation != b->output_generation;
+}
+
+void
+t_led_phase_bootstrap_push_pose_coverage(struct t_led_phase_bootstrap *b, int64_t exposure_timestamp_ns, float coverage)
+{
+	if (!b->options.track_use_pose_coverage || !t_led_phase_bootstrap_is_probing(b)) {
+		return;
+	}
+	if (window_accepts(b, exposure_timestamp_ns)) {
+		b->track_coverage_sum += coverage < 0.0f ? 0.0f : (coverage > 1.0f ? 1.0f : coverage);
+	}
 }
 
 void

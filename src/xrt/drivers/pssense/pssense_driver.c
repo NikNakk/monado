@@ -99,6 +99,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_led_blobs, "PSSENSE_LED_BOOTSTR
  * added at least three blobs per camera (a smaller one turns every blob of noise into a full-scale correction).
  */
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_strict, "PSSENSE_LED_BOOTSTRAP_STRICT", false)
+//! Phase-tracking probes score joint-solve pose coverage (fraction of visible LEDs matched) instead of blob counts.
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track_coverage, "PSSENSE_LED_BOOTSTRAP_TRACK_COVERAGE", false)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -1789,6 +1791,12 @@ pssense_accept_joint_sample(struct pssense_device *pssense, struct t_constellati
 			             sqrtf(dx * dx + dy * dy + dz * dz) * 1000.0f);
 		}
 	}
+	if (pssense->tracking.use_led_bootstrap && !pssense->tracking.led_bootstrap_yielding &&
+	    sample->metrics.visible_led_count > 0) {
+		t_led_phase_bootstrap_push_pose_coverage(&pssense->tracking.led_bootstrap, sample->timestamp_ns,
+		                                         (float)sample->metrics.matched_blob_count /
+		                                             (float)sample->metrics.visible_led_count);
+	}
 	return pssense_commit_optical_pose_locked(pssense, sample, sample->joint_camera_count, reacquiring, true);
 }
 
@@ -2523,19 +2531,23 @@ pssense_create(struct xrt_prober *xp,
 			long frames = debug_get_num_option_pssense_led_bootstrap_track_frames();
 			bootstrap_options.track_interval_frames = frames > 0 ? (uint32_t)frames : 120;
 		}
+		pssense->tracking.led_bootstrap_led_blobs = debug_get_bool_option_pssense_led_bootstrap_led_blobs();
 		if (debug_get_bool_option_pssense_led_bootstrap_strict()) {
 			bootstrap_options.min_lock_peak_score = 2.0f;
-			bootstrap_options.track_min_ring_blobs = 3.0f;
+			// LED-shaped counts are nearly background-free, but average over every camera: a ring three of four
+			// cameras saw added 2.9 per camera on 25 Sep. Raw counts need more margin over their noise.
+			bootstrap_options.track_min_ring_blobs = pssense->tracking.led_bootstrap_led_blobs ? 1.5f : 3.0f;
 		}
-		pssense->tracking.led_bootstrap_led_blobs = debug_get_bool_option_pssense_led_bootstrap_led_blobs();
+		bootstrap_options.track_use_pose_coverage = debug_get_bool_option_pssense_led_bootstrap_track_coverage();
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
 		// Force the first update to program the bootstrap's output, replacing any refinement sample.
 		pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
 	}
 	if (pssense->tracking.use_led_bootstrap) {
-		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)%s%s",
+		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)%s%s%s",
 		             pssense->tracking.led_bootstrap_led_blobs ? ", LED-shaped per-controller blob counts" : "",
-		             debug_get_bool_option_pssense_led_bootstrap_strict() ? ", strict" : "");
+		             debug_get_bool_option_pssense_led_bootstrap_strict() ? ", strict" : "",
+		             debug_get_bool_option_pssense_led_bootstrap_track_coverage() ? ", coverage probes" : "");
 	}
 
 	ret = os_thread_helper_init(&pssense->controller_thread);

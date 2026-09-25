@@ -135,6 +135,15 @@ struct t_led_phase_bootstrap_options
 	float track_deadband;
 	//! Skip tracking unless the ring added at least this many mean blobs per camera at lock time.
 	float track_min_ring_blobs;
+	/*!
+	 * Probe with pose coverage instead of blob counts: each probe stage scores the sum over its exposures of the
+	 * fraction of predicted-visible LEDs the pose solve matched (@ref t_led_phase_bootstrap_push_pose_coverage), divided
+	 * by the stage's exposure count, so an exposure that did not solve scores 0. Background light and the ring's size in
+	 * view both drop out; blob counts swung 4.6 -> 8.8 between the left's probes on 25 Sep as the hand moved.
+	 */
+	bool track_use_pose_coverage;
+	//! With track_use_pose_coverage: skip tracking unless the reference stage scored at least this.
+	float track_min_reference_coverage;
 };
 
 //! Result of one scan step, for logging and tests.
@@ -210,6 +219,8 @@ struct t_led_phase_bootstrap
 	uint32_t track_countdown;
 	bool track_wants_probe;
 	uint64_t track_blob_sum;
+	//! Sum of pushed pose coverages in the current probe stage's window.
+	float track_coverage_sum;
 	uint32_t track_reports;
 	float track_means[3];
 	uint32_t track_cycles;
@@ -268,6 +279,13 @@ t_led_phase_bootstrap_is_scanning(const struct t_led_phase_bootstrap *b)
 	return b->state == T_LED_PHASE_BOOTSTRAP_BASELINE || b->state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN ||
 	       b->state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
 }
+
+/*!
+ * Push the pose coverage of one solved exposure (matched / predicted-visible LEDs, 0-1). Only used by probes with
+ * @ref t_led_phase_bootstrap_options::track_use_pose_coverage; exposures that did not solve are simply not pushed.
+ */
+void
+t_led_phase_bootstrap_push_pose_coverage(struct t_led_phase_bootstrap *b, int64_t exposure_timestamp_ns, float coverage);
 
 //! True while locked and due a tracking probe. The caller must get exclusive use of the LEDs (no other controller
 //! scanning or probing) and then call @ref t_led_phase_bootstrap_begin_probe.

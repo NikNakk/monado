@@ -796,6 +796,22 @@ got 1–3 reports per camera instead of 8. Even so, it locked where grip-3 did (
 tracking was stable (7 probes, net +41 µs). The script now prefers `build-sense-rel`. The joint worker logs
 `JOINT_SLOW` with a time breakdown when an exposure takes over 8 ms.
 
+**Optimised re-run** (`20260925-205419-joint-both-ledblobs-rel`, LED-blob counts + strict, right ring held in view
+during the left's scan): 4201/4201 exposures processed, 0 skipped, no `JOINT_SLOW`. The left's dark baseline was
+1,2,1,5 (morning: 9,8,6,8). Its scan was clean: lit narrow steps ~20 LED blobs over three cameras, dark steps 1.5–3.5.
+It locked at centre 16350 µs, peak 3.0, window 1700 µs, the same place as grip-3. The left had 2524 fused poses, the
+most yet (grip-3: 1972), with 0 disagreements. The right had 2816, 2536 of them with four cameras. The left's phase
+tracking never ran (10× `ring_too_small`): LED counts average the ring over all four cameras, and three saw it, giving
+2.91 against the strict threshold of 3. Its probe counts also swung 4.6 → 8.8 between probes as the hand moved.
+
+So strict mode's ring threshold is 1.5 with LED-blob counts, and there is a better probe signal:
+`PSSENSE_LED_BOOTSTRAP_TRACK_COVERAGE=1` scores each probe stage by joint-solve pose coverage (matched / predicted-visible
+LEDs, capped at 1). The stage score is summed over its exposures and divided by the exposure count, so an exposure that
+does not solve scores 0. Background light and how much of the ring is in view drop out. The imbalance is normalised by
+the reference stage, and tracking is skipped when the reference scores under 0.5 (`reference_not_tracked`). In
+simulation it follows ±60 µs/s drift (>90% lit), and holds its lock with the background changing by 0–8 blobs and one
+block in four losing every solve (>95% lit).
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

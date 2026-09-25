@@ -37,6 +37,10 @@ struct Sim
 	//! other controller's ring passing through view).
 	uint32_t noise_blobs = 0;
 	uint32_t noise_block_frames = 30;
+	//! Also push a pose coverage for each lit frame, as the driver does for each joint solve.
+	bool push_coverage = false;
+	//! One block in this many (of noise_block_frames) loses every solve, as when the hand hides the ring.
+	uint32_t solve_dropout_one_in = 0;
 	uint32_t frames_run = 0;
 	uint32_t frames_lit = 0;
 
@@ -92,13 +96,14 @@ struct Sim
 			while (reports.size() > report_delay_frames) {
 				auto [rts, rlit] = reports.front();
 				reports.pop_front();
-				uint32_t noise = 0;
-				if (noise_blobs > 0) {
-					// A fixed hash of the block index, so runs are repeatable.
-					uint64_t block = (uint64_t)(rts / kPeriod) / noise_block_frames;
-					uint64_t h = (block + 1) * 0x9E3779B97F4A7C15ull;
-					h ^= h >> 29;
-					noise = (uint32_t)(h % (noise_blobs + 1));
+				// A fixed hash of the block index, so runs are repeatable.
+				uint64_t block = (uint64_t)(rts / kPeriod) / noise_block_frames;
+				uint64_t h = (block + 1) * 0x9E3779B97F4A7C15ull;
+				h ^= h >> 29;
+				uint32_t noise = noise_blobs > 0 ? (uint32_t)(h % (noise_blobs + 1)) : 0;
+				bool dropped = solve_dropout_one_in > 0 && (h >> 7) % solve_dropout_one_in == 0;
+				if (push_coverage && rlit && visible_cameras >= 2 && !dropped) {
+					t_led_phase_bootstrap_push_pose_coverage(&b, rts, 1.0f);
 				}
 				for (uint32_t c = 0; c < 4; c++) {
 					bool cam_lit = rlit && c < visible_cameras;
@@ -455,6 +460,45 @@ TEST_CASE("LED phase bootstrap tracking holds its lock while background light ch
 	sim.run(b, 4000, frame);
 	CHECK(b.track_cycles >= 10);
 	CHECK((float)sim.frames_lit / (float)sim.frames_run > 0.95f);
+}
+
+TEST_CASE("LED phase bootstrap coverage probes follow drift and ignore background and lost solves")
+{
+	for (int64_t drift : {int64_t(1000), int64_t(-1000)}) {
+		CAPTURE(drift);
+		t_led_phase_bootstrap_options options = test_options();
+		options.track_interval_frames = 120;
+		options.track_use_pose_coverage = true;
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		Sim sim{.latency_ns = 5000000};
+		sim.push_coverage = true;
+		float fraction = run_drifting_lock(b, sim, drift, 3000);
+		CHECK(fraction > 0.9f);
+		CHECK(b.track_moves > 0);
+	}
+
+	// No drift, background changing by 0-8 blobs and one block in four losing every solve: the lock stays put.
+	t_led_phase_bootstrap_options options = test_options();
+	options.track_interval_frames = 120;
+	options.track_use_pose_coverage = true;
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+	Sim sim{.latency_ns = 9000000};
+	sim.push_coverage = true;
+	uint32_t frame = 0;
+	t_led_phase_bootstrap_start(&b, kPeriod);
+	sim.run(b, 1000, frame);
+	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	int64_t lock = b.lock_fudge_ns;
+	sim.noise_blobs = 8;
+	sim.solve_dropout_one_in = 4;
+	sim.frames_run = 0;
+	sim.frames_lit = 0;
+	sim.run(b, 4000, frame);
+	CHECK(b.track_cycles >= 10);
+	CHECK((float)sim.frames_lit / (float)sim.frames_run > 0.95f);
+	CHECK(circular_distance(b.lock_fudge_ns, lock) <= 400000);
 }
 
 TEST_CASE("LED phase bootstrap wraps offsets into the period")
