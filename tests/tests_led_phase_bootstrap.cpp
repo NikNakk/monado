@@ -538,6 +538,39 @@ TEST_CASE("LED phase bootstrap coverage probes ignore solve dropouts that the bl
 	}
 }
 
+TEST_CASE("LED phase bootstrap coverage probes fall back to blob counts when the ring has slid out of view")
+{
+	// The lit window jumps 0.9 ms (the left slid ~0.9 ms on 25 Sep): the lock is now dark, nothing solves, and only
+	// the blob counts can show which way to move.
+	for (bool fallback : {false, true}) {
+		CAPTURE(fallback);
+		t_led_phase_bootstrap_options options = test_options();
+		options.track_interval_frames = 120;
+		options.track_use_pose_coverage = true;
+		options.track_blob_fallback = fallback;
+		options.lost_frames = 100000; // keep the lock, so only tracking can recover
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		Sim sim{.latency_ns = 5000000};
+		sim.push_coverage = true;
+		uint32_t frame = 0;
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		sim.run(b, 1000, frame);
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		sim.latency_ns -= 900000; // pulses land 0.9 ms earlier; the simulated ring is lit or dark, never dim
+		sim.frames_run = 0;
+		sim.frames_lit = 0;
+		sim.run(b, 3000, frame);
+		float lit = (float)sim.frames_lit / (float)sim.frames_run;
+		if (fallback) {
+			CHECK(lit > 0.7f);
+			CHECK(b.track_moves > 0);
+		} else {
+			CHECK(lit < 0.3f);
+		}
+	}
+}
+
 TEST_CASE("LED phase bootstrap detects a controller stuck lit and stops scanning")
 {
 	t_led_phase_bootstrap_options options = test_options();

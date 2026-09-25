@@ -958,6 +958,28 @@ on the desk while only the head moved, 60–90 s natural movement). Two findings
   `frames_since_lit`. The left made 1401 fused poses (tracked 36%); the right made 3214. In the previous (hinted) run
   both controllers' offset estimates jumped ~3.5 ms together at 60–65 s, which points to the host side of the mapping.
 
+## World-frame tracking and the camera-0-to-head transform (plan, 26 Sep)
+
+- `PSVR2_CONSTELLATION_WORLD=1` (CLI) gives the camera mosaic a tracking origin: the PS VR2 head pose at each exposure
+  (`XRT_INPUT_GENERIC_HEAD_POSE`; interpolated from the SLAM history, or predicted a few ms past it) composed with the
+  calibration's optional `head_from_camera0_xrt`, identity if absent. Controller poses, the joint tracker's IMU alignment
+  and the driver's predictions are then in the world, and the dataset's camera poses record head · X. Off by default.
+- `scripts/psvr2_head_from_camera0.py` estimates X from a world-frame recording in which the controllers rest while the
+  head turns. For each rest (the controller's IMU rotating < 3°/s for ≥ 1 s), head_i · X · C_i must be constant, where
+  head_i = camera0_i · X_recorded⁻¹ and C_i = camera0_i⁻¹ · world_i. It starts from the classic hand-eye solution
+  (A X = X B, rotation by aligning rotation axes, translation by linear least squares), then refines X jointly with
+  each rest's world pose (Huber). It reports the resting controllers' world spread for the recorded, initial and refined
+  X, and can write the calibration plus `head_from_camera0_xrt` (`runtime_usable` stays false). The synthetic test
+  recovers a 27°, 7 cm X within 2 mm and 0.5°, and refuses a recording without head rotation.
+- `constellation_replay --calibration CAL --recorded-calibration SESSION/calibration.json` swaps X on a world-frame
+  recording (camera 0 becomes recorded camera 0 · X_recorded⁻¹ · X_new), so a fitted X can be judged offline.
+
+**LED timing recovery.** With LED-blob counts on, coverage probes whose reference stage is not tracked now steer by the
+LED-blob imbalance (`blob_moved` / `blob_centred`) instead of skipping (`track_blob_fallback`). In simulation a lit
+window that slides 0.9 ms off the lock stays dark without it (< 30% lit) and is recovered with it (> 70%). The fast
+clock-offset excursions (~90 µs/s for ~10 s, well beyond crystal drift) are still unexplained. The max-tracker decays at
+a fixed 50 µs/s and snaps upwards, so a change in the Bluetooth latency floor could move it.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

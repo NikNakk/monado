@@ -374,7 +374,23 @@ finish_track(struct t_led_phase_bootstrap *b)
 	time_duration_ns shift = 0;
 	const char *result = "centred";
 	if (b->options.track_use_pose_coverage && ref < b->options.track_min_reference_coverage) {
+		/*
+		 * Not tracked at the lock: the ring may be dark because the lit window has slid off the lock. The blob
+		 * counts still see it: on 25 Sep (234624) the left's untracked probes read e.g. 0.2/1.9/7.2 blobs
+		 * (ref/early/late) as its window slid later, while coverage read 0/0/0 and the lock never moved.
+		 */
 		result = "reference_not_tracked";
+		if (b->options.track_blob_fallback && b->ring_blobs >= b->options.track_min_ring_blobs) {
+			ring = b->ring_blobs;
+			imbalance = (b->track_blob_means[2] - b->track_blob_means[1]) / ring;
+			imbalance = imbalance > 1.0f ? 1.0f : (imbalance < -1.0f ? -1.0f : imbalance);
+			result = "blob_centred";
+			if (imbalance > b->options.track_deadband || imbalance < -b->options.track_deadband) {
+				shift = (time_duration_ns)(b->options.track_gain * imbalance * (float)b->track_offset_ns);
+				shift = CLAMP(shift, -b->options.track_max_step_ns, b->options.track_max_step_ns);
+				result = "blob_moved";
+			}
+		}
 	} else if (!b->options.track_use_pose_coverage && ring < b->options.track_min_ring_blobs) {
 		result = "ring_too_small";
 	} else {
@@ -580,6 +596,7 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .track_use_pose_coverage = false,
 	    .track_min_reference_coverage = 0.5f,
 	    .track_coverage_min_blob_imbalance = 0.25f,
+	    .track_blob_fallback = false,
 	    .detect_stuck_lit = false,
 	    .stuck_min_matched = 2,
 	    .stuck_own_fraction = 0.25f,
