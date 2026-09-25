@@ -205,6 +205,8 @@ def summarise_clock(samples: list[tuple[float, float]], snaps: int, settle_us: f
 def summarise_bootstrap(events: list[dict]) -> dict:
     summary = {
         "scans_started": 0,
+        "stuck_lit": [],
+        "hints_failed": 0,
         "scans_failed": [],
         "locks": [],
         "lost": 0,
@@ -218,8 +220,13 @@ def summarise_bootstrap(events: list[dict]) -> dict:
         event = kv.get("event")
         if event == "scan_start":
             if kv.get("stage") == "wide":
-                summary["scans_started"] += 1
                 steps = defaultdict(list)
+        elif event == "hinted_scan":
+            steps = defaultdict(list)
+        elif event == "hint_failed":
+            summary["hints_failed"] += 1
+        elif event == "stuck_lit":
+            summary["stuck_lit"].append(kv.get("reason"))
         elif event == "step":
             steps[kv.get("stage", "?")].append(
                 {
@@ -240,6 +247,8 @@ def summarise_bootstrap(events: list[dict]) -> dict:
                 }
             )
         elif event == "baseline":
+            # Every scan, full or hinted, starts with its dark baseline.
+            summary["scans_started"] += 1
             summary["baselines"].append(kv.get("blobs"))
         elif event == "scan_failed":
             summary["scans_failed"].append(kv.get("reason"))
@@ -481,6 +490,8 @@ def render_text(result: dict) -> str:
         lines.append(
             f"    bootstrap: {b['scans_started']} scans, {len(b['locks'])} locks, {b['lost']} lost, "
             f"failures {Counter(b['scans_failed']) or '-'}"
+            + (f", hinted scans that fell back {b['hints_failed']}" if b.get("hints_failed") else "")
+            + (f", STUCK LIT ({', '.join(b['stuck_lit'])})" if b.get("stuck_lit") else "")
         )
         for lock in b["locks"]:
             lines.append(

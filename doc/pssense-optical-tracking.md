@@ -922,6 +922,22 @@ centre so far lies between 15850 and 16600 µs, or just past the wrap (42–542 
 12850, 14225 µs). In simulation a hinted scan locks with ≤ 16 setting changes, with the hint up to 0.9 ms off, and a
 hint 5 ms off falls back and still locks.
 
+**2026-09-25 23:41, `sessions/20260925-234101-joint-both-hinted`** (hinted scans at 16350 µs, stuck-lit detection,
+LED-blob counts, strict, coverage probes; both moving after lock). No fault and no `stuck_lit`.
+
+- **Hinted scans work.** The right locked at 5.1 s (previously 13.5 s) and the left at 11.6 s (previously ~27 s). Each did one
+  13-step narrow scan with a clean 1700 µs window: centres 15975 µs (R) and 16225 µs (L), baselines `1,0,0,0`. That is 13
+  setting changes instead of 38 per controller.
+- Left 2919 fused poses, right 3313 (2403 of them with four cameras), 0 disagreements.
+- **Coverage probes were fooled by solve dropouts.** Stages read all-or-nothing (e.g. ref 1.00, early 1.00, late
+  0.00): a hand or fast motion lost every solve for the stage's 8 exposures while the ring stayed lit. The left's lock
+  moved 400 µs at a time, net −1188 µs, to 14538 µs, outside its lit window (lit fraction 0.62). A lock centred in a
+  1.4 ms window cannot go dark at ±300 µs, so these were not dimming. Fix: in coverage mode a move now also needs the
+  blob counts to agree. The dimmer side must have lost ≥ 25% of the ring's blobs; otherwise the probe logs
+  `unconfirmed`. In simulation, with one block in three losing every solve and no drift, the lock no longer moves
+  (it did before), and ±60 µs/s drift is still followed. The track log now includes each stage's blob means.
+- The scorer counts hinted scans (it counts dark baselines) and reports `stuck_lit` and hint fall-backs.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
