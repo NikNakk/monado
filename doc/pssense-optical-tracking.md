@@ -892,6 +892,36 @@ felt it). So in this state the controller still receives and acts on output repo
 is stuck on. Nothing short of a power cycle has cleared it so far. A stuck controller keeps its ring lit, so it stays
 trackable: the sweep's left tracked 88%.
 
+## The always-lit fault: pattern, detection and fewer triggers (25 Sep)
+
+`scripts/pssense_stuck_lit_survey.py` scans every session's log for the fault. A scan step is "lit out of window" when it
+scores ≥ 1 camera with its pulse far from every healthy lock; the onset is the first of three such steps in a row. It
+finds five of the six confirmed occurrences: `224851` R, `225515` R, `230002` R, `205908` R, and `232548` L. It misses
+`233615` R, whose onset step lay inside the normal window. It also flags five unconfirmed ones on 24 Sep, some from
+before the dark baseline existed.
+
+- **Only while scanning, at an apparently random step.** Onsets fall on wide steps 3–8 and narrow steps 1–20, on both
+  controllers, at controller uptimes of 31–706 s, at any LED sequence number, and with the other controller lit or dark.
+  That is ~6 faults in ~40 scans of ~38 steps: ~15% per scan, ~0.4% per step.
+- **Never while locked**, although a locked controller re-latches its settings (a new sequence number) on every frame,
+  hundreds of thousands of times so far. The risk seems to come with changes in content (phase jumps, pulse-width
+  changes), not with latching.
+- **Not a late schedule.** In the 3 s before each onset, the schedule lead on the controller's clock was 43–59 ms (normal),
+  and the clock samples were fresh (age ≤ 25 ms).
+
+**Detection** (`PSSENSE_LED_BOOTSTRAP_STRICT=1`, needs the joint path). The tracker already reports each device's own
+matched blobs per camera frame. The bootstrap declares `stuck_lit` if the controller's own ring is solved in ≥ 25% of the
+dark baseline's camera frames, in ≥ 60% of wide-scan steps (a healthy scan: ~3 of 17), or in all but one narrow-scan
+step. A stuck controller stops scanning and probing, releases the scan token, counts as locked for the `FIRST` ordering,
+and keeps tracking. It logs `event=stuck_lit ... power-cycle the controller`.
+
+**Fewer triggers.** `PSSENSE_LED_BOOTSTRAP_HINT_US=16350` (a lit-window centre) replaces the first full scan (17 wide +
+21 narrow steps across two pulse widths) with the dark baseline plus a 13-step narrow scan of ±1.5 ms around the hint.
+Rescans then start around the last lock. If the hinted scan finds nothing it falls back to the full scan. Every lock
+centre so far lies between 15850 and 16600 µs, or just past the wrap (42–542 µs), apart from three outliers (2600,
+12850, 14225 µs). In simulation a hinted scan locks with ≤ 16 setting changes, with the hint up to 0.9 ms off, and a
+hint 5 ms off falls back and still locks.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

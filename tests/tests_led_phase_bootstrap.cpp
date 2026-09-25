@@ -41,6 +41,10 @@ struct Sim
 	bool push_coverage = false;
 	//! One block in this many (of noise_block_frames) loses every solve, as when the hand hides the ring.
 	uint32_t solve_dropout_one_in = 0;
+	//! Push each camera's own matched blob count, as the joint tracker does (lit frames match 5).
+	bool push_own = false;
+	//! From this frame on the ring is lit whatever it is told (the always-lit fault); UINT32_MAX never.
+	uint32_t stuck_from_frame = UINT32_MAX;
 	uint32_t frames_run = 0;
 	uint32_t frames_lit = 0;
 
@@ -82,7 +86,7 @@ struct Sim
 				pending_outputs.pop_front();
 			}
 
-			bool frame_lit = lit(applied_fudge, applied_blink);
+			bool frame_lit = lit(applied_fudge, applied_blink) || (visible && frame_index >= stuck_from_frame);
 			frames_run++;
 			frames_lit += frame_lit ? 1 : 0;
 			reports.emplace_back(ts, frame_lit);
@@ -109,6 +113,9 @@ struct Sim
 					bool cam_lit = rlit && c < visible_cameras;
 					t_led_phase_bootstrap_push_blob_count(
 					    &b, c, rts, background[c] + noise + (cam_lit ? lit_blobs : dark_blobs));
+					if (push_own) {
+						t_led_phase_bootstrap_push_own_matched(&b, c, rts, cam_lit && visible_cameras >= 2 ? 5 : 0);
+					}
 				}
 			}
 		}
@@ -499,6 +506,119 @@ TEST_CASE("LED phase bootstrap coverage probes follow drift and ignore backgroun
 	CHECK(b.track_cycles >= 10);
 	CHECK((float)sim.frames_lit / (float)sim.frames_run > 0.95f);
 	CHECK(circular_distance(b.lock_fudge_ns, lock) <= 400000);
+}
+
+TEST_CASE("LED phase bootstrap detects a controller stuck lit and stops scanning")
+{
+	t_led_phase_bootstrap_options options = test_options();
+	options.detect_stuck_lit = true;
+
+	// Stuck from the start: its own ring is solved during the dark baseline.
+	{
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		Sim sim{.latency_ns = 5000000};
+		sim.push_own = true;
+		sim.stuck_from_frame = 0;
+		uint32_t frame = 0;
+		sim.run(b, 2000, frame);
+		CHECK(t_led_phase_bootstrap_is_stuck_lit(&b));
+		CHECK_FALSE(b.have_lock);
+		CHECK(b.scans_attempted == 1);
+		CHECK_FALSE(t_led_phase_bootstrap_is_scanning(&b));
+		CHECK_FALSE(t_led_phase_bootstrap_ready_to_scan(&b));
+		t_led_phase_bootstrap_start(&b, kPeriod); // ignored once stuck
+		CHECK(t_led_phase_bootstrap_is_stuck_lit(&b));
+	}
+
+	// Sticks during the wide scan (as on 24 Sep at wide step 3): caught when the wide scan ends.
+	{
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		Sim sim{.latency_ns = 5000000};
+		sim.push_own = true;
+		sim.stuck_from_frame = 36 + 2 * 20;
+		uint32_t frame = 0;
+		sim.run(b, 2000, frame);
+		CHECK(t_led_phase_bootstrap_is_stuck_lit(&b));
+		CHECK_FALSE(b.have_lock);
+	}
+
+	// Sticks at the start of the narrow scan (as in the 25 Sep rotation sweep): caught when the narrow scan ends.
+	{
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		Sim sim{.latency_ns = 5000000};
+		sim.push_own = true;
+		sim.stuck_from_frame = 36 + 17 * 20 + 5;
+		uint32_t frame = 0;
+		sim.run(b, 2000, frame);
+		CHECK(t_led_phase_bootstrap_is_stuck_lit(&b));
+	}
+
+	// A healthy controller seen by every camera, and one seen by two, still lock.
+	for (uint32_t cameras : {4u, 2u}) {
+		CAPTURE(cameras);
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		Sim sim{.latency_ns = 5000000};
+		sim.push_own = true;
+		sim.visible_cameras = cameras;
+		uint32_t frame = 0;
+		sim.run(b, 2000, frame);
+		CHECK(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		CHECK(b.stuck_detections == 0);
+	}
+}
+
+TEST_CASE("LED phase bootstrap hinted scan locks with far fewer setting changes, and falls back when the hint is stale")
+{
+	// Find the true lock first, as a previous run would have.
+	t_led_phase_bootstrap_options full = test_options();
+	t_led_phase_bootstrap reference;
+	t_led_phase_bootstrap_init(&reference, &full);
+	t_led_phase_bootstrap_start(&reference, kPeriod);
+	Sim ref_sim{.latency_ns = 5000000};
+	uint32_t frame = 0;
+	ref_sim.run(reference, 2000, frame);
+	REQUIRE(reference.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	const int64_t true_hint = reference.lock_fudge_ns + full.lock_blink_ns / 2 - full.narrow_blink_ns / 2;
+
+	for (int64_t error_ns : {int64_t(0), int64_t(600000), int64_t(-900000)}) {
+		CAPTURE(error_ns);
+		t_led_phase_bootstrap_options options = test_options();
+		options.hint_fudge_ns = t_led_phase_bootstrap_wrap(true_hint + error_ns, kPeriod);
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		Sim sim{.latency_ns = 5000000};
+		frame = 0;
+		// Without tracking, every output change is a scan step, the start or the lock.
+		uint32_t first_generation = b.output_generation;
+		sim.run(b, 1000, frame);
+		uint32_t changes = b.output_generation - first_generation;
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		CHECK(circular_distance(b.lock_fudge_ns, reference.lock_fudge_ns) <= full.narrow_step_ns);
+		// The full scan makes ~38 changes; the hinted one ~13.
+		CHECK(changes <= 16);
+	}
+
+	// A hint 5 ms off finds nothing and falls back to the full scan, which still locks.
+	t_led_phase_bootstrap_options options = test_options();
+	options.hint_fudge_ns = t_led_phase_bootstrap_wrap(true_hint + 5000000, kPeriod);
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+	t_led_phase_bootstrap_start(&b, kPeriod);
+	Sim sim{.latency_ns = 5000000};
+	frame = 0;
+	sim.run(b, 3000, frame);
+	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	CHECK(circular_distance(b.lock_fudge_ns, reference.lock_fudge_ns) <= full.narrow_step_ns);
+	CHECK(b.consecutive_failures == 0);
 }
 
 TEST_CASE("LED phase bootstrap wraps offsets into the period")

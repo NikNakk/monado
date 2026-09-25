@@ -45,6 +45,7 @@ state_name(enum t_led_phase_bootstrap_state state)
 	case T_LED_PHASE_BOOTSTRAP_NARROW_SCAN: return "narrow";
 	case T_LED_PHASE_BOOTSTRAP_LOCKED: return "locked";
 	case T_LED_PHASE_BOOTSTRAP_BASELINE: return "baseline";
+	case T_LED_PHASE_BOOTSTRAP_STUCK_LIT: return "stuck_lit";
 	default: return "unknown";
 	}
 }
@@ -120,6 +121,9 @@ begin_scan(struct t_led_phase_bootstrap *b,
 }
 
 static void
+begin_wide_scan(struct t_led_phase_bootstrap *b);
+
+static void
 fail_scan(struct t_led_phase_bootstrap *b, const char *reason)
 {
 	LOG_W(b, "LED_BOOTSTRAP side=%c event=scan_failed stage=%s reason=%s", b->options.label, state_name(b->state),
@@ -129,6 +133,26 @@ fail_scan(struct t_led_phase_bootstrap *b, const char *reason)
 	uint64_t backoff = (uint64_t)b->options.failed_backoff_frames << shift;
 	b->idle_backoff_frames = (uint32_t)MIN(backoff, (uint64_t)b->options.max_failed_backoff_frames);
 	b->consecutive_failures++;
+	b->output_generation++;
+}
+
+static bool
+own_lit(const struct t_led_phase_bootstrap *b, uint32_t frames, uint32_t reports)
+{
+	return reports > 0 && (float)frames >= b->options.stuck_own_fraction * (float)reports;
+}
+
+static void
+enter_stuck_lit(struct t_led_phase_bootstrap *b, const char *reason)
+{
+	LOG_W(b,
+	      "LED_BOOTSTRAP side=%c event=stuck_lit stage=%s reason=%s: the LEDs ignore their schedule (power-cycle the "
+	      "controller to clear it); scanning and probing stop, tracking continues",
+	      b->options.label, state_name(b->state), reason);
+	b->state = T_LED_PHASE_BOOTSTRAP_STUCK_LIT;
+	b->track_stage = T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
+	b->track_wants_probe = false;
+	b->stuck_detections++;
 	b->output_generation++;
 }
 
@@ -169,6 +193,17 @@ finish_wide_scan(struct t_led_phase_bootstrap *b)
 		}
 	}
 
+	if (b->options.detect_stuck_lit) {
+		uint32_t own_lit_steps = 0;
+		for (uint32_t i = 0; i < n; i++) {
+			own_lit_steps += own_lit(b, b->steps[i].own_frames, b->steps[i].own_reports) ? 1 : 0;
+		}
+		if ((float)own_lit_steps >= b->options.stuck_wide_step_fraction * (float)n) {
+			enter_stuck_lit(b, "own_ring_lit_at_every_phase");
+			return;
+		}
+	}
+
 	qsort(sorted, n, sizeof(float), compare_float);
 	float median = sorted[n / 2];
 	float peak = b->steps[best].score;
@@ -203,15 +238,38 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		}
 	}
 
-	float peak = b->steps[peak_index].score;
-	if (peak < b->options.min_peak_score) {
-		fail_scan(b, "narrow_peak_below_minimum");
-		return;
+	if (b->options.detect_stuck_lit && n >= 6) {
+		uint32_t own_lit_steps = 0;
+		for (uint32_t i = 0; i < n; i++) {
+			own_lit_steps += own_lit(b, b->steps[i].own_frames, b->steps[i].own_reports) ? 1 : 0;
+		}
+		// A healthy lit window covers ~7 narrow steps; a ring lit across the whole 3-5 ms range is stuck.
+		if (own_lit_steps + 1 >= n) {
+			enter_stuck_lit(b, "own_ring_lit_across_narrow_scan");
+			return;
+		}
 	}
-	if (b->options.min_lock_peak_score > 0.0f && peak < b->options.min_lock_peak_score) {
+
+	float peak = b->steps[peak_index].score;
+	const char *weak = NULL;
+	if (peak < b->options.min_peak_score) {
+		weak = "narrow_peak_below_minimum";
+	} else if (b->options.min_lock_peak_score > 0.0f && peak < b->options.min_lock_peak_score) {
 		LOG_W(b, "LED_BOOTSTRAP side=%c event=narrow_peak_weak peak=%.3f min=%.3f", b->options.label, peak,
 		      b->options.min_lock_peak_score);
-		fail_scan(b, "narrow_peak_weak");
+		weak = "narrow_peak_weak";
+	}
+	if (weak != NULL) {
+		if (b->hinted_scan) {
+			// The window has moved from the hint (or the ring was out of view): fall back to the full scan.
+			LOG_W(b, "LED_BOOTSTRAP side=%c event=hint_failed reason=%s, falling back to the full scan",
+			      b->options.label, weak);
+			b->hinted_scan = false;
+			b->next_hint_ns = -1;
+			begin_wide_scan(b);
+			return;
+		}
+		fail_scan(b, weak);
 		return;
 	}
 
@@ -253,6 +311,11 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 	                              b->options.lock_blink_ns - b->options.narrow_blink_ns) /
 	                             2;
 	b->lock_fudge_ns = b->fudge_offset_ns;
+	if (b->options.hint_fudge_ns >= 0) {
+		// The lock pulse centre, expressed as a narrow-pulse start like the hint.
+		b->next_hint_ns = centre - b->options.narrow_blink_ns / 2;
+	}
+	b->hinted_scan = false;
 	float background = 0.0f;
 	for (uint32_t c = 0; c < b->options.camera_count; c++) {
 		background += (float)b->baseline_blobs[c];
@@ -398,9 +461,25 @@ finish_baseline(struct t_led_phase_bootstrap *b)
 		b->baseline_blobs[c] = b->baseline_samples[c][n / 2];
 	}
 	LOG_I(b,
-	      "LED_BOOTSTRAP side=%c event=baseline blobs=%u,%u,%u,%u reported=%u,%u,%u,%u", b->options.label,
+	      "LED_BOOTSTRAP side=%c event=baseline blobs=%u,%u,%u,%u reported=%u,%u,%u,%u own=%u/%u", b->options.label,
 	      b->baseline_blobs[0], b->baseline_blobs[1], b->baseline_blobs[2], b->baseline_blobs[3],
-	      b->baseline_reported[0], b->baseline_reported[1], b->baseline_reported[2], b->baseline_reported[3]);
+	      b->baseline_reported[0], b->baseline_reported[1], b->baseline_reported[2], b->baseline_reported[3],
+	      b->baseline_own_frames, b->baseline_own_reports);
+	if (b->options.detect_stuck_lit && b->baseline_own_reports >= 8 &&
+	    own_lit(b, b->baseline_own_frames, b->baseline_own_reports)) {
+		enter_stuck_lit(b, "own_ring_lit_while_commanded_off");
+		return;
+	}
+	if (b->next_hint_ns >= 0 && b->options.hint_span_ns > 0) {
+		b->hinted_scan = true;
+		time_duration_ns start = b->next_hint_ns - b->options.hint_span_ns;
+		uint32_t count = (uint32_t)(2 * b->options.hint_span_ns / b->options.narrow_step_ns) + 1;
+		LOG_I(b, "LED_BOOTSTRAP side=%c event=hinted_scan hint_us=%.1f span_us=%.1f", b->options.label,
+		      (double)t_led_phase_bootstrap_wrap(b->next_hint_ns, b->period_ns) / 1000.0,
+		      (double)b->options.hint_span_ns / 1000.0);
+		begin_scan(b, T_LED_PHASE_BOOTSTRAP_NARROW_SCAN, start, b->options.narrow_step_ns, count);
+		return;
+	}
 	begin_wide_scan(b);
 }
 
@@ -488,6 +567,12 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .track_min_ring_blobs = 1.0f,
 	    .track_use_pose_coverage = false,
 	    .track_min_reference_coverage = 0.5f,
+	    .detect_stuck_lit = false,
+	    .stuck_min_matched = 2,
+	    .stuck_own_fraction = 0.25f,
+	    .stuck_wide_step_fraction = 0.6f,
+	    .hint_fudge_ns = -1,
+	    .hint_span_ns = 1500 * U_TIME_1US_IN_NS,
 	};
 }
 
@@ -499,6 +584,7 @@ t_led_phase_bootstrap_init(struct t_led_phase_bootstrap *b, const struct t_led_p
 	b->options.camera_count = MIN(b->options.camera_count, (uint32_t)T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS);
 	b->state = T_LED_PHASE_BOOTSTRAP_IDLE;
 	b->blink_ns = options->wide_blink_ns;
+	b->next_hint_ns = options->hint_fudge_ns;
 }
 
 void
@@ -508,8 +594,14 @@ t_led_phase_bootstrap_start(struct t_led_phase_bootstrap *b, time_duration_ns pe
 		return;
 	}
 
+	if (b->state == T_LED_PHASE_BOOTSTRAP_STUCK_LIT) {
+		return;
+	}
 	b->period_ns = period_ns;
 	b->scans_attempted++;
+	b->baseline_own_reports = 0;
+	b->baseline_own_frames = 0;
+	b->hinted_scan = false;
 	b->idle_backoff_frames = 0;
 
 	// Measure the background with the LEDs dark before scanning.
@@ -554,6 +646,10 @@ t_led_phase_bootstrap_push_exposure(struct t_led_phase_bootstrap *b, int64_t exp
 		if (b->idle_backoff_frames > 0) {
 			b->idle_backoff_frames--;
 		}
+		break;
+
+	case T_LED_PHASE_BOOTSTRAP_STUCK_LIT:
+		// Nothing to do: the ring is lit regardless, and changing its settings has only ever made this happen.
 		break;
 
 	case T_LED_PHASE_BOOTSTRAP_LOCKED:
@@ -616,6 +712,27 @@ t_led_phase_bootstrap_push_pose_coverage(struct t_led_phase_bootstrap *b, int64_
 	if (window_accepts(b, exposure_timestamp_ns)) {
 		b->track_coverage_sum += coverage < 0.0f ? 0.0f : (coverage > 1.0f ? 1.0f : coverage);
 	}
+}
+
+void
+t_led_phase_bootstrap_push_own_matched(struct t_led_phase_bootstrap *b,
+                                       uint32_t camera_index,
+                                       int64_t exposure_timestamp_ns,
+                                       uint32_t matched)
+{
+	if (!b->options.detect_stuck_lit || camera_index >= b->options.camera_count ||
+	    !t_led_phase_bootstrap_is_scanning(b) || !window_accepts(b, exposure_timestamp_ns)) {
+		return;
+	}
+	bool seen = matched >= b->options.stuck_min_matched;
+	if (b->state == T_LED_PHASE_BOOTSTRAP_BASELINE) {
+		b->baseline_own_reports++;
+		b->baseline_own_frames += seen ? 1 : 0;
+		return;
+	}
+	struct t_led_phase_bootstrap_step *step = &b->steps[b->step_index];
+	step->own_reports++;
+	step->own_frames += seen ? 1 : 0;
 }
 
 void

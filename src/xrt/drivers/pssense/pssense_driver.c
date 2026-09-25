@@ -99,6 +99,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_led_blobs, "PSSENSE_LED_BOOTSTR
  * added at least three blobs per camera (a smaller one turns every blob of noise into a full-scale correction).
  */
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_strict, "PSSENSE_LED_BOOTSTRAP_STRICT", false)
+/*!
+ * Start the first scan as a short narrow scan around this lit-window centre (the bootstrap's centre_us; locks have
+ * been 16100-16600 us on this setup) instead of the full 38-step scan; rescans then start around the last lock.
+ * Unset (-1) for the full scan. The always-lit fault starts during scans at ~0.4% per step.
+ */
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_hint_us, "PSSENSE_LED_BOOTSTRAP_HINT_US", -1)
 //! Phase-tracking probes score joint-solve pose coverage (fraction of visible LEDs matched) instead of blob counts.
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track_coverage, "PSSENSE_LED_BOOTSTRAP_TRACK_COVERAGE", false)
 
@@ -1446,7 +1452,7 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 
 	(void)t_led_phase_bootstrap_push_exposure(b, exposure_timestamp_ns);
 
-	if (b->locks_acquired > 0) {
+	if (b->locks_acquired > 0 || t_led_phase_bootstrap_is_stuck_lit(b)) {
 		const char *first = debug_get_option_pssense_led_bootstrap_first();
 		char mine = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
 		if (first != NULL && (first[0] == mine || first[0] == mine + ('a' - 'A'))) {
@@ -1705,13 +1711,16 @@ pssense_push_camera_led_blob_count(struct t_constellation_tracker_device *device
                                    uint32_t matched_blob_count)
 {
 	struct pssense_device *pssense = from_constellation_device(device);
-	(void)matched_blob_count;
 
 	os_thread_helper_lock(&pssense->controller_thread);
 	if (pssense->tracking.use_led_bootstrap && pssense->tracking.led_bootstrap_led_blobs &&
 	    !pssense->tracking.led_bootstrap_yielding) {
 		t_led_phase_bootstrap_push_blob_count(&pssense->tracking.led_bootstrap, (uint32_t)camera_index,
 		                                      timestamp_ns, led_blob_count);
+	}
+	if (pssense->tracking.use_led_bootstrap && !pssense->tracking.led_bootstrap_yielding) {
+		t_led_phase_bootstrap_push_own_matched(&pssense->tracking.led_bootstrap, (uint32_t)camera_index,
+		                                       timestamp_ns, matched_blob_count);
 	}
 	os_thread_helper_unlock(&pssense->controller_thread);
 }
@@ -2566,11 +2575,19 @@ pssense_create(struct xrt_prober *xp,
 		pssense->tracking.led_bootstrap_led_blobs = debug_get_bool_option_pssense_led_bootstrap_led_blobs();
 		if (debug_get_bool_option_pssense_led_bootstrap_strict()) {
 			bootstrap_options.min_lock_peak_score = 2.0f;
+			// Needs the joint tracker's per-device matched counts (push_camera_led_blob_count).
+			bootstrap_options.detect_stuck_lit = true;
 			// LED-shaped counts are nearly background-free, but average over every camera: a ring three of four
 			// cameras saw added 2.9 per camera on 25 Sep. Raw counts need more margin over their noise.
 			bootstrap_options.track_min_ring_blobs = pssense->tracking.led_bootstrap_led_blobs ? 1.5f : 3.0f;
 		}
 		bootstrap_options.track_use_pose_coverage = debug_get_bool_option_pssense_led_bootstrap_track_coverage();
+		long hint_us = debug_get_num_option_pssense_led_bootstrap_hint_us();
+		if (hint_us >= 0) {
+			// The hint is a narrow-pulse start offset, like the scan steps: centre minus half the narrow pulse.
+			bootstrap_options.hint_fudge_ns =
+			    (time_duration_ns)hint_us * U_TIME_1US_IN_NS - bootstrap_options.narrow_blink_ns / 2;
+		}
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
 		// Force the first update to program the bootstrap's output, replacing any refinement sample.
 		pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
