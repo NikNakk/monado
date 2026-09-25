@@ -19,6 +19,8 @@
 #include "xrt/xrt_frame.h"
 
 #include "math/m_api.h"
+#include "util/u_file.h"
+#include "util/u_json.h"
 
 #include <Eigen/Geometry>
 #include <Eigen/SVD>
@@ -31,6 +33,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -330,6 +333,100 @@ report_imu_offset(const DeviceTrack &track)
 	            b.angle() * 180.0 / M_PI, b.axis().x(), b.axis().y(), b.axis().z(), used, B.x(), B.y(), B.z(), B.w());
 	std::printf("  with B: world alignment tilt deg p50 %.2f p95 %.2f; alignment spread deg p50 %.2f p95 %.2f\n",
 	            tilt_deg.pct(0.5), tilt_deg.pct(0.95), align_spread_deg.pct(0.5), align_spread_deg.pct(0.95));
+}
+
+/*!
+ * Replace the dataset's camera calibration with a psvr2-constellation calibration JSON, so one recording can be
+ * replayed against different calibrations. Intrinsics are swapped; each sample's world pose keeps the recorded
+ * tracking origin (recorded camera c pose times the inverse of its recorded pose relative to camera 0) and applies
+ * the file's camera pose in that origin. Both calibrations must use camera 0 as their tracking origin.
+ */
+void
+override_calibration(DatasetReader &dataset, const char *path)
+{
+	if (dataset.mosaics.empty()) {
+		throw std::runtime_error("no cameras to override");
+	}
+	DatasetMosaic &mosaic = dataset.mosaics[0];
+	const size_t camera_count = mosaic.camera_calibrations.size();
+
+	char *contents = u_file_read_content_from_path(path, nullptr);
+	cJSON *root = contents ? cJSON_Parse(contents) : nullptr;
+	std::free(contents);
+	const cJSON *cameras = u_json_get(root, "cameras");
+	if (!cJSON_IsArray(cameras) || (size_t)cJSON_GetArraySize(cameras) != camera_count) {
+		cJSON_Delete(root);
+		throw std::runtime_error("calibration has no matching cameras array");
+	}
+	std::vector<xrt_pose> new_in_origin(camera_count);
+	for (size_t c = 0; c < camera_count; c++) {
+		const cJSON *camera = cJSON_GetArrayItem(cameras, (int)c);
+		const cJSON *cal = u_json_get(camera, "calibration");
+		const cJSON *in = u_json_get(cal, "intrinsics");
+		const cJSON *d = u_json_get(cal, "distortion");
+		double v[8];
+		const char *names[8] = {"fx", "fy", "cx", "cy", "k1", "k2", "k3", "k4"};
+		bool good = u_json_get_pose(u_json_get(camera, "pose_in_tracking_origin_xrt"), &new_in_origin[c]);
+		for (int i = 0; i < 8; i++) {
+			good = good && u_json_get_double(u_json_get(i < 4 ? in : d, names[i]), &v[i]);
+		}
+		if (!good) {
+			cJSON_Delete(root);
+			throw std::runtime_error("bad camera entry in calibration");
+		}
+		t_camera_calibration &out = mosaic.camera_calibrations[c];
+		out.intrinsics[0][0] = v[0];
+		out.intrinsics[1][1] = v[1];
+		out.intrinsics[0][2] = v[2];
+		out.intrinsics[1][2] = v[3];
+		out.kb4 = t_camera_calibration_kb4_params{v[4], v[5], v[6], v[7]};
+		out.distortion_model = T_DISTORTION_FISHEYE_KB4;
+	}
+	cJSON_Delete(root);
+
+	// Recorded rig relative to camera 0, from the first exposure with every camera's pose.
+	std::vector<std::optional<xrt_pose>> world(camera_count);
+	for (const Exposure &exposure : group_exposures(dataset.samples)) {
+		std::vector<std::optional<xrt_pose>> w(camera_count);
+		size_t have = 0;
+		for (const CameraSample *sample : exposure.samples) {
+			if (sample->camera_index < camera_count && sample->Txr_world_cam.has_value()) {
+				w[sample->camera_index] = sample->Txr_world_cam;
+				have++;
+			}
+		}
+		if (have == camera_count) {
+			world = w;
+			break;
+		}
+	}
+	if (!world[0].has_value()) {
+		throw std::runtime_error("no exposure with every camera's pose");
+	}
+	xrt_pose inverse_cam0;
+	math_pose_invert(&world[0].value(), &inverse_cam0);
+	std::vector<xrt_pose> origin_from_recorded(camera_count);
+	for (size_t c = 0; c < camera_count; c++) {
+		xrt_pose recorded_in_origin, inverse_recorded;
+		math_pose_transform(&inverse_cam0, &world[c].value(), &recorded_in_origin);
+		math_pose_invert(&recorded_in_origin, &inverse_recorded);
+		// World pose of camera c becomes: recorded world pose * inverse(recorded in origin) * new in origin.
+		math_pose_transform(&inverse_recorded, &new_in_origin[c], &origin_from_recorded[c]);
+		const xrt_pose &d = origin_from_recorded[c];
+		std::printf("  camera %zu: calibration change %.2f mm, %.3f deg\n", c,
+		            1000.0 * std::sqrt(d.position.x * d.position.x + d.position.y * d.position.y +
+		                               d.position.z * d.position.z),
+		            2.0 * std::acos(std::min(1.0f, std::fabs(d.orientation.w))) * 180.0 / M_PI);
+	}
+	for (CameraSample &sample : dataset.samples) {
+		if (sample.camera_index < camera_count && sample.Txr_world_cam.has_value()) {
+			xrt_pose updated;
+			math_pose_transform(&sample.Txr_world_cam.value(), &origin_from_recorded[sample.camera_index],
+			                    &updated);
+			sample.Txr_world_cam = updated;
+		}
+	}
+	std::printf("calibration overridden from %s\n", path);
 }
 
 int
@@ -844,7 +941,7 @@ int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
@@ -853,6 +950,7 @@ main(int argc, char **argv)
 	const char *tracking_csv = nullptr;
 	bool seed_recorded = false;
 	const char *csv = nullptr;
+	const char *calibration = nullptr;
 	for (int i = 2; i < argc; i++) {
 		std::string arg = argv[i];
 		if (arg == "--m1") {
@@ -868,11 +966,16 @@ main(int argc, char **argv)
 			seed_recorded = true;
 		} else if (arg == "--csv" && i + 1 < argc) {
 			csv = argv[++i];
+		} else if (arg == "--calibration" && i + 1 < argc) {
+			calibration = argv[++i];
 		}
 	}
 
 	try {
 		DatasetReader dataset(argv[1]);
+		if (calibration) {
+			override_calibration(dataset, calibration);
+		}
 		int status = summarise(dataset);
 		if (tracking_csv) {
 			// Every recorded tracking-source relation (what the device predicted at each exposure), XR convention.
