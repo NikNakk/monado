@@ -348,6 +348,82 @@ refine_impl(const std::vector<JointSolveCamera> &cameras,
 	return out.ok;
 }
 
+/*!
+ * refine_impl, then the camera dropout retry: when one camera's residual stands out in a solve over three or more
+ * cameras, solve again without it, starting from the first solve's pose. A failed solve takes the retry if the retry
+ * passes; a passed one only if the retry passes with a clearly lower RMS, since a miscalibrated camera can bias a pose
+ * by millimetres while the joint RMS stays under the limit.
+ */
+bool
+refine_with_dropout(const std::vector<JointSolveCamera> &cameras,
+                    const t_constellation_tracker_led_model &model,
+                    const xrt_pose &prior,
+                    const OrientationPrior &orientation,
+                    const JointSolveParams &params,
+                    JointSolveResult &out)
+{
+	const bool first_ok = refine_impl(cameras, model, prior, orientation, params, out);
+	if (!params.camera_dropout || out.cameras_used < 3 || out.matches < params.min_matches) {
+		return first_ok;
+	}
+
+	std::vector<double> sum2(cameras.size(), 0.0);
+	std::vector<int> count(cameras.size(), 0);
+	for (const JointSolveMatch &m : out.correspondences) {
+		sum2[m.camera] += (double)m.residual_px * m.residual_px;
+		count[m.camera]++;
+	}
+	int worst = -1;
+	double worst_rms = 0.0;
+	std::vector<double> rms;
+	for (size_t c = 0; c < cameras.size(); c++) {
+		if (count[c] < 2) {
+			continue;
+		}
+		double r = std::sqrt(sum2[c] / count[c]);
+		rms.push_back(r);
+		if (r > worst_rms) {
+			worst_rms = r;
+			worst = (int)c;
+		}
+	}
+	if (worst < 0 || rms.size() < 3) {
+		return first_ok;
+	}
+	std::vector<double> others;
+	for (size_t c = 0; c < cameras.size(); c++) {
+		if ((int)c != worst && count[c] >= 2) {
+			others.push_back(std::sqrt(sum2[c] / count[c]));
+		}
+	}
+	std::sort(others.begin(), others.end());
+	double median_other = others[others.size() / 2];
+	if (worst_rms < params.dropout_ratio * median_other) {
+		return first_ok;
+	}
+
+	// Leave the camera out entirely, so its predicted-visible LEDs do not count against coverage.
+	std::vector<JointSolveCamera> reduced;
+	std::vector<uint32_t> original_index;
+	for (size_t c = 0; c < cameras.size(); c++) {
+		if ((int)c != worst) {
+			reduced.push_back(cameras[c]);
+			original_index.push_back((uint32_t)c);
+		}
+	}
+	JointSolveResult retry;
+	if (!refine_impl(reduced, model, out.Tcv_world_device, orientation, params, retry) || retry.cameras_used < 2 ||
+	    (first_ok && retry.rms_px > 0.8f * out.rms_px)) {
+		return first_ok;
+	}
+	for (JointSolveMatch &m : retry.correspondences) {
+		m.camera = original_index[m.camera];
+	}
+	retry.dropped_camera = worst;
+	out = retry;
+	return true;
+}
+
 } // namespace
 
 bool
@@ -357,7 +433,7 @@ joint_solve_refine(const std::vector<JointSolveCamera> &cameras,
                    const JointSolveParams &params,
                    JointSolveResult &out)
 {
-	return refine_impl(cameras, model, prior, OrientationPrior{}, params, out);
+	return refine_with_dropout(cameras, model, prior, OrientationPrior{}, params, out);
 }
 
 bool
@@ -376,7 +452,7 @@ joint_solve_refine(const std::vector<JointSolveCamera> &cameras,
 		                    .normalized();
 		orientation.inv_sigma_rad = 1.0 / (params.orientation_prior_sigma_deg * M_PI / 180.0);
 	}
-	return refine_impl(cameras, model, prior, orientation, params, out);
+	return refine_with_dropout(cameras, model, prior, orientation, params, out);
 }
 
 } // namespace xrt::tracking::constellation
