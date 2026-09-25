@@ -89,6 +89,16 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTS
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
 DEBUG_GET_ONCE_OPTION(pssense_led_bootstrap_first, "PSSENSE_LED_BOOTSTRAP_FIRST", "")
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_align_imu_orientation, "PSSENSE_ALIGN_IMU_ORIENTATION", false)
+/*
+ * Score LED illumination by the tracker's per-controller LED-shaped blob counts (other controllers' claimed blobs,
+ * lamps and window glare removed) instead of raw blob counts.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_led_blobs, "PSSENSE_LED_BOOTSTRAP_LED_BLOBS", false)
+/*
+ * Stricter bootstrap: reject locks seen by fewer than two cameras' worth of lit frames, and track only a ring that
+ * added at least three blobs per camera (a smaller one turns every blob of noise into a full-scale correction).
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_strict, "PSSENSE_LED_BOOTSTRAP_STRICT", false)
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -340,6 +350,8 @@ struct pssense_device
 		 * @ref t_led_sync_refinement while enabled. Locked by controller_thread.
 		 */
 		bool use_led_bootstrap;
+		//! Feed the bootstrap LED-shaped per-controller counts rather than raw blob counts.
+		bool led_bootstrap_led_blobs;
 		struct t_led_phase_bootstrap led_bootstrap;
 		//! Output generation last programmed into the LED settings.
 		uint32_t led_bootstrap_programmed_generation;
@@ -1643,9 +1655,29 @@ pssense_push_camera_blob_count(struct t_constellation_tracker_device *device,
 	struct pssense_device *pssense = from_constellation_device(device);
 
 	os_thread_helper_lock(&pssense->controller_thread);
-	if (pssense->tracking.use_led_bootstrap && !pssense->tracking.led_bootstrap_yielding) {
+	if (pssense->tracking.use_led_bootstrap && !pssense->tracking.led_bootstrap_led_blobs &&
+	    !pssense->tracking.led_bootstrap_yielding) {
 		t_led_phase_bootstrap_push_blob_count(&pssense->tracking.led_bootstrap, (uint32_t)camera_index,
 		                                      timestamp_ns, blob_count);
+	}
+	os_thread_helper_unlock(&pssense->controller_thread);
+}
+
+static void
+pssense_push_camera_led_blob_count(struct t_constellation_tracker_device *device,
+                                   size_t camera_index,
+                                   int64_t timestamp_ns,
+                                   uint32_t led_blob_count,
+                                   uint32_t matched_blob_count)
+{
+	struct pssense_device *pssense = from_constellation_device(device);
+	(void)matched_blob_count;
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	if (pssense->tracking.use_led_bootstrap && pssense->tracking.led_bootstrap_led_blobs &&
+	    !pssense->tracking.led_bootstrap_yielding) {
+		t_led_phase_bootstrap_push_blob_count(&pssense->tracking.led_bootstrap, (uint32_t)camera_index,
+		                                      timestamp_ns, led_blob_count);
 	}
 	os_thread_helper_unlock(&pssense->controller_thread);
 }
@@ -2340,6 +2372,7 @@ pssense_create(struct xrt_prober *xp,
 
 	pssense->constellation_device.push_constellation_tracker_sample = pssense_push_constellation_tracker_sample;
 	pssense->constellation_device.push_camera_blob_count = pssense_push_camera_blob_count;
+	pssense->constellation_device.push_camera_led_blob_count = pssense_push_camera_led_blob_count;
 
 	pssense->constellation_tracking_source.get_tracked_pose = pssense_get_constellation_tracking_source_pose;
 
@@ -2490,12 +2523,19 @@ pssense_create(struct xrt_prober *xp,
 			long frames = debug_get_num_option_pssense_led_bootstrap_track_frames();
 			bootstrap_options.track_interval_frames = frames > 0 ? (uint32_t)frames : 120;
 		}
+		if (debug_get_bool_option_pssense_led_bootstrap_strict()) {
+			bootstrap_options.min_lock_peak_score = 2.0f;
+			bootstrap_options.track_min_ring_blobs = 3.0f;
+		}
+		pssense->tracking.led_bootstrap_led_blobs = debug_get_bool_option_pssense_led_bootstrap_led_blobs();
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
 		// Force the first update to program the bootstrap's output, replacing any refinement sample.
 		pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
 	}
 	if (pssense->tracking.use_led_bootstrap) {
-		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)");
+		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)%s%s",
+		             pssense->tracking.led_bootstrap_led_blobs ? ", LED-shaped per-controller blob counts" : "",
+		             debug_get_bool_option_pssense_led_bootstrap_strict() ? ", strict" : "");
 	}
 
 	ret = os_thread_helper_init(&pssense->controller_thread);

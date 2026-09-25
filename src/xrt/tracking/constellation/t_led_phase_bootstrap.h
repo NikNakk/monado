@@ -98,6 +98,12 @@ struct t_led_phase_bootstrap_options
 	float min_peak_score;
 	//! The best wide step must exceed the median wide step score by this much.
 	float min_peak_contrast;
+	/*!
+	 * The narrow scan's best step must reach this score to lock; below it the scan fails and is retried. 0 uses
+	 * min_peak_score. A lock from a weak peak sits on the edge of the lit window: on 25 Sep the left locked at a
+	 * 1.9-camera peak 600 us late of its true centre and stayed lit in only half its frames.
+	 */
+	float min_lock_peak_score;
 
 	//! Once locked, rescan after this many exposures without any lit camera frame.
 	uint32_t lost_frames;
