@@ -430,7 +430,7 @@ override_calibration(DatasetReader &dataset, const char *path)
 }
 
 int
-replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded)
+replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded, const char *blobs_path)
 {
 	if (dataset.mosaics.empty()) {
 		std::fprintf(stderr, "no cameras in dataset\n");
@@ -453,6 +453,12 @@ replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded
 	if (csv) {
 		std::fprintf(csv, "timestamp_ns,device,solved,seeded,cameras,matches,rms_px,coverage,outliers,solve_us,"
 		                  "px,py,pz,qx,qy,qz,qw,rms_cam0,rms_cam1,rms_cam2,rms_cam3,n_cam0,n_cam1,n_cam2,n_cam3\n");
+	}
+
+	// Every blob with its owner after the exposure's solves (-1 for none), for studying background light.
+	FILE *blobs_csv = blobs_path ? std::fopen(blobs_path, "w") : nullptr;
+	if (blobs_csv) {
+		std::fprintf(blobs_csv, "timestamp_ns,camera,blob_id,cx,cy,w,h,brightness,owner\n");
 	}
 
 	JointSolveParams params;
@@ -613,9 +619,23 @@ replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded
 				track->recorded_delta_deg.add(quat_angle_deg(recorded.orientation, result.Tcv_world_device.orientation));
 			}
 		}
+		if (blobs_csv) {
+			for (size_t i = 0; i < cameras.size(); i++) {
+				for (uint32_t b = 0; b < cameras[i].blob_count; b++) {
+					const t_blob &blob = cameras[i].blobs[b];
+					std::fprintf(blobs_csv, "%" PRIi64 ",%u,%u,%.2f,%.2f,%.2f,%.2f,%.3f,%d\n",
+					             exposure.timestamp_ns, camera_index_of[i], blob.blob_id, blob.center.x,
+					             blob.center.y, blob.size.x, blob.size.y, blob.brightness,
+					             owners[i][b] == XRT_CONSTELLATION_INVALID_DEVICE_ID ? -1 : (int)owners[i][b]);
+				}
+			}
+		}
 	}
 	if (csv) {
 		std::fclose(csv);
+	}
+	if (blobs_csv) {
+		std::fclose(blobs_csv);
 	}
 
 	for (DeviceTrack &track : tracks) {
@@ -856,6 +876,7 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path)
 		auto fake = std::make_unique<FakeDevice>();
 		fake->base.push_constellation_tracker_sample = fake_device_push;
 		fake->base.push_camera_blob_count = nullptr;
+		fake->base.push_camera_led_blob_count = nullptr;
 		fake->source.get_tracked_pose = fake_device_get;
 		fake->csv = csv;
 		for (const DatasetDeviceTracking &t : dataset.device_tracking) {
@@ -941,7 +962,7 @@ int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json] [--blobs-csv OUT.csv]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
@@ -951,6 +972,7 @@ main(int argc, char **argv)
 	bool seed_recorded = false;
 	const char *csv = nullptr;
 	const char *calibration = nullptr;
+	const char *blobs_csv = nullptr;
 	for (int i = 2; i < argc; i++) {
 		std::string arg = argv[i];
 		if (arg == "--m1") {
@@ -966,6 +988,9 @@ main(int argc, char **argv)
 			seed_recorded = true;
 		} else if (arg == "--csv" && i + 1 < argc) {
 			csv = argv[++i];
+		} else if (arg == "--blobs-csv" && i + 1 < argc) {
+			m1 = true;
+			blobs_csv = argv[++i];
 		} else if (arg == "--calibration" && i + 1 < argc) {
 			calibration = argv[++i];
 		}
@@ -990,7 +1015,7 @@ main(int argc, char **argv)
 			std::fclose(f);
 		}
 		if (m1) {
-			status = replay_m1(dataset, csv, seed_recorded) != 0 ? 1 : status;
+			status = replay_m1(dataset, csv, seed_recorded, blobs_csv) != 0 ? 1 : status;
 		}
 		if (tracker) {
 			status = replay_tracker(dataset, tracker_csv) != 0 ? 1 : status;

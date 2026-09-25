@@ -373,6 +373,43 @@ JointProcessor::process(JointExposure &exposure)
 		failed(device);
 	}
 
+	/*
+	 * Per-device illumination counts, now that every solved device has claimed its blobs: LED-shaped blobs no
+	 * other device owns, plus the device's own matches. Another controller's lit ring, lamps and window glare all
+	 * drop out, which raw blob counts could not do (25 Sep: a kept-lit right ring inflated the left's baseline).
+	 */
+	for (std::unique_ptr<Device> &owned : ct->devices) {
+		Device *device = owned.get();
+		if (device->device->push_camera_led_blob_count == nullptr) {
+			continue;
+		}
+		for (std::optional<CameraSample> &maybe : exposure.samples) {
+			if (!maybe.has_value()) {
+				continue;
+			}
+			const t_constellation_device_id_t *owner = nullptr;
+			for (size_t i = 0; i < samples.size(); i++) {
+				if (samples[i] == &maybe.value()) {
+					owner = owners[i].data();
+				}
+			}
+			uint32_t led_blobs = 0;
+			uint32_t matched = 0;
+			for (uint32_t b = 0; b < maybe->blob_count; b++) {
+				t_constellation_device_id_t id = owner ? owner[b] : XRT_CONSTELLATION_INVALID_DEVICE_ID;
+				if (id == device->id) {
+					matched++;
+					led_blobs++;
+				} else if (id == XRT_CONSTELLATION_INVALID_DEVICE_ID &&
+				           t_constellation_blob_is_led_shaped(maybe->blobs[b])) {
+					led_blobs++;
+				}
+			}
+			device->device->push_camera_led_blob_count(device->device, maybe->camera_index,
+			                                           maybe->timestamp_ns, led_blobs, matched);
+		}
+	}
+
 	if (ct->data_recorder) {
 		for (CameraSample *sample : samples) {
 			ct->data_recorder->recordSample(*sample);
