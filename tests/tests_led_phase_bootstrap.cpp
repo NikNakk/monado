@@ -33,6 +33,10 @@ struct Sim
 	int64_t latency_drift_ns_per_frame = 0;
 	//! Grant tracking probes as soon as they are wanted, as the driver does when no other controller scans.
 	bool grant_probes = true;
+	//! Extra blobs on every camera, redrawn from 0..noise_blobs every noise_block_frames (a moving hand, the
+	//! other controller's ring passing through view).
+	uint32_t noise_blobs = 0;
+	uint32_t noise_block_frames = 30;
 	uint32_t frames_run = 0;
 	uint32_t frames_lit = 0;
 
@@ -88,10 +92,18 @@ struct Sim
 			while (reports.size() > report_delay_frames) {
 				auto [rts, rlit] = reports.front();
 				reports.pop_front();
+				uint32_t noise = 0;
+				if (noise_blobs > 0) {
+					// A fixed hash of the block index, so runs are repeatable.
+					uint64_t block = (uint64_t)(rts / kPeriod) / noise_block_frames;
+					uint64_t h = (block + 1) * 0x9E3779B97F4A7C15ull;
+					h ^= h >> 29;
+					noise = (uint32_t)(h % (noise_blobs + 1));
+				}
 				for (uint32_t c = 0; c < 4; c++) {
 					bool cam_lit = rlit && c < visible_cameras;
-					t_led_phase_bootstrap_push_blob_count(&b, c, rts,
-					                                      background[c] + (cam_lit ? lit_blobs : dark_blobs));
+					t_led_phase_bootstrap_push_blob_count(
+					    &b, c, rts, background[c] + noise + (cam_lit ? lit_blobs : dark_blobs));
 				}
 			}
 		}
@@ -385,6 +397,64 @@ TEST_CASE("LED phase bootstrap rescans after losing the controller")
 	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
 	int64_t pulse_centre = b.fudge_offset_ns + sim.latency_ns + b.blink_ns / 2;
 	CHECK(circular_distance(pulse_centre, sim.exposure_ns / 2) <= options.narrow_step_ns);
+}
+
+TEST_CASE("LED phase bootstrap with a minimum lock peak rejects a controller only one camera sees")
+{
+	// A lock from one camera's worth of lit frames sits wherever that camera's view happened to be lit.
+	t_led_phase_bootstrap_options loose = test_options();
+	t_led_phase_bootstrap b_loose;
+	t_led_phase_bootstrap_init(&b_loose, &loose);
+	t_led_phase_bootstrap_start(&b_loose, kPeriod);
+	Sim sim_loose{.latency_ns = 5000000};
+	sim_loose.visible_cameras = 1;
+	uint32_t frame = 0;
+	sim_loose.run(b_loose, 2000, frame);
+	CHECK(b_loose.have_lock);
+
+	t_led_phase_bootstrap_options strict = test_options();
+	strict.min_lock_peak_score = 2.0f;
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &strict);
+	t_led_phase_bootstrap_start(&b, kPeriod);
+	Sim sim{.latency_ns = 5000000};
+	sim.visible_cameras = 1;
+	frame = 0;
+	sim.run(b, 2000, frame);
+	CHECK_FALSE(b.have_lock);
+	CHECK(b.consecutive_failures >= 1);
+
+	// Two cameras are enough.
+	t_led_phase_bootstrap b_two;
+	t_led_phase_bootstrap_init(&b_two, &strict);
+	t_led_phase_bootstrap_start(&b_two, kPeriod);
+	Sim sim_two{.latency_ns = 5000000};
+	sim_two.visible_cameras = 2;
+	frame = 0;
+	sim_two.run(b_two, 2000, frame);
+	CHECK(b_two.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+}
+
+TEST_CASE("LED phase bootstrap tracking holds its lock while background light changes")
+{
+	// Background changing by 0-4 blobs every 30 frames (a hand, another ring passing through view) makes single
+	// probes disagree; the lock must stay in the lit window. (Requiring two agreeing probes before moving was tried
+	// and was worse: 83% lit here against 97%, and it could not follow 60 us/s drift.)
+	t_led_phase_bootstrap_options options = test_options();
+	options.track_interval_frames = 120;
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+	Sim sim{.latency_ns = 9000000};
+	uint32_t frame = 0;
+	t_led_phase_bootstrap_start(&b, kPeriod);
+	sim.run(b, 1000, frame);
+	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	sim.noise_blobs = 4;
+	sim.frames_run = 0;
+	sim.frames_lit = 0;
+	sim.run(b, 4000, frame);
+	CHECK(b.track_cycles >= 10);
+	CHECK((float)sim.frames_lit / (float)sim.frames_run > 0.95f);
 }
 
 TEST_CASE("LED phase bootstrap wraps offsets into the period")

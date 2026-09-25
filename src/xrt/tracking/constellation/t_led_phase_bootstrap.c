@@ -208,6 +208,12 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		fail_scan(b, "narrow_peak_below_minimum");
 		return;
 	}
+	if (b->options.min_lock_peak_score > 0.0f && peak < b->options.min_lock_peak_score) {
+		LOG_W(b, "LED_BOOTSTRAP side=%c event=narrow_peak_weak peak=%.3f min=%.3f", b->options.label, peak,
+		      b->options.min_lock_peak_score);
+		fail_scan(b, "narrow_peak_weak");
+		return;
+	}
 
 	// Grow the lit run around the peak while steps stay above half the peak score.
 	float threshold = 0.5f * peak;
