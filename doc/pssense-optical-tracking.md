@@ -788,6 +788,14 @@ of LED blobs and 0–4% of dark blobs. It is `t_constellation_blob_is_led_shaped
 - Requiring two agreeing probes before moving was tried and dropped. In simulation it was worse under changing
   background (83% lit against 97%) and could not follow 60 µs/s drift.
 
+**Caveat: `grip-newcal` and `ledblobs` ran the unoptimised build.** The session script defaulted to `build-sense`
+(-O0), and the commands for those two runs did not set `MONADO_CLI`. At -O0 the joint worker falls behind and skips
+exposures. `grip-newcal` recorded 4101 of ~4495, and `20260925-204758-joint-both-ledblobs` only 3235, falling to 5–9
+exposures per second while the left scanned. Skipped exposures send no LED-blob counts, so the left's LED-count steps
+got 1–3 reports per camera instead of 8. Even so, it locked where grip-3 did (centre 16350 µs, peak 3.75), and phase
+tracking was stable (7 probes, net +41 µs). The script now prefers `build-sense-rel`. The joint worker logs
+`JOINT_SLOW` with a time breakdown when an exposure takes over 8 ms.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

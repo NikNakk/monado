@@ -34,7 +34,10 @@ NOTE="${4:-}"
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 DATASETS="${PSVR2_DATASETS:-$HOME/Code/psvr2-datasets}"
-CLI="${MONADO_CLI:-$REPO/build-sense/src/xrt/targets/cli/monado-cli}"
+# Prefer the optimised build: at -O0 the joint solver cannot keep up with 60 Hz and drops exposures (25 Sep).
+DEFAULT_CLI="$REPO/build-sense-rel/src/xrt/targets/cli/monado-cli"
+[ -x "$DEFAULT_CLI" ] || DEFAULT_CLI="$REPO/build-sense/src/xrt/targets/cli/monado-cli"
+CLI="${MONADO_CLI:-$DEFAULT_CLI}"
 PYTHON="${PYTHON:-$REPO/.venv/bin/python}"
 [ -x "$PYTHON" ] || PYTHON=python3
 

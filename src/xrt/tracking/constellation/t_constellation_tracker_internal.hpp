@@ -467,6 +467,8 @@ struct JointProcessor
 	double solve_us_total{0.0};
 	double solve_us_max{0.0};
 	int64_t last_status_ns{0};
+	//! Last JOINT_SLOW warning (steady clock), to rate-limit them.
+	int64_t last_slow_log_ns{0};
 
 	JointProcessor(ConstellationTracker *tracker, size_t camera_count);
 	~JointProcessor();

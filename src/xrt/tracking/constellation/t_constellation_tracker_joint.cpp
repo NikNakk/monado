@@ -39,6 +39,9 @@ constexpr float kOrientationPriorSigmaDeg = 3.0f;
 constexpr uint32_t kConfirmSolves = 3;
 //! Status log interval.
 constexpr int64_t kStatusIntervalNs = 5'000'000'000;
+//! An exposure slower than this is logged (JOINT_SLOW), at most every kSlowLogIntervalNs.
+constexpr double kSlowProcessMs = 8.0;
+constexpr int64_t kSlowLogIntervalNs = 250'000'000;
 
 bool
 relation_has(const xrt_space_relation &relation, uint32_t flags)
@@ -162,6 +165,14 @@ JointProcessor::process(JointExposure &exposure)
 	ConstellationTracker *ct = this->tracker;
 	this->processed++;
 
+	// Where the time goes, for JOINT_SLOW: the worker skips exposures whenever one takes longer than a frame.
+	using Clock = std::chrono::steady_clock;
+	const Clock::time_point process_start = Clock::now();
+	double lock_wait_ms = 0.0, predict_ms = 0.0, push_ms = 0.0, led_count_ms = 0.0, record_ms = 0.0;
+	auto ms_since = [](Clock::time_point start) {
+		return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+	};
+
 	// Cameras of this exposure, with blob ownership shared between devices.
 	std::vector<CameraSample *> samples;
 	std::vector<JointSolveCamera> cameras;
@@ -186,7 +197,9 @@ JointProcessor::process(JointExposure &exposure)
 		cameras[i].blob_owner = owners[i].data();
 	}
 
+	Clock::time_point lock_start = Clock::now();
 	std::shared_lock device_lock(ct->device_lock);
+	lock_wait_ms = ms_since(lock_start);
 
 	// The device's prediction for this exposure, by device (filled in phase 1).
 	std::map<t_constellation_device_id_t, xrt_space_relation> predictions;
@@ -247,7 +260,10 @@ JointProcessor::process(JointExposure &exposure)
 		        },
 		    .joint_camera_count = std::max<uint32_t>(result.cameras_used, 1),
 		};
-		if (t_constellation_tracker_device_push_sample(device->device, &sample)) {
+		Clock::time_point push_start = Clock::now();
+		bool pushed = t_constellation_tracker_device_push_sample(device->device, &sample);
+		push_ms += ms_since(push_start);
+		if (pushed) {
 			std::unique_lock<os::Mutex> lock(device->data_lock);
 			device->locked_data.last_known_pose = DeviceLastPose(sample.pose, sample.timestamp_ns);
 		}
@@ -282,8 +298,10 @@ JointProcessor::process(JointExposure &exposure)
 
 		xrt_space_relation predicted = XRT_SPACE_RELATION_ZERO;
 		if (device->params.tracking_source != nullptr) {
+			Clock::time_point predict_start = Clock::now();
 			t_constellation_tracker_tracking_source_get_tracked_pose(device->params.tracking_source,
 			                                                         exposure.timestamp_ns, &predicted);
+			predict_ms += ms_since(predict_start);
 		}
 		predictions[device->id] = predicted;
 		if (ct->data_recorder && !samples.empty()) {
@@ -378,6 +396,7 @@ JointProcessor::process(JointExposure &exposure)
 	 * other device owns, plus the device's own matches. Another controller's lit ring, lamps and window glare all
 	 * drop out, which raw blob counts could not do (25 Sep: a kept-lit right ring inflated the left's baseline).
 	 */
+	Clock::time_point led_count_start = Clock::now();
 	for (std::unique_ptr<Device> &owned : ct->devices) {
 		Device *device = owned.get();
 		if (device->device->push_camera_led_blob_count == nullptr) {
@@ -410,10 +429,30 @@ JointProcessor::process(JointExposure &exposure)
 		}
 	}
 
+	led_count_ms = ms_since(led_count_start);
+
+	Clock::time_point record_start = Clock::now();
 	if (ct->data_recorder) {
 		for (CameraSample *sample : samples) {
 			ct->data_recorder->recordSample(*sample);
 		}
+	}
+	record_ms = ms_since(record_start);
+
+	const double total_ms = ms_since(process_start);
+	const int64_t now_ns =
+	    std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count();
+	if (total_ms > kSlowProcessMs && now_ns - this->last_slow_log_ns >= kSlowLogIntervalNs) {
+		size_t blobs = 0;
+		for (const JointSolveCamera &cam : cameras) {
+			blobs += cam.blob_count;
+		}
+		CT_WARN(ct,
+		        "JOINT_SLOW ts=%" PRIi64 " total_ms=%.2f lock_wait_ms=%.2f predict_ms=%.2f push_ms=%.2f "
+		        "led_count_ms=%.2f record_ms=%.2f solve_ms=%.2f blobs=%zu",
+		        exposure.timestamp_ns, total_ms, lock_wait_ms, predict_ms, push_ms, led_count_ms, record_ms,
+		        total_ms - lock_wait_ms - predict_ms - push_ms - led_count_ms - record_ms, blobs);
+		this->last_slow_log_ns = now_ns;
 	}
 
 	if (exposure.timestamp_ns - this->last_status_ns >= kStatusIntervalNs) {
