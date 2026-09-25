@@ -365,8 +365,8 @@ public: // Fields
 
 	t_constellation_device_id_t id;
 
-	//! The owner tracker, so we can retrieve it from the IMU sink callback
-	ConstellationTracker *tracker;
+	//! The owner tracker, so we can retrieve it from the IMU sink callback (set by the tracker when added).
+	ConstellationTracker *tracker{nullptr};
 
 	// @todo remove when clang-format is updated in CI
 	// clang-format off

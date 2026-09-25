@@ -27,6 +27,8 @@ enum PacketType
 	 * that @ref DeviceState::Txr_world_device_prior leaves out. Needed to replay IMU gravity priors.
 	 */
 	PACKET_TYPE_DEVICE_TRACKING = 3,
+	//! One IMU sample as the device pushed it to the tracker's IMU sink (host time, device IMU frame).
+	PACKET_TYPE_IMU_SAMPLE = 4,
 };
 
 namespace {
@@ -519,6 +521,23 @@ DataRecorder::recordDeviceTracking(const CameraSample &sample,
 }
 
 void
+DataRecorder::recordImuSample(t_constellation_device_id_t device_id, const xrt_imu_sample &sample)
+{
+	std::lock_guard<std::mutex> guard(this->lock);
+
+	this->serializer.write(static_cast<uint8_t>(PACKET_TYPE_IMU_SAMPLE));
+	this->serializer.write(static_cast<uint8_t>(device_id));
+	this->serializer.write(static_cast<uint64_t>(sample.timestamp_ns));
+	this->serializer.write(sample.accel_m_s2.x);
+	this->serializer.write(sample.accel_m_s2.y);
+	this->serializer.write(sample.accel_m_s2.z);
+	this->serializer.write(sample.gyro_rad_secs.x);
+	this->serializer.write(sample.gyro_rad_secs.y);
+	this->serializer.write(sample.gyro_rad_secs.z);
+	this->serializer.flush();
+}
+
+void
 DataRecorder::recordDeviceInfo(const Device &device)
 {
 	std::lock_guard<std::mutex> guard(this->lock);
@@ -599,6 +618,22 @@ DatasetReader::DatasetReader(std::string filename) : serializer(filename, false)
 				tracking.timestamp_ns = static_cast<int64_t>(timestamp_ns);
 				tracking.device_id = static_cast<t_constellation_device_id_t>(device_id);
 				tracking.relation_flags = static_cast<xrt_space_relation_flags>(flags);
+				break;
+			}
+			case PACKET_TYPE_IMU_SAMPLE: {
+				DatasetImuSample &imu = this->imu_samples.emplace_back();
+				uint8_t device_id;
+				uint64_t timestamp_ns;
+				this->serializer.read(device_id);
+				this->serializer.read(timestamp_ns);
+				this->serializer.read(imu.sample.accel_m_s2.x);
+				this->serializer.read(imu.sample.accel_m_s2.y);
+				this->serializer.read(imu.sample.accel_m_s2.z);
+				this->serializer.read(imu.sample.gyro_rad_secs.x);
+				this->serializer.read(imu.sample.gyro_rad_secs.y);
+				this->serializer.read(imu.sample.gyro_rad_secs.z);
+				imu.device_id = static_cast<t_constellation_device_id_t>(device_id);
+				imu.sample.timestamp_ns = static_cast<timepoint_ns>(timestamp_ns);
 				break;
 			}
 			default: {
