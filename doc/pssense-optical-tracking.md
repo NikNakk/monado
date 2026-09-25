@@ -654,6 +654,38 @@ The alignment itself is still computed from the unaligned corrected IMU pose, so
 The per-camera candidate diagnostics are unchanged. Before the first optical commit, and with the option off, the
 orientation stays unaligned as before. Not yet tested on hardware.
 
+**Third live M3 run, `sessions/20260925-002110-joint-both-grip-3`** (commit `8c932b8d6`; `002058` before it is an
+empty failed start with no controllers connected). **The joint path works live.**
+
+| | per-camera path `000029` (same scenario) | joint path live `002110` |
+|---|---|---|
+| left fused poses | 2723 (2 cameras) | 1972 (1922 × 3 cameras, 50 × 4) |
+| right fused poses | 799 (2 cameras) | 3118 (1303 × 3, 1815 × 4) |
+| right position tracked | 26.2% | 75.5% |
+| re-acquisitions L / R | 7 / 10 | 5 / 11 |
+| disagreements, jumps | 498, 82 | 0, 0 |
+| exposure timestamp residual p5/p95 | −152 / 81 µs | −48 / 46 µs |
+
+`JOINT_STATUS`: 0 skipped exposures, 91 µs mean solve, max 1.25 ms. The tracker replay of this recording predicts
+the live result almost exactly (1974 / 3127 poses against 1972 / 3118 live).
+
+The left produced nothing from 35 to 40 s although it was lit (locked lit 1025/1200) and in view. It was bootstrapping
+the whole time: the ring was found (13–14 matches, 4 cameras, coverage 0.85) but at 1.2–1.3 px RMS, over the
+bootstrap's 0.8 px and tracking's 1.0 px limits. Per-camera residuals (`--m1 --csv` now writes `rms_camN` and
+`n_camN`) show the rig calibration's limits:
+
+| median residual px | cam0 | cam1 | cam2 | cam3 |
+|---|---|---|---|---|
+| left, accepted (`002110`) | 0.50 | 0.55 | 0.39 | 0.70 |
+| left, rejected RMS > 1 | 0.96 | 1.21 | 1.52 | 1.06 |
+| right, accepted | 0.45 | 0.87 | 0.66 | 0.71 |
+| right, rejected RMS > 1 | 0.87 | 1.63 | 2.31 | 0.71 |
+| left, accepted (`234059`) | 0.42 | 0.44 | 0.36 | 0.70 |
+
+Camera 3 sits at ~0.7 px even in good solves, and the rejected solves are mostly one camera (usually camera 2)
+going bad in part of its field of view. The per-camera path hid this because each camera fitted separately. This is
+more evidence for recapturing the rig calibration (plan item 2).
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
