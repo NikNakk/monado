@@ -131,7 +131,7 @@ def main() -> int:
             return result.returncode
         found = detect_pose(pose, detector)
         print("this pose, corners per camera: " + "  ".join(f"cam{c} {f['corners']}" for c, f in enumerate(found)))
-        print("board dark/light level (DN of 255; want light >= 20 and nothing saturated): "
+        print("board dark/light level (DN of 255, averaged frames): "
               + "  ".join(board_levels(pose, found)))
         if not any(f["corners"] >= MIN_CORNERS for f in found):
             print("  no camera sees enough of the board: check lighting and placement (pose kept; delete it if useless)")
