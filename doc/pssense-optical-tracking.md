@@ -1065,6 +1065,35 @@ world frame). No fault.
 - Mitigation (strict mode, `hint_retries = 1`): a failed hinted scan is retried once, after a 1 s dark pause, before
   the full scan. Whether that avoids the fault is untested.
 
+## IMU + optical filter (plan item 4, 26 Sep)
+
+- **Recording:** datasets now carry every IMU sample the Sense driver pushes to the tracker (packet type 4; host time,
+  factory- and online-bias-corrected, IMU frame). `Device::pushImuSample` had been an empty stub and `Device::tracker`
+  was never set. `constellation_replay --imu-csv` exports them.
+- **`t_imu_optical_filter`** (constellation library, C API) is an error-state EKF with 15 error states: position,
+  velocity, orientation, gyro bias and accelerometer bias. IMU samples propagate it. An optical pose updates it at its
+  exposure time: the filter rewinds a 250 ms state history, updates, and re-propagates the buffered IMU samples. It
+  gates on Mahalanobis² > 30 (6 DOF), and re-initialises position and velocity (keeping the biases) after 0.5 s
+  without an accepted pose or after 5 consecutive rejections. It predicts forward at most 100 ms, and reports position
+  as tracked for 250 ms after the last accepted pose. The body frame is the LED model frame; gravity is −9.80665 m/s²
+  along the world y axis, so it needs `PSVR2_CONSTELLATION_WORLD=1`.
+  Synthetic tests (1 kHz IMU with biases and noise, 60 Hz poses with 1.5 mm / 0.23° noise arriving 40 ms late):
+  - "now" is within 2.1 mm and 0.08° RMS of the truth, better than the raw optical noise (2.6 mm) while also carrying
+    each pose 40 ms forward;
+  - a 0.06 rad/s gyro bias is learnt to within 0.01 rad/s;
+  - a 300 ms dropout is bridged within 2 cm and 1°;
+  - a 20 cm outlier is rejected, and 2 s hidden then re-initialises.
+- **Driver:** `PSSENSE_FILTER=1` feeds the filter the bias-corrected IMU, rotated into the LED frame by the mounting
+  angle (the inverse of `T_led_imu`), and every accepted joint pose. The pose noise is 2 mm / 0.46°, scaled up with
+  reprojection RMS above 0.5 px. The driver's pose output, which is also the joint tracker's prior, then comes from the
+  filter: position and orientation both in the world. It logs `FILTER side=… event=initialised|reinitialised|status`
+  with the update, rejection and re-initialisation counts, the last Mahalanobis² and the learnt biases.
+- **Offline evaluation:** `constellation_replay DATASET --filter-eval TRACKER.csv [--filter-out OUT.csv]` replays the
+  recorded IMU and the tracker's poses through the filter, each pose arriving 35 ms after its exposure. It hides
+  optical for 300 ms every 2 s and compares the filter at each hidden exposure with the hidden pose and with holding the
+  last pose. It also reports filter-versus-optical on visible exposures, the still accelerometer rotated into the world
+  (a gravity-axis check) and the learnt biases.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

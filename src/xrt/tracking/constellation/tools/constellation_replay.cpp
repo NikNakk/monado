@@ -14,6 +14,7 @@
 #include "t_constellation_tracker_dataset.hpp"
 #include "joint_pose_solver.hpp"
 #include "stereo_bootstrap.hpp"
+#include "t_imu_optical_filter.h"
 #include "t_constellation_tracker.h"
 
 #include "xrt/xrt_frame.h"
@@ -32,7 +33,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -986,13 +989,185 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path)
 	return 0;
 }
 
+/*
+ * Offline evaluation of the IMU + optical EKF (--filter-eval TRACKER.csv): the dataset's IMU samples (rotated into the
+ * LED model frame by the Sense mounting angle) and the tracker's poses (constellation_replay --tracker-csv, world
+ * frame) are replayed through t_imu_optical_filter as the driver would see them, each optical pose arriving
+ * kOpticalDelayNs after its exposure. Every kGapPeriodNs the optical poses are hidden for kGapLengthNs; the filter's pose
+ * at each hidden exposure is compared with the hidden optical pose, against holding the last optical pose.
+ */
+constexpr int64_t kOpticalDelayNs = 35'000'000;
+constexpr int64_t kGapPeriodNs = 2'000'000'000;
+constexpr int64_t kGapLengthNs = 300'000'000;
+
+struct TrackerPose
+{
+	int64_t t;
+	xrt_pose pose;
+	float rms_px;
+};
+
+double
+quat_angle_rad(const xrt_quat &a, const xrt_quat &b)
+{
+	double d = std::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
+	return 2.0 * std::acos(std::min(1.0, d));
+}
+
+int
+replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_angle_deg, const char *out_csv)
+{
+	std::map<int, std::vector<TrackerPose>> poses;
+	std::ifstream in(tracker_csv);
+	std::string line;
+	std::getline(in, line); // header: timestamp_ns,device,cameras,matches,rms_px,px,py,pz,qx,qy,qz,qw
+	while (std::getline(in, line)) {
+		std::stringstream ss(line);
+		std::string field;
+		std::vector<std::string> f;
+		while (std::getline(ss, field, ',')) {
+			f.push_back(field);
+		}
+		if (f.size() < 12) {
+			continue;
+		}
+		TrackerPose tp{};
+		tp.t = std::stoll(f[0]);
+		tp.rms_px = std::stof(f[4]);
+		tp.pose.position = {std::stof(f[5]), std::stof(f[6]), std::stof(f[7])};
+		tp.pose.orientation = {std::stof(f[8]), std::stof(f[9]), std::stof(f[10]), std::stof(f[11])};
+		poses[std::stoi(f[1])].push_back(tp);
+	}
+
+	const double half = imu_angle_deg * M_PI / 180.0 * 0.5;
+	xrt_quat imu_to_led{(float)-std::sin(half), 0.0f, 0.0f, (float)std::cos(half)}; // inverse of the mounting rotation
+
+	FILE *out = out_csv ? std::fopen(out_csv, "w") : nullptr;
+	if (out) {
+		std::fprintf(out, "timestamp_ns,device,hidden,raw_px,raw_py,raw_pz,raw_qx,raw_qy,raw_qz,raw_qw,"
+		                  "filt_px,filt_py,filt_pz,filt_qx,filt_qy,filt_qz,filt_qw\n");
+	}
+
+	for (auto &[device, list] : poses) {
+		std::sort(list.begin(), list.end(), [](const TrackerPose &a, const TrackerPose &b) { return a.t < b.t; });
+		std::vector<const xrt_imu_sample *> imu;
+		for (const DatasetImuSample &s : dataset.imu_samples) {
+			if ((int)s.device_id == device) {
+				imu.push_back(&s.sample);
+			}
+		}
+		if (imu.empty() || list.empty()) {
+			std::printf("filter device %d: no IMU samples or poses\n", device);
+			continue;
+		}
+		t_imu_optical_filter_params params;
+		t_imu_optical_filter_default_params(&params);
+		t_imu_optical_filter *filter = t_imu_optical_filter_create(&params);
+
+		Stats hidden_filter_mm, hidden_filter_deg, hidden_hold_mm, hidden_hold_deg, visible_diff_mm;
+		Stats gravity_x, gravity_y, gravity_z;
+		size_t next_pose = 0;           // next optical pose to deliver
+		size_t next_eval = 0;           // next exposure to evaluate (at its exposure time, as live)
+		const int64_t t0 = list.front().t;
+		xrt_pose last_delivered = list.front().pose;
+		bool have_delivered = false;
+		auto hidden = [&](int64_t t) { return ((t - t0) % kGapPeriodNs) >= kGapPeriodNs - kGapLengthNs; };
+
+		for (const xrt_imu_sample *s : imu) {
+			xrt_vec3 a{(float)s->accel_m_s2.x, (float)s->accel_m_s2.y, (float)s->accel_m_s2.z};
+			xrt_vec3 g{(float)s->gyro_rad_secs.x, (float)s->gyro_rad_secs.y, (float)s->gyro_rad_secs.z};
+			xrt_vec3 a_led, g_led;
+			math_quat_rotate_vec3(&imu_to_led, &a, &a_led);
+			math_quat_rotate_vec3(&imu_to_led, &g, &g_led);
+			t_imu_optical_filter_push_imu(filter, s->timestamp_ns, &a_led, &g_led);
+
+			// Gravity check while nearly still: the accelerometer rotated into the world by the optical orientation.
+			double gyro_len = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
+			if (have_delivered && gyro_len < 0.05) {
+				xrt_vec3 a_world;
+				math_quat_rotate_vec3(&last_delivered.orientation, &a_led, &a_world);
+				gravity_x.add(a_world.x);
+				gravity_y.add(a_world.y);
+				gravity_z.add(a_world.z);
+			}
+
+			// Deliver optical poses whose delay has passed, unless they fall in a hidden gap.
+			while (next_pose < list.size() && list[next_pose].t + kOpticalDelayNs <= s->timestamp_ns) {
+				const TrackerPose &tp = list[next_pose++];
+				if (hidden(tp.t)) {
+					continue;
+				}
+				float scale = std::max(1.0f, tp.rms_px / 0.5f);
+				t_imu_optical_filter_push_pose(filter, tp.t, &tp.pose, 0.002f * scale, 0.008f * scale);
+				last_delivered = tp.pose;
+				have_delivered = true;
+			}
+			// Evaluate exposures as the live driver would when asked for them: at the exposure time itself, once
+			// the IMU has reached it (the joint tracker's prior), using everything delivered by then.
+			while (next_eval < list.size() && list[next_eval].t <= s->timestamp_ns) {
+				const TrackerPose &tp = list[next_eval++];
+				xrt_space_relation rel;
+				if (!have_delivered || !t_imu_optical_filter_get_relation(filter, tp.t, &rel)) {
+					continue;
+				}
+				double mm = 1000.0 * distance_m(rel.pose.position, tp.pose.position);
+				double deg = quat_angle_rad(rel.pose.orientation, tp.pose.orientation) * 180.0 / M_PI;
+				bool is_hidden = hidden(tp.t);
+				if (is_hidden) {
+					hidden_filter_mm.add(mm);
+					hidden_filter_deg.add(deg);
+					hidden_hold_mm.add(1000.0 * distance_m(last_delivered.position, tp.pose.position));
+					hidden_hold_deg.add(quat_angle_rad(last_delivered.orientation, tp.pose.orientation) * 180.0 /
+					                    M_PI);
+				} else {
+					visible_diff_mm.add(mm);
+				}
+				if (out) {
+					std::fprintf(out,
+					             "%" PRIi64 ",%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+					             "%.6f,%.6f\n",
+					             tp.t, device, is_hidden ? 1 : 0, tp.pose.position.x, tp.pose.position.y,
+					             tp.pose.position.z, tp.pose.orientation.x, tp.pose.orientation.y,
+					             tp.pose.orientation.z, tp.pose.orientation.w, rel.pose.position.x,
+					             rel.pose.position.y, rel.pose.position.z, rel.pose.orientation.x,
+					             rel.pose.orientation.y, rel.pose.orientation.z, rel.pose.orientation.w);
+				}
+			}
+		}
+
+		t_imu_optical_filter_stats st;
+		t_imu_optical_filter_get_stats(filter, &st);
+		std::printf("filter device %d: %zu IMU samples, %zu poses; updates %" PRIu64 " rejections %" PRIu64
+		            " reinitialisations %" PRIu64 "\n",
+		            device, imu.size(), list.size(), st.updates, st.rejections, st.reinitialisations);
+		std::printf("  hidden %zu exposures (300 ms every 2 s): filter mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f;"
+		            " hold-last mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f\n",
+		            hidden_filter_mm.values.size(), hidden_filter_mm.pct(0.5), hidden_filter_mm.pct(0.95),
+		            hidden_filter_deg.pct(0.5), hidden_filter_deg.pct(0.95), hidden_hold_mm.pct(0.5),
+		            hidden_hold_mm.pct(0.95), hidden_hold_deg.pct(0.5), hidden_hold_deg.pct(0.95));
+		std::printf("  visible exposures: filter vs optical mm p50 %.1f p95 %.1f\n", visible_diff_mm.pct(0.5),
+		            visible_diff_mm.pct(0.95));
+		std::printf("  still accelerometer in the world (expect ~0, +9.8, 0): %.2f %.2f %.2f (%zu samples)\n",
+		            gravity_x.pct(0.5), gravity_y.pct(0.5), gravity_z.pct(0.5), gravity_x.values.size());
+		std::printf("  learnt gyro bias deg/s %.2f %.2f %.2f, accel bias m/s^2 %.3f %.3f %.3f\n",
+		            st.gyro_bias_rad_s.x * 180 / M_PI, st.gyro_bias_rad_s.y * 180 / M_PI,
+		            st.gyro_bias_rad_s.z * 180 / M_PI, st.accel_bias_m_s2.x, st.accel_bias_m_s2.y,
+		            st.accel_bias_m_s2.z);
+		t_imu_optical_filter_destroy(&filter);
+	}
+	if (out) {
+		std::fclose(out);
+	}
+	return 0;
+}
+
 } // namespace
 
 int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json [--recorded-calibration SESSION/calibration.json]] [--blobs-csv OUT.csv] [--geometry PREFIX]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json [--recorded-calibration SESSION/calibration.json]] [--blobs-csv OUT.csv] [--geometry PREFIX] [--filter-eval TRACKER.csv [--filter-out OUT.csv]]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
@@ -1001,6 +1176,9 @@ main(int argc, char **argv)
 	const char *tracking_csv = nullptr;
 	const char *geometry_prefix = nullptr;
 	const char *imu_csv = nullptr;
+	const char *filter_eval = nullptr;
+	const char *filter_out = nullptr;
+	double imu_angle_deg = 50.27; // pssense_imu_angle: the Sense IMU's mounting rotation about x
 	bool seed_recorded = false;
 	const char *csv = nullptr;
 	const char *calibration = nullptr;
@@ -1012,6 +1190,12 @@ main(int argc, char **argv)
 			m1 = true;
 		} else if (arg == "--tracker") {
 			tracker = true;
+		} else if (arg == "--filter-eval" && i + 1 < argc) {
+			filter_eval = argv[++i];
+		} else if (arg == "--filter-out" && i + 1 < argc) {
+			filter_out = argv[++i];
+		} else if (arg == "--imu-angle-deg" && i + 1 < argc) {
+			imu_angle_deg = std::atof(argv[++i]);
 		} else if (arg == "--imu-csv" && i + 1 < argc) {
 			imu_csv = argv[++i];
 		} else if (arg == "--geometry" && i + 1 < argc) {
@@ -1092,6 +1276,9 @@ main(int argc, char **argv)
 				             t.pose.orientation.z, t.pose.orientation.w);
 			}
 			std::fclose(f);
+		}
+		if (filter_eval) {
+			status = replay_filter(dataset, filter_eval, imu_angle_deg, filter_out) != 0 ? 1 : status;
 		}
 		if (m1) {
 			status = replay_m1(dataset, csv, seed_recorded, blobs_csv) != 0 ? 1 : status;
