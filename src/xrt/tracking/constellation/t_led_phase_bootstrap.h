@@ -46,6 +46,11 @@ enum t_led_phase_bootstrap_state
 	T_LED_PHASE_BOOTSTRAP_LOCKED = 3,
 	//! LEDs held dark for one step at the start of a scan, measuring each camera's background blob count.
 	T_LED_PHASE_BOOTSTRAP_BASELINE = 4,
+	/*!
+	 * The controller's ring is lit whatever it is told (the Sense always-lit fault: status LED off, only a power cycle
+	 * clears it). Scanning and probing stop; the ring stays trackable. See t_led_phase_bootstrap_options::detect_stuck_lit.
+	 */
+	T_LED_PHASE_BOOTSTRAP_STUCK_LIT = 5,
 };
 
 //! Stages of closed-loop phase tracking while locked.
@@ -144,6 +149,28 @@ struct t_led_phase_bootstrap_options
 	bool track_use_pose_coverage;
 	//! With track_use_pose_coverage: skip tracking unless the reference stage scored at least this.
 	float track_min_reference_coverage;
+
+	/*!
+	 * Detect the always-lit fault from the controller's own matched blobs
+	 * (@ref t_led_phase_bootstrap_push_own_matched): stuck if its ring is solved during the dark baseline, in most
+	 * wide-scan steps, or in nearly every narrow-scan step. A healthy wide scan is lit in ~3 of 17 steps.
+	 */
+	bool detect_stuck_lit;
+	//! A camera frame counts as "own ring seen" when the device's solve matched at least this many of its blobs.
+	uint32_t stuck_min_matched;
+	//! A step (or the baseline) counts as own-lit when at least this fraction of its camera frames saw the ring.
+	float stuck_own_fraction;
+	//! Stuck if at least this fraction of wide-scan steps were own-lit.
+	float stuck_wide_step_fraction;
+
+	/*!
+	 * Hinted scan: when hint_fudge_ns >= 0, scan only a narrow window of +-hint_span_ns around it (about 13 steps
+	 * instead of 38), falling back to the full scan if that finds nothing. After a lock, rescans use the lock as the
+	 * hint. The always-lit fault has only ever started during scans, at about 0.4% per step, so fewer steps
+	 * means fewer faults.
+	 */
+	time_duration_ns hint_fudge_ns;
+	time_duration_ns hint_span_ns;
 };
 
 //! Result of one scan step, for logging and tests.
@@ -157,6 +184,9 @@ struct t_led_phase_bootstrap_step
 	float mean_blobs;
 	uint32_t reported[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
 	uint32_t lit[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+	//! Camera frames in the step's window, and those in which the device's own solve matched its ring.
+	uint32_t own_reports;
+	uint32_t own_frames;
 };
 
 struct t_led_phase_bootstrap
@@ -221,6 +251,15 @@ struct t_led_phase_bootstrap
 	uint64_t track_blob_sum;
 	//! Sum of pushed pose coverages in the current probe stage's window.
 	float track_coverage_sum;
+
+	//! Own-ring frames during the dark baseline, for stuck-lit detection.
+	uint32_t baseline_own_reports;
+	uint32_t baseline_own_frames;
+	//! The current scan is a hinted narrow scan (a failure falls back to the full scan).
+	bool hinted_scan;
+	//! Where rescans start: the hint option, then the last lock. Negative for none.
+	time_duration_ns next_hint_ns;
+	uint32_t stuck_detections;
 	uint32_t track_reports;
 	float track_means[3];
 	uint32_t track_cycles;
@@ -286,6 +325,23 @@ t_led_phase_bootstrap_is_scanning(const struct t_led_phase_bootstrap *b)
  */
 void
 t_led_phase_bootstrap_push_pose_coverage(struct t_led_phase_bootstrap *b, int64_t exposure_timestamp_ns, float coverage);
+
+/*!
+ * Push how many of one camera frame's blobs the device's own pose solve matched (0 if it was not solved). Used by
+ * @ref t_led_phase_bootstrap_options::detect_stuck_lit.
+ */
+void
+t_led_phase_bootstrap_push_own_matched(struct t_led_phase_bootstrap *b,
+                                       uint32_t camera_index,
+                                       int64_t exposure_timestamp_ns,
+                                       uint32_t matched);
+
+//! True once the always-lit fault has been detected; only restarting the bootstrap leaves this state.
+static inline bool
+t_led_phase_bootstrap_is_stuck_lit(const struct t_led_phase_bootstrap *b)
+{
+	return b->state == T_LED_PHASE_BOOTSTRAP_STUCK_LIT;
+}
 
 //! True while locked and due a tracking probe. The caller must get exclusive use of the LEDs (no other controller
 //! scanning or probing) and then call @ref t_led_phase_bootstrap_begin_probe.
