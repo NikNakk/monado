@@ -812,6 +812,23 @@ the reference stage, and tracking is skipped when the reference scores under 0.5
 simulation it follows ±60 µs/s drift (>90% lit), and holds its lock with the background changing by 0–8 blobs and one
 block in four losing every solve (>95% lit).
 
+**2026-09-25 20:59, `sessions/20260925-205908-joint-both-coverage`** (LED-blob counts, strict, coverage probes,
+`FIRST=R`). **The right-controller always-lit fault, this time with the right scanning first.** The user saw its
+status LED go off.
+
+- Scan 1: the right ring was barely in view (wide peak 1.0 at 13000 µs, mean ~1 LED blob elsewhere), and the narrow
+  scan failed (`narrow_peak_below_minimum`, 0.5).
+- Scan 2 (clean baseline `0,0,0,0`): wide steps 1–3 were dark. **From wide step 4 (fudge 3000 µs, `period_id` 42) it
+  was lit in every frame at every phase** (~25 LED blobs across four cameras). The following baselines, `9,5,6,3`,
+  `7,7,2,7` and `8,6,9,7`, were taken while commanded off. Every later scan failed, and the left never got a turn
+  (idle 97%). The right was still tracked 2791 times, because its ring stayed lit.
+- So the fault isn't limited to the right scanning second. Every occurrence is still on the right controller, while it
+  is scanning, with the left connected. Onsets were: wide fudge 0 (`224851`), wide 2000 µs (`230002`), narrow 15500 µs
+  (`233615`), and now wide 3000 µs after a failed first scan. Three of the five are early wide steps at `period_id` 42.
+  The right scanned cleanly in the eight right-first runs before this one; this is the first run where it needed a
+  second scan.
+- The coverage probes went untested: neither controller locked.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
