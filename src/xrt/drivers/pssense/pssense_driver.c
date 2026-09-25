@@ -23,6 +23,7 @@
 #include "constellation/t_constellation_tracker.h"
 #include "constellation/t_led_sync_refinement.h"
 #include "constellation/t_led_phase_bootstrap.h"
+#include "constellation/t_imu_optical_filter.h"
 
 #include "util/u_var.h"
 #include "util/u_debug.h"
@@ -113,6 +114,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track_coverage, "PSSENSE_LED_BO
  * left at 2-4 deg/s), which the joint tracker's 3-degree orientation prior cannot absorb for long.
  */
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_gyro_bias_auto, "PSSENSE_GYRO_BIAS_AUTO", false)
+/*
+ * Fuse the IMU and the optical poses with an error-state EKF (t_imu_optical_filter) and report its pose: position and
+ * orientation both in the optical (world) frame, predicted through optical gaps. Without it the output takes position
+ * from interpolated optical poses and orientation from the IMU fusion's own world.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_filter, "PSSENSE_FILTER", false)
 
 //! Stillness statistics time constant, and how long the controller must be still before its mean gyro is the bias.
 #define PSSENSE_GYRO_BIAS_TAU_S 0.25
@@ -355,6 +362,10 @@ struct pssense_device
 
 		//! Online gyro bias (PSSENSE_GYRO_BIAS_AUTO): exponential statistics of the factory-corrected IMU.
 		struct pssense_gyro_bias gyro_bias;
+
+		//! PSSENSE_FILTER: IMU + optical EKF; NULL when off. Locked by controller_thread.
+		struct t_imu_optical_filter *filter;
+		uint64_t filter_last_logged_updates;
 		struct xrt_pose pose;
 
 		uint32_t received_frames;
@@ -721,6 +732,19 @@ pssense_update_fusion(struct pssense_device *pssense)
 	};
 	m_relation_history_push(pssense->tracking.imu_relation_history, &space_relation,
 	                        pssense->timing.latest_imu_time_ns);
+
+	if (pssense->tracking.filter != NULL) {
+		// The filter's body frame is the LED model frame the optical poses use: rotate the IMU vectors into it.
+		struct xrt_quat led_from_imu;
+		math_quat_invert(&pssense->tracking.T_led_imu.orientation, &led_from_imu);
+		struct xrt_vec3 gyro_led, accel_led;
+		math_quat_rotate_vec3(&led_from_imu, &gyro, &gyro_led);
+		math_quat_rotate_vec3(&led_from_imu, &accel, &accel_led);
+		timepoint_ns host_ns;
+		if (pssense_device_ts_to_host(pssense, pssense->timing.latest_imu_time_ns, &host_ns)) {
+			t_imu_optical_filter_push_imu(pssense->tracking.filter, host_ns, &accel_led, &gyro_led);
+		}
+	}
 
 	if (pssense->tracking.constellation_imu_sink != NULL) {
 		struct xrt_imu_sample sample = {
@@ -1192,6 +1216,11 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 		return;
 	}
 
+	if (pssense->tracking.filter != NULL &&
+	    t_imu_optical_filter_get_relation(pssense->tracking.filter, at_timestamp_ns, out_relation)) {
+		return;
+	}
+
 	struct xrt_space_relation optical = XRT_SPACE_RELATION_ZERO;
 	struct xrt_space_relation imu = XRT_SPACE_RELATION_ZERO;
 	m_relation_history_get(pssense->tracking.constellation_relation_history, device_ts, &optical);
@@ -1498,6 +1527,7 @@ pssense_node_destroy(struct xrt_frame_node *node)
 	// Relation histories are used from the frame context lifecycle in the constellation tracker device callbacks.
 	m_relation_history_destroy(&pssense->tracking.imu_relation_history);
 	m_relation_history_destroy(&pssense->tracking.constellation_relation_history);
+	t_imu_optical_filter_destroy(&pssense->tracking.filter);
 
 	// LED sync is used on the frame context lifecycle, so it needs to be destroyed in here.
 	t_led_sync_refinement_destroy(&pssense->tracking.led_sync_refinement);
@@ -1874,6 +1904,31 @@ pssense_commit_optical_pose_locked(struct pssense_device *pssense,
 		math_quat_normalize(&pssense->tracking.optical_from_imu_orientation);
 		pssense->tracking.have_optical_from_imu_orientation = true;
 		pssense->tracking.optical_from_imu_timestamp_ns = sample->timestamp_ns;
+	}
+
+	if (pssense->tracking.filter != NULL) {
+		// Noise grows with the solve's reprojection error: 2 mm and 0.46 deg at 0.5 px or better.
+		float scale = (float)fmax(1.0, sample->metrics.reprojection_error / 0.5);
+		enum t_imu_optical_filter_update_result result = t_imu_optical_filter_push_pose(
+		    pssense->tracking.filter, sample->timestamp_ns, &sample->pose, 0.002f * scale, 0.008f * scale);
+		struct t_imu_optical_filter_stats stats;
+		t_imu_optical_filter_get_stats(pssense->tracking.filter, &stats);
+		if (result == T_IMU_OPTICAL_FILTER_INITIALISED || result == T_IMU_OPTICAL_FILTER_REINITIALISED ||
+		    stats.updates >= pssense->tracking.filter_last_logged_updates + 300) {
+			pssense->tracking.filter_last_logged_updates = stats.updates;
+			PSSENSE_INFO(pssense,
+			             "FILTER side=%c event=%s updates=%" PRIu64 " rejections=%" PRIu64
+			             " reinitialisations=%" PRIu64 " mahalanobis2=%.2f gyro_bias_deg_s=%.2f,%.2f,%.2f "
+			             "accel_bias_m_s2=%.3f,%.3f,%.3f",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+			             result == T_IMU_OPTICAL_FILTER_INITIALISED     ? "initialised"
+			             : result == T_IMU_OPTICAL_FILTER_REINITIALISED ? "reinitialised"
+			                                                            : "status",
+			             stats.updates, stats.rejections, stats.reinitialisations, stats.last_mahalanobis2,
+			             stats.gyro_bias_rad_s.x * 180.0 / M_PI, stats.gyro_bias_rad_s.y * 180.0 / M_PI,
+			             stats.gyro_bias_rad_s.z * 180.0 / M_PI, stats.accel_bias_m_s2.x, stats.accel_bias_m_s2.y,
+			             stats.accel_bias_m_s2.z);
+		}
 	}
 
 	pssense->tracking.last_fused_pose = sample->pose;
@@ -2566,6 +2621,11 @@ pssense_create(struct xrt_prober *xp,
 
 	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 	pssense->tracking.gyro_bias.enabled = debug_get_bool_option_pssense_gyro_bias_auto();
+	if (debug_get_bool_option_pssense_filter()) {
+		struct t_imu_optical_filter_params filter_params;
+		t_imu_optical_filter_default_params(&filter_params);
+		pssense->tracking.filter = t_imu_optical_filter_create(&filter_params);
+	}
 
 	long timing_fudge_100us = debug_get_num_option_pssense_timing_fudge_100us();
 	if (timing_fudge_100us == LONG_MIN) {
