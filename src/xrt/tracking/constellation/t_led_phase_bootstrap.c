@@ -380,7 +380,17 @@ finish_track(struct t_led_phase_bootstrap *b)
 	} else {
 		imbalance = (late - early) / ring;
 		imbalance = imbalance > 1.0f ? 1.0f : (imbalance < -1.0f ? -1.0f : imbalance);
-		if (imbalance > b->options.track_deadband || imbalance < -b->options.track_deadband) {
+		bool confirmed = true;
+		if (b->options.track_use_pose_coverage && b->options.track_coverage_min_blob_imbalance > 0.0f &&
+		    b->ring_blobs > 0.0f) {
+			// The side the coverage says is dimmer must also have lost blobs; otherwise its solves just dropped out.
+			float blob_imbalance = (b->track_blob_means[2] - b->track_blob_means[1]) / b->ring_blobs;
+			confirmed = imbalance > 0.0f ? blob_imbalance >= b->options.track_coverage_min_blob_imbalance
+			                             : blob_imbalance <= -b->options.track_coverage_min_blob_imbalance;
+		}
+		if (!confirmed && (imbalance > b->options.track_deadband || imbalance < -b->options.track_deadband)) {
+			result = "unconfirmed";
+		} else if (imbalance > b->options.track_deadband || imbalance < -b->options.track_deadband) {
 			shift = (time_duration_ns)(b->options.track_gain * imbalance * (float)b->track_offset_ns);
 			shift = CLAMP(shift, -b->options.track_max_step_ns, b->options.track_max_step_ns);
 			result = "moved";
@@ -396,8 +406,9 @@ finish_track(struct t_led_phase_bootstrap *b)
 
 	LOG_I(b,
 	      "LED_BOOTSTRAP side=%c event=track result=%s ref=%.2f early=%.2f late=%.2f ring=%.2f "
-	      "imbalance=%.3f shift_us=%.1f lock_fudge_us=%.1f offset_us=%.1f total_shift_us=%.1f",
-	      b->options.label, result, ref, early, late, ring, imbalance, (double)shift / 1000.0,
+	      "imbalance=%.3f blobs=%.2f/%.2f/%.2f shift_us=%.1f lock_fudge_us=%.1f offset_us=%.1f total_shift_us=%.1f",
+	      b->options.label, result, ref, early, late, ring, imbalance, b->track_blob_means[0],
+	      b->track_blob_means[1], b->track_blob_means[2], (double)shift / 1000.0,
 	      (double)b->lock_fudge_ns / 1000.0, (double)b->track_offset_ns / 1000.0,
 	      (double)b->track_total_shift_ns / 1000.0);
 
@@ -411,6 +422,7 @@ static void
 finish_track_stage(struct t_led_phase_bootstrap *b)
 {
 	uint32_t index = (uint32_t)b->track_stage - 1;
+	b->track_blob_means[index] = b->track_reports ? (float)b->track_blob_sum / (float)b->track_reports : 0.0f;
 	if (b->options.track_use_pose_coverage) {
 		// Per exposure of the window, so exposures that did not solve count as dark.
 		b->track_means[index] = b->track_coverage_sum / (float)MAX(b->options.measure_frames, 1u);
@@ -567,6 +579,7 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .track_min_ring_blobs = 1.0f,
 	    .track_use_pose_coverage = false,
 	    .track_min_reference_coverage = 0.5f,
+	    .track_coverage_min_blob_imbalance = 0.25f,
 	    .detect_stuck_lit = false,
 	    .stuck_min_matched = 2,
 	    .stuck_own_fraction = 0.25f,

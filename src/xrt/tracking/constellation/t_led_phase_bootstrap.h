@@ -147,6 +147,12 @@ struct t_led_phase_bootstrap_options
 	 * view both drop out; blob counts swung 4.6 -> 8.8 between the left's probes on 25 Sep as the hand moved.
 	 */
 	bool track_use_pose_coverage;
+	/*!
+	 * With track_use_pose_coverage, move only when the blob counts agree: the dimmer side must also have lost at least
+	 * this fraction of the ring's blobs. A stage whose solves all dropped out (hand, motion) reads coverage 0 with
+	 * the ring still lit; on 25 Sep (234101) such stages moved the left's lock by 400 us at a time, 1.2 ms in all.
+	 */
+	float track_coverage_min_blob_imbalance;
 	//! With track_use_pose_coverage: skip tracking unless the reference stage scored at least this.
 	float track_min_reference_coverage;
 
@@ -262,6 +268,8 @@ struct t_led_phase_bootstrap
 	uint32_t stuck_detections;
 	uint32_t track_reports;
 	float track_means[3];
+	//! Mean blob count per camera frame for each probe stage (also kept in coverage mode, to cross-check it).
+	float track_blob_means[3];
 	uint32_t track_cycles;
 	uint32_t track_moves;
 	time_duration_ns track_total_shift_ns;

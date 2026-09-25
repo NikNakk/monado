@@ -508,6 +508,36 @@ TEST_CASE("LED phase bootstrap coverage probes follow drift and ignore backgroun
 	CHECK(circular_distance(b.lock_fudge_ns, lock) <= 400000);
 }
 
+TEST_CASE("LED phase bootstrap coverage probes ignore solve dropouts that the blob counts do not confirm")
+{
+	// 25 Sep (234101): whole probe stages lost every solve while the ring stayed lit (a hand, fast motion), read
+	// coverage 0, and moved the left's lock 400 us at a time. With one block in three dropping out and no drift, the
+	// lock must stay put.
+	for (bool confirm : {false, true}) {
+		CAPTURE(confirm);
+		t_led_phase_bootstrap_options options = test_options();
+		options.track_interval_frames = 120;
+		options.track_use_pose_coverage = true;
+		options.track_coverage_min_blob_imbalance = confirm ? 0.25f : 0.0f;
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		Sim sim{.latency_ns = 9000000};
+		sim.push_coverage = true;
+		uint32_t frame = 0;
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		sim.run(b, 1000, frame);
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		sim.solve_dropout_one_in = 3;
+		sim.run(b, 6000, frame);
+		CHECK(b.track_cycles >= 15);
+		if (confirm) {
+			CHECK(b.track_moves == 0);
+		} else {
+			CHECK(b.track_moves > 0);
+		}
+	}
+}
+
 TEST_CASE("LED phase bootstrap detects a controller stuck lit and stops scanning")
 {
 	t_led_phase_bootstrap_options options = test_options();
