@@ -997,6 +997,26 @@ disagreements. The blob-count fallback steered the left (6 `blob_moved`, net +17
   counts barely change (L 3241 → 3307, R 3058 → 3165), because the replay's stand-in driver does not reproduce the
   live world-frame prediction.
 
+**2026-09-26 00:22, `sessions/20260926-002244-world-head-motion`** (world frame with the fitted head_from_camera0).
+
+- **World frame confirmed live.** The estimator found a 22 s rest of the left controller while the head turned up to 71°.
+  Under the live calibration its world position stayed within 4.5 mm p50 / 17.9 mm p95 (0.12 m of head movement in
+  height alone). Re-fitting on this run gives (−46.1, −18.9, −96.6) mm and 32.2°, within 9 mm and 0.6° of the first
+  fit.
+- The right did poorly: tracked 36%, 1282 poses, lit 0.42. Its hinted scan found only a weak peak (the ring was
+  probably barely in view) and fell back to the full scan, locking at 17.8 s.
+- **The right controller's IMU turns at 16–20°/s at rest, in every session since 25 Sep** (lowest-decile rotation
+  speed of its fused orientation; the left: 1.7–4°/s, up to ~10°/s in the hand-held runs). The driver applies only the
+  factory gyro bias from the calibration report, and `m_imu_3dof` estimates a bias only when fired by hand. This is why
+  the right never qualifies as "resting" for the hand-eye estimator. It also strains the joint tracker, whose
+  orientation prior is `align · q_IMU` with a 3° sigma: the right's prior is several degrees off within a few tenths of
+  a second of its last solve.
+- Fix (opt-in `PSSENSE_GYRO_BIAS_AUTO=1`): exponential (τ 0.25 s) mean and variance of the factory-corrected gyro and
+  accelerometer. While the gyro std < 0.03 rad/s, the accelerometer std < 0.1 m/s² and |a| is within 0.6 m/s² of g for
+  ≥ 0.6 s, the gyro mean becomes the bias. It is subtracted before the fusion, the angular velocity and the IMU samples
+  sent to the tracker. It logs `GYRO_BIAS side=… event=still bias_deg_s=…` once per still spell. Stillness is judged
+  from the spread of the readings, not their size, so any bias can be learnt.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
