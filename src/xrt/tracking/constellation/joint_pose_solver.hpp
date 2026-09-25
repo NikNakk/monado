@@ -77,6 +77,15 @@ struct JointSolveParams
 	 * Its residual is scaled so one sigma costs as much as one pixel of reprojection error.
 	 */
 	float orientation_prior_sigma_deg{0.0f};
+
+	/*!
+	 * If a solve over three or more cameras fails and one camera's residual is at least @ref dropout_ratio times the
+	 * median of the others, re-solve without that camera. Rig calibration error typically shows up as one camera
+	 * going bad in part of its field of view (1.5-2.3 px against ~0.5 px elsewhere), which the per-camera path
+	 * absorbed but a joint solve cannot.
+	 */
+	bool camera_dropout{true};
+	float dropout_ratio{1.8f};
 };
 
 struct JointSolveMatch
@@ -98,6 +107,8 @@ struct JointSolveResult
 	uint32_t visible_leds{0};
 	float coverage{0.0f};
 	uint32_t outliers{0};
+	//! Index (into the cameras passed in) of a camera left out by the dropout retry, or -1.
+	int dropped_camera{-1};
 	std::vector<JointSolveMatch> correspondences;
 };
 

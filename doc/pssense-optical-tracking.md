@@ -686,6 +686,15 @@ Camera 3 sits at ~0.7 px even in good solves, and the rejected solves are mostly
 going bad in part of its field of view. The per-camera path hid this because each camera fitted separately. This is
 more evidence for recapturing the rig calibration (plan item 2).
 
+**Camera dropout in M1.** When one camera's residual is at least 1.8× the median of the others in a solve over three
+or more cameras, M1 re-solves without it, starting from the first solve's pose. A failed solve takes the retry if the retry
+passes; a passed one takes it only at under 0.8× the RMS, since a miscalibrated camera biased synthetic poses by ~6 mm
+at 0.92–0.97 px. Synthetic, with camera 2 rotated 0.8°: 30/30 accepted within 3 mm / 1.5° (9/30 without dropout).
+The never-wrong test is unchanged (99/100 accepted, none wrong). Tracker replay: right-controller poses +5–14% where a
+camera misbehaves (e.g. `002110` 3127 → 3342, `001537` 559 → 638), lower RMS (e.g. `000029` right 0.62 → 0.42 px p50),
+and still 0 false right poses on `000212`. The left's 35–40 s blackout in `002110` is not rescued: three cameras were
+elevated at once there (1.1–1.5 px), which needs the calibration recapture.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into

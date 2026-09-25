@@ -388,3 +388,43 @@ TEST_CASE("Stereo bootstrap does not fit a model to its mirror image")
 	}
 	CHECK(wrong == 0);
 }
+
+TEST_CASE("Joint solve drops a miscalibrated camera")
+{
+	// Rig calibration error: blobs rendered with the true rig, solved with camera 2 rotated by 0.8 degrees.
+	Ring ring;
+	Rig rig;
+	std::mt19937 rng(41);
+
+	int dropout_ok = 0, plain_ok = 0;
+	for (int i = 0; i < 30; i++) {
+		CAPTURE(i);
+		Trial trial = make_trial(rig, ring, rng, 0.004, 1.0);
+
+		Rig wrong = rig;
+		Eigen::Quaterniond q2 = quat_of(wrong.cam_poses[2]);
+		q2 = Eigen::AngleAxisd(0.8 * M_PI / 180.0, Eigen::Vector3d(0.3, 1.0, 0.2).normalized()) * q2;
+		wrong.cam_poses[2] = make_pose(q2, pos_of(wrong.cam_poses[2]));
+		auto cams = cameras_for(wrong, trial.blobs);
+
+		JointSolveParams plain;
+		plain.camera_dropout = false;
+		JointSolveResult plain_result;
+		plain_ok += joint_solve_refine(cams, ring.model, trial.prior, plain, plain_result) ? 1 : 0;
+
+		JointSolveResult result;
+		if (!joint_solve_refine(cams, ring.model, trial.prior, JointSolveParams{}, result)) {
+			continue;
+		}
+		dropout_ok++;
+		CAPTURE(result.rms_px, result.dropped_camera, result.cameras_used);
+		CHECK((pos_of(result.Tcv_world_device) - pos_of(trial.truth)).norm() < 0.003);
+		CHECK(angle_deg(quat_of(result.Tcv_world_device), quat_of(trial.truth)) < 1.5);
+		if (result.dropped_camera >= 0) {
+			CHECK(result.dropped_camera == 2);
+		}
+	}
+	INFO("plain accepted " << plain_ok << ", with dropout " << dropout_ok << " of 30");
+	CHECK(dropout_ok > plain_ok);
+	CHECK(dropout_ok >= 25);
+}
