@@ -695,6 +695,45 @@ camera misbehaves (e.g. `002110` 3127 → 3342, `001537` 559 → 638), lower RMS
 and still 0 false right poses on `000212`. The left's 35–40 s blackout in `002110` is not rescued: three cameras were
 elevated at once there (1.1–1.5 px), which needs the calibration recapture.
 
+## Mode-4 calibration recapture (plan item 2, 2026-09-25)
+
+**Capture.** `scripts/psvr2_charuco_capture_pose.py SESSION LABEL --frames 32` captures one static pose with the
+`char-mode-12` survey settings, detects the board with the direct solver's detector and prints the session's
+coverage: usable poses per camera (at least 6 corners), which cells of a 3×3 image grid hold at least 3 corners, and
+poses shared by each camera pair. Session: `~/Code/psvr2-datasets/calibration/20260925-charuco-mode4/` (22 poses).
+
+- In mode 4 the board's light squares are only ~3 DN of 255 in ordinary room light. Averaging copes: splitting a
+  pose's 8 frames in half puts the corner noise of an 8-frame average at 0.13–0.3 px, and `--frames 32` halves it.
+  Brightness was not what limited the old calibration.
+- Coverage was. On the corner count, the September set never had a corner in the bottom third of cameras 0 and 1
+  (6/6/7/5 cells of 9). The new set has 9/8/8/9.
+- Camera 2 looks out to the headset's left and camera 3 to its right. The bottom third of cameras 0 and 1 needs the
+  board below the headset: headset overhanging a table edge, board low and about 30 cm in front. The board at 80 cm
+  gave no detections.
+
+**Solve.** `20260925-charuco-mode4-direct.json` gives fisheye RMS 0.30 / 0.23 / 0.26 / 0.26 px (old set with the same
+code: 0.37 / 0.34 / 0.37 / 0.28). Upper-camera LOO RMS is 0.29 / 0.28 px (old 0.40 / 0.29), and rig RMS is 0.37 px (old
+0.40). Focal lengths moved by up to 2.6% (camera 0 fx 187.9 → 192.7); the old fit was extrapolating its distortion
+over the uncovered half of the image. Camera poses moved by 2.9–4.9 mm and under 1°. The lower baseline is 80.2 mm.
+`20260925-charuco-mode4-native-origin-candidate.json` was built with `psvr2_tracking_charuco_native_origin.py` and
+keeps `runtime_usable: false`.
+
+**Replay.** `constellation_replay --calibration CAL.json` swaps a recording's calibration: intrinsics are replaced, and
+camera poses are re-expressed in the recorded camera-0 origin. Beware: the replay is chaotic at rounding level.
+Re-applying the *same* calibration changes the M1 solve counts by ~4% (2204 → 2301) while the RMS barely moves. Compare
+residuals, and treat count changes under ~5% as noise. On `20260925-002110-joint-both-grip-3`, old → new:
+
+| | old | new |
+| --- | --- | --- |
+| M1 per-camera RMS p50 / p95, left (cams 0–3) | 0.52/0.94, 0.56/0.80, 0.37/0.89, 0.95/1.08 | 0.34/0.50, 0.35/0.51, 0.45/0.56, 0.52/0.66 |
+| M1 per-camera RMS p50 / p95, right | 0.45/0.81, 0.85/1.10, 0.52/0.84, 0.63/0.92 | 0.45/0.91, 0.36/0.94, 0.43/0.82, 0.52/0.82 |
+| joint tracker, left pushed (RMS p50 / p95) | 1974 (0.47 / 0.80) | 2268 (0.38 / 0.50) |
+| joint tracker, right pushed (4-camera solves) | 3337 (1113) | 3392 (1726) |
+
+The left's 30–35 s blackout is gone (0 → 241 poses in that 5 s bin). The left's remaining gaps are the bootstrap at the
+start and spells when the ring was out of view. The right controller's camera 1 went from the worst camera to one of the
+best. It still needs a live run, and the held-out Sense validation from plan item 2 is still outstanding.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
