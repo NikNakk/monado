@@ -52,6 +52,22 @@
 #define MIN_ROT_ERROR DEG_TO_RAD(30)
 #define MIN_POS_ERROR 0.10
 
+/*!
+ * Whether a blob has the shape of a controller LED: small and round. Lamps, windows and glare make large or elongated
+ * blobs. On PS VR2 mode-4 recordings (25 Sep) this kept 98.3-99.7% of the blobs matched to Sense LEDs and 0-4% of the
+ * blobs seen with every LED dark. A blob without a size (some blobwatches leave it {0,0}) counts as an LED.
+ */
+static inline bool
+t_constellation_blob_is_led_shaped(const t_blob &blob)
+{
+	const float longest = blob.size.x > blob.size.y ? blob.size.x : blob.size.y;
+	const float shortest = blob.size.x > blob.size.y ? blob.size.y : blob.size.x;
+	if (longest <= 0.0f) {
+		return true;
+	}
+	return longest <= 16.0f && blob.size.x * blob.size.y <= 200.0f && longest <= 3.0f * (shortest > 1.0f ? shortest : 1.0f);
+}
+
 /*
  *
  * Forward declares for C callback functions

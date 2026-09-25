@@ -376,6 +376,25 @@ struct t_constellation_tracker_device
 	                               size_t camera_index,
 	                               int64_t timestamp_ns,
 	                               uint32_t blob_count);
+
+	/*!
+	 * Optional, may be NULL. Called once per camera frame with a count of the blobs that could be this device's
+	 * LEDs: LED-shaped blobs (small and round, which excludes lamps, windows and glare) that no other device has
+	 * claimed, plus every blob this device's own solve matched. On the joint path this is called after the
+	 * exposure has been solved, so another tracked controller's ring is excluded; the per-camera path has no
+	 * ownership yet when it calls this, so there it is the shape filter alone. Frames with no blobs are reported.
+	 *
+	 * @param connection         The device.
+	 * @param camera_index       Index of the camera within its mosaic.
+	 * @param timestamp_ns       Exposure timestamp of the frame.
+	 * @param led_blob_count     LED-shaped blobs not claimed by another device, plus this device's matched blobs.
+	 * @param matched_blob_count Blobs this device's solve matched in the frame (0 if it was not solved).
+	 */
+	void (*push_camera_led_blob_count)(struct t_constellation_tracker_device *connection,
+	                                   size_t camera_index,
+	                                   int64_t timestamp_ns,
+	                                   uint32_t led_blob_count,
+	                                   uint32_t matched_blob_count);
 };
 
 /*!

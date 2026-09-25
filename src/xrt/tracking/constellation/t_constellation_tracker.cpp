@@ -1151,6 +1151,19 @@ constellation_tracker_camera_push_blobs(t_blob_sink *tbs, t_blob_observation *tb
 				                                       tbo->num_blobs);
 			}
 		}
+		// The joint path reports LED-shaped counts after solving, when other devices' blobs are known.
+		if (!tracker->joint) {
+			uint32_t led_shaped = 0;
+			for (uint32_t b = 0; b < tbo->num_blobs; b++) {
+				led_shaped += t_constellation_blob_is_led_shaped(tbo->blobs[b]) ? 1 : 0;
+			}
+			for (std::unique_ptr<Device> &device : tracker->devices) {
+				if (device->device->push_camera_led_blob_count != nullptr) {
+					device->device->push_camera_led_blob_count(device->device, camera->index,
+					                                           tbo->timestamp_ns, led_shaped, 0);
+				}
+			}
+		}
 	}
 
 	// The joint path wants every camera's frame, empty ones included, so it knows when an exposure is complete.
