@@ -962,13 +962,14 @@ int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json] [--blobs-csv OUT.csv]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json] [--blobs-csv OUT.csv] [--geometry PREFIX]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
 	bool tracker = false;
 	const char *tracker_csv = nullptr;
 	const char *tracking_csv = nullptr;
+	const char *geometry_prefix = nullptr;
 	bool seed_recorded = false;
 	const char *csv = nullptr;
 	const char *calibration = nullptr;
@@ -979,6 +980,8 @@ main(int argc, char **argv)
 			m1 = true;
 		} else if (arg == "--tracker") {
 			tracker = true;
+		} else if (arg == "--geometry" && i + 1 < argc) {
+			geometry_prefix = argv[++i];
 		} else if (arg == "--tracking-csv" && i + 1 < argc) {
 			tracking_csv = argv[++i];
 		} else if (arg == "--tracker-csv" && i + 1 < argc) {
@@ -1002,6 +1005,33 @@ main(int argc, char **argv)
 			override_calibration(dataset, calibration);
 		}
 		int status = summarise(dataset);
+		if (geometry_prefix) {
+			// Camera world poses per sample (XR convention) and each device's LED model (device frame, as stored).
+			std::string prefix = geometry_prefix;
+			FILE *f = std::fopen((prefix + "-cameras.csv").c_str(), "w");
+			std::fprintf(f, "timestamp_ns,camera,px,py,pz,qx,qy,qz,qw\n");
+			for (const CameraSample &sample : dataset.samples) {
+				if (!sample.Txr_world_cam.has_value()) {
+					continue;
+				}
+				const xrt_pose &c = sample.Txr_world_cam.value();
+				std::fprintf(f, "%" PRIi64 ",%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", sample.timestamp_ns,
+				             sample.camera_index, c.position.x, c.position.y, c.position.z, c.orientation.x,
+				             c.orientation.y, c.orientation.z, c.orientation.w);
+			}
+			std::fclose(f);
+			f = std::fopen((prefix + "-leds.csv").c_str(), "w");
+			std::fprintf(f, "device,led,px,py,pz,nx,ny,nz,visibility_angle\n");
+			for (const DatasetDevice &device : dataset.devices) {
+				for (size_t l = 0; l < device.leds.size(); l++) {
+					const t_constellation_tracker_led &led = device.leds[l];
+					std::fprintf(f, "%d,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f\n", (int)device.id, l,
+					             led.position.x, led.position.y, led.position.z, led.normal.x, led.normal.y,
+					             led.normal.z, led.visibility_angle);
+				}
+			}
+			std::fclose(f);
+		}
 		if (tracking_csv) {
 			// Every recorded tracking-source relation (what the device predicted at each exposure), XR convention.
 			FILE *f = std::fopen(tracking_csv, "w");

@@ -848,6 +848,31 @@ coverage probes; right in view during the left's scan, both moving afterwards). 
 - Fix: with LED-blob counts, a controller now waits 1.5 s after another releases the scan token before starting its
   own scan (`PSSENSE_LED_BOOTSTRAP_HANDOFF_MS`), so the joint tracker can claim the newly locked ring first.
 
+## Orientation and rotation speed (25 Sep replays)
+
+`scripts/psvr2_sense_rotation_coverage.py` measures tracking success against controller orientation and rotation speed.
+Every exposure's IMU orientation is carried into the optical world with the alignment from the nearest optical pose,
+and position is taken from that pose. Its inputs come from `constellation_replay --geometry PREFIX --tracking-csv
+--tracker-csv` (joint tracker, combined calibration). Only exposures after the first optical pose and within 10 s of
+one are counted, so the LED bootstrap does not count as a loss. "Facing angle" is the angle between the ring's mean LED
+normal and the direction to the headset. Tracked fraction per bin:
+
+| recording, device | 0–30° | 30–60° | 60–90° | 90–120° | >120° | 180–360°/s | 360–720°/s |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| grip-3 L / R | 86 / 85% | 66 / 92% | 50 / 65% | – | – | 78 / 87% | (2 / 1 exp.) |
+| left-fast L | 95% | 83% | 75% | 99% (167) | – | 93% | 95% (59) |
+| left-fast-2 L | 89% | 90% | 82% | 58% (819) | 0% (3) | 84% | 91% (57) |
+| ledblobs-rel L / R | 71 / 67% | 72 / 67% | 99 / 58% | 100 / 90% | – | 100 / 84% | (9 / 8) |
+| coverage L / R | 62 / 88% | 70 / 90% | 55 / 82% | 0 / 38% (19 / 231) | – | 47 / 87% | (7 / 7) |
+
+- **Rotation speed is not the limit so far.** Tracking holds up to ~360°/s, and the joint path tracked rotations up to
+  650°/s (p95 ~190–285°/s). The slow bins score lowest because they include still spells with the ring gripped or
+  hidden. Nothing above 720°/s was recorded.
+- **Orientation is the limit.** Success falls once the ring turns 60–90° from the headset, and 90–120° varies from
+  0–100% by run. Nothing past ~120° was recorded except a few exposures, and the largest facing angle ever tracked is
+  116°. The extreme range is therefore untested rather than known-good.
+- The facing angle is approximate (mean ring normal, drift-corrected IMU orientation, nearest optical position).
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
