@@ -980,6 +980,23 @@ window that slides 0.9 ms off the lock stays dark without it (< 30% lit) and is 
 clock-offset excursions (~90 µs/s for ~10 s, well beyond crystal drift) are still unexplained. The max-tracker decays at
 a fixed 50 µs/s and snaps upwards, so a change in the Bluetooth latency floor could move it.
 
+**2026-09-26 00:09, `sessions/20260926-000957-head-from-camera0`** (`PSVR2_CONSTELLATION_WORLD=1`, X = identity;
+controllers resting in two spots while the head turned, nodded and tilted). Camera 0's world position varied by 5–11 cm
+(std), so the head pose is flowing into the tracker. The left made 3230 fused poses and the right 3000, with 0
+disagreements. The blob-count fallback steered the left (6 `blob_moved`, net +177 µs), and both lit fractions were
+0.69–0.75.
+
+- **Fitted head_from_camera0:** camera 0 is at (−42.5, −19.4, −104.6) mm in the head frame (4 cm left, 2 cm down, 10.5 cm
+  forward), rotated 32.8° about (−0.89, 0.44, −0.13), i.e. tipped down. The estimator used 14 left-controller rests
+  (IMU < 5°/s for ≥ 1 s, head turning 15–99°); the right's IMU never met the rest test. The resting-controller world
+  spread over those rests fell from 47 mm p50 / 455 mm p95 (identity) to 2.5 / 16.5 mm (hand-eye alone: 4.7 / 31).
+  Fitting each spot separately agrees within 0.86° and 12.7 mm, mostly along the forward axis. Written to
+  `calibration/20260926-charuco-mode4-combined-head.json` (`runtime_usable: false`).
+- **Check on the right controller, which the fit did not use:** during the second rest (62–88 s) its world position
+  varied by 5.4 mm p50 / 11.2 mm p95 (identity: 73.6 / 325.6); the left's by 4.9 / 18.0 (76.3 / 463.0). Replay pose
+  counts barely change (L 3241 → 3307, R 3058 → 3165), because the replay's stand-in driver does not reproduce the
+  live world-frame prediction.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
