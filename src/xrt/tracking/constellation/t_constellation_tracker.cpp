@@ -907,7 +907,12 @@ Device::~Device()
 
 void
 Device::pushImuSample(const xrt_imu_sample &raw_sample)
-{}
+{
+	// Recorded for offline filter work; the tracker itself does not use IMU samples yet.
+	if (this->tracker != nullptr && this->tracker->data_recorder) {
+		this->tracker->data_recorder->recordImuSample(this->id, raw_sample);
+	}
+}
 
 /*
  *
@@ -1043,6 +1048,7 @@ ConstellationTracker::addDevice(t_constellation_tracker_device_params *params, t
 	t_constellation_device_id_t id = this->next_device_id++;
 
 	this->devices.push_back(std::make_unique<Device>(params, device, id));
+	this->devices.back()->tracker = this;
 
 	CT_DEBUG(this, "Added device with ID %d to constellation tracker", id);
 

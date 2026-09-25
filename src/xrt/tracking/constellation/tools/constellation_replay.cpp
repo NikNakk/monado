@@ -1000,6 +1000,7 @@ main(int argc, char **argv)
 	const char *tracker_csv = nullptr;
 	const char *tracking_csv = nullptr;
 	const char *geometry_prefix = nullptr;
+	const char *imu_csv = nullptr;
 	bool seed_recorded = false;
 	const char *csv = nullptr;
 	const char *calibration = nullptr;
@@ -1011,6 +1012,8 @@ main(int argc, char **argv)
 			m1 = true;
 		} else if (arg == "--tracker") {
 			tracker = true;
+		} else if (arg == "--imu-csv" && i + 1 < argc) {
+			imu_csv = argv[++i];
 		} else if (arg == "--geometry" && i + 1 < argc) {
 			geometry_prefix = argv[++i];
 		} else if (arg == "--tracking-csv" && i + 1 < argc) {
@@ -1038,6 +1041,19 @@ main(int argc, char **argv)
 			override_calibration(dataset, calibration, recorded_calibration);
 		}
 		int status = summarise(dataset);
+		if (imu_csv) {
+			// IMU samples as the devices pushed them (host time; accel m/s^2 and gyro rad/s in the IMU frame).
+			FILE *f = std::fopen(imu_csv, "w");
+			std::fprintf(f, "timestamp_ns,device,ax,ay,az,gx,gy,gz\n");
+			for (const DatasetImuSample &imu : dataset.imu_samples) {
+				const xrt_imu_sample &s = imu.sample;
+				std::fprintf(f, "%" PRIi64 ",%d,%.6f,%.6f,%.6f,%.7f,%.7f,%.7f\n", s.timestamp_ns,
+				             (int)imu.device_id, s.accel_m_s2.x, s.accel_m_s2.y, s.accel_m_s2.z, s.gyro_rad_secs.x,
+				             s.gyro_rad_secs.y, s.gyro_rad_secs.z);
+			}
+			std::fclose(f);
+			std::printf("imu samples: %zu\n", dataset.imu_samples.size());
+		}
 		if (geometry_prefix) {
 			// Camera world poses per sample (XR convention) and each device's LED model (device frame, as stored).
 			std::string prefix = geometry_prefix;

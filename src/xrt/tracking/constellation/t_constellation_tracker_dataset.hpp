@@ -148,6 +148,9 @@ public: // Methods
 	recordDeviceInfo(const Device &device);
 
 	void
+	recordImuSample(t_constellation_device_id_t device_id, const xrt_imu_sample &sample);
+
+	void
 	recordDeviceTracking(const CameraSample &sample,
 	                     t_constellation_device_id_t device_id,
 	                     const xrt_space_relation &relation);
@@ -177,6 +180,12 @@ struct DatasetDeviceTracking
 	xrt_pose pose;
 };
 
+struct DatasetImuSample
+{
+	t_constellation_device_id_t device_id;
+	xrt_imu_sample sample;
+};
+
 struct DatasetReader
 {
 private: // Fields
@@ -188,6 +197,7 @@ public: // Fields
 
 	std::vector<CameraSample> samples;
 	std::vector<DatasetDeviceTracking> device_tracking;
+	std::vector<DatasetImuSample> imu_samples;
 
 	//! Why reading stopped: empty at a clean end of file; anything else means the file is truncated or corrupt.
 	std::string stop_reason;
