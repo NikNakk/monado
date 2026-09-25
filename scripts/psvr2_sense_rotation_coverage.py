@@ -7,8 +7,11 @@ Every exposure has an IMU orientation, tracked or not. It is carried into the op
 the nearest optical pose (optical = align * IMU, re-estimated per pose, so gyro drift is followed), and the position
 comes from the nearest optical pose. From that it computes, per exposure:
 
-- facing angle: between the ring's mean LED normal and the direction to the headset (0 = ring faces the headset);
+- ring angle: between the plane of the LED ring's normal and the direction to the headset, folded to 0-90 deg
+  (0 = ring face-on to the headset, 90 = edge-on). The Sense LEDs point all round the ring (their mean normal has
+  length 0.16), so the ring has no "front" and a facing angle from the mean normal says little;
 - LEDs facing a camera: LEDs whose normal is within 70 deg of some camera's direction;
+- distance from the headset (mean camera position);
 - rotation speed from successive IMU orientations;
 
 and reports the fraction of exposures with an optical pose, per bin. Inputs come from constellation_replay:
@@ -38,8 +41,10 @@ def load(prefix: str, trk_path: str, tr_path: str):
             np.array([float(r[k]) for k in ("px", "py", "pz")]),
             np.array([float(r[k]) for k in ("qx", "qy", "qz", "qw")]))
     leds = defaultdict(list)
+    led_pos = defaultdict(list)
     for r in csv.DictReader(open(prefix + "-leds.csv")):
         leds[int(r["device"])].append(np.array([float(r[k]) for k in ("nx", "ny", "nz")]))
+        led_pos[int(r["device"])].append(np.array([float(r[k]) for k in ("px", "py", "pz")]))
     imu = defaultdict(dict)  # device -> ts -> quat (IMU world)
     for r in csv.DictReader(open(trk_path)):
         if int(r["camera"]) == 0 and int(r["flags"]) & 1:
@@ -49,7 +54,7 @@ def load(prefix: str, trk_path: str, tr_path: str):
         opt[int(r["device"])][int(r["timestamp_ns"])] = (
             np.array([float(r[k]) for k in ("px", "py", "pz")]),
             np.array([float(r[k]) for k in ("qx", "qy", "qz", "qw")]))
-    return cams, leds, imu, opt
+    return cams, leds, led_pos, imu, opt
 
 
 def table(title: str, values: np.ndarray, tracked: np.ndarray, edges: list[float]) -> None:
@@ -67,12 +72,13 @@ def main() -> int:
     parser.add_argument("tracking_csv")
     parser.add_argument("tracker_csv")
     args = parser.parse_args()
-    cams, leds, imu, opt = load(args.geometry_prefix, args.tracking_csv, args.tracker_csv)
+    cams, leds, led_pos, imu, opt = load(args.geometry_prefix, args.tracking_csv, args.tracker_csv)
 
     for device in sorted(imu):
         normals_cv = np.array(leds[device])
-        mean_normal_cv = normals_cv.sum(axis=0)
-        mean_normal_cv /= np.linalg.norm(mean_normal_cv)
+        positions_cv = np.array(led_pos[device])
+        centred = positions_cv - positions_cv.mean(axis=0)
+        plane_normal_cv = np.linalg.svd(centred)[2][2]
         opt_ts = np.array(sorted(opt[device]))
         if len(opt_ts) < 100:
             continue
@@ -83,7 +89,7 @@ def main() -> int:
                 aligns[t] = Rotation.from_quat(opt[device][t][1]) * Rotation.from_quat(imu[device][t]).inv()
         align_ts = np.array(sorted(aligns))
 
-        facing, facing_leds, speed, tracked, when = [], [], [], [], []
+        facing, facing_leds, speed, tracked, when, distance = [], [], [], [], [], []
         prev = None
         t0 = min(imu[device])
         for t in sorted(imu[device]):
@@ -108,32 +114,35 @@ def main() -> int:
             R_xr = (aligns[near] * q_imu).as_matrix()
             R_cv = C @ R_xr @ C
             p_cv = C @ pos_xr
-            normal_w = R_cv @ mean_normal_cv
+            normal_w = R_cv @ plane_normal_cv
             normals_w = normals_cv @ R_cv.T
             head = np.mean([C @ cams[t][c][0] for c in cams[t]], axis=0)
             to_head = head - p_cv
             to_head /= np.linalg.norm(to_head)
-            facing.append(np.degrees(np.arccos(np.clip(normal_w @ to_head, -1, 1))))
+            facing.append(np.degrees(np.arccos(np.clip(abs(normal_w @ to_head), 0, 1))))
             best = 0
             for c in cams[t]:
                 d = C @ cams[t][c][0] - p_cv
                 d /= np.linalg.norm(d)
                 best = max(best, int((normals_w @ d > np.cos(np.radians(FACING_LIMIT_DEG))).sum()))
             facing_leds.append(best)
+            distance.append(np.linalg.norm(pos_xr - np.mean([cams[t][c][0] for c in cams[t]], axis=0)))
             speed.append(np.degrees(w))
             tracked.append(t in opt[device])
             when.append((t - t0) * 1e-9)
-        facing, facing_leds, speed, tracked = map(np.array, (facing, facing_leds, speed, tracked))
+        facing, facing_leds, speed, tracked, distance = map(
+            np.array, (facing, facing_leds, speed, tracked, distance))
         print(f"device {device}: {len(tracked)} exposures after the first optical pose, within 10 s of one, tracked "
               f"{tracked.mean() * 100:.1f}%")
-        table("ring facing angle from the headset (deg)", facing, tracked, [0, 30, 60, 90, 120, 150, 181])
+        table("ring plane angle to the headset (deg; 0 face-on, 90 edge-on)", facing, tracked,
+              [0, 15, 30, 45, 60, 75, 91])
         table("most LEDs facing one camera (normal within 70 deg)", facing_leds.astype(float), tracked,
               [0, 3, 5, 7, 9, 11, 18])
+        table("distance from the headset (cm)", distance * 100, tracked, [0, 20, 30, 40, 50, 60, 80, 200])
         ok = ~np.isnan(speed)
         table("rotation speed (deg/s)", speed[ok], tracked[ok], [0, 30, 90, 180, 360, 720, 5000])
         if tracked.any():
-            print(f"  largest facing angle while tracked: p95 {np.percentile(facing[tracked], 95):.0f} deg, "
-                  f"max {facing[tracked].max():.0f} deg; fastest tracked rotation p95 "
+            print(f"  fastest tracked rotation p95 "
                   f"{np.nanpercentile(speed[tracked], 95):.0f} deg/s, max {np.nanmax(speed[tracked]):.0f} deg/s")
     return 0
 

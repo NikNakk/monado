@@ -848,30 +848,39 @@ coverage probes; right in view during the left's scan, both moving afterwards). 
 - Fix: with LED-blob counts, a controller now waits 1.5 s after another releases the scan token before starting its
   own scan (`PSSENSE_LED_BOOTSTRAP_HANDOFF_MS`), so the joint tracker can claim the newly locked ring first.
 
-## Orientation and rotation speed (25 Sep replays)
+## Orientation, distance and rotation speed (25 Sep replays)
 
-`scripts/psvr2_sense_rotation_coverage.py` measures tracking success against controller orientation and rotation speed.
-Every exposure's IMU orientation is carried into the optical world with the alignment from the nearest optical pose,
-and position is taken from that pose. Its inputs come from `constellation_replay --geometry PREFIX --tracking-csv
---tracker-csv` (joint tracker, combined calibration). Only exposures after the first optical pose and within 10 s of
-one are counted, so the LED bootstrap does not count as a loss. "Facing angle" is the angle between the ring's mean LED
-normal and the direction to the headset. Tracked fraction per bin:
+`scripts/psvr2_sense_rotation_coverage.py` measures tracking success against controller orientation, distance and
+rotation speed. Every exposure's IMU orientation is carried into the optical world with the alignment from the nearest
+optical pose, and position is taken from that pose. Its inputs come from `constellation_replay --geometry PREFIX
+--tracking-csv --tracker-csv` (joint tracker, combined calibration). Only exposures after the first optical pose and
+within 10 s of one are counted, so the LED bootstrap does not count as a loss.
 
-| recording, device | 0–30° | 30–60° | 60–90° | 90–120° | >120° | 180–360°/s | 360–720°/s |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| grip-3 L / R | 86 / 85% | 66 / 92% | 50 / 65% | – | – | 78 / 87% | (2 / 1 exp.) |
-| left-fast L | 95% | 83% | 75% | 99% (167) | – | 93% | 95% (59) |
-| left-fast-2 L | 89% | 90% | 82% | 58% (819) | 0% (3) | 84% | 91% (57) |
-| ledblobs-rel L / R | 71 / 67% | 72 / 67% | 99 / 58% | 100 / 90% | – | 100 / 84% | (9 / 8) |
-| coverage L / R | 62 / 88% | 70 / 90% | 55 / 82% | 0 / 38% (19 / 231) | – | 47 / 87% | (7 / 7) |
+**Orientation is not the limit.** The Sense ring has no front: its 17 LED normals point all round it (their mean has
+length 0.16). A first version of the script measured a "facing angle" from that mean normal, and its apparent fall-off
+past 60–90° was an artefact. The script now uses the ring plane: 0° face-on to the headset, 90° edge-on. The deliberate
+sweep `20260925-232548-rotation-sweep` (slow full roll, pitch and yaw of each controller, then flicks) tracked 87.6% (L)
+and 79.5% (R) of exposures. Every 15° bin from face-on to edge-on was 79–98% (L) and 61–88% (R), with the low right bins
+face-on. Over grip-3, left-fast-2 and coverage, no bin is consistently worse, and edge-on is as often the best as the
+worst.
 
-- **Rotation speed is not the limit so far.** Tracking holds up to ~360°/s, and the joint path tracked rotations up to
-  650°/s (p95 ~190–285°/s). The slow bins score lowest because they include still spells with the ring gripped or
-  hidden. Nothing above 720°/s was recorded.
-- **Orientation is the limit.** Success falls once the ring turns 60–90° from the headset, and 90–120° varies from
-  0–100% by run. Nothing past ~120° was recorded except a few exposures, and the largest facing angle ever tracked is
-  116°. The extreme range is therefore untested rather than known-good.
-- The facing angle is approximate (mean ring normal, drift-corrected IMU orientation, nearest optical position).
+**Distance is.** Within ~20 cm of the headset tracking collapses: 4% (R, 118 exposures) and 56% (L, 68) in the sweep,
+15% (R) in the coverage run. At 20–50 cm it is 55–98%, varying more between runs than between bins. That fits LED
+blobs growing past the LED-shape and blob limits and the rings falling out of the cameras' shared view up close. It is
+not investigated further yet.
+
+**Rotation speed is not the limit so far.** Tracking holds at 84–100% for 180–360°/s, and the joint path has tracked
+rotations up to 650°/s (left-fast runs). Nothing above 720°/s was recorded; the flicks in the sweep peaked at ~400°/s.
+
+The remaining losses at normal distances are more likely a hand covering the ring (normal grip), or the controller
+leaving the cameras' view, than orientation.
+
+**The sweep also caught the always-lit fault on the left controller.** From ~20 s, the start of its narrow scan, the left
+ring was lit and tracked in every frame (3–6 matched blobs per camera) whatever the 450 µs scan step. Its narrow scan
+scored ~3.0 across all 21 steps (a 5.45 ms "window"), whereas the right's narrow scan in the same run shows a crisp
+1.5 ms window. So the fault is not specific to the right controller. Both occurrences today came while a controller was
+scanning. With a stuck-on ring, coverage probes read the same at every offset, so the left's 10 `centred` results are
+uninformative. Its handoff baseline was clean (`0,0,0,0`), so the 1.5 s hand-off delay worked.
 
 ## Session tools
 
