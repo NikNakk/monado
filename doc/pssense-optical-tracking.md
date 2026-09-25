@@ -1026,6 +1026,7 @@ controllers resting in view for the first seconds).
   under the live head_from_camera0. A third, right-only fit gives (−48.1, −16.3, −95.3) mm and 32.2°, within ~6 mm and
   0.6° of the first two.
 - **`stuck_lit` fired on the right** (`own_ring_lit_across_narrow_scan`) after a weak hinted scan and a failed wide pass.
+  **The user confirmed its status LED went off: a true detection**, the first of the always-lit fault by the driver.
   The session carried on: the right tracked 71% (3463 poses) with its stuck-lit ring, and the left then scanned and
   locked (at 32 s). (The scorer crashed on the unknown state 5; fixed.)
 - **Probes in normal movement did harm.** The left locked at a 0.79 lit fraction. One coverage probe, confirmed by blobs
