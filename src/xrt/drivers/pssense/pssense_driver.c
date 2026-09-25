@@ -107,6 +107,21 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_strict, "PSSENSE_LED_BOOTSTRAP_
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_hint_us, "PSSENSE_LED_BOOTSTRAP_HINT_US", -1)
 //! Phase-tracking probes score joint-solve pose coverage (fraction of visible LEDs matched) instead of blob counts.
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track_coverage, "PSSENSE_LED_BOOTSTRAP_TRACK_COVERAGE", false)
+/*
+ * Estimate the gyro bias online while the controller is still (gyro and accelerometer steady, reading 1 g) and subtract
+ * it. The factory bias alone leaves the right Sense turning at 16-20 deg/s at rest in every session since 25 Sep (the
+ * left at 2-4 deg/s), which the joint tracker's 3-degree orientation prior cannot absorb for long.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_gyro_bias_auto, "PSSENSE_GYRO_BIAS_AUTO", false)
+
+//! Stillness statistics time constant, and how long the controller must be still before its mean gyro is the bias.
+#define PSSENSE_GYRO_BIAS_TAU_S 0.25
+#define PSSENSE_GYRO_BIAS_STILL_NS (600 * U_TIME_1MS_IN_NS)
+//! Still: gyro standard deviation below this (rad/s), accelerometer standard deviation below this (m/s^2), and the
+//! accelerometer within this of 1 g (m/s^2).
+#define PSSENSE_GYRO_BIAS_MAX_GYRO_STD 0.03
+#define PSSENSE_GYRO_BIAS_MAX_ACCEL_STD 0.10
+#define PSSENSE_GYRO_BIAS_MAX_GRAVITY_ERROR 0.6
 
 #define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
@@ -324,6 +339,19 @@ struct pssense_device
 
 		struct m_relation_history *imu_relation_history;
 		struct m_imu_3dof fusion;
+
+		//! Online gyro bias (PSSENSE_GYRO_BIAS_AUTO): exponential statistics of the factory-corrected IMU.
+		struct
+		{
+			bool enabled;
+			bool have_stats;
+			double gyro_mean[3], gyro_sq[3], accel_mean[3], accel_sq[3];
+			timepoint_ns last_ns;
+			timepoint_ns still_since_ns;
+			bool still_logged;
+			uint32_t updates;
+			struct xrt_vec3 bias;
+		} gyro_bias;
 		struct xrt_pose pose;
 
 		uint32_t received_frames;
@@ -588,6 +616,68 @@ pssense_read_packet_data(struct pssense_device *pssense,
 	return ret;
 }
 
+/*!
+ * Track exponential mean and variance of the factory-corrected gyro and accelerometer; while they show the controller
+ * still for long enough, take the gyro mean as the bias. Stillness is judged from the spread of the readings, not
+ * their size, so it works whatever the bias is.
+ */
+static void
+pssense_update_gyro_bias(struct pssense_device *pssense,
+                         timepoint_ns now_ns,
+                         const struct xrt_vec3 *gyro,
+                         const struct xrt_vec3 *accel)
+{
+	__typeof__(pssense->tracking.gyro_bias) *b = &pssense->tracking.gyro_bias;
+	const double g[3] = {gyro->x, gyro->y, gyro->z};
+	const double a[3] = {accel->x, accel->y, accel->z};
+	if (!b->have_stats || now_ns <= b->last_ns) {
+		for (int i = 0; i < 3; i++) {
+			b->gyro_mean[i] = g[i];
+			b->gyro_sq[i] = g[i] * g[i];
+			b->accel_mean[i] = a[i];
+			b->accel_sq[i] = a[i] * a[i];
+		}
+		b->have_stats = true;
+		b->last_ns = now_ns;
+		b->still_since_ns = 0;
+		return;
+	}
+	double dt = (double)(now_ns - b->last_ns) * 1e-9;
+	b->last_ns = now_ns;
+	double alpha = dt / (PSSENSE_GYRO_BIAS_TAU_S + dt);
+	double gyro_var = 0.0, accel_var = 0.0, accel_len2 = 0.0;
+	for (int i = 0; i < 3; i++) {
+		b->gyro_mean[i] += alpha * (g[i] - b->gyro_mean[i]);
+		b->gyro_sq[i] += alpha * (g[i] * g[i] - b->gyro_sq[i]);
+		b->accel_mean[i] += alpha * (a[i] - b->accel_mean[i]);
+		b->accel_sq[i] += alpha * (a[i] * a[i] - b->accel_sq[i]);
+		gyro_var += fmax(0.0, b->gyro_sq[i] - b->gyro_mean[i] * b->gyro_mean[i]);
+		accel_var += fmax(0.0, b->accel_sq[i] - b->accel_mean[i] * b->accel_mean[i]);
+		accel_len2 += b->accel_mean[i] * b->accel_mean[i];
+	}
+	bool still = sqrt(gyro_var) < PSSENSE_GYRO_BIAS_MAX_GYRO_STD && sqrt(accel_var) < PSSENSE_GYRO_BIAS_MAX_ACCEL_STD &&
+	             fabs(sqrt(accel_len2) - MATH_GRAVITY_M_S2) < PSSENSE_GYRO_BIAS_MAX_GRAVITY_ERROR;
+	if (!still) {
+		b->still_since_ns = 0;
+		b->still_logged = false;
+		return;
+	}
+	if (b->still_since_ns == 0) {
+		b->still_since_ns = now_ns;
+	}
+	if (now_ns - b->still_since_ns < PSSENSE_GYRO_BIAS_STILL_NS) {
+		return;
+	}
+	b->bias = (struct xrt_vec3){(float)b->gyro_mean[0], (float)b->gyro_mean[1], (float)b->gyro_mean[2]};
+	b->updates++;
+	if (!b->still_logged) {
+		b->still_logged = true;
+		PSSENSE_INFO(pssense, "GYRO_BIAS side=%c event=still bias_deg_s=%.2f,%.2f,%.2f magnitude_deg_s=%.2f updates=%u",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', b->bias.x * 180.0 / M_PI, b->bias.y * 180.0 / M_PI,
+		             b->bias.z * 180.0 / M_PI, m_vec3_len(b->bias) * 180.0 / M_PI, b->updates);
+	}
+}
+
 static void
 pssense_update_fusion(struct pssense_device *pssense)
 {
@@ -607,6 +697,13 @@ pssense_update_fusion(struct pssense_device *pssense)
 	    .y = (pssense->state.accel_raw.y - pssense->calibration.accel_bias.y) * pssense->calibration.accel_scale.y,
 	    .z = (pssense->state.accel_raw.z - pssense->calibration.accel_bias.z) * pssense->calibration.accel_scale.z,
 	};
+
+	if (pssense->tracking.gyro_bias.enabled) {
+		pssense_update_gyro_bias(pssense, pssense->timing.latest_imu_time_ns, &gyro, &accel);
+		gyro.x -= pssense->tracking.gyro_bias.bias.x;
+		gyro.y -= pssense->tracking.gyro_bias.bias.y;
+		gyro.z -= pssense->tracking.gyro_bias.bias.z;
+	}
 
 	m_imu_3dof_update(&pssense->tracking.fusion, pssense->timing.latest_imu_time_ns, &accel, &gyro);
 	pssense->tracking.pose.orientation = pssense->tracking.fusion.rot;
@@ -2443,6 +2540,7 @@ pssense_create(struct xrt_prober *xp,
 	pssense->usb = xpdev->bus == XRT_BUS_TYPE_USB;
 
 	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
+	pssense->tracking.gyro_bias.enabled = debug_get_bool_option_pssense_gyro_bias_auto();
 
 	long timing_fudge_100us = debug_get_num_option_pssense_timing_fudge_100us();
 	if (timing_fudge_100us == LONG_MIN) {
