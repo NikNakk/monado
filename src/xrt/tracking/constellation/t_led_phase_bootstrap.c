@@ -384,8 +384,22 @@ finish_track(struct t_led_phase_bootstrap *b)
 			ring = b->ring_blobs;
 			imbalance = (b->track_blob_means[2] - b->track_blob_means[1]) / ring;
 			imbalance = imbalance > 1.0f ? 1.0f : (imbalance < -1.0f ? -1.0f : imbalance);
+			// Above the dark baseline, as ring_blobs is.
+			float background = 0.0f;
+			for (uint32_t c = 0; c < b->options.camera_count; c++) {
+				background += (float)b->baseline_blobs[c];
+			}
+			background /= (float)MAX(b->options.camera_count, 1u);
+			float brighter = (b->track_blob_means[1] > b->track_blob_means[2] ? b->track_blob_means[1]
+			                                                                   : b->track_blob_means[2]) -
+			                 background;
 			result = "blob_centred";
-			if (imbalance > b->options.track_deadband || imbalance < -b->options.track_deadband) {
+			if (brighter < b->options.track_blob_fallback_min_fraction * ring) {
+				// Too little light either side to steer by: the ring is out of view or covered, not off-phase.
+				// On 26 Sep (004424) the right's fallback moved 175 us at a time on 1.0/2.0/0.1 blobs of a 4.9 ring.
+				result = "blob_too_dim";
+				imbalance = 0.0f;
+			} else if (imbalance > b->options.track_deadband || imbalance < -b->options.track_deadband) {
 				shift = (time_duration_ns)(b->options.track_gain * imbalance * (float)b->track_offset_ns);
 				shift = CLAMP(shift, -b->options.track_max_step_ns, b->options.track_max_step_ns);
 				result = "blob_moved";
@@ -597,6 +611,7 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .track_min_reference_coverage = 0.5f,
 	    .track_coverage_min_blob_imbalance = 0.25f,
 	    .track_blob_fallback = false,
+	    .track_blob_fallback_min_fraction = 0.5f,
 	    .detect_stuck_lit = false,
 	    .stuck_min_matched = 2,
 	    .stuck_own_fraction = 0.25f,

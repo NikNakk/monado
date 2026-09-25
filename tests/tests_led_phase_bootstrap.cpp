@@ -571,6 +571,31 @@ TEST_CASE("LED phase bootstrap coverage probes fall back to blob counts when the
 	}
 }
 
+TEST_CASE("LED phase bootstrap blob fallback does not steer a ring that is out of view")
+{
+	// The ring leaves view: every probe stage sees only a stray blob or two. The lock must not wander.
+	t_led_phase_bootstrap_options options = test_options();
+	options.track_interval_frames = 120;
+	options.track_use_pose_coverage = true;
+	options.track_blob_fallback = true;
+	options.lost_frames = 100000;
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+	Sim sim{.latency_ns = 5000000};
+	sim.push_coverage = true;
+	uint32_t frame = 0;
+	t_led_phase_bootstrap_start(&b, kPeriod);
+	sim.run(b, 1000, frame);
+	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	int64_t lock = b.lock_fudge_ns;
+	sim.visible = false;
+	sim.noise_blobs = 1; // a stray blob that comes and goes (the real out-of-view stages read 0.1-2 of a 4.9 ring)
+	sim.run(b, 4000, frame);
+	CHECK(b.track_cycles >= 10);
+	CHECK(b.track_moves == 0);
+	CHECK(b.lock_fudge_ns == lock);
+}
+
 TEST_CASE("LED phase bootstrap detects a controller stuck lit and stops scanning")
 {
 	t_led_phase_bootstrap_options options = test_options();
