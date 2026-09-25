@@ -12,7 +12,7 @@ solver's own detector and prints the whole session's coverage:
 
 - corners per camera for this pose (>= 6 makes the pose usable for that camera);
 - usable poses per camera (the solver needs >= 6; aim for >= 15);
-- which cells of a 3x3 image grid each camera has seen the board centre in (aim for >= 7 of 9, edges matter);
+- which cells of a 3x3 image grid hold >= 3 of a camera's corners in some pose (aim for >= 7 of 9, edges matter);
 - poses seen together by each camera pair (they carry the rig extrinsics; aim for >= 8 per overlapping pair).
 
 Monado must not be running: the survey claims the camera interface over libusb. Never use /tmp.
@@ -59,9 +59,11 @@ def board_levels(pose_dir: Path, found: list[dict]) -> list[str]:
     return out
 
 
-def cell_of(points: np.ndarray) -> tuple[int, int]:
-    c = points.mean(axis=0)
-    return min(2, int(c[0] * 3 / SIZE)), min(2, int(c[1] * 3 / SIZE))
+def cells_of(points: np.ndarray, min_corners: int = 3) -> set[tuple[int, int]]:
+    """Image cells holding at least @p min_corners detected corners: where the pose constrains the lens model."""
+    cells = np.minimum(2, (points * 3 / SIZE).astype(int))
+    keys, counts = np.unique(cells, axis=0, return_counts=True)
+    return {(int(x), int(y)) for (x, y), n in zip(keys, counts) if n >= min_corners}
 
 
 def report(session: Path, detector) -> None:
@@ -82,7 +84,7 @@ def report(session: Path, detector) -> None:
         for c in range(4):
             if ok[c]:
                 usable[c] += 1
-                cells[c].add(cell_of(found[c]["points"]))
+                cells[c] |= cells_of(found[c]["points"])
             for d in range(c + 1, 4):
                 if ok[c] and ok[d]:
                     pairs[c, d] += 1
