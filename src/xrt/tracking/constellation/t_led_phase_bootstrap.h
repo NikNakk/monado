@@ -153,6 +153,12 @@ struct t_led_phase_bootstrap_options
 	 * the ring still lit; on 25 Sep (234101) such stages moved the left's lock by 400 us at a time, 1.2 ms in all.
 	 */
 	float track_coverage_min_blob_imbalance;
+	/*!
+	 * With track_use_pose_coverage: when the reference stage is not tracked, steer by the blob-count imbalance
+	 * (normalised by the ring's blobs at lock) instead of skipping the probe. A ring whose lit window has slid off
+	 * the lock is dark or half lit, so it is not tracked, and coverage probes alone can never bring it back.
+	 */
+	bool track_blob_fallback;
 	//! With track_use_pose_coverage: skip tracking unless the reference stage scored at least this.
 	float track_min_reference_coverage;
 

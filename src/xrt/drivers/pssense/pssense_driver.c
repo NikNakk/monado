@@ -2582,6 +2582,8 @@ pssense_create(struct xrt_prober *xp,
 			bootstrap_options.track_min_ring_blobs = pssense->tracking.led_bootstrap_led_blobs ? 1.5f : 3.0f;
 		}
 		bootstrap_options.track_use_pose_coverage = debug_get_bool_option_pssense_led_bootstrap_track_coverage();
+		// Only meaningful with LED-shaped counts: raw counts include the other ring and background light.
+		bootstrap_options.track_blob_fallback = pssense->tracking.led_bootstrap_led_blobs;
 		long hint_us = debug_get_num_option_pssense_led_bootstrap_hint_us();
 		if (hint_us >= 0) {
 			// The hint is a narrow-pulse start offset, like the scan steps: centre minus half the narrow pulse.

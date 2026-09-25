@@ -341,8 +341,26 @@ report_imu_offset(const DeviceTrack &track)
  * tracking origin (recorded camera c pose times the inverse of its recorded pose relative to camera 0) and applies
  * the file's camera pose in that origin. Both calibrations must use camera 0 as their tracking origin.
  */
+//! head_from_camera0_xrt from a calibration file, identity if the file or the field is absent.
+xrt_pose
+read_head_from_camera0(const char *path)
+{
+	xrt_pose pose = XRT_POSE_IDENTITY;
+	if (path == nullptr) {
+		return pose;
+	}
+	char *contents = u_file_read_content_from_path(path, nullptr);
+	cJSON *root = contents ? cJSON_Parse(contents) : nullptr;
+	std::free(contents);
+	if (!u_json_get_pose(u_json_get(root, "head_from_camera0_xrt"), &pose)) {
+		pose = XRT_POSE_IDENTITY;
+	}
+	cJSON_Delete(root);
+	return pose;
+}
+
 void
-override_calibration(DatasetReader &dataset, const char *path)
+override_calibration(DatasetReader &dataset, const char *path, const char *recorded_calibration)
 {
 	if (dataset.mosaics.empty()) {
 		throw std::runtime_error("no cameras to override");
@@ -403,15 +421,27 @@ override_calibration(DatasetReader &dataset, const char *path)
 	if (!world[0].has_value()) {
 		throw std::runtime_error("no exposure with every camera's pose");
 	}
+	/*
+	 * World-frame recordings place camera 0 at head * head_from_camera0 (X). Swapping X: head = recorded camera 0 *
+	 * X_recorded^-1, so the new camera 0 is recorded camera 0 * X_recorded^-1 * X_new. Head-relative recordings have
+	 * no head pose, so X cannot change them; both default to identity.
+	 */
+	xrt_pose x_recorded = read_head_from_camera0(recorded_calibration);
+	xrt_pose x_new = read_head_from_camera0(path);
+	xrt_pose x_recorded_inverse, x_change;
+	math_pose_invert(&x_recorded, &x_recorded_inverse);
+	math_pose_transform(&x_recorded_inverse, &x_new, &x_change);
+
 	xrt_pose inverse_cam0;
 	math_pose_invert(&world[0].value(), &inverse_cam0);
 	std::vector<xrt_pose> origin_from_recorded(camera_count);
 	for (size_t c = 0; c < camera_count; c++) {
-		xrt_pose recorded_in_origin, inverse_recorded;
+		xrt_pose recorded_in_origin, inverse_recorded, changed_in_origin;
 		math_pose_transform(&inverse_cam0, &world[c].value(), &recorded_in_origin);
 		math_pose_invert(&recorded_in_origin, &inverse_recorded);
-		// World pose of camera c becomes: recorded world pose * inverse(recorded in origin) * new in origin.
-		math_pose_transform(&inverse_recorded, &new_in_origin[c], &origin_from_recorded[c]);
+		// World pose of camera c becomes: recorded world pose * inverse(recorded in origin) * X change * new in origin.
+		math_pose_transform(&x_change, &new_in_origin[c], &changed_in_origin);
+		math_pose_transform(&inverse_recorded, &changed_in_origin, &origin_from_recorded[c]);
 		const xrt_pose &d = origin_from_recorded[c];
 		std::printf("  camera %zu: calibration change %.2f mm, %.3f deg\n", c,
 		            1000.0 * std::sqrt(d.position.x * d.position.x + d.position.y * d.position.y +
@@ -962,7 +992,7 @@ int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json] [--blobs-csv OUT.csv] [--geometry PREFIX]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json [--recorded-calibration SESSION/calibration.json]] [--blobs-csv OUT.csv] [--geometry PREFIX]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
@@ -973,6 +1003,7 @@ main(int argc, char **argv)
 	bool seed_recorded = false;
 	const char *csv = nullptr;
 	const char *calibration = nullptr;
+	const char *recorded_calibration = nullptr;
 	const char *blobs_csv = nullptr;
 	for (int i = 2; i < argc; i++) {
 		std::string arg = argv[i];
@@ -994,6 +1025,8 @@ main(int argc, char **argv)
 		} else if (arg == "--blobs-csv" && i + 1 < argc) {
 			m1 = true;
 			blobs_csv = argv[++i];
+		} else if (arg == "--recorded-calibration" && i + 1 < argc) {
+			recorded_calibration = argv[++i];
 		} else if (arg == "--calibration" && i + 1 < argc) {
 			calibration = argv[++i];
 		}
@@ -1002,7 +1035,7 @@ main(int argc, char **argv)
 	try {
 		DatasetReader dataset(argv[1]);
 		if (calibration) {
-			override_calibration(dataset, calibration);
+			override_calibration(dataset, calibration, recorded_calibration);
 		}
 		int status = summarise(dataset);
 		if (geometry_prefix) {

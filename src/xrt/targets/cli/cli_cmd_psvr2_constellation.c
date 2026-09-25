@@ -16,6 +16,7 @@
 
 #include "constellation/t_constellation_tracker.h"
 #include "constellation/t_rift_blobwatch.h"
+#include "math/m_api.h"
 #include "os/os_time.h"
 #include "pssense/pssense_interface.h"
 #include "psvr2/psvr2_interface.h"
@@ -38,6 +39,35 @@ DEBUG_GET_ONCE_NUM_OPTION(psvr2_constellation_blob_pixel_threshold, "PSVR2_BLOB_
 DEBUG_GET_ONCE_NUM_OPTION(psvr2_constellation_blob_required_threshold, "PSVR2_BLOB_REQUIRED_THRESHOLD", 0xb4)
 DEBUG_GET_ONCE_NUM_OPTION(psvr2_constellation_blob_max_width, "PSVR2_BLOB_MAX_WIDTH", 50)
 DEBUG_GET_ONCE_NUM_OPTION(psvr2_constellation_capture_stride, "PSVR2_CONSTELLATION_CAPTURE_STRIDE", 1)
+/*
+ * Track in the world rather than relative to the headset: the camera mosaic's tracking origin becomes the PS VR2 head
+ * pose at each exposure, composed with the calibration's optional head_from_camera0_xrt (identity if absent). Without
+ * it every camera pose is fixed, so controller poses are head-relative and resting controllers "move" when the head does.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_constellation_world, "PSVR2_CONSTELLATION_WORLD", false)
+
+//! Tracking origin for the camera mosaic: the head pose at the requested time, times camera 0 in the head frame.
+struct head_tracking_origin
+{
+	struct t_constellation_tracker_tracking_source base;
+	struct xrt_device *head;
+	struct xrt_pose head_from_camera0;
+};
+
+static void
+head_tracking_origin_get(struct t_constellation_tracker_tracking_source *source,
+                         int64_t when_ns,
+                         struct xrt_space_relation *out_relation)
+{
+	struct head_tracking_origin *origin = (struct head_tracking_origin *)source;
+	struct xrt_space_relation head = XRT_SPACE_RELATION_ZERO;
+	if (xrt_device_get_tracked_pose(origin->head, XRT_INPUT_GENERIC_HEAD_POSE, when_ns, &head) != XRT_SUCCESS) {
+		*out_relation = (struct xrt_space_relation)XRT_SPACE_RELATION_ZERO;
+		return;
+	}
+	*out_relation = head;
+	math_pose_transform(&head.pose, &origin->head_from_camera0, &out_relation->pose);
+}
 
 
 #define CONSTELLATION_CAMERA_COUNT 4
@@ -259,7 +289,10 @@ load_camera(const cJSON *json, struct t_constellation_tracker_camera *out_camera
 }
 
 static bool
-load_calibration(const char *path, struct t_constellation_tracker_params *out_params)
+load_calibration(const char *path,
+                 struct t_constellation_tracker_params *out_params,
+                 struct xrt_pose *out_head_from_camera0,
+                 bool *out_have_head_from_camera0)
 {
 	char *contents = u_file_read_content_from_path(path, NULL);
 	if (contents == NULL) {
@@ -289,6 +322,9 @@ load_calibration(const char *path, struct t_constellation_tracker_params *out_pa
 			good = load_camera(camera, &out_params->mosaics[0].cameras[camera_index]);
 		}
 	}
+	*out_head_from_camera0 = (struct xrt_pose)XRT_POSE_IDENTITY;
+	*out_have_head_from_camera0 =
+	    good && u_json_get_pose(u_json_get(root, "head_from_camera0_xrt"), out_head_from_camera0);
 	cJSON_Delete(root);
 	if (!good) {
 		fprintf(stderr, "Calibration is not a valid four-camera provisional mode-4 artifact.\n");
@@ -341,7 +377,9 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	}
 
 	struct t_constellation_tracker_params params = {0};
-	if (!load_calibration(argv[2], &params)) {
+	struct head_tracking_origin head_origin = {.base.get_tracked_pose = head_tracking_origin_get};
+	bool have_head_from_camera0 = false;
+	if (!load_calibration(argv[2], &params, &head_origin.head_from_camera0, &have_head_from_camera0)) {
 		return EXIT_FAILURE;
 	}
 	fprintf(stderr, "WARNING: using a provisional calibration for an opt-in diagnostic only.\n");
@@ -374,6 +412,18 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 		fprintf(stderr, "Need a PS VR2 in camera mode 4 and at least one connected Sense controller.\n");
 		destroy_system(&xi, &xsys, &xsysd, &xso);
 		return EXIT_FAILURE;
+	}
+
+	if (debug_get_bool_option_psvr2_constellation_world()) {
+		head_origin.head = head;
+		params.mosaics[0].tracking_origin = &head_origin.base;
+		const struct xrt_pose *x = &head_origin.head_from_camera0;
+		fprintf(stderr,
+		        "World-frame tracking: cameras follow the head pose; head_from_camera0 %s: position %.4f %.4f %.4f "
+		        "orientation %.5f %.5f %.5f %.5f\n",
+		        have_head_from_camera0 ? "from the calibration" : "absent, identity (lever-arm error until calibrated)",
+		        x->position.x, x->position.y, x->position.z, x->orientation.x, x->orientation.y, x->orientation.z,
+		        x->orientation.w);
 	}
 
 	struct xrt_frame_context tracking_xfctx = {0};
