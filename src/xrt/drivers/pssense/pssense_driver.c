@@ -120,6 +120,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_gyro_bias_auto, "PSSENSE_GYRO_BIAS_AUTO", fal
  * from interpolated optical poses and orientation from the IMU fusion's own world.
  */
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_filter, "PSSENSE_FILTER", false)
+/*
+ * On shutdown, send LED_ALL_OFF for ~150 ms before closing, instead of stopping mid-schedule. The always-lit fault has
+ * been seen "at the end" of a session (26 Sep, left, 004811), and two of the right's failed hinted scans came in the
+ * first session after one that ended without a power cycle.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_leds_off_on_exit, "PSSENSE_LEDS_OFF_ON_EXIT", false)
 
 //! Stillness statistics time constant, and how long the controller must be still before its mean gyro is the bias.
 #define PSSENSE_GYRO_BIAS_TAU_S 0.25
@@ -442,6 +448,10 @@ struct pssense_device
 		uint64_t vibration_end_timestamp_ns;
 
 		bool send_trigger_feedback;
+
+		//! PSSENSE_LEDS_OFF_ON_EXIT: shutting down; send LED_ALL_OFF (latched with exit_led_sequence) until closed.
+		bool exiting;
+		uint8_t exit_led_sequence;
 		enum pssense_adaptive_trigger_mode trigger_feedback_mode;
 	} output;
 	struct
@@ -1004,7 +1014,11 @@ pssense_set_output_report_settings_locked(struct pssense_device *pssense,
 	}
 
 	// Give it some time to settle
-	if (pssense->tracking.received_frames > 10) {
+	if (pssense->output.exiting) {
+		settings->led_settings = pssense->tracking.led_settings;
+		settings->led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
+		settings->led_settings.sequence_number = pssense->output.exit_led_sequence;
+	} else if (pssense->tracking.received_frames > 10) {
 		settings->led_settings = pssense->tracking.led_settings;
 
 #if 0
@@ -1505,6 +1519,17 @@ static void
 pssense_node_destroy(struct xrt_frame_node *node)
 {
 	struct pssense_device *pssense = from_node(node);
+
+	if (debug_get_bool_option_pssense_leds_off_on_exit() && pssense->hid != NULL) {
+		// Let the controller thread send LED_ALL_OFF (a new sequence number, so it latches) for a while first.
+		os_thread_helper_lock(&pssense->controller_thread);
+		pssense->output.exit_led_sequence = (uint8_t)(pssense->tracking.led_settings.sequence_number + 1);
+		pssense->output.exiting = true;
+		os_thread_helper_unlock(&pssense->controller_thread);
+		os_nanosleep(150 * U_TIME_1MS_IN_NS);
+		PSSENSE_INFO(pssense, "LEDS_OFF_ON_EXIT side=%c sent LED_ALL_OFF for 150 ms before closing",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R');
+	}
 
 	// Destroy the controller thread
 	os_thread_helper_destroy(&pssense->controller_thread);
