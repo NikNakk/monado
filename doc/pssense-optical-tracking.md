@@ -1062,6 +1062,12 @@ world frame). No fault.
   successful 004424 scan the same steps were lit 8/8. Twice the full scan that followed put the right into the
   always-lit fault (at wide steps 3 and 2). The right's hinted scan succeeded in the first run after each power cycle
   (234101, 004424), and in 234624.
+- **Both controllers stuck at once, for the first time:** the user saw the left's status LED off at the end of 004811.
+  Its log is ordinary to the last line (locked, 17 probes, normal commands), and the detector only looks during scans,
+  so it stuck in the last moments, or at or after shutdown. At shutdown the driver stops its thread and closes the HID
+  device with the controller mid-schedule. `PSSENSE_LEDS_OFF_ON_EXIT=1` sends `LED_ALL_OFF` (a new sequence number, so
+  it latches) for ~150 ms first, to test whether that matters. A controller left stuck, or half-broken, by one session's
+  end may also explain the next session's odd hinted scan.
 - Mitigation (strict mode, `hint_retries = 1`): a failed hinted scan is retried once, after a 1 s dark pause, before
   the full scan. Whether that avoids the fault is untested.
 
