@@ -126,6 +126,27 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_filter, "PSSENSE_FILTER", false)
  * first session after one that ended without a power cycle.
  */
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_leds_off_on_exit, "PSSENSE_LEDS_OFF_ON_EXIT", false)
+/*
+ * Log every change in the input-report bytes the driver does not otherwise use (unknown fields, the controller's CRC
+ * failure count and padding), and a periodic count of changes per byte. For finding a controller-side flag when the
+ * always-lit fault starts.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_input_diag, "PSSENSE_INPUT_DIAG", false)
+/*
+ * Pulse width (period id) for the LED bootstrap's wide scan; default MAX_PERIOD_ID (42, 2.1 ms). All seven located
+ * onsets of the always-lit fault followed period-42 pulses within 1.5 s; PSVR2Toolkit's own latency calibration never
+ * uses more than 32 (1.6 ms).
+ */
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_wide_period_id, "PSSENSE_LED_BOOTSTRAP_WIDE_PERIOD_ID", -1)
+
+/*
+ * Stress test for the always-lit fault: once a controller has been locked this many seconds, and no other controller
+ * holds the scan token, rescan it from scratch (a full scan unless PSSENSE_LED_BOOTSTRAP_HINT_US is set). 0 = off.
+ */
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_stress_rescan_s, "PSSENSE_LED_BOOTSTRAP_STRESS_RESCAN_S", 0)
+
+//! Unused input-report bytes watched by PSSENSE_INPUT_DIAG.
+#define PSSENSE_INPUT_DIAG_BYTES 24
 
 //! Stillness statistics time constant, and how long the controller must be still before its mean gyro is the bias.
 #define PSSENSE_GYRO_BIAS_TAU_S 0.25
@@ -368,6 +389,17 @@ struct pssense_device
 
 		//! Online gyro bias (PSSENSE_GYRO_BIAS_AUTO): exponential statistics of the factory-corrected IMU.
 		struct pssense_gyro_bias gyro_bias;
+
+		//! PSSENSE_INPUT_DIAG: last value and change count of each watched byte, and when the summary last printed.
+		//! PSSENSE_LED_BOOTSTRAP_STRESS_RESCAN_S: when the current lock began (0 when not locked).
+		timepoint_ns stress_locked_since_ns;
+		uint32_t stress_rescans;
+
+		bool input_diag;
+		bool input_diag_have;
+		uint8_t input_diag_last[PSSENSE_INPUT_DIAG_BYTES];
+		uint32_t input_diag_changes[PSSENSE_INPUT_DIAG_BYTES];
+		timepoint_ns input_diag_summary_ns;
 
 		//! PSSENSE_FILTER: IMU + optical EKF; NULL when off. Locked by controller_thread.
 		struct t_imu_optical_filter *filter;
@@ -924,6 +956,66 @@ pssense_handle_packet(struct pssense_device *pssense,
 	return 0;
 }
 
+
+/*!
+ * PSSENSE_INPUT_DIAG: watch the input-report bytes nothing else reads. Bytes that change at most 20 times are logged on
+ * each change (flags, states); busier ones (counters) only appear in the 10 s summary of change counts.
+ */
+static void
+pssense_input_diag(struct pssense_device *pssense,
+                   timepoint_ns recv_time_ns,
+                   const struct pssense_bluetooth_input_report *report)
+{
+	static const char *const names[PSSENSE_INPUT_DIAG_BYTES] = {
+	    "unknown1[0]", "unknown1[1]", "unknown2",   "unknown3[0]", "unknown3[1]",       "unknown3[2]",
+	    "unknown3[3]", "unknown3[4]", "unknown3[5]", "unknown3[6]", "unknown4[0]",       "unknown4[1]",
+	    "unknown4[2]", "unknown4[3]", "unknown5",   "crc_failure_count", "padding[0]", "padding[1]",
+	    "padding[2]",  "padding[3]",  "padding[4]", "padding[5]",  "padding[6]",        "bt_header",
+	};
+	const struct pssense_input_report_common *c = &report->common;
+	uint8_t now[PSSENSE_INPUT_DIAG_BYTES] = {
+	    c->unknown1[0], c->unknown1[1], c->unknown2,   c->unknown3[0], c->unknown3[1], c->unknown3[2],
+	    c->unknown3[3], c->unknown3[4], c->unknown3[5], c->unknown3[6], c->unknown4[0], c->unknown4[1],
+	    c->unknown4[2], c->unknown4[3], report->unknown5, report->crc_failure_count, report->padding[0],
+	    report->padding[1], report->padding[2], report->padding[3], report->padding[4], report->padding[5],
+	    report->padding[6], report->bt_header,
+	};
+	const char side = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+	if (!pssense->tracking.input_diag_have) {
+		memcpy(pssense->tracking.input_diag_last, now, sizeof(now));
+		pssense->tracking.input_diag_have = true;
+		pssense->tracking.input_diag_summary_ns = recv_time_ns;
+		char buf[PSSENSE_INPUT_DIAG_BYTES * 3 + 1];
+		for (int i = 0; i < PSSENSE_INPUT_DIAG_BYTES; i++) {
+			snprintf(buf + i * 3, 4, "%02x ", now[i]);
+		}
+		PSSENSE_INFO(pssense, "INPUT_DIAG side=%c event=initial host_ns=%" PRIi64 " bytes=%s", side, recv_time_ns, buf);
+		return;
+	}
+	for (int i = 0; i < PSSENSE_INPUT_DIAG_BYTES; i++) {
+		if (now[i] == pssense->tracking.input_diag_last[i]) {
+			continue;
+		}
+		if (++pssense->tracking.input_diag_changes[i] <= 20) {
+			PSSENSE_INFO(pssense, "INPUT_DIAG side=%c event=change host_ns=%" PRIi64 " field=%s %02x->%02x", side,
+			             recv_time_ns, names[i], pssense->tracking.input_diag_last[i], now[i]);
+		}
+		pssense->tracking.input_diag_last[i] = now[i];
+	}
+	if (recv_time_ns - pssense->tracking.input_diag_summary_ns >= (timepoint_ns)10 * U_TIME_1S_IN_NS) {
+		char buf[PSSENSE_INPUT_DIAG_BYTES * 12 + 1] = {0};
+		size_t used = 0;
+		for (int i = 0; i < PSSENSE_INPUT_DIAG_BYTES && used < sizeof(buf); i++) {
+			if (pssense->tracking.input_diag_changes[i] > 0) {
+				used += (size_t)snprintf(buf + used, sizeof(buf) - used, "%d:%u ", i,
+				                         pssense->tracking.input_diag_changes[i]);
+			}
+		}
+		PSSENSE_INFO(pssense, "INPUT_DIAG side=%c event=summary changes_by_byte=%s", side, used ? buf : "none");
+		pssense->tracking.input_diag_summary_ns = recv_time_ns;
+	}
+}
+
 static int
 pssense_handle_read(struct pssense_device *pssense)
 {
@@ -979,6 +1071,10 @@ pssense_handle_read(struct pssense_device *pssense)
 			PSSENSE_WARN(pssense, "CRC mismatch; skipping input. Expected %08X but got %08X", expected_crc,
 			             crc);
 			return -EINVAL;
+		}
+
+		if (pssense->tracking.input_diag) {
+			pssense_input_diag(pssense, recv_time_ns, &data);
 		}
 
 		return pssense_handle_packet(pssense, recv_time_ns, &data.common);
@@ -1622,6 +1718,25 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	    pssense_led_bootstrap_handoff_settled(pssense, exposure_timestamp_ns)) {
 		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
 			owner = me;
+			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
+		}
+	}
+
+	long stress_s = debug_get_num_option_pssense_led_bootstrap_stress_rescan_s();
+	if (stress_s > 0) {
+		if (b->state != T_LED_PHASE_BOOTSTRAP_LOCKED) {
+			pssense->tracking.stress_locked_since_ns = 0;
+		} else if (pssense->tracking.stress_locked_since_ns == 0) {
+			pssense->tracking.stress_locked_since_ns = exposure_timestamp_ns;
+		} else if (exposure_timestamp_ns - pssense->tracking.stress_locked_since_ns >=
+		               (timepoint_ns)stress_s * U_TIME_1S_IN_NS &&
+		           owner == 0 && !t_led_phase_bootstrap_is_probing(b) &&
+		           xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
+			owner = me;
+			pssense->tracking.stress_locked_since_ns = 0;
+			pssense->tracking.stress_rescans++;
+			PSSENSE_INFO(pssense, "LED_BOOTSTRAP side=%c event=stress_rescan count=%u",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', pssense->tracking.stress_rescans);
 			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
 		}
 	}
@@ -2646,6 +2761,7 @@ pssense_create(struct xrt_prober *xp,
 
 	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 	pssense->tracking.gyro_bias.enabled = debug_get_bool_option_pssense_gyro_bias_auto();
+	pssense->tracking.input_diag = debug_get_bool_option_pssense_input_diag();
 	if (debug_get_bool_option_pssense_filter()) {
 		struct t_imu_optical_filter_params filter_params;
 		t_imu_optical_filter_default_params(&filter_params);
@@ -2771,7 +2887,9 @@ pssense_create(struct xrt_prober *xp,
 		t_led_phase_bootstrap_default_options(&bootstrap_options);
 		bootstrap_options.log_level = pssense->log_level;
 		bootstrap_options.label = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
-		bootstrap_options.wide_blink_ns = PERIOD_ID_TO_DURATION_NS(MAX_PERIOD_ID);
+		long wide_period_id = debug_get_num_option_pssense_led_bootstrap_wide_period_id();
+		wide_period_id = wide_period_id > 0 ? CLAMP(wide_period_id, 1, MAX_PERIOD_ID) : MAX_PERIOD_ID;
+		bootstrap_options.wide_blink_ns = PERIOD_ID_TO_DURATION_NS(wide_period_id);
 		bootstrap_options.narrow_blink_ns = PERIOD_ID_TO_DURATION_NS(9);
 		long lock_period_id = debug_get_num_option_pssense_led_bootstrap_lock_period_id();
 		lock_period_id = CLAMP(lock_period_id, 1, MAX_PERIOD_ID);

@@ -1125,6 +1125,42 @@ would have caught this. With the fix, pushed poses: imu-capture L 3605 → 4259 
 filter-live L 1957 → 2030, R 3866 → 4222.
 The `PSSENSE_LEDS_OFF_ON_EXIT` shutdown ran on both sides.
 
+## The always-lit fault: what the logs and PSVR2Toolkit say (26 Sep)
+
+**Command stream at the 7 located onsets** (6 right, 1 left; from `PSSENSE_TIMING`, 1.5 s before each onset):
+
+- No 32-bit device-tick wrap nearby (uptimes 31–700 s; the wrap is at ~1432 s).
+- No link trouble: output-report gaps and input-report age were within the session's normal range.
+- The schedule lead was normal (47–61 ms), the sequence numbers were unremarkable, and the phase was always PRESCAN.
+- **Every onset followed `period_id` 42 (2.1 ms) pulses within 1.5 s**: five during wide scans and two at the first
+  narrow step straight after one. No hinted scan (period 9 then 20) has faulted in ~15 so far; the "hinted" sessions'
+  faults came after a fall-back to the full scan.
+
+**PSVR2Toolkit** (`projects/psvr2_openvr_driver_ex/driver_hooks/libpad_hooks.cpp`) hooks Sony's libpad, whose LED
+protocol is command-based: `SET_SYNC_PHASE`, `SET_LEDS_IMMEDIATE`, `ADJUST_FRAME_CYCLE`, `ADJUST_BASE_TIME`,
+`ADJUST_TIME_AND_CYCLE`, `SYSTEM_CONTROL`. Sony's driver steps through PRESCAN → BROAD → BG → STABLE, and outside
+PRESCAN the cycle position is an offset, not an absolute position. The toolkit's own latency calibration:
+
+- **Never uses more than period 32** (1.6 ms): PRESCAN and BROAD 32, BG 20, STABLE 9, "for better battery life".
+- Binary-searches each edge of the lit window, with inner and outer confirmations, and changes the offset at most every
+  4 optical frames, using one `SET_SYNC_PHASE` per change.
+- Starts with the LEDs off (`LED_ALL_OFF`), like our baseline, and afterwards resets Sony's tracking so its driver
+  resumes the phase sequence.
+
+Our driver stays in PRESCAN, re-latched with a new sequence number every frame, and our full scan's wide pass uses
+the protocol maximum, period 42.
+
+**Diagnostics and experiments (all opt-in):**
+
+- `PSSENSE_INPUT_DIAG=1` watches the 24 input-report bytes the driver ignores: `unknown1..5`, `crc_failure_count`,
+  `padding` and `bt_header`. It logs every change of a byte that changes at most 20 times (flags and states) and a 10 s
+  summary of change counts (counters). This is to find a controller-side flag or rejected-report count at the next
+  onset.
+- `PSSENSE_LED_BOOTSTRAP_WIDE_PERIOD_ID=N` sets the wide scan's pulse (default 42). At 32 the lit window is still 2 ms,
+  wider than the 1 ms wide step.
+- `PSSENSE_LED_BOOTSTRAP_STRESS_RESCAN_S=N` forces a full rescan once a controller has been locked N s and the scan
+  token is free. This gives several full scans per run, so fault rates for period 42 and 32 can be compared.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
