@@ -228,6 +228,22 @@ TEST_CASE("IMU optical filter rejects an outlier and re-initialises after a long
 	t_imu_optical_filter_destroy(&f);
 }
 
+TEST_CASE("IMU optical filter stops reporting a position soon after optical stops")
+{
+	t_imu_optical_filter *f = make_filter();
+	Sim sim;
+	sim.run(f, 4.0, always, nothing);
+	double start = sim.t_ns * 1e-9;
+	sim.run(f, 1.0, [&](double t) { return t < start; }, nothing);
+	xrt_space_relation rel;
+	REQUIRE(t_imu_optical_filter_get_relation(f, sim.t_ns, &rel));
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) == 0);
+	CHECK((rel.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0);
+	// Orientation is still good from the gyro alone after a second.
+	CHECK(sim.error(f).second * 180 / M_PI < 2.0);
+	t_imu_optical_filter_destroy(&f);
+}
+
 TEST_CASE("IMU optical filter predicts ahead from the latest IMU state")
 {
 	t_imu_optical_filter *f = make_filter();

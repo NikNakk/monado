@@ -200,6 +200,7 @@ t_imu_optical_filter_default_params(t_imu_optical_filter_params *params)
 	params->history_ns = 250'000'000;
 	params->max_prediction_ns = 100'000'000;
 	params->position_tracked_ns = 250'000'000;
+	params->position_valid_ns = 300'000'000;
 }
 
 extern "C" t_imu_optical_filter *
@@ -368,9 +369,12 @@ t_imu_optical_filter_get_relation(t_imu_optical_filter *f, int64_t timestamp_ns,
 	out->linear_velocity = {(float)v.x(), (float)v.y(), (float)v.z()};
 	out->angular_velocity = {(float)omega_world.x(), (float)omega_world.y(), (float)omega_world.z()};
 	int flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
-	            XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
-	            XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT;
-	if (timestamp_ns - f->last_accepted_ns <= f->params.position_tracked_ns) {
+	            XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT;
+	const int64_t since_optical = timestamp_ns - f->last_accepted_ns;
+	if (since_optical <= f->params.position_valid_ns) {
+		flags |= XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT;
+	}
+	if (since_optical <= f->params.position_tracked_ns) {
 		flags |= XRT_SPACE_RELATION_POSITION_TRACKED_BIT;
 	}
 	out->relation_flags = (xrt_space_relation_flags)flags;

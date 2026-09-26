@@ -1100,6 +1100,31 @@ world frame). No fault.
   last pose. It also reports filter-versus-optical on visible exposures, the still accelerometer rotated into the world
   (a gravity-axis check) and the learnt biases.
 
+**Offline, on `sessions/20260926-010135-imu-capture`** (the first recording with IMU samples). The Sense IMU arrives at
+only 66 Hz, one sample per Bluetooth report (~15 ms).
+
+- **Gravity check passes:** the ~1 g accelerometer, rotated into the world by a fresh optical orientation, reads
+  L (0.19, 9.65, −0.23) and R (−0.04, 9.59, −0.41). So the world is y-up and the IMU→LED rotation (50.27° about x) is
+  right for both sides. (A first check read R 39° off because it used orientations from before the controller was put
+  down out of view.)
+- **Tuning:** sweeping the noise densities (`FILTER_*` overrides in the replay) gives gyro 0.02 rad/s/√Hz and accel
+  0.3 m/s²/√Hz as defaults. The synthetic tests keep noise matching their 1 kHz simulation.
+- **Hidden 300 ms gaps** (filter vs holding the last pose, p50/p95): L 3.3/16 mm (6.6/218), 0.57/1.7° (2.0/43);
+  R 4.4/21 mm (59/150), 0.54/1.6° (9.6/40). With optical visible the filter is within ~1 mm p50 of the optical
+  poses.
+
+**First live run, `sessions/20260926-014505-filter-live` (`PSSENSE_FILTER=1`): tracking collapsed** (L 1 pose, R 234).
+After ~10 s, `tracked` stayed at 240 while `bootstrapped` and `unconfirmed` climbed together: every re-acquisition failed
+before its third confirming solve. Unconfirmed tracks are not pushed to the driver, so the filter got no updates. Its
+IMU-only dead-reckoned position was still reported as valid and drifted, and the joint tracker used it as the prior,
+so the tracking solves failed. The load also delayed LED scheduling from 25 to 41 ms. Fix: the filter reports position
+as valid only for 300 ms after an accepted optical pose (`position_valid_ns`); orientation stays valid. After that the
+tracker falls back on its own last solve, as before the filter. `constellation_replay --tracker-filter` now replays
+the tracker with the filter as the stand-in driver's prior (recorded IMU fused up to 30 ms past each exposure), which
+would have caught this. With the fix, pushed poses: imu-capture L 3605 → 4259 (+18%), R 1693 → 1973 (+17%);
+filter-live L 1957 → 2030, R 3866 → 4222.
+The `PSSENSE_LEDS_OFF_ON_EXIT` shutdown ran on both sides.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
