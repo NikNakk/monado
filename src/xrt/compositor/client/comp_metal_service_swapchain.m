@@ -268,10 +268,9 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 			        i,
 			        info->width,
 			        info->height,
-			        surface,
+			        (void *)surface,
 			        surface != NULL ? IOSurfaceGetWidth(surface) : 0,
 			        surface != NULL ? IOSurfaceGetHeight(surface) : 0);
-			[descriptor release];
 			metal_service_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_ALLOCATION;
 		}
@@ -285,15 +284,12 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 			        (unsigned)IOSurfaceGetID(surface),
 			        (__bridge void *)texture);
 			[texture release];
-			[descriptor release];
 			metal_service_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_ALLOCATION;
 		}
 
 		sc->base.images[i] = (__bridge void *)texture;
 	}
-
-	[descriptor release];
 
 	/*
 	 * The IOSurface stores BGRA bytes; the transfer function belongs to the
@@ -411,7 +407,6 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 		textures[i] = [link->device newSharedTextureWithDescriptor:descriptor];
 		if (textures[i] == nil) {
 			U_LOG_E("Metal service texture creation failed at image %u", i);
-			[descriptor release];
 			free(transport_images);
 			free(raw_textures);
 			release_texture_array(textures, xsccp.image_count);
