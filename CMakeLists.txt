@@ -456,7 +456,7 @@ option(XRT_FEATURE_OPENXR_INTERACTION_LOGITECH_MX_INK "Enable XR_LOGITECH_mx_ink
 # formats in IOSurface-backed textures.
 option(XRT_FEATURE_OPENXR_LAYER_DEPTH "Enable XR_KHR_composition_layer_depth" ON)
 option(XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS "Enable XR_KHR_composition_layer_color_scale_bias" ON)
-option(XRT_FEATURE_OPENXR_LAYER_CUBE "Enable XR_KHR_composition_layer_cube" OFF)
+option(XRT_FEATURE_OPENXR_LAYER_CUBE "Enable XR_KHR_composition_layer_cube" ON)
 option(XRT_FEATURE_OPENXR_LAYER_CYLINDER "Enable XR_KHR_composition_layer_cylinder" ON)
 option(XRT_FEATURE_OPENXR_LAYER_EQUIRECT2 "Enable XR_KHR_composition_layer_equirect2" ON)
 option(XRT_FEATURE_OPENXR_LAYER_EQUIRECT1 "Enable XR_KHR_composition_layer_equirect" OFF)
