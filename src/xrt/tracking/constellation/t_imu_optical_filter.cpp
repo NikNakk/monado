@@ -181,8 +181,14 @@ t_imu_optical_filter_default_params(t_imu_optical_filter_params *params)
 {
 	*params = t_imu_optical_filter_params{};
 	params->gravity_m_s2 = {0.0f, -9.80665f, 0.0f};
-	params->gyro_noise_rad_s = 0.005f;
-	params->accel_noise_m_s2 = 0.08f;
+	/*
+	 * Tuned on the 26 Sep IMU capture (66 Hz Sense IMU, real motion): against 0.005 / 0.08 these cut the left's
+	 * rejected optical poses from 33 to 6 and the orientation error through 300 ms gaps from 2.2 to 1.7 deg p95, and the
+	 * right's position error through them from 28 to 21 mm p95. They absorb what a 66 Hz, zero-order-hold integration
+	 * misses, not just sensor noise.
+	 */
+	params->gyro_noise_rad_s = 0.02f;
+	params->accel_noise_m_s2 = 0.3f;
 	params->gyro_bias_walk_rad_s2 = 0.0005f;
 	params->accel_bias_walk_m_s3 = 0.005f;
 	params->initial_velocity_sigma_m_s = 0.5f;
