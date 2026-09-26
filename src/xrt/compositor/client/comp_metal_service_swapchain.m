@@ -7,6 +7,7 @@
  */
 
 #import <Metal/Metal.h>
+#import <IOSurface/IOSurface.h>
 
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_gfx_metal.h"
@@ -81,6 +82,23 @@ metal_format_to_vk(MTLPixelFormat format)
 	case MTLPixelFormatBGRA8Unorm_sRGB: return 50;
 	case MTLPixelFormatBGR10A2Unorm: return 64;
 	default: return 0;
+	}
+}
+
+static bool
+metal_service_can_use_iosurface(const struct xrt_swapchain_create_info *info)
+{
+	if (info == NULL || info->array_size != 1 || info->face_count != 1 || info->mip_count != 1 ||
+	    info->sample_count != 1 || (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+		return false;
+	}
+
+	switch ((MTLPixelFormat)info->format) {
+	case MTLPixelFormatBGRA8Unorm:
+	case MTLPixelFormatBGRA8Unorm_sRGB:
+		return true;
+	default:
+		return false;
 	}
 }
 
@@ -202,6 +220,98 @@ metal_service_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 }
 
 static xrt_result_t
+metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *link,
+                                         const struct xrt_swapchain_create_info *info,
+                                         const struct xrt_swapchain_create_info *native_info,
+                                         struct xrt_swapchain **out_xsc)
+{
+	struct xrt_swapchain_native *xscn = NULL;
+	xrt_result_t xret = xrt_comp_native_create_swapchain(link->xcn, native_info, &xscn);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	if (xscn == NULL || xscn->base.image_count == 0 ||
+	    xscn->base.image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		xrt_swapchain_native_reference(&xscn, NULL);
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	MTLTextureDescriptor *descriptor =
+	    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)info->format
+	                                                      width:info->width
+	                                                     height:info->height
+	                                                  mipmapped:NO];
+	descriptor.usage = xrt_usage_to_metal(native_info->bits);
+
+	struct metal_service_swapchain *sc = calloc(1, sizeof(*sc));
+	if (sc == NULL) {
+		xrt_swapchain_native_reference(&xscn, NULL);
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	sc->base.base.destroy = metal_service_swapchain_destroy;
+	sc->base.base.acquire_image = metal_service_swapchain_acquire_image;
+	sc->base.base.wait_image = metal_service_swapchain_wait_image;
+	sc->base.base.barrier_image = metal_service_swapchain_barrier_image;
+	sc->base.base.release_image = metal_service_swapchain_release_image;
+	sc->base.base.reference.count = 1;
+	sc->base.base.image_count = xscn->base.image_count;
+	sc->xscn = xscn;
+	sc->command_queue = [link->command_queue retain];
+
+	for (uint32_t i = 0; i < xscn->base.image_count; i++) {
+		IOSurfaceRef surface = xscn->images[i].handle;
+		if (!xrt_graphics_buffer_is_valid(surface) ||
+		    IOSurfaceGetWidth(surface) != info->width ||
+		    IOSurfaceGetHeight(surface) != info->height) {
+			U_LOG_E("Metal service IOSurface image mismatch: image=%u expected=%ux%u surface=%p size=%zux%zu",
+			        i,
+			        info->width,
+			        info->height,
+			        surface,
+			        surface != NULL ? IOSurfaceGetWidth(surface) : 0,
+			        surface != NULL ? IOSurfaceGetHeight(surface) : 0);
+			[descriptor release];
+			metal_service_swapchain_destroy(&sc->base.base);
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		id<MTLTexture> texture = [link->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
+		if (texture == nil || texture.iosurface == nil ||
+		    texture.width != info->width || texture.height != info->height ||
+		    texture.pixelFormat != (MTLPixelFormat)info->format) {
+			U_LOG_E("Metal service IOSurface texture creation failed: image=%u surface=%u texture=%p",
+			        i,
+			        (unsigned)IOSurfaceGetID(surface),
+			        (__bridge void *)texture);
+			[texture release];
+			[descriptor release];
+			metal_service_swapchain_destroy(&sc->base.base);
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		sc->base.images[i] = (__bridge void *)texture;
+	}
+
+	[descriptor release];
+
+	/*
+	 * The IOSurface stores BGRA bytes; the transfer function belongs to the
+	 * Vulkan/Metal image format. For BGRA8Unorm_sRGB both the service VkImage
+	 * and client MTLTexture retain their sRGB formats, so no reinterpretation
+	 * or mutable-format view is required here.
+	 */
+	U_LOG_D("Metal service swapchain backing=iosurface images=%u size=%ux%u format=%lld",
+	        xscn->base.image_count,
+	        info->width,
+	        info->height,
+	        (long long)info->format);
+
+	*out_xsc = &sc->base.base;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 metal_service_create_swapchain(struct xrt_compositor *xc,
                                const struct xrt_swapchain_create_info *info,
                                struct xrt_swapchain **out_xsc)
@@ -230,6 +340,27 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 		return xret;
 	}
 
+	struct xrt_swapchain_create_info native_info = *info;
+	native_info.format = vk_format;
+	native_info.bits |= xsccp.extra_bits;
+
+	/*
+	 * Prefer the ordinary native compositor path for simple 2D BGRA images.
+	 * On macOS that path allocates IOSurface-backed VkImages in monado-service
+	 * and the existing Monado IPC graphics-buffer transport returns retained
+	 * IOSurfaceRefs to this client. Re-wrap those surfaces on the application's
+	 * MTLDevice, avoiding the Metal shared-handle/XPC texture broker entirely.
+	 */
+	if (metal_service_can_use_iosurface(info)) {
+		xret = metal_service_create_iosurface_swapchain(link, info, &native_info, out_xsc);
+		if (xret == XRT_SUCCESS) {
+			return XRT_SUCCESS;
+		}
+
+		U_LOG_D("Metal service IOSurface backing unavailable (result=%d); falling back to shared Metal handles",
+		        xret);
+	}
+
 	/*
 	 * Strict service-GPU reuse tracking can keep separate generations alive in
 	 * the multi-compositor's progress, scheduled, and delivered slots. With the
@@ -244,7 +375,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) == 0 && xsccp.image_count < 4) {
 		uint32_t original_image_count = xsccp.image_count;
 		xsccp.image_count = 4;
-		U_LOG_I("Metal service swapchain image depth increased from %u to %u to preserve a producer spare across multi-compositor staging",
+		U_LOG_D("Metal service shared-handle swapchain image depth increased from %u to %u",
 		        original_image_count,
 		        xsccp.image_count);
 	}
@@ -252,10 +383,6 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	if (xsccp.image_count == 0 || xsccp.image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return XRT_ERROR_ALLOCATION;
 	}
-
-	struct xrt_swapchain_create_info native_info = *info;
-	native_info.format = vk_format;
-	native_info.bits |= xsccp.extra_bits;
 
 	MTLTextureDescriptor *descriptor = [[MTLTextureDescriptor alloc] init];
 	descriptor.textureType = info->array_size > 1 ? MTLTextureType2DArray : MTLTextureType2D;
@@ -305,7 +432,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 
 	ipc_metal_xpc_make_token_images(token, xsccp.image_count, transport_images);
 
-	U_LOG_I("Metal service swapchain: published %u Metal-owned texture(s) token=0x%016llx size=%ux%u array_size=%u",
+	U_LOG_D("Metal service swapchain backing=shared-handle published=%u token=0x%016llx size=%ux%u array_size=%u",
 	        xsccp.image_count,
 	        (unsigned long long)token,
 	        info->width,
@@ -359,7 +486,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	}
 	free(textures);
 
-	U_LOG_I("Metal service swapchain active: client Metal textures are shared with the Vulkan compositor service (array_size=%u images=%u)",
+	U_LOG_D("Metal service swapchain backing=shared-handle active array_size=%u images=%u",
 	        info->array_size,
 	        xsccp.image_count);
 
