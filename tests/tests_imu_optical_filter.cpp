@@ -141,6 +141,9 @@ make_filter()
 {
 	t_imu_optical_filter_params params;
 	t_imu_optical_filter_default_params(&params);
+	// Match the simulated 1 kHz IMU; the defaults are tuned for the real 66 Hz Sense IMU.
+	params.gyro_noise_rad_s = 0.005f;
+	params.accel_noise_m_s2 = 0.08f;
 	return t_imu_optical_filter_create(&params);
 }
 

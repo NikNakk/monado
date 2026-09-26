@@ -1062,6 +1062,19 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 		}
 		t_imu_optical_filter_params params;
 		t_imu_optical_filter_default_params(&params);
+		// Tuning overrides for offline sweeps (tool only).
+		auto env = [](const char *name, float &value) {
+			if (const char *v = std::getenv(name)) {
+				value = std::strtof(v, nullptr);
+			}
+		};
+		env("FILTER_GYRO_NOISE", params.gyro_noise_rad_s);
+		env("FILTER_ACCEL_NOISE", params.accel_noise_m_s2);
+		env("FILTER_GYRO_BIAS_WALK", params.gyro_bias_walk_rad_s2);
+		env("FILTER_ACCEL_BIAS_WALK", params.accel_bias_walk_m_s3);
+		env("FILTER_GATE", params.gate_chi2);
+		float pose_sigma_scale = 1.0f;
+		env("FILTER_POSE_SIGMA_SCALE", pose_sigma_scale);
 		t_imu_optical_filter *filter = t_imu_optical_filter_create(&params);
 
 		Stats hidden_filter_mm, hidden_filter_deg, hidden_hold_mm, hidden_hold_deg, visible_diff_mm;
@@ -1070,6 +1083,7 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 		size_t next_eval = 0;           // next exposure to evaluate (at its exposure time, as live)
 		const int64_t t0 = list.front().t;
 		xrt_pose last_delivered = list.front().pose;
+		int64_t last_delivered_t = 0;
 		bool have_delivered = false;
 		auto hidden = [&](int64_t t) { return ((t - t0) % kGapPeriodNs) >= kGapPeriodNs - kGapLengthNs; };
 
@@ -1083,7 +1097,11 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 
 			// Gravity check while nearly still: the accelerometer rotated into the world by the optical orientation.
 			double gyro_len = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
-			if (have_delivered && gyro_len < 0.05) {
+			// Only with a fresh optical orientation (exposed within the delivery delay plus 20 ms; a stale one from before the controller was
+			// put down out of view says nothing), slow rotation and ~1 g (little linear acceleration).
+			double accel_len = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+			if (have_delivered && gyro_len < 0.5 && std::fabs(accel_len - 9.80665) < 0.4 &&
+			    s->timestamp_ns - last_delivered_t < kOpticalDelayNs + 20'000'000) {
 				xrt_vec3 a_world;
 				math_quat_rotate_vec3(&last_delivered.orientation, &a_led, &a_world);
 				gravity_x.add(a_world.x);
@@ -1097,9 +1115,10 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 				if (hidden(tp.t)) {
 					continue;
 				}
-				float scale = std::max(1.0f, tp.rms_px / 0.5f);
+				float scale = std::max(1.0f, tp.rms_px / 0.5f) * pose_sigma_scale;
 				t_imu_optical_filter_push_pose(filter, tp.t, &tp.pose, 0.002f * scale, 0.008f * scale);
 				last_delivered = tp.pose;
+				last_delivered_t = tp.t;
 				have_delivered = true;
 			}
 			// Evaluate exposures as the live driver would when asked for them: at the exposure time itself, once
@@ -1147,7 +1166,7 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 		            hidden_hold_mm.pct(0.95), hidden_hold_deg.pct(0.5), hidden_hold_deg.pct(0.95));
 		std::printf("  visible exposures: filter vs optical mm p50 %.1f p95 %.1f\n", visible_diff_mm.pct(0.5),
 		            visible_diff_mm.pct(0.95));
-		std::printf("  still accelerometer in the world (expect ~0, +9.8, 0): %.2f %.2f %.2f (%zu samples)\n",
+		std::printf("  ~1 g accelerometer in the world (expect ~0, +9.8, 0): %.2f %.2f %.2f (%zu samples)\n",
 		            gravity_x.pct(0.5), gravity_y.pct(0.5), gravity_z.pct(0.5), gravity_x.values.size());
 		std::printf("  learnt gyro bias deg/s %.2f %.2f %.2f, accel bias m/s^2 %.3f %.3f %.3f\n",
 		            st.gyro_bias_rad_s.x * 180 / M_PI, st.gyro_bias_rad_s.y * 180 / M_PI,
