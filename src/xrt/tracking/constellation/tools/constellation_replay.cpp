@@ -786,6 +786,10 @@ struct FakeDevice
 	Stats rms_px;
 	std::vector<std::pair<int64_t, xrt_vec3>> positions;
 	FILE *csv{nullptr};
+	//! --tracker-filter: the driver's IMU + optical EKF provides the prior instead.
+	t_imu_optical_filter *filter{nullptr};
+	std::vector<const xrt_imu_sample *> imu;
+	size_t next_imu{0};
 };
 
 FakeDevice *
@@ -811,6 +815,11 @@ fake_device_push(t_constellation_tracker_device *device, t_constellation_tracker
 	}
 	fake->last = *sample;
 	fake->have_last = true;
+	if (fake->filter != nullptr) {
+		float scale = std::max(1.0f, (float)sample->metrics.reprojection_error / 0.5f);
+		t_imu_optical_filter_push_pose(fake->filter, sample->timestamp_ns, &sample->pose, 0.002f * scale,
+		                               0.008f * scale);
+	}
 	return true;
 }
 
@@ -823,6 +832,9 @@ fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 	 */
 	FakeDevice *fake = fake_device_of_source(source);
 	*out = XRT_SPACE_RELATION_ZERO;
+	if (fake->filter != nullptr && t_imu_optical_filter_get_relation(fake->filter, when_ns, out)) {
+		return;
+	}
 	auto it = std::lower_bound(fake->recorded.begin(), fake->recorded.end(), when_ns,
 	                           [](const auto &p, int64_t t) { return p.first < t; });
 	if (it != fake->recorded.end() && std::llabs(it->first - when_ns) < 5'000'000 &&
@@ -838,7 +850,7 @@ fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 }
 
 int
-replay_tracker(const DatasetReader &dataset, const char *csv_path)
+replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filter, double imu_angle_deg)
 {
 	FILE *csv = csv_path ? std::fopen(csv_path, "w") : nullptr;
 	if (csv) {
@@ -936,6 +948,16 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path)
 		dparams.led_model.led_count = fake->leds.size();
 		dparams.led_model.compute_led_visibility = nullptr;
 		dparams.tracking_source = &fake->source;
+		if (use_filter) {
+			t_imu_optical_filter_params fparams;
+			t_imu_optical_filter_default_params(&fparams);
+			fake->filter = t_imu_optical_filter_create(&fparams);
+			for (const DatasetImuSample &s : dataset.imu_samples) {
+				if (s.device_id == device.id) {
+					fake->imu.push_back(&s.sample);
+				}
+			}
+		}
 		t_constellation_tracker_add_device(tracker, &dparams, &fake->base, &fake->id);
 		fakes.push_back(std::move(fake));
 	}
@@ -951,9 +973,24 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path)
 	});
 	auto start = std::chrono::steady_clock::now();
 	std::vector<t_blob> blobs;
+	const double half = imu_angle_deg * M_PI / 180.0 * 0.5;
+	const xrt_quat imu_to_led{(float)-std::sin(half), 0.0f, 0.0f, (float)std::cos(half)};
 	for (const CameraSample *sample : order) {
 		if (sample->camera_index >= camera_count) {
 			continue;
+		}
+		// Live, the joint worker solves an exposure ~30 ms after it, with the IMU up to then already fused.
+		for (auto &fake : fakes) {
+			while (fake->filter != nullptr && fake->next_imu < fake->imu.size() &&
+			       fake->imu[fake->next_imu]->timestamp_ns <= sample->timestamp_ns + 30'000'000) {
+				const xrt_imu_sample *s = fake->imu[fake->next_imu++];
+				xrt_vec3 a{(float)s->accel_m_s2.x, (float)s->accel_m_s2.y, (float)s->accel_m_s2.z};
+				xrt_vec3 g{(float)s->gyro_rad_secs.x, (float)s->gyro_rad_secs.y, (float)s->gyro_rad_secs.z};
+				xrt_vec3 a_led, g_led;
+				math_quat_rotate_vec3(&imu_to_led, &a, &a_led);
+				math_quat_rotate_vec3(&imu_to_led, &g, &g_led);
+				t_imu_optical_filter_push_imu(fake->filter, s->timestamp_ns, &a_led, &g_led);
+			}
 		}
 		blobs.assign(sample->blobs, sample->blobs + sample->blob_count);
 		for (t_blob &b : blobs) {
@@ -972,6 +1009,9 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path)
 	double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 
 	xrt_frame_context_destroy_nodes(&xfctx);
+	for (auto &fake : fakes) {
+		t_imu_optical_filter_destroy(&fake->filter);
+	}
 	if (csv) {
 		std::fclose(csv);
 	}
@@ -1191,6 +1231,7 @@ main(int argc, char **argv)
 	}
 	bool m1 = false;
 	bool tracker = false;
+	bool tracker_filter = false;
 	const char *tracker_csv = nullptr;
 	const char *tracking_csv = nullptr;
 	const char *geometry_prefix = nullptr;
@@ -1207,6 +1248,9 @@ main(int argc, char **argv)
 		std::string arg = argv[i];
 		if (arg == "--m1") {
 			m1 = true;
+		} else if (arg == "--tracker-filter") {
+			tracker = true;
+			tracker_filter = true;
 		} else if (arg == "--tracker") {
 			tracker = true;
 		} else if (arg == "--filter-eval" && i + 1 < argc) {
@@ -1303,7 +1347,7 @@ main(int argc, char **argv)
 			status = replay_m1(dataset, csv, seed_recorded, blobs_csv) != 0 ? 1 : status;
 		}
 		if (tracker) {
-			status = replay_tracker(dataset, tracker_csv) != 0 ? 1 : status;
+			status = replay_tracker(dataset, tracker_csv, tracker_filter, imu_angle_deg) != 0 ? 1 : status;
 		}
 		return status;
 	} catch (const std::exception &e) {

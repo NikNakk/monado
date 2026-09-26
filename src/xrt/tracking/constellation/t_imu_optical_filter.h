@@ -57,8 +57,14 @@ struct t_imu_optical_filter_params
 	//! How far back optical poses may arrive (history kept), and the longest forward prediction.
 	int64_t history_ns;
 	int64_t max_prediction_ns;
-	//! Position is reported as tracked until this long after the last accepted optical pose.
+	//! Position is reported as tracked until this long after the last accepted optical pose...
 	int64_t position_tracked_ns;
+	/*!
+	 * ...and as valid at all only until this long after it; orientation stays valid. An IMU-only position drifts
+	 * fast, and on 26 Sep (014505) a stale one used as the joint tracker's prior stopped every re-acquired track from
+	 * confirming (unconfirmed tracks do not reach the filter): 1 left pose in 90 s.
+	 */
+	int64_t position_valid_ns;
 };
 
 enum t_imu_optical_filter_update_result
