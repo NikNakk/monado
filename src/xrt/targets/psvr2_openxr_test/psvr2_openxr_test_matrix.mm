@@ -139,6 +139,14 @@ render_views(application &app, XrTime predicted_display_time)
 		check_xr(app.xr.wait_swapchain_image(app.swapchains[i].handle, &wait_info), "xrWaitSwapchainImage");
 	}
 
+	float foveation_yaw_deg = 0.0f;
+	float foveation_pitch_deg = 0.0f;
+	if (app.gaze_foveation &&
+	    !locate_gaze_relative_to_view(app, predicted_display_time, &foveation_yaw_deg, &foveation_pitch_deg)) {
+		foveation_yaw_deg = 0.0f;
+		foveation_pitch_deg = 0.0f;
+	}
+
 	id<MTLCommandBuffer> command_buffer = [app.command_queue commandBuffer];
 	if (command_buffer == nil) {
 		fatal("could not allocate Metal command buffer");
@@ -154,14 +162,24 @@ render_views(application &app, XrTime predicted_display_time)
 			fatal("OpenXR returned a nil Metal swapchain texture");
 		}
 
+		if (app.gaze_foveation) {
+			(void)update_gaze_foveation_map(
+			    app, i, predicted_display_time, foveation_yaw_deg, foveation_pitch_deg);
+		}
+
 		MTLRenderPassDescriptor *render_pass = [MTLRenderPassDescriptor renderPassDescriptor];
-		render_pass.colorAttachments[0].texture = color_texture;
+		render_pass.colorAttachments[0].texture =
+		    app.gaze_foveation ? swapchain.foveation_color_texture : color_texture;
 		render_pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 		render_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
 		render_pass.colorAttachments[0].clearColor =
 		    app.submit_passthrough ? MTLClearColorMake(0.0, 0.0, 0.0, 0.0)
 		                           : MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
-		render_pass.depthAttachment.texture = swapchain.depth_texture;
+		if (app.gaze_foveation) {
+			render_pass.rasterizationRateMap = swapchain.foveation_rate_map;
+		}
+		render_pass.depthAttachment.texture =
+		    app.gaze_foveation ? swapchain.foveation_depth_texture : swapchain.depth_texture;
 		render_pass.depthAttachment.loadAction = MTLLoadActionClear;
 		render_pass.depthAttachment.storeAction = MTLStoreActionDontCare;
 		render_pass.depthAttachment.clearDepth = 1.0;
@@ -185,6 +203,9 @@ render_views(application &app, XrTime predicted_display_time)
 		            vertexCount:sizeof(k_cube_vertices) / sizeof(k_cube_vertices[0])
 		          instanceCount:app.frame_instances.size()];
 		[encoder endEncoding];
+		if (app.gaze_foveation) {
+			encode_gaze_foveation_resolve(app, swapchain, command_buffer, color_texture);
+		}
 	}
 	[command_buffer commit];
 
@@ -272,6 +293,7 @@ run(int argc, char **argv)
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool gaze_calibrate = false;
+	bool gaze_foveation = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
@@ -287,16 +309,20 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--gaze-calibrate") == 0) {
 			test_gaze = true;
 			gaze_calibrate = true;
+		} else if (strcmp(argv[i], "--gaze-foveation") == 0) {
+			test_gaze = true;
+			gaze_foveation = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate]\n"
+			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			        "  --passthrough-only submits only XR_FB_passthrough.\n"
 			        "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			        "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
+			        "  --gaze-foveation renders through gaze-driven Metal variable rasterization rate maps.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
 			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
 			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
@@ -312,8 +338,12 @@ run(int argc, char **argv)
 	app.submit_depth_layer = submit_depth_layer;
 	app.submit_passthrough = submit_passthrough;
 	app.passthrough_only = passthrough_only;
+	if (gaze_foveation && submit_depth_layer) {
+		fatal("--gaze-foveation cannot currently be combined with --depth-layer");
+	}
 	app.test_gaze = test_gaze;
 	app.gaze_calibrate = gaze_calibrate;
+	app.gaze_foveation = gaze_foveation;
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
