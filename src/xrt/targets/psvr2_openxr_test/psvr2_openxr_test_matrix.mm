@@ -387,6 +387,9 @@ run(int argc, char **argv)
 	if (gaze_foveation && submit_depth_layer) {
 		fatal("--gaze-foveation cannot currently be combined with --depth-layer");
 	}
+	if (gaze_foveation_fused && submit_passthrough) {
+		fatal("--gaze-foveation-fused currently requires a single projection layer and cannot be combined with passthrough");
+	}
 	app.test_gaze = test_gaze;
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
