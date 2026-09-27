@@ -8,6 +8,7 @@
 
 #import <Metal/Metal.h>
 #import <IOSurface/IOSurface.h>
+#import <CoreVideo/CoreVideo.h>
 
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_gfx_metal.h"
@@ -263,14 +264,16 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 		IOSurfaceRef surface = xscn->images[i].handle;
 		if (!xrt_graphics_buffer_is_valid(surface) ||
 		    IOSurfaceGetWidth(surface) != info->width ||
-		    IOSurfaceGetHeight(surface) != info->height) {
-			U_LOG_E("Metal service IOSurface image mismatch: image=%u expected=%ux%u surface=%p size=%zux%zu",
+		    IOSurfaceGetHeight(surface) != info->height ||
+		    IOSurfaceGetPixelFormat(surface) != kCVPixelFormatType_32BGRA) {
+			U_LOG_E("Metal service IOSurface image mismatch: image=%u expected=%ux%u BGRA surface=%p size=%zux%zu cv_format=0x%08x",
 			        i,
 			        info->width,
 			        info->height,
 			        (void *)surface,
 			        surface != NULL ? IOSurfaceGetWidth(surface) : 0,
-			        surface != NULL ? IOSurfaceGetHeight(surface) : 0);
+			        surface != NULL ? IOSurfaceGetHeight(surface) : 0,
+			        surface != NULL ? (unsigned)IOSurfaceGetPixelFormat(surface) : 0);
 			metal_service_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_ALLOCATION;
 		}
@@ -297,11 +300,12 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	 * and client MTLTexture retain their sRGB formats, so no reinterpretation
 	 * or mutable-format view is required here.
 	 */
-	U_LOG_D("Metal service swapchain backing=iosurface images=%u size=%ux%u format=%lld",
+	U_LOG_D("Metal service swapchain backing=iosurface images=%u size=%ux%u metal_format=%lld cv_format=0x%08x",
 	        xscn->base.image_count,
 	        info->width,
 	        info->height,
-	        (long long)info->format);
+	        (long long)info->format,
+	        (unsigned)kCVPixelFormatType_32BGRA);
 
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
