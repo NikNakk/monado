@@ -17,6 +17,21 @@
 #include "psvr2.h"
 
 
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_yaw_offset_deg, "PSVR2_GAZE_YAW_OFFSET_DEG", 0.0f)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_pitch_offset_deg, "PSVR2_GAZE_PITCH_OFFSET_DEG", 0.0f)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_yaw_gain, "PSVR2_GAZE_YAW_GAIN", 1.0f)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_pitch_gain, "PSVR2_GAZE_PITCH_GAIN", 1.0f)
+
+static float
+psvr2_gaze_gain(float value)
+{
+	if (!isfinite(value) || value < 0.5f || value > 1.5f) {
+		return 1.0f;
+	}
+	return value;
+}
+
+
 static void
 process_gaze_packet(struct psvr2_hmd *hmd, uint8_t *buf, size_t bytes_read)
 {
@@ -149,12 +164,21 @@ process_gaze_packet(struct psvr2_hmd *hmd, uint8_t *buf, size_t bytes_read)
 	hmd->et_data.unk_float_5_valid = gaze_state.packet_data.unk_bool_10;
 	hmd->et_data.unk_float_5 = __lef32_to_cpu(gaze_state.packet_data.unk_float_5);
 
-	// update the gaze direction
+	// Update the gaze direction. The Sony calibration blob gets us very
+	// close, but a small user-specific angular bias can remain. Keep a simple
+	// post-calibration correction here so OpenXR clients all see the same
+	// corrected gaze pose rather than baking offsets into individual apps.
 	float look_x_dir = atanf(hmd->et_data.combined.filtered_gaze_direction.x);
 	float look_y_dir = atanf(hmd->et_data.combined.filtered_gaze_direction.y);
 
+	const float deg_to_rad = (float)M_PI / 180.0f;
+	float yaw = -look_x_dir * psvr2_gaze_gain(debug_get_float_option_psvr2_gaze_yaw_gain()) +
+	            debug_get_float_option_psvr2_gaze_yaw_offset_deg() * deg_to_rad;
+	float pitch = look_y_dir * psvr2_gaze_gain(debug_get_float_option_psvr2_gaze_pitch_gain()) +
+	              debug_get_float_option_psvr2_gaze_pitch_offset_deg() * deg_to_rad;
+
 	struct xrt_space_relation gaze_relation = {0};
-	math_quat_from_euler_angles(&(struct xrt_vec3){.x = look_y_dir, .y = -look_x_dir},
+	math_quat_from_euler_angles(&(struct xrt_vec3){.x = pitch, .y = yaw},
 	                            &gaze_relation.pose.orientation);
 	gaze_relation.pose.position = (struct xrt_vec3){0};
 
