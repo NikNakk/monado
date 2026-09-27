@@ -36,6 +36,12 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	vec4 new_origin_in_source_view_scanout_begin[2];
 	vec4 new_origin_in_source_view_scanout_end[2];
 	uvec4 has_depth[2];
+
+	// 17 logical-cell boundary values packed into five vec4s per eye.
+	vec4 foveation_x[10];
+	vec4 foveation_y[10];
+	// x: enabled, y: boundary count.
+	uvec4 foveation[2];
 }ubo;
 
 
@@ -77,6 +83,43 @@ vec2 position_to_distortion_uv(ivec2 extent, uint ix, uint iy)
 
 	return dist_uv;
 }
+
+float foveation_boundary_x(uint iz, uint index)
+{
+	uint packed = iz * 5u + index / 4u;
+	return ubo.foveation_x[packed][index % 4u];
+}
+
+float foveation_boundary_y(uint iz, uint index)
+{
+	uint packed = iz * 5u + index / 4u;
+	return ubo.foveation_y[packed][index % 4u];
+}
+
+vec2 transform_uv_foveation(vec2 uv, uint iz)
+{
+	if (ubo.foveation[iz].x == 0u || ubo.foveation[iz].y != 17u) {
+		return uv;
+	}
+
+	// Preserve out-of-range UVs for the existing border-black sampler.
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+		return uv;
+	}
+
+	const float cells = 16.0;
+	vec2 scaled = min(uv * cells, vec2(cells - 1e-6));
+	uvec2 cell = uvec2(floor(scaled));
+	vec2 local = fract(scaled);
+
+	float x0 = foveation_boundary_x(iz, cell.x);
+	float x1 = foveation_boundary_x(iz, cell.x + 1u);
+	float y0 = foveation_boundary_y(iz, cell.y);
+	float y1 = foveation_boundary_y(iz, cell.y + 1u);
+
+	return vec2(mix(x0, x1, local.x), mix(y0, y1, local.y));
+}
+
 
 vec2 transform_uv_subimage(vec2 uv, uint iz)
 {
@@ -228,6 +271,13 @@ void main()
 		g_uv = transform_uv_subimage(g_uv, iz);
 		b_uv = transform_uv_subimage(b_uv, iz);
 	}
+
+	// Metal variable-rasterization-rate images store logical pixels in a
+	// compact physical region of the source texture. Fold that coordinate
+	// reconstruction into the distortion/timewarp sampling pass.
+	r_uv = transform_uv_foveation(r_uv, iz);
+	g_uv = transform_uv_foveation(g_uv, iz);
+	b_uv = transform_uv_foveation(b_uv, iz);
 
 	// Preserve source alpha instead of forcing the compositor target opaque.
 	vec4 colour = vec4(              //
