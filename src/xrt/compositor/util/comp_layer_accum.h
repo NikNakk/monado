@@ -170,8 +170,6 @@ comp_layer_accum_equirect1(struct comp_layer_accum *cla, struct xrt_swapchain *x
 xrt_result_t
 comp_layer_accum_equirect2(struct comp_layer_accum *cla, struct xrt_swapchain *xsc, const struct xrt_layer_data *data);
 
-xrt_result_t
-comp_layer_accum_passthrough(struct comp_layer_accum *cla, const struct xrt_layer_data *data);
 
 
 /*!
