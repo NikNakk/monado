@@ -335,6 +335,7 @@ run(int argc, char **argv)
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool gaze_foveation_fused = false;
+	int foveation_profile_index = 0;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
@@ -357,10 +358,17 @@ run(int argc, char **argv)
 			test_gaze = true;
 			gaze_foveation = true;
 			gaze_foveation_fused = true;
+		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
+			foveation_profile_index = find_foveation_profile(argv[++i]);
+			if (foveation_profile_index < 0) {
+				fprintf(stderr, "Unknown foveation profile: %s (expected reference, strong, aggressive, or extreme)\n", argv[i]);
+				return EXIT_FAILURE;
+			}
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused]\n"
+			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused] "
+			        "[--foveation-profile reference|strong|aggressive|extreme]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
@@ -369,6 +377,8 @@ run(int argc, char **argv)
 			        "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			        "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve pass.\n"
 			        "  --gaze-foveation-fused renders Metal VRR directly into the OpenXR image and lets Monado decode it.\n"
+			        "  --foveation-profile selects a fixed starting profile (default: reference).\n"
+			        "  While foveation is running in a terminal: 1-4 select profiles, [ and ] step, r restores reference.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
 			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
 			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
@@ -394,6 +404,12 @@ run(int argc, char **argv)
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
 	app.gaze_foveation_fused = gaze_foveation_fused;
+	app.foveation_profile_index = foveation_profile_index;
+	if (gaze_foveation) {
+		const foveation_profile &profile = k_foveation_profiles[(size_t)foveation_profile_index];
+		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)\n",
+		        profile.name, profile.middle_rate, profile.peripheral_rate);
+	}
 	if (gaze_foveation_fused) {
 		setenv("XRT_MACOS_FUSED_FOVEATION", "1", 1);
 	}
@@ -405,11 +421,13 @@ run(int argc, char **argv)
 	create_gaze_resources(app);
 	create_passthrough_resources(app);
 	create_swapchains(app);
+	initialize_terminal_controls(app);
 
 	while (!g_stop_requested && !app.exit_requested) {
 		if (!poll_events(app)) {
 			break;
 		}
+		poll_terminal_controls(app);
 		if (!app.session_running) {
 			usleep(10000);
 			continue;
