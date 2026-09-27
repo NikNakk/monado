@@ -17,7 +17,7 @@
 #include "oxr_api_funcs.h"
 #include "oxr_api_verify.h"
 #include "oxr_chain.h"
-#include "oxr_subaction.h"
+#include "actions/oxr_subaction.h"
 
 #include <stdio.h>
 
