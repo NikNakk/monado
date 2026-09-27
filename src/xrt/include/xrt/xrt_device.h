@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 struct xrt_tracking;
+struct xrt_frame_sink;
 
 #define XRT_DEVICE_NAME_LEN 256
 
@@ -734,6 +735,17 @@ struct xrt_device
 	 * @param[in] type        The type of device feature.
 	 */
 	xrt_result_t (*end_feature)(struct xrt_device *xdev, enum xrt_device_feature_type type);
+
+	/*!
+	 * Attach optional passthrough camera consumers.
+	 *
+	 * Drivers with native camera streams may expose left/right eye frames to
+	 * the compositor without making the compositor depend on a specific HMD
+	 * driver. The caller owns the sink lifetime. Passing NULL detaches a sink.
+	 */
+	xrt_result_t (*set_passthrough_sinks)(struct xrt_device *xdev,
+	                                      struct xrt_frame_sink *left,
+	                                      struct xrt_frame_sink *right);
 
 	/*!
 	 * Destroy device.
