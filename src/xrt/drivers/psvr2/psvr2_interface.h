@@ -73,10 +73,11 @@ bool
 psvr2_get_slam_timing(struct xrt_device *xdev, struct psvr2_slam_timing *out);
 
 /*!
- * Attach optional consumers for the two 640x640 PS VR2 front-camera views.
+ * Attach optional consumers for the two PS VR2 front-camera passthrough views.
  *
- * This follows the existing WMR camera sink model: the caller owns sink
- * lifetime. Enable the camera interface with PSVR2_CAMERA_STREAMS=1 on macOS.
+ * With PSVR2_CAMERA_STREAMS=1 the macOS path uses the stock-headset mode 0x10
+ * stream validated by GAV: two 1024x1016 BC4 grayscale frames. This follows
+ * the existing WMR camera sink model; the caller owns sink lifetime.
  */
 bool
 psvr2_set_passthrough_sinks(struct xrt_device *xdev,
