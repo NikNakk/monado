@@ -569,6 +569,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(psvr2_auxiliary_streams, "PSVR2_AUXILIARY_STREAMS", P
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_camera_streams, "PSVR2_CAMERA_STREAMS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_gaze_streams, "PSVR2_GAZE_STREAMS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_stage_space, "PSVR2_STAGE_SPACE", false)
+/*
+ * Headset vibration is firmware-gated on stock PS VR2 units. PSVR2Toolkit
+ * documents this as requiring a jailbroken headset, so never advertise it by
+ * default even though the USB motor command itself is known.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_headset_haptics, "PSVR2_HEADSET_HAPTICS", false)
 
 static void
 psvr2_usb_stop(struct psvr2_hmd *hmd);
@@ -1122,7 +1128,45 @@ img_xfer_cb(struct libusb_transfer *xfer)
 		PSVR2_TRACE(hmd, "Camera frame - %d bytes", xfer->actual_length);
 		PSVR2_TRACE_HEX(hmd, xfer->buffer, MIN(256, xfer->actual_length));
 
-		if (xfer->actual_length == USB_CAM_MODE10_XFER_SIZE) {
+		if (xfer->actual_length == USB_CAM_MODE10_XFER_SIZE &&
+		    hmd->camera_mode == PSVR2_CAMERA_MODE_BOTTOM_SBS_BC4) {
+			/*
+			 * GAV's native macOS player confirmed mode 0x10 as the useful
+			 * stock-headset passthrough mode: a 256-byte 'VI' header followed
+			 * by two 1024x1016 BC4 grayscale planes. Keep the data compressed
+			 * and let GPU consumers sample BC4 directly.
+			 */
+			const uint32_t width = 1024;
+			const uint32_t height = 1016;
+			const size_t header_size = 256;
+			const size_t plane_size = (size_t)width * height / 2;
+
+			if (xfer->buffer[0] != 'V' || xfer->buffer[1] != 'I') {
+				PSVR2_WARN(hmd, "Unexpected passthrough frame signature %02x %02x",
+				           xfer->buffer[0], xfer->buffer[1]);
+			} else {
+				struct xrt_frame_sink *passthrough_sinks[2] = {NULL, NULL};
+				os_mutex_lock(&hmd->data_lock);
+				passthrough_sinks[0] = hmd->passthrough_sinks[0];
+				passthrough_sinks[1] = hmd->passthrough_sinks[1];
+				os_mutex_unlock(&hmd->data_lock);
+
+				for (int eye = 0; eye < 2; eye++) {
+					struct xrt_frame_sink *sink = passthrough_sinks[eye];
+					if (sink == NULL) {
+						continue;
+					}
+
+					struct xrt_frame *xf = NULL;
+					u_frame_create_one_off(XRT_FORMAT_BC4, width, height, &xf);
+					memcpy(xf->data, xfer->buffer + header_size + eye * plane_size, plane_size);
+					xf->timestamp = os_monotonic_get_ns();
+					xf->source_timestamp = xf->timestamp;
+					xrt_sink_push_frame(sink, xf);
+					xrt_frame_reference(&xf, NULL);
+				}
+			}
+		} else if (xfer->actual_length == USB_CAM_MODE10_XFER_SIZE) {
 			for (int d = 0; d < 3; d++) {
 				if (u_sink_debug_is_active(&hmd->debug_sinks[d])) {
 					struct xrt_frame *xf = NULL;
@@ -1634,6 +1678,10 @@ psvr2_hmd_set_output(struct xrt_device *xdev, enum xrt_output_name name, const s
 
 	switch (name) {
 	case XRT_OUTPUT_NAME_PSVR2_HAPTIC: {
+		if (!debug_get_bool_option_psvr2_headset_haptics()) {
+			return XRT_ERROR_OUTPUT_UNSUPPORTED;
+		}
+
 		const struct xrt_output_value_vibration vibration = value->vibration;
 
 		/*
@@ -1735,7 +1783,8 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 
 	/* Camera data is not needed for HMD tracking. */
 	hmd->camera_enable = hmd->camera_streams_enabled;
-	hmd->camera_mode = hmd->auxiliary_streams_enabled ? PSVR2_CAMERA_MODE_10 : PSVR2_CAMERA_MODE_BOTTOM_SBS_CROPPED;
+	hmd->camera_mode =
+	    hmd->auxiliary_streams_enabled ? PSVR2_CAMERA_MODE_10 : PSVR2_CAMERA_MODE_BOTTOM_SBS_BC4;
 	if (hmd->camera_streams_enabled) {
 		set_camera_mode(hmd, hmd->camera_mode);
 
@@ -2155,7 +2204,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->base.supported.presence = true;
 	hmd->base.supported.brightness_control = true;
 	hmd->base.supported.compositor_info = true;
-	hmd->base.supported.force_feedback = true;
+	hmd->base.supported.force_feedback = debug_get_bool_option_psvr2_headset_haptics();
 	hmd->base.supported.eye_gaze = hmd->gaze_streams_enabled;
 	hmd->base.supported.face_tracking = hmd->gaze_streams_enabled;
 	hmd->base.supported.stage = hmd->stage_space_enabled;
