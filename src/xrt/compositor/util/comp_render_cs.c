@@ -578,7 +578,6 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 		// Fill in data.
 		src_image_views[i] = src_image_view;
 		src_norm_rects[i] = src_norm_rect;
-		src_foveation[i] = vds[i]->foveation;
 		src_samplers[i] = clamp_to_border_black;
 		target_viewport_datas[i] = viewport_data;
 
@@ -682,6 +681,7 @@ crc_distortion_fast_path(struct render_compute *render,
 		// Fill in data.
 		src_image_views[i] = src_image_view;
 		src_norm_rects[i] = src_norm_rect;
+		src_foveation[i] = vds[i]->foveation;
 		src_samplers[i] = clamp_to_border_black;
 		target_viewport_datas[i] = viewport_data;
 		src_fovs[i] = src_fov;
