@@ -935,8 +935,8 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	struct render_resources *r = render->r;
 
 	if (!debug_get_bool_option_depth_reprojection()) {
-		render_compute_projection_timewarp(render, src_samplers, src_image_views, src_rects, src_poses, src_fovs,
-		                                   new_poses_scanout_begin, new_poses_scanout_end, target_image,
+		render_compute_projection_timewarp(render, src_samplers, src_image_views, src_rects, NULL, src_poses,
+		                                   src_fovs, new_poses_scanout_begin, new_poses_scanout_end, target_image,
 		                                   target_image_view, views);
 		return;
 	}
