@@ -18,6 +18,8 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
+#include "metal/m_metal_foveation.h"
+
 #include <simd/simd.h>
 
 #include <dlfcn.h>
@@ -41,33 +43,6 @@
 #endif
 
 static volatile sig_atomic_t g_stop_requested = 0;
-
-struct foveation_profile
-{
-	const char *name;
-	float middle_rate;
-	float peripheral_rate;
-};
-
-static constexpr std::array<foveation_profile, 6> k_foveation_profiles = {{
-    {"reference", 0.70f, 0.45f},
-    {"strong", 0.60f, 0.35f},
-    {"aggressive", 0.50f, 0.25f},
-    {"aggressive-plus", 0.46f, 0.23f},
-    {"near-extreme", 0.43f, 0.21f},
-    {"extreme", 0.40f, 0.20f},
-}};
-
-static int
-find_foveation_profile(const char *name)
-{
-	for (size_t i = 0; i < k_foveation_profiles.size(); ++i) {
-		if (strcmp(name, k_foveation_profiles[i].name) == 0) {
-			return (int)i;
-		}
-	}
-	return -1;
-}
 
 struct terminal_input_state
 {
@@ -1727,55 +1702,29 @@ update_gaze_foveation_map(application &app,
 		fatal("Metal device does not support variable rasterization rate maps");
 	}
 
-	const foveation_profile &profile = k_foveation_profiles[(size_t)app.foveation_profile_index];
-	float horizontal[zone_count];
-	float vertical[zone_count];
-	for (int i = 0; i < zone_count; ++i) {
-		const int dx = abs(i - zone_x);
-		const int dy = abs(i - zone_y);
-		horizontal[i] = dx <= 1 ? 1.0f : (dx <= 3 ? profile.middle_rate : profile.peripheral_rate);
-		vertical[i] = dy <= 1 ? 1.0f : (dy <= 3 ? profile.middle_rate : profile.peripheral_rate);
-	}
-
-	MTLRasterizationRateLayerDescriptor *layer =
-	    [[MTLRasterizationRateLayerDescriptor alloc]
-	        initWithSampleCount:MTLSizeMake(zone_count, zone_count, 1)
-	                 horizontal:horizontal
-	                   vertical:vertical];
-	MTLRasterizationRateMapDescriptor *descriptor = [[MTLRasterizationRateMapDescriptor alloc] init];
-	descriptor.screenSize = MTLSizeMake(swapchain.width, swapchain.height, 1);
-	[descriptor setLayer:layer atIndex:0];
-	id<MTLRasterizationRateMap> rate_map = [device newRasterizationRateMapWithDescriptor:descriptor];
-	[layer release];
-	[descriptor release];
-	if (rate_map == nil) {
+	struct m_metal_foveation_map built_map = {};
+	if (!m_metal_foveation_map_build((void *)device,
+	                                  swapchain.width,
+	                                  swapchain.height,
+	                                  zone_x,
+	                                  zone_y,
+	                                  app.foveation_profile_index,
+	                                  &built_map)) {
 		fatal("could not create Metal gaze foveation rasterization rate map");
 	}
 
-	const MTLSize physical_size = [rate_map physicalSizeForLayer:0];
-	if (physical_size.width == 0 || physical_size.height == 0) {
-		[rate_map release];
-		fatal("Metal gaze foveation returned an empty physical render size");
-	}
+	id<MTLRasterizationRateMap> rate_map = (id<MTLRasterizationRateMap>)built_map.rate_map;
+	const MTLSize physical_size = MTLSizeMake(built_map.physical_width, built_map.physical_height, 1);
 
 	if (app.gaze_foveation_fused) {
 		oxr_macos_foveation_map_chain &map = app.fused_foveation_info[eye];
 		map.type = OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE;
 		map.next = nullptr;
 		map.boundary_count = OXR_MACOS_FOVEATION_BOUNDARY_COUNT;
+		static_assert(OXR_MACOS_FOVEATION_BOUNDARY_COUNT == M_METAL_FOVEATION_BOUNDARY_COUNT);
 		for (uint32_t boundary = 0; boundary < OXR_MACOS_FOVEATION_BOUNDARY_COUNT; ++boundary) {
-			const float logical_x =
-			    (float)swapchain.width * (float)boundary / (float)(OXR_MACOS_FOVEATION_BOUNDARY_COUNT - 1);
-			const float logical_y =
-			    (float)swapchain.height * (float)boundary / (float)(OXR_MACOS_FOVEATION_BOUNDARY_COUNT - 1);
-			const MTLCoordinate2D px = [rate_map
-			    mapScreenToPhysicalCoordinates:MTLCoordinate2DMake(logical_x, 0.0f)
-			                         forLayer:0];
-			const MTLCoordinate2D py = [rate_map
-			    mapScreenToPhysicalCoordinates:MTLCoordinate2DMake(0.0f, logical_y)
-			                         forLayer:0];
-			map.x[boundary] = px.x / (float)swapchain.width;
-			map.y[boundary] = py.y / (float)swapchain.height;
+			map.x[boundary] = built_map.x[boundary];
+			map.y[boundary] = built_map.y[boundary];
 		}
 	}
 
@@ -1845,7 +1794,7 @@ update_gaze_foveation_map(application &app,
 	        physical_size.width, physical_size.height,
 	        100.0 * physical_pixels / logical_pixels,
 	        app.gaze_foveation_fused ? " (fused)" : "",
-	        k_foveation_profiles[(size_t)app.foveation_profile_index].name);
+	        m_metal_foveation_profile_get(app.foveation_profile_index)->name);
 	return true;
 }
 
@@ -2233,7 +2182,7 @@ render_frame(application &app)
 static void
 set_foveation_profile(application &app, int index)
 {
-	index = std::max(0, std::min(index, (int)k_foveation_profiles.size() - 1));
+	index = std::max(0, std::min(index, M_METAL_FOVEATION_PROFILE_COUNT - 1));
 	if (index == app.foveation_profile_index) {
 		return;
 	}
@@ -2242,10 +2191,10 @@ set_foveation_profile(application &app, int index)
 	if (app.foveation_profile_revision == 0) {
 		app.foveation_profile_revision = 1;
 	}
-	const foveation_profile &profile = k_foveation_profiles[(size_t)index];
+	const struct m_metal_foveation_profile *profile = m_metal_foveation_profile_get(index);
 	fprintf(stderr,
 	        "psvr2-openxr-test: foveation profile -> %s (middle %.2f, peripheral %.2f); rebuilding rate maps\n",
-	        profile.name, profile.middle_rate, profile.peripheral_rate);
+	        profile->name, profile->middle_rate, profile->peripheral_rate);
 }
 
 static void
@@ -2404,7 +2353,7 @@ run(int argc, char **argv)
 			gaze_foveation = true;
 			gaze_foveation_fused = true;
 		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
-			foveation_profile_index = find_foveation_profile(argv[++i]);
+			foveation_profile_index = m_metal_foveation_profile_find(argv[++i]);
 			if (foveation_profile_index < 0) {
 				fprintf(stderr, "Unknown foveation profile: %s (expected reference, strong, aggressive, aggressive-plus, near-extreme, or extreme)\n", argv[i]);
 				return EXIT_FAILURE;
@@ -2451,9 +2400,9 @@ run(int argc, char **argv)
 	app.gaze_foveation_fused = gaze_foveation_fused;
 	app.foveation_profile_index = foveation_profile_index;
 	if (gaze_foveation) {
-		const foveation_profile &profile = k_foveation_profiles[(size_t)foveation_profile_index];
+		const struct m_metal_foveation_profile *profile = m_metal_foveation_profile_get(foveation_profile_index);
 		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)\n",
-		        profile.name, profile.middle_rate, profile.peripheral_rate);
+		        profile->name, profile->middle_rate, profile->peripheral_rate);
 	}
 	if (gaze_foveation_fused) {
 		setenv("XRT_MACOS_FUSED_FOVEATION", "1", 1);
