@@ -487,3 +487,23 @@ branch is an alternative complete port:
 
 The tracker in [macos-port-tracker.md](macos-port-tracker.md) is the shorter
 branch-oriented companion to this document.
+
+
+### PS VR2 eye-gaze calibration tuning
+
+The PS VR2 eye tracker can use the standard `XR_EXT_eye_gaze_interaction` path on macOS when
+`PSVR2_GAZE_STREAMS=1` is enabled. The driver loads the Sony calibration blob from
+`~/Library/Application Support/monado/psvr2/eye_calibration.bin` when present.
+
+Small residual user-specific calibration errors can be corrected without modifying that blob:
+
+```sh
+export PSVR2_GAZE_YAW_OFFSET_DEG=0
+export PSVR2_GAZE_PITCH_OFFSET_DEG=0
+export PSVR2_GAZE_YAW_GAIN=1.0
+export PSVR2_GAZE_PITCH_GAIN=1.0
+```
+
+Use offsets for a roughly constant displacement across the field of view. Use gains only when the
+centre is approximately correct but error grows toward the edges. The gain range is intentionally
+clamped to 0.5–1.5.
