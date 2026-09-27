@@ -2161,6 +2161,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->base.set_brightness = psvr2_set_brightness;
 	hmd->base.set_output = psvr2_hmd_set_output;
 	hmd->base.get_compositor_info = psvr2_hmd_get_compositor_info;
+	hmd->base.set_passthrough_sinks = psvr2_set_passthrough_sinks;
 	if (hmd->gaze_streams_enabled) {
 		hmd->base.begin_feature = psvr2_begin_feature;
 		hmd->base.end_feature = psvr2_end_feature;
@@ -2365,18 +2366,19 @@ cleanup:
 }
 
 
-bool
+xrt_result_t
 psvr2_set_passthrough_sinks(struct xrt_device *xdev,
                             struct xrt_frame_sink *left,
                             struct xrt_frame_sink *right)
 {
 	if (xdev == NULL || xdev->name != XRT_DEVICE_PSVR2) {
-		return false;
+		return XRT_ERROR_NOT_IMPLEMENTED;
 	}
 
 	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
 	if (!hmd->camera_streams_enabled) {
-		return false;
+		PSVR2_WARN(hmd, "Passthrough requested but camera streaming is disabled; set PSVR2_CAMERA_STREAMS=1");
+		return XRT_ERROR_NOT_IMPLEMENTED;
 	}
 
 	os_mutex_lock(&hmd->data_lock);
@@ -2384,5 +2386,5 @@ psvr2_set_passthrough_sinks(struct xrt_device *xdev,
 	hmd->passthrough_sinks[1] = right;
 	os_mutex_unlock(&hmd->data_lock);
 
-	return true;
+	return XRT_SUCCESS;
 }
