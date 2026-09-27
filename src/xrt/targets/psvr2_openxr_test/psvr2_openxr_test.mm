@@ -491,11 +491,39 @@ fragment float4 fragment_main(VertexOut in [[stage_in]])
 {
     return in.color;
 }
+
+struct FoveationVertexOut {
+    float4 position [[position]];
+};
+
+vertex FoveationVertexOut foveation_resolve_vertex(uint vertex_id [[vertex_id]])
+{
+    const float2 positions[3] = {
+        float2(-1.0, -1.0),
+        float2( 3.0, -1.0),
+        float2(-1.0,  3.0),
+    };
+    FoveationVertexOut out;
+    out.position = float4(positions[vertex_id], 0.0, 1.0);
+    return out;
+}
+
+fragment float4 foveation_resolve_fragment(
+    FoveationVertexOut in [[stage_in]],
+    constant rasterization_rate_map_data &rate_data [[buffer(0)]],
+    texture2d<float> intermediate [[texture(0)]])
+{
+    constexpr sampler s(coord::pixel, address::clamp_to_edge, filter::linear);
+    rasterization_rate_map_decoder decoder(rate_data);
+    float2 physical = decoder.map_screen_to_physical_coordinates(in.position.xy);
+    return intermediate.sample(s, physical);
+}
 )METAL";
 
 struct metal_renderer
 {
 	id<MTLRenderPipelineState> pipeline = nil;
+	id<MTLRenderPipelineState> foveation_resolve_pipeline = nil;
 	id<MTLDepthStencilState> depth_state = nil;
 	id<MTLBuffer> cube_vertex_buffer = nil;
 	id<MTLBuffer> instance_buffer = nil;
@@ -526,9 +554,28 @@ struct metal_renderer
 		[pipeline_descriptor release];
 		[vertex_function release];
 		[fragment_function release];
-		[library release];
 		if (pipeline == nil) {
 			fprintf(stderr, "psvr2-openxr-test: Metal pipeline creation failed: %s\n",
+			        error != nil ? [[error localizedDescription] UTF8String] : "unknown error");
+			exit(EXIT_FAILURE);
+		}
+
+		id<MTLFunction> resolve_vertex = [library newFunctionWithName:@"foveation_resolve_vertex"];
+		id<MTLFunction> resolve_fragment = [library newFunctionWithName:@"foveation_resolve_fragment"];
+		if (resolve_vertex == nil || resolve_fragment == nil) {
+			fatal("could not find foveation resolve Metal shader entry points");
+		}
+		MTLRenderPipelineDescriptor *resolve_descriptor = [[MTLRenderPipelineDescriptor alloc] init];
+		resolve_descriptor.vertexFunction = resolve_vertex;
+		resolve_descriptor.fragmentFunction = resolve_fragment;
+		resolve_descriptor.colorAttachments[0].pixelFormat = color_format;
+		foveation_resolve_pipeline = [device newRenderPipelineStateWithDescriptor:resolve_descriptor error:&error];
+		[resolve_descriptor release];
+		[resolve_vertex release];
+		[resolve_fragment release];
+		[library release];
+		if (foveation_resolve_pipeline == nil) {
+			fprintf(stderr, "psvr2-openxr-test: Metal foveation resolve pipeline creation failed: %s\n",
 			        error != nil ? [[error localizedDescription] UTF8String] : "unknown error");
 			exit(EXIT_FAILURE);
 		}
@@ -560,6 +607,8 @@ struct metal_renderer
 		cube_vertex_buffer = nil;
 		[depth_state release];
 		depth_state = nil;
+		[foveation_resolve_pipeline release];
+		foveation_resolve_pipeline = nil;
 		[pipeline release];
 		pipeline = nil;
 	}
@@ -574,6 +623,15 @@ struct view_swapchain
 	std::vector<XrSwapchainImageMetalKHR> images;
 	std::vector<XrSwapchainImageMetalKHR> depth_images;
 	id<MTLTexture> depth_texture = nil;
+
+	id<MTLRasterizationRateMap> foveation_rate_map = nil;
+	id<MTLBuffer> foveation_rate_data = nil;
+	id<MTLTexture> foveation_color_texture = nil;
+	id<MTLTexture> foveation_depth_texture = nil;
+	int foveation_zone_x = -1;
+	int foveation_zone_y = -1;
+	uint32_t foveation_physical_width = 0;
+	uint32_t foveation_physical_height = 0;
 };
 
 struct gaze_calibration_target
@@ -627,6 +685,7 @@ struct application
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool gaze_calibrate = false;
+	bool gaze_foveation = false;
 	bool gaze_supported = false;
 	gaze_calibration_state gaze_calibration;
 	XrActionSet gaze_action_set = XR_NULL_HANDLE;
