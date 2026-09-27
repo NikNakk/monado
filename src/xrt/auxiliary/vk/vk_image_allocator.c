@@ -25,6 +25,12 @@
 #include "android/android_ahardwarebuffer_allocator.h"
 #endif
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+#include <CoreFoundation/CoreFoundation.h>
+#include <CoreVideo/CoreVideo.h>
+#include <IOSurface/IOSurface.h>
+#endif
+
 
 /*
  *
@@ -103,11 +109,153 @@ add_format_non_dup(struct format_list_helper *flh, VkFormat format)
 	flh->formats[flh->format_count++] = format;
 }
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+static bool
+iosurface_swapchain_is_supported(const struct xrt_swapchain_create_info *info)
+{
+	if (info == NULL || info->array_size != 1 || info->face_count != 1 || info->mip_count != 1 ||
+	    info->sample_count != 1 || (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
+		return false;
+	}
+
+	const VkFormat format = (VkFormat)info->format;
+	return format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
+}
+
+static bool
+iosurface_set_size_value(CFMutableDictionaryRef properties, CFStringRef key, size_t value)
+{
+	int64_t signed_value = (int64_t)value;
+	CFNumberRef number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt64Type, &signed_value);
+	if (number == NULL) {
+		return false;
+	}
+	CFDictionarySetValue(properties, key, number);
+	CFRelease(number);
+	return true;
+}
+
+static bool
+iosurface_set_u32_value(CFMutableDictionaryRef properties, CFStringRef key, uint32_t value)
+{
+	int32_t signed_value = (int32_t)value;
+	CFNumberRef number = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &signed_value);
+	if (number == NULL) {
+		return false;
+	}
+	CFDictionarySetValue(properties, key, number);
+	CFRelease(number);
+	return true;
+}
+
+static IOSurfaceRef
+create_bgra_iosurface(const struct xrt_swapchain_create_info *info)
+{
+	const size_t bytes_per_element = 4;
+	const size_t min_bytes_per_row = (size_t)info->width * bytes_per_element;
+	const size_t bytes_per_row = IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, min_bytes_per_row);
+	const size_t alloc_size = bytes_per_row * (size_t)info->height;
+
+	CFMutableDictionaryRef properties =
+	    CFDictionaryCreateMutable(kCFAllocatorDefault,
+	                              0,
+	                              &kCFTypeDictionaryKeyCallBacks,
+	                              &kCFTypeDictionaryValueCallBacks);
+	if (properties == NULL) {
+		return NULL;
+	}
+
+	const bool ok = iosurface_set_size_value(properties, kIOSurfaceWidth, info->width) &&
+	                iosurface_set_size_value(properties, kIOSurfaceHeight, info->height) &&
+	                iosurface_set_size_value(properties, kIOSurfaceBytesPerElement, bytes_per_element) &&
+	                iosurface_set_size_value(properties, kIOSurfaceBytesPerRow, bytes_per_row) &&
+	                iosurface_set_size_value(properties, kIOSurfaceAllocSize, alloc_size) &&
+	                iosurface_set_u32_value(properties, kIOSurfacePixelFormat, kCVPixelFormatType_32BGRA);
+	if (!ok) {
+		CFRelease(properties);
+		return NULL;
+	}
+
+	IOSurfaceRef surface = IOSurfaceCreate(properties);
+	CFRelease(properties);
+	return surface;
+}
+
+static VkResult
+create_image_from_iosurface(struct vk_bundle *vk,
+                            const struct xrt_swapchain_create_info *info,
+                            struct vk_image *out_image)
+{
+	if (!vk->has_EXT_metal_objects || vk->vkExportMetalObjectsEXT == NULL) {
+		U_LOG_E("IOSurface-backed Vulkan image requires VK_EXT_metal_objects");
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	}
+
+	IOSurfaceRef surface = create_bgra_iosurface(info);
+	if (surface == NULL) {
+		U_LOG_E("Failed to create BGRA IOSurface for %ux%u swapchain", info->width, info->height);
+		return VK_ERROR_OUT_OF_HOST_MEMORY;
+	}
+
+	if (IOSurfaceGetPixelFormat(surface) != kCVPixelFormatType_32BGRA) {
+		U_LOG_E("Created IOSurface has unexpected pixel format 0x%08x",
+		        (unsigned)IOSurfaceGetPixelFormat(surface));
+		CFRelease(surface);
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	struct xrt_image_native image_native = {0};
+	image_native.handle = surface;
+	image_native.size = IOSurfaceGetAllocSize(surface);
+	image_native.use_dedicated_allocation = true;
+
+	VkImage image = VK_NULL_HANDLE;
+	VkDeviceMemory memory = VK_NULL_HANDLE;
+	VkResult ret = vk_create_image_from_native(vk, info, &image_native, &image, &memory);
+
+	/*
+	 * On successful IOSurface import vk_create_image_from_native() consumes
+	 * our reference according to XRT_GRAPHICS_BUFFER_HANDLE_REFERENCE_ADDED_BY_VULKAN_IMPORT.
+	 * On an early failure it may still be live, so release it here.
+	 */
+	if (xrt_graphics_buffer_is_valid(image_native.handle)) {
+		u_graphics_buffer_unref(&image_native.handle);
+	}
+
+	if (ret != VK_SUCCESS) {
+		return ret;
+	}
+
+	VkMemoryRequirements requirements = {0};
+	vk->vkGetImageMemoryRequirements(vk->device, image, &requirements);
+
+	out_image->handle = image;
+	out_image->memory = memory;
+	out_image->size = requirements.size;
+	out_image->use_dedicated_allocation = true;
+	return VK_SUCCESS;
+}
+#endif
+
 static VkResult
 create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info, struct vk_image *out_image)
 {
 	// This is the format we allocate the image in, can be changed further down.
 	VkFormat image_format = (VkFormat)info->format;
+
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	/*
+	 * Simple single-slice BGRA swapchains use a service-created IOSurface with
+	 * explicit CoreVideo format metadata. Import that surface into MoltenVK
+	 * rather than asking MoltenVK to allocate/export an anonymous IOSurface.
+	 * This preserves the BGRA fourcc for standard consumers such as Chromium's
+	 * IOSurfaceImageBacking while keeping array/depth paths unchanged.
+	 */
+	if (iosurface_swapchain_is_supported(info)) {
+		return create_image_from_iosurface(vk, info, out_image);
+	}
+#endif
+
 	VkImageCreateFlags image_create_flags = 0;
 
 	VkImageUsageFlags image_usage = vk_csci_get_image_usage_flags( //
