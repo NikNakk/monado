@@ -6,203 +6,100 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
-## Branch
+This is the concise branch-oriented companion to
+[macos-port.md](macos-port.md). The main document is the authoritative
+high-level status/roadmap.
 
-- `kg/macos-ipc-port-spike`
+## Current integration branch
 
-## Fork
+- Repository: [NikNakk/monado](https://github.com/NikNakk/monado)
+- Branch:
+  [`macos-wine-openvr-legacy-unity`](https://github.com/NikNakk/monado/tree/macos-wine-openvr-legacy-unity)
+- Canonical upstream remains the Monado project on freedesktop.org.
 
-- GitHub working fork: `kzahel/monado`
-- Canonical upstream remains GitLab `monado/monado`
+The branch name is historical. It now carries the broadest integration of the
+native Apple Silicon runtime, PS VR2 HMD path, Metal/IOSurface sharing,
+launchd/XPC service integration, depth support, Chromium handoff and Wine/OpenVR
+work.
 
-## Initial blocker stack
+## Current validated capabilities
 
-1. Missing local toolchain on the Mac host:
-   `pkg-config`, `ninja`, `glslangValidator`
-2. SDL2 include-path mismatch in optional desktop helper targets
-3. IPC client `wait` symbol collision on BSD/macOS
-4. Desktop IPC server explicitly unported on Apple
-5. Linux-only `epoll` dependency in server IPC threads
+- Native Apple Silicon `monado-service` and OpenXR runtime.
+- Native PS VR2 HMD discovery, display output and 6DoF head tracking.
+- Vulkan/MoltenVK compositor with native Metal/CAMetalLayer presentation.
+- Native Metal OpenXR clients.
+- IOSurface and shared-Metal cross-process graphics transport.
+- Launchd/XPC service activation and Metal shared-event support.
+- `XR_KHR_composition_layer_depth` plus experimental depth-aware reprojection.
+- Native application/engine validation through Unity/Open Brush, Unreal Engine,
+  Godot, Chromium WebXR and SwiftXR/SwiftXRShell.
+- Native PS Sense HID path for 3DoF, inputs and haptics.
+- Wine D3D11 OpenXR plus OpenVR experiments through OpenComposite and xrizer.
 
-## Changes started in this branch
+## Active side branches
 
-- renamed the IPC future `wait` callback implementation to avoid the POSIX
-  `wait(2)` collision
-- added a macOS desktop IPC mainloop source using Unix sockets plus `poll()`
-- added an Apple path to IPC CMake source selection
-- added a macOS `poll()` path for per-client IPC thread waiting
-- ported the first remote-rendering compositor behavior from WiVRn patch `0008`
-  so compute rendering can use submitted projection-layer pose data instead of
-  always querying device pose data
-- added the first macOS native runtime probe in `tests/tests_macos_runtime_probe.c`
-- enabled MoltenVK portability-driver instance creation
-- relaxed the native macOS compositor probe path so internal image allocations
-  do not require Linux FD export support
-- stopped suppressing native macOS swapchain formats just because the current
-  placeholder handle model cannot export Linux FD handles
-- changed the macOS graphics-buffer abstraction from the placeholder FD model to
-  `IOSurfaceRef`
-- wired the first real macOS native-image path with `VK_EXT_metal_objects`
-  so compositor swapchains can export/import `IOSurfaceRef` handles
-- fixed macOS runtime-dir fallback so the service uses a real absolute socket
-  path instead of the literal `~/.cache`
-- added `IOSurfaceRef` transport across Unix IPC by carrying `IOSurfaceID`
-  values inline in the message stream
-- added `tests/tests_macos_ipc_swapchain_probe.c` to validate the service-backed
-  macOS swapchain import/export path over real IPC
-- added `tests/tests_macos_openxr_loaderless_probe.c` to validate the macOS
-  OpenXR state tracker by loading `libopenxr_monado.dylib` directly and
-  creating a headless session against `monado-service`
-- added `tests/tests_macos_openxr_vulkan_probe.c` to validate a real
-  graphics-bound OpenXR Vulkan session and swapchain path on macOS
-- added Apple-specific reply framing for server-to-client IPC traffic so reply
-  boundaries survive macOS `SOCK_STREAM` short reads
-- fixed the IPC protocol generator so graphics-buffer reply capacity uses
-  `XRT_MAX_SWAPCHAIN_IMAGES` instead of `XRT_MAX_IPC_HANDLES`
-- enabled Monado's existing remote driver build option on macOS so the MVP
-  remote-HMD path can be built and tested without inventing a new device stack
-- fixed the remote driver's socket creation path for macOS by falling back when
-  `SOCK_CLOEXEC` is unavailable
-- enabled `config_v0.json` loading on macOS so remote-builder settings can be
-  selected through the normal config path instead of env-only overrides
-- added `tests/tests_macos_remote_driver_pose_probe.c` to feed synthetic head
-  poses into the remote-driver TCP path on macOS
-- added a tiny local bridge layer:
-  - `tests/tests_macos_remote_pose_protocol.h`
-  - `tests/tests_macos_remote_pose_bridge.c`
-  - `tests/tests_macos_remote_pose_packet_sender.c`
+### PS Sense optical 6DoF
 
-## Still expected after this patch set
+- [`macos-pssense-6dof`](https://github.com/NikNakk/monado/tree/macos-pssense-6dof)
+- [tracking notes](https://github.com/NikNakk/monado/blob/macos-pssense-6dof/doc/pssense-optical-tracking.md)
+- [camera calibration notes](https://github.com/NikNakk/monado/blob/macos-pssense-6dof/doc/psvr2-camera-calibration.md)
 
-- more IPC/server portability work after the first `poll()` conversion
-- real OpenXR state-tracker validation on top of the now-working IPC image path
-- remote-driver validation on macOS as the first host-side remote-HMD stub
-- adapting the remote driver protocol/data model to the Quest MVP pose path
-- replacing the local UDP bridge with a real Quest-side pose transport path
-- cleanup/teardown fixes for the service-backed probe shutdown path
-- deciding whether any additional WiVRn compositor patches should be ported, or
-  only mined for design ideas
+This is intentionally separate from the integration branch. Camera calibration,
+LED phase/bootstrap and multi-camera pose solving work, but sustained dynamic
+two-controller tracking, fusion/filtering and reacquisition are not yet reliable
+enough to merge.
 
-## Current local status
+### Earlier camera calibration
 
-- the no-SDL macOS build recipe in `doc/macos-port.md` completes successfully
-- `monado-service`, `monado-ctl`, `monado-cli`, and `libopenxr_monado.dylib`
-  all build on the current branch
-- the native macOS runtime probe can now:
-  - create the MoltenVK instance and compute device
-  - start an in-process session against the simulated HMD
-  - create a native swapchain
-  - advertise real native swapchain formats without a probe-only fallback
-  - report `IOSurfaceRef` as the macOS graphics-buffer handle model
-  - export native swapchain images as `IOSurfaceRef`
-  - import those images back through `xrt_comp_import_swapchain`
-  - validate acquire/release on the imported swapchain
-- the new macOS IPC probe can now:
-  - launch against a running `monado-service`
-  - create a native swapchain over the IPC client path
-  - receive exported `IOSurfaceRef` images from the service
-  - import them back through `xrt_comp_import_swapchain`
-  - validate acquire/release on the imported swapchain over the real
-    service/client boundary
-- the new loaderless OpenXR probe can now:
-  - dlopen `libopenxr_monado.dylib` directly on macOS
-  - negotiate `xrGetInstanceProcAddr` without a separately installed loader
-  - create an OpenXR instance with `XR_MND_headless`
-  - select the simulated HMD system through the OpenXR state tracker
-  - create a headless OpenXR session over the real Monado service boundary
-- the new Vulkan OpenXR probe can now:
-  - negotiate `XR_KHR_vulkan_enable2`
-  - create a Vulkan instance and device through Monado's OpenXR runtime
-  - create a graphics-bound OpenXR session on macOS
-  - create an OpenXR swapchain and enumerate three Vulkan swapchain images
-    over the real service-backed path
-  - complete `xrWaitFrame` with a valid predicted display time over the live
-    service boundary
-  - submit one projection frame through the live macOS service/runtime path
-  - submit multiple projection frames cleanly when
-    `MACOS_OPENXR_VULKAN_PROBE_FRAMES>1` and
-    `MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS=1`
-  - isolate the sustained-render blocker to the current `IOSurface`
-    array-texture import path for `MTLTextureType2DArray`
-  - use a simpler probe-side clear path for the temporary per-view validation
-    route:
-    - `clear_swapchain_image()` now uses transfer-layout barriers plus
-      `vkCmdClearColorImage`
-    - the old render-pass/framebuffer/readback path is no longer in the probe
-      clear step
-    - fence waits in that helper are now bounded, so a stuck submit should
-      fail with a concrete timeout instead of hanging forever
-  - an ADB-assisted rerun against rebuilt WiVRn macOS artifacts in `/tmp`
-    confirms the real headset-connected path now reaches this helper again:
-    - Quest 3 attached over USB
-    - `adb reverse tcp:9757 tcp:9757` active
-    - `org.meumeu.wivrn.local` relaunched with
-      `wivrn+tcp://localhost:9757`
-    - `wivrn-server-headless` reaches
-      `Initial headset handshake completed`
-  - on that live path, the first explicit failure is now the bounded timeout in
-    `clear_swapchain_image(submit)`
-  - after that timeout is reported, the probe still hangs in teardown
-  - a one-shot `sample` of the timed-out probe shows the main thread in
-    `vkDeviceWaitIdle()` inside MoltenVK
-- the existing remote builder can now be brought up on macOS:
-  - `XRT_BUILD_DRIVER_REMOTE=ON` now configures and builds cleanly on Apple
-    Silicon
-  - a macOS `config_v0.json` with `active=remote` is now honored
-  - `monado-service` selects the remote builder, exposes `Remote HMD`, and
-    listens on the configured TCP port
-  - `tests/tests_macos_remote_driver_pose_probe.c` can connect to that socket
-    and stream synthetic head poses
-  - with that probe connected,
-    `tests/tests_macos_openxr_vulkan_probe.c` now runs against `Remote HMD`
-    instead of the simulated device and still submits projection frames
-  - the new local UDP bridge path can now:
-    - accept a tiny `v0` pose packet on UDP `4243`
-    - translate that packet into the remote-driver TCP stream on `4242`
-    - forward live packets while the Vulkan OpenXR probe runs against
-      `Remote HMD`
-- with `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1`, the same probe can still continue
-  into the older frame-submit path for deeper compositor debugging
-- the earlier branch result that the compute compositor consumes submitted
-  projection-layer pose data is still valid, but that path is no longer the
-  default probe exit because the cleanup path after deeper submission still
-  trips a macOS-only teardown bug
-- the current service-backed probe still exits with noisy but non-fatal
-  shutdown logging (`ipc_call_session_destroy` and server-side broken-pipe
-  output), which should be cleaned up before this moves beyond spike status
-- the per-client Unix IPC loop now treats a zero-byte `MSG_PEEK` as a normal
-  client disconnect on macOS, so the loaderless and Vulkan probes no longer end
-  with the misleading `Invalid command received.` server error
+- [`macos-psvr2-camera-calibration`](https://github.com/NikNakk/monado/tree/macos-psvr2-camera-calibration)
 
-## Recommended workflow
+Historical/base work for the current optical tracking branch.
 
-1. Reconfigure with the no-SDL macOS recipe from `doc/macos-port.md`
-2. Build with `ninja -k 1`
-3. Use `tests/tests_macos_runtime_probe` for in-process native-image regression
-   checks on macOS
-   Default run validates the IOSurface round-trip.
-   `MACOS_RUNTIME_PROBE_SUBMIT_FRAME=1` keeps going into the older frame-submit
-   path.
-4. Use `tests/tests_macos_ipc_swapchain_probe` against a running
-   `monado-service` to validate the real service/client image path
-5. Use `tests/tests_macos_openxr_loaderless_probe` with
-   `MONADO_OPENXR_RUNTIME_PATH` set to `libopenxr_monado.dylib` to validate the
-   headless OpenXR path over the real service boundary
-6. Use `tests/tests_macos_openxr_vulkan_probe` to validate the first
-   graphics-bound OpenXR Vulkan session and swapchain path on macOS
-   `MACOS_OPENXR_VULKAN_PROBE_FRAMES=3` plus
-   `MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS=1` is currently the useful
-   sustained-render regression path on Apple Silicon.
-   After a real headset/client handshake, the probe now does return a bounded
-   fence-timeout error in `clear_swapchain_image()`.
-   The next Apple-side follow-on blocker after that is teardown hanging in
-   `vkDeviceWaitIdle()`.
-7. Use a macOS `config_v0.json` with `active=remote` when validating the
-   remote-builder path on Apple Silicon
-8. Use `tests/tests_macos_remote_driver_pose_probe` to keep `Remote HMD`
-   fed with synthetic poses while validating OpenXR/runtime behavior
-9. Use `tests/tests_macos_remote_pose_bridge` plus
-   `tests/tests_macos_remote_pose_packet_sender` when validating the first
-   "simpler-than-Monado" pose packet path on macOS
-10. Fix only the first blocker each round
-11. Keep notes here so the blocker order stays explicit
+### Depth development history
+
+- [`macos-depth-aware-reprojection`](https://github.com/NikNakk/monado/tree/macos-depth-aware-reprojection)
+
+The useful depth path has since been integrated into the main macOS integration
+branch. Keep this branch mainly for development history/comparison.
+
+## Immediate priorities
+
+1. Make PS Sense optical 6DoF reliable enough to merge.
+2. Turn existing PS VR2 camera acquisition into a real Monado passthrough/MR
+   pipeline.
+3. Solve the PS VR2 eye-tracking calibration path, then expose gaze/foveation.
+4. Finish Chromium's sandboxed IOSurface/shared-event graphics path.
+5. Broaden Wine/OpenVR compatibility and determine whether SteamVR Home can run
+   without reproducing Valve's compositor.
+6. Continue compositor pacing/reprojection robustness work.
+7. Add broader OpenXR regression/conformance coverage.
+8. Package and notarize the runtime with a simple settings/diagnostics surface.
+
+## Related repositories
+
+See the main status document for descriptions and branch details. The principal
+companion repositories are:
+
+- [Open Brush / Unity](https://github.com/NikNakk/open-brush)
+- [Godot](https://github.com/NikNakk/godot)
+- [Unreal Engine](https://github.com/NikNakk/UnrealEngine)
+- [Chromium](https://github.com/NikNakk/chromium)
+- [SwiftXR](https://github.com/NikNakk/SwiftXR)
+- [SwiftXRShell](https://github.com/NikNakk/SwiftXRShell)
+- [xrizer](https://github.com/NikNakk/xrizer)
+- [BasaltVR](https://github.com/NikNakk/BasaltVR)
+- [GAV PSVR2 Player for macOS](https://github.com/NikNakk/gav-psvr2-player-mac)
+- [PSVR2Toolkit](https://github.com/NikNakk/PSVR2Toolkit)
+
+## Detailed runtime documents
+
+- [macOS direct service XPC](macos-service-direct-xpc.md)
+- [PS VR2 timing diagnostics](macos-psvr2-timing-diagnostics.md)
+- [PS VR2 judder evidence](macos-psvr2-judder-evidence.md)
+- [Wine D3D11 OpenXR](macos-wine-openxr-d3d11.md)
+- [Wine IOSurface import](macos-wine-iosurface-import.md)
+- [Wine XR audio](macos-wine-xr-audio.md)
+
+Older `macos-wine-*`, Metal-array, service-XPC, timing and presentation
+branches should generally be considered development history unless a specific
+experiment still references them.
