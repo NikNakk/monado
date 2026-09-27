@@ -1389,6 +1389,195 @@ update_gaze_calibration(application &app, XrTime predicted_display_time, const X
 	}
 }
 
+
+static float
+clampf01(float value)
+{
+	return fmaxf(0.0f, fminf(1.0f, value));
+}
+
+static void
+release_gaze_foveation_resources(view_swapchain &swapchain)
+{
+	[swapchain.foveation_rate_map release];
+	swapchain.foveation_rate_map = nil;
+	[swapchain.foveation_rate_data release];
+	swapchain.foveation_rate_data = nil;
+	[swapchain.foveation_color_texture release];
+	swapchain.foveation_color_texture = nil;
+	[swapchain.foveation_depth_texture release];
+	swapchain.foveation_depth_texture = nil;
+	swapchain.foveation_zone_x = -1;
+	swapchain.foveation_zone_y = -1;
+	swapchain.foveation_physical_width = 0;
+	swapchain.foveation_physical_height = 0;
+}
+
+static bool
+update_gaze_foveation_map(application &app,
+                          size_t eye,
+                          XrTime predicted_display_time,
+                          float gaze_yaw_deg,
+                          float gaze_pitch_deg)
+{
+	if (!app.gaze_foveation || eye >= app.swapchains.size()) {
+		return false;
+	}
+
+	view_swapchain &swapchain = app.swapchains[eye];
+	const XrFovf &fov = app.views[eye].fov;
+	const float yaw_rad = gaze_yaw_deg * (float)M_PI / 180.0f;
+	const float pitch_rad = gaze_pitch_deg * (float)M_PI / 180.0f;
+	const float tangent_x = tanf(yaw_rad);
+	const float tangent_y = tanf(pitch_rad);
+	const float left = tanf(fov.angleLeft);
+	const float right = tanf(fov.angleRight);
+	const float down = tanf(fov.angleDown);
+	const float up = tanf(fov.angleUp);
+
+	float u = (tangent_x - left) / (right - left);
+	float v = 1.0f - (tangent_y - down) / (up - down);
+	u = clampf01(u);
+	v = clampf01(v);
+
+	static const int zone_count = 16;
+	const int zone_x = (int)fminf((float)(zone_count - 1), floorf(u * zone_count));
+	const int zone_y = (int)fminf((float)(zone_count - 1), floorf(v * zone_count));
+	if (swapchain.foveation_rate_map != nil &&
+	    zone_x == swapchain.foveation_zone_x && zone_y == swapchain.foveation_zone_y) {
+		return true;
+	}
+
+	id<MTLDevice> device = [app.command_queue device];
+	if (![device supportsRasterizationRateMapWithLayerCount:1]) {
+		fatal("Metal device does not support variable rasterization rate maps");
+	}
+
+	float horizontal[zone_count];
+	float vertical[zone_count];
+	for (int i = 0; i < zone_count; ++i) {
+		const int dx = abs(i - zone_x);
+		const int dy = abs(i - zone_y);
+		horizontal[i] = dx <= 1 ? 1.0f : (dx <= 3 ? 0.70f : 0.45f);
+		vertical[i] = dy <= 1 ? 1.0f : (dy <= 3 ? 0.70f : 0.45f);
+	}
+
+	MTLRasterizationRateLayerDescriptor *layer =
+	    [[MTLRasterizationRateLayerDescriptor alloc]
+	        initWithSampleCount:MTLSizeMake(zone_count, zone_count, 1)
+	                 horizontal:horizontal
+	                   vertical:vertical];
+	MTLRasterizationRateMapDescriptor *descriptor = [[MTLRasterizationRateMapDescriptor alloc] init];
+	descriptor.screenSize = MTLSizeMake(swapchain.width, swapchain.height, 1);
+	[descriptor setLayer:layer atIndex:0];
+	id<MTLRasterizationRateMap> rate_map = [device newRasterizationRateMapWithDescriptor:descriptor];
+	[layer release];
+	[descriptor release];
+	if (rate_map == nil) {
+		fatal("could not create Metal gaze foveation rasterization rate map");
+	}
+
+	const MTLSize physical_size = [rate_map physicalSizeForLayer:0];
+	if (physical_size.width == 0 || physical_size.height == 0) {
+		[rate_map release];
+		fatal("Metal gaze foveation returned an empty physical render size");
+	}
+
+	id<MTLTexture> color_texture = swapchain.foveation_color_texture;
+	id<MTLTexture> depth_texture = swapchain.foveation_depth_texture;
+	const bool size_changed =
+	    swapchain.foveation_physical_width != physical_size.width ||
+	    swapchain.foveation_physical_height != physical_size.height;
+	if (size_changed || color_texture == nil || depth_texture == nil) {
+		MTLTextureDescriptor *color_desc =
+		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:app.color_format
+		                                                     width:physical_size.width
+		                                                    height:physical_size.height
+		                                                 mipmapped:NO];
+		color_desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+		color_desc.storageMode = MTLStorageModePrivate;
+		color_texture = [device newTextureWithDescriptor:color_desc];
+
+		MTLTextureDescriptor *depth_desc =
+		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
+		                                                     width:physical_size.width
+		                                                    height:physical_size.height
+		                                                 mipmapped:NO];
+		depth_desc.usage = MTLTextureUsageRenderTarget;
+		depth_desc.storageMode = MTLStorageModePrivate;
+		depth_texture = [device newTextureWithDescriptor:depth_desc];
+		if (color_texture == nil || depth_texture == nil) {
+			[color_texture release];
+			[depth_texture release];
+			[rate_map release];
+			fatal("could not allocate Metal gaze foveation intermediate textures");
+		}
+
+		[swapchain.foveation_color_texture release];
+		[swapchain.foveation_depth_texture release];
+		swapchain.foveation_color_texture = color_texture;
+		swapchain.foveation_depth_texture = depth_texture;
+		swapchain.foveation_physical_width = (uint32_t)physical_size.width;
+		swapchain.foveation_physical_height = (uint32_t)physical_size.height;
+	}
+
+	const MTLSizeAndAlign parameter_size = [rate_map parameterBufferSizeAndAlign];
+	id<MTLBuffer> rate_data =
+	    [device newBufferWithLength:parameter_size.size options:MTLResourceStorageModeShared];
+	if (rate_data == nil) {
+		[rate_map release];
+		fatal("could not allocate Metal gaze foveation rate-map parameter buffer");
+	}
+	[rate_map copyParameterDataToBuffer:rate_data offset:0];
+
+	[swapchain.foveation_rate_map release];
+	[swapchain.foveation_rate_data release];
+	swapchain.foveation_rate_map = rate_map;
+	swapchain.foveation_rate_data = rate_data;
+	swapchain.foveation_zone_x = zone_x;
+	swapchain.foveation_zone_y = zone_y;
+
+	const double logical_pixels = (double)swapchain.width * (double)swapchain.height;
+	const double physical_pixels = (double)physical_size.width * (double)physical_size.height;
+	fprintf(stderr,
+	        "psvr2-openxr-test: eye %zu foveation gaze=(%+.1f,%+.1f)deg zone=(%d,%d) "
+	        "physical=%zux%zu %.1f%% of full pixels\n",
+	        eye, gaze_yaw_deg, gaze_pitch_deg, zone_x, zone_y,
+	        physical_size.width, physical_size.height,
+	        100.0 * physical_pixels / logical_pixels);
+	return true;
+}
+
+static void
+encode_gaze_foveation_resolve(application &app,
+                              view_swapchain &swapchain,
+                              id<MTLCommandBuffer> command_buffer,
+                              id<MTLTexture> destination)
+{
+	if (swapchain.foveation_rate_map == nil || swapchain.foveation_rate_data == nil ||
+	    swapchain.foveation_color_texture == nil) {
+		fatal("gaze foveation resolve requested without initialized resources");
+	}
+
+	MTLRenderPassDescriptor *resolve_pass = [MTLRenderPassDescriptor renderPassDescriptor];
+	resolve_pass.colorAttachments[0].texture = destination;
+	resolve_pass.colorAttachments[0].loadAction = MTLLoadActionDontCare;
+	resolve_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+
+	id<MTLRenderCommandEncoder> resolve_encoder =
+	    [command_buffer renderCommandEncoderWithDescriptor:resolve_pass];
+	if (resolve_encoder == nil) {
+		fatal("could not create gaze foveation resolve encoder");
+	}
+	[resolve_encoder setRenderPipelineState:app.renderer.foveation_resolve_pipeline];
+	[resolve_encoder setFragmentBuffer:swapchain.foveation_rate_data offset:0 atIndex:0];
+	[resolve_encoder setFragmentTexture:swapchain.foveation_color_texture atIndex:0];
+	[resolve_encoder setViewport:(MTLViewport){
+	    0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
+	[resolve_encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
+	[resolve_encoder endEncoding];
+}
+
 static void
 append_gaze_marker(application &app, XrTime predicted_display_time)
 {
