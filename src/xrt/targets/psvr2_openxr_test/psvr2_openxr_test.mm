@@ -44,13 +44,14 @@ struct gpu_timing_state
 {
 	std::mutex mutex;
 	std::vector<double> samples_ms;
-	uint64_t completed = 0;
 };
 
-static gpu_timing_state g_gpu_timing;
+static gpu_timing_state g_gpu_timing_normal;
+static gpu_timing_state g_gpu_timing_foveated_scene;
+static gpu_timing_state g_gpu_timing_foveated_resolve;
 
 static void
-record_gpu_timing(id<MTLCommandBuffer> command_buffer, bool foveated)
+record_gpu_timing(gpu_timing_state &state, const char *label, id<MTLCommandBuffer> command_buffer)
 {
 	const CFTimeInterval start = command_buffer.GPUStartTime;
 	const CFTimeInterval end = command_buffer.GPUEndTime;
@@ -58,14 +59,13 @@ record_gpu_timing(id<MTLCommandBuffer> command_buffer, bool foveated)
 		return;
 	}
 
-	std::lock_guard<std::mutex> lock(g_gpu_timing.mutex);
-	g_gpu_timing.samples_ms.push_back((end - start) * 1000.0);
-	g_gpu_timing.completed++;
-	if (g_gpu_timing.samples_ms.size() < 240) {
+	std::lock_guard<std::mutex> lock(state.mutex);
+	state.samples_ms.push_back((end - start) * 1000.0);
+	if (state.samples_ms.size() < 240) {
 		return;
 	}
 
-	std::vector<double> sorted = g_gpu_timing.samples_ms;
+	std::vector<double> sorted = state.samples_ms;
 	std::sort(sorted.begin(), sorted.end());
 	double sum = 0.0;
 	for (double value : sorted) {
@@ -78,9 +78,9 @@ record_gpu_timing(id<MTLCommandBuffer> command_buffer, bool foveated)
 	};
 	fprintf(stderr,
 	        "psvr2-openxr-test: GPU %s n=%zu mean=%.3fms p50=%.3fms p90=%.3fms p99=%.3fms\n",
-	        foveated ? "foveated" : "normal", sorted.size(), sum / (double)sorted.size(),
+	        label, sorted.size(), sum / (double)sorted.size(),
 	        percentile(0.50), percentile(0.90), percentile(0.99));
-	g_gpu_timing.samples_ms.clear();
+	state.samples_ms.clear();
 }
 
 static void
@@ -1772,7 +1772,14 @@ render_views(application &app, XrTime predicted_display_time)
 
 	id<MTLCommandBuffer> command_buffer = [app.command_queue commandBuffer];
 	if (command_buffer == nil) {
-		fatal("could not allocate Metal command buffer");
+		fatal("could not allocate Metal scene command buffer");
+	}
+	id<MTLCommandBuffer> resolve_command_buffer = nil;
+	if (app.gaze_foveation) {
+		resolve_command_buffer = [app.command_queue commandBuffer];
+		if (resolve_command_buffer == nil) {
+			fatal("could not allocate Metal foveation resolve command buffer");
+		}
 	}
 
 	for (size_t i = 0; i < app.swapchains.size(); ++i) {
@@ -1839,14 +1846,24 @@ render_views(application &app, XrTime predicted_display_time)
 		[encoder endEncoding];
 
 		if (app.gaze_foveation) {
-			encode_gaze_foveation_resolve(app, swapchain, command_buffer, color_texture);
+			encode_gaze_foveation_resolve(app, swapchain, resolve_command_buffer, color_texture);
 		}
 	}
-	const bool timing_foveated = app.gaze_foveation;
-	[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-		record_gpu_timing(completed, timing_foveated);
-	}];
-	[command_buffer commit];
+	if (app.gaze_foveation) {
+		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+			record_gpu_timing(g_gpu_timing_foveated_scene, "foveated-scene", completed);
+		}];
+		[resolve_command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+			record_gpu_timing(g_gpu_timing_foveated_resolve, "foveated-resolve", completed);
+		}];
+		[command_buffer commit];
+		[resolve_command_buffer commit];
+	} else {
+		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+			record_gpu_timing(g_gpu_timing_normal, "normal", completed);
+		}];
+		[command_buffer commit];
+	}
 
 	for (view_swapchain &swapchain : app.swapchains) {
 		XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
