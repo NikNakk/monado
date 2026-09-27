@@ -389,6 +389,32 @@ compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 	return XRT_SUCCESS;
 }
 
+static xrt_result_t
+compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+	c->passthrough_active = false;
+	c->passthrough_has_application_layers = false;
+	return comp_layer_accum_begin(&c->base.layer_accum, data);
+}
+
+static xrt_result_t
+compositor_layer_passthrough(struct xrt_compositor *xc,
+                             struct xrt_device *xdev,
+                             const struct xrt_layer_data *data)
+{
+	struct comp_compositor *c = comp_compositor(xc);
+	(void)xdev;
+
+	/*
+	 * Keep camera-backed passthrough outside the Vulkan layer renderer.
+	 * The macOS PS VR2 target composites it in Metal at presentation time.
+	 * Pause state is serialised by the OpenXR/IPC layer data.
+	 */
+	c->passthrough_active = !data->passthrough.xrt_pt.paused && !data->passthrough.xrt_pl.paused;
+	return XRT_SUCCESS;
+}
+
 /*!
  * We have a fast path for single projection layer that goes directly
  * to the distortion shader, so no need to use the layer renderer.
@@ -418,6 +444,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	COMP_TRACE_MARKER();
 
 	struct comp_compositor *c = comp_compositor(xc);
+	c->passthrough_has_application_layers = c->base.layer_accum.layer_count > 0;
 	int64_t frame_id = c->frame.waited.id;
 	int64_t desired_present_time_ns = frame_id >= 0 ? (int64_t)c->frame.waited.desired_present_time_ns : 0;
 	int64_t predicted_display_time_ns = frame_id >= 0 ? (int64_t)c->frame.waited.predicted_display_time_ns : 0;
@@ -1254,6 +1281,10 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 
 	// Do this as early as possible.
 	comp_base_init(&c->base);
+
+	/* Override the generic no-op passthrough hooks for the native compositor. */
+	iface->layer_begin = compositor_layer_begin;
+	iface->layer_passthrough = compositor_layer_passthrough;
 
 	// Init the settings to default.
 	comp_settings_init(&c->settings, xdev);
