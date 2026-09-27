@@ -660,7 +660,7 @@ struct metal_renderer
 };
 
 #define OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE ((XrStructureType)0x7fff5056)
-#define OXR_MACOS_FOVEATION_BOUNDARY_COUNT 17
+#define OXR_MACOS_FOVEATION_BOUNDARY_COUNT 129
 
 struct oxr_macos_foveation_map_chain
 {
