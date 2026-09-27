@@ -31,6 +31,9 @@ add_subdirectory(math)
 # OS library.
 add_subdirectory(os)
 
+# Graphics-API-independent foveation policy.
+add_subdirectory(foveation)
+
 # Small reusable Metal client helpers.
 if(APPLE)
 	add_subdirectory(metal)

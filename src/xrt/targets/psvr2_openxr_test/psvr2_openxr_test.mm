@@ -18,6 +18,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 
+#include "foveation/u_foveation.h"
 #include "metal/m_metal_foveation.h"
 
 #include <simd/simd.h>
@@ -1709,7 +1710,7 @@ update_gaze_foveation_map(application &app,
 	                                  swapchain.height,
 	                                  zone_x,
 	                                  zone_y,
-	                                  app.foveation_profile_index,
+	                                  u_foveation_profile_get(app.foveation_profile_index),
 	                                  &built_map)) {
 		fatal("could not create Metal gaze foveation rasterization rate map");
 	}
@@ -1795,7 +1796,7 @@ update_gaze_foveation_map(application &app,
 	        physical_size.width, physical_size.height,
 	        100.0 * physical_pixels / logical_pixels,
 	        app.gaze_foveation_fused ? " (fused)" : "",
-	        m_metal_foveation_profile_get(app.foveation_profile_index)->name);
+	        u_foveation_profile_get(app.foveation_profile_index)->name);
 	return true;
 }
 
@@ -2183,7 +2184,7 @@ render_frame(application &app)
 static void
 set_foveation_profile(application &app, int index)
 {
-	index = std::max(0, std::min(index, M_METAL_FOVEATION_PROFILE_COUNT - 1));
+	index = std::max(0, std::min(index, U_FOVEATION_PROFILE_COUNT - 1));
 	if (index == app.foveation_profile_index) {
 		return;
 	}
@@ -2192,7 +2193,7 @@ set_foveation_profile(application &app, int index)
 	if (app.foveation_profile_revision == 0) {
 		app.foveation_profile_revision = 1;
 	}
-	const struct m_metal_foveation_profile *profile = m_metal_foveation_profile_get(index);
+	const struct u_foveation_profile *profile = u_foveation_profile_get(index);
 	fprintf(stderr,
 	        "psvr2-openxr-test: foveation profile -> %s (middle %.2f, peripheral %.2f); rebuilding rate maps\n",
 	        profile->name, profile->middle_rate, profile->peripheral_rate);
@@ -2354,7 +2355,7 @@ run(int argc, char **argv)
 			gaze_foveation = true;
 			gaze_foveation_fused = true;
 		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
-			foveation_profile_index = m_metal_foveation_profile_find(argv[++i]);
+			foveation_profile_index = u_foveation_profile_find(argv[++i]);
 			if (foveation_profile_index < 0) {
 				fprintf(stderr, "Unknown foveation profile: %s (expected reference, strong, aggressive, aggressive-plus, near-extreme, or extreme)\n", argv[i]);
 				return EXIT_FAILURE;
@@ -2401,7 +2402,7 @@ run(int argc, char **argv)
 	app.gaze_foveation_fused = gaze_foveation_fused;
 	app.foveation_profile_index = foveation_profile_index;
 	if (gaze_foveation) {
-		const struct m_metal_foveation_profile *profile = m_metal_foveation_profile_get(foveation_profile_index);
+		const struct u_foveation_profile *profile = u_foveation_profile_get(foveation_profile_index);
 		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)\n",
 		        profile->name, profile->middle_rate, profile->peripheral_rate);
 	}

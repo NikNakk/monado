@@ -359,7 +359,7 @@ run(int argc, char **argv)
 			gaze_foveation = true;
 			gaze_foveation_fused = true;
 		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
-			foveation_profile_index = m_metal_foveation_profile_find(argv[++i]);
+			foveation_profile_index = u_foveation_profile_find(argv[++i]);
 			if (foveation_profile_index < 0) {
 				fprintf(stderr, "Unknown foveation profile: %s (expected reference, strong, aggressive, aggressive-plus, near-extreme, or extreme)\n", argv[i]);
 				return EXIT_FAILURE;
@@ -406,7 +406,7 @@ run(int argc, char **argv)
 	app.gaze_foveation_fused = gaze_foveation_fused;
 	app.foveation_profile_index = foveation_profile_index;
 	if (gaze_foveation) {
-		const struct m_metal_foveation_profile *profile = m_metal_foveation_profile_get(foveation_profile_index);
+		const struct u_foveation_profile *profile = u_foveation_profile_get(foveation_profile_index);
 		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)\n",
 		        profile->name, profile->middle_rate, profile->peripheral_rate);
 	}
