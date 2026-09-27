@@ -104,11 +104,35 @@ base_create_semaphore(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
+base_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	(void)xc;
+	(void)info;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+base_create_passthrough_layer(struct xrt_compositor *xc, const struct xrt_passthrough_layer_create_info *info)
+{
+	(void)xc;
+	(void)info;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+base_destroy_passthrough(struct xrt_compositor *xc)
+{
+	(void)xc;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 base_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	struct comp_base *cb = comp_base(xc);
 	return comp_layer_accum_begin(&cb->layer_accum, data);
 }
+
 
 static xrt_result_t
 base_layer_projection(struct xrt_compositor *xc,
@@ -182,6 +206,14 @@ base_layer_equirect2(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
+base_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev, const struct xrt_layer_data *data)
+{
+	struct comp_base *cb = comp_base(xc);
+	(void)xdev;
+	return comp_layer_accum_passthrough(&cb->layer_accum, data);
+}
+
+static xrt_result_t
 base_wait_frame(struct xrt_compositor *xc,
                 int64_t *out_frame_id,
                 int64_t *out_predicted_display_time_ns,
@@ -232,6 +264,9 @@ comp_base_init(struct comp_base *cb)
 	iface->import_swapchain = base_import_swapchain;
 	iface->create_semaphore = base_create_semaphore;
 	iface->import_fence = base_import_fence;
+	iface->create_passthrough = base_create_passthrough;
+	iface->create_passthrough_layer = base_create_passthrough_layer;
+	iface->destroy_passthrough = base_destroy_passthrough;
 	iface->layer_begin = base_layer_begin;
 	iface->layer_projection = base_layer_projection;
 	iface->layer_projection_depth = base_layer_projection_depth;
@@ -240,6 +275,7 @@ comp_base_init(struct comp_base *cb)
 	iface->layer_cylinder = base_layer_cylinder;
 	iface->layer_equirect1 = base_layer_equirect1;
 	iface->layer_equirect2 = base_layer_equirect2;
+	iface->layer_passthrough = base_layer_passthrough;
 	iface->wait_frame = base_wait_frame;
 
 	u_threading_stack_init(&cb->cscs.destroy_swapchains);
