@@ -139,12 +139,22 @@ render_views(application &app, XrTime predicted_display_time)
 		check_xr(app.xr.wait_swapchain_image(app.swapchains[i].handle, &wait_info), "xrWaitSwapchainImage");
 	}
 
-	float foveation_yaw_deg = 0.0f;
-	float foveation_pitch_deg = 0.0f;
-	if (app.gaze_foveation &&
-	    !locate_gaze_relative_to_view(app, predicted_display_time, &foveation_yaw_deg, &foveation_pitch_deg)) {
-		foveation_yaw_deg = 0.0f;
-		foveation_pitch_deg = 0.0f;
+	float foveation_yaw_deg = app.last_foveation_yaw_deg;
+	float foveation_pitch_deg = app.last_foveation_pitch_deg;
+	if (app.gaze_foveation) {
+		float current_yaw_deg = 0.0f;
+		float current_pitch_deg = 0.0f;
+		if (locate_gaze_relative_to_view(
+		        app, predicted_display_time, &current_yaw_deg, &current_pitch_deg)) {
+			app.last_foveation_yaw_deg = current_yaw_deg;
+			app.last_foveation_pitch_deg = current_pitch_deg;
+			app.last_foveation_gaze_valid = true;
+			foveation_yaw_deg = current_yaw_deg;
+			foveation_pitch_deg = current_pitch_deg;
+		} else if (!app.last_foveation_gaze_valid) {
+			foveation_yaw_deg = 0.0f;
+			foveation_pitch_deg = 0.0f;
+		}
 	}
 
 	id<MTLCommandBuffer> command_buffer = [app.command_queue commandBuffer];
@@ -207,6 +217,10 @@ render_views(application &app, XrTime predicted_display_time)
 			encode_gaze_foveation_resolve(app, swapchain, command_buffer, color_texture);
 		}
 	}
+	const bool timing_foveated = app.gaze_foveation;
+	[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+		record_gpu_timing(completed, timing_foveated);
+	}];
 	[command_buffer commit];
 
 	for (view_swapchain &swapchain : app.swapchains) {
