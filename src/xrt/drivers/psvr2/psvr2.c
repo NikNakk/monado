@@ -1157,8 +1157,14 @@ img_xfer_cb(struct libusb_transfer *xfer)
 				}
 			}
 		} else if (xfer->actual_length == USB_CAM_MODE1_XFER_SIZE) {
+			struct xrt_frame_sink *passthrough_sinks[2] = {NULL, NULL};
+			os_mutex_lock(&hmd->data_lock);
+			passthrough_sinks[0] = hmd->passthrough_sinks[0];
+			passthrough_sinks[1] = hmd->passthrough_sinks[1];
+			os_mutex_unlock(&hmd->data_lock);
+
 			bool have_consumer = u_sink_debug_is_active(&hmd->debug_sinks[3]) ||
-			                     hmd->passthrough_sinks[0] != NULL || hmd->passthrough_sinks[1] != NULL;
+			                     passthrough_sinks[0] != NULL || passthrough_sinks[1] != NULL;
 			if (have_consumer) {
 				struct xrt_frame *xf = NULL;
 				u_frame_create_one_off(XRT_FORMAT_L8, 1280, 640, &xf);
@@ -1173,7 +1179,7 @@ img_xfer_cb(struct libusb_transfer *xfer)
 				}
 
 				for (int eye = 0; eye < 2; eye++) {
-					struct xrt_frame_sink *sink = hmd->passthrough_sinks[eye];
+					struct xrt_frame_sink *sink = passthrough_sinks[eye];
 					if (sink == NULL) {
 						continue;
 					}
