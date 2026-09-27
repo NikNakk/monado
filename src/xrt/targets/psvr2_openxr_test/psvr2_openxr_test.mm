@@ -374,6 +374,69 @@ add_world_box(diagnostic_scene &scene,
 	scene.world_instances.push_back({basis_model(position, scene.right, scene.up, back, scale), color});
 }
 
+static std::array<uint8_t, 7>
+glyph_5x7(char c)
+{
+	switch (c) {
+	case 'A': return {0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11};
+	case 'D': return {0x1e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1e};
+	case 'E': return {0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x1f};
+	case 'F': return {0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x10};
+	case 'H': return {0x11, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11};
+	case 'I': return {0x1f, 0x04, 0x04, 0x04, 0x04, 0x04, 0x1f};
+	case 'L': return {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1f};
+	case 'M': return {0x11, 0x1b, 0x15, 0x15, 0x11, 0x11, 0x11};
+	case 'N': return {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11};
+	case 'O': return {0x0e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e};
+	case 'P': return {0x1e, 0x11, 0x11, 0x1e, 0x10, 0x10, 0x10};
+	case 'R': return {0x1e, 0x11, 0x11, 0x1e, 0x14, 0x12, 0x11};
+	case 'S': return {0x0f, 0x10, 0x10, 0x0e, 0x01, 0x01, 0x1e};
+	case 'T': return {0x1f, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04};
+	case 'V': return {0x11, 0x11, 0x11, 0x11, 0x11, 0x0a, 0x04};
+	case 'X': return {0x11, 0x11, 0x0a, 0x04, 0x0a, 0x11, 0x11};
+	case 'Y': return {0x11, 0x11, 0x0a, 0x04, 0x04, 0x04, 0x04};
+	case '1': return {0x04, 0x0c, 0x14, 0x04, 0x04, 0x04, 0x1f};
+	case '2': return {0x0e, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1f};
+	case '3': return {0x1e, 0x01, 0x01, 0x0e, 0x01, 0x01, 0x1e};
+	default: return {0, 0, 0, 0, 0, 0, 0};
+	}
+}
+
+static void
+add_world_text(diagnostic_scene &scene,
+               float center_x,
+               float center_y,
+               float z,
+               float pixel,
+               const char *text,
+               simd_float4 color)
+{
+	const size_t length = strlen(text);
+	if (length == 0) {
+		return;
+	}
+	const float advance = 6.0f * pixel;
+	const float total_width = advance * (float)length - pixel;
+	const float left = center_x - 0.5f * total_width;
+	const float top = center_y + 3.5f * pixel;
+	const float glyph_depth = 0.008f;
+	const float block = pixel * 0.82f;
+
+	for (size_t index = 0; index < length; ++index) {
+		const auto rows = glyph_5x7(text[index]);
+		for (int row = 0; row < 7; ++row) {
+			for (int column = 0; column < 5; ++column) {
+				if ((rows[row] & (1u << (4 - column))) == 0) {
+					continue;
+				}
+				const float x = left + (float)index * advance + ((float)column + 0.5f) * pixel;
+				const float y = top - ((float)row + 0.5f) * pixel;
+				add_world_box(scene, x, y, z, make_float3(block, block, glyph_depth), color);
+			}
+		}
+	}
+}
+
 static void
 initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 {
@@ -460,17 +523,27 @@ initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 		              make_float3(0.035f, 1.25f, 0.035f), cardinal_colors[cardinal]);
 	}
 
-	// High-detail foveation wall on the initial forward axis. The alpha component
-	// is repurposed as a procedural pattern selector by the diagnostic shader:
-	// 2=checkerboard, 3=radial spokes/rings, 4=multiscale detail, 5=acuity bars.
-	// Four panels cover a broad enough visual angle that the user can move gaze
-	// between them while keeping the head mostly still.
+	// High-detail foveation wall on the initial forward axis. The left targets
+	// retain broad-spectrum procedural detail; the right side is now a text
+	// acuity chart. The previous radial/bar targets produced obvious moire even
+	// without foveation, so they were poor discriminators for the VRR path.
 	const float detail_z = 2.75f;
 	const simd_float3 detail_scale = make_float3(0.72f, 0.44f, 0.012f);
 	add_world_box(scene, -0.78f, +0.50f, detail_z, detail_scale, make_float4(1.0f, 1.0f, 1.0f, 2.0f));
-	add_world_box(scene, +0.78f, +0.50f, detail_z, detail_scale, make_float4(1.0f, 1.0f, 1.0f, 3.0f));
 	add_world_box(scene, -0.78f, -0.50f, detail_z, detail_scale, make_float4(1.0f, 1.0f, 1.0f, 4.0f));
-	add_world_box(scene, +0.78f, -0.50f, detail_z, detail_scale, make_float4(1.0f, 1.0f, 1.0f, 5.0f));
+
+	// Dark backing board for high-contrast text. Glyphs are actual world-space
+	// geometry rather than another high-frequency procedural pattern, making
+	// legibility a more useful subjective comparison between normal and fused.
+	add_world_box(scene, +0.78f, 0.00f, 2.77f, make_float3(1.35f, 1.18f, 0.010f),
+	              make_float4(0.035f, 0.040f, 0.050f, 1.0f));
+	const simd_float4 text_white = make_float4(0.96f, 0.97f, 1.0f, 1.0f);
+	const simd_float4 text_dim = make_float4(0.58f, 0.62f, 0.68f, 1.0f);
+	add_world_text(scene, +0.78f, +0.38f, 2.74f, 0.024f, "FOVEATION", text_white);
+	add_world_text(scene, +0.78f, +0.15f, 2.74f, 0.018f, "SHARP TEXT", text_white);
+	add_world_text(scene, +0.78f, -0.05f, 2.74f, 0.014f, "SMALL TYPE", text_white);
+	add_world_text(scene, +0.78f, -0.23f, 2.74f, 0.011f, "READ THIS", text_dim);
+	add_world_text(scene, +0.78f, -0.39f, 2.74f, 0.0085f, "FINE 123", text_white);
 
 	// Retain a world-locked fixation cross on the initial forward axis. The
 	// magenta head-locked cross remains available independently in every view.
@@ -480,7 +553,7 @@ initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 	scene.initialized = true;
 	fprintf(stderr, "psvr2-openxr-test: diagnostic world contains %zu world-locked boxes over 360 degrees\n",
 	        scene.world_instances.size());
-	fprintf(stderr, "psvr2-openxr-test: foveation detail wall added at 2.75 m — checker, radial, multiscale, acuity bars\n");
+	fprintf(stderr, "psvr2-openxr-test: foveation detail wall added at 2.75 m — checker, multiscale, text acuity chart\n");
 }
 
 static void
@@ -643,7 +716,7 @@ struct metal_renderer
 	id<MTLDepthStencilState> depth_state = nil;
 	id<MTLBuffer> cube_vertex_buffer = nil;
 	id<MTLBuffer> instance_buffer = nil;
-	size_t max_instances = 256;
+	size_t max_instances = 1536;
 
 	void initialize(id<MTLDevice> device, MTLPixelFormat color_format)
 	{
