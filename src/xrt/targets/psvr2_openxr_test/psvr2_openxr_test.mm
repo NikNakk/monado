@@ -1838,12 +1838,12 @@ update_gaze_foveation_map(application &app,
 	const double physical_pixels = (double)physical_size.width * (double)physical_size.height;
 	fprintf(stderr,
 	        "psvr2-openxr-test: eye %zu foveation gaze=(%+.1f,%+.1f)deg zone=(%d,%d) "
-	        "physical=%zux%zu %.1f%% of full pixels%s\n",
+	        "physical=%zux%zu %.1f%% of full pixels%s profile=%s\n",
 	        eye, gaze_yaw_deg, gaze_pitch_deg, zone_x, zone_y,
 	        physical_size.width, physical_size.height,
 	        100.0 * physical_pixels / logical_pixels,
 	        app.gaze_foveation_fused ? " (fused)" : "",
-			        k_foveation_profiles[(size_t)app.foveation_profile_index].name);
+	        k_foveation_profiles[(size_t)app.foveation_profile_index].name);
 	return true;
 }
 
@@ -2421,7 +2421,7 @@ run(int argc, char **argv)
 			        "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve pass.\n"
 			        "  --gaze-foveation-fused renders Metal VRR directly into the OpenXR image and lets Monado decode it.\n"
 			        "  --foveation-profile selects a fixed starting profile (default: reference).\n"
-			        "  While foveation is running in a terminal: 1-4 select profiles, [/] step, r restores reference.\n"
+			        "  While foveation is running in a terminal: 1-4 select profiles, [ and ] step, r restores reference.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
 			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
 			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
