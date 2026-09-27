@@ -40,7 +40,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Depth layers | **Working experimental** | `XR_KHR_composition_layer_depth` is exposed for Metal and depth-aware positional reprojection is available. |
 | Wine OpenXR / OpenVR | **Working experimental** | Native Monado remains the compositor/runtime; Windows D3D11 clients run through Wine/DXMT and OpenVR through OpenComposite or xrizer. |
 | SteamVR games under Wine | **Working for a small tested set** | At least several SteamVR titles have reached runnable/interactive states; Half-Life: Alyx is the most heavily exercised path. |
-| PS VR2 passthrough in Monado | **Not integrated** | Camera acquisition/calibration work exists, but there is no finished Monado/OpenXR passthrough path. |
+| PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; hardware validation/calibration refinement remains. |
 | PS VR2 eye tracking | **Not yet usable** | The low-level stream can be reached, but the required calibration path is not solved. |
 | SteamVR Home | **Unresolved** | Not currently working; feasibility depends on how much additional SteamVR/OpenVR behaviour can be reproduced without Valve's compositor. |
 | End-user packaging | **Not done** | Development launchd installation exists, but there is no polished signed/notarized installer or settings application. |
@@ -315,7 +315,9 @@ is retained for that history:
 The independent native player also demonstrates that the front-camera image can
 be acquired and displayed on macOS.
 
-What is still missing in Monado is the runtime layer above acquisition:
+The integration branch now has an experimental runtime path from the stock-headset BC4 camera stream through `XR_FB_passthrough` to the final macOS Metal presentation stage. See [PS VR2 passthrough on macOS](macos-psvr2-passthrough.md).
+
+What is still missing before this should be considered calibrated MR support:
 
 - a stable camera/calibration API in the PS VR2 driver;
 - distortion/rectification and pose/time alignment suitable for passthrough;
