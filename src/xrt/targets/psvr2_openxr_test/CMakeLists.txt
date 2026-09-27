@@ -11,6 +11,7 @@ target_link_libraries(
 	psvr2-openxr-test
 	PRIVATE
 		xrt-external-openxr
+		aux_metal_foveation
 		"-framework Foundation"
 		"-framework Metal"
 	)

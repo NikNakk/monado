@@ -31,6 +31,11 @@ add_subdirectory(math)
 # OS library.
 add_subdirectory(os)
 
+# Small reusable Metal client helpers.
+if(APPLE)
+	add_subdirectory(metal)
+endif()
+
 # GStreamer library.
 if(XRT_HAVE_GST)
 	add_subdirectory(gstreamer)
