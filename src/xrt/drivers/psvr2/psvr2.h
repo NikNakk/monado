@@ -228,11 +228,22 @@ struct psvr2_hmd
 	/* Camera debug sinks */
 	struct u_sink_debug debug_sinks[4];
 
+	/* Optional consumers for the two 640x640 passthrough camera views.
+	 * Lifetime is owned by the caller, following the WMR camera sink pattern. */
+	struct xrt_frame_sink *passthrough_sinks[2];
+
 	/* USB communication */
 	libusb_context *ctx;
 	libusb_device_handle *dev;
-	/* Whether to claim and stream the camera, gaze, and other optional interfaces. */
+	/* Optional USB streams. auxiliary_streams_enabled retains the historical
+	 * all-streams switch; camera and gaze can now be enabled independently. */
 	bool auxiliary_streams_enabled;
+	bool camera_streams_enabled;
+	bool gaze_streams_enabled;
+
+	/* Expose the PSVR2 SLAM origin as an OpenXR stage space. This is opt-in
+	 * until we have a persisted Sony play-area/floor calibration. */
+	bool stage_space_enabled;
 
 	struct os_thread_helper usb_thread;
 	int usb_complete;
