@@ -79,7 +79,7 @@ psvr2_get_slam_timing(struct xrt_device *xdev, struct psvr2_slam_timing *out);
  * stream validated by GAV: two 1024x1016 BC4 grayscale frames. This follows
  * the existing WMR camera sink model; the caller owns sink lifetime.
  */
-bool
+xrt_result_t
 psvr2_set_passthrough_sinks(struct xrt_device *xdev,
                             struct xrt_frame_sink *left,
                             struct xrt_frame_sink *right);
