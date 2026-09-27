@@ -30,6 +30,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,49 @@
 #endif
 
 static volatile sig_atomic_t g_stop_requested = 0;
+
+struct gpu_timing_state
+{
+	std::mutex mutex;
+	std::vector<double> samples_ms;
+	uint64_t completed = 0;
+};
+
+static gpu_timing_state g_gpu_timing;
+
+static void
+record_gpu_timing(id<MTLCommandBuffer> command_buffer, bool foveated)
+{
+	const CFTimeInterval start = command_buffer.GPUStartTime;
+	const CFTimeInterval end = command_buffer.GPUEndTime;
+	if (!(end > start)) {
+		return;
+	}
+
+	std::lock_guard<std::mutex> lock(g_gpu_timing.mutex);
+	g_gpu_timing.samples_ms.push_back((end - start) * 1000.0);
+	g_gpu_timing.completed++;
+	if (g_gpu_timing.samples_ms.size() < 240) {
+		return;
+	}
+
+	std::vector<double> sorted = g_gpu_timing.samples_ms;
+	std::sort(sorted.begin(), sorted.end());
+	double sum = 0.0;
+	for (double value : sorted) {
+		sum += value;
+	}
+	const auto percentile = [&](double fraction) {
+		const size_t index = (size_t)fmin((double)(sorted.size() - 1),
+		                                  floor(fraction * (double)(sorted.size() - 1)));
+		return sorted[index];
+	};
+	fprintf(stderr,
+	        "psvr2-openxr-test: GPU %s n=%zu mean=%.3fms p50=%.3fms p90=%.3fms p99=%.3fms\n",
+	        foveated ? "foveated" : "normal", sorted.size(), sum / (double)sorted.size(),
+	        percentile(0.50), percentile(0.90), percentile(0.99));
+	g_gpu_timing.samples_ms.clear();
+}
 
 static void
 handle_signal(int signal_number)
@@ -687,6 +731,9 @@ struct application
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool gaze_supported = false;
+	bool last_foveation_gaze_valid = false;
+	float last_foveation_yaw_deg = 0.0f;
+	float last_foveation_pitch_deg = 0.0f;
 	gaze_calibration_state gaze_calibration;
 	XrActionSet gaze_action_set = XR_NULL_HANDLE;
 	XrAction gaze_action = XR_NULL_HANDLE;
@@ -1445,8 +1492,28 @@ update_gaze_foveation_map(application &app,
 	v = clampf01(v);
 
 	static const int zone_count = 16;
-	const int zone_x = (int)fminf((float)(zone_count - 1), floorf(u * zone_count));
-	const int zone_y = (int)fminf((float)(zone_count - 1), floorf(v * zone_count));
+	int zone_x = (int)fminf((float)(zone_count - 1), floorf(u * zone_count));
+	int zone_y = (int)fminf((float)(zone_count - 1), floorf(v * zone_count));
+
+	/*
+	 * Keep the current cell until gaze moves a little beyond its boundary.
+	 * This avoids rebuilding immutable Metal rate maps when filtered gaze
+	 * jitters on a 16x16 cell edge.
+	 */
+	if (swapchain.foveation_rate_map != nil) {
+		const float cell = 1.0f / (float)zone_count;
+		const float margin = 0.18f * cell;
+		const float x_min = swapchain.foveation_zone_x * cell - margin;
+		const float x_max = (swapchain.foveation_zone_x + 1) * cell + margin;
+		const float y_min = swapchain.foveation_zone_y * cell - margin;
+		const float y_max = (swapchain.foveation_zone_y + 1) * cell + margin;
+		if (u >= x_min && u < x_max) {
+			zone_x = swapchain.foveation_zone_x;
+		}
+		if (v >= y_min && v < y_max) {
+			zone_y = swapchain.foveation_zone_y;
+		}
+	}
 	if (swapchain.foveation_rate_map != nil &&
 	    zone_x == swapchain.foveation_zone_x && zone_y == swapchain.foveation_zone_y) {
 		return true;
@@ -1685,13 +1752,22 @@ render_views(application &app, XrTime predicted_display_time)
 		}
 	}
 
-	float foveation_yaw_deg = 0.0f;
-	float foveation_pitch_deg = 0.0f;
-	if (app.gaze_foveation &&
-	    !locate_gaze_relative_to_view(app, predicted_display_time, &foveation_yaw_deg, &foveation_pitch_deg)) {
-		/* Keep a useful centred map if gaze is briefly unavailable. */
-		foveation_yaw_deg = 0.0f;
-		foveation_pitch_deg = 0.0f;
+	float foveation_yaw_deg = app.last_foveation_yaw_deg;
+	float foveation_pitch_deg = app.last_foveation_pitch_deg;
+	if (app.gaze_foveation) {
+		float current_yaw_deg = 0.0f;
+		float current_pitch_deg = 0.0f;
+		if (locate_gaze_relative_to_view(
+		        app, predicted_display_time, &current_yaw_deg, &current_pitch_deg)) {
+			app.last_foveation_yaw_deg = current_yaw_deg;
+			app.last_foveation_pitch_deg = current_pitch_deg;
+			app.last_foveation_gaze_valid = true;
+			foveation_yaw_deg = current_yaw_deg;
+			foveation_pitch_deg = current_pitch_deg;
+		} else if (!app.last_foveation_gaze_valid) {
+			foveation_yaw_deg = 0.0f;
+			foveation_pitch_deg = 0.0f;
+		}
 	}
 
 	id<MTLCommandBuffer> command_buffer = [app.command_queue commandBuffer];
@@ -1766,6 +1842,10 @@ render_views(application &app, XrTime predicted_display_time)
 			encode_gaze_foveation_resolve(app, swapchain, command_buffer, color_texture);
 		}
 	}
+	const bool timing_foveated = app.gaze_foveation;
+	[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+		record_gpu_timing(completed, timing_foveated);
+	}];
 	[command_buffer commit];
 
 	for (view_swapchain &swapchain : app.swapchains) {
