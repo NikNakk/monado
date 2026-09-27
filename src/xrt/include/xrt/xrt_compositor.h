@@ -215,12 +215,30 @@ struct xrt_sub_image
  * The @ref xrt_swapchain references and @ref xrt_device are provided outside of
  * this struct.
  */
+#define XRT_FOVEATION_MAP_BOUNDARY_COUNT 17
+
+/*!
+ * Experimental logical-to-physical coordinate map for Metal variable
+ * rasterization-rate projection images. Boundary values are normalized to the
+ * full source texture. The 17 entries describe the boundaries of a 16-cell
+ * piecewise-linear map.
+ */
+struct xrt_foveation_map_data
+{
+	uint32_t enabled;
+	uint32_t boundary_count;
+	float x[XRT_FOVEATION_MAP_BOUNDARY_COUNT];
+	float y[XRT_FOVEATION_MAP_BOUNDARY_COUNT];
+};
+
 struct xrt_layer_projection_view_data
 {
 	struct xrt_sub_image sub;
 
 	struct xrt_fov fov;
 	struct xrt_pose pose;
+
+	struct xrt_foveation_map_data foveation;
 };
 
 /*!
