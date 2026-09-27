@@ -208,9 +208,11 @@ base_layer_equirect2(struct xrt_compositor *xc,
 static xrt_result_t
 base_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev, const struct xrt_layer_data *data)
 {
-	struct comp_base *cb = comp_base(xc);
+	(void)xc;
 	(void)xdev;
-	return comp_layer_accum_passthrough(&cb->layer_accum, data);
+	(void)data;
+	/* Targets that can actually render passthrough override this hook. */
+	return XRT_SUCCESS;
 }
 
 static xrt_result_t
