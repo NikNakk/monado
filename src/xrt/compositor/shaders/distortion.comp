@@ -37,9 +37,9 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	vec4 new_origin_in_source_view_scanout_end[2];
 	uvec4 has_depth[2];
 
-	// 17 logical-cell boundary values packed into five vec4s per eye.
-	vec4 foveation_x[10];
-	vec4 foveation_y[10];
+	// 129 transform samples packed into 33 vec4s per eye.
+	vec4 foveation_x[66];
+	vec4 foveation_y[66];
 	// x: enabled, y: boundary count.
 	uvec4 foveation[2];
 }ubo;
@@ -84,21 +84,24 @@ vec2 position_to_distortion_uv(ivec2 extent, uint ix, uint iy)
 	return dist_uv;
 }
 
+const uint FOVEATION_BOUNDARY_COUNT = 129u;
+const uint FOVEATION_BOUNDARY_VEC4_COUNT = 33u;
+
 float foveation_boundary_x(uint iz, uint index)
 {
-	uint packed = iz * 5u + index / 4u;
+	uint packed = iz * FOVEATION_BOUNDARY_VEC4_COUNT + index / 4u;
 	return ubo.foveation_x[packed][index % 4u];
 }
 
 float foveation_boundary_y(uint iz, uint index)
 {
-	uint packed = iz * 5u + index / 4u;
+	uint packed = iz * FOVEATION_BOUNDARY_VEC4_COUNT + index / 4u;
 	return ubo.foveation_y[packed][index % 4u];
 }
 
 vec2 transform_uv_foveation(vec2 uv, uint iz)
 {
-	if (ubo.foveation[iz].x == 0u || ubo.foveation[iz].y != 17u) {
+	if (ubo.foveation[iz].x == 0u || ubo.foveation[iz].y != FOVEATION_BOUNDARY_COUNT) {
 		return uv;
 	}
 
@@ -107,8 +110,8 @@ vec2 transform_uv_foveation(vec2 uv, uint iz)
 		return uv;
 	}
 
-	const float cells = 16.0;
-	vec2 scaled = min(uv * cells, vec2(cells - 1e-6));
+	const float intervals = float(FOVEATION_BOUNDARY_COUNT - 1u);
+	vec2 scaled = min(uv * intervals, vec2(intervals - 1e-6));
 	uvec2 cell = uvec2(floor(scaled));
 	vec2 local = fract(scaled);
 
