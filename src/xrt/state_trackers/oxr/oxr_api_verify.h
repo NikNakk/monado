@@ -321,10 +321,15 @@ struct oxr_subaction_paths;
 	} while (false)
 
 #define OXR_VERIFY_PASSTHROUGH_FLAGS(log, flags)                                                                       \
-	if (flags == 0 ||                                                                                              \
-	    (flags & (XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB | XR_PASSTHROUGH_LAYER_DEPTH_BIT_FB)) == 0)         \
-		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,                                                     \
-		                 "flags is not a valid combination of XrPassthroughFlagBitsFB values");
+	do {                                                                                                           \
+		const XrPassthroughFlagsFB valid_flags =                                                               \
+		    XR_PASSTHROUGH_IS_RUNNING_AT_CREATION_BIT_FB | XR_PASSTHROUGH_LAYER_DEPTH_BIT_FB;                  \
+		/* OpenXR explicitly permits zero here: flags is "0 or a valid combination". */                        \
+		if (((flags) & ~valid_flags) != 0) {                                                                    \
+			return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,                                               \
+			                 "flags contains invalid XrPassthroughFlagBitsFB values");                        \
+		}                                                                                                      \
+	} while (false)
 
 #define OXR_VERIFY_PASSTHROUGH_LAYER_PURPOSE(log, purpose)                                                             \
 	if ((purpose != XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB &&                                              \
