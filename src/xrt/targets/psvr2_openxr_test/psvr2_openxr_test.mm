@@ -22,6 +22,8 @@
 
 #include <dlfcn.h>
 #include <signal.h>
+#include <termios.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -39,6 +41,39 @@
 #endif
 
 static volatile sig_atomic_t g_stop_requested = 0;
+
+struct foveation_profile
+{
+	const char *name;
+	float middle_rate;
+	float peripheral_rate;
+};
+
+static constexpr std::array<foveation_profile, 4> k_foveation_profiles = {{
+    {"reference", 0.70f, 0.45f},
+    {"strong", 0.60f, 0.35f},
+    {"aggressive", 0.50f, 0.25f},
+    {"extreme", 0.40f, 0.20f},
+}};
+
+static int
+find_foveation_profile(const char *name)
+{
+	for (size_t i = 0; i < k_foveation_profiles.size(); ++i) {
+		if (strcmp(name, k_foveation_profiles[i].name) == 0) {
+			return (int)i;
+		}
+	}
+	return -1;
+}
+
+struct terminal_input_state
+{
+	bool active = false;
+	int old_flags = 0;
+	struct termios old_termios = {};
+};
+
 
 struct gpu_timing_state
 {
@@ -833,6 +868,7 @@ struct view_swapchain
 	int foveation_zone_y = -1;
 	uint32_t foveation_physical_width = 0;
 	uint32_t foveation_physical_height = 0;
+	uint32_t foveation_profile_revision = 0;
 };
 
 struct gaze_calibration_target
@@ -888,6 +924,9 @@ struct application
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool gaze_foveation_fused = false;
+	int foveation_profile_index = 0;
+	uint32_t foveation_profile_revision = 1;
+	terminal_input_state terminal_input;
 	bool gaze_supported = false;
 	bool last_foveation_gaze_valid = false;
 	float last_foveation_yaw_deg = 0.0f;
@@ -1622,6 +1661,7 @@ release_gaze_foveation_resources(view_swapchain &swapchain)
 	swapchain.foveation_zone_y = -1;
 	swapchain.foveation_physical_width = 0;
 	swapchain.foveation_physical_height = 0;
+	swapchain.foveation_profile_revision = 0;
 }
 
 static bool
@@ -1675,7 +1715,8 @@ update_gaze_foveation_map(application &app,
 		}
 	}
 	if (swapchain.foveation_rate_map != nil &&
-	    zone_x == swapchain.foveation_zone_x && zone_y == swapchain.foveation_zone_y) {
+	    zone_x == swapchain.foveation_zone_x && zone_y == swapchain.foveation_zone_y &&
+	    swapchain.foveation_profile_revision == app.foveation_profile_revision) {
 		return true;
 	}
 
@@ -1684,13 +1725,14 @@ update_gaze_foveation_map(application &app,
 		fatal("Metal device does not support variable rasterization rate maps");
 	}
 
+	const foveation_profile &profile = k_foveation_profiles[(size_t)app.foveation_profile_index];
 	float horizontal[zone_count];
 	float vertical[zone_count];
 	for (int i = 0; i < zone_count; ++i) {
 		const int dx = abs(i - zone_x);
 		const int dy = abs(i - zone_y);
-		horizontal[i] = dx <= 1 ? 1.0f : (dx <= 3 ? 0.70f : 0.45f);
-		vertical[i] = dy <= 1 ? 1.0f : (dy <= 3 ? 0.70f : 0.45f);
+		horizontal[i] = dx <= 1 ? 1.0f : (dx <= 3 ? profile.middle_rate : profile.peripheral_rate);
+		vertical[i] = dy <= 1 ? 1.0f : (dy <= 3 ? profile.middle_rate : profile.peripheral_rate);
 	}
 
 	MTLRasterizationRateLayerDescriptor *layer =
@@ -1790,6 +1832,7 @@ update_gaze_foveation_map(application &app,
 	swapchain.foveation_rate_data = rate_data;
 	swapchain.foveation_zone_x = zone_x;
 	swapchain.foveation_zone_y = zone_y;
+	swapchain.foveation_profile_revision = app.foveation_profile_revision;
 
 	const double logical_pixels = (double)swapchain.width * (double)swapchain.height;
 	const double physical_pixels = (double)physical_size.width * (double)physical_size.height;
@@ -1799,7 +1842,8 @@ update_gaze_foveation_map(application &app,
 	        eye, gaze_yaw_deg, gaze_pitch_deg, zone_x, zone_y,
 	        physical_size.width, physical_size.height,
 	        100.0 * physical_pixels / logical_pixels,
-	        app.gaze_foveation_fused ? " (fused)" : "");
+	        app.gaze_foveation_fused ? " (fused)" : "",
+			        k_foveation_profiles[(size_t)app.foveation_profile_index].name);
 	return true;
 }
 
@@ -2185,8 +2229,86 @@ render_frame(application &app)
 }
 
 static void
+set_foveation_profile(application &app, int index)
+{
+	index = std::max(0, std::min(index, (int)k_foveation_profiles.size() - 1));
+	if (index == app.foveation_profile_index) {
+		return;
+	}
+	app.foveation_profile_index = index;
+	++app.foveation_profile_revision;
+	if (app.foveation_profile_revision == 0) {
+		app.foveation_profile_revision = 1;
+	}
+	const foveation_profile &profile = k_foveation_profiles[(size_t)index];
+	fprintf(stderr,
+	        "psvr2-openxr-test: foveation profile -> %s (middle %.2f, peripheral %.2f); rebuilding rate maps\n",
+	        profile.name, profile.middle_rate, profile.peripheral_rate);
+}
+
+static void
+initialize_terminal_controls(application &app)
+{
+	if (!app.gaze_foveation || !isatty(STDIN_FILENO)) {
+		return;
+	}
+	app.terminal_input.old_flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+	if (app.terminal_input.old_flags < 0 || tcgetattr(STDIN_FILENO, &app.terminal_input.old_termios) != 0) {
+		return;
+	}
+	struct termios raw = app.terminal_input.old_termios;
+	raw.c_lflag &= ~(ICANON | ECHO);
+	raw.c_cc[VMIN] = 0;
+	raw.c_cc[VTIME] = 0;
+	if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0 ||
+	    fcntl(STDIN_FILENO, F_SETFL, app.terminal_input.old_flags | O_NONBLOCK) != 0) {
+		tcsetattr(STDIN_FILENO, TCSANOW, &app.terminal_input.old_termios);
+		return;
+	}
+	app.terminal_input.active = true;
+	fprintf(stderr,
+	        "psvr2-openxr-test: live foveation controls: 1=reference 2=strong 3=aggressive 4=extreme, [ ]=step, r=reference\n");
+}
+
+static void
+restore_terminal_controls(application &app)
+{
+	if (!app.terminal_input.active) {
+		return;
+	}
+	tcsetattr(STDIN_FILENO, TCSANOW, &app.terminal_input.old_termios);
+	fcntl(STDIN_FILENO, F_SETFL, app.terminal_input.old_flags);
+	app.terminal_input.active = false;
+}
+
+static void
+poll_terminal_controls(application &app)
+{
+	if (!app.terminal_input.active) {
+		return;
+	}
+	char buffer[32];
+	ssize_t count = 0;
+	while ((count = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
+		for (ssize_t i = 0; i < count; ++i) {
+			const char key = buffer[i];
+			if (key >= '1' && key <= '4') {
+				set_foveation_profile(app, key - '1');
+			} else if (key == ']' || key == '+') {
+				set_foveation_profile(app, app.foveation_profile_index + 1);
+			} else if (key == '[' || key == '-') {
+				set_foveation_profile(app, app.foveation_profile_index - 1);
+			} else if (key == 'r' || key == 'R') {
+				set_foveation_profile(app, 0);
+			}
+		}
+	}
+}
+
+static void
 cleanup(application &app)
 {
+	restore_terminal_controls(app);
 	app.renderer.shutdown();
 	for (view_swapchain &swapchain : app.swapchains) {
 		release_gaze_foveation_resources(swapchain);
@@ -2256,6 +2378,7 @@ run(int argc, char **argv)
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool gaze_foveation_fused = false;
+	int foveation_profile_index = 0;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
@@ -2278,10 +2401,17 @@ run(int argc, char **argv)
 			test_gaze = true;
 			gaze_foveation = true;
 			gaze_foveation_fused = true;
+		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
+			foveation_profile_index = find_foveation_profile(argv[++i]);
+			if (foveation_profile_index < 0) {
+				fprintf(stderr, "Unknown foveation profile: %s (expected reference, strong, aggressive, or extreme)\n", argv[i]);
+				return EXIT_FAILURE;
+			}
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused]\n"
+			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused] "
+			        "[--foveation-profile reference|strong|aggressive|extreme]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
@@ -2290,6 +2420,8 @@ run(int argc, char **argv)
 			        "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			        "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve pass.\n"
 			        "  --gaze-foveation-fused renders Metal VRR directly into the OpenXR image and lets Monado decode it.\n"
+			        "  --foveation-profile selects a fixed starting profile (default: reference).\n"
+			        "  While foveation is running in a terminal: 1-4 select profiles, [/] step, r restores reference.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
 			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
 			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
@@ -2315,6 +2447,12 @@ run(int argc, char **argv)
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
 	app.gaze_foveation_fused = gaze_foveation_fused;
+	app.foveation_profile_index = foveation_profile_index;
+	if (gaze_foveation) {
+		const foveation_profile &profile = k_foveation_profiles[(size_t)foveation_profile_index];
+		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)\n",
+		        profile.name, profile.middle_rate, profile.peripheral_rate);
+	}
 	if (gaze_foveation_fused) {
 		setenv("XRT_MACOS_FUSED_FOVEATION", "1", 1);
 	}
@@ -2326,11 +2464,13 @@ run(int argc, char **argv)
 	create_gaze_resources(app);
 	create_passthrough_resources(app);
 	create_swapchains(app);
+	initialize_terminal_controls(app);
 
 	while (!g_stop_requested && !app.exit_requested) {
 		if (!poll_events(app)) {
 			break;
 		}
+		poll_terminal_controls(app);
 		if (!app.session_running) {
 			usleep(10000);
 			continue;
