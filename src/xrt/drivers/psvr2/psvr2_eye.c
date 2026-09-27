@@ -35,6 +35,7 @@ process_gaze_packet(struct psvr2_hmd *hmd, uint8_t *buf, size_t bytes_read)
 	}
 
 	hmd->et_data.processed_sample_packet = true;
+	hmd->et_data.packet_count++;
 
 	uint32_t remote_sample_timestamp_us = __le32_to_cpu(gaze_state.packet_data.combined.timestamp);
 
@@ -127,6 +128,9 @@ process_gaze_packet(struct psvr2_hmd *hmd, uint8_t *buf, size_t bytes_read)
 		}
 
 		eye_data->gaze_direction_valid = combined->normalized_gaze_valid;
+		if (combined->normalized_gaze_valid) {
+			hmd->et_data.valid_combined_gaze_count++;
+		}
 		eye_data->gaze_direction = gaze_direction;
 		eye_data->gaze_point_valid = combined->gaze_point_valid;
 		eye_data->gaze_point = gaze_point;
@@ -331,10 +335,14 @@ psvr2_start_gaze_tracking(struct psvr2_hmd *hmd)
 				return -1;
 			}
 
+			hmd->et_data.calibration_loaded = true;
+			PSVR2_INFO(hmd, "Loaded PS VR2 eye calibration blob (%zu bytes)", file_size);
 			free(contents);
 		}
 
 		fclose(eye_calib_file);
+	} else {
+		PSVR2_WARN(hmd, "No PS VR2 eye calibration blob found; gaze packets may remain invalid");
 	}
 
 	ret = os_thread_helper_start(&hmd->et_data.eye_tracking_thread, psvr2_eye_tracking_control_thread, hmd);
@@ -358,6 +366,9 @@ psvr2_start_gaze_tracking(struct psvr2_hmd *hmd)
 
 		u_var_add_ro_i64_ns(et_data, &et_data->last_remote_report_sample_time_ns, "Timestamp");
 		u_var_add_ro_u32(et_data, &et_data->last_remote_report_sample_time_us, "Raw Timestamp (us)");
+		u_var_add_bool(et_data, &et_data->calibration_loaded, "Calibration Loaded");
+		u_var_add_ro_u64(et_data, &et_data->packet_count, "Packets");
+		u_var_add_ro_u64(et_data, &et_data->valid_combined_gaze_count, "Valid Combined Gaze");
 
 		u_var_add_bool(et_data, &et_data->unk_float_4_valid, "unk_float_4 Valid");
 		u_var_add_f32(et_data, &et_data->unk_float_4, "unk_float_4");
