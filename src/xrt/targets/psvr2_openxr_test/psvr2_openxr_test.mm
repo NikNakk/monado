@@ -783,6 +783,9 @@ create_system_and_session(application &app)
 	         "xrCreateReferenceSpace(VIEW)");
 }
 
+static bool
+read_existing_gaze_calibration(gaze_calibration_state &state);
+
 static void
 create_gaze_resources(application &app)
 {
