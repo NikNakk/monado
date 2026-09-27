@@ -17,6 +17,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+struct xrt_frame_sink;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -69,6 +71,17 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev);
  */
 bool
 psvr2_get_slam_timing(struct xrt_device *xdev, struct psvr2_slam_timing *out);
+
+/*!
+ * Attach optional consumers for the two 640x640 PS VR2 front-camera views.
+ *
+ * This follows the existing WMR camera sink model: the caller owns sink
+ * lifetime. Enable the camera interface with PSVR2_CAMERA_STREAMS=1 on macOS.
+ */
+bool
+psvr2_set_passthrough_sinks(struct xrt_device *xdev,
+                            struct xrt_frame_sink *left,
+                            struct xrt_frame_sink *right);
 
 /*!
  * Probing function for PlayStation VR2 devices.
