@@ -31,6 +31,69 @@ psvr2_gaze_gain(float value)
 	return value;
 }
 
+static float
+psvr2_gaze_offset(float value)
+{
+	if (!isfinite(value) || value < -20.0f || value > 20.0f) {
+		return 0.0f;
+	}
+	return value;
+}
+
+static void
+psvr2_load_user_gaze_calibration(struct psvr2_hmd *hmd)
+{
+	struct psvr2_et_data *et = &hmd->et_data;
+	et->user_yaw_gain = 1.0f;
+	et->user_pitch_gain = 1.0f;
+	et->user_yaw_offset_deg = 0.0f;
+	et->user_pitch_offset_deg = 0.0f;
+
+	FILE *file = u_file_open_file_in_config_dir_subpath("psvr2", "gaze_user_calibration.txt", "r");
+	if (file != NULL) {
+		char magic[64] = {0};
+		float yaw_gain = 1.0f;
+		float yaw_offset = 0.0f;
+		float pitch_gain = 1.0f;
+		float pitch_offset = 0.0f;
+		int fields = fscanf(file, "%63s %f %f %f %f", magic, &yaw_gain, &yaw_offset, &pitch_gain, &pitch_offset);
+		fclose(file);
+
+		if (fields == 5 && strcmp(magic, "PSVR2_GAZE_USER_CALIBRATION_V1") == 0) {
+			et->user_yaw_gain = psvr2_gaze_gain(yaw_gain);
+			et->user_yaw_offset_deg = psvr2_gaze_offset(yaw_offset);
+			et->user_pitch_gain = psvr2_gaze_gain(pitch_gain);
+			et->user_pitch_offset_deg = psvr2_gaze_offset(pitch_offset);
+			et->user_calibration_loaded = true;
+			PSVR2_DEBUG(hmd,
+			            "Loaded user gaze calibration: yaw %.5fx %+0.3f deg, pitch %.5fx %+0.3f deg",
+			            et->user_yaw_gain, et->user_yaw_offset_deg, et->user_pitch_gain,
+			            et->user_pitch_offset_deg);
+		} else {
+			PSVR2_WARN(hmd, "Ignoring invalid gaze_user_calibration.txt");
+		}
+	}
+
+	/*
+	 * Environment variables are useful for temporary experimentation and take
+	 * precedence over the persisted calibration.
+	 */
+	if (getenv("PSVR2_GAZE_YAW_GAIN") != NULL) {
+		et->user_yaw_gain = psvr2_gaze_gain(debug_get_float_option_psvr2_gaze_yaw_gain());
+	}
+	if (getenv("PSVR2_GAZE_YAW_OFFSET_DEG") != NULL) {
+		et->user_yaw_offset_deg =
+		    psvr2_gaze_offset(debug_get_float_option_psvr2_gaze_yaw_offset_deg());
+	}
+	if (getenv("PSVR2_GAZE_PITCH_GAIN") != NULL) {
+		et->user_pitch_gain = psvr2_gaze_gain(debug_get_float_option_psvr2_gaze_pitch_gain());
+	}
+	if (getenv("PSVR2_GAZE_PITCH_OFFSET_DEG") != NULL) {
+		et->user_pitch_offset_deg =
+		    psvr2_gaze_offset(debug_get_float_option_psvr2_gaze_pitch_offset_deg());
+	}
+}
+
 
 static void
 process_gaze_packet(struct psvr2_hmd *hmd, uint8_t *buf, size_t bytes_read)
@@ -172,10 +235,10 @@ process_gaze_packet(struct psvr2_hmd *hmd, uint8_t *buf, size_t bytes_read)
 	float look_y_dir = atanf(hmd->et_data.combined.filtered_gaze_direction.y);
 
 	const float deg_to_rad = (float)M_PI / 180.0f;
-	float yaw = -look_x_dir * psvr2_gaze_gain(debug_get_float_option_psvr2_gaze_yaw_gain()) +
-	            debug_get_float_option_psvr2_gaze_yaw_offset_deg() * deg_to_rad;
-	float pitch = look_y_dir * psvr2_gaze_gain(debug_get_float_option_psvr2_gaze_pitch_gain()) +
-	              debug_get_float_option_psvr2_gaze_pitch_offset_deg() * deg_to_rad;
+	float yaw = -look_x_dir * hmd->et_data.user_yaw_gain +
+	            hmd->et_data.user_yaw_offset_deg * deg_to_rad;
+	float pitch = look_y_dir * hmd->et_data.user_pitch_gain +
+	              hmd->et_data.user_pitch_offset_deg * deg_to_rad;
 
 	struct xrt_space_relation gaze_relation = {0};
 	math_quat_from_euler_angles(&(struct xrt_vec3){.x = pitch, .y = yaw},
@@ -343,6 +406,8 @@ psvr2_start_gaze_tracking(struct psvr2_hmd *hmd)
 		return -1;
 	}
 
+	psvr2_load_user_gaze_calibration(hmd);
+
 	FILE *eye_calib_file = u_file_open_file_in_config_dir_subpath("psvr2", "eye_calibration.bin", "r");
 
 	if (eye_calib_file) {
@@ -390,7 +455,12 @@ psvr2_start_gaze_tracking(struct psvr2_hmd *hmd)
 
 		u_var_add_ro_i64_ns(et_data, &et_data->last_remote_report_sample_time_ns, "Timestamp");
 		u_var_add_ro_u32(et_data, &et_data->last_remote_report_sample_time_us, "Raw Timestamp (us)");
-		u_var_add_bool(et_data, &et_data->calibration_loaded, "Calibration Loaded");
+		u_var_add_bool(et_data, &et_data->calibration_loaded, "Sony Calibration Loaded");
+		u_var_add_bool(et_data, &et_data->user_calibration_loaded, "User Calibration Loaded");
+		u_var_add_f32(et_data, &et_data->user_yaw_gain, "User Yaw Gain");
+		u_var_add_f32(et_data, &et_data->user_yaw_offset_deg, "User Yaw Offset (deg)");
+		u_var_add_f32(et_data, &et_data->user_pitch_gain, "User Pitch Gain");
+		u_var_add_f32(et_data, &et_data->user_pitch_offset_deg, "User Pitch Offset (deg)");
 		u_var_add_ro_u64(et_data, &et_data->packet_count, "Packets");
 		u_var_add_ro_u64(et_data, &et_data->valid_combined_gaze_count, "Valid Combined Gaze");
 
