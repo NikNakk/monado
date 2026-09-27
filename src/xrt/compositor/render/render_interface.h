@@ -1366,6 +1366,8 @@ struct render_compute_layer_ubo_data
  *
  * @relates render_compute
  */
+#define RENDER_FOVEATION_BOUNDARY_VEC4_COUNT ((XRT_FOVEATION_MAP_BOUNDARY_COUNT + 3) / 4)
+
 struct render_compute_distortion_ubo_data
 {
 	struct render_viewport_data views[XRT_MAX_VIEWS];
@@ -1402,6 +1404,23 @@ struct render_compute_distortion_ubo_data
 		uint32_t padding1;
 		uint32_t padding2;
 	} has_depth[XRT_MAX_VIEWS];
+
+	/*
+	 * Experimental Metal variable-rasterization-rate source mapping.
+	 * Boundary arrays are packed as std140 vec4s: 17 values => 5 vec4s.
+	 */
+	struct
+	{
+		float v[4];
+	} foveation_x[XRT_MAX_VIEWS * RENDER_FOVEATION_BOUNDARY_VEC4_COUNT],
+	    foveation_y[XRT_MAX_VIEWS * RENDER_FOVEATION_BOUNDARY_VEC4_COUNT];
+	struct
+	{
+		uint32_t value;
+		uint32_t boundary_count;
+		uint32_t padding0;
+		uint32_t padding1;
+	} foveation[XRT_MAX_VIEWS];
 };
 
 /*!
@@ -1480,6 +1499,7 @@ render_compute_projection_timewarp(struct render_compute *render,
                                    VkSampler src_samplers[XRT_MAX_VIEWS],
                                    VkImageView src_image_views[XRT_MAX_VIEWS],
                                    const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                   const struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS],
                                    const struct xrt_pose src_poses[XRT_MAX_VIEWS],
                                    const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
                                    const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
@@ -1519,6 +1539,7 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
                                                VkSampler src_samplers[XRT_MAX_VIEWS],
                                                VkImageView src_image_views[XRT_MAX_VIEWS],
                                                const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                               const struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS],
                                                const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
                                                const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
                                                const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
@@ -1534,6 +1555,7 @@ render_compute_projection_no_timewarp(struct render_compute *render,
                                       VkSampler src_samplers[XRT_MAX_VIEWS],
                                       VkImageView src_image_views[XRT_MAX_VIEWS],
                                       const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                      const struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS],
                                       VkImage target_image,
                                       VkImageView target_image_view,
                                       const struct render_viewport_data views[XRT_MAX_VIEWS]);
