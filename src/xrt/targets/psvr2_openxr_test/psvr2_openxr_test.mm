@@ -592,7 +592,6 @@ struct application
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
 	bool test_gaze = false;
-	bool test_gaze = false;
 	bool gaze_supported = false;
 	XrActionSet gaze_action_set = XR_NULL_HANDLE;
 	XrAction gaze_action = XR_NULL_HANDLE;
@@ -1342,6 +1341,7 @@ run(int argc, char **argv)
 	bool submit_depth_layer = false;
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
+	bool test_gaze = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
