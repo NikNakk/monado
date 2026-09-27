@@ -645,8 +645,9 @@ macos_passthrough_init(struct comp_window_macos *cwm)
 		if (xret == XRT_SUCCESS) {
 			cwm->passthrough_sinks_attached = true;
 			COMP_INFO(cwm->base.base.c,
-			          "PS VR2 BC4 passthrough attached (FOV %.0f deg, convergence %.3f)",
-			          fov_deg, convergence);
+			          "PS VR2 BC4 passthrough attached (FOV %d deg, convergence %.3f)",
+			          debug_get_num_option_macos_passthrough_fov_deg(),
+			          (double)debug_get_num_option_macos_passthrough_convergence_milli() / 1000.0);
 			return true;
 		}
 	}
@@ -1078,6 +1079,10 @@ comp_window_macos_init(struct comp_target *ct)
 		cwm->present_queue = present_queue;
 		cwm->pixel_width = (uint32_t)pixel_width;
 		cwm->pixel_height = (uint32_t)pixel_height;
+
+		/* Best effort: ordinary presentation continues if camera passthrough
+		 * is unavailable or PSVR2_CAMERA_STREAMS was not enabled. */
+		(void)macos_passthrough_init(cwm);
 
 		mach_timebase_info(&cwm->mach_timebase);
 		refresh_host_to_monotonic_offset_ns(cwm);
@@ -1543,25 +1548,33 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		if (shared_event_wait) {
 			[command_buffer encodeWaitForEvent:cwm->render_complete_event value:timeline_semaphore_value];
 		}
-		id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
-		if (blit == nil) {
-			COMP_ERROR(ct->c, "Could not create Metal blit encoder");
-			if (async_present) {
-				macos_retire_unpresented_job(cwm, job, "blit_error", 0);
-			}
-			return VK_ERROR_DEVICE_LOST;
+		bool encoded_passthrough = false;
+		if (job->passthrough_active) {
+			encoded_passthrough =
+			    macos_passthrough_encode(cwm, command_buffer, drawable, cwm->metal_images[index],
+			                             job->passthrough_has_application_layers);
 		}
-		MTLSize size = MTLSizeMake(ct->width, ct->height, 1);
-		[blit copyFromTexture:cwm->metal_images[index]
-		             sourceSlice:0
-		             sourceLevel:0
-		            sourceOrigin:MTLOriginMake(0, 0, 0)
-		              sourceSize:size
-		               toTexture:[drawable texture]
-		        destinationSlice:0
-		        destinationLevel:0
-		       destinationOrigin:MTLOriginMake(0, 0, 0)];
-		[blit endEncoding];
+		if (!encoded_passthrough) {
+			id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
+			if (blit == nil) {
+				COMP_ERROR(ct->c, "Could not create Metal blit encoder");
+				if (async_present) {
+					macos_retire_unpresented_job(cwm, job, "blit_error", 0);
+				}
+				return VK_ERROR_DEVICE_LOST;
+			}
+			MTLSize size = MTLSizeMake(ct->width, ct->height, 1);
+			[blit copyFromTexture:cwm->metal_images[index]
+			             sourceSlice:0
+			             sourceLevel:0
+			            sourceOrigin:MTLOriginMake(0, 0, 0)
+			              sourceSize:size
+			               toTexture:[drawable texture]
+			        destinationSlice:0
+			        destinationLevel:0
+			       destinationOrigin:MTLOriginMake(0, 0, 0)];
+			[blit endEncoding];
+		}
 
 		before_present_call_ns = os_monotonic_get_ns();
 		uint64_t latest_output_ns =
@@ -1957,6 +1970,8 @@ comp_window_macos_present(struct comp_target *ct,
 	    .desired_present_time_ns = desired_present_time_ns,
 	    .present_slop_ns = present_slop_ns,
 	    .present_queue = present_queue,
+	    .passthrough_active = ct->c->passthrough_active,
+	    .passthrough_has_application_layers = ct->c->passthrough_has_application_layers,
 	};
 	if (!cwm->async_present) {
 		return macos_execute_present_job(cwm, &job, false);
@@ -2181,6 +2196,18 @@ comp_window_macos_destroy(struct comp_target *ct)
 {
 	macos_cametal_drive_stop();
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+
+	atomic_store_explicit(&cwm->passthrough_shutdown, true, memory_order_release);
+	struct xrt_device *xdev = ct->c != NULL ? ct->c->xdev : NULL;
+	if (cwm->passthrough_sinks_attached && xdev != NULL && xdev->set_passthrough_sinks != NULL) {
+		(void)xdev->set_passthrough_sinks(xdev, NULL, NULL);
+		cwm->passthrough_sinks_attached = false;
+	}
+	pthread_mutex_lock(&cwm->passthrough_mutex);
+	for (uint32_t eye = 0; eye < 2; eye++) {
+		xrt_frame_reference(&cwm->passthrough_frames[eye], NULL);
+	}
+	pthread_mutex_unlock(&cwm->passthrough_mutex);
 	if (cwm->display_link != NULL) {
 		CVDisplayLinkStop(cwm->display_link);
 		CVDisplayLinkRelease(cwm->display_link);
@@ -2221,9 +2248,18 @@ comp_window_macos_destroy(struct comp_target *ct)
 		[cwm->window close];
 		[cwm->window release];
 		[cwm->present_queue release];
+		for (uint32_t eye = 0; eye < 2; eye++) {
+			[cwm->passthrough_camera_textures[eye] release];
+			cwm->passthrough_camera_textures[eye] = nil;
+			[cwm->passthrough_uv_maps[eye] release];
+			cwm->passthrough_uv_maps[eye] = nil;
+		}
+		[cwm->passthrough_pipeline release];
+		cwm->passthrough_pipeline = nil;
 		[cwm->metal_layer release];
 		[cwm->screen release];
 	}
+	pthread_mutex_destroy(&cwm->passthrough_mutex);
 	pthread_mutex_destroy(&cwm->present_worker_mutex);
 	free(cwm);
 }
@@ -2239,6 +2275,12 @@ comp_window_macos_create(struct comp_compositor *c)
 		free(cwm);
 		return NULL;
 	}
+	if (pthread_mutex_init(&cwm->passthrough_mutex, NULL) != 0) {
+		pthread_mutex_destroy(&cwm->present_worker_mutex);
+		free(cwm);
+		return NULL;
+	}
+	atomic_init(&cwm->passthrough_shutdown, false);
 	cwm->async_present = debug_get_bool_option_macos_async_present();
 	bool want_present_worker = debug_get_bool_option_macos_present_worker();
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
