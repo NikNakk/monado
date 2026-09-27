@@ -565,6 +565,9 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 #endif
 
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_auxiliary_streams, "PSVR2_AUXILIARY_STREAMS", PSVR2_AUXILIARY_STREAMS_DEFAULT)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_camera_streams, "PSVR2_CAMERA_STREAMS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_gaze_streams, "PSVR2_GAZE_STREAMS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_stage_space, "PSVR2_STAGE_SPACE", false)
 
 static void
 psvr2_usb_stop(struct psvr2_hmd *hmd);
@@ -829,10 +832,21 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 	case XRT_INPUT_GENERIC_HEAD_POSE:
 		break;
 	case XRT_INPUT_GENERIC_EYE_GAZE_POSE:
-		if (!hmd->auxiliary_streams_enabled) {
+		if (!hmd->gaze_streams_enabled) {
 			return XRT_ERROR_INPUT_UNSUPPORTED;
 		}
 		break;
+	case XRT_INPUT_GENERIC_STAGE_SPACE_POSE:
+		if (!hmd->stage_space_enabled) {
+			return XRT_ERROR_INPUT_UNSUPPORTED;
+		}
+		*out_relation = (struct xrt_space_relation){
+		    .pose = XRT_POSE_IDENTITY,
+		    .relation_flags = (enum xrt_space_relation_flags)(
+		        XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
+		        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT),
+		};
+		return XRT_SUCCESS;
 	default: PSVR2_ERROR(hmd, "unknown input name"); return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 
@@ -1143,16 +1157,37 @@ img_xfer_cb(struct libusb_transfer *xfer)
 				}
 			}
 		} else if (xfer->actual_length == USB_CAM_MODE1_XFER_SIZE) {
-			if (u_sink_debug_is_active(&hmd->debug_sinks[3])) {
-
+			bool have_consumer = u_sink_debug_is_active(&hmd->debug_sinks[3]) ||
+			                     hmd->passthrough_sinks[0] != NULL || hmd->passthrough_sinks[1] != NULL;
+			if (have_consumer) {
 				struct xrt_frame *xf = NULL;
 				u_frame_create_one_off(XRT_FORMAT_L8, 1280, 640, &xf);
 
 				uint8_t *src = xfer->buffer + 256;
-				uint8_t *dest = xf->data;
-				memcpy(dest, src, 640 * 1280);
+				memcpy(xf->data, src, 640 * 1280);
 				xf->timestamp = os_monotonic_get_ns();
-				u_sink_debug_push_frame(&hmd->debug_sinks[3], xf);
+				xf->source_timestamp = xf->timestamp;
+
+				if (u_sink_debug_is_active(&hmd->debug_sinks[3])) {
+					u_sink_debug_push_frame(&hmd->debug_sinks[3], xf);
+				}
+
+				for (int eye = 0; eye < 2; eye++) {
+					struct xrt_frame_sink *sink = hmd->passthrough_sinks[eye];
+					if (sink == NULL) {
+						continue;
+					}
+
+					struct xrt_rect roi = {
+					    .offset = {.w = eye * 640, .h = 0},
+					    .extent = {.w = 640, .h = 640},
+					};
+					struct xrt_frame *eye_frame = NULL;
+					u_frame_create_roi(xf, roi, &eye_frame);
+					xrt_sink_push_frame(sink, eye_frame);
+					xrt_frame_reference(&eye_frame, NULL);
+				}
+
 				xrt_frame_reference(&xf, NULL);
 			}
 		}
@@ -1415,13 +1450,20 @@ psvr2_usb_open(struct psvr2_hmd *hmd, struct xrt_prober_device *xpdev)
 	}
 
 	for (size_t i = 0; i < sizeof(interface_list) / sizeof(interface_list[0]); i++) {
-		if (interface_list[i].auxiliary && !hmd->auxiliary_streams_enabled) {
-			continue;
-		}
-
 		int intf_no = interface_list[i].interface_no;
 		int altmode = interface_list[i].altmode;
 		const char *name = interface_list[i].name;
+
+		if (intf_no == PSVR2_CAMERA_INTERFACE && !hmd->camera_streams_enabled) {
+			continue;
+		}
+		if (intf_no == PSVR2_GAZE_INTERFACE && !hmd->gaze_streams_enabled) {
+			continue;
+		}
+		if (interface_list[i].auxiliary && intf_no != PSVR2_CAMERA_INTERFACE &&
+		    intf_no != PSVR2_GAZE_INTERFACE && !hmd->auxiliary_streams_enabled) {
+			continue;
+		}
 
 		res = libusb_claim_interface(hmd->dev, intf_no);
 		if (res < 0) {
@@ -1576,13 +1618,34 @@ psvr2_set_brightness(struct xrt_device *xdev, float brightness, bool relative)
 static xrt_result_t
 psvr2_hmd_set_output(struct xrt_device *xdev, enum xrt_output_name name, const struct xrt_output_value *value)
 {
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+
 	switch (name) {
 	case XRT_OUTPUT_NAME_PSVR2_HAPTIC: {
-		struct xrt_output_value_vibration vibration = value->vibration;
-		(void)vibration;
+		const struct xrt_output_value_vibration vibration = value->vibration;
 
-		// @todo: Implement headset haptics.
+		/*
+		 * Sony's headset motor command is a single byte in Hz. PSVR2Toolkit
+		 * documents 10-25 Hz (0 stops the motor); values 1-9 are accepted but
+		 * effectively become 10 Hz. OpenXR amplitude has no independent
+		 * hardware field here, so use it to choose a sensible runtime-selected
+		 * frequency when XR_FREQUENCY_UNSPECIFIED (0) is requested.
+		 */
+		uint8_t rumble_hz = 0;
+		if (vibration.amplitude > 0.0f) {
+			float requested_hz = vibration.frequency;
+			if (!isfinite(requested_hz) || requested_hz <= 0.0f) {
+				float amplitude = CLAMP(vibration.amplitude, 0.0f, 1.0f);
+				requested_hz = 10.0f + 15.0f * amplitude;
+			}
+			rumble_hz = (uint8_t)CLAMP((int)lroundf(requested_hz), 10, 25);
+		}
 
+		if (!send_psvr2_control(hmd, PSVR2_REPORT_ID_SET_PERIPHERAL,
+		                        PSVR2_SET_PERIPHERAL_SUBCMD_MOTOR, &rumble_hz, sizeof(rumble_hz))) {
+			PSVR2_ERROR(hmd, "Failed to set headset rumble to %u Hz", rumble_hz);
+			return XRT_ERROR_OUTPUT_REQUEST_FAILURE;
+		}
 		break;
 	}
 	default: return XRT_ERROR_OUTPUT_UNSUPPORTED;
@@ -1659,9 +1722,9 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	hmd->usb_transfers_drained = false;
 
 	/* Camera data is not needed for HMD tracking. */
-	hmd->camera_enable = hmd->auxiliary_streams_enabled;
-	hmd->camera_mode = PSVR2_CAMERA_MODE_10;
-	if (hmd->auxiliary_streams_enabled) {
+	hmd->camera_enable = hmd->camera_streams_enabled;
+	hmd->camera_mode = hmd->auxiliary_streams_enabled ? PSVR2_CAMERA_MODE_10 : PSVR2_CAMERA_MODE_BOTTOM_SBS_CROPPED;
+	if (hmd->camera_streams_enabled) {
 		set_camera_mode(hmd, hmd->camera_mode);
 
 		for (int i = 0; i < NUM_CAM_XFERS; i++) {
@@ -1705,11 +1768,7 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	}
 	hmd->usb_active_xfers++;
 
-	if (!hmd->auxiliary_streams_enabled) {
-		result = true;
-		goto out;
-	}
-
+	if (hmd->auxiliary_streams_enabled) {
 	/* LD endpoint */
 	hmd->led_detector_xfer = libusb_alloc_transfer(0);
 	if (hmd->led_detector_xfer == NULL) {
@@ -1764,10 +1823,14 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	}
 	hmd->usb_active_xfers++;
 
-	res = psvr2_start_gaze_tracking(hmd);
-	if (res < 0) {
-		PSVR2_ERROR(hmd, "Could not start gaze tracking");
-		goto out;
+	}
+
+	if (hmd->gaze_streams_enabled) {
+		res = psvr2_start_gaze_tracking(hmd);
+		if (res < 0) {
+			PSVR2_ERROR(hmd, "Could not start gaze tracking");
+			goto out;
+		}
 	}
 
 	result = true;
@@ -1987,6 +2050,11 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->usb_transfers_drained = true;
 	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
+	hmd->camera_streams_enabled =
+	    hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_camera_streams();
+	hmd->gaze_streams_enabled =
+	    hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_gaze_streams();
+	hmd->stage_space_enabled = debug_get_bool_option_psvr2_stage_space();
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	psvr2_timing_trace_open();
@@ -2027,7 +2095,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->base.set_brightness = psvr2_set_brightness;
 	hmd->base.set_output = psvr2_hmd_set_output;
 	hmd->base.get_compositor_info = psvr2_hmd_get_compositor_info;
-	if (hmd->auxiliary_streams_enabled) {
+	if (hmd->gaze_streams_enabled) {
 		hmd->base.begin_feature = psvr2_begin_feature;
 		hmd->base.end_feature = psvr2_end_feature;
 		hmd->base.get_face_tracking = psvr2_get_face_tracking;
@@ -2057,7 +2125,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 
 	hmd->base.outputs[0].name = XRT_OUTPUT_NAME_PSVR2_HAPTIC;
 
-	if (hmd->auxiliary_streams_enabled) {
+	if (hmd->gaze_streams_enabled) {
 		hmd->base.binding_profiles = psvr2_binding_profiles;
 		hmd->base.binding_profile_count = ARRAY_SIZE(psvr2_binding_profiles);
 	} else {
@@ -2070,8 +2138,10 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->base.supported.presence = true;
 	hmd->base.supported.brightness_control = true;
 	hmd->base.supported.compositor_info = true;
-	hmd->base.supported.eye_gaze = hmd->auxiliary_streams_enabled;
-	hmd->base.supported.face_tracking = hmd->auxiliary_streams_enabled;
+	hmd->base.supported.force_feedback = true;
+	hmd->base.supported.eye_gaze = hmd->gaze_streams_enabled;
+	hmd->base.supported.face_tracking = hmd->gaze_streams_enabled;
+	hmd->base.supported.stage = hmd->stage_space_enabled;
 
 	// Set up display details
 	// refresh rate
@@ -2174,7 +2244,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->brightness_btn.ptr = hmd;
 	u_var_add_button(hmd, &hmd->brightness_btn, "Set Brightness");
 
-	if (hmd->auxiliary_streams_enabled) {
+	if (hmd->camera_streams_enabled) {
 		u_var_add_gui_header(hmd, NULL, "Camera data");
 		{
 			hmd->camera_enable_btn.cb = (void (*)(void *))toggle_camera_enable;
@@ -2226,4 +2296,27 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 cleanup:
 	psvr2_hmd_destroy(&hmd->base);
 	return NULL;
+}
+
+
+bool
+psvr2_set_passthrough_sinks(struct xrt_device *xdev,
+                            struct xrt_frame_sink *left,
+                            struct xrt_frame_sink *right)
+{
+	if (xdev == NULL || xdev->name != XRT_DEVICE_PSVR2) {
+		return false;
+	}
+
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	if (!hmd->camera_streams_enabled) {
+		return false;
+	}
+
+	os_mutex_lock(&hmd->data_lock);
+	hmd->passthrough_sinks[0] = left;
+	hmd->passthrough_sinks[1] = right;
+	os_mutex_unlock(&hmd->data_lock);
+
+	return true;
 }
