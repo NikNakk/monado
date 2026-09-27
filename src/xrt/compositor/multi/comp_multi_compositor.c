@@ -826,6 +826,30 @@ multi_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 }
 
 static xrt_result_t
+multi_compositor_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	(void)xc;
+	(void)info;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_create_passthrough_layer(struct xrt_compositor *xc,
+                                          const struct xrt_passthrough_layer_create_info *info)
+{
+	(void)xc;
+	(void)info;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_destroy_passthrough(struct xrt_compositor *xc)
+{
+	(void)xc;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
 multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	struct multi_compositor *mc = multi_compositor(xc);
@@ -986,6 +1010,21 @@ multi_compositor_layer_equirect2(struct xrt_compositor *xc,
 	size_t index = mc->progress.layer_count++;
 	mc->progress.layers[index].xdev = xdev;
 	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_passthrough(struct xrt_compositor *xc,
+                                   struct xrt_device *xdev,
+                                   const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
 	mc->progress.layers[index].data = *data;
 	layer_gpu_reuse_claim(&mc->progress.layers[index]);
 
@@ -1213,6 +1252,9 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	mc->base.base.import_swapchain = multi_compositor_import_swapchain;
 	mc->base.base.import_fence = multi_compositor_import_fence;
 	mc->base.base.create_semaphore = multi_compositor_create_semaphore;
+	mc->base.base.create_passthrough = multi_compositor_create_passthrough;
+	mc->base.base.create_passthrough_layer = multi_compositor_create_passthrough_layer;
+	mc->base.base.destroy_passthrough = multi_compositor_destroy_passthrough;
 	mc->base.base.begin_session = multi_compositor_begin_session;
 	mc->base.base.end_session = multi_compositor_end_session;
 	mc->base.base.predict_frame = multi_compositor_predict_frame;
@@ -1228,6 +1270,7 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	mc->base.base.layer_cylinder = multi_compositor_layer_cylinder;
 	mc->base.base.layer_equirect1 = multi_compositor_layer_equirect1;
 	mc->base.base.layer_equirect2 = multi_compositor_layer_equirect2;
+	mc->base.base.layer_passthrough = multi_compositor_layer_passthrough;
 	mc->base.base.layer_commit = multi_compositor_layer_commit;
 	mc->base.base.layer_commit_with_semaphore = multi_compositor_layer_commit_with_semaphore;
 	mc->base.base.destroy = multi_compositor_destroy;
