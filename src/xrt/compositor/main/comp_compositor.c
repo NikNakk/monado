@@ -461,6 +461,7 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	 * to the distortion shader, so no need to use the layer renderer.
 	 */
 	bool fast_path =                              //
+	    !c->passthrough_active &&                 //
 	    !c->peek &&                               //
 	    !c->mirroring_to_debug_gui &&             //
 	    !c->debug.disable_fast_path &&            //
