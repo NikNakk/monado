@@ -159,7 +159,14 @@ render_views(application &app, XrTime predicted_display_time)
 
 	id<MTLCommandBuffer> command_buffer = [app.command_queue commandBuffer];
 	if (command_buffer == nil) {
-		fatal("could not allocate Metal command buffer");
+		fatal("could not allocate Metal scene command buffer");
+	}
+	id<MTLCommandBuffer> resolve_command_buffer = nil;
+	if (app.gaze_foveation) {
+		resolve_command_buffer = [app.command_queue commandBuffer];
+		if (resolve_command_buffer == nil) {
+			fatal("could not allocate Metal foveation resolve command buffer");
+		}
 	}
 
 	for (size_t i = 0; i < app.swapchains.size(); ++i) {
@@ -214,14 +221,24 @@ render_views(application &app, XrTime predicted_display_time)
 		          instanceCount:app.frame_instances.size()];
 		[encoder endEncoding];
 		if (app.gaze_foveation) {
-			encode_gaze_foveation_resolve(app, swapchain, command_buffer, color_texture);
+			encode_gaze_foveation_resolve(app, swapchain, resolve_command_buffer, color_texture);
 		}
 	}
-	const bool timing_foveated = app.gaze_foveation;
-	[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-		record_gpu_timing(completed, timing_foveated);
-	}];
-	[command_buffer commit];
+	if (app.gaze_foveation) {
+		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+			record_gpu_timing(g_gpu_timing_foveated_scene, "foveated-scene", completed);
+		}];
+		[resolve_command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+			record_gpu_timing(g_gpu_timing_foveated_resolve, "foveated-resolve", completed);
+		}];
+		[command_buffer commit];
+		[resolve_command_buffer commit];
+	} else {
+		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+			record_gpu_timing(g_gpu_timing_normal, "normal", completed);
+		}];
+		[command_buffer commit];
+	}
 
 	for (view_swapchain &swapchain : app.swapchains) {
 		XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
