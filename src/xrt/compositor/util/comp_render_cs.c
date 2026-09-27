@@ -578,6 +578,7 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 		// Fill in data.
 		src_image_views[i] = src_image_view;
 		src_norm_rects[i] = src_norm_rect;
+		src_foveation[i] = vds[i]->foveation;
 		src_samplers[i] = clamp_to_border_black;
 		target_viewport_datas[i] = viewport_data;
 
@@ -594,6 +595,7 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 		    src_samplers,                      //
 		    src_image_views,                   //
 		    src_norm_rects,                    //
+		    NULL,                              // src_foveation
 		    d->target.cs.image,                //
 		    d->target.cs.storage_view,         // target_image_view
 		    target_viewport_datas);            // views
@@ -603,6 +605,7 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 		    src_samplers,                               //
 		    src_image_views,                            //
 		    src_norm_rects,                             //
+		    NULL,                                       // src_foveation
 		    src_fovs,                                   //
 		    world_poses_scanout_begin,                  //
 		    world_poses_scanout_end,                    //
@@ -637,6 +640,7 @@ crc_distortion_fast_path(struct render_compute *render,
 	VkSampler depth_samplers[XRT_MAX_VIEWS];
 	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
 	struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS];
+	struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS] = {0};
 	struct xrt_normalized_rect depth_norm_rects[XRT_MAX_VIEWS];
 	struct xrt_layer_depth_data depth_datas[XRT_MAX_VIEWS];
 	struct xrt_fov src_fovs[XRT_MAX_VIEWS];
@@ -708,6 +712,7 @@ crc_distortion_fast_path(struct render_compute *render,
 		    src_samplers,                      //
 		    src_image_views,                   //
 		    src_norm_rects,                    //
+		    src_foveation,                     //
 		    d->target.cs.image,                //
 		    d->target.cs.storage_view,         //
 		    target_viewport_datas);            //
@@ -734,6 +739,7 @@ crc_distortion_fast_path(struct render_compute *render,
 		    src_samplers,                   //
 		    src_image_views,                //
 		    src_norm_rects,                 //
+		    src_foveation,                  //
 		    src_poses,                      //
 		    src_fovs,                       //
 		    world_poses_scanout_begin,      //
