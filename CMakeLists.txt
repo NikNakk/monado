@@ -464,7 +464,7 @@ option(XRT_FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND "Enable XR_FB_composition_layer_a
 option(XRT_FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT "Enable XR_FB_composition_layer_image_layout" OFF)
 option(XRT_FEATURE_OPENXR_LAYER_FB_SETTINGS "Enable XR_FB_composition_layer_settings" OFF)
 option(XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST "Enable XR_FB_composition_layer_depth_test" OFF)
-option(XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH "Enable XR_FB_passthrough" OFF)
+option(XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH "Enable XR_FB_passthrough" ${APPLE})
 
 # Defaults for OpenXR spaces
 option(XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR "Enable XR_EXT_local_floor" ON)
@@ -775,7 +775,9 @@ if(XRT_FEATURE_OPENXR_DEBUG_UTILS)
 	message(FATAL_ERROR "XRT_FEATURE_OPENXR_DEBUG_UTILS is not fully implemented")
 endif()
 if(XRT_MODULE_COMPOSITOR_MAIN AND NOT XRT_SILENCE_CMAKE_LAYER_ERRORS)
-	if(XRT_FEATURE_OPENXR_LAYER_CUBE)
+	# The macOS port's main compositor handles cube layers (used by WebXR).
+	# Keep the upstream guard for other targets until their support is verified.
+	if(XRT_FEATURE_OPENXR_LAYER_CUBE AND NOT APPLE)
 		message(
 			FATAL_ERROR "Main compositor doesn't support cube layer "
 				    "(set XRT_SILENCE_CMAKE_LAYER_ERRORS to silence)"
