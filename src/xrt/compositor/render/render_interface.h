@@ -1407,7 +1407,8 @@ struct render_compute_distortion_ubo_data
 
 	/*
 	 * Experimental Metal variable-rasterization-rate source mapping.
-	 * Boundary arrays are packed as std140 vec4s: 17 values => 5 vec4s.
+	 * Boundary arrays are packed as std140 vec4s. The current 129-point
+	 * map uses 33 vec4s per axis and eye.
 	 */
 	struct
 	{
