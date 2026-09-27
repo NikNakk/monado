@@ -15,6 +15,7 @@ on:
       - src/xrt/compositor/**
       - src/xrt/auxiliary/**
       - src/xrt/targets/**
+      - src/xrt/state_trackers/**
       - src/external/openxr_includes/**
   workflow_dispatch:
 
