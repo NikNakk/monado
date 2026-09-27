@@ -148,10 +148,11 @@ XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
 The client renders with `MTLRasterizationRateMap` directly into the ordinary
 full-sized OpenXR Metal swapchain texture. Only the compact physical-coordinate
 region contains meaningful rendered pixels. For every new gaze-rate-map cell,
-the client asks Metal for the exact logical-to-physical mapping at the 17
-boundaries of the 16-cell horizontal and vertical maps and attaches those
-normalized boundary arrays to the projection view using an internal,
-experimental structure chain.
+the client samples Metal's logical-to-physical mapping at 129 positions per
+axis (128 intervals) and attaches those normalized lookup arrays to the
+projection view using an internal, experimental structure chain. The lookup
+is intentionally denser than the requested 16 rate zones because Metal may
+refine the requested zones or raise their actual rasterization rates.
 
 The OpenXR state tracker copies those boundary arrays into the normal Monado
 projection layer data. Because layer data already travels through the shared
