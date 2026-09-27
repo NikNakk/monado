@@ -146,3 +146,16 @@ comp_layer_accum_equirect2(struct comp_layer_accum *cla, struct xrt_swapchain *x
 {
 	return push_single_swapchain_layer(cla, xsc, data);
 }
+
+xrt_result_t
+comp_layer_accum_passthrough(struct comp_layer_accum *cla, const struct xrt_layer_data *data)
+{
+	if (cla->layer_count >= XRT_MAX_LAYERS) {
+		return XRT_ERROR_LAYER_LIMIT_EXCEEDED;
+	}
+
+	struct comp_layer *layer = &cla->layers[cla->layer_count++];
+	U_ZERO(layer);
+	layer->data = *data;
+	return XRT_SUCCESS;
+}
