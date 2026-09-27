@@ -158,6 +158,11 @@ struct psvr2_et_data
 
 	bool processed_sample_packet;
 	bool calibration_loaded;
+	bool user_calibration_loaded;
+	float user_yaw_gain;
+	float user_yaw_offset_deg;
+	float user_pitch_gain;
+	float user_pitch_offset_deg;
 	uint64_t packet_count;
 	uint64_t valid_combined_gaze_count;
 
