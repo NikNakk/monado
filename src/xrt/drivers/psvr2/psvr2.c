@@ -85,6 +85,7 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_M
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_full_linear_horizon, "PSVR2_FULL_LINEAR_HORIZON", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_recenter_on_first_pose, "PSVR2_RECENTER_ON_FIRST_POSE", false)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_recenter_eye_height_m, "PSVR2_RECENTER_EYE_HEIGHT_M", 1.6f)
 
 /*
  * PSVR2 SLAM normally updates at about 60 Hz. If it has not produced a pose
@@ -788,14 +789,19 @@ psvr2_apply_first_pose_recenter(struct psvr2_hmd *hmd, struct xrt_space_relation
 			struct xrt_vec3 rotated_first_position;
 			math_quat_rotate_vec3(
 			    &hmd->recenter_transform.orientation, &relation->pose.position, &rotated_first_position);
+			float eye_height_m = debug_get_float_option_psvr2_recenter_eye_height_m();
+			if (!isfinite(eye_height_m) || eye_height_m < 0.5f || eye_height_m > 2.5f) {
+				eye_height_m = 1.6f;
+			}
 			hmd->recenter_transform.position = (struct xrt_vec3){
 			    -rotated_first_position.x,
-			    1.6f - rotated_first_position.y,
+			    eye_height_m - rotated_first_position.y,
 			    -rotated_first_position.z,
 			};
 			hmd->recenter_initialized = true;
 			PSVR2_WARN(hmd,
-			            "PSVR2_RECENTER_ON_FIRST_POSE: centred first HMD pose at (0, 1.6, 0) with forward -Z");
+			            "PSVR2_RECENTER_ON_FIRST_POSE: centred first HMD pose at (0, %.2f, 0) with forward -Z",
+			            eye_height_m);
 		}
 	}
 	transform = hmd->recenter_transform;
@@ -2061,6 +2067,11 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->gaze_streams_enabled =
 	    hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_gaze_streams();
 	hmd->stage_space_enabled = debug_get_bool_option_psvr2_stage_space();
+	if (hmd->stage_space_enabled && !hmd->recenter_on_first_pose) {
+		PSVR2_WARN(hmd,
+		            "PSVR2_STAGE_SPACE enabled without PSVR2_RECENTER_ON_FIRST_POSE: "
+		            "stage Y=0 is the raw SLAM origin, not a calibrated physical floor");
+	}
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	psvr2_timing_trace_open();
