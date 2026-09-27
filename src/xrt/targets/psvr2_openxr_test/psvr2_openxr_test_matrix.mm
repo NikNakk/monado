@@ -117,6 +117,7 @@ render_views(application &app, XrTime predicted_display_time)
 	}
 	app.frame_instances = app.scene.world_instances;
 	append_head_locked_cross(app.frame_instances, head_pose);
+	append_gaze_marker(app, predicted_display_time);
 	if (app.frame_instances.size() > app.renderer.max_instances) {
 		fatal("diagnostic scene exceeded Metal instance buffer capacity");
 	}
@@ -264,6 +265,7 @@ run(int argc, char **argv)
 	bool submit_depth_layer = false;
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
+	bool test_gaze = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
@@ -274,16 +276,20 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--passthrough-only") == 0) {
 			submit_passthrough = true;
 			passthrough_only = true;
+		} else if (strcmp(argv[i], "--gaze") == 0) {
+			test_gaze = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only]\n"
+			        "[--passthrough|--passthrough-only] [--gaze]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			        "  --passthrough-only submits only XR_FB_passthrough.\n"
+			        "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
-			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source.\n",
+			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
+			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
 			        argv[0]);
 			return EXIT_SUCCESS;
 		} else {
@@ -296,11 +302,13 @@ run(int argc, char **argv)
 	app.submit_depth_layer = submit_depth_layer;
 	app.submit_passthrough = submit_passthrough;
 	app.passthrough_only = passthrough_only;
+	app.test_gaze = test_gaze;
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
 	create_instance(app);
 	create_system_and_session(app);
+	create_gaze_resources(app);
 	create_passthrough_resources(app);
 	create_swapchains(app);
 
