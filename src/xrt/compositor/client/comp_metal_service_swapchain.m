@@ -8,7 +8,6 @@
 
 #import <Metal/Metal.h>
 #import <IOSurface/IOSurface.h>
-#import <CoreVideo/CoreVideo.h>
 
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_gfx_metal.h"
@@ -220,48 +219,20 @@ metal_service_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
 }
 
-static IOSurfaceRef
-metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
-{
-	const size_t bytes_per_element = 4;
-	const size_t min_bytes_per_row = (size_t)width * bytes_per_element;
-	const size_t bytes_per_row = IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, min_bytes_per_row);
-	const size_t alloc_size = bytes_per_row * (size_t)height;
-
-	NSDictionary *properties = @{
-		(__bridge NSString *)kIOSurfaceWidth : @(width),
-		(__bridge NSString *)kIOSurfaceHeight : @(height),
-		(__bridge NSString *)kIOSurfaceBytesPerElement : @(bytes_per_element),
-		(__bridge NSString *)kIOSurfaceBytesPerRow : @(bytes_per_row),
-		(__bridge NSString *)kIOSurfaceAllocSize : @(alloc_size),
-		(__bridge NSString *)kIOSurfacePixelFormat : @(kCVPixelFormatType_32BGRA),
-	};
-
-	return IOSurfaceCreate((__bridge CFDictionaryRef)properties);
-}
-
-static void
-metal_service_release_native_images(struct xrt_image_native *images, uint32_t image_count)
-{
-	if (images == NULL) {
-		return;
-	}
-	for (uint32_t i = 0; i < image_count; i++) {
-		if (xrt_graphics_buffer_is_valid(images[i].handle)) {
-			CFRelease(images[i].handle);
-			images[i].handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
-		}
-	}
-}
-
 static xrt_result_t
 metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *link,
                                          const struct xrt_swapchain_create_info *info,
                                          const struct xrt_swapchain_create_info *native_info,
-                                         uint32_t image_count,
                                          struct xrt_swapchain **out_xsc)
 {
-	if (image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+	struct xrt_swapchain_native *xscn = NULL;
+	xrt_result_t xret = xrt_comp_native_create_swapchain(link->xcn, native_info, &xscn);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	if (xscn == NULL || xscn->base.image_count == 0 ||
+	    xscn->base.image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		xrt_swapchain_native_reference(&xscn, NULL);
 		return XRT_ERROR_ALLOCATION;
 	}
 
@@ -270,107 +241,11 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	                                                      width:info->width
 	                                                     height:info->height
 	                                                  mipmapped:NO];
-	descriptor.storageMode = MTLStorageModeShared;
 	descriptor.usage = xrt_usage_to_metal(native_info->bits);
-
-	struct xrt_image_native *transport_images = calloc(image_count, sizeof(*transport_images));
-	id<MTLTexture> *textures = calloc(image_count, sizeof(*textures));
-	if (transport_images == NULL || textures == NULL) {
-		free(textures);
-		free(transport_images);
-		return XRT_ERROR_ALLOCATION;
-	}
-
-	for (uint32_t i = 0; i < image_count; i++) {
-		IOSurfaceRef surface = metal_service_create_bgra_iosurface(info->width, info->height);
-		if (surface == NULL) {
-			U_LOG_E("Metal service IOSurfaceCreate failed: image=%u size=%ux%u", i, info->width, info->height);
-			metal_service_release_native_images(transport_images, image_count);
-			release_texture_array(textures, image_count);
-			free(transport_images);
-			return XRT_ERROR_ALLOCATION;
-		}
-
-		if (IOSurfaceGetPixelFormat(surface) != kCVPixelFormatType_32BGRA) {
-			U_LOG_E("Metal service IOSurface has unexpected pixel format: image=%u format=0x%08x",
-			        i,
-			        (unsigned)IOSurfaceGetPixelFormat(surface));
-			CFRelease(surface);
-			metal_service_release_native_images(transport_images, image_count);
-			release_texture_array(textures, image_count);
-			free(transport_images);
-			return XRT_ERROR_ALLOCATION;
-		}
-
-		id<MTLTexture> texture =
-		    [link->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
-		if (texture == nil || texture.iosurface == nil ||
-		    texture.width != info->width || texture.height != info->height ||
-		    texture.pixelFormat != (MTLPixelFormat)info->format) {
-			U_LOG_E("Metal service IOSurface texture creation failed: image=%u surface=%u texture=%p",
-			        i,
-			        (unsigned)IOSurfaceGetID(surface),
-			        (__bridge void *)texture);
-			[texture release];
-			CFRelease(surface);
-			metal_service_release_native_images(transport_images, image_count);
-			release_texture_array(textures, image_count);
-			free(transport_images);
-			return XRT_ERROR_ALLOCATION;
-		}
-
-		transport_images[i].handle = surface;
-		transport_images[i].size = IOSurfaceGetAllocSize(surface);
-		transport_images[i].use_dedicated_allocation = false;
-		textures[i] = texture;
-	}
-
-	/*
-	 * Use Monado's ordinary native-handle import path. On macOS the IPC layer
-	 * serializes IOSurfaces by IOSurfaceID and the service imports each retained
-	 * surface into its Vulkan compositor with VkImportMetalIOSurfaceInfoEXT.
-	 *
-	 * The import call copies/transports the handles and the returned native
-	 * client swapchain assumes ownership of this client's retained IOSurfaceRefs,
-	 * so do not release transport_images on success.
-	 */
-	struct xrt_swapchain *native_xsc = NULL;
-	xrt_result_t xret = xrt_comp_import_swapchain(&link->xcn->base,
-	                                              native_info,
-	                                              transport_images,
-	                                              image_count,
-	                                              &native_xsc);
-	free(transport_images);
-	if (xret != XRT_SUCCESS) {
-		// xrt_comp_import_swapchain does not consume handles on failure.
-		for (uint32_t i = 0; i < image_count; i++) {
-			if (textures[i] != nil) {
-				IOSurfaceRef surface = textures[i].iosurface;
-				if (surface != NULL) {
-					CFRelease(surface);
-				}
-			}
-		}
-		release_texture_array(textures, image_count);
-		return xret;
-	}
-
-	struct xrt_swapchain_native *xscn = (struct xrt_swapchain_native *)native_xsc;
-	if (xscn == NULL || xscn->base.image_count != image_count) {
-		U_LOG_E("Metal service IOSurface swapchain image-count mismatch: expected=%u actual=%u",
-		        image_count,
-		        xscn != NULL ? xscn->base.image_count : 0);
-		if (xscn != NULL) {
-			xrt_swapchain_native_reference(&xscn, NULL);
-		}
-		release_texture_array(textures, image_count);
-		return XRT_ERROR_ALLOCATION;
-	}
 
 	struct metal_service_swapchain *sc = calloc(1, sizeof(*sc));
 	if (sc == NULL) {
 		xrt_swapchain_native_reference(&xscn, NULL);
-		release_texture_array(textures, image_count);
 		return XRT_ERROR_ALLOCATION;
 	}
 
@@ -380,26 +255,53 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	sc->base.base.barrier_image = metal_service_swapchain_barrier_image;
 	sc->base.base.release_image = metal_service_swapchain_release_image;
 	sc->base.base.reference.count = 1;
-	sc->base.base.image_count = image_count;
+	sc->base.base.image_count = xscn->base.image_count;
 	sc->xscn = xscn;
 	sc->command_queue = [link->command_queue retain];
 
-	for (uint32_t i = 0; i < image_count; i++) {
-		sc->base.images[i] = (__bridge void *)textures[i];
+	for (uint32_t i = 0; i < xscn->base.image_count; i++) {
+		IOSurfaceRef surface = xscn->images[i].handle;
+		if (!xrt_graphics_buffer_is_valid(surface) ||
+		    IOSurfaceGetWidth(surface) != info->width ||
+		    IOSurfaceGetHeight(surface) != info->height) {
+			U_LOG_E("Metal service IOSurface image mismatch: image=%u expected=%ux%u surface=%p size=%zux%zu",
+			        i,
+			        info->width,
+			        info->height,
+			        (void *)surface,
+			        surface != NULL ? IOSurfaceGetWidth(surface) : 0,
+			        surface != NULL ? IOSurfaceGetHeight(surface) : 0);
+			metal_service_swapchain_destroy(&sc->base.base);
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		id<MTLTexture> texture = [link->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
+		if (texture == nil || texture.iosurface == nil ||
+		    texture.width != info->width || texture.height != info->height ||
+		    texture.pixelFormat != (MTLPixelFormat)info->format) {
+			U_LOG_E("Metal service IOSurface texture creation failed: image=%u surface=%u texture=%p",
+			        i,
+			        (unsigned)IOSurfaceGetID(surface),
+			        (__bridge void *)texture);
+			[texture release];
+			metal_service_swapchain_destroy(&sc->base.base);
+			return XRT_ERROR_ALLOCATION;
+		}
+
+		sc->base.images[i] = (__bridge void *)texture;
 	}
-	free(textures);
 
 	/*
-	 * The IOSurface stores BGRA bytes. BGRA8Unorm_sRGB remains an sRGB Metal
-	 * texture and an sRGB VkImage; the IOSurface's fourcc describes storage,
-	 * not the transfer function.
+	 * The IOSurface stores BGRA bytes; the transfer function belongs to the
+	 * Vulkan/Metal image format. For BGRA8Unorm_sRGB both the service VkImage
+	 * and client MTLTexture retain their sRGB formats, so no reinterpretation
+	 * or mutable-format view is required here.
 	 */
-	U_LOG_D("Metal service swapchain backing=iosurface images=%u size=%ux%u metal_format=%lld cv_format=0x%08x",
-	        image_count,
+	U_LOG_D("Metal service swapchain backing=iosurface images=%u size=%ux%u format=%lld",
+	        xscn->base.image_count,
 	        info->width,
 	        info->height,
-	        (long long)info->format,
-	        (unsigned)kCVPixelFormatType_32BGRA);
+	        (long long)info->format);
 
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
@@ -446,8 +348,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	 * MTLDevice, avoiding the Metal shared-handle/XPC texture broker entirely.
 	 */
 	if (metal_service_can_use_iosurface(info)) {
-		xret = metal_service_create_iosurface_swapchain(
-		    link, info, &native_info, xsccp.image_count, out_xsc);
+		xret = metal_service_create_iosurface_swapchain(link, info, &native_info, out_xsc);
 		if (xret == XRT_SUCCESS) {
 			return XRT_SUCCESS;
 		}
