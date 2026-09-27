@@ -429,6 +429,22 @@ do_equirect2_layer(struct xrt_compositor *xc, struct multi_compositor *mc, struc
 	xrt_comp_layer_equirect2(xc, xdev, xcs, data);
 }
 
+static void
+do_passthrough_layer(struct xrt_compositor *xc,
+                     struct multi_compositor *mc,
+                     struct multi_layer_entry *layer,
+                     uint32_t i)
+{
+	(void)mc;
+	struct xrt_device *xdev = layer->xdev;
+	if (xdev == NULL) {
+		U_LOG_E("Invalid xdev for passthrough layer #%u!", i);
+		return;
+	}
+
+	xrt_comp_layer_passthrough(xc, xdev, &layer->data);
+}
+
 static int
 overlay_sort_func(const void *a, const void *b)
 {
@@ -556,6 +572,7 @@ transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time
 			case XRT_LAYER_CYLINDER: do_cylinder_layer(xc, mc, layer, i); break;
 			case XRT_LAYER_EQUIRECT1: do_equirect1_layer(xc, mc, layer, i); break;
 			case XRT_LAYER_EQUIRECT2: do_equirect2_layer(xc, mc, layer, i); break;
+			case XRT_LAYER_PASSTHROUGH: do_passthrough_layer(xc, mc, layer, i); break;
 			default: U_LOG_E("Unhandled layer type '%i'!", layer->data.type); break;
 			}
 		}
