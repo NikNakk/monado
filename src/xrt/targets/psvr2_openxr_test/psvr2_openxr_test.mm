@@ -92,6 +92,16 @@ struct xr_api
 	PFN_xrAcquireSwapchainImage acquire_swapchain_image = nullptr;
 	PFN_xrWaitSwapchainImage wait_swapchain_image = nullptr;
 	PFN_xrReleaseSwapchainImage release_swapchain_image = nullptr;
+	PFN_xrCreateActionSet create_action_set = nullptr;
+	PFN_xrDestroyActionSet destroy_action_set = nullptr;
+	PFN_xrCreateAction create_action = nullptr;
+	PFN_xrDestroyAction destroy_action = nullptr;
+	PFN_xrStringToPath string_to_path = nullptr;
+	PFN_xrSuggestInteractionProfileBindings suggest_interaction_profile_bindings = nullptr;
+	PFN_xrAttachSessionActionSets attach_session_action_sets = nullptr;
+	PFN_xrCreateActionSpace create_action_space = nullptr;
+	PFN_xrSyncActions sync_actions = nullptr;
+	PFN_xrGetActionStatePose get_action_state_pose = nullptr;
 	PFN_xrCreatePassthroughFB create_passthrough = nullptr;
 	PFN_xrDestroyPassthroughFB destroy_passthrough = nullptr;
 	PFN_xrPassthroughStartFB passthrough_start = nullptr;
@@ -198,6 +208,16 @@ load_instance_xr_functions(xr_api &xr, XrInstance instance)
 	LOAD_XR("xrAcquireSwapchainImage", acquire_swapchain_image);
 	LOAD_XR("xrWaitSwapchainImage", wait_swapchain_image);
 	LOAD_XR("xrReleaseSwapchainImage", release_swapchain_image);
+	LOAD_XR("xrCreateActionSet", create_action_set);
+	LOAD_XR("xrDestroyActionSet", destroy_action_set);
+	LOAD_XR("xrCreateAction", create_action);
+	LOAD_XR("xrDestroyAction", destroy_action);
+	LOAD_XR("xrStringToPath", string_to_path);
+	LOAD_XR("xrSuggestInteractionProfileBindings", suggest_interaction_profile_bindings);
+	LOAD_XR("xrAttachSessionActionSets", attach_session_action_sets);
+	LOAD_XR("xrCreateActionSpace", create_action_space);
+	LOAD_XR("xrSyncActions", sync_actions);
+	LOAD_XR("xrGetActionStatePose", get_action_state_pose);
 #undef LOAD_XR
 }
 
@@ -571,6 +591,15 @@ struct application
 	bool submit_depth_layer = false;
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
+	bool test_gaze = false;
+	bool test_gaze = false;
+	bool gaze_supported = false;
+	XrActionSet gaze_action_set = XR_NULL_HANDLE;
+	XrAction gaze_action = XR_NULL_HANDLE;
+	XrSpace gaze_space = XR_NULL_HANDLE;
+	XrPath gaze_subaction_path = XR_NULL_PATH;
+	uint64_t gaze_frame_count = 0;
+	uint64_t gaze_valid_count = 0;
 	XrPassthroughFB passthrough = XR_NULL_HANDLE;
 	XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
 	id<MTLCommandQueue> command_queue = nil;
@@ -617,6 +646,9 @@ create_instance(application &app)
 	if (app.submit_passthrough && !has_extension(app.xr, XR_FB_PASSTHROUGH_EXTENSION_NAME)) {
 		fatal("runtime does not expose XR_FB_passthrough");
 	}
+	if (app.test_gaze && !has_extension(app.xr, XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME)) {
+		fatal("runtime does not expose XR_EXT_eye_gaze_interaction");
+	}
 
 	std::vector<const char *> extensions = {XR_KHR_METAL_ENABLE_EXTENSION_NAME};
 	if (app.submit_depth_layer) {
@@ -624,6 +656,9 @@ create_instance(application &app)
 	}
 	if (app.submit_passthrough) {
 		extensions.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+	}
+	if (app.test_gaze) {
+		extensions.push_back(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
 	}
 
 	XrInstanceCreateInfo create_info{XR_TYPE_INSTANCE_CREATE_INFO};
@@ -665,9 +700,21 @@ create_system_and_session(application &app)
 	system_info.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 	check_xr(app.xr.get_system(app.instance, &system_info, &app.system_id), "xrGetSystem");
 
+	XrSystemEyeGazeInteractionPropertiesEXT gaze_properties{XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
 	XrSystemProperties properties{XR_TYPE_SYSTEM_PROPERTIES};
+	if (app.test_gaze) {
+		properties.next = &gaze_properties;
+	}
 	check_xr(app.xr.get_system_properties(app.instance, app.system_id, &properties), "xrGetSystemProperties");
 	fprintf(stderr, "psvr2-openxr-test: system %s\n", properties.systemName);
+	if (app.test_gaze) {
+		app.gaze_supported = gaze_properties.supportsEyeGazeInteraction == XR_TRUE;
+		fprintf(stderr, "psvr2-openxr-test: eye gaze interaction %s\n",
+		        app.gaze_supported ? "supported" : "NOT supported");
+		if (!app.gaze_supported) {
+			fatal("runtime system does not report eye gaze support; ensure PSVR2_GAZE_STREAMS=1 reaches monado-service");
+		}
+	}
 
 	XrGraphicsRequirementsMetalKHR requirements{XR_TYPE_GRAPHICS_REQUIREMENTS_METAL_KHR};
 	check_xr(app.xr.get_metal_graphics_requirements(app.instance, app.system_id, &requirements),
@@ -699,6 +746,61 @@ create_system_and_session(application &app)
 	view_space_info.poseInReferenceSpace.orientation.w = 1.0f;
 	check_xr(app.xr.create_reference_space(app.session, &view_space_info, &app.view_space),
 	         "xrCreateReferenceSpace(VIEW)");
+}
+
+static void
+create_gaze_resources(application &app)
+{
+	if (!app.test_gaze) {
+		return;
+	}
+
+	check_xr(app.xr.string_to_path(app.instance, "/user/eyes_ext", &app.gaze_subaction_path),
+	         "xrStringToPath(/user/eyes_ext)");
+
+	XrActionSetCreateInfo set_info{XR_TYPE_ACTION_SET_CREATE_INFO};
+	snprintf(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "%s", "gaze");
+	snprintf(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "%s", "Eye gaze");
+	set_info.priority = 0;
+	check_xr(app.xr.create_action_set(app.instance, &set_info, &app.gaze_action_set), "xrCreateActionSet(gaze)");
+
+	XrActionCreateInfo action_info{XR_TYPE_ACTION_CREATE_INFO};
+	action_info.actionType = XR_ACTION_TYPE_POSE_INPUT;
+	snprintf(action_info.actionName, XR_MAX_ACTION_NAME_SIZE, "%s", "gaze_pose");
+	snprintf(action_info.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE, "%s", "Gaze pose");
+	action_info.countSubactionPaths = 1;
+	action_info.subactionPaths = &app.gaze_subaction_path;
+	check_xr(app.xr.create_action(app.gaze_action_set, &action_info, &app.gaze_action), "xrCreateAction(gaze)");
+
+	XrPath interaction_profile = XR_NULL_PATH;
+	XrPath gaze_binding_path = XR_NULL_PATH;
+	check_xr(app.xr.string_to_path(app.instance, "/interaction_profiles/ext/eye_gaze_interaction",
+	                               &interaction_profile),
+	         "xrStringToPath(eye gaze profile)");
+	check_xr(app.xr.string_to_path(app.instance, "/user/eyes_ext/input/gaze_ext/pose", &gaze_binding_path),
+	         "xrStringToPath(gaze pose binding)");
+
+	XrActionSuggestedBinding binding{app.gaze_action, gaze_binding_path};
+	XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+	suggested.interactionProfile = interaction_profile;
+	suggested.countSuggestedBindings = 1;
+	suggested.suggestedBindings = &binding;
+	check_xr(app.xr.suggest_interaction_profile_bindings(app.instance, &suggested),
+	         "xrSuggestInteractionProfileBindings(eye gaze)");
+
+	XrSessionActionSetsAttachInfo attach_info{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+	attach_info.countActionSets = 1;
+	attach_info.actionSets = &app.gaze_action_set;
+	check_xr(app.xr.attach_session_action_sets(app.session, &attach_info), "xrAttachSessionActionSets(gaze)");
+
+	XrActionSpaceCreateInfo space_info{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+	space_info.action = app.gaze_action;
+	space_info.subactionPath = app.gaze_subaction_path;
+	space_info.poseInActionSpace.orientation.w = 1.0f;
+	check_xr(app.xr.create_action_space(app.session, &space_info, &app.gaze_space), "xrCreateActionSpace(gaze)");
+
+	fprintf(stderr,
+	        "psvr2-openxr-test: gaze action ready; marker is bright yellow at 2 m along the reported gaze ray\n");
 }
 
 static void
@@ -889,6 +991,69 @@ head_pose_for_frame(application &app, XrTime predicted_display_time)
 }
 
 static void
+append_gaze_marker(application &app, XrTime predicted_display_time)
+{
+	if (!app.test_gaze || app.gaze_space == XR_NULL_HANDLE) {
+		return;
+	}
+
+	XrActiveActionSet active_set{app.gaze_action_set, XR_NULL_PATH};
+	XrActionsSyncInfo sync_info{XR_TYPE_ACTIONS_SYNC_INFO};
+	sync_info.countActiveActionSets = 1;
+	sync_info.activeActionSets = &active_set;
+	XrResult sync_result = app.xr.sync_actions(app.session, &sync_info);
+	if (XR_FAILED(sync_result)) {
+		return;
+	}
+
+	XrActionStateGetInfo get_info{XR_TYPE_ACTION_STATE_GET_INFO};
+	get_info.action = app.gaze_action;
+	get_info.subactionPath = app.gaze_subaction_path;
+	XrActionStatePose pose_state{XR_TYPE_ACTION_STATE_POSE};
+	if (XR_FAILED(app.xr.get_action_state_pose(app.session, &get_info, &pose_state)) || pose_state.isActive != XR_TRUE) {
+		app.gaze_frame_count++;
+		if ((app.gaze_frame_count % 120) == 0) {
+			fprintf(stderr, "psvr2-openxr-test: gaze action inactive\n");
+		}
+		return;
+	}
+
+	XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+	XrResult locate_result = app.xr.locate_space(app.gaze_space, app.app_space, predicted_display_time, &location);
+	app.gaze_frame_count++;
+	const XrSpaceLocationFlags required =
+	    XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+	if (XR_FAILED(locate_result) || (location.locationFlags & required) != required) {
+		if ((app.gaze_frame_count % 120) == 0) {
+			fprintf(stderr, "psvr2-openxr-test: gaze active but pose invalid (flags=0x%llx)\n",
+			        (unsigned long long)location.locationFlags);
+		}
+		return;
+	}
+
+	app.gaze_valid_count++;
+	const simd_float3 origin = xr_position(location.pose.position);
+	const simd_float3 direction =
+	    rotate_vector(location.pose.orientation, make_float3(0.0f, 0.0f, -1.0f));
+	const simd_float3 target = origin + direction * 2.0f;
+	const simd_float3 right =
+	    rotate_vector(location.pose.orientation, make_float3(1.0f, 0.0f, 0.0f));
+	const simd_float3 up =
+	    rotate_vector(location.pose.orientation, make_float3(0.0f, 1.0f, 0.0f));
+	const simd_float3 back = -direction;
+	const simd_float4 color = make_float4(1.0f, 0.95f, 0.05f, 1.0f);
+
+	app.frame_instances.push_back(
+	    {basis_model(target, right, up, back, make_float3(0.025f, 0.025f, 0.025f)), color});
+
+	if ((app.gaze_valid_count % 120) == 1) {
+		fprintf(stderr,
+		        "psvr2-openxr-test: gaze valid dir=(%+.3f,%+.3f,%+.3f) target2m=(%+.2f,%+.2f,%+.2f)\n",
+		        direction.x, direction.y, direction.z, target.x, target.y, target.z);
+	}
+}
+
+static void
 render_views(application &app, XrTime predicted_display_time)
 {
 	const XrPosef head_pose = head_pose_for_frame(app, predicted_display_time);
@@ -897,6 +1062,7 @@ render_views(application &app, XrTime predicted_display_time)
 	}
 	app.frame_instances = app.scene.world_instances;
 	append_head_locked_cross(app.frame_instances, head_pose);
+	append_gaze_marker(app, predicted_display_time);
 	if (app.frame_instances.size() > app.renderer.max_instances) {
 		fatal("diagnostic scene exceeded Metal instance buffer capacity");
 	}
@@ -1125,6 +1291,18 @@ cleanup(application &app)
 			swapchain.handle = XR_NULL_HANDLE;
 		}
 	}
+	if (app.gaze_space != XR_NULL_HANDLE && app.xr.destroy_space != nullptr) {
+		app.xr.destroy_space(app.gaze_space);
+		app.gaze_space = XR_NULL_HANDLE;
+	}
+	if (app.gaze_action != XR_NULL_HANDLE && app.xr.destroy_action != nullptr) {
+		app.xr.destroy_action(app.gaze_action);
+		app.gaze_action = XR_NULL_HANDLE;
+	}
+	if (app.gaze_action_set != XR_NULL_HANDLE && app.xr.destroy_action_set != nullptr) {
+		app.xr.destroy_action_set(app.gaze_action_set);
+		app.gaze_action_set = XR_NULL_HANDLE;
+	}
 	if (app.view_space != XR_NULL_HANDLE && app.xr.destroy_space != nullptr) {
 		app.xr.destroy_space(app.view_space);
 		app.view_space = XR_NULL_HANDLE;
@@ -1174,16 +1352,20 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--passthrough-only") == 0) {
 			submit_passthrough = true;
 			passthrough_only = true;
+		} else if (strcmp(argv[i], "--gaze") == 0) {
+			test_gaze = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only]\n"
+			        "[--passthrough|--passthrough-only] [--gaze]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			        "  --passthrough-only submits only XR_FB_passthrough.\n"
+			        "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
-			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source.\n",
+			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
+			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
 			        argv[0]);
 			return EXIT_SUCCESS;
 		} else {
@@ -1196,11 +1378,13 @@ run(int argc, char **argv)
 	app.submit_depth_layer = submit_depth_layer;
 	app.submit_passthrough = submit_passthrough;
 	app.passthrough_only = passthrough_only;
+	app.test_gaze = test_gaze;
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
 	create_instance(app);
 	create_system_and_session(app);
+	create_gaze_resources(app);
 	create_passthrough_resources(app);
 	create_swapchains(app);
 
