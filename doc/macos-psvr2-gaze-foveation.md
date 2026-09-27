@@ -126,3 +126,67 @@ peripheral artefacts:
 Compositor-only foveation of an already full-resolution application image is
 not expected to save meaningful application rendering work, so it is not the
 primary path.
+
+
+## Fused compositor proof
+
+The original `--gaze-foveation` mode intentionally used an explicit
+application-side reconstruction pass. Measurements on the 2800x2856-per-eye
+diagnostic scene showed that the Metal VRR scene render itself fell from about
+0.91 ms to about 0.46 ms, while the full-resolution reconstruction pass cost
+about 1.54 ms. The rate-mapped physical image was about 41.6% of the normal
+pixel count and was not perceptibly different in the headset.
+
+The experimental fused mode removes that application reconstruction pass:
+
+```sh
+XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
+./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  --gaze-foveation-fused
+```
+
+The client renders with `MTLRasterizationRateMap` directly into the ordinary
+full-sized OpenXR Metal swapchain texture. Only the compact physical-coordinate
+region contains meaningful rendered pixels. For every new gaze-rate-map cell,
+the client asks Metal for the exact logical-to-physical mapping at the 17
+boundaries of the 16-cell horizontal and vertical maps and attaches those
+normalized boundary arrays to the projection view using an internal,
+experimental structure chain.
+
+The OpenXR state tracker copies those boundary arrays into the normal Monado
+projection layer data. Because layer data already travels through the shared
+IPC layer slot, no extra per-frame IPC operation is required.
+
+On the compositor's single-projection fast path, the existing distortion /
+timewarp compute shader applies the same piecewise-linear logical-to-physical
+mapping immediately before sampling the source image. This folds VRR
+reconstruction into the compositor pass that was already required:
+
+```text
+Metal gaze VRR render into OpenXR image
+          |
+          v
+projection layer + 17 x/y boundary values per eye
+          |
+          v
+Monado distortion / timewarp
+  - optical distortion
+  - chromatic source UVs
+  - timewarp
+  - logical -> physical VRR UV mapping
+  - source sampling
+          |
+          v
+display
+```
+
+The first proof is intentionally restricted to one projection layer without an
+OpenXR depth layer or passthrough. Those cases can use the layer-squashing path
+or additional source images and need equivalent foveation-aware sampling before
+they are enabled.
+
+Set `XRT_MACOS_FUSED_FOVEATION` only for this internal experiment. The
+diagnostic sets it automatically when `--gaze-foveation-fused` is requested.
+
+The old `--gaze-foveation` mode remains available as a two-pass reference
+implementation for timing and visual comparisons.
