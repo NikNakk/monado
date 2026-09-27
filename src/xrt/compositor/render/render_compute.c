@@ -373,10 +373,37 @@ update_compute_descriptor_set_target(struct vk_bundle *vk,
 }
 
 static void
+fill_distortion_foveation_data(struct render_compute_distortion_ubo_data *data,
+                               const struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS],
+                               uint32_t view_count)
+{
+	for (uint32_t eye = 0; eye < view_count; ++eye) {
+		const struct xrt_foveation_map_data *map = src_foveation != NULL ? &src_foveation[eye] : NULL;
+		const bool enabled = map != NULL && map->enabled != 0 &&
+		                     map->boundary_count == XRT_FOVEATION_MAP_BOUNDARY_COUNT;
+		data->foveation[eye].value = enabled ? 1u : 0u;
+		data->foveation[eye].boundary_count = enabled ? map->boundary_count : 0u;
+
+		for (uint32_t packed = 0; packed < RENDER_FOVEATION_BOUNDARY_VEC4_COUNT; ++packed) {
+			const uint32_t dst = eye * RENDER_FOVEATION_BOUNDARY_VEC4_COUNT + packed;
+			for (uint32_t lane = 0; lane < 4; ++lane) {
+				const uint32_t index = packed * 4 + lane;
+				data->foveation_x[dst].v[lane] =
+				    enabled && index < XRT_FOVEATION_MAP_BOUNDARY_COUNT ? map->x[index] : 0.0f;
+				data->foveation_y[dst].v[lane] =
+				    enabled && index < XRT_FOVEATION_MAP_BOUNDARY_COUNT ? map->y[index] : 0.0f;
+			}
+		}
+	}
+}
+
+
+static void
 dispatch_project_pipeline(struct render_compute *render,
                           VkSampler src_samplers[XRT_MAX_VIEWS],
                           VkImageView src_image_views[XRT_MAX_VIEWS],
                           const struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS],
+                          const struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS],
                           VkSampler depth_samplers[XRT_MAX_VIEWS],
                           VkImageView depth_image_views[XRT_MAX_VIEWS],
                           VkImage target_image,
@@ -398,6 +425,7 @@ dispatch_project_pipeline(struct render_compute *render,
 		data->views[i] = views[i];
 		data->post_transforms[i] = src_norm_rects[i];
 	}
+	fill_distortion_foveation_data(data, src_foveation, render->r->view_count);
 
 
 	/*
@@ -809,6 +837,7 @@ render_compute_projection_timewarp(struct render_compute *render,
                                    VkSampler src_samplers[XRT_MAX_VIEWS],
                                    VkImageView src_image_views[XRT_MAX_VIEWS],
                                    const struct xrt_normalized_rect src_norm_rects[XRT_MAX_VIEWS],
+                                   const struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS],
                                    const struct xrt_pose src_poses[XRT_MAX_VIEWS],
                                    const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
                                    const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
@@ -869,7 +898,7 @@ render_compute_projection_timewarp(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, NULL, NULL, target_image,
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, src_foveation, NULL, NULL, target_image,
 	                          target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
@@ -952,7 +981,7 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, depth_samplers, depth_image_views,
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, depth_samplers, depth_image_views,
 	                          target_image, target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
@@ -967,6 +996,7 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
                                                VkSampler src_samplers[XRT_MAX_VIEWS],
                                                VkImageView src_image_views[XRT_MAX_VIEWS],
                                                const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                               const struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS],
                                                const struct xrt_fov src_fovs[XRT_MAX_VIEWS],
                                                const struct xrt_pose new_poses_scanout_begin[XRT_MAX_VIEWS],
                                                const struct xrt_pose new_poses_scanout_end[XRT_MAX_VIEWS],
@@ -1022,7 +1052,7 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, NULL, target_image,
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL, target_image,
 	                          target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
@@ -1031,6 +1061,7 @@ render_compute_projection_no_timewarp(struct render_compute *render,
                                       VkSampler src_samplers[XRT_MAX_VIEWS],
                                       VkImageView src_image_views[XRT_MAX_VIEWS],
                                       const struct xrt_normalized_rect src_rects[XRT_MAX_VIEWS],
+                                      const struct xrt_foveation_map_data src_foveation[XRT_MAX_VIEWS],
                                       VkImage target_image,
                                       VkImageView target_image_view,
                                       const struct render_viewport_data views[XRT_MAX_VIEWS])
@@ -1038,7 +1069,7 @@ render_compute_projection_no_timewarp(struct render_compute *render,
 	assert(render->r != NULL);
 	struct render_resources *r = render->r;
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, NULL, target_image,
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL, target_image,
 	                          target_image_view, views, r->compute.distortion.pipeline);
 }
 
