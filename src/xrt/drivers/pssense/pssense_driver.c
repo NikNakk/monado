@@ -1102,6 +1102,7 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 	pssense->base.destroy = pssense_device_destroy;
 	pssense->base.supported.orientation_tracking = true;
 	pssense->base.supported.battery_status = true;
+	pssense->base.supported.force_feedback = true;
 
 	m_imu_3dof_init(&pssense->fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 
