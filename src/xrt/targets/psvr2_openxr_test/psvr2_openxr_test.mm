@@ -92,6 +92,12 @@ struct xr_api
 	PFN_xrAcquireSwapchainImage acquire_swapchain_image = nullptr;
 	PFN_xrWaitSwapchainImage wait_swapchain_image = nullptr;
 	PFN_xrReleaseSwapchainImage release_swapchain_image = nullptr;
+	PFN_xrCreatePassthroughFB create_passthrough = nullptr;
+	PFN_xrDestroyPassthroughFB destroy_passthrough = nullptr;
+	PFN_xrPassthroughStartFB passthrough_start = nullptr;
+	PFN_xrCreatePassthroughLayerFB create_passthrough_layer = nullptr;
+	PFN_xrDestroyPassthroughLayerFB destroy_passthrough_layer = nullptr;
+	PFN_xrPassthroughLayerResumeFB passthrough_layer_resume = nullptr;
 };
 
 template <typename T>
@@ -563,6 +569,10 @@ struct application
 	bool session_running = false;
 	bool exit_requested = false;
 	bool submit_depth_layer = false;
+	bool submit_passthrough = false;
+	bool passthrough_only = false;
+	XrPassthroughFB passthrough = XR_NULL_HANDLE;
+	XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
 	id<MTLCommandQueue> command_queue = nil;
 	MTLPixelFormat color_format = MTLPixelFormatInvalid;
 	std::vector<XrViewConfigurationView> view_configuration;
@@ -604,10 +614,16 @@ create_instance(application &app)
 	if (app.submit_depth_layer && !has_extension(app.xr, XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME)) {
 		fatal("runtime does not expose XR_KHR_composition_layer_depth");
 	}
+	if (app.submit_passthrough && !has_extension(app.xr, XR_FB_PASSTHROUGH_EXTENSION_NAME)) {
+		fatal("runtime does not expose XR_FB_passthrough");
+	}
 
 	std::vector<const char *> extensions = {XR_KHR_METAL_ENABLE_EXTENSION_NAME};
 	if (app.submit_depth_layer) {
 		extensions.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
+	}
+	if (app.submit_passthrough) {
+		extensions.push_back(XR_FB_PASSTHROUGH_EXTENSION_NAME);
 	}
 
 	XrInstanceCreateInfo create_info{XR_TYPE_INSTANCE_CREATE_INFO};
@@ -620,6 +636,20 @@ create_instance(application &app)
 	create_info.enabledExtensionNames = extensions.data();
 	check_xr(app.xr.create_instance(&create_info, &app.instance), "xrCreateInstance");
 	load_instance_xr_functions(app.xr, app.instance);
+	if (app.submit_passthrough) {
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrCreatePassthroughFB",
+		             &app.xr.create_passthrough);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrDestroyPassthroughFB",
+		             &app.xr.destroy_passthrough);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrPassthroughStartFB",
+		             &app.xr.passthrough_start);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrCreatePassthroughLayerFB",
+		             &app.xr.create_passthrough_layer);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrDestroyPassthroughLayerFB",
+		             &app.xr.destroy_passthrough_layer);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrPassthroughLayerResumeFB",
+		             &app.xr.passthrough_layer_resume);
+	}
 
 	XrInstanceProperties instance_properties{XR_TYPE_INSTANCE_PROPERTIES};
 	check_xr(app.xr.get_instance_properties(app.instance, &instance_properties), "xrGetInstanceProperties");
@@ -669,6 +699,29 @@ create_system_and_session(application &app)
 	view_space_info.poseInReferenceSpace.orientation.w = 1.0f;
 	check_xr(app.xr.create_reference_space(app.session, &view_space_info, &app.view_space),
 	         "xrCreateReferenceSpace(VIEW)");
+}
+
+static void
+create_passthrough_resources(application &app)
+{
+	if (!app.submit_passthrough) {
+		return;
+	}
+
+	XrPassthroughCreateInfoFB passthrough_info{XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
+	check_xr(app.xr.create_passthrough(app.session, &passthrough_info, &app.passthrough),
+	         "xrCreatePassthroughFB");
+	check_xr(app.xr.passthrough_start(app.passthrough), "xrPassthroughStartFB");
+
+	XrPassthroughLayerCreateInfoFB layer_info{XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB};
+	layer_info.passthrough = app.passthrough;
+	layer_info.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
+	check_xr(app.xr.create_passthrough_layer(app.session, &layer_info, &app.passthrough_layer),
+	         "xrCreatePassthroughLayerFB");
+	check_xr(app.xr.passthrough_layer_resume(app.passthrough_layer), "xrPassthroughLayerResumeFB");
+
+	fprintf(stderr, "psvr2-openxr-test: XR_FB_passthrough running%s\n",
+	        app.passthrough_only ? " (camera only)" : " behind diagnostic scene");
 }
 
 static MTLPixelFormat
@@ -888,7 +941,9 @@ render_views(application &app, XrTime predicted_display_time)
 		render_pass.colorAttachments[0].texture = color_texture;
 		render_pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 		render_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-		render_pass.colorAttachments[0].clearColor = MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
+		render_pass.colorAttachments[0].clearColor =
+		    app.submit_passthrough ? MTLClearColorMake(0.0, 0.0, 0.0, 0.0)
+		                           : MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
 		id<MTLTexture> depth_texture = swapchain.depth_texture;
 		if (app.submit_depth_layer) {
 			if (depth_image_indices[i] >= swapchain.depth_images.size()) {
@@ -1025,18 +1080,32 @@ render_frame(application &app)
 			layer.space = app.app_space;
 			layer.viewCount = (uint32_t)app.projection_views.size();
 			layer.views = app.projection_views.data();
-			submit_projection = true;
+			if (app.submit_passthrough) {
+				layer.layerFlags |= XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+			}
+			submit_projection = !app.passthrough_only;
 		}
 	}
 
-	const XrCompositionLayerBaseHeader *layers[] = {
-	    reinterpret_cast<const XrCompositionLayerBaseHeader *>(&layer),
-	};
+	XrCompositionLayerPassthroughFB passthrough_layer{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
+	passthrough_layer.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+	passthrough_layer.space = XR_NULL_HANDLE;
+	passthrough_layer.layerHandle = app.passthrough_layer;
+
+	const XrCompositionLayerBaseHeader *layers[2] = {};
+	uint32_t layer_count = 0;
+	if (app.submit_passthrough) {
+		layers[layer_count++] = reinterpret_cast<const XrCompositionLayerBaseHeader *>(&passthrough_layer);
+	}
+	if (submit_projection) {
+		layers[layer_count++] = reinterpret_cast<const XrCompositionLayerBaseHeader *>(&layer);
+	}
+
 	XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
 	end_info.displayTime = frame_state.predictedDisplayTime;
 	end_info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-	end_info.layerCount = submit_projection ? 1u : 0u;
-	end_info.layers = submit_projection ? layers : nullptr;
+	end_info.layerCount = layer_count;
+	end_info.layers = layer_count > 0 ? layers : nullptr;
 	check_xr(app.xr.end_frame(app.session, &end_info), "xrEndFrame");
 }
 
@@ -1064,6 +1133,14 @@ cleanup(application &app)
 		app.xr.destroy_space(app.app_space);
 		app.app_space = XR_NULL_HANDLE;
 	}
+	if (app.passthrough_layer != XR_NULL_HANDLE && app.xr.destroy_passthrough_layer != nullptr) {
+		app.xr.destroy_passthrough_layer(app.passthrough_layer);
+		app.passthrough_layer = XR_NULL_HANDLE;
+	}
+	if (app.passthrough != XR_NULL_HANDLE && app.xr.destroy_passthrough != nullptr) {
+		app.xr.destroy_passthrough(app.passthrough);
+		app.passthrough = XR_NULL_HANDLE;
+	}
 	if (app.session != XR_NULL_HANDLE && app.xr.destroy_session != nullptr) {
 		app.xr.destroy_session(app.session);
 		app.session = XR_NULL_HANDLE;
@@ -1085,17 +1162,28 @@ run(int argc, char **argv)
 {
 	const char *loader_path = nullptr;
 	bool submit_depth_layer = false;
+	bool submit_passthrough = false;
+	bool passthrough_only = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
 		} else if (strcmp(argv[i], "--depth-layer") == 0) {
 			submit_depth_layer = true;
+		} else if (strcmp(argv[i], "--passthrough") == 0) {
+			submit_passthrough = true;
+		} else if (strcmp(argv[i], "--passthrough-only") == 0) {
+			submit_passthrough = true;
+			passthrough_only = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
-			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer]\n"
+			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
+			        "[--passthrough|--passthrough-only]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
-			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader.\n",
+			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
+			        "  --passthrough-only submits only XR_FB_passthrough.\n"
+			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
+			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source.\n",
 			        argv[0]);
 			return EXIT_SUCCESS;
 		} else {
@@ -1106,11 +1194,14 @@ run(int argc, char **argv)
 
 	application app;
 	app.submit_depth_layer = submit_depth_layer;
+	app.submit_passthrough = submit_passthrough;
+	app.passthrough_only = passthrough_only;
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
 	create_instance(app);
 	create_system_and_session(app);
+	create_passthrough_resources(app);
 	create_swapchains(app);
 
 	while (!g_stop_requested && !app.exit_requested) {
