@@ -49,6 +49,7 @@ struct gpu_timing_state
 static gpu_timing_state g_gpu_timing_normal;
 static gpu_timing_state g_gpu_timing_foveated_scene;
 static gpu_timing_state g_gpu_timing_foveated_resolve;
+static gpu_timing_state g_gpu_timing_foveated_fused;
 
 static void
 record_gpu_timing(gpu_timing_state &state, const char *label, id<MTLCommandBuffer> command_buffer)
@@ -658,6 +659,18 @@ struct metal_renderer
 	}
 };
 
+#define OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE ((XrStructureType)0x7fff5056)
+#define OXR_MACOS_FOVEATION_BOUNDARY_COUNT 17
+
+struct oxr_macos_foveation_map_chain
+{
+	XrStructureType type = OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE;
+	const void *next = nullptr;
+	uint32_t boundary_count = OXR_MACOS_FOVEATION_BOUNDARY_COUNT;
+	float x[OXR_MACOS_FOVEATION_BOUNDARY_COUNT] = {};
+	float y[OXR_MACOS_FOVEATION_BOUNDARY_COUNT] = {};
+};
+
 struct view_swapchain
 {
 	XrSwapchain handle = XR_NULL_HANDLE;
@@ -730,6 +743,7 @@ struct application
 	bool test_gaze = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
+	bool gaze_foveation_fused = false;
 	bool gaze_supported = false;
 	bool last_foveation_gaze_valid = false;
 	float last_foveation_yaw_deg = 0.0f;
@@ -749,6 +763,7 @@ struct application
 	std::vector<XrView> views;
 	std::vector<XrCompositionLayerProjectionView> projection_views;
 	std::vector<XrCompositionLayerDepthInfoKHR> depth_infos;
+	std::array<oxr_macos_foveation_map_chain, 2> fused_foveation_info;
 	std::vector<view_swapchain> swapchains;
 	metal_renderer renderer;
 	diagnostic_scene scene;
@@ -1133,7 +1148,8 @@ create_swapchains(application &app)
 	fprintf(stderr, "psvr2-openxr-test: %u views, %ux%u per eye, Metal format %lld%s%s\n", view_count,
 	        app.swapchains[0].width, app.swapchains[0].height, (long long)app.color_format,
 	        app.submit_depth_layer ? ", XR_KHR_composition_layer_depth enabled" : "",
-	        app.gaze_foveation ? ", gaze-driven Metal VRR enabled" : "");
+	        app.gaze_foveation ? (app.gaze_foveation_fused ? ", fused gaze-driven Metal VRR enabled"
+	                                                     : ", gaze-driven Metal VRR enabled") : "");
 }
 
 static XrPosef
@@ -1554,12 +1570,33 @@ update_gaze_foveation_map(application &app,
 		fatal("Metal gaze foveation returned an empty physical render size");
 	}
 
+	if (app.gaze_foveation_fused) {
+		oxr_macos_foveation_map_chain &map = app.fused_foveation_info[eye];
+		map.type = OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE;
+		map.next = nullptr;
+		map.boundary_count = OXR_MACOS_FOVEATION_BOUNDARY_COUNT;
+		for (uint32_t boundary = 0; boundary < OXR_MACOS_FOVEATION_BOUNDARY_COUNT; ++boundary) {
+			const float logical_x =
+			    (float)swapchain.width * (float)boundary / (float)(OXR_MACOS_FOVEATION_BOUNDARY_COUNT - 1);
+			const float logical_y =
+			    (float)swapchain.height * (float)boundary / (float)(OXR_MACOS_FOVEATION_BOUNDARY_COUNT - 1);
+			const MTLCoordinate2D px = [rate_map
+			    mapScreenToPhysicalCoordinates:MTLCoordinate2DMake(logical_x, 0.0f)
+			                         forLayer:0];
+			const MTLCoordinate2D py = [rate_map
+			    mapScreenToPhysicalCoordinates:MTLCoordinate2DMake(0.0f, logical_y)
+			                         forLayer:0];
+			map.x[boundary] = px.x / (float)swapchain.width;
+			map.y[boundary] = py.y / (float)swapchain.height;
+		}
+	}
+
 	id<MTLTexture> color_texture = swapchain.foveation_color_texture;
 	id<MTLTexture> depth_texture = swapchain.foveation_depth_texture;
 	const bool size_changed =
 	    swapchain.foveation_physical_width != physical_size.width ||
 	    swapchain.foveation_physical_height != physical_size.height;
-	if (size_changed || color_texture == nil || depth_texture == nil) {
+	if (!app.gaze_foveation_fused && (size_changed || color_texture == nil || depth_texture == nil)) {
 		MTLTextureDescriptor *color_desc =
 		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:app.color_format
 		                                                     width:physical_size.width
@@ -1592,14 +1629,16 @@ update_gaze_foveation_map(application &app,
 		swapchain.foveation_physical_height = (uint32_t)physical_size.height;
 	}
 
-	const MTLSizeAndAlign parameter_size = [rate_map parameterBufferSizeAndAlign];
-	id<MTLBuffer> rate_data =
-	    [device newBufferWithLength:parameter_size.size options:MTLResourceStorageModeShared];
-	if (rate_data == nil) {
-		[rate_map release];
-		fatal("could not allocate Metal gaze foveation rate-map parameter buffer");
+	id<MTLBuffer> rate_data = nil;
+	if (!app.gaze_foveation_fused) {
+		const MTLSizeAndAlign parameter_size = [rate_map parameterBufferSizeAndAlign];
+		rate_data = [device newBufferWithLength:parameter_size.size options:MTLResourceStorageModeShared];
+		if (rate_data == nil) {
+			[rate_map release];
+			fatal("could not allocate Metal gaze foveation rate-map parameter buffer");
+		}
+		[rate_map copyParameterDataToBuffer:rate_data offset:0];
 	}
-	[rate_map copyParameterDataToBuffer:rate_data offset:0];
 
 	[swapchain.foveation_rate_map release];
 	[swapchain.foveation_rate_data release];
@@ -1612,10 +1651,11 @@ update_gaze_foveation_map(application &app,
 	const double physical_pixels = (double)physical_size.width * (double)physical_size.height;
 	fprintf(stderr,
 	        "psvr2-openxr-test: eye %zu foveation gaze=(%+.1f,%+.1f)deg zone=(%d,%d) "
-	        "physical=%zux%zu %.1f%% of full pixels\n",
+	        "physical=%zux%zu %.1f%% of full pixels%s\n",
 	        eye, gaze_yaw_deg, gaze_pitch_deg, zone_x, zone_y,
 	        physical_size.width, physical_size.height,
-	        100.0 * physical_pixels / logical_pixels);
+	        100.0 * physical_pixels / logical_pixels,
+	        app.gaze_foveation_fused ? " (fused)" : "");
 	return true;
 }
 
@@ -1775,7 +1815,7 @@ render_views(application &app, XrTime predicted_display_time)
 		fatal("could not allocate Metal scene command buffer");
 	}
 	id<MTLCommandBuffer> resolve_command_buffer = nil;
-	if (app.gaze_foveation) {
+	if (app.gaze_foveation && !app.gaze_foveation_fused) {
 		resolve_command_buffer = [app.command_queue commandBuffer];
 		if (resolve_command_buffer == nil) {
 			fatal("could not allocate Metal foveation resolve command buffer");
@@ -1799,14 +1839,15 @@ render_views(application &app, XrTime predicted_display_time)
 
 		MTLRenderPassDescriptor *render_pass = [MTLRenderPassDescriptor renderPassDescriptor];
 		render_pass.colorAttachments[0].texture =
-		    app.gaze_foveation ? swapchain.foveation_color_texture : color_texture;
+		    app.gaze_foveation && !app.gaze_foveation_fused ? swapchain.foveation_color_texture : color_texture;
 		render_pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 		render_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
 		render_pass.colorAttachments[0].clearColor =
 		    app.submit_passthrough ? MTLClearColorMake(0.0, 0.0, 0.0, 0.0)
 		                           : MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
 		id<MTLTexture> depth_texture =
-		    app.gaze_foveation ? swapchain.foveation_depth_texture : swapchain.depth_texture;
+		    app.gaze_foveation && !app.gaze_foveation_fused ? swapchain.foveation_depth_texture
+		                                                  : swapchain.depth_texture;
 		if (app.submit_depth_layer) {
 			if (depth_image_indices[i] >= swapchain.depth_images.size()) {
 				fatal("OpenXR returned an out-of-range depth swapchain image index");
@@ -1845,11 +1886,16 @@ render_views(application &app, XrTime predicted_display_time)
 		          instanceCount:app.frame_instances.size()];
 		[encoder endEncoding];
 
-		if (app.gaze_foveation) {
+		if (app.gaze_foveation && !app.gaze_foveation_fused) {
 			encode_gaze_foveation_resolve(app, swapchain, resolve_command_buffer, color_texture);
 		}
 	}
-	if (app.gaze_foveation) {
+	if (app.gaze_foveation_fused) {
+		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
+			record_gpu_timing(g_gpu_timing_foveated_fused, "foveated-fused", completed);
+		}];
+		[command_buffer commit];
+	} else if (app.gaze_foveation) {
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
 			record_gpu_timing(g_gpu_timing_foveated_scene, "foveated-scene", completed);
 		}];
@@ -1945,7 +1991,9 @@ render_frame(application &app)
 				                                            (int32_t)app.swapchains[i].height};
 				projection_view.subImage.imageArrayIndex = 0;
 
-				if (app.submit_depth_layer) {
+				if (app.gaze_foveation_fused) {
+					projection_view.next = &app.fused_foveation_info[i];
+				} else if (app.submit_depth_layer) {
 					XrCompositionLayerDepthInfoKHR &depth_info = app.depth_infos[i];
 					depth_info = {XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR};
 					depth_info.subImage.swapchain = app.swapchains[i].depth_handle;
@@ -2063,6 +2111,7 @@ run(int argc, char **argv)
 	bool test_gaze = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
+	bool gaze_foveation_fused = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
@@ -2081,17 +2130,22 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--gaze-foveation") == 0) {
 			test_gaze = true;
 			gaze_foveation = true;
+		} else if (strcmp(argv[i], "--gaze-foveation-fused") == 0) {
+			test_gaze = true;
+			gaze_foveation = true;
+			gaze_foveation_fused = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation]\n"
+			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			        "  --passthrough-only submits only XR_FB_passthrough.\n"
 			        "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			        "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
-			        "  --gaze-foveation renders through gaze-driven Metal variable rasterization rate maps.\n"
+			        "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve pass.\n"
+			        "  --gaze-foveation-fused renders Metal VRR directly into the OpenXR image and lets Monado decode it.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
 			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
 			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
@@ -2113,6 +2167,10 @@ run(int argc, char **argv)
 	app.test_gaze = test_gaze;
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
+	app.gaze_foveation_fused = gaze_foveation_fused;
+	if (gaze_foveation_fused) {
+		setenv("XRT_MACOS_FUSED_FOVEATION", "1", 1);
+	}
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
