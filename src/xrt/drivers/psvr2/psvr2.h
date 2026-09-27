@@ -157,6 +157,9 @@ struct psvr2_et_data
 	struct psvr2_et_combined_data combined;
 
 	bool processed_sample_packet;
+	bool calibration_loaded;
+	uint64_t packet_count;
+	uint64_t valid_combined_gaze_count;
 
 	uint32_t last_remote_report_sample_time_us;
 	timepoint_ns last_remote_report_sample_time_ns;
