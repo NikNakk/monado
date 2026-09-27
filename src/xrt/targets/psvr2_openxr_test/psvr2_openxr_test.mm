@@ -576,6 +576,40 @@ struct view_swapchain
 	id<MTLTexture> depth_texture = nil;
 };
 
+struct gaze_calibration_target
+{
+	float yaw_deg;
+	float pitch_deg;
+};
+
+struct gaze_calibration_state
+{
+	size_t target_index = 0;
+	XrTime target_started = 0;
+	std::vector<float> current_yaw_samples;
+	std::vector<float> current_pitch_samples;
+	std::vector<float> measured_yaw;
+	std::vector<float> measured_pitch;
+	float prior_yaw_gain = 1.0f;
+	float prior_yaw_offset_deg = 0.0f;
+	float prior_pitch_gain = 1.0f;
+	float prior_pitch_offset_deg = 0.0f;
+	bool prior_loaded = false;
+	bool finished = false;
+};
+
+static const std::array<gaze_calibration_target, 9> k_gaze_calibration_targets = {{
+    {0.0f, 0.0f},
+    {-20.0f, 15.0f},
+    {20.0f, -15.0f},
+    {-20.0f, 0.0f},
+    {20.0f, 0.0f},
+    {20.0f, 15.0f},
+    {-20.0f, -15.0f},
+    {0.0f, 15.0f},
+    {0.0f, -15.0f},
+}};
+
 struct application
 {
 	loader_handle loader;
@@ -592,7 +626,9 @@ struct application
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
 	bool test_gaze = false;
+	bool gaze_calibrate = false;
 	bool gaze_supported = false;
+	gaze_calibration_state gaze_calibration;
 	XrActionSet gaze_action_set = XR_NULL_HANDLE;
 	XrAction gaze_action = XR_NULL_HANDLE;
 	XrSpace gaze_space = XR_NULL_HANDLE;
@@ -798,8 +834,24 @@ create_gaze_resources(application &app)
 	space_info.poseInActionSpace.orientation.w = 1.0f;
 	check_xr(app.xr.create_action_space(app.session, &space_info, &app.gaze_space), "xrCreateActionSpace(gaze)");
 
-	fprintf(stderr,
-	        "psvr2-openxr-test: gaze action ready; marker is bright yellow at 2 m along the reported gaze ray\n");
+	if (app.gaze_calibrate) {
+		(void)read_existing_gaze_calibration(app.gaze_calibration);
+		fprintf(stderr,
+		        "psvr2-openxr-test: gaze calibration mode: follow each target with your eyes; "
+		        "blue=settle, green=capture\n");
+		if (app.gaze_calibration.prior_loaded) {
+			fprintf(stderr,
+			        "psvr2-openxr-test: existing user calibration will be refined "
+			        "(yaw %.5fx %+0.3f deg, pitch %.5fx %+0.3f deg)\n",
+			        app.gaze_calibration.prior_yaw_gain, app.gaze_calibration.prior_yaw_offset_deg,
+			        app.gaze_calibration.prior_pitch_gain, app.gaze_calibration.prior_pitch_offset_deg);
+		}
+		fprintf(stderr,
+		        "psvr2-openxr-test: calibration assumes PSVR2_GAZE_* environment overrides are unset\n");
+	} else {
+		fprintf(stderr,
+		        "psvr2-openxr-test: gaze action ready; marker is bright yellow at 2 m along the reported gaze ray\n");
+	}
 }
 
 static void
@@ -989,6 +1041,292 @@ head_pose_for_frame(application &app, XrTime predicted_display_time)
 	return fallback;
 }
 
+
+static bool
+read_existing_gaze_calibration(gaze_calibration_state &state)
+{
+	const char *home = getenv("HOME");
+	if (home == nullptr) {
+		return false;
+	}
+	char path[1024];
+	snprintf(path, sizeof(path), "%s/Library/Application Support/monado/psvr2/gaze_user_calibration.txt", home);
+	FILE *file = fopen(path, "r");
+	if (file == nullptr) {
+		return false;
+	}
+
+	char magic[64] = {};
+	float yaw_gain = 1.0f;
+	float yaw_offset = 0.0f;
+	float pitch_gain = 1.0f;
+	float pitch_offset = 0.0f;
+	int fields = fscanf(file, "%63s %f %f %f %f", magic, &yaw_gain, &yaw_offset, &pitch_gain, &pitch_offset);
+	fclose(file);
+	if (fields != 5 || strcmp(magic, "PSVR2_GAZE_USER_CALIBRATION_V1") != 0) {
+		return false;
+	}
+
+	state.prior_yaw_gain = yaw_gain;
+	state.prior_yaw_offset_deg = yaw_offset;
+	state.prior_pitch_gain = pitch_gain;
+	state.prior_pitch_offset_deg = pitch_offset;
+	state.prior_loaded = true;
+	return true;
+}
+
+static float
+median_sample(std::vector<float> values)
+{
+	if (values.empty()) {
+		return 0.0f;
+	}
+	std::sort(values.begin(), values.end());
+	const size_t mid = values.size() / 2;
+	if ((values.size() & 1u) != 0) {
+		return values[mid];
+	}
+	return 0.5f * (values[mid - 1] + values[mid]);
+}
+
+static bool
+fit_linear_calibration(const std::vector<float> &measured,
+                       bool yaw_axis,
+                       float *out_gain,
+                       float *out_offset,
+                       float *out_rms)
+{
+	if (measured.size() != k_gaze_calibration_targets.size()) {
+		return false;
+	}
+
+	double sx = 0.0;
+	double sy = 0.0;
+	double sxx = 0.0;
+	double sxy = 0.0;
+	for (size_t i = 0; i < measured.size(); ++i) {
+		const double x = measured[i];
+		const double y = yaw_axis ? k_gaze_calibration_targets[i].yaw_deg
+		                          : k_gaze_calibration_targets[i].pitch_deg;
+		sx += x;
+		sy += y;
+		sxx += x * x;
+		sxy += x * y;
+	}
+	const double n = (double)measured.size();
+	const double denominator = n * sxx - sx * sx;
+	if (fabs(denominator) < 1e-6) {
+		return false;
+	}
+	const double gain = (n * sxy - sx * sy) / denominator;
+	const double offset = (sy - gain * sx) / n;
+
+	double squared_error = 0.0;
+	for (size_t i = 0; i < measured.size(); ++i) {
+		const double expected = yaw_axis ? k_gaze_calibration_targets[i].yaw_deg
+		                                 : k_gaze_calibration_targets[i].pitch_deg;
+		const double error = gain * measured[i] + offset - expected;
+		squared_error += error * error;
+	}
+	*out_gain = (float)gain;
+	*out_offset = (float)offset;
+	*out_rms = (float)sqrt(squared_error / n);
+	return true;
+}
+
+static bool
+write_gaze_calibration(float yaw_gain, float yaw_offset, float pitch_gain, float pitch_offset)
+{
+	NSString *directory =
+	    [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/monado/psvr2"];
+	NSError *error = nil;
+	if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
+	                              withIntermediateDirectories:YES
+	                                               attributes:nil
+	                                                    error:&error]) {
+		fprintf(stderr, "psvr2-openxr-test: could not create gaze calibration directory: %s\n",
+		        [[error localizedDescription] UTF8String]);
+		return false;
+	}
+
+	NSString *path = [directory stringByAppendingPathComponent:@"gaze_user_calibration.txt"];
+	NSString *contents =
+	    [NSString stringWithFormat:@"PSVR2_GAZE_USER_CALIBRATION_V1 %.9g %.9g %.9g %.9g\n",
+	                               yaw_gain, yaw_offset, pitch_gain, pitch_offset];
+	if (![contents writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+		fprintf(stderr, "psvr2-openxr-test: could not write gaze calibration: %s\n",
+		        [[error localizedDescription] UTF8String]);
+		return false;
+	}
+	fprintf(stderr, "psvr2-openxr-test: saved gaze calibration to %s\n", [path fileSystemRepresentation]);
+	return true;
+}
+
+static bool
+locate_gaze_relative_to_view(application &app,
+                             XrTime predicted_display_time,
+                             float *out_yaw_deg,
+                             float *out_pitch_deg)
+{
+	XrActiveActionSet active_set{app.gaze_action_set, XR_NULL_PATH};
+	XrActionsSyncInfo sync_info{XR_TYPE_ACTIONS_SYNC_INFO};
+	sync_info.countActiveActionSets = 1;
+	sync_info.activeActionSets = &active_set;
+	if (XR_FAILED(app.xr.sync_actions(app.session, &sync_info))) {
+		return false;
+	}
+
+	XrActionStateGetInfo get_info{XR_TYPE_ACTION_STATE_GET_INFO};
+	get_info.action = app.gaze_action;
+	get_info.subactionPath = app.gaze_subaction_path;
+	XrActionStatePose pose_state{XR_TYPE_ACTION_STATE_POSE};
+	if (XR_FAILED(app.xr.get_action_state_pose(app.session, &get_info, &pose_state)) ||
+	    pose_state.isActive != XR_TRUE) {
+		return false;
+	}
+
+	XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+	if (XR_FAILED(app.xr.locate_space(app.gaze_space, app.view_space, predicted_display_time, &location))) {
+		return false;
+	}
+	const XrSpaceLocationFlags required =
+	    XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+	if ((location.locationFlags & required) != required) {
+		return false;
+	}
+
+	const simd_float3 direction =
+	    rotate_vector(location.pose.orientation, make_float3(0.0f, 0.0f, -1.0f));
+	*out_yaw_deg = atan2f(direction.x, -direction.z) * 180.0f / (float)M_PI;
+	*out_pitch_deg =
+	    atan2f(direction.y, sqrtf(direction.x * direction.x + direction.z * direction.z)) *
+	    180.0f / (float)M_PI;
+	return true;
+}
+
+static void
+finish_gaze_calibration(application &app)
+{
+	gaze_calibration_state &state = app.gaze_calibration;
+	float residual_yaw_gain = 1.0f;
+	float residual_yaw_offset = 0.0f;
+	float yaw_rms = 0.0f;
+	float residual_pitch_gain = 1.0f;
+	float residual_pitch_offset = 0.0f;
+	float pitch_rms = 0.0f;
+
+	if (!fit_linear_calibration(state.measured_yaw, true, &residual_yaw_gain, &residual_yaw_offset, &yaw_rms) ||
+	    !fit_linear_calibration(state.measured_pitch, false, &residual_pitch_gain, &residual_pitch_offset,
+	                            &pitch_rms)) {
+		fatal("could not solve gaze calibration");
+	}
+
+	/*
+	 * The OpenXR samples already include any calibration currently loaded by
+	 * the service. Compose the fitted residual correction with that prior
+	 * transform so rerunning calibration refines rather than double-applies it.
+	 */
+	const float yaw_gain = residual_yaw_gain * state.prior_yaw_gain;
+	const float yaw_offset =
+	    residual_yaw_gain * state.prior_yaw_offset_deg + residual_yaw_offset;
+	const float pitch_gain = residual_pitch_gain * state.prior_pitch_gain;
+	const float pitch_offset =
+	    residual_pitch_gain * state.prior_pitch_offset_deg + residual_pitch_offset;
+
+	fprintf(stderr,
+	        "\npsvr2-openxr-test: gaze calibration complete\n"
+	        "  residual fit: yaw %.5fx %+0.3f deg (RMS %.3f deg), "
+	        "pitch %.5fx %+0.3f deg (RMS %.3f deg)\n"
+	        "  saved absolute calibration: yaw %.5fx %+0.3f deg, pitch %.5fx %+0.3f deg\n",
+	        residual_yaw_gain, residual_yaw_offset, yaw_rms,
+	        residual_pitch_gain, residual_pitch_offset, pitch_rms,
+	        yaw_gain, yaw_offset, pitch_gain, pitch_offset);
+
+	if (!isfinite(yaw_gain) || yaw_gain < 0.5f || yaw_gain > 1.5f ||
+	    !isfinite(pitch_gain) || pitch_gain < 0.5f || pitch_gain > 1.5f ||
+	    fabsf(yaw_offset) > 20.0f || fabsf(pitch_offset) > 20.0f) {
+		fatal("calibration solution is outside safety bounds; not saving");
+	}
+	if (!write_gaze_calibration(yaw_gain, yaw_offset, pitch_gain, pitch_offset)) {
+		fatal("failed to save gaze calibration");
+	}
+
+	fprintf(stderr,
+	        "psvr2-openxr-test: restart monado-service to load the new calibration, then verify with --gaze\n");
+	state.finished = true;
+	app.exit_requested = true;
+}
+
+static void
+update_gaze_calibration(application &app, XrTime predicted_display_time, const XrPosef &head_pose)
+{
+	gaze_calibration_state &state = app.gaze_calibration;
+	if (state.finished || state.target_index >= k_gaze_calibration_targets.size()) {
+		return;
+	}
+
+	const gaze_calibration_target target = k_gaze_calibration_targets[state.target_index];
+	if (state.target_started == 0) {
+		state.target_started = predicted_display_time;
+		state.current_yaw_samples.clear();
+		state.current_pitch_samples.clear();
+		fprintf(stderr, "psvr2-openxr-test: calibration target %zu/%zu: yaw %+0.1f deg, pitch %+0.1f deg\n",
+		        state.target_index + 1, k_gaze_calibration_targets.size(), target.yaw_deg, target.pitch_deg);
+	}
+
+	const XrDuration elapsed = predicted_display_time - state.target_started;
+	const XrDuration settle_ns = 900000000;
+	const XrDuration capture_ns = 1200000000;
+	const bool collecting = elapsed >= settle_ns && elapsed < settle_ns + capture_ns;
+
+	if (collecting) {
+		float yaw_deg = 0.0f;
+		float pitch_deg = 0.0f;
+		if (locate_gaze_relative_to_view(app, predicted_display_time, &yaw_deg, &pitch_deg)) {
+			state.current_yaw_samples.push_back(yaw_deg);
+			state.current_pitch_samples.push_back(pitch_deg);
+		}
+	}
+
+	const float yaw = target.yaw_deg * (float)M_PI / 180.0f;
+	const float pitch = target.pitch_deg * (float)M_PI / 180.0f;
+	const simd_float3 local_direction =
+	    make_float3(sinf(yaw) * cosf(pitch), sinf(pitch), -cosf(yaw) * cosf(pitch));
+	const simd_float3 world_direction = rotate_vector(head_pose.orientation, local_direction);
+	const simd_float3 position = xr_position(head_pose.position) + world_direction * 2.0f;
+	const simd_float3 right = rotate_vector(head_pose.orientation, make_float3(1.0f, 0.0f, 0.0f));
+	const simd_float3 up = rotate_vector(head_pose.orientation, make_float3(0.0f, 1.0f, 0.0f));
+	const simd_float4 color =
+	    collecting ? make_float4(0.20f, 1.0f, 0.30f, 1.0f) : make_float4(0.15f, 0.75f, 1.0f, 1.0f);
+	app.frame_instances.push_back(
+	    {basis_model(position, right, up, -world_direction, make_float3(0.022f, 0.022f, 0.022f)), color});
+
+	if (elapsed >= settle_ns + capture_ns) {
+		if (state.current_yaw_samples.size() < 30 || state.current_pitch_samples.size() < 30) {
+			fprintf(stderr,
+			        "psvr2-openxr-test: insufficient valid gaze samples (%zu); repeating target\n",
+			        state.current_yaw_samples.size());
+			state.target_started = 0;
+			return;
+		}
+
+		const float measured_yaw = median_sample(state.current_yaw_samples);
+		const float measured_pitch = median_sample(state.current_pitch_samples);
+		state.measured_yaw.push_back(measured_yaw);
+		state.measured_pitch.push_back(measured_pitch);
+		fprintf(stderr,
+		        "psvr2-openxr-test: captured target %zu: measured yaw %+0.2f, pitch %+0.2f deg "
+		        "(%zu samples)\n",
+		        state.target_index + 1, measured_yaw, measured_pitch, state.current_yaw_samples.size());
+
+		state.target_index++;
+		state.target_started = 0;
+		if (state.target_index == k_gaze_calibration_targets.size()) {
+			finish_gaze_calibration(app);
+		}
+	}
+}
+
 static void
 append_gaze_marker(application &app, XrTime predicted_display_time)
 {
@@ -1059,9 +1397,14 @@ render_views(application &app, XrTime predicted_display_time)
 	if (!app.scene.initialized) {
 		initialize_scene(app.scene, head_pose);
 	}
-	app.frame_instances = app.scene.world_instances;
-	append_head_locked_cross(app.frame_instances, head_pose);
-	append_gaze_marker(app, predicted_display_time);
+	if (app.gaze_calibrate) {
+		app.frame_instances.clear();
+		update_gaze_calibration(app, predicted_display_time, head_pose);
+	} else {
+		app.frame_instances = app.scene.world_instances;
+		append_head_locked_cross(app.frame_instances, head_pose);
+		append_gaze_marker(app, predicted_display_time);
+	}
 	if (app.frame_instances.size() > app.renderer.max_instances) {
 		fatal("diagnostic scene exceeded Metal instance buffer capacity");
 	}
@@ -1342,6 +1685,7 @@ run(int argc, char **argv)
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
 	bool test_gaze = false;
+	bool gaze_calibrate = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
@@ -1354,15 +1698,19 @@ run(int argc, char **argv)
 			passthrough_only = true;
 		} else if (strcmp(argv[i], "--gaze") == 0) {
 			test_gaze = true;
+		} else if (strcmp(argv[i], "--gaze-calibrate") == 0) {
+			test_gaze = true;
+			gaze_calibrate = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only] [--gaze]\n"
+			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			        "  --passthrough-only submits only XR_FB_passthrough.\n"
 			        "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
+			        "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
 			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
 			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
@@ -1379,6 +1727,7 @@ run(int argc, char **argv)
 	app.submit_passthrough = submit_passthrough;
 	app.passthrough_only = passthrough_only;
 	app.test_gaze = test_gaze;
+	app.gaze_calibrate = gaze_calibrate;
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
