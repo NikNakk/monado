@@ -460,6 +460,18 @@ initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 		              make_float3(0.035f, 1.25f, 0.035f), cardinal_colors[cardinal]);
 	}
 
+	// High-detail foveation wall on the initial forward axis. The alpha component
+	// is repurposed as a procedural pattern selector by the diagnostic shader:
+	// 2=checkerboard, 3=radial spokes/rings, 4=multiscale detail, 5=acuity bars.
+	// Four panels cover a broad enough visual angle that the user can move gaze
+	// between them while keeping the head mostly still.
+	const float detail_z = 2.75f;
+	const simd_float3 detail_scale = make_float3(0.72f, 0.44f, 0.012f);
+	add_world_box(scene, -0.78f, +0.50f, detail_z, detail_scale, make_float4(1.0f, 1.0f, 1.0f, 2.0f));
+	add_world_box(scene, +0.78f, +0.50f, detail_z, detail_scale, make_float4(1.0f, 1.0f, 1.0f, 3.0f));
+	add_world_box(scene, -0.78f, -0.50f, detail_z, detail_scale, make_float4(1.0f, 1.0f, 1.0f, 4.0f));
+	add_world_box(scene, +0.78f, -0.50f, detail_z, detail_scale, make_float4(1.0f, 1.0f, 1.0f, 5.0f));
+
 	// Retain a world-locked fixation cross on the initial forward axis. The
 	// magenta head-locked cross remains available independently in every view.
 	add_world_box(scene, 0.0f, 0.0f, 2.0f, make_float3(0.30f, 0.018f, 0.018f), front_color);
@@ -468,6 +480,7 @@ initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 	scene.initialized = true;
 	fprintf(stderr, "psvr2-openxr-test: diagnostic world contains %zu world-locked boxes over 360 degrees\n",
 	        scene.world_instances.size());
+	fprintf(stderr, "psvr2-openxr-test: foveation detail wall added at 2.75 m — checker, radial, multiscale, acuity bars\n");
 }
 
 static void
@@ -518,6 +531,7 @@ struct InstanceData {
 struct VertexOut {
     float4 position [[position]];
     float4 color;
+    float3 local_position;
 };
 
 vertex VertexOut vertex_main(uint vertex_id [[vertex_id]],
@@ -529,12 +543,69 @@ vertex VertexOut vertex_main(uint vertex_id [[vertex_id]],
     VertexOut out;
     out.position = view_projection * instances[instance_id].model * vertices[vertex_id];
     out.color = instances[instance_id].color;
+    out.local_position = vertices[vertex_id].xyz;
     return out;
+}
+
+static float detail_hash(float2 p)
+{
+    return fract(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
 }
 
 fragment float4 fragment_main(VertexOut in [[stage_in]])
 {
-    return in.color;
+    const float pattern = in.color.a;
+    if (pattern < 1.5) {
+        return float4(in.color.rgb, 1.0);
+    }
+
+    // Object-space coordinates are stable in the world and independent of
+    // swapchain resolution. The thin diagnostic panels use their XY face.
+    const float2 uv = in.local_position.xy + 0.5;
+
+    if (pattern < 2.5) {
+        // Fine two-frequency checkerboard: the coarse component remains easy
+        // to follow while the fine component exposes peripheral resolution.
+        const float coarse = fmod(floor(uv.x * 24.0) + floor(uv.y * 16.0), 2.0);
+        const float fine = fmod(floor(uv.x * 120.0) + floor(uv.y * 80.0), 2.0);
+        const float v = mix(0.10, 0.95, mix(coarse, fine, 0.70));
+        return float4(v, v, v, 1.0);
+    }
+
+    if (pattern < 3.5) {
+        // Siemens-star-like angular spokes plus concentric rings. These are
+        // especially sensitive to foveation blur, shimmer and reconstruction.
+        const float2 p = uv - 0.5;
+        const float angle = atan2(p.y, p.x);
+        const float radius = length(p);
+        const float spokes = step(0.5, fract((angle + M_PI_F) * (96.0 / (2.0 * M_PI_F))));
+        const float rings = step(0.5, fract(radius * 96.0));
+        const float v = mix(spokes, 1.0 - spokes, rings);
+        return float4(v, v, v, 1.0);
+    }
+
+    if (pattern < 4.5) {
+        // Deterministic multiscale "natural-detail" texture. It deliberately
+        // combines large structure with very fine contrast so gaze-contingent
+        // quality changes are visible without loading an external asset.
+        const float2 p0 = floor(uv * float2(32.0, 24.0));
+        const float2 p1 = floor(uv * float2(96.0, 72.0));
+        const float2 p2 = floor(uv * float2(192.0, 144.0));
+        float v = 0.45 * detail_hash(p0) + 0.35 * detail_hash(p1) + 0.20 * detail_hash(p2);
+        const float edge = smoothstep(0.42, 0.58, v);
+        return float4(0.15 + 0.80 * edge,
+                      0.10 + 0.65 * v,
+                      0.20 + 0.70 * (1.0 - edge),
+                      1.0);
+    }
+
+    // Dense orientation/acuity bars at several spatial frequencies.
+    const float band = floor(uv.y * 8.0);
+    const float frequency = exp2(4.0 + min(band, 7.0) * 0.45);
+    const bool vertical = fmod(band, 2.0) < 1.0;
+    const float coord = vertical ? uv.x : uv.y;
+    const float bars = step(0.5, fract(coord * frequency));
+    return float4(float3(bars), 1.0);
 }
 
 struct FoveationVertexOut {
