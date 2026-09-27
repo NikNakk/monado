@@ -152,7 +152,9 @@ render_views(application &app, XrTime predicted_display_time)
 		render_pass.colorAttachments[0].texture = color_texture;
 		render_pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 		render_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-		render_pass.colorAttachments[0].clearColor = MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
+		render_pass.colorAttachments[0].clearColor =
+		    app.submit_passthrough ? MTLClearColorMake(0.0, 0.0, 0.0, 0.0)
+		                           : MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
 		render_pass.depthAttachment.texture = swapchain.depth_texture;
 		render_pass.depthAttachment.loadAction = MTLLoadActionClear;
 		render_pass.depthAttachment.storeAction = MTLStoreActionDontCare;
@@ -226,18 +228,32 @@ render_frame(application &app)
 			layer.space = app.app_space;
 			layer.viewCount = (uint32_t)app.projection_views.size();
 			layer.views = app.projection_views.data();
-			submit_projection = true;
+			if (app.submit_passthrough) {
+				layer.layerFlags |= XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+			}
+			submit_projection = !app.passthrough_only;
 		}
 	}
 
-	const XrCompositionLayerBaseHeader *layers[] = {
-	    reinterpret_cast<const XrCompositionLayerBaseHeader *>(&layer),
-	};
+	XrCompositionLayerPassthroughFB passthrough_layer{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
+	passthrough_layer.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+	passthrough_layer.space = XR_NULL_HANDLE;
+	passthrough_layer.layerHandle = app.passthrough_layer;
+
+	const XrCompositionLayerBaseHeader *layers[2] = {};
+	uint32_t layer_count = 0;
+	if (app.submit_passthrough) {
+		layers[layer_count++] = reinterpret_cast<const XrCompositionLayerBaseHeader *>(&passthrough_layer);
+	}
+	if (submit_projection) {
+		layers[layer_count++] = reinterpret_cast<const XrCompositionLayerBaseHeader *>(&layer);
+	}
+
 	XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
 	end_info.displayTime = frame_state.predictedDisplayTime;
 	end_info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-	end_info.layerCount = submit_projection ? 1u : 0u;
-	end_info.layers = submit_projection ? layers : nullptr;
+	end_info.layerCount = layer_count;
+	end_info.layers = layer_count > 0 ? layers : nullptr;
 	check_xr(app.xr.end_frame(app.session, &end_info), "xrEndFrame");
 }
 
@@ -245,13 +261,29 @@ static int
 run(int argc, char **argv)
 {
 	const char *loader_path = nullptr;
+	bool submit_depth_layer = false;
+	bool submit_passthrough = false;
+	bool passthrough_only = false;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
+		} else if (strcmp(argv[i], "--depth-layer") == 0) {
+			submit_depth_layer = true;
+		} else if (strcmp(argv[i], "--passthrough") == 0) {
+			submit_passthrough = true;
+		} else if (strcmp(argv[i], "--passthrough-only") == 0) {
+			submit_passthrough = true;
+			passthrough_only = true;
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
-			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib]\n"
-			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader.\n",
+			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
+			        "[--passthrough|--passthrough-only]\n"
+			        "  --depth-layer submits the rendered Depth32Float attachment through "
+			        "XR_KHR_composition_layer_depth.\n"
+			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
+			        "  --passthrough-only submits only XR_FB_passthrough.\n"
+			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
+			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source.\n",
 			        argv[0]);
 			return EXIT_SUCCESS;
 		} else {
@@ -261,11 +293,15 @@ run(int argc, char **argv)
 	}
 
 	application app;
+	app.submit_depth_layer = submit_depth_layer;
+	app.submit_passthrough = submit_passthrough;
+	app.passthrough_only = passthrough_only;
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
 	create_instance(app);
 	create_system_and_session(app);
+	create_passthrough_resources(app);
 	create_swapchains(app);
 
 	while (!g_stop_requested && !app.exit_requested) {
