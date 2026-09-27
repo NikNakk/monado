@@ -1668,7 +1668,8 @@ update_gaze_foveation_map(application &app,
 	u = clampf01(u);
 	v = clampf01(v);
 
-	static const int zone_count = 16;
+	static const int zone_count = M_METAL_FOVEATION_ZONE_COUNT;
+	static_assert(zone_count == M_METAL_FOVEATION_ZONE_COUNT);
 	int zone_x = (int)fminf((float)(zone_count - 1), floorf(u * zone_count));
 	int zone_y = (int)fminf((float)(zone_count - 1), floorf(v * zone_count));
 
