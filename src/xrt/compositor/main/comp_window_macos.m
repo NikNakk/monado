@@ -514,7 +514,7 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 				float dir_x = tan_x / len;
 				float dir_y = -tan_y_down / len;
 				float neg_dir_z = 1.0f / len;
-				float theta = acosf(CLAMP(neg_dir_z, -1.0f, 1.0f));
+				float theta = acosf(fmaxf(-1.0f, fminf(1.0f, neg_dir_z)));
 				float radius = theta / fov_rad;
 				float xy_len = sqrtf(dir_x * dir_x + dir_y * dir_y);
 
