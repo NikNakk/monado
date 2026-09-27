@@ -450,7 +450,9 @@ macos_passthrough_sink_push_frame(struct xrt_frame_sink *sink, struct xrt_frame 
 	}
 
 	pthread_mutex_lock(&cwm->passthrough_mutex);
-	xrt_frame_reference(&cwm->passthrough_frames[pts->eye], frame);
+	if (!atomic_load_explicit(&cwm->passthrough_shutdown, memory_order_acquire)) {
+		xrt_frame_reference(&cwm->passthrough_frames[pts->eye], frame);
+	}
 	pthread_mutex_unlock(&cwm->passthrough_mutex);
 }
 
@@ -469,7 +471,7 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 	float convergence = (float)debug_get_num_option_macos_passthrough_convergence_milli() / 1000.0f;
 	if (fov_deg < 90.0f) fov_deg = 90.0f;
 	if (fov_deg > 190.0f) fov_deg = 190.0f;
-	const float fov_rad = fov_deg * (float)M_PI / 180.0f;
+	const float fov_rad = fov_deg * 3.14159265358979323846f / 180.0f;
 
 	id<MTLDevice> device = [cwm->metal_layer device];
 	MTLTextureDescriptor *desc =
@@ -615,7 +617,9 @@ macos_passthrough_init(struct comp_window_macos *cwm)
 	MTLRenderPipelineDescriptor *pipeline_desc = [[MTLRenderPipelineDescriptor alloc] init];
 	[pipeline_desc setVertexFunction:vs];
 	[pipeline_desc setFragmentFunction:fs];
-	[[pipeline_desc colorAttachments] objectAtIndexedSubscript:0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+	MTLRenderPipelineColorAttachmentDescriptor *pipeline_color =
+	    [[pipeline_desc colorAttachments] objectAtIndexedSubscript:0];
+	[pipeline_color setPixelFormat:MTLPixelFormatBGRA8Unorm];
 	cwm->passthrough_pipeline = [device newRenderPipelineStateWithDescriptor:pipeline_desc error:&error];
 	[pipeline_desc release];
 	[vs release];
@@ -646,7 +650,7 @@ macos_passthrough_init(struct comp_window_macos *cwm)
 			cwm->passthrough_sinks_attached = true;
 			COMP_INFO(cwm->base.base.c,
 			          "PS VR2 BC4 passthrough attached (FOV %d deg, convergence %.3f)",
-			          debug_get_num_option_macos_passthrough_fov_deg(),
+			          (int)debug_get_num_option_macos_passthrough_fov_deg(),
 			          (double)debug_get_num_option_macos_passthrough_convergence_milli() / 1000.0);
 			return true;
 		}
