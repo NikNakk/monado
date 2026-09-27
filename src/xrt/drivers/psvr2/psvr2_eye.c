@@ -336,7 +336,7 @@ psvr2_start_gaze_tracking(struct psvr2_hmd *hmd)
 			}
 
 			hmd->et_data.calibration_loaded = true;
-			PSVR2_INFO(hmd, "Loaded PS VR2 eye calibration blob (%zu bytes)", file_size);
+			PSVR2_DEBUG(hmd, "Loaded PS VR2 eye calibration blob (%zu bytes)", file_size);
 			free(contents);
 		}
 
