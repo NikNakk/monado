@@ -361,14 +361,14 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
 			foveation_profile_index = find_foveation_profile(argv[++i]);
 			if (foveation_profile_index < 0) {
-				fprintf(stderr, "Unknown foveation profile: %s (expected reference, strong, aggressive, or extreme)\n", argv[i]);
+				fprintf(stderr, "Unknown foveation profile: %s (expected reference, strong, aggressive, aggressive-plus, near-extreme, or extreme)\n", argv[i]);
 				return EXIT_FAILURE;
 			}
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
 			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused] "
-			        "[--foveation-profile reference|strong|aggressive|extreme]\n"
+			        "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
@@ -378,7 +378,7 @@ run(int argc, char **argv)
 			        "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve pass.\n"
 			        "  --gaze-foveation-fused renders Metal VRR directly into the OpenXR image and lets Monado decode it.\n"
 			        "  --foveation-profile selects a fixed starting profile (default: reference).\n"
-			        "  While foveation is running in a terminal: 1-4 select profiles, [ and ] step, r restores reference.\n"
+			        "  While foveation is running in a terminal: 1-6 select profiles, [ and ] step, r restores reference.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
 			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
 			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
