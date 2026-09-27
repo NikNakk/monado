@@ -159,6 +159,13 @@ struct comp_compositor
 		struct u_swapchain_debug sc;
 	} debug;
 
+	/*
+	 * Passthrough state for the frame currently being rendered. The macOS
+	 * Metal target snapshots this into its presentation job.
+	 */
+	bool passthrough_active;
+	bool passthrough_has_application_layers;
+
 	//! If true, part of the compositor startup will be delayed until a session is started
 	bool deferred_surface;
 };
