@@ -117,16 +117,35 @@ peripheral artefacts:
 1. measure GPU duration against the unfoveated diagnostic with a heavier scene;
 2. tune the foveal radius/rates and rate-map update threshold;
 3. cache/prebuild likely maps or otherwise reduce rate-map creation overhead;
-4. expose the mechanism cleanly to native Metal OpenXR clients;
-5. investigate using the same Metal mechanism in Chromium's Metal/ANGLE path;
-6. add a general OpenXR foveation interface only once the client/runtime
+4. keep foveation policy graphics-API-independent while Metal translates it
+   into `MTLRasterizationRateMap` state;
+5. expose the mechanism cleanly to native Metal OpenXR clients;
+6. investigate using the same Metal mechanism in Chromium's Metal/ANGLE path;
+7. add a general OpenXR foveation interface only once the client/runtime
    ownership model is clear;
-7. revisit Vulkan clients when MoltenVK exposes a suitable Vulkan VRS feature.
+8. revisit Vulkan clients when MoltenVK exposes a suitable Vulkan VRS feature.
 
 Compositor-only foveation of an already full-resolution application image is
 not expected to save meaningful application rendering work, so it is not the
 primary path.
 
+
+## Foveation policy and graphics backends
+
+Foveation strength is deliberately separated from the Metal implementation.
+`src/xrt/auxiliary/foveation/u_foveation.*` owns the named policy profiles
+and their normalized centre / middle / peripheral rates. The currently useful
+diagnostic profile is `aggressive` (1.00 / 0.50 / 0.25).
+
+`src/xrt/auxiliary/metal/m_metal_foveation.*` does not select profiles. It
+accepts a resolved `u_foveation_profile` and translates that policy into a
+16x16 `MTLRasterizationRateMap`, returning both Metal's actual physical render
+size and the dense 129-sample logical-to-physical transform used by the fused
+compositor path.
+
+This leaves room for future Vulkan or D3D backends to implement the same policy
+with their native VRS mechanism without exposing Metal-specific concepts to the
+OpenXR-facing policy layer.
 
 ## Fused compositor proof
 
@@ -167,7 +186,7 @@ reconstruction into the compositor pass that was already required:
 Metal gaze VRR render into OpenXR image
           |
           v
-projection layer + 17 x/y boundary values per eye
+projection layer + 129 x/y boundary values per eye
           |
           v
 Monado distortion / timewarp
