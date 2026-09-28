@@ -118,3 +118,8 @@ target_link_libraries(
 		aux_math
 		aux_tracking
 	)
+if(XRT_HAVE_CONSTELLATION_FUSION_EVAL)
+	target_sources(constellation_replay PRIVATE tools/fusion_compare.cpp tools/fusion_compare.hpp)
+	target_compile_definitions(constellation_replay PRIVATE XRT_HAVE_CONSTELLATION_FUSION_EVAL)
+	target_link_libraries(constellation_replay PRIVATE constellation_fusion)
+endif()
