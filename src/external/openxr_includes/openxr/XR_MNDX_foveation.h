@@ -7,7 +7,10 @@
  * Applications obtain normalized per-axis foveation policy from the runtime,
  * implement it with their graphics API's native VRS mechanism, then attach the
  * actual logical-to-physical mapping when that mechanism uses non-uniform
- * raster coordinates. Full-resolution VRS backends may omit the mapping.
+ * raster coordinates. Mapping coordinates are normalized to the full
+ * swapchain image, so the same mapping may be chained to multiple projection
+ * views that reference subimages of a packed render target. Full-resolution
+ * VRS backends may omit the mapping.
  */
 
 #ifndef XR_MNDX_FOVEATION_H
