@@ -247,44 +247,28 @@ fill_in_y_flip(struct oxr_session *sess, const XrCompositionLayerBaseHeader *lay
 #endif // OXR_HAVE_FB_composition_layer_image_layout
 }
 
-#define OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE ((XrStructureType)0x7fff5056)
-
-struct oxr_macos_foveation_map_chain
-{
-	XrStructureType type;
-	const void *next;
-	uint32_t boundary_count;
-	float x[XRT_FOVEATION_MAP_BOUNDARY_COUNT];
-	float y[XRT_FOVEATION_MAP_BOUNDARY_COUNT];
-};
-
 static void
-fill_in_macos_foveation_map(const XrCompositionLayerProjectionView *view,
-                            const struct oxr_swapchain *sc,
-                            struct xrt_foveation_map_data *out)
+fill_in_foveation_map(struct oxr_session *sess,
+                      const XrCompositionLayerProjectionView *view,
+                      const struct oxr_swapchain *sc,
+                      struct xrt_foveation_map_data *out)
 {
-	if (getenv("XRT_MACOS_FUSED_FOVEATION") == NULL || view == NULL || sc == NULL || out == NULL) {
+#ifdef OXR_HAVE_MNDX_foveation
+	if (!sess->sys->inst->extensions.MNDX_foveation || view == NULL || sc == NULL || out == NULL) {
 		return;
 	}
 
-	/* The first proof only supports a full-texture projection view. */
+	/* Version 1 supports only a full-texture projection view. */
 	if (view->subImage.imageRect.offset.x != 0 || view->subImage.imageRect.offset.y != 0 ||
 	    view->subImage.imageRect.extent.width != (int32_t)sc->width ||
 	    view->subImage.imageRect.extent.height != (int32_t)sc->height) {
 		return;
 	}
 
-	const XrBaseInStructure *entry = (const XrBaseInStructure *)view->next;
-	while (entry != NULL && entry->type != OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE) {
-		entry = entry->next;
-	}
-	if (entry == NULL) {
-		return;
-	}
-
-	const struct oxr_macos_foveation_map_chain *map =
-	    (const struct oxr_macos_foveation_map_chain *)entry;
-	if (map->boundary_count != XRT_FOVEATION_MAP_BOUNDARY_COUNT) {
+	const XrCompositionLayerFoveationMapMNDX *map = OXR_GET_INPUT_FROM_CHAIN(
+	    view, XR_TYPE_COMPOSITION_LAYER_FOVEATION_MAP_MNDX, XrCompositionLayerFoveationMapMNDX);
+	if (map == NULL || map->boundaryCount != XRT_FOVEATION_MAP_BOUNDARY_COUNT ||
+	    map->boundaryCount != XR_MNDX_FOVEATION_MAP_BOUNDARY_COUNT) {
 		return;
 	}
 
@@ -305,8 +289,13 @@ fill_in_macos_foveation_map(const XrCompositionLayerProjectionView *view,
 	out->boundary_count = XRT_FOVEATION_MAP_BOUNDARY_COUNT;
 	memcpy(out->x, map->x, sizeof(out->x));
 	memcpy(out->y, map->y, sizeof(out->y));
+#else
+	(void)sess;
+	(void)view;
+	(void)sc;
+	(void)out;
+#endif
 }
-
 
 static void
 fill_in_sub_image(const struct oxr_swapchain *sc, const XrSwapchainSubImage *oxr_sub, struct xrt_sub_image *xsub)
@@ -1403,7 +1392,7 @@ submit_projection_layer(struct oxr_session *sess,
 		data.proj.v[i].fov = *fov;
 		data.proj.v[i].pose = pose[i];
 		fill_in_sub_image(scs[i], &proj->views[i].subImage, &data.proj.v[i].sub);
-		fill_in_macos_foveation_map(&proj->views[i], scs[i], &data.proj.v[i].foveation);
+		fill_in_foveation_map(sess, &proj->views[i], scs[i], &data.proj.v[i].foveation);
 		swapchains[i] = scs[i]->swapchain;
 	}
 	fill_in_color_scale_bias(sess, (XrCompositionLayerBaseHeader *)proj, &data);
