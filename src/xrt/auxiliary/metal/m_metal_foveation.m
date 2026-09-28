@@ -31,12 +31,16 @@ m_metal_foveation_map_build(void *metal_device,
 	float horizontal[M_METAL_FOVEATION_ZONE_COUNT];
 	float vertical[M_METAL_FOVEATION_ZONE_COUNT];
 	for (int i = 0; i < M_METAL_FOVEATION_ZONE_COUNT; ++i) {
-		const int dx = abs(i - zone_x);
-		const int dy = abs(i - zone_y);
-		horizontal[i] =
-		    dx <= 1 ? profile->center_rate : (dx <= 3 ? profile->middle_rate : profile->peripheral_rate);
-		vertical[i] =
-		    dy <= 1 ? profile->center_rate : (dy <= 3 ? profile->middle_rate : profile->peripheral_rate);
+		const float dx = (float)abs(i - zone_x) / (float)M_METAL_FOVEATION_ZONE_COUNT;
+		const float dy = (float)abs(i - zone_y) / (float)M_METAL_FOVEATION_ZONE_COUNT;
+		horizontal[i] = dx <= profile->center_half_extent
+		                    ? profile->center_rate
+		                    : (dx <= profile->middle_half_extent ? profile->middle_rate
+		                                                         : profile->peripheral_rate);
+		vertical[i] = dy <= profile->center_half_extent
+		                  ? profile->center_rate
+		                  : (dy <= profile->middle_half_extent ? profile->middle_rate
+		                                                       : profile->peripheral_rate);
 	}
 
 	MTLRasterizationRateLayerDescriptor *layer =
