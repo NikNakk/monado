@@ -16,6 +16,10 @@
 #include "stereo_bootstrap.hpp"
 #include "t_imu_optical_filter.h"
 #include "t_constellation_tracker.h"
+#include "replay_records.hpp"
+#ifdef XRT_HAVE_CONSTELLATION_FUSION_EVAL
+#include "fusion_compare.hpp"
+#endif
 
 #include "xrt/xrt_frame.h"
 
@@ -462,8 +466,16 @@ override_calibration(DatasetReader &dataset, const char *path, const char *recor
 	std::printf("calibration overridden from %s\n", path);
 }
 
+/*!
+ * @param records Optional: every accepted solve with its correspondences, so other backends can be run on exactly
+ *                this optical input (--fusion-compare). Collecting them does not change the replay.
+ */
 int
-replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded, const char *blobs_path)
+replay_m1(const DatasetReader &dataset,
+          const char *csv_path,
+          bool seed_recorded,
+          const char *blobs_path,
+          std::vector<FrontendRecord> *records = nullptr)
 {
 	if (dataset.mosaics.empty()) {
 		std::fprintf(stderr, "no cameras in dataset\n");
@@ -644,6 +656,17 @@ replay_m1(const DatasetReader &dataset, const char *csv_path, bool seed_recorded
 			}
 			for (const JointSolveMatch &m : result.correspondences) {
 				owners[m.camera][m.blob] = id;
+			}
+			if (records != nullptr) {
+				FrontendRecord record{exposure.timestamp_ns, id,      result.Tcv_world_device, result.rms_px,
+				                      result.cameras_used,   result.matches, bootstrapped,         us,
+				                      {}};
+				for (const JointSolveMatch &m : result.correspondences) {
+					record.correspondences.push_back(FrontendMatch{camera_index_of[m.camera],
+					                                               cameras[m.camera].Tcv_world_cam,
+					                                               cameras[m.camera].blobs[m.blob].center, m.led});
+				}
+				records->push_back(std::move(record));
 			}
 
 			xrt_pose recorded;
@@ -1226,7 +1249,7 @@ int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json [--recorded-calibration SESSION/calibration.json]] [--blobs-csv OUT.csv] [--geometry PREFIX] [--filter-eval TRACKER.csv [--filter-out OUT.csv]]\n", argv[0]);
+		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json [--recorded-calibration SESSION/calibration.json]] [--blobs-csv OUT.csv] [--geometry PREFIX] [--filter-eval TRACKER.csv [--filter-out OUT.csv]] [--fusion-compare [--run-log SESSION/run.log] [--fusion-out PREFIX] [--fusion-scenarios nominal,dropout,corrupt]]\n", argv[0]);
 		return 2;
 	}
 	bool m1 = false;
@@ -1244,6 +1267,10 @@ main(int argc, char **argv)
 	const char *calibration = nullptr;
 	const char *recorded_calibration = nullptr;
 	const char *blobs_csv = nullptr;
+	bool fusion = false;
+	const char *run_log = nullptr;
+	const char *fusion_out = nullptr;
+	const char *fusion_scenarios = nullptr;
 	for (int i = 2; i < argc; i++) {
 		std::string arg = argv[i];
 		if (arg == "--m1") {
@@ -1279,6 +1306,14 @@ main(int argc, char **argv)
 			recorded_calibration = argv[++i];
 		} else if (arg == "--calibration" && i + 1 < argc) {
 			calibration = argv[++i];
+		} else if (arg == "--fusion-compare") {
+			fusion = true;
+		} else if (arg == "--run-log" && i + 1 < argc) {
+			run_log = argv[++i];
+		} else if (arg == "--fusion-out" && i + 1 < argc) {
+			fusion_out = argv[++i];
+		} else if (arg == "--fusion-scenarios" && i + 1 < argc) {
+			fusion_scenarios = argv[++i];
 		}
 	}
 
@@ -1343,7 +1378,28 @@ main(int argc, char **argv)
 		if (filter_eval) {
 			status = replay_filter(dataset, filter_eval, imu_angle_deg, filter_out) != 0 ? 1 : status;
 		}
-		if (m1) {
+		if (fusion) {
+#ifdef XRT_HAVE_CONSTELLATION_FUSION_EVAL
+			// The M1/M2 frontend runs once; every backend then consumes exactly its solves.
+			std::vector<FrontendRecord> records;
+			status = replay_m1(dataset, csv, seed_recorded, blobs_csv, &records) != 0 ? 1 : status;
+			std::vector<int64_t> exposure_times;
+			for (const Exposure &exposure : group_exposures(dataset.samples)) {
+				exposure_times.push_back(exposure.timestamp_ns);
+			}
+			FusionCompareOptions options;
+			options.run_log = run_log;
+			options.out_prefix = fusion_out;
+			options.imu_angle_deg = imu_angle_deg;
+			if (fusion_scenarios != nullptr) {
+				options.scenarios = fusion_scenarios;
+			}
+			status = fusion_compare(dataset, exposure_times, records, options) != 0 ? 1 : status;
+#else
+			std::fprintf(stderr, "--fusion-compare needs a build with Ceres >= 2.1\n");
+			status = 1;
+#endif
+		} else if (m1) {
 			status = replay_m1(dataset, csv, seed_recorded, blobs_csv) != 0 ? 1 : status;
 		}
 		if (tracker) {
