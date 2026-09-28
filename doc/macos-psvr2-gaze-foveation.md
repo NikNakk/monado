@@ -130,6 +130,24 @@ not expected to save meaningful application rendering work, so it is not the
 primary path.
 
 
+## Cross-platform OpenXR contract
+
+The fused path now uses the experimental `XR_MNDX_foveation` extension rather
+than a macOS-only hidden structure type or environment-variable gate.
+
+- `xrGetFoveationProfileMNDX` returns normalized centre, transition and
+  peripheral rates plus normalized region extents for a strength level.
+- The application implements that policy using its own graphics backend.
+- `XrCompositionLayerFoveationMapMNDX`, chained to each
+  `XrCompositionLayerProjectionView`, submits the actual 129-point
+  logical-to-physical mapping produced by that backend.
+- Monado copies that mapping into ordinary compositor projection data, so the
+  distortion/timewarp reconstruction path is graphics-API-neutral.
+
+Metal is the first backend via `MTLRasterizationRateMap`. Vulkan or D3D can
+implement the same contract later using their native VRS mechanisms without
+changing the OpenXR or compositor-facing interface.
+
 ## Foveation policy and graphics backends
 
 Foveation strength is deliberately separated from the Metal implementation.
@@ -204,9 +222,6 @@ The first proof is intentionally restricted to one projection layer without an
 OpenXR depth layer or passthrough. Those cases can use the layer-squashing path
 or additional source images and need equivalent foveation-aware sampling before
 they are enabled.
-
-Set `XRT_MACOS_FUSED_FOVEATION` only for this internal experiment. The
-diagnostic sets it automatically when `--gaze-foveation-fused` is requested.
 
 The old `--gaze-foveation` mode remains available as a two-pass reference
 implementation for timing and visual comparisons.
