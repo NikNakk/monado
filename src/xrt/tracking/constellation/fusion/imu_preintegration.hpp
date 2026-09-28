@@ -74,8 +74,8 @@ struct ImuNoiseModel
 	/*!
 	 * Defaults for the PS Sense as recorded: the noise densities the branch's EKF was tuned to on
 	 * `20260926-010135-imu-capture` (they absorb host timestamp jitter and the ~15 ms sample spacing, not just sensor
-	 * noise), upstream's random walks and scale, and a wider gyro-bias bound because the right controller's ~20 deg/s
-	 * bias is only removed by the driver once it has been still.
+	 * noise); upstream's random walks, anchors and bounds. A wider gyro anchor and bound (0.1 and 0.4 rad/s) were tried
+	 * for the right controller's ~20 deg/s bias before the driver learns it, and were no better.
 	 */
 	static ImuNoiseModel
 	psSense()
@@ -83,8 +83,6 @@ struct ImuNoiseModel
 		ImuNoiseModel m = upstreamCv1();
 		m.gyro_noise_density = 0.02;
 		m.accel_noise_density = 0.3;
-		m.gyro_bias_anchor_sigma = 0.1;
-		m.max_gyro_bias = 0.4;
 		return m;
 	}
 };
