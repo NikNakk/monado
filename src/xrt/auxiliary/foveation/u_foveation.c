@@ -42,3 +42,42 @@ u_foveation_profile_find(const char *name)
 	}
 	return -1;
 }
+
+float
+u_foveation_profile_rate_for_offset(const struct u_foveation_profile *profile, float normalized_offset)
+{
+	if (profile == NULL) {
+		return 1.0f;
+	}
+
+	if (normalized_offset < 0.0f) {
+		normalized_offset = -normalized_offset;
+	}
+
+	if (normalized_offset <= profile->center_half_extent) {
+		return profile->center_rate;
+	}
+	if (normalized_offset <= profile->middle_half_extent) {
+		return profile->middle_rate;
+	}
+	return profile->peripheral_rate;
+}
+
+bool
+u_foveation_build_axis_rates(const struct u_foveation_profile *profile,
+                             uint32_t sample_count,
+                             uint32_t center_index,
+                             float *out_rates)
+{
+	if (profile == NULL || out_rates == NULL || sample_count == 0 || center_index >= sample_count) {
+		return false;
+	}
+
+	for (uint32_t i = 0; i < sample_count; ++i) {
+		const uint32_t delta = i > center_index ? i - center_index : center_index - i;
+		const float normalized_offset = (float)delta / (float)sample_count;
+		out_rates[i] = u_foveation_profile_rate_for_offset(profile, normalized_offset);
+	}
+
+	return true;
+}
