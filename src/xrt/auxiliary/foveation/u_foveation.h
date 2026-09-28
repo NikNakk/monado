@@ -39,6 +39,12 @@ struct u_foveation_profile
 
 	//! Normalized rate for the peripheral region.
 	float peripheral_rate;
+
+	//! Half-extent of the full-rate centre, normalized to one view dimension.
+	float center_half_extent;
+
+	//! Half-extent of the centre + transition region, normalized likewise.
+	float middle_half_extent;
 };
 
 const struct u_foveation_profile *
