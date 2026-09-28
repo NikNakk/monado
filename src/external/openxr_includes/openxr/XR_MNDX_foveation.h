@@ -4,9 +4,10 @@
  * @file
  * @brief Experimental graphics-API-independent foveated-rendering contract.
  *
- * Applications obtain normalized foveation policy from the runtime, implement
- * it with their graphics API's native VRS mechanism, then attach the actual
- * logical-to-physical mapping to each submitted projection view.
+ * Applications obtain normalized per-axis foveation policy from the runtime,
+ * implement it with their graphics API's native VRS mechanism, then attach the
+ * actual logical-to-physical mapping when that mechanism uses non-uniform
+ * raster coordinates. Full-resolution VRS backends may omit the mapping.
  */
 
 #ifndef XR_MNDX_FOVEATION_H
@@ -40,9 +41,11 @@ typedef struct XrFoveationProfileMNDX {
     XrStructureType       type;
     void* XR_MAY_ALIAS    next;
     XrFoveationLevelMNDX level;
+    // Per-axis normalized rasterization rates. 1.0 means full rate.
     float                 centerRate;
     float                 middleRate;
     float                 peripheralRate;
+    // Per-axis normalized half-extents measured from the foveation centre.
     float                 centerHalfExtent;
     float                 middleHalfExtent;
 } XrFoveationProfileMNDX;

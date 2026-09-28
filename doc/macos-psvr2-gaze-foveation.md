@@ -165,6 +165,14 @@ This leaves room for future Vulkan or D3D backends to implement the same policy
 with their native VRS mechanism without exposing Metal-specific concepts to the
 OpenXR-facing policy layer.
 
+The centre/middle/peripheral selection itself is also graphics-independent:
+`u_foveation_profile_rate_for_offset()` and
+`u_foveation_build_axis_rates()` turn a profile into per-axis rates for an
+arbitrary discrete grid. Metal now consumes those helpers rather than carrying
+its own copy of the ring logic. A Vulkan fragment-density-map or D3D shading
+rate backend can therefore reuse the same policy and boundaries while choosing
+its own native grid/quantization.
+
 ## Fused compositor proof
 
 The original `--gaze-foveation` mode intentionally used an explicit

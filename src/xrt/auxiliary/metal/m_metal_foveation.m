@@ -5,7 +5,6 @@
 
 #include "metal/m_metal_foveation.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 bool
@@ -30,17 +29,9 @@ m_metal_foveation_map_build(void *metal_device,
 
 	float horizontal[M_METAL_FOVEATION_ZONE_COUNT];
 	float vertical[M_METAL_FOVEATION_ZONE_COUNT];
-	for (int i = 0; i < M_METAL_FOVEATION_ZONE_COUNT; ++i) {
-		const float dx = (float)abs(i - zone_x) / (float)M_METAL_FOVEATION_ZONE_COUNT;
-		const float dy = (float)abs(i - zone_y) / (float)M_METAL_FOVEATION_ZONE_COUNT;
-		horizontal[i] = dx <= profile->center_half_extent
-		                    ? profile->center_rate
-		                    : (dx <= profile->middle_half_extent ? profile->middle_rate
-		                                                         : profile->peripheral_rate);
-		vertical[i] = dy <= profile->center_half_extent
-		                  ? profile->center_rate
-		                  : (dy <= profile->middle_half_extent ? profile->middle_rate
-		                                                       : profile->peripheral_rate);
+	if (!u_foveation_build_axis_rates(profile, M_METAL_FOVEATION_ZONE_COUNT, (uint32_t)zone_x, horizontal) ||
+	    !u_foveation_build_axis_rates(profile, M_METAL_FOVEATION_ZONE_COUNT, (uint32_t)zone_y, vertical)) {
+		return false;
 	}
 
 	MTLRasterizationRateLayerDescriptor *layer =

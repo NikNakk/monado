@@ -12,6 +12,9 @@
 
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -52,6 +55,27 @@ u_foveation_profile_get(int profile_index);
 
 int
 u_foveation_profile_find(const char *name);
+
+/*!
+ * Return the per-axis normalized rasterization rate for an absolute normalized
+ * distance from the foveation centre. A distance of 0 is at gaze; 0.5 is half
+ * of one view dimension away.
+ */
+float
+u_foveation_profile_rate_for_offset(const struct u_foveation_profile *profile, float normalized_offset);
+
+/*!
+ * Fill one axis of a discrete foveation grid using the generic profile policy.
+ *
+ * Samples are addressed by index so graphics backends can choose their native
+ * grid resolution. This intentionally matches the established 16-zone Metal
+ * behaviour when sample_count is 16.
+ */
+bool
+u_foveation_build_axis_rates(const struct u_foveation_profile *profile,
+                             uint32_t sample_count,
+                             uint32_t center_index,
+                             float *out_rates);
 
 #ifdef __cplusplus
 }
