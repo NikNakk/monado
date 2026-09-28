@@ -142,6 +142,15 @@ oxr_xrGetSystem(XrInstance instance, const XrSystemGetInfo *getInfo, XrSystemId 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetSystemProperties(XrInstance instance, XrSystemId systemId, XrSystemProperties *properties);
 
+#ifdef OXR_HAVE_MNDX_foveation
+//! OpenXR API function xrGetFoveationProfileMNDX
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetFoveationProfileMNDX(XrInstance instance,
+                              XrSystemId systemId,
+                              XrFoveationLevelMNDX level,
+                              XrFoveationProfileMNDX *profile);
+#endif // OXR_HAVE_MNDX_foveation
+
 //! OpenXR API function @ep{xrEnumerateViewConfigurations}
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEnumerateViewConfigurations(XrInstance instance,
