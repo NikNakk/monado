@@ -82,6 +82,9 @@ if(Ceres_FOUND)
 		fusion/fusion_math.hpp
 		fusion/imu_preintegration.cpp
 		fusion/imu_preintegration.hpp
+		fusion/psvr2_fusion_frames.hpp
+		fusion/sliding_window_fusion.cpp
+		fusion/sliding_window_fusion.hpp
 		)
 	target_compile_features(constellation_fusion PUBLIC cxx_std_20)
 	target_include_directories(constellation_fusion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
