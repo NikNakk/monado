@@ -1161,6 +1161,13 @@ the protocol maximum, period 42.
 - `PSSENSE_LED_BOOTSTRAP_STRESS_RESCAN_S=N` forces a full rescan once a controller has been locked N s and the scan
   token is free. This gives several full scans per run, so fault rates for period 42 and 32 can be compared.
 
+## Upstream fusion evaluation (28 Sep)
+
+MR 3015's sliding-window IMU + optical fusion was adapted for moving PS VR2 cameras and compared offline with the raw
+M1/M2 poses and the EKF on identical input (`constellation_replay --fusion-compare`). It matches the EKF's availability
+and is modestly better in some consistency metrics, at about 300× the cost. The recommendation is to keep M3 + EKF and
+take selected components. See `doc/macos-pssense-upstream-fusion-evaluation.md`.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
