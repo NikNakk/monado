@@ -68,6 +68,39 @@ if(XRT_FEATURE_RERUN)
 		)
 endif()
 
+# Experimental IMU + optical sliding-window fusion adapted from Monado MR 3015, for offline evaluation only. The
+# live tracker never links it. Needs Ceres >= 2.1 (ProductManifold).
+find_package(Ceres 2.1 CONFIG QUIET)
+if(Ceres_FOUND)
+	set(XRT_HAVE_CONSTELLATION_FUSION_EVAL
+	    ON
+	    CACHE INTERNAL "Experimental constellation fusion evaluation"
+		)
+	add_library(
+		constellation_fusion STATIC
+		fusion/fusion_math.cpp
+		fusion/fusion_math.hpp
+		fusion/imu_preintegration.cpp
+		fusion/imu_preintegration.hpp
+		)
+	target_compile_features(constellation_fusion PUBLIC cxx_std_20)
+	target_include_directories(constellation_fusion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+	target_link_libraries(
+		constellation_fusion
+		PUBLIC
+			xrt-interfaces
+			tracking-includes
+			aux_math
+			aux_tracking
+			Ceres::ceres
+		)
+else()
+	set(XRT_HAVE_CONSTELLATION_FUSION_EVAL
+	    OFF
+	    CACHE INTERNAL "Experimental constellation fusion evaluation"
+		)
+endif()
+
 # Offline replay of datasets written by the tracker's data recorder (CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT).
 add_executable(constellation_replay tools/constellation_replay.cpp)
 target_include_directories(constellation_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
