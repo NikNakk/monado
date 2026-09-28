@@ -80,6 +80,15 @@ struct SlidingWindowFusionParams
 
 	ImuNoiseModel noise{ImuNoiseModel::psSense()};
 
+	/*!
+	 * The calibrated IMU bias the oldest keyframe's bias is anchored to, and every reset re-seeds from. Upstream
+	 * anchors to the latest estimate instead, which lets a bias that has run away (seen on 014505) hold itself there
+	 * across resets. The recorded Sense samples already have the driver's factory and online gyro bias removed, so
+	 * zero is the calibration.
+	 */
+	Eigen::Vector3d calibrated_gyro_bias{Eigen::Vector3d::Zero()};
+	Eigen::Vector3d calibrated_accel_bias{Eigen::Vector3d::Zero()};
+
 	//! Blob centroid noise, pixels (upstream: 0.16 for the CV1). M1's live floor is ~0.3-0.5 px RMS.
 	double blob_sigma_px{0.5};
 	//! Huber threshold per observation, in standard deviations of its chi-square (upstream: 3).
@@ -87,16 +96,32 @@ struct SlidingWindowFusionParams
 	//! Ceres iterations per solve (upstream: 15).
 	int max_iterations{15};
 
-	//! Seed IMU -> LED model rotation (CV), and whether to solve for it (upstream does).
+	/*!
+	 * Seed IMU -> LED model rotation (CV), and whether to solve for it. Upstream solves for it; here it is fixed by
+	 * default, since the Sense ring constrains its own tilt too weakly for the extrinsic to stay put (see the
+	 * evaluation document).
+	 */
 	Eigen::Quaterniond Q_imu_model{Eigen::Quaterniond::Identity()};
-	bool optimize_extrinsics{true};
+	bool optimize_extrinsics{false};
 
-	//! Pre-admission gate: the seed must lie within these of the IMU prediction, growing with the time since the
-	//! last keyframe (position + 0.5 a dt^2, orientation + w dt).
+	/*!
+	 * Optional prior tying each keyframe's LED model orientation to the seed's, 1 sigma in degrees; 0 disables it
+	 * (upstream has none). M1 itself regularises the ring's weakly observed tilt with a 3 degree IMU prior, which
+	 * reprojection factors alone discard.
+	 */
+	double seed_orientation_sigma_deg{0.0};
+
+	/*!
+	 * Pre-admission gate against the IMU prediction. The seed's position must lie within gate_position_m +
+	 * 0.5 gate_accel dt^2 of it, and the observations must reproject within gate_reprojection_px (RMS) at the seed's
+	 * position with the predicted orientation: a wrong lock fails that, while a disagreement about the ring's
+	 * weakly observed tilt does not. A coarse angle gate catches the rest.
+	 */
 	bool gate{true};
 	double gate_position_m{0.04};
 	double gate_accel_m_s2{40.0};
-	double gate_orientation_deg{12.0};
+	double gate_reprojection_px{4.0};
+	double gate_orientation_deg{45.0};
 	double gate_rate_deg_s{90.0};
 	//! Post-solve check: a new keyframe whose observations still exceed this RMS (pixels) after the solve is dropped.
 	double post_solve_max_rms_px{2.0};
@@ -142,6 +167,8 @@ struct FusionUpdateResult
 	//! Seed against the IMU prediction (when there was one).
 	double gate_position_error_m{0.0};
 	double gate_orientation_error_deg{0.0};
+	//! RMS reprojection (pixels) at the seed position with the predicted orientation.
+	double gate_reprojection_px{0.0};
 	//! RMS reprojection (pixels) of this exposure's observations at the solved pose.
 	double solved_rms_px{0.0};
 	int iterations{0};

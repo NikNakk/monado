@@ -84,6 +84,35 @@ typedef ceres::AutoDiffCostFunction<CameraObservationCostFunctor, ceres::DYNAMIC
     CameraObservationCostFunction;
 
 /*!
+ * Optional: the LED model orientation (body orientation times the IMU extrinsic) near the frontend's, whose tilt M1
+ * regularises with the driver's IMU orientation. Not in upstream.
+ */
+struct SeedOrientationCostFunctor
+{
+	Eigen::Quaterniond q_seed;
+	double sigma_rad;
+
+	template <typename T>
+	bool
+	operator()(const T *const keyframe_parameters, const T *const imu_extrinsics_parameters, T *residuals) const
+	{
+		const Pose<T> T_world_device{Map<const Vector<T, Pose<T>::kNumParameters>>(keyframe_parameters)};
+		const ImuExtrinsics<T> extrinsics{
+		    Map<const Vector<T, ImuExtrinsics<T>::kNumParameters>>(imu_extrinsics_parameters)};
+		Quaternion<T> error = q_seed.conjugate().cast<T>() * (T_world_device.rotation * extrinsics.Q_imu_model);
+		if (error.w() < T(0)) {
+			error.coeffs() = -error.coeffs();
+		}
+		Map<Vector3<T>> out(residuals);
+		out = quat_ln_so3(error) / T(sigma_rad);
+		return true;
+	}
+};
+
+typedef ceres::AutoDiffCostFunction<SeedOrientationCostFunctor, 3, kPoseSize, kExtrinsicsSize>
+    SeedOrientationCostFunction;
+
+/*!
  * Evaluates residuals where the states are, Jacobians at their first estimates. Upstream's
  * FirstEstimateJacobianCostFunction, unchanged.
  */
@@ -331,6 +360,7 @@ struct SlidingWindowFusion::Impl
 		uint64_t id;
 		int64_t t;
 		std::vector<FusionCameraObservation> observations;
+		Eigen::Quaterniond q_seed_model;
 		SeedableVector<double, kPoseSize> pose;
 		SeedableVector<double, kBiasSize> bias;
 		//! The IMU interval ending at this keyframe, absent for the first keyframe of the window.
@@ -408,7 +438,13 @@ struct SlidingWindowFusion::Impl
 		params.window_size = std::max<uint32_t>(2, params.window_size);
 		WorldGravity<double>().pack(gravity.seedVec());
 		ImuExtrinsics<double>(params.Q_imu_model.normalized()).pack(extrinsics.seedVec());
-		latest_bias = ImuBias<double>();
+		latest_bias = calibratedBias();
+	}
+
+	ImuBias<double>
+	calibratedBias() const
+	{
+		return ImuBias<double>(params.calibrated_accel_bias, params.calibrated_gyro_bias, Eigen::Vector3d::Ones());
 	}
 
 	/*
@@ -632,6 +668,19 @@ struct SlidingWindowFusion::Impl
 			}
 		}
 
+		if (params.seed_orientation_sigma_deg > 0.0) {
+			for (size_t k = 0; k < window.size(); k++) {
+				Keyframe &kf = window[k];
+				ceres::ResidualBlockId id = problem->AddResidualBlock(
+				    new FirstEstimateJacobianCostFunction(
+				        new SeedOrientationCostFunction(new SeedOrientationCostFunctor{
+				            kf.q_seed_model, params.seed_orientation_sigma_deg * M_PI / 180.0}),
+				        {{kf.pose.anchorData(), &pose_manifold}, {nullptr, &quaternion_manifold}}),
+				    nullptr, kf.pose.data(), extrinsics.data());
+				keyframe_residuals[k].push_back(id);
+			}
+		}
+
 		// IMU and bias random-walk factors, owned by the older keyframe of each pair.
 		for (size_t k = 1; k < window.size(); k++) {
 			Keyframe &start = window[k - 1];
@@ -659,13 +708,13 @@ struct SlidingWindowFusion::Impl
 		// Anchor the oldest bias when no prior carries it.
 		if (!window.empty() && !priorNames(PriorBlock::Kind::Bias, window.front().id)) {
 			ceres::ResidualBlockId id = problem->AddResidualBlock(
-			    new ImuBiasAnchorCostFunction(new ImuBiasAnchorCostFunctor{latest_bias, params.noise}), nullptr,
+			    new ImuBiasAnchorCostFunction(new ImuBiasAnchorCostFunctor{calibratedBias(), params.noise}), nullptr,
 			    window.front().bias.data());
 			keyframe_residuals[0].push_back(id);
 		}
 	}
 
-	//! Unrobustified RMS, in pixels, of a camera factor at the current state.
+	//! Unrobustified RMS reprojection error per LED (pixels, as M1 reports it) of a camera factor.
 	double
 	cameraRmsPx(ceres::ResidualBlockId id) const
 	{
@@ -673,7 +722,8 @@ struct SlidingWindowFusion::Impl
 		const int n = problem->GetCostFunctionForResidualBlock(id)->num_residuals();
 		std::vector<double> residuals(n);
 		problem->EvaluateResidualBlock(id, false, &cost, residuals.data(), nullptr);
-		return params.blob_sigma_px * std::sqrt(2.0 * cost / std::max(1, n));
+		// cost = 0.5 sum (r / sigma)^2 over n / 2 LEDs.
+		return params.blob_sigma_px * std::sqrt(4.0 * cost / std::max(1, n));
 	}
 
 	double
@@ -688,6 +738,27 @@ struct SlidingWindowFusion::Impl
 			n += m;
 		}
 		return n > 0 ? std::sqrt(sum2 / n) : 0.0;
+	}
+
+	//! RMS reprojection (pixels) of an exposure's observations at an LED model pose.
+	double
+	reprojectionRmsPx(const FusionExposure &exposure, const xrt_pose &Tcv_world_model) const
+	{
+		const Eigen::Isometry3d world_model = isometry_of(Tcv_world_model);
+		double sum2 = 0.0;
+		int n = 0;
+		for (const FusionCameraObservation &obs : exposure.observations) {
+			const Eigen::Isometry3d cam_model = isometry_of(obs.Tcv_world_cam).inverse() * world_model;
+			const Eigen::Quaterniond q(cam_model.linear());
+			const Eigen::Vector3d t = cam_model.translation();
+			for (size_t i = 0; i < obs.points2d.size(); i++) {
+				double r[2];
+				computeLedResidual<double>(obs.model, t, q, obs.points2d[i], obs.points3d[i], r);
+				sum2 += r[0] * r[0] + r[1] * r[1];
+				n += 2;
+			}
+		}
+		return n > 0 ? std::sqrt(2.0 * sum2 / n) : 0.0;
 	}
 
 	/*
@@ -799,6 +870,7 @@ struct SlidingWindowFusion::Impl
 	void
 	resetState()
 	{
+		latest_bias = calibratedBias();
 		window.clear();
 		prior = Prior{};
 		published.clear();
@@ -832,6 +904,7 @@ struct SlidingWindowFusion::Impl
 		kf.id = next_keyframe_id++;
 		kf.t = exposure.timestamp_ns;
 		kf.observations = exposure.observations;
+		kf.q_seed_model = quat_of(exposure.Tcv_world_model_seed);
 
 		// The seed is the LED model's pose; the state is the IMU body's: Q_world_imu = Q_world_model Q_imu_model^-1.
 		const Eigen::Quaterniond q_imu_model = ImuExtrinsics<double>(extrinsics.vec).Q_imu_model.normalized();
@@ -917,11 +990,16 @@ struct SlidingWindowFusion::Impl
 			return result;
 		};
 
+		result.gate_reprojection_px =
+		    reprojectionRmsPx(exposure, make_pose(predicted_model, pos_of(exposure.Tcv_world_model_seed)));
 		if (params.gate) {
 			const double pos_gate = params.gate_position_m + 0.5 * params.gate_accel_m_s2 * dt * dt;
 			const double rot_gate = params.gate_orientation_deg + params.gate_rate_deg_s * dt;
 			if (result.gate_position_error_m > pos_gate) {
 				return reject(FusionUpdateStatus::RejectedGate, "position");
+			}
+			if (result.gate_reprojection_px > params.gate_reprojection_px) {
+				return reject(FusionUpdateStatus::RejectedGate, "reprojection");
 			}
 			if (result.gate_orientation_error_deg > rot_gate) {
 				return reject(FusionUpdateStatus::RejectedGate, "orientation");
