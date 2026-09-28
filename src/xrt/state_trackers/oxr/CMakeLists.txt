@@ -198,6 +198,7 @@ target_link_libraries(
 		xrt-external-openxr
 		aux_util
 		aux_math
+		aux_foveation
 		aux_generated_bindings_helpers
 		comp_client
 		aux-includes
