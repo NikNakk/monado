@@ -258,13 +258,6 @@ fill_in_foveation_map(struct oxr_session *sess,
 		return;
 	}
 
-	/* Version 1 supports only a full-texture projection view. */
-	if (view->subImage.imageRect.offset.x != 0 || view->subImage.imageRect.offset.y != 0 ||
-	    view->subImage.imageRect.extent.width != (int32_t)sc->width ||
-	    view->subImage.imageRect.extent.height != (int32_t)sc->height) {
-		return;
-	}
-
 	const XrCompositionLayerFoveationMapMNDX *map = OXR_GET_INPUT_FROM_CHAIN(
 	    view, XR_TYPE_COMPOSITION_LAYER_FOVEATION_MAP_MNDX, XrCompositionLayerFoveationMapMNDX);
 	if (map == NULL || map->boundaryCount != XRT_FOVEATION_MAP_BOUNDARY_COUNT ||
