@@ -6,13 +6,18 @@
 #include <stddef.h>
 #include <string.h>
 
+/*
+ * The half-extents preserve the proven 16-zone layout while expressing the
+ * policy independently of any graphics API: three full-rate zones span 3/16
+ * of the view and the centre+transition region spans 7/16.
+ */
 static const struct u_foveation_profile k_profiles[U_FOVEATION_PROFILE_COUNT] = {
-    {"reference", 1.00f, 0.70f, 0.45f},
-    {"strong", 1.00f, 0.60f, 0.35f},
-    {"aggressive", 1.00f, 0.50f, 0.25f},
-    {"aggressive-plus", 1.00f, 0.46f, 0.23f},
-    {"near-extreme", 1.00f, 0.43f, 0.21f},
-    {"extreme", 1.00f, 0.40f, 0.20f},
+    {"reference", 1.00f, 0.70f, 0.45f, 0.09375f, 0.21875f},
+    {"strong", 1.00f, 0.60f, 0.35f, 0.09375f, 0.21875f},
+    {"aggressive", 1.00f, 0.50f, 0.25f, 0.09375f, 0.21875f},
+    {"aggressive-plus", 1.00f, 0.46f, 0.23f, 0.09375f, 0.21875f},
+    {"near-extreme", 1.00f, 0.43f, 0.21f, 0.09375f, 0.21875f},
+    {"extreme", 1.00f, 0.40f, 0.20f, 0.09375f, 0.21875f},
 };
 
 const struct u_foveation_profile *
