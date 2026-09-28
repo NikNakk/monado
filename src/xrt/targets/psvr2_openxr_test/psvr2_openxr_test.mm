@@ -17,6 +17,7 @@
 
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
+#include <openxr/XR_MNDX_foveation.h>
 
 #include "foveation/u_foveation.h"
 #include "metal/m_metal_foveation.h"
@@ -129,6 +130,7 @@ struct xr_api
 	PFN_xrGetInstanceProperties get_instance_properties = nullptr;
 	PFN_xrGetSystem get_system = nullptr;
 	PFN_xrGetSystemProperties get_system_properties = nullptr;
+	PFN_xrGetFoveationProfileMNDX get_foveation_profile = nullptr;
 	PFN_xrGetMetalGraphicsRequirementsKHR get_metal_graphics_requirements = nullptr;
 	PFN_xrCreateSession create_session = nullptr;
 	PFN_xrDestroySession destroy_session = nullptr;
@@ -816,18 +818,6 @@ struct metal_renderer
 	}
 };
 
-#define OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE ((XrStructureType)0x7fff5056)
-#define OXR_MACOS_FOVEATION_BOUNDARY_COUNT 129
-
-struct oxr_macos_foveation_map_chain
-{
-	XrStructureType type = OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE;
-	const void *next = nullptr;
-	uint32_t boundary_count = OXR_MACOS_FOVEATION_BOUNDARY_COUNT;
-	float x[OXR_MACOS_FOVEATION_BOUNDARY_COUNT] = {};
-	float y[OXR_MACOS_FOVEATION_BOUNDARY_COUNT] = {};
-};
-
 struct view_swapchain
 {
 	XrSwapchain handle = XR_NULL_HANDLE;
@@ -904,6 +894,7 @@ struct application
 	bool gaze_foveation_fused = false;
 	int foveation_profile_index = 0;
 	uint32_t foveation_profile_revision = 1;
+	struct u_foveation_profile runtime_foveation_profile = {};
 	terminal_input_state terminal_input;
 	bool gaze_supported = false;
 	bool last_foveation_gaze_valid = false;
@@ -924,7 +915,7 @@ struct application
 	std::vector<XrView> views;
 	std::vector<XrCompositionLayerProjectionView> projection_views;
 	std::vector<XrCompositionLayerDepthInfoKHR> depth_infos;
-	std::array<oxr_macos_foveation_map_chain, 2> fused_foveation_info;
+	std::array<XrCompositionLayerFoveationMapMNDX, 2> fused_foveation_info;
 	std::vector<view_swapchain> swapchains;
 	metal_renderer renderer;
 	diagnostic_scene scene;
@@ -966,6 +957,9 @@ create_instance(application &app)
 	if (app.test_gaze && !has_extension(app.xr, XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME)) {
 		fatal("runtime does not expose XR_EXT_eye_gaze_interaction");
 	}
+	if (app.gaze_foveation_fused && !has_extension(app.xr, XR_MNDX_FOVEATION_EXTENSION_NAME)) {
+		fatal("runtime does not expose XR_MNDX_foveation");
+	}
 
 	std::vector<const char *> extensions = {XR_KHR_METAL_ENABLE_EXTENSION_NAME};
 	if (app.submit_depth_layer) {
@@ -976,6 +970,9 @@ create_instance(application &app)
 	}
 	if (app.test_gaze) {
 		extensions.push_back(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
+	}
+	if (app.gaze_foveation_fused) {
+		extensions.push_back(XR_MNDX_FOVEATION_EXTENSION_NAME);
 	}
 
 	XrInstanceCreateInfo create_info{XR_TYPE_INSTANCE_CREATE_INFO};
@@ -988,6 +985,10 @@ create_instance(application &app)
 	create_info.enabledExtensionNames = extensions.data();
 	check_xr(app.xr.create_instance(&create_info, &app.instance), "xrCreateInstance");
 	load_instance_xr_functions(app.xr, app.instance);
+	if (app.gaze_foveation_fused) {
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrGetFoveationProfileMNDX",
+		             &app.xr.get_foveation_profile);
+	}
 	if (app.submit_passthrough) {
 		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrCreatePassthroughFB",
 		             &app.xr.create_passthrough);
@@ -1642,6 +1643,42 @@ release_gaze_foveation_resources(view_swapchain &swapchain)
 	swapchain.foveation_profile_revision = 0;
 }
 
+static XrFoveationLevelMNDX
+xr_foveation_level_from_index(int index)
+{
+	switch (index) {
+	case U_FOVEATION_PROFILE_REFERENCE: return XR_FOVEATION_LEVEL_REFERENCE_MNDX;
+	case U_FOVEATION_PROFILE_STRONG: return XR_FOVEATION_LEVEL_STRONG_MNDX;
+	case U_FOVEATION_PROFILE_AGGRESSIVE: return XR_FOVEATION_LEVEL_AGGRESSIVE_MNDX;
+	case U_FOVEATION_PROFILE_AGGRESSIVE_PLUS: return XR_FOVEATION_LEVEL_AGGRESSIVE_PLUS_MNDX;
+	case U_FOVEATION_PROFILE_NEAR_EXTREME: return XR_FOVEATION_LEVEL_NEAR_EXTREME_MNDX;
+	case U_FOVEATION_PROFILE_EXTREME: return XR_FOVEATION_LEVEL_EXTREME_MNDX;
+	default: return XR_FOVEATION_LEVEL_REFERENCE_MNDX;
+	}
+}
+
+static void
+refresh_runtime_foveation_profile(application &app)
+{
+	if (!app.gaze_foveation_fused || app.xr.get_foveation_profile == nullptr || app.system_id == XR_NULL_SYSTEM_ID) {
+		return;
+	}
+
+	XrFoveationProfileMNDX xr_profile{XR_TYPE_FOVEATION_PROFILE_MNDX};
+	check_xr(app.xr.get_foveation_profile(app.instance, app.system_id,
+	                                      xr_foveation_level_from_index(app.foveation_profile_index),
+	                                      &xr_profile),
+	         "xrGetFoveationProfileMNDX");
+
+	const struct u_foveation_profile *named = u_foveation_profile_get(app.foveation_profile_index);
+	app.runtime_foveation_profile.name = named != nullptr ? named->name : "runtime";
+	app.runtime_foveation_profile.center_rate = xr_profile.centerRate;
+	app.runtime_foveation_profile.middle_rate = xr_profile.middleRate;
+	app.runtime_foveation_profile.peripheral_rate = xr_profile.peripheralRate;
+	app.runtime_foveation_profile.center_half_extent = xr_profile.centerHalfExtent;
+	app.runtime_foveation_profile.middle_half_extent = xr_profile.middleHalfExtent;
+}
+
 static bool
 update_gaze_foveation_map(application &app,
                           size_t eye,
@@ -1704,13 +1741,16 @@ update_gaze_foveation_map(application &app,
 		fatal("Metal device does not support variable rasterization rate maps");
 	}
 
+	const struct u_foveation_profile *active_profile =
+	    app.gaze_foveation_fused ? &app.runtime_foveation_profile
+	                              : u_foveation_profile_get(app.foveation_profile_index);
 	struct m_metal_foveation_map built_map = {};
 	if (!m_metal_foveation_map_build((void *)device,
 	                                  swapchain.width,
 	                                  swapchain.height,
 	                                  zone_x,
 	                                  zone_y,
-	                                  u_foveation_profile_get(app.foveation_profile_index),
+	                                  active_profile,
 	                                  &built_map)) {
 		fatal("could not create Metal gaze foveation rasterization rate map");
 	}
@@ -1719,12 +1759,12 @@ update_gaze_foveation_map(application &app,
 	const MTLSize physical_size = MTLSizeMake(built_map.physical_width, built_map.physical_height, 1);
 
 	if (app.gaze_foveation_fused) {
-		oxr_macos_foveation_map_chain &map = app.fused_foveation_info[eye];
-		map.type = OXR_MACOS_FOVEATION_MAP_STRUCTURE_TYPE;
+		XrCompositionLayerFoveationMapMNDX &map = app.fused_foveation_info[eye];
+		map.type = XR_TYPE_COMPOSITION_LAYER_FOVEATION_MAP_MNDX;
 		map.next = nullptr;
-		map.boundary_count = OXR_MACOS_FOVEATION_BOUNDARY_COUNT;
-		static_assert(OXR_MACOS_FOVEATION_BOUNDARY_COUNT == M_METAL_FOVEATION_BOUNDARY_COUNT);
-		for (uint32_t boundary = 0; boundary < OXR_MACOS_FOVEATION_BOUNDARY_COUNT; ++boundary) {
+		map.boundaryCount = XR_MNDX_FOVEATION_MAP_BOUNDARY_COUNT;
+		static_assert(XR_MNDX_FOVEATION_MAP_BOUNDARY_COUNT == M_METAL_FOVEATION_BOUNDARY_COUNT);
+		for (uint32_t boundary = 0; boundary < XR_MNDX_FOVEATION_MAP_BOUNDARY_COUNT; ++boundary) {
 			map.x[boundary] = built_map.x[boundary];
 			map.y[boundary] = built_map.y[boundary];
 		}
@@ -2189,6 +2229,7 @@ set_foveation_profile(application &app, int index)
 		return;
 	}
 	app.foveation_profile_index = index;
+	refresh_runtime_foveation_profile(app);
 	++app.foveation_profile_revision;
 	if (app.foveation_profile_revision == 0) {
 		app.foveation_profile_revision = 1;
@@ -2406,14 +2447,12 @@ run(int argc, char **argv)
 		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)\n",
 		        profile->name, profile->middle_rate, profile->peripheral_rate);
 	}
-	if (gaze_foveation_fused) {
-		setenv("XRT_MACOS_FUSED_FOVEATION", "1", 1);
-	}
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
 	load_global_xr_functions(app.loader, app.xr);
 	create_instance(app);
 	create_system_and_session(app);
+	refresh_runtime_foveation_profile(app);
 	create_gaze_resources(app);
 	create_passthrough_resources(app);
 	create_swapchains(app);
