@@ -77,7 +77,6 @@ DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_driver_timing_trace, "PSVR2_DRIVER_TIMING_TRACE", true)
 #endif
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_filtered_linear_prediction, "PSVR2_FILTERED_LINEAR_PREDICTION", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_ALPHA", 0.25f)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", true)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_tau_ms, "PSVR2_CONTINUITY_TAU_MS", 4.0f)
@@ -376,7 +375,7 @@ psvr2_timing_trace_prediction(struct psvr2_hmd *hmd,
 	        predicted->z, error.x, error.y, error.z, error_m * 1000.0f, along_m * 1000.0f, prior_velocity->x,
 	        prior_velocity->y, prior_velocity->z, estimated_velocity->x, estimated_velocity->y, estimated_velocity->z,
 	        hmd->filtered_linear_velocity.x, hmd->filtered_linear_velocity.y, hmd->filtered_linear_velocity.z, alpha,
-	        debug_get_bool_option_psvr2_filtered_linear_prediction() ? 1u : 0u);
+	        0u /* filter_enabled: EMA is trace-only; column kept for CSV compatibility */);
 	g_psvr2_timing_trace.prediction_rows++;
 	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.prediction_rows, 256);
 }
@@ -532,7 +531,7 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		        raw_along_m * 1000.0f, filtered_along_m * 1000.0f, p->source_position.x, p->source_position.y,
 		        p->source_position.z, p->raw_velocity.x, p->raw_velocity.y, p->raw_velocity.z,
 		        p->filtered_velocity.x, p->filtered_velocity.y, p->filtered_velocity.z, alpha,
-		        debug_get_bool_option_psvr2_filtered_linear_prediction() ? 1u : 0u);
+		        0u /* filter_enabled: EMA is trace-only; column kept for CSV compatibility */);
 		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,",
 		        p->acceleration_predicted_position.x, p->acceleration_predicted_position.y,
 		        p->acceleration_predicted_position.z, psvr2_vec3_length(&acceleration_error) * 1000.0f,
@@ -709,13 +708,6 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 				hmd->timing_prediction_after_imu_total_ns = 0;
 			}
 		}
-	}
-
-	if (!hmd->acceleration_prediction_enabled && debug_get_bool_option_psvr2_filtered_linear_prediction() &&
-	    hmd->filtered_linear_velocity_initialized) {
-		latest_relation.linear_velocity = hmd->filtered_linear_velocity;
-		latest_relation.relation_flags = (enum xrt_space_relation_flags)(
-		    latest_relation.relation_flags | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
 	}
 
 	// Status and SLAM transfers are independent. A pose query can arrive after a
