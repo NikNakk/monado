@@ -103,7 +103,6 @@ macos_presented_state_release(struct macos_presented_state *state)
 
 DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_cvdisplaylink_pacing, "XRT_MACOS_CVDISPLAYLINK_PACING", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
@@ -2110,9 +2109,7 @@ comp_window_macos_update_timings(struct comp_target *ct)
 		}
 	}
 
-	if (debug_get_bool_option_macos_cvdisplaylink_pacing()) {
-		u_pc_update_vblank_from_display_control(cwm->base.upc, (int64_t)vblank_ns);
-	}
+	u_pc_update_vblank_from_display_control(cwm->base.upc, (int64_t)vblank_ns);
 	if (cwm->last_vblank_ns != 0 && vblank_ns > cwm->last_vblank_ns) {
 		uint64_t interval_ns = vblank_ns - cwm->last_vblank_ns;
 		if (cwm->display_period_ns > 0 && interval_ns > (uint64_t)cwm->display_period_ns * 4) {
