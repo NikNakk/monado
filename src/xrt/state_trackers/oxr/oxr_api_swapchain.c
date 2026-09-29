@@ -118,6 +118,25 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 	}
 
 
+#ifdef OXR_HAVE_FB_foveation
+	const XrSwapchainCreateInfoFoveationFB *foveation_info =
+	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB,
+	                             XrSwapchainCreateInfoFoveationFB);
+	if (foveation_info != NULL) {
+		if (!inst->extensions.FB_foveation) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+			                 "XrSwapchainCreateInfoFoveationFB requires XR_FB_foveation");
+		}
+		const XrSwapchainCreateFoveationFlagsFB valid_foveation_flags =
+		    XR_SWAPCHAIN_CREATE_FOVEATION_SCALED_BIN_BIT_FB |
+		    XR_SWAPCHAIN_CREATE_FOVEATION_FRAGMENT_DENSITY_MAP_BIT_FB;
+		if ((foveation_info->flags & ~valid_foveation_flags) != 0) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+			                 "XrSwapchainCreateInfoFoveationFB::flags contains invalid bits");
+		}
+	}
+#endif
+
 	/*
 	 * Format.
 	 */
