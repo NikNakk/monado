@@ -30,6 +30,36 @@ enum u_foveation_profile_index
 	U_FOVEATION_PROFILE_COUNT,
 };
 
+/*!
+ * API-independent coarse foveation levels. These mirror the common
+ * NONE/LOW/MEDIUM/HIGH model used by registered OpenXR foveation extensions
+ * without making the utility layer depend on OpenXR headers.
+ */
+enum u_foveation_level
+{
+	U_FOVEATION_LEVEL_NONE = 0,
+	U_FOVEATION_LEVEL_LOW,
+	U_FOVEATION_LEVEL_MEDIUM,
+	U_FOVEATION_LEVEL_HIGH,
+};
+
+/*!
+ * Runtime policy requested by a client-facing foveation API.
+ *
+ * profile_index is the maximum requested fixed profile when enabled.
+ * dynamic allows the runtime to reduce foveation strength at run time.
+ * eye_tracked means the runtime owns gaze selection; it does not imply that
+ * gaze data is exposed to the requesting application.
+ */
+struct u_foveation_request
+{
+	bool enabled;
+	int profile_index;
+	bool dynamic;
+	bool eye_tracked;
+	float vertical_offset_degrees;
+};
+
 struct u_foveation_profile
 {
 	const char *name;
@@ -55,6 +85,19 @@ u_foveation_profile_get(int profile_index);
 
 int
 u_foveation_profile_find(const char *name);
+
+/*!
+ * Convert a coarse standards-facing level into the internal profile family.
+ * NONE disables foveation; LOW/MEDIUM/HIGH map to progressively stronger
+ * profiles while retaining the finer experimental profiles for runtime use.
+ */
+bool
+u_foveation_request_from_level(enum u_foveation_level level,
+                               bool dynamic,
+                               bool eye_tracked,
+                               float vertical_offset_degrees,
+                               struct u_foveation_request *out_request);
+
 
 /*!
  * Return the per-axis normalized rasterization rate for an absolute normalized
