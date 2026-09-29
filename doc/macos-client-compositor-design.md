@@ -431,3 +431,37 @@ scripts/psvr2_delivery_delay.py --window-s 120 --bucket-s 0 \
   current driver already adds today.
 - The `query` output should show `ext_darwinbg=1` on the real service, matching
   the probe's host.
+
+## Phase 1 result (provisional, 2026-09-29)
+
+One session of about 97 s with Game Mode toggled from its menu: off for about
+20 s, then roughly 15 s on / 15 s off. Service pid 19721, `--window-s 30`:
+
+| | Median | p95 | p99 | Max |
+| --- | ---: | ---: | ---: | ---: |
+| IMU delivery delay | 1.39 ms | 1.68 ms | 2.17 ms | 76.7 ms |
+| IMU delay absorbed into the driver's mapping | 1.43 ms | 1.54 ms | 2.75 ms | 23.7 ms |
+| SLAM delivery delay | 4.24 ms | 8.82 ms | 10.5 ms | 61.1 ms |
+
+IMU arrival gaps over 5 ms: 9 in the session; SLAM gaps over 30 ms: 6. Per
+10 s bucket, IMU p95 stays between 1.2 and 1.7 ms throughout, and the isolated
+15–77 ms maxima occur in the first 20 s (Game Mode off) as often as later.
+
+- **The PS VR2 reader is not starved by Game Mode.** Unlike the compositor, its
+  work per wake-up is tiny, and it still gets CPU time promptly at priority 4
+  with a real game's load (the probe's 20 busy threads were far harsher).
+- **Tracking can stay in the service.** No USB reader needs to move into the
+  client or a helper.
+- **The compositor is what fails.** The swapchain-wait abort above is the
+  service's heavy per-frame work missing its deadlines, not light I/O. The
+  design's core (compositing and presenting in the client) is unchanged.
+- **The shared-memory pose ring becomes an improvement, not a prerequisite.**
+  IPC pose queries are also light work, so they can stay for the first hosted
+  version, with the ring moving to a later phase.
+
+To be confirmed against `policy.log`: the Game Mode on/off times should fall in
+buckets with the same p95 as the off periods.
+
+The 120 s window is not useful here. Its per-bucket p95 creeps from 1.2 to
+3.1 ms over the session, the signature of about 20 ppm drift between the
+headset clock and the host clock, which a 30 s window keeps under about 0.6 ms.
