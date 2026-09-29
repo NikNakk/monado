@@ -567,7 +567,13 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_auxiliary_streams, "PSVR2_AUXILIARY_STREAMS", PSVR2_AUXILIARY_STREAMS_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_camera_streams, "PSVR2_CAMERA_STREAMS", false)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_gaze_streams, "PSVR2_GAZE_STREAMS", false)
+/*
+ * Provision the PS VR2 gaze USB interface by default so runtime-owned
+ * eye-tracked features can be requested without a startup environment flag.
+ * This does not enable the eye tracker: psvr2_begin_feature controls
+ * et_data.want_enabled, and the gaze machinery is initialized lazily there.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_gaze_streams, "PSVR2_GAZE_STREAMS", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_stage_space, "PSVR2_STAGE_SPACE", false)
 /*
  * Headset vibration is firmware-gated on stock PS VR2 units. PSVR2Toolkit
@@ -1886,14 +1892,11 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 
 	}
 
-	if (hmd->gaze_streams_enabled) {
-		res = psvr2_start_gaze_tracking(hmd);
-		if (res < 0) {
-			PSVR2_ERROR(hmd, "Could not start gaze tracking");
-			goto out;
-		}
-	}
-
+	/*
+	 * Gaze interface is claimed above when available, but do not start the
+	 * gaze transfer/control thread here. Eye/face feature reference counting
+	 * activates it lazily in psvr2_begin_feature.
+	 */
 	result = true;
 
 out:
@@ -2043,8 +2046,36 @@ psvr2_begin_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 	default: return XRT_ERROR_FEATURE_NOT_SUPPORTED;
 	}
 
-	if (hmd->eye_feature_enabled || hmd->face_feature_enabled) {
-		hmd->et_data.want_enabled = true;
+	if (!hmd->gaze_streams_enabled) {
+		if (type == XRT_DEVICE_FEATURE_EYE_TRACKING) {
+			hmd->eye_feature_enabled = false;
+		} else {
+			hmd->face_feature_enabled = false;
+		}
+		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
+	}
+
+	/*
+	 * Claiming the gaze interface at device startup is only capability
+	 * provisioning. Start the transfer, calibration and control thread on the
+	 * first actual feature user so no eye-tracking data is requested merely
+	 * because a page/application exists.
+	 */
+	hmd->et_data.want_enabled = true;
+	if (!hmd->et_data.data_mutex_created) {
+		os_thread_helper_lock(&hmd->usb_thread);
+		int ret = psvr2_start_gaze_tracking(hmd);
+		os_thread_helper_unlock(&hmd->usb_thread);
+		if (ret < 0) {
+			if (type == XRT_DEVICE_FEATURE_EYE_TRACKING) {
+				hmd->eye_feature_enabled = false;
+			} else {
+				hmd->face_feature_enabled = false;
+			}
+			hmd->et_data.want_enabled =
+			    hmd->eye_feature_enabled || hmd->face_feature_enabled;
+			return XRT_ERROR_FEATURE_NOT_SUPPORTED;
+		}
 	}
 
 	return XRT_SUCCESS;

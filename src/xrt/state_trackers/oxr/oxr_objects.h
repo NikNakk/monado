@@ -1475,6 +1475,23 @@ struct oxr_session
 	//! Extra sleep in wait frame.
 	uint32_t frame_timing_wait_sleep_ms;
 
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	struct
+	{
+		/*
+		 * Runtime-private eye tracking. This is deliberately independent of
+		 * XR_EXT_eye_gaze_interaction and is never exposed as an action/space.
+		 */
+		struct xrt_space *gaze_space;
+		uint32_t active_swapchain_count;
+		bool feature_acquired;
+
+		XrVector2f center[XR_FOVEATION_CENTER_SIZE_META];
+		bool valid;
+		uint64_t revision;
+	} eye_tracked_foveation;
+#endif
+
 	/*!
 	 * To pipe swapchain creation to right code.
 	 */
