@@ -2180,6 +2180,15 @@ xrt_compositor_vk(struct xrt_compositor *xc)
  * @ingroup xrt_iface comp_client
  * @extends xrt_swapchain
  */
+struct xrt_metal_foveation_state
+{
+	bool enabled;
+	void *rasterization_rate_map;
+	uint32_t physical_width;
+	uint32_t physical_height;
+	uint32_t revision;
+};
+
 struct xrt_swapchain_metal
 {
 	//! @public Base
@@ -2187,6 +2196,16 @@ struct xrt_swapchain_metal
 
 	//! Images to be used by the caller.
 	void *images[XRT_MAX_SWAPCHAIN_IMAGES];
+
+	/*!
+	 * Return the native Metal state for a resolved XRT foveation policy.
+	 * view_index is independent of array_layer: separate per-eye swapchains
+	 * commonly use array layer zero for both views.
+	 */
+	xrt_result_t (*get_foveation_metal_state)(struct xrt_swapchain_metal *xscm,
+	                                          uint32_t view_index,
+	                                          uint32_t array_layer,
+	                                          struct xrt_metal_foveation_state *out_state);
 };
 
 /*!
@@ -2210,6 +2229,22 @@ static inline struct xrt_swapchain_metal *
 xrt_swapchain_metal(struct xrt_swapchain *xsc)
 {
 	return (struct xrt_swapchain_metal *)xsc;
+}
+
+/*!
+ * Query Metal-native foveation state when implemented by the concrete
+ * Metal client swapchain.
+ */
+static inline xrt_result_t
+xrt_swapchain_metal_get_foveation_state(struct xrt_swapchain_metal *xscm,
+                                        uint32_t view_index,
+                                        uint32_t array_layer,
+                                        struct xrt_metal_foveation_state *out_state)
+{
+	if (xscm->get_foveation_metal_state == NULL) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	return xscm->get_foveation_metal_state(xscm, view_index, array_layer, out_state);
 }
 
 /*!
