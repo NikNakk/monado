@@ -184,7 +184,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		 * are populated later from runtime-owned gaze instead.
 		 */
 		if (xrt_state.enabled && !xrt_state.eye_tracked) {
-			struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(&sc->sess->sys->system, head);
+			struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(sc->sess->sys, head);
 			if (head == NULL || head->hmd == NULL || head->hmd->view_count == 0) {
 				return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
 				                 "No HMD view FOVs available for fixed foveation");
