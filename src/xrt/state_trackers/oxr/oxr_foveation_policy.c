@@ -4,6 +4,7 @@
 #include "oxr_foveation_policy.h"
 
 #include <stddef.h>
+#include <math.h>
 
 
 static enum oxr_foveation_parse_result
@@ -130,5 +131,50 @@ oxr_foveation_request_to_xrt(const struct u_foveation_request *request,
 	}
 
 	*out_state = state;
+	return true;
+}
+
+
+bool
+oxr_foveation_resolve_fixed_centres(const struct xrt_fov *fovs,
+                                    uint32_t view_count,
+                                    struct xrt_foveation_state *state)
+{
+	if (fovs == NULL || state == NULL || view_count == 0 || view_count > XRT_MAX_VIEWS) {
+		return false;
+	}
+
+	const float offset_rad = state->vertical_offset_degrees * (float)M_PI / 180.0f;
+	for (uint32_t i = 0; i < view_count; ++i) {
+		const float down = tanf(fovs[i].angle_down);
+		const float up = tanf(fovs[i].angle_up);
+		const float tangent_height = up - down;
+		if (!(tangent_height > 0.0f) || !isfinite(tangent_height)) {
+			return false;
+		}
+
+		/*
+		 * NDC y=0 is the midpoint in tangent space. Convert that midpoint to
+		 * an angle, add FB's degree offset, then project back into NDC.
+		 */
+		const float centre_tangent_y = 0.5f * (up + down);
+		const float centre_angle = atanf(centre_tangent_y);
+		const float shifted_tangent_y = tanf(centre_angle + offset_rad);
+		float y_ndc = 2.0f * ((shifted_tangent_y - down) / tangent_height) - 1.0f;
+		if (!isfinite(y_ndc)) {
+			return false;
+		}
+		if (y_ndc < -1.0f) {
+			y_ndc = -1.0f;
+		} else if (y_ndc > 1.0f) {
+			y_ndc = 1.0f;
+		}
+
+		state->views[i].center.x = 0.0f;
+		state->views[i].center.y = y_ndc;
+		state->views[i].center_valid = true;
+	}
+
+	state->view_count = view_count;
 	return true;
 }
