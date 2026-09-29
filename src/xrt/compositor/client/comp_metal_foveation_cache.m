@@ -364,6 +364,8 @@ comp_metal_foveation_cache_get_packed(
 
 	uint32_t zones_x[XRT_MAX_VIEWS] = {0};
 	uint32_t zones_y[XRT_MAX_VIEWS] = {0};
+	float scales_x[XRT_MAX_VIEWS] = {0};
+	float scales_y[XRT_MAX_VIEWS] = {0};
 	for (uint32_t i = 0; i < view_count; ++i) {
 		const struct xrt_metal_foveation_view_layout *layout = &views[i];
 		const struct xrt_foveation_view_state *view = &state.views[layout->view_index];
@@ -381,6 +383,8 @@ comp_metal_foveation_cache_get_packed(
 		zones_y[i] = (uint32_t)fminf(
 		    (float)(M_METAL_FOVEATION_ZONE_COUNT - 1),
 		    floorf(clampf01(target_v) * (float)M_METAL_FOVEATION_ZONE_COUNT));
+		scales_x[i] = (float)layout->width / (float)cache->logical_width;
+		scales_y[i] = (float)layout->height / (float)cache->logical_height;
 	}
 
 	const struct u_foveation_profile profile = profile_from_state(&state);
@@ -391,7 +395,8 @@ comp_metal_foveation_cache_get_packed(
 	}
 	if (!m_metal_foveation_map_build_for_zones(
 	        cache->metal_device, cache->logical_width, cache->logical_height,
-	        zones_x, zones_y, view_count, &profile, &entry->map)) {
+	        zones_x, zones_y, scales_x, scales_y, view_count, &profile,
+	        &entry->map)) {
 		free(entry);
 		os_mutex_unlock(&cache->mutex);
 		return XRT_ERROR_NOT_IMPLEMENTED;
