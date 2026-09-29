@@ -387,7 +387,7 @@ Previous traces showed roughly 2-3 ms scheduler overshoot with a 0.5 ms spin mar
 
 ## Asynchronous Metal presentation / Vulkan-to-Metal shared event
 
-`XRT_MACOS_ASYNC_PRESENT=1` is an opt-in diagnostic that removes the synchronous Metal `waitUntilCompleted` from the compositor thread. Source IOSurfaces are marked in-flight on acquire and are not reused until the Metal blit command buffer completes; with three target images this should normally avoid blocking, while remaining correct if the GPU falls behind. The default is `0`, preserving the prior synchronous path.
+`XRT_MACOS_ASYNC_PRESENT=1` is an opt-in diagnostic that removes the synchronous Metal `waitUntilCompleted` from the compositor thread. Source IOSurfaces are marked in-flight on acquire and are not reused until the Metal blit command buffer completes; with three target images this should normally avoid blocking, while remaining correct if the GPU falls behind. The default was originally `0`, preserving the prior synchronous path. The option has since been removed: presentation is always asynchronous.
 
 When async present is enabled, `XRT_MACOS_METAL_SHARED_EVENT_WAIT=1` (default) also requests `VK_EXT_metal_objects`, creates the render-complete Vulkan timeline semaphore as exportable to Metal, exports its underlying `MTLSharedEvent`, and encodes the timeline-value wait directly into the Metal command buffer. If the extension/event export is unavailable, presentation falls back to the existing CPU Vulkan timeline wait but still avoids the Metal completion wait. `XRT_MACOS_METAL_SHARED_EVENT_WAIT=0` originally forced that intermediate mode. The option has since been removed: the shared-event handoff is always used when available, and the CPU wait is only the automatic fallback.
 
