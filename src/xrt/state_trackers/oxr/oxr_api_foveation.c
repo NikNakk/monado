@@ -311,6 +311,19 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 			                 "Failed to resolve foveation profile to backend-neutral state");
 		}
 
+		if (xrt_state.enabled) {
+			if (sc->swapchain == NULL || sc->swapchain->set_foveation == NULL ||
+			    (sc->swapchain->foveation_capabilities & XRT_FOVEATION_CAPABILITY_FIXED) == 0) {
+				return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+				                 "Graphics swapchain has no foveation rendering transport");
+			}
+			if (xrt_state.eye_tracked &&
+			    (sc->swapchain->foveation_capabilities & XRT_FOVEATION_CAPABILITY_EYE_TRACKED) == 0) {
+				return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+				                 "Graphics swapchain cannot consume eye-tracked foveation centres");
+			}
+		}
+
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 		if (new_eye_tracked && !old_eye_tracked) {
 			XrResult acquire_result = eye_tracking_acquire(&log, sc->sess);
