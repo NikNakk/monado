@@ -118,6 +118,15 @@ device:
   the period). In the game's process that is honoured (probe: priority 97
   throughout).
 
+The in-process compositor itself is already proven on macOS: the
+`-DXRT_FEATURE_SERVICE=OFF` build (direct Metal swapchains) has been run on
+hardware and is built in CI (see `macos-openxr-foveation.md`). What is new is
+combining it with IPC devices in one build. Today `XRT_FEATURE_SERVICE` chooses
+at compile time between an IPC runtime and a fully in-process one (including
+the device prober). The hosted build needs both at run time: devices, sessions
+and focus from the service, with `comp_main` and the direct Metal swapchain path
+linked into the runtime library and created in the client.
+
 ### 2. Hosted presenter (client side)
 
 `comp_window_macos.m` currently creates the `NSWindow` and owns the
