@@ -1304,7 +1304,14 @@ create_swapchains(application &app)
 		swapchain.width = app.view_configuration[i].recommendedImageRectWidth;
 		swapchain.height = app.view_configuration[i].recommendedImageRectHeight;
 
+		XrSwapchainCreateInfoFoveationFB foveation_create_info{
+		    XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
+		foveation_create_info.flags = 0;
+
 		XrSwapchainCreateInfo create_info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+		if (app.standard_foveation) {
+			create_info.next = &foveation_create_info;
+		}
 		create_info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT;
 		create_info.format = (int64_t)app.color_format;
 		create_info.sampleCount = 1;
@@ -1377,11 +1384,15 @@ create_swapchains(application &app)
 	app.frame_instances.reserve(app.renderer.max_instances);
 	app.renderer.initialize(device, app.color_format);
 
-	fprintf(stderr, "psvr2-openxr-test: %u views, %ux%u per eye, Metal format %lld%s%s\n", view_count,
+	fprintf(stderr, "psvr2-openxr-test: %u views, %ux%u per eye, Metal format %lld%s%s%s\n", view_count,
 	        app.swapchains[0].width, app.swapchains[0].height, (long long)app.color_format,
 	        app.submit_depth_layer ? ", XR_KHR_composition_layer_depth enabled" : "",
 	        app.gaze_foveation ? (app.gaze_foveation_fused ? ", fused gaze-driven Metal VRR enabled"
-	                                                     : ", gaze-driven Metal VRR enabled") : "");
+	                                                     : ", gaze-driven Metal VRR enabled") : "",
+	        app.standard_foveation
+	            ? (app.standard_eye_foveation ? ", FB/META runtime-owned eye foveation enabled"
+	                                         : ", FB fixed Metal foveation enabled")
+	            : "");
 }
 
 static XrPosef
