@@ -47,7 +47,11 @@ typedef struct XrFoveationMetalStateMNDX {
 } XrFoveationMetalStateMNDX;
 
 /*!
- * Return the current Metal render state for one swapchain array layer.
+ * Return the current Metal render state for one view and swapchain array layer.
+ *
+ * viewIndex identifies the XrView whose foveation centre is required. It is
+ * independent of arrayLayer: applications commonly use separate per-eye
+ * swapchains where both eyes render to array layer zero.
  *
  * Call after xrUpdateSwapchainFB and before encoding the Metal render pass
  * which targets this swapchain. A revision change means the returned map may
@@ -56,6 +60,7 @@ typedef struct XrFoveationMetalStateMNDX {
  */
 typedef XrResult (XRAPI_PTR *PFN_xrGetFoveationMetalStateMNDX)(
     XrSwapchain swapchain,
+    uint32_t viewIndex,
     uint32_t arrayLayer,
     XrFoveationMetalStateMNDX* state);
 
