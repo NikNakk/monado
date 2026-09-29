@@ -37,6 +37,33 @@ From the probe (PS VR2, 119.88 Hz):
 | Can clients be handed off seamlessly? | Yes: every switch is one refresh period. |
 | Does the handoff depend on the host? | Client-driven visibility makes the switch independent of it. Leaving two hosted layers unhidden costs about a frame, so the hybrid protocol below has the host arm and tidy. |
 
+### Real service under Unreal with Game Mode (2026-09-29)
+
+A background `--role query` log during an Unreal session (service pid 15173,
+game pid 15044, 2 s samples):
+
+- Windowed: service `ext_darwinbg=0 adaptive=1 adaptive_important=1`, game
+  `game_mode=off`.
+- Fullscreen from 23:59:27: game `game_mode=on`, service `ext_darwinbg=1`,
+  **while still `adaptive_important=1`**. The service held an importance boost
+  the whole time and was backgrounded anyway. This is direct confirmation that
+  an XPC importance boost cannot override the external background request.
+- The service returned to `ext_darwinbg=0` within 2 s of the game exiting.
+
+About 21 s into Game Mode, Unreal aborted. `xrWaitSwapchainImage` →
+`ipc_call_swapchain_wait_image` returned `XRT_TIMEOUT` ten times in about 1 s,
+and Unreal's OpenXR plugin treats that as fatal ("Failed to wait on acquired
+swapchain image"). The wait is a round trip to the throttled service. So
+throttling does not only cause judder: any per-frame IPC call can stall long
+enough to kill the app. That is further reason why swapchain waits, frame
+timing and pose queries all have to become local to the client.
+
+**Interim workaround.** Game Mode is opt-out per app through its `Info.plist`.
+Setting `LSSupportsGameMode` (and `GCSupportsGameMode`, which the probe's game
+bundle sets to true) to false in a VR build should keep macOS from engaging
+Game Mode, and so from backgrounding the service. Verify with the same policy
+log: the game should stay at `game_mode=off` in fullscreen.
+
 ## Architecture
 
 Today:
