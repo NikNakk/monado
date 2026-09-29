@@ -203,6 +203,7 @@ enum swap_method
 	SWAP_REPARENT,
 	SWAP_HIDDEN,
 	SWAP_CLIENT,
+	SWAP_HYBRID,
 };
 
 enum present_mode
@@ -246,7 +247,8 @@ struct probe_options
 	enum swap_method swap_method;
 	bool host_background;
 	int tint;        //!< Client only: 1 = client A (red), 2 = client B (blue).
-	int peer_fd;     //!< Client only, SWAP_CLIENT: socket to the other client.
+	int peer_fd;     //!< Client only, SWAP_CLIENT/HYBRID: socket to the other client.
+	int control_fd;  //!< Client only, SWAP_HYBRID: socket to the host.
 	double epoch_s;  //!< Client only, SWAP_CLIENT: swap k is at epoch + (k + 1) * swap_every.
 
 	// Passed from host to client only.
@@ -295,6 +297,7 @@ swap_method_name(enum swap_method method)
 	case SWAP_REPARENT: return "reparent";
 	case SWAP_HIDDEN: return "hidden";
 	case SWAP_CLIENT: return "client";
+	case SWAP_HYBRID: return "hybrid";
 	}
 	return "unknown";
 }
@@ -329,7 +332,9 @@ print_usage(const char *argv0)
 	        "  --swap-every S           seconds between swaps (default 2)\n"
 	        "  --swap-method M          reparent (host removes/adds, as Chromium), hidden (host toggles\n"
 	        "                           hidden) or client (clients show/hide their own layers; the host\n"
-	        "                           never commits after setup) (default reparent)\n"
+	        "                           never commits after setup) or hybrid (host unhides the\n"
+	        "                           incoming host layer and starts the swap, clients swap,\n"
+	        "                           host hides the outgoing host layer after) (default reparent)\n"
 	        "  --host-background 0|1    Darwin-background the host, as Game Mode does (default 0)\n"
 	        "  --cpu-load N             busy threads in each client (default 0)\n"
 	        "\n"
@@ -364,6 +369,7 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 	    .swap_every = 2.0,
 	    .swap_method = SWAP_REPARENT,
 	    .peer_fd = -1,
+	    .control_fd = -1,
 	    .context_fd = -1,
 	};
 
@@ -457,6 +463,8 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 				opts->swap_method = SWAP_HIDDEN;
 			} else if (strcmp(value, "client") == 0) {
 				opts->swap_method = SWAP_CLIENT;
+			} else if (strcmp(value, "hybrid") == 0) {
+				opts->swap_method = SWAP_HYBRID;
 			} else {
 				return false;
 			}
@@ -466,6 +474,8 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 			opts->tint = atoi(value);
 		} else if (strcmp(arg, "--peer-fd") == 0) {
 			opts->peer_fd = atoi(value);
+		} else if (strcmp(arg, "--control-fd") == 0) {
+			opts->control_fd = atoi(value);
 		} else if (strcmp(arg, "--epoch") == 0) {
 			opts->epoch_s = atof(value);
 		} else if (strcmp(arg, "--pid") == 0) {
@@ -1511,6 +1521,92 @@ run_visibility_controller(const struct probe_options *opts,
 	return count;
 }
 
+/*
+ * Hybrid swaps (--swap-method hybrid). The host starts each swap: it unhides
+ * the incoming client's CALayerHost, then sends "show k" on the control
+ * socket. The incoming client shows its content, waits for one of its frames
+ * to be presented and sends k to the outgoing client, which hides its content
+ * and reports "hidden k" back to the host. The host then hides the outgoing
+ * CALayerHost, so only one hosted layer stays unhidden between swaps.
+ */
+static size_t
+run_hybrid_controller(const struct probe_options *opts,
+                      CALayer *container,
+                      ProbeRenderer *renderer,
+                      double end_s,
+                      struct visibility_event *events,
+                      size_t capacity)
+{
+	pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+	bool visible = opts->tint == 1; // A is shown first.
+	size_t count = 0;
+
+	while (count < capacity) {
+		double remaining = end_s - now_seconds();
+		if (remaining <= 0.0) {
+			break;
+		}
+		struct pollfd pfds[2] = {
+		    {.fd = opts->control_fd, .events = POLLIN},
+		    {.fd = opts->peer_fd, .events = POLLIN},
+		};
+		int ready = poll(pfds, 2, (int)(remaining * 1000.0) + 1);
+		if (ready <= 0) {
+			continue;
+		}
+
+		// The host asks this client to show itself.
+		if (pfds[0].revents != 0) {
+			uint32_t k;
+			if (!read_full(opts->control_fd, &k, sizeof(k))) {
+				break;
+			}
+			struct visibility_event ev = {.k = k, .show = true};
+			ev.request_s = ev.scheduled_s = now_seconds();
+			set_layer_visible(container, true);
+			ev.commit_s = now_seconds();
+			visible = true;
+
+			double deadline = ev.commit_s + 1.0;
+			while (now_seconds() < deadline) {
+				double latest = [renderer latestPresented];
+				if (latest > ev.commit_s) {
+					ev.first_present_s = latest;
+					break;
+				}
+				usleep(500);
+			}
+			events[count++] = ev;
+			if (!write_full(opts->peer_fd, &k, sizeof(k))) {
+				fprintf(stderr, "LAYER_HOST_PROBE client: peer gone at swap %u\n", k);
+				break;
+			}
+			continue;
+		}
+
+		// The other client is on screen: hide, then tell the host.
+		if (pfds[1].revents != 0) {
+			uint32_t k;
+			if (!read_full(opts->peer_fd, &k, sizeof(k))) {
+				break;
+			}
+			if (!visible) {
+				continue;
+			}
+			struct visibility_event ev = {.k = k, .show = false};
+			ev.request_s = ev.scheduled_s = now_seconds();
+			set_layer_visible(container, false);
+			ev.commit_s = now_seconds();
+			visible = false;
+			events[count++] = ev;
+			if (!write_full(opts->control_fd, &k, sizeof(k))) {
+				break;
+			}
+		}
+	}
+	return count;
+}
+
 static void
 write_visibility_log(const struct probe_options *opts,
                      const char *role,
@@ -1541,7 +1637,8 @@ run_client(const struct probe_options *opts)
 		return 1;
 	}
 
-	bool client_swaps = opts->swap_method == SWAP_CLIENT && opts->peer_fd >= 0;
+	bool hybrid_swaps = opts->swap_method == SWAP_HYBRID && opts->peer_fd >= 0 && opts->control_fd >= 0;
+	bool client_swaps = (opts->swap_method == SWAP_CLIENT && opts->peer_fd >= 0) || hybrid_swaps;
 	if (client_swaps) {
 		signal(SIGPIPE, SIG_IGN);
 	}
@@ -1582,9 +1679,16 @@ run_client(const struct probe_options *opts)
 	struct visibility_event *events = calloc(event_capacity, sizeof(struct visibility_event));
 	__block size_t event_count = 0;
 	dispatch_semaphore_t controller_done = dispatch_semaphore_create(0);
+	// Stop listening just before the renderer stops.
+	double controller_end_s = now_seconds() + opts->seconds - 0.25;
 	if (client_swaps) {
 		[NSThread detachNewThreadWithBlock:^{
-			event_count = run_visibility_controller(opts, container, renderer, events, event_capacity);
+			if (hybrid_swaps) {
+				event_count = run_hybrid_controller(opts, container, renderer, controller_end_s, events,
+				                                    event_capacity);
+			} else {
+				event_count = run_visibility_controller(opts, container, renderer, events, event_capacity);
+			}
 			dispatch_semaphore_signal(controller_done);
 		}];
 	}
@@ -1597,6 +1701,9 @@ run_client(const struct probe_options *opts)
 		dispatch_semaphore_wait(controller_done, DISPATCH_TIME_FOREVER);
 		write_visibility_log(opts, role, events, event_count);
 		close(opts->peer_fd);
+		if (opts->control_fd >= 0) {
+			close(opts->control_fd);
+		}
 	}
 	free(events);
 
@@ -1757,6 +1864,7 @@ spawn_client(const char *self_path,
              const struct probe_options *opts,
              int tint,
              int peer_fd,
+             int control_fd,
              double epoch_s,
              CGDirectDisplayID display_id,
              CGSize points,
@@ -1779,11 +1887,15 @@ spawn_client(const char *self_path,
 	 */
 	int context_src = fcntl(fds[1], F_DUPFD_CLOEXEC, 10);
 	int peer_src = peer_fd >= 0 ? fcntl(peer_fd, F_DUPFD_CLOEXEC, 10) : -1;
-	if (context_src < 0 || (peer_fd >= 0 && peer_src < 0)) {
+	int control_src = control_fd >= 0 ? fcntl(control_fd, F_DUPFD_CLOEXEC, 10) : -1;
+	if (context_src < 0 || (peer_fd >= 0 && peer_src < 0) || (control_fd >= 0 && control_src < 0)) {
 		close(fds[0]);
 		close(fds[1]);
 		if (context_src >= 0) {
 			close(context_src);
+		}
+		if (peer_src >= 0) {
+			close(peer_src);
 		}
 		return -1;
 	}
@@ -1833,6 +1945,9 @@ spawn_client(const char *self_path,
 		PUSH_ARG("--epoch"), PUSH_ARG(epoch_str);
 		PUSH_ARG("--peer-fd"), PUSH_ARG("4");
 	}
+	if (control_src >= 0) {
+		PUSH_ARG("--control-fd"), PUSH_ARG("5");
+	}
 	argv[argc] = NULL;
 #undef PUSH_ARG
 
@@ -1842,6 +1957,9 @@ spawn_client(const char *self_path,
 	if (peer_src >= 0) {
 		posix_spawn_file_actions_adddup2(&actions, peer_src, 4);
 	}
+	if (control_src >= 0) {
+		posix_spawn_file_actions_adddup2(&actions, control_src, 5);
+	}
 
 	pid_t pid = -1;
 	int ret = posix_spawn(&pid, self_path, &actions, NULL, argv, environ);
@@ -1850,6 +1968,9 @@ spawn_client(const char *self_path,
 	close(context_src);
 	if (peer_src >= 0) {
 		close(peer_src);
+	}
+	if (control_src >= 0) {
+		close(control_src);
 	}
 
 	if (ret != 0) {
@@ -1885,6 +2006,8 @@ struct handoff_swap
 	double commit_s;
 	int visible;         //!< Client shown after this swap: 0 = A, 1 = B.
 	double hide_commit_s; //!< Client swaps: when the outgoing client hid; 0 otherwise.
+	double prepare_s;     //!< Hybrid: host unhid the incoming host layer.
+	double tidy_s;        //!< Hybrid: host hid the outgoing host layer.
 };
 
 struct handoff_log
@@ -1954,7 +2077,7 @@ visible_at(const struct handoff_log *log, double t)
 static bool
 client_hidden_at(const struct handoff_log *log, enum swap_method method, int c, double t)
 {
-	if (method != SWAP_CLIENT) {
+	if (method != SWAP_CLIENT && method != SWAP_HYBRID) {
 		return visible_at(log, t) != c;
 	}
 	bool hidden = c == 1; // A is shown first.
@@ -1979,7 +2102,7 @@ client_hidden_at(const struct handoff_log *log, enum swap_method method, int c, 
  * commit is recorded alongside.
  */
 static void
-load_client_swaps(const struct probe_options *opts, pid_t pids[2], struct handoff_log *log)
+load_client_swaps(const struct probe_options *opts, pid_t pids[2], struct handoff_log *log, bool keep_host_timing)
 {
 	const char *roles[2] = {"client-a", "client-b"};
 	for (int c = 0; c < 2; c++) {
@@ -2004,8 +2127,10 @@ load_client_swaps(const struct probe_options *opts, pid_t pids[2], struct handof
 			}
 			struct handoff_swap *sw = &log->swaps[k];
 			if (strcmp(action, "show") == 0) {
-				sw->scheduled_s = scheduled;
-				sw->request_s = request;
+				if (!keep_host_timing) {
+					sw->scheduled_s = scheduled;
+					sw->request_s = request;
+				}
 				sw->commit_s = commit;
 				sw->visible = c;
 			} else {
@@ -2016,9 +2141,14 @@ load_client_swaps(const struct probe_options *opts, pid_t pids[2], struct handof
 	}
 
 	// Swaps are consecutive from 0; stop at the first one never shown.
+	size_t started = log->count;
 	log->count = 0;
 	while (log->count < log->capacity && log->swaps[log->count].commit_s > 0.0) {
 		log->count++;
+	}
+	if (keep_host_timing && log->count < started) {
+		fprintf(stderr, "LAYER_HOST_PROBE handoff: %zu of %zu started swaps were never shown\n",
+		        started - log->count, started);
 	}
 }
 
@@ -2110,7 +2240,10 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	double *first_new = calloc(log->count + 1, sizeof(double));
 	double *late = calloc(log->count + 1, sizeof(double));
 	double *hide_lags = calloc(log->count + 1, sizeof(double));
-	size_t measured = 0, long_gaps = 0, long_switches = 0, hide_measured = 0;
+	double *prepare_to_show = calloc(log->count + 1, sizeof(double));
+	double *tidy_delays = calloc(log->count + 1, sizeof(double));
+	size_t measured = 0, long_gaps = 0, long_switches = 0, hide_measured = 0, prepare_measured = 0,
+	       tidy_measured = 0;
 	for (size_t k = 0; k < log->count; k++) {
 		const struct handoff_swap *sw = &log->swaps[k];
 		double lo = sw->commit_s - 2.0 * period_s;
@@ -2180,6 +2313,12 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 		if (hide_lag_ms >= 0.0) {
 			hide_lags[hide_measured++] = hide_lag_ms;
 		}
+		if (sw->prepare_s > 0.0) {
+			prepare_to_show[prepare_measured++] = (sw->commit_s - sw->prepare_s) * 1e3;
+		}
+		if (sw->tidy_s > 0.0 && sw->hide_commit_s > 0.0) {
+			tidy_delays[tidy_measured++] = (sw->tidy_s - sw->hide_commit_s) * 1e3;
+		}
 		measured++;
 		if (max_gap > 1.5 * period_s) {
 			long_gaps++;
@@ -2199,6 +2338,8 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	qsort(first_new, measured, sizeof(double), compare_doubles);
 	qsort(late, measured, sizeof(double), compare_doubles);
 	qsort(hide_lags, hide_measured, sizeof(double), compare_doubles);
+	qsort(prepare_to_show, prepare_measured, sizeof(double), compare_doubles);
+	qsort(tidy_delays, tidy_measured, sizeof(double), compare_doubles);
 
 	/*
 	 * Each client's present latency before the first swap and after it, to
@@ -2240,6 +2381,8 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	        "  swap commit -> first new-client present ms: median=%.3f p95=%.3f max=%.3f\n"
 	        "  swap timer lateness ms: median=%.3f p95=%.3f max=%.3f\n"
 	        "  outgoing hide commit after incoming show commit ms (client swaps): median=%.3f p95=%.3f max=%.3f\n"
+	        "  host unhide -> incoming show commit ms (hybrid): median=%.3f p95=%.3f max=%.3f\n"
+	        "  outgoing hide -> host hides its host layer ms (hybrid): median=%.3f p95=%.3f max=%.3f (n=%zu)\n"
 	        "  steady state (away from swaps) intervals >1.5x period=%.2f%%\n"
 	        "  client-a presented - submit ms: %s\n"
 	        "  client-b presented - submit ms: %s\n"
@@ -2254,7 +2397,11 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	        percentile(first_new, measured, 95), measured > 0 ? first_new[measured - 1] : 0.0,
 	        percentile(late, measured, 50), percentile(late, measured, 95), measured > 0 ? late[measured - 1] : 0.0,
 	        percentile(hide_lags, hide_measured, 50), percentile(hide_lags, hide_measured, 95),
-	        hide_measured > 0 ? hide_lags[hide_measured - 1] : 0.0,
+	        hide_measured > 0 ? hide_lags[hide_measured - 1] : 0.0, percentile(prepare_to_show, prepare_measured, 50),
+	        percentile(prepare_to_show, prepare_measured, 95),
+	        prepare_measured > 0 ? prepare_to_show[prepare_measured - 1] : 0.0,
+	        percentile(tidy_delays, tidy_measured, 50), percentile(tidy_delays, tidy_measured, 95),
+	        tidy_measured > 0 ? tidy_delays[tidy_measured - 1] : 0.0, tidy_measured,
 	        steady_intervals > 0 ? 100.0 * (double)steady_long / (double)steady_intervals : 0.0, latency[0],
 	        latency[1], hidden_presented, hidden_total, 100.0 * hidden_share,
 	        hidden_share > 0.05 ? "\n  WARNING: hidden layers report presentedTime, so the gap figures may count "
@@ -2265,6 +2412,8 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	free(switch_gaps);
 	free(old_after);
 	free(hide_lags);
+	free(prepare_to_show);
+	free(tidy_delays);
 	free(first_new);
 	free(late);
 	free(merged);
@@ -2412,6 +2561,7 @@ run_host(const struct probe_options *opts, const char *self_path)
 	pid_t handoff_pids[2] = {-1, -1};
 	CALayerHost *handoff_hosts[2] = {nil, nil};
 	double handoff_epoch_s = 0.0;
+	int handoff_control[2] = {-1, -1};
 
 	[CATransaction begin];
 	[CATransaction setDisableActions:YES];
@@ -2427,7 +2577,7 @@ run_host(const struct probe_options *opts, const char *self_path)
 		break;
 	case PROBE_MODE_HOSTED: {
 		int read_fd = -1;
-		child = spawn_client(self_path, opts, 0, -1, 0.0, display_id, points, scale, &read_fd);
+		child = spawn_client(self_path, opts, 0, -1, -1, 0.0, display_id, points, scale, &read_fd);
 		CAContextID context_id = 0;
 		if (child < 0 || !read_context_id(read_fd, &context_id)) {
 			fprintf(stderr, "LAYER_HOST_PROBE: client did not report a context id\n");
@@ -2443,9 +2593,9 @@ run_host(const struct probe_options *opts, const char *self_path)
 		break;
 	}
 	case PROBE_MODE_HANDOFF: {
-		// Client swaps: the clients talk directly over a socket pair.
+		// Client and hybrid swaps: the clients talk directly over a socket pair.
 		int peer[2] = {-1, -1};
-		if (opts->swap_method == SWAP_CLIENT) {
+		if (opts->swap_method == SWAP_CLIENT || opts->swap_method == SWAP_HYBRID) {
 			if (socketpair(AF_UNIX, SOCK_STREAM, 0, peer) != 0) {
 				fprintf(stderr, "LAYER_HOST_PROBE: socketpair failed: %s\n", strerror(errno));
 				[CATransaction commit];
@@ -2455,10 +2605,24 @@ run_host(const struct probe_options *opts, const char *self_path)
 			fcntl(peer[1], F_SETFD, FD_CLOEXEC);
 			handoff_epoch_s = now_seconds() + 1.5;
 		}
+		// Hybrid swaps: the host also has a control socket to each client.
+		int control[2][2] = {{-1, -1}, {-1, -1}};
+		if (opts->swap_method == SWAP_HYBRID) {
+			for (int c = 0; c < 2; c++) {
+				if (socketpair(AF_UNIX, SOCK_STREAM, 0, control[c]) != 0) {
+					fprintf(stderr, "LAYER_HOST_PROBE: socketpair failed: %s\n", strerror(errno));
+					[CATransaction commit];
+					return 1;
+				}
+				fcntl(control[c][0], F_SETFD, FD_CLOEXEC);
+				fcntl(control[c][1], F_SETFD, FD_CLOEXEC);
+				handoff_control[c] = control[c][0];
+			}
+		}
 		for (int c = 0; c < 2; c++) {
 			int read_fd = -1;
-			handoff_pids[c] = spawn_client(self_path, opts, c + 1, peer[c], handoff_epoch_s, display_id, points,
-			                               scale, &read_fd);
+			handoff_pids[c] = spawn_client(self_path, opts, c + 1, peer[c], control[c][1], handoff_epoch_s,
+			                               display_id, points, scale, &read_fd);
 			CAContextID context_id = 0;
 			if (handoff_pids[c] < 0 || !read_context_id(read_fd, &context_id)) {
 				fprintf(stderr, "LAYER_HOST_PROBE: client %c did not report a context id\n", 'a' + c);
@@ -2479,11 +2643,16 @@ run_host(const struct probe_options *opts, const char *self_path)
 			close(peer[0]);
 			close(peer[1]);
 		}
+		for (int c = 0; c < 2; c++) {
+			if (control[c][1] >= 0) {
+				close(control[c][1]);
+			}
+		}
 		// Client A is shown first. With the hidden method both stay attached;
 		// with client swaps both stay attached and visible, B stacked above A,
 		// and each client hides its own content.
 		[root addSublayer:handoff_hosts[0]];
-		if (opts->swap_method == SWAP_HIDDEN) {
+		if (opts->swap_method == SWAP_HIDDEN || opts->swap_method == SWAP_HYBRID) {
 			handoff_hosts[1].hidden = YES;
 			[root addSublayer:handoff_hosts[1]];
 		} else if (opts->swap_method == SWAP_CLIENT) {
@@ -2531,7 +2700,43 @@ run_host(const struct probe_options *opts, const char *self_path)
 		CALayerHost *host_a = handoff_hosts[0];
 		CALayerHost *host_b = handoff_hosts[1];
 		double first_s = log->attach_s + opts->swap_every;
+
+		/*
+		 * Hybrid swaps: on "hidden k" from the outgoing client, hide its host
+		 * layer, unless a newer swap has already unhidden it again. All of
+		 * this runs on the main queue, like the timer.
+		 */
+		int *control_a_b = calloc(2, sizeof(int));
+		long *last_prepared = calloc(2, sizeof(long));
+		control_a_b[0] = handoff_control[0];
+		control_a_b[1] = handoff_control[1];
+		last_prepared[0] = -1; // A was shown at attach.
+		last_prepared[1] = -2;
+		if (opts->swap_method == SWAP_HYBRID) {
+			signal(SIGPIPE, SIG_IGN);
+			for (int c = 0; c < 2; c++) {
+				int fd = handoff_control[c];
+				CALayerHost *own = c ? host_b : host_a;
+				dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+					uint32_t k;
+					while (read_full(fd, &k, sizeof(k))) {
+						dispatch_async(dispatch_get_main_queue(), ^{
+							if (k >= log->capacity || last_prepared[c] > (long)k) {
+								return;
+							}
+							[CATransaction begin];
+							[CATransaction setDisableActions:YES];
+							own.hidden = YES;
+							[CATransaction commit];
+							[CATransaction flush];
+							log->swaps[k].tidy_s = now_seconds();
+						});
+					}
+				});
+			}
+		}
 		// With client swaps the host never commits again; the clients swap.
+		// With hybrid swaps the timer starts each swap.
 		dispatch_source_t timer = opts->swap_method == SWAP_CLIENT
 		                              ? nil
 		                              : dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
@@ -2550,6 +2755,23 @@ run_host(const struct probe_options *opts, const char *self_path)
 
 				CALayerHost *show = sw->visible ? host_b : host_a;
 				CALayerHost *hide = sw->visible ? host_a : host_b;
+
+				if (opts->swap_method == SWAP_HYBRID) {
+					// Unhide the incoming host layer (its content is still
+					// hidden), then let the clients swap.
+					[CATransaction begin];
+					[CATransaction setDisableActions:YES];
+					show.hidden = NO;
+					[CATransaction commit];
+					[CATransaction flush];
+					sw->prepare_s = now_seconds();
+					last_prepared[sw->visible] = (long)log->count;
+					uint32_t k = (uint32_t)log->count;
+					log->count++;
+					write_full(control_a_b[sw->visible], &k, sizeof(k));
+					return;
+				}
+
 				[CATransaction begin];
 				[CATransaction setDisableActions:YES];
 				if (opts->swap_method == SWAP_HIDDEN) {
@@ -2591,8 +2813,9 @@ run_host(const struct probe_options *opts, const char *self_path)
 				pid_t pids[2] = {pid_a, pid_b};
 				if (timer != nil) {
 					dispatch_source_cancel(timer);
-				} else {
-					load_client_swaps(opts, pids, log);
+				}
+				if (opts->swap_method == SWAP_CLIENT || opts->swap_method == SWAP_HYBRID) {
+					load_client_swaps(opts, pids, log, opts->swap_method == SWAP_HYBRID);
 				}
 				analyze_handoff(opts, pids, log, period_s);
 				stop_app();

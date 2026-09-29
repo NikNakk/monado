@@ -563,6 +563,40 @@ gets to run. Only the one visible client's layer is left in the tree in the
 steady state, and a late service commit only delays a latency recovery, never
 the swap itself.
 
+### Hybrid swaps
+
+`--swap-method hybrid` tests that design. The service must start each swap,
+since focus decisions are its job anyway. The ordering is what keeps it safe:
+
+1. **Host prepares.** On its swap timer it unhides the incoming client's
+   `CALayerHost` (nothing visible changes, because that client's content is
+   still hidden), then sends "show *k*" on a host↔client control socket.
+2. **Clients swap.** The incoming client shows its content, waits for one of
+   its frames to be presented and tells the outgoing client directly. The
+   outgoing client hides its content and reports "hidden *k*" to the host.
+3. **Host tidies.** On "hidden *k*" it hides the outgoing client's
+   `CALayerHost`, unless a newer swap has already unhidden it again. Between
+   swaps only one hosted layer is unhidden.
+
+The client only shows after the host's unhide has been committed, so a
+throttled host can delay a swap but never leave the headset black. A late tidy
+only prolongs the period with two unhidden host layers.
+
+Extra summary lines: host unhide → incoming show commit (message plus client
+reaction) and outgoing hide → host tidy.
+
+```sh
+$P/macos-layer-host-probe --mode handoff --seconds 30 --swap-method hybrid
+$P/macos-layer-host-probe --mode handoff --seconds 30 --swap-method hybrid --host-background 1 \
+    --cpu-load "$(sysctl -n hw.ncpu)"
+```
+
+If composition with two unhidden host layers is what costs the extra frame,
+client A should be at about 16 ms before the first swap, and latency after
+swaps should return to about 16 ms once each tidy lands. Under throttling and
+load, swaps will start late (the host's timer is starved, as in reality), but
+every switch should still be one period.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
