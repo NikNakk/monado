@@ -19,10 +19,13 @@ extern "C" {
 #endif
 
 #define XR_MNDX_foveation_metal 1
-#define XR_MNDX_foveation_metal_SPEC_VERSION 1
+#define XR_MNDX_foveation_metal_SPEC_VERSION 2
 #define XR_MNDX_FOVEATION_METAL_EXTENSION_NAME "XR_MNDX_foveation_metal"
+#define XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT 16
+#define XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT 129
 
 XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_STATE_MNDX, 0x7fff5057);
+XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_PACKED_STATE_MNDX, 0x7fff5058);
 
 /*!
  * Renderer-facing state for the currently applied XR_FB_foveation profile.
@@ -49,11 +52,46 @@ typedef struct XrFoveationMetalStateMNDX {
 } XrFoveationMetalStateMNDX;
 
 /*!
+ * One OpenXR view packed into a rectangle of the Metal render target.
+ */
+typedef struct XrFoveationMetalViewMNDX {
+    uint32_t    viewIndex;
+    XrRect2Di  imageRect;
+} XrFoveationMetalViewMNDX;
+
+/*!
+ * Optional input/output structure chained to XrFoveationMetalStateMNDX::next.
+ *
+ * On input, viewCount/views describe all OpenXR views rendered into one
+ * swapchain array layer. On output, the sample-rate arrays are the exact
+ * descriptor recipe used to construct rasterizationRateMap, and x/y are the
+ * matching logical-to-physical mapping. This supports multi-process clients
+ * which cannot share a process-local MTLRasterizationRateMap object.
+ */
+typedef struct XrFoveationMetalPackedStateMNDX {
+    XrStructureType                    type;
+    void* XR_MAY_ALIAS                 next;
+    uint32_t                           viewCount;
+    const XrFoveationMetalViewMNDX*    views;
+    uint32_t                           horizontalSampleCount;
+    uint32_t                           verticalSampleCount;
+    float                              horizontalSampleRates[XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT];
+    float                              verticalSampleRates[XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT];
+    uint32_t                           boundaryCount;
+    float                              x[XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT];
+    float                              y[XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT];
+} XrFoveationMetalPackedStateMNDX;
+
+/*!
  * Return the current Metal render state for one view and swapchain array layer.
  *
  * viewIndex identifies the XrView whose foveation centre is required. It is
  * independent of arrayLayer: applications commonly use separate per-eye
  * swapchains where both eyes render to array layer zero.
+ *
+ * If XrFoveationMetalPackedStateMNDX is chained to state->next, viewIndex is
+ * ignored and the runtime returns one map covering the supplied packed view
+ * rectangles. That map becomes the active map for compositor reconstruction.
  *
  * Call after xrUpdateSwapchainFB and before encoding the Metal render pass
  * which targets this swapchain. A revision change means the returned map may

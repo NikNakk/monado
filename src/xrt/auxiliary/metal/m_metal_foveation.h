@@ -33,6 +33,9 @@ struct m_metal_foveation_map
 	void *rate_map;
 	size_t physical_width;
 	size_t physical_height;
+	uint32_t sample_count;
+	float horizontal_rates[M_METAL_FOVEATION_ZONE_COUNT];
+	float vertical_rates[M_METAL_FOVEATION_ZONE_COUNT];
 	float x[M_METAL_FOVEATION_BOUNDARY_COUNT];
 	float y[M_METAL_FOVEATION_BOUNDARY_COUNT];
 };
@@ -45,6 +48,21 @@ m_metal_foveation_map_build(void *metal_device,
                             int zone_y,
                             const struct u_foveation_profile *profile,
                             struct m_metal_foveation_map *out_map);
+
+/*!
+ * Build one Metal map whose full target contains multiple foveal centres.
+ * This is needed by packed-stereo clients such as Chromium, where two OpenXR
+ * views occupy sub-rectangles of one 2D swapchain image.
+ */
+bool
+m_metal_foveation_map_build_for_zones(void *metal_device,
+                                      uint32_t screen_width,
+                                      uint32_t screen_height,
+                                      const uint32_t *zone_x,
+                                      const uint32_t *zone_y,
+                                      uint32_t center_count,
+                                      const struct u_foveation_profile *profile,
+                                      struct m_metal_foveation_map *out_map);
 
 void
 m_metal_foveation_map_release(struct m_metal_foveation_map *map);

@@ -102,6 +102,21 @@ It is valid for future encoding until a later successful
 `xrUpdateSwapchainFB` changes the revision, or until the swapchain is
 destroyed. Applications should query again after updating foveation state.
 
+Version 2 also supports packed multi-view render targets. A client chains
+`XrFoveationMetalPackedStateMNDX` to the query and supplies the OpenXR view
+index plus `imageRect` for each view sharing an array layer. The runtime then
+builds one Metal rate map over the whole packed target. The chained structure
+returns the exact horizontal/vertical Metal descriptor samples and dense
+logical-to-physical mapping. This is specifically useful to multi-process
+clients such as Chromium: the XR process can publish the small numeric recipe
+while the GPU process reconstructs an equivalent `MTLRasterizationRateMap`
+on the same Metal device.
+
+The packed map selected by the application is retained as the active map for
+that array layer. At `xrEndFrame`, Monado uses that same mapping for every
+projection view referencing the packed swapchain, so compositor reconstruction
+matches the application's render pass.
+
 The cache only changes revision when the actual rasterization pattern changes.
 Eye movement within the same quantized Metal rate-map cell updates META's
 reported NDC centre but reuses the existing immutable Metal map.
