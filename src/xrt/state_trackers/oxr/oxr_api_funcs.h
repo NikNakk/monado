@@ -431,6 +431,13 @@ XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetSwapchainStateFB(XrSwapchain swapchain, XrSwapchainStateBaseHeaderFB *state);
 #endif
 
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+//! OpenXR API function @ep{xrGetFoveationEyeTrackedStateMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetFoveationEyeTrackedStateMETA(XrSession session,
+                                      XrFoveationEyeTrackedStateMETA *foveationState);
+#endif
+
 #ifdef OXR_HAVE_MNDX_foveation_metal
 //! Experimental Metal companion for XR_FB_foveation.
 XRAPI_ATTR XrResult XRAPI_CALL
