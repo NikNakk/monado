@@ -62,18 +62,23 @@ macos_displaylink_init_mode(void)
 			return;
 		}
 		fprintf(stderr,
-		        "WARN: XRT_MACOS_CAMETALDISPLAYLINK_MODE='%s' is invalid; expected legacy, driven, or hybrid; using driven\n",
+		        "WARN: XRT_MACOS_CAMETALDISPLAYLINK_MODE='%s' is invalid; expected legacy, driven, or hybrid; using legacy\n",
 		        mode);
-		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_DRIVEN;
+		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
 		return;
 	}
 
-	/* Backward-compatible escape hatch used by earlier revisions of this branch. */
+	/*
+	 * Legacy CVDisplayLink/timed presentation is the default: on hardware,
+	 * driven and hybrid CAMetalDisplayLink modes both showed display-link
+	 * thread delays and more late frames than legacy. The older
+	 * XRT_MACOS_CAMETALDISPLAYLINK_DRIVE=1 alias still selects driven mode.
+	 */
 	const char *drive = getenv("XRT_MACOS_CAMETALDISPLAYLINK_DRIVE");
-	if (drive != NULL && strcmp(drive, "0") == 0) {
-		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
-	} else {
+	if (drive != NULL && strcmp(drive, "1") == 0) {
 		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_DRIVEN;
+	} else {
+		g_mode = COMP_MULTI_MACOS_DISPLAYLINK_LEGACY;
 	}
 }
 

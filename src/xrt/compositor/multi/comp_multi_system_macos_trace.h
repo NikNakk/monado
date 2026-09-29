@@ -36,9 +36,9 @@
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_client_frame_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_min_hold, "XRT_MACOS_CLIENT_FRAME_MIN_HOLD", 0)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_time_constraint, "XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT", false)
-DEBUG_GET_ONCE_NUM_OPTION(macos_compositor_computation_pct, "XRT_MACOS_COMPOSITOR_COMPUTATION_PCT", 36)
-DEBUG_GET_ONCE_NUM_OPTION(macos_compositor_constraint_pct, "XRT_MACOS_COMPOSITOR_CONSTRAINT_PCT", 72)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_time_constraint, "XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT", true)
+DEBUG_GET_ONCE_NUM_OPTION(macos_compositor_computation_pct, "XRT_MACOS_COMPOSITOR_COMPUTATION_PCT", 35)
+DEBUG_GET_ONCE_NUM_OPTION(macos_compositor_constraint_pct, "XRT_MACOS_COMPOSITOR_CONSTRAINT_PCT", 70)
 
 static FILE *g_macos_client_frame_trace = NULL;
 static uint64_t g_macos_client_frame_trace_rows = 0;
