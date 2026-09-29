@@ -6,6 +6,7 @@
  */
 
 #include "catch_amalgamated.hpp"
+#include "util/u_misc.h"
 
 #include <cstring>
 
@@ -115,10 +116,9 @@ TEST_CASE("KHR generic controller fallback selection")
 
 	SECTION("generic-capable compatibility mapping prefers generic over simple")
 	{
-		struct xrt_binding_profile fallbacks[] = {
-		    {.name = XRT_DEVICE_SIMPLE_CONTROLLER},
-		    {.name = XRT_DEVICE_INDEX_CONTROLLER},
-		};
+		struct xrt_binding_profile fallbacks[2] = {};
+		fallbacks[0].name = XRT_DEVICE_SIMPLE_CONTROLLER;
+		fallbacks[1].name = XRT_DEVICE_INDEX_CONTROLLER;
 
 		struct xrt_device xdev = {};
 		xdev.name = XRT_DEVICE_PSSENSE;
@@ -135,10 +135,9 @@ TEST_CASE("KHR generic controller fallback selection")
 
 	SECTION("explicit Index compatibility still wins over generic")
 	{
-		struct xrt_binding_profile fallbacks[] = {
-		    {.name = XRT_DEVICE_SIMPLE_CONTROLLER},
-		    {.name = XRT_DEVICE_INDEX_CONTROLLER},
-		};
+		struct xrt_binding_profile fallbacks[2] = {};
+		fallbacks[0].name = XRT_DEVICE_SIMPLE_CONTROLLER;
+		fallbacks[1].name = XRT_DEVICE_INDEX_CONTROLLER;
 
 		struct xrt_device xdev = {};
 		xdev.name = XRT_DEVICE_PSSENSE;
@@ -155,9 +154,8 @@ TEST_CASE("KHR generic controller fallback selection")
 
 	SECTION("unrelated devices retain simple fallback")
 	{
-		struct xrt_binding_profile fallbacks[] = {
-		    {.name = XRT_DEVICE_SIMPLE_CONTROLLER},
-		};
+		struct xrt_binding_profile fallbacks[1] = {};
+		fallbacks[0].name = XRT_DEVICE_SIMPLE_CONTROLLER;
 
 		struct xrt_device xdev = {};
 		xdev.name = XRT_DEVICE_PSSENSE;
