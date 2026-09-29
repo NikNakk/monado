@@ -238,7 +238,6 @@ keeping default behaviour:
 | `U_PACING_APP_FORCED_FRAME_DIVISOR` | upstream single-file `u_pacing_app.c` restored |
 | `WAIT_HYBRID_US` | spin or Mach wait only |
 | `PROCESS_ACTIVITY` | files removed |
-| `METAL_XPC_EXTERNAL_BROKER` | direct in-service registry only |
 
 Then two separately revertable **default changes**:
 
@@ -249,9 +248,28 @@ Then two separately revertable **default changes**:
    time constraint on at 35/70. It also adds a `tests_macos_displaylink_default`
    test.
 
-Still to do after the flip (not yet done): remove `PRESENT_PRELATCH_US`,
-`PRESENT_MIN_LEAD_US`, `CAMETALDISPLAYLINK_LATENCY`/`_THREAD_PRIORITY`, the
-driven/hybrid backend and the `DRIVE` alias.
+Third batch:
+
+- **Driven and hybrid backends removed.** This takes out
+  `CAMETALDISPLAYLINK_MODE`, the `DRIVE` alias, `_LATENCY`, `_THREAD_PRIORITY`,
+  `_DRIVE_TRACE_PATH`, the child-layer probe (`_PROBE`, `_TRACE_PATH`), four
+  force-included selector-rewriting headers, the multi-compositor callback
+  bridge and its test (~2,050 lines). The force-included multi header is renamed
+  `comp_multi_system_macos_compositor_rt.h` and keeps `compositor_rt.csv` and
+  the time-constraint wrapper.
+- **The synchronous Metal present path is pruned.**
+- **`comp_window_macos_latest.m` is folded into `comp_window_macos.m`**
+  (part-2 step 1). Only `comp_window_macos_trace_buffer.h` is still
+  force-included.
+- **Correction:** the `METAL_XPC_EXTERNAL_BROKER` removal was reverted. It is
+  (b), not (c): `scripts/macos/run-wine-openvr-native-trace.zsh` runs
+  `monado-service` directly in the Wine/DXMT bootstrap namespace, where it
+  cannot host the launchd Mach service, and needs the broker for Metal handle
+  transport.
+
+Still not done: `PRESENT_PRELATCH_US` and `PRESENT_MIN_LEAD_US` (inert under the
+default minimum present duration, but kept because the Wine trace script still
+sets `PRELATCH_US`).
 
 The async commit is deliberately minimal. The synchronous branches inside
 `macos_execute_present_job()` are now unreachable but still present, and
