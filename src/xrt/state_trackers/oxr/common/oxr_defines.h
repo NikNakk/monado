@@ -34,6 +34,7 @@ extern "C" {
 #define OXR_XR_DEBUG_PASSTHROUGH                      (*(uint64_t *)"oxrpass\0")
 #define OXR_XR_DEBUG_PASSTHROUGH_LAYER                (*(uint64_t *)"oxrptla\0")
 #define OXR_XR_DEBUG_FTRACKER                         (*(uint64_t *)"oxrftra\0")
+#define OXR_XR_DEBUG_FOVEATION_PROFILE                (*(uint64_t *)"oxrfove\0")
 // body tracker (FB)
 #define OXR_XR_DEBUG_BTRACKER                         (*(uint64_t *)"oxrbtra\0")
 // body tracker (BD/PICO)
