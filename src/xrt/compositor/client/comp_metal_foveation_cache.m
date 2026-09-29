@@ -89,7 +89,15 @@ foveation_maps_equivalent(const struct xrt_foveation_state *a,
 static void
 release_cached_entries(struct comp_metal_foveation_cache *cache)
 {
-	release_cached_entries(cache);
+	struct comp_metal_foveation_cache_entry *entry =
+	    (struct comp_metal_foveation_cache_entry *)cache->entries;
+	while (entry != NULL) {
+		struct comp_metal_foveation_cache_entry *next = entry->next;
+		m_metal_foveation_map_release(&entry->map);
+		free(entry);
+		entry = next;
+	}
+	cache->entries = NULL;
 }
 
 bool
