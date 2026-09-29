@@ -2149,6 +2149,15 @@ render_views(application &app, XrTime predicted_display_time)
 	memcpy([app.renderer.instance_buffer contents], app.frame_instances.data(),
 	       app.frame_instances.size() * sizeof(instance_data));
 
+	if (app.standard_eye_foveation) {
+		/*
+		 * Refresh runtime-owned gaze and fetch the current Metal maps before
+		 * encoding this frame. No XR_EXT_eye_gaze_interaction action exists in
+		 * this path.
+		 */
+		update_standard_foveation(app, false);
+	}
+
 	std::vector<uint32_t> image_indices(app.swapchains.size(), 0);
 	std::vector<uint32_t> depth_image_indices(app.swapchains.size(), 0);
 	for (size_t i = 0; i < app.swapchains.size(); ++i) {
@@ -2233,7 +2242,12 @@ render_views(application &app, XrTime predicted_display_time)
 				fatal("OpenXR returned a nil Metal depth swapchain texture");
 			}
 		}
-		if (app.gaze_foveation) {
+		if (app.standard_foveation) {
+			if (swapchain.standard_foveation_rate_map == nil) {
+				fatal("standard foveation render requested without a runtime Metal rate map");
+			}
+			render_pass.rasterizationRateMap = swapchain.standard_foveation_rate_map;
+		} else if (app.gaze_foveation) {
 			render_pass.rasterizationRateMap = swapchain.foveation_rate_map;
 		}
 		render_pass.depthAttachment.texture = depth_texture;
@@ -2266,9 +2280,14 @@ render_views(application &app, XrTime predicted_display_time)
 			encode_gaze_foveation_resolve(app, swapchain, resolve_command_buffer, color_texture);
 		}
 	}
-	if (app.gaze_foveation_fused) {
+	if (app.standard_foveation || app.gaze_foveation_fused) {
+		const char *timing_label = app.standard_eye_foveation
+		                               ? "fb-meta-eye-foveated"
+		                               : app.standard_foveation
+		                                     ? "fb-foveated"
+		                                     : "foveated-fused";
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-			record_gpu_timing(g_gpu_timing_foveated_fused, "foveated-fused", completed);
+			record_gpu_timing(g_gpu_timing_foveated_fused, timing_label, completed);
 		}];
 		[command_buffer commit];
 	} else if (app.gaze_foveation) {
