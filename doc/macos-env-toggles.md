@@ -57,7 +57,7 @@ and dates, and checked against this audit. A value that was merely present in a
 good run is treated as configuration evidence, not proof that it caused the
 result.
 
-**Final counts: (a) 42, (b) 20, (c) 28, (d) 1** (91 names).
+**Final counts: (a) 43, (b) 20, (c) 28, (d) 0** (91 names).
 
 (c), removable now **without** changing default behaviour (8 already removed on
 `cleanup/toggles`; 16 more):
@@ -107,26 +107,37 @@ Separately, depth reprojection **on by default** showed silhouettes, trails and
 holes. Whether the default should be rotation-only is a new question outside
 this toggle audit.
 
-The only (d) item left is `APP_RELEASE_SHARED_EVENT_WAIT_THREAD`, the app-side
-release handoff (see finding 3). Without it, each `xrReleaseSwapchainImage`
-in a service build commits an empty Metal command buffer and CPU-blocks in
-`waitUntilCompleted` (`metal_service_swapchain_barrier_image`). The chats
-show the wait thread working, but not whether that was a service build with the
-variable unset. Check the OpenXR app's log in a service build with the variable
-**unset**. If `Metal app-release Stage 4 ready` appears, finding 3 is wrong. If
-it does not, the intended default is compiled out; setting it to `1` explicitly
-is the workaround.
+`APP_RELEASE_SHARED_EVENT_WAIT_THREAD` is resolved as (a): **turn it on by default
+in service builds**, as the code comment always intended.
 
-Headset check, 2026-09-29 (UE 5.8 native Metal, service PIDs 65220/65383): the
-service's `client_gpu.csv` contains no `semaphore_pushed`, `semaphore_wait_start`
-or `semaphore_ready` rows in either run, only `layer_begin_*`. So neither run
-used the semaphore release path. The unset run confirms finding 3: with the
-variable unset, a service build uses the blocking release. The "set" run did
-not test the toggle, because the variable was put in the LaunchAgent (service)
-environment, while it is read in the app process. The app-side
-`metal_release_barrier.csv` is empty in both runs because service builds replace
-the client swapchain with `comp_metal_service_swapchain.m`, whose barrier is not
-traced.
+- **Finding 3 is confirmed on hardware.** With the variable unset (service PIDs
+  65220 and 65383), the service's `client_gpu.csv` has no semaphore events, so
+  the app took the blocking release path.
+- **Setting it in the app's environment works** (service 65753, UE 5.8 native
+  Metal, reduced quality). All 1,708 frames arrived with `semaphore_pushed`,
+  `semaphore_wait_start` and `semaphore_ready` events, and the service logged
+  `Metal IPC Stage 4 semaphore active`.
+
+| Service run | Release path | Presents >1.5× period | App frames held 1 refresh | App `draw_actual` median / p95 | Service wait for app GPU |
+| --- | --- | ---: | ---: | --- | --- |
+| 65220 | blocking | 2.15% | 97.9% | 7.25 / 7.99 ms | n/a |
+| 65383 | blocking | 0.59% | 98.6% | 7.25 / 8.00 ms | n/a |
+| 65753 | shared event | 0.98% | 98.6% | **2.07 / 2.57 ms** | 4.59 / 5.74 ms |
+
+The app-side CPU cost per frame drops by ~5 ms. The GPU completion wait moves
+into Monado's wait thread (median 4.6 ms), and cadence and latency are unchanged
+within run-to-run noise: all runs ~120 Hz presentation, ~118 fps app, and
+presented−desired 16.68 ms. The benefit should appear when the app is CPU-bound;
+this reduced-quality scene was not. The fix is to include `xrt/xrt_config_build.h`
+in `comp_metal_release_wait_thread.m`. That is a default change and belongs in
+its own commit.
+
+`XRT_MACOS_XPC_IMPORTANCE` was in fact reaching the app in all four sessions
+(`XR_XPC_IMPORTANCE acquired` for app PIDs 65103, 65263, 65464 and 65637). The
+compositor thread stayed at priority 97 with no policy transitions in these runs.
+With Game Mode enabled for UE, however, it is still demoted 97→4, so the lease
+does not achieve its purpose. It stays an opt-in (b) diagnostic while the
+RunningBoard investigation continues.
 
 ### Resolution from the best legacy configuration (2026-09-29)
 
