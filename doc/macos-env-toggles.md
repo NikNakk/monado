@@ -57,10 +57,10 @@ and dates, and checked against this audit. A value that was merely present in a
 good run is treated as configuration evidence, not proof that it caused the
 result.
 
-**Final counts: (a) 42, (b) 20, (c) 27, (d) 2** (91 names).
+**Final counts: (a) 42, (b) 20, (c) 28, (d) 1** (91 names).
 
 (c), removable now **without** changing default behaviour (8 already removed on
-`cleanup/toggles`; 15 more):
+`cleanup/toggles`; 16 more):
 
 | Toggle | Evidence |
 | --- | --- |
@@ -74,6 +74,7 @@ result.
 | `PROCESS_ACTIVITY` | Never validly tested (hooks compiled out), then abandoned for XPC importance. |
 | `METAL_XPC_EXTERNAL_BROKER` | Implemented, never run. |
 | `MAX_DRAWABLES` | 2 never reduced end-to-end latency and repeatedly collapsed to ~60 Hz. Hard-code 3. |
+| `LATE_RENDER_DESIRED_OFFSET_US` | +2 ms sometimes improved pose freshness, but the newest controlled evidence showed the deliberate offset could break cadence, and removing it restored ~120 Hz. The no-offset default is supported. It was tested with `DRAWABLE_SLOT=1`, though never as a clean slot-only on/off A/B independent of the CAMetalDisplayLink change. |
 
 (c), removable only **after** the default flip (D1b):
 `CAMETALDISPLAYLINK_LATENCY` and `_THREAD_PRIORITY` (driven-only; latency=2 was
@@ -92,11 +93,6 @@ Corrections to the resolution table below:
   run stayed RT97 throughout, but on 21 Sep the lease was acquired and the
   thread was still demoted to priority 4. Keep it as an opt-in client-side
   diagnostic until a controlled A/B shows a benefit.
-- **`XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US` stays (d).** It was dropped
-  because 2000 µs forced every-other-refresh callbacks in driven mode, not
-  because it failed on legacy. It was set in the 19 Sep legacy+slot baseline
-  with no on/off A/B. The older sweep showed a latency-for-cadence trade:
-  18.9→14.7 ms pose-to-display but 89%→55% at 120 Hz.
 - **`PRESENT_MIN_DURATION_US=8000` and time constraint 35/70 are known-good
   baseline values, not demonstrated optima.** No alternative-value sweep and no
   90 Hz test exist. Make them the defaults, and keep one A/B each on the list.
@@ -111,15 +107,15 @@ Separately, depth reprojection **on by default** showed silhouettes, trails and
 holes. Whether the default should be rotation-only is a new question outside
 this toggle audit.
 
-The only (d) items left:
-
-1. `LATE_RENDER_DESIRED_OFFSET_US`: needs a legacy + drawable-slot A/B, unset
-   vs 2000.
-2. `APP_RELEASE_SHARED_EVENT_WAIT_THREAD`: the chats show the app-side wait
-   thread working, but not whether that was a service build without the
-   variable set. Check the OpenXR app's log in a service build with the
-   variable **unset**. If `Metal app-release Stage 4 ready` appears, finding 3
-   is wrong; if it does not, the intended service default is being compiled out.
+The only (d) item left is `APP_RELEASE_SHARED_EVENT_WAIT_THREAD`, the app-side
+release handoff (see finding 3). Without it, each `xrReleaseSwapchainImage`
+in a service build commits an empty Metal command buffer and CPU-blocks in
+`waitUntilCompleted` (`metal_service_swapchain_barrier_image`). The chats
+show the wait thread working, but not whether that was a service build with the
+variable unset. Check the OpenXR app's log in a service build with the variable
+**unset**. If `Metal app-release Stage 4 ready` appears, finding 3 is wrong. If
+it does not, the intended default is compiled out; setting it to `1` explicitly
+is the workaround.
 
 ### Resolution from the best legacy configuration (2026-09-29)
 
