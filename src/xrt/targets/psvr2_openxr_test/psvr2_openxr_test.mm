@@ -927,6 +927,12 @@ struct application
 	int foveation_profile_index = 0;
 	XrFoveationProfileFB standard_foveation_profile = XR_NULL_HANDLE;
 	uint64_t standard_foveation_frame_count = 0;
+	// --fb-foveation-sparse-check: every other frame changes the FB state and
+	// re-submits the previously rendered images without rendering new ones.
+	bool fb_sparse_check = false;
+	XrFoveationProfileFB fb_sparse_alt_profile = XR_NULL_HANDLE;
+	bool fb_sparse_have_image = false;
+	uint64_t fb_sparse_frame = 0;
 	uint32_t foveation_profile_revision = 1;
 	struct u_foveation_profile runtime_foveation_profile = {};
 	terminal_input_state terminal_input;
@@ -2102,6 +2108,50 @@ create_standard_foveation_resources(application &app)
 	 * centre and native Metal map.
 	 */
 	update_standard_foveation(app, true);
+
+	if (app.fb_sparse_check) {
+		// A different level guarantees a different Metal map on sparse frames.
+		level_info.level = level_info.level == XR_FOVEATION_LEVEL_HIGH_FB ? XR_FOVEATION_LEVEL_LOW_FB
+		                                                                  : XR_FOVEATION_LEVEL_HIGH_FB;
+		check_xr(app.xr.create_foveation_profile_fb(app.session, &create_info, &app.fb_sparse_alt_profile),
+		         "xrCreateFoveationProfileFB(sparse alternate)");
+		fprintf(stderr,
+		        "psvr2-openxr-test: FB sparse-frame check: odd frames switch to level=%d and re-submit the "
+		        "previous images unrendered; the runtime must keep sampling them with their render map "
+		        "(OXR_DEBUG_FOVEATION_BINDING=1 logs what xrEndFrame submits)\n",
+		        (int)level_info.level);
+	}
+}
+
+/*
+ * Sparse frame: move the runtime to a different foveation state and even
+ * query its map, exactly like an application that is about to render, but then
+ * submit the previously released images without rendering. The compositor must
+ * still sample each image with the map it was rendered with.
+ */
+static void
+apply_fb_sparse_alternate(application &app)
+{
+	const bool verbose = app.fb_sparse_frame < 12 || (app.fb_sparse_frame % 240) < 2;
+	for (uint32_t i = 0; i < app.swapchains.size(); ++i) {
+		view_swapchain &swapchain = app.swapchains[i];
+		XrSwapchainStateFoveationFB update{XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
+		update.profile = app.fb_sparse_alt_profile;
+		check_xr(app.xr.update_swapchain_fb(swapchain.handle,
+		                                    reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&update)),
+		         "xrUpdateSwapchainFB(sparse alternate)");
+		XrFoveationMetalStateMNDX native{XR_TYPE_FOVEATION_METAL_STATE_MNDX};
+		check_xr(app.xr.get_foveation_metal_state_mndx(swapchain.handle, i, 0, &native),
+		         "xrGetFoveationMetalStateMNDX(sparse alternate)");
+		if (verbose) {
+			fprintf(stderr,
+			        "psvr2-openxr-test: sparse frame %llu eye=%u: runtime now revision=%u physical=%ux%u; "
+			        "re-submitting image rendered with revision=%u physical=%ux%u\n",
+			        (unsigned long long)app.fb_sparse_frame, i, native.revision, native.physicalWidth,
+			        native.physicalHeight, swapchain.standard_foveation_revision,
+			        swapchain.standard_foveation_physical_width, swapchain.standard_foveation_physical_height);
+		}
+	}
 }
 
 static XrFoveationLevelMNDX
@@ -2654,8 +2704,19 @@ render_frame(application &app)
 		         "xrLocateViews");
 		const XrViewStateFlags required = XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
 		if (view_count == app.views.size() && (view_state.viewStateFlags & required) == required) {
-			@autoreleasepool {
-				render_views(app, frame_state.predictedDisplayTime);
+			const bool sparse_frame =
+			    app.fb_sparse_check && app.fb_sparse_have_image && (app.fb_sparse_frame++ % 2) == 1;
+			if (sparse_frame) {
+				apply_fb_sparse_alternate(app);
+			} else {
+				if (app.fb_sparse_check && !app.standard_eye_foveation) {
+					// Restore the render state undone by the previous sparse frame.
+					update_standard_foveation(app, app.fb_sparse_frame < 12);
+				}
+				@autoreleasepool {
+					render_views(app, frame_state.predictedDisplayTime);
+				}
+				app.fb_sparse_have_image = true;
 			}
 			for (size_t i = 0; i < app.projection_views.size(); ++i) {
 				XrCompositionLayerProjectionView &projection_view = app.projection_views[i];
@@ -2806,6 +2867,10 @@ cleanup(application &app)
 		app.xr.destroy_foveation_profile_fb(app.standard_foveation_profile);
 		app.standard_foveation_profile = XR_NULL_HANDLE;
 	}
+	if (app.fb_sparse_alt_profile != XR_NULL_HANDLE && app.xr.destroy_foveation_profile_fb != nullptr) {
+		app.xr.destroy_foveation_profile_fb(app.fb_sparse_alt_profile);
+		app.fb_sparse_alt_profile = XR_NULL_HANDLE;
+	}
 	for (view_swapchain &swapchain : app.swapchains) {
 		// Standard Metal maps are borrowed from the runtime: never release.
 		swapchain.standard_foveation_rate_map = nil;
@@ -2891,6 +2956,7 @@ run(int argc, char **argv)
 	bool gaze_foveation_fused = false;
 	bool standard_foveation = false;
 	bool standard_eye_foveation = false;
+	bool fb_sparse_check = false;
 	int foveation_profile_index = 0;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
@@ -2921,6 +2987,8 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--fb-eye-foveation") == 0) {
 			standard_foveation = true;
 			standard_eye_foveation = true;
+		} else if (strcmp(argv[i], "--fb-foveation-sparse-check") == 0) {
+			fb_sparse_check = true;
 		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
 			foveation_profile_index = u_foveation_profile_find(argv[++i]);
 			if (foveation_profile_index < 0) {
@@ -2932,7 +3000,7 @@ run(int argc, char **argv)
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
 			        "[--passthrough|--passthrough-only] [--generic-controller] "
 			        "[--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused] "
-			        "[--fb-foveation|--fb-eye-foveation] "
+			        "[--fb-foveation|--fb-eye-foveation] [--fb-foveation-sparse-check] "
 			        "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
@@ -2946,6 +3014,8 @@ run(int argc, char **argv)
 			        "  --fb-foveation uses XR_FB_foveation with the Metal transport and compositor remap.\n"
 			        "  --fb-eye-foveation adds XR_META_foveation_eye_tracked; gaze stays runtime-owned and "
 			        "XR_EXT_eye_gaze_interaction is not enabled.\n"
+			        "  --fb-foveation-sparse-check alternates rendered frames with frames that change the FB "
+			        "state but re-submit the previous images unrendered.\n"
 			        "  --foveation-profile selects the starting profile; FB maps reference/strong/aggressive+ "
 			        "to LOW/MEDIUM/HIGH.\n"
 			        "  While foveation is running in a terminal: 1-6 select profiles, [ and ] step, r restores reference.\n"
@@ -2970,6 +3040,9 @@ run(int argc, char **argv)
 	if (standard_foveation && submit_depth_layer) {
 		fatal("standard FB foveation cannot yet be combined with --depth-layer");
 	}
+	if (fb_sparse_check && !standard_foveation) {
+		fatal("--fb-foveation-sparse-check requires --fb-foveation or --fb-eye-foveation");
+	}
 	if (gaze_foveation && submit_depth_layer) {
 		fatal("--gaze-foveation cannot currently be combined with --depth-layer");
 	}
@@ -2983,6 +3056,7 @@ run(int argc, char **argv)
 	app.gaze_foveation_fused = gaze_foveation_fused;
 	app.standard_foveation = standard_foveation;
 	app.standard_eye_foveation = standard_eye_foveation;
+	app.fb_sparse_check = fb_sparse_check;
 	app.foveation_profile_index = foveation_profile_index;
 	if (gaze_foveation || standard_foveation) {
 		const struct u_foveation_profile *profile = u_foveation_profile_get(foveation_profile_index);
