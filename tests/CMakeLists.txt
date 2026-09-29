@@ -141,18 +141,6 @@ add_executable(tests_macos_runtime_probe tests_macos_runtime_probe.c)
 target_link_libraries(tests_macos_runtime_probe PRIVATE target_instance xrt-interfaces aux_util)
 set_target_properties(tests_macos_runtime_probe PROPERTIES FOLDER monado_tests)
 
-if(APPLE AND XRT_MODULE_COMPOSITOR_MULTI)
-	add_executable(tests_macos_displaylink tests_macos_displaylink.cpp)
-	target_link_libraries(tests_macos_displaylink PRIVATE comp_multi aux_os)
-	add_test(NAME tests_macos_displaylink_legacy
-		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_MODE=legacy $<TARGET_FILE:tests_macos_displaylink> legacy)
-	add_test(NAME tests_macos_displaylink_driven
-		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_MODE=driven $<TARGET_FILE:tests_macos_displaylink> driven)
-	add_test(NAME tests_macos_displaylink_hybrid
-		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_MODE=hybrid $<TARGET_FILE:tests_macos_displaylink> hybrid)
-	set_tests_properties(tests_macos_displaylink_legacy tests_macos_displaylink_driven tests_macos_displaylink_hybrid PROPERTIES TIMEOUT 10)
-endif()
-
 if(APPLE)
 	add_executable(tests_macos_iosurface_producer tests_macos_iosurface_producer.c)
 	target_link_libraries(tests_macos_iosurface_producer PRIVATE "-framework CoreFoundation" "-framework IOSurface")

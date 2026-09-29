@@ -389,7 +389,7 @@ do_cs_projection_layer(const struct comp_layer *layer,
 	ubo_data->layers[cur_layer].image_info.has_depth = 0;
 
 	// Depth
-	if (layer_data->type == XRT_LAYER_PROJECTION_DEPTH) {
+	if (layer_data->type == XRT_LAYER_PROJECTION_DEPTH && render_compute_depth_reprojection_enabled()) {
 		uint32_t d_array_index = dvd->sub.array_index;
 		const struct comp_swapchain_image *d_image =
 		    get_layer_depth_image(layer, sc_array_index, dvd->sub.image_index);

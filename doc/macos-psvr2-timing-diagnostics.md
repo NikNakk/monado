@@ -2,76 +2,40 @@
 
 ## Current presentation defaults
 
-The release-preparation branch incorporates `macos-cametallink-driven-compositor`
-through `47a14a169`, preserving direct service XPC and per-process Metal resource
-ownership, launchd registration/lifecycle handling, repeatable installation,
-Release build fixes, and the default-off timing-diagnostics build option. The
-incoming branch also enables libmonado on macOS and adds the independent
-CAMetalDisplayLink probe, Mach wait experiments, and IPC stall diagnostics.
-
-`XRT_MACOS_CAMETALDISPLAYLINK_DRIVE` defaults to `1` on macOS 14 and later.
-The local Metal target activates the bridge; other targets retain normal pacing.
-Older macOS versions use the legacy path. Set this variable to `0` to opt out.
-The driven path consumes the callback's drawable, holds the callback until Metal
-schedules presentation, suppresses CVDisplayLink callbacks and the multi-compositor's
-legacy timed wait, and uses plain `presentDrawable:`. Idle drawables are cleared
-to black. Frame IDs and pacing statistics retain Monado's native bookkeeping. For each
-consumed callback, `targetTimestamp` supplies the GPU completion deadline and
-`targetPresentationTimestamp` supplies the predicted display time. Both are
-converted from Core Animation media time to Monado's monotonic clock by the
-callback's existing clock bridge. The native compositor stores these values
-before returning its prediction, so renderer/timewarp pose selection, client
-frame selection, and client pacing all use the same display-time reference.
-The physical display period remains the target's configured refresh period;
-missed callbacks do not redefine that period.
-
-In driven mode, `presented.csv` compares the drawable's actual presentation with
-that callback's presentation timestamp (`target_output_ns`), and
-`desired_present_ns` is the callback's rendering deadline. No absolute Metal
-presentation request is made (`metal_request_ns=0`). The old learned
-present-to-display offset is not applied in driven mode, even with tracing
-enabled. Tracing therefore does not retune driven pose prediction. The legacy
-path retains its existing feedback behaviour.
-
-To validate rotational stability, compare `frame_pipeline.csv`'s predicted
-display time and `late_render.csv`'s `predicted_display_ns` with `present.csv`'s
-`target_output_ns` (join the native frame ID to `present.csv`'s `timeline_value`).
-Then join `present.csv` and `presented.csv` by their presentation `frame_id` and
-inspect `presented_minus_target_ns`.
-These should share the same predicted timestamp; actual missed presentations
-remain observable rather than being folded into a learned pose offset.
-
-The conflicting presentation experiments now default off:
+Presentation uses CVDisplayLink pacing with timed Metal presents. The
+CAMetalDisplayLink driven and hybrid modes, and the child-layer
+CAMetalDisplayLink probe, have been removed. On hardware both modes showed
+display-link thread delays and more late frames than this path (~0.87% late
+cadence intervals vs driven ~5.2–5.8%), and the configuration below restored
+~119.88 Hz. Later sections describe them historically. See
+`doc/macos-env-toggles.md` for the evidence behind each default.
 
 | Control | Default |
 | --- | --- |
-| `XRT_MACOS_DRAWABLE_SLOT` | `0` |
-| `XRT_MACOS_PRESENT_WORKER`, `XRT_MACOS_EARLY_DRAWABLE` | `0` |
-| `XRT_MACOS_PRESENT_MIN_DURATION_US` | `0` |
-| `XRT_MACOS_UNIQUE_PRESENT_SLOTS`, `XRT_MACOS_PRESENT_STALE_SUBSTITUTE` | `0` |
-| `XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US` | unset (disabled; explicit `0` still enables the experiment) |
-| `XRT_MACOS_LATE_RENDER_LEAD_US` | `0` |
-| `XRT_MACOS_CLIENT_FRAME_DIVISOR`, `XRT_MACOS_CLIENT_FRAME_MIN_HOLD` | `0` |
-| `XRT_MACOS_COMPOSITOR_QOS`, `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `0` |
-| `XRT_MACOS_WAIT_SPIN`, `XRT_MACOS_WAIT_HYBRID_US` | `0` |
+| `XRT_MACOS_DRAWABLE_SLOT` | `1`: newest-frame worker acquires drawables off the compositor thread |
+| `XRT_MACOS_PRESENT_MIN_DURATION_US` | `8000`: `presentDrawable:afterMinimumDuration:` (known-good 120 Hz value; `0` restores absolute timed presents) |
+| `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `1`, with `_COMPUTATION_PCT=35` and `_CONSTRAINT_PCT=70` of the display period |
+| `XRT_MACOS_CLIENT_FRAME_MIN_HOLD` | `0` (set `2` to hold each app frame for at least two refreshes, e.g. a 60 Hz app on the 120 Hz headset) |
+| `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD` | `1` in service builds; read in the **app** process |
+| `XRT_MACOS_XPC_IMPORTANCE` | `0`; opt-in diagnostic, read in the **app** process. It does not yet prevent the Game Mode 97→4 demotion |
+| `XRT_MACOS_WAIT_SPIN` | `0`; opt-in busy-wait diagnostic |
 
-CAMetalDisplayLink mode explicitly disables the presentation worker, drawable-slot
-worker, and early drawable prefetch, including when old environment overrides
-request them. Presentation submission runs on the compositor thread. The
-`present_worker` CSV is opened only when a legacy worker is actually enabled;
-inline asynchronous GPU submission does not produce worker events.
+Always on, with the old toggles removed: asynchronous presentation, the Metal
+shared-event handoff (automatic CPU-wait fallback), deferred GPU timestamp
+readback, CVDisplayLink vblank feedback, three drawables, and no
+late-render wait. The removed experiments were the present worker, stale
+substitution, early drawable, immediate present, unique present slots, the
+display-rate, client-frame and app-pacer divisors, compositor QoS, the hybrid
+wait, the process-activity assertion and the CAMetalLayer display-sync and
+framebuffer-only switches. `XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1` remains
+available for a manually started service;
+`scripts/macos/run-wine-openvr-native-trace.zsh` depends on it.
 
-Async presentation and Metal shared-event synchronization remain enabled. The
-CVDisplayLink pacing option remains available for the legacy fallback, but its
-callback is suppressed in driven mode. Clear old environment overrides when
-testing these defaults; disable drive mode before comparing legacy experiments.
-The LaunchAgent adds lifecycle settings only, so direct and installed launches
-use the same source defaults.
+With a non-zero minimum present duration, `XRT_MACOS_PRESENT_PRELATCH_US` and
+`XRT_MACOS_PRESENT_MIN_LEAD_US` only affect the `target_output_ns` and
+`metal_request_ns` trace columns, because the requested present time is
+discarded.
 
-The driven CSV trace requires a build with
-`-DXRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=ON` and either `PSVR2_TIMING_TRACE=1`
-or an explicit `XRT_MACOS_CAMETALDISPLAYLINK_DRIVE_TRACE_PATH`. The independent
-child-layer probe remains opt-in via `XRT_MACOS_CAMETALDISPLAYLINK_PROBE=1`.
 The sections below record earlier experiments and their historical defaults.
 
 
@@ -186,7 +150,7 @@ The diagnostic branch now also fixes the timing defects exposed by the first cap
 - `inOutputTime` is treated as a future output target. The display period is used to project it backwards to the most recent refresh boundary before feeding `u_pc_update_vblank_from_display_control()`.
 - `desired_present_time_ns` is translated back into Mach absolute seconds and supplied to Metal with `presentDrawable:atTime:`. Late frames naturally fall back to earliest possible presentation according to Metal semantics.
 - Actual screen presentation is recorded asynchronously from `addPresentedHandler:` in `*_presented.csv`; reading `presentedTime` immediately after GPU completion is no longer used.
-- `XRT_MACOS_CVDISPLAYLINK_PACING=0` remains available as an A/B diagnostic to disable display-link feedback while keeping the trace enabled.
+- `XRT_MACOS_CVDISPLAYLINK_PACING=0` was originally available as an A/B diagnostic to disable display-link feedback. It has since been removed.
 
 A post-fix capture therefore produces six CSVs: `imu`, `slam`, `pose`, `present`, `presented`, and `vblank`.
 
@@ -381,15 +345,15 @@ export XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US=2000
 
 Signed offsets are accepted. A useful initial 120 Hz sweep is `0`, `1000`, `2000`, and `3000` microseconds, keeping `XRT_MACOS_PRESENT_MIN_LEAD_US=2000` unchanged. The default path remains unchanged when the variable is unset.
 
-`XRT_MACOS_LATE_RENDER_LEAD_US` is retained only as the legacy predicted-display-relative diagnostic. Its default remains `0` (disabled), and the desired-relative option takes precedence if both are set.
+The older predicted-display-relative diagnostic, `XRT_MACOS_LATE_RENDER_LEAD_US`, has been removed. `late_render.csv` keeps its `lead_us` column, which is always `0`.
 
 Previous traces showed roughly 2-3 ms scheduler overshoot with a 0.5 ms spin margin, so the diagnostics-only wait now sleeps until 3 ms before its target and spins for the remainder. `monado_psvr2_<PID>_late_render.csv` retains the original columns and appends `desired_offset_us`, `wait_mode`, `target_minus_desired_ns`, and `pose_begin_minus_desired_ns` so the desired-relative and legacy modes can be distinguished without breaking column-name-based analysis. This remains an A/B diagnostic rather than the final late-latching design.
 
 ## Asynchronous Metal presentation / Vulkan-to-Metal shared event
 
-`XRT_MACOS_ASYNC_PRESENT=1` is an opt-in diagnostic that removes the synchronous Metal `waitUntilCompleted` from the compositor thread. Source IOSurfaces are marked in-flight on acquire and are not reused until the Metal blit command buffer completes; with three target images this should normally avoid blocking, while remaining correct if the GPU falls behind. The default is `0`, preserving the prior synchronous path.
+`XRT_MACOS_ASYNC_PRESENT=1` is an opt-in diagnostic that removes the synchronous Metal `waitUntilCompleted` from the compositor thread. Source IOSurfaces are marked in-flight on acquire and are not reused until the Metal blit command buffer completes; with three target images this should normally avoid blocking, while remaining correct if the GPU falls behind. The default was originally `0`, preserving the prior synchronous path. The option has since been removed: presentation is always asynchronous.
 
-When async present is enabled, `XRT_MACOS_METAL_SHARED_EVENT_WAIT=1` (default) also requests `VK_EXT_metal_objects`, creates the render-complete Vulkan timeline semaphore as exportable to Metal, exports its underlying `MTLSharedEvent`, and encodes the timeline-value wait directly into the Metal command buffer. If the extension/event export is unavailable, presentation falls back to the existing CPU Vulkan timeline wait but still avoids the Metal completion wait. Set `XRT_MACOS_METAL_SHARED_EVENT_WAIT=0` to test that intermediate mode explicitly.
+When async present is enabled, `XRT_MACOS_METAL_SHARED_EVENT_WAIT=1` (default) also requests `VK_EXT_metal_objects`, creates the render-complete Vulkan timeline semaphore as exportable to Metal, exports its underlying `MTLSharedEvent`, and encodes the timeline-value wait directly into the Metal command buffer. If the extension/event export is unavailable, presentation falls back to the existing CPU Vulkan timeline wait but still avoids the Metal completion wait. `XRT_MACOS_METAL_SHARED_EVENT_WAIT=0` originally forced that intermediate mode. The option has since been removed: the shared-event handoff is always used when available, and the CPU wait is only the automatic fallback.
 
 `present.csv` appends `async_present`, `shared_event_wait`, and `image_reuse_wait_ns`. Async runs also produce `present_complete.csv`, recording the command-buffer completion callback, GPU start/end timestamps, source image, timeline value, and whether the shared-event handoff was used. In async mode the legacy `after_metal_wait_ns` field records the immediate post-commit timestamp rather than a completion wait; use `present_complete.csv` for actual Metal completion.
 

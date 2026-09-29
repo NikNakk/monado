@@ -1510,6 +1510,14 @@ render_compute_projection_timewarp(struct render_compute *render,
                                    const struct render_viewport_data views[XRT_MAX_VIEWS]);
 
 /*!
+ * Whether projection-depth layers should use their depth for reprojection
+ * (`XRT_COMPOSITOR_DEPTH_REPROJECTION`, default off). When false, depth layers
+ * are composited exactly like ordinary projection layers.
+ */
+bool
+render_compute_depth_reprojection_enabled(void);
+
+/*!
  * Single-pass projection-depth fast path. Depth is sampled by the existing
  * distortion/timewarp compute dispatch; no intermediate image is produced.
  *

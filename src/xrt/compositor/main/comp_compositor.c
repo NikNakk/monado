@@ -52,7 +52,6 @@
 
 #include "os/os_time.h"
 #ifdef XRT_OS_OSX
-#include "multi/comp_multi_macos_displaylink.h"
 #include "util/comp_metal_semaphore_probe.h"
 #endif
 
@@ -293,20 +292,6 @@ compositor_predict_frame(struct xrt_compositor *xc,
 	    &desired_present_time_ns,    //
 	    &present_slop_ns,            //
 	    &predicted_display_time_ns); //
-
-#ifdef XRT_OS_OSX
-	/* Keep the pacer's frame IDs/statistics, but take this frame's actual
-	 * deadline and pose-prediction time from the callback owning its drawable.
-	 * Set these before storing waited state: changing only the values returned
-	 * to the multi compositor would leave renderer ATW on the old prediction. */
-	struct comp_multi_macos_displaylink_timing displaylink_timing;
-	if (comp_multi_macos_displaylink_current_timing(&displaylink_timing)) {
-		wake_up_time_ns = displaylink_timing.callback_ns;
-		desired_present_time_ns = displaylink_timing.deadline_ns;
-		predicted_display_time_ns = displaylink_timing.presentation_ns;
-		present_slop_ns = 0;
-	}
-#endif
 
 	c->frame.waited.id = frame_id;
 	c->frame.waited.desired_present_time_ns = desired_present_time_ns;

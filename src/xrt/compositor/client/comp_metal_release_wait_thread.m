@@ -8,6 +8,8 @@
 
 #import <Metal/Metal.h>
 
+/* XRT_FEATURE_SERVICE, which selects the default below, comes from here. */
+#include "xrt/xrt_config_build.h"
 #include "client/comp_metal_release_wait_thread.h"
 #include "util/comp_metal_semaphore_probe.h"
 #include "util/u_debug.h"
