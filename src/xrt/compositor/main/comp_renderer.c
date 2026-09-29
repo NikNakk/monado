@@ -63,7 +63,6 @@ DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL
 DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #ifdef XRT_OS_OSX
-DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", LONG_MIN)
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_reprojection_trace, "XRT_MACOS_REPROJECTION_TRACE", false)
@@ -214,18 +213,6 @@ struct comp_renderer
  */
 
 #ifdef XRT_OS_OSX
-static bool
-renderer_get_macos_late_render_desired_offset_us(int64_t *out_offset_us)
-{
-	long value = debug_get_num_option_macos_late_render_desired_offset_us();
-	if (value == LONG_MIN) {
-		*out_offset_us = 0;
-		return false;
-	}
-	*out_offset_us = (int64_t)value;
-	return true;
-}
-
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 
 static bool
@@ -537,66 +524,21 @@ renderer_late_render_trace_close(struct comp_renderer *r)
 
 #endif
 
-static void
-renderer_late_render_wait(struct comp_renderer *r)
-{
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+/*
+ * The late-render wait experiments were removed; late_render.csv still records
+ * the renderer's pose-query timing, with the wait columns left at zero.
+ */
+static void
+renderer_late_render_trace_begin(struct comp_renderer *r)
+{
 	r->late_render_target_ns = 0;
 	r->late_render_pose_begin_ns = 0;
 	r->late_render_pose_end_ns = 0;
 	r->late_render_wait_begin_ns = (int64_t)os_monotonic_get_ns();
 	r->late_render_wait_end_ns = r->late_render_wait_begin_ns;
-#endif
-
-	int64_t desired_offset_us = 0;
-	if (!renderer_get_macos_late_render_desired_offset_us(&desired_offset_us)) {
-		return;
-	}
-
-	uint64_t desired_u64 = r->c->frame.rendering.desired_present_time_ns;
-	if (desired_u64 == 0 || desired_u64 > INT64_MAX || desired_offset_us > INT64_MAX / 1000 ||
-	    desired_offset_us < INT64_MIN / 1000) {
-		return;
-	}
-
-	int64_t desired_ns = (int64_t)desired_u64;
-	int64_t offset_ns = desired_offset_us * 1000;
-	if ((offset_ns > 0 && desired_ns > INT64_MAX - offset_ns) ||
-	    (offset_ns < 0 && desired_ns < INT64_MIN - offset_ns)) {
-		return;
-	}
-	int64_t target_ns = desired_ns + offset_ns;
-
-#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
-	r->late_render_target_ns = target_ns;
-#endif
-
-	/*
-	 * Previous traces showed 2-3 ms scheduler overshoot with only a
-	 * 0.5 ms spin margin. This diagnostics-only path trades one CPU
-	 * core's time for repeatable wake timing around the latch cliff.
-	 */
-	const int64_t spin_margin_ns = 3000000;
-	for (;;) {
-		int64_t now_ns = (int64_t)os_monotonic_get_ns();
-		if (now_ns >= target_ns) {
-#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
-			r->late_render_wait_end_ns = now_ns;
-#endif
-			break;
-		}
-
-		int64_t remaining_ns = target_ns - now_ns;
-		if (remaining_ns > spin_margin_ns) {
-			int64_t sleep_ns = remaining_ns - spin_margin_ns;
-			struct timespec ts = {
-			    .tv_sec = (time_t)(sleep_ns / 1000000000LL),
-			    .tv_nsec = (long)(sleep_ns % 1000000000LL),
-			};
-			(void)nanosleep(&ts, NULL);
-		}
-	}
 }
+#endif
 
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 static void
@@ -608,9 +550,9 @@ renderer_late_render_trace_frame(struct comp_renderer *r)
 
 	/* The predicted-relative lead mode was removed; its CSV column stays 0 for compatibility. */
 	const int64_t lead_us = 0;
-	int64_t desired_offset_us = 0;
-	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
-	const char *wait_mode = desired_mode ? "desired" : "none";
+	/* Removed late-render wait modes; columns kept for CSV compatibility. */
+	const int64_t desired_offset_us = 0;
+	const char *wait_mode = "none";
 	int64_t wait_requested_ns = r->late_render_target_ns > r->late_render_wait_begin_ns
 	                                ? r->late_render_target_ns - r->late_render_wait_begin_ns
 	                                : 0;
@@ -1113,12 +1055,6 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	renderer_late_render_trace_open(r);
 	renderer_reprojection_trace_open(r);
 #endif
-	int64_t desired_offset_us = 0;
-	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
-	if (desired_mode) {
-		COMP_INFO(c, "macOS desired-relative late-render experiment enabled: dispatch at desired present %+lld us",
-		          (long long)desired_offset_us);
-	}
 #endif
 
 	r->acquired_buffer = -1;
@@ -1777,8 +1713,8 @@ comp_renderer_draw(struct comp_renderer *r)
 	c->nr.apple_target_debug.frame_id = c->frame.rendering.id;
 #endif
 
-#ifdef XRT_OS_OSX
-	renderer_late_render_wait(r);
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+	renderer_late_render_trace_begin(r);
 #endif
 
 	VkResult res = VK_SUCCESS;
