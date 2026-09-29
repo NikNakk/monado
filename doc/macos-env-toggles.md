@@ -204,6 +204,28 @@ Still (d), with no setting in the best run: `DISPLAY_RATE_DIVISOR`,
 `DEPTH_REPROJECTION`, `CAMETALDISPLAYLINK_LATENCY` and `_THREAD_PRIORITY`. The
 last two go if driven mode is dropped (D1b).
 
+### Status on `cleanup/toggles`
+
+The original eight (c) toggles are removed there, one commit per toggle or group. Each
+commit keeps the default behaviour and keeps the affected CSV columns, filled
+with the constant value:
+
+| Commit | Removed | Now always |
+| --- | --- | --- |
+| psvr2: always predict translation over the full horizon | `PSVR2_FULL_LINEAR_HORIZON` | full horizon |
+| psvr2: drop EMA-filtered velocity as a live predictor | `PSVR2_FILTERED_LINEAR_PREDICTION` | raw velocity; EMA stays trace-only |
+| comp/macos: remove predicted-relative late-render lead | `XRT_MACOS_LATE_RENDER_LEAD_US` | no predicted-relative wait |
+| comp/macos: always feed CVDisplayLink vblanks to the pacer | `XRT_MACOS_CVDISPLAYLINK_PACING` | feedback on |
+| comp/macos: always use the Metal shared-event handoff when available | `XRT_MACOS_METAL_SHARED_EVENT_WAIT` | shared event, with auto-fallback |
+| comp/macos: always defer compositor GPU timestamp readback | `XRT_MACOS_DEFER_GPU_TIMESTAMPS`, `XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS` | deferred |
+| comp/macos: always present asynchronously | `XRT_MACOS_ASYNC_PRESENT` | async |
+
+The async commit is deliberately minimal. The synchronous branches inside
+`macos_execute_present_job()` are now unreachable but still present, and
+should be pruned in a follow-up that is compiled on macOS. The Objective-C
+changes have **not** been compiled; only Linux builds and syntax-only checks
+of the C files' macOS paths were possible.
+
 ## Cross-cutting findings
 
 1. **`PSVR2_TIMING_TRACE` is parsed 13 times, using four different truthiness
