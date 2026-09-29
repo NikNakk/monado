@@ -122,6 +122,8 @@ struct macos_passthrough_sink
 	uint32_t eye;
 };
 
+struct macos_frontend_ops;
+
 struct comp_window_macos
 {
 	struct comp_target_swapchain base;
@@ -129,6 +131,9 @@ struct comp_window_macos
 	NSWindow *window;
 	/* The headset display, fixed for the session. */
 	CGDirectDisplayID display_id;
+	char display_name[128];
+	/* Owns the layer's container; the presenter only uses metal_layer. */
+	const struct macos_frontend_ops *frontend;
 	CAMetalLayer *metal_layer;
 	id<MTLCommandQueue> present_queue;
 	id<MTLTexture> metal_images[MACOS_TARGET_IMAGE_COUNT];
@@ -942,65 +947,171 @@ find_psvr2_screen(struct comp_compositor *c)
 	return width_fallback;
 }
 
+/*
+ *
+ * Front-ends: where the presenter's CAMetalLayer lives.
+ *
+ * The presenter only needs a CAMetalLayer, the headset's display ID and its
+ * pixel size. A front-end provides them and owns whatever the layer sits in.
+ * Today that is a borderless window on the headset display.
+ *
+ */
+
+struct macos_frontend_ops
+{
+	const char *name;
+	/*!
+	 * Set cwm->metal_layer (retained, contentsScale set), cwm->display_id,
+	 * cwm->pixel_width/height and cwm->display_name. Nothing is on screen yet.
+	 */
+	bool (*create)(struct comp_window_macos *cwm);
+	//! Put the layer on screen, once the presenter has configured it.
+	void (*show)(struct comp_window_macos *cwm);
+	void (*set_title)(struct comp_window_macos *cwm, const char *title);
+	bool (*is_visible)(struct comp_window_macos *cwm);
+	//! Release what create made, except cwm->metal_layer. Safe after a failed create.
+	void (*destroy)(struct comp_window_macos *cwm);
+};
+
+static bool
+macos_window_frontend_create(struct comp_window_macos *cwm)
+{
+	struct comp_compositor *c = cwm->base.base.c;
+
+	NSScreen *screen = find_psvr2_screen(c);
+	if (screen == nil) {
+		COMP_ERROR(c, "Could not find a display named 'PS VR2' or a 4000-pixel-wide fallback");
+		return false;
+	}
+
+	[NSApplication sharedApplication];
+	[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+	[NSApp finishLaunching];
+
+	CGDirectDisplayID display_id = get_display_id(screen);
+	if (display_id == kCGNullDirectDisplay) {
+		COMP_ERROR(c, "Could not get the CoreGraphics display ID for '%s'", [[screen localizedName] UTF8String]);
+		return false;
+	}
+	size_t pixel_width = CGDisplayPixelsWide(display_id);
+	size_t pixel_height = CGDisplayPixelsHigh(display_id);
+	if (pixel_width == 0 || pixel_height == 0) {
+		COMP_ERROR(c, "Selected macOS display has an invalid pixel size");
+		return false;
+	}
+
+	NSWindow *window = [[NSWindow alloc] initWithContentRect:[screen frame]
+	                                                styleMask:NSWindowStyleMaskBorderless
+	                                                  backing:NSBackingStoreBuffered
+	                                                    defer:NO
+	                                                   screen:screen];
+	if (window == nil) {
+		COMP_ERROR(c, "Failed to create the macOS PS VR2 window");
+		return false;
+	}
+
+	id<MTLDevice> metal_device = MTLCreateSystemDefaultDevice();
+	if (metal_device == nil) {
+		[window release];
+		COMP_ERROR(c, "Failed to create the default Metal device");
+		return false;
+	}
+	MTKView *metal_view = [[MTKView alloc] initWithFrame:[screen frame] device:metal_device];
+	[metal_device release];
+	if (metal_view == nil) {
+		[window release];
+		COMP_ERROR(c, "Failed to create the PS VR2 MTKView");
+		return false;
+	}
+	[metal_view setPaused:YES];
+	[metal_view setEnableSetNeedsDisplay:NO];
+	[metal_view setColorPixelFormat:MTLPixelFormatBGRA8Unorm];
+	[metal_view setFramebufferOnly:NO];
+	[window setContentView:metal_view];
+
+	CAMetalLayer *metal_layer = [(CAMetalLayer *)[metal_view layer] retain];
+	[metal_layer setContentsScale:[screen backingScaleFactor]];
+	// The window's content view keeps the view alive.
+	[metal_view release];
+
+	cwm->screen = [screen retain];
+	cwm->window = window;
+	cwm->metal_layer = metal_layer;
+	cwm->display_id = display_id;
+	cwm->pixel_width = (uint32_t)pixel_width;
+	cwm->pixel_height = (uint32_t)pixel_height;
+	snprintf(cwm->display_name, sizeof(cwm->display_name), "%s", [[screen localizedName] UTF8String]);
+	return true;
+}
+
+static void
+macos_window_frontend_show(struct comp_window_macos *cwm)
+{
+	NSWindow *window = cwm->window;
+	[window setBackgroundColor:[NSColor blackColor]];
+	[window setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
+	                              NSWindowCollectionBehaviorFullScreenAuxiliary |
+	                              NSWindowCollectionBehaviorStationary];
+	[window setHasShadow:NO];
+	[window setHidesOnDeactivate:NO];
+	[window setIgnoresMouseEvents:YES];
+	[window setLevel:NSMainMenuWindowLevel + 1];
+	[window setFrame:[cwm->screen frame] display:YES];
+	[window orderFrontRegardless];
+	[NSApp activateIgnoringOtherApps:YES];
+	[CATransaction flush];
+}
+
+static void
+macos_window_frontend_set_title(struct comp_window_macos *cwm, const char *title)
+{
+	[cwm->window setTitle:[NSString stringWithUTF8String:title]];
+}
+
+static bool
+macos_window_frontend_is_visible(struct comp_window_macos *cwm)
+{
+	return [cwm->window isVisible];
+}
+
+static void
+macos_window_frontend_destroy(struct comp_window_macos *cwm)
+{
+	[cwm->window orderOut:nil];
+	[cwm->window close];
+	[cwm->window release];
+	cwm->window = nil;
+	[cwm->screen release];
+	cwm->screen = nil;
+}
+
+static const struct macos_frontend_ops macos_window_frontend = {
+    .name = "window",
+    .create = macos_window_frontend_create,
+    .show = macos_window_frontend_show,
+    .set_title = macos_window_frontend_set_title,
+    .is_visible = macos_window_frontend_is_visible,
+    .destroy = macos_window_frontend_destroy,
+};
+
+
+/*
+ *
+ * Presenter setup: configures whatever layer the front-end provides.
+ *
+ */
+
 static bool
 comp_window_macos_init(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	@autoreleasepool {
-		NSScreen *screen = find_psvr2_screen(ct->c);
-		if (screen == nil) {
-			COMP_ERROR(ct->c, "Could not find a display named 'PS VR2' or a 4000-pixel-wide fallback");
+		if (!cwm->frontend->create(cwm)) {
 			return false;
 		}
 
-		[NSApplication sharedApplication];
-		[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
-		[NSApp finishLaunching];
-
-		CGDirectDisplayID display_id = get_display_id(screen);
-		if (display_id == kCGNullDirectDisplay) {
-			COMP_ERROR(ct->c, "Could not get the CoreGraphics display ID for '%s'", [[screen localizedName] UTF8String]);
-			return false;
-		}
-		size_t pixel_width = CGDisplayPixelsWide(display_id);
-		size_t pixel_height = CGDisplayPixelsHigh(display_id);
-		if (pixel_width == 0 || pixel_height == 0) {
-			COMP_ERROR(ct->c, "Selected macOS display has an invalid pixel size");
-			return false;
-		}
-
-		NSWindow *window = [[NSWindow alloc] initWithContentRect:[screen frame]
-		                                                styleMask:NSWindowStyleMaskBorderless
-		                                                  backing:NSBackingStoreBuffered
-		                                                    defer:NO
-		                                                   screen:screen];
-		if (window == nil) {
-			COMP_ERROR(ct->c, "Failed to create the macOS PS VR2 window");
-			return false;
-		}
-
-		id<MTLDevice> metal_device = MTLCreateSystemDefaultDevice();
-		if (metal_device == nil) {
-			[window release];
-			COMP_ERROR(ct->c, "Failed to create the default Metal device");
-			return false;
-		}
-		MTKView *metal_view = [[MTKView alloc] initWithFrame:[screen frame] device:metal_device];
-		[metal_device release];
-		if (metal_view == nil) {
-			[window release];
-			COMP_ERROR(ct->c, "Failed to create the PS VR2 MTKView");
-			return false;
-		}
-		[metal_view setPaused:YES];
-		[metal_view setEnableSetNeedsDisplay:NO];
-		[metal_view setColorPixelFormat:MTLPixelFormatBGRA8Unorm];
-		[metal_view setFramebufferOnly:NO];
-		[window setContentView:metal_view];
-
-		CAMetalLayer *metal_layer = [(CAMetalLayer *)[metal_view layer] retain];
-		[metal_layer setContentsScale:[screen backingScaleFactor]];
-		[metal_layer setDrawableSize:CGSizeMake(pixel_width, pixel_height)];
+		CAMetalLayer *metal_layer = cwm->metal_layer;
+		[metal_layer setDrawableSize:CGSizeMake(cwm->pixel_width, cwm->pixel_height)];
 		[metal_layer setOpaque:YES];
 		[metal_layer setDisplaySyncEnabled:YES];
 		[metal_layer setAllowsNextDrawableTimeout:YES];
@@ -1009,34 +1120,16 @@ comp_window_macos_init(struct comp_target *ct)
 		COMP_INFO(ct->c, "macOS CAMetalLayer maximumDrawableCount=%lu",
 		          (unsigned long)[metal_layer maximumDrawableCount]);
 		id<MTLCommandQueue> present_queue = [[metal_layer device] newCommandQueue];
-		[metal_view release];
 		if (present_queue == nil) {
-			[metal_layer release];
-			[window release];
+			cwm->frontend->destroy(cwm);
+			[cwm->metal_layer release];
+			cwm->metal_layer = nil;
 			COMP_ERROR(ct->c, "Failed to create the macOS Metal presentation queue");
 			return false;
 		}
-
-		[window setBackgroundColor:[NSColor blackColor]];
-		[window setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
-		                              NSWindowCollectionBehaviorFullScreenAuxiliary |
-		                              NSWindowCollectionBehaviorStationary];
-		[window setHasShadow:NO];
-		[window setHidesOnDeactivate:NO];
-		[window setIgnoresMouseEvents:YES];
-		[window setLevel:NSMainMenuWindowLevel + 1];
-		[window setFrame:[screen frame] display:YES];
-		[window orderFrontRegardless];
-		[NSApp activateIgnoringOtherApps:YES];
-		[CATransaction flush];
-
-		cwm->screen = [screen retain];
-		cwm->window = window;
-		cwm->display_id = display_id;
-		cwm->metal_layer = metal_layer;
 		cwm->present_queue = present_queue;
-		cwm->pixel_width = (uint32_t)pixel_width;
-		cwm->pixel_height = (uint32_t)pixel_height;
+
+		cwm->frontend->show(cwm);
 
 		/* Best effort: ordinary presentation continues if camera passthrough
 		 * is unavailable or PSVR2_CAMERA_STREAMS was not enabled. */
@@ -1044,7 +1137,7 @@ comp_window_macos_init(struct comp_target *ct)
 
 		mach_timebase_info(&cwm->mach_timebase);
 		refresh_host_to_monotonic_offset_ns(cwm);
-		CVReturn cvret = CVDisplayLinkCreateWithCGDisplay(display_id, &cwm->display_link);
+		CVReturn cvret = CVDisplayLinkCreateWithCGDisplay(cwm->display_id, &cwm->display_link);
 		if (cvret == kCVReturnSuccess) {
 			cvret = CVDisplayLinkSetOutputCallback(cwm->display_link, display_link_callback, cwm);
 		}
@@ -1068,8 +1161,8 @@ comp_window_macos_init(struct comp_target *ct)
 
 		VkExtent2D extent = {.width = cwm->pixel_width, .height = cwm->pixel_height};
 		comp_target_swapchain_override_extents(&cwm->base, extent);
-		COMP_INFO(ct->c, "Selected macOS display '%s' at %ux%u", [[screen localizedName] UTF8String], extent.width,
-		          extent.height);
+		COMP_INFO(ct->c, "Selected macOS display '%s' at %ux%u (%s front-end)", cwm->display_name, extent.width,
+		          extent.height, cwm->frontend->name);
 	}
 	return true;
 }
@@ -2064,8 +2157,9 @@ comp_window_macos_flush(struct comp_target *ct)
 		[CATransaction flush];
 		if (!cwm->logged_layer_state) {
 			CGSize drawable_size = [cwm->metal_layer drawableSize];
-			COMP_INFO(ct->c, "macOS presentation: window visible=%s layer device=%s format=%lu drawable=%.0fx%.0f",
-			          [cwm->window isVisible] ? "true" : "false", [cwm->metal_layer device] != nil ? "set" : "nil",
+			COMP_INFO(ct->c, "macOS presentation: %s front-end visible=%s layer device=%s format=%lu drawable=%.0fx%.0f",
+			          cwm->frontend->name, cwm->frontend->is_visible(cwm) ? "true" : "false",
+			          [cwm->metal_layer device] != nil ? "set" : "nil",
 			          (unsigned long)[cwm->metal_layer pixelFormat], drawable_size.width, drawable_size.height);
 			cwm->logged_layer_state = true;
 		}
@@ -2077,7 +2171,7 @@ comp_window_macos_set_title(struct comp_target *ct, const char *title)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	@autoreleasepool {
-		[cwm->window setTitle:[NSString stringWithUTF8String:title]];
+		cwm->frontend->set_title(cwm, title);
 	}
 }
 
@@ -2133,9 +2227,9 @@ comp_window_macos_destroy(struct comp_target *ct)
 	}
 	u_pc_destroy(&cwm->base.upc);
 	@autoreleasepool {
-		[cwm->window orderOut:nil];
-		[cwm->window close];
-		[cwm->window release];
+		if (cwm->frontend != NULL) {
+			cwm->frontend->destroy(cwm);
+		}
 		[cwm->present_queue release];
 		for (uint32_t eye = 0; eye < 2; eye++) {
 			[cwm->passthrough_camera_textures[eye] release];
@@ -2146,7 +2240,6 @@ comp_window_macos_destroy(struct comp_target *ct)
 		[cwm->passthrough_pipeline release];
 		cwm->passthrough_pipeline = nil;
 		[cwm->metal_layer release];
-		[cwm->screen release];
 	}
 	pthread_mutex_destroy(&cwm->passthrough_mutex);
 	pthread_mutex_destroy(&cwm->present_worker_mutex);
@@ -2170,6 +2263,7 @@ comp_window_macos_create_base(struct comp_compositor *c)
 		return NULL;
 	}
 	atomic_init(&cwm->passthrough_shutdown, false);
+	cwm->frontend = &macos_window_frontend;
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
 	cwm->drawable_slot_enabled = want_drawable_slot;
 	/*
