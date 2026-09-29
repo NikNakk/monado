@@ -49,6 +49,71 @@ in `nextDrawable`. The judder ledger found that this "deterministically force[s]
 missed refreshes". So simply flipping the default to `legacy` would not
 reproduce the good result: the legacy *configuration* must be pinned too (D1).
 
+### Resolution from the best legacy configuration (2026-09-29)
+
+You supplied the environment of the best-performing run. The PSVR2 prediction
+values in it equal the current code defaults, and so do the seven settings
+removed on `cleanup/toggles`. Its presentation and scheduling settings resolve
+16 of the 28 (d) entries:
+
+| Toggle | Best run | Current default | New category |
+| --- | --- | --- | --- |
+| `XRT_MACOS_CAMETALDISPLAYLINK_MODE` | `legacy` | `driven` | (a), **default must change** |
+| `XRT_MACOS_DRAWABLE_SLOT` | `1` (newest-frame slot worker) | off | (a), **default must change** |
+| `XRT_MACOS_PRESENT_MIN_DURATION_US` | `8000` | 0 | (a), **default must change** |
+| `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `1` | off | (a), **default must change** |
+| `XRT_MACOS_COMPOSITOR_COMPUTATION_PCT` / `_CONSTRAINT_PCT` | 35 / 70 | 36 / 72 | (a), hard-code 35/70 |
+| `XRT_MACOS_XPC_IMPORTANCE` | `1` | off | (a), **default must change** (read in the *client* process) |
+| `XRT_MACOS_MAX_DRAWABLES` | 3 | 3 | (a), hard-code |
+| `XRT_MACOS_PRESENT_WORKER` (standalone worker) | 0 | 0 | (c) |
+| `XRT_MACOS_EARLY_DRAWABLE` | 0 | 0 | (c) |
+| `XRT_MACOS_PRESENT_STALE_SUBSTITUTE` | 0 (ignored in slot mode anyway) | 0 | (c) |
+| `XRT_MACOS_PRESENT_IMMEDIATE` | 0 (stale path only) | 0 | (c) |
+| `XRT_MACOS_UNIQUE_PRESENT_SLOTS` | 0 | 0 | (c) |
+| `XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US` | unset | unset | (c) |
+| `XRT_MACOS_CLIENT_FRAME_DIVISOR` / `_MIN_HOLD` | 0 / 0 | 0 / 0 | (c) |
+| `XRT_MACOS_COMPOSITOR_QOS` | 0 | 0 | (c) |
+
+Revised counts: **(a) 45, (b) 17, (c) 17, (d) 12**. The (c) figure includes the
+eight already removed.
+
+Consequences:
+
+- **Stale substitution becomes dead code.** It is ignored whenever the drawable
+  slot is on (`comp_window_macos_create` in `_latest.m`), so its ~400-line copy
+  of the presenter can simply be deleted. Finding 6 (the passthrough omission)
+  disappears with it, and part-2 step 2 (the substitution policy) is no longer
+  needed. `_latest.m` would then hold only refresh-rate switching and the
+  CAMetalLayer diagnostics.
+- **`PRESENT_MIN_DURATION_US` makes `PRESENT_PRELATCH_US` and
+  `PRESENT_MIN_LEAD_US` inert.** With a non-zero minimum duration, the
+  `presentDrawable:atTime:` shim in `comp_window_macos_trace_buffer.h` calls
+  `presentDrawable:afterMinimumDuration:` and discards the requested time. The
+  two lead/prelatch values then only shape the `target_output_ns` and
+  `metal_request_ns` trace columns. Once 8000 µs becomes the default, both are
+  (c).
+- **The 8000 µs minimum duration is tuned for 120 Hz** (8.33 ms period). At
+  90 Hz, reachable via refresh switching, the period is 11.1 ms, so 8 ms still
+  permits one present per refresh but no longer tracks the period. Consider
+  deriving it from `display_period_ns` when hard-coding it; that would need a
+  90 Hz headset check.
+- **`XRT_MACOS_XPC_IMPORTANCE` is read in the OpenXR application process**
+  (`ipc_client_compositor.c`), not by the service. It only took effect if the
+  app was started from a shell with that environment. If the service was
+  launched separately (LaunchAgent), check the service log for
+  `XR_XPC_IMPORTANCE acquired` to confirm the lease was actually used in the
+  best run.
+- The environment still mentions eight variables that `cleanup/toggles`
+  removes: seven set, plus `LATE_RENDER_LEAD_US`, which it unsets. They are
+  ignored harmlessly, but can be deleted from the file.
+
+Still (d), with no setting in the best run: `DISPLAY_RATE_DIVISOR`,
+`U_PACING_APP_FORCED_FRAME_DIVISOR`, `DISABLE_DISPLAY_SYNC`,
+`DISABLE_FRAMEBUFFER_ONLY`, `WAIT_SPIN`, `WAIT_HYBRID_US`, `PROCESS_ACTIVITY`,
+`METAL_XPC_EXTERNAL_BROKER`, `APP_RELEASE_SHARED_EVENT_WAIT_THREAD`,
+`DEPTH_REPROJECTION`, `CAMETALDISPLAYLINK_LATENCY` and `_THREAD_PRIORITY`. The
+last two go if driven mode is dropped (D1b).
+
 ## Cross-cutting findings
 
 1. **`PSVR2_TIMING_TRACE` is parsed 13 times, using four different truthiness
