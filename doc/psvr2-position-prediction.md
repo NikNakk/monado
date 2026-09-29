@@ -180,7 +180,10 @@ Finite parameters are clamped to these ranges; nonfinite parameters use defaults
 > acceleration and continuity on. `PSVR2_FULL_LINEAR_HORIZON` has since been
 > removed. Full-horizon translation is always used, because the shortened horizon
 > was a confirmed defect. `horizon.csv` still writes
-> `full_linear_horizon_enabled`, always as `1`. See `doc/macos-env-toggles.md`.
+> `full_linear_horizon_enabled`, always as `1`. `PSVR2_FILTERED_LINEAR_PREDICTION`
+> has also been removed, because EMA velocity was disfavoured. The EMA candidate is
+> still scored in the traces using `PSVR2_LINEAR_VELOCITY_ALPHA`, and
+> `filter_enabled` is always `0`. See `doc/macos-env-toggles.md`.
 `PSVR2_FILTERED_LINEAR_PREDICTION` and `PSVR2_LINEAR_VELOCITY_ALPHA` are retained.
 Both new booleans at zero preserve legacy behavior. `FULL_LINEAR_HORIZON=1`,
 `FILTERED_LINEAR_PREDICTION=1`, `ACCELERATION_PREDICTION=0` tests full-horizon EMA.
