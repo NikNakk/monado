@@ -127,6 +127,8 @@ struct comp_window_macos
 	struct comp_target_swapchain base;
 	NSScreen *screen;
 	NSWindow *window;
+	/* The headset display, fixed for the session. */
+	CGDirectDisplayID display_id;
 	CAMetalLayer *metal_layer;
 	id<MTLCommandQueue> present_queue;
 	id<MTLTexture> metal_images[MACOS_TARGET_IMAGE_COUNT];
@@ -1030,6 +1032,7 @@ comp_window_macos_init(struct comp_target *ct)
 
 		cwm->screen = [screen retain];
 		cwm->window = window;
+		cwm->display_id = display_id;
 		cwm->metal_layer = metal_layer;
 		cwm->present_queue = present_queue;
 		cwm->pixel_width = (uint32_t)pixel_width;
@@ -2244,11 +2247,7 @@ static void
 macos_log_refresh_mode_candidates(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	if (cwm->screen == nil) {
-		return;
-	}
-
-	CGDirectDisplayID display_id = get_display_id(cwm->screen);
+	CGDirectDisplayID display_id = cwm->display_id;
 	if (display_id == kCGNullDirectDisplay) {
 		COMP_WARN(ct->c, "Could not enumerate PS VR2 refresh modes: display ID is unavailable");
 		return;
@@ -2339,10 +2338,7 @@ macos_log_refresh_mode_candidates(struct comp_target *ct)
 static uint32_t
 macos_collect_refresh_rates(struct comp_window_macos *cwm, float *out_rates)
 {
-	if (cwm->screen == nil) {
-		return 0;
-	}
-	CGDirectDisplayID display_id = get_display_id(cwm->screen);
+	CGDirectDisplayID display_id = cwm->display_id;
 	if (display_id == kCGNullDirectDisplay) {
 		return 0;
 	}
@@ -2398,10 +2394,7 @@ macos_collect_refresh_rates(struct comp_window_macos *cwm, float *out_rates)
 static CGDisplayModeRef
 macos_copy_refresh_mode(struct comp_window_macos *cwm, float requested_hz, float *out_selected_hz)
 {
-	if (cwm->screen == nil) {
-		return NULL;
-	}
-	CGDirectDisplayID display_id = get_display_id(cwm->screen);
+	CGDirectDisplayID display_id = cwm->display_id;
 	CGDisplayModeRef current_mode = display_id != kCGNullDirectDisplay ? CGDisplayCopyDisplayMode(display_id) : NULL;
 	if (current_mode == NULL) {
 		return NULL;
@@ -2471,7 +2464,7 @@ static xrt_result_t
 comp_window_macos_get_current_refresh_rate_physical(struct comp_target *ct, float *out_rate)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	CGDirectDisplayID display_id = cwm->screen != nil ? get_display_id(cwm->screen) : kCGNullDirectDisplay;
+	CGDirectDisplayID display_id = cwm->display_id;
 	CGDisplayModeRef mode = display_id != kCGNullDirectDisplay ? CGDisplayCopyDisplayMode(display_id) : NULL;
 	if (mode != NULL) {
 		double refresh_hz = CGDisplayModeGetRefreshRate(mode);
@@ -2535,10 +2528,7 @@ static xrt_result_t
 comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float requested_hz)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	if (cwm->screen == nil) {
-		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
-	}
-	CGDirectDisplayID display_id = get_display_id(cwm->screen);
+	CGDirectDisplayID display_id = cwm->display_id;
 	if (display_id == kCGNullDirectDisplay) {
 		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
 	}
