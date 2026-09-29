@@ -36,7 +36,6 @@
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_client_frame_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_min_hold, "XRT_MACOS_CLIENT_FRAME_MIN_HOLD", 0)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_qos, "XRT_MACOS_COMPOSITOR_QOS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_time_constraint, "XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_compositor_computation_pct, "XRT_MACOS_COMPOSITOR_COMPUTATION_PCT", 36)
 DEBUG_GET_ONCE_NUM_OPTION(macos_compositor_constraint_pct, "XRT_MACOS_COMPOSITOR_CONSTRAINT_PCT", 72)
@@ -247,33 +246,6 @@ macos_trace_multi_compositor_latch_frame_locked(struct multi_compositor *mc,
 	funlockfile(file);
 }
 
-/*
- * The macOS system compositor's render loop is the thread that calls
- * os_thread_helper_name() in multi_main_loop(). Linux already tries to promote
- * that exact thread to realtime priority. Keep the macOS QoS experiment local
- * to this translation unit and opt-in so default scheduling remains unchanged.
- */
-static inline void
-macos_os_thread_helper_name_with_qos(struct os_thread_helper *oth, const char *name)
-{
-	os_thread_helper_name(oth, name);
-
-	if (!debug_get_bool_option_macos_compositor_qos()) {
-		return;
-	}
-
-	int ret = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
-	if (ret == 0) {
-		fprintf(stderr,
-		        "INFO: macOS diagnostic: Multi Client Module compositor thread promoted to USER_INTERACTIVE QoS\n");
-	} else {
-		fprintf(stderr,
-		        "WARN: macOS diagnostic: failed to promote Multi Client Module compositor thread to USER_INTERACTIVE "
-		        "QoS: %s (%d)\n",
-		        strerror(ret), ret);
-	}
-}
-
 static inline uint32_t
 macos_compositor_ns_to_mach_ticks(uint64_t ns, const mach_timebase_info_data_t *timebase)
 {
@@ -369,11 +341,9 @@ macos_xrt_comp_predict_frame_with_time_constraint(struct xrt_compositor *xc,
 /*
  * comp_multi_system.c has exactly one delivery call and one latch call, both
  * inside transfer_layers_locked where system_frame_id and display_time_ns are
- * available. It names the render loop once at multi_main_loop() entry and calls
- * xrt_comp_predict_frame() once per physical compositor tick. Keep the public
+ * available. It calls xrt_comp_predict_frame() once per physical compositor tick. Keep the public
  * interfaces unchanged and wrap only this Apple build translation unit.
  */
-#define os_thread_helper_name(oth, name) macos_os_thread_helper_name_with_qos((oth), (name))
 #define xrt_comp_predict_frame(xc, out_frame_id, out_wake_up_time_ns, out_predicted_gpu_time_ns,                  \
                                out_predicted_display_time_ns, out_predicted_display_period_ns)                     \
 	macos_xrt_comp_predict_frame_with_time_constraint((xc), (out_frame_id), (out_wake_up_time_ns),              \
