@@ -1,0 +1,40 @@
+name: Linux build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Default-options build and test run, to keep non-Apple platforms building.
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            glslang-tools \
+            libeigen3-dev \
+            libhidapi-dev \
+            libudev-dev \
+            libusb-1.0-0-dev \
+            libvulkan-dev \
+            ninja-build \
+            pkg-config \
+            python3
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

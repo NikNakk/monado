@@ -282,6 +282,16 @@ class Call:
 
         write_decl(f, 'xrt_result_t', 'ipc_handle_' + self.name, args)
 
+    def write_ifdef_start(self, f):
+        """Open a preprocessor guard if this call is platform specific."""
+        if self.ifdef:
+            f.write("\n#ifdef " + self.ifdef + "\n")
+
+    def write_ifdef_end(self, f):
+        """Close the preprocessor guard opened by write_ifdef_start."""
+        if self.ifdef:
+            f.write("#endif // " + self.ifdef + "\n")
+
     @property
     def needs_msg_struct(self):
         """Decide whether this call needs a msg struct."""
@@ -296,6 +306,7 @@ class Call:
         self.in_handles = None
         self.out_handles = None
         self.varlen = False
+        self.ifdef = None
         for key, val in data.items():
             if key == 'id':
                 self.id = val
@@ -309,6 +320,8 @@ class Call:
                 self.in_handles = HandleType(val)
             elif key == 'varlen':
                 self.varlen = val
+            elif key == 'ifdef':
+                self.ifdef = val
             else:
                 raise RuntimeError("Unrecognized key")
         if not self.id:

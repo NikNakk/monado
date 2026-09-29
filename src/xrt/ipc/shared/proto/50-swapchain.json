@@ -35,6 +35,7 @@
 	},
 
 	"swapchain_import_metal": {
+		"ifdef": "__APPLE__",
 		"in": [
 			{"name": "info", "type": "struct xrt_swapchain_create_info"},
 			{"name": "token", "type": "uint64_t"},
@@ -46,6 +47,7 @@
 	},
 
 	"swapchain_import_metal_bootstrap": {
+		"ifdef": "__APPLE__",
 		"in": [
 			{"name": "info", "type": "struct xrt_swapchain_create_info"},
 			{"name": "args", "type": "struct ipc_arg_swapchain_metal_bootstrap"}
@@ -56,6 +58,7 @@
 	},
 
 	"swapchain_import_iosurface": {
+		"ifdef": "__APPLE__",
 		"in": [
 			{"name": "info", "type": "struct xrt_swapchain_create_info"},
 			{"name": "args", "type": "struct ipc_arg_swapchain_iosurface"}
