@@ -14,6 +14,7 @@
 #include "os/os_time.h"
 
 #if defined(XRT_OS_OSX)
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #endif
@@ -40,11 +41,22 @@
 #endif
 
 #if defined(XRT_OS_OSX)
+/*!
+ * Read a boolean wait diagnostic from the environment once and cache it.
+ * u_wait_until() runs in the compositor's pacing loop, so it must not call
+ * getenv() on every wait. A cache value of -1 means "not read yet"; concurrent
+ * first calls store the same result.
+ */
 static inline bool
-u_wait_macos_env_enabled(const char *name)
+u_wait_macos_env_enabled(atomic_int *cache, const char *name)
 {
-	const char *value = getenv(name);
-	return value != NULL && value[0] != '\0' && value[0] != '0';
+	int cached = atomic_load_explicit(cache, memory_order_relaxed);
+	if (cached < 0) {
+		const char *value = getenv(name);
+		cached = value != NULL && value[0] != '\0' && value[0] != '0';
+		atomic_store_explicit(cache, cached, memory_order_relaxed);
+	}
+	return cached != 0;
 }
 #endif
 
@@ -70,8 +82,10 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 	uint32_t delay = (uint32_t)(until_ns - now_ns - U_WAIT_MEASURED_SCHEDULER_LATENCY_NS);
 
 #if defined(XRT_OS_OSX)
-	bool trace_wait = u_wait_macos_env_enabled("XRT_MACOS_WAIT_TIMING");
-	bool spin_wait = u_wait_macos_env_enabled("XRT_MACOS_WAIT_SPIN");
+	static atomic_int trace_wait_cache = -1;
+	static atomic_int spin_wait_cache = -1;
+	bool trace_wait = u_wait_macos_env_enabled(&trace_wait_cache, "XRT_MACOS_WAIT_TIMING");
+	bool spin_wait = u_wait_macos_env_enabled(&spin_wait_cache, "XRT_MACOS_WAIT_SPIN");
 	uint64_t wait_begin_ns = trace_wait ? os_monotonic_get_ns() : 0;
 	uint64_t park_requested_ns = 0;
 	uint64_t park_actual_ns = 0;
