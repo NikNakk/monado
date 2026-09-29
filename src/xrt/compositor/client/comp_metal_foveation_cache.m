@@ -34,6 +34,64 @@ clampf01(float value)
 	return value;
 }
 
+
+static void
+center_to_zone(const struct xrt_foveation_view_state *view, int *out_x, int *out_y)
+{
+	if (view == NULL || !view->center_valid) {
+		*out_x = -1;
+		*out_y = -1;
+		return;
+	}
+
+	const float u = clampf01(0.5f * (view->center.x + 1.0f));
+	const float v = clampf01(0.5f * (1.0f - view->center.y));
+	const int zone_count = M_METAL_FOVEATION_ZONE_COUNT;
+	*out_x = (int)fminf((float)(zone_count - 1), floorf(u * (float)zone_count));
+	*out_y = (int)fminf((float)(zone_count - 1), floorf(v * (float)zone_count));
+}
+
+static bool
+foveation_maps_equivalent(const struct xrt_foveation_state *a,
+                          const struct xrt_foveation_state *b)
+{
+	if (a->enabled != b->enabled) {
+		return false;
+	}
+	if (!a->enabled) {
+		return true;
+	}
+
+	if (a->center_rate != b->center_rate ||
+	    a->middle_rate != b->middle_rate ||
+	    a->peripheral_rate != b->peripheral_rate ||
+	    a->center_half_extent != b->center_half_extent ||
+	    a->middle_half_extent != b->middle_half_extent ||
+	    a->view_count != b->view_count) {
+		return false;
+	}
+
+	for (uint32_t i = 0; i < a->view_count; ++i) {
+		if (a->views[i].center_valid != b->views[i].center_valid) {
+			return false;
+		}
+		int ax = -1, ay = -1, bx = -1, by = -1;
+		center_to_zone(&a->views[i], &ax, &ay);
+		center_to_zone(&b->views[i], &bx, &by);
+		if (ax != bx || ay != by) {
+			return false;
+		}
+	}
+
+	return true;
+}
+
+static void
+release_cached_entries(struct comp_metal_foveation_cache *cache)
+{
+	release_cached_entries(cache);
+}
+
 bool
 comp_metal_foveation_cache_init(struct comp_metal_foveation_cache *cache,
                                 void *metal_device,
@@ -96,10 +154,20 @@ comp_metal_foveation_cache_set(struct comp_metal_foveation_cache *cache,
 	}
 
 	os_mutex_lock(&cache->mutex);
+	const bool same_map = foveation_maps_equivalent(&cache->state, state);
 	cache->state = *state;
-	cache->revision++;
-	if (cache->revision == 0) {
-		cache->revision = 1;
+	if (!same_map) {
+		/*
+		 * Once an application accepts a new revision, pointers returned for
+		 * the old revision are no longer part of the API state. Metal command
+		 * encoders retain objects they have already encoded, so dropping the
+		 * cache's ownership here does not invalidate submitted GPU work.
+		 */
+		release_cached_entries(cache);
+		cache->revision++;
+		if (cache->revision == 0) {
+			cache->revision = 1;
+		}
 	}
 	os_mutex_unlock(&cache->mutex);
 
@@ -159,11 +227,13 @@ comp_metal_foveation_cache_get(struct comp_metal_foveation_cache *cache,
 	}
 
 	const struct xrt_foveation_view_state *view = &state.views[view_index];
-	const float u = clampf01(0.5f * (view->center.x + 1.0f));
-	const float v = clampf01(0.5f * (1.0f - view->center.y));
-	const int zone_count = M_METAL_FOVEATION_ZONE_COUNT;
-	const int zone_x = (int)fminf((float)(zone_count - 1), floorf(u * (float)zone_count));
-	const int zone_y = (int)fminf((float)(zone_count - 1), floorf(v * (float)zone_count));
+	int zone_x = -1;
+	int zone_y = -1;
+	center_to_zone(view, &zone_x, &zone_y);
+	if (zone_x < 0 || zone_y < 0) {
+		os_mutex_unlock(&cache->mutex);
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
 
 	struct u_foveation_profile profile = {
 	    .name = "xrt",
