@@ -223,6 +223,13 @@ struct probe_options
 	const char *out_prefix;
 	bool realtime;
 
+	/*
+	 * Render at most once per wake, for the newest vblank. Without this a
+	 * stall leaves several display-link ticks counted in the semaphore, and
+	 * the loop renders them back to back, refilling the present queue.
+	 */
+	bool coalesce_vblanks;
+
 	// Latency guard: drop a frame to drain a present queue stuck deep.
 	bool latency_guard;
 	double guard_window_ms;
@@ -312,6 +319,8 @@ print_usage(const char *argv0)
 	        "                renders for at most S and should outlast the game\n"
 	        "  --out PREFIX  CSV path prefix (default /tmp/layer_host_probe)\n"
 	        "  --rt 0|1      realtime (time-constraint) render thread, as Monado's compositor (default 1)\n"
+	        "  --coalesce-vblanks 0|1     render once per wake for the newest vblank, dropping\n"
+	        "                             ticks missed during a stall (default 1)\n"
 	        "  --latency-guard 0|1        skip a frame when presents have been 2+ periods late for\n"
 	        "                             --guard-window-ms (default 250), at most every\n"
 	        "                             --guard-min-interval-ms (default 500) (default 0)\n"
@@ -347,6 +356,7 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 	    .min_duration_us = 8000.0,
 	    .out_prefix = "/tmp/layer_host_probe",
 	    .realtime = true,
+	    .coalesce_vblanks = true,
 	    .guard_window_ms = 250.0,
 	    .guard_min_interval_ms = 500.0,
 	    .warmup = 5.0,
@@ -421,6 +431,8 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 			opts->out_prefix = value;
 		} else if (strcmp(arg, "--rt") == 0) {
 			opts->realtime = atoi(value) != 0;
+		} else if (strcmp(arg, "--coalesce-vblanks") == 0) {
+			opts->coalesce_vblanks = atoi(value) != 0;
 		} else if (strcmp(arg, "--latency-guard") == 0) {
 			opts->latency_guard = atoi(value) != 0;
 		} else if (strcmp(arg, "--guard-window-ms") == 0) {
@@ -696,6 +708,7 @@ display_link_callback(CVDisplayLinkRef link,
 	_Atomic int _deepPresents;
 	double _lastDrainS;
 	size_t _drains;
+	size_t _coalescedTicks;
 	double _periodSeconds;
 	bool _realtime;
 
@@ -869,6 +882,11 @@ display_link_callback(CVDisplayLinkRef link,
 		if (dispatch_semaphore_wait(_vblank, timeout) != 0) {
 			continue;
 		}
+		if (_opts.coalesce_vblanks) {
+			while (dispatch_semaphore_wait(_vblank, DISPATCH_TIME_NOW) == 0) {
+				_coalescedTicks++;
+			}
+		}
 		if ([self shouldDrainQueue]) {
 			continue;
 		}
@@ -977,7 +995,7 @@ display_link_callback(CVDisplayLinkRef link,
 	        "  presented - vblank target ms: median=%.3f p95=%.3f\n"
 	        "  presented - CPU submit ms: median=%.3f p95=%.3f\n"
 	        "  render thread: realtime=%s priority min=%.0f median=%.0f  frames throttled (<=4)=%.2f%%\n"
-	        "  latency guard: %s drains=%zu\n",
+	        "  latency guard: %s drains=%zu  vblank coalescing: %s ticks dropped=%zu\n",
 	        _role, mode_name(_opts.mode), present_name(_opts.present), _opts.min_duration_us,
 	        1.0 / _periodSeconds, _count, presented_count, _count - presented_count, _nilDrawables,
 	        percentile(intervals, interval_count, 50), percentile(intervals, interval_count, 95),
@@ -987,7 +1005,8 @@ display_link_callback(CVDisplayLinkRef link,
 	        percentile(to_submit, presented_count, 50), percentile(to_submit, presented_count, 95),
 	        _realtime ? "yes" : "no", _count > 0 ? priorities[0] : -1.0, percentile(priorities, _count, 50),
 	        _count > 0 ? 100.0 * (double)throttled_frames / (double)_count : 0.0,
-	        _opts.latency_guard ? "on" : "off", _drains);
+	        _opts.latency_guard ? "on" : "off", _drains, _opts.coalesce_vblanks ? "on" : "off",
+	        _coalescedTicks);
 
 	free(intervals);
 	free(to_target);
@@ -1797,6 +1816,7 @@ spawn_client(const char *self_path,
 	char guard_window_str[32], guard_interval_str[32];
 	snprintf(guard_window_str, sizeof(guard_window_str), "%.3f", opts->guard_window_ms);
 	snprintf(guard_interval_str, sizeof(guard_interval_str), "%.3f", opts->guard_min_interval_ms);
+	PUSH_ARG("--coalesce-vblanks"), PUSH_ARG(opts->coalesce_vblanks ? "1" : "0");
 	PUSH_ARG("--latency-guard"), PUSH_ARG(opts->latency_guard ? "1" : "0");
 	PUSH_ARG("--guard-window-ms"), PUSH_ARG(guard_window_str);
 	PUSH_ARG("--guard-min-interval-ms"), PUSH_ARG(guard_interval_str);
@@ -2683,6 +2703,8 @@ run_bootstrap_host(const struct probe_options *opts, const char *self_path)
 		@(opts->out_prefix),
 		@"--rt",
 		opts->realtime ? @"1" : @"0",
+		@"--coalesce-vblanks",
+		opts->coalesce_vblanks ? @"1" : @"0",
 		@"--latency-guard",
 		opts->latency_guard ? @"1" : @"0",
 		@"--guard-window-ms",
