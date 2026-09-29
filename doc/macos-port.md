@@ -39,7 +39,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Swift VR home/shell | **Working experimental shell** | SwiftXRShell provides launcher/home, immersive video, desktop/panel support and system-overlay experiments. |
 | PS Sense 3DoF, buttons and haptics | **Working experimental** | Native IOKit HID discovery/input is present on the integration branch. Sense also maps to `XR_KHR_generic_controller` (opt-in, `XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC`). |
 | PS Sense optical 6DoF | **In development on a separate branch** | Static/recorded optical results are encouraging, but dynamic tracking is not yet reliable enough to merge. |
-| Depth layers | **Working experimental** | `XR_KHR_composition_layer_depth` is exposed for Metal and depth-aware positional reprojection is available. |
+| Depth layers | **Off by default** | `XR_KHR_composition_layer_depth` is not exposed on macOS unless configured with `-DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON`; depth-aware reprojection additionally needs `XRT_COMPOSITOR_DEPTH_REPROJECTION=1`. Depth swapchain formats (including `Depth32Float_Stencil8`) are still creatable. |
 | Wine OpenXR / OpenVR | **Working experimental** | Native Monado remains the compositor/runtime; Windows D3D11 clients run through Wine/DXMT and OpenVR through OpenComposite or xrizer. |
 | SteamVR games under Wine | **Working for a small tested set** | At least several SteamVR titles have reached runnable/interactive states; Half-Life: Alyx is the most heavily exercised path. |
 | PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; hardware validation/calibration refinement remains. |
@@ -147,7 +147,8 @@ The macOS port now supports substantially more than the original bring-up:
 - service-backed swapchains;
 - projection layers;
 - cube composition layers used by newer WebXR Layers work;
-- `XR_KHR_composition_layer_depth` for native Metal clients;
+- `XR_KHR_composition_layer_depth` for native Metal clients (opt-in at
+  configure time; off by default on macOS);
 - `XR_FB_passthrough` layers rendered by the final Metal presentation pass;
 - `XR_EXT_eye_gaze_interaction` on PS VR2;
 - opt-in `XR_FB_foveation`, `XR_FB_foveation_configuration`,

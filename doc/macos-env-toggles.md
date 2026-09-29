@@ -111,7 +111,10 @@ holes, and none of the disocclusion-fill approaches on
 Metal depth-format mapping from that branch was ported: depth swapchains
 (including `Depth32Float_Stencil8`, Unreal's first choice) can now be created,
 so apps that submit depth layers would otherwise switch depth reprojection on.
-Set `XRT_COMPOSITOR_DEPTH_REPROJECTION=1` to experiment.
+Set `XRT_COMPOSITOR_DEPTH_REPROJECTION=1` to experiment. The
+`XR_KHR_composition_layer_depth` extension itself now also defaults off on
+Apple (`XRT_FEATURE_OPENXR_LAYER_DEPTH`), so apps don't render and submit depth
+the compositor would ignore; depth experiments need both switches.
 
 `APP_RELEASE_SHARED_EVENT_WAIT_THREAD` is resolved as (a): **turn it on by default
 in service builds**, as the code comment always intended.
