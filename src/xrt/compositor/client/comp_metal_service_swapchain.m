@@ -402,16 +402,11 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	xrt_result_t xret = ipc_client_compositor_import_iosurface_ids(
 	    link->xcn, native_info, image_count, iosurface_ids, &native_xsc);
 	if (xret != XRT_SUCCESS || native_xsc == NULL) {
-		if (xret == XRT_ERROR_NOT_IMPLEMENTED) {
-			U_LOG_D("Metal service IOSurfaceID import unavailable on this IPC transport; "
-			        "using shared Metal handles");
-		} else {
-			U_LOG_E("Metal service IOSurfaceID import failed: result=%d images=%u size=%ux%u",
-			        xret,
-			        image_count,
-			        info->width,
-			        info->height);
-		}
+		U_LOG_E("Metal service IOSurfaceID import failed: result=%d images=%u size=%ux%u",
+		        xret,
+		        image_count,
+		        info->width,
+		        info->height);
 		release_texture_array(textures, image_count);
 		metal_service_release_iosurfaces(surfaces, image_count);
 		return xret != XRT_SUCCESS ? xret : XRT_ERROR_IPC_FAILURE;
