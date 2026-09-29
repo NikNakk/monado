@@ -178,3 +178,62 @@ oxr_foveation_resolve_fixed_centres(const struct xrt_fov *fovs,
 	state->view_count = view_count;
 	return true;
 }
+
+
+bool
+oxr_foveation_resolve_gaze_centres(const struct xrt_vec3 *view_direction,
+                                   const struct xrt_fov *fovs,
+                                   uint32_t view_count,
+                                   float vertical_offset_degrees,
+                                   struct xrt_foveation_state *state)
+{
+	if (view_direction == NULL || fovs == NULL || state == NULL ||
+	    view_count == 0 || view_count > XRT_MAX_VIEWS) {
+		return false;
+	}
+
+	const float horizontal = sqrtf(view_direction->x * view_direction->x +
+	                               view_direction->z * view_direction->z);
+	if (!(horizontal > 0.000001f) || !isfinite(horizontal) ||
+	    !isfinite(view_direction->x) || !isfinite(view_direction->y) ||
+	    !isfinite(view_direction->z) || view_direction->z >= -0.000001f) {
+		return false;
+	}
+
+	const float yaw = atan2f(view_direction->x, -view_direction->z);
+	const float pitch = atan2f(view_direction->y, horizontal) +
+	                    vertical_offset_degrees * 0.01745329251994329577f;
+	const float tangent_x = tanf(yaw);
+	const float tangent_y = tanf(pitch);
+	if (!isfinite(tangent_x) || !isfinite(tangent_y)) {
+		return false;
+	}
+
+	for (uint32_t i = 0; i < view_count; ++i) {
+		const float left = tanf(fovs[i].angle_left);
+		const float right = tanf(fovs[i].angle_right);
+		const float down = tanf(fovs[i].angle_down);
+		const float up = tanf(fovs[i].angle_up);
+		const float width = right - left;
+		const float height = up - down;
+		if (!(width > 0.0f) || !(height > 0.0f) || !isfinite(width) || !isfinite(height)) {
+			return false;
+		}
+
+		float x_ndc = 2.0f * ((tangent_x - left) / width) - 1.0f;
+		float y_ndc = 2.0f * ((tangent_y - down) / height) - 1.0f;
+		if (!isfinite(x_ndc) || !isfinite(y_ndc)) {
+			return false;
+		}
+
+		x_ndc = fmaxf(-1.0f, fminf(1.0f, x_ndc));
+		y_ndc = fmaxf(-1.0f, fminf(1.0f, y_ndc));
+
+		state->views[i].center.x = x_ndc;
+		state->views[i].center.y = y_ndc;
+		state->views[i].center_valid = true;
+	}
+
+	state->view_count = view_count;
+	return true;
+}
