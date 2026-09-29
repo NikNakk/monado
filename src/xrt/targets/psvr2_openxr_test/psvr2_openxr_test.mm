@@ -468,6 +468,9 @@ add_world_text(diagnostic_scene &scene,
 	}
 }
 
+using diagnostic_scene_augment_fn = void (*)(diagnostic_scene &);
+static diagnostic_scene_augment_fn g_diagnostic_scene_augment = nullptr;
+
 static void
 initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 {
@@ -585,6 +588,10 @@ initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 	fprintf(stderr, "psvr2-openxr-test: diagnostic world contains %zu world-locked boxes over 360 degrees\n",
 	        scene.world_instances.size());
 	fprintf(stderr, "psvr2-openxr-test: foveation detail wall added at 2.75 m — checker, multiscale, text acuity chart\n");
+
+	if (g_diagnostic_scene_augment != nullptr) {
+		g_diagnostic_scene_augment(scene);
+	}
 }
 
 static void
@@ -1355,6 +1362,10 @@ attach_action_sets(application &app)
 	attach_info.countActionSets = count;
 	attach_info.actionSets = action_sets.data();
 	check_xr(app.xr.attach_session_action_sets(app.session, &attach_info), "xrAttachSessionActionSets");
+	fprintf(stderr, "psvr2-openxr-test: attached %u OpenXR action set%s%s%s\n",
+	        count, count == 1 ? "" : "s",
+	        app.gaze_action_set != XR_NULL_HANDLE ? " [gaze]" : "",
+	        app.controller_action_set != XR_NULL_HANDLE ? " [controller]" : "");
 }
 
 static std::string
@@ -2119,6 +2130,22 @@ refresh_runtime_foveation_profile(application &app)
 	                                      xr_foveation_level_from_index(app.foveation_profile_index),
 	                                      &xr_profile),
 	         "xrGetFoveationProfileMNDX");
+
+	const bool valid_profile =
+	    std::isfinite(xr_profile.centerRate) && xr_profile.centerRate > 0.0f &&
+	    std::isfinite(xr_profile.middleRate) && xr_profile.middleRate > 0.0f &&
+	    std::isfinite(xr_profile.peripheralRate) && xr_profile.peripheralRate > 0.0f &&
+	    std::isfinite(xr_profile.centerHalfExtent) && xr_profile.centerHalfExtent > 0.0f &&
+	    std::isfinite(xr_profile.middleHalfExtent) &&
+	    xr_profile.middleHalfExtent > xr_profile.centerHalfExtent;
+	if (!valid_profile) {
+		fprintf(stderr,
+		        "psvr2-openxr-test: invalid runtime fused foveation profile "
+		        "rates=(%.3f,%.3f,%.3f) extents=(%.5f,%.5f)\n",
+		        xr_profile.centerRate, xr_profile.middleRate, xr_profile.peripheralRate,
+		        xr_profile.centerHalfExtent, xr_profile.middleHalfExtent);
+		fatal("runtime returned an invalid fused foveation profile");
+	}
 
 	const struct u_foveation_profile *named = u_foveation_profile_get(app.foveation_profile_index);
 	app.runtime_foveation_profile.name = named != nullptr ? named->name : "runtime";
