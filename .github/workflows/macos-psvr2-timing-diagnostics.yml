@@ -44,6 +44,9 @@ jobs:
           -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
           -DXRT_BUILD_DRIVER_QWERTY=OFF
           -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_FEATURE_OPENXR_FB_SWAPCHAIN_UPDATE_STATE=ON
+          -DXRT_FEATURE_OPENXR_FB_FOVEATION=ON
+          -DXRT_FEATURE_OPENXR_FB_FOVEATION_CONFIGURATION=ON
       - name: Build standards targets
         run: >-
           cmake --build build-foveation
