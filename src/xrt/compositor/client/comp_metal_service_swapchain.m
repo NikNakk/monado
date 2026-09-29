@@ -216,14 +216,14 @@ metal_service_swapchain_get_packed_foveation_state(
 }
 
 static xrt_result_t
-metal_service_swapchain_get_active_foveation_state(
+metal_service_swapchain_get_image_foveation_state(
     struct xrt_swapchain_metal *xscm,
+    uint32_t image_index,
     uint32_t array_layer,
     struct xrt_metal_foveation_state *out_state)
 {
 	struct metal_service_swapchain *sc = (struct metal_service_swapchain *)xscm;
-	return comp_metal_foveation_cache_get_active(
-	    &sc->foveation, array_layer, out_state);
+	return comp_metal_foveation_cache_get_image(&sc->foveation, image_index, array_layer, out_state);
 }
 
 static xrt_result_t
@@ -274,7 +274,12 @@ metal_service_swapchain_barrier_image(struct xrt_swapchain *xsc,
 static xrt_result_t
 metal_service_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
-	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
+	xrt_result_t xret = xrt_swapchain_release_image(to_native_swapchain(xsc), index);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	// The released image now carries the map it was rendered with.
+	return comp_metal_foveation_cache_bind_released_image(&metal_service_swapchain(xsc)->foveation, index);
 }
 
 static IOSurfaceRef
@@ -448,14 +453,15 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	sc->base.get_foveation_metal_state = metal_service_swapchain_get_foveation_state;
 	sc->base.get_foveation_metal_packed_state =
 	    metal_service_swapchain_get_packed_foveation_state;
-	sc->base.get_foveation_metal_active_state =
-	    metal_service_swapchain_get_active_foveation_state;
+	sc->base.get_foveation_metal_image_state =
+	    metal_service_swapchain_get_image_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = image_count;
 	sc->xscn = xscn;
 	sc->command_queue = [link->command_queue retain];
 	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device,
-	                                      info->width, info->height, info->array_size)) {
+	                                      info->width, info->height, info->array_size,
+	                                      sc->base.base.image_count)) {
 		metal_service_swapchain_destroy(&sc->base.base);
 		release_texture_array(textures, image_count);
 		metal_service_release_iosurfaces(surfaces, image_count);
@@ -650,14 +656,15 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	sc->base.get_foveation_metal_state = metal_service_swapchain_get_foveation_state;
 	sc->base.get_foveation_metal_packed_state =
 	    metal_service_swapchain_get_packed_foveation_state;
-	sc->base.get_foveation_metal_active_state =
-	    metal_service_swapchain_get_active_foveation_state;
+	sc->base.get_foveation_metal_image_state =
+	    metal_service_swapchain_get_image_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xsccp.image_count;
 	sc->xscn = xscn;
 	sc->command_queue = [link->command_queue retain];
 	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device,
-	                                      info->width, info->height, info->array_size)) {
+	                                      info->width, info->height, info->array_size,
+	                                      sc->base.base.image_count)) {
 		metal_service_swapchain_destroy(&sc->base.base);
 		release_texture_array(textures, xsccp.image_count);
 		return XRT_ERROR_ALLOCATION;

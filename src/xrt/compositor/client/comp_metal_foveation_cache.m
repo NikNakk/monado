@@ -7,6 +7,7 @@
 #include "metal/m_metal_foveation.h"
 #include "foveation/u_foveation.h"
 
+#include <assert.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -16,13 +17,15 @@ _Static_assert(M_METAL_FOVEATION_ZONE_COUNT == XRT_METAL_FOVEATION_ZONE_COUNT,
 
 struct comp_metal_foveation_cache_entry
 {
+	//! Owners: lookup list, layer selections and image bindings.
+	uint32_t refs;
 	uint32_t revision;
 	uint32_t view_index;
-	uint32_t array_layer;
 	bool packed;
 	uint32_t packed_view_count;
 	struct xrt_metal_foveation_view_layout packed_views[XRT_MAX_VIEWS];
 	struct m_metal_foveation_map map;
+	//! Lookup-list link, only meaningful while the list holds a reference.
 	struct comp_metal_foveation_cache_entry *next;
 };
 
@@ -89,27 +92,118 @@ foveation_maps_equivalent(const struct xrt_foveation_state *a,
 	return true;
 }
 
-static void
-clear_active_entries(struct comp_metal_foveation_cache *cache)
+/*
+ *
+ * Entry ownership. All functions below require cache->mutex to be held.
+ *
+ */
+
+static struct comp_metal_foveation_cache_entry *
+entry_ref(struct comp_metal_foveation_cache_entry *entry)
 {
-	if (cache->active_entries != NULL) {
-		memset(cache->active_entries, 0, sizeof(void *) * cache->array_size);
+	if (entry != NULL) {
+		entry->refs++;
+	}
+	return entry;
+}
+
+static void
+entry_unref(struct comp_metal_foveation_cache *cache, struct comp_metal_foveation_cache_entry *entry)
+{
+	if (entry == NULL) {
+		return;
+	}
+	assert(entry->refs > 0);
+	if (--entry->refs > 0) {
+		return;
+	}
+	m_metal_foveation_map_release(&entry->map);
+	free(entry);
+	assert(cache->live_entry_count > 0);
+	cache->live_entry_count--;
+}
+
+//! Replace one owned slot, taking a reference on @p entry first.
+static void
+slot_assign(struct comp_metal_foveation_cache *cache, void **slot, struct comp_metal_foveation_cache_entry *entry)
+{
+	struct comp_metal_foveation_cache_entry *old = (struct comp_metal_foveation_cache_entry *)*slot;
+	if (old == entry) {
+		return;
+	}
+	*slot = entry_ref(entry);
+	entry_unref(cache, old);
+}
+
+static void
+clear_lookup_entries(struct comp_metal_foveation_cache *cache)
+{
+	struct comp_metal_foveation_cache_entry *entry = (struct comp_metal_foveation_cache_entry *)cache->entries;
+	cache->entries = NULL;
+	cache->entry_count = 0;
+	while (entry != NULL) {
+		struct comp_metal_foveation_cache_entry *next = entry->next;
+		entry->next = NULL;
+		entry_unref(cache, entry);
+		entry = next;
 	}
 }
 
 static void
-release_cached_entries(struct comp_metal_foveation_cache *cache)
+clear_selections(struct comp_metal_foveation_cache *cache)
 {
-	struct comp_metal_foveation_cache_entry *entry =
-	    (struct comp_metal_foveation_cache_entry *)cache->entries;
-	while (entry != NULL) {
-		struct comp_metal_foveation_cache_entry *next = entry->next;
-		m_metal_foveation_map_release(&entry->map);
-		free(entry);
-		entry = next;
+	for (uint32_t layer = 0; layer < cache->array_size; ++layer) {
+		slot_assign(cache, &cache->selected[layer], NULL);
 	}
-	cache->entries = NULL;
-	clear_active_entries(cache);
+}
+
+static void
+clear_image_bindings(struct comp_metal_foveation_cache *cache)
+{
+	const size_t count = (size_t)cache->image_count * cache->array_size;
+	for (size_t i = 0; i < count; ++i) {
+		slot_assign(cache, &cache->image_entries[i], NULL);
+	}
+}
+
+//! Insert a freshly built entry (refs == 0) into the lookup list.
+static void
+lookup_insert(struct comp_metal_foveation_cache *cache, struct comp_metal_foveation_cache_entry *entry)
+{
+	entry->next = (struct comp_metal_foveation_cache_entry *)cache->entries;
+	cache->entries = entry_ref(entry);
+	cache->entry_count++;
+
+	if (cache->entry_count <= COMP_METAL_FOVEATION_CACHE_MAX_LOOKUP_ENTRIES) {
+		return;
+	}
+
+	// Drop the oldest lookup entry; other owners keep it alive if needed.
+	struct comp_metal_foveation_cache_entry *prev = entry;
+	while (prev->next != NULL && prev->next->next != NULL) {
+		prev = prev->next;
+	}
+	struct comp_metal_foveation_cache_entry *oldest = prev->next;
+	prev->next = NULL;
+	cache->entry_count--;
+	entry_unref(cache, oldest);
+}
+
+static struct comp_metal_foveation_cache_entry *
+entry_alloc(struct comp_metal_foveation_cache *cache)
+{
+	struct comp_metal_foveation_cache_entry *entry = calloc(1, sizeof(*entry));
+	if (entry != NULL) {
+		cache->live_entry_count++;
+	}
+	return entry;
+}
+
+static void
+entry_free_unbuilt(struct comp_metal_foveation_cache *cache, struct comp_metal_foveation_cache_entry *entry)
+{
+	free(entry);
+	cache->live_entry_count--;
 }
 
 static void
@@ -169,37 +263,67 @@ same_packed_layout(const struct comp_metal_foveation_cache_entry *entry,
 	       memcmp(entry->packed_views, views, view_count * sizeof(*views)) == 0;
 }
 
+//! Select @p entry (may be NULL) for @p array_layer and report it.
+static void
+select_entry(struct comp_metal_foveation_cache *cache,
+             uint32_t array_layer,
+             struct comp_metal_foveation_cache_entry *entry,
+             struct xrt_metal_foveation_state *out_state)
+{
+	slot_assign(cache, &cache->selected[array_layer], entry);
+	if (out_state == NULL) {
+		return;
+	}
+	if (entry != NULL) {
+		fill_native_state(entry, out_state);
+	} else {
+		fill_disabled_state(cache, out_state);
+	}
+}
+
+static xrt_result_t
+select_failure(struct comp_metal_foveation_cache *cache, uint32_t array_layer, xrt_result_t xret)
+{
+	// A failed query must not leave an older map attached to future images.
+	slot_assign(cache, &cache->selected[array_layer], NULL);
+	return xret;
+}
+
+
+/*
+ *
+ * 'Exported' functions.
+ *
+ */
+
 bool
 comp_metal_foveation_cache_init(struct comp_metal_foveation_cache *cache,
                                 void *metal_device,
                                 uint32_t logical_width,
                                 uint32_t logical_height,
-                                uint32_t array_size)
+                                uint32_t array_size,
+                                uint32_t image_count)
 {
-	if (cache == NULL || metal_device == NULL || logical_width == 0 ||
-	    logical_height == 0 || array_size == 0) {
+	if (cache == NULL || metal_device == NULL || logical_width == 0 || logical_height == 0 ||
+	    array_size == 0 || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return false;
 	}
 
 	memset(cache, 0, sizeof(*cache));
-	cache->metal_device = (void *)[(__bridge id<MTLDevice>)metal_device retain];
 	cache->logical_width = logical_width;
 	cache->logical_height = logical_height;
 	cache->array_size = array_size;
+	cache->image_count = image_count;
 	cache->revision = 1;
-	cache->active_entries = calloc(array_size, sizeof(void *));
-	if (cache->active_entries == NULL) {
-		[(__bridge id<MTLDevice>)cache->metal_device release];
+	cache->selected = calloc(array_size, sizeof(void *));
+	cache->image_entries = calloc((size_t)image_count * array_size, sizeof(void *));
+	if (cache->selected == NULL || cache->image_entries == NULL || os_mutex_init(&cache->mutex) != 0) {
+		free(cache->selected);
+		free(cache->image_entries);
 		memset(cache, 0, sizeof(*cache));
 		return false;
 	}
-
-	if (os_mutex_init(&cache->mutex) != 0) {
-		free(cache->active_entries);
-		[(__bridge id<MTLDevice>)cache->metal_device release];
-		memset(cache, 0, sizeof(*cache));
-		return false;
-	}
+	cache->metal_device = (void *)[(__bridge id<MTLDevice>)metal_device retain];
 
 	return true;
 }
@@ -212,9 +336,14 @@ comp_metal_foveation_cache_destroy(struct comp_metal_foveation_cache *cache)
 	}
 
 	os_mutex_lock(&cache->mutex);
-	release_cached_entries(cache);
-	free(cache->active_entries);
-	cache->active_entries = NULL;
+	clear_image_bindings(cache);
+	clear_selections(cache);
+	clear_lookup_entries(cache);
+	assert(cache->live_entry_count == 0);
+	free(cache->image_entries);
+	free(cache->selected);
+	cache->image_entries = NULL;
+	cache->selected = NULL;
 	void *device = cache->metal_device;
 	cache->metal_device = NULL;
 	os_mutex_unlock(&cache->mutex);
@@ -236,11 +365,19 @@ comp_metal_foveation_cache_set(struct comp_metal_foveation_cache *cache,
 	const bool same_map = foveation_maps_equivalent(&cache->state, state);
 	cache->state = *state;
 	if (!same_map) {
-		release_cached_entries(cache);
+		/*
+		 * Only the lookup list is revision-scoped. Selections keep the map
+		 * last handed to the application alive until it queries again, and
+		 * image bindings keep what each released image was rendered with.
+		 */
+		clear_lookup_entries(cache);
 		cache->revision++;
 		if (cache->revision == 0) {
 			cache->revision = 1;
 		}
+	}
+	if (!state->enabled) {
+		clear_selections(cache);
 	}
 	os_mutex_unlock(&cache->mutex);
 
@@ -262,23 +399,22 @@ comp_metal_foveation_cache_get(struct comp_metal_foveation_cache *cache,
 	const uint32_t revision = cache->revision;
 	const struct xrt_foveation_state state = cache->state;
 	if (!state.enabled) {
-		fill_disabled_state(cache, out_state);
+		select_entry(cache, array_layer, NULL, out_state);
 		os_mutex_unlock(&cache->mutex);
 		return XRT_SUCCESS;
 	}
 	if (state.view_count == 0 || view_index >= state.view_count ||
 	    !state.views[view_index].center_valid) {
+		xrt_result_t xret = select_failure(cache, array_layer, XRT_ERROR_NOT_IMPLEMENTED);
 		os_mutex_unlock(&cache->mutex);
-		return XRT_ERROR_NOT_IMPLEMENTED;
+		return xret;
 	}
 
 	for (struct comp_metal_foveation_cache_entry *entry =
 	         (struct comp_metal_foveation_cache_entry *)cache->entries;
 	     entry != NULL; entry = entry->next) {
-		if (!entry->packed && entry->revision == revision &&
-		    entry->view_index == view_index && entry->array_layer == array_layer) {
-			cache->active_entries[array_layer] = entry;
-			fill_native_state(entry, out_state);
+		if (!entry->packed && entry->view_index == view_index) {
+			select_entry(cache, array_layer, entry, out_state);
 			os_mutex_unlock(&cache->mutex);
 			return XRT_SUCCESS;
 		}
@@ -287,29 +423,29 @@ comp_metal_foveation_cache_get(struct comp_metal_foveation_cache *cache,
 	int zone_x = -1, zone_y = -1;
 	center_to_zone(&state.views[view_index], &zone_x, &zone_y);
 	if (zone_x < 0 || zone_y < 0) {
+		xrt_result_t xret = select_failure(cache, array_layer, XRT_ERROR_NOT_IMPLEMENTED);
 		os_mutex_unlock(&cache->mutex);
-		return XRT_ERROR_NOT_IMPLEMENTED;
+		return xret;
 	}
 	const struct u_foveation_profile profile = profile_from_state(&state);
-	struct comp_metal_foveation_cache_entry *entry = calloc(1, sizeof(*entry));
+	struct comp_metal_foveation_cache_entry *entry = entry_alloc(cache);
 	if (entry == NULL) {
+		xrt_result_t xret = select_failure(cache, array_layer, XRT_ERROR_ALLOCATION);
 		os_mutex_unlock(&cache->mutex);
-		return XRT_ERROR_ALLOCATION;
+		return xret;
 	}
 	if (!m_metal_foveation_map_build(cache->metal_device, cache->logical_width,
 	                                  cache->logical_height, zone_x, zone_y,
 	                                  &profile, &entry->map)) {
-		free(entry);
+		entry_free_unbuilt(cache, entry);
+		xrt_result_t xret = select_failure(cache, array_layer, XRT_ERROR_NOT_IMPLEMENTED);
 		os_mutex_unlock(&cache->mutex);
-		return XRT_ERROR_NOT_IMPLEMENTED;
+		return xret;
 	}
 	entry->revision = revision;
 	entry->view_index = view_index;
-	entry->array_layer = array_layer;
-	entry->next = (struct comp_metal_foveation_cache_entry *)cache->entries;
-	cache->entries = entry;
-	cache->active_entries[array_layer] = entry;
-	fill_native_state(entry, out_state);
+	lookup_insert(cache, entry);
+	select_entry(cache, array_layer, entry, out_state);
 	os_mutex_unlock(&cache->mutex);
 	return XRT_SUCCESS;
 }
@@ -332,7 +468,7 @@ comp_metal_foveation_cache_get_packed(
 	const uint32_t revision = cache->revision;
 	const struct xrt_foveation_state state = cache->state;
 	if (!state.enabled) {
-		fill_disabled_state(cache, out_state);
+		select_entry(cache, array_layer, NULL, out_state);
 		os_mutex_unlock(&cache->mutex);
 		return XRT_SUCCESS;
 	}
@@ -345,18 +481,17 @@ comp_metal_foveation_cache_get_packed(
 		    layout->offset_y < 0 ||
 		    (uint64_t)layout->offset_x + layout->width > cache->logical_width ||
 		    (uint64_t)layout->offset_y + layout->height > cache->logical_height) {
+			xrt_result_t xret = select_failure(cache, array_layer, XRT_ERROR_INVALID_ARGUMENT);
 			os_mutex_unlock(&cache->mutex);
-			return XRT_ERROR_INVALID_ARGUMENT;
+			return xret;
 		}
 	}
 
 	for (struct comp_metal_foveation_cache_entry *entry =
 	         (struct comp_metal_foveation_cache_entry *)cache->entries;
 	     entry != NULL; entry = entry->next) {
-		if (entry->revision == revision && entry->array_layer == array_layer &&
-		    same_packed_layout(entry, views, view_count)) {
-			cache->active_entries[array_layer] = entry;
-			fill_native_state(entry, out_state);
+		if (same_packed_layout(entry, views, view_count)) {
+			select_entry(cache, array_layer, entry, out_state);
 			os_mutex_unlock(&cache->mutex);
 			return XRT_SUCCESS;
 		}
@@ -388,56 +523,70 @@ comp_metal_foveation_cache_get_packed(
 	}
 
 	const struct u_foveation_profile profile = profile_from_state(&state);
-	struct comp_metal_foveation_cache_entry *entry = calloc(1, sizeof(*entry));
+	struct comp_metal_foveation_cache_entry *entry = entry_alloc(cache);
 	if (entry == NULL) {
+		xrt_result_t xret = select_failure(cache, array_layer, XRT_ERROR_ALLOCATION);
 		os_mutex_unlock(&cache->mutex);
-		return XRT_ERROR_ALLOCATION;
+		return xret;
 	}
 	if (!m_metal_foveation_map_build_for_zones(
 	        cache->metal_device, cache->logical_width, cache->logical_height,
 	        zones_x, zones_y, scales_x, scales_y, view_count, &profile,
 	        &entry->map)) {
-		free(entry);
+		entry_free_unbuilt(cache, entry);
+		xrt_result_t xret = select_failure(cache, array_layer, XRT_ERROR_NOT_IMPLEMENTED);
 		os_mutex_unlock(&cache->mutex);
-		return XRT_ERROR_NOT_IMPLEMENTED;
+		return xret;
 	}
 	entry->revision = revision;
-	entry->array_layer = array_layer;
 	entry->packed = true;
 	entry->packed_view_count = view_count;
 	memcpy(entry->packed_views, views, view_count * sizeof(*views));
-	entry->next = (struct comp_metal_foveation_cache_entry *)cache->entries;
-	cache->entries = entry;
-	cache->active_entries[array_layer] = entry;
-	fill_native_state(entry, out_state);
+	lookup_insert(cache, entry);
+	select_entry(cache, array_layer, entry, out_state);
 	os_mutex_unlock(&cache->mutex);
 	return XRT_SUCCESS;
 }
 
 xrt_result_t
-comp_metal_foveation_cache_get_active(
-    struct comp_metal_foveation_cache *cache,
-    uint32_t array_layer,
-    struct xrt_metal_foveation_state *out_state)
+comp_metal_foveation_cache_bind_released_image(struct comp_metal_foveation_cache *cache,
+                                               uint32_t image_index)
 {
-	if (cache == NULL || cache->metal_device == NULL || out_state == NULL ||
-	    array_layer >= cache->array_size) {
+	if (cache == NULL || cache->metal_device == NULL || image_index >= cache->image_count) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
 	os_mutex_lock(&cache->mutex);
-	if (!cache->state.enabled) {
-		fill_disabled_state(cache, out_state);
-		os_mutex_unlock(&cache->mutex);
-		return XRT_SUCCESS;
+	void **bindings = &cache->image_entries[(size_t)image_index * cache->array_size];
+	for (uint32_t layer = 0; layer < cache->array_size; ++layer) {
+		slot_assign(cache, &bindings[layer], (struct comp_metal_foveation_cache_entry *)cache->selected[layer]);
 	}
-	struct comp_metal_foveation_cache_entry *entry =
-	    (struct comp_metal_foveation_cache_entry *)cache->active_entries[array_layer];
-	if (entry == NULL || entry->revision != cache->revision) {
-		os_mutex_unlock(&cache->mutex);
-		return XRT_ERROR_NOT_IMPLEMENTED;
-	}
-	fill_native_state(entry, out_state);
 	os_mutex_unlock(&cache->mutex);
+
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+comp_metal_foveation_cache_get_image(struct comp_metal_foveation_cache *cache,
+                                     uint32_t image_index,
+                                     uint32_t array_layer,
+                                     struct xrt_metal_foveation_state *out_state)
+{
+	if (cache == NULL || cache->metal_device == NULL || out_state == NULL ||
+	    image_index >= cache->image_count || array_layer >= cache->array_size) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	os_mutex_lock(&cache->mutex);
+	const struct comp_metal_foveation_cache_entry *entry =
+	    (const struct comp_metal_foveation_cache_entry *)
+	        cache->image_entries[(size_t)image_index * cache->array_size + array_layer];
+	if (entry != NULL) {
+		fill_native_state(entry, out_state);
+	} else {
+		fill_disabled_state(cache, out_state);
+	}
+	os_mutex_unlock(&cache->mutex);
+
 	return XRT_SUCCESS;
 }
