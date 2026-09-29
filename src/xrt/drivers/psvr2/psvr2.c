@@ -82,7 +82,6 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", true)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_tau_ms, "PSVR2_CONTINUITY_TAU_MS", 4.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_MM", 7.5f)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_full_linear_horizon, "PSVR2_FULL_LINEAR_HORIZON", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_recenter_on_first_pose, "PSVR2_RECENTER_ON_FIRST_POSE", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_recenter_eye_height_m, "PSVR2_RECENTER_EYE_HEIGHT_M", 1.6f)
@@ -124,7 +123,6 @@ struct psvr2_pending_horizon_prediction
 	struct xrt_vec3 acceleration;
 	bool acceleration_applied;
 	bool acceleration_enabled;
-	bool full_linear_horizon_enabled;
 	struct xrt_vec3 returned_position;
 	struct xrt_vec3 continuity_position;
 	bool continuity_enabled;
@@ -448,7 +446,6 @@ psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_hos
 	pending.acceleration_enabled = hmd->acceleration_prediction_enabled;
 	pending.acceleration_params = hmd->linear_prediction_params;
 	pending.returned_position = *returned_position;
-	pending.full_linear_horizon_enabled = hmd->full_linear_horizon_enabled || hmd->acceleration_prediction_enabled;
 	uint32_t slot = g_psvr2_timing_trace.horizon_next_slot++ % PSVR2_PENDING_HORIZON_PREDICTIONS;
 	g_psvr2_timing_trace.horizon_pending[slot] = pending;
 }
@@ -545,7 +542,7 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		        p->acceleration_params.min_speed, p->acceleration_params.max_horizon_s * 1000.0f);
 		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%u,", p->returned_position.x, p->returned_position.y,
 		        p->returned_position.z, psvr2_vec3_length(&returned_error) * 1000.0f, returned_along_m * 1000.0f,
-		        p->full_linear_horizon_enabled ? 1u : 0u);
+		        1u /* full_linear_horizon_enabled: always on; column kept for CSV compatibility */);
 		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%u,%.9g,%.9g,%" PRIi64 "\n",
 		        p->continuity_position.x, p->continuity_position.y, p->continuity_position.z,
 		        psvr2_vec3_length(&continuity_error) * 1000.0f, continuity_along_m * 1000.0f,
@@ -740,11 +737,9 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 	    latest_relation_ts, //
 	    out_relation);      //
 
-	// Gyro-only dead reckoning advances integ_rel_ts without advancing position.
-	// Opt in to predicting linear motion over the complete SLAM->target interval.
-	// Keep this independently selectable so acceleration can be compared fairly.
-	if ((hmd->full_linear_horizon_enabled || hmd->acceleration_prediction_enabled) &&
-	    (latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
+	// Gyro-only dead reckoning advances integ_rel_ts without advancing position,
+	// so predict linear motion over the complete SLAM->target interval.
+	if ((latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
 	    (latest_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
 		float dt = (float)((double)(at_timestamp_ns - latest_relation_ts) * 1e-9);
 		out_relation->pose.position = (struct xrt_vec3){
@@ -2257,7 +2252,6 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->info.display.h_pixels = 2040;
 	hmd->info.display.w_meters = 0.13f;
 	hmd->info.display.h_meters = 0.07f;
-	hmd->full_linear_horizon_enabled = debug_get_bool_option_psvr2_full_linear_horizon();
 	hmd->continuity_prediction_enabled = debug_get_bool_option_psvr2_continuity_prediction();
 	hmd->recenter_on_first_pose = debug_get_bool_option_psvr2_recenter_on_first_pose();
 	hmd->recenter_transform = (struct xrt_pose)XRT_POSE_IDENTITY;

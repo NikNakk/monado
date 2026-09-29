@@ -175,6 +175,12 @@ Options are read once at device startup. Restart the service to change them.
 | `PSVR2_ACCELERATION_HORIZON_MS` | 80 | Cap on correction horizon only, 0–120 ms |
 
 Finite parameters are clamped to these ranges; nonfinite parameters use defaults.
+
+> **Update:** the defaults above predate `59150ab`, which turned full-horizon,
+> acceleration and continuity on. `PSVR2_FULL_LINEAR_HORIZON` has since been
+> removed. Full-horizon translation is always used, because the shortened horizon
+> was a confirmed defect. `horizon.csv` still writes
+> `full_linear_horizon_enabled`, always as `1`. See `doc/macos-env-toggles.md`.
 `PSVR2_FILTERED_LINEAR_PREDICTION` and `PSVR2_LINEAR_VELOCITY_ALPHA` are retained.
 Both new booleans at zero preserve legacy behavior. `FULL_LINEAR_HORIZON=1`,
 `FILTERED_LINEAR_PREDICTION=1`, `ACCELERATION_PREDICTION=0` tests full-horizon EMA.
