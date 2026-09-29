@@ -9,6 +9,7 @@
 
 #include "foveation/u_foveation.h"
 #include "xrt/xrt_openxr_includes.h"
+#include "xrt/xrt_compositor.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,6 +42,15 @@ oxr_foveation_request_from_fb(const XrFoveationProfileCreateInfoFB *create_info,
                               bool allow_configuration,
                               bool allow_eye_tracked,
                               struct u_foveation_request *out_request);
+
+/*!
+ * Resolve policy-helper state into the XRT graphics-backend contract.
+ * Eye-tracked centres are intentionally not derived here: the runtime fills
+ * them later from its private tracking path.
+ */
+bool
+oxr_foveation_request_to_xrt(const struct u_foveation_request *request,
+                             struct xrt_foveation_state *out_state);
 
 #ifdef __cplusplus
 }
