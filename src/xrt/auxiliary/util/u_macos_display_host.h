@@ -69,6 +69,50 @@ u_macos_display_host_set_visibility(uint32_t client_id, enum u_macos_display_hos
 void
 u_macos_display_host_detach(uint32_t client_id);
 
+
+/*
+ *
+ * Client side: a process that composites in-process and asks the service to
+ * host its CAContext. The IPC client registers these; the presenter uses the
+ * hosted front-end when they are registered.
+ *
+ */
+
+struct u_macos_hosted_client_ops
+{
+	xrt_result_t (*attach)(void *ctx, uint32_t context_id);
+	xrt_result_t (*set_visibility)(void *ctx, enum u_macos_display_host_visibility visibility);
+	void (*detach)(void *ctx);
+};
+
+void
+u_macos_hosted_client_register(const struct u_macos_hosted_client_ops *ops, void *ctx);
+
+void
+u_macos_hosted_client_unregister(void *ctx);
+
+//! True if this process can have its presenter hosted by the service.
+bool
+u_macos_hosted_client_available(void);
+
+xrt_result_t
+u_macos_hosted_client_attach(uint32_t context_id);
+
+xrt_result_t
+u_macos_hosted_client_set_visibility(enum u_macos_display_host_visibility visibility);
+
+void
+u_macos_hosted_client_detach(void);
+
+/*!
+ * Called by the presenter for each presented drawable. After the layer has
+ * been shown, the first presented frame asks the service, asynchronously, to
+ * make it exclusive (hide the service's own layer). Cheap; safe from any
+ * thread.
+ */
+void
+u_macos_hosted_client_note_presented(void);
+
 #ifdef __cplusplus
 }
 #endif

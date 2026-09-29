@@ -146,6 +146,9 @@ struct comp_window_macos
 	pthread_mutex_t host_mutex;
 	struct macos_hosted_layer hosted[MACOS_MAX_HOSTED_LAYERS];
 	bool host_registered;
+	/* Hosted front-end: container around metal_layer, shown by the service. */
+	CALayer *hosted_container;
+	CAContext *hosted_context;
 	/* The headset display, fixed for the session. */
 	CGDirectDisplayID display_id;
 	char display_name[128];
@@ -988,6 +991,8 @@ struct macos_frontend_ops
 	bool (*is_visible)(struct comp_window_macos *cwm);
 	//! Release what create made, except cwm->metal_layer. Safe after a failed create.
 	void (*destroy)(struct comp_window_macos *cwm);
+	//! Report presented drawables to u_macos_hosted_client_note_presented.
+	bool notify_presented;
 };
 
 static bool
@@ -1286,6 +1291,163 @@ static const struct macos_frontend_ops macos_window_frontend = {
     .set_title = macos_window_frontend_set_title,
     .is_visible = macos_window_frontend_is_visible,
     .destroy = macos_window_frontend_destroy,
+    .notify_presented = false,
+};
+
+
+/*
+ *
+ * Hosted front-end: the presenter runs in a client process and its layer is
+ * shown by the service in the headset window.
+ *
+ * The layer sits in a container on a CAContext; the service shows the context
+ * through a CALayerHost (u_macos_display_host). This process's NSApp belongs
+ * to the application, so nothing here touches it. Selected when the IPC client
+ * has registered u_macos_hosted_client. See doc/macos-client-compositor-design.md.
+ *
+ */
+
+static bool
+macos_hosted_frontend_create(struct comp_window_macos *cwm)
+{
+	struct comp_compositor *c = cwm->base.base.c;
+
+	if (!comp_macos_remote_layer_supported()) {
+		COMP_ERROR(c, "Hosted presentation needs the remote layer API, which is unavailable");
+		return false;
+	}
+
+	// The headset display is visible to every process; no need to ask the service.
+	NSScreen *screen = find_psvr2_screen(c);
+	if (screen == nil) {
+		COMP_ERROR(c, "Could not find a display named 'PS VR2' or a 4000-pixel-wide fallback");
+		return false;
+	}
+	CGDirectDisplayID display_id = get_display_id(screen);
+	size_t pixel_width = display_id != kCGNullDirectDisplay ? CGDisplayPixelsWide(display_id) : 0;
+	size_t pixel_height = display_id != kCGNullDirectDisplay ? CGDisplayPixelsHigh(display_id) : 0;
+	if (pixel_width == 0 || pixel_height == 0) {
+		COMP_ERROR(c, "Selected macOS display has no usable display ID or pixel size");
+		return false;
+	}
+
+	id<MTLDevice> metal_device = MTLCreateSystemDefaultDevice();
+	if (metal_device == nil) {
+		COMP_ERROR(c, "Failed to create the default Metal device");
+		return false;
+	}
+
+	NSSize size = [screen frame].size;
+	CGRect bounds = CGRectMake(0, 0, size.width, size.height);
+
+	[CATransaction begin];
+	[CATransaction setDisableActions:YES];
+
+	// Same configuration as the window front-end's layer.
+	CAMetalLayer *metal_layer = [[CAMetalLayer alloc] init];
+	[metal_layer setDevice:metal_device];
+	[metal_device release];
+	[metal_layer setPixelFormat:MTLPixelFormatBGRA8Unorm];
+	[metal_layer setFramebufferOnly:NO];
+	[metal_layer setContentsScale:[screen backingScaleFactor]];
+	[metal_layer setAnchorPoint:CGPointZero];
+	[metal_layer setFrame:bounds];
+
+	// Hidden until the service has unhidden its host layer (arm, then show).
+	CALayer *container = [[CALayer alloc] init];
+	[container setAnchorPoint:CGPointZero];
+	[container setFrame:bounds];
+	[container setHidden:YES];
+	[container addSublayer:metal_layer];
+
+	CAContext *context = comp_macos_remote_layer_create_context(container);
+
+	[CATransaction commit];
+	[CATransaction flush];
+
+	if (context == nil) {
+		[container release];
+		[metal_layer release];
+		COMP_ERROR(c, "Could not create a CAContext for hosted presentation");
+		return false;
+	}
+
+	xrt_result_t xret = u_macos_hosted_client_attach(context.contextId);
+	if (xret != XRT_SUCCESS) {
+		context.layer = nil;
+		[context release];
+		[container release];
+		[metal_layer release];
+		COMP_ERROR(c, "The service did not accept the hosted layer (%d)", (int)xret);
+		return false;
+	}
+
+	cwm->hosted_container = container;
+	cwm->hosted_context = context;
+	cwm->metal_layer = metal_layer;
+	cwm->display_id = display_id;
+	cwm->pixel_width = (uint32_t)pixel_width;
+	cwm->pixel_height = (uint32_t)pixel_height;
+	snprintf(cwm->display_name, sizeof(cwm->display_name), "%s", [[screen localizedName] UTF8String]);
+	COMP_INFO(c, "Presenting through the service's headset window (CAContext %u)", context.contextId);
+	return true;
+}
+
+static void
+macos_hosted_frontend_show(struct comp_window_macos *cwm)
+{
+	// Arm: the service shows its host layer above its own, still empty.
+	xrt_result_t xret = u_macos_hosted_client_set_visibility(U_MACOS_DISPLAY_HOST_SHOWN);
+	if (xret != XRT_SUCCESS) {
+		COMP_WARN(cwm->base.base.c, "The service did not show the hosted layer (%d)", (int)xret);
+	}
+
+	// Show our content. Once a frame is presented the service is asked to hide
+	// its own layer (u_macos_hosted_client_note_presented).
+	[CATransaction begin];
+	[CATransaction setDisableActions:YES];
+	[cwm->hosted_container setHidden:NO];
+	[CATransaction commit];
+	[CATransaction flush];
+}
+
+static void
+macos_hosted_frontend_set_title(struct comp_window_macos *cwm, const char *title)
+{
+	// The service owns the window.
+	(void)cwm;
+	(void)title;
+}
+
+static bool
+macos_hosted_frontend_is_visible(struct comp_window_macos *cwm)
+{
+	return cwm->hosted_container != nil && ![cwm->hosted_container isHidden];
+}
+
+static void
+macos_hosted_frontend_destroy(struct comp_window_macos *cwm)
+{
+	if (cwm->hosted_context == nil) {
+		return;
+	}
+	// The service restores its own layer when the host goes.
+	u_macos_hosted_client_detach();
+	cwm->hosted_context.layer = nil;
+	[cwm->hosted_context release];
+	cwm->hosted_context = nil;
+	[cwm->hosted_container release];
+	cwm->hosted_container = nil;
+}
+
+static const struct macos_frontend_ops macos_hosted_frontend = {
+    .name = "hosted",
+    .create = macos_hosted_frontend_create,
+    .show = macos_hosted_frontend_show,
+    .set_title = macos_hosted_frontend_set_title,
+    .is_visible = macos_hosted_frontend_is_visible,
+    .destroy = macos_hosted_frontend_destroy,
+    .notify_presented = true,
 };
 
 
@@ -1883,6 +2045,14 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		uint64_t prelatch_ns = (uint64_t)prelatch_us * 1000ULL;
 		metal_request_ns = target_output_ns > prelatch_ns ? target_output_ns - prelatch_ns : target_output_ns;
 		scheduled_present_host_s = monotonic_ns_to_host_seconds(cwm, (int64_t)metal_request_ns);
+		if (cwm->frontend->notify_presented) {
+			// Captures nothing from cwm, so it is safe after destroy.
+			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
+				if ([presented_drawable presentedTime] > 0.0) {
+					u_macos_hosted_client_note_presented();
+				}
+			}];
+		}
 		if (scheduled_present_host_s > 0.0) {
 			[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
 		} else {
@@ -2464,7 +2634,8 @@ comp_window_macos_create_base(struct comp_compositor *c)
 		return NULL;
 	}
 	atomic_init(&cwm->passthrough_shutdown, false);
-	cwm->frontend = &macos_window_frontend;
+	/* Hosted when this is a client whose IPC connection can ask the service to show it. */
+	cwm->frontend = u_macos_hosted_client_available() ? &macos_hosted_frontend : &macos_window_frontend;
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
 	cwm->drawable_slot_enabled = want_drawable_slot;
 	/*
