@@ -10,7 +10,6 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreVideo/CoreVideo.h>
 #import <Metal/Metal.h>
-#import <MetalKit/MetalKit.h>
 #import <QuartzCore/QuartzCore.h>
 
 #include "main/comp_window.h"
@@ -129,6 +128,8 @@ struct comp_window_macos
 	struct comp_target_swapchain base;
 	NSScreen *screen;
 	NSWindow *window;
+	/* Window front-end: root of the window's layer tree; metal_layer is a sublayer. */
+	CALayer *root_layer;
 	/* The headset display, fixed for the session. */
 	CGDirectDisplayID display_id;
 	char display_name[128];
@@ -1016,26 +1017,40 @@ macos_window_frontend_create(struct comp_window_macos *cwm)
 		COMP_ERROR(c, "Failed to create the default Metal device");
 		return false;
 	}
-	MTKView *metal_view = [[MTKView alloc] initWithFrame:[screen frame] device:metal_device];
-	[metal_device release];
-	if (metal_view == nil) {
-		[window release];
-		COMP_ERROR(c, "Failed to create the PS VR2 MTKView");
-		return false;
-	}
-	[metal_view setPaused:YES];
-	[metal_view setEnableSetNeedsDisplay:NO];
-	[metal_view setColorPixelFormat:MTLPixelFormatBGRA8Unorm];
-	[metal_view setFramebufferOnly:NO];
-	[window setContentView:metal_view];
 
-	CAMetalLayer *metal_layer = [(CAMetalLayer *)[metal_view layer] retain];
+	/*
+	 * The window hosts its own layer tree: a root layer holding the
+	 * presenter's CAMetalLayer. Layers hosted from client processes can then
+	 * sit beside it, and the presenter's layer can be hidden on its own while
+	 * a client is shown. This replaces an MTKView, whose layer AppKit owns.
+	 */
+	NSSize size = [screen frame].size;
+	NSView *content_view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+	CALayer *root_layer = [[CALayer alloc] init];
+	CGColorRef black = CGColorCreateGenericRGB(0.0, 0.0, 0.0, 1.0);
+	[root_layer setBackgroundColor:black];
+	CGColorRelease(black);
+	[root_layer setFrame:CGRectMake(0, 0, size.width, size.height)];
+	[content_view setLayer:root_layer];
+	[content_view setWantsLayer:YES];
+	[window setContentView:content_view];
+	[content_view release];
+
+	// Same configuration the MTKView applied to its layer.
+	CAMetalLayer *metal_layer = [[CAMetalLayer alloc] init];
+	[metal_layer setDevice:metal_device];
+	[metal_device release];
+	[metal_layer setPixelFormat:MTLPixelFormatBGRA8Unorm];
+	[metal_layer setFramebufferOnly:NO];
 	[metal_layer setContentsScale:[screen backingScaleFactor]];
-	// The window's content view keeps the view alive.
-	[metal_view release];
+	[metal_layer setAnchorPoint:CGPointZero];
+	[metal_layer setFrame:CGRectMake(0, 0, size.width, size.height)];
+	[metal_layer setAutoresizingMask:kCALayerWidthSizable | kCALayerHeightSizable];
+	[root_layer addSublayer:metal_layer];
 
 	cwm->screen = [screen retain];
 	cwm->window = window;
+	cwm->root_layer = root_layer;
 	cwm->metal_layer = metal_layer;
 	cwm->display_id = display_id;
 	cwm->pixel_width = (uint32_t)pixel_width;
@@ -1081,6 +1096,8 @@ macos_window_frontend_destroy(struct comp_window_macos *cwm)
 	[cwm->window close];
 	[cwm->window release];
 	cwm->window = nil;
+	[cwm->root_layer release];
+	cwm->root_layer = nil;
 	[cwm->screen release];
 	cwm->screen = nil;
 }
@@ -2703,12 +2720,18 @@ comp_window_macos_init_with_refresh_rate(struct comp_target *ct)
 		return true;
 	}
 
+	CFStringRef colorspace_name = [layer colorspace] != NULL ? CGColorSpaceCopyName([layer colorspace]) : NULL;
 	COMP_INFO(ct->c,
 	          "macOS CAMetalLayer state: framebufferOnly=%s displaySyncEnabled=%s "
-	          "presentsWithTransaction=%s maximumDrawableCount=%lu allowsNextDrawableTimeout=%s",
+	          "presentsWithTransaction=%s maximumDrawableCount=%lu allowsNextDrawableTimeout=%s "
+	          "pixelFormat=%lu colorspace=%s",
 	          [layer framebufferOnly] ? "true" : "false", [layer displaySyncEnabled] ? "true" : "false",
 	          [layer presentsWithTransaction] ? "true" : "false", (unsigned long)[layer maximumDrawableCount],
-	          [layer allowsNextDrawableTimeout] ? "true" : "false");
+	          [layer allowsNextDrawableTimeout] ? "true" : "false", (unsigned long)[layer pixelFormat],
+	          colorspace_name != NULL ? [(NSString *)colorspace_name UTF8String] : "none");
+	if (colorspace_name != NULL) {
+		CFRelease(colorspace_name);
+	}
 	return true;
 }
 
