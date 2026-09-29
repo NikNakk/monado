@@ -104,8 +104,14 @@ Reclassified to (b): `WAIT_SPIN` (by far the best wait accuracy, <1 µs
 lateness, but costs a core; keep as an opt-in diagnostic) and
 `XRT_COMPOSITOR_DEPTH_REPROJECTION` (useful rotation-only kill-switch).
 Separately, depth reprojection **on by default** showed silhouettes, trails and
-holes. Whether the default should be rotation-only is a new question outside
-this toggle audit.
+holes, and none of the disocclusion-fill approaches on
+`macos-depth-aware-reprojection` fixed that yet. The default is therefore now
+**off** (rotation-only), and the toggle also gates the layer-squash path in
+`comp_render_cs.c`, not just the fast path. This became necessary once the
+Metal depth-format mapping from that branch was ported: depth swapchains
+(including `Depth32Float_Stencil8`, Unreal's first choice) can now be created,
+so apps that submit depth layers would otherwise switch depth reprojection on.
+Set `XRT_COMPOSITOR_DEPTH_REPROJECTION=1` to experiment.
 
 `APP_RELEASE_SHARED_EVENT_WAIT_THREAD` is resolved as (a): **turn it on by default
 in service builds**, as the code comment always intended.
@@ -424,7 +430,7 @@ Notes on classification:
 | `XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS` | `main/comp_renderer.c` | off | Skip compositor GPU timestamp readback entirely | `5a118a8` / `84bfa46` | **c** |
 | `XRT_MACOS_DEFER_GPU_TIMESTAMPS` | `main/comp_renderer.c` | on | Read the previous frame's timestamps after its fence, not the current frame's (blocking) | `84bfa46` / `59150ab` | **c** |
 | `XRT_MACOS_REPROJECTION_TRACE` | `main/comp_renderer.c`, `multi/comp_multi_system.c` | off (on with `PSVR2_TIMING_TRACE`) | `reprojection.csv` / `reprojection_source.csv` | `dffa6d2` / `dffa6d2` | b |
-| `XRT_COMPOSITOR_DEPTH_REPROJECTION` | `render/render_compute.c` | on | Kill-switch for depth-aware compute timewarp (shared code) | `615a1da` / `615a1da` | d |
+| `XRT_COMPOSITOR_DEPTH_REPROJECTION` | `render/render_compute.c` | off (was on) | Opt-in depth-aware timewarp, fast and layer-squash paths (shared code) | `615a1da` / `615a1da` | b |
 | `XRT_COMPOSITOR_WAIT_IMAGE_QUEUE_IDLE` | `util/comp_swapchain.c` | off | `vkQueueWaitIdle` before swapchain image reuse (sync-bug bisection; shared code) | `1d54237` / `1d54237` | b |
 | `XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE` | `util/comp_swapchain_gpu_reuse.c` | off | Log service Metal swapchain GPU reuse | `c6b6d5c` / `c6b6d5c` | b |
 
@@ -602,9 +608,8 @@ decision needs hardware validation that I cannot do.
   be on in service builds (finding 3)? If so, the one-line fix is to include
   `xrt/xrt_config_build.h`, but that turns it on for everyone and needs headset
   validation. Otherwise flip the default to plain `false` and fix the comment.
-- **D9. `XRT_COMPOSITOR_DEPTH_REPROJECTION`.** This is an A/B kill-switch in
-  shared compositor code, with no recorded result. Keep it as a diagnostic (b),
-  or remove it?
+- **D9. `XRT_COMPOSITOR_DEPTH_REPROJECTION`.** Resolved: kept as an opt-in
+  diagnostic (b), default **off** until a disocclusion fill works on hardware.
 
 ## Presenter structure: `comp_window_macos_latest.m`
 

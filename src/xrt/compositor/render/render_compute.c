@@ -22,7 +22,12 @@
 DEBUG_GET_ONCE_BOOL_OPTION(log_timewarp_inputs, "XRT_COMPOSITOR_LOG_TIMEWARP_INPUTS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_IDENTITY", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_PRETRANSFORM_IDENTITY", false)
-DEBUG_GET_ONCE_BOOL_OPTION(depth_reprojection, "XRT_COMPOSITOR_DEPTH_REPROJECTION", true)
+/*
+ * Depth-aware reprojection is opt-in: without a working disocclusion fill it
+ * shows silhouettes, trails and holes. Depth layers are still accepted and
+ * reprojected as ordinary rotation-only projection layers.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(depth_reprojection, "XRT_COMPOSITOR_DEPTH_REPROJECTION", false)
 
 /*
  *
@@ -912,6 +917,12 @@ calc_new_origin_in_source_view(const struct xrt_pose *source_pose, const struct 
 	struct xrt_vec3 origin;
 	math_pose_transform_point(&world_to_source, &new_pose->position, &origin);
 	return origin;
+}
+
+bool
+render_compute_depth_reprojection_enabled(void)
+{
+	return debug_get_bool_option_depth_reprojection();
 }
 
 void
