@@ -27,6 +27,14 @@ xrt_result_t
 client_metal_service_semaphore_create_pair(struct xrt_compositor_semaphore **out_xcsem,
                                            void **out_mtl_shared_event);
 
+/*
+ * Replacement for comp_metal_semaphore_create_client_pair() in service
+ * builds: through the service, or locally when this client is hosted and
+ * composites in-process.
+ */
+xrt_result_t
+client_metal_semaphore_create_pair_for_mode(struct xrt_compositor_semaphore **out_xcsem, void **out_mtl_shared_event);
+
 #ifdef __cplusplus
 }
 #endif
