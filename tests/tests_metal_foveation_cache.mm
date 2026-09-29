@@ -72,8 +72,8 @@ disabled_state()
 }
 
 const xrt_metal_foveation_view_layout kSideBySide[2] = {
-    {0, 0, 0, kWidth / 2, kHeight},
-    {1, kWidth / 2, 0, kWidth / 2, kHeight},
+    {0, 0, 0, kWidth / 2, kHeight, 0},
+    {1, kWidth / 2, 0, kWidth / 2, kHeight, 0},
 };
 
 bool
@@ -235,8 +235,8 @@ TEST_CASE("metal foveation cache pairs submitted images with their render maps")
 		REQUIRE(comp_metal_foveation_cache_set(&cache, &state_a) == XRT_SUCCESS);
 		(void)select_packed(cache);
 		const xrt_metal_foveation_view_layout too_wide[2] = {
-		    {0, 0, 0, kWidth / 2, kHeight},
-		    {1, kWidth / 2 + 1, 0, kWidth / 2, kHeight},
+		    {0, 0, 0, kWidth / 2, kHeight, 0},
+		    {1, kWidth / 2 + 1, 0, kWidth / 2, kHeight, 0},
 		};
 		CHECK(comp_metal_foveation_cache_get_packed(&cache, too_wide, 2, 0, &out) ==
 		      XRT_ERROR_INVALID_ARGUMENT);
@@ -264,8 +264,8 @@ TEST_CASE("metal foveation cache pairs submitted images with their render maps")
 		for (uint32_t i = 0; i < 3 * COMP_METAL_FOVEATION_CACHE_MAX_LOOKUP_ENTRIES; ++i) {
 			const uint32_t shift = 16 * (i + 1);
 			const xrt_metal_foveation_view_layout layout[2] = {
-			    {0, 0, 0, kWidth / 2 - shift, kHeight},
-			    {1, (int32_t)(kWidth / 2), 0, kWidth / 2, kHeight},
+			    {0, 0, 0, kWidth / 2 - shift, kHeight, 0},
+			    {1, (int32_t)(kWidth / 2), 0, kWidth / 2, kHeight, 0},
 			};
 			xrt_metal_foveation_state out = {};
 			REQUIRE(comp_metal_foveation_cache_get_packed(&cache, layout, 2, 0, &out) == XRT_SUCCESS);
@@ -433,8 +433,8 @@ TEST_CASE("packed stereo maps use view-local profile extents")
 	SECTION("different sizes, arbitrary offsets and non-zero Y")
 	{
 		const xrt_metal_foveation_view_layout views[2] = {
-		    {0, 16, 8, 1200, 900},
-		    {1, 1240, 100, 800, 920},
+		    {0, 16, 8, 1200, 900, 0},
+		    {1, 1240, 100, 800, 920, 0},
 		};
 		check_packed_layout(metal.device, views, make_state(0.4f, -0.4f, 0.3f));
 	}
@@ -473,8 +473,8 @@ TEST_CASE("packed stereo maps use view-local profile extents")
 	SECTION("views listed out of order")
 	{
 		const xrt_metal_foveation_view_layout views[2] = {
-		    {1, kWidth / 2, 0, kWidth / 2, kHeight},
-		    {0, 0, 0, kWidth / 2, kHeight},
+		    {1, kWidth / 2, 0, kWidth / 2, kHeight, 0},
+		    {0, 0, 0, kWidth / 2, kHeight, 0},
 		};
 		check_packed_layout(metal.device, views, make_state(-0.2f, 0.6f));
 	}
