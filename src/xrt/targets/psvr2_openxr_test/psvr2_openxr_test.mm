@@ -18,6 +18,7 @@
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include <openxr/XR_MNDX_foveation.h>
+#include <openxr/XR_MNDX_foveation_metal.h>
 
 #include "foveation/u_foveation.h"
 #include "metal/m_metal_foveation.h"
@@ -131,6 +132,11 @@ struct xr_api
 	PFN_xrGetSystem get_system = nullptr;
 	PFN_xrGetSystemProperties get_system_properties = nullptr;
 	PFN_xrGetFoveationProfileMNDX get_foveation_profile = nullptr;
+	PFN_xrCreateFoveationProfileFB create_foveation_profile_fb = nullptr;
+	PFN_xrDestroyFoveationProfileFB destroy_foveation_profile_fb = nullptr;
+	PFN_xrUpdateSwapchainFB update_swapchain_fb = nullptr;
+	PFN_xrGetFoveationEyeTrackedStateMETA get_foveation_eye_tracked_state_meta = nullptr;
+	PFN_xrGetFoveationMetalStateMNDX get_foveation_metal_state_mndx = nullptr;
 	PFN_xrGetMetalGraphicsRequirementsKHR get_metal_graphics_requirements = nullptr;
 	PFN_xrCreateSession create_session = nullptr;
 	PFN_xrDestroySession destroy_session = nullptr;
@@ -837,6 +843,12 @@ struct view_swapchain
 	uint32_t foveation_physical_width = 0;
 	uint32_t foveation_physical_height = 0;
 	uint32_t foveation_profile_revision = 0;
+
+	// Borrowed from the runtime-owned standard FB/META Metal transport.
+	id<MTLRasterizationRateMap> standard_foveation_rate_map = nil;
+	uint32_t standard_foveation_revision = 0;
+	uint32_t standard_foveation_physical_width = 0;
+	uint32_t standard_foveation_physical_height = 0;
 };
 
 struct gaze_calibration_target
@@ -892,7 +904,11 @@ struct application
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool gaze_foveation_fused = false;
+	bool standard_foveation = false;
+	bool standard_eye_foveation = false;
 	int foveation_profile_index = 0;
+	XrFoveationProfileFB standard_foveation_profile = XR_NULL_HANDLE;
+	uint64_t standard_foveation_frame_count = 0;
 	uint32_t foveation_profile_revision = 1;
 	struct u_foveation_profile runtime_foveation_profile = {};
 	terminal_input_state terminal_input;
