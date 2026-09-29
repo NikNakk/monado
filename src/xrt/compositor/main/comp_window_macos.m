@@ -1071,6 +1071,24 @@ comp_window_macos_init(struct comp_target *ct)
 	return true;
 }
 
+/*
+ * Drawable-slot mode only prefetches drawables once the render-complete timeline
+ * is exported as an MTLSharedEvent, and only schedules the present worker once a
+ * drawable is prefetched. Without that handoff it would never present, so fall
+ * back to the worker acquiring its own drawable behind a CPU Vulkan wait.
+ */
+static void
+macos_disable_drawable_slot_without_shared_event(struct comp_window_macos *cwm)
+{
+	if (!cwm->drawable_slot_enabled) {
+		return;
+	}
+	COMP_WARN(cwm->base.base.c,
+	          "XRT_MACOS_DRAWABLE_SLOT requires the MTLSharedEvent render-complete handoff, which is unavailable; "
+	          "drawable slot is disabled");
+	cwm->drawable_slot_enabled = false;
+}
+
 static bool
 comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, uint32_t preferred_height)
 {
@@ -1081,6 +1099,7 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 
 	if (!vk->features.timeline_semaphore || vk->vkWaitSemaphores == NULL) {
 		COMP_WARN(ct->c, "Timeline semaphores unavailable; macOS presentation will fall back to queue-idle waits");
+		macos_disable_drawable_slot_without_shared_event(cwm);
 		return true;
 	}
 
@@ -1107,6 +1126,7 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		          vk_result_string(ret));
 		ct->semaphores.render_complete = VK_NULL_HANDLE;
 		ct->semaphores.render_complete_is_timeline = false;
+		macos_disable_drawable_slot_without_shared_event(cwm);
 		return true;
 	}
 	ct->semaphores.render_complete_is_timeline = true;
@@ -1136,9 +1156,8 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 
 	COMP_INFO(ct->c, "macOS target using render-complete timeline semaphore%s",
 	          cwm->render_complete_event != nil ? " with Metal shared-event handoff" : "");
-	if (cwm->drawable_slot_enabled && cwm->render_complete_event == nil) {
-		COMP_WARN(ct->c, "XRT_MACOS_DRAWABLE_SLOT requested but MTLSharedEvent handoff is unavailable; drawable slot is disabled");
-		cwm->drawable_slot_enabled = false;
+	if (cwm->render_complete_event == nil) {
+		macos_disable_drawable_slot_without_shared_event(cwm);
 	}
 	return true;
 }
