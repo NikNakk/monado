@@ -1162,6 +1162,8 @@ enum xrt_input_name
 	XRT_INPUT_PSSENSE_THUMBSTICK_TOUCH                          = XRT_INPUT_NAME(0x0316, BOOLEAN),
 	XRT_INPUT_PSSENSE_GRIP_POSE                                 = XRT_INPUT_NAME(0x0317, POSE),
 	XRT_INPUT_PSSENSE_AIM_POSE                                  = XRT_INPUT_NAME(0x0318, POSE),
+	// Binary L1/R1 grip activation represented as squeeze/value for generic profiles.
+	XRT_INPUT_PSSENSE_SQUEEZE_VALUE                             = XRT_INPUT_NAME(0x0319, VEC1_ZERO_TO_ONE),
 
 	// XR_EXT_hand_interaction
 	XRT_INPUT_HAND_PINCH_POSE                                   = XRT_INPUT_NAME(0x0401, POSE),
