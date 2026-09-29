@@ -46,7 +46,7 @@ The one-refresh `predicted_display_time_ns - target_output_ns` concern is substa
 | `CVDisplayLink inOutputTime` is the previous vblank | It is a future output time; code now projects to the most recent refresh boundary before pacing feedback. | **Real defect fixed** |
 | Queue-wide Vulkan idle is required before Metal | Replaced by exact timeline/shared-event handoff. | **Old synchronization path unnecessary; not root cause** |
 | Synchronous Metal `waitUntilCompleted` is required | Async present works with in-flight/source-image protection. | **Not required** |
-| Blocking current-frame GPU timestamp readback is harmless | Omitting deferred readback adds ~3.7 ms renderer blocking and drives mixed ~70–73 fps cadence. | **Major experimental confound ruled in; keep `XRT_MACOS_DEFER_GPU_TIMESTAMPS=1` for A/Bs** |
+| Blocking current-frame GPU timestamp readback is harmless | Omitting deferred readback adds ~3.7 ms renderer blocking and drives mixed ~70–73 fps cadence. | **Major experimental confound ruled in; deferred readback is now unconditional on macOS (`XRT_MACOS_DEFER_GPU_TIMESTAMPS` removed)** |
 | Rendering intrinsically exceeds 120 Hz budget | Corrected runs show ~4.2–4.3 ms total `comp_renderer_draw()`, almost all intentional late-render wait; residual CPU renderer time ~0.07 ms. | **Sustained renderer overload unlikely** |
 | PSVR2/CVDisplayLink refresh is unstable | Stable runs show ~8.3417 ms refresh with few genuine outliers. | **Unlikely as primary cause** |
 | Two drawables are preferable | Lower latency but subjectively more juddery / less stable. | **Latency/stability trade-off; keep 3 as baseline** |

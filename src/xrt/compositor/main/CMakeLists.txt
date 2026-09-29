@@ -56,11 +56,11 @@ if(WIN32)
 	target_sources(comp_main PRIVATE comp_window_mswin.c)
 endif()
 if(APPLE)
-	target_sources(comp_main PRIVATE comp_window_macos_latest.m)
+	target_sources(comp_main PRIVATE comp_window_macos.m)
 	set_source_files_properties(
-		comp_window_macos_latest.m
+		comp_window_macos.m
 		PROPERTIES COMPILE_OPTIONS
-			"-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_probe.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_idle_black.h;-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_cametal_drive_cv.h"
+			"-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h"
 		)
 
 	# Add the service-Metal reuse timeline to the exact renderer queue submit

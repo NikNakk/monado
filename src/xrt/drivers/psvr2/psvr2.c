@@ -77,12 +77,10 @@ DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_log, "PSVR2_TIMING_LOG", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_driver_timing_trace, "PSVR2_DRIVER_TIMING_TRACE", true)
 #endif
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_filtered_linear_prediction, "PSVR2_FILTERED_LINEAR_PREDICTION", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_ALPHA", 0.25f)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", true)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_tau_ms, "PSVR2_CONTINUITY_TAU_MS", 4.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_MM", 7.5f)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_full_linear_horizon, "PSVR2_FULL_LINEAR_HORIZON", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", true)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_recenter_on_first_pose, "PSVR2_RECENTER_ON_FIRST_POSE", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_recenter_eye_height_m, "PSVR2_RECENTER_EYE_HEIGHT_M", 1.6f)
@@ -124,7 +122,6 @@ struct psvr2_pending_horizon_prediction
 	struct xrt_vec3 acceleration;
 	bool acceleration_applied;
 	bool acceleration_enabled;
-	bool full_linear_horizon_enabled;
 	struct xrt_vec3 returned_position;
 	struct xrt_vec3 continuity_position;
 	bool continuity_enabled;
@@ -378,7 +375,7 @@ psvr2_timing_trace_prediction(struct psvr2_hmd *hmd,
 	        predicted->z, error.x, error.y, error.z, error_m * 1000.0f, along_m * 1000.0f, prior_velocity->x,
 	        prior_velocity->y, prior_velocity->z, estimated_velocity->x, estimated_velocity->y, estimated_velocity->z,
 	        hmd->filtered_linear_velocity.x, hmd->filtered_linear_velocity.y, hmd->filtered_linear_velocity.z, alpha,
-	        debug_get_bool_option_psvr2_filtered_linear_prediction() ? 1u : 0u);
+	        0u /* filter_enabled: EMA is trace-only; column kept for CSV compatibility */);
 	g_psvr2_timing_trace.prediction_rows++;
 	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.prediction_rows, 256);
 }
@@ -448,7 +445,6 @@ psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_hos
 	pending.acceleration_enabled = hmd->acceleration_prediction_enabled;
 	pending.acceleration_params = hmd->linear_prediction_params;
 	pending.returned_position = *returned_position;
-	pending.full_linear_horizon_enabled = hmd->full_linear_horizon_enabled || hmd->acceleration_prediction_enabled;
 	uint32_t slot = g_psvr2_timing_trace.horizon_next_slot++ % PSVR2_PENDING_HORIZON_PREDICTIONS;
 	g_psvr2_timing_trace.horizon_pending[slot] = pending;
 }
@@ -535,7 +531,7 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		        raw_along_m * 1000.0f, filtered_along_m * 1000.0f, p->source_position.x, p->source_position.y,
 		        p->source_position.z, p->raw_velocity.x, p->raw_velocity.y, p->raw_velocity.z,
 		        p->filtered_velocity.x, p->filtered_velocity.y, p->filtered_velocity.z, alpha,
-		        debug_get_bool_option_psvr2_filtered_linear_prediction() ? 1u : 0u);
+		        0u /* filter_enabled: EMA is trace-only; column kept for CSV compatibility */);
 		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,%u,%.9g,%.9g,%.9g,%.9g,%.9g,",
 		        p->acceleration_predicted_position.x, p->acceleration_predicted_position.y,
 		        p->acceleration_predicted_position.z, psvr2_vec3_length(&acceleration_error) * 1000.0f,
@@ -545,7 +541,7 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		        p->acceleration_params.min_speed, p->acceleration_params.max_horizon_s * 1000.0f);
 		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%u,", p->returned_position.x, p->returned_position.y,
 		        p->returned_position.z, psvr2_vec3_length(&returned_error) * 1000.0f, returned_along_m * 1000.0f,
-		        p->full_linear_horizon_enabled ? 1u : 0u);
+		        1u /* full_linear_horizon_enabled: always on; column kept for CSV compatibility */);
 		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%u,%.9g,%.9g,%" PRIi64 "\n",
 		        p->continuity_position.x, p->continuity_position.y, p->continuity_position.z,
 		        psvr2_vec3_length(&continuity_error) * 1000.0f, continuity_along_m * 1000.0f,
@@ -714,13 +710,6 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 		}
 	}
 
-	if (!hmd->acceleration_prediction_enabled && debug_get_bool_option_psvr2_filtered_linear_prediction() &&
-	    hmd->filtered_linear_velocity_initialized) {
-		latest_relation.linear_velocity = hmd->filtered_linear_velocity;
-		latest_relation.relation_flags = (enum xrt_space_relation_flags)(
-		    latest_relation.relation_flags | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
-	}
-
 	// Status and SLAM transfers are independent. A pose query can arrive after a
 	// new SLAM pose but just before the next status packet, leaving no gyro sample
 	// newer than the pose. Seed prediction with the most recent high-rate gyro in
@@ -740,11 +729,9 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 	    latest_relation_ts, //
 	    out_relation);      //
 
-	// Gyro-only dead reckoning advances integ_rel_ts without advancing position.
-	// Opt in to predicting linear motion over the complete SLAM->target interval.
-	// Keep this independently selectable so acceleration can be compared fairly.
-	if ((hmd->full_linear_horizon_enabled || hmd->acceleration_prediction_enabled) &&
-	    (latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
+	// Gyro-only dead reckoning advances integ_rel_ts without advancing position,
+	// so predict linear motion over the complete SLAM->target interval.
+	if ((latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
 	    (latest_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
 		float dt = (float)((double)(at_timestamp_ns - latest_relation_ts) * 1e-9);
 		out_relation->pose.position = (struct xrt_vec3){
@@ -2257,7 +2244,6 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->info.display.h_pixels = 2040;
 	hmd->info.display.w_meters = 0.13f;
 	hmd->info.display.h_meters = 0.07f;
-	hmd->full_linear_horizon_enabled = debug_get_bool_option_psvr2_full_linear_horizon();
 	hmd->continuity_prediction_enabled = debug_get_bool_option_psvr2_continuity_prediction();
 	hmd->recenter_on_first_pose = debug_get_bool_option_psvr2_recenter_on_first_pose();
 	hmd->recenter_transform = (struct xrt_pose)XRT_POSE_IDENTITY;

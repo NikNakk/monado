@@ -14,6 +14,7 @@
 #include "os/os_time.h"
 
 #if defined(XRT_OS_OSX)
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #endif
@@ -40,24 +41,22 @@
 #endif
 
 #if defined(XRT_OS_OSX)
+/*!
+ * Read a boolean wait diagnostic from the environment once and cache it.
+ * u_wait_until() runs in the compositor's pacing loop, so it must not call
+ * getenv() on every wait. A cache value of -1 means "not read yet"; concurrent
+ * first calls store the same result.
+ */
 static inline bool
-u_wait_macos_env_enabled(const char *name)
+u_wait_macos_env_enabled(atomic_int *cache, const char *name)
 {
-	const char *value = getenv(name);
-	return value != NULL && value[0] != '\0' && value[0] != '0';
-}
-
-static inline uint64_t
-u_wait_macos_env_u64(const char *name, uint64_t default_value)
-{
-	const char *value = getenv(name);
-	if (value == NULL || value[0] == '\0') {
-		return default_value;
+	int cached = atomic_load_explicit(cache, memory_order_relaxed);
+	if (cached < 0) {
+		const char *value = getenv(name);
+		cached = value != NULL && value[0] != '\0' && value[0] != '0';
+		atomic_store_explicit(cache, cached, memory_order_relaxed);
 	}
-
-	char *end = NULL;
-	unsigned long long parsed = strtoull(value, &end, 10);
-	return end != value && *end == '\0' ? (uint64_t)parsed : default_value;
+	return cached != 0;
 }
 #endif
 
@@ -83,11 +82,10 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 	uint32_t delay = (uint32_t)(until_ns - now_ns - U_WAIT_MEASURED_SCHEDULER_LATENCY_NS);
 
 #if defined(XRT_OS_OSX)
-	bool trace_wait = u_wait_macos_env_enabled("XRT_MACOS_WAIT_TIMING");
-	bool spin_wait = u_wait_macos_env_enabled("XRT_MACOS_WAIT_SPIN");
-	uint64_t hybrid_us = u_wait_macos_env_u64("XRT_MACOS_WAIT_HYBRID_US", 0);
-	uint64_t hybrid_ns = hybrid_us <= UINT64_MAX / 1000 ? hybrid_us * 1000 : 0;
-	bool hybrid_wait = !spin_wait && hybrid_ns > 0;
+	static atomic_int trace_wait_cache = -1;
+	static atomic_int spin_wait_cache = -1;
+	bool trace_wait = u_wait_macos_env_enabled(&trace_wait_cache, "XRT_MACOS_WAIT_TIMING");
+	bool spin_wait = u_wait_macos_env_enabled(&spin_wait_cache, "XRT_MACOS_WAIT_SPIN");
 	uint64_t wait_begin_ns = trace_wait ? os_monotonic_get_ns() : 0;
 	uint64_t park_requested_ns = 0;
 	uint64_t park_actual_ns = 0;
@@ -97,22 +95,6 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 		uint64_t spin_begin_ns = os_monotonic_get_ns();
 		while (os_monotonic_get_ns() < until_ns) {
 			/* Diagnostic control: stay runnable for the whole wait. */
-		}
-		spin_actual_ns = os_monotonic_get_ns() - spin_begin_ns;
-	} else if (hybrid_wait) {
-		uint64_t before_park_ns = os_monotonic_get_ns();
-		if (until_ns > before_park_ns + hybrid_ns) {
-			uint64_t requested = until_ns - before_park_ns - hybrid_ns;
-			park_requested_ns = requested;
-			uint64_t park_begin_ns = os_monotonic_get_ns();
-			os_precise_sleeper_nanosleep(sleeper, requested);
-			uint64_t park_end_ns = os_monotonic_get_ns();
-			park_actual_ns = park_end_ns >= park_begin_ns ? park_end_ns - park_begin_ns : 0;
-		}
-
-		uint64_t spin_begin_ns = os_monotonic_get_ns();
-		while (os_monotonic_get_ns() < until_ns) {
-			/* Short final spin removes residual wake jitter without a full-frame busy wait. */
 		}
 		spin_actual_ns = os_monotonic_get_ns() - spin_begin_ns;
 	} else {
@@ -133,7 +115,7 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 		uint64_t wait_end_ns = os_monotonic_get_ns();
 		uint64_t actual_ns = wait_end_ns >= wait_begin_ns ? wait_end_ns - wait_begin_ns : 0;
 		int64_t lateness_ns = (int64_t)wait_end_ns - (int64_t)until_ns;
-		const char *mode = spin_wait ? "spin" : (hybrid_wait ? "hybrid" : "mach");
+		const char *mode = spin_wait ? "spin" : "mach";
 		fprintf(stderr,
 		        "MACOS_WAIT_TIMING mode=%s requested_ns=%u park_requested_ns=%llu park_actual_ns=%llu spin_actual_ns=%llu actual_ns=%llu lateness_ns=%lld until_ns=%llu begin_ns=%llu end_ns=%llu\n",
 		        mode, delay, (unsigned long long)park_requested_ns, (unsigned long long)park_actual_ns,

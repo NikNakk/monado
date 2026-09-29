@@ -1,5 +1,10 @@
 # macOS PS VR2 legacy-worker stale-frame substitution
 
+> **Removed.** `XRT_MACOS_PRESENT_STALE_SUBSTITUTE` and `XRT_MACOS_PRESENT_IMMEDIATE`
+> no longer exist. The redesigned drawable-slot newest-frame worker superseded this
+> approach (0 slot drops at ~119.88 Hz, 19–21 Sep), and it already ignored stale
+> substitution. This document is kept as a historical record.
+
 ## Motivation
 
 The 2026-09-11 legacy present-worker control was objectively close to a true 120 Hz presentation cadence and subjectively one of the best runs, but it had one narrow weakness: after a rare long `CAMetalLayer nextDrawable` stall (roughly 15 ms rather than the normal ~6.5–8.4 ms), a newer compositor frame could become pending while the worker was blocked. The worker could then remain one compositor frame behind for many subsequent 120 Hz presentations.
