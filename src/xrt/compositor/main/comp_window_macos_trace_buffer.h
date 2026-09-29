@@ -4,7 +4,7 @@
  * @file
  * @brief Diagnostic stdio buffering and timed-present shims for the macOS PS VR2 compositor.
  *
- * This header is force-included only for comp_window_macos_latest.m. When
+ * This header is force-included only for comp_window_macos.m. When
  * PSVR2_TIMING_TRACE_FULLY_BUFFERED=1, explicit fflush() calls from the macOS
  * compositor timing trace are suppressed and fully-buffered streams are enlarged
  * from their normal 64 KiB to 16 MiB. fclose() still performs the final flush at
