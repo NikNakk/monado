@@ -117,6 +117,7 @@ if(XRT_FEATURE_OPENXR)
 	target_link_libraries(
 		tests_generic_controller PRIVATE st_oxr xrt-interfaces xrt-external-openxr
 		)
+	add_dependencies(tests_generic_controller generate_oxr_bindings)
 endif()
 if(_have_opengl_test)
 	target_link_libraries(
