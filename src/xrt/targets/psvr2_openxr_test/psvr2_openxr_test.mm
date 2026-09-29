@@ -976,6 +976,24 @@ create_instance(application &app)
 	if (app.gaze_foveation_fused && !has_extension(app.xr, XR_MNDX_FOVEATION_EXTENSION_NAME)) {
 		fatal("runtime does not expose XR_MNDX_foveation");
 	}
+	if (app.standard_foveation) {
+		if (!has_extension(app.xr, XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME)) {
+			fatal("runtime does not expose XR_FB_swapchain_update_state");
+		}
+		if (!has_extension(app.xr, XR_FB_FOVEATION_EXTENSION_NAME)) {
+			fatal("runtime does not expose XR_FB_foveation");
+		}
+		if (!has_extension(app.xr, XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME)) {
+			fatal("runtime does not expose XR_FB_foveation_configuration");
+		}
+		if (!has_extension(app.xr, XR_MNDX_FOVEATION_METAL_EXTENSION_NAME)) {
+			fatal("runtime does not expose XR_MNDX_foveation_metal");
+		}
+	}
+	if (app.standard_eye_foveation &&
+	    !has_extension(app.xr, XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME)) {
+		fatal("runtime does not expose XR_META_foveation_eye_tracked");
+	}
 
 	std::vector<const char *> extensions = {XR_KHR_METAL_ENABLE_EXTENSION_NAME};
 	if (app.submit_depth_layer) {
@@ -989,6 +1007,15 @@ create_instance(application &app)
 	}
 	if (app.gaze_foveation_fused) {
 		extensions.push_back(XR_MNDX_FOVEATION_EXTENSION_NAME);
+	}
+	if (app.standard_foveation) {
+		extensions.push_back(XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME);
+		extensions.push_back(XR_FB_FOVEATION_EXTENSION_NAME);
+		extensions.push_back(XR_FB_FOVEATION_CONFIGURATION_EXTENSION_NAME);
+		extensions.push_back(XR_MNDX_FOVEATION_METAL_EXTENSION_NAME);
+	}
+	if (app.standard_eye_foveation) {
+		extensions.push_back(XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME);
 	}
 
 	XrInstanceCreateInfo create_info{XR_TYPE_INSTANCE_CREATE_INFO};
@@ -1004,6 +1031,20 @@ create_instance(application &app)
 	if (app.gaze_foveation_fused) {
 		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrGetFoveationProfileMNDX",
 		             &app.xr.get_foveation_profile);
+	}
+	if (app.standard_foveation) {
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrCreateFoveationProfileFB",
+		             &app.xr.create_foveation_profile_fb);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrDestroyFoveationProfileFB",
+		             &app.xr.destroy_foveation_profile_fb);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrUpdateSwapchainFB",
+		             &app.xr.update_swapchain_fb);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrGetFoveationMetalStateMNDX",
+		             &app.xr.get_foveation_metal_state_mndx);
+	}
+	if (app.standard_eye_foveation) {
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrGetFoveationEyeTrackedStateMETA",
+		             &app.xr.get_foveation_eye_tracked_state_meta);
 	}
 	if (app.submit_passthrough) {
 		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrCreatePassthroughFB",
