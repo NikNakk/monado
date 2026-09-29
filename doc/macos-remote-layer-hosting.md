@@ -120,9 +120,32 @@ macos-layer-host-probe --mode hosted       --seconds 30
 Instruments' Display trace can confirm whether the headset surface is still
 scanned out directly in each mode.
 
+### Results, 2026-09-29
+
+PS VR2 at 4000x2040, 119.880 Hz, 30 s per mode, default `min-duration` 8000 µs:
+
+| Mode | Submitted | Not presented | Interval median / p95 / p99 ms | >1.5× period | Presented − target median / p95 ms | Presented − submit median / p95 ms |
+| --- | ---: | ---: | --- | ---: | --- | --- |
+| `direct` | 3547 | 0 | 8.342 / 8.342 / 16.683 | 1.41% | 8.342 / 8.342 | 16.141 / 16.234 |
+| `hosted-local` | 3537 | 2 | 8.342 / 8.342 / 16.683 | 1.44% | 8.342 / 8.342 | 16.125 / 16.264 |
+| `hosted` (child) | 3573 | 0 | 8.342 / 8.342 / 8.342 | 0.70% | 8.342 / 8.342 | 16.080 / 16.202 |
+
+Cross-process hosting adds no measurable cost. Latency from submit to present
+is the same in all three modes to within about 0.1 ms, so there is no extra
+frame. Interval distributions match, and the hosted run had fewer missed
+vblanks, which is within run-to-run noise. `presented − target` is exactly one
+period in every mode, so the CVDisplayLink output time relates to the actual
+present the same way whether or not the layer is hosted.
+
+The probe renders almost nothing, so these numbers do not yet cover a
+GPU-loaded client. They also do not show whether the surface was scanned out
+directly; that needs an Instruments Display trace.
+
 ### Not yet covered
 
+- Behaviour under Game Mode, with the host in the service's launchd coalition
+  and the renderer in a real Game Mode app. The probe's child inherits the
+  host's coalition, so it is not a Game Mode test.
 - Handoff between two hosted clients, and fence-port alignment.
-- Behaviour under Game Mode. The probe's child inherits the host's coalition,
-  so it is not a Game Mode test.
+- A GPU-heavy renderer, and whether direct scanout is kept.
 - Integration with the multi-client compositor.
