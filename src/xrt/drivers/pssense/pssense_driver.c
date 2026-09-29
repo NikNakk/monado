@@ -67,8 +67,8 @@ static struct xrt_binding_output_pair simple_outputs_pssense[1] = {
  * L1/R1 is the closest squeeze actuator. Monado's existing input transform
  * converts its boolean click to the 0/1 float required by squeeze/value,
  * avoiding a second driver-level representation of the same physical input.
- * Until we have a calibrated palm-surface transform, grip_surface uses the
- * existing grip pose as the best available approximation.
+ * grip_surface first uses a driver's calibrated generic palm pose when one
+ * is exposed, with the existing grip pose retained as a last-resort fallback.
  */
 static struct xrt_binding_input_pair generic_inputs_pssense_left[] = {
     {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
@@ -78,6 +78,7 @@ static struct xrt_binding_input_pair generic_inputs_pssense_left[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
 };
@@ -90,6 +91,7 @@ static struct xrt_binding_input_pair generic_inputs_pssense_right[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
 };
