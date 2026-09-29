@@ -271,7 +271,8 @@ validate_foveation_map(const struct xrt_foveation_map_data *map)
 }
 
 static void
-fill_in_foveation_map(struct oxr_session *sess,
+fill_in_foveation_map(struct oxr_logger *log,
+                      struct oxr_session *sess,
                       uint32_t view_index,
                       const XrCompositionLayerProjectionView *view,
                       const struct oxr_swapchain *sc,
@@ -285,19 +286,35 @@ fill_in_foveation_map(struct oxr_session *sess,
 	/*
 	 * Standard FB foveation is swapchain state, not projection-layer state.
 	 * For Metal, ask the concrete client swapchain for the exact dense mapping
-	 * corresponding to the immutable MTLRasterizationRateMap used by the app.
-	 * Feeding that map into the existing compositor path guarantees rendering
-	 * and sampling use the same logical-to-physical transform.
+	 * corresponding to the immutable MTLRasterizationRateMap that was bound
+	 * to the submitted image when it was released. Feeding that map into the
+	 * existing compositor path guarantees rendering and sampling use the same
+	 * logical-to-physical transform.
+	 *
+	 * This deliberately does not consult the current foveation state: an
+	 * image re-submitted without being rendered again still holds pixels laid
+	 * out by its original map, even if foveation has since changed or been
+	 * disabled. An image released without a map reports disabled.
 	 */
-	if (sc->has_foveation_state && sc->foveation_request.enabled &&
-	    sess->gfx_ext == OXR_SESSION_GRAPHICS_EXT_METAL && sc->swapchain != NULL &&
-	    sc->swapchain->set_foveation != NULL) {
+	if (sess->gfx_ext == OXR_SESSION_GRAPHICS_EXT_METAL && sc->swapchain != NULL &&
+	    sc->swapchain->set_foveation != NULL && sc->released.yes && sc->released.index >= 0) {
 		struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
 		struct xrt_metal_foveation_state native = {};
-		xrt_result_t xret = xrt_swapchain_metal_get_active_foveation_state(
-		    xscm, view->subImage.imageArrayIndex, &native);
-		if (xret == XRT_SUCCESS && native.enabled && validate_foveation_map(&native.compositor_map)) {
-			*out = native.compositor_map;
+		xrt_result_t xret = xrt_swapchain_metal_get_image_foveation_state(
+		    xscm, (uint32_t)sc->released.index, view->subImage.imageArrayIndex, &native);
+		if (xret == XRT_SUCCESS && native.enabled) {
+			if (validate_foveation_map(&native.compositor_map)) {
+				*out = native.compositor_map;
+			} else {
+				/*
+				 * Never sample a compacted image as if it were
+				 * unfoveated without saying so.
+				 */
+				oxr_warn(log,
+				         "Metal foveation map bound to image %d layer %u is invalid; "
+				         "sampling without foveation",
+				         sc->released.index, view->subImage.imageArrayIndex);
+			}
 			return;
 		}
 	}
@@ -1429,7 +1446,7 @@ submit_projection_layer(struct oxr_session *sess,
 		data.proj.v[i].fov = *fov;
 		data.proj.v[i].pose = pose[i];
 		fill_in_sub_image(scs[i], &proj->views[i].subImage, &data.proj.v[i].sub);
-		fill_in_foveation_map(sess, (uint32_t)i, &proj->views[i], scs[i], &data.proj.v[i].foveation);
+		fill_in_foveation_map(log, sess, (uint32_t)i, &proj->views[i], scs[i], &data.proj.v[i].foveation);
 		swapchains[i] = scs[i]->swapchain;
 	}
 	fill_in_color_scale_bias(sess, (XrCompositionLayerBaseHeader *)proj, &data);

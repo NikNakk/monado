@@ -33,9 +33,12 @@ XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_PACKED_STATE_MNDX, 0x7fff5058);
  * rasterizationRateMap is an id<MTLRasterizationRateMap> represented as an
  * opaque pointer, consistent with XR_KHR_metal_enable's opaque Metal handles.
  * The object is owned by the runtime. Applications must not release it.
- * The returned pointer remains valid until a later successful
+ * The returned pointer remains valid at least until a later successful
  * xrUpdateSwapchainFB changes the revision, or until the XrSwapchain is
  * destroyed. Applications should query again after updating foveation state.
+ * The runtime keeps the most recently returned map alive until the next query
+ * for the same array layer, so a map returned before a revision change is not
+ * freed underneath an application that has not queried again yet.
  *
  * physicalWidth/physicalHeight describe the rasterized extent for this array
  * layer. They are the dimensions appropriate for the physical-coordinate
@@ -91,7 +94,18 @@ typedef struct XrFoveationMetalPackedStateMNDX {
  *
  * If XrFoveationMetalPackedStateMNDX is chained to state->next, viewIndex is
  * ignored and the runtime returns one map covering the supplied packed view
- * rectangles. That map becomes the active map for compositor reconstruction.
+ * rectangles.
+ *
+ * Every call selects the returned map for arrayLayer. The next successful
+ * xrReleaseSwapchainImage on this swapchain binds the current selection of
+ * every array layer to the released image, and the compositor samples that
+ * image with exactly that map whenever it is submitted, including when it is
+ * submitted again later without being rendered again. A result with
+ * foveationEnabled XR_FALSE, a failed call, or disabling foveation through
+ * xrUpdateSwapchainFB clears the selection, so subsequently released images
+ * are sampled unfoveated until a map is queried again. Query before releasing
+ * the image the map applies to, and do not query a map for a later image while
+ * an earlier image rendered with a different map is still waited.
  *
  * Call after xrUpdateSwapchainFB and before encoding the Metal render pass
  * which targets this swapchain. A revision change means the returned map may

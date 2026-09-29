@@ -432,6 +432,27 @@ client_metal_swapchain_get_foveation_state(struct xrt_swapchain_metal *xscm,
 }
 
 static xrt_result_t
+client_metal_swapchain_get_packed_foveation_state(struct xrt_swapchain_metal *xscm,
+                                                  const struct xrt_metal_foveation_view_layout *views,
+                                                  uint32_t view_count,
+                                                  uint32_t array_layer,
+                                                  struct xrt_metal_foveation_state *out_state)
+{
+	struct client_metal_swapchain *sc = (struct client_metal_swapchain *)xscm;
+	return comp_metal_foveation_cache_get_packed(&sc->foveation, views, view_count, array_layer, out_state);
+}
+
+static xrt_result_t
+client_metal_swapchain_get_image_foveation_state(struct xrt_swapchain_metal *xscm,
+                                                 uint32_t image_index,
+                                                 uint32_t array_layer,
+                                                 struct xrt_metal_foveation_state *out_state)
+{
+	struct client_metal_swapchain *sc = (struct client_metal_swapchain *)xscm;
+	return comp_metal_foveation_cache_get_image(&sc->foveation, image_index, array_layer, out_state);
+}
+
+static xrt_result_t
 client_metal_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 {
 	return xrt_swapchain_acquire_image(to_native_swapchain(xsc), out_index);
@@ -582,7 +603,12 @@ client_metal_swapchain_log_iosurface_sample(struct client_metal_swapchain *sc, u
 static xrt_result_t
 client_metal_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 {
-	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
+	xrt_result_t xret = xrt_swapchain_release_image(to_native_swapchain(xsc), index);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+	// The released image now carries the map it was rendered with.
+	return comp_metal_foveation_cache_bind_released_image(&client_metal_swapchain(xsc)->foveation, index);
 }
 
 static xrt_result_t
@@ -685,12 +711,15 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	sc->base.base.foveation_capabilities =
 	    XRT_FOVEATION_CAPABILITY_FIXED | XRT_FOVEATION_CAPABILITY_DYNAMIC | XRT_FOVEATION_CAPABILITY_EYE_TRACKED;
 	sc->base.get_foveation_metal_state = client_metal_swapchain_get_foveation_state;
+	sc->base.get_foveation_metal_packed_state = client_metal_swapchain_get_packed_foveation_state;
+	sc->base.get_foveation_metal_image_state = client_metal_swapchain_get_image_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xscn->base.image_count;
 	sc->xscn = xscn;
 	sc->c = c;
 	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)c->device,
-	                                      info->width, info->height, info->array_size)) {
+	                                      info->width, info->height, info->array_size,
+	                                      sc->base.base.image_count)) {
 		client_metal_swapchain_destroy(&sc->base.base);
 		return XRT_ERROR_ALLOCATION;
 	}

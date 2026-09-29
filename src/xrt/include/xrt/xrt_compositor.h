@@ -2227,6 +2227,10 @@ struct xrt_swapchain_metal
 	 * Return the native Metal state for a resolved XRT foveation policy.
 	 * view_index is independent of array_layer: separate per-eye swapchains
 	 * commonly use array layer zero for both views.
+	 *
+	 * The returned map also becomes the selection for array_layer: the next
+	 * successful release_image binds it to the released image. A disabled or
+	 * failed result clears the selection.
 	 */
 	xrt_result_t (*get_foveation_metal_state)(struct xrt_swapchain_metal *xscm,
 	                                          uint32_t view_index,
@@ -2235,7 +2239,8 @@ struct xrt_swapchain_metal
 
 	/*!
 	 * Return one Metal map covering multiple OpenXR views packed into
-	 * sub-rectangles of the same array layer.
+	 * sub-rectangles of the same array layer. Selection semantics are the
+	 * same as for get_foveation_metal_state.
 	 */
 	xrt_result_t (*get_foveation_metal_packed_state)(
 	    struct xrt_swapchain_metal *xscm,
@@ -2245,11 +2250,15 @@ struct xrt_swapchain_metal
 	    struct xrt_metal_foveation_state *out_state);
 
 	/*!
-	 * Return the map most recently selected by the application for this array
-	 * layer. The compositor uses this to reconstruct exactly what was rendered.
+	 * Return the map that was bound to image_index/array_layer when that
+	 * image was last successfully released. The compositor uses this to
+	 * sample exactly what was rendered, including when an older image is
+	 * submitted again after the foveation state has changed. An image
+	 * released without a selected map reports a disabled state.
 	 */
-	xrt_result_t (*get_foveation_metal_active_state)(
+	xrt_result_t (*get_foveation_metal_image_state)(
 	    struct xrt_swapchain_metal *xscm,
+	    uint32_t image_index,
 	    uint32_t array_layer,
 	    struct xrt_metal_foveation_state *out_state);
 };
@@ -2309,15 +2318,16 @@ xrt_swapchain_metal_get_packed_foveation_state(
 }
 
 static inline xrt_result_t
-xrt_swapchain_metal_get_active_foveation_state(
+xrt_swapchain_metal_get_image_foveation_state(
     struct xrt_swapchain_metal *xscm,
+    uint32_t image_index,
     uint32_t array_layer,
     struct xrt_metal_foveation_state *out_state)
 {
-	if (xscm->get_foveation_metal_active_state == NULL) {
+	if (xscm->get_foveation_metal_image_state == NULL) {
 		return XRT_ERROR_NOT_IMPLEMENTED;
 	}
-	return xscm->get_foveation_metal_active_state(xscm, array_layer, out_state);
+	return xscm->get_foveation_metal_image_state(xscm, image_index, array_layer, out_state);
 }
 
 /*!
