@@ -2187,6 +2187,13 @@ struct xrt_metal_foveation_state
 	uint32_t physical_width;
 	uint32_t physical_height;
 	uint32_t revision;
+
+	/*
+	 * Exact logical-to-physical mapping represented by rasterization_rate_map.
+	 * This is consumed internally by the compositor; native client APIs do not
+	 * need to expose it when they can bind the Metal rate-map object directly.
+	 */
+	struct xrt_foveation_map_data compositor_map;
 };
 
 struct xrt_swapchain_metal
