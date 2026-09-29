@@ -331,19 +331,40 @@ the same thing.
 
 ## Eye tracking and foveation
 
-Eye-tracking data can be reached at the USB/protocol level, but usable gaze
-tracking is still blocked by the headset's calibration path. The current work
-does not yet provide a trustworthy OpenXR eye-gaze interaction source.
+The macOS PS VR2 driver now has a usable eye-gaze path and an experimental
+standards-facing foveation stack.
 
-A complete implementation would need:
+Public gaze input is exposed through `XR_EXT_eye_gaze_interaction`. Separately,
+the foveation work uses the registered `XR_FB_foveation`,
+`XR_FB_foveation_configuration` and
+`XR_META_foveation_eye_tracked` semantics, with gaze kept runtime-private for
+eye-tracked foveation.
 
-1. recover or reproduce the per-user/device calibration needed to turn the raw
-   stream into valid gaze;
-2. expose gaze through the appropriate OpenXR interaction extension(s);
-3. validate timing and coordinate transforms;
-4. only then add eye-tracked/foveated rendering support.
+The graphics-API-independent policy is carried through `xrt_foveation_state`.
+Metal is the first rendering backend. Because OpenXR currently has no registered
+Metal foveation companion equivalent to `XR_FB_foveation_vulkan`, the branch
+uses the experimental `XR_MNDX_foveation_metal` extension only to expose the
+runtime-selected `MTLRasterizationRateMap` and physical render size to a Metal
+client.
 
-This remains a major missing PS VR2 capability.
+The compositor receives the exact matching dense logical-to-physical map from
+the swapchain cache and reuses the existing distortion/timewarp remapper, so no
+separate full-resolution reconstruction pass is required.
+
+PS VR2 gaze capability is provisioned by default but activated lazily through
+feature reference counting. Eye-tracked foveation does not implicitly grant an
+application `XR_EXT_eye_gaze_interaction` access.
+
+See:
+
+- [OpenXR foveation architecture on macOS](macos-openxr-foveation.md)
+- [PS VR2 eye gaze](macos-psvr2-eye-gaze.md)
+- [PS VR2 gaze-driven foveation](macos-psvr2-gaze-foveation.md)
+
+The implementation remains default-OFF pending hardware validation and
+standards/upstream review of the Metal companion. Compact depth coordinates also
+need to be audited before depth submission is combined with the new foveated
+swapchain path.
 
 ## Wine, OpenVR and SteamVR applications
 
@@ -419,9 +440,11 @@ runtime/compositor.
    - expose a usable OpenXR-facing API.
 
 3. **Eye tracking and gaze-driven foveation**
-   - solve the missing calibration path;
-   - expose reliable eye-gaze input;
-   - add/validate foveated rendering afterwards.
+   - hardware-validate the new FB/META foveation paths;
+   - validate lazy/private gaze activation and lifetime;
+   - integrate the standards-facing path into Chromium;
+   - audit compact depth coordinates;
+   - refine and upstream the Metal rendering companion.
 
 4. **SteamVR/OpenVR compatibility breadth**
    - reduce game-specific shims;
@@ -491,8 +514,9 @@ branch-oriented companion to this document.
 
 ### PS VR2 eye-gaze calibration tuning
 
-The PS VR2 eye tracker can use the standard `XR_EXT_eye_gaze_interaction` path on macOS when
-`PSVR2_GAZE_STREAMS=1` is enabled. The driver loads the Sony calibration blob from
+The PS VR2 eye tracker can use the standard `XR_EXT_eye_gaze_interaction` path on macOS.
+The gaze interface is provisioned by default and activates lazily when a tracking feature is
+requested; `PSVR2_GAZE_STREAMS=1` is no longer required. The driver loads the Sony calibration blob from
 `~/Library/Application Support/monado/psvr2/eye_calibration.bin` when present.
 
 Small residual user-specific calibration errors can be corrected without modifying that blob:
