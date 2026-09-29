@@ -17,8 +17,6 @@ struct comp_target *
 comp_window_macos_create(struct comp_compositor *c);
 extern const struct comp_target_factory comp_target_factory_macos;
 
-DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_display_sync, "XRT_MACOS_DISABLE_DISPLAY_SYNC", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_disable_framebuffer_only, "XRT_MACOS_DISABLE_FRAMEBUFFER_ONLY", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_refresh_rate_hz, "XRT_MACOS_REFRESH_RATE_HZ", 0)
 
 static void
@@ -376,7 +374,7 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 }
 
 static bool
-comp_window_macos_init_display_sync_diagnostic(struct comp_target *ct)
+comp_window_macos_init_with_refresh_rate(struct comp_target *ct)
 {
 	bool ret = comp_window_macos_init(ct);
 	if (!ret) {
@@ -401,36 +399,7 @@ comp_window_macos_init_display_sync_diagnostic(struct comp_target *ct)
 	}
 
 	COMP_INFO(ct->c,
-	          "macOS CAMetalLayer after init: framebufferOnly=%s displaySyncEnabled=%s presentsWithTransaction=%s "
-	          "maximumDrawableCount=%lu allowsNextDrawableTimeout=%s",
-	          [layer framebufferOnly] ? "true" : "false", [layer displaySyncEnabled] ? "true" : "false",
-	          [layer presentsWithTransaction] ? "true" : "false", (unsigned long)[layer maximumDrawableCount],
-	          [layer allowsNextDrawableTimeout] ? "true" : "false");
-
-	if (debug_get_bool_option_macos_disable_framebuffer_only()) {
-		BOOL previous_framebuffer_only = [layer framebufferOnly];
-		[layer setFramebufferOnly:NO];
-		BOOL current_framebuffer_only = [layer framebufferOnly];
-		COMP_INFO(ct->c,
-		          "macOS diagnostic: CAMetalLayer.framebufferOnly changed after layer init: was %s; now %s; "
-		          "presentation remains otherwise unchanged",
-		          previous_framebuffer_only ? "enabled" : "disabled",
-		          current_framebuffer_only ? "enabled" : "disabled");
-	}
-
-	if (debug_get_bool_option_macos_disable_display_sync()) {
-		BOOL previous_display_sync_enabled = [layer displaySyncEnabled];
-		[layer setDisplaySyncEnabled:NO];
-		BOOL current_display_sync_enabled = [layer displaySyncEnabled];
-		COMP_INFO(ct->c,
-		          "macOS diagnostic: CAMetalLayer.displaySyncEnabled changed after layer init: was %s; now %s; "
-		          "presentation remains otherwise unchanged",
-		          previous_display_sync_enabled ? "enabled" : "disabled",
-		          current_display_sync_enabled ? "enabled" : "disabled");
-	}
-
-	COMP_INFO(ct->c,
-	          "macOS CAMetalLayer diagnostic state: framebufferOnly=%s displaySyncEnabled=%s "
+	          "macOS CAMetalLayer state: framebufferOnly=%s displaySyncEnabled=%s "
 	          "presentsWithTransaction=%s maximumDrawableCount=%lu allowsNextDrawableTimeout=%s",
 	          [layer framebufferOnly] ? "true" : "false", [layer displaySyncEnabled] ? "true" : "false",
 	          [layer presentsWithTransaction] ? "true" : "false", (unsigned long)[layer maximumDrawableCount],
@@ -445,7 +414,7 @@ comp_window_macos_create(struct comp_compositor *c)
 	if (ct == NULL) {
 		return NULL;
 	}
-	ct->init_pre_vulkan = comp_window_macos_init_display_sync_diagnostic;
+	ct->init_pre_vulkan = comp_window_macos_init_with_refresh_rate;
 	ct->get_refresh_rates = comp_window_macos_get_refresh_rates_physical;
 	ct->get_current_refresh_rate = comp_window_macos_get_current_refresh_rate_physical;
 	ct->request_refresh_rate = comp_window_macos_request_refresh_rate_physical;
