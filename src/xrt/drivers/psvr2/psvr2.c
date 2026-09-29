@@ -2047,6 +2047,11 @@ psvr2_begin_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 	}
 
 	if (!hmd->gaze_streams_enabled) {
+		if (type == XRT_DEVICE_FEATURE_EYE_TRACKING) {
+			hmd->eye_feature_enabled = false;
+		} else {
+			hmd->face_feature_enabled = false;
+		}
 		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
 	}
 
@@ -2056,19 +2061,23 @@ psvr2_begin_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 	 * first actual feature user so no eye-tracking data is requested merely
 	 * because a page/application exists.
 	 */
+	hmd->et_data.want_enabled = true;
 	if (!hmd->et_data.data_mutex_created) {
 		os_thread_helper_lock(&hmd->usb_thread);
 		int ret = psvr2_start_gaze_tracking(hmd);
 		os_thread_helper_unlock(&hmd->usb_thread);
 		if (ret < 0) {
-			hmd->eye_feature_enabled = false;
-			hmd->face_feature_enabled = false;
-			hmd->et_data.want_enabled = false;
+			if (type == XRT_DEVICE_FEATURE_EYE_TRACKING) {
+				hmd->eye_feature_enabled = false;
+			} else {
+				hmd->face_feature_enabled = false;
+			}
+			hmd->et_data.want_enabled =
+			    hmd->eye_feature_enabled || hmd->face_feature_enabled;
 			return XRT_ERROR_FEATURE_NOT_SUPPORTED;
 		}
 	}
 
-	hmd->et_data.want_enabled = true;
 	return XRT_SUCCESS;
 }
 
