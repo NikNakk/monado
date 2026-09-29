@@ -475,6 +475,36 @@ for example, skip rendering for a vblank whenever measured present latency is
 a frame or more above nominal, or on becoming visible wait until drawables have
 drained before resuming.
 
+### Latency guard
+
+`--latency-guard 1` adds a queue drain to the renderer, the approach GAV's
+player introduced in `0182380` ("keep the present queue shallow"), implemented
+independently here. GAV measured the same behaviour: frames normally appear
+one period after the display link's output time, and "left alone, the present
+queue ends up two frames deep after any display-side stall and stays there".
+They also rejected `maximumDrawableCount = 2` (fps fell to about 100), as
+Monado did.
+
+Each presented handler rounds presented − target to whole periods. The guard
+counts consecutive presents at 2 or more periods. Once that run has lasted
+`--guard-window-ms` (default 250 ms), and no drain happened in the last
+`--guard-min-interval-ms` (default 500 ms), the render loop skips one vblank,
+which removes one frame from the queue, and starts counting again. The cost is
+one repeated frame per drain; the summary reports the number of drains.
+
+GAV waits 1 s and drains at most every 10 s, which suits one long session. Here
+the defaults are shorter so a client re-shown every 2 s can recover, and
+repeated drains are allowed because a client re-shown from a full queue can be
+two frames deep.
+
+```sh
+$P/macos-layer-host-probe --mode handoff --seconds 30 --swap-method client --latency-guard 1
+```
+
+Success is presented − submit back at about 16 ms after swaps (the summary's
+"after" figure), with a few drains per swap at most and long intervals near the
+0.5 % baseline.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
