@@ -345,6 +345,23 @@ oxr_swapchain_common_create(struct oxr_logger *log,
 	sc->face_count = createInfo->faceCount;
 	sc->is_static = (createInfo->createFlags & XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT) != 0;
 
+#ifdef OXR_HAVE_FB_foveation
+	const XrSwapchainCreateInfoFoveationFB *foveation_info =
+	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB,
+	                             XrSwapchainCreateInfoFoveationFB);
+	if (foveation_info != NULL && sess->sys->inst->extensions.FB_foveation) {
+		sc->foveation_capable = true;
+		sc->foveation_create_flags = foveation_info->flags;
+		/*
+		 * Before the first xrUpdateSwapchainFB there is no effective
+		 * application-selected profile. The backend must therefore treat
+		 * this as unfoveated.
+		 */
+		(void)u_foveation_request_from_level(U_FOVEATION_LEVEL_NONE, false, false, 0.0f,
+		                                    &sc->foveation_request);
+	}
+#endif
+
 	// Functions.
 	sc->wait_image = implicit_wait_image;
 	sc->release_image = implicit_release_image;
