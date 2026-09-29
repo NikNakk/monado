@@ -2518,7 +2518,15 @@ cleanup(application &app)
 {
 	restore_terminal_controls(app);
 	app.renderer.shutdown();
+
+	if (app.standard_foveation_profile != XR_NULL_HANDLE &&
+	    app.xr.destroy_foveation_profile_fb != nullptr) {
+		app.xr.destroy_foveation_profile_fb(app.standard_foveation_profile);
+		app.standard_foveation_profile = XR_NULL_HANDLE;
+	}
 	for (view_swapchain &swapchain : app.swapchains) {
+		// Standard Metal maps are borrowed from the runtime: never release.
+		swapchain.standard_foveation_rate_map = nil;
 		release_gaze_foveation_resources(swapchain);
 		[swapchain.depth_texture release];
 		swapchain.depth_texture = nil;
@@ -2586,6 +2594,8 @@ run(int argc, char **argv)
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool gaze_foveation_fused = false;
+	bool standard_foveation = false;
+	bool standard_eye_foveation = false;
 	int foveation_profile_index = 0;
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
@@ -2609,6 +2619,11 @@ run(int argc, char **argv)
 			test_gaze = true;
 			gaze_foveation = true;
 			gaze_foveation_fused = true;
+		} else if (strcmp(argv[i], "--fb-foveation") == 0) {
+			standard_foveation = true;
+		} else if (strcmp(argv[i], "--fb-eye-foveation") == 0) {
+			standard_foveation = true;
+			standard_eye_foveation = true;
 		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
 			foveation_profile_index = u_foveation_profile_find(argv[++i]);
 			if (foveation_profile_index < 0) {
@@ -2618,7 +2633,9 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused] "
+			        "[--passthrough|--passthrough-only] "
+			        "[--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused] "
+			        "[--fb-foveation|--fb-eye-foveation] "
 			        "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
@@ -2627,12 +2644,16 @@ run(int argc, char **argv)
 			        "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			        "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			        "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve pass.\n"
-			        "  --gaze-foveation-fused renders Metal VRR directly into the OpenXR image and lets Monado decode it.\n"
-			        "  --foveation-profile selects a fixed starting profile (default: reference).\n"
+			        "  --gaze-foveation-fused is the legacy experimental app-owned gaze + MNDX fused path.\n"
+			        "  --fb-foveation uses XR_FB_foveation with the Metal transport and compositor remap.\n"
+			        "  --fb-eye-foveation adds XR_META_foveation_eye_tracked; gaze stays runtime-owned and "
+			        "XR_EXT_eye_gaze_interaction is not enabled.\n"
+			        "  --foveation-profile selects the starting profile; FB maps reference/strong/aggressive+ "
+			        "to LOW/MEDIUM/HIGH.\n"
 			        "  While foveation is running in a terminal: 1-6 select profiles, [ and ] step, r restores reference.\n"
 			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
 			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
-			        "PSVR2_GAZE_STREAMS=1 enables the gaze USB stream.\n",
+			        "PSVR2_GAZE_STREAMS=0 explicitly disables PS VR2 gaze capability.\n",
 			        argv[0]);
 			return EXIT_SUCCESS;
 		} else {
@@ -2645,6 +2666,12 @@ run(int argc, char **argv)
 	app.submit_depth_layer = submit_depth_layer;
 	app.submit_passthrough = submit_passthrough;
 	app.passthrough_only = passthrough_only;
+	if (gaze_foveation && standard_foveation) {
+		fatal("legacy gaze-foveation modes cannot be combined with --fb-foveation/--fb-eye-foveation");
+	}
+	if (standard_foveation && submit_depth_layer) {
+		fatal("standard FB foveation cannot yet be combined with --depth-layer");
+	}
 	if (gaze_foveation && submit_depth_layer) {
 		fatal("--gaze-foveation cannot currently be combined with --depth-layer");
 	}
@@ -2655,11 +2682,15 @@ run(int argc, char **argv)
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
 	app.gaze_foveation_fused = gaze_foveation_fused;
+	app.standard_foveation = standard_foveation;
+	app.standard_eye_foveation = standard_eye_foveation;
 	app.foveation_profile_index = foveation_profile_index;
-	if (gaze_foveation) {
+	if (gaze_foveation || standard_foveation) {
 		const struct u_foveation_profile *profile = u_foveation_profile_get(foveation_profile_index);
-		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)\n",
-		        profile->name, profile->middle_rate, profile->peripheral_rate);
+		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)%s\n",
+		        profile->name, profile->middle_rate, profile->peripheral_rate,
+		        standard_eye_foveation ? " with runtime-owned META gaze" :
+		        standard_foveation ? " through standard FB policy" : "");
 	}
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());
@@ -2670,6 +2701,7 @@ run(int argc, char **argv)
 	create_gaze_resources(app);
 	create_passthrough_resources(app);
 	create_swapchains(app);
+	create_standard_foveation_resources(app);
 	initialize_terminal_controls(app);
 
 	while (!g_stop_requested && !app.exit_requested) {
