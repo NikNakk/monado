@@ -1,5 +1,8 @@
 # macOS: Game Mode demotion and cross-process layer hosting
 
+The resulting design is in
+[`macos-client-compositor-design.md`](macos-client-compositor-design.md).
+
 ## Problem
 
 With Game Mode active for an OpenXR game (Unreal), the service's Multi Client
