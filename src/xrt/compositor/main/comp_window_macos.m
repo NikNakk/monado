@@ -101,7 +101,6 @@ macos_presented_state_release(struct macos_presented_state *state)
 	free(state);
 }
 
-DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR", 1)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
@@ -1058,13 +1057,9 @@ comp_window_macos_init(struct comp_target *ct)
 			if ((period.flags & kCVTimeIsIndefinite) == 0 && period.timeValue > 0 && period.timeScale > 0) {
 				cwm->display_period_ns =
 				    (int64_t)(((__int128)period.timeValue * U_TIME_1S_IN_NS) / period.timeScale);
-				int divisor = debug_get_num_option_display_rate_divisor();
-				if (divisor < 1) {
-					divisor = 1;
-				}
-				ct->c->frame_interval_ns = cwm->display_period_ns * divisor;
-				COMP_INFO(ct->c, "PS VR2 display period %.3fms; compositor rate divisor %d (%.2f Hz)",
-				          (double)cwm->display_period_ns / 1000000.0, divisor,
+				ct->c->frame_interval_ns = cwm->display_period_ns;
+				COMP_INFO(ct->c, "PS VR2 display period %.3fms (%.2f Hz)",
+				          (double)cwm->display_period_ns / 1000000.0,
 				          (double)U_TIME_1S_IN_NS / (double)ct->c->frame_interval_ns);
 			}
 		}
