@@ -297,13 +297,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		    sc->foveation_request.eye_tracked;
 		const bool new_eye_tracked = fp->request.enabled && fp->request.eye_tracked;
 		bool acquired_eye_tracking = false;
-		if (new_eye_tracked && !old_eye_tracked) {
-			XrResult acquire_result = eye_tracking_acquire(&log, sc->sess);
-			if (XR_FAILED(acquire_result)) {
-				return acquire_result;
-			}
-			acquired_eye_tracking = true;
-		}
+		bool gaze_valid = false;
 #endif
 
 		/*
@@ -316,6 +310,16 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 			return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
 			                 "Failed to resolve foveation profile to backend-neutral state");
 		}
+
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+		if (new_eye_tracked && !old_eye_tracked) {
+			XrResult acquire_result = eye_tracking_acquire(&log, sc->sess);
+			if (XR_FAILED(acquire_result)) {
+				return acquire_result;
+			}
+			acquired_eye_tracking = true;
+		}
+#endif
 
 		/*
 		 * Resolve the renderer-facing centre entirely inside the runtime.
@@ -343,7 +347,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 			if (xrt_state.eye_tracked) {
-				const bool gaze_valid = sample_eye_tracked_centres(sc->sess, &xrt_state);
+				gaze_valid = sample_eye_tracked_centres(sc->sess, &xrt_state);
 				if (!gaze_valid &&
 				    !oxr_foveation_resolve_fixed_centres(
 				        head->hmd->distortion.fov, view_count, &xrt_state)) {
@@ -353,7 +357,6 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 					return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
 					                 "Failed to resolve eye-tracked foveation fallback");
 				}
-				store_eye_tracked_state(sc->sess, &xrt_state, gaze_valid);
 			} else
 #endif
 			if (!oxr_foveation_resolve_fixed_centres(
@@ -392,6 +395,9 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		sc->foveation_source_profile = foveation->profile;
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
+		if (new_eye_tracked) {
+			store_eye_tracked_state(sc->sess, &xrt_state, gaze_valid);
+		}
 		if (old_eye_tracked && !new_eye_tracked) {
 			eye_tracking_release(sc->sess);
 		}
