@@ -107,7 +107,6 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", true)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_metal_shared_event_wait, "XRT_MACOS_METAL_SHARED_EVENT_WAIT", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_early_drawable, "XRT_MACOS_EARLY_DRAWABLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", false)
@@ -1136,8 +1135,7 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		return true;
 	}
 
-	bool want_shared_event = cwm->async_present && debug_get_bool_option_macos_metal_shared_event_wait() &&
-	                         vk->has_EXT_metal_objects && vk->vkExportMetalObjectsEXT != NULL;
+	bool want_shared_event = cwm->async_present && vk->has_EXT_metal_objects && vk->vkExportMetalObjectsEXT != NULL;
 
 	VkExportMetalObjectCreateInfoEXT metal_export_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
@@ -1183,7 +1181,7 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		} else {
 			COMP_WARN(ct->c, "VK_EXT_metal_objects did not export an MTLSharedEvent; retaining CPU Vulkan wait fallback");
 		}
-	} else if (cwm->async_present && debug_get_bool_option_macos_metal_shared_event_wait()) {
+	} else if (cwm->async_present) {
 		COMP_WARN(ct->c, "VK_EXT_metal_objects unavailable; asynchronous present will retain the CPU Vulkan wait");
 	}
 
@@ -1415,8 +1413,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	uint64_t target_output_ns = 0;
 	uint64_t metal_request_ns = 0;
 	const char *wait_mode = "queue_idle";
-	bool shared_event_wait = async_present && debug_get_bool_option_macos_metal_shared_event_wait() &&
-	                         cwm->render_complete_event != nil;
+	bool shared_event_wait = async_present && cwm->render_complete_event != nil;
 	uint64_t image_reuse_wait_ns = job->image_reuse_wait_ns;
 	double scheduled_present_host_s = 0.0;
 	double gpu_start_time_s = 0.0;
@@ -1844,8 +1841,7 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
                              uint32_t queue_depth)
 {
 	struct macos_present_job retired_job = *job;
-	bool shared_event_wait = debug_get_bool_option_macos_metal_shared_event_wait() &&
-	                         cwm->render_complete_event != nil;
+	bool shared_event_wait = cwm->render_complete_event != nil;
 	uint64_t event_ns = os_monotonic_get_ns();
 	macos_trace_present_worker(cwm, trace_event, &retired_job, event_ns, 0, 0, 0, 0, 0, queue_depth,
 	                           shared_event_wait);
@@ -2025,8 +2021,7 @@ comp_window_macos_present(struct comp_target *ct,
 	}
 	uint64_t handoff_return_ns = os_monotonic_get_ns();
 	macos_trace_present_worker(cwm, "enqueued", &job, handoff_return_ns, handoff_return_ns, 0, 0, 0, 0, 1,
-	                           debug_get_bool_option_macos_metal_shared_event_wait() &&
-	                               cwm->render_complete_event != nil);
+	                           cwm->render_complete_event != nil);
 	return VK_SUCCESS;
 }
 
