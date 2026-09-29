@@ -419,6 +419,46 @@ Expected: swaps as clean as the host-driven ones, and with the host
 backgrounded under load, swap lateness staying near zero instead of the ~12 s
 seen with host-driven swaps.
 
+### Client-driven visibility results, 2026-09-29
+
+The first runs failed: a file-descriptor collision in `spawn_client` meant
+neither client received the peer socket (fixed in `2c7fabc`). After the fix,
+30 s per run, 14 swaps each:
+
+| | Unthrottled host | Host Darwin-backgrounded, `--cpu-load 10` |
+| --- | --- | --- |
+| Switch gap median / max | 8.342 / 8.342 ms | 8.342 / 8.342 ms |
+| Max on-screen interval around swaps | 8.342 ms | 8.342 ms |
+| Swap lateness median / max | 2.3 / 5.0 ms | 5.0 / 5.0 ms |
+| Incoming show commit → own first present, median | 36.6 ms | 32.3 ms |
+| Outgoing hide after incoming show, median | 37.6 ms | 33.4 ms |
+| Hidden frames reporting `presentedTime` | 0 of 3498 | 0 of 3380 |
+
+- **Every swap was seamless:** the new client's first frame followed the old
+  client's last by exactly one refresh period, in both runs.
+- **Host throttling no longer matters:** under the same load that delayed
+  host-driven swaps by ~12 s, client-driven swaps ran within 5 ms of schedule.
+  The host made no commits after setup.
+- **The overlap works as designed.** The outgoing client hides about 33–38 ms
+  after the incoming client's show commit, once the incoming frame is on screen.
+
+**Latency.** Clients' presented − submit was 24 ms before the first swap and
+28–32 ms after (1–2 frames above the 16 ms of the single-client and unthrottled
+host-driven runs). The same +1 or +2 frames appeared in the host-driven runs
+with a backgrounded host, but not consistently. The values are quantised at
+16, 24 and 32 ms with a matching 8.3 → 16.7 → 25.0 ms step in presented −
+vblank target, and they stay raised rather than recovering.
+
+This looks like a latency ratchet in the presentation pipeline rather than a
+cost of hosting: with CVDisplayLink pacing, three drawables and
+`afterMinimumDuration`, any hiccup that delays one present leaves one more
+drawable queued, and nothing drains it again. Monado's legacy presenter uses
+the same configuration, so this may matter beyond the probe. Checks:
+
+- the per-frame CSVs should show `present_minus_submit_ms` stepping up at
+  discrete moments and then staying level;
+- `--present at-time` should not ratchet if the cause is the queue.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
