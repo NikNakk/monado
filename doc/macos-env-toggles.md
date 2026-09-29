@@ -117,6 +117,17 @@ variable unset. Check the OpenXR app's log in a service build with the variable
 it does not, the intended default is compiled out; setting it to `1` explicitly
 is the workaround.
 
+Headset check, 2026-09-29 (UE 5.8 native Metal, service PIDs 65220/65383): the
+service's `client_gpu.csv` contains no `semaphore_pushed`, `semaphore_wait_start`
+or `semaphore_ready` rows in either run, only `layer_begin_*`. So neither run
+used the semaphore release path. The unset run confirms finding 3: with the
+variable unset, a service build uses the blocking release. The "set" run did
+not test the toggle, because the variable was put in the LaunchAgent (service)
+environment, while it is read in the app process. The app-side
+`metal_release_barrier.csv` is empty in both runs because service builds replace
+the client swapchain with `comp_metal_service_swapchain.m`, whose barrier is not
+traced.
+
 ### Resolution from the best legacy configuration (2026-09-29)
 
 You supplied the environment of the best-performing run. The PSVR2 prediction
