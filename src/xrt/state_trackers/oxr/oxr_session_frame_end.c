@@ -40,6 +40,11 @@
 
 
 
+#ifdef OXR_HAVE_FB_foveation
+// Logs which Metal foveation map each submitted image carries.
+DEBUG_GET_ONCE_BOOL_OPTION(debug_foveation_binding, "OXR_DEBUG_FOVEATION_BINDING", false)
+#endif
+
 /*
  *
  * Helper functions and defines.
@@ -302,6 +307,17 @@ fill_in_foveation_map(struct oxr_logger *log,
 		struct xrt_metal_foveation_state native = {};
 		xrt_result_t xret = xrt_swapchain_metal_get_image_foveation_state(
 		    xscm, (uint32_t)sc->released.index, view->subImage.imageArrayIndex, &native);
+		if (debug_get_bool_option_debug_foveation_binding()) {
+			static uint64_t count = 0;
+			if (count < 48 || (count % 480) == 0) {
+				oxr_log(log, "xrEndFrame foveation: view=%u swapchain=%p image=%d layer=%u result=%d "
+				        "enabled=%d revision=%u physical=%ux%u",
+				        view_index, (void *)sc, sc->released.index, view->subImage.imageArrayIndex,
+				        (int)xret, native.enabled, native.revision, native.physical_width,
+				        native.physical_height);
+			}
+			count++;
+		}
 		if (xret == XRT_SUCCESS && native.enabled) {
 			if (validate_foveation_map(&native.compositor_map)) {
 				*out = native.compositor_map;
