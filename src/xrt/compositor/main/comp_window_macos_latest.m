@@ -476,8 +476,7 @@ macos_execute_present_job_stale(struct comp_window_macos *cwm,
                                 const struct macos_present_job *job,
                                 bool async_present)
 {
-	bool shared_event_wait = async_present && debug_get_bool_option_macos_metal_shared_event_wait() &&
-	                         cwm->render_complete_event != nil;
+	bool shared_event_wait = async_present && cwm->render_complete_event != nil;
 	if (!async_present || !cwm->present_worker_enabled || !shared_event_wait || cwm->drawable_slot_enabled ||
 	    cwm->early_drawable_enabled) {
 		return macos_execute_present_job(cwm, job, async_present);
