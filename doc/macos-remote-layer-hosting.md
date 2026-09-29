@@ -379,13 +379,51 @@ and the two clients' commits can be made atomic with a shared fence port.
 The service would only tell clients about focus, which still goes through the
 throttled service, but only as a small message rather than a layer-tree commit.
 
+### Client-driven visibility
+
+`--swap-method client` removes the service from the swap entirely. The host
+attaches both `CALayerHost`s once, A below and B stacked above, both left
+visible, and never commits again. Each client's `CAContext` holds a container
+layer around its `CAMetalLayer` that the client shows or hides itself.
+
+At swap *k* (from a shared start time, every `--swap-every` seconds):
+
+1. The incoming client shows its container, committing from its own process.
+2. It waits until one of its own frames has been presented, then sends *k* to
+   the outgoing client over a socket pair connecting the two clients directly.
+3. The outgoing client hides its container.
+
+The stacking order makes the two commits safe without a fence port. Switching
+to B (on top), B covers A as soon as it appears. Switching to A (underneath), A
+is already shown under B before B hides. Either way one valid layer is always
+on screen.
+
+The swap schedule runs in the clients, standing in for a focus decision made
+somewhere unthrottled. In Monado the decision would come from the service,
+whose message to the clients would still be delayed by throttling. What this
+removes is the service's layer-tree commit, which the `reparent` and `hidden`
+methods need at every swap.
+
+The summary adds the outgoing client's hide lag (its hide commit after the
+incoming client's show commit). The switch gap now runs from the old client's
+last present before the next swap to the new client's first present after it,
+which also catches a gap when an upper layer disappears.
+
+```sh
+$P/macos-layer-host-probe --mode handoff --seconds 30 --swap-method client
+$P/macos-layer-host-probe --mode handoff --seconds 30 --swap-method client --host-background 1 \
+    --cpu-load "$(sysctl -n hw.ncpu)"
+```
+
+Expected: swaps as clean as the host-driven ones, and with the host
+backgrounded under load, swap lateness staying near zero instead of the ~12 s
+seen with host-driven swaps.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
   Unreal (`--role query --pid <service pid>`).
 - Handoff when the new client is not pre-warmed (context created at the
   swap), and whether fence ports are needed for that case.
-- Client-driven visibility (each client hides or shows its own layer, with a
-  shared fence port) as a handoff that needs no commit from the service.
 - A GPU-heavy renderer, and whether direct scanout is kept.
 - Integration with the multi-client compositor.
