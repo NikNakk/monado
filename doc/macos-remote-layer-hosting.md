@@ -505,6 +505,27 @@ Success is presented − submit back at about 16 ms after swaps (the summary's
 "after" figure), with a few drains per swap at most and long intervals near the
 0.5 % baseline.
 
+**Guard result, and a pacing flaw in the probe (2026-09-29).** With
+`--latency-guard 1` and client-driven swaps, latency after swaps fell from a
+median of 28–32 ms to 19.8 ms, but p95 stayed at 29–33 ms. There were 33 drains
+over 14 swaps, and long intervals rose from about 0.5–0.8 % to 1.3 %. Client A
+also sat at 32 ms for its first 3.4 s despite the guard.
+
+The cause is in the probe's own pacing, not in hosting. Its display-link
+callback signals a `dispatch_semaphore`, which counts, so after any stall the
+render loop renders one frame per missed tick, back to back, and refills the
+queue. A drain skips one tick while others are still pending, so it barely
+helps. GAV's player avoids this ("only one draw can be queued… no burst after a
+stall"), and so does Monado's presenter, which keeps a single pending present
+job and replaces it with the newest frame.
+
+The probe now coalesces ticks by default: after waking it drops any further
+pending signals and renders once, for the newest target
+(`--coalesce-vblanks 0` restores the old behaviour, and the summary reports
+dropped ticks). **The latency steps recorded above for the handoff runs were
+measured without coalescing and are likely inflated by it**; they need
+re-measuring before drawing conclusions about Monado's presenter.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
