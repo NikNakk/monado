@@ -247,14 +247,69 @@ fill_in_y_flip(struct oxr_session *sess, const XrCompositionLayerBaseHeader *lay
 #endif // OXR_HAVE_FB_composition_layer_image_layout
 }
 
+static bool
+validate_foveation_map(const struct xrt_foveation_map_data *map)
+{
+	if (map == NULL || map->enabled == 0 || map->boundary_count != XRT_FOVEATION_MAP_BOUNDARY_COUNT) {
+		return false;
+	}
+
+	float previous_x = -1.0f;
+	float previous_y = -1.0f;
+	for (uint32_t i = 0; i < XRT_FOVEATION_MAP_BOUNDARY_COUNT; ++i) {
+		const float x = map->x[i];
+		const float y = map->y[i];
+		if (!isfinite(x) || !isfinite(y) || x < previous_x || y < previous_y ||
+		    x < 0.0f || x > 1.0f || y < 0.0f || y > 1.0f) {
+			return false;
+		}
+		previous_x = x;
+		previous_y = y;
+	}
+
+	return true;
+}
+
 static void
 fill_in_foveation_map(struct oxr_session *sess,
+                      uint32_t view_index,
                       const XrCompositionLayerProjectionView *view,
                       const struct oxr_swapchain *sc,
                       struct xrt_foveation_map_data *out)
 {
+	if (sess == NULL || view == NULL || sc == NULL || out == NULL) {
+		return;
+	}
+
+#ifdef OXR_HAVE_FB_foveation
+	/*
+	 * Standard FB foveation is swapchain state, not projection-layer state.
+	 * For Metal, ask the concrete client swapchain for the exact dense mapping
+	 * corresponding to the immutable MTLRasterizationRateMap used by the app.
+	 * Feeding that map into the existing compositor path guarantees rendering
+	 * and sampling use the same logical-to-physical transform.
+	 */
+	if (sc->has_foveation_state && sc->foveation_request.enabled &&
+	    sess->gfx_ext == OXR_SESSION_GRAPHICS_EXT_METAL && sc->swapchain != NULL &&
+	    sc->swapchain->set_foveation != NULL) {
+		struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
+		struct xrt_metal_foveation_state native = {};
+		xrt_result_t xret = xrt_swapchain_metal_get_foveation_state(
+		    xscm, view_index, view->subImage.imageArrayIndex, &native);
+		if (xret == XRT_SUCCESS && native.enabled && validate_foveation_map(&native.compositor_map)) {
+			*out = native.compositor_map;
+			return;
+		}
+	}
+#endif
+
 #ifdef OXR_HAVE_MNDX_foveation
-	if (!sess->sys->inst->extensions.MNDX_foveation || view == NULL || sc == NULL || out == NULL) {
+	/*
+	 * Legacy experimental path: applications may still provide the mapping
+	 * explicitly on each projection view. Keep this as a compatibility
+	 * fallback while new Metal clients use FB swapchain state.
+	 */
+	if (!sess->sys->inst->extensions.MNDX_foveation) {
 		return;
 	}
 
@@ -265,28 +320,17 @@ fill_in_foveation_map(struct oxr_session *sess,
 		return;
 	}
 
-	float previous_x = -1.0f;
-	float previous_y = -1.0f;
-	for (uint32_t i = 0; i < XRT_FOVEATION_MAP_BOUNDARY_COUNT; ++i) {
-		const float x = map->x[i];
-		const float y = map->y[i];
-		if (!isfinite(x) || !isfinite(y) || x < previous_x || y < previous_y ||
-		    x < 0.0f || x > 1.0f || y < 0.0f || y > 1.0f) {
-			return;
-		}
-		previous_x = x;
-		previous_y = y;
+	struct xrt_foveation_map_data candidate = {
+	    .enabled = 1,
+	    .boundary_count = XRT_FOVEATION_MAP_BOUNDARY_COUNT,
+	};
+	memcpy(candidate.x, map->x, sizeof(candidate.x));
+	memcpy(candidate.y, map->y, sizeof(candidate.y));
+	if (validate_foveation_map(&candidate)) {
+		*out = candidate;
 	}
-
-	out->enabled = 1;
-	out->boundary_count = XRT_FOVEATION_MAP_BOUNDARY_COUNT;
-	memcpy(out->x, map->x, sizeof(out->x));
-	memcpy(out->y, map->y, sizeof(out->y));
 #else
-	(void)sess;
-	(void)view;
-	(void)sc;
-	(void)out;
+	(void)view_index;
 #endif
 }
 
@@ -1385,7 +1429,7 @@ submit_projection_layer(struct oxr_session *sess,
 		data.proj.v[i].fov = *fov;
 		data.proj.v[i].pose = pose[i];
 		fill_in_sub_image(scs[i], &proj->views[i].subImage, &data.proj.v[i].sub);
-		fill_in_foveation_map(sess, &proj->views[i], scs[i], &data.proj.v[i].foveation);
+		fill_in_foveation_map(sess, (uint32_t)i, &proj->views[i], scs[i], &data.proj.v[i].foveation);
 		swapchains[i] = scs[i]->swapchain;
 	}
 	fill_in_color_scale_bias(sess, (XrCompositionLayerBaseHeader *)proj, &data);
