@@ -24,6 +24,11 @@ if(APPLE AND XRT_FEATURE_OPENXR)
 	add_subdirectory(psvr2_openxr_test)
 endif()
 
+# Standalone CAMetalLayer present-timing probe for cross-process layer hosting.
+if(APPLE)
+	add_subdirectory(macos_layer_host_probe)
+endif()
+
 if(XRT_MODULE_MONADO_CLI)
 	add_subdirectory(cli)
 endif()
