@@ -1076,8 +1076,13 @@ create_system_and_session(application &app)
 	check_xr(app.xr.get_system(app.instance, &system_info, &app.system_id), "xrGetSystem");
 
 	XrSystemEyeGazeInteractionPropertiesEXT gaze_properties{XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
+	XrSystemFoveationEyeTrackedPropertiesMETA eye_foveation_properties{
+	    XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META};
 	XrSystemProperties properties{XR_TYPE_SYSTEM_PROPERTIES};
-	if (app.test_gaze) {
+	if (app.standard_eye_foveation) {
+		properties.next = &eye_foveation_properties;
+		eye_foveation_properties.next = app.test_gaze ? &gaze_properties : nullptr;
+	} else if (app.test_gaze) {
 		properties.next = &gaze_properties;
 	}
 	check_xr(app.xr.get_system_properties(app.instance, app.system_id, &properties), "xrGetSystemProperties");
@@ -1087,7 +1092,14 @@ create_system_and_session(application &app)
 		fprintf(stderr, "psvr2-openxr-test: eye gaze interaction %s\n",
 		        app.gaze_supported ? "supported" : "NOT supported");
 		if (!app.gaze_supported) {
-			fatal("runtime system does not report eye gaze support; ensure PSVR2_GAZE_STREAMS=1 reaches monado-service");
+			fatal("runtime system does not report eye gaze interaction support");
+		}
+	}
+	if (app.standard_eye_foveation) {
+		fprintf(stderr, "psvr2-openxr-test: META eye-tracked foveation %s (without XR_EXT_eye_gaze_interaction)\n",
+		        eye_foveation_properties.supportsFoveationEyeTracked ? "supported" : "NOT supported");
+		if (!eye_foveation_properties.supportsFoveationEyeTracked) {
+			fatal("runtime system does not report META eye-tracked foveation support");
 		}
 	}
 
@@ -1098,7 +1110,8 @@ create_system_and_session(application &app)
 	if (device == nil) {
 		fatal("runtime returned a nil Metal device");
 	}
-	if (app.gaze_foveation && ![device supportsRasterizationRateMapWithLayerCount:1]) {
+	if ((app.gaze_foveation || app.standard_foveation) &&
+	    ![device supportsRasterizationRateMapWithLayerCount:1]) {
 		fatal("Metal device does not support variable rasterization rate maps");
 	}
 	app.command_queue = [device newCommandQueue];
