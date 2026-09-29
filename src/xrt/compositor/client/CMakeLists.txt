@@ -20,15 +20,24 @@ if(XRT_HAVE_VULKAN)
 endif()
 
 if(APPLE)
+	# Per-swapchain Metal foveation map cache, separate so it can be unit tested
+	# without the rest of the client compositor.
+	add_library(comp_metal_foveation_cache STATIC comp_metal_foveation_cache.h comp_metal_foveation_cache.m)
+	target_link_libraries(
+		comp_metal_foveation_cache
+		PUBLIC xrt-interfaces aux-includes
+		PRIVATE aux_metal_foveation "-framework Metal"
+		)
+	target_include_directories(comp_metal_foveation_cache INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+
 	target_sources(
 		comp_client
 		PRIVATE
 			comp_metal_client.h
 			comp_metal_client.m
 			comp_metal_glue.c
-			comp_metal_foveation_cache.h
-			comp_metal_foveation_cache.m
 		)
+	target_link_libraries(comp_client PRIVATE comp_metal_foveation_cache)
 	if(XRT_MODULE_COMPOSITOR_UTIL)
 		target_sources(
 			comp_client

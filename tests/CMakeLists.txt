@@ -141,6 +141,19 @@ add_executable(tests_macos_runtime_probe tests_macos_runtime_probe.c)
 target_link_libraries(tests_macos_runtime_probe PRIVATE target_instance xrt-interfaces aux_util)
 set_target_properties(tests_macos_runtime_probe PROPERTIES FOLDER monado_tests)
 
+if(APPLE AND TARGET comp_metal_foveation_cache)
+	# Per-image Metal foveation map association. Skips itself when the Metal
+	# device cannot create rasterization-rate maps.
+	add_executable(tests_metal_foveation_cache tests_metal_foveation_cache.mm)
+	target_compile_features(tests_metal_foveation_cache PRIVATE cxx_std_17)
+	target_link_libraries(
+		tests_metal_foveation_cache PRIVATE comp_metal_foveation_cache aux_foveation aux_util
+						    xrt-external-catch2 "-framework Metal"
+		)
+	add_test(NAME tests_metal_foveation_cache COMMAND tests_metal_foveation_cache --success --allow-running-no-tests)
+	set_target_properties(tests_metal_foveation_cache PROPERTIES FOLDER monado_tests)
+endif()
+
 if(APPLE)
 	add_executable(tests_macos_iosurface_producer tests_macos_iosurface_producer.c)
 	target_link_libraries(tests_macos_iosurface_producer PRIVATE "-framework CoreFoundation" "-framework IOSurface")
