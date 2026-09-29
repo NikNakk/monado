@@ -13,9 +13,11 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include "main/comp_window.h"
+#include "main/comp_macos_remote_layer.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
 #include "util/u_handles.h"
+#include "util/u_macos_display_host.h"
 #include "util/u_misc.h"
 #include "util/u_pacing.h"
 #include "vk/vk_image_allocator.h"
@@ -123,6 +125,16 @@ struct macos_passthrough_sink
 
 struct macos_frontend_ops;
 
+#define MACOS_MAX_HOSTED_LAYERS 8
+
+//! A client's CAContext shown in the headset window (window front-end).
+struct macos_hosted_layer
+{
+	uint32_t client_id;
+	CALayerHost *host;
+	enum u_macos_display_host_visibility visibility;
+};
+
 struct comp_window_macos
 {
 	struct comp_target_swapchain base;
@@ -130,6 +142,10 @@ struct comp_window_macos
 	NSWindow *window;
 	/* Window front-end: root of the window's layer tree; metal_layer is a sublayer. */
 	CALayer *root_layer;
+	/* Window front-end: layers hosted from client processes, above metal_layer. */
+	pthread_mutex_t host_mutex;
+	struct macos_hosted_layer hosted[MACOS_MAX_HOSTED_LAYERS];
+	bool host_registered;
 	/* The headset display, fixed for the session. */
 	CGDirectDisplayID display_id;
 	char display_name[128];
@@ -1059,6 +1075,150 @@ macos_window_frontend_create(struct comp_window_macos *cwm)
 	return true;
 }
 
+
+/*
+ *
+ * Window front-end: hosting client layers.
+ *
+ * A client that composites in its own process presents into a CAContext and
+ * the service shows it here through a CALayerHost, above the presenter's own
+ * layer. Registered with u_macos_display_host so the IPC server can reach it.
+ *
+ */
+
+//! Hide the presenter's own layer while any client is exclusive.
+static void
+macos_host_update_service_layer_locked(struct comp_window_macos *cwm)
+{
+	bool exclusive = false;
+	for (uint32_t i = 0; i < MACOS_MAX_HOSTED_LAYERS; i++) {
+		if (cwm->hosted[i].host != nil && cwm->hosted[i].visibility == U_MACOS_DISPLAY_HOST_EXCLUSIVE) {
+			exclusive = true;
+		}
+	}
+	[cwm->metal_layer setHidden:exclusive];
+}
+
+static struct macos_hosted_layer *
+macos_host_find_locked(struct comp_window_macos *cwm, uint32_t client_id, bool allocate)
+{
+	struct macos_hosted_layer *free_entry = NULL;
+	for (uint32_t i = 0; i < MACOS_MAX_HOSTED_LAYERS; i++) {
+		struct macos_hosted_layer *entry = &cwm->hosted[i];
+		if (entry->host != nil && entry->client_id == client_id) {
+			return entry;
+		}
+		if (entry->host == nil && free_entry == NULL) {
+			free_entry = entry;
+		}
+	}
+	return allocate ? free_entry : NULL;
+}
+
+static void
+macos_host_remove_locked(struct macos_hosted_layer *entry)
+{
+	[entry->host removeFromSuperlayer];
+	[entry->host release];
+	entry->host = nil;
+	entry->client_id = 0;
+	entry->visibility = U_MACOS_DISPLAY_HOST_HIDDEN;
+}
+
+static xrt_result_t
+macos_host_attach(void *ctx, uint32_t client_id, uint32_t context_id)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ctx;
+	if (!comp_macos_remote_layer_supported()) {
+		COMP_WARN(cwm->base.base.c, "Client %u asked to be hosted, but the remote layer API is unavailable",
+		          client_id);
+		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
+	}
+
+	xrt_result_t xret = XRT_SUCCESS;
+	@autoreleasepool {
+		pthread_mutex_lock(&cwm->host_mutex);
+		struct macos_hosted_layer *entry = macos_host_find_locked(cwm, client_id, true);
+		CALayerHost *host = entry != NULL ? comp_macos_remote_layer_create_host(context_id) : nil;
+		if (entry == NULL || host == nil) {
+			xret = XRT_ERROR_ALLOCATION;
+		} else {
+			[CATransaction begin];
+			[CATransaction setDisableActions:YES];
+			if (entry->host != nil) {
+				macos_host_remove_locked(entry);
+			}
+			host.hidden = YES;
+			// Added after the presenter's layer, so it is drawn above it.
+			[cwm->root_layer addSublayer:host];
+			entry->client_id = client_id;
+			entry->host = host;
+			entry->visibility = U_MACOS_DISPLAY_HOST_HIDDEN;
+			macos_host_update_service_layer_locked(cwm);
+			[CATransaction commit];
+			[CATransaction flush];
+		}
+		pthread_mutex_unlock(&cwm->host_mutex);
+	}
+
+	if (xret == XRT_SUCCESS) {
+		COMP_INFO(cwm->base.base.c, "Hosting client %u (CAContext %u) in the headset window", client_id, context_id);
+	} else {
+		COMP_ERROR(cwm->base.base.c, "Could not host client %u (CAContext %u)", client_id, context_id);
+	}
+	return xret;
+}
+
+static xrt_result_t
+macos_host_set_visibility(void *ctx, uint32_t client_id, enum u_macos_display_host_visibility visibility)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ctx;
+	xrt_result_t xret = XRT_SUCCESS;
+	@autoreleasepool {
+		pthread_mutex_lock(&cwm->host_mutex);
+		struct macos_hosted_layer *entry = macos_host_find_locked(cwm, client_id, false);
+		if (entry == NULL) {
+			xret = XRT_ERROR_INVALID_ARGUMENT;
+		} else {
+			[CATransaction begin];
+			[CATransaction setDisableActions:YES];
+			entry->host.hidden = visibility == U_MACOS_DISPLAY_HOST_HIDDEN;
+			entry->visibility = visibility;
+			macos_host_update_service_layer_locked(cwm);
+			[CATransaction commit];
+			[CATransaction flush];
+		}
+		pthread_mutex_unlock(&cwm->host_mutex);
+	}
+	return xret;
+}
+
+static void
+macos_host_detach(void *ctx, uint32_t client_id)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ctx;
+	@autoreleasepool {
+		pthread_mutex_lock(&cwm->host_mutex);
+		struct macos_hosted_layer *entry = macos_host_find_locked(cwm, client_id, false);
+		if (entry != NULL) {
+			[CATransaction begin];
+			[CATransaction setDisableActions:YES];
+			macos_host_remove_locked(entry);
+			macos_host_update_service_layer_locked(cwm);
+			[CATransaction commit];
+			[CATransaction flush];
+			COMP_INFO(cwm->base.base.c, "Stopped hosting client %u", client_id);
+		}
+		pthread_mutex_unlock(&cwm->host_mutex);
+	}
+}
+
+static const struct u_macos_display_host_ops macos_display_host_ops = {
+    .attach = macos_host_attach,
+    .set_visibility = macos_host_set_visibility,
+    .detach = macos_host_detach,
+};
+
 static void
 macos_window_frontend_show(struct comp_window_macos *cwm)
 {
@@ -1075,6 +1235,10 @@ macos_window_frontend_show(struct comp_window_macos *cwm)
 	[window orderFrontRegardless];
 	[NSApp activateIgnoringOtherApps:YES];
 	[CATransaction flush];
+
+	// The window can now show layers hosted from client processes.
+	u_macos_display_host_register(&macos_display_host_ops, cwm);
+	cwm->host_registered = true;
 }
 
 static void
@@ -1092,6 +1256,19 @@ macos_window_frontend_is_visible(struct comp_window_macos *cwm)
 static void
 macos_window_frontend_destroy(struct comp_window_macos *cwm)
 {
+	if (cwm->host_registered) {
+		// Waits for any host call in progress.
+		u_macos_display_host_unregister(cwm);
+		cwm->host_registered = false;
+	}
+	pthread_mutex_lock(&cwm->host_mutex);
+	for (uint32_t i = 0; i < MACOS_MAX_HOSTED_LAYERS; i++) {
+		if (cwm->hosted[i].host != nil) {
+			macos_host_remove_locked(&cwm->hosted[i]);
+		}
+	}
+	pthread_mutex_unlock(&cwm->host_mutex);
+
 	[cwm->window orderOut:nil];
 	[cwm->window close];
 	[cwm->window release];
@@ -2258,6 +2435,7 @@ comp_window_macos_destroy(struct comp_target *ct)
 		cwm->passthrough_pipeline = nil;
 		[cwm->metal_layer release];
 	}
+	pthread_mutex_destroy(&cwm->host_mutex);
 	pthread_mutex_destroy(&cwm->passthrough_mutex);
 	pthread_mutex_destroy(&cwm->present_worker_mutex);
 	free(cwm);
@@ -2275,6 +2453,12 @@ comp_window_macos_create_base(struct comp_compositor *c)
 		return NULL;
 	}
 	if (pthread_mutex_init(&cwm->passthrough_mutex, NULL) != 0) {
+		pthread_mutex_destroy(&cwm->present_worker_mutex);
+		free(cwm);
+		return NULL;
+	}
+	if (pthread_mutex_init(&cwm->host_mutex, NULL) != 0) {
+		pthread_mutex_destroy(&cwm->passthrough_mutex);
 		pthread_mutex_destroy(&cwm->present_worker_mutex);
 		free(cwm);
 		return NULL;

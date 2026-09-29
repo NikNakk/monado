@@ -68,6 +68,11 @@ delayed_exit_thread(void *_server)
 static void
 common_shutdown(volatile struct ipc_client_state *ics)
 {
+#ifdef __APPLE__
+	// Take a hosted layer off the headset before the client state is cleared.
+	ipc_server_macos_display_host_client_gone(ics);
+#endif
+
 	/*
 	 * Remove the thread from the server.
 	 */

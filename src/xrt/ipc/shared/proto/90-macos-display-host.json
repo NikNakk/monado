@@ -1,0 +1,21 @@
+{
+	"$schema": "../proto.schema.json",
+
+	"compositor_hosted_attach": {
+		"ifdef": "__APPLE__",
+		"in": [
+			{"name": "context_id", "type": "uint32_t"}
+		]
+	},
+
+	"compositor_hosted_set_visibility": {
+		"ifdef": "__APPLE__",
+		"in": [
+			{"name": "visibility", "type": "uint32_t"}
+		]
+	},
+
+	"compositor_hosted_detach": {
+		"ifdef": "__APPLE__"
+	}
+}
