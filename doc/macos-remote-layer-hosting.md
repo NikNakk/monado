@@ -228,8 +228,61 @@ pid=` line. CSVs are written to `/tmp/layer_host_probe_<mode>_{host,game,canary}
   `monado-service`. Try `--process-type Adaptive`, and compare with
   `query --pid` on the real service while Unreal runs.
 
+### Results, 2026-09-29
+
+LaunchAgent host with `ProcessType=Interactive`, game app fullscreen on the Mac
+display with Game Mode engaged, `--cpu-load 10`, 60 s after a 5 s warm-up. PS VR2
+at 119.880 Hz.
+
+**The demotion is reproduced, and its mechanism identified.** In both runs
+the host's canary went `realtime` (97) → `throttled` (4) while the game was
+still warming up in fullscreen, before it connected. It stayed throttled until
+the game quit, then returned to 97 within about 30 ms. Throughout:
+
+```
+host{darwinbg=0 ext_darwinbg=1 adaptive=0 adaptive_important=0 app=0 role=default}
+game{darwinbg=0 ext_darwinbg=0 adaptive=0 adaptive_important=0 app=1 role=ui-focal}
+```
+
+`ext_darwinbg=1` is `trp_ext_darwinbg`, Darwin background requested *from
+outside* the process (by RunningBoard or gamepolicyd under Game Mode). The
+role is untouched, the job is not `Adaptive`, and there is no internal request.
+An XPC importance boost does not cancel `trp_ext_darwinbg`, which is why the
+lease had no effect.
+
+| | `game-direct` (host renders, today's design) | `game-hosted` (game renders, host shows `CALayerHost`) |
+| --- | --- | --- |
+| Host throttled | ~64.5 s of ~78 s | ~65 s of ~70.5 s |
+| Host canary wake lateness p99 / max | 348 ms / 8.2 s | 252 ms / 706 ms |
+| Renderer | host, priority 4 for 95.7 % of frames | game, priority 97 for every frame |
+| Frames submitted / presented | 23 / 8 in ~58 s | 7098 / 7043 in 60 s |
+| Present interval median / p95 / p99 | 41.7 ms / 9.6 s / 9.6 s | 8.342 / 8.342 / 8.342 ms |
+| Intervals > 1.5× period | 71.4 % | 0.51 % |
+| Presented − submit median / p95 | 132 ms / 5.05 s | 15.15 / 16.25 ms |
+
+(Throttled times are from the canary transition timestamps. The summary line
+in these runs weighted by samples, which understates throttling because a
+starved thread takes few samples; it is now weighted by time.)
+
+`game-direct` collapses completely under this load: the host renders a handful
+of frames seconds apart. `game-hosted` matches the unloaded timing baseline
+(0.51 % long intervals against 0.70–1.41 %, the same one-period target offset,
+slightly lower latency) while the host is throttled to priority 4 for the whole
+session. Frame delivery no longer depends on the hosting process's scheduling.
+
+The one difference from the baseline is 55 not-presented drawables (0.77 %,
+against 0–2). Whether they cluster at attach or teardown or are spread through
+the run can be read from `presented_s == 0` in the game CSV.
+
+The load here (10 busy threads at user-interactive QoS on every core) is harsher
+than a typical game, so `game-direct` is a worst case. The qualitative result
+holds either way: with the service externally backgrounded, only the process
+Game Mode favours can keep frame timing.
+
 ### Not yet covered
 
+- Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
+  Unreal (`--role query --pid <service pid>`).
 - Handoff between two hosted clients, and fence-port alignment.
 - A GPU-heavy renderer, and whether direct scanout is kept.
 - Integration with the multi-client compositor.
