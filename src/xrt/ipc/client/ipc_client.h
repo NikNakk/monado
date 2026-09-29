@@ -140,6 +140,14 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c,
                       struct ipc_client_tracking_origin_manager *ictom,
                       uint32_t device_id);
 
+/*!
+ * Fill in the parts of an IPC HMD that only a compositor needs (screen,
+ * viewports, distortion), so a client can composite in-process with it.
+ * Distortion is computed by the service's device, once, into a local mesh.
+ */
+void
+ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev);
+
 struct xrt_device *
 ipc_client_device_create(struct ipc_connection *ipc_c,
                          struct ipc_client_tracking_origin_manager *ictom,
@@ -147,6 +155,14 @@ ipc_client_device_create(struct ipc_connection *ipc_c,
 
 struct xrt_system *
 ipc_client_system_create(struct ipc_connection *ipc_c, struct xrt_system_compositor *xsysc);
+
+/*!
+ * Like @ref ipc_client_system_create, but @p xsysc is a compositor running in
+ * this process: sessions are headless on the service side, and the native
+ * compositor is created locally, its events merged into the session's.
+ */
+struct xrt_system *
+ipc_client_system_create_with_local_compositor(struct ipc_connection *ipc_c, struct xrt_system_compositor *xsysc);
 
 struct xrt_space_overseer *
 ipc_client_space_overseer_create(struct ipc_connection *ipc_c);

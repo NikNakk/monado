@@ -194,6 +194,17 @@ if(APPLE AND XRT_FEATURE_SERVICE)
 			"-include"
 			"${CMAKE_CURRENT_SOURCE_DIR}/client/ipc_metal_swapchain_import_override.h"
 		)
+
+	if(XRT_MODULE_COMPOSITOR_MAIN)
+		# Clients may composite in-process, hosted by the service. Opt-in at
+		# run time with XRT_MACOS_CLIENT_COMPOSITOR=1.
+		target_sources(
+			ipc_client PRIVATE client/ipc_client_macos_hosted.c
+					   client/ipc_client_macos_hosted.h
+			)
+		target_compile_definitions(ipc_client PRIVATE XRT_IPC_MACOS_HOSTED_COMPOSITOR)
+		target_link_libraries(ipc_client PRIVATE comp_main)
+	endif()
 endif()
 
 if(ANDROID)

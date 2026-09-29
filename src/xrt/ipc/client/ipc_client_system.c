@@ -12,9 +12,14 @@
 #include "xrt/xrt_system.h"
 #include "xrt/xrt_session.h"
 
+#include "util/u_misc.h"
+#include "util/u_session.h"
+
 #include "ipc_client_generated.h"
 
 #include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
 
 /*!
  * IPC client implementation of @ref xrt_system.
@@ -29,6 +34,9 @@ struct ipc_client_system
 	struct ipc_connection *ipc_c;
 
 	struct xrt_system_compositor *xsysc;
+
+	//! The system compositor runs in this process, not in the service.
+	bool local_compositor;
 };
 
 
@@ -90,6 +98,115 @@ create_with_comp(struct ipc_client_system *icsys,
 }
 
 
+/*!
+ * Session of a client that composites in-process: headless on the service
+ * side, with the local native compositor's events queued here.
+ */
+struct ipc_client_local_session
+{
+	struct xrt_session base;
+
+	//! The service-side, headless, session.
+	struct xrt_session *remote;
+
+	//! Receives the local compositor's events.
+	struct u_session *local;
+};
+
+static inline struct ipc_client_local_session *
+ipc_local_session(struct xrt_session *xs)
+{
+	return (struct ipc_client_local_session *)xs;
+}
+
+static xrt_result_t
+local_session_poll_events(struct xrt_session *xs, union xrt_session_event *out_xse)
+{
+	struct ipc_client_local_session *ils = ipc_local_session(xs);
+
+	xrt_result_t xret = xrt_session_poll_events(&ils->local->base, out_xse);
+	if (xret != XRT_SUCCESS || out_xse->type != XRT_SESSION_EVENT_NONE) {
+		return xret;
+	}
+
+	/*
+	 * The service creates a native compositor for every session, headless
+	 * or not. Its compositor events describe that unused compositor, so the
+	 * local compositor's events replace them.
+	 */
+	while (true) {
+		xret = xrt_session_poll_events(ils->remote, out_xse);
+		if (xret != XRT_SUCCESS) {
+			return xret;
+		}
+
+		switch (out_xse->type) {
+		case XRT_SESSION_EVENT_STATE_CHANGE:
+		case XRT_SESSION_EVENT_OVERLAY_CHANGE:
+		case XRT_SESSION_EVENT_LOSS_PENDING:
+		case XRT_SESSION_EVENT_LOST:
+		case XRT_SESSION_EVENT_DISPLAY_REFRESH_RATE_CHANGE: continue;
+		default: return XRT_SUCCESS;
+		}
+	}
+}
+
+static xrt_result_t
+local_session_request_exit(struct xrt_session *xs)
+{
+	struct ipc_client_local_session *ils = ipc_local_session(xs);
+
+	return xrt_session_request_exit(&ils->local->base);
+}
+
+static void
+local_session_destroy(struct xrt_session *xs)
+{
+	struct ipc_client_local_session *ils = ipc_local_session(xs);
+
+	struct xrt_session *local = &ils->local->base;
+	xrt_session_destroy(&local);
+	xrt_session_destroy(&ils->remote);
+
+	free(ils);
+}
+
+static inline xrt_result_t
+create_with_local_comp(struct ipc_client_system *icsys,
+                       const struct xrt_session_info *xsi,
+                       struct xrt_session **out_xs,
+                       struct xrt_compositor_native **out_xcn)
+{
+	struct xrt_session *remote = NULL;
+	xrt_result_t xret = create_headless(icsys, xsi, &remote);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	struct ipc_client_local_session *ils = U_TYPED_CALLOC(struct ipc_client_local_session);
+	ils->base.poll_events = local_session_poll_events;
+	ils->base.request_exit = local_session_request_exit;
+	ils->base.destroy = local_session_destroy;
+	ils->remote = remote;
+	ils->local = u_session_create(NULL);
+
+	xret = xrt_syscomp_create_native_compositor( //
+	    icsys->xsysc,                            //
+	    xsi,                                     //
+	    &ils->local->sink,                       //
+	    out_xcn);                                //
+	if (xret != XRT_SUCCESS) {
+		struct xrt_session *xs = &ils->base;
+		xrt_session_destroy(&xs);
+		return xret;
+	}
+
+	*out_xs = &ils->base;
+
+	return XRT_SUCCESS;
+}
+
+
 /*
  *
  * Member functions.
@@ -112,6 +229,8 @@ ipc_client_system_create_session(struct xrt_system *xsys,
 	// Skip making a native compositor if not asked for.
 	if (out_xcn == NULL) {
 		return create_headless(icsys, xsi, out_xs);
+	} else if (icsys->local_compositor) {
+		return create_with_local_comp(icsys, xsi, out_xs, out_xcn);
 	} else {
 		return create_with_comp(icsys, xsi, out_xs, out_xcn);
 	}
@@ -150,4 +269,15 @@ ipc_client_system_create(struct ipc_connection *ipc_c, struct xrt_system_composi
 	icsys->xsysc = xsysc;
 
 	return &icsys->base;
+}
+
+struct xrt_system *
+ipc_client_system_create_with_local_compositor(struct ipc_connection *ipc_c, struct xrt_system_compositor *xsysc)
+{
+	struct xrt_system *xsys = ipc_client_system_create(ipc_c, xsysc);
+	if (xsys != NULL) {
+		ipc_system(xsys)->local_compositor = true;
+	}
+
+	return xsys;
 }

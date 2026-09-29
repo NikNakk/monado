@@ -205,6 +205,39 @@ ipc_client_hmd_compute_distortion(
 	IPC_CHK_ALWAYS_RET(ich->ipc_c, xret, "ipc_call_device_compute_distortion");
 }
 
+void
+ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+	struct ipc_shared_memory *ism = ich->ipc_c->ism;
+	struct xrt_hmd_parts *hmd = xdev->hmd;
+
+	hmd->screens[0].w_pixels = (int)ism->hmd.compositor.w_pixels;
+	hmd->screens[0].h_pixels = (int)ism->hmd.compositor.h_pixels;
+	hmd->screens[0].nominal_frame_interval_ns = ism->hmd.compositor.nominal_frame_interval_ns;
+	for (uint32_t i = 0; i < hmd->view_count && i < ARRAY_SIZE(ism->hmd.compositor.views); ++i) {
+		hmd->views[i].viewport.x_pixels = ism->hmd.compositor.views[i].x_pixels;
+		hmd->views[i].viewport.y_pixels = ism->hmd.compositor.views[i].y_pixels;
+		hmd->views[i].viewport.w_pixels = ism->hmd.compositor.views[i].w_pixels;
+		hmd->views[i].viewport.h_pixels = ism->hmd.compositor.views[i].h_pixels;
+		hmd->views[i].rot = ism->hmd.compositor.views[i].rot;
+		hmd->distortion.fov[i] = ism->hmd.compositor.views[i].distortion_fov;
+	}
+
+	// Replace the placeholder mesh with one computed by the service's device.
+	free(hmd->distortion.mesh.vertices);
+	hmd->distortion.mesh.vertices = NULL;
+	free(hmd->distortion.mesh.indices);
+	hmd->distortion.mesh.indices = NULL;
+
+	xdev->compute_distortion = ipc_client_hmd_compute_distortion;
+	hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
+	hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
+	u_distortion_mesh_fill_in_compute(xdev);
+	hmd->distortion.models |= XRT_DISTORTION_MODEL_MESHUV;
+	hmd->distortion.preferred = XRT_DISTORTION_MODEL_MESHUV;
+}
+
 static xrt_result_t
 ipc_client_hmd_is_form_factor_available(struct xrt_device *xdev, enum xrt_form_factor form_factor, bool *out_available)
 {

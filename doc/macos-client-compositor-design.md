@@ -479,3 +479,51 @@ samples; the time spans are the right measure.
 The 120 s window is not useful. Its per-bucket p95 creeps from 1.2 to 3.1 ms
 over the session, the signature of about 20 ppm drift between the headset
 clock and the host clock, which a 30 s window keeps under about 0.6 ms.
+
+## Phase 2 status (2026-09-29)
+
+All of phase 2 is in the tree, behind `XRT_MACOS_CLIENT_COMPOSITOR=1` in the
+client's environment. Without it, clients take exactly the old service path.
+
+- **Service side** (`ipc_server_macos_display_host.c`, `comp_window_macos.m`):
+  a table of client `CALayerHost`s above the presenter's own layer, with
+  `compositor_hosted_attach`, `_set_visibility` and `_detach`. The layer is
+  removed when the client disconnects.
+- **Hosted presenter** (`comp_window_macos.m`): in a client, the
+  `CAMetalLayer` sits in a `CAContext` rather than in a window. It shows
+  itself in the handoff order (shown, then exclusive after the first present).
+- **Metal swapchains** (`comp_metal_glue.c`): service builds carry both paths
+  and pick the direct one, with a local semaphore pair, when hosted.
+- **IPC client** (`ipc_client_macos_hosted.c`, `ipc_client_system.c`): when
+  asked, the client registers the host functions and creates
+  `comp_main_create_system_compositor()` on the IPC head device. Sessions are
+  headless on the service side. The local compositor's events replace the
+  compositor events of the service's unused per-session compositor. If the
+  local compositor cannot be created, everything is unregistered and the
+  client falls back to the service.
+- **IPC head device**: the shared memory now carries the screen size, frame
+  interval, viewports, rotations and distortion FoVs. A hosted client builds
+  its distortion mesh once at start-up, by computing it through the service's
+  device. That is one IPC round trip per mesh vertex, about 8,500 at the
+  default `XRT_MESH_SIZE`, so start-up takes a little longer.
+
+The shared-memory layout changed, so rebuild the Wine client alongside the
+service.
+
+Not done yet:
+
+- The service does not see `xrSessionBegin`/`End` from a hosted client. Its
+  app list and focus logic treat the client as idle.
+- There is one hosted client at a time and no mid-session handoff (phase 3).
+
+### Testing phase 2
+
+1. Start the service as usual. Its presenter must own the headset window.
+2. Run the application with `XRT_MACOS_CLIENT_COMPOSITOR=1`, for example
+   `XRT_MACOS_CLIENT_COMPOSITOR=1 hello_xr -g Metal`. For a bundled game, set
+   the variable in the launch environment.
+3. The client log should say `Compositing in-process; the service hosts this
+   client's layer`. The service log should show the attach and the visibility
+   changes. `U_LOG_W` "In-process compositor unavailable" means it fell back.
+4. Repeat the phase 1 Unreal run with `PSVR2_TIMING_TRACE=1`, with and without
+   Game Mode. The compositor RT trace now comes from the client process.

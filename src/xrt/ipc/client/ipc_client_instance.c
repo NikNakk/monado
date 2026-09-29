@@ -35,6 +35,10 @@
 
 #include "ipc_client_generated.h"
 
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+#include "client/ipc_client_macos_hosted.h"
+#endif
+
 
 #include <stdio.h>
 #if defined(XRT_OS_WINDOWS)
@@ -80,6 +84,9 @@ struct ipc_client_instance
 
 	struct ipc_connection ipc_c;
 
+	//! The system compositor runs in this process, hosted by the service.
+	bool local_compositor;
+
 #ifdef XRT_OS_ANDROID
 	struct android_instance_base android;
 #endif
@@ -99,6 +106,16 @@ create_system_compositor(struct ipc_client_instance *ii,
 	struct xrt_system_compositor *xsysc = NULL;
 	struct xrt_image_native_allocator *xina = NULL;
 	xrt_result_t xret;
+
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	// Composite in-process if asked to and possible, else fall through.
+	xret = ipc_client_macos_hosted_create_system_compositor(&ii->ipc_c, xdev, &xsysc);
+	if (xret == XRT_SUCCESS) {
+		ii->local_compositor = true;
+		*out_xsysc = xsysc;
+		return XRT_SUCCESS;
+	}
+#endif
 
 #ifdef XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER
 	// On Android, we allocate images natively on the client side.
@@ -232,7 +249,11 @@ ipc_client_instance_create_system(struct xrt_instance *xinst,
 	}
 
 out:
-	*out_xsys = ipc_client_system_create(&ii->ipc_c, xsysc);
+	if (ii->local_compositor) {
+		*out_xsys = ipc_client_system_create_with_local_compositor(&ii->ipc_c, xsysc);
+	} else {
+		*out_xsys = ipc_client_system_create(&ii->ipc_c, xsysc);
+	}
 	*out_xsysd = xsysd;
 	*out_xso = ipc_client_space_overseer_create(&ii->ipc_c);
 
@@ -261,6 +282,12 @@ static void
 ipc_client_instance_destroy(struct xrt_instance *xinst)
 {
 	struct ipc_client_instance *ii = ipc_client_instance(xinst);
+
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	if (ii->local_compositor) {
+		ipc_client_macos_hosted_fini(&ii->ipc_c);
+	}
+#endif
 
 	// service considers us to be connected until fd is closed
 	ipc_client_connection_fini(&ii->ipc_c);
