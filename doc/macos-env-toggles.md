@@ -220,11 +220,46 @@ with the constant value:
 | comp/macos: always defer compositor GPU timestamp readback | `XRT_MACOS_DEFER_GPU_TIMESTAMPS`, `XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS` | deferred |
 | comp/macos: always present asynchronously | `XRT_MACOS_ASYNC_PRESENT` | async |
 
+Second batch (approved 2026-09-29), again one commit per toggle or group and
+keeping default behaviour:
+
+| Removed | Now always |
+| --- | --- |
+| `PRESENT_STALE_SUBSTITUTE`, `PRESENT_IMMEDIATE` (and the ~400-line stale presenter copy) | drawable-slot newest-frame worker is the only substitution |
+| `DISABLE_DISPLAY_SYNC`, `DISABLE_FRAMEBUFFER_ONLY` | layer flags as initialised |
+| `EARLY_DRAWABLE` | no compositor-thread prefetch |
+| `PRESENT_WORKER` (standalone) | worker used only by drawable-slot mode |
+| `MAX_DRAWABLES` | 3 |
+| `DISPLAY_RATE_DIVISOR` | compositor runs every refresh |
+| `UNIQUE_PRESENT_SLOTS` | no slot reservation |
+| `LATE_RENDER_DESIRED_OFFSET_US` | no late-render wait (`late_render.csv` kept for pose timing) |
+| `CLIENT_FRAME_DIVISOR` | elastic `CLIENT_FRAME_MIN_HOLD` kept instead |
+| `COMPOSITOR_QOS` | time-constraint policy only |
+| `U_PACING_APP_FORCED_FRAME_DIVISOR` | upstream single-file `u_pacing_app.c` restored |
+| `WAIT_HYBRID_US` | spin or Mach wait only |
+| `PROCESS_ACTIVITY` | files removed |
+| `METAL_XPC_EXTERNAL_BROKER` | direct in-service registry only |
+
+Then two separately revertable **default changes**:
+
+1. `client/metal: enable app-release wait thread by default in service builds`
+   fixes finding 3 by including `xrt/xrt_config_build.h`.
+2. `comp/macos: default to the best measured legacy presentation config` sets
+   mode `legacy`, drawable slot on, minimum present duration 8000 µs and the
+   time constraint on at 35/70. It also adds a `tests_macos_displaylink_default`
+   test.
+
+Still to do after the flip (not yet done): remove `PRESENT_PRELATCH_US`,
+`PRESENT_MIN_LEAD_US`, `CAMETALDISPLAYLINK_LATENCY`/`_THREAD_PRIORITY`, the
+driven/hybrid backend and the `DRIVE` alias.
+
 The async commit is deliberately minimal. The synchronous branches inside
 `macos_execute_present_job()` are now unreachable but still present, and
 should be pruned in a follow-up that is compiled on macOS. The Objective-C
-changes have **not** been compiled; only Linux builds and syntax-only checks
-of the C files' macOS paths were possible.
+changes have **not** been compiled. Only Linux builds and syntax-only checks
+of the C files' macOS paths were possible (`comp_renderer.c`, `psvr2.c`,
+`comp_multi_system.c` with its force-included macOS headers,
+`comp_multi_macos_displaylink.c` and `u_wait.h`, using Mach stub headers).
 
 ## Cross-cutting findings
 
