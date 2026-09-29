@@ -69,6 +69,7 @@ jobs:
           cmake -S . -B build-foveation -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
           -DBUILD_TESTING=ON
+          -DXRT_FEATURE_SERVICE=OFF
           -DXRT_HAVE_OPENGLES=OFF
           -DXRT_HAVE_SDL2=OFF
           -DXRT_MODULE_MONADO_GUI=OFF
@@ -82,7 +83,7 @@ jobs:
           -DXRT_FEATURE_OPENXR_FB_FOVEATION_CONFIGURATION=ON
           -DXRT_FEATURE_OPENXR_META_FOVEATION_EYE_TRACKED=ON
           -DXRT_FEATURE_OPENXR_MNDX_FOVEATION_METAL=ON
-      - name: Build standards targets
+      - name: Build standards targets (in-process, direct Metal swapchains)
         run: >-
           cmake --build build-foveation
           --target st_oxr openxr_monado tests_foveation tests_foveation_openxr
