@@ -313,6 +313,28 @@ struct ipc_shared_memory
 		uint32_t view_count;
 		enum xrt_blend_mode blend_modes[XRT_MAX_DEVICE_BLEND_MODES];
 		uint32_t blend_mode_count;
+
+		/*!
+		 * The rest of @ref xrt_hmd_parts that a compositor needs, for
+		 * clients that composite in-process with IPC devices. Distortion
+		 * itself is computed through the device.
+		 */
+		struct
+		{
+			uint32_t w_pixels;
+			uint32_t h_pixels;
+			XRT_ALIGNAS(8) uint64_t nominal_frame_interval_ns;
+
+			struct
+			{
+				uint32_t x_pixels;
+				uint32_t y_pixels;
+				uint32_t w_pixels;
+				uint32_t h_pixels;
+				struct xrt_matrix_2x2 rot;
+				struct xrt_fov distortion_fov;
+			} views[2];
+		} compositor;
 	} hmd;
 
 	struct ipc_layer_slot slots[IPC_MAX_SLOTS];
