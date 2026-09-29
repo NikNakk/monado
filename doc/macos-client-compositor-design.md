@@ -359,13 +359,17 @@ development service that picks up the trace variables:
 
 ```sh
 export PSVR2_TIMING_TRACE=1
+export PSVR2_DRIVER_TIMING_TRACE=1   # the IMU/SLAM/pose files need both
 export PSVR2_TIMING_TRACE_DIR="$HOME/psvr2-trace"
 mkdir -p "$PSVR2_TIMING_TRACE_DIR"
 build/src/xrt/targets/service/monado-service-xpc-control bootstrap
 ```
 
 The service starts on the first client connection. Each service process writes
-its own `monado_psvr2_<PID>_*.csv`.
+its own `monado_psvr2_<PID>_*.csv`. Check that `_imu.csv` and `_slam.csv`
+appear once the headset is tracking. `bootstrap` copies every `PSVR2_*`
+variable from the shell, so a `PSVR2_DRIVER_TIMING_TRACE=0` left over from
+another setup silently disables them.
 
 **Run A: control, no Game Mode.** Start the Unreal app windowed on the Mac
 display. Wear the headset and move your head naturally for about 100 s. Quit the
@@ -388,13 +392,16 @@ while true; do
 done > ~/psvr2-trace/policy.log 2>&1 &
 ```
 
-Then, without returning to Terminal:
+Then, without returning to Terminal, go fullscreen and toggle Game Mode from
+its menu (the menu-bar item), rather than by changing the window:
 
-1. About 20 s windowed.
-2. Switch the app to fullscreen on the Mac display from within the app. Check
-   that the Game Mode icon appears in the menu bar. Keep moving about 60 s.
-3. Leave fullscreen from within the app and continue about 20 s windowed.
-4. Quit the app, then stop the loop (`kill %1`) and `bootout`.
+1. About 20 s with Game Mode off.
+2. Game Mode on for about 15 s, then off for about 15 s; repeat two or three
+   times. Keep moving your head throughout. Short periods get data before
+   Unreal's swapchain-wait abort, which hit about 21 s into Game Mode.
+3. Quit the app (or let it abort), then stop the loop (`kill %1`) and
+   `bootout`. The service keeps running after an app abort, so `bootout` still
+   flushes its traces.
 
 `policy.log` should show the service switching to `ext_darwinbg=1` and the
 game to `game_mode=on` for the fullscreen minute, with wall-clock times that
