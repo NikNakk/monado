@@ -115,3 +115,32 @@ TEST_CASE("FB foveation parser enforces extension availability and valid enums")
 	CHECK(oxr_foveation_request_from_fb(&create_info, true, true, &request) ==
 	      OXR_FOVEATION_PARSE_INVALID_EYE_TRACKED_FLAGS);
 }
+
+
+TEST_CASE("standard foveation resolves to backend-neutral XRT state")
+{
+	struct u_foveation_request request{};
+	REQUIRE(u_foveation_request_from_level(
+	    U_FOVEATION_LEVEL_HIGH, true, true, 1.25f, &request));
+
+	struct xrt_foveation_state state{};
+	REQUIRE(oxr_foveation_request_to_xrt(&request, &state));
+	CHECK(state.enabled);
+	CHECK(state.dynamic);
+	CHECK(state.eye_tracked);
+	CHECK(state.center_rate == Catch::Approx(1.0f));
+	CHECK(state.middle_rate == Catch::Approx(0.5f));
+	CHECK(state.peripheral_rate == Catch::Approx(0.25f));
+	CHECK(state.center_half_extent == Catch::Approx(0.09375f));
+	CHECK(state.middle_half_extent == Catch::Approx(0.21875f));
+	CHECK(state.vertical_offset_degrees == Catch::Approx(1.25f));
+	CHECK(state.view_count == 0);
+
+	REQUIRE(u_foveation_request_from_level(
+	    U_FOVEATION_LEVEL_NONE, false, false, 0.0f, &request));
+	REQUIRE(oxr_foveation_request_to_xrt(&request, &state));
+	CHECK_FALSE(state.enabled);
+	CHECK(state.center_rate == Catch::Approx(1.0f));
+	CHECK(state.middle_rate == Catch::Approx(1.0f));
+	CHECK(state.peripheral_rate == Catch::Approx(1.0f));
+}
