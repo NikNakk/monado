@@ -150,7 +150,9 @@ if(APPLE AND XRT_MODULE_COMPOSITOR_MULTI)
 		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_MODE=driven $<TARGET_FILE:tests_macos_displaylink> driven)
 	add_test(NAME tests_macos_displaylink_hybrid
 		COMMAND ${CMAKE_COMMAND} -E env XRT_MACOS_CAMETALDISPLAYLINK_MODE=hybrid $<TARGET_FILE:tests_macos_displaylink> hybrid)
-	set_tests_properties(tests_macos_displaylink_legacy tests_macos_displaylink_driven tests_macos_displaylink_hybrid PROPERTIES TIMEOUT 10)
+	add_test(NAME tests_macos_displaylink_default
+		COMMAND ${CMAKE_COMMAND} -E env --unset=XRT_MACOS_CAMETALDISPLAYLINK_MODE --unset=XRT_MACOS_CAMETALDISPLAYLINK_DRIVE $<TARGET_FILE:tests_macos_displaylink> legacy)
+	set_tests_properties(tests_macos_displaylink_legacy tests_macos_displaylink_driven tests_macos_displaylink_hybrid tests_macos_displaylink_default PROPERTIES TIMEOUT 10)
 endif()
 
 if(APPLE)
