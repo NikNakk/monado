@@ -92,3 +92,43 @@ oxr_foveation_request_from_fb(const XrFoveationProfileCreateInfoFB *create_info,
 
 	return OXR_FOVEATION_PARSE_SUCCESS;
 }
+
+
+bool
+oxr_foveation_request_to_xrt(const struct u_foveation_request *request,
+                             struct xrt_foveation_state *out_state)
+{
+	if (request == NULL || out_state == NULL) {
+		return false;
+	}
+
+	struct xrt_foveation_state state = {
+	    .enabled = request->enabled,
+	    .dynamic = request->dynamic,
+	    .eye_tracked = request->eye_tracked,
+	    .center_rate = 1.0f,
+	    .middle_rate = 1.0f,
+	    .peripheral_rate = 1.0f,
+	    .center_half_extent = 0.0f,
+	    .middle_half_extent = 0.0f,
+	    .vertical_offset_degrees = request->vertical_offset_degrees,
+	    .view_count = 0,
+	};
+
+	if (request->enabled) {
+		const struct u_foveation_profile *profile =
+		    u_foveation_profile_get(request->profile_index);
+		if (profile == NULL) {
+			return false;
+		}
+
+		state.center_rate = profile->center_rate;
+		state.middle_rate = profile->middle_rate;
+		state.peripheral_rate = profile->peripheral_rate;
+		state.center_half_extent = profile->center_half_extent;
+		state.middle_half_extent = profile->middle_half_extent;
+	}
+
+	*out_state = state;
+	return true;
+}
