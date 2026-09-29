@@ -7,7 +7,6 @@ set(tests
     tests_cxx_wrappers
     tests_deque
     tests_generic_callbacks
-    tests_generic_controller
     tests_foveation
     tests_glue_device
     tests_history_buf
@@ -42,7 +41,7 @@ if(XRT_HAVE_VULKAN)
 	list(APPEND tests tests_uv_to_tangent)
 endif()
 if(XRT_FEATURE_OPENXR)
-	list(APPEND tests tests_input_transform)
+	list(APPEND tests tests_input_transform tests_generic_controller)
 endif()
 if(XRT_HAVE_OPENGL
    AND XRT_HAVE_OPENGL_GLX
