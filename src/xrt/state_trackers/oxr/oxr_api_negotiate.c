@@ -286,6 +286,16 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrGetDeviceSampleRateFB, FB_haptic_pcm);
 #endif
 
+#ifdef OXR_HAVE_FB_swapchain_update_state
+	ENTRY_IF_EXT(xrUpdateSwapchainFB, FB_swapchain_update_state);
+	ENTRY_IF_EXT(xrGetSwapchainStateFB, FB_swapchain_update_state);
+#endif
+
+#ifdef OXR_HAVE_FB_foveation
+	ENTRY_IF_EXT(xrCreateFoveationProfileFB, FB_foveation);
+	ENTRY_IF_EXT(xrDestroyFoveationProfileFB, FB_foveation);
+#endif
+
 #ifdef OXR_HAVE_FB_passthrough
 	ENTRY_IF_EXT(xrCreateGeometryInstanceFB, FB_passthrough);
 	ENTRY_IF_EXT(xrCreatePassthroughFB, FB_passthrough);
