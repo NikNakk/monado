@@ -55,6 +55,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <libproc.h>
+#include <math.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <mach/mach_time.h>
@@ -222,6 +223,11 @@ struct probe_options
 	const char *out_prefix;
 	bool realtime;
 
+	// Latency guard: drop a frame to drain a present queue stuck deep.
+	bool latency_guard;
+	double guard_window_ms;
+	double guard_min_interval_ms;
+
 	// Game Mode test.
 	int cpu_load;
 	double warmup;
@@ -306,6 +312,9 @@ print_usage(const char *argv0)
 	        "                renders for at most S and should outlast the game\n"
 	        "  --out PREFIX  CSV path prefix (default /tmp/layer_host_probe)\n"
 	        "  --rt 0|1      realtime (time-constraint) render thread, as Monado's compositor (default 1)\n"
+	        "  --latency-guard 0|1        skip a frame when presents have been 2+ periods late for\n"
+	        "                             --guard-window-ms (default 250), at most every\n"
+	        "                             --guard-min-interval-ms (default 500) (default 0)\n"
 	        "\n"
 	        "Handoff:\n"
 	        "  --swap-every S           seconds between swaps (default 2)\n"
@@ -338,6 +347,8 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 	    .min_duration_us = 8000.0,
 	    .out_prefix = "/tmp/layer_host_probe",
 	    .realtime = true,
+	    .guard_window_ms = 250.0,
+	    .guard_min_interval_ms = 500.0,
 	    .warmup = 5.0,
 	    .process_type = "Interactive",
 	    .swap_every = 2.0,
@@ -410,6 +421,12 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 			opts->out_prefix = value;
 		} else if (strcmp(arg, "--rt") == 0) {
 			opts->realtime = atoi(value) != 0;
+		} else if (strcmp(arg, "--latency-guard") == 0) {
+			opts->latency_guard = atoi(value) != 0;
+		} else if (strcmp(arg, "--guard-window-ms") == 0) {
+			opts->guard_window_ms = atof(value);
+		} else if (strcmp(arg, "--guard-min-interval-ms") == 0) {
+			opts->guard_min_interval_ms = atof(value);
 		} else if (strcmp(arg, "--cpu-load") == 0) {
 			opts->cpu_load = atoi(value);
 		} else if (strcmp(arg, "--warmup") == 0) {
@@ -667,6 +684,18 @@ display_link_callback(CVDisplayLinkRef link,
 	_Atomic uint64_t _nextVblankHostTime;
 	_Atomic bool _stopRequested;
 	_Atomic double _latestPresented;
+
+	/*
+	 * Latency guard. A present normally lands one period after the display
+	 * link's output time. After any stall the queue can be left a frame or two
+	 * deeper, and one-frame-per-vblank rendering never drains it. The guard
+	 * counts consecutive presents at 2+ periods and skips one vblank to drain
+	 * the queue once that has lasted long enough. The same idea as GAV's
+	 * player (FramePacer / notePresentDelay), implemented independently.
+	 */
+	_Atomic int _deepPresents;
+	double _lastDrainS;
+	size_t _drains;
 	double _periodSeconds;
 	bool _realtime;
 
@@ -798,11 +827,19 @@ display_link_callback(CVDisplayLinkRef link,
 	[blit endEncoding];
 
 	_Atomic double *latest = &_latestPresented;
+	_Atomic int *deep = &_deepPresents;
+	double period = _periodSeconds;
 	[drawable addPresentedHandler:^(id<MTLDrawable> presented) {
 		double t = presented.presentedTime;
 		atomic_store(&record->presented_s, t);
 		if (t > 0.0) {
 			atomic_store(latest, t);
+			long periods = lround((t - record->target_s) / period);
+			if (periods >= 2) {
+				atomic_fetch_add(deep, 1);
+			} else {
+				atomic_store(deep, 0);
+			}
 		}
 	}];
 
@@ -832,6 +869,9 @@ display_link_callback(CVDisplayLinkRef link,
 		if (dispatch_semaphore_wait(_vblank, timeout) != 0) {
 			continue;
 		}
+		if ([self shouldDrainQueue]) {
+			continue;
+		}
 		@autoreleasepool {
 			[self renderFrame];
 		}
@@ -844,6 +884,25 @@ display_link_callback(CVDisplayLinkRef link,
 
 	[self writeCsv];
 	[self printSummary];
+}
+
+//! Latency guard: true to skip this vblank so the present queue drains by one.
+- (bool)shouldDrainQueue
+{
+	if (!_opts.latency_guard) {
+		return false;
+	}
+	int window_frames = (int)lround(_opts.guard_window_ms / 1e3 / _periodSeconds);
+	double now = now_seconds();
+	if (atomic_load(&_deepPresents) < (window_frames > 1 ? window_frames : 1) ||
+	    now - _lastDrainS < _opts.guard_min_interval_ms / 1e3) {
+		return false;
+	}
+	// Presents already in flight still report the old depth; start counting again.
+	atomic_store(&_deepPresents, 0);
+	_lastDrainS = now;
+	_drains++;
+	return true;
 }
 
 - (void)writeCsv
@@ -917,7 +976,8 @@ display_link_callback(CVDisplayLinkRef link,
 	        "  present interval ms: median=%.3f p95=%.3f p99=%.3f  >1.5x period=%.2f%%\n"
 	        "  presented - vblank target ms: median=%.3f p95=%.3f\n"
 	        "  presented - CPU submit ms: median=%.3f p95=%.3f\n"
-	        "  render thread: realtime=%s priority min=%.0f median=%.0f  frames throttled (<=4)=%.2f%%\n",
+	        "  render thread: realtime=%s priority min=%.0f median=%.0f  frames throttled (<=4)=%.2f%%\n"
+	        "  latency guard: %s drains=%zu\n",
 	        _role, mode_name(_opts.mode), present_name(_opts.present), _opts.min_duration_us,
 	        1.0 / _periodSeconds, _count, presented_count, _count - presented_count, _nilDrawables,
 	        percentile(intervals, interval_count, 50), percentile(intervals, interval_count, 95),
@@ -926,7 +986,8 @@ display_link_callback(CVDisplayLinkRef link,
 	        percentile(to_target, presented_count, 50), percentile(to_target, presented_count, 95),
 	        percentile(to_submit, presented_count, 50), percentile(to_submit, presented_count, 95),
 	        _realtime ? "yes" : "no", _count > 0 ? priorities[0] : -1.0, percentile(priorities, _count, 50),
-	        _count > 0 ? 100.0 * (double)throttled_frames / (double)_count : 0.0);
+	        _count > 0 ? 100.0 * (double)throttled_frames / (double)_count : 0.0,
+	        _opts.latency_guard ? "on" : "off", _drains);
 
 	free(intervals);
 	free(to_target);
@@ -1733,6 +1794,12 @@ spawn_client(const char *self_path,
 	PUSH_ARG("--seconds"), PUSH_ARG(seconds_str);
 	PUSH_ARG("--out"), PUSH_ARG(opts->out_prefix);
 	PUSH_ARG("--rt"), PUSH_ARG(opts->realtime ? "1" : "0");
+	char guard_window_str[32], guard_interval_str[32];
+	snprintf(guard_window_str, sizeof(guard_window_str), "%.3f", opts->guard_window_ms);
+	snprintf(guard_interval_str, sizeof(guard_interval_str), "%.3f", opts->guard_min_interval_ms);
+	PUSH_ARG("--latency-guard"), PUSH_ARG(opts->latency_guard ? "1" : "0");
+	PUSH_ARG("--guard-window-ms"), PUSH_ARG(guard_window_str);
+	PUSH_ARG("--guard-min-interval-ms"), PUSH_ARG(guard_interval_str);
 	PUSH_ARG("--tint"), PUSH_ARG(tint_str);
 	PUSH_ARG("--cpu-load"), PUSH_ARG(cpu_load_str);
 	PUSH_ARG("--display-id"), PUSH_ARG(display_id_str);
@@ -2616,6 +2683,12 @@ run_bootstrap_host(const struct probe_options *opts, const char *self_path)
 		@(opts->out_prefix),
 		@"--rt",
 		opts->realtime ? @"1" : @"0",
+		@"--latency-guard",
+		opts->latency_guard ? @"1" : @"0",
+		@"--guard-window-ms",
+		[NSString stringWithFormat:@"%.3f", opts->guard_window_ms],
+		@"--guard-min-interval-ms",
+		[NSString stringWithFormat:@"%.3f", opts->guard_min_interval_ms],
 	]];
 	if (opts->display_index >= 0) {
 		[args addObjectsFromArray:@[ @"--display", [NSString stringWithFormat:@"%d", opts->display_index] ]];
