@@ -994,21 +994,32 @@ canary_stop(struct canary *c, const struct probe_options *opts)
 		fprintf(stderr, "LAYER_HOST_PROBE wrote %s\n", path);
 	}
 
+	/*
+	 * Weight by time, not samples: a starved thread takes few samples, so a
+	 * per-sample share would understate throttling. Each gap is attributed to
+	 * the priority observed at the wake that ended it.
+	 */
 	double *lateness = calloc(c->count + 1, sizeof(double));
-	size_t throttled = 0;
+	double throttled_s = 0.0;
+	double total_s = 0.0;
 	for (size_t i = 0; i < c->count; i++) {
 		lateness[i] = c->samples[i].lateness_us;
+		if (i == 0) {
+			continue;
+		}
+		double gap = c->samples[i].t_s - c->samples[i - 1].t_s;
+		total_s += gap;
 		if (c->samples[i].priority >= 0 && c->samples[i].priority <= 4) {
-			throttled++;
+			throttled_s += gap;
 		}
 	}
 	qsort(lateness, c->count, sizeof(double), compare_doubles);
 	fprintf(stderr,
 	        "LAYER_HOST_PROBE canary summary realtime=%s samples=%zu class_transitions=%zu "
-	        "throttled (<=4)=%.2f%%\n"
+	        "time throttled (<=4)=%.1fs of %.1fs (%.2f%%)\n"
 	        "  wake lateness us: median=%.0f p95=%.0f p99=%.0f max=%.0f\n",
-	        c->realtime ? "yes" : "no", c->count, c->transitions,
-	        c->count > 0 ? 100.0 * (double)throttled / (double)c->count : 0.0, percentile(lateness, c->count, 50),
+	        c->realtime ? "yes" : "no", c->count, c->transitions, throttled_s, total_s,
+	        total_s > 0.0 ? 100.0 * throttled_s / total_s : 0.0, percentile(lateness, c->count, 50),
 	        percentile(lateness, c->count, 95), percentile(lateness, c->count, 99),
 	        c->count > 0 ? lateness[c->count - 1] : 0.0);
 	free(lateness);
