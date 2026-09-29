@@ -459,6 +459,22 @@ the same configuration, so this may matter beyond the probe. Checks:
   discrete moments and then staying level;
 - `--present at-time` should not ratchet if the cause is the queue.
 
+**`--present at-time` run.** It ratcheted too, so that prediction was wrong:
+`at-time` cannot drain a queue either, because the loop still renders one frame
+per vblank. The run did narrow the trigger. Client A was at the nominal 16.1 ms
+before the first swap and 32.2 ms after; B, first shown at swap 0, was 28.1 ms.
+So the step comes from hiding and re-showing a client's own layer. While hidden,
+a client keeps rendering but its drawables are never presented, and when it is
+shown again its presents start from a full queue that one-frame-per-vblank
+rendering never drains. `at-time` also had worse cadence here (3.26 % long
+intervals for A, against about 0.5 % with `min-duration`), so `min-duration`
+stays the default.
+
+A fix has to drain the queue deliberately, not just change the present call:
+for example, skip rendering for a vblank whenever measured present latency is
+a frame or more above nominal, or on becoming visible wait until drawables have
+drained before resuming.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
