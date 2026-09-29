@@ -597,6 +597,41 @@ swaps should return to about 16 ms once each tidy lands. Under throttling and
 load, swaps will start late (the host's timer is starved, as in reality), but
 every switch should still be one period.
 
+**Hybrid results (2026-09-29).**
+
+Unthrottled host, 14 swaps:
+
+- **Latency after swaps is back to 16 ms**: client A 16.08 ms median (p95 16.34),
+  B 16.06 ms, against about 20 ms (p95 28–29) for client-driven swaps. Keeping
+  only one hosted layer unhidden removes the extra frame, which supports the
+  composition explanation.
+- **The host steps are fast when it can run**: unhide → incoming show commit
+  0.09 ms median, outgoing hide → tidy 0.13 ms.
+- **Small cadence cost at swaps**: one switch of 14 took 16.7 ms instead of 8.3,
+  five swaps had one 16.7 ms interval nearby, and long intervals were 1.8–2.2 %
+  (against about 0.7 % client-driven). Each host-level unhide or hide probably
+  makes WindowServer change composition mode, costing one repeated frame.
+  Focus changes are rare in use, so a 16 ms steady state is worth that.
+- **Client A was at 24 ms before its first swap** (n=234) and 16 ms after. The
+  same start-up level appears in every method and does not depend on the host
+  tree. It looks like the queue being left a frame deep from start-up, the
+  situation GAV's latency guard targets.
+
+Host Darwin-backgrounded with `--cpu-load 10` per client:
+
+- **Only one swap started in 30 s, and too late to complete.** The host's timer
+  was starved, as with host-driven swaps under the same load (median 12 s
+  late). The failure was safe: client A stayed on screen throughout with
+  0.25 % long intervals, and nothing went black.
+- **Client A stayed at 24 ms for the whole run** with no swap to reset it,
+  which is the long-session case for the latency guard.
+
+This load (20 busy threads at user-interactive QoS plus a self-backgrounded
+host) is harsher than the real Game Mode test, where the throttled host's
+canary still woke within 706 ms at worst. In practice, hybrid swaps would
+start after the service's scheduling delay (hundreds of milliseconds under
+Game Mode), then complete in about 30–40 ms.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
