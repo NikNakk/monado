@@ -144,7 +144,7 @@ oxr_foveation_resolve_fixed_centres(const struct xrt_fov *fovs,
 		return false;
 	}
 
-	const float offset_rad = state->vertical_offset_degrees * (float)M_PI / 180.0f;
+	const float offset_rad = state->vertical_offset_degrees * 0.01745329251994329577f;
 	for (uint32_t i = 0; i < view_count; ++i) {
 		const float down = tanf(fovs[i].angle_down);
 		const float up = tanf(fovs[i].angle_up);
