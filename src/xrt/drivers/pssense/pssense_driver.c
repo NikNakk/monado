@@ -64,8 +64,9 @@ static struct xrt_binding_output_pair simple_outputs_pssense[1] = {
  * standard generic paths without pretending Sense is another vendor's
  * controller.
  *
- * L1/R1 is exposed as a derived 0/1 squeeze value. This is semantically
- * closer to squeeze/value than the capacitive squeeze-proximity channel.
+ * L1/R1 is the closest squeeze actuator. Monado's existing input transform
+ * converts its boolean click to the 0/1 float required by squeeze/value,
+ * avoiding a second driver-level representation of the same physical input.
  * Until we have a calibrated palm-surface transform, grip_surface uses the
  * existing grip pose as the best available approximation.
  */
@@ -74,7 +75,7 @@ static struct xrt_binding_input_pair generic_inputs_pssense_left[] = {
     {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_PSSENSE_TRIANGLE_CLICK},
     {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
     {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
@@ -86,7 +87,7 @@ static struct xrt_binding_input_pair generic_inputs_pssense_right[] = {
     {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_PSSENSE_CIRCLE_CLICK},
     {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
     {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
-    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
@@ -202,7 +203,6 @@ enum pssense_input_index
 	PSSENSE_INDEX_CIRCLE_CLICK,
 	PSSENSE_INDEX_CIRCLE_TOUCH,
 	PSSENSE_INDEX_SQUEEZE_CLICK,
-	PSSENSE_INDEX_SQUEEZE_VALUE,
 	PSSENSE_INDEX_SQUEEZE_TOUCH,
 	PSSENSE_INDEX_SQUEEZE_PROXIMITY_FLOAT,
 	PSSENSE_INDEX_TRIGGER_CLICK,
@@ -798,7 +798,6 @@ pssense_device_update_inputs(struct xrt_device *xdev)
 	pssense->base.inputs[PSSENSE_INDEX_CIRCLE_CLICK].value.boolean = pssense->state.circle_click;
 	pssense->base.inputs[PSSENSE_INDEX_CIRCLE_TOUCH].value.boolean = pssense->state.circle_touch;
 	pssense->base.inputs[PSSENSE_INDEX_SQUEEZE_CLICK].value.boolean = pssense->state.squeeze_click;
-	pssense->base.inputs[PSSENSE_INDEX_SQUEEZE_VALUE].value.vec1.x = pssense->state.squeeze_click ? 1.0f : 0.0f;
 	pssense->base.inputs[PSSENSE_INDEX_SQUEEZE_TOUCH].value.boolean = pssense->state.squeeze_touch;
 	pssense->base.inputs[PSSENSE_INDEX_SQUEEZE_PROXIMITY_FLOAT].value.vec1.x = pssense->state.squeeze_proximity;
 	pssense->base.inputs[PSSENSE_INDEX_TRIGGER_CLICK].value.boolean = pssense->state.trigger_click;
@@ -1212,7 +1211,6 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 	SET_INPUT(CIRCLE_CLICK);
 	SET_INPUT(CIRCLE_TOUCH);
 	SET_INPUT(SQUEEZE_CLICK);
-	SET_INPUT(SQUEEZE_VALUE);
 	SET_INPUT(SQUEEZE_TOUCH);
 	SET_INPUT(SQUEEZE_PROXIMITY_FLOAT);
 	SET_INPUT(TRIGGER_CLICK);
