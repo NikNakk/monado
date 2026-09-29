@@ -61,8 +61,9 @@ request them. Presentation submission runs on the compositor thread. The
 inline asynchronous GPU submission does not produce worker events.
 
 Async presentation and Metal shared-event synchronization remain enabled. The
-CVDisplayLink pacing option remains available for the legacy fallback, but its
-callback is suppressed in driven mode. Clear old environment overrides when
+legacy fallback always feeds CVDisplayLink vblanks to the pacer
+(`XRT_MACOS_CVDISPLAYLINK_PACING` was removed). That callback is suppressed in
+driven mode. Clear old environment overrides when
 testing these defaults; disable drive mode before comparing legacy experiments.
 The LaunchAgent adds lifecycle settings only, so direct and installed launches
 use the same source defaults.
@@ -185,7 +186,7 @@ The diagnostic branch now also fixes the timing defects exposed by the first cap
 - `inOutputTime` is treated as a future output target. The display period is used to project it backwards to the most recent refresh boundary before feeding `u_pc_update_vblank_from_display_control()`.
 - `desired_present_time_ns` is translated back into Mach absolute seconds and supplied to Metal with `presentDrawable:atTime:`. Late frames naturally fall back to earliest possible presentation according to Metal semantics.
 - Actual screen presentation is recorded asynchronously from `addPresentedHandler:` in `*_presented.csv`; reading `presentedTime` immediately after GPU completion is no longer used.
-- `XRT_MACOS_CVDISPLAYLINK_PACING=0` remains available as an A/B diagnostic to disable display-link feedback while keeping the trace enabled.
+- `XRT_MACOS_CVDISPLAYLINK_PACING=0` was originally available as an A/B diagnostic to disable display-link feedback. It has since been removed.
 
 A post-fix capture therefore produces six CSVs: `imu`, `slam`, `pose`, `present`, `presented`, and `vblank`.
 
