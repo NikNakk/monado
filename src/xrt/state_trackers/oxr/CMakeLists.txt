@@ -48,6 +48,7 @@ add_library(
 	path/oxr_path_store.h
 	path/oxr_path_wrappers.h
 	oxr_api_funcs.h
+	oxr_api_foveation.c
 	oxr_api_instance.c
 	oxr_api_negotiate.c
 	oxr_api_session.c
@@ -60,6 +61,8 @@ add_library(
 	oxr_event.c
 	oxr_frame_sync.c
 	oxr_frame_sync.h
+	oxr_foveation_policy.c
+	oxr_foveation_policy.h
 	oxr_handle_base.c
 	oxr_instance.c
 	oxr_logger.c
