@@ -256,6 +256,7 @@ elseif(APPLE)
 		ipc_server
 		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
 			server/ipc_server_metal.c
+			server/ipc_server_macos_display_host.c
 		)
 
 	if(XRT_FEATURE_SERVICE)

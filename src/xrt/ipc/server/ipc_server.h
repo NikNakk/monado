@@ -134,6 +134,13 @@ struct ipc_client_state
 	//! Data for the swapchains.
 	struct ipc_swapchain_data swapchain_data[IPC_MAX_CLIENT_SWAPCHAINS];
 
+#ifdef __APPLE__
+	//! This client composites in-process; the service hosts its CAContext.
+	bool hosted_attached;
+	//! Client id the hosted layer was attached under (client_state is cleared on shutdown).
+	uint32_t hosted_client_id;
+#endif
+
 	//! Number of compositor semaphores in use by client
 	uint32_t compositor_semaphore_count;
 
@@ -553,6 +560,15 @@ ipc_server_client_thread(void *_ics);
  */
 void
 ipc_server_client_destroy_session_and_compositor(volatile struct ipc_client_state *ics);
+
+#ifdef __APPLE__
+/*!
+ * Stop showing a client's hosted layer, if it has one. Called on detach and
+ * when the client disconnects.
+ */
+void
+ipc_server_macos_display_host_client_gone(volatile struct ipc_client_state *ics);
+#endif
 
 /*!
  * @defgroup ipc_server_internals Server Internals
