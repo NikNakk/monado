@@ -170,14 +170,29 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		 * destroyed immediately after this call without changing the
 		 * effective swapchain foveation parameters.
 		 */
+		struct xrt_foveation_state xrt_state = {};
+		if (!oxr_foveation_request_to_xrt(&fp->request, &xrt_state)) {
+			return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
+			                 "Failed to resolve foveation profile to backend-neutral state");
+		}
+
+		/*
+		 * A concrete graphics client may consume the resolved state here.
+		 * Backends that have no application-rendering transport leave this
+		 * callback NULL; the extension remains default-OFF until an enabled
+		 * build has a complete graphics-API path.
+		 */
+		if (sc->swapchain != NULL && sc->swapchain->set_foveation != NULL) {
+			xrt_result_t xret = xrt_swapchain_set_foveation(sc->swapchain, &xrt_state);
+			if (xret != XRT_SUCCESS) {
+				return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
+				                 "Graphics backend rejected foveation state (%d)", (int)xret);
+			}
+		}
+
 		sc->foveation_request = fp->request;
 		sc->has_foveation_state = true;
 		sc->foveation_source_profile = foveation->profile;
-
-		/*
-		 * Backend application is intentionally separate. Until a backend hook
-		 * is attached, these extensions remain build-gated and default OFF.
-		 */
 		return oxr_session_success_result(sc->sess);
 	}
 #endif
