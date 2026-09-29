@@ -1462,6 +1462,9 @@ run_client(const struct probe_options *opts)
 	}
 
 	bool client_swaps = opts->swap_method == SWAP_CLIENT && opts->peer_fd >= 0;
+	if (client_swaps) {
+		signal(SIGPIPE, SIG_IGN);
+	}
 	CAMetalLayer *layer = create_metal_layer(CGSizeMake(opts->width_points, opts->height_points), opts->scale);
 
 	// With client swaps the context holds a container this client can hide.
@@ -1684,6 +1687,26 @@ spawn_client(const char *self_path,
 	if (pipe(fds) != 0) {
 		return -1;
 	}
+	// Neither end may leak into later children.
+	fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+	fcntl(fds[1], F_SETFD, FD_CLOEXEC);
+
+	/*
+	 * The child gets the pipe as fd 3 and the peer socket as fd 4. Duplicate
+	 * both sources above 10 first: a source already at 3 or 4 would either be
+	 * overwritten by the other dup2, or be dup2'd onto itself, which keeps its
+	 * close-on-exec flag and closes it in the child.
+	 */
+	int context_src = fcntl(fds[1], F_DUPFD_CLOEXEC, 10);
+	int peer_src = peer_fd >= 0 ? fcntl(peer_fd, F_DUPFD_CLOEXEC, 10) : -1;
+	if (context_src < 0 || (peer_fd >= 0 && peer_src < 0)) {
+		close(fds[0]);
+		close(fds[1]);
+		if (context_src >= 0) {
+			close(context_src);
+		}
+		return -1;
+	}
 
 	char display_id_str[32], width_str[32], height_str[32], scale_str[32], seconds_str[32], min_us_str[32];
 	char tint_str[16], cpu_load_str[16];
@@ -1728,16 +1751,19 @@ spawn_client(const char *self_path,
 
 	posix_spawn_file_actions_t actions;
 	posix_spawn_file_actions_init(&actions);
-	posix_spawn_file_actions_adddup2(&actions, fds[1], 3);
-	posix_spawn_file_actions_addclose(&actions, fds[0]);
-	if (peer_fd >= 0) {
-		posix_spawn_file_actions_adddup2(&actions, peer_fd, 4);
+	posix_spawn_file_actions_adddup2(&actions, context_src, 3);
+	if (peer_src >= 0) {
+		posix_spawn_file_actions_adddup2(&actions, peer_src, 4);
 	}
 
 	pid_t pid = -1;
 	int ret = posix_spawn(&pid, self_path, &actions, NULL, argv, environ);
 	posix_spawn_file_actions_destroy(&actions);
 	close(fds[1]);
+	close(context_src);
+	if (peer_src >= 0) {
+		close(peer_src);
+	}
 
 	if (ret != 0) {
 		close(fds[0]);
@@ -2460,6 +2486,16 @@ run_host(const struct probe_options *opts, const char *self_path)
 			int status_a = 0, status_b = 0;
 			waitpid(pid_a, &status_a, 0);
 			waitpid(pid_b, &status_b, 0);
+			int statuses[2] = {status_a, status_b};
+			for (int c = 0; c < 2; c++) {
+				if (WIFSIGNALED(statuses[c])) {
+					fprintf(stderr, "LAYER_HOST_PROBE host: client %c killed by signal %d (%s)\n", 'a' + c,
+					        WTERMSIG(statuses[c]), strsignal(WTERMSIG(statuses[c])));
+				} else if (WIFEXITED(statuses[c]) && WEXITSTATUS(statuses[c]) != 0) {
+					fprintf(stderr, "LAYER_HOST_PROBE host: client %c exited with status %d\n", 'a' + c,
+					        WEXITSTATUS(statuses[c]));
+				}
+			}
 			exit_code = (WIFEXITED(status_a) && WEXITSTATUS(status_a) == 0 && WIFEXITED(status_b) &&
 			             WEXITSTATUS(status_b) == 0)
 			                ? 0
