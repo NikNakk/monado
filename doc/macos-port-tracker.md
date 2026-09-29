@@ -37,8 +37,10 @@ It also carries the standards-facing slices, merged in this order:
   remap of the rate map, packed multi-view support, and runtime-owned
   `XR_META_foveation_eye_tracked`.
 
-All foveation options are default OFF. Fixed FB foveation works without eye
-tracking; META eye-tracked foveation uses runtime-private PS VR2 gaze.
+All foveation options are opt-in at build time (default OFF). Fixed FB
+foveation works without eye tracking; META eye-tracked foveation uses
+runtime-private PS VR2 gaze. Both are hardware-validated through
+`monado-service`.
 
 The branch has macOS and Linux build/test CI workflows; the macOS PS VR2
 diagnostics workflow also compiles and tests each standards slice with its
@@ -58,6 +60,11 @@ options enabled.
 - Native PS Sense HID path for 3DoF, inputs and haptics.
 - `XR_EXT_eye_gaze_interaction` on PS VR2 with lazy activation and optional
   user calibration.
+- Opt-in (build-time) standard `XR_FB_foveation` /
+  `XR_FB_foveation_configuration` and runtime-owned
+  `XR_META_foveation_eye_tracked` for Metal clients through
+  `XR_MNDX_foveation_metal`, validated on PS VR2 via `monado-service`
+  (2026-09-29).
 - Wine D3D11 OpenXR plus OpenVR experiments through OpenComposite and xrizer.
 
 ## Implemented, awaiting hardware validation
@@ -65,8 +72,9 @@ options enabled.
 - `XR_FB_passthrough` from the stock-headset BC4 cameras, composited in the
   final Metal presentation pass (uncalibrated fisheye approximation).
 - Opt-in `XR_KHR_generic_controller` mapping for PS Sense.
-- Opt-in fixed `XR_FB_foveation` and runtime-owned
-  `XR_META_foveation_eye_tracked` for Metal clients.
+- Per-image foveation map association for sparse/re-submitted frames and
+  foveated projection layers in the layer squasher (unit-tested; see
+  [the foveation design note](macos-openxr-foveation.md#not-yet-validated-on-hardware)).
 
 ## Active side branches
 

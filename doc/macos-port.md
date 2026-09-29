@@ -44,7 +44,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | SteamVR games under Wine | **Working for a small tested set** | At least several SteamVR titles have reached runnable/interactive states; Half-Life: Alyx is the most heavily exercised path. |
 | PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; hardware validation/calibration refinement remains. |
 | PS VR2 eye tracking | **Working experimental** | `XR_EXT_eye_gaze_interaction` using the Sony calibration blob plus an optional 9-point user calibration; gaze activates lazily. Accuracy still needs broader hardware validation. |
-| Foveated rendering | **Implemented, default OFF, awaiting hardware validation** | Fixed `XR_FB_foveation` / `XR_FB_foveation_configuration` works without gaze; `XR_META_foveation_eye_tracked` adds runtime-owned gaze. Metal is the only rendering backend, via the experimental `XR_MNDX_foveation_metal` companion. |
+| Foveated rendering | **Hardware-validated, opt-in at build time** | Fixed `XR_FB_foveation` / `XR_FB_foveation_configuration` works without gaze; `XR_META_foveation_eye_tracked` adds runtime-owned gaze. Validated on PS VR2 through `monado-service`. Metal is the only rendering backend, via the experimental `XR_MNDX_foveation_metal` companion. |
 | SteamVR Home | **Unresolved** | Not currently working; feasibility depends on how much additional SteamVR/OpenVR behaviour can be reproduced without Valve's compositor. |
 | End-user packaging | **Not done** | Development launchd installation exists, but there is no polished signed/notarized installer or settings application. |
 
@@ -393,9 +393,10 @@ See:
 - [PS VR2 eye gaze](macos-psvr2-eye-gaze.md)
 - [PS VR2 gaze-driven foveation](macos-psvr2-gaze-foveation.md)
 
-The implementation remains default-OFF (`XRT_FEATURE_OPENXR_FB_FOVEATION` and
-related options) pending hardware validation and standards/upstream review of
-the Metal companion. Metal is the only backend that implements swapchain
+The standard FB and FB + META paths have been validated on PS VR2 hardware
+through `monado-service`. The implementation remains opt-in at build time
+(`XRT_FEATURE_OPENXR_FB_FOVEATION` and related options, default-OFF) pending
+standards/upstream review of the Metal companion. Metal is the only backend that implements swapchain
 foveation; Vulkan, D3D and OpenGL clients get no foveation yet. Compact depth
 coordinates also need to be audited before depth submission is combined with
 the new foveated swapchain path.
