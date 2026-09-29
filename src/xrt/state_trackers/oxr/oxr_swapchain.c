@@ -149,6 +149,29 @@ destroy(struct oxr_logger *log, struct oxr_swapchain *sc)
 	// It is not safe to do transitions here for some Graphics APIs, and
 	// the ipc layer has to be robust enough to handle a disconnect.
 
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	/*
+	 * Eye tracking belongs to effective swapchain state, not to the
+	 * XrFoveationProfileFB handle that originally supplied it. Drop the
+	 * session-owned private tracker only when the last eye-tracked swapchain
+	 * disappears.
+	 */
+	if (sc->has_foveation_state && sc->foveation_request.enabled &&
+	    sc->foveation_request.eye_tracked &&
+	    sc->sess->eye_tracked_foveation.active_swapchain_count > 0) {
+		sc->sess->eye_tracked_foveation.active_swapchain_count--;
+		if (sc->sess->eye_tracked_foveation.active_swapchain_count == 0) {
+			xrt_space_reference(&sc->sess->eye_tracked_foveation.gaze_space, NULL);
+			if (sc->sess->eye_tracked_foveation.feature_acquired) {
+				(void)xrt_system_devices_feature_dec(
+				    sc->sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+				sc->sess->eye_tracked_foveation.feature_acquired = false;
+			}
+			sc->sess->eye_tracked_foveation.valid = false;
+		}
+	}
+#endif
+
 	// Drop our reference, does NULL checking.
 	xrt_swapchain_reference(&sc->swapchain, NULL);
 
