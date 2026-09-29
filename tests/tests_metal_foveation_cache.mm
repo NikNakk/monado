@@ -346,7 +346,10 @@ expected_rate(const xrt_foveation_state &state,
 	for (uint32_t i = 0; i < view_count; ++i) {
 		const xrt_metal_foveation_view_layout &v = views[i];
 		const xrt_foveation_view_state &view = state.views[v.view_index];
-		const float local = horizontal ? 0.5f * (view.center.x + 1.0f) : 0.5f * (1.0f - view.center.y);
+		float local = horizontal ? 0.5f * (view.center.x + 1.0f) : 0.5f * (1.0f - view.center.y);
+		if (!horizontal && (v.flags & XRT_METAL_FOVEATION_VIEW_VERTICAL_FLIP) != 0) {
+			local = 1.0f - local; // The view's top is stored at the bottom of its rect.
+		}
 		const float offset = horizontal ? (float)v.offset_x : (float)v.offset_y;
 		const float extent = horizontal ? (float)v.width : (float)v.height;
 		const float full = horizontal ? (float)kWidth : (float)kHeight;
@@ -434,6 +437,37 @@ TEST_CASE("packed stereo maps use view-local profile extents")
 		    {1, 1240, 100, 800, 920},
 		};
 		check_packed_layout(metal.device, views, make_state(0.4f, -0.4f, 0.3f));
+	}
+
+	SECTION("vertically flipped views mirror the centre within their rects")
+	{
+		const xrt_metal_foveation_view_layout views[2] = {
+		    {0, 0, 24, 1024, 1000, XRT_METAL_FOVEATION_VIEW_VERTICAL_FLIP},
+		    {1, 1024, 0, 1024, 1000, XRT_METAL_FOVEATION_VIEW_VERTICAL_FLIP},
+		};
+		check_packed_layout(metal.device, views, make_state(0.2f, -0.2f, 0.6f));
+	}
+
+	SECTION("the flip flag is part of the map identity")
+	{
+		const xrt_foveation_state state = make_state(0.0f, 0.0f, 0.6f);
+		comp_metal_foveation_cache cache = {};
+		REQUIRE(comp_metal_foveation_cache_init(&cache, (__bridge void *)metal.device, kWidth, kHeight, 1, 1));
+		REQUIRE(comp_metal_foveation_cache_set(&cache, &state) == XRT_SUCCESS);
+		xrt_metal_foveation_view_layout views[2] = {kSideBySide[0], kSideBySide[1]};
+		xrt_metal_foveation_state upright = {};
+		REQUIRE(comp_metal_foveation_cache_get_packed(&cache, views, 2, 0, &upright) == XRT_SUCCESS);
+		views[0].flags = views[1].flags = XRT_METAL_FOVEATION_VIEW_VERTICAL_FLIP;
+		xrt_metal_foveation_state flipped = {};
+		REQUIRE(comp_metal_foveation_cache_get_packed(&cache, views, 2, 0, &flipped) == XRT_SUCCESS);
+		CHECK(upright.rasterization_rate_map != flipped.rasterization_rate_map);
+		CHECK(std::memcmp(upright.vertical_rates, flipped.vertical_rates, sizeof(upright.vertical_rates)) != 0);
+		CHECK(std::memcmp(upright.horizontal_rates, flipped.horizontal_rates, sizeof(upright.horizontal_rates)) == 0);
+
+		views[0].flags = 0x80u; // Unknown bits are rejected.
+		xrt_metal_foveation_state out = {};
+		CHECK(comp_metal_foveation_cache_get_packed(&cache, views, 2, 0, &out) == XRT_ERROR_INVALID_ARGUMENT);
+		comp_metal_foveation_cache_destroy(&cache);
 	}
 
 	SECTION("views listed out of order")

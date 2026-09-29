@@ -2182,6 +2182,9 @@ xrt_compositor_vk(struct xrt_compositor *xc)
  */
 #define XRT_METAL_FOVEATION_ZONE_COUNT 16
 
+//! The view is stored vertically mirrored within its rectangle.
+#define XRT_METAL_FOVEATION_VIEW_VERTICAL_FLIP (1u << 0u)
+
 struct xrt_metal_foveation_view_layout
 {
 	uint32_t view_index;
@@ -2189,6 +2192,8 @@ struct xrt_metal_foveation_view_layout
 	int32_t offset_y;
 	uint32_t width;
 	uint32_t height;
+	//! XRT_METAL_FOVEATION_VIEW_* bits.
+	uint32_t flags;
 };
 
 struct xrt_metal_foveation_state
