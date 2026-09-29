@@ -13,12 +13,14 @@ on:
     paths:
       - .github/workflows/macos-psvr2-timing-diagnostics.yml
       - CMakeLists.txt
-      - tests/tests_psvr2_linear_prediction.c
+      - tests/**
       - src/xrt/drivers/**
       - src/xrt/compositor/**
       - src/xrt/auxiliary/**
       - src/xrt/targets/**
       - src/xrt/state_trackers/**
+      - src/xrt/include/**
+      - src/xrt/ipc/**
       - src/external/openxr_includes/**
   workflow_dispatch:
 
@@ -83,12 +85,39 @@ jobs:
       - name: Build standards targets
         run: >-
           cmake --build build-foveation
-          --target st_oxr tests_foveation tests_foveation_openxr psvr2-openxr-test
+          --target st_oxr openxr_monado tests_foveation tests_foveation_openxr
+          tests_metal_foveation_cache psvr2-openxr-test
           --parallel
       - name: Run foveation policy tests
         run: |
           build-foveation/tests/tests_foveation --success
           build-foveation/tests/tests_foveation_openxr --success
+          # Skips (exit 0) if the runner's Metal device lacks rate maps.
+          build-foveation/tests/tests_metal_foveation_cache --allow-running-no-tests
+      - name: Configure foveation standards service build
+        run: >-
+          cmake -S . -B build-foveation-service -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTING=ON
+          -DXRT_FEATURE_SERVICE=ON
+          -DXRT_HAVE_OPENGLES=OFF
+          -DXRT_HAVE_SDL2=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+          -DXRT_FEATURE_OPENXR_FB_SWAPCHAIN_UPDATE_STATE=ON
+          -DXRT_FEATURE_OPENXR_FB_FOVEATION=ON
+          -DXRT_FEATURE_OPENXR_FB_FOVEATION_CONFIGURATION=ON
+          -DXRT_FEATURE_OPENXR_META_FOVEATION_EYE_TRACKED=ON
+          -DXRT_FEATURE_OPENXR_MNDX_FOVEATION_METAL=ON
+      - name: Build standards service targets
+        run: >-
+          cmake --build build-foveation-service
+          --target openxr_monado monado-service tests_metal_foveation_cache
+          --parallel
 
   build-driver:
     runs-on: macos-15
