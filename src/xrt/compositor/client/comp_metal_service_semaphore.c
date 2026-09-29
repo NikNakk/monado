@@ -8,6 +8,8 @@
 
 #include "client/comp_metal_service_semaphore.h"
 #include "shared/ipc_metal_xpc.h"
+#include "util/comp_metal_semaphore_provider.h"
+#include "util/u_macos_display_host.h"
 #include "util/u_logging.h"
 
 #include <pthread.h>
@@ -69,4 +71,14 @@ client_metal_service_semaphore_create_pair(struct xrt_compositor_semaphore **out
 	*out_xcsem = xcsem;
 	*out_mtl_shared_event = raw_event;
 	return XRT_SUCCESS;
+}
+
+xrt_result_t
+client_metal_semaphore_create_pair_for_mode(struct xrt_compositor_semaphore **out_xcsem, void **out_mtl_shared_event)
+{
+	// A hosted client composites in-process, so its semaphore is local.
+	if (u_macos_hosted_client_available()) {
+		return comp_metal_semaphore_create_client_pair(out_xcsem, out_mtl_shared_event);
+	}
+	return client_metal_service_semaphore_create_pair(out_xcsem, out_mtl_shared_event);
 }
