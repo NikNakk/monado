@@ -459,8 +459,11 @@ IMU arrival gaps over 5 ms: 9 in the session; SLAM gaps over 30 ms: 6. Per
   IPC pose queries are also light work, so they can stay for the first hosted
   version, with the ring moving to a later phase.
 
-To be confirmed against `policy.log`: the Game Mode on/off times should fall in
-buckets with the same p95 as the off periods.
+To be confirmed: that run has no `policy.log`, but the service's
+`compositor_rt.csv` records the compositor thread's priority on the same host
+clock, and 4 marks Game Mode backgrounding. The script now reads it when
+present, prints the throttled spans, and splits every delay figure into
+throttled and not throttled.
 
 The 120 s window is not useful here. Its per-bucket p95 creeps from 1.2 to
 3.1 ms over the session, the signature of about 20 ppm drift between the
