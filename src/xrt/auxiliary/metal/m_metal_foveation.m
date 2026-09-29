@@ -14,16 +14,21 @@ m_metal_foveation_map_build_for_zones(void *metal_device,
                                       uint32_t screen_height,
                                       const uint32_t *zone_x,
                                       const uint32_t *zone_y,
+                                      const float *scale_x,
+                                      const float *scale_y,
                                       uint32_t center_count,
                                       const struct u_foveation_profile *profile,
                                       struct m_metal_foveation_map *out_map)
 {
 	if (metal_device == NULL || profile == NULL || out_map == NULL || screen_width == 0 || screen_height == 0 ||
-	    zone_x == NULL || zone_y == NULL || center_count == 0) {
+	    zone_x == NULL || zone_y == NULL || scale_x == NULL || scale_y == NULL ||
+    center_count == 0) {
 		return false;
 	}
 	for (uint32_t center = 0; center < center_count; ++center) {
-		if (zone_x[center] >= M_METAL_FOVEATION_ZONE_COUNT || zone_y[center] >= M_METAL_FOVEATION_ZONE_COUNT) {
+		if (zone_x[center] >= M_METAL_FOVEATION_ZONE_COUNT ||
+		    zone_y[center] >= M_METAL_FOVEATION_ZONE_COUNT ||
+		    !(scale_x[center] > 0.0f) || !(scale_y[center] > 0.0f)) {
 			return false;
 		}
 	}
@@ -39,10 +44,19 @@ m_metal_foveation_map_build_for_zones(void *metal_device,
 		for (uint32_t center = 0; center < center_count; ++center) {
 			const uint32_t dx = sample > zone_x[center] ? sample - zone_x[center] : zone_x[center] - sample;
 			const uint32_t dy = sample > zone_y[center] ? sample - zone_y[center] : zone_y[center] - sample;
-			const float x_rate = u_foveation_profile_rate_for_offset(
-		    profile, (float)dx / (float)M_METAL_FOVEATION_ZONE_COUNT);
-			const float y_rate = u_foveation_profile_rate_for_offset(
-		    profile, (float)dy / (float)M_METAL_FOVEATION_ZONE_COUNT);
+			/*
+			 * The FB policy is resolved per OpenXR view. When views are packed
+			 * into one target, convert target-normalized distance back to the
+			 * local view-normalized distance before applying profile extents.
+			 */
+			const float x_offset =
+			    ((float)dx / (float)M_METAL_FOVEATION_ZONE_COUNT) / scale_x[center];
+			const float y_offset =
+			    ((float)dy / (float)M_METAL_FOVEATION_ZONE_COUNT) / scale_y[center];
+			const float x_rate =
+			    u_foveation_profile_rate_for_offset(profile, x_offset);
+			const float y_rate =
+			    u_foveation_profile_rate_for_offset(profile, y_offset);
 			horizontal[sample] = fmaxf(horizontal[sample], x_rate);
 			vertical[sample] = fmaxf(vertical[sample], y_rate);
 		}
@@ -109,8 +123,11 @@ m_metal_foveation_map_build(void *metal_device,
 	}
 	const uint32_t zones_x[1] = {(uint32_t)zone_x};
 	const uint32_t zones_y[1] = {(uint32_t)zone_y};
+	const float scales_x[1] = {1.0f};
+	const float scales_y[1] = {1.0f};
 	return m_metal_foveation_map_build_for_zones(
-	    metal_device, screen_width, screen_height, zones_x, zones_y, 1, profile, out_map);
+	    metal_device, screen_width, screen_height, zones_x, zones_y,
+	    scales_x, scales_y, 1, profile, out_map);
 }
 
 void

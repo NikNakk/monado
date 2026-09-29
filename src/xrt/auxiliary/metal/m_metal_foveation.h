@@ -60,6 +60,8 @@ m_metal_foveation_map_build_for_zones(void *metal_device,
                                       uint32_t screen_height,
                                       const uint32_t *zone_x,
                                       const uint32_t *zone_y,
+                                      const float *scale_x,
+                                      const float *scale_y,
                                       uint32_t center_count,
                                       const struct u_foveation_profile *profile,
                                       struct m_metal_foveation_map *out_map);
