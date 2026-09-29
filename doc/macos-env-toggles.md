@@ -13,8 +13,10 @@ then groups the results by environment-variable name.
 - 139 added lines contain `DEBUG_GET_ONCE_*` or `getenv(`: 81 option
   declarations and 58 raw `getenv` calls.
 - These cover **130 (file, variable) pairs** and **99 distinct variable
-  names**. The remaining lines are `getenv(name)` helper bodies, the `HOME`
-  lookup in the OpenXR test and the four presence checks in `psvr2_eye.c`.
+  names**. The other lines are repeated reads of the same name within one
+  file (for example two `PSVR2_TIMING_TRACE_DIR` reads in `comp_renderer.c`),
+  the `u_wait.h` `getenv(name)` helper bodies, the `HOME` lookup in the OpenXR
+  test and the four presence checks in `psvr2_eye.c`.
 - 8 of the 99 names are **out of scope** (see [Out of scope](#out-of-scope)),
   leaving **91 classified names**.
 
