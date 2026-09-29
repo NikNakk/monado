@@ -346,18 +346,33 @@ app, then `monado-service-xpc-control bootout` so the service exits and flushes
 its traces.
 
 **Run B: Game Mode.** `monado-service-xpc-control bootstrap` again, then start
-the same Unreal app windowed.
+the same Unreal app windowed. Switching to Terminal ends Game Mode, so start a
+background policy log *before* going fullscreen:
+
+```sh
+P=build/src/xrt/targets/macos_layer_host_probe
+SVC=$(pgrep -x monado-service); GAME=<Unreal app pid>
+sudo -v   # cache credentials so the loop can read the Game Mode flag
+while true; do
+  for pid in $SVC $GAME; do
+    printf '%s ' "$(date +%T)"; sudo -n $P/macos-layer-host-probe --role query --pid $pid
+  done
+  sleep 2
+done > ~/psvr2-trace/policy.log 2>&1 &
+```
+
+Then, without returning to Terminal:
 
 1. About 20 s windowed.
-2. Switch it to fullscreen on the Mac display. Check that the Game Mode icon
-   appears in the menu bar. Keep moving about 60 s. During this, from a
-   terminal, run `macos-layer-host-probe --role query --pid $(pgrep -x
-   monado-service)` a couple of times. Add `sudo` and the game's pid to see its
-   Game Mode flag.
-3. Leave fullscreen and continue about 20 s windowed.
-4. Quit, then `bootout`.
+2. Switch the app to fullscreen on the Mac display from within the app. Check
+   that the Game Mode icon appears in the menu bar. Keep moving about 60 s.
+3. Leave fullscreen from within the app and continue about 20 s windowed.
+4. Quit the app, then stop the loop (`kill %1`) and `bootout`.
 
-Note the rough times of each switch; the per-bucket view shows them anyway.
+`policy.log` should show the service switching to `ext_darwinbg=1` and the
+game to `game_mode=on` for the fullscreen minute, with wall-clock times that
+also mark the switches. The `sudo` credential cache normally lasts 5 minutes,
+which is enough for the run.
 
 **Analysis.**
 
