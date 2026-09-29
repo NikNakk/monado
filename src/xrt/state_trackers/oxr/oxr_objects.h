@@ -1478,6 +1478,14 @@ struct oxr_session
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 	struct
 	{
+		/*
+		 * Runtime-private eye tracking. This is deliberately independent of
+		 * XR_EXT_eye_gaze_interaction and is never exposed as an action/space.
+		 */
+		struct xrt_space *gaze_space;
+		uint32_t active_swapchain_count;
+		bool feature_acquired;
+
 		XrVector2f center[XR_FOVEATION_CENTER_SIZE_META];
 		bool valid;
 		uint64_t revision;
@@ -2126,12 +2134,6 @@ struct oxr_foveation_profile
 	struct oxr_handle_base handle;
 	struct oxr_session *sess;
 	struct u_foveation_request request;
-
-#ifdef OXR_HAVE_META_foveation_eye_tracked
-	//! Private runtime-only gaze space: never exposed as an OpenXR action/space.
-	struct xrt_space *eye_gaze_space;
-	bool eye_tracking_feature_acquired;
-#endif
 };
 
 static inline XrFoveationProfileFB
