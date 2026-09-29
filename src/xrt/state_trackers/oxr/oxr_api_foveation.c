@@ -11,6 +11,7 @@
 #include "oxr_handle.h"
 #include "oxr_logger.h"
 #include "oxr_objects.h"
+#include "oxr_roles.h"
 
 #include "util/u_trace_marker.h"
 
@@ -174,6 +175,29 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		if (!oxr_foveation_request_to_xrt(&fp->request, &xrt_state)) {
 			return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
 			                 "Failed to resolve foveation profile to backend-neutral state");
+		}
+
+		/*
+		 * Fixed FB foveation defines verticalOffset in degrees. Resolve it
+		 * against the actual HMD view FOVs here so every graphics backend
+		 * receives the same per-view NDC centre. Eye-tracked META profiles
+		 * are populated later from runtime-owned gaze instead.
+		 */
+		if (xrt_state.enabled && !xrt_state.eye_tracked) {
+			struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(&sc->sess->sys->system, head);
+			if (head == NULL || head->hmd == NULL || head->hmd->view_count == 0) {
+				return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
+				                 "No HMD view FOVs available for fixed foveation");
+			}
+			uint32_t view_count = (uint32_t)head->hmd->view_count;
+			if (view_count > XRT_MAX_VIEWS) {
+				view_count = XRT_MAX_VIEWS;
+			}
+			if (!oxr_foveation_resolve_fixed_centres(
+			        head->hmd->distortion.fov, view_count, &xrt_state)) {
+				return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
+				                 "Failed to resolve fixed foveation centres");
+			}
 		}
 
 		/*
