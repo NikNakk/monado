@@ -144,3 +144,32 @@ TEST_CASE("standard foveation resolves to backend-neutral XRT state")
 	CHECK(state.middle_rate == Catch::Approx(1.0f));
 	CHECK(state.peripheral_rate == Catch::Approx(1.0f));
 }
+
+
+TEST_CASE("fixed FB vertical offset resolves relative to view centre")
+{
+	struct xrt_fov fovs[2] = {
+	    {-0.8f, 0.8f, 0.7f, -0.7f},
+	    {-0.9f, 0.7f, 0.8f, -0.6f},
+	};
+	struct xrt_foveation_state state{};
+	state.vertical_offset_degrees = 0.0f;
+
+	REQUIRE(oxr_foveation_resolve_fixed_centres(fovs, 2, &state));
+	CHECK(state.view_count == 2);
+	CHECK(state.views[0].center_valid);
+	CHECK(state.views[1].center_valid);
+	CHECK(state.views[0].center.x == Catch::Approx(0.0f));
+	CHECK(state.views[0].center.y == Catch::Approx(0.0f).margin(1e-6f));
+	CHECK(state.views[1].center.y == Catch::Approx(0.0f).margin(1e-6f));
+
+	state.vertical_offset_degrees = 10.0f;
+	REQUIRE(oxr_foveation_resolve_fixed_centres(fovs, 2, &state));
+	CHECK(state.views[0].center.y > 0.0f);
+	CHECK(state.views[1].center.y > 0.0f);
+
+	state.vertical_offset_degrees = -10.0f;
+	REQUIRE(oxr_foveation_resolve_fixed_centres(fovs, 2, &state));
+	CHECK(state.views[0].center.y < 0.0f);
+	CHECK(state.views[1].center.y < 0.0f);
+}
