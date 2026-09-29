@@ -43,6 +43,40 @@ u_foveation_profile_find(const char *name)
 	return -1;
 }
 
+bool
+u_foveation_request_from_level(enum u_foveation_level level,
+                               bool dynamic,
+                               bool eye_tracked,
+                               float vertical_offset_degrees,
+                               struct u_foveation_request *out_request)
+{
+	if (out_request == NULL) {
+		return false;
+	}
+
+	struct u_foveation_request request = {
+	    .enabled = true,
+	    .profile_index = U_FOVEATION_PROFILE_REFERENCE,
+	    .dynamic = dynamic,
+	    .eye_tracked = eye_tracked,
+	    .vertical_offset_degrees = vertical_offset_degrees,
+	};
+
+	switch (level) {
+	case U_FOVEATION_LEVEL_NONE:
+		request.enabled = false;
+		request.profile_index = U_FOVEATION_PROFILE_REFERENCE;
+		break;
+	case U_FOVEATION_LEVEL_LOW: request.profile_index = U_FOVEATION_PROFILE_REFERENCE; break;
+	case U_FOVEATION_LEVEL_MEDIUM: request.profile_index = U_FOVEATION_PROFILE_STRONG; break;
+	case U_FOVEATION_LEVEL_HIGH: request.profile_index = U_FOVEATION_PROFILE_AGGRESSIVE; break;
+	default: return false;
+	}
+
+	*out_request = request;
+	return true;
+}
+
 float
 u_foveation_profile_rate_for_offset(const struct u_foveation_profile *profile, float normalized_offset)
 {
