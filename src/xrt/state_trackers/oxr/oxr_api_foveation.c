@@ -264,3 +264,61 @@ oxr_xrGetSwapchainStateFB(XrSwapchain swapchain, XrSwapchainStateBaseHeaderFB *s
 	                 "Unsupported XrSwapchainStateBaseHeaderFB structure type %d", state->type);
 }
 #endif // OXR_HAVE_FB_swapchain_update_state
+
+
+#ifdef OXR_HAVE_MNDX_foveation_metal
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
+                                 uint32_t viewIndex,
+                                 uint32_t arrayLayer,
+                                 XrFoveationMetalStateMNDX *state)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_swapchain *sc;
+	struct oxr_logger log;
+	OXR_VERIFY_SWAPCHAIN_AND_INIT_LOG(&log, swapchain, sc, "xrGetFoveationMetalStateMNDX");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sc->sess);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, state, XR_TYPE_FOVEATION_METAL_STATE_MNDX);
+
+	if (sc->sess->gfx_ext != OXR_SESSION_GRAPHICS_EXT_METAL) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "xrGetFoveationMetalStateMNDX requires a Metal session");
+	}
+	if (arrayLayer >= sc->array_layer_count) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "arrayLayer %u is outside swapchain array size %u",
+		                 arrayLayer, sc->array_layer_count);
+	}
+
+	struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(sc->sess->sys, head);
+	if (head == NULL || head->hmd == NULL || viewIndex >= head->hmd->view_count) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+		                 "viewIndex %u is not valid for this system", viewIndex);
+	}
+	if (sc->swapchain == NULL || sc->swapchain->set_foveation == NULL) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Metal swapchain has no foveation transport");
+	}
+
+	struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
+	struct xrt_metal_foveation_state native = {};
+	xrt_result_t xret =
+	    xrt_swapchain_metal_get_foveation_state(xscm, viewIndex, arrayLayer, &native);
+	if (xret == XRT_ERROR_NOT_IMPLEMENTED) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Metal foveation state is not currently available");
+	}
+	if (xret != XRT_SUCCESS) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
+		                 "Metal foveation state query failed (%d)", (int)xret);
+	}
+
+	state->foveationEnabled = native.enabled ? XR_TRUE : XR_FALSE;
+	state->rasterizationRateMap = native.rasterization_rate_map;
+	state->physicalWidth = native.physical_width;
+	state->physicalHeight = native.physical_height;
+	state->revision = native.revision;
+	return oxr_session_success_result(sc->sess);
+}
+#endif // OXR_HAVE_MNDX_foveation_metal
