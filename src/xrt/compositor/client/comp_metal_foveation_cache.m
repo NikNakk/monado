@@ -149,6 +149,10 @@ comp_metal_foveation_cache_get(struct comp_metal_foveation_cache *cache,
 			    .physical_height = entry->map.physical_height,
 			    .revision = revision,
 			};
+			out_state->compositor_map.enabled = 1;
+			out_state->compositor_map.boundary_count = M_METAL_FOVEATION_BOUNDARY_COUNT;
+			memcpy(out_state->compositor_map.x, entry->map.x, sizeof(out_state->compositor_map.x));
+			memcpy(out_state->compositor_map.y, entry->map.y, sizeof(out_state->compositor_map.y));
 			os_mutex_unlock(&cache->mutex);
 			return XRT_SUCCESS;
 		}
@@ -201,6 +205,10 @@ comp_metal_foveation_cache_get(struct comp_metal_foveation_cache *cache,
 	    .physical_height = entry->map.physical_height,
 	    .revision = revision,
 	};
+	out_state->compositor_map.enabled = 1;
+	out_state->compositor_map.boundary_count = M_METAL_FOVEATION_BOUNDARY_COUNT;
+	memcpy(out_state->compositor_map.x, entry->map.x, sizeof(out_state->compositor_map.x));
+	memcpy(out_state->compositor_map.y, entry->map.y, sizeof(out_state->compositor_map.y));
 
 	os_mutex_unlock(&cache->mutex);
 	return XRT_SUCCESS;
