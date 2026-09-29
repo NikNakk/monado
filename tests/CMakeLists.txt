@@ -7,6 +7,7 @@ set(tests
     tests_cxx_wrappers
     tests_deque
     tests_generic_callbacks
+    tests_generic_controller
     tests_foveation
     tests_glue_device
     tests_history_buf
@@ -113,6 +114,9 @@ endif()
 if(XRT_FEATURE_OPENXR)
 	target_link_libraries(
 		tests_input_transform PRIVATE st_oxr xrt-interfaces xrt-external-openxr
+		)
+	target_link_libraries(
+		tests_generic_controller PRIVATE st_oxr xrt-interfaces xrt-external-openxr
 		)
 endif()
 if(_have_opengl_test)
