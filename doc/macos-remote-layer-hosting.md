@@ -526,6 +526,43 @@ dropped ticks). **The latency steps recorded above for the handoff runs were
 measured without coalescing and are likely inflated by it**; they need
 re-measuring before drawing conclusions about Monado's presenter.
 
+**Re-measured with coalescing (2026-09-29).** Client-driven swaps, 30 s, 14
+swaps each:
+
+| | Coalescing only | Coalescing + latency guard |
+| --- | --- | --- |
+| Presented − submit after first swap, median / p95 (A; B) | 19.8 / 28.1; 21.6 / 29.3 ms | 19.8 / 28.1; 19.7 / 28.1 ms |
+| Client A before first swap, median | 24.2 ms | 27.9 ms |
+| Long intervals (A; B) | 0.73 %; 0.65 % | 1.79 %; 1.01 % |
+| Steady-state long intervals | 0.35 % | 1.09 % |
+| Ticks dropped by coalescing (A; B) | 8; 1 | 15; 4 |
+| Guard drains (A; B) | — | 14; 7 |
+| Switch gap, every swap | 8.342 ms | 8.342 ms |
+
+- **Coalescing was the main fix.** Median latency after swaps fell from 28–32 ms
+  to about 20 ms, with cadence back at baseline. Only a handful of ticks
+  needed dropping.
+- **The guard adds nothing on top here and costs cadence** (long intervals
+  roughly doubled). It stays off for now. GAV's evidence comes from long
+  sessions in a single process, which is still worth checking in Monado.
+- **About one frame of extra latency remains for part of the time**, and it is
+  not queue depth, since draining does not remove it. It is present from the
+  start: client A was at 24 ms before any swap, against 16 ms for a single
+  hosted client and for host-driven `hidden` swaps. What differs is that
+  client-driven swaps leave both `CALayerHost`s unhidden in the host's tree,
+  one with its content hidden inside the client. The likely cause is that
+  WindowServer then composites the window instead of scanning the surface out
+  directly, which would add a frame. An Instruments Display trace can confirm
+  this.
+
+If confirmed, a hybrid keeps both benefits: the service unhides the incoming
+client's `CALayerHost` when it decides on the focus change (it has to run then
+anyway, to send the message), the clients make the visible swap themselves,
+and the service hides the outgoing `CALayerHost` afterwards, whenever it next
+gets to run. Only the one visible client's layer is left in the tree in the
+steady state, and a late service commit only delays a latency recovery, never
+the swap itself.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
