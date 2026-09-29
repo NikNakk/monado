@@ -16,6 +16,8 @@
 #include <oxr/oxr_objects.h>
 #include <oxr_generated_bindings.h>
 
+using Catch::Generators::values;
+
 
 static void
 initialize_template_paths(struct oxr_instance_path_cache *cache)
@@ -105,6 +107,46 @@ TEST_CASE("KHR generic controller fallback selection")
 	{
 		struct xrt_device xdev = {};
 		xdev.name = XRT_DEVICE_TOUCH_CONTROLLER;
+
+		struct oxr_interaction_profile *profiles[] = {&generic};
+		struct oxr_interaction_profile_array array = {profiles, ARRAY_SIZE(profiles)};
+
+		struct oxr_interaction_profile *selected = nullptr;
+		CHECK(oxr_interaction_profile_array_find_by_device(&array, &cache, &xdev, &selected));
+		CHECK(selected == &generic);
+	}
+
+
+	SECTION("promoted Touch variants fall back to generic")
+	{
+		auto name = GENERATE(values({
+		    XRT_DEVICE_TOUCH_CONTROLLER_RIFT_CV1,
+		    XRT_DEVICE_TOUCH_CONTROLLER_QUEST_1_RIFT_S,
+		    XRT_DEVICE_TOUCH_CONTROLLER_QUEST_2,
+		}));
+		CAPTURE(name);
+
+		struct xrt_device xdev = {};
+		xdev.name = name;
+
+		struct oxr_interaction_profile *profiles[] = {&generic};
+		struct oxr_interaction_profile_array array = {profiles, ARRAY_SIZE(profiles)};
+
+		struct oxr_interaction_profile *selected = nullptr;
+		CHECK(oxr_interaction_profile_array_find_by_device(&array, &cache, &xdev, &selected));
+		CHECK(selected == &generic);
+	}
+
+	SECTION("newer Touch variants fall back to generic")
+	{
+		auto name = GENERATE(values({
+		    XRT_DEVICE_TOUCH_PRO_CONTROLLER,
+		    XRT_DEVICE_TOUCH_PLUS_CONTROLLER,
+		}));
+		CAPTURE(name);
+
+		struct xrt_device xdev = {};
+		xdev.name = name;
 
 		struct oxr_interaction_profile *profiles[] = {&generic};
 		struct oxr_interaction_profile_array array = {profiles, ARRAY_SIZE(profiles)};
