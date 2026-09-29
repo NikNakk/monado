@@ -296,6 +296,14 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrDestroyFoveationProfileFB, FB_foveation);
 #endif
 
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	ENTRY_IF_EXT(xrGetFoveationEyeTrackedStateMETA, META_foveation_eye_tracked);
+#endif
+
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	ENTRY_IF_EXT(xrGetFoveationMetalStateMNDX, MNDX_foveation_metal);
+#endif
+
 #ifdef OXR_HAVE_FB_passthrough
 	ENTRY_IF_EXT(xrCreateGeometryInstanceFB, FB_passthrough);
 	ENTRY_IF_EXT(xrCreatePassthroughFB, FB_passthrough);

@@ -65,13 +65,15 @@ branch. Keep this branch mainly for development history/comparison.
 ## Immediate priorities
 
 1. Make PS Sense optical 6DoF reliable enough to merge.
-2. Turn existing PS VR2 camera acquisition into a real Monado passthrough/MR
+2. Turn existing PS VR2 camera acquisition into a calibrated passthrough/MR
    pipeline.
-3. Solve the PS VR2 eye-tracking calibration path, then expose gaze/foveation.
-4. Finish Chromium's sandboxed IOSurface/shared-event graphics path.
+3. Hardware-validate the FB/META foveation path, integrate it into Chromium,
+   and refine the experimental Metal rendering companion for upstream review.
+4. Continue hardening Chromium's sandboxed IOSurface/shared-event graphics path.
 5. Broaden Wine/OpenVR compatibility and determine whether SteamVR Home can run
    without reproducing Valve's compositor.
-6. Continue compositor pacing/reprojection robustness work.
+6. Continue compositor pacing/reprojection robustness work, including depth +
+   foveation coordinate handling.
 7. Add broader OpenXR regression/conformance coverage.
 8. Package and notarize the runtime with a simple settings/diagnostics surface.
 
@@ -93,6 +95,9 @@ companion repositories are:
 
 ## Detailed runtime documents
 
+- [OpenXR foveation architecture](macos-openxr-foveation.md)
+- [PS VR2 eye gaze](macos-psvr2-eye-gaze.md)
+- [PS VR2 gaze-driven foveation](macos-psvr2-gaze-foveation.md)
 - [macOS direct service XPC](macos-service-direct-xpc.md)
 - [PS VR2 timing diagnostics](macos-psvr2-timing-diagnostics.md)
 - [PS VR2 judder evidence](macos-psvr2-judder-evidence.md)
