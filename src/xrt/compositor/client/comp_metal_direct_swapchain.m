@@ -161,6 +161,30 @@ metal_direct_swapchain_get_foveation_state(struct xrt_swapchain_metal *xscm,
 }
 
 static xrt_result_t
+metal_direct_swapchain_get_packed_foveation_state(
+    struct xrt_swapchain_metal *xscm,
+    const struct xrt_metal_foveation_view_layout *views,
+    uint32_t view_count,
+    uint32_t array_layer,
+    struct xrt_metal_foveation_state *out_state)
+{
+	struct metal_direct_swapchain *sc = (struct metal_direct_swapchain *)xscm;
+	return comp_metal_foveation_cache_get_packed(
+	    &sc->foveation, views, view_count, array_layer, out_state);
+}
+
+static xrt_result_t
+metal_direct_swapchain_get_active_foveation_state(
+    struct xrt_swapchain_metal *xscm,
+    uint32_t array_layer,
+    struct xrt_metal_foveation_state *out_state)
+{
+	struct metal_direct_swapchain *sc = (struct metal_direct_swapchain *)xscm;
+	return comp_metal_foveation_cache_get_active(
+	    &sc->foveation, array_layer, out_state);
+}
+
+static xrt_result_t
 metal_direct_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
 {
 	return xrt_swapchain_acquire_image(to_native_swapchain(xsc), out_index);
@@ -371,6 +395,10 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 	sc->base.base.foveation_capabilities =
 	    XRT_FOVEATION_CAPABILITY_FIXED | XRT_FOVEATION_CAPABILITY_DYNAMIC | XRT_FOVEATION_CAPABILITY_EYE_TRACKED;
 	sc->base.get_foveation_metal_state = metal_direct_swapchain_get_foveation_state;
+	sc->base.get_foveation_metal_packed_state =
+	    metal_direct_swapchain_get_packed_foveation_state;
+	sc->base.get_foveation_metal_active_state =
+	    metal_direct_swapchain_get_active_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xsccp.image_count;
 	sc->xscn = xscn;

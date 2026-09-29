@@ -20,6 +20,7 @@ struct comp_metal_foveation_cache
 	struct xrt_foveation_state state;
 	struct os_mutex mutex;
 	void *entries;
+	void **active_entries;
 };
 
 bool
@@ -41,6 +42,20 @@ comp_metal_foveation_cache_get(struct comp_metal_foveation_cache *cache,
                                uint32_t view_index,
                                uint32_t array_layer,
                                struct xrt_metal_foveation_state *out_state);
+
+xrt_result_t
+comp_metal_foveation_cache_get_packed(
+    struct comp_metal_foveation_cache *cache,
+    const struct xrt_metal_foveation_view_layout *views,
+    uint32_t view_count,
+    uint32_t array_layer,
+    struct xrt_metal_foveation_state *out_state);
+
+xrt_result_t
+comp_metal_foveation_cache_get_active(
+    struct comp_metal_foveation_cache *cache,
+    uint32_t array_layer,
+    struct xrt_metal_foveation_state *out_state);
 
 #ifdef __cplusplus
 }

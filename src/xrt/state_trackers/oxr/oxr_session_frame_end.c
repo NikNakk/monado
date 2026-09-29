@@ -294,8 +294,8 @@ fill_in_foveation_map(struct oxr_session *sess,
 	    sc->swapchain->set_foveation != NULL) {
 		struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
 		struct xrt_metal_foveation_state native = {};
-		xrt_result_t xret = xrt_swapchain_metal_get_foveation_state(
-		    xscm, view_index, view->subImage.imageArrayIndex, &native);
+		xrt_result_t xret = xrt_swapchain_metal_get_active_foveation_state(
+		    xscm, view->subImage.imageArrayIndex, &native);
 		if (xret == XRT_SUCCESS && native.enabled && validate_foveation_map(&native.compositor_map)) {
 			*out = native.compositor_map;
 			return;

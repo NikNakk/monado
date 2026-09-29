@@ -532,8 +532,48 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 
 	struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
 	struct xrt_metal_foveation_state native = {};
-	xrt_result_t xret =
-	    xrt_swapchain_metal_get_foveation_state(xscm, viewIndex, arrayLayer, &native);
+	xrt_result_t xret = XRT_ERROR_NOT_IMPLEMENTED;
+
+	XrFoveationMetalPackedStateMNDX *packed = NULL;
+	if (state->next != NULL) {
+		XrBaseOutStructure *next = (XrBaseOutStructure *)state->next;
+		if (next->type != XR_TYPE_FOVEATION_METAL_PACKED_STATE_MNDX) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+			                 "Unsupported XrFoveationMetalStateMNDX::next type %d",
+			                 next->type);
+		}
+		packed = (XrFoveationMetalPackedStateMNDX *)state->next;
+		if (packed->next != NULL || packed->viewCount == 0 ||
+		    packed->viewCount > XRT_MAX_VIEWS || packed->views == NULL) {
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+			                 "Invalid packed Metal foveation view list");
+		}
+
+		struct xrt_metal_foveation_view_layout layouts[XRT_MAX_VIEWS] = {0};
+		for (uint32_t i = 0; i < packed->viewCount; ++i) {
+			const XrFoveationMetalViewMNDX *view = &packed->views[i];
+			if (view->viewIndex >= head->hmd->view_count ||
+			    view->imageRect.offset.x < 0 || view->imageRect.offset.y < 0 ||
+			    view->imageRect.extent.width <= 0 || view->imageRect.extent.height <= 0 ||
+			    (uint64_t)view->imageRect.offset.x + (uint32_t)view->imageRect.extent.width > sc->width ||
+			    (uint64_t)view->imageRect.offset.y + (uint32_t)view->imageRect.extent.height > sc->height) {
+				return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+				                 "Invalid packed Metal foveation view %u", i);
+			}
+			layouts[i] = (struct xrt_metal_foveation_view_layout){
+			    .view_index = view->viewIndex,
+			    .offset_x = view->imageRect.offset.x,
+			    .offset_y = view->imageRect.offset.y,
+			    .width = (uint32_t)view->imageRect.extent.width,
+			    .height = (uint32_t)view->imageRect.extent.height,
+			};
+		}
+		xret = xrt_swapchain_metal_get_packed_foveation_state(
+		    xscm, layouts, packed->viewCount, arrayLayer, &native);
+	} else {
+		xret = xrt_swapchain_metal_get_foveation_state(
+		    xscm, viewIndex, arrayLayer, &native);
+	}
 	if (xret == XRT_ERROR_NOT_IMPLEMENTED) {
 		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
 		                 "Metal foveation state is not currently available");
@@ -548,6 +588,25 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 	state->physicalWidth = native.physical_width;
 	state->physicalHeight = native.physical_height;
 	state->revision = native.revision;
+
+	if (packed != NULL) {
+		if (native.sample_count > XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT ||
+		    native.compositor_map.boundary_count > XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT) {
+			return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
+			                 "Runtime Metal foveation map exceeds transport limits");
+		}
+		packed->horizontalSampleCount = native.sample_count;
+		packed->verticalSampleCount = native.sample_count;
+		memcpy(packed->horizontalSampleRates, native.horizontal_rates,
+		       native.sample_count * sizeof(float));
+		memcpy(packed->verticalSampleRates, native.vertical_rates,
+		       native.sample_count * sizeof(float));
+		packed->boundaryCount = native.compositor_map.boundary_count;
+		memcpy(packed->x, native.compositor_map.x,
+		       native.compositor_map.boundary_count * sizeof(float));
+		memcpy(packed->y, native.compositor_map.y,
+		       native.compositor_map.boundary_count * sizeof(float));
+	}
 	return oxr_session_success_result(sc->sess);
 }
 #endif // OXR_HAVE_MNDX_foveation_metal
