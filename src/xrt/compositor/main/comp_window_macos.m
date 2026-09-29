@@ -151,7 +151,6 @@ struct comp_window_macos
 	bool present_worker_scheduled;
 	bool drawable_slot_acquire_scheduled;
 	bool present_worker_shutdown;
-	bool async_present;
 	bool present_worker_enabled;
 	bool drawable_slot_enabled;
 	id<CAMetalDrawable> prefetched_drawable;
@@ -190,7 +189,6 @@ struct comp_window_macos
 	uint64_t present_missed_intervals;
 	uint64_t present_vk_wait_total_ns;
 	uint64_t present_drawable_wait_total_ns;
-	uint64_t present_metal_wait_total_ns;
 	int64_t display_period_ns;
 	uint32_t pixel_width;
 	uint32_t pixel_height;
@@ -1085,7 +1083,7 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		return true;
 	}
 
-	bool want_shared_event = cwm->async_present && vk->has_EXT_metal_objects && vk->vkExportMetalObjectsEXT != NULL;
+	bool want_shared_event = vk->has_EXT_metal_objects && vk->vkExportMetalObjectsEXT != NULL;
 
 	VkExportMetalObjectCreateInfoEXT metal_export_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
@@ -1131,7 +1129,7 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		} else {
 			COMP_WARN(ct->c, "VK_EXT_metal_objects did not export an MTLSharedEvent; retaining CPU Vulkan wait fallback");
 		}
-	} else if (cwm->async_present) {
+	} else {
 		COMP_WARN(ct->c, "VK_EXT_metal_objects unavailable; asynchronous present will retain the CPU Vulkan wait");
 	}
 
@@ -1305,13 +1303,6 @@ comp_window_macos_acquire(struct comp_target *ct, uint32_t *out_index)
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
-	if (!cwm->async_present) {
-		*out_index = cwm->next_image;
-		cwm->next_image = (cwm->next_image + 1) % ct->image_count;
-		cwm->last_image_acquire_wait_ns = 0;
-		return VK_SUCCESS;
-	}
-
 	uint64_t wait_begin_ns = os_monotonic_get_ns();
 	for (;;) {
 		for (uint32_t n = 0; n < ct->image_count; n++) {
@@ -1339,7 +1330,7 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
                              uint32_t queue_depth);
 
 static VkResult
-macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_present_job *job, bool async_present)
+macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_present_job *job)
 {
 	struct comp_target *ct = &cwm->base.base;
 	struct vk_bundle *vk = get_vk(cwm);
@@ -1349,7 +1340,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	uint64_t timeline_semaphore_value = job->timeline_value;
 	int64_t desired_present_time_ns = job->desired_present_time_ns;
 	int64_t present_slop_ns = job->present_slop_ns;
-	uint64_t worker_start_ns = async_present ? os_monotonic_get_ns() : 0;
+	uint64_t worker_start_ns = os_monotonic_get_ns();
 	uint64_t next_drawable_begin_ns = 0;
 	uint64_t after_drawable_ns = 0;
 	uint64_t before_present_call_ns = 0;
@@ -1359,20 +1350,16 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	uint64_t target_output_ns = 0;
 	uint64_t metal_request_ns = 0;
 	const char *wait_mode = "queue_idle";
-	bool shared_event_wait = async_present && cwm->render_complete_event != nil;
+	bool shared_event_wait = cwm->render_complete_event != nil;
 	uint64_t image_reuse_wait_ns = job->image_reuse_wait_ns;
 	double scheduled_present_host_s = 0.0;
 	double gpu_start_time_s = 0.0;
 	double gpu_end_time_s = 0.0;
-	if (async_present) {
-		macos_trace_present_worker(cwm, "worker_start", job, worker_start_ns, 0, worker_start_ns, 0, 0, 0, 0,
-		                           shared_event_wait);
-	}
+	macos_trace_present_worker(cwm, "worker_start", job, worker_start_ns, 0, worker_start_ns, 0, 0, 0, 0,
+	                           shared_event_wait);
 	assert(present_queue != NULL);
 	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
-		if (async_present) {
-			macos_retire_unpresented_job(cwm, job, "invalid", 0);
-		}
+		macos_retire_unpresented_job(cwm, job, "invalid", 0);
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
@@ -1399,9 +1386,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	uint64_t after_vk_wait_ns = os_monotonic_get_ns();
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));
-		if (async_present) {
-			macos_release_source_image(cwm, index);
-		}
+		macos_release_source_image(cwm, index);
 		return ret;
 	}
 
@@ -1447,36 +1432,28 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				macos_release_prefetched_drawable(cwm, "present_mismatch_release");
 			}
 			uint64_t drawable_trace_begin_ns = os_monotonic_get_ns();
-			if (async_present) {
-				/*
-				 * Do not include trace-writing latency in the nextDrawable measurement.
-				 * The actual call start is captured only after this row has been written;
-				 * drawable_end records both the real call begin and end timestamps.
-				 */
-				macos_trace_present_worker(cwm, "drawable_trace_begin", job, drawable_trace_begin_ns, 0,
-				                           worker_start_ns, 0, 0, 0, 0, shared_event_wait);
-			}
+			/*
+			 * Do not include trace-writing latency in the nextDrawable measurement.
+			 * The actual call start is captured only after this row has been written;
+			 * drawable_end records both the real call begin and end timestamps.
+			 */
+			macos_trace_present_worker(cwm, "drawable_trace_begin", job, drawable_trace_begin_ns, 0,
+			                           worker_start_ns, 0, 0, 0, 0, shared_event_wait);
 			next_drawable_begin_ns = os_monotonic_get_ns();
 			drawable = [cwm->metal_layer nextDrawable];
 			after_drawable_ns = os_monotonic_get_ns();
-			if (async_present) {
-				macos_trace_present_worker(cwm, "drawable_end", job, after_drawable_ns, 0, worker_start_ns,
-				                           next_drawable_begin_ns, after_drawable_ns, 0, 0, shared_event_wait);
-			}
+			macos_trace_present_worker(cwm, "drawable_end", job, after_drawable_ns, 0, worker_start_ns,
+			                           next_drawable_begin_ns, after_drawable_ns, 0, 0, shared_event_wait);
 		}
 		if (drawable == nil) {
 			COMP_ERROR(ct->c, "Could not acquire a CAMetalDrawable");
-			if (async_present) {
-				macos_retire_unpresented_job(cwm, job, "drawable_error", 0);
-			}
+			macos_retire_unpresented_job(cwm, job, "drawable_error", 0);
 			return VK_ERROR_OUT_OF_DATE_KHR;
 		}
 		id<MTLCommandBuffer> command_buffer = [cwm->present_queue commandBuffer];
 		if (command_buffer == nil) {
 			COMP_ERROR(ct->c, "Could not create a Metal presentation command buffer");
-			if (async_present) {
-				macos_retire_unpresented_job(cwm, job, "command_buffer_error", 0);
-			}
+			macos_retire_unpresented_job(cwm, job, "command_buffer_error", 0);
 			return VK_ERROR_DEVICE_LOST;
 		}
 		if (shared_event_wait) {
@@ -1492,9 +1469,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
 			if (blit == nil) {
 				COMP_ERROR(ct->c, "Could not create Metal blit encoder");
-				if (async_present) {
-					macos_retire_unpresented_job(cwm, job, "blit_error", 0);
-				}
+				macos_retire_unpresented_job(cwm, job, "blit_error", 0);
 				return VK_ERROR_DEVICE_LOST;
 			}
 			MTLSize size = MTLSizeMake(ct->width, ct->height, 1);
@@ -1604,92 +1579,75 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			[command_buffer presentDrawable:drawable];
 		}
 		after_present_call_ns = os_monotonic_get_ns();
-		if (async_present) {
-			uint64_t traced_frame_id = frame_id;
-			uint32_t traced_index = index;
-			uint64_t traced_timeline_value = timeline_semaphore_value;
-			uint64_t commit_begin_ns = os_monotonic_get_ns();
-			bool traced_shared_event_wait = shared_event_wait;
-			dispatch_group_t command_group = cwm->present_command_group;
-			FILE *complete_trace = cwm->trace_present_complete;
-			dispatch_group_enter(command_group);
-			[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {
-				uint64_t completion_ns = os_monotonic_get_ns();
-				MTLCommandBufferStatus status = [completed_buffer status];
-				double completed_gpu_start_s = [completed_buffer GPUStartTime];
-				double completed_gpu_end_s = [completed_buffer GPUEndTime];
-				if (status == MTLCommandBufferStatusError) {
-					COMP_ERROR(cwm->base.base.c, "Asynchronous Metal presentation failed: %s",
-					           [[[completed_buffer error] localizedDescription] UTF8String]);
-				}
-				if (complete_trace != NULL) {
-					flockfile(complete_trace);
-					fprintf(complete_trace, "%llu,%llu,%u,%llu,%lu,%llu,%.17g,%.17g,%u\n",
-					        (unsigned long long)traced_frame_id, (unsigned long long)completion_ns,
-					        traced_index, (unsigned long long)traced_timeline_value, (unsigned long)status,
-					        (unsigned long long)(completion_ns - commit_begin_ns), completed_gpu_start_s,
-					        completed_gpu_end_s, traced_shared_event_wait ? 1u : 0u);
-					funlockfile(complete_trace);
-				}
-				macos_release_source_image(cwm, traced_index);
-				dispatch_group_leave(command_group);
-			}];
-			[command_buffer commit];
-			after_commit_ns = os_monotonic_get_ns();
-			after_metal_wait_ns = after_commit_ns;
-			macos_trace_present_worker(cwm, "submitted", job, after_commit_ns, 0, worker_start_ns,
-			                           next_drawable_begin_ns, after_drawable_ns, after_commit_ns, 0,
-			                           shared_event_wait);
-			pthread_mutex_lock(&cwm->present_worker_mutex);
-			cwm->worker_jobs_submitted++;
-			uint64_t worker_delay_ns = worker_start_ns > job->enqueue_ns ? worker_start_ns - job->enqueue_ns : 0;
-			uint64_t drawable_wait_ns =
-			    after_drawable_ns > next_drawable_begin_ns ? after_drawable_ns - next_drawable_begin_ns : 0;
-			cwm->worker_queue_delay_total_ns += worker_delay_ns;
-			if (worker_delay_ns > cwm->worker_queue_delay_max_ns) {
-				cwm->worker_queue_delay_max_ns = worker_delay_ns;
+		uint64_t traced_frame_id = frame_id;
+		uint32_t traced_index = index;
+		uint64_t traced_timeline_value = timeline_semaphore_value;
+		uint64_t commit_begin_ns = os_monotonic_get_ns();
+		bool traced_shared_event_wait = shared_event_wait;
+		dispatch_group_t command_group = cwm->present_command_group;
+		FILE *complete_trace = cwm->trace_present_complete;
+		dispatch_group_enter(command_group);
+		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {
+			uint64_t completion_ns = os_monotonic_get_ns();
+			MTLCommandBufferStatus status = [completed_buffer status];
+			double completed_gpu_start_s = [completed_buffer GPUStartTime];
+			double completed_gpu_end_s = [completed_buffer GPUEndTime];
+			if (status == MTLCommandBufferStatusError) {
+				COMP_ERROR(cwm->base.base.c, "Asynchronous Metal presentation failed: %s",
+				           [[[completed_buffer error] localizedDescription] UTF8String]);
 			}
-			if (drawable_wait_ns > 5000000ULL) {
-				cwm->worker_drawable_stalls++;
+			if (complete_trace != NULL) {
+				flockfile(complete_trace);
+				fprintf(complete_trace, "%llu,%llu,%u,%llu,%lu,%llu,%.17g,%.17g,%u\n",
+				        (unsigned long long)traced_frame_id, (unsigned long long)completion_ns,
+				        traced_index, (unsigned long long)traced_timeline_value, (unsigned long)status,
+				        (unsigned long long)(completion_ns - commit_begin_ns), completed_gpu_start_s,
+				        completed_gpu_end_s, traced_shared_event_wait ? 1u : 0u);
+				funlockfile(complete_trace);
 			}
-			if (cwm->display_period_ns > 0 && drawable_wait_ns > (uint64_t)cwm->display_period_ns / 2) {
-				cwm->worker_drawable_half_refresh_stalls++;
-			}
-			uint64_t submitted = cwm->worker_jobs_submitted;
-			uint64_t superseded = cwm->worker_jobs_superseded;
-			uint64_t half_refresh_stalls = cwm->worker_drawable_half_refresh_stalls;
-			uint64_t stalls = cwm->worker_drawable_stalls;
-			uint64_t average_delay_ns = submitted != 0 ? cwm->worker_queue_delay_total_ns / submitted : 0;
-			uint64_t max_delay_ns = cwm->worker_queue_delay_max_ns;
-			pthread_mutex_unlock(&cwm->present_worker_mutex);
-			if (submitted % 240 == 0) {
-				COMP_INFO(ct->c,
-				          "macOS present worker: submitted %llu, superseded %llu, drawable >half-refresh %llu, >5ms "
-				          "%llu, queue delay avg %.3fms max %.3fms",
-				          (unsigned long long)submitted, (unsigned long long)superseded,
-				          (unsigned long long)half_refresh_stalls, (unsigned long long)stalls,
-				          (double)average_delay_ns / 1000000.0,
-				          (double)max_delay_ns / 1000000.0);
-			}
-		} else {
-			[command_buffer commit];
-			after_commit_ns = os_monotonic_get_ns();
-			[command_buffer waitUntilCompleted];
-			after_metal_wait_ns = os_monotonic_get_ns();
-			gpu_start_time_s = [command_buffer GPUStartTime];
-			gpu_end_time_s = [command_buffer GPUEndTime];
-			if ([command_buffer status] == MTLCommandBufferStatusError) {
-				COMP_ERROR(ct->c, "Metal presentation failed: %s",
-				           [[[command_buffer error] localizedDescription] UTF8String]);
-				return VK_ERROR_DEVICE_LOST;
-			}
+			macos_release_source_image(cwm, traced_index);
+			dispatch_group_leave(command_group);
+		}];
+		[command_buffer commit];
+		after_commit_ns = os_monotonic_get_ns();
+		after_metal_wait_ns = after_commit_ns;
+		macos_trace_present_worker(cwm, "submitted", job, after_commit_ns, 0, worker_start_ns,
+		                           next_drawable_begin_ns, after_drawable_ns, after_commit_ns, 0,
+		                           shared_event_wait);
+		pthread_mutex_lock(&cwm->present_worker_mutex);
+		cwm->worker_jobs_submitted++;
+		uint64_t worker_delay_ns = worker_start_ns > job->enqueue_ns ? worker_start_ns - job->enqueue_ns : 0;
+		uint64_t drawable_wait_ns =
+		    after_drawable_ns > next_drawable_begin_ns ? after_drawable_ns - next_drawable_begin_ns : 0;
+		cwm->worker_queue_delay_total_ns += worker_delay_ns;
+		if (worker_delay_ns > cwm->worker_queue_delay_max_ns) {
+			cwm->worker_queue_delay_max_ns = worker_delay_ns;
+		}
+		if (drawable_wait_ns > 5000000ULL) {
+			cwm->worker_drawable_stalls++;
+		}
+		if (cwm->display_period_ns > 0 && drawable_wait_ns > (uint64_t)cwm->display_period_ns / 2) {
+			cwm->worker_drawable_half_refresh_stalls++;
+		}
+		uint64_t submitted = cwm->worker_jobs_submitted;
+		uint64_t superseded = cwm->worker_jobs_superseded;
+		uint64_t half_refresh_stalls = cwm->worker_drawable_half_refresh_stalls;
+		uint64_t stalls = cwm->worker_drawable_stalls;
+		uint64_t average_delay_ns = submitted != 0 ? cwm->worker_queue_delay_total_ns / submitted : 0;
+		uint64_t max_delay_ns = cwm->worker_queue_delay_max_ns;
+		pthread_mutex_unlock(&cwm->present_worker_mutex);
+		if (submitted % 240 == 0) {
+			COMP_INFO(ct->c,
+			          "macOS present worker: submitted %llu, superseded %llu, drawable >half-refresh %llu, >5ms "
+			          "%llu, queue delay avg %.3fms max %.3fms",
+			          (unsigned long long)submitted, (unsigned long long)superseded,
+			          (unsigned long long)half_refresh_stalls, (unsigned long long)stalls,
+			          (double)average_delay_ns / 1000000.0,
+			          (double)max_delay_ns / 1000000.0);
 		}
 		cwm->present_vk_wait_total_ns += after_vk_wait_ns - before_vk_wait_ns;
 		cwm->present_drawable_wait_total_ns +=
 		    after_drawable_ns > next_drawable_begin_ns ? after_drawable_ns - next_drawable_begin_ns : 0;
-		if (!async_present) {
-			cwm->present_metal_wait_total_ns += after_metal_wait_ns - after_drawable_ns;
-		}
 	}
 
 	if (cwm->trace_present != NULL) {
@@ -1705,7 +1663,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		        (unsigned long long)after_drawable_ns, (unsigned long long)before_present_call_ns,
 		        (unsigned long long)after_present_call_ns, (unsigned long long)after_commit_ns,
 		        (unsigned long long)after_metal_wait_ns, (unsigned long long)latest_output_ns, gpu_start_time_s, gpu_end_time_s,
-		        async_present ? 1u : 0u, shared_event_wait ? 1u : 0u, (unsigned long long)image_reuse_wait_ns);
+		        1u /* async_present */, shared_event_wait ? 1u : 0u, (unsigned long long)image_reuse_wait_ns);
 		cwm->trace_present_rows++;
 		if (cwm->trace_present_rows % 256 == 0) {
 			fflush(cwm->trace_present);
@@ -1732,18 +1690,15 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	cwm->last_present_ns = now_ns;
 	if (cwm->present_sample_count == 240) {
 		double average_ms = (double)cwm->present_total_ns / (double)cwm->present_sample_count / 1000000.0;
-		const char *cadence_label = cwm->present_worker_enabled
-		                                ? "macOS present-worker completion cadence"
-		                                : (async_present ? "macOS async present completion cadence"
-		                                                 : "macOS present-call return cadence");
+		const char *cadence_label = cwm->present_worker_enabled ? "macOS present-worker completion cadence"
+		                                                        : "macOS async present completion cadence";
 		COMP_INFO(ct->c, "%s: average %.3fms, min %.3fms, max %.3fms, late %llu/240",
 		          cadence_label,
 		          average_ms, (double)cwm->present_min_ns / 1000000.0, (double)cwm->present_max_ns / 1000000.0,
 		          (unsigned long long)cwm->present_missed_intervals);
-		COMP_INFO(ct->c, "macOS presentation CPU waits: Vulkan %.3fms, drawable %.3fms, synchronous Metal %.3fms",
+		COMP_INFO(ct->c, "macOS presentation CPU waits: Vulkan %.3fms, drawable %.3fms",
 		          (double)cwm->present_vk_wait_total_ns / 240.0 / 1000000.0,
-		          (double)cwm->present_drawable_wait_total_ns / 240.0 / 1000000.0,
-		          (double)cwm->present_metal_wait_total_ns / 240.0 / 1000000.0);
+		          (double)cwm->present_drawable_wait_total_ns / 240.0 / 1000000.0);
 		cwm->present_sample_count = 0;
 		cwm->present_total_ns = 0;
 		cwm->present_min_ns = 0;
@@ -1751,7 +1706,6 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		cwm->present_missed_intervals = 0;
 		cwm->present_vk_wait_total_ns = 0;
 		cwm->present_drawable_wait_total_ns = 0;
-		cwm->present_metal_wait_total_ns = 0;
 	}
 	return VK_SUCCESS;
 }
@@ -1860,7 +1814,7 @@ macos_present_worker_run_one(struct comp_window_macos *cwm)
 	cwm->pending_present_job_valid = false;
 	pthread_mutex_unlock(&cwm->present_worker_mutex);
 
-	(void)macos_execute_present_job(cwm, &job, true);
+	(void)macos_execute_present_job(cwm, &job);
 
 	/* Schedule one job at a time so already-queued dropped-image retirement work cannot starve. */
 	pthread_mutex_lock(&cwm->present_worker_mutex);
@@ -1896,7 +1850,7 @@ comp_window_macos_present(struct comp_target *ct,
 	};
 	if (!cwm->present_worker_enabled) {
 		/* Submit on the compositor thread; async GPU completion does not need a worker. */
-		return macos_execute_present_job(cwm, &job, true);
+		return macos_execute_present_job(cwm, &job);
 	}
 	if (index >= ct->image_count || cwm->metal_images[index] == nil || present_queue == NULL) {
 		macos_retire_unpresented_job(cwm, &job, "invalid", 0);
@@ -2193,10 +2147,8 @@ comp_window_macos_create(struct comp_compositor *c)
 		return NULL;
 	}
 	atomic_init(&cwm->passthrough_shutdown, false);
-	/* Synchronous Metal presentation (waitUntilCompleted) is no longer used. */
-	cwm->async_present = true;
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
-	cwm->drawable_slot_enabled = cwm->async_present && want_drawable_slot;
+	cwm->drawable_slot_enabled = want_drawable_slot;
 	/*
 	 * Slot mode is itself a newest-frame presentation worker. The producer may
 	 * keep rendering and replace the single pending job while asynchronous
@@ -2214,13 +2166,9 @@ comp_window_macos_create(struct comp_compositor *c)
 		                                                  worker_attr);
 		cwm->present_worker_group = dispatch_group_create();
 	}
-	if (want_drawable_slot) {
-		if (cwm->drawable_slot_enabled) {
-			COMP_INFO(c,
-			          "macOS diagnostic: asynchronous drawable slot with newest-frame worker enabled; nextDrawable stalls supersede pending frames instead of dropping them");
-		} else {
-			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT requires asynchronous presentation; slot is disabled");
-		}
+	if (cwm->drawable_slot_enabled) {
+		COMP_INFO(c,
+		          "macOS diagnostic: asynchronous drawable slot with newest-frame worker enabled; nextDrawable stalls supersede pending frames instead of dropping them");
 	}
 	macos_timing_trace_open(cwm);
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
