@@ -20,8 +20,29 @@ high-level status/roadmap.
 
 The branch name is historical. It now carries the broadest integration of the
 native Apple Silicon runtime, PS VR2 HMD path, Metal/IOSurface sharing,
-launchd/XPC service integration, depth support, Chromium handoff and Wine/OpenVR
-work.
+launchd/XPC service integration, depth support, passthrough, eye gaze, Chromium
+handoff and Wine/OpenVR work.
+
+It also carries the standards-facing slices, merged in this order:
+
+- [`standards/khr-generic-controller`](https://github.com/NikNakk/monado/tree/standards/khr-generic-controller)
+  — `XR_KHR_generic_controller` for PS Sense, Touch-family and Index devices
+  (opt-in: `XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC`).
+- [`standards/fb-foveation`](https://github.com/NikNakk/monado/tree/standards/fb-foveation)
+  — `XR_FB_swapchain_update_state`, `XR_FB_foveation` and
+  `XR_FB_foveation_configuration` resolved into the backend-neutral
+  `xrt_foveation_state`.
+- [`standards/fb-foveation-metal`](https://github.com/NikNakk/monado/tree/standards/fb-foveation-metal)
+  — the Metal backend: experimental `XR_MNDX_foveation_metal`, compositor
+  remap of the rate map, packed multi-view support, and runtime-owned
+  `XR_META_foveation_eye_tracked`.
+
+All foveation options are default OFF. Fixed FB foveation works without eye
+tracking; META eye-tracked foveation uses runtime-private PS VR2 gaze.
+
+The branch has macOS and Linux build/test CI workflows; the macOS PS VR2
+diagnostics workflow also compiles and tests each standards slice with its
+options enabled.
 
 ## Current validated capabilities
 
@@ -35,7 +56,17 @@ work.
 - Native application/engine validation through Unity/Open Brush, Unreal Engine,
   Godot, Chromium WebXR and SwiftXR/SwiftXRShell.
 - Native PS Sense HID path for 3DoF, inputs and haptics.
+- `XR_EXT_eye_gaze_interaction` on PS VR2 with lazy activation and optional
+  user calibration.
 - Wine D3D11 OpenXR plus OpenVR experiments through OpenComposite and xrizer.
+
+## Implemented, awaiting hardware validation
+
+- `XR_FB_passthrough` from the stock-headset BC4 cameras, composited in the
+  final Metal presentation pass (uncalibrated fisheye approximation).
+- Opt-in `XR_KHR_generic_controller` mapping for PS Sense.
+- Opt-in fixed `XR_FB_foveation` and runtime-owned
+  `XR_META_foveation_eye_tracked` for Metal clients.
 
 ## Active side branches
 

@@ -9,13 +9,15 @@ SPDX-License-Identifier: BSL-1.0
 This document is the high-level status and roadmap for the experimental Monado
 port to Apple Silicon macOS, with PS VR2 as the primary headset.
 
-**Status date:** 2026-09-27
+**Status date:** 2026-09-29
 
 **Current integration branch:** `macos-wine-openvr-legacy-unity`
 
 Despite its historical name, this is now the best single integration branch for
 the macOS port. It contains most of the recent native macOS, PS VR2, compositor,
-depth, service/XPC, Chromium-sharing and Wine/OpenVR work. PS Sense optical 6DoF
+depth, passthrough, foveation, service/XPC, Chromium-sharing and Wine/OpenVR
+work, plus the `standards/*` branches for `XR_KHR_generic_controller` and
+`XR_FB_foveation` / `XR_META_foveation_eye_tracked`. PS Sense optical 6DoF
 development deliberately remains on a separate branch until it is reliable
 enough to merge.
 
@@ -35,13 +37,14 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Chromium WebXR | **Working, still being hardened** | Immersive WebXR works; the sandboxed SharedImage/IOSurface/shared-event path is still active work. |
 | Swift OpenXR wrapper | **Working** | SwiftXR provides the native Swift-facing layer used by shell experiments. |
 | Swift VR home/shell | **Working experimental shell** | SwiftXRShell provides launcher/home, immersive video, desktop/panel support and system-overlay experiments. |
-| PS Sense 3DoF, buttons and haptics | **Working experimental** | Native IOKit HID discovery/input is present on the integration branch. |
+| PS Sense 3DoF, buttons and haptics | **Working experimental** | Native IOKit HID discovery/input is present on the integration branch. Sense also maps to `XR_KHR_generic_controller` (opt-in, `XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC`). |
 | PS Sense optical 6DoF | **In development on a separate branch** | Static/recorded optical results are encouraging, but dynamic tracking is not yet reliable enough to merge. |
 | Depth layers | **Working experimental** | `XR_KHR_composition_layer_depth` is exposed for Metal and depth-aware positional reprojection is available. |
 | Wine OpenXR / OpenVR | **Working experimental** | Native Monado remains the compositor/runtime; Windows D3D11 clients run through Wine/DXMT and OpenVR through OpenComposite or xrizer. |
 | SteamVR games under Wine | **Working for a small tested set** | At least several SteamVR titles have reached runnable/interactive states; Half-Life: Alyx is the most heavily exercised path. |
 | PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; hardware validation/calibration refinement remains. |
-| PS VR2 eye tracking | **Not yet usable** | The low-level stream can be reached, but the required calibration path is not solved. |
+| PS VR2 eye tracking | **Working experimental** | `XR_EXT_eye_gaze_interaction` using the Sony calibration blob plus an optional 9-point user calibration; gaze activates lazily. Accuracy still needs broader hardware validation. |
+| Foveated rendering | **Implemented, default OFF, awaiting hardware validation** | Fixed `XR_FB_foveation` / `XR_FB_foveation_configuration` works without gaze; `XR_META_foveation_eye_tracked` adds runtime-owned gaze. Metal is the only rendering backend, via the experimental `XR_MNDX_foveation_metal` companion. |
 | SteamVR Home | **Unresolved** | Not currently working; feasibility depends on how much additional SteamVR/OpenVR behaviour can be reproduced without Valve's compositor. |
 | End-user packaging | **Not done** | Development launchd installation exists, but there is no polished signed/notarized installer or settings application. |
 
@@ -145,6 +148,12 @@ The macOS port now supports substantially more than the original bring-up:
 - projection layers;
 - cube composition layers used by newer WebXR Layers work;
 - `XR_KHR_composition_layer_depth` for native Metal clients;
+- `XR_FB_passthrough` layers rendered by the final Metal presentation pass;
+- `XR_EXT_eye_gaze_interaction` on PS VR2;
+- opt-in `XR_FB_foveation`, `XR_FB_foveation_configuration`,
+  `XR_META_foveation_eye_tracked` and experimental `XR_MNDX_foveation_metal`;
+- opt-in `XR_KHR_generic_controller`, mapped for PS Sense and for Touch-family
+  and Index devices, and preferred over `simple_controller` as a fallback;
 - experimental depth-aware positional reprojection in the compute compositor;
 - multi-process Metal/IOSurface resource sharing;
 - application GPU-completion waits before compositor reuse;
@@ -163,6 +172,11 @@ Depth submission can be exercised with:
 XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
   ./build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --depth-layer
 ```
+
+The same target also has `--passthrough` / `--passthrough-only`,
+`--generic-controller`, `--gaze` / `--gaze-calibrate`, and `--fb-foveation` /
+`--fb-eye-foveation` modes for the corresponding extensions. The generic
+controller and foveation modes need their opt-in CMake features.
 
 The remaining OpenXR work is now mostly breadth, conformance and polish rather
 than "can a native application render to the headset at all?"
@@ -276,7 +290,9 @@ basic PS Sense runtime integration needed for:
 - orientation/3DoF tracking;
 - buttons/analogue inputs;
 - haptics;
-- OpenXR interaction-profile experiments;
+- OpenXR interaction-profile experiments, including an opt-in
+  `XR_KHR_generic_controller` mapping (L1/R1 drives squeeze/value, and
+  grip_surface prefers a calibrated palm pose);
 - HMD-relative synthetic position/arm-model experiments used while optical
   position is unavailable.
 
@@ -317,30 +333,45 @@ be acquired and displayed on macOS.
 
 The integration branch now has an experimental runtime path from the stock-headset BC4 camera stream through `XR_FB_passthrough` to the final macOS Metal presentation stage. See [PS VR2 passthrough on macOS](macos-psvr2-passthrough.md).
 
+That path already covers the OpenXR API (`XR_FB_passthrough` create/start/
+layer/resume), carrying passthrough layer state through IPC and the multi
+compositor, and compositing the camera image behind application content in the
+final Metal presentation pass. It uses a tunable equidistant-fisheye
+approximation rather than real camera calibration.
+
 What is still missing before this should be considered calibrated MR support:
 
-- a stable camera/calibration API in the PS VR2 driver;
-- distortion/rectification and pose/time alignment suitable for passthrough;
-- compositor support for presenting passthrough behind/with application
-  content;
-- an OpenXR-facing passthrough/MR extension strategy;
-- permission, lifecycle and failure handling.
-
-So "camera frames can be obtained" and "Monado supports passthrough" are not yet
-the same thing.
+- a stable camera/calibration API in the PS VR2 driver, using real camera
+  intrinsics/extrinsics instead of the fisheye/convergence approximation;
+- rectification plus hardware timestamps and head-pose alignment for camera
+  frames, and camera reprojection/late correction;
+- passthrough style/colour-map controls, projected passthrough and
+  depth-aware MR occlusion;
+- robust stream restart when camera delivery stalls;
+- permission and shell UX (for example the HMD function-button toggle).
 
 ## Eye tracking and foveation
 
 The macOS PS VR2 driver now has a usable eye-gaze path and an experimental
-standards-facing foveation stack.
+standards-facing foveation stack. The two are independent: foveation does not
+need eye tracking, and eye tracking does not depend on foveation.
 
-Public gaze input is exposed through `XR_EXT_eye_gaze_interaction`. Separately,
-the foveation work uses the registered `XR_FB_foveation`,
-`XR_FB_foveation_configuration` and
-`XR_META_foveation_eye_tracked` semantics, with gaze kept runtime-private for
-eye-tracked foveation.
+Public gaze input is exposed through `XR_EXT_eye_gaze_interaction`, using the
+Sony calibration blob plus an optional 9-point user calibration.
 
-The graphics-API-independent policy is carried through `xrt_foveation_state`.
+Foveation uses the registered `XR_FB_foveation` and
+`XR_FB_foveation_configuration` semantics, with `XR_META_foveation_eye_tracked`
+as an optional extra:
+
+- **Fixed foveation** (`XR_FB_foveation` levels, dynamic flag and vertical
+  offset) is resolved into per-view centres from the session's view FOVs and
+  works with no gaze at all.
+- **Eye-tracked foveation** (`XR_META_foveation_eye_tracked`) is runtime-owned:
+  Monado locates a private gaze space and projects it into per-view centres.
+  The application never receives the gaze ray.
+
+The coarse FB levels map onto graphics-API-independent `u_foveation` profiles,
+and the resolved policy is carried through `xrt_foveation_state`.
 Metal is the first rendering backend. Because OpenXR currently has no registered
 Metal foveation companion equivalent to `XR_FB_foveation_vulkan`, the branch
 uses the experimental `XR_MNDX_foveation_metal` extension only to expose the
@@ -361,10 +392,12 @@ See:
 - [PS VR2 eye gaze](macos-psvr2-eye-gaze.md)
 - [PS VR2 gaze-driven foveation](macos-psvr2-gaze-foveation.md)
 
-The implementation remains default-OFF pending hardware validation and
-standards/upstream review of the Metal companion. Compact depth coordinates also
-need to be audited before depth submission is combined with the new foveated
-swapchain path.
+The implementation remains default-OFF (`XRT_FEATURE_OPENXR_FB_FOVEATION` and
+related options) pending hardware validation and standards/upstream review of
+the Metal companion. Metal is the only backend that implements swapchain
+foveation; Vulkan, D3D and OpenGL clients get no foveation yet. Compact depth
+coordinates also need to be audited before depth submission is combined with
+the new foveated swapchain path.
 
 ## Wine, OpenVR and SteamVR applications
 
@@ -434,13 +467,15 @@ runtime/compositor.
    - validate latency/jitter and then merge into the integration branch.
 
 2. **Passthrough / mixed reality**
-   - turn the existing camera acquisition/calibration work into a supported
-     Monado camera/passthrough pipeline;
-   - align camera timing and geometry with the HMD;
-   - expose a usable OpenXR-facing API.
+   - replace the fisheye approximation with calibrated camera geometry;
+   - align camera timing and pose with the HMD and add camera reprojection;
+   - add projected passthrough, style controls and depth-aware occlusion.
 
-3. **Eye tracking and gaze-driven foveation**
-   - hardware-validate the new FB/META foveation paths;
+3. **Eye tracking and foveation**
+   - hardware-validate gaze accuracy and the fixed FB and eye-tracked META
+     foveation paths;
+   - add a foveation backend for non-Metal clients (for example
+     `XR_FB_foveation_vulkan`);
    - validate lazy/private gaze activation and lifetime;
    - integrate the standards-facing path into Chromium;
    - audit compact depth coordinates;
@@ -485,7 +520,7 @@ runtime/compositor.
    - remove dependence on development-only environment-variable forests.
 
 10. **CI, documentation and upstreamability**
-    - keep macOS Monado CI green;
+    - keep the macOS and Linux Monado CI builds green;
     - add targeted CI for the engine/browser/wrapper forks where practical;
     - maintain known-good cross-repository revisions;
     - split generally useful macOS/OpenXR work from PS VR2-specific changes so
@@ -504,6 +539,9 @@ branch is an alternative complete port:
   underpins the Sense branch.
 - **`macos-depth-aware-reprojection`** — development history for depth-aware
   reprojection; the integration branch already contains the usable depth path.
+- **`standards/khr-generic-controller`**, **`standards/fb-foveation`** and
+  **`standards/fb-foveation-metal`** — standards-facing slices, now merged into
+  the integration branch; kept as smaller review units for upstreaming.
 - Older `macos-wine-*`, Metal-array, service-XPC, timing and presentation
   branches should be treated primarily as development history unless a specific
   experiment still refers to them.
