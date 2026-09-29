@@ -13,6 +13,10 @@ run:
   cancels the fixed clock offset and slow drift, so a stall or a throttled
   reader thread shows up in full;
 - arrival gaps: the longest intervals between consecutive receipts;
+- if monado_psvr2_<PID>_compositor_rt.csv is present, the same figures split
+  by whether the service's compositor thread was throttled (priority 4 or
+  below, i.e. Game Mode backgrounding the service) at the time. The traces
+  share the host monotonic clock;
 - absorbed delay (IMU): how far the driver's own VTS-to-host mapping has
   moved above the envelope. The driver maps with an exponential filter that
   follows receipt times within about 80 ms, so sustained delivery delay is
@@ -29,6 +33,7 @@ it as the baseline.
 """
 
 import argparse
+import bisect
 import collections
 import csv
 import os
@@ -79,6 +84,46 @@ def summarize(label, values_ms):
     )
 
 
+def load_throttle_timeline(path):
+    """(times_ns, throttled) from compositor_rt.csv; throttled = priority <= 4."""
+    times, states = [], []
+    with open(path, newline="") as f:
+        for r in csv.DictReader(f):
+            try:
+                t = int(r["sample_ns"])
+                pri = int(r["cur_priority"])
+            except (KeyError, ValueError):
+                continue
+            if pri <= 0:  # not sampled in detail
+                continue
+            times.append(t)
+            states.append(pri <= 4)
+    order = sorted(range(len(times)), key=lambda i: times[i])
+    return [times[i] for i in order], [states[i] for i in order]
+
+
+def throttled_at(timeline, t):
+    times, states = timeline
+    i = bisect.bisect_right(times, t) - 1
+    if i < 0:
+        return None
+    # A sample more than 1 s old says nothing about now.
+    if t - times[i] > 1_000_000_000:
+        return None
+    return states[i]
+
+
+def print_split(kind, timeline, times, delay):
+    split = {True: [], False: []}
+    for t, d in zip(times, delay):
+        state = throttled_at(timeline, t)
+        if state is not None:
+            split[state].append(d)
+    for state, label in ((False, "not throttled"), (True, "throttled (GM)")):
+        if split[state]:
+            print("  {:<4} ".format(kind) + summarize("delay, " + label, split[state]))
+
+
 def gaps_ms(times_ns):
     return [(b - a) / 1e6 for a, b in zip(times_ns, times_ns[1:])]
 
@@ -88,6 +133,30 @@ def analyze(prefix, window_s, skip_s, bucket_s):
     slam_path = prefix + "_slam.csv"
     window_ns = int(window_s * 1e9)
     print("== {}".format(os.path.basename(prefix)))
+
+    timeline = None
+    rt_path = prefix + "_compositor_rt.csv"
+    if os.path.exists(rt_path):
+        timeline = load_throttle_timeline(rt_path)
+        if timeline[0]:
+            throttled = sum(1 for x in timeline[1] if x)
+            print("  compositor_rt: {} samples, {:.1f} % at priority <= 4".format(
+                len(timeline[1]), 100.0 * throttled / len(timeline[1])))
+            # Throttled periods, for reference.
+            spans, start = [], None
+            for t, st in zip(*timeline):
+                if st and start is None:
+                    start = t
+                elif not st and start is not None:
+                    spans.append((start, t))
+                    start = None
+            if start is not None:
+                spans.append((start, timeline[0][-1]))
+            results_origin = timeline[0][0]
+            print("  throttled spans (s from first compositor sample): " + ", ".join(
+                "{:.1f}-{:.1f}".format((a - results_origin) / 1e9, (b - results_origin) / 1e9) for a, b in spans))
+        else:
+            timeline = None
 
     results = {}
 
@@ -113,6 +182,8 @@ def analyze(prefix, window_s, skip_s, bucket_s):
             print("  IMU  arrival gaps: p99={:.2f} max={:.2f} ms, gaps >5 ms: {}".format(
                 pct(g, 99), g[-1] if g else float("nan"), sum(1 for x in g if x > 5.0)))
             results["imu"] = (times, delay, t[0])
+            if timeline:
+                print_split("IMU", timeline, times, delay)
     else:
         print("  (no {})".format(imu_path))
 
@@ -130,6 +201,8 @@ def analyze(prefix, window_s, skip_s, bucket_s):
             print("  SLAM arrival gaps: median={:.2f} p99={:.2f} max={:.2f} ms, gaps >30 ms: {}".format(
                 pct(g, 50), pct(g, 99), g[-1] if g else float("nan"), sum(1 for x in g if x > 30.0)))
             results["slam"] = (times, delay)
+            if timeline:
+                print_split("SLAM", timeline, times, delay)
     else:
         print("  (no {})".format(slam_path))
 
