@@ -727,6 +727,212 @@ do_io_bindings(struct oxr_binding *binding_point,
 	    input_count);  //
 }
 
+
+/*
+ * XR_KHR_generic_controller defines natural equivalences for the legacy
+ * Oculus Touch and Valve Index profiles. Keep those mappings in common code
+ * so every driver that exposes the canonical XRT device names gets the
+ * standards fallback without duplicating a generic profile table.
+ *
+ * grip_surface prefers XRT_INPUT_GENERIC_PALM_POSE when the driver exposes a
+ * calibrated palm-surface pose. A grip-pose fallback follows it so older
+ * drivers remain usable; find_xdev_name_from_pairs() selects the first target
+ * that the concrete device actually exposes.
+ */
+static struct xrt_binding_input_pair khr_generic_index_inputs[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_INDEX_A_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_INDEX_B_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_INDEX_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_INDEX_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_INDEX_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_INDEX_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_INDEX_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_INDEX_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_INDEX_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair khr_generic_index_outputs[] = {
+    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_INDEX_HAPTIC},
+};
+
+static struct xrt_binding_profile khr_generic_index_profile = {
+    .name = XRT_DEVICE_GENERIC_CONTROLLER,
+    .inputs = khr_generic_index_inputs,
+    .input_count = ARRAY_SIZE(khr_generic_index_inputs),
+    .outputs = khr_generic_index_outputs,
+    .output_count = ARRAY_SIZE(khr_generic_index_outputs),
+};
+
+static struct xrt_binding_input_pair khr_generic_touch_left_inputs[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_X_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_Y_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_AIM_POSE},
+};
+
+static struct xrt_binding_input_pair khr_generic_touch_right_inputs[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_A_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_B_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair khr_generic_touch_outputs[] = {
+    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_TOUCH_HAPTIC},
+};
+
+static struct xrt_binding_profile khr_generic_touch_left_profile = {
+    .name = XRT_DEVICE_GENERIC_CONTROLLER,
+    .inputs = khr_generic_touch_left_inputs,
+    .input_count = ARRAY_SIZE(khr_generic_touch_left_inputs),
+    .outputs = khr_generic_touch_outputs,
+    .output_count = ARRAY_SIZE(khr_generic_touch_outputs),
+};
+
+static struct xrt_binding_profile khr_generic_touch_right_profile = {
+    .name = XRT_DEVICE_GENERIC_CONTROLLER,
+    .inputs = khr_generic_touch_right_inputs,
+    .input_count = ARRAY_SIZE(khr_generic_touch_right_inputs),
+    .outputs = khr_generic_touch_outputs,
+    .output_count = ARRAY_SIZE(khr_generic_touch_outputs),
+};
+
+
+static struct xrt_binding_input_pair khr_generic_touch_pro_left_inputs[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_PRO_X_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_PRO_Y_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_PRO_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_PRO_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PRO_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PRO_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PRO_AIM_POSE},
+};
+
+static struct xrt_binding_input_pair khr_generic_touch_pro_right_inputs[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_PRO_A_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_PRO_B_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_PRO_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_PRO_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PRO_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PRO_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PRO_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair khr_generic_touch_pro_outputs[] = {
+    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_TOUCH_PRO_HAPTIC},
+};
+
+static struct xrt_binding_profile khr_generic_touch_pro_left_profile = {
+    .name = XRT_DEVICE_GENERIC_CONTROLLER,
+    .inputs = khr_generic_touch_pro_left_inputs,
+    .input_count = ARRAY_SIZE(khr_generic_touch_pro_left_inputs),
+    .outputs = khr_generic_touch_pro_outputs,
+    .output_count = ARRAY_SIZE(khr_generic_touch_pro_outputs),
+};
+
+static struct xrt_binding_profile khr_generic_touch_pro_right_profile = {
+    .name = XRT_DEVICE_GENERIC_CONTROLLER,
+    .inputs = khr_generic_touch_pro_right_inputs,
+    .input_count = ARRAY_SIZE(khr_generic_touch_pro_right_inputs),
+    .outputs = khr_generic_touch_pro_outputs,
+    .output_count = ARRAY_SIZE(khr_generic_touch_pro_outputs),
+};
+
+static struct xrt_binding_input_pair khr_generic_touch_plus_left_inputs[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_PLUS_X_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_PLUS_Y_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_PLUS_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_PLUS_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PLUS_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PLUS_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PLUS_AIM_POSE},
+};
+
+static struct xrt_binding_input_pair khr_generic_touch_plus_right_inputs[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_TOUCH_PLUS_A_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_TOUCH_PLUS_B_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_TOUCH_PLUS_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_TOUCH_PLUS_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PLUS_SQUEEZE_VALUE},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PLUS_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PLUS_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair khr_generic_touch_plus_outputs[] = {
+    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_TOUCH_PLUS_HAPTIC},
+};
+
+static struct xrt_binding_profile khr_generic_touch_plus_left_profile = {
+    .name = XRT_DEVICE_GENERIC_CONTROLLER,
+    .inputs = khr_generic_touch_plus_left_inputs,
+    .input_count = ARRAY_SIZE(khr_generic_touch_plus_left_inputs),
+    .outputs = khr_generic_touch_plus_outputs,
+    .output_count = ARRAY_SIZE(khr_generic_touch_plus_outputs),
+};
+
+static struct xrt_binding_profile khr_generic_touch_plus_right_profile = {
+    .name = XRT_DEVICE_GENERIC_CONTROLLER,
+    .inputs = khr_generic_touch_plus_right_inputs,
+    .input_count = ARRAY_SIZE(khr_generic_touch_plus_right_inputs),
+    .outputs = khr_generic_touch_plus_outputs,
+    .output_count = ARRAY_SIZE(khr_generic_touch_plus_outputs),
+};
+
+static struct xrt_binding_profile *
+get_builtin_khr_generic_binding_profile(struct xrt_device *xdev)
+{
+	switch (xdev->name) {
+	case XRT_DEVICE_INDEX_CONTROLLER: return &khr_generic_index_profile;
+	case XRT_DEVICE_TOUCH_CONTROLLER:
+	case XRT_DEVICE_TOUCH_CONTROLLER_RIFT_CV1:
+	case XRT_DEVICE_TOUCH_CONTROLLER_QUEST_1_RIFT_S:
+	case XRT_DEVICE_TOUCH_CONTROLLER_QUEST_2:
+		switch (xdev->device_type) {
+		case XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER: return &khr_generic_touch_left_profile;
+		case XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER: return &khr_generic_touch_right_profile;
+		default: return NULL;
+		}
+	case XRT_DEVICE_TOUCH_PRO_CONTROLLER:
+		switch (xdev->device_type) {
+		case XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER: return &khr_generic_touch_pro_left_profile;
+		case XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER: return &khr_generic_touch_pro_right_profile;
+		default: return NULL;
+		}
+	case XRT_DEVICE_TOUCH_PLUS_CONTROLLER:
+		switch (xdev->device_type) {
+		case XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER: return &khr_generic_touch_plus_left_profile;
+		case XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER: return &khr_generic_touch_plus_right_profile;
+		default: return NULL;
+		}
+	default: return NULL;
+	}
+}
+
 static struct xrt_binding_profile *
 get_matching_binding_profile(struct oxr_interaction_profile *profile, struct xrt_device *xdev)
 {
@@ -734,6 +940,10 @@ get_matching_binding_profile(struct oxr_interaction_profile *profile, struct xrt
 		if (xdev->binding_profiles[i].name == profile->xname) {
 			return &xdev->binding_profiles[i];
 		}
+	}
+
+	if (profile->xname == XRT_DEVICE_GENERIC_CONTROLLER) {
+		return get_builtin_khr_generic_binding_profile(xdev);
 	}
 
 	return NULL;

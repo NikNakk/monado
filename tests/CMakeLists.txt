@@ -41,7 +41,7 @@ if(XRT_HAVE_VULKAN)
 	list(APPEND tests tests_uv_to_tangent)
 endif()
 if(XRT_FEATURE_OPENXR)
-	list(APPEND tests tests_input_transform)
+	list(APPEND tests tests_input_transform tests_generic_controller)
 endif()
 if(XRT_HAVE_OPENGL
    AND XRT_HAVE_OPENGL_GLX
@@ -114,6 +114,10 @@ if(XRT_FEATURE_OPENXR)
 	target_link_libraries(
 		tests_input_transform PRIVATE st_oxr xrt-interfaces xrt-external-openxr
 		)
+	target_link_libraries(
+		tests_generic_controller PRIVATE st_oxr xrt-interfaces xrt-external-openxr
+		)
+	add_dependencies(tests_generic_controller generate_oxr_bindings)
 endif()
 if(_have_opengl_test)
 	target_link_libraries(

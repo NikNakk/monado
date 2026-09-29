@@ -58,6 +58,48 @@ static struct xrt_binding_output_pair simple_outputs_pssense[1] = {
     {XRT_OUTPUT_NAME_SIMPLE_VIBRATION, XRT_OUTPUT_NAME_PSSENSE_VIBRATION},
 };
 
+/*
+ * XR_KHR_generic_controller is a hardware-neutral fallback interaction
+ * profile. Keep the mapping explicit so OpenXR applications can bind to
+ * standard generic paths without pretending Sense is another vendor's
+ * controller.
+ *
+ * L1/R1 is the closest squeeze actuator. Monado's existing input transform
+ * converts its boolean click to the 0/1 float required by squeeze/value,
+ * avoiding a second driver-level representation of the same physical input.
+ * grip_surface first uses a driver's calibrated generic palm pose when one
+ * is exposed, with the existing grip pose retained as a last-resort fallback.
+ */
+static struct xrt_binding_input_pair generic_inputs_pssense_left[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_PSSENSE_TRIANGLE_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
+};
+
+static struct xrt_binding_input_pair generic_inputs_pssense_right[] = {
+    {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_PSSENSE_CROSS_CLICK},
+    {XRT_INPUT_GENERIC_SECONDARY_CLICK, XRT_INPUT_PSSENSE_CIRCLE_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK_CLICK, XRT_INPUT_PSSENSE_THUMBSTICK_CLICK},
+    {XRT_INPUT_GENERIC_THUMBSTICK, XRT_INPUT_PSSENSE_THUMBSTICK},
+    {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_PSSENSE_SQUEEZE_CLICK},
+    {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_PSSENSE_TRIGGER_VALUE},
+    {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_PSSENSE_GRIP_POSE},
+    {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_PSSENSE_AIM_POSE},
+};
+
+static struct xrt_binding_output_pair generic_outputs_pssense[] = {
+    {XRT_OUTPUT_NAME_GENERIC_VIBRATION, XRT_OUTPUT_NAME_PSSENSE_VIBRATION},
+};
+
 static struct xrt_binding_input_pair index_inputs_pssense_left[] = {
     {XRT_INPUT_INDEX_SYSTEM_CLICK, XRT_INPUT_PSSENSE_PS_CLICK},
     {XRT_INPUT_INDEX_A_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
@@ -100,6 +142,13 @@ static struct xrt_binding_output_pair index_outputs_pssense[] = {
 
 static struct xrt_binding_profile binding_profiles_pssense_left[] = {
     {
+        .name = XRT_DEVICE_GENERIC_CONTROLLER,
+        .inputs = generic_inputs_pssense_left,
+        .input_count = ARRAY_SIZE(generic_inputs_pssense_left),
+        .outputs = generic_outputs_pssense,
+        .output_count = ARRAY_SIZE(generic_outputs_pssense),
+    },
+    {
         .name = XRT_DEVICE_SIMPLE_CONTROLLER,
         .inputs = simple_inputs_pssense,
         .input_count = ARRAY_SIZE(simple_inputs_pssense),
@@ -116,6 +165,13 @@ static struct xrt_binding_profile binding_profiles_pssense_left[] = {
 };
 
 static struct xrt_binding_profile binding_profiles_pssense_right[] = {
+    {
+        .name = XRT_DEVICE_GENERIC_CONTROLLER,
+        .inputs = generic_inputs_pssense_right,
+        .input_count = ARRAY_SIZE(generic_inputs_pssense_right),
+        .outputs = generic_outputs_pssense,
+        .output_count = ARRAY_SIZE(generic_outputs_pssense),
+    },
     {
         .name = XRT_DEVICE_SIMPLE_CONTROLLER,
         .inputs = simple_inputs_pssense,
@@ -1133,12 +1189,12 @@ pssense_create(struct xrt_prober *xp, struct xrt_prober_device *xpdev)
 		pssense->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
 		pssense->hand = PSSENSE_HAND_LEFT;
 		pssense->base.binding_profiles = binding_profiles_pssense_left;
-		pssense->base.binding_profile_count = index_profile ? ARRAY_SIZE(binding_profiles_pssense_left) : 1;
+		pssense->base.binding_profile_count = index_profile ? ARRAY_SIZE(binding_profiles_pssense_left) : 2;
 	} else if (xpdev->product_id == PSSENSE_PID_RIGHT) {
 		pssense->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
 		pssense->hand = PSSENSE_HAND_RIGHT;
 		pssense->base.binding_profiles = binding_profiles_pssense_right;
-		pssense->base.binding_profile_count = index_profile ? ARRAY_SIZE(binding_profiles_pssense_right) : 1;
+		pssense->base.binding_profile_count = index_profile ? ARRAY_SIZE(binding_profiles_pssense_right) : 2;
 	} else {
 		PSSENSE_ERROR(pssense, "Unable to determine controller type");
 		pssense_device_destroy(&pssense->base);

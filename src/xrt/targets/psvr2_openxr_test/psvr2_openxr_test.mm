@@ -162,6 +162,11 @@ struct xr_api
 	PFN_xrCreateActionSpace create_action_space = nullptr;
 	PFN_xrSyncActions sync_actions = nullptr;
 	PFN_xrGetActionStatePose get_action_state_pose = nullptr;
+	PFN_xrGetActionStateBoolean get_action_state_boolean = nullptr;
+	PFN_xrGetActionStateFloat get_action_state_float = nullptr;
+	PFN_xrGetActionStateVector2f get_action_state_vector2f = nullptr;
+	PFN_xrGetCurrentInteractionProfile get_current_interaction_profile = nullptr;
+	PFN_xrPathToString path_to_string = nullptr;
 	PFN_xrCreatePassthroughFB create_passthrough = nullptr;
 	PFN_xrDestroyPassthroughFB destroy_passthrough = nullptr;
 	PFN_xrPassthroughStartFB passthrough_start = nullptr;
@@ -278,6 +283,11 @@ load_instance_xr_functions(xr_api &xr, XrInstance instance)
 	LOAD_XR("xrCreateActionSpace", create_action_space);
 	LOAD_XR("xrSyncActions", sync_actions);
 	LOAD_XR("xrGetActionStatePose", get_action_state_pose);
+	LOAD_XR("xrGetActionStateBoolean", get_action_state_boolean);
+	LOAD_XR("xrGetActionStateFloat", get_action_state_float);
+	LOAD_XR("xrGetActionStateVector2f", get_action_state_vector2f);
+	LOAD_XR("xrGetCurrentInteractionProfile", get_current_interaction_profile);
+	LOAD_XR("xrPathToString", path_to_string);
 #undef LOAD_XR
 }
 
@@ -889,6 +899,7 @@ struct application
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
 	bool test_gaze = false;
+	bool test_generic_controller = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool gaze_foveation_fused = false;
@@ -907,6 +918,17 @@ struct application
 	XrPath gaze_subaction_path = XR_NULL_PATH;
 	uint64_t gaze_frame_count = 0;
 	uint64_t gaze_valid_count = 0;
+	XrActionSet controller_action_set = XR_NULL_HANDLE;
+	XrAction controller_primary_action = XR_NULL_HANDLE;
+	XrAction controller_secondary_action = XR_NULL_HANDLE;
+	XrAction controller_trigger_action = XR_NULL_HANDLE;
+	XrAction controller_squeeze_action = XR_NULL_HANDLE;
+	XrAction controller_thumbstick_action = XR_NULL_HANDLE;
+	XrAction controller_grip_action = XR_NULL_HANDLE;
+	XrAction controller_grip_surface_action = XR_NULL_HANDLE;
+	XrAction controller_aim_action = XR_NULL_HANDLE;
+	std::array<XrPath, 2> controller_hand_paths = {XR_NULL_PATH, XR_NULL_PATH};
+	uint64_t controller_frame_count = 0;
 	XrPassthroughFB passthrough = XR_NULL_HANDLE;
 	XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
 	id<MTLCommandQueue> command_queue = nil;
@@ -957,6 +979,9 @@ create_instance(application &app)
 	if (app.test_gaze && !has_extension(app.xr, XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME)) {
 		fatal("runtime does not expose XR_EXT_eye_gaze_interaction");
 	}
+	if (app.test_generic_controller && !has_extension(app.xr, XR_KHR_GENERIC_CONTROLLER_EXTENSION_NAME)) {
+		fatal("runtime does not expose XR_KHR_generic_controller; configure Monado with XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON");
+	}
 	if (app.gaze_foveation_fused && !has_extension(app.xr, XR_MNDX_FOVEATION_EXTENSION_NAME)) {
 		fatal("runtime does not expose XR_MNDX_foveation");
 	}
@@ -970,6 +995,9 @@ create_instance(application &app)
 	}
 	if (app.test_gaze) {
 		extensions.push_back(XR_EXT_EYE_GAZE_INTERACTION_EXTENSION_NAME);
+	}
+	if (app.test_generic_controller) {
+		extensions.push_back(XR_KHR_GENERIC_CONTROLLER_EXTENSION_NAME);
 	}
 	if (app.gaze_foveation_fused) {
 		extensions.push_back(XR_MNDX_FOVEATION_EXTENSION_NAME);
@@ -1112,11 +1140,6 @@ create_gaze_resources(application &app)
 	check_xr(app.xr.suggest_interaction_profile_bindings(app.instance, &suggested),
 	         "xrSuggestInteractionProfileBindings(eye gaze)");
 
-	XrSessionActionSetsAttachInfo attach_info{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
-	attach_info.countActionSets = 1;
-	attach_info.actionSets = &app.gaze_action_set;
-	check_xr(app.xr.attach_session_action_sets(app.session, &attach_info), "xrAttachSessionActionSets(gaze)");
-
 	XrActionSpaceCreateInfo space_info{XR_TYPE_ACTION_SPACE_CREATE_INFO};
 	space_info.action = app.gaze_action;
 	space_info.subactionPath = app.gaze_subaction_path;
@@ -1140,6 +1163,238 @@ create_gaze_resources(application &app)
 	} else {
 		fprintf(stderr,
 		        "psvr2-openxr-test: gaze action ready; marker is bright yellow at 2 m along the reported gaze ray\n");
+	}
+}
+
+
+static XrAction
+create_controller_action(application &app,
+                         const char *name,
+                         const char *localized_name,
+                         XrActionType type)
+{
+	XrActionCreateInfo action_info{XR_TYPE_ACTION_CREATE_INFO};
+	action_info.actionType = type;
+	snprintf(action_info.actionName, XR_MAX_ACTION_NAME_SIZE, "%s", name);
+	snprintf(action_info.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE, "%s", localized_name);
+	action_info.countSubactionPaths = (uint32_t)app.controller_hand_paths.size();
+	action_info.subactionPaths = app.controller_hand_paths.data();
+
+	XrAction action = XR_NULL_HANDLE;
+	check_xr(app.xr.create_action(app.controller_action_set, &action_info, &action), "xrCreateAction(generic controller)");
+	return action;
+}
+
+static void
+create_generic_controller_resources(application &app)
+{
+	if (!app.test_generic_controller) {
+		return;
+	}
+
+	check_xr(app.xr.string_to_path(app.instance, "/user/hand/left", &app.controller_hand_paths[0]),
+	         "xrStringToPath(/user/hand/left)");
+	check_xr(app.xr.string_to_path(app.instance, "/user/hand/right", &app.controller_hand_paths[1]),
+	         "xrStringToPath(/user/hand/right)");
+
+	XrActionSetCreateInfo set_info{XR_TYPE_ACTION_SET_CREATE_INFO};
+	snprintf(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "%s", "generic_controller");
+	snprintf(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "%s",
+	         "Generic controller");
+	set_info.priority = 0;
+	check_xr(app.xr.create_action_set(app.instance, &set_info, &app.controller_action_set),
+	         "xrCreateActionSet(generic controller)");
+
+	app.controller_primary_action =
+	    create_controller_action(app, "primary", "Primary", XR_ACTION_TYPE_BOOLEAN_INPUT);
+	app.controller_secondary_action =
+	    create_controller_action(app, "secondary", "Secondary", XR_ACTION_TYPE_BOOLEAN_INPUT);
+	app.controller_trigger_action =
+	    create_controller_action(app, "trigger", "Trigger", XR_ACTION_TYPE_FLOAT_INPUT);
+	app.controller_squeeze_action =
+	    create_controller_action(app, "squeeze", "Squeeze", XR_ACTION_TYPE_FLOAT_INPUT);
+	app.controller_thumbstick_action =
+	    create_controller_action(app, "thumbstick", "Thumbstick", XR_ACTION_TYPE_VECTOR2F_INPUT);
+	app.controller_grip_action =
+	    create_controller_action(app, "grip_pose", "Grip pose", XR_ACTION_TYPE_POSE_INPUT);
+	app.controller_grip_surface_action =
+	    create_controller_action(app, "grip_surface", "Grip surface pose", XR_ACTION_TYPE_POSE_INPUT);
+	app.controller_aim_action =
+	    create_controller_action(app, "aim_pose", "Aim pose", XR_ACTION_TYPE_POSE_INPUT);
+
+	XrPath generic_profile = XR_NULL_PATH;
+	check_xr(app.xr.string_to_path(app.instance, "/interaction_profiles/khr/generic_controller", &generic_profile),
+	         "xrStringToPath(generic controller profile)");
+
+	struct binding_path
+	{
+		XrAction action;
+		const char *suffix;
+	};
+	const std::array<binding_path, 8> action_paths = {{
+	    {app.controller_primary_action, "/input/primary/click"},
+	    {app.controller_secondary_action, "/input/secondary/click"},
+	    {app.controller_trigger_action, "/input/trigger/value"},
+	    {app.controller_squeeze_action, "/input/squeeze/value"},
+	    {app.controller_thumbstick_action, "/input/thumbstick"},
+	    {app.controller_grip_action, "/input/grip/pose"},
+	    {app.controller_grip_surface_action, "/input/grip_surface/pose"},
+	    {app.controller_aim_action, "/input/aim/pose"},
+	}};
+
+	std::vector<XrActionSuggestedBinding> bindings;
+	bindings.reserve(action_paths.size() * app.controller_hand_paths.size());
+	for (const char *hand : {"/user/hand/left", "/user/hand/right"}) {
+		for (const binding_path &entry : action_paths) {
+			std::string path = std::string(hand) + entry.suffix;
+			XrPath xr_path = XR_NULL_PATH;
+			check_xr(app.xr.string_to_path(app.instance, path.c_str(), &xr_path),
+			         "xrStringToPath(generic controller binding)");
+			bindings.push_back({entry.action, xr_path});
+		}
+	}
+
+	XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+	suggested.interactionProfile = generic_profile;
+	suggested.countSuggestedBindings = (uint32_t)bindings.size();
+	suggested.suggestedBindings = bindings.data();
+	check_xr(app.xr.suggest_interaction_profile_bindings(app.instance, &suggested),
+	         "xrSuggestInteractionProfileBindings(generic controller)");
+
+	fprintf(stderr,
+	        "psvr2-openxr-test: XR_KHR_generic_controller actions ready; "
+	        "press face buttons, L1/R1, triggers and move/click sticks\n");
+}
+
+static void
+attach_action_sets(application &app)
+{
+	std::array<XrActionSet, 2> action_sets = {};
+	uint32_t count = 0;
+	if (app.gaze_action_set != XR_NULL_HANDLE) {
+		action_sets[count++] = app.gaze_action_set;
+	}
+	if (app.controller_action_set != XR_NULL_HANDLE) {
+		action_sets[count++] = app.controller_action_set;
+	}
+	if (count == 0) {
+		return;
+	}
+
+	XrSessionActionSetsAttachInfo attach_info{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+	attach_info.countActionSets = count;
+	attach_info.actionSets = action_sets.data();
+	check_xr(app.xr.attach_session_action_sets(app.session, &attach_info), "xrAttachSessionActionSets");
+}
+
+static std::string
+xr_path_string(application &app, XrPath path)
+{
+	if (path == XR_NULL_PATH) {
+		return "(none)";
+	}
+
+	uint32_t count = 0;
+	XrResult result = app.xr.path_to_string(app.instance, path, 0, &count, nullptr);
+	if (XR_FAILED(result) || count == 0) {
+		return "(unavailable)";
+	}
+	std::vector<char> buffer(count);
+	result = app.xr.path_to_string(app.instance, path, count, &count, buffer.data());
+	if (XR_FAILED(result)) {
+		return "(unavailable)";
+	}
+	return std::string(buffer.data());
+}
+
+static void
+poll_generic_controller(application &app)
+{
+	if (!app.test_generic_controller || app.controller_action_set == XR_NULL_HANDLE) {
+		return;
+	}
+
+	XrActiveActionSet active_set{app.controller_action_set, XR_NULL_PATH};
+	XrActionsSyncInfo sync_info{XR_TYPE_ACTIONS_SYNC_INFO};
+	sync_info.countActiveActionSets = 1;
+	sync_info.activeActionSets = &active_set;
+	if (XR_FAILED(app.xr.sync_actions(app.session, &sync_info))) {
+		return;
+	}
+
+	app.controller_frame_count++;
+	const bool periodic = (app.controller_frame_count % 120) == 1;
+
+	for (size_t hand_index = 0; hand_index < app.controller_hand_paths.size(); ++hand_index) {
+		const XrPath hand_path = app.controller_hand_paths[hand_index];
+		const char *hand_name = hand_index == 0 ? "left" : "right";
+
+		XrActionStateGetInfo get_info{XR_TYPE_ACTION_STATE_GET_INFO};
+		get_info.subactionPath = hand_path;
+
+		XrActionStateBoolean primary{XR_TYPE_ACTION_STATE_BOOLEAN};
+		get_info.action = app.controller_primary_action;
+		check_xr(app.xr.get_action_state_boolean(app.session, &get_info, &primary),
+		         "xrGetActionStateBoolean(primary)");
+
+		XrActionStateBoolean secondary{XR_TYPE_ACTION_STATE_BOOLEAN};
+		get_info.action = app.controller_secondary_action;
+		check_xr(app.xr.get_action_state_boolean(app.session, &get_info, &secondary),
+		         "xrGetActionStateBoolean(secondary)");
+
+		XrActionStateFloat trigger{XR_TYPE_ACTION_STATE_FLOAT};
+		get_info.action = app.controller_trigger_action;
+		check_xr(app.xr.get_action_state_float(app.session, &get_info, &trigger),
+		         "xrGetActionStateFloat(trigger)");
+
+		XrActionStateFloat squeeze{XR_TYPE_ACTION_STATE_FLOAT};
+		get_info.action = app.controller_squeeze_action;
+		check_xr(app.xr.get_action_state_float(app.session, &get_info, &squeeze),
+		         "xrGetActionStateFloat(squeeze)");
+
+		XrActionStateVector2f thumbstick{XR_TYPE_ACTION_STATE_VECTOR2F};
+		get_info.action = app.controller_thumbstick_action;
+		check_xr(app.xr.get_action_state_vector2f(app.session, &get_info, &thumbstick),
+		         "xrGetActionStateVector2f(thumbstick)");
+
+		XrActionStatePose grip{XR_TYPE_ACTION_STATE_POSE};
+		get_info.action = app.controller_grip_action;
+		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &grip),
+		         "xrGetActionStatePose(grip)");
+
+		XrActionStatePose grip_surface{XR_TYPE_ACTION_STATE_POSE};
+		get_info.action = app.controller_grip_surface_action;
+		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &grip_surface),
+		         "xrGetActionStatePose(grip_surface)");
+
+		XrActionStatePose aim{XR_TYPE_ACTION_STATE_POSE};
+		get_info.action = app.controller_aim_action;
+		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &aim),
+		         "xrGetActionStatePose(aim)");
+
+		const bool changed =
+		    primary.changedSinceLastSync || secondary.changedSinceLastSync ||
+		    trigger.changedSinceLastSync || squeeze.changedSinceLastSync ||
+		    thumbstick.changedSinceLastSync;
+
+		if (periodic || changed) {
+			XrInteractionProfileState profile_state{XR_TYPE_INTERACTION_PROFILE_STATE};
+			check_xr(app.xr.get_current_interaction_profile(app.session, hand_path, &profile_state),
+			         "xrGetCurrentInteractionProfile");
+			std::string profile = xr_path_string(app, profile_state.interactionProfile);
+
+			fprintf(stderr,
+			        "psvr2-openxr-test: generic %s profile=%s active=%d "
+			        "primary=%d secondary=%d trigger=%.3f squeeze=%.3f "
+			        "stick=(%.3f,%.3f) poses[g=%d gs=%d a=%d]\n",
+			        hand_name, profile.c_str(),
+			        (int)(primary.isActive || secondary.isActive || trigger.isActive || squeeze.isActive ||
+			              thumbstick.isActive || grip.isActive || grip_surface.isActive || aim.isActive),
+			        primary.currentState ? 1 : 0, secondary.currentState ? 1 : 0,
+			        trigger.currentState, squeeze.currentState,
+			        thumbstick.currentState.x, thumbstick.currentState.y,
+			        grip.isActive ? 1 : 0, grip_surface.isActive ? 1 : 0, aim.isActive ? 1 : 0);
+		}
 	}
 }
 
@@ -2329,6 +2584,18 @@ cleanup(application &app)
 		app.xr.destroy_action_set(app.gaze_action_set);
 		app.gaze_action_set = XR_NULL_HANDLE;
 	}
+	if (app.controller_action_set != XR_NULL_HANDLE && app.xr.destroy_action_set != nullptr) {
+		app.xr.destroy_action_set(app.controller_action_set);
+		app.controller_action_set = XR_NULL_HANDLE;
+		app.controller_primary_action = XR_NULL_HANDLE;
+		app.controller_secondary_action = XR_NULL_HANDLE;
+		app.controller_trigger_action = XR_NULL_HANDLE;
+		app.controller_squeeze_action = XR_NULL_HANDLE;
+		app.controller_thumbstick_action = XR_NULL_HANDLE;
+		app.controller_grip_action = XR_NULL_HANDLE;
+		app.controller_grip_surface_action = XR_NULL_HANDLE;
+		app.controller_aim_action = XR_NULL_HANDLE;
+	}
 	if (app.view_space != XR_NULL_HANDLE && app.xr.destroy_space != nullptr) {
 		app.xr.destroy_space(app.view_space);
 		app.view_space = XR_NULL_HANDLE;
@@ -2369,6 +2636,7 @@ run(int argc, char **argv)
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
 	bool test_gaze = false;
+	bool test_generic_controller = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool gaze_foveation_fused = false;
@@ -2383,6 +2651,8 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--passthrough-only") == 0) {
 			submit_passthrough = true;
 			passthrough_only = true;
+		} else if (strcmp(argv[i], "--generic-controller") == 0) {
+			test_generic_controller = true;
 		} else if (strcmp(argv[i], "--gaze") == 0) {
 			test_gaze = true;
 		} else if (strcmp(argv[i], "--gaze-calibrate") == 0) {
@@ -2404,12 +2674,14 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(stderr,
 			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only] [--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused] "
+			        "[--passthrough|--passthrough-only] [--generic-controller] "
+			        "[--gaze|--gaze-calibrate|--gaze-foveation|--gaze-foveation-fused] "
 			        "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
 			        "  --depth-layer submits the rendered Depth32Float attachment through "
 			        "XR_KHR_composition_layer_depth.\n"
 			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			        "  --passthrough-only submits only XR_FB_passthrough.\n"
+			        "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action state.\n"
 			        "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			        "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			        "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve pass.\n"
@@ -2438,6 +2710,7 @@ run(int argc, char **argv)
 		fatal("--gaze-foveation-fused currently requires a single projection layer and cannot be combined with passthrough");
 	}
 	app.test_gaze = test_gaze;
+	app.test_generic_controller = test_generic_controller;
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
 	app.gaze_foveation_fused = gaze_foveation_fused;
@@ -2454,6 +2727,8 @@ run(int argc, char **argv)
 	create_system_and_session(app);
 	refresh_runtime_foveation_profile(app);
 	create_gaze_resources(app);
+	create_generic_controller_resources(app);
+	attach_action_sets(app);
 	create_passthrough_resources(app);
 	create_swapchains(app);
 	initialize_terminal_controls(app);
@@ -2467,6 +2742,7 @@ run(int argc, char **argv)
 			usleep(10000);
 			continue;
 		}
+		poll_generic_controller(app);
 		render_frame(app);
 	}
 

@@ -130,6 +130,71 @@ oxr_interaction_profile_array_find_by_device_name(const struct oxr_interaction_p
 	return false;
 }
 
+
+static bool
+xdev_supports_khr_generic_controller(const struct xrt_device *xdev)
+{
+	switch (xdev->name) {
+	case XRT_DEVICE_GENERIC_CONTROLLER:
+	case XRT_DEVICE_TOUCH_CONTROLLER:
+	case XRT_DEVICE_INDEX_CONTROLLER:
+	case XRT_DEVICE_TOUCH_PRO_CONTROLLER:
+	case XRT_DEVICE_TOUCH_PLUS_CONTROLLER:
+	case XRT_DEVICE_TOUCH_CONTROLLER_RIFT_CV1:
+	case XRT_DEVICE_TOUCH_CONTROLLER_QUEST_1_RIFT_S:
+	case XRT_DEVICE_TOUCH_CONTROLLER_QUEST_2: return true;
+	default: break;
+	}
+
+	/*
+	 * XR_KHR_generic_controller requires a generic fallback in conditions
+	 * where the runtime would otherwise select the legacy Touch or Index
+	 * interaction profiles. Devices can advertise those profiles through
+	 * xrt_device::binding_profiles even when their native xrt_device_name is
+	 * different.
+	 */
+	for (size_t i = 0; i < xdev->binding_profile_count; i++) {
+		switch (xdev->binding_profiles[i].name) {
+		case XRT_DEVICE_GENERIC_CONTROLLER:
+		case XRT_DEVICE_TOUCH_CONTROLLER:
+		case XRT_DEVICE_INDEX_CONTROLLER: return true;
+		default: break;
+		}
+	}
+
+	return false;
+}
+
+static bool
+find_khr_generic_controller(const struct oxr_interaction_profile_array *array,
+                            const struct oxr_instance_path_cache *cache,
+                            struct oxr_interaction_profile **out_p)
+{
+	return oxr_interaction_profile_array_find_by_device_name(
+	    array, cache, XRT_DEVICE_GENERIC_CONTROLLER, out_p);
+}
+
+static bool
+find_suggested_touch_or_index_fallback(const struct oxr_interaction_profile_array *array,
+                                       const struct oxr_instance_path_cache *cache,
+                                       const struct xrt_device *xdev,
+                                       struct oxr_interaction_profile **out_p)
+{
+	for (size_t i = 0; i < xdev->binding_profile_count; i++) {
+		enum xrt_device_name name = xdev->binding_profiles[i].name;
+		if (name != XRT_DEVICE_TOUCH_CONTROLLER && name != XRT_DEVICE_INDEX_CONTROLLER) {
+			continue;
+		}
+
+		if (oxr_interaction_profile_array_find_by_device_name(array, cache, name, out_p)) {
+			return true;
+		}
+	}
+
+	*out_p = NULL;
+	return false;
+}
+
 bool
 oxr_interaction_profile_array_find_by_device(const struct oxr_interaction_profile_array *array,
                                              const struct oxr_instance_path_cache *cache,
@@ -153,9 +218,35 @@ oxr_interaction_profile_array_find_by_device(const struct oxr_interaction_profil
 		return true;
 	}
 
+	bool supports_generic = xdev_supports_khr_generic_controller(xdev);
+
+	/*
+	 * A suggested Touch or Index profile remains more specific than the
+	 * generic fallback. Check those first even if a driver's historical
+	 * fallback ordering placed simple_controller ahead of them.
+	 */
+	if (supports_generic && find_suggested_touch_or_index_fallback(array, cache, xdev, out_p)) {
+		return true;
+	}
+
+	bool tried_generic = false;
+
 	// Check if bindings for any of this device's alternative interaction profiles have been suggested.
 	for (size_t i = 0; i < xdev->binding_profile_count; i++) {
 		struct xrt_binding_profile *xbp = &xdev->binding_profiles[i];
+
+		/*
+		 * The generic profile is a richer hardware-neutral fallback than
+		 * simple_controller. Prefer it before falling all the way back to
+		 * the simple profile when this device is known to map to
+		 * generic_controller semantics.
+		 */
+		if (supports_generic && !tried_generic && xbp->name == XRT_DEVICE_SIMPLE_CONTROLLER) {
+			tried_generic = true;
+			if (find_khr_generic_controller(array, cache, out_p)) {
+				return true;
+			}
+		}
 
 		found = oxr_interaction_profile_array_find_by_device_name( //
 		    array,                                                 //
@@ -165,6 +256,15 @@ oxr_interaction_profile_array_find_by_device(const struct oxr_interaction_profil
 		if (found) {
 			return true;
 		}
+	}
+
+	/*
+	 * Index/Touch devices do not need an explicit generic entry in every
+	 * driver. The common OpenXR layer provides the standards-required
+	 * fallback after hardware-specific alternatives have been considered.
+	 */
+	if (supports_generic && !tried_generic && find_khr_generic_controller(array, cache, out_p)) {
+		return true;
 	}
 
 	*out_p = NULL;
