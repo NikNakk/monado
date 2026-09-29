@@ -459,7 +459,15 @@ option(XRT_FEATURE_OPENXR_INTERACTION_LOGITECH_MX_INK "Enable XR_LOGITECH_mx_ink
 # The macOS Metal client exports depth swapchains as MoltenVK-backed MTLTexture
 # objects through VK_EXT_metal_objects instead of trying to put depth/stencil
 # formats in IOSurface-backed textures.
-option(XRT_FEATURE_OPENXR_LAYER_DEPTH "Enable XR_KHR_composition_layer_depth" ON)
+# On macOS depth reprojection is off by default (XRT_COMPOSITOR_DEPTH_REPROJECTION)
+# until disocclusion fill works, so don't invite apps to render and submit depth
+# the compositor would ignore. Configure with ON for depth experiments.
+if(APPLE)
+	set(XRT_OPENXR_LAYER_DEPTH_DEFAULT OFF)
+else()
+	set(XRT_OPENXR_LAYER_DEPTH_DEFAULT ON)
+endif()
+option(XRT_FEATURE_OPENXR_LAYER_DEPTH "Enable XR_KHR_composition_layer_depth" ${XRT_OPENXR_LAYER_DEPTH_DEFAULT})
 option(XRT_FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS "Enable XR_KHR_composition_layer_color_scale_bias" ON)
 option(XRT_FEATURE_OPENXR_LAYER_CUBE "Enable XR_KHR_composition_layer_cube" ${APPLE})
 option(XRT_FEATURE_OPENXR_LAYER_CYLINDER "Enable XR_KHR_composition_layer_cylinder" ON)
