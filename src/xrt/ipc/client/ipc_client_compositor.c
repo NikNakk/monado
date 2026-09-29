@@ -500,10 +500,12 @@ ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
 	}
 
 	struct ipc_client_compositor *icc = ipc_client_compositor(&xcn->base);
-	if (!icc->ipc_c->imc.stream_socket) {
-		return XRT_ERROR_NOT_IMPLEMENTED;
-	}
 
+	/*
+	 * IOSurface IDs are scalar data carried by the ordinary IPC request.
+	 * Native macOS uses the AF_UNIX control socket, where stream_socket is
+	 * deliberately false (that flag identifies the framed Wine/TCP transport).
+	 */
 	struct ipc_arg_swapchain_iosurface args = {0};
 	args.image_count = image_count;
 	for (uint32_t i = 0; i < image_count; i++) {
