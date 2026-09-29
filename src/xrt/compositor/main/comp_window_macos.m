@@ -106,7 +106,6 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
@@ -2220,7 +2219,6 @@ comp_window_macos_create(struct comp_compositor *c)
 	atomic_init(&cwm->passthrough_shutdown, false);
 	/* Synchronous Metal presentation (waitUntilCompleted) is no longer used. */
 	cwm->async_present = true;
-	bool want_present_worker = debug_get_bool_option_macos_present_worker();
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
 	/* The display link supplies this frame's drawable. Never hand it to a
 	 * legacy worker or prefetch a drawable for a different callback, even when
@@ -2228,10 +2226,9 @@ comp_window_macos_create(struct comp_compositor *c)
 	 * is not active yet: target creation precedes display-link attachment. */
 	bool displaylink_driven = macos_cametal_drive_enabled();
 	if (displaylink_driven) {
-		if (want_present_worker || want_drawable_slot) {
-			COMP_WARN(c, "CAMetalDisplayLink ignores XRT_MACOS_PRESENT_WORKER and XRT_MACOS_DRAWABLE_SLOT; presentation runs on the compositor thread");
+		if (want_drawable_slot) {
+			COMP_WARN(c, "CAMetalDisplayLink ignores XRT_MACOS_DRAWABLE_SLOT; presentation runs on the compositor thread");
 		}
-		want_present_worker = false;
 		want_drawable_slot = false;
 	}
 	cwm->drawable_slot_enabled = cwm->async_present && want_drawable_slot;
@@ -2241,7 +2238,7 @@ comp_window_macos_create(struct comp_compositor *c)
 	 * nextDrawable acquisition blocks; a missing slot is no longer a reason to
 	 * drop the just-rendered frame on the caller thread.
 	 */
-	cwm->present_worker_enabled = cwm->async_present && (want_present_worker || cwm->drawable_slot_enabled);
+	cwm->present_worker_enabled = cwm->drawable_slot_enabled;
 	cwm->present_command_group = dispatch_group_create();
 	if (cwm->present_worker_enabled) {
 		dispatch_queue_attr_t worker_attr =
