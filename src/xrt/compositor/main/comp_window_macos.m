@@ -106,7 +106,6 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_async_present, "XRT_MACOS_ASYNC_PRESENT", true)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_early_drawable, "XRT_MACOS_EARLY_DRAWABLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", false)
@@ -1972,9 +1971,6 @@ comp_window_macos_present(struct comp_target *ct,
 	    .passthrough_active = ct->c->passthrough_active,
 	    .passthrough_has_application_layers = ct->c->passthrough_has_application_layers,
 	};
-	if (!cwm->async_present) {
-		return macos_execute_present_job(cwm, &job, false);
-	}
 	if (!cwm->present_worker_enabled) {
 		/* Submit on the compositor thread; async GPU completion does not need a worker. */
 		return macos_execute_present_job(cwm, &job, true);
@@ -2277,7 +2273,8 @@ comp_window_macos_create(struct comp_compositor *c)
 		return NULL;
 	}
 	atomic_init(&cwm->passthrough_shutdown, false);
-	cwm->async_present = debug_get_bool_option_macos_async_present();
+	/* Synchronous Metal presentation (waitUntilCompleted) is no longer used. */
+	cwm->async_present = true;
 	bool want_present_worker = debug_get_bool_option_macos_present_worker();
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
 	bool want_early_drawable = debug_get_bool_option_macos_early_drawable();
