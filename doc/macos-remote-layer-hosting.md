@@ -331,11 +331,61 @@ $P/macos-layer-host-probe --mode handoff --seconds 30 --host-background 1
 $P/macos-layer-host-probe --mode handoff --seconds 30 --host-background 1 --cpu-load "$(sysctl -n hw.ncpu)"
 ```
 
+### Handoff results, 2026-09-29
+
+30 s per run, swap every 2 s, PS VR2 at 119.880 Hz. By eye, every swap looked
+clean in all four runs: no black or frozen frame at the colour change.
+
+| Run | Swap timer lateness median / max | Commit → first new present median / max | Client presented − submit median (A / B) |
+| --- | --- | --- | --- |
+| `reparent` | 0.9 / 1.1 ms | 44.4 / 57.6 ms | 16.0 / 16.0 ms |
+| `hidden` | 1.1 / 1.1 ms | 33.8 / 40.9 ms | 16.0 / 16.0 ms |
+| `reparent`, host backgrounded | 55.9 / 82.8 ms | 49.3 / 57.7 ms | 23.7 / 16.1 ms |
+| `reparent`, host backgrounded, `--cpu-load 10` | 12 328 / 13 250 ms | 55.6 / 57.6 ms | 24.3 / 32.5 ms |
+
+- **Hidden clients never report `presentedTime`** (0 of about 3500 frames in
+  each unloaded run; 20 of 2980 under load, where swaps ran seconds late). So
+  `presentedTime` is a reliable record of what was on screen.
+- **Pre-warming works with both methods.** Hidden clients kept getting
+  drawables (`nil_drawables=0`); their frames were simply not presented.
+- **The swap takes effect 34–55 ms after the host commits it**, a little
+  sooner with `hidden` than with `reparent`. The old client stays on screen
+  until then, so there is no visible gap, matching what was seen.
+- **The first analysis reported a 42–58 ms "gap" at every swap. That was an
+  artifact:** it assigned frames to clients by the host's commit time, and so
+  discarded the old client's frames that were still on screen while the swap
+  was pending. The analysis now treats every presented frame as on screen, and
+  reports the real switch gap (old client's last present → new client's first)
+  and how long the old client stayed after the commit.
+- **A throttled host is slow to perform the swap.** Darwin-backgrounded, its
+  main thread ran swaps a median 56 ms late with no load, and about 12 s late
+  with 10 busy threads in each client. Frame delivery was unaffected, but
+  focus changes decided and committed by the service would be delayed the same
+  way under Game Mode with a heavily loaded CPU.
+- **Open question: client latency rose 1–2 frames with the host backgrounded**
+  (A 23.7 ms; under load A 24.3 and B 32.5 ms, against 16.0 ms unthrottled).
+  The Game Mode `game-hosted` run did not show this (15.2 ms). The summary now
+  splits each client's latency into before and after the first swap, to show
+  whether it comes from the host's state or from swaps committed by a
+  throttled host. A run with `--host-background 1 --swap-every 1000` (no swaps)
+  isolates the host's state.
+
+**Design implication.** The display path is immune to the service being
+throttled, but anything the service itself must do, such as committing a
+handoff, is not. One way round this is to keep every client's `CALayerHost`
+attached permanently and have each client show or hide its own layer inside
+its own `CAContext`. The commit then happens in unthrottled client processes,
+and the two clients' commits can be made atomic with a shared fence port.
+The service would only tell clients about focus, which still goes through the
+throttled service, but only as a small message rather than a layer-tree commit.
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
   Unreal (`--role query --pid <service pid>`).
 - Handoff when the new client is not pre-warmed (context created at the
   swap), and whether fence ports are needed for that case.
+- Client-driven visibility (each client hides or shows its own layer, with a
+  shared fence port) as a handoff that needs no commit from the service.
 - A GPU-heavy renderer, and whether direct scanout is kept.
 - Integration with the multi-client compositor.

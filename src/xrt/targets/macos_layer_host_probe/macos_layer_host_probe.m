@@ -1658,11 +1658,14 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	/*
 	 * Classify each frame by whether its client was shown when it was
 	 * submitted, skipping frames submitted within a few periods of a swap.
-	 * If hidden frames still report presentedTime, presentedTime cannot tell
-	 * what was actually on screen and the gap figures are unreliable.
+	 * Hidden frames should not report presentedTime. If they do,
+	 * presentedTime cannot tell what was on screen and the gap figures are
+	 * unreliable.
 	 *
-	 * The on-screen timeline is every presented frame whose client was shown
-	 * at its presented time.
+	 * Since only on-screen drawables report presentedTime, the on-screen
+	 * timeline is every presented frame from both clients. It must not be
+	 * split by the host's commit time: WindowServer applies the swap some
+	 * frames after the commit, and the old client stays on screen until then.
 	 */
 	size_t hidden_presented = 0, hidden_total = 0;
 	size_t merged_count = 0;
@@ -1680,7 +1683,7 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 					hidden_presented++;
 				}
 			}
-			if (p > 0.0 && visible_at(log, p) == c) {
+			if (p > 0.0) {
 				merged[merged_count++] = p;
 			}
 		}
@@ -1703,13 +1706,17 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	snprintf(path, sizeof(path), "%s_handoff_swaps_%d.csv", opts->out_prefix, (int)getpid());
 	FILE *file = fopen(path, "w");
 	if (file != NULL) {
-		fprintf(file, "swap,visible,scheduled_s,commit_s,swap_late_ms,commit_ms,max_gap_ms,first_new_present_ms\n");
+		fprintf(file,
+		        "swap,visible,scheduled_s,commit_s,swap_late_ms,commit_ms,max_gap_ms,first_new_present_ms,"
+		        "switch_gap_ms,old_after_commit_ms\n");
 	}
 
 	double *gaps = calloc(log->count + 1, sizeof(double));
+	double *switch_gaps = calloc(log->count + 1, sizeof(double));
+	double *old_after = calloc(log->count + 1, sizeof(double));
 	double *first_new = calloc(log->count + 1, sizeof(double));
 	double *late = calloc(log->count + 1, sizeof(double));
-	size_t measured = 0, long_gaps = 0;
+	size_t measured = 0, long_gaps = 0, long_switches = 0;
 	for (size_t k = 0; k < log->count; k++) {
 		const struct handoff_swap *sw = &log->swaps[k];
 		double lo = sw->commit_s - 2.0 * period_s;
@@ -1732,12 +1739,24 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 			}
 		}
 
+		// The real switch: the old client's last frame before the new one's first.
+		double last_old = -1.0;
+		int o = !c;
+		for (size_t i = 0; first >= 0.0 && i < frames[o].count; i++) {
+			double p = frames[o].presented_s[i];
+			if (p > 0.0 && p < first && p > last_old) {
+				last_old = p;
+			}
+		}
+
 		double swap_late_ms = (sw->request_s - sw->scheduled_s) * 1e3;
 		double commit_ms = (sw->commit_s - sw->request_s) * 1e3;
 		double first_ms = first >= 0.0 ? (first - sw->commit_s) * 1e3 : -1.0;
+		double switch_gap_ms = first >= 0.0 && last_old >= 0.0 ? (first - last_old) * 1e3 : -1.0;
+		double old_after_ms = last_old >= 0.0 ? (last_old - sw->commit_s) * 1e3 : -1.0;
 		if (file != NULL) {
-			fprintf(file, "%zu,%s,%.6f,%.6f,%.3f,%.3f,%.3f,%.3f\n", k, c ? "b" : "a", sw->scheduled_s,
-			        sw->commit_s, swap_late_ms, commit_ms, max_gap * 1e3, first_ms);
+			fprintf(file, "%zu,%s,%.6f,%.6f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", k, c ? "b" : "a", sw->scheduled_s,
+			        sw->commit_s, swap_late_ms, commit_ms, max_gap * 1e3, first_ms, switch_gap_ms, old_after_ms);
 		}
 
 		// The last swap can land after the clients stopped; skip it.
@@ -1745,11 +1764,16 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 			continue;
 		}
 		gaps[measured] = max_gap * 1e3;
+		switch_gaps[measured] = switch_gap_ms;
+		old_after[measured] = old_after_ms;
 		first_new[measured] = first_ms;
 		late[measured] = swap_late_ms;
 		measured++;
 		if (max_gap > 1.5 * period_s) {
 			long_gaps++;
+		}
+		if (switch_gap_ms > 1.5 * period_s * 1e3) {
+			long_switches++;
 		}
 	}
 	if (file != NULL) {
@@ -1758,29 +1782,72 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	}
 
 	qsort(gaps, measured, sizeof(double), compare_doubles);
+	qsort(switch_gaps, measured, sizeof(double), compare_doubles);
+	qsort(old_after, measured, sizeof(double), compare_doubles);
 	qsort(first_new, measured, sizeof(double), compare_doubles);
 	qsort(late, measured, sizeof(double), compare_doubles);
+
+	/*
+	 * Each client's present latency before the first swap and after it, to
+	 * separate the effect of the host's state from the effect of swapping.
+	 */
+	char latency[2][160];
+	double first_commit = log->count > 0 ? log->swaps[0].commit_s : 1e300;
+	for (int c = 0; c < 2; c++) {
+		double *before = calloc(frames[c].count + 1, sizeof(double));
+		double *after = calloc(frames[c].count + 1, sizeof(double));
+		size_t nb = 0, na = 0;
+		for (size_t i = 0; i < frames[c].count; i++) {
+			double p = frames[c].presented_s[i];
+			if (p <= 0.0 || frames[c].submit_s[i] < log->attach_s) {
+				continue;
+			}
+			double ms = (p - frames[c].submit_s[i]) * 1e3;
+			if (frames[c].submit_s[i] < first_commit) {
+				before[nb++] = ms;
+			} else {
+				after[na++] = ms;
+			}
+		}
+		qsort(before, nb, sizeof(double), compare_doubles);
+		qsort(after, na, sizeof(double), compare_doubles);
+		snprintf(latency[c], sizeof(latency[c]), "before first swap median=%.3f (n=%zu), after median=%.3f p95=%.3f (n=%zu)",
+		         percentile(before, nb, 50), nb, percentile(after, na, 50), percentile(after, na, 95), na);
+		free(before);
+		free(after);
+	}
 
 	double hidden_share = hidden_total > 0 ? (double)hidden_presented / (double)hidden_total : 0.0;
 	fprintf(stderr,
 	        "LAYER_HOST_PROBE handoff summary method=%s host_background=%s swaps=%zu measured=%zu period_ms=%.3f\n"
-	        "  max on-screen gap around swap ms: median=%.3f p95=%.3f max=%.3f  swaps with gap >1.5x period=%zu\n"
+	        "  switch gap (old last present -> new first present) ms: median=%.3f p95=%.3f max=%.3f  "
+	        ">1.5x period=%zu\n"
+	        "  max on-screen interval around swap ms: median=%.3f p95=%.3f max=%.3f  >1.5x period=%zu\n"
+	        "  old client still shown after commit ms: median=%.3f p95=%.3f max=%.3f\n"
 	        "  swap commit -> first new-client present ms: median=%.3f p95=%.3f max=%.3f\n"
 	        "  swap timer lateness ms: median=%.3f p95=%.3f max=%.3f\n"
 	        "  steady state (away from swaps) intervals >1.5x period=%.2f%%\n"
+	        "  client-a presented - submit ms: %s\n"
+	        "  client-b presented - submit ms: %s\n"
 	        "  hidden-client frames reporting presentedTime: %zu of %zu (%.1f%%)%s\n",
 	        opts->swap_method == SWAP_HIDDEN ? "hidden" : "reparent", opts->host_background ? "yes" : "no",
-	        log->count, measured, period_s * 1e3, percentile(gaps, measured, 50), percentile(gaps, measured, 95),
-	        measured > 0 ? gaps[measured - 1] : 0.0, long_gaps, percentile(first_new, measured, 50),
+	        log->count, measured, period_s * 1e3, percentile(switch_gaps, measured, 50),
+	        percentile(switch_gaps, measured, 95), measured > 0 ? switch_gaps[measured - 1] : 0.0, long_switches,
+	        percentile(gaps, measured, 50), percentile(gaps, measured, 95),
+	        measured > 0 ? gaps[measured - 1] : 0.0, long_gaps, percentile(old_after, measured, 50),
+	        percentile(old_after, measured, 95), measured > 0 ? old_after[measured - 1] : 0.0,
+	        percentile(first_new, measured, 50),
 	        percentile(first_new, measured, 95), measured > 0 ? first_new[measured - 1] : 0.0,
 	        percentile(late, measured, 50), percentile(late, measured, 95), measured > 0 ? late[measured - 1] : 0.0,
-	        steady_intervals > 0 ? 100.0 * (double)steady_long / (double)steady_intervals : 0.0, hidden_presented,
-	        hidden_total, 100.0 * hidden_share,
-	        hidden_share > 0.5 ? "\n  WARNING: hidden layers still report presentedTime, so the gap figures may count "
-	                             "frames that were not visible; check visually"
-	                           : "");
+	        steady_intervals > 0 ? 100.0 * (double)steady_long / (double)steady_intervals : 0.0, latency[0],
+	        latency[1], hidden_presented, hidden_total, 100.0 * hidden_share,
+	        hidden_share > 0.05 ? "\n  WARNING: hidden layers report presentedTime, so the gap figures may count "
+	                              "frames that were not visible; check visually"
+	                            : "");
 
 	free(gaps);
+	free(switch_gaps);
+	free(old_after);
 	free(first_new);
 	free(late);
 	free(merged);
