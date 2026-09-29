@@ -734,11 +734,10 @@ do_io_bindings(struct oxr_binding *binding_point,
  * so every driver that exposes the canonical XRT device names gets the
  * standards fallback without duplicating a generic profile table.
  *
- * grip_surface is kept usable by falling back to the controller grip pose
- * until a device provides a calibrated palm-surface pose. This is preferable
- * to silently dropping the binding, but runtimes/drivers with a calibrated
- * palm pose should provide an explicit XRT_DEVICE_GENERIC_CONTROLLER binding
- * profile and will take precedence over these tables.
+ * grip_surface prefers XRT_INPUT_GENERIC_PALM_POSE when the driver exposes a
+ * calibrated palm-surface pose. A grip-pose fallback follows it so older
+ * drivers remain usable; find_xdev_name_from_pairs() selects the first target
+ * that the concrete device actually exposes.
  */
 static struct xrt_binding_input_pair khr_generic_index_inputs[] = {
     {XRT_INPUT_GENERIC_PRIMARY_CLICK, XRT_INPUT_INDEX_A_CLICK},
@@ -748,6 +747,7 @@ static struct xrt_binding_input_pair khr_generic_index_inputs[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_INDEX_SQUEEZE_VALUE},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_INDEX_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_INDEX_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_INDEX_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_INDEX_AIM_POSE},
 };
@@ -772,6 +772,7 @@ static struct xrt_binding_input_pair khr_generic_touch_left_inputs[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_SQUEEZE_VALUE},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_AIM_POSE},
 };
@@ -784,6 +785,7 @@ static struct xrt_binding_input_pair khr_generic_touch_right_inputs[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_SQUEEZE_VALUE},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_AIM_POSE},
 };
@@ -817,6 +819,7 @@ static struct xrt_binding_input_pair khr_generic_touch_pro_left_inputs[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PRO_SQUEEZE_VALUE},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PRO_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PRO_AIM_POSE},
 };
@@ -829,6 +832,7 @@ static struct xrt_binding_input_pair khr_generic_touch_pro_right_inputs[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PRO_SQUEEZE_VALUE},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PRO_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PRO_AIM_POSE},
 };
@@ -861,6 +865,7 @@ static struct xrt_binding_input_pair khr_generic_touch_plus_left_inputs[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PLUS_SQUEEZE_VALUE},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PLUS_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PLUS_AIM_POSE},
 };
@@ -873,6 +878,7 @@ static struct xrt_binding_input_pair khr_generic_touch_plus_right_inputs[] = {
     {XRT_INPUT_GENERIC_SQUEEZE_VALUE, XRT_INPUT_TOUCH_PLUS_SQUEEZE_VALUE},
     {XRT_INPUT_GENERIC_TRIGGER_VALUE, XRT_INPUT_TOUCH_PLUS_TRIGGER_VALUE},
     {XRT_INPUT_GENERIC_GRIP_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
+    {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_GENERIC_PALM_POSE},
     {XRT_INPUT_GENERIC_GRIP_SURFACE_POSE, XRT_INPUT_TOUCH_PLUS_GRIP_POSE},
     {XRT_INPUT_GENERIC_AIM_POSE, XRT_INPUT_TOUCH_PLUS_AIM_POSE},
 };
