@@ -1724,6 +1724,120 @@ release_gaze_foveation_resources(view_swapchain &swapchain)
 	swapchain.foveation_profile_revision = 0;
 }
 
+static XrFoveationLevelFB
+xr_fb_foveation_level_from_index(int index)
+{
+	switch (index) {
+	case U_FOVEATION_PROFILE_REFERENCE: return XR_FOVEATION_LEVEL_LOW_FB;
+	case U_FOVEATION_PROFILE_STRONG: return XR_FOVEATION_LEVEL_MEDIUM_FB;
+	case U_FOVEATION_PROFILE_AGGRESSIVE:
+	case U_FOVEATION_PROFILE_AGGRESSIVE_PLUS:
+	case U_FOVEATION_PROFILE_NEAR_EXTREME:
+	case U_FOVEATION_PROFILE_EXTREME: return XR_FOVEATION_LEVEL_HIGH_FB;
+	default: return XR_FOVEATION_LEVEL_LOW_FB;
+	}
+}
+
+static void
+update_standard_foveation(application &app, bool verbose)
+{
+	if (!app.standard_foveation || app.standard_foveation_profile == XR_NULL_HANDLE) {
+		return;
+	}
+
+	for (uint32_t i = 0; i < app.swapchains.size(); ++i) {
+		view_swapchain &swapchain = app.swapchains[i];
+
+		XrSwapchainStateFoveationFB update{XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
+		update.flags = 0;
+		update.profile = app.standard_foveation_profile;
+		check_xr(app.xr.update_swapchain_fb(
+		             swapchain.handle,
+		             reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&update)),
+		         "xrUpdateSwapchainFB(foveation)");
+
+		XrFoveationMetalStateMNDX native{XR_TYPE_FOVEATION_METAL_STATE_MNDX};
+		check_xr(app.xr.get_foveation_metal_state_mndx(
+		             swapchain.handle, i, 0, &native),
+		         "xrGetFoveationMetalStateMNDX");
+
+		swapchain.standard_foveation_rate_map =
+		    (__bridge id<MTLRasterizationRateMap>)native.rasterizationRateMap;
+		swapchain.standard_foveation_revision = native.revision;
+		swapchain.standard_foveation_physical_width = native.physicalWidth;
+		swapchain.standard_foveation_physical_height = native.physicalHeight;
+
+		if (native.foveationEnabled != XR_TRUE || swapchain.standard_foveation_rate_map == nil) {
+			fatal("standard FB foveation update returned no Metal rate map");
+		}
+
+		if (verbose) {
+			fprintf(stderr,
+			        "psvr2-openxr-test: FB Metal eye=%u revision=%u logical=%ux%u physical=%ux%u map=%p\n",
+			        i, native.revision, swapchain.width, swapchain.height,
+			        native.physicalWidth, native.physicalHeight,
+			        native.rasterizationRateMap);
+		}
+	}
+
+	app.standard_foveation_frame_count++;
+	if (app.standard_eye_foveation && app.xr.get_foveation_eye_tracked_state_meta != nullptr &&
+	    (verbose || (app.standard_foveation_frame_count % 120) == 1)) {
+		XrFoveationEyeTrackedStateMETA state{XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META};
+		check_xr(app.xr.get_foveation_eye_tracked_state_meta(app.session, &state),
+		         "xrGetFoveationEyeTrackedStateMETA");
+		fprintf(stderr,
+		        "psvr2-openxr-test: META eye foveation valid=%d left=(%+.3f,%+.3f) right=(%+.3f,%+.3f)\n",
+		        (state.flags & XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META) != 0,
+		        state.foveationCenter[0].x, state.foveationCenter[0].y,
+		        state.foveationCenter[1].x, state.foveationCenter[1].y);
+	}
+}
+
+static void
+create_standard_foveation_resources(application &app)
+{
+	if (!app.standard_foveation) {
+		return;
+	}
+
+	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info{
+	    XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
+	eye_info.flags = 0;
+
+	XrFoveationLevelProfileCreateInfoFB level_info{
+	    XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+	level_info.level = xr_fb_foveation_level_from_index(app.foveation_profile_index);
+	level_info.verticalOffset = 0.0f;
+	level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
+	if (app.standard_eye_foveation) {
+		level_info.next = &eye_info;
+	}
+
+	XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+	create_info.next = &level_info;
+	check_xr(app.xr.create_foveation_profile_fb(
+	             app.session, &create_info, &app.standard_foveation_profile),
+	         "xrCreateFoveationProfileFB");
+
+	const struct u_foveation_profile *named =
+	    u_foveation_profile_get(app.foveation_profile_index);
+	fprintf(stderr,
+	        "psvr2-openxr-test: standard FB foveation profile=%s level=%d%s; "
+	        "XR_EXT_eye_gaze_interaction %s\n",
+	        named != nullptr ? named->name : "unknown",
+	        (int)level_info.level,
+	        app.standard_eye_foveation ? " + META eye-tracked" : "",
+	        app.test_gaze ? "enabled separately" : "NOT enabled");
+
+	/*
+	 * Fixed state only needs to be applied once. Eye-tracked state is updated
+	 * every rendered frame below so the runtime can refresh its private gaze
+	 * centre and native Metal map.
+	 */
+	update_standard_foveation(app, true);
+}
+
 static XrFoveationLevelMNDX
 xr_foveation_level_from_index(int index)
 {
