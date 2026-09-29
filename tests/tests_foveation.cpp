@@ -55,3 +55,39 @@ TEST_CASE("generic foveation axis builder validates arguments")
 	CHECK_FALSE(u_foveation_build_axis_rates(profile, rates.size(), rates.size(), rates.data()));
 	CHECK_FALSE(u_foveation_build_axis_rates(profile, rates.size(), 0, nullptr));
 }
+
+
+TEST_CASE("standards-facing foveation requests map onto generic policy")
+{
+	struct u_foveation_request request{};
+
+	REQUIRE(u_foveation_request_from_level(
+	    U_FOVEATION_LEVEL_NONE, false, false, 0.0f, &request));
+	CHECK_FALSE(request.enabled);
+
+	REQUIRE(u_foveation_request_from_level(
+	    U_FOVEATION_LEVEL_LOW, false, false, 1.5f, &request));
+	CHECK(request.enabled);
+	CHECK(request.profile_index == U_FOVEATION_PROFILE_REFERENCE);
+	CHECK_FALSE(request.dynamic);
+	CHECK_FALSE(request.eye_tracked);
+	CHECK(request.vertical_offset_degrees == Catch::Approx(1.5f));
+
+	REQUIRE(u_foveation_request_from_level(
+	    U_FOVEATION_LEVEL_MEDIUM, true, false, -2.0f, &request));
+	CHECK(request.profile_index == U_FOVEATION_PROFILE_STRONG);
+	CHECK(request.dynamic);
+	CHECK_FALSE(request.eye_tracked);
+
+	REQUIRE(u_foveation_request_from_level(
+	    U_FOVEATION_LEVEL_HIGH, true, true, 3.0f, &request));
+	CHECK(request.profile_index == U_FOVEATION_PROFILE_AGGRESSIVE);
+	CHECK(request.dynamic);
+	CHECK(request.eye_tracked);
+	CHECK(request.vertical_offset_degrees == Catch::Approx(3.0f));
+
+	CHECK_FALSE(u_foveation_request_from_level(
+	    static_cast<u_foveation_level>(99), false, false, 0.0f, &request));
+	CHECK_FALSE(u_foveation_request_from_level(
+	    U_FOVEATION_LEVEL_LOW, false, false, 0.0f, nullptr));
+}

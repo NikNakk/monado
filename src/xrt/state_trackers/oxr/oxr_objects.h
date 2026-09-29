@@ -29,6 +29,7 @@
 #include "util/u_hashset.h"
 #include "util/u_hashmap.h"
 #include "util/u_device.h"
+#include "foveation/u_foveation.h"
 
 #include "oxr_extension_support.h"
 #include "oxr_defines.h"
@@ -1899,6 +1900,22 @@ struct oxr_swapchain
 	// Is this a static swapchain, needed for acquire semantics.
 	bool is_static;
 
+#ifdef OXR_HAVE_FB_foveation
+	//! Swapchain was created with XrSwapchainCreateInfoFoveationFB.
+	bool foveation_capable;
+	XrSwapchainCreateFoveationFlagsFB foveation_create_flags;
+
+	//! Effective state is copied here by xrUpdateSwapchainFB.
+	bool has_foveation_state;
+	struct u_foveation_request foveation_request;
+
+	/*!
+	 * Original application handle when still live. This is informational
+	 * only: rendering uses the copied request above. It is cleared when the
+	 * profile is destroyed, as destruction must not alter effective state.
+	 */
+	XrFoveationProfileFB foveation_source_profile;
+#endif
 
 	XrResult (*destroy)(struct oxr_logger *, struct oxr_swapchain *);
 
@@ -2092,6 +2109,23 @@ struct oxr_debug_messenger
 	//! Opaque user data
 	void *XR_MAY_ALIAS user_data;
 };
+
+#ifdef OXR_HAVE_FB_foveation
+
+struct oxr_foveation_profile
+{
+	struct oxr_handle_base handle;
+	struct oxr_session *sess;
+	struct u_foveation_request request;
+};
+
+static inline XrFoveationProfileFB
+oxr_foveation_profile_to_openxr(struct oxr_foveation_profile *profile)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrFoveationProfileFB, profile);
+}
+
+#endif // OXR_HAVE_FB_foveation
 
 #ifdef OXR_HAVE_FB_passthrough
 

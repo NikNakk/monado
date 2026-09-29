@@ -421,6 +421,28 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrDestroySwapchain(XrSwapchain swapchain);
 
+#ifdef OXR_HAVE_FB_swapchain_update_state
+//! OpenXR API function @ep{xrUpdateSwapchainFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderFB *state);
+
+//! OpenXR API function @ep{xrGetSwapchainStateFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetSwapchainStateFB(XrSwapchain swapchain, XrSwapchainStateBaseHeaderFB *state);
+#endif
+
+#ifdef OXR_HAVE_FB_foveation
+//! OpenXR API function @ep{xrCreateFoveationProfileFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateFoveationProfileFB(XrSession session,
+                               const XrFoveationProfileCreateInfoFB *createInfo,
+                               XrFoveationProfileFB *profile);
+
+//! OpenXR API function @ep{xrDestroyFoveationProfileFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyFoveationProfileFB(XrFoveationProfileFB profile);
+#endif
+
 //! OpenXR API function @ep{xrEnumerateSwapchainImages}
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEnumerateSwapchainImages(XrSwapchain swapchain,

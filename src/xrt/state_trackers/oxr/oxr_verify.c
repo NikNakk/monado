@@ -434,6 +434,29 @@ oxr_verify_extensions(struct oxr_logger *log, const struct oxr_extension_status 
 	}
 #endif
 
+#ifdef OXR_HAVE_FB_foveation
+	if (extensions->FB_foveation && !extensions->FB_swapchain_update_state) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "XR_FB_foveation requires XR_FB_swapchain_update_state");
+	}
+#endif
+
+#ifdef OXR_HAVE_FB_foveation_configuration
+	if (extensions->FB_foveation_configuration && !extensions->FB_foveation) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "XR_FB_foveation_configuration requires XR_FB_foveation");
+	}
+#endif
+
+#ifdef OXR_HAVE_META_foveation_eye_tracked
+	if (extensions->META_foveation_eye_tracked &&
+	    (!extensions->FB_foveation || !extensions->FB_foveation_configuration)) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "XR_META_foveation_eye_tracked requires XR_FB_foveation and "
+		                 "XR_FB_foveation_configuration");
+	}
+#endif
+
 	return XR_SUCCESS;
 }
 
