@@ -49,6 +49,78 @@ in `nextDrawable`. The judder ledger found that this "deterministically force[s]
 missed refreshes". So simply flipping the default to `legacy` would not
 reproduce the good result: the legacy *configuration* must be pinned too (D1).
 
+### Final classification after chat-history evidence (2026-09-29)
+
+This section supersedes the counts below and in the summary table. The
+evidence was recovered from the project's earlier ChatGPT chats, with quotes
+and dates, and checked against this audit. A value that was merely present in a
+good run is treated as configuration evidence, not proof that it caused the
+result.
+
+**Final counts: (a) 42, (b) 20, (c) 27, (d) 2** (91 names).
+
+(c), removable now **without** changing default behaviour (8 already removed on
+`cleanup/toggles`; 15 more):
+
+| Toggle | Evidence |
+| --- | --- |
+| `PRESENT_WORKER` (standalone), `PRESENT_STALE_SUBSTITUTE` | Superseded by the redesigned drawable-slot newest-frame worker (0 slot drops, ~119.88 Hz, 19–21 Sep). Stale substitution is ignored in slot mode. |
+| `EARLY_DRAWABLE`, `PRESENT_IMMEDIATE`, `UNIQUE_PRESENT_SLOTS` | Never actually enabled in any recovered run. |
+| `CLIENT_FRAME_DIVISOR`, `U_PACING_APP_FORCED_FRAME_DIVISOR` | Fixed divisors tested and worse: irregular 1/2/3-refresh holds, only ~62–65% two-refresh holds, judder. Removing the pacer divisor also removes the `u_pacing_app.c` `#include` wrapper. |
+| `DISPLAY_RATE_DIVISOR` | Only `1` used. The improvement came from phase sync, not N. |
+| `COMPOSITOR_QOS` | Early positive result contradicted by a later A/B. Final baseline has it off. |
+| `DISABLE_DISPLAY_SYNC`, `DISABLE_FRAMEBUFFER_ONLY` | Display sync off: 0.83% vs 0.90% misses, the repeating miss pattern remained, and near cubes shimmered. Framebuffer-only was a no-op (already `NO`). |
+| `WAIT_HYBRID_US` | Failed its purpose: median lateness 29.6 ms vs ~0.006 ms for full spin. |
+| `PROCESS_ACTIVITY` | Never validly tested (hooks compiled out), then abandoned for XPC importance. |
+| `METAL_XPC_EXTERNAL_BROKER` | Implemented, never run. |
+| `MAX_DRAWABLES` | 2 never reduced end-to-end latency and repeatedly collapsed to ~60 Hz. Hard-code 3. |
+
+(c), removable only **after** the default flip (D1b):
+`CAMETALDISPLAYLINK_LATENCY` and `_THREAD_PRIORITY` (driven-only; latency=2 was
+never validly run, and realtime priority gave "no convincing large
+improvement"), plus `PRESENT_PRELATCH_US` and `PRESENT_MIN_LEAD_US` (inert once
+the minimum duration is the default; prelatch was already deprioritised). The
+driven/hybrid backend and the `DRIVE` alias go at the same time.
+
+Corrections to the resolution table below:
+
+- **`CLIENT_FRAME_MIN_HOLD` is (a), not (c).** Elastic hold=2 gave 98.33% exact
+  two-refresh holds and was "much smoother". A 60 Hz app on the 120 Hz headset
+  is a wanted feature. Keep it as a real opt-in setting (default 0, as in the
+  baseline), and consider an app-facing name.
+- **`XRT_MACOS_XPC_IMPORTANCE` is (b), not a default.** An excellent 18 Sep
+  run stayed RT97 throughout, but on 21 Sep the lease was acquired and the
+  thread was still demoted to priority 4. Keep it as an opt-in client-side
+  diagnostic until a controlled A/B shows a benefit.
+- **`XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US` stays (d).** It was dropped
+  because 2000 µs forced every-other-refresh callbacks in driven mode, not
+  because it failed on legacy. It was set in the 19 Sep legacy+slot baseline
+  with no on/off A/B. The older sweep showed a latency-for-cadence trade:
+  18.9→14.7 ms pose-to-display but 89%→55% at 120 Hz.
+- **`PRESENT_MIN_DURATION_US=8000` and time constraint 35/70 are known-good
+  baseline values, not demonstrated optima.** No alternative-value sweep and no
+  90 Hz test exist. Make them the defaults, and keep one A/B each on the list.
+- **D6 resolved:** keep acceleration-only as a selectable predictor mode.
+  Replay showed it the most pointwise accurate (median/p95 2.57/11.97 mm vs
+  continuity 2.79/12.90). Continuity trades accuracy for smoothness.
+
+Reclassified to (b): `WAIT_SPIN` (by far the best wait accuracy, <1 µs
+lateness, but costs a core; keep as an opt-in diagnostic) and
+`XRT_COMPOSITOR_DEPTH_REPROJECTION` (useful rotation-only kill-switch).
+Separately, depth reprojection **on by default** showed silhouettes, trails and
+holes. Whether the default should be rotation-only is a new question outside
+this toggle audit.
+
+The only (d) items left:
+
+1. `LATE_RENDER_DESIRED_OFFSET_US`: needs a legacy + drawable-slot A/B, unset
+   vs 2000.
+2. `APP_RELEASE_SHARED_EVENT_WAIT_THREAD`: the chats show the app-side wait
+   thread working, but not whether that was a service build without the
+   variable set. Check the OpenXR app's log in a service build with the
+   variable **unset**. If `Metal app-release Stage 4 ready` appears, finding 3
+   is wrong; if it does not, the intended service default is being compiled out.
+
 ### Resolution from the best legacy configuration (2026-09-29)
 
 You supplied the environment of the best-performing run. The PSVR2 prediction
