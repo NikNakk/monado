@@ -134,9 +134,16 @@ oxr_interaction_profile_array_find_by_device_name(const struct oxr_interaction_p
 static bool
 xdev_supports_khr_generic_controller(const struct xrt_device *xdev)
 {
-	if (xdev->name == XRT_DEVICE_GENERIC_CONTROLLER || xdev->name == XRT_DEVICE_TOUCH_CONTROLLER ||
-	    xdev->name == XRT_DEVICE_INDEX_CONTROLLER) {
-		return true;
+	switch (xdev->name) {
+	case XRT_DEVICE_GENERIC_CONTROLLER:
+	case XRT_DEVICE_TOUCH_CONTROLLER:
+	case XRT_DEVICE_INDEX_CONTROLLER:
+	case XRT_DEVICE_TOUCH_PRO_CONTROLLER:
+	case XRT_DEVICE_TOUCH_PLUS_CONTROLLER:
+	case XRT_DEVICE_TOUCH_CONTROLLER_RIFT_CV1:
+	case XRT_DEVICE_TOUCH_CONTROLLER_QUEST_1_RIFT_S:
+	case XRT_DEVICE_TOUCH_CONTROLLER_QUEST_2: return true;
+	default: break;
 	}
 
 	/*
