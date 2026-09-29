@@ -20,6 +20,53 @@
 #include <stdlib.h>
 
 
+static bool
+get_current_view_fovs(struct oxr_session *sess,
+                      struct xrt_fov out_fovs[XRT_MAX_VIEWS],
+                      uint32_t *out_view_count)
+{
+	if (sess == NULL || out_fovs == NULL || out_view_count == NULL) {
+		return false;
+	}
+
+	struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(sess->sys, head);
+	if (head == NULL || head->hmd == NULL || head->hmd->view_count == 0) {
+		return false;
+	}
+
+	uint32_t view_count = (uint32_t)head->hmd->view_count;
+	if (view_count > XRT_MAX_VIEWS) {
+		view_count = XRT_MAX_VIEWS;
+	}
+
+	const struct xrt_vec3 default_eye_relation = {
+	    sess->ipd_meters,
+	    0.0f,
+	    0.0f,
+	};
+	struct xrt_space_relation head_relation = XRT_SPACE_RELATION_ZERO;
+	struct xrt_pose poses[XRT_MAX_VIEWS] = {0};
+	const enum xrt_view_type view_type =
+	    view_count == 1 ? XRT_VIEW_TYPE_MONO : XRT_VIEW_TYPE_STEREO;
+
+	xrt_result_t xret = xrt_device_get_view_poses(
+	    head,
+	    &default_eye_relation,
+	    os_monotonic_get_ns(),
+	    view_type,
+	    view_count,
+	    &head_relation,
+	    out_fovs,
+	    poses);
+	if (xret != XRT_SUCCESS) {
+		return false;
+	}
+
+	*out_view_count = view_count;
+	return true;
+}
+
+
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 static XrResult
 eye_tracking_acquire(struct oxr_logger *log, struct oxr_session *sess)
@@ -84,8 +131,9 @@ sample_eye_tracked_centres(struct oxr_session *sess, struct xrt_foveation_state 
 		return false;
 	}
 
-	struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(sess->sys, head);
-	if (head == NULL || head->hmd == NULL || head->hmd->view_count == 0) {
+	struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
+	uint32_t view_count = 0;
+	if (!get_current_view_fovs(sess, fovs, &view_count)) {
 		return false;
 	}
 
@@ -114,13 +162,8 @@ sample_eye_tracked_centres(struct oxr_session *sess, struct xrt_foveation_state 
 	struct xrt_vec3 direction = {};
 	math_quat_rotate_vec3(&relation.pose.orientation, &forward, &direction);
 
-	uint32_t view_count = (uint32_t)head->hmd->view_count;
-	if (view_count > XRT_MAX_VIEWS) {
-		view_count = XRT_MAX_VIEWS;
-	}
-
 	return oxr_foveation_resolve_gaze_centres(
-	    &direction, head->hmd->distortion.fov, view_count,
+	    &direction, fovs, view_count,
 	    state->vertical_offset_degrees, state);
 }
 
@@ -342,20 +385,16 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		 * the META state as invalid.
 		 */
 		if (xrt_state.enabled) {
-			struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(sc->sess->sys, head);
-			if (head == NULL || head->hmd == NULL || head->hmd->view_count == 0) {
+			struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
+			uint32_t view_count = 0;
+			if (!get_current_view_fovs(sc->sess, fovs, &view_count)) {
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 				if (acquired_eye_tracking) {
 					eye_tracking_release(sc->sess);
 				}
 #endif
 				return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
-				                 "No HMD view FOVs available for foveation");
-			}
-
-			uint32_t view_count = (uint32_t)head->hmd->view_count;
-			if (view_count > XRT_MAX_VIEWS) {
-				view_count = XRT_MAX_VIEWS;
+				                 "Failed to query HMD view FOVs for foveation");
 			}
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
@@ -363,7 +402,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 				gaze_valid = sample_eye_tracked_centres(sc->sess, &xrt_state);
 				if (!gaze_valid &&
 				    !oxr_foveation_resolve_fixed_centres(
-				        head->hmd->distortion.fov, view_count, &xrt_state)) {
+				        fovs, view_count, &xrt_state)) {
 					if (acquired_eye_tracking) {
 						eye_tracking_release(sc->sess);
 					}
@@ -373,7 +412,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 			} else
 #endif
 			if (!oxr_foveation_resolve_fixed_centres(
-			        head->hmd->distortion.fov, view_count, &xrt_state)) {
+			        fovs, view_count, &xrt_state)) {
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 				if (acquired_eye_tracking) {
 					eye_tracking_release(sc->sess);
