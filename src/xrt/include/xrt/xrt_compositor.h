@@ -547,6 +547,51 @@ enum xrt_barrier_direction
 };
 
 /*!
+ * Graphics-API-independent resolved foveation policy.
+ *
+ * This sits in the XRT interface rather than aux_foveation so compositor
+ * clients can consume it without depending on a particular policy helper or
+ * client API such as OpenXR.
+ */
+enum xrt_foveation_capability_bits
+{
+	//! The swapchain accepts a fixed resolved foveation policy.
+	XRT_FOVEATION_CAPABILITY_FIXED = 1u << 0u,
+
+	//! The backend can update foveation state after swapchain creation.
+	XRT_FOVEATION_CAPABILITY_DYNAMIC = 1u << 1u,
+
+	//! The backend can consume per-view runtime-owned eye-tracked centres.
+	XRT_FOVEATION_CAPABILITY_EYE_TRACKED = 1u << 2u,
+};
+
+struct xrt_foveation_view_state
+{
+	//! Centre in normalized device coordinates, -1..1, when valid.
+	struct xrt_vec2 center;
+	bool center_valid;
+};
+
+struct xrt_foveation_state
+{
+	bool enabled;
+	bool dynamic;
+	bool eye_tracked;
+
+	float center_rate;
+	float middle_rate;
+	float peripheral_rate;
+	float center_half_extent;
+	float middle_half_extent;
+
+	//! Vertical policy offset in degrees before any per-view gaze centre.
+	float vertical_offset_degrees;
+
+	uint32_t view_count;
+	struct xrt_foveation_view_state views[XRT_MAX_VIEWS];
+};
+
+/*!
  * @interface xrt_swapchain
  *
  * Common swapchain interface/base.
@@ -627,7 +672,34 @@ struct xrt_swapchain
 	 * See xrReleaseSwapchainImage, state tracker needs to track index.
 	 */
 	xrt_result_t (*release_image)(struct xrt_swapchain *xsc, uint32_t index);
+
+	/*!
+	 * Foveation capabilities implemented by this concrete graphics-client
+	 * swapchain. Zero means the swapchain has no client-rendering foveation
+	 * transport.
+	 */
+	uint32_t foveation_capabilities;
+
+	/*!
+	 * Apply a resolved, graphics-API-independent foveation state.
+	 *
+	 * This callback only describes renderer-facing policy. Graphics backends
+	 * remain responsible for translating it into their native mechanism.
+	 */
+	xrt_result_t (*set_foveation)(struct xrt_swapchain *xsc, const struct xrt_foveation_state *state);
 };
+
+/*!
+ * Apply foveation policy when supported by the concrete swapchain.
+ */
+static inline xrt_result_t
+xrt_swapchain_set_foveation(struct xrt_swapchain *xsc, const struct xrt_foveation_state *state)
+{
+	if (xsc->set_foveation == NULL) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	return xsc->set_foveation(xsc, state);
+}
 
 /*!
  * Update the reference counts on swapchain(s).
