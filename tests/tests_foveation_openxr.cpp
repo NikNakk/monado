@@ -1,0 +1,117 @@
+// Copyright 2026, Nick Kennedy
+// SPDX-License-Identifier: BSL-1.0
+
+#include "catch_amalgamated.hpp"
+
+#include <oxr/oxr_foveation_policy.h>
+
+
+TEST_CASE("FB foveation base profile means no foveation")
+{
+	XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+	struct u_foveation_request request{};
+
+	CHECK(oxr_foveation_request_from_fb(&create_info, false, false, &request) ==
+	      OXR_FOVEATION_PARSE_SUCCESS);
+	CHECK_FALSE(request.enabled);
+	CHECK_FALSE(request.dynamic);
+	CHECK_FALSE(request.eye_tracked);
+}
+
+TEST_CASE("FB foveation configuration maps to generic policy")
+{
+	struct case_data
+	{
+		XrFoveationLevelFB level;
+		int profile;
+		bool enabled;
+	};
+
+	const case_data cases[] = {
+	    {XR_FOVEATION_LEVEL_NONE_FB, U_FOVEATION_PROFILE_REFERENCE, false},
+	    {XR_FOVEATION_LEVEL_LOW_FB, U_FOVEATION_PROFILE_REFERENCE, true},
+	    {XR_FOVEATION_LEVEL_MEDIUM_FB, U_FOVEATION_PROFILE_STRONG, true},
+	    {XR_FOVEATION_LEVEL_HIGH_FB, U_FOVEATION_PROFILE_AGGRESSIVE, true},
+	};
+
+	for (const auto &entry : cases) {
+		XrFoveationLevelProfileCreateInfoFB level_info{
+		    XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+		level_info.level = entry.level;
+		level_info.verticalOffset = 2.25f;
+		level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
+
+		XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+		create_info.next = &level_info;
+
+		struct u_foveation_request request{};
+		CAPTURE(entry.level);
+		REQUIRE(oxr_foveation_request_from_fb(&create_info, true, false, &request) ==
+		        OXR_FOVEATION_PARSE_SUCCESS);
+		CHECK(request.enabled == entry.enabled);
+		CHECK(request.profile_index == entry.profile);
+		CHECK_FALSE(request.dynamic);
+		CHECK_FALSE(request.eye_tracked);
+		CHECK(request.vertical_offset_degrees == Catch::Approx(2.25f));
+	}
+}
+
+TEST_CASE("FB dynamic and META eye-tracked policy stays runtime-owned")
+{
+	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info{
+	    XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
+
+	XrFoveationLevelProfileCreateInfoFB level_info{
+	    XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+	level_info.next = &eye_info;
+	level_info.level = XR_FOVEATION_LEVEL_HIGH_FB;
+	level_info.verticalOffset = -1.5f;
+	level_info.dynamic = XR_FOVEATION_DYNAMIC_LEVEL_ENABLED_FB;
+
+	XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+	create_info.next = &level_info;
+
+	struct u_foveation_request request{};
+	REQUIRE(oxr_foveation_request_from_fb(&create_info, true, true, &request) ==
+	        OXR_FOVEATION_PARSE_SUCCESS);
+	CHECK(request.enabled);
+	CHECK(request.profile_index == U_FOVEATION_PROFILE_AGGRESSIVE);
+	CHECK(request.dynamic);
+	CHECK(request.eye_tracked);
+	CHECK(request.vertical_offset_degrees == Catch::Approx(-1.5f));
+}
+
+TEST_CASE("FB foveation parser enforces extension availability and valid enums")
+{
+	XrFoveationLevelProfileCreateInfoFB level_info{
+	    XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+	level_info.level = XR_FOVEATION_LEVEL_MEDIUM_FB;
+	level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
+
+	XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+	create_info.next = &level_info;
+
+	struct u_foveation_request request{};
+	CHECK(oxr_foveation_request_from_fb(&create_info, false, false, &request) ==
+	      OXR_FOVEATION_PARSE_UNSUPPORTED_CONFIGURATION);
+
+	level_info.level = static_cast<XrFoveationLevelFB>(99);
+	CHECK(oxr_foveation_request_from_fb(&create_info, true, false, &request) ==
+	      OXR_FOVEATION_PARSE_INVALID_LEVEL);
+
+	level_info.level = XR_FOVEATION_LEVEL_LOW_FB;
+	level_info.dynamic = static_cast<XrFoveationDynamicFB>(99);
+	CHECK(oxr_foveation_request_from_fb(&create_info, true, false, &request) ==
+	      OXR_FOVEATION_PARSE_INVALID_DYNAMIC);
+
+	level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
+	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info{
+	    XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
+	level_info.next = &eye_info;
+	CHECK(oxr_foveation_request_from_fb(&create_info, true, false, &request) ==
+	      OXR_FOVEATION_PARSE_UNSUPPORTED_EYE_TRACKED);
+
+	eye_info.flags = 1;
+	CHECK(oxr_foveation_request_from_fb(&create_info, true, true, &request) ==
+	      OXR_FOVEATION_PARSE_INVALID_EYE_TRACKED_FLAGS);
+}
