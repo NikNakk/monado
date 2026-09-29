@@ -139,18 +139,18 @@ static struct xrt_binding_output_pair index_outputs_pssense[] = {
 
 static struct xrt_binding_profile binding_profiles_pssense_left[] = {
     {
-        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
-        .inputs = simple_inputs_pssense,
-        .input_count = ARRAY_SIZE(simple_inputs_pssense),
-        .outputs = simple_outputs_pssense,
-        .output_count = ARRAY_SIZE(simple_outputs_pssense),
-    },
-    {
         .name = XRT_DEVICE_GENERIC_CONTROLLER,
         .inputs = generic_inputs_pssense_left,
         .input_count = ARRAY_SIZE(generic_inputs_pssense_left),
         .outputs = generic_outputs_pssense,
         .output_count = ARRAY_SIZE(generic_outputs_pssense),
+    },
+    {
+        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
+        .inputs = simple_inputs_pssense,
+        .input_count = ARRAY_SIZE(simple_inputs_pssense),
+        .outputs = simple_outputs_pssense,
+        .output_count = ARRAY_SIZE(simple_outputs_pssense),
     },
     {
         .name = XRT_DEVICE_INDEX_CONTROLLER,
@@ -163,18 +163,18 @@ static struct xrt_binding_profile binding_profiles_pssense_left[] = {
 
 static struct xrt_binding_profile binding_profiles_pssense_right[] = {
     {
-        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
-        .inputs = simple_inputs_pssense,
-        .input_count = ARRAY_SIZE(simple_inputs_pssense),
-        .outputs = simple_outputs_pssense,
-        .output_count = ARRAY_SIZE(simple_outputs_pssense),
-    },
-    {
         .name = XRT_DEVICE_GENERIC_CONTROLLER,
         .inputs = generic_inputs_pssense_right,
         .input_count = ARRAY_SIZE(generic_inputs_pssense_right),
         .outputs = generic_outputs_pssense,
         .output_count = ARRAY_SIZE(generic_outputs_pssense),
+    },
+    {
+        .name = XRT_DEVICE_SIMPLE_CONTROLLER,
+        .inputs = simple_inputs_pssense,
+        .input_count = ARRAY_SIZE(simple_inputs_pssense),
+        .outputs = simple_outputs_pssense,
+        .output_count = ARRAY_SIZE(simple_outputs_pssense),
     },
     {
         .name = XRT_DEVICE_INDEX_CONTROLLER,
