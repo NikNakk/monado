@@ -105,7 +105,6 @@ DEBUG_GET_ONCE_NUM_OPTION(display_rate_divisor, "XRT_MACOS_DISPLAY_RATE_DIVISOR"
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
-DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
@@ -1005,12 +1004,8 @@ comp_window_macos_init(struct comp_target *ct)
 		[metal_layer setOpaque:YES];
 		[metal_layer setDisplaySyncEnabled:YES];
 		[metal_layer setAllowsNextDrawableTimeout:YES];
-		int max_drawables = debug_get_num_option_macos_max_drawables();
-		if (max_drawables != 2 && max_drawables != 3) {
-			COMP_WARN(ct->c, "XRT_MACOS_MAX_DRAWABLES must be 2 or 3; using default 3 instead of %d", max_drawables);
-			max_drawables = 3;
-		}
-		[metal_layer setMaximumDrawableCount:(NSUInteger)max_drawables];
+		/* Two drawables starved nextDrawable and collapsed to ~60 Hz on hardware. */
+		[metal_layer setMaximumDrawableCount:3];
 		COMP_INFO(ct->c, "macOS CAMetalLayer maximumDrawableCount=%lu",
 		          (unsigned long)[metal_layer maximumDrawableCount]);
 		id<MTLCommandQueue> present_queue = [[metal_layer device] newCommandQueue];
