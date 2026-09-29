@@ -7,6 +7,7 @@ on:
       - macos-drawable-slot-newest
       - macos-client-cadence-stabilizer
       - macos-wine-openvr-legacy-unity
+      - standards/fb-foveation
     paths:
       - .github/workflows/macos-psvr2-timing-diagnostics.yml
       - CMakeLists.txt
@@ -24,6 +25,35 @@ permissions:
 
 # This workflow compile-checks the CoreVideo/Metal timing bridge, timeline synchronization, presentation feedback, PSVR2 short- and long-horizon positional predictor diagnostics, and the standalone OpenXR/Metal diagnostic scene used by the diagnostic branch.
 jobs:
+  build-foveation-standards:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
+      - name: Configure foveation standards build
+        run: >-
+          cmake -S . -B build-foveation -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DBUILD_TESTING=ON
+          -DXRT_HAVE_OPENGLES=OFF
+          -DXRT_HAVE_SDL2=OFF
+          -DXRT_MODULE_MONADO_GUI=OFF
+          -DXRT_FEATURE_WINDOW_PEEK=OFF
+          -DXRT_FEATURE_DEBUG_GUI=OFF
+          -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF
+          -DXRT_BUILD_DRIVER_QWERTY=OFF
+          -DXRT_BUILD_DRIVER_PSVR2=ON
+      - name: Build standards targets
+        run: >-
+          cmake --build build-foveation
+          --target st_oxr tests_foveation tests_foveation_openxr psvr2-openxr-test
+          --parallel
+      - name: Run foveation policy tests
+        run: |
+          build-foveation/tests/tests_foveation --success
+          build-foveation/tests/tests_foveation_openxr --success
+
   build-driver:
     runs-on: macos-15
     steps:
