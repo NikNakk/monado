@@ -60,6 +60,8 @@ add_library(
 	oxr_event.c
 	oxr_frame_sync.c
 	oxr_frame_sync.h
+	oxr_foveation_policy.c
+	oxr_foveation_policy.h
 	oxr_handle_base.c
 	oxr_instance.c
 	oxr_logger.c
