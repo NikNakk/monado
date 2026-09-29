@@ -285,6 +285,11 @@ metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
 	const size_t bytes_per_row = IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, min_bytes_per_row);
 	const size_t alloc_size = bytes_per_row * (size_t)height;
 
+	/*
+	 * The service imports these surfaces in a different process using
+	 * IOSurfaceLookup(IOSurfaceID), so the surfaces must be globally visible.
+	 * The standalone cross-process IOSurface probe already does the same.
+	 */
 	NSDictionary *properties = @{
 		(__bridge NSString *)kIOSurfaceWidth : @(width),
 		(__bridge NSString *)kIOSurfaceHeight : @(height),
@@ -292,6 +297,7 @@ metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
 		(__bridge NSString *)kIOSurfaceBytesPerRow : @(bytes_per_row),
 		(__bridge NSString *)kIOSurfaceAllocSize : @(alloc_size),
 		(__bridge NSString *)kIOSurfacePixelFormat : @(kCVPixelFormatType_32BGRA),
+		(__bridge NSString *)kIOSurfaceIsGlobal : @YES,
 	};
 
 	return IOSurfaceCreate((__bridge CFDictionaryRef)properties);
