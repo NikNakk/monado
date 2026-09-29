@@ -478,6 +478,9 @@ struct render_resources
 		//! Uniform data binding.
 		uint32_t ubo_binding;
 
+		//! Layer squasher foveation-map uniform binding.
+		uint32_t layer_foveation_binding;
+
 		struct
 		{
 			//! Descriptor set layout for compute.
@@ -497,6 +500,9 @@ struct render_resources
 
 			//! Target info.
 			struct render_buffer ubos[RENDER_MAX_LAYER_RUNS_SIZE];
+
+			//! Per-run foveation maps, see render_compute_layer_foveation_ubo_data.
+			struct render_buffer foveation_ubos[RENDER_MAX_LAYER_RUNS_SIZE];
 		} layer;
 
 		struct
@@ -1368,6 +1374,33 @@ struct render_compute_layer_ubo_data
  */
 #define RENDER_FOVEATION_BOUNDARY_VEC4_COUNT ((XRT_FOVEATION_MAP_BOUNDARY_COUNT + 3) / 4)
 
+/*!
+ * Number of projection layers per layer-squasher run that can carry an
+ * experimental Metal variable-rasterization-rate source map. Further foveated
+ * projection layers in the same run are not composited, rather than being
+ * sampled with the wrong coordinate transform. Has to match layer.comp.
+ */
+#define RENDER_MAX_FOVEATED_LAYERS (8)
+
+/*!
+ * Foveation maps for the layer squasher, kept out of
+ * render_compute_layer_ubo_data so the large per-layer UBO does not grow.
+ *
+ * @relates render_compute
+ */
+struct render_compute_layer_foveation_ubo_data
+{
+	//! One-based map slot per layer, zero for none; std140 uvec4 packed.
+	uint32_t layer_slot[RENDER_MAX_LAYERS];
+
+	//! Boundary arrays packed as std140 vec4s, 33 per axis and slot.
+	struct
+	{
+		float v[4];
+	} x[RENDER_MAX_FOVEATED_LAYERS * RENDER_FOVEATION_BOUNDARY_VEC4_COUNT],
+	    y[RENDER_MAX_FOVEATED_LAYERS * RENDER_FOVEATION_BOUNDARY_VEC4_COUNT];
+};
+
 struct render_compute_distortion_ubo_data
 {
 	struct render_viewport_data views[XRT_MAX_VIEWS];
@@ -1485,6 +1518,7 @@ void
 render_compute_layers(struct render_compute *render,
                       VkDescriptorSet descriptor_set,
                       VkBuffer ubo,
+                      VkBuffer foveation_ubo,
                       VkSampler src_samplers[RENDER_MAX_IMAGES_SIZE],
                       VkImageView src_image_views[RENDER_MAX_IMAGES_SIZE],
                       uint32_t num_srcs,

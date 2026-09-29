@@ -351,6 +351,53 @@ calc_new_to_source_view_matrix(const struct xrt_pose *source_pose,
 	math_matrix_4x4_multiply(&world_to_source, &new_to_world, out_matrix);
 }
 
+/*!
+ * Record the Metal variable-rasterization-rate source map, if any, for a
+ * projection layer in the layer squasher. Returns false if the layer carries a
+ * map that cannot be applied, in which case it must not be composited.
+ */
+static bool
+set_cs_projection_foveation(const struct xrt_layer_data *layer_data,
+                            uint32_t view_index,
+                            uint32_t cur_layer,
+                            struct render_compute_layer_foveation_ubo_data *foveation_data,
+                            uint32_t *inout_slot_count)
+{
+	// Depth layers never carry a source map, see oxr_session_frame_end.c.
+	if (layer_data->type != XRT_LAYER_PROJECTION) {
+		return true;
+	}
+
+	const struct xrt_layer_projection_view_data *vd = NULL;
+	view_index_to_projection_data(view_index, layer_data, &vd);
+	const struct xrt_foveation_map_data *map = &vd->foveation;
+	if (map->enabled == 0) {
+		return true;
+	}
+
+	if (map->boundary_count != XRT_FOVEATION_MAP_BOUNDARY_COUNT ||
+	    *inout_slot_count >= RENDER_MAX_FOVEATED_LAYERS) {
+		static bool logged = false;
+		if (!logged) {
+			U_LOG_E("Skipping foveated projection layer %u: %s (logged once)", cur_layer,
+			        map->boundary_count != XRT_FOVEATION_MAP_BOUNDARY_COUNT ? "invalid map"
+			                                                                : "too many foveated layers");
+			logged = true;
+		}
+		return false;
+	}
+
+	const uint32_t slot = (*inout_slot_count)++;
+	for (uint32_t i = 0; i < XRT_FOVEATION_MAP_BOUNDARY_COUNT; ++i) {
+		const uint32_t packed = slot * RENDER_FOVEATION_BOUNDARY_VEC4_COUNT + i / 4u;
+		foveation_data->x[packed].v[i % 4u] = map->x[i];
+		foveation_data->y[packed].v[i % 4u] = map->y[i];
+	}
+	foveation_data->layer_slot[cur_layer] = slot + 1u;
+
+	return true;
+}
+
 /// Data setup for a projection layer
 static inline void
 do_cs_projection_layer(const struct comp_layer *layer,
@@ -782,6 +829,10 @@ comp_render_cs_layer(struct render_compute *render,
 
 	struct render_buffer *ubo = &render->r->compute.layer.ubos[view_index];
 	struct render_compute_layer_ubo_data *ubo_data = ubo->mapped;
+	struct render_buffer *foveation_ubo = &render->r->compute.layer.foveation_ubos[view_index];
+	struct render_compute_layer_foveation_ubo_data *foveation_data = foveation_ubo->mapped;
+	uint32_t foveation_slot_count = 0;
+	U_ZERO_ARRAY(foveation_data->layer_slot);
 
 	// Tightly pack layers in data struct.
 	uint32_t cur_layer = 0;
@@ -859,6 +910,10 @@ comp_render_cs_layer(struct render_compute *render,
 			break;
 		case XRT_LAYER_PROJECTION_DEPTH:
 		case XRT_LAYER_PROJECTION: {
+			if (!set_cs_projection_foveation(data, view_index, cur_layer, foveation_data,
+			                                 &foveation_slot_count)) {
+				continue; // Never sample a compacted image with the wrong transform.
+			}
 			do_cs_projection_layer(       //
 			    layer,                    // layer
 			    world_pose_scanout_begin, // world_pose_scanout_begin
@@ -922,10 +977,11 @@ comp_render_cs_layer(struct render_compute *render,
 
 	VkDescriptorSet descriptor_set = render->layer_descriptor_sets[view_index];
 
-	render_compute_layers( //
-	    render,            //
-	    descriptor_set,    //
-	    ubo->buffer,       //
+	render_compute_layers(     //
+	    render,                //
+	    descriptor_set,        //
+	    ubo->buffer,           //
+	    foveation_ubo->buffer, //
 	    src_samplers,      //
 	    src_image_views,   //
 	    cur_image,         //

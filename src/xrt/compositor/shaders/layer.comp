@@ -108,6 +108,19 @@ layout(set = 0, binding = 3, std140) uniform restrict Config
 	Layer layers[RENDER_MAX_LAYERS];
 } ubo;
 
+#define RENDER_MAX_FOVEATED_LAYERS (8) // has to match RENDER_MAX_FOVEATED_LAYERS in render_interface.h
+const uint FOVEATION_BOUNDARY_COUNT = 129u;
+const uint FOVEATION_BOUNDARY_VEC4_COUNT = 33u;
+
+// Experimental Metal variable-rasterization-rate source maps for projection
+// layers, see render_compute_layer_foveation_ubo_data.
+layout(set = 0, binding = 4, std140) uniform restrict Foveation
+{
+	uvec4 layer_slot[RENDER_MAX_LAYERS / 4];
+	vec4 x[RENDER_MAX_FOVEATED_LAYERS * FOVEATION_BOUNDARY_VEC4_COUNT];
+	vec4 y[RENDER_MAX_FOVEATED_LAYERS * FOVEATION_BOUNDARY_VEC4_COUNT];
+} foveation;
+
 
 vec2 position_to_view_uv(ivec2 extent, uint ix, uint iy)
 {
@@ -455,6 +468,40 @@ vec2 transform_uv_projection_depth(vec2 view_uv, uint layer)
 	return fma(corrected_projection_uv, LAYER.post_transform.zw, LAYER.post_transform.xy);
 }
 
+float foveation_boundary(bool x_axis, uint slot, uint index)
+{
+	uint packed = slot * FOVEATION_BOUNDARY_VEC4_COUNT + index / 4u;
+	return x_axis ? foveation.x[packed][index % 4u] : foveation.y[packed][index % 4u];
+}
+
+// Same logical-to-physical reconstruction as distortion.comp, applied to the
+// full-texture UV after the subimage transform.
+vec2 transform_uv_foveation(vec2 uv, uint layer)
+{
+	uint slot = foveation.layer_slot[layer / 4u][layer % 4u];
+	if (slot == 0u) {
+		return uv;
+	}
+	slot -= 1u;
+
+	// Preserve out-of-range UVs for the border-black sampler.
+	if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) {
+		return uv;
+	}
+
+	const float intervals = float(FOVEATION_BOUNDARY_COUNT - 1u);
+	vec2 scaled = min(uv * intervals, vec2(intervals - 1e-6));
+	uvec2 cell = uvec2(floor(scaled));
+	vec2 local = fract(scaled);
+
+	float x0 = foveation_boundary(true, slot, cell.x);
+	float x1 = foveation_boundary(true, slot, cell.x + 1u);
+	float y0 = foveation_boundary(false, slot, cell.y);
+	float y1 = foveation_boundary(false, slot, cell.y + 1u);
+
+	return vec2(mix(x0, x1, local.x), mix(y0, y1, local.y));
+}
+
 vec4 do_projection(vec2 view_uv, uint layer)
 {
 	uint source_image_index = LAYER.image_info.color_image_index;
@@ -465,6 +512,8 @@ vec4 do_projection(vec2 view_uv, uint layer)
 	} else {
 		uv = transform_uv(view_uv, layer);
 	}
+
+	uv = transform_uv_foveation(uv, layer);
 
 	return vec4(texture(source[source_image_index], uv).rgba);
 }
