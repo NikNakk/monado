@@ -186,12 +186,13 @@ create_compute_layer_descriptor_set_layout(struct vk_bundle *vk,
                                            uint32_t src_binding,
                                            uint32_t target_binding,
                                            uint32_t ubo_binding,
+                                           uint32_t foveation_binding,
                                            uint32_t source_images_count,
                                            VkDescriptorSetLayout *out_descriptor_set_layout)
 {
 	VkResult ret;
 
-	VkDescriptorSetLayoutBinding set_layout_bindings[3] = {
+	VkDescriptorSetLayoutBinding set_layout_bindings[4] = {
 	    {
 	        .binding = src_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -206,6 +207,12 @@ create_compute_layer_descriptor_set_layout(struct vk_bundle *vk,
 	    },
 	    {
 	        .binding = ubo_binding,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+	    },
+	    {
+	        .binding = foveation_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
@@ -547,6 +554,7 @@ render_resources_init(struct render_resources *r,
 	r->compute.distortion_binding = 1;
 	r->compute.target_binding = 2;
 	r->compute.ubo_binding = 3;
+	r->compute.layer_foveation_binding = 4;
 
 	r->compute.layer.image_array_size =
 	    MIN(vk->limits.max_per_stage_descriptor_sampled_images, RENDER_MAX_IMAGES_SIZE);
@@ -878,7 +886,8 @@ render_resources_init(struct render_resources *r,
 	    RENDER_MAX_LAYER_RUNS_COUNT(r);       // Layer shader run(s).
 
 	struct vk_descriptor_pool_info compute_pool_info = {
-	    .uniform_per_descriptor_count = 1,
+	    // Layer sets use a second UBO for foveation maps.
+	    .uniform_per_descriptor_count = 2,
 	    // layer images
 	    .sampler_per_descriptor_count = r->compute.layer.image_array_size + RENDER_DISTORTION_IMAGES_COUNT(r),
 	    .storage_image_per_descriptor_count = 1,
@@ -904,6 +913,7 @@ render_resources_init(struct render_resources *r,
 	    r->compute.src_binding,                       // src_binding,
 	    r->compute.target_binding,                    // target_binding,
 	    r->compute.ubo_binding,                       // ubo_binding,
+	    r->compute.layer_foveation_binding,           // foveation_binding,
 	    r->compute.layer.image_array_size,            // source_images_count,
 	    &r->compute.layer.descriptor_set_layout);     // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_compute_layer_descriptor_set_layout", false);
@@ -970,6 +980,22 @@ render_resources_init(struct render_resources *r,
 		    vk,                         // vk_bundle
 		    &r->compute.layer.ubos[i]); // buffer
 		VK_CHK_WITH_RET(ret, "render_buffer_map", false);
+
+		ret = render_buffer_init(                                       //
+		    vk,                                                         // vk_bundle
+		    &r->compute.layer.foveation_ubos[i],                        // buffer
+		    ubo_usage_flags,                                            // usage_flags
+		    memory_property_flags,                                      // memory_property_flags
+		    sizeof(struct render_compute_layer_foveation_ubo_data));    // size
+		VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+		VK_NAME_BUFFER(vk, r->compute.layer.foveation_ubos[i].buffer,
+		               "render_resources compute layer foveation ubo");
+
+		ret = render_buffer_map(                  //
+		    vk,                                   // vk_bundle
+		    &r->compute.layer.foveation_ubos[i]); // buffer
+		VK_CHK_WITH_RET(ret, "render_buffer_map", false);
+		U_ZERO((struct render_compute_layer_foveation_ubo_data *)r->compute.layer.foveation_ubos[i].mapped);
 	}
 
 
@@ -1190,6 +1216,7 @@ render_resources_fini(struct render_resources *r)
 	render_buffer_fini(vk, &r->compute.clear.ubo);
 	for (uint32_t i = 0; i < r->view_count; i++) {
 		render_buffer_fini(vk, &r->compute.layer.ubos[i]);
+		render_buffer_fini(vk, &r->compute.layer.foveation_ubos[i]);
 	}
 	render_buffer_fini(vk, &r->compute.distortion.ubo);
 

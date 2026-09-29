@@ -888,6 +888,34 @@ err_layer:
 
 
 
+/*!
+ * The graphics path does not reconstruct experimental Metal
+ * variable-rasterization-rate source images; only the compute path does. Say
+ * so loudly rather than let a compacted image look like a rendering bug.
+ */
+static void
+warn_if_foveated_layers(const struct comp_layer *layers, uint32_t layer_count)
+{
+	static bool logged = false;
+	if (logged) {
+		return;
+	}
+	for (uint32_t i = 0; i < layer_count; i++) {
+		const struct xrt_layer_data *data = &layers[i].data;
+		if (data->type != XRT_LAYER_PROJECTION) {
+			continue;
+		}
+		for (uint32_t v = 0; v < data->view_count; v++) {
+			if (data->proj.v[v].foveation.enabled != 0) {
+				U_LOG_E("Graphics compositor path cannot sample foveated projection images; "
+				        "use the compute path (XRT_COMPOSITOR_COMPUTE=1). Logged once.");
+				logged = true;
+				return;
+			}
+		}
+	}
+}
+
 void
 comp_render_gfx_dispatch(struct render_gfx *render,
                          const struct comp_layer *layers,
@@ -899,6 +927,8 @@ comp_render_gfx_dispatch(struct render_gfx *render,
 		assert(d->target.initialized);
 		return;
 	}
+
+	warn_if_foveated_layers(layers, layer_count);
 
 	// Convenience.
 	bool fast_path = d->fast_path;

@@ -190,6 +190,8 @@ update_compute_layer_descriptor_set(struct vk_bundle *vk,
                                     uint32_t ubo_binding,
                                     VkBuffer ubo_buffer,
                                     VkDeviceSize ubo_size,
+                                    uint32_t foveation_binding,
+                                    VkBuffer foveation_buffer,
                                     VkDescriptorSet descriptor_set)
 {
 	VkDescriptorImageInfo src_image_info[RENDER_MAX_IMAGES_SIZE];
@@ -210,7 +212,13 @@ update_compute_layer_descriptor_set(struct vk_bundle *vk,
 	    .range = ubo_size,
 	};
 
-	VkWriteDescriptorSet write_descriptor_sets[3] = {
+	VkDescriptorBufferInfo foveation_buffer_info = {
+	    .buffer = foveation_buffer,
+	    .offset = 0,
+	    .range = VK_WHOLE_SIZE,
+	};
+
+	VkWriteDescriptorSet write_descriptor_sets[4] = {
 	    {
 	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 	        .dstSet = descriptor_set,
@@ -234,6 +242,14 @@ update_compute_layer_descriptor_set(struct vk_bundle *vk,
 	        .descriptorCount = 1,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 	        .pBufferInfo = &buffer_info,
+	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = descriptor_set,
+	        .dstBinding = foveation_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .pBufferInfo = &foveation_buffer_info,
 	    },
 	};
 
@@ -779,6 +795,7 @@ void
 render_compute_layers(struct render_compute *render,
                       VkDescriptorSet descriptor_set,
                       VkBuffer ubo,
+                      VkBuffer foveation_ubo,
                       VkSampler src_samplers[RENDER_MAX_IMAGES_SIZE],
                       VkImageView src_image_views[RENDER_MAX_IMAGES_SIZE],
                       uint32_t num_srcs,
@@ -807,6 +824,8 @@ render_compute_layers(struct render_compute *render,
 	    r->compute.ubo_binding,          //
 	    ubo,                             //
 	    VK_WHOLE_SIZE,                   //
+	    r->compute.layer_foveation_binding, //
+	    foveation_ubo,                   //
 	    descriptor_set);                 //
 
 	VkPipeline pipeline = do_timewarp ? r->compute.layer.timewarp_pipeline : r->compute.layer.non_timewarp_pipeline;
