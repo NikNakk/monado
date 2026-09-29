@@ -62,6 +62,17 @@ oxr_foveation_resolve_fixed_centres(const struct xrt_fov *fovs,
                                     uint32_t view_count,
                                     struct xrt_foveation_state *state);
 
+/*!
+ * Project a runtime-owned gaze direction in view space into per-view NDC
+ * foveation centres. vertical_offset_degrees is applied in angular space.
+ */
+bool
+oxr_foveation_resolve_gaze_centres(const struct xrt_vec3 *view_direction,
+                                   const struct xrt_fov *fovs,
+                                   uint32_t view_count,
+                                   float vertical_offset_degrees,
+                                   struct xrt_foveation_state *state);
+
 #ifdef __cplusplus
 }
 #endif
