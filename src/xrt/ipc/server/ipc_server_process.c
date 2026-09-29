@@ -36,9 +36,6 @@
 #include "server/ipc_server.h"
 #include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
-#if defined(XRT_OS_OSX)
-#include "server/ipc_server_macos_activity.h"
-#endif
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -957,15 +954,6 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 	// Log very early who we are.
 	U_LOG_IFL_I(log_level, "%s '%s' starting up...", u_runtime_description, u_git_tag);
 
-#if defined(XRT_OS_OSX)
-	/*
-	 * Diagnostic process-lifetime activity assertion. Acquire it before Monado
-	 * creates the compositor so RunningBoard policy cannot race ahead of a
-	 * later session-lifecycle hook.
-	 */
-	ipc_server_macos_process_activity_startup();
-#endif
-
 	// Allocate the server itself.
 	struct ipc_server *s = U_TYPED_CALLOC(struct ipc_server);
 
@@ -990,9 +978,6 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 		callbacks->init_failed(xret, data);
 		u_debug_gui_stop(&s->debug_gui);
 		free(s);
-#if defined(XRT_OS_OSX)
-		ipc_server_macos_process_activity_shutdown();
-#endif
 		return -1;
 	}
 
@@ -1019,11 +1004,6 @@ ipc_server_main_common(const struct ipc_server_main_info *ismi,
 
 	// Stop the UI before tearing everything down.
 	u_debug_gui_stop(&s->debug_gui);
-
-	// End the diagnostic assertion before tearing the process down.
-#if defined(XRT_OS_OSX)
-	ipc_server_macos_process_activity_shutdown();
-#endif
 
 	// Done after UI stopped.
 	teardown_all(s);
