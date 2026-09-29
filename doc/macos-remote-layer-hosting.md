@@ -141,11 +141,95 @@ The probe renders almost nothing, so these numbers do not yet cover a
 GPU-loaded client. They also do not show whether the surface was scanned out
 directly; that needs an Instruments Display trace.
 
+Since the Game Mode test was added, render threads use a realtime
+time-constraint policy by default, like Monado's compositor thread. Pass
+`--rt 0` to repeat the runs above exactly.
+
+## Game Mode test
+
+The timing runs above keep both processes in the terminal's coalition, so
+Game Mode never separates them. The Game Mode test reproduces the real
+arrangement:
+
+- **Host:** `macos-layer-host-probe --role bootstrap-host` registers the probe
+  with launchd as a LaunchAgent (`org.freedesktop.monado.layer-host-probe`,
+  `ProcessType=Interactive` by default, `--process-type Adaptive` to match the
+  service's current default). It therefore runs in its own coalition, like
+  `monado-service`. It opens the headset window and waits on
+  `/tmp/monado-layer-host-probe.sock`.
+- **Game:** `macos-layer-host-probe-game.app` is the same program built as an
+  app bundle with `LSApplicationCategoryType=public.app-category.games` and
+  `GCSupportsGameMode`. It goes fullscreen on the Mac's own display so Game
+  Mode engages, waits `--warmup` seconds, connects to the host and runs for
+  `--seconds`. `--cpu-load N` adds N busy threads at user-interactive QoS in
+  place of a game's workers.
+
+Two modes, chosen when the host is bootstrapped:
+
+| Mode | Who renders to the headset | Expected under Game Mode |
+| --- | --- | --- |
+| `game-direct` | the host, as `monado-service` does today | reproduces the problem |
+| `game-hosted` | the game, through `CAContext`; the host shows it in a `CALayerHost` | the proposed fix |
+
+To make throttling of the host visible whichever process renders, the host
+runs a realtime canary thread. It wakes every refresh period and logs its
+priority class (`realtime` at 97, `throttled` at 4) and both processes'
+Darwin-background state: the `darwinbg` and `ext_darwinbg` flags, `adaptive`
+and `adaptive_important`, and the Darwin role. It logs on every class change
+and every 5 s. It starts before the game connects, which gives a baseline.
+Each rendered frame also records its render thread's priority.
+
+`macos-layer-host-probe --role query --pid PID` prints the same state for any
+process, for example the real `monado-service` while Unreal runs. Run it with
+`sudo` to also read whether Game Mode is on for that process.
+
+### Running it
+
+Stop `monado-service` first so it releases the headset display. From the build
+directory:
+
+```sh
+P=src/xrt/targets/macos_layer_host_probe
+
+# 1. Host under launchd, in its own coalition. It must outlast the game.
+$P/macos-layer-host-probe --role bootstrap-host --mode game-direct --seconds 120
+
+# 2. Game half: goes fullscreen on the Mac display. Check that the Game Mode
+#    icon appears in the menu bar.
+open -n $P/macos-layer-host-probe-game.app --args \
+    --seconds 60 --warmup 5 --cpu-load "$(sysctl -n hw.ncpu)"
+
+# 3. When the game exits (about 65 s), read both logs.
+cat /tmp/layer_host_probe_host.log /tmp/layer_host_probe_game.log
+
+# 4. Repeat steps 1-3 with --mode game-hosted.
+
+# 5. Remove the LaunchAgent.
+$P/macos-layer-host-probe --role bootout-host
+```
+
+The logs append, so clear them between runs or read from the latest `host
+pid=` line. CSVs are written to `/tmp/layer_host_probe_<mode>_{host,game,canary}_<pid>.csv`.
+
+### Reading the results
+
+- **Canary moves `realtime` → `throttled` once the game is fullscreen:** the
+  probe reproduces the demotion. The host flags show the mechanism:
+  `ext_darwinbg=1` means another process set it; `role=darwin-bg` means a task
+  role; `darwinbg=1` with neither points to coalition suppression or a QoS
+  clamp; `adaptive=1 adaptive_important=0` would mean the `Adaptive` cause.
+- **`game-direct`:** the host's render summary should show throttled frames
+  and worse intervals than the 2026-09-29 baseline. This is today's service.
+- **`game-hosted`:** the game's render summary is the key result. If it
+  matches the baseline while the canary shows the host throttled, the design
+  works: frames no longer depend on the host's priority.
+- **Canary never throttled:** either Game Mode did not engage (check the menu
+  bar icon), or it does not throttle this LaunchAgent the way it throttles
+  `monado-service`. Try `--process-type Adaptive`, and compare with
+  `query --pid` on the real service while Unreal runs.
+
 ### Not yet covered
 
-- Behaviour under Game Mode, with the host in the service's launchd coalition
-  and the renderer in a real Game Mode app. The probe's child inherits the
-  host's coalition, so it is not a Game Mode test.
 - Handoff between two hosted clients, and fence-port alignment.
 - A GPU-heavy renderer, and whether direct scanout is kept.
 - Integration with the multi-client compositor.

@@ -3,16 +3,31 @@
 /*!
  * @file
  * @brief Standalone probe: does cross-process CALayerHost hosting change
- *        CAMetalLayer present timing on the headset display?
+ *        CAMetalLayer present timing on the headset display, and does it
+ *        keep that timing when Game Mode throttles the hosting process?
  *
- * Three modes, all presenting the same way as Monado's legacy headset window
- * (CVDisplayLink pacing, three drawables, afterMinimumDuration by default):
+ * All modes present the same way as Monado's legacy headset window
+ * (CVDisplayLink pacing, three drawables, afterMinimumDuration by default).
+ *
+ * Timing modes, run from a terminal:
  *
  *  - direct:       this process renders into its own window's CAMetalLayer.
  *  - hosted-local: this process renders into a CAContext and shows it through
  *                  a CALayerHost in its own window (hosting cost only).
  *  - hosted:       a spawned child process renders into a CAContext; this
  *                  process shows it through a CALayerHost (cross-process).
+ *
+ * Game Mode modes, with the host started by launchd (bootstrap-host) like
+ * monado-service and the game half run as a games-category app bundle:
+ *
+ *  - game-direct:  the host renders to the headset, as monado-service does
+ *                  today; the game only goes fullscreen and loads the CPU.
+ *  - game-hosted:  the game renders into a CAContext; the host shows it
+ *                  through a CALayerHost.
+ *
+ * In the Game Mode modes the host also runs a realtime canary thread that
+ * logs its own scheduling priority and both processes' Darwin-background
+ * state, so throttling of the host is visible directly.
  *
  * The rendering process records presentedTime for every drawable against the
  * CVDisplayLink vblank it was paced to, writes a CSV and prints a summary.
@@ -27,20 +42,60 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include <dlfcn.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <libproc.h>
 #include <mach-o/dyld.h>
+#include <mach/mach.h>
 #include <mach/mach_time.h>
+#include <mach/thread_policy.h>
 #include <objc/runtime.h>
 #include <poll.h>
+#include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/proc_info.h>
+#include <sys/resource.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 extern char **environ;
+
+// Private libproc / getpriority values, from XNU's proc_info_private.h and
+// resource_private.h. Only read, never set.
+#ifndef PROC_FLAG_DARWINBG
+#define PROC_FLAG_DARWINBG 0x8000
+#endif
+#ifndef PROC_FLAG_EXT_DARWINBG
+#define PROC_FLAG_EXT_DARWINBG 0x10000
+#endif
+#ifndef PROC_FLAG_ADAPTIVE
+#define PROC_FLAG_ADAPTIVE 0x100000
+#endif
+#ifndef PROC_FLAG_ADAPTIVE_IMPORTANT
+#define PROC_FLAG_ADAPTIVE_IMPORTANT 0x200000
+#endif
+#ifndef PROC_FLAG_APPLICATION
+#define PROC_FLAG_APPLICATION 0x1000000
+#endif
+#ifndef PRIO_DARWIN_ROLE
+#define PRIO_DARWIN_ROLE 6
+#endif
+#ifndef PRIO_DARWIN_GAME_MODE
+#define PRIO_DARWIN_GAME_MODE 7
+#endif
+
+#define PROBE_SOCKET_PATH "/tmp/monado-layer-host-probe.sock"
+#define PROBE_LAUNCHD_LABEL "org.freedesktop.monado.layer-host-probe"
+#define PROBE_HOST_LOG "/tmp/layer_host_probe_host.log"
+#define PROBE_GAME_LOG "/tmp/layer_host_probe_game.log"
+#define PROBE_MAGIC 0x4d4c4850u
 
 
 /*
@@ -112,11 +167,23 @@ create_layer_host(CAContextID context_id)
  *
  */
 
+enum probe_role
+{
+	PROBE_ROLE_HOST,
+	PROBE_ROLE_CLIENT,
+	PROBE_ROLE_GAME,
+	PROBE_ROLE_BOOTSTRAP_HOST,
+	PROBE_ROLE_BOOTOUT_HOST,
+	PROBE_ROLE_QUERY,
+};
+
 enum probe_mode
 {
 	PROBE_MODE_DIRECT,
 	PROBE_MODE_HOSTED_LOCAL,
 	PROBE_MODE_HOSTED,
+	PROBE_MODE_GAME_DIRECT,
+	PROBE_MODE_GAME_HOSTED,
 };
 
 enum present_mode
@@ -128,13 +195,20 @@ enum present_mode
 
 struct probe_options
 {
-	bool is_client;
+	enum probe_role role;
 	enum probe_mode mode;
 	enum present_mode present;
 	int display_index;
 	double seconds;
 	double min_duration_us;
 	const char *out_prefix;
+	bool realtime;
+
+	// Game Mode test.
+	int cpu_load;
+	double warmup;
+	const char *process_type;
+	pid_t query_pid;
 
 	// Passed from host to client only.
 	CGDirectDisplayID display_id;
@@ -151,8 +225,16 @@ mode_name(enum probe_mode mode)
 	case PROBE_MODE_DIRECT: return "direct";
 	case PROBE_MODE_HOSTED_LOCAL: return "hosted-local";
 	case PROBE_MODE_HOSTED: return "hosted";
+	case PROBE_MODE_GAME_DIRECT: return "game-direct";
+	case PROBE_MODE_GAME_HOSTED: return "game-hosted";
 	}
 	return "unknown";
+}
+
+static bool
+mode_is_game(enum probe_mode mode)
+{
+	return mode == PROBE_MODE_GAME_DIRECT || mode == PROBE_MODE_GAME_HOSTED;
 }
 
 static const char *
@@ -170,26 +252,47 @@ static void
 print_usage(const char *argv0)
 {
 	fprintf(stderr,
-	        "Usage: %s [--mode direct|hosted-local|hosted] [--display N] [--seconds S]\n"
+	        "Usage: %s [--mode MODE] [--display N] [--seconds S]\n"
 	        "          [--present min-duration|at-time|immediate] [--min-duration-us US]\n"
-	        "          [--out PREFIX]\n"
+	        "          [--out PREFIX] [--rt 0|1]\n"
+	        "       %s --role bootstrap-host --mode game-direct|game-hosted [host options]\n"
+	        "          [--process-type Interactive|Adaptive]\n"
+	        "       %s --role bootout-host\n"
+	        "       %s --role query --pid PID\n"
 	        "\n"
+	        "  MODE          direct, hosted-local, hosted (timing, run from a terminal)\n"
+	        "                game-direct, game-hosted (Game Mode test, host via bootstrap-host)\n"
 	        "  --display N   index into NSScreen.screens (default: last screen, usually the headset)\n"
-	        "  --seconds S   measurement length (default 20)\n"
-	        "  --out PREFIX  CSV path prefix (default /tmp/layer_host_probe)\n",
-	        argv0);
+	        "  --seconds S   measurement length (default 20); in the Game Mode test the host\n"
+	        "                renders for at most S and should outlast the game\n"
+	        "  --out PREFIX  CSV path prefix (default /tmp/layer_host_probe)\n"
+	        "  --rt 0|1      realtime (time-constraint) render thread, as Monado's compositor (default 1)\n"
+	        "\n"
+	        "Game half (macos-layer-host-probe-game.app, launched with open --args):\n"
+	        "  --seconds S   how long to render or load the CPU (default 20)\n"
+	        "  --warmup S    wait before connecting, so Game Mode can engage (default 5)\n"
+	        "  --cpu-load N  busy threads at user-interactive QoS (default 0)\n",
+	        argv0, argv0, argv0, argv0);
 }
 
 static bool
 parse_options(int argc, char **argv, struct probe_options *opts)
 {
 	*opts = (struct probe_options){
+#ifdef LAYER_HOST_PROBE_GAME_BUNDLE
+	    .role = PROBE_ROLE_GAME,
+#else
+	    .role = PROBE_ROLE_HOST,
+#endif
 	    .mode = PROBE_MODE_DIRECT,
 	    .present = PRESENT_MIN_DURATION,
 	    .display_index = -1,
 	    .seconds = 20.0,
 	    .min_duration_us = 8000.0,
 	    .out_prefix = "/tmp/layer_host_probe",
+	    .realtime = true,
+	    .warmup = 5.0,
+	    .process_type = "Interactive",
 	    .context_fd = -1,
 	};
 
@@ -197,19 +300,45 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 		const char *arg = argv[i];
 		const char *value = (i + 1 < argc) ? argv[i + 1] : NULL;
 
-		if (strcmp(arg, "--role") == 0 && value != NULL) {
-			opts->is_client = strcmp(value, "client") == 0;
-		} else if (strcmp(arg, "--mode") == 0 && value != NULL) {
+		// LaunchServices may pass a process serial number to bundled apps.
+		if (strncmp(arg, "-psn_", 5) == 0) {
+			continue;
+		}
+		if (value == NULL) {
+			return false;
+		}
+
+		if (strcmp(arg, "--role") == 0) {
+			if (strcmp(value, "host") == 0) {
+				opts->role = PROBE_ROLE_HOST;
+			} else if (strcmp(value, "client") == 0) {
+				opts->role = PROBE_ROLE_CLIENT;
+			} else if (strcmp(value, "game") == 0) {
+				opts->role = PROBE_ROLE_GAME;
+			} else if (strcmp(value, "bootstrap-host") == 0) {
+				opts->role = PROBE_ROLE_BOOTSTRAP_HOST;
+			} else if (strcmp(value, "bootout-host") == 0) {
+				opts->role = PROBE_ROLE_BOOTOUT_HOST;
+			} else if (strcmp(value, "query") == 0) {
+				opts->role = PROBE_ROLE_QUERY;
+			} else {
+				return false;
+			}
+		} else if (strcmp(arg, "--mode") == 0) {
 			if (strcmp(value, "direct") == 0) {
 				opts->mode = PROBE_MODE_DIRECT;
 			} else if (strcmp(value, "hosted-local") == 0) {
 				opts->mode = PROBE_MODE_HOSTED_LOCAL;
 			} else if (strcmp(value, "hosted") == 0) {
 				opts->mode = PROBE_MODE_HOSTED;
+			} else if (strcmp(value, "game-direct") == 0) {
+				opts->mode = PROBE_MODE_GAME_DIRECT;
+			} else if (strcmp(value, "game-hosted") == 0) {
+				opts->mode = PROBE_MODE_GAME_HOSTED;
 			} else {
 				return false;
 			}
-		} else if (strcmp(arg, "--present") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--present") == 0) {
 			if (strcmp(value, "min-duration") == 0) {
 				opts->present = PRESENT_MIN_DURATION;
 			} else if (strcmp(value, "at-time") == 0) {
@@ -219,23 +348,36 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 			} else {
 				return false;
 			}
-		} else if (strcmp(arg, "--display") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--display") == 0) {
 			opts->display_index = atoi(value);
-		} else if (strcmp(arg, "--seconds") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--seconds") == 0) {
 			opts->seconds = atof(value);
-		} else if (strcmp(arg, "--min-duration-us") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--min-duration-us") == 0) {
 			opts->min_duration_us = atof(value);
-		} else if (strcmp(arg, "--out") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--out") == 0) {
 			opts->out_prefix = value;
-		} else if (strcmp(arg, "--display-id") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--rt") == 0) {
+			opts->realtime = atoi(value) != 0;
+		} else if (strcmp(arg, "--cpu-load") == 0) {
+			opts->cpu_load = atoi(value);
+		} else if (strcmp(arg, "--warmup") == 0) {
+			opts->warmup = atof(value);
+		} else if (strcmp(arg, "--process-type") == 0) {
+			if (strcmp(value, "Interactive") != 0 && strcmp(value, "Adaptive") != 0) {
+				return false;
+			}
+			opts->process_type = value;
+		} else if (strcmp(arg, "--pid") == 0) {
+			opts->query_pid = (pid_t)atoi(value);
+		} else if (strcmp(arg, "--display-id") == 0) {
 			opts->display_id = (CGDirectDisplayID)strtoul(value, NULL, 10);
-		} else if (strcmp(arg, "--width") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--width") == 0) {
 			opts->width_points = atof(value);
-		} else if (strcmp(arg, "--height") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--height") == 0) {
 			opts->height_points = atof(value);
-		} else if (strcmp(arg, "--scale") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--scale") == 0) {
 			opts->scale = atof(value);
-		} else if (strcmp(arg, "--context-fd") == 0 && value != NULL) {
+		} else if (strcmp(arg, "--context-fd") == 0) {
 			opts->context_fd = atoi(value);
 		} else {
 			return false;
@@ -245,7 +387,7 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 		i++;
 	}
 
-	return opts->seconds > 0.0;
+	return opts->seconds > 0.0 && opts->cpu_load >= 0 && opts->warmup >= 0.0;
 }
 
 
@@ -261,6 +403,12 @@ static double
 mach_to_seconds(uint64_t ticks)
 {
 	return (double)ticks * (double)g_timebase.numer / (double)g_timebase.denom / 1e9;
+}
+
+static uint64_t
+seconds_to_mach(double seconds)
+{
+	return (uint64_t)(seconds * 1e9 * (double)g_timebase.denom / (double)g_timebase.numer);
 }
 
 static double
@@ -291,6 +439,120 @@ percentile(double *sorted, size_t count, double pct)
 
 /*
  *
+ * Scheduling and process-policy helpers.
+ *
+ */
+
+//! Same time-constraint shape as Monado's compositor thread (35 % / 70 %).
+static bool
+set_thread_realtime(double period_s)
+{
+	uint64_t period = seconds_to_mach(period_s);
+	thread_time_constraint_policy_data_t policy = {
+	    .period = (uint32_t)period,
+	    .computation = (uint32_t)(period * 35 / 100),
+	    .constraint = (uint32_t)(period * 70 / 100),
+	    .preemptible = TRUE,
+	};
+	kern_return_t kr = thread_policy_set(pthread_mach_thread_np(pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
+	                                     (thread_policy_t)&policy, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+	return kr == KERN_SUCCESS;
+}
+
+//! Current scheduled priority: 97 when realtime, 4 when Darwin-background.
+static int
+thread_current_priority(void)
+{
+	thread_extended_info_data_t info;
+	mach_msg_type_number_t count = THREAD_EXTENDED_INFO_COUNT;
+	kern_return_t kr =
+	    thread_info(pthread_mach_thread_np(pthread_self()), THREAD_EXTENDED_INFO, (thread_info_t)&info, &count);
+	return kr == KERN_SUCCESS ? info.pth_curpri : -1;
+}
+
+static const char *
+priority_class(int priority)
+{
+	if (priority < 0) {
+		return "unknown";
+	}
+	if (priority >= 80) {
+		return "realtime";
+	}
+	if (priority <= 4) {
+		return "throttled";
+	}
+	return "timeshare";
+}
+
+struct policy_snapshot
+{
+	bool flags_valid;
+	uint32_t flags;
+	int role;      //!< PRIO_DARWIN_ROLE_*, or -1 if unreadable.
+	int game_mode; //!< 1 on, 0 off, -1 unreadable (needs root).
+};
+
+static struct policy_snapshot
+snapshot_policy(pid_t pid)
+{
+	struct policy_snapshot snap = {.role = -1, .game_mode = -1};
+
+	struct proc_bsdinfo info;
+	if (proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, sizeof(info)) == (int)sizeof(info)) {
+		snap.flags_valid = true;
+		snap.flags = info.pbi_flags;
+	}
+
+	errno = 0;
+	int role = getpriority(PRIO_DARWIN_ROLE, (id_t)pid);
+	if (errno == 0) {
+		snap.role = role;
+	}
+
+	errno = 0;
+	int game_mode = getpriority(PRIO_DARWIN_GAME_MODE, (id_t)pid);
+	if (errno == 0) {
+		snap.game_mode = game_mode;
+	}
+
+	return snap;
+}
+
+static const char *
+darwin_role_name(int role)
+{
+	switch (role) {
+	case -1: return "unreadable";
+	case 0: return "default";
+	case 1: return "ui-focal";
+	case 2: return "ui";
+	case 3: return "non-ui";
+	case 4: return "ui-non-focal";
+	case 5: return "tal-launch";
+	case 6: return "darwin-bg";
+	case 7: return "user-init";
+	}
+	return "other";
+}
+
+static void
+format_policy(char *buf, size_t size, struct policy_snapshot snap)
+{
+	if (!snap.flags_valid) {
+		snprintf(buf, size, "flags=unreadable role=%s", darwin_role_name(snap.role));
+		return;
+	}
+	snprintf(buf, size, "darwinbg=%d ext_darwinbg=%d adaptive=%d adaptive_important=%d app=%d role=%s game_mode=%s",
+	         (snap.flags & PROC_FLAG_DARWINBG) != 0, (snap.flags & PROC_FLAG_EXT_DARWINBG) != 0,
+	         (snap.flags & PROC_FLAG_ADAPTIVE) != 0, (snap.flags & PROC_FLAG_ADAPTIVE_IMPORTANT) != 0,
+	         (snap.flags & PROC_FLAG_APPLICATION) != 0, darwin_role_name(snap.role),
+	         snap.game_mode < 0 ? "unreadable" : (snap.game_mode ? "on" : "off"));
+}
+
+
+/*
+ *
  * Renderer: paces to CVDisplayLink and presents into a CAMetalLayer.
  *
  */
@@ -300,6 +562,7 @@ struct frame_record
 	double submit_s;
 	double target_s;
 	_Atomic double presented_s;
+	int priority;
 };
 
 @interface ProbeRenderer : NSObject
@@ -307,7 +570,9 @@ struct frame_record
                     displayID:(CGDirectDisplayID)displayID
                       options:(const struct probe_options *)opts
                          role:(const char *)role;
+//! Renders on the calling thread, which must be a dedicated thread.
 - (void)runForSeconds:(double)seconds;
+- (void)requestStop;
 @end
 
 static CVReturn
@@ -326,7 +591,9 @@ display_link_callback(CVDisplayLinkRef link,
 	CVDisplayLinkRef _displayLink;
 	dispatch_semaphore_t _vblank;
 	_Atomic uint64_t _nextVblankHostTime;
+	_Atomic bool _stopRequested;
 	double _periodSeconds;
+	bool _realtime;
 
 	struct probe_options _opts;
 	const char *_role;
@@ -400,6 +667,11 @@ display_link_callback(CVDisplayLinkRef link,
 	dispatch_semaphore_signal(_vblank);
 }
 
+- (void)requestStop
+{
+	atomic_store(&_stopRequested, true);
+}
+
 - (void)renderFrame
 {
 	id<CAMetalDrawable> drawable = [_layer nextDrawable];
@@ -414,6 +686,7 @@ display_link_callback(CVDisplayLinkRef link,
 	size_t index = _count++;
 	struct frame_record *record = &_records[index];
 	record->target_s = mach_to_seconds(atomic_load(&_nextVblankHostTime));
+	record->priority = thread_current_priority();
 
 	id<MTLCommandBuffer> cmd = [_queue commandBuffer];
 
@@ -455,10 +728,17 @@ display_link_callback(CVDisplayLinkRef link,
 
 - (void)runForSeconds:(double)seconds
 {
+	if (_opts.realtime) {
+		_realtime = set_thread_realtime(_periodSeconds);
+		if (!_realtime) {
+			fprintf(stderr, "LAYER_HOST_PROBE %s: could not make the render thread realtime\n", _role);
+		}
+	}
+
 	CVDisplayLinkStart(_displayLink);
 
 	double end = now_seconds() + seconds;
-	while (now_seconds() < end) {
+	while (now_seconds() < end && !atomic_load(&_stopRequested)) {
 		dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC));
 		if (dispatch_semaphore_wait(_vblank, timeout) != 0) {
 			continue;
@@ -487,13 +767,15 @@ display_link_callback(CVDisplayLinkRef link,
 		return;
 	}
 
-	fprintf(file, "frame,submit_s,target_vblank_s,presented_s,present_minus_target_ms,present_minus_submit_ms\n");
+	fprintf(file,
+	        "frame,submit_s,target_vblank_s,presented_s,present_minus_target_ms,present_minus_submit_ms,"
+	        "thread_priority\n");
 	for (size_t i = 0; i < _count; i++) {
 		double presented = atomic_load(&_records[i].presented_s);
 		double to_target = presented > 0.0 ? (presented - _records[i].target_s) * 1e3 : 0.0;
 		double to_submit = presented > 0.0 ? (presented - _records[i].submit_s) * 1e3 : 0.0;
-		fprintf(file, "%zu,%.9f,%.9f,%.9f,%.4f,%.4f\n", i, _records[i].submit_s, _records[i].target_s, presented,
-		        to_target, to_submit);
+		fprintf(file, "%zu,%.9f,%.9f,%.9f,%.4f,%.4f,%d\n", i, _records[i].submit_s, _records[i].target_s,
+		        presented, to_target, to_submit, _records[i].priority);
 	}
 	fclose(file);
 	fprintf(stderr, "LAYER_HOST_PROBE wrote %s\n", path);
@@ -504,12 +786,19 @@ display_link_callback(CVDisplayLinkRef link,
 	double *intervals = calloc(_count + 1, sizeof(double));
 	double *to_target = calloc(_count + 1, sizeof(double));
 	double *to_submit = calloc(_count + 1, sizeof(double));
+	double *priorities = calloc(_count + 1, sizeof(double));
 	size_t presented_count = 0;
 	size_t interval_count = 0;
 	size_t long_intervals = 0;
+	size_t throttled_frames = 0;
 	double previous = 0.0;
 
 	for (size_t i = 0; i < _count; i++) {
+		priorities[i] = _records[i].priority;
+		if (_records[i].priority >= 0 && _records[i].priority <= 4) {
+			throttled_frames++;
+		}
+
 		double presented = atomic_load(&_records[i].presented_s);
 		if (presented <= 0.0) {
 			continue;
@@ -531,24 +820,29 @@ display_link_callback(CVDisplayLinkRef link,
 	qsort(intervals, interval_count, sizeof(double), compare_doubles);
 	qsort(to_target, presented_count, sizeof(double), compare_doubles);
 	qsort(to_submit, presented_count, sizeof(double), compare_doubles);
+	qsort(priorities, _count, sizeof(double), compare_doubles);
 
 	fprintf(stderr,
 	        "LAYER_HOST_PROBE summary role=%s mode=%s present=%s min_duration_us=%.0f refresh_hz=%.3f\n"
 	        "  frames submitted=%zu presented=%zu not_presented=%zu nil_drawables=%zu\n"
 	        "  present interval ms: median=%.3f p95=%.3f p99=%.3f  >1.5x period=%.2f%%\n"
 	        "  presented - vblank target ms: median=%.3f p95=%.3f\n"
-	        "  presented - CPU submit ms: median=%.3f p95=%.3f\n",
+	        "  presented - CPU submit ms: median=%.3f p95=%.3f\n"
+	        "  render thread: realtime=%s priority min=%.0f median=%.0f  frames throttled (<=4)=%.2f%%\n",
 	        _role, mode_name(_opts.mode), present_name(_opts.present), _opts.min_duration_us,
 	        1.0 / _periodSeconds, _count, presented_count, _count - presented_count, _nilDrawables,
 	        percentile(intervals, interval_count, 50), percentile(intervals, interval_count, 95),
 	        percentile(intervals, interval_count, 99),
 	        interval_count > 0 ? 100.0 * (double)long_intervals / (double)interval_count : 0.0,
 	        percentile(to_target, presented_count, 50), percentile(to_target, presented_count, 95),
-	        percentile(to_submit, presented_count, 50), percentile(to_submit, presented_count, 95));
+	        percentile(to_submit, presented_count, 50), percentile(to_submit, presented_count, 95),
+	        _realtime ? "yes" : "no", _count > 0 ? priorities[0] : -1.0, percentile(priorities, _count, 50),
+	        _count > 0 ? 100.0 * (double)throttled_frames / (double)_count : 0.0);
 
 	free(intervals);
 	free(to_target);
 	free(to_submit);
+	free(priorities);
 }
 
 @end
@@ -583,6 +877,357 @@ create_metal_layer(CGSize points, double scale)
 	layer.contentsScale = scale;
 	layer.drawableSize = CGSizeMake(points.width * scale, points.height * scale);
 	return layer;
+}
+
+
+/*
+ *
+ * Canary: a realtime thread in the host that wakes every refresh period and
+ * records how late it woke and at what priority it ran.
+ *
+ */
+
+struct canary_sample
+{
+	double t_s;
+	float lateness_us;
+	int16_t priority;
+};
+
+struct canary
+{
+	pthread_t thread;
+	_Atomic bool stop;
+	_Atomic int watch_pid;
+	double period_s;
+	bool realtime;
+	struct canary_sample *samples;
+	size_t capacity;
+	size_t count;
+	size_t transitions;
+};
+
+static void
+canary_log_state(struct canary *c, double t, int priority)
+{
+	char host_policy[256];
+	char game_policy[256] = "none";
+	format_policy(host_policy, sizeof(host_policy), snapshot_policy(getpid()));
+	int watch_pid = atomic_load(&c->watch_pid);
+	if (watch_pid > 0) {
+		format_policy(game_policy, sizeof(game_policy), snapshot_policy(watch_pid));
+	}
+	fprintf(stderr, "LAYER_HOST_PROBE canary t=%.3f priority=%d class=%s host{%s} game{pid=%d %s}\n", t, priority,
+	        priority_class(priority), host_policy, watch_pid, game_policy);
+}
+
+static void *
+canary_main(void *ptr)
+{
+	struct canary *c = ptr;
+	pthread_setname_np("layer-host-probe-canary");
+	c->realtime = set_thread_realtime(c->period_s);
+
+	uint64_t period_ticks = seconds_to_mach(c->period_s);
+	uint64_t next = mach_absolute_time() + period_ticks;
+	const char *last_class = NULL;
+	double last_log = 0.0;
+
+	while (!atomic_load(&c->stop)) {
+		mach_wait_until(next);
+		uint64_t now = mach_absolute_time();
+		double t = mach_to_seconds(now);
+		int priority = thread_current_priority();
+
+		if (c->count < c->capacity) {
+			struct canary_sample *s = &c->samples[c->count++];
+			s->t_s = t;
+			s->lateness_us = now > next ? (float)(mach_to_seconds(now - next) * 1e6) : 0.0f;
+			s->priority = (int16_t)priority;
+		}
+
+		// Log every class change immediately, and the full state every 5 s.
+		const char *cls = priority_class(priority);
+		bool changed = last_class != NULL && strcmp(cls, last_class) != 0;
+		if (changed) {
+			c->transitions++;
+		}
+		if (last_class == NULL || changed || t - last_log >= 5.0) {
+			canary_log_state(c, t, priority);
+			last_log = t;
+		}
+		last_class = cls;
+
+		next += period_ticks;
+		if (next <= now) {
+			next = now + period_ticks;
+		}
+	}
+	return NULL;
+}
+
+static void
+canary_start(struct canary *c, double period_s, double max_seconds)
+{
+	*c = (struct canary){.period_s = period_s};
+	c->capacity = (size_t)(max_seconds / period_s) + 64;
+	c->samples = calloc(c->capacity, sizeof(struct canary_sample));
+	pthread_create(&c->thread, NULL, canary_main, c);
+}
+
+static void
+canary_stop(struct canary *c, const struct probe_options *opts)
+{
+	atomic_store(&c->stop, true);
+	pthread_join(c->thread, NULL);
+
+	char path[1024];
+	snprintf(path, sizeof(path), "%s_%s_canary_%d.csv", opts->out_prefix, mode_name(opts->mode), (int)getpid());
+	FILE *file = fopen(path, "w");
+	if (file != NULL) {
+		fprintf(file, "t_s,lateness_us,priority\n");
+		for (size_t i = 0; i < c->count; i++) {
+			fprintf(file, "%.6f,%.1f,%d\n", c->samples[i].t_s, c->samples[i].lateness_us,
+			        c->samples[i].priority);
+		}
+		fclose(file);
+		fprintf(stderr, "LAYER_HOST_PROBE wrote %s\n", path);
+	}
+
+	double *lateness = calloc(c->count + 1, sizeof(double));
+	size_t throttled = 0;
+	for (size_t i = 0; i < c->count; i++) {
+		lateness[i] = c->samples[i].lateness_us;
+		if (c->samples[i].priority >= 0 && c->samples[i].priority <= 4) {
+			throttled++;
+		}
+	}
+	qsort(lateness, c->count, sizeof(double), compare_doubles);
+	fprintf(stderr,
+	        "LAYER_HOST_PROBE canary summary realtime=%s samples=%zu class_transitions=%zu "
+	        "throttled (<=4)=%.2f%%\n"
+	        "  wake lateness us: median=%.0f p95=%.0f p99=%.0f max=%.0f\n",
+	        c->realtime ? "yes" : "no", c->count, c->transitions,
+	        c->count > 0 ? 100.0 * (double)throttled / (double)c->count : 0.0, percentile(lateness, c->count, 50),
+	        percentile(lateness, c->count, 95), percentile(lateness, c->count, 99),
+	        c->count > 0 ? lateness[c->count - 1] : 0.0);
+	free(lateness);
+	free(c->samples);
+	c->samples = NULL;
+}
+
+
+/*
+ *
+ * CPU load for the game half, standing in for a game's worker threads.
+ *
+ */
+
+struct cpu_load
+{
+	_Atomic bool stop;
+	int count;
+	pthread_t *threads;
+};
+
+static void *
+cpu_load_main(void *ptr)
+{
+	struct cpu_load *load = ptr;
+	pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+	volatile double x = 1.0;
+	while (!atomic_load_explicit(&load->stop, memory_order_relaxed)) {
+		for (int i = 0; i < 100000; i++) {
+			x = x * 1.0000001 + 0.0000001;
+		}
+	}
+	return NULL;
+}
+
+static struct cpu_load *
+cpu_load_start(int count)
+{
+	struct cpu_load *load = calloc(1, sizeof(*load));
+	load->count = count;
+	load->threads = calloc((size_t)count + 1, sizeof(pthread_t));
+	for (int i = 0; i < count; i++) {
+		pthread_create(&load->threads[i], NULL, cpu_load_main, load);
+	}
+	return load;
+}
+
+static void
+cpu_load_stop(struct cpu_load *load)
+{
+	atomic_store(&load->stop, true);
+	for (int i = 0; i < load->count; i++) {
+		pthread_join(load->threads[i], NULL);
+	}
+	free(load->threads);
+	free(load);
+}
+
+
+/*
+ *
+ * Host <-> game rendezvous over a Unix socket.
+ *
+ */
+
+struct probe_hello
+{
+	uint32_t magic;
+	uint32_t mode;
+	uint32_t display_id;
+	uint32_t reserved;
+	double width_points;
+	double height_points;
+	double scale;
+};
+
+struct probe_attach
+{
+	uint32_t magic;
+	uint32_t context_id; //!< 0 in game-direct.
+	int32_t pid;
+	uint32_t reserved;
+};
+
+static bool
+write_full(int fd, const void *data, size_t size)
+{
+	const uint8_t *p = data;
+	while (size > 0) {
+		ssize_t n = write(fd, p, size);
+		if (n < 0 && errno == EINTR) {
+			continue;
+		}
+		if (n <= 0) {
+			return false;
+		}
+		p += n;
+		size -= (size_t)n;
+	}
+	return true;
+}
+
+static bool
+read_full(int fd, void *data, size_t size)
+{
+	uint8_t *p = data;
+	while (size > 0) {
+		ssize_t n = read(fd, p, size);
+		if (n < 0 && errno == EINTR) {
+			continue;
+		}
+		if (n <= 0) {
+			return false;
+		}
+		p += n;
+		size -= (size_t)n;
+	}
+	return true;
+}
+
+static struct sockaddr_un
+probe_socket_address(void)
+{
+	struct sockaddr_un addr = {.sun_family = AF_UNIX};
+	strlcpy(addr.sun_path, PROBE_SOCKET_PATH, sizeof(addr.sun_path));
+	return addr;
+}
+
+static int
+listen_probe_socket(void)
+{
+	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) {
+		return -1;
+	}
+	unlink(PROBE_SOCKET_PATH);
+	struct sockaddr_un addr = probe_socket_address();
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 || listen(fd, 1) != 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+static int
+connect_probe_socket(double timeout_s)
+{
+	double end = now_seconds() + timeout_s;
+	do {
+		int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (fd < 0) {
+			return -1;
+		}
+		struct sockaddr_un addr = probe_socket_address();
+		if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+			return fd;
+		}
+		close(fd);
+		[NSThread sleepForTimeInterval:0.25];
+	} while (now_seconds() < end);
+	return -1;
+}
+
+
+/*
+ *
+ * Shared AppKit helpers.
+ *
+ */
+
+static void
+stop_app(void)
+{
+	// -[NSApp stop:] only takes effect once another event is processed.
+	[NSApp stop:nil];
+	NSEvent *wake = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
+	                                   location:NSZeroPoint
+	                              modifierFlags:0
+	                                  timestamp:0
+	                               windowNumber:0
+	                                    context:nil
+	                                    subtype:0
+	                                      data1:0
+	                                      data2:0];
+	[NSApp postEvent:wake atStart:YES];
+}
+
+static NSScreen *
+select_screen(int index)
+{
+	NSArray<NSScreen *> *screens = [NSScreen screens];
+	if (screens.count == 0) {
+		return nil;
+	}
+	if (index < 0 || (NSUInteger)index >= screens.count) {
+		return screens.lastObject;
+	}
+	return screens[(NSUInteger)index];
+}
+
+static NSWindow *
+create_headset_window(NSScreen *screen)
+{
+	// Same window configuration as Monado's legacy headset window.
+	NSWindow *window = [[NSWindow alloc] initWithContentRect:screen.frame
+	                                               styleMask:NSWindowStyleMaskBorderless
+	                                                 backing:NSBackingStoreBuffered
+	                                                   defer:NO
+	                                                  screen:screen];
+	window.backgroundColor = [NSColor blackColor];
+	window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
+	                            NSWindowCollectionBehaviorFullScreenAuxiliary |
+	                            NSWindowCollectionBehaviorStationary;
+	window.hasShadow = NO;
+	window.hidesOnDeactivate = NO;
+	window.ignoresMouseEvents = YES;
+	window.level = NSMainMenuWindowLevel + 1;
+	window.releasedWhenClosed = NO;
+	return window;
 }
 
 
@@ -629,43 +1274,149 @@ run_client(const struct probe_options *opts)
 
 /*
  *
- * Host role: owns the fullscreen window on the headset display.
+ * Game role: a games-category app that goes fullscreen on the Mac display so
+ * Game Mode engages, then either renders to the headset through a CAContext
+ * (game-hosted) or only loads the CPU while the host renders (game-direct).
  *
  */
 
-static NSScreen *
-select_screen(int index)
+static int
+game_session(const struct probe_options *opts)
 {
-	NSArray<NSScreen *> *screens = [NSScreen screens];
-	if (screens.count == 0) {
-		return nil;
+	fprintf(stderr, "LAYER_HOST_PROBE game pid=%d warmup=%.1fs seconds=%.1fs cpu_load=%d\n", (int)getpid(),
+	        opts->warmup, opts->seconds, opts->cpu_load);
+
+	// Give the fullscreen transition time to finish and Game Mode time to engage.
+	[NSThread sleepForTimeInterval:opts->warmup];
+
+	int fd = connect_probe_socket(10.0);
+	if (fd < 0) {
+		fprintf(stderr, "LAYER_HOST_PROBE game: no host on %s (run --role bootstrap-host first)\n",
+		        PROBE_SOCKET_PATH);
+		return 1;
 	}
-	if (index < 0 || (NSUInteger)index >= screens.count) {
-		return screens.lastObject;
+
+	struct probe_hello hello;
+	if (!read_full(fd, &hello, sizeof(hello)) || hello.magic != PROBE_MAGIC) {
+		fprintf(stderr, "LAYER_HOST_PROBE game: bad hello from host\n");
+		close(fd);
+		return 1;
 	}
-	return screens[(NSUInteger)index];
+	enum probe_mode mode = (enum probe_mode)hello.mode;
+	fprintf(stderr, "LAYER_HOST_PROBE game connected mode=%s display_id=%u %.0fx%.0f pt\n", mode_name(mode),
+	        hello.display_id, hello.width_points, hello.height_points);
+
+	__block CAMetalLayer *layer = nil;
+	__block CAContext *context = nil;
+	if (mode == PROBE_MODE_GAME_HOSTED) {
+		if (!remote_layer_api_supported()) {
+			fprintf(stderr, "LAYER_HOST_PROBE game: remote layer API not available\n");
+			close(fd);
+			return 1;
+		}
+		dispatch_sync(dispatch_get_main_queue(), ^{
+			layer = create_metal_layer(CGSizeMake(hello.width_points, hello.height_points), hello.scale);
+			[CATransaction begin];
+			context = create_remote_context(layer);
+			[CATransaction commit];
+			[CATransaction flush];
+		});
+	}
+
+	struct probe_attach attach = {
+	    .magic = PROBE_MAGIC,
+	    .context_id = context != nil ? context.contextId : 0,
+	    .pid = (int32_t)getpid(),
+	};
+	if (!write_full(fd, &attach, sizeof(attach))) {
+		fprintf(stderr, "LAYER_HOST_PROBE game: could not attach to host\n");
+		close(fd);
+		return 1;
+	}
+
+	char policy[256];
+	format_policy(policy, sizeof(policy), snapshot_policy(getpid()));
+	fprintf(stderr, "LAYER_HOST_PROBE game policy at start: %s\n", policy);
+
+	struct cpu_load *load = cpu_load_start(opts->cpu_load);
+
+	if (mode == PROBE_MODE_GAME_HOSTED) {
+		struct probe_options render_opts = *opts;
+		render_opts.mode = mode;
+		ProbeRenderer *renderer = [[ProbeRenderer alloc] initWithLayer:layer
+		                                                     displayID:hello.display_id
+		                                                       options:&render_opts
+		                                                          role:"game"];
+		[renderer runForSeconds:opts->seconds];
+	} else {
+		[NSThread sleepForTimeInterval:opts->seconds];
+	}
+
+	format_policy(policy, sizeof(policy), snapshot_policy(getpid()));
+	fprintf(stderr, "LAYER_HOST_PROBE game policy at end: %s\n", policy);
+
+	cpu_load_stop(load);
+
+	// Closing the socket tells the host the session is over.
+	close(fd);
+	(void)context;
+	return 0;
 }
 
-static NSWindow *
-create_headset_window(NSScreen *screen)
+static int
+run_game(const struct probe_options *opts)
 {
-	// Same window configuration as Monado's legacy headset window.
-	NSWindow *window = [[NSWindow alloc] initWithContentRect:screen.frame
-	                                               styleMask:NSWindowStyleMaskBorderless
-	                                                 backing:NSBackingStoreBuffered
-	                                                   defer:NO
-	                                                  screen:screen];
-	window.backgroundColor = [NSColor blackColor];
-	window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
-	                            NSWindowCollectionBehaviorFullScreenAuxiliary |
-	                            NSWindowCollectionBehaviorStationary;
-	window.hasShadow = NO;
-	window.hidesOnDeactivate = NO;
-	window.ignoresMouseEvents = YES;
-	window.level = NSMainMenuWindowLevel + 1;
+	// Launched through open(1), stderr goes nowhere; keep a log instead.
+	if (!isatty(STDERR_FILENO) && freopen(PROBE_GAME_LOG, "a", stderr) != NULL) {
+		setvbuf(stderr, NULL, _IOLBF, 0);
+	}
+
+	[NSApplication sharedApplication];
+	[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+
+	// Game Mode needs a fullscreen window on the Mac's own display.
+	NSScreen *screen = [NSScreen screens].firstObject;
+	NSWindow *window = [[NSWindow alloc]
+	    initWithContentRect:NSMakeRect(0, 0, 1280, 720)
+	              styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+	                backing:NSBackingStoreBuffered
+	                  defer:NO
+	                 screen:screen];
+	window.title = @"Monado layer-host probe (game)";
+	window.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
 	window.releasedWhenClosed = NO;
-	return window;
+	NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1280, 720)];
+	CALayer *root = [CALayer layer];
+	root.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
+	view.layer = root;
+	view.wantsLayer = YES;
+	window.contentView = view;
+	[window center];
+	[window makeKeyAndOrderFront:nil];
+	[NSApp activateIgnoringOtherApps:YES];
+
+	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+		[window toggleFullScreen:nil];
+	});
+
+	__block int exit_code = 0;
+	[NSThread detachNewThreadWithBlock:^{
+		exit_code = game_session(opts);
+		dispatch_async(dispatch_get_main_queue(), ^{
+			stop_app();
+		});
+	}];
+
+	[NSApp run];
+	return exit_code;
 }
+
+
+/*
+ *
+ * Host role: owns the fullscreen window on the headset display.
+ *
+ */
 
 static pid_t
 spawn_client(const char *self_path,
@@ -696,6 +1447,7 @@ spawn_client(const char *self_path,
 	    "--min-duration-us", min_us_str,
 	    "--seconds", seconds_str,
 	    "--out", (char *)opts->out_prefix,
+	    "--rt", opts->realtime ? "1" : "0",
 	    "--display-id", display_id_str,
 	    "--width", width_str,
 	    "--height", height_str,
@@ -733,21 +1485,104 @@ read_context_id(int fd, CAContextID *out_id)
 	return read(fd, out_id, sizeof(*out_id)) == sizeof(*out_id);
 }
 
-static void
-stop_app(void)
+//! Runs on a dedicated thread: waits for the game, then serves one session.
+static int
+host_game_session(const struct probe_options *opts,
+                  CALayer *root,
+                  CGDirectDisplayID display_id,
+                  CGSize points,
+                  double scale,
+                  double period_s)
 {
-	// -[NSApp stop:] only takes effect once another event is processed.
-	[NSApp stop:nil];
-	NSEvent *wake = [NSEvent otherEventWithType:NSEventTypeApplicationDefined
-	                                   location:NSZeroPoint
-	                              modifierFlags:0
-	                                  timestamp:0
-	                               windowNumber:0
-	                                    context:nil
-	                                    subtype:0
-	                                      data1:0
-	                                      data2:0];
-	[NSApp postEvent:wake atStart:YES];
+	int listen_fd = listen_probe_socket();
+	if (listen_fd < 0) {
+		fprintf(stderr, "LAYER_HOST_PROBE host: could not listen on %s: %s\n", PROBE_SOCKET_PATH,
+		        strerror(errno));
+		return 1;
+	}
+
+	// Canary covers the wait too, so there is a baseline before Game Mode.
+	struct canary canary;
+	canary_start(&canary, period_s, opts->seconds + 600.0);
+
+	fprintf(stderr, "LAYER_HOST_PROBE host waiting for the game on %s\n", PROBE_SOCKET_PATH);
+	int fd = accept(listen_fd, NULL, NULL);
+	close(listen_fd);
+	unlink(PROBE_SOCKET_PATH);
+	if (fd < 0) {
+		canary_stop(&canary, opts);
+		return 1;
+	}
+
+	struct probe_hello hello = {
+	    .magic = PROBE_MAGIC,
+	    .mode = (uint32_t)opts->mode,
+	    .display_id = display_id,
+	    .width_points = points.width,
+	    .height_points = points.height,
+	    .scale = scale,
+	};
+	struct probe_attach attach;
+	if (!write_full(fd, &hello, sizeof(hello)) || !read_full(fd, &attach, sizeof(attach)) ||
+	    attach.magic != PROBE_MAGIC) {
+		fprintf(stderr, "LAYER_HOST_PROBE host: game handshake failed\n");
+		close(fd);
+		canary_stop(&canary, opts);
+		return 1;
+	}
+	atomic_store(&canary.watch_pid, attach.pid);
+	fprintf(stderr, "LAYER_HOST_PROBE host attached game pid=%d context_id=%u\n", attach.pid, attach.context_id);
+
+	ProbeRenderer *renderer = nil;
+	dispatch_semaphore_t renderer_done = dispatch_semaphore_create(0);
+
+	if (opts->mode == PROBE_MODE_GAME_HOSTED) {
+		if (attach.context_id == 0) {
+			fprintf(stderr, "LAYER_HOST_PROBE host: game sent no context id\n");
+			close(fd);
+			canary_stop(&canary, opts);
+			return 1;
+		}
+		dispatch_sync(dispatch_get_main_queue(), ^{
+			[CATransaction begin];
+			[CATransaction setDisableActions:YES];
+			[root addSublayer:create_layer_host(attach.context_id)];
+			[CATransaction commit];
+			[CATransaction flush];
+		});
+	} else {
+		__block CAMetalLayer *layer = nil;
+		dispatch_sync(dispatch_get_main_queue(), ^{
+			[CATransaction begin];
+			[CATransaction setDisableActions:YES];
+			layer = create_metal_layer(points, scale);
+			[root addSublayer:layer];
+			[CATransaction commit];
+			[CATransaction flush];
+		});
+		renderer = [[ProbeRenderer alloc] initWithLayer:layer displayID:display_id options:opts role:"host"];
+		ProbeRenderer *thread_renderer = renderer;
+		[NSThread detachNewThreadWithBlock:^{
+			[thread_renderer runForSeconds:opts->seconds];
+			dispatch_semaphore_signal(renderer_done);
+		}];
+	}
+
+	// The game closes the socket when it is done.
+	uint8_t byte;
+	while (read(fd, &byte, 1) > 0) {
+	}
+	close(fd);
+	fprintf(stderr, "LAYER_HOST_PROBE host: game disconnected\n");
+
+	if (renderer != nil) {
+		[renderer requestStop];
+		dispatch_semaphore_wait(renderer_done, DISPATCH_TIME_FOREVER);
+	}
+
+	canary_log_state(&canary, now_seconds(), -1);
+	canary_stop(&canary, opts);
+	return 0;
 }
 
 static int
@@ -756,7 +1591,7 @@ run_host(const struct probe_options *opts, const char *self_path)
 	[NSApplication sharedApplication];
 	[NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
-	if (opts->mode != PROBE_MODE_DIRECT && !remote_layer_api_supported()) {
+	if (opts->mode != PROBE_MODE_DIRECT && opts->mode != PROBE_MODE_GAME_DIRECT && !remote_layer_api_supported()) {
 		fprintf(stderr, "LAYER_HOST_PROBE: remote layer API not available on this macOS\n");
 		return 1;
 	}
@@ -769,6 +1604,7 @@ run_host(const struct probe_options *opts, const char *self_path)
 	CGDirectDisplayID display_id = [[screen.deviceDescription objectForKey:@"NSScreenNumber"] unsignedIntValue];
 	CGSize points = screen.frame.size;
 	double scale = screen.backingScaleFactor;
+	double period_s = screen.maximumFramesPerSecond > 0 ? 1.0 / (double)screen.maximumFramesPerSecond : 1.0 / 120.0;
 	fprintf(stderr, "LAYER_HOST_PROBE host pid=%d mode=%s screen='%s' display_id=%u %.0fx%.0f pt scale=%.1f\n",
 	        (int)getpid(), mode_name(opts->mode), screen.localizedName.UTF8String, display_id, points.width,
 	        points.height, scale);
@@ -814,6 +1650,10 @@ run_host(const struct probe_options *opts, const char *self_path)
 		[root addSublayer:create_layer_host(context_id)];
 		break;
 	}
+	case PROBE_MODE_GAME_DIRECT:
+	case PROBE_MODE_GAME_HOSTED:
+		// Content is added once the game connects.
+		break;
 	}
 	[CATransaction commit];
 
@@ -822,7 +1662,14 @@ run_host(const struct probe_options *opts, const char *self_path)
 	[CATransaction flush];
 
 	__block int exit_code = 0;
-	if (opts->mode == PROBE_MODE_HOSTED) {
+	if (mode_is_game(opts->mode)) {
+		[NSThread detachNewThreadWithBlock:^{
+			exit_code = host_game_session(opts, root, display_id, points, scale, period_s);
+			dispatch_async(dispatch_get_main_queue(), ^{
+				stop_app();
+			});
+		}];
+	} else if (opts->mode == PROBE_MODE_HOSTED) {
 		dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
 			int status = 0;
 			waitpid(child, &status, 0);
@@ -836,12 +1683,13 @@ run_host(const struct probe_options *opts, const char *self_path)
 		                                                     displayID:display_id
 		                                                       options:opts
 		                                                          role:"host"];
-		dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
+		// A dedicated thread, since the renderer may make it realtime.
+		[NSThread detachNewThreadWithBlock:^{
 			[renderer runForSeconds:opts->seconds];
 			dispatch_async(dispatch_get_main_queue(), ^{
 				stop_app();
 			});
-		});
+		}];
 	}
 
 	[NSApp run];
@@ -849,6 +1697,137 @@ run_host(const struct probe_options *opts, const char *self_path)
 	(void)local_context;
 	[window orderOut:nil];
 	return exit_code;
+}
+
+
+/*
+ *
+ * launchd registration, so the host runs in its own coalition like
+ * monado-service rather than inside the terminal's.
+ *
+ */
+
+static int
+run_launchctl(NSArray<NSString *> *args, bool quiet)
+{
+	char **argv = calloc(args.count + 2, sizeof(char *));
+	argv[0] = "launchctl";
+	for (NSUInteger i = 0; i < args.count; i++) {
+		argv[i + 1] = (char *)args[i].UTF8String;
+	}
+
+	posix_spawn_file_actions_t actions;
+	posix_spawn_file_actions_init(&actions);
+	if (quiet) {
+		posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+	}
+
+	pid_t pid = -1;
+	int ret = posix_spawnp(&pid, "launchctl", &actions, NULL, argv, environ);
+	posix_spawn_file_actions_destroy(&actions);
+	free(argv);
+	if (ret != 0) {
+		return -1;
+	}
+
+	int status = 0;
+	waitpid(pid, &status, 0);
+	return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+static NSString *
+launchd_target(void)
+{
+	return [NSString stringWithFormat:@"gui/%u/%s", getuid(), PROBE_LAUNCHD_LABEL];
+}
+
+static int
+run_bootout_host(void)
+{
+	int ret = run_launchctl(@[ @"bootout", launchd_target() ], true);
+	fprintf(stderr, "LAYER_HOST_PROBE bootout %s: %s\n", PROBE_LAUNCHD_LABEL, ret == 0 ? "done" : "not loaded");
+	unlink(PROBE_SOCKET_PATH);
+	return 0;
+}
+
+static int
+run_bootstrap_host(const struct probe_options *opts, const char *self_path)
+{
+	if (!mode_is_game(opts->mode)) {
+		fprintf(stderr, "LAYER_HOST_PROBE: bootstrap-host needs --mode game-direct or game-hosted\n");
+		return 2;
+	}
+
+	NSMutableArray<NSString *> *args = [NSMutableArray arrayWithArray:@[
+		@(self_path),
+		@"--role",
+		@"host",
+		@"--mode",
+		@(mode_name(opts->mode)),
+		@"--seconds",
+		[NSString stringWithFormat:@"%.3f", opts->seconds],
+		@"--present",
+		@(present_name(opts->present)),
+		@"--min-duration-us",
+		[NSString stringWithFormat:@"%.0f", opts->min_duration_us],
+		@"--out",
+		@(opts->out_prefix),
+		@"--rt",
+		opts->realtime ? @"1" : @"0",
+	]];
+	if (opts->display_index >= 0) {
+		[args addObjectsFromArray:@[ @"--display", [NSString stringWithFormat:@"%d", opts->display_index] ]];
+	}
+
+	NSDictionary *plist = @{
+		@"Label" : @PROBE_LAUNCHD_LABEL,
+		@"ProgramArguments" : args,
+		@"RunAtLoad" : @YES,
+		@"KeepAlive" : @NO,
+		@"LimitLoadToSessionType" : @"Aqua",
+		@"ProcessType" : @(opts->process_type),
+		@"StandardOutPath" : @PROBE_HOST_LOG,
+		@"StandardErrorPath" : @PROBE_HOST_LOG,
+	};
+
+	NSString *path = @"/tmp/" PROBE_LAUNCHD_LABEL ".plist";
+	NSError *error = nil;
+	if (![plist writeToURL:[NSURL fileURLWithPath:path] error:&error]) {
+		fprintf(stderr, "LAYER_HOST_PROBE: could not write %s: %s\n", path.UTF8String,
+		        error.localizedDescription.UTF8String);
+		return 1;
+	}
+
+	// Replace any earlier run, then start the host under launchd.
+	run_launchctl(@[ @"bootout", launchd_target() ], true);
+	unlink(PROBE_SOCKET_PATH);
+	NSString *domain = [NSString stringWithFormat:@"gui/%u", getuid()];
+	int ret = run_launchctl(@[ @"bootstrap", domain, path ], false);
+	if (ret != 0) {
+		fprintf(stderr, "LAYER_HOST_PROBE: launchctl bootstrap failed (%d)\n", ret);
+		return 1;
+	}
+
+	fprintf(stderr,
+	        "LAYER_HOST_PROBE host started by launchd: label=%s mode=%s ProcessType=%s\n"
+	        "  log: %s\n"
+	        "  now launch the game half, e.g.\n"
+	        "    open macos-layer-host-probe-game.app --args --seconds 60 --cpu-load 8\n",
+	        PROBE_LAUNCHD_LABEL, mode_name(opts->mode), opts->process_type, PROBE_HOST_LOG);
+	return 0;
+}
+
+static int
+run_query(pid_t pid)
+{
+	if (pid <= 0) {
+		fprintf(stderr, "LAYER_HOST_PROBE: query needs --pid PID\n");
+		return 2;
+	}
+	char policy[256];
+	format_policy(policy, sizeof(policy), snapshot_policy(pid));
+	printf("pid=%d %s\n", (int)pid, policy);
+	return 0;
 }
 
 int
@@ -863,14 +1842,19 @@ main(int argc, char **argv)
 			return 2;
 		}
 
-		if (opts.is_client) {
-			return run_client(&opts);
-		}
-
 		char self_path[PATH_MAX];
 		uint32_t self_path_size = sizeof(self_path);
 		if (_NSGetExecutablePath(self_path, &self_path_size) != 0) {
 			strlcpy(self_path, argv[0], sizeof(self_path));
+		}
+
+		switch (opts.role) {
+		case PROBE_ROLE_CLIENT: return run_client(&opts);
+		case PROBE_ROLE_GAME: return run_game(&opts);
+		case PROBE_ROLE_BOOTSTRAP_HOST: return run_bootstrap_host(&opts, self_path);
+		case PROBE_ROLE_BOOTOUT_HOST: return run_bootout_host();
+		case PROBE_ROLE_QUERY: return run_query(opts.query_pid);
+		case PROBE_ROLE_HOST: break;
 		}
 		return run_host(&opts, self_path);
 	}
