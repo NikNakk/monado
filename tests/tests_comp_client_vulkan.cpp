@@ -151,6 +151,7 @@ TEST_CASE("client_compositor", "[.][needgpu]")
 #error "Need port for fence sync handles checkers"
 #endif
 	    vk->has_KHR_image_format_list, // image_format_list_enabled
+	    false,                         // metal_objects_enabled
 	    false,                         // debug_utils_enabled
 	    false,                         // renderdoc_enabled
 	    vk->main_queue->family_index,  //
