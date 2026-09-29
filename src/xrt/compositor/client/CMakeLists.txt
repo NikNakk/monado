@@ -20,7 +20,15 @@ if(XRT_HAVE_VULKAN)
 endif()
 
 if(APPLE)
-	target_sources(comp_client PRIVATE comp_metal_client.h comp_metal_client.m comp_metal_glue.c)
+	target_sources(
+		comp_client
+		PRIVATE
+			comp_metal_client.h
+			comp_metal_client.m
+			comp_metal_glue.c
+			comp_metal_foveation_cache.h
+			comp_metal_foveation_cache.m
+		)
 	if(XRT_MODULE_COMPOSITOR_UTIL)
 		target_sources(
 			comp_client
@@ -48,7 +56,7 @@ if(APPLE)
 			target_sources(comp_client PRIVATE comp_metal_direct_swapchain.m)
 		endif()
 	endif()
-	target_link_libraries(comp_client PRIVATE "-framework Metal")
+	target_link_libraries(comp_client PRIVATE "-framework Metal" aux_metal_foveation)
 endif()
 
 if(XRT_HAVE_OPENGL OR XRT_HAVE_OPENGLES)
