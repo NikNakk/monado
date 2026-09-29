@@ -63,7 +63,6 @@ DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL
 DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #ifdef XRT_OS_OSX
-DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_lead_us, "XRT_MACOS_LATE_RENDER_LEAD_US", 0)
 DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US", LONG_MIN)
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
@@ -217,13 +216,6 @@ struct comp_renderer
  */
 
 #ifdef XRT_OS_OSX
-static int64_t
-renderer_get_macos_late_render_lead_us(void)
-{
-	int64_t lead_us = debug_get_num_option_macos_late_render_lead_us();
-	return lead_us > 0 ? lead_us : 0;
-}
-
 static bool
 renderer_get_macos_late_render_desired_offset_us(int64_t *out_offset_us)
 {
@@ -559,37 +551,23 @@ renderer_late_render_wait(struct comp_renderer *r)
 #endif
 
 	int64_t desired_offset_us = 0;
-	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
-	int64_t lead_us = renderer_get_macos_late_render_lead_us();
-	int64_t target_ns = 0;
-
-	if (desired_mode) {
-		uint64_t desired_u64 = r->c->frame.rendering.desired_present_time_ns;
-		if (desired_u64 == 0 || desired_u64 > INT64_MAX || desired_offset_us > INT64_MAX / 1000 ||
-		    desired_offset_us < INT64_MIN / 1000) {
-			return;
-		}
-
-		int64_t desired_ns = (int64_t)desired_u64;
-		int64_t offset_ns = desired_offset_us * 1000;
-		if ((offset_ns > 0 && desired_ns > INT64_MAX - offset_ns) ||
-		    (offset_ns < 0 && desired_ns < INT64_MIN - offset_ns)) {
-			return;
-		}
-		target_ns = desired_ns + offset_ns;
-	} else {
-		/* Legacy predicted-display-relative mode: opt-in only. */
-		int64_t predicted_ns = r->c->frame.rendering.predicted_display_time_ns;
-		if (lead_us <= 0 || predicted_ns <= 0 || lead_us > INT64_MAX / 1000) {
-			return;
-		}
-
-		int64_t lead_ns = lead_us * 1000;
-		if (predicted_ns <= lead_ns) {
-			return;
-		}
-		target_ns = predicted_ns - lead_ns;
+	if (!renderer_get_macos_late_render_desired_offset_us(&desired_offset_us)) {
+		return;
 	}
+
+	uint64_t desired_u64 = r->c->frame.rendering.desired_present_time_ns;
+	if (desired_u64 == 0 || desired_u64 > INT64_MAX || desired_offset_us > INT64_MAX / 1000 ||
+	    desired_offset_us < INT64_MIN / 1000) {
+		return;
+	}
+
+	int64_t desired_ns = (int64_t)desired_u64;
+	int64_t offset_ns = desired_offset_us * 1000;
+	if ((offset_ns > 0 && desired_ns > INT64_MAX - offset_ns) ||
+	    (offset_ns < 0 && desired_ns < INT64_MIN - offset_ns)) {
+		return;
+	}
+	int64_t target_ns = desired_ns + offset_ns;
 
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	r->late_render_target_ns = target_ns;
@@ -630,10 +608,11 @@ renderer_late_render_trace_frame(struct comp_renderer *r)
 		return;
 	}
 
-	int64_t lead_us = renderer_get_macos_late_render_lead_us();
+	/* The predicted-relative lead mode was removed; its CSV column stays 0 for compatibility. */
+	const int64_t lead_us = 0;
 	int64_t desired_offset_us = 0;
 	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
-	const char *wait_mode = desired_mode ? "desired" : (lead_us > 0 ? "predicted" : "none");
+	const char *wait_mode = desired_mode ? "desired" : "none";
 	int64_t wait_requested_ns = r->late_render_target_ns > r->late_render_wait_begin_ns
 	                                ? r->late_render_target_ns - r->late_render_wait_begin_ns
 	                                : 0;
@@ -1138,16 +1117,9 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 #endif
 	int64_t desired_offset_us = 0;
 	bool desired_mode = renderer_get_macos_late_render_desired_offset_us(&desired_offset_us);
-	int64_t late_render_lead_us = renderer_get_macos_late_render_lead_us();
 	if (desired_mode) {
 		COMP_INFO(c, "macOS desired-relative late-render experiment enabled: dispatch at desired present %+lld us",
 		          (long long)desired_offset_us);
-		if (late_render_lead_us > 0) {
-			COMP_WARN(c, "Both desired-relative and legacy predicted-relative late-render options are set; using desired-relative mode");
-		}
-	} else if (late_render_lead_us > 0) {
-		COMP_INFO(c, "macOS legacy predicted-relative late-render experiment enabled: dispatch lead %lld us",
-		          (long long)late_render_lead_us);
 	}
 	if (debug_get_bool_option_macos_skip_blocking_gpu_timestamps()) {
 		COMP_INFO(c, "macOS diagnostic: skipping blocking compositor GPU timestamp readback");
