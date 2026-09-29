@@ -1,0 +1,30 @@
+name: macOS build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Default-options build and test run, the macOS counterpart of linux-build.yml.
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: >-
+          brew install cmake eigen glslang jpeg-turbo libusb molten-vk ninja
+          pkgconf sdl2-compat vulkan-headers vulkan-loader
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure

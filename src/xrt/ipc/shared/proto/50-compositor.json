@@ -177,6 +177,7 @@
 	},
 
 	"compositor_semaphore_import_metal_bootstrap": {
+		"ifdef": "__APPLE__",
 		"in": [
 			{"name": "bootstrap", "type": "struct ipc_metal_bootstrap_name"}
 		],
@@ -186,6 +187,7 @@
 	},
 
 	"compositor_semaphore_create_metal": {
+		"ifdef": "__APPLE__",
 		"out": [
 			{"name": "id", "type": "uint32_t"},
 			{"name": "token", "type": "uint64_t"}
