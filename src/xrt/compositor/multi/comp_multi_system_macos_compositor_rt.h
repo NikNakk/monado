@@ -2,34 +2,18 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief Experimental CAMetalDisplayLink trigger for the Multi Client Module.
+ * @brief Compositor-thread realtime scheduling trace for the Multi Client Module.
  *
- * Force-include this after comp_multi_system_macos_trace.h. It does not replace
- * multi_main_loop(): it changes only where CAMetalDisplayLink participates in
- * the established predict/wait/render sequence.
- *
- * Driven mode must consume the CAMetal tick before xrt_comp_predict_frame(): the
- * native compositor uses that callback's target/presentation timestamps and its
- * callback-owned drawable for the frame.
- *
- * Hybrid mode is deliberately narrower. Prediction remains completely native/
- * legacy. The ordinary u_wait_until(wake_up_time_ns) call inside wait_frame() is
- * replaced with a condition-variable wait for the independent child-layer
- * CAMetalDisplayLink callback. Thus the only intended difference from legacy is
- * the CPU wake primitive at the existing wake point.
- *
- * When PSVR2_TIMING_TRACE=1, hybrid writes hybrid_phase.csv so the callback phase
- * can be compared directly with the native pacer's wake target. If the optional
- * compositor Mach time-constraint experiment is enabled, compositor_rt.csv also
- * records CPU-time budget use and samples the effective scheduling policy every
- * frame. Detailed public Mach information is captured on policy transitions,
- * budget overruns, the first frame, and every 60 frames.
+ * Force-include this after comp_multi_system_macos_trace.h. It wraps
+ * xrt_comp_predict_frame() so that, when PSVR2_TIMING_TRACE=1 and the Mach
+ * time-constraint policy is enabled, compositor_rt.csv records CPU-time budget
+ * use and samples the effective scheduling policy every frame. Detailed public
+ * Mach information is captured on policy transitions, budget overruns, the
+ * first frame, and every 60 frames.
  */
 #pragma once
 
-#include "multi/comp_multi_macos_displaylink.h"
 #include "os/os_time.h"
-#include "util/u_wait.h"
 
 #include <mach/mach.h>
 #include <mach/thread_info.h>
@@ -41,11 +25,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-static FILE *g_macos_hybrid_phase_trace = NULL;
-static bool g_macos_hybrid_phase_trace_failed = false;
-static bool g_macos_hybrid_phase_trace_atexit_registered = false;
-static uint64_t g_macos_hybrid_phase_trace_rows = 0;
 
 static FILE *g_macos_compositor_rt_trace = NULL;
 static bool g_macos_compositor_rt_trace_failed = false;
@@ -67,99 +46,24 @@ static int g_macos_compositor_rt_last_priority = -1;
 static int g_macos_compositor_rt_last_maxpriority = -1;
 
 static inline bool
-macos_displaylink_trace_enabled(void)
+macos_compositor_rt_trace_enabled(void)
 {
 	const char *value = getenv("PSVR2_TIMING_TRACE");
 	return value != NULL && strcmp(value, "1") == 0;
 }
 
 static inline bool
-macos_displaylink_trace_fully_buffered(void)
+macos_compositor_rt_trace_fully_buffered(void)
 {
 	const char *value = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
 	return value != NULL && strcmp(value, "1") == 0;
 }
 
 static inline const char *
-macos_displaylink_trace_dir(void)
+macos_compositor_rt_trace_dir(void)
 {
 	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
 	return dir != NULL && dir[0] != '\0' ? dir : "/tmp";
-}
-
-static void
-macos_hybrid_phase_trace_close(void)
-{
-	if (g_macos_hybrid_phase_trace != NULL) {
-		fflush(g_macos_hybrid_phase_trace);
-		fclose(g_macos_hybrid_phase_trace);
-		g_macos_hybrid_phase_trace = NULL;
-	}
-}
-
-static FILE *
-macos_hybrid_phase_trace_get(void)
-{
-	if (!macos_displaylink_trace_enabled() || g_macos_hybrid_phase_trace_failed) {
-		return NULL;
-	}
-	if (g_macos_hybrid_phase_trace != NULL) {
-		return g_macos_hybrid_phase_trace;
-	}
-
-	const char *dir = macos_displaylink_trace_dir();
-	char path[1024];
-	size_t len = strlen(dir);
-	const char *separator = len > 0 && dir[len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_hybrid_phase.csv", dir, separator, (int)getpid());
-	g_macos_hybrid_phase_trace = fopen(path, "w");
-	if (g_macos_hybrid_phase_trace == NULL) {
-		g_macos_hybrid_phase_trace_failed = true;
-		return NULL;
-	}
-	setvbuf(g_macos_hybrid_phase_trace, NULL, _IOFBF,
-	        macos_displaylink_trace_fully_buffered() ? 16u * 1024u * 1024u : 64u * 1024u);
-	fputs("sample,wait_entry_ns,native_wake_ns,callback_ns,callback_minus_native_wake_ns,wait_return_ns,"
-	      "wait_return_minus_native_wake_ns,target_ns,target_minus_callback_ns,presentation_ns,"
-	      "presentation_minus_callback_ns,presentation_minus_target_ns\n",
-	      g_macos_hybrid_phase_trace);
-	if (!g_macos_hybrid_phase_trace_atexit_registered) {
-		atexit(macos_hybrid_phase_trace_close);
-		g_macos_hybrid_phase_trace_atexit_registered = true;
-	}
-	fprintf(stderr, "macOS hybrid phase trace: %s\n", path);
-	return g_macos_hybrid_phase_trace;
-}
-
-static inline void
-macos_hybrid_phase_trace_record(int64_t native_wake_ns,
-                                uint64_t wait_entry_ns,
-                                uint64_t callback_ns,
-                                uint64_t target_ns,
-                                uint64_t presentation_ns,
-                                uint64_t wait_return_ns)
-{
-	FILE *file = macos_hybrid_phase_trace_get();
-	if (file == NULL) {
-		return;
-	}
-	g_macos_hybrid_phase_trace_rows++;
-	fprintf(file, "%llu,%llu,%lld,%llu,%lld,%llu,%lld,%llu,%lld,%llu,%lld,%lld\n",
-	        (unsigned long long)g_macos_hybrid_phase_trace_rows,
-	        (unsigned long long)wait_entry_ns,
-	        (long long)native_wake_ns,
-	        (unsigned long long)callback_ns,
-	        (long long)((int64_t)callback_ns - native_wake_ns),
-	        (unsigned long long)wait_return_ns,
-	        (long long)((int64_t)wait_return_ns - native_wake_ns),
-	        (unsigned long long)target_ns,
-	        (long long)((int64_t)target_ns - (int64_t)callback_ns),
-	        (unsigned long long)presentation_ns,
-	        (long long)((int64_t)presentation_ns - (int64_t)callback_ns),
-	        (long long)((int64_t)presentation_ns - (int64_t)target_ns));
-	if (!macos_displaylink_trace_fully_buffered() && (g_macos_hybrid_phase_trace_rows % 256) == 0) {
-		fflush(file);
-	}
 }
 
 static void
@@ -176,7 +80,7 @@ static FILE *
 macos_compositor_rt_trace_get(void)
 {
 	/* The time-constraint getter is defined by the preceding macOS trace header. */
-	if (!macos_displaylink_trace_enabled() || !debug_get_bool_option_macos_compositor_time_constraint() ||
+	if (!macos_compositor_rt_trace_enabled() || !debug_get_bool_option_macos_compositor_time_constraint() ||
 	    g_macos_compositor_rt_trace_failed) {
 		return NULL;
 	}
@@ -184,7 +88,7 @@ macos_compositor_rt_trace_get(void)
 		return g_macos_compositor_rt_trace;
 	}
 
-	const char *dir = macos_displaylink_trace_dir();
+	const char *dir = macos_compositor_rt_trace_dir();
 	char path[1024];
 	size_t len = strlen(dir);
 	const char *separator = len > 0 && dir[len - 1] == '/' ? "" : "/";
@@ -195,7 +99,7 @@ macos_compositor_rt_trace_get(void)
 		return NULL;
 	}
 	setvbuf(g_macos_compositor_rt_trace, NULL, _IOFBF,
-	        macos_displaylink_trace_fully_buffered() ? 16u * 1024u * 1024u : 64u * 1024u);
+	        macos_compositor_rt_trace_fully_buffered() ? 16u * 1024u * 1024u : 64u * 1024u);
 	fputs("sample,frame_id,sample_ns,wall_since_previous_predict_ns,thread_id,display_period_ns,"
 	      "cpu_since_previous_predict_ns,configured_computation_ns,configured_constraint_ns,"
 	      "over_computation_budget,basic_info_kr,basic_policy,basic_cpu_usage,basic_run_state,basic_flags,"
@@ -346,7 +250,7 @@ macos_compositor_rt_trace_record(int64_t frame_id, int64_t display_period_ns)
 	        g_macos_compositor_rt_last_period_ticks,
 	        g_macos_compositor_rt_last_computation_ticks,
 	        g_macos_compositor_rt_last_constraint_ticks);
-	if (!macos_displaylink_trace_fully_buffered() && (g_macos_compositor_rt_trace_rows % 256) == 0) {
+	if (!macos_compositor_rt_trace_fully_buffered() && (g_macos_compositor_rt_trace_rows % 256) == 0) {
 		fflush(file);
 	}
 }
@@ -357,18 +261,13 @@ macos_compositor_rt_trace_record(int64_t frame_id, int64_t display_period_ns)
 #endif
 
 static inline void
-macos_xrt_comp_predict_frame_from_displaylink(struct xrt_compositor *xc,
-                                              int64_t *out_frame_id,
-                                              int64_t *out_wake_up_time_ns,
-                                              int64_t *out_predicted_gpu_time_ns,
-                                              int64_t *out_predicted_display_time_ns,
-                                              int64_t *out_predicted_display_period_ns)
+macos_xrt_comp_predict_frame_with_rt_trace(struct xrt_compositor *xc,
+                                           int64_t *out_frame_id,
+                                           int64_t *out_wake_up_time_ns,
+                                           int64_t *out_predicted_gpu_time_ns,
+                                           int64_t *out_predicted_display_time_ns,
+                                           int64_t *out_predicted_display_period_ns)
 {
-	/* Driven mode needs the callback timing before native prediction. Hybrid does
-	 * not: it predicts first and substitutes its callback for u_wait_until below. */
-	if (comp_multi_macos_displaylink_active() && comp_multi_macos_displaylink_driven_mode()) {
-		(void)comp_multi_macos_displaylink_wait_tick(NULL, NULL, NULL);
-	}
 	macos_xrt_comp_predict_frame_with_time_constraint(xc, out_frame_id, out_wake_up_time_ns,
 	                                                  out_predicted_gpu_time_ns,
 	                                                  out_predicted_display_time_ns,
@@ -381,45 +280,7 @@ macos_xrt_comp_predict_frame_from_displaylink(struct xrt_compositor *xc,
 
 #define xrt_comp_predict_frame(xc, out_frame_id, out_wake_up_time_ns, out_predicted_gpu_time_ns,                     \
                                out_predicted_display_time_ns, out_predicted_display_period_ns)                       \
-	macos_xrt_comp_predict_frame_from_displaylink((xc), (out_frame_id), (out_wake_up_time_ns),                       \
-	                                              (out_predicted_gpu_time_ns),                                         \
-	                                              (out_predicted_display_time_ns),                                     \
-	                                              (out_predicted_display_period_ns))
-
-/*
- * Preserve the source-level wait point so hybrid differs from legacy only in the
- * primitive used to release wait_frame():
- *
- *   legacy: u_wait_until(sleeper, native_wake_time)
- *   hybrid: predict native timing, then wait for the child CAMetal callback here
- *   driven: callback was already consumed before prediction, so do not wait twice
- *
- * Hybrid phase tracing records the exact callback which released this wait against
- * the native wake target. The bridge's 100 ms timeout remains only a failure/
- * teardown escape hatch; healthy CAMetal cadence is callback-driven.
- */
-static inline void
-macos_u_wait_until_displaylink(struct os_precise_sleeper *sleeper, int64_t wake_up_time_ns)
-{
-	if (comp_multi_macos_displaylink_active()) {
-		if (comp_multi_macos_displaylink_hybrid_mode()) {
-			uint64_t callback_ns = 0;
-			uint64_t target_ns = 0;
-			uint64_t presentation_ns = 0;
-			uint64_t wait_entry_ns = os_monotonic_get_ns();
-			bool got_tick = comp_multi_macos_displaylink_wait_tick(&callback_ns, &target_ns, &presentation_ns);
-			uint64_t wait_return_ns = os_monotonic_get_ns();
-			if (got_tick) {
-				macos_hybrid_phase_trace_record(wake_up_time_ns, wait_entry_ns, callback_ns, target_ns,
-				                                presentation_ns, wait_return_ns);
-			}
-		}
-		/* Driven already waited before prediction. Hybrid just waited above. */
-		(void)sleeper;
-		(void)wake_up_time_ns;
-		return;
-	}
-	u_wait_until(sleeper, wake_up_time_ns);
-}
-
-#define u_wait_until(sleeper, wake_up_time_ns) macos_u_wait_until_displaylink((sleeper), (wake_up_time_ns))
+	macos_xrt_comp_predict_frame_with_rt_trace((xc), (out_frame_id), (out_wake_up_time_ns),                       \
+	                                           (out_predicted_gpu_time_ns),                                         \
+	                                           (out_predicted_display_time_ns),                                     \
+	                                           (out_predicted_display_period_ns))

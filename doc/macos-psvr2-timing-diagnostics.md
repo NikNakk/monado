@@ -2,15 +2,16 @@
 
 ## Current presentation defaults
 
-Legacy presentation is the default. On hardware, driven and hybrid
-CAMetalDisplayLink modes both showed display-link thread delays and more late
-frames than legacy (legacy ~0.87% late cadence intervals vs driven ~5.2–5.8%),
-and the legacy configuration below restored ~119.88 Hz. See
+Presentation uses CVDisplayLink pacing with timed Metal presents. The
+CAMetalDisplayLink driven and hybrid modes, and the child-layer
+CAMetalDisplayLink probe, have been removed. On hardware both modes showed
+display-link thread delays and more late frames than this path (~0.87% late
+cadence intervals vs driven ~5.2–5.8%), and the configuration below restored
+~119.88 Hz. Later sections describe them historically. See
 `doc/macos-env-toggles.md` for the evidence behind each default.
 
 | Control | Default |
 | --- | --- |
-| `XRT_MACOS_CAMETALDISPLAYLINK_MODE` | `legacy` (`driven` and `hybrid` are opt-in; `XRT_MACOS_CAMETALDISPLAYLINK_DRIVE=1` still selects driven) |
 | `XRT_MACOS_DRAWABLE_SLOT` | `1`: newest-frame worker acquires drawables off the compositor thread |
 | `XRT_MACOS_PRESENT_MIN_DURATION_US` | `8000`: `presentDrawable:afterMinimumDuration:` (known-good 120 Hz value; `0` restores absolute timed presents) |
 | `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `1`, with `_COMPUTATION_PCT=35` and `_CONSTRAINT_PCT=70` of the display period |
@@ -21,35 +22,19 @@ and the legacy configuration below restored ~119.88 Hz. See
 
 Always on, with the old toggles removed: asynchronous presentation, the Metal
 shared-event handoff (automatic CPU-wait fallback), deferred GPU timestamp
-readback, CVDisplayLink vblank feedback in legacy mode, three drawables, and no
+readback, CVDisplayLink vblank feedback, three drawables, and no
 late-render wait. The removed experiments were the present worker, stale
 substitution, early drawable, immediate present, unique present slots, the
 display-rate, client-frame and app-pacer divisors, compositor QoS, the hybrid
-wait, the process-activity assertion, the external XPC broker and the
-CAMetalLayer display-sync and framebuffer-only switches.
+wait, the process-activity assertion and the CAMetalLayer display-sync and
+framebuffer-only switches. `XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1` remains
+available for a manually started service;
+`scripts/macos/run-wine-openvr-native-trace.zsh` depends on it.
 
 With a non-zero minimum present duration, `XRT_MACOS_PRESENT_PRELATCH_US` and
 `XRT_MACOS_PRESENT_MIN_LEAD_US` only affect the `target_output_ns` and
 `metal_request_ns` trace columns, because the requested present time is
 discarded.
-
-### Driven mode (opt-in)
-
-`XRT_MACOS_CAMETALDISPLAYLINK_MODE=driven` (macOS 14+) attaches
-CAMetalDisplayLink to the real PS VR2 layer. It consumes the callback's
-drawable, holds the callback until Metal schedules presentation, suppresses the
-CVDisplayLink callback and the multi-compositor's legacy timed wait, disables
-the drawable-slot worker, and uses plain `presentDrawable:`. Idle drawables are
-cleared to black. The callback's `targetTimestamp` and
-`targetPresentationTimestamp` become the GPU deadline and predicted display
-time, and the learned present-to-display offset is not applied. In driven mode,
-`presented.csv` compares actual presentation with the callback's presentation
-timestamp (`target_output_ns`), and `metal_request_ns` is 0.
-
-The driven CSV trace requires a build with
-`-DXRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=ON` and either `PSVR2_TIMING_TRACE=1`
-or an explicit `XRT_MACOS_CAMETALDISPLAYLINK_DRIVE_TRACE_PATH`. The independent
-child-layer probe remains opt-in via `XRT_MACOS_CAMETALDISPLAYLINK_PROBE=1`.
 
 The sections below record earlier experiments and their historical defaults.
 
