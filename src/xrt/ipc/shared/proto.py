@@ -293,6 +293,9 @@ ipc_dispatch(volatile struct ipc_client_state *ics, ipc_command_t *ipc_command)
 ''')
 
     for call in p.calls:
+        # Only the handler is platform specific, the command ID, message
+        # structs and client side stay so IDs are identical everywhere.
+        call.write_ifdef_start(f)
         f.write("\tcase " + call.id + ": {\n")
 
         f.write("\t\tIPC_TRACE(ics->server, \"Dispatching " + call.name +
@@ -416,6 +419,7 @@ ipc_dispatch(volatile struct ipc_client_state *ics, ipc_command_t *ipc_command)
 
         f.write("\n\t\treturn xret;\n")
         f.write("\t}\n")
+        call.write_ifdef_end(f)
     f.write('''\tdefault:
 \t\tU_LOG_E("UNHANDLED IPC MESSAGE! %d", *ipc_command);
 \t\treturn XRT_ERROR_IPC_FAILURE;
@@ -493,8 +497,10 @@ def generate_server_header(file, p):
     f.write(";\n")
 
     for call in p.calls:
+        call.write_ifdef_start(f)
         call.write_handler_decl(f)
         f.write(";\n")
+        call.write_ifdef_end(f)
 
     write_cpp_header_guard_end(f)
     f.close()
