@@ -107,7 +107,6 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_max_drawables, "XRT_MACOS_MAX_DRAWABLES", 3)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_present_worker, "XRT_MACOS_PRESENT_WORKER", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_early_drawable, "XRT_MACOS_EARLY_DRAWABLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
@@ -157,7 +156,6 @@ struct comp_window_macos
 	bool present_worker_shutdown;
 	bool async_present;
 	bool present_worker_enabled;
-	bool early_drawable_enabled;
 	bool drawable_slot_enabled;
 	id<CAMetalDrawable> prefetched_drawable;
 	uint64_t prefetched_drawable_timeline_value;
@@ -788,42 +786,6 @@ macos_release_prefetched_drawable(struct comp_window_macos *cwm, const char *tra
 }
 
 static void
-macos_prefetch_drawable_for_rendering_frame(struct comp_window_macos *cwm)
-{
-	if (!cwm->early_drawable_enabled || !cwm->async_present || cwm->present_worker_enabled ||
-	    cwm->render_complete_event == nil || cwm->metal_layer == nil) {
-		return;
-	}
-
-	int64_t rendering_frame_id = cwm->base.base.c->frame.rendering.id;
-	if (rendering_frame_id < 0) {
-		return;
-	}
-	uint64_t timeline_value = (uint64_t)rendering_frame_id;
-	if (cwm->prefetched_drawable != nil && cwm->prefetched_drawable_timeline_value == timeline_value) {
-		return;
-	}
-	if (cwm->prefetched_drawable != nil) {
-		macos_release_prefetched_drawable(cwm, "stale_release");
-	}
-
-	@autoreleasepool {
-		uint64_t begin_ns = os_monotonic_get_ns();
-		id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
-		uint64_t end_ns = os_monotonic_get_ns();
-		if (drawable == nil) {
-			macos_trace_drawable_prefetch(cwm, "acquire_nil", timeline_value, end_ns, begin_ns, end_ns);
-			return;
-		}
-		cwm->prefetched_drawable = [drawable retain];
-		cwm->prefetched_drawable_timeline_value = timeline_value;
-		cwm->prefetched_drawable_begin_ns = begin_ns;
-		cwm->prefetched_drawable_end_ns = end_ns;
-		macos_trace_drawable_prefetch(cwm, "acquired", timeline_value, end_ns, begin_ns, end_ns);
-	}
-}
-
-static void
 macos_present_worker_run_one(struct comp_window_macos *cwm);
 
 static void
@@ -1186,10 +1148,6 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 
 	COMP_INFO(ct->c, "macOS target using render-complete timeline semaphore%s",
 	          cwm->render_complete_event != nil ? " with Metal shared-event handoff" : "");
-	if (cwm->early_drawable_enabled && cwm->render_complete_event == nil) {
-		COMP_WARN(ct->c, "XRT_MACOS_EARLY_DRAWABLE requested but MTLSharedEvent handoff is unavailable; early drawable prefetch is disabled");
-		cwm->early_drawable_enabled = false;
-	}
 	if (cwm->drawable_slot_enabled && cwm->render_complete_event == nil) {
 		COMP_WARN(ct->c, "XRT_MACOS_DRAWABLE_SLOT requested but MTLSharedEvent handoff is unavailable; drawable slot is disabled");
 		cwm->drawable_slot_enabled = false;
@@ -1495,18 +1453,6 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				                               next_drawable_begin_ns, after_drawable_ns);
 				macos_schedule_drawable_slot(cwm);
 			}
-		} else if (cwm->early_drawable_enabled && cwm->prefetched_drawable != nil &&
-		           cwm->prefetched_drawable_timeline_value == timeline_semaphore_value) {
-			next_drawable_begin_ns = cwm->prefetched_drawable_begin_ns;
-			after_drawable_ns = cwm->prefetched_drawable_end_ns;
-			id<CAMetalDrawable> retained_drawable = cwm->prefetched_drawable;
-			cwm->prefetched_drawable = nil;
-			cwm->prefetched_drawable_timeline_value = 0;
-			cwm->prefetched_drawable_begin_ns = 0;
-			cwm->prefetched_drawable_end_ns = 0;
-			drawable = [retained_drawable autorelease];
-			macos_trace_drawable_prefetch(cwm, "consumed", timeline_semaphore_value, os_monotonic_get_ns(),
-			                               next_drawable_begin_ns, after_drawable_ns);
 		} else {
 			if (cwm->prefetched_drawable != nil) {
 				macos_release_prefetched_drawable(cwm, "present_mismatch_release");
@@ -2033,7 +1979,6 @@ static VkResult
 comp_window_macos_update_timings(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	macos_prefetch_drawable_for_rendering_frame(cwm);
 	macos_schedule_drawable_slot(cwm);
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
 	uint64_t displaylink_now_host_ns =
@@ -2277,19 +2222,17 @@ comp_window_macos_create(struct comp_compositor *c)
 	cwm->async_present = true;
 	bool want_present_worker = debug_get_bool_option_macos_present_worker();
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
-	bool want_early_drawable = debug_get_bool_option_macos_early_drawable();
 	/* The display link supplies this frame's drawable. Never hand it to a
 	 * legacy worker or prefetch a drawable for a different callback, even when
 	 * an old launch environment still requests these experiments. The bridge
 	 * is not active yet: target creation precedes display-link attachment. */
 	bool displaylink_driven = macos_cametal_drive_enabled();
 	if (displaylink_driven) {
-		if (want_present_worker || want_drawable_slot || want_early_drawable) {
-			COMP_WARN(c, "CAMetalDisplayLink ignores XRT_MACOS_PRESENT_WORKER, XRT_MACOS_DRAWABLE_SLOT and XRT_MACOS_EARLY_DRAWABLE; presentation runs on the compositor thread");
+		if (want_present_worker || want_drawable_slot) {
+			COMP_WARN(c, "CAMetalDisplayLink ignores XRT_MACOS_PRESENT_WORKER and XRT_MACOS_DRAWABLE_SLOT; presentation runs on the compositor thread");
 		}
 		want_present_worker = false;
 		want_drawable_slot = false;
-		want_early_drawable = false;
 	}
 	cwm->drawable_slot_enabled = cwm->async_present && want_drawable_slot;
 	/*
@@ -2299,8 +2242,6 @@ comp_window_macos_create(struct comp_compositor *c)
 	 * drop the just-rendered frame on the caller thread.
 	 */
 	cwm->present_worker_enabled = cwm->async_present && (want_present_worker || cwm->drawable_slot_enabled);
-	cwm->early_drawable_enabled = cwm->async_present && !cwm->present_worker_enabled && !cwm->drawable_slot_enabled &&
-	                               want_early_drawable;
 	cwm->present_command_group = dispatch_group_create();
 	if (cwm->present_worker_enabled) {
 		dispatch_queue_attr_t worker_attr =
@@ -2317,15 +2258,6 @@ comp_window_macos_create(struct comp_compositor *c)
 			          "macOS diagnostic: asynchronous drawable slot with newest-frame worker enabled; nextDrawable stalls supersede pending frames instead of dropping them");
 		} else {
 			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT requires asynchronous presentation; slot is disabled");
-		}
-	}
-	if (want_early_drawable) {
-		if (cwm->drawable_slot_enabled) {
-			COMP_WARN(c, "XRT_MACOS_DRAWABLE_SLOT and XRT_MACOS_EARLY_DRAWABLE are both set; using drawable slot mode");
-		} else if (cwm->early_drawable_enabled) {
-			COMP_INFO(c, "macOS diagnostic: early CAMetalDrawable prefetch enabled");
-		} else {
-			COMP_WARN(c, "XRT_MACOS_EARLY_DRAWABLE requires async presentation without the present worker; prefetch is disabled");
 		}
 	}
 	macos_timing_trace_open(cwm);
