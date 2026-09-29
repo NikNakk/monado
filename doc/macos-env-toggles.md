@@ -34,14 +34,20 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 | (d) unclear | 28 | Needs a decision from you (see [Decisions needed](#decisions-needed)) |
 | Out of scope | 8 | Upstream options that were only moved, or pre-existing |
 
-The single biggest lever is **D1: whether the legacy (non-CAMetalDisplayLink)
-presentation path still has to be supported**. `XRT_MACOS_CAMETALDISPLAYLINK_MODE`
-defaults to `driven` on macOS 14 and later. In that mode `comp_window_macos.m`
-force-disables the present worker, drawable slot and early drawable (`4f887c3`).
-It also suppresses the CVDisplayLink callback and the learned present offset, and
-uses plain `presentDrawable:`. That makes 7 of the 28 (d) entries, and 3 (a)/(c)
-entries, inert by default (marked **L** below). If you drop legacy/hybrid mode,
-all 10 become (c), along with most of `comp_window_macos_latest.m`.
+**Hardware result, 2026-09-29: legacy presentation is the best mode.** Driven
+CAMetalDisplayLink mode suffered unpredictable timing delays on the display-link
+thread and did not improve on legacy. The code still defaults to the losing
+mode: `XRT_MACOS_CAMETALDISPLAYLINK_MODE` is `driven` on macOS 14 and later. In
+driven mode `comp_window_macos.m` force-disables the present worker, drawable
+slot and early drawable (`4f887c3`). It also suppresses the CVDisplayLink
+callback and the learned present offset, and uses plain `presentDrawable:`.
+
+The toggles marked **L** below (7 (d), 3 (a)/(c)) are therefore the ones that
+matter in practice. Legacy mode with today's defaults (worker, stale substitution
+and drawable slot all off) presents inline on the compositor thread, which blocks
+in `nextDrawable`. The judder ledger found that this "deterministically force[s]
+missed refreshes". So simply flipping the default to `legacy` would not
+reproduce the good result: the legacy *configuration* must be pinned too (D1).
 
 ## Cross-cutting findings
 
@@ -203,8 +209,9 @@ Notes on classification:
 
 ### macOS presenter: `main/comp_window_macos.m`, `comp_window_macos_latest.m`, force-included headers
 
-In the notes column, **L** means inert in the default driven CAMetalDisplayLink
-mode: it only matters on macOS < 14 or with `XRT_MACOS_CAMETALDISPLAYLINK_MODE=legacy|hybrid`.
+In the notes column, **L** means active only in legacy (or hybrid) mode, not in
+the current default driven mode. Legacy is the mode that tested best, so these
+are the ones that matter in practice.
 
 | Variable | File | Default | What it changes | Intro / last | Cat |
 | --- | --- | --- | --- | --- | :-: |
@@ -305,26 +312,39 @@ mode: it only matters on macOS < 14 or with `XRT_MACOS_CAMETALDISPLAYLINK_MODE=l
 Each item names the (d) toggles it resolves. The recommendation is mine; the
 decision needs hardware validation that I cannot do.
 
-- **D1. Keep the legacy / hybrid presentation path?** This covers the 10 **L**
-  toggles: the (d) items `PRESENT_WORKER`, `DRAWABLE_SLOT`, `EARLY_DRAWABLE`,
-  `PRESENT_STALE_SUBSTITUTE`, `PRESENT_IMMEDIATE`, `UNIQUE_PRESENT_SLOTS` and
-  `PRESENT_MIN_DURATION_US`, plus the (a)/(c) items `CVDISPLAYLINK_PACING`,
-  `PRESENT_MIN_LEAD_US` and `PRESENT_PRELATCH_US`. It also covers
-  `CAMETALDISPLAYLINK_MODE=hybrid`, the `DRIVE` alias and most of
-  `comp_window_macos_latest.m`.
-  - *If you keep it* (macOS 13 support, or hybrid as a fallback), the
-    evidence ledger names worker + stale substitution as the best legacy
-    baseline. Make that combination the legacy default, and treat `DRAWABLE_SLOT`
-    (converted stalls into ~2% drops), `EARLY_DRAWABLE`, `PRESENT_IMMEDIATE`,
-    `UNIQUE_PRESENT_SLOTS` and `PRESENT_MIN_DURATION_US` as (c). None of the
-    last three has a recorded result.
-  - *If you drop it*, delete the worker, slot, prefetch, stale and timed-present
-    machinery and the four selector-rewriting headers. Most of the part-2
-    restructure then becomes unnecessary.
+- **D1. Which exact legacy configuration was best?** You have said that legacy
+  beats driven. The remaining question is which legacy variant. The last
+  recorded legacy baseline (`macos-psvr2-stale-substitution.md`, 2026-09-11) is
+  `ASYNC_PRESENT=1`, `METAL_SHARED_EVENT_WAIT=1`, `PRESENT_WORKER=1`,
+  `PRESENT_STALE_SUBSTITUTE=1`, `DRAWABLE_SLOT=0`, `EARLY_DRAWABLE=0`,
+  `MAX_DRAWABLES=3`, `LATE_RENDER_DESIRED_OFFSET_US=2000`, `PRESENT_MIN_LEAD_US=2000`,
+  `PRESENT_PRELATCH_US=2000` and deferred GPU timestamps. After that, `59150ab`
+  made the drawable-slot newest-frame worker (`07f16e2`), `PRESENT_MIN_DURATION_US=8000`
+  and `COMPOSITOR_QOS=1` release defaults, before driven mode replaced them.
+  Please give the environment of the run you consider best. The answer settles
+  seven **L** (d) toggles, D2, and possibly `COMPOSITOR_QOS`. The winners become
+  hard-coded legacy defaults, and `DRAWABLE_SLOT`/`STALE_SUBSTITUTE` (whichever
+  lost), `EARLY_DRAWABLE`, `PRESENT_IMMEDIATE`, `UNIQUE_PRESENT_SLOTS` and
+  possibly `PRESENT_MIN_DURATION_US` become (c).
+- **D1b. Flip the default mode to legacy, and drop driven/hybrid?** This changes
+  runtime defaults, so it needs your explicit go-ahead, and it must land together
+  with the D1 configuration (see above). Hybrid also depends on a
+  CAMetalDisplayLink callback thread, via a child layer used as the cadence
+  source. Was it tested, or does it share driven's problem? If both go:
+  - `CAMETALDISPLAYLINK_MODE` and the `DRIVE` alias,
+    `CAMETALDISPLAYLINK_LATENCY`/`_THREAD_PRIORITY`, and
+    `CAMETALDISPLAYLINK_DRIVE_TRACE_PATH` all go.
+  - `CAMETALDISPLAYLINK_PROBE`/`_TRACE_PATH` could remain as a standalone
+    diagnostic, or go too.
+  - About 2,200 lines of CAMetalDisplayLink-only code go with them:
+    `comp_window_macos_cametal_{drive,drive_cv,idle_black,probe}.h`,
+    `multi/comp_multi_macos_displaylink.[ch]`,
+    `comp_multi_system_macos_displaylink_drive.h` and
+    `tests_macos_displaylink.cpp`, plus their call sites.
 - **D2. `LATE_RENDER_DESIRED_OFFSET_US`.** It was the winning setting (2000 µs)
   on the legacy path and was briefly a release default. It was turned off when
-  driven mode landed. Has it been measured in driven mode? If not, it is an open
-  experiment rather than dead code.
+  driven mode landed. If your best legacy run used it, it should become the
+  legacy default (a). Otherwise it is an open experiment.
 - **D3. Any fixed-divisor mode?** There are three overlapping mechanisms:
   `XRT_MACOS_DISPLAY_RATE_DIVISOR` (compositor), `XRT_MACOS_CLIENT_FRAME_DIVISOR`
   / `CLIENT_FRAME_MIN_HOLD` (multi-system latch) and
@@ -339,15 +359,15 @@ decision needs hardware validation that I cannot do.
   winners become (a) and the rest (c). `EXTERNAL_BROKER` in particular looks
   like a one-off A/B.
 - **D5. `DISABLE_DISPLAY_SYNC` and `DISABLE_FRAMEBUFFER_ONLY`.** These are live
-  in driven mode too, and no result is recorded. Delete them unless you
+  in every mode, and no result is recorded. Delete them unless you
   remember a finding.
 - **D6. Is `acceleration` without `continuity` worth keeping as a user
   mode?** This decides whether `PSVR2_ACCELERATION_PREDICTION` survives inside a
   `PSVR2_POSITION_PREDICTOR` enum.
-- **D7. `MAX_DRAWABLES`, `CAMETALDISPLAYLINK_LATENCY` and `_THREAD_PRIORITY`.**
-  The "3 drawables" conclusion was reached on the legacy worker path. In driven
-  mode these interact with `preferredFrameLatency`. Should they be re-measured
-  before hard-coding 3 / 1 / interactive?
+- **D7. `MAX_DRAWABLES`.** The "3 drawables" conclusion (2 is lower latency
+  but more juddery) was reached on the legacy worker path, which is the mode you
+  are keeping. Hard-code 3 unless your best run used 2. (`CAMETALDISPLAYLINK_LATENCY`
+  and `_THREAD_PRIORITY` are decided by D1b.)
 - **D8. `APP_RELEASE_SHARED_EVENT_WAIT_THREAD`.** Was the wait thread meant to
   be on in service builds (finding 3)? If so, the one-line fix is to include
   `xrt/xrt_config_build.h`, but that turns it on for everyone and needs headset
@@ -400,7 +420,10 @@ and `multi_compositor_deliver_any_frames` is used by `comp_multi_system.c`.
 
 ### Proposal
 
-I recommend deciding D1 first, because it changes which of these is worth doing.
+Legacy is the mode being kept, so the legacy presenter, worker and substitution
+code is the product path, and step 2 is worth doing. It also fixes finding 6
+(stale path drops passthrough), which becomes user-visible if the D1 answer is
+worker + stale substitution. Step 3 depends on D1b.
 
 **Step 1: fold the wrapper into the main file.** This is mechanical and
 behaviour-preserving, about +10/−25 lines net, with ~900 lines moved.
@@ -418,8 +441,8 @@ this environment (no macOS host). It is the safest first change to make on a
 Mac: the build either compiles or it doesn't, and there is nothing to validate
 on the headset.
 
-**Step 2: one presenter with a pluggable substitution policy.** This only makes
-sense if D1 keeps the legacy path. About −330/+80 lines; it needs a headset run.
+**Step 2: one presenter with a pluggable substitution policy.** About −330/+80
+lines; it needs a headset run.
 
 ```c
 /* Called on the worker after nextDrawable returns. May swap *job for a newer
@@ -444,9 +467,20 @@ behavioural risk is that the base worker branch has picked up small differences
 from the copy (trace columns, the `image_reuse_wait` source, the `wait_mode`
 string), and these must be reconciled one by one.
 
-**Step 3: replace the selector macros with explicit hooks.** This is needed with
-or without D1. About −250/+150 lines, touching every present call site; it needs
-a headset run.
+**Step 3: remove the selector macros.** If D1b drops driven and hybrid, most
+of the macro layer simply goes away. Three of the four `-include` headers
+(`cametal_probe.h`, `cametal_idle_black.h` → `cametal_drive.h`, `cametal_drive_cv.h`)
+exist only to redirect `nextDrawable`, `presentDrawable`, `setDrawableSize`,
+`CVDisplayLinkStart` and `present` to the display-link drawable. Deleting them,
+together with the rest of the ~2,200 CAMetalDisplayLink-only lines, leaves only
+`comp_window_macos_trace_buffer.h`, whose `presentDrawable` rename carries the
+`UNIQUE_PRESENT_SLOTS`/`PRESENT_MIN_DURATION_US` experiments. That rename should
+become a plain function called at the one `atTime:` site, or go entirely if D1
+rejects both experiments. This is roughly −2,300/+30 lines, and the headset
+check is simply "legacy still behaves as before".
+
+If driven or hybrid must stay, replace the macros with explicit hooks instead
+(about −250/+150 lines, touching every present call site, needs a headset run):
 
 ```c
 struct macos_presenter_backend {
@@ -463,8 +497,11 @@ presentDrawable`/`nextDrawable`/`setDrawableSize`/`CVDisplayLinkStart`/`present`
 rewrites, and the `-include` list. The trace-buffer `fflush`/`setvbuf` macros
 go away with the single trace helper from finding 1.
 
-| Scope | If D1 keeps legacy | If D1 drops legacy |
+| Scope | Driven/hybrid dropped (D1b yes) | Driven/hybrid kept |
 | --- | --- | --- |
-| Step 1 | ~35 changed lines, mechanical | same |
-| Step 2 | ~−330/+80, headset A/B | not needed: delete ~600 lines of worker, slot and stale code instead |
-| Step 3 | ~−250/+150, headset A/B | ~−450/+60: only the driven backend remains |
+| Step 1: fold wrapper | ~35 changed lines, mechanical | same |
+| Step 2: substitution policy | ~−330/+80, headset A/B; losing policies from D1 deleted | same |
+| Step 3: selector macros | ~−2,300/+30, delete driven/hybrid backend | ~−250/+150, explicit backend hooks |
+
+Recommended order: step 1, then D1b (default flip to the D1 configuration, as its
+own commit so it can be reverted on its own), then step 3, then step 2.
