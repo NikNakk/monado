@@ -22,8 +22,14 @@ The Metal companion is deliberately narrow: it exposes the current
 It does not define policy and it does not expose raw gaze.
 
 The compositor obtains the exact matching dense logical-to-physical mapping
-from the Metal swapchain cache and feeds it into the existing distortion /
-timewarp compute path.
+that was bound to the submitted swapchain image when it was released, and feeds
+it into the existing distortion / timewarp compute path (or the layer squasher
+for multi-layer frames). See
+[Per-image map association](macos-openxr-foveation.md#per-image-map-association).
+
+This path has been validated on PS VR2 hardware through `monado-service`; it
+remains opt-in at build time via the `XRT_FEATURE_OPENXR_*FOVEATION*` gates
+listed in the architecture document.
 
 ## Running the standard path
 
@@ -47,6 +53,20 @@ The eye-tracked mode deliberately does **not** enable
 `XR_EXT_eye_gaze_interaction`. The runtime acquires gaze privately and the
 application receives only the standardized META foveation-centre state plus the
 native Metal rate map needed for rendering.
+
+Sparse-frame check (either mode; add `--passthrough` to exercise the layer
+squasher):
+
+```sh
+OXR_DEBUG_FOVEATION_BINDING=1 \
+XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
+./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  --fb-eye-foveation --fb-foveation-sparse-check --foveation-profile aggressive
+```
+
+On sparse frames the application log shows the runtime's new revision while
+the `xrEndFrame foveation` lines must keep reporting the revision the
+re-submitted image was rendered with.
 
 `PSVR2_GAZE_STREAMS=1` is no longer required. The gaze interface is
 provisioned by default and activation is lazy/reference-counted. Set
@@ -90,7 +110,7 @@ Metal render directly into OpenXR swapchain
 ordinary projection layer
                   |
                   v
-matching 129-sample dense map from swapchain cache
+129-sample dense map bound to the submitted image
                   |
                   v
 Monado distortion / timewarp compute pass
@@ -144,15 +164,24 @@ Those measurements motivated the fused compositor design: the VRR rendering
 saving is useful only if reconstruction can be folded into work the compositor
 already has to perform.
 
-## Next validation
+## Validation status and next steps
 
-Before enabling the new extension path by default:
+Done on hardware (PS VR2, native macOS, `monado-service`, 2026-09-29):
 
-1. validate `--fb-foveation` on headset;
-2. validate `--fb-eye-foveation` and confirm gaze activation/lifetime;
-3. compare fixed and eye-tracked image quality against the legacy fused path;
-4. record GPU timing and rate-map revision frequency;
-5. audit compact depth coordinates before combining depth + foveation;
-6. integrate the standard FB/META + Metal companion path into Chromium;
-7. use that implementation experience to refine the proposed Metal companion
+- `--fb-foveation` and `--fb-eye-foveation` render correctly;
+- runtime-private gaze activates and produces changing per-eye centres without
+  `XR_EXT_eye_gaze_interaction`;
+- logical 2800 x 2856 per eye, aggressive/HIGH physical about 1376 x 1404,
+  with no obvious visual difference.
+
+Remaining:
+
+1. run `--fb-foveation-sparse-check` on the headset, with and without
+   `--passthrough`, to confirm the per-image association and layer-squasher
+   reconstruction end to end;
+2. compare fixed and eye-tracked image quality against the legacy fused path;
+3. record GPU timing and rate-map revision frequency;
+4. audit compact depth coordinates before combining depth + foveation;
+5. validate the standard FB/META + Metal companion path in Chromium;
+6. use that implementation experience to refine the proposed Metal companion
    before taking it upstream.
