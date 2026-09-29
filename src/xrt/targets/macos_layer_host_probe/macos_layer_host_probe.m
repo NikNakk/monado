@@ -25,6 +25,14 @@
  *  - game-hosted:  the game renders into a CAContext; the host shows it
  *                  through a CALayerHost.
  *
+ * Handoff mode, run from a terminal:
+ *
+ *  - handoff:      two spawned clients render continuously into their own
+ *                  CAContexts; the host swaps which CALayerHost is shown every
+ *                  few seconds in one CATransaction, optionally while the host
+ *                  is Darwin-backgrounded like monado-service under Game Mode,
+ *                  and measures the on-screen gap at each swap.
+ *
  * In the Game Mode modes the host also runs a realtime canary thread that
  * logs its own scheduling priority and both processes' Darwin-background
  * state, so throttling of the host is visible directly.
@@ -184,6 +192,13 @@ enum probe_mode
 	PROBE_MODE_HOSTED,
 	PROBE_MODE_GAME_DIRECT,
 	PROBE_MODE_GAME_HOSTED,
+	PROBE_MODE_HANDOFF,
+};
+
+enum swap_method
+{
+	SWAP_REPARENT,
+	SWAP_HIDDEN,
 };
 
 enum present_mode
@@ -210,6 +225,12 @@ struct probe_options
 	const char *process_type;
 	pid_t query_pid;
 
+	// Handoff test.
+	double swap_every;
+	enum swap_method swap_method;
+	bool host_background;
+	int tint; //!< Client only: 1 = client A (red), 2 = client B (blue).
+
 	// Passed from host to client only.
 	CGDirectDisplayID display_id;
 	double width_points;
@@ -227,6 +248,7 @@ mode_name(enum probe_mode mode)
 	case PROBE_MODE_HOSTED: return "hosted";
 	case PROBE_MODE_GAME_DIRECT: return "game-direct";
 	case PROBE_MODE_GAME_HOSTED: return "game-hosted";
+	case PROBE_MODE_HANDOFF: return "handoff";
 	}
 	return "unknown";
 }
@@ -261,12 +283,19 @@ print_usage(const char *argv0)
 	        "       %s --role query --pid PID\n"
 	        "\n"
 	        "  MODE          direct, hosted-local, hosted (timing, run from a terminal)\n"
+	        "                handoff (swap between two hosted clients, run from a terminal)\n"
 	        "                game-direct, game-hosted (Game Mode test, host via bootstrap-host)\n"
 	        "  --display N   index into NSScreen.screens (default: last screen, usually the headset)\n"
 	        "  --seconds S   measurement length (default 20); in the Game Mode test the host\n"
 	        "                renders for at most S and should outlast the game\n"
 	        "  --out PREFIX  CSV path prefix (default /tmp/layer_host_probe)\n"
 	        "  --rt 0|1      realtime (time-constraint) render thread, as Monado's compositor (default 1)\n"
+	        "\n"
+	        "Handoff:\n"
+	        "  --swap-every S           seconds between swaps (default 2)\n"
+	        "  --swap-method M          reparent (remove/add, as Chromium) or hidden (default reparent)\n"
+	        "  --host-background 0|1    Darwin-background the host, as Game Mode does (default 0)\n"
+	        "  --cpu-load N             busy threads in each client (default 0)\n"
 	        "\n"
 	        "Game half (macos-layer-host-probe-game.app, launched with open --args):\n"
 	        "  --seconds S   how long to render or load the CPU (default 20)\n"
@@ -293,6 +322,8 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 	    .realtime = true,
 	    .warmup = 5.0,
 	    .process_type = "Interactive",
+	    .swap_every = 2.0,
+	    .swap_method = SWAP_REPARENT,
 	    .context_fd = -1,
 	};
 
@@ -335,6 +366,8 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 				opts->mode = PROBE_MODE_GAME_DIRECT;
 			} else if (strcmp(value, "game-hosted") == 0) {
 				opts->mode = PROBE_MODE_GAME_HOSTED;
+			} else if (strcmp(value, "handoff") == 0) {
+				opts->mode = PROBE_MODE_HANDOFF;
 			} else {
 				return false;
 			}
@@ -367,6 +400,20 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 				return false;
 			}
 			opts->process_type = value;
+		} else if (strcmp(arg, "--swap-every") == 0) {
+			opts->swap_every = atof(value);
+		} else if (strcmp(arg, "--swap-method") == 0) {
+			if (strcmp(value, "reparent") == 0) {
+				opts->swap_method = SWAP_REPARENT;
+			} else if (strcmp(value, "hidden") == 0) {
+				opts->swap_method = SWAP_HIDDEN;
+			} else {
+				return false;
+			}
+		} else if (strcmp(arg, "--host-background") == 0) {
+			opts->host_background = atoi(value) != 0;
+		} else if (strcmp(arg, "--tint") == 0) {
+			opts->tint = atoi(value);
 		} else if (strcmp(arg, "--pid") == 0) {
 			opts->query_pid = (pid_t)atoi(value);
 		} else if (strcmp(arg, "--display-id") == 0) {
@@ -387,7 +434,7 @@ parse_options(int argc, char **argv, struct probe_options *opts)
 		i++;
 	}
 
-	return opts->seconds > 0.0 && opts->cpu_load >= 0 && opts->warmup >= 0.0;
+	return opts->seconds > 0.0 && opts->cpu_load >= 0 && opts->warmup >= 0.0 && opts->swap_every > 0.0;
 }
 
 
@@ -694,7 +741,11 @@ display_link_callback(CVDisplayLinkRef link,
 	pass.colorAttachments[0].texture = drawable.texture;
 	pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 	pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-	pass.colorAttachments[0].clearColor = MTLClearColorMake(0.1, 0.1, 0.12, 1.0);
+	switch (_opts.tint) {
+	case 1: pass.colorAttachments[0].clearColor = MTLClearColorMake(0.35, 0.05, 0.05, 1.0); break;
+	case 2: pass.colorAttachments[0].clearColor = MTLClearColorMake(0.05, 0.08, 0.35, 1.0); break;
+	default: pass.colorAttachments[0].clearColor = MTLClearColorMake(0.1, 0.1, 0.12, 1.0); break;
+	}
 	[[cmd renderCommandEncoderWithDescriptor:pass] endEncoding];
 
 	NSUInteger width = drawable.texture.width;
@@ -1271,11 +1322,14 @@ run_client(const struct probe_options *opts)
 	}
 	close(opts->context_fd);
 
+	const char *role = opts->tint == 1 ? "client-a" : opts->tint == 2 ? "client-b" : "client";
 	ProbeRenderer *renderer = [[ProbeRenderer alloc] initWithLayer:layer
 	                                                     displayID:opts->display_id
 	                                                       options:opts
-	                                                          role:"client"];
+	                                                          role:role];
+	struct cpu_load *load = cpu_load_start(opts->cpu_load);
 	[renderer runForSeconds:opts->seconds];
+	cpu_load_stop(load);
 
 	// Keep the context alive until rendering is finished.
 	(void)context;
@@ -1432,6 +1486,7 @@ run_game(const struct probe_options *opts)
 static pid_t
 spawn_client(const char *self_path,
              const struct probe_options *opts,
+             int tint,
              CGDirectDisplayID display_id,
              CGSize points,
              double scale,
@@ -1443,6 +1498,9 @@ spawn_client(const char *self_path,
 	}
 
 	char display_id_str[32], width_str[32], height_str[32], scale_str[32], seconds_str[32], min_us_str[32];
+	char tint_str[16], cpu_load_str[16];
+	snprintf(tint_str, sizeof(tint_str), "%d", tint);
+	snprintf(cpu_load_str, sizeof(cpu_load_str), "%d", opts->cpu_load);
 	snprintf(display_id_str, sizeof(display_id_str), "%u", display_id);
 	snprintf(width_str, sizeof(width_str), "%.3f", points.width);
 	snprintf(height_str, sizeof(height_str), "%.3f", points.height);
@@ -1459,6 +1517,8 @@ spawn_client(const char *self_path,
 	    "--seconds", seconds_str,
 	    "--out", (char *)opts->out_prefix,
 	    "--rt", opts->realtime ? "1" : "0",
+	    "--tint", tint_str,
+	    "--cpu-load", cpu_load_str,
 	    "--display-id", display_id_str,
 	    "--width", width_str,
 	    "--height", height_str,
@@ -1494,6 +1554,240 @@ read_context_id(int fd, CAContextID *out_id)
 		return false;
 	}
 	return read(fd, out_id, sizeof(*out_id)) == sizeof(*out_id);
+}
+
+/*
+ *
+ * Handoff analysis: rebuilds what was on screen from both clients' CSVs and
+ * the host's swap log.
+ *
+ */
+
+struct handoff_swap
+{
+	double scheduled_s;
+	double request_s;
+	double commit_s;
+	int visible; //!< Client shown after this swap: 0 = A, 1 = B.
+};
+
+struct handoff_log
+{
+	double attach_s; //!< Client A shown from here.
+	struct handoff_swap *swaps;
+	size_t capacity;
+	size_t count;
+};
+
+struct client_frames
+{
+	double *submit_s;
+	double *presented_s; //!< 0 when the drawable was not presented.
+	size_t count;
+};
+
+//! Reads submit and presented times for every frame of a ProbeRenderer CSV.
+static bool
+load_client_frames(const char *path, struct client_frames *out)
+{
+	*out = (struct client_frames){0};
+	FILE *file = fopen(path, "r");
+	if (file == NULL) {
+		return false;
+	}
+
+	size_t capacity = 4096;
+	out->submit_s = malloc(capacity * sizeof(double));
+	out->presented_s = malloc(capacity * sizeof(double));
+	char line[512];
+	(void)fgets(line, sizeof(line), file); // header
+	while (fgets(line, sizeof(line), file) != NULL) {
+		size_t frame;
+		double submit, target, presented;
+		if (sscanf(line, "%zu,%lf,%lf,%lf", &frame, &submit, &target, &presented) != 4) {
+			continue;
+		}
+		if (out->count == capacity) {
+			capacity *= 2;
+			out->submit_s = realloc(out->submit_s, capacity * sizeof(double));
+			out->presented_s = realloc(out->presented_s, capacity * sizeof(double));
+		}
+		out->submit_s[out->count] = submit;
+		out->presented_s[out->count] = presented;
+		out->count++;
+	}
+	fclose(file);
+	return true;
+}
+
+static int
+visible_at(const struct handoff_log *log, double t)
+{
+	int visible = 0;
+	for (size_t k = 0; k < log->count && log->swaps[k].commit_s <= t; k++) {
+		visible = log->swaps[k].visible;
+	}
+	return visible;
+}
+
+static bool
+near_swap(const struct handoff_log *log, double t, double before_s, double after_s)
+{
+	for (size_t k = 0; k < log->count; k++) {
+		if (t >= log->swaps[k].commit_s - before_s && t <= log->swaps[k].commit_s + after_s) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static void
+analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct handoff_log *log, double period_s)
+{
+	const char *roles[2] = {"client-a", "client-b"};
+	struct client_frames frames[2];
+	for (int c = 0; c < 2; c++) {
+		char path[1024];
+		snprintf(path, sizeof(path), "%s_%s_%s_%d.csv", opts->out_prefix, mode_name(opts->mode), roles[c],
+		         (int)pids[c]);
+		if (!load_client_frames(path, &frames[c])) {
+			fprintf(stderr, "LAYER_HOST_PROBE handoff: could not read %s\n", path);
+		}
+	}
+
+	/*
+	 * Classify each frame by whether its client was shown when it was
+	 * submitted, skipping frames submitted within a few periods of a swap.
+	 * If hidden frames still report presentedTime, presentedTime cannot tell
+	 * what was actually on screen and the gap figures are unreliable.
+	 *
+	 * The on-screen timeline is every presented frame whose client was shown
+	 * at its presented time.
+	 */
+	size_t hidden_presented = 0, hidden_total = 0;
+	size_t merged_count = 0;
+	double *merged = malloc((frames[0].count + frames[1].count + 1) * sizeof(double));
+	for (int c = 0; c < 2; c++) {
+		for (size_t i = 0; i < frames[c].count; i++) {
+			double submit = frames[c].submit_s[i];
+			double p = frames[c].presented_s[i];
+			if (submit < log->attach_s) {
+				continue;
+			}
+			if (visible_at(log, submit) != c && !near_swap(log, submit, 3.0 * period_s, 3.0 * period_s)) {
+				hidden_total++;
+				if (p > 0.0) {
+					hidden_presented++;
+				}
+			}
+			if (p > 0.0 && visible_at(log, p) == c) {
+				merged[merged_count++] = p;
+			}
+		}
+	}
+	qsort(merged, merged_count, sizeof(double), compare_doubles);
+
+	// Steady state: long intervals away from any swap.
+	size_t steady_intervals = 0, steady_long = 0;
+	for (size_t i = 1; i < merged_count; i++) {
+		if (near_swap(log, merged[i], 2.0 * period_s, 10.0 * period_s)) {
+			continue;
+		}
+		steady_intervals++;
+		if (merged[i] - merged[i - 1] > 1.5 * period_s) {
+			steady_long++;
+		}
+	}
+
+	char path[1024];
+	snprintf(path, sizeof(path), "%s_handoff_swaps_%d.csv", opts->out_prefix, (int)getpid());
+	FILE *file = fopen(path, "w");
+	if (file != NULL) {
+		fprintf(file, "swap,visible,scheduled_s,commit_s,swap_late_ms,commit_ms,max_gap_ms,first_new_present_ms\n");
+	}
+
+	double *gaps = calloc(log->count + 1, sizeof(double));
+	double *first_new = calloc(log->count + 1, sizeof(double));
+	double *late = calloc(log->count + 1, sizeof(double));
+	size_t measured = 0, long_gaps = 0;
+	for (size_t k = 0; k < log->count; k++) {
+		const struct handoff_swap *sw = &log->swaps[k];
+		double lo = sw->commit_s - 2.0 * period_s;
+		double hi = sw->commit_s + 10.0 * period_s;
+
+		double max_gap = 0.0;
+		for (size_t i = 1; i < merged_count; i++) {
+			if (merged[i] >= lo && merged[i] <= hi) {
+				double gap = merged[i] - merged[i - 1];
+				max_gap = gap > max_gap ? gap : max_gap;
+			}
+		}
+
+		double first = -1.0;
+		int c = sw->visible;
+		for (size_t i = 0; i < frames[c].count; i++) {
+			double p = frames[c].presented_s[i];
+			if (p >= sw->commit_s && (first < 0.0 || p < first)) {
+				first = p;
+			}
+		}
+
+		double swap_late_ms = (sw->request_s - sw->scheduled_s) * 1e3;
+		double commit_ms = (sw->commit_s - sw->request_s) * 1e3;
+		double first_ms = first >= 0.0 ? (first - sw->commit_s) * 1e3 : -1.0;
+		if (file != NULL) {
+			fprintf(file, "%zu,%s,%.6f,%.6f,%.3f,%.3f,%.3f,%.3f\n", k, c ? "b" : "a", sw->scheduled_s,
+			        sw->commit_s, swap_late_ms, commit_ms, max_gap * 1e3, first_ms);
+		}
+
+		// The last swap can land after the clients stopped; skip it.
+		if (first < 0.0) {
+			continue;
+		}
+		gaps[measured] = max_gap * 1e3;
+		first_new[measured] = first_ms;
+		late[measured] = swap_late_ms;
+		measured++;
+		if (max_gap > 1.5 * period_s) {
+			long_gaps++;
+		}
+	}
+	if (file != NULL) {
+		fclose(file);
+		fprintf(stderr, "LAYER_HOST_PROBE wrote %s\n", path);
+	}
+
+	qsort(gaps, measured, sizeof(double), compare_doubles);
+	qsort(first_new, measured, sizeof(double), compare_doubles);
+	qsort(late, measured, sizeof(double), compare_doubles);
+
+	double hidden_share = hidden_total > 0 ? (double)hidden_presented / (double)hidden_total : 0.0;
+	fprintf(stderr,
+	        "LAYER_HOST_PROBE handoff summary method=%s host_background=%s swaps=%zu measured=%zu period_ms=%.3f\n"
+	        "  max on-screen gap around swap ms: median=%.3f p95=%.3f max=%.3f  swaps with gap >1.5x period=%zu\n"
+	        "  swap commit -> first new-client present ms: median=%.3f p95=%.3f max=%.3f\n"
+	        "  swap timer lateness ms: median=%.3f p95=%.3f max=%.3f\n"
+	        "  steady state (away from swaps) intervals >1.5x period=%.2f%%\n"
+	        "  hidden-client frames reporting presentedTime: %zu of %zu (%.1f%%)%s\n",
+	        opts->swap_method == SWAP_HIDDEN ? "hidden" : "reparent", opts->host_background ? "yes" : "no",
+	        log->count, measured, period_s * 1e3, percentile(gaps, measured, 50), percentile(gaps, measured, 95),
+	        measured > 0 ? gaps[measured - 1] : 0.0, long_gaps, percentile(first_new, measured, 50),
+	        percentile(first_new, measured, 95), measured > 0 ? first_new[measured - 1] : 0.0,
+	        percentile(late, measured, 50), percentile(late, measured, 95), measured > 0 ? late[measured - 1] : 0.0,
+	        steady_intervals > 0 ? 100.0 * (double)steady_long / (double)steady_intervals : 0.0, hidden_presented,
+	        hidden_total, 100.0 * hidden_share,
+	        hidden_share > 0.5 ? "\n  WARNING: hidden layers still report presentedTime, so the gap figures may count "
+	                             "frames that were not visible; check visually"
+	                           : "");
+
+	free(gaps);
+	free(first_new);
+	free(late);
+	free(merged);
+	for (int c = 0; c < 2; c++) {
+		free(frames[c].submit_s);
+		free(frames[c].presented_s);
+	}
 }
 
 //! Runs on a dedicated thread: waits for the game, then serves one session.
@@ -1631,6 +1925,8 @@ run_host(const struct probe_options *opts, const char *self_path)
 	CAMetalLayer *local_layer = nil;
 	CAContext *local_context = nil;
 	pid_t child = -1;
+	pid_t handoff_pids[2] = {-1, -1};
+	CALayerHost *handoff_hosts[2] = {nil, nil};
 
 	[CATransaction begin];
 	[CATransaction setDisableActions:YES];
@@ -1646,7 +1942,7 @@ run_host(const struct probe_options *opts, const char *self_path)
 		break;
 	case PROBE_MODE_HOSTED: {
 		int read_fd = -1;
-		child = spawn_client(self_path, opts, display_id, points, scale, &read_fd);
+		child = spawn_client(self_path, opts, 0, display_id, points, scale, &read_fd);
 		CAContextID context_id = 0;
 		if (child < 0 || !read_context_id(read_fd, &context_id)) {
 			fprintf(stderr, "LAYER_HOST_PROBE: client did not report a context id\n");
@@ -1661,6 +1957,33 @@ run_host(const struct probe_options *opts, const char *self_path)
 		[root addSublayer:create_layer_host(context_id)];
 		break;
 	}
+	case PROBE_MODE_HANDOFF:
+		for (int c = 0; c < 2; c++) {
+			int read_fd = -1;
+			handoff_pids[c] = spawn_client(self_path, opts, c + 1, display_id, points, scale, &read_fd);
+			CAContextID context_id = 0;
+			if (handoff_pids[c] < 0 || !read_context_id(read_fd, &context_id)) {
+				fprintf(stderr, "LAYER_HOST_PROBE: client %c did not report a context id\n", 'a' + c);
+				[CATransaction commit];
+				for (int k = 0; k <= c; k++) {
+					if (handoff_pids[k] > 0) {
+						kill(handoff_pids[k], SIGTERM);
+					}
+				}
+				return 1;
+			}
+			close(read_fd);
+			handoff_hosts[c] = create_layer_host(context_id);
+			fprintf(stderr, "LAYER_HOST_PROBE host hosting client %c pid=%d context_id=%u\n", 'a' + c,
+			        (int)handoff_pids[c], context_id);
+		}
+		// Client A is shown first. With the hidden method both stay attached.
+		[root addSublayer:handoff_hosts[0]];
+		if (opts->swap_method == SWAP_HIDDEN) {
+			handoff_hosts[1].hidden = YES;
+			[root addSublayer:handoff_hosts[1]];
+		}
+		break;
 	case PROBE_MODE_GAME_DIRECT:
 	case PROBE_MODE_GAME_HOSTED:
 		// Content is added once the game connects.
@@ -1680,6 +2003,74 @@ run_host(const struct probe_options *opts, const char *self_path)
 				stop_app();
 			});
 		}];
+	} else if (opts->mode == PROBE_MODE_HANDOFF) {
+		if (opts->host_background) {
+			// The same clamp Game Mode applies to monado-service. The clients
+			// were spawned first, so they are not affected.
+			if (setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG) != 0) {
+				fprintf(stderr, "LAYER_HOST_PROBE host: could not enter Darwin background: %s\n",
+				        strerror(errno));
+			}
+			char policy[256];
+			format_policy(policy, sizeof(policy), snapshot_policy(getpid()));
+			fprintf(stderr, "LAYER_HOST_PROBE host policy: %s\n", policy);
+		}
+
+		struct handoff_log *log = calloc(1, sizeof(*log));
+		log->attach_s = now_seconds();
+		log->capacity = (size_t)(opts->seconds / opts->swap_every) + 8;
+		log->swaps = calloc(log->capacity, sizeof(struct handoff_swap));
+
+		CALayerHost *host_a = handoff_hosts[0];
+		CALayerHost *host_b = handoff_hosts[1];
+		double first_s = log->attach_s + opts->swap_every;
+		dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+		dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(opts->swap_every * NSEC_PER_SEC)),
+		                          (uint64_t)(opts->swap_every * NSEC_PER_SEC), 0);
+		dispatch_source_set_event_handler(timer, ^{
+			if (log->count >= log->capacity) {
+				return;
+			}
+			struct handoff_swap *sw = &log->swaps[log->count];
+			sw->scheduled_s = first_s + (double)log->count * opts->swap_every;
+			sw->request_s = now_seconds();
+			sw->visible = log->count == 0 ? 1 : !log->swaps[log->count - 1].visible;
+
+			CALayerHost *show = sw->visible ? host_b : host_a;
+			CALayerHost *hide = sw->visible ? host_a : host_b;
+			[CATransaction begin];
+			[CATransaction setDisableActions:YES];
+			if (opts->swap_method == SWAP_HIDDEN) {
+				show.hidden = NO;
+				hide.hidden = YES;
+			} else {
+				[root addSublayer:show];
+				[hide removeFromSuperlayer];
+			}
+			[CATransaction commit];
+			[CATransaction flush];
+			sw->commit_s = now_seconds();
+			log->count++;
+		});
+		dispatch_resume(timer);
+
+		pid_t pid_a = handoff_pids[0];
+		pid_t pid_b = handoff_pids[1];
+		dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+			int status_a = 0, status_b = 0;
+			waitpid(pid_a, &status_a, 0);
+			waitpid(pid_b, &status_b, 0);
+			exit_code = (WIFEXITED(status_a) && WEXITSTATUS(status_a) == 0 && WIFEXITED(status_b) &&
+			             WEXITSTATUS(status_b) == 0)
+			                ? 0
+			                : 1;
+			dispatch_async(dispatch_get_main_queue(), ^{
+				dispatch_source_cancel(timer);
+				pid_t pids[2] = {pid_a, pid_b};
+				analyze_handoff(opts, pids, log, period_s);
+				stop_app();
+			});
+		});
 	} else if (opts->mode == PROBE_MODE_HOSTED) {
 		dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
 			int status = 0;

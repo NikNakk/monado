@@ -279,10 +279,63 @@ than a typical game, so `game-direct` is a worst case. The qualitative result
 holds either way: with the service externally backgrounded, only the process
 Game Mode favours can keep frame timing.
 
+## Handoff test
+
+In the proposed design, the service keeps the headset window and switches
+which client's `CALayerHost` is shown when focus changes. The next client is
+already rendering (pre-warmed), and the service is Darwin-backgrounded while a
+game has Game Mode. The `handoff` mode tests exactly that swap.
+
+The host spawns two clients, A (red) and B (blue), which render continuously
+into their own `CAContext`s. Every `--swap-every` seconds (default 2) the host
+swaps which `CALayerHost` is shown in one `CATransaction`:
+
+- `--swap-method reparent` (default) adds the new host layer and removes the
+  old one, as Chromium does.
+- `--swap-method hidden` keeps both attached and toggles `hidden`.
+
+`--host-background 1` puts the host into Darwin background after spawning the
+clients. That is the priority-4 clamp Game Mode applied in the test above, via
+`setpriority(PRIO_DARWIN_PROCESS, 0, PRIO_DARWIN_BG)`, without needing the game
+app. `--cpu-load N` adds N busy threads in each client.
+
+After both clients exit, the host rebuilds what was on screen from the two
+client CSVs and its own swap log, and prints a `handoff summary`:
+
+- **Max on-screen gap around each swap:** the longest interval between
+  presented frames of whichever client was shown, from 2 periods before to 10
+  after the swap commit. One period (8.34 ms) means a seamless swap.
+- **Swap commit → first new-client present:** how quickly the new client's
+  content appears.
+- **Swap timer lateness:** how late the host ran each swap. Under
+  `--host-background 1` this shows the cost of the throttled service.
+- **Steady-state long intervals**, away from swaps, for comparison.
+- **Hidden-client frames reporting `presentedTime`:** if a hidden client's
+  drawables still report being presented, `presentedTime` cannot say what was
+  visible and the gap figures are unreliable. The summary warns when this
+  happens; then judge the swap by eye (a black or stale frame at the colour
+  change).
+
+Each client also prints its usual render summary. With the `reparent` method,
+watch the hidden client's `nil_drawables`: if a detached context never releases
+its drawables, the hidden client stalls, and pre-warming needs the `hidden`
+method instead.
+
+Per-swap figures go to `/tmp/layer_host_probe_handoff_swaps_<pid>.csv`.
+
+```sh
+P=src/xrt/targets/macos_layer_host_probe
+$P/macos-layer-host-probe --mode handoff --seconds 30
+$P/macos-layer-host-probe --mode handoff --seconds 30 --swap-method hidden
+$P/macos-layer-host-probe --mode handoff --seconds 30 --host-background 1
+$P/macos-layer-host-probe --mode handoff --seconds 30 --host-background 1 --cpu-load "$(sysctl -n hw.ncpu)"
+```
+
 ### Not yet covered
 
 - Confirming the real `monado-service` gets the same `ext_darwinbg=1` under
   Unreal (`--role query --pid <service pid>`).
-- Handoff between two hosted clients, and fence-port alignment.
+- Handoff when the new client is not pre-warmed (context created at the
+  swap), and whether fence ports are needed for that case.
 - A GPU-heavy renderer, and whether direct scanout is kept.
 - Integration with the multi-client compositor.
