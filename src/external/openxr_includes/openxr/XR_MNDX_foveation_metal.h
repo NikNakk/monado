@@ -29,8 +29,10 @@ XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_STATE_MNDX, 0x7fff5057);
  *
  * rasterizationRateMap is an id<MTLRasterizationRateMap> represented as an
  * opaque pointer, consistent with XR_KHR_metal_enable's opaque Metal handles.
- * The object is owned by the runtime and remains valid until the XrSwapchain
- * is destroyed. Applications must not release it.
+ * The object is owned by the runtime. Applications must not release it.
+ * The returned pointer remains valid until a later successful
+ * xrUpdateSwapchainFB changes the revision, or until the XrSwapchain is
+ * destroyed. Applications should query again after updating foveation state.
  *
  * physicalWidth/physicalHeight describe the rasterized extent for this array
  * layer. They are the dimensions appropriate for the physical-coordinate
@@ -55,8 +57,10 @@ typedef struct XrFoveationMetalStateMNDX {
  *
  * Call after xrUpdateSwapchainFB and before encoding the Metal render pass
  * which targets this swapchain. A revision change means the returned map may
- * differ from the previous call. Previously returned map objects remain valid
- * for the lifetime of the swapchain so in-flight GPU work is safe.
+ * differ from the previous call. A revision change invalidates previously
+ * returned borrowed pointers for future encoding; query again before encoding
+ * subsequent render passes. Metal retains resources referenced by already
+ * encoded command buffers, so submitted work remains safe.
  */
 typedef XrResult (XRAPI_PTR *PFN_xrGetFoveationMetalStateMNDX)(
     XrSwapchain swapchain,
