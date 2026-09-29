@@ -1,4 +1,4 @@
-// Copyright 2026, Collabora, Ltd.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 //
 // Minimal OpenVR/OpenComposite loader smoke test. It intentionally does not

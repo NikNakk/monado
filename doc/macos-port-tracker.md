@@ -1,5 +1,6 @@
 <!--
 Copyright 2026, Collabora, Ltd.
+Copyright 2026, Nick Kennedy
 
 SPDX-License-Identifier: BSL-1.0
 -->
