@@ -11,6 +11,7 @@
 #import <IOSurface/IOSurface.h>
 
 #include "client/comp_metal_client.h"
+#include "comp_metal_foveation_cache.h"
 #include "os/os_time.h"
 #include "util/comp_swapchain.h"
 #include "util/u_debug.h"
@@ -71,6 +72,7 @@ struct client_metal_swapchain
 	struct xrt_swapchain_metal base;
 	struct xrt_swapchain_native *xscn;
 	struct client_metal_compositor *c;
+	struct comp_metal_foveation_cache foveation;
 	uint64_t debug_release_count;
 };
 
@@ -395,6 +397,8 @@ client_metal_swapchain_destroy(struct xrt_swapchain *xsc)
 {
 	struct client_metal_swapchain *sc = client_metal_swapchain(xsc);
 
+	comp_metal_foveation_cache_destroy(&sc->foveation);
+
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
 		id<MTLTexture> texture = (__bridge id<MTLTexture>)sc->base.images[i];
 		if (texture != nil) {
@@ -406,6 +410,23 @@ client_metal_swapchain_destroy(struct xrt_swapchain *xsc)
 	xrt_swapchain_native_reference(&sc->xscn, NULL);
 
 	free(sc);
+}
+
+static xrt_result_t
+client_metal_swapchain_set_foveation(struct xrt_swapchain *xsc, const struct xrt_foveation_state *state)
+{
+	struct client_metal_swapchain *sc = client_metal_swapchain(xsc);
+	return comp_metal_foveation_cache_set(&sc->foveation, state);
+}
+
+static xrt_result_t
+client_metal_swapchain_get_foveation_state(struct xrt_swapchain_metal *xscm,
+                                           uint32_t view_index,
+                                           uint32_t array_layer,
+                                           struct xrt_metal_foveation_state *out_state)
+{
+	struct client_metal_swapchain *sc = (struct client_metal_swapchain *)xscm;
+	return comp_metal_foveation_cache_get(&sc->foveation, view_index, array_layer, out_state);
 }
 
 static xrt_result_t
@@ -658,10 +679,19 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	sc->base.base.wait_image = client_metal_swapchain_wait_image;
 	sc->base.base.barrier_image = client_metal_swapchain_barrier_image;
 	sc->base.base.release_image = client_metal_swapchain_release_image;
+	sc->base.base.set_foveation = client_metal_swapchain_set_foveation;
+	sc->base.base.foveation_capabilities =
+	    XRT_FOVEATION_CAPABILITY_FIXED | XRT_FOVEATION_CAPABILITY_DYNAMIC | XRT_FOVEATION_CAPABILITY_EYE_TRACKED;
+	sc->base.get_foveation_metal_state = client_metal_swapchain_get_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xscn->base.image_count;
 	sc->xscn = xscn;
 	sc->c = c;
+	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)c->device,
+	                                      info->width, info->height, info->array_size)) {
+		client_metal_swapchain_destroy(&sc->base.base);
+		return XRT_ERROR_ALLOCATION;
+	}
 
 	if (direct_metal_texture) {
 		for (uint32_t i = 0; i < xscn->base.image_count; i++) {

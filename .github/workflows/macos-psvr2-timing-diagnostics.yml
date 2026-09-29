@@ -9,6 +9,7 @@ on:
       - macos-wine-openvr-legacy-unity
       - standards/khr-generic-controller
       - standards/fb-foveation
+      - standards/fb-foveation-metal
     paths:
       - .github/workflows/macos-psvr2-timing-diagnostics.yml
       - CMakeLists.txt
@@ -77,6 +78,8 @@ jobs:
           -DXRT_FEATURE_OPENXR_FB_SWAPCHAIN_UPDATE_STATE=ON
           -DXRT_FEATURE_OPENXR_FB_FOVEATION=ON
           -DXRT_FEATURE_OPENXR_FB_FOVEATION_CONFIGURATION=ON
+          -DXRT_FEATURE_OPENXR_META_FOVEATION_EYE_TRACKED=ON
+          -DXRT_FEATURE_OPENXR_MNDX_FOVEATION_METAL=ON
       - name: Build standards targets
         run: >-
           cmake --build build-foveation

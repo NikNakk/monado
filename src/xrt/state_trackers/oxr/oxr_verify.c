@@ -457,6 +457,14 @@ oxr_verify_extensions(struct oxr_logger *log, const struct oxr_extension_status 
 	}
 #endif
 
+#ifdef OXR_HAVE_MNDX_foveation_metal
+	if (extensions->MNDX_foveation_metal &&
+	    (!extensions->FB_foveation || !extensions->KHR_metal_enable)) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "XR_MNDX_foveation_metal requires XR_FB_foveation and XR_KHR_metal_enable");
+	}
+#endif
+
 	return XR_SUCCESS;
 }
 

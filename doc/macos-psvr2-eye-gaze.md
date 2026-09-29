@@ -5,11 +5,13 @@
 The macOS PS VR2 driver supports `XR_EXT_eye_gaze_interaction` using the
 headset's gaze interface.
 
-Enable the gaze USB stream before starting `monado-service`:
+The gaze USB interface is provisioned by default when available, but the eye
+tracker is activated lazily only when an eye/face tracking feature is actually
+requested. `PSVR2_GAZE_STREAMS=1` is therefore no longer required for normal
+testing.
 
-```sh
-launchctl setenv PSVR2_GAZE_STREAMS 1
-```
+Set `PSVR2_GAZE_STREAMS=0` before starting `monado-service` if the gaze
+capability should be disabled explicitly.
 
 The Sony calibration blob, when available, is read from:
 
@@ -82,3 +84,26 @@ PSVR2_GAZE_PITCH_OFFSET_DEG
 ```
 
 For reliable automatic calibration, leave those overrides unset.
+
+
+## Eye tracking versus eye-tracked foveation
+
+Public gaze interaction and eye-tracked foveation are intentionally separate
+capabilities.
+
+`XR_EXT_eye_gaze_interaction` exposes a gaze pose to an application through an
+OpenXR action. It is appropriate for applications that genuinely need gaze
+input.
+
+`XR_META_foveation_eye_tracked` does not require that public gaze action. In
+the foveation path Monado acquires the same underlying eye-tracking feature
+privately, creates an internal XRT gaze space, and converts gaze to the two
+standardized per-eye NDC foveation centres.
+
+An application using eye-tracked foveation therefore does not automatically
+gain access to a gaze ray.
+
+See [OpenXR foveation architecture on macOS](macos-openxr-foveation.md) for the
+full policy/privacy design and
+[PS VR2 gaze-driven foveation](macos-psvr2-gaze-foveation.md) for diagnostic
+commands.
