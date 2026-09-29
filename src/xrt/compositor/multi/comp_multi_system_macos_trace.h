@@ -35,7 +35,6 @@
 #include <unistd.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_client_frame_trace, "PSVR2_TIMING_TRACE", false)
-DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_divisor, "XRT_MACOS_CLIENT_FRAME_DIVISOR", 0)
 DEBUG_GET_ONCE_NUM_OPTION(macos_client_frame_min_hold, "XRT_MACOS_CLIENT_FRAME_MIN_HOLD", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_qos, "XRT_MACOS_COMPOSITOR_QOS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_time_constraint, "XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT", false)
@@ -55,19 +54,6 @@ static int64_t g_macos_compositor_time_constraint_period_ns = 0;
 static bool g_macos_client_frame_hold_initialized[MULTI_MAX_CLIENTS];
 static int64_t g_macos_client_frame_hold_frame_id[MULTI_MAX_CLIENTS];
 static int64_t g_macos_client_frame_hold_first_system_frame[MULTI_MAX_CLIENTS];
-
-static int
-macos_client_frame_divisor(void)
-{
-	int divisor = debug_get_num_option_macos_client_frame_divisor();
-	if (divisor <= 1) {
-		return 0;
-	}
-	if (divisor > 16) {
-		divisor = 16;
-	}
-	return divisor;
-}
 
 static int
 macos_client_frame_min_hold(void)
@@ -153,18 +139,15 @@ macos_client_frame_trace_get(void)
 }
 
 /*
- * Optional source-cadence stabilisers. Neither alters the application's
+ * Optional source-cadence stabiliser. It does not alter the application's
  * xrWaitFrame pacing or the system compositor's physical cadence.
  *
- * XRT_MACOS_CLIENT_FRAME_MIN_HOLD=2 is the preferred elastic experiment. A
+ * XRT_MACOS_CLIENT_FRAME_MIN_HOLD=2 (elastic minimum hold): a
  * newly delivered client frame must remain delivered for at least two system
  * compositor ticks. Once that minimum has elapsed, the next GPU-complete frame
  * is accepted immediately, so a late 60 Hz source frame produces a 3-refresh
  * hold and shifts phase instead of being forced to wait for a fixed even/odd
  * boundary and becoming a 4-refresh hold.
- *
- * XRT_MACOS_CLIENT_FRAME_DIVISOR=2 retains the older fixed-phase experiment for
- * A/B comparison. MIN_HOLD takes precedence when both variables are set.
  */
 static inline void
 macos_deliver_client_frame_cadenced(struct multi_compositor *mc,
@@ -210,16 +193,7 @@ macos_deliver_client_frame_cadenced(struct multi_compositor *mc,
 		return;
 	}
 
-	int divisor = macos_client_frame_divisor();
-	if (divisor == 0 || mc == NULL || !mc->delivered.active) {
-		multi_compositor_deliver_any_frames(mc, display_time_ns);
-		return;
-	}
-
-	/* Fixed global phase retained as the original diagnostic A/B path. */
-	if ((system_frame_id % divisor) == 0) {
-		multi_compositor_deliver_any_frames(mc, display_time_ns);
-	}
+	multi_compositor_deliver_any_frames(mc, display_time_ns);
 }
 
 static inline void
