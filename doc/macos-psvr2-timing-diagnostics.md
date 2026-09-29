@@ -50,7 +50,6 @@ The conflicting presentation experiments now default off:
 | `XRT_MACOS_PRESENT_MIN_DURATION_US` | `0` |
 | `XRT_MACOS_UNIQUE_PRESENT_SLOTS`, `XRT_MACOS_PRESENT_STALE_SUBSTITUTE` | `0` |
 | `XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US` | unset (disabled; explicit `0` still enables the experiment) |
-| `XRT_MACOS_LATE_RENDER_LEAD_US` | `0` |
 | `XRT_MACOS_CLIENT_FRAME_DIVISOR`, `XRT_MACOS_CLIENT_FRAME_MIN_HOLD` | `0` |
 | `XRT_MACOS_COMPOSITOR_QOS`, `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `0` |
 | `XRT_MACOS_WAIT_SPIN`, `XRT_MACOS_WAIT_HYBRID_US` | `0` |
@@ -381,7 +380,7 @@ export XRT_MACOS_LATE_RENDER_DESIRED_OFFSET_US=2000
 
 Signed offsets are accepted. A useful initial 120 Hz sweep is `0`, `1000`, `2000`, and `3000` microseconds, keeping `XRT_MACOS_PRESENT_MIN_LEAD_US=2000` unchanged. The default path remains unchanged when the variable is unset.
 
-`XRT_MACOS_LATE_RENDER_LEAD_US` is retained only as the legacy predicted-display-relative diagnostic. Its default remains `0` (disabled), and the desired-relative option takes precedence if both are set.
+The older predicted-display-relative diagnostic, `XRT_MACOS_LATE_RENDER_LEAD_US`, has been removed. `late_render.csv` keeps its `lead_us` column, which is always `0`.
 
 Previous traces showed roughly 2-3 ms scheduler overshoot with a 0.5 ms spin margin, so the diagnostics-only wait now sleeps until 3 ms before its target and spins for the remainder. `monado_psvr2_<PID>_late_render.csv` retains the original columns and appends `desired_offset_us`, `wait_mode`, `target_minus_desired_ns`, and `pose_begin_minus_desired_ns` so the desired-relative and legacy modes can be distinguished without breaking column-name-based analysis. This remains an A/B diagnostic rather than the final late-latching design.
 
