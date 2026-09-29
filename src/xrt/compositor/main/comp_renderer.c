@@ -68,8 +68,6 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_late_render_desired_offset_us, "XRT_MACOS_LATE_R
 DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_reprojection_trace, "XRT_MACOS_REPROJECTION_TRACE", false)
 #endif
-DEBUG_GET_ONCE_BOOL_OPTION(macos_skip_blocking_gpu_timestamps, "XRT_MACOS_SKIP_BLOCKING_GPU_TIMESTAMPS", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_defer_gpu_timestamps, "XRT_MACOS_DEFER_GPU_TIMESTAMPS", true)
 #endif
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
@@ -1121,11 +1119,6 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 		COMP_INFO(c, "macOS desired-relative late-render experiment enabled: dispatch at desired present %+lld us",
 		          (long long)desired_offset_us);
 	}
-	if (debug_get_bool_option_macos_skip_blocking_gpu_timestamps()) {
-		COMP_INFO(c, "macOS diagnostic: skipping blocking compositor GPU timestamp readback");
-	} else if (debug_get_bool_option_macos_defer_gpu_timestamps()) {
-		COMP_INFO(c, "macOS diagnostic: deferring compositor GPU timestamp readback until the previous frame fence signals");
-	}
 #endif
 
 	r->acquired_buffer = -1;
@@ -1179,8 +1172,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	}
 
 #ifdef XRT_OS_OSX
-	if (ret == VK_SUCCESS && debug_get_bool_option_macos_defer_gpu_timestamps() &&
-	    !debug_get_bool_option_macos_skip_blocking_gpu_timestamps() && r->fenced_frame_id >= 0) {
+	if (ret == VK_SUCCESS && r->fenced_frame_id >= 0) {
 		/*
 		 * The previous frame fence guarantees these query results are ready.
 		 * The current frame may already have recorded a vkCmdResetQueryPool,
@@ -1894,8 +1886,11 @@ comp_renderer_draw(struct comp_renderer *r)
 
 	bool collect_gpu_timestamps = xret == XRT_SUCCESS;
 #ifdef XRT_OS_OSX
-	collect_gpu_timestamps = collect_gpu_timestamps && !debug_get_bool_option_macos_skip_blocking_gpu_timestamps() &&
-	                         !debug_get_bool_option_macos_defer_gpu_timestamps();
+	/*
+	 * Reading the current frame's timestamps here blocks for roughly 3.7 ms on
+	 * macOS. renderer_wait_for_last_fence() reads the previous frame's instead.
+	 */
+	collect_gpu_timestamps = false;
 #endif
 
 	// Check timestamps.
