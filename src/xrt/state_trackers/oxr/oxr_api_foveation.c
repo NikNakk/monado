@@ -582,10 +582,24 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 			                 next->type);
 		}
 		packed = (XrFoveationMetalPackedStateMNDX *)state->next;
-		if (packed->next != NULL || packed->viewCount == 0 ||
-		    packed->viewCount > XRT_MAX_VIEWS || packed->views == NULL) {
+		if (packed->viewCount == 0 || packed->viewCount > XRT_MAX_VIEWS || packed->views == NULL) {
 			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
 			                 "Invalid packed Metal foveation view list");
+		}
+
+		uint32_t layout_flags = 0;
+		if (packed->next != NULL) {
+			const XrFoveationMetalImageLayoutMNDX *image_layout =
+			    (const XrFoveationMetalImageLayoutMNDX *)packed->next;
+			if (image_layout->type != XR_TYPE_FOVEATION_METAL_IMAGE_LAYOUT_MNDX ||
+			    image_layout->next != NULL) {
+				return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
+				                 "Unsupported XrFoveationMetalPackedStateMNDX::next type %d",
+				                 image_layout->type);
+			}
+			if (image_layout->verticalFlip) {
+				layout_flags |= XRT_METAL_FOVEATION_VIEW_VERTICAL_FLIP;
+			}
 		}
 
 		struct xrt_metal_foveation_view_layout layouts[XRT_MAX_VIEWS] = {0};
@@ -605,6 +619,7 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 			    .offset_y = view->imageRect.offset.y,
 			    .width = (uint32_t)view->imageRect.extent.width,
 			    .height = (uint32_t)view->imageRect.extent.height,
+			    .flags = layout_flags,
 			};
 		}
 		xret = xrt_swapchain_metal_get_packed_foveation_state(

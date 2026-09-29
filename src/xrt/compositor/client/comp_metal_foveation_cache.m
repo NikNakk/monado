@@ -478,7 +478,7 @@ comp_metal_foveation_cache_get_packed(
 		if (layout->view_index >= state.view_count ||
 		    !state.views[layout->view_index].center_valid ||
 		    layout->width == 0 || layout->height == 0 || layout->offset_x < 0 ||
-		    layout->offset_y < 0 ||
+		    layout->offset_y < 0 || (layout->flags & ~XRT_METAL_FOVEATION_VIEW_VERTICAL_FLIP) != 0 ||
 		    (uint64_t)layout->offset_x + layout->width > cache->logical_width ||
 		    (uint64_t)layout->offset_y + layout->height > cache->logical_height) {
 			xrt_result_t xret = select_failure(cache, array_layer, XRT_ERROR_INVALID_ARGUMENT);
@@ -505,7 +505,11 @@ comp_metal_foveation_cache_get_packed(
 		const struct xrt_metal_foveation_view_layout *layout = &views[i];
 		const struct xrt_foveation_view_state *view = &state.views[layout->view_index];
 		const float local_u = clampf01(0.5f * (view->center.x + 1.0f));
-		const float local_v = clampf01(0.5f * (1.0f - view->center.y));
+		float local_v = clampf01(0.5f * (1.0f - view->center.y));
+		if ((layout->flags & XRT_METAL_FOVEATION_VIEW_VERTICAL_FLIP) != 0) {
+			// The view's top is stored at the bottom of its rectangle.
+			local_v = 1.0f - local_v;
+		}
 		const float target_u =
 		    ((float)layout->offset_x + local_u * (float)layout->width) /
 		    (float)cache->logical_width;

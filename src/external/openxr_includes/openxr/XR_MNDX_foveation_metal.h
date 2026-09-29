@@ -19,13 +19,14 @@ extern "C" {
 #endif
 
 #define XR_MNDX_foveation_metal 1
-#define XR_MNDX_foveation_metal_SPEC_VERSION 2
+#define XR_MNDX_foveation_metal_SPEC_VERSION 3
 #define XR_MNDX_FOVEATION_METAL_EXTENSION_NAME "XR_MNDX_foveation_metal"
 #define XR_MNDX_FOVEATION_METAL_RATE_SAMPLE_COUNT 16
 #define XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT 129
 
 XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_STATE_MNDX, 0x7fff5057);
 XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_PACKED_STATE_MNDX, 0x7fff5058);
+XR_STRUCT_ENUM(XR_TYPE_FOVEATION_METAL_IMAGE_LAYOUT_MNDX, 0x7fff5059);
 
 /*!
  * Renderer-facing state for the currently applied XR_FB_foveation profile.
@@ -84,6 +85,26 @@ typedef struct XrFoveationMetalPackedStateMNDX {
     float                              x[XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT];
     float                              y[XR_MNDX_FOVEATION_METAL_MAP_BOUNDARY_COUNT];
 } XrFoveationMetalPackedStateMNDX;
+
+/*!
+ * Optional input structure chained to XrFoveationMetalPackedStateMNDX::next.
+ * Spec version 3.
+ *
+ * verticalFlip declares that the application stores each packed view
+ * vertically mirrored within its imageRect, and will submit it with
+ * XR_COMPOSITION_LAYER_IMAGE_LAYOUT_VERTICAL_FLIP_BIT_FB or an equivalent
+ * inverted projection. This is the case for OpenGL-style renderers such as
+ * ANGLE drawing into a Metal texture. The runtime then mirrors each view's
+ * vertical foveation centre within its rectangle, so the full-rate region is
+ * placed over the content that will be displayed at the gaze or fixed centre.
+ * It does not change how the returned map or mapping is expressed: both stay
+ * in the texture's own top-left-origin coordinates.
+ */
+typedef struct XrFoveationMetalImageLayoutMNDX {
+    XrStructureType       type;
+    const void* XR_MAY_ALIAS next;
+    XrBool32              verticalFlip;
+} XrFoveationMetalImageLayoutMNDX;
 
 /*!
  * Return the current Metal render state for one view and swapchain array layer.

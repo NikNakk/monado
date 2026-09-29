@@ -173,6 +173,15 @@ view order are supported. Because Metal rate maps are separable, each sample
 row/column takes the maximum rate over all views; a centre can therefore raise
 quality slightly in a neighbouring view but never lower it.
 
+Spec version 3 adds `XrFoveationMetalImageLayoutMNDX`, chained to the packed
+query. `verticalFlip` declares that each view is stored vertically mirrored in
+its rectangle and will be submitted with a vertical flip, as ANGLE-rendered
+WebGL content is. Monado then mirrors each vertical centre within its
+rectangle so the full-rate region lands over the content that is displayed at
+the gaze/fixed centre. The map and mapping stay in texture coordinates, so
+renderer and compositor still use the identical transform; without the flag a
+flipped client would get correct but vertically misplaced foveation.
+
 The cache only changes revision when the actual rasterization pattern changes.
 Eye movement within the same quantized Metal rate-map cell updates META's
 reported NDC centre but reuses the existing immutable Metal map.
