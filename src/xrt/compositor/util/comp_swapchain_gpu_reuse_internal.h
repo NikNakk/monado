@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "xrt/xrt_config_os.h"
 #include "util/comp_layer_accum.h"
 #include "vk/vk_cmd.h"
 #include "vk/vk_submit_helpers.h"
@@ -17,6 +18,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#ifdef XRT_OS_OSX
 
 /* Native comp_layer_accum bridge claims. */
 void
@@ -55,6 +58,31 @@ comp_swapchain_gpu_reuse_vk_cmd_submit_locked(struct vk_bundle *vk,
                                               uint32_t count,
                                               const VkSubmitInfo *infos,
                                               VkFence fence);
+
+#else
+
+// Tracking is only used by the macOS service; the layer accumulator has nothing to claim elsewhere.
+static inline void
+comp_swapchain_gpu_reuse_native_accum_begin(struct comp_layer_accum *cla)
+{
+	(void)cla;
+}
+
+static inline xrt_result_t
+comp_swapchain_gpu_reuse_native_accum_claim_layer(struct comp_layer_accum *cla, const struct comp_layer *layer)
+{
+	(void)cla;
+	(void)layer;
+	return XRT_SUCCESS;
+}
+
+static inline void
+comp_swapchain_gpu_reuse_native_accum_release(struct comp_layer_accum *cla)
+{
+	(void)cla;
+}
+
+#endif
 
 #ifdef __cplusplus
 }
