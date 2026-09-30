@@ -574,6 +574,25 @@ compositor, switching Game Mode on and off from the Cmd-Esc menu:
   compositor thread kept its time constraint at priority 97, task maximum
   priority 63, in all 4,287 samples. The wait thread is now the default.
 
+### Phase 2 result: A/B under Game Mode (2026-09-30)
+
+Game Mode was toggled from the Cmd-Esc menu in all three Unreal runs. The
+service's compositor RT trace shows when it was throttled:
+
+| | Service compositor (run 6) | In-process compositor (runs 4, 5) |
+| --- | --- | --- |
+| Thread policy, Game Mode on | timeshare, priority 4, task max 4 | time constraint, priority 97, task max 63 |
+| Frames/s, Game Mode on | 13.5 and 17.7 (two spans) | 120 |
+| Interval p50 / p99, Game Mode on | 62 / 107 ms, max 108 ms | 8.34 / 8.6 ms |
+| Frames/s, Game Mode off | 120 | 120 |
+| Interval p50 / p99, Game Mode off | 8.34 / 8.54 ms | 8.34 / 8.6 ms |
+
+The service was throttled in the in-process runs too (its idle compositor
+thread sampled at priority 4, task max 4), yet the client's compositor
+thread kept its time constraint and pose queries over IPC stayed at 0.09 ms
+median. Moving the compositor into the game's process removes the Game Mode
+demotion from the display path, which was the aim of phase 2.
+
 ### Testing phase 2
 
 1. Start the service as usual. Its presenter must own the headset window.
