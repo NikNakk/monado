@@ -110,8 +110,7 @@ u_frame_share_is_valid(const void *mem, size_t mem_size)
 	}
 	atomic_thread_fence(memory_order_acquire);
 	return h->stream_count > 0 && h->stream_count <= U_FRAME_SHARE_MAX_STREAMS &&
-	       h->slot_count == U_FRAME_SHARE_SLOTS && h->total_size <= mem_size &&
-	       h->data_offset >= sizeof(*h) &&
+	       h->slot_count == U_FRAME_SHARE_SLOTS && h->total_size <= mem_size && h->data_offset >= sizeof(*h) &&
 	       h->data_offset + (uint64_t)h->stream_count * U_FRAME_SHARE_SLOTS * h->max_frame_size <= h->total_size;
 }
 

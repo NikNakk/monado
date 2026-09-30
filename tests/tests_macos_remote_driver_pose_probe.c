@@ -36,8 +36,7 @@ get_frame_count(void)
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
 	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 3600) {
-		fprintf(stderr,
-		        "Invalid MACOS_REMOTE_DRIVER_POSE_PROBE_FRAMES=%s, expected integer in [1,3600]\n",
+		fprintf(stderr, "Invalid MACOS_REMOTE_DRIVER_POSE_PROBE_FRAMES=%s, expected integer in [1,3600]\n",
 		        value);
 		return 0;
 	}
@@ -57,8 +56,7 @@ get_port(void)
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
 	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 65535) {
-		fprintf(stderr,
-		        "Invalid MACOS_REMOTE_DRIVER_POSE_PROBE_PORT=%s, expected integer in [1,65535]\n",
+		fprintf(stderr, "Invalid MACOS_REMOTE_DRIVER_POSE_PROBE_PORT=%s, expected integer in [1,65535]\n",
 		        value);
 		return 0;
 	}
@@ -127,8 +125,7 @@ main(void)
 		os_nanosleep(U_TIME_1S_IN_NS / 60);
 	}
 
-	fprintf(stdout,
-	        "Remote pose probe connected on port %u and sent %u head pose packets.\n",
-	        (unsigned)port, frame_count);
+	fprintf(stdout, "Remote pose probe connected on port %u and sent %u head pose packets.\n", (unsigned)port,
+	        frame_count);
 	return 0;
 }

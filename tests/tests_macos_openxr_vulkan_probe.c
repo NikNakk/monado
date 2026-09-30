@@ -54,9 +54,7 @@ get_frame_count(void)
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
 	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 3600) {
-		fprintf(stderr,
-		        "Invalid MACOS_OPENXR_VULKAN_PROBE_FRAMES=%s, expected integer in [1,3600]\n",
-		        value);
+		fprintf(stderr, "Invalid MACOS_OPENXR_VULKAN_PROBE_FRAMES=%s, expected integer in [1,3600]\n", value);
 		return 0;
 	}
 
@@ -364,15 +362,8 @@ clear_swapchain_image_with_color_attachment(VkDevice device,
 		            .layerCount = 1,
 		        },
 		};
-		vkCmdPipelineBarrier(ctx->command_buffer,
-		                     get_src_stage_mask_for_layout(*layout),
-		                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-		                     0,
-		                     0,
-		                     NULL,
-		                     0,
-		                     NULL,
-		                     1,
+		vkCmdPipelineBarrier(ctx->command_buffer, get_src_stage_mask_for_layout(*layout),
+		                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1,
 		                     &to_color_attachment);
 	}
 
@@ -400,9 +391,7 @@ clear_swapchain_image_with_color_attachment(VkDevice device,
 		goto out;
 	}
 
-	ret = submit_command_buffer_and_wait(device,
-	                                     ctx,
-	                                     "vkQueueSubmit(color_attachment_clear)",
+	ret = submit_command_buffer_and_wait(device, ctx, "vkQueueSubmit(color_attachment_clear)",
 	                                     "color_attachment_clear(submit)");
 	if (ret == 0) {
 		*layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -545,7 +534,10 @@ find_graphics_queue_family(VkPhysicalDevice physical_device)
 }
 
 static int
-init_vk_context(VkPhysicalDevice physical_device, VkDevice device, uint32_t queue_family_index, struct probe_vk_context *ctx)
+init_vk_context(VkPhysicalDevice physical_device,
+                VkDevice device,
+                uint32_t queue_family_index,
+                struct probe_vk_context *ctx)
 {
 	memset(ctx, 0, sizeof(*ctx));
 
@@ -608,8 +600,8 @@ clear_swapchain_image(VkDevice device,
                       const VkClearColorValue *color)
 {
 	if (use_color_attachment_clear()) {
-		return clear_swapchain_image_with_color_attachment(
-		    device, ctx, swapchain, image_index, array_layer, color);
+		return clear_swapchain_image_with_color_attachment(device, ctx, swapchain, image_index, array_layer,
+		                                                   color);
 	}
 
 	const uint32_t array_size = swapchain->create_info.arraySize;
@@ -644,9 +636,7 @@ clear_swapchain_image(VkDevice device,
 			return fail_vk("vkEndCommandBuffer(empty_submit_check)", vk);
 		}
 
-		if (submit_command_buffer_and_wait(device,
-		                                   ctx,
-		                                   "vkQueueSubmit(empty_submit_check)",
+		if (submit_command_buffer_and_wait(device, ctx, "vkQueueSubmit(empty_submit_check)",
 		                                   "empty_submit_check(submit)") != 0) {
 			return 1;
 		}
@@ -685,16 +675,8 @@ clear_swapchain_image(VkDevice device,
 	            .layerCount = 1,
 	        },
 	};
-	vkCmdPipelineBarrier(ctx->command_buffer,
-	                     get_src_stage_mask_for_layout(*layout),
-	                     VK_PIPELINE_STAGE_TRANSFER_BIT,
-	                     0,
-	                     0,
-	                     NULL,
-	                     0,
-	                     NULL,
-	                     1,
-	                     &to_transfer_dst);
+	vkCmdPipelineBarrier(ctx->command_buffer, get_src_stage_mask_for_layout(*layout),
+	                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &to_transfer_dst);
 
 	if (!skip_image_clear()) {
 		VkImageSubresourceRange clear_range = {
@@ -704,12 +686,8 @@ clear_swapchain_image(VkDevice device,
 		    .baseArrayLayer = array_layer,
 		    .layerCount = 1,
 		};
-		vkCmdClearColorImage(ctx->command_buffer,
-		                     swapchain->images[image_index].image,
-		                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		                     color,
-		                     1,
-		                     &clear_range);
+		vkCmdClearColorImage(ctx->command_buffer, swapchain->images[image_index].image,
+		                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, color, 1, &clear_range);
 	}
 
 	VkImageMemoryBarrier back_to_color_attachment = {
@@ -730,15 +708,8 @@ clear_swapchain_image(VkDevice device,
 	            .layerCount = 1,
 	        },
 	};
-	vkCmdPipelineBarrier(ctx->command_buffer,
-	                     VK_PIPELINE_STAGE_TRANSFER_BIT,
-	                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-	                     0,
-	                     0,
-	                     NULL,
-	                     0,
-	                     NULL,
-	                     1,
+	vkCmdPipelineBarrier(ctx->command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+	                     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1,
 	                     &back_to_color_attachment);
 
 	vk = vkEndCommandBuffer(ctx->command_buffer);
@@ -746,9 +717,7 @@ clear_swapchain_image(VkDevice device,
 		return fail_vk("vkEndCommandBuffer", vk);
 	}
 
-	if (submit_command_buffer_and_wait(device,
-	                                   ctx,
-	                                   "vkQueueSubmit(clear_swapchain_image)",
+	if (submit_command_buffer_and_wait(device, ctx, "vkQueueSubmit(clear_swapchain_image)",
 	                                   "clear_swapchain_image(submit)") != 0) {
 		return 1;
 	}
@@ -789,8 +758,8 @@ main(void)
 		return 1;
 	}
 
-	PFN_xrNegotiateLoaderRuntimeInterface negotiate = (PFN_xrNegotiateLoaderRuntimeInterface)dlsym(
-	    runtime, "xrNegotiateLoaderRuntimeInterface");
+	PFN_xrNegotiateLoaderRuntimeInterface negotiate =
+	    (PFN_xrNegotiateLoaderRuntimeInterface)dlsym(runtime, "xrNegotiateLoaderRuntimeInterface");
 	if (negotiate == NULL) {
 		fprintf(stderr, "dlsym(xrNegotiateLoaderRuntimeInterface) failed: %s\n", dlerror());
 		goto out;
@@ -876,9 +845,8 @@ main(void)
 	    .enabledExtensionCount = 1,
 	    .enabledExtensionNames = enabled_xr_extensions,
 	};
-	snprintf(instance_info.applicationInfo.applicationName,
-	         sizeof(instance_info.applicationInfo.applicationName), "%s",
-	         "tests_macos_openxr_vulkan_probe");
+	snprintf(instance_info.applicationInfo.applicationName, sizeof(instance_info.applicationInfo.applicationName),
+	         "%s", "tests_macos_openxr_vulkan_probe");
 	snprintf(instance_info.applicationInfo.engineName, sizeof(instance_info.applicationInfo.engineName), "%s",
 	         "monado");
 	instance_info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
@@ -914,11 +882,14 @@ main(void)
 	PFN_xrGetVulkanGraphicsDevice2KHR xrGetVulkanGraphicsDevice2KHR = NULL;
 	PFN_xrCreateVulkanDeviceKHR xrCreateVulkanDeviceKHR = NULL;
 
-	if (get_proc(get_instance_proc_addr, instance, "xrDestroyInstance", (PFN_xrVoidFunction *)&xrDestroyInstance) != 0 ||
+	if (get_proc(get_instance_proc_addr, instance, "xrDestroyInstance", (PFN_xrVoidFunction *)&xrDestroyInstance) !=
+	        0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrPollEvent", (PFN_xrVoidFunction *)&xrPollEvent) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrGetSystem", (PFN_xrVoidFunction *)&xrGetSystem) != 0 ||
-	    get_proc(get_instance_proc_addr, instance, "xrCreateSession", (PFN_xrVoidFunction *)&xrCreateSession) != 0 ||
-	    get_proc(get_instance_proc_addr, instance, "xrDestroySession", (PFN_xrVoidFunction *)&xrDestroySession) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrCreateSession", (PFN_xrVoidFunction *)&xrCreateSession) !=
+	        0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrDestroySession", (PFN_xrVoidFunction *)&xrDestroySession) !=
+	        0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrBeginSession", (PFN_xrVoidFunction *)&xrBeginSession) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrWaitFrame", (PFN_xrVoidFunction *)&xrWaitFrame) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrBeginFrame", (PFN_xrVoidFunction *)&xrBeginFrame) != 0 ||
@@ -931,8 +902,8 @@ main(void)
 	             (PFN_xrVoidFunction *)&xrEnumerateViewConfigurationViews) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrEnumerateSwapchainFormats",
 	             (PFN_xrVoidFunction *)&xrEnumerateSwapchainFormats) != 0 ||
-	    get_proc(get_instance_proc_addr, instance, "xrCreateSwapchain",
-	             (PFN_xrVoidFunction *)&xrCreateSwapchain) != 0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrCreateSwapchain", (PFN_xrVoidFunction *)&xrCreateSwapchain) !=
+	        0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrDestroySwapchain",
 	             (PFN_xrVoidFunction *)&xrDestroySwapchain) != 0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrEnumerateSwapchainImages",
@@ -1118,9 +1089,10 @@ main(void)
 	XrReferenceSpaceCreateInfo space_info = {
 	    .type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO,
 	    .referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL,
-	    .poseInReferenceSpace = {
-	        .orientation = {.w = 1.0f},
-	    },
+	    .poseInReferenceSpace =
+	        {
+	            .orientation = {.w = 1.0f},
+	        },
 	};
 	xr = xrCreateReferenceSpace(session, &space_info, &local_space);
 	if (xr != XR_SUCCESS) {
@@ -1145,8 +1117,8 @@ main(void)
 		views[i].type = XR_TYPE_VIEW_CONFIGURATION_VIEW;
 	}
 
-	xr = xrEnumerateViewConfigurationViews(instance, system_id, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, view_count,
-	                                       &view_count, views);
+	xr = xrEnumerateViewConfigurationViews(instance, system_id, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
+	                                       view_count, &view_count, views);
 	if (xr != XR_SUCCESS) {
 		free(views);
 		ret = fail_xr("xrEnumerateViewConfigurationViews(list)", xr);
@@ -1222,8 +1194,8 @@ main(void)
 			ret = fail_msg("calloc(swapchain images) failed");
 			goto out;
 		}
-		swapchains[i].layouts =
-		    calloc(swapchains[i].image_count * swapchains[i].create_info.arraySize, sizeof(*swapchains[i].layouts));
+		swapchains[i].layouts = calloc(swapchains[i].image_count * swapchains[i].create_info.arraySize,
+		                               sizeof(*swapchains[i].layouts));
 		if (swapchains[i].layouts == NULL) {
 			ret = fail_msg("calloc(swapchain layouts) failed");
 			goto out;
@@ -1231,11 +1203,13 @@ main(void)
 		for (uint32_t j = 0; j < swapchains[i].image_count; ++j) {
 			swapchains[i].images[j].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR;
 			for (uint32_t layer = 0; layer < swapchains[i].create_info.arraySize; ++layer) {
-				swapchains[i].layouts[j * swapchains[i].create_info.arraySize + layer] = VK_IMAGE_LAYOUT_UNDEFINED;
+				swapchains[i].layouts[j * swapchains[i].create_info.arraySize + layer] =
+				    VK_IMAGE_LAYOUT_UNDEFINED;
 			}
 		}
 
-		xr = xrEnumerateSwapchainImages(swapchains[i].handle, swapchains[i].image_count, &swapchains[i].image_count,
+		xr = xrEnumerateSwapchainImages(swapchains[i].handle, swapchains[i].image_count,
+		                                &swapchains[i].image_count,
 		                                (XrSwapchainImageBaseHeader *)swapchains[i].images);
 		if (xr != XR_SUCCESS) {
 			ret = fail_xr("xrEnumerateSwapchainImages(list)", xr);
@@ -1311,7 +1285,8 @@ main(void)
 			}
 			swapchains[i].inflight_index = (int32_t)image_index;
 			if (!skip_runtime_barrier_to_app()) {
-				set_swapchain_image_layout(&swapchains[i], image_index, get_probe_app_layout(&swapchains[i]));
+				set_swapchain_image_layout(&swapchains[i], image_index,
+				                           get_probe_app_layout(&swapchains[i]));
 			}
 
 			const bool flash_phase = ((frame / 30) % 2) != 0;
@@ -1325,7 +1300,8 @@ main(void)
 			        },
 			};
 			uint32_t layer = per_view_swapchains ? 0 : i;
-			if (clear_swapchain_image(vk_device, &vk_ctx, &swapchains[i], image_index, layer, &clear_color) != 0) {
+			if (clear_swapchain_image(vk_device, &vk_ctx, &swapchains[i], image_index, layer,
+			                          &clear_color) != 0) {
 				free(projection_views);
 				free(located_views);
 				ret = 1;
@@ -1349,7 +1325,8 @@ main(void)
 			    .type = XR_TYPE_VIEW_STATE,
 			};
 			uint32_t located_view_count = 0;
-			xr = xrLocateViews(session, &locate_info, &view_state, view_count, &located_view_count, located_views);
+			xr = xrLocateViews(session, &locate_info, &view_state, view_count, &located_view_count,
+			                   located_views);
 			if (xr != XR_SUCCESS) {
 				free(projection_views);
 				free(located_views);
@@ -1377,8 +1354,8 @@ main(void)
 				goto out;
 			}
 			if (swapchains[i].inflight_index >= 0) {
-				set_swapchain_image_layout(
-				    &swapchains[i], (uint32_t)swapchains[i].inflight_index, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+				set_swapchain_image_layout(&swapchains[i], (uint32_t)swapchains[i].inflight_index,
+				                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 				swapchains[i].inflight_index = -1;
 			}
 		}
@@ -1425,9 +1402,11 @@ main(void)
 				projection_views[i].subImage.imageRect.offset.x = 0;
 				projection_views[i].subImage.imageRect.offset.y = 0;
 				projection_views[i].subImage.imageRect.extent.width =
-				    (int32_t)(per_view_swapchains ? swapchains[i].create_info.width : swapchains[0].create_info.width);
+				    (int32_t)(per_view_swapchains ? swapchains[i].create_info.width
+				                                  : swapchains[0].create_info.width);
 				projection_views[i].subImage.imageRect.extent.height =
-				    (int32_t)(per_view_swapchains ? swapchains[i].create_info.height : swapchains[0].create_info.height);
+				    (int32_t)(per_view_swapchains ? swapchains[i].create_info.height
+				                                  : swapchains[0].create_info.height);
 				projection_views[i].subImage.imageArrayIndex = per_view_swapchains ? 0 : i;
 			}
 			layers[0] = (const XrCompositionLayerBaseHeader *)&projection_layer;
@@ -1449,11 +1428,8 @@ main(void)
 		}
 	}
 
-	fprintf(stdout,
-	        "OpenXR Vulkan probe created session, %u swapchain(s), and submitted %u %s frames.\n",
-	        swapchain_count,
-	        frame_count,
-	        use_quad_layer ? "quad-layer" : "projection");
+	fprintf(stdout, "OpenXR Vulkan probe created session, %u swapchain(s), and submitted %u %s frames.\n",
+	        swapchain_count, frame_count, use_quad_layer ? "quad-layer" : "projection");
 	free(projection_views);
 	free(located_views);
 	ret = 0;

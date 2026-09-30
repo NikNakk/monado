@@ -210,8 +210,8 @@ comp_semaphore_import_metal_shared_event(struct vk_bundle *vk,
                                          struct xrt_compositor_semaphore **out_xcsem)
 {
 #ifdef VK_KHR_timeline_semaphore
-	if (vk == NULL || mtl_shared_event == NULL || out_xcsem == NULL ||
-	    !vk->features.timeline_semaphore || !vk->has_EXT_metal_objects) {
+	if (vk == NULL || mtl_shared_event == NULL || out_xcsem == NULL || !vk->features.timeline_semaphore ||
+	    !vk->has_EXT_metal_objects) {
 		return XRT_ERROR_VULKAN;
 	}
 

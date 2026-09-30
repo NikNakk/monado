@@ -1428,8 +1428,7 @@ struct render_compute_distortion_ubo_data
 	{
 		struct xrt_vec3 val;
 		float padding;
-	} new_origin_in_source_view_scanout_begin[XRT_MAX_VIEWS],
-	    new_origin_in_source_view_scanout_end[XRT_MAX_VIEWS];
+	} new_origin_in_source_view_scanout_begin[XRT_MAX_VIEWS], new_origin_in_source_view_scanout_end[XRT_MAX_VIEWS];
 	struct
 	{
 		uint32_t value;

@@ -57,7 +57,8 @@ check_feature(VkFormat format,
 static bool
 vk_csci_requires_external_handle_support(void)
 {
-#if defined(XRT_OS_OSX) && (defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE))
+#if defined(XRT_OS_OSX) &&                                                                                             \
+    (defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE))
 	// The macOS spike currently supports native compositor allocations without exporting shared image handles.
 	// Do not let the placeholder FD handle model suppress otherwise valid local swapchain formats.
 	return false;

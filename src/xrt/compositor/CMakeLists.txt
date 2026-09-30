@@ -38,7 +38,10 @@ endif()
 # swapchain import and shared-event app-release handoff. Add this dependency
 # only after comp_util has been defined: client/ is intentionally configured
 # earlier in this file.
-if(APPLE AND XRT_MODULE_COMPOSITOR_CLIENT AND XRT_MODULE_COMPOSITOR_UTIL)
+if(APPLE
+   AND XRT_MODULE_COMPOSITOR_CLIENT
+   AND XRT_MODULE_COMPOSITOR_UTIL
+	)
 	target_link_libraries(comp_client PRIVATE comp_util)
 endif()
 

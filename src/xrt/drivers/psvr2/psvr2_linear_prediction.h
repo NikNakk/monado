@@ -104,10 +104,10 @@ psvr2_linear_predict(const struct psvr2_linear_prediction *state,
 	float pc = params->gain * 0.5f * h * (h + state->interval_s);
 	float vc = dt < params->max_horizon_s ? params->gain * (h + 0.5f * state->interval_s) : 0.0f;
 	*position = (struct xrt_vec3){state->position.x + state->velocity.x * dt + state->acceleration.x * pc,
-	                            state->position.y + state->velocity.y * dt + state->acceleration.y * pc,
-	                            state->position.z + state->velocity.z * dt + state->acceleration.z * pc};
+	                              state->position.y + state->velocity.y * dt + state->acceleration.y * pc,
+	                              state->position.z + state->velocity.z * dt + state->acceleration.z * pc};
 	*velocity = (struct xrt_vec3){state->velocity.x + state->acceleration.x * vc,
-	                            state->velocity.y + state->acceleration.y * vc,
-	                            state->velocity.z + state->acceleration.z * vc};
+	                              state->velocity.y + state->acceleration.y * vc,
+	                              state->velocity.z + state->acceleration.z * vc};
 	return true;
 }

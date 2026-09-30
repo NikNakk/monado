@@ -43,9 +43,9 @@ static inline bool
 comp_macos_remote_layer_supported(void)
 {
 	Class context_class = NSClassFromString(@"CAContext");
-	if (context_class == nil ||
-	    ![context_class respondsToSelector:@selector(contextWithCGSConnection:options:)] ||
-	    class_getProperty(context_class, "contextId") == NULL || class_getProperty(context_class, "layer") == NULL) {
+	if (context_class == nil || ![context_class respondsToSelector:@selector(contextWithCGSConnection:options:)] ||
+	    class_getProperty(context_class, "contextId") == NULL ||
+	    class_getProperty(context_class, "layer") == NULL) {
 		return false;
 	}
 

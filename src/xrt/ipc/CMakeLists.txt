@@ -88,50 +88,49 @@ if(APPLE)
 	# in Monado.
 	add_library(
 		monado_metal_xpc_client SHARED
-		shared/ipc_metal_xpc.h
-		shared/monado_metal_xpc_client.m
+		shared/ipc_metal_xpc.h shared/monado_metal_xpc_client.m
 		shared/monado_metal_xpc_client.h
 		)
 	target_include_directories(
-		monado_metal_xpc_client
-		PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
+		monado_metal_xpc_client PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
+					       ${CMAKE_CURRENT_BINARY_DIR}
 		)
 	target_compile_options(monado_metal_xpc_client PRIVATE -fblocks)
 	target_link_libraries(
-		monado_metal_xpc_client
-		PRIVATE xrt-interfaces "-framework Foundation" "-framework Metal"
+		monado_metal_xpc_client PRIVATE xrt-interfaces "-framework Foundation"
+						"-framework Metal"
 		)
 	set_target_properties(
 		monado_metal_xpc_client PROPERTIES OUTPUT_NAME monado_metal_xpc_client
 		)
-	install(
-		TARGETS monado_metal_xpc_client
-		LIBRARY DESTINATION lib
-		)
+	install(TARGETS monado_metal_xpc_client LIBRARY DESTINATION lib)
 
 	if(XRT_FEATURE_SERVICE)
 		target_sources(
-			ipc_shared
-			PRIVATE shared/ipc_metal_xpc_service.h shared/ipc_metal_xpc_service.m
+			ipc_shared PRIVATE shared/ipc_metal_xpc_service.h
+					   shared/ipc_metal_xpc_service.m
 			)
 
 		add_executable(ipc_metal_xpc_probe shared/ipc_metal_xpc_probe.m)
 		set_target_properties(
-			ipc_metal_xpc_probe PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-probe PREFIX ""
+			ipc_metal_xpc_probe PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-probe PREFIX
+											      ""
 			)
 		target_compile_options(ipc_metal_xpc_probe PRIVATE -fblocks)
 		target_link_libraries(
-			ipc_metal_xpc_probe PRIVATE xrt-interfaces "-framework Foundation" "-framework Metal"
+			ipc_metal_xpc_probe PRIVATE xrt-interfaces "-framework Foundation"
+						    "-framework Metal"
 			)
 
 		add_executable(ipc_metal_xpc_broker shared/ipc_metal_xpc_broker.m)
 		set_target_properties(
-			ipc_metal_xpc_broker PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-broker PREFIX ""
+			ipc_metal_xpc_broker PROPERTIES OUTPUT_NAME monado-ipc-metal-xpc-broker
+							PREFIX ""
 			)
 		target_compile_options(ipc_metal_xpc_broker PRIVATE -fblocks)
 		target_link_libraries(
-			ipc_metal_xpc_broker
-			PRIVATE xrt-interfaces ipc_shared "-framework Foundation" "-framework Metal"
+			ipc_metal_xpc_broker PRIVATE xrt-interfaces ipc_shared
+						     "-framework Foundation" "-framework Metal"
 			)
 	endif()
 endif()
@@ -182,9 +181,8 @@ target_link_libraries(ipc_client PRIVATE aux_util ipc_shared base)
 
 if(APPLE AND XRT_FEATURE_SERVICE)
 	target_sources(
-		ipc_client
-		PRIVATE client/ipc_metal_swapchain_import.c
-			client/ipc_metal_swapchain_import.h
+		ipc_client PRIVATE client/ipc_metal_swapchain_import.c
+				   client/ipc_metal_swapchain_import.h
 		)
 	target_compile_definitions(ipc_client PRIVATE XRT_IPC_MACOS_METAL_IMPORT)
 
@@ -258,30 +256,35 @@ elseif(XRT_HAVE_LINUX)
 		)
 elseif(APPLE)
 	target_sources(
-		ipc_server
-		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
-			server/ipc_server_metal.c
-			server/ipc_server_macos_display_host.c
+		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
+				   server/ipc_server_metal.c server/ipc_server_macos_display_host.c
 		)
 
 	if(XRT_FEATURE_SERVICE)
 		target_sources(
 			ipc_server
 			PRIVATE server/ipc_server_mainloop_apple_xpc.m
-				server/ipc_metal_client_cleanup.c
-				server/ipc_metal_client_cleanup.h
+				server/ipc_metal_client_cleanup.c server/ipc_metal_client_cleanup.h
 			)
 	endif()
 	set_source_files_properties(
-		${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE OBJC
+		${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE
+											  OBJC
 		)
 
 	target_link_libraries(
-		ipc_server PRIVATE comp_util "-framework AppKit" "-framework CoreGraphics" "-framework Foundation" "-framework Metal"
+		ipc_server
+		PRIVATE
+			comp_util
+			"-framework AppKit"
+			"-framework CoreGraphics"
+			"-framework Foundation"
+			"-framework Metal"
 		)
 elseif(WIN32)
 	target_sources(
-		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_windows.cpp
+		ipc_server
+		PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_windows.cpp
 		)
 
 	target_link_libraries(ipc_server PRIVATE winmm)

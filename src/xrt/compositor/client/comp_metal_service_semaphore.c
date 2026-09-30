@@ -28,8 +28,7 @@ client_metal_service_semaphore_register_compositor(struct xrt_compositor *xc, vo
 }
 
 xrt_result_t
-client_metal_service_semaphore_create_pair(struct xrt_compositor_semaphore **out_xcsem,
-                                           void **out_mtl_shared_event)
+client_metal_service_semaphore_create_pair(struct xrt_compositor_semaphore **out_xcsem, void **out_mtl_shared_event)
 {
 	if (out_xcsem == NULL || out_mtl_shared_event == NULL) {
 		return XRT_ERROR_INVALID_ARGUMENT;
@@ -58,14 +57,15 @@ client_metal_service_semaphore_create_pair(struct xrt_compositor_semaphore **out
 		if (xcsem != NULL) {
 			xrt_compositor_semaphore_reference(&xcsem, NULL);
 		}
-		U_LOG_W("Metal service Stage 4 semaphore pair unavailable: create=%d event=%s",
-		        xret,
+		U_LOG_W("Metal service Stage 4 semaphore pair unavailable: create=%d event=%s", xret,
 		        got_event && raw_event != NULL ? "yes" : "no");
 		return xret != XRT_SUCCESS ? xret : XRT_ERROR_IPC_FAILURE;
 	}
 
 	if (xrt_graphics_sync_handle_is_valid(native_handle)) {
-		U_LOG_W("Metal service Stage 4 unexpectedly received a native semaphore handle; XPC shared-event path remains active");
+		U_LOG_W(
+		    "Metal service Stage 4 unexpectedly received a native semaphore handle; XPC shared-event path "
+		    "remains active");
 	}
 
 	*out_xcsem = xcsem;

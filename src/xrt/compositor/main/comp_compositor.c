@@ -322,14 +322,11 @@ compositor_mark_frame(struct xrt_compositor *xc,
 	switch (point) {
 	case XRT_COMPOSITOR_FRAME_POINT_WOKE:
 #ifdef XRT_OS_OSX
-		macos_frame_pipeline_trace_event("mark_woke", frame_id, os_monotonic_get_ns(), when_ns, 0,
-		                                 c->frame.waited.id == frame_id
-		                                     ? (int64_t)c->frame.waited.desired_present_time_ns
-		                                     : 0,
-		                                 c->frame.waited.id == frame_id
-		                                     ? (int64_t)c->frame.waited.predicted_display_time_ns
-		                                     : 0,
-		                                 c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.present_slop_ns : 0);
+		macos_frame_pipeline_trace_event(
+		    "mark_woke", frame_id, os_monotonic_get_ns(), when_ns, 0,
+		    c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.desired_present_time_ns : 0,
+		    c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.predicted_display_time_ns : 0,
+		    c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.present_slop_ns : 0);
 #endif
 		comp_target_mark_wake_up(c->target, frame_id, when_ns);
 		return XRT_SUCCESS;
@@ -345,12 +342,11 @@ compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
 	COMP_SPEW(c, "BEGIN_FRAME");
 	c->app_profiling.last_begin = os_monotonic_get_ns();
 #ifdef XRT_OS_OSX
-	macos_frame_pipeline_trace_event("begin_frame", frame_id, c->app_profiling.last_begin, 0, 0,
-	                                 c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.desired_present_time_ns : 0,
-	                                 c->frame.waited.id == frame_id
-	                                     ? (int64_t)c->frame.waited.predicted_display_time_ns
-	                                     : 0,
-	                                 c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.present_slop_ns : 0);
+	macos_frame_pipeline_trace_event(
+	    "begin_frame", frame_id, c->app_profiling.last_begin, 0, 0,
+	    c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.desired_present_time_ns : 0,
+	    c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.predicted_display_time_ns : 0,
+	    c->frame.waited.id == frame_id ? (int64_t)c->frame.waited.present_slop_ns : 0);
 #endif
 	return XRT_SUCCESS;
 }
@@ -376,9 +372,7 @@ compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_d
 }
 
 static xrt_result_t
-compositor_layer_passthrough(struct xrt_compositor *xc,
-                             struct xrt_device *xdev,
-                             const struct xrt_layer_data *data)
+compositor_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev, const struct xrt_layer_data *data)
 {
 	struct comp_compositor *c = comp_compositor(xc);
 	(void)xdev;

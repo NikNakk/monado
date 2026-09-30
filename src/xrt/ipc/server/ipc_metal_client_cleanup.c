@@ -31,8 +31,7 @@ ipc_metal_client_cleanup(volatile struct ipc_client_state *ics)
 			continue;
 		}
 		if (other->server_thread_index >= 0 && other->client_state.pid == owner_pid) {
-			IPC_TRACE(server,
-			          "Keeping Metal XPC tokens for pid=%d: another IPC client is still connected",
+			IPC_TRACE(server, "Keeping Metal XPC tokens for pid=%d: another IPC client is still connected",
 			          (int)owner_pid);
 			return;
 		}

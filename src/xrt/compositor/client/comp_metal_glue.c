@@ -27,8 +27,9 @@ xrt_gfx_metal_provider_create(struct xrt_compositor_native *xcn, void *metal_dev
 	 * compositor is the service's, reached over IPC and XPC.
 	 */
 	bool hosted = u_macos_hosted_client_available();
-	struct xrt_compositor_metal *xcm = hosted ? client_metal_direct_compositor_create(xcn, metal_device, command_queue)
-	                                          : client_metal_service_compositor_create(xcn, metal_device, command_queue);
+	struct xrt_compositor_metal *xcm =
+	    hosted ? client_metal_direct_compositor_create(xcn, metal_device, command_queue)
+	           : client_metal_service_compositor_create(xcn, metal_device, command_queue);
 	if (xcm != NULL && !hosted) {
 		client_metal_service_semaphore_register_compositor(&xcm->base, metal_device);
 	}

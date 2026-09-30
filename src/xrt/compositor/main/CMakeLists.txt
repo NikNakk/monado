@@ -60,7 +60,12 @@ if(APPLE)
 
 	target_link_libraries(
 		comp_main
-		PRIVATE "-framework AppKit" "-framework CoreGraphics" "-framework CoreVideo" "-framework Metal" "-framework MetalKit"
+		PRIVATE
+			"-framework AppKit"
+			"-framework CoreGraphics"
+			"-framework CoreVideo"
+			"-framework Metal"
+			"-framework MetalKit"
 			"-framework QuartzCore"
 		)
 endif()

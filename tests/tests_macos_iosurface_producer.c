@@ -33,8 +33,8 @@ create_surface(uint32_t image_index)
 	const uint32_t bytes_per_row = PROBE_WIDTH * bytes_per_element;
 	const uint32_t alloc_size = bytes_per_row * PROBE_HEIGHT;
 
-	CFMutableDictionaryRef properties =
-	    CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+	CFMutableDictionaryRef properties = CFDictionaryCreateMutable(
+	    kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 	if (properties == NULL) {
 		return NULL;
 	}
@@ -95,9 +95,7 @@ main(void)
 		}
 	}
 
-	printf("%u %u %u\n",
-	       (unsigned)IOSurfaceGetID(surfaces[0]),
-	       (unsigned)IOSurfaceGetID(surfaces[1]),
+	printf("%u %u %u\n", (unsigned)IOSurfaceGetID(surfaces[0]), (unsigned)IOSurfaceGetID(surfaces[1]),
 	       (unsigned)IOSurfaceGetID(surfaces[2]));
 	fflush(stdout);
 	fprintf(stderr, "Holding three 64x64 BGRA IOSurfaces alive. Press Enter after the import probe completes.\n");

@@ -59,7 +59,8 @@ psvr2_load_user_gaze_calibration(struct psvr2_hmd *hmd)
 		float yaw_offset = 0.0f;
 		float pitch_gain = 1.0f;
 		float pitch_offset = 0.0f;
-		int fields = fscanf(file, "%63s %f %f %f %f", magic, &yaw_gain, &yaw_offset, &pitch_gain, &pitch_offset);
+		int fields =
+		    fscanf(file, "%63s %f %f %f %f", magic, &yaw_gain, &yaw_offset, &pitch_gain, &pitch_offset);
 		fclose(file);
 
 		if (fields == 5 && strcmp(magic, "PSVR2_GAZE_USER_CALIBRATION_V1") == 0) {
@@ -68,8 +69,7 @@ psvr2_load_user_gaze_calibration(struct psvr2_hmd *hmd)
 			et->user_pitch_gain = psvr2_gaze_gain(pitch_gain);
 			et->user_pitch_offset_deg = psvr2_gaze_offset(pitch_offset);
 			et->user_calibration_loaded = true;
-			PSVR2_DEBUG(hmd,
-			            "Loaded user gaze calibration: yaw %.5fx %+0.3f deg, pitch %.5fx %+0.3f deg",
+			PSVR2_DEBUG(hmd, "Loaded user gaze calibration: yaw %.5fx %+0.3f deg, pitch %.5fx %+0.3f deg",
 			            et->user_yaw_gain, et->user_yaw_offset_deg, et->user_pitch_gain,
 			            et->user_pitch_offset_deg);
 		} else {
@@ -236,14 +236,11 @@ process_gaze_packet(struct psvr2_hmd *hmd, uint8_t *buf, size_t bytes_read)
 	float look_y_dir = atanf(hmd->et_data.combined.filtered_gaze_direction.y);
 
 	const float deg_to_rad = (float)M_PI / 180.0f;
-	float yaw = -look_x_dir * hmd->et_data.user_yaw_gain +
-	            hmd->et_data.user_yaw_offset_deg * deg_to_rad;
-	float pitch = look_y_dir * hmd->et_data.user_pitch_gain +
-	              hmd->et_data.user_pitch_offset_deg * deg_to_rad;
+	float yaw = -look_x_dir * hmd->et_data.user_yaw_gain + hmd->et_data.user_yaw_offset_deg * deg_to_rad;
+	float pitch = look_y_dir * hmd->et_data.user_pitch_gain + hmd->et_data.user_pitch_offset_deg * deg_to_rad;
 
 	struct xrt_space_relation gaze_relation = {0};
-	math_quat_from_euler_angles(&(struct xrt_vec3){.x = pitch, .y = yaw},
-	                            &gaze_relation.pose.orientation);
+	math_quat_from_euler_angles(&(struct xrt_vec3){.x = pitch, .y = yaw}, &gaze_relation.pose.orientation);
 	gaze_relation.pose.position = (struct xrt_vec3){0};
 
 	if (hmd->et_data.combined.gaze_direction_valid) {

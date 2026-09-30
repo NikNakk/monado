@@ -33,8 +33,8 @@ main(int argc, char **argv)
 				assert(command == 'P');
 				float dt = (float)((double)(ts - state.timestamp_ns) * 1e-9);
 				p = (struct xrt_vec3){state.position.x + state.velocity.x * dt,
-				                     state.position.y + state.velocity.y * dt,
-				                     state.position.z + state.velocity.z * dt};
+				                      state.position.y + state.velocity.y * dt,
+				                      state.position.z + state.velocity.z * dt};
 				v = state.velocity;
 				psvr2_linear_predict(&state, &params, ts, &p, &v);
 				if (replay_continuity) {
@@ -115,9 +115,11 @@ main(int argc, char **argv)
 	}
 	// Cap magnitude and its target-time derivative, including tangential motion.
 	transition.limit_m = 0.005f;
-	continuity = (struct psvr2_continuity_prediction){
-	    .source_ns = 1000000000, .received_ns = 2000000000, .valid = true,
-	    .correction_position = {0.02f, 0.01f, 0}, .correction_velocity = {0.1f, -0.2f, 0}};
+	continuity = (struct psvr2_continuity_prediction){.source_ns = 1000000000,
+	                                                  .received_ns = 2000000000,
+	                                                  .valid = true,
+	                                                  .correction_position = {0.02f, 0.01f, 0},
+	                                                  .correction_velocity = {0.1f, -0.2f, 0}};
 	p = v = (struct xrt_vec3){0};
 	psvr2_continuity_predict(&continuity, &transition, 1060000000, 2000000000, &p, &v);
 	assert(fabsf(psvr2_linear_length(p) - 0.005f) < 1e-7f);

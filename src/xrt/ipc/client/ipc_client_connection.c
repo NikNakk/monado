@@ -370,7 +370,8 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c)
 	 * already listening, so this retry should not require polling or sleeps.
 	 */
 	if (!ipc_client_socket_connect_once(ipc_c)) {
-		IPC_ERROR(ipc_c, "Monado service reported ready over XPC but its Unix socket still could not be reached");
+		IPC_ERROR(ipc_c,
+		          "Monado service reported ready over XPC but its Unix socket still could not be reached");
 		return false;
 	}
 
@@ -414,11 +415,8 @@ ipc_client_connection_refresh_shm_copy(struct ipc_connection *ipc_c)
 			expected = IPC_SHM_COPY_CHUNK_SIZE;
 		}
 		if (chunk.size != expected) {
-			IPC_ERROR(ipc_c,
-			          "Invalid shared-memory chunk size at offset %zu: got %u expected %zu",
-			          offset,
-			          chunk.size,
-			          expected);
+			IPC_ERROR(ipc_c, "Invalid shared-memory chunk size at offset %zu: got %u expected %zu", offset,
+			          chunk.size, expected);
 			return XRT_ERROR_IPC_FAILURE;
 		}
 

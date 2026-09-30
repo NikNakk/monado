@@ -60,18 +60,16 @@ ipc_metal_xpc_activate_service(void);
  */
 xrt_result_t
 ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
-                                             uint32_t expected_count,
-                                             void **out_metal_textures,
-                                             pid_t owner_pid);
+                                            uint32_t expected_count,
+                                            void **out_metal_textures,
+                                            pid_t owner_pid);
 
 /*!
  * Publish a service-created MTLSharedEvent for one Unix IPC client. The XPC
  * peer that retrieves it must have the same PID.
  */
 xrt_result_t
-ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event,
-                                                    uint64_t *out_token,
-                                                    pid_t owner_pid);
+ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event, uint64_t *out_token, pid_t owner_pid);
 
 /*! Drop a token only when it belongs to the supplied Unix IPC client PID. */
 void

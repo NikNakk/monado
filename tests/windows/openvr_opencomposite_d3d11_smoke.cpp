@@ -104,23 +104,17 @@ main(int argc, char **argv)
 	    factory != nullptr && adapter_index >= 0) {
 		factory->EnumAdapters1(static_cast<UINT>(adapter_index), &adapter);
 	}
-	if (factory != nullptr) factory->Release();
+	if (factory != nullptr)
+		factory->Release();
 
 	ID3D11Device *device = nullptr;
 	ID3D11DeviceContext *context = nullptr;
 	D3D_FEATURE_LEVEL obtained = D3D_FEATURE_LEVEL_11_0;
 	D3D_FEATURE_LEVEL requested[] = {D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0};
-	HRESULT hr = D3D11CreateDevice(adapter,
-	                               adapter != nullptr ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE,
-	                               nullptr,
-	                               0,
-	                               requested,
-	                               2,
-	                               D3D11_SDK_VERSION,
-	                               &device,
-	                               &obtained,
-	                               &context);
-	if (adapter != nullptr) adapter->Release();
+	HRESULT hr = D3D11CreateDevice(adapter, adapter != nullptr ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE,
+	                               nullptr, 0, requested, 2, D3D11_SDK_VERSION, &device, &obtained, &context);
+	if (adapter != nullptr)
+		adapter->Release();
 	if (FAILED(hr) || device == nullptr || context == nullptr) {
 		std::fprintf(stderr, "D3D11CreateDevice failed hr=0x%08lx\n", (unsigned long)hr);
 		vr_shutdown();
@@ -161,8 +155,7 @@ main(int argc, char **argv)
 	compositor->SetTrackingSpace(vr::TrackingUniverseStanding);
 	bool render_ok = true;
 	for (int frame = 0; frame < frames; ++frame) {
-		vr::EVRCompositorError e =
-		    compositor->WaitGetPoses(poses, vr::k_unMaxTrackedDeviceCount, nullptr, 0);
+		vr::EVRCompositorError e = compositor->WaitGetPoses(poses, vr::k_unMaxTrackedDeviceCount, nullptr, 0);
 		if (e != vr::VRCompositorError_None) {
 			std::fprintf(stderr, "WaitGetPoses failed frame=%d error=%d\n", frame, (int)e);
 			render_ok = false;
@@ -190,9 +183,7 @@ main(int argc, char **argv)
 		compositor->PostPresentHandoff();
 
 		if (frame == 0 || ((frame + 1) % 120) == 0) {
-			std::printf("submitted frame %d/%d hmd_pose_valid=%s\n",
-			            frame + 1,
-			            frames,
+			std::printf("submitted frame %d/%d hmd_pose_valid=%s\n", frame + 1, frames,
 			            poses[vr::k_unTrackedDeviceIndex_Hmd].bPoseIsValid ? "true" : "false");
 			std::fflush(stdout);
 		}

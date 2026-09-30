@@ -2247,12 +2247,11 @@ struct xrt_swapchain_metal
 	 * sub-rectangles of the same array layer. Selection semantics are the
 	 * same as for get_foveation_metal_state.
 	 */
-	xrt_result_t (*get_foveation_metal_packed_state)(
-	    struct xrt_swapchain_metal *xscm,
-	    const struct xrt_metal_foveation_view_layout *views,
-	    uint32_t view_count,
-	    uint32_t array_layer,
-	    struct xrt_metal_foveation_state *out_state);
+	xrt_result_t (*get_foveation_metal_packed_state)(struct xrt_swapchain_metal *xscm,
+	                                                 const struct xrt_metal_foveation_view_layout *views,
+	                                                 uint32_t view_count,
+	                                                 uint32_t array_layer,
+	                                                 struct xrt_metal_foveation_state *out_state);
 
 	/*!
 	 * Return the map that was bound to image_index/array_layer when that
@@ -2261,11 +2260,10 @@ struct xrt_swapchain_metal
 	 * submitted again after the foveation state has changed. An image
 	 * released without a selected map reports a disabled state.
 	 */
-	xrt_result_t (*get_foveation_metal_image_state)(
-	    struct xrt_swapchain_metal *xscm,
-	    uint32_t image_index,
-	    uint32_t array_layer,
-	    struct xrt_metal_foveation_state *out_state);
+	xrt_result_t (*get_foveation_metal_image_state)(struct xrt_swapchain_metal *xscm,
+	                                                uint32_t image_index,
+	                                                uint32_t array_layer,
+	                                                struct xrt_metal_foveation_state *out_state);
 };
 
 /*!
@@ -2308,26 +2306,23 @@ xrt_swapchain_metal_get_foveation_state(struct xrt_swapchain_metal *xscm,
 }
 
 static inline xrt_result_t
-xrt_swapchain_metal_get_packed_foveation_state(
-    struct xrt_swapchain_metal *xscm,
-    const struct xrt_metal_foveation_view_layout *views,
-    uint32_t view_count,
-    uint32_t array_layer,
-    struct xrt_metal_foveation_state *out_state)
+xrt_swapchain_metal_get_packed_foveation_state(struct xrt_swapchain_metal *xscm,
+                                               const struct xrt_metal_foveation_view_layout *views,
+                                               uint32_t view_count,
+                                               uint32_t array_layer,
+                                               struct xrt_metal_foveation_state *out_state)
 {
 	if (xscm->get_foveation_metal_packed_state == NULL) {
 		return XRT_ERROR_NOT_IMPLEMENTED;
 	}
-	return xscm->get_foveation_metal_packed_state(
-	    xscm, views, view_count, array_layer, out_state);
+	return xscm->get_foveation_metal_packed_state(xscm, views, view_count, array_layer, out_state);
 }
 
 static inline xrt_result_t
-xrt_swapchain_metal_get_image_foveation_state(
-    struct xrt_swapchain_metal *xscm,
-    uint32_t image_index,
-    uint32_t array_layer,
-    struct xrt_metal_foveation_state *out_state)
+xrt_swapchain_metal_get_image_foveation_state(struct xrt_swapchain_metal *xscm,
+                                              uint32_t image_index,
+                                              uint32_t array_layer,
+                                              struct xrt_metal_foveation_state *out_state)
 {
 	if (xscm->get_foveation_metal_image_state == NULL) {
 		return XRT_ERROR_NOT_IMPLEMENTED;

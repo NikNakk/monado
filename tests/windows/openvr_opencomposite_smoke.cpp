@@ -44,7 +44,8 @@ main(int argc, char **argv)
 	auto vr_get_interface =
 	    reinterpret_cast<VR_GetGenericInterface_t>(required_proc(module, "VR_GetGenericInterface"));
 	auto vr_is_hmd_present = reinterpret_cast<VR_IsHmdPresent_t>(required_proc(module, "VR_IsHmdPresent"));
-	if (vr_init == nullptr || vr_shutdown == nullptr || vr_get_interface == nullptr || vr_is_hmd_present == nullptr) {
+	if (vr_init == nullptr || vr_shutdown == nullptr || vr_get_interface == nullptr ||
+	    vr_is_hmd_present == nullptr) {
 		FreeLibrary(module);
 		return 4;
 	}
@@ -84,8 +85,8 @@ main(int argc, char **argv)
 	}
 	std::printf("OpenVR system interface: %s\n", selected_system);
 
-	const char *compositor_versions[] = {
-	    "IVRCompositor_028", "IVRCompositor_027", "IVRCompositor_026", "IVRCompositor_025", "IVRCompositor_024"};
+	const char *compositor_versions[] = {"IVRCompositor_028", "IVRCompositor_027", "IVRCompositor_026",
+	                                     "IVRCompositor_025", "IVRCompositor_024"};
 	void *compositor = nullptr;
 	const char *selected_compositor = nullptr;
 	for (const char *version : compositor_versions) {

@@ -104,12 +104,8 @@ reuse_log(const char *what, struct xrt_swapchain *xsc, uint32_t image_index, uin
 		return;
 	}
 
-	U_LOG_I("Swapchain GPU reuse %s: swapchain=%p image=%u timeline=%llu extra_ns=%lld",
-	        what,
-	        (void *)xsc,
-	        image_index,
-	        (unsigned long long)value,
-	        (long long)extra_ns);
+	U_LOG_I("Swapchain GPU reuse %s: swapchain=%p image=%u timeline=%llu extra_ns=%lld", what, (void *)xsc,
+	        image_index, (unsigned long long)value, (long long)extra_ns);
 }
 
 static struct gpu_reuse_context *
@@ -307,11 +303,8 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 			return XRT_TIMEOUT;
 		}
 		if (ret != VK_SUCCESS) {
-			VK_ERROR(vk,
-			         "Swapchain GPU reuse vkWaitSemaphores image %u value %llu: %s",
-			         image_index,
-			         (unsigned long long)value,
-			         vk_result_string(ret));
+			VK_ERROR(vk, "Swapchain GPU reuse vkWaitSemaphores image %u value %llu: %s", image_index,
+			         (unsigned long long)value, vk_result_string(ret));
 			return XRT_ERROR_VULKAN;
 		}
 
@@ -323,7 +316,8 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 			pthread_mutex_unlock(&g_gpu_reuse_mutex);
 			return XRT_SUCCESS;
 		}
-		bool stable = tracker->pending_consumers[image_index] == 0 && tracker->last_gpu_use[image_index] == value;
+		bool stable =
+		    tracker->pending_consumers[image_index] == 0 && tracker->last_gpu_use[image_index] == value;
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
 		if (stable) {
 			return XRT_SUCCESS;
@@ -451,10 +445,8 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
 	xsc->destroy = tracked_swapchain_destroy;
 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 
-	U_LOG_I("Swapchain GPU reuse tracking enabled: swapchain=%p images=%u timeline=%p",
-	        (void *)xsc,
-	        xsc->image_count,
-	        (void *)context->timeline);
+	U_LOG_I("Swapchain GPU reuse tracking enabled: swapchain=%p images=%u timeline=%p", (void *)xsc,
+	        xsc->image_count, (void *)context->timeline);
 	return XRT_SUCCESS;
 }
 
@@ -612,15 +604,17 @@ comp_swapchain_gpu_reuse_native_accum_claim_layer(struct comp_layer_accum *cla, 
 	switch (data->type) {
 	case XRT_LAYER_PROJECTION:
 		for (uint32_t i = 0; i < data->view_count && xret == XRT_SUCCESS; i++) {
-			xret = native_accum_claim_image_locked(cla, layer->sc_array[i], data->proj.v[i].sub.image_index);
+			xret =
+			    native_accum_claim_image_locked(cla, layer->sc_array[i], data->proj.v[i].sub.image_index);
 		}
 		break;
 	case XRT_LAYER_PROJECTION_DEPTH:
 		for (uint32_t i = 0; i < data->view_count && xret == XRT_SUCCESS; i++) {
-			xret = native_accum_claim_image_locked(cla, layer->sc_array[i], data->depth.v[i].sub.image_index);
+			xret =
+			    native_accum_claim_image_locked(cla, layer->sc_array[i], data->depth.v[i].sub.image_index);
 			if (xret == XRT_SUCCESS) {
-				xret = native_accum_claim_image_locked(
-				    cla, layer->sc_array[i + data->view_count], data->depth.d[i].sub.image_index);
+				xret = native_accum_claim_image_locked(cla, layer->sc_array[i + data->view_count],
+				                                       data->depth.d[i].sub.image_index);
 			}
 		}
 		break;
@@ -706,16 +700,14 @@ submit_add_layer_locked(struct gpu_reuse_submit *submit, const struct comp_layer
 	case XRT_LAYER_PROJECTION_DEPTH:
 		for (uint32_t i = 0; i < data->view_count; i++) {
 			if (!submit_add_image_locked(submit, layer->sc_array[i], data->depth.v[i].sub.image_index) ||
-			    !submit_add_image_locked(
-			        submit, layer->sc_array[i + data->view_count], data->depth.d[i].sub.image_index)) {
+			    !submit_add_image_locked(submit, layer->sc_array[i + data->view_count],
+			                             data->depth.d[i].sub.image_index)) {
 				return false;
 			}
 		}
 		break;
-	case XRT_LAYER_QUAD:
-		return submit_add_image_locked(submit, layer->sc_array[0], data->quad.sub.image_index);
-	case XRT_LAYER_CUBE:
-		return submit_add_image_locked(submit, layer->sc_array[0], data->cube.sub.image_index);
+	case XRT_LAYER_QUAD: return submit_add_image_locked(submit, layer->sc_array[0], data->quad.sub.image_index);
+	case XRT_LAYER_CUBE: return submit_add_image_locked(submit, layer->sc_array[0], data->cube.sub.image_index);
 	case XRT_LAYER_CYLINDER:
 		return submit_add_image_locked(submit, layer->sc_array[0], data->cylinder.sub.image_index);
 	case XRT_LAYER_EQUIRECT1:
@@ -785,8 +777,8 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
                                                      const void *next)
 {
 	if (g_renderer.cla == NULL || g_renderer.submit_active) {
-		vk_submit_info_builder_prepare(
-		    builder, wait_semaphores, command_buffers, command_buffer_count, signal_semaphores, next);
+		vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
+		                               signal_semaphores, next);
 		return;
 	}
 
@@ -804,8 +796,8 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 	if (!collected) {
 		submit_rollback_locked(&g_renderer.submit);
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
-		vk_submit_info_builder_prepare(
-		    builder, wait_semaphores, command_buffers, command_buffer_count, signal_semaphores, next);
+		vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
+		                               signal_semaphores, next);
 		g_renderer.rejected_submit_info = &builder->submit_info;
 		g_renderer.rejected_result = VK_ERROR_TOO_MANY_OBJECTS;
 		return;
@@ -813,8 +805,8 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 
 	if (g_renderer.submit.image_count == 0) {
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
-		vk_submit_info_builder_prepare(
-		    builder, wait_semaphores, command_buffers, command_buffer_count, signal_semaphores, next);
+		vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
+		                               signal_semaphores, next);
 		return;
 	}
 
@@ -826,17 +818,17 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 		U_LOG_E("No renderer signal-semaphore slot available for swapchain GPU reuse timeline");
 		submit_rollback_locked(&g_renderer.submit);
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
-		vk_submit_info_builder_prepare(
-		    builder, wait_semaphores, command_buffers, command_buffer_count, signal_semaphores, next);
+		vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
+		                               signal_semaphores, next);
 		g_renderer.rejected_submit_info = &builder->submit_info;
 		g_renderer.rejected_result = VK_ERROR_TOO_MANY_OBJECTS;
 		return;
 	}
 
-	vk_semaphore_list_signal_add_timeline(
-	    &g_renderer.signal_sems, g_renderer.submit.context->timeline, g_renderer.submit.value);
-	vk_submit_info_builder_prepare(
-	    builder, wait_semaphores, command_buffers, command_buffer_count, &g_renderer.signal_sems, next);
+	vk_semaphore_list_signal_add_timeline(&g_renderer.signal_sems, g_renderer.submit.context->timeline,
+	                                      g_renderer.submit.value);
+	vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
+	                               &g_renderer.signal_sems, next);
 
 	/*
 	 * Keep the publication mutex held until this exact VkSubmitInfo has been
@@ -848,11 +840,8 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 }
 
 VkResult
-comp_swapchain_gpu_reuse_vk_cmd_submit_locked(struct vk_bundle *vk,
-                                              struct vk_bundle_queue *queue,
-                                              uint32_t count,
-                                              const VkSubmitInfo *infos,
-                                              VkFence fence)
+comp_swapchain_gpu_reuse_vk_cmd_submit_locked(
+    struct vk_bundle *vk, struct vk_bundle_queue *queue, uint32_t count, const VkSubmitInfo *infos, VkFence fence)
 {
 	if (vk == NULL || queue == NULL || infos == NULL) {
 		return VK_ERROR_INITIALIZATION_FAILED;

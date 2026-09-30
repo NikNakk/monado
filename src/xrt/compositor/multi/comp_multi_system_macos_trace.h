@@ -105,9 +105,10 @@ macos_client_frame_trace_get(void)
 	}
 
 
-	fputs("system_frame_id,system_display_time_ns,latch_ns,client_slot,client_frame_id,"
-	      "client_display_time_ns,display_time_delta_ns,reused,source_use_ordinal,layer_count,focused,visible\n",
-	      g_macos_client_frame_trace);
+	fputs(
+	    "system_frame_id,system_display_time_ns,latch_ns,client_slot,client_frame_id,"
+	    "client_display_time_ns,display_time_delta_ns,reused,source_use_ordinal,layer_count,focused,visible\n",
+	    g_macos_client_frame_trace);
 
 	if (!g_macos_client_frame_trace_atexit_registered) {
 		atexit(macos_client_frame_trace_close);
@@ -129,9 +130,7 @@ macos_client_frame_trace_get(void)
  * boundary and becoming a 4-refresh hold.
  */
 static inline void
-macos_deliver_client_frame_cadenced(struct multi_compositor *mc,
-                                    int64_t display_time_ns,
-                                    int64_t system_frame_id)
+macos_deliver_client_frame_cadenced(struct multi_compositor *mc, int64_t display_time_ns, int64_t system_frame_id)
 {
 	int min_hold = macos_client_frame_min_hold();
 	if (min_hold != 0 && mc != NULL) {
@@ -163,8 +162,7 @@ macos_deliver_client_frame_cadenced(struct multi_compositor *mc,
 		int64_t first_system_frame = g_macos_client_frame_hold_first_system_frame[client_slot];
 		if (!active_before || system_frame_id - first_system_frame >= min_hold) {
 			multi_compositor_deliver_any_frames(mc, display_time_ns);
-			if (mc->delivered.active &&
-			    (!active_before || mc->delivered.data.frame_id != frame_before)) {
+			if (mc->delivered.active && (!active_before || mc->delivered.data.frame_id != frame_before)) {
 				g_macos_client_frame_hold_frame_id[client_slot] = mc->delivered.data.frame_id;
 				g_macos_client_frame_hold_first_system_frame[client_slot] = system_frame_id;
 			}
@@ -177,9 +175,9 @@ macos_deliver_client_frame_cadenced(struct multi_compositor *mc,
 
 static inline void
 macos_trace_multi_compositor_latch_frame_locked(struct multi_compositor *mc,
-                                                 int64_t when_ns,
-                                                 int64_t system_frame_id,
-                                                 int64_t system_display_time_ns)
+                                                int64_t when_ns,
+                                                int64_t system_frame_id,
+                                                int64_t system_display_time_ns)
 {
 	/* Preserve the real compositor behaviour exactly. */
 	multi_compositor_latch_frame_locked(mc, when_ns, system_frame_id);
@@ -211,10 +209,10 @@ macos_trace_multi_compositor_latch_frame_locked(struct multi_compositor *mc,
 	int64_t display_time_delta_ns = system_display_time_ns - client_display_time_ns;
 
 	flockfile(file);
-	fprintf(file, "%lld,%lld,%lld,%zu,%lld,%lld,%lld,%u,%u,%u,%u,%u\n",
-	        (long long)system_frame_id, (long long)system_display_time_ns, (long long)when_ns, client_slot,
-	        (long long)client_frame_id, (long long)client_display_time_ns, (long long)display_time_delta_ns,
-	        reused ? 1u : 0u, g_macos_client_frame_trace_source_use_ordinal[client_slot], mc->delivered.layer_count,
+	fprintf(file, "%lld,%lld,%lld,%zu,%lld,%lld,%lld,%u,%u,%u,%u,%u\n", (long long)system_frame_id,
+	        (long long)system_display_time_ns, (long long)when_ns, client_slot, (long long)client_frame_id,
+	        (long long)client_display_time_ns, (long long)display_time_delta_ns, reused ? 1u : 0u,
+	        g_macos_client_frame_trace_source_use_ordinal[client_slot], mc->delivered.layer_count,
 	        mc->state.focused ? 1u : 0u, mc->state.visible ? 1u : 0u);
 	g_macos_client_frame_trace_rows++;
 
@@ -252,9 +250,10 @@ macos_compositor_update_time_constraint(int64_t period_ns)
 	int computation_pct = debug_get_num_option_macos_compositor_computation_pct();
 	int constraint_pct = debug_get_num_option_macos_compositor_constraint_pct();
 	if (computation_pct <= 0 || constraint_pct <= 0 || computation_pct > constraint_pct || constraint_pct > 100) {
-		U_LOG_W("macOS diagnostic: invalid compositor time constraint percentages: computation_pct=%d "
-		        "constraint_pct=%d",
-		        computation_pct, constraint_pct);
+		U_LOG_W(
+		    "macOS diagnostic: invalid compositor time constraint percentages: computation_pct=%d "
+		    "constraint_pct=%d",
+		    computation_pct, constraint_pct);
 		g_macos_compositor_time_constraint_period_ns = period_ns;
 		return;
 	}
@@ -285,25 +284,27 @@ macos_compositor_update_time_constraint(int64_t period_ns)
 
 	double refresh_hz = 1000000000.0 / (double)period_ns;
 	if (kr == KERN_SUCCESS) {
-		U_LOG_I("macOS diagnostic: Multi Client Module time constraint updated: refresh_hz=%.3f "
-		        "period_ns=%lld computation_ns=%llu constraint_ns=%llu computation_pct=%d constraint_pct=%d",
-		        refresh_hz, (long long)period_ns, (unsigned long long)computation_ns,
-		        (unsigned long long)constraint_ns, computation_pct, constraint_pct);
+		U_LOG_I(
+		    "macOS diagnostic: Multi Client Module time constraint updated: refresh_hz=%.3f "
+		    "period_ns=%lld computation_ns=%llu constraint_ns=%llu computation_pct=%d constraint_pct=%d",
+		    refresh_hz, (long long)period_ns, (unsigned long long)computation_ns,
+		    (unsigned long long)constraint_ns, computation_pct, constraint_pct);
 	} else {
-		U_LOG_W("macOS diagnostic: failed to set Multi Client Module THREAD_TIME_CONSTRAINT_POLICY: kr=%d "
-		        "refresh_hz=%.3f period_ns=%lld computation_ns=%llu constraint_ns=%llu",
-		        kr, refresh_hz, (long long)period_ns, (unsigned long long)computation_ns,
-		        (unsigned long long)constraint_ns);
+		U_LOG_W(
+		    "macOS diagnostic: failed to set Multi Client Module THREAD_TIME_CONSTRAINT_POLICY: kr=%d "
+		    "refresh_hz=%.3f period_ns=%lld computation_ns=%llu constraint_ns=%llu",
+		    kr, refresh_hz, (long long)period_ns, (unsigned long long)computation_ns,
+		    (unsigned long long)constraint_ns);
 	}
 }
 
 static inline void
 macos_xrt_comp_predict_frame_with_time_constraint(struct xrt_compositor *xc,
-                                                   int64_t *out_frame_id,
-                                                   int64_t *out_wake_up_time_ns,
-                                                   int64_t *out_predicted_gpu_time_ns,
-                                                   int64_t *out_predicted_display_time_ns,
-                                                   int64_t *out_predicted_display_period_ns)
+                                                  int64_t *out_frame_id,
+                                                  int64_t *out_wake_up_time_ns,
+                                                  int64_t *out_predicted_gpu_time_ns,
+                                                  int64_t *out_predicted_display_time_ns,
+                                                  int64_t *out_predicted_display_period_ns)
 {
 	xrt_comp_predict_frame(xc, out_frame_id, out_wake_up_time_ns, out_predicted_gpu_time_ns,
 	                       out_predicted_display_time_ns, out_predicted_display_period_ns);

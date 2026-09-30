@@ -80,9 +80,7 @@ psvr2_get_slam_timing(struct xrt_device *xdev, struct psvr2_slam_timing *out);
  * the existing WMR camera sink model; the caller owns sink lifetime.
  */
 xrt_result_t
-psvr2_set_passthrough_sinks(struct xrt_device *xdev,
-                            struct xrt_frame_sink *left,
-                            struct xrt_frame_sink *right);
+psvr2_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left, struct xrt_frame_sink *right);
 
 /*!
  * Probing function for PlayStation VR2 devices.

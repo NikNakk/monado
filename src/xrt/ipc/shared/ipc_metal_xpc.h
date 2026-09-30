@@ -50,9 +50,7 @@ ipc_metal_xpc_publish_textures(void *const *metal_textures, uint32_t image_count
  * GPU-process handoff; ordinary Monado texture tokens remain PID-scoped.
  */
 xrt_result_t
-ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures,
-                                         uint32_t image_count,
-                                         uint64_t *out_token);
+ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures, uint32_t image_count, uint64_t *out_token);
 
 /*!
  * Recreate textures previously published under @p token.
@@ -128,9 +126,7 @@ ipc_metal_xpc_make_token_images(uint64_t token, uint32_t image_count, struct xrt
 
 /*! True if all images contain one valid Metal-broker token and invalid handles. */
 bool
-ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images,
-                                    uint32_t image_count,
-                                    uint64_t *out_token);
+ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images, uint32_t image_count, uint64_t *out_token);
 
 #endif // XRT_OS_OSX
 
@@ -155,15 +151,13 @@ ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images,
                             index:(uint32_t)index
                             reply:(void (^)(MTLSharedTextureHandle *handle))reply;
 
-- (void)markTextureTokenClaimable:(uint64_t)token
-                            reply:(void (^)(BOOL success))reply;
+- (void)markTextureTokenClaimable:(uint64_t)token reply:(void (^)(BOOL success))reply;
 
 - (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
                            token:(uint64_t)token
                            reply:(void (^)(BOOL success))reply;
 
-- (void)takeSharedEventHandleForToken:(uint64_t)token
-                                reply:(void (^)(MTLSharedEventHandle *handle))reply;
+- (void)takeSharedEventHandleForToken:(uint64_t)token reply:(void (^)(MTLSharedEventHandle *handle))reply;
 
 - (void)discardToken:(uint64_t)token reply:(void (^)(void))reply;
 

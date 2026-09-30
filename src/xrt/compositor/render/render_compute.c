@@ -21,7 +21,9 @@
 
 DEBUG_GET_ONCE_BOOL_OPTION(log_timewarp_inputs, "XRT_COMPOSITOR_LOG_TIMEWARP_INPUTS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_IDENTITY", false)
-DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_PRETRANSFORM_IDENTITY", false)
+DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity,
+                           "XRT_COMPOSITOR_FORCE_TIMEWARP_PRETRANSFORM_IDENTITY",
+                           false)
 /*
  * Depth-aware reprojection is opt-in: without a working disocclusion fill it
  * shows silhouettes, trails and holes. Depth layers are still accepted and
@@ -119,56 +121,21 @@ maybe_log_timewarp_inputs(uint64_t frame_id,
 		return;
 	}
 
-	U_LOG_RAW("atw-input frame=%llu eye=%u fov=(%.5f,%.5f,%.5f,%.5f) "
-	        "src-orient=(%.5f,%.5f,%.5f,%.5f) src-pos=(%.5f,%.5f,%.5f) "
-	        "new-orient=(%.5f,%.5f,%.5f,%.5f) new-pos=(%.5f,%.5f,%.5f) "
-	        "pre=(%.5f,%.5f,%.5f,%.5f) post=(%.5f,%.5f,%.5f,%.5f) "
-	        "begin0=(%.5f,%.5f,%.5f,%.5f) begin1=(%.5f,%.5f,%.5f,%.5f) "
-	        "end0=(%.5f,%.5f,%.5f,%.5f) end1=(%.5f,%.5f,%.5f,%.5f)",
-	        (unsigned long long)frame_id,
-	        eye,
-	        fov->angle_left,
-	        fov->angle_right,
-	        fov->angle_up,
-	        fov->angle_down,
-	        src_pose->orientation.x,
-	        src_pose->orientation.y,
-	        src_pose->orientation.z,
-	        src_pose->orientation.w,
-	        src_pose->position.x,
-	        src_pose->position.y,
-	        src_pose->position.z,
-	        new_pose->orientation.x,
-	        new_pose->orientation.y,
-	        new_pose->orientation.z,
-	        new_pose->orientation.w,
-	        new_pose->position.x,
-	        new_pose->position.y,
-	        new_pose->position.z,
-	        pre_transform->x,
-	        pre_transform->y,
-	        pre_transform->w,
-	        pre_transform->h,
-	        post_transform->x,
-	        post_transform->y,
-	        post_transform->w,
-	        post_transform->h,
-	        begin->v[0],
-	        begin->v[1],
-	        begin->v[2],
-	        begin->v[3],
-	        begin->v[4],
-	        begin->v[5],
-	        begin->v[6],
-	        begin->v[7],
-	        end->v[0],
-	        end->v[1],
-	        end->v[2],
-	        end->v[3],
-	        end->v[4],
-	        end->v[5],
-	        end->v[6],
-	        end->v[7]);
+	U_LOG_RAW(
+	    "atw-input frame=%llu eye=%u fov=(%.5f,%.5f,%.5f,%.5f) "
+	    "src-orient=(%.5f,%.5f,%.5f,%.5f) src-pos=(%.5f,%.5f,%.5f) "
+	    "new-orient=(%.5f,%.5f,%.5f,%.5f) new-pos=(%.5f,%.5f,%.5f) "
+	    "pre=(%.5f,%.5f,%.5f,%.5f) post=(%.5f,%.5f,%.5f,%.5f) "
+	    "begin0=(%.5f,%.5f,%.5f,%.5f) begin1=(%.5f,%.5f,%.5f,%.5f) "
+	    "end0=(%.5f,%.5f,%.5f,%.5f) end1=(%.5f,%.5f,%.5f,%.5f)",
+	    (unsigned long long)frame_id, eye, fov->angle_left, fov->angle_right, fov->angle_up, fov->angle_down,
+	    src_pose->orientation.x, src_pose->orientation.y, src_pose->orientation.z, src_pose->orientation.w,
+	    src_pose->position.x, src_pose->position.y, src_pose->position.z, new_pose->orientation.x,
+	    new_pose->orientation.y, new_pose->orientation.z, new_pose->orientation.w, new_pose->position.x,
+	    new_pose->position.y, new_pose->position.z, pre_transform->x, pre_transform->y, pre_transform->w,
+	    pre_transform->h, post_transform->x, post_transform->y, post_transform->w, post_transform->h, begin->v[0],
+	    begin->v[1], begin->v[2], begin->v[3], begin->v[4], begin->v[5], begin->v[6], begin->v[7], end->v[0],
+	    end->v[1], end->v[2], end->v[3], end->v[4], end->v[5], end->v[6], end->v[7]);
 }
 
 
@@ -399,8 +366,8 @@ fill_distortion_foveation_data(struct render_compute_distortion_ubo_data *data,
 {
 	for (uint32_t eye = 0; eye < view_count; ++eye) {
 		const struct xrt_foveation_map_data *map = src_foveation != NULL ? &src_foveation[eye] : NULL;
-		const bool enabled = map != NULL && map->enabled != 0 &&
-		                     map->boundary_count == XRT_FOVEATION_MAP_BOUNDARY_COUNT;
+		const bool enabled =
+		    map != NULL && map->enabled != 0 && map->boundary_count == XRT_FOVEATION_MAP_BOUNDARY_COUNT;
 		data->foveation[eye].value = enabled ? 1u : 0u;
 		data->foveation[eye].boundary_count = enabled ? map->boundary_count : 0u;
 
@@ -486,8 +453,7 @@ dispatch_project_pipeline(struct render_compute *render,
 
 		// Keep all descriptors valid on the ordinary color-only path. The depth
 		// slots are sampled only when has_depth is set in the UBO.
-		combined_src_samplers[XRT_MAX_VIEWS + i] =
-		    depth_samplers != NULL ? depth_samplers[i] : src_samplers[i];
+		combined_src_samplers[XRT_MAX_VIEWS + i] = depth_samplers != NULL ? depth_samplers[i] : src_samplers[i];
 		combined_src_image_views[XRT_MAX_VIEWS + i] =
 		    depth_image_views != NULL ? depth_image_views[i] : src_image_views[i];
 	}
@@ -541,7 +507,8 @@ dispatch_project_pipeline(struct render_compute *render,
 			uint32_t target_width = 0;
 			uint32_t target_height = 0;
 			for (uint32_t i = 0; i < render->r->view_count; ++i) {
-				target_width = target_width > views[i].x + views[i].w ? target_width : views[i].x + views[i].w;
+				target_width =
+				    target_width > views[i].x + views[i].w ? target_width : views[i].x + views[i].w;
 				target_height =
 				    target_height > views[i].y + views[i].h ? target_height : views[i].y + views[i].h;
 			}
@@ -549,10 +516,13 @@ dispatch_project_pipeline(struct render_compute *render,
 			if (target_width > 0 && target_height > 0) {
 				const uint32_t max_x = target_width - 1;
 				const uint32_t max_y = target_height - 1;
-				const int32_t quarter_x = (int32_t)(target_width / 4 < max_x ? target_width / 4 : max_x);
+				const int32_t quarter_x =
+				    (int32_t)(target_width / 4 < max_x ? target_width / 4 : max_x);
 				const int32_t center_x = (int32_t)(target_width / 2 < max_x ? target_width / 2 : max_x);
-				const int32_t right_x = (int32_t)(((target_width * 3) / 4) < max_x ? (target_width * 3) / 4 : max_x);
-				const int32_t sample_y = (int32_t)(target_height / 2 < max_y ? target_height / 2 : max_y);
+				const int32_t right_x =
+				    (int32_t)(((target_width * 3) / 4) < max_x ? (target_width * 3) / 4 : max_x);
+				const int32_t sample_y =
+				    (int32_t)(target_height / 2 < max_y ? target_height / 2 : max_y);
 				const VkImageSubresourceRange target_subresource_range = {
 				    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
 				    .baseMipLevel = 0,
@@ -620,34 +590,24 @@ dispatch_project_pipeline(struct render_compute *render,
 				    target_subresource_range);            //
 
 				vk->vkCmdCopyImageToBuffer( //
-				    r->cmd,                  //
-				    target_image,            //
-				    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-				    buffer->buffer,
-				    ARRAY_SIZE(copies),
-				    copies);
+				    r->cmd,                 //
+				    target_image,           //
+				    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer->buffer, ARRAY_SIZE(copies), copies);
 
-				vk->vkCmdPipelineBarrier(          //
-				    r->cmd,                        //
-				    VK_PIPELINE_STAGE_TRANSFER_BIT,
-				    VK_PIPELINE_STAGE_HOST_BIT,
-				    0,
-				    0,
-				    NULL,
-				    1,
-				    &buffer_barrier,
-				    0,
-				    NULL);
+				vk->vkCmdPipelineBarrier( //
+				    r->cmd,               //
+				    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, NULL, 1,
+				    &buffer_barrier, 0, NULL);
 
-				vk_cmd_image_barrier_gpu_locked(      //
-				    vk,                                //
-				    r->cmd,                            //
-				    target_image,                      //
-				    VK_ACCESS_TRANSFER_READ_BIT,       //
-				    VK_ACCESS_MEMORY_READ_BIT,         //
+				vk_cmd_image_barrier_gpu_locked( //
+				    vk,                          //
+				    r->cmd,                      //
+				    target_image,                //
+				    VK_ACCESS_TRANSFER_READ_BIT, //
+				    VK_ACCESS_MEMORY_READ_BIT,   //
 				    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-				    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,   //
-				    target_subresource_range);         //
+				    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, //
+				    target_subresource_range);       //
 
 				r->apple_target_debug.pending = true;
 			}
@@ -812,20 +772,20 @@ render_compute_layers(struct render_compute *render,
 	 * Source, target and distortion images.
 	 */
 
-	update_compute_layer_descriptor_set( //
-	    vk,                              //
-	    r->compute.src_binding,          //
-	    src_samplers,                    //
-	    src_image_views,                 //
-	    num_srcs,                        //
-	    r->compute.target_binding,       //
-	    target_image_view,               //
-	    r->compute.ubo_binding,          //
-	    ubo,                             //
-	    VK_WHOLE_SIZE,                   //
+	update_compute_layer_descriptor_set(    //
+	    vk,                                 //
+	    r->compute.src_binding,             //
+	    src_samplers,                       //
+	    src_image_views,                    //
+	    num_srcs,                           //
+	    r->compute.target_binding,          //
+	    target_image_view,                  //
+	    r->compute.ubo_binding,             //
+	    ubo,                                //
+	    VK_WHOLE_SIZE,                      //
 	    r->compute.layer_foveation_binding, //
-	    foveation_ubo,                   //
-	    descriptor_set);                 //
+	    foveation_ubo,                      //
+	    descriptor_set);                    //
 
 	VkPipeline pipeline = do_timewarp ? r->compute.layer.timewarp_pipeline : r->compute.layer.non_timewarp_pipeline;
 	vk->vkCmdBindPipeline(              //
@@ -894,8 +854,7 @@ render_compute_projection_timewarp(struct render_compute *render,
 	}
 
 	const bool force_timewarp_identity = debug_get_bool_option_force_timewarp_identity();
-	const bool force_timewarp_pretransform_identity =
-	    debug_get_bool_option_force_timewarp_pretransform_identity();
+	const bool force_timewarp_pretransform_identity = debug_get_bool_option_force_timewarp_pretransform_identity();
 	const struct xrt_normalized_rect identity_pre_transform = timewarp_identity_pre_transform();
 	struct render_compute_distortion_ubo_data *data =
 	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
@@ -921,8 +880,8 @@ render_compute_projection_timewarp(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, src_foveation, NULL, NULL, target_image,
-	                          target_image_view, views, r->compute.distortion.timewarp_pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, src_foveation, NULL, NULL,
+	                          target_image, target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
 
@@ -965,8 +924,8 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 
 	if (!debug_get_bool_option_depth_reprojection()) {
 		render_compute_projection_timewarp(render, src_samplers, src_image_views, src_rects, NULL, src_poses,
-		                                   src_fovs, new_poses_scanout_begin, new_poses_scanout_end, target_image,
-		                                   target_image_view, views);
+		                                   src_fovs, new_poses_scanout_begin, new_poses_scanout_end,
+		                                   target_image, target_image_view, views);
 		return;
 	}
 
@@ -977,10 +936,10 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
 
 	for (uint32_t i = 0; i < render->r->view_count; ++i) {
-		render_calc_time_warp_matrix(
-		    &src_poses[i], &src_fovs[i], &new_poses_scanout_begin[i], &time_warp_matrix_scanout_begin[i]);
-		render_calc_time_warp_matrix(
-		    &src_poses[i], &src_fovs[i], &new_poses_scanout_end[i], &time_warp_matrix_scanout_end[i]);
+		render_calc_time_warp_matrix(&src_poses[i], &src_fovs[i], &new_poses_scanout_begin[i],
+		                             &time_warp_matrix_scanout_begin[i]);
+		render_calc_time_warp_matrix(&src_poses[i], &src_fovs[i], &new_poses_scanout_end[i],
+		                             &time_warp_matrix_scanout_end[i]);
 
 		data->views[i] = views[i];
 		data->pre_transforms[i] = r->distortion.uv_to_tanangle[i];
@@ -1010,8 +969,9 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, depth_samplers, depth_image_views,
-	                          target_image, target_image_view, views, r->compute.distortion.timewarp_pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, depth_samplers,
+	                          depth_image_views, target_image, target_image_view, views,
+	                          r->compute.distortion.timewarp_pipeline);
 }
 
 
@@ -1054,8 +1014,7 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 	}
 
 	const bool force_timewarp_identity = debug_get_bool_option_force_timewarp_identity();
-	const bool force_timewarp_pretransform_identity =
-	    debug_get_bool_option_force_timewarp_pretransform_identity();
+	const bool force_timewarp_pretransform_identity = debug_get_bool_option_force_timewarp_pretransform_identity();
 	const struct xrt_normalized_rect identity_pre_transform = timewarp_identity_pre_transform();
 	struct render_compute_distortion_ubo_data *data =
 	    (struct render_compute_distortion_ubo_data *)r->compute.distortion.ubo.mapped;
@@ -1081,8 +1040,8 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL, target_image,
-	                          target_image_view, views, r->compute.distortion.timewarp_pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL,
+	                          target_image, target_image_view, views, r->compute.distortion.timewarp_pipeline);
 }
 
 void
@@ -1098,8 +1057,8 @@ render_compute_projection_no_timewarp(struct render_compute *render,
 	assert(render->r != NULL);
 	struct render_resources *r = render->r;
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL, target_image,
-	                          target_image_view, views, r->compute.distortion.pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL,
+	                          target_image, target_image_view, views, r->compute.distortion.pipeline);
 }
 
 void

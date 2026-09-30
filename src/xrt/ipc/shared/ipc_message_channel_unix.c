@@ -61,7 +61,8 @@ union imcontrol_buf {
 
 #ifdef XRT_OS_OSX
 static xrt_result_t
-ipc_send_exact_internal(struct ipc_message_channel *imc, const void *data, size_t size, const int *handles, uint32_t handle_count)
+ipc_send_exact_internal(
+    struct ipc_message_channel *imc, const void *data, size_t size, const int *handles, uint32_t handle_count)
 {
 	const uint8_t *ptr = (const uint8_t *)data;
 	size_t total = 0;
@@ -113,7 +114,8 @@ ipc_send_exact_internal(struct ipc_message_channel *imc, const void *data, size_
 }
 
 static xrt_result_t
-ipc_receive_exact_internal(struct ipc_message_channel *imc, void *out_data, size_t size, int *out_handles, uint32_t handle_count)
+ipc_receive_exact_internal(
+    struct ipc_message_channel *imc, void *out_data, size_t size, int *out_handles, uint32_t handle_count)
 {
 	uint8_t *ptr = (uint8_t *)out_data;
 	size_t total = 0;
@@ -241,8 +243,8 @@ ipc_receive(struct ipc_message_channel *imc, void *out_data, size_t size)
 			return ret;
 		}
 		if ((size_t)framed_size != size) {
-			IPC_ERROR(imc, "recvmsg(%i) failed: wrong framed size '%u', expected '%i'!", (int)imc->ipc_handle,
-			          framed_size, (int)size);
+			IPC_ERROR(imc, "recvmsg(%i) failed: wrong framed size '%u', expected '%i'!",
+			          (int)imc->ipc_handle, framed_size, (int)size);
 			return XRT_ERROR_IPC_FAILURE;
 		}
 		return ipc_receive_exact_internal(imc, out_data, size, NULL, 0);
@@ -295,8 +297,8 @@ ipc_receive_fds(struct ipc_message_channel *imc, void *out_data, size_t size, in
 			return ret;
 		}
 		if ((size_t)framed_size != size) {
-			IPC_ERROR(imc, "recvmsg(%i) failed: wrong framed size '%u', expected '%i'!", (int)imc->ipc_handle,
-			          framed_size, (int)size);
+			IPC_ERROR(imc, "recvmsg(%i) failed: wrong framed size '%u', expected '%i'!",
+			          (int)imc->ipc_handle, framed_size, (int)size);
 			return XRT_ERROR_IPC_FAILURE;
 		}
 		return ipc_receive_exact_internal(imc, out_data, size, NULL, 0);
@@ -359,7 +361,8 @@ ipc_send_fds(struct ipc_message_channel *imc, const void *data, size_t size, con
 #ifdef XRT_OS_OSX
 	if (imc->frame_writes) {
 		uint32_t framed_size = (uint32_t)size;
-		xrt_result_t ret = ipc_send_exact_internal(imc, &framed_size, sizeof(framed_size), handles, handle_count);
+		xrt_result_t ret =
+		    ipc_send_exact_internal(imc, &framed_size, sizeof(framed_size), handles, handle_count);
 		if (ret != XRT_SUCCESS) {
 			return ret;
 		}
@@ -412,8 +415,8 @@ ipc_send_fds(struct ipc_message_channel *imc, const void *data, size_t size, con
 			struct u_pp_sink_stack_only sink;
 			u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
 
-			u_pp(dg, "sendmsg(%i) failed: count: %u, error: '%i' '%s'!", imc->ipc_handle, handle_count, errno,
-			     strerror(errno));
+			u_pp(dg, "sendmsg(%i) failed: count: %u, error: '%i' '%s'!", imc->ipc_handle, handle_count,
+			     errno, strerror(errno));
 
 			for (uint32_t i = 0; i < handle_count; i++) {
 				u_pp(dg, "\n\tfd #%i: %i", i, handles[i]);

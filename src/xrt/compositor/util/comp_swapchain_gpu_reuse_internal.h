@@ -53,11 +53,8 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
                                                      const void *next);
 
 VkResult
-comp_swapchain_gpu_reuse_vk_cmd_submit_locked(struct vk_bundle *vk,
-                                              struct vk_bundle_queue *queue,
-                                              uint32_t count,
-                                              const VkSubmitInfo *infos,
-                                              VkFence fence);
+comp_swapchain_gpu_reuse_vk_cmd_submit_locked(
+    struct vk_bundle *vk, struct vk_bundle_queue *queue, uint32_t count, const VkSubmitInfo *infos, VkFence fence);
 
 #else
 

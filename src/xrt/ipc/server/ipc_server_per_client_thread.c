@@ -323,10 +323,8 @@ client_loop(volatile struct ipc_client_state *ics)
 			received += (size_t)len;
 		}
 		if (received != cmd_size) {
-			IPC_ERROR(ics->server,
-			          "Invalid/short packet received (%zu/%zu bytes), disconnecting client.",
-			          received,
-			          cmd_size);
+			IPC_ERROR(ics->server, "Invalid/short packet received (%zu/%zu bytes), disconnecting client.",
+			          received, cmd_size);
 			break;
 		}
 

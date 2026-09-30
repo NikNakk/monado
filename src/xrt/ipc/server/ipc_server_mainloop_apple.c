@@ -162,8 +162,7 @@ init_wine_tcp_listener(struct ipc_server_mainloop *ml)
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
 	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-		U_LOG_E("Could not bind Wine TCP bridge to 127.0.0.1:%llu: %s",
-		        (unsigned long long)requested,
+		U_LOG_E("Could not bind Wine TCP bridge to 127.0.0.1:%llu: %s", (unsigned long long)requested,
 		        strerror(errno));
 		close(fd);
 		return -1;

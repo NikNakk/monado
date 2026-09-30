@@ -235,18 +235,20 @@ renderer_reprojection_trace_open(struct comp_renderer *r)
 		return;
 	}
 
-	fputs("system_frame_id,sample_ns,predicted_display_ns,desired_present_ns,system_layer_display_ns,"
-	      "path,fast_path,do_timewarp,source_valid,source_changed,layer_type,layer_timestamp_ns,"
-	      "layer_age_to_predicted_ns,view_count,left_image_index,left_array_index,right_image_index,right_array_index,"
-	      "left_src_qx,left_src_qy,left_src_qz,left_src_qw,left_src_px,left_src_py,left_src_pz,"
-	      "left_begin_qx,left_begin_qy,left_begin_qz,left_begin_qw,left_begin_px,left_begin_py,left_begin_pz,"
-	      "left_end_qx,left_end_qy,left_end_qz,left_end_qw,left_end_px,left_end_py,left_end_pz,"
-	      "right_src_qx,right_src_qy,right_src_qz,right_src_qw,right_src_px,right_src_py,right_src_pz,"
-	      "right_begin_qx,right_begin_qy,right_begin_qz,right_begin_qw,right_begin_px,right_begin_py,right_begin_pz,"
-	      "right_end_qx,right_end_qy,right_end_qz,right_end_qw,right_end_px,right_end_py,right_end_pz,"
-	      "left_src_to_begin_deg,left_src_to_end_deg,right_src_to_begin_deg,right_src_to_end_deg,"
-	      "left_source_step_deg,right_source_step_deg,left_scanout_step_deg,right_scanout_step_deg",
-	      r->reprojection_trace);
+	fputs(
+	    "system_frame_id,sample_ns,predicted_display_ns,desired_present_ns,system_layer_display_ns,"
+	    "path,fast_path,do_timewarp,source_valid,source_changed,layer_type,layer_timestamp_ns,"
+	    "layer_age_to_predicted_ns,view_count,left_image_index,left_array_index,right_image_index,right_array_"
+	    "index,"
+	    "left_src_qx,left_src_qy,left_src_qz,left_src_qw,left_src_px,left_src_py,left_src_pz,"
+	    "left_begin_qx,left_begin_qy,left_begin_qz,left_begin_qw,left_begin_px,left_begin_py,left_begin_pz,"
+	    "left_end_qx,left_end_qy,left_end_qz,left_end_qw,left_end_px,left_end_py,left_end_pz,"
+	    "right_src_qx,right_src_qy,right_src_qz,right_src_qw,right_src_px,right_src_py,right_src_pz,"
+	    "right_begin_qx,right_begin_qy,right_begin_qz,right_begin_qw,right_begin_px,right_begin_py,right_begin_pz,"
+	    "right_end_qx,right_end_qy,right_end_qz,right_end_qw,right_end_px,right_end_py,right_end_pz,"
+	    "left_src_to_begin_deg,left_src_to_end_deg,right_src_to_begin_deg,right_src_to_end_deg,"
+	    "left_source_step_deg,right_source_step_deg,left_scanout_step_deg,right_scanout_step_deg",
+	    r->reprojection_trace);
 	for (uint32_t i = 0; i < 16; ++i) {
 		fprintf(r->reprojection_trace, ",left_tw_begin_m%02u", i);
 	}
@@ -312,15 +314,8 @@ renderer_quat_distance_deg(const struct xrt_quat *a, const struct xrt_quat *b)
 static void
 renderer_trace_pose(FILE *f, const struct xrt_pose *p)
 {
-	fprintf(f,
-	        ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
-	        p->orientation.x,
-	        p->orientation.y,
-	        p->orientation.z,
-	        p->orientation.w,
-	        p->position.x,
-	        p->position.y,
-	        p->position.z);
+	fprintf(f, ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g", p->orientation.x, p->orientation.y, p->orientation.z,
+	        p->orientation.w, p->position.x, p->position.y, p->position.z);
 }
 
 static void
@@ -350,15 +345,11 @@ renderer_reprojection_trace_frame(struct comp_renderer *r,
 	const struct xrt_layer_projection_view_data *views =
 	    layer != NULL ? renderer_projection_views(&layer->data) : NULL;
 	if (layer == NULL || views == NULL || layer->data.view_count == 0 || view_count == 0) {
-		fprintf(r->reprojection_trace,
-		        "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,0,0,0,0,0,0,0,0,0,0",
-		        (long long)r->c->frame.rendering.id,
-		        (long long)os_monotonic_get_ns(),
+		fprintf(r->reprojection_trace, "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,0,0,0,0,0,0,0,0,0,0",
+		        (long long)r->c->frame.rendering.id, (long long)os_monotonic_get_ns(),
 		        (unsigned long long)r->c->frame.rendering.predicted_display_time_ns,
 		        (unsigned long long)r->c->frame.rendering.desired_present_time_ns,
-		        (long long)r->c->base.layer_accum.data.display_time_ns,
-		        path,
-		        fast_path ? 1 : 0,
+		        (long long)r->c->base.layer_accum.data.display_time_ns, path, fast_path ? 1 : 0,
 		        do_timewarp ? 1 : 0);
 		/*
 		 * Header has 100 columns total. The prefix above writes 18;
@@ -389,19 +380,19 @@ renderer_reprojection_trace_frame(struct comp_renderer *r,
 	double left_source_step_deg = NAN;
 	double right_source_step_deg = NAN;
 	if (source_changed && r->reprojection_prev_source_valid) {
-		left_source_step_deg =
-		    renderer_quat_distance_deg(&r->reprojection_prev_source_pose[0].orientation, &left->pose.orientation);
-		right_source_step_deg =
-		    renderer_quat_distance_deg(&r->reprojection_prev_source_pose[1].orientation, &right->pose.orientation);
+		left_source_step_deg = renderer_quat_distance_deg(&r->reprojection_prev_source_pose[0].orientation,
+		                                                  &left->pose.orientation);
+		right_source_step_deg = renderer_quat_distance_deg(&r->reprojection_prev_source_pose[1].orientation,
+		                                                   &right->pose.orientation);
 	}
 
 	double left_scanout_step_deg = NAN;
 	double right_scanout_step_deg = NAN;
 	if (r->reprojection_prev_scanout_valid) {
-		left_scanout_step_deg = renderer_quat_distance_deg(
-		    &r->reprojection_prev_scanout_begin[0].orientation, &left_begin->orientation);
-		right_scanout_step_deg = renderer_quat_distance_deg(
-		    &r->reprojection_prev_scanout_begin[1].orientation, &right_begin->orientation);
+		left_scanout_step_deg = renderer_quat_distance_deg(&r->reprojection_prev_scanout_begin[0].orientation,
+		                                                   &left_begin->orientation);
+		right_scanout_step_deg = renderer_quat_distance_deg(&r->reprojection_prev_scanout_begin[1].orientation,
+		                                                    &right_begin->orientation);
 	}
 
 	struct xrt_matrix_4x4 left_tw_begin;
@@ -409,24 +400,14 @@ renderer_reprojection_trace_frame(struct comp_renderer *r,
 	render_calc_time_warp_matrix(&left->pose, &left->fov, left_begin, &left_tw_begin);
 	render_calc_time_warp_matrix(&left->pose, &left->fov, left_end, &left_tw_end);
 
-	fprintf(r->reprojection_trace,
-	        "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,1,%d,%u,%lld,%lld,%u,%u,%u,%u,%u",
-	        (long long)r->c->frame.rendering.id,
-	        (long long)os_monotonic_get_ns(),
+	fprintf(r->reprojection_trace, "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,1,%d,%u,%lld,%lld,%u,%u,%u,%u,%u",
+	        (long long)r->c->frame.rendering.id, (long long)os_monotonic_get_ns(),
 	        (unsigned long long)r->c->frame.rendering.predicted_display_time_ns,
 	        (unsigned long long)r->c->frame.rendering.desired_present_time_ns,
-	        (long long)r->c->base.layer_accum.data.display_time_ns,
-	        path,
-	        fast_path ? 1 : 0,
-	        do_timewarp ? 1 : 0,
-	        source_changed ? 1 : 0,
-	        (unsigned)layer->data.type,
-	        (long long)layer->data.timestamp,
+	        (long long)r->c->base.layer_accum.data.display_time_ns, path, fast_path ? 1 : 0, do_timewarp ? 1 : 0,
+	        source_changed ? 1 : 0, (unsigned)layer->data.type, (long long)layer->data.timestamp,
 	        (long long)((int64_t)r->c->frame.rendering.predicted_display_time_ns - layer->data.timestamp),
-	        layer->data.view_count,
-	        left->sub.image_index,
-	        left->sub.array_index,
-	        right->sub.image_index,
+	        layer->data.view_count, left->sub.image_index, left->sub.array_index, right->sub.image_index,
 	        right->sub.array_index);
 
 	renderer_trace_pose(r->reprojection_trace, &left->pose);
@@ -436,16 +417,12 @@ renderer_reprojection_trace_frame(struct comp_renderer *r,
 	renderer_trace_pose(r->reprojection_trace, right_begin);
 	renderer_trace_pose(r->reprojection_trace, right_end);
 
-	fprintf(r->reprojection_trace,
-	        ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
+	fprintf(r->reprojection_trace, ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
 	        renderer_quat_distance_deg(&left->pose.orientation, &left_begin->orientation),
 	        renderer_quat_distance_deg(&left->pose.orientation, &left_end->orientation),
 	        renderer_quat_distance_deg(&right->pose.orientation, &right_begin->orientation),
-	        renderer_quat_distance_deg(&right->pose.orientation, &right_end->orientation),
-	        left_source_step_deg,
-	        right_source_step_deg,
-	        left_scanout_step_deg,
-	        right_scanout_step_deg);
+	        renderer_quat_distance_deg(&right->pose.orientation, &right_end->orientation), left_source_step_deg,
+	        right_source_step_deg, left_scanout_step_deg, right_scanout_step_deg);
 	renderer_trace_matrix(r->reprojection_trace, &left_tw_begin);
 	renderer_trace_matrix(r->reprojection_trace, &left_tw_end);
 	fputc('\n', r->reprojection_trace);
@@ -481,11 +458,12 @@ renderer_late_render_trace_open(struct comp_renderer *r)
 		return;
 	}
 
-	fputs("frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
-	      "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
-	      "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns,"
-	      "desired_offset_us,wait_mode,target_minus_desired_ns,pose_begin_minus_desired_ns\n",
-	      r->late_render_trace);
+	fputs(
+	    "frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
+	    "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
+	    "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns,"
+	    "desired_offset_us,wait_mode,target_minus_desired_ns,pose_begin_minus_desired_ns\n",
+	    r->late_render_trace);
 	fflush(r->late_render_trace);
 }
 
@@ -537,36 +515,32 @@ renderer_late_render_trace_frame(struct comp_renderer *r)
 	int64_t wait_actual_ns = r->late_render_wait_end_ns >= r->late_render_wait_begin_ns
 	                             ? r->late_render_wait_end_ns - r->late_render_wait_begin_ns
 	                             : 0;
-	int64_t wake_lateness_ns = r->late_render_target_ns != 0
-	                               ? r->late_render_wait_end_ns - r->late_render_target_ns
-	                               : 0;
-	int64_t pose_duration_ns = r->late_render_pose_begin_ns != 0 &&
-	                                   r->late_render_pose_end_ns >= r->late_render_pose_begin_ns
-	                               ? r->late_render_pose_end_ns - r->late_render_pose_begin_ns
-	                               : 0;
+	int64_t wake_lateness_ns =
+	    r->late_render_target_ns != 0 ? r->late_render_wait_end_ns - r->late_render_target_ns : 0;
+	int64_t pose_duration_ns =
+	    r->late_render_pose_begin_ns != 0 && r->late_render_pose_end_ns >= r->late_render_pose_begin_ns
+	        ? r->late_render_pose_end_ns - r->late_render_pose_begin_ns
+	        : 0;
 	int64_t pose_begin_minus_target_ns = r->late_render_target_ns != 0 && r->late_render_pose_begin_ns != 0
 	                                         ? r->late_render_pose_begin_ns - r->late_render_target_ns
 	                                         : 0;
-	int64_t pose_begin_to_predicted_ns = r->late_render_pose_begin_ns != 0
-	                                         ? r->c->frame.rendering.predicted_display_time_ns -
-	                                               r->late_render_pose_begin_ns
-	                                         : 0;
+	int64_t pose_begin_to_predicted_ns =
+	    r->late_render_pose_begin_ns != 0
+	        ? r->c->frame.rendering.predicted_display_time_ns - r->late_render_pose_begin_ns
+	        : 0;
 	int64_t desired_present_ns = (int64_t)r->c->frame.rendering.desired_present_time_ns;
-	int64_t target_minus_desired_ns = r->late_render_target_ns != 0
-	                                          ? r->late_render_target_ns - desired_present_ns
-	                                          : 0;
-	int64_t pose_begin_minus_desired_ns = r->late_render_pose_begin_ns != 0
-	                                              ? r->late_render_pose_begin_ns - desired_present_ns
-	                                              : 0;
+	int64_t target_minus_desired_ns =
+	    r->late_render_target_ns != 0 ? r->late_render_target_ns - desired_present_ns : 0;
+	int64_t pose_begin_minus_desired_ns =
+	    r->late_render_pose_begin_ns != 0 ? r->late_render_pose_begin_ns - desired_present_ns : 0;
 
 	fprintf(r->late_render_trace,
 	        "%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%s,%lld,%lld\n",
 	        (long long)r->c->frame.rendering.id, (long long)lead_us,
 	        (long long)r->c->frame.rendering.desired_present_time_ns,
-	        (long long)r->c->frame.rendering.predicted_display_time_ns,
-	        (long long)r->late_render_target_ns, (long long)r->late_render_wait_begin_ns,
-	        (long long)r->late_render_wait_end_ns, (long long)wait_requested_ns,
-	        (long long)wait_actual_ns, (long long)wake_lateness_ns,
+	        (long long)r->c->frame.rendering.predicted_display_time_ns, (long long)r->late_render_target_ns,
+	        (long long)r->late_render_wait_begin_ns, (long long)r->late_render_wait_end_ns,
+	        (long long)wait_requested_ns, (long long)wait_actual_ns, (long long)wake_lateness_ns,
 	        (long long)r->late_render_pose_begin_ns, (long long)r->late_render_pose_end_ns,
 	        (long long)pose_duration_ns, (long long)pose_begin_minus_target_ns,
 	        (long long)pose_begin_to_predicted_ns, (long long)desired_offset_us, wait_mode,
@@ -1029,7 +1003,7 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	r->settings = &c->settings;
 
 #ifdef XRT_OS_OSX
-	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_open(r);
 	renderer_reprojection_trace_open(r);
 #endif
@@ -1097,7 +1071,8 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 		uint64_t gpu_end_ns = 0;
 		if (render_resources_get_timestamps(&r->c->nr, &gpu_start_ns, &gpu_end_ns)) {
 			uint64_t now_ns = os_monotonic_get_ns();
-			comp_target_info_gpu(r->c->target, (uint64_t)r->fenced_frame_id, gpu_start_ns, gpu_end_ns, now_ns);
+			comp_target_info_gpu(r->c->target, (uint64_t)r->fenced_frame_id, gpu_start_ns, gpu_end_ns,
+			                     now_ns);
 		}
 	}
 
@@ -1113,18 +1088,12 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 				}
 
 				const uint8_t *sample = r->c->nr.apple_source_debug.buffers[i].mapped;
-				U_LOG_RAW("vk-source frame=%lld eye=%u image=%u rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)",
-				        (long long)r->c->nr.apple_source_debug.frame_id,
-				        i,
-				        r->c->nr.apple_source_debug.image_indices[i],
-				        (unsigned)sample[0],
-				        (unsigned)sample[1],
-				        (unsigned)sample[2],
-				        (unsigned)sample[3],
-				        (unsigned)sample[4],
-				        (unsigned)sample[5],
-				        (unsigned)sample[6],
-				        (unsigned)sample[7]);
+				U_LOG_RAW(
+				    "vk-source frame=%lld eye=%u image=%u rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)",
+				    (long long)r->c->nr.apple_source_debug.frame_id, i,
+				    r->c->nr.apple_source_debug.image_indices[i], (unsigned)sample[0],
+				    (unsigned)sample[1], (unsigned)sample[2], (unsigned)sample[3], (unsigned)sample[4],
+				    (unsigned)sample[5], (unsigned)sample[6], (unsigned)sample[7]);
 			}
 		}
 
@@ -1139,20 +1108,12 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 		if (debug_get_bool_option_log_apple_samples() &&
 		    (r->c->nr.apple_target_debug.log_count <= 5 || r->c->nr.apple_target_debug.log_count % 120 == 0)) {
 			const uint8_t *sample = r->c->nr.apple_target_debug.buffer.mapped;
-			U_LOG_RAW("vk-target frame=%lld layer=0 rgbaL=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u) rgbaR=(%u,%u,%u,%u)",
-			        (long long)r->c->nr.apple_target_debug.frame_id,
-			        (unsigned)sample[0],
-			        (unsigned)sample[1],
-			        (unsigned)sample[2],
-			        (unsigned)sample[3],
-			        (unsigned)sample[4],
-			        (unsigned)sample[5],
-			        (unsigned)sample[6],
-			        (unsigned)sample[7],
-			        (unsigned)sample[8],
-			        (unsigned)sample[9],
-			        (unsigned)sample[10],
-			        (unsigned)sample[11]);
+			U_LOG_RAW(
+			    "vk-target frame=%lld layer=0 rgbaL=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u) rgbaR=(%u,%u,%u,%u)",
+			    (long long)r->c->nr.apple_target_debug.frame_id, (unsigned)sample[0], (unsigned)sample[1],
+			    (unsigned)sample[2], (unsigned)sample[3], (unsigned)sample[4], (unsigned)sample[5],
+			    (unsigned)sample[6], (unsigned)sample[7], (unsigned)sample[8], (unsigned)sample[9],
+			    (unsigned)sample[10], (unsigned)sample[11]);
 		}
 
 		r->c->nr.apple_target_debug.pending = false;
@@ -1380,7 +1341,7 @@ renderer_fini(struct comp_renderer *r)
 	struct vk_bundle *vk = &r->c->base.vk;
 
 #ifdef XRT_OS_OSX
-	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_close(r);
 	renderer_reprojection_trace_close(r);
 #endif
@@ -1448,15 +1409,9 @@ dispatch_graphics(struct comp_renderer *r,
 	    render->r->view_count);    //
 
 #ifdef XRT_OS_OSX
-	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
-	renderer_reprojection_trace_frame(r,
-	                                  "graphics",
-	                                  layers,
-	                                  layer_count,
-	                                  world_poses_scanout_begin,
-	                                  world_poses_scanout_end,
-	                                  render->r->view_count,
-	                                  frame_state->data.fast_path,
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	renderer_reprojection_trace_frame(r, "graphics", layers, layer_count, world_poses_scanout_begin,
+	                                  world_poses_scanout_end, render->r->view_count, frame_state->data.fast_path,
 	                                  frame_state->data.do_timewarp);
 #endif
 #endif
@@ -1563,15 +1518,9 @@ dispatch_compute(struct comp_renderer *r,
 	}
 
 #ifdef XRT_OS_OSX
-	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
-	renderer_reprojection_trace_frame(r,
-	                                  "compute",
-	                                  layers,
-	                                  layer_count,
-	                                  world_poses_scanout_begin,
-	                                  world_poses_scanout_end,
-	                                  render->r->view_count,
-	                                  frame_state->data.fast_path,
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	renderer_reprojection_trace_frame(r, "compute", layers, layer_count, world_poses_scanout_begin,
+	                                  world_poses_scanout_end, render->r->view_count, frame_state->data.fast_path,
 	                                  frame_state->data.do_timewarp);
 #endif
 #endif
@@ -1711,7 +1660,7 @@ comp_renderer_draw(struct comp_renderer *r)
 	}
 
 #ifdef XRT_OS_OSX
-	#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_frame(r);
 #endif
 #endif

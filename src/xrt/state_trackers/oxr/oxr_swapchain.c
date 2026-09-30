@@ -156,15 +156,14 @@ destroy(struct oxr_logger *log, struct oxr_swapchain *sc)
 	 * session-owned private tracker only when the last eye-tracked swapchain
 	 * disappears.
 	 */
-	if (sc->has_foveation_state && sc->foveation_request.enabled &&
-	    sc->foveation_request.eye_tracked &&
+	if (sc->has_foveation_state && sc->foveation_request.enabled && sc->foveation_request.eye_tracked &&
 	    sc->sess->eye_tracked_foveation.active_swapchain_count > 0) {
 		sc->sess->eye_tracked_foveation.active_swapchain_count--;
 		if (sc->sess->eye_tracked_foveation.active_swapchain_count == 0) {
 			xrt_space_reference(&sc->sess->eye_tracked_foveation.gaze_space, NULL);
 			if (sc->sess->eye_tracked_foveation.feature_acquired) {
-				(void)xrt_system_devices_feature_dec(
-				    sc->sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+				(void)xrt_system_devices_feature_dec(sc->sess->sys->xsysd,
+				                                     XRT_DEVICE_FEATURE_EYE_TRACKING);
 				sc->sess->eye_tracked_foveation.feature_acquired = false;
 			}
 			sc->sess->eye_tracked_foveation.valid = false;
@@ -369,9 +368,8 @@ oxr_swapchain_common_create(struct oxr_logger *log,
 	sc->is_static = (createInfo->createFlags & XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT) != 0;
 
 #ifdef OXR_HAVE_FB_foveation
-	const XrSwapchainCreateInfoFoveationFB *foveation_info =
-	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB,
-	                             XrSwapchainCreateInfoFoveationFB);
+	const XrSwapchainCreateInfoFoveationFB *foveation_info = OXR_GET_INPUT_FROM_CHAIN(
+	    createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB, XrSwapchainCreateInfoFoveationFB);
 	if (foveation_info != NULL && sess->sys->inst->extensions.FB_foveation) {
 		sc->foveation_capable = true;
 		sc->foveation_create_flags = foveation_info->flags;
@@ -381,7 +379,7 @@ oxr_swapchain_common_create(struct oxr_logger *log,
 		 * this as unfoveated.
 		 */
 		(void)u_foveation_request_from_level(U_FOVEATION_LEVEL_NONE, false, false, 0.0f,
-		                                    &sc->foveation_request);
+		                                     &sc->foveation_request);
 	}
 #endif
 

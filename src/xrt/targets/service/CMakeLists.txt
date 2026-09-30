@@ -28,13 +28,13 @@ install(TARGETS monado-service RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 if(APPLE)
 	add_executable(monado_service_xpc_control macos_xpc_control.m)
 	set_target_properties(
-		monado_service_xpc_control
-		PROPERTIES OUTPUT_NAME monado-service-xpc-control PREFIX ""
+		monado_service_xpc_control PROPERTIES OUTPUT_NAME monado-service-xpc-control PREFIX
+											     ""
 		)
 	target_compile_options(monado_service_xpc_control PRIVATE -fblocks)
 	target_link_libraries(
-		monado_service_xpc_control
-		PRIVATE xrt-interfaces ipc_shared "-framework Foundation" "-framework Metal"
+		monado_service_xpc_control PRIVATE xrt-interfaces ipc_shared
+						   "-framework Foundation" "-framework Metal"
 		)
 	install(TARGETS monado_service_xpc_control RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()

@@ -22,7 +22,10 @@ endif()
 if(APPLE)
 	# Per-swapchain Metal foveation map cache, separate so it can be unit tested
 	# without the rest of the client compositor.
-	add_library(comp_metal_foveation_cache STATIC comp_metal_foveation_cache.h comp_metal_foveation_cache.m)
+	add_library(
+		comp_metal_foveation_cache STATIC comp_metal_foveation_cache.h
+						  comp_metal_foveation_cache.m
+		)
 	target_link_libraries(
 		comp_metal_foveation_cache
 		PUBLIC xrt-interfaces aux-includes
@@ -31,18 +34,13 @@ if(APPLE)
 	target_include_directories(comp_metal_foveation_cache INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 	target_sources(
-		comp_client
-		PRIVATE
-			comp_metal_client.h
-			comp_metal_client.m
-			comp_metal_glue.c
+		comp_client PRIVATE comp_metal_client.h comp_metal_client.m comp_metal_glue.c
 		)
 	target_link_libraries(comp_client PRIVATE comp_metal_foveation_cache)
 	if(XRT_MODULE_COMPOSITOR_UTIL)
 		target_sources(
-			comp_client
-			PRIVATE comp_metal_release_wait_thread.h
-				comp_metal_release_wait_thread.m
+			comp_client PRIVATE comp_metal_release_wait_thread.h
+					    comp_metal_release_wait_thread.m
 			)
 		if(XRT_FEATURE_SERVICE)
 			# Service builds carry both swapchain paths: the service (XPC)
@@ -51,12 +49,15 @@ if(APPLE)
 			# chooses at run time.
 			target_sources(
 				comp_client
-				PRIVATE comp_metal_service_swapchain.m
+				PRIVATE
+					comp_metal_service_swapchain.m
 					comp_metal_direct_swapchain.m
 					comp_metal_service_semaphore.c
 					comp_metal_service_semaphore.h
 				)
-			target_include_directories(comp_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../ipc)
+			target_include_directories(
+				comp_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../ipc
+				)
 			# comp_util provides the local semaphore pair used when hosted.
 			target_link_libraries(comp_client PRIVATE ipc_shared comp_util)
 		else()
@@ -90,7 +91,9 @@ if(XRT_HAVE_EGL)
 endif()
 
 if(XRT_HAVE_OPENGL_GLX AND XRT_HAVE_XLIB)
-	target_sources(comp_client PRIVATE comp_gl_xlib_client.c comp_gl_xlib_client.h comp_gl_xlib_glue.c)
+	target_sources(
+		comp_client PRIVATE comp_gl_xlib_client.c comp_gl_xlib_client.h comp_gl_xlib_glue.c
+		)
 	target_link_libraries(comp_client PRIVATE OpenGL::GLX)
 endif()
 
@@ -103,7 +106,8 @@ endif()
 
 if(XRT_FEATURE_WINE_D3D11_BRIDGE)
 	target_sources(
-		comp_client PRIVATE comp_d3d11_wine_client.cpp comp_d3d11_client.h comp_d3d11_glue.c
+		comp_client PRIVATE comp_d3d11_wine_client.cpp comp_d3d11_client.h
+				    comp_d3d11_glue.c
 		)
 	target_include_directories(comp_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../ipc)
 	target_link_libraries(comp_client PRIVATE d3d11 dxgi dxguid)
@@ -115,7 +119,8 @@ else()
 
 	if(XRT_HAVE_D3D11)
 		target_sources(
-			comp_client PRIVATE comp_d3d11_client.cpp comp_d3d11_client.h comp_d3d11_glue.c
+			comp_client PRIVATE comp_d3d11_client.cpp comp_d3d11_client.h
+					    comp_d3d11_glue.c
 			)
 	endif()
 endif()

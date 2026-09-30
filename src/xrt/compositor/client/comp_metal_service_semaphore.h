@@ -24,8 +24,7 @@ client_metal_service_semaphore_register_compositor(struct xrt_compositor *xc, vo
  * MTLSharedEvent is reconstructed on the application's MTLDevice through XPC.
  */
 xrt_result_t
-client_metal_service_semaphore_create_pair(struct xrt_compositor_semaphore **out_xcsem,
-                                           void **out_mtl_shared_event);
+client_metal_service_semaphore_create_pair(struct xrt_compositor_semaphore **out_xcsem, void **out_mtl_shared_event);
 
 /*
  * Replacement for comp_metal_semaphore_create_client_pair() in service

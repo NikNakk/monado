@@ -93,7 +93,9 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", PSVR2_PREDICTION_EXTRAS_DEFAULT)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_tau_ms, "PSVR2_CONTINUITY_TAU_MS", 4.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_MM", 7.5f)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", PSVR2_PREDICTION_EXTRAS_DEFAULT)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction,
+                           "PSVR2_ACCELERATION_PREDICTION",
+                           PSVR2_PREDICTION_EXTRAS_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_recenter_on_first_pose, "PSVR2_RECENTER_ON_FIRST_POSE", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_recenter_eye_height_m, "PSVR2_RECENTER_EYE_HEIGHT_M", 1.6f)
 
@@ -206,17 +208,20 @@ psvr2_timing_trace_open(void)
 	g_psvr2_timing_trace.prediction = psvr2_timing_trace_open_file(
 	    "prediction",
 	    "slam_vts_ns,dt_ns,actual_x,actual_y,actual_z,predicted_x,predicted_y,predicted_z,error_x,error_y,error_z,"
-	    "error_mm,error_along_mm,prior_vel_x,prior_vel_y,prior_vel_z,estimated_vel_x,estimated_vel_y,estimated_vel_z,"
+	    "error_mm,error_along_mm,prior_vel_x,prior_vel_y,prior_vel_z,estimated_vel_x,estimated_vel_y,estimated_vel_"
+	    "z,"
 	    "filtered_vel_x,filtered_vel_y,filtered_vel_z,filter_alpha,filter_enabled");
 	g_psvr2_timing_trace.horizon = psvr2_timing_trace_open_file(
 	    "horizon",
 	    "sequence,query_host_ns,source_slam_vts_ns,target_vts_ns,horizon_ns,score_slam_vts_ns,"
-	    "actual_x,actual_y,actual_z,raw_pred_x,raw_pred_y,raw_pred_z,filtered_pred_x,filtered_pred_y,filtered_pred_z,"
+	    "actual_x,actual_y,actual_z,raw_pred_x,raw_pred_y,raw_pred_z,filtered_pred_x,filtered_pred_y,filtered_pred_"
+	    "z,"
 	    "raw_error_mm,filtered_error_mm,raw_along_mm,filtered_along_mm,source_x,source_y,source_z,"
 	    "raw_vel_x,raw_vel_y,raw_vel_z,filtered_vel_x,filtered_vel_y,filtered_vel_z,filter_alpha,filter_enabled,"
 	    "accel_pred_x,accel_pred_y,accel_pred_z,accel_error_mm,accel_along_mm,accel_x,accel_y,accel_z,"
 	    "accel_applied,accel_enabled,accel_alpha,accel_gain,accel_limit,accel_min_speed,accel_horizon_ms,"
-	    "returned_pred_x,returned_pred_y,returned_pred_z,returned_error_mm,returned_along_mm,full_linear_horizon_enabled,"
+	    "returned_pred_x,returned_pred_y,returned_pred_z,returned_error_mm,returned_along_mm,full_linear_horizon_"
+	    "enabled,"
 	    "continuity_pred_x,continuity_pred_y,continuity_pred_z,continuity_error_mm,continuity_along_mm,"
 	    "continuity_enabled,continuity_tau_ms,continuity_limit_mm,continuity_source_host_ns");
 }
@@ -277,8 +282,8 @@ psvr2_timing_trace_imu(struct psvr2_hmd *hmd,
 	}
 
 	fprintf(file,
-	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,%u,%u,%u,%" PRIi64
-	        ",%" PRIi64 ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,%u,%u,%u,%" PRIi64 ",%" PRIi64
+	        ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
 	        (int64_t)estimated_sample_time, (int64_t)vts_ns, (int64_t)imu_ns, (int64_t)(vts_ns + hmd->hw2mono_vts),
 	        (int64_t)(imu_ns + hmd->hw2mono_imu), imu->vts_us, imu->imu_ts_us, imu->dp_frame_cnt, imu->dp_line_cnt,
 	        imu->status, (int64_t)hmd->hw2mono_vts, (int64_t)hmd->hw2mono_imu, hmd->last_gyro.x, hmd->last_gyro.y,
@@ -302,18 +307,19 @@ psvr2_timing_trace_slam(struct psvr2_hmd *hmd,
 	psvr2_timing_trace_load_scanout(&dp_frame_cnt, &dp_line_cnt);
 
 	fprintf(file,
-	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,"
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
+	        ",%u,%u,"
 	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
 	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
 	        (int64_t)received_ns, (int64_t)vts_ns, (int64_t)(vts_ns + hmd->hw2mono_vts),
 	        (int64_t)hmd->last_imu_vts_ns, (int64_t)(hmd->last_imu_vts_ns + hmd->hw2mono_vts), dp_frame_cnt,
-	        dp_line_cnt, hmd->last_slam_pose.position.x, hmd->last_slam_pose.position.y, hmd->last_slam_pose.position.z,
-	        hmd->last_slam_pose.orientation.w, hmd->last_slam_pose.orientation.x, hmd->last_slam_pose.orientation.y,
-	        hmd->last_slam_pose.orientation.z, hmd->pose.position.x, hmd->pose.position.y, hmd->pose.position.z,
-	        hmd->pose.orientation.w, hmd->pose.orientation.x, hmd->pose.orientation.y, hmd->pose.orientation.z,
-	        relation->linear_velocity.x, relation->linear_velocity.y, relation->linear_velocity.z,
-	        relation->angular_velocity.x, relation->angular_velocity.y, relation->angular_velocity.z,
-	        (unsigned int)relation->relation_flags);
+	        dp_line_cnt, hmd->last_slam_pose.position.x, hmd->last_slam_pose.position.y,
+	        hmd->last_slam_pose.position.z, hmd->last_slam_pose.orientation.w, hmd->last_slam_pose.orientation.x,
+	        hmd->last_slam_pose.orientation.y, hmd->last_slam_pose.orientation.z, hmd->pose.position.x,
+	        hmd->pose.position.y, hmd->pose.position.z, hmd->pose.orientation.w, hmd->pose.orientation.x,
+	        hmd->pose.orientation.y, hmd->pose.orientation.z, relation->linear_velocity.x,
+	        relation->linear_velocity.y, relation->linear_velocity.z, relation->angular_velocity.x,
+	        relation->angular_velocity.y, relation->angular_velocity.z, (unsigned int)relation->relation_flags);
 	g_psvr2_timing_trace.slam_rows++;
 	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.slam_rows, 256);
 }
@@ -336,12 +342,14 @@ psvr2_timing_trace_pose(timepoint_ns host_query_ns,
 	psvr2_timing_trace_load_scanout(&dp_frame_cnt, &dp_line_cnt);
 
 	fprintf(file,
-	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,"
+	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
+	        ",%u,%u,"
 	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
-	        (int64_t)host_query_ns, (int64_t)requested_host_ns, (int64_t)requested_vts_ns, (int64_t)latest_slam_vts_ns,
-	        (int64_t)latest_imu_vts_ns, (int64_t)hw2mono_vts, dp_frame_cnt, dp_line_cnt, relation->pose.position.x,
-	        relation->pose.position.y, relation->pose.position.z, relation->pose.orientation.w, relation->pose.orientation.x,
-	        relation->pose.orientation.y, relation->pose.orientation.z, relation->linear_velocity.x, relation->linear_velocity.y,
+	        (int64_t)host_query_ns, (int64_t)requested_host_ns, (int64_t)requested_vts_ns,
+	        (int64_t)latest_slam_vts_ns, (int64_t)latest_imu_vts_ns, (int64_t)hw2mono_vts, dp_frame_cnt,
+	        dp_line_cnt, relation->pose.position.x, relation->pose.position.y, relation->pose.position.z,
+	        relation->pose.orientation.w, relation->pose.orientation.x, relation->pose.orientation.y,
+	        relation->pose.orientation.z, relation->linear_velocity.x, relation->linear_velocity.y,
 	        relation->linear_velocity.z, relation->angular_velocity.x, relation->angular_velocity.y,
 	        relation->angular_velocity.z, (unsigned int)relation->relation_flags);
 	g_psvr2_timing_trace.pose_rows++;
@@ -350,12 +358,12 @@ psvr2_timing_trace_pose(timepoint_ns host_query_ns,
 
 static void
 psvr2_timing_trace_prediction(struct psvr2_hmd *hmd,
-                               timepoint_ns slam_vts_ns,
-                               time_duration_ns dt_ns,
-                               const struct xrt_vec3 *actual,
-                               const struct xrt_vec3 *predicted,
-                               const struct xrt_vec3 *prior_velocity,
-                               const struct xrt_vec3 *estimated_velocity)
+                              timepoint_ns slam_vts_ns,
+                              time_duration_ns dt_ns,
+                              const struct xrt_vec3 *actual,
+                              const struct xrt_vec3 *predicted,
+                              const struct xrt_vec3 *prior_velocity,
+                              const struct xrt_vec3 *estimated_velocity)
 {
 	FILE *file = g_psvr2_timing_trace.prediction;
 	if (file == NULL) {
@@ -367,18 +375,23 @@ psvr2_timing_trace_prediction(struct psvr2_hmd *hmd,
 	                    prior_velocity->z * prior_velocity->z);
 	float along_m = 0.0f;
 	if (speed > 0.001f) {
-		along_m = (error.x * prior_velocity->x + error.y * prior_velocity->y + error.z * prior_velocity->z) / speed;
+		along_m =
+		    (error.x * prior_velocity->x + error.y * prior_velocity->y + error.z * prior_velocity->z) / speed;
 	}
 	float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
-	if (alpha < 0.0f) alpha = 0.0f;
-	if (alpha > 1.0f) alpha = 1.0f;
+	if (alpha < 0.0f)
+		alpha = 0.0f;
+	if (alpha > 1.0f)
+		alpha = 1.0f;
 	fprintf(file,
-	        "%" PRIi64 ",%" PRIi64 ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
+	        "%" PRIi64 ",%" PRIi64
+	        ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
 	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u\n",
 	        (int64_t)slam_vts_ns, (int64_t)dt_ns, actual->x, actual->y, actual->z, predicted->x, predicted->y,
 	        predicted->z, error.x, error.y, error.z, error_m * 1000.0f, along_m * 1000.0f, prior_velocity->x,
-	        prior_velocity->y, prior_velocity->z, estimated_velocity->x, estimated_velocity->y, estimated_velocity->z,
-	        hmd->filtered_linear_velocity.x, hmd->filtered_linear_velocity.y, hmd->filtered_linear_velocity.z, alpha,
+	        prior_velocity->y, prior_velocity->z, estimated_velocity->x, estimated_velocity->y,
+	        estimated_velocity->z, hmd->filtered_linear_velocity.x, hmd->filtered_linear_velocity.y,
+	        hmd->filtered_linear_velocity.z, alpha,
 	        0u /* filter_enabled: EMA is trace-only; column kept for CSV compatibility */);
 	g_psvr2_timing_trace.prediction_rows++;
 	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.prediction_rows, 256);
@@ -391,15 +404,18 @@ psvr2_vec3_length(const struct xrt_vec3 *v)
 }
 
 static void
-psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_host_ns, timepoint_ns target_vts_ns,
-                                    const struct xrt_vec3 *returned_position)
+psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd,
+                                   timepoint_ns query_host_ns,
+                                   timepoint_ns target_vts_ns,
+                                   const struct xrt_vec3 *returned_position)
 {
 	if (g_psvr2_timing_trace.horizon == NULL) {
 		return;
 	}
 	struct xrt_space_relation latest = XRT_SPACE_RELATION_ZERO;
 	timepoint_ns latest_ts = 0;
-	if (!m_relation_history_get_latest(hmd->slam_relation_history, &latest_ts, &latest) || target_vts_ns <= latest_ts) {
+	if (!m_relation_history_get_latest(hmd->slam_relation_history, &latest_ts, &latest) ||
+	    target_vts_ns <= latest_ts) {
 		return;
 	}
 	if ((latest.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) == 0) {
@@ -407,9 +423,8 @@ psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_hos
 	}
 
 	float dt_s = (float)((double)(target_vts_ns - latest_ts) / 1000000000.0);
-	struct xrt_vec3 filtered_velocity = hmd->filtered_linear_velocity_initialized
-	                                        ? hmd->filtered_linear_velocity
-	                                        : latest.linear_velocity;
+	struct xrt_vec3 filtered_velocity =
+	    hmd->filtered_linear_velocity_initialized ? hmd->filtered_linear_velocity : latest.linear_velocity;
 	struct psvr2_pending_horizon_prediction pending = {
 	    .valid = true,
 	    .sequence = ++g_psvr2_timing_trace.horizon_sequence,
@@ -419,16 +434,18 @@ psvr2_timing_trace_enqueue_horizon(struct psvr2_hmd *hmd, timepoint_ns query_hos
 	    .source_position = latest.pose.position,
 	    .raw_velocity = latest.linear_velocity,
 	    .filtered_velocity = filtered_velocity,
-	    .raw_predicted_position = {
-	        latest.pose.position.x + latest.linear_velocity.x * dt_s,
-	        latest.pose.position.y + latest.linear_velocity.y * dt_s,
-	        latest.pose.position.z + latest.linear_velocity.z * dt_s,
-	    },
-	    .filtered_predicted_position = {
-	        latest.pose.position.x + filtered_velocity.x * dt_s,
-	        latest.pose.position.y + filtered_velocity.y * dt_s,
-	        latest.pose.position.z + filtered_velocity.z * dt_s,
-	    },
+	    .raw_predicted_position =
+	        {
+	            latest.pose.position.x + latest.linear_velocity.x * dt_s,
+	            latest.pose.position.y + latest.linear_velocity.y * dt_s,
+	            latest.pose.position.z + latest.linear_velocity.z * dt_s,
+	        },
+	    .filtered_predicted_position =
+	        {
+	            latest.pose.position.x + filtered_velocity.x * dt_s,
+	            latest.pose.position.y + filtered_velocity.y * dt_s,
+	            latest.pose.position.z + filtered_velocity.z * dt_s,
+	        },
 	};
 	pending.acceleration_predicted_position = pending.raw_predicted_position;
 	struct xrt_vec3 acceleration_velocity = latest.linear_velocity;
@@ -481,8 +498,10 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 
 		double fraction = (double)(p->target_vts_ns - previous_slam_vts_ns) /
 		                  (double)(current_slam_vts_ns - previous_slam_vts_ns);
-		if (fraction < 0.0) fraction = 0.0;
-		if (fraction > 1.0) fraction = 1.0;
+		if (fraction < 0.0)
+			fraction = 0.0;
+		if (fraction > 1.0)
+			fraction = 1.0;
 		struct xrt_vec3 actual = {
 		    previous_position->x + (float)fraction * segment.x,
 		    previous_position->y + (float)fraction * segment.y,
@@ -495,13 +514,13 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		                                  actual.y - p->filtered_predicted_position.y,
 		                                  actual.z - p->filtered_predicted_position.z};
 		struct xrt_vec3 acceleration_error = {actual.x - p->acceleration_predicted_position.x,
-		                                     actual.y - p->acceleration_predicted_position.y,
-		                                     actual.z - p->acceleration_predicted_position.z};
+		                                      actual.y - p->acceleration_predicted_position.y,
+		                                      actual.z - p->acceleration_predicted_position.z};
 		struct xrt_vec3 returned_error = {actual.x - p->returned_position.x, actual.y - p->returned_position.y,
-		                                 actual.z - p->returned_position.z};
+		                                  actual.z - p->returned_position.z};
 		struct xrt_vec3 continuity_error = {actual.x - p->continuity_position.x,
-		                                   actual.y - p->continuity_position.y,
-		                                   actual.z - p->continuity_position.z};
+		                                    actual.y - p->continuity_position.y,
+		                                    actual.z - p->continuity_position.z};
 		float continuity_along_m = 0.0f;
 		float returned_along_m = 0.0f;
 		float acceleration_along_m = 0.0f;
@@ -509,28 +528,35 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		float filtered_along_m = 0.0f;
 		if (segment_length > 0.0001f) {
 			continuity_along_m = (continuity_error.x * segment.x + continuity_error.y * segment.y +
-			                      continuity_error.z * segment.z) / segment_length;
+			                      continuity_error.z * segment.z) /
+			                     segment_length;
 			returned_along_m = (returned_error.x * segment.x + returned_error.y * segment.y +
-			                    returned_error.z * segment.z) / segment_length;
+			                    returned_error.z * segment.z) /
+			                   segment_length;
 			acceleration_along_m = (acceleration_error.x * segment.x + acceleration_error.y * segment.y +
-			                        acceleration_error.z * segment.z) / segment_length;
+			                        acceleration_error.z * segment.z) /
+			                       segment_length;
 			raw_along_m = (raw_error.x * segment.x + raw_error.y * segment.y + raw_error.z * segment.z) /
 			              segment_length;
-			filtered_along_m =
-			    (filtered_error.x * segment.x + filtered_error.y * segment.y + filtered_error.z * segment.z) /
-			    segment_length;
+			filtered_along_m = (filtered_error.x * segment.x + filtered_error.y * segment.y +
+			                    filtered_error.z * segment.z) /
+			                   segment_length;
 		}
 		float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
-		if (alpha < 0.0f) alpha = 0.0f;
-		if (alpha > 1.0f) alpha = 1.0f;
+		if (alpha < 0.0f)
+			alpha = 0.0f;
+		if (alpha > 1.0f)
+			alpha = 1.0f;
 		fprintf(file,
-		        "%" PRIu64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ","
+		        "%" PRIu64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
+		        ","
 		        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
 		        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%u,",
-		        p->sequence, (int64_t)p->query_host_ns, (int64_t)p->source_slam_vts_ns, (int64_t)p->target_vts_ns,
-		        (int64_t)(p->target_vts_ns - p->source_slam_vts_ns), (int64_t)current_slam_vts_ns, actual.x, actual.y,
-		        actual.z, p->raw_predicted_position.x, p->raw_predicted_position.y, p->raw_predicted_position.z,
-		        p->filtered_predicted_position.x, p->filtered_predicted_position.y, p->filtered_predicted_position.z,
+		        p->sequence, (int64_t)p->query_host_ns, (int64_t)p->source_slam_vts_ns,
+		        (int64_t)p->target_vts_ns, (int64_t)(p->target_vts_ns - p->source_slam_vts_ns),
+		        (int64_t)current_slam_vts_ns, actual.x, actual.y, actual.z, p->raw_predicted_position.x,
+		        p->raw_predicted_position.y, p->raw_predicted_position.z, p->filtered_predicted_position.x,
+		        p->filtered_predicted_position.y, p->filtered_predicted_position.z,
 		        psvr2_vec3_length(&raw_error) * 1000.0f, psvr2_vec3_length(&filtered_error) * 1000.0f,
 		        raw_along_m * 1000.0f, filtered_along_m * 1000.0f, p->source_position.x, p->source_position.y,
 		        p->source_position.z, p->raw_velocity.x, p->raw_velocity.y, p->raw_velocity.z,
@@ -541,13 +567,15 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 		        p->acceleration_predicted_position.z, psvr2_vec3_length(&acceleration_error) * 1000.0f,
 		        acceleration_along_m * 1000.0f, p->acceleration.x, p->acceleration.y, p->acceleration.z,
 		        p->acceleration_applied ? 1u : 0u, p->acceleration_enabled ? 1u : 0u,
-		        p->acceleration_params.alpha, p->acceleration_params.gain, p->acceleration_params.max_acceleration,
-		        p->acceleration_params.min_speed, p->acceleration_params.max_horizon_s * 1000.0f);
+		        p->acceleration_params.alpha, p->acceleration_params.gain,
+		        p->acceleration_params.max_acceleration, p->acceleration_params.min_speed,
+		        p->acceleration_params.max_horizon_s * 1000.0f);
 		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%u,", p->returned_position.x, p->returned_position.y,
-		        p->returned_position.z, psvr2_vec3_length(&returned_error) * 1000.0f, returned_along_m * 1000.0f,
+		        p->returned_position.z, psvr2_vec3_length(&returned_error) * 1000.0f,
+		        returned_along_m * 1000.0f,
 		        1u /* full_linear_horizon_enabled: always on; column kept for CSV compatibility */);
-		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%u,%.9g,%.9g,%" PRIi64 "\n",
-		        p->continuity_position.x, p->continuity_position.y, p->continuity_position.z,
+		fprintf(file, "%.9g,%.9g,%.9g,%.9g,%.9g,%u,%.9g,%.9g,%" PRIi64 "\n", p->continuity_position.x,
+		        p->continuity_position.y, p->continuity_position.z,
 		        psvr2_vec3_length(&continuity_error) * 1000.0f, continuity_along_m * 1000.0f,
 		        p->continuity_enabled ? 1u : 0u, p->continuity_params.tau_s * 1000.0f,
 		        p->continuity_params.limit_m * 1000.0f, (int64_t)p->continuity_source_host_ns);
@@ -657,7 +685,9 @@ psvr2_hmd_update_inputs(struct xrt_device *xdev)
 }
 
 static void
-hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, timepoint_ns query_host_ns,
+hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd,
+                         timepoint_ns at_timestamp_ns,
+                         timepoint_ns query_host_ns,
                          struct xrt_space_relation *out_relation)
 {
 	struct xrt_space_relation latest_relation;
@@ -700,12 +730,13 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 			hmd->timing_imu_after_slam_total_ns += (int64_t)latest_imu_ts - latest_relation_ts;
 			hmd->timing_prediction_after_imu_total_ns += at_timestamp_ns - (int64_t)latest_imu_ts;
 			if (hmd->timing_query_count == 240) {
-				PSVR2_WARN(hmd,
-				             "Pose timing: prediction %.3fms after SLAM, latest IMU %.3fms after SLAM, target "
-				             "%.3fms after IMU",
-				             (double)hmd->timing_prediction_total_ns / 240.0 / 1000000.0,
-				             (double)hmd->timing_imu_after_slam_total_ns / 240.0 / 1000000.0,
-				             (double)hmd->timing_prediction_after_imu_total_ns / 240.0 / 1000000.0);
+				PSVR2_WARN(
+				    hmd,
+				    "Pose timing: prediction %.3fms after SLAM, latest IMU %.3fms after SLAM, target "
+				    "%.3fms after IMU",
+				    (double)hmd->timing_prediction_total_ns / 240.0 / 1000000.0,
+				    (double)hmd->timing_imu_after_slam_total_ns / 240.0 / 1000000.0,
+				    (double)hmd->timing_prediction_after_imu_total_ns / 240.0 / 1000000.0);
 				hmd->timing_query_count = 0;
 				hmd->timing_prediction_total_ns = 0;
 				hmd->timing_imu_after_slam_total_ns = 0;
@@ -720,8 +751,8 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 	// that case instead of relying on noisier velocity estimated from 60 Hz SLAM.
 	math_quat_rotate_derivative(&latest_relation.pose.orientation, &hmd->last_gyro,
 	                            &latest_relation.angular_velocity);
-	latest_relation.relation_flags = (enum xrt_space_relation_flags)(
-	    latest_relation.relation_flags | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+	latest_relation.relation_flags = (enum xrt_space_relation_flags)(latest_relation.relation_flags |
+	                                                                 XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
 
 	// Predict forward using dead reckoning
 	t_apply_dead_reckoning( //
@@ -738,10 +769,10 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 	if ((latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
 	    (latest_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
 		float dt = (float)((double)(at_timestamp_ns - latest_relation_ts) * 1e-9);
-		out_relation->pose.position = (struct xrt_vec3){
-		    latest_relation.pose.position.x + latest_relation.linear_velocity.x * dt,
-		    latest_relation.pose.position.y + latest_relation.linear_velocity.y * dt,
-		    latest_relation.pose.position.z + latest_relation.linear_velocity.z * dt};
+		out_relation->pose.position =
+		    (struct xrt_vec3){latest_relation.pose.position.x + latest_relation.linear_velocity.x * dt,
+		                      latest_relation.pose.position.y + latest_relation.linear_velocity.y * dt,
+		                      latest_relation.pose.position.z + latest_relation.linear_velocity.z * dt};
 		out_relation->linear_velocity = latest_relation.linear_velocity;
 	}
 
@@ -752,7 +783,8 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 		                     &out_relation->pose.position, &out_relation->linear_velocity);
 		if (hmd->continuity_prediction_enabled && hmd->continuity_prediction.source_ns == latest_relation_ts) {
 			psvr2_continuity_predict(&hmd->continuity_prediction, &hmd->continuity_params, at_timestamp_ns,
-			                         query_host_ns, &out_relation->pose.position, &out_relation->linear_velocity);
+			                         query_host_ns, &out_relation->pose.position,
+			                         &out_relation->linear_velocity);
 		}
 	}
 }
@@ -786,12 +818,12 @@ psvr2_apply_first_pose_recenter(struct psvr2_hmd *hmd, struct xrt_space_relation
 			first_forward.x /= forward_len;
 			first_forward.z /= forward_len;
 			struct xrt_vec3 target_forward = {0.0f, 0.0f, -1.0f};
-			math_quat_from_vec_a_to_vec_b(
-			    &first_forward, &target_forward, &hmd->recenter_transform.orientation);
+			math_quat_from_vec_a_to_vec_b(&first_forward, &target_forward,
+			                              &hmd->recenter_transform.orientation);
 
 			struct xrt_vec3 rotated_first_position;
-			math_quat_rotate_vec3(
-			    &hmd->recenter_transform.orientation, &relation->pose.position, &rotated_first_position);
+			math_quat_rotate_vec3(&hmd->recenter_transform.orientation, &relation->pose.position,
+			                      &rotated_first_position);
 			float eye_height_m = debug_get_float_option_psvr2_recenter_eye_height_m();
 			if (!isfinite(eye_height_m) || eye_height_m < 0.5f || eye_height_m > 2.5f) {
 				eye_height_m = 1.6f;
@@ -802,9 +834,9 @@ psvr2_apply_first_pose_recenter(struct psvr2_hmd *hmd, struct xrt_space_relation
 			    -rotated_first_position.z,
 			};
 			hmd->recenter_initialized = true;
-			PSVR2_WARN(hmd,
-			            "PSVR2_RECENTER_ON_FIRST_POSE: centred first HMD pose at (0, %.2f, 0) with forward -Z",
-			            eye_height_m);
+			PSVR2_WARN(
+			    hmd, "PSVR2_RECENTER_ON_FIRST_POSE: centred first HMD pose at (0, %.2f, 0) with forward -Z",
+			    eye_height_m);
 		}
 	}
 	transform = hmd->recenter_transform;
@@ -819,10 +851,8 @@ psvr2_apply_first_pose_recenter(struct psvr2_hmd *hmd, struct xrt_space_relation
 
 	struct xrt_vec3 transformed_linear_velocity;
 	struct xrt_vec3 transformed_angular_velocity;
-	math_quat_rotate_vec3(
-	    &transform.orientation, &relation->linear_velocity, &transformed_linear_velocity);
-	math_quat_rotate_vec3(
-	    &transform.orientation, &relation->angular_velocity, &transformed_angular_velocity);
+	math_quat_rotate_vec3(&transform.orientation, &relation->linear_velocity, &transformed_linear_velocity);
+	math_quat_rotate_vec3(&transform.orientation, &relation->angular_velocity, &transformed_angular_velocity);
 	relation->linear_velocity = transformed_linear_velocity;
 	relation->angular_velocity = transformed_angular_velocity;
 }
@@ -838,8 +868,7 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 	timepoint_ns trace_host_query_ns = os_monotonic_get_ns();
 
 	switch (name) {
-	case XRT_INPUT_GENERIC_HEAD_POSE:
-		break;
+	case XRT_INPUT_GENERIC_HEAD_POSE: break;
 	case XRT_INPUT_GENERIC_EYE_GAZE_POSE:
 		if (!hmd->gaze_streams_enabled) {
 			return XRT_ERROR_INPUT_UNSUPPORTED;
@@ -892,7 +921,7 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
 		psvr2_timing_trace_enqueue_horizon(hmd, trace_host_query_ns, prediction_ns_hw,
-		                                     &tracker_relation->pose.position);
+		                                   &tracker_relation->pose.position);
 	}
 #endif
 
@@ -904,8 +933,9 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	if (name == XRT_INPUT_GENERIC_HEAD_POSE) {
-		psvr2_timing_trace_pose(trace_host_query_ns, at_timestamp_ns, prediction_ns_hw, trace_latest_slam_vts_ns,
-		                         trace_latest_imu_vts_ns, trace_hw2mono_vts, out_relation);
+		psvr2_timing_trace_pose(trace_host_query_ns, at_timestamp_ns, prediction_ns_hw,
+		                        trace_latest_slam_vts_ns, trace_latest_imu_vts_ns, trace_hw2mono_vts,
+		                        out_relation);
 	}
 #endif
 
@@ -1139,8 +1169,8 @@ img_xfer_cb(struct libusb_transfer *xfer)
 			const size_t plane_size = (size_t)width * height / 2;
 
 			if (xfer->buffer[0] != 'V' || xfer->buffer[1] != 'I') {
-				PSVR2_WARN(hmd, "Unexpected passthrough frame signature %02x %02x",
-				           xfer->buffer[0], xfer->buffer[1]);
+				PSVR2_WARN(hmd, "Unexpected passthrough frame signature %02x %02x", xfer->buffer[0],
+				           xfer->buffer[1]);
 			} else {
 				struct xrt_frame_sink *passthrough_sinks[2] = {NULL, NULL};
 				os_mutex_lock(&hmd->data_lock);
@@ -1328,8 +1358,8 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	if (have_prior_relation) {
-		psvr2_timing_trace_score_horizon(prior_relation_ts, &prior_relation.pose.position, pose_sample.timestamp_ns,
-		                                 &relation.pose.position);
+		psvr2_timing_trace_score_horizon(prior_relation_ts, &prior_relation.pose.position,
+		                                 pose_sample.timestamp_ns, &relation.pose.position);
 	}
 #endif
 
@@ -1343,26 +1373,33 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 	psvr2_linear_update(&hmd->linear_prediction, &hmd->linear_prediction_params, estimated_relation_ts,
 	                    estimated_relation.pose.position, estimated_relation.linear_velocity,
 	                    (estimated_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
-	                        (estimated_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0);
+	                        (estimated_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) !=
+	                            0);
 	psvr2_continuity_update(&hmd->continuity_prediction, &hmd->continuity_params, &hmd->linear_prediction,
 	                        &hmd->linear_prediction_params, received_ns);
 	float alpha = debug_get_float_option_psvr2_linear_velocity_alpha();
-	if (alpha < 0.0f) alpha = 0.0f;
-	if (alpha > 1.0f) alpha = 1.0f;
+	if (alpha < 0.0f)
+		alpha = 0.0f;
+	if (alpha > 1.0f)
+		alpha = 1.0f;
 	if (!hmd->filtered_linear_velocity_initialized) {
 		hmd->filtered_linear_velocity = estimated_relation.linear_velocity;
 		hmd->filtered_linear_velocity_initialized = true;
 	} else {
-		hmd->filtered_linear_velocity.x += alpha * (estimated_relation.linear_velocity.x - hmd->filtered_linear_velocity.x);
-		hmd->filtered_linear_velocity.y += alpha * (estimated_relation.linear_velocity.y - hmd->filtered_linear_velocity.y);
-		hmd->filtered_linear_velocity.z += alpha * (estimated_relation.linear_velocity.z - hmd->filtered_linear_velocity.z);
+		hmd->filtered_linear_velocity.x +=
+		    alpha * (estimated_relation.linear_velocity.x - hmd->filtered_linear_velocity.x);
+		hmd->filtered_linear_velocity.y +=
+		    alpha * (estimated_relation.linear_velocity.y - hmd->filtered_linear_velocity.y);
+		hmd->filtered_linear_velocity.z +=
+		    alpha * (estimated_relation.linear_velocity.z - hmd->filtered_linear_velocity.z);
 	}
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	psvr2_timing_trace_slam(hmd, received_ns, vts_ns, &estimated_relation);
 	if (have_prior_relation) {
-		psvr2_timing_trace_prediction(hmd, vts_ns, prediction_dt_ns, &relation.pose.position, &predicted_position,
-		                              &prior_relation.linear_velocity, &estimated_relation.linear_velocity);
+		psvr2_timing_trace_prediction(hmd, vts_ns, prediction_dt_ns, &relation.pose.position,
+		                              &predicted_position, &prior_relation.linear_velocity,
+		                              &estimated_relation.linear_velocity);
 	}
 #endif
 
@@ -1460,7 +1497,7 @@ psvr2_usb_thread(void *ptr)
 	hmd->usb_transfers_drained = hmd->usb_active_xfers == 0;
 	if (!hmd->usb_transfers_drained) {
 		PSVR2_WARN(hmd, "Leaving libusb resources allocated because %d transfers did not finish cancellation",
-		            hmd->usb_active_xfers);
+		           hmd->usb_active_xfers);
 	}
 	os_thread_helper_unlock(&hmd->usb_thread);
 
@@ -1698,8 +1735,8 @@ psvr2_hmd_set_output(struct xrt_device *xdev, enum xrt_output_name name, const s
 			rumble_hz = (uint8_t)CLAMP((int)lroundf(requested_hz), 10, 25);
 		}
 
-		if (!send_psvr2_control(hmd, PSVR2_REPORT_ID_SET_PERIPHERAL,
-		                        PSVR2_SET_PERIPHERAL_SUBCMD_MOTOR, &rumble_hz, sizeof(rumble_hz))) {
+		if (!send_psvr2_control(hmd, PSVR2_REPORT_ID_SET_PERIPHERAL, PSVR2_SET_PERIPHERAL_SUBCMD_MOTOR,
+		                        &rumble_hz, sizeof(rumble_hz))) {
 			PSVR2_ERROR(hmd, "Failed to set headset rumble to %u Hz", rumble_hz);
 			return XRT_ERROR_OUTPUT_REQUEST_FAILURE;
 		}
@@ -1780,8 +1817,7 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 
 	/* Camera data is not needed for HMD tracking. */
 	hmd->camera_enable = hmd->camera_streams_enabled;
-	hmd->camera_mode =
-	    hmd->auxiliary_streams_enabled ? PSVR2_CAMERA_MODE_10 : PSVR2_CAMERA_MODE_BOTTOM_SBS_BC4;
+	hmd->camera_mode = hmd->auxiliary_streams_enabled ? PSVR2_CAMERA_MODE_10 : PSVR2_CAMERA_MODE_BOTTOM_SBS_BC4;
 	if (hmd->camera_streams_enabled) {
 		set_camera_mode(hmd, hmd->camera_mode);
 
@@ -1827,60 +1863,59 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	hmd->usb_active_xfers++;
 
 	if (hmd->auxiliary_streams_enabled) {
-	/* LD endpoint */
-	hmd->led_detector_xfer = libusb_alloc_transfer(0);
-	if (hmd->led_detector_xfer == NULL) {
-		PSVR2_ERROR(hmd, "Could not alloc USB transfer for LED Detector data");
-		goto out;
-	}
-	uint8_t *led_detector_buf = malloc(USB_LD_XFER_SIZE);
-	libusb_fill_bulk_transfer(hmd->led_detector_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_LD_ENDPOINT,
-	                          led_detector_buf, USB_LD_XFER_SIZE, dump_xfer_cb, hmd, 0);
-	hmd->led_detector_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+		/* LD endpoint */
+		hmd->led_detector_xfer = libusb_alloc_transfer(0);
+		if (hmd->led_detector_xfer == NULL) {
+			PSVR2_ERROR(hmd, "Could not alloc USB transfer for LED Detector data");
+			goto out;
+		}
+		uint8_t *led_detector_buf = malloc(USB_LD_XFER_SIZE);
+		libusb_fill_bulk_transfer(hmd->led_detector_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_LD_ENDPOINT,
+		                          led_detector_buf, USB_LD_XFER_SIZE, dump_xfer_cb, hmd, 0);
+		hmd->led_detector_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
 
-	res = libusb_submit_transfer(hmd->led_detector_xfer);
-	if (res < 0) {
-		PSVR2_ERROR(hmd, "Could not submit USB transfer for LED Detector data");
-		goto out;
-	}
-	hmd->usb_active_xfers++;
+		res = libusb_submit_transfer(hmd->led_detector_xfer);
+		if (res < 0) {
+			PSVR2_ERROR(hmd, "Could not submit USB transfer for LED Detector data");
+			goto out;
+		}
+		hmd->usb_active_xfers++;
 
-	/* RP endpoint */
-	hmd->relocalizer_xfer = libusb_alloc_transfer(0);
-	if (hmd->relocalizer_xfer == NULL) {
-		PSVR2_ERROR(hmd, "Could not alloc USB transfer for RP data");
-		goto out;
-	}
-	uint8_t *relocalizer_buf = malloc(USB_RP_XFER_SIZE);
-	libusb_fill_bulk_transfer(hmd->relocalizer_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_RP_ENDPOINT,
-	                          relocalizer_buf, USB_RP_XFER_SIZE, dump_xfer_cb, hmd, 0);
-	hmd->relocalizer_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+		/* RP endpoint */
+		hmd->relocalizer_xfer = libusb_alloc_transfer(0);
+		if (hmd->relocalizer_xfer == NULL) {
+			PSVR2_ERROR(hmd, "Could not alloc USB transfer for RP data");
+			goto out;
+		}
+		uint8_t *relocalizer_buf = malloc(USB_RP_XFER_SIZE);
+		libusb_fill_bulk_transfer(hmd->relocalizer_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_RP_ENDPOINT,
+		                          relocalizer_buf, USB_RP_XFER_SIZE, dump_xfer_cb, hmd, 0);
+		hmd->relocalizer_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
 
-	res = libusb_submit_transfer(hmd->relocalizer_xfer);
-	if (res < 0) {
-		PSVR2_ERROR(hmd, "Could not submit USB transfer for RP data");
-		goto out;
-	}
-	hmd->usb_active_xfers++;
+		res = libusb_submit_transfer(hmd->relocalizer_xfer);
+		if (res < 0) {
+			PSVR2_ERROR(hmd, "Could not submit USB transfer for RP data");
+			goto out;
+		}
+		hmd->usb_active_xfers++;
 
-	/* VD endpoint */
-	hmd->vd_xfer = libusb_alloc_transfer(0);
-	if (hmd->vd_xfer == NULL) {
-		PSVR2_ERROR(hmd, "Could not alloc USB transfer for VD data");
-		goto out;
-	}
-	uint8_t *vd_buf = malloc(USB_VD_XFER_SIZE);
-	libusb_fill_bulk_transfer(hmd->vd_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_VD_ENDPOINT, vd_buf,
-	                          USB_VD_XFER_SIZE, dump_xfer_cb, hmd, 0);
-	hmd->vd_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
+		/* VD endpoint */
+		hmd->vd_xfer = libusb_alloc_transfer(0);
+		if (hmd->vd_xfer == NULL) {
+			PSVR2_ERROR(hmd, "Could not alloc USB transfer for VD data");
+			goto out;
+		}
+		uint8_t *vd_buf = malloc(USB_VD_XFER_SIZE);
+		libusb_fill_bulk_transfer(hmd->vd_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_VD_ENDPOINT, vd_buf,
+		                          USB_VD_XFER_SIZE, dump_xfer_cb, hmd, 0);
+		hmd->vd_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
 
-	res = libusb_submit_transfer(hmd->vd_xfer);
-	if (res < 0) {
-		PSVR2_ERROR(hmd, "Could not submit USB transfer for VD data");
-		goto out;
-	}
-	hmd->usb_active_xfers++;
-
+		res = libusb_submit_transfer(hmd->vd_xfer);
+		if (res < 0) {
+			PSVR2_ERROR(hmd, "Could not submit USB transfer for VD data");
+			goto out;
+		}
+		hmd->usb_active_xfers++;
 	}
 
 	/*
@@ -1937,7 +1972,7 @@ psvr2_usb_stop(struct psvr2_hmd *hmd)
 	if (xfer) {                                                                                                    \
 		ret = libusb_cancel_transfer(xfer);                                                                    \
 		assert(ret == 0 || ret == LIBUSB_ERROR_NOT_FOUND);                                                     \
-		(void)ret;                                                                                              \
+		(void)ret;                                                                                             \
 	}
 
 	os_mutex_lock(&hmd->data_lock);
@@ -2063,8 +2098,7 @@ psvr2_begin_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 			} else {
 				hmd->face_feature_enabled = false;
 			}
-			hmd->et_data.want_enabled =
-			    hmd->eye_feature_enabled || hmd->face_feature_enabled;
+			hmd->et_data.want_enabled = hmd->eye_feature_enabled || hmd->face_feature_enabled;
 			return XRT_ERROR_FEATURE_NOT_SUPPORTED;
 		}
 	}
@@ -2133,15 +2167,13 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->usb_transfers_drained = true;
 	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
-	hmd->camera_streams_enabled =
-	    hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_camera_streams();
-	hmd->gaze_streams_enabled =
-	    hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_gaze_streams();
+	hmd->camera_streams_enabled = hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_camera_streams();
+	hmd->gaze_streams_enabled = hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_gaze_streams();
 	hmd->stage_space_enabled = debug_get_bool_option_psvr2_stage_space();
 	if (hmd->stage_space_enabled && !hmd->recenter_on_first_pose) {
 		PSVR2_WARN(hmd,
-		            "PSVR2_STAGE_SPACE enabled without PSVR2_RECENTER_ON_FIRST_POSE: "
-		            "stage Y=0 is the raw SLAM origin, not a calibrated physical floor");
+		           "PSVR2_STAGE_SPACE enabled without PSVR2_RECENTER_ON_FIRST_POSE: "
+		           "stage Y=0 is the raw SLAM origin, not a calibrated physical floor");
 	}
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
@@ -2258,8 +2290,10 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->acceleration_prediction_enabled =
 	    debug_get_bool_option_psvr2_acceleration_prediction() || hmd->continuity_prediction_enabled;
 	hmd->continuity_params = (struct psvr2_continuity_params){
-	    .tau_s = 0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_continuity_tau_ms(), 4.0f, 0.5f, 20.0f),
-	    .limit_m = 0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_continuity_limit_mm(), 7.5f, 0.0f, 20.0f),
+	    .tau_s = 0.001f *
+	             psvr2_prediction_parameter(debug_get_float_option_psvr2_continuity_tau_ms(), 4.0f, 0.5f, 20.0f),
+	    .limit_m = 0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_continuity_limit_mm(), 7.5f,
+	                                                   0.0f, 20.0f),
 	};
 	hmd->linear_prediction_params = (struct psvr2_linear_prediction_params){
 	    .alpha = psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_alpha(), 0.25f, 0.0f, 1.0f),
@@ -2268,8 +2302,8 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	        psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_limit(), 2.0f, 0.0f, 20.0f),
 	    .min_speed =
 	        psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_min_speed(), 0.01f, 0.0f, 1.0f),
-	    .max_horizon_s =
-	        0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_horizon_ms(), 90.0f, 0.0f, 120.0f),
+	    .max_horizon_s = 0.001f * psvr2_prediction_parameter(debug_get_float_option_psvr2_acceleration_horizon_ms(),
+	                                                         90.0f, 0.0f, 120.0f),
 	};
 	hmd->info.lens_horizontal_separation_meters = 0.13f / 2.0f;
 	hmd->info.lens_vertical_position_meters = 0.07f / 2.0f;
@@ -2388,9 +2422,7 @@ cleanup:
 
 
 xrt_result_t
-psvr2_set_passthrough_sinks(struct xrt_device *xdev,
-                            struct xrt_frame_sink *left,
-                            struct xrt_frame_sink *right)
+psvr2_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left, struct xrt_frame_sink *right)
 {
 	if (xdev == NULL || xdev->name != XRT_DEVICE_PSVR2) {
 		return XRT_ERROR_NOT_IMPLEMENTED;

@@ -7,7 +7,9 @@ if(XRT_FEATURE_WINE_D3D11_BRIDGE)
 	# to exist for dependency compatibility. Do not pull Microsoft WIL into
 	# the MinGW build.
 	add_library(aux_d3d INTERFACE)
-	target_link_libraries(aux_d3d INTERFACE aux-includes xrt-interfaces xrt-external-vulkan-headers)
+	target_link_libraries(
+		aux_d3d INTERFACE aux-includes xrt-interfaces xrt-external-vulkan-headers
+		)
 	return()
 endif()
 

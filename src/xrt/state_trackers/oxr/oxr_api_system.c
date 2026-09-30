@@ -134,8 +134,8 @@ oxr_xrGetFoveationProfileMNDX(XrInstance instance,
 
 	const int profile_index = foveation_level_to_profile_index(level);
 	if (profile_index < 0) {
-		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
-		                 "(level == %d) is not a valid XrFoveationLevelMNDX", (int)level);
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(level == %d) is not a valid XrFoveationLevelMNDX",
+		                 (int)level);
 	}
 
 	const struct u_foveation_profile *policy = u_foveation_profile_get(profile_index);
