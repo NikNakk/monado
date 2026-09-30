@@ -21,8 +21,7 @@ add_library(
 target_link_libraries(aux_os PUBLIC aux-includes xrt-pthreads)
 
 if(APPLE)
-	target_sources(aux_os PRIVATE os_macos_xpc_context.c os_macos_xpc_context.h os_hid_iokit.c)
-	set_property(SOURCE os_macos_xpc_context.c APPEND PROPERTY COMPILE_OPTIONS "-fblocks")
+	target_sources(aux_os PRIVATE os_hid_iokit.c)
 	target_link_libraries(aux_os PRIVATE "-framework IOKit" "-framework CoreFoundation")
 endif()
 

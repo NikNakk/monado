@@ -6,8 +6,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS: client-side compositing for Game Mode
 
-**Status:** design, 2026-09-29. Nothing here is implemented yet. The evidence
-comes from `macos-layer-host-probe`; see
+**Status (2026-09-30):** phase 1 measured; phase 2 implemented and
+hardware-validated under Game Mode with Unreal; phase 3 handoff implemented
+but not yet run on hardware; phase 4 not started. Opt-in with
+`XRT_MACOS_CLIENT_COMPOSITOR=1`. See [Phase 2 status](#phase-2-status-2026-09-29).
+The design evidence comes from `macos-layer-host-probe`; see
 [`macos-remote-layer-hosting.md`](macos-remote-layer-hosting.md) for every
 measurement cited below.
 
@@ -18,8 +21,8 @@ process (`ext_darwinbg=1`: RunningBoard or gamepolicyd). Every thread in the
 service is clamped to priority 4 and moved to E-cores. That includes the
 compositor, the IPC threads and the PS VR2 driver threads. XPC importance and
 `ProcessType` cannot undo an external background request, so the XPC
-importance lease, the captured-context adoption and the `Adaptive` default do
-not help.
+importance lease, the captured-context adoption and the `Adaptive` default did
+not help, and have been removed.
 
 The only processes Game Mode favours are the game and its coalition. Anything
 the headset needs frame by frame must therefore run in the game's process.
@@ -287,11 +290,13 @@ If it is bad, the options are:
 
 ## Clean-up once this works
 
-- Remove the XPC importance lease (`XRT_MACOS_XPC_IMPORTANCE`), the captured XPC
-  context adoption (`os_macos_xpc_context_*`) and the `Adaptive` `ProcessType`
-  default. They address a cause (adaptive-daemon background) that Game Mode
-  does not use.
-- The process-activity and external-broker diagnostics are already gone.
+- Done 2026-09-30: the XPC importance lease (`XRT_MACOS_XPC_IMPORTANCE`), the
+  captured XPC context adoption (`os_macos_xpc_context_*`) and the `Adaptive`
+  `ProcessType` default are removed; the LaunchAgent is `Interactive` again.
+  They addressed a cause (adaptive-daemon background) that Game Mode does not
+  use.
+- The process-activity diagnostic is already gone. The external Metal broker
+  stays: the Wine trace script needs it.
 
 ## Phases
 

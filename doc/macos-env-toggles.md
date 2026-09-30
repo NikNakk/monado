@@ -89,7 +89,8 @@ Corrections to the resolution table below:
   two-refresh holds and was "much smoother". A 60 Hz app on the 120 Hz headset
   is a wanted feature. Keep it as a real opt-in setting (default 0, as in the
   baseline), and consider an app-facing name.
-- **`XRT_MACOS_XPC_IMPORTANCE` is (b), not a default.** An excellent 18 Sep
+- **`XRT_MACOS_XPC_IMPORTANCE` is (b), not a default.** (Later removed
+  outright; see the fourth batch below.) An excellent 18 Sep
   run stayed RT97 throughout, but on 21 Sep the lease was acquired and the
   thread was still demoted to priority 4. Keep it as an opt-in client-side
   diagnostic until a controlled A/B shows a benefit.
@@ -275,6 +276,19 @@ Third batch:
   `monado-service` directly in the Wine/DXMT bootstrap namespace, where it
   cannot host the launchd Mach service, and needs the broker for Metal handle
   transport.
+
+Fourth batch (2026-09-30):
+
+- **The XPC importance lease is removed.** `XRT_MACOS_XPC_IMPORTANCE`, the
+  service's lease methods and XPC transactions, the captured XPC context
+  (`os_macos_xpc_context_*`) and its wrapper around the multi-compositor frame
+  all go. `XRT_MACOS_LAUNCHD_PROCESS_TYPE` goes too, and the LaunchAgent is
+  `ProcessType=Interactive` again, as it was before the lease. The lease never
+  prevented the Game Mode demotion: Game Mode backgrounds the service from
+  outside (`ext_darwinbg=1`), which no importance boost overrides, and the one
+  good 18 Sep run coincided with Game Mode being off. The in-process client
+  compositor is the fix instead; see
+  [macos-client-compositor-design.md](macos-client-compositor-design.md).
 
 Still not done: `PRESENT_PRELATCH_US` and `PRESENT_MIN_LEAD_US` (inert under the
 default minimum present duration, but kept because the Wine trace script still
@@ -524,11 +538,11 @@ are the ones that matter in practice.
 | `XRT_MACOS_EXIT_ON_DISPLAY_LOSS` | `ipc/server/ipc_server_mainloop_apple_xpc.m` | off (LaunchAgent sets `1`) | Stop the service when the PS VR2 display disappears | `4135890` / `4135890` | a |
 | `XRT_MACOS_DISPLAY_LOSS_DELAY_MS` | same | 3000 | Grace period before stopping | `4135890` / `4135890` | a |
 | `XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS` | same | 5000 | Hard-exit watchdog after display-loss shutdown | `eaa4d7f` / `eaa4d7f` | a |
-| `XRT_MACOS_LAUNCHD_PROCESS_TYPE` | `targets/service/macos_xpc_control.m` | `Adaptive` | LaunchAgent `ProcessType` (`Adaptive` or `Interactive`) | `b38ccd0` / `b38ccd0` | a |
+| ~~`XRT_MACOS_LAUNCHD_PROCESS_TYPE`~~ | removed 2026-09-30 | `Interactive` | LaunchAgent `ProcessType` | `b38ccd0` / removed | c |
 | `IPC_WINE_TCP_PORT` | `ipc/server/ipc_server_mainloop_apple.c` | 0 (off) | Loopback TCP listener for Wine clients | `68b8620` / `68b8620` | a |
 | `MONADO_WINE_TCP_PORT` | `ipc/client/ipc_client_connection.c` | unset (named pipe) | Windows client connects over TCP instead | `17f9d14` / `17f9d14` | a |
 | `XRT_MACOS_PROCESS_ACTIVITY` | `ipc/server/ipc_server_macos_activity.m` | unset (off) | Process-lifetime `NSProcessInfo` activity (`user-interactive` or `latency-critical`) | `69ca4d0` / `69ca4d0` | d |
-| `XRT_MACOS_XPC_IMPORTANCE` | `ipc/shared/ipc_metal_xpc.m` | off | Client holds an XPC importance lease for the session | `472c930` / `472c930` | d |
+| ~~`XRT_MACOS_XPC_IMPORTANCE`~~ | removed 2026-09-30 | — | Client held an XPC importance lease for the session | `472c930` / removed | c |
 | `XRT_MACOS_METAL_XPC_EXTERNAL_BROKER` | `ipc/shared/ipc_metal_xpc_service.m` | off | Route Metal handles through the standalone broker (launchd vs manual A/B) | `1cec3f6` / `1cec3f6` | d |
 | `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD` | `compositor/client/comp_metal_release_wait_thread.m` | on in all builds (2026-09-30; finding 3 fixed earlier) | App-side swapchain release via the compositor wait thread | `b714613` / `b714613` | d |
 
