@@ -37,6 +37,10 @@ It also carries the standards-facing slices, merged in this order:
   remap of the rate map, packed multi-view support, and runtime-owned
   `XR_META_foveation_eye_tracked`.
 
+Game Mode work is on
+[`claude/game-mode-priority-issue-xkx6m7`](https://github.com/NikNakk/monado/tree/claude/game-mode-priority-issue-xkx6m7),
+which builds on the integration branch and is not merged into it yet.
+
 All foveation options are opt-in at build time (default OFF). Fixed FB
 foveation works without eye tracking; META eye-tracked foveation uses
 runtime-private PS VR2 gaze. Both are hardware-validated through
@@ -66,8 +70,14 @@ options enabled.
   `XR_MNDX_foveation_metal`, validated on PS VR2 via `monado-service`
   (2026-09-29).
 - Wine D3D11 OpenXR plus OpenVR experiments through OpenComposite and xrizer.
+- Opt-in in-process client compositing (`XRT_MACOS_CLIENT_COMPOSITOR=1`),
+  hosted by the service through `CALayerHost`: Unreal holds 120 Hz under Game
+  Mode (2026-09-30).
 
 ## Implemented, awaiting hardware validation
+
+- Hosted-client handoff that follows the service's focus, and passthrough
+  camera frames shared with in-process clients (Game Mode branch).
 
 - `XR_FB_passthrough` from the stock-headset BC4 cameras, composited in the
   final Metal presentation pass (uncalibrated fisheye approximation).
@@ -104,18 +114,22 @@ branch. Keep this branch mainly for development history/comparison.
 
 ## Immediate priorities
 
-1. Make PS Sense optical 6DoF reliable enough to merge.
-2. Turn existing PS VR2 camera acquisition into a calibrated passthrough/MR
+1. Finish client-side compositing for Game Mode: validate handoff on
+   hardware, merge into the integration branch, then overlays, Wine and
+   Chromium, and make it the default
+   ([design](macos-client-compositor-design.md)).
+2. Make PS Sense optical 6DoF reliable enough to merge.
+3. Turn existing PS VR2 camera acquisition into a calibrated passthrough/MR
    pipeline.
-3. Hardware-validate the FB/META foveation path, integrate it into Chromium,
+4. Bring the validated FB/META foveation path to engines and Chromium,
    and refine the experimental Metal rendering companion for upstream review.
-4. Continue hardening Chromium's sandboxed IOSurface/shared-event graphics path.
-5. Broaden Wine/OpenVR compatibility and determine whether SteamVR Home can run
+5. Continue hardening Chromium's sandboxed IOSurface/shared-event graphics path.
+6. Broaden Wine/OpenVR compatibility and determine whether SteamVR Home can run
    without reproducing Valve's compositor.
-6. Continue compositor pacing/reprojection robustness work, including depth +
+7. Continue compositor pacing/reprojection robustness work, including depth +
    foveation coordinate handling.
-7. Add broader OpenXR regression/conformance coverage.
-8. Package and notarize the runtime with a simple settings/diagnostics surface.
+8. Add broader OpenXR regression/conformance coverage.
+9. Package and notarize the runtime with a simple settings/diagnostics surface.
 
 ## Related repositories
 
@@ -138,6 +152,9 @@ companion repositories are:
 - [OpenXR foveation architecture](macos-openxr-foveation.md)
 - [PS VR2 eye gaze](macos-psvr2-eye-gaze.md)
 - [PS VR2 gaze-driven foveation](macos-psvr2-gaze-foveation.md)
+- [Client-side compositing for Game Mode](macos-client-compositor-design.md)
+- [Game Mode and cross-process layer hosting](macos-remote-layer-hosting.md)
+- [Environment toggle inventory](macos-env-toggles.md)
 - [macOS direct service XPC](macos-service-direct-xpc.md)
 - [PS VR2 timing diagnostics](macos-psvr2-timing-diagnostics.md)
 - [PS VR2 judder evidence](macos-psvr2-judder-evidence.md)

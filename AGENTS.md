@@ -1,224 +1,99 @@
-# PS VR2 on macOS: Codex handover
+# Monado on macOS with PS VR2: agent handover
 
-This repository contains experimental work toward using a wired Sony PS VR2 as
-a native OpenXR HMD on Apple Silicon macOS. Read this file,
-`doc/macos-port.md`, and `doc/macos-psvr2-timing-diagnostics.md` before changing
-the macOS, PSVR2, compositor, or OpenXR paths.
+This fork runs Monado natively on Apple Silicon macOS, with a wired Sony PS VR2
+as the primary headset. It is experimental: not upstream-supported, not
+packaged, and not conformant.
 
-## Objective and first acceptance test
+## Read first
 
-The immediate goal is a headset-only MVP:
+- `doc/macos-port.md`: the authoritative status and roadmap. Start here.
+- `doc/macos-port-tracker.md`: short branch-oriented companion.
+- The detailed note for the area you are changing, linked from those two.
+  In particular:
+  - Presentation and pacing: `doc/macos-psvr2-timing-diagnostics.md` (current
+    defaults at the top) and `doc/macos-psvr2-judder-evidence.md`.
+  - Game Mode and in-process compositing:
+    `doc/macos-client-compositor-design.md` and
+    `doc/macos-remote-layer-hosting.md`.
+  - Environment variables: `doc/macos-env-toggles.md`.
 
-- PS VR2 discovered through Monado's normal hardware prober
-- 6-DoF HMD pose from the headset's SLAM/IMU path
-- native macOS Metal OpenXR application support
-- stereo output on the directly connected PS VR2 display
-- Khronos `hello_xr -g Metal` running in the headset
+Keep these documents current when a change or a hardware run alters what they
+say. The evidence ledgers exist so that settled questions are not reopened:
+check them before re-testing a hypothesis.
 
-Sense controllers, eye tracking, passthrough, boundary support, Windows games,
-and OpenXR conformance are explicitly outside the first milestone.
+## Branches
 
-## Branch and upstreams
+- `macos-wine-openvr-legacy-unity`: the integration branch, despite its name.
+  It carries the native runtime, PS VR2, Metal/IOSurface sharing,
+  launchd/XPC, depth, passthrough, eye gaze, foveation and Wine/OpenVR work.
+- `claude/game-mode-priority-issue-xkx6m7`: client-side compositing for Game
+  Mode, built on the integration branch and not merged into it yet.
+- `macos-pssense-6dof`: PS Sense optical tracking, deliberately separate until
+  it is reliable.
+- `standards/*`: smaller review units for upstreaming, already merged into the
+  integration branch.
+- `main` tracks upstream Monado. Most other `macos-*` branches are history.
 
-- Working fork: `NikNakk/monado`
-- Working branch: `macos-psvr2-mvp`
-- Branch base: `kzahel/monado:combined` at
-  `9c1dbc398261fa8136dbb3fbae34ac9739132847`
-- macOS PSVR2 reference: `GAVProject/gav-psvr2-player-mac`
-- macOS Metal/OpenXR/IOSurface work: `kzahel/monado:combined`
-- Packaging/reference wrapper: `kzahel/wivrn-macos`
-- Streaming reference only: `kzahel/WiVRn:combined`
-- Future Windows/OpenVR reference: `cbusillo/macos-game-patches`
+Check the remote branch before publishing. Commits may have been made through
+the GitHub integration, so local and remote hashes can differ even when the
+trees match.
 
-GAV is the known-good hardware baseline and a reference implementation. Keep it
-separate initially; do not copy its code into this repository without checking
-licensing and identifying the smallest required part.
+## Architecture in brief
 
-## Work completed as of 2026-09-02
-
-The first implementation commit is
-`8f591e05fbabcaf8018905a0852f2bcde3c55cb2` and the macOS CI commit is
-`eb9d4d31cb7d408c28980249b2559c7d12a42386` on the remote branch.
-
-Implemented changes:
-
-- `CMakeLists.txt` permits the PSVR2 HMD driver on Apple platforms with libusb;
-  internal HID remains required only by the separate PSSENSE driver.
-- `src/xrt/drivers/psvr2/psvr2.c` defaults macOS to a conservative HMD mode
-  claiming only the status and SLAM USB interfaces.
-- Camera, gaze, LED-detector, relocalizer, and VD interfaces and transfers are
-  disabled in that mode.
-- `PSVR2_AUXILIARY_STREAMS=1` opts back into the full stream set. Other
-  platforms retain full-stream behavior by default and may use `0` to test the
-  minimal path.
-- Eye/face callbacks, gaze support, gaze interaction profiles, and camera debug
-  UI are not advertised when their streams are disabled.
-- Teardown now safely handles USB/data/eye threads and locks that were never
-  initialized by minimal mode.
-- `doc/macos-port.md` documents the conservative HMD path.
-- `.github/workflows/macos-psvr2-driver.yml` builds `drv_psvr2` on `macos-15`.
-
-Validation already completed:
-
-- The macOS driver-only GitHub Actions job passed:
-  <https://github.com/NikNakk/monado/actions/runs/33572654233>
-- A Linux driver-only compile passed locally.
-- `git diff --check` passed before the commits were published.
-
-## Tracking timing findings (2026-09-06)
-
-A dedicated `monado-cli pose-dump` diagnostic was used to compare native macOS
-tracking with a Linux reference running **Ubuntu ARM64 as a VMware Fusion guest
-on the same Mac**, with the PS VR2 USB device passed through to the VM. The
-Linux comparison is therefore useful for implementation behaviour, but it is
-not a bare-metal Linux latency benchmark.
-
-The detailed methodology and numbers are in
-`doc/macos-psvr2-timing-diagnostics.md`. Current conclusions:
-
-- 0/+5/+10/+15/+20 ms pose prediction from
-  `xrt_device_get_tracked_pose()` is quantitatively very similar on macOS and
-  Linux/Fusion once movement speed is accounted for.
-- The PSVR2 SLAM stream is about 60 Hz on both platforms (median update interval
-  about 16.683 ms).
-- Newly published SLAM poses are already about 23-24 ms old when first observed
-  by the host-side diagnostic on both platforms.
-- Median first-seen SLAM latency was about 24.0 ms on Linux/Fusion and about
-  23.0 ms on macOS; p95 was about 28.3 ms and 27.9 ms respectively.
-- Latest IMU timestamps are roughly 22.5-23 ms newer than the newly observed
-  SLAM pose on both, consistent with forward dead reckoning using newer IMU
-  samples.
-- macOS shows no evidence of a substantial platform-specific SLAM availability
-  delay, and no tracking/prediction behaviour resembling the visible backwards
-  judder.
-
-These experiments substantially reduce the likelihood that the current visual
-judder originates in the PSVR2 SLAM/prediction path. They do not prove every
-tracking-side issue impossible, and the Linux reference is virtualized. Unless
-new tracking evidence appears, timing investigation should concentrate after
-pose selection: ATW/distortion rendering, Vulkan completion, IOSurface/Metal
-handoff, scheduled presentation, CVDisplayLink/vblank alignment, and actual
-scanout.
-
-## Key architecture decision
-
-Do not start by replacing WiVRn's virtual HMD or by running its complete server.
-That path is designed for an encoded, streamed headset and uses a bespoke target
-instance that bypasses Monado's normal hardware probing.
-
-Instead, use:
-
-1. Monado's normal target instance and hardware prober.
-2. The existing PSVR2 `xrt_device`, made safe and buildable on macOS.
-3. The existing macOS Metal/OpenXR/IOSurface work in this fork.
-4. A new local macOS display compositor target for the PS VR2 display.
-
-The major missing component is the local display target. The preferred first
-design is an Objective-C or Objective-C++ target under
-`src/xrt/compositor/main`, likely `comp_window_macos.m`, which:
-
-- selects the `NSScreen` named `PS VR2` or, provisionally, a 4000-pixel-wide
-  screen
-- creates a borderless/full-screen `NSWindow` backed by `CAMetalLayer`
-- creates a Vulkan surface through `VK_EXT_metal_surface` under MoltenVK
-- feeds that surface to Monado's existing Vulkan compositor so existing layer,
-  distortion, and timewarp code remains in use
-- later uses `CVDisplayLink` associated with that display for accurate 90/120 Hz
-  pacing
-
-GAV's per-scanline rolling-shutter correction is a later latency/quality
-optimization, not a prerequisite for first light.
-
-Khronos `hello_xr` currently creates one array-size-1 swapchain per eye. That
-matches the present Metal path's constraints and is why it is the first target.
+- Monado's normal target instance and hardware prober find the PS VR2 over
+  libusb. The headset's own SLAM and IMU give 6DoF head tracking.
+- A Vulkan (MoltenVK) compositor does distortion and timewarp.
+  `comp_window_macos.m` presents the result through a `CAMetalLayer` on the
+  PS VR2 display, paced from CVDisplayLink.
+- Clients share swapchains with the service as IOSurfaces or Metal objects. XPC
+  handles launchd activation and Metal handle transfer; the Monado protocol
+  stays on the Unix socket.
+- Under Game Mode, macOS throttles `monado-service` from outside the process,
+  and no XPC importance or `ProcessType` setting undoes that. The fix is to
+  composite in the client's process (`XRT_MACOS_CLIENT_COMPOSITOR=1`). The
+  service then hosts the client's layer through `CALayerHost`, and tracking
+  stays in the service.
 
 ## Build and test
 
-The authoritative driver-only macOS recipe is in
-`.github/workflows/macos-psvr2-driver.yml`. In outline:
+The macOS CI recipe (`.github/workflows/macos-build.yml`) builds everything:
 
 ```sh
-brew install cmake eigen glslang libusb ninja
-
-cmake -S . -B build -G Ninja \
-  -DBUILD_TESTING=OFF \
-  -DXRT_FEATURE_OPENXR=OFF \
-  -DXRT_FEATURE_SERVICE=OFF \
-  -DXRT_MODULE_COMPOSITOR=OFF \
-  -DXRT_MODULE_COMPOSITOR_CLIENT=OFF \
-  -DXRT_MODULE_COMPOSITOR_MAIN=OFF \
-  -DXRT_MODULE_COMPOSITOR_MULTI=OFF \
-  -DXRT_MODULE_COMPOSITOR_NULL=OFF \
-  -DXRT_MODULE_COMPOSITOR_RENDER=OFF \
-  -DXRT_MODULE_COMPOSITOR_SHADERS=OFF \
-  -DXRT_MODULE_COMPOSITOR_UTIL=OFF \
-  -DXRT_MODULE_COMPOSITOR_MOCK=OFF \
-  -DXRT_MODULE_OPENXR_STATE_TRACKER=OFF \
-  -DXRT_MODULE_IPC=OFF \
-  -DXRT_MODULE_MONADO_GUI=OFF \
-  -DXRT_MODULE_MONADO_CLI=OFF \
-  -DXRT_FEATURE_WINDOW_PEEK=OFF \
-  -DXRT_FEATURE_DEBUG_GUI=OFF \
-  -DXRT_FEATURE_CLIENT_DEBUG_GUI=OFF \
-  -DXRT_BUILD_DRIVER_PSVR2=ON \
-  -DXRT_BUILD_DRIVER_PSSENSE=OFF \
-  -DXRT_BUILD_DRIVER_QWERTY=OFF \
-  -DXRT_BUILD_DRIVER_SIMULATED=OFF
-
-cmake --build build --target drv_psvr2 --parallel
+brew install cmake eigen glslang jpeg-turbo libusb molten-vk ninja \
+  pkgconf sdl2-compat vulkan-headers vulkan-loader
+cmake -S . -B build -G Ninja
+cmake --build build --parallel
+ctest --test-dir build --output-on-failure
 ```
 
-Keep this build green while adding hardware-probe tests. The fuller runtime and
-compositor build recipes and probes are recorded in `doc/macos-port.md`.
+Linux CI (`linux-build.yml`) must stay green too. The driver-only and
+standards-slice jobs are in the other workflows. On-headset regression
+testing uses `psvr2-openxr-test`; see `doc/macos-port.md` for its modes.
 
-## Hardware setup and baseline
+Several existing `build*` directories belong to other checkouts or to the
+installed LaunchAgent. Check `CMAKE_HOME_DIRECTORY` in a build directory's
+`CMakeCache.txt` before building into it.
 
-Expected topology:
+## Hardware
 
-- Mac USB-C/Thunderbolt DisplayPort output -> direct DP 1.4/HBR3 cable -> Sony
-  PS VR2 PC adapter DisplayPort input
-- adapter USB -> Mac directly, not through a hub
-- Sony power supply -> adapter
-- PS VR2 -> adapter
+- Mac USB-C DisplayPort -> DP 1.4/HBR3 cable -> Sony PS VR2 PC adapter, with
+  the adapter's USB connected directly to the Mac (no hub) and the Sony power
+  supply attached.
+- The headset runs at 4000x2040, 120 Hz (90 Hz is also available).
+- Only one process can claim the headset's USB interfaces. Close GAV or any
+  other PS VR2 tool before starting Monado.
+- Hardware runs are done by the user. Record results, with the commit tested,
+  in the relevant document.
 
-The user has ordered the Sony adapter and a UGREEN DP 1.4/HBR3 cable.
+## Guardrails
 
-Before testing Monado with hardware, build and run GAV unchanged. Confirm:
-
-- the headset powers and is detected
-- the PS VR2 display runs at 4000x2040 and 120 Hz
-- stereo output is stable
-- SLAM/IMU 6-DoF tracking works
-
-Close GAV before starting Monado. Both use libusb and cannot simultaneously
-claim the same headset interfaces.
-
-## Next milestones
-
-Work in this order unless hardware findings force a change:
-
-1. Run the GAV hardware baseline when the adapter arrives.
-2. Add a small Monado PSVR2 discovery/pose probe on macOS and verify status plus
-   SLAM USB interfaces in conservative mode.
-3. Add the macOS display target and achieve static/full-screen headset output.
-4. Submit native Metal OpenXR projection frames and run `hello_xr -g Metal`.
-5. Improve refresh-rate selection, hotplug, display selection, frame pacing,
-   prediction, and latency.
-6. Treat Sense controllers as a separate project: buttons/IMU first, optical
-   tracking later.
-7. Explore CrossOver/OpenVR game compatibility only after native OpenXR is
-   stable.
-
-## Development guardrails
-
-- Preserve existing Linux behavior and full PSVR2 streams by default.
-- Keep macOS conservative mode the default until each extra USB interface is
-  proven safe on hardware.
-- Keep PSSENSE disabled for the HMD MVP.
-- Prefer small, reviewable commits with one buildable milestone each.
-- Add explicit unsupported responses instead of partially advertising missing
-  OpenXR features.
-- Do not describe the runtime as conformant; it is experimental.
-- Check the remote branch before publishing. Repository writes may have been
-  made through the GitHub integration, so local and remote commit hashes can
-  differ even when their trees are identical.
+- Preserve Linux behaviour, and full PS VR2 streams by default on Linux.
+- On macOS, keep the conservative USB set as the default. Camera streams
+  (`PSVR2_CAMERA_STREAMS=1`) stay opt-in until proven safe; gaze activates
+  lazily when a feature needs it.
+- Keep new OpenXR features opt-in until validated on hardware, and return
+  explicit unsupported results rather than advertising partial features.
+- Prefer small commits, one buildable step each. Remove failed experiments
+  rather than leaving them behind environment variables.
+- GAV (`gav-psvr2-player-mac`) is a reference only. Check the licence before
+  copying any of its code.

@@ -4,6 +4,15 @@ This is the short-form decision record for the visible head-motion judder / appa
 
 The aim is to stop later work from reopening hypotheses that have already been tested. **Ruled in** means a real mechanism has been demonstrated at a magnitude capable of contributing to visible judder, not necessarily that it is the only cause. Distinguish measured fact from inference, and keep motion-speed confounding in mind for subjective A/Bs.
 
+> **Update, 2026-09-30.** Presentation has moved on since the synthesis
+> below. The drawable-slot newest-frame worker (the acquire-first design in
+> "Highest-value next work") replaced stale substitution as the default, with 0
+> slot drops at about 119.88 Hz, and stale substitution and the
+> CAMetalDisplayLink modes have been removed. Current defaults are at the top of
+> [macos-psvr2-timing-diagnostics.md](macos-psvr2-timing-diagnostics.md).
+> Judder under Game Mode has a separate cause (the service is throttled); see
+> [macos-client-compositor-design.md](macos-client-compositor-design.md).
+
 ## Current synthesis — 2026-09-11
 
 The evidence no longer supports a primary macOS-specific PSVR2 tracking/SLAM defect. The strongest current explanation for the large visible discontinuities is presentation cadence / latency state, with smaller residual tracking-prediction error still possible once presentation is stable.
