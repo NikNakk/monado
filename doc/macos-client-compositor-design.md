@@ -503,14 +503,14 @@ client's environment. Without it, clients take exactly the old service path.
   client falls back to the service.
 - **IPC head device**: the shared memory now carries the screen size, frame
   interval, viewports, rotations and distortion FoVs. A hosted client builds
-  its distortion mesh once at start-up, by computing it through the service's
-  device. By default that is one IPC round trip per mesh vertex, about 8,500
-  at the default `XRT_MESH_SIZE`. That took 225 ms against an idle service on
-  Linux, and will be far slower if Game Mode is throttling the service when
-  the game starts. With `XRT_IPC_DISTORTION_MESH_TRANSFER=1`, the client
-  instead copies the mesh the service device already has, in one
-  `device_get_distortion_mesh` call, and falls back to the per-vertex path if
-  that fails. The PS VR2 driver builds its mesh at start-up, so the service
+  its distortion mesh once at start-up by copying the mesh the service
+  device already has, in one `device_get_distortion_mesh` call. If that
+  fails, or with `XRT_IPC_DISTORTION_MESH_TRANSFER=0`, it computes the mesh
+  through the service's device instead: one IPC round trip per vertex, about
+  8,500 at the default `XRT_MESH_SIZE`. In Unreal on the M5 the copy took
+  0.6 ms and the per-vertex path 217 ms with the service unthrottled; the
+  per-vertex path would be far slower if Game Mode throttled the service as
+  the game starts. The PS VR2 driver builds its mesh at start-up, so the service
   always has one to send. `IPC_LOG=info` logs which path was used and how
   long it took.
 
@@ -534,8 +534,17 @@ connection error at start-up comes from the service being launched by
 launchd, not from this path.
 
 Still to do: a baseline of the same build without
-`XRT_MACOS_CLIENT_COMPOSITOR`, the two mesh start-up times at `IPC_LOG=info`,
-and the Game Mode run that phase 2 is for.
+`XRT_MACOS_CLIENT_COMPOSITOR`, and the Game Mode run that phase 2 is for.
+
+### Unreal (2026-09-30)
+
+The first Unreal runs fell back to the service's compositor. The in-process
+compositor failed because it started SDL video for the peek window's Vulkan
+extensions even with no peek window requested, and Unreal creates the
+compositor on its game thread, where SDL video cannot start (`ffe7d26`). The
+first run also crashed in teardown on uninitialised Vulkan queue mutexes
+instead of falling back (`fe144b2`). Mesh start-up: 217 ms per-vertex, 0.6 ms
+copied, which made the copy the default.
 
 ### Testing phase 2
 
@@ -543,8 +552,8 @@ and the Game Mode run that phase 2 is for.
 2. Run the application with `XRT_MACOS_CLIENT_COMPOSITOR=1`, for example
    `XRT_MACOS_CLIENT_COMPOSITOR=1 hello_xr -g Metal`. For a bundled game, set
    the variable in the launch environment.
-   Add `XRT_IPC_DISTORTION_MESH_TRANSFER=1 IPC_LOG=info` to try the one-call
-   mesh copy and log its time.
+   Add `IPC_LOG=info` to log how the distortion mesh was built and how long
+   it took.
 3. The client log should say `Compositing in-process; the service hosts this
    client's layer`. The service log should show the attach and the visibility
    changes. `U_LOG_W` "In-process compositor unavailable" means it fell back.
