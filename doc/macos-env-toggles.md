@@ -530,7 +530,7 @@ are the ones that matter in practice.
 | `XRT_MACOS_PROCESS_ACTIVITY` | `ipc/server/ipc_server_macos_activity.m` | unset (off) | Process-lifetime `NSProcessInfo` activity (`user-interactive` or `latency-critical`) | `69ca4d0` / `69ca4d0` | d |
 | `XRT_MACOS_XPC_IMPORTANCE` | `ipc/shared/ipc_metal_xpc.m` | off | Client holds an XPC importance lease for the session | `472c930` / `472c930` | d |
 | `XRT_MACOS_METAL_XPC_EXTERNAL_BROKER` | `ipc/shared/ipc_metal_xpc_service.m` | off | Route Metal handles through the standalone broker (launchd vs manual A/B) | `1cec3f6` / `1cec3f6` | d |
-| `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD` | `compositor/client/comp_metal_release_wait_thread.m` | intended on for service builds; **effectively off** (finding 3) | App-side swapchain release via the compositor wait thread | `b714613` / `b714613` | d |
+| `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD` | `compositor/client/comp_metal_release_wait_thread.m` | on in all builds (2026-09-30; finding 3 fixed earlier) | App-side swapchain release via the compositor wait thread | `b714613` / `b714613` | d |
 
 ### Tests and tools
 
