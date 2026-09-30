@@ -546,6 +546,25 @@ first run also crashed in teardown on uninitialised Vulkan queue mutexes
 instead of falling back (`fe144b2`). Mesh start-up: 217 ms per-vertex, 0.6 ms
 copied, which made the copy the default.
 
+### Unreal under load, Game Mode on and off (2026-09-30)
+
+A heavy scene (5600x2856 swapchain, Lumen on) with the in-process
+compositor, switching Game Mode on and off from the Cmd-Esc menu:
+
+- The compositor held 120 Hz: 3,129 frames in 28 s, frame interval median
+  8.34 ms, p99 8.66 ms, eight intervals over 12 ms (worst 52 ms, once).
+  Present completion had 0 to 6 late per 240. No change with Game Mode.
+- The compositor thread never woke late, and pose queries over IPC took
+  0.09 ms median, 0.4 ms worst, throughout. No sign of the service being
+  throttled on the pose path. (No policy log was taken for this run.)
+- Unreal ran at about 13 fps in all three configurations: in-process with a
+  blocking release (13.4 fps, finish-rendering 69 ms), in-process with
+  `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD=1` (13.6 fps, 33 ms), and
+  through the service's compositor (13.0 fps, 10 ms). The scene is GPU-bound;
+  the blocking release only moves where Unreal waits. The visible judder is
+  the compositor reprojecting each game frame about nine times.
+- No swapchain wait timeout under Game Mode, unlike the phase 1 Unreal run.
+
 ### Testing phase 2
 
 1. Start the service as usual. Its presenter must own the headset window.
