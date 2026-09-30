@@ -296,6 +296,21 @@ Fourth batch (2026-09-30):
   compositor is the fix instead; see
   [macos-client-compositor-design.md](macos-client-compositor-design.md).
 
+Fifth batch (2026-10-01), no default changes:
+
+- **One parser for the timing traces.** `util/u_timing_trace.h` reads
+  `PSVR2_TIMING_TRACE`, `PSVR2_TIMING_TRACE_FULLY_BUFFERED` and
+  `PSVR2_TIMING_TRACE_DIR` once through `DEBUG_GET_ONCE_*`, and
+  `u_timing_trace_open()` replaces about a dozen copies of the file-opening
+  code. The names are unchanged; the rename proposed below has not been done.
+  As with other Monado boolean options, `true`, `on` and `yes` now also enable
+  them. Fully buffered captures now use 16 MiB for every trace.
+- **No more redefined functions.** The force-included headers and `-D`
+  renames are gone (including the ones that redefined `fflush`, `setvbuf` and
+  `presentDrawable`); callers call the macOS hooks by name.
+- **Other raw `getenv` reads now use `DEBUG_GET_ONCE_*`**, including
+  `MONADO_WINE_TCP_PORT` (finding 5 below) and the macOS wait diagnostics.
+
 Still not done: `PRESENT_PRELATCH_US` and `PRESENT_MIN_LEAD_US` (inert under the
 default minimum present duration, but kept because the Wine trace script still
 sets `PRELATCH_US`).
