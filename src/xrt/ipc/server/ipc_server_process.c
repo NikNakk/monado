@@ -22,6 +22,9 @@
 #include "os/os_time.h"
 #include "util/u_var.h"
 #include "util/u_misc.h"
+#ifdef __APPLE__
+#include "util/u_frame_share.h"
+#endif
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
 #include "util/u_verify.h"
@@ -168,6 +171,11 @@ teardown_all(struct ipc_server *s)
 {
 	u_var_remove_root(s);
 
+#ifdef __APPLE__
+	// Stop the compositor publishing into the share before unmapping it.
+	ipc_server_passthrough_share_fini(s);
+#endif
+
 	xrt_syscomp_destroy(&s->xsysc);
 
 	xrt_space_overseer_destroy(&s->xso);
@@ -267,6 +275,10 @@ init_system_shm_state(struct ipc_server *s, volatile struct ipc_client_state *ic
 		}
 		ism->hmd.blend_mode_count = xhmd->blend_mode_count;
 
+#ifdef __APPLE__
+		ism->hmd.passthrough_share_available = u_passthrough_share_source_available() ? 1 : 0;
+#endif
+
 		ism->hmd.compositor.w_pixels = (uint32_t)xhmd->screens[0].w_pixels;
 		ism->hmd.compositor.h_pixels = (uint32_t)xhmd->screens[0].h_pixels;
 		ism->hmd.compositor.nominal_frame_interval_ns = xhmd->screens[0].nominal_frame_interval_ns;
@@ -335,6 +347,10 @@ init_all(struct ipc_server *s,
 		// Do not call teardown_all here, os_mutex_destroy will assert.
 		return XRT_ERROR_SYNC_PRIMITIVE_CREATION_FAILED;
 	}
+
+#ifdef __APPLE__
+	ipc_server_passthrough_share_init(s);
+#endif
 
 	s->process = u_process_create_if_not_running();
 	if (!s->process) {

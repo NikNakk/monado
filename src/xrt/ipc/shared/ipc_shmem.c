@@ -24,6 +24,8 @@
 // non-android unix
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <stdbool.h>
+#include <stdio.h>
 #endif
 
 #if defined(XRT_OS_ANDROID)
@@ -52,12 +54,31 @@ ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 #elif defined(XRT_OS_UNIX)
 
 #define MONADO_SHMEM_NAME "/monado_shm"
+
+static xrt_result_t
+shmem_create_named(const char *name, bool exclusive, size_t size, xrt_shmem_handle_t *out_handle, void **out_map);
+
 // Impl for non-Android Unix.
 xrt_result_t
 ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 {
+	return shmem_create_named(MONADO_SHMEM_NAME, false, size, out_handle, out_map);
+}
+
+xrt_result_t
+ipc_shmem_create_private(const char *suffix, size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
+{
+	// A name of its own, so it cannot meet a concurrent ipc_shmem_create().
+	char name[64];
+	snprintf(name, sizeof(name), "/monado_%s_%d", suffix, (int)getpid());
+	return shmem_create_named(name, true, size, out_handle, out_map);
+}
+
+static xrt_result_t
+shmem_create_named(const char *name, bool exclusive, size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
+{
 	*out_handle = -1;
-	int fd = shm_open(MONADO_SHMEM_NAME, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+	int fd = shm_open(name, O_CREAT | O_RDWR | (exclusive ? O_EXCL : 0), S_IRUSR | S_IWUSR);
 	if (fd < 0) {
 		return XRT_ERROR_IPC_FAILURE;
 	}
@@ -73,7 +94,7 @@ ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 	}
 
 	// Don't need the name entry anymore, we can share the FD.
-	shm_unlink(MONADO_SHMEM_NAME);
+	shm_unlink(name);
 	*out_handle = fd;
 	return XRT_SUCCESS;
 }

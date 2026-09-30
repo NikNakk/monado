@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <xrt/xrt_config_os.h>
 #include <xrt/xrt_handles.h>
 #include <xrt/xrt_results.h>
 
@@ -38,6 +39,16 @@ extern "C" {
  */
 xrt_result_t
 ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map);
+
+#if defined(XRT_OS_UNIX) && !defined(XRT_OS_ANDROID)
+/*!
+ * Like ipc_shmem_create(), but under a name of its own made from @p suffix
+ * and the process ID, so it cannot collide with a concurrent
+ * ipc_shmem_create() on another thread. Non-Android Unix only.
+ */
+xrt_result_t
+ipc_shmem_create_private(const char *suffix, size_t size, xrt_shmem_handle_t *out_handle, void **out_map);
+#endif
 
 /*!
  * Map a shared memory region.

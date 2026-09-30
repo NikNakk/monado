@@ -335,6 +335,13 @@ struct ipc_shared_memory
 				struct xrt_fov distortion_fov;
 			} views[2];
 		} compositor;
+
+		/*!
+		 * The service's compositor has passthrough camera frames that
+		 * clients compositing in-process can have, see
+		 * device_passthrough_share_get.
+		 */
+		uint32_t passthrough_share_available;
 	} hmd;
 
 	struct ipc_layer_slot slots[IPC_MAX_SLOTS];

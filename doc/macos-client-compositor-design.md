@@ -527,6 +527,19 @@ client's environment. Without it, clients take exactly the old service path.
   always has one to send. `IPC_LOG=info` logs which path was used and how
   long it took.
 
+- **Passthrough** (`u_frame_share`, `device_passthrough_share_get`): the
+  cameras belong to the service's driver, which has one pair of sinks, owned
+  by the service's compositor. That compositor's sink also publishes each
+  BC4 camera frame into a shared-memory frame share (three slots per eye,
+  sequence-checked, no locks between processes), created when a client first
+  asks. The shared memory's `passthrough_share_available` says whether the
+  service has camera frames. If so, a hosted client's IPC head device gains
+  `set_passthrough_sinks`: it maps the share and a thread pushes new frames
+  into the client compositor's sinks, polling every 2 ms, so the existing
+  Metal passthrough code runs unchanged. The UV maps come from the
+  distortion grid above. Requires `PSVR2_CAMERA_STREAMS=1` for the service,
+  as before. Not yet run on hardware.
+
 The shared-memory layout changed, so rebuild the Wine client alongside the
 service.
 
