@@ -34,7 +34,7 @@
 #include <assert.h>
 
 
-DEBUG_GET_ONCE_BOOL_OPTION(ipc_distortion_mesh_transfer, "XRT_IPC_DISTORTION_MESH_TRANSFER", false)
+DEBUG_GET_ONCE_BOOL_OPTION(ipc_distortion_mesh_transfer, "XRT_IPC_DISTORTION_MESH_TRANSFER", true)
 
 
 /*
