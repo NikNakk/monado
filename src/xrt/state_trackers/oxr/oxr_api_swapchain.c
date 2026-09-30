@@ -11,6 +11,7 @@
 #include "xrt/xrt_compiler.h"
 
 #include "util/u_debug.h"
+#include "util/u_logging.h"
 #include "util/u_trace_marker.h"
 
 #include "oxr_chain.h"
@@ -59,9 +60,8 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO);
 	OXR_VERIFY_ARG_NOT_NULL(&log, out_swapchain);
 
-	fprintf(stderr,
-	        "xrCreateSwapchain: createFlags=0x%" PRIx64 " usageFlags=0x%" PRIx64 " format=%" PRIi64
-	        " size=%ux%u arraySize=%u sampleCount=%u\n",
+	U_LOG_D("xrCreateSwapchain: createFlags=0x%" PRIx64 " usageFlags=0x%" PRIx64 " format=%" PRIi64
+	        " size=%ux%u arraySize=%u sampleCount=%u",
 	        (uint64_t)createInfo->createFlags, (uint64_t)createInfo->usageFlags, createInfo->format, createInfo->width,
 	        createInfo->height, createInfo->arraySize, createInfo->sampleCount);
 
