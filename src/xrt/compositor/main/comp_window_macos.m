@@ -16,6 +16,7 @@
 #include "main/comp_macos_remote_layer.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
+#include "util/u_frame_share.h"
 #include "util/u_handles.h"
 #include "util/u_macos_display_host.h"
 #include "util/u_misc.h"
@@ -472,6 +473,9 @@ macos_passthrough_sink_push_frame(struct xrt_frame_sink *sink, struct xrt_frame 
 		xrt_frame_reference(&cwm->passthrough_frames[pts->eye], frame);
 	}
 	pthread_mutex_unlock(&cwm->passthrough_mutex);
+
+	// In the service: also pass the frame to clients compositing in-process.
+	u_passthrough_share_push(pts->eye, frame);
 }
 
 static bool
@@ -676,6 +680,10 @@ macos_passthrough_init(struct comp_window_macos *cwm)
 	    xdev->set_passthrough_sinks(xdev, &cwm->passthrough_sinks[0].base, &cwm->passthrough_sinks[1].base);
 	if (xret == XRT_SUCCESS) {
 		cwm->passthrough_sinks_attached = true;
+		// Clients hosted by this service can have the frames too.
+		if (!u_macos_hosted_client_available()) {
+			u_passthrough_share_set_source_available(true);
+		}
 		COMP_INFO(cwm->base.base.c, "PS VR2 BC4 passthrough attached (FOV %d deg, convergence %.3f)",
 		          (int)debug_get_num_option_macos_passthrough_fov_deg(),
 		          (double)debug_get_num_option_macos_passthrough_convergence_milli() / 1000.0);
@@ -2557,6 +2565,9 @@ comp_window_macos_destroy(struct comp_target *ct)
 	if (cwm->passthrough_sinks_attached && xdev != NULL && xdev->set_passthrough_sinks != NULL) {
 		(void)xdev->set_passthrough_sinks(xdev, NULL, NULL);
 		cwm->passthrough_sinks_attached = false;
+		if (!u_macos_hosted_client_available()) {
+			u_passthrough_share_set_source_available(false);
+		}
 	}
 	pthread_mutex_lock(&cwm->passthrough_mutex);
 	for (uint32_t eye = 0; eye < 2; eye++) {

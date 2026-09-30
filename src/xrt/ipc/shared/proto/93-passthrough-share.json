@@ -1,0 +1,14 @@
+{
+	"$schema": "../proto.schema.json",
+
+	"device_passthrough_share_get": {
+		"ifdef": "__APPLE__",
+		"in": [
+			{"name": "id", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "size", "type": "uint64_t"}
+		],
+		"out_handles": {"type": "xrt_shmem_handle_t"}
+	}
+}

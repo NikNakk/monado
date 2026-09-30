@@ -27,6 +27,10 @@
 #include "client/ipc_client_connection.h"
 #include "ipc_client_generated.h"
 
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+#include "client/ipc_client_passthrough.h"
+#endif
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -371,6 +375,22 @@ out_unlock:
 	return xret;
 }
 
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+//! The service's camera frames, for this process's compositor.
+static xrt_result_t
+ipc_client_hmd_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left, struct xrt_frame_sink *right)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+	if (ich->passthrough == NULL) {
+		if (left == NULL && right == NULL) {
+			return XRT_SUCCESS;
+		}
+		ich->passthrough = ipc_client_passthrough_create(ich->ipc_c, ich->device_id);
+	}
+	return ipc_client_passthrough_set_sinks(ich->passthrough, left, right);
+}
+#endif
+
 void
 ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 {
@@ -389,6 +409,13 @@ ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 		hmd->views[i].rot = ism->hmd.compositor.views[i].rot;
 		hmd->distortion.fov[i] = ism->hmd.compositor.views[i].distortion_fov;
 	}
+
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	// Passthrough, if the service's compositor has camera frames to share.
+	if (ism->hmd.passthrough_share_available != 0) {
+		xdev->set_passthrough_sinks = ipc_client_hmd_set_passthrough_sinks;
+	}
+#endif
 
 	// Replace the placeholder mesh with the service device's distortion.
 	free(hmd->distortion.mesh.vertices);
@@ -528,6 +555,10 @@ ipc_client_hmd_destroy(struct xrt_device *xdev)
 		free(ich->distortion_grid[i]);
 		ich->distortion_grid[i] = NULL;
 	}
+
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	ipc_client_passthrough_destroy(&ich->passthrough);
+#endif
 
 	// Free and de-init the shared things.
 	ipc_client_xdev_fini(ich);

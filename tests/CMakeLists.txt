@@ -25,6 +25,9 @@ set(tests
     tests_pose
     tests_vec3_angle
 	)
+if(NOT MSVC)
+	list(APPEND tests tests_frame_share)
+endif()
 if(XRT_HAVE_D3D11)
 	list(APPEND tests tests_aux_d3d_d3d11 tests_comp_client_d3d11)
 endif()

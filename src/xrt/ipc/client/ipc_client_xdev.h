@@ -23,6 +23,7 @@ extern "C" {
 
 struct ipc_connection;
 struct ipc_client_tracking_origin_manager;
+struct ipc_client_passthrough;
 
 /*!
  * An IPC client proxy for an @ref xrt_device.
@@ -48,6 +49,9 @@ struct ipc_client_xdev
 	 */
 	struct xrt_uv_triplet *distortion_grid[XRT_MAX_VIEWS];
 	uint32_t distortion_grid_points;
+
+	//! Passthrough frames from the service, for a compositor in this process.
+	struct ipc_client_passthrough *passthrough;
 };
 
 /*!

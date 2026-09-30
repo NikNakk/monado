@@ -149,6 +149,11 @@ if(XRT_HAVE_LINUX OR ANDROID)
 	target_sources(aux_util PRIVATE u_linux.c u_linux.h)
 endif()
 
+if(NOT MSVC)
+	# Uses C11 atomics in shared memory and pthreads.
+	target_sources(aux_util PRIVATE u_frame_share.c u_frame_share.h)
+endif()
+
 if(APPLE)
 	target_sources(aux_util PRIVATE u_macos_display_host.c u_macos_display_host.h)
 	target_link_libraries(aux_util PUBLIC "-framework CoreFoundation" "-framework IOSurface")

@@ -478,6 +478,20 @@ struct ipc_server
 
 	//! Disable listening on stdin for server stop.
 	bool no_stdin;
+
+#ifdef __APPLE__
+	/*!
+	 * Passthrough camera frames for clients that composite in-process,
+	 * created on first request. See u_frame_share.
+	 */
+	struct
+	{
+		struct os_mutex lock;
+		xrt_shmem_handle_t handle;
+		void *mem;
+		size_t size;
+	} passthrough_share;
+#endif
 };
 
 /*!
@@ -568,6 +582,13 @@ ipc_server_client_destroy_session_and_compositor(volatile struct ipc_client_stat
  */
 void
 ipc_server_macos_display_host_client_gone(volatile struct ipc_client_state *ics);
+
+//! Set up and tear down the passthrough share state; the memory itself is created on request.
+void
+ipc_server_passthrough_share_init(struct ipc_server *s);
+
+void
+ipc_server_passthrough_share_fini(struct ipc_server *s);
 #endif
 
 /*!
