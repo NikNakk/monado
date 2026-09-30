@@ -8,12 +8,8 @@ add_executable(psvr2-openxr-test psvr2_openxr_test_matrix.mm)
 
 target_compile_features(psvr2-openxr-test PRIVATE cxx_std_17)
 target_link_libraries(
-	psvr2-openxr-test
-	PRIVATE
-		xrt-external-openxr
-		aux_metal_foveation
-		"-framework Foundation"
-		"-framework Metal"
+	psvr2-openxr-test PRIVATE xrt-external-openxr aux_metal_foveation "-framework Foundation"
+				  "-framework Metal"
 	)
 
 # The test deliberately has no build-time dependency on the Khronos loader. It

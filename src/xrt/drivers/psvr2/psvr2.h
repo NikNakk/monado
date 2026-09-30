@@ -353,9 +353,7 @@ psvr2_get_face_tracking(struct xrt_device *xdev,
                         struct xrt_facial_expression_set *out_value);
 
 xrt_result_t
-psvr2_set_passthrough_sinks(struct xrt_device *xdev,
-                            struct xrt_frame_sink *left,
-                            struct xrt_frame_sink *right);
+psvr2_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left, struct xrt_frame_sink *right);
 
 #ifdef __cplusplus
 }

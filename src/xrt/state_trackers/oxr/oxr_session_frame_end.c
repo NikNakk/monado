@@ -264,8 +264,8 @@ validate_foveation_map(const struct xrt_foveation_map_data *map)
 	for (uint32_t i = 0; i < XRT_FOVEATION_MAP_BOUNDARY_COUNT; ++i) {
 		const float x = map->x[i];
 		const float y = map->y[i];
-		if (!isfinite(x) || !isfinite(y) || x < previous_x || y < previous_y ||
-		    x < 0.0f || x > 1.0f || y < 0.0f || y > 1.0f) {
+		if (!isfinite(x) || !isfinite(y) || x < previous_x || y < previous_y || x < 0.0f || x > 1.0f ||
+		    y < 0.0f || y > 1.0f) {
 			return false;
 		}
 		previous_x = x;
@@ -310,7 +310,8 @@ fill_in_foveation_map(struct oxr_logger *log,
 		if (debug_get_bool_option_debug_foveation_binding()) {
 			static uint64_t count = 0;
 			if (count < 48 || (count % 480) == 0) {
-				oxr_log(log, "xrEndFrame foveation: view=%u swapchain=%p image=%d layer=%u result=%d "
+				oxr_log(log,
+				        "xrEndFrame foveation: view=%u swapchain=%p image=%d layer=%u result=%d "
 				        "enabled=%d revision=%u physical=%ux%u",
 				        view_index, (void *)sc, sc->released.index, view->subImage.imageArrayIndex,
 				        (int)xret, native.enabled, native.revision, native.physical_width,

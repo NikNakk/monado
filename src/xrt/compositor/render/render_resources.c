@@ -588,15 +588,14 @@ render_resources_init(struct render_resources *r,
 
 	VK_NAME_SAMPLER(vk, r->samplers.clamp_to_edge, "render_resources sampler clamp_to_edge");
 
-	ret = vk_create_sampler_with_filter(         //
-	    vk,                                      // vk_bundle
-	    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,   // clamp_mode
-	    VK_FILTER_NEAREST,                       // filter
-	    &r->samplers.nearest_clamp_to_edge);     // out_sampler
+	ret = vk_create_sampler_with_filter(       //
+	    vk,                                    // vk_bundle
+	    VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, // clamp_mode
+	    VK_FILTER_NEAREST,                     // filter
+	    &r->samplers.nearest_clamp_to_edge);   // out_sampler
 	VK_CHK_WITH_RET(ret, "vk_create_sampler_with_filter", false);
 
-	VK_NAME_SAMPLER(vk, r->samplers.nearest_clamp_to_edge,
-	                "render_resources sampler nearest_clamp_to_edge");
+	VK_NAME_SAMPLER(vk, r->samplers.nearest_clamp_to_edge, "render_resources sampler nearest_clamp_to_edge");
 
 	ret = vk_create_sampler(                     //
 	    vk,                                      // vk_bundle
@@ -629,28 +628,26 @@ render_resources_init(struct render_resources *r,
 
 #ifdef XRT_OS_OSX
 	for (uint32_t i = 0; i < r->view_count; ++i) {
-		ret = render_buffer_init(                      //
-		    vk,                                       //
-		    &r->apple_source_debug.buffers[i],        //
-		    VK_BUFFER_USAGE_TRANSFER_DST_BIT,         //
-		    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |     //
-		        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
-		        VK_MEMORY_PROPERTY_HOST_CACHED_BIT,   //
-		    8);                                       //
+		ret = render_buffer_init(                                                          //
+		    vk,                                                                            //
+		    &r->apple_source_debug.buffers[i],                                             //
+		    VK_BUFFER_USAGE_TRANSFER_DST_BIT,                                              //
+		    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |                                          //
+		        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, //
+		    8);                                                                            //
 		VK_CHK_WITH_RET(ret, "render_buffer_init", false);
 
 		ret = render_buffer_map(vk, &r->apple_source_debug.buffers[i]);
 		VK_CHK_WITH_RET(ret, "render_buffer_map", false);
 	}
 
-	ret = render_buffer_init(                      //
-	    vk,                                       //
-	    &r->apple_target_debug.buffer,            //
-	    VK_BUFFER_USAGE_TRANSFER_DST_BIT,         //
-	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |     //
-	        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
-	        VK_MEMORY_PROPERTY_HOST_CACHED_BIT,   //
-	    12);                                      //
+	ret = render_buffer_init(                                                          //
+	    vk,                                                                            //
+	    &r->apple_target_debug.buffer,                                                 //
+	    VK_BUFFER_USAGE_TRANSFER_DST_BIT,                                              //
+	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |                                          //
+	        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, //
+	    12);                                                                           //
 	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
 
 	ret = render_buffer_map(vk, &r->apple_target_debug.buffer);
@@ -981,12 +978,12 @@ render_resources_init(struct render_resources *r,
 		    &r->compute.layer.ubos[i]); // buffer
 		VK_CHK_WITH_RET(ret, "render_buffer_map", false);
 
-		ret = render_buffer_init(                                       //
-		    vk,                                                         // vk_bundle
-		    &r->compute.layer.foveation_ubos[i],                        // buffer
-		    ubo_usage_flags,                                            // usage_flags
-		    memory_property_flags,                                      // memory_property_flags
-		    sizeof(struct render_compute_layer_foveation_ubo_data));    // size
+		ret = render_buffer_init(                                    //
+		    vk,                                                      // vk_bundle
+		    &r->compute.layer.foveation_ubos[i],                     // buffer
+		    ubo_usage_flags,                                         // usage_flags
+		    memory_property_flags,                                   // memory_property_flags
+		    sizeof(struct render_compute_layer_foveation_ubo_data)); // size
 		VK_CHK_WITH_RET(ret, "render_buffer_init", false);
 		VK_NAME_BUFFER(vk, r->compute.layer.foveation_ubos[i].buffer,
 		               "render_resources compute layer foveation ubo");

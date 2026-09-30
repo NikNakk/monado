@@ -170,8 +170,7 @@ find_khr_generic_controller(const struct oxr_interaction_profile_array *array,
                             const struct oxr_instance_path_cache *cache,
                             struct oxr_interaction_profile **out_p)
 {
-	return oxr_interaction_profile_array_find_by_device_name(
-	    array, cache, XRT_DEVICE_GENERIC_CONTROLLER, out_p);
+	return oxr_interaction_profile_array_find_by_device_name(array, cache, XRT_DEVICE_GENERIC_CONTROLLER, out_p);
 }
 
 static bool

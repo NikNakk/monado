@@ -153,7 +153,8 @@ u_macos_hosted_client_set_visibility(enum u_macos_display_host_visibility visibi
 		if (xret == XRT_SUCCESS) {
 			g_client_visibility = visibility;
 		}
-		atomic_store(&g_client_awaiting_present, xret == XRT_SUCCESS && visibility == U_MACOS_DISPLAY_HOST_SHOWN);
+		atomic_store(&g_client_awaiting_present,
+		             xret == XRT_SUCCESS && visibility == U_MACOS_DISPLAY_HOST_SHOWN);
 	}
 	pthread_mutex_unlock(&g_client_mutex);
 	return xret;

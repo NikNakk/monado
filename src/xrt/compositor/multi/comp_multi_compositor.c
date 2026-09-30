@@ -117,10 +117,7 @@ macos_client_gpu_trace_get(void)
 }
 
 static void
-macos_client_gpu_trace_event(const char *event,
-                             int64_t frame_id,
-                             uint64_t semaphore_value,
-                             int64_t duration_ns)
+macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semaphore_value, int64_t duration_ns)
 {
 	FILE *file = macos_client_gpu_trace_get();
 	if (file == NULL) {
@@ -128,8 +125,8 @@ macos_client_gpu_trace_event(const char *event,
 	}
 
 	flockfile(file);
-	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 "\n",
-	        event, frame_id, os_monotonic_get_ns(), semaphore_value, duration_ns);
+	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 "\n", event, frame_id, os_monotonic_get_ns(),
+	        semaphore_value, duration_ns);
 	g_macos_client_gpu_trace_rows++;
 	if (g_macos_client_gpu_trace_rows % 512 == 0) {
 		fflush(file);
@@ -161,7 +158,7 @@ layer_gpu_reuse_claim(struct multi_layer_entry *layer)
 		for (uint32_t i = 0; i < data->view_count; i++) {
 			(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[i], data->depth.v[i].sub.image_index);
 			(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[i + data->view_count],
-			                                            data->depth.d[i].sub.image_index);
+			                                           data->depth.d[i].sub.image_index);
 		}
 		break;
 	case XRT_LAYER_QUAD:
@@ -198,15 +195,11 @@ layer_gpu_reuse_release(struct multi_layer_entry *layer)
 		for (uint32_t i = 0; i < data->view_count; i++) {
 			comp_swapchain_gpu_reuse_release_image(layer->xscs[i], data->depth.v[i].sub.image_index);
 			comp_swapchain_gpu_reuse_release_image(layer->xscs[i + data->view_count],
-			                                      data->depth.d[i].sub.image_index);
+			                                       data->depth.d[i].sub.image_index);
 		}
 		break;
-	case XRT_LAYER_QUAD:
-		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->quad.sub.image_index);
-		break;
-	case XRT_LAYER_CUBE:
-		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->cube.sub.image_index);
-		break;
+	case XRT_LAYER_QUAD: comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->quad.sub.image_index); break;
+	case XRT_LAYER_CUBE: comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->cube.sub.image_index); break;
 	case XRT_LAYER_CYLINDER:
 		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->cylinder.sub.image_index);
 		break;
@@ -415,7 +408,7 @@ wait_for_scheduled_free(struct multi_compositor *mc)
 	if (ipc_frame_timing_enabled()) {
 		int64_t timing_end_ns = os_monotonic_get_ns();
 		U_LOG_RAW("IPC_FRAME_TIMING server scheduled_free frame=%" PRId64 " duration_ms=%.3f sleeps=%u",
-		        timing_frame_id, ipc_elapsed_ms(timing_start_ns, timing_end_ns), sleep_count);
+		          timing_frame_id, ipc_elapsed_ms(timing_start_ns, timing_end_ns), sleep_count);
 	}
 }
 
@@ -478,7 +471,7 @@ run_func(void *ptr)
 			wait_semaphore(mc, &xcsem, value);
 			int64_t semaphore_wait_end_ns = os_monotonic_get_ns();
 			macos_client_gpu_trace_event("semaphore_ready", frame_id, value,
-			                            semaphore_wait_end_ns - semaphore_wait_start_ns);
+			                             semaphore_wait_end_ns - semaphore_wait_start_ns);
 		}
 		if (xcf != NULL) {
 			wait_fence(mc, &xcf);
@@ -496,7 +489,7 @@ run_func(void *ptr)
 		wait_for_scheduled_free(mc);
 		int64_t scheduled_wait_end_ns = os_monotonic_get_ns();
 		macos_client_gpu_trace_event("scheduled", frame_id, value,
-		                            scheduled_wait_end_ns - scheduled_wait_start_ns);
+		                             scheduled_wait_end_ns - scheduled_wait_start_ns);
 
 		os_thread_helper_lock(&mc->wait_thread.oth);
 
@@ -862,8 +855,8 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
 	int64_t wait_end_ns = os_monotonic_get_ns();
 	macos_client_gpu_trace_event("layer_begin_after_previous", data->frame_id, 0, wait_end_ns - wait_start_ns);
 	if (ipc_frame_timing_enabled()) {
-		U_LOG_RAW("IPC_FRAME_TIMING server layer_begin_wait frame=%" PRId64 " duration_ms=%.3f",
-		        data->frame_id, ipc_elapsed_ms(wait_start_ns, wait_end_ns));
+		U_LOG_RAW("IPC_FRAME_TIMING server layer_begin_wait frame=%" PRId64 " duration_ms=%.3f", data->frame_id,
+		          ipc_elapsed_ms(wait_start_ns, wait_end_ns));
 	}
 
 	assert(mc->progress.layer_count == 0);
@@ -1065,9 +1058,10 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 	if (ipc_frame_timing_enabled()) {
 		int64_t commit_end_ns = os_monotonic_get_ns();
 		U_LOG_RAW("IPC_FRAME_TIMING server layer_commit frame=%" PRId64
-		        " sync_handle=%d imported_fence=%d import_ms=%.3f total_ms=%.3f",
-		        frame_id, xrt_graphics_sync_handle_is_valid(sync_handle) ? 1 : 0, xcf != NULL ? 1 : 0,
-		        ipc_elapsed_ms(import_start_ns, import_end_ns), ipc_elapsed_ms(commit_start_ns, commit_end_ns));
+		          " sync_handle=%d imported_fence=%d import_ms=%.3f total_ms=%.3f",
+		          frame_id, xrt_graphics_sync_handle_is_valid(sync_handle) ? 1 : 0, xcf != NULL ? 1 : 0,
+		          ipc_elapsed_ms(import_start_ns, import_end_ns),
+		          ipc_elapsed_ms(commit_start_ns, commit_end_ns));
 	}
 
 	return XRT_SUCCESS;

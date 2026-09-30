@@ -75,4 +75,3 @@ macos_trace_buffered_fflush(FILE *stream)
 	}
 	return fflush(stream);
 }
-

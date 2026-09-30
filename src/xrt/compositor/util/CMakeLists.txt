@@ -44,7 +44,8 @@ if(APPLE)
 	# the headers provide no-op inline stubs.
 	target_sources(
 		comp_util
-		PRIVATE comp_swapchain_gpu_reuse.c
+		PRIVATE
+			comp_swapchain_gpu_reuse.c
 			comp_metal_semaphore_provider.h
 			comp_metal_semaphore_probe.h
 			comp_metal_semaphore_probe.m

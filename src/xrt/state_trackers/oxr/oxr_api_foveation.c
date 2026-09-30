@@ -21,9 +21,7 @@
 
 
 static bool
-get_current_view_fovs(struct oxr_session *sess,
-                      struct xrt_fov out_fovs[XRT_MAX_VIEWS],
-                      uint32_t *out_view_count)
+get_current_view_fovs(struct oxr_session *sess, struct xrt_fov out_fovs[XRT_MAX_VIEWS], uint32_t *out_view_count)
 {
 	if (sess == NULL || out_fovs == NULL || out_view_count == NULL) {
 		return false;
@@ -46,18 +44,10 @@ get_current_view_fovs(struct oxr_session *sess,
 	};
 	struct xrt_space_relation head_relation = XRT_SPACE_RELATION_ZERO;
 	struct xrt_pose poses[XRT_MAX_VIEWS] = {0};
-	const enum xrt_view_type view_type =
-	    view_count == 1 ? XRT_VIEW_TYPE_MONO : XRT_VIEW_TYPE_STEREO;
+	const enum xrt_view_type view_type = view_count == 1 ? XRT_VIEW_TYPE_MONO : XRT_VIEW_TYPE_STEREO;
 
-	xrt_result_t xret = xrt_device_get_view_poses(
-	    head,
-	    &default_eye_relation,
-	    os_monotonic_get_ns(),
-	    view_type,
-	    view_count,
-	    &head_relation,
-	    out_fovs,
-	    poses);
+	xrt_result_t xret = xrt_device_get_view_poses(head, &default_eye_relation, os_monotonic_get_ns(), view_type,
+	                                              view_count, &head_relation, out_fovs, poses);
 	if (xret != XRT_SUCCESS) {
 		return false;
 	}
@@ -78,20 +68,17 @@ eye_tracking_acquire(struct oxr_logger *log, struct oxr_session *sess)
 	}
 
 	if (sess->eye_tracked_foveation.active_swapchain_count == 0) {
-		xrt_result_t xret =
-		    xrt_system_devices_feature_inc(sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+		xrt_result_t xret = xrt_system_devices_feature_inc(sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
 		if (xret != XRT_SUCCESS) {
 			return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED,
 			                 "Could not enable runtime-owned eye tracking (%d)", (int)xret);
 		}
 		sess->eye_tracked_foveation.feature_acquired = true;
 
-		xret = xrt_space_overseer_create_pose_space(
-		    sess->sys->xso, eyes, XRT_INPUT_GENERIC_EYE_GAZE_POSE,
-		    &sess->eye_tracked_foveation.gaze_space);
+		xret = xrt_space_overseer_create_pose_space(sess->sys->xso, eyes, XRT_INPUT_GENERIC_EYE_GAZE_POSE,
+		                                            &sess->eye_tracked_foveation.gaze_space);
 		if (xret != XRT_SUCCESS || sess->eye_tracked_foveation.gaze_space == NULL) {
-			(void)xrt_system_devices_feature_dec(
-			    sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+			(void)xrt_system_devices_feature_dec(sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
 			sess->eye_tracked_foveation.feature_acquired = false;
 			return oxr_error(log, XR_ERROR_FEATURE_UNSUPPORTED,
 			                 "Could not create runtime-private eye-gaze space (%d)", (int)xret);
@@ -116,8 +103,7 @@ eye_tracking_release(struct oxr_session *sess)
 
 	xrt_space_reference(&sess->eye_tracked_foveation.gaze_space, NULL);
 	if (sess->eye_tracked_foveation.feature_acquired) {
-		(void)xrt_system_devices_feature_dec(
-		    sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
+		(void)xrt_system_devices_feature_dec(sess->sys->xsysd, XRT_DEVICE_FEATURE_EYE_TRACKING);
 		sess->eye_tracked_foveation.feature_acquired = false;
 	}
 	sess->eye_tracked_foveation.valid = false;
@@ -140,20 +126,14 @@ sample_eye_tracked_centres(struct oxr_session *sess, struct xrt_foveation_state 
 	const struct xrt_pose identity = XRT_POSE_IDENTITY;
 	struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
 	xrt_result_t xret = xrt_space_overseer_locate_space(
-	    sess->sys->xso,
-	    sess->sys->xso->semantic.view,
-	    &identity,
-	    os_monotonic_get_ns(),
-	    sess->eye_tracked_foveation.gaze_space,
-	    &identity,
-	    &relation);
+	    sess->sys->xso, sess->sys->xso->semantic.view, &identity, os_monotonic_get_ns(),
+	    sess->eye_tracked_foveation.gaze_space, &identity, &relation);
 	if (xret != XRT_SUCCESS) {
 		return false;
 	}
 
-	const enum xrt_space_relation_flags required =
-	    (enum xrt_space_relation_flags)(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
-	                                    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	const enum xrt_space_relation_flags required = (enum xrt_space_relation_flags)(
+	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 	if ((relation.relation_flags & required) != required) {
 		return false;
 	}
@@ -162,15 +142,11 @@ sample_eye_tracked_centres(struct oxr_session *sess, struct xrt_foveation_state 
 	struct xrt_vec3 direction = {};
 	math_quat_rotate_vec3(&relation.pose.orientation, &forward, &direction);
 
-	return oxr_foveation_resolve_gaze_centres(
-	    &direction, fovs, view_count,
-	    state->vertical_offset_degrees, state);
+	return oxr_foveation_resolve_gaze_centres(&direction, fovs, view_count, state->vertical_offset_degrees, state);
 }
 
 static void
-store_eye_tracked_state(struct oxr_session *sess,
-                        const struct xrt_foveation_state *state,
-                        bool gaze_valid)
+store_eye_tracked_state(struct oxr_session *sess, const struct xrt_foveation_state *state, bool gaze_valid)
 {
 	for (uint32_t i = 0; i < XR_FOVEATION_CENTER_SIZE_META; ++i) {
 		if (i < state->view_count && state->views[i].center_valid) {
@@ -273,8 +249,8 @@ oxr_xrCreateFoveationProfileFB(XrSession session,
 	}
 
 	struct oxr_foveation_profile *fp = NULL;
-	OXR_ALLOCATE_HANDLE_OR_RETURN(&log, fp, OXR_XR_DEBUG_FOVEATION_PROFILE,
-	                              oxr_foveation_profile_destroy, &sess->handle);
+	OXR_ALLOCATE_HANDLE_OR_RETURN(&log, fp, OXR_XR_DEBUG_FOVEATION_PROFILE, oxr_foveation_profile_destroy,
+	                              &sess->handle);
 	fp->sess = sess;
 	fp->request = request;
 
@@ -327,8 +303,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		}
 
 		struct oxr_foveation_profile *fp;
-		OXR_VERIFY_FOVEATION_PROFILE_AND_INIT_LOG(&log, foveation->profile, fp,
-		                                          "xrUpdateSwapchainFB");
+		OXR_VERIFY_FOVEATION_PROFILE_AND_INIT_LOG(&log, foveation->profile, fp, "xrUpdateSwapchainFB");
 		if (fp->sess != sc->sess) {
 			return oxr_error(&log, XR_ERROR_HANDLE_INVALID,
 			                 "Foveation profile belongs to a different session");
@@ -336,8 +311,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 		const bool old_eye_tracked =
-		    sc->has_foveation_state && sc->foveation_request.enabled &&
-		    sc->foveation_request.eye_tracked;
+		    sc->has_foveation_state && sc->foveation_request.enabled && sc->foveation_request.eye_tracked;
 		const bool new_eye_tracked = fp->request.enabled && fp->request.eye_tracked;
 		bool acquired_eye_tracking = false;
 		bool gaze_valid = false;
@@ -400,9 +374,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 			if (xrt_state.eye_tracked) {
 				gaze_valid = sample_eye_tracked_centres(sc->sess, &xrt_state);
-				if (!gaze_valid &&
-				    !oxr_foveation_resolve_fixed_centres(
-				        fovs, view_count, &xrt_state)) {
+				if (!gaze_valid && !oxr_foveation_resolve_fixed_centres(fovs, view_count, &xrt_state)) {
 					if (acquired_eye_tracking) {
 						eye_tracking_release(sc->sess);
 					}
@@ -411,8 +383,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 				}
 			} else
 #endif
-			if (!oxr_foveation_resolve_fixed_centres(
-			        fovs, view_count, &xrt_state)) {
+			    if (!oxr_foveation_resolve_fixed_centres(fovs, view_count, &xrt_state)) {
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 				if (acquired_eye_tracking) {
 					eye_tracking_release(sc->sess);
@@ -505,8 +476,7 @@ oxr_xrGetSwapchainStateFB(XrSwapchain swapchain, XrSwapchainStateBaseHeaderFB *s
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
 XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetFoveationEyeTrackedStateMETA(XrSession session,
-                                      XrFoveationEyeTrackedStateMETA *foveationState)
+oxr_xrGetFoveationEyeTrackedStateMETA(XrSession session, XrFoveationEyeTrackedStateMETA *foveationState)
 {
 	OXR_TRACE_MARKER();
 
@@ -514,8 +484,7 @@ oxr_xrGetFoveationEyeTrackedStateMETA(XrSession session,
 	struct oxr_logger log;
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrGetFoveationEyeTrackedStateMETA");
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
-	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(
-	    &log, foveationState, XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, foveationState, XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META);
 
 	if (foveationState->next != NULL) {
 		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
@@ -525,9 +494,7 @@ oxr_xrGetFoveationEyeTrackedStateMETA(XrSession session,
 	for (uint32_t i = 0; i < XR_FOVEATION_CENTER_SIZE_META; ++i) {
 		foveationState->foveationCenter[i] = sess->eye_tracked_foveation.center[i];
 	}
-	foveationState->flags = sess->eye_tracked_foveation.valid
-	                            ? XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META
-	                            : 0;
+	foveationState->flags = sess->eye_tracked_foveation.valid ? XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META : 0;
 
 	return oxr_session_success_result(sess);
 }
@@ -554,19 +521,17 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 		                 "xrGetFoveationMetalStateMNDX requires a Metal session");
 	}
 	if (arrayLayer >= sc->array_layer_count) {
-		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
-		                 "arrayLayer %u is outside swapchain array size %u",
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "arrayLayer %u is outside swapchain array size %u",
 		                 arrayLayer, sc->array_layer_count);
 	}
 
 	struct xrt_device *head = GET_STATIC_XDEV_BY_ROLE(sc->sess->sys, head);
 	if (head == NULL || head->hmd == NULL || viewIndex >= head->hmd->view_count) {
-		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
-		                 "viewIndex %u is not valid for this system", viewIndex);
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "viewIndex %u is not valid for this system",
+		                 viewIndex);
 	}
 	if (sc->swapchain == NULL || sc->swapchain->set_foveation == NULL) {
-		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
-		                 "Metal swapchain has no foveation transport");
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED, "Metal swapchain has no foveation transport");
 	}
 
 	struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
@@ -578,13 +543,11 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 		XrBaseOutStructure *next = (XrBaseOutStructure *)state->next;
 		if (next->type != XR_TYPE_FOVEATION_METAL_PACKED_STATE_MNDX) {
 			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
-			                 "Unsupported XrFoveationMetalStateMNDX::next type %d",
-			                 next->type);
+			                 "Unsupported XrFoveationMetalStateMNDX::next type %d", next->type);
 		}
 		packed = (XrFoveationMetalPackedStateMNDX *)state->next;
 		if (packed->viewCount == 0 || packed->viewCount > XRT_MAX_VIEWS || packed->views == NULL) {
-			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
-			                 "Invalid packed Metal foveation view list");
+			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "Invalid packed Metal foveation view list");
 		}
 
 		uint32_t layout_flags = 0;
@@ -605,9 +568,9 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 		struct xrt_metal_foveation_view_layout layouts[XRT_MAX_VIEWS] = {0};
 		for (uint32_t i = 0; i < packed->viewCount; ++i) {
 			const XrFoveationMetalViewMNDX *view = &packed->views[i];
-			if (view->viewIndex >= head->hmd->view_count ||
-			    view->imageRect.offset.x < 0 || view->imageRect.offset.y < 0 ||
-			    view->imageRect.extent.width <= 0 || view->imageRect.extent.height <= 0 ||
+			if (view->viewIndex >= head->hmd->view_count || view->imageRect.offset.x < 0 ||
+			    view->imageRect.offset.y < 0 || view->imageRect.extent.width <= 0 ||
+			    view->imageRect.extent.height <= 0 ||
 			    (uint64_t)view->imageRect.offset.x + (uint32_t)view->imageRect.extent.width > sc->width ||
 			    (uint64_t)view->imageRect.offset.y + (uint32_t)view->imageRect.extent.height > sc->height) {
 				return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,
@@ -622,19 +585,17 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 			    .flags = layout_flags,
 			};
 		}
-		xret = xrt_swapchain_metal_get_packed_foveation_state(
-		    xscm, layouts, packed->viewCount, arrayLayer, &native);
+		xret = xrt_swapchain_metal_get_packed_foveation_state(xscm, layouts, packed->viewCount, arrayLayer,
+		                                                      &native);
 	} else {
-		xret = xrt_swapchain_metal_get_foveation_state(
-		    xscm, viewIndex, arrayLayer, &native);
+		xret = xrt_swapchain_metal_get_foveation_state(xscm, viewIndex, arrayLayer, &native);
 	}
 	if (xret == XRT_ERROR_NOT_IMPLEMENTED) {
 		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
 		                 "Metal foveation state is not currently available");
 	}
 	if (xret != XRT_SUCCESS) {
-		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
-		                 "Metal foveation state query failed (%d)", (int)xret);
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Metal foveation state query failed (%d)", (int)xret);
 	}
 
 	state->foveationEnabled = native.enabled ? XR_TRUE : XR_FALSE;
@@ -651,15 +612,11 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 		}
 		packed->horizontalSampleCount = native.sample_count;
 		packed->verticalSampleCount = native.sample_count;
-		memcpy(packed->horizontalSampleRates, native.horizontal_rates,
-		       native.sample_count * sizeof(float));
-		memcpy(packed->verticalSampleRates, native.vertical_rates,
-		       native.sample_count * sizeof(float));
+		memcpy(packed->horizontalSampleRates, native.horizontal_rates, native.sample_count * sizeof(float));
+		memcpy(packed->verticalSampleRates, native.vertical_rates, native.sample_count * sizeof(float));
 		packed->boundaryCount = native.compositor_map.boundary_count;
-		memcpy(packed->x, native.compositor_map.x,
-		       native.compositor_map.boundary_count * sizeof(float));
-		memcpy(packed->y, native.compositor_map.y,
-		       native.compositor_map.boundary_count * sizeof(float));
+		memcpy(packed->x, native.compositor_map.x, native.compositor_map.boundary_count * sizeof(float));
+		memcpy(packed->y, native.compositor_map.y, native.compositor_map.boundary_count * sizeof(float));
 	}
 	return oxr_session_success_result(sc->sess);
 }

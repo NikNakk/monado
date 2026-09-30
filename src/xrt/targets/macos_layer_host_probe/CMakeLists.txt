@@ -9,12 +9,8 @@ function(layer_host_probe_target target)
 	# Unlike the rest of the macOS code, this standalone tool uses ARC.
 	target_compile_options(${target} PRIVATE -fobjc-arc)
 	target_link_libraries(
-		${target}
-		PRIVATE
-			"-framework AppKit"
-			"-framework CoreVideo"
-			"-framework Metal"
-			"-framework QuartzCore"
+		${target} PRIVATE "-framework AppKit" "-framework CoreVideo" "-framework Metal"
+				  "-framework QuartzCore"
 		)
 endfunction()
 
@@ -29,9 +25,8 @@ layer_host_probe_target(macos-layer-host-probe-game)
 target_compile_definitions(macos-layer-host-probe-game PRIVATE LAYER_HOST_PROBE_GAME_BUNDLE=1)
 set_target_properties(
 	macos-layer-host-probe-game
-	PROPERTIES
-		MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/game-Info.plist.in"
-		OUTPUT_NAME "macos-layer-host-probe-game"
+	PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/game-Info.plist.in"
+		   OUTPUT_NAME "macos-layer-host-probe-game"
 	)
 
 # Sign the whole bundle ad hoc so its Info.plist is sealed with the binary.

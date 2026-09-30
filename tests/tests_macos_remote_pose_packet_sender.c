@@ -41,8 +41,7 @@ get_frame_count(void)
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
 	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 3600) {
-		fprintf(stderr,
-		        "Invalid MACOS_REMOTE_POSE_PACKET_SENDER_FRAMES=%s, expected integer in [1,3600]\n",
+		fprintf(stderr, "Invalid MACOS_REMOTE_POSE_PACKET_SENDER_FRAMES=%s, expected integer in [1,3600]\n",
 		        value);
 		return 0;
 	}
@@ -62,8 +61,7 @@ get_udp_port(void)
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
 	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 65535) {
-		fprintf(stderr,
-		        "Invalid MACOS_REMOTE_POSE_PACKET_SENDER_UDP_PORT=%s, expected integer in [1,65535]\n",
+		fprintf(stderr, "Invalid MACOS_REMOTE_POSE_PACKET_SENDER_UDP_PORT=%s, expected integer in [1,65535]\n",
 		        value);
 		return 0;
 	}
@@ -126,9 +124,7 @@ main(void)
 		os_nanosleep(U_TIME_1S_IN_NS / 60);
 	}
 
-	fprintf(stdout,
-	        "Remote pose packet sender sent %u packets to UDP port %u.\n",
-	        frame_count, (unsigned)udp_port);
+	fprintf(stdout, "Remote pose packet sender sent %u packets to UDP port %u.\n", frame_count, (unsigned)udp_port);
 	ret = 0;
 
 out:

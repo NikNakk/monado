@@ -18,7 +18,8 @@ get_first_adapter_luid(struct oxr_logger *log, LUID *out_luid)
 	IDXGIFactory1 *factory = NULL;
 	HRESULT hr = CreateDXGIFactory1(IID_IDXGIFactory1, (void **)&factory);
 	if (FAILED(hr) || factory == NULL) {
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, " CreateDXGIFactory1 failed: 0x%08lx", (unsigned long)hr);
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, " CreateDXGIFactory1 failed: 0x%08lx",
+		                 (unsigned long)hr);
 	}
 
 	IDXGIAdapter1 *adapter = NULL;
@@ -32,7 +33,8 @@ get_first_adapter_luid(struct oxr_logger *log, LUID *out_luid)
 	hr = adapter->GetDesc1(&desc);
 	adapter->Release();
 	if (FAILED(hr)) {
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, " IDXGIAdapter1::GetDesc1 failed: 0x%08lx", (unsigned long)hr);
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, " IDXGIAdapter1::GetDesc1 failed: 0x%08lx",
+		                 (unsigned long)hr);
 	}
 
 	*out_luid = desc.AdapterLuid;
@@ -105,16 +107,16 @@ oxr_d3d11_check_device(struct oxr_logger *log, struct oxr_system *sys, ID3D11Dev
 	hr = dxgi_device->GetAdapter(&adapter);
 	dxgi_device->Release();
 	if (FAILED(hr) || adapter == NULL) {
-		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
-		                 " IDXGIDevice::GetAdapter failed: 0x%08lx", (unsigned long)hr);
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, " IDXGIDevice::GetAdapter failed: 0x%08lx",
+		                 (unsigned long)hr);
 	}
 
 	DXGI_ADAPTER_DESC desc = {};
 	hr = adapter->GetDesc(&desc);
 	adapter->Release();
 	if (FAILED(hr)) {
-		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
-		                 " IDXGIAdapter::GetDesc failed: 0x%08lx", (unsigned long)hr);
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID, " IDXGIAdapter::GetDesc failed: 0x%08lx",
+		                 (unsigned long)hr);
 	}
 
 	return oxr_d3d_check_luid(log, sys, &desc.AdapterLuid);

@@ -20,8 +20,7 @@
 #include <cstring>
 #include <cstdio>
 
-namespace
-{
+namespace {
 constexpr int kEventWaitGetPoses = 201510020;
 constexpr int kEventSubmitL = 201510021;
 constexpr int kEventSubmitR = 201510022;
@@ -44,366 +43,359 @@ vr::EVRSubmitFlags g_submit_flags = vr::Submit_Default;
 vr::EColorSpace g_color_space = vr::ColorSpace_Auto;
 bool g_submitted_left = false;
 bool g_submitted_right = false;
-using LegacyGetFrameTimingFn = bool (__stdcall *)(vr::Compositor_FrameTiming *, uint32_t);
+using LegacyGetFrameTimingFn = bool(__stdcall *)(vr::Compositor_FrameTiming *, uint32_t);
 LegacyGetFrameTimingFn g_real_get_frame_timing = nullptr;
 bool g_compositor_fn_table_patched = false;
 
 void
 log_line(const char *message)
 {
-    std::fprintf(stderr, "[legacy-unity-openvr] %s\n", message);
-    std::fflush(stderr);
+	std::fprintf(stderr, "[legacy-unity-openvr] %s\n", message);
+	std::fflush(stderr);
 }
 
 HMODULE
 ensure_real()
 {
-    if (g_real != nullptr) {
-        return g_real;
-    }
+	if (g_real != nullptr) {
+		return g_real;
+	}
 
-    char path[MAX_PATH] = {};
-    if (g_self == nullptr || GetModuleFileNameA(g_self, path, MAX_PATH) == 0) {
-        log_line("Could not determine proxy DLL path");
-        return nullptr;
-    }
+	char path[MAX_PATH] = {};
+	if (g_self == nullptr || GetModuleFileNameA(g_self, path, MAX_PATH) == 0) {
+		log_line("Could not determine proxy DLL path");
+		return nullptr;
+	}
 
-    char *slash = nullptr;
-    for (char *p = path; *p != '\0'; ++p) {
-        if (*p == '\\' || *p == '/') slash = p;
-    }
-    if (slash == nullptr) {
-        log_line("Proxy DLL path has no directory");
-        return nullptr;
-    }
-    slash[1] = '\0';
+	char *slash = nullptr;
+	for (char *p = path; *p != '\0'; ++p) {
+		if (*p == '\\' || *p == '/')
+			slash = p;
+	}
+	if (slash == nullptr) {
+		log_line("Proxy DLL path has no directory");
+		return nullptr;
+	}
+	slash[1] = '\0';
 
-    const char real_name[] = "openvr_api_opencomposite.dll";
-    if (std::strlen(path) + sizeof(real_name) >= MAX_PATH) {
-        log_line("OpenComposite sibling path is too long");
-        return nullptr;
-    }
-    std::strcat(path, real_name);
+	const char real_name[] = "openvr_api_opencomposite.dll";
+	if (std::strlen(path) + sizeof(real_name) >= MAX_PATH) {
+		log_line("OpenComposite sibling path is too long");
+		return nullptr;
+	}
+	std::strcat(path, real_name);
 
-    g_real = LoadLibraryA(path);
-    if (g_real == nullptr) {
-        std::fprintf(stderr,
-                     "[legacy-unity-openvr] LoadLibraryA(%s) failed: %lu\n",
-                     path,
-                     static_cast<unsigned long>(GetLastError()));
-        std::fflush(stderr);
-    }
-    return g_real;
+	g_real = LoadLibraryA(path);
+	if (g_real == nullptr) {
+		std::fprintf(stderr, "[legacy-unity-openvr] LoadLibraryA(%s) failed: %lu\n", path,
+		             static_cast<unsigned long>(GetLastError()));
+		std::fflush(stderr);
+	}
+	return g_real;
 }
 
-bool __stdcall
-legacy_get_frame_timing(vr::Compositor_FrameTiming *timing, uint32_t frames_ago)
+bool __stdcall legacy_get_frame_timing(vr::Compositor_FrameTiming *timing, uint32_t frames_ago)
 {
-    if (g_real_get_frame_timing == nullptr) {
-        return false;
-    }
+	if (g_real_get_frame_timing == nullptr) {
+		return false;
+	}
 
-    const bool ok = g_real_get_frame_timing(timing, frames_ago);
+	const bool ok = g_real_get_frame_timing(timing, frames_ago);
 
-    if (timing != nullptr && timing->m_nNumFramePresents == 0) {
-        // SteamVR's Unity 5.x integration uses m_nNumFramePresents to derive
-        // Time.maximumDeltaTime but does not robustly handle GetFrameTiming()
-        // returning false before a compositor timing sample exists. A zero
-        // value drives maximumDeltaTime to zero and causes a runaway
-        // FixedUpdate/PostPresentHandoff loop. Supply the minimal sane value
-        // expected for a normally presented frame.
-        timing->m_nNumFramePresents = 1;
-    }
+	if (timing != nullptr && timing->m_nNumFramePresents == 0) {
+		// SteamVR's Unity 5.x integration uses m_nNumFramePresents to derive
+		// Time.maximumDeltaTime but does not robustly handle GetFrameTiming()
+		// returning false before a compositor timing sample exists. A zero
+		// value drives maximumDeltaTime to zero and causes a runaway
+		// FixedUpdate/PostPresentHandoff loop. Supply the minimal sane value
+		// expected for a normally presented frame.
+		timing->m_nNumFramePresents = 1;
+	}
 
-    if (!ok && timing != nullptr) {
-        // For this legacy compatibility path the Unity script only needs a
-        // usable frame-present count here. Report success once we have
-        // supplied that fallback so the caller does not treat the timing
-        // structure as unavailable.
-        return true;
-    }
+	if (!ok && timing != nullptr) {
+		// For this legacy compatibility path the Unity script only needs a
+		// usable frame-present count here. Report success once we have
+		// supplied that fallback so the caller does not treat the timing
+		// structure as unavailable.
+		return true;
+	}
 
-    return ok;
+	return ok;
 }
 
 void
 patch_legacy_compositor_fn_table(void *table_ptr, const char *version)
 {
-    if (g_compositor_fn_table_patched || table_ptr == nullptr) {
-        return;
-    }
+	if (g_compositor_fn_table_patched || table_ptr == nullptr) {
+		return;
+	}
 
-    // In the legacy OpenVR compositor function tables used by Unity 5.0-5.3,
-    // GetFrameTiming is entry 8:
-    // SetTrackingSpace, GetTrackingSpace, WaitGetPoses, GetLastPoses,
-    // GetLastPoseForTrackedDeviceIndex, Submit, ClearLastSubmittedFrame,
-    // PostPresentHandoff, GetFrameTiming.
-    auto **table = reinterpret_cast<void **>(table_ptr);
-    void **slot = &table[8];
+	// In the legacy OpenVR compositor function tables used by Unity 5.0-5.3,
+	// GetFrameTiming is entry 8:
+	// SetTrackingSpace, GetTrackingSpace, WaitGetPoses, GetLastPoses,
+	// GetLastPoseForTrackedDeviceIndex, Submit, ClearLastSubmittedFrame,
+	// PostPresentHandoff, GetFrameTiming.
+	auto **table = reinterpret_cast<void **>(table_ptr);
+	void **slot = &table[8];
 
-    DWORD old_protect = 0;
-    if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old_protect)) {
-        std::fprintf(stderr,
-                     "[legacy-unity-openvr] Could not patch %s GetFrameTiming table slot: %lu\n",
-                     version ? version : "<unknown>",
-                     static_cast<unsigned long>(GetLastError()));
-        std::fflush(stderr);
-        return;
-    }
+	DWORD old_protect = 0;
+	if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old_protect)) {
+		std::fprintf(stderr, "[legacy-unity-openvr] Could not patch %s GetFrameTiming table slot: %lu\n",
+		             version ? version : "<unknown>", static_cast<unsigned long>(GetLastError()));
+		std::fflush(stderr);
+		return;
+	}
 
-    g_real_get_frame_timing = reinterpret_cast<LegacyGetFrameTimingFn>(*slot);
-    *slot = reinterpret_cast<void *>(&legacy_get_frame_timing);
+	g_real_get_frame_timing = reinterpret_cast<LegacyGetFrameTimingFn>(*slot);
+	*slot = reinterpret_cast<void *>(&legacy_get_frame_timing);
 
-    DWORD ignored = 0;
-    VirtualProtect(slot, sizeof(void *), old_protect, &ignored);
-    FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void *));
+	DWORD ignored = 0;
+	VirtualProtect(slot, sizeof(void *), old_protect, &ignored);
+	FlushInstructionCache(GetCurrentProcess(), slot, sizeof(void *));
 
-    g_compositor_fn_table_patched = true;
-    std::fprintf(stderr,
-                 "[legacy-unity-openvr] Patched legacy compositor GetFrameTiming (%s)\n",
-                 version ? version : "<unknown>");
-    std::fflush(stderr);
+	g_compositor_fn_table_patched = true;
+	std::fprintf(stderr, "[legacy-unity-openvr] Patched legacy compositor GetFrameTiming (%s)\n",
+	             version ? version : "<unknown>");
+	std::fflush(stderr);
 }
 
 template <typename T>
 T
 real_proc(const char *name)
 {
-    HMODULE module = ensure_real();
-    if (module == nullptr) return nullptr;
-    return reinterpret_cast<T>(GetProcAddress(module, name));
+	HMODULE module = ensure_real();
+	if (module == nullptr)
+		return nullptr;
+	return reinterpret_cast<T>(GetProcAddress(module, name));
 }
 
 vr::IVRCompositor *
 get_compositor()
 {
-    if (g_compositor != nullptr) return g_compositor;
+	if (g_compositor != nullptr)
+		return g_compositor;
 
-    using Fn = void *(__cdecl *)(const char *, vr::EVRInitError *);
-    Fn get = real_proc<Fn>("VR_GetGenericInterface");
-    if (get == nullptr) return nullptr;
+	using Fn = void *(__cdecl *)(const char *, vr::EVRInitError *);
+	Fn get = real_proc<Fn>("VR_GetGenericInterface");
+	if (get == nullptr)
+		return nullptr;
 
-    vr::EVRInitError error = vr::VRInitError_None;
-    void *ptr = get(vr::IVRCompositor_Version, &error);
-    if (ptr == nullptr || error != vr::VRInitError_None) {
-        std::fprintf(stderr,
-                     "[legacy-unity-openvr] Could not get %s error=%d\n",
-                     vr::IVRCompositor_Version,
-                     static_cast<int>(error));
-        std::fflush(stderr);
-        return nullptr;
-    }
+	vr::EVRInitError error = vr::VRInitError_None;
+	void *ptr = get(vr::IVRCompositor_Version, &error);
+	if (ptr == nullptr || error != vr::VRInitError_None) {
+		std::fprintf(stderr, "[legacy-unity-openvr] Could not get %s error=%d\n", vr::IVRCompositor_Version,
+		             static_cast<int>(error));
+		std::fflush(stderr);
+		return nullptr;
+	}
 
-    g_compositor = reinterpret_cast<vr::IVRCompositor *>(ptr);
-    return g_compositor;
+	g_compositor = reinterpret_cast<vr::IVRCompositor *>(ptr);
+	return g_compositor;
 }
 
 ID3D11Texture2D *
 current_render_target()
 {
-    if (g_device == nullptr) {
-        log_line("Submit event arrived before Unity supplied a D3D11 device");
-        return nullptr;
-    }
+	if (g_device == nullptr) {
+		log_line("Submit event arrived before Unity supplied a D3D11 device");
+		return nullptr;
+	}
 
-    ID3D11DeviceContext *context = nullptr;
-    g_device->GetImmediateContext(&context);
-    if (context == nullptr) return nullptr;
+	ID3D11DeviceContext *context = nullptr;
+	g_device->GetImmediateContext(&context);
+	if (context == nullptr)
+		return nullptr;
 
-    ID3D11RenderTargetView *rtv = nullptr;
-    context->OMGetRenderTargets(1, &rtv, nullptr);
-    context->Release();
-    if (rtv == nullptr) {
-        log_line("No D3D11 render target is bound at Submit event");
-        return nullptr;
-    }
+	ID3D11RenderTargetView *rtv = nullptr;
+	context->OMGetRenderTargets(1, &rtv, nullptr);
+	context->Release();
+	if (rtv == nullptr) {
+		log_line("No D3D11 render target is bound at Submit event");
+		return nullptr;
+	}
 
-    ID3D11Resource *resource = nullptr;
-    rtv->GetResource(&resource);
-    rtv->Release();
-    if (resource == nullptr) return nullptr;
+	ID3D11Resource *resource = nullptr;
+	rtv->GetResource(&resource);
+	rtv->Release();
+	if (resource == nullptr)
+		return nullptr;
 
-    ID3D11Texture2D *texture = nullptr;
-    HRESULT hr = resource->QueryInterface(IID_ID3D11Texture2D, reinterpret_cast<void **>(&texture));
-    resource->Release();
-    if (FAILED(hr)) {
-        std::fprintf(stderr,
-                     "[legacy-unity-openvr] Bound resource is not ID3D11Texture2D hr=0x%08lx\n",
-                     static_cast<unsigned long>(hr));
-        std::fflush(stderr);
-        return nullptr;
-    }
+	ID3D11Texture2D *texture = nullptr;
+	HRESULT hr = resource->QueryInterface(IID_ID3D11Texture2D, reinterpret_cast<void **>(&texture));
+	resource->Release();
+	if (FAILED(hr)) {
+		std::fprintf(stderr, "[legacy-unity-openvr] Bound resource is not ID3D11Texture2D hr=0x%08lx\n",
+		             static_cast<unsigned long>(hr));
+		std::fflush(stderr);
+		return nullptr;
+	}
 
-    return texture;
+	return texture;
 }
 
-void __stdcall
-legacy_render_event(int event_id)
+void __stdcall legacy_render_event(int event_id)
 {
-    vr::IVRCompositor *compositor = get_compositor();
-    if (compositor == nullptr) return;
+	vr::IVRCompositor *compositor = get_compositor();
+	if (compositor == nullptr)
+		return;
 
 
-    switch (event_id) {
-    case kEventWaitGetPoses: {
-        vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount] = {};
-        vr::EVRCompositorError e =
-            compositor->WaitGetPoses(poses, vr::k_unMaxTrackedDeviceCount, nullptr, 0);
-        if (e != vr::VRCompositorError_None) {
-            std::fprintf(stderr, "[legacy-unity-openvr] WaitGetPoses error=%d\n", static_cast<int>(e));
-            std::fflush(stderr);
-        }
-        break;
-    }
-    case kEventSubmitL:
-    case kEventSubmitR: {
-        ID3D11Texture2D *texture = current_render_target();
-        if (texture == nullptr) break;
+	switch (event_id) {
+	case kEventWaitGetPoses: {
+		vr::TrackedDevicePose_t poses[vr::k_unMaxTrackedDeviceCount] = {};
+		vr::EVRCompositorError e = compositor->WaitGetPoses(poses, vr::k_unMaxTrackedDeviceCount, nullptr, 0);
+		if (e != vr::VRCompositorError_None) {
+			std::fprintf(stderr, "[legacy-unity-openvr] WaitGetPoses error=%d\n", static_cast<int>(e));
+			std::fflush(stderr);
+		}
+		break;
+	}
+	case kEventSubmitL:
+	case kEventSubmitR: {
+		ID3D11Texture2D *texture = current_render_target();
+		if (texture == nullptr)
+			break;
 
-        const vr::EVREye eye = event_id == kEventSubmitL ? vr::Eye_Left : vr::Eye_Right;
-        const unsigned index = eye == vr::Eye_Left ? 0u : 1u;
-        vr::Texture_t submitted = {
-            texture,
-            vr::TextureType_DirectX,
-            g_color_space,
-        };
-        vr::EVRCompositorError e =
-            compositor->Submit(eye, &submitted, &g_bounds[index], g_submit_flags);
-        texture->Release();
-        if (e == vr::VRCompositorError_None) {
-            if (eye == vr::Eye_Left) {
-                g_submitted_left = true;
-            } else {
-                g_submitted_right = true;
-            }
-        } else {
-            std::fprintf(stderr,
-                         "[legacy-unity-openvr] Submit eye=%u error=%d\n",
-                         index,
-                         static_cast<int>(e));
-            std::fflush(stderr);
-        }
-        break;
-    }
-    case kEventFlush:
-        if (g_device != nullptr) {
-            ID3D11DeviceContext *context = nullptr;
-            g_device->GetImmediateContext(&context);
-            if (context != nullptr) {
-                context->Flush();
-                context->Release();
-            }
-        }
-        break;
-    case kEventPostPresentHandoff:
-        // Old Unity 5.x SteamVR integrations can emit this plugin event far
-        // more often than actual rendered frames. Forwarding every event to
-        // OpenComposite causes a pathological handoff storm. A handoff is
-        // meaningful only after a complete stereo frame has been submitted.
-        if (g_submitted_left && g_submitted_right) {
-            compositor->PostPresentHandoff();
-            g_submitted_left = false;
-            g_submitted_right = false;
-        }
-        break;
-    default:
-        std::fprintf(stderr, "[legacy-unity-openvr] Unknown render event %d\n", event_id);
-        std::fflush(stderr);
-        break;
-    }
+		const vr::EVREye eye = event_id == kEventSubmitL ? vr::Eye_Left : vr::Eye_Right;
+		const unsigned index = eye == vr::Eye_Left ? 0u : 1u;
+		vr::Texture_t submitted = {
+		    texture,
+		    vr::TextureType_DirectX,
+		    g_color_space,
+		};
+		vr::EVRCompositorError e = compositor->Submit(eye, &submitted, &g_bounds[index], g_submit_flags);
+		texture->Release();
+		if (e == vr::VRCompositorError_None) {
+			if (eye == vr::Eye_Left) {
+				g_submitted_left = true;
+			} else {
+				g_submitted_right = true;
+			}
+		} else {
+			std::fprintf(stderr, "[legacy-unity-openvr] Submit eye=%u error=%d\n", index,
+			             static_cast<int>(e));
+			std::fflush(stderr);
+		}
+		break;
+	}
+	case kEventFlush:
+		if (g_device != nullptr) {
+			ID3D11DeviceContext *context = nullptr;
+			g_device->GetImmediateContext(&context);
+			if (context != nullptr) {
+				context->Flush();
+				context->Release();
+			}
+		}
+		break;
+	case kEventPostPresentHandoff:
+		// Old Unity 5.x SteamVR integrations can emit this plugin event far
+		// more often than actual rendered frames. Forwarding every event to
+		// OpenComposite causes a pathological handoff storm. A handoff is
+		// meaningful only after a complete stereo frame has been submitted.
+		if (g_submitted_left && g_submitted_right) {
+			compositor->PostPresentHandoff();
+			g_submitted_left = false;
+			g_submitted_right = false;
+		}
+		break;
+	default:
+		std::fprintf(stderr, "[legacy-unity-openvr] Unknown render event %d\n", event_id);
+		std::fflush(stderr);
+		break;
+	}
 }
 } // namespace
 
-extern "C" __declspec(dllexport) void __stdcall
-UnitySetGraphicsDevice(void *device, int device_type, int event_type)
+extern "C" __declspec(dllexport) void __stdcall UnitySetGraphicsDevice(void *device, int device_type, int event_type)
 {
-    if (device_type != kUnityGfxRendererD3D11) return;
+	if (device_type != kUnityGfxRendererD3D11)
+		return;
 
-    if (event_type == kUnityGfxDeviceEventInitialize) {
-        auto *next = reinterpret_cast<ID3D11Device *>(device);
-        if (next != nullptr) next->AddRef();
-        if (g_device != nullptr) g_device->Release();
-        g_device = next;
-        log_line("Captured Unity D3D11 graphics device");
-    } else if (event_type == kUnityGfxDeviceEventShutdown) {
-        if (g_device != nullptr) {
-            g_device->Release();
-            g_device = nullptr;
-        }
-        log_line("Released Unity D3D11 graphics device");
-    }
+	if (event_type == kUnityGfxDeviceEventInitialize) {
+		auto *next = reinterpret_cast<ID3D11Device *>(device);
+		if (next != nullptr)
+			next->AddRef();
+		if (g_device != nullptr)
+			g_device->Release();
+		g_device = next;
+		log_line("Captured Unity D3D11 graphics device");
+	} else if (event_type == kUnityGfxDeviceEventShutdown) {
+		if (g_device != nullptr) {
+			g_device->Release();
+			g_device = nullptr;
+		}
+		log_line("Released Unity D3D11 graphics device");
+	}
 }
 
-extern "C" __declspec(dllexport) void *
-UnityHooks_GetRenderEventFunc()
+extern "C" __declspec(dllexport) void *UnityHooks_GetRenderEventFunc()
 {
-    return reinterpret_cast<void *>(&legacy_render_event);
+	return reinterpret_cast<void *>(&legacy_render_event);
 }
 
-extern "C" __declspec(dllexport) void
-UnityHooks_SetSubmitParams(vr::VRTextureBounds_t bounds_l,
-                           vr::VRTextureBounds_t bounds_r,
-                           vr::EVRSubmitFlags submit_flags)
+extern "C" __declspec(dllexport) void UnityHooks_SetSubmitParams(vr::VRTextureBounds_t bounds_l,
+                                                                 vr::VRTextureBounds_t bounds_r,
+                                                                 vr::EVRSubmitFlags submit_flags)
 {
-    g_bounds[0] = bounds_l;
-    g_bounds[1] = bounds_r;
-    g_submit_flags = submit_flags;
+	g_bounds[0] = bounds_l;
+	g_bounds[1] = bounds_r;
+	g_submit_flags = submit_flags;
 }
 
-extern "C" __declspec(dllexport) void
-UnityHooks_SetColorSpace(vr::EColorSpace color_space)
+extern "C" __declspec(dllexport) void UnityHooks_SetColorSpace(vr::EColorSpace color_space)
 {
-    g_color_space = color_space;
+	g_color_space = color_space;
 }
 
-extern "C" __declspec(dllexport) void
-UnityHooks_EventWriteString(const wchar_t *event)
+extern "C" __declspec(dllexport) void UnityHooks_EventWriteString(const wchar_t *event)
 {
-    if (event != nullptr) {
-        OutputDebugStringW(event);
-        OutputDebugStringW(L"\n");
-    }
+	if (event != nullptr) {
+		OutputDebugStringW(event);
+		OutputDebugStringW(L"\n");
+	}
 }
 
-#define FORWARD_RET(name, ret, args, callargs) \
-extern "C" __declspec(dllexport) ret name args { \
-    using Fn = ret (__cdecl *) args; \
-    Fn fn = real_proc<Fn>(#name); \
-    if (fn == nullptr) return {}; \
-    return fn callargs; \
-}
+#define FORWARD_RET(name, ret, args, callargs)                                                                         \
+	extern "C" __declspec(dllexport) ret name args                                                                 \
+	{                                                                                                              \
+		using Fn = ret(__cdecl *) args;                                                                        \
+		Fn fn = real_proc<Fn>(#name);                                                                          \
+		if (fn == nullptr)                                                                                     \
+			return {};                                                                                     \
+		return fn callargs;                                                                                    \
+	}
 
-#define FORWARD_VOID(name, args, callargs) \
-extern "C" __declspec(dllexport) void name args { \
-    using Fn = void (__cdecl *) args; \
-    Fn fn = real_proc<Fn>(#name); \
-    if (fn != nullptr) fn callargs; \
-}
+#define FORWARD_VOID(name, args, callargs)                                                                             \
+	extern "C" __declspec(dllexport) void name args                                                                \
+	{                                                                                                              \
+		using Fn = void(__cdecl *) args;                                                                       \
+		Fn fn = real_proc<Fn>(#name);                                                                          \
+		if (fn != nullptr)                                                                                     \
+			fn callargs;                                                                                   \
+	}
 
-FORWARD_RET(VR_InitInternal2, uint32_t,
-            (vr::EVRInitError *error, vr::EVRApplicationType type, const char *startup),
+FORWARD_RET(VR_InitInternal2,
+            uint32_t,
+            (vr::EVRInitError * error, vr::EVRApplicationType type, const char *startup),
             (error, type, startup))
-FORWARD_RET(VR_InitInternal, uint32_t,
-            (vr::EVRInitError *error, vr::EVRApplicationType type),
-            (error, type))
+FORWARD_RET(VR_InitInternal, uint32_t, (vr::EVRInitError * error, vr::EVRApplicationType type), (error, type))
 FORWARD_VOID(VR_ShutdownInternal, (), ())
-extern "C" __declspec(dllexport) void *
-VR_GetGenericInterface(const char *version, vr::EVRInitError *error)
+extern "C" __declspec(dllexport) void *VR_GetGenericInterface(const char *version, vr::EVRInitError *error)
 {
-    using Fn = void *(__cdecl *)(const char *, vr::EVRInitError *);
-    Fn fn = real_proc<Fn>("VR_GetGenericInterface");
-    if (fn == nullptr) {
-        return nullptr;
-    }
+	using Fn = void *(__cdecl *)(const char *, vr::EVRInitError *);
+	Fn fn = real_proc<Fn>("VR_GetGenericInterface");
+	if (fn == nullptr) {
+		return nullptr;
+	}
 
-    void *result = fn(version, error);
+	void *result = fn(version, error);
 
-    if (result != nullptr && version != nullptr &&
-        std::strncmp(version, "FnTable:IVRCompositor_", 22) == 0) {
-        patch_legacy_compositor_fn_table(result, version);
-    }
+	if (result != nullptr && version != nullptr && std::strncmp(version, "FnTable:IVRCompositor_", 22) == 0) {
+		patch_legacy_compositor_fn_table(result, version);
+	}
 
-    return result;
+	return result;
 }
 FORWARD_RET(VR_IsInterfaceVersionValid, bool, (const char *version), (version))
 FORWARD_RET(VR_IsHmdPresent, bool, (), ())
@@ -414,38 +406,37 @@ FORWARD_RET(VR_GetStringForHmdError, const char *, (vr::EVRInitError error), (er
 FORWARD_RET(VR_GetInitToken, uint32_t, (), ())
 FORWARD_RET(VR_RuntimePath, const char *, (), ())
 
-extern "C" __declspec(dllexport) void *
-VRControlPanel()
+extern "C" __declspec(dllexport) void *VRControlPanel()
 {
-    // VRControlPanel was a legacy global accessor. If a future/pinned
-    // OpenComposite build provides it, preserve that implementation. Current
-    // OpenComposite does not, and older clients are permitted to receive a
-    // null control-panel interface when that optional interface is unavailable.
-    using Fn = void *(__cdecl *)();
-    Fn fn = real_proc<Fn>("VRControlPanel");
-    if (fn != nullptr) {
-        return fn();
-    }
+	// VRControlPanel was a legacy global accessor. If a future/pinned
+	// OpenComposite build provides it, preserve that implementation. Current
+	// OpenComposite does not, and older clients are permitted to receive a
+	// null control-panel interface when that optional interface is unavailable.
+	using Fn = void *(__cdecl *)();
+	Fn fn = real_proc<Fn>("VRControlPanel");
+	if (fn != nullptr) {
+		return fn();
+	}
 
-    log_line("VRControlPanel requested; OpenComposite has no implementation, returning nullptr");
-    return nullptr;
+	log_line("VRControlPanel requested; OpenComposite has no implementation, returning nullptr");
+	return nullptr;
 }
 
 BOOL WINAPI
 DllMain(HINSTANCE instance, DWORD reason, LPVOID)
 {
-    if (reason == DLL_PROCESS_ATTACH) {
-        g_self = instance;
-        DisableThreadLibraryCalls(instance);
-    } else if (reason == DLL_PROCESS_DETACH) {
-        if (g_device != nullptr) {
-            g_device->Release();
-            g_device = nullptr;
-        }
-        if (g_real != nullptr) {
-            FreeLibrary(g_real);
-            g_real = nullptr;
-        }
-    }
-    return TRUE;
+	if (reason == DLL_PROCESS_ATTACH) {
+		g_self = instance;
+		DisableThreadLibraryCalls(instance);
+	} else if (reason == DLL_PROCESS_DETACH) {
+		if (g_device != nullptr) {
+			g_device->Release();
+			g_device = nullptr;
+		}
+		if (g_real != nullptr) {
+			FreeLibrary(g_real);
+			g_real = nullptr;
+		}
+	}
+	return TRUE;
 }

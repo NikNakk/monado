@@ -62,8 +62,8 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 
 	U_LOG_D("xrCreateSwapchain: createFlags=0x%" PRIx64 " usageFlags=0x%" PRIx64 " format=%" PRIi64
 	        " size=%ux%u arraySize=%u sampleCount=%u",
-	        (uint64_t)createInfo->createFlags, (uint64_t)createInfo->usageFlags, createInfo->format, createInfo->width,
-	        createInfo->height, createInfo->arraySize, createInfo->sampleCount);
+	        (uint64_t)createInfo->createFlags, (uint64_t)createInfo->usageFlags, createInfo->format,
+	        createInfo->width, createInfo->height, createInfo->arraySize, createInfo->sampleCount);
 
 	// Save people from shooting themselves in the foot.
 	OXR_VERIFY_ARG_NOT_ZERO(&log, createInfo->arraySize);
@@ -119,9 +119,8 @@ oxr_xrCreateSwapchain(XrSession session, const XrSwapchainCreateInfo *createInfo
 
 
 #ifdef OXR_HAVE_FB_foveation
-	const XrSwapchainCreateInfoFoveationFB *foveation_info =
-	    OXR_GET_INPUT_FROM_CHAIN(createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB,
-	                             XrSwapchainCreateInfoFoveationFB);
+	const XrSwapchainCreateInfoFoveationFB *foveation_info = OXR_GET_INPUT_FROM_CHAIN(
+	    createInfo, XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB, XrSwapchainCreateInfoFoveationFB);
 	if (foveation_info != NULL) {
 		if (!inst->extensions.FB_foveation) {
 			return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE,

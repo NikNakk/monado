@@ -39,10 +39,10 @@ DEBUG_GET_ONCE_BOOL_OPTION(ignore_openxr_version, "OXR_IGNORE_OPENXR_VERSION", f
 #define MAKE_EXTENSION_PROPERTIES(mixed_case, all_caps)                                                                \
 	{XR_TYPE_EXTENSION_PROPERTIES, NULL, XR_##all_caps##_EXTENSION_NAME, XR_##mixed_case##_SPEC_VERSION},
 static const XrExtensionProperties extension_properties[] = {
-	OXR_EXTENSION_SUPPORT_GENERATE(MAKE_EXTENSION_PROPERTIES)
+    OXR_EXTENSION_SUPPORT_GENERATE(MAKE_EXTENSION_PROPERTIES)
 #ifdef OXR_HAVE_KHR_metal_enable
-	// Unity's macOS OpenXR provider still requests the provisional KHRX2 name.
-	{XR_TYPE_EXTENSION_PROPERTIES, NULL, "XR_KHRX2_metal_enable", XR_KHR_metal_enable_SPEC_VERSION},
+    // Unity's macOS OpenXR provider still requests the provisional KHRX2 name.
+    {XR_TYPE_EXTENSION_PROPERTIES, NULL, "XR_KHRX2_metal_enable", XR_KHR_metal_enable_SPEC_VERSION},
 #endif
 };
 

@@ -285,7 +285,8 @@ p_osx_hid_probe(struct prober *p)
 		}
 
 		struct prober_device *pdev = NULL;
-		if (p_dev_get_bluetooth_dev(p, bluetooth_id, (uint16_t)vendor, (uint16_t)product, product_name, &pdev) != 0 ||
+		if (p_dev_get_bluetooth_dev(p, bluetooth_id, (uint16_t)vendor, (uint16_t)product, product_name,
+		                            &pdev) != 0 ||
 		    pdev == NULL) {
 			P_WARN(p, "Failed to add PS Sense controller %04x:%04x", (uint16_t)vendor, (uint16_t)product);
 			continue;

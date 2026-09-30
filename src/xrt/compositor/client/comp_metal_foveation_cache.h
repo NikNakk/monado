@@ -77,8 +77,7 @@ comp_metal_foveation_cache_destroy(struct comp_metal_foveation_cache *cache);
  * again. Existing image bindings are never modified here.
  */
 xrt_result_t
-comp_metal_foveation_cache_set(struct comp_metal_foveation_cache *cache,
-                               const struct xrt_foveation_state *state);
+comp_metal_foveation_cache_set(struct comp_metal_foveation_cache *cache, const struct xrt_foveation_state *state);
 
 /*!
  * Return the map for one view and select it for @p array_layer. A disabled or
@@ -95,20 +94,18 @@ comp_metal_foveation_cache_get(struct comp_metal_foveation_cache *cache,
  * @p array_layer. A disabled or failed result clears the layer selection.
  */
 xrt_result_t
-comp_metal_foveation_cache_get_packed(
-    struct comp_metal_foveation_cache *cache,
-    const struct xrt_metal_foveation_view_layout *views,
-    uint32_t view_count,
-    uint32_t array_layer,
-    struct xrt_metal_foveation_state *out_state);
+comp_metal_foveation_cache_get_packed(struct comp_metal_foveation_cache *cache,
+                                      const struct xrt_metal_foveation_view_layout *views,
+                                      uint32_t view_count,
+                                      uint32_t array_layer,
+                                      struct xrt_metal_foveation_state *out_state);
 
 /*!
  * Bind the current selection of every array layer to @p image_index. Call
  * after the image has been successfully released to the compositor.
  */
 xrt_result_t
-comp_metal_foveation_cache_bind_released_image(struct comp_metal_foveation_cache *cache,
-                                               uint32_t image_index);
+comp_metal_foveation_cache_bind_released_image(struct comp_metal_foveation_cache *cache, uint32_t image_index);
 
 /*!
  * Return the map bound to a released image and array layer. An image that was

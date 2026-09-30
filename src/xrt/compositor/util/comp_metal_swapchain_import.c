@@ -46,9 +46,10 @@ static __thread struct metal_swapchain_import_request g_request = {0};
 static bool
 create_info_matches(const struct xrt_swapchain_create_info *a, const struct xrt_swapchain_create_info *b)
 {
-	if (a->create != b->create || a->bits != b->bits || a->format != b->format || a->sample_count != b->sample_count ||
-	    a->width != b->width || a->height != b->height || a->face_count != b->face_count ||
-	    a->array_size != b->array_size || a->mip_count != b->mip_count || a->format_count != b->format_count) {
+	if (a->create != b->create || a->bits != b->bits || a->format != b->format ||
+	    a->sample_count != b->sample_count || a->width != b->width || a->height != b->height ||
+	    a->face_count != b->face_count || a->array_size != b->array_size || a->mip_count != b->mip_count ||
+	    a->format_count != b->format_count) {
 		return false;
 	}
 
@@ -189,11 +190,10 @@ create_direct_image(struct vk_bundle *vk,
 
 	void *import_texture = NULL;
 	bool import_texture_needs_release = false;
-	if (!comp_metal_texture_prepare_for_vk_device(
-	        vk, metal_texture, &import_texture, &import_texture_needs_release)) {
+	if (!comp_metal_texture_prepare_for_vk_device(vk, metal_texture, &import_texture,
+	                                              &import_texture_needs_release)) {
 		U_LOG_E("Metal direct import could not prepare texture for Vulkan device: image=%u source=%p",
-		        image_index,
-		        metal_texture);
+		        image_index, metal_texture);
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
@@ -244,14 +244,11 @@ create_direct_image(struct vk_bundle *vk,
 
 	VkResult ret = vk->vkCreateImage(vk->device, &create_info, NULL, &out_image->handle);
 	if (ret != VK_SUCCESS) {
-		U_LOG_E("Metal direct vkCreateImage failed: image=%u result=%d source=%p import=%p array_layers=%u format=%u usage=0x%x",
-		        image_index,
-		        (int)ret,
-		        metal_texture,
-		        import_texture,
-		        info->array_size * info->face_count,
-		        (unsigned)format,
-		        (unsigned)usage);
+		U_LOG_E(
+		    "Metal direct vkCreateImage failed: image=%u result=%d source=%p import=%p array_layers=%u "
+		    "format=%u usage=0x%x",
+		    image_index, (int)ret, metal_texture, import_texture, info->array_size * info->face_count,
+		    (unsigned)format, (unsigned)usage);
 		comp_metal_texture_finish_for_vk_device(import_texture, import_texture_needs_release);
 		return ret;
 	}
@@ -272,24 +269,18 @@ create_direct_image(struct vk_bundle *vk,
 	vk->vkExportMetalObjectsEXT(vk->device, &objects_info);
 	if (texture_info.mtlTexture == NULL || texture_info.mtlTexture != import_texture) {
 		U_LOG_E("Metal direct import round-trip mismatch: image=%u source=%p imported=%p exported=%p",
-		        image_index,
-		        metal_texture,
-		        import_texture,
-		        texture_info.mtlTexture);
+		        image_index, metal_texture, import_texture, texture_info.mtlTexture);
 		vk->vkDestroyImage(vk->device, out_image->handle, NULL);
 		out_image->handle = VK_NULL_HANDLE;
 		comp_metal_texture_finish_for_vk_device(import_texture, import_texture_needs_release);
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
 
-	U_LOG_I("Metal direct VkImage import: image=%u source_texture=%p import_texture=%p VkImage=%p array_layers=%u format=%u usage=0x%x",
-	        image_index,
-	        metal_texture,
-	        import_texture,
-	        (void *)out_image->handle,
-	        info->array_size * info->face_count,
-	        (unsigned)format,
-	        (unsigned)usage);
+	U_LOG_I(
+	    "Metal direct VkImage import: image=%u source_texture=%p import_texture=%p VkImage=%p array_layers=%u "
+	    "format=%u usage=0x%x",
+	    image_index, metal_texture, import_texture, (void *)out_image->handle, info->array_size * info->face_count,
+	    (unsigned)format, (unsigned)usage);
 
 	comp_metal_texture_finish_for_vk_device(import_texture, import_texture_needs_release);
 	return VK_SUCCESS;
@@ -307,8 +298,7 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 
 	const uint32_t direct_image_count = g_request.image_count;
 	if (direct_image_count == 0 || direct_image_count > ARRAY_SIZE(out_vkic->images)) {
-		U_LOG_E("Metal direct swapchain image count invalid: requested=%u max=%zu",
-		        direct_image_count,
+		U_LOG_E("Metal direct swapchain image count invalid: requested=%u max=%zu", direct_image_count,
 		        ARRAY_SIZE(out_vkic->images));
 		return VK_ERROR_TOO_MANY_OBJECTS;
 	}
@@ -371,19 +361,16 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 	 * vkic.image_count, so publish the same count through xrt_swapchain before
 	 * the completed swapchain can escape to the IPC server.
 	 */
-	struct comp_swapchain *sc =
-	    (struct comp_swapchain *)((char *)out_vkic - offsetof(struct comp_swapchain, vkic));
+	struct comp_swapchain *sc = (struct comp_swapchain *)((char *)out_vkic - offsetof(struct comp_swapchain, vkic));
 	sc->base.base.image_count = direct_image_count;
 
-	const char *source_name = g_request.source == METAL_SWAPCHAIN_IMPORT_IOSURFACE_IDS
-	                              ? "iosurface-id"
-	                              : g_request.source == METAL_SWAPCHAIN_IMPORT_BOOTSTRAP_NAMES
-	                                    ? "metal-bootstrap"
-	                                    : "metal-texture";
-	U_LOG_I("Metal direct swapchain allocator consumed %u external image(s) source=%s (compositor default=%u); no Vulkan-first image allocation performed",
-	        direct_image_count,
-	        source_name,
-	        image_count);
+	const char *source_name = g_request.source == METAL_SWAPCHAIN_IMPORT_IOSURFACE_IDS     ? "iosurface-id"
+	                          : g_request.source == METAL_SWAPCHAIN_IMPORT_BOOTSTRAP_NAMES ? "metal-bootstrap"
+	                                                                                       : "metal-texture";
+	U_LOG_I(
+	    "Metal direct swapchain allocator consumed %u external image(s) source=%s (compositor default=%u); no "
+	    "Vulkan-first image allocation performed",
+	    direct_image_count, source_name, image_count);
 	return VK_SUCCESS;
 }
 

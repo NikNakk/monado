@@ -99,14 +99,8 @@ trace_frame_timing(struct client_d3d11_compositor *c,
 		return;
 	}
 
-	fprintf(c->timing_trace,
-	        "%" PRId64 ",%" PRIu64 ",%u,%.3f,%.3f,%.3f,%.3f\n",
-	        c->timing_frame_id,
-	        c->fence_value,
-	        c->gpu_sync_active ? 1u : 0u,
-	        c->last_wait_frame_us,
-	        producer_wait_us,
-	        ipc_commit_us,
+	fprintf(c->timing_trace, "%" PRId64 ",%" PRIu64 ",%u,%.3f,%.3f,%.3f,%.3f\n", c->timing_frame_id, c->fence_value,
+	        c->gpu_sync_active ? 1u : 0u, c->last_wait_frame_us, producer_wait_us, ipc_commit_us,
 	        layer_commit_total_us);
 	fflush(c->timing_trace);
 }
@@ -228,14 +222,8 @@ swapchain_release(struct xrt_swapchain *xsc, uint32_t index)
 		}
 
 		for (uint32_t layer = 0; layer < sc->array_size; ++layer) {
-			sc->c->context->CopySubresourceRegion(sc->transport_images[index],
-			                                      0,
-			                                      layer * sc->layer_width,
-			                                      0,
-			                                      0,
-			                                      sc->base.images[index],
-			                                      layer,
-			                                      NULL);
+			sc->c->context->CopySubresourceRegion(sc->transport_images[index], 0, layer * sc->layer_width,
+			                                      0, 0, sc->base.images[index], layer, NULL);
 		}
 	}
 	return xrt_swapchain_release_image(native_swapchain(xsc), index);
@@ -385,21 +373,20 @@ try_create_direct_array_swapchain(struct client_d3d11_compositor *c,
 		ID3D11Texture2D *texture = NULL;
 		HRESULT hr = c->device->CreateTexture2D(&desc, NULL, &texture);
 		if (FAILED(hr) || texture == NULL) {
-			U_LOG_W("Wine D3D11 direct array texture creation failed image=%u hr=0x%08lx",
-			        i,
+			U_LOG_W("Wine D3D11 direct array texture creation failed image=%u hr=0x%08lx", i,
 			        (unsigned long)hr);
 			swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_NOT_IMPLEMENTED;
 		}
 
 		UINT bootstrap_size = sizeof(bootstrap_names[i].name);
-		hr = texture->GetPrivateData(
-		    kMonadoSharedTextureBootstrapNameGuid, &bootstrap_size, bootstrap_names[i].name);
+		hr = texture->GetPrivateData(kMonadoSharedTextureBootstrapNameGuid, &bootstrap_size,
+		                             bootstrap_names[i].name);
 		if (FAILED(hr) || bootstrap_size == 0 || bootstrap_size > sizeof(bootstrap_names[i].name)) {
-			U_LOG_W("DXMT array texture does not expose shared Metal bootstrap metadata: image=%u hr=0x%08lx size=%u",
-			        i,
-			        (unsigned long)hr,
-			        bootstrap_size);
+			U_LOG_W(
+			    "DXMT array texture does not expose shared Metal bootstrap metadata: image=%u hr=0x%08lx "
+			    "size=%u",
+			    i, (unsigned long)hr, bootstrap_size);
 			texture->Release();
 			swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_NOT_IMPLEMENTED;
@@ -414,8 +401,8 @@ try_create_direct_array_swapchain(struct client_d3d11_compositor *c,
 		sc->base.images[i] = texture;
 	}
 
-	xret = ipc_client_compositor_import_metal_bootstrap_textures(
-	    c->xcn, &native_info, props.image_count, bootstrap_names, &sc->native);
+	xret = ipc_client_compositor_import_metal_bootstrap_textures(c->xcn, &native_info, props.image_count,
+	                                                             bootstrap_names, &sc->native);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_W("Wine D3D11 direct Metal array import failed: result=%d; using side-by-side fallback", xret);
 		swapchain_destroy(&sc->base.base);
@@ -423,13 +410,11 @@ try_create_direct_array_swapchain(struct client_d3d11_compositor *c,
 	}
 
 	finish_swapchain_setup(sc);
-	U_LOG_I("Wine D3D11 direct Metal array swapchain imported: images=%u size=%ux%u array_size=%u dxgi_format=%lld first_name='%s' (zero-copy transport)",
-	        props.image_count,
-	        info->width,
-	        info->height,
-	        info->array_size,
-	        (long long)info->format,
-	        bootstrap_names[0].name);
+	U_LOG_I(
+	    "Wine D3D11 direct Metal array swapchain imported: images=%u size=%ux%u array_size=%u dxgi_format=%lld "
+	    "first_name='%s' (zero-copy transport)",
+	    props.image_count, info->width, info->height, info->array_size, (long long)info->format,
+	    bootstrap_names[0].name);
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
 }
@@ -462,8 +447,10 @@ create_swapchain(struct xrt_compositor *xc,
 			return XRT_SUCCESS;
 		}
 		if (direct_ret != XRT_ERROR_NOT_IMPLEMENTED) {
-			U_LOG_W("Wine D3D11 direct array path failed with result=%d; falling back to side-by-side transport",
-			        direct_ret);
+			U_LOG_W(
+			    "Wine D3D11 direct array path failed with result=%d; falling back to side-by-side "
+			    "transport",
+			    direct_ret);
 		}
 	} else if (info->array_size > 1) {
 		U_LOG_I("Wine D3D11 direct array transport disabled by MONADO_WINE_DIRECT_ARRAY=0");
@@ -523,8 +510,7 @@ create_swapchain(struct xrt_compositor *xc,
 			transport_desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 			hr = c->device->CreateTexture2D(&transport_desc, NULL, &transport);
 			if (FAILED(hr) || transport == NULL) {
-				U_LOG_E("Wine D3D11 transport texture creation failed image=%u hr=0x%08lx",
-				        i,
+				U_LOG_E("Wine D3D11 transport texture creation failed image=%u hr=0x%08lx", i,
 				        (unsigned long)hr);
 				texture->Release();
 				swapchain_destroy(&sc->base.base);
@@ -536,11 +522,10 @@ create_swapchain(struct xrt_compositor *xc,
 		UINT size = sizeof(ids[i]);
 		hr = transport->GetPrivateData(kBasaltIOSurfaceIdGuid, &size, &ids[i]);
 		if (FAILED(hr) || size != sizeof(ids[i]) || ids[i] == 0) {
-			U_LOG_E("DXMT transport texture did not expose a Basalt IOSurface ID: image=%u hr=0x%08lx size=%u id=%u",
-			        i,
-			        (unsigned long)hr,
-			        size,
-			        ids[i]);
+			U_LOG_E(
+			    "DXMT transport texture did not expose a Basalt IOSurface ID: image=%u hr=0x%08lx size=%u "
+			    "id=%u",
+			    i, (unsigned long)hr, size, ids[i]);
 			texture->Release();
 			if (info->array_size > 1) {
 				transport->Release();
@@ -562,16 +547,12 @@ create_swapchain(struct xrt_compositor *xc,
 
 	finish_swapchain_setup(sc);
 
-	U_LOG_I("Wine D3D11 swapchain imported: images=%u app_size=%ux%u app_array_size=%u transport_size=%ux%u transport_array_size=%u dxgi_format=%lld ids=%u,%u,%u",
-	        props.image_count,
-	        info->width,
-	        info->height,
-	        info->array_size,
-	        native_info.width,
-	        native_info.height,
-	        native_info.array_size,
-	        (long long)info->format,
-	        ids[0], props.image_count > 1 ? ids[1] : 0, props.image_count > 2 ? ids[2] : 0);
+	U_LOG_I(
+	    "Wine D3D11 swapchain imported: images=%u app_size=%ux%u app_array_size=%u transport_size=%ux%u "
+	    "transport_array_size=%u dxgi_format=%lld ids=%u,%u,%u",
+	    props.image_count, info->width, info->height, info->array_size, native_info.width, native_info.height,
+	    native_info.array_size, (long long)info->format, ids[0], props.image_count > 1 ? ids[1] : 0,
+	    props.image_count > 2 ? ids[2] : 0);
 
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
@@ -582,7 +563,11 @@ begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *in
 {
 	return xrt_comp_begin_session(native_compositor(xc), info);
 }
-static xrt_result_t end_session(struct xrt_compositor *xc) { return xrt_comp_end_session(native_compositor(xc)); }
+static xrt_result_t
+end_session(struct xrt_compositor *xc)
+{
+	return xrt_comp_end_session(native_compositor(xc));
+}
 static xrt_result_t
 wait_frame(struct xrt_compositor *xc, int64_t *id, int64_t *display, int64_t *period)
 {
@@ -596,8 +581,16 @@ wait_frame(struct xrt_compositor *xc, int64_t *id, int64_t *display, int64_t *pe
 	}
 	return xret;
 }
-static xrt_result_t begin_frame(struct xrt_compositor *xc, int64_t id) { return xrt_comp_begin_frame(native_compositor(xc), id); }
-static xrt_result_t discard_frame(struct xrt_compositor *xc, int64_t id) { return xrt_comp_discard_frame(native_compositor(xc), id); }
+static xrt_result_t
+begin_frame(struct xrt_compositor *xc, int64_t id)
+{
+	return xrt_comp_begin_frame(native_compositor(xc), id);
+}
+static xrt_result_t
+discard_frame(struct xrt_compositor *xc, int64_t id)
+{
+	return xrt_comp_discard_frame(native_compositor(xc), id);
+}
 static xrt_result_t
 layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
@@ -646,27 +639,42 @@ layer_projection_depth(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
-layer_quad(struct xrt_compositor *xc, struct xrt_device *xdev, struct xrt_swapchain *xsc, const struct xrt_layer_data *data)
+layer_quad(struct xrt_compositor *xc,
+           struct xrt_device *xdev,
+           struct xrt_swapchain *xsc,
+           const struct xrt_layer_data *data)
 {
 	return xrt_comp_layer_quad(native_compositor(xc), xdev, native_swapchain(xsc), data);
 }
 static xrt_result_t
-layer_cube(struct xrt_compositor *xc, struct xrt_device *xdev, struct xrt_swapchain *xsc, const struct xrt_layer_data *data)
+layer_cube(struct xrt_compositor *xc,
+           struct xrt_device *xdev,
+           struct xrt_swapchain *xsc,
+           const struct xrt_layer_data *data)
 {
 	return xrt_comp_layer_cube(native_compositor(xc), xdev, native_swapchain(xsc), data);
 }
 static xrt_result_t
-layer_cylinder(struct xrt_compositor *xc, struct xrt_device *xdev, struct xrt_swapchain *xsc, const struct xrt_layer_data *data)
+layer_cylinder(struct xrt_compositor *xc,
+               struct xrt_device *xdev,
+               struct xrt_swapchain *xsc,
+               const struct xrt_layer_data *data)
 {
 	return xrt_comp_layer_cylinder(native_compositor(xc), xdev, native_swapchain(xsc), data);
 }
 static xrt_result_t
-layer_equirect1(struct xrt_compositor *xc, struct xrt_device *xdev, struct xrt_swapchain *xsc, const struct xrt_layer_data *data)
+layer_equirect1(struct xrt_compositor *xc,
+                struct xrt_device *xdev,
+                struct xrt_swapchain *xsc,
+                const struct xrt_layer_data *data)
 {
 	return xrt_comp_layer_equirect1(native_compositor(xc), xdev, native_swapchain(xsc), data);
 }
 static xrt_result_t
-layer_equirect2(struct xrt_compositor *xc, struct xrt_device *xdev, struct xrt_swapchain *xsc, const struct xrt_layer_data *data)
+layer_equirect2(struct xrt_compositor *xc,
+                struct xrt_device *xdev,
+                struct xrt_swapchain *xsc,
+                const struct xrt_layer_data *data)
 {
 	return xrt_comp_layer_equirect2(native_compositor(xc), xdev, native_swapchain(xsc), data);
 }
@@ -804,22 +812,29 @@ destroy_compositor(struct xrt_compositor *xc)
 	if (c->gpu_semaphore != NULL) {
 		xrt_compositor_semaphore_reference(&c->gpu_semaphore, NULL);
 	}
-	if (c->fence_event != NULL) CloseHandle(c->fence_event);
-	if (c->fence != NULL) c->fence->Release();
-	if (c->context4 != NULL) c->context4->Release();
-	if (c->context != NULL) c->context->Release();
-	if (c->device != NULL) c->device->Release();
+	if (c->fence_event != NULL)
+		CloseHandle(c->fence_event);
+	if (c->fence != NULL)
+		c->fence->Release();
+	if (c->context4 != NULL)
+		c->context4->Release();
+	if (c->context != NULL)
+		c->context->Release();
+	if (c->device != NULL)
+		c->device->Release();
 	free(c);
 }
 
 struct xrt_compositor_d3d11 *
 client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *device)
 {
-	if (xcn == NULL || device == NULL) return NULL;
+	if (xcn == NULL || device == NULL)
+		return NULL;
 
 	struct client_d3d11_compositor *c =
 	    (struct client_d3d11_compositor *)calloc(1, sizeof(struct client_d3d11_compositor));
-	if (c == NULL) return NULL;
+	if (c == NULL)
+		return NULL;
 
 	c->xcn = xcn;
 	c->device = device;
@@ -846,7 +861,8 @@ client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *
 			if (FAILED(hr) || c->fence == NULL) {
 				U_LOG_W("DXMT shared D3D11 fence unavailable (hr=0x%08lx); falling back to local fence",
 				        (unsigned long)hr);
-				hr = device5->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_ID3D11Fence, (void **)&c->fence);
+				hr =
+				    device5->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_ID3D11Fence, (void **)&c->fence);
 			}
 			device5->Release();
 
@@ -854,8 +870,8 @@ client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *
 				c->fence_event = CreateEventW(NULL, FALSE, FALSE, NULL);
 
 				char gpu_sync_env[16] = {};
-				DWORD env_len = GetEnvironmentVariableA(
-				    "MONADO_WINE_GPU_SYNC", gpu_sync_env, (DWORD)sizeof(gpu_sync_env));
+				DWORD env_len = GetEnvironmentVariableA("MONADO_WINE_GPU_SYNC", gpu_sync_env,
+				                                        (DWORD)sizeof(gpu_sync_env));
 				bool allow_gpu_sync = !(env_len > 0 && strcmp(gpu_sync_env, "0") == 0);
 
 				if (allow_gpu_sync) {
@@ -874,11 +890,15 @@ client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *
 							U_LOG_I("Wine D3D11 GPU-only shared-event sync active: '%s'",
 							        bootstrap_name);
 						} else {
-							U_LOG_W("Native DXMT shared-event import failed: result=%d; CPU fence fallback active",
-							        sync_ret);
+							U_LOG_W(
+							    "Native DXMT shared-event import failed: result=%d; CPU "
+							    "fence fallback active",
+							    sync_ret);
 						}
 					} else {
-						U_LOG_I("DXMT fence does not expose Monado shared-event metadata; CPU fence fallback active");
+						U_LOG_I(
+						    "DXMT fence does not expose Monado shared-event metadata; CPU "
+						    "fence fallback active");
 					}
 				} else {
 					U_LOG_I("Wine D3D11 GPU-only sync disabled by MONADO_WINE_GPU_SYNC=0");
@@ -914,7 +934,8 @@ client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *
 
 	for (uint32_t i = 0; i < xcn->base.info.format_count; ++i) {
 		DXGI_FORMAT format = vk_to_dxgi(xcn->base.info.formats[i]);
-		if (format == DXGI_FORMAT_UNKNOWN) continue;
+		if (format == DXGI_FORMAT_UNKNOWN)
+			continue;
 		c->base.base.info.formats[c->base.base.info.format_count++] = (int64_t)format;
 	}
 

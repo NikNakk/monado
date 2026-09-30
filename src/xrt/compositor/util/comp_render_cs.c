@@ -148,25 +148,14 @@ cmd_sample_projection_source_image(struct render_compute *render,
 	    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,     //
 	    subresource_range);                       //
 
-	vk->vkCmdCopyImageToBuffer(        //
-	    r->cmd,                        //
-	    image,                         //
-	    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-	    buffer->buffer,
-	    ARRAY_SIZE(copies),
-	    copies);
+	vk->vkCmdCopyImageToBuffer( //
+	    r->cmd,                 //
+	    image,                  //
+	    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer->buffer, ARRAY_SIZE(copies), copies);
 
-	vk->vkCmdPipelineBarrier(          //
-	    r->cmd,                        //
-	    VK_PIPELINE_STAGE_TRANSFER_BIT,
-	    VK_PIPELINE_STAGE_HOST_BIT,
-	    0,
-	    0,
-	    NULL,
-	    1,
-	    &buffer_barrier,
-	    0,
-	    NULL);
+	vk->vkCmdPipelineBarrier( //
+	    r->cmd,               //
+	    VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, NULL, 1, &buffer_barrier, 0, NULL);
 
 	vk_cmd_image_barrier_gpu_locked(              //
 	    vk,                                       //
@@ -451,14 +440,12 @@ do_cs_projection_layer(const struct comp_layer *layer,
 		ubo_data->layers[cur_layer].projection_depth.near_z = dvd->near_z;
 		ubo_data->layers[cur_layer].projection_depth.far_z = dvd->far_z;
 
-		set_post_transform_rect(layer_data,
-		                        &dvd->sub.norm_rect,
-		                        false,
+		set_post_transform_rect(layer_data, &dvd->sub.norm_rect, false,
 		                        &ubo_data->layers[cur_layer].projection_depth_post_transform);
 		render_calc_uv_to_tangent_lengths_rect(&vd->fov,
 		                                       &ubo_data->layers[cur_layer].projection_source_uv_to_tanangle);
-		calc_new_to_source_view_matrix(
-		    &vd->pose, world_pose_scanout_begin, &ubo_data->layers[cur_layer].projection_new_to_source_view);
+		calc_new_to_source_view_matrix(&vd->pose, world_pose_scanout_begin,
+		                               &ubo_data->layers[cur_layer].projection_new_to_source_view);
 	}
 
 	set_post_transform_rect(                           //
@@ -982,12 +969,12 @@ comp_render_cs_layer(struct render_compute *render,
 	    descriptor_set,        //
 	    ubo->buffer,           //
 	    foveation_ubo->buffer, //
-	    src_samplers,      //
-	    src_image_views,   //
-	    cur_image,         //
-	    target_image_view, //
-	    target_view,       //
-	    do_timewarp);      //
+	    src_samplers,          //
+	    src_image_views,       //
+	    cur_image,             //
+	    target_image_view,     //
+	    target_view,           //
+	    do_timewarp);          //
 }
 
 void

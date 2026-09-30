@@ -91,12 +91,13 @@ reprojection_source_trace_open(void)
 		return;
 	}
 
-	fputs("system_frame_id,system_display_time_ns,source_valid,source_changed,focused,client_frame_id,"
-	      "client_display_time_ns,layer_index,layer_type,layer_timestamp_ns,view_count,"
-	      "left_image_index,left_array_index,right_image_index,right_array_index,"
-	      "left_src_qx,left_src_qy,left_src_qz,left_src_qw,left_src_px,left_src_py,left_src_pz,"
-	      "right_src_qx,right_src_qy,right_src_qz,right_src_qw,right_src_px,right_src_py,right_src_pz\n",
-	      g_reprojection_source_trace);
+	fputs(
+	    "system_frame_id,system_display_time_ns,source_valid,source_changed,focused,client_frame_id,"
+	    "client_display_time_ns,layer_index,layer_type,layer_timestamp_ns,view_count,"
+	    "left_image_index,left_array_index,right_image_index,right_array_index,"
+	    "left_src_qx,left_src_qy,left_src_qz,left_src_qw,left_src_px,left_src_py,left_src_pz,"
+	    "right_src_qx,right_src_qy,right_src_qz,right_src_qw,right_src_px,right_src_py,right_src_pz\n",
+	    g_reprojection_source_trace);
 	fflush(g_reprojection_source_trace);
 	U_LOG_I("Reprojection source trace enabled");
 }
@@ -188,8 +189,7 @@ trace_reprojection_source(struct multi_compositor **array,
 		fprintf(g_reprojection_source_trace,
 		        "%lld,%lld,0,0,0,-1,0,0,0,0,0,0,0,0,0,"
 		        "nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan\n",
-		        (long long)system_frame_id,
-		        (long long)system_display_time_ns);
+		        (long long)system_frame_id, (long long)system_display_time_ns);
 		g_reprojection_source_previous_valid = false;
 		goto flush_maybe;
 	}
@@ -201,8 +201,7 @@ trace_reprojection_source(struct multi_compositor **array,
 		return;
 	}
 
-	bool source_changed = !g_reprojection_source_previous_valid ||
-	                      g_reprojection_source_previous_client != mc ||
+	bool source_changed = !g_reprojection_source_previous_valid || g_reprojection_source_previous_client != mc ||
 	                      g_reprojection_source_previous_client_frame_id != mc->delivered.data.frame_id;
 
 	const struct xrt_layer_projection_view_data *left = &views[0];
@@ -212,34 +211,14 @@ trace_reprojection_source(struct multi_compositor **array,
 	        "%lld,%lld,1,%d,%d,%lld,%lld,%u,%u,%lld,%u,%u,%u,%u,%u,"
 	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,"
 	        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
-	        (long long)system_frame_id,
-	        (long long)system_display_time_ns,
-	        source_changed ? 1 : 0,
-	        mc->state.focused ? 1 : 0,
-	        (long long)mc->delivered.data.frame_id,
-	        (long long)mc->delivered.data.display_time_ns,
-	        layer_index,
-	        (unsigned)data->type,
-	        (long long)data->timestamp,
-	        data->view_count,
-	        left->sub.image_index,
-	        left->sub.array_index,
-	        right->sub.image_index,
-	        right->sub.array_index,
-	        left->pose.orientation.x,
-	        left->pose.orientation.y,
-	        left->pose.orientation.z,
-	        left->pose.orientation.w,
-	        left->pose.position.x,
-	        left->pose.position.y,
-	        left->pose.position.z,
-	        right->pose.orientation.x,
-	        right->pose.orientation.y,
-	        right->pose.orientation.z,
-	        right->pose.orientation.w,
-	        right->pose.position.x,
-	        right->pose.position.y,
-	        right->pose.position.z);
+	        (long long)system_frame_id, (long long)system_display_time_ns, source_changed ? 1 : 0,
+	        mc->state.focused ? 1 : 0, (long long)mc->delivered.data.frame_id,
+	        (long long)mc->delivered.data.display_time_ns, layer_index, (unsigned)data->type,
+	        (long long)data->timestamp, data->view_count, left->sub.image_index, left->sub.array_index,
+	        right->sub.image_index, right->sub.array_index, left->pose.orientation.x, left->pose.orientation.y,
+	        left->pose.orientation.z, left->pose.orientation.w, left->pose.position.x, left->pose.position.y,
+	        left->pose.position.z, right->pose.orientation.x, right->pose.orientation.y, right->pose.orientation.z,
+	        right->pose.orientation.w, right->pose.position.x, right->pose.position.y, right->pose.position.z);
 
 	g_reprojection_source_previous_valid = true;
 	g_reprojection_source_previous_client = mc;

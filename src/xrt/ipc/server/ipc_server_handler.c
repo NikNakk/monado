@@ -107,8 +107,8 @@ wine_submit_trace_event(const char *event,
 	}
 
 	flockfile(file);
-	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 ",%u,%d\n",
-	        event, frame_id, os_monotonic_get_ns(), semaphore_value, display_time_ns, layer_count, (int)result);
+	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 ",%u,%d\n", event, frame_id,
+	        os_monotonic_get_ns(), semaphore_value, display_time_ns, layer_count, (int)result);
 	g_wine_submit_trace_rows++;
 	if (g_wine_submit_trace_rows % 512 == 0) {
 		fflush(file);
@@ -172,8 +172,8 @@ wine_swapchain_trace_event(const char *event,
 		return;
 	}
 	flockfile(file);
-	fprintf(file, "%s,%u,%u,%" PRId64 ",%" PRId64 ",%" PRId64 ",%d\n",
-	        event, swapchain_id, image_index, os_monotonic_get_ns(), duration_ns, timeout_ns, (int)result);
+	fprintf(file, "%s,%u,%u,%" PRId64 ",%" PRId64 ",%" PRId64 ",%d\n", event, swapchain_id, image_index,
+	        os_monotonic_get_ns(), duration_ns, timeout_ns, (int)result);
 	g_wine_swapchain_trace_rows++;
 	if (g_wine_swapchain_trace_rows % 512 == 0) {
 		fflush(file);
@@ -694,8 +694,7 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 	struct xrt_session_info server_xsi = *xsi;
 	if (ics->imc.stream_socket) {
 		server_xsi.pacing_flags |= XRT_SESSION_PACING_USE_MIN_FRAME_PERIOD_BIT;
-		IPC_INFO(ics->server,
-		         "Wine/TCP session: enabling minimum-display-period application pacing");
+		IPC_INFO(ics->server, "Wine/TCP session: enabling minimum-display-period application pacing");
 	}
 
 	xrt_result_t xret = xrt_system_create_session(ics->server->xsys, &server_xsi, &xs, &xcn);
@@ -1291,13 +1290,13 @@ ipc_handle_compositor_wait_frame(volatile struct ipc_client_state *ics,
 	int64_t wake_up_time_ns = 0;
 	int64_t predicted_gpu_time_ns = 0;
 
-	xrt_result_t xret = xrt_comp_predict_frame(       //
-	    ics->xc,                                      //
-	    out_frame_id,                                 //
-	    &wake_up_time_ns,                             //
-	    &predicted_gpu_time_ns,                       //
-	    out_predicted_display_time_ns,                //
-	    out_predicted_display_period_ns);             //
+	xrt_result_t xret = xrt_comp_predict_frame( //
+	    ics->xc,                                //
+	    out_frame_id,                           //
+	    &wake_up_time_ns,                       //
+	    &predicted_gpu_time_ns,                 //
+	    out_predicted_display_time_ns,          //
+	    out_predicted_display_period_ns);       //
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -1764,25 +1763,21 @@ ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
 	const int64_t trace_frame_id = slot.data.frame_id;
 	const int64_t trace_display_time_ns = slot.data.display_time_ns;
 	const uint32_t trace_layer_count = slot.layer_count;
-	wine_submit_trace_event("handler_entry", trace_frame_id, 0, trace_display_time_ns,
-	                        trace_layer_count, XRT_SUCCESS);
+	wine_submit_trace_event("handler_entry", trace_frame_id, 0, trace_display_time_ns, trace_layer_count,
+	                        XRT_SUCCESS);
 	if (slot.layer_count != 1) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
-	const size_t expected_size =
-	    offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
+	const size_t expected_size = offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
 	if ((size_t)payload->size != expected_size) {
-		IPC_ERROR(ics->server,
-		          "Wine single-layer wire-layout mismatch: received=%u expected_native=%zu",
-		          payload->size,
-		          expected_size);
+		IPC_ERROR(ics->server, "Wine single-layer wire-layout mismatch: received=%u expected_native=%zu",
+		          payload->size, expected_size);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
 	xrt_result_t xret = xrt_comp_layer_begin(ics->xc, &slot.data);
-	wine_submit_trace_event("after_layer_begin", trace_frame_id, 0, trace_display_time_ns,
-	                        trace_layer_count, xret);
+	wine_submit_trace_event("after_layer_begin", trace_frame_id, 0, trace_display_time_ns, trace_layer_count, xret);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -1791,12 +1786,11 @@ ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
 		                        trace_layer_count, XRT_ERROR_IPC_FAILURE);
 		return XRT_ERROR_IPC_FAILURE;
 	}
-	wine_submit_trace_event("after_update_layers", trace_frame_id, 0, trace_display_time_ns,
-	                        trace_layer_count, XRT_SUCCESS);
+	wine_submit_trace_event("after_update_layers", trace_frame_id, 0, trace_display_time_ns, trace_layer_count,
+	                        XRT_SUCCESS);
 
 	xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
-	wine_submit_trace_event("after_commit", trace_frame_id, 0, trace_display_time_ns,
-	                        trace_layer_count, xret);
+	wine_submit_trace_event("after_commit", trace_frame_id, 0, trace_display_time_ns, trace_layer_count, xret);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -1838,13 +1832,11 @@ ipc_handle_compositor_layer_sync_single_semaphore(volatile struct ipc_client_sta
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
-	const size_t expected_size =
-	    offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
+	const size_t expected_size = offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
 	if ((size_t)payload->size != expected_size) {
 		IPC_ERROR(ics->server,
 		          "Wine single-layer semaphore wire-layout mismatch: received=%u expected_native=%zu",
-		          payload->size,
-		          expected_size);
+		          payload->size, expected_size);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
@@ -1853,8 +1845,7 @@ ipc_handle_compositor_layer_sync_single_semaphore(volatile struct ipc_client_sta
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	xrt_result_t xret =
-	    xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
+	xrt_result_t xret = xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -1904,13 +1895,11 @@ ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_clie
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
-	const size_t expected_size =
-	    offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
+	const size_t expected_size = offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
 	if ((size_t)payload->size != expected_size) {
 		IPC_ERROR(ics->server,
 		          "Wine async single-layer semaphore wire-layout mismatch: received=%u expected_native=%zu",
-		          payload->size,
-		          expected_size);
+		          payload->size, expected_size);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
@@ -1997,11 +1986,8 @@ ipc_handle_compositor_layer_sync_copy_commit(volatile struct ipc_client_state *i
 	const size_t expected_size =
 	    offsetof(struct ipc_layer_slot, layers) + ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
 	if ((size_t)total_size != expected_size) {
-		IPC_ERROR(ics->server,
-		          "Wine layer wire-layout mismatch: received=%u expected_native=%zu layers=%u",
-		          total_size,
-		          expected_size,
-		          slot->layer_count);
+		IPC_ERROR(ics->server, "Wine layer wire-layout mismatch: received=%u expected_native=%zu layers=%u",
+		          total_size, expected_size, slot->layer_count);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
@@ -2057,9 +2043,7 @@ ipc_handle_compositor_layer_sync_copy_commit_semaphore(volatile struct ipc_clien
 	if ((size_t)total_size != expected_size) {
 		IPC_ERROR(ics->server,
 		          "Wine layer semaphore wire-layout mismatch: received=%u expected_native=%zu layers=%u",
-		          total_size,
-		          expected_size,
-		          slot->layer_count);
+		          total_size, expected_size, slot->layer_count);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
@@ -2068,8 +2052,7 @@ ipc_handle_compositor_layer_sync_copy_commit_semaphore(volatile struct ipc_clien
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	xrt_result_t xret =
-	    xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
+	xrt_result_t xret = xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}

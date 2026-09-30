@@ -282,7 +282,8 @@ init_system_shm_state(struct ipc_server *s, volatile struct ipc_client_state *ic
 		ism->hmd.compositor.w_pixels = (uint32_t)xhmd->screens[0].w_pixels;
 		ism->hmd.compositor.h_pixels = (uint32_t)xhmd->screens[0].h_pixels;
 		ism->hmd.compositor.nominal_frame_interval_ns = xhmd->screens[0].nominal_frame_interval_ns;
-		for (uint32_t view = 0; view < xhmd->view_count && view < ARRAY_SIZE(ism->hmd.compositor.views); ++view) {
+		for (uint32_t view = 0; view < xhmd->view_count && view < ARRAY_SIZE(ism->hmd.compositor.views);
+		     ++view) {
 			ism->hmd.compositor.views[view].x_pixels = xhmd->views[view].viewport.x_pixels;
 			ism->hmd.compositor.views[view].y_pixels = xhmd->views[view].viewport.y_pixels;
 			ism->hmd.compositor.views[view].w_pixels = xhmd->views[view].viewport.w_pixels;

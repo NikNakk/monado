@@ -156,11 +156,8 @@ create_bgra_iosurface(const struct xrt_swapchain_create_info *info)
 	const size_t bytes_per_row = IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, min_bytes_per_row);
 	const size_t alloc_size = bytes_per_row * (size_t)info->height;
 
-	CFMutableDictionaryRef properties =
-	    CFDictionaryCreateMutable(kCFAllocatorDefault,
-	                              0,
-	                              &kCFTypeDictionaryKeyCallBacks,
-	                              &kCFTypeDictionaryValueCallBacks);
+	CFMutableDictionaryRef properties = CFDictionaryCreateMutable(
+	    kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 	if (properties == NULL) {
 		return NULL;
 	}
@@ -333,8 +330,7 @@ create_image(struct vk_bundle *vk, const struct xrt_swapchain_create_info *info,
 	};
 
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
-	const bool direct_metal_texture =
-	    info->array_size > 1 || (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
+	const bool direct_metal_texture = info->array_size > 1 || (info->bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0;
 	VkExportMetalObjectCreateInfoEXT export_metal_object_create_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
 	    // IOSurface cannot back Metal 2D-array or depth/stencil textures.

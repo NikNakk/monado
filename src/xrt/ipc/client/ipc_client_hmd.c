@@ -467,7 +467,8 @@ ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 		if (xret == XRT_SUCCESS) {
 			how = "copied from the service";
 		} else {
-			IPC_WARN(ich->ipc_c, "Could not copy the distortion mesh from the service (%d), computing it", xret);
+			IPC_WARN(ich->ipc_c, "Could not copy the distortion mesh from the service (%d), computing it",
+			         xret);
 		}
 	}
 	if (hmd->distortion.mesh.vertices == NULL) {

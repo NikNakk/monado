@@ -63,11 +63,10 @@ pose_changed(const struct xrt_pose *first, const struct xrt_pose *current)
 	double dz = (double)current->position.z - first->position.z;
 	double distance_squared = dx * dx + dy * dy + dz * dz;
 
-	double orientation_dot =
-	    fabs((double)current->orientation.x * first->orientation.x +
-	         (double)current->orientation.y * first->orientation.y +
-	         (double)current->orientation.z * first->orientation.z +
-	         (double)current->orientation.w * first->orientation.w);
+	double orientation_dot = fabs((double)current->orientation.x * first->orientation.x +
+	                              (double)current->orientation.y * first->orientation.y +
+	                              (double)current->orientation.z * first->orientation.z +
+	                              (double)current->orientation.w * first->orientation.w);
 	if (orientation_dot > 1.0) {
 		orientation_dot = 1.0;
 	}
@@ -155,10 +154,10 @@ cli_cmd_psvr2_pose(int argc, const char **argv)
 
 		if (now_ns >= next_print_ns) {
 			double elapsed_s = (double)(now_ns - start_ns) / U_TIME_1S_IN_NS;
-			printf("%7.2f s   0x%02x   %+8.4f %+8.4f %+8.4f   %+8.4f %+8.4f %+8.4f %+8.4f\n",
-			       elapsed_s, (unsigned)relation.relation_flags, relation.pose.position.x,
-			       relation.pose.position.y, relation.pose.position.z, relation.pose.orientation.x,
-			       relation.pose.orientation.y, relation.pose.orientation.z, relation.pose.orientation.w);
+			printf("%7.2f s   0x%02x   %+8.4f %+8.4f %+8.4f   %+8.4f %+8.4f %+8.4f %+8.4f\n", elapsed_s,
+			       (unsigned)relation.relation_flags, relation.pose.position.x, relation.pose.position.y,
+			       relation.pose.position.z, relation.pose.orientation.x, relation.pose.orientation.y,
+			       relation.pose.orientation.z, relation.pose.orientation.w);
 			fflush(stdout);
 			next_print_ns += print_interval_ns;
 		}
@@ -173,7 +172,8 @@ cli_cmd_psvr2_pose(int argc, const char **argv)
 		return EXIT_FAILURE;
 	}
 	if (!saw_motion) {
-		fprintf(stderr, "FAIL: tracked poses were received, but no headset motion exceeded the probe threshold.\n");
+		fprintf(stderr,
+		        "FAIL: tracked poses were received, but no headset motion exceeded the probe threshold.\n");
 		return EXIT_FAILURE;
 	}
 

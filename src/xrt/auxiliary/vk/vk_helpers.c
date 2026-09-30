@@ -1156,7 +1156,7 @@ vk_create_image_from_native(struct vk_bundle *vk,
 
 	void *image_create_next = NULL;
 
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER) || \
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_AHARDWAREBUFFER) ||             \
     defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_WIN32_HANDLE)
 	VkExternalMemoryImageCreateInfoKHR external_memory_image_create_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO_KHR,

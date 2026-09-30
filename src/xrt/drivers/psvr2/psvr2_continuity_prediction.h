@@ -36,33 +36,32 @@ psvr2_continuity_update(struct psvr2_continuity_prediction *state,
 	struct xrt_vec3 a = {0};
 	if (linear->ready && psvr2_linear_length(linear->velocity) >= linear_params->min_speed) {
 		a = (struct xrt_vec3){linear->acceleration.x * linear_params->gain,
-		                     linear->acceleration.y * linear_params->gain,
-		                     linear->acceleration.z * linear_params->gain};
+		                      linear->acceleration.y * linear_params->gain,
+		                      linear->acceleration.z * linear_params->gain};
 	}
 	float half_interval = 0.5f * linear->interval_s;
-	struct xrt_vec3 v = {linear->velocity.x + a.x * half_interval,
-	                     linear->velocity.y + a.y * half_interval,
+	struct xrt_vec3 v = {linear->velocity.x + a.x * half_interval, linear->velocity.y + a.y * half_interval,
 	                     linear->velocity.z + a.z * half_interval};
 	float dt = (float)((double)(linear->timestamp_ns - state->source_ns) * 1e-9);
 	float dh = (float)((double)(received_ns - state->received_ns) * 1e-9);
-	bool contiguous = state->valid && linear->have_velocity && dt >= 0.005f && dt <= 0.035f &&
-	                  dh >= 0.0f && dh <= 0.1f;
+	bool contiguous =
+	    state->valid && linear->have_velocity && dt >= 0.005f && dt <= 0.035f && dh >= 0.0f && dh <= 0.1f;
 	if (contiguous) {
 		float decay = expf(-dh / params->tau_s);
 		// Translate the old quadratic and its remaining correction to the new
 		// source timestamp, then subtract the new quadratic. The prediction is
 		// continuous before applying bounds, within the acceleration horizon.
-#define PSVR2_CONTINUITY_AXIS(axis)                                                                                     \
-		state->correction_position.axis =                                                                               \
-		    (state->position.axis - linear->position.axis) + state->velocity.axis * dt +                                  \
-		    0.5f * state->acceleration.axis * dt * dt +                                                                   \
-		    decay * (state->correction_position.axis + state->correction_velocity.axis * dt +                            \
-		             0.5f * state->correction_acceleration.axis * dt * dt);                                              \
-		state->correction_velocity.axis =                                                                               \
-		    state->velocity.axis + state->acceleration.axis * dt - v.axis +                                              \
-		    decay * (state->correction_velocity.axis + state->correction_acceleration.axis * dt);                         \
-		state->correction_acceleration.axis =                                                                           \
-		    state->acceleration.axis - a.axis + decay * state->correction_acceleration.axis
+#define PSVR2_CONTINUITY_AXIS(axis)                                                                                    \
+	state->correction_position.axis =                                                                              \
+	    (state->position.axis - linear->position.axis) + state->velocity.axis * dt +                               \
+	    0.5f * state->acceleration.axis * dt * dt +                                                                \
+	    decay * (state->correction_position.axis + state->correction_velocity.axis * dt +                          \
+	             0.5f * state->correction_acceleration.axis * dt * dt);                                            \
+	state->correction_velocity.axis =                                                                              \
+	    state->velocity.axis + state->acceleration.axis * dt - v.axis +                                            \
+	    decay * (state->correction_velocity.axis + state->correction_acceleration.axis * dt);                      \
+	state->correction_acceleration.axis =                                                                          \
+	    state->acceleration.axis - a.axis + decay * state->correction_acceleration.axis
 		PSVR2_CONTINUITY_AXIS(x);
 		PSVR2_CONTINUITY_AXIS(y);
 		PSVR2_CONTINUITY_AXIS(z);
@@ -98,9 +97,9 @@ psvr2_continuity_predict(const struct psvr2_continuity_prediction *state,
 	float age = fmaxf(0.0f, (float)((double)(query_host_ns - state->received_ns) * 1e-9));
 	float decay = expf(-age / params->tau_s);
 	struct xrt_vec3 c, d;
-#define PSVR2_CONTINUITY_AXIS(axis)                                                                                     \
-	c.axis = decay * (state->correction_position.axis + state->correction_velocity.axis * h +                          \
-	                  0.5f * state->correction_acceleration.axis * h * h);                                           \
+#define PSVR2_CONTINUITY_AXIS(axis)                                                                                    \
+	c.axis = decay * (state->correction_position.axis + state->correction_velocity.axis * h +                      \
+	                  0.5f * state->correction_acceleration.axis * h * h);                                         \
 	d.axis = decay * (state->correction_velocity.axis + state->correction_acceleration.axis * h)
 	PSVR2_CONTINUITY_AXIS(x);
 	PSVR2_CONTINUITY_AXIS(y);
@@ -112,7 +111,7 @@ psvr2_continuity_predict(const struct psvr2_continuity_prediction *state,
 		float projection = n.x * d.x + n.y * d.y + n.z * d.z;
 		float scale = params->limit_m / length;
 		d = (struct xrt_vec3){scale * (d.x - n.x * projection), scale * (d.y - n.y * projection),
-		                     scale * (d.z - n.z * projection)};
+		                      scale * (d.z - n.z * projection)};
 		c = (struct xrt_vec3){n.x * params->limit_m, n.y * params->limit_m, n.z * params->limit_m};
 	}
 	position->x += c.x;

@@ -126,8 +126,7 @@ static struct metal_ipc_smart_acquire_tracker *g_metal_ipc_smart_acquire_tracker
 static struct metal_ipc_smart_acquire_tracker *
 metal_ipc_smart_acquire_find_locked(struct xrt_swapchain *xsc)
 {
-	for (struct metal_ipc_smart_acquire_tracker *tracker = g_metal_ipc_smart_acquire_trackers;
-	     tracker != NULL;
+	for (struct metal_ipc_smart_acquire_tracker *tracker = g_metal_ipc_smart_acquire_trackers; tracker != NULL;
 	     tracker = tracker->next) {
 		if (tracker->xsc == xsc) {
 			return tracker;
@@ -372,10 +371,8 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 	void *textures[XRT_MAX_SWAPCHAIN_IMAGES] = {0};
 	xret = ipc_metal_server_take_textures(token, image_count, textures, ics->client_state.pid);
 	if (xret != XRT_SUCCESS) {
-		IPC_ERROR(ics->server,
-		          "Failed to retrieve Metal XPC swapchain textures token=0x%016llx count=%u",
-		          (unsigned long long)token,
-		          image_count);
+		IPC_ERROR(ics->server, "Failed to retrieve Metal XPC swapchain textures token=0x%016llx count=%u",
+		          (unsigned long long)token, image_count);
 		return xret;
 	}
 
@@ -400,11 +397,8 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 		return xret;
 	}
 	if (!consumed || xsc == NULL || xsc->image_count != image_count) {
-		IPC_ERROR(ics->server,
-		          "Metal IPC swapchain allocator mismatch: consumed=%s expected=%u actual=%u",
-		          consumed ? "true" : "false",
-		          image_count,
-		          xsc != NULL ? xsc->image_count : 0);
+		IPC_ERROR(ics->server, "Metal IPC swapchain allocator mismatch: consumed=%s expected=%u actual=%u",
+		          consumed ? "true" : "false", image_count, xsc != NULL ? xsc->image_count : 0);
 		xrt_swapchain_reference(&xsc, NULL);
 		return XRT_ERROR_VULKAN;
 	}
@@ -415,9 +409,7 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 	 */
 	xret = comp_swapchain_gpu_reuse_enable(xsc);
 	if (xret != XRT_SUCCESS) {
-		IPC_ERROR(ics->server,
-		          "Failed to enable Metal IPC swapchain GPU reuse tracking: result=%d",
-		          xret);
+		IPC_ERROR(ics->server, "Failed to enable Metal IPC swapchain GPU reuse tracking: result=%d", xret);
 		xrt_swapchain_reference(&xsc, NULL);
 		return xret;
 	}
@@ -434,10 +426,8 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 		         "Could not enable Metal IPC smart swapchain acquire; keeping safe FIFO behaviour: result=%d",
 		         xret);
 	} else {
-		IPC_INFO(ics->server,
-		         "Metal IPC smart swapchain acquire enabled: images=%u swapchain=%p",
-		         xsc->image_count,
-		         (void *)xsc);
+		IPC_INFO(ics->server, "Metal IPC smart swapchain acquire enabled: images=%u swapchain=%p",
+		         xsc->image_count, (void *)xsc);
 	}
 
 	ics->swapchain_count++;
@@ -449,14 +439,8 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 	ics->swapchain_data[index].image_count = xsc->image_count;
 	*out_id = index;
 
-	IPC_INFO(ics->server,
-	         "Metal IPC swapchain active: id=%u images=%u size=%ux%u array_size=%u token=0x%016llx",
-	         index,
-	         image_count,
-	         info->width,
-	         info->height,
-	         info->array_size,
-	         (unsigned long long)token);
+	IPC_INFO(ics->server, "Metal IPC swapchain active: id=%u images=%u size=%ux%u array_size=%u token=0x%016llx",
+	         index, image_count, info->width, info->height, info->array_size, (unsigned long long)token);
 
 	return XRT_SUCCESS;
 #endif
@@ -513,20 +497,15 @@ ipc_handle_swapchain_import_metal_bootstrap(volatile struct ipc_client_state *ic
 		return xret;
 	}
 	if (!consumed || xsc == NULL || xsc->image_count != image_count) {
-		IPC_ERROR(ics->server,
-		          "DXMT Metal bootstrap allocator mismatch: consumed=%s expected=%u actual=%u",
-		          consumed ? "true" : "false",
-		          image_count,
-		          xsc != NULL ? xsc->image_count : 0);
+		IPC_ERROR(ics->server, "DXMT Metal bootstrap allocator mismatch: consumed=%s expected=%u actual=%u",
+		          consumed ? "true" : "false", image_count, xsc != NULL ? xsc->image_count : 0);
 		xrt_swapchain_reference(&xsc, NULL);
 		return XRT_ERROR_VULKAN;
 	}
 
 	xret = comp_swapchain_gpu_reuse_enable(xsc);
 	if (xret != XRT_SUCCESS) {
-		IPC_ERROR(ics->server,
-		          "Failed to enable DXMT Metal bootstrap GPU reuse tracking: result=%d",
-		          xret);
+		IPC_ERROR(ics->server, "Failed to enable DXMT Metal bootstrap GPU reuse tracking: result=%d", xret);
 		xrt_swapchain_reference(&xsc, NULL);
 		return xret;
 	}
@@ -549,12 +528,7 @@ ipc_handle_swapchain_import_metal_bootstrap(volatile struct ipc_client_state *ic
 
 	IPC_INFO(ics->server,
 	         "DXMT direct Metal array swapchain active: id=%u images=%u size=%ux%u array_size=%u first_name='%s'",
-	         index,
-	         image_count,
-	         info->width,
-	         info->height,
-	         info->array_size,
-	         args->names[0].name);
+	         index, image_count, info->width, info->height, info->array_size, args->names[0].name);
 	return XRT_SUCCESS;
 #endif
 }
@@ -606,11 +580,8 @@ ipc_handle_swapchain_import_iosurface(volatile struct ipc_client_state *ics,
 		return xret;
 	}
 	if (!consumed || xsc == NULL || xsc->image_count != image_count) {
-		IPC_ERROR(ics->server,
-		          "External IOSurface allocator mismatch: consumed=%s expected=%u actual=%u",
-		          consumed ? "true" : "false",
-		          image_count,
-		          xsc != NULL ? xsc->image_count : 0);
+		IPC_ERROR(ics->server, "External IOSurface allocator mismatch: consumed=%s expected=%u actual=%u",
+		          consumed ? "true" : "false", image_count, xsc != NULL ? xsc->image_count : 0);
 		xrt_swapchain_reference(&xsc, NULL);
 		return XRT_ERROR_VULKAN;
 	}
@@ -660,8 +631,7 @@ ipc_handle_compositor_semaphore_import_metal_bootstrap(volatile struct ipc_clien
 	if (ics == NULL || bootstrap == NULL || out_id == NULL || ics->xc == NULL) {
 		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
 	}
-	if (bootstrap->name[0] == '\0' ||
-	    memchr(bootstrap->name, '\0', sizeof(bootstrap->name)) == NULL) {
+	if (bootstrap->name[0] == '\0' || memchr(bootstrap->name, '\0', sizeof(bootstrap->name)) == NULL) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
@@ -674,10 +644,8 @@ ipc_handle_compositor_semaphore_import_metal_bootstrap(volatile struct ipc_clien
 	struct xrt_compositor_semaphore *xcsem = NULL;
 	xret = comp_metal_semaphore_import_bootstrap_event(bootstrap->name, &xcsem);
 	if (xret != XRT_SUCCESS || xcsem == NULL) {
-		IPC_WARN(ics->server,
-		         "DXMT shared-event semaphore import unavailable: name='%s' result=%d",
-		         bootstrap->name,
-		         xret);
+		IPC_WARN(ics->server, "DXMT shared-event semaphore import unavailable: name='%s' result=%d",
+		         bootstrap->name, xret);
 		return xret != XRT_SUCCESS ? xret : XRT_ERROR_VULKAN;
 	}
 
@@ -685,10 +653,7 @@ ipc_handle_compositor_semaphore_import_metal_bootstrap(volatile struct ipc_clien
 	ics->compositor_semaphore_count++;
 	*out_id = id;
 
-	IPC_INFO(ics->server,
-	         "DXMT shared-event compositor semaphore active: id=%u name='%s'",
-	         id,
-	         bootstrap->name);
+	IPC_INFO(ics->server, "DXMT shared-event compositor semaphore active: id=%u name='%s'", id, bootstrap->name);
 	return XRT_SUCCESS;
 #endif
 }
@@ -720,9 +685,7 @@ ipc_handle_compositor_semaphore_create_metal(volatile struct ipc_client_state *i
 	void *raw_shared_event = NULL;
 	xret = comp_metal_semaphore_create_client_pair(&xcsem, &raw_shared_event);
 	if (xret != XRT_SUCCESS || xcsem == NULL || raw_shared_event == NULL) {
-		IPC_ERROR(ics->server,
-		          "Failed to create Metal shared-event compositor semaphore: result=%d",
-		          xret);
+		IPC_ERROR(ics->server, "Failed to create Metal shared-event compositor semaphore: result=%d", xret);
 		if (xcsem != NULL) {
 			xrt_compositor_semaphore_reference(&xcsem, NULL);
 		}
@@ -741,11 +704,8 @@ ipc_handle_compositor_semaphore_create_metal(volatile struct ipc_client_state *i
 	*out_id = id;
 	*out_token = token;
 
-	IPC_INFO(ics->server,
-	         "Metal IPC Stage 4 semaphore active: id=%u token=0x%016llx event=%p",
-	         id,
-	         (unsigned long long)token,
-	         raw_shared_event);
+	IPC_INFO(ics->server, "Metal IPC Stage 4 semaphore active: id=%u token=0x%016llx event=%p", id,
+	         (unsigned long long)token, raw_shared_event);
 
 	return XRT_SUCCESS;
 #endif

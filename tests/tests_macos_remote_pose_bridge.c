@@ -94,9 +94,7 @@ get_udp_port(void)
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
 	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 65535) {
-		fprintf(stderr,
-		        "Invalid MACOS_REMOTE_POSE_BRIDGE_UDP_PORT=%s, expected integer in [1,65535]\n",
-		        value);
+		fprintf(stderr, "Invalid MACOS_REMOTE_POSE_BRIDGE_UDP_PORT=%s, expected integer in [1,65535]\n", value);
 		return 0;
 	}
 
@@ -115,8 +113,7 @@ get_remote_driver_port(void)
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
 	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 65535) {
-		fprintf(stderr,
-		        "Invalid MACOS_REMOTE_POSE_BRIDGE_REMOTE_PORT=%s, expected integer in [1,65535]\n",
+		fprintf(stderr, "Invalid MACOS_REMOTE_POSE_BRIDGE_REMOTE_PORT=%s, expected integer in [1,65535]\n",
 		        value);
 		return 0;
 	}
@@ -136,8 +133,7 @@ get_idle_timeout_ms(void)
 	char *end = NULL;
 	long parsed = strtol(value, &end, 10);
 	if (errno != 0 || end == value || *end != '\0' || parsed < 1 || parsed > 60000) {
-		fprintf(stderr,
-		        "Invalid MACOS_REMOTE_POSE_BRIDGE_IDLE_TIMEOUT_MS=%s, expected integer in [1,60000]\n",
+		fprintf(stderr, "Invalid MACOS_REMOTE_POSE_BRIDGE_IDLE_TIMEOUT_MS=%s, expected integer in [1,60000]\n",
 		        value);
 		return 0;
 	}
@@ -158,11 +154,8 @@ apply_packet_to_remote_data(const struct macos_remote_pose_packet_v0 *packet, st
 		data->head.center.position = packet->position;
 	}
 	if (!g_logged_v0_pose) {
-		fprintf(stdout,
-		        "Bridge v0 center position: x=%0.4f y=%0.4f z=%0.4f\n",
-		        data->head.center.position.x,
-		        data->head.center.position.y,
-		        data->head.center.position.z);
+		fprintf(stdout, "Bridge v0 center position: x=%0.4f y=%0.4f z=%0.4f\n", data->head.center.position.x,
+		        data->head.center.position.y, data->head.center.position.z);
 		g_logged_v0_pose = true;
 	}
 	maybe_log_translation(&data->head.center.position);
@@ -190,11 +183,8 @@ apply_packet_v1_to_remote_data(const struct macos_remote_pose_packet_v1 *packet,
 	if (!g_logged_v1_pose) {
 		fprintf(stdout,
 		        "Bridge v1 center position: x=%0.4f y=%0.4f z=%0.4f views: left_x=%0.4f right_x=%0.4f\n",
-		        data->head.center.position.x,
-		        data->head.center.position.y,
-		        data->head.center.position.z,
-		        data->head.views[0].pose.position.x,
-		        data->head.views[1].pose.position.x);
+		        data->head.center.position.x, data->head.center.position.y, data->head.center.position.z,
+		        data->head.views[0].pose.position.x, data->head.views[1].pose.position.x);
 		g_logged_v1_pose = true;
 	}
 	maybe_log_translation(&data->head.center.position);
@@ -310,8 +300,7 @@ main(void)
 		packets_forwarded++;
 	}
 
-	fprintf(stdout,
-	        "Remote pose bridge connected to port %u, listened on UDP %u, and forwarded %u packets.\n",
+	fprintf(stdout, "Remote pose bridge connected to port %u, listened on UDP %u, and forwarded %u packets.\n",
 	        (unsigned)remote_driver_port, (unsigned)udp_port, packets_forwarded);
 	ret = 0;
 

@@ -117,10 +117,12 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 		uint64_t actual_ns = wait_end_ns >= wait_begin_ns ? wait_end_ns - wait_begin_ns : 0;
 		int64_t lateness_ns = (int64_t)wait_end_ns - (int64_t)until_ns;
 		const char *mode = spin_wait ? "spin" : "mach";
-		U_LOG_RAW("MACOS_WAIT_TIMING mode=%s requested_ns=%u park_requested_ns=%llu park_actual_ns=%llu spin_actual_ns=%llu actual_ns=%llu lateness_ns=%lld until_ns=%llu begin_ns=%llu end_ns=%llu",
-		        mode, delay, (unsigned long long)park_requested_ns, (unsigned long long)park_actual_ns,
-		        (unsigned long long)spin_actual_ns, (unsigned long long)actual_ns, (long long)lateness_ns,
-		        (unsigned long long)until_ns, (unsigned long long)wait_begin_ns, (unsigned long long)wait_end_ns);
+		U_LOG_RAW(
+		    "MACOS_WAIT_TIMING mode=%s requested_ns=%u park_requested_ns=%llu park_actual_ns=%llu "
+		    "spin_actual_ns=%llu actual_ns=%llu lateness_ns=%lld until_ns=%llu begin_ns=%llu end_ns=%llu",
+		    mode, delay, (unsigned long long)park_requested_ns, (unsigned long long)park_actual_ns,
+		    (unsigned long long)spin_actual_ns, (unsigned long long)actual_ns, (long long)lateness_ns,
+		    (unsigned long long)until_ns, (unsigned long long)wait_begin_ns, (unsigned long long)wait_end_ns);
 	}
 #endif
 }

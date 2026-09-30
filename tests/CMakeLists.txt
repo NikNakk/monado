@@ -44,7 +44,13 @@ if(XRT_HAVE_VULKAN)
 	list(APPEND tests tests_uv_to_tangent)
 endif()
 if(XRT_FEATURE_OPENXR)
-	list(APPEND tests tests_input_transform tests_generic_controller tests_foveation_openxr)
+	list(
+		APPEND
+		tests
+		tests_input_transform
+		tests_generic_controller
+		tests_foveation_openxr
+		)
 endif()
 if(XRT_HAVE_OPENGL
    AND XRT_HAVE_OPENGL_GLX
@@ -122,7 +128,8 @@ if(XRT_FEATURE_OPENXR)
 		)
 	add_dependencies(tests_generic_controller generate_oxr_bindings)
 	target_link_libraries(
-		tests_foveation_openxr PRIVATE st_oxr aux_foveation xrt-interfaces xrt-external-openxr
+		tests_foveation_openxr PRIVATE st_oxr aux_foveation xrt-interfaces
+					       xrt-external-openxr
 		)
 endif()
 if(_have_opengl_test)
@@ -150,47 +157,88 @@ if(APPLE AND TARGET comp_metal_foveation_cache)
 	add_executable(tests_metal_foveation_cache tests_metal_foveation_cache.mm)
 	target_compile_features(tests_metal_foveation_cache PRIVATE cxx_std_17)
 	target_link_libraries(
-		tests_metal_foveation_cache PRIVATE comp_metal_foveation_cache aux_foveation aux_util
-						    xrt-external-catch2 "-framework Metal"
+		tests_metal_foveation_cache
+		PRIVATE
+			comp_metal_foveation_cache
+			aux_foveation
+			aux_util
+			xrt-external-catch2
+			"-framework Metal"
 		)
-	add_test(NAME tests_metal_foveation_cache COMMAND tests_metal_foveation_cache --success --allow-running-no-tests)
+	add_test(
+		NAME tests_metal_foveation_cache
+		COMMAND tests_metal_foveation_cache --success --allow-running-no-tests
+		)
 	set_target_properties(tests_metal_foveation_cache PROPERTIES FOLDER monado_tests)
 endif()
 
 if(APPLE)
 	add_executable(tests_macos_iosurface_producer tests_macos_iosurface_producer.c)
-	target_link_libraries(tests_macos_iosurface_producer PRIVATE "-framework CoreFoundation" "-framework IOSurface")
+	target_link_libraries(
+		tests_macos_iosurface_producer PRIVATE "-framework CoreFoundation"
+						       "-framework IOSurface"
+		)
 	set_target_properties(tests_macos_iosurface_producer PROPERTIES FOLDER monado_tests)
 
 	add_executable(tests_macos_iosurface_import_probe tests_macos_iosurface_import_probe.c)
-	target_link_libraries(tests_macos_iosurface_import_probe PRIVATE ipc_client xrt-interfaces aux_util)
+	target_link_libraries(
+		tests_macos_iosurface_import_probe PRIVATE ipc_client xrt-interfaces aux_util
+		)
 	set_target_properties(tests_macos_iosurface_import_probe PROPERTIES FOLDER monado_tests)
 
 	add_executable(tests_macos_ipc_swapchain_probe tests_macos_ipc_swapchain_probe.c)
-	target_link_libraries(tests_macos_ipc_swapchain_probe PRIVATE ipc_client xrt-interfaces aux_util)
+	target_link_libraries(
+		tests_macos_ipc_swapchain_probe PRIVATE ipc_client xrt-interfaces aux_util
+		)
 	set_target_properties(tests_macos_ipc_swapchain_probe PROPERTIES FOLDER monado_tests)
 
 	add_executable(tests_macos_openxr_loaderless_probe tests_macos_openxr_loaderless_probe.c)
-	target_link_libraries(tests_macos_openxr_loaderless_probe PRIVATE xrt-interfaces xrt-external-openxr)
+	target_link_libraries(
+		tests_macos_openxr_loaderless_probe PRIVATE xrt-interfaces xrt-external-openxr
+		)
 	set_target_properties(tests_macos_openxr_loaderless_probe PROPERTIES FOLDER monado_tests)
 
 	add_executable(tests_macos_openxr_vulkan_probe tests_macos_openxr_vulkan_probe.c)
-	target_link_libraries(tests_macos_openxr_vulkan_probe PRIVATE aux_vk xrt-interfaces xrt-external-openxr)
+	target_link_libraries(
+		tests_macos_openxr_vulkan_probe PRIVATE aux_vk xrt-interfaces xrt-external-openxr
+		)
 	set_target_properties(tests_macos_openxr_vulkan_probe PROPERTIES FOLDER monado_tests)
 
 	if(XRT_BUILD_DRIVER_REMOTE)
 		add_executable(tests_macos_remote_pose_bridge tests_macos_remote_pose_bridge.c)
-		target_link_libraries(tests_macos_remote_pose_bridge PRIVATE drv_remote xrt-interfaces aux_util)
-		target_include_directories(tests_macos_remote_pose_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers)
+		target_link_libraries(
+			tests_macos_remote_pose_bridge PRIVATE drv_remote xrt-interfaces aux_util
+			)
+		target_include_directories(
+			tests_macos_remote_pose_bridge
+			PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers
+			)
 		set_target_properties(tests_macos_remote_pose_bridge PROPERTIES FOLDER monado_tests)
 
-		add_executable(tests_macos_remote_pose_packet_sender tests_macos_remote_pose_packet_sender.c)
-		target_link_libraries(tests_macos_remote_pose_packet_sender PRIVATE xrt-interfaces aux_util)
-		set_target_properties(tests_macos_remote_pose_packet_sender PROPERTIES FOLDER monado_tests)
+		add_executable(
+			tests_macos_remote_pose_packet_sender
+			tests_macos_remote_pose_packet_sender.c
+			)
+		target_link_libraries(
+			tests_macos_remote_pose_packet_sender PRIVATE xrt-interfaces aux_util
+			)
+		set_target_properties(
+			tests_macos_remote_pose_packet_sender PROPERTIES FOLDER monado_tests
+			)
 
-		add_executable(tests_macos_remote_driver_pose_probe tests_macos_remote_driver_pose_probe.c)
-		target_link_libraries(tests_macos_remote_driver_pose_probe PRIVATE drv_remote xrt-interfaces aux_util)
-		target_include_directories(tests_macos_remote_driver_pose_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers)
-		set_target_properties(tests_macos_remote_driver_pose_probe PROPERTIES FOLDER monado_tests)
+		add_executable(
+			tests_macos_remote_driver_pose_probe tests_macos_remote_driver_pose_probe.c
+			)
+		target_link_libraries(
+			tests_macos_remote_driver_pose_probe PRIVATE drv_remote xrt-interfaces
+								     aux_util
+			)
+		target_include_directories(
+			tests_macos_remote_driver_pose_probe
+			PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers
+			)
+		set_target_properties(
+			tests_macos_remote_driver_pose_probe PROPERTIES FOLDER monado_tests
+			)
 	endif()
 endif()

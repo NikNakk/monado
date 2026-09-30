@@ -43,21 +43,10 @@ print_relation(const struct xrt_space_relation *r, xrt_result_t result)
 	    "%.9f,%.9f,%.9f,"
 	    "%.9f,%.9f,%.9f,"
 	    "%u,%d",
-	    r->pose.position.x,
-	    r->pose.position.y,
-	    r->pose.position.z,
-	    r->pose.orientation.x,
-	    r->pose.orientation.y,
-	    r->pose.orientation.z,
-	    r->pose.orientation.w,
-	    r->linear_velocity.x,
-	    r->linear_velocity.y,
-	    r->linear_velocity.z,
-	    r->angular_velocity.x,
-	    r->angular_velocity.y,
-	    r->angular_velocity.z,
-	    (unsigned)r->relation_flags,
-	    (int)result);
+	    r->pose.position.x, r->pose.position.y, r->pose.position.z, r->pose.orientation.x, r->pose.orientation.y,
+	    r->pose.orientation.z, r->pose.orientation.w, r->linear_velocity.x, r->linear_velocity.y,
+	    r->linear_velocity.z, r->angular_velocity.x, r->angular_velocity.y, r->angular_velocity.z,
+	    (unsigned)r->relation_flags, (int)result);
 }
 
 
@@ -70,21 +59,8 @@ print_relation_header(const char *prefix)
 	    "%s_vx,%s_vy,%s_vz,"
 	    "%s_wx,%s_wy,%s_wz,"
 	    "%s_flags,%s_result",
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix,
-	    prefix);
+	    prefix, prefix, prefix, prefix, prefix, prefix, prefix, prefix, prefix, prefix, prefix, prefix, prefix,
+	    prefix, prefix);
 }
 
 
@@ -117,19 +93,11 @@ cli_cmd_pose_dump(int argc, const char **argv)
 	const int64_t interval_ns = (int64_t)(1000000000.0 / frequency_hz);
 
 	static const int64_t prediction_ns[] = {
-	    0,
-	    5000000,
-	    10000000,
-	    15000000,
-	    20000000,
+	    0, 5000000, 10000000, 15000000, 20000000,
 	};
 
 	static const char *prediction_names[] = {
-	    "p0",
-	    "p5",
-	    "p10",
-	    "p15",
-	    "p20",
+	    "p0", "p5", "p10", "p15", "p20",
 	};
 
 	const size_t prediction_count = sizeof(prediction_ns) / sizeof(prediction_ns[0]);
@@ -191,11 +159,12 @@ cli_cmd_pose_dump(int argc, const char **argv)
 	signal(SIGINT, handle_signal);
 	signal(SIGTERM, handle_signal);
 
-	printf("sample,query_time_ns,"
-	       "slam_valid,slam_new,slam_vts_ns,slam_monotonic_ns,slam_age_at_query_ns,"
-	       "slam_first_seen_latency_ns,"
-	       "imu_vts_ns,imu_monotonic_ns,imu_minus_slam_ns,"
-	       "hw2mono_vts_ns,timestamp_samples");
+	printf(
+	    "sample,query_time_ns,"
+	    "slam_valid,slam_new,slam_vts_ns,slam_monotonic_ns,slam_age_at_query_ns,"
+	    "slam_first_seen_latency_ns,"
+	    "imu_vts_ns,imu_monotonic_ns,imu_minus_slam_ns,"
+	    "hw2mono_vts_ns,timestamp_samples");
 
 	for (size_t i = 0; i < prediction_count; i++) {
 		printf(",%s_requested_time_ns,", prediction_names[i]);
@@ -232,25 +201,16 @@ cli_cmd_pose_dump(int argc, const char **argv)
 
 		for (size_t i = 0; i < prediction_count; i++) {
 			const int64_t requested_ns = query_ns + prediction_ns[i];
-			results[i] = xrt_device_get_tracked_pose(
-			    hmd, XRT_INPUT_GENERIC_HEAD_POSE, requested_ns, &relations[i]);
+			results[i] =
+			    xrt_device_get_tracked_pose(hmd, XRT_INPUT_GENERIC_HEAD_POSE, requested_ns, &relations[i]);
 		}
 
-		printf("%" PRIu64 ",%" PRIi64 ",%d,%d,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
-		       ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%d",
-		       sample++,
-		       query_ns,
-		       slam_timing.valid ? 1 : 0,
-		       slam_new ? 1 : 0,
-		       slam_timing.slam_vts_ns,
-		       slam_timing.slam_monotonic_ns,
-		       slam_age_at_query_ns,
-		       slam_first_seen_latency_ns,
-		       slam_timing.imu_vts_ns,
-		       slam_timing.imu_monotonic_ns,
-		       imu_minus_slam_ns,
-		       slam_timing.hw2mono_vts_ns,
-		       slam_timing.timestamp_samples);
+		printf("%" PRIu64 ",%" PRIi64 ",%d,%d,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
+		       ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%d",
+		       sample++, query_ns, slam_timing.valid ? 1 : 0, slam_new ? 1 : 0, slam_timing.slam_vts_ns,
+		       slam_timing.slam_monotonic_ns, slam_age_at_query_ns, slam_first_seen_latency_ns,
+		       slam_timing.imu_vts_ns, slam_timing.imu_monotonic_ns, imu_minus_slam_ns,
+		       slam_timing.hw2mono_vts_ns, slam_timing.timestamp_samples);
 
 		for (size_t i = 0; i < prediction_count; i++) {
 			const int64_t requested_ns = query_ns + prediction_ns[i];

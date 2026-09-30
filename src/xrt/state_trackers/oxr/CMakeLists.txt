@@ -125,10 +125,7 @@ endif()
 
 if(XRT_FEATURE_WINE_D3D11_BRIDGE)
 	target_sources(
-		st_oxr
-		PRIVATE oxr_session_gfx_d3d11.c
-			oxr_swapchain_d3d11.c
-			oxr_d3d11_wine.cpp
+		st_oxr PRIVATE oxr_session_gfx_d3d11.c oxr_swapchain_d3d11.c oxr_d3d11_wine.cpp
 		)
 	target_link_libraries(st_oxr PRIVATE d3d11 dxgi dxguid)
 else()
@@ -138,7 +135,9 @@ else()
 	endif()
 
 	if(XRT_HAVE_D3D11)
-		target_sources(st_oxr PRIVATE oxr_session_gfx_d3d11.c oxr_swapchain_d3d11.c oxr_d3d11.cpp)
+		target_sources(
+			st_oxr PRIVATE oxr_session_gfx_d3d11.c oxr_swapchain_d3d11.c oxr_d3d11.cpp
+			)
 	endif()
 endif()
 

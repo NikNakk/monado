@@ -22,8 +22,7 @@
 #include <cstring>
 #include <vector>
 
-namespace
-{
+namespace {
 
 constexpr uint32_t kWidth = 64;
 constexpr uint32_t kHeight = 64;
@@ -33,8 +32,7 @@ constexpr DWORD kDoneFileWaitMilliseconds = 120000;
 
 // Must match BASALT_GUID_IOSURFACE_ID in Basalt's DXMT fork.
 // {DD807311-529E-4856-A5C0-48BED2048129}
-constexpr GUID kBasaltIOSurfaceIdGuid = {
-    0xdd807311, 0x529e, 0x4856, {0xa5, 0xc0, 0x48, 0xbe, 0xd2, 0x04, 0x81, 0x29}};
+constexpr GUID kBasaltIOSurfaceIdGuid = {0xdd807311, 0x529e, 0x4856, {0xa5, 0xc0, 0x48, 0xbe, 0xd2, 0x04, 0x81, 0x29}};
 
 template <typename Interface>
 void
@@ -49,10 +47,7 @@ release(Interface *&object)
 int
 fail(const char *operation, HRESULT result)
 {
-	std::fprintf(stderr,
-	             "FAIL: %s returned HRESULT 0x%08lx\n",
-	             operation,
-	             static_cast<unsigned long>(result));
+	std::fprintf(stderr, "FAIL: %s returned HRESULT 0x%08lx\n", operation, static_cast<unsigned long>(result));
 	return 1;
 }
 
@@ -79,11 +74,8 @@ query_iosurface_id(ID3D11Texture2D *texture, uint32_t *out_id)
 	UINT size = sizeof(id);
 	HRESULT result = texture->GetPrivateData(kBasaltIOSurfaceIdGuid, &size, &id);
 	if (FAILED(result) || size != sizeof(id) || id == 0) {
-		std::fprintf(stderr,
-		             "FAIL: GetPrivateData(BASALT_GUID_IOSURFACE_ID) HRESULT=0x%08lx size=%u id=%u\n",
-		             static_cast<unsigned long>(result),
-		             size,
-		             id);
+		std::fprintf(stderr, "FAIL: GetPrivateData(BASALT_GUID_IOSURFACE_ID) HRESULT=0x%08lx size=%u id=%u\n",
+		             static_cast<unsigned long>(result), size, id);
 		return false;
 	}
 
@@ -109,16 +101,10 @@ main()
 	    D3D_FEATURE_LEVEL_11_0,
 	};
 
-	HRESULT result = D3D11CreateDevice(nullptr,
-	                                   D3D_DRIVER_TYPE_HARDWARE,
-	                                   nullptr,
-	                                   D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-	                                   requested_feature_levels,
-	                                   static_cast<UINT>(sizeof(requested_feature_levels) / sizeof(requested_feature_levels[0])),
-	                                   D3D11_SDK_VERSION,
-	                                   &device,
-	                                   &selected_feature_level,
-	                                   &context);
+	HRESULT result = D3D11CreateDevice(
+	    nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, requested_feature_levels,
+	    static_cast<UINT>(sizeof(requested_feature_levels) / sizeof(requested_feature_levels[0])),
+	    D3D11_SDK_VERSION, &device, &selected_feature_level, &context);
 	if (FAILED(result)) {
 		return fail("D3D11CreateDevice", result);
 	}
@@ -145,11 +131,7 @@ main()
 			}
 
 			std::vector<uint32_t> pixels(kWidth * kHeight, colors[i]);
-			context->UpdateSubresource(textures[i],
-			                           0,
-			                           nullptr,
-			                           pixels.data(),
-			                           kWidth * sizeof(uint32_t),
+			context->UpdateSubresource(textures[i], 0, nullptr, pixels.data(), kWidth * sizeof(uint32_t),
 			                           0);
 		}
 
@@ -163,10 +145,8 @@ main()
 			exit_code = fail("QueryInterface(ID3D11DeviceContext4)", result);
 			break;
 		}
-		result = device5->CreateFence(0,
-		                             D3D11_FENCE_FLAG_NONE,
-		                             IID_ID3D11Fence,
-		                             reinterpret_cast<void **>(&fence));
+		result =
+		    device5->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_ID3D11Fence, reinterpret_cast<void **>(&fence));
 		if (FAILED(result)) {
 			exit_code = fail("ID3D11Device5::CreateFence", result);
 			break;
@@ -192,8 +172,7 @@ main()
 
 		const DWORD wait_status = WaitForSingleObject(fence_event, kFenceWaitMilliseconds);
 		if (wait_status != WAIT_OBJECT_0) {
-			std::fprintf(stderr,
-			             "FAIL: D3D11 fence wait returned %lu\n",
+			std::fprintf(stderr, "FAIL: D3D11 fence wait returned %lu\n",
 			             static_cast<unsigned long>(wait_status));
 			break;
 		}
@@ -204,21 +183,17 @@ main()
 				break;
 			}
 		}
-		if (ids[0] == 0 || ids[1] == 0 || ids[2] == 0 ||
-		    ids[0] == ids[1] || ids[0] == ids[2] || ids[1] == ids[2]) {
-			std::fprintf(stderr,
-			             "FAIL: IOSurface IDs are not nonzero and distinct: %u %u %u\n",
-			             ids[0],
-			             ids[1],
-			             ids[2]);
+		if (ids[0] == 0 || ids[1] == 0 || ids[2] == 0 || ids[0] == ids[1] || ids[0] == ids[2] ||
+		    ids[1] == ids[2]) {
+			std::fprintf(stderr, "FAIL: IOSurface IDs are not nonzero and distinct: %u %u %u\n", ids[0],
+			             ids[1], ids[2]);
 			break;
 		}
 
 		// stdout is intentionally machine-readable for the host harness.
 		std::printf("%u %u %u\n", ids[0], ids[1], ids[2]);
 		std::fflush(stdout);
-		std::fprintf(stderr,
-		             "D3D11 producer is holding three BGRA8 IOSurface-backed textures alive.\n");
+		std::fprintf(stderr, "D3D11 producer is holding three BGRA8 IOSurface-backed textures alive.\n");
 
 		bool done = false;
 		for (DWORD waited = 0; waited < kDoneFileWaitMilliseconds; waited += 100) {
@@ -233,7 +208,8 @@ main()
 			break;
 		}
 
-		std::fprintf(stderr, "PASS: host completed external IOSurface import while D3D11 resources remained alive.\n");
+		std::fprintf(stderr,
+		             "PASS: host completed external IOSurface import while D3D11 resources remained alive.\n");
 		exit_code = 0;
 	} while (false);
 

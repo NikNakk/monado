@@ -34,8 +34,7 @@ oxr_foveation_request_from_fb(const XrFoveationProfileCreateInfoFB *create_info,
 	 * that applies no foveation.
 	 */
 	if (create_info->next == NULL) {
-		if (!u_foveation_request_from_level(
-		        U_FOVEATION_LEVEL_NONE, false, false, 0.0f, out_request)) {
+		if (!u_foveation_request_from_level(U_FOVEATION_LEVEL_NONE, false, false, 0.0f, out_request)) {
 			return OXR_FOVEATION_PARSE_UNSUPPORTED_CONFIGURATION;
 		}
 		return OXR_FOVEATION_PARSE_SUCCESS;
@@ -49,8 +48,7 @@ oxr_foveation_request_from_fb(const XrFoveationProfileCreateInfoFB *create_info,
 		return OXR_FOVEATION_PARSE_UNSUPPORTED_CONFIGURATION;
 	}
 
-	const XrFoveationLevelProfileCreateInfoFB *level_info =
-	    (const XrFoveationLevelProfileCreateInfoFB *)next;
+	const XrFoveationLevelProfileCreateInfoFB *level_info = (const XrFoveationLevelProfileCreateInfoFB *)next;
 
 	enum u_foveation_level level;
 	enum oxr_foveation_parse_result result = convert_level(level_info->level, &level);
@@ -86,8 +84,7 @@ oxr_foveation_request_from_fb(const XrFoveationProfileCreateInfoFB *create_info,
 		eye_tracked = true;
 	}
 
-	if (!u_foveation_request_from_level(
-	        level, dynamic, eye_tracked, level_info->verticalOffset, out_request)) {
+	if (!u_foveation_request_from_level(level, dynamic, eye_tracked, level_info->verticalOffset, out_request)) {
 		return OXR_FOVEATION_PARSE_INVALID_LEVEL;
 	}
 
@@ -96,8 +93,7 @@ oxr_foveation_request_from_fb(const XrFoveationProfileCreateInfoFB *create_info,
 
 
 bool
-oxr_foveation_request_to_xrt(const struct u_foveation_request *request,
-                             struct xrt_foveation_state *out_state)
+oxr_foveation_request_to_xrt(const struct u_foveation_request *request, struct xrt_foveation_state *out_state)
 {
 	if (request == NULL || out_state == NULL) {
 		return false;
@@ -117,8 +113,7 @@ oxr_foveation_request_to_xrt(const struct u_foveation_request *request,
 	};
 
 	if (request->enabled) {
-		const struct u_foveation_profile *profile =
-		    u_foveation_profile_get(request->profile_index);
+		const struct u_foveation_profile *profile = u_foveation_profile_get(request->profile_index);
 		if (profile == NULL) {
 			return false;
 		}
@@ -136,9 +131,7 @@ oxr_foveation_request_to_xrt(const struct u_foveation_request *request,
 
 
 bool
-oxr_foveation_resolve_fixed_centres(const struct xrt_fov *fovs,
-                                    uint32_t view_count,
-                                    struct xrt_foveation_state *state)
+oxr_foveation_resolve_fixed_centres(const struct xrt_fov *fovs, uint32_t view_count, struct xrt_foveation_state *state)
 {
 	if (fovs == NULL || state == NULL || view_count == 0 || view_count > XRT_MAX_VIEWS) {
 		return false;
@@ -187,22 +180,18 @@ oxr_foveation_resolve_gaze_centres(const struct xrt_vec3 *view_direction,
                                    float vertical_offset_degrees,
                                    struct xrt_foveation_state *state)
 {
-	if (view_direction == NULL || fovs == NULL || state == NULL ||
-	    view_count == 0 || view_count > XRT_MAX_VIEWS) {
+	if (view_direction == NULL || fovs == NULL || state == NULL || view_count == 0 || view_count > XRT_MAX_VIEWS) {
 		return false;
 	}
 
-	const float horizontal = sqrtf(view_direction->x * view_direction->x +
-	                               view_direction->z * view_direction->z);
-	if (!(horizontal > 0.000001f) || !isfinite(horizontal) ||
-	    !isfinite(view_direction->x) || !isfinite(view_direction->y) ||
-	    !isfinite(view_direction->z) || view_direction->z >= -0.000001f) {
+	const float horizontal = sqrtf(view_direction->x * view_direction->x + view_direction->z * view_direction->z);
+	if (!(horizontal > 0.000001f) || !isfinite(horizontal) || !isfinite(view_direction->x) ||
+	    !isfinite(view_direction->y) || !isfinite(view_direction->z) || view_direction->z >= -0.000001f) {
 		return false;
 	}
 
 	const float yaw = atan2f(view_direction->x, -view_direction->z);
-	const float pitch = atan2f(view_direction->y, horizontal) +
-	                    vertical_offset_degrees * 0.01745329251994329577f;
+	const float pitch = atan2f(view_direction->y, horizontal) + vertical_offset_degrees * 0.01745329251994329577f;
 	const float tangent_x = tanf(yaw);
 	const float tangent_y = tanf(pitch);
 	if (!isfinite(tangent_x) || !isfinite(tangent_y)) {

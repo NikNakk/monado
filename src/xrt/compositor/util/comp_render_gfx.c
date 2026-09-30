@@ -907,8 +907,9 @@ warn_if_foveated_layers(const struct comp_layer *layers, uint32_t layer_count)
 		}
 		for (uint32_t v = 0; v < data->view_count; v++) {
 			if (data->proj.v[v].foveation.enabled != 0) {
-				U_LOG_E("Graphics compositor path cannot sample foveated projection images; "
-				        "use the compute path (XRT_COMPOSITOR_COMPUTE=1). Logged once.");
+				U_LOG_E(
+				    "Graphics compositor path cannot sample foveated projection images; "
+				    "use the compute path (XRT_COMPOSITOR_COMPUTE=1). Logged once.");
 				logged = true;
 				return;
 			}

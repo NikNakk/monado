@@ -113,9 +113,11 @@ macos_app_pacing_trace_get(void)
 		g_macos_app_pacing_trace_failed = true;
 		return NULL;
 	}
-	fputs("event,session_id,client_frame_id,event_ns,wake_ns,predicted_display_ns,predicted_period_ns,display_time_ns,"
-	      "cpu_est_ns,draw_est_ns,gpu_est_ns,cpu_actual_ns,draw_actual_ns,gpu_actual_ns\n",
-	      g_macos_app_pacing_trace);
+	fputs(
+	    "event,session_id,client_frame_id,event_ns,wake_ns,predicted_display_ns,predicted_period_ns,display_time_"
+	    "ns,"
+	    "cpu_est_ns,draw_est_ns,gpu_est_ns,cpu_actual_ns,draw_actual_ns,gpu_actual_ns\n",
+	    g_macos_app_pacing_trace);
 	if (!g_macos_app_pacing_trace_atexit_registered) {
 		atexit(macos_app_pacing_trace_close);
 		g_macos_app_pacing_trace_atexit_registered = true;
@@ -145,10 +147,10 @@ macos_app_pacing_trace_event(const char *event,
 	}
 	flockfile(file);
 	fprintf(file,
-	        "%s,%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64
-	        ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "\n",
-	        event, session_id, frame_id, event_ns, wake_ns, predicted_display_ns, predicted_period_ns, display_time_ns,
-	        cpu_est_ns, draw_est_ns, gpu_est_ns, cpu_actual_ns, draw_actual_ns, gpu_actual_ns);
+	        "%s,%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64
+	        ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 ",%" PRId64 "\n",
+	        event, session_id, frame_id, event_ns, wake_ns, predicted_display_ns, predicted_period_ns,
+	        display_time_ns, cpu_est_ns, draw_est_ns, gpu_est_ns, cpu_actual_ns, draw_actual_ns, gpu_actual_ns);
 	g_macos_app_pacing_trace_rows++;
 	if (g_macos_app_pacing_trace_rows % 512 == 0) {
 		fflush(file);
@@ -632,9 +634,8 @@ pa_predict(struct u_pacing_app *upa,
 	f->predicted_display_period_ns = app_period_ns;
 	f->when.predicted_ns = now_ns;
 
-	macos_app_pacing_trace_event("predict", pa->session_id, frame_id, now_ns,
-	                             wake_up_time_ns, predict_ns, app_period_ns, 0,
-	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns,
+	macos_app_pacing_trace_event("predict", pa->session_id, frame_id, now_ns, wake_up_time_ns, predict_ns,
+	                             app_period_ns, 0, pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns,
 	                             0, 0, 0);
 
 #ifdef U_TRACE_TRACY // Uses Tracy specific things.
@@ -722,11 +723,10 @@ pa_mark_delivered(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns, i
 
 	int64_t cpu_actual_ns = f->when.begin_ns - f->when.wait_woke_ns;
 	int64_t draw_actual_ns = f->when.delivered_ns - f->when.begin_ns;
-	macos_app_pacing_trace_event("delivered", pa->session_id, frame_id, when_ns,
-	                             f->predicted_wake_up_time_ns, f->predicted_display_time_ns,
-	                             f->predicted_display_period_ns, display_time_ns,
-	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns,
-	                             cpu_actual_ns, draw_actual_ns, 0);
+	macos_app_pacing_trace_event("delivered", pa->session_id, frame_id, when_ns, f->predicted_wake_up_time_ns,
+	                             f->predicted_display_time_ns, f->predicted_display_period_ns, display_time_ns,
+	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns, cpu_actual_ns,
+	                             draw_actual_ns, 0);
 }
 
 static void
@@ -778,11 +778,10 @@ pa_mark_gpu_done(struct u_pacing_app *upa, int64_t frame_id, int64_t when_ns)
 	do_iir_filter(&pa->app.draw_time_ns, IIR_ALPHA_LT, IIR_ALPHA_GT, diff_draw_ns);
 	do_iir_filter(&pa->app.gpu_time_ns, IIR_ALPHA_LT, IIR_ALPHA_GT, diff_gpu_ns);
 
-	macos_app_pacing_trace_event("gpu_done", pa->session_id, frame_id, when_ns,
-	                             f->predicted_wake_up_time_ns, f->predicted_display_time_ns,
-	                             f->predicted_display_period_ns, f->display_time_ns,
-	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns,
-	                             diff_cpu_ns, diff_draw_ns, diff_gpu_ns);
+	macos_app_pacing_trace_event("gpu_done", pa->session_id, frame_id, when_ns, f->predicted_wake_up_time_ns,
+	                             f->predicted_display_time_ns, f->predicted_display_period_ns, f->display_time_ns,
+	                             pa->app.cpu_time_ns, pa->app.draw_time_ns, pa->app.gpu_time_ns, diff_cpu_ns,
+	                             diff_draw_ns, diff_gpu_ns);
 
 	// Write out metrics and tracing data.
 	do_metrics(pa, f, false);

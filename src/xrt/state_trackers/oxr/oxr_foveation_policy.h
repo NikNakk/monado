@@ -49,8 +49,7 @@ oxr_foveation_request_from_fb(const XrFoveationProfileCreateInfoFB *create_info,
  * them later from its private tracking path.
  */
 bool
-oxr_foveation_request_to_xrt(const struct u_foveation_request *request,
-                             struct xrt_foveation_state *out_state);
+oxr_foveation_request_to_xrt(const struct u_foveation_request *request, struct xrt_foveation_state *out_state);
 
 /*!
  * Resolve FB's degree-based fixed vertical offset into per-view NDC centres.
@@ -58,9 +57,7 @@ oxr_foveation_request_to_xrt(const struct u_foveation_request *request,
  * projection FOVs.
  */
 bool
-oxr_foveation_resolve_fixed_centres(const struct xrt_fov *fovs,
-                                    uint32_t view_count,
-                                    struct xrt_foveation_state *state);
+oxr_foveation_resolve_fixed_centres(const struct xrt_fov *fovs, uint32_t view_count, struct xrt_foveation_state *state);
 
 /*!
  * Project a runtime-owned gaze direction in view space into per-view NDC

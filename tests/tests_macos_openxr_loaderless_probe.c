@@ -60,8 +60,8 @@ main(void)
 		return 1;
 	}
 
-	PFN_xrNegotiateLoaderRuntimeInterface negotiate = (PFN_xrNegotiateLoaderRuntimeInterface)dlsym(
-	    runtime, "xrNegotiateLoaderRuntimeInterface");
+	PFN_xrNegotiateLoaderRuntimeInterface negotiate =
+	    (PFN_xrNegotiateLoaderRuntimeInterface)dlsym(runtime, "xrNegotiateLoaderRuntimeInterface");
 	if (negotiate == NULL) {
 		fprintf(stderr, "dlsym(xrNegotiateLoaderRuntimeInterface) failed: %s\n", dlerror());
 		dlclose(runtime);
@@ -159,9 +159,8 @@ main(void)
 	    .enabledExtensionCount = 1,
 	    .enabledExtensionNames = enabled_extensions,
 	};
-	snprintf(instance_info.applicationInfo.applicationName,
-	         sizeof(instance_info.applicationInfo.applicationName), "%s",
-	         "tests_macos_openxr_loaderless_probe");
+	snprintf(instance_info.applicationInfo.applicationName, sizeof(instance_info.applicationInfo.applicationName),
+	         "%s", "tests_macos_openxr_loaderless_probe");
 	snprintf(instance_info.applicationInfo.engineName, sizeof(instance_info.applicationInfo.engineName), "%s",
 	         "monado");
 	instance_info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
@@ -173,10 +172,13 @@ main(void)
 		return fail_xr("xrCreateInstance", result);
 	}
 
-	if (get_proc(get_instance_proc_addr, instance, "xrDestroyInstance", (PFN_xrVoidFunction *)&xrDestroyInstance) != 0 ||
+	if (get_proc(get_instance_proc_addr, instance, "xrDestroyInstance", (PFN_xrVoidFunction *)&xrDestroyInstance) !=
+	        0 ||
 	    get_proc(get_instance_proc_addr, instance, "xrGetSystem", (PFN_xrVoidFunction *)&xrGetSystem) != 0 ||
-	    get_proc(get_instance_proc_addr, instance, "xrCreateSession", (PFN_xrVoidFunction *)&xrCreateSession) != 0 ||
-	    get_proc(get_instance_proc_addr, instance, "xrDestroySession", (PFN_xrVoidFunction *)&xrDestroySession) != 0) {
+	    get_proc(get_instance_proc_addr, instance, "xrCreateSession", (PFN_xrVoidFunction *)&xrCreateSession) !=
+	        0 ||
+	    get_proc(get_instance_proc_addr, instance, "xrDestroySession", (PFN_xrVoidFunction *)&xrDestroySession) !=
+	        0) {
 		xrDestroyInstance(instance);
 		free(extensions);
 		dlclose(runtime);

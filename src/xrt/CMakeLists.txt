@@ -6,8 +6,7 @@
 # investigations, but they add work to IMU, pose, and compositor hot paths.
 option(
 	XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
-	"Compile high-frequency macOS/PSVR2 timing diagnostics"
-	OFF
+	"Compile high-frequency macOS/PSVR2 timing diagnostics" OFF
 	)
 if(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	add_compile_definitions(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)

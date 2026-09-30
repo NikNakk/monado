@@ -76,8 +76,7 @@ main(int argc, char **argv)
 
 	fprintf(stdout, "Head device: %s\n", xsysd->static_roles.head->str);
 	fprintf(stdout, "View config count: %u\n", xsysc->info.view_config_count);
-	fprintf(stdout, "Recommended view size: %ux%u\n",
-	        view_config->views[0].recommended.width_pixels,
+	fprintf(stdout, "Recommended view size: %ux%u\n", view_config->views[0].recommended.width_pixels,
 	        view_config->views[0].recommended.height_pixels);
 
 	const struct xrt_session_info xsi = {0};
@@ -224,14 +223,9 @@ submit_frame:;
 	struct xrt_space_relation head_relation = XRT_SPACE_RELATION_ZERO;
 	struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
 	struct xrt_pose eye_poses[XRT_MAX_VIEWS] = {0};
-	xret = xrt_device_get_view_poses(xsysd->static_roles.head,
-	                                 &default_eye_relation,
-	                                 predicted_display_time_ns,
-	                                 view_config->view_type,
-	                                 view_config->view_count,
-	                                 &head_relation,
-	                                 fovs,
-	                                 eye_poses);
+	xret =
+	    xrt_device_get_view_poses(xsysd->static_roles.head, &default_eye_relation, predicted_display_time_ns,
+	                              view_config->view_type, view_config->view_count, &head_relation, fovs, eye_poses);
 	if (xret != XRT_SUCCESS) {
 		ret = fail_xret("xrt_device_get_view_poses", xret);
 		goto out;

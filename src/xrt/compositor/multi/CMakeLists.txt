@@ -7,8 +7,12 @@
 #
 
 add_library(
-	comp_multi STATIC comp_multi_compositor.c comp_multi_interface.h comp_multi_private.h
-			  comp_multi_system.c comp_multi_system_macos_trace.h
+	comp_multi STATIC
+	comp_multi_compositor.c
+	comp_multi_interface.h
+	comp_multi_private.h
+	comp_multi_system.c
+	comp_multi_system_macos_trace.h
 	)
 target_link_libraries(
 	comp_multi
