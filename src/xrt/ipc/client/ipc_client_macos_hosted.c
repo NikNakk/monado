@@ -99,3 +99,27 @@ ipc_client_macos_hosted_fini(struct ipc_connection *ipc_c)
 {
 	u_macos_hosted_client_unregister(ipc_c);
 }
+
+bool
+ipc_client_macos_hosted_follows_service_focus(void)
+{
+	return u_macos_hosted_client_follows_service_focus();
+}
+
+void
+ipc_client_macos_hosted_session_active(struct ipc_connection *ipc_c, bool active)
+{
+	xrt_result_t xret = ipc_call_compositor_hosted_session_active(ipc_c, active);
+	IPC_CHK_ONLY_PRINT(ipc_c, xret, "ipc_call_compositor_hosted_session_active");
+}
+
+void
+ipc_client_macos_hosted_set_visible(bool visible)
+{
+	// Shown first; the presenter makes it exclusive after its next frame.
+	xrt_result_t xret =
+	    u_macos_hosted_client_set_visibility(visible ? U_MACOS_DISPLAY_HOST_SHOWN : U_MACOS_DISPLAY_HOST_HIDDEN);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_W("The service did not %s the hosted layer (%d)", visible ? "show" : "hide", (int)xret);
+	}
+}

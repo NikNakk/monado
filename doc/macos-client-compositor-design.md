@@ -543,11 +543,31 @@ client's environment. Without it, clients take exactly the old service path.
 The shared-memory layout changed, so rebuild the Wine client alongside the
 service.
 
+- **Session and focus** (`compositor_hosted_session_active`): a hosted
+  client never waits for frames in the service, which is what normally marks
+  a session active there. Its local `begin_session`/`end_session` (and
+  session destroy) now report the session active or inactive instead, so the
+  service's usual focus logic covers hosted clients: the newest active
+  application is visible and focused, and falls back to the previous one when
+  it ends. The service's per-client compositor turns those decisions into
+  state-change events on the client's service-side session; the client
+  applies them to its local compositor (which tells the application) and to
+  its hosted layer.
+- **Handoff (phase 3)**: a hosted client's layer is now shown only when the
+  service makes its session visible, not when its compositor starts. Being
+  shown raises its host layer above any other, then it goes exclusive after
+  its first frame, and the application losing focus hides its own layer. The
+  service's own layer reappears when no hosted layer is exclusive. So
+  launching a second application covers the first only once it has begun
+  its session and drawn a frame, and ending it brings the first back.
+  `XRT_MACOS_HOSTED_FOLLOW_SERVICE_FOCUS=0` restores the earlier behaviour
+  (show at start, ignore the service's focus). Not yet run on hardware.
+
 Not done yet:
 
-- The service does not see `xrSessionBegin`/`End` from a hosted client. Its
-  app list and focus logic treat the client as idle.
-- There is one hosted client at a time and no mid-session handoff (phase 3).
+- Hosted clients that are not visible keep compositing and presenting into
+  their hidden layer. Pausing the presenter while hidden would save GPU time.
+- Overlay sessions (phase 4) are not handled specially.
 
 ### First hardware run (2026-09-30)
 

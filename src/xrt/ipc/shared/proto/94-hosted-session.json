@@ -1,0 +1,10 @@
+{
+	"$schema": "../proto.schema.json",
+
+	"compositor_hosted_session_active": {
+		"ifdef": "__APPLE__",
+		"in": [
+			{"name": "active", "type": "bool"}
+		]
+	}
+}

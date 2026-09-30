@@ -1203,6 +1203,13 @@ macos_host_set_visibility(void *ctx, uint32_t client_id, enum u_macos_display_ho
 		} else {
 			[CATransaction begin];
 			[CATransaction setDisableActions:YES];
+			if (entry->visibility == U_MACOS_DISPLAY_HOST_HIDDEN && visibility != U_MACOS_DISPLAY_HOST_HIDDEN) {
+				// The client being shown is the one taking over: draw it above any other.
+				[entry->host retain];
+				[entry->host removeFromSuperlayer];
+				[cwm->root_layer addSublayer:entry->host];
+				[entry->host release];
+			}
 			entry->host.hidden = visibility == U_MACOS_DISPLAY_HOST_HIDDEN;
 			entry->visibility = visibility;
 			macos_host_update_service_layer_locked(cwm);
@@ -1412,10 +1419,17 @@ macos_hosted_frontend_create(struct comp_window_macos *cwm)
 static void
 macos_hosted_frontend_show(struct comp_window_macos *cwm)
 {
-	// Arm: the service shows its host layer above its own, still empty.
-	xrt_result_t xret = u_macos_hosted_client_set_visibility(U_MACOS_DISPLAY_HOST_SHOWN);
-	if (xret != XRT_SUCCESS) {
-		COMP_WARN(cwm->base.base.c, "The service did not show the hosted layer (%d)", (int)xret);
+	/*
+	 * Arm: the service shows its host layer above its own, still empty. By
+	 * default that waits until the service makes this application's session
+	 * visible (the IPC client applies the service's focus), so starting a
+	 * second application does not cover the first before it has begun.
+	 */
+	if (!u_macos_hosted_client_follows_service_focus()) {
+		xrt_result_t xret = u_macos_hosted_client_set_visibility(U_MACOS_DISPLAY_HOST_SHOWN);
+		if (xret != XRT_SUCCESS) {
+			COMP_WARN(cwm->base.base.c, "The service did not show the hosted layer (%d)", (int)xret);
+		}
 	}
 
 	// Show our content. Once a frame is presented the service is asked to hide
