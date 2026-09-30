@@ -9,12 +9,18 @@
  * @ingroup comp_main
  */
 
+#include "xrt/xrt_config_os.h"
+
 #include "main/comp_compositor.h"
 #include "main/comp_target_swapchain.h"
 #include "main/comp_window_peek.h"
 
 #include "util/u_debug.h"
 #include "util/u_extension_list.h"
+
+#ifdef XRT_OS_OSX
+#include "util/u_macos_display_host.h"
+#endif
 
 #ifdef XRT_HAVE_SDL2
 #include <SDL2/SDL.h>
@@ -119,6 +125,27 @@ window_peek_run_thread(void *ptr)
 	return NULL;
 }
 
+bool
+comp_window_peek_is_enabled(void)
+{
+	if (debug_get_option_window_peek() == NULL) {
+		return false;
+	}
+
+#ifdef XRT_OS_OSX
+	/*
+	 * A client compositing in-process, hosted by the service, must not open
+	 * windows or start SDL video in the application's process: SDL video
+	 * only starts on the main thread, and the app owns NSApp.
+	 */
+	if (u_macos_hosted_client_available()) {
+		return false;
+	}
+#endif
+
+	return true;
+}
+
 struct comp_window_peek *
 comp_window_peek_create(struct comp_compositor *c)
 {
@@ -128,10 +155,10 @@ comp_window_peek_create(struct comp_compositor *c)
 		return NULL;
 	}
 
-	const char *option = debug_get_option_window_peek();
-	if (option == NULL) {
+	if (!comp_window_peek_is_enabled()) {
 		return NULL;
 	}
+	const char *option = debug_get_option_window_peek();
 
 	struct xrt_device *xdev = c->xdev;
 	enum comp_window_peek_eye eye = -1;
