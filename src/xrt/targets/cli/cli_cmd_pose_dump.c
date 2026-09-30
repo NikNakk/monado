@@ -9,6 +9,7 @@
 #include "xrt/xrt_instance.h"
 #include "xrt/xrt_space.h"
 #include "xrt/xrt_system.h"
+#include "xrt/xrt_config_drivers.h"
 
 #include "os/os_time.h"
 
@@ -151,7 +152,11 @@ cli_cmd_pose_dump(int argc, const char **argv)
 	fprintf(stderr, "Using HMD: %s\n", hmd->str);
 
 	struct psvr2_slam_timing initial_slam_timing = {0};
+#ifdef XRT_BUILD_DRIVER_PSVR2
 	bool have_psvr2_timing = psvr2_get_slam_timing(hmd, &initial_slam_timing);
+#else
+	bool have_psvr2_timing = false;
+#endif
 	if (!have_psvr2_timing) {
 		fprintf(stderr, "HMD is not recognised as PSVR2; SLAM timing columns will be zero\n");
 	}
@@ -182,9 +187,11 @@ cli_cmd_pose_dump(int argc, const char **argv)
 		const int64_t query_ns = os_monotonic_get_ns();
 
 		struct psvr2_slam_timing slam_timing = {0};
+#ifdef XRT_BUILD_DRIVER_PSVR2
 		if (have_psvr2_timing) {
 			(void)psvr2_get_slam_timing(hmd, &slam_timing);
 		}
+#endif
 
 		bool slam_new = slam_timing.valid && slam_timing.slam_vts_ns != previous_slam_vts_ns;
 		int64_t slam_age_at_query_ns = slam_timing.valid ? query_ns - slam_timing.slam_monotonic_ns : -1;
