@@ -3138,6 +3138,60 @@ ipc_handle_device_compute_distortion(volatile struct ipc_client_state *ics,
 }
 
 xrt_result_t
+ipc_handle_device_get_distortion_mesh(volatile struct ipc_client_state *ics, uint32_t id)
+{
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	struct ipc_device_get_distortion_mesh_reply reply = XRT_STRUCT_INIT;
+	struct ipc_server *s = ics->server;
+
+	/*
+	 * The client always waits for the reply, so send one on every path. The
+	 * vertices and indices follow only on success.
+	 */
+	struct xrt_device *xdev = NULL;
+	reply.result = ipc_server_objects_get_xdev_and_validate(ics, id, &xdev);
+
+	const struct xrt_hmd_parts *hmd = xdev != NULL ? xdev->hmd : NULL;
+	if (reply.result == XRT_SUCCESS &&
+	    (hmd == NULL || (hmd->distortion.models & XRT_DISTORTION_MODEL_MESHUV) == 0 ||
+	     hmd->distortion.mesh.vertices == NULL || hmd->distortion.mesh.indices == NULL)) {
+		reply.result = XRT_ERROR_FEATURE_NOT_SUPPORTED;
+	}
+
+	if (reply.result == XRT_SUCCESS) {
+		reply.info.vertex_count = hmd->distortion.mesh.vertex_count;
+		reply.info.stride = hmd->distortion.mesh.stride;
+		reply.info.uv_channels_count = hmd->distortion.mesh.uv_channels_count;
+		reply.info.index_count_total = hmd->distortion.mesh.index_count_total;
+		for (uint32_t i = 0; i < XRT_MAX_VIEWS; i++) {
+			reply.info.index_counts[i] = hmd->distortion.mesh.index_counts[i];
+			reply.info.index_offsets[i] = hmd->distortion.mesh.index_offsets[i];
+		}
+	}
+
+	xrt_result_t xret = ipc_send(imc, &reply, sizeof(reply));
+	if (xret != XRT_SUCCESS || reply.result != XRT_SUCCESS) {
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to send distortion mesh reply");
+		}
+		return xret;
+	}
+
+	xret = ipc_send(imc, hmd->distortion.mesh.vertices, (size_t)reply.info.vertex_count * reply.info.stride);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(s, "Failed to send distortion mesh vertices");
+		return xret;
+	}
+
+	xret = ipc_send(imc, hmd->distortion.mesh.indices, (size_t)reply.info.index_count_total * sizeof(int));
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(s, "Failed to send distortion mesh indices");
+	}
+
+	return xret;
+}
+
+xrt_result_t
 ipc_handle_device_begin_plane_detection_ext(volatile struct ipc_client_state *ics,
                                             uint32_t id,
                                             uint64_t plane_detection_id,

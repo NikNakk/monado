@@ -34,6 +34,9 @@
 #include <assert.h>
 
 
+DEBUG_GET_ONCE_BOOL_OPTION(ipc_distortion_mesh_transfer, "XRT_IPC_DISTORTION_MESH_TRANSFER", false)
+
+
 /*
  *
  * Structs and defines.
@@ -205,6 +208,81 @@ ipc_client_hmd_compute_distortion(
 	IPC_CHK_ALWAYS_RET(ich->ipc_c, xret, "ipc_call_device_compute_distortion");
 }
 
+/*!
+ * Copy the service device's finished distortion mesh in one call, instead of
+ * one call per vertex. Leaves the mesh untouched on failure.
+ */
+static xrt_result_t
+fetch_distortion_mesh(ipc_client_hmd_t *ich)
+{
+	struct ipc_connection *ipc_c = ich->ipc_c;
+	struct xrt_hmd_parts *hmd = ich->base.hmd;
+	struct ipc_distortion_mesh_info info = {0};
+	float *vertices = NULL;
+	int *indices = NULL;
+	xrt_result_t xret;
+
+	ipc_client_connection_lock(ipc_c);
+	ipc_client_connection_send_lock(ipc_c);
+	xret = ipc_send_device_get_distortion_mesh_locked(ipc_c, ich->device_id);
+	ipc_client_connection_send_unlock(ipc_c);
+	if (xret != XRT_SUCCESS) {
+		goto out_unlock;
+	}
+
+	// Nothing follows an unsuccessful reply.
+	xret = ipc_receive_device_get_distortion_mesh_locked(ipc_c, &info);
+	if (xret != XRT_SUCCESS) {
+		goto out_unlock;
+	}
+
+	size_t vertices_size = (size_t)info.vertex_count * info.stride;
+	size_t indices_size = (size_t)info.index_count_total * sizeof(int);
+	vertices = malloc(vertices_size);
+	indices = malloc(indices_size);
+	if (vertices == NULL || indices == NULL) {
+		// The data is on its way regardless: drain it to keep the channel in step.
+		free(vertices);
+		free(indices);
+		vertices = malloc(vertices_size > indices_size ? vertices_size : indices_size);
+		indices = NULL;
+		if (vertices == NULL) {
+			xret = XRT_ERROR_IPC_FAILURE;
+			goto out_unlock;
+		}
+		(void)ipc_receive(&ipc_c->imc, vertices, vertices_size);
+		(void)ipc_receive(&ipc_c->imc, vertices, indices_size);
+		free(vertices);
+		xret = XRT_ERROR_ALLOCATION;
+		goto out_unlock;
+	}
+
+	xret = ipc_receive(&ipc_c->imc, vertices, vertices_size);
+	if (xret == XRT_SUCCESS) {
+		xret = ipc_receive(&ipc_c->imc, indices, indices_size);
+	}
+	if (xret != XRT_SUCCESS) {
+		free(vertices);
+		free(indices);
+		goto out_unlock;
+	}
+
+	hmd->distortion.mesh.vertices = vertices;
+	hmd->distortion.mesh.vertex_count = info.vertex_count;
+	hmd->distortion.mesh.stride = info.stride;
+	hmd->distortion.mesh.uv_channels_count = info.uv_channels_count;
+	hmd->distortion.mesh.indices = indices;
+	hmd->distortion.mesh.index_count_total = info.index_count_total;
+	for (uint32_t i = 0; i < XRT_MAX_VIEWS; i++) {
+		hmd->distortion.mesh.index_counts[i] = info.index_counts[i];
+		hmd->distortion.mesh.index_offsets[i] = info.index_offsets[i];
+	}
+
+out_unlock:
+	ipc_client_connection_unlock(ipc_c);
+	return xret;
+}
+
 void
 ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 {
@@ -224,7 +302,7 @@ ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 		hmd->distortion.fov[i] = ism->hmd.compositor.views[i].distortion_fov;
 	}
 
-	// Replace the placeholder mesh with one computed by the service's device.
+	// Replace the placeholder mesh with the service device's distortion.
 	free(hmd->distortion.mesh.vertices);
 	hmd->distortion.mesh.vertices = NULL;
 	free(hmd->distortion.mesh.indices);
@@ -233,9 +311,27 @@ ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 	xdev->compute_distortion = ipc_client_hmd_compute_distortion;
 	hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
-	u_distortion_mesh_fill_in_compute(xdev);
+
+	int64_t start_ns = os_monotonic_get_ns();
+	const char *how = "computed point by point";
+	if (debug_get_bool_option_ipc_distortion_mesh_transfer()) {
+		xrt_result_t xret = fetch_distortion_mesh(ich);
+		if (xret == XRT_SUCCESS) {
+			how = "copied from the service";
+		} else {
+			IPC_WARN(ich->ipc_c, "Could not copy the distortion mesh from the service (%d), computing it", xret);
+		}
+	}
+	if (hmd->distortion.mesh.vertices == NULL) {
+		u_distortion_mesh_fill_in_compute(xdev);
+	}
+	int64_t elapsed_ns = os_monotonic_get_ns() - start_ns;
+
 	hmd->distortion.models |= XRT_DISTORTION_MODEL_MESHUV;
 	hmd->distortion.preferred = XRT_DISTORTION_MODEL_MESHUV;
+
+	IPC_INFO(ich->ipc_c, "Distortion mesh %s: %u vertices in %.1f ms", how, hmd->distortion.mesh.vertex_count,
+	         (double)elapsed_ns / 1e6);
 }
 
 static xrt_result_t
