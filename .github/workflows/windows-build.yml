@@ -39,6 +39,16 @@ jobs:
           key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
           restore-keys: vcpkg-windows-
 
+      # The shaders need glslangValidator, which upstream's CI image gets from
+      # the Vulkan SDK. vcpkg's glslang tools provide it without the SDK.
+      - name: Install glslangValidator
+        shell: pwsh
+        working-directory: ${{ runner.temp }}
+        run: |
+          & "$env:VCPKG_ROOT\vcpkg.exe" install --classic "glslang[tools]:x64-windows"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "$env:VCPKG_ROOT\installed\x64-windows\tools\glslang" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
       - name: Configure
         shell: pwsh
         run: >-
