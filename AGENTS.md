@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # Monado on macOS with PS VR2: agent handover
 
 This fork runs Monado natively on Apple Silicon macOS, with a wired Sony PS VR2
