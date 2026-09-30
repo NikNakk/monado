@@ -8,11 +8,14 @@
 
 #pragma once
 
+#include "xrt/xrt_config_os.h"
 #include "xrt/xrt_compositor.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#ifdef XRT_OS_OSX
 
 /*!
  * Enable fine-grained GPU reuse tracking on one native compositor swapchain.
@@ -35,6 +38,26 @@ comp_swapchain_gpu_reuse_claim_image(struct xrt_swapchain *xsc, uint32_t image_i
 
 void
 comp_swapchain_gpu_reuse_release_image(struct xrt_swapchain *xsc, uint32_t image_index);
+
+#else
+
+// Tracking is only used by the macOS service; nothing is ever tracked elsewhere.
+static inline bool
+comp_swapchain_gpu_reuse_claim_image(struct xrt_swapchain *xsc, uint32_t image_index)
+{
+	(void)xsc;
+	(void)image_index;
+	return false;
+}
+
+static inline void
+comp_swapchain_gpu_reuse_release_image(struct xrt_swapchain *xsc, uint32_t image_index)
+{
+	(void)xsc;
+	(void)image_index;
+}
+
+#endif
 
 #ifdef __cplusplus
 }

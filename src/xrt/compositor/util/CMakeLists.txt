@@ -28,9 +28,6 @@ add_library(
 	comp_swapchain.c
 	comp_swapchain_gpu_reuse.h
 	comp_swapchain_gpu_reuse_internal.h
-	comp_swapchain_gpu_reuse_renderer_override.h
-	comp_swapchain_gpu_reuse_compositor_override.h
-	comp_swapchain_gpu_reuse.c
 	comp_sync.h
 	comp_sync.c
 	comp_vulkan.h
@@ -43,9 +40,14 @@ target_link_libraries(
 	)
 
 if(APPLE)
+	# Only the macOS service's shared Metal swapchains are tracked; elsewhere
+	# the headers provide no-op inline stubs.
 	target_sources(
 		comp_util
-		PRIVATE comp_metal_semaphore_provider.h
+		PRIVATE comp_swapchain_gpu_reuse.c
+			comp_swapchain_gpu_reuse_renderer_override.h
+			comp_swapchain_gpu_reuse_compositor_override.h
+			comp_metal_semaphore_provider.h
 			comp_metal_semaphore_probe.h
 			comp_metal_semaphore_probe.m
 			comp_metal_swapchain_handoff.h
