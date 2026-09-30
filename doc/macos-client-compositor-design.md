@@ -513,7 +513,17 @@ client's environment. Without it, clients take exactly the old service path.
   8,500 at the default `XRT_MESH_SIZE`. In Unreal on the M5 the copy took
   0.6 ms and the per-vertex path 217 ms with the service unthrottled; the
   per-vertex path would be far slower if Game Mode throttled the service as
-  the game starts. The PS VR2 driver builds its mesh at start-up, so the service
+  the game starts.
+- **Distortion elsewhere** (`device_get_distortion_grid`): the compositor also
+  samples the distortion per texel, for the compute path's 128 x 128
+  distortion images and the 512 x 512 passthrough maps. A hosted client
+  fetches the service device's distortion on a 513 x 513 grid per view in one
+  call per view (about 12 MB, 18 ms in a Linux test) and interpolates it
+  locally. Offline, against the PS VR2 distortion function: 0.5 px worst,
+  0.013 px mean, in a 2800-pixel eye buffer. For scale, the service's own
+  compute path, which interpolates a 128 x 128 image, is up to 6.3 px off
+  the exact function at the edge. `XRT_IPC_DISTORTION_GRID_POINTS` sets the
+  size; 0 falls back to one call per point. The PS VR2 driver builds its mesh at start-up, so the service
   always has one to send. `IPC_LOG=info` logs which path was used and how
   long it took.
 
