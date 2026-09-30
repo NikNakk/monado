@@ -578,6 +578,18 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 static bool
 macos_passthrough_init(struct comp_window_macos *cwm)
 {
+	/*
+	 * Check for a camera source first: the UV maps below sample the device's
+	 * distortion for every texel, which for an IPC device (a client
+	 * compositing in-process) is half a million round trips to the service.
+	 * IPC devices have no passthrough sinks, as the cameras are the service's.
+	 */
+	struct xrt_device *xdev = cwm->base.base.c->xdev;
+	if (xdev == NULL || xdev->set_passthrough_sinks == NULL) {
+		COMP_INFO(cwm->base.base.c, "PS VR2 passthrough unavailable: the head device has no camera source here");
+		return false;
+	}
+
 	id<MTLDevice> device = [cwm->metal_layer device];
 
 	MTLTextureDescriptor *cam_desc =
@@ -660,18 +672,14 @@ macos_passthrough_init(struct comp_window_macos *cwm)
 		cwm->passthrough_sinks[eye].eye = eye;
 	}
 
-	struct xrt_device *xdev = cwm->base.base.c->xdev;
-	if (xdev != NULL && xdev->set_passthrough_sinks != NULL) {
-		xrt_result_t xret =
-		    xdev->set_passthrough_sinks(xdev, &cwm->passthrough_sinks[0].base, &cwm->passthrough_sinks[1].base);
-		if (xret == XRT_SUCCESS) {
-			cwm->passthrough_sinks_attached = true;
-			COMP_INFO(cwm->base.base.c,
-			          "PS VR2 BC4 passthrough attached (FOV %d deg, convergence %.3f)",
-			          (int)debug_get_num_option_macos_passthrough_fov_deg(),
-			          (double)debug_get_num_option_macos_passthrough_convergence_milli() / 1000.0);
-			return true;
-		}
+	xrt_result_t xret =
+	    xdev->set_passthrough_sinks(xdev, &cwm->passthrough_sinks[0].base, &cwm->passthrough_sinks[1].base);
+	if (xret == XRT_SUCCESS) {
+		cwm->passthrough_sinks_attached = true;
+		COMP_INFO(cwm->base.base.c, "PS VR2 BC4 passthrough attached (FOV %d deg, convergence %.3f)",
+		          (int)debug_get_num_option_macos_passthrough_fov_deg(),
+		          (double)debug_get_num_option_macos_passthrough_convergence_milli() / 1000.0);
+		return true;
 	}
 
 	COMP_WARN(cwm->base.base.c,
