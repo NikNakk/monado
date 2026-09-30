@@ -13,6 +13,7 @@
 #include "util/u_time.h"
 #include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 #include "util/u_pacing.h"
 #include "util/u_metrics.h"
 #include "util/u_logging.h"
@@ -83,8 +84,7 @@ static uint64_t g_macos_app_pacing_trace_rows = 0;
 static bool
 macos_app_pacing_trace_enabled(void)
 {
-	const char *value = getenv("PSVR2_TIMING_TRACE");
-	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+	return u_timing_trace_enabled();
 }
 
 static void
@@ -108,24 +108,11 @@ macos_app_pacing_trace_get(void)
 		return g_macos_app_pacing_trace;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_app_pacing.csv", dir, separator, (int)getpid());
-
-	g_macos_app_pacing_trace = fopen(path, "w");
+	g_macos_app_pacing_trace = u_timing_trace_open("app_pacing", 64u * 1024u);
 	if (g_macos_app_pacing_trace == NULL) {
 		g_macos_app_pacing_trace_failed = true;
 		return NULL;
 	}
-	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
-	size_t buffer_size =
-	    fully_buffered != NULL && strcmp(fully_buffered, "1") == 0 ? 16u * 1024u * 1024u : 64u * 1024u;
-	setvbuf(g_macos_app_pacing_trace, NULL, _IOFBF, buffer_size);
 	fputs("event,session_id,client_frame_id,event_ns,wake_ns,predicted_display_ns,predicted_period_ns,display_time_ns,"
 	      "cpu_est_ns,draw_est_ns,gpu_est_ns,cpu_actual_ns,draw_actual_ns,gpu_actual_ns\n",
 	      g_macos_app_pacing_trace);

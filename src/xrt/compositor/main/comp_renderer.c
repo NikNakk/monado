@@ -30,6 +30,7 @@
 #include "util/u_var.h"
 #include "util/u_frame_times_widget.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 
 #include "util/comp_render.h"
 #include "util/comp_high_level_render.h"
@@ -229,23 +230,11 @@ renderer_reprojection_trace_open(struct comp_renderer *r)
 		return;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_reprojection.csv", dir, separator, (int)getpid());
-
-	r->reprojection_trace = fopen(path, "w");
+	r->reprojection_trace = u_timing_trace_open("reprojection", 256 * 1024);
 	if (r->reprojection_trace == NULL) {
-		COMP_WARN(r->c, "Could not open macOS reprojection trace '%s'", path);
 		return;
 	}
 
-	setvbuf(r->reprojection_trace, NULL, _IOFBF, 256 * 1024);
 	fputs("system_frame_id,sample_ns,predicted_display_ns,desired_present_ns,system_layer_display_ns,"
 	      "path,fast_path,do_timewarp,source_valid,source_changed,layer_type,layer_timestamp_ns,"
 	      "layer_age_to_predicted_ns,view_count,left_image_index,left_array_index,right_image_index,right_array_index,"
@@ -487,23 +476,11 @@ renderer_late_render_trace_open(struct comp_renderer *r)
 		return;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_late_render.csv", dir, separator, (int)getpid());
-
-	r->late_render_trace = fopen(path, "w");
+	r->late_render_trace = u_timing_trace_open("late_render", 64 * 1024);
 	if (r->late_render_trace == NULL) {
-		COMP_WARN(r->c, "Could not open macOS late-render trace '%s'", path);
 		return;
 	}
 
-	setvbuf(r->late_render_trace, NULL, _IOFBF, 64 * 1024);
 	fputs("frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
 	      "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
 	      "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns,"
@@ -1136,8 +1113,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 				}
 
 				const uint8_t *sample = r->c->nr.apple_source_debug.buffers[i].mapped;
-				fprintf(stderr,
-				        "vk-source frame=%lld eye=%u image=%u rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)\n",
+				U_LOG_RAW("vk-source frame=%lld eye=%u image=%u rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)",
 				        (long long)r->c->nr.apple_source_debug.frame_id,
 				        i,
 				        r->c->nr.apple_source_debug.image_indices[i],
@@ -1163,8 +1139,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 		if (debug_get_bool_option_log_apple_samples() &&
 		    (r->c->nr.apple_target_debug.log_count <= 5 || r->c->nr.apple_target_debug.log_count % 120 == 0)) {
 			const uint8_t *sample = r->c->nr.apple_target_debug.buffer.mapped;
-			fprintf(stderr,
-			        "vk-target frame=%lld layer=0 rgbaL=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u) rgbaR=(%u,%u,%u,%u)\n",
+			U_LOG_RAW("vk-target frame=%lld layer=0 rgbaL=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u) rgbaR=(%u,%u,%u,%u)",
 			        (long long)r->c->nr.apple_target_debug.frame_id,
 			        (unsigned)sample[0],
 			        (unsigned)sample[1],

@@ -11,6 +11,7 @@
 
 #include "shared/ipc_metal_xpc.h"
 #include "shared/ipc_metal_xpc_service.h"
+#include "util/u_debug.h"
 #include "util/u_logging.h"
 
 #include <dispatch/dispatch.h>
@@ -61,11 +62,12 @@ texture_token_is_valid(uint64_t token)
 	return standard_token_is_valid(token) || external_texture_token_is_valid(token);
 }
 
+DEBUG_GET_ONCE_BOOL_OPTION(metal_xpc_external_broker, "XRT_MACOS_METAL_XPC_EXTERNAL_BROKER", false)
+
 bool
 ipc_metal_xpc_external_broker_enabled(void)
 {
-	const char *value = getenv("XRT_MACOS_METAL_XPC_EXTERNAL_BROKER");
-	return value != NULL && value[0] != '\0' && !(value[0] == '0' && value[1] == '\0');
+	return debug_get_bool_option_metal_xpc_external_broker();
 }
 
 static uint64_t

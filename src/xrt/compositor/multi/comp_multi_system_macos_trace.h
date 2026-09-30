@@ -17,6 +17,7 @@
 #include "multi/comp_multi_private.h"
 #include "os/os_time.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 
 #include <mach/mach.h>
 #include <mach/mach_time.h>
@@ -97,28 +98,12 @@ macos_client_frame_trace_get(void)
 		return g_macos_client_frame_trace;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_client_frame_map.csv", dir, separator, (int)getpid());
-
-	g_macos_client_frame_trace = fopen(path, "w");
+	g_macos_client_frame_trace = u_timing_trace_open("client_frame_map", 64u * 1024u);
 	if (g_macos_client_frame_trace == NULL) {
 		g_macos_client_frame_trace_failed = true;
 		return NULL;
 	}
 
-	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
-	if (fully_buffered != NULL && strcmp(fully_buffered, "1") == 0) {
-		setvbuf(g_macos_client_frame_trace, NULL, _IOFBF, 16u * 1024u * 1024u);
-	} else {
-		setvbuf(g_macos_client_frame_trace, NULL, _IOFBF, 64u * 1024u);
-	}
 
 	fputs("system_frame_id,system_display_time_ns,latch_ns,client_slot,client_frame_id,"
 	      "client_display_time_ns,display_time_delta_ns,reused,source_use_ordinal,layer_count,focused,visible\n",
@@ -233,9 +218,7 @@ macos_trace_multi_compositor_latch_frame_locked(struct multi_compositor *mc,
 	        mc->state.focused ? 1u : 0u, mc->state.visible ? 1u : 0u);
 	g_macos_client_frame_trace_rows++;
 
-	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
-	bool defer_flush = fully_buffered != NULL && strcmp(fully_buffered, "1") == 0;
-	if (!defer_flush && g_macos_client_frame_trace_rows % 512 == 0) {
+	if (!u_timing_trace_fully_buffered() && g_macos_client_frame_trace_rows % 512 == 0) {
 		fflush(file);
 	}
 	funlockfile(file);
@@ -269,9 +252,8 @@ macos_compositor_update_time_constraint(int64_t period_ns)
 	int computation_pct = debug_get_num_option_macos_compositor_computation_pct();
 	int constraint_pct = debug_get_num_option_macos_compositor_constraint_pct();
 	if (computation_pct <= 0 || constraint_pct <= 0 || computation_pct > constraint_pct || constraint_pct > 100) {
-		fprintf(stderr,
-		        "WARN: macOS diagnostic: invalid compositor time constraint percentages: computation_pct=%d "
-		        "constraint_pct=%d\n",
+		U_LOG_W("macOS diagnostic: invalid compositor time constraint percentages: computation_pct=%d "
+		        "constraint_pct=%d",
 		        computation_pct, constraint_pct);
 		g_macos_compositor_time_constraint_period_ns = period_ns;
 		return;
@@ -283,7 +265,7 @@ macos_compositor_update_time_constraint(int64_t period_ns)
 	mach_timebase_info_data_t timebase = {0};
 	kern_return_t kr = mach_timebase_info(&timebase);
 	if (kr != KERN_SUCCESS || timebase.numer == 0 || timebase.denom == 0) {
-		fprintf(stderr, "WARN: macOS diagnostic: mach_timebase_info failed for compositor time constraint: %d\n", kr);
+		U_LOG_W("macOS diagnostic: mach_timebase_info failed for compositor time constraint: %d", kr);
 		g_macos_compositor_time_constraint_period_ns = period_ns;
 		return;
 	}
@@ -303,15 +285,13 @@ macos_compositor_update_time_constraint(int64_t period_ns)
 
 	double refresh_hz = 1000000000.0 / (double)period_ns;
 	if (kr == KERN_SUCCESS) {
-		fprintf(stderr,
-		        "INFO: macOS diagnostic: Multi Client Module time constraint updated: refresh_hz=%.3f "
-		        "period_ns=%lld computation_ns=%llu constraint_ns=%llu computation_pct=%d constraint_pct=%d\n",
+		U_LOG_I("macOS diagnostic: Multi Client Module time constraint updated: refresh_hz=%.3f "
+		        "period_ns=%lld computation_ns=%llu constraint_ns=%llu computation_pct=%d constraint_pct=%d",
 		        refresh_hz, (long long)period_ns, (unsigned long long)computation_ns,
 		        (unsigned long long)constraint_ns, computation_pct, constraint_pct);
 	} else {
-		fprintf(stderr,
-		        "WARN: macOS diagnostic: failed to set Multi Client Module THREAD_TIME_CONSTRAINT_POLICY: kr=%d "
-		        "refresh_hz=%.3f period_ns=%lld computation_ns=%llu constraint_ns=%llu\n",
+		U_LOG_W("macOS diagnostic: failed to set Multi Client Module THREAD_TIME_CONSTRAINT_POLICY: kr=%d "
+		        "refresh_hz=%.3f period_ns=%lld computation_ns=%llu constraint_ns=%llu",
 		        kr, refresh_hz, (long long)period_ns, (unsigned long long)computation_ns,
 		        (unsigned long long)constraint_ns);
 	}

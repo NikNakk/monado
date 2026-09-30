@@ -119,13 +119,12 @@ maybe_log_timewarp_inputs(uint64_t frame_id,
 		return;
 	}
 
-	fprintf(stderr,
-	        "atw-input frame=%llu eye=%u fov=(%.5f,%.5f,%.5f,%.5f) "
+	U_LOG_RAW("atw-input frame=%llu eye=%u fov=(%.5f,%.5f,%.5f,%.5f) "
 	        "src-orient=(%.5f,%.5f,%.5f,%.5f) src-pos=(%.5f,%.5f,%.5f) "
 	        "new-orient=(%.5f,%.5f,%.5f,%.5f) new-pos=(%.5f,%.5f,%.5f) "
 	        "pre=(%.5f,%.5f,%.5f,%.5f) post=(%.5f,%.5f,%.5f,%.5f) "
 	        "begin0=(%.5f,%.5f,%.5f,%.5f) begin1=(%.5f,%.5f,%.5f,%.5f) "
-	        "end0=(%.5f,%.5f,%.5f,%.5f) end1=(%.5f,%.5f,%.5f,%.5f)\n",
+	        "end0=(%.5f,%.5f,%.5f,%.5f) end1=(%.5f,%.5f,%.5f,%.5f)",
 	        (unsigned long long)frame_id,
 	        eye,
 	        fov->angle_left,

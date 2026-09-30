@@ -199,9 +199,8 @@ schedule_display_loss_shutdown_watchdog(void)
 		 * is safer than leaving a Metal/CAMetalLayer teardown indefinitely
 		 * wedged after its original display has disappeared.
 		 */
-		fprintf(stderr,
-		        "ERROR: macOS display-loss shutdown watchdog expired after %lld ms for monado-service pid=%d; "
-		        "forcing process exit\n",
+		U_LOG_E("macOS display-loss shutdown watchdog expired after %lld ms for monado-service pid=%d; "
+		        "forcing process exit",
 		        (long long)watchdog_ms, (int)pid);
 		fflush(stderr);
 		_exit(0);

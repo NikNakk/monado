@@ -14,6 +14,7 @@
 #pragma once
 
 #include "os/os_time.h"
+#include "util/u_timing_trace.h"
 
 #include <mach/mach.h>
 #include <mach/thread_info.h>
@@ -45,27 +46,6 @@ static int g_macos_compositor_rt_last_curpri = -1;
 static int g_macos_compositor_rt_last_priority = -1;
 static int g_macos_compositor_rt_last_maxpriority = -1;
 
-static inline bool
-macos_compositor_rt_trace_enabled(void)
-{
-	const char *value = getenv("PSVR2_TIMING_TRACE");
-	return value != NULL && strcmp(value, "1") == 0;
-}
-
-static inline bool
-macos_compositor_rt_trace_fully_buffered(void)
-{
-	const char *value = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
-	return value != NULL && strcmp(value, "1") == 0;
-}
-
-static inline const char *
-macos_compositor_rt_trace_dir(void)
-{
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	return dir != NULL && dir[0] != '\0' ? dir : "/tmp";
-}
-
 static void
 macos_compositor_rt_trace_close(void)
 {
@@ -80,7 +60,7 @@ static FILE *
 macos_compositor_rt_trace_get(void)
 {
 	/* The time-constraint getter is defined by the preceding macOS trace header. */
-	if (!macos_compositor_rt_trace_enabled() || !debug_get_bool_option_macos_compositor_time_constraint() ||
+	if (!u_timing_trace_enabled() || !debug_get_bool_option_macos_compositor_time_constraint() ||
 	    g_macos_compositor_rt_trace_failed) {
 		return NULL;
 	}
@@ -88,18 +68,11 @@ macos_compositor_rt_trace_get(void)
 		return g_macos_compositor_rt_trace;
 	}
 
-	const char *dir = macos_compositor_rt_trace_dir();
-	char path[1024];
-	size_t len = strlen(dir);
-	const char *separator = len > 0 && dir[len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_compositor_rt.csv", dir, separator, (int)getpid());
-	g_macos_compositor_rt_trace = fopen(path, "w");
+	g_macos_compositor_rt_trace = u_timing_trace_open("compositor_rt", 64u * 1024u);
 	if (g_macos_compositor_rt_trace == NULL) {
 		g_macos_compositor_rt_trace_failed = true;
 		return NULL;
 	}
-	setvbuf(g_macos_compositor_rt_trace, NULL, _IOFBF,
-	        macos_compositor_rt_trace_fully_buffered() ? 16u * 1024u * 1024u : 64u * 1024u);
 	fputs("sample,frame_id,sample_ns,wall_since_previous_predict_ns,thread_id,display_period_ns,"
 	      "cpu_since_previous_predict_ns,configured_computation_ns,configured_constraint_ns,"
 	      "over_computation_budget,basic_info_kr,basic_policy,basic_cpu_usage,basic_run_state,basic_flags,"
@@ -111,7 +84,7 @@ macos_compositor_rt_trace_get(void)
 		atexit(macos_compositor_rt_trace_close);
 		g_macos_compositor_rt_trace_atexit_registered = true;
 	}
-	fprintf(stderr, "macOS compositor realtime trace: %s\n", path);
+	U_LOG_I("macOS compositor realtime trace enabled");
 	return g_macos_compositor_rt_trace;
 }
 
@@ -210,9 +183,8 @@ macos_compositor_rt_trace_record(int64_t frame_id, int64_t display_period_ns)
 	mach_port_deallocate(mach_task_self(), thread);
 
 	if (policy_transition) {
-		fprintf(stderr,
-		        "INFO: macOS compositor scheduler policy transition: frame=%lld thread_id=%llu policy=%d->%d "
-		        "wall_delta_ms=%.3f cpu_delta_ms=%.3f over_budget=%u ext_policy=%d curpri=%d basepri=%d maxpri=%d\n",
+		U_LOG_RAW("macOS compositor scheduler policy transition: frame=%lld thread_id=%llu policy=%d->%d "
+		        "wall_delta_ms=%.3f cpu_delta_ms=%.3f over_budget=%u ext_policy=%d curpri=%d basepri=%d maxpri=%d",
 		        (long long)frame_id, (unsigned long long)g_macos_compositor_rt_thread_id,
 		        previous_policy, basic_policy, (double)wall_delta_ns / 1000000.0,
 		        (double)cpu_delta_ns / 1000000.0, over_budget ? 1u : 0u,
@@ -250,7 +222,7 @@ macos_compositor_rt_trace_record(int64_t frame_id, int64_t display_period_ns)
 	        g_macos_compositor_rt_last_period_ticks,
 	        g_macos_compositor_rt_last_computation_ticks,
 	        g_macos_compositor_rt_last_constraint_ticks);
-	if (!macos_compositor_rt_trace_fully_buffered() && (g_macos_compositor_rt_trace_rows % 256) == 0) {
+	if (!u_timing_trace_fully_buffered() && (g_macos_compositor_rt_trace_rows % 256) == 0) {
 		fflush(file);
 	}
 }

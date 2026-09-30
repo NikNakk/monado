@@ -21,6 +21,7 @@
 #include "util/u_time.h"
 #include "util/u_wait.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 #include "util/u_trace_marker.h"
 #include "util/u_distortion_mesh.h"
 
@@ -65,18 +66,17 @@ static bool g_reprojection_source_previous_valid = false;
 static int64_t g_reprojection_source_previous_client_frame_id = -1;
 static const struct multi_compositor *g_reprojection_source_previous_client = NULL;
 
+DEBUG_GET_ONCE_TRISTATE_OPTION(reprojection_trace, "XRT_MACOS_REPROJECTION_TRACE")
+
+//! On with the timing traces, unless XRT_MACOS_REPROJECTION_TRACE says otherwise.
 static bool
 reprojection_trace_enabled(void)
 {
-	const char *explicit_value = getenv("XRT_MACOS_REPROJECTION_TRACE");
-	if (explicit_value != NULL && explicit_value[0] != '\0') {
-		return strcmp(explicit_value, "0") != 0 && strcmp(explicit_value, "off") != 0 &&
-		       strcmp(explicit_value, "false") != 0;
+	switch (debug_get_tristate_option_reprojection_trace()) {
+	case DEBUG_TRISTATE_ON: return true;
+	case DEBUG_TRISTATE_OFF: return false;
+	default: return u_timing_trace_enabled();
 	}
-
-	const char *timing_value = getenv("PSVR2_TIMING_TRACE");
-	return timing_value != NULL && timing_value[0] != '\0' && strcmp(timing_value, "0") != 0 &&
-	       strcmp(timing_value, "off") != 0 && strcmp(timing_value, "false") != 0;
 }
 
 static void
@@ -86,23 +86,11 @@ reprojection_source_trace_open(void)
 		return;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_reprojection_source.csv", dir, separator, (int)getpid());
-
-	g_reprojection_source_trace = fopen(path, "w");
+	g_reprojection_source_trace = u_timing_trace_open("reprojection_source", 128 * 1024);
 	if (g_reprojection_source_trace == NULL) {
-		U_LOG_W("Could not open reprojection source trace '%s'", path);
 		return;
 	}
 
-	setvbuf(g_reprojection_source_trace, NULL, _IOFBF, 128 * 1024);
 	fputs("system_frame_id,system_display_time_ns,source_valid,source_changed,focused,client_frame_id,"
 	      "client_display_time_ns,layer_index,layer_type,layer_timestamp_ns,view_count,"
 	      "left_image_index,left_array_index,right_image_index,right_array_index,"
@@ -110,7 +98,7 @@ reprojection_source_trace_open(void)
 	      "right_src_qx,right_src_qy,right_src_qz,right_src_qw,right_src_px,right_src_py,right_src_pz\n",
 	      g_reprojection_source_trace);
 	fflush(g_reprojection_source_trace);
-	U_LOG_I("Reprojection source trace enabled: %s", path);
+	U_LOG_I("Reprojection source trace enabled");
 }
 
 static void

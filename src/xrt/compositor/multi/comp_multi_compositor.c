@@ -19,6 +19,7 @@
 #include "util/u_misc.h"
 #include "util/u_time.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
 #include "util/u_distortion_mesh.h"
@@ -75,8 +76,7 @@ static bool g_macos_client_gpu_trace_atexit_registered = false;
 static bool
 macos_client_gpu_trace_enabled(void)
 {
-	const char *value = getenv("PSVR2_TIMING_TRACE");
-	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+	return u_timing_trace_enabled();
 }
 
 static void
@@ -100,25 +100,12 @@ macos_client_gpu_trace_get(void)
 		return g_macos_client_gpu_trace;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_client_gpu.csv", dir, separator, (int)getpid());
-
-	g_macos_client_gpu_trace = fopen(path, "w");
+	g_macos_client_gpu_trace = u_timing_trace_open("client_gpu", 64u * 1024u);
 	if (g_macos_client_gpu_trace == NULL) {
 		g_macos_client_gpu_trace_failed = true;
 		return NULL;
 	}
 
-	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
-	size_t buffer_size = fully_buffered != NULL && strcmp(fully_buffered, "1") == 0 ? 16u * 1024u * 1024u : 64u * 1024u;
-	setvbuf(g_macos_client_gpu_trace, NULL, _IOFBF, buffer_size);
 	fputs("event,client_frame_id,event_ns,semaphore_value,duration_ns\n", g_macos_client_gpu_trace);
 
 	if (!g_macos_client_gpu_trace_atexit_registered) {
@@ -427,8 +414,7 @@ wait_for_scheduled_free(struct multi_compositor *mc)
 
 	if (ipc_frame_timing_enabled()) {
 		int64_t timing_end_ns = os_monotonic_get_ns();
-		fprintf(stderr,
-		        "IPC_FRAME_TIMING server scheduled_free frame=%" PRId64 " duration_ms=%.3f sleeps=%u\n",
+		U_LOG_RAW("IPC_FRAME_TIMING server scheduled_free frame=%" PRId64 " duration_ms=%.3f sleeps=%u",
 		        timing_frame_id, ipc_elapsed_ms(timing_start_ns, timing_end_ns), sleep_count);
 	}
 }
@@ -876,8 +862,7 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
 	int64_t wait_end_ns = os_monotonic_get_ns();
 	macos_client_gpu_trace_event("layer_begin_after_previous", data->frame_id, 0, wait_end_ns - wait_start_ns);
 	if (ipc_frame_timing_enabled()) {
-		fprintf(stderr,
-		        "IPC_FRAME_TIMING server layer_begin_wait frame=%" PRId64 " duration_ms=%.3f\n",
+		U_LOG_RAW("IPC_FRAME_TIMING server layer_begin_wait frame=%" PRId64 " duration_ms=%.3f",
 		        data->frame_id, ipc_elapsed_ms(wait_start_ns, wait_end_ns));
 	}
 
@@ -1079,9 +1064,8 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 
 	if (ipc_frame_timing_enabled()) {
 		int64_t commit_end_ns = os_monotonic_get_ns();
-		fprintf(stderr,
-		        "IPC_FRAME_TIMING server layer_commit frame=%" PRId64
-		        " sync_handle=%d imported_fence=%d import_ms=%.3f total_ms=%.3f\n",
+		U_LOG_RAW("IPC_FRAME_TIMING server layer_commit frame=%" PRId64
+		        " sync_handle=%d imported_fence=%d import_ms=%.3f total_ms=%.3f",
 		        frame_id, xrt_graphics_sync_handle_is_valid(sync_handle) ? 1 : 0, xcf != NULL ? 1 : 0,
 		        ipc_elapsed_ms(import_start_ns, import_end_ns), ipc_elapsed_ms(commit_start_ns, commit_end_ns));
 	}
