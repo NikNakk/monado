@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # macOS direct service XPC activation
 
 This work moves the macOS Metal XPC endpoint from the standalone

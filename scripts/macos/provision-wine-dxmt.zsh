@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 #
 # Provision the pinned Windows-PCVR D3D11 test stack used by the macOS Monado
 # Wine bridge work.

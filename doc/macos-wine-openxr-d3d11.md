@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # Wine D3D11 OpenXR client for native macOS Monado
 
 This branch builds a Windows x86-64 Monado OpenXR runtime under MinGW and runs

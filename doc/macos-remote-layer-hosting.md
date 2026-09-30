@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # macOS: Game Mode demotion and cross-process layer hosting
 
 The resulting design is in

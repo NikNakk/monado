@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 #
 # Build the pinned MIT DXMT v0.80 + Basalt IOSurface patches + Monado shared
 # D3D11 fence/texture metadata patches, then overlay the matched artifacts into the

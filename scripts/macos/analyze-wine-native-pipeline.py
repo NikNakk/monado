@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 """Join Wine/OpenComposite client frames to native macOS compositor/presentation traces."""
 
 from __future__ import annotations

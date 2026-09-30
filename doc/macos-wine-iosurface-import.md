@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # Windows/Wine IOSurface swapchain import
 
 This branch starts the Windows-PCVR graphics bridge without adding a second compositor.

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright 2026, Nick Kennedy
 # SPDX-License-Identifier: BSL-1.0
 """Replay position continuity and accuracy together; requires NumPy.
 

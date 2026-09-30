@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # macOS PS VR2 judder evidence ledger
 
 This is the short-form decision record for the visible head-motion judder / apparent backwards snap seen in the native macOS PS VR2 OpenXR path. It complements `macos-psvr2-timing-diagnostics.md`, `macos-psvr2-stale-substitution.md`, `macos-psvr2-latest-frame-worker.md`, `psvr2-position-prediction.md`, and `psvr2-continuity-prediction.md`.

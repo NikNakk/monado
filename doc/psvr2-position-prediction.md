@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # PSVR2 positional prediction experiment — 2026-09-05
 
 Test **full-horizon raw prediction first**, then bounded acceleration against it.

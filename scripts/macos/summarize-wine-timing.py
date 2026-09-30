@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 """Summarise Monado Wine D3D11 timing traces without third-party packages."""
 
 from __future__ import annotations
