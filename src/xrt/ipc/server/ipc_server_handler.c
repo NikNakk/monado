@@ -3192,6 +3192,69 @@ ipc_handle_device_get_distortion_mesh(volatile struct ipc_client_state *ics, uin
 }
 
 xrt_result_t
+ipc_handle_device_get_distortion_grid(volatile struct ipc_client_state *ics,
+                                      uint32_t id,
+                                      uint32_t view,
+                                      uint32_t points_per_side)
+{
+	struct ipc_message_channel *imc = (struct ipc_message_channel *)&ics->imc;
+	struct ipc_device_get_distortion_grid_reply reply = XRT_STRUCT_INIT;
+	struct ipc_server *s = ics->server;
+
+	/*
+	 * Sample the device's distortion on a regular grid over [0, 1] x [0, 1],
+	 * row by row, so a client compositing in-process can interpolate it
+	 * locally instead of making one call per point. As with the mesh, the
+	 * reply is sent on every path and the data follows only on success.
+	 */
+	struct xrt_device *xdev = NULL;
+	reply.result = ipc_server_objects_get_xdev_and_validate(ics, id, &xdev);
+	if (reply.result == XRT_SUCCESS &&
+	    (xdev->hmd == NULL || view >= xdev->hmd->view_count || xdev->compute_distortion == NULL)) {
+		reply.result = XRT_ERROR_FEATURE_NOT_SUPPORTED;
+	}
+	if (reply.result == XRT_SUCCESS && (points_per_side < 2 || points_per_side > 1025)) {
+		reply.result = XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	struct xrt_uv_triplet *grid = NULL;
+	size_t count = (size_t)points_per_side * points_per_side;
+	if (reply.result == XRT_SUCCESS) {
+		grid = U_TYPED_ARRAY_CALLOC(struct xrt_uv_triplet, count);
+		if (grid == NULL) {
+			reply.result = XRT_ERROR_ALLOCATION;
+		}
+	}
+
+	const float step = points_per_side > 1 ? 1.0f / (float)(points_per_side - 1) : 0.0f;
+	for (uint32_t row = 0; reply.result == XRT_SUCCESS && row < points_per_side; row++) {
+		for (uint32_t col = 0; col < points_per_side; col++) {
+			struct xrt_uv_triplet *t = &grid[(size_t)row * points_per_side + col];
+			xrt_result_t xret = xrt_device_compute_distortion(xdev, view, col * step, row * step, t);
+			if (xret != XRT_SUCCESS) {
+				reply.result = xret;
+				break;
+			}
+		}
+	}
+
+	reply.grid_size = reply.result == XRT_SUCCESS ? (uint32_t)(count * sizeof(*grid)) : 0;
+
+	xrt_result_t xret = ipc_send(imc, &reply, sizeof(reply));
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(s, "Failed to send distortion grid reply");
+	} else if (reply.result == XRT_SUCCESS) {
+		xret = ipc_send(imc, grid, reply.grid_size);
+		if (xret != XRT_SUCCESS) {
+			IPC_ERROR(s, "Failed to send distortion grid");
+		}
+	}
+
+	free(grid);
+	return xret;
+}
+
+xrt_result_t
 ipc_handle_device_begin_plane_detection_ext(volatile struct ipc_client_state *ics,
                                             uint32_t id,
                                             uint64_t plane_detection_id,

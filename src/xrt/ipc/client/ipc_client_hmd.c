@@ -35,6 +35,7 @@
 
 
 DEBUG_GET_ONCE_BOOL_OPTION(ipc_distortion_mesh_transfer, "XRT_IPC_DISTORTION_MESH_TRANSFER", true)
+DEBUG_GET_ONCE_NUM_OPTION(ipc_distortion_grid_points, "XRT_IPC_DISTORTION_GRID_POINTS", 513)
 
 
 /*
@@ -209,6 +210,93 @@ ipc_client_hmd_compute_distortion(
 }
 
 /*!
+ * Fetch the service device's distortion for @p view sampled on a grid, in one
+ * call. Leaves nothing allocated on failure.
+ */
+static xrt_result_t
+fetch_distortion_grid(ipc_client_hmd_t *ich, uint32_t view, uint32_t points)
+{
+	struct ipc_connection *ipc_c = ich->ipc_c;
+	struct xrt_uv_triplet *grid = NULL;
+	uint32_t grid_size = 0;
+	xrt_result_t xret;
+
+	ipc_client_connection_lock(ipc_c);
+	ipc_client_connection_send_lock(ipc_c);
+	xret = ipc_send_device_get_distortion_grid_locked(ipc_c, ich->device_id, view, points);
+	ipc_client_connection_send_unlock(ipc_c);
+	if (xret != XRT_SUCCESS) {
+		goto out_unlock;
+	}
+
+	// Nothing follows an unsuccessful reply.
+	xret = ipc_receive_device_get_distortion_grid_locked(ipc_c, &grid_size);
+	if (xret != XRT_SUCCESS) {
+		goto out_unlock;
+	}
+
+	grid = malloc(grid_size > 0 ? grid_size : 1);
+	if (grid == NULL) {
+		xret = XRT_ERROR_ALLOCATION;
+		goto out_unlock;
+	}
+
+	// Receive even if the size is wrong, to keep the channel in step.
+	xret = ipc_receive(&ipc_c->imc, grid, grid_size);
+	if (xret == XRT_SUCCESS && grid_size != (size_t)points * points * sizeof(*grid)) {
+		xret = XRT_ERROR_IPC_FAILURE;
+	}
+	if (xret != XRT_SUCCESS) {
+		free(grid);
+		goto out_unlock;
+	}
+
+	ich->distortion_grid[view] = grid;
+
+out_unlock:
+	ipc_client_connection_unlock(ipc_c);
+	return xret;
+}
+
+static inline struct xrt_vec2
+lerp_vec2(struct xrt_vec2 a, struct xrt_vec2 b, float t)
+{
+	return (struct xrt_vec2){a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t};
+}
+
+//! compute_distortion from the fetched grid, bilinearly interpolated.
+static xrt_result_t
+ipc_client_hmd_compute_distortion_from_grid(
+    struct xrt_device *xdev, uint32_t view, float u, float v, struct xrt_uv_triplet *out_result)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+	const uint32_t n = ich->distortion_grid_points;
+	const struct xrt_uv_triplet *grid = view < XRT_MAX_VIEWS ? ich->distortion_grid[view] : NULL;
+	if (grid == NULL || n < 2) {
+		return ipc_client_hmd_compute_distortion(xdev, view, u, v, out_result);
+	}
+
+	// Clamp to the sampled square; callers sample inside [0, 1].
+	float x = (u < 0.0f ? 0.0f : (u > 1.0f ? 1.0f : u)) * (float)(n - 1);
+	float y = (v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v)) * (float)(n - 1);
+	uint32_t x0 = (uint32_t)x < n - 1 ? (uint32_t)x : n - 2;
+	uint32_t y0 = (uint32_t)y < n - 1 ? (uint32_t)y : n - 2;
+	float tx = x - (float)x0;
+	float ty = y - (float)y0;
+
+	const struct xrt_uv_triplet *a = &grid[(size_t)y0 * n + x0];
+	const struct xrt_uv_triplet *b = a + 1;
+	const struct xrt_uv_triplet *c = a + n;
+	const struct xrt_uv_triplet *d = c + 1;
+
+	out_result->r = lerp_vec2(lerp_vec2(a->r, b->r, tx), lerp_vec2(c->r, d->r, tx), ty);
+	out_result->g = lerp_vec2(lerp_vec2(a->g, b->g, tx), lerp_vec2(c->g, d->g, tx), ty);
+	out_result->b = lerp_vec2(lerp_vec2(a->b, b->b, tx), lerp_vec2(c->b, d->b, tx), ty);
+
+	return XRT_SUCCESS;
+}
+
+/*!
  * Copy the service device's finished distortion mesh in one call, instead of
  * one call per vertex. Leaves the mesh untouched on failure.
  */
@@ -312,6 +400,39 @@ ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 	hmd->distortion.models = XRT_DISTORTION_MODEL_COMPUTE;
 	hmd->distortion.preferred = XRT_DISTORTION_MODEL_COMPUTE;
 
+	/*
+	 * The compositor samples the distortion per texel as well (the compute
+	 * path's distortion images, and on macOS the passthrough maps). Fetch a
+	 * grid per view and interpolate it locally, instead of hundreds of
+	 * thousands of calls to the service.
+	 */
+	int64_t grid_start_ns = os_monotonic_get_ns();
+	int64_t points = debug_get_num_option_ipc_distortion_grid_points();
+	if (points >= 2 && points <= 1025) {
+		ich->distortion_grid_points = (uint32_t)points;
+		bool all = true;
+		for (uint32_t i = 0; i < hmd->view_count && i < XRT_MAX_VIEWS; i++) {
+			xrt_result_t xret = fetch_distortion_grid(ich, i, (uint32_t)points);
+			if (xret != XRT_SUCCESS) {
+				IPC_WARN(ich->ipc_c, "Could not fetch the distortion grid for view %u (%d)", i, xret);
+				all = false;
+				break;
+			}
+		}
+		if (all) {
+			xdev->compute_distortion = ipc_client_hmd_compute_distortion_from_grid;
+			IPC_INFO(ich->ipc_c, "Distortion grid copied from the service: %u x %u per view in %.1f ms",
+			         (uint32_t)points, (uint32_t)points,
+			         (double)(os_monotonic_get_ns() - grid_start_ns) / 1e6);
+		} else {
+			for (uint32_t i = 0; i < XRT_MAX_VIEWS; i++) {
+				free(ich->distortion_grid[i]);
+				ich->distortion_grid[i] = NULL;
+			}
+			ich->distortion_grid_points = 0;
+		}
+	}
+
 	int64_t start_ns = os_monotonic_get_ns();
 	const char *how = "computed point by point";
 	if (debug_get_bool_option_ipc_distortion_mesh_transfer()) {
@@ -402,6 +523,11 @@ ipc_client_hmd_destroy(struct xrt_device *xdev)
 
 	// Remove the variable tracking.
 	u_var_remove_root(ich);
+
+	for (uint32_t i = 0; i < XRT_MAX_VIEWS; i++) {
+		free(ich->distortion_grid[i]);
+		ich->distortion_grid[i] = NULL;
+	}
 
 	// Free and de-init the shared things.
 	ipc_client_xdev_fini(ich);

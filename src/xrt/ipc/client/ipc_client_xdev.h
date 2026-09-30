@@ -40,6 +40,14 @@ struct ipc_client_xdev
 
 	struct xrt_binding_input_pair *all_input_pairs;
 	struct xrt_binding_output_pair *all_output_pairs;
+
+	/*!
+	 * HMDs used by a compositor in this process: the service device's
+	 * distortion sampled on a points x points grid per view, interpolated
+	 * locally instead of one IPC call per point. NULL when not fetched.
+	 */
+	struct xrt_uv_triplet *distortion_grid[XRT_MAX_VIEWS];
+	uint32_t distortion_grid_points;
 };
 
 /*!

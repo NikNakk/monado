@@ -1,0 +1,15 @@
+{
+	"$schema": "../proto.schema.json",
+
+	"device_get_distortion_grid": {
+		"varlen": true,
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "view", "type": "uint32_t"},
+			{"name": "points_per_side", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "grid_size", "type": "uint32_t"}
+		]
+	}
+}
