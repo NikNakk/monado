@@ -4,7 +4,7 @@
  * @file
  * @brief macOS PS VR2 diagnostic mapping from system compositor frames to client frames.
  *
- * Force-included into comp_multi_system.c on Apple builds only. The wrapper leaves
+ * Included by comp_multi_system.c on Apple builds only. The latch trace leaves
  * the normal multi-compositor latch behaviour unchanged and records which delivered
  * client frame supplied each system-compositor refresh. Joining system_frame_id to
  * late_render.csv and present.csv/timeline_value lets us verify asynchronous
@@ -13,11 +13,6 @@
 
 #pragma once
 
-/*
- * This header is force-included before comp_multi_system.c's normal include list.
- * Bring in xrt_session.h first so union xrt_session_event has file scope before
- * comp_multi_private.h declares multi_compositor_push_event().
- */
 #include "xrt/xrt_session.h"
 #include "multi/comp_multi_private.h"
 #include "os/os_time.h"
@@ -337,22 +332,3 @@ macos_xrt_comp_predict_frame_with_time_constraint(struct xrt_compositor *xc,
 		macos_compositor_update_time_constraint(*out_predicted_display_period_ns);
 	}
 }
-
-/*
- * comp_multi_system.c has exactly one delivery call and one latch call, both
- * inside transfer_layers_locked where system_frame_id and display_time_ns are
- * available. It calls xrt_comp_predict_frame() once per physical compositor tick. Keep the public
- * interfaces unchanged and wrap only this Apple build translation unit.
- */
-#define xrt_comp_predict_frame(xc, out_frame_id, out_wake_up_time_ns, out_predicted_gpu_time_ns,                  \
-                               out_predicted_display_time_ns, out_predicted_display_period_ns)                     \
-	macos_xrt_comp_predict_frame_with_time_constraint((xc), (out_frame_id), (out_wake_up_time_ns),              \
-	                                                   (out_predicted_gpu_time_ns),                                \
-	                                                   (out_predicted_display_time_ns),                            \
-	                                                   (out_predicted_display_period_ns))
-#define multi_compositor_deliver_any_frames(mc, display_time_ns)                                                     \
-	macos_deliver_client_frame_cadenced((mc), (display_time_ns), system_frame_id)
-#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
-#define multi_compositor_latch_frame_locked(mc, when_ns, system_frame_id)                                            \
-	macos_trace_multi_compositor_latch_frame_locked((mc), (when_ns), (system_frame_id), display_time_ns)
-#endif

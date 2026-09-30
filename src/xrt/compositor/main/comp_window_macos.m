@@ -14,6 +14,7 @@
 
 #include "main/comp_window.h"
 #include "main/comp_macos_remote_layer.h"
+#include "main/comp_window_macos_trace_buffer.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
 #include "util/u_frame_share.h"
@@ -96,7 +97,7 @@ macos_presented_state_release(struct macos_presented_state *state)
 		return;
 	}
 	if (state->trace_presented != NULL) {
-		fflush(state->trace_presented);
+		macos_trace_buffered_fflush(state->trace_presented);
 		fclose(state->trace_presented);
 		state->trace_presented = NULL;
 	}
@@ -258,10 +259,10 @@ macos_timing_trace_open_file(const char *suffix, const char *header)
 	if (file == NULL) {
 		return NULL;
 	}
-	setvbuf(file, NULL, _IOFBF, 64 * 1024);
+	macos_trace_buffered_setvbuf(file, NULL, _IOFBF, 64 * 1024);
 	fputs(header, file);
 	fputc('\n', file);
-	fflush(file);
+	macos_trace_buffered_fflush(file);
 	return file;
 }
 
@@ -325,32 +326,32 @@ macos_timing_trace_close(struct comp_window_macos *cwm)
 		cwm->trace_present_group = NULL;
 	}
 	if (cwm->trace_present != NULL) {
-		fflush(cwm->trace_present);
+		macos_trace_buffered_fflush(cwm->trace_present);
 		fclose(cwm->trace_present);
 		cwm->trace_present = NULL;
 	}
 	if (cwm->trace_presented != NULL) {
-		fflush(cwm->trace_presented);
+		macos_trace_buffered_fflush(cwm->trace_presented);
 		fclose(cwm->trace_presented);
 		cwm->trace_presented = NULL;
 	}
 	if (cwm->trace_present_complete != NULL) {
-		fflush(cwm->trace_present_complete);
+		macos_trace_buffered_fflush(cwm->trace_present_complete);
 		fclose(cwm->trace_present_complete);
 		cwm->trace_present_complete = NULL;
 	}
 	if (cwm->trace_present_worker != NULL) {
-		fflush(cwm->trace_present_worker);
+		macos_trace_buffered_fflush(cwm->trace_present_worker);
 		fclose(cwm->trace_present_worker);
 		cwm->trace_present_worker = NULL;
 	}
 	if (cwm->trace_drawable_prefetch != NULL) {
-		fflush(cwm->trace_drawable_prefetch);
+		macos_trace_buffered_fflush(cwm->trace_drawable_prefetch);
 		fclose(cwm->trace_drawable_prefetch);
 		cwm->trace_drawable_prefetch = NULL;
 	}
 	if (cwm->trace_vblank != NULL) {
-		fflush(cwm->trace_vblank);
+		macos_trace_buffered_fflush(cwm->trace_vblank);
 		fclose(cwm->trace_vblank);
 		cwm->trace_vblank = NULL;
 	}
@@ -801,7 +802,7 @@ macos_trace_drawable_prefetch(struct comp_window_macos *cwm,
 	        (unsigned long long)end_ns, (unsigned long long)wait_ns);
 	cwm->trace_drawable_prefetch_rows++;
 	if (cwm->trace_drawable_prefetch_rows % 256 == 0) {
-		fflush(cwm->trace_drawable_prefetch);
+		macos_trace_buffered_fflush(cwm->trace_drawable_prefetch);
 	}
 	funlockfile(cwm->trace_drawable_prefetch);
 }
@@ -938,7 +939,7 @@ macos_trace_present_worker(struct comp_window_macos *cwm,
 	        (unsigned long long)pending_timeline_value);
 	cwm->trace_present_worker_rows++;
 	if (cwm->trace_present_worker_rows % 256 == 0) {
-		fflush(cwm->trace_present_worker);
+		macos_trace_buffered_fflush(cwm->trace_present_worker);
 	}
 	funlockfile(cwm->trace_present_worker);
 }
@@ -2062,7 +2063,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				        (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,
 				        presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns,
 				        present_queue_depth);
-				fflush(trace_file);
+				macos_trace_buffered_fflush(trace_file);
 				funlockfile(trace_file);
 				macos_presented_state_release(presented_state);
 			}];
@@ -2084,7 +2085,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			}];
 		}
 		if (scheduled_present_host_s > 0.0) {
-			[command_buffer presentDrawable:drawable atTime:scheduled_present_host_s];
+			macos_present_drawable_at_time(command_buffer, drawable, scheduled_present_host_s);
 		} else {
 			[command_buffer presentDrawable:drawable];
 		}
@@ -2176,7 +2177,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		        1u /* async_present */, shared_event_wait ? 1u : 0u, (unsigned long long)image_reuse_wait_ns);
 		cwm->trace_present_rows++;
 		if (cwm->trace_present_rows % 256 == 0) {
-			fflush(cwm->trace_present);
+			macos_trace_buffered_fflush(cwm->trace_present);
 		}
 	}
 
@@ -2481,7 +2482,7 @@ comp_window_macos_update_timings(struct comp_target *ct)
 		        cwm->display_period_ns);
 		cwm->trace_vblank_rows++;
 		if (cwm->trace_vblank_rows % 256 == 0) {
-			fflush(cwm->trace_vblank);
+			macos_trace_buffered_fflush(cwm->trace_vblank);
 		}
 	}
 

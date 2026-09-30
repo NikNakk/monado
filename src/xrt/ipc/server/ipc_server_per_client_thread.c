@@ -18,6 +18,10 @@
 #include "server/ipc_server.h"
 #include "ipc_server_generated.h"
 
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+#include "server/ipc_metal_client_cleanup.h"
+#endif
+
 #ifndef XRT_OS_WINDOWS
 
 #include <unistd.h>
@@ -81,6 +85,11 @@ common_shutdown(volatile struct ipc_client_state *ics)
 	os_mutex_lock(&ics->server->global_state.lock);
 
 	ipc_message_channel_close((struct ipc_message_channel *)&ics->imc);
+
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+	// Release the client's Metal handles while its PID is still known.
+	ipc_metal_client_cleanup(ics);
+#endif
 
 	ipc_shmem_destroy((xrt_shmem_handle_t *)&ics->ism_handle, (void **)&ics->server->isms[ics->server_thread_index],
 	                  sizeof(struct ipc_shared_memory));

@@ -28,6 +28,10 @@
 #include "client/ipc_client.h"
 #include "ipc_client_generated.h"
 
+#ifdef XRT_IPC_MACOS_METAL_IMPORT
+#include "client/ipc_metal_swapchain_import.h"
+#endif
+
 #include <string.h>
 #include <stdio.h>
 #if !defined(XRT_OS_WINDOWS)
@@ -391,13 +395,18 @@ swapchain_server_import(struct ipc_client_compositor *icc,
 	}
 
 	// This does not consume the handles, it copies them.
+#ifdef XRT_IPC_MACOS_METAL_IMPORT
+	// Metal textures go through the Metal import calls, everything else as usual.
+	xret = ipc_metal_call_swapchain_import_or_default( //
+#else
 	xret = ipc_call_swapchain_import( //
-	    icc->ipc_c,                   // connection
-	    info,                         // in
-	    &args,                        // in
-	    handles,                      // handles
-	    image_count,                  // handles
-	    &id);                         // out
+#endif
+	    icc->ipc_c, // connection
+	    info,       // in
+	    &args,      // in
+	    handles,    // handles
+	    image_count, // handles
+	    &id);        // out
 	if (xret == XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED) {
 		// Don't error print this, not an error.
 		IPC_DEBUG(icc->ipc_c, "Got XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED");
@@ -640,7 +649,11 @@ ipc_compositor_semaphore_create(struct xrt_compositor *xc,
 	xrt_result_t xret;
 	uint32_t id = 0;
 
+#ifdef XRT_IPC_MACOS_METAL_IMPORT
+	xret = ipc_metal_call_compositor_semaphore_create_or_default(icc->ipc_c, &id, &handle, 1);
+#else
 	xret = ipc_call_compositor_semaphore_create(icc->ipc_c, &id, &handle, 1);
+#endif
 	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_compositor_semaphore_create");
 
 	struct ipc_client_compositor_semaphore *iccs = U_TYPED_CALLOC(struct ipc_client_compositor_semaphore);

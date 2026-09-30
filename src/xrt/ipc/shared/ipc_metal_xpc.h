@@ -96,8 +96,9 @@ ipc_metal_xpc_release_shared_event(void *metal_shared_event);
 
 /*
  * Thread-local marker used only while the Metal Stage-4 wrapper asks the IPC
- * compositor to create its service-side timeline semaphore. The source-local
- * IPC override consumes the returned broker token and stores the reconstructed
+ * compositor to create its service-side timeline semaphore. The IPC client's
+ * Metal semaphore call (ipc_metal_call_compositor_semaphore_create_or_default)
+ * consumes the returned broker token and stores the reconstructed
  * event here so the ordinary xrt_comp_create_semaphore call can still return
  * the normal IPC semaphore proxy.
  */

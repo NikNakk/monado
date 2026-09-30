@@ -56,32 +56,7 @@ if(WIN32)
 	target_sources(comp_main PRIVATE comp_window_mswin.c)
 endif()
 if(APPLE)
-	target_sources(comp_main PRIVATE comp_window_macos.m)
-	set_source_files_properties(
-		comp_window_macos.m
-		PROPERTIES COMPILE_OPTIONS
-			"-include;${CMAKE_CURRENT_SOURCE_DIR}/comp_window_macos_trace_buffer.h"
-		)
-
-	# Add the service-Metal reuse timeline to the exact renderer queue submit
-	# without changing the ordinary renderer/presentation code path.
-	set_property(
-		SOURCE comp_renderer.c
-		APPEND
-		PROPERTY COMPILE_OPTIONS
-			"-include"
-			"${CMAKE_CURRENT_SOURCE_DIR}/../util/comp_swapchain_gpu_reuse_renderer_override.h"
-		)
-
-	# Ensure native layer-accumulator claims are also released on renderer
-	# early-return/error paths that never reach vkQueueSubmit.
-	set_property(
-		SOURCE comp_compositor.c
-		APPEND
-		PROPERTY COMPILE_OPTIONS
-			"-include"
-			"${CMAKE_CURRENT_SOURCE_DIR}/../util/comp_swapchain_gpu_reuse_compositor_override.h"
-		)
+	target_sources(comp_main PRIVATE comp_window_macos.m comp_window_macos_trace_buffer.h)
 
 	target_link_libraries(
 		comp_main

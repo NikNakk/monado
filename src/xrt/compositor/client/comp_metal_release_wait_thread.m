@@ -11,6 +11,9 @@
 #include "xrt/xrt_config_build.h"
 #include "client/comp_metal_release_wait_thread.h"
 #include "util/comp_metal_semaphore_probe.h"
+#ifdef XRT_FEATURE_SERVICE
+#include "client/comp_metal_service_semaphore.h"
+#endif
 #include "util/u_debug.h"
 #include "util/u_handles.h"
 #include "util/u_logging.h"
@@ -116,7 +119,12 @@ ensure_pair(struct client_metal_wait_thread_context *c)
 
 	struct xrt_compositor_semaphore *xcsem = NULL;
 	void *raw_shared_event = NULL;
+#ifdef XRT_FEATURE_SERVICE
+	// Through monado-service, or locally when this client is hosted by it.
+	xrt_result_t xret = client_metal_semaphore_create_pair_for_mode(&xcsem, &raw_shared_event);
+#else
 	xrt_result_t xret = comp_metal_semaphore_create_client_pair(&xcsem, &raw_shared_event);
+#endif
 	if (xret != XRT_SUCCESS || xcsem == NULL || raw_shared_event == NULL) {
 		U_LOG_W("Metal app-release wait-thread handoff unavailable: result=%d; blocking release handoff unchanged",
 		        xret);

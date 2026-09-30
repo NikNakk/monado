@@ -9,22 +9,11 @@
 #include "server/ipc_server.h"
 #include "shared/ipc_metal_xpc_service.h"
 
-#include <stddef.h>
-
 void
-ipc_metal_client_message_channel_close(struct ipc_message_channel *imc)
+ipc_metal_client_cleanup(volatile struct ipc_client_state *ics)
 {
-	if (imc == NULL) {
-		return;
-	}
-
-	volatile struct ipc_client_state *ics =
-	    (volatile struct ipc_client_state *)((char *)imc - offsetof(struct ipc_client_state, imc));
 	struct ipc_server *server = ics->server;
 	pid_t owner_pid = ics->client_state.pid;
-
-	/* Preserve normal Monado socket teardown first. */
-	ipc_message_channel_close(imc);
 
 	if (server == NULL || owner_pid <= 0) {
 		return;

@@ -67,6 +67,7 @@
 #include "util/u_verify.h"
 
 #include "util/comp_vulkan.h"
+#include "util/comp_swapchain_gpu_reuse_internal.h"
 #include "main/comp_compositor.h"
 #include "main/comp_frame.h"
 
@@ -462,8 +463,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);
 #endif
 
-	// Do the drawing
+	// Do the drawing, tracking which swapchain images it reads.
+	comp_swapchain_gpu_reuse_renderer_enter(&c->base.layer_accum);
 	xrt_result_t xret = comp_renderer_draw(c->r);
+	comp_swapchain_gpu_reuse_renderer_leave(&c->base.layer_accum);
 #ifdef XRT_OS_OSX
 	macos_frame_pipeline_trace_event("layer_commit_after_renderer", frame_id, os_monotonic_get_ns(), 0, 0,
 	                                 desired_present_time_ns, predicted_display_time_ns, present_slop_ns);

@@ -253,7 +253,7 @@ pump_appkit_events(void)
  */
 
 void
-ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
+ipc_server_mainloop_apple_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 {
 	IPC_TRACE_MARKER();
 	pump_appkit_events();
@@ -328,7 +328,7 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 }
 
 int
-ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
+ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, bool no_stdin)
 {
 	IPC_TRACE_MARKER();
 
@@ -338,13 +338,13 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 
 	int ret = init_listen_socket(ml);
 	if (ret < 0) {
-		ipc_server_mainloop_deinit(ml);
+		ipc_server_mainloop_apple_deinit(ml);
 		return ret;
 	}
 
 	ret = init_wine_tcp_listener(ml);
 	if (ret < 0) {
-		ipc_server_mainloop_deinit(ml);
+		ipc_server_mainloop_apple_deinit(ml);
 		return ret;
 	}
 
@@ -353,7 +353,7 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 }
 
 void
-ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
+ipc_server_mainloop_apple_deinit(struct ipc_server_mainloop *ml)
 {
 	IPC_TRACE_MARKER();
 
@@ -374,3 +374,27 @@ ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
 		ml->socket_filename = NULL;
 	}
 }
+
+#ifndef XRT_FEATURE_SERVICE
+/*
+ * Service builds wrap these with launchd/XPC lifecycle handling in
+ * ipc_server_mainloop_apple_xpc.m; otherwise they are the main loop.
+ */
+int
+ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
+{
+	return ipc_server_mainloop_apple_init(ml, no_stdin);
+}
+
+void
+ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
+{
+	ipc_server_mainloop_apple_poll(vs, ml);
+}
+
+void
+ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
+{
+	ipc_server_mainloop_apple_deinit(ml);
+}
+#endif

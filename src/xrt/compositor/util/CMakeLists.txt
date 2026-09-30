@@ -45,26 +45,14 @@ if(APPLE)
 	target_sources(
 		comp_util
 		PRIVATE comp_swapchain_gpu_reuse.c
-			comp_swapchain_gpu_reuse_renderer_override.h
-			comp_swapchain_gpu_reuse_compositor_override.h
 			comp_metal_semaphore_provider.h
 			comp_metal_semaphore_probe.h
 			comp_metal_semaphore_probe.m
 			comp_metal_swapchain_handoff.h
 			comp_metal_swapchain_import.h
 			comp_metal_swapchain_import.c
-			comp_metal_swapchain_import_override.h
 			comp_metal_texture_device.h
 			comp_metal_texture_device.m
-		)
-
-	# Redirect the two vk_image_allocator calls in comp_swapchain.c only. The
-	# override falls straight through to the ordinary allocator unless the
-	# current thread carries a matching in-process Metal-first request.
-	set_property(
-		SOURCE comp_swapchain.c
-		APPEND
-		PROPERTY COMPILE_OPTIONS "-include" "${CMAKE_CURRENT_SOURCE_DIR}/comp_metal_swapchain_import_override.h"
 		)
 
 	target_link_libraries(comp_util PRIVATE "-framework Metal" "-framework IOSurface")

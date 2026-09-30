@@ -56,30 +56,9 @@ if(APPLE)
 					comp_metal_service_semaphore.c
 					comp_metal_service_semaphore.h
 				)
-			set_property(
-				SOURCE comp_metal_service_swapchain.m
-				APPEND
-				PROPERTY COMPILE_DEFINITIONS
-					"client_metal_compositor_create=client_metal_service_compositor_create"
-				)
-			set_property(
-				SOURCE comp_metal_direct_swapchain.m
-				APPEND
-				PROPERTY COMPILE_DEFINITIONS
-					"client_metal_compositor_create=client_metal_direct_compositor_create"
-				)
 			target_include_directories(comp_client PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../ipc)
 			# comp_util provides the local semaphore pair used when hosted.
 			target_link_libraries(comp_client PRIVATE ipc_shared comp_util)
-			# Reuse the proven Stage-4 wrapper unchanged, but create its
-			# semaphore/event pair through monado-service in service builds,
-			# or locally when hosted.
-			set_property(
-				SOURCE comp_metal_release_wait_thread.m
-				APPEND
-				PROPERTY COMPILE_DEFINITIONS
-					"comp_metal_semaphore_create_client_pair=client_metal_semaphore_create_pair_for_mode"
-				)
 		else()
 			target_sources(comp_client PRIVATE comp_metal_direct_swapchain.m)
 		endif()

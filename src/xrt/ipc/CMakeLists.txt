@@ -185,15 +185,8 @@ if(APPLE AND XRT_FEATURE_SERVICE)
 		ipc_client
 		PRIVATE client/ipc_metal_swapchain_import.c
 			client/ipc_metal_swapchain_import.h
-			client/ipc_metal_swapchain_import_override.h
 		)
-	set_property(
-		SOURCE client/ipc_client_compositor.c
-		APPEND
-		PROPERTY COMPILE_OPTIONS
-			"-include"
-			"${CMAKE_CURRENT_SOURCE_DIR}/client/ipc_metal_swapchain_import_override.h"
-		)
+	target_compile_definitions(ipc_client PRIVATE XRT_IPC_MACOS_METAL_IMPORT)
 
 	if(XRT_MODULE_COMPOSITOR_MAIN)
 		# Clients may composite in-process, hosted by the service. Opt-in at
@@ -275,36 +268,13 @@ elseif(APPLE)
 		target_sources(
 			ipc_server
 			PRIVATE server/ipc_server_mainloop_apple_xpc.m
-				server/ipc_metal_service_local_override.h
 				server/ipc_metal_client_cleanup.c
 				server/ipc_metal_client_cleanup.h
 			)
-		set_source_files_properties(
-			${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
-			PROPERTIES
-				LANGUAGE OBJC
-				COMPILE_DEFINITIONS
-					"ipc_server_mainloop_init=ipc_server_mainloop_init_apple_vanilla;ipc_server_mainloop_poll=ipc_server_mainloop_poll_apple_vanilla;ipc_server_mainloop_deinit=ipc_server_mainloop_deinit_apple_vanilla"
-			)
-		set_property(
-			SOURCE server/ipc_server_metal.c
-			APPEND
-			PROPERTY COMPILE_OPTIONS
-				"-include"
-				"${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_metal_service_local_override.h"
-			)
-		set_property(
-			SOURCE server/ipc_server_per_client_thread.c
-			APPEND
-			PROPERTY COMPILE_OPTIONS
-				"-include"
-				"${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_metal_client_cleanup.h"
-			)
-	else()
-		set_source_files_properties(
-			${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE OBJC
-			)
 	endif()
+	set_source_files_properties(
+		${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE OBJC
+		)
 
 	target_link_libraries(
 		ipc_server PRIVATE comp_util "-framework AppKit" "-framework CoreGraphics" "-framework Foundation" "-framework Metal"
