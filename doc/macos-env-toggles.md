@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # macOS / PS VR2 environment toggle audit
 
 Audit of every `DEBUG_GET_ONCE_*` option and raw `getenv()` added on
@@ -387,13 +393,13 @@ Paths are relative to `src/xrt/`. Ranges are the clamps applied in code.
 | `PSVR2_FILTERED_LINEAR_PREDICTION` | off | Live EMA-filtered linear velocity instead of raw (only when acceleration is off) | `eebbbd1` / `b0034e4` | **c** |
 | `PSVR2_LINEAR_VELOCITY_ALPHA` | 0.25 | EMA coefficient; also feeds the EMA candidate scored in `prediction.csv`/`horizon.csv` | `eebbbd1` / `9bde48d` | b |
 | `PSVR2_FULL_LINEAR_HORIZON` | on | Predict translation over the full SLAM-to-target interval instead of the post-gyro residual | `b0034e4` / `59150ab` | **c** |
-| `PSVR2_ACCELERATION_PREDICTION` | on | Bounded-acceleration position model; implied by continuity | `b0034e4` / `59150ab` | a |
+| `PSVR2_ACCELERATION_PREDICTION` | on (macOS; off elsewhere) | Bounded-acceleration position model; implied by continuity | `b0034e4` / `59150ab` | a |
 | `PSVR2_ACCELERATION_ALPHA` | 0.25 [0,1] | Acceleration EMA coefficient | `b0034e4` / `b0034e4` | a |
 | `PSVR2_ACCELERATION_GAIN` | 0.5 [0,1] | Fraction of acceleration correction applied | `b0034e4` / `b0034e4` | a |
 | `PSVR2_ACCELERATION_LIMIT` | 2.0 m/s² [0,20] | Pre-filter acceleration clip | `b0034e4` / `b0034e4` | a |
 | `PSVR2_ACCELERATION_MIN_SPEED` | 0.01 m/s [0,1] | Below this, fall back to raw full-horizon | `b0034e4` / `b0034e4` | a |
 | `PSVR2_ACCELERATION_HORIZON_MS` | 90 [0,120] | Cap on the acceleration-correction horizon | `b0034e4` / `59150ab` | a |
-| `PSVR2_CONTINUITY_PREDICTION` | on | Host-time decaying transition between SLAM updates; implies acceleration and full horizon | `a23d038` / `59150ab` | a |
+| `PSVR2_CONTINUITY_PREDICTION` | on (macOS; off elsewhere) | Host-time decaying transition between SLAM updates; implies acceleration and full horizon | `a23d038` / `59150ab` | a |
 | `PSVR2_CONTINUITY_TAU_MS` | 4 [0.5,20] | Continuity decay constant | `a23d038` / `a23d038` | a |
 | `PSVR2_CONTINUITY_LIMIT_MM` | 7.5 [0,20] | Continuity residual cap | `a23d038` / `59150ab` | a |
 | `PSVR2_RECENTER_ON_FIRST_POSE` | off | Re-origin tracking at the first valid pose | `d46c551` / `eeb0915` | a |

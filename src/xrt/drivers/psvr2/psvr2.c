@@ -78,10 +78,21 @@ DEBUG_GET_ONCE_BOOL_OPTION(psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_driver_timing_trace, "PSVR2_DRIVER_TIMING_TRACE", true)
 #endif
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_linear_velocity_alpha, "PSVR2_LINEAR_VELOCITY_ALPHA", 0.25f)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", true)
+
+/*
+ * Bounded-acceleration and continuity prediction have only been validated on
+ * macOS, so other platforms keep them opt-in.
+ */
+#ifdef XRT_OS_OSX
+#define PSVR2_PREDICTION_EXTRAS_DEFAULT true
+#else
+#define PSVR2_PREDICTION_EXTRAS_DEFAULT false
+#endif
+
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_continuity_prediction, "PSVR2_CONTINUITY_PREDICTION", PSVR2_PREDICTION_EXTRAS_DEFAULT)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_tau_ms, "PSVR2_CONTINUITY_TAU_MS", 4.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_continuity_limit_mm, "PSVR2_CONTINUITY_LIMIT_MM", 7.5f)
-DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", true)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_acceleration_prediction, "PSVR2_ACCELERATION_PREDICTION", PSVR2_PREDICTION_EXTRAS_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_recenter_on_first_pose, "PSVR2_RECENTER_ON_FIRST_POSE", false)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_recenter_eye_height_m, "PSVR2_RECENTER_EYE_HEIGHT_M", 1.6f)
 
