@@ -344,6 +344,21 @@ struct ipc_shared_memory
 };
 
 /*!
+ * Layout of a device's distortion mesh, sent ahead of its vertices and
+ * indices by device_get_distortion_mesh. See the mesh in @ref xrt_hmd_parts.
+ */
+struct ipc_distortion_mesh_info
+{
+	uint32_t vertex_count;
+	//! Stride of vertices, in bytes.
+	uint32_t stride;
+	uint32_t uv_channels_count;
+	uint32_t index_counts[XRT_MAX_VIEWS];
+	uint32_t index_offsets[XRT_MAX_VIEWS];
+	uint32_t index_count_total;
+};
+
+/*!
  * Initial info from a client when it connects.
  */
 struct ipc_client_description

@@ -1,0 +1,13 @@
+{
+	"$schema": "../proto.schema.json",
+
+	"device_get_distortion_mesh": {
+		"varlen": true,
+		"in": [
+			{"name": "id", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "info", "type": "struct ipc_distortion_mesh_info"}
+		]
+	}
+}
