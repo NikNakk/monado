@@ -1,0 +1,54 @@
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+name: Windows build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Default-options MSVC build and test run, like upstream's Windows CI job
+# (.gitlab-ci/windows/monado_build.ps1), to keep Windows building.
+jobs:
+  build-and-test:
+    runs-on: windows-2022
+    env:
+      VCPKG_ROOT: C:\vcpkg
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}\vcpkg-binary-cache
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\vcpkg-binary-cache,readwrite
+    steps:
+      - uses: actions/checkout@v4
+
+      # vcpkg.json pins a builtin-baseline, which needs the vcpkg registry's
+      # history.
+      - name: Update vcpkg
+        shell: pwsh
+        run: |
+          git -C $env:VCPKG_ROOT fetch --unshallow 2>$null
+          git -C $env:VCPKG_ROOT pull --ff-only
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: vcpkg-binary-cache
+          key: vcpkg-windows-${{ hashFiles('vcpkg.json') }}
+          restore-keys: vcpkg-windows-
+
+      - name: Configure
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DX_VCPKG_APPLOCAL_DEPS_INSTALL=ON
+
+      - name: Build
+        run: cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure
