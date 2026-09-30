@@ -147,9 +147,13 @@ if(XRT_HAVE_VULKAN AND XRT_HAVE_D3D12)
 	target_link_libraries(tests_aux_d3d_d3d12 PRIVATE comp_util aux_vk)
 endif()
 
-add_executable(tests_macos_runtime_probe tests_macos_runtime_probe.c)
-target_link_libraries(tests_macos_runtime_probe PRIVATE target_instance xrt-interfaces aux_util)
-set_target_properties(tests_macos_runtime_probe PROPERTIES FOLDER monado_tests)
+if(APPLE)
+	add_executable(tests_macos_runtime_probe tests_macos_runtime_probe.c)
+	target_link_libraries(
+		tests_macos_runtime_probe PRIVATE target_instance xrt-interfaces aux_util
+		)
+	set_target_properties(tests_macos_runtime_probe PROPERTIES FOLDER monado_tests)
+endif()
 
 if(APPLE AND TARGET comp_metal_foveation_cache)
 	# Per-image Metal foveation map association. Skips itself when the Metal
