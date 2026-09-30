@@ -33,6 +33,13 @@ enum comp_window_peek_eye
 
 struct comp_window_peek;
 
+/*!
+ * True if a peek window was asked for (XRT_WINDOW_PEEK) and can be made here.
+ * Nothing touches SDL unless this is true.
+ */
+bool
+comp_window_peek_is_enabled(void);
+
 struct comp_window_peek *
 comp_window_peek_create(struct comp_compositor *c);
 
