@@ -1,4 +1,6 @@
 // swift-tools-version: 6.0
+// Copyright 2026, Nick Kennedy
+// SPDX-License-Identifier: BSL-1.0
 import PackageDescription
 
 let package = Package(

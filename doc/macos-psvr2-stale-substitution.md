@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # macOS PS VR2 legacy-worker stale-frame substitution
 
 > **Removed.** `XRT_MACOS_PRESENT_STALE_SUBSTITUTE` and `XRT_MACOS_PRESENT_IMMEDIATE`

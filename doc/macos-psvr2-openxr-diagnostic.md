@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # PS VR2 macOS OpenXR diagnostic scene
 
 `psvr2-openxr-test` is a small OpenXR application built directly in the Monado tree for the native macOS PS VR2 work. It is intended to replace ad-hoc patches to Khronos `hello_xr` when investigating motion judder.

@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # macOS Wine XR audio routing
 
 This document describes the audio-routing design for Windows XR applications

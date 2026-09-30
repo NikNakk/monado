@@ -1,4 +1,6 @@
 <!--
+Copyright 2026, Nick Kennedy
+
 SPDX-License-Identifier: BSL-1.0
 -->
 

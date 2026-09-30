@@ -1,3 +1,4 @@
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 // Pin Wine's default render endpoints to a selected physical MMDevice.
 //

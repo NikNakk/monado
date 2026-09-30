@@ -98,7 +98,7 @@ set_monado_application_icon(void)
 	 * converted from Android vector XML to equivalent SVG so AppKit can consume
 	 * it without requiring a macOS application bundle or an external resource.
 	 *
-	 * Artwork copyright 2023 Collabora, Ltd.; SPDX-License-Identifier: CC-BY-4.0.
+	 * Artwork copyright 2023 Collabora, Ltd., licensed CC-BY-4.0 like the Android original.
 	 * The square viewBox only adds transparent vertical padding for a macOS icon
 	 * slot. The purple outline uses the original path unchanged; its three
 	 * negative-space Monado "M" subpaths are then painted white explicitly so

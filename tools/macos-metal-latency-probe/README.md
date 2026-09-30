@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # macOS Metal latency probe
 
 A standalone Swift/Metal harness for measuring presentation latency on the PS VR2 display under macOS. It does **not** link to Monado, Vulkan, OpenXR, or the PSVR2 tracking driver.

@@ -1,4 +1,8 @@
-<!-- SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 
 # PS VR2 eye gaze on macOS
 

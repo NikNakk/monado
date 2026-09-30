@@ -1,4 +1,6 @@
 #!/bin/zsh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 set -euo pipefail
 
 script_dir=${0:A:h}

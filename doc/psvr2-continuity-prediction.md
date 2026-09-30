@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # PSVR2 continuity experiment — 2026-09-06
 
 The next headset candidate transitions between bounded-acceleration predictions
