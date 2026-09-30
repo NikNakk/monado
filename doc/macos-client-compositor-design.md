@@ -523,6 +523,20 @@ Not done yet:
   app list and focus logic treat the client as idle.
 - There is one hosted client at a time and no mid-session handoff (phase 3).
 
+### First hardware run (2026-09-30)
+
+`psvr2-openxr-test` on an M5 with the PS VR2 at 120 Hz, at `da3a939`, with
+and without `XRT_IPC_DISTORTION_MESH_TRANSFER=1`. Both looked correct in the
+headset. The client composited in-process through the hosted front-end, and
+the compositor thread's time constraint was set in the client. Present
+completion averaged about 8.5 ms, with 4 to 9 late frames per 240. The IPC
+connection error at start-up comes from the service being launched by
+launchd, not from this path.
+
+Still to do: a baseline of the same build without
+`XRT_MACOS_CLIENT_COMPOSITOR`, the two mesh start-up times at `IPC_LOG=info`,
+and the Game Mode run that phase 2 is for.
+
 ### Testing phase 2
 
 1. Start the service as usual. Its presenter must own the headset window.
