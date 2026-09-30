@@ -8,16 +8,12 @@
 
 #import <Metal/Metal.h>
 
-/* XRT_FEATURE_SERVICE, which selects the default below, comes from here. */
 #include "xrt/xrt_config_build.h"
 #include "client/comp_metal_release_wait_thread.h"
 #include "util/comp_metal_semaphore_probe.h"
 #include "util/u_debug.h"
 #include "util/u_handles.h"
 #include "util/u_logging.h"
-#if defined(XRT_FEATURE_SERVICE)
-#include "util/u_macos_display_host.h"
-#endif
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -25,29 +21,13 @@
 #include <stdlib.h>
 
 /*
- * Service-mode Metal swapchains have a proven cross-process shared-event path,
- * so use the non-blocking wait-thread handoff unless explicitly disabled.
- * Keep non-service builds opt-in while that path remains independently staged.
+ * Use the non-blocking wait-thread handoff unless explicitly disabled. It is
+ * proven cross-process (service swapchains, through an XPC shared event) and
+ * in-process (the local shared-event pair, in Unreal hosted by the service).
  */
-#if defined(XRT_FEATURE_SERVICE)
-#define METAL_APP_RELEASE_WAIT_THREAD_DEFAULT true
-#else
-#define METAL_APP_RELEASE_WAIT_THREAD_DEFAULT false
-#endif
-
 DEBUG_GET_ONCE_BOOL_OPTION(metal_app_release_wait_thread,
                            "XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD",
-                           METAL_APP_RELEASE_WAIT_THREAD_DEFAULT)
-
-#if defined(XRT_FEATURE_SERVICE)
-/*
- * A client hosted by the service composites in-process, like a non-service
- * build, so it takes the non-service default.
- */
-DEBUG_GET_ONCE_BOOL_OPTION(metal_app_release_wait_thread_hosted,
-                           "XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD",
-                           false)
-#endif
+                           true)
 
 #define METAL_WAIT_THREAD_LOG_WINDOW 240
 
@@ -120,11 +100,6 @@ find_swapchain_locked(struct xrt_swapchain *xsc)
 bool
 client_metal_release_wait_thread_enabled(void)
 {
-#if defined(XRT_FEATURE_SERVICE)
-	if (u_macos_hosted_client_available()) {
-		return debug_get_bool_option_metal_app_release_wait_thread_hosted();
-	}
-#endif
 	return debug_get_bool_option_metal_app_release_wait_thread();
 }
 

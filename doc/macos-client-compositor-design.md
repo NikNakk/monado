@@ -493,7 +493,10 @@ client's environment. Without it, clients take exactly the old service path.
   `CAMetalLayer` sits in a `CAContext` rather than in a window. It shows
   itself in the handoff order (shown, then exclusive after the first present).
 - **Metal swapchains** (`comp_metal_glue.c`): service builds carry both paths
-  and pick the direct one, with a local semaphore pair, when hosted.
+  and pick the direct one, with a local semaphore pair, when hosted. The
+  non-blocking release (wait thread) is the default in both, as in the
+  service path; `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD=0` turns it
+  off.
 - **IPC client** (`ipc_client_macos_hosted.c`, `ipc_client_system.c`): when
   asked, the client registers the host functions and creates
   `comp_main_create_system_compositor()` on the IPC head device. Sessions are
@@ -564,6 +567,12 @@ compositor, switching Game Mode on and off from the Cmd-Esc menu:
   the blocking release only moves where Unreal waits. The visible judder is
   the compositor reprojecting each game frame about nine times.
 - No swapchain wait timeout under Game Mode, unlike the phase 1 Unreal run.
+- Traces, in-process blocking release (run 4, Game Mode toggled) against the
+  wait thread (run 5): compositor interval p99 8.63 and 8.60 ms; wake
+  lateness 0; pose query median 0.09 ms; 13.5 and 13.7 new app frames/s;
+  layer age at display median 33 ms in both. In run 5 the client's
+  compositor thread kept its time constraint at priority 97, task maximum
+  priority 63, in all 4,287 samples. The wait thread is now the default.
 
 ### Testing phase 2
 

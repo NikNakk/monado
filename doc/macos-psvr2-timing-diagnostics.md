@@ -16,7 +16,7 @@ cadence intervals vs driven ~5.2–5.8%), and the configuration below restored
 | `XRT_MACOS_PRESENT_MIN_DURATION_US` | `8000`: `presentDrawable:afterMinimumDuration:` (known-good 120 Hz value; `0` restores absolute timed presents) |
 | `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `1`, with `_COMPUTATION_PCT=35` and `_CONSTRAINT_PCT=70` of the display period |
 | `XRT_MACOS_CLIENT_FRAME_MIN_HOLD` | `0` (set `2` to hold each app frame for at least two refreshes, e.g. a 60 Hz app on the 120 Hz headset) |
-| `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD` | `1` in service builds; read in the **app** process |
+| `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD` | `1` in all builds; read in the **app** process |
 | `XRT_MACOS_XPC_IMPORTANCE` | `0`; opt-in diagnostic, read in the **app** process. It does not yet prevent the Game Mode 97→4 demotion |
 | `XRT_MACOS_WAIT_SPIN` | `0`; opt-in busy-wait diagnostic |
 
