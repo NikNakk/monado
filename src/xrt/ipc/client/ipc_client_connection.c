@@ -65,6 +65,9 @@
 #endif // XRT_OS_ANDROID
 
 DEBUG_GET_ONCE_BOOL_OPTION(ipc_ignore_version, "IPC_IGNORE_VERSION", false)
+#ifdef XRT_OS_WINDOWS
+DEBUG_GET_ONCE_OPTION(wine_tcp_port, "MONADO_WINE_TCP_PORT", NULL)
+#endif
 
 #ifdef XRT_OS_ANDROID
 
@@ -251,7 +254,7 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 static bool
 ipc_client_socket_connect(struct ipc_connection *ipc_c)
 {
-	const char *wine_tcp_port = getenv("MONADO_WINE_TCP_PORT");
+	const char *wine_tcp_port = debug_get_option_wine_tcp_port();
 	if (wine_tcp_port != NULL && wine_tcp_port[0] != '\0') {
 		return ipc_client_tcp_connect(ipc_c, wine_tcp_port);
 	}

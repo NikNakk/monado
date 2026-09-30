@@ -33,6 +33,7 @@
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
 #include "util/u_frame.h"
@@ -165,24 +166,15 @@ static struct psvr2_timing_trace_state g_psvr2_timing_trace;
 static FILE *
 psvr2_timing_trace_open_file(const char *suffix, const char *header)
 {
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_%s.csv", dir, separator, (int)getpid(), suffix);
-
-	FILE *file = fopen(path, "w");
+	FILE *file = u_timing_trace_open(suffix, 64 * 1024);
 	if (file == NULL) {
 		return NULL;
 	}
-	setvbuf(file, NULL, _IOFBF, 64 * 1024);
 	fputs(header, file);
 	fputc('\n', file);
-	fflush(file);
+	if (!u_timing_trace_fully_buffered()) {
+		fflush(file);
+	}
 	return file;
 }
 
@@ -250,7 +242,8 @@ psvr2_timing_trace_close(void)
 static void
 psvr2_timing_trace_maybe_flush(FILE *file, uint64_t rows, uint64_t interval)
 {
-	if (file != NULL && rows % interval == 0) {
+	// Fully buffered captures only flush when the file is closed.
+	if (file != NULL && rows % interval == 0 && !u_timing_trace_fully_buffered()) {
 		fflush(file);
 	}
 }

@@ -3,7 +3,6 @@
 #pragma once
 
 #include "psvr2_linear_prediction.h"
-#include "psvr2_trace_buffer.h"
 
 struct psvr2_continuity_params
 {

@@ -15,6 +15,7 @@
 #include "os/os_time.h"
 #include "util/comp_swapchain.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -143,24 +144,8 @@ client_metal_release_trace_open(struct client_metal_compositor *c)
 		return;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path,
-	         sizeof(path),
-	         "%s%smonado_psvr2_%d_metal_release_barrier.csv",
-	         dir,
-	         separator,
-	         (int)getpid());
-
-	c->release_trace.file = fopen(path, "w");
+	c->release_trace.file = u_timing_trace_open("metal_release_barrier", 64 * 1024);
 	if (c->release_trace.file == NULL) {
-		U_LOG_W("Could not open Metal release-barrier timing trace '%s'", path);
 		return;
 	}
 
@@ -173,13 +158,11 @@ client_metal_release_trace_open(struct client_metal_compositor *c)
 	c->release_trace.mutex_initialized = true;
 	client_metal_release_trace_reset_window(&c->release_trace);
 
-	setvbuf(c->release_trace.file, NULL, _IOFBF, 64 * 1024);
 	fputs("sequence,swapchain_id,image_index,barrier_entry_ns,command_buffer_created_ns,before_commit_ns,"
 	      "after_commit_ns,after_wait_ns,create_duration_ns,commit_duration_ns,wait_duration_ns,"
 	      "total_barrier_duration_ns,metal_status,gpu_start_time_s,gpu_end_time_s,gpu_duration_ns\n",
 	      c->release_trace.file);
 	fflush(c->release_trace.file);
-	U_LOG_I("Metal app-queue release-barrier timing trace: %s", path);
 }
 
 static void
@@ -582,8 +565,7 @@ client_metal_swapchain_log_iosurface_sample(struct client_metal_swapchain *sc, u
 	const uint8_t *texel0 = base;
 	const uint8_t *texel_center = base + (center_y * bytes_per_row) + (center_x * bytes_per_element);
 
-	fprintf(stderr,
-	        "metal-iosurface swapchain=%llu image=%u surface=%u bpe=%zu rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)\n",
+	U_LOG_RAW("metal-iosurface swapchain=%llu image=%u surface=%u bpe=%zu rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)",
 	        (unsigned long long)sc->xscn->limited_unique_id.data,
 	        index,
 	        (unsigned)IOSurfaceGetID(surface),

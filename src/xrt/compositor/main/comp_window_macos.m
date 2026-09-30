@@ -17,6 +17,7 @@
 #include "main/comp_window_macos_trace_buffer.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 #include "util/u_frame_share.h"
 #include "util/u_handles.h"
 #include "util/u_macos_display_host.h"
@@ -247,19 +248,10 @@ struct comp_window_macos
 static FILE *
 macos_timing_trace_open_file(const char *suffix, const char *header)
 {
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_%s.csv", dir, separator, (int)getpid(), suffix);
-	FILE *file = fopen(path, "w");
+	FILE *file = u_timing_trace_open(suffix, 64 * 1024);
 	if (file == NULL) {
 		return NULL;
 	}
-	macos_trace_buffered_setvbuf(file, NULL, _IOFBF, 64 * 1024);
 	fputs(header, file);
 	fputc('\n', file);
 	macos_trace_buffered_fflush(file);

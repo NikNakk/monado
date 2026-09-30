@@ -22,6 +22,7 @@
 #include "util/u_pretty_print.h"
 #include "util/u_visibility_mask.h"
 #include "util/u_trace_marker.h"
+#include "util/u_timing_trace.h"
 
 #include "server/ipc_server.h"
 #include "server/ipc_server_objects.h"
@@ -53,8 +54,7 @@ static uint64_t g_wine_submit_trace_rows = 0;
 static bool
 wine_submit_trace_enabled(void)
 {
-	const char *value = getenv("PSVR2_TIMING_TRACE");
-	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+	return u_timing_trace_enabled();
 }
 
 static void
@@ -78,25 +78,12 @@ wine_submit_trace_get(void)
 		return g_wine_submit_trace;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_wine_submit.csv", dir, separator, (int)getpid());
-
-	g_wine_submit_trace = fopen(path, "w");
+	g_wine_submit_trace = u_timing_trace_open("wine_submit", 64u * 1024u);
 	if (g_wine_submit_trace == NULL) {
 		g_wine_submit_trace_failed = true;
 		return NULL;
 	}
 
-	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
-	size_t buffer_size = fully_buffered != NULL && strcmp(fully_buffered, "1") == 0 ? 16u * 1024u * 1024u : 64u * 1024u;
-	setvbuf(g_wine_submit_trace, NULL, _IOFBF, buffer_size);
 	fputs("event,client_frame_id,event_ns,semaphore_value,display_time_ns,layer_count,result\n",
 	      g_wine_submit_trace);
 	if (!g_wine_submit_trace_atexit_registered) {
@@ -159,24 +146,11 @@ wine_swapchain_trace_get(void)
 		return g_wine_swapchain_trace;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_wine_swapchain.csv", dir, separator, (int)getpid());
-
-	g_wine_swapchain_trace = fopen(path, "w");
+	g_wine_swapchain_trace = u_timing_trace_open("wine_swapchain", 64u * 1024u);
 	if (g_wine_swapchain_trace == NULL) {
 		g_wine_swapchain_trace_failed = true;
 		return NULL;
 	}
-	const char *fully_buffered = getenv("PSVR2_TIMING_TRACE_FULLY_BUFFERED");
-	size_t buffer_size =
-	    fully_buffered != NULL && strcmp(fully_buffered, "1") == 0 ? 16u * 1024u * 1024u : 64u * 1024u;
-	setvbuf(g_wine_swapchain_trace, NULL, _IOFBF, buffer_size);
 	fputs("event,swapchain_id,image_index,event_ns,duration_ns,timeout_ns,result\n", g_wine_swapchain_trace);
 	if (!g_wine_swapchain_trace_atexit_registered) {
 		atexit(wine_swapchain_trace_close);

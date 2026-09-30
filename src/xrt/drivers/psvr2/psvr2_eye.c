@@ -16,11 +16,14 @@
 
 #include "psvr2.h"
 
+#include <math.h>
 
-DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_yaw_offset_deg, "PSVR2_GAZE_YAW_OFFSET_DEG", 0.0f)
-DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_pitch_offset_deg, "PSVR2_GAZE_PITCH_OFFSET_DEG", 0.0f)
-DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_yaw_gain, "PSVR2_GAZE_YAW_GAIN", 1.0f)
-DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_pitch_gain, "PSVR2_GAZE_PITCH_GAIN", 1.0f)
+
+// NAN when unset: the persisted user calibration then applies.
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_yaw_offset_deg, "PSVR2_GAZE_YAW_OFFSET_DEG", NAN)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_pitch_offset_deg, "PSVR2_GAZE_PITCH_OFFSET_DEG", NAN)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_yaw_gain, "PSVR2_GAZE_YAW_GAIN", NAN)
+DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_gaze_pitch_gain, "PSVR2_GAZE_PITCH_GAIN", NAN)
 
 static float
 psvr2_gaze_gain(float value)
@@ -78,19 +81,17 @@ psvr2_load_user_gaze_calibration(struct psvr2_hmd *hmd)
 	 * Environment variables are useful for temporary experimentation and take
 	 * precedence over the persisted calibration.
 	 */
-	if (getenv("PSVR2_GAZE_YAW_GAIN") != NULL) {
+	if (!isnan(debug_get_float_option_psvr2_gaze_yaw_gain())) {
 		et->user_yaw_gain = psvr2_gaze_gain(debug_get_float_option_psvr2_gaze_yaw_gain());
 	}
-	if (getenv("PSVR2_GAZE_YAW_OFFSET_DEG") != NULL) {
-		et->user_yaw_offset_deg =
-		    psvr2_gaze_offset(debug_get_float_option_psvr2_gaze_yaw_offset_deg());
+	if (!isnan(debug_get_float_option_psvr2_gaze_yaw_offset_deg())) {
+		et->user_yaw_offset_deg = psvr2_gaze_offset(debug_get_float_option_psvr2_gaze_yaw_offset_deg());
 	}
-	if (getenv("PSVR2_GAZE_PITCH_GAIN") != NULL) {
+	if (!isnan(debug_get_float_option_psvr2_gaze_pitch_gain())) {
 		et->user_pitch_gain = psvr2_gaze_gain(debug_get_float_option_psvr2_gaze_pitch_gain());
 	}
-	if (getenv("PSVR2_GAZE_PITCH_OFFSET_DEG") != NULL) {
-		et->user_pitch_offset_deg =
-		    psvr2_gaze_offset(debug_get_float_option_psvr2_gaze_pitch_offset_deg());
+	if (!isnan(debug_get_float_option_psvr2_gaze_pitch_offset_deg())) {
+		et->user_pitch_offset_deg = psvr2_gaze_offset(debug_get_float_option_psvr2_gaze_pitch_offset_deg());
 	}
 }
 

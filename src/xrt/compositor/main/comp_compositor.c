@@ -59,6 +59,7 @@
 #include "util/u_misc.h"
 #include "util/u_time.h"
 #include "util/u_debug.h"
+#include "util/u_timing_trace.h"
 #include "util/u_pacing.h"
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
@@ -143,21 +144,11 @@ macos_frame_pipeline_trace_get(void)
 		return g_macos_frame_pipeline_trace;
 	}
 
-	const char *dir = getenv("PSVR2_TIMING_TRACE_DIR");
-	if (dir == NULL || dir[0] == '\0') {
-		dir = "/tmp";
-	}
-	char path[1024];
-	size_t dir_len = strlen(dir);
-	const char *separator = dir_len > 0 && dir[dir_len - 1] == '/' ? "" : "/";
-	snprintf(path, sizeof(path), "%s%smonado_psvr2_%d_frame_pipeline.csv", dir, separator, (int)getpid());
-
-	g_macos_frame_pipeline_trace = fopen(path, "w");
+	g_macos_frame_pipeline_trace = u_timing_trace_open("frame_pipeline", 64u * 1024u);
 	if (g_macos_frame_pipeline_trace == NULL) {
 		g_macos_frame_pipeline_trace_failed = true;
 		return NULL;
 	}
-	setvbuf(g_macos_frame_pipeline_trace, NULL, _IOFBF, 64 * 1024);
 	fputs("event,frame_id,event_ns,point_ns,wake_time_ns,desired_present_ns,predicted_display_ns,present_slop_ns\n",
 	      g_macos_frame_pipeline_trace);
 	fflush(g_macos_frame_pipeline_trace);

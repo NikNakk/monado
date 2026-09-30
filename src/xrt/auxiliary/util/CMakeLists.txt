@@ -100,6 +100,8 @@ add_library(
 	u_system_helpers.h
 	u_template_historybuf.hpp
 	u_time.cpp
+	u_timing_trace.c
+	u_timing_trace.h
 	u_time.h
 	u_trace_marker.c
 	u_trace_marker.h
