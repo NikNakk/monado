@@ -9,7 +9,7 @@ SPDX-License-Identifier: BSL-1.0
 This document is the high-level status and roadmap for the experimental Monado
 port to Apple Silicon macOS, with PS VR2 as the primary headset.
 
-**Status date:** 2026-09-29
+**Status date:** 2026-09-30
 
 **Current integration branch:** `macos-wine-openvr-legacy-unity`
 
@@ -21,6 +21,10 @@ work, plus the `standards/*` branches for `XR_KHR_generic_controller` and
 development deliberately remains on a separate branch until it is reliable
 enough to merge.
 
+Game Mode work (client-side compositing, below) is on
+`claude/game-mode-priority-issue-xkx6m7`, which builds on the integration
+branch and has not been merged into it yet.
+
 This is development work, not an upstream-supported or packaged Monado target.
 
 ## Current state at a glance
@@ -30,6 +34,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Native Monado service/runtime on Apple Silicon | **Working** | `monado-service`, OpenXR runtime, Unix IPC and macOS launchd/XPC integration all run natively. |
 | PS VR2 HMD discovery and 6DoF head tracking | **Working** | Uses the headset's own SLAM/IMU path. |
 | PS VR2 display/compositor output | **Working** | Vulkan/MoltenVK distortion compositor with native Metal/CAMetalLayer final presentation. |
+| Game Mode (fullscreen games) | **Working, opt-in** | macOS throttles `monado-service` under Game Mode. With `XRT_MACOS_CLIENT_COMPOSITOR=1` the client composites in its own process and the service hosts its layer; hardware-validated with Unreal at 120 Hz under Game Mode. Handoff between clients is implemented but not yet run on hardware. |
 | Native OpenXR Metal clients | **Working** | Used by native samples and the engine/browser ports below. |
 | Unity | **Working proof** | Open Brush is the main Unity validation application. |
 | Unreal Engine | **Working proof** | Native Metal/OpenXR path exists in the UE fork. |
@@ -75,19 +80,54 @@ keeps Monado's Vulkan compositor, exports the completed compositor images throug
 Apple-compatible Metal/IOSurface mechanisms, and performs final presentation
 through a native `CAMetalLayer`.
 
-CAMetalDisplayLink drives the macOS presentation cadence. The branch also
-contains the later presentation/pacing experiments, asynchronous presentation
-support, Metal shared-event synchronization, XPC process-importance propagation
-and latest-frame work. These have made the runtime substantially more usable,
-but frame pacing and reprojection should still be treated as active engineering
-areas rather than finished product behaviour.
+CVDisplayLink vblanks drive the compositor's pacing. Presentation is
+asynchronous: a newest-frame worker acquires drawables off the compositor
+thread and presents with a minimum duration of 8 ms, and the compositor thread
+runs under a Mach time constraint. GPU hand-off uses Metal shared events. The
+CAMetalDisplayLink driven and hybrid modes, stale-frame substitution and most
+other pacing experiments tested worse and have been removed; see
+[the toggle inventory](macos-env-toggles.md). Frame pacing and reprojection
+are still active engineering areas rather than finished product behaviour.
 
 See:
 
-- [PS VR2 timing diagnostics](macos-psvr2-timing-diagnostics.md)
+- [PS VR2 timing diagnostics](macos-psvr2-timing-diagnostics.md) (current
+  defaults at the top)
 - [judder evidence and analysis](macos-psvr2-judder-evidence.md)
-- [latest-frame worker](macos-psvr2-latest-frame-worker.md)
-- [stale-frame substitution](macos-psvr2-stale-substitution.md)
+- [latest-frame worker](macos-psvr2-latest-frame-worker.md) and
+  [stale-frame substitution](macos-psvr2-stale-substitution.md) (history)
+
+### Game Mode and client-side compositing
+
+When a fullscreen game has Game Mode, macOS backgrounds `monado-service` from
+outside the process: every service thread drops to priority 4 on the E-cores,
+and the headset compositor falls to 13–18 fps. XPC importance and launchd
+`ProcessType` cannot undo this; an importance lease was tried and removed.
+
+The fix moves the compositor into the game's process. With
+`XRT_MACOS_CLIENT_COMPOSITOR=1` in the application's environment, the IPC
+client creates Monado's main compositor in-process, presents into a
+`CAMetalLayer` inside a `CAContext`, and the service shows that context on the
+headset window through a `CALayerHost`. Tracking stays in the service: phase 1
+measurements showed PS VR2 USB delivery is essentially unaffected by Game Mode.
+The distortion mesh, a distortion grid and passthrough camera frames are
+copied from the service once or through shared memory, so no per-frame IPC
+round trip is needed except pose queries.
+
+```text
+game process (Game Mode favours it)          monado-service (throttled)
+-----------------------------------          --------------------------
+OpenXR state tracker                          PS VR2 driver: USB, SLAM, IMU
+main compositor (distortion/timewarp) <-poses- IPC head device
+CAMetalLayer in a CAContext  --------------->  CALayerHost on the headset window
+```
+
+With Unreal under Game Mode, the in-process compositor held 120 Hz (interval
+p50/p99 8.34/8.6 ms) against 62/107 ms through the service. See
+[the client compositor design](macos-client-compositor-design.md) for the
+phases, handoff protocol and test procedure, and
+[remote layer hosting](macos-remote-layer-hosting.md) for the probe
+measurements behind it.
 
 ## macOS graphics and process sharing
 
@@ -158,7 +198,9 @@ The macOS port now supports substantially more than the original bring-up:
 - experimental depth-aware positional reprojection in the compute compositor;
 - multi-process Metal/IOSurface resource sharing;
 - application GPU-completion waits before compositor reuse;
-- launchd/XPC service activation and per-client Metal-resource ownership.
+- launchd/XPC service activation and per-client Metal-resource ownership;
+- opt-in in-process compositing for clients, hosted by the service's headset
+  window (Game Mode).
 
 The native diagnostic target remains useful for runtime regression testing:
 
@@ -496,6 +538,10 @@ runtime/compositor.
    - eventually a boundary/guardian-equivalent strategy.
 
 6. **Compositor/presentation robustness**
+   - finish client-side compositing: hardware-validate handoff between hosted
+     clients, pause hidden presenters, handle overlays, Wine and Chromium, then
+     make it the default;
+   - move pose queries to a shared-memory ring;
    - continue reducing pacing sensitivity and late-frame artefacts;
    - harden depth reprojection;
    - verify hot-plug, display-mode changes, sleep/wake and long sessions;
@@ -535,6 +581,9 @@ branch is an alternative complete port:
 
 - **`macos-wine-openvr-legacy-unity`** — current integration branch and source
   of truth for the broad macOS runtime.
+- **`claude/game-mode-priority-issue-xkx6m7`** — client-side compositing for
+  Game Mode, on top of the integration branch; to be merged into it once
+  handoff is validated on hardware.
 - **`macos-pssense-6dof`** — active Sense optical-position development; not
   yet merged because reliability is the gate.
 - **`macos-psvr2-camera-calibration`** — earlier camera/calibration work that
