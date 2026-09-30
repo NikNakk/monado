@@ -91,6 +91,9 @@ struct vk_bundle
 	 */
 	struct vk_bundle_queue queues[VK_BUNDLE_MAX_QUEUES];
 
+	//! The queue mutexes are initialised, see vk_init_mutex.
+	bool queue_mutexes_initialized;
+
 	/*!
 	 * @brief Main queue for general work.
 	 *
