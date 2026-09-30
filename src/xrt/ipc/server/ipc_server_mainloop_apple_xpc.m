@@ -25,19 +25,6 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_exit_on_display_loss, "XRT_MACOS_EXIT_ON_DISPLA
 DEBUG_GET_ONCE_NUM_OPTION(macos_display_loss_delay_ms, "XRT_MACOS_DISPLAY_LOSS_DELAY_MS", 3000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_display_loss_shutdown_watchdog_ms, "XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS", 5000)
 
-/*
- * ipc_server_mainloop_apple.c is compiled with source-local symbol redirects
- * for init/poll/deinit. Keep the established socket, signal, and AppKit event
- * implementation there and add only launchd/XPC lifecycle policy here.
- */
-int
-ipc_server_mainloop_init_apple_vanilla(struct ipc_server_mainloop *ml, bool no_stdin);
-
-void
-ipc_server_mainloop_poll_apple_vanilla(struct ipc_server *vs, struct ipc_server_mainloop *ml);
-
-void
-ipc_server_mainloop_deinit_apple_vanilla(struct ipc_server_mainloop *ml);
 
 /*
  * The macOS compositor window is intentionally distinctive: borderless,
@@ -303,7 +290,7 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 {
 	reset_compositor_window_tracking();
 
-	int ret = ipc_server_mainloop_init_apple_vanilla(ml, no_stdin);
+	int ret = ipc_server_mainloop_apple_init(ml, no_stdin);
 	if (ret < 0) {
 		return ret;
 	}
@@ -327,7 +314,7 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 void
 ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 {
-	ipc_server_mainloop_poll_apple_vanilla(vs, ml);
+	ipc_server_mainloop_apple_poll(vs, ml);
 	poll_compositor_display_lifecycle(vs);
 }
 
@@ -336,5 +323,5 @@ ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
 {
 	reset_compositor_window_tracking();
 	ipc_metal_xpc_service_stop();
-	ipc_server_mainloop_deinit_apple_vanilla(ml);
+	ipc_server_mainloop_apple_deinit(ml);
 }

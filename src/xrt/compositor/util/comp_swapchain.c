@@ -24,6 +24,10 @@
 
 #include "util/comp_swapchain.h"
 
+#ifdef XRT_OS_OSX
+#include "util/comp_metal_swapchain_import.h"
+#endif
+
 #include "util/comp_swapchain.h"
 
 #include <stdio.h>
@@ -550,7 +554,12 @@ comp_swapchain_create_init(struct comp_swapchain *sc,
 	set_common_fields(sc, destroy_func, vk, cscs, xsccp->image_count);
 
 	// Use the image helper to allocate the images.
+#ifdef XRT_OS_OSX
+	// An in-process Metal request on this thread may provide the images instead.
+	ret = comp_metal_swapchain_import_allocate_or_default(vk, info, xsccp->image_count, &sc->vkic);
+#else
 	ret = vk_ic_allocate(vk, info, xsccp->image_count, &sc->vkic);
+#endif
 	if (ret == VK_ERROR_FEATURE_NOT_PRESENT) {
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
@@ -563,7 +572,11 @@ comp_swapchain_create_init(struct comp_swapchain *sc,
 
 	xrt_graphics_buffer_handle_t handles[ARRAY_SIZE(sc->vkic.images)];
 
+#ifdef XRT_OS_OSX
+	ret = comp_metal_swapchain_import_get_handles_or_default(vk, &sc->vkic, ARRAY_SIZE(handles), handles);
+#else
 	ret = vk_ic_get_handles(vk, &sc->vkic, ARRAY_SIZE(handles), handles);
+#endif
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "Failed to get native handles for images.");
 		vk_ic_destroy(vk, &sc->vkic);

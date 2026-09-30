@@ -33,6 +33,7 @@
 
 #include "util/comp_render.h"
 #include "util/comp_high_level_render.h"
+#include "util/comp_swapchain_gpu_reuse_internal.h"
 
 #include "main/comp_frame.h"
 #include "main/comp_mirror_to_debug_gui.h"
@@ -1227,14 +1228,18 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	// Add signal semaphore (render_complete to target).
 	ADD_SIGNAL(signal_sems, ct->semaphores.render_complete, ct->semaphores.render_complete_is_timeline);
 
-	// Build the submit info struct, handles all of the semaphores for us.
-	vk_submit_info_builder_prepare( //
-	    &builder,                   //
-	    &wait_sems,                 //
-	    &cmd,                       //
-	    1,                          //
-	    &signal_sems,               //
-	    NULL);                      //
+	/*
+	 * Build the submit info struct, handles all of the semaphores for us.
+	 * The GPU reuse hook adds its timeline signal when swapchains are tracked
+	 * (macOS service Metal swapchains), and is the plain builder otherwise.
+	 */
+	comp_swapchain_gpu_reuse_submit_info_builder_prepare( //
+	    &builder,                                         //
+	    &wait_sems,                                       //
+	    &cmd,                                             //
+	    1,                                                //
+	    &signal_sems,                                     //
+	    NULL);                                            //
 
 	// Everything prepared, now we are submitting.
 	comp_target_mark_submit_begin(ct, frame_id, os_monotonic_get_ns());
@@ -1245,7 +1250,8 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	 * us avoid taking a lot of locks. The queue lock will be taken by
 	 * @ref vk_cmd_submit_locked tho.
 	 */
-	ret = vk_cmd_submit_locked(vk, vk->main_queue, 1, &builder.submit_info, r->fences[r->acquired_buffer]);
+	ret = comp_swapchain_gpu_reuse_vk_cmd_submit_locked(vk, vk->main_queue, 1, &builder.submit_info,
+	                                                    r->fences[r->acquired_buffer]);
 
 	// We have now completed the submit, even if we failed.
 	comp_target_mark_submit_end(ct, frame_id, os_monotonic_get_ns());

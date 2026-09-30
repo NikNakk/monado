@@ -18,18 +18,4 @@ target_link_libraries(
 
 if(APPLE)
 	target_sources(comp_multi PRIVATE comp_multi_system_macos_compositor_rt.h)
-
-	# Diagnostic-only mapping from each 120 Hz system-compositor frame to the
-	# delivered client frame that supplied it. The compositor realtime trace
-	# header is included after it so the existing time-constraint wrapper remains
-	# available.
-	set_property(
-		SOURCE comp_multi_system.c
-		APPEND
-		PROPERTY COMPILE_OPTIONS
-			"-include"
-			"${CMAKE_CURRENT_SOURCE_DIR}/comp_multi_system_macos_trace.h"
-			"-include"
-			"${CMAKE_CURRENT_SOURCE_DIR}/comp_multi_system_macos_compositor_rt.h"
-		)
 endif()

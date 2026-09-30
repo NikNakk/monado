@@ -15,16 +15,15 @@
 extern "C" {
 #endif
 
+/*!
+ * Release a disconnecting client's unconsumed Metal XPC registry entries,
+ * unless another connection from the same process is still open. Called from
+ * common_shutdown() with the global state lock held, before the client state
+ * (and so its PID) is cleared.
+ */
 void
-ipc_metal_client_message_channel_close(struct ipc_message_channel *imc);
+ipc_metal_client_cleanup(volatile struct ipc_client_state *ics);
 
 #ifdef __cplusplus
 }
 #endif
-
-/*
- * common_shutdown() still owns normal socket teardown. In a macOS service
- * build, intercept only that close call so we can release any unconsumed Metal
- * XPC registry entries while the ipc_client_state still contains the PID.
- */
-#define ipc_message_channel_close(IMC) ipc_metal_client_message_channel_close((IMC))

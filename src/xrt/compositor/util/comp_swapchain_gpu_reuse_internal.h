@@ -31,7 +31,7 @@ comp_swapchain_gpu_reuse_native_accum_claim_layer(struct comp_layer_accum *cla, 
 void
 comp_swapchain_gpu_reuse_native_accum_release(struct comp_layer_accum *cla);
 
-/* Scope the renderer translation unit's submit interception to one comp_renderer_draw(). */
+/* Scope the renderer's submit tracking to one comp_renderer_draw(). */
 void
 comp_swapchain_gpu_reuse_renderer_enter(struct comp_layer_accum *cla);
 
@@ -39,10 +39,10 @@ void
 comp_swapchain_gpu_reuse_renderer_leave(struct comp_layer_accum *cla);
 
 /*
- * Source-local replacements used only while compiling comp_renderer.c. The
- * prepare hook arms tracking for the exact VkSubmitInfo built by
- * renderer_submit_queue(); the submit hook only augments/finalizes that armed
- * submission. Unrelated inline Vulkan submissions pass through unchanged.
+ * Used by renderer_submit_queue() in place of vk_submit_info_builder_prepare()
+ * and vk_cmd_submit_locked(). The prepare hook arms tracking for the exact
+ * VkSubmitInfo it builds; the submit hook only augments/finalizes that armed
+ * submission, and passes anything else straight through.
  */
 void
 comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_builder *builder,
@@ -80,6 +80,37 @@ static inline void
 comp_swapchain_gpu_reuse_native_accum_release(struct comp_layer_accum *cla)
 {
 	(void)cla;
+}
+
+static inline void
+comp_swapchain_gpu_reuse_renderer_enter(struct comp_layer_accum *cla)
+{
+	(void)cla;
+}
+
+static inline void
+comp_swapchain_gpu_reuse_renderer_leave(struct comp_layer_accum *cla)
+{
+	(void)cla;
+}
+
+static inline void
+comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_builder *builder,
+                                                     const struct vk_semaphore_list_wait *wait_semaphores,
+                                                     const VkCommandBuffer *command_buffers,
+                                                     uint32_t command_buffer_count,
+                                                     const struct vk_semaphore_list_signal *signal_semaphores,
+                                                     const void *next)
+{
+	vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
+	                               signal_semaphores, next);
+}
+
+static inline VkResult
+comp_swapchain_gpu_reuse_vk_cmd_submit_locked(
+    struct vk_bundle *vk, struct vk_bundle_queue *queue, uint32_t count, const VkSubmitInfo *infos, VkFence fence)
+{
+	return vk_cmd_submit_locked(vk, queue, count, infos, fence);
 }
 
 #endif

@@ -16,18 +16,29 @@
 extern "C" {
 #endif
 
-/*
- * macOS builds with compositor util wrap the ordinary Metal client constructor:
- * in-process builds use direct Metal/Vulkan imports, while service builds use
- * the XPC shared-texture transport. The underlying implementation is retained
- * as client_metal_compositor_create_vanilla().
+/*!
+ * The plain Metal client compositor. With compositor util, the swapchain paths
+ * below wrap it, and xrt_gfx_metal_provider_create() picks one.
  */
-#if defined(__OBJC__) && defined(XRT_OS_OSX) && defined(XRT_MODULE_COMPOSITOR_UTIL)
-#define client_metal_compositor_create client_metal_compositor_create_vanilla
-#endif
-
 struct xrt_compositor_metal *
 client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue);
+
+#ifdef XRT_MODULE_COMPOSITOR_UTIL
+/*!
+ * Direct swapchains: Metal textures imported into the compositor's Vulkan in
+ * this process. Used in-process, and by service clients hosted by the service.
+ */
+struct xrt_compositor_metal *
+client_metal_direct_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue);
+#endif
+
+#if defined(XRT_MODULE_COMPOSITOR_UTIL) && defined(XRT_FEATURE_SERVICE)
+/*!
+ * Service swapchains: shared textures created by monado-service over XPC.
+ */
+struct xrt_compositor_metal *
+client_metal_service_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue);
+#endif
 
 #ifdef __cplusplus
 }

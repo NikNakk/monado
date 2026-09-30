@@ -388,6 +388,22 @@ ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin);
 void
 ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml);
 
+#ifdef XRT_OS_OSX
+/*!
+ * The macOS socket, signal and AppKit event loop. The service's XPC main loop
+ * (ipc_server_mainloop_apple_xpc.m) wraps these; other macOS builds use them
+ * directly as the functions above.
+ */
+int
+ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, bool no_stdin);
+
+void
+ipc_server_mainloop_apple_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml);
+
+void
+ipc_server_mainloop_apple_deinit(struct ipc_server_mainloop *ml);
+#endif
+
 /*!
  * Main IPC object for the server.
  *

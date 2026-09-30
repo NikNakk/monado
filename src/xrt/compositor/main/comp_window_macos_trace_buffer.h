@@ -4,8 +4,9 @@
  * @file
  * @brief Diagnostic stdio buffering and timed-present shims for the macOS PS VR2 compositor.
  *
- * This header is force-included only for comp_window_macos.m. When
- * PSVR2_TIMING_TRACE_FULLY_BUFFERED=1, explicit fflush() calls from the macOS
+ * Used only by comp_window_macos.m, which calls these in place of fflush(),
+ * setvbuf() and presentDrawable:atTime:. When
+ * PSVR2_TIMING_TRACE_FULLY_BUFFERED=1, explicit flushes of the macOS
  * compositor timing trace are suppressed and fully-buffered streams are enlarged
  * from their normal 64 KiB to 16 MiB. fclose() still performs the final flush at
  * teardown. The enlarged buffers are intended for short (roughly 30-60 second)
@@ -66,37 +67,24 @@ macos_present_min_duration_us(void)
 	return duration_us;
 }
 
-/*
- * The concrete Metal command-buffer class is private, but it inherits NSObject.
- * A category method with a private selector therefore gives this one translation
- * unit a narrow interception point without changing the Metal object or queue.
- * The macro below rewrites only source-level presentDrawable selectors compiled
- * after this header; these implementations call the real selectors before that
- * macro is defined, avoiding recursion.
+/*!
+ * Present @p drawable at @p present_host_s, or after the minimum duration when
+ * XRT_MACOS_PRESENT_MIN_DURATION_US is non-zero (the default).
  */
-@interface NSObject (MonadoMacOSPresentMinDuration)
-- (void)monadoPresentDrawable:(id<MTLDrawable>)drawable;
-- (void)monadoPresentDrawable:(id<MTLDrawable>)drawable atTime:(CFTimeInterval)presentationTime;
-@end
-
-@implementation NSObject (MonadoMacOSPresentMinDuration)
-- (void)monadoPresentDrawable:(id<MTLDrawable>)drawable
-{
-	[(id<MTLCommandBuffer>)self presentDrawable:drawable];
-}
-
-- (void)monadoPresentDrawable:(id<MTLDrawable>)drawable atTime:(CFTimeInterval)presentationTime
+static inline void
+macos_present_drawable_at_time(id<MTLCommandBuffer> command_buffer,
+                               id<MTLDrawable> drawable,
+                               CFTimeInterval present_host_s)
 {
 	uint64_t minimum_duration_us = macos_present_min_duration_us();
 	if (minimum_duration_us != 0) {
 		CFTimeInterval minimum_duration_s = (CFTimeInterval)((double)minimum_duration_us / 1000000.0);
-		[(id<MTLCommandBuffer>)self presentDrawable:drawable afterMinimumDuration:minimum_duration_s];
+		[command_buffer presentDrawable:drawable afterMinimumDuration:minimum_duration_s];
 		return;
 	}
 
-	[(id<MTLCommandBuffer>)self presentDrawable:drawable atTime:presentationTime];
+	[command_buffer presentDrawable:drawable atTime:present_host_s];
 }
-@end
 
 static inline int
 macos_trace_buffered_fflush(FILE *stream)
@@ -124,8 +112,3 @@ macos_trace_buffered_setvbuf(FILE *stream, char *buffer, int mode, size_t size)
 	}
 	return setvbuf(stream, buffer, mode, size);
 }
-
-/* Define these only after the real libc/Metal functions above have been referenced. */
-#define fflush macos_trace_buffered_fflush
-#define setvbuf macos_trace_buffered_setvbuf
-#define presentDrawable monadoPresentDrawable

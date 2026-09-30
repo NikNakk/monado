@@ -39,6 +39,8 @@
 #include <string.h>
 
 #ifdef XRT_OS_OSX
+#include "multi/comp_multi_system_macos_trace.h"
+#include "multi/comp_multi_system_macos_compositor_rt.h"
 #include <unistd.h>
 #endif
 
@@ -509,7 +511,12 @@ transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time
 		}
 
 		// Even if it's not shown, make sure that frames are delivered.
+#ifdef XRT_OS_OSX
+		// Also holds frames for XRT_MACOS_CLIENT_FRAME_MIN_HOLD, and traces delivery.
+		macos_deliver_client_frame_cadenced(mc, display_time_ns, system_frame_id);
+#else
 		multi_compositor_deliver_any_frames(mc, display_time_ns);
+#endif
 
 		// None of the data in this slot is valid, don't check access it.
 		if (!mc->delivered.active) {
@@ -533,7 +540,11 @@ transfer_layers_locked(struct multi_system_compositor *msc, int64_t display_time
 		}
 
 		// The list_and_timing_lock is held when callign this function.
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+		macos_trace_multi_compositor_latch_frame_locked(mc, now_ns, system_frame_id, display_time_ns);
+#else
 		multi_compositor_latch_frame_locked(mc, now_ns, system_frame_id);
+#endif
 
 		array[count++] = msc->clients[k];
 	}
@@ -766,6 +777,10 @@ multi_main_loop(struct multi_system_compositor *msc)
 		    &predicted_gpu_time_ns,        //
 		    &predicted_display_time_ns,    //
 		    &predicted_display_period_ns); //
+
+#ifdef XRT_OS_OSX
+		macos_multi_system_after_predict_frame(frame_id, predicted_display_period_ns);
+#endif
 
 		// Do this as soon as we have the new display time.
 		broadcast_timings_to_clients(msc, predicted_display_time_ns);

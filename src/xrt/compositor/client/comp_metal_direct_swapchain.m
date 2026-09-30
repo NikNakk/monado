@@ -12,6 +12,7 @@
 
 #include "xrt/xrt_compositor.h"
 #include "xrt/xrt_gfx_metal.h"
+#include "client/comp_metal_client.h"
 #include "comp_metal_foveation_cache.h"
 #include "util/comp_metal_swapchain_import.h"
 #include "util/comp_swapchain.h"
@@ -21,12 +22,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-
-/* comp_metal_client.m is renamed to this symbol by comp_metal_client.h. */
-struct xrt_compositor_metal *
-client_metal_compositor_create_vanilla(struct xrt_compositor_native *xcn,
-                                       void *metal_device,
-                                       void *command_queue);
 
 struct metal_direct_compositor_link
 {
@@ -559,9 +554,9 @@ metal_direct_compositor_destroy(struct xrt_compositor *xc)
 }
 
 struct xrt_compositor_metal *
-client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue)
+client_metal_direct_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue)
 {
-	struct xrt_compositor_metal *xcm = client_metal_compositor_create_vanilla(xcn, metal_device, command_queue);
+	struct xrt_compositor_metal *xcm = client_metal_compositor_create(xcn, metal_device, command_queue);
 	if (xcm == NULL) {
 		return xcm;
 	}

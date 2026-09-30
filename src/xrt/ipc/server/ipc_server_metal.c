@@ -21,6 +21,77 @@
 #include <string.h>
 #endif
 
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
+#include "shared/ipc_metal_xpc_service.h"
+
+/*
+ * Normal service builds consume Metal resources directly from the registry
+ * hosted inside monado-service. For the diagnostic manual-service A/B,
+ * XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1 routes the same operations through the
+ * legacy standalone XPC broker instead. This lets monado-service run directly
+ * from a terminal while preserving cross-process Metal handle transport.
+ *
+ * The external mode deliberately gives up the direct registry's PID ownership
+ * check; it is for scheduler/process-policy diagnosis only and is not the
+ * production architecture.
+ */
+static inline xrt_result_t
+ipc_metal_server_take_textures(uint64_t token, uint32_t count, void **out, pid_t owner_pid)
+{
+	if (ipc_metal_xpc_external_broker_enabled()) {
+		return ipc_metal_xpc_take_textures(token, count, out);
+	}
+
+	return ipc_metal_xpc_service_take_textures_for_pid(token, count, out, owner_pid);
+}
+
+static inline xrt_result_t
+ipc_metal_server_publish_shared_event(void *event, uint64_t *out_token, pid_t owner_pid)
+{
+	if (ipc_metal_xpc_external_broker_enabled()) {
+		return ipc_metal_xpc_publish_shared_event(event, out_token);
+	}
+
+	return ipc_metal_xpc_service_publish_shared_event_for_pid(event, out_token, owner_pid);
+}
+
+static inline void
+ipc_metal_server_discard_token(uint64_t token, pid_t owner_pid)
+{
+	if (ipc_metal_xpc_external_broker_enabled()) {
+		ipc_metal_xpc_discard_token(token);
+		return;
+	}
+
+	ipc_metal_xpc_service_discard_token_for_pid(token, owner_pid);
+}
+#elif defined(XRT_OS_OSX)
+/*
+ * Without the service there is no in-process registry, so Metal handles
+ * always go through the standalone XPC broker.
+ */
+static inline xrt_result_t
+ipc_metal_server_take_textures(uint64_t token, uint32_t count, void **out, pid_t owner_pid)
+{
+	(void)owner_pid;
+	return ipc_metal_xpc_take_textures(token, count, out);
+}
+
+static inline xrt_result_t
+ipc_metal_server_publish_shared_event(void *event, uint64_t *out_token, pid_t owner_pid)
+{
+	(void)owner_pid;
+	return ipc_metal_xpc_publish_shared_event(event, out_token);
+}
+
+static inline void
+ipc_metal_server_discard_token(uint64_t token, pid_t owner_pid)
+{
+	(void)owner_pid;
+	ipc_metal_xpc_discard_token(token);
+}
+#endif
+
 #ifdef XRT_OS_OSX
 /*
  * OpenXR permits acquire_image() to return an image that is not writable yet;
@@ -294,12 +365,12 @@ ipc_handle_swapchain_import_metal(volatile struct ipc_client_state *ics,
 	uint32_t index = 0;
 	xrt_result_t xret = find_free_swapchain_index(ics, &index);
 	if (xret != XRT_SUCCESS) {
-		ipc_metal_xpc_discard_token(token);
+		ipc_metal_server_discard_token(token, ics->client_state.pid);
 		return xret;
 	}
 
 	void *textures[XRT_MAX_SWAPCHAIN_IMAGES] = {0};
-	xret = ipc_metal_xpc_take_textures(token, image_count, textures);
+	xret = ipc_metal_server_take_textures(token, image_count, textures, ics->client_state.pid);
 	if (xret != XRT_SUCCESS) {
 		IPC_ERROR(ics->server,
 		          "Failed to retrieve Metal XPC swapchain textures token=0x%016llx count=%u",
@@ -659,7 +730,7 @@ ipc_handle_compositor_semaphore_create_metal(volatile struct ipc_client_state *i
 	}
 
 	uint64_t token = 0;
-	xret = ipc_metal_xpc_publish_shared_event(raw_shared_event, &token);
+	xret = ipc_metal_server_publish_shared_event(raw_shared_event, &token, ics->client_state.pid);
 	if (xret != XRT_SUCCESS) {
 		xrt_compositor_semaphore_reference(&xcsem, NULL);
 		return xret;

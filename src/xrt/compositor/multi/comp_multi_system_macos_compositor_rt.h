@@ -4,8 +4,8 @@
  * @file
  * @brief Compositor-thread realtime scheduling trace for the Multi Client Module.
  *
- * Force-include this after comp_multi_system_macos_trace.h. It wraps
- * xrt_comp_predict_frame() so that, when PSVR2_TIMING_TRACE=1 and the Mach
+ * Include this after comp_multi_system_macos_trace.h. After each
+ * xrt_comp_predict_frame(), when PSVR2_TIMING_TRACE=1 and the Mach
  * time-constraint policy is enabled, compositor_rt.csv records CPU-time budget
  * use and samples the effective scheduling policy every frame. Detailed public
  * Mach information is captured on policy transitions, budget overruns, the
@@ -255,32 +255,14 @@ macos_compositor_rt_trace_record(int64_t frame_id, int64_t display_period_ns)
 	}
 }
 
-/* The trace header has already defined its predict wrapper and source macro. */
-#ifdef xrt_comp_predict_frame
-#undef xrt_comp_predict_frame
-#endif
-
+/*!
+ * Called after each xrt_comp_predict_frame() on the compositor thread: keeps
+ * its Mach time constraint in step with the display period, and records it
+ * in compositor_rt.csv when tracing.
+ */
 static inline void
-macos_xrt_comp_predict_frame_with_rt_trace(struct xrt_compositor *xc,
-                                           int64_t *out_frame_id,
-                                           int64_t *out_wake_up_time_ns,
-                                           int64_t *out_predicted_gpu_time_ns,
-                                           int64_t *out_predicted_display_time_ns,
-                                           int64_t *out_predicted_display_period_ns)
+macos_multi_system_after_predict_frame(int64_t frame_id, int64_t predicted_display_period_ns)
 {
-	macos_xrt_comp_predict_frame_with_time_constraint(xc, out_frame_id, out_wake_up_time_ns,
-	                                                  out_predicted_gpu_time_ns,
-	                                                  out_predicted_display_time_ns,
-	                                                  out_predicted_display_period_ns);
-
-	if (out_frame_id != NULL && out_predicted_display_period_ns != NULL) {
-		macos_compositor_rt_trace_record(*out_frame_id, *out_predicted_display_period_ns);
-	}
+	macos_compositor_update_time_constraint(predicted_display_period_ns);
+	macos_compositor_rt_trace_record(frame_id, predicted_display_period_ns);
 }
-
-#define xrt_comp_predict_frame(xc, out_frame_id, out_wake_up_time_ns, out_predicted_gpu_time_ns,                     \
-                               out_predicted_display_time_ns, out_predicted_display_period_ns)                       \
-	macos_xrt_comp_predict_frame_with_rt_trace((xc), (out_frame_id), (out_wake_up_time_ns),                       \
-	                                           (out_predicted_gpu_time_ns),                                         \
-	                                           (out_predicted_display_time_ns),                                     \
-	                                           (out_predicted_display_period_ns))

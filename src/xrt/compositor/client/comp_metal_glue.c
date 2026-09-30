@@ -17,14 +17,6 @@
 #endif
 #endif
 
-#if defined(XRT_MODULE_COMPOSITOR_UTIL) && defined(XRT_FEATURE_SERVICE)
-/* Both swapchain paths are built in service builds; see CMakeLists.txt. */
-struct xrt_compositor_metal *
-client_metal_service_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue);
-struct xrt_compositor_metal *
-client_metal_direct_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue);
-#endif
-
 struct xrt_compositor_metal *
 xrt_gfx_metal_provider_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue)
 {
@@ -40,6 +32,8 @@ xrt_gfx_metal_provider_create(struct xrt_compositor_native *xcn, void *metal_dev
 	if (xcm != NULL && !hosted) {
 		client_metal_service_semaphore_register_compositor(&xcm->base, metal_device);
 	}
+#elif defined(XRT_MODULE_COMPOSITOR_UTIL)
+	struct xrt_compositor_metal *xcm = client_metal_direct_compositor_create(xcn, metal_device, command_queue);
 #else
 	struct xrt_compositor_metal *xcm = client_metal_compositor_create(xcn, metal_device, command_queue);
 #endif
