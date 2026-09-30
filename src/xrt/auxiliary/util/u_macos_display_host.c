@@ -7,6 +7,7 @@
  */
 
 #include "util/u_macos_display_host.h"
+#include "util/u_debug.h"
 
 #include <dispatch/dispatch.h>
 #include <pthread.h>
@@ -111,6 +112,14 @@ u_macos_hosted_client_unregister(void *ctx)
 		atomic_store(&g_client_awaiting_present, false);
 	}
 	pthread_mutex_unlock(&g_client_mutex);
+}
+
+DEBUG_GET_ONCE_BOOL_OPTION(macos_hosted_follow_service_focus, "XRT_MACOS_HOSTED_FOLLOW_SERVICE_FOCUS", true)
+
+bool
+u_macos_hosted_client_follows_service_focus(void)
+{
+	return debug_get_bool_option_macos_hosted_follow_service_focus();
 }
 
 bool

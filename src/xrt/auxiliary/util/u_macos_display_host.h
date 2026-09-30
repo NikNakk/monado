@@ -95,6 +95,15 @@ u_macos_hosted_client_unregister(void *ctx);
 bool
 u_macos_hosted_client_available(void);
 
+/*!
+ * True (the default) if a hosted client shows its layer only when the
+ * service's focus logic makes its session visible, and hides it when another
+ * application takes over. False (XRT_MACOS_HOSTED_FOLLOW_SERVICE_FOCUS=0)
+ * shows it as soon as the presenter starts and ignores the service's focus.
+ */
+bool
+u_macos_hosted_client_follows_service_focus(void);
+
 xrt_result_t
 u_macos_hosted_client_attach(uint32_t context_id);
 

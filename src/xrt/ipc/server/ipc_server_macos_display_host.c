@@ -69,6 +69,29 @@ ipc_server_macos_display_host_client_gone(volatile struct ipc_client_state *ics)
 }
 
 
+xrt_result_t
+ipc_handle_compositor_hosted_session_active(volatile struct ipc_client_state *ics, bool active)
+{
+	IPC_TRACE_MARKER();
+
+	/*
+	 * A client compositing in-process never waits for frames here, which is
+	 * what normally marks its session active. Its session begin and end
+	 * stand in for that, so the usual focus logic covers hosted clients:
+	 * the newest active application becomes visible and focused, and the
+	 * others hear, through their sessions, that they no longer are.
+	 */
+	if (ics->xs == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	if (active) {
+		ipc_server_activate_session(ics);
+	} else {
+		ipc_server_deactivate_session(ics);
+	}
+	return XRT_SUCCESS;
+}
+
 /*
  *
  * Passthrough camera frames for clients compositing in-process.
