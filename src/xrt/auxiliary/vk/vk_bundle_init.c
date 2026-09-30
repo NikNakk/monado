@@ -1150,9 +1150,15 @@ vk_init_mutex(struct vk_bundle *vk)
 
 		if (os_mutex_init(&q->mutex) < 0) {
 			VK_ERROR(vk, "failed to initialize queue mutex");
+			// Destroy the ones that were initialised.
+			for (uint32_t j = 0; j < i; ++j) {
+				os_mutex_destroy(&vk->queues[j].mutex);
+				vk->queues[j].mutex = (struct os_mutex){0};
+			}
 			return VK_ERROR_INITIALIZATION_FAILED;
 		}
 	}
+	vk->queue_mutexes_initialized = true;
 	return VK_SUCCESS;
 }
 
@@ -1161,11 +1167,17 @@ vk_deinit_mutex(struct vk_bundle *vk)
 {
 	assert(vk != NULL);
 
+	// Compositors tear down after a failed start, before this was set up.
+	if (!vk->queue_mutexes_initialized) {
+		return VK_SUCCESS;
+	}
+
 	for (uint32_t i = 0; i < ARRAY_SIZE(vk->queues); ++i) {
 		struct vk_bundle_queue *q = &vk->queues[i];
 		os_mutex_destroy(&q->mutex);
 		q->mutex = (struct os_mutex){0};
 	}
+	vk->queue_mutexes_initialized = false;
 	return VK_SUCCESS;
 }
 
