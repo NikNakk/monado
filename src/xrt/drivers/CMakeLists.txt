@@ -196,6 +196,7 @@ if(XRT_BUILD_DRIVER_PSSENSE)
 	add_library(
 		drv_pssense STATIC pssense/pssense_driver.c pssense/pssense_interface.h
 				   pssense/pssense_protocol.h pssense/pssense_led_model.h
+				   pssense/pssense_led_correction.h
 		)
 	target_link_libraries(
 		drv_pssense

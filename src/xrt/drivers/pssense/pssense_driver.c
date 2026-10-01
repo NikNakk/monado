@@ -42,6 +42,7 @@
 #include "pssense_interface.h"
 #include "pssense_protocol.h"
 #include "pssense_led_model.h"
+#include "pssense_led_correction.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -144,6 +145,17 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_wide_period_id, "PSSENSE_LED_BOO
  * holds the scan token, rescan it from scratch (a full scan unless PSSENSE_LED_BOOTSTRAP_HINT_US is set). 0 = off.
  */
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_stress_rescan_s, "PSSENSE_LED_BOOTSTRAP_STRESS_RESCAN_S", 0)
+/*
+ * Move each LED of the model by its measured offset (pssense_led_correction.h) before the model goes to the
+ * constellation tracker. Replayed on recordings the corrected rings fit the cameras at 0.38-0.40 px instead of
+ * 0.42-0.53 px, and the right controller gains 10% more poses. Fitted with the combined mode-4 calibration of 25 Sep
+ * and worse with the older one. Not yet run on the headset.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_correction, "PSSENSE_LED_CORRECTION", false)
+_Static_assert(ARRAY_SIZE(pssense_left_led_corrections) == ARRAY_SIZE(pssense_left_leds) &&
+                   ARRAY_SIZE(pssense_right_led_corrections) == ARRAY_SIZE(pssense_right_leds) &&
+                   ARRAY_SIZE(pssense_left_leds) == ARRAY_SIZE(pssense_right_leds),
+               "one correction per LED, and both rings the same size");
 
 //! Unused input-report bytes watched by PSSENSE_INPUT_DIAG.
 #define PSSENSE_INPUT_DIAG_BYTES 24
@@ -325,6 +337,8 @@ struct pssense_device
 	struct xrt_frame_node node;
 	struct t_timing_event_sink timing_event_sink;
 	struct t_constellation_tracker_led_model led_model;
+	//! This controller's own copy of the LEDs when PSSENSE_LED_CORRECTION moves them; led_model then points here.
+	struct t_constellation_tracker_led corrected_leds[ARRAY_SIZE(pssense_left_leds)];
 	struct t_constellation_tracker_device constellation_device;
 	struct t_constellation_tracker_tracking_source constellation_tracking_source;
 
@@ -2875,6 +2889,18 @@ pssense_create(struct xrt_prober *xp,
 		PSSENSE_ERROR(pssense, "Unable to determine controller type");
 		pssense_device_destroy(&pssense->base);
 		return NULL;
+	}
+
+	if (debug_get_bool_option_pssense_led_correction()) {
+		const struct xrt_vec3 *corrections =
+		    pssense->hand == XRT_HAND_LEFT ? pssense_left_led_corrections : pssense_right_led_corrections;
+		for (size_t i = 0; i < pssense->led_model.led_count; i++) {
+			pssense->corrected_leds[i] = pssense->led_model.leds[i];
+			math_vec3_accum(&corrections[i], &pssense->corrected_leds[i].position);
+		}
+		pssense->led_model.leds = pssense->corrected_leds;
+		PSSENSE_INFO(pssense, "LED_CORRECTION side=%c leds=%zu", pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+		             pssense->led_model.led_count);
 	}
 
 	SET_INPUT(PS_CLICK);
