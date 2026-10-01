@@ -61,11 +61,8 @@ create_connection(void)
 }
 
 static bool
-publish_texture(NSXPCConnection *connection,
-                MTLSharedTextureHandle *handle,
-                uint64_t token,
-                uint32_t index,
-                uint32_t image_count)
+publish_texture(
+    NSXPCConnection *connection, MTLSharedTextureHandle *handle, uint64_t token, uint32_t index, uint32_t image_count)
 {
 	__block BOOL success = NO;
 	__block BOOL replied = NO;
@@ -104,12 +101,12 @@ publish_shared_event(NSXPCConnection *connection, MTLSharedEventHandle *handle, 
 	}];
 
 	[proxy publishSharedEventHandle:handle
-	                         token:token
-	                         reply:^(BOOL remote_success) {
-		                   success = remote_success;
-		                   replied = YES;
-		                   dispatch_semaphore_signal(semaphore);
-	                         }];
+	                          token:token
+	                          reply:^(BOOL remote_success) {
+		                    success = remote_success;
+		                    replied = YES;
+		                    dispatch_semaphore_signal(semaphore);
+	                          }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MONADO_METAL_XPC_TIMEOUT_NS));
@@ -196,13 +193,9 @@ discard_token(NSXPCConnection *connection, uint64_t token)
 }
 
 static int
-publish_textures_common(void *const *metal_textures,
-                        uint32_t image_count,
-                        bool claimable,
-                        uint64_t *out_token)
+publish_textures_common(void *const *metal_textures, uint32_t image_count, bool claimable, uint64_t *out_token)
 {
-	if (metal_textures == NULL || out_token == NULL || image_count == 0 ||
-	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+	if (metal_textures == NULL || out_token == NULL || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return -1;
 	}
 	*out_token = 0;
@@ -271,17 +264,17 @@ monado_metal_xpc_activate_service(void)
 		if (connection == nil) {
 			return -1;
 		}
-		connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCServiceProtocol)];
+		connection.remoteObjectInterface =
+		    [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCServiceProtocol)];
 		[connection resume];
 
 		__block BOOL ready = NO;
 		__block BOOL replied = NO;
 		dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-		id<IPCMetalXPCServiceProtocol> proxy =
-		    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		      (void)error;
-		      dispatch_semaphore_signal(semaphore);
-		    }];
+		id<IPCMetalXPCServiceProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+		  (void)error;
+		  dispatch_semaphore_signal(semaphore);
+		}];
 
 		[proxy activateWithReply:^(BOOL remote_ready) {
 		  ready = remote_ready;

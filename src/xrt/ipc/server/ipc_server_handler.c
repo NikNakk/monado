@@ -1649,7 +1649,7 @@ ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
 	const int64_t trace_display_time_ns = slot.data.display_time_ns;
 	const uint32_t trace_layer_count = slot.layer_count;
 	ipc_submit_trace_event("handler_entry", trace_frame_id, 0, trace_display_time_ns, trace_layer_count,
-	                        XRT_SUCCESS);
+	                       XRT_SUCCESS);
 	if (slot.layer_count != 1) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
@@ -1668,11 +1668,11 @@ ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
 	}
 	if (_update_layers(ics, &slot) != XRT_SUCCESS) {
 		ipc_submit_trace_event("update_layers_failed", trace_frame_id, 0, trace_display_time_ns,
-		                        trace_layer_count, XRT_ERROR_IPC_FAILURE);
+		                       trace_layer_count, XRT_ERROR_IPC_FAILURE);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 	ipc_submit_trace_event("after_update_layers", trace_frame_id, 0, trace_display_time_ns, trace_layer_count,
-	                        XRT_SUCCESS);
+	                       XRT_SUCCESS);
 
 	xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
 	ipc_submit_trace_event("after_commit", trace_frame_id, 0, trace_display_time_ns, trace_layer_count, xret);
@@ -1775,32 +1775,33 @@ ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_clie
 	trace_display_time_ns = slot.data.display_time_ns;
 	trace_layer_count = slot.layer_count;
 	ipc_submit_trace_event("handler_entry", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                        trace_layer_count, XRT_SUCCESS);
+	                       trace_layer_count, XRT_SUCCESS);
 	if (slot.layer_count != 1) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
 	const size_t expected_size = offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
 	if ((size_t)payload->size != expected_size) {
-		IPC_ERROR(ics->server,
-		          "Byte-stream async single-layer semaphore wire-layout mismatch: received=%u expected_native=%zu",
-		          payload->size, expected_size);
+		IPC_ERROR(
+		    ics->server,
+		    "Byte-stream async single-layer semaphore wire-layout mismatch: received=%u expected_native=%zu",
+		    payload->size, expected_size);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
 	xrt_result_t xret = xrt_comp_layer_begin(ics->xc, &slot.data);
 	ipc_submit_trace_event("after_layer_begin", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                        trace_layer_count, xret);
+	                       trace_layer_count, xret);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
 	if (_update_layers(ics, &slot) != XRT_SUCCESS) {
 		ipc_submit_trace_event("update_layers_failed", trace_frame_id, semaphore_value, trace_display_time_ns,
-		                        trace_layer_count, XRT_ERROR_IPC_FAILURE);
+		                       trace_layer_count, XRT_ERROR_IPC_FAILURE);
 		return XRT_ERROR_IPC_FAILURE;
 	}
 	ipc_submit_trace_event("after_update_layers", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                        trace_layer_count, XRT_SUCCESS);
+	                       trace_layer_count, XRT_SUCCESS);
 
 	/*
 	 * No IPC reply is sent for this command. The TCP stream itself preserves
@@ -1811,7 +1812,7 @@ ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_clie
 	 */
 	xret = xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
 	ipc_submit_trace_event("after_commit", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                        trace_layer_count, xret);
+	                       trace_layer_count, xret);
 	return xret;
 }
 
@@ -1871,7 +1872,8 @@ ipc_handle_compositor_layer_sync_copy_commit(volatile struct ipc_client_state *i
 	const size_t expected_size =
 	    offsetof(struct ipc_layer_slot, layers) + ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
 	if ((size_t)total_size != expected_size) {
-		IPC_ERROR(ics->server, "Byte-stream layer wire-layout mismatch: received=%u expected_native=%zu layers=%u",
+		IPC_ERROR(ics->server,
+		          "Byte-stream layer wire-layout mismatch: received=%u expected_native=%zu layers=%u",
 		          total_size, expected_size, slot->layer_count);
 		return XRT_ERROR_IPC_FAILURE;
 	}
