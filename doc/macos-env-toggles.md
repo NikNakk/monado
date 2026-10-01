@@ -311,6 +311,12 @@ Fifth batch (2026-10-01), no default changes:
 - **Other raw `getenv` reads now use `DEBUG_GET_ONCE_*`**, including
   `MONADO_WINE_TCP_PORT` (finding 5 below) and the macOS wait diagnostics.
 
+Added 2026-10-01: `XRT_MACOS_DISPLAY_LINK` (`cv` default, `ca`), an A/B switch
+for moving from the deprecated CVDisplayLink to CADisplayLink. It is category
+(d) until the headset comparison in
+[the timing notes](macos-psvr2-timing-diagnostics.md#cvdisplaylink-against-cadisplaylink)
+is done; then one source should be removed.
+
 Still not done: `PRESENT_PRELATCH_US` and `PRESENT_MIN_LEAD_US` (inert under the
 default minimum present duration, but kept because the Wine trace script still
 sets `PRELATCH_US`).
