@@ -63,8 +63,6 @@ set(IPC_COMMON_SOURCES
     shared/ipc_shmem.h
     shared/ipc_utils.c
     shared/ipc_utils.h
-    shared/ipc_tcp_auth.c
-    shared/ipc_tcp_auth.h
 	)
 
 add_library(ipc_shared STATIC ${IPC_COMMON_SOURCES})
