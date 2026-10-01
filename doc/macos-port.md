@@ -634,8 +634,18 @@ Points that change behaviour or need checking on hardware:
 - **PS VR2 prediction**: dead reckoning now reports failure instead of
   asserting; the driver falls back to the latest SLAM pose. With our IMU
   FIFO index fix this is not expected in normal running.
-- `macos-pssense-6dof` predates upstream's constellation tracker and should
-  be rebased on it rather than merged as is.
+- `macos-pssense-6dof` keeps its own optical frontend (M1/M2/M3) and IMU EKF.
+  An offline comparison against upstream's sliding-window fusion (MR 3015,
+  not yet merged upstream) found the same pose coverage and similar accuracy:
+  upstream was modestly better on some consistency metrics, at about 300x the
+  cost and with a Ceres dependency. Upstream's Ceres frontend (MR 2940, in
+  this merge) was not benchmarked. See
+  [the evaluation](https://github.com/NikNakk/monado/blob/codex/pssense-upstream-fusion-evaluation/doc/macos-pssense-upstream-fusion-evaluation.md).
+  The plan is therefore to bring that branch forward onto this upstream
+  keeping its frontend and EKF, adopting upstream pieces selectively (SO(3)
+  maths, IMU preintegration, a reprojection-based gate), not to switch to
+  upstream's tracker. Its driver has diverged by about 3000 lines, so expect
+  API conflicts in the constellation tracker and Sense driver.
 
 
 ### PS VR2 eye-gaze calibration tuning
