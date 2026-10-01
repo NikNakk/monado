@@ -28,7 +28,7 @@ xrt_result_t
 comp_metal_semaphore_create_client_pair(struct xrt_compositor_semaphore **out_xcsem, void **out_mtl_shared_event);
 
 /*!
- * Resolve a bootstrap-registered MTLSharedEvent Mach port (as used by DXMT
+ * Resolve a bootstrap-registered MTLSharedEvent Mach port (for external native
  * shared D3D11 fences) and import it into the compositor Vulkan timeline.
  */
 xrt_result_t
