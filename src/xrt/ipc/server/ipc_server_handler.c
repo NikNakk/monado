@@ -1808,7 +1808,7 @@ ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_clie
 
 	/*
 	 * No IPC reply is sent for this command. The TCP stream itself preserves
-	 * ordering, and Wine copied the complete active layer into this request,
+	 * ordering, and the byte-stream client copied the complete active layer into this request,
 	 * so there is no shared-memory slot to return to the client. If the native
 	 * compositor needs time here, the next synchronous request (normally
 	 * wait_frame) naturally queues behind it instead of stalling xrEndFrame.
