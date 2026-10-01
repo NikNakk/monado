@@ -641,10 +641,6 @@ ipc_handle_session_create(volatile struct ipc_client_state *ics,
 #endif
 
 	struct xrt_session_info server_xsi = *xsi;
-	if (ics->imc.stream_socket) {
-		server_xsi.pacing_flags |= XRT_SESSION_PACING_USE_MIN_FRAME_PERIOD_BIT;
-		IPC_INFO(ics->server, "Byte-stream IPC session: enabling minimum-display-period application pacing");
-	}
 
 	// This is false in headless sessions, don't create a native compositor.
 	xcn_ptr = create_native_compositor ? &xcn : NULL;
