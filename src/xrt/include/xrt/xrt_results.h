@@ -262,4 +262,14 @@ typedef enum xrt_result
 	 * C++ code threw an exception that wasn't caught.
 	 */
 	XRT_ERROR_UNCAUGHT_EXCEPTION = -43,
+
+	/*!
+	 * The specified @ref xrt_view_type was unsupported by the callee.
+	 */
+	XRT_ERROR_UNSUPPORTED_VIEW_TYPE = -44,
+
+	/*!
+	 * The IPC client did not create a system yet, which is required for this function.
+	 */
+	XRT_ERROR_IPC_SYSTEM_NOT_CREATED = -45,
 } xrt_result_t;

@@ -18,9 +18,22 @@ struct u_resampler *
 u_resampler_create(size_t num_samples, float sample_rate)
 {
 	struct u_resampler *resampler = U_TYPED_CALLOC(struct u_resampler);
+	if (resampler == NULL) {
+		return NULL;
+	}
 
 	resampler->samples = calloc(num_samples, sizeof(sample_t));
+	if (resampler->samples == NULL) {
+		u_resampler_destroy(resampler);
+		return NULL;
+	}
+
 	resampler->scratch = calloc(num_samples, sizeof(sample_t));
+	if (resampler->scratch == NULL) {
+		u_resampler_destroy(resampler);
+		return NULL;
+	}
+
 	resampler->num_samples = num_samples;
 	resampler->sample_rate = sample_rate;
 
@@ -34,7 +47,10 @@ void
 u_resampler_destroy(struct u_resampler *resampler)
 {
 	free(resampler->samples);
+	resampler->samples = NULL;
 	free(resampler->scratch);
+	resampler->scratch = NULL;
+
 	free(resampler);
 }
 
@@ -97,14 +113,10 @@ resampler_write_raw(struct u_resampler *resampler, const sample_t *samples, size
 	if (num_samples > 0 && can_write > 0) {
 		assert(resampler->write_index == 0);
 
-		// copy in the samples that go at the start of the buffer
-		can_write = resampler->read_index;
-
 		// bytes to write after the start
 		size_t written_after_start = MIN(resampler->read_index, num_samples);
 
 		written += written_after_start;
-		num_samples -= written;
 
 		// copy the data
 		memcpy(resampler->samples + resampler->write_index, samples, written_after_start * sizeof(sample_t));

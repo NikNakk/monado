@@ -1,4 +1,5 @@
 # Copyright 2019-2025, Collabora, Ltd.
+# Copyright 2026, NVIDIA CORPORATION.
 #
 # SPDX-License-Identifier: BSL-1.0
 
@@ -18,7 +19,7 @@ if(XRT_BUILD_DRIVER_ARDUINO)
 endif()
 
 add_library(drv_cemu STATIC ht_ctrl_emu/ht_ctrl_emu.cpp ht_ctrl_emu/ht_ctrl_emu_interface.h)
-target_link_libraries(drv_cemu PRIVATE xrt-interfaces aux_generated_bindings_helpers aux_util)
+target_link_libraries(drv_cemu PRIVATE xrt-interfaces aux_util)
 list(APPEND ENABLED_HEADSET_DRIVERS drv_cemu)
 
 if(XRT_BUILD_DRIVER_BLUBUR_S1)
@@ -28,6 +29,21 @@ if(XRT_BUILD_DRIVER_BLUBUR_S1)
 		)
 	target_link_libraries(drv_blubur_s1 PRIVATE xrt-interfaces aux_util aux_os)
 	list(APPEND ENABLED_DRIVERS blubur_s1)
+endif()
+
+if(XRT_BUILD_DRIVER_CONTACTGLOVE)
+	add_library(
+		drv_contactglove STATIC
+		contactglove/contactglove.c
+		contactglove/contactglove_calibration.c
+		contactglove/contactglove_calibration.h
+		contactglove/contactglove_interface.h
+		contactglove/contactglove_internal.h
+		contactglove/contactglove_prober.c
+		contactglove/contactglove_protocol.h
+		)
+	target_link_libraries(drv_contactglove PRIVATE xrt-interfaces aux_util aux_os)
+	list(APPEND ENABLED_DRIVERS contactglove)
 endif()
 
 if(XRT_BUILD_DRIVER_DAYDREAM)
@@ -193,8 +209,19 @@ if(XRT_BUILD_DRIVER_PSMV)
 endif()
 
 if(XRT_BUILD_DRIVER_PSSENSE)
-	add_library(drv_pssense STATIC pssense/pssense_driver.c pssense/pssense_interface.h)
-	target_link_libraries(drv_pssense PRIVATE aux_os aux_util)
+	add_library(
+		drv_pssense STATIC pssense/pssense_driver.c pssense/pssense_interface.h
+				   pssense/pssense_protocol.h pssense/pssense_led_model.h
+		)
+	target_link_libraries(
+		drv_pssense
+		PRIVATE
+			xrt-interfaces
+			tracking-includes
+			aux_os
+			aux_util
+			constellation
+		)
 	list(APPEND ENABLED_DRIVERS pssense)
 endif()
 
@@ -258,7 +285,7 @@ if(XRT_BUILD_DRIVER_REMOTE)
 		remote/r_interface.h
 		remote/r_internal.h
 		)
-	target_link_libraries(drv_remote PRIVATE xrt-interfaces aux_util aux_vive)
+	target_link_libraries(drv_remote PRIVATE xrt-interfaces aux_util aux_vive base)
 	if(WIN32)
 		target_link_libraries(drv_remote PRIVATE ws2_32)
 	endif()
@@ -288,8 +315,6 @@ if(XRT_BUILD_DRIVER_RIFT)
 		rift/rift_bindings.c
 		rift/rift_bindings.h
 		rift/rift_driver.c
-		rift/rift_distortion.c
-		rift/rift_prober.c
 		rift/rift_usb.c
 		rift/rift_usb.h
 		rift/rift_radio.c
@@ -301,9 +326,12 @@ if(XRT_BUILD_DRIVER_RIFT)
 		drv_rift
 		PRIVATE
 			xrt-interfaces
+			tracking-includes
 			aux_util
 			aux_util_sink
 			aux_math
+			base
+			constellation
 			xrt-external-cjson
 			xrt-external-tinyceres
 		)
@@ -330,6 +358,7 @@ if(XRT_BUILD_DRIVER_RIFT_SENSOR)
 		drv_rift_sensor
 		PRIVATE
 			xrt-interfaces
+			tracking-includes
 			aux_util
 			aux_util_sink
 			aux_math
@@ -443,6 +472,8 @@ if(XRT_BUILD_DRIVER_HANDTRACKING)
 endif()
 
 if(XRT_BUILD_DRIVER_SURVIVE)
+	include(CMakePushCheckState)
+	include(CheckSymbolExists)
 	add_library(
 		drv_survive STATIC
 		survive/survive_driver.c
@@ -463,6 +494,17 @@ if(XRT_BUILD_DRIVER_SURVIVE)
 			drv_vp2
 			PkgConfig::SURVIVE
 		)
+
+	cmake_push_check_state(RESET)
+	set(CMAKE_REQUIRED_LIBRARIES PkgConfig::SURVIVE)
+	check_symbol_exists(
+		"survive_simple_object_charge_percet" "survive_api.h" HAVE_MISSPELLED_CHARGE_FN
+		)
+	cmake_pop_check_state()
+	if(HAVE_MISSPELLED_CHARGE_FN)
+		target_compile_definitions(drv_survive PUBLIC XR_SURVIVE_MISSPELLED_CHARGE_FN)
+	endif()
+
 	list(APPEND ENABLED_HEADSET_DRIVERS survive)
 endif()
 
@@ -611,6 +653,7 @@ if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE)
 			aux_vive
 			drv_vp2
 			drv_includes
+			base
 			xrt-interfaces
 			xrt-external-openvr
 			xrt-external-cjson

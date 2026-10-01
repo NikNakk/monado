@@ -28,6 +28,28 @@ struct xrt_frame_sink;
 
 
 /*!
+ * A unique identifier for an @ref xrt_device instance.
+ *
+ * Each device is assigned a 64-bit ID when it is created in the Monado service
+ * process, or in the application process for in-process setups. For
+ * out-of-process clients the ID is synchronized over the IPC layer, so every
+ * client connected to the same service refers to a given device by the same
+ * value.
+ *
+ * The ID is intended for hash maps, caches, and similar lookups. Unlike a
+ * memory pointer it is never reused after the device is destroyed.
+ *
+ * A value of zero is invalid and means the device ID has not been assigned,
+ * matching the zero-initialized state of the struct.
+ *
+ * @ingroup xrt_iface
+ */
+struct xrt_device_id
+{
+	uint64_t val;
+};
+
+/*!
  * A per-lens/display view information.
  *
  * @ingroup xrt_iface
@@ -87,6 +109,22 @@ struct xrt_view
  */
 struct xrt_device_compositor_info
 {
+	/*!
+	 * @brief The type of panel refresh the screen uses.
+	 *
+	 * This affects how scanout poses are queried for rolling refresh
+	 * compensation: if the mode is @ref XRT_PANEL_REFRESH_TYPE_GLOBAL,
+	 * the start and end scanout world poses will be identical; otherwise,
+	 * separate start and end poses are queried using different predicted
+	 * timestamps derived from the other members of
+	 * @ref xrt_device_compositor_info.
+	 *
+	 * The transmission direction (if known) should be specified via
+	 * @ref scanout_direction. Some features may require this information
+	 * even for global-refresh panels, e.g. beam racing.
+	 */
+	enum xrt_panel_refresh_type panel_refresh_type;
+
 	//! The direction scanout on the display occurs.
 	enum xrt_scanout_direction scanout_direction;
 	/*!
@@ -292,12 +330,21 @@ struct xrt_device_supported
 	bool face_tracking_calibration_state;
 	bool body_tracking;
 	bool body_tracking_calibration;
+	bool body_tracking_fidelity;
 	bool battery_status;
 	bool brightness_control;
 	bool compositor_info;
+	bool notify_chirality;
 
 	bool planes;
 	enum xrt_plane_detection_capability_flags_ext plane_capability_flags;
+
+	/*!
+	 * The device itself only has 2 views but is aware of quad views, has
+	 * better knowledge of which fovs to use for quad views to stereo views
+	 * emulation. So it supports retrieving quad views from get_views.
+	 */
+	bool get_views_quad;
 };
 
 /*!
@@ -309,6 +356,9 @@ struct xrt_device_supported
  */
 struct xrt_device
 {
+	//! Instance identifier, see @ref xrt_device_id.
+	struct xrt_device_id id;
+
 	//! Enum identifier of the device.
 	enum xrt_device_name name;
 	enum xrt_device_type device_type;
@@ -490,6 +540,17 @@ struct xrt_device
 	xrt_result_t (*set_body_tracking_calibration_override_meta)(struct xrt_device *xdev, float new_body_height);
 
 	/*!
+	 * @brief XR_META_body_tracking_fidelity - body tracking extension for request changing the tracking fidelity
+	 *
+	 * @param[in] xdev              The body tracking device.
+	 * @param[in] new_fidelity      The new tracking fidelity mode.
+	 *
+	 * @see xrt_body_tracking_fidelity_meta
+	 */
+	xrt_result_t (*set_body_tracking_fidelity_meta)(struct xrt_device *xdev,
+	                                                enum xrt_body_tracking_fidelity_meta new_fidelity);
+
+	/*!
 	 * Set a output value.
 	 *
 	 * @param[in] xdev           The device.
@@ -508,14 +569,6 @@ struct xrt_device
 	 * @param[out] limits        The returned limits.
 	 */
 	xrt_result_t (*get_output_limits)(struct xrt_device *xdev, struct xrt_output_limits *limits);
-
-	/*!
-	 * @brief Get current presence status of the device.
-	 *
-	 * @param[in] xdev           The device.
-	 * @param[out] presence      The returned presence status.
-	 */
-	xrt_result_t (*get_presence)(struct xrt_device *xdev, bool *presence);
 
 	/*!
 	 * Begin a plane detection request
@@ -737,6 +790,17 @@ struct xrt_device
 	xrt_result_t (*end_feature)(struct xrt_device *xdev, enum xrt_device_feature_type type);
 
 	/*!
+	 * Notify the device of it's new chirality, or that it no longer has a set chirality.
+	 *
+	 * Devices are assumed to have no set chirality by default.
+	 *
+	 * @param[in] xdev          The device.
+	 * @param[in] has_chirality Whether or not the device has a set chirality.
+	 * @param[in] chirality     The device's current chirality (unset if `has_chirality` is false).
+	 */
+	xrt_result_t (*notify_chirality)(struct xrt_device *xdev, bool has_chirality, enum xrt_hand chirality);
+
+	/*!
 	 * Attach optional passthrough camera consumers.
 	 *
 	 * Drivers with native camera streams may expose left/right eye frames to
@@ -894,6 +958,22 @@ xrt_device_set_body_tracking_calibration_override_meta(struct xrt_device *xdev, 
 }
 
 /*!
+ * Helper function for @ref xrt_device::set_body_tracking_fidelity_meta.
+ *
+ * @copydoc xrt_device::set_body_tracking_fidelity_meta
+ *
+ * @public @memberof xrt_device
+ */
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_device_set_body_tracking_fidelity_meta(struct xrt_device *xdev, enum xrt_body_tracking_fidelity_meta new_fidelity)
+{
+	if (xdev->set_body_tracking_fidelity_meta == NULL) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	return xdev->set_body_tracking_fidelity_meta(xdev, new_fidelity);
+}
+
+/*!
  * Helper function for @ref xrt_device::set_output.
  *
  * @copydoc xrt_device::set_output
@@ -912,23 +992,6 @@ xrt_device_get_output_limits(struct xrt_device *xdev, struct xrt_output_limits *
 {
 	if (xdev->get_output_limits) {
 		return xdev->get_output_limits(xdev, limits);
-	} else {
-		return XRT_ERROR_NOT_IMPLEMENTED;
-	}
-}
-
-/*!
- * Helper function for @ref xrt_device::get_presence.
- *
- * @copydoc xrt_device::get_presence
- *
- * @public @memberof xrt_device
- */
-XRT_NONNULL_ALL static inline xrt_result_t
-xrt_device_get_presence(struct xrt_device *xdev, bool *presence)
-{
-	if (xdev->get_presence) {
-		return xdev->get_presence(xdev, presence);
 	} else {
 		return XRT_ERROR_NOT_IMPLEMENTED;
 	}
@@ -1147,6 +1210,19 @@ XRT_NONNULL_ALL static inline xrt_result_t
 xrt_device_end_feature(struct xrt_device *xdev, enum xrt_device_feature_type type)
 {
 	return xdev->end_feature(xdev, type);
+}
+
+/*!
+ * Helper function for @ref xrt_device::notify_chirality.
+ *
+ * @copydoc xrt_device::notify_chirality
+ *
+ * @public @memberof xrt_device
+ */
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_device_notify_chirality(struct xrt_device *xdev, bool has_chirality, enum xrt_hand chirality)
+{
+	return xdev->notify_chirality(xdev, has_chirality, chirality);
 }
 
 /*!

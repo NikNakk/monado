@@ -131,6 +131,28 @@ enum xrt_layer_composition_flags
 	 * see XrCompositionLayerDepthTestFB.
 	 */
 	XRT_LAYER_COMPOSITION_DEPTH_TEST = 1u << 10u,
+
+	/*!
+	 * This layer has inverted alpha,
+	 * see @p XR_COMPOSITION_LAYER_INVERTED_ALPHA_BIT_EXT
+	 */
+	XRT_LAYER_COMPOSITION_INVERTED_ALPHA_BIT = 1u << 11u,
+
+	/*!
+	 * When "emulating" a quad view projection layer with two stereo
+	 * projection layers this is used to tag the context (background) layer
+	 * that the inset layer is blended with.
+	 */
+	XRT_LAYER_SPLIT_QUAD_VIEW_CONTEXT = 1u << 12u,
+
+	/*!
+	 * When "emulating" a quad view projection layer with two stereo
+	 * projection layers this is used to tag the inset layer so that the
+	 * compositor can apply blending between the two. Essentially this tells
+	 * the compositor to blend the edges of this layer with the context
+	 * layer below it.
+	 */
+	XRT_LAYER_SPLIT_QUAD_VIEW_INSET = 1u << 13u,
 };
 
 /*!
@@ -176,6 +198,26 @@ enum xrt_blend_factor
 	XRT_BLEND_FACTOR_DST_ALPHA = 4,
 	XRT_BLEND_FACTOR_ONE_MINUS_DST_ALPHA = 5,
 	XRT_BLEND_FACTOR_MAX_ENUM_FB = 0x7FFFFFFF,
+};
+
+
+/*!
+ * Chroma key parameters in HSV space.
+ * Alpha 0-1 interpolates between hsv_min and hsv_max
+ * with curve as a power curve defined by the curve exponent.
+ *
+ * Used for projection layers.
+ */
+struct xrt_layer_chroma_key_data
+{
+	//!< Minimum HSV bounds
+	struct xrt_colour_hsv_f32 hsv_min;
+	//! Maximum HSV bounds
+	struct xrt_colour_hsv_f32 hsv_max;
+	//! Power curve for alpha falloff (1.0 = linear)
+	float curve;
+	//! Despill strength (0.0 = none, 1.0 = full)
+	float despill;
 };
 
 /*!
@@ -251,6 +293,8 @@ struct xrt_layer_projection_view_data
 struct xrt_layer_projection_data
 {
 	struct xrt_layer_projection_view_data v[XRT_MAX_VIEWS];
+
+	struct xrt_layer_chroma_key_data chroma_key;
 };
 
 /*!
@@ -288,6 +332,8 @@ struct xrt_layer_projection_depth_data
 	struct xrt_layer_projection_view_data v[XRT_MAX_VIEWS];
 
 	struct xrt_layer_depth_data d[XRT_MAX_VIEWS];
+
+	struct xrt_layer_chroma_key_data chroma_key;
 };
 
 /*!
@@ -520,6 +566,13 @@ enum xrt_swapchain_create_flags
 	XRT_SWAPCHAIN_CREATE_PROTECTED_CONTENT = (1u << 0u),
 	//! Signals that the allocator should only allocate one image.
 	XRT_SWAPCHAIN_CREATE_STATIC_IMAGE = (1u << 1u),
+	/*!
+	 * Signals to the compositor to use the equivalent sRGB format of the UNORM swapchain.
+	 *
+	 * The swapchain must have @ref XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT and must have
+	 * both formats in the format list.
+	 */
+	XRT_SWAPCHAIN_CREATE_SAMPLE_AS_SRGB = (1u << 2u),
 };
 
 /*!
@@ -1075,6 +1128,7 @@ struct xrt_begin_session_info
 	bool fb_face_tracking2_enabled;
 	bool meta_body_tracking_full_body_enabled;
 	bool meta_body_tracking_calibration_enabled;
+	bool meta_body_tracking_fidelity_enabled;
 	bool android_face_tracking_enabled;
 };
 
@@ -2072,17 +2126,6 @@ struct xrt_swapchain_gl
 };
 
 /*!
- * Base class for an OpenGL (ES) client compositor.
- *
- * @ingroup xrt_iface comp_client
- * @extends xrt_compositor
- */
-struct xrt_compositor_gl
-{
-	struct xrt_compositor base;
-};
-
-/*!
  * Down-cast helper.
  *
  * @private @memberof xrt_swapchain_gl
@@ -2093,19 +2136,6 @@ static inline struct xrt_swapchain_gl *
 xrt_swapchain_gl(struct xrt_swapchain *xsc)
 {
 	return (struct xrt_swapchain_gl *)xsc;
-}
-
-/*!
- * Down-cast helper.
- *
- * @private @memberof xrt_compositor_gl
- *
- * @todo unused - remove?
- */
-static inline struct xrt_compositor_gl *
-xrt_compositor_gl(struct xrt_compositor *xc)
-{
-	return (struct xrt_compositor_gl *)xc;
 }
 
 
@@ -2131,18 +2161,6 @@ struct xrt_swapchain_vk
 };
 
 /*!
- * Base class for a Vulkan client compositor.
- *
- * @ingroup xrt_iface comp_client
- * @extends xrt_compositor
- */
-struct xrt_compositor_vk
-{
-	//! @public Base
-	struct xrt_compositor base;
-};
-
-/*!
  * Down-cast helper.
  *
  * @private @memberof xrt_swapchain_vk
@@ -2153,19 +2171,6 @@ static inline struct xrt_swapchain_vk *
 xrt_swapchain_vk(struct xrt_swapchain *xsc)
 {
 	return (struct xrt_swapchain_vk *)xsc;
-}
-
-/*!
- * Down-cast helper.
- *
- * @private @memberof xrt_compositor_vk
- *
- * @todo unused - remove?
- */
-static inline struct xrt_compositor_vk *
-xrt_compositor_vk(struct xrt_compositor *xc)
-{
-	return (struct xrt_compositor_vk *)xc;
 }
 
 /*
@@ -2365,18 +2370,6 @@ struct xrt_swapchain_d3d11
 };
 
 /*!
- * Base class for a D3D11 client compositor.
- *
- * @ingroup xrt_iface comp_client
- * @extends xrt_compositor
- */
-struct xrt_compositor_d3d11
-{
-	//! @public Base
-	struct xrt_compositor base;
-};
-
-/*!
  * Graphics usage requirements for D3D APIs.
  *
  * @ingroup xrt_iface
@@ -2412,17 +2405,6 @@ struct xrt_swapchain_d3d12
 	ID3D12Resource *images[XRT_MAX_SWAPCHAIN_IMAGES];
 };
 
-/*!
- * Base class for a D3D12 client compositor.
- *
- * @ingroup xrt_iface comp_client
- * @extends xrt_compositor
- */
-struct xrt_compositor_d3d12
-{
-	//! @public Base
-	struct xrt_compositor base;
-};
 #endif
 
 /*
@@ -2622,8 +2604,8 @@ struct xrt_view_config
  */
 struct xrt_system_compositor_info
 {
-	uint32_t view_config_count;
-	struct xrt_view_config view_configs[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_COUNT];
+	uint32_t view_type_count;
+	enum xrt_view_type view_types[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_COUNT];
 
 	//! Maximum number of composition layers supported, never changes.
 	uint32_t max_layers;
@@ -2657,6 +2639,32 @@ struct xrt_system_compositor_info
 
 	//! Whether submitting projection layers of a differing FOV from the target FOV is supported.
 	bool supports_fov_mutable;
+
+	/*!
+	 * The compositor supports emulating quad views with insets even if the
+	 * device is only a stereo device. The views are split into two stereo
+	 * projections layers by the state trackers and tagged with the correct
+	 * layer type tags.
+	 *
+	 * This only needs to be set if the compositor hasn't exposed a
+	 * view_configs with the XRT_VIEW_TYPE_QUAD type, as that will also
+	 * cause the state tracker to submit split quad views with stereo
+	 * devices.
+	 */
+	bool supports_emulated_quad_views_with_inset;
+};
+
+/*!
+ * Details about the currently running session of an xrt_compositor.
+ *
+ * @related xrt_multi_compositor_control
+ */
+struct xrt_compositor_session_running_state
+{
+	//! Whether or not this session has been begun.
+	bool running;
+	//! The active view type of the session
+	enum xrt_view_type active_view_type;
 };
 
 struct xrt_system_compositor;
@@ -2689,6 +2697,22 @@ struct xrt_multi_compositor_control
 	xrt_result_t (*set_z_order)(struct xrt_system_compositor *xsc, struct xrt_compositor *xc, int64_t z_order);
 
 	/*!
+	 * Set the chroma key parameters for the base app's projection layers.
+	 * This is used to punch holes through opaque projection layers and adjust their blend mode.
+	 * Uses HSV min/max range for flexible color targeting.
+	 *
+	 * @param hsv_min Minimum HSV bounds
+	 * @param hsv_max Maximum HSV bounds
+	 * @param curve Power curve for alpha falloff
+	 * @param despill Despill strength
+	 */
+	xrt_result_t (*set_base_chroma_key_params)(struct xrt_system_compositor *xsc,
+	                                           struct xrt_colour_hsv_f32 hsv_min,
+	                                           struct xrt_colour_hsv_f32 hsv_max,
+	                                           float curve,
+	                                           float despill);
+
+	/*!
 	 * Tell this client/session if the main application is visible or not.
 	 */
 	xrt_result_t (*set_main_app_visibility)(struct xrt_system_compositor *xsc,
@@ -2716,6 +2740,13 @@ struct xrt_multi_compositor_control
 	                                               struct xrt_compositor *xc,
 	                                               float from_display_refresh_rate_hz,
 	                                               float to_display_refresh_rate_hz);
+
+	/*!
+	 * This function returns the state of the currently running session.
+	 */
+	xrt_result_t (*session_get_running_state)(struct xrt_system_compositor *xsc,
+	                                          struct xrt_compositor *xc,
+	                                          struct xrt_compositor_session_running_state *out_running_state);
 };
 
 /*!
@@ -2758,6 +2789,13 @@ struct xrt_system_compositor
 	                                         const struct xrt_session_info *xsi,
 	                                         struct xrt_session_event_sink *xses,
 	                                         struct xrt_compositor_native **out_xcn);
+
+	/*!
+	 * Gets the view configuration for the specified view type.
+	 */
+	xrt_result_t (*get_view_config)(struct xrt_system_compositor *xsc,
+	                                enum xrt_view_type view_type,
+	                                struct xrt_view_config *out_view_config);
 
 	/*!
 	 * Teardown the system compositor.
@@ -2894,6 +2932,28 @@ xrt_syscomp_notify_display_refresh_changed(struct xrt_system_compositor *xsc,
 }
 
 /*!
+ * @copydoc xrt_multi_compositor_control::session_get_running_state
+ *
+ * Helper for calling through the function pointer.
+ *
+ * If the system compositor @p xsc does not implement @ref xrt_multi_composition_control,
+ * this returns @ref XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED.
+ *
+ * @public @memberof xrt_system_compositor
+ */
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_syscomp_session_get_running_state(struct xrt_system_compositor *xsc,
+                                      struct xrt_compositor *xc,
+                                      struct xrt_compositor_session_running_state *out_running_state)
+{
+	if (xsc->xmcc == NULL) {
+		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;
+	}
+
+	return xsc->xmcc->session_get_running_state(xsc, xc, out_running_state);
+}
+
+/*!
  * @copydoc xrt_system_compositor::create_native_compositor
  *
  * Helper for calling through the function pointer.
@@ -2907,6 +2967,21 @@ xrt_syscomp_create_native_compositor(struct xrt_system_compositor *xsc,
                                      struct xrt_compositor_native **out_xcn)
 {
 	return xsc->create_native_compositor(xsc, xsi, xses, out_xcn);
+}
+
+/*!
+ * @copydoc xrt_system_compositor::get_view_config
+ *
+ * Helper for calling through the function pointer.
+ *
+ * @public @memberof xrt_system_compositor
+ */
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_syscomp_get_view_config(struct xrt_system_compositor *xsc,
+                            enum xrt_view_type view_type,
+                            struct xrt_view_config *out_view_config)
+{
+	return xsc->get_view_config(xsc, view_type, out_view_config);
 }
 
 /*!

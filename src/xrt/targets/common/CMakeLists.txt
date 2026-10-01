@@ -96,6 +96,10 @@ if(XRT_BUILD_DRIVER_BLUBUR_S1)
 	target_link_libraries(target_lists PRIVATE drv_blubur_s1)
 endif()
 
+if(XRT_BUILD_DRIVER_CONTACTGLOVE)
+	target_link_libraries(target_lists PRIVATE drv_contactglove)
+endif()
+
 target_link_libraries(target_lists PRIVATE drv_cemu)
 
 if(XRT_BUILD_DRIVER_DAYDREAM)
@@ -255,6 +259,7 @@ if(XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL)
 			st_prober
 			target_lists
 			drv_includes
+			base
 		)
 	target_include_directories(target_instance PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -280,6 +285,7 @@ target_link_libraries(
 		st_prober
 		target_lists
 		drv_includes
+		base
 	)
 target_include_directories(target_instance_no_comp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

@@ -1,4 +1,5 @@
 // Copyright 2023, Shawn Wallace
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -17,6 +18,7 @@
 
 #include "util/u_debug.h"
 #include "util/u_device.h"
+#include "util/u_device_id.h"
 #include "util/u_hand_tracking.h"
 #include "util/u_logging.h"
 #include "util/u_json.hpp"
@@ -271,7 +273,11 @@ HmdDevice::HmdDevice(const DeviceBuilder &builder) : Device(builder)
 
 	this->supported.compositor_info = true;
 
-	inputs_vec = {xrt_input{true, 0, XRT_INPUT_GENERIC_HEAD_POSE, {}}};
+	inputs_vec = {
+	    xrt_input{true, 0, XRT_INPUT_GENERIC_HEAD_POSE, {}},
+	    xrt_input{false, 0, XRT_INPUT_GENERIC_HEAD_DETECT, {}},
+	};
+	this->inputs_map["/proximity"] = &inputs_vec[1];
 	this->inputs = inputs_vec.data();
 	this->input_count = inputs_vec.size();
 
@@ -292,6 +298,10 @@ ControllerDevice::ControllerDevice(vr::PropertyContainerHandle_t handle, const D
 	this->xrt_device::get_hand_tracking =
 	    &device_bouncer<ControllerDevice, &ControllerDevice::get_hand_tracking, xrt_result_t>;
 	this->xrt_device::set_output = &device_bouncer<ControllerDevice, &ControllerDevice::set_output, xrt_result_t>;
+	this->xrt_device::notify_chirality =
+	    &device_bouncer<ControllerDevice, &ControllerDevice::notify_chirality, xrt_result_t>;
+
+	this->supported.notify_chirality = true;
 
 	this->inputs_map["/skeleton/hand/left"] = &hand_tracking_inputs[XRT_HAND_LEFT];
 	this->inputs_map["/skeleton/hand/right"] = &hand_tracking_inputs[XRT_HAND_RIGHT];
@@ -304,6 +314,8 @@ Device::~Device()
 
 Device::Device(const DeviceBuilder &builder) : xrt_device({}), ctx(builder.ctx), driver(builder.driver)
 {
+	u_device_id_assign(this);
+
 	m_relation_history_create(&relation_hist);
 	std::strncpy(this->serial, builder.serial, XRT_DEVICE_NAME_LEN - 1);
 	this->serial[XRT_DEVICE_NAME_LEN - 1] = 0;
@@ -316,7 +328,7 @@ Device::Device(const DeviceBuilder &builder) : xrt_device({}), ctx(builder.ctx),
 	this->supported.battery_status = true;
 	this->supported.brightness_control = true;
 
-	this->xrt_device::update_inputs = &device_bouncer<Device, &Device::update_inputs, xrt_result_t>;
+	this->xrt_device::update_inputs = u_device_noop_update_inputs;
 #define SETUP_MEMBER_FUNC(name) this->xrt_device::name = &device_bouncer<Device, &Device::name>
 	SETUP_MEMBER_FUNC(get_tracked_pose);
 	SETUP_MEMBER_FUNC(get_battery_status);
@@ -324,10 +336,40 @@ Device::Device(const DeviceBuilder &builder) : xrt_device({}), ctx(builder.ctx),
 
 	this->xrt_device::destroy = [](xrt_device *xdev) {
 		auto *dev = static_cast<Device *>(xdev);
+		auto &ctx = dev->ctx;
+
 		if (debug_get_bool_option_lh_standby_on_exit()) {
 			dev->driver->EnterStandby();
 		}
 		dev->driver->Deactivate();
+
+		// The context outlives us until the last device releases it, and its frame thread keeps
+		// running that whole time - unregister before tearing anything down so it cannot reach us.
+		{
+			std::lock_guard lk(ctx->devices_mut);
+
+			for (auto handle : dev->handles) {
+				// Remove all the handles this device has from the global tables
+				ctx->input.handle_to_input.erase(handle);
+				ctx->input.vec2_inputs.erase(handle);
+				ctx->input.skeleton_to_controller.erase(handle);
+			}
+
+			for (auto &input : dev->inputs_vec) {
+				// Remove all our vec2 inputs from the global table
+				ctx->input.vec2_input_to_components.erase(&input);
+			}
+
+			if (ctx->hmd == dev) {
+				ctx->hmd = nullptr;
+			}
+			for (ControllerDevice *&controller : ctx->controller) {
+				if (controller == dev) {
+					controller = nullptr;
+				}
+			}
+		}
+
 		delete dev;
 	};
 
@@ -373,10 +415,13 @@ ControllerDevice::get_xrt_hand()
 	}
 }
 
-void
-ControllerDevice::set_active_hand(xrt_hand hand)
+xrt_result_t
+ControllerDevice::notify_chirality(bool has_chirality, xrt_hand chirality)
 {
-	this->skeleton_hand = hand;
+	// Just assume left hand if no chirality is specified
+	this->skeleton_hand = has_chirality ? chirality : XRT_HAND_LEFT;
+
+	return XRT_SUCCESS;
 }
 
 namespace {
@@ -655,14 +700,6 @@ ControllerDevice::set_haptic_handle(vr::VRInputComponentHandle_t handle)
 }
 
 xrt_result_t
-Device::update_inputs()
-{
-	std::lock_guard<std::mutex> lock(frame_mutex);
-	ctx->maybe_run_frame(++current_frame);
-	return XRT_SUCCESS;
-}
-
-xrt_result_t
 ControllerDevice::get_hand_tracking(enum xrt_input_name name,
                                     int64_t desired_timestamp_ns,
                                     struct xrt_hand_joint_set *out_value,
@@ -797,11 +834,14 @@ HmdDevice::get_compositor_info(const struct xrt_device_compositor_mode *mode,
                                struct xrt_device_compositor_info *out_info)
 {
 	time_duration_ns scanout_time_ns;
+	enum xrt_panel_refresh_type panel_refresh_type;
 	enum xrt_scanout_direction scanout_direction;
 
-	vive_variant_scanout_info(this->variant, mode->frame_interval_ns, &scanout_time_ns, &scanout_direction);
+	vive_variant_scanout_info(this->variant, mode->frame_interval_ns, &scanout_time_ns, &scanout_direction,
+	                          &panel_refresh_type);
 
 	(*out_info) = {
+	    .panel_refresh_type = panel_refresh_type,
 	    .scanout_direction = scanout_direction,
 	    .scanout_time_ns = scanout_time_ns,
 	};
@@ -873,7 +913,8 @@ ControllerDevice::set_output(xrt_output_name name, const xrt_output_value *value
 	event.fFrequency = frequency;
 	event.fAmplitude = vib.amplitude;
 
-	ctx->add_haptic_event(event);
+	// `latest_haptic_event` assumes single haptic component per device
+	this->latest_haptic_event = ctx->add_haptic_event(event, this->latest_haptic_event);
 	return XRT_SUCCESS;
 }
 
@@ -1407,6 +1448,10 @@ HmdDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 		DEV_DEBUG("Battery: HMD: %f", bat);
 		break;
 	}
+	case vr::Prop_ContainsProximitySensor_Bool: {
+		this->supported.presence = *static_cast<bool *>(prop.pvBuffer);
+		break;
+	}
 	case vr::Prop_DisplaySupportsAnalogGain_Bool: {
 		this->supported.brightness_control = *static_cast<bool *>(prop.pvBuffer);
 		break;
@@ -1467,12 +1512,12 @@ ControllerDevice::handle_property_write(const vr::PropertyWrite_t &prop)
 		}
 		case vr::TrackedControllerRole_RightHand: {
 			this->device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
-			set_active_hand(XRT_HAND_RIGHT);
+			this->skeleton_hand = XRT_HAND_RIGHT;
 			break;
 		}
 		case vr::TrackedControllerRole_LeftHand: {
 			this->device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
-			set_active_hand(XRT_HAND_LEFT);
+			this->skeleton_hand = XRT_HAND_LEFT;
 			break;
 		}
 		case vr::TrackedControllerRole_OptOut: {

@@ -1522,6 +1522,8 @@ comp_window_macos_create_images(struct comp_target *ct,
 	ct->height = cwm->pixel_height;
 	ct->format = VK_FORMAT_B8G8R8A8_UNORM;
 	ct->final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	// Same as comp_target_swapchain: the graphics path clears the target.
+	ct->present_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	ct->surface_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 	cwm->next_image = 0;
 	if (cwm->base.upc == NULL) {

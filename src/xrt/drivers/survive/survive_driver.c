@@ -1,4 +1,4 @@
-// Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2019-2026, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -258,7 +258,11 @@ survive_device_get_battery_status(struct xrt_device *xdev, bool *out_present, bo
 
 	*out_present = true;
 	*out_charging = survive_simple_object_charging(survive->survive_obj);
+#ifdef XR_SURVIVE_MISSPELLED_CHARGE_FN
 	*out_charge = survive_simple_object_charge_percet(survive->survive_obj) * 0.01F;
+#else
+	*out_charge = survive_simple_object_charge_percent(survive->survive_obj) * 0.01F;
+#endif
 	SURVIVE_TRACE(survive, "Charging: %s, charge: %f", *out_charging ? "true" : "false", *out_charge);
 	return XRT_SUCCESS;
 }
@@ -718,10 +722,9 @@ add_device(struct survive_system *ss, const struct SurviveSimpleConfigEvent *e);
 static void
 _process_pose_event(struct survive_device *survive, const struct SurviveSimplePoseUpdatedEvent *e)
 {
-	struct xrt_space_relation rel;
-	timepoint_ns ts;
+	struct xrt_space_relation rel = {0};
 	pose_to_relation(&e->pose, &e->velocity, &rel);
-	ts = survive_timecode_to_monotonic(survive, e->time);
+	timepoint_ns ts = survive_timecode_to_monotonic(survive, e->time);
 	m_relation_history_push(survive->relation_hist, &rel, ts);
 
 	SURVIVE_TRACE(survive, "Process pose event for %s", survive->base.str);
@@ -822,11 +825,14 @@ survive_get_compositor_info(struct xrt_device *xdev,
 	struct survive_device *d = (struct survive_device *)xdev;
 
 	time_duration_ns scanout_time_ns;
+	enum xrt_panel_refresh_type panel_refresh_type;
 	enum xrt_scanout_direction scanout_direction;
 
-	vive_variant_scanout_info(d->hmd.config.variant, mode->frame_interval_ns, &scanout_time_ns, &scanout_direction);
+	vive_variant_scanout_info(d->hmd.config.variant, mode->frame_interval_ns, &scanout_time_ns, &scanout_direction,
+	                          &panel_refresh_type);
 
 	(*out_info) = (struct xrt_device_compositor_info){
+	    .panel_refresh_type = panel_refresh_type,
 	    .scanout_time_ns = scanout_time_ns,
 	    .scanout_direction = scanout_direction,
 	};

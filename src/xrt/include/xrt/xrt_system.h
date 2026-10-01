@@ -14,6 +14,8 @@
 #include "xrt/xrt_compiler.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_device.h"
+#include "xrt/xrt_body_tracker.h"
+#include "xrt/xrt_hand_tracker.h"
 #include "xrt/xrt_limits.h"
 
 #ifdef __cplusplus
@@ -322,6 +324,28 @@ struct xrt_system_devices
 	xrt_result_t (*get_roles)(struct xrt_system_devices *xsysd, struct xrt_system_roles *out_roles);
 
 	/*!
+	 * Create a @ref xrt_body_tracker from this system devices object.
+	 *
+	 * @param xsysd   Pointer to self.
+	 * @param info    Body-tracker creation info.
+	 * @param out_xbt Created body tracker.
+	 */
+	xrt_result_t (*create_body_tracker)(struct xrt_system_devices *xsysd,
+	                                    const struct xrt_body_tracker_create_info *info,
+	                                    struct xrt_body_tracker **out_xbt);
+
+	/*!
+	 * Create a @ref xrt_hand_tracker from this system devices object.
+	 *
+	 * @param xsysd   Pointer to self.
+	 * @param info    Hand-tracker creation info.
+	 * @param out_xht Created hand tracker.
+	 */
+	xrt_result_t (*create_hand_tracker)(struct xrt_system_devices *xsysd,
+	                                    const struct xrt_hand_tracker_create_info *info,
+	                                    struct xrt_hand_tracker **out_xht);
+
+	/*!
 	 * Increment the usage count of a feature.
 	 * When the feature is used for the first time, then the feature will be begun.
 	 *
@@ -360,6 +384,32 @@ XRT_NONNULL_ALL static inline xrt_result_t
 xrt_system_devices_get_roles(struct xrt_system_devices *xsysd, struct xrt_system_roles *out_roles)
 {
 	return xsysd->get_roles(xsysd, out_roles);
+}
+
+/*!
+ * @copydoc xrt_system_devices::create_body_tracker
+ *
+ * @public @memberof xrt_system_devices
+ */
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_system_devices_create_body_tracker(struct xrt_system_devices *xsysd,
+                                       const struct xrt_body_tracker_create_info *info,
+                                       struct xrt_body_tracker **out_xbt)
+{
+	return xsysd->create_body_tracker(xsysd, info, out_xbt);
+}
+
+/*!
+ * @copydoc xrt_system_devices::create_hand_tracker
+ *
+ * @public @memberof xrt_system_devices
+ */
+XRT_NONNULL_ALL static inline xrt_result_t
+xrt_system_devices_create_hand_tracker(struct xrt_system_devices *xsysd,
+                                       const struct xrt_hand_tracker_create_info *info,
+                                       struct xrt_hand_tracker **out_xht)
+{
+	return xsysd->create_hand_tracker(xsysd, info, out_xht);
 }
 
 /*!

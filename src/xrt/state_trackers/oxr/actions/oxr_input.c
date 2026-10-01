@@ -1,20 +1,23 @@
 // Copyright 2018-2024, Collabora, Ltd.
 // Copyright 2023-2026, NVIDIA CORPORATION.
+// Copyright 2026, Beyley Cardellio
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  Holds input related functions.
  * @author Jakob Bornecrantz <jakob@collabora.com>
  * @author Korcan Hussein <korcan.hussein@collabora.com>
+ * @author Beyley Cardellio <ep1cm1n10n123@gmail.com>
  * @ingroup oxr_main
  */
+
+#include "xrt/xrt_compiler.h"
 
 #include "util/u_debug.h"
 #include "util/u_time.h"
 #include "util/u_misc.h"
-#include "math/m_vec2.h"
 
-#include "xrt/xrt_compiler.h"
+#include "math/m_vec2.h"
 
 #include "oxr_input.h"
 #include "oxr_binding.h"
@@ -23,10 +26,10 @@
 #include "oxr_dpad_state.h"
 #include "oxr_input_transform.h"
 #include "oxr_generated_bindings.h"
+#include "oxr_handle_base.h"
 
 #include "../oxr_objects.h"
 #include "../oxr_logger.h"
-#include "../oxr_handle.h"
 #include "../oxr_two_call.h"
 #include "../oxr_conversions.h"
 #include "../oxr_xret.h"
@@ -375,7 +378,8 @@ oxr_action_set_create(struct oxr_logger *log,
 	int h_ret;
 
 	struct oxr_action_set *act_set = NULL;
-	OXR_ALLOCATE_HANDLE_OR_RETURN(log, act_set, OXR_XR_DEBUG_ACTIONSET, oxr_action_set_destroy_cb, &inst->handle);
+	OXR_ALLOCATE_HANDLE_PARENT_OR_RETURN(log, act_set, OXR_XR_DEBUG_ACTIONSET, oxr_action_set_destroy_cb,
+	                                     &inst->handle);
 
 	act_set->inst_context = NULL;
 
@@ -392,7 +396,7 @@ oxr_action_set_create(struct oxr_logger *log,
 
 	ret = oxr_pair_hashset_init(log, &act_set_ref->actions);
 	if (ret != XR_SUCCESS) {
-		oxr_handle_destroy(log, &act_set->handle);
+		oxr_handle_parent_destroy(log, &act_set->handle);
 		return ret;
 	}
 
@@ -405,7 +409,7 @@ oxr_action_set_create(struct oxr_logger *log,
 	    &act_set->name_item,                //
 	    &act_set->loc_item);                //
 	if (h_ret != 0) {
-		oxr_handle_destroy(log, &act_set->handle);
+		oxr_handle_parent_destroy(log, &act_set->handle);
 		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to insert action set name pair");
 	}
 
@@ -487,11 +491,6 @@ oxr_action_create(struct oxr_logger *log,
 	act_ref->subaction_paths = subaction_paths;
 	act_ref->action_type = createInfo->actionType;
 	act_ref->subaction_paths = subaction_paths;
-
-	// Any subaction paths allowed for this action are allowed for this
-	// action set. But, do not accumulate "any" - it just means none were
-	// specified for this action.
-	oxr_subaction_paths_accumulate_except_any(&(act_set->data->permitted_subaction_paths), &subaction_paths);
 
 	// Any subaction paths allowed for this action are allowed for this
 	// action set. But, do not accumulate "any" - it just means none were
@@ -986,7 +985,7 @@ get_binding(struct oxr_logger *log,
 	//! @todo This probably falls on its head if the application doesn't use
 	//! sub action paths.
 	switch (subaction_path) {
-#define PATH_CASE(NAME, NAMECAPS, PATH)                                                                                \
+#define PATH_CASE(NAME, NAMECAPS, PATH, LOCALIZED_NAME)                                                                \
 	case OXR_SUB_ACTION_PATH_##NAMECAPS:                                                                           \
 		user_path_str = PATH;                                                                                  \
 		xdev = GET_XDEV_BY_ROLE(roles, NAME);                                                                  \
@@ -1149,7 +1148,7 @@ oxr_action_attachment_bind(struct oxr_logger *log,
 #endif
 	}
 
-#define BIND_SUBACTION(NAME, NAME_CAPS, PATH)                                                                          \
+#define BIND_SUBACTION(NAME, NAME_CAPS, PATH, LOCALIZED_NAME)                                                          \
 	if (act_ref->subaction_paths.NAME || act_ref->subaction_paths.any) {                                           \
 		oxr_action_bind_io(log, &slog, &inst->path_store, roles, act_ref, act_set_key, &act_attached->NAME,    \
 		                   profiles->NAME, OXR_SUB_ACTION_PATH_##NAME_CAPS);                                   \
@@ -1755,9 +1754,9 @@ oxr_action_populate_input_transform(struct oxr_logger *log,
  */
 static bool
 find_matching_dpad(const struct oxr_path_store *store,
-                   struct oxr_dpad_entry *dpad_entry,
+                   const struct oxr_dpad_entry *dpad_entry,
                    const char *bound_path_string,
-                   struct oxr_dpad_binding_modification **out_dpad_binding)
+                   const struct oxr_dpad_binding_modification **out_dpad_binding)
 {
 	if (dpad_entry != NULL) {
 		for (uint32_t i = 0; i < dpad_entry->dpad_count; i++) {
@@ -1788,7 +1787,7 @@ oxr_action_populate_input_transform_dpad(struct oxr_logger *log,
                                          struct oxr_sink_logger *slog,
                                          const struct oxr_path_store *store,
                                          const struct oxr_action_ref *act_ref,
-                                         struct oxr_dpad_entry *dpad_entry,
+                                         const struct oxr_dpad_entry *dpad_entry,
                                          enum oxr_dpad_region dpad_region,
                                          struct oxr_interaction_profile *profile,
                                          struct oxr_action_input *action_inputs,
@@ -1804,7 +1803,7 @@ oxr_action_populate_input_transform_dpad(struct oxr_logger *log,
 	oxr_path_store_get_string(store, action_input->bound_path, &bound_path_string, &bound_path_length);
 
 	// find correct dpad entry
-	struct oxr_dpad_binding_modification *dpad_binding_modification = NULL;
+	const struct oxr_dpad_binding_modification *dpad_binding_modification = NULL;
 	find_matching_dpad(store, dpad_entry, bound_path_string, &dpad_binding_modification);
 
 	enum xrt_input_type t = XRT_GET_INPUT_TYPE(action_input->input->name);
@@ -1945,7 +1944,8 @@ oxr_action_bind_io(struct oxr_logger *log,
 
 			enum oxr_dpad_region dpad_region;
 			if (get_dpad_region_from_path(store, inputs[i].bound_path, &dpad_region)) {
-				struct oxr_dpad_entry *entry = oxr_dpad_state_get(&profile->dpad_state, act_set_key);
+				const struct oxr_dpad_entry *entry =
+				    oxr_dpad_state_get(&profile->dpad_state, act_set_key);
 
 				bool bret = oxr_action_populate_input_transform_dpad( //
 				    log,                                              //
@@ -2008,46 +2008,34 @@ oxr_action_bind_io(struct oxr_logger *log,
  *
  */
 
-static inline size_t
-oxr_handle_base_get_num_children(struct oxr_handle_base *hb)
-{
-	size_t ret = 0;
-	for (uint32_t i = 0; i < XRT_MAX_HANDLE_CHILDREN; ++i) {
-		if (hb->children[i] != NULL) {
-			++ret;
-		}
-	}
-	return ret;
-}
-
 XrResult
 oxr_session_attach_action_sets(struct oxr_logger *log,
-                               struct oxr_session *sess,
+                               const struct oxr_interaction_profile_array *suggested_profiles,
+                               struct oxr_session_attached_actions *attached_actions,
+                               struct oxr_session_action_context *sess_context,
                                const XrSessionActionSetsAttachInfo *bindInfo)
 {
-	struct oxr_instance *inst = sess->sys->inst;
-	XrResult ret = XR_SUCCESS;
+	XrResult ret;
 
-	const struct oxr_instance_action_context *inst_context = inst->action_context;
-	struct oxr_session_attached_actions *attached_actions = &sess->attached_actions;
-	struct oxr_session_action_context *sess_context = &sess->action_context;
+	size_t count = bindInfo->countActionSets;
 
-	oxr_interaction_profile_array_clone(&inst_context->suggested_profiles, &sess_context->profiles_on_attachment);
+	sess_context->action_set_attachment_count = count;
+	sess_context->act_set_attachments = U_TYPED_ARRAY_CALLOC(struct oxr_action_set_attachment, count);
+	if (sess_context->act_set_attachments == NULL) {
+		// Actual clean-up.
+		sess_context->action_set_attachment_count = 0;
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to allocate action set attachments");
+	}
 
-	// Allocate room for list. No need to check if anything has been
-	// attached the API function does that.
-	sess->action_context.action_set_attachment_count = bindInfo->countActionSets;
-	sess->action_context.act_set_attachments =
-	    U_TYPED_ARRAY_CALLOC(struct oxr_action_set_attachment, sess->action_context.action_set_attachment_count);
-
-	// Set up the per-session data for these action sets.
-	for (uint32_t i = 0; i < sess->action_context.action_set_attachment_count; i++) {
+	for (size_t i = 0; i < count; i++) {
 		struct oxr_action_set *act_set =
 		    XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_action_set *, bindInfo->actionSets[i]);
+		assert(act_set != NULL);
+
 		struct oxr_action_set_ref *act_set_ref = act_set->data;
 		act_set_ref->ever_attached = true;
 
-		struct oxr_action_set_attachment *act_set_attached = &sess->action_context.act_set_attachments[i];
+		struct oxr_action_set_attachment *act_set_attached = &sess_context->act_set_attachments[i];
 		ret = oxr_action_set_attachment_init( //
 		    log,                              //
 		    act_set_attached,                 //
@@ -2060,7 +2048,7 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 		}
 
 		// Allocate the action attachments for this set.
-		act_set_attached->action_attachment_count = oxr_handle_base_get_num_children(&act_set->handle);
+		act_set_attached->action_attachment_count = act_set->handle.children.count;
 		act_set_attached->act_attachments =
 		    U_TYPED_ARRAY_CALLOC(struct oxr_action_attachment, act_set_attached->action_attachment_count);
 		if (act_set_attached->act_attachments == NULL) {
@@ -2071,8 +2059,8 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 
 		// Set up the per-session data for the actions.
 		uint32_t child_index = 0;
-		for (uint32_t k = 0; k < XRT_MAX_HANDLE_CHILDREN; k++) {
-			struct oxr_action *act = (struct oxr_action *)act_set->handle.children[k];
+		for (uint32_t k = 0; k < act_set->handle.children.count; k++) {
+			struct oxr_action *act = (struct oxr_action *)act_set->handle.children.handles[k];
 			if (act == NULL) {
 				continue;
 			}
@@ -2094,13 +2082,15 @@ oxr_session_attach_action_sets(struct oxr_logger *log,
 		}
 	}
 
+	oxr_interaction_profile_array_clone(suggested_profiles, &sess_context->profiles_on_attachment);
+
 	/*
 	 * We used to send XrEventDataInteractionProfileChanged here, but that's
 	 * wrong. The OpenXR spec says we should only send them after a
 	 * successful call to xrSyncActionData.
 	 */
 
-	return oxr_session_success_result(sess);
+	return XR_SUCCESS;
 }
 
 static XrResult
@@ -2165,11 +2155,42 @@ oxr_action_sync_data(struct oxr_logger *log,
                      const XrActiveActionSet *actionSets,
                      const XrActiveActionSetPrioritiesEXT *activePriorities)
 {
-	struct oxr_session_action_context *sess_context = &sess->action_context;
+	bool interaction_profile_changed = false;
+	XrResult ret = oxr_action_sync_data_with_context( //
+	    log,                                          //
+	    sess,                                         //
+	    &sess->action_context,                        //
+	    countActionSets,                              //
+	    actionSets,                                   //
+	    activePriorities,                             //
+	    &interaction_profile_changed);                //
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	if (interaction_profile_changed) {
+		oxr_event_push_XrEventDataInteractionProfileChanged(log, sess);
+	}
+
+	return oxr_session_success_focused_result(sess);
+}
+
+XrResult
+oxr_action_sync_data_with_context(struct oxr_logger *log,
+                                  struct oxr_session *sess,
+                                  struct oxr_session_action_context *sess_context,
+                                  uint32_t countActionSets,
+                                  const XrActiveActionSet *actionSets,
+                                  const XrActiveActionSetPrioritiesEXT *activePriorities,
+                                  bool *out_interaction_profile_changed)
+{
 	struct oxr_instance *inst = sess->sys->inst;
 
 	struct oxr_action_set *act_set = NULL;
 	struct oxr_action_set_attachment *act_set_attached = NULL;
+
+	// Reset.
+	*out_interaction_profile_changed = false;
 
 	/*
 	 * No side-effects allowed in this section as we are still
@@ -2209,23 +2230,17 @@ oxr_action_sync_data(struct oxr_logger *log,
 
 	// Should we redo the bindings?
 	{
-		bool interaction_profile_changed = false;
-
 		os_mutex_lock(&sess_context->sync_actions_mutex);
 		if (sess_context->dynamic_roles_generation_id < roles.roles.generation_id) {
 			sess_context->dynamic_roles_generation_id = roles.roles.generation_id;
-			session_update_action_bindings(    //
-			    log,                           //
-			    inst,                          //
-			    sess_context,                  //
-			    &roles,                        //
-			    &interaction_profile_changed); //
+			session_update_action_bindings(       //
+			    log,                              //
+			    inst,                             //
+			    sess_context,                     //
+			    &roles,                           //
+			    out_interaction_profile_changed); //
 		}
 		os_mutex_unlock(&sess_context->sync_actions_mutex);
-
-		if (interaction_profile_changed) {
-			oxr_event_push_XrEventDataInteractionProfileChanged(log, sess);
-		}
 	}
 
 	if (countActionSets == 0) {
@@ -2306,7 +2321,7 @@ oxr_action_sync_data(struct oxr_logger *log,
 		}
 	}
 
-	return oxr_session_success_focused_result(sess);
+	return XR_SUCCESS;
 }
 
 static void

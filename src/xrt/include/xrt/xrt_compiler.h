@@ -153,6 +153,20 @@
 #endif
 
 
+/*
+ * typeof extension, until C23 is widely available. This macro may not always be available,
+ * and should be checked before usage.
+ *
+ * @todo Remove this macro when Monado is updated project-wide to C23.
+ */
+#if defined(__cpp_decltype) && __cpp_decltype >= 200707L
+#define XRT_TYPEOF(x) decltype(x)
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L
+#define XRT_TYPEOF(x) typeof(x)
+#elif defined(__GNUC__) || defined(__clang__)
+#define XRT_TYPEOF(x) __typeof__(x)
+#endif
+
 
 typedef volatile int32_t xrt_atomic_s32_t;
 
@@ -207,6 +221,64 @@ xrt_atomic_s32_load(xrt_atomic_s32_t *p)
 	return __atomic_load_n(p, __ATOMIC_SEQ_CST);
 #elif defined(_MSC_VER)
 	return InterlockedCompareExchange((volatile LONG *)p, 0, 0);
+#else
+#error "compiler not supported"
+#endif
+}
+
+typedef volatile int64_t xrt_atomic_s64_t;
+
+static inline int64_t
+xrt_atomic_s64_inc_return(xrt_atomic_s64_t *p)
+{
+#if defined(__GNUC__)
+	return __sync_add_and_fetch(p, 1);
+#elif defined(_MSC_VER)
+	return InterlockedIncrement64((volatile LONG64 *)p);
+#else
+#error "compiler not supported"
+#endif
+}
+static inline int64_t
+xrt_atomic_s64_dec_return(xrt_atomic_s64_t *p)
+{
+#if defined(__GNUC__)
+	return __sync_sub_and_fetch(p, 1);
+#elif defined(_MSC_VER)
+	return InterlockedDecrement64((volatile LONG64 *)p);
+#else
+#error "compiler not supported"
+#endif
+}
+static inline int64_t
+xrt_atomic_s64_cmpxchg(xrt_atomic_s64_t *p, int64_t old_, int64_t new_)
+{
+#if defined(__GNUC__)
+	return __sync_val_compare_and_swap(p, old_, new_);
+#elif defined(_MSC_VER)
+	return InterlockedCompareExchange64((volatile LONG64 *)p, old_, new_);
+#else
+#error "compiler not supported"
+#endif
+}
+static inline void
+xrt_atomic_s64_store(xrt_atomic_s64_t *p, int64_t v)
+{
+#if defined(__GNUC__)
+	__atomic_store_n(p, v, __ATOMIC_SEQ_CST);
+#elif defined(_MSC_VER)
+	InterlockedExchange64((volatile LONG64 *)p, v);
+#else
+#error "compiler not supported"
+#endif
+}
+static inline int64_t
+xrt_atomic_s64_load(xrt_atomic_s64_t *p)
+{
+#if defined(__GNUC__)
+	return __atomic_load_n(p, __ATOMIC_SEQ_CST);
+#elif defined(_MSC_VER)
+	return InterlockedCompareExchange64((volatile LONG64 *)p, 0, 0);
 #else
 #error "compiler not supported"
 #endif

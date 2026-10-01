@@ -130,15 +130,6 @@
 		]
 	},
 
-	"device_get_presence": {
-		"in": [
-			{"name": "id", "type": "uint32_t"}
-		],
-		"out": [
-			{"name": "presence", "type": "bool"}
-		]
-	},
-
 	"device_set_output": {
 		"in": [
 			{"name": "id", "type": "uint32_t"},
@@ -244,6 +235,13 @@
 		]
 	},
 
+	"device_set_body_tracking_fidelity_meta": {
+		"in": [
+			{"name": "id", "type": "uint32_t"},
+			{"name": "new_fidelity", "type": "enum xrt_body_tracking_fidelity_meta"}
+		]
+	},
+
 	"device_get_battery_status": {
 		"in": [
 			{"name": "id", "type": "uint32_t"}
@@ -280,5 +278,5 @@
 		"out": [
 			{"name": "info", "type": "struct xrt_device_compositor_info"}
 		]
-	} 
+	}
 }

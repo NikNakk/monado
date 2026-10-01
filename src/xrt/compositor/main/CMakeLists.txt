@@ -1,5 +1,5 @@
 # Copyright 2019-2024, Collabora, Ltd.
-# Copyright 2025, NVIDIA CORPORATION.
+# Copyright 2025-2026, NVIDIA CORPORATION.
 # SPDX-License-Identifier: BSL-1.0
 
 ##
@@ -32,7 +32,8 @@ target_link_libraries(
 		aux_os
 		aux_vk
 		comp_util
-		comp_render
+		aux_render
+		aux_render_cache
 	)
 
 if(XRT_HAVE_XCB)
@@ -132,6 +133,7 @@ endif()
 if(ANDROID)
 	target_sources(comp_main PRIVATE comp_window_android.c)
 	target_link_libraries(comp_main PRIVATE aux_ogl aux_android)
+	target_compile_options(comp_main PRIVATE -Wno-gnu-offsetof-extensions)
 endif()
 
 target_link_libraries(comp_main PRIVATE comp_multi)

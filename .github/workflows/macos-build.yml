@@ -39,7 +39,7 @@ jobs:
 
       - name: Install dependencies
         run: >-
-          brew install cmake eigen glslang jpeg-turbo libusb molten-vk ninja
+          brew install ceres-solver cmake eigen glslang jpeg-turbo libusb molten-vk ninja
           pkgconf sdl2-compat vulkan-headers vulkan-loader
 
       - name: Configure
