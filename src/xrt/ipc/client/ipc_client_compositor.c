@@ -247,49 +247,6 @@ ipc_client_compositor_semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
 }
 
 
-xrt_result_t
-ipc_client_compositor_import_metal_bootstrap_semaphore(struct xrt_compositor_native *xcn,
-                                                       const char *bootstrap_name,
-                                                       struct xrt_compositor_semaphore **out_xcsem)
-{
-	if (xcn == NULL || bootstrap_name == NULL || bootstrap_name[0] == '\0' || out_xcsem == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	*out_xcsem = NULL;
-
-	struct ipc_client_compositor *icc = ipc_client_compositor(&xcn->base);
-	if (!icc->ipc_c->imc.stream_socket) {
-		return XRT_ERROR_NOT_IMPLEMENTED;
-	}
-
-	size_t len = strlen(bootstrap_name);
-	if (len >= IPC_METAL_BOOTSTRAP_NAME_SIZE) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	struct ipc_metal_bootstrap_name bootstrap = {0};
-	memcpy(bootstrap.name, bootstrap_name, len + 1);
-
-	uint32_t id = 0;
-	xrt_result_t xret = ipc_call_compositor_semaphore_import_metal_bootstrap(icc->ipc_c, &bootstrap, &id);
-	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_compositor_semaphore_import_metal_bootstrap");
-
-	struct ipc_client_compositor_semaphore *iccs = U_TYPED_CALLOC(struct ipc_client_compositor_semaphore);
-	if (iccs == NULL) {
-		(void)ipc_call_compositor_semaphore_destroy(icc->ipc_c, id);
-		return XRT_ERROR_ALLOCATION;
-	}
-
-	iccs->base.reference.count = 1;
-	iccs->base.wait = ipc_client_compositor_semaphore_wait;
-	iccs->base.destroy = ipc_client_compositor_semaphore_destroy;
-	iccs->id = id;
-	iccs->icc = icc;
-
-	*out_xcsem = &iccs->base;
-	return XRT_SUCCESS;
-}
-
 /*
  *
  * Compositor functions.
@@ -425,58 +382,6 @@ swapchain_server_import(struct ipc_client_compositor *icc,
 }
 
 xrt_result_t
-ipc_client_compositor_import_metal_bootstrap_textures(struct xrt_compositor_native *xcn,
-                                                      const struct xrt_swapchain_create_info *info,
-                                                      uint32_t image_count,
-                                                      const struct ipc_metal_bootstrap_name *bootstrap_names,
-                                                      struct xrt_swapchain **out_xsc)
-{
-	if (xcn == NULL || info == NULL || bootstrap_names == NULL || out_xsc == NULL || image_count == 0 ||
-	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	struct ipc_client_compositor *icc = ipc_client_compositor(&xcn->base);
-	if (!icc->ipc_c->imc.stream_socket) {
-		return XRT_ERROR_NOT_IMPLEMENTED;
-	}
-
-	struct ipc_arg_swapchain_metal_bootstrap args = {0};
-	args.image_count = image_count;
-	for (uint32_t i = 0; i < image_count; i++) {
-		const char *nul = memchr(bootstrap_names[i].name, '\0', sizeof(bootstrap_names[i].name));
-		if (nul == NULL || nul == bootstrap_names[i].name) {
-			return XRT_ERROR_INVALID_ARGUMENT;
-		}
-		size_t len = (size_t)(nul - bootstrap_names[i].name);
-		memcpy(args.names[i].name, bootstrap_names[i].name, len + 1);
-	}
-
-	uint32_t id = 0;
-	xrt_result_t xret = ipc_call_swapchain_import_metal_bootstrap(icc->ipc_c, info, &args, &id);
-	IPC_CHK_AND_RET(icc->ipc_c, xret, "ipc_call_swapchain_import_metal_bootstrap");
-
-	struct ipc_client_swapchain *ics = U_TYPED_CALLOC(struct ipc_client_swapchain);
-	if (ics == NULL) {
-		(void)ipc_call_swapchain_destroy(icc->ipc_c, id);
-		return XRT_ERROR_ALLOCATION;
-	}
-
-	ics->base.base.image_count = image_count;
-	ics->base.base.wait_image = ipc_compositor_swapchain_wait_image;
-	ics->base.base.acquire_image = ipc_compositor_swapchain_acquire_image;
-	ics->base.base.release_image = ipc_compositor_swapchain_release_image;
-	ics->base.base.destroy = ipc_compositor_swapchain_destroy;
-	ics->base.base.reference.count = 1;
-	ics->base.limited_unique_id = u_limited_unique_id_get();
-	ics->icc = icc;
-	ics->id = id;
-
-	*out_xsc = &ics->base.base;
-	return XRT_SUCCESS;
-}
-
-xrt_result_t
 ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
                                            const struct xrt_swapchain_create_info *info,
                                            uint32_t image_count,
@@ -490,11 +395,7 @@ ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
 
 	struct ipc_client_compositor *icc = ipc_client_compositor(&xcn->base);
 
-	/*
-	 * IOSurface IDs are scalar data carried by the ordinary IPC request.
-	 * Native macOS uses the AF_UNIX control socket, where stream_socket is
-	 * deliberately false (that flag identifies framed byte-stream transports).
-	 */
+	/* IOSurface IDs are scalar data carried by the ordinary IPC request. */
 	struct ipc_arg_swapchain_iosurface args = {0};
 	args.image_count = image_count;
 	for (uint32_t i = 0; i < image_count; i++) {
@@ -949,56 +850,12 @@ ipc_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 	// Last bit of data to put in the shared memory area.
 	slot->layer_count = icc->layers.layer_count;
 
-	if (icc->ipc_c->imc.stream_socket) {
-		/*
-		 * A byte-stream bridge owns a private metadata snapshot rather than the
-		 * service's shared-memory mapping. Upload only the active prefix of
-		 * the slot: frame header + layer_count + active layer entries.
-		 * This avoids sending the ~50 KiB full IPC_MAX_LAYERS allocation on
-		 * every frame while keeping each command below IPC_BUF_SIZE.
-		 *
-		 * Producer GPU completion has already been established by the D3D11
-		 * client compositor before entering this path.
-		 */
-		const size_t total_size = offsetof(struct ipc_layer_slot, layers) +
-		                          ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
-		if (total_size > UINT32_MAX) {
-			xret = XRT_ERROR_IPC_FAILURE;
-		} else if (slot->layer_count == 1 && total_size <= IPC_LAYER_SINGLE_PAYLOAD_SIZE) {
-			struct ipc_layer_single_payload payload = {0};
-			payload.size = (uint32_t)total_size;
-			memcpy(payload.data, slot, total_size);
-			xret = ipc_call_compositor_layer_sync_single(icc->ipc_c, &payload, &icc->layers.slot_id);
-		} else {
-			const uint8_t *src = (const uint8_t *)slot;
-			xret = XRT_SUCCESS;
-			for (size_t offset = 0; offset < total_size; offset += IPC_LAYER_COPY_CHUNK_SIZE) {
-				struct ipc_layer_copy_chunk chunk = {0};
-				size_t remaining = total_size - offset;
-				size_t copy_size =
-				    remaining < IPC_LAYER_COPY_CHUNK_SIZE ? remaining : IPC_LAYER_COPY_CHUNK_SIZE;
-				chunk.size = (uint32_t)copy_size;
-				memcpy(chunk.data, src + offset, copy_size);
-
-				xret = ipc_call_compositor_layer_copy_chunk(icc->ipc_c, (uint32_t)offset,
-				                                            (uint32_t)total_size, &chunk);
-				if (xret != XRT_SUCCESS) {
-					break;
-				}
-			}
-			if (xret == XRT_SUCCESS) {
-				xret = ipc_call_compositor_layer_sync_copy_commit(icc->ipc_c, (uint32_t)total_size,
-				                                                  &icc->layers.slot_id);
-			}
-		}
-	} else {
-		xret = ipc_call_compositor_layer_sync( //
-		    icc->ipc_c,                        //
-		    icc->layers.slot_id,               //
-		    &sync_handle,                      //
-		    valid_sync ? 1 : 0,                //
-		    &icc->layers.slot_id);             //
-	}
+	xret = ipc_call_compositor_layer_sync( //
+	    icc->ipc_c,                        //
+	    icc->layers.slot_id,               //
+	    &sync_handle,                      //
+	    valid_sync ? 1 : 0,                //
+	    &icc->layers.slot_id);             //
 
 	/*
 	 * We are probably in a really bad state if we fail, at
@@ -1032,73 +889,12 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 	// Last bit of data to put in the shared memory area.
 	slot->layer_count = icc->layers.layer_count;
 
-	if (icc->ipc_c->imc.stream_socket) {
-		const size_t total_size = offsetof(struct ipc_layer_slot, layers) +
-		                          ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
-		if (total_size > UINT32_MAX) {
-			xret = XRT_ERROR_IPC_FAILURE;
-		} else if (slot->layer_count == 1 && total_size <= IPC_LAYER_SINGLE_PAYLOAD_SIZE) {
-			struct ipc_layer_single_payload payload = {0};
-			payload.size = (uint32_t)total_size;
-			memcpy(payload.data, slot, total_size);
-
-			/*
-			 * Byte-stream clients have no shared layer-slot mapping to recycle: the complete
-			 * active layer is in this message. Send it without waiting for a
-			 * reply so native compositor work falls behind the next pacing
-			 * call instead of blocking xrEndFrame.
-			 */
-			uint64_t lock_start_ns = os_monotonic_get_ns();
-			os_mutex_lock(&icc->ipc_c->send_mutex);
-			uint64_t send_start_ns = os_monotonic_get_ns();
-			xret = ipc_send_compositor_layer_sync_single_semaphore_async_locked(icc->ipc_c, &payload,
-			                                                                    iccs->id, value);
-			uint64_t send_end_ns = os_monotonic_get_ns();
-			os_mutex_unlock(&icc->ipc_c->send_mutex);
-
-			double wire_lock_us = (double)(send_start_ns - lock_start_ns) / 1000.0;
-			double send_us = (double)(send_end_ns - send_start_ns) / 1000.0;
-			if (wire_lock_us > 1000.0 || send_us > 1000.0) {
-				U_LOG_W("Byte-stream async IPC submit stall: layers=%u bytes=%zu wire_lock=%.3fus send=%.3fus",
-				        slot->layer_count, total_size, wire_lock_us, send_us);
-			}
-		} else {
-			uint64_t copy_start_ns = os_monotonic_get_ns();
-			const uint8_t *src = (const uint8_t *)slot;
-			xret = XRT_SUCCESS;
-			for (size_t offset = 0; offset < total_size; offset += IPC_LAYER_COPY_CHUNK_SIZE) {
-				struct ipc_layer_copy_chunk chunk = {0};
-				size_t remaining = total_size - offset;
-				size_t copy_size =
-				    remaining < IPC_LAYER_COPY_CHUNK_SIZE ? remaining : IPC_LAYER_COPY_CHUNK_SIZE;
-				chunk.size = (uint32_t)copy_size;
-				memcpy(chunk.data, src + offset, copy_size);
-
-				xret = ipc_call_compositor_layer_copy_chunk(icc->ipc_c, (uint32_t)offset,
-				                                            (uint32_t)total_size, &chunk);
-				if (xret != XRT_SUCCESS) {
-					break;
-				}
-			}
-			if (xret == XRT_SUCCESS) {
-				xret = ipc_call_compositor_layer_sync_copy_commit_semaphore(
-				    icc->ipc_c, (uint32_t)total_size, iccs->id, value, &icc->layers.slot_id);
-			}
-			uint64_t copy_end_ns = os_monotonic_get_ns();
-			double copy_us = (double)(copy_end_ns - copy_start_ns) / 1000.0;
-			if (copy_us > 1000.0) {
-				U_LOG_W("Byte-stream synchronous IPC layer submit: layers=%u bytes=%zu duration=%.3fus",
-				        slot->layer_count, total_size, copy_us);
-			}
-		}
-	} else {
-		xret = ipc_call_compositor_layer_sync_with_semaphore( //
-		    icc->ipc_c,                                       //
-		    icc->layers.slot_id,                              //
-		    iccs->id,                                         //
-		    value,                                            //
-		    &icc->layers.slot_id);                            //
-	}
+	xret = ipc_call_compositor_layer_sync_with_semaphore( //
+	    icc->ipc_c,                                       //
+	    icc->layers.slot_id,                              //
+	    iccs->id,                                         //
+	    value,                                            //
+	    &icc->layers.slot_id);                            //
 
 	/*
 	 * We are probably in a really bad state if we fail, at
