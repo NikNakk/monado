@@ -1,0 +1,13 @@
+{
+	"$schema": "../proto.schema.json",
+
+	"compositor_semaphore_import_metal": {
+		"ifdef": "__APPLE__",
+		"in": [
+			{"name": "token", "type": "uint64_t"}
+		],
+		"out": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	}
+}
