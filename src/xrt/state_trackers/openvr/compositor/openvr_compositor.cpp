@@ -285,6 +285,7 @@ Compositor::getProjectionLayerDataForEye(vr::EVREye eye, const EyeState &eye_sta
 	        },
 	    .fov = this->render_state_cache->fovs[eye],
 	    .pose = T_origin_eye,
+	    .foveation = {},
 	};
 }
 
