@@ -22,7 +22,8 @@ This note covers the optical front end. The fusion back ends are in `doc/macos-p
 - **The first follow-up is measured.** See "The LED model's fit". The right controller is not a special case. Both
   rings fit the cameras better about 1% larger than the model, and a correction fitted on one day's sessions carries
   over to the next day's: in the shipped path the right controller gains 10% more poses and its RMS falls from 0.53 px
-  to 0.38 px. The correction is a tool option only (`--led-offsets`). Putting it in the driver is proposed, not done.
+  to 0.38 px. The driver applies the correction with `PSSENSE_LED_CORRECTION=1`. It is off by default and has not
+  been run on the headset.
 - **The recording format now carries what this evaluation lacked** (packet 5 extension records, below). New
   recordings need no extra steps beyond the static markers, which are optional.
 
@@ -430,19 +431,32 @@ gives poses pushed, and the median over sessions of the RMS p50, as left / right
 Not checked: whether a better-fitting model changes the wrong-device poses, and the corrected poses' gyro and
 stillness metrics.
 
-### Proposed, not implemented
+### In the driver, opt-in
 
-Apply fit A's per-LED offsets to both controllers' models on macOS, and validate on the headset. The evidence is the
-held-out gain above. The limits are:
+`PSSENSE_LED_CORRECTION=1` adds fit A's offsets to both controllers' models before they go to the tracker. The table
+is `src/xrt/drivers/pssense/pssense_led_correction.h`. `pssense_led_model.h`, which is upstream's file with Sony's
+data, is unchanged. The corrected model was checked against the one replayed above: all 34 LEDs agree to 0.0001 mm.
+A recording made with the variable set carries the corrected model, so it replays without `--led-offsets`.
+
+Limits:
 
 - it is fitted on one pair of controllers and one rig calibration, and it would have to be refitted if the calibration
   changes;
 - the cause is not settled, so it may be compensating a rig error rather than correcting the LEDs;
-- `pssense_led_model.h` is upstream's file, taken from Sony's driver. A correction table beside it, applied when the
-  model is handed to the tracker, keeps that file unchanged.
+- it has not been run on the headset.
 
-A recording that would settle the cause: both controllers resting at two or three known separations, measured with a
-ruler. The rig's scale then has a reference that does not depend on the LED model.
+**Hardware test.** Use the combined calibration (`20260926-charuco-mode4-combined-head.json`) and the same settings
+for each pair of runs:
+
+1. The same moves twice, with `PSSENSE_LED_CORRECTION=0` and then `=1`. `run.log` should show `LED_CORRECTION side=L`
+   and `side=R` in the second. Compare the poses pushed and the reprojection RMS per controller, the right one above
+   all, and replay each recording through `--tracker-filter`.
+2. Both controllers resting at two or three separations measured with a ruler, 30 s each, with the correction on and
+   Create-button static markers. The measured separation gives the rig's scale a reference that does not depend on
+   the LED model, which settles the cause: if the tracked separation is right with the correction, the model was
+   small; if it is about 1% long, the rig is.
+
+Record the results here, with the commit tested.
 
 The scripts and the fitted offsets are in the experiment directory, under `analysis/led/`.
 
@@ -688,6 +702,7 @@ On `claude/pssense-mr2940-evaluation`:
 - `t/constellation: synthetic dataset generator with ground truth`
 - `t/constellation: score optical front ends side by side in the replay`
 - `t/constellation: per-correspondence residuals and LED offsets in the replay`
+- `d/pssense: opt-in measured correction to the LED models`
 
 On `claude/pssense-upstream-frontend-replay`:
 
