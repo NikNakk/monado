@@ -497,10 +497,11 @@ The two IMU sessions, left / right. Both are held out from the fit.
 The jump columns are totals over both controllers.
 
 - **The shipped path with the corrected model reaches 95% of upstream's pose count** in these two sessions (13,295
-  against 13,954; 89% with the recorded model, 84% for the M1 loop). Its gyro residual at p95 is a third to a fifth of
+  against 13,954; 89% with the recorded model, 84% for the M1 loop). Its gyro residual at p95 is a third to a tenth of
   upstream's, and it has one rotation jump against upstream's 185.
 - **The correction keeps the shipped path's consistency.** Gyro residuals are the same or lower, except the left's p95
-  in `014505` (0.56° → 0.67°). The step while still is unchanged for three controllers and lower for the fourth.
+  in `014505` (0.56° → 0.67°). The step while still is unchanged or slightly lower (right: 1.43 → 1.36 mm and
+  0.84 → 0.80 mm RMS).
 - **The EKF prior is worth more to the left controller and the correction more to the right.** In `010135` the prior
   takes the left from 3605 to 4259 and the correction takes the right from 1973 to 2438.
 
