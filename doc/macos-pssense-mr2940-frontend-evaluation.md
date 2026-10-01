@@ -428,8 +428,49 @@ gives poses pushed, and the median over sessions of the RMS p50, as left / right
 - **On the old calibration it is worse.** In `20260925-002110`, fit A takes the left's RMS from 0.47 px to 0.68 px and
   the right's poses from 3342 to 2649. The correction belongs with the combined calibration.
 
-Not checked: whether a better-fitting model changes the wrong-device poses, and the corrected poses' gyro and
-stillness metrics.
+### The front-end comparison with the corrected model
+
+The comparison was re-run on all 27 sessions with fit A's offsets (`--led-offsets` with `--compare-frontend`).
+Upstream's records are unchanged. They were solved with the recorded model, so upstream's evaluator figures under the
+corrected model are not comparable and are left out. M1 loop, before → after, left / right:
+
+| sessions | M1 solved | evaluator RMS px p50 | only upstream |
+|---|---|---|---|
+| combined calibration, fitted on (7) | +6.8% / +6.8% | 0.51 → 0.38 / 0.54 → 0.32 | 2470 → 1540 / 4045 → 2697 |
+| combined calibration, held out (6) | +2.1% / +8.0% | 0.44 → 0.43 / 0.53 → 0.41 | 3875 → 3651 / 4249 → 2923 |
+| 25 Sep calibration alone (1) | −3.2% / +2.8% | 0.48 → 0.35 / 0.57 → 0.28 | 133 → 127 / 173 → 81 |
+| old calibration (12) | −3.5% / −4.4% | 0.48 → 0.57 / 0.62 → 0.66 | 2203 → 3213 / 2815 → 3617 |
+
+In the two IMU sessions, which are held out:
+
+| | `010135` before → after | `014505` before → after |
+|---|---|---|
+| solved, % of exposures | 67.4 / 37.4 → 68.6 / 44.9 | 36.9 / 74.5 → 35.6 / 78.4 |
+| evaluator RMS, px, p50 | 0.412 / 0.528 → 0.352 / 0.325 | 0.395 / 0.469 → 0.298 / 0.278 |
+| unsupported poses | 1.02% / 2.23% → 1.11% / 1.86% | 0.10% / 0.32% → 0.88% / 0.00% |
+| rotation vs gyro, deg, p50 | 0.182 / 0.113 → 0.172 / 0.079 | 0.120 / 0.106 → 0.111 / 0.101 |
+| rotation vs gyro, deg, p95 | 0.737 / 0.613 → 0.729 / 0.484 | 1.188 / 0.496 → 1.152 / 0.500 |
+| rotation and position jumps | 0 → 0 | 0 → 0 |
+| step while still, mm, RMS | 1.99 / 2.03 → 2.03 / 1.46 | 2.47 / 0.82 → 2.45 / 1.05 |
+| solved by upstream only | 738 / 912 → 658 / 533 | 468 / 705 → 575 / 527 |
+
+- **The right controller gains on every measure but one.** It solves 8% more held out, the evaluator RMS falls by a
+  quarter to a half, and its gyro residual is the same or lower. Its step while still is lower in `010135` and higher
+  in `014505` (0.82 → 1.05 mm).
+- **The left controller is about unchanged held out.** Its RMS falls, its gyro residual is slightly lower, and its
+  count moves within the noise. In `014505` it loses 1.3 points of coverage and its unsupported poses go from 2 to 17.
+- **M1 and upstream now differ by about 3.9 mm where both solve**, up from 2.5 mm. That is the scale: a ring 1% larger
+  sits about 1% further away, and upstream's poses use the recorded model.
+- **Wrong-device poses do not go away.** By the attribution used above, the M1 loop has 434 → 453 held out (1.23% both
+  times) and 175 → 320 in the sessions the offsets were fitted on (0.43% → 0.73%). The corrected models are still
+  mirror images of each other.
+- **But the corrected model separates them from correct poses.** Over the combined-calibration sessions, correct M1
+  poses fit at 0.34 px p50 and 0.63 px p95 (before: 0.48 and 0.82). Wrong-device poses are unchanged at 0.66 px p50.
+  An RMS limit of 0.6 px would now drop 66% of the wrong-device poses and 6% of the correct ones. With the recorded
+  model the same limit drops 24% of the correct ones. Tightening the limits is a possible follow-up once the
+  correction is confirmed on the headset. It is not implemented.
+
+The shipped path's poses are still not scored by the evaluator.
 
 ### In the driver, opt-in
 
