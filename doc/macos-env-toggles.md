@@ -30,6 +30,12 @@ then groups the results by environment-variable name.
 string to that file (`git log -S`). "Last" is the newest commit touching a line
 that names the variable or its `debug_get_*` accessor (`git log -G`).
 
+> **Repository split note (2026-10-01):** Wine-specific build, test and
+> compatibility tooling has moved to `NikNakk/macos-wine-xr`. Wine transport
+> rows below are retained as historical audit evidence while transport
+> extraction is completed; they are not part of the intended upstream macOS
+> runtime surface.
+
 ## Summary
 
 | Category | Count | Meaning |
@@ -279,7 +285,7 @@ Third batch:
   force-included.
 - **Correction:** the `METAL_XPC_EXTERNAL_BROKER` removal was reverted. It is
   (b), not (c): `scripts/macos/run-wine-openvr-native-trace.zsh` runs
-  `monado-service` directly in the Wine/DXMT bootstrap namespace, where it
+  `monado-service` directly in the legacy Wine bridge bootstrap namespace, where it
   cannot host the launchd Mach service, and needs the broker for Metal handle
   transport.
 
