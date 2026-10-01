@@ -1173,10 +1173,18 @@ take selected components. See `doc/macos-pssense-upstream-fusion-evaluation.md`.
 Upstream's per-camera front end now runs on recordings in its own tree (`constellation_upstream_replay`, branch
 `claude/pssense-upstream-frontend-replay`). `constellation_replay --compare-frontend` scores its poses beside M1's by one
 evaluator. On synthetic recordings with ground truth, it solved 15–20% more exposures than M1, at 2–3× the pose error
-and about 10× the cost. M1's misses there come from its coverage gate on merged blobs. The Mac recordings still need
-to be run through it. Recordings now carry session info, sync events, IMU timing, head-pose age and Create-button
-static markers (packet 5). See `doc/macos-pssense-mr2940-frontend-evaluation.md` for the results, the commands and
-recording guidance.
+and about 10× the cost. M1's misses there come from its coverage gate on merged blobs.
+
+On the 27 Mac recordings (1 Oct) upstream solved 63% of controller-exposures against the replay M1 loop's 56%. M1 had
+the lower evaluator RMS in every session, about half the gyro residual, no jumps in the IMU sessions (upstream: 185
+rotation and 233 position jumps), and about 1/70 of the cost. The coverage gate explains 3–4% of the exposures only
+upstream solved, so it stays as it is. About 40% are the M1 loop losing lock, mostly at 1 m/s or more, which the live
+tracker with the EKF prior mostly solves. 18% are the right controller fitting at about 1 px, over the bootstrap RMS
+limit. A quarter are poses where one front end fitted the wrong controller's ring, which the evaluator does not
+detect. The decision stands: keep our front end. The right controller's fit is the follow-up.
+
+Recordings now carry session info, sync events, IMU timing, head-pose age and Create-button static markers (packet 5).
+See `doc/macos-pssense-mr2940-frontend-evaluation.md` for the results, the commands and recording guidance.
 
 ## Session tools
 
