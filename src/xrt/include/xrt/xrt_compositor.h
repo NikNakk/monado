@@ -1084,7 +1084,7 @@ struct xrt_session_info
 	/*!
 	 * Runtime-internal pacing hints. These are not OpenXR session flags.
 	 *
-	 * The Wine/macOS TCP bridge uses the minimum-period hint to avoid a
+	 * Byte-stream compatibility clients may use the minimum-period hint to avoid a
 	 * positive feedback loop where runtime-induced swapchain waits are
 	 * mistaken for slow application rendering.
 	 */
