@@ -217,7 +217,7 @@ ipc_handle_swapchain_wait_image(volatile struct ipc_client_state *ics, uint32_t 
 
 	int64_t start_ns = os_monotonic_get_ns();
 	xrt_result_t xret = xrt_swapchain_wait_image(xsc, timeout_ns, index);
-	wine_swapchain_trace_event("wait", id, index, os_monotonic_get_ns() - start_ns, timeout_ns, xret);
+	ipc_swapchain_trace_event("wait", id, index, os_monotonic_get_ns() - start_ns, timeout_ns, xret);
 	return xret;
 }
 
@@ -235,7 +235,7 @@ ipc_handle_swapchain_acquire_image(volatile struct ipc_client_state *ics, uint32
 	int64_t start_ns = os_monotonic_get_ns();
 	xrt_result_t xret = xrt_swapchain_acquire_image(xsc, out_index);
 	uint32_t traced_index = xret == XRT_SUCCESS ? *out_index : UINT32_MAX;
-	wine_swapchain_trace_event("acquire", id, traced_index, os_monotonic_get_ns() - start_ns, 0, xret);
+	ipc_swapchain_trace_event("acquire", id, traced_index, os_monotonic_get_ns() - start_ns, 0, xret);
 	return xret;
 }
 
@@ -252,7 +252,7 @@ ipc_handle_swapchain_release_image(volatile struct ipc_client_state *ics, uint32
 
 	int64_t start_ns = os_monotonic_get_ns();
 	xrt_result_t xret = xrt_swapchain_release_image(xsc, index);
-	wine_swapchain_trace_event("release", id, index, os_monotonic_get_ns() - start_ns, 0, xret);
+	ipc_swapchain_trace_event("release", id, index, os_monotonic_get_ns() - start_ns, 0, xret);
 	return xret;
 }
 
