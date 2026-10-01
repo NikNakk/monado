@@ -11,6 +11,7 @@ permissions:
   contents: read
 
 # Default-options build and test run, to keep non-Apple platforms building.
+# Any compiler warning fails the job.
 jobs:
   build-and-test:
     runs-on: ubuntu-24.04
@@ -36,7 +37,16 @@ jobs:
         run: cmake -S . -B build -G Ninja
 
       - name: Build
-        run: cmake --build build
+        shell: bash
+        run: cmake --build build 2>&1 | tee build.log
+
+      - name: Check for compiler warnings
+        shell: bash
+        run: |
+          if grep 'warning:' build.log | sort -u; then
+            echo "::error::The build has compiler warnings"
+            exit 1
+          fi
 
       - name: Test
         run: ctest --test-dir build --output-on-failure

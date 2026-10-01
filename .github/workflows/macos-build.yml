@@ -10,10 +10,30 @@ on:
 permissions:
   contents: read
 
-# Default-options build and test run, the macOS counterpart of linux-build.yml.
+# Build and test with the default options (the macOS counterpart of
+# linux-build.yml) and with every opt-in macOS/OpenXR feature switched on, which
+# is the only place the standards and timing-diagnostics code is compiled.
+# Any compiler warning fails the job.
 jobs:
   build-and-test:
+    name: build-and-test (${{ matrix.name }})
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            options: ""
+          - name: all features
+            options: >-
+              -DXRT_FEATURE_OPENXR_FB_SWAPCHAIN_UPDATE_STATE=ON
+              -DXRT_FEATURE_OPENXR_FB_FOVEATION=ON
+              -DXRT_FEATURE_OPENXR_FB_FOVEATION_CONFIGURATION=ON
+              -DXRT_FEATURE_OPENXR_META_FOVEATION_EYE_TRACKED=ON
+              -DXRT_FEATURE_OPENXR_MNDX_FOVEATION_METAL=ON
+              -DXRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON
+              -DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON
+              -DXRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=ON
     steps:
       - uses: actions/checkout@v4
 
@@ -23,10 +43,19 @@ jobs:
           pkgconf sdl2-compat vulkan-headers vulkan-loader
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja
+        run: cmake -S . -B build -G Ninja ${{ matrix.options }}
 
       - name: Build
-        run: cmake --build build --parallel
+        shell: bash
+        run: cmake --build build --parallel 2>&1 | tee build.log
+
+      - name: Check for compiler warnings
+        shell: bash
+        run: |
+          if grep 'warning:' build.log | sort -u; then
+            echo "::error::The build has compiler warnings"
+            exit 1
+          fi
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
