@@ -173,6 +173,7 @@ oxr_xrPassthroughLayerSetStyleFB(XrPassthroughLayerFB layer, const XrPassthrough
 		case XR_TYPE_PASSTHROUGH_COLOR_MAP_MONO_TO_RGBA_FB:
 			pl->monoToRgba = *(XrPassthroughColorMapMonoToRgbaFB *)next;
 			break;
+		default: break;
 		}
 
 		next = (XrPassthroughStyleFB *)next->next;

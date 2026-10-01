@@ -98,9 +98,9 @@ ogl_import_from_native(struct xrt_image_native *natives,
                        const struct xrt_swapchain_create_info *info,
                        struct ogl_import_results *results)
 {
-#if defined(XRT_OS_ANDROID_USE_AHB)
+#if defined(XRT_OS_ANDROID_USE_AHB) || defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 	// Function is disabled for AHardwareBuffer, glImportMemoryFdEXT requires an actual FD and requires more work
-	// to handle AHardwareBuffer.
+	// to handle AHardwareBuffer. An IOSurface is not a memory object either.
 	return false;
 #else
 

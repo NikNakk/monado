@@ -87,8 +87,6 @@ oxr_passthrough_create(struct oxr_logger *log,
                        const XrPassthroughCreateInfoFB *createInfo,
                        struct oxr_passthrough **out_passthrough)
 {
-	struct oxr_instance *inst = sess->sys->inst;
-
 	struct oxr_passthrough *passthrough = NULL;
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, passthrough, OXR_XR_DEBUG_PASSTHROUGH, oxr_passthrough_destroy,
 	                              &sess->handle);
@@ -116,8 +114,6 @@ oxr_passthrough_layer_create(struct oxr_logger *log,
                              const XrPassthroughLayerCreateInfoFB *createInfo,
                              struct oxr_passthrough_layer **out_layer)
 {
-	struct oxr_instance *inst = sess->sys->inst;
-
 	struct oxr_passthrough_layer *passthroughLayer = NULL;
 	OXR_ALLOCATE_HANDLE_OR_RETURN(log, passthroughLayer, OXR_XR_DEBUG_PASSTHROUGH_LAYER,
 	                              oxr_passthrough_layer_destroy, &sess->handle);

@@ -116,7 +116,22 @@ wine_submit_trace_event(const char *event,
 	funlockfile(file);
 }
 #else
-#define wine_submit_trace_event(...) ((void)0)
+// Only traced on macOS.
+static inline void
+wine_submit_trace_event(const char *event,
+                        int64_t frame_id,
+                        uint64_t semaphore_value,
+                        int64_t display_time_ns,
+                        uint32_t layer_count,
+                        xrt_result_t result)
+{
+	(void)event;
+	(void)frame_id;
+	(void)semaphore_value;
+	(void)display_time_ns;
+	(void)layer_count;
+	(void)result;
+}
 #endif
 
 #ifdef XRT_OS_OSX
@@ -181,7 +196,22 @@ wine_swapchain_trace_event(const char *event,
 	funlockfile(file);
 }
 #else
-#define wine_swapchain_trace_event(...) ((void)0)
+// Only traced on macOS.
+static inline void
+wine_swapchain_trace_event(const char *event,
+                           uint32_t swapchain_id,
+                           uint32_t image_index,
+                           int64_t duration_ns,
+                           int64_t timeout_ns,
+                           xrt_result_t result)
+{
+	(void)event;
+	(void)swapchain_id;
+	(void)image_index;
+	(void)duration_ns;
+	(void)timeout_ns;
+	(void)result;
+}
 #endif
 
 

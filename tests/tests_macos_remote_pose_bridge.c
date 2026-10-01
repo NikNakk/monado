@@ -22,30 +22,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-static struct xrt_quat
-rotate_y_180_quat(struct xrt_quat quat)
-{
-	quat.x = -quat.x;
-	quat.z = -quat.z;
-	return quat;
-}
-
-static struct xrt_vec3
-rotate_y_180_vec3(struct xrt_vec3 vec)
-{
-	vec.x = -vec.x;
-	vec.z = -vec.z;
-	return vec;
-}
-
-static struct xrt_pose
-rotate_y_180_pose(struct xrt_pose pose)
-{
-	pose.orientation = rotate_y_180_quat(pose.orientation);
-	pose.position = rotate_y_180_vec3(pose.position);
-	return pose;
-}
-
 static bool g_logged_v0_pose = false;
 static bool g_logged_v1_pose = false;
 static bool g_has_center_baseline = false;

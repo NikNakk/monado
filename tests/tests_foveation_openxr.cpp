@@ -5,10 +5,25 @@
 
 #include <oxr/oxr_foveation_policy.h>
 
+/*!
+ * A zero-initialised OpenXR structure with its type set. The usual
+ * `XrFoo x{XR_TYPE_FOO}` leaves the other members to implicit initialisation,
+ * which -Wextra reports.
+ */
+template <typename T>
+static T
+xr_struct(XrStructureType type)
+{
+	T value{};
+	value.type = type;
+	return value;
+}
+
 
 TEST_CASE("FB foveation base profile means no foveation")
 {
-	XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+	XrFoveationProfileCreateInfoFB create_info =
+	    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 	struct u_foveation_request request
 	{
 	};
@@ -36,12 +51,14 @@ TEST_CASE("FB foveation configuration maps to generic policy")
 	};
 
 	for (const auto &entry : cases) {
-		XrFoveationLevelProfileCreateInfoFB level_info{XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+		XrFoveationLevelProfileCreateInfoFB level_info =
+		    xr_struct<XrFoveationLevelProfileCreateInfoFB>(XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB);
 		level_info.level = entry.level;
 		level_info.verticalOffset = 2.25f;
 		level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
 
-		XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+		XrFoveationProfileCreateInfoFB create_info =
+		    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 		create_info.next = &level_info;
 
 		struct u_foveation_request request
@@ -60,15 +77,18 @@ TEST_CASE("FB foveation configuration maps to generic policy")
 
 TEST_CASE("FB dynamic and META eye-tracked policy stays runtime-owned")
 {
-	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info{XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
+	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info = xr_struct<XrFoveationEyeTrackedProfileCreateInfoMETA>(
+	    XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META);
 
-	XrFoveationLevelProfileCreateInfoFB level_info{XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+	XrFoveationLevelProfileCreateInfoFB level_info =
+	    xr_struct<XrFoveationLevelProfileCreateInfoFB>(XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB);
 	level_info.next = &eye_info;
 	level_info.level = XR_FOVEATION_LEVEL_HIGH_FB;
 	level_info.verticalOffset = -1.5f;
 	level_info.dynamic = XR_FOVEATION_DYNAMIC_LEVEL_ENABLED_FB;
 
-	XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+	XrFoveationProfileCreateInfoFB create_info =
+	    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 	create_info.next = &level_info;
 
 	struct u_foveation_request request
@@ -84,11 +104,13 @@ TEST_CASE("FB dynamic and META eye-tracked policy stays runtime-owned")
 
 TEST_CASE("FB foveation parser enforces extension availability and valid enums")
 {
-	XrFoveationLevelProfileCreateInfoFB level_info{XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+	XrFoveationLevelProfileCreateInfoFB level_info =
+	    xr_struct<XrFoveationLevelProfileCreateInfoFB>(XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB);
 	level_info.level = XR_FOVEATION_LEVEL_MEDIUM_FB;
 	level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
 
-	XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+	XrFoveationProfileCreateInfoFB create_info =
+	    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 	create_info.next = &level_info;
 
 	struct u_foveation_request request
@@ -106,7 +128,8 @@ TEST_CASE("FB foveation parser enforces extension availability and valid enums")
 	      OXR_FOVEATION_PARSE_INVALID_DYNAMIC);
 
 	level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
-	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info{XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
+	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info = xr_struct<XrFoveationEyeTrackedProfileCreateInfoMETA>(
+	    XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META);
 	level_info.next = &eye_info;
 	CHECK(oxr_foveation_request_from_fb(&create_info, true, false, &request) ==
 	      OXR_FOVEATION_PARSE_UNSUPPORTED_EYE_TRACKED);

@@ -20,6 +20,7 @@
 #include <stdlib.h>
 
 
+#if defined(OXR_HAVE_FB_foveation) || defined(OXR_HAVE_META_foveation_eye_tracked)
 static bool
 get_current_view_fovs(struct oxr_session *sess, struct xrt_fov out_fovs[XRT_MAX_VIEWS], uint32_t *out_view_count)
 {
@@ -55,6 +56,7 @@ get_current_view_fovs(struct oxr_session *sess, struct xrt_fov out_fovs[XRT_MAX_
 	*out_view_count = view_count;
 	return true;
 }
+#endif
 
 
 #ifdef OXR_HAVE_META_foveation_eye_tracked
@@ -139,7 +141,7 @@ sample_eye_tracked_centres(struct oxr_session *sess, struct xrt_foveation_state 
 	}
 
 	const struct xrt_vec3 forward = {0.0f, 0.0f, -1.0f};
-	struct xrt_vec3 direction = {};
+	struct xrt_vec3 direction = {0};
 	math_quat_rotate_vec3(&relation.pose.orientation, &forward, &direction);
 
 	return oxr_foveation_resolve_gaze_centres(&direction, fovs, view_count, state->vertical_offset_degrees, state);
@@ -230,7 +232,7 @@ oxr_xrCreateFoveationProfileFB(XrSession session,
 	OXR_VERIFY_ARG_NOT_NULL(&log, profile);
 
 	struct oxr_instance *inst = sess->sys->inst;
-	struct u_foveation_request request = {};
+	struct u_foveation_request request = {0};
 	enum oxr_foveation_parse_result parsed =
 	    oxr_foveation_request_from_fb(createInfo,
 #ifdef OXR_HAVE_FB_foveation_configuration
@@ -322,7 +324,7 @@ oxr_xrUpdateSwapchainFB(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderF
 		 * destroyed immediately after this call without changing the
 		 * effective swapchain foveation parameters.
 		 */
-		struct xrt_foveation_state xrt_state = {};
+		struct xrt_foveation_state xrt_state = {0};
 		if (!oxr_foveation_request_to_xrt(&fp->request, &xrt_state)) {
 			return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE,
 			                 "Failed to resolve foveation profile to backend-neutral state");
@@ -535,7 +537,7 @@ oxr_xrGetFoveationMetalStateMNDX(XrSwapchain swapchain,
 	}
 
 	struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
-	struct xrt_metal_foveation_state native = {};
+	struct xrt_metal_foveation_state native = {0};
 	xrt_result_t xret = XRT_ERROR_NOT_IMPLEMENTED;
 
 	XrFoveationMetalPackedStateMNDX *packed = NULL;

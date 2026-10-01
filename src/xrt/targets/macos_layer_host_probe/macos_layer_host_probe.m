@@ -668,6 +668,13 @@ format_policy(char *buf, size_t size, struct policy_snapshot snap)
  *
  */
 
+/*
+ * CVDisplayLink is deprecated from macOS 15, but this probe exists to measure
+ * the same pacing path as the compositor (comp_window_macos.m), which still
+ * uses it. The rest of the file keeps the warning off.
+ */
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 struct frame_record
 {
 	double submit_s;

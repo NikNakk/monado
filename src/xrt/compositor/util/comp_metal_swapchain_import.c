@@ -218,7 +218,8 @@ create_direct_image(struct vk_bundle *vk,
 	VkImportMetalTextureInfoEXT import_info = {
 	    .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_TEXTURE_INFO_EXT,
 #ifdef VK_KHR_image_format_list
-	    .pNext = vk->has_KHR_image_format_list && info->format_count != 0 ? &format_list : &export_info,
+	    .pNext = vk->has_KHR_image_format_list && info->format_count != 0 ? (const void *)&format_list
+	                                                                      : (const void *)&export_info,
 #else
 	    .pNext = &export_info,
 #endif

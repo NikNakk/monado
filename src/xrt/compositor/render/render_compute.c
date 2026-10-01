@@ -19,7 +19,9 @@
 #include <stdio.h>
 
 
+#ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(log_timewarp_inputs, "XRT_COMPOSITOR_LOG_TIMEWARP_INPUTS", false)
+#endif
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_identity, "XRT_COMPOSITOR_FORCE_TIMEWARP_IDENTITY", false)
 DEBUG_GET_ONCE_BOOL_OPTION(force_timewarp_pretransform_identity,
                            "XRT_COMPOSITOR_FORCE_TIMEWARP_PRETRANSFORM_IDENTITY",
@@ -100,6 +102,7 @@ timewarp_identity_pre_transform(void)
 	};
 }
 
+#if defined(XRT_OS_OSX)
 static void
 maybe_log_timewarp_inputs(uint64_t frame_id,
                           uint32_t eye,
@@ -137,6 +140,7 @@ maybe_log_timewarp_inputs(uint64_t frame_id,
 	    begin->v[1], begin->v[2], begin->v[3], begin->v[4], begin->v[5], begin->v[6], begin->v[7], end->v[0],
 	    end->v[1], end->v[2], end->v[3], end->v[4], end->v[5], end->v[6], end->v[7]);
 }
+#endif // XRT_OS_OSX
 
 
 /*

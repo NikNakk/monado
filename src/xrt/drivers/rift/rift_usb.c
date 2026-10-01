@@ -12,6 +12,7 @@
 #include "rift_usb.h"
 
 #include <errno.h>
+#include <inttypes.h>
 
 
 /*
@@ -68,7 +69,7 @@ rift_send_keepalive(struct rift_hmd *hmd)
 	}
 
 	hmd->last_keepalive_time = os_monotonic_get_ns();
-	HMD_TRACE(hmd, "Sent keepalive at time %ld", hmd->last_keepalive_time);
+	HMD_TRACE(hmd, "Sent keepalive at time %" PRId64, (int64_t)hmd->last_keepalive_time);
 
 	return 0;
 }

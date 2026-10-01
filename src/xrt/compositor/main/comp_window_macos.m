@@ -114,6 +114,12 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASSTHROUGH_BRIGHTNESS_PERCENT", 160)
 
+/*
+ * CVDisplayLink is deprecated from macOS 15 in favour of CADisplayLink
+ * (-[NSScreen displayLinkWithTarget:selector:]). Pacing and present timing
+ * were validated on the PS VR2 with CVDisplayLink, and the CAMetalDisplayLink
+ * alternatives tested worse, so moving needs a headset A/B first.
+ */
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 
@@ -2969,6 +2975,10 @@ comp_window_macos_get_current_refresh_rate_physical(struct comp_target *ct, floa
 	return comp_window_macos_get_current_refresh_rate(ct, out_rate);
 }
 
+// CVDisplayLink again, see the note at the first pragma above.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+
 static bool
 macos_recreate_display_link(struct comp_window_macos *cwm, CGDirectDisplayID display_id, bool start_link)
 {
@@ -3075,6 +3085,8 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 	          (double)U_TIME_1S_IN_NS / (double)cwm->display_period_ns);
 	return XRT_SUCCESS;
 }
+
+#pragma clang diagnostic pop
 
 static bool
 comp_window_macos_init_with_refresh_rate(struct comp_target *ct)

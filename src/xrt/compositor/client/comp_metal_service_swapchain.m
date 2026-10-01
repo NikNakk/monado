@@ -289,7 +289,13 @@ metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
 	 * The service imports these surfaces in a different process using
 	 * IOSurfaceLookup(IOSurfaceID), so the surfaces must be globally visible.
 	 * The standalone cross-process IOSurface probe already does the same.
+	 *
+	 * kIOSurfaceIsGlobal is deprecated because any process can look such a
+	 * surface up by ID. @todo Send the surfaces to the service as Mach ports
+	 * over the existing XPC connection instead (IOSurfaceCreateXPCObject).
 	 */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 	NSDictionary *properties = @{
 		(__bridge NSString *)kIOSurfaceWidth : @(width),
 		(__bridge NSString *)kIOSurfaceHeight : @(height),
@@ -299,6 +305,7 @@ metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
 		(__bridge NSString *)kIOSurfacePixelFormat : @(kCVPixelFormatType_32BGRA),
 		(__bridge NSString *)kIOSurfaceIsGlobal : @YES,
 	};
+#pragma clang diagnostic pop
 
 	return IOSurfaceCreate((__bridge CFDictionaryRef)properties);
 }
