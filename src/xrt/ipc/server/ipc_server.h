@@ -358,11 +358,8 @@ struct ipc_server_mainloop
 	//! The socket filename we bound to, if any.
 	char *socket_filename;
 
-	//! Optional loopback TCP listener for Wine/Windows clients.
+	//! Lock protecting ownership of the Unix-domain service socket.
 	int socket_lock_fd;
-	int wine_tcp_listen_socket;
-	char wine_tcp_token[65];
-	uint16_t wine_tcp_port;
 
 	//! Should console input trigger shutdown?
 	bool no_stdin;
