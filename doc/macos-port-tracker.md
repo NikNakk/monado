@@ -171,3 +171,16 @@ companion repositories are:
 Older `macos-wine-*`, Metal-array, service-XPC, timing and presentation
 branches should generally be considered development history unless a specific
 experiment still references them.
+
+## IPC hardening and upstream preparation
+
+The security follow-up verifies native socket peer identity, authenticates Wine
+TCP, locks socket lifetimes and bounds pending XPC resources. Wine clients and
+services need matching rebuilt binaries and the shared key described in
+[the transport note](macos-wine-openxr-d3d11.md#tcp-authentication).
+The former external-broker runtime override is retired.
+
+Contribution checks and Android/macOS version coverage are automated. Hardware
+and Wine application regression runs remain user-owned. Human DCO sign-offs
+and upstream MR-specific changelog filenames remain submission prerequisites;
+see [the contribution preparation](macos-upstream-contribution.md).

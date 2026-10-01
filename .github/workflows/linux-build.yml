@@ -29,6 +29,7 @@ jobs:
             libhidapi-dev \
             libudev-dev \
             libusb-1.0-0-dev \
+            libssl-dev \
             libvulkan-dev \
             ninja-build \
             pkg-config \
