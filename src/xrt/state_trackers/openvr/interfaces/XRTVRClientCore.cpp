@@ -113,6 +113,7 @@ XRTVRClientCore_003::Init(vr::EVRApplicationType eApplicationType, const char *p
 	    .is_overlay = false,
 	    .flags = 0,
 	    .z_order = 0,
+	    .pacing_flags = 0,
 	};
 	xret = xrt_system_create_session(this->xsys, &xsi, &this->xs, this->isHeadless() ? nullptr : &this->xcn);
 	if (xret != XRT_SUCCESS) {
