@@ -470,7 +470,56 @@ In the two IMU sessions, which are held out:
   model the same limit drops 24% of the correct ones. Tightening the limits is a possible follow-up once the
   correction is confirmed on the headset. It is not implemented.
 
-The shipped path's poses are still not scored by the evaluator.
+### The shipped path, scored
+
+The tracker replay's poses were converted to records files and imported beside upstream's, so the evaluator scores
+them too. `M3` is `--tracker` (the live joint tracker: M1 refinement, M2 stereo bootstrap, the bootstrap contest and
+the confirming solves). `M3+EKF` is `--tracker-filter`, which adds the filter's prediction as the prior. The conversion
+is a script (`analysis/led/runm3.py`), not a tool option. It checks out: M3's poses are 0.04 mm from the M1 loop's where
+both solve.
+
+The two IMU sessions, left / right. Both are held out from the fit.
+
+| `010135` | solved | evaluator RMS px p50 | gyro deg p50 | gyro deg p95 | rotation / position jumps |
+|---|---|---|---|---|---|
+| upstream | 4277 / 2807 | 0.62 / 1.10 | 0.38 / 0.21 | 3.43 / 3.40 | 133 / 158 |
+| M1 loop, recorded model | 3638 / 2020 | 0.41 / 0.53 | 0.18 / 0.11 | 0.74 / 0.61 | 0 / 0 |
+| M3+EKF, recorded model | 4259 / 1973 | 0.40 / 0.53 | 0.15 / 0.09 | 0.64 / 0.42 | 0 / 0 |
+| M3+EKF, corrected model | 4257 / 2438 | 0.33 / 0.32 | 0.15 / 0.07 | 0.69 / 0.34 | 0 / 0 |
+
+| `014505` | solved | evaluator RMS px p50 | gyro deg p50 | gyro deg p95 | rotation / position jumps |
+|---|---|---|---|---|---|
+| upstream | 2325 / 4545 | 0.64 / 0.84 | 0.26 / 0.22 | 2.26 / 1.79 | 52 / 75 |
+| M1 loop, recorded model | 1989 / 4020 | 0.40 / 0.47 | 0.12 / 0.11 | 1.19 / 0.50 | 0 / 0 |
+| M3+EKF, recorded model | 2030 / 4222 | 0.38 / 0.47 | 0.10 / 0.11 | 0.56 / 0.48 | 1 / 0 |
+| M3+EKF, corrected model | 2174 / 4426 | 0.30 / 0.28 | 0.11 / 0.09 | 0.67 / 0.38 | 1 / 0 |
+
+The jump columns are totals over both controllers.
+
+- **The shipped path with the corrected model reaches 95% of upstream's pose count** in these two sessions (13,295
+  against 13,954; 89% with the recorded model, 84% for the M1 loop). Its gyro residual at p95 is a third to a fifth of
+  upstream's, and it has one rotation jump against upstream's 185.
+- **The correction keeps the shipped path's consistency.** Gyro residuals are the same or lower, except the left's p95
+  in `014505` (0.56° → 0.67°). The step while still is unchanged for three controllers and lower for the fourth.
+- **The EKF prior is worth more to the left controller and the correction more to the right.** In `010135` the prior
+  takes the left from 3605 to 4259 and the correction takes the right from 1973 to 2438.
+
+Over the session groups, M3+EKF, recorded → corrected model, left / right:
+
+| sessions | solved | evaluator RMS px p50 | wrong-device poses |
+|---|---|---|---|
+| held out (6) | 17417 / 17116 → 17696 / 18837 | 0.44 / 0.53 → 0.42 / 0.41 | 161 (0.47%) → 120 (0.33%) |
+| fitted on (7) | 17005 / 22633 → 18137 / 24438 | 0.51 / 0.54 → 0.35 / 0.32 | 31 (0.08%) → 110 (0.26%) |
+
+- **The shipped path has a third to a fifth of the M1 loop's wrong-device poses** (the M1 loop: 443 and 186 with the
+  recorded model). The contest and the confirming solves do work. Its longest wrong-device run is still 52 exposures
+  (0.87 s).
+- **The correction's effect on them is mixed**: fewer held out, more in the sessions it was fitted on. So the
+  correction does not fix wrong-device poses, and the tighter RMS limit above is still the lever for them.
+- Wrong-device poses here are counted per pose: a pose within 80 mm of the other controller's agreed track and more
+  than 150 mm from its own. That is a little broader than the collision rule used earlier, which gives the M1 loop
+  434 and 175.
+- The 25 Sep evening sessions have no IMU samples, so M3 and M3+EKF are the same there.
 
 ### In the driver, opt-in
 
