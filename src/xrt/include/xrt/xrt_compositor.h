@@ -2518,6 +2518,9 @@ struct xrt_compositor_native
 {
 	//! @public Base
 	struct xrt_compositor base;
+
+	//! The compositor implementation is a proxy to another process.
+	bool is_remote;
 };
 
 /*!

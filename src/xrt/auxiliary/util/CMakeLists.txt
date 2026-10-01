@@ -154,6 +154,9 @@ endif()
 if(NOT MSVC)
 	# Uses C11 atomics in shared memory and pthreads.
 	target_sources(aux_util PRIVATE u_frame_share.c u_frame_share.h)
+	if(UNIX)
+		target_sources(aux_util PRIVATE u_macos_hosted_client.c u_macos_hosted_client.h)
+	endif()
 endif()
 
 if(APPLE)

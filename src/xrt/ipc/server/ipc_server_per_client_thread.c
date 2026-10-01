@@ -12,6 +12,10 @@
 #include "util/u_misc.h"
 #include "util/u_trace_marker.h"
 
+#ifdef __APPLE__
+#include "util/u_macos_display_host.h"
+#endif
+
 #include "shared/ipc_protocol.h"
 #include "shared/ipc_shmem.h"
 #include "shared/ipc_utils.h"
@@ -458,6 +462,13 @@ client_loop(volatile struct ipc_client_state *ics)
 void
 ipc_server_client_destroy_session_and_compositor(volatile struct ipc_client_state *ics)
 {
+#ifdef __APPLE__
+	// Keep the attachment for a replacement session, but hide its old frame.
+	if (ics->hosted_attached) {
+		(void)u_macos_display_host_set_visibility(ics->hosted_client_id, U_MACOS_DISPLAY_HOST_HIDDEN);
+		ipc_server_deactivate_session(ics);
+	}
+#endif
 	// Multiple threads might be looking at these fields.
 	os_mutex_lock(&ics->server->global_state.lock);
 

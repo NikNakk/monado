@@ -18,10 +18,6 @@
 #include "util/u_debug.h"
 #include "util/u_extension_list.h"
 
-#ifdef XRT_OS_OSX
-#include "util/u_macos_display_host.h"
-#endif
-
 #ifdef XRT_HAVE_SDL2
 #include <SDL2/SDL.h>
 #else
@@ -132,17 +128,6 @@ comp_window_peek_is_enabled(void)
 		return false;
 	}
 
-#ifdef XRT_OS_OSX
-	/*
-	 * A client compositing in-process, hosted by the service, must not open
-	 * windows or start SDL video in the application's process: SDL video
-	 * only starts on the main thread, and the app owns NSApp.
-	 */
-	if (u_macos_hosted_client_available()) {
-		return false;
-	}
-#endif
-
 	return true;
 }
 
@@ -155,7 +140,7 @@ comp_window_peek_create(struct comp_compositor *c)
 		return NULL;
 	}
 
-	if (!comp_window_peek_is_enabled()) {
+	if (c->target_factory->disable_peek || !comp_window_peek_is_enabled()) {
 		return NULL;
 	}
 	const char *option = debug_get_option_window_peek();

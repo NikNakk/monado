@@ -7,11 +7,8 @@
  */
 
 #include "util/u_macos_display_host.h"
-#include "util/u_debug.h"
 
-#include <dispatch/dispatch.h>
 #include <pthread.h>
-#include <stdatomic.h>
 #include <stddef.h>
 
 static pthread_mutex_t g_host_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -75,123 +72,4 @@ u_macos_display_host_detach(uint32_t client_id)
 		g_host_ops->detach(g_host_ctx, client_id);
 	}
 	pthread_mutex_unlock(&g_host_mutex);
-}
-
-
-/*
- *
- * Client side.
- *
- */
-
-static pthread_mutex_t g_client_mutex = PTHREAD_MUTEX_INITIALIZER;
-static const struct u_macos_hosted_client_ops *g_client_ops = NULL;
-static void *g_client_ctx = NULL;
-//! Last visibility the service accepted; guarded by g_client_mutex.
-static enum u_macos_display_host_visibility g_client_visibility = U_MACOS_DISPLAY_HOST_HIDDEN;
-//! Set while shown, until the first presented frame asks for exclusive.
-static atomic_bool g_client_awaiting_present = false;
-
-void
-u_macos_hosted_client_register(const struct u_macos_hosted_client_ops *ops, void *ctx)
-{
-	pthread_mutex_lock(&g_client_mutex);
-	g_client_ops = ops;
-	g_client_ctx = ctx;
-	pthread_mutex_unlock(&g_client_mutex);
-}
-
-void
-u_macos_hosted_client_unregister(void *ctx)
-{
-	pthread_mutex_lock(&g_client_mutex);
-	if (g_client_ctx == ctx) {
-		g_client_ops = NULL;
-		g_client_ctx = NULL;
-		g_client_visibility = U_MACOS_DISPLAY_HOST_HIDDEN;
-		atomic_store(&g_client_awaiting_present, false);
-	}
-	pthread_mutex_unlock(&g_client_mutex);
-}
-
-DEBUG_GET_ONCE_BOOL_OPTION(macos_hosted_follow_service_focus, "XRT_MACOS_HOSTED_FOLLOW_SERVICE_FOCUS", true)
-
-bool
-u_macos_hosted_client_follows_service_focus(void)
-{
-	return debug_get_bool_option_macos_hosted_follow_service_focus();
-}
-
-bool
-u_macos_hosted_client_available(void)
-{
-	pthread_mutex_lock(&g_client_mutex);
-	bool available = g_client_ops != NULL;
-	pthread_mutex_unlock(&g_client_mutex);
-	return available;
-}
-
-xrt_result_t
-u_macos_hosted_client_attach(uint32_t context_id)
-{
-	xrt_result_t xret = XRT_ERROR_FEATURE_NOT_SUPPORTED;
-	pthread_mutex_lock(&g_client_mutex);
-	if (g_client_ops != NULL) {
-		xret = g_client_ops->attach(g_client_ctx, context_id);
-	}
-	pthread_mutex_unlock(&g_client_mutex);
-	return xret;
-}
-
-xrt_result_t
-u_macos_hosted_client_set_visibility(enum u_macos_display_host_visibility visibility)
-{
-	xrt_result_t xret = XRT_ERROR_FEATURE_NOT_SUPPORTED;
-	pthread_mutex_lock(&g_client_mutex);
-	if (g_client_ops != NULL) {
-		xret = g_client_ops->set_visibility(g_client_ctx, visibility);
-		if (xret == XRT_SUCCESS) {
-			g_client_visibility = visibility;
-		}
-		atomic_store(&g_client_awaiting_present,
-		             xret == XRT_SUCCESS && visibility == U_MACOS_DISPLAY_HOST_SHOWN);
-	}
-	pthread_mutex_unlock(&g_client_mutex);
-	return xret;
-}
-
-void
-u_macos_hosted_client_detach(void)
-{
-	pthread_mutex_lock(&g_client_mutex);
-	atomic_store(&g_client_awaiting_present, false);
-	g_client_visibility = U_MACOS_DISPLAY_HOST_HIDDEN;
-	if (g_client_ops != NULL) {
-		g_client_ops->detach(g_client_ctx);
-	}
-	pthread_mutex_unlock(&g_client_mutex);
-}
-
-static void
-make_exclusive(void *unused)
-{
-	(void)unused;
-	// Only if the layer is still just shown: not hidden or detached meanwhile.
-	pthread_mutex_lock(&g_client_mutex);
-	if (g_client_ops != NULL && g_client_visibility == U_MACOS_DISPLAY_HOST_SHOWN &&
-	    g_client_ops->set_visibility(g_client_ctx, U_MACOS_DISPLAY_HOST_EXCLUSIVE) == XRT_SUCCESS) {
-		g_client_visibility = U_MACOS_DISPLAY_HOST_EXCLUSIVE;
-	}
-	pthread_mutex_unlock(&g_client_mutex);
-}
-
-void
-u_macos_hosted_client_note_presented(void)
-{
-	bool expected = true;
-	if (!atomic_compare_exchange_strong(&g_client_awaiting_present, &expected, false)) {
-		return;
-	}
-	// Not on the presented-handler thread: this is an IPC round trip.
-	dispatch_async_f(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), NULL, make_exclusive);
 }

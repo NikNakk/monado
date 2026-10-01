@@ -19,6 +19,8 @@
 
 #ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
 #include "client/ipc_client_macos_hosted.h"
+#include "util/u_macos_hosted_client.h"
+#include "multi/comp_multi_interface.h"
 #endif
 
 #include <assert.h>
@@ -39,8 +41,8 @@ struct ipc_client_system
 
 	struct xrt_system_compositor *xsysc;
 
-	//! The system compositor runs in this process, not in the service.
-	bool local_compositor;
+	struct ipc_client_local_session *local_session;
+	struct u_macos_hosted_client *hosted_client;
 };
 
 
@@ -102,6 +104,7 @@ create_with_comp(struct ipc_client_system *icsys,
 }
 
 
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
 /*!
  * Session of a client that composites in-process: headless on the service
  * side, with the local native compositor's events queued here.
@@ -122,20 +125,9 @@ struct ipc_client_local_session
 	struct xrt_system_compositor *xsysc;
 	struct xrt_compositor_native *xcn;
 
-	//! The native compositor's own functions, wrapped below.
-	xrt_result_t (*begin_session)(struct xrt_compositor *xc, const struct xrt_begin_session_info *info);
-	xrt_result_t (*end_session)(struct xrt_compositor *xc);
-	void (*destroy)(struct xrt_compositor *xc);
-
-	//! The service has been told the session is running.
-	bool reported_active;
+	struct ipc_client_system *owner;
+	struct u_macos_hosted_client *hosted_client;
 };
-
-/*!
- * The wrapped compositor functions only get the compositor, and OpenXR has
- * one session per instance, so the session is found here.
- */
-static struct ipc_client_local_session *g_local_session;
 
 static inline struct ipc_client_local_session *
 ipc_local_session(struct xrt_session *xs)
@@ -146,66 +138,38 @@ ipc_local_session(struct xrt_session *xs)
 static void
 report_active(struct ipc_client_local_session *ils, bool active)
 {
-#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
-	if (ils->reported_active != active) {
-		ipc_client_macos_hosted_session_active(ils->ipc_c, active);
-		ils->reported_active = active;
-	}
-#else
-	(void)ils;
-	(void)active;
-#endif
-}
-
-static xrt_result_t
-local_comp_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
-{
-	struct ipc_client_local_session *ils = g_local_session;
-	assert(ils != NULL && xc == &ils->xcn->base);
-
-	xrt_result_t xret = ils->begin_session(xc, info);
-	if (xret == XRT_SUCCESS) {
-		// Lets the service's focus logic make this application the visible one.
-		report_active(ils, true);
-	}
-	return xret;
-}
-
-static xrt_result_t
-local_comp_end_session(struct xrt_compositor *xc)
-{
-	struct ipc_client_local_session *ils = g_local_session;
-	assert(ils != NULL && xc == &ils->xcn->base);
-
-	report_active(ils, false);
-	return ils->end_session(xc);
+	ipc_client_macos_hosted_session_active(ils->hosted_client, active);
 }
 
 static void
-local_comp_destroy(struct xrt_compositor *xc)
+local_comp_set_active(void *ctx, bool active)
 {
-	struct ipc_client_local_session *ils = g_local_session;
-	assert(ils != NULL && xc == &ils->xcn->base);
-
-	ils->xcn = NULL;
-	ils->destroy(xc);
+	report_active(ctx, active);
 }
+
+static void
+local_comp_destroyed(void *ctx)
+{
+	struct ipc_client_local_session *ils = ctx;
+	report_active(ils, false);
+	ils->xcn = NULL;
+}
+
+static const struct comp_multi_lifecycle_callbacks local_lifecycle_callbacks = {
+    .set_active = local_comp_set_active,
+    .destroyed = local_comp_destroyed,
+};
 
 //! Apply the service's decision on whether this application is visible and focused.
 static void
 apply_service_state(struct ipc_client_local_session *ils, const struct xrt_session_event_state_change *state)
 {
-#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
-	if (!ipc_client_macos_hosted_follows_service_focus() || ils->xcn == NULL) {
+	if (!ipc_client_macos_hosted_follows_service_focus(ils->hosted_client) || ils->xcn == NULL) {
 		return;
 	}
 	// The local compositor then sends the application the matching event.
 	xrt_syscomp_set_state(ils->xsysc, &ils->xcn->base, state->visible, state->focused, state->timestamp_ns);
-	ipc_client_macos_hosted_set_visible(state->visible);
-#else
-	(void)ils;
-	(void)state;
-#endif
+	ipc_client_macos_hosted_set_visible(ils->hosted_client, state->visible);
 }
 
 static xrt_result_t
@@ -254,6 +218,10 @@ local_session_destroy(struct xrt_session *xs)
 {
 	struct ipc_client_local_session *ils = ipc_local_session(xs);
 
+	// Disarm callbacks before freeing the observer context.
+	if (ils->xcn != NULL) {
+		comp_multi_compositor_set_lifecycle_callbacks(ils->xcn, NULL, NULL);
+	}
 	// An application may destroy the session without ending it.
 	report_active(ils, false);
 
@@ -261,9 +229,10 @@ local_session_destroy(struct xrt_session *xs)
 	xrt_session_destroy(&local);
 	xrt_session_destroy(&ils->remote);
 
-	if (g_local_session == ils) {
-		g_local_session = NULL;
+	if (ils->owner->local_session == ils) {
+		ils->owner->local_session = NULL;
 	}
+	u_macos_hosted_client_release(ils->hosted_client);
 	free(ils);
 }
 
@@ -273,6 +242,9 @@ create_with_local_comp(struct ipc_client_system *icsys,
                        struct xrt_session **out_xs,
                        struct xrt_compositor_native **out_xcn)
 {
+	if (icsys->local_session != NULL) {
+		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;
+	}
 	struct xrt_session *remote = NULL;
 	xrt_result_t xret = create_headless(icsys, xsi, &remote);
 	if (xret != XRT_SUCCESS) {
@@ -280,19 +252,20 @@ create_with_local_comp(struct ipc_client_system *icsys,
 	}
 
 	struct ipc_client_local_session *ils = U_TYPED_CALLOC(struct ipc_client_local_session);
+	if (ils == NULL) {
+		xrt_session_destroy(&remote);
+		return XRT_ERROR_ALLOCATION;
+	}
 	ils->base.poll_events = local_session_poll_events;
 	ils->base.request_exit = local_session_request_exit;
 	ils->base.destroy = local_session_destroy;
 	ils->ipc_c = icsys->ipc_c;
+	ils->owner = icsys;
+	ils->hosted_client = icsys->hosted_client;
+	u_macos_hosted_client_reference(ils->hosted_client);
 	ils->remote = remote;
 	ils->local = u_session_create(NULL);
 	ils->xsysc = icsys->xsysc;
-
-	if (g_local_session != NULL) {
-		struct xrt_session *xs = &ils->base;
-		xrt_session_destroy(&xs);
-		return XRT_ERROR_MULTI_SESSION_NOT_IMPLEMENTED;
-	}
 
 	xret = xrt_syscomp_create_native_compositor( //
 	    icsys->xsysc,                            //
@@ -305,22 +278,16 @@ create_with_local_comp(struct ipc_client_system *icsys,
 		return xret;
 	}
 
-	// Tell the service when the session runs, and notice the compositor going.
-	struct xrt_compositor *xc = &(*out_xcn)->base;
 	ils->xcn = *out_xcn;
-	ils->begin_session = xc->begin_session;
-	ils->end_session = xc->end_session;
-	ils->destroy = xc->destroy;
-	xc->begin_session = local_comp_begin_session;
-	xc->end_session = local_comp_end_session;
-	xc->destroy = local_comp_destroy;
-	g_local_session = ils;
+	comp_multi_compositor_set_lifecycle_callbacks(ils->xcn, &local_lifecycle_callbacks, ils);
+	icsys->local_session = ils;
 
 	*out_xs = &ils->base;
 
 	return XRT_SUCCESS;
 }
 
+#endif
 
 /*
  *
@@ -344,8 +311,10 @@ ipc_client_system_create_session(struct xrt_system *xsys,
 	// Skip making a native compositor if not asked for.
 	if (out_xcn == NULL) {
 		return create_headless(icsys, xsi, out_xs);
-	} else if (icsys->local_compositor) {
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	} else if (icsys->hosted_client != NULL) {
 		return create_with_local_comp(icsys, xsi, out_xs, out_xcn);
+#endif
 	} else {
 		return create_with_comp(icsys, xsi, out_xs, out_xcn);
 	}
@@ -387,11 +356,13 @@ ipc_client_system_create(struct ipc_connection *ipc_c, struct xrt_system_composi
 }
 
 struct xrt_system *
-ipc_client_system_create_with_local_compositor(struct ipc_connection *ipc_c, struct xrt_system_compositor *xsysc)
+ipc_client_system_create_with_local_compositor(struct ipc_connection *ipc_c,
+                                               struct xrt_system_compositor *xsysc,
+                                               struct u_macos_hosted_client *client)
 {
 	struct xrt_system *xsys = ipc_client_system_create(ipc_c, xsysc);
 	if (xsys != NULL) {
-		ipc_system(xsys)->local_compositor = true;
+		ipc_system(xsys)->hosted_client = client;
 	}
 
 	return xsys;

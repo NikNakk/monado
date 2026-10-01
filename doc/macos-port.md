@@ -205,7 +205,10 @@ The macOS port now supports substantially more than the original bring-up:
 - application GPU-completion waits before compositor reuse;
 - launchd/XPC service activation and per-client Metal-resource ownership;
 - opt-in in-process compositing for clients, hosted by the service's headset
-  window (Game Mode).
+  window (Game Mode). Hosted bindings now have explicit ownership, with
+  read-only passthrough descriptors and synchronous teardown hiding; the
+  refactor and handoff still await macOS/on-headset validation (see
+  [the design note](macos-client-compositor-design.md#ownership-and-teardown-hardening-2026-10-01)).
 
 The native diagnostic target remains useful for runtime regression testing:
 

@@ -77,7 +77,10 @@ options enabled.
 ## Implemented, awaiting hardware validation
 
 - Hosted-client handoff that follows the service's focus, and passthrough
-  camera frames shared with in-process clients (Game Mode branch).
+  camera frames shared with in-process clients (Game Mode branch). The
+  2026-10-01 hardening uses read-only consumer descriptors, hides on session
+  teardown without event polling, and gives hosted bindings explicit ownership.
+  See [the design note](macos-client-compositor-design.md#ownership-and-teardown-hardening-2026-10-01).
 
 - `XR_FB_passthrough` from the stock-headset BC4 cameras, composited in the
   final Metal presentation pass (uncalibrated fisheye approximation).

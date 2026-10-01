@@ -72,6 +72,19 @@ foreach(testname ${tests})
 	set_target_properties(${testname} PROPERTIES FOLDER monado_tests)
 endforeach()
 
+if(UNIX AND NOT ANDROID AND TARGET ipc_shared)
+    add_executable(tests_ipc_shmem tests_ipc_shmem.cpp)
+    target_link_libraries(tests_ipc_shmem PRIVATE ipc_shared aux_util xrt-external-catch2)
+    add_test(NAME tests_ipc_shmem COMMAND tests_ipc_shmem)
+    set_target_properties(tests_ipc_shmem PROPERTIES FOLDER monado_tests)
+endif()
+if(UNIX AND NOT MSVC)
+    add_executable(tests_macos_hosted_client tests_macos_hosted_client.cpp)
+    target_link_libraries(tests_macos_hosted_client PRIVATE aux_util xrt-external-catch2)
+    add_test(NAME tests_macos_hosted_client COMMAND tests_macos_hosted_client)
+    set_target_properties(tests_macos_hosted_client PROPERTIES FOLDER monado_tests)
+endif()
+
 # For tests that require more than just aux_util, link those other libs down here.
 
 target_link_libraries(tests_cxx_wrappers PRIVATE xrt-interfaces)
@@ -245,4 +258,13 @@ if(APPLE)
 			tests_macos_remote_driver_pose_probe PROPERTIES FOLDER monado_tests
 			)
 	endif()
+endif()
+
+if(UNIX AND TARGET comp_multi AND TARGET ipc_shared)
+    add_executable(tests_ipc_local_session tests_ipc_local_session.cpp
+        ../src/xrt/ipc/client/ipc_client_system.c)
+    target_compile_definitions(tests_ipc_local_session PRIVATE XRT_IPC_MACOS_HOSTED_COMPOSITOR)
+    target_link_libraries(tests_ipc_local_session PRIVATE comp_multi ipc_shared aux_util xrt-external-catch2)
+    add_test(NAME tests_ipc_local_session COMMAND tests_ipc_local_session)
+    set_target_properties(tests_ipc_local_session PROPERTIES FOLDER monado_tests)
 endif()

@@ -56,13 +56,18 @@ ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 #define MONADO_SHMEM_NAME "/monado_shm"
 
 static xrt_result_t
-shmem_create_named(const char *name, bool exclusive, size_t size, xrt_shmem_handle_t *out_handle, void **out_map);
+shmem_create_named(const char *name,
+                   bool exclusive,
+                   bool readonly_handle,
+                   size_t size,
+                   xrt_shmem_handle_t *out_handle,
+                   void **out_map);
 
 // Impl for non-Android Unix.
 xrt_result_t
 ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 {
-	return shmem_create_named(MONADO_SHMEM_NAME, false, size, out_handle, out_map);
+	return shmem_create_named(MONADO_SHMEM_NAME, false, false, size, out_handle, out_map);
 }
 
 xrt_result_t
@@ -71,31 +76,50 @@ ipc_shmem_create_private(const char *suffix, size_t size, xrt_shmem_handle_t *ou
 	// A name of its own, so it cannot meet a concurrent ipc_shmem_create().
 	char name[64];
 	snprintf(name, sizeof(name), "/monado_%s_%d", suffix, (int)getpid());
-	return shmem_create_named(name, true, size, out_handle, out_map);
+	return shmem_create_named(name, true, false, size, out_handle, out_map);
+}
+
+xrt_result_t
+ipc_shmem_create_private_readonly(const char *suffix, size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
+{
+	char name[64];
+	snprintf(name, sizeof(name), "/monado_%s_%d", suffix, (int)getpid());
+	return shmem_create_named(name, true, true, size, out_handle, out_map);
 }
 
 static xrt_result_t
-shmem_create_named(const char *name, bool exclusive, size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
+shmem_create_named(
+    const char *name, bool exclusive, bool readonly_handle, size_t size, xrt_shmem_handle_t *out_handle, void **out_map)
 {
-	*out_handle = -1;
-	int fd = shm_open(name, O_CREAT | O_RDWR | (exclusive ? O_EXCL : 0), S_IRUSR | S_IWUSR);
-	if (fd < 0) {
+	*out_handle = XRT_SHMEM_HANDLE_INVALID;
+	*out_map = NULL;
+	int writer = shm_open(name, O_CREAT | O_RDWR | (exclusive ? O_EXCL : 0), S_IRUSR | S_IWUSR);
+	if (writer < 0) {
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
-	if (ftruncate(fd, size) < 0) {
-		close(fd);
-		return XRT_ERROR_IPC_FAILURE;
+	int consumer = writer;
+	xrt_result_t xret = XRT_ERROR_IPC_FAILURE;
+	if (ftruncate(writer, size) == 0) {
+		// Open before unlinking: dup() would preserve the writer's access rights.
+		if (readonly_handle) {
+			consumer = shm_open(name, O_RDONLY, 0);
+		}
+		if (consumer >= 0) {
+			xret = ipc_shmem_map(writer, size, out_map);
+		}
 	}
-	xrt_result_t result = ipc_shmem_map(fd, size, out_map);
-	if (result != XRT_SUCCESS) {
-		close(fd);
-		return result;
-	}
-
-	// Don't need the name entry anymore, we can share the FD.
 	shm_unlink(name);
-	*out_handle = fd;
+	if (xret != XRT_SUCCESS || readonly_handle) {
+		close(writer);
+	}
+	if (xret != XRT_SUCCESS) {
+		if (consumer >= 0 && consumer != writer) {
+			close(consumer);
+		}
+		return xret;
+	}
+	*out_handle = consumer;
 	return XRT_SUCCESS;
 }
 
@@ -151,7 +175,20 @@ ipc_shmem_map(xrt_shmem_handle_t handle, size_t size, void **out_map)
 	const int access = PROT_READ | PROT_WRITE;
 	const int flags = MAP_SHARED;
 	void *ptr = mmap(NULL, size, access, flags, handle, 0);
-	if (ptr == NULL) {
+	if (ptr == MAP_FAILED) {
+		*out_map = NULL;
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	*out_map = ptr;
+	return XRT_SUCCESS;
+}
+
+xrt_result_t
+ipc_shmem_map_readonly(xrt_shmem_handle_t handle, size_t size, void **out_map)
+{
+	void *ptr = mmap(NULL, size, PROT_READ, MAP_SHARED, handle, 0);
+	if (ptr == MAP_FAILED) {
+		*out_map = NULL;
 		return XRT_ERROR_IPC_FAILURE;
 	}
 	*out_map = ptr;

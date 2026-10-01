@@ -109,6 +109,9 @@ struct multi_compositor
 	//! Where events for this compositor should go.
 	struct xrt_session_event_sink *xses;
 
+	const struct comp_multi_lifecycle_callbacks *lifecycle_callbacks;
+	void *lifecycle_ctx;
+
 	//! Owning system compositor.
 	struct multi_system_compositor *msc;
 

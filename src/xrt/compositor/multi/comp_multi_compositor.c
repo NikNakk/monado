@@ -26,6 +26,7 @@
 #include "util/comp_swapchain_gpu_reuse.h"
 
 #include "multi/comp_multi_private.h"
+#include "multi/comp_multi_interface.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -671,6 +672,9 @@ multi_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin
 	if (!mc->state.session_active) {
 		multi_system_compositor_update_session_status(mc->msc, true);
 		mc->state.session_active = true;
+		if (mc->lifecycle_callbacks != NULL) {
+			mc->lifecycle_callbacks->set_active(mc->lifecycle_ctx, true);
+		}
 	}
 
 	return XRT_SUCCESS;
@@ -687,6 +691,9 @@ multi_compositor_end_session(struct xrt_compositor *xc)
 	if (mc->state.session_active) {
 		multi_system_compositor_update_session_status(mc->msc, false);
 		mc->state.session_active = false;
+		if (mc->lifecycle_callbacks != NULL) {
+			mc->lifecycle_callbacks->set_active(mc->lifecycle_ctx, false);
+		}
 	}
 
 	return XRT_SUCCESS;
@@ -1144,6 +1151,10 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 		mc->state.session_active = false;
 	}
 
+	if (mc->lifecycle_callbacks != NULL) {
+		mc->lifecycle_callbacks->destroyed(mc->lifecycle_ctx);
+	}
+
 	os_mutex_lock(&mc->msc->list_and_timing_lock);
 
 	// Remove it from the list of clients.
@@ -1324,4 +1335,15 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	*out_xcn = &mc->base;
 
 	return XRT_SUCCESS;
+}
+
+void
+comp_multi_compositor_set_lifecycle_callbacks(struct xrt_compositor_native *xcn,
+                                              const struct comp_multi_lifecycle_callbacks *callbacks,
+                                              void *ctx)
+{
+	assert(xcn->base.destroy == multi_compositor_destroy);
+	struct multi_compositor *mc = multi_compositor(&xcn->base);
+	mc->lifecycle_callbacks = callbacks;
+	mc->lifecycle_ctx = ctx;
 }
