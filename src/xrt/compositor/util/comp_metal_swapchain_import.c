@@ -368,7 +368,7 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 		} else if (g_request.source == METAL_SWAPCHAIN_IMPORT_BOOTSTRAP_NAMES) {
 			if (!comp_metal_texture_create_from_bootstrap_name_for_vk_device(
 			        vk, info, g_request.bootstrap_names[i], &source_texture)) {
-				U_LOG_E("Could not import DXMT shared Metal texture '%s' image=%u",
+				U_LOG_E("Could not import shared Metal texture '%s' image=%u",
 				        g_request.bootstrap_names[i], i);
 				destroy_direct_images(vk, out_vkic);
 				return VK_ERROR_INITIALIZATION_FAILED;
