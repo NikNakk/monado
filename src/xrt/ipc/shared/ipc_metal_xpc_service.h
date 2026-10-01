@@ -84,6 +84,17 @@ ipc_metal_xpc_service_take_iosurfaces_for_pid(uint64_t token,
 xrt_result_t
 ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event, uint64_t *out_token, pid_t owner_pid);
 
+/*!
+ * Consume one client-published MTLSharedEventHandle owned by @p owner_pid.
+ * On success, @p out_handle owns one Objective-C reference. Release it with
+ * ipc_metal_xpc_service_release_shared_event_handle().
+ */
+xrt_result_t
+ipc_metal_xpc_service_take_shared_event_handle_for_pid(uint64_t token, void **out_handle, pid_t owner_pid);
+
+void
+ipc_metal_xpc_service_release_shared_event_handle(void *handle);
+
 /*! Drop a token only when it belongs to the supplied Unix IPC client PID. */
 void
 ipc_metal_xpc_service_discard_token_for_pid(uint64_t token, pid_t owner_pid);
