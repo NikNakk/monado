@@ -493,7 +493,7 @@ ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
 	/*
 	 * IOSurface IDs are scalar data carried by the ordinary IPC request.
 	 * Native macOS uses the AF_UNIX control socket, where stream_socket is
-	 * deliberately false (that flag identifies the framed Wine/TCP transport).
+	 * deliberately false (that flag identifies framed byte-stream transports).
 	 */
 	struct ipc_arg_swapchain_iosurface args = {0};
 	args.image_count = image_count;
@@ -951,7 +951,7 @@ ipc_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_
 
 	if (icc->ipc_c->imc.stream_socket) {
 		/*
-		 * The Wine bridge owns a private metadata snapshot rather than the
+		 * A byte-stream bridge owns a private metadata snapshot rather than the
 		 * service's shared-memory mapping. Upload only the active prefix of
 		 * the slot: frame header + layer_count + active layer entries.
 		 * This avoids sending the ~50 KiB full IPC_MAX_LAYERS allocation on
@@ -1043,7 +1043,7 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 			memcpy(payload.data, slot, total_size);
 
 			/*
-			 * Wine has no shared layer-slot mapping to recycle: the complete
+			 * Byte-stream clients have no shared layer-slot mapping to recycle: the complete
 			 * active layer is in this message. Send it without waiting for a
 			 * reply so native compositor work falls behind the next pacing
 			 * call instead of blocking xrEndFrame.
@@ -1059,7 +1059,7 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 			double wire_lock_us = (double)(send_start_ns - lock_start_ns) / 1000.0;
 			double send_us = (double)(send_end_ns - send_start_ns) / 1000.0;
 			if (wire_lock_us > 1000.0 || send_us > 1000.0) {
-				U_LOG_W("Wine async IPC submit stall: layers=%u bytes=%zu wire_lock=%.3fus send=%.3fus",
+				U_LOG_W("Byte-stream async IPC submit stall: layers=%u bytes=%zu wire_lock=%.3fus send=%.3fus",
 				        slot->layer_count, total_size, wire_lock_us, send_us);
 			}
 		} else {
@@ -1087,7 +1087,7 @@ ipc_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 			uint64_t copy_end_ns = os_monotonic_get_ns();
 			double copy_us = (double)(copy_end_ns - copy_start_ns) / 1000.0;
 			if (copy_us > 1000.0) {
-				U_LOG_W("Wine synchronous IPC layer submit: layers=%u bytes=%zu duration=%.3fus",
+				U_LOG_W("Byte-stream synchronous IPC layer submit: layers=%u bytes=%zu duration=%.3fus",
 				        slot->layer_count, total_size, copy_us);
 			}
 		}
