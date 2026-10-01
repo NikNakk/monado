@@ -151,8 +151,8 @@ cli_cmd_pose_dump(int argc, const char **argv)
 
 	fprintf(stderr, "Using HMD: %s\n", hmd->str);
 
-	struct psvr2_slam_timing initial_slam_timing = {0};
 #ifdef XRT_BUILD_DRIVER_PSVR2
+	struct psvr2_slam_timing initial_slam_timing = {0};
 	bool have_psvr2_timing = psvr2_get_slam_timing(hmd, &initial_slam_timing);
 #else
 	bool have_psvr2_timing = false;
