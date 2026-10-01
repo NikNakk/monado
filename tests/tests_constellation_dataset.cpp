@@ -92,15 +92,14 @@ TEST_CASE("constellation dataset round trip with extension records")
 		recorder.recordExtension(9999, {1, 2, 3, 4, 5});
 
 		recorder.recordSyncEvent(DatasetSyncEvent{0, 2'000'000, 3, {12.5, 400.0, 0.0}});
-		recorder.recordImuTiming(DatasetImuTiming{0, 2'500'000, 7'000'000'000, 6'997'500'000.0, {0.01, -0.02, 0.03}});
-		recorder.recordHeadPose(DatasetHeadPose{3'000'000,
-		                                        XRT_SPACE_RELATION_ORIENTATION_VALID_BIT,
+		recorder.recordImuTiming(
+		    DatasetImuTiming{0, 2'500'000, 7'000'000'000, 6'997'500'000.0, {0.01, -0.02, 0.03}});
+		recorder.recordHeadPose(DatasetHeadPose{3'000'000, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT,
 		                                        xrt_pose{{0.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.7f, 0.2f}},
-		                                        2'990'000,
-		                                        1});
-		recorder.recordGroundTruth(DatasetGroundTruth{0, 3'000'000,
-		                                              xrt_pose{{0.0f, 0.70710677f, 0.0f, 0.70710677f}, {0.2f, 1.1f, -0.4f}},
-		                                              0.001f, 0.002f, 1});
+		                                        2'990'000, 1});
+		recorder.recordGroundTruth(DatasetGroundTruth{
+		    0, 3'000'000, xrt_pose{{0.0f, 0.70710677f, 0.0f, 0.70710677f}, {0.2f, 1.1f, -0.4f}}, 0.001f, 0.002f,
+		    1});
 		recorder.recordAnnotation(DatasetAnnotation{0, 4'000'000, "static_begin"});
 		recorder.recordSample(make_sample(2, 5'000'000, 1));
 	}
@@ -112,6 +111,7 @@ TEST_CASE("constellation dataset round trip with extension records")
 	REQUIRE(reader.mosaics.size() == 1);
 	REQUIRE(reader.mosaics[0].camera_calibrations.size() == 2);
 	CHECK(reader.mosaics[0].camera_calibrations[1].intrinsics[0][0] == 310.0);
+	CHECK(reader.mosaics[0].camera_calibrations[1].distortion_model == T_DISTORTION_FISHEYE_KB4);
 	REQUIRE(reader.devices.size() == 1);
 	CHECK(reader.devices[0].leds.size() == 3);
 
@@ -152,7 +152,8 @@ TEST_CASE("constellation dataset reader stops cleanly on a truncated extension")
 	{
 		DataRecorder recorder(path, {{make_calibration(300.0)}});
 		recorder.recordSample(make_sample(1, 1'000'000, 0));
-		recorder.recordAnnotation(DatasetAnnotation{XRT_CONSTELLATION_INVALID_DEVICE_ID, 2'000'000, "a marker"});
+		recorder.recordAnnotation(
+		    DatasetAnnotation{XRT_CONSTELLATION_INVALID_DEVICE_ID, 2'000'000, "a marker"});
 	}
 	// Cut the last record short.
 	FILE *f = std::fopen(path.c_str(), "rb+");

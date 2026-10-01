@@ -497,6 +497,37 @@ DataSerializer::read(CameraSample &value)
 
 // t_camera_calibration
 
+/*!
+ * Distortion models are stored as fixed codes rather than as the enum's value, which differs between trees
+ * (upstream inserted T_DISTORTION_PINHOLE at the front). The codes follow the enum's original order, so files
+ * written before this mapping read unchanged. New models take new codes at the end.
+ */
+static uint8_t
+distortion_model_to_file(t_camera_distortion_model model)
+{
+	switch (model) {
+	case T_DISTORTION_OPENCV_RADTAN_5: return 0;
+	case T_DISTORTION_OPENCV_RADTAN_8: return 1;
+	case T_DISTORTION_OPENCV_RADTAN_14: return 2;
+	case T_DISTORTION_FISHEYE_KB4: return 3;
+	case T_DISTORTION_WMR: return 4;
+	default: throw std::runtime_error("Distortion model has no dataset code: " + std::to_string((int)model));
+	}
+}
+
+static t_camera_distortion_model
+distortion_model_from_file(uint8_t code)
+{
+	switch (code) {
+	case 0: return T_DISTORTION_OPENCV_RADTAN_5;
+	case 1: return T_DISTORTION_OPENCV_RADTAN_8;
+	case 2: return T_DISTORTION_OPENCV_RADTAN_14;
+	case 3: return T_DISTORTION_FISHEYE_KB4;
+	case 4: return T_DISTORTION_WMR;
+	default: throw std::runtime_error("Unknown distortion model code in dataset: " + std::to_string(code));
+	}
+}
+
 void
 DataSerializer::write(const t_camera_calibration &value)
 {
@@ -516,7 +547,7 @@ DataSerializer::write(const t_camera_calibration &value)
 		this->write(value.distortion_parameters_as_array[i]);
 	}
 
-	this->write(static_cast<uint8_t>(value.distortion_model));
+	this->write(distortion_model_to_file(value.distortion_model));
 }
 
 void
@@ -545,7 +576,7 @@ DataSerializer::read(t_camera_calibration &value)
 
 	uint8_t distortion_model;
 	this->read(distortion_model);
-	value.distortion_model = static_cast<t_camera_distortion_model>(distortion_model);
+	value.distortion_model = distortion_model_from_file(distortion_model);
 }
 
 // t_constellation_tracker_led
@@ -711,7 +742,8 @@ DataRecorder::recordDeviceInfo(const Device &device)
 }
 
 void
-DataRecorder::recordDeviceInfo(t_constellation_device_id_t device_id, const t_constellation_tracker_led_model &led_model)
+DataRecorder::recordDeviceInfo(t_constellation_device_id_t device_id,
+                               const t_constellation_tracker_led_model &led_model)
 {
 	std::lock_guard<std::mutex> guard(this->lock);
 
