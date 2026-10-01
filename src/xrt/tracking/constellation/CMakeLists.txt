@@ -105,7 +105,9 @@ else()
 endif()
 
 # Offline replay of datasets written by the tracker's data recorder (CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT).
-add_executable(constellation_replay tools/constellation_replay.cpp)
+add_executable(
+	constellation_replay tools/constellation_replay.cpp tools/frontend_compare.cpp tools/frontend_compare.hpp
+	)
 target_include_directories(constellation_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(
 	constellation_replay

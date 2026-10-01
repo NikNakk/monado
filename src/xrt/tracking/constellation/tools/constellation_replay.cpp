@@ -17,6 +17,7 @@
 #include "t_imu_optical_filter.h"
 #include "t_constellation_tracker.h"
 #include "replay_records.hpp"
+#include "frontend_compare.hpp"
 #ifdef XRT_HAVE_CONSTELLATION_FUSION_EVAL
 #include "fusion_compare.hpp"
 #endif
@@ -142,10 +143,11 @@ summarise(const DatasetReader &dataset)
 	}
 	if (!dataset.sync_events.empty() || !dataset.imu_timing.empty() || !dataset.head_poses.empty() ||
 	    !dataset.ground_truth.empty() || !dataset.annotations.empty() || dataset.unknown_extensions > 0) {
-		std::printf("extension records: %zu sync events, %zu IMU timings, %zu head poses, %zu ground-truth poses, "
-		            "%zu annotations, %zu of unknown kinds\n",
-		            dataset.sync_events.size(), dataset.imu_timing.size(), dataset.head_poses.size(),
-		            dataset.ground_truth.size(), dataset.annotations.size(), dataset.unknown_extensions);
+		std::printf(
+		    "extension records: %zu sync events, %zu IMU timings, %zu head poses, %zu ground-truth poses, "
+		    "%zu annotations, %zu of unknown kinds\n",
+		    dataset.sync_events.size(), dataset.imu_timing.size(), dataset.head_poses.size(),
+		    dataset.ground_truth.size(), dataset.annotations.size(), dataset.unknown_extensions);
 	}
 	if (!dataset.head_poses.empty()) {
 		Stats age_ms;
@@ -157,9 +159,10 @@ summarise(const DatasetReader &dataset)
 			age_ms.add((double)(h.timestamp_ns - h.source_ns) / 1e6);
 			predicted += (h.source_flags & T_CONSTELLATION_HEAD_POSE_INTERPOLATED) == 0 ? 1 : 0;
 		}
-		std::printf("head pose at exposure minus newest SLAM pose, ms: p05 %.1f p50 %.1f p95 %.1f; %zu of %zu "
-		            "predicted past it\n",
-		            age_ms.pct(0.05), age_ms.pct(0.5), age_ms.pct(0.95), predicted, age_ms.values.size());
+		std::printf(
+		    "head pose at exposure minus newest SLAM pose, ms: p05 %.1f p50 %.1f p95 %.1f; %zu of %zu "
+		    "predicted past it\n",
+		    age_ms.pct(0.05), age_ms.pct(0.5), age_ms.pct(0.95), predicted, age_ms.values.size());
 	}
 	for (const DatasetAnnotation &a : dataset.annotations) {
 		std::printf("annotation at %" PRIi64 " device %d: %s\n", a.host_ns, (int)a.device_id, a.text.c_str());
@@ -275,7 +278,8 @@ imu_orientation_at(const DatasetReader &dataset,
 		if (t.device_id != device_id || (t.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) == 0) {
 			continue;
 		}
-		if (best == nullptr || std::llabs(t.timestamp_ns - timestamp_ns) < std::llabs(best->timestamp_ns - timestamp_ns)) {
+		if (best == nullptr ||
+		    std::llabs(t.timestamp_ns - timestamp_ns) < std::llabs(best->timestamp_ns - timestamp_ns)) {
 			best = &t;
 		}
 	}
@@ -364,9 +368,10 @@ report_imu_offset(const DeviceTrack &track)
 		align_spread_deg.add(A.angularDistance(aligns[aligns.size() / 2]) * 180.0 / M_PI);
 	}
 	Eigen::AngleAxisd b(B);
-	std::printf("  IMU body offset B: %.1f deg about (%.3f, %.3f, %.3f) from %u relative rotations; quat "
-	            "(x %.4f, y %.4f, z %.4f, w %.4f)\n",
-	            b.angle() * 180.0 / M_PI, b.axis().x(), b.axis().y(), b.axis().z(), used, B.x(), B.y(), B.z(), B.w());
+	std::printf(
+	    "  IMU body offset B: %.1f deg about (%.3f, %.3f, %.3f) from %u relative rotations; quat "
+	    "(x %.4f, y %.4f, z %.4f, w %.4f)\n",
+	    b.angle() * 180.0 / M_PI, b.axis().x(), b.axis().y(), b.axis().z(), used, B.x(), B.y(), B.z(), B.w());
 	std::printf("  with B: world alignment tilt deg p50 %.2f p95 %.2f; alignment spread deg p50 %.2f p95 %.2f\n",
 	            tilt_deg.pct(0.5), tilt_deg.pct(0.95), align_spread_deg.pct(0.5), align_spread_deg.pct(0.95));
 }
@@ -459,8 +464,8 @@ override_calibration(DatasetReader &dataset, const char *path, const char *recor
 	}
 	/*
 	 * World-frame recordings place camera 0 at head * head_from_camera0 (X). Swapping X: head = recorded camera 0 *
-	 * X_recorded^-1, so the new camera 0 is recorded camera 0 * X_recorded^-1 * X_new. Head-relative recordings have
-	 * no head pose, so X cannot change them; both default to identity.
+	 * X_recorded^-1, so the new camera 0 is recorded camera 0 * X_recorded^-1 * X_new. Head-relative recordings
+	 * have no head pose, so X cannot change them; both default to identity.
 	 */
 	xrt_pose x_recorded = read_head_from_camera0(recorded_calibration);
 	xrt_pose x_new = read_head_from_camera0(path);
@@ -475,7 +480,8 @@ override_calibration(DatasetReader &dataset, const char *path, const char *recor
 		xrt_pose recorded_in_origin, inverse_recorded, changed_in_origin;
 		math_pose_transform(&inverse_cam0, &world[c].value(), &recorded_in_origin);
 		math_pose_invert(&recorded_in_origin, &inverse_recorded);
-		// World pose of camera c becomes: recorded world pose * inverse(recorded in origin) * X change * new in origin.
+		// World pose of camera c becomes: recorded world pose * inverse(recorded in origin) * X change * new in
+		// origin.
 		math_pose_transform(&x_change, &new_in_origin[c], &changed_in_origin);
 		math_pose_transform(&inverse_recorded, &changed_in_origin, &origin_from_recorded[c]);
 		const xrt_pose &d = origin_from_recorded[c];
@@ -496,15 +502,17 @@ override_calibration(DatasetReader &dataset, const char *path, const char *recor
 }
 
 /*!
- * @param records Optional: every accepted solve with its correspondences, so other backends can be run on exactly
- *                this optical input (--fusion-compare). Collecting them does not change the replay.
+ * @param records     Optional: every accepted solve with its correspondences, so other backends can be run on
+ *                    exactly this optical input (--fusion-compare). Collecting them does not change the replay.
+ * @param exposure_us Optional: solve and bootstrap time of each exposure, all devices (--compare-frontend).
  */
 int
 replay_m1(const DatasetReader &dataset,
           const char *csv_path,
           bool seed_recorded,
           const char *blobs_path,
-          std::vector<FrontendRecord> *records = nullptr)
+          std::vector<FrontendRecord> *records = nullptr,
+          std::vector<double> *exposure_us = nullptr)
 {
 	if (dataset.mosaics.empty()) {
 		std::fprintf(stderr, "no cameras in dataset\n");
@@ -525,8 +533,9 @@ replay_m1(const DatasetReader &dataset,
 
 	FILE *csv = csv_path ? std::fopen(csv_path, "w") : nullptr;
 	if (csv) {
-		std::fprintf(csv, "timestamp_ns,device,solved,seeded,cameras,matches,rms_px,coverage,outliers,solve_us,"
-		                  "px,py,pz,qx,qy,qz,qw,rms_cam0,rms_cam1,rms_cam2,rms_cam3,n_cam0,n_cam1,n_cam2,n_cam3\n");
+		std::fprintf(csv,
+		             "timestamp_ns,device,solved,seeded,cameras,matches,rms_px,coverage,outliers,solve_us,"
+		             "px,py,pz,qx,qy,qz,qw,rms_cam0,rms_cam1,rms_cam2,rms_cam3,n_cam0,n_cam1,n_cam2,n_cam3\n");
 	}
 
 	// Every blob with its owner after the exposure's solves (-1 for none), for studying background light.
@@ -571,9 +580,11 @@ replay_m1(const DatasetReader &dataset,
 		for (DeviceTrack &t : tracks) {
 			order.push_back(&t);
 		}
-		std::stable_sort(order.begin(), order.end(),
-		                 [](const DeviceTrack *a, const DeviceTrack *b) { return a->tracking && !b->tracking; });
+		std::stable_sort(order.begin(), order.end(), [](const DeviceTrack *a, const DeviceTrack *b) {
+			return a->tracking && !b->tracking;
+		});
 
+		double exposure_cost_us = 0.0;
 		for (DeviceTrack *track : order) {
 			t_constellation_device_id_t id = track->device->id;
 			if (any_blobs) {
@@ -596,11 +607,12 @@ replay_m1(const DatasetReader &dataset,
 				}
 				auto start = std::chrono::steady_clock::now();
 				ok = have_imu && track->have_align
-				         ? joint_solve_refine(cameras, track->device->led_model, prior, prior.orientation,
-				                              params, result)
-				         : joint_solve_refine(cameras, track->device->led_model, prior, JointSolveParams{},
-				                              result);
-				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+				         ? joint_solve_refine(cameras, track->device->led_model, prior,
+				                              prior.orientation, params, result)
+				         : joint_solve_refine(cameras, track->device->led_model, prior,
+				                              JointSolveParams{}, result);
+				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
+				         .count();
 				track->solve_us.add(us);
 			} else if (seed_recorded) {
 				if (!recorded_pose(exposure, id, prior)) {
@@ -608,20 +620,25 @@ replay_m1(const DatasetReader &dataset,
 				}
 				seeded = true;
 				auto start = std::chrono::steady_clock::now();
-				ok = joint_solve_refine(cameras, track->device->led_model, prior, JointSolveParams{}, result);
-				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+				ok = joint_solve_refine(cameras, track->device->led_model, prior, JointSolveParams{},
+				                        result);
+				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
+				         .count();
 				track->solve_us.add(us);
 			} else {
 				StereoBootstrapResult bootstrap;
 				auto start = std::chrono::steady_clock::now();
-				ok = stereo_bootstrap(cameras, track->device->led_model, StereoBootstrapParams{}, bootstrap);
-				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
+				ok = stereo_bootstrap(cameras, track->device->led_model, StereoBootstrapParams{},
+				                      bootstrap);
+				us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start)
+				         .count();
 				track->bootstrap_attempts++;
 				track->bootstrap_us.add(us);
 				result = bootstrap.refined;
 				bootstrapped = ok;
 				seeded = true;
 			}
+			exposure_cost_us += us;
 
 			if (csv) {
 				const xrt_pose &p = result.Tcv_world_device;
@@ -635,11 +652,13 @@ replay_m1(const DatasetReader &dataset,
 						count[cam]++;
 					}
 				}
-				std::fprintf(csv, "%" PRIi64 ",%d,%d,%d,%u,%u,%.4f,%.3f,%u,%.1f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f",
-				             exposure.timestamp_ns, (int)id, ok ? 1 : 0, seeded ? 1 : 0, result.cameras_used,
-				             result.matches, result.rms_px, result.coverage, result.outliers, us, p.position.x,
-				             p.position.y, p.position.z, p.orientation.x, p.orientation.y, p.orientation.z,
-				             p.orientation.w);
+				std::fprintf(csv,
+				             "%" PRIi64
+				             ",%d,%d,%d,%u,%u,%.4f,%.3f,%u,%.1f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f",
+				             exposure.timestamp_ns, (int)id, ok ? 1 : 0, seeded ? 1 : 0,
+				             result.cameras_used, result.matches, result.rms_px, result.coverage,
+				             result.outliers, us, p.position.x, p.position.y, p.position.z,
+				             p.orientation.x, p.orientation.y, p.orientation.z, p.orientation.w);
 				for (int c = 0; c < 4; c++) {
 					std::fprintf(csv, ",%.4f", count[c] ? std::sqrt(sum2[c] / count[c]) : NAN);
 				}
@@ -670,8 +689,9 @@ replay_m1(const DatasetReader &dataset,
 			track->positions.push_back({exposure.timestamp_ns, result.Tcv_world_device.position});
 			if (have_imu) {
 				const xrt_quat &o = result.Tcv_world_device.orientation;
-				track->orientation_pairs.push_back({Eigen::Quaterniond(o.w, o.x, o.y, o.z).normalized(),
-				                                    Eigen::Quaterniond(imu.w, imu.x, imu.y, imu.z).normalized()});
+				track->orientation_pairs.push_back(
+				    {Eigen::Quaterniond(o.w, o.x, o.y, o.z).normalized(),
+				     Eigen::Quaterniond(imu.w, imu.x, imu.y, imu.z).normalized()});
 				xrt_quat inverse_imu;
 				math_quat_invert(&imu, &inverse_imu);
 				math_quat_rotate(&result.Tcv_world_device.orientation, &inverse_imu, &track->align);
@@ -687,31 +707,44 @@ replay_m1(const DatasetReader &dataset,
 				owners[m.camera][m.blob] = id;
 			}
 			if (records != nullptr) {
-				FrontendRecord record{exposure.timestamp_ns, id,      result.Tcv_world_device, result.rms_px,
-				                      result.cameras_used,   result.matches, bootstrapped,         us,
+				FrontendRecord record{exposure.timestamp_ns,
+				                      id,
+				                      result.Tcv_world_device,
+				                      result.rms_px,
+				                      result.cameras_used,
+				                      result.matches,
+				                      bootstrapped,
+				                      us,
 				                      {}};
 				for (const JointSolveMatch &m : result.correspondences) {
-					record.correspondences.push_back(FrontendMatch{camera_index_of[m.camera],
-					                                               cameras[m.camera].Tcv_world_cam,
-					                                               cameras[m.camera].blobs[m.blob].center, m.led});
+					record.correspondences.push_back(
+					    FrontendMatch{camera_index_of[m.camera], cameras[m.camera].Tcv_world_cam,
+					                  cameras[m.camera].blobs[m.blob].center, m.led});
 				}
 				records->push_back(std::move(record));
 			}
 
 			xrt_pose recorded;
 			if (!seeded && recorded_pose(exposure, id, recorded)) {
-				track->recorded_delta_mm.add(1000.0 * distance_m(recorded.position, result.Tcv_world_device.position));
-				track->recorded_delta_deg.add(quat_angle_deg(recorded.orientation, result.Tcv_world_device.orientation));
+				track->recorded_delta_mm.add(
+				    1000.0 * distance_m(recorded.position, result.Tcv_world_device.position));
+				track->recorded_delta_deg.add(
+				    quat_angle_deg(recorded.orientation, result.Tcv_world_device.orientation));
 			}
+		}
+		if (exposure_us != nullptr) {
+			exposure_us->push_back(exposure_cost_us);
 		}
 		if (blobs_csv) {
 			for (size_t i = 0; i < cameras.size(); i++) {
 				for (uint32_t b = 0; b < cameras[i].blob_count; b++) {
 					const t_blob &blob = cameras[i].blobs[b];
-					std::fprintf(blobs_csv, "%" PRIi64 ",%u,%u,%.2f,%.2f,%.2f,%.2f,%.3f,%d\n",
-					             exposure.timestamp_ns, camera_index_of[i], blob.blob_id, blob.center.x,
-					             blob.center.y, blob.size.x, blob.size.y, blob.brightness,
-					             owners[i][b] == XRT_CONSTELLATION_INVALID_DEVICE_ID ? -1 : (int)owners[i][b]);
+					std::fprintf(
+					    blobs_csv, "%" PRIi64 ",%u,%u,%.2f,%.2f,%.2f,%.2f,%.3f,%d\n",
+					    exposure.timestamp_ns, camera_index_of[i], blob.blob_id, blob.center.x,
+					    blob.center.y, blob.size.x, blob.size.y, blob.brightness,
+					    owners[i][b] == XRT_CONSTELLATION_INVALID_DEVICE_ID ? -1
+					                                                        : (int)owners[i][b]);
 				}
 			}
 		}
@@ -756,11 +789,12 @@ replay_m1(const DatasetReader &dataset,
 			begin = i;
 		}
 
-		std::printf("M1 device %d: solved %u of %u exposures with blobs (%.1f%%), %u from recorded seeds, %u "
-		            "bootstraps from %u attempts\n",
-		            (int)track.device->id, track.solved, track.exposures_with_blobs,
-		            track.exposures_with_blobs ? 100.0 * track.solved / track.exposures_with_blobs : 0.0, track.seeds,
-		            track.bootstraps, track.bootstrap_attempts);
+		std::printf(
+		    "M1 device %d: solved %u of %u exposures with blobs (%.1f%%), %u from recorded seeds, %u "
+		    "bootstraps from %u attempts\n",
+		    (int)track.device->id, track.solved, track.exposures_with_blobs,
+		    track.exposures_with_blobs ? 100.0 * track.solved / track.exposures_with_blobs : 0.0, track.seeds,
+		    track.bootstraps, track.bootstrap_attempts);
 		std::printf("  bootstrap us p50 %.0f p95 %.0f max %.0f\n", track.bootstrap_us.pct(0.5),
 		            track.bootstrap_us.pct(0.95), track.bootstrap_us.pct(1.0));
 		std::printf("  cameras used:");
@@ -768,10 +802,10 @@ replay_m1(const DatasetReader &dataset,
 			std::printf(" %u:%u", cams, count);
 		}
 		std::printf("\n  matches p50 %.0f; rms px p50 %.3f p95 %.3f; coverage p50 %.2f p05 %.2f\n",
-		            track.matches.pct(0.5), track.rms_px.pct(0.5), track.rms_px.pct(0.95), track.coverage.pct(0.5),
-		            track.coverage.pct(0.05));
-		std::printf("  solve us p50 %.0f p95 %.0f max %.0f\n", track.solve_us.pct(0.5), track.solve_us.pct(0.95),
-		            track.solve_us.pct(1.0));
+		            track.matches.pct(0.5), track.rms_px.pct(0.5), track.rms_px.pct(0.95),
+		            track.coverage.pct(0.5), track.coverage.pct(0.05));
+		std::printf("  solve us p50 %.0f p95 %.0f max %.0f\n", track.solve_us.pct(0.5),
+		            track.solve_us.pct(0.95), track.solve_us.pct(1.0));
 		std::printf("  static jitter mm (1 s windows) p50 %.2f p95 %.2f over %zu windows\n", jitter_mm.pct(0.5),
 		            jitter_mm.pct(0.95), jitter_mm.values.size());
 		std::printf("  optical-from-IMU alignment tilt deg p50 %.2f p95 %.2f\n", track.align_tilt_deg.pct(0.5),
@@ -810,7 +844,8 @@ fake_origin_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 	}
 	auto it = std::lower_bound(origin->poses.begin(), origin->poses.end(), when_ns,
 	                           [](const std::pair<int64_t, xrt_pose> &p, int64_t t) { return p.first < t; });
-	if (it == origin->poses.end() || (it != origin->poses.begin() && when_ns - (it - 1)->first < it->first - when_ns)) {
+	if (it == origin->poses.end() ||
+	    (it != origin->poses.begin() && when_ns - (it - 1)->first < it->first - when_ns)) {
 		it = it == origin->poses.begin() ? it : it - 1;
 	}
 	out->pose = it->second;
@@ -860,10 +895,11 @@ fake_device_push(t_constellation_tracker_device *device, t_constellation_tracker
 	fake->positions.push_back({sample->timestamp_ns, sample->pose.position});
 	if (fake->csv) {
 		const xrt_pose &p = sample->pose;
-		std::fprintf(fake->csv, "%" PRIi64 ",%d,%u,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", sample->timestamp_ns,
-		             (int)fake->id, sample->joint_camera_count, sample->metrics.matched_blob_count,
-		             sample->metrics.reprojection_error, p.position.x, p.position.y, p.position.z, p.orientation.x,
-		             p.orientation.y, p.orientation.z, p.orientation.w);
+		std::fprintf(fake->csv, "%" PRIi64 ",%d,%u,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+		             sample->timestamp_ns, (int)fake->id, sample->joint_camera_count,
+		             sample->metrics.matched_blob_count, sample->metrics.reprojection_error, p.position.x,
+		             p.position.y, p.position.z, p.orientation.x, p.orientation.y, p.orientation.z,
+		             p.orientation.w);
 	}
 	fake->last = *sample;
 	fake->have_last = true;
@@ -879,8 +915,8 @@ void
 fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns, xrt_space_relation *out)
 {
 	/*
-	 * Like the Sense driver: orientation is the IMU's (the recorded relation's orientation, in the IMU's own world),
-	 * position is the last optical pose while it is fresh. Before any push there is only the orientation.
+	 * Like the Sense driver: orientation is the IMU's (the recorded relation's orientation, in the IMU's own
+	 * world), position is the last optical pose while it is fresh. Before any push there is only the orientation.
 	 */
 	FakeDevice *fake = fake_device_of_source(source);
 	*out = XRT_SPACE_RELATION_ZERO;
@@ -897,7 +933,8 @@ fake_device_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 	}
 	if (fake->have_last && std::llabs(when_ns - fake->last.timestamp_ns) < 100'000'000) {
 		out->pose.position = fake->last.pose.position;
-		out->relation_flags = (xrt_space_relation_flags)(out->relation_flags | XRT_SPACE_RELATION_POSITION_VALID_BIT);
+		out->relation_flags =
+		    (xrt_space_relation_flags)(out->relation_flags | XRT_SPACE_RELATION_POSITION_VALID_BIT);
 	}
 }
 
@@ -956,7 +993,8 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
 	math_pose_invert(&first_world[0].value(), &inverse_cam0);
 	for (size_t c = 0; c < camera_count; c++) {
 		params.mosaics[0].cameras[c].calibration = mosaic.camera_calibrations[c];
-		math_pose_transform(&inverse_cam0, &first_world[c].value(), &params.mosaics[0].cameras[c].pose_in_origin);
+		math_pose_transform(&inverse_cam0, &first_world[c].value(),
+		                    &params.mosaics[0].cameras[c].pose_in_origin);
 		params.mosaics[0].cameras[c].has_concrete_pose = true;
 	}
 
@@ -1037,7 +1075,8 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
 			       fake->imu[fake->next_imu]->timestamp_ns <= sample->timestamp_ns + 30'000'000) {
 				const xrt_imu_sample *s = fake->imu[fake->next_imu++];
 				xrt_vec3 a{(float)s->accel_m_s2.x, (float)s->accel_m_s2.y, (float)s->accel_m_s2.z};
-				xrt_vec3 g{(float)s->gyro_rad_secs.x, (float)s->gyro_rad_secs.y, (float)s->gyro_rad_secs.z};
+				xrt_vec3 g{(float)s->gyro_rad_secs.x, (float)s->gyro_rad_secs.y,
+				           (float)s->gyro_rad_secs.z};
 				xrt_vec3 a_led, g_led;
 				math_quat_rotate_vec3(&imu_to_led, &a, &a_led);
 				math_quat_rotate_vec3(&imu_to_led, &g, &g_led);
@@ -1085,8 +1124,8 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
  * Offline evaluation of the IMU + optical EKF (--filter-eval TRACKER.csv): the dataset's IMU samples (rotated into the
  * LED model frame by the Sense mounting angle) and the tracker's poses (constellation_replay --tracker-csv, world
  * frame) are replayed through t_imu_optical_filter as the driver would see them, each optical pose arriving
- * kOpticalDelayNs after its exposure. Every kGapPeriodNs the optical poses are hidden for kGapLengthNs; the filter's pose
- * at each hidden exposure is compared with the hidden optical pose, against holding the last optical pose.
+ * kOpticalDelayNs after its exposure. Every kGapPeriodNs the optical poses are hidden for kGapLengthNs; the filter's
+ * pose at each hidden exposure is compared with the hidden optical pose, against holding the last optical pose.
  */
 constexpr int64_t kOpticalDelayNs = 35'000'000;
 constexpr int64_t kGapPeriodNs = 2'000'000'000;
@@ -1132,16 +1171,19 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 	}
 
 	const double half = imu_angle_deg * M_PI / 180.0 * 0.5;
-	xrt_quat imu_to_led{(float)-std::sin(half), 0.0f, 0.0f, (float)std::cos(half)}; // inverse of the mounting rotation
+	xrt_quat imu_to_led{(float)-std::sin(half), 0.0f, 0.0f,
+	                    (float)std::cos(half)}; // inverse of the mounting rotation
 
 	FILE *out = out_csv ? std::fopen(out_csv, "w") : nullptr;
 	if (out) {
-		std::fprintf(out, "timestamp_ns,device,hidden,raw_px,raw_py,raw_pz,raw_qx,raw_qy,raw_qz,raw_qw,"
-		                  "filt_px,filt_py,filt_pz,filt_qx,filt_qy,filt_qz,filt_qw\n");
+		std::fprintf(out,
+		             "timestamp_ns,device,hidden,raw_px,raw_py,raw_pz,raw_qx,raw_qy,raw_qz,raw_qw,"
+		             "filt_px,filt_py,filt_pz,filt_qx,filt_qy,filt_qz,filt_qw\n");
 	}
 
 	for (auto &[device, list] : poses) {
-		std::sort(list.begin(), list.end(), [](const TrackerPose &a, const TrackerPose &b) { return a.t < b.t; });
+		std::sort(list.begin(), list.end(),
+		          [](const TrackerPose &a, const TrackerPose &b) { return a.t < b.t; });
 		std::vector<const xrt_imu_sample *> imu;
 		for (const DatasetImuSample &s : dataset.imu_samples) {
 			if ((int)s.device_id == device) {
@@ -1171,8 +1213,8 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 
 		Stats hidden_filter_mm, hidden_filter_deg, hidden_hold_mm, hidden_hold_deg, visible_diff_mm;
 		Stats gravity_x, gravity_y, gravity_z;
-		size_t next_pose = 0;           // next optical pose to deliver
-		size_t next_eval = 0;           // next exposure to evaluate (at its exposure time, as live)
+		size_t next_pose = 0; // next optical pose to deliver
+		size_t next_eval = 0; // next exposure to evaluate (at its exposure time, as live)
 		const int64_t t0 = list.front().t;
 		xrt_pose last_delivered = list.front().pose;
 		int64_t last_delivered_t = 0;
@@ -1187,10 +1229,12 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 			math_quat_rotate_vec3(&imu_to_led, &g, &g_led);
 			t_imu_optical_filter_push_imu(filter, s->timestamp_ns, &a_led, &g_led);
 
-			// Gravity check while nearly still: the accelerometer rotated into the world by the optical orientation.
+			// Gravity check while nearly still: the accelerometer rotated into the world by the optical
+			// orientation.
 			double gyro_len = std::sqrt(g.x * g.x + g.y * g.y + g.z * g.z);
-			// Only with a fresh optical orientation (exposed within the delivery delay plus 20 ms; a stale one from before the controller was
-			// put down out of view says nothing), slow rotation and ~1 g (little linear acceleration).
+			// Only with a fresh optical orientation (exposed within the delivery delay plus 20 ms; a stale
+			// one from before the controller was put down out of view says nothing), slow rotation and ~1 g
+			// (little linear acceleration).
 			double accel_len = std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
 			if (have_delivered && gyro_len < 0.5 && std::fabs(accel_len - 9.80665) < 0.4 &&
 			    s->timestamp_ns - last_delivered_t < kOpticalDelayNs + 20'000'000) {
@@ -1213,8 +1257,8 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 				last_delivered_t = tp.t;
 				have_delivered = true;
 			}
-			// Evaluate exposures as the live driver would when asked for them: at the exposure time itself, once
-			// the IMU has reached it (the joint tracker's prior), using everything delivered by then.
+			// Evaluate exposures as the live driver would when asked for them: at the exposure time itself,
+			// once the IMU has reached it (the joint tracker's prior), using everything delivered by then.
 			while (next_eval < list.size() && list[next_eval].t <= s->timestamp_ns) {
 				const TrackerPose &tp = list[next_eval++];
 				xrt_space_relation rel;
@@ -1227,21 +1271,25 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 				if (is_hidden) {
 					hidden_filter_mm.add(mm);
 					hidden_filter_deg.add(deg);
-					hidden_hold_mm.add(1000.0 * distance_m(last_delivered.position, tp.pose.position));
-					hidden_hold_deg.add(quat_angle_rad(last_delivered.orientation, tp.pose.orientation) * 180.0 /
-					                    M_PI);
+					hidden_hold_mm.add(1000.0 *
+					                   distance_m(last_delivered.position, tp.pose.position));
+					hidden_hold_deg.add(
+					    quat_angle_rad(last_delivered.orientation, tp.pose.orientation) * 180.0 /
+					    M_PI);
 				} else {
 					visible_diff_mm.add(mm);
 				}
 				if (out) {
-					std::fprintf(out,
-					             "%" PRIi64 ",%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
-					             "%.6f,%.6f\n",
-					             tp.t, device, is_hidden ? 1 : 0, tp.pose.position.x, tp.pose.position.y,
-					             tp.pose.position.z, tp.pose.orientation.x, tp.pose.orientation.y,
-					             tp.pose.orientation.z, tp.pose.orientation.w, rel.pose.position.x,
-					             rel.pose.position.y, rel.pose.position.z, rel.pose.orientation.x,
-					             rel.pose.orientation.y, rel.pose.orientation.z, rel.pose.orientation.w);
+					std::fprintf(
+					    out,
+					    "%" PRIi64
+					    ",%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,"
+					    "%.6f,%.6f\n",
+					    tp.t, device, is_hidden ? 1 : 0, tp.pose.position.x, tp.pose.position.y,
+					    tp.pose.position.z, tp.pose.orientation.x, tp.pose.orientation.y,
+					    tp.pose.orientation.z, tp.pose.orientation.w, rel.pose.position.x,
+					    rel.pose.position.y, rel.pose.position.z, rel.pose.orientation.x,
+					    rel.pose.orientation.y, rel.pose.orientation.z, rel.pose.orientation.w);
 				}
 			}
 		}
@@ -1251,11 +1299,12 @@ replay_filter(const DatasetReader &dataset, const char *tracker_csv, double imu_
 		std::printf("filter device %d: %zu IMU samples, %zu poses; updates %" PRIu64 " rejections %" PRIu64
 		            " reinitialisations %" PRIu64 "\n",
 		            device, imu.size(), list.size(), st.updates, st.rejections, st.reinitialisations);
-		std::printf("  hidden %zu exposures (300 ms every 2 s): filter mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f;"
-		            " hold-last mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f\n",
-		            hidden_filter_mm.values.size(), hidden_filter_mm.pct(0.5), hidden_filter_mm.pct(0.95),
-		            hidden_filter_deg.pct(0.5), hidden_filter_deg.pct(0.95), hidden_hold_mm.pct(0.5),
-		            hidden_hold_mm.pct(0.95), hidden_hold_deg.pct(0.5), hidden_hold_deg.pct(0.95));
+		std::printf(
+		    "  hidden %zu exposures (300 ms every 2 s): filter mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f;"
+		    " hold-last mm p50 %.1f p95 %.1f, deg p50 %.2f p95 %.2f\n",
+		    hidden_filter_mm.values.size(), hidden_filter_mm.pct(0.5), hidden_filter_mm.pct(0.95),
+		    hidden_filter_deg.pct(0.5), hidden_filter_deg.pct(0.95), hidden_hold_mm.pct(0.5),
+		    hidden_hold_mm.pct(0.95), hidden_hold_deg.pct(0.5), hidden_hold_deg.pct(0.95));
 		std::printf("  visible exposures: filter vs optical mm p50 %.1f p95 %.1f\n", visible_diff_mm.pct(0.5),
 		            visible_diff_mm.pct(0.95));
 		std::printf("  ~1 g accelerometer in the world (expect ~0, +9.8, 0): %.2f %.2f %.2f (%zu samples)\n",
@@ -1278,7 +1327,14 @@ int
 main(int argc, char **argv)
 {
 	if (argc < 2) {
-		std::fprintf(stderr, "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv OUT.csv] [--calibration CAL.json [--recorded-calibration SESSION/calibration.json]] [--blobs-csv OUT.csv] [--geometry PREFIX] [--filter-eval TRACKER.csv [--filter-out OUT.csv]] [--fusion-compare [--run-log SESSION/run.log] [--fusion-out PREFIX] [--fusion-scenarios nominal,dropout,corrupt]]\n", argv[0]);
+		std::fprintf(
+		    stderr,
+		    "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv "
+		    "OUT.csv] [--calibration CAL.json [--recorded-calibration SESSION/calibration.json]] [--blobs-csv "
+		    "OUT.csv] [--geometry PREFIX] [--filter-eval TRACKER.csv [--filter-out OUT.csv]] [--fusion-compare "
+		    "[--run-log SESSION/run.log] [--fusion-out PREFIX] [--fusion-scenarios nominal,dropout,corrupt] "
+		    "[--fusion-frontend NAME]] [--compare-frontend NAME=RECORDS.csv ...] [--compare-out OUT.csv]\n",
+		    argv[0]);
 		return 2;
 	}
 	bool m1 = false;
@@ -1300,6 +1356,10 @@ main(int argc, char **argv)
 	const char *run_log = nullptr;
 	const char *fusion_out = nullptr;
 	const char *fusion_scenarios = nullptr;
+	const char *fusion_frontend = nullptr;
+	std::vector<std::pair<std::string, std::string>> compare_frontends;
+	bool compare = false;
+	const char *compare_out = nullptr;
 	for (int i = 2; i < argc; i++) {
 		std::string arg = argv[i];
 		if (arg == "--m1") {
@@ -1343,6 +1403,21 @@ main(int argc, char **argv)
 			fusion_out = argv[++i];
 		} else if (arg == "--fusion-scenarios" && i + 1 < argc) {
 			fusion_scenarios = argv[++i];
+		} else if (arg == "--fusion-frontend" && i + 1 < argc) {
+			fusion_frontend = argv[++i];
+		} else if (arg == "--compare-frontend" && i + 1 < argc) {
+			std::string spec = argv[++i];
+			size_t eq = spec.find('=');
+			if (eq == std::string::npos || eq == 0) {
+				std::fprintf(stderr, "--compare-frontend wants NAME=RECORDS.csv, got %s\n",
+				             spec.c_str());
+				return 2;
+			}
+			compare_frontends.push_back({spec.substr(0, eq), spec.substr(eq + 1)});
+			compare = true;
+		} else if (arg == "--compare-out" && i + 1 < argc) {
+			compare_out = argv[++i];
+			compare = true;
 		}
 	}
 
@@ -1353,20 +1428,22 @@ main(int argc, char **argv)
 		}
 		int status = summarise(dataset);
 		if (imu_csv) {
-			// IMU samples as the devices pushed them (host time; accel m/s^2 and gyro rad/s in the IMU frame).
+			// IMU samples as the devices pushed them (host time; accel m/s^2 and gyro rad/s in the IMU
+			// frame).
 			FILE *f = std::fopen(imu_csv, "w");
 			std::fprintf(f, "timestamp_ns,device,ax,ay,az,gx,gy,gz\n");
 			for (const DatasetImuSample &imu : dataset.imu_samples) {
 				const xrt_imu_sample &s = imu.sample;
 				std::fprintf(f, "%" PRIi64 ",%d,%.6f,%.6f,%.6f,%.7f,%.7f,%.7f\n", s.timestamp_ns,
-				             (int)imu.device_id, s.accel_m_s2.x, s.accel_m_s2.y, s.accel_m_s2.z, s.gyro_rad_secs.x,
-				             s.gyro_rad_secs.y, s.gyro_rad_secs.z);
+				             (int)imu.device_id, s.accel_m_s2.x, s.accel_m_s2.y, s.accel_m_s2.z,
+				             s.gyro_rad_secs.x, s.gyro_rad_secs.y, s.gyro_rad_secs.z);
 			}
 			std::fclose(f);
 			std::printf("imu samples: %zu\n", dataset.imu_samples.size());
 		}
 		if (geometry_prefix) {
-			// Camera world poses per sample (XR convention) and each device's LED model (device frame, as stored).
+			// Camera world poses per sample (XR convention) and each device's LED model (device frame, as
+			// stored).
 			std::string prefix = geometry_prefix;
 			FILE *f = std::fopen((prefix + "-cameras.csv").c_str(), "w");
 			std::fprintf(f, "timestamp_ns,camera,px,py,pz,qx,qy,qz,qw\n");
@@ -1375,9 +1452,10 @@ main(int argc, char **argv)
 					continue;
 				}
 				const xrt_pose &c = sample.Txr_world_cam.value();
-				std::fprintf(f, "%" PRIi64 ",%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", sample.timestamp_ns,
-				             sample.camera_index, c.position.x, c.position.y, c.position.z, c.orientation.x,
-				             c.orientation.y, c.orientation.z, c.orientation.w);
+				std::fprintf(f, "%" PRIi64 ",%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+				             sample.timestamp_ns, sample.camera_index, c.position.x, c.position.y,
+				             c.position.z, c.orientation.x, c.orientation.y, c.orientation.z,
+				             c.orientation.w);
 			}
 			std::fclose(f);
 			f = std::fopen((prefix + "-leds.csv").c_str(), "w");
@@ -1385,21 +1463,23 @@ main(int argc, char **argv)
 			for (const DatasetDevice &device : dataset.devices) {
 				for (size_t l = 0; l < device.leds.size(); l++) {
 					const t_constellation_tracker_led &led = device.leds[l];
-					std::fprintf(f, "%d,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f\n", (int)device.id, l,
-					             led.position.x, led.position.y, led.position.z, led.normal.x, led.normal.y,
-					             led.normal.z, led.visibility_angle);
+					std::fprintf(f, "%d,%zu,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.4f\n", (int)device.id,
+					             l, led.position.x, led.position.y, led.position.z, led.normal.x,
+					             led.normal.y, led.normal.z, led.visibility_angle);
 				}
 			}
 			std::fclose(f);
 		}
 		if (tracking_csv) {
-			// Every recorded tracking-source relation (what the device predicted at each exposure), XR convention.
+			// Every recorded tracking-source relation (what the device predicted at each exposure), XR
+			// convention.
 			FILE *f = std::fopen(tracking_csv, "w");
 			std::fprintf(f, "timestamp_ns,device,camera,flags,px,py,pz,qx,qy,qz,qw\n");
 			for (const DatasetDeviceTracking &t : dataset.device_tracking) {
-				std::fprintf(f, "%" PRIi64 ",%d,%u,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n", t.timestamp_ns,
-				             (int)t.device_id, t.camera_index, (unsigned)t.relation_flags, t.pose.position.x,
-				             t.pose.position.y, t.pose.position.z, t.pose.orientation.x, t.pose.orientation.y,
+				std::fprintf(f, "%" PRIi64 ",%d,%u,%u,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f\n",
+				             t.timestamp_ns, (int)t.device_id, t.camera_index,
+				             (unsigned)t.relation_flags, t.pose.position.x, t.pose.position.y,
+				             t.pose.position.z, t.pose.orientation.x, t.pose.orientation.y,
 				             t.pose.orientation.z, t.pose.orientation.w);
 			}
 			std::fclose(f);
@@ -1407,15 +1487,49 @@ main(int argc, char **argv)
 		if (filter_eval) {
 			status = replay_filter(dataset, filter_eval, imu_angle_deg, filter_out) != 0 ? 1 : status;
 		}
+		std::vector<int64_t> exposure_times;
+		for (const Exposure &exposure : group_exposures(dataset.samples)) {
+			exposure_times.push_back(exposure.timestamp_ns);
+		}
+		// Front ends: M1/M2 runs once; imported ones come from records files. Every consumer sees the same
+		// solves.
+		std::vector<FrontendRun> frontends;
+		if (fusion || compare) {
+			FrontendRun ours;
+			ours.name = "M1";
+			status =
+			    replay_m1(dataset, csv, seed_recorded, blobs_csv, &ours.records, &ours.exposure_us) != 0
+			        ? 1
+			        : status;
+			frontends.push_back(std::move(ours));
+			for (const auto &[name, path] : compare_frontends) {
+				FrontendRun run;
+				run.name = name;
+				if (!load_frontend_records(dataset, exposure_times, path.c_str(), run)) {
+					return 1;
+				}
+				frontends.push_back(std::move(run));
+			}
+		}
+		if (compare) {
+			status = frontend_compare(dataset, exposure_times, frontends, compare_out) != 0 ? 1 : status;
+		}
 		if (fusion) {
 #ifdef XRT_HAVE_CONSTELLATION_FUSION_EVAL
-			// The M1/M2 frontend runs once; every backend then consumes exactly its solves.
-			std::vector<FrontendRecord> records;
-			status = replay_m1(dataset, csv, seed_recorded, blobs_csv, &records) != 0 ? 1 : status;
-			std::vector<int64_t> exposure_times;
-			for (const Exposure &exposure : group_exposures(dataset.samples)) {
-				exposure_times.push_back(exposure.timestamp_ns);
+			const FrontendRun *input = &frontends[0];
+			if (fusion_frontend != nullptr) {
+				input = nullptr;
+				for (const FrontendRun &run : frontends) {
+					input = run.name == fusion_frontend ? &run : input;
+				}
+				if (input == nullptr) {
+					std::fprintf(stderr, "--fusion-frontend %s: no such front end\n",
+					             fusion_frontend);
+					return 1;
+				}
 			}
+			std::printf("fusion input: %s front end\n", input->name.c_str());
+			const std::vector<FrontendRecord> &records = input->records;
 			FusionCompareOptions options;
 			options.run_log = run_log;
 			options.out_prefix = fusion_out;
@@ -1428,7 +1542,7 @@ main(int argc, char **argv)
 			std::fprintf(stderr, "--fusion-compare needs a build with Ceres >= 2.1\n");
 			status = 1;
 #endif
-		} else if (m1) {
+		} else if (m1 && !compare) {
 			status = replay_m1(dataset, csv, seed_recorded, blobs_csv) != 0 ? 1 : status;
 		}
 		if (tracker) {
