@@ -212,10 +212,10 @@ struct ipc_client_state
 	//! Kernel-verified native peer PID, zero for transports without peer credentials.
 	int64_t peer_pid;
 
-	//! Staging area for compact Wine/TCP layer uploads.
-	struct ipc_layer_slot wine_layer_slot_upload;
-	uint32_t wine_layer_slot_received;
-	uint32_t wine_layer_slot_total_size;
+	//! Staging area for compact byte-stream layer uploads.
+	struct ipc_layer_slot stream_layer_slot_upload;
+	uint32_t stream_layer_slot_received;
+	uint32_t stream_layer_slot_total_size;
 
 	uint64_t plane_detection_size;
 	uint64_t plane_detection_count;
@@ -688,7 +688,7 @@ ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_h
 
 /*!
  * Variant used for byte-stream IPC transports that need transport-specific
- * server policy. On macOS this is the loopback Wine/TCP bridge.
+ * server policy.
  */
 void
 ipc_server_handle_stream_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle);
@@ -739,11 +739,11 @@ get_ism_handle(volatile struct ipc_client_state *ics)
 
 #ifdef XRT_OS_OSX
 /*!
- * Record a swapchain wait/acquire/release for the Wine bridge timing trace.
- * Does nothing unless the Wine submit trace is enabled.
+ * Record a swapchain wait/acquire/release for the IPC timing trace.
+ * Does nothing unless IPC timing tracing is enabled.
  */
 void
-wine_swapchain_trace_event(const char *event,
+ipc_swapchain_trace_event(const char *event,
                            uint32_t swapchain_id,
                            uint32_t image_index,
                            int64_t duration_ns,
@@ -752,7 +752,7 @@ wine_swapchain_trace_event(const char *event,
 #else
 // Only traced on macOS.
 static inline void
-wine_swapchain_trace_event(const char *event,
+ipc_swapchain_trace_event(const char *event,
                            uint32_t swapchain_id,
                            uint32_t image_index,
                            int64_t duration_ns,
