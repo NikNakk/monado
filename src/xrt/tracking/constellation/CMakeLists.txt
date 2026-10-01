@@ -58,3 +58,20 @@ if(XRT_FEATURE_RERUN)
 			constellation_tracker_rerun_blobwatch.h
 		)
 endif()
+
+# Offline replay of a constellation dataset through this tracker, writing per-frame front-end records.
+add_executable(constellation_upstream_replay tools/constellation_upstream_replay.cpp)
+target_include_directories(
+	constellation_upstream_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../drivers
+	)
+target_link_libraries(
+	constellation_upstream_replay
+	PRIVATE
+		constellation
+		xrt-interfaces
+		tracking-includes
+		aux_os
+		aux_util
+		aux_math
+		aux_tracking
+	)
