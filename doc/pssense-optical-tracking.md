@@ -1168,6 +1168,16 @@ M1/M2 poses and the EKF on identical input (`constellation_replay --fusion-compa
 and is modestly better in some consistency metrics, at about 300× the cost. The recommendation is to keep M3 + EKF and
 take selected components. See `doc/macos-pssense-upstream-fusion-evaluation.md`.
 
+## Upstream front end (MR 2940) and recording for evaluation (1 Oct)
+
+Upstream's per-camera front end now runs on recordings in its own tree (`constellation_upstream_replay`, branch
+`claude/pssense-upstream-frontend-replay`). `constellation_replay --compare-frontend` scores its poses beside M1's by one
+evaluator. On synthetic recordings with ground truth, it solved 15–20% more exposures than M1, at 2–3× the pose error
+and about 10× the cost. M1's misses there come from its coverage gate on merged blobs. The Mac recordings still need
+to be run through it. Recordings now carry session info, sync events, IMU timing, head-pose age and Create-button
+static markers (packet 5). See `doc/macos-pssense-mr2940-frontend-evaluation.md` for the results, the commands and
+recording guidance.
+
 ## Session tools
 
 - `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
@@ -1184,6 +1194,6 @@ take selected components. See `doc/macos-pssense-upstream-fusion-evaluation.md`.
 
 It is tested by `tests/test_psvr2_sense_session_score.py`.
 
-A full offline replay, feeding recorded frames, IMU and HMD poses back through the tracker, is not built
-yet. It should follow once the calibration is recaptured, so pose-solver changes can be scored on identical
-input.
+`constellation_replay` replays a session's `constellation.ctd` (blobs, camera poses, IMU, and, from 1 Oct, the
+packet 5 extension records) through M1/M2, the tracker, the fusion paths and other front ends. `constellation_synth`
+writes synthetic sessions with ground truth for checking those pipelines.
