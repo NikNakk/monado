@@ -551,6 +551,35 @@ branch is an alternative complete port:
 The tracker in [macos-port-tracker.md](macos-port-tracker.md) is the shorter
 branch-oriented companion to this document.
 
+## Upstream sync
+
+The integration branch was forked from upstream at `ac3f23f71` (2026-03-31).
+Upstream `main` up to `045931d12` (2026-09-30) has been merged on
+`macos-upstream-sync-2026-10`; it builds and passes tests on Linux, and
+awaits macOS CI and a headset run before it replaces the integration branch.
+Points that change behaviour or need checking on hardware:
+
+- **PS Sense** now uses upstream's rewritten driver: constellation (optical)
+  tracking support, USB, clock sync, factory IMU calibration, corrected
+  grip/aim poses and a Touch-controller binding profile. Our generic, simple
+  and optional Index profiles remain, and synthetic position and the arm
+  model still apply when constellation tracking is not in use (the PS VR2
+  builder does not add the controllers to a constellation tracker). The
+  driver now requires Ceres: `brew install ceres-solver`, otherwise
+  `XRT_BUILD_DRIVER_PSSENSE` is silently off. Check 3DoF orientation, the
+  grip/aim offsets and the synthetic modes on hardware.
+- **Compositor**: the shared render code moved to `auxiliary/render` with a
+  pipeline cache. Depth reprojection, Metal foveation and the identity
+  distortion bypass were carried over; the layer shader also gained
+  upstream's chroma key, inset blending and frustum rejection. Check depth
+  reprojection and foveated layers on hardware. The layer UBO is 63,536
+  bytes, close to the 64 KiB limit, so a static assert guards it.
+- **PS VR2 prediction**: dead reckoning now reports failure instead of
+  asserting; the driver falls back to the latest SLAM pose. With our IMU
+  FIFO index fix this is not expected in normal running.
+- `macos-pssense-6dof` predates upstream's constellation tracker and should
+  be rebased on it rather than merged as is.
+
 
 ### PS VR2 eye-gaze calibration tuning
 
