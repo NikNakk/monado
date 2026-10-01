@@ -109,6 +109,51 @@ comp_metal_semaphore_create_client_pair(struct xrt_compositor_semaphore **out_xc
 @end
 
 xrt_result_t
+comp_metal_semaphore_import_shared_event_handle(void *mtl_shared_event_handle,
+                                                struct xrt_compositor_semaphore **out_xcsem)
+{
+	if (mtl_shared_event_handle == NULL || out_xcsem == NULL) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	*out_xcsem = NULL;
+
+	pthread_mutex_lock(&g_provider.mutex);
+	struct vk_bundle *vk = g_provider.vk;
+	if (vk == NULL || vk->vkExportMetalObjectsEXT == NULL) {
+		pthread_mutex_unlock(&g_provider.mutex);
+		return XRT_ERROR_VULKAN;
+	}
+
+	VkExportMetalDeviceInfoEXT device_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_DEVICE_INFO_EXT,
+	};
+	VkExportMetalObjectsInfoEXT objects_info = {
+	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
+	    .pNext = &device_info,
+	};
+	vk->vkExportMetalObjectsEXT(vk->device, &objects_info);
+	id<MTLDevice> device = (__bridge id<MTLDevice>)device_info.mtlDevice;
+	if (device == nil) {
+		pthread_mutex_unlock(&g_provider.mutex);
+		return XRT_ERROR_VULKAN;
+	}
+
+	MTLSharedEventHandle *handle = (__bridge MTLSharedEventHandle *)mtl_shared_event_handle;
+	id<MTLSharedEvent> event = [device newSharedEventWithHandle:handle];
+	if (event == nil) {
+		pthread_mutex_unlock(&g_provider.mutex);
+		return XRT_ERROR_VULKAN;
+	}
+
+	uint64_t initial_value = event.signaledValue;
+	xrt_result_t xret =
+	    comp_semaphore_import_metal_shared_event(vk, (__bridge void *)event, initial_value, out_xcsem);
+	[event release];
+	pthread_mutex_unlock(&g_provider.mutex);
+	return xret;
+}
+
+xrt_result_t
 comp_metal_semaphore_import_bootstrap_event(const char *bootstrap_name, struct xrt_compositor_semaphore **out_xcsem)
 {
 	if (bootstrap_name == NULL || bootstrap_name[0] == '\0' || out_xcsem == NULL) {
