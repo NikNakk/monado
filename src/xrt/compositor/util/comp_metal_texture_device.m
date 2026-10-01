@@ -209,8 +209,8 @@ comp_metal_texture_create_from_bootstrap_name_for_vk_device(struct vk_bundle *vk
 		    texture.sampleCount != 1 || texture.pixelFormat != pixel_format ||
 		    texture.textureType != expected_type) {
 			U_LOG_E(
-			    "Shared Metal texture geometry mismatch for '%s': got=%lux%lu array=%lu type=%lu format=%lu "
-			    "expected=%ux%u array=%u type=%lu format=%lu",
+			    "Shared Metal texture geometry mismatch for '%s': got=%lux%lu array=%lu type=%lu "
+			    "format=%lu expected=%ux%u array=%u type=%lu format=%lu",
 			    bootstrap_name, (unsigned long)texture.width, (unsigned long)texture.height,
 			    (unsigned long)texture.arrayLength, (unsigned long)texture.textureType,
 			    (unsigned long)texture.pixelFormat, info->width, info->height, info->array_size,
