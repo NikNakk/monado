@@ -502,9 +502,129 @@ override_calibration(DatasetReader &dataset, const char *path, const char *recor
 }
 
 /*!
+ * Move LEDs of the recorded models (--led-offsets): rows of "device,led,dx_mm,dy_mm,dz_mm" in the model's own frame,
+ * as --residuals-csv reports its err_*_mm. For trying a corrected model on a recording.
+ */
+void
+apply_led_offsets(DatasetReader &dataset, const char *path)
+{
+	std::ifstream in(path);
+	if (!in) {
+		throw std::runtime_error(std::string("cannot open ") + path);
+	}
+	std::string line;
+	size_t applied = 0;
+	while (std::getline(in, line)) {
+		int device, led;
+		double dx, dy, dz;
+		if (std::sscanf(line.c_str(), "%d,%d,%lf,%lf,%lf", &device, &led, &dx, &dy, &dz) != 5) {
+			continue; // header or comment
+		}
+		for (DatasetDevice &d : dataset.devices) {
+			if ((int)d.id != device || led < 0 || (size_t)led >= d.led_model.led_count) {
+				continue;
+			}
+			xrt_vec3 &p = d.led_model.leds[led].position;
+			p.x += (float)(dx / 1000.0);
+			p.y += (float)(dy / 1000.0);
+			p.z += (float)(dz / 1000.0);
+			applied++;
+		}
+	}
+	std::printf("LED offsets from %s applied to %zu LEDs\n", path, applied);
+}
+
+/*!
+ * One row per correspondence of a solve, for looking at where the reprojection error sits (--residuals-csv): which
+ * LED, which camera, how far from the camera (range_m) and how obliquely (facing_deg, 0 is head on) the LED was seen.
+ *
+ * The pixel residual is blob minus projection. err_*_mm is the same residual as a displacement of the LED in the
+ * device frame, perpendicular to the view ray (ray_*, LED towards camera, device frame): the smallest move of the LED
+ * that would put its projection on the blob. Averaged over many views, per LED, it estimates the LED's position error
+ * in the model.
+ */
+void
+write_residual_rows(FILE *out,
+                    int64_t timestamp_ns,
+                    t_constellation_device_id_t id,
+                    bool solved,
+                    bool seeded,
+                    const JointSolveResult &result,
+                    const std::vector<JointSolveCamera> &cameras,
+                    const std::vector<uint32_t> &camera_index_of,
+                    const t_constellation_tracker_led_model &model)
+{
+	const xrt_pose &pose = result.Tcv_world_device;
+	Eigen::Quaterniond q_wd =
+	    Eigen::Quaterniond(pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z)
+	        .normalized();
+	Eigen::Vector3d t_wd(pose.position.x, pose.position.y, pose.position.z);
+
+	for (const JointSolveMatch &m : result.correspondences) {
+		const JointSolveCamera &camera = cameras[m.camera];
+		const t_constellation_tracker_led &led = model.leds[m.led];
+		const t_blob &blob = camera.blobs[m.blob];
+
+		const xrt_pose &cam = camera.Tcv_world_cam;
+		Eigen::Quaterniond q_wc =
+		    Eigen::Quaterniond(cam.orientation.w, cam.orientation.x, cam.orientation.y, cam.orientation.z)
+		        .normalized();
+		Eigen::Vector3d t_wc(cam.position.x, cam.position.y, cam.position.z);
+
+		Eigen::Vector3d p_device(led.position.x, led.position.y, led.position.z);
+		Eigen::Vector3d p_cam = q_wc.conjugate() * (q_wd * p_device + t_wd - t_wc);
+		auto project = [&](const Eigen::Vector3d &p, Eigen::Vector2d &px) {
+			float u, v;
+			if (!t_camera_models_project(camera.model, (float)p.x(), (float)p.y(), (float)p.z(), &u, &v)) {
+				return false;
+			}
+			px = Eigen::Vector2d(u, v);
+			return true;
+		};
+		Eigen::Vector2d px;
+		if (!project(p_cam, px)) {
+			continue;
+		}
+		Eigen::Vector2d d(blob.center.x - px.x(), blob.center.y - px.y());
+
+		// LED towards camera, and the LED's normal against it.
+		Eigen::Vector3d ray_cam = -p_cam.normalized();
+		Eigen::Vector3d n_cam = q_wc.conjugate() * (q_wd * Eigen::Vector3d(led.normal.x, led.normal.y, led.normal.z));
+		double facing_deg = std::acos(std::max(-1.0, std::min(1.0, ray_cam.dot(n_cam.normalized())))) * 180.0 / M_PI;
+
+		// Two directions across the view ray, and how the projection moves along each (finite difference).
+		Eigen::Vector3d e1 = ray_cam.unitOrthogonal();
+		Eigen::Vector3d e2 = ray_cam.cross(e1);
+		const double eps = 1e-4;
+		Eigen::Vector2d a1, a2;
+		Eigen::Vector3d err_device(NAN, NAN, NAN);
+		if (project(p_cam + eps * e1, a1) && project(p_cam + eps * e2, a2)) {
+			Eigen::Matrix2d A;
+			A.col(0) = (a1 - px) / eps;
+			A.col(1) = (a2 - px) / eps;
+			if (std::fabs(A.determinant()) > 1e-9) {
+				Eigen::Vector2d c = A.inverse() * d;
+				err_device = q_wd.conjugate() * (q_wc * (c.x() * e1 + c.y() * e2));
+			}
+		}
+		Eigen::Vector3d ray_device = q_wd.conjugate() * (q_wc * ray_cam);
+
+		std::fprintf(out,
+		             "%" PRIi64 ",%d,%d,%d,%.4f,%.3f,%u,%u,%u,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,"
+		             "%.2f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f\n",
+		             timestamp_ns, (int)id, solved ? 1 : 0, seeded ? 1 : 0, result.rms_px, result.coverage,
+		             camera_index_of[m.camera], m.led, blob.blob_id, blob.center.x, blob.center.y, blob.size.x,
+		             blob.size.y, blob.brightness, px.x(), px.y(), d.x(), d.y(), p_cam.norm(), facing_deg,
+		             ray_device.x(), ray_device.y(), ray_device.z(), 1000.0 * err_device.x(),
+		             1000.0 * err_device.y(), 1000.0 * err_device.z());
+	}
+}
+
+/*!
  * @param records     Optional: every accepted solve with its correspondences, so other backends can be run on
  *                    exactly this optical input (--fusion-compare). Collecting them does not change the replay.
  * @param exposure_us Optional: solve and bootstrap time of each exposure, all devices (--compare-frontend).
+ * @param residuals_path Optional: one row per correspondence of every solve, accepted or not (--residuals-csv).
  */
 int
 replay_m1(const DatasetReader &dataset,
@@ -512,7 +632,8 @@ replay_m1(const DatasetReader &dataset,
           bool seed_recorded,
           const char *blobs_path,
           std::vector<FrontendRecord> *records = nullptr,
-          std::vector<double> *exposure_us = nullptr)
+          std::vector<double> *exposure_us = nullptr,
+          const char *residuals_path = nullptr)
 {
 	if (dataset.mosaics.empty()) {
 		std::fprintf(stderr, "no cameras in dataset\n");
@@ -542,6 +663,22 @@ replay_m1(const DatasetReader &dataset,
 	FILE *blobs_csv = blobs_path ? std::fopen(blobs_path, "w") : nullptr;
 	if (blobs_csv) {
 		std::fprintf(blobs_csv, "timestamp_ns,camera,blob_id,cx,cy,w,h,brightness,owner\n");
+	}
+
+	FILE *residuals_csv = residuals_path ? std::fopen(residuals_path, "w") : nullptr;
+	if (residuals_csv) {
+		// The models the residuals refer to, in the frame of err_*_mm.
+		for (const DatasetDevice &device : dataset.devices) {
+			for (size_t l = 0; l < device.led_model.led_count; l++) {
+				const xrt_vec3 &p = device.led_model.leds[l].position;
+				std::printf("LED model: device %d led %zu at mm (%.3f, %.3f, %.3f)\n", (int)device.id, l,
+				            1000.0 * p.x, 1000.0 * p.y, 1000.0 * p.z);
+			}
+		}
+		std::fprintf(residuals_csv,
+		             "timestamp_ns,device,solved,seeded,rms_px,coverage,camera,led,blob_id,blob_x,blob_y,blob_w,"
+		             "blob_h,brightness,proj_x,proj_y,dx,dy,range_m,facing_deg,ray_x,ray_y,ray_z,err_x_mm,err_y_mm,"
+		             "err_z_mm\n");
 	}
 
 	JointSolveParams params;
@@ -668,6 +805,11 @@ replay_m1(const DatasetReader &dataset,
 				std::fprintf(csv, "\n");
 			}
 
+			if (residuals_csv) {
+				write_residual_rows(residuals_csv, exposure.timestamp_ns, id, ok, seeded, result, cameras,
+				                    camera_index_of, track->device->led_model);
+			}
+
 			if (!ok) {
 				if (track->tracking && ++track->consecutive_failures > 3) {
 					track->tracking = false;
@@ -754,6 +896,9 @@ replay_m1(const DatasetReader &dataset,
 	}
 	if (blobs_csv) {
 		std::fclose(blobs_csv);
+	}
+	if (residuals_csv) {
+		std::fclose(residuals_csv);
 	}
 
 	for (DeviceTrack &track : tracks) {
@@ -1331,7 +1476,7 @@ main(int argc, char **argv)
 		    stderr,
 		    "usage: %s DATASET.ctd [--m1] [--seed-recorded] [--csv OUT.csv] [--tracker] [--tracker-csv "
 		    "OUT.csv] [--calibration CAL.json [--recorded-calibration SESSION/calibration.json]] [--blobs-csv "
-		    "OUT.csv] [--geometry PREFIX] [--filter-eval TRACKER.csv [--filter-out OUT.csv]] [--fusion-compare "
+		    "OUT.csv] [--residuals-csv OUT.csv] [--led-offsets OFFSETS.csv] [--geometry PREFIX] [--filter-eval TRACKER.csv [--filter-out OUT.csv]] [--fusion-compare "
 		    "[--run-log SESSION/run.log] [--fusion-out PREFIX] [--fusion-scenarios nominal,dropout,corrupt] "
 		    "[--fusion-frontend NAME]] [--compare-frontend NAME=RECORDS.csv ...] [--compare-out OUT.csv]\n",
 		    argv[0]);
@@ -1352,6 +1497,8 @@ main(int argc, char **argv)
 	const char *calibration = nullptr;
 	const char *recorded_calibration = nullptr;
 	const char *blobs_csv = nullptr;
+	const char *residuals_csv = nullptr;
+	const char *led_offsets = nullptr;
 	bool fusion = false;
 	const char *run_log = nullptr;
 	const char *fusion_out = nullptr;
@@ -1391,6 +1538,11 @@ main(int argc, char **argv)
 		} else if (arg == "--blobs-csv" && i + 1 < argc) {
 			m1 = true;
 			blobs_csv = argv[++i];
+		} else if (arg == "--residuals-csv" && i + 1 < argc) {
+			m1 = true;
+			residuals_csv = argv[++i];
+		} else if (arg == "--led-offsets" && i + 1 < argc) {
+			led_offsets = argv[++i];
 		} else if (arg == "--recorded-calibration" && i + 1 < argc) {
 			recorded_calibration = argv[++i];
 		} else if (arg == "--calibration" && i + 1 < argc) {
@@ -1425,6 +1577,9 @@ main(int argc, char **argv)
 		DatasetReader dataset(argv[1]);
 		if (calibration) {
 			override_calibration(dataset, calibration, recorded_calibration);
+		}
+		if (led_offsets) {
+			apply_led_offsets(dataset, led_offsets);
 		}
 		int status = summarise(dataset);
 		if (imu_csv) {
@@ -1498,7 +1653,8 @@ main(int argc, char **argv)
 			FrontendRun ours;
 			ours.name = "M1";
 			status =
-			    replay_m1(dataset, csv, seed_recorded, blobs_csv, &ours.records, &ours.exposure_us) != 0
+			    replay_m1(dataset, csv, seed_recorded, blobs_csv, &ours.records, &ours.exposure_us,
+			              residuals_csv) != 0
 			        ? 1
 			        : status;
 			frontends.push_back(std::move(ours));
@@ -1543,7 +1699,9 @@ main(int argc, char **argv)
 			status = 1;
 #endif
 		} else if (m1 && !compare) {
-			status = replay_m1(dataset, csv, seed_recorded, blobs_csv) != 0 ? 1 : status;
+			status = replay_m1(dataset, csv, seed_recorded, blobs_csv, nullptr, nullptr, residuals_csv) != 0
+			             ? 1
+			             : status;
 		}
 		if (tracker) {
 			status = replay_tracker(dataset, tracker_csv, tracker_filter, imu_angle_deg) != 0 ? 1 : status;
