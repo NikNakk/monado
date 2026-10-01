@@ -491,7 +491,7 @@ ipc_handle_swapchain_import_metal_bootstrap(volatile struct ipc_client_state *ic
 		return xret;
 	}
 	if (!consumed || xsc == NULL || xsc->image_count != image_count) {
-		IPC_ERROR(ics->server, "DXMT Metal bootstrap allocator mismatch: consumed=%s expected=%u actual=%u",
+		IPC_ERROR(ics->server, "Native Metal bootstrap allocator mismatch: consumed=%s expected=%u actual=%u",
 		          consumed ? "true" : "false", image_count, xsc != NULL ? xsc->image_count : 0);
 		xrt_swapchain_reference(&xsc, NULL);
 		return XRT_ERROR_VULKAN;
@@ -499,7 +499,7 @@ ipc_handle_swapchain_import_metal_bootstrap(volatile struct ipc_client_state *ic
 
 	xret = comp_swapchain_gpu_reuse_enable(xsc);
 	if (xret != XRT_SUCCESS) {
-		IPC_ERROR(ics->server, "Failed to enable DXMT Metal bootstrap GPU reuse tracking: result=%d", xret);
+		IPC_ERROR(ics->server, "Failed to enable native Metal bootstrap GPU reuse tracking: result=%d", xret);
 		xrt_swapchain_reference(&xsc, NULL);
 		return xret;
 	}
@@ -507,7 +507,7 @@ ipc_handle_swapchain_import_metal_bootstrap(volatile struct ipc_client_state *ic
 	xret = metal_ipc_smart_acquire_enable(xsc);
 	if (xret != XRT_SUCCESS) {
 		IPC_WARN(ics->server,
-		         "DXMT Metal bootstrap smart acquire unavailable; retaining safe FIFO behaviour: result=%d",
+		         "Native Metal bootstrap smart acquire unavailable; retaining safe FIFO behaviour: result=%d",
 		         xret);
 	}
 
@@ -521,7 +521,7 @@ ipc_handle_swapchain_import_metal_bootstrap(volatile struct ipc_client_state *ic
 	*out_id = index;
 
 	IPC_INFO(ics->server,
-	         "DXMT direct Metal array swapchain active: id=%u images=%u size=%ux%u array_size=%u first_name='%s'",
+	         "Native Metal bootstrap swapchain active: id=%u images=%u size=%ux%u array_size=%u first_name='%s'",
 	         index, image_count, info->width, info->height, info->array_size, args->names[0].name);
 	return XRT_SUCCESS;
 #endif
@@ -710,7 +710,7 @@ ipc_handle_compositor_semaphore_import_metal_bootstrap(volatile struct ipc_clien
 	struct xrt_compositor_semaphore *xcsem = NULL;
 	xret = comp_metal_semaphore_import_bootstrap_event(bootstrap->name, &xcsem);
 	if (xret != XRT_SUCCESS || xcsem == NULL) {
-		IPC_WARN(ics->server, "DXMT shared-event semaphore import unavailable: name='%s' result=%d",
+		IPC_WARN(ics->server, "Native Metal shared-event semaphore import unavailable: name='%s' result=%d",
 		         bootstrap->name, xret);
 		return xret != XRT_SUCCESS ? xret : XRT_ERROR_VULKAN;
 	}
@@ -719,7 +719,7 @@ ipc_handle_compositor_semaphore_import_metal_bootstrap(volatile struct ipc_clien
 	ics->compositor_semaphore_count++;
 	*out_id = id;
 
-	IPC_INFO(ics->server, "DXMT shared-event compositor semaphore active: id=%u name='%s'", id, bootstrap->name);
+	IPC_INFO(ics->server, "Native Metal shared-event compositor semaphore active: id=%u name='%s'", id, bootstrap->name);
 	return XRT_SUCCESS;
 #endif
 }
