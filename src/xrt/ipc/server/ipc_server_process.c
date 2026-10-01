@@ -39,6 +39,7 @@
 #include "server/ipc_server.h"
 #include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
+#include "server/ipc_server_thread_shutdown.h"
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -166,71 +167,27 @@ print_linux_end_user_started_information(enum u_logging_level log_level)
 	U_LOG_IFL_I(log_level, "%s", sink.buffer);
 }
 
-#ifdef XRT_OS_WINDOWS
-/*!
- * Cancel the blocking read each client thread is sitting in.
- *
- * The epoll based client loop wakes up on its own timeout and so notices
- * `s->running` going false, but the Windows one blocks in ReadFile() with no
- * timeout and would only notice once the client happens to send something.
- * Cancelling the pending I/O makes that read fail so the thread can run its
- * shutdown and be joined.
- *
- * The client thread closes this handle in common_shutdown() while holding the
- * global state lock, so take it here as well, otherwise we could cancel I/O on
- * a handle that has just been closed and possibly reused.
- */
-static void
-cancel_all_client_io(struct ipc_server *s)
-{
-	os_mutex_lock(&s->global_state.lock);
-
-	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
-		struct ipc_thread *it = &s->threads[i];
-		if (it->state == IPC_THREAD_READY) {
-			continue;
-		}
-
-		xrt_ipc_handle_t ipc_handle = it->ics.imc.ipc_handle;
-		if (!xrt_ipc_handle_is_valid(ipc_handle)) {
-			continue;
-		}
-
-		CancelIoEx(ipc_handle, NULL);
-	}
-
-	os_mutex_unlock(&s->global_state.lock);
-}
-#endif // XRT_OS_WINDOWS
 
 /*!
- * Join any still-running per-client threads.
+ * Stop and join any remaining per-client threads.
  *
  * On shutdown @ref main_loop returns as soon as `s->running` is cleared, but the
  * per-client threads may still be inside common_shutdown(), which destroys each
  * client's compositor and dereferences `s->xsysd` / `s->xso`. Waiting for them
  * here, before teardown_all() destroys those resources, avoids a race where a
  * client thread locks a mutex the teardown below has already freed (observed as
- * an `om->initialized` assertion in multi_compositor_destroy). `s->running` is
- * already false by this point, so the epoll based client loop exits on its next
- * timeout; the Windows one is woken by @ref cancel_all_client_io.
+ * an `om->initialized` assertion in multi_compositor_destroy). Stop their loops
+ * before joining: epoll wakes on its timeout, while Windows needs its blocking
+ * I/O cancelled.
  */
 static void
 join_all_client_threads(struct ipc_server *s)
 {
 #ifdef XRT_OS_WINDOWS
-	cancel_all_client_io(s);
+	ipc_server_stop_and_join_client_threads(s, ipc_server_cancel_all_client_io);
+#else
+	ipc_server_stop_and_join_client_threads(s, NULL);
 #endif
-
-	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
-		struct ipc_thread *it = &s->threads[i];
-		if (it->state == IPC_THREAD_READY) {
-			continue;
-		}
-		os_thread_join(&it->thread);
-		os_thread_destroy(&it->thread);
-		it->state = IPC_THREAD_READY;
-	}
 }
 
 static void
@@ -482,6 +439,9 @@ shutdown_clients(struct ipc_server *s)
 	for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
 		struct ipc_thread *it = &s->threads[i];
 		volatile struct ipc_client_state *ics = &it->ics;
+		if (it->state == IPC_THREAD_READY) {
+			continue;
+		}
 		if (ics->client_state.info.immediate_disconnect) {
 			// instantly disconnect clients with this flag
 			// some clients (e.g. libmonado) have no session or event polling to respond to an exit request
@@ -516,14 +476,6 @@ shutdown_clients(struct ipc_server *s)
 
 	if (connected_client_count != 0) {
 		U_LOG_W("%" PRIx32 " clients still connected after shutdown timeout!", connected_client_count);
-		for (uint32_t i = 0; i < IPC_MAX_CLIENTS; i++) {
-			struct ipc_thread *it = &s->threads[i];
-			if (it->state == IPC_THREAD_READY)
-				continue;
-			it->state = IPC_THREAD_STOPPING;
-			os_thread_join(&it->thread);
-			os_thread_destroy(&it->thread);
-		}
 	}
 }
 

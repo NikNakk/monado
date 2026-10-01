@@ -614,6 +614,13 @@ The integration branch was forked from upstream at `ac3f23f71` (2026-03-31).
 Upstream `main` up to `045931d12` (2026-09-30) has been merged on
 `macos-upstream-sync-2026-10`; it builds and passes tests on Linux, and
 awaits macOS CI and a headset run before it replaces the integration branch.
+Server shutdown retains the three-second graceful-exit window, then stops all
+client loops and cancels/disconnects Windows pipe I/O before joining threads.
+Joined slots become `READY`, so teardown cannot join them twice. A delayed
+client startup cannot override a shutdown request. Regression tests cover
+blocked readers, repeated shutdown and threads that have not started yet; the
+Windows test also exercises a real synchronous named pipe.
+
 Points that change behaviour or need checking on hardware:
 
 - **PS Sense** now uses upstream's rewritten driver: constellation (optical)

@@ -224,6 +224,8 @@ add_library(
 	server/ipc_server_handler_swapchain.c
 	server/ipc_server_per_client_thread.c
 	server/ipc_server_process.c
+	server/ipc_server_thread_shutdown.c
+	server/ipc_server_thread_shutdown.h
 	server/ipc_server_objects.c
 	server/ipc_server_objects.h
 	)
