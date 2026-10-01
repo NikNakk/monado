@@ -43,7 +43,7 @@ comp_metal_texture_create_from_iosurface_for_vk_device(struct vk_bundle *vk,
 
 /*!
  * As above, for a surface identified by its global IOSurfaceID (used for
- * surfaces created by DXMT under Wine).
+ * surfaces created by external Metal producers).
  */
 bool
 comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
