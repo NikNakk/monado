@@ -77,9 +77,5 @@ ipc_client_connection_send_unlock(struct ipc_connection *ipc_c)
  *
  * @ingroup ipc_client
  */
-/*!
- * Refresh the heap snapshot used by byte-stream clients after the server updates
- * per-client system metadata. No-op for normal shared-memory clients.
- */
 void
 ipc_client_connection_fini(struct ipc_connection *ipc_c);

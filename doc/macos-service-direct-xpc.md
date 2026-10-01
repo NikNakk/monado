@@ -286,3 +286,10 @@ check confirms 136 transitional commands and 18 old schemas unchanged, with
 only the generic external semaphore import appended. The external generic
 OpenXR host also ran `hello_xr` against this branch's simulated HMD through
 standard Metal OpenXR swapchains; hardware pacing comparison remains pending.
+
+The full native client build also exposed a remaining call to the deleted
+byte-stream shared-memory snapshot refresh helper, plus its orphaned header
+comment. Both are removed: native clients retain their live shared-memory
+mapping. The service-based `openxr_monado` target now builds as well. The
+contribution checker also required formatting two previously modified IPC
+files; that follow-up has no behavior or wire-format changes.
