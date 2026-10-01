@@ -199,7 +199,7 @@ comp_metal_texture_create_from_bootstrap_name_for_vk_device(struct vk_bundle *vk
 		id<MTLTexture> texture = [vk_device newSharedTextureWithHandle:handle];
 		[handle release];
 		if (texture == nil) {
-			U_LOG_E("Could not reopen DXMT shared texture '%s' on Vulkan MTLDevice", bootstrap_name);
+			U_LOG_E("Could not reopen shared Metal texture '%s' on Vulkan MTLDevice", bootstrap_name);
 			return false;
 		}
 
@@ -209,7 +209,7 @@ comp_metal_texture_create_from_bootstrap_name_for_vk_device(struct vk_bundle *vk
 		    texture.sampleCount != 1 || texture.pixelFormat != pixel_format ||
 		    texture.textureType != expected_type) {
 			U_LOG_E(
-			    "DXMT shared texture geometry mismatch for '%s': got=%lux%lu array=%lu type=%lu format=%lu "
+			    "Shared Metal texture geometry mismatch for '%s': got=%lux%lu array=%lu type=%lu format=%lu "
 			    "expected=%ux%u array=%u type=%lu format=%lu",
 			    bootstrap_name, (unsigned long)texture.width, (unsigned long)texture.height,
 			    (unsigned long)texture.arrayLength, (unsigned long)texture.textureType,
@@ -219,7 +219,7 @@ comp_metal_texture_create_from_bootstrap_name_for_vk_device(struct vk_bundle *vk
 			return false;
 		}
 
-		U_LOG_I("DXMT shared Metal texture imported by bootstrap name: '%s' texture=%p array_size=%u",
+		U_LOG_I("Shared Metal texture imported by bootstrap name: '%s' texture=%p array_size=%u",
 		        bootstrap_name, (__bridge void *)texture, info->array_size);
 		*out_texture = (__bridge void *)texture;
 		return true;
