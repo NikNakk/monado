@@ -94,7 +94,8 @@ ensure_real()
 	return g_real;
 }
 
-bool __stdcall legacy_get_frame_timing(vr::Compositor_FrameTiming *timing, uint32_t frames_ago)
+bool __stdcall
+legacy_get_frame_timing(vr::Compositor_FrameTiming *timing, uint32_t frames_ago)
 {
 	if (g_real_get_frame_timing == nullptr) {
 		return false;
@@ -233,7 +234,8 @@ current_render_target()
 	return texture;
 }
 
-void __stdcall legacy_render_event(int event_id)
+void __stdcall
+legacy_render_event(int event_id)
 {
 	vr::IVRCompositor *compositor = get_compositor();
 	if (compositor == nullptr)
@@ -307,7 +309,8 @@ void __stdcall legacy_render_event(int event_id)
 }
 } // namespace
 
-extern "C" __declspec(dllexport) void __stdcall UnitySetGraphicsDevice(void *device, int device_type, int event_type)
+extern "C" __declspec(dllexport) void __stdcall
+UnitySetGraphicsDevice(void *device, int device_type, int event_type)
 {
 	if (device_type != kUnityGfxRendererD3D11)
 		return;
@@ -329,26 +332,30 @@ extern "C" __declspec(dllexport) void __stdcall UnitySetGraphicsDevice(void *dev
 	}
 }
 
-extern "C" __declspec(dllexport) void *UnityHooks_GetRenderEventFunc()
+extern "C" __declspec(dllexport) void *
+UnityHooks_GetRenderEventFunc()
 {
 	return reinterpret_cast<void *>(&legacy_render_event);
 }
 
-extern "C" __declspec(dllexport) void UnityHooks_SetSubmitParams(vr::VRTextureBounds_t bounds_l,
-                                                                 vr::VRTextureBounds_t bounds_r,
-                                                                 vr::EVRSubmitFlags submit_flags)
+extern "C" __declspec(dllexport) void
+UnityHooks_SetSubmitParams(vr::VRTextureBounds_t bounds_l,
+                           vr::VRTextureBounds_t bounds_r,
+                           vr::EVRSubmitFlags submit_flags)
 {
 	g_bounds[0] = bounds_l;
 	g_bounds[1] = bounds_r;
 	g_submit_flags = submit_flags;
 }
 
-extern "C" __declspec(dllexport) void UnityHooks_SetColorSpace(vr::EColorSpace color_space)
+extern "C" __declspec(dllexport) void
+UnityHooks_SetColorSpace(vr::EColorSpace color_space)
 {
 	g_color_space = color_space;
 }
 
-extern "C" __declspec(dllexport) void UnityHooks_EventWriteString(const wchar_t *event)
+extern "C" __declspec(dllexport) void
+UnityHooks_EventWriteString(const wchar_t *event)
 {
 	if (event != nullptr) {
 		OutputDebugStringW(event);
@@ -381,7 +388,8 @@ FORWARD_RET(VR_InitInternal2,
             (error, type, startup))
 FORWARD_RET(VR_InitInternal, uint32_t, (vr::EVRInitError * error, vr::EVRApplicationType type), (error, type))
 FORWARD_VOID(VR_ShutdownInternal, (), ())
-extern "C" __declspec(dllexport) void *VR_GetGenericInterface(const char *version, vr::EVRInitError *error)
+extern "C" __declspec(dllexport) void *
+VR_GetGenericInterface(const char *version, vr::EVRInitError *error)
 {
 	using Fn = void *(__cdecl *)(const char *, vr::EVRInitError *);
 	Fn fn = real_proc<Fn>("VR_GetGenericInterface");
@@ -406,7 +414,8 @@ FORWARD_RET(VR_GetStringForHmdError, const char *, (vr::EVRInitError error), (er
 FORWARD_RET(VR_GetInitToken, uint32_t, (), ())
 FORWARD_RET(VR_RuntimePath, const char *, (), ())
 
-extern "C" __declspec(dllexport) void *VRControlPanel()
+extern "C" __declspec(dllexport) void *
+VRControlPanel()
 {
 	// VRControlPanel was a legacy global accessor. If a future/pinned
 	// OpenComposite build provides it, preserve that implementation. Current

@@ -59,9 +59,7 @@ TEST_CASE("generic foveation axis builder validates arguments")
 
 TEST_CASE("standards-facing foveation requests map onto generic policy")
 {
-	struct u_foveation_request request
-	{
-	};
+	struct u_foveation_request request{};
 
 	REQUIRE(u_foveation_request_from_level(U_FOVEATION_LEVEL_NONE, false, false, 0.0f, &request));
 	CHECK_FALSE(request.enabled);

@@ -160,24 +160,21 @@ metal_direct_swapchain_get_foveation_state(struct xrt_swapchain_metal *xscm,
 }
 
 static xrt_result_t
-metal_direct_swapchain_get_packed_foveation_state(
-    struct xrt_swapchain_metal *xscm,
-    const struct xrt_metal_foveation_view_layout *views,
-    uint32_t view_count,
-    uint32_t array_layer,
-    struct xrt_metal_foveation_state *out_state)
+metal_direct_swapchain_get_packed_foveation_state(struct xrt_swapchain_metal *xscm,
+                                                  const struct xrt_metal_foveation_view_layout *views,
+                                                  uint32_t view_count,
+                                                  uint32_t array_layer,
+                                                  struct xrt_metal_foveation_state *out_state)
 {
 	struct metal_direct_swapchain *sc = (struct metal_direct_swapchain *)xscm;
-	return comp_metal_foveation_cache_get_packed(
-	    &sc->foveation, views, view_count, array_layer, out_state);
+	return comp_metal_foveation_cache_get_packed(&sc->foveation, views, view_count, array_layer, out_state);
 }
 
 static xrt_result_t
-metal_direct_swapchain_get_image_foveation_state(
-    struct xrt_swapchain_metal *xscm,
-    uint32_t image_index,
-    uint32_t array_layer,
-    struct xrt_metal_foveation_state *out_state)
+metal_direct_swapchain_get_image_foveation_state(struct xrt_swapchain_metal *xscm,
+                                                 uint32_t image_index,
+                                                 uint32_t array_layer,
+                                                 struct xrt_metal_foveation_state *out_state)
 {
 	struct metal_direct_swapchain *sc = (struct metal_direct_swapchain *)xscm;
 	return comp_metal_foveation_cache_get_image(&sc->foveation, image_index, array_layer, out_state);
@@ -196,9 +193,7 @@ metal_direct_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns,
 }
 
 static xrt_result_t
-metal_direct_swapchain_barrier_image(struct xrt_swapchain *xsc,
-                                     enum xrt_barrier_direction direction,
-                                     uint32_t index)
+metal_direct_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction direction, uint32_t index)
 {
 	struct metal_direct_swapchain *sc = metal_direct_swapchain(xsc);
 
@@ -265,9 +260,7 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 
 	if (info->face_count != 1 || info->sample_count != 1 || info->array_size == 0) {
 		U_LOG_W("Metal direct swapchain unsupported geometry: array_size=%u face_count=%u sample_count=%u",
-		        info->array_size,
-		        info->face_count,
-		        info->sample_count);
+		        info->array_size, info->face_count, info->sample_count);
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
 
@@ -310,16 +303,12 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 		return XRT_ERROR_ALLOCATION;
 	}
 
-	U_LOG_I("Metal direct swapchain: creating %u Metal-owned texture(s) size=%ux%u array_size=%u type=%s(%lu) vk_format=%u metal_format=%lld usage=0x%lx",
-	        xsccp.image_count,
-	        info->width,
-	        info->height,
-	        info->array_size,
-	        metal_texture_type_string(descriptor.textureType),
-	        (unsigned long)descriptor.textureType,
-	        vk_format,
-	        (long long)info->format,
-	        (unsigned long)descriptor.usage);
+	U_LOG_I(
+	    "Metal direct swapchain: creating %u Metal-owned texture(s) size=%ux%u array_size=%u type=%s(%lu) "
+	    "vk_format=%u metal_format=%lld usage=0x%lx",
+	    xsccp.image_count, info->width, info->height, info->array_size,
+	    metal_texture_type_string(descriptor.textureType), (unsigned long)descriptor.textureType, vk_format,
+	    (long long)info->format, (unsigned long)descriptor.usage);
 
 	for (uint32_t i = 0; i < xsccp.image_count; i++) {
 		textures[i] = [link->device newSharedTextureWithDescriptor:descriptor];
@@ -352,14 +341,14 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 		return xret;
 	}
 	if (!consumed) {
-		U_LOG_E("Metal direct swapchain native create succeeded without consuming the direct allocator request");
+		U_LOG_E(
+		    "Metal direct swapchain native create succeeded without consuming the direct allocator request");
 		xrt_swapchain_native_reference(&xscn, NULL);
 		release_texture_array(textures, xsccp.image_count);
 		return XRT_ERROR_VULKAN;
 	}
 	if (xscn == NULL || xscn->base.image_count != xsccp.image_count) {
-		U_LOG_E("Metal direct swapchain image-count mismatch: expected=%u actual=%u",
-		        xsccp.image_count,
+		U_LOG_E("Metal direct swapchain image-count mismatch: expected=%u actual=%u", xsccp.image_count,
 		        xscn != NULL ? xscn->base.image_count : 0);
 		xrt_swapchain_native_reference(&xscn, NULL);
 		release_texture_array(textures, xsccp.image_count);
@@ -371,12 +360,10 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 		VkImage vk_image = VK_NULL_HANDLE;
 		VkResult ret = comp_swapchain_export_metal_texture(xscn, i, &exported, &vk_image);
 		if (ret != VK_SUCCESS || exported != (__bridge void *)textures[i]) {
-			U_LOG_E("Metal direct client identity mismatch: image=%u VkImage=%p expected=%p exported=%p result=%d",
-			        i,
-			        (void *)vk_image,
-			        (__bridge void *)textures[i],
-			        exported,
-			        (int)ret);
+			U_LOG_E(
+			    "Metal direct client identity mismatch: image=%u VkImage=%p expected=%p exported=%p "
+			    "result=%d",
+			    i, (void *)vk_image, (__bridge void *)textures[i], exported, (int)ret);
 			xrt_swapchain_native_reference(&xscn, NULL);
 			release_texture_array(textures, xsccp.image_count);
 			return XRT_ERROR_VULKAN;
@@ -399,17 +386,14 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 	sc->base.base.foveation_capabilities =
 	    XRT_FOVEATION_CAPABILITY_FIXED | XRT_FOVEATION_CAPABILITY_DYNAMIC | XRT_FOVEATION_CAPABILITY_EYE_TRACKED;
 	sc->base.get_foveation_metal_state = metal_direct_swapchain_get_foveation_state;
-	sc->base.get_foveation_metal_packed_state =
-	    metal_direct_swapchain_get_packed_foveation_state;
-	sc->base.get_foveation_metal_image_state =
-	    metal_direct_swapchain_get_image_foveation_state;
+	sc->base.get_foveation_metal_packed_state = metal_direct_swapchain_get_packed_foveation_state;
+	sc->base.get_foveation_metal_image_state = metal_direct_swapchain_get_image_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xsccp.image_count;
 	sc->xscn = xscn;
 	sc->command_queue = [link->command_queue retain];
-	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device,
-	                                      info->width, info->height, info->array_size,
-	                                      sc->base.base.image_count)) {
+	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device, info->width, info->height,
+	                                     info->array_size, sc->base.base.image_count)) {
 		metal_direct_swapchain_destroy(&sc->base.base);
 		release_texture_array(textures, xsccp.image_count);
 		return XRT_ERROR_ALLOCATION;
@@ -422,9 +406,10 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 	}
 	free(textures);
 
-	U_LOG_I("Metal direct swapchain active: no temporary Vulkan/IOSurface allocation; client and compositor share the same Metal-owned %s texture objects (array_size=%u)",
-	        info->array_size > 1 ? "2D-array" : "2D",
-	        info->array_size);
+	U_LOG_I(
+	    "Metal direct swapchain active: no temporary Vulkan/IOSurface allocation; client and compositor share the "
+	    "same Metal-owned %s texture objects (array_size=%u)",
+	    info->array_size > 1 ? "2D-array" : "2D", info->array_size);
 
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
@@ -587,6 +572,8 @@ client_metal_direct_compositor_create(struct xrt_compositor_native *xcn, void *m
 	xcm->base.destroy = metal_direct_compositor_destroy;
 	pthread_mutex_unlock(&g_contexts_mutex);
 
-	U_LOG_I("Metal swapchain path installed: Metal-owned textures are imported directly into Vulkan for arraySize=1 and arraySize>1");
+	U_LOG_I(
+	    "Metal swapchain path installed: Metal-owned textures are imported directly into Vulkan for arraySize=1 "
+	    "and arraySize>1");
 	return xcm;
 }

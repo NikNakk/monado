@@ -44,8 +44,10 @@ comp_metal_semaphore_probe(struct vk_bundle *vk)
 	void *raw_shared_event = NULL;
 	xrt_result_t xret = comp_semaphore_create_metal_shared_event(vk, &xcsem, &raw_shared_event);
 	if (xret != XRT_SUCCESS) {
-		U_LOG_W("Metal timeline shared-event probe unavailable: result=%d; blocking app release handoff remains active",
-		        xret);
+		U_LOG_W(
+		    "Metal timeline shared-event probe unavailable: result=%d; blocking app release handoff remains "
+		    "active",
+		    xret);
 		return;
 	}
 
@@ -59,9 +61,10 @@ comp_metal_semaphore_probe(struct vk_bundle *vk)
 			U_LOG_W("Metal timeline shared-event probe returned a nil MTLSharedEvent after export");
 		} else {
 			usable = true;
-			U_LOG_I("Metal timeline shared-event probe succeeded: event=%p initial_value=%llu; in-process client provider registered",
-			        (__bridge void *)shared_event,
-			        (unsigned long long)shared_event.signaledValue);
+			U_LOG_I(
+			    "Metal timeline shared-event probe succeeded: event=%p initial_value=%llu; in-process "
+			    "client provider registered",
+			    (__bridge void *)shared_event, (unsigned long long)shared_event.signaledValue);
 			[shared_event release];
 		}
 	}
@@ -106,8 +109,7 @@ comp_metal_semaphore_create_client_pair(struct xrt_compositor_semaphore **out_xc
 @end
 
 xrt_result_t
-comp_metal_semaphore_import_bootstrap_event(const char *bootstrap_name,
-                                            struct xrt_compositor_semaphore **out_xcsem)
+comp_metal_semaphore_import_bootstrap_event(const char *bootstrap_name, struct xrt_compositor_semaphore **out_xcsem)
 {
 	if (bootstrap_name == NULL || bootstrap_name[0] == '\0' || out_xcsem == NULL) {
 		return XRT_ERROR_INVALID_ARGUMENT;
@@ -167,13 +169,11 @@ comp_metal_semaphore_import_bootstrap_event(const char *bootstrap_name,
 			U_LOG_E("DXMT shared-event reconstruction failed for '%s'", bootstrap_name);
 		} else {
 			uint64_t initial_value = event.signaledValue;
-			xret = comp_semaphore_import_metal_shared_event(
-			    vk, (__bridge void *)event, initial_value, out_xcsem);
+			xret = comp_semaphore_import_metal_shared_event(vk, (__bridge void *)event, initial_value,
+			                                                out_xcsem);
 			if (xret == XRT_SUCCESS) {
 				U_LOG_I("DXMT shared-event imported: name='%s' initial_value=%llu event=%p",
-				        bootstrap_name,
-				        (unsigned long long)initial_value,
-				        (__bridge void *)event);
+				        bootstrap_name, (unsigned long long)initial_value, (__bridge void *)event);
 			}
 			[event release];
 		}

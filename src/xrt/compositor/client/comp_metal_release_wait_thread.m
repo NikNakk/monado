@@ -28,9 +28,7 @@
  * proven cross-process (service swapchains, through an XPC shared event) and
  * in-process (the local shared-event pair, in Unreal hosted by the service).
  */
-DEBUG_GET_ONCE_BOOL_OPTION(metal_app_release_wait_thread,
-                           "XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD",
-                           true)
+DEBUG_GET_ONCE_BOOL_OPTION(metal_app_release_wait_thread, "XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD", true)
 
 #define METAL_WAIT_THREAD_LOG_WINDOW 240
 
@@ -130,8 +128,9 @@ ensure_pair(struct client_metal_wait_thread_context *c)
 	xrt_result_t xret = comp_metal_semaphore_create_client_pair(&xcsem, &raw_shared_event);
 #endif
 	if (xret != XRT_SUCCESS || xcsem == NULL || raw_shared_event == NULL) {
-		U_LOG_W("Metal app-release wait-thread handoff unavailable: result=%d; blocking release handoff unchanged",
-		        xret);
+		U_LOG_W(
+		    "Metal app-release wait-thread handoff unavailable: result=%d; blocking release handoff unchanged",
+		    xret);
 		if (xcsem != NULL) {
 			xrt_compositor_semaphore_reference(&xcsem, NULL);
 		}
@@ -154,9 +153,10 @@ ensure_pair(struct client_metal_wait_thread_context *c)
 	c->last_committed_value = c->next_value;
 	c->pair_ready = true;
 
-	U_LOG_I("Metal app-release Stage 4 ready: event=%p initial_value=%llu; app CPU barrier bypassed and frame readiness delegated to Monado wait thread",
-	        (__bridge void *)event,
-	        (unsigned long long)c->next_value);
+	U_LOG_I(
+	    "Metal app-release Stage 4 ready: event=%p initial_value=%llu; app CPU barrier bypassed and frame "
+	    "readiness delegated to Monado wait thread",
+	    (__bridge void *)event, (unsigned long long)c->next_value);
 
 	pthread_mutex_unlock(&c->signal_mutex);
 	return true;
@@ -195,7 +195,9 @@ wrapped_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction dire
 		pthread_mutex_unlock(&c->signal_mutex);
 
 		if (signal_buffer == nil) {
-			U_LOG_W("Metal app-release Stage 4 could not allocate signal command buffer; using blocking barrier");
+			U_LOG_W(
+			    "Metal app-release Stage 4 could not allocate signal command buffer; using blocking "
+			    "barrier");
 			return original_barrier(xsc, direction, index);
 		}
 
@@ -264,8 +266,8 @@ wrapped_create_swapchain(struct xrt_compositor *xc,
 {
 	pthread_mutex_lock(&g_contexts_mutex);
 	struct client_metal_wait_thread_context *c = find_context_locked(xc);
-	xrt_result_t (*original_create)(struct xrt_compositor *, const struct xrt_swapchain_create_info *, struct xrt_swapchain **) =
-	    c != NULL ? c->original_create_swapchain : NULL;
+	xrt_result_t (*original_create)(struct xrt_compositor *, const struct xrt_swapchain_create_info *,
+	                                struct xrt_swapchain **) = c != NULL ? c->original_create_swapchain : NULL;
 	pthread_mutex_unlock(&g_contexts_mutex);
 
 	if (c == NULL || original_create == NULL) {
@@ -290,7 +292,8 @@ wrapped_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_
 	struct client_metal_wait_thread_context *c = find_context_locked(xc);
 	xrt_result_t (*original_layer_commit)(struct xrt_compositor *, xrt_graphics_sync_handle_t) =
 	    c != NULL ? c->original_layer_commit : NULL;
-	xrt_result_t (*original_layer_commit_with_semaphore)(struct xrt_compositor *, struct xrt_compositor_semaphore *, uint64_t) =
+	xrt_result_t (*original_layer_commit_with_semaphore)(struct xrt_compositor *, struct xrt_compositor_semaphore *,
+	                                                     uint64_t) =
 	    c != NULL ? c->original_layer_commit_with_semaphore : NULL;
 	pthread_mutex_unlock(&g_contexts_mutex);
 
@@ -320,14 +323,14 @@ wrapped_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_
 	u_graphics_sync_unref(&sync_handle);
 	xrt_result_t xret = original_layer_commit_with_semaphore(xc, c->xcsem, wait_value);
 	if (xret != XRT_SUCCESS) {
-		U_LOG_W("Metal app-release Stage 4 layer_commit_with_semaphore failed at value %llu (result=%d); falling back to CPU timeline wait",
-		        (unsigned long long)wait_value,
-		        xret);
+		U_LOG_W(
+		    "Metal app-release Stage 4 layer_commit_with_semaphore failed at value %llu (result=%d); falling "
+		    "back to CPU timeline wait",
+		    (unsigned long long)wait_value, xret);
 		xrt_result_t wait_result = xrt_compositor_semaphore_wait(c->xcsem, wait_value, 1000000000ull);
 		if (wait_result != XRT_SUCCESS) {
 			U_LOG_E("Metal app-release Stage 4 fallback timeline wait failed at value %llu: result=%d",
-			        (unsigned long long)wait_value,
-			        wait_result);
+			        (unsigned long long)wait_value, wait_result);
 			return wait_result;
 		}
 		return original_layer_commit(xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
@@ -343,10 +346,10 @@ wrapped_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_
 	pthread_mutex_unlock(&c->signal_mutex);
 
 	if ((submit_count % METAL_WAIT_THREAD_LOG_WINDOW) == 0) {
-		U_LOG_I("Metal app-release Stage 4: wait-thread handoffs=%llu latest_value=%llu observed_event=%llu; app CPU barrier and comp_main queue wait both bypassed",
-		        (unsigned long long)submit_count,
-		        (unsigned long long)wait_value,
-		        (unsigned long long)observed);
+		U_LOG_I(
+		    "Metal app-release Stage 4: wait-thread handoffs=%llu latest_value=%llu observed_event=%llu; app "
+		    "CPU barrier and comp_main queue wait both bypassed",
+		    (unsigned long long)submit_count, (unsigned long long)wait_value, (unsigned long long)observed);
 	}
 
 	return XRT_SUCCESS;
@@ -429,6 +432,8 @@ client_metal_release_wait_thread_attach(struct xrt_compositor_metal *xcm, void *
 	xcm->base.destroy = wrapped_compositor_destroy;
 	pthread_mutex_unlock(&g_contexts_mutex);
 
-	U_LOG_I("Metal app-release Stage 4 enabled; shared-event completion will gate frame readiness on Monado's wait thread");
+	U_LOG_I(
+	    "Metal app-release Stage 4 enabled; shared-event completion will gate frame readiness on Monado's wait "
+	    "thread");
 	return xcm;
 }

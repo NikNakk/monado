@@ -24,9 +24,7 @@ TEST_CASE("FB foveation base profile means no foveation")
 {
 	XrFoveationProfileCreateInfoFB create_info =
 	    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
-	struct u_foveation_request request
-	{
-	};
+	struct u_foveation_request request{};
 
 	CHECK(oxr_foveation_request_from_fb(&create_info, false, false, &request) == OXR_FOVEATION_PARSE_SUCCESS);
 	CHECK_FALSE(request.enabled);
@@ -61,9 +59,7 @@ TEST_CASE("FB foveation configuration maps to generic policy")
 		    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 		create_info.next = &level_info;
 
-		struct u_foveation_request request
-		{
-		};
+		struct u_foveation_request request{};
 		CAPTURE(entry.level);
 		REQUIRE(oxr_foveation_request_from_fb(&create_info, true, false, &request) ==
 		        OXR_FOVEATION_PARSE_SUCCESS);
@@ -91,9 +87,7 @@ TEST_CASE("FB dynamic and META eye-tracked policy stays runtime-owned")
 	    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 	create_info.next = &level_info;
 
-	struct u_foveation_request request
-	{
-	};
+	struct u_foveation_request request{};
 	REQUIRE(oxr_foveation_request_from_fb(&create_info, true, true, &request) == OXR_FOVEATION_PARSE_SUCCESS);
 	CHECK(request.enabled);
 	CHECK(request.profile_index == U_FOVEATION_PROFILE_AGGRESSIVE);
@@ -113,9 +107,7 @@ TEST_CASE("FB foveation parser enforces extension availability and valid enums")
 	    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 	create_info.next = &level_info;
 
-	struct u_foveation_request request
-	{
-	};
+	struct u_foveation_request request{};
 	CHECK(oxr_foveation_request_from_fb(&create_info, false, false, &request) ==
 	      OXR_FOVEATION_PARSE_UNSUPPORTED_CONFIGURATION);
 
@@ -142,14 +134,10 @@ TEST_CASE("FB foveation parser enforces extension availability and valid enums")
 
 TEST_CASE("standard foveation resolves to backend-neutral XRT state")
 {
-	struct u_foveation_request request
-	{
-	};
+	struct u_foveation_request request{};
 	REQUIRE(u_foveation_request_from_level(U_FOVEATION_LEVEL_HIGH, true, true, 1.25f, &request));
 
-	struct xrt_foveation_state state
-	{
-	};
+	struct xrt_foveation_state state{};
 	REQUIRE(oxr_foveation_request_to_xrt(&request, &state));
 	CHECK(state.enabled);
 	CHECK(state.dynamic);
@@ -177,9 +165,7 @@ TEST_CASE("fixed FB vertical offset resolves relative to view centre")
 	    {-0.8f, 0.8f, 0.7f, -0.7f},
 	    {-0.9f, 0.7f, 0.8f, -0.6f},
 	};
-	struct xrt_foveation_state state
-	{
-	};
+	struct xrt_foveation_state state{};
 	state.vertical_offset_degrees = 0.0f;
 
 	REQUIRE(oxr_foveation_resolve_fixed_centres(fovs, 2, &state));
@@ -208,13 +194,8 @@ TEST_CASE("runtime-owned gaze projects to per-view META NDC centres")
 	    {-0.8f, 0.7f, 0.65f, -0.60f},
 	    {-0.7f, 0.8f, 0.60f, -0.65f},
 	};
-	struct xrt_foveation_state state
-	{
-	};
-	struct xrt_vec3 forward
-	{
-		0.0f, 0.0f, -1.0f
-	};
+	struct xrt_foveation_state state{};
+	struct xrt_vec3 forward{0.0f, 0.0f, -1.0f};
 
 	REQUIRE(oxr_foveation_resolve_gaze_centres(&forward, fovs, 2, 0.0f, &state));
 	CHECK(state.view_count == 2);
@@ -225,10 +206,7 @@ TEST_CASE("runtime-owned gaze projects to per-view META NDC centres")
 	CHECK(state.views[0].center.x != Catch::Approx(0.0f));
 	CHECK(state.views[1].center.x != Catch::Approx(0.0f));
 
-	struct xrt_vec3 right_up
-	{
-		0.15f, 0.10f, -1.0f
-	};
+	struct xrt_vec3 right_up{0.15f, 0.10f, -1.0f};
 	REQUIRE(oxr_foveation_resolve_gaze_centres(&right_up, fovs, 2, 0.0f, &state));
 	CHECK(state.views[0].center.x > -1.0f);
 	CHECK(state.views[0].center.y > -1.0f);
@@ -237,9 +215,6 @@ TEST_CASE("runtime-owned gaze projects to per-view META NDC centres")
 	REQUIRE(oxr_foveation_resolve_gaze_centres(&right_up, fovs, 2, 5.0f, &state));
 	CHECK(state.views[0].center.y > before_y);
 
-	struct xrt_vec3 behind
-	{
-		0.0f, 0.0f, 1.0f
-	};
+	struct xrt_vec3 behind{0.0f, 0.0f, 1.0f};
 	CHECK_FALSE(oxr_foveation_resolve_gaze_centres(&behind, fovs, 2, 0.0f, &state));
 }
