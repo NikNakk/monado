@@ -1,6 +1,7 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 #ifdef _WIN32
+#define NOMINMAX
 #include <winsock2.h>
 #else
 #include <sys/socket.h>
