@@ -134,7 +134,15 @@ macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semap
 	funlockfile(file);
 }
 #else
-#define macos_client_gpu_trace_event(...) ((void)0)
+// Only traced on macOS.
+static inline void
+macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semaphore_value, int64_t duration_ns)
+{
+	(void)event;
+	(void)frame_id;
+	(void)semaphore_value;
+	(void)duration_ns;
+}
 #endif
 
 /*

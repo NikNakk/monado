@@ -28,7 +28,9 @@
 
 #include <xrt/xrt_handles.h>
 
+#if !defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 DEBUG_GET_ONCE_BOOL_OPTION(vk_ignore_memory_size_mismatch, "XRT_VK_IGNORE_MEMORY_SIZE_MISMATCH", false)
+#endif
 
 
 /*

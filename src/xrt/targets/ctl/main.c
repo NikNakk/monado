@@ -124,7 +124,7 @@ get_mode(struct ipc_connection *ipc_c)
 		  !cs.io_blocks.block_outputs,       //
 		  cs.session_overlay,                //
 		  cs.z_order,                        //
-		  cs.pid,                            //
+		  (int)cs.pid,                       //
 		  cs.info.application_name);
 	}
 

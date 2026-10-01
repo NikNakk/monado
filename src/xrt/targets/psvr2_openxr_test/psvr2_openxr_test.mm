@@ -40,6 +40,28 @@
 #include <string>
 #include <vector>
 
+/*!
+ * A zero-initialised OpenXR structure with its type set. The usual
+ * `XrFoo x{XR_TYPE_FOO}` leaves the other members to implicit initialisation,
+ * which -Wextra reports.
+ */
+template <typename T>
+static T
+xr_struct(XrStructureType type)
+{
+	T value{};
+	value.type = type;
+	return value;
+}
+
+//! Reset an existing OpenXR structure to zero with its type set.
+template <typename T>
+static void
+xr_reset(T &value, XrStructureType type)
+{
+	value = xr_struct<T>(type);
+}
+
 #ifndef PSVR2_OPENXR_LOADER_DEFAULT
 #define PSVR2_OPENXR_LOADER_DEFAULT ""
 #endif
@@ -976,7 +998,7 @@ has_extension(const xr_api &xr, const char *extension_name)
 	         "xrEnumerateInstanceExtensionProperties(count)");
 	std::vector<XrExtensionProperties> extensions(extension_count);
 	for (XrExtensionProperties &extension : extensions) {
-		extension = {XR_TYPE_EXTENSION_PROPERTIES};
+		xr_reset(extension, XR_TYPE_EXTENSION_PROPERTIES);
 	}
 	check_xr(xr.enumerate_instance_extension_properties(nullptr, extension_count, &extension_count, extensions.data()),
 	         "xrEnumerateInstanceExtensionProperties(list)");
@@ -1048,7 +1070,7 @@ create_instance(application &app)
 		extensions.push_back(XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME);
 	}
 
-	XrInstanceCreateInfo create_info{XR_TYPE_INSTANCE_CREATE_INFO};
+	XrInstanceCreateInfo create_info = xr_struct<XrInstanceCreateInfo>(XR_TYPE_INSTANCE_CREATE_INFO);
 	snprintf(create_info.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "%s", "PSVR2 OpenXR Test");
 	create_info.applicationInfo.applicationVersion = 1;
 	snprintf(create_info.applicationInfo.engineName, XR_MAX_ENGINE_NAME_SIZE, "%s", "Monado diagnostic");
@@ -1087,7 +1109,7 @@ create_instance(application &app)
 		             &app.xr.passthrough_layer_resume);
 	}
 
-	XrInstanceProperties instance_properties{XR_TYPE_INSTANCE_PROPERTIES};
+	XrInstanceProperties instance_properties = xr_struct<XrInstanceProperties>(XR_TYPE_INSTANCE_PROPERTIES);
 	check_xr(app.xr.get_instance_properties(app.instance, &instance_properties), "xrGetInstanceProperties");
 	fprintf(stderr, "psvr2-openxr-test: runtime %s %u.%u.%u\n", instance_properties.runtimeName,
 	        XR_VERSION_MAJOR(instance_properties.runtimeVersion), XR_VERSION_MINOR(instance_properties.runtimeVersion),
@@ -1097,14 +1119,13 @@ create_instance(application &app)
 static void
 create_system_and_session(application &app)
 {
-	XrSystemGetInfo system_info{XR_TYPE_SYSTEM_GET_INFO};
+	XrSystemGetInfo system_info = xr_struct<XrSystemGetInfo>(XR_TYPE_SYSTEM_GET_INFO);
 	system_info.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 	check_xr(app.xr.get_system(app.instance, &system_info, &app.system_id), "xrGetSystem");
 
-	XrSystemEyeGazeInteractionPropertiesEXT gaze_properties{XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT};
-	XrSystemFoveationEyeTrackedPropertiesMETA eye_foveation_properties{
-	    XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META};
-	XrSystemProperties properties{XR_TYPE_SYSTEM_PROPERTIES};
+	XrSystemEyeGazeInteractionPropertiesEXT gaze_properties = xr_struct<XrSystemEyeGazeInteractionPropertiesEXT>(XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT);
+	XrSystemFoveationEyeTrackedPropertiesMETA eye_foveation_properties = xr_struct<XrSystemFoveationEyeTrackedPropertiesMETA>(XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META);
+	XrSystemProperties properties = xr_struct<XrSystemProperties>(XR_TYPE_SYSTEM_PROPERTIES);
 	if (app.standard_eye_foveation) {
 		properties.next = &eye_foveation_properties;
 		eye_foveation_properties.next = app.test_gaze ? &gaze_properties : nullptr;
@@ -1129,7 +1150,7 @@ create_system_and_session(application &app)
 		}
 	}
 
-	XrGraphicsRequirementsMetalKHR requirements{XR_TYPE_GRAPHICS_REQUIREMENTS_METAL_KHR};
+	XrGraphicsRequirementsMetalKHR requirements = xr_struct<XrGraphicsRequirementsMetalKHR>(XR_TYPE_GRAPHICS_REQUIREMENTS_METAL_KHR);
 	check_xr(app.xr.get_metal_graphics_requirements(app.instance, app.system_id, &requirements),
 	         "xrGetMetalGraphicsRequirementsKHR");
 	id<MTLDevice> device = (__bridge id<MTLDevice>)requirements.metalDevice;
@@ -1145,20 +1166,20 @@ create_system_and_session(application &app)
 		fatal("could not create Metal command queue");
 	}
 
-	XrGraphicsBindingMetalKHR graphics_binding{XR_TYPE_GRAPHICS_BINDING_METAL_KHR};
+	XrGraphicsBindingMetalKHR graphics_binding = xr_struct<XrGraphicsBindingMetalKHR>(XR_TYPE_GRAPHICS_BINDING_METAL_KHR);
 	graphics_binding.commandQueue = (__bridge void *)app.command_queue;
-	XrSessionCreateInfo session_info{XR_TYPE_SESSION_CREATE_INFO};
+	XrSessionCreateInfo session_info = xr_struct<XrSessionCreateInfo>(XR_TYPE_SESSION_CREATE_INFO);
 	session_info.next = &graphics_binding;
 	session_info.systemId = app.system_id;
 	check_xr(app.xr.create_session(app.instance, &session_info, &app.session), "xrCreateSession");
 
-	XrReferenceSpaceCreateInfo local_space_info{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+	XrReferenceSpaceCreateInfo local_space_info = xr_struct<XrReferenceSpaceCreateInfo>(XR_TYPE_REFERENCE_SPACE_CREATE_INFO);
 	local_space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
 	local_space_info.poseInReferenceSpace.orientation.w = 1.0f;
 	check_xr(app.xr.create_reference_space(app.session, &local_space_info, &app.app_space),
 	         "xrCreateReferenceSpace(LOCAL)");
 
-	XrReferenceSpaceCreateInfo view_space_info{XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
+	XrReferenceSpaceCreateInfo view_space_info = xr_struct<XrReferenceSpaceCreateInfo>(XR_TYPE_REFERENCE_SPACE_CREATE_INFO);
 	view_space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
 	view_space_info.poseInReferenceSpace.orientation.w = 1.0f;
 	check_xr(app.xr.create_reference_space(app.session, &view_space_info, &app.view_space),
@@ -1178,13 +1199,13 @@ create_gaze_resources(application &app)
 	check_xr(app.xr.string_to_path(app.instance, "/user/eyes_ext", &app.gaze_subaction_path),
 	         "xrStringToPath(/user/eyes_ext)");
 
-	XrActionSetCreateInfo set_info{XR_TYPE_ACTION_SET_CREATE_INFO};
+	XrActionSetCreateInfo set_info = xr_struct<XrActionSetCreateInfo>(XR_TYPE_ACTION_SET_CREATE_INFO);
 	snprintf(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "%s", "gaze");
 	snprintf(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "%s", "Eye gaze");
 	set_info.priority = 0;
 	check_xr(app.xr.create_action_set(app.instance, &set_info, &app.gaze_action_set), "xrCreateActionSet(gaze)");
 
-	XrActionCreateInfo action_info{XR_TYPE_ACTION_CREATE_INFO};
+	XrActionCreateInfo action_info = xr_struct<XrActionCreateInfo>(XR_TYPE_ACTION_CREATE_INFO);
 	action_info.actionType = XR_ACTION_TYPE_POSE_INPUT;
 	snprintf(action_info.actionName, XR_MAX_ACTION_NAME_SIZE, "%s", "gaze_pose");
 	snprintf(action_info.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE, "%s", "Gaze pose");
@@ -1201,14 +1222,14 @@ create_gaze_resources(application &app)
 	         "xrStringToPath(gaze pose binding)");
 
 	XrActionSuggestedBinding binding{app.gaze_action, gaze_binding_path};
-	XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+	XrInteractionProfileSuggestedBinding suggested = xr_struct<XrInteractionProfileSuggestedBinding>(XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING);
 	suggested.interactionProfile = interaction_profile;
 	suggested.countSuggestedBindings = 1;
 	suggested.suggestedBindings = &binding;
 	check_xr(app.xr.suggest_interaction_profile_bindings(app.instance, &suggested),
 	         "xrSuggestInteractionProfileBindings(eye gaze)");
 
-	XrActionSpaceCreateInfo space_info{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+	XrActionSpaceCreateInfo space_info = xr_struct<XrActionSpaceCreateInfo>(XR_TYPE_ACTION_SPACE_CREATE_INFO);
 	space_info.action = app.gaze_action;
 	space_info.subactionPath = app.gaze_subaction_path;
 	space_info.poseInActionSpace.orientation.w = 1.0f;
@@ -1241,7 +1262,7 @@ create_controller_action(application &app,
                          const char *localized_name,
                          XrActionType type)
 {
-	XrActionCreateInfo action_info{XR_TYPE_ACTION_CREATE_INFO};
+	XrActionCreateInfo action_info = xr_struct<XrActionCreateInfo>(XR_TYPE_ACTION_CREATE_INFO);
 	action_info.actionType = type;
 	snprintf(action_info.actionName, XR_MAX_ACTION_NAME_SIZE, "%s", name);
 	snprintf(action_info.localizedActionName, XR_MAX_LOCALIZED_ACTION_NAME_SIZE, "%s", localized_name);
@@ -1265,7 +1286,7 @@ create_generic_controller_resources(application &app)
 	check_xr(app.xr.string_to_path(app.instance, "/user/hand/right", &app.controller_hand_paths[1]),
 	         "xrStringToPath(/user/hand/right)");
 
-	XrActionSetCreateInfo set_info{XR_TYPE_ACTION_SET_CREATE_INFO};
+	XrActionSetCreateInfo set_info = xr_struct<XrActionSetCreateInfo>(XR_TYPE_ACTION_SET_CREATE_INFO);
 	snprintf(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "%s", "generic_controller");
 	snprintf(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "%s",
 	         "Generic controller");
@@ -1322,7 +1343,7 @@ create_generic_controller_resources(application &app)
 		}
 	}
 
-	XrInteractionProfileSuggestedBinding suggested{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+	XrInteractionProfileSuggestedBinding suggested = xr_struct<XrInteractionProfileSuggestedBinding>(XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING);
 	suggested.interactionProfile = generic_profile;
 	suggested.countSuggestedBindings = (uint32_t)bindings.size();
 	suggested.suggestedBindings = bindings.data();
@@ -1349,7 +1370,7 @@ attach_action_sets(application &app)
 		return;
 	}
 
-	XrSessionActionSetsAttachInfo attach_info{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+	XrSessionActionSetsAttachInfo attach_info = xr_struct<XrSessionActionSetsAttachInfo>(XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO);
 	attach_info.countActionSets = count;
 	attach_info.actionSets = action_sets.data();
 	check_xr(app.xr.attach_session_action_sets(app.session, &attach_info), "xrAttachSessionActionSets");
@@ -1387,7 +1408,7 @@ poll_generic_controller(application &app)
 	}
 
 	XrActiveActionSet active_set{app.controller_action_set, XR_NULL_PATH};
-	XrActionsSyncInfo sync_info{XR_TYPE_ACTIONS_SYNC_INFO};
+	XrActionsSyncInfo sync_info = xr_struct<XrActionsSyncInfo>(XR_TYPE_ACTIONS_SYNC_INFO);
 	sync_info.countActiveActionSets = 1;
 	sync_info.activeActionSets = &active_set;
 	if (XR_FAILED(app.xr.sync_actions(app.session, &sync_info))) {
@@ -1401,45 +1422,45 @@ poll_generic_controller(application &app)
 		const XrPath hand_path = app.controller_hand_paths[hand_index];
 		const char *hand_name = hand_index == 0 ? "left" : "right";
 
-		XrActionStateGetInfo get_info{XR_TYPE_ACTION_STATE_GET_INFO};
+		XrActionStateGetInfo get_info = xr_struct<XrActionStateGetInfo>(XR_TYPE_ACTION_STATE_GET_INFO);
 		get_info.subactionPath = hand_path;
 
-		XrActionStateBoolean primary{XR_TYPE_ACTION_STATE_BOOLEAN};
+		XrActionStateBoolean primary = xr_struct<XrActionStateBoolean>(XR_TYPE_ACTION_STATE_BOOLEAN);
 		get_info.action = app.controller_primary_action;
 		check_xr(app.xr.get_action_state_boolean(app.session, &get_info, &primary),
 		         "xrGetActionStateBoolean(primary)");
 
-		XrActionStateBoolean secondary{XR_TYPE_ACTION_STATE_BOOLEAN};
+		XrActionStateBoolean secondary = xr_struct<XrActionStateBoolean>(XR_TYPE_ACTION_STATE_BOOLEAN);
 		get_info.action = app.controller_secondary_action;
 		check_xr(app.xr.get_action_state_boolean(app.session, &get_info, &secondary),
 		         "xrGetActionStateBoolean(secondary)");
 
-		XrActionStateFloat trigger{XR_TYPE_ACTION_STATE_FLOAT};
+		XrActionStateFloat trigger = xr_struct<XrActionStateFloat>(XR_TYPE_ACTION_STATE_FLOAT);
 		get_info.action = app.controller_trigger_action;
 		check_xr(app.xr.get_action_state_float(app.session, &get_info, &trigger),
 		         "xrGetActionStateFloat(trigger)");
 
-		XrActionStateFloat squeeze{XR_TYPE_ACTION_STATE_FLOAT};
+		XrActionStateFloat squeeze = xr_struct<XrActionStateFloat>(XR_TYPE_ACTION_STATE_FLOAT);
 		get_info.action = app.controller_squeeze_action;
 		check_xr(app.xr.get_action_state_float(app.session, &get_info, &squeeze),
 		         "xrGetActionStateFloat(squeeze)");
 
-		XrActionStateVector2f thumbstick{XR_TYPE_ACTION_STATE_VECTOR2F};
+		XrActionStateVector2f thumbstick = xr_struct<XrActionStateVector2f>(XR_TYPE_ACTION_STATE_VECTOR2F);
 		get_info.action = app.controller_thumbstick_action;
 		check_xr(app.xr.get_action_state_vector2f(app.session, &get_info, &thumbstick),
 		         "xrGetActionStateVector2f(thumbstick)");
 
-		XrActionStatePose grip{XR_TYPE_ACTION_STATE_POSE};
+		XrActionStatePose grip = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 		get_info.action = app.controller_grip_action;
 		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &grip),
 		         "xrGetActionStatePose(grip)");
 
-		XrActionStatePose grip_surface{XR_TYPE_ACTION_STATE_POSE};
+		XrActionStatePose grip_surface = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 		get_info.action = app.controller_grip_surface_action;
 		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &grip_surface),
 		         "xrGetActionStatePose(grip_surface)");
 
-		XrActionStatePose aim{XR_TYPE_ACTION_STATE_POSE};
+		XrActionStatePose aim = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 		get_info.action = app.controller_aim_action;
 		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &aim),
 		         "xrGetActionStatePose(aim)");
@@ -1450,7 +1471,7 @@ poll_generic_controller(application &app)
 		    thumbstick.changedSinceLastSync;
 
 		if (periodic || changed) {
-			XrInteractionProfileState profile_state{XR_TYPE_INTERACTION_PROFILE_STATE};
+			XrInteractionProfileState profile_state = xr_struct<XrInteractionProfileState>(XR_TYPE_INTERACTION_PROFILE_STATE);
 			check_xr(app.xr.get_current_interaction_profile(app.session, hand_path, &profile_state),
 			         "xrGetCurrentInteractionProfile");
 			std::string profile = xr_path_string(app, profile_state.interactionProfile);
@@ -1477,12 +1498,12 @@ create_passthrough_resources(application &app)
 		return;
 	}
 
-	XrPassthroughCreateInfoFB passthrough_info{XR_TYPE_PASSTHROUGH_CREATE_INFO_FB};
+	XrPassthroughCreateInfoFB passthrough_info = xr_struct<XrPassthroughCreateInfoFB>(XR_TYPE_PASSTHROUGH_CREATE_INFO_FB);
 	check_xr(app.xr.create_passthrough(app.session, &passthrough_info, &app.passthrough),
 	         "xrCreatePassthroughFB");
 	check_xr(app.xr.passthrough_start(app.passthrough), "xrPassthroughStartFB");
 
-	XrPassthroughLayerCreateInfoFB layer_info{XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB};
+	XrPassthroughLayerCreateInfoFB layer_info = xr_struct<XrPassthroughLayerCreateInfoFB>(XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB);
 	layer_info.passthrough = app.passthrough;
 	layer_info.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
 	check_xr(app.xr.create_passthrough_layer(app.session, &layer_info, &app.passthrough_layer),
@@ -1546,7 +1567,7 @@ create_swapchains(application &app)
 	}
 	app.view_configuration.resize(view_count);
 	for (XrViewConfigurationView &view : app.view_configuration) {
-		view = {XR_TYPE_VIEW_CONFIGURATION_VIEW};
+		xr_reset(view, XR_TYPE_VIEW_CONFIGURATION_VIEW);
 	}
 	check_xr(app.xr.enumerate_view_configuration_views(app.instance, app.system_id,
 	                                                   XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, view_count,
@@ -1561,11 +1582,10 @@ create_swapchains(application &app)
 		swapchain.width = app.view_configuration[i].recommendedImageRectWidth;
 		swapchain.height = app.view_configuration[i].recommendedImageRectHeight;
 
-		XrSwapchainCreateInfoFoveationFB foveation_create_info{
-		    XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
+		XrSwapchainCreateInfoFoveationFB foveation_create_info = xr_struct<XrSwapchainCreateInfoFoveationFB>(XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB);
 		foveation_create_info.flags = 0;
 
-		XrSwapchainCreateInfo create_info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+		XrSwapchainCreateInfo create_info = xr_struct<XrSwapchainCreateInfo>(XR_TYPE_SWAPCHAIN_CREATE_INFO);
 		if (app.standard_foveation) {
 			create_info.next = &foveation_create_info;
 		}
@@ -1584,7 +1604,7 @@ create_swapchains(application &app)
 		         "xrEnumerateSwapchainImages(count)");
 		swapchain.images.resize(image_count);
 		for (XrSwapchainImageMetalKHR &image : swapchain.images) {
-			image = {XR_TYPE_SWAPCHAIN_IMAGE_METAL_KHR};
+			xr_reset(image, XR_TYPE_SWAPCHAIN_IMAGE_METAL_KHR);
 		}
 		check_xr(app.xr.enumerate_swapchain_images(
 		             swapchain.handle, image_count, &image_count,
@@ -1592,7 +1612,7 @@ create_swapchains(application &app)
 		         "xrEnumerateSwapchainImages(list)");
 
 		if (app.submit_depth_layer) {
-			XrSwapchainCreateInfo depth_create_info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+			XrSwapchainCreateInfo depth_create_info = xr_struct<XrSwapchainCreateInfo>(XR_TYPE_SWAPCHAIN_CREATE_INFO);
 			depth_create_info.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 			depth_create_info.format = (int64_t)choose_depth_swapchain_format(app);
 			depth_create_info.sampleCount = 1;
@@ -1609,7 +1629,7 @@ create_swapchains(application &app)
 			         "xrEnumerateSwapchainImages(depth count)");
 			swapchain.depth_images.resize(depth_image_count);
 			for (XrSwapchainImageMetalKHR &image : swapchain.depth_images) {
-				image = {XR_TYPE_SWAPCHAIN_IMAGE_METAL_KHR};
+				xr_reset(image, XR_TYPE_SWAPCHAIN_IMAGE_METAL_KHR);
 			}
 			check_xr(app.xr.enumerate_swapchain_images(
 			             swapchain.depth_handle, depth_image_count, &depth_image_count,
@@ -1634,9 +1654,9 @@ create_swapchains(application &app)
 	app.projection_views.resize(view_count);
 	app.depth_infos.resize(view_count);
 	for (uint32_t i = 0; i < view_count; ++i) {
-		app.views[i] = {XR_TYPE_VIEW};
-		app.projection_views[i] = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
-		app.depth_infos[i] = {XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR};
+		xr_reset(app.views[i], XR_TYPE_VIEW);
+		xr_reset(app.projection_views[i], XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW);
+		xr_reset(app.depth_infos[i], XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR);
 	}
 	app.frame_instances.reserve(app.renderer.max_instances);
 	app.renderer.initialize(device, app.color_format);
@@ -1654,7 +1674,7 @@ create_swapchains(application &app)
 static XrPosef
 head_pose_for_frame(application &app, XrTime predicted_display_time)
 {
-	XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+	XrSpaceLocation location = xr_struct<XrSpaceLocation>(XR_TYPE_SPACE_LOCATION);
 	XrResult result = app.xr.locate_space(app.view_space, app.app_space, predicted_display_time, &location);
 	if (XR_SUCCEEDED(result) &&
 	    (location.locationFlags & (XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) ==
@@ -1797,23 +1817,23 @@ locate_gaze_relative_to_view(application &app,
                              float *out_pitch_deg)
 {
 	XrActiveActionSet active_set{app.gaze_action_set, XR_NULL_PATH};
-	XrActionsSyncInfo sync_info{XR_TYPE_ACTIONS_SYNC_INFO};
+	XrActionsSyncInfo sync_info = xr_struct<XrActionsSyncInfo>(XR_TYPE_ACTIONS_SYNC_INFO);
 	sync_info.countActiveActionSets = 1;
 	sync_info.activeActionSets = &active_set;
 	if (XR_FAILED(app.xr.sync_actions(app.session, &sync_info))) {
 		return false;
 	}
 
-	XrActionStateGetInfo get_info{XR_TYPE_ACTION_STATE_GET_INFO};
+	XrActionStateGetInfo get_info = xr_struct<XrActionStateGetInfo>(XR_TYPE_ACTION_STATE_GET_INFO);
 	get_info.action = app.gaze_action;
 	get_info.subactionPath = app.gaze_subaction_path;
-	XrActionStatePose pose_state{XR_TYPE_ACTION_STATE_POSE};
+	XrActionStatePose pose_state = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 	if (XR_FAILED(app.xr.get_action_state_pose(app.session, &get_info, &pose_state)) ||
 	    pose_state.isActive != XR_TRUE) {
 		return false;
 	}
 
-	XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+	XrSpaceLocation location = xr_struct<XrSpaceLocation>(XR_TYPE_SPACE_LOCATION);
 	if (XR_FAILED(app.xr.locate_space(app.gaze_space, app.view_space, predicted_display_time, &location))) {
 		return false;
 	}
@@ -2004,7 +2024,7 @@ update_standard_foveation(application &app, bool verbose)
 	for (uint32_t i = 0; i < app.swapchains.size(); ++i) {
 		view_swapchain &swapchain = app.swapchains[i];
 
-		XrSwapchainStateFoveationFB update{XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
+		XrSwapchainStateFoveationFB update = xr_struct<XrSwapchainStateFoveationFB>(XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB);
 		update.flags = 0;
 		update.profile = app.standard_foveation_profile;
 		check_xr(app.xr.update_swapchain_fb(
@@ -2012,7 +2032,7 @@ update_standard_foveation(application &app, bool verbose)
 		             reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&update)),
 		         "xrUpdateSwapchainFB(foveation)");
 
-		XrFoveationMetalStateMNDX native{XR_TYPE_FOVEATION_METAL_STATE_MNDX};
+		XrFoveationMetalStateMNDX native = xr_struct<XrFoveationMetalStateMNDX>(XR_TYPE_FOVEATION_METAL_STATE_MNDX);
 		check_xr(app.xr.get_foveation_metal_state_mndx(
 		             swapchain.handle, i, 0, &native),
 		         "xrGetFoveationMetalStateMNDX");
@@ -2039,7 +2059,7 @@ update_standard_foveation(application &app, bool verbose)
 	app.standard_foveation_frame_count++;
 	if (app.standard_eye_foveation && app.xr.get_foveation_eye_tracked_state_meta != nullptr &&
 	    (verbose || (app.standard_foveation_frame_count % 120) == 1)) {
-		XrFoveationEyeTrackedStateMETA state{XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META};
+		XrFoveationEyeTrackedStateMETA state = xr_struct<XrFoveationEyeTrackedStateMETA>(XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META);
 		check_xr(app.xr.get_foveation_eye_tracked_state_meta(app.session, &state),
 		         "xrGetFoveationEyeTrackedStateMETA");
 		fprintf(stderr,
@@ -2057,12 +2077,10 @@ create_standard_foveation_resources(application &app)
 		return;
 	}
 
-	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info{
-	    XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META};
+	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info = xr_struct<XrFoveationEyeTrackedProfileCreateInfoMETA>(XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META);
 	eye_info.flags = 0;
 
-	XrFoveationLevelProfileCreateInfoFB level_info{
-	    XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB};
+	XrFoveationLevelProfileCreateInfoFB level_info = xr_struct<XrFoveationLevelProfileCreateInfoFB>(XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB);
 	level_info.level = xr_fb_foveation_level_from_index(app.foveation_profile_index);
 	level_info.verticalOffset = 0.0f;
 	level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
@@ -2070,7 +2088,7 @@ create_standard_foveation_resources(application &app)
 		level_info.next = &eye_info;
 	}
 
-	XrFoveationProfileCreateInfoFB create_info{XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB};
+	XrFoveationProfileCreateInfoFB create_info = xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 	create_info.next = &level_info;
 	check_xr(app.xr.create_foveation_profile_fb(
 	             app.session, &create_info, &app.standard_foveation_profile),
@@ -2119,12 +2137,12 @@ apply_fb_sparse_alternate(application &app)
 	const bool verbose = app.fb_sparse_frame < 12 || (app.fb_sparse_frame % 240) < 2;
 	for (uint32_t i = 0; i < app.swapchains.size(); ++i) {
 		view_swapchain &swapchain = app.swapchains[i];
-		XrSwapchainStateFoveationFB update{XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB};
+		XrSwapchainStateFoveationFB update = xr_struct<XrSwapchainStateFoveationFB>(XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB);
 		update.profile = app.fb_sparse_alt_profile;
 		check_xr(app.xr.update_swapchain_fb(swapchain.handle,
 		                                    reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&update)),
 		         "xrUpdateSwapchainFB(sparse alternate)");
-		XrFoveationMetalStateMNDX native{XR_TYPE_FOVEATION_METAL_STATE_MNDX};
+		XrFoveationMetalStateMNDX native = xr_struct<XrFoveationMetalStateMNDX>(XR_TYPE_FOVEATION_METAL_STATE_MNDX);
 		check_xr(app.xr.get_foveation_metal_state_mndx(swapchain.handle, i, 0, &native),
 		         "xrGetFoveationMetalStateMNDX(sparse alternate)");
 		if (verbose) {
@@ -2305,8 +2323,7 @@ encode_gaze_foveation_resolve(application &app,
 	[resolve_encoder setRenderPipelineState:app.renderer.foveation_resolve_pipeline];
 	[resolve_encoder setFragmentBuffer:swapchain.foveation_rate_data offset:0 atIndex:0];
 	[resolve_encoder setFragmentTexture:swapchain.foveation_color_texture atIndex:0];
-	[resolve_encoder setViewport:(MTLViewport){
-	    0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
+	[resolve_encoder setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
 	[resolve_encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[resolve_encoder endEncoding];
 }
@@ -2319,7 +2336,7 @@ append_gaze_marker(application &app, XrTime predicted_display_time)
 	}
 
 	XrActiveActionSet active_set{app.gaze_action_set, XR_NULL_PATH};
-	XrActionsSyncInfo sync_info{XR_TYPE_ACTIONS_SYNC_INFO};
+	XrActionsSyncInfo sync_info = xr_struct<XrActionsSyncInfo>(XR_TYPE_ACTIONS_SYNC_INFO);
 	sync_info.countActiveActionSets = 1;
 	sync_info.activeActionSets = &active_set;
 	XrResult sync_result = app.xr.sync_actions(app.session, &sync_info);
@@ -2327,10 +2344,10 @@ append_gaze_marker(application &app, XrTime predicted_display_time)
 		return;
 	}
 
-	XrActionStateGetInfo get_info{XR_TYPE_ACTION_STATE_GET_INFO};
+	XrActionStateGetInfo get_info = xr_struct<XrActionStateGetInfo>(XR_TYPE_ACTION_STATE_GET_INFO);
 	get_info.action = app.gaze_action;
 	get_info.subactionPath = app.gaze_subaction_path;
-	XrActionStatePose pose_state{XR_TYPE_ACTION_STATE_POSE};
+	XrActionStatePose pose_state = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 	if (XR_FAILED(app.xr.get_action_state_pose(app.session, &get_info, &pose_state)) || pose_state.isActive != XR_TRUE) {
 		app.gaze_frame_count++;
 		if ((app.gaze_frame_count % 120) == 0) {
@@ -2339,7 +2356,7 @@ append_gaze_marker(application &app, XrTime predicted_display_time)
 		return;
 	}
 
-	XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+	XrSpaceLocation location = xr_struct<XrSpaceLocation>(XR_TYPE_SPACE_LOCATION);
 	XrResult locate_result = app.xr.locate_space(app.gaze_space, app.app_space, predicted_display_time, &location);
 	app.gaze_frame_count++;
 	const XrSpaceLocationFlags required =
@@ -2407,10 +2424,10 @@ render_views(application &app, XrTime predicted_display_time)
 	std::vector<uint32_t> image_indices(app.swapchains.size(), 0);
 	std::vector<uint32_t> depth_image_indices(app.swapchains.size(), 0);
 	for (size_t i = 0; i < app.swapchains.size(); ++i) {
-		XrSwapchainImageAcquireInfo acquire_info{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+		XrSwapchainImageAcquireInfo acquire_info = xr_struct<XrSwapchainImageAcquireInfo>(XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO);
 		check_xr(app.xr.acquire_swapchain_image(app.swapchains[i].handle, &acquire_info, &image_indices[i]),
 		         "xrAcquireSwapchainImage");
-		XrSwapchainImageWaitInfo wait_info{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+		XrSwapchainImageWaitInfo wait_info = xr_struct<XrSwapchainImageWaitInfo>(XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO);
 		wait_info.timeout = XR_INFINITE_DURATION;
 		check_xr(app.xr.wait_swapchain_image(app.swapchains[i].handle, &wait_info), "xrWaitSwapchainImage");
 
@@ -2508,7 +2525,7 @@ render_views(application &app, XrTime predicted_display_time)
 		[encoder setRenderPipelineState:app.renderer.pipeline];
 		[encoder setDepthStencilState:app.renderer.depth_state];
 		[encoder setCullMode:MTLCullModeNone];
-		[encoder setViewport:(MTLViewport){0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
+		[encoder setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
 		[encoder setVertexBuffer:app.renderer.cube_vertex_buffer offset:0 atIndex:0];
 		[encoder setVertexBuffer:app.renderer.instance_buffer offset:0 atIndex:1];
 		const matrix_float4x4 projection = projection_matrix(app.views[i].fov, 0.05f, 100.0f);
@@ -2548,7 +2565,7 @@ render_views(application &app, XrTime predicted_display_time)
 	}
 
 	for (view_swapchain &swapchain : app.swapchains) {
-		XrSwapchainImageReleaseInfo release_info{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+		XrSwapchainImageReleaseInfo release_info = xr_struct<XrSwapchainImageReleaseInfo>(XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO);
 		check_xr(app.xr.release_swapchain_image(swapchain.handle, &release_info), "xrReleaseSwapchainImage");
 		if (app.submit_depth_layer) {
 			check_xr(app.xr.release_swapchain_image(swapchain.depth_handle, &release_info),
@@ -2560,7 +2577,7 @@ render_views(application &app, XrTime predicted_display_time)
 static bool
 poll_events(application &app)
 {
-	XrEventDataBuffer event{XR_TYPE_EVENT_DATA_BUFFER};
+	XrEventDataBuffer event = xr_struct<XrEventDataBuffer>(XR_TYPE_EVENT_DATA_BUFFER);
 	while (app.xr.poll_event(app.instance, &event) == XR_SUCCESS) {
 		switch (event.type) {
 		case XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED: {
@@ -2568,7 +2585,7 @@ poll_events(application &app)
 			    reinterpret_cast<const XrEventDataSessionStateChanged *>(&event);
 			app.session_state = state_changed->state;
 			if (state_changed->state == XR_SESSION_STATE_READY && !app.session_running) {
-				XrSessionBeginInfo begin_info{XR_TYPE_SESSION_BEGIN_INFO};
+				XrSessionBeginInfo begin_info = xr_struct<XrSessionBeginInfo>(XR_TYPE_SESSION_BEGIN_INFO);
 				begin_info.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 				check_xr(app.xr.begin_session(app.session, &begin_info), "xrBeginSession");
 				app.session_running = true;
@@ -2585,7 +2602,7 @@ poll_events(application &app)
 		case XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING: return false;
 		default: break;
 		}
-		event = {XR_TYPE_EVENT_DATA_BUFFER};
+		xr_reset(event, XR_TYPE_EVENT_DATA_BUFFER);
 	}
 	return true;
 }
@@ -2593,20 +2610,20 @@ poll_events(application &app)
 static void
 render_frame(application &app)
 {
-	XrFrameWaitInfo wait_info{XR_TYPE_FRAME_WAIT_INFO};
-	XrFrameState frame_state{XR_TYPE_FRAME_STATE};
+	XrFrameWaitInfo wait_info = xr_struct<XrFrameWaitInfo>(XR_TYPE_FRAME_WAIT_INFO);
+	XrFrameState frame_state = xr_struct<XrFrameState>(XR_TYPE_FRAME_STATE);
 	check_xr(app.xr.wait_frame(app.session, &wait_info, &frame_state), "xrWaitFrame");
-	XrFrameBeginInfo begin_info{XR_TYPE_FRAME_BEGIN_INFO};
+	XrFrameBeginInfo begin_info = xr_struct<XrFrameBeginInfo>(XR_TYPE_FRAME_BEGIN_INFO);
 	check_xr(app.xr.begin_frame(app.session, &begin_info), "xrBeginFrame");
 
 	bool submit_projection = false;
-	XrCompositionLayerProjection layer{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+	XrCompositionLayerProjection layer = xr_struct<XrCompositionLayerProjection>(XR_TYPE_COMPOSITION_LAYER_PROJECTION);
 	if (frame_state.shouldRender == XR_TRUE) {
-		XrViewLocateInfo locate_info{XR_TYPE_VIEW_LOCATE_INFO};
+		XrViewLocateInfo locate_info = xr_struct<XrViewLocateInfo>(XR_TYPE_VIEW_LOCATE_INFO);
 		locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 		locate_info.displayTime = frame_state.predictedDisplayTime;
 		locate_info.space = app.app_space;
-		XrViewState view_state{XR_TYPE_VIEW_STATE};
+		XrViewState view_state = xr_struct<XrViewState>(XR_TYPE_VIEW_STATE);
 		uint32_t view_count = 0;
 		check_xr(app.xr.locate_views(app.session, &locate_info, &view_state, (uint32_t)app.views.size(), &view_count,
 		                             app.views.data()),
@@ -2629,7 +2646,7 @@ render_frame(application &app)
 			}
 			for (size_t i = 0; i < app.projection_views.size(); ++i) {
 				XrCompositionLayerProjectionView &projection_view = app.projection_views[i];
-				projection_view = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+				xr_reset(projection_view, XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW);
 				projection_view.pose = app.views[i].pose;
 				projection_view.fov = app.views[i].fov;
 				projection_view.subImage.swapchain = app.swapchains[i].handle;
@@ -2640,7 +2657,7 @@ render_frame(application &app)
 
 				if (app.submit_depth_layer) {
 					XrCompositionLayerDepthInfoKHR &depth_info = app.depth_infos[i];
-					depth_info = {XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR};
+					xr_reset(depth_info, XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR);
 					depth_info.subImage.swapchain = app.swapchains[i].depth_handle;
 					depth_info.subImage.imageRect.offset = {0, 0};
 					depth_info.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
@@ -2663,7 +2680,7 @@ render_frame(application &app)
 		}
 	}
 
-	XrCompositionLayerPassthroughFB passthrough_layer{XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
+	XrCompositionLayerPassthroughFB passthrough_layer = xr_struct<XrCompositionLayerPassthroughFB>(XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB);
 	passthrough_layer.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 	passthrough_layer.space = XR_NULL_HANDLE;
 	passthrough_layer.layerHandle = app.passthrough_layer;
@@ -2677,7 +2694,7 @@ render_frame(application &app)
 		layers[layer_count++] = reinterpret_cast<const XrCompositionLayerBaseHeader *>(&layer);
 	}
 
-	XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
+	XrFrameEndInfo end_info = xr_struct<XrFrameEndInfo>(XR_TYPE_FRAME_END_INFO);
 	end_info.displayTime = frame_state.predictedDisplayTime;
 	end_info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 	end_info.layerCount = layer_count;

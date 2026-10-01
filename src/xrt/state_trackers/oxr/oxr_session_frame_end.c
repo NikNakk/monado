@@ -306,7 +306,7 @@ fill_in_foveation_map(struct oxr_logger *log,
 	if (sess->gfx_ext == OXR_SESSION_GRAPHICS_EXT_METAL && sc->swapchain != NULL &&
 	    sc->swapchain->set_foveation != NULL && sc->released.yes && sc->released.index >= 0) {
 		struct xrt_swapchain_metal *xscm = xrt_swapchain_metal(sc->swapchain);
-		struct xrt_metal_foveation_state native = {};
+		struct xrt_metal_foveation_state native = {0};
 		xrt_result_t xret = xrt_swapchain_metal_get_image_foveation_state(
 		    xscm, (uint32_t)sc->released.index, view->subImage.imageArrayIndex, &native);
 		if (debug_get_bool_option_debug_foveation_binding()) {

@@ -158,7 +158,38 @@ macos_app_pacing_trace_event(const char *event,
 	funlockfile(file);
 }
 #else
-#define macos_app_pacing_trace_event(...) ((void)0)
+// Only traced on macOS.
+static inline void
+macos_app_pacing_trace_event(const char *event,
+                             int64_t session_id,
+                             int64_t frame_id,
+                             int64_t event_ns,
+                             int64_t wake_ns,
+                             int64_t predicted_display_ns,
+                             int64_t predicted_period_ns,
+                             int64_t display_time_ns,
+                             int64_t cpu_est_ns,
+                             int64_t draw_est_ns,
+                             int64_t gpu_est_ns,
+                             int64_t cpu_actual_ns,
+                             int64_t draw_actual_ns,
+                             int64_t gpu_actual_ns)
+{
+	(void)event;
+	(void)session_id;
+	(void)frame_id;
+	(void)event_ns;
+	(void)wake_ns;
+	(void)predicted_display_ns;
+	(void)predicted_period_ns;
+	(void)display_time_ns;
+	(void)cpu_est_ns;
+	(void)draw_est_ns;
+	(void)gpu_est_ns;
+	(void)cpu_actual_ns;
+	(void)draw_actual_ns;
+	(void)gpu_actual_ns;
+}
 #endif
 
 enum u_pa_state

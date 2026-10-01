@@ -45,7 +45,11 @@ create_surface(uint32_t image_index)
 	dict_set_u32(properties, kIOSurfaceBytesPerRow, bytes_per_row);
 	dict_set_u32(properties, kIOSurfaceAllocSize, alloc_size);
 	dict_set_u32(properties, kIOSurfacePixelFormat, PROBE_BGRA_FOURCC);
+	// Deprecated as insecure, but this probe tests exactly the lookup-by-ID path.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 	CFDictionarySetValue(properties, kIOSurfaceIsGlobal, kCFBooleanTrue);
+#pragma clang diagnostic pop
 
 	IOSurfaceRef surface = IOSurfaceCreate(properties);
 	CFRelease(properties);

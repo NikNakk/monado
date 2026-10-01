@@ -1053,12 +1053,6 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 		hmd->timestamp_samples++;
 	}
 
-	struct xrt_imu_sample sample = {
-	    .timestamp_ns = sample_vts_ns,
-	    .accel_m_s2 = {hmd->last_accel.x, hmd->last_accel.y, hmd->last_accel.z},
-	    .gyro_rad_secs = {hmd->last_gyro.x, hmd->last_gyro.y, hmd->last_gyro.z},
-	};
-
 	m_ff_vec3_f32_push(hmd->ff_gyro, &hmd->last_gyro, sample_vts_ns);
 }
 
@@ -1342,6 +1336,8 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 	        XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT),
 	};
 
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+	// What the previous pose predicted for this one, for the timing traces.
 	struct xrt_space_relation prior_relation = XRT_SPACE_RELATION_ZERO;
 	timepoint_ns prior_relation_ts = 0;
 	bool have_prior_relation =
@@ -1356,7 +1352,6 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 		predicted_position.z = prior_relation.pose.position.z + prior_relation.linear_velocity.z * dt_s;
 	}
 
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	if (have_prior_relation) {
 		psvr2_timing_trace_score_horizon(prior_relation_ts, &prior_relation.pose.position,
 		                                 pose_sample.timestamp_ns, &relation.pose.position);

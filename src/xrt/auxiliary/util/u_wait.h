@@ -94,7 +94,7 @@ u_wait_until(struct os_precise_sleeper *sleeper, uint64_t until_ns)
 
 	if (spin_wait) {
 		uint64_t spin_begin_ns = os_monotonic_get_ns();
-		while (os_monotonic_get_ns() < until_ns) {
+		while ((uint64_t)os_monotonic_get_ns() < until_ns) {
 			/* Diagnostic control: stay runnable for the whole wait. */
 		}
 		spin_actual_ns = os_monotonic_get_ns() - spin_begin_ns;

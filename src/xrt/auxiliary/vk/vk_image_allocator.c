@@ -571,10 +571,10 @@ destroy_image(struct vk_bundle *vk, struct vk_image *image)
 	}
 }
 
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 static VkResult
 get_image_native_handle(struct vk_bundle *vk, VkImage image, xrt_graphics_buffer_handle_t *out_handle)
 {
-#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 	if (!vk->has_EXT_metal_objects || vk->vkExportMetalObjectsEXT == NULL) {
 		*out_handle = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
@@ -598,13 +598,8 @@ get_image_native_handle(struct vk_bundle *vk, VkImage image, xrt_graphics_buffer
 
 	*out_handle = u_graphics_buffer_ref(io_surface_info.ioSurface);
 	return xrt_graphics_buffer_is_valid(*out_handle) ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
-#else
-	(void)vk;
-	(void)image;
-	(void)out_handle;
-	return VK_ERROR_EXTENSION_NOT_PRESENT;
-#endif
 }
+#endif // XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE
 
 
 /*

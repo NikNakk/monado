@@ -181,6 +181,8 @@ fill_in_device_features(struct vk_bundle *vk, const uint32_t queue_family_index)
 	free(props);
 }
 
+// Metal objects are checked directly; see fill_in_external_object_properties.
+#if !defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 static void
 get_external_image_support(struct vk_bundle *vk,
                            bool depth,
@@ -198,6 +200,7 @@ get_external_image_support(struct vk_bundle *vk,
 	          : (enum xrt_swapchain_usage_bits)(XRT_SWAPCHAIN_USAGE_COLOR | XRT_SWAPCHAIN_USAGE_SAMPLED);
 	vk_csci_get_image_external_support(vk, image_format, bits, handle_type, out_importable, out_exportable);
 }
+#endif // !XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE
 
 static bool
 is_fence_bit_supported(struct vk_bundle *vk, VkExternalFenceHandleTypeFlagBits handle_type)
