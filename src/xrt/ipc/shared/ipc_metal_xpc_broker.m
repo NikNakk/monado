@@ -114,12 +114,49 @@ external_texture_token_is_valid(uint64_t token)
 	NSNumber *count = [_countsByToken objectForKey:key];
 	NSMutableDictionary *images = [_handlesByToken objectForKey:key];
 	if (count != nil && index < count.unsignedIntValue) {
-		handle = [[images objectForKey:[NSNumber numberWithUnsignedInt:index]] retain];
+		id object = [images objectForKey:[NSNumber numberWithUnsignedInt:index]];
+		if ([object isKindOfClass:[MTLSharedTextureHandle class]]) {
+			handle = [object retain];
+		}
 	}
 	[_lock unlock];
 
 	reply(handle);
 	[handle release];
+}
+
+- (void)publishIOSurface:(IOSurface *)surface
+                   token:(uint64_t)token
+                   index:(uint32_t)index
+              imageCount:(uint32_t)imageCount
+                   reply:(void (^)(BOOL success))reply
+{
+	// The registry holds either kind of object; the take checks the class.
+	[self publishTextureHandle:(MTLSharedTextureHandle *)surface
+	                     token:token
+	                     index:index
+	                imageCount:imageCount
+	                     reply:reply];
+}
+
+- (void)takeIOSurfaceForToken:(uint64_t)token index:(uint32_t)index reply:(void (^)(IOSurface *surface))reply
+{
+	IOSurface *surface = nil;
+	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
+
+	[_lock lock];
+	NSNumber *count = [_countsByToken objectForKey:key];
+	NSMutableDictionary *images = [_handlesByToken objectForKey:key];
+	if (count != nil && index < count.unsignedIntValue) {
+		id object = [images objectForKey:[NSNumber numberWithUnsignedInt:index]];
+		if ([object isKindOfClass:[IOSurface class]]) {
+			surface = [object retain];
+		}
+	}
+	[_lock unlock];
+
+	reply(surface);
+	[surface release];
 }
 
 - (void)markTextureTokenClaimable:(uint64_t)token

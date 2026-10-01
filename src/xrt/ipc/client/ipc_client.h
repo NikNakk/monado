@@ -180,6 +180,18 @@ ipc_client_compositor_import_iosurface_ids(struct xrt_compositor_native *xcn,
                                            struct xrt_swapchain **out_xsc);
 
 /*!
+ * Native macOS: import IOSurface-backed images this process published to the
+ * service over XPC (ipc_metal_xpc_publish_iosurfaces). Unlike the ID import
+ * above, the surfaces do not have to be global.
+ */
+xrt_result_t
+ipc_client_compositor_import_iosurface_token(struct xrt_compositor_native *xcn,
+                                             const struct xrt_swapchain_create_info *info,
+                                             uint32_t image_count,
+                                             uint64_t token,
+                                             struct xrt_swapchain **out_xsc);
+
+/*!
  * Wine/macOS bridge helper: import DXMT shared Metal textures directly by the
  * bootstrap names of their MTLSharedTextureHandle Mach ports.
  */

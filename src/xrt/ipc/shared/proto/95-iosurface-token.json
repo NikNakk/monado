@@ -1,0 +1,15 @@
+{
+	"$schema": "../proto.schema.json",
+
+	"swapchain_import_iosurface_token": {
+		"ifdef": "__APPLE__",
+		"in": [
+			{"name": "info", "type": "struct xrt_swapchain_create_info"},
+			{"name": "token", "type": "uint64_t"},
+			{"name": "image_count", "type": "uint32_t"}
+		],
+		"out": [
+			{"name": "id", "type": "uint32_t"}
+		]
+	}
+}

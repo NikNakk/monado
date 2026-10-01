@@ -75,6 +75,26 @@ void
 ipc_metal_xpc_release_textures(void **metal_textures, uint32_t image_count);
 
 /*!
+ * Publish borrowed IOSurfaceRef objects to the service under a token scoped
+ * to this process. The surfaces travel as Mach ports, so they do not need to
+ * be global (kIOSurfaceIsGlobal), which would let any process open them by ID.
+ */
+xrt_result_t
+ipc_metal_xpc_publish_iosurfaces(void *const *iosurfaces, uint32_t image_count, uint64_t *out_token);
+
+/*!
+ * Take the surfaces published under @p token from the standalone broker.
+ * Each returned pointer is a retained IOSurfaceRef. The service's own
+ * registry is read with ipc_metal_xpc_service_take_iosurfaces_for_pid().
+ */
+xrt_result_t
+ipc_metal_xpc_take_iosurfaces(uint64_t token, uint32_t expected_count, void **out_iosurfaces);
+
+/*! Release surfaces returned by the take functions. */
+void
+ipc_metal_xpc_release_iosurfaces(void **iosurfaces, uint32_t image_count);
+
+/*!
  * Publish a borrowed MTLSharedEvent through the broker and return its token.
  */
 xrt_result_t
@@ -137,6 +157,7 @@ ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images, uint3
 #ifdef __OBJC__
 
 #import <Foundation/Foundation.h>
+#import <IOSurface/IOSurfaceObjC.h>
 #import <Metal/Metal.h>
 
 @protocol IPCMetalXPCBrokerProtocol
@@ -150,6 +171,14 @@ ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images, uint3
 - (void)takeTextureHandleForToken:(uint64_t)token
                             index:(uint32_t)index
                             reply:(void (^)(MTLSharedTextureHandle *handle))reply;
+
+- (void)publishIOSurface:(IOSurface *)surface
+                   token:(uint64_t)token
+                   index:(uint32_t)index
+              imageCount:(uint32_t)imageCount
+                   reply:(void (^)(BOOL success))reply;
+
+- (void)takeIOSurfaceForToken:(uint64_t)token index:(uint32_t)index reply:(void (^)(IOSurface *surface))reply;
 
 - (void)markTextureTokenClaimable:(uint64_t)token reply:(void (^)(BOOL success))reply;
 

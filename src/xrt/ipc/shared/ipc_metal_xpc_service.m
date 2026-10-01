@@ -32,12 +32,15 @@
 	NSMutableSet *_claimableTextureTokens;
 }
 
-- (BOOL)storeTextureHandle:(MTLSharedTextureHandle *)handle
-                     token:(uint64_t)token
-                     index:(uint32_t)index
-                imageCount:(uint32_t)imageCount
-                  ownerPID:(pid_t)ownerPID;
-- (MTLSharedTextureHandle *)copyTextureHandleForToken:(uint64_t)token index:(uint32_t)index ownerPID:(pid_t)ownerPID;
+- (BOOL)storeImageObject:(id)handle
+                   token:(uint64_t)token
+                   index:(uint32_t)index
+              imageCount:(uint32_t)imageCount
+                ownerPID:(pid_t)ownerPID;
+- (id)copyImageObjectForToken:(uint64_t)token
+                        index:(uint32_t)index
+                     ownerPID:(pid_t)ownerPID
+                expectedClass:(Class)expectedClass;
 - (BOOL)storeSharedEventHandle:(MTLSharedEventHandle *)handle token:(uint64_t)token ownerPID:(pid_t)ownerPID;
 - (MTLSharedEventHandle *)copySharedEventHandleForToken:(uint64_t)token ownerPID:(pid_t)ownerPID;
 - (void)discardToken:(uint64_t)token ownerPID:(pid_t)ownerPID;
@@ -130,11 +133,11 @@ current_xpc_pid(void)
 	return known_owner.intValue == ownerPID;
 }
 
-- (BOOL)storeTextureHandle:(MTLSharedTextureHandle *)handle
-                     token:(uint64_t)token
-                     index:(uint32_t)index
-                imageCount:(uint32_t)imageCount
-                  ownerPID:(pid_t)ownerPID
+- (BOOL)storeImageObject:(id)handle
+                   token:(uint64_t)token
+                   index:(uint32_t)index
+              imageCount:(uint32_t)imageCount
+                ownerPID:(pid_t)ownerPID
 {
 	if (handle == nil || !texture_token_is_valid(token) || imageCount == 0 || imageCount > XRT_MAX_SWAPCHAIN_IMAGES ||
 	    index >= imageCount || ownerPID <= 0) {
@@ -163,14 +166,17 @@ current_xpc_pid(void)
 	return success;
 }
 
-- (MTLSharedTextureHandle *)copyTextureHandleForToken:(uint64_t)token index:(uint32_t)index ownerPID:(pid_t)ownerPID
+- (id)copyImageObjectForToken:(uint64_t)token
+                        index:(uint32_t)index
+                     ownerPID:(pid_t)ownerPID
+                expectedClass:(Class)expectedClass
 {
 	if (!texture_token_is_valid(token) || ownerPID <= 0) {
 		return nil;
 	}
 
 	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
-	MTLSharedTextureHandle *handle = nil;
+	id handle = nil;
 	[_lock lock];
 	BOOL permitted = [self token:key belongsToPIDLocked:ownerPID allowClaim:NO];
 	if (!permitted && [_claimableTextureTokens containsObject:key]) {
@@ -184,7 +190,11 @@ current_xpc_pid(void)
 		NSNumber *count = [_countsByToken objectForKey:key];
 		NSMutableDictionary *images = [_handlesByToken objectForKey:key];
 		if (count != nil && index < count.unsignedIntValue) {
-			handle = [[images objectForKey:[NSNumber numberWithUnsignedInt:index]] retain];
+			id object = [images objectForKey:[NSNumber numberWithUnsignedInt:index]];
+			// A token published as one kind of object cannot be taken as another.
+			if ([object isKindOfClass:expectedClass]) {
+				handle = [object retain];
+			}
 		}
 	}
 	[_lock unlock];
@@ -284,11 +294,44 @@ current_xpc_pid(void)
                        reply:(void (^)(BOOL success))reply
 {
 	pid_t pid = current_xpc_pid();
-	BOOL success = [self storeTextureHandle:handle token:token index:index imageCount:imageCount ownerPID:pid];
+	BOOL success = [handle isKindOfClass:[MTLSharedTextureHandle class]] &&
+	               [self storeImageObject:handle token:token index:index imageCount:imageCount ownerPID:pid];
 	if (!success) {
 		U_LOG_W("Rejected Metal texture token=0x%016llx from XPC pid=%d", (unsigned long long)token, (int)pid);
 	}
 	reply(success);
+}
+
+- (void)publishIOSurface:(IOSurface *)surface
+                   token:(uint64_t)token
+                   index:(uint32_t)index
+              imageCount:(uint32_t)imageCount
+                   reply:(void (^)(BOOL success))reply
+{
+	pid_t pid = current_xpc_pid();
+	// IOSurface tokens are always scoped to the publishing process.
+	BOOL success = standard_token_is_valid(token) && [surface isKindOfClass:[IOSurface class]] &&
+	               [self storeImageObject:surface token:token index:index imageCount:imageCount ownerPID:pid];
+	if (!success) {
+		U_LOG_W("Rejected IOSurface token=0x%016llx from XPC pid=%d", (unsigned long long)token, (int)pid);
+	}
+	reply(success);
+}
+
+- (void)takeIOSurfaceForToken:(uint64_t)token index:(uint32_t)index reply:(void (^)(IOSurface *surface))reply
+{
+	pid_t pid = current_xpc_pid();
+	IOSurface *surface = standard_token_is_valid(token) ? [self copyImageObjectForToken:token
+	                                                                               index:index
+	                                                                            ownerPID:pid
+	                                                                       expectedClass:[IOSurface class]]
+	                                                    : nil;
+	if (surface == nil) {
+		U_LOG_W("Rejected/missing IOSurface token=0x%016llx image=%u for XPC pid=%d",
+		        (unsigned long long)token, index, (int)pid);
+	}
+	reply(surface);
+	[surface release];
 }
 
 - (void)takeTextureHandleForToken:(uint64_t)token
@@ -296,7 +339,10 @@ current_xpc_pid(void)
                             reply:(void (^)(MTLSharedTextureHandle *handle))reply
 {
 	pid_t pid = current_xpc_pid();
-	MTLSharedTextureHandle *handle = [self copyTextureHandleForToken:token index:index ownerPID:pid];
+	MTLSharedTextureHandle *handle = [self copyImageObjectForToken:token
+	                                                         index:index
+	                                                      ownerPID:pid
+	                                                 expectedClass:[MTLSharedTextureHandle class]];
 	if (handle == nil) {
 		U_LOG_W("Rejected/missing Metal texture token=0x%016llx image=%u for XPC pid=%d",
 		        (unsigned long long)token,
@@ -568,8 +614,10 @@ ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
 
 		xrt_result_t xret = XRT_SUCCESS;
 		for (uint32_t i = 0; i < expected_count; i++) {
-			MTLSharedTextureHandle *handle =
-			    [service copyTextureHandleForToken:token index:i ownerPID:owner_pid];
+			MTLSharedTextureHandle *handle = [service copyImageObjectForToken:token
+			                                                            index:i
+			                                                         ownerPID:owner_pid
+			                                                    expectedClass:[MTLSharedTextureHandle class]];
 			if (handle == nil) {
 				U_LOG_E("Metal token ownership mismatch/missing texture token=0x%016llx image=%u pid=%d",
 				        (unsigned long long)token,
@@ -602,6 +650,53 @@ ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
 		        (unsigned long long)token,
 		        (int)owner_pid);
 		return XRT_SUCCESS;
+	}
+}
+
+xrt_result_t
+ipc_metal_xpc_service_take_iosurfaces_for_pid(uint64_t token,
+                                              uint32_t expected_count,
+                                              void **out_iosurfaces,
+                                              pid_t owner_pid)
+{
+	if (!standard_token_is_valid(token) || out_iosurfaces == NULL || expected_count == 0 ||
+	    expected_count > XRT_MAX_SWAPCHAIN_IMAGES || owner_pid <= 0) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	for (uint32_t i = 0; i < expected_count; i++) {
+		out_iosurfaces[i] = NULL;
+	}
+
+	@autoreleasepool {
+		IPCMetalXPCServiceObject *service = copy_service_object();
+		if (service == nil) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		xrt_result_t xret = XRT_SUCCESS;
+		for (uint32_t i = 0; i < expected_count; i++) {
+			IOSurface *surface = [service copyImageObjectForToken:token
+			                                               index:i
+			                                            ownerPID:owner_pid
+			                                       expectedClass:[IOSurface class]];
+			if (surface == nil) {
+				U_LOG_E("IOSurface token ownership mismatch/missing surface token=0x%016llx image=%u pid=%d",
+				        (unsigned long long)token, i, (int)owner_pid);
+				xret = XRT_ERROR_IPC_FAILURE;
+				break;
+			}
+			// Keeps the reference from the copy.
+			out_iosurfaces[i] = (__bridge void *)surface;
+		}
+
+		[service discardToken:token ownerPID:owner_pid];
+		[service release];
+
+		if (xret != XRT_SUCCESS) {
+			ipc_metal_xpc_release_iosurfaces(out_iosurfaces, expected_count);
+		}
+		return xret;
 	}
 }
 

@@ -46,6 +46,16 @@ ipc_metal_server_take_textures(uint64_t token, uint32_t count, void **out, pid_t
 }
 
 static inline xrt_result_t
+ipc_metal_server_take_iosurfaces(uint64_t token, uint32_t count, void **out, pid_t owner_pid)
+{
+	if (ipc_metal_xpc_external_broker_enabled()) {
+		return ipc_metal_xpc_take_iosurfaces(token, count, out);
+	}
+
+	return ipc_metal_xpc_service_take_iosurfaces_for_pid(token, count, out, owner_pid);
+}
+
+static inline xrt_result_t
 ipc_metal_server_publish_shared_event(void *event, uint64_t *out_token, pid_t owner_pid)
 {
 	if (ipc_metal_xpc_external_broker_enabled()) {
@@ -75,6 +85,13 @@ ipc_metal_server_take_textures(uint64_t token, uint32_t count, void **out, pid_t
 {
 	(void)owner_pid;
 	return ipc_metal_xpc_take_textures(token, count, out);
+}
+
+static inline xrt_result_t
+ipc_metal_server_take_iosurfaces(uint64_t token, uint32_t count, void **out, pid_t owner_pid)
+{
+	(void)owner_pid;
+	return ipc_metal_xpc_take_iosurfaces(token, count, out);
 }
 
 static inline xrt_result_t
@@ -533,43 +550,19 @@ ipc_handle_swapchain_import_metal_bootstrap(volatile struct ipc_client_state *ic
 #endif
 }
 
-xrt_result_t
-ipc_handle_swapchain_import_iosurface(volatile struct ipc_client_state *ics,
-                                      const struct xrt_swapchain_create_info *info,
-                                      const struct ipc_arg_swapchain_iosurface *args,
-                                      uint32_t *out_id)
+#ifdef XRT_OS_OSX
+/*!
+ * Create the swapchain for an active external IOSurface import request, and
+ * register it for the client. Ends the request.
+ */
+static xrt_result_t
+finish_external_iosurface_swapchain(volatile struct ipc_client_state *ics,
+                                    const struct xrt_swapchain_create_info *info,
+                                    uint32_t image_count,
+                                    uint32_t index,
+                                    uint32_t *out_id)
 {
-	IPC_TRACE_MARKER();
-
-#ifndef XRT_OS_OSX
-	(void)ics;
-	(void)info;
-	(void)args;
-	(void)out_id;
-	return XRT_ERROR_NOT_IMPLEMENTED;
-#else
-	if (ics == NULL || info == NULL || args == NULL || out_id == NULL || ics->xc == NULL) {
-		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
-	}
-	const uint32_t image_count = args->image_count;
-	if (image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	for (uint32_t i = 0; i < image_count; i++) {
-		if (args->ids[i] == 0) {
-			return XRT_ERROR_INVALID_ARGUMENT;
-		}
-	}
-
-	uint32_t index = 0;
-	xrt_result_t xret = find_free_swapchain_index(ics, &index);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
-
-	if (!comp_metal_swapchain_import_begin_iosurface_ids(info, image_count, args->ids)) {
-		return XRT_ERROR_ALLOCATION;
-	}
+	xrt_result_t xret = XRT_SUCCESS;
 
 	struct xrt_swapchain *xsc = NULL;
 	xret = xrt_comp_create_swapchain(ics->xc, info, &xsc);
@@ -608,10 +601,106 @@ ipc_handle_swapchain_import_iosurface(volatile struct ipc_client_state *ics,
 	ics->swapchain_data[index].image_count = xsc->image_count;
 	*out_id = index;
 
-	IPC_INFO(ics->server,
-	         "External IOSurface swapchain active: id=%u images=%u size=%ux%u array_size=%u first_surface=%u",
-	         index, image_count, info->width, info->height, info->array_size, args->ids[0]);
+	IPC_INFO(ics->server, "External IOSurface swapchain active: id=%u images=%u size=%ux%u array_size=%u", index,
+	         image_count, info->width, info->height, info->array_size);
 	return XRT_SUCCESS;
+}
+#endif
+
+xrt_result_t
+ipc_handle_swapchain_import_iosurface(volatile struct ipc_client_state *ics,
+                                      const struct xrt_swapchain_create_info *info,
+                                      const struct ipc_arg_swapchain_iosurface *args,
+                                      uint32_t *out_id)
+{
+	IPC_TRACE_MARKER();
+
+#ifndef XRT_OS_OSX
+	(void)ics;
+	(void)info;
+	(void)args;
+	(void)out_id;
+	return XRT_ERROR_NOT_IMPLEMENTED;
+#else
+	if (ics == NULL || info == NULL || args == NULL || out_id == NULL || ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	const uint32_t image_count = args->image_count;
+	if (image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	for (uint32_t i = 0; i < image_count; i++) {
+		if (args->ids[i] == 0) {
+			return XRT_ERROR_INVALID_ARGUMENT;
+		}
+	}
+
+	uint32_t index = 0;
+	xrt_result_t xret = find_free_swapchain_index(ics, &index);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	if (!comp_metal_swapchain_import_begin_iosurface_ids(info, image_count, args->ids)) {
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	return finish_external_iosurface_swapchain(ics, info, image_count, index, out_id);
+#endif
+}
+
+xrt_result_t
+ipc_handle_swapchain_import_iosurface_token(volatile struct ipc_client_state *ics,
+                                            const struct xrt_swapchain_create_info *info,
+                                            uint64_t token,
+                                            uint32_t image_count,
+                                            uint32_t *out_id)
+{
+	IPC_TRACE_MARKER();
+
+#ifndef XRT_OS_OSX
+	(void)ics;
+	(void)info;
+	(void)token;
+	(void)image_count;
+	(void)out_id;
+	return XRT_ERROR_NOT_IMPLEMENTED;
+#else
+	if (ics == NULL || info == NULL || out_id == NULL || ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	if (image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	uint32_t index = 0;
+	xrt_result_t xret = find_free_swapchain_index(ics, &index);
+	if (xret != XRT_SUCCESS) {
+		ipc_metal_server_discard_token(token, ics->client_state.pid);
+		return xret;
+	}
+
+	/*
+	 * The client published its surfaces over XPC, which carries them as
+	 * Mach ports, and only the process that published a token may use it.
+	 */
+	void *surfaces[XRT_MAX_SWAPCHAIN_IMAGES] = {0};
+	xret = ipc_metal_server_take_iosurfaces(token, image_count, surfaces, ics->client_state.pid);
+	if (xret != XRT_SUCCESS) {
+		IPC_ERROR(ics->server, "Failed to retrieve XPC IOSurfaces token=0x%016llx count=%u",
+		          (unsigned long long)token, image_count);
+		return xret;
+	}
+
+	if (!comp_metal_swapchain_import_begin_iosurfaces(info, image_count, surfaces)) {
+		ipc_metal_xpc_release_iosurfaces(surfaces, image_count);
+		return XRT_ERROR_ALLOCATION;
+	}
+
+	// The swapchain's textures keep the surfaces alive from here.
+	xret = finish_external_iosurface_swapchain(ics, info, image_count, index, out_id);
+	ipc_metal_xpc_release_iosurfaces(surfaces, image_count);
+	return xret;
 #endif
 }
 

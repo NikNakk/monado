@@ -65,6 +65,18 @@ ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
                                             pid_t owner_pid);
 
 /*!
+ * Consume client-published IOSurfaces from the registry hosted by
+ * monado-service. The token must belong to the Unix IPC client's PID. Each
+ * returned pointer is a retained IOSurfaceRef; release them with
+ * ipc_metal_xpc_release_iosurfaces().
+ */
+xrt_result_t
+ipc_metal_xpc_service_take_iosurfaces_for_pid(uint64_t token,
+                                              uint32_t expected_count,
+                                              void **out_iosurfaces,
+                                              pid_t owner_pid);
+
+/*!
  * Publish a service-created MTLSharedEvent for one Unix IPC client. The XPC
  * peer that retrieves it must have the same PID.
  */

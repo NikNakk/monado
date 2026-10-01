@@ -141,6 +141,67 @@ take_texture_one(NSXPCConnection *connection, uint64_t token, uint32_t index)
 }
 
 static bool
+publish_iosurface_one(
+    NSXPCConnection *connection, IOSurface *surface, uint64_t token, uint32_t index, uint32_t image_count)
+{
+	__block BOOL success = NO;
+	__block BOOL replied = NO;
+	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+		const char *message = error.localizedDescription.UTF8String;
+		U_LOG_E("Metal XPC IOSurface publish failed: %s", message != NULL ? message : "unknown error");
+		dispatch_semaphore_signal(semaphore);
+	}];
+
+	[proxy publishIOSurface:surface
+	                  token:token
+	                  index:index
+	             imageCount:image_count
+	                  reply:^(BOOL remote_success) {
+		                  success = remote_success;
+		                  replied = YES;
+		                  dispatch_semaphore_signal(semaphore);
+	                  }];
+
+	long wait_result =
+	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
+	return wait_result == 0 && replied && success;
+}
+
+static IOSurface *
+take_iosurface_one(NSXPCConnection *connection, uint64_t token, uint32_t index)
+{
+	__block IOSurface *result = nil;
+	__block BOOL replied = NO;
+	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+		const char *message = error.localizedDescription.UTF8String;
+		U_LOG_E("Metal XPC IOSurface take failed: %s", message != NULL ? message : "unknown error");
+		dispatch_semaphore_signal(semaphore);
+	}];
+
+	[proxy takeIOSurfaceForToken:token
+	                       index:index
+	                       reply:^(IOSurface *surface) {
+		                       if (surface != nil) {
+			                       result = [surface retain];
+		                       }
+		                       replied = YES;
+		                       dispatch_semaphore_signal(semaphore);
+	                       }];
+
+	long wait_result =
+	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
+	if (wait_result != 0 || !replied) {
+		[result release];
+		return nil;
+	}
+	return result;
+}
+
+static bool
 publish_event_one(NSXPCConnection *connection, MTLSharedEventHandle *handle, uint64_t token)
 {
 	__block BOOL success = NO;
@@ -446,6 +507,101 @@ ipc_metal_xpc_release_textures(void **metal_textures, uint32_t image_count)
 		if (texture != nil) {
 			[texture release];
 			metal_textures[i] = NULL;
+		}
+	}
+}
+
+xrt_result_t
+ipc_metal_xpc_publish_iosurfaces(void *const *iosurfaces, uint32_t image_count, uint64_t *out_token)
+{
+	if (iosurfaces == NULL || out_token == NULL || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	*out_token = 0;
+
+	@autoreleasepool {
+		NSXPCConnection *connection = create_connection();
+		if (connection == nil) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		uint64_t token = make_token();
+		bool ok = true;
+
+		for (uint32_t i = 0; i < image_count && ok; i++) {
+			IOSurface *surface = (__bridge IOSurface *)iosurfaces[i];
+			ok = surface != nil && publish_iosurface_one(connection, surface, token, i, image_count);
+		}
+
+		if (!ok) {
+			(void)discard_sync(connection, token);
+		}
+
+		[connection invalidate];
+		[connection release];
+
+		if (!ok) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		*out_token = token;
+		U_LOG_I("Metal XPC published %u IOSurface(s) token=0x%016llx", image_count, (unsigned long long)token);
+		return XRT_SUCCESS;
+	}
+}
+
+xrt_result_t
+ipc_metal_xpc_take_iosurfaces(uint64_t token, uint32_t expected_count, void **out_iosurfaces)
+{
+	if (!standard_token_is_valid(token) || out_iosurfaces == NULL || expected_count == 0 ||
+	    expected_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+
+	for (uint32_t i = 0; i < expected_count; i++) {
+		out_iosurfaces[i] = NULL;
+	}
+
+	@autoreleasepool {
+		NSXPCConnection *connection = create_connection();
+		if (connection == nil) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		xrt_result_t xret = XRT_SUCCESS;
+		for (uint32_t i = 0; i < expected_count; i++) {
+			IOSurface *surface = take_iosurface_one(connection, token, i);
+			if (surface == nil) {
+				xret = XRT_ERROR_IPC_FAILURE;
+				break;
+			}
+			// Keeps the reference taken by take_iosurface_one().
+			out_iosurfaces[i] = (__bridge void *)surface;
+		}
+
+		(void)discard_sync(connection, token);
+		[connection invalidate];
+		[connection release];
+
+		if (xret != XRT_SUCCESS) {
+			ipc_metal_xpc_release_iosurfaces(out_iosurfaces, expected_count);
+		}
+		return xret;
+	}
+}
+
+void
+ipc_metal_xpc_release_iosurfaces(void **iosurfaces, uint32_t image_count)
+{
+	if (iosurfaces == NULL) {
+		return;
+	}
+
+	for (uint32_t i = 0; i < image_count; i++) {
+		if (iosurfaces[i] != NULL) {
+			[(__bridge IOSurface *)iosurfaces[i] release];
+			iosurfaces[i] = NULL;
 		}
 	}
 }
