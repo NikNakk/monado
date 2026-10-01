@@ -19,7 +19,6 @@
 
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
-#include "foveation/u_foveation.h"
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
@@ -101,53 +100,6 @@ oxr_xrGetSystemProperties(XrInstance instance, XrSystemId systemId, XrSystemProp
 
 	return oxr_system_get_properties(&log, sys, properties);
 }
-
-#ifdef OXR_HAVE_MNDX_foveation
-static int
-foveation_level_to_profile_index(XrFoveationLevelMNDX level)
-{
-	switch (level) {
-	case XR_FOVEATION_LEVEL_REFERENCE_MNDX: return U_FOVEATION_PROFILE_REFERENCE;
-	case XR_FOVEATION_LEVEL_STRONG_MNDX: return U_FOVEATION_PROFILE_STRONG;
-	case XR_FOVEATION_LEVEL_AGGRESSIVE_MNDX: return U_FOVEATION_PROFILE_AGGRESSIVE;
-	case XR_FOVEATION_LEVEL_AGGRESSIVE_PLUS_MNDX: return U_FOVEATION_PROFILE_AGGRESSIVE_PLUS;
-	case XR_FOVEATION_LEVEL_NEAR_EXTREME_MNDX: return U_FOVEATION_PROFILE_NEAR_EXTREME;
-	case XR_FOVEATION_LEVEL_EXTREME_MNDX: return U_FOVEATION_PROFILE_EXTREME;
-	default: return -1;
-	}
-}
-
-XRAPI_ATTR XrResult XRAPI_CALL
-oxr_xrGetFoveationProfileMNDX(XrInstance instance,
-                              XrSystemId systemId,
-                              XrFoveationLevelMNDX level,
-                              XrFoveationProfileMNDX *profile)
-{
-	OXR_TRACE_MARKER();
-
-	struct oxr_instance *inst;
-	struct oxr_logger log;
-	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetFoveationProfileMNDX");
-	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, profile, XR_TYPE_FOVEATION_PROFILE_MNDX);
-	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, systemId, sys);
-	(void)sys;
-
-	const int profile_index = foveation_level_to_profile_index(level);
-	if (profile_index < 0) {
-		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "(level == %d) is not a valid XrFoveationLevelMNDX",
-		                 (int)level);
-	}
-
-	const struct u_foveation_profile *policy = u_foveation_profile_get(profile_index);
-	profile->level = level;
-	profile->centerRate = policy->center_rate;
-	profile->middleRate = policy->middle_rate;
-	profile->peripheralRate = policy->peripheral_rate;
-	profile->centerHalfExtent = policy->center_half_extent;
-	profile->middleHalfExtent = policy->middle_half_extent;
-	return XR_SUCCESS;
-}
-#endif // OXR_HAVE_MNDX_foveation
 
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrEnumerateViewConfigurations(XrInstance instance,
