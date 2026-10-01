@@ -24,6 +24,7 @@ cadence intervals vs driven ~5.2–5.8%), and the configuration below restored
 | `XRT_MACOS_CLIENT_FRAME_MIN_HOLD` | `0` (set `2` to hold each app frame for at least two refreshes, e.g. a 60 Hz app on the 120 Hz headset) |
 | `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD` | `1` in all builds; read in the **app** process |
 | `XRT_MACOS_WAIT_SPIN` | `0`; opt-in busy-wait diagnostic |
+| `XRT_MACOS_DISPLAY_LINK` | `cv`: CVDisplayLink vblank timestamps. `ca` uses CADisplayLink instead; see [the A/B below](#cvdisplaylink-against-cadisplaylink) |
 
 Always on, with the old toggles removed: asynchronous presentation, the Metal
 shared-event handoff (automatic CPU-wait fallback), deferred GPU timestamp
@@ -557,6 +558,42 @@ This logging bypasses Monado's logging level and the XPC mainloop wrapper. It
 therefore distinguishes an unexported environment variable from a build or
 execution-path problem directly.
 
+
+## CVDisplayLink against CADisplayLink
+
+CVDisplayLink is deprecated from macOS 15. Its replacement is CADisplayLink,
+from `-[NSScreen displayLinkWithTarget:selector:]` (macOS 14 and later).
+`XRT_MACOS_DISPLAY_LINK=ca` in the compositor's environment (the service, or a
+hosted client) selects it; unset or `cv` keeps CVDisplayLink.
+
+Only the source of the vblank timestamps changes. Both feed the same values to
+the pacer (`macos_display_link_tick()` in `comp_window_macos.m`), and
+drawables, presentation and the present worker are untouched. This is not the
+removed CAMetalDisplayLink driven mode, where the link supplied the drawables
+and compositing ran from its callback: that mode's timestamps were correct
+(2026-09-17 captures below) but about 11 % of its drawables were late or
+dropped.
+
+Differences to expect:
+
+- CADisplayLink fires on a run loop, so it has a thread of its own
+  (`Monado CADisplayLink`). CVDisplayLink calls back on Core Video's thread.
+- CADisplayLink follows the real display. It does not fire while the display
+  is asleep, where CVDisplayLink free-runs at the nominal rate. The log says
+  how many times it fired in its first second, or warns if it did not.
+- The nominal period comes from the display mode's refresh rate rather than
+  CVDisplayLink's exact rational period.
+
+**Status: compiled only (2026-10-01).** It has not run on the headset, and
+could not be exercised on the development Mac either, whose display was
+asleep.
+
+To compare, record the same scene twice with `PSVR2_TIMING_TRACE=1`, once
+with `XRT_MACOS_DISPLAY_LINK=ca`, and compare in `present.csv` and
+`presented.csv`: physical intervals over 12 ms, `latest_displaylink_output_ns`
+against the actual presented time, late-frame counts per 240, and
+`compositor_rt.csv` wake lateness. Run it under Game Mode with a hosted
+client too, since the callback thread differs.
 
 ## Foreground-client XPC importance lease / Game Mode diagnostic, 2026-09-18
 

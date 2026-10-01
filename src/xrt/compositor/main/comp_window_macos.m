@@ -110,6 +110,8 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_refresh_rate_hz, "XRT_MACOS_REFRESH_RATE_HZ", 0)
+// Vblank timing source: "cv" (CVDisplayLink, the default) or "ca" (CADisplayLink, macOS 14+).
+DEBUG_GET_ONCE_OPTION(macos_display_link, "XRT_MACOS_DISPLAY_LINK", "cv")
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASSTHROUGH_BRIGHTNESS_PERCENT", 160)
@@ -117,8 +119,9 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASST
 /*
  * CVDisplayLink is deprecated from macOS 15 in favour of CADisplayLink
  * (-[NSScreen displayLinkWithTarget:selector:]). Pacing and present timing
- * were validated on the PS VR2 with CVDisplayLink, and the CAMetalDisplayLink
- * alternatives tested worse, so moving needs a headset A/B first.
+ * were validated on the PS VR2 with CVDisplayLink, so it stays the default
+ * until XRT_MACOS_DISPLAY_LINK=ca (CADisplayLink, below) has been compared
+ * with it on the headset.
  */
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -199,6 +202,8 @@ struct comp_window_macos
 	xrt_graphics_buffer_handle_t io_surfaces[MACOS_TARGET_IMAGE_COUNT];
 	struct vk_image_collection vkic;
 	CVDisplayLinkRef display_link;
+	//! MonadoCADisplayLinkSource, used instead of display_link with XRT_MACOS_DISPLAY_LINK=ca.
+	void *ca_display_link;
 	mach_timebase_info_data_t mach_timebase;
 	atomic_uint_fast64_t latest_vblank_ns;
 	atomic_uint_fast64_t latest_displaylink_now_host_ns;
@@ -405,6 +410,38 @@ derive_last_vblank_ns(struct comp_window_macos *cwm, uint64_t output_ns, uint64_
 	return output_ns + periods * period_ns;
 }
 
+/*!
+ * One vblank from whichever display link is in use. Host times are in
+ * nanoseconds of mach_absolute_time, zero if unknown: @p now_host_ns is the
+ * vblank that has just happened and @p output_host_ns when the next frame
+ * will be shown.
+ */
+static void
+macos_display_link_tick(struct comp_window_macos *cwm, uint64_t now_host_ns, uint64_t output_host_ns)
+{
+	int64_t offset_ns = refresh_host_to_monotonic_offset_ns(cwm);
+	uint64_t callback_ns = (uint64_t)os_monotonic_get_ns();
+	uint64_t now_ns = callback_ns;
+	uint64_t output_ns = 0;
+
+	if (now_host_ns != 0) {
+		now_ns = host_ns_to_monotonic_ns(now_host_ns, offset_ns);
+		atomic_store_explicit(&cwm->latest_displaylink_now_host_ns, now_host_ns, memory_order_release);
+		atomic_store_explicit(&cwm->latest_displaylink_now_ns, now_ns, memory_order_release);
+	}
+	if (output_host_ns != 0) {
+		output_ns = host_ns_to_monotonic_ns(output_host_ns, offset_ns);
+		atomic_store_explicit(&cwm->latest_displaylink_output_host_ns, output_host_ns, memory_order_release);
+		atomic_store_explicit(&cwm->latest_displaylink_output_ns, output_ns, memory_order_release);
+	}
+
+	if (output_ns != 0) {
+		uint64_t last_vblank_ns = derive_last_vblank_ns(cwm, output_ns, now_ns);
+		atomic_store_explicit(&cwm->latest_vblank_ns, last_vblank_ns, memory_order_release);
+	}
+	atomic_store_explicit(&cwm->latest_displaylink_callback_ns, callback_ns, memory_order_release);
+}
+
 static CVReturn
 display_link_callback(CVDisplayLinkRef display_link,
                       const CVTimeStamp *in_now,
@@ -418,32 +455,300 @@ display_link_callback(CVDisplayLinkRef display_link,
 	(void)flags_out;
 	struct comp_window_macos *cwm = context;
 
-	int64_t offset_ns = refresh_host_to_monotonic_offset_ns(cwm);
-	uint64_t callback_ns = (uint64_t)os_monotonic_get_ns();
 	uint64_t now_host_ns = 0;
 	uint64_t output_host_ns = 0;
-	uint64_t now_ns = callback_ns;
-	uint64_t output_ns = 0;
-
 	if ((in_now->flags & kCVTimeStampHostTimeValid) != 0) {
 		now_host_ns = host_time_to_ns(cwm, in_now->hostTime);
-		now_ns = host_ns_to_monotonic_ns(now_host_ns, offset_ns);
-		atomic_store_explicit(&cwm->latest_displaylink_now_host_ns, now_host_ns, memory_order_release);
-		atomic_store_explicit(&cwm->latest_displaylink_now_ns, now_ns, memory_order_release);
 	}
 	if ((in_output_time->flags & kCVTimeStampHostTimeValid) != 0) {
 		output_host_ns = host_time_to_ns(cwm, in_output_time->hostTime);
-		output_ns = host_ns_to_monotonic_ns(output_host_ns, offset_ns);
-		atomic_store_explicit(&cwm->latest_displaylink_output_host_ns, output_host_ns, memory_order_release);
-		atomic_store_explicit(&cwm->latest_displaylink_output_ns, output_ns, memory_order_release);
+	}
+	macos_display_link_tick(cwm, now_host_ns, output_host_ns);
+	return kCVReturnSuccess;
+}
+
+static CGDirectDisplayID
+get_display_id(NSScreen *screen);
+
+/*
+ * CADisplayLink vblank source, selected with XRT_MACOS_DISPLAY_LINK=ca. It is
+ * Apple's replacement for the deprecated CVDisplayLink. It only supplies
+ * timestamps: drawables and presentation are untouched. CADisplayLink fires on
+ * a run loop, so it gets a thread of its own, away from the main thread's
+ * AppKit work.
+ */
+API_AVAILABLE(macos(14.0))
+@interface MonadoCADisplayLinkSource : NSObject
+{
+	struct comp_window_macos *_cwm;
+	CGDirectDisplayID _displayID;
+	NSThread *_thread;
+	CADisplayLink *_link;
+	dispatch_semaphore_t _ready;
+	dispatch_semaphore_t _finished;
+	BOOL _created;
+	BOOL _stop;
+	uint64_t _tickCount;
+}
+- (instancetype)initWithWindow:(struct comp_window_macos *)cwm displayID:(CGDirectDisplayID)displayID;
+- (BOOL)isRunning;
+- (void)setRunning:(BOOL)running;
+- (void)shutdown;
+@end
+
+@implementation MonadoCADisplayLinkSource
+
+- (instancetype)initWithWindow:(struct comp_window_macos *)cwm displayID:(CGDirectDisplayID)displayID
+{
+	self = [super init];
+	if (self == nil) {
+		return nil;
 	}
 
-	if (output_ns != 0) {
-		uint64_t last_vblank_ns = derive_last_vblank_ns(cwm, output_ns, now_ns);
-		atomic_store_explicit(&cwm->latest_vblank_ns, last_vblank_ns, memory_order_release);
+	_cwm = cwm;
+	_displayID = displayID;
+	_ready = dispatch_semaphore_create(0);
+	_finished = dispatch_semaphore_create(0);
+	_thread = [[NSThread alloc] initWithTarget:self selector:@selector(threadMain) object:nil];
+	_thread.name = @"Monado CADisplayLink";
+	_thread.qualityOfService = NSQualityOfServiceUserInteractive;
+	[_thread start];
+	dispatch_semaphore_wait(_ready, DISPATCH_TIME_FOREVER);
+
+	if (!_created) {
+		dispatch_semaphore_wait(_finished, DISPATCH_TIME_FOREVER);
+		[self release];
+		return nil;
 	}
-	atomic_store_explicit(&cwm->latest_displaylink_callback_ns, callback_ns, memory_order_release);
-	return kCVReturnSuccess;
+	return self;
+}
+
+- (void)dealloc
+{
+	[_thread release];
+	[_link release];
+	dispatch_release(_ready);
+	dispatch_release(_finished);
+	[super dealloc];
+}
+
+- (void)threadMain
+{
+	@autoreleasepool {
+		for (NSScreen *screen in [NSScreen screens]) {
+			if (get_display_id(screen) == _displayID) {
+				_link = [[screen displayLinkWithTarget:self selector:@selector(tick:)] retain];
+				break;
+			}
+		}
+		if (_link != nil) {
+			// Paused until the compositor starts it, like a stopped CVDisplayLink.
+			_link.paused = YES;
+			[_link addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+			_created = YES;
+		}
+		dispatch_semaphore_signal(_ready);
+
+		while (_created && !_stop) {
+			@autoreleasepool {
+				[[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
+			}
+		}
+
+		[_link invalidate];
+	}
+	dispatch_semaphore_signal(_finished);
+}
+
+- (void)tick:(CADisplayLink *)link
+{
+	_tickCount++;
+
+	// Both are in seconds of mach_absolute_time, like CACurrentMediaTime().
+	const CFTimeInterval now_s = link.timestamp;
+	const CFTimeInterval output_s = link.targetTimestamp;
+	macos_display_link_tick(_cwm, now_s > 0.0 ? (uint64_t)(now_s * (double)U_TIME_1S_IN_NS) : 0,
+	                        output_s > 0.0 ? (uint64_t)(output_s * (double)U_TIME_1S_IN_NS) : 0);
+}
+
+- (void)applyPaused:(NSNumber *)paused
+{
+	_link.paused = paused.boolValue;
+	if (!paused.boolValue) {
+		// Unlike CVDisplayLink this follows the real display, so say so if nothing arrives.
+		_tickCount = 0;
+		[self performSelector:@selector(checkTicking) withObject:nil afterDelay:1.0];
+	}
+}
+
+- (void)checkTicking
+{
+	if (_tickCount == 0 && !_link.paused && !_stop) {
+		U_LOG_W("CADisplayLink has not fired in its first second (is the display asleep?); pacing is "
+		        "running on estimates. Unset XRT_MACOS_DISPLAY_LINK to use CVDisplayLink.");
+	} else if (!_stop) {
+		U_LOG_I("CADisplayLink fired %llu times in its first second", (unsigned long long)_tickCount);
+	}
+}
+
+- (void)applyStop
+{
+	_stop = YES;
+}
+
+- (BOOL)isRunning
+{
+	return _link != nil && !_link.paused;
+}
+
+- (void)setRunning:(BOOL)running
+{
+	// The link belongs to its thread's run loop, so change it there.
+	[self performSelector:@selector(applyPaused:)
+	             onThread:_thread
+	           withObject:[NSNumber numberWithBool:!running]
+	        waitUntilDone:YES];
+}
+
+- (void)shutdown
+{
+	// Performing the selector also wakes the run loop so that it sees _stop.
+	[self performSelector:@selector(applyStop) onThread:_thread withObject:nil waitUntilDone:NO];
+	dispatch_semaphore_wait(_finished, DISPATCH_TIME_FOREVER);
+}
+
+@end
+
+static bool
+macos_display_link_wants_ca(void)
+{
+	const char *value = debug_get_option_macos_display_link();
+	return value != NULL && strcasecmp(value, "ca") == 0;
+}
+
+//! Nominal period of the display's current mode, zero if unknown.
+static int64_t
+macos_display_mode_period_ns(CGDirectDisplayID display_id)
+{
+	CGDisplayModeRef mode = CGDisplayCopyDisplayMode(display_id);
+	if (mode == NULL) {
+		return 0;
+	}
+	const double refresh_hz = CGDisplayModeGetRefreshRate(mode);
+	CGDisplayModeRelease(mode);
+	return refresh_hz > 1.0 ? (int64_t)((double)U_TIME_1S_IN_NS / refresh_hz) : 0;
+}
+
+static bool
+macos_display_link_exists(struct comp_window_macos *cwm)
+{
+	return cwm->display_link != NULL || cwm->ca_display_link != NULL;
+}
+
+static void
+macos_display_link_stop(struct comp_window_macos *cwm)
+{
+	if (cwm->display_link != NULL) {
+		CVDisplayLinkStop(cwm->display_link);
+	}
+	if (cwm->ca_display_link != NULL) {
+		if (@available(macOS 14.0, *)) {
+			[(MonadoCADisplayLinkSource *)cwm->ca_display_link setRunning:NO];
+		}
+	}
+}
+
+static void
+macos_display_link_destroy(struct comp_window_macos *cwm)
+{
+	if (cwm->display_link != NULL) {
+		CVDisplayLinkStop(cwm->display_link);
+		CVDisplayLinkRelease(cwm->display_link);
+		cwm->display_link = NULL;
+	}
+	if (cwm->ca_display_link != NULL) {
+		if (@available(macOS 14.0, *)) {
+			MonadoCADisplayLinkSource *source = (MonadoCADisplayLinkSource *)cwm->ca_display_link;
+			[source shutdown];
+			[source release];
+		}
+		cwm->ca_display_link = NULL;
+	}
+}
+
+/*!
+ * Create the vblank source for @p display_id, stopped, replacing any existing
+ * one. Sets display_period_ns when the source knows the period.
+ */
+static bool
+macos_display_link_create(struct comp_window_macos *cwm, CGDirectDisplayID display_id)
+{
+	macos_display_link_destroy(cwm);
+
+	if (macos_display_link_wants_ca()) {
+		if (@available(macOS 14.0, *)) {
+			MonadoCADisplayLinkSource *source =
+			    [[MonadoCADisplayLinkSource alloc] initWithWindow:cwm displayID:display_id];
+			if (source != nil) {
+				cwm->ca_display_link = source;
+				const int64_t period_ns = macos_display_mode_period_ns(display_id);
+				if (period_ns > 0) {
+					cwm->display_period_ns = period_ns;
+				}
+				U_LOG_I("macOS vblank source: CADisplayLink (XRT_MACOS_DISPLAY_LINK=ca)");
+				return true;
+			}
+		}
+		U_LOG_W("XRT_MACOS_DISPLAY_LINK=ca: CADisplayLink is unavailable for this display; using CVDisplayLink");
+	}
+
+	CVReturn cvret = CVDisplayLinkCreateWithCGDisplay(display_id, &cwm->display_link);
+	if (cvret == kCVReturnSuccess) {
+		cvret = CVDisplayLinkSetOutputCallback(cwm->display_link, display_link_callback, cwm);
+	}
+	if (cvret != kCVReturnSuccess) {
+		if (cwm->display_link != NULL) {
+			CVDisplayLinkRelease(cwm->display_link);
+			cwm->display_link = NULL;
+		}
+		U_LOG_W("Could not create a CVDisplayLink for the display (%d)", cvret);
+		return false;
+	}
+
+	CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(cwm->display_link);
+	if ((period.flags & kCVTimeIsIndefinite) == 0 && period.timeValue > 0 && period.timeScale > 0) {
+		cwm->display_period_ns = (int64_t)(((__int128)period.timeValue * U_TIME_1S_IN_NS) / period.timeScale);
+	}
+	return true;
+}
+
+static bool
+macos_display_link_is_running(struct comp_window_macos *cwm)
+{
+	if (cwm->display_link != NULL) {
+		return CVDisplayLinkIsRunning(cwm->display_link);
+	}
+	if (cwm->ca_display_link != NULL) {
+		if (@available(macOS 14.0, *)) {
+			return [(MonadoCADisplayLinkSource *)cwm->ca_display_link isRunning];
+		}
+	}
+	return false;
+}
+
+static bool
+macos_display_link_start(struct comp_window_macos *cwm)
+{
+	if (cwm->display_link != NULL) {
+		return CVDisplayLinkStart(cwm->display_link) == kCVReturnSuccess;
+	}
+	if (cwm->ca_display_link != NULL) {
+		if (@available(macOS 14.0, *)) {
+			[(MonadoCADisplayLinkSource *)cwm->ca_display_link setRunning:YES];
+			return true;
+		}
+	}
+	return false;
 }
 
 static inline struct vk_bundle *
@@ -1522,26 +1827,18 @@ comp_window_macos_init(struct comp_target *ct)
 
 		mach_timebase_info(&cwm->mach_timebase);
 		refresh_host_to_monotonic_offset_ns(cwm);
-		CVReturn cvret = CVDisplayLinkCreateWithCGDisplay(cwm->display_id, &cwm->display_link);
-		if (cvret == kCVReturnSuccess) {
-			cvret = CVDisplayLinkSetOutputCallback(cwm->display_link, display_link_callback, cwm);
+		const int64_t estimated_period_ns = cwm->display_period_ns;
+		cwm->display_period_ns = 0;
+		if (!macos_display_link_create(cwm, cwm->display_id)) {
+			COMP_WARN(ct->c, "Could not create the PS VR2 display link; using estimated pacing");
 		}
-		if (cvret != kCVReturnSuccess) {
-			if (cwm->display_link != NULL) {
-				CVDisplayLinkRelease(cwm->display_link);
-				cwm->display_link = NULL;
-			}
-			COMP_WARN(ct->c, "Could not create the PS VR2 display link (%d); using estimated pacing", cvret);
+		if (cwm->display_period_ns > 0) {
+			ct->c->frame_interval_ns = cwm->display_period_ns;
+			COMP_INFO(ct->c, "PS VR2 display period %.3fms (%.2f Hz)",
+			          (double)cwm->display_period_ns / 1000000.0,
+			          (double)U_TIME_1S_IN_NS / (double)ct->c->frame_interval_ns);
 		} else {
-			CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(cwm->display_link);
-			if ((period.flags & kCVTimeIsIndefinite) == 0 && period.timeValue > 0 && period.timeScale > 0) {
-				cwm->display_period_ns =
-				    (int64_t)(((__int128)period.timeValue * U_TIME_1S_IN_NS) / period.timeScale);
-				ct->c->frame_interval_ns = cwm->display_period_ns;
-				COMP_INFO(ct->c, "PS VR2 display period %.3fms (%.2f Hz)",
-				          (double)cwm->display_period_ns / 1000000.0,
-				          (double)U_TIME_1S_IN_NS / (double)ct->c->frame_interval_ns);
-			}
+			cwm->display_period_ns = estimated_period_ns;
 		}
 
 		VkExtent2D extent = {.width = cwm->pixel_width, .height = cwm->pixel_height};
@@ -1779,10 +2076,9 @@ comp_window_macos_create_images(struct comp_target *ct,
 	if (cwm->base.upc == NULL) {
 		u_pc_fake_create(ct->c->frame_interval_ns, os_monotonic_get_ns(), &cwm->base.upc);
 	}
-	if (cwm->display_link != NULL && !CVDisplayLinkIsRunning(cwm->display_link)) {
-		CVReturn cvret = CVDisplayLinkStart(cwm->display_link);
-		if (cvret != kCVReturnSuccess) {
-			COMP_WARN(ct->c, "Could not start the PS VR2 display link (%d); using estimated pacing", cvret);
+	if (macos_display_link_exists(cwm) && !macos_display_link_is_running(cwm)) {
+		if (!macos_display_link_start(cwm)) {
+			COMP_WARN(ct->c, "Could not start the PS VR2 display link; using estimated pacing");
 		}
 	}
 	macos_schedule_drawable_slot(cwm);
@@ -2587,11 +2883,7 @@ comp_window_macos_destroy(struct comp_target *ct)
 		xrt_frame_reference(&cwm->passthrough_frames[eye], NULL);
 	}
 	pthread_mutex_unlock(&cwm->passthrough_mutex);
-	if (cwm->display_link != NULL) {
-		CVDisplayLinkStop(cwm->display_link);
-		CVDisplayLinkRelease(cwm->display_link);
-		cwm->display_link = NULL;
-	}
+	macos_display_link_destroy(cwm);
 	if (cwm->present_worker_queue != NULL) {
 		struct macos_present_job pending_job;
 		bool had_pending_job = false;
@@ -2975,32 +3267,11 @@ comp_window_macos_get_current_refresh_rate_physical(struct comp_target *ct, floa
 	return comp_window_macos_get_current_refresh_rate(ct, out_rate);
 }
 
-// CVDisplayLink again, see the note at the first pragma above.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-
 static bool
 macos_recreate_display_link(struct comp_window_macos *cwm, CGDirectDisplayID display_id, bool start_link)
 {
-	if (cwm->display_link != NULL) {
-		CVDisplayLinkStop(cwm->display_link);
-		CVDisplayLinkRelease(cwm->display_link);
-		cwm->display_link = NULL;
-	}
-	CVReturn cvret = CVDisplayLinkCreateWithCGDisplay(display_id, &cwm->display_link);
-	if (cvret == kCVReturnSuccess) {
-		cvret = CVDisplayLinkSetOutputCallback(cwm->display_link, display_link_callback, cwm);
-	}
-	if (cvret != kCVReturnSuccess) {
-		if (cwm->display_link != NULL) {
-			CVDisplayLinkRelease(cwm->display_link);
-			cwm->display_link = NULL;
-		}
+	if (!macos_display_link_create(cwm, display_id)) {
 		return false;
-	}
-	CVTime period = CVDisplayLinkGetNominalOutputVideoRefreshPeriod(cwm->display_link);
-	if ((period.flags & kCVTimeIsIndefinite) == 0 && period.timeValue > 0 && period.timeScale > 0) {
-		cwm->display_period_ns = (int64_t)(((__int128)period.timeValue * U_TIME_1S_IN_NS) / period.timeScale);
 	}
 	refresh_host_to_monotonic_offset_ns(cwm);
 	atomic_store_explicit(&cwm->latest_vblank_ns, 0, memory_order_release);
@@ -3017,11 +3288,8 @@ macos_recreate_display_link(struct comp_window_macos *cwm, CGDirectDisplayID dis
 	cwm->present_offset_sample_count = 0;
 	cwm->calibrated_present_offset_ns = 0;
 	cwm->consumed_present_offset_sample_serial = 0;
-	if (start_link) {
-		cvret = CVDisplayLinkStart(cwm->display_link);
-		if (cvret != kCVReturnSuccess) {
-			return false;
-		}
+	if (start_link && !macos_display_link_start(cwm)) {
+		return false;
 	}
 	return true;
 }
@@ -3052,10 +3320,8 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 
 	macos_drain_present_worker(cwm);
 	macos_release_prefetched_drawable(cwm, "refresh_switch_release");
-	bool display_link_was_running = cwm->display_link != NULL && CVDisplayLinkIsRunning(cwm->display_link);
-	if (cwm->display_link != NULL) {
-		CVDisplayLinkStop(cwm->display_link);
-	}
+	bool display_link_was_running = macos_display_link_is_running(cwm);
+	macos_display_link_stop(cwm);
 
 	CGError cgret = CGDisplaySetDisplayMode(display_id, selected_mode, NULL);
 	CGDisplayModeRelease(selected_mode);
@@ -3085,8 +3351,6 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 	          (double)U_TIME_1S_IN_NS / (double)cwm->display_period_ns);
 	return XRT_SUCCESS;
 }
-
-#pragma clang diagnostic pop
 
 static bool
 comp_window_macos_init_with_refresh_rate(struct comp_target *ct)
