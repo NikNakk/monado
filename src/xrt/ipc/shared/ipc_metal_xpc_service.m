@@ -765,6 +765,43 @@ ipc_metal_xpc_service_take_iosurfaces_for_pid(uint64_t token,
 }
 
 xrt_result_t
+ipc_metal_xpc_service_take_shared_event_handle_for_pid(uint64_t token, void **out_handle, pid_t owner_pid)
+{
+	if (!standard_token_is_valid(token) || out_handle == NULL || owner_pid <= 0) {
+		return XRT_ERROR_INVALID_ARGUMENT;
+	}
+	*out_handle = NULL;
+
+	@autoreleasepool {
+		IPCMetalXPCServiceObject *service = copy_service_object();
+		if (service == nil) {
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		MTLSharedEventHandle *handle = [service copySharedEventHandleForToken:token ownerPID:owner_pid];
+		if (handle == nil) {
+			U_LOG_E("Metal shared-event token ownership mismatch/missing token=0x%016llx pid=%d",
+			        (unsigned long long)token, (int)owner_pid);
+			[service release];
+			return XRT_ERROR_IPC_FAILURE;
+		}
+
+		[service discardToken:token ownerPID:owner_pid];
+		[service release];
+		*out_handle = (__bridge void *)handle;
+		return XRT_SUCCESS;
+	}
+}
+
+void
+ipc_metal_xpc_service_release_shared_event_handle(void *handle)
+{
+	if (handle != NULL) {
+		[(__bridge id)handle release];
+	}
+}
+
+xrt_result_t
 ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event, uint64_t *out_token, pid_t owner_pid)
 {
 	if (metal_shared_event == NULL || out_token == NULL || owner_pid <= 0) {
