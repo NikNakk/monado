@@ -24,7 +24,6 @@
 #include "shared/ipc_utils.h"
 #include "server/ipc_server.h"
 #include "server/ipc_server_thread_shutdown.h"
-#include "shared/ipc_tcp_auth.h"
 #include "ipc_server_generated.h"
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
@@ -274,15 +273,6 @@ static void
 client_loop(volatile struct ipc_client_state *ics)
 {
 	U_TRACE_SET_THREAD_NAME("IPC Client");
-#ifdef XRT_OS_OSX
-	if (ics->imc.stream_socket &&
-	    !ipc_tcp_authenticate_server(ics->imc.ipc_handle, ics->server->ml.wine_tcp_token, 1000)) {
-		IPC_WARN(ics->server, "Rejecting unauthenticated Wine TCP client");
-		common_shutdown(ics);
-		return;
-	}
-#endif
-
 	// Call the client connected callback.
 	ics->server->callbacks->client_connected( //
 	    ics->server,                          //
@@ -365,7 +355,7 @@ client_loop(volatile struct ipc_client_state *ics)
 
 		// Read the whole command now that we know its size. Unix-domain
 		// sockets commonly return the complete small write in one recv(), but
-		// the Wine bridge is a TCP stream and may split a request arbitrarily.
+		// byte-stream transports may split a request arbitrarily.
 		uint8_t buf[IPC_BUF_SIZE] = {0};
 		size_t received = 0;
 		while (received < cmd_size) {
@@ -430,15 +420,6 @@ static void
 client_loop(volatile struct ipc_client_state *ics)
 {
 	U_TRACE_SET_THREAD_NAME("IPC Client");
-#ifdef XRT_OS_OSX
-	if (ics->imc.stream_socket &&
-	    !ipc_tcp_authenticate_server(ics->imc.ipc_handle, ics->server->ml.wine_tcp_token, 1000)) {
-		IPC_WARN(ics->server, "Rejecting unauthenticated Wine TCP client");
-		common_shutdown(ics);
-		return;
-	}
-#endif
-
 	// Call the client connected callback.
 	ics->server->callbacks->client_connected( //
 	    ics->server,                          //
