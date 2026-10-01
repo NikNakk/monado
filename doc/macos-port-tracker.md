@@ -14,17 +14,19 @@ high-level status/roadmap.
 ## Current integration branch
 
 - Repository: [NikNakk/monado](https://github.com/NikNakk/monado)
-- Branch:
-  [`macos-wine-openvr-legacy-unity`](https://github.com/NikNakk/monado/tree/macos-wine-openvr-legacy-unity)
+- Integration branch:
+  [`macos-game-mode-upstream-sync-2026-10`](https://github.com/NikNakk/monado/tree/macos-game-mode-upstream-sync-2026-10)
+- Upstream-oriented cleanup branch:
+  [`macos-upstream-clean`](https://github.com/NikNakk/monado/tree/macos-upstream-clean)
 - Canonical upstream remains the Monado project on freedesktop.org.
 - Upstream sync: `main` up to `045931d12` (2026-09-30) is merged on
   `macos-upstream-sync-2026-10`, pending macOS CI and a headset run; see
   [Upstream sync](macos-port.md#upstream-sync).
 
-The branch name is historical. It now carries the broadest integration of the
-native Apple Silicon runtime, PS VR2 HMD path, Metal/IOSurface sharing,
-launchd/XPC service integration, depth support, passthrough, eye gaze, Chromium
-handoff and Wine/OpenVR work.
+The integration branch carries the broadest native Apple Silicon runtime,
+PS VR2 HMD, Metal/IOSurface sharing, launchd/XPC service, depth, passthrough,
+eye gaze and Chromium work. Wine/OpenVR compatibility has been split into
+[NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr).
 
 It also carries the standards-facing slices, merged in this order:
 
@@ -72,7 +74,6 @@ options enabled.
   `XR_META_foveation_eye_tracked` for Metal clients through
   `XR_MNDX_foveation_metal`, validated on PS VR2 via `monado-service`
   (2026-09-29).
-- Wine D3D11 OpenXR plus OpenVR experiments through OpenComposite and xrizer.
 - Opt-in in-process client compositing (`XRT_MACOS_CLIENT_COMPOSITOR=1`),
   hosted by the service through `CALayerHost`: Unreal holds 120 Hz under Game
   Mode (2026-09-30).
@@ -121,8 +122,8 @@ branch. Keep this branch mainly for development history/comparison.
 ## Immediate priorities
 
 1. Finish client-side compositing for Game Mode: validate handoff on
-   hardware, merge into the integration branch, then overlays, Wine and
-   Chromium, and make it the default
+   hardware, merge into the integration branch, then overlays and Chromium,
+   and make it the default
    ([design](macos-client-compositor-design.md)).
 2. Make PS Sense optical 6DoF reliable enough to merge.
 3. Turn existing PS VR2 camera acquisition into a calibrated passthrough/MR
@@ -130,8 +131,8 @@ branch. Keep this branch mainly for development history/comparison.
 4. Bring the validated FB/META foveation path to engines and Chromium,
    and refine the experimental Metal rendering companion for upstream review.
 5. Continue hardening Chromium's sandboxed IOSurface/shared-event graphics path.
-6. Broaden Wine/OpenVR compatibility and determine whether SteamVR Home can run
-   without reproducing Valve's compositor.
+6. Keep the generic macOS/Metal handoff stable for external compatibility
+   clients; Wine/OpenVR breadth is tracked in `macos-wine-xr`.
 7. Continue compositor pacing/reprojection robustness work, including depth +
    foveation coordinate handling.
 8. Add broader OpenXR regression/conformance coverage.
@@ -149,6 +150,7 @@ companion repositories are:
 - [SwiftXR](https://github.com/NikNakk/SwiftXR)
 - [SwiftXRShell](https://github.com/NikNakk/SwiftXRShell)
 - [xrizer](https://github.com/NikNakk/xrizer)
+- [macOS Wine XR](https://github.com/NikNakk/macos-wine-xr)
 - [BasaltVR](https://github.com/NikNakk/BasaltVR)
 - [GAV PSVR2 Player for macOS](https://github.com/NikNakk/gav-psvr2-player-mac)
 - [PSVR2Toolkit](https://github.com/NikNakk/PSVR2Toolkit)
@@ -164,23 +166,21 @@ companion repositories are:
 - [macOS direct service XPC](macos-service-direct-xpc.md)
 - [PS VR2 timing diagnostics](macos-psvr2-timing-diagnostics.md)
 - [PS VR2 judder evidence](macos-psvr2-judder-evidence.md)
-- [Wine D3D11 OpenXR](macos-wine-openxr-d3d11.md)
-- [Wine IOSurface import](macos-wine-iosurface-import.md)
-- [Wine XR audio](macos-wine-xr-audio.md)
+Wine/OpenVR implementation notes and the preserved embedded implementation now
+live in [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr).
 
-Older `macos-wine-*`, Metal-array, service-XPC, timing and presentation
-branches should generally be considered development history unless a specific
-experiment still references them.
+Older Metal-array, service-XPC, timing and presentation branches should
+generally be considered development history unless a specific experiment still
+references them.
 
 ## IPC hardening and upstream preparation
 
-The security follow-up verifies native socket peer identity, authenticates Wine
-TCP, locks socket lifetimes and bounds pending XPC resources. Wine clients and
-services need matching rebuilt binaries and the shared key described in
-[the transport note](macos-wine-openxr-d3d11.md#tcp-authentication).
-The former external-broker runtime override is retired.
+The security follow-up verifies native socket peer identity, locks socket
+lifetimes and bounds pending XPC resources. Compatibility-bridge transport
+authentication now belongs to the external `macos-wine-xr` project. The
+former external-broker runtime override is retired.
 
 Contribution checks and Android/macOS version coverage are automated. Hardware
-and Wine application regression runs remain user-owned. Human DCO sign-offs
+regression runs remain user-owned. Human DCO sign-offs
 and upstream MR-specific changelog filenames remain submission prerequisites;
 see [the contribution preparation](macos-upstream-contribution.md).
