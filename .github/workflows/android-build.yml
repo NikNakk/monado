@@ -26,8 +26,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ninja-build glslang-tools libeigen3-dev python3
       - uses: android-actions/setup-android@v3
-      - name: Install upstream NDK version
-        run: sdkmanager --install "ndk;26.3.11579264"
+        with:
+          packages: "ndk;26.3.11579264"
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja

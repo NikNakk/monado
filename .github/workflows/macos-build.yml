@@ -45,7 +45,7 @@ jobs:
           pkgconf sdl2-compat vulkan-headers vulkan-loader
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja ${{ matrix.options }}
+        run: cmake -S . -B build -G Ninja -DCMAKE_FIND_FRAMEWORK=LAST ${{ matrix.options }}
 
       - name: Build
         shell: bash

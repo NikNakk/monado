@@ -150,8 +150,13 @@ if(APPLE)
 			)
 		target_compile_options(ipc_metal_xpc_broker PRIVATE -fblocks)
 		target_link_libraries(
-			ipc_metal_xpc_broker PRIVATE xrt-interfaces ipc_shared
-						     "-framework Foundation" "-framework Metal"
+			ipc_metal_xpc_broker
+			PRIVATE
+				xrt-interfaces
+				ipc_shared
+				aux_os
+				"-framework Foundation"
+				"-framework Metal"
 			)
 	endif()
 endif()
