@@ -34,9 +34,9 @@ struct ipc_message_channel
 	bool frame_writes;
 
 	/*
-	 * Windows normally uses named pipes. The Wine/macOS bridge instead uses a
-	 * loopback TCP socket stored in ipc_handle and sets this flag so the
-	 * Windows message-channel implementation uses Winsock send/recv.
+	 * Some Windows-side compatibility transports use a byte-stream socket stored
+	 * in ipc_handle and set this flag so the Windows message-channel
+	 * implementation uses Winsock send/recv.
 	 */
 	bool stream_socket;
 };
