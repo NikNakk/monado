@@ -77,22 +77,6 @@ else()
 	target_sources(
 		ipc_shared PRIVATE shared/ipc_message_channel_unix.c shared/ipc_socket_security.c
 		)
-	# The bridge is macOS/Windows only. OpenSSL enables its portable Linux tests
-	# without making it a dependency of ordinary Linux or Android builds.
-	if(NOT APPLE AND NOT ANDROID)
-		find_package(OpenSSL QUIET)
-		if(OpenSSL_FOUND)
-			target_compile_definitions(ipc_shared PRIVATE IPC_TCP_AUTH_OPENSSL)
-			target_link_libraries(ipc_shared PRIVATE OpenSSL::Crypto)
-		endif()
-	endif()
-endif()
-
-if(WIN32
-   OR APPLE
-   OR OpenSSL_FOUND
-	)
-	set_property(TARGET ipc_shared PROPERTY IPC_TCP_AUTH_AVAILABLE TRUE)
 endif()
 
 if(APPLE)
