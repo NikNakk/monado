@@ -26,9 +26,7 @@
 #include <string.h>
 #include <unistd.h>
 
-DEBUG_GET_ONCE_BOOL_OPTION(log_metal_swapchain_samples,
-                           "XRT_COMPOSITOR_LOG_METAL_SWAPCHAIN_SAMPLES",
-                           false)
+DEBUG_GET_ONCE_BOOL_OPTION(log_metal_swapchain_samples, "XRT_COMPOSITOR_LOG_METAL_SWAPCHAIN_SAMPLES", false)
 DEBUG_GET_ONCE_BOOL_OPTION(metal_release_timing_trace, "PSVR2_TIMING_TRACE", false)
 
 #define METAL_RELEASE_TRACE_WINDOW 240
@@ -158,10 +156,11 @@ client_metal_release_trace_open(struct client_metal_compositor *c)
 	c->release_trace.mutex_initialized = true;
 	client_metal_release_trace_reset_window(&c->release_trace);
 
-	fputs("sequence,swapchain_id,image_index,barrier_entry_ns,command_buffer_created_ns,before_commit_ns,"
-	      "after_commit_ns,after_wait_ns,create_duration_ns,commit_duration_ns,wait_duration_ns,"
-	      "total_barrier_duration_ns,metal_status,gpu_start_time_s,gpu_end_time_s,gpu_duration_ns\n",
-	      c->release_trace.file);
+	fputs(
+	    "sequence,swapchain_id,image_index,barrier_entry_ns,command_buffer_created_ns,before_commit_ns,"
+	    "after_commit_ns,after_wait_ns,create_duration_ns,commit_duration_ns,wait_duration_ns,"
+	    "total_barrier_duration_ns,metal_status,gpu_start_time_s,gpu_end_time_s,gpu_duration_ns\n",
+	    c->release_trace.file);
 	fflush(c->release_trace.file);
 }
 
@@ -196,25 +195,21 @@ client_metal_release_trace_log_window(struct client_metal_release_trace *trace)
 	const uint64_t wait_average_ns = trace->wait_sum_ns / METAL_RELEASE_TRACE_WINDOW;
 	const uint64_t total_average_ns = trace->total_sum_ns / METAL_RELEASE_TRACE_WINDOW;
 
-	U_LOG_I("Metal app-queue release barrier: average %.3fms, min %.3fms, max %.3fms, p95 %.3fms, p99 %.3fms, >4.17ms %u/%u, >8.34ms %u/%u, >12.50ms %u/%u",
-	        release_trace_ns_to_ms(wait_average_ns),
-	        release_trace_ns_to_ms(sorted[0]),
-	        release_trace_ns_to_ms(sorted[METAL_RELEASE_TRACE_WINDOW - 1]),
-	        release_trace_ns_to_ms(sorted[p95_index]),
-	        release_trace_ns_to_ms(sorted[p99_index]),
-	        trace->over_4_17_ms,
-	        METAL_RELEASE_TRACE_WINDOW,
-	        trace->over_8_34_ms,
-	        METAL_RELEASE_TRACE_WINDOW,
-	        trace->over_12_50_ms,
-	        METAL_RELEASE_TRACE_WINDOW);
+	U_LOG_I(
+	    "Metal app-queue release barrier: average %.3fms, min %.3fms, max %.3fms, p95 %.3fms, p99 %.3fms, >4.17ms "
+	    "%u/%u, >8.34ms %u/%u, >12.50ms %u/%u",
+	    release_trace_ns_to_ms(wait_average_ns), release_trace_ns_to_ms(sorted[0]),
+	    release_trace_ns_to_ms(sorted[METAL_RELEASE_TRACE_WINDOW - 1]), release_trace_ns_to_ms(sorted[p95_index]),
+	    release_trace_ns_to_ms(sorted[p99_index]), trace->over_4_17_ms, METAL_RELEASE_TRACE_WINDOW,
+	    trace->over_8_34_ms, METAL_RELEASE_TRACE_WINDOW, trace->over_12_50_ms, METAL_RELEASE_TRACE_WINDOW);
 
 	if (total_average_ns > wait_average_ns + 50000) {
-		U_LOG_I("Metal app-queue release barrier total: average %.3fms, min %.3fms, max %.3fms (+%.3fms average outside wait)",
-		        release_trace_ns_to_ms(total_average_ns),
-		        release_trace_ns_to_ms(trace->total_min_ns),
-		        release_trace_ns_to_ms(trace->total_max_ns),
-		        release_trace_ns_to_ms(total_average_ns - wait_average_ns));
+		U_LOG_I(
+		    "Metal app-queue release barrier total: average %.3fms, min %.3fms, max %.3fms (+%.3fms average "
+		    "outside wait)",
+		    release_trace_ns_to_ms(total_average_ns), release_trace_ns_to_ms(trace->total_min_ns),
+		    release_trace_ns_to_ms(trace->total_max_ns),
+		    release_trace_ns_to_ms(total_average_ns - wait_average_ns));
 	}
 }
 
@@ -226,19 +221,21 @@ client_metal_release_trace_record(struct client_metal_compositor *c, const struc
 		return;
 	}
 
-	const uint64_t create_duration_ns =
-	    sample->command_buffer_created_ns >= sample->barrier_entry_ns
-	        ? sample->command_buffer_created_ns - sample->barrier_entry_ns
-	        : 0;
-	const uint64_t commit_duration_ns = sample->after_commit_ns >= sample->before_commit_ns && sample->before_commit_ns != 0
-	                                        ? sample->after_commit_ns - sample->before_commit_ns
+	const uint64_t create_duration_ns = sample->command_buffer_created_ns >= sample->barrier_entry_ns
+	                                        ? sample->command_buffer_created_ns - sample->barrier_entry_ns
 	                                        : 0;
-	const uint64_t wait_duration_ns = sample->after_wait_ns >= sample->after_commit_ns && sample->after_commit_ns != 0
-	                                      ? sample->after_wait_ns - sample->after_commit_ns
-	                                      : 0;
-	const uint64_t total_duration_ns = sample->after_wait_ns >= sample->barrier_entry_ns && sample->after_wait_ns != 0
-	                                       ? sample->after_wait_ns - sample->barrier_entry_ns
-	                                       : 0;
+	const uint64_t commit_duration_ns =
+	    sample->after_commit_ns >= sample->before_commit_ns && sample->before_commit_ns != 0
+	        ? sample->after_commit_ns - sample->before_commit_ns
+	        : 0;
+	const uint64_t wait_duration_ns =
+	    sample->after_wait_ns >= sample->after_commit_ns && sample->after_commit_ns != 0
+	        ? sample->after_wait_ns - sample->after_commit_ns
+	        : 0;
+	const uint64_t total_duration_ns =
+	    sample->after_wait_ns >= sample->barrier_entry_ns && sample->after_wait_ns != 0
+	        ? sample->after_wait_ns - sample->barrier_entry_ns
+	        : 0;
 
 	pthread_mutex_lock(&trace->mutex);
 	if (trace->file == NULL) {
@@ -247,24 +244,14 @@ client_metal_release_trace_record(struct client_metal_compositor *c, const struc
 	}
 
 	const uint64_t sequence = ++trace->rows;
-	fprintf(trace->file,
-	        "%llu,%llu,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lld,%.9f,%.9f,%llu\n",
-	        (unsigned long long)sequence,
-	        (unsigned long long)sample->swapchain_id,
-	        sample->image_index,
-	        (unsigned long long)sample->barrier_entry_ns,
-	        (unsigned long long)sample->command_buffer_created_ns,
-	        (unsigned long long)sample->before_commit_ns,
-	        (unsigned long long)sample->after_commit_ns,
-	        (unsigned long long)sample->after_wait_ns,
-	        (unsigned long long)create_duration_ns,
-	        (unsigned long long)commit_duration_ns,
-	        (unsigned long long)wait_duration_ns,
-	        (unsigned long long)total_duration_ns,
-	        (long long)sample->metal_status,
-	        sample->gpu_start_time_s,
-	        sample->gpu_end_time_s,
-	        (unsigned long long)sample->gpu_duration_ns);
+	fprintf(trace->file, "%llu,%llu,%u,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%lld,%.9f,%.9f,%llu\n",
+	        (unsigned long long)sequence, (unsigned long long)sample->swapchain_id, sample->image_index,
+	        (unsigned long long)sample->barrier_entry_ns, (unsigned long long)sample->command_buffer_created_ns,
+	        (unsigned long long)sample->before_commit_ns, (unsigned long long)sample->after_commit_ns,
+	        (unsigned long long)sample->after_wait_ns, (unsigned long long)create_duration_ns,
+	        (unsigned long long)commit_duration_ns, (unsigned long long)wait_duration_ns,
+	        (unsigned long long)total_duration_ns, (long long)sample->metal_status, sample->gpu_start_time_s,
+	        sample->gpu_end_time_s, (unsigned long long)sample->gpu_duration_ns);
 
 	if (sample->after_wait_ns != 0) {
 		const uint32_t slot = trace->window_count++;
@@ -303,11 +290,11 @@ static int64_t
 vk_format_to_metal(uint32_t format)
 {
 	switch (format) {
-	case 37: return MTLPixelFormatRGBA8Unorm;       // VK_FORMAT_R8G8B8A8_UNORM
-	case 43: return MTLPixelFormatRGBA8Unorm_sRGB;  // VK_FORMAT_R8G8B8A8_SRGB
-	case 44: return MTLPixelFormatBGRA8Unorm;       // VK_FORMAT_B8G8R8A8_UNORM
-	case 50: return MTLPixelFormatBGRA8Unorm_sRGB;  // VK_FORMAT_B8G8R8A8_SRGB
-	case 64: return MTLPixelFormatBGR10A2Unorm;     // VK_FORMAT_A2B10G10R10_UNORM_PACK32
+	case 37: return MTLPixelFormatRGBA8Unorm;             // VK_FORMAT_R8G8B8A8_UNORM
+	case 43: return MTLPixelFormatRGBA8Unorm_sRGB;        // VK_FORMAT_R8G8B8A8_SRGB
+	case 44: return MTLPixelFormatBGRA8Unorm;             // VK_FORMAT_B8G8R8A8_UNORM
+	case 50: return MTLPixelFormatBGRA8Unorm_sRGB;        // VK_FORMAT_B8G8R8A8_SRGB
+	case 64: return MTLPixelFormatBGR10A2Unorm;           // VK_FORMAT_A2B10G10R10_UNORM_PACK32
 	case 124: return MTLPixelFormatDepth16Unorm;          // VK_FORMAT_D16_UNORM
 	case 126: return MTLPixelFormatDepth32Float;          // VK_FORMAT_D32_SFLOAT
 	case 130: return MTLPixelFormatDepth32Float_Stencil8; // VK_FORMAT_D32_SFLOAT_S8_UINT
@@ -319,11 +306,11 @@ static uint32_t
 metal_format_to_vk(int64_t format)
 {
 	switch ((MTLPixelFormat)format) {
-	case MTLPixelFormatRGBA8Unorm: return 37;      // VK_FORMAT_R8G8B8A8_UNORM
-	case MTLPixelFormatRGBA8Unorm_sRGB: return 43; // VK_FORMAT_R8G8B8A8_SRGB
-	case MTLPixelFormatBGRA8Unorm: return 44;      // VK_FORMAT_B8G8R8A8_UNORM
-	case MTLPixelFormatBGRA8Unorm_sRGB: return 50; // VK_FORMAT_B8G8R8A8_SRGB
-	case MTLPixelFormatBGR10A2Unorm: return 64;    // VK_FORMAT_A2B10G10R10_UNORM_PACK32
+	case MTLPixelFormatRGBA8Unorm: return 37;             // VK_FORMAT_R8G8B8A8_UNORM
+	case MTLPixelFormatRGBA8Unorm_sRGB: return 43;        // VK_FORMAT_R8G8B8A8_SRGB
+	case MTLPixelFormatBGRA8Unorm: return 44;             // VK_FORMAT_B8G8R8A8_UNORM
+	case MTLPixelFormatBGRA8Unorm_sRGB: return 50;        // VK_FORMAT_B8G8R8A8_SRGB
+	case MTLPixelFormatBGR10A2Unorm: return 64;           // VK_FORMAT_A2B10G10R10_UNORM_PACK32
 	case MTLPixelFormatDepth16Unorm: return 124;          // VK_FORMAT_D16_UNORM
 	case MTLPixelFormatDepth32Float: return 126;          // VK_FORMAT_D32_SFLOAT
 	case MTLPixelFormatDepth32Float_Stencil8: return 130; // VK_FORMAT_D32_SFLOAT_S8_UINT
@@ -365,16 +352,12 @@ metal_texture_type_string(MTLTextureType type)
 static void
 client_metal_log_iosurface_info(uint32_t image_index, IOSurfaceRef surface)
 {
-	U_LOG_I("Metal swapchain IOSurface image=%u id=%u size=%zux%zu bpr=%zu bpe=%zu alloc=%zu planes=%zu pixel_format=0x%08x",
-	        image_index,
-	        (unsigned)IOSurfaceGetID(surface),
-	        IOSurfaceGetWidth(surface),
-	        IOSurfaceGetHeight(surface),
-	        IOSurfaceGetBytesPerRow(surface),
-	        IOSurfaceGetBytesPerElement(surface),
-	        IOSurfaceGetAllocSize(surface),
-	        IOSurfaceGetPlaneCount(surface),
-	        (unsigned)IOSurfaceGetPixelFormat(surface));
+	U_LOG_I(
+	    "Metal swapchain IOSurface image=%u id=%u size=%zux%zu bpr=%zu bpe=%zu alloc=%zu planes=%zu "
+	    "pixel_format=0x%08x",
+	    image_index, (unsigned)IOSurfaceGetID(surface), IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface),
+	    IOSurfaceGetBytesPerRow(surface), IOSurfaceGetBytesPerElement(surface), IOSurfaceGetAllocSize(surface),
+	    IOSurfaceGetPlaneCount(surface), (unsigned)IOSurfaceGetPixelFormat(surface));
 }
 
 static void
@@ -499,7 +482,9 @@ client_metal_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier
 				sample.gpu_end_time_s = [command_buffer GPUEndTime];
 				if (sample.gpu_start_time_s > 0.0 && sample.gpu_end_time_s >= sample.gpu_start_time_s) {
 					sample.gpu_duration_ns =
-					    (uint64_t)((sample.gpu_end_time_s - sample.gpu_start_time_s) * 1000000000.0 + 0.5);
+					    (uint64_t)((sample.gpu_end_time_s - sample.gpu_start_time_s) *
+					                   1000000000.0 +
+					               0.5);
 				}
 				client_metal_release_trace_record(sc->c, &sample);
 			}
@@ -566,18 +551,10 @@ client_metal_swapchain_log_iosurface_sample(struct client_metal_swapchain *sc, u
 	const uint8_t *texel_center = base + (center_y * bytes_per_row) + (center_x * bytes_per_element);
 
 	U_LOG_RAW("metal-iosurface swapchain=%llu image=%u surface=%u bpe=%zu rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)",
-	        (unsigned long long)sc->xscn->limited_unique_id.data,
-	        index,
-	        (unsigned)IOSurfaceGetID(surface),
-	        bytes_per_element,
-	        (unsigned)texel0[0],
-	        (unsigned)texel0[1],
-	        (unsigned)texel0[2],
-	        (unsigned)texel0[3],
-	        (unsigned)texel_center[0],
-	        (unsigned)texel_center[1],
-	        (unsigned)texel_center[2],
-	        (unsigned)texel_center[3]);
+	          (unsigned long long)sc->xscn->limited_unique_id.data, index, (unsigned)IOSurfaceGetID(surface),
+	          bytes_per_element, (unsigned)texel0[0], (unsigned)texel0[1], (unsigned)texel0[2], (unsigned)texel0[3],
+	          (unsigned)texel_center[0], (unsigned)texel_center[1], (unsigned)texel_center[2],
+	          (unsigned)texel_center[3]);
 
 	IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, NULL);
 }
@@ -614,7 +591,8 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 {
 	struct client_metal_compositor *c = client_metal_compositor(xc);
 	if (info->face_count != 1) {
-		U_LOG_W("Metal swapchain face_count=%u is not supported (array_size=%u)", info->face_count, info->array_size);
+		U_LOG_W("Metal swapchain face_count=%u is not supported (array_size=%u)", info->face_count,
+		        info->array_size);
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
 
@@ -628,19 +606,12 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	MTLTextureType texture_type = info->array_size > 1 ? MTLTextureType2DArray : MTLTextureType2D;
 	MTLTextureUsage texture_usage = usage_flags_to_metal(info->bits);
 	const char *path = direct_metal_texture ? "vk-ext-metal-objects" : "iosurface-2d";
-	U_LOG_I("Metal swapchain create: path=%s size=%ux%u array_size=%u face_count=%u mip_count=%u sample_count=%u vk_format=%u metal_format=%lld texture_type=%s(%lu) expected_usage=0x%lx",
-	        path,
-	        info->width,
-	        info->height,
-	        info->array_size,
-	        info->face_count,
-	        info->mip_count,
-	        info->sample_count,
-	        vk_format,
-	        (long long)info->format,
-	        metal_texture_type_string(texture_type),
-	        (unsigned long)texture_type,
-	        (unsigned long)texture_usage);
+	U_LOG_I(
+	    "Metal swapchain create: path=%s size=%ux%u array_size=%u face_count=%u mip_count=%u sample_count=%u "
+	    "vk_format=%u metal_format=%lld texture_type=%s(%lu) expected_usage=0x%lx",
+	    path, info->width, info->height, info->array_size, info->face_count, info->mip_count, info->sample_count,
+	    vk_format, (long long)info->format, metal_texture_type_string(texture_type), (unsigned long)texture_type,
+	    (unsigned long)texture_usage);
 
 	struct xrt_swapchain_create_info native_info = *info;
 	native_info.format = vk_format;
@@ -648,10 +619,8 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	struct xrt_swapchain_create_properties xsccp = XRT_STRUCT_INIT;
 	xrt_result_t xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, &native_info, &xsccp);
 	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Metal swapchain native create-properties failed: result=%d array_size=%u vk_format=%u",
-		        xret,
-		        info->array_size,
-		        vk_format);
+		U_LOG_E("Metal swapchain native create-properties failed: result=%d array_size=%u vk_format=%u", xret,
+		        info->array_size, vk_format);
 		return xret;
 	}
 
@@ -660,23 +629,15 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	struct xrt_swapchain_native *xscn = NULL;
 	xret = xrt_comp_native_create_swapchain(c->xcn, &native_info, &xscn);
 	if (xret != XRT_SUCCESS) {
-		U_LOG_E("Metal swapchain native Vulkan allocation failed: result=%d size=%ux%u array_size=%u face_count=%u mip_count=%u sample_count=%u vk_format=%u bits=0x%x",
-		        xret,
-		        info->width,
-		        info->height,
-		        info->array_size,
-		        info->face_count,
-		        info->mip_count,
-		        info->sample_count,
-		        vk_format,
-		        native_info.bits);
+		U_LOG_E(
+		    "Metal swapchain native Vulkan allocation failed: result=%d size=%ux%u array_size=%u face_count=%u "
+		    "mip_count=%u sample_count=%u vk_format=%u bits=0x%x",
+		    xret, info->width, info->height, info->array_size, info->face_count, info->mip_count,
+		    info->sample_count, vk_format, native_info.bits);
 		return xret;
 	}
 	U_LOG_I("Metal swapchain native Vulkan allocation succeeded: path=%s images=%u array_size=%u vk_format=%u",
-	        path,
-	        xscn->base.image_count,
-	        info->array_size,
-	        vk_format);
+	        path, xscn->base.image_count, info->array_size, vk_format);
 
 	struct client_metal_swapchain *sc = calloc(1, sizeof(*sc));
 	if (sc == NULL) {
@@ -699,9 +660,8 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	sc->base.base.image_count = xscn->base.image_count;
 	sc->xscn = xscn;
 	sc->c = c;
-	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)c->device,
-	                                      info->width, info->height, info->array_size,
-	                                      sc->base.base.image_count)) {
+	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)c->device, info->width, info->height,
+	                                     info->array_size, sc->base.base.image_count)) {
 		client_metal_swapchain_destroy(&sc->base.base);
 		return XRT_ERROR_ALLOCATION;
 	}
@@ -712,10 +672,10 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 			VkImage vk_image = VK_NULL_HANDLE;
 			VkResult vk_ret = comp_swapchain_export_metal_texture(xscn, i, &raw_texture, &vk_image);
 			if (vk_ret != VK_SUCCESS || raw_texture == NULL) {
-				U_LOG_E("Metal direct swapchain export failed: image=%u vk_image=%p helper_result=%d; vkExportMetalObjectsEXT returns void and produced no MTLTexture",
-				        i,
-				        (void *)vk_image,
-				        (int)vk_ret);
+				U_LOG_E(
+				    "Metal direct swapchain export failed: image=%u vk_image=%p helper_result=%d; "
+				    "vkExportMetalObjectsEXT returns void and produced no MTLTexture",
+				    i, (void *)vk_image, (int)vk_ret);
 				client_metal_swapchain_destroy(&sc->base.base);
 				return XRT_ERROR_VULKAN;
 			}
@@ -723,46 +683,39 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 			id<MTLTexture> texture = (__bridge id<MTLTexture>)raw_texture;
 			if (texture.textureType != texture_type ||
 			    (info->array_size > 1 && texture.arrayLength != info->array_size)) {
-				U_LOG_E("Metal direct swapchain export incompatible: image=%u vk_image=%p texture=%p type=%s(%lu) expected_type=%s(%lu) array_length=%lu expected_array_size=%u",
-				        i,
-				        (void *)vk_image,
-				        (__bridge void *)texture,
-				        metal_texture_type_string(texture.textureType),
-				        (unsigned long)texture.textureType,
-				        metal_texture_type_string(texture_type),
-				        (unsigned long)texture_type,
-				        (unsigned long)texture.arrayLength,
-				        info->array_size);
+				U_LOG_E(
+				    "Metal direct swapchain export incompatible: image=%u vk_image=%p texture=%p "
+				    "type=%s(%lu) expected_type=%s(%lu) array_length=%lu expected_array_size=%u",
+				    i, (void *)vk_image, (__bridge void *)texture,
+				    metal_texture_type_string(texture.textureType), (unsigned long)texture.textureType,
+				    metal_texture_type_string(texture_type), (unsigned long)texture_type,
+				    (unsigned long)texture.arrayLength, info->array_size);
 				client_metal_swapchain_destroy(&sc->base.base);
 				return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 			}
 
 			if (texture.width != info->width || texture.height != info->height ||
-			    texture.mipmapLevelCount != info->mip_count || texture.pixelFormat != (MTLPixelFormat)info->format) {
-				U_LOG_E("Metal direct swapchain export geometry/format mismatch: image=%u vk_image=%p texture=%p size=%lux%lu expected=%ux%u mip_levels=%lu expected_mips=%u pixel_format=%lu expected_format=%lld",
-				        i,
-				        (void *)vk_image,
-				        (__bridge void *)texture,
-				        (unsigned long)texture.width,
-				        (unsigned long)texture.height,
-				        info->width,
-				        info->height,
-				        (unsigned long)texture.mipmapLevelCount,
-				        info->mip_count,
-				        (unsigned long)texture.pixelFormat,
-				        (long long)info->format);
+			    texture.mipmapLevelCount != info->mip_count ||
+			    texture.pixelFormat != (MTLPixelFormat)info->format) {
+				U_LOG_E(
+				    "Metal direct swapchain export geometry/format mismatch: image=%u vk_image=%p "
+				    "texture=%p size=%lux%lu expected=%ux%u mip_levels=%lu expected_mips=%u "
+				    "pixel_format=%lu expected_format=%lld",
+				    i, (void *)vk_image, (__bridge void *)texture, (unsigned long)texture.width,
+				    (unsigned long)texture.height, info->width, info->height,
+				    (unsigned long)texture.mipmapLevelCount, info->mip_count,
+				    (unsigned long)texture.pixelFormat, (long long)info->format);
 				client_metal_swapchain_destroy(&sc->base.base);
 				return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
 			}
 
 			MTLTextureUsage required_usage = texture_usage;
 			if ((texture.usage & required_usage) != required_usage) {
-				U_LOG_E("Metal direct swapchain export usage mismatch: image=%u vk_image=%p texture=%p actual_usage=0x%lx required_usage=0x%lx",
-				        i,
-				        (void *)vk_image,
-				        (__bridge void *)texture,
-				        (unsigned long)texture.usage,
-				        (unsigned long)required_usage);
+				U_LOG_E(
+				    "Metal direct swapchain export usage mismatch: image=%u vk_image=%p texture=%p "
+				    "actual_usage=0x%lx required_usage=0x%lx",
+				    i, (void *)vk_image, (__bridge void *)texture, (unsigned long)texture.usage,
+				    (unsigned long)required_usage);
 				client_metal_swapchain_destroy(&sc->base.base);
 				return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 			}
@@ -772,72 +725,64 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 			texture = [texture retain];
 			sc->base.images[i] = (__bridge void *)texture;
 
-			U_LOG_I("Metal swapchain texture: path=vk-ext-metal-objects image=%u vk_image=%p texture=%p type=%s(%lu) size=%lux%lu array_length=%lu mip_levels=%lu sample_count=%lu pixel_format=%lu usage=0x%lx",
-			        i,
-			        (void *)vk_image,
-			        (__bridge void *)texture,
-			        metal_texture_type_string(texture.textureType),
-			        (unsigned long)texture.textureType,
-			        (unsigned long)texture.width,
-			        (unsigned long)texture.height,
-			        (unsigned long)texture.arrayLength,
-			        (unsigned long)texture.mipmapLevelCount,
-			        (unsigned long)texture.sampleCount,
-			        (unsigned long)texture.pixelFormat,
-			        (unsigned long)texture.usage);
+			U_LOG_I(
+			    "Metal swapchain texture: path=vk-ext-metal-objects image=%u vk_image=%p texture=%p "
+			    "type=%s(%lu) size=%lux%lu array_length=%lu mip_levels=%lu sample_count=%lu "
+			    "pixel_format=%lu usage=0x%lx",
+			    i, (void *)vk_image, (__bridge void *)texture,
+			    metal_texture_type_string(texture.textureType), (unsigned long)texture.textureType,
+			    (unsigned long)texture.width, (unsigned long)texture.height,
+			    (unsigned long)texture.arrayLength, (unsigned long)texture.mipmapLevelCount,
+			    (unsigned long)texture.sampleCount, (unsigned long)texture.pixelFormat,
+			    (unsigned long)texture.usage);
 		}
 	} else {
 		MTLTextureDescriptor *descriptor =
 		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)info->format
-		                                                      width:info->width
-		                                                     height:info->height
-		                                                  mipmapped:info->mip_count > 1];
+		                                                       width:info->width
+		                                                      height:info->height
+		                                                   mipmapped:info->mip_count > 1];
 		descriptor.usage = texture_usage;
 
 		for (uint32_t i = 0; i < xscn->base.image_count; i++) {
 			IOSurfaceRef surface = xscn->images[i].handle;
 			if (!xrt_graphics_buffer_is_valid(surface)) {
-				U_LOG_E("Metal swapchain native image %u has an invalid IOSurface handle (array_size=%u)",
-				        i,
-				        info->array_size);
+				U_LOG_E(
+				    "Metal swapchain native image %u has an invalid IOSurface handle (array_size=%u)",
+				    i, info->array_size);
 				client_metal_swapchain_destroy(&sc->base.base);
 				return XRT_ERROR_ALLOCATION;
 			}
 
 			client_metal_log_iosurface_info(i, surface);
 
-			id<MTLTexture> texture = [c->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
+			id<MTLTexture> texture = [c->device newTextureWithDescriptor:descriptor
+			                                                   iosurface:surface
+			                                                       plane:0];
 			if (texture == nil) {
-				U_LOG_E("Metal IOSurface texture creation failed: image=%u array_size=%u texture_type=%s(%lu) metal_format=%lld usage=0x%lx IOSurface{id=%u size=%zux%zu bpr=%zu bpe=%zu alloc=%zu planes=%zu pixel_format=0x%08x}",
-				        i,
-				        info->array_size,
-				        metal_texture_type_string(descriptor.textureType),
-				        (unsigned long)descriptor.textureType,
-				        (long long)descriptor.pixelFormat,
-				        (unsigned long)descriptor.usage,
-				        (unsigned)IOSurfaceGetID(surface),
-				        IOSurfaceGetWidth(surface),
-				        IOSurfaceGetHeight(surface),
-				        IOSurfaceGetBytesPerRow(surface),
-				        IOSurfaceGetBytesPerElement(surface),
-				        IOSurfaceGetAllocSize(surface),
-				        IOSurfaceGetPlaneCount(surface),
-				        (unsigned)IOSurfaceGetPixelFormat(surface));
+				U_LOG_E(
+				    "Metal IOSurface texture creation failed: image=%u array_size=%u "
+				    "texture_type=%s(%lu) metal_format=%lld usage=0x%lx IOSurface{id=%u size=%zux%zu "
+				    "bpr=%zu bpe=%zu alloc=%zu planes=%zu pixel_format=0x%08x}",
+				    i, info->array_size, metal_texture_type_string(descriptor.textureType),
+				    (unsigned long)descriptor.textureType, (long long)descriptor.pixelFormat,
+				    (unsigned long)descriptor.usage, (unsigned)IOSurfaceGetID(surface),
+				    IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface),
+				    IOSurfaceGetBytesPerRow(surface), IOSurfaceGetBytesPerElement(surface),
+				    IOSurfaceGetAllocSize(surface), IOSurfaceGetPlaneCount(surface),
+				    (unsigned)IOSurfaceGetPixelFormat(surface));
 				client_metal_swapchain_destroy(&sc->base.base);
 				return XRT_ERROR_ALLOCATION;
 			}
 
-			U_LOG_I("Metal swapchain texture: path=iosurface-2d image=%u type=%s(%lu) size=%lux%lu array_length=%lu mip_levels=%lu sample_count=%lu pixel_format=%lu usage=0x%lx",
-			        i,
-			        metal_texture_type_string(texture.textureType),
-			        (unsigned long)texture.textureType,
-			        (unsigned long)texture.width,
-			        (unsigned long)texture.height,
-			        (unsigned long)texture.arrayLength,
-			        (unsigned long)texture.mipmapLevelCount,
-			        (unsigned long)texture.sampleCount,
-			        (unsigned long)texture.pixelFormat,
-			        (unsigned long)texture.usage);
+			U_LOG_I(
+			    "Metal swapchain texture: path=iosurface-2d image=%u type=%s(%lu) size=%lux%lu "
+			    "array_length=%lu mip_levels=%lu sample_count=%lu pixel_format=%lu usage=0x%lx",
+			    i, metal_texture_type_string(texture.textureType), (unsigned long)texture.textureType,
+			    (unsigned long)texture.width, (unsigned long)texture.height,
+			    (unsigned long)texture.arrayLength, (unsigned long)texture.mipmapLevelCount,
+			    (unsigned long)texture.sampleCount, (unsigned long)texture.pixelFormat,
+			    (unsigned long)texture.usage);
 			sc->base.images[i] = (__bridge void *)texture;
 		}
 	}

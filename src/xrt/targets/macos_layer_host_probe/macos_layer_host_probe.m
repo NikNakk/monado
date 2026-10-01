@@ -135,9 +135,9 @@ static bool
 remote_layer_api_supported(void)
 {
 	Class context_class = NSClassFromString(@"CAContext");
-	if (context_class == nil ||
-	    ![context_class respondsToSelector:@selector(contextWithCGSConnection:options:)] ||
-	    class_getProperty(context_class, "contextId") == NULL || class_getProperty(context_class, "layer") == NULL) {
+	if (context_class == nil || ![context_class respondsToSelector:@selector(contextWithCGSConnection:options:)] ||
+	    class_getProperty(context_class, "contextId") == NULL ||
+	    class_getProperty(context_class, "layer") == NULL) {
 		return false;
 	}
 
@@ -246,10 +246,10 @@ struct probe_options
 	double swap_every;
 	enum swap_method swap_method;
 	bool host_background;
-	int tint;        //!< Client only: 1 = client A (red), 2 = client B (blue).
-	int peer_fd;     //!< Client only, SWAP_CLIENT/HYBRID: socket to the other client.
-	int control_fd;  //!< Client only, SWAP_HYBRID: socket to the host.
-	double epoch_s;  //!< Client only, SWAP_CLIENT: swap k is at epoch + (k + 1) * swap_every.
+	int tint;       //!< Client only: 1 = client A (red), 2 = client B (blue).
+	int peer_fd;    //!< Client only, SWAP_CLIENT/HYBRID: socket to the other client.
+	int control_fd; //!< Client only, SWAP_HYBRID: socket to the host.
+	double epoch_s; //!< Client only, SWAP_CLIENT: swap k is at epoch + (k + 1) * swap_every.
 
 	// Passed from host to client only.
 	CGDirectDisplayID display_id;
@@ -703,8 +703,7 @@ display_link_callback(CVDisplayLinkRef link,
                       CVOptionFlags *flags_out,
                       void *ctx);
 
-@implementation ProbeRenderer
-{
+@implementation ProbeRenderer {
 	CAMetalLayer *_layer;
 	id<MTLCommandQueue> _queue;
 	id<MTLTexture> _bar;
@@ -860,22 +859,24 @@ display_link_callback(CVDisplayLinkRef link,
 	_Atomic int *deep = &_deepPresents;
 	double period = _periodSeconds;
 	[drawable addPresentedHandler:^(id<MTLDrawable> presented) {
-		double t = presented.presentedTime;
-		atomic_store(&record->presented_s, t);
-		if (t > 0.0) {
-			atomic_store(latest, t);
-			long periods = lround((t - record->target_s) / period);
-			if (periods >= 2) {
-				atomic_fetch_add(deep, 1);
-			} else {
-				atomic_store(deep, 0);
-			}
-		}
+	  double t = presented.presentedTime;
+	  atomic_store(&record->presented_s, t);
+	  if (t > 0.0) {
+		  atomic_store(latest, t);
+		  long periods = lround((t - record->target_s) / period);
+		  if (periods >= 2) {
+			  atomic_fetch_add(deep, 1);
+		  } else {
+			  atomic_store(deep, 0);
+		  }
+	  }
 	}];
 
 	record->submit_s = now_seconds();
 	switch (_opts.present) {
-	case PRESENT_MIN_DURATION: [cmd presentDrawable:drawable afterMinimumDuration:_opts.min_duration_us / 1e6]; break;
+	case PRESENT_MIN_DURATION:
+		[cmd presentDrawable:drawable afterMinimumDuration:_opts.min_duration_us / 1e6];
+		break;
 	case PRESENT_AT_TIME: [cmd presentDrawable:drawable atTime:record->target_s]; break;
 	case PRESENT_IMMEDIATE: [cmd presentDrawable:drawable]; break;
 	}
@@ -1013,8 +1014,8 @@ display_link_callback(CVDisplayLinkRef link,
 	        "  presented - CPU submit ms: median=%.3f p95=%.3f\n"
 	        "  render thread: realtime=%s priority min=%.0f median=%.0f  frames throttled (<=4)=%.2f%%\n"
 	        "  latency guard: %s drains=%zu  vblank coalescing: %s ticks dropped=%zu\n",
-	        _role, mode_name(_opts.mode), present_name(_opts.present), _opts.min_duration_us,
-	        1.0 / _periodSeconds, _count, presented_count, _count - presented_count, _nilDrawables,
+	        _role, mode_name(_opts.mode), present_name(_opts.present), _opts.min_duration_us, 1.0 / _periodSeconds,
+	        _count, presented_count, _count - presented_count, _nilDrawables,
 	        percentile(intervals, interval_count, 50), percentile(intervals, interval_count, 95),
 	        percentile(intervals, interval_count, 99),
 	        interval_count > 0 ? 100.0 * (double)long_intervals / (double)interval_count : 0.0,
@@ -1022,8 +1023,7 @@ display_link_callback(CVDisplayLinkRef link,
 	        percentile(to_submit, presented_count, 50), percentile(to_submit, presented_count, 95),
 	        _realtime ? "yes" : "no", _count > 0 ? priorities[0] : -1.0, percentile(priorities, _count, 50),
 	        _count > 0 ? 100.0 * (double)throttled_frames / (double)_count : 0.0,
-	        _opts.latency_guard ? "on" : "off", _drains, _opts.coalesce_vblanks ? "on" : "off",
-	        _coalescedTicks);
+	        _opts.latency_guard ? "on" : "off", _drains, _opts.coalesce_vblanks ? "on" : "off", _coalescedTicks);
 
 	free(intervals);
 	free(to_target);
@@ -1690,13 +1690,13 @@ run_client(const struct probe_options *opts)
 	double controller_end_s = now_seconds() + opts->seconds - 0.25;
 	if (client_swaps) {
 		[NSThread detachNewThreadWithBlock:^{
-			if (hybrid_swaps) {
-				event_count = run_hybrid_controller(opts, container, renderer, controller_end_s, events,
-				                                    event_capacity);
-			} else {
-				event_count = run_visibility_controller(opts, container, renderer, events, event_capacity);
-			}
-			dispatch_semaphore_signal(controller_done);
+		  if (hybrid_swaps) {
+			  event_count = run_hybrid_controller(opts, container, renderer, controller_end_s, events,
+				                              event_capacity);
+		  } else {
+			  event_count = run_visibility_controller(opts, container, renderer, events, event_capacity);
+		  }
+		  dispatch_semaphore_signal(controller_done);
 		}];
 	}
 
@@ -1763,11 +1763,11 @@ game_session(const struct probe_options *opts)
 			return 1;
 		}
 		dispatch_sync(dispatch_get_main_queue(), ^{
-			layer = create_metal_layer(CGSizeMake(hello.width_points, hello.height_points), hello.scale);
-			[CATransaction begin];
-			context = create_remote_context(layer);
-			[CATransaction commit];
-			[CATransaction flush];
+		  layer = create_metal_layer(CGSizeMake(hello.width_points, hello.height_points), hello.scale);
+		  [CATransaction begin];
+		  context = create_remote_context(layer);
+		  [CATransaction commit];
+		  [CATransaction flush];
 		});
 	}
 
@@ -1844,15 +1844,15 @@ run_game(const struct probe_options *opts)
 	[NSApp activateIgnoringOtherApps:YES];
 
 	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-		[window toggleFullScreen:nil];
+	  [window toggleFullScreen:nil];
 	});
 
 	__block int exit_code = 0;
 	[NSThread detachNewThreadWithBlock:^{
-		exit_code = game_session(opts);
-		dispatch_async(dispatch_get_main_queue(), ^{
-			stop_app();
-		});
+	  exit_code = game_session(opts);
+	  dispatch_async(dispatch_get_main_queue(), ^{
+	    stop_app();
+	  });
 	}];
 
 	[NSApp run];
@@ -2011,7 +2011,7 @@ struct handoff_swap
 	double scheduled_s;
 	double request_s;
 	double commit_s;
-	int visible;         //!< Client shown after this swap: 0 = A, 1 = B.
+	int visible;          //!< Client shown after this swap: 0 = A, 1 = B.
 	double hide_commit_s; //!< Client swaps: when the outgoing client hid; 0 otherwise.
 	double prepare_s;     //!< Hybrid: host unhid the incoming host layer.
 	double tidy_s;        //!< Hybrid: host hid the outgoing host layer.
@@ -2095,7 +2095,8 @@ client_hidden_at(const struct handoff_log *log, enum swap_method method, int c, 
 			hidden = false;
 			latest = sw->commit_s;
 		}
-		if (sw->visible != c && sw->hide_commit_s > 0.0 && sw->hide_commit_s <= t && sw->hide_commit_s > latest) {
+		if (sw->visible != c && sw->hide_commit_s > 0.0 && sw->hide_commit_s <= t &&
+		    sw->hide_commit_s > latest) {
 			hidden = true;
 			latest = sw->hide_commit_s;
 		}
@@ -2304,8 +2305,8 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 		double old_after_ms = last_old >= 0.0 ? (last_old - sw->commit_s) * 1e3 : -1.0;
 		if (file != NULL) {
 			fprintf(file, "%zu,%s,%.6f,%.6f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", k, c ? "b" : "a",
-			        sw->scheduled_s, sw->commit_s, swap_late_ms, commit_ms, max_gap * 1e3, first_ms, switch_gap_ms,
-			        old_after_ms, hide_lag_ms);
+			        sw->scheduled_s, sw->commit_s, swap_late_ms, commit_ms, max_gap * 1e3, first_ms,
+			        switch_gap_ms, old_after_ms, hide_lag_ms);
 		}
 
 		// The last swap can land after the clients stopped; skip it.
@@ -2372,7 +2373,8 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 		}
 		qsort(before, nb, sizeof(double), compare_doubles);
 		qsort(after, na, sizeof(double), compare_doubles);
-		snprintf(latency[c], sizeof(latency[c]), "before first swap median=%.3f (n=%zu), after median=%.3f p95=%.3f (n=%zu)",
+		snprintf(latency[c], sizeof(latency[c]),
+		         "before first swap median=%.3f (n=%zu), after median=%.3f p95=%.3f (n=%zu)",
 		         percentile(before, nb, 50), nb, percentile(after, na, 50), percentile(after, na, 95), na);
 		free(before);
 		free(after);
@@ -2394,18 +2396,17 @@ analyze_handoff(const struct probe_options *opts, pid_t pids[2], const struct ha
 	        "  client-a presented - submit ms: %s\n"
 	        "  client-b presented - submit ms: %s\n"
 	        "  hidden-client frames reporting presentedTime: %zu of %zu (%.1f%%)%s\n",
-	        swap_method_name(opts->swap_method), opts->host_background ? "yes" : "no",
-	        log->count, measured, period_s * 1e3, percentile(switch_gaps, measured, 50),
-	        percentile(switch_gaps, measured, 95), measured > 0 ? switch_gaps[measured - 1] : 0.0, long_switches,
-	        percentile(gaps, measured, 50), percentile(gaps, measured, 95),
-	        measured > 0 ? gaps[measured - 1] : 0.0, long_gaps, percentile(old_after, measured, 50),
-	        percentile(old_after, measured, 95), measured > 0 ? old_after[measured - 1] : 0.0,
-	        percentile(first_new, measured, 50),
+	        swap_method_name(opts->swap_method), opts->host_background ? "yes" : "no", log->count, measured,
+	        period_s * 1e3, percentile(switch_gaps, measured, 50), percentile(switch_gaps, measured, 95),
+	        measured > 0 ? switch_gaps[measured - 1] : 0.0, long_switches, percentile(gaps, measured, 50),
+	        percentile(gaps, measured, 95), measured > 0 ? gaps[measured - 1] : 0.0, long_gaps,
+	        percentile(old_after, measured, 50), percentile(old_after, measured, 95),
+	        measured > 0 ? old_after[measured - 1] : 0.0, percentile(first_new, measured, 50),
 	        percentile(first_new, measured, 95), measured > 0 ? first_new[measured - 1] : 0.0,
 	        percentile(late, measured, 50), percentile(late, measured, 95), measured > 0 ? late[measured - 1] : 0.0,
 	        percentile(hide_lags, hide_measured, 50), percentile(hide_lags, hide_measured, 95),
-	        hide_measured > 0 ? hide_lags[hide_measured - 1] : 0.0, percentile(prepare_to_show, prepare_measured, 50),
-	        percentile(prepare_to_show, prepare_measured, 95),
+	        hide_measured > 0 ? hide_lags[hide_measured - 1] : 0.0,
+	        percentile(prepare_to_show, prepare_measured, 50), percentile(prepare_to_show, prepare_measured, 95),
 	        prepare_measured > 0 ? prepare_to_show[prepare_measured - 1] : 0.0,
 	        percentile(tidy_delays, tidy_measured, 50), percentile(tidy_delays, tidy_measured, 95),
 	        tidy_measured > 0 ? tidy_delays[tidy_measured - 1] : 0.0, tidy_measured,
@@ -2489,27 +2490,27 @@ host_game_session(const struct probe_options *opts,
 			return 1;
 		}
 		dispatch_sync(dispatch_get_main_queue(), ^{
-			[CATransaction begin];
-			[CATransaction setDisableActions:YES];
-			[root addSublayer:create_layer_host(attach.context_id)];
-			[CATransaction commit];
-			[CATransaction flush];
+		  [CATransaction begin];
+		  [CATransaction setDisableActions:YES];
+		  [root addSublayer:create_layer_host(attach.context_id)];
+		  [CATransaction commit];
+		  [CATransaction flush];
 		});
 	} else {
 		__block CAMetalLayer *layer = nil;
 		dispatch_sync(dispatch_get_main_queue(), ^{
-			[CATransaction begin];
-			[CATransaction setDisableActions:YES];
-			layer = create_metal_layer(points, scale);
-			[root addSublayer:layer];
-			[CATransaction commit];
-			[CATransaction flush];
+		  [CATransaction begin];
+		  [CATransaction setDisableActions:YES];
+		  layer = create_metal_layer(points, scale);
+		  [root addSublayer:layer];
+		  [CATransaction commit];
+		  [CATransaction flush];
 		});
 		renderer = [[ProbeRenderer alloc] initWithLayer:layer displayID:display_id options:opts role:"host"];
 		ProbeRenderer *thread_renderer = renderer;
 		[NSThread detachNewThreadWithBlock:^{
-			[thread_renderer runForSeconds:opts->seconds];
-			dispatch_semaphore_signal(renderer_done);
+		  [thread_renderer runForSeconds:opts->seconds];
+		  dispatch_semaphore_signal(renderer_done);
 		}];
 	}
 
@@ -2681,10 +2682,10 @@ run_host(const struct probe_options *opts, const char *self_path)
 	__block int exit_code = 0;
 	if (mode_is_game(opts->mode)) {
 		[NSThread detachNewThreadWithBlock:^{
-			exit_code = host_game_session(opts, root, display_id, points, scale, period_s);
-			dispatch_async(dispatch_get_main_queue(), ^{
-				stop_app();
-			});
+		  exit_code = host_game_session(opts, root, display_id, points, scale, period_s);
+		  dispatch_async(dispatch_get_main_queue(), ^{
+		    stop_app();
+		  });
 		}];
 	} else if (opts->mode == PROBE_MODE_HANDOFF) {
 		if (opts->host_background) {
@@ -2725,73 +2726,74 @@ run_host(const struct probe_options *opts, const char *self_path)
 				int fd = handoff_control[c];
 				CALayerHost *own = c ? host_b : host_a;
 				dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-					uint32_t k;
-					while (read_full(fd, &k, sizeof(k))) {
-						dispatch_async(dispatch_get_main_queue(), ^{
-							if (k >= log->capacity || last_prepared[c] > (long)k) {
-								return;
-							}
-							[CATransaction begin];
-							[CATransaction setDisableActions:YES];
-							own.hidden = YES;
-							[CATransaction commit];
-							[CATransaction flush];
-							log->swaps[k].tidy_s = now_seconds();
-						});
-					}
+				  uint32_t k;
+				  while (read_full(fd, &k, sizeof(k))) {
+					  dispatch_async(dispatch_get_main_queue(), ^{
+					    if (k >= log->capacity || last_prepared[c] > (long)k) {
+						    return;
+					    }
+					    [CATransaction begin];
+					    [CATransaction setDisableActions:YES];
+					    own.hidden = YES;
+					    [CATransaction commit];
+					    [CATransaction flush];
+					    log->swaps[k].tidy_s = now_seconds();
+					  });
+				  }
 				});
 			}
 		}
 		// With client swaps the host never commits again; the clients swap.
 		// With hybrid swaps the timer starts each swap.
-		dispatch_source_t timer = opts->swap_method == SWAP_CLIENT
-		                              ? nil
-		                              : dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-		                                                       dispatch_get_main_queue());
+		dispatch_source_t timer =
+		    opts->swap_method == SWAP_CLIENT
+		        ? nil
+		        : dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
 		if (timer != nil) {
-			dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(opts->swap_every * NSEC_PER_SEC)),
-			                          (uint64_t)(opts->swap_every * NSEC_PER_SEC), 0);
+			dispatch_source_set_timer(
+			    timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(opts->swap_every * NSEC_PER_SEC)),
+			    (uint64_t)(opts->swap_every * NSEC_PER_SEC), 0);
 			dispatch_source_set_event_handler(timer, ^{
-				if (log->count >= log->capacity) {
-					return;
-				}
-				struct handoff_swap *sw = &log->swaps[log->count];
-				sw->scheduled_s = first_s + (double)log->count * opts->swap_every;
-				sw->request_s = now_seconds();
-				sw->visible = log->count == 0 ? 1 : !log->swaps[log->count - 1].visible;
+			  if (log->count >= log->capacity) {
+				  return;
+			  }
+			  struct handoff_swap *sw = &log->swaps[log->count];
+			  sw->scheduled_s = first_s + (double)log->count * opts->swap_every;
+			  sw->request_s = now_seconds();
+			  sw->visible = log->count == 0 ? 1 : !log->swaps[log->count - 1].visible;
 
-				CALayerHost *show = sw->visible ? host_b : host_a;
-				CALayerHost *hide = sw->visible ? host_a : host_b;
+			  CALayerHost *show = sw->visible ? host_b : host_a;
+			  CALayerHost *hide = sw->visible ? host_a : host_b;
 
-				if (opts->swap_method == SWAP_HYBRID) {
-					// Unhide the incoming host layer (its content is still
-					// hidden), then let the clients swap.
-					[CATransaction begin];
-					[CATransaction setDisableActions:YES];
-					show.hidden = NO;
-					[CATransaction commit];
-					[CATransaction flush];
-					sw->prepare_s = now_seconds();
-					last_prepared[sw->visible] = (long)log->count;
-					uint32_t k = (uint32_t)log->count;
-					log->count++;
-					write_full(control_a_b[sw->visible], &k, sizeof(k));
-					return;
-				}
+			  if (opts->swap_method == SWAP_HYBRID) {
+				  // Unhide the incoming host layer (its content is still
+				  // hidden), then let the clients swap.
+				  [CATransaction begin];
+				  [CATransaction setDisableActions:YES];
+				  show.hidden = NO;
+				  [CATransaction commit];
+				  [CATransaction flush];
+				  sw->prepare_s = now_seconds();
+				  last_prepared[sw->visible] = (long)log->count;
+				  uint32_t k = (uint32_t)log->count;
+				  log->count++;
+				  write_full(control_a_b[sw->visible], &k, sizeof(k));
+				  return;
+			  }
 
-				[CATransaction begin];
-				[CATransaction setDisableActions:YES];
-				if (opts->swap_method == SWAP_HIDDEN) {
-					show.hidden = NO;
-					hide.hidden = YES;
-				} else {
-					[root addSublayer:show];
-					[hide removeFromSuperlayer];
-				}
-				[CATransaction commit];
-				[CATransaction flush];
-				sw->commit_s = now_seconds();
-				log->count++;
+			  [CATransaction begin];
+			  [CATransaction setDisableActions:YES];
+			  if (opts->swap_method == SWAP_HIDDEN) {
+				  show.hidden = NO;
+				  hide.hidden = YES;
+			  } else {
+				  [root addSublayer:show];
+				  [hide removeFromSuperlayer];
+			  }
+			  [CATransaction commit];
+			  [CATransaction flush];
+			  sw->commit_s = now_seconds();
+			  log->count++;
 			});
 			dispatch_resume(timer);
 		}
@@ -2799,43 +2801,43 @@ run_host(const struct probe_options *opts, const char *self_path)
 		pid_t pid_a = handoff_pids[0];
 		pid_t pid_b = handoff_pids[1];
 		dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-			int status_a = 0, status_b = 0;
-			waitpid(pid_a, &status_a, 0);
-			waitpid(pid_b, &status_b, 0);
-			int statuses[2] = {status_a, status_b};
-			for (int c = 0; c < 2; c++) {
-				if (WIFSIGNALED(statuses[c])) {
-					fprintf(stderr, "LAYER_HOST_PROBE host: client %c killed by signal %d (%s)\n", 'a' + c,
-					        WTERMSIG(statuses[c]), strsignal(WTERMSIG(statuses[c])));
-				} else if (WIFEXITED(statuses[c]) && WEXITSTATUS(statuses[c]) != 0) {
-					fprintf(stderr, "LAYER_HOST_PROBE host: client %c exited with status %d\n", 'a' + c,
-					        WEXITSTATUS(statuses[c]));
-				}
-			}
-			exit_code = (WIFEXITED(status_a) && WEXITSTATUS(status_a) == 0 && WIFEXITED(status_b) &&
-			             WEXITSTATUS(status_b) == 0)
-			                ? 0
-			                : 1;
-			dispatch_async(dispatch_get_main_queue(), ^{
-				pid_t pids[2] = {pid_a, pid_b};
-				if (timer != nil) {
-					dispatch_source_cancel(timer);
-				}
-				if (opts->swap_method == SWAP_CLIENT || opts->swap_method == SWAP_HYBRID) {
-					load_client_swaps(opts, pids, log, opts->swap_method == SWAP_HYBRID);
-				}
-				analyze_handoff(opts, pids, log, period_s);
-				stop_app();
-			});
+		  int status_a = 0, status_b = 0;
+		  waitpid(pid_a, &status_a, 0);
+		  waitpid(pid_b, &status_b, 0);
+		  int statuses[2] = {status_a, status_b};
+		  for (int c = 0; c < 2; c++) {
+			  if (WIFSIGNALED(statuses[c])) {
+				  fprintf(stderr, "LAYER_HOST_PROBE host: client %c killed by signal %d (%s)\n",
+					  'a' + c, WTERMSIG(statuses[c]), strsignal(WTERMSIG(statuses[c])));
+			  } else if (WIFEXITED(statuses[c]) && WEXITSTATUS(statuses[c]) != 0) {
+				  fprintf(stderr, "LAYER_HOST_PROBE host: client %c exited with status %d\n", 'a' + c,
+					  WEXITSTATUS(statuses[c]));
+			  }
+		  }
+		  exit_code = (WIFEXITED(status_a) && WEXITSTATUS(status_a) == 0 && WIFEXITED(status_b) &&
+			       WEXITSTATUS(status_b) == 0)
+			          ? 0
+			          : 1;
+		  dispatch_async(dispatch_get_main_queue(), ^{
+		    pid_t pids[2] = {pid_a, pid_b};
+		    if (timer != nil) {
+			    dispatch_source_cancel(timer);
+		    }
+		    if (opts->swap_method == SWAP_CLIENT || opts->swap_method == SWAP_HYBRID) {
+			    load_client_swaps(opts, pids, log, opts->swap_method == SWAP_HYBRID);
+		    }
+		    analyze_handoff(opts, pids, log, period_s);
+		    stop_app();
+		  });
 		});
 	} else if (opts->mode == PROBE_MODE_HOSTED) {
 		dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-			int status = 0;
-			waitpid(child, &status, 0);
-			exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
-			dispatch_async(dispatch_get_main_queue(), ^{
-				stop_app();
-			});
+		  int status = 0;
+		  waitpid(child, &status, 0);
+		  exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+		  dispatch_async(dispatch_get_main_queue(), ^{
+		    stop_app();
+		  });
 		});
 	} else {
 		ProbeRenderer *renderer = [[ProbeRenderer alloc] initWithLayer:local_layer
@@ -2844,10 +2846,10 @@ run_host(const struct probe_options *opts, const char *self_path)
 		                                                          role:"host"];
 		// A dedicated thread, since the renderer may make it realtime.
 		[NSThread detachNewThreadWithBlock:^{
-			[renderer runForSeconds:opts->seconds];
-			dispatch_async(dispatch_get_main_queue(), ^{
-				stop_app();
-			});
+		  [renderer runForSeconds:opts->seconds];
+		  dispatch_async(dispatch_get_main_queue(), ^{
+		    stop_app();
+		  });
 		}];
 	}
 

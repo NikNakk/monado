@@ -339,8 +339,12 @@ expected_rate(const xrt_foveation_state &state,
               bool horizontal)
 {
 	const u_foveation_profile profile = {
-	    "test", state.center_rate, state.middle_rate, state.peripheral_rate,
-	    state.center_half_extent, state.middle_half_extent,
+	    "test",
+	    state.center_rate,
+	    state.middle_rate,
+	    state.peripheral_rate,
+	    state.center_half_extent,
+	    state.middle_half_extent,
 	};
 	float rate = 0.0f;
 	for (uint32_t i = 0; i < view_count; ++i) {
@@ -364,7 +368,9 @@ expected_rate(const xrt_foveation_state &state,
 }
 
 void
-check_packed_layout(id<MTLDevice> device, const xrt_metal_foveation_view_layout *views, const xrt_foveation_state &state)
+check_packed_layout(id<MTLDevice> device,
+                    const xrt_metal_foveation_view_layout *views,
+                    const xrt_foveation_state &state)
 {
 	comp_metal_foveation_cache cache = {};
 	REQUIRE(comp_metal_foveation_cache_init(&cache, (__bridge void *)device, kWidth, kHeight, 1, 1));
@@ -462,7 +468,8 @@ TEST_CASE("packed stereo maps use view-local profile extents")
 		REQUIRE(comp_metal_foveation_cache_get_packed(&cache, views, 2, 0, &flipped) == XRT_SUCCESS);
 		CHECK(upright.rasterization_rate_map != flipped.rasterization_rate_map);
 		CHECK(std::memcmp(upright.vertical_rates, flipped.vertical_rates, sizeof(upright.vertical_rates)) != 0);
-		CHECK(std::memcmp(upright.horizontal_rates, flipped.horizontal_rates, sizeof(upright.horizontal_rates)) == 0);
+		CHECK(std::memcmp(upright.horizontal_rates, flipped.horizontal_rates,
+		                  sizeof(upright.horizontal_rates)) == 0);
 
 		views[0].flags = 0x80u; // Unknown bits are rejected.
 		xrt_metal_foveation_state out = {};

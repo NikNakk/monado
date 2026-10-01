@@ -753,20 +753,20 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		};
 
 		VkImageMemoryBarrier release = {
-			.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-			.srcAccessMask = barrier_access_mask,
-			.dstAccessMask = 0,
-			.oldLayout = barrier_optimal_layout,
-			.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-			.srcQueueFamilyIndex = vk->main_queue->family_index,
+		    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		    .srcAccessMask = barrier_access_mask,
+		    .dstAccessMask = 0,
+		    .oldLayout = barrier_optimal_layout,
+		    .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		    .srcQueueFamilyIndex = vk->main_queue->family_index,
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
-			// IOSurface-backed images stay within the same logical queue ownership model on Apple.
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		    // IOSurface-backed images stay within the same logical queue ownership model on Apple.
+		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
 #else
-			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
+		    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL,
 #endif
-			.image = sc->base.images[i],
-			.subresourceRange = subresource_range,
+		    .image = sc->base.images[i],
+		    .subresourceRange = subresource_range,
 		};
 
 		//! @todo less conservative pipeline stage masks based on usage

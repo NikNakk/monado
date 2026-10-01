@@ -329,7 +329,7 @@ Compositor::setupBlitPipelines(openvr_logger &logger)
 	    {
 	        RENDER_BLIT_RESOLVE_COLOR_MODE_GAMMA_IN_LINEAR_FORMAT,
 	        RENDER_BLIT_RESOLVE_COLOR_MODE_LINEAR_IN_SRGB_FORMAT,
-	    };
+	};
 
 	const struct render_blit_ms_spec blit_variants[] = {
 	    render_make_blit_ms_spec(RENDER_BLIT_RESOLVE_COLOR_MODE_GAMMA_IN_LINEAR_FORMAT),

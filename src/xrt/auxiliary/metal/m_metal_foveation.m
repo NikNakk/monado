@@ -21,13 +21,11 @@ m_metal_foveation_map_build_for_zones(void *metal_device,
                                       struct m_metal_foveation_map *out_map)
 {
 	if (metal_device == NULL || profile == NULL || out_map == NULL || screen_width == 0 || screen_height == 0 ||
-	    zone_x == NULL || zone_y == NULL || scale_x == NULL || scale_y == NULL ||
-    center_count == 0) {
+	    zone_x == NULL || zone_y == NULL || scale_x == NULL || scale_y == NULL || center_count == 0) {
 		return false;
 	}
 	for (uint32_t center = 0; center < center_count; ++center) {
-		if (zone_x[center] >= M_METAL_FOVEATION_ZONE_COUNT ||
-		    zone_y[center] >= M_METAL_FOVEATION_ZONE_COUNT ||
+		if (zone_x[center] >= M_METAL_FOVEATION_ZONE_COUNT || zone_y[center] >= M_METAL_FOVEATION_ZONE_COUNT ||
 		    !(scale_x[center] > 0.0f) || !(scale_y[center] > 0.0f)) {
 			return false;
 		}
@@ -49,24 +47,19 @@ m_metal_foveation_map_build_for_zones(void *metal_device,
 			 * into one target, convert target-normalized distance back to the
 			 * local view-normalized distance before applying profile extents.
 			 */
-			const float x_offset =
-			    ((float)dx / (float)M_METAL_FOVEATION_ZONE_COUNT) / scale_x[center];
-			const float y_offset =
-			    ((float)dy / (float)M_METAL_FOVEATION_ZONE_COUNT) / scale_y[center];
-			const float x_rate =
-			    u_foveation_profile_rate_for_offset(profile, x_offset);
-			const float y_rate =
-			    u_foveation_profile_rate_for_offset(profile, y_offset);
+			const float x_offset = ((float)dx / (float)M_METAL_FOVEATION_ZONE_COUNT) / scale_x[center];
+			const float y_offset = ((float)dy / (float)M_METAL_FOVEATION_ZONE_COUNT) / scale_y[center];
+			const float x_rate = u_foveation_profile_rate_for_offset(profile, x_offset);
+			const float y_rate = u_foveation_profile_rate_for_offset(profile, y_offset);
 			horizontal[sample] = fmaxf(horizontal[sample], x_rate);
 			vertical[sample] = fmaxf(vertical[sample], y_rate);
 		}
 	}
 
-	MTLRasterizationRateLayerDescriptor *layer =
-	    [[MTLRasterizationRateLayerDescriptor alloc]
-	        initWithSampleCount:MTLSizeMake(M_METAL_FOVEATION_ZONE_COUNT, M_METAL_FOVEATION_ZONE_COUNT, 1)
-	                 horizontal:horizontal
-	                   vertical:vertical];
+	MTLRasterizationRateLayerDescriptor *layer = [[MTLRasterizationRateLayerDescriptor alloc]
+	    initWithSampleCount:MTLSizeMake(M_METAL_FOVEATION_ZONE_COUNT, M_METAL_FOVEATION_ZONE_COUNT, 1)
+	             horizontal:horizontal
+	               vertical:vertical];
 	if (layer == nil) {
 		return false;
 	}
@@ -98,10 +91,10 @@ m_metal_foveation_map_build_for_zones(void *metal_device,
 		const float fraction = (float)boundary / (float)(M_METAL_FOVEATION_BOUNDARY_COUNT - 1);
 		const float logical_x = (float)screen_width * fraction;
 		const float logical_y = (float)screen_height * fraction;
-		const MTLCoordinate2D px =
-		    [rate_map mapScreenToPhysicalCoordinates:MTLCoordinate2DMake(logical_x, 0.0) forLayer:0];
-		const MTLCoordinate2D py =
-		    [rate_map mapScreenToPhysicalCoordinates:MTLCoordinate2DMake(0.0, logical_y) forLayer:0];
+		const MTLCoordinate2D px = [rate_map mapScreenToPhysicalCoordinates:MTLCoordinate2DMake(logical_x, 0.0)
+		                                                           forLayer:0];
+		const MTLCoordinate2D py = [rate_map mapScreenToPhysicalCoordinates:MTLCoordinate2DMake(0.0, logical_y)
+		                                                           forLayer:0];
 		out_map->x[boundary] = (float)px.x / (float)screen_width;
 		out_map->y[boundary] = (float)py.y / (float)screen_height;
 	}
@@ -125,9 +118,8 @@ m_metal_foveation_map_build(void *metal_device,
 	const uint32_t zones_y[1] = {(uint32_t)zone_y};
 	const float scales_x[1] = {1.0f};
 	const float scales_y[1] = {1.0f};
-	return m_metal_foveation_map_build_for_zones(
-	    metal_device, screen_width, screen_height, zones_x, zones_y,
-	    scales_x, scales_y, 1, profile, out_map);
+	return m_metal_foveation_map_build_for_zones(metal_device, screen_width, screen_height, zones_x, zones_y,
+	                                             scales_x, scales_y, 1, profile, out_map);
 }
 
 void

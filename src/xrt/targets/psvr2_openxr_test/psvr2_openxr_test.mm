@@ -109,14 +109,12 @@ record_gpu_timing(gpu_timing_state &state, const char *label, id<MTLCommandBuffe
 		sum += value;
 	}
 	const auto percentile = [&](double fraction) {
-		const size_t index = (size_t)fmin((double)(sorted.size() - 1),
-		                                  floor(fraction * (double)(sorted.size() - 1)));
+		const size_t index =
+		    (size_t)fmin((double)(sorted.size() - 1), floor(fraction * (double)(sorted.size() - 1)));
 		return sorted[index];
 	};
-	fprintf(stderr,
-	        "psvr2-openxr-test: GPU %s n=%zu mean=%.3fms p50=%.3fms p90=%.3fms p99=%.3fms\n",
-	        label, sorted.size(), sum / (double)sorted.size(),
-	        percentile(0.50), percentile(0.90), percentile(0.99));
+	fprintf(stderr, "psvr2-openxr-test: GPU %s n=%zu mean=%.3fms p50=%.3fms p90=%.3fms p99=%.3fms\n", label,
+	        sorted.size(), sum / (double)sorted.size(), percentile(0.50), percentile(0.90), percentile(0.99));
 	state.samples_ms.clear();
 }
 
@@ -203,10 +201,7 @@ struct xr_api
 
 template <typename T>
 static void
-load_xr_proc(PFN_xrGetInstanceProcAddr get_instance_proc_addr,
-             XrInstance instance,
-             const char *name,
-             T *out_function)
+load_xr_proc(PFN_xrGetInstanceProcAddr get_instance_proc_addr, XrInstance instance, const char *name, T *out_function)
 {
 	PFN_xrVoidFunction function = nullptr;
 	XrResult result = get_instance_proc_addr(instance, name, &function);
@@ -358,8 +353,7 @@ projection_matrix(const XrFovf &fov, float near_z, float far_z)
 	matrix_float4x4 matrix = {};
 	matrix.columns[0] = make_float4(2.0f / width, 0.0f, 0.0f, 0.0f);
 	matrix.columns[1] = make_float4(0.0f, 2.0f / height, 0.0f, 0.0f);
-	matrix.columns[2] = make_float4((right + left) / width, (up + down) / height,
-	                                far_z / (near_z - far_z), -1.0f);
+	matrix.columns[2] = make_float4((right + left) / width, (up + down) / height, far_z / (near_z - far_z), -1.0f);
 	matrix.columns[3] = make_float4(0.0f, 0.0f, (far_z * near_z) / (near_z - far_z), 0.0f);
 	return matrix;
 }
@@ -376,8 +370,8 @@ view_matrix(const XrPosef &pose)
 	matrix.columns[0] = make_float4(right.x, up.x, back.x, 0.0f);
 	matrix.columns[1] = make_float4(right.y, up.y, back.y, 0.0f);
 	matrix.columns[2] = make_float4(right.z, up.z, back.z, 0.0f);
-	matrix.columns[3] = make_float4(-simd_dot(right, position), -simd_dot(up, position),
-	                                -simd_dot(back, position), 1.0f);
+	matrix.columns[3] =
+	    make_float4(-simd_dot(right, position), -simd_dot(up, position), -simd_dot(back, position), 1.0f);
 	return matrix;
 }
 
@@ -398,11 +392,7 @@ struct diagnostic_scene
 };
 
 static matrix_float4x4
-basis_model(simd_float3 position,
-            simd_float3 right,
-            simd_float3 up,
-            simd_float3 back,
-            simd_float3 scale)
+basis_model(simd_float3 position, simd_float3 right, simd_float3 up, simd_float3 back, simd_float3 scale)
 {
 	matrix_float4x4 matrix = {};
 	matrix.columns[0] = make_float4(right.x * scale.x, right.y * scale.x, right.z * scale.x, 0.0f);
@@ -413,12 +403,7 @@ basis_model(simd_float3 position,
 }
 
 static void
-add_world_box(diagnostic_scene &scene,
-              float x,
-              float y,
-              float z,
-              simd_float3 scale,
-              simd_float4 color)
+add_world_box(diagnostic_scene &scene, float x, float y, float z, simd_float3 scale, simd_float4 color)
 {
 	const simd_float3 position = scene.origin + scene.right * x + scene.up * y + scene.forward * z;
 	const simd_float3 back = -scene.forward;
@@ -454,13 +439,8 @@ glyph_5x7(char c)
 }
 
 static void
-add_world_text(diagnostic_scene &scene,
-               float center_x,
-               float center_y,
-               float z,
-               float pixel,
-               const char *text,
-               simd_float4 color)
+add_world_text(
+    diagnostic_scene &scene, float center_x, float center_y, float z, float pixel, const char *text, simd_float4 color)
 {
 	const size_t length = strlen(text);
 	if (length == 0) {
@@ -558,9 +538,7 @@ initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 	for (size_t distance_index = 0; distance_index < distances.size(); ++distance_index) {
 		const float distance = distances[distance_index];
 		const float size = std::max(0.026f, distance * 0.035f);
-		const simd_float4 color = distance_index == 0 ? near_color
-		                              : distance_index < 3 ? mid_color
-		                                                   : far_color;
+		const simd_float4 color = distance_index == 0 ? near_color : distance_index < 3 ? mid_color : far_color;
 		for (int angle_degrees = 0; angle_degrees < 360; angle_degrees += 60) {
 			const float radians = (float)angle_degrees * (float)M_PI / 180.0f;
 			add_world_box(scene, sinf(radians) * distance, 0.72f, cosf(radians) * distance,
@@ -607,7 +585,8 @@ initialize_scene(diagnostic_scene &scene, const XrPosef &head_pose)
 	scene.initialized = true;
 	fprintf(stderr, "psvr2-openxr-test: diagnostic world contains %zu world-locked boxes over 360 degrees\n",
 	        scene.world_instances.size());
-	fprintf(stderr, "psvr2-openxr-test: foveation detail wall added at 2.75 m — checker, multiscale, text acuity chart\n");
+	fprintf(stderr,
+	        "psvr2-openxr-test: foveation detail wall added at 2.75 m — checker, multiscale, text acuity chart\n");
 
 	if (g_diagnostic_scene_augment != nullptr) {
 		g_diagnostic_scene_augment(scene);
@@ -621,7 +600,8 @@ append_head_locked_cross(std::vector<instance_data> &instances, const XrPosef &h
 	const simd_float3 right = rotate_vector(head_pose.orientation, make_float3(1.0f, 0.0f, 0.0f));
 	const simd_float3 up = rotate_vector(head_pose.orientation, make_float3(0.0f, 1.0f, 0.0f));
 	const simd_float3 back = rotate_vector(head_pose.orientation, make_float3(0.0f, 0.0f, 1.0f));
-	const simd_float3 centre = head_position + rotate_vector(head_pose.orientation, make_float3(0.0f, 0.0f, -0.55f));
+	const simd_float3 centre =
+	    head_position + rotate_vector(head_pose.orientation, make_float3(0.0f, 0.0f, -0.55f));
 	const simd_float4 color = make_float4(1.0f, 0.12f, 0.55f, 1.0f);
 
 	instances.push_back({basis_model(centre, right, up, back, make_float3(0.090f, 0.006f, 0.006f)), color});
@@ -631,23 +611,47 @@ append_head_locked_cross(std::vector<instance_data> &instances, const XrPosef &h
 
 static const simd_float4 k_cube_vertices[] = {
     // -Z
-    {-0.5f, -0.5f, -0.5f, 1.0f}, {0.5f, 0.5f, -0.5f, 1.0f}, {0.5f, -0.5f, -0.5f, 1.0f},
-    {-0.5f, -0.5f, -0.5f, 1.0f}, {-0.5f, 0.5f, -0.5f, 1.0f}, {0.5f, 0.5f, -0.5f, 1.0f},
+    {-0.5f, -0.5f, -0.5f, 1.0f},
+    {0.5f, 0.5f, -0.5f, 1.0f},
+    {0.5f, -0.5f, -0.5f, 1.0f},
+    {-0.5f, -0.5f, -0.5f, 1.0f},
+    {-0.5f, 0.5f, -0.5f, 1.0f},
+    {0.5f, 0.5f, -0.5f, 1.0f},
     // +Z
-    {-0.5f, -0.5f, 0.5f, 1.0f}, {0.5f, -0.5f, 0.5f, 1.0f}, {0.5f, 0.5f, 0.5f, 1.0f},
-    {-0.5f, -0.5f, 0.5f, 1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}, {-0.5f, 0.5f, 0.5f, 1.0f},
+    {-0.5f, -0.5f, 0.5f, 1.0f},
+    {0.5f, -0.5f, 0.5f, 1.0f},
+    {0.5f, 0.5f, 0.5f, 1.0f},
+    {-0.5f, -0.5f, 0.5f, 1.0f},
+    {0.5f, 0.5f, 0.5f, 1.0f},
+    {-0.5f, 0.5f, 0.5f, 1.0f},
     // -X
-    {-0.5f, -0.5f, -0.5f, 1.0f}, {-0.5f, -0.5f, 0.5f, 1.0f}, {-0.5f, 0.5f, 0.5f, 1.0f},
-    {-0.5f, -0.5f, -0.5f, 1.0f}, {-0.5f, 0.5f, 0.5f, 1.0f}, {-0.5f, 0.5f, -0.5f, 1.0f},
+    {-0.5f, -0.5f, -0.5f, 1.0f},
+    {-0.5f, -0.5f, 0.5f, 1.0f},
+    {-0.5f, 0.5f, 0.5f, 1.0f},
+    {-0.5f, -0.5f, -0.5f, 1.0f},
+    {-0.5f, 0.5f, 0.5f, 1.0f},
+    {-0.5f, 0.5f, -0.5f, 1.0f},
     // +X
-    {0.5f, -0.5f, -0.5f, 1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}, {0.5f, -0.5f, 0.5f, 1.0f},
-    {0.5f, -0.5f, -0.5f, 1.0f}, {0.5f, 0.5f, -0.5f, 1.0f}, {0.5f, 0.5f, 0.5f, 1.0f},
+    {0.5f, -0.5f, -0.5f, 1.0f},
+    {0.5f, 0.5f, 0.5f, 1.0f},
+    {0.5f, -0.5f, 0.5f, 1.0f},
+    {0.5f, -0.5f, -0.5f, 1.0f},
+    {0.5f, 0.5f, -0.5f, 1.0f},
+    {0.5f, 0.5f, 0.5f, 1.0f},
     // -Y
-    {-0.5f, -0.5f, -0.5f, 1.0f}, {0.5f, -0.5f, 0.5f, 1.0f}, {-0.5f, -0.5f, 0.5f, 1.0f},
-    {-0.5f, -0.5f, -0.5f, 1.0f}, {0.5f, -0.5f, -0.5f, 1.0f}, {0.5f, -0.5f, 0.5f, 1.0f},
+    {-0.5f, -0.5f, -0.5f, 1.0f},
+    {0.5f, -0.5f, 0.5f, 1.0f},
+    {-0.5f, -0.5f, 0.5f, 1.0f},
+    {-0.5f, -0.5f, -0.5f, 1.0f},
+    {0.5f, -0.5f, -0.5f, 1.0f},
+    {0.5f, -0.5f, 0.5f, 1.0f},
     // +Y
-    {-0.5f, 0.5f, -0.5f, 1.0f}, {-0.5f, 0.5f, 0.5f, 1.0f}, {0.5f, 0.5f, 0.5f, 1.0f},
-    {-0.5f, 0.5f, -0.5f, 1.0f}, {0.5f, 0.5f, 0.5f, 1.0f}, {0.5f, 0.5f, -0.5f, 1.0f},
+    {-0.5f, 0.5f, -0.5f, 1.0f},
+    {-0.5f, 0.5f, 0.5f, 1.0f},
+    {0.5f, 0.5f, 0.5f, 1.0f},
+    {-0.5f, 0.5f, -0.5f, 1.0f},
+    {0.5f, 0.5f, 0.5f, 1.0f},
+    {0.5f, 0.5f, -0.5f, 1.0f},
 };
 
 static const char *k_metal_shader = R"METAL(
@@ -776,7 +780,8 @@ struct metal_renderer
 	id<MTLBuffer> instance_buffer = nil;
 	size_t max_instances = 1536;
 
-	void initialize(id<MTLDevice> device, MTLPixelFormat color_format)
+	void
+	initialize(id<MTLDevice> device, MTLPixelFormat color_format)
 	{
 		NSError *error = nil;
 		NSString *source = [NSString stringWithUTF8String:k_metal_shader];
@@ -816,7 +821,8 @@ struct metal_renderer
 		resolve_descriptor.vertexFunction = resolve_vertex;
 		resolve_descriptor.fragmentFunction = resolve_fragment;
 		resolve_descriptor.colorAttachments[0].pixelFormat = color_format;
-		foveation_resolve_pipeline = [device newRenderPipelineStateWithDescriptor:resolve_descriptor error:&error];
+		foveation_resolve_pipeline = [device newRenderPipelineStateWithDescriptor:resolve_descriptor
+		                                                                    error:&error];
 		[resolve_descriptor release];
 		[resolve_vertex release];
 		[resolve_fragment release];
@@ -837,16 +843,17 @@ struct metal_renderer
 		}
 
 		cube_vertex_buffer = [device newBufferWithBytes:k_cube_vertices
-		                                      length:sizeof(k_cube_vertices)
-		                                     options:MTLResourceStorageModeShared];
+		                                         length:sizeof(k_cube_vertices)
+		                                        options:MTLResourceStorageModeShared];
 		instance_buffer = [device newBufferWithLength:max_instances * sizeof(instance_data)
-		                                  options:MTLResourceStorageModeShared];
+		                                      options:MTLResourceStorageModeShared];
 		if (cube_vertex_buffer == nil || instance_buffer == nil) {
 			fatal("could not allocate Metal geometry buffers");
 		}
 	}
 
-	void shutdown()
+	void
+	shutdown()
 	{
 		[instance_buffer release];
 		instance_buffer = nil;
@@ -1000,8 +1007,9 @@ has_extension(const xr_api &xr, const char *extension_name)
 	for (XrExtensionProperties &extension : extensions) {
 		xr_reset(extension, XR_TYPE_EXTENSION_PROPERTIES);
 	}
-	check_xr(xr.enumerate_instance_extension_properties(nullptr, extension_count, &extension_count, extensions.data()),
-	         "xrEnumerateInstanceExtensionProperties(list)");
+	check_xr(
+	    xr.enumerate_instance_extension_properties(nullptr, extension_count, &extension_count, extensions.data()),
+	    "xrEnumerateInstanceExtensionProperties(list)");
 	for (const XrExtensionProperties &extension : extensions) {
 		if (strcmp(extension.extensionName, extension_name) == 0) {
 			return true;
@@ -1026,7 +1034,9 @@ create_instance(application &app)
 		fatal("runtime does not expose XR_EXT_eye_gaze_interaction");
 	}
 	if (app.test_generic_controller && !has_extension(app.xr, XR_KHR_GENERIC_CONTROLLER_EXTENSION_NAME)) {
-		fatal("runtime does not expose XR_KHR_generic_controller; configure Monado with XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON");
+		fatal(
+		    "runtime does not expose XR_KHR_generic_controller; configure Monado with "
+		    "XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON");
 	}
 	if (app.standard_foveation) {
 		if (!has_extension(app.xr, XR_FB_SWAPCHAIN_UPDATE_STATE_EXTENSION_NAME)) {
@@ -1042,8 +1052,7 @@ create_instance(application &app)
 			fatal("runtime does not expose XR_MNDX_foveation_metal");
 		}
 	}
-	if (app.standard_eye_foveation &&
-	    !has_extension(app.xr, XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME)) {
+	if (app.standard_eye_foveation && !has_extension(app.xr, XR_META_FOVEATION_EYE_TRACKED_EXTENSION_NAME)) {
 		fatal("runtime does not expose XR_META_foveation_eye_tracked");
 	}
 
@@ -1112,7 +1121,8 @@ create_instance(application &app)
 	XrInstanceProperties instance_properties = xr_struct<XrInstanceProperties>(XR_TYPE_INSTANCE_PROPERTIES);
 	check_xr(app.xr.get_instance_properties(app.instance, &instance_properties), "xrGetInstanceProperties");
 	fprintf(stderr, "psvr2-openxr-test: runtime %s %u.%u.%u\n", instance_properties.runtimeName,
-	        XR_VERSION_MAJOR(instance_properties.runtimeVersion), XR_VERSION_MINOR(instance_properties.runtimeVersion),
+	        XR_VERSION_MAJOR(instance_properties.runtimeVersion),
+	        XR_VERSION_MINOR(instance_properties.runtimeVersion),
 	        XR_VERSION_PATCH(instance_properties.runtimeVersion));
 }
 
@@ -1123,8 +1133,10 @@ create_system_and_session(application &app)
 	system_info.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 	check_xr(app.xr.get_system(app.instance, &system_info, &app.system_id), "xrGetSystem");
 
-	XrSystemEyeGazeInteractionPropertiesEXT gaze_properties = xr_struct<XrSystemEyeGazeInteractionPropertiesEXT>(XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT);
-	XrSystemFoveationEyeTrackedPropertiesMETA eye_foveation_properties = xr_struct<XrSystemFoveationEyeTrackedPropertiesMETA>(XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META);
+	XrSystemEyeGazeInteractionPropertiesEXT gaze_properties =
+	    xr_struct<XrSystemEyeGazeInteractionPropertiesEXT>(XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT);
+	XrSystemFoveationEyeTrackedPropertiesMETA eye_foveation_properties =
+	    xr_struct<XrSystemFoveationEyeTrackedPropertiesMETA>(XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META);
 	XrSystemProperties properties = xr_struct<XrSystemProperties>(XR_TYPE_SYSTEM_PROPERTIES);
 	if (app.standard_eye_foveation) {
 		properties.next = &eye_foveation_properties;
@@ -1143,22 +1155,23 @@ create_system_and_session(application &app)
 		}
 	}
 	if (app.standard_eye_foveation) {
-		fprintf(stderr, "psvr2-openxr-test: META eye-tracked foveation %s (without XR_EXT_eye_gaze_interaction)\n",
+		fprintf(stderr,
+		        "psvr2-openxr-test: META eye-tracked foveation %s (without XR_EXT_eye_gaze_interaction)\n",
 		        eye_foveation_properties.supportsFoveationEyeTracked ? "supported" : "NOT supported");
 		if (!eye_foveation_properties.supportsFoveationEyeTracked) {
 			fatal("runtime system does not report META eye-tracked foveation support");
 		}
 	}
 
-	XrGraphicsRequirementsMetalKHR requirements = xr_struct<XrGraphicsRequirementsMetalKHR>(XR_TYPE_GRAPHICS_REQUIREMENTS_METAL_KHR);
+	XrGraphicsRequirementsMetalKHR requirements =
+	    xr_struct<XrGraphicsRequirementsMetalKHR>(XR_TYPE_GRAPHICS_REQUIREMENTS_METAL_KHR);
 	check_xr(app.xr.get_metal_graphics_requirements(app.instance, app.system_id, &requirements),
 	         "xrGetMetalGraphicsRequirementsKHR");
 	id<MTLDevice> device = (__bridge id<MTLDevice>)requirements.metalDevice;
 	if (device == nil) {
 		fatal("runtime returned a nil Metal device");
 	}
-	if ((app.gaze_foveation || app.standard_foveation) &&
-	    ![device supportsRasterizationRateMapWithLayerCount:1]) {
+	if ((app.gaze_foveation || app.standard_foveation) && ![device supportsRasterizationRateMapWithLayerCount:1]) {
 		fatal("Metal device does not support variable rasterization rate maps");
 	}
 	app.command_queue = [device newCommandQueue];
@@ -1166,20 +1179,23 @@ create_system_and_session(application &app)
 		fatal("could not create Metal command queue");
 	}
 
-	XrGraphicsBindingMetalKHR graphics_binding = xr_struct<XrGraphicsBindingMetalKHR>(XR_TYPE_GRAPHICS_BINDING_METAL_KHR);
+	XrGraphicsBindingMetalKHR graphics_binding =
+	    xr_struct<XrGraphicsBindingMetalKHR>(XR_TYPE_GRAPHICS_BINDING_METAL_KHR);
 	graphics_binding.commandQueue = (__bridge void *)app.command_queue;
 	XrSessionCreateInfo session_info = xr_struct<XrSessionCreateInfo>(XR_TYPE_SESSION_CREATE_INFO);
 	session_info.next = &graphics_binding;
 	session_info.systemId = app.system_id;
 	check_xr(app.xr.create_session(app.instance, &session_info, &app.session), "xrCreateSession");
 
-	XrReferenceSpaceCreateInfo local_space_info = xr_struct<XrReferenceSpaceCreateInfo>(XR_TYPE_REFERENCE_SPACE_CREATE_INFO);
+	XrReferenceSpaceCreateInfo local_space_info =
+	    xr_struct<XrReferenceSpaceCreateInfo>(XR_TYPE_REFERENCE_SPACE_CREATE_INFO);
 	local_space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
 	local_space_info.poseInReferenceSpace.orientation.w = 1.0f;
 	check_xr(app.xr.create_reference_space(app.session, &local_space_info, &app.app_space),
 	         "xrCreateReferenceSpace(LOCAL)");
 
-	XrReferenceSpaceCreateInfo view_space_info = xr_struct<XrReferenceSpaceCreateInfo>(XR_TYPE_REFERENCE_SPACE_CREATE_INFO);
+	XrReferenceSpaceCreateInfo view_space_info =
+	    xr_struct<XrReferenceSpaceCreateInfo>(XR_TYPE_REFERENCE_SPACE_CREATE_INFO);
 	view_space_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
 	view_space_info.poseInReferenceSpace.orientation.w = 1.0f;
 	check_xr(app.xr.create_reference_space(app.session, &view_space_info, &app.view_space),
@@ -1215,14 +1231,15 @@ create_gaze_resources(application &app)
 
 	XrPath interaction_profile = XR_NULL_PATH;
 	XrPath gaze_binding_path = XR_NULL_PATH;
-	check_xr(app.xr.string_to_path(app.instance, "/interaction_profiles/ext/eye_gaze_interaction",
-	                               &interaction_profile),
-	         "xrStringToPath(eye gaze profile)");
+	check_xr(
+	    app.xr.string_to_path(app.instance, "/interaction_profiles/ext/eye_gaze_interaction", &interaction_profile),
+	    "xrStringToPath(eye gaze profile)");
 	check_xr(app.xr.string_to_path(app.instance, "/user/eyes_ext/input/gaze_ext/pose", &gaze_binding_path),
 	         "xrStringToPath(gaze pose binding)");
 
 	XrActionSuggestedBinding binding{app.gaze_action, gaze_binding_path};
-	XrInteractionProfileSuggestedBinding suggested = xr_struct<XrInteractionProfileSuggestedBinding>(XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING);
+	XrInteractionProfileSuggestedBinding suggested =
+	    xr_struct<XrInteractionProfileSuggestedBinding>(XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING);
 	suggested.interactionProfile = interaction_profile;
 	suggested.countSuggestedBindings = 1;
 	suggested.suggestedBindings = &binding;
@@ -1251,16 +1268,14 @@ create_gaze_resources(application &app)
 		        "psvr2-openxr-test: calibration assumes PSVR2_GAZE_* environment overrides are unset\n");
 	} else {
 		fprintf(stderr,
-		        "psvr2-openxr-test: gaze action ready; marker is bright yellow at 2 m along the reported gaze ray\n");
+		        "psvr2-openxr-test: gaze action ready; marker is bright yellow at 2 m along the reported gaze "
+		        "ray\n");
 	}
 }
 
 
 static XrAction
-create_controller_action(application &app,
-                         const char *name,
-                         const char *localized_name,
-                         XrActionType type)
+create_controller_action(application &app, const char *name, const char *localized_name, XrActionType type)
 {
 	XrActionCreateInfo action_info = xr_struct<XrActionCreateInfo>(XR_TYPE_ACTION_CREATE_INFO);
 	action_info.actionType = type;
@@ -1270,7 +1285,8 @@ create_controller_action(application &app,
 	action_info.subactionPaths = app.controller_hand_paths.data();
 
 	XrAction action = XR_NULL_HANDLE;
-	check_xr(app.xr.create_action(app.controller_action_set, &action_info, &action), "xrCreateAction(generic controller)");
+	check_xr(app.xr.create_action(app.controller_action_set, &action_info, &action),
+	         "xrCreateAction(generic controller)");
 	return action;
 }
 
@@ -1288,8 +1304,7 @@ create_generic_controller_resources(application &app)
 
 	XrActionSetCreateInfo set_info = xr_struct<XrActionSetCreateInfo>(XR_TYPE_ACTION_SET_CREATE_INFO);
 	snprintf(set_info.actionSetName, XR_MAX_ACTION_SET_NAME_SIZE, "%s", "generic_controller");
-	snprintf(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "%s",
-	         "Generic controller");
+	snprintf(set_info.localizedActionSetName, XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE, "%s", "Generic controller");
 	set_info.priority = 0;
 	check_xr(app.xr.create_action_set(app.instance, &set_info, &app.controller_action_set),
 	         "xrCreateActionSet(generic controller)");
@@ -1298,18 +1313,14 @@ create_generic_controller_resources(application &app)
 	    create_controller_action(app, "primary", "Primary", XR_ACTION_TYPE_BOOLEAN_INPUT);
 	app.controller_secondary_action =
 	    create_controller_action(app, "secondary", "Secondary", XR_ACTION_TYPE_BOOLEAN_INPUT);
-	app.controller_trigger_action =
-	    create_controller_action(app, "trigger", "Trigger", XR_ACTION_TYPE_FLOAT_INPUT);
-	app.controller_squeeze_action =
-	    create_controller_action(app, "squeeze", "Squeeze", XR_ACTION_TYPE_FLOAT_INPUT);
+	app.controller_trigger_action = create_controller_action(app, "trigger", "Trigger", XR_ACTION_TYPE_FLOAT_INPUT);
+	app.controller_squeeze_action = create_controller_action(app, "squeeze", "Squeeze", XR_ACTION_TYPE_FLOAT_INPUT);
 	app.controller_thumbstick_action =
 	    create_controller_action(app, "thumbstick", "Thumbstick", XR_ACTION_TYPE_VECTOR2F_INPUT);
-	app.controller_grip_action =
-	    create_controller_action(app, "grip_pose", "Grip pose", XR_ACTION_TYPE_POSE_INPUT);
+	app.controller_grip_action = create_controller_action(app, "grip_pose", "Grip pose", XR_ACTION_TYPE_POSE_INPUT);
 	app.controller_grip_surface_action =
 	    create_controller_action(app, "grip_surface", "Grip surface pose", XR_ACTION_TYPE_POSE_INPUT);
-	app.controller_aim_action =
-	    create_controller_action(app, "aim_pose", "Aim pose", XR_ACTION_TYPE_POSE_INPUT);
+	app.controller_aim_action = create_controller_action(app, "aim_pose", "Aim pose", XR_ACTION_TYPE_POSE_INPUT);
 
 	XrPath generic_profile = XR_NULL_PATH;
 	check_xr(app.xr.string_to_path(app.instance, "/interaction_profiles/khr/generic_controller", &generic_profile),
@@ -1343,7 +1354,8 @@ create_generic_controller_resources(application &app)
 		}
 	}
 
-	XrInteractionProfileSuggestedBinding suggested = xr_struct<XrInteractionProfileSuggestedBinding>(XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING);
+	XrInteractionProfileSuggestedBinding suggested =
+	    xr_struct<XrInteractionProfileSuggestedBinding>(XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING);
 	suggested.interactionProfile = generic_profile;
 	suggested.countSuggestedBindings = (uint32_t)bindings.size();
 	suggested.suggestedBindings = bindings.data();
@@ -1370,12 +1382,12 @@ attach_action_sets(application &app)
 		return;
 	}
 
-	XrSessionActionSetsAttachInfo attach_info = xr_struct<XrSessionActionSetsAttachInfo>(XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO);
+	XrSessionActionSetsAttachInfo attach_info =
+	    xr_struct<XrSessionActionSetsAttachInfo>(XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO);
 	attach_info.countActionSets = count;
 	attach_info.actionSets = action_sets.data();
 	check_xr(app.xr.attach_session_action_sets(app.session, &attach_info), "xrAttachSessionActionSets");
-	fprintf(stderr, "psvr2-openxr-test: attached %u OpenXR action set%s%s%s\n",
-	        count, count == 1 ? "" : "s",
+	fprintf(stderr, "psvr2-openxr-test: attached %u OpenXR action set%s%s%s\n", count, count == 1 ? "" : "s",
 	        app.gaze_action_set != XR_NULL_HANDLE ? " [gaze]" : "",
 	        app.controller_action_set != XR_NULL_HANDLE ? " [controller]" : "");
 }
@@ -1452,8 +1464,7 @@ poll_generic_controller(application &app)
 
 		XrActionStatePose grip = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 		get_info.action = app.controller_grip_action;
-		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &grip),
-		         "xrGetActionStatePose(grip)");
+		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &grip), "xrGetActionStatePose(grip)");
 
 		XrActionStatePose grip_surface = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 		get_info.action = app.controller_grip_surface_action;
@@ -1462,16 +1473,15 @@ poll_generic_controller(application &app)
 
 		XrActionStatePose aim = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 		get_info.action = app.controller_aim_action;
-		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &aim),
-		         "xrGetActionStatePose(aim)");
+		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &aim), "xrGetActionStatePose(aim)");
 
-		const bool changed =
-		    primary.changedSinceLastSync || secondary.changedSinceLastSync ||
-		    trigger.changedSinceLastSync || squeeze.changedSinceLastSync ||
-		    thumbstick.changedSinceLastSync;
+		const bool changed = primary.changedSinceLastSync || secondary.changedSinceLastSync ||
+		                     trigger.changedSinceLastSync || squeeze.changedSinceLastSync ||
+		                     thumbstick.changedSinceLastSync;
 
 		if (periodic || changed) {
-			XrInteractionProfileState profile_state = xr_struct<XrInteractionProfileState>(XR_TYPE_INTERACTION_PROFILE_STATE);
+			XrInteractionProfileState profile_state =
+			    xr_struct<XrInteractionProfileState>(XR_TYPE_INTERACTION_PROFILE_STATE);
 			check_xr(app.xr.get_current_interaction_profile(app.session, hand_path, &profile_state),
 			         "xrGetCurrentInteractionProfile");
 			std::string profile = xr_path_string(app, profile_state.interactionProfile);
@@ -1483,9 +1493,8 @@ poll_generic_controller(application &app)
 			        hand_name, profile.c_str(),
 			        (int)(primary.isActive || secondary.isActive || trigger.isActive || squeeze.isActive ||
 			              thumbstick.isActive || grip.isActive || grip_surface.isActive || aim.isActive),
-			        primary.currentState ? 1 : 0, secondary.currentState ? 1 : 0,
-			        trigger.currentState, squeeze.currentState,
-			        thumbstick.currentState.x, thumbstick.currentState.y,
+			        primary.currentState ? 1 : 0, secondary.currentState ? 1 : 0, trigger.currentState,
+			        squeeze.currentState, thumbstick.currentState.x, thumbstick.currentState.y,
 			        grip.isActive ? 1 : 0, grip_surface.isActive ? 1 : 0, aim.isActive ? 1 : 0);
 		}
 	}
@@ -1498,12 +1507,13 @@ create_passthrough_resources(application &app)
 		return;
 	}
 
-	XrPassthroughCreateInfoFB passthrough_info = xr_struct<XrPassthroughCreateInfoFB>(XR_TYPE_PASSTHROUGH_CREATE_INFO_FB);
-	check_xr(app.xr.create_passthrough(app.session, &passthrough_info, &app.passthrough),
-	         "xrCreatePassthroughFB");
+	XrPassthroughCreateInfoFB passthrough_info =
+	    xr_struct<XrPassthroughCreateInfoFB>(XR_TYPE_PASSTHROUGH_CREATE_INFO_FB);
+	check_xr(app.xr.create_passthrough(app.session, &passthrough_info, &app.passthrough), "xrCreatePassthroughFB");
 	check_xr(app.xr.passthrough_start(app.passthrough), "xrPassthroughStartFB");
 
-	XrPassthroughLayerCreateInfoFB layer_info = xr_struct<XrPassthroughLayerCreateInfoFB>(XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB);
+	XrPassthroughLayerCreateInfoFB layer_info =
+	    xr_struct<XrPassthroughLayerCreateInfoFB>(XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB);
 	layer_info.passthrough = app.passthrough;
 	layer_info.purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB;
 	check_xr(app.xr.create_passthrough_layer(app.session, &layer_info, &app.passthrough_layer),
@@ -1558,9 +1568,8 @@ static void
 create_swapchains(application &app)
 {
 	uint32_t view_count = 0;
-	check_xr(app.xr.enumerate_view_configuration_views(app.instance, app.system_id,
-	                                                   XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &view_count,
-	                                                   nullptr),
+	check_xr(app.xr.enumerate_view_configuration_views(
+	             app.instance, app.system_id, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &view_count, nullptr),
 	         "xrEnumerateViewConfigurationViews(count)");
 	if (view_count != 2) {
 		fatal("diagnostic application currently requires PRIMARY_STEREO with two views");
@@ -1582,7 +1591,8 @@ create_swapchains(application &app)
 		swapchain.width = app.view_configuration[i].recommendedImageRectWidth;
 		swapchain.height = app.view_configuration[i].recommendedImageRectHeight;
 
-		XrSwapchainCreateInfoFoveationFB foveation_create_info = xr_struct<XrSwapchainCreateInfoFoveationFB>(XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB);
+		XrSwapchainCreateInfoFoveationFB foveation_create_info =
+		    xr_struct<XrSwapchainCreateInfoFoveationFB>(XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB);
 		foveation_create_info.flags = 0;
 
 		XrSwapchainCreateInfo create_info = xr_struct<XrSwapchainCreateInfo>(XR_TYPE_SWAPCHAIN_CREATE_INFO);
@@ -1612,7 +1622,8 @@ create_swapchains(application &app)
 		         "xrEnumerateSwapchainImages(list)");
 
 		if (app.submit_depth_layer) {
-			XrSwapchainCreateInfo depth_create_info = xr_struct<XrSwapchainCreateInfo>(XR_TYPE_SWAPCHAIN_CREATE_INFO);
+			XrSwapchainCreateInfo depth_create_info =
+			    xr_struct<XrSwapchainCreateInfo>(XR_TYPE_SWAPCHAIN_CREATE_INFO);
 			depth_create_info.usageFlags = XR_SWAPCHAIN_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 			depth_create_info.format = (int64_t)choose_depth_swapchain_format(app);
 			depth_create_info.sampleCount = 1;
@@ -1625,8 +1636,9 @@ create_swapchains(application &app)
 			         "xrCreateSwapchain(depth)");
 
 			uint32_t depth_image_count = 0;
-			check_xr(app.xr.enumerate_swapchain_images(swapchain.depth_handle, 0, &depth_image_count, nullptr),
-			         "xrEnumerateSwapchainImages(depth count)");
+			check_xr(
+			    app.xr.enumerate_swapchain_images(swapchain.depth_handle, 0, &depth_image_count, nullptr),
+			    "xrEnumerateSwapchainImages(depth count)");
 			swapchain.depth_images.resize(depth_image_count);
 			for (XrSwapchainImageMetalKHR &image : swapchain.depth_images) {
 				xr_reset(image, XR_TYPE_SWAPCHAIN_IMAGE_METAL_KHR);
@@ -1638,9 +1650,9 @@ create_swapchains(application &app)
 		} else {
 			MTLTextureDescriptor *depth_descriptor =
 			    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-			                                                      width:swapchain.width
-			                                                     height:swapchain.height
-			                                                  mipmapped:NO];
+			                                                       width:swapchain.width
+			                                                      height:swapchain.height
+			                                                   mipmapped:NO];
 			depth_descriptor.usage = MTLTextureUsageRenderTarget;
 			depth_descriptor.storageMode = MTLStorageModePrivate;
 			swapchain.depth_texture = [device newTextureWithDescriptor:depth_descriptor];
@@ -1665,10 +1677,9 @@ create_swapchains(application &app)
 	        app.swapchains[0].width, app.swapchains[0].height, (long long)app.color_format,
 	        app.submit_depth_layer ? ", XR_KHR_composition_layer_depth enabled" : "",
 	        app.gaze_foveation ? ", gaze-driven Metal VRR enabled" : "",
-	        app.standard_foveation
-	            ? (app.standard_eye_foveation ? ", FB/META runtime-owned eye foveation enabled"
-	                                         : ", FB fixed Metal foveation enabled")
-	            : "");
+	        app.standard_foveation ? (app.standard_eye_foveation ? ", FB/META runtime-owned eye foveation enabled"
+	                                                             : ", FB fixed Metal foveation enabled")
+	                               : "");
 }
 
 static XrPosef
@@ -1677,7 +1688,8 @@ head_pose_for_frame(application &app, XrTime predicted_display_time)
 	XrSpaceLocation location = xr_struct<XrSpaceLocation>(XR_TYPE_SPACE_LOCATION);
 	XrResult result = app.xr.locate_space(app.view_space, app.app_space, predicted_display_time, &location);
 	if (XR_SUCCEEDED(result) &&
-	    (location.locationFlags & (XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) ==
+	    (location.locationFlags &
+	     (XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) ==
 	        (XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
 		return location.pose;
 	}
@@ -1738,11 +1750,8 @@ median_sample(std::vector<float> values)
 }
 
 static bool
-fit_linear_calibration(const std::vector<float> &measured,
-                       bool yaw_axis,
-                       float *out_gain,
-                       float *out_offset,
-                       float *out_rms)
+fit_linear_calibration(
+    const std::vector<float> &measured, bool yaw_axis, float *out_gain, float *out_offset, float *out_rms)
 {
 	if (measured.size() != k_gaze_calibration_targets.size()) {
 		return false;
@@ -1754,8 +1763,8 @@ fit_linear_calibration(const std::vector<float> &measured,
 	double sxy = 0.0;
 	for (size_t i = 0; i < measured.size(); ++i) {
 		const double x = measured[i];
-		const double y = yaw_axis ? k_gaze_calibration_targets[i].yaw_deg
-		                          : k_gaze_calibration_targets[i].pitch_deg;
+		const double y =
+		    yaw_axis ? k_gaze_calibration_targets[i].yaw_deg : k_gaze_calibration_targets[i].pitch_deg;
 		sx += x;
 		sy += y;
 		sxx += x * x;
@@ -1771,8 +1780,8 @@ fit_linear_calibration(const std::vector<float> &measured,
 
 	double squared_error = 0.0;
 	for (size_t i = 0; i < measured.size(); ++i) {
-		const double expected = yaw_axis ? k_gaze_calibration_targets[i].yaw_deg
-		                                 : k_gaze_calibration_targets[i].pitch_deg;
+		const double expected =
+		    yaw_axis ? k_gaze_calibration_targets[i].yaw_deg : k_gaze_calibration_targets[i].pitch_deg;
 		const double error = gain * measured[i] + offset - expected;
 		squared_error += error * error;
 	}
@@ -1789,18 +1798,17 @@ write_gaze_calibration(float yaw_gain, float yaw_offset, float pitch_gain, float
 	    [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/monado/psvr2"];
 	NSError *error = nil;
 	if (![[NSFileManager defaultManager] createDirectoryAtPath:directory
-	                              withIntermediateDirectories:YES
-	                                               attributes:nil
-	                                                    error:&error]) {
+	                               withIntermediateDirectories:YES
+	                                                attributes:nil
+	                                                     error:&error]) {
 		fprintf(stderr, "psvr2-openxr-test: could not create gaze calibration directory: %s\n",
 		        [[error localizedDescription] UTF8String]);
 		return false;
 	}
 
 	NSString *path = [directory stringByAppendingPathComponent:@"gaze_user_calibration.txt"];
-	NSString *contents =
-	    [NSString stringWithFormat:@"PSVR2_GAZE_USER_CALIBRATION_V1 %.9g %.9g %.9g %.9g\n",
-	                               yaw_gain, yaw_offset, pitch_gain, pitch_offset];
+	NSString *contents = [NSString stringWithFormat:@"PSVR2_GAZE_USER_CALIBRATION_V1 %.9g %.9g %.9g %.9g\n",
+	                                                yaw_gain, yaw_offset, pitch_gain, pitch_offset];
 	if (![contents writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
 		fprintf(stderr, "psvr2-openxr-test: could not write gaze calibration: %s\n",
 		        [[error localizedDescription] UTF8String]);
@@ -1811,10 +1819,7 @@ write_gaze_calibration(float yaw_gain, float yaw_offset, float pitch_gain, float
 }
 
 static bool
-locate_gaze_relative_to_view(application &app,
-                             XrTime predicted_display_time,
-                             float *out_yaw_deg,
-                             float *out_pitch_deg)
+locate_gaze_relative_to_view(application &app, XrTime predicted_display_time, float *out_yaw_deg, float *out_pitch_deg)
 {
 	XrActiveActionSet active_set{app.gaze_action_set, XR_NULL_PATH};
 	XrActionsSyncInfo sync_info = xr_struct<XrActionsSyncInfo>(XR_TYPE_ACTIONS_SYNC_INFO);
@@ -1843,12 +1848,10 @@ locate_gaze_relative_to_view(application &app,
 		return false;
 	}
 
-	const simd_float3 direction =
-	    rotate_vector(location.pose.orientation, make_float3(0.0f, 0.0f, -1.0f));
+	const simd_float3 direction = rotate_vector(location.pose.orientation, make_float3(0.0f, 0.0f, -1.0f));
 	*out_yaw_deg = atan2f(direction.x, -direction.z) * 180.0f / (float)M_PI;
 	*out_pitch_deg =
-	    atan2f(direction.y, sqrtf(direction.x * direction.x + direction.z * direction.z)) *
-	    180.0f / (float)M_PI;
+	    atan2f(direction.y, sqrtf(direction.x * direction.x + direction.z * direction.z)) * 180.0f / (float)M_PI;
 	return true;
 }
 
@@ -1875,24 +1878,20 @@ finish_gaze_calibration(application &app)
 	 * transform so rerunning calibration refines rather than double-applies it.
 	 */
 	const float yaw_gain = residual_yaw_gain * state.prior_yaw_gain;
-	const float yaw_offset =
-	    residual_yaw_gain * state.prior_yaw_offset_deg + residual_yaw_offset;
+	const float yaw_offset = residual_yaw_gain * state.prior_yaw_offset_deg + residual_yaw_offset;
 	const float pitch_gain = residual_pitch_gain * state.prior_pitch_gain;
-	const float pitch_offset =
-	    residual_pitch_gain * state.prior_pitch_offset_deg + residual_pitch_offset;
+	const float pitch_offset = residual_pitch_gain * state.prior_pitch_offset_deg + residual_pitch_offset;
 
 	fprintf(stderr,
 	        "\npsvr2-openxr-test: gaze calibration complete\n"
 	        "  residual fit: yaw %.5fx %+0.3f deg (RMS %.3f deg), "
 	        "pitch %.5fx %+0.3f deg (RMS %.3f deg)\n"
 	        "  saved absolute calibration: yaw %.5fx %+0.3f deg, pitch %.5fx %+0.3f deg\n",
-	        residual_yaw_gain, residual_yaw_offset, yaw_rms,
-	        residual_pitch_gain, residual_pitch_offset, pitch_rms,
+	        residual_yaw_gain, residual_yaw_offset, yaw_rms, residual_pitch_gain, residual_pitch_offset, pitch_rms,
 	        yaw_gain, yaw_offset, pitch_gain, pitch_offset);
 
-	if (!isfinite(yaw_gain) || yaw_gain < 0.5f || yaw_gain > 1.5f ||
-	    !isfinite(pitch_gain) || pitch_gain < 0.5f || pitch_gain > 1.5f ||
-	    fabsf(yaw_offset) > 20.0f || fabsf(pitch_offset) > 20.0f) {
+	if (!isfinite(yaw_gain) || yaw_gain < 0.5f || yaw_gain > 1.5f || !isfinite(pitch_gain) || pitch_gain < 0.5f ||
+	    pitch_gain > 1.5f || fabsf(yaw_offset) > 20.0f || fabsf(pitch_offset) > 20.0f) {
 		fatal("calibration solution is outside safety bounds; not saving");
 	}
 	if (!write_gaze_calibration(yaw_gain, yaw_offset, pitch_gain, pitch_offset)) {
@@ -1938,8 +1937,7 @@ update_gaze_calibration(application &app, XrTime predicted_display_time, const X
 
 	const float yaw = target.yaw_deg * (float)M_PI / 180.0f;
 	const float pitch = target.pitch_deg * (float)M_PI / 180.0f;
-	const simd_float3 local_direction =
-	    make_float3(sinf(yaw) * cosf(pitch), sinf(pitch), -cosf(yaw) * cosf(pitch));
+	const simd_float3 local_direction = make_float3(sinf(yaw) * cosf(pitch), sinf(pitch), -cosf(yaw) * cosf(pitch));
 	const simd_float3 world_direction = rotate_vector(head_pose.orientation, local_direction);
 	const simd_float3 position = xr_position(head_pose.position) + world_direction * 2.0f;
 	const simd_float3 right = rotate_vector(head_pose.orientation, make_float3(1.0f, 0.0f, 0.0f));
@@ -1951,8 +1949,7 @@ update_gaze_calibration(application &app, XrTime predicted_display_time, const X
 
 	if (elapsed >= settle_ns + capture_ns) {
 		if (state.current_yaw_samples.size() < 30 || state.current_pitch_samples.size() < 30) {
-			fprintf(stderr,
-			        "psvr2-openxr-test: insufficient valid gaze samples (%zu); repeating target\n",
+			fprintf(stderr, "psvr2-openxr-test: insufficient valid gaze samples (%zu); repeating target\n",
 			        state.current_yaw_samples.size());
 			state.target_started = 0;
 			return;
@@ -2024,17 +2021,17 @@ update_standard_foveation(application &app, bool verbose)
 	for (uint32_t i = 0; i < app.swapchains.size(); ++i) {
 		view_swapchain &swapchain = app.swapchains[i];
 
-		XrSwapchainStateFoveationFB update = xr_struct<XrSwapchainStateFoveationFB>(XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB);
+		XrSwapchainStateFoveationFB update =
+		    xr_struct<XrSwapchainStateFoveationFB>(XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB);
 		update.flags = 0;
 		update.profile = app.standard_foveation_profile;
-		check_xr(app.xr.update_swapchain_fb(
-		             swapchain.handle,
-		             reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&update)),
+		check_xr(app.xr.update_swapchain_fb(swapchain.handle,
+		                                    reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&update)),
 		         "xrUpdateSwapchainFB(foveation)");
 
-		XrFoveationMetalStateMNDX native = xr_struct<XrFoveationMetalStateMNDX>(XR_TYPE_FOVEATION_METAL_STATE_MNDX);
-		check_xr(app.xr.get_foveation_metal_state_mndx(
-		             swapchain.handle, i, 0, &native),
+		XrFoveationMetalStateMNDX native =
+		    xr_struct<XrFoveationMetalStateMNDX>(XR_TYPE_FOVEATION_METAL_STATE_MNDX);
+		check_xr(app.xr.get_foveation_metal_state_mndx(swapchain.handle, i, 0, &native),
 		         "xrGetFoveationMetalStateMNDX");
 
 		swapchain.standard_foveation_rate_map =
@@ -2050,23 +2047,22 @@ update_standard_foveation(application &app, bool verbose)
 		if (verbose) {
 			fprintf(stderr,
 			        "psvr2-openxr-test: FB Metal eye=%u revision=%u logical=%ux%u physical=%ux%u map=%p\n",
-			        i, native.revision, swapchain.width, swapchain.height,
-			        native.physicalWidth, native.physicalHeight,
-			        native.rasterizationRateMap);
+			        i, native.revision, swapchain.width, swapchain.height, native.physicalWidth,
+			        native.physicalHeight, native.rasterizationRateMap);
 		}
 	}
 
 	app.standard_foveation_frame_count++;
 	if (app.standard_eye_foveation && app.xr.get_foveation_eye_tracked_state_meta != nullptr &&
 	    (verbose || (app.standard_foveation_frame_count % 120) == 1)) {
-		XrFoveationEyeTrackedStateMETA state = xr_struct<XrFoveationEyeTrackedStateMETA>(XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META);
+		XrFoveationEyeTrackedStateMETA state =
+		    xr_struct<XrFoveationEyeTrackedStateMETA>(XR_TYPE_FOVEATION_EYE_TRACKED_STATE_META);
 		check_xr(app.xr.get_foveation_eye_tracked_state_meta(app.session, &state),
 		         "xrGetFoveationEyeTrackedStateMETA");
 		fprintf(stderr,
 		        "psvr2-openxr-test: META eye foveation valid=%d left=(%+.3f,%+.3f) right=(%+.3f,%+.3f)\n",
-		        (state.flags & XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META) != 0,
-		        state.foveationCenter[0].x, state.foveationCenter[0].y,
-		        state.foveationCenter[1].x, state.foveationCenter[1].y);
+		        (state.flags & XR_FOVEATION_EYE_TRACKED_STATE_VALID_BIT_META) != 0, state.foveationCenter[0].x,
+		        state.foveationCenter[0].y, state.foveationCenter[1].x, state.foveationCenter[1].y);
 	}
 }
 
@@ -2077,10 +2073,12 @@ create_standard_foveation_resources(application &app)
 		return;
 	}
 
-	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info = xr_struct<XrFoveationEyeTrackedProfileCreateInfoMETA>(XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META);
+	XrFoveationEyeTrackedProfileCreateInfoMETA eye_info = xr_struct<XrFoveationEyeTrackedProfileCreateInfoMETA>(
+	    XR_TYPE_FOVEATION_EYE_TRACKED_PROFILE_CREATE_INFO_META);
 	eye_info.flags = 0;
 
-	XrFoveationLevelProfileCreateInfoFB level_info = xr_struct<XrFoveationLevelProfileCreateInfoFB>(XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB);
+	XrFoveationLevelProfileCreateInfoFB level_info =
+	    xr_struct<XrFoveationLevelProfileCreateInfoFB>(XR_TYPE_FOVEATION_LEVEL_PROFILE_CREATE_INFO_FB);
 	level_info.level = xr_fb_foveation_level_from_index(app.foveation_profile_index);
 	level_info.verticalOffset = 0.0f;
 	level_info.dynamic = XR_FOVEATION_DYNAMIC_DISABLED_FB;
@@ -2088,19 +2086,17 @@ create_standard_foveation_resources(application &app)
 		level_info.next = &eye_info;
 	}
 
-	XrFoveationProfileCreateInfoFB create_info = xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
+	XrFoveationProfileCreateInfoFB create_info =
+	    xr_struct<XrFoveationProfileCreateInfoFB>(XR_TYPE_FOVEATION_PROFILE_CREATE_INFO_FB);
 	create_info.next = &level_info;
-	check_xr(app.xr.create_foveation_profile_fb(
-	             app.session, &create_info, &app.standard_foveation_profile),
+	check_xr(app.xr.create_foveation_profile_fb(app.session, &create_info, &app.standard_foveation_profile),
 	         "xrCreateFoveationProfileFB");
 
-	const struct u_foveation_profile *named =
-	    u_foveation_profile_get(app.foveation_profile_index);
+	const struct u_foveation_profile *named = u_foveation_profile_get(app.foveation_profile_index);
 	fprintf(stderr,
 	        "psvr2-openxr-test: standard FB foveation profile=%s level=%d%s; "
 	        "XR_EXT_eye_gaze_interaction %s\n",
-	        named != nullptr ? named->name : "unknown",
-	        (int)level_info.level,
+	        named != nullptr ? named->name : "unknown", (int)level_info.level,
 	        app.standard_eye_foveation ? " + META eye-tracked" : "",
 	        app.test_gaze ? "enabled separately" : "NOT enabled");
 
@@ -2137,12 +2133,14 @@ apply_fb_sparse_alternate(application &app)
 	const bool verbose = app.fb_sparse_frame < 12 || (app.fb_sparse_frame % 240) < 2;
 	for (uint32_t i = 0; i < app.swapchains.size(); ++i) {
 		view_swapchain &swapchain = app.swapchains[i];
-		XrSwapchainStateFoveationFB update = xr_struct<XrSwapchainStateFoveationFB>(XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB);
+		XrSwapchainStateFoveationFB update =
+		    xr_struct<XrSwapchainStateFoveationFB>(XR_TYPE_SWAPCHAIN_STATE_FOVEATION_FB);
 		update.profile = app.fb_sparse_alt_profile;
 		check_xr(app.xr.update_swapchain_fb(swapchain.handle,
 		                                    reinterpret_cast<const XrSwapchainStateBaseHeaderFB *>(&update)),
 		         "xrUpdateSwapchainFB(sparse alternate)");
-		XrFoveationMetalStateMNDX native = xr_struct<XrFoveationMetalStateMNDX>(XR_TYPE_FOVEATION_METAL_STATE_MNDX);
+		XrFoveationMetalStateMNDX native =
+		    xr_struct<XrFoveationMetalStateMNDX>(XR_TYPE_FOVEATION_METAL_STATE_MNDX);
 		check_xr(app.xr.get_foveation_metal_state_mndx(swapchain.handle, i, 0, &native),
 		         "xrGetFoveationMetalStateMNDX(sparse alternate)");
 		if (verbose) {
@@ -2151,17 +2149,15 @@ apply_fb_sparse_alternate(application &app)
 			        "re-submitting image rendered with revision=%u physical=%ux%u\n",
 			        (unsigned long long)app.fb_sparse_frame, i, native.revision, native.physicalWidth,
 			        native.physicalHeight, swapchain.standard_foveation_revision,
-			        swapchain.standard_foveation_physical_width, swapchain.standard_foveation_physical_height);
+			        swapchain.standard_foveation_physical_width,
+			        swapchain.standard_foveation_physical_height);
 		}
 	}
 }
 
 static bool
-update_gaze_foveation_map(application &app,
-                          size_t eye,
-                          XrTime predicted_display_time,
-                          float gaze_yaw_deg,
-                          float gaze_pitch_deg)
+update_gaze_foveation_map(
+    application &app, size_t eye, XrTime predicted_display_time, float gaze_yaw_deg, float gaze_pitch_deg)
 {
 	if (!app.gaze_foveation || eye >= app.swapchains.size()) {
 		return false;
@@ -2207,8 +2203,8 @@ update_gaze_foveation_map(application &app,
 			zone_y = swapchain.foveation_zone_y;
 		}
 	}
-	if (swapchain.foveation_rate_map != nil &&
-	    zone_x == swapchain.foveation_zone_x && zone_y == swapchain.foveation_zone_y &&
+	if (swapchain.foveation_rate_map != nil && zone_x == swapchain.foveation_zone_x &&
+	    zone_y == swapchain.foveation_zone_y &&
 	    swapchain.foveation_profile_revision == app.foveation_profile_revision) {
 		return true;
 	}
@@ -2220,13 +2216,8 @@ update_gaze_foveation_map(application &app,
 
 	const struct u_foveation_profile *active_profile = u_foveation_profile_get(app.foveation_profile_index);
 	struct m_metal_foveation_map built_map = {};
-	if (!m_metal_foveation_map_build((void *)device,
-	                                  swapchain.width,
-	                                  swapchain.height,
-	                                  zone_x,
-	                                  zone_y,
-	                                  active_profile,
-	                                  &built_map)) {
+	if (!m_metal_foveation_map_build((void *)device, swapchain.width, swapchain.height, zone_x, zone_y,
+	                                 active_profile, &built_map)) {
 		fatal("could not create Metal gaze foveation rasterization rate map");
 	}
 
@@ -2235,24 +2226,23 @@ update_gaze_foveation_map(application &app,
 
 	id<MTLTexture> color_texture = swapchain.foveation_color_texture;
 	id<MTLTexture> depth_texture = swapchain.foveation_depth_texture;
-	const bool size_changed =
-	    swapchain.foveation_physical_width != physical_size.width ||
-	    swapchain.foveation_physical_height != physical_size.height;
+	const bool size_changed = swapchain.foveation_physical_width != physical_size.width ||
+	                          swapchain.foveation_physical_height != physical_size.height;
 	if (size_changed || color_texture == nil || depth_texture == nil) {
 		MTLTextureDescriptor *color_desc =
 		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:app.color_format
-		                                                     width:physical_size.width
-		                                                    height:physical_size.height
-		                                                 mipmapped:NO];
+		                                                       width:physical_size.width
+		                                                      height:physical_size.height
+		                                                   mipmapped:NO];
 		color_desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
 		color_desc.storageMode = MTLStorageModePrivate;
 		color_texture = [device newTextureWithDescriptor:color_desc];
 
 		MTLTextureDescriptor *depth_desc =
 		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float
-		                                                     width:physical_size.width
-		                                                    height:physical_size.height
-		                                                 mipmapped:NO];
+		                                                       width:physical_size.width
+		                                                      height:physical_size.height
+		                                                   mipmapped:NO];
 		depth_desc.usage = MTLTextureUsageRenderTarget;
 		depth_desc.storageMode = MTLStorageModePrivate;
 		depth_texture = [device newTextureWithDescriptor:depth_desc];
@@ -2292,10 +2282,8 @@ update_gaze_foveation_map(application &app,
 	fprintf(stderr,
 	        "psvr2-openxr-test: eye %zu foveation gaze=(%+.1f,%+.1f)deg zone=(%d,%d) "
 	        "physical=%zux%zu %.1f%% of full pixels profile=%s\n",
-	        eye, gaze_yaw_deg, gaze_pitch_deg, zone_x, zone_y,
-	        physical_size.width, physical_size.height,
-	        100.0 * physical_pixels / logical_pixels,
-	        u_foveation_profile_get(app.foveation_profile_index)->name);
+	        eye, gaze_yaw_deg, gaze_pitch_deg, zone_x, zone_y, physical_size.width, physical_size.height,
+	        100.0 * physical_pixels / logical_pixels, u_foveation_profile_get(app.foveation_profile_index)->name);
 	return true;
 }
 
@@ -2315,15 +2303,15 @@ encode_gaze_foveation_resolve(application &app,
 	resolve_pass.colorAttachments[0].loadAction = MTLLoadActionDontCare;
 	resolve_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
 
-	id<MTLRenderCommandEncoder> resolve_encoder =
-	    [command_buffer renderCommandEncoderWithDescriptor:resolve_pass];
+	id<MTLRenderCommandEncoder> resolve_encoder = [command_buffer renderCommandEncoderWithDescriptor:resolve_pass];
 	if (resolve_encoder == nil) {
 		fatal("could not create gaze foveation resolve encoder");
 	}
 	[resolve_encoder setRenderPipelineState:app.renderer.foveation_resolve_pipeline];
 	[resolve_encoder setFragmentBuffer:swapchain.foveation_rate_data offset:0 atIndex:0];
 	[resolve_encoder setFragmentTexture:swapchain.foveation_color_texture atIndex:0];
-	[resolve_encoder setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
+	[resolve_encoder
+	    setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
 	[resolve_encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
 	[resolve_encoder endEncoding];
 }
@@ -2348,7 +2336,8 @@ append_gaze_marker(application &app, XrTime predicted_display_time)
 	get_info.action = app.gaze_action;
 	get_info.subactionPath = app.gaze_subaction_path;
 	XrActionStatePose pose_state = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
-	if (XR_FAILED(app.xr.get_action_state_pose(app.session, &get_info, &pose_state)) || pose_state.isActive != XR_TRUE) {
+	if (XR_FAILED(app.xr.get_action_state_pose(app.session, &get_info, &pose_state)) ||
+	    pose_state.isActive != XR_TRUE) {
 		app.gaze_frame_count++;
 		if ((app.gaze_frame_count % 120) == 0) {
 			fprintf(stderr, "psvr2-openxr-test: gaze action inactive\n");
@@ -2371,13 +2360,10 @@ append_gaze_marker(application &app, XrTime predicted_display_time)
 
 	app.gaze_valid_count++;
 	const simd_float3 origin = xr_position(location.pose.position);
-	const simd_float3 direction =
-	    rotate_vector(location.pose.orientation, make_float3(0.0f, 0.0f, -1.0f));
+	const simd_float3 direction = rotate_vector(location.pose.orientation, make_float3(0.0f, 0.0f, -1.0f));
 	const simd_float3 target = origin + direction * 2.0f;
-	const simd_float3 right =
-	    rotate_vector(location.pose.orientation, make_float3(1.0f, 0.0f, 0.0f));
-	const simd_float3 up =
-	    rotate_vector(location.pose.orientation, make_float3(0.0f, 1.0f, 0.0f));
+	const simd_float3 right = rotate_vector(location.pose.orientation, make_float3(1.0f, 0.0f, 0.0f));
+	const simd_float3 up = rotate_vector(location.pose.orientation, make_float3(0.0f, 1.0f, 0.0f));
 	const simd_float3 back = -direction;
 	const simd_float4 color = make_float4(1.0f, 0.95f, 0.05f, 1.0f);
 
@@ -2385,8 +2371,7 @@ append_gaze_marker(application &app, XrTime predicted_display_time)
 	    {basis_model(target, right, up, back, make_float3(0.025f, 0.025f, 0.025f)), color});
 
 	if ((app.gaze_valid_count % 120) == 1) {
-		fprintf(stderr,
-		        "psvr2-openxr-test: gaze valid dir=(%+.3f,%+.3f,%+.3f) target2m=(%+.2f,%+.2f,%+.2f)\n",
+		fprintf(stderr, "psvr2-openxr-test: gaze valid dir=(%+.3f,%+.3f,%+.3f) target2m=(%+.2f,%+.2f,%+.2f)\n",
 		        direction.x, direction.y, direction.z, target.x, target.y, target.z);
 	}
 }
@@ -2424,16 +2409,18 @@ render_views(application &app, XrTime predicted_display_time)
 	std::vector<uint32_t> image_indices(app.swapchains.size(), 0);
 	std::vector<uint32_t> depth_image_indices(app.swapchains.size(), 0);
 	for (size_t i = 0; i < app.swapchains.size(); ++i) {
-		XrSwapchainImageAcquireInfo acquire_info = xr_struct<XrSwapchainImageAcquireInfo>(XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO);
+		XrSwapchainImageAcquireInfo acquire_info =
+		    xr_struct<XrSwapchainImageAcquireInfo>(XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO);
 		check_xr(app.xr.acquire_swapchain_image(app.swapchains[i].handle, &acquire_info, &image_indices[i]),
 		         "xrAcquireSwapchainImage");
-		XrSwapchainImageWaitInfo wait_info = xr_struct<XrSwapchainImageWaitInfo>(XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO);
+		XrSwapchainImageWaitInfo wait_info =
+		    xr_struct<XrSwapchainImageWaitInfo>(XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO);
 		wait_info.timeout = XR_INFINITE_DURATION;
 		check_xr(app.xr.wait_swapchain_image(app.swapchains[i].handle, &wait_info), "xrWaitSwapchainImage");
 
 		if (app.submit_depth_layer) {
 			check_xr(app.xr.acquire_swapchain_image(app.swapchains[i].depth_handle, &acquire_info,
-			                                         &depth_image_indices[i]),
+			                                        &depth_image_indices[i]),
 			         "xrAcquireSwapchainImage(depth)");
 			check_xr(app.xr.wait_swapchain_image(app.swapchains[i].depth_handle, &wait_info),
 			         "xrWaitSwapchainImage(depth)");
@@ -2445,8 +2432,7 @@ render_views(application &app, XrTime predicted_display_time)
 	if (app.gaze_foveation) {
 		float current_yaw_deg = 0.0f;
 		float current_pitch_deg = 0.0f;
-		if (locate_gaze_relative_to_view(
-		        app, predicted_display_time, &current_yaw_deg, &current_pitch_deg)) {
+		if (locate_gaze_relative_to_view(app, predicted_display_time, &current_yaw_deg, &current_pitch_deg)) {
 			app.last_foveation_yaw_deg = current_yaw_deg;
 			app.last_foveation_pitch_deg = current_pitch_deg;
 			app.last_foveation_gaze_valid = true;
@@ -2481,8 +2467,8 @@ render_views(application &app, XrTime predicted_display_time)
 		}
 
 		if (app.gaze_foveation) {
-			(void)update_gaze_foveation_map(
-			    app, i, predicted_display_time, foveation_yaw_deg, foveation_pitch_deg);
+			(void)update_gaze_foveation_map(app, i, predicted_display_time, foveation_yaw_deg,
+			                                foveation_pitch_deg);
 		}
 
 		MTLRenderPassDescriptor *render_pass = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -2490,9 +2476,9 @@ render_views(application &app, XrTime predicted_display_time)
 		    app.gaze_foveation ? swapchain.foveation_color_texture : color_texture;
 		render_pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 		render_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-		render_pass.colorAttachments[0].clearColor =
-		    app.submit_passthrough ? MTLClearColorMake(0.0, 0.0, 0.0, 0.0)
-		                           : MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
+		render_pass.colorAttachments[0].clearColor = app.submit_passthrough
+		                                                 ? MTLClearColorMake(0.0, 0.0, 0.0, 0.0)
+		                                                 : MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
 		id<MTLTexture> depth_texture =
 		    app.gaze_foveation ? swapchain.foveation_depth_texture : swapchain.depth_texture;
 		if (app.submit_depth_layer) {
@@ -2525,7 +2511,8 @@ render_views(application &app, XrTime predicted_display_time)
 		[encoder setRenderPipelineState:app.renderer.pipeline];
 		[encoder setDepthStencilState:app.renderer.depth_state];
 		[encoder setCullMode:MTLCullModeNone];
-		[encoder setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
+		[encoder
+		    setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
 		[encoder setVertexBuffer:app.renderer.cube_vertex_buffer offset:0 atIndex:0];
 		[encoder setVertexBuffer:app.renderer.instance_buffer offset:0 atIndex:1];
 		const matrix_float4x4 projection = projection_matrix(app.views[i].fov, 0.05f, 100.0f);
@@ -2545,27 +2532,28 @@ render_views(application &app, XrTime predicted_display_time)
 	if (app.standard_foveation) {
 		const char *timing_label = app.standard_eye_foveation ? "fb-meta-eye-foveated" : "fb-foveated";
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-			record_gpu_timing(g_gpu_timing_foveated_standard, timing_label, completed);
+		  record_gpu_timing(g_gpu_timing_foveated_standard, timing_label, completed);
 		}];
 		[command_buffer commit];
 	} else if (app.gaze_foveation) {
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-			record_gpu_timing(g_gpu_timing_foveated_scene, "foveated-scene", completed);
+		  record_gpu_timing(g_gpu_timing_foveated_scene, "foveated-scene", completed);
 		}];
 		[resolve_command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-			record_gpu_timing(g_gpu_timing_foveated_resolve, "foveated-resolve", completed);
+		  record_gpu_timing(g_gpu_timing_foveated_resolve, "foveated-resolve", completed);
 		}];
 		[command_buffer commit];
 		[resolve_command_buffer commit];
 	} else {
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed) {
-			record_gpu_timing(g_gpu_timing_normal, "normal", completed);
+		  record_gpu_timing(g_gpu_timing_normal, "normal", completed);
 		}];
 		[command_buffer commit];
 	}
 
 	for (view_swapchain &swapchain : app.swapchains) {
-		XrSwapchainImageReleaseInfo release_info = xr_struct<XrSwapchainImageReleaseInfo>(XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO);
+		XrSwapchainImageReleaseInfo release_info =
+		    xr_struct<XrSwapchainImageReleaseInfo>(XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO);
 		check_xr(app.xr.release_swapchain_image(swapchain.handle, &release_info), "xrReleaseSwapchainImage");
 		if (app.submit_depth_layer) {
 			check_xr(app.xr.release_swapchain_image(swapchain.depth_handle, &release_info),
@@ -2585,7 +2573,8 @@ poll_events(application &app)
 			    reinterpret_cast<const XrEventDataSessionStateChanged *>(&event);
 			app.session_state = state_changed->state;
 			if (state_changed->state == XR_SESSION_STATE_READY && !app.session_running) {
-				XrSessionBeginInfo begin_info = xr_struct<XrSessionBeginInfo>(XR_TYPE_SESSION_BEGIN_INFO);
+				XrSessionBeginInfo begin_info =
+				    xr_struct<XrSessionBeginInfo>(XR_TYPE_SESSION_BEGIN_INFO);
 				begin_info.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 				check_xr(app.xr.begin_session(app.session, &begin_info), "xrBeginSession");
 				app.session_running = true;
@@ -2617,7 +2606,8 @@ render_frame(application &app)
 	check_xr(app.xr.begin_frame(app.session, &begin_info), "xrBeginFrame");
 
 	bool submit_projection = false;
-	XrCompositionLayerProjection layer = xr_struct<XrCompositionLayerProjection>(XR_TYPE_COMPOSITION_LAYER_PROJECTION);
+	XrCompositionLayerProjection layer =
+	    xr_struct<XrCompositionLayerProjection>(XR_TYPE_COMPOSITION_LAYER_PROJECTION);
 	if (frame_state.shouldRender == XR_TRUE) {
 		XrViewLocateInfo locate_info = xr_struct<XrViewLocateInfo>(XR_TYPE_VIEW_LOCATE_INFO);
 		locate_info.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -2625,10 +2615,11 @@ render_frame(application &app)
 		locate_info.space = app.app_space;
 		XrViewState view_state = xr_struct<XrViewState>(XR_TYPE_VIEW_STATE);
 		uint32_t view_count = 0;
-		check_xr(app.xr.locate_views(app.session, &locate_info, &view_state, (uint32_t)app.views.size(), &view_count,
-		                             app.views.data()),
+		check_xr(app.xr.locate_views(app.session, &locate_info, &view_state, (uint32_t)app.views.size(),
+		                             &view_count, app.views.data()),
 		         "xrLocateViews");
-		const XrViewStateFlags required = XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
+		const XrViewStateFlags required =
+		    XR_VIEW_STATE_POSITION_VALID_BIT | XR_VIEW_STATE_ORIENTATION_VALID_BIT;
 		if (view_count == app.views.size() && (view_state.viewStateFlags & required) == required) {
 			const bool sparse_frame =
 			    app.fb_sparse_check && app.fb_sparse_have_image && (app.fb_sparse_frame++ % 2) == 1;
@@ -2652,7 +2643,7 @@ render_frame(application &app)
 				projection_view.subImage.swapchain = app.swapchains[i].handle;
 				projection_view.subImage.imageRect.offset = {0, 0};
 				projection_view.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
-				                                            (int32_t)app.swapchains[i].height};
+				                                             (int32_t)app.swapchains[i].height};
 				projection_view.subImage.imageArrayIndex = 0;
 
 				if (app.submit_depth_layer) {
@@ -2661,7 +2652,7 @@ render_frame(application &app)
 					depth_info.subImage.swapchain = app.swapchains[i].depth_handle;
 					depth_info.subImage.imageRect.offset = {0, 0};
 					depth_info.subImage.imageRect.extent = {(int32_t)app.swapchains[i].width,
-					                                          (int32_t)app.swapchains[i].height};
+					                                        (int32_t)app.swapchains[i].height};
 					depth_info.subImage.imageArrayIndex = 0;
 					depth_info.minDepth = 0.0f;
 					depth_info.maxDepth = 1.0f;
@@ -2680,7 +2671,8 @@ render_frame(application &app)
 		}
 	}
 
-	XrCompositionLayerPassthroughFB passthrough_layer = xr_struct<XrCompositionLayerPassthroughFB>(XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB);
+	XrCompositionLayerPassthroughFB passthrough_layer =
+	    xr_struct<XrCompositionLayerPassthroughFB>(XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB);
 	passthrough_layer.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 	passthrough_layer.space = XR_NULL_HANDLE;
 	passthrough_layer.layerHandle = app.passthrough_layer;
@@ -2741,7 +2733,8 @@ initialize_terminal_controls(application &app)
 	}
 	app.terminal_input.active = true;
 	fprintf(stderr,
-	        "psvr2-openxr-test: live foveation controls: 1=reference 2=strong 3=aggressive 4=aggressive-plus 5=near-extreme 6=extreme, [ ]=step, r=reference\n");
+	        "psvr2-openxr-test: live foveation controls: 1=reference 2=strong 3=aggressive 4=aggressive-plus "
+	        "5=near-extreme 6=extreme, [ ]=step, r=reference\n");
 }
 
 static void
@@ -2785,8 +2778,7 @@ cleanup(application &app)
 	restore_terminal_controls(app);
 	app.renderer.shutdown();
 
-	if (app.standard_foveation_profile != XR_NULL_HANDLE &&
-	    app.xr.destroy_foveation_profile_fb != nullptr) {
+	if (app.standard_foveation_profile != XR_NULL_HANDLE && app.xr.destroy_foveation_profile_fb != nullptr) {
 		app.xr.destroy_foveation_profile_fb(app.standard_foveation_profile);
 		app.standard_foveation_profile = XR_NULL_HANDLE;
 	}
@@ -2910,36 +2902,43 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--foveation-profile") == 0 && i + 1 < argc) {
 			foveation_profile_index = u_foveation_profile_find(argv[++i]);
 			if (foveation_profile_index < 0) {
-				fprintf(stderr, "Unknown foveation profile: %s (expected reference, strong, aggressive, aggressive-plus, near-extreme, or extreme)\n", argv[i]);
+				fprintf(stderr,
+				        "Unknown foveation profile: %s (expected reference, strong, aggressive, "
+				        "aggressive-plus, near-extreme, or extreme)\n",
+				        argv[i]);
 				return EXIT_FAILURE;
 			}
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-			fprintf(stderr,
-			        "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
-			        "[--passthrough|--passthrough-only] [--generic-controller] "
-			        "[--gaze|--gaze-calibrate|--gaze-foveation] "
-			        "[--fb-foveation|--fb-eye-foveation] [--fb-foveation-sparse-check] "
-			        "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
-			        "  --depth-layer submits the rendered Depth32Float attachment through "
-			        "XR_KHR_composition_layer_depth.\n"
-			        "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
-			        "  --passthrough-only submits only XR_FB_passthrough.\n"
-			        "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action state.\n"
-			        "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
-			        "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
-			        "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve pass.\n"
-			        "  --fb-foveation uses XR_FB_foveation with the Metal transport and compositor remap.\n"
-			        "  --fb-eye-foveation adds XR_META_foveation_eye_tracked; gaze stays runtime-owned and "
-			        "XR_EXT_eye_gaze_interaction is not enabled.\n"
-			        "  --fb-foveation-sparse-check alternates rendered frames with frames that change the FB "
-			        "state but re-submit the previous images unrendered.\n"
-			        "  --foveation-profile selects the starting profile; FB maps reference/strong/aggressive+ "
-			        "to LOW/MEDIUM/HIGH.\n"
-			        "  While foveation is running in a terminal: 1-6 select profiles, [ and ] step, r restores reference.\n"
-			        "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
-			        "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
-			        "PSVR2_GAZE_STREAMS=0 explicitly disables PS VR2 gaze capability.\n",
-			        argv[0]);
+			fprintf(
+			    stderr,
+			    "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
+			    "[--passthrough|--passthrough-only] [--generic-controller] "
+			    "[--gaze|--gaze-calibrate|--gaze-foveation] "
+			    "[--fb-foveation|--fb-eye-foveation] [--fb-foveation-sparse-check] "
+			    "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
+			    "  --depth-layer submits the rendered Depth32Float attachment through "
+			    "XR_KHR_composition_layer_depth.\n"
+			    "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
+			    "  --passthrough-only submits only XR_FB_passthrough.\n"
+			    "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action "
+			    "state.\n"
+			    "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
+			    "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
+			    "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve "
+			    "pass.\n"
+			    "  --fb-foveation uses XR_FB_foveation with the Metal transport and compositor remap.\n"
+			    "  --fb-eye-foveation adds XR_META_foveation_eye_tracked; gaze stays runtime-owned and "
+			    "XR_EXT_eye_gaze_interaction is not enabled.\n"
+			    "  --fb-foveation-sparse-check alternates rendered frames with frames that change the FB "
+			    "state but re-submit the previous images unrendered.\n"
+			    "  --foveation-profile selects the starting profile; FB maps reference/strong/aggressive+ "
+			    "to LOW/MEDIUM/HIGH.\n"
+			    "  While foveation is running in a terminal: 1-6 select profiles, [ and ] step, r restores "
+			    "reference.\n"
+			    "Environment: XR_RUNTIME_JSON selects the runtime; PSVR2_OPENXR_LOADER selects the loader. "
+			    "PSVR2_CAMERA_STREAMS=1 enables the PS VR2 BC4 camera source; "
+			    "PSVR2_GAZE_STREAMS=0 explicitly disables PS VR2 gaze capability.\n",
+			    argv[0]);
 			return EXIT_SUCCESS;
 		} else {
 			fprintf(stderr, "Unknown argument: %s\n", argv[i]);
@@ -2975,8 +2974,9 @@ run(int argc, char **argv)
 		const struct u_foveation_profile *profile = u_foveation_profile_get(foveation_profile_index);
 		fprintf(stderr, "psvr2-openxr-test: starting foveation profile %s (middle %.2f, peripheral %.2f)%s\n",
 		        profile->name, profile->middle_rate, profile->peripheral_rate,
-		        standard_eye_foveation ? " with runtime-owned META gaze" :
-		        standard_foveation ? " through standard FB policy" : "");
+		        standard_eye_foveation ? " with runtime-owned META gaze"
+		        : standard_foveation   ? " through standard FB policy"
+		                               : "");
 	}
 	app.loader = open_openxr_loader(loader_path);
 	fprintf(stderr, "psvr2-openxr-test: OpenXR loader %s\n", app.loader.path.c_str());

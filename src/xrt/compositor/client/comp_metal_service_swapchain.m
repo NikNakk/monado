@@ -102,10 +102,8 @@ metal_service_can_use_iosurface(const struct xrt_swapchain_create_info *info)
 
 	switch ((MTLPixelFormat)info->format) {
 	case MTLPixelFormatBGRA8Unorm:
-	case MTLPixelFormatBGRA8Unorm_sRGB:
-		return true;
-	default:
-		return false;
+	case MTLPixelFormatBGRA8Unorm_sRGB: return true;
+	default: return false;
 	}
 }
 
@@ -198,24 +196,21 @@ metal_service_swapchain_get_foveation_state(struct xrt_swapchain_metal *xscm,
 }
 
 static xrt_result_t
-metal_service_swapchain_get_packed_foveation_state(
-    struct xrt_swapchain_metal *xscm,
-    const struct xrt_metal_foveation_view_layout *views,
-    uint32_t view_count,
-    uint32_t array_layer,
-    struct xrt_metal_foveation_state *out_state)
+metal_service_swapchain_get_packed_foveation_state(struct xrt_swapchain_metal *xscm,
+                                                   const struct xrt_metal_foveation_view_layout *views,
+                                                   uint32_t view_count,
+                                                   uint32_t array_layer,
+                                                   struct xrt_metal_foveation_state *out_state)
 {
 	struct metal_service_swapchain *sc = (struct metal_service_swapchain *)xscm;
-	return comp_metal_foveation_cache_get_packed(
-	    &sc->foveation, views, view_count, array_layer, out_state);
+	return comp_metal_foveation_cache_get_packed(&sc->foveation, views, view_count, array_layer, out_state);
 }
 
 static xrt_result_t
-metal_service_swapchain_get_image_foveation_state(
-    struct xrt_swapchain_metal *xscm,
-    uint32_t image_index,
-    uint32_t array_layer,
-    struct xrt_metal_foveation_state *out_state)
+metal_service_swapchain_get_image_foveation_state(struct xrt_swapchain_metal *xscm,
+                                                  uint32_t image_index,
+                                                  uint32_t array_layer,
+                                                  struct xrt_metal_foveation_state *out_state)
 {
 	struct metal_service_swapchain *sc = (struct metal_service_swapchain *)xscm;
 	return comp_metal_foveation_cache_get_image(&sc->foveation, image_index, array_layer, out_state);
@@ -234,9 +229,7 @@ metal_service_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns
 }
 
 static xrt_result_t
-metal_service_swapchain_barrier_image(struct xrt_swapchain *xsc,
-                                      enum xrt_barrier_direction direction,
-                                      uint32_t index)
+metal_service_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_direction direction, uint32_t index)
 {
 	struct metal_service_swapchain *sc = metal_service_swapchain(xsc);
 
@@ -329,9 +322,9 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 
 	MTLTextureDescriptor *descriptor =
 	    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)info->format
-	                                                      width:info->width
-	                                                     height:info->height
-	                                                  mipmapped:NO];
+	                                                       width:info->width
+	                                                      height:info->height
+	                                                   mipmapped:NO];
 	descriptor.storageMode = MTLStorageModeShared;
 	descriptor.usage = xrt_usage_to_metal(native_info->bits);
 
@@ -346,7 +339,8 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	for (uint32_t i = 0; i < image_count; i++) {
 		IOSurfaceRef surface = metal_service_create_bgra_iosurface(info->width, info->height);
 		if (surface == NULL) {
-			U_LOG_E("Metal service IOSurfaceCreate failed: image=%u size=%ux%u", i, info->width, info->height);
+			U_LOG_E("Metal service IOSurfaceCreate failed: image=%u size=%ux%u", i, info->width,
+			        info->height);
 			release_texture_array(textures, image_count);
 			metal_service_release_iosurfaces(surfaces, image_count);
 			[descriptor release];
@@ -357,14 +351,11 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 		if (surface_id == 0 || IOSurfaceGetWidth(surface) != info->width ||
 		    IOSurfaceGetHeight(surface) != info->height ||
 		    IOSurfaceGetPixelFormat(surface) != kCVPixelFormatType_32BGRA) {
-			U_LOG_E("Metal service IOSurface validation failed: image=%u id=%u expected=%ux%u BGRA actual=%zux%zu cv_format=0x%08x",
-			        i,
-			        surface_id,
-			        info->width,
-			        info->height,
-			        IOSurfaceGetWidth(surface),
-			        IOSurfaceGetHeight(surface),
-			        (unsigned)IOSurfaceGetPixelFormat(surface));
+			U_LOG_E(
+			    "Metal service IOSurface validation failed: image=%u id=%u expected=%ux%u BGRA "
+			    "actual=%zux%zu cv_format=0x%08x",
+			    i, surface_id, info->width, info->height, IOSurfaceGetWidth(surface),
+			    IOSurfaceGetHeight(surface), (unsigned)IOSurfaceGetPixelFormat(surface));
 			CFRelease(surface);
 			release_texture_array(textures, image_count);
 			metal_service_release_iosurfaces(surfaces, image_count);
@@ -372,15 +363,11 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 			return XRT_ERROR_ALLOCATION;
 		}
 
-		id<MTLTexture> texture =
-		    [link->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
-		if (texture == nil || texture.iosurface == nil ||
-		    texture.width != info->width || texture.height != info->height ||
-		    texture.pixelFormat != (MTLPixelFormat)info->format) {
-			U_LOG_E("Metal service IOSurface texture creation failed: image=%u surface=%u texture=%p",
-			        i,
-			        surface_id,
-			        (__bridge void *)texture);
+		id<MTLTexture> texture = [link->device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
+		if (texture == nil || texture.iosurface == nil || texture.width != info->width ||
+		    texture.height != info->height || texture.pixelFormat != (MTLPixelFormat)info->format) {
+			U_LOG_E("Metal service IOSurface texture creation failed: image=%u surface=%u texture=%p", i,
+			        surface_id, (__bridge void *)texture);
 			[texture release];
 			CFRelease(surface);
 			release_texture_array(textures, image_count);
@@ -425,8 +412,7 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 
 	struct xrt_swapchain_native *xscn = (struct xrt_swapchain_native *)native_xsc;
 	if (xscn->base.image_count != image_count) {
-		U_LOG_E("Metal service IOSurface swapchain image-count mismatch: expected=%u actual=%u",
-		        image_count,
+		U_LOG_E("Metal service IOSurface swapchain image-count mismatch: expected=%u actual=%u", image_count,
 		        xscn->base.image_count);
 		xrt_swapchain_native_reference(&xscn, NULL);
 		release_texture_array(textures, image_count);
@@ -451,17 +437,14 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	sc->base.base.foveation_capabilities =
 	    XRT_FOVEATION_CAPABILITY_FIXED | XRT_FOVEATION_CAPABILITY_DYNAMIC | XRT_FOVEATION_CAPABILITY_EYE_TRACKED;
 	sc->base.get_foveation_metal_state = metal_service_swapchain_get_foveation_state;
-	sc->base.get_foveation_metal_packed_state =
-	    metal_service_swapchain_get_packed_foveation_state;
-	sc->base.get_foveation_metal_image_state =
-	    metal_service_swapchain_get_image_foveation_state;
+	sc->base.get_foveation_metal_packed_state = metal_service_swapchain_get_packed_foveation_state;
+	sc->base.get_foveation_metal_image_state = metal_service_swapchain_get_image_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = image_count;
 	sc->xscn = xscn;
 	sc->command_queue = [link->command_queue retain];
-	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device,
-	                                      info->width, info->height, info->array_size,
-	                                      sc->base.base.image_count)) {
+	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device, info->width, info->height,
+	                                     info->array_size, sc->base.base.image_count)) {
 		metal_service_swapchain_destroy(&sc->base.base);
 		release_texture_array(textures, image_count);
 		metal_service_release_iosurfaces(surfaces, image_count);
@@ -476,13 +459,11 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 	}
 	free(textures);
 
-	U_LOG_D("Metal service swapchain backing=iosurface-id images=%u size=%ux%u metal_format=%lld cv_format=0x%08x first_surface=%u",
-	        image_count,
-	        info->width,
-	        info->height,
-	        (long long)info->format,
-	        (unsigned)kCVPixelFormatType_32BGRA,
-	        iosurface_ids[0]);
+	U_LOG_D(
+	    "Metal service swapchain backing=iosurface-id images=%u size=%ux%u metal_format=%lld cv_format=0x%08x "
+	    "first_surface=%u",
+	    image_count, info->width, info->height, (long long)info->format, (unsigned)kCVPixelFormatType_32BGRA,
+	    iosurface_ids[0]);
 
 	*out_xsc = &sc->base.base;
 	return XRT_SUCCESS;
@@ -500,9 +481,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 
 	if (info->face_count != 1 || info->sample_count != 1 || info->array_size == 0) {
 		U_LOG_W("Metal service swapchain unsupported geometry: array_size=%u face_count=%u sample_count=%u",
-		        info->array_size,
-		        info->face_count,
-		        info->sample_count);
+		        info->array_size, info->face_count, info->sample_count);
 		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
 	}
 
@@ -527,8 +506,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	 * into Vulkan without an XPC shared-handle round trip.
 	 */
 	if (metal_service_can_use_iosurface(info)) {
-		xret = metal_service_create_iosurface_swapchain(
-		    link, info, &native_info, xsccp.image_count, out_xsc);
+		xret = metal_service_create_iosurface_swapchain(link, info, &native_info, xsccp.image_count, out_xsc);
 		if (xret == XRT_SUCCESS) {
 			return XRT_SUCCESS;
 		}
@@ -552,8 +530,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 		uint32_t original_image_count = xsccp.image_count;
 		xsccp.image_count = 4;
 		U_LOG_D("Metal service shared-handle swapchain image depth increased from %u to %u",
-		        original_image_count,
-		        xsccp.image_count);
+		        original_image_count, xsccp.image_count);
 	}
 
 	if (xsccp.image_count == 0 || xsccp.image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
@@ -608,18 +585,11 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	ipc_metal_xpc_make_token_images(token, xsccp.image_count, transport_images);
 
 	U_LOG_D("Metal service swapchain backing=shared-handle published=%u token=0x%016llx size=%ux%u array_size=%u",
-	        xsccp.image_count,
-	        (unsigned long long)token,
-	        info->width,
-	        info->height,
-	        info->array_size);
+	        xsccp.image_count, (unsigned long long)token, info->width, info->height, info->array_size);
 
 	struct xrt_swapchain *native_xsc = NULL;
-	xret = xrt_comp_import_swapchain(&link->xcn->base,
-	                                &native_info,
-	                                transport_images,
-	                                xsccp.image_count,
-	                                &native_xsc);
+	xret =
+	    xrt_comp_import_swapchain(&link->xcn->base, &native_info, transport_images, xsccp.image_count, &native_xsc);
 	free(transport_images);
 
 	if (xret != XRT_SUCCESS) {
@@ -630,8 +600,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 
 	struct xrt_swapchain_native *xscn = (struct xrt_swapchain_native *)native_xsc;
 	if (xscn->base.image_count != xsccp.image_count) {
-		U_LOG_E("Metal service swapchain image-count mismatch: expected=%u actual=%u",
-		        xsccp.image_count,
+		U_LOG_E("Metal service swapchain image-count mismatch: expected=%u actual=%u", xsccp.image_count,
 		        xscn->base.image_count);
 		xrt_swapchain_native_reference(&xscn, NULL);
 		release_texture_array(textures, xsccp.image_count);
@@ -654,17 +623,14 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	sc->base.base.foveation_capabilities =
 	    XRT_FOVEATION_CAPABILITY_FIXED | XRT_FOVEATION_CAPABILITY_DYNAMIC | XRT_FOVEATION_CAPABILITY_EYE_TRACKED;
 	sc->base.get_foveation_metal_state = metal_service_swapchain_get_foveation_state;
-	sc->base.get_foveation_metal_packed_state =
-	    metal_service_swapchain_get_packed_foveation_state;
-	sc->base.get_foveation_metal_image_state =
-	    metal_service_swapchain_get_image_foveation_state;
+	sc->base.get_foveation_metal_packed_state = metal_service_swapchain_get_packed_foveation_state;
+	sc->base.get_foveation_metal_image_state = metal_service_swapchain_get_image_foveation_state;
 	sc->base.base.reference.count = 1;
 	sc->base.base.image_count = xsccp.image_count;
 	sc->xscn = xscn;
 	sc->command_queue = [link->command_queue retain];
-	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device,
-	                                      info->width, info->height, info->array_size,
-	                                      sc->base.base.image_count)) {
+	if (!comp_metal_foveation_cache_init(&sc->foveation, (__bridge void *)link->device, info->width, info->height,
+	                                     info->array_size, sc->base.base.image_count)) {
 		metal_service_swapchain_destroy(&sc->base.base);
 		release_texture_array(textures, xsccp.image_count);
 		return XRT_ERROR_ALLOCATION;
@@ -676,8 +642,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	}
 	free(textures);
 
-	U_LOG_D("Metal service swapchain backing=shared-handle active array_size=%u images=%u",
-	        info->array_size,
+	U_LOG_D("Metal service swapchain backing=shared-handle active array_size=%u images=%u", info->array_size,
 	        xsccp.image_count);
 
 	*out_xsc = &sc->base.base;
@@ -742,6 +707,8 @@ client_metal_service_compositor_create(struct xrt_compositor_native *xcn, void *
 	xcm->base.destroy = metal_service_compositor_destroy;
 	pthread_mutex_unlock(&g_contexts_mutex);
 
-	U_LOG_I("Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images");
+	U_LOG_I(
+	    "Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and "
+	    "imported directly into service Vulkan images");
 	return xcm;
 }

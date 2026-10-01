@@ -47,8 +47,7 @@ comp_metal_texture_prepare_for_vk_device(struct vk_bundle *vk,
 	id<MTLDevice> vk_device = (__bridge id<MTLDevice>)device_info.mtlDevice;
 	id<MTLTexture> source = (__bridge id<MTLTexture>)source_texture;
 	if (vk_device == nil || source == nil) {
-		U_LOG_E("Metal texture device normalization failed: vk_device=%p source=%p",
-		        (__bridge void *)vk_device,
+		U_LOG_E("Metal texture device normalization failed: vk_device=%p source=%p", (__bridge void *)vk_device,
 		        source_texture);
 		return false;
 	}
@@ -61,20 +60,20 @@ comp_metal_texture_prepare_for_vk_device(struct vk_bundle *vk,
 	@autoreleasepool {
 		MTLSharedTextureHandle *handle = [source newSharedTextureHandle];
 		if (handle == nil) {
-			U_LOG_E("Metal texture device normalization could not create shared handle: source=%p source_device=%p vk_device=%p",
-			        source_texture,
-			        (__bridge void *)source.device,
-			        (__bridge void *)vk_device);
+			U_LOG_E(
+			    "Metal texture device normalization could not create shared handle: source=%p "
+			    "source_device=%p vk_device=%p",
+			    source_texture, (__bridge void *)source.device, (__bridge void *)vk_device);
 			return false;
 		}
 
 		id<MTLTexture> rebound = [vk_device newSharedTextureWithHandle:handle];
 		[handle release];
 		if (rebound == nil) {
-			U_LOG_E("Metal texture device normalization could not reopen shared texture on Vulkan MTLDevice: source=%p source_device=%p vk_device=%p",
-			        source_texture,
-			        (__bridge void *)source.device,
-			        (__bridge void *)vk_device);
+			U_LOG_E(
+			    "Metal texture device normalization could not reopen shared texture on Vulkan MTLDevice: "
+			    "source=%p source_device=%p vk_device=%p",
+			    source_texture, (__bridge void *)source.device, (__bridge void *)vk_device);
 			return false;
 		}
 
@@ -82,18 +81,18 @@ comp_metal_texture_prepare_for_vk_device(struct vk_bundle *vk,
 		    rebound.arrayLength != source.arrayLength || rebound.mipmapLevelCount != source.mipmapLevelCount ||
 		    rebound.sampleCount != source.sampleCount || rebound.pixelFormat != source.pixelFormat ||
 		    rebound.textureType != source.textureType) {
-			U_LOG_E("Metal texture device normalization changed texture geometry/format: source=%p rebound=%p",
-			        source_texture,
-			        (__bridge void *)rebound);
+			U_LOG_E(
+			    "Metal texture device normalization changed texture geometry/format: source=%p rebound=%p",
+			    source_texture, (__bridge void *)rebound);
 			[rebound release];
 			return false;
 		}
 
-		U_LOG_I("Metal shared texture rebound to Vulkan MTLDevice: source=%p source_device=%p rebound=%p vk_device=%p",
-		        source_texture,
-		        (__bridge void *)source.device,
-		        (__bridge void *)rebound,
-		        (__bridge void *)vk_device);
+		U_LOG_I(
+		    "Metal shared texture rebound to Vulkan MTLDevice: source=%p source_device=%p rebound=%p "
+		    "vk_device=%p",
+		    source_texture, (__bridge void *)source.device, (__bridge void *)rebound,
+		    (__bridge void *)vk_device);
 
 		*out_texture = (__bridge void *)rebound;
 		*out_needs_release = true;
@@ -137,11 +136,14 @@ static MTLTextureUsage
 xrt_usage_to_metal(enum xrt_swapchain_usage_bits bits)
 {
 	MTLTextureUsage usage = MTLTextureUsageUnknown;
-	if ((bits & XRT_SWAPCHAIN_USAGE_COLOR) != 0) usage |= MTLTextureUsageRenderTarget;
+	if ((bits & XRT_SWAPCHAIN_USAGE_COLOR) != 0)
+		usage |= MTLTextureUsageRenderTarget;
 	if ((bits & XRT_SWAPCHAIN_USAGE_SAMPLED) != 0 || (bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0)
 		usage |= MTLTextureUsageShaderRead;
-	if ((bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0) usage |= MTLTextureUsageShaderWrite;
-	if ((bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT) != 0) usage |= MTLTextureUsagePixelFormatView;
+	if ((bits & XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS) != 0)
+		usage |= MTLTextureUsageShaderWrite;
+	if ((bits & XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT) != 0)
+		usage |= MTLTextureUsagePixelFormatView;
 	return usage;
 }
 
@@ -203,28 +205,22 @@ comp_metal_texture_create_from_bootstrap_name_for_vk_device(struct vk_bundle *vk
 
 		MTLTextureType expected_type = info->array_size > 1 ? MTLTextureType2DArray : MTLTextureType2D;
 		if (texture.device != vk_device || texture.width != info->width || texture.height != info->height ||
-		    texture.arrayLength != info->array_size || texture.mipmapLevelCount != 1 || texture.sampleCount != 1 ||
-		    texture.pixelFormat != pixel_format || texture.textureType != expected_type) {
-			U_LOG_E("DXMT shared texture geometry mismatch for '%s': got=%lux%lu array=%lu type=%lu format=%lu expected=%ux%u array=%u type=%lu format=%lu",
-			        bootstrap_name,
-			        (unsigned long)texture.width,
-			        (unsigned long)texture.height,
-			        (unsigned long)texture.arrayLength,
-			        (unsigned long)texture.textureType,
-			        (unsigned long)texture.pixelFormat,
-			        info->width,
-			        info->height,
-			        info->array_size,
-			        (unsigned long)expected_type,
-			        (unsigned long)pixel_format);
+		    texture.arrayLength != info->array_size || texture.mipmapLevelCount != 1 ||
+		    texture.sampleCount != 1 || texture.pixelFormat != pixel_format ||
+		    texture.textureType != expected_type) {
+			U_LOG_E(
+			    "DXMT shared texture geometry mismatch for '%s': got=%lux%lu array=%lu type=%lu format=%lu "
+			    "expected=%ux%u array=%u type=%lu format=%lu",
+			    bootstrap_name, (unsigned long)texture.width, (unsigned long)texture.height,
+			    (unsigned long)texture.arrayLength, (unsigned long)texture.textureType,
+			    (unsigned long)texture.pixelFormat, info->width, info->height, info->array_size,
+			    (unsigned long)expected_type, (unsigned long)pixel_format);
 			[texture release];
 			return false;
 		}
 
 		U_LOG_I("DXMT shared Metal texture imported by bootstrap name: '%s' texture=%p array_size=%u",
-		        bootstrap_name,
-		        (__bridge void *)texture,
-		        info->array_size);
+		        bootstrap_name, (__bridge void *)texture, info->array_size);
 		*out_texture = (__bridge void *)texture;
 		return true;
 	}
@@ -265,11 +261,10 @@ comp_metal_texture_create_from_iosurface_for_vk_device(struct vk_bundle *vk,
 			        IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), info->width, info->height);
 			return false;
 		}
-		MTLTextureDescriptor *descriptor =
-		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixel_format
-		                                                       width:info->width
-		                                                      height:info->height
-		                                                   mipmapped:NO];
+		MTLTextureDescriptor *descriptor = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixel_format
+		                                                                                      width:info->width
+		                                                                                     height:info->height
+		                                                                                  mipmapped:NO];
 		descriptor.storageMode = MTLStorageModeShared;
 		descriptor.usage = xrt_usage_to_metal(info->bits);
 		id<MTLTexture> texture = [vk_device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
@@ -316,7 +311,8 @@ comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
 void
 comp_metal_texture_release(void *texture)
 {
-	if (texture != NULL) [(__bridge id<MTLTexture>)texture release];
+	if (texture != NULL)
+		[(__bridge id<MTLTexture>)texture release];
 }
 
 void

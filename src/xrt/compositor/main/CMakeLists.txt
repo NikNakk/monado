@@ -58,9 +58,14 @@ if(WIN32)
 endif()
 if(APPLE)
 	target_sources(
-        comp_main PRIVATE comp_window_macos.m comp_macos_frontend.m comp_macos_frontend.h
-                          comp_window_macos_hosted.h comp_window_macos_trace_buffer.h
-        )
+		comp_main
+		PRIVATE
+			comp_window_macos.m
+			comp_macos_frontend.m
+			comp_macos_frontend.h
+			comp_window_macos_hosted.h
+			comp_window_macos_trace_buffer.h
+		)
 
 	target_link_libraries(
 		comp_main
