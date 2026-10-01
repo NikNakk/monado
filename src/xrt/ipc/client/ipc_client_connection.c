@@ -9,11 +9,6 @@
  * @ingroup ipc_client
  */
 
-#if defined(_WIN32)
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif
-
 #include "os/os_threading.h"
 #include "xrt/xrt_results.h"
 #if defined(_MSC_VER) && !defined(_CRT_SECURE_NO_WARNINGS)
@@ -33,7 +28,6 @@
 #include "util/u_truncate_printf.h"
 
 #include "shared/ipc_utils.h"
-#include "shared/ipc_tcp_auth.h"
 #include "shared/ipc_protocol.h"
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
 #include "shared/ipc_metal_xpc_service.h"
@@ -66,10 +60,6 @@
 #endif // XRT_OS_ANDROID
 
 DEBUG_GET_ONCE_BOOL_OPTION(ipc_ignore_version, "IPC_IGNORE_VERSION", false)
-#ifdef XRT_OS_WINDOWS
-DEBUG_GET_ONCE_OPTION(wine_tcp_port, "MONADO_WINE_TCP_PORT", NULL)
-#endif
-
 #ifdef XRT_OS_ANDROID
 
 static bool
@@ -102,83 +92,6 @@ ipc_client_socket_connect(struct ipc_connection *ipc_c, struct _JavaVM *vm, void
 }
 
 #elif defined(XRT_OS_WINDOWS)
-
-static bool
-ipc_client_tcp_connect(struct ipc_connection *ipc_c, const char *port_text)
-{
-	char *end = NULL;
-	long port = strtol(port_text, &end, 10);
-	if (end == port_text || *end != '\0' || port <= 0 || port > 65535) {
-		IPC_ERROR(ipc_c, "Invalid MONADO_WINE_TCP_PORT value '%s'", port_text);
-		return false;
-	}
-
-	const char *token = getenv("IPC_WINE_TCP_TOKEN");
-	if (!ipc_tcp_auth_token_valid(token)) {
-		IPC_ERROR(ipc_c, "Wine TCP requires IPC_WINE_TCP_TOKEN: 64 lowercase hexadecimal characters");
-		return false;
-	}
-	WSADATA wsa = {0};
-	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-		IPC_ERROR(ipc_c, "WSAStartup failed");
-		return false;
-	}
-
-	SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (sock == INVALID_SOCKET) {
-		IPC_ERROR(ipc_c, "Wine bridge socket() failed: %d", WSAGetLastError());
-		WSACleanup();
-		return false;
-	}
-
-	struct sockaddr_in addr = {0};
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons((u_short)port);
-	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-	if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
-		IPC_ERROR(ipc_c, "Wine bridge connect(127.0.0.1:%ld) failed: %d", port, WSAGetLastError());
-		closesocket(sock);
-		WSACleanup();
-		return false;
-	}
-
-	if (!ipc_tcp_authenticate_client((xrt_ipc_handle_t)(uintptr_t)sock, token, 5000)) {
-		IPC_ERROR(ipc_c, "Wine TCP authentication failed");
-		closesocket(sock);
-		WSACleanup();
-		return false;
-	}
-
-	/*
-	 * Frame-submit messages are tiny and latency-sensitive. Avoid delayed
-	 * small-packet coalescing, and give the Wine/Winsock side enough buffering
-	 * that a short native compositor scheduling delay does not make send()
-	 * block the OpenXR application thread.
-	 */
-	BOOL no_delay = TRUE;
-	if (setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (const char *)&no_delay, sizeof(no_delay)) == SOCKET_ERROR) {
-		IPC_WARN(ipc_c, "Could not enable TCP_NODELAY on Wine bridge socket: %d", WSAGetLastError());
-	}
-
-	int send_buffer = 1024 * 1024;
-	if (setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (const char *)&send_buffer, sizeof(send_buffer)) == SOCKET_ERROR) {
-		IPC_WARN(ipc_c, "Could not enlarge Wine bridge send buffer: %d", WSAGetLastError());
-	}
-
-	int actual_send_buffer = 0;
-	int actual_send_buffer_len = sizeof(actual_send_buffer);
-	if (getsockopt(sock, SOL_SOCKET, SO_SNDBUF, (char *)&actual_send_buffer, &actual_send_buffer_len) == 0) {
-		IPC_INFO(ipc_c, "Wine bridge TCP send buffer: %d bytes", actual_send_buffer);
-	}
-
-	ipc_c->imc.ipc_handle = (xrt_ipc_handle_t)(uintptr_t)sock;
-	ipc_c->imc.stream_socket = true;
-	ipc_c->imc.frame_reads = true;
-	ipc_c->imc.frame_writes = false;
-	IPC_INFO(ipc_c, "Connected to native macOS Monado service over Wine TCP bridge on 127.0.0.1:%ld", port);
-	return true;
-}
 
 #if defined(NO_XRT_SERVICE_LAUNCH) || !defined(XRT_SERVICE_EXECUTABLE)
 static HANDLE
@@ -267,11 +180,6 @@ ipc_connect_pipe(struct ipc_connection *ipc_c, const char *pipe_name)
 static bool
 ipc_client_socket_connect(struct ipc_connection *ipc_c)
 {
-	const char *wine_tcp_port = debug_get_option_wine_tcp_port();
-	if (wine_tcp_port != NULL && wine_tcp_port[0] != '\0') {
-		return ipc_client_tcp_connect(ipc_c, wine_tcp_port);
-	}
-
 	const char pipe_prefix[] = "\\\\.\\pipe\\";
 #define prefix_len sizeof(pipe_prefix) - 1
 	char pipe_name[MAX_PATH + prefix_len];
