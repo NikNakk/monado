@@ -23,6 +23,7 @@
 #include "shared/ipc_shmem.h"
 #include "shared/ipc_utils.h"
 #include "server/ipc_server.h"
+#include "server/ipc_server_thread_shutdown.h"
 #include "ipc_server_generated.h"
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
@@ -286,7 +287,7 @@ client_loop(volatile struct ipc_client_state *ics)
 	}
 
 	struct ipc_thread *it = &ics->server->threads[ics->server_thread_index];
-	it->state = IPC_THREAD_RUNNING;
+	ipc_server_client_thread_set_running(ics->server, it);
 	while (it->state == IPC_THREAD_RUNNING) {
 		const int half_a_second_ms = 500;
 		int ret = 0;
@@ -425,7 +426,7 @@ client_loop(volatile struct ipc_client_state *ics)
 	    ics->server->callback_data);          //
 
 	struct ipc_thread *it = &ics->server->threads[ics->server_thread_index];
-	it->state = IPC_THREAD_RUNNING;
+	ipc_server_client_thread_set_running(ics->server, it);
 	while (it->state == IPC_THREAD_RUNNING) {
 		uint8_t buf[IPC_BUF_SIZE] = {0};
 		DWORD len = 0;

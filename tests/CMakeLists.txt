@@ -284,3 +284,12 @@ if(UNIX AND TARGET comp_multi AND TARGET ipc_shared)
     add_test(NAME tests_ipc_local_session COMMAND tests_ipc_local_session)
     set_target_properties(tests_ipc_local_session PROPERTIES FOLDER monado_tests)
 endif()
+
+if(TARGET ipc_server)
+    add_executable(tests_ipc_thread_shutdown tests_ipc_thread_shutdown.cpp
+        ../src/xrt/ipc/server/ipc_server_thread_shutdown.c)
+    target_link_libraries(tests_ipc_thread_shutdown PRIVATE ipc_shared aux_util aux_os base xrt-external-catch2)
+    add_test(NAME tests_ipc_thread_shutdown COMMAND tests_ipc_thread_shutdown)
+    set_tests_properties(tests_ipc_thread_shutdown PROPERTIES TIMEOUT 10)
+    set_target_properties(tests_ipc_thread_shutdown PROPERTIES FOLDER monado_tests)
+endif()
