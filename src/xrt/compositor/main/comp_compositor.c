@@ -416,8 +416,8 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 	struct comp_compositor *c = comp_compositor(xc);
 	c->passthrough_has_application_layers = c->base.layer_accum.layer_count > 0;
-	int64_t frame_id = c->frame.waited.id;
 #ifdef XRT_OS_OSX
+	int64_t frame_id = c->frame.waited.id;
 	int64_t desired_present_time_ns = frame_id >= 0 ? (int64_t)c->frame.waited.desired_present_time_ns : 0;
 	int64_t predicted_display_time_ns = frame_id >= 0 ? (int64_t)c->frame.waited.predicted_display_time_ns : 0;
 	int64_t present_slop_ns = frame_id >= 0 ? (int64_t)c->frame.waited.present_slop_ns : 0;
