@@ -236,19 +236,6 @@ endif()
 option_with_deps(CMAKE_INTERPROCEDURAL_OPTIMIZATION "Enable inter-procedural (link-time) optimization" DEFAULT OFF DEPENDS HAS_IPO)
 option(XRT_HAVE_TRACY "Enable Tracy support for tracing, make sure to set XRT_FEATURE_TRACING as well." OFF)
 
-# Wine/macOS client-only D3D11 path. This is intentionally separate from the
-# normal Windows D3D implementation because that path depends on Microsoft WIL.
-option(XRT_FEATURE_WINE_D3D11_BRIDGE "Build the MinGW D3D11 OpenXR client for a native macOS Monado service" OFF)
-
-# The Wine/macOS bridge uses MinGW import libraries directly and deliberately
-# bypasses the normal WIL/Vulkan-backed Windows D3D client. Define these before
-# option_with_deps() so repeated CMake configuration sees the libraries, but do
-# not persist XRT_HAVE_DXGI/XRT_HAVE_D3D11 as forced cache values.
-if(XRT_FEATURE_WINE_D3D11_BRIDGE)
-	set(D3D11_LIBRARY d3d11)
-	set(DXGI_LIBRARY dxgi)
-endif()
-
 # Graphics deps to use (sorted in each group, groups thematic and ordered to handle internal deps: e.g. EGL and SDL2 need OpenGL/GLES)
 option_with_deps(XRT_HAVE_OPENGL "Enable OpenGL Graphics API support" DEPENDS OPENGL_WITHOUT_GLX_FOUND)
 option_with_deps(XRT_HAVE_OPENGL_GLX "Enable OpenGL Graphics API support on X11 (GLX)" DEPENDS XRT_HAVE_OPENGL OpenGL_GLX_FOUND)
@@ -264,16 +251,6 @@ option_with_deps(XRT_HAVE_WINRT "Use WinRT APIs for some Windows-specific functi
 option_with_deps(XRT_HAVE_VULKAN "Enable Vulkan Graphics API support (also needed for compositor)" DEPENDS VULKAN_FOUND)
 option_with_deps(XRT_HAVE_D3D11 "Enable Direct3D 11 Graphics API support" DEPENDS D3D11_LIBRARY XRT_HAVE_VULKAN XRT_HAVE_DXGI XRT_HAVE_WIL)
 option_with_deps(XRT_HAVE_D3D12 "Enable Direct3D 12 Graphics API support" DEPENDS D3D12_LIBRARY XRT_HAVE_D3D11 XRT_HAVE_VULKAN XRT_HAVE_DXGI XRT_HAVE_WIL)
-
-if(XRT_FEATURE_WINE_D3D11_BRIDGE)
-	# The generic Monado D3D11 option is intentionally unavailable under MinGW
-	# because it requires WIL and Vulkan. This bridge has its own raw-COM D3D11
-	# implementation, so expose D3D11/DXGI to downstream CMake logic only as
-	# normal variables for this configure; never poison the cache.
-	set(XRT_HAVE_DXGI ON)
-	set(XRT_HAVE_D3D11 ON)
-	set(XRT_HAVE_D3D12 OFF)
-endif()
 
 option_with_deps(XRT_HAVE_WAYLAND "Enable Wayland support" DEPENDS WAYLAND_FOUND WAYLAND_SCANNER_FOUND WAYLAND_PROTOCOLS_FOUND LIBDRM_FOUND)
 option_with_deps(XRT_HAVE_WAYLAND_DIRECT "Enable Wayland direct support" DEPENDS XRT_HAVE_WAYLAND LIBDRM_FOUND "WAYLAND_PROTOCOLS_VERSION VERSION_GREATER_EQUAL 1.22")
@@ -325,7 +302,7 @@ option_with_deps(XRT_FEATURE_COLOR_LOG "Enable logging in color on supported pla
 option_with_deps(XRT_FEATURE_DEBUG_GUI "Enable debug window to be used" DEPENDS XRT_HAVE_SDL2)
 option(XRT_FEATURE_NO_COMPOSITOR_FOR_HEADLESS_SESSIONS "Does headless not create a compositor" OFF)
 option_with_deps(XRT_FEATURE_OPENVR "Build OpenVR runtime target" DEPENDS XRT_MODULE_OPENVR_STATE_TRACKER "XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL")
-option_with_deps(XRT_FEATURE_OPENXR "Build OpenXR runtime target" DEPENDS XRT_MODULE_OPENXR_STATE_TRACKER "XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL OR XRT_FEATURE_WINE_D3D11_BRIDGE")
+option_with_deps(XRT_FEATURE_OPENXR "Build OpenXR runtime target" DEPENDS XRT_MODULE_OPENXR_STATE_TRACKER "XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL")
 set(XRT_FEATURE_OPENXR_DEBUG_UTILS OFF) # Has never been enabled
 option_with_deps(XRT_FEATURE_RENDERDOC "Enable RenderDoc API" DEPENDS "RT_LIBRARY OR WIN32 OR ANDROID")
 option_with_deps(XRT_FEATURE_RERUN "Enable integration of Rerun SDK" DEFAULT OFF DEPENDS rerun_sdk_FOUND)
