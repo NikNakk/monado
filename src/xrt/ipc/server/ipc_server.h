@@ -737,20 +737,20 @@ get_ism_handle(volatile struct ipc_client_state *ics)
  */
 void
 ipc_swapchain_trace_event(const char *event,
-                           uint32_t swapchain_id,
-                           uint32_t image_index,
-                           int64_t duration_ns,
-                           int64_t timeout_ns,
-                           xrt_result_t result);
+                          uint32_t swapchain_id,
+                          uint32_t image_index,
+                          int64_t duration_ns,
+                          int64_t timeout_ns,
+                          xrt_result_t result);
 #else
 // Only traced on macOS.
 static inline void
 ipc_swapchain_trace_event(const char *event,
-                           uint32_t swapchain_id,
-                           uint32_t image_index,
-                           int64_t duration_ns,
-                           int64_t timeout_ns,
-                           xrt_result_t result)
+                          uint32_t swapchain_id,
+                          uint32_t image_index,
+                          int64_t duration_ns,
+                          int64_t timeout_ns,
+                          xrt_result_t result)
 {
 	(void)event;
 	(void)swapchain_id;
