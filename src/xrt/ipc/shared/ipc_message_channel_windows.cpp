@@ -97,7 +97,7 @@ stream_send_exact(struct ipc_message_channel *imc, const void *data, size_t size
 	while (total < size) {
 		int sent = send((SOCKET)(uintptr_t)imc->ipc_handle, ptr + total, (int)(size - total), 0);
 		if (sent <= 0) {
-			IPC_ERROR(imc, "send() on Wine bridge socket failed: %d", WSAGetLastError());
+			IPC_ERROR(imc, "send() on IPC stream socket failed: %d", WSAGetLastError());
 			return XRT_ERROR_IPC_FAILURE;
 		}
 		total += (size_t)sent;
@@ -113,7 +113,7 @@ stream_recv_exact(struct ipc_message_channel *imc, void *data, size_t size)
 	while (total < size) {
 		int got = recv((SOCKET)(uintptr_t)imc->ipc_handle, ptr + total, (int)(size - total), 0);
 		if (got <= 0) {
-			IPC_ERROR(imc, "recv() on Wine bridge socket failed: %d", WSAGetLastError());
+			IPC_ERROR(imc, "recv() on IPC stream socket failed: %d", WSAGetLastError());
 			return XRT_ERROR_IPC_FAILURE;
 		}
 		total += (size_t)got;
@@ -168,7 +168,7 @@ ipc_receive(struct ipc_message_channel *imc, void *out_data, size_t size)
 			return xret;
 		}
 		if ((size_t)framed_size != size) {
-			IPC_ERROR(imc, "Wine bridge framed response size %u, expected %zu", framed_size, size);
+			IPC_ERROR(imc, "IPC stream framed response size %u, expected %zu", framed_size, size);
 			return XRT_ERROR_IPC_FAILURE;
 		}
 		return stream_recv_exact(imc, out_data, size);
