@@ -444,7 +444,7 @@ struct ipc_app_state
 	bool session_overlay;
 	struct ipc_client_io_blocks io_blocks;
 	uint32_t z_order;
-	/* Fixed-width for Wine/macOS wire compatibility: see ipc_client_description. */
+	/* Fixed-width for cross-ABI IPC wire compatibility: see ipc_client_description. */
 	int64_t pid;
 	struct xrt_application_info info;
 };
@@ -470,7 +470,7 @@ struct ipc_metal_bootstrap_name
 };
 
 /*!
- * Wine/DXMT array-texture transport. Each name identifies the Mach port of an
+ * Native Metal array-texture transport. Each name identifies the Mach port of an
  * existing MTLSharedTextureHandle registered by DXMT in the user's bootstrap
  * namespace. The service reopens the same storage; no pixel copy is involved.
  */
@@ -482,7 +482,7 @@ struct ipc_arg_swapchain_metal_bootstrap
 
 /*!
  * Bounded byte chunk used to copy the large ipc_shared_memory structure to
- * Wine clients without placing the whole structure in a generated IPC reply
+ * byte-stream clients without placing the whole structure in a generated IPC reply
  * on the Windows thread stack.
  */
 #define IPC_SHM_COPY_CHUNK_SIZE 4096
@@ -493,7 +493,7 @@ struct ipc_shm_copy_chunk
 };
 
 /*!
- * Bounded active-layer upload chunk for the Wine compositor bridge.
+ * Bounded active-layer upload chunk for byte-stream compositor transports.
  * Keep the generated command comfortably below IPC_BUF_SIZE (2048).
  */
 #define IPC_LAYER_COPY_CHUNK_SIZE 1900
