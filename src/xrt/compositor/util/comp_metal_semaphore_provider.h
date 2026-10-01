@@ -34,6 +34,14 @@ comp_metal_semaphore_create_client_pair(struct xrt_compositor_semaphore **out_xc
 xrt_result_t
 comp_metal_semaphore_import_bootstrap_event(const char *bootstrap_name, struct xrt_compositor_semaphore **out_xcsem);
 
+/*!
+ * Import an existing MTLSharedEventHandle into the compositor timeline.
+ * The handle remains owned by the caller.
+ */
+xrt_result_t
+comp_metal_semaphore_import_shared_event_handle(void *mtl_shared_event_handle,
+                                                struct xrt_compositor_semaphore **out_xcsem);
+
 #endif
 
 #ifdef __cplusplus
