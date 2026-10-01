@@ -1187,8 +1187,9 @@ The right controller's fit was then measured from per-LED residuals (`constellat
 specific to the right controller: both rings fit the cameras better about 1% larger than the model, as mirror-image
 per-LED offsets of about 1 mm. Offsets fitted on the 25 Sep sessions and applied to the 26 Sep ones
 (`--led-offsets`) give the right controller 10% more poses in the shipped path and take its RMS from 0.53 px to
-0.38 px. The cause is not settled between the LED model and the rig calibration. Applying the offsets in the driver is
-proposed, not done.
+0.38 px. The cause is not settled between the LED model and the rig calibration. `PSSENSE_LED_CORRECTION=1` applies
+the offsets in the driver. It is off by default, belongs with the combined calibration, and has not been run on the
+headset. The hardware test is described in `doc/macos-pssense-mr2940-frontend-evaluation.md`.
 
 Recordings now carry session info, sync events, IMU timing, head-pose age and Create-button static markers (packet 5).
 See `doc/macos-pssense-mr2940-frontend-evaluation.md` for the results, the commands and recording guidance.
