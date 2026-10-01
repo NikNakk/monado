@@ -1079,21 +1079,19 @@ ipc_server_handle_shutdown_signal(struct ipc_server *vs)
 	vs->running = false;
 }
 
-static void
-ipc_server_handle_client_connected_internal(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle, bool stream_socket)
+void
+ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle)
 {
 	int64_t peer_pid = 0;
 #ifdef XRT_OS_OSX
-	if (!stream_socket) {
-		uid_t uid;
-		pid_t pid;
-		if (!ipc_socket_get_peer_identity(ipc_handle, &uid, &pid) || uid != getuid()) {
-			xrt_ipc_handle_close(ipc_handle);
-			U_LOG_W("Rejecting IPC connection without matching kernel peer credentials");
-			return;
-		}
-		peer_pid = pid;
+	uid_t uid;
+	pid_t pid;
+	if (!ipc_socket_get_peer_identity(ipc_handle, &uid, &pid) || uid != getuid()) {
+		xrt_ipc_handle_close(ipc_handle);
+		U_LOG_W("Rejecting IPC connection without matching kernel peer credentials");
+		return;
 	}
+	peer_pid = pid;
 #endif
 	volatile struct ipc_client_state *ics = NULL;
 	int32_t cs_index = -1;
@@ -1154,12 +1152,7 @@ ipc_server_handle_client_connected_internal(struct ipc_server *vs, xrt_ipc_handl
 	ics->local_space_overseer_index = UINT32_MAX;
 	ics->client_state.id = id;
 	ics->imc.ipc_handle = ipc_handle;
-	ics->imc.stream_socket = stream_socket;
 	ics->peer_pid = peer_pid;
-#ifdef XRT_OS_OSX
-	ics->imc.frame_reads = false;
-	ics->imc.frame_writes = true;
-#endif
 	ics->server = vs;
 	ics->server_thread_index = cs_index;
 
@@ -1192,18 +1185,6 @@ ipc_server_handle_client_connected_internal(struct ipc_server *vs, xrt_ipc_handl
 
 	// Unlock when we are done.
 	os_mutex_unlock(&vs->global_state.lock);
-}
-
-void
-ipc_server_handle_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle)
-{
-	ipc_server_handle_client_connected_internal(vs, ipc_handle, false);
-}
-
-void
-ipc_server_handle_stream_client_connected(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle)
-{
-	ipc_server_handle_client_connected_internal(vs, ipc_handle, true);
 }
 
 xrt_result_t
