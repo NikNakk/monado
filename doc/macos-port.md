@@ -297,6 +297,13 @@ that genuinely requires runtime integration.
 
 ### External Wine / OpenVR compatibility
 
+The external bridge now has a runtime-neutral native Khronos-loader host and
+thin Win64 OpenXR thunk. Its simulated-HMD test on `macos-upstream-clean`
+wrapped normal runtime-owned Metal images directly in DXMT (zero bridge
+copies). This adds no Windows transport/state tracker to Monado. See the
+external project's `docs/native-openxr-backend.md` for evidence and limits;
+physical PS VR2 pacing and game regression testing remain pending.
+
 - Wine/XR bridge and compatibility tooling:
   [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr)
 - OpenVR compatibility fork:
