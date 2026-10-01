@@ -24,6 +24,7 @@
 #include "shared/ipc_utils.h"
 #include "server/ipc_server.h"
 #include "server/ipc_server_thread_shutdown.h"
+#include "shared/ipc_tcp_auth.h"
 #include "ipc_server_generated.h"
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
@@ -273,6 +274,14 @@ static void
 client_loop(volatile struct ipc_client_state *ics)
 {
 	U_TRACE_SET_THREAD_NAME("IPC Client");
+#ifdef XRT_OS_OSX
+	if (ics->imc.stream_socket &&
+	    !ipc_tcp_authenticate_server(ics->imc.ipc_handle, ics->server->ml.wine_tcp_token, 1000)) {
+		IPC_WARN(ics->server, "Rejecting unauthenticated Wine TCP client");
+		common_shutdown(ics);
+		return;
+	}
+#endif
 
 	// Call the client connected callback.
 	ics->server->callbacks->client_connected( //
@@ -283,6 +292,9 @@ client_loop(volatile struct ipc_client_state *ics)
 	// Claim the client fd.
 	int wait_handle = setup_wait_handle(ics);
 	if (wait_handle < 0) {
+		ics->server->callbacks->client_disconnected(ics->server, ics->client_state.id,
+		                                            ics->server->callback_data);
+		common_shutdown(ics);
 		return;
 	}
 
@@ -418,6 +430,14 @@ static void
 client_loop(volatile struct ipc_client_state *ics)
 {
 	U_TRACE_SET_THREAD_NAME("IPC Client");
+#ifdef XRT_OS_OSX
+	if (ics->imc.stream_socket &&
+	    !ipc_tcp_authenticate_server(ics->imc.ipc_handle, ics->server->ml.wine_tcp_token, 1000)) {
+		IPC_WARN(ics->server, "Rejecting unauthenticated Wine TCP client");
+		common_shutdown(ics);
+		return;
+	}
+#endif
 
 	// Call the client connected callback.
 	ics->server->callbacks->client_connected( //

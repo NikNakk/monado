@@ -22,6 +22,8 @@
 #include "util/u_truncate_printf.h"
 
 #include "shared/ipc_shmem.h"
+#include "shared/ipc_socket_security.h"
+#include "shared/ipc_tcp_auth.h"
 #include "server/ipc_server.h"
 
 #import <AppKit/AppKit.h>
@@ -79,33 +81,21 @@ create_listen_socket(struct ipc_server_mainloop *ml, int *out_fd)
 		return -1;
 	}
 
-	addr.sun_family = AF_UNIX;
-	u_truncate_snprintf(addr.sun_path, dst_size, "%s", sock_file);
-
-	int ret = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-	if (ret < 0 && errno == EADDRINUSE) {
-		U_LOG_W("Removing stale socket file %s", sock_file);
-		ret = unlink(sock_file);
-		if (ret < 0) {
-			U_LOG_E("Failed to remove stale socket file %s: %s", sock_file, strerror(errno));
-			close(fd);
-			return ret;
-		}
-		ret = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
-	}
+	int ret = ipc_socket_bind_exclusive(fd, sock_file, &ml->socket_lock_fd);
 
 	if (ret < 0) {
 		U_LOG_E("Could not bind socket to path %s: %s. Is the service running already?", sock_file,
 		        strerror(errno));
-		if (errno == EADDRINUSE) {
-			U_LOG_E("If monado-service is not running, delete %s before starting a new instance",
-			        sock_file);
-		}
 		close(fd);
 		return ret;
 	}
 
 	ml->socket_filename = strdup(sock_file);
+	if (ml->socket_filename == NULL) {
+		unlink(sock_file);
+		close(fd);
+		return -1;
+	}
 
 	ret = listen(fd, IPC_MAX_CLIENTS);
 	if (ret < 0) {
@@ -142,6 +132,13 @@ init_wine_tcp_listener(struct ipc_server_mainloop *ml)
 	if (requested == 0) {
 		return 0;
 	}
+	// Do not use u_debug for secrets: option tracing must never print this value.
+	const char *token = getenv("IPC_WINE_TCP_TOKEN");
+	if (!ipc_tcp_auth_token_valid(token)) {
+		U_LOG_E("Wine TCP requires IPC_WINE_TCP_TOKEN: 64 lowercase hexadecimal characters");
+		return -1;
+	}
+	memcpy(ml->wine_tcp_token, token, sizeof(ml->wine_tcp_token));
 	if (requested > 65535) {
 		U_LOG_E("IPC_WINE_TCP_PORT must be between 1 and 65535");
 		return -1;
@@ -332,6 +329,8 @@ ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, bool no_stdin)
 	IPC_TRACE_MARKER();
 
 	ml->listen_socket = -1;
+	ml->socket_lock_fd = -1;
+	ml->wine_tcp_listen_socket = -1;
 	ml->socket_filename = NULL;
 	ml->no_stdin = no_stdin;
 
@@ -359,7 +358,7 @@ ipc_server_mainloop_apple_deinit(struct ipc_server_mainloop *ml)
 	if (ml == NULL) {
 		return;
 	}
-	if (ml->listen_socket > 0) {
+	if (ml->listen_socket >= 0) {
 		close(ml->listen_socket);
 		ml->listen_socket = -1;
 	}
@@ -368,9 +367,13 @@ ipc_server_mainloop_apple_deinit(struct ipc_server_mainloop *ml)
 		ml->wine_tcp_listen_socket = -1;
 	}
 	if (ml->socket_filename != NULL) {
-		U_LOG_W("Preserving Apple IPC socket path %s for WiVRn/macOS port bring-up", ml->socket_filename);
+		unlink(ml->socket_filename);
 		free(ml->socket_filename);
 		ml->socket_filename = NULL;
+	}
+	if (ml->socket_lock_fd >= 0) {
+		close(ml->socket_lock_fd);
+		ml->socket_lock_fd = -1;
 	}
 }
 

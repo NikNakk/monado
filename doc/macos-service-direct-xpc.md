@@ -113,31 +113,38 @@ The old standalone broker also implements the claimable-token method for
 development compatibility; because that broker predates PID ownership, marking
 an existing external token claimable is effectively a no-op there.
 
-### Per-client ownership
+### Per-client ownership and pending-resource limits
 
-Registry tokens are scoped to the application process that owns them.
+The direct listener accepts only XPC connections with the service user's UID.
+The publisher/retriever PID comes from `NSXPCConnection.processIdentifier`.
+The ordinary Unix socket obtains UID and PID from `getpeereid()` and
+`LOCAL_PEERPID`. A separate `peer_pid` field carries this verified identity;
+`instance_describe_client` remains application metadata and cannot change it.
+Metal/IOSurface imports, shared-event publication and disconnect cleanup use
+only the verified identity. Wine TCP clients have no native peer PID and cannot
+use PID-scoped native XPC imports; their bootstrap-name transport remains
+separate.
 
-- The XPC endpoint obtains the publisher/retriever PID from
-  `NSXPCConnection.processIdentifier`.
-- Ordinary Monado IPC already receives the application's PID in
-  `instance_describe_client` and stores it in `ics->client_state.pid`.
-- A server-side texture import is accepted only when the token's XPC owner PID
-  matches that Unix IPC client PID.
-- A client can retrieve a service-created shared event only when its XPC PID
-  matches the PID for which the service published the event.
-- Discard operations are owner checked as well.
+The registry admits at most 64 pending tokens and 128 pending images per PID,
+with global limits of 1024 tokens and 1024 images. Replacing an existing image
+uses its existing slot. A claimable external texture token transfers only after
+the requested object and the recipient's quota are validated.
 
-This gives separate OpenXR applications independent Metal-resource namespaces
-without adding a new OpenXR or Monado IPC protocol field. It is the first
-resource-isolation step needed for a persistent launcher plus temporary VR apps.
+Pending publications expire 60 seconds after creation. Publication, retrieval
+and ownership checks prune expired entries, and the service main loop prunes
+once per second even when no client makes another request. This also bounds
+retention by XPC-only publishers that never open ordinary Monado IPC. Normal
+last-IPC-connection cleanup still releases entries sooner. XPC connections are
+short-lived during legitimate publish/import handoffs, so their invalidation
+alone does not discard pending resources.
 
-PID reuse is not relied upon as token identity: tokens retain random bits and
-must also match the stored owner. When the last ordinary IPC connection for an
-application PID closes, the service discards any texture or shared-event tokens
-still owned by that PID, covering normal exit and client crashes.
-
-The standalone broker target is retained temporarily for comparison and
-fallback testing.
+The standalone broker probe now shares this registry implementation, including
+ownership checks, quotas and expiry. The old
+`XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1` runtime override is retired: service
+startup rejects it because routing server-side imports through a separate XPC
+connection would bypass the verified native client's identity. Historical A/B
+commands below record earlier experiments and no longer describe a supported
+runtime configuration.
 
 ## Development launchd registration
 

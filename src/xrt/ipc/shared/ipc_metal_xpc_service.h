@@ -22,12 +22,9 @@ extern "C" {
 #ifdef XRT_OS_OSX
 
 /*!
- * Diagnostic-only override for manually-started monado-service testing.
- *
- * When XRT_MACOS_METAL_XPC_EXTERNAL_BROKER=1, the service does not host the
- * Metal Mach service itself. Server-side Metal resource operations are routed
- * through the legacy standalone broker instead. This isolates launchd process
- * policy from the compositor while preserving cross-process Metal transport.
+ * Detect the retired diagnostic override so service startup can reject it.
+ * The external broker cannot authorize ordinary IPC resource imports and is
+ * retained only as an isolated XPC protocol probe with the same bounded registry.
  */
 bool
 ipc_metal_xpc_external_broker_enabled(void);
@@ -42,6 +39,10 @@ ipc_metal_xpc_external_broker_enabled(void);
  */
 xrt_result_t
 ipc_metal_xpc_service_start(void);
+
+//! Release abandoned publications after their bounded transfer window.
+void
+ipc_metal_xpc_service_expire_tokens(void);
 
 /*! Stop and release the in-process XPC listener. */
 void

@@ -9,6 +9,7 @@
 #import <Foundation/Foundation.h>
 
 #include "shared/ipc_metal_xpc.h"
+#include "util/u_file.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -142,8 +143,12 @@ ensure_persistent_directories(void)
 		];
 		for (NSString *directory in directories) {
 			NSError *error = nil;
-			if (![fm createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&error]) {
-				const char *message = error != nil ? error.localizedDescription.UTF8String : "unknown error";
+			if (![fm createDirectoryAtPath:directory
+			        withIntermediateDirectories:YES
+			                         attributes:nil
+			                              error:&error]) {
+				const char *message =
+				    error != nil ? error.localizedDescription.UTF8String : strerror(errno);
 				fprintf(stderr, "Could not create '%s': %s\n", directory.fileSystemRepresentation,
 				        message != NULL ? message : "unknown error");
 				return false;
@@ -213,17 +218,9 @@ should_forward_environment_key(NSString *key)
 	static NSSet<NSString *> *exact_keys = nil;
 	static dispatch_once_t once_token;
 	dispatch_once(&once_token, ^{
-		prefixes = [[NSArray alloc] initWithObjects:@"XRT_",
-		                                              @"PSVR2_",
-		                                              @"PSSENSE_",
-		                                              @"IPC_",
-		                                              @"VK_",
-		                                              @"MVK_",
-		                                              @"MOLTENVK_",
-		                                              @"METAL_",
-		                                              @"MTL_",
-		                                              nil];
-		exact_keys = [[NSSet alloc] initWithObjects:@"PATH", @"DYLD_LIBRARY_PATH", @"DYLD_FRAMEWORK_PATH", nil];
+	  prefixes = [[NSArray alloc] initWithObjects:@"XRT_", @"PSVR2_", @"PSSENSE_", @"IPC_", @"VK_", @"MVK_",
+		                                      @"MOLTENVK_", @"METAL_", @"MTL_", nil];
+	  exact_keys = [[NSSet alloc] initWithObjects:@"PATH", @"DYLD_LIBRARY_PATH", @"DYLD_FRAMEWORK_PATH", nil];
 	});
 
 	if ([exact_keys containsObject:key]) {
@@ -284,7 +281,9 @@ make_launch_environment(bool capture_current_environment)
 }
 
 static bool
-write_launch_agent_plist(const char *path, const char *service_executable, bool capture_current_environment,
+write_launch_agent_plist(const char *path,
+                         const char *service_executable,
+                         bool capture_current_environment,
                          bool persistent_logs)
 {
 	@autoreleasepool {
@@ -309,7 +308,7 @@ write_launch_agent_plist(const char *path, const char *service_executable, bool 
 		NSDictionary *plist = @{
 			@"Label" : label,
 			@"ProgramArguments" : @[ exe ],
-			@"MachServices" : @{ mach_service : @YES },
+			@"MachServices" : @{mach_service : @YES},
 			@"RunAtLoad" : @NO,
 			@"ProcessType" : @"Interactive",
 			@"EnvironmentVariables" : launch_environment,
@@ -319,11 +318,11 @@ write_launch_agent_plist(const char *path, const char *service_executable, bool 
 
 		NSError *error = nil;
 		NSData *data = [NSPropertyListSerialization dataWithPropertyList:plist
-		                                                        format:NSPropertyListXMLFormat_v1_0
-		                                                       options:0
-		                                                         error:&error];
-		if (data == nil || ![data writeToFile:plist_path options:NSDataWritingAtomic error:&error]) {
-			const char *message = error != nil ? error.localizedDescription.UTF8String : "unknown error";
+		                                                          format:NSPropertyListXMLFormat_v1_0
+		                                                         options:0
+		                                                           error:&error];
+		if (data == nil || u_file_write_private_atomic(path, data.bytes, data.length) != 0) {
+			const char *message = error != nil ? error.localizedDescription.UTF8String : strerror(errno);
 			fprintf(stderr, "Could not write monado-service LaunchAgent plist: %s\n",
 			        message != NULL ? message : "unknown");
 			return false;
@@ -334,7 +333,9 @@ write_launch_agent_plist(const char *path, const char *service_executable, bool 
 }
 
 static void
-remove_development_registrations(const char *legacy_target, const char *direct_target, const char *legacy_plist_path,
+remove_development_registrations(const char *legacy_target,
+                                 const char *direct_target,
+                                 const char *legacy_plist_path,
                                  const char *plist_path)
 {
 	/* The old broker and the service intentionally advertise the same Mach name. */
@@ -386,7 +387,9 @@ bootstrap_service(void)
 	printf("Executable: %s\n", service_executable);
 	printf("LaunchAgent plist: %s\n", plist_path);
 	printf("Relevant XRT/PSVR2/Vulkan environment captured from this shell\n");
-	printf("Lifecycle defaults: idle exit after 5000 ms; display-loss exit after 3000 ms; forced-exit watchdog after a further 5000 ms (explicit environment overrides preserved)\n");
+	printf(
+	    "Lifecycle defaults: idle exit after 5000 ms; display-loss exit after 3000 ms; forced-exit watchdog after "
+	    "a further 5000 ms (explicit environment overrides preserved)\n");
 	printf("stdout: %s\n", stdout_path);
 	printf("stderr: %s\n", stderr_path);
 	return 0;

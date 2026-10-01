@@ -40,6 +40,10 @@
 #include "server/ipc_server_objects.h"
 #include "server/ipc_server_interface.h"
 #include "server/ipc_server_thread_shutdown.h"
+#ifdef XRT_OS_OSX
+#include "shared/ipc_socket_security.h"
+#include <unistd.h>
+#endif
 
 #include <stdlib.h>
 #include <stdbool.h>
@@ -1078,17 +1082,23 @@ ipc_server_handle_shutdown_signal(struct ipc_server *vs)
 static void
 ipc_server_handle_client_connected_internal(struct ipc_server *vs, xrt_ipc_handle_t ipc_handle, bool stream_socket)
 {
+	int64_t peer_pid = 0;
+#ifdef XRT_OS_OSX
+	if (!stream_socket) {
+		uid_t uid;
+		pid_t pid;
+		if (!ipc_socket_get_peer_identity(ipc_handle, &uid, &pid) || uid != getuid()) {
+			xrt_ipc_handle_close(ipc_handle);
+			U_LOG_W("Rejecting IPC connection without matching kernel peer credentials");
+			return;
+		}
+		peer_pid = pid;
+	}
+#endif
 	volatile struct ipc_client_state *ics = NULL;
 	int32_t cs_index = -1;
 
 	os_mutex_lock(&vs->global_state.lock);
-
-	// Increment the connected client counter
-	vs->global_state.connected_client_count++;
-
-	// A client connected, so we're no longer in a delayed exit state
-	// (The delay thread will still check the client count before exiting)
-	vs->last_client_disconnect_ns = 0;
 
 	// find the next free thread in our array (server_thread_index is -1)
 	// and have it handle this connection
@@ -1123,8 +1133,12 @@ ipc_server_handle_client_connected_internal(struct ipc_server *vs, xrt_ipc_handl
 	}
 
 	if (it->state != IPC_THREAD_READY) {
+		// The exiting worker still needs this lock to destroy its session.
+		// Only the server main thread allocates slots, so it remains ours.
+		os_mutex_unlock(&vs->global_state.lock);
 		os_thread_join(&it->thread);
 		os_thread_destroy(&it->thread);
+		os_mutex_lock(&vs->global_state.lock);
 		it->state = IPC_THREAD_READY;
 	}
 
@@ -1141,6 +1155,7 @@ ipc_server_handle_client_connected_internal(struct ipc_server *vs, xrt_ipc_handl
 	ics->client_state.id = id;
 	ics->imc.ipc_handle = ipc_handle;
 	ics->imc.stream_socket = stream_socket;
+	ics->peer_pid = peer_pid;
 #ifdef XRT_OS_OSX
 	ics->imc.frame_reads = false;
 	ics->imc.frame_writes = true;
@@ -1155,15 +1170,25 @@ ipc_server_handle_client_connected_internal(struct ipc_server *vs, xrt_ipc_handl
 
 	xrt_result_t xret = init_shm_and_instance_state(vs, ics);
 	if (xret != XRT_SUCCESS) {
-
-		// Unlock when we are done.
+		xrt_ipc_handle_close(ipc_handle);
+		ics->server_thread_index = -1;
+		it->state = IPC_THREAD_READY;
 		os_mutex_unlock(&vs->global_state.lock);
-
 		U_LOG_E("Failed to allocate shared memory!");
 		return;
 	}
 
-	os_thread_start(&it->thread, ipc_server_client_thread, (void *)ics);
+	vs->global_state.connected_client_count++;
+	vs->last_client_disconnect_ns = 0;
+	if (os_thread_start(&it->thread, ipc_server_client_thread, (void *)ics) != 0) {
+		vs->global_state.connected_client_count--;
+		ipc_message_channel_close((struct ipc_message_channel *)&ics->imc);
+		ipc_shmem_destroy((xrt_shmem_handle_t *)&ics->ism_handle, (void **)&vs->isms[cs_index],
+		                  sizeof(struct ipc_shared_memory));
+		ics->server_thread_index = -1;
+		it->state = IPC_THREAD_READY;
+		U_LOG_E("Failed to start IPC client thread");
+	}
 
 	// Unlock when we are done.
 	os_mutex_unlock(&vs->global_state.lock);

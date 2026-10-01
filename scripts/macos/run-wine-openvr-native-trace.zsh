@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: BSL-1.0
 set -euo pipefail
 
+source "${0:A:h}/wine-tcp-auth.zsh"
+
 script_dir=${0:A:h}
 repo_root=${script_dir:h:h}
 native_build=${MONADO_NATIVE_BUILD_DIR:-${repo_root}/build-wine}

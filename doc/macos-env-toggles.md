@@ -566,11 +566,12 @@ are the ones that matter in practice.
 | `XRT_MACOS_DISPLAY_LOSS_DELAY_MS` | same | 3000 | Grace period before stopping | `4135890` / `4135890` | a |
 | `XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS` | same | 5000 | Hard-exit watchdog after display-loss shutdown | `eaa4d7f` / `eaa4d7f` | a |
 | ~~`XRT_MACOS_LAUNCHD_PROCESS_TYPE`~~ | removed 2026-09-30 | `Interactive` | LaunchAgent `ProcessType` | `b38ccd0` / removed | c |
-| `IPC_WINE_TCP_PORT` | `ipc/server/ipc_server_mainloop_apple.c` | 0 (off) | Loopback TCP listener for Wine clients | `68b8620` / `68b8620` | a |
+| `IPC_WINE_TCP_PORT` | `ipc/server/ipc_server_mainloop_apple.c` | 0 (off) | Authenticated loopback TCP listener for Wine clients | `68b8620` / `68b8620` | a |
+| `IPC_WINE_TCP_TOKEN` | `ipc/shared/ipc_tcp_auth.c`, service/client connection setup | required when TCP is enabled | 256-bit shared authentication key, encoded as 64 lowercase hexadecimal characters; excluded from option logging | security hardening / security hardening | a |
 | `MONADO_WINE_TCP_PORT` | `ipc/client/ipc_client_connection.c` | unset (named pipe) | Windows client connects over TCP instead | `17f9d14` / `17f9d14` | a |
 | `XRT_MACOS_PROCESS_ACTIVITY` | `ipc/server/ipc_server_macos_activity.m` | unset (off) | Process-lifetime `NSProcessInfo` activity (`user-interactive` or `latency-critical`) | `69ca4d0` / `69ca4d0` | d |
 | ~~`XRT_MACOS_XPC_IMPORTANCE`~~ | removed 2026-09-30 | — | Client held an XPC importance lease for the session | `472c930` / removed | c |
-| `XRT_MACOS_METAL_XPC_EXTERNAL_BROKER` | `ipc/shared/ipc_metal_xpc_service.m` | off | Route Metal handles through the standalone broker (launchd vs manual A/B) | `1cec3f6` / `1cec3f6` | d |
+| `XRT_MACOS_METAL_XPC_EXTERNAL_BROKER` | `ipc/shared/ipc_metal_xpc_service.m` | off | Retired override; service startup rejects it | `1cec3f6` / `1cec3f6` | d |
 | `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD` | `compositor/client/comp_metal_release_wait_thread.m` | on in all builds (2026-09-30; finding 3 fixed earlier) | App-side swapchain release via the compositor wait thread | `b714613` / `b714613` | d |
 
 ### Tests and tools

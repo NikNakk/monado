@@ -66,6 +66,9 @@ comp_macos_remote_layer_supported(void)
 static inline CAContext *
 comp_macos_remote_layer_create_context(CALayer *layer)
 {
+	if (layer == nil || !comp_macos_remote_layer_supported()) {
+		return nil;
+	}
 	typedef CGSConnectionID (*main_connection_fn)(void);
 	main_connection_fn main_connection = (main_connection_fn)dlsym(RTLD_DEFAULT, "CGSMainConnectionID");
 	Class context_class = NSClassFromString(@"CAContext");
@@ -84,6 +87,9 @@ comp_macos_remote_layer_create_context(CALayer *layer)
 static inline CALayerHost *
 comp_macos_remote_layer_create_host(CAContextID context_id)
 {
+	if (context_id == 0 || !comp_macos_remote_layer_supported()) {
+		return nil;
+	}
 	Class host_class = NSClassFromString(@"CALayerHost");
 	if (host_class == nil) {
 		return nil;

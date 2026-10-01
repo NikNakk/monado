@@ -39,8 +39,9 @@ extern char **environ;
 	@autoreleasepool {
 		id<MTLDevice> device = handle.device;
 		id<MTLTexture> texture = device != nil ? [device newSharedTextureWithHandle:handle] : nil;
-		BOOL valid = texture != nil && texture.textureType == MTLTextureType2DArray && texture.arrayLength == 2 &&
-		             texture.width == 8 && texture.height == 8 && texture.pixelFormat == MTLPixelFormatRGBA8Unorm;
+		BOOL valid = texture != nil && texture.textureType == MTLTextureType2DArray &&
+		             texture.arrayLength == 2 && texture.width == 8 && texture.height == 8 &&
+		             texture.pixelFormat == MTLPixelFormatRGBA8Unorm;
 		if (texture != nil) {
 			[texture release];
 		}
@@ -66,8 +67,7 @@ extern char **environ;
 
 @end
 
-@interface IPCMetalXPCProbeListenerDelegate : NSObject <NSXPCListenerDelegate>
-{
+@interface IPCMetalXPCProbeListenerDelegate : NSObject <NSXPCListenerDelegate> {
 	IPCMetalXPCProbeService *_service;
 }
 @end
@@ -148,18 +148,19 @@ write_launch_agent_plist(const char *path, const char *executable, const char *s
 		NSDictionary *plist = @{
 			@"Label" : service,
 			@"ProgramArguments" : @[ exe, @"--xpc-service", service ],
-			@"MachServices" : @{ service : @YES },
+			@"MachServices" : @{service : @YES},
 			@"RunAtLoad" : @NO,
 		};
 
 		NSError *error = nil;
 		NSData *data = [NSPropertyListSerialization dataWithPropertyList:plist
-		                                                        format:NSPropertyListXMLFormat_v1_0
-		                                                       options:0
-		                                                         error:&error];
+		                                                          format:NSPropertyListXMLFormat_v1_0
+		                                                         options:0
+		                                                           error:&error];
 		if (data == nil || ![data writeToFile:plist_path options:NSDataWritingAtomic error:&error]) {
 			const char *message = error != nil ? error.localizedDescription.UTF8String : "unknown error";
-			fprintf(stderr, "Could not write temporary launchd plist: %s\n", message != NULL ? message : "unknown");
+			fprintf(stderr, "Could not write temporary launchd plist: %s\n",
+			        message != NULL ? message : "unknown");
 			return false;
 		}
 		return true;
@@ -195,14 +196,15 @@ call_texture_probe(NSXPCConnection *connection, MTLSharedTextureHandle *handle)
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
 	id<IPCMetalXPCProbeProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		fprintf(stderr, "XPC texture call failed: %s\n", error.localizedDescription.UTF8String);
-		dispatch_semaphore_signal(semaphore);
+	  fprintf(stderr, "XPC texture call failed: %s\n", error.localizedDescription.UTF8String);
+	  dispatch_semaphore_signal(semaphore);
 	}];
-	[proxy testTextureHandle:handle reply:^(BOOL remote_success) {
-		success = remote_success;
-		replied = YES;
-		dispatch_semaphore_signal(semaphore);
-	}];
+	[proxy testTextureHandle:handle
+	                   reply:^(BOOL remote_success) {
+		             success = remote_success;
+		             replied = YES;
+		             dispatch_semaphore_signal(semaphore);
+	                   }];
 
 	long wait_result = dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 5LL * NSEC_PER_SEC));
 	return wait_result == 0 && replied && success;
@@ -216,14 +218,15 @@ call_event_probe(NSXPCConnection *connection, MTLSharedEventHandle *handle)
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
 	id<IPCMetalXPCProbeProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		fprintf(stderr, "XPC event call failed: %s\n", error.localizedDescription.UTF8String);
-		dispatch_semaphore_signal(semaphore);
+	  fprintf(stderr, "XPC event call failed: %s\n", error.localizedDescription.UTF8String);
+	  dispatch_semaphore_signal(semaphore);
 	}];
-	[proxy testEventHandle:handle reply:^(BOOL remote_success) {
-		success = remote_success;
-		replied = YES;
-		dispatch_semaphore_signal(semaphore);
-	}];
+	[proxy testEventHandle:handle
+	                 reply:^(BOOL remote_success) {
+		           success = remote_success;
+		           replied = YES;
+		           dispatch_semaphore_signal(semaphore);
+	                 }];
 
 	long wait_result = dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, 5LL * NSEC_PER_SEC));
 	return wait_result == 0 && replied && success;
@@ -240,7 +243,8 @@ run_parent_probe(void)
 		}
 
 		char service_name[192];
-		snprintf(service_name, sizeof(service_name), "org.freedesktop.monado.metal-xpc-probe.%d", (int)getpid());
+		snprintf(service_name, sizeof(service_name), "org.freedesktop.monado.metal-xpc-probe.%d",
+		         (int)getpid());
 
 		char plist_path[PATH_MAX];
 		snprintf(plist_path, sizeof(plist_path), "/tmp/%s.plist", service_name);
@@ -260,7 +264,8 @@ run_parent_probe(void)
 		int result = 4;
 		NSString *service = [NSString stringWithUTF8String:service_name];
 		NSXPCConnection *connection = [[NSXPCConnection alloc] initWithMachServiceName:service options:0];
-		connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCProbeProtocol)];
+		connection.remoteObjectInterface =
+		    [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCProbeProtocol)];
 		[connection resume];
 
 		id<MTLDevice> device = MTLCreateSystemDefaultDevice();
@@ -319,8 +324,7 @@ run_parent_probe(void)
 		}
 
 		if (!call_event_probe(connection, event_handle) || event.signaledValue != 41) {
-			fprintf(stderr,
-			        "XPC shared-event handle probe failed (parent value=%llu)\n",
+			fprintf(stderr, "XPC shared-event handle probe failed (parent value=%llu)\n",
 			        (unsigned long long)event.signaledValue);
 			[event_handle release];
 			[event release];

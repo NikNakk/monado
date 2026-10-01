@@ -33,8 +33,13 @@ if(APPLE)
 		)
 	target_compile_options(monado_service_xpc_control PRIVATE -fblocks)
 	target_link_libraries(
-		monado_service_xpc_control PRIVATE xrt-interfaces ipc_shared
-						   "-framework Foundation" "-framework Metal"
+		monado_service_xpc_control
+		PRIVATE
+			xrt-interfaces
+			ipc_shared
+			aux_util
+			"-framework Foundation"
+			"-framework Metal"
 		)
 	install(TARGETS monado_service_xpc_control RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()

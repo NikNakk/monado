@@ -209,6 +209,9 @@ struct ipc_client_state
 
 	struct ipc_app_state client_state;
 
+	//! Kernel-verified native peer PID, zero for transports without peer credentials.
+	int64_t peer_pid;
+
 	//! Staging area for compact Wine/TCP layer uploads.
 	struct ipc_layer_slot wine_layer_slot_upload;
 	uint32_t wine_layer_slot_received;
@@ -356,7 +359,9 @@ struct ipc_server_mainloop
 	char *socket_filename;
 
 	//! Optional loopback TCP listener for Wine/Windows clients.
+	int socket_lock_fd;
 	int wine_tcp_listen_socket;
+	char wine_tcp_token[65];
 	uint16_t wine_tcp_port;
 
 	//! Should console input trigger shutdown?

@@ -1,5 +1,6 @@
 // Copyright 2019-2025, Collabora, Ltd.
 // Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -27,6 +28,71 @@
 #if defined(XRT_OS_WINDOWS) && !defined(XRT_ENV_MINGW)
 #define PATH_MAX 4096
 #endif
+
+#ifdef XRT_OS_LINUX
+#include <linux/limits.h>
+#endif
+
+#ifdef XRT_OS_UNIX
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+
+int
+u_file_write_private_atomic(const char *path, const void *data, size_t size)
+{
+#ifdef XRT_OS_UNIX
+	char temporary[PATH_MAX];
+	if (snprintf(temporary, sizeof(temporary), "%s.XXXXXX", path) >= (int)sizeof(temporary)) {
+		errno = ENAMETOOLONG;
+		return -1;
+	}
+	int fd = mkstemp(temporary); // Created privately from the first write.
+	if (fd < 0)
+		return -1;
+	if (fchmod(fd, S_IRUSR | S_IWUSR) != 0 || fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
+		int saved_errno = errno;
+		close(fd);
+		unlink(temporary);
+		errno = saved_errno;
+		return -1;
+	}
+	size_t offset = 0;
+	while (offset < size) {
+		ssize_t count = write(fd, (const char *)data + offset, size - offset);
+		if (count < 0 && errno == EINTR)
+			continue;
+		if (count <= 0) {
+			int saved_errno = count == 0 ? EIO : errno;
+			close(fd);
+			unlink(temporary);
+			errno = saved_errno;
+			return -1;
+		}
+		offset += (size_t)count;
+	}
+	int result = fsync(fd);
+	int saved_errno = errno;
+	if (close(fd) != 0 && result == 0) {
+		result = -1;
+		saved_errno = errno;
+	}
+	if (result == 0 && rename(temporary, path) == 0)
+		return 0;
+	if (result == 0)
+		saved_errno = errno;
+	unlink(temporary);
+	errno = saved_errno;
+	return -1;
+#else
+	(void)path;
+	(void)data;
+	(void)size;
+	errno = ENOSYS;
+	return -1;
+#endif
+}
 
 #ifdef XRT_OS_WINDOWS
 typedef DWORD(WINAPI *PFN_GetTempPath2A)(DWORD, LPSTR);

@@ -33,6 +33,7 @@
 #include "util/u_truncate_printf.h"
 
 #include "shared/ipc_utils.h"
+#include "shared/ipc_tcp_auth.h"
 #include "shared/ipc_protocol.h"
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
 #include "shared/ipc_metal_xpc_service.h"
@@ -112,6 +113,11 @@ ipc_client_tcp_connect(struct ipc_connection *ipc_c, const char *port_text)
 		return false;
 	}
 
+	const char *token = getenv("IPC_WINE_TCP_TOKEN");
+	if (!ipc_tcp_auth_token_valid(token)) {
+		IPC_ERROR(ipc_c, "Wine TCP requires IPC_WINE_TCP_TOKEN: 64 lowercase hexadecimal characters");
+		return false;
+	}
 	WSADATA wsa = {0};
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
 		IPC_ERROR(ipc_c, "WSAStartup failed");
@@ -132,6 +138,13 @@ ipc_client_tcp_connect(struct ipc_connection *ipc_c, const char *port_text)
 
 	if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) == SOCKET_ERROR) {
 		IPC_ERROR(ipc_c, "Wine bridge connect(127.0.0.1:%ld) failed: %d", port, WSAGetLastError());
+		closesocket(sock);
+		WSACleanup();
+		return false;
+	}
+
+	if (!ipc_tcp_authenticate_client((xrt_ipc_handle_t)(uintptr_t)sock, token, 5000)) {
+		IPC_ERROR(ipc_c, "Wine TCP authentication failed");
 		closesocket(sock);
 		WSACleanup();
 		return false;

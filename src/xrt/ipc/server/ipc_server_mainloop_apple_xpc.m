@@ -94,10 +94,20 @@ set_monado_application_icon(void)
 	NSString *svg =
 	    @"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 150.72 150.72\">"
 	     "<g transform=\"translate(0 3.16)\">"
-	     "<path fill=\"#782b90\" d=\"m143.23,19.75L79.85,0.66c-2.93,-0.88 -6.05,-0.88 -8.97,0L7.49,19.75c-4.45,1.34 -7.49,5.43 -7.49,10.08v85.07c0,4.66 3.07,8.77 7.54,10.09l63.43,18.77c2.87,0.85 5.92,0.85 8.79,0l63.43,-18.77c4.47,-1.32 7.54,-5.43 7.54,-10.09L150.72,29.83c0,-4.64 -3.04,-8.74 -7.49,-10.08ZM49.02,104l-17.99,-5.35c-2.52,-0.75 -4.24,-3.06 -4.24,-5.68v-36.81l22.23,30.57v17.28ZM75.36,108.15v0l-0,-0 -0,0v-0L26.79,41.84l17.99,-5.35c2.35,-0.7 4.88,0.12 6.38,2.06l24.19,31.33 24.19,-31.33c1.5,-1.94 4.04,-2.76 6.38,-2.06l17.99,5.35 -48.56,66.3ZM123.93,92.96c0,2.62 -1.72,4.94 -4.24,5.68l-17.99,5.35v-17.28l22.23,-30.57v36.81Z\"/>"
-	     "<path fill=\"#ffffff\" d=\"M49.02,104l-17.99,-5.35c-2.52,-0.75 -4.24,-3.06 -4.24,-5.68v-36.81l22.23,30.57v17.28Z\"/>"
-	     "<path fill=\"#ffffff\" d=\"M75.36,108.15L26.79,41.84l17.99,-5.35c2.35,-0.7 4.88,0.12 6.38,2.06l24.19,31.33 24.19,-31.33c1.5,-1.94 4.04,-2.76 6.38,-2.06l17.99,5.35 -48.56,66.3Z\"/>"
-	     "<path fill=\"#ffffff\" d=\"M123.93,92.96c0,2.62 -1.72,4.94 -4.24,5.68l-17.99,5.35v-17.28l22.23,-30.57v36.81Z\"/>"
+	     "<path fill=\"#782b90\" d=\"m143.23,19.75L79.85,0.66c-2.93,-0.88 -6.05,-0.88 "
+	     "-8.97,0L7.49,19.75c-4.45,1.34 -7.49,5.43 -7.49,10.08v85.07c0,4.66 3.07,8.77 "
+	     "7.54,10.09l63.43,18.77c2.87,0.85 5.92,0.85 8.79,0l63.43,-18.77c4.47,-1.32 7.54,-5.43 "
+	     "7.54,-10.09L150.72,29.83c0,-4.64 -3.04,-8.74 -7.49,-10.08ZM49.02,104l-17.99,-5.35c-2.52,-0.75 "
+	     "-4.24,-3.06 -4.24,-5.68v-36.81l22.23,30.57v17.28ZM75.36,108.15v0l-0,-0 "
+	     "-0,0v-0L26.79,41.84l17.99,-5.35c2.35,-0.7 4.88,0.12 6.38,2.06l24.19,31.33 24.19,-31.33c1.5,-1.94 "
+	     "4.04,-2.76 6.38,-2.06l17.99,5.35 -48.56,66.3ZM123.93,92.96c0,2.62 -1.72,4.94 "
+	     "-4.24,5.68l-17.99,5.35v-17.28l22.23,-30.57v36.81Z\"/>"
+	     "<path fill=\"#ffffff\" d=\"M49.02,104l-17.99,-5.35c-2.52,-0.75 -4.24,-3.06 "
+	     "-4.24,-5.68v-36.81l22.23,30.57v17.28Z\"/>"
+	     "<path fill=\"#ffffff\" d=\"M75.36,108.15L26.79,41.84l17.99,-5.35c2.35,-0.7 4.88,0.12 "
+	     "6.38,2.06l24.19,31.33 24.19,-31.33c1.5,-1.94 4.04,-2.76 6.38,-2.06l17.99,5.35 -48.56,66.3Z\"/>"
+	     "<path fill=\"#ffffff\" d=\"M123.93,92.96c0,2.62 -1.72,4.94 "
+	     "-4.24,5.68l-17.99,5.35v-17.28l22.23,-30.57v36.81Z\"/>"
 	     "</g></svg>";
 	NSData *data = [svg dataUsingEncoding:NSUTF8StringEncoding];
 	NSImage *image = data != nil ? [[NSImage alloc] initWithData:data] : nil;
@@ -193,17 +203,18 @@ schedule_display_loss_shutdown_watchdog(void)
 	pid_t pid = getpid();
 	dispatch_time_t when = dispatch_time(DISPATCH_TIME_NOW, watchdog_ms * (int64_t)NSEC_PER_MSEC);
 	dispatch_after(when, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-		/*
-		 * Reaching this block means normal shutdown did not terminate the
-		 * process in time. The service is launchd-disposable, and process exit
-		 * is safer than leaving a Metal/CAMetalLayer teardown indefinitely
-		 * wedged after its original display has disappeared.
-		 */
-		U_LOG_E("macOS display-loss shutdown watchdog expired after %lld ms for monado-service pid=%d; "
-		        "forcing process exit",
-		        (long long)watchdog_ms, (int)pid);
-		fflush(stderr);
-		_exit(0);
+	  /*
+	   * Reaching this block means normal shutdown did not terminate the
+	   * process in time. The service is launchd-disposable, and process exit
+	   * is safer than leaving a Metal/CAMetalLayer teardown indefinitely
+	   * wedged after its original display has disappeared.
+	   */
+	  U_LOG_E(
+	      "macOS display-loss shutdown watchdog expired after %lld ms for monado-service pid=%d; "
+	      "forcing process exit",
+	      (long long)watchdog_ms, (int)pid);
+	  fflush(stderr);
+	  _exit(0);
 	});
 }
 
@@ -220,8 +231,9 @@ handle_display_recovered(void)
 	if (screen != nil) {
 		[g_compositor_window setFrame:[screen frame] display:YES];
 		[g_compositor_window orderFrontRegardless];
-		U_LOG_I("Selected macOS compositor display id=%u recovered before shutdown; restoring compositor window",
-		        (unsigned)g_compositor_display_id);
+		U_LOG_I(
+		    "Selected macOS compositor display id=%u recovered before shutdown; restoring compositor window",
+		    (unsigned)g_compositor_display_id);
 	}
 
 	g_display_loss_since_ns = 0;
@@ -248,8 +260,10 @@ poll_compositor_display_lifecycle(struct ipc_server *vs)
 			g_display_loss_since_ns = now_ns;
 			[g_compositor_window orderOut:nil];
 			g_display_loss_hidden = true;
-			U_LOG_W("Selected macOS compositor display id=%u is unavailable; hiding compositor window immediately",
-			        (unsigned)g_compositor_display_id);
+			U_LOG_W(
+			    "Selected macOS compositor display id=%u is unavailable; hiding compositor window "
+			    "immediately",
+			    (unsigned)g_compositor_display_id);
 		}
 
 		if (!debug_get_bool_option_macos_exit_on_display_loss() || g_display_loss_shutdown_requested) {
@@ -273,12 +287,16 @@ poll_compositor_display_lifecycle(struct ipc_server *vs)
 
 		g_display_loss_shutdown_requested = true;
 		if (connected_clients == 0 && idle_exit_enabled) {
-			U_LOG_I("Selected macOS compositor display remains unavailable; idle-exit policy will stop the service");
+			U_LOG_I(
+			    "Selected macOS compositor display remains unavailable; idle-exit policy will stop the "
+			    "service");
 			return;
 		}
 
-		U_LOG_I("Selected macOS compositor display remains unavailable for %llu ms; requesting service shutdown (pid=%d)",
-		        (unsigned long long)(delay_ns / 1000000ULL), (int)getpid());
+		U_LOG_I(
+		    "Selected macOS compositor display remains unavailable for %llu ms; requesting service shutdown "
+		    "(pid=%d)",
+		    (unsigned long long)(delay_ns / 1000000ULL), (int)getpid());
 		schedule_display_loss_shutdown_watchdog();
 		ipc_server_handle_shutdown_signal(vs);
 	}
@@ -314,6 +332,7 @@ void
 ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 {
 	ipc_server_mainloop_apple_poll(vs, ml);
+	ipc_metal_xpc_service_expire_tokens();
 	poll_compositor_display_lifecycle(vs);
 }
 

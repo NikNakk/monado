@@ -39,9 +39,39 @@ existing compositor / reprojection / presentation
 PSVR2
 ```
 
-The TCP endpoint is development-only, loopback-only, and opt-in. Native macOS
+The TCP endpoint is development-only, loopback-only, opt-in and authenticated. Native macOS
 OpenXR applications continue to use the ordinary Unix socket and XPC Metal
 side-channel unchanged.
+
+## TCP authentication
+
+Before bootstrapping a TCP-enabled service, source the authentication helper in
+that shell:
+
+```sh
+source scripts/macos/wine-tcp-auth.zsh
+IPC_WINE_TCP_PORT=4242 IPC_EXIT_WHEN_IDLE=0 <native-build>/src/xrt/targets/service/monado-service-xpc-control bootstrap
+```
+
+The Wine runner scripts source the same helper automatically. It creates a
+256-bit key in `~/Library/Caches/monado/wine-tcp-token` with mode 0600 in a
+private directory, then exports `IPC_WINE_TCP_TOKEN` to both processes. The
+launchd plist is also written privately with mode 0600. Explicit keys must be
+64 lowercase hexadecimal characters. Do not put keys in command-line arguments
+or paste them into logs.
+
+The bridge uses fresh random challenges and role-separated HMAC-SHA256 proofs
+from the platform crypto libraries to authenticate both the client and server
+before ordinary IPC traffic. The key is not transmitted. Missing keys,
+mismatched proofs and incomplete handshakes fail closed; the server handshake
+has a one-second deadline. Existing unauthenticated Wine runtime binaries must
+be rebuilt together with the service. Previously registered launchd services
+must be bootstrapped again from a shell with the key exported.
+
+To rotate the key, stop the service and clients, remove the private token file,
+then source the helper and bootstrap again in a fresh shell. The key is a bearer
+credential for applications running as that user; this bridge does not isolate
+mutually hostile applications within the same user account.
 
 ## Why TCP
 
@@ -162,7 +192,7 @@ The first implementation intentionally supports:
   when using the patched private DXMT, with CPU-wait fallback;
 - one-RPC single-projection submission, with compact chunk fallback for
   multi-layer frames;
-- development loopback TCP without authentication.
+- authenticated development loopback TCP; native peer credentials are unavailable on this transport.
 
 The principal remaining performance work is measurement and tuning: compare
 the GPU-only path with `MONADO_WINE_GPU_SYNC=0`, inspect the timing CSV, and
