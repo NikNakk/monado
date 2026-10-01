@@ -195,26 +195,6 @@ ipc_client_compositor_import_iosurface_token(struct xrt_compositor_native *xcn,
                                              uint64_t token,
                                              struct xrt_swapchain **out_xsc);
 
-/*!
- * macOS helper: import externally shared Metal textures directly by the
- * bootstrap names of their MTLSharedTextureHandle Mach ports.
- */
-xrt_result_t
-ipc_client_compositor_import_metal_bootstrap_textures(struct xrt_compositor_native *xcn,
-                                                      const struct xrt_swapchain_create_info *info,
-                                                      uint32_t image_count,
-                                                      const struct ipc_metal_bootstrap_name *bootstrap_names,
-                                                      struct xrt_swapchain **out_xsc);
-
-/*!
- * macOS helper: bind an already-existing external MTLSharedEvent to a
- * native compositor semaphore by its bootstrap registration name.
- */
-xrt_result_t
-ipc_client_compositor_import_metal_bootstrap_semaphore(struct xrt_compositor_native *xcn,
-                                                       const char *bootstrap_name,
-                                                       struct xrt_compositor_semaphore **out_xcsem);
-
 uint32_t
 ipc_client_space_get_id(struct xrt_space *space);
 
