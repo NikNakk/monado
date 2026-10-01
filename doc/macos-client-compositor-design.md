@@ -490,24 +490,27 @@ clock and the host clock, which a 30 s window keeps under about 0.6 ms.
 All of phase 2 is in the tree, behind `XRT_MACOS_CLIENT_COMPOSITOR=1` in the
 client's environment. Without it, clients take exactly the old service path.
 
-- **Service side** (`ipc_server_macos_display_host.c`, `comp_window_macos.m`):
+- **Service side** (`ipc_server_macos_display_host.c`, `comp_macos_frontend.m`):
   a table of client `CALayerHost`s above the presenter's own layer, with
   `compositor_hosted_attach`, `_set_visibility` and `_detach`. The layer is
   removed when the client disconnects.
-- **Hosted presenter** (`comp_window_macos.m`): in a client, the
+- **Hosted frontend** (`comp_macos_frontend.m`): in a client, the
   `CAMetalLayer` sits in a `CAContext` rather than in a window. It shows
   itself in the handoff order (shown, then exclusive after the first present).
 - **Metal swapchains** (`comp_metal_glue.c`): service builds carry both paths
-  and pick the direct one, with a local semaphore pair, when hosted. The
+  and select from the native compositor's `is_remote` property: a local
+  compositor uses direct swapchains and a local semaphore pair. Service
+  semaphore creation receives its compositor and Metal device explicitly. The
   non-blocking release (wait thread) is the default in both, as in the
   service path; `XRT_MACOS_APP_RELEASE_SHARED_EVENT_WAIT_THREAD=0` turns it
   off.
 - **IPC client** (`ipc_client_macos_hosted.c`, `ipc_client_system.c`): when
-  asked, the client registers the host functions and creates
-  `comp_main_create_system_compositor()` on the IPC head device. Sessions are
-  headless on the service side. The local compositor's events replace the
+  asked, the client creates an owned hosted connection binding and an explicit
+  target factory, then calls `comp_main_create_system_compositor()` on the IPC
+  head device. The binding is passed to the frontend and the session adapter.
+  Sessions are headless on the service side. The local compositor's events replace the
   compositor events of the service's unused per-session compositor. If the
-  local compositor cannot be created, everything is unregistered and the
+  local compositor cannot be created, the binding and factory are released and the
   client falls back to the service.
 - **IPC head device**: the shared memory now carries the screen size, frame
   interval, viewports, rotations and distortion FoVs. A hosted client builds
@@ -537,8 +540,11 @@ client's environment. Without it, clients take exactly the old service path.
   by the service's compositor. That compositor's sink also publishes each
   BC4 camera frame into a shared-memory frame share (three slots per eye,
   sequence-checked, no locks between processes), created when a client first
-  asks. The shared memory's `passthrough_share_available` says whether the
-  service has camera frames. If so, a hosted client's IPC head device gains
+  asks. The producer retains a writable mapping, while the descriptor sent
+  to consumers is opened read-only and mapped with `PROT_READ`. Consumers
+  cannot use that descriptor to mutate the frame-share layout, truncate the
+  object, or create a writable shared mapping. The shared memory's
+  `passthrough_share_available` says whether the service has camera frames. If so, a hosted client's IPC head device gains
   `set_passthrough_sinks`: it maps the share and a thread pushes new frames
   into the client compositor's sinks, polling every 2 ms, so the existing
   Metal passthrough code runs unchanged. The UV maps come from the
@@ -566,7 +572,36 @@ service.
   launching a second application covers the first only once it has begun
   its session and drawn a frame, and ending it brings the first back.
   `XRT_MACOS_HOSTED_FOLLOW_SERVICE_FOCUS=0` restores the earlier behaviour
-  (show at start, ignore the service's focus). Not yet run on hardware.
+  (show when the session begins, ignore the service's focus). Not yet run on
+  hardware.
+
+### Ownership and teardown hardening (2026-10-01)
+
+`comp_macos_frontend.m` owns the window or CAContext, the Metal layer and the
+service's hosted-layer table. Both frontends share display validation and
+Metal-layer construction. Rendering, pacing and drawable presentation remain
+in the single `comp_window_macos.m` implementation.
+
+The client binding (`u_macos_hosted_client`) is reference-counted and owned by
+the IPC instance. There is no process-wide hosted-client registry. The local
+session uses a compositor-scoped lifecycle observer in `comp_multi`, so it
+does not replace compositor entry points or look up a process-global session.
+Duplicate local sessions are rejected before a new remote session is created.
+
+End and destroy hide the hosted layer synchronously before reporting the
+session inactive. The server also hides on deactivation and session teardown,
+and rejects show/exclusive requests from inactive sessions. This restores the
+service's layer even if the application never polls another event. A submitted
+drawable captures a handoff generation; callbacks from before hide, detach or
+close cannot promote a later handoff. Callback objects retain the binding,
+and closing the binding disarms its IPC callbacks before the connection dies.
+
+Linux regression tests cover descriptor rights and publication, end and
+destroy without event polling, independent instances, duplicate-session
+rejection, failed activity reports, and stale presentation callbacks. The
+Objective-C frontend changes still need a macOS build and on-headset checks:
+end/destroy while exclusive, begin/end/begin, switching between two apps,
+service fallback, and passthrough with `PSVR2_CAMERA_STREAMS=1`.
 
 Not done yet:
 

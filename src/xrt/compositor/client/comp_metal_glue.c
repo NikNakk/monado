@@ -11,35 +11,22 @@
 #include "client/comp_metal_client.h"
 #ifdef XRT_MODULE_COMPOSITOR_UTIL
 #include "client/comp_metal_release_wait_thread.h"
-#ifdef XRT_FEATURE_SERVICE
-#include "client/comp_metal_service_semaphore.h"
-#include "util/u_macos_display_host.h"
-#endif
 #endif
 
 struct xrt_compositor_metal *
 xrt_gfx_metal_provider_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue)
 {
 #if defined(XRT_MODULE_COMPOSITOR_UTIL) && defined(XRT_FEATURE_SERVICE)
-	/*
-	 * A client hosted by the service composites in-process, so its native
-	 * compositor is local: use the direct swapchain path. Otherwise the native
-	 * compositor is the service's, reached over IPC and XPC.
-	 */
-	bool hosted = u_macos_hosted_client_available();
 	struct xrt_compositor_metal *xcm =
-	    hosted ? client_metal_direct_compositor_create(xcn, metal_device, command_queue)
-	           : client_metal_service_compositor_create(xcn, metal_device, command_queue);
-	if (xcm != NULL && !hosted) {
-		client_metal_service_semaphore_register_compositor(&xcm->base, metal_device);
-	}
+	    xcn->is_remote ? client_metal_service_compositor_create(xcn, metal_device, command_queue)
+	                   : client_metal_direct_compositor_create(xcn, metal_device, command_queue);
 #elif defined(XRT_MODULE_COMPOSITOR_UTIL)
 	struct xrt_compositor_metal *xcm = client_metal_direct_compositor_create(xcn, metal_device, command_queue);
 #else
 	struct xrt_compositor_metal *xcm = client_metal_compositor_create(xcn, metal_device, command_queue);
 #endif
 #ifdef XRT_MODULE_COMPOSITOR_UTIL
-	return client_metal_release_wait_thread_attach(xcm, command_queue);
+	return client_metal_release_wait_thread_attach(xcm, command_queue, xcn->is_remote);
 #else
 	return xcm;
 #endif

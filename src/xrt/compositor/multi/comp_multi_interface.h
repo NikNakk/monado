@@ -18,6 +18,26 @@ extern "C" {
 
 struct u_pacing_app_factory;
 
+/*!
+ * Optional observer owned by the caller. Both callbacks must be provided.
+ * Called synchronously on begin/end and destruction, respectively. Destruction
+ * also means the session has stopped, even if end was never called.
+ * Registration and context release must be serialized with these operations.
+ * Clear the observer before releasing its context.
+ */
+struct comp_multi_lifecycle_callbacks
+{
+	void (*set_active)(void *ctx, bool active);
+	void (*destroyed)(void *ctx);
+};
+
+//! Only accepts a native compositor created by comp_multi.
+void
+comp_multi_compositor_set_lifecycle_callbacks(struct xrt_compositor_native *xcn,
+                                              const struct comp_multi_lifecycle_callbacks *callbacks,
+                                              void *ctx);
+
+
 
 /*!
  * Create a "system compositor" that can handle multiple clients (each

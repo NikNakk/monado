@@ -41,7 +41,8 @@ ipc_handle_compositor_hosted_set_visibility(volatile struct ipc_client_state *ic
 	if (!ics->hosted_attached) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
-	if (visibility > U_MACOS_DISPLAY_HOST_EXCLUSIVE) {
+	if (visibility > U_MACOS_DISPLAY_HOST_EXCLUSIVE ||
+	    (visibility != U_MACOS_DISPLAY_HOST_HIDDEN && !ics->client_state.session_active)) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 	return u_macos_display_host_set_visibility(ics->hosted_client_id,
@@ -87,6 +88,10 @@ ipc_handle_compositor_hosted_session_active(volatile struct ipc_client_state *ic
 	if (active) {
 		ipc_server_activate_session(ics);
 	} else {
+		// Ending a session must restore the display even if it never polls again.
+		if (ics->hosted_attached) {
+			(void)u_macos_display_host_set_visibility(ics->hosted_client_id, U_MACOS_DISPLAY_HOST_HIDDEN);
+		}
 		ipc_server_deactivate_session(ics);
 	}
 	return XRT_SUCCESS;
@@ -156,7 +161,7 @@ ipc_handle_device_passthrough_share_get(volatile struct ipc_client_state *ics,
 		size_t size = u_frame_share_size(2, PASSTHROUGH_SHARE_MAX_FRAME_SIZE);
 		xrt_shmem_handle_t handle = XRT_SHMEM_HANDLE_INVALID;
 		void *mem = NULL;
-		xret = ipc_shmem_create_private("passthrough", size, &handle, &mem);
+		xret = ipc_shmem_create_private_readonly("passthrough", size, &handle, &mem);
 		if (xret == XRT_SUCCESS && !u_frame_share_init(mem, size, 2, PASSTHROUGH_SHARE_MAX_FRAME_SIZE)) {
 			ipc_shmem_destroy(&handle, &mem, size);
 			xret = XRT_ERROR_ALLOCATION;

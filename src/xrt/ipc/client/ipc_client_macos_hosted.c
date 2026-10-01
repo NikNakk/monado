@@ -14,7 +14,9 @@
 
 #include "util/u_debug.h"
 #include "util/u_logging.h"
-#include "util/u_macos_display_host.h"
+#include "util/u_macos_hosted_client.h"
+#include "util/u_misc.h"
+#include "main/comp_window_macos_hosted.h"
 
 #include "main/comp_main_interface.h"
 
@@ -26,6 +28,20 @@
 
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_client_compositor, "XRT_MACOS_CLIENT_COMPOSITOR", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_hosted_follow_service_focus, "XRT_MACOS_HOSTED_FOLLOW_SERVICE_FOCUS", true)
+
+struct ipc_client_macos_hosted
+{
+	struct u_macos_hosted_client *client;
+	struct comp_target_factory *factory;
+};
+
+static xrt_result_t
+hosted_set_active(void *ctx, bool active)
+{
+	return ipc_call_compositor_hosted_session_active((struct ipc_connection *)ctx, active);
+}
+
 
 
 /*
@@ -57,6 +73,7 @@ static const struct u_macos_hosted_client_ops hosted_ops = {
     .attach = hosted_attach,
     .set_visibility = hosted_set_visibility,
     .detach = hosted_detach,
+    .set_active = hosted_set_active,
 };
 
 
@@ -69,56 +86,84 @@ static const struct u_macos_hosted_client_ops hosted_ops = {
 xrt_result_t
 ipc_client_macos_hosted_create_system_compositor(struct ipc_connection *ipc_c,
                                                  struct xrt_device *head,
-                                                 struct xrt_system_compositor **out_xsysc)
+                                                 struct xrt_system_compositor **out_xsysc,
+                                                 struct ipc_client_macos_hosted **out_hosted)
 {
 	if (!debug_get_bool_option_macos_client_compositor()) {
 		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
 	}
 
-	// The Metal glue and the presenter check this, so register first.
-	u_macos_hosted_client_register(&hosted_ops, ipc_c);
+	struct ipc_client_macos_hosted *hosted = U_TYPED_CALLOC(struct ipc_client_macos_hosted);
+	if (hosted == NULL) {
+		return XRT_ERROR_ALLOCATION;
+	}
+	hosted->client =
+	    u_macos_hosted_client_create(&hosted_ops, ipc_c, debug_get_bool_option_macos_hosted_follow_service_focus());
+	if (hosted->client == NULL) {
+		free(hosted);
+		return XRT_ERROR_ALLOCATION;
+	}
+	hosted->factory = comp_window_macos_hosted_factory_create(hosted->client);
+	if (hosted->factory == NULL) {
+		ipc_client_macos_hosted_fini(hosted);
+		return XRT_ERROR_ALLOCATION;
+	}
 
 	ipc_client_hmd_prepare_for_local_compositor(head);
 
 	struct xrt_system_compositor *xsysc = NULL;
-	xrt_result_t xret = comp_main_create_system_compositor(head, NULL, NULL, &xsysc);
+	xrt_result_t xret = comp_main_create_system_compositor(head, hosted->factory, NULL, &xsysc);
 	if (xret != XRT_SUCCESS || xsysc == NULL) {
 		U_LOG_W("In-process compositor unavailable (%d), using the service's compositor", (int)xret);
-		u_macos_hosted_client_unregister(ipc_c);
+		ipc_client_macos_hosted_fini(hosted);
 		return xret != XRT_SUCCESS ? xret : XRT_ERROR_IPC_FAILURE;
 	}
 
 	U_LOG_I("Compositing in-process; the service hosts this client's layer");
 	*out_xsysc = xsysc;
+	*out_hosted = hosted;
 
 	return XRT_SUCCESS;
 }
 
 void
-ipc_client_macos_hosted_fini(struct ipc_connection *ipc_c)
+ipc_client_macos_hosted_fini(struct ipc_client_macos_hosted *hosted)
 {
-	u_macos_hosted_client_unregister(ipc_c);
+	if (hosted == NULL) {
+		return;
+	}
+	u_macos_hosted_client_close(hosted->client);
+	u_macos_hosted_client_release(hosted->client);
+	comp_window_macos_hosted_factory_destroy(hosted->factory);
+	free(hosted);
+}
+
+struct u_macos_hosted_client *
+ipc_client_macos_hosted_get_client(struct ipc_client_macos_hosted *hosted)
+{
+	return hosted->client;
 }
 
 bool
-ipc_client_macos_hosted_follows_service_focus(void)
+ipc_client_macos_hosted_follows_service_focus(struct u_macos_hosted_client *client)
 {
-	return u_macos_hosted_client_follows_service_focus();
+	return u_macos_hosted_client_follows_service_focus(client);
 }
 
 void
-ipc_client_macos_hosted_session_active(struct ipc_connection *ipc_c, bool active)
+ipc_client_macos_hosted_session_active(struct u_macos_hosted_client *client, bool active)
 {
-	xrt_result_t xret = ipc_call_compositor_hosted_session_active(ipc_c, active);
-	IPC_CHK_ONLY_PRINT(ipc_c, xret, "ipc_call_compositor_hosted_session_active");
+	xrt_result_t xret = u_macos_hosted_client_set_active(client, active);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_W("The service did not accept hosted session activity (%d)", (int)xret);
+	}
 }
 
 void
-ipc_client_macos_hosted_set_visible(bool visible)
+ipc_client_macos_hosted_set_visible(struct u_macos_hosted_client *client, bool visible)
 {
-	// Shown first; the presenter makes it exclusive after its next frame.
-	xrt_result_t xret =
-	    u_macos_hosted_client_set_visibility(visible ? U_MACOS_DISPLAY_HOST_SHOWN : U_MACOS_DISPLAY_HOST_HIDDEN);
+	xrt_result_t xret = u_macos_hosted_client_set_visibility(client, visible ? U_MACOS_DISPLAY_HOST_SHOWN
+	                                                                         : U_MACOS_DISPLAY_HOST_HIDDEN);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_W("The service did not %s the hosted layer (%d)", visible ? "show" : "hide", (int)xret);
 	}

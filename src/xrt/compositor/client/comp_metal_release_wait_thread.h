@@ -20,7 +20,7 @@ bool
 client_metal_release_wait_thread_enabled(void);
 
 struct xrt_compositor_metal *
-client_metal_release_wait_thread_attach(struct xrt_compositor_metal *xcm, void *command_queue);
+client_metal_release_wait_thread_attach(struct xrt_compositor_metal *xcm, void *command_queue, bool remote);
 
 #endif
 

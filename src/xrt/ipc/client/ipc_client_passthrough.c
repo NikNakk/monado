@@ -90,7 +90,7 @@ map_share(struct ipc_client_passthrough *icp)
 	}
 
 	void *mem = NULL;
-	xret = ipc_shmem_map(handle, (size_t)size, &mem);
+	xret = ipc_shmem_map_readonly(handle, (size_t)size, &mem);
 	if (xret != XRT_SUCCESS || !u_frame_share_is_valid(mem, (size_t)size)) {
 		ipc_shmem_destroy(&handle, &mem, (size_t)size);
 		return xret != XRT_SUCCESS ? xret : XRT_ERROR_IPC_FAILURE;

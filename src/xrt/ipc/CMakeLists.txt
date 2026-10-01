@@ -195,7 +195,7 @@ if(APPLE AND XRT_FEATURE_SERVICE)
 				client/ipc_client_passthrough.c client/ipc_client_passthrough.h
 			)
 		target_compile_definitions(ipc_client PRIVATE XRT_IPC_MACOS_HOSTED_COMPOSITOR)
-		target_link_libraries(ipc_client PRIVATE comp_main)
+		target_link_libraries(ipc_client PRIVATE comp_main comp_multi)
 	endif()
 endif()
 

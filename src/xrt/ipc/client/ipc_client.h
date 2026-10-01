@@ -156,13 +156,17 @@ ipc_client_device_create(struct ipc_connection *ipc_c,
 struct xrt_system *
 ipc_client_system_create(struct ipc_connection *ipc_c, struct xrt_system_compositor *xsysc);
 
+struct u_macos_hosted_client;
+
 /*!
  * Like @ref ipc_client_system_create, but @p xsysc is a compositor running in
  * this process: sessions are headless on the service side, and the native
  * compositor is created locally, its events merged into the session's.
  */
 struct xrt_system *
-ipc_client_system_create_with_local_compositor(struct ipc_connection *ipc_c, struct xrt_system_compositor *xsysc);
+ipc_client_system_create_with_local_compositor(struct ipc_connection *ipc_c,
+                                               struct xrt_system_compositor *xsysc,
+                                               struct u_macos_hosted_client *client);
 
 struct xrt_space_overseer *
 ipc_client_space_overseer_create(struct ipc_connection *ipc_c);

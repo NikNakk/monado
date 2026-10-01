@@ -48,6 +48,14 @@ ipc_shmem_create(size_t size, xrt_shmem_handle_t *out_handle, void **out_map);
  */
 xrt_result_t
 ipc_shmem_create_private(const char *suffix, size_t size, xrt_shmem_handle_t *out_handle, void **out_map);
+
+/*!
+ * Create a private region with a writable producer mapping and a read-only
+ * descriptor for consumers. The descriptor cannot create writable shared
+ * mappings or truncate the region. Close it with ipc_shmem_destroy().
+ */
+xrt_result_t
+ipc_shmem_create_private_readonly(const char *suffix, size_t size, xrt_shmem_handle_t *out_handle, void **out_map);
 #endif
 
 /*!
@@ -62,6 +70,12 @@ ipc_shmem_create_private(const char *suffix, size_t size, xrt_shmem_handle_t *ou
  */
 xrt_result_t
 ipc_shmem_map(xrt_shmem_handle_t handle, size_t size, void **out_map);
+
+#if defined(XRT_OS_UNIX)
+//! Map a consumer descriptor without requesting write access.
+xrt_result_t
+ipc_shmem_map_readonly(xrt_shmem_handle_t handle, size_t size, void **out_map);
+#endif
 
 /*!
  * Unmap a shared memory region.

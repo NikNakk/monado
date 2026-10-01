@@ -84,8 +84,10 @@ struct ipc_client_instance
 
 	struct ipc_connection ipc_c;
 
-	//! The system compositor runs in this process, hosted by the service.
-	bool local_compositor;
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	//! Owns the hosted connection binding and its target factory.
+	struct ipc_client_macos_hosted *hosted;
+#endif
 
 #ifdef XRT_OS_ANDROID
 	struct android_instance_base android;
@@ -109,9 +111,8 @@ create_system_compositor(struct ipc_client_instance *ii,
 
 #ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
 	// Composite in-process if asked to and possible, else fall through.
-	xret = ipc_client_macos_hosted_create_system_compositor(&ii->ipc_c, xdev, &xsysc);
+	xret = ipc_client_macos_hosted_create_system_compositor(&ii->ipc_c, xdev, &xsysc, &ii->hosted);
 	if (xret == XRT_SUCCESS) {
-		ii->local_compositor = true;
 		*out_xsysc = xsysc;
 		return XRT_SUCCESS;
 	}
@@ -249,9 +250,13 @@ ipc_client_instance_create_system(struct xrt_instance *xinst,
 	}
 
 out:
-	if (ii->local_compositor) {
-		*out_xsys = ipc_client_system_create_with_local_compositor(&ii->ipc_c, xsysc);
-	} else {
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	if (ii->hosted != NULL) {
+		*out_xsys = ipc_client_system_create_with_local_compositor(
+		    &ii->ipc_c, xsysc, ipc_client_macos_hosted_get_client(ii->hosted));
+	} else
+#endif
+	{
 		*out_xsys = ipc_client_system_create(&ii->ipc_c, xsysc);
 	}
 	*out_xsysd = xsysd;
@@ -284,8 +289,8 @@ ipc_client_instance_destroy(struct xrt_instance *xinst)
 	struct ipc_client_instance *ii = ipc_client_instance(xinst);
 
 #ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
-	if (ii->local_compositor) {
-		ipc_client_macos_hosted_fini(&ii->ipc_c);
+	if (ii->hosted != NULL) {
+		ipc_client_macos_hosted_fini(ii->hosted);
 	}
 #endif
 

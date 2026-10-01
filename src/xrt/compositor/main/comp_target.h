@@ -731,6 +731,9 @@ struct comp_target_factory
 	 */
 	bool is_deferred;
 
+	//! Suppress the optional desktop mirror for this target.
+	bool disable_peek;
+
 	/*!
 	 * Vulkan version that is required or 0 if no specific
 	 * requirement, equivalent to VK_MAKE_VERSION(1, 0, 0)

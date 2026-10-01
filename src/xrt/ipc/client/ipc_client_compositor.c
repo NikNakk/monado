@@ -1198,6 +1198,7 @@ ipc_compositor_destroy(struct xrt_compositor *xc)
 static void
 ipc_compositor_init(struct ipc_client_compositor *icc, struct xrt_compositor_native **out_xcn)
 {
+	icc->base.is_remote = true;
 	icc->base.base.get_swapchain_create_properties = ipc_compositor_get_swapchain_create_properties;
 	icc->base.base.create_swapchain = ipc_compositor_swapchain_create;
 	icc->base.base.import_swapchain = ipc_compositor_swapchain_import;

@@ -55,6 +55,7 @@ struct client_metal_wait_thread_context
 	pthread_mutex_t signal_mutex;
 	bool signal_mutex_initialized;
 	bool pair_attempted;
+	bool remote;
 	bool pair_ready;
 	uint64_t next_value;
 	uint64_t last_submitted_value;
@@ -121,7 +122,10 @@ ensure_pair(struct client_metal_wait_thread_context *c)
 	void *raw_shared_event = NULL;
 #ifdef XRT_FEATURE_SERVICE
 	// Through monado-service, or locally when this client is hosted by it.
-	xrt_result_t xret = client_metal_semaphore_create_pair_for_mode(&xcsem, &raw_shared_event);
+	xrt_result_t xret =
+	    c->remote ? client_metal_service_semaphore_create_pair(c->xc, (__bridge void *)[c->command_queue device],
+	                                                           &xcsem, &raw_shared_event)
+	              : comp_metal_semaphore_create_client_pair(&xcsem, &raw_shared_event);
 #else
 	xrt_result_t xret = comp_metal_semaphore_create_client_pair(&xcsem, &raw_shared_event);
 #endif
@@ -389,7 +393,7 @@ wrapped_compositor_destroy(struct xrt_compositor *xc)
 }
 
 struct xrt_compositor_metal *
-client_metal_release_wait_thread_attach(struct xrt_compositor_metal *xcm, void *command_queue)
+client_metal_release_wait_thread_attach(struct xrt_compositor_metal *xcm, void *command_queue, bool remote)
 {
 	if (xcm == NULL || command_queue == NULL || !client_metal_release_wait_thread_enabled()) {
 		return xcm;
@@ -410,6 +414,7 @@ client_metal_release_wait_thread_attach(struct xrt_compositor_metal *xcm, void *
 	c->signal_mutex_initialized = true;
 
 	c->xc = &xcm->base;
+	c->remote = remote;
 	c->command_queue = [(__bridge id<MTLCommandQueue>)command_queue retain];
 	c->original_create_swapchain = xcm->base.create_swapchain;
 	c->original_layer_commit = xcm->base.layer_commit;
