@@ -23,6 +23,7 @@
 #include "util/u_trace_marker.h"
 
 #include "vk/vk_helpers.h"
+#include "vk/vk_compositor_flags.h"
 
 #include "render/render_interface.h"
 
