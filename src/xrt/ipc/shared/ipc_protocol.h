@@ -471,7 +471,7 @@ struct ipc_metal_bootstrap_name
 
 /*!
  * Native Metal array-texture transport. Each name identifies the Mach port of an
- * existing MTLSharedTextureHandle registered by DXMT in the user's bootstrap
+ * existing MTLSharedTextureHandle registered by an external producer in the user's bootstrap
  * namespace. The service reopens the same storage; no pixel copy is involved.
  */
 struct ipc_arg_swapchain_metal_bootstrap
