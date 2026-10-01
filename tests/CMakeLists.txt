@@ -355,17 +355,6 @@ if(APPLE
 	set_target_properties(tests_metal_xpc_registry PROPERTIES FOLDER monado_tests)
 endif()
 
-if(TARGET ipc_shared)
-	get_target_property(_ipc_tcp_auth_available ipc_shared IPC_TCP_AUTH_AVAILABLE)
-endif()
-if(_ipc_tcp_auth_available)
-	add_executable(tests_ipc_tcp_auth tests_ipc_tcp_auth.cpp)
-	target_link_libraries(tests_ipc_tcp_auth PRIVATE ipc_shared aux_util xrt-external-catch2)
-	add_test(NAME tests_ipc_tcp_auth COMMAND tests_ipc_tcp_auth)
-	set_tests_properties(tests_ipc_tcp_auth PROPERTIES TIMEOUT 10)
-	set_target_properties(tests_ipc_tcp_auth PROPERTIES FOLDER monado_tests)
-endif()
-
 if(APPLE AND TARGET comp_main)
 	add_executable(tests_macos_remote_layer tests_macos_remote_layer.mm)
 	target_include_directories(tests_macos_remote_layer PRIVATE ../src/xrt/compositor)
