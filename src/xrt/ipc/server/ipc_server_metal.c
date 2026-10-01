@@ -707,9 +707,7 @@ ipc_handle_swapchain_import_iosurface_token(volatile struct ipc_client_state *ic
 }
 
 xrt_result_t
-ipc_handle_compositor_semaphore_import_metal(volatile struct ipc_client_state *ics,
-                                             uint64_t token,
-                                             uint32_t *out_id)
+ipc_handle_compositor_semaphore_import_metal(volatile struct ipc_client_state *ics, uint64_t token, uint32_t *out_id)
 {
 	IPC_TRACE_MARKER();
 
@@ -790,7 +788,8 @@ ipc_handle_compositor_semaphore_import_metal_bootstrap(volatile struct ipc_clien
 	ics->compositor_semaphore_count++;
 	*out_id = id;
 
-	IPC_INFO(ics->server, "Native Metal shared-event compositor semaphore active: id=%u name='%s'", id, bootstrap->name);
+	IPC_INFO(ics->server, "Native Metal shared-event compositor semaphore active: id=%u name='%s'", id,
+	         bootstrap->name);
 	return XRT_SUCCESS;
 #endif
 }
