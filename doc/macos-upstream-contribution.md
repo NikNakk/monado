@@ -25,8 +25,10 @@ next upstream sync is reviewed.
    explicit unsupported behavior when the interfaces are unavailable.
 5. Each opt-in OpenXR extension as its own review unit, with its existing feature
    guards and hardware evidence.
-6. Wine and scheduler diagnostics as optional development tooling. Describe the
-   authenticated transport and its same-user trust boundary explicitly.
+6. Scheduler/timing diagnostics as optional development tooling. Wine/OpenVR
+   compatibility, authenticated loopback transport and game-specific policy live
+   in the separate `NikNakk/macos-wine-xr` project and are not part of the
+   Monado upstream series.
 
 An initial upstream issue should describe the platform architecture and the
 private API tradeoff before the larger presentation/hosting changes are proposed.
@@ -46,8 +48,9 @@ reuse lint
 The style check covers files changed relative to the sync base, including
 Objective-C and Objective-C++. It preserves generated CSV line endings and the
 whitespace inside vendored patch files. Compiler-warning checks and tests run on
-Linux and macOS; Windows runs native tests, including the authenticated TCP
-handshake and synchronous pipe shutdown. Android API 26/NDK r26d builds cover
+Linux and macOS; Windows runs native tests, including synchronous pipe shutdown. The external
+Wine bridge owns and tests its authenticated loopback handshake separately.
+Android API 26/NDK r26d builds cover
 `armeabi-v7a` and `arm64-v8a`, matching upstream's native configurations.
 
 The macOS context/host smoke test checks runtime compatibility on CI macOS
@@ -81,8 +84,9 @@ service shutdown; avoid repeated joins and delayed startup reviving stopped loop
 
 ### macOS IPC hardening — `ipc`
 
-Verify native socket peer identities, authenticate the optional Wine TCP bridge,
-preserve live socket endpoints, and bound pending Metal/IOSurface XPC resources.
+Verify native socket peer identities, preserve live socket endpoints, and bound
+pending Metal/IOSurface XPC resources. Expose a small PID-scoped external Metal
+handoff ABI without embedding translation-layer transport or policy in Monado.
 Retire the external-broker runtime override that bypassed native ownership checks.
 
 ### Platform and contribution validation — `doc`
