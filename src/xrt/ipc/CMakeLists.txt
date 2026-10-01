@@ -63,6 +63,8 @@ set(IPC_COMMON_SOURCES
     shared/ipc_shmem.h
     shared/ipc_utils.c
     shared/ipc_utils.h
+    shared/ipc_tcp_auth.c
+    shared/ipc_tcp_auth.h
 	)
 
 add_library(ipc_shared STATIC ${IPC_COMMON_SOURCES})
@@ -72,9 +74,27 @@ target_include_directories(
 
 if(WIN32)
 	target_sources(ipc_shared PRIVATE shared/ipc_message_channel_windows.cpp)
-	target_link_libraries(ipc_shared PRIVATE ws2_32)
+	target_link_libraries(ipc_shared PRIVATE ws2_32 bcrypt)
 else()
-	target_sources(ipc_shared PRIVATE shared/ipc_message_channel_unix.c)
+	target_sources(
+		ipc_shared PRIVATE shared/ipc_message_channel_unix.c shared/ipc_socket_security.c
+		)
+	# The bridge is macOS/Windows only. OpenSSL enables its portable Linux tests
+	# without making it a dependency of ordinary Linux or Android builds.
+	if(NOT APPLE AND NOT ANDROID)
+		find_package(OpenSSL QUIET)
+		if(OpenSSL_FOUND)
+			target_compile_definitions(ipc_shared PRIVATE IPC_TCP_AUTH_OPENSSL)
+			target_link_libraries(ipc_shared PRIVATE OpenSSL::Crypto)
+		endif()
+	endif()
+endif()
+
+if(WIN32
+   OR APPLE
+   OR OpenSSL_FOUND
+	)
+	set_property(TARGET ipc_shared PROPERTY IPC_TCP_AUTH_AVAILABLE TRUE)
 endif()
 
 if(APPLE)
@@ -107,8 +127,9 @@ if(APPLE)
 
 	if(XRT_FEATURE_SERVICE)
 		target_sources(
-			ipc_shared PRIVATE shared/ipc_metal_xpc_service.h
-					   shared/ipc_metal_xpc_service.m
+			ipc_shared
+			PRIVATE shared/ipc_metal_xpc_service.h shared/ipc_metal_xpc_service.m
+				shared/ipc_metal_xpc_service_internal.h
 			)
 
 		add_executable(ipc_metal_xpc_probe shared/ipc_metal_xpc_probe.m)

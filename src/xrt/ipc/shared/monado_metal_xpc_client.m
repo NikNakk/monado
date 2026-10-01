@@ -24,8 +24,7 @@ make_token(void)
 {
 	uint64_t random_bits = 0;
 	arc4random_buf(&random_bits, sizeof(random_bits));
-	return IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC |
-	       (random_bits & ~IPC_METAL_XPC_EXTERNAL_TOKEN_MASK);
+	return IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC | (random_bits & ~IPC_METAL_XPC_EXTERNAL_TOKEN_MASK);
 }
 
 static NSXPCConnection *
@@ -36,8 +35,7 @@ create_connection(void)
 	if (connection == nil) {
 		return nil;
 	}
-	connection.remoteObjectInterface =
-	    [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCBrokerProtocol)];
+	connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCBrokerProtocol)];
 	[connection resume];
 	return connection;
 }
@@ -49,21 +47,20 @@ publish_texture(NSXPCConnection *connection, MTLSharedTextureHandle *handle, uin
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    (void)error;
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  (void)error;
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy publishTextureHandle:handle
-	                     token:token
-	                     index:0
-	                imageCount:1
-	                     reply:^(BOOL remote_success) {
-		                     success = remote_success;
-		                     replied = YES;
-		                     dispatch_semaphore_signal(semaphore);
-	                     }];
+	                      token:token
+	                      index:0
+	                 imageCount:1
+	                      reply:^(BOOL remote_success) {
+		                success = remote_success;
+		                replied = YES;
+		                dispatch_semaphore_signal(semaphore);
+	                      }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MONADO_METAL_XPC_TIMEOUT_NS));
@@ -77,18 +74,17 @@ mark_claimable(NSXPCConnection *connection, uint64_t token)
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    (void)error;
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  (void)error;
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy markTextureTokenClaimable:token
-	                          reply:^(BOOL remote_success) {
-		                          success = remote_success;
-		                          replied = YES;
-		                          dispatch_semaphore_signal(semaphore);
-	                          }];
+	                           reply:^(BOOL remote_success) {
+		                     success = remote_success;
+		                     replied = YES;
+		                     dispatch_semaphore_signal(semaphore);
+	                           }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MONADO_METAL_XPC_TIMEOUT_NS));
@@ -102,21 +98,20 @@ take_texture_handle(NSXPCConnection *connection, uint64_t token)
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    (void)error;
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  (void)error;
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy takeTextureHandleForToken:token
-	                          index:0
-	                          reply:^(MTLSharedTextureHandle *handle) {
-		                          if (handle != nil) {
-			                          result = [handle retain];
-		                          }
-		                          replied = YES;
-		                          dispatch_semaphore_signal(semaphore);
-	                          }];
+	                           index:0
+	                           reply:^(MTLSharedTextureHandle *handle) {
+		                     if (handle != nil) {
+			                     result = [handle retain];
+		                     }
+		                     replied = YES;
+		                     dispatch_semaphore_signal(semaphore);
+	                           }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MONADO_METAL_XPC_TIMEOUT_NS));
@@ -136,20 +131,18 @@ discard_token(NSXPCConnection *connection, uint64_t token)
 
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    (void)error;
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  (void)error;
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy discardToken:token
 	              reply:^{
-		              replied = YES;
-		              dispatch_semaphore_signal(semaphore);
+		        replied = YES;
+		        dispatch_semaphore_signal(semaphore);
 	              }];
 
-	(void)dispatch_semaphore_wait(
-	    semaphore, dispatch_time(DISPATCH_TIME_NOW, MONADO_METAL_XPC_TIMEOUT_NS));
+	(void)dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MONADO_METAL_XPC_TIMEOUT_NS));
 	(void)replied;
 }
 
@@ -215,8 +208,7 @@ take_texture_common(uint64_t token, id<MTLDevice> requested_device, void **out_m
 		}
 
 		id<MTLDevice> device = requested_device != nil ? requested_device : handle.device;
-		id<MTLTexture> texture =
-		    device != nil ? [device newSharedTextureWithHandle:handle] : nil;
+		id<MTLTexture> texture = device != nil ? [device newSharedTextureWithHandle:handle] : nil;
 		[handle release];
 
 		// takeTextureHandleForToken() transfers ownership of a claimable token
@@ -242,9 +234,7 @@ monado_metal_xpc_take_texture(uint64_t token, void **out_metal_texture)
 }
 
 int
-monado_metal_xpc_take_texture_on_device(uint64_t token,
-                                        void *metal_device,
-                                        void **out_metal_texture)
+monado_metal_xpc_take_texture_on_device(uint64_t token, void *metal_device, void **out_metal_texture)
 {
 	if (metal_device == NULL) {
 		return -1;

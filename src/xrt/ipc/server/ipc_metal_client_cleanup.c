@@ -13,7 +13,7 @@ void
 ipc_metal_client_cleanup(volatile struct ipc_client_state *ics)
 {
 	struct ipc_server *server = ics->server;
-	pid_t owner_pid = ics->client_state.pid;
+	pid_t owner_pid = ics->peer_pid;
 
 	if (server == NULL || owner_pid <= 0) {
 		return;
@@ -30,7 +30,7 @@ ipc_metal_client_cleanup(volatile struct ipc_client_state *ics)
 		if (other == ics) {
 			continue;
 		}
-		if (other->server_thread_index >= 0 && other->client_state.pid == owner_pid) {
+		if (other->server_thread_index >= 0 && other->peer_pid == owner_pid) {
 			IPC_TRACE(server, "Keeping Metal XPC tokens for pid=%d: another IPC client is still connected",
 			          (int)owner_pid);
 			return;

@@ -73,17 +73,20 @@ foreach(testname ${tests})
 	set_target_properties(${testname} PROPERTIES FOLDER monado_tests)
 endforeach()
 
-if(UNIX AND NOT ANDROID AND TARGET ipc_shared)
-    add_executable(tests_ipc_shmem tests_ipc_shmem.cpp)
-    target_link_libraries(tests_ipc_shmem PRIVATE ipc_shared aux_util xrt-external-catch2)
-    add_test(NAME tests_ipc_shmem COMMAND tests_ipc_shmem)
-    set_target_properties(tests_ipc_shmem PROPERTIES FOLDER monado_tests)
+if(UNIX
+   AND NOT ANDROID
+   AND TARGET ipc_shared
+	)
+	add_executable(tests_ipc_shmem tests_ipc_shmem.cpp)
+	target_link_libraries(tests_ipc_shmem PRIVATE ipc_shared aux_util xrt-external-catch2)
+	add_test(NAME tests_ipc_shmem COMMAND tests_ipc_shmem)
+	set_target_properties(tests_ipc_shmem PROPERTIES FOLDER monado_tests)
 endif()
 if(UNIX AND NOT MSVC)
-    add_executable(tests_macos_hosted_client tests_macos_hosted_client.cpp)
-    target_link_libraries(tests_macos_hosted_client PRIVATE aux_util xrt-external-catch2)
-    add_test(NAME tests_macos_hosted_client COMMAND tests_macos_hosted_client)
-    set_target_properties(tests_macos_hosted_client PROPERTIES FOLDER monado_tests)
+	add_executable(tests_macos_hosted_client tests_macos_hosted_client.cpp)
+	target_link_libraries(tests_macos_hosted_client PRIVATE aux_util xrt-external-catch2)
+	add_test(NAME tests_macos_hosted_client COMMAND tests_macos_hosted_client)
+	set_target_properties(tests_macos_hosted_client PROPERTIES FOLDER monado_tests)
 endif()
 
 # For tests that require more than just aux_util, link those other libs down here.
@@ -276,20 +279,100 @@ if(APPLE)
 	endif()
 endif()
 
-if(UNIX AND TARGET comp_multi AND TARGET ipc_shared)
-    add_executable(tests_ipc_local_session tests_ipc_local_session.cpp
-        ../src/xrt/ipc/client/ipc_client_system.c)
-    target_compile_definitions(tests_ipc_local_session PRIVATE XRT_IPC_MACOS_HOSTED_COMPOSITOR)
-    target_link_libraries(tests_ipc_local_session PRIVATE comp_multi ipc_shared aux_util base xrt-external-catch2)
-    add_test(NAME tests_ipc_local_session COMMAND tests_ipc_local_session)
-    set_target_properties(tests_ipc_local_session PROPERTIES FOLDER monado_tests)
+if(UNIX
+   AND TARGET comp_multi
+   AND TARGET ipc_shared
+	)
+	add_executable(
+		tests_ipc_local_session tests_ipc_local_session.cpp
+					../src/xrt/ipc/client/ipc_client_system.c
+		)
+	target_compile_definitions(tests_ipc_local_session PRIVATE XRT_IPC_MACOS_HOSTED_COMPOSITOR)
+	target_link_libraries(
+		tests_ipc_local_session
+		PRIVATE
+			comp_multi
+			ipc_shared
+			aux_util
+			base
+			xrt-external-catch2
+		)
+	add_test(NAME tests_ipc_local_session COMMAND tests_ipc_local_session)
+	set_target_properties(tests_ipc_local_session PROPERTIES FOLDER monado_tests)
 endif()
 
 if(TARGET ipc_server)
-    add_executable(tests_ipc_thread_shutdown tests_ipc_thread_shutdown.cpp
-        ../src/xrt/ipc/server/ipc_server_thread_shutdown.c)
-    target_link_libraries(tests_ipc_thread_shutdown PRIVATE ipc_shared aux_util aux_os base xrt-external-catch2)
-    add_test(NAME tests_ipc_thread_shutdown COMMAND tests_ipc_thread_shutdown)
-    set_tests_properties(tests_ipc_thread_shutdown PROPERTIES TIMEOUT 10)
-    set_target_properties(tests_ipc_thread_shutdown PROPERTIES FOLDER monado_tests)
+	add_executable(
+		tests_ipc_thread_shutdown tests_ipc_thread_shutdown.cpp
+					  ../src/xrt/ipc/server/ipc_server_thread_shutdown.c
+		)
+	target_link_libraries(
+		tests_ipc_thread_shutdown
+		PRIVATE
+			ipc_shared
+			aux_util
+			aux_os
+			base
+			xrt-external-catch2
+		)
+	add_test(NAME tests_ipc_thread_shutdown COMMAND tests_ipc_thread_shutdown)
+	set_tests_properties(tests_ipc_thread_shutdown PROPERTIES TIMEOUT 10)
+	set_target_properties(tests_ipc_thread_shutdown PROPERTIES FOLDER monado_tests)
+endif()
+
+if(UNIX
+   AND NOT ANDROID
+   AND TARGET ipc_shared
+	)
+	add_executable(tests_ipc_socket_security tests_ipc_socket_security.cpp)
+	target_link_libraries(
+		tests_ipc_socket_security PRIVATE ipc_shared aux_util xrt-external-catch2
+		)
+	add_test(NAME tests_ipc_socket_security COMMAND tests_ipc_socket_security)
+	set_tests_properties(tests_ipc_socket_security PROPERTIES TIMEOUT 10)
+	set_target_properties(tests_ipc_socket_security PROPERTIES FOLDER monado_tests)
+endif()
+
+if(APPLE
+   AND XRT_FEATURE_SERVICE
+   AND TARGET ipc_server
+	)
+	add_executable(
+		tests_metal_xpc_registry tests_metal_xpc_registry.mm
+					 ../src/xrt/ipc/shared/ipc_metal_xpc_service.m
+		)
+	target_compile_options(tests_metal_xpc_registry PRIVATE -fblocks)
+	target_link_libraries(
+		tests_metal_xpc_registry
+		PRIVATE
+			ipc_shared
+			aux_util
+			xrt-external-catch2
+			"-framework Foundation"
+			"-framework Metal"
+		)
+	add_test(NAME tests_metal_xpc_registry COMMAND tests_metal_xpc_registry)
+	set_target_properties(tests_metal_xpc_registry PROPERTIES FOLDER monado_tests)
+endif()
+
+if(TARGET ipc_shared)
+	get_target_property(_ipc_tcp_auth_available ipc_shared IPC_TCP_AUTH_AVAILABLE)
+endif()
+if(_ipc_tcp_auth_available)
+	add_executable(tests_ipc_tcp_auth tests_ipc_tcp_auth.cpp)
+	target_link_libraries(tests_ipc_tcp_auth PRIVATE ipc_shared aux_util xrt-external-catch2)
+	add_test(NAME tests_ipc_tcp_auth COMMAND tests_ipc_tcp_auth)
+	set_tests_properties(tests_ipc_tcp_auth PROPERTIES TIMEOUT 10)
+	set_target_properties(tests_ipc_tcp_auth PROPERTIES FOLDER monado_tests)
+endif()
+
+if(APPLE AND TARGET comp_main)
+	add_executable(tests_macos_remote_layer tests_macos_remote_layer.mm)
+	target_include_directories(tests_macos_remote_layer PRIVATE ../src/xrt/compositor)
+	target_link_libraries(
+		tests_macos_remote_layer PRIVATE xrt-external-catch2 "-framework AppKit"
+						 "-framework QuartzCore"
+		)
+	add_test(NAME tests_macos_remote_layer COMMAND tests_macos_remote_layer)
+	set_target_properties(tests_macos_remote_layer PROPERTIES FOLDER monado_tests)
 endif()

@@ -70,37 +70,32 @@ make_external_texture_token(void)
 {
 	uint64_t random_bits = 0;
 	arc4random_buf(&random_bits, sizeof(random_bits));
-	return IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC |
-	       (random_bits & ~IPC_METAL_XPC_EXTERNAL_TOKEN_MASK);
+	return IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC | (random_bits & ~IPC_METAL_XPC_EXTERNAL_TOKEN_MASK);
 }
 
 static bool
-publish_texture_one(NSXPCConnection *connection,
-                    MTLSharedTextureHandle *handle,
-                    uint64_t token,
-                    uint32_t index,
-                    uint32_t image_count)
+publish_texture_one(
+    NSXPCConnection *connection, MTLSharedTextureHandle *handle, uint64_t token, uint32_t index, uint32_t image_count)
 {
 	__block BOOL success = NO;
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    const char *message = error.localizedDescription.UTF8String;
-		    U_LOG_E("Metal XPC texture publish failed: %s", message != NULL ? message : "unknown error");
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  const char *message = error.localizedDescription.UTF8String;
+	  U_LOG_E("Metal XPC texture publish failed: %s", message != NULL ? message : "unknown error");
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy publishTextureHandle:handle
-	                     token:token
-	                     index:index
-	                imageCount:image_count
-	                     reply:^(BOOL remote_success) {
-		                     success = remote_success;
-		                     replied = YES;
-		                     dispatch_semaphore_signal(semaphore);
-	                     }];
+	                      token:token
+	                      index:index
+	                 imageCount:image_count
+	                      reply:^(BOOL remote_success) {
+		                success = remote_success;
+		                replied = YES;
+		                dispatch_semaphore_signal(semaphore);
+	                      }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
@@ -114,22 +109,21 @@ take_texture_one(NSXPCConnection *connection, uint64_t token, uint32_t index)
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    const char *message = error.localizedDescription.UTF8String;
-		    U_LOG_E("Metal XPC texture take failed: %s", message != NULL ? message : "unknown error");
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  const char *message = error.localizedDescription.UTF8String;
+	  U_LOG_E("Metal XPC texture take failed: %s", message != NULL ? message : "unknown error");
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy takeTextureHandleForToken:token
-	                          index:index
-	                          reply:^(MTLSharedTextureHandle *handle) {
-		                          if (handle != nil) {
-			                          result = [handle retain];
-		                          }
-		                          replied = YES;
-		                          dispatch_semaphore_signal(semaphore);
-	                          }];
+	                           index:index
+	                           reply:^(MTLSharedTextureHandle *handle) {
+		                     if (handle != nil) {
+			                     result = [handle retain];
+		                     }
+		                     replied = YES;
+		                     dispatch_semaphore_signal(semaphore);
+	                           }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
@@ -149,9 +143,9 @@ publish_iosurface_one(
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
 	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		const char *message = error.localizedDescription.UTF8String;
-		U_LOG_E("Metal XPC IOSurface publish failed: %s", message != NULL ? message : "unknown error");
-		dispatch_semaphore_signal(semaphore);
+	  const char *message = error.localizedDescription.UTF8String;
+	  U_LOG_E("Metal XPC IOSurface publish failed: %s", message != NULL ? message : "unknown error");
+	  dispatch_semaphore_signal(semaphore);
 	}];
 
 	[proxy publishIOSurface:surface
@@ -159,9 +153,9 @@ publish_iosurface_one(
 	                  index:index
 	             imageCount:image_count
 	                  reply:^(BOOL remote_success) {
-		                  success = remote_success;
-		                  replied = YES;
-		                  dispatch_semaphore_signal(semaphore);
+		            success = remote_success;
+		            replied = YES;
+		            dispatch_semaphore_signal(semaphore);
 	                  }];
 
 	long wait_result =
@@ -177,19 +171,19 @@ take_iosurface_one(NSXPCConnection *connection, uint64_t token, uint32_t index)
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
 	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		const char *message = error.localizedDescription.UTF8String;
-		U_LOG_E("Metal XPC IOSurface take failed: %s", message != NULL ? message : "unknown error");
-		dispatch_semaphore_signal(semaphore);
+	  const char *message = error.localizedDescription.UTF8String;
+	  U_LOG_E("Metal XPC IOSurface take failed: %s", message != NULL ? message : "unknown error");
+	  dispatch_semaphore_signal(semaphore);
 	}];
 
 	[proxy takeIOSurfaceForToken:token
 	                       index:index
 	                       reply:^(IOSurface *surface) {
-		                       if (surface != nil) {
-			                       result = [surface retain];
-		                       }
-		                       replied = YES;
-		                       dispatch_semaphore_signal(semaphore);
+		                 if (surface != nil) {
+			                 result = [surface retain];
+		                 }
+		                 replied = YES;
+		                 dispatch_semaphore_signal(semaphore);
 	                       }];
 
 	long wait_result =
@@ -208,19 +202,18 @@ publish_event_one(NSXPCConnection *connection, MTLSharedEventHandle *handle, uin
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    const char *message = error.localizedDescription.UTF8String;
-		    U_LOG_E("Metal XPC shared-event publish failed: %s", message != NULL ? message : "unknown error");
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  const char *message = error.localizedDescription.UTF8String;
+	  U_LOG_E("Metal XPC shared-event publish failed: %s", message != NULL ? message : "unknown error");
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy publishSharedEventHandle:handle
 	                          token:token
 	                          reply:^(BOOL remote_success) {
-		                          success = remote_success;
-		                          replied = YES;
-		                          dispatch_semaphore_signal(semaphore);
+		                    success = remote_success;
+		                    replied = YES;
+		                    dispatch_semaphore_signal(semaphore);
 	                          }];
 
 	long wait_result =
@@ -235,21 +228,20 @@ take_event_one(NSXPCConnection *connection, uint64_t token)
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    const char *message = error.localizedDescription.UTF8String;
-		    U_LOG_E("Metal XPC shared-event take failed: %s", message != NULL ? message : "unknown error");
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  const char *message = error.localizedDescription.UTF8String;
+	  U_LOG_E("Metal XPC shared-event take failed: %s", message != NULL ? message : "unknown error");
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy takeSharedEventHandleForToken:token
-	                              reply:^(MTLSharedEventHandle *handle) {
-		                              if (handle != nil) {
-			                              result = [handle retain];
-		                              }
-		                              replied = YES;
-		                              dispatch_semaphore_signal(semaphore);
-	                              }];
+	                               reply:^(MTLSharedEventHandle *handle) {
+		                         if (handle != nil) {
+			                         result = [handle retain];
+		                         }
+		                         replied = YES;
+		                         dispatch_semaphore_signal(semaphore);
+	                               }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
@@ -267,19 +259,18 @@ mark_texture_token_claimable_sync(NSXPCConnection *connection, uint64_t token)
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    const char *message = error.localizedDescription.UTF8String;
-		    U_LOG_E("Metal XPC mark-claimable failed: %s", message != NULL ? message : "unknown error");
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  const char *message = error.localizedDescription.UTF8String;
+	  U_LOG_E("Metal XPC mark-claimable failed: %s", message != NULL ? message : "unknown error");
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy markTextureTokenClaimable:token
-	                          reply:^(BOOL remote_success) {
-		                          success = remote_success;
-		                          replied = YES;
-		                          dispatch_semaphore_signal(semaphore);
-	                          }];
+	                           reply:^(BOOL remote_success) {
+		                     success = remote_success;
+		                     replied = YES;
+		                     dispatch_semaphore_signal(semaphore);
+	                           }];
 
 	long wait_result =
 	    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, IPC_METAL_XPC_TIMEOUT_NS));
@@ -292,17 +283,16 @@ discard_sync(NSXPCConnection *connection, uint64_t token)
 	__block BOOL replied = NO;
 	dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
 
-	id<IPCMetalXPCBrokerProtocol> proxy =
-	    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		    const char *message = error.localizedDescription.UTF8String;
-		    U_LOG_E("Metal XPC discard failed: %s", message != NULL ? message : "unknown error");
-		    dispatch_semaphore_signal(semaphore);
-	    }];
+	id<IPCMetalXPCBrokerProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+	  const char *message = error.localizedDescription.UTF8String;
+	  U_LOG_E("Metal XPC discard failed: %s", message != NULL ? message : "unknown error");
+	  dispatch_semaphore_signal(semaphore);
+	}];
 
 	[proxy discardToken:token
 	              reply:^{
-		              replied = YES;
-		              dispatch_semaphore_signal(semaphore);
+		        replied = YES;
+		        dispatch_semaphore_signal(semaphore);
 	              }];
 
 	long wait_result =
@@ -314,8 +304,7 @@ discard_sync(NSXPCConnection *connection, uint64_t token)
 xrt_result_t
 ipc_metal_xpc_publish_textures(void *const *metal_textures, uint32_t image_count, uint64_t *out_token)
 {
-	if (metal_textures == NULL || out_token == NULL || image_count == 0 ||
-	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+	if (metal_textures == NULL || out_token == NULL || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
@@ -362,20 +351,16 @@ ipc_metal_xpc_publish_textures(void *const *metal_textures, uint32_t image_count
 		[connection release];
 
 		*out_token = token;
-		U_LOG_I("Metal XPC published %u shared texture handle(s) token=0x%016llx",
-		        image_count,
+		U_LOG_I("Metal XPC published %u shared texture handle(s) token=0x%016llx", image_count,
 		        (unsigned long long)token);
 		return XRT_SUCCESS;
 	}
 }
 
 xrt_result_t
-ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures,
-                                         uint32_t image_count,
-                                         uint64_t *out_token)
+ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures, uint32_t image_count, uint64_t *out_token)
 {
-	if (metal_textures == NULL || out_token == NULL || image_count == 0 ||
-	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
+	if (metal_textures == NULL || out_token == NULL || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
@@ -419,8 +404,7 @@ ipc_metal_xpc_publish_claimable_textures(void *const *metal_textures,
 		[connection invalidate];
 		[connection release];
 		*out_token = token;
-		U_LOG_I("Metal XPC published %u claimable texture handle(s) token=0x%016llx",
-		        image_count,
+		U_LOG_I("Metal XPC published %u claimable texture handle(s) token=0x%016llx", image_count,
 		        (unsigned long long)token);
 		return XRT_SUCCESS;
 	}
@@ -450,22 +434,18 @@ ipc_metal_xpc_take_textures_on_device(uint64_t token,
 			MTLSharedTextureHandle *handle = take_texture_one(connection, token, i);
 			if (handle == nil) {
 				U_LOG_E("Metal XPC broker had no texture handle for token=0x%016llx image=%u",
-				        (unsigned long long)token,
-				        i);
+				        (unsigned long long)token, i);
 				xret = XRT_ERROR_IPC_FAILURE;
 				break;
 			}
 
-			id<MTLDevice> device = metal_device != NULL
-			                           ? (__bridge id<MTLDevice>)metal_device
-			                           : handle.device;
-			id<MTLTexture> texture =
-			    device != nil ? [device newSharedTextureWithHandle:handle] : nil;
+			id<MTLDevice> device =
+			    metal_device != NULL ? (__bridge id<MTLDevice>)metal_device : handle.device;
+			id<MTLTexture> texture = device != nil ? [device newSharedTextureWithHandle:handle] : nil;
 			[handle release];
 			if (texture == nil) {
 				U_LOG_E("Metal XPC could not recreate shared texture token=0x%016llx image=%u",
-				        (unsigned long long)token,
-				        i);
+				        (unsigned long long)token, i);
 				xret = XRT_ERROR_ALLOCATION;
 				break;
 			}
@@ -482,8 +462,7 @@ ipc_metal_xpc_take_textures_on_device(uint64_t token,
 			return xret;
 		}
 
-		U_LOG_I("Metal XPC took and recreated %u shared texture(s) token=0x%016llx",
-		        expected_count,
+		U_LOG_I("Metal XPC took and recreated %u shared texture(s) token=0x%016llx", expected_count,
 		        (unsigned long long)token);
 		return XRT_SUCCESS;
 	}
@@ -641,8 +620,7 @@ ipc_metal_xpc_publish_shared_event(void *metal_shared_event, uint64_t *out_token
 		[connection invalidate];
 		[connection release];
 		*out_token = token;
-		U_LOG_I("Metal XPC published shared event token=0x%016llx value=%llu",
-		        (unsigned long long)token,
+		U_LOG_I("Metal XPC published shared event token=0x%016llx value=%llu", (unsigned long long)token,
 		        (unsigned long long)event.signaledValue);
 		return XRT_SUCCESS;
 	}
@@ -681,16 +659,13 @@ ipc_metal_xpc_take_shared_event(uint64_t token, void *metal_device, void **out_m
 
 		if (event == nil) {
 			U_LOG_E("Metal XPC could not recreate shared event token=0x%016llx on device=%p",
-			        (unsigned long long)token,
-			        metal_device);
+			        (unsigned long long)token, metal_device);
 			return XRT_ERROR_ALLOCATION;
 		}
 
 		*out_metal_shared_event = (__bridge void *)event;
 		U_LOG_I("Metal XPC took and recreated shared event token=0x%016llx device=%p value=%llu",
-		        (unsigned long long)token,
-		        metal_device,
-		        (unsigned long long)event.signaledValue);
+		        (unsigned long long)token, metal_device, (unsigned long long)event.signaledValue);
 		return XRT_SUCCESS;
 	}
 }
@@ -727,8 +702,7 @@ ipc_metal_xpc_resolve_shared_event_request(uint64_t token)
 	}
 
 	void *raw_event = NULL;
-	xrt_result_t xret =
-	    ipc_metal_xpc_take_shared_event(token, g_shared_event_request_device, &raw_event);
+	xrt_result_t xret = ipc_metal_xpc_take_shared_event(token, g_shared_event_request_device, &raw_event);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
@@ -801,9 +775,7 @@ ipc_metal_xpc_make_token_images(uint64_t token, uint32_t image_count, struct xrt
 }
 
 bool
-ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images,
-                                    uint32_t image_count,
-                                    uint64_t *out_token)
+ipc_metal_xpc_get_token_from_images(const struct xrt_image_native *images, uint32_t image_count, uint64_t *out_token)
 {
 	if (images == NULL || out_token == NULL || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES) {
 		return false;

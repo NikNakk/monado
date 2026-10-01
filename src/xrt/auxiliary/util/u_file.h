@@ -1,4 +1,5 @@
 // Copyright 2019-2025, Collabora, Ltd.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -14,6 +15,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*! Atomically replace a file with mode 0600. Unix only; never follows the destination symlink. */
+int
+u_file_write_private_atomic(const char *path, const void *data, size_t size);
 
 int
 u_file_get_config_dir(char *out_path, size_t out_path_size);

@@ -22,30 +22,10 @@
 
 #define IPC_METAL_XPC_ACTIVATION_TIMEOUT_NS (15LL * NSEC_PER_SEC)
 
-@interface IPCMetalXPCServiceObject : NSObject <IPCMetalXPCServiceProtocol>
-{
-	NSLock *_lock;
-	NSMutableDictionary *_handlesByToken;
-	NSMutableDictionary *_countsByToken;
-	NSMutableDictionary *_eventsByToken;
-	NSMutableDictionary *_ownersByToken;
-	NSMutableSet *_claimableTextureTokens;
-}
+#include "shared/ipc_metal_xpc_service_internal.h"
+#include "os/os_time.h"
+#include <unistd.h>
 
-- (BOOL)storeImageObject:(id)handle
-                   token:(uint64_t)token
-                   index:(uint32_t)index
-              imageCount:(uint32_t)imageCount
-                ownerPID:(pid_t)ownerPID;
-- (id)copyImageObjectForToken:(uint64_t)token
-                        index:(uint32_t)index
-                     ownerPID:(pid_t)ownerPID
-                expectedClass:(Class)expectedClass;
-- (BOOL)storeSharedEventHandle:(MTLSharedEventHandle *)handle token:(uint64_t)token ownerPID:(pid_t)ownerPID;
-- (MTLSharedEventHandle *)copySharedEventHandleForToken:(uint64_t)token ownerPID:(pid_t)ownerPID;
-- (void)discardToken:(uint64_t)token ownerPID:(pid_t)ownerPID;
-- (NSUInteger)discardAllForPID:(pid_t)ownerPID;
-@end
 
 static bool
 standard_token_is_valid(uint64_t token)
@@ -100,12 +80,14 @@ current_xpc_pid(void)
 		_eventsByToken = [[NSMutableDictionary alloc] init];
 		_ownersByToken = [[NSMutableDictionary alloc] init];
 		_claimableTextureTokens = [[NSMutableSet alloc] init];
+		_createdByToken = [[NSMutableDictionary alloc] init];
 	}
 	return self;
 }
 
 - (void)dealloc
 {
+	[_createdByToken release];
 	[_claimableTextureTokens release];
 	[_ownersByToken release];
 	[_eventsByToken release];
@@ -115,18 +97,86 @@ current_xpc_pid(void)
 	[super dealloc];
 }
 
+// All Locked methods below run under _lock.
+- (void)removeTokenLocked:(NSNumber *)key
+{
+	[_handlesByToken removeObjectForKey:key];
+	[_countsByToken removeObjectForKey:key];
+	[_eventsByToken removeObjectForKey:key];
+	[_ownersByToken removeObjectForKey:key];
+	[_claimableTextureTokens removeObject:key];
+	[_createdByToken removeObjectForKey:key];
+}
+
+- (void)expireTokensBeforeLocked:(uint64_t)cutoff
+{
+	NSMutableArray *expired = [NSMutableArray array];
+	for (NSNumber *key in _createdByToken) {
+		NSNumber *created = [_createdByToken objectForKey:key];
+		if (created.unsignedLongLongValue <= cutoff)
+			[expired addObject:key];
+	}
+	for (NSNumber *key in expired)
+		[self removeTokenLocked:key];
+}
+
+- (void)expireTokensBefore:(uint64_t)cutoff
+{
+	[_lock lock];
+	[self expireTokensBeforeLocked:cutoff];
+	[_lock unlock];
+}
+
+- (BOOL)canOwnTokenLocked:(NSNumber *)key pid:(pid_t)pid
+{
+	NSUInteger owned = 0;
+	for (NSNumber *owner in [_ownersByToken allValues])
+		if (owner.intValue == pid)
+			++owned;
+	BOOL existing = [_ownersByToken objectForKey:key] != nil;
+	return owned < IPC_METAL_XPC_MAX_TOKENS_PER_PID &&
+	       (existing || _ownersByToken.count < IPC_METAL_XPC_MAX_TOKENS);
+}
+
+- (BOOL)canStoreImagesLocked:(NSUInteger)additional pid:(pid_t)pid
+{
+	NSUInteger owned = 0, total = 0;
+	for (NSNumber *key in _handlesByToken) {
+		NSDictionary *images = [_handlesByToken objectForKey:key];
+		total += images.count;
+		if ([[_ownersByToken objectForKey:key] intValue] == pid)
+			owned += images.count;
+	}
+	return owned + additional <= IPC_METAL_XPC_MAX_IMAGES_PER_PID && total + additional <= IPC_METAL_XPC_MAX_IMAGES;
+}
+
+- (BOOL)canReceiveImagesLocked:(NSUInteger)additional pid:(pid_t)pid
+{
+	NSUInteger owned = 0;
+	for (NSNumber *key in _handlesByToken) {
+		if ([[_ownersByToken objectForKey:key] intValue] == pid)
+			owned += [[_handlesByToken objectForKey:key] count];
+	}
+	return owned + additional <= IPC_METAL_XPC_MAX_IMAGES_PER_PID;
+}
+
 - (BOOL)token:(NSNumber *)key belongsToPIDLocked:(pid_t)ownerPID allowClaim:(BOOL)allowClaim
 {
 	if (ownerPID <= 0) {
 		return NO;
 	}
 
+	uint64_t now = os_monotonic_get_ns();
+	if (now > IPC_METAL_XPC_TOKEN_LIFETIME_NS) {
+		[self expireTokensBeforeLocked:now - IPC_METAL_XPC_TOKEN_LIFETIME_NS];
+	}
 	NSNumber *known_owner = [_ownersByToken objectForKey:key];
 	if (known_owner == nil) {
-		if (!allowClaim) {
+		if (!allowClaim || ![self canOwnTokenLocked:key pid:ownerPID]) {
 			return NO;
 		}
 		[_ownersByToken setObject:[NSNumber numberWithInt:ownerPID] forKey:key];
+		[_createdByToken setObject:[NSNumber numberWithUnsignedLongLong:now] forKey:key];
 		return YES;
 	}
 
@@ -139,8 +189,8 @@ current_xpc_pid(void)
               imageCount:(uint32_t)imageCount
                 ownerPID:(pid_t)ownerPID
 {
-	if (handle == nil || !texture_token_is_valid(token) || imageCount == 0 || imageCount > XRT_MAX_SWAPCHAIN_IMAGES ||
-	    index >= imageCount || ownerPID <= 0) {
+	if (handle == nil || !texture_token_is_valid(token) || imageCount == 0 ||
+	    imageCount > XRT_MAX_SWAPCHAIN_IMAGES || index >= imageCount || ownerPID <= 0) {
 		return NO;
 	}
 
@@ -152,6 +202,11 @@ current_xpc_pid(void)
 		NSNumber *known_count = [_countsByToken objectForKey:key];
 		if (known_count == nil || known_count.unsignedIntValue == imageCount) {
 			NSMutableDictionary *images = [_handlesByToken objectForKey:key];
+			BOOL replacing = [images objectForKey:[NSNumber numberWithUnsignedInt:index]] != nil;
+			if (![self canStoreImagesLocked:replacing ? 0 : 1 pid:ownerPID]) {
+				[_lock unlock];
+				return NO;
+			}
 			if (images == nil) {
 				images = [NSMutableDictionary dictionaryWithCapacity:imageCount];
 				[_handlesByToken setObject:images forKey:key];
@@ -180,11 +235,15 @@ current_xpc_pid(void)
 	[_lock lock];
 	BOOL permitted = [self token:key belongsToPIDLocked:ownerPID allowClaim:NO];
 	if (!permitted && [_claimableTextureTokens containsObject:key]) {
-		// Claim exactly once for the receiving process. From this point on the
-		// token is PID-scoped again, now to the recipient rather than publisher.
-		[_ownersByToken setObject:[NSNumber numberWithInt:ownerPID] forKey:key];
-		[_claimableTextureTokens removeObject:key];
-		permitted = YES;
+		NSDictionary *images = [_handlesByToken objectForKey:key];
+		id object = [images objectForKey:[NSNumber numberWithUnsignedInt:index]];
+		if ([object isKindOfClass:expectedClass] && [self canOwnTokenLocked:key pid:ownerPID] &&
+		    [self canReceiveImagesLocked:images.count pid:ownerPID]) {
+			// Transfer once, only after validating the requested object and quota.
+			[_ownersByToken setObject:[NSNumber numberWithInt:ownerPID] forKey:key];
+			[_claimableTextureTokens removeObject:key];
+			permitted = YES;
+		}
 	}
 	if (permitted) {
 		NSNumber *count = [_countsByToken objectForKey:key];
@@ -243,11 +302,7 @@ current_xpc_pid(void)
 	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
 	[_lock lock];
 	if ([self token:key belongsToPIDLocked:ownerPID allowClaim:NO]) {
-		[_handlesByToken removeObjectForKey:key];
-		[_countsByToken removeObjectForKey:key];
-		[_eventsByToken removeObjectForKey:key];
-		[_ownersByToken removeObjectForKey:key];
-		[_claimableTextureTokens removeObject:key];
+		[self removeTokenLocked:key];
 	}
 	[_lock unlock];
 }
@@ -270,11 +325,7 @@ current_xpc_pid(void)
 	}
 
 	for (NSNumber *key in keys) {
-		[_handlesByToken removeObjectForKey:key];
-		[_countsByToken removeObjectForKey:key];
-		[_eventsByToken removeObjectForKey:key];
-		[_ownersByToken removeObjectForKey:key];
-		[_claimableTextureTokens removeObject:key];
+		[self removeTokenLocked:key];
 	}
 	NSUInteger count = keys.count;
 	[_lock unlock];
@@ -294,8 +345,11 @@ current_xpc_pid(void)
                        reply:(void (^)(BOOL success))reply
 {
 	pid_t pid = current_xpc_pid();
-	BOOL success = [handle isKindOfClass:[MTLSharedTextureHandle class]] &&
-	               [self storeImageObject:handle token:token index:index imageCount:imageCount ownerPID:pid];
+	BOOL success = [handle isKindOfClass:[MTLSharedTextureHandle class]] && [self storeImageObject:handle
+	                                                                                         token:token
+	                                                                                         index:index
+	                                                                                    imageCount:imageCount
+	                                                                                      ownerPID:pid];
 	if (!success) {
 		U_LOG_W("Rejected Metal texture token=0x%016llx from XPC pid=%d", (unsigned long long)token, (int)pid);
 	}
@@ -322,13 +376,13 @@ current_xpc_pid(void)
 {
 	pid_t pid = current_xpc_pid();
 	IOSurface *surface = standard_token_is_valid(token) ? [self copyImageObjectForToken:token
-	                                                                               index:index
-	                                                                            ownerPID:pid
-	                                                                       expectedClass:[IOSurface class]]
+	                                                                              index:index
+	                                                                           ownerPID:pid
+	                                                                      expectedClass:[IOSurface class]]
 	                                                    : nil;
 	if (surface == nil) {
-		U_LOG_W("Rejected/missing IOSurface token=0x%016llx image=%u for XPC pid=%d",
-		        (unsigned long long)token, index, (int)pid);
+		U_LOG_W("Rejected/missing IOSurface token=0x%016llx image=%u for XPC pid=%d", (unsigned long long)token,
+		        index, (int)pid);
 	}
 	reply(surface);
 	[surface release];
@@ -345,37 +399,34 @@ current_xpc_pid(void)
 	                                                 expectedClass:[MTLSharedTextureHandle class]];
 	if (handle == nil) {
 		U_LOG_W("Rejected/missing Metal texture token=0x%016llx image=%u for XPC pid=%d",
-		        (unsigned long long)token,
-		        index,
-		        (int)pid);
+		        (unsigned long long)token, index, (int)pid);
 	}
 	reply(handle);
 	[handle release];
 }
 
-- (void)markTextureTokenClaimable:(uint64_t)token
-                            reply:(void (^)(BOOL success))reply
+- (BOOL)markTextureTokenClaimable:(uint64_t)token ownerPID:(pid_t)pid
 {
-	pid_t pid = current_xpc_pid();
-	if (!external_texture_token_is_valid(token) || pid <= 0) {
-		reply(NO);
-		return;
-	}
-
+	if (!external_texture_token_is_valid(token) || pid <= 0)
+		return NO;
 	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
 	BOOL success = NO;
 	[_lock lock];
-	if ([self token:key belongsToPIDLocked:pid allowClaim:NO] &&
-	    [_handlesByToken objectForKey:key] != nil) {
+	if ([self token:key belongsToPIDLocked:pid allowClaim:NO] && [_handlesByToken objectForKey:key] != nil) {
 		[_claimableTextureTokens addObject:key];
 		success = YES;
 	}
 	[_lock unlock];
+	return success;
+}
 
-	if (!success) {
-		U_LOG_W("Rejected mark-claimable Metal token=0x%016llx for XPC pid=%d",
-		        (unsigned long long)token, (int)pid);
-	}
+- (void)markTextureTokenClaimable:(uint64_t)token reply:(void (^)(BOOL success))reply
+{
+	pid_t pid = current_xpc_pid();
+	BOOL success = [self markTextureTokenClaimable:token ownerPID:pid];
+	if (!success)
+		U_LOG_W("Rejected mark-claimable Metal token=0x%016llx for XPC pid=%d", (unsigned long long)token,
+		        (int)pid);
 	reply(success);
 }
 
@@ -386,21 +437,18 @@ current_xpc_pid(void)
 	pid_t pid = current_xpc_pid();
 	BOOL success = [self storeSharedEventHandle:handle token:token ownerPID:pid];
 	if (!success) {
-		U_LOG_W("Rejected Metal shared-event token=0x%016llx from XPC pid=%d",
-		        (unsigned long long)token,
+		U_LOG_W("Rejected Metal shared-event token=0x%016llx from XPC pid=%d", (unsigned long long)token,
 		        (int)pid);
 	}
 	reply(success);
 }
 
-- (void)takeSharedEventHandleForToken:(uint64_t)token
-                                reply:(void (^)(MTLSharedEventHandle *handle))reply
+- (void)takeSharedEventHandleForToken:(uint64_t)token reply:(void (^)(MTLSharedEventHandle *handle))reply
 {
 	pid_t pid = current_xpc_pid();
 	MTLSharedEventHandle *handle = [self copySharedEventHandleForToken:token ownerPID:pid];
 	if (handle == nil) {
-		U_LOG_W("Rejected/missing Metal shared-event token=0x%016llx for XPC pid=%d",
-		        (unsigned long long)token,
+		U_LOG_W("Rejected/missing Metal shared-event token=0x%016llx for XPC pid=%d", (unsigned long long)token,
 		        (int)pid);
 	}
 	reply(handle);
@@ -415,8 +463,7 @@ current_xpc_pid(void)
 
 @end
 
-@interface IPCMetalXPCServiceListenerDelegate : NSObject <NSXPCListenerDelegate>
-{
+@interface IPCMetalXPCServiceListenerDelegate : NSObject <NSXPCListenerDelegate> {
 	IPCMetalXPCServiceObject *_service;
 }
 - (instancetype)initWithService:(IPCMetalXPCServiceObject *)service;
@@ -442,6 +489,9 @@ current_xpc_pid(void)
 - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)newConnection
 {
 	(void)listener;
+	if (newConnection.effectiveUserIdentifier != getuid() || newConnection.processIdentifier <= 0) {
+		return NO;
+	}
 	newConnection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCServiceProtocol)];
 	newConnection.exportedObject = _service;
 
@@ -477,12 +527,28 @@ copy_service_object(void)
 	return service;
 }
 
+void
+ipc_metal_xpc_service_expire_tokens(void)
+{
+	@autoreleasepool {
+		// Called only by the server main loop; avoid scanning on every poll.
+		static uint64_t last_expire_ns = 0;
+		uint64_t now = os_monotonic_get_ns();
+		if (now <= IPC_METAL_XPC_TOKEN_LIFETIME_NS || now - last_expire_ns < 1000000000ULL)
+			return;
+		last_expire_ns = now;
+		IPCMetalXPCServiceObject *service = copy_service_object();
+		[service expireTokensBefore:now - IPC_METAL_XPC_TOKEN_LIFETIME_NS];
+		[service release];
+	}
+}
+
 xrt_result_t
 ipc_metal_xpc_service_start(void)
 {
 	if (ipc_metal_xpc_external_broker_enabled()) {
-		U_LOG_I("External Metal XPC broker diagnostic enabled; skipping direct in-process Mach-service listener");
-		return XRT_SUCCESS;
+		U_LOG_E("XRT_MACOS_METAL_XPC_EXTERNAL_BROKER is no longer supported: use the direct service registry");
+		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
 	}
 
 	@autoreleasepool {
@@ -520,8 +586,7 @@ ipc_metal_xpc_service_start(void)
 		} @catch (NSException *exception) {
 			const char *reason = exception.reason.UTF8String;
 			[lock unlock];
-			U_LOG_W("Could not start direct Metal XPC endpoint '%s': %s",
-			        IPC_METAL_XPC_SERVICE_NAME,
+			U_LOG_W("Could not start direct Metal XPC endpoint '%s': %s", IPC_METAL_XPC_SERVICE_NAME,
 			        reason != NULL ? reason : "unknown exception");
 			return XRT_ERROR_IPC_FAILURE;
 		}
@@ -557,24 +622,23 @@ ipc_metal_xpc_activate_service(void)
 			return XRT_ERROR_IPC_FAILURE;
 		}
 
-		connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCServiceProtocol)];
+		connection.remoteObjectInterface =
+		    [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCServiceProtocol)];
 		[connection resume];
 
 		__block BOOL replied = NO;
 		__block BOOL ready = NO;
 		dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
-		id<IPCMetalXPCServiceProtocol> proxy =
-		    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-			    const char *message = error.localizedDescription.UTF8String;
-			    U_LOG_D("Monado launchd XPC activation unavailable: %s",
-			            message != NULL ? message : "unknown error");
-			    dispatch_semaphore_signal(semaphore);
-		    }];
+		id<IPCMetalXPCServiceProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+		  const char *message = error.localizedDescription.UTF8String;
+		  U_LOG_D("Monado launchd XPC activation unavailable: %s", message != NULL ? message : "unknown error");
+		  dispatch_semaphore_signal(semaphore);
+		}];
 
 		[proxy activateWithReply:^(BOOL remote_ready) {
-			replied = YES;
-			ready = remote_ready;
-			dispatch_semaphore_signal(semaphore);
+		  replied = YES;
+		  ready = remote_ready;
+		  dispatch_semaphore_signal(semaphore);
 		}];
 
 		long wait_result = dispatch_semaphore_wait(
@@ -593,9 +657,9 @@ ipc_metal_xpc_activate_service(void)
 
 xrt_result_t
 ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
-                                             uint32_t expected_count,
-                                             void **out_metal_textures,
-                                             pid_t owner_pid)
+                                            uint32_t expected_count,
+                                            void **out_metal_textures,
+                                            pid_t owner_pid)
 {
 	if (!standard_token_is_valid(token) || out_metal_textures == NULL || expected_count == 0 ||
 	    expected_count > XRT_MAX_SWAPCHAIN_IMAGES || owner_pid <= 0) {
@@ -614,15 +678,15 @@ ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
 
 		xrt_result_t xret = XRT_SUCCESS;
 		for (uint32_t i = 0; i < expected_count; i++) {
-			MTLSharedTextureHandle *handle = [service copyImageObjectForToken:token
-			                                                            index:i
-			                                                         ownerPID:owner_pid
-			                                                    expectedClass:[MTLSharedTextureHandle class]];
+			MTLSharedTextureHandle *handle =
+			    [service copyImageObjectForToken:token
+			                               index:i
+			                            ownerPID:owner_pid
+			                       expectedClass:[MTLSharedTextureHandle class]];
 			if (handle == nil) {
-				U_LOG_E("Metal token ownership mismatch/missing texture token=0x%016llx image=%u pid=%d",
-				        (unsigned long long)token,
-				        i,
-				        (int)owner_pid);
+				U_LOG_E(
+				    "Metal token ownership mismatch/missing texture token=0x%016llx image=%u pid=%d",
+				    (unsigned long long)token, i, (int)owner_pid);
 				xret = XRT_ERROR_IPC_FAILURE;
 				break;
 			}
@@ -645,10 +709,8 @@ ipc_metal_xpc_service_take_textures_for_pid(uint64_t token,
 			return xret;
 		}
 
-		U_LOG_I("Metal XPC consumed %u in-process texture handle(s) token=0x%016llx pid=%d",
-		        expected_count,
-		        (unsigned long long)token,
-		        (int)owner_pid);
+		U_LOG_I("Metal XPC consumed %u in-process texture handle(s) token=0x%016llx pid=%d", expected_count,
+		        (unsigned long long)token, (int)owner_pid);
 		return XRT_SUCCESS;
 	}
 }
@@ -677,12 +739,14 @@ ipc_metal_xpc_service_take_iosurfaces_for_pid(uint64_t token,
 		xrt_result_t xret = XRT_SUCCESS;
 		for (uint32_t i = 0; i < expected_count; i++) {
 			IOSurface *surface = [service copyImageObjectForToken:token
-			                                               index:i
-			                                            ownerPID:owner_pid
-			                                       expectedClass:[IOSurface class]];
+			                                                index:i
+			                                             ownerPID:owner_pid
+			                                        expectedClass:[IOSurface class]];
 			if (surface == nil) {
-				U_LOG_E("IOSurface token ownership mismatch/missing surface token=0x%016llx image=%u pid=%d",
-				        (unsigned long long)token, i, (int)owner_pid);
+				U_LOG_E(
+				    "IOSurface token ownership mismatch/missing surface token=0x%016llx image=%u "
+				    "pid=%d",
+				    (unsigned long long)token, i, (int)owner_pid);
 				xret = XRT_ERROR_IPC_FAILURE;
 				break;
 			}
@@ -701,9 +765,7 @@ ipc_metal_xpc_service_take_iosurfaces_for_pid(uint64_t token,
 }
 
 xrt_result_t
-ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event,
-                                                    uint64_t *out_token,
-                                                    pid_t owner_pid)
+ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event, uint64_t *out_token, pid_t owner_pid)
 {
 	if (metal_shared_event == NULL || out_token == NULL || owner_pid <= 0) {
 		return XRT_ERROR_INVALID_ARGUMENT;
@@ -732,8 +794,7 @@ ipc_metal_xpc_service_publish_shared_event_for_pid(void *metal_shared_event,
 		}
 
 		*out_token = token;
-		U_LOG_I("Metal XPC published in-process shared event token=0x%016llx pid=%d",
-		        (unsigned long long)token,
+		U_LOG_I("Metal XPC published in-process shared event token=0x%016llx pid=%d", (unsigned long long)token,
 		        (int)owner_pid);
 		return XRT_SUCCESS;
 	}
@@ -772,8 +833,7 @@ ipc_metal_xpc_service_discard_all_for_pid(pid_t owner_pid)
 		[service release];
 		if (count > 0) {
 			U_LOG_I("Metal XPC discarded %lu pending resource token(s) for disconnected pid=%d",
-			        (unsigned long)count,
-			        (int)owner_pid);
+			        (unsigned long)count, (int)owner_pid);
 		}
 	}
 }

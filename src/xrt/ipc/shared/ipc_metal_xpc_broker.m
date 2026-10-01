@@ -10,6 +10,8 @@
 #import <Metal/Metal.h>
 
 #include "shared/ipc_metal_xpc.h"
+#include "shared/ipc_metal_xpc_service_internal.h"
+#include "os/os_time.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -25,202 +27,8 @@
 
 extern char **environ;
 
-static bool
-texture_token_is_valid(uint64_t token)
-{
-	return (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC ||
-	       (token & IPC_METAL_XPC_EXTERNAL_TOKEN_MASK) == IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC;
-}
-
-static bool
-external_texture_token_is_valid(uint64_t token)
-{
-	return (token & IPC_METAL_XPC_EXTERNAL_TOKEN_MASK) == IPC_METAL_XPC_EXTERNAL_TOKEN_MAGIC;
-}
-
-@interface IPCMetalXPCBrokerService : NSObject <IPCMetalXPCBrokerProtocol>
-{
-	NSLock *_lock;
-	NSMutableDictionary *_handlesByToken;
-	NSMutableDictionary *_countsByToken;
-	NSMutableDictionary *_eventsByToken;
-}
-@end
-
-@implementation IPCMetalXPCBrokerService
-
-- (instancetype)init
-{
-	self = [super init];
-	if (self != nil) {
-		_lock = [[NSLock alloc] init];
-		_handlesByToken = [[NSMutableDictionary alloc] init];
-		_countsByToken = [[NSMutableDictionary alloc] init];
-		_eventsByToken = [[NSMutableDictionary alloc] init];
-	}
-	return self;
-}
-
-- (void)dealloc
-{
-	[_eventsByToken release];
-	[_countsByToken release];
-	[_handlesByToken release];
-	[_lock release];
-	[super dealloc];
-}
-
-- (void)publishTextureHandle:(MTLSharedTextureHandle *)handle
-                       token:(uint64_t)token
-                       index:(uint32_t)index
-                  imageCount:(uint32_t)imageCount
-                       reply:(void (^)(BOOL success))reply
-{
-	BOOL success = NO;
-
-	if (handle != nil && imageCount > 0 && imageCount <= XRT_MAX_SWAPCHAIN_IMAGES && index < imageCount &&
-	    texture_token_is_valid(token)) {
-		NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
-
-		[_lock lock];
-
-		NSNumber *known_count = [_countsByToken objectForKey:key];
-		if (known_count == nil || known_count.unsignedIntValue == imageCount) {
-			NSMutableDictionary *images = [_handlesByToken objectForKey:key];
-			if (images == nil) {
-				images = [NSMutableDictionary dictionaryWithCapacity:imageCount];
-				[_handlesByToken setObject:images forKey:key];
-				[_countsByToken setObject:[NSNumber numberWithUnsignedInt:imageCount] forKey:key];
-			}
-
-			[images setObject:handle forKey:[NSNumber numberWithUnsignedInt:index]];
-			success = YES;
-		}
-
-		[_lock unlock];
-	}
-
-	reply(success);
-}
-
-- (void)takeTextureHandleForToken:(uint64_t)token
-                            index:(uint32_t)index
-                            reply:(void (^)(MTLSharedTextureHandle *handle))reply
-{
-	MTLSharedTextureHandle *handle = nil;
-	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
-
-	[_lock lock];
-	NSNumber *count = [_countsByToken objectForKey:key];
-	NSMutableDictionary *images = [_handlesByToken objectForKey:key];
-	if (count != nil && index < count.unsignedIntValue) {
-		id object = [images objectForKey:[NSNumber numberWithUnsignedInt:index]];
-		if ([object isKindOfClass:[MTLSharedTextureHandle class]]) {
-			handle = [object retain];
-		}
-	}
-	[_lock unlock];
-
-	reply(handle);
-	[handle release];
-}
-
-- (void)publishIOSurface:(IOSurface *)surface
-                   token:(uint64_t)token
-                   index:(uint32_t)index
-              imageCount:(uint32_t)imageCount
-                   reply:(void (^)(BOOL success))reply
-{
-	// The registry holds either kind of object; the take checks the class.
-	[self publishTextureHandle:(MTLSharedTextureHandle *)surface
-	                     token:token
-	                     index:index
-	                imageCount:imageCount
-	                     reply:reply];
-}
-
-- (void)takeIOSurfaceForToken:(uint64_t)token index:(uint32_t)index reply:(void (^)(IOSurface *surface))reply
-{
-	IOSurface *surface = nil;
-	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
-
-	[_lock lock];
-	NSNumber *count = [_countsByToken objectForKey:key];
-	NSMutableDictionary *images = [_handlesByToken objectForKey:key];
-	if (count != nil && index < count.unsignedIntValue) {
-		id object = [images objectForKey:[NSNumber numberWithUnsignedInt:index]];
-		if ([object isKindOfClass:[IOSurface class]]) {
-			surface = [object retain];
-		}
-	}
-	[_lock unlock];
-
-	reply(surface);
-	[surface release];
-}
-
-- (void)markTextureTokenClaimable:(uint64_t)token
-                            reply:(void (^)(BOOL success))reply
-{
-	// The legacy standalone broker predates PID-scoped ownership and its
-	// texture tokens are already cross-process. Treat an existing texture token
-	// as claimable so clients using the new helper ABI remain compatible.
-	BOOL success = NO;
-	if (external_texture_token_is_valid(token)) {
-		NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
-		[_lock lock];
-		success = [_handlesByToken objectForKey:key] != nil;
-		[_lock unlock];
-	}
-	reply(success);
-}
-
-- (void)publishSharedEventHandle:(MTLSharedEventHandle *)handle
-                           token:(uint64_t)token
-                           reply:(void (^)(BOOL success))reply
-{
-	BOOL success = NO;
-	if (handle != nil && (token & IPC_METAL_XPC_TOKEN_MASK) == IPC_METAL_XPC_TOKEN_MAGIC) {
-		NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
-		[_lock lock];
-		if ([_eventsByToken objectForKey:key] == nil) {
-			[_eventsByToken setObject:handle forKey:key];
-			success = YES;
-		}
-		[_lock unlock];
-	}
-	reply(success);
-}
-
-- (void)takeSharedEventHandleForToken:(uint64_t)token
-                                reply:(void (^)(MTLSharedEventHandle *handle))reply
-{
-	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
-	MTLSharedEventHandle *handle = nil;
-	[_lock lock];
-	handle = [[_eventsByToken objectForKey:key] retain];
-	[_lock unlock];
-
-	reply(handle);
-	[handle release];
-}
-
-- (void)discardToken:(uint64_t)token reply:(void (^)(void))reply
-{
-	NSNumber *key = [NSNumber numberWithUnsignedLongLong:token];
-	[_lock lock];
-	[_handlesByToken removeObjectForKey:key];
-	[_countsByToken removeObjectForKey:key];
-	[_eventsByToken removeObjectForKey:key];
-	[_lock unlock];
-	reply();
-}
-
-@end
-
-@interface IPCMetalXPCBrokerListenerDelegate : NSObject <NSXPCListenerDelegate>
-{
-	IPCMetalXPCBrokerService *_service;
+@interface IPCMetalXPCBrokerListenerDelegate : NSObject <NSXPCListenerDelegate> {
+	IPCMetalXPCServiceObject *_service;
 }
 @end
 
@@ -230,7 +38,7 @@ external_texture_token_is_valid(uint64_t token)
 {
 	self = [super init];
 	if (self != nil) {
-		_service = [[IPCMetalXPCBrokerService alloc] init];
+		_service = [[IPCMetalXPCServiceObject alloc] init];
 	}
 	return self;
 }
@@ -244,10 +52,22 @@ external_texture_token_is_valid(uint64_t token)
 - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)newConnection
 {
 	(void)listener;
+	if (newConnection.effectiveUserIdentifier != getuid() || newConnection.processIdentifier <= 0) {
+		return NO;
+	}
 	newConnection.exportedInterface = ipc_metal_xpc_create_interface();
 	newConnection.exportedObject = _service;
 	[newConnection resume];
 	return YES;
+}
+
+- (void)expirePendingTokens:(NSTimer *)timer
+{
+	(void)timer;
+	uint64_t now = os_monotonic_get_ns();
+	if (now > IPC_METAL_XPC_TOKEN_LIFETIME_NS) {
+		[_service expireTokensBefore:now - IPC_METAL_XPC_TOKEN_LIFETIME_NS];
+	}
 }
 
 @end
@@ -323,20 +143,19 @@ write_launch_agent_plist(const char *path, const char *executable)
 		NSDictionary *plist = @{
 			@"Label" : service,
 			@"ProgramArguments" : @[ exe, @"--service" ],
-			@"MachServices" : @{ service : @YES },
+			@"MachServices" : @{service : @YES},
 			@"RunAtLoad" : @NO,
 			@"ProcessType" : @"Interactive",
 		};
 
 		NSError *error = nil;
 		NSData *data = [NSPropertyListSerialization dataWithPropertyList:plist
-		                                                        format:NSPropertyListXMLFormat_v1_0
-		                                                       options:0
-		                                                         error:&error];
+		                                                          format:NSPropertyListXMLFormat_v1_0
+		                                                         options:0
+		                                                           error:&error];
 		if (data == nil || ![data writeToFile:plist_path options:NSDataWritingAtomic error:&error]) {
 			const char *message = error != nil ? error.localizedDescription.UTF8String : "unknown error";
-			fprintf(stderr,
-			        "Could not write Metal XPC broker LaunchAgent plist: %s\n",
+			fprintf(stderr, "Could not write Metal XPC broker LaunchAgent plist: %s\n",
 			        message != NULL ? message : "unknown");
 			return false;
 		}
@@ -405,7 +224,13 @@ run_service(void)
 		listener.delegate = delegate;
 		[listener resume];
 
+		NSTimer *timer = [NSTimer scheduledTimerWithTimeInterval:1.0
+		                                                  target:delegate
+		                                                selector:@selector(expirePendingTokens:)
+		                                                userInfo:nil
+		                                                 repeats:YES];
 		[[NSRunLoop currentRunLoop] run];
+		[timer invalidate];
 
 		[listener release];
 		[delegate release];
