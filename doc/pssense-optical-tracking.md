@@ -1181,7 +1181,14 @@ rotation and 233 position jumps), and about 1/70 of the cost. The coverage gate 
 upstream solved, so it stays as it is. About 40% are the M1 loop losing lock, mostly at 1 m/s or more, which the live
 tracker with the EKF prior mostly solves. 18% are the right controller fitting at about 1 px, over the bootstrap RMS
 limit. A quarter are poses where one front end fitted the wrong controller's ring, which the evaluator does not
-detect. The decision stands: keep our front end. The right controller's fit is the follow-up.
+detect. The decision stands: keep our front end.
+
+The right controller's fit was then measured from per-LED residuals (`constellation_replay --residuals-csv`). It is not
+specific to the right controller: both rings fit the cameras better about 1% larger than the model, as mirror-image
+per-LED offsets of about 1 mm. Offsets fitted on the 25 Sep sessions and applied to the 26 Sep ones
+(`--led-offsets`) give the right controller 10% more poses in the shipped path and take its RMS from 0.53 px to
+0.38 px. The cause is not settled between the LED model and the rig calibration. Applying the offsets in the driver is
+proposed, not done.
 
 Recordings now carry session info, sync events, IMU timing, head-pose age and Create-button static markers (packet 5).
 See `doc/macos-pssense-mr2940-frontend-evaluation.md` for the results, the commands and recording guidance.
@@ -1203,5 +1210,6 @@ See `doc/macos-pssense-mr2940-frontend-evaluation.md` for the results, the comma
 It is tested by `tests/test_psvr2_sense_session_score.py`.
 
 `constellation_replay` replays a session's `constellation.ctd` (blobs, camera poses, IMU, and, from 1 Oct, the
-packet 5 extension records) through M1/M2, the tracker, the fusion paths and other front ends. `constellation_synth`
+packet 5 extension records) through M1/M2, the tracker, the fusion paths and other front ends. `--residuals-csv` writes
+M1's residual per LED and camera, and `--led-offsets` replays with a corrected LED model. `constellation_synth`
 writes synthetic sessions with ground truth for checking those pipelines.

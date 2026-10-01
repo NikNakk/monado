@@ -17,8 +17,12 @@ This note covers the optical front end. The fusion back ends are in `doc/macos-p
   It accounts for 3–4% of the exposures only upstream solved. About half of the gap is the replay's M1 loop losing
   lock in fast motion, which the shipped tracker with the EKF prior does not. The rest is mostly the right controller
   failing M1's RMS limits, and poses in which one front end has fitted the wrong controller.
-- **No change to M1's coverage gate is proposed.** Two follow-ups are, under "Proposed follow-ups". Neither is
+- **No change to M1's coverage gate is proposed.** Two follow-ups are, under "Proposed follow-ups". The second is not
   implemented.
+- **The first follow-up is measured.** See "The LED model's fit". The right controller is not a special case. Both
+  rings fit the cameras better about 1% larger than the model, and a correction fitted on one day's sessions carries
+  over to the next day's: in the shipped path the right controller gains 10% more poses and its RMS falls from 0.53 px
+  to 0.38 px. The correction is a tool option only (`--led-offsets`). Putting it in the driver is proposed, not done.
 - **The recording format now carries what this evaluation lacked** (packet 5 extension records, below). New
   recordings need no extra steps beyond the static markers, which are optional.
 
@@ -311,10 +315,9 @@ Neither is implemented.
 
 1. **Find why the right controller fits at about 1 px.** This is the one real coverage loss the comparison found that
    the shipped path does not recover: 440 of the 506 exposures in the IMU sessions, and the largest class over all
-   sessions. The residual is in all four cameras, which suggests the right controller's LED model rather than one
-   camera's calibration. A per-LED residual table from the recordings would show it. Raising the bootstrap RMS limit
-   from 0.8 px to the tracking limit of 1.0 px would recover 216 of the 506. But that limit is what keeps mirror-image
-   fits out (0.80–0.96 px), and the wrong-device counts above say the risk is real. Fixing the fit should come first.
+   sessions. Raising the bootstrap RMS limit from 0.8 px to the tracking limit of 1.0 px would recover 216 of the 506.
+   But that limit is what keeps mirror-image fits out (0.80–0.96 px), and the wrong-device counts above say the risk
+   is real. Fixing the fit comes first. It is measured in "The LED model's fit" below.
 2. **Score the shipped path in the comparison.** `--compare-frontend` scores the bare M1 loop, which has no position
    prediction, no bootstrap contest and no confirming solves. Half of its gap to upstream and all of its wrong-device
    poses may be artefacts of that. The comparison should also score `--tracker-filter`'s poses, and the evaluator
@@ -322,6 +325,126 @@ Neither is implemented.
 
 The per-exposure analysis behind this section is in the experiment directory, under `analysis/`: the scripts, the
 `--m1 --csv` outputs and the `--tracker` / `--tracker-filter` outputs.
+
+## The LED model's fit (1 October 2026)
+
+This follows up the right controller's RMS. Two options were added to `constellation_replay`:
+
+- `--residuals-csv OUT.csv` writes one row per correspondence of every M1 solve, accepted or not: LED, camera, blob,
+  projection, pixel residual, range, facing angle, and the residual as a displacement of the LED in the model frame
+  (`err_*_mm`, perpendicular to the view ray `ray_*`).
+- `--led-offsets OFFSETS.csv` moves LEDs of the recorded models before any replay mode runs. Rows are
+  `device,led,dx_mm,dy_mm,dz_mm` in the recorded model frame, which is the header's with y and z negated.
+
+### What the residuals show
+
+Over the 27 sessions, accepted solves hold 1.27 million left and 1.37 million right correspondences. The RMS is
+0.49 px left and 0.57 px right. It rises with the facing angle for both (left 0.41 px head on to 0.55 px at 75–90°,
+right 0.47 to 0.64 px), and no single camera or LED stands out.
+
+Each LED's position error was fitted from those residuals: the least-squares displacement over all its views. One
+pass gives 0.1–0.4 mm per LED for the left controller and 0.2–0.65 mm for the right, where they point outward. A
+single pass underestimates, because the pose solve absorbs part of the error. So the fit was iterated: replay with the corrected
+model, refit, remove the rigid part, repeat until the steps fall under 0.1 mm.
+
+Three groups of sessions were fitted separately:
+
+| fit | sessions | calibration | RMS before → after, px, L / R | scale it implies, L / R |
+|---|---|---|---|---|
+| A | 7, 25 Sep 20:47 to 26 Sep 00:09 | combined | 0.544 → 0.423 / 0.566 → 0.359 | +1.18% / +1.33% |
+| B | 6, 26 Sep 00:22 to 01:45 | combined | 0.463 → 0.424 / 0.542 → 0.406 | +0.40% / +0.81% |
+| C | 3, 25 Sep 00:12 to 00:21 | old (13 Sep) | 0.473 → 0.443 / 0.636 → 0.565 | −0.62% / +0.33% |
+
+Fit A's offsets, in mm, in the recorded model frame:
+
+| LED | left model | left offset | right model | right offset |
+|---|---|---|---|---|
+| 0 | (-12.1, +55.2, -38.2) | (-0.51, +0.85, -0.49) | (+12.1, +55.2, -38.2) | (+0.04, +0.65, -0.60) |
+| 1 | (-33.1, +55.2, -20.2) | (-0.56, +0.61, +0.52) | (+33.1, +55.2, -20.2) | (+0.48, +0.82, +0.51) |
+| 2 | (-53.7, +31.0, -28.4) | (-0.98, +0.68, -0.43) | (+53.7, +31.0, -28.4) | (+1.13, +0.80, -0.41) |
+| 3 | (-67.0, +10.5, -8.7) | (-0.97, +0.67, -0.08) | (+67.0, +10.5, -8.7) | (+1.25, +0.21, +0.23) |
+| 4 | (-63.5, -24.6, -4.2) | (-1.27, -0.21, -0.12) | (+63.5, -24.6, -4.2) | (+1.18, -0.37, -0.06) |
+| 5 | (-47.8, -45.0, -18.5) | (-0.91, -0.50, -0.13) | (+47.8, -45.0, -18.5) | (+0.76, -0.45, -0.35) |
+| 6 | (+45.5, +27.0, -43.0) | (+0.85, -0.09, -0.46) | (-45.5, +27.0, -43.0) | (-0.90, +0.03, -0.68) |
+| 7 | (+59.5, +14.0, -28.5) | (+0.54, +0.25, -0.19) | (-59.5, +14.0, -28.5) | (-0.74, +0.57, -0.17) |
+| 8 | (+61.1, -14.6, -24.7) | (+0.80, +0.04, -0.20) | (-61.1, -14.6, -24.7) | (-0.92, +0.19, -0.11) |
+| 9 | (+51.0, -27.3, -36.2) | (+0.97, -0.48, -0.31) | (-51.0, -27.3, -36.2) | (-0.89, -0.68, -0.28) |
+| 10 | (+48.5, -43.0, -18.8) | (+0.68, -0.04, +0.10) | (-48.5, -43.0, -18.8) | (-0.73, -0.13, +0.08) |
+| 11 | (+30.6, -53.4, -29.4) | (+0.60, -0.54, -0.04) | (-30.6, -53.4, -29.4) | (-0.33, -0.63, -0.25) |
+| 12 | (+18.5, -63.9, -11.2) | (+0.20, -0.15, +0.29) | (-18.5, -63.9, -11.2) | (-0.15, -0.31, +0.14) |
+| 13 | (-2.7, -64.3, -22.7) | (+0.12, -0.51, +0.05) | (+2.7, -64.3, -22.7) | (+0.12, -0.54, -0.20) |
+| 14 | (-29.1, -13.4, +60.7) | (-0.13, +0.07, +0.61) | (+29.1, -13.4, +60.7) | (+0.25, +0.04, +0.76) |
+| 15 | (+1.1, -13.4, +67.3) | (+0.15, -0.17, +0.50) | (-1.1, -13.4, +67.3) | (-0.11, -0.02, +0.74) |
+| 16 | (+31.8, -13.4, +59.3) | (+0.42, -0.47, +0.37) | (-31.8, -13.4, +59.3) | (-0.43, -0.17, +0.66) |
+
+- **The right controller is not a special case.** The two controllers were fitted independently, and their offsets
+  are mirror images of each other to 0.32 mm RMS, against an offset size of 0.9–1.0 mm RMS. The left ring has the
+  same error. It shows less in the left's RMS on the 26 Sep sessions (0.46 px against the right's 0.54 px).
+- **The offsets point outward.** They fit a uniform scale of +1.2 to +1.3%, or a shift of 0.8–0.9 mm along each LED's
+  normal, about equally well (0.39–0.45 mm and 0.34–0.41 mm left over). The ring's normals are nearly radial, so the
+  recordings cannot tell the two apart.
+- **The size is not stable.** Fit B, on the same calibration, gives +0.4 to +0.8%. Fit C, on the old calibration, gives
+  about zero and did not converge. A fixed error in the LED model would give the same answer each time. So part of
+  this is the rig calibration, or depends on where the controllers were.
+- **It is not the board's print scale.** The ChArUco squares were measured at 40.00 mm (`doc/macos-port.md`), assuming
+  the mode-4 captures used the same board.
+
+### Does a correction carry over?
+
+Each correction was applied to sessions it was not fitted on, in the shipped path (`--tracker-filter`). The table
+gives poses pushed, and the median over sessions of the RMS p50, as left / right.
+
+26 Sep sessions (fit B's own; held out from fit A):
+
+| model | pushed | RMS px p50 | RMS px p95 |
+|---|---|---|---|
+| as recorded | 17417 / 17116 | 0.424 / 0.526 | 0.618 / 0.800 |
+| fit A offsets | 17696 / 18837 | 0.396 / 0.383 | 0.548 / 0.620 |
+| fit B offsets | 17532 / 18833 | 0.403 / 0.413 | 0.581 / 0.657 |
+| scale +1.0% | 17657 / 18586 | 0.423 / 0.446 | 0.583 / 0.674 |
+| scale +1.3% | 17581 / 18690 | 0.428 / 0.418 | 0.573 / 0.633 |
+| 0.9 mm along the normals | 17604 / 18669 | 0.432 / 0.450 | 0.581 / 0.674 |
+
+25 Sep evening sessions (fit A's own; held out from fit B):
+
+| model | pushed | RMS px p50 | RMS px p95 |
+|---|---|---|---|
+| as recorded | 17005 / 22633 | 0.504 / 0.525 | 0.778 / 0.820 |
+| fit A offsets | 18137 / 24438 | 0.355 / 0.301 | 0.627 / 0.574 |
+| fit B offsets | 17623 / 24187 | 0.425 / 0.363 | 0.684 / 0.678 |
+| scale +1.0% | 18025 / 24199 | 0.425 / 0.380 | 0.680 / 0.652 |
+| scale +1.3% | 18067 / 24276 | 0.383 / 0.372 | 0.679 / 0.607 |
+| 0.9 mm along the normals | 18079 / 24281 | 0.378 / 0.372 | 0.664 / 0.598 |
+
+- **Fit A's offsets are the best correction on both groups**, including the one they were not fitted on. Held out, the
+  right controller gains 10% more poses (17116 → 18837) and its RMS p50 falls from 0.53 px to 0.38 px. The left gains
+  2%, which is inside the replay's count noise (about 5%, see `doc/pssense-optical-tracking.md`), and its RMS falls
+  from 0.42 px to 0.40 px.
+- **A plain scale or normal shift gets most of the right controller's gain**, and less of the RMS.
+- In `010135`, the right controller goes from 1973 to 2438 poses and from 0.53 px to 0.31 px. Upstream had 2807.
+- On `20260925-083326`, recorded with the 25 Sep calibration alone, fit A takes the RMS from 0.48 / 0.57 px to
+  0.32 / 0.26 px, with the counts unchanged.
+- **On the old calibration it is worse.** In `20260925-002110`, fit A takes the left's RMS from 0.47 px to 0.68 px and
+  the right's poses from 3342 to 2649. The correction belongs with the combined calibration.
+
+Not checked: whether a better-fitting model changes the wrong-device poses, and the corrected poses' gyro and
+stillness metrics.
+
+### Proposed, not implemented
+
+Apply fit A's per-LED offsets to both controllers' models on macOS, and validate on the headset. The evidence is the
+held-out gain above. The limits are:
+
+- it is fitted on one pair of controllers and one rig calibration, and it would have to be refitted if the calibration
+  changes;
+- the cause is not settled, so it may be compensating a rig error rather than correcting the LEDs;
+- `pssense_led_model.h` is upstream's file, taken from Sony's driver. A correction table beside it, applied when the
+  model is handed to the tracker, keeps that file unchanged.
+
+A recording that would settle the cause: both controllers resting at two or three known separations, measured with a
+ruler. The rig's scale then has a reference that does not depend on the LED model.
+
+The scripts and the fitted offsets are in the experiment directory, under `analysis/led/`.
 
 ## Synthetic results
 
@@ -564,6 +687,7 @@ On `claude/pssense-mr2940-evaluation`:
 - `t/constellation: store distortion models as fixed dataset codes`
 - `t/constellation: synthetic dataset generator with ground truth`
 - `t/constellation: score optical front ends side by side in the replay`
+- `t/constellation: per-correspondence residuals and LED offsets in the replay`
 
 On `claude/pssense-upstream-frontend-replay`:
 
