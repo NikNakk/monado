@@ -257,7 +257,6 @@ renderer_reprojection_trace_open(struct comp_renderer *r)
 	}
 	fputc('\n', r->reprojection_trace);
 	fflush(r->reprojection_trace);
-	COMP_INFO(r->c, "macOS reprojection trace enabled: %s", path);
 }
 
 static void
