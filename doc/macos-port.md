@@ -45,8 +45,8 @@ This is development work, not an upstream-supported or packaged Monado target.
 | PS Sense 3DoF, buttons and haptics | **Working experimental** | Native IOKit HID discovery/input is present on the integration branch. Sense also maps to `XR_KHR_generic_controller` (opt-in, `XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC`). |
 | PS Sense optical 6DoF | **In development on a separate branch** | Static/recorded optical results are encouraging, but dynamic tracking is not yet reliable enough to merge. |
 | Depth layers | **Off by default** | `XR_KHR_composition_layer_depth` is not exposed on macOS unless configured with `-DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON`; depth-aware reprojection additionally needs `XRT_COMPOSITOR_DEPTH_REPROJECTION=1`. Depth swapchain formats (including `Depth32Float_Stencil8`) are still creatable. |
-| Wine OpenXR / OpenVR | **Working experimental** | Native Monado remains the compositor/runtime; Windows D3D11 clients run through Wine/DXMT and OpenVR through OpenComposite or xrizer. |
-| SteamVR games under Wine | **Working for a small tested set** | At least several SteamVR titles have reached runnable/interactive states; Half-Life: Alyx is the most heavily exercised path. |
+| Wine OpenXR / OpenVR | **External compatibility project** | Wine/OpenVR integration has moved to [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr); Monado retains only generic macOS/Metal runtime and resource-handoff support. |
+| SteamVR games under Wine | **External experimental path** | Game compatibility and launch policy are tracked in [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr) and the relevant OpenVR compatibility projects. |
 | PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; hardware validation/calibration refinement remains. |
 | PS VR2 eye tracking | **Working experimental** | `XR_EXT_eye_gaze_interaction` using the Sony calibration blob plus an optional 9-point user calibration; gaze activates lazily. Accuracy still needs broader hardware validation. |
 | Foveated rendering | **Hardware-validated, opt-in at build time** | Fixed `XR_FB_foveation` / `XR_FB_foveation_configuration` works without gaze; `XR_META_foveation_eye_tracked` adds runtime-owned gaze. Validated on PS VR2 through `monado-service`. Metal is the only rendering backend, via the experimental `XR_MNDX_foveation_metal` companion. |
@@ -160,8 +160,8 @@ side channel used for:
 - IOSurface transfer for native clients' swapchains. The client creates the
   surfaces and publishes them to the service under a token only its own PID
   can redeem, so they travel as Mach ports and are not global. (Surfaces sent
-  by ID must be `kIOSurfaceIsGlobal`, which lets any process open them; only
-  the Wine/DXMT import still uses IDs, for surfaces DXMT creates.);
+  by ID must be `kIOSurfaceIsGlobal`, which lets any process open them; new
+  native clients should prefer the PID-scoped XPC/Mach-port path.);
 - `MTLSharedTextureHandle` transfer where IOSurface is not the right carrier;
 - `MTLSharedEventHandle` synchronization;
 - process ownership/lifetime of shared Metal resources.
@@ -295,16 +295,18 @@ controller-accessible system overlay. It should remain a client of standard
 OpenXR where possible; Monado-specific behaviour is reserved for functionality
 that genuinely requires runtime integration.
 
-### Wine / OpenVR compatibility
+### External Wine / OpenVR compatibility
 
+- Wine/XR bridge and compatibility tooling:
+  [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr)
 - OpenVR compatibility fork:
   [NikNakk/xrizer](https://github.com/NikNakk/xrizer)
-- DXMT/Wine support and published development artifacts:
+- Earlier streaming/interoperability experiments:
   [NikNakk/BasaltVR](https://github.com/NikNakk/BasaltVR)
 
-The Monado integration branch contains the Wine-side build/provision/run scripts,
-the Windows Monado OpenXR client, loopback IPC bridge, DXMT texture sharing,
-OpenComposite helpers and xrizer launch paths.
+Wine-specific D3D clients, launch/provisioning scripts, transport policy and
+game compatibility shims no longer live in the Monado tree. The external bridge
+consumes Monado's generic macOS/Metal handoff mechanisms instead.
 
 ### Native PS VR2 reference player
 
@@ -451,63 +453,34 @@ foveation; Vulkan, D3D and OpenGL clients get no foveation yet. Compact depth
 coordinates also need to be audited before depth submission is combined with
 the new foveated swapchain path.
 
-## Wine, OpenVR and SteamVR applications
+## External Wine, OpenVR and SteamVR applications
 
-The architecture deliberately avoids running a second VR compositor under Wine.
-The native arm64 Monado service owns the headset and presentation path.
+Wine/OpenVR compatibility is developed outside Monado in
+[NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr).
+The native arm64 Monado service remains the headset runtime/compositor, while
+the external project owns the Windows/Wine graphics binding, transport,
+OpenComposite/xrizer integration, launch tooling and game-specific policy.
 
 ```text
 Windows VR application
        |
-       +-- OpenXR --> PE Monado OpenXR client
+    Wine / D3D11
        |
-       +-- OpenVR --> OpenComposite or xrizer
-                         |
-                         v
-                  Wine / D3D11 / DXMT
-                         |
-           IOSurface / shared Metal texture
-                         |
-                         v
-                 native monado-service
-                         |
-                         v
-                       PS VR2
+  macos-wine-xr
+       |
+ generic macOS Metal resource handoff
+       |
+ native monado-service
+       |
+     PS VR2
 ```
 
-The current branch includes:
+This separation is deliberate: Monado should understand Metal textures,
+IOSurfaces and shared synchronization primitives, but should not contain
+translation-layer-specific or game-specific behavior.
 
-- a PE x86-64 Monado OpenXR runtime;
-- framed loopback IPC between the Wine client and native service;
-- D3D11/DXMT IOSurface and shared-Metal swapchain paths;
-- direct Metal array-texture transport for cases that need it;
-- GPU shared-event/timeline synchronization plus diagnostic CPU fallback;
-- OpenComposite provisioning and per-game helpers;
-- xrizer provisioning/rebuild helpers;
-- legacy Unity/OpenVR compatibility shims;
-- timing capture and analysis tooling;
-- controller-binding experiments;
-- headset audio-routing helpers.
-
-See:
-
-- [Wine D3D11 OpenXR](macos-wine-openxr-d3d11.md)
-- [Wine IOSurface import](macos-wine-iosurface-import.md)
-- [Wine XR audio](macos-wine-xr-audio.md)
-
-Half-Life: Alyx is the most demanding application exercised so far. Rendering,
-menu/game input and multiple maps have been reached through the current
-OpenComposite/xrizer experiments, but compatibility is still game-sensitive.
-At least several SteamVR titles have been brought up; this is not yet a claim of
-general SteamVR compatibility.
-
-### SteamVR Home
-
-SteamVR Home remains an explicit experiment rather than a supported feature.
-The useful goal is to broaden OpenVR/SteamVR API compatibility until Home either
-runs naturally or a concrete architectural blocker is identified. Recreating
-Valve's full SteamVR compositor is not a goal: Monado should remain the headset
-runtime/compositor.
+SteamVR Home remains an experiment in the external compatibility layer rather
+than a Monado runtime target. Recreating Valve's compositor is not a goal.
 
 ## What is left
 
@@ -678,13 +651,11 @@ clamped to 0.5–1.5.
 ### IPC security and contribution follow-up
 
 Native macOS socket clients now have a kernel-verified UID/PID separate from
-application metadata. Wine TCP requires mutual HMAC authentication before IPC;
-see [the Wine transport setup](macos-wine-openxr-d3d11.md#tcp-authentication).
-Socket lifetime locking preserves live endpoints and recovers stale sockets.
-Launchd configuration containing the Wine key is written atomically with mode
-0600. XPC pending-resource quotas and 60-second expiry apply to both the direct
-service and standalone probe; the ownership-bypassing runtime broker override
-is retired. See [the XPC ownership note](macos-service-direct-xpc.md#per-client-ownership-and-pending-resource-limits).
+application metadata. Socket lifetime locking preserves live endpoints and
+recovers stale sockets. XPC pending-resource quotas and 60-second expiry apply
+to both the direct service and standalone probe; the ownership-bypassing
+runtime broker override is retired. Compatibility-bridge authentication and
+transport policy are maintained in the external macOS Wine XR repository. See [the XPC ownership note](macos-service-direct-xpc.md#per-client-ownership-and-pending-resource-limits).
 
 CI now checks formatting, spelling and REUSE metadata, builds both upstream
 Android ABIs, and runs the macOS default/all-feature configurations on macOS 14
