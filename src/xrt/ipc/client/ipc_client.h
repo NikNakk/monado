@@ -69,9 +69,6 @@ struct ipc_connection
 	struct ipc_shared_memory *ism;
 	xrt_shmem_handle_t ism_handle;
 
-	/* Byte-stream clients may own a heap snapshot instead of a mapped OS handle. */
-	bool ism_is_copy;
-
 	/*
 	 * Serializes request/reply transactions so responses cannot be consumed by
 	 * the wrong synchronous caller.
@@ -81,8 +78,8 @@ struct ipc_connection
 	/*
 	 * Serializes bytes written to the IPC transport. Unlike mutex above, this
 	 * is held only while a request is actually being written (except for the
-	 * special input-handle handshake). One-way byte-stream frame submissions can
-	 * therefore write while another thread is waiting for a synchronous reply.
+	 * special input-handle handshake). One-way submissions can therefore write
+	 * while another thread is waiting for a synchronous reply.
 	 */
 	struct os_mutex send_mutex;
 
