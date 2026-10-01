@@ -184,3 +184,10 @@ Contribution checks and Android/macOS version coverage are automated. Hardware
 regression runs remain user-owned. Human DCO sign-offs
 and upstream MR-specific changelog filenames remain submission prerequisites;
 see [the contribution preparation](macos-upstream-contribution.md).
+
+
+### Clean service build follow-up, 2026-10-01
+
+Removed dormant Unix-channel framing references to deleted fields. Clean
+service/XPC targets and three IPC regression suites pass. Wire commands and
+schemas are unchanged. See [the validation note](macos-service-direct-xpc.md#clean-unix-channel-build-validation-2026-10-01).

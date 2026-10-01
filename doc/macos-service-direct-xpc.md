@@ -268,3 +268,21 @@ The next steps are:
 - remove the legacy standalone broker once the direct path has enough soak time;
 - refine the user-facing `Quit VR` policy on top of the implemented idle and
   display-loss shutdown lifecycle.
+
+
+## Clean Unix channel build validation (2026-10-01)
+
+The clean branch had retained dormant Unix-channel framing code referring to
+removed `ipc_message_channel.frame_reads` / `frame_writes` fields. These
+macOS-guarded helpers and branches have been removed. Native Unix IPC uses
+its existing plain message/descriptor path; external transport framing belongs
+to the external compatibility project. No command IDs, wire schemas, XPC
+publication interfaces or Linux paths changed.
+
+From `f1a6b7f98`, with hardware drivers disabled, the clean service,
+`ipc_shared` and `monado_metal_xpc_client` build. Shared-memory,
+socket-security and thread-shutdown tests pass. The external compatibility
+check confirms 136 transitional commands and 18 old schemas unchanged, with
+only the generic external semaphore import appended. The external generic
+OpenXR host also ran `hello_xr` against this branch's simulated HMD through
+standard Metal OpenXR swapchains; hardware pacing comparison remains pending.
