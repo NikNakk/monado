@@ -22,11 +22,11 @@
 #include "oxr_binding.h"
 #include "oxr_haptic.h"
 #include "oxr_session_action_context.h"
+#include "oxr_handle_base.h"
 
 #include "../oxr_api_verify.h"
 #include "../oxr_objects.h"
 #include "../oxr_logger.h"
-#include "../oxr_handle.h"
 #include "../oxr_chain.h"
 #include "../oxr_roles.h"
 
@@ -75,7 +75,7 @@ process_dpad(struct oxr_logger *log,
 	}
 
 	struct oxr_action_set *act_set = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_action_set *, dpad->actionSet);
-	if (act_set->handle.debug != OXR_XR_DEBUG_ACTIONSET) {
+	if (act_set->handle.base.debug != OXR_XR_DEBUG_ACTIONSET) {
 		return oxr_error(log, XR_ERROR_HANDLE_INVALID, "(%s->actionSet == %p)", prefix, (void *)act_set);
 	}
 
@@ -152,16 +152,14 @@ oxr_xrSyncActions(XrSession session, const XrActionsSyncInfo *syncInfo)
 	}
 #endif
 
-	for (uint32_t i = 0; i < syncInfo->countActiveActionSets; i++) {
-		struct oxr_action_set *act_set = NULL;
-
-		OXR_VERIFY_ACTIONSET_NOT_NULL(&log, syncInfo->activeActionSets[i].actionSet, act_set);
-
-		XrResult res = oxr_verify_subaction_path_sync(&log, sess->sys->inst, act_set,
-		                                              syncInfo->activeActionSets[i].subactionPath, i);
-		if (res != XR_SUCCESS) {
-			return res;
-		}
+	XrResult ret = oxr_verify_active_action_sets_sync( //
+	    &log,                                          //
+	    sess->sys->inst,                               //
+	    syncInfo->countActiveActionSets,               //
+	    syncInfo->activeActionSets,                    //
+	    "syncInfo->activeActionSets");                 //
+	if (ret != XR_SUCCESS) {
+		return ret;
 	}
 
 	return oxr_action_sync_data(&log, sess, syncInfo->countActiveActionSets, syncInfo->activeActionSets,
@@ -175,11 +173,17 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 
 	struct oxr_session *sess;
 	struct oxr_logger log;
+	XrResult ret;
+
 	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrAttachSessionActionSets");
 	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, bindInfo, XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO);
 
-	if (oxr_session_action_context_has_attached_act_sets(&sess->action_context)) {
+	// Convenience
+	struct oxr_instance_action_context *inst_context = sess->sys->inst->action_context;
+	struct oxr_session_action_context *sess_context = &sess->action_context;
+
+	if (oxr_session_action_context_has_attached_act_sets(sess_context)) {
 		return oxr_error(&log, XR_ERROR_ACTIONSETS_ALREADY_ATTACHED,
 		                 "(session) has already had action sets "
 		                 "attached, can only attach action sets once.");
@@ -191,12 +195,26 @@ oxr_xrAttachSessionActionSets(XrSession session, const XrSessionActionSetsAttach
 		                 "at least one action set.");
 	}
 
-	for (uint32_t i = 0; i < bindInfo->countActionSets; i++) {
-		struct oxr_action_set *act_set = NULL;
-		OXR_VERIFY_ACTIONSET_NOT_NULL(&log, bindInfo->actionSets[i], act_set);
+	ret = oxr_verify_action_sets_array( //
+	    &log,                           //
+	    bindInfo->countActionSets,      //
+	    bindInfo->actionSets,           //
+	    "bindInfo->actionSets");        //
+	if (ret != XR_SUCCESS) {
+		return ret;
 	}
 
-	return oxr_session_attach_action_sets(&log, sess, bindInfo);
+	ret = oxr_session_attach_action_sets(  //
+	    &log,                              //
+	    &inst_context->suggested_profiles, //
+	    &sess->attached_actions,           //
+	    sess_context,                      //
+	    bindInfo);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	return oxr_session_success_result(sess);
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -239,9 +257,9 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 	const bool has_dpad = false;
 #endif
 
-	struct profile_template *interaction_profile_template = NULL;
+	struct oxr_profile_template *interaction_profile_template = NULL;
 
-	static_assert(OXR_BINDINGS_PROFILE_TEMPLATE_COUNT == ARRAY_SIZE(profile_templates), "Must match");
+	static_assert(OXR_BINDINGS_PROFILE_TEMPLATE_COUNT == ARRAY_SIZE(oxr_profile_templates), "Must match");
 	static_assert(OXR_BINDINGS_PROFILE_TEMPLATE_COUNT == ARRAY_SIZE(inst->path_cache.template_paths), "Must match");
 
 	for (size_t i = 0; i < OXR_BINDINGS_PROFILE_TEMPLATE_COUNT; i++) {
@@ -249,11 +267,11 @@ oxr_xrSuggestInteractionProfileBindings(XrInstance instance,
 			continue;
 		}
 
-		subpath_fn = profile_templates[i].subpath_fn;
-		dpad_path_fn = profile_templates[i].dpad_path_fn;
-		dpad_emulator_fn = profile_templates[i].dpad_emulator_fn;
-		ext_verify_fn = profile_templates[i].ext_verify_fn;
-		interaction_profile_template = &profile_templates[i];
+		subpath_fn = oxr_profile_templates[i].subpath_fn;
+		dpad_path_fn = oxr_profile_templates[i].dpad_path_fn;
+		dpad_emulator_fn = oxr_profile_templates[i].dpad_emulator_fn;
+		ext_verify_fn = oxr_profile_templates[i].ext_verify_fn;
+		interaction_profile_template = &oxr_profile_templates[i];
 		break;
 	}
 
@@ -583,7 +601,7 @@ oxr_xrDestroyActionSet(XrActionSet actionSet)
 	struct oxr_logger log;
 	OXR_VERIFY_ACTIONSET_AND_INIT_LOG(&log, actionSet, act_set, "xrDestroyActionSet");
 
-	return oxr_handle_destroy(&log, &act_set->handle);
+	return oxr_handle_parent_destroy(&log, &act_set->handle);
 }
 
 

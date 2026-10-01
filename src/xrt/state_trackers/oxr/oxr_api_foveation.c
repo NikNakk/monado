@@ -8,7 +8,7 @@
 #include "oxr_api_funcs.h"
 #include "oxr_api_verify.h"
 #include "oxr_foveation_policy.h"
-#include "oxr_handle.h"
+#include "oxr_handle_base.h"
 #include "oxr_logger.h"
 #include "oxr_objects.h"
 #include "oxr_roles.h"
@@ -200,8 +200,8 @@ oxr_foveation_profile_destroy(struct oxr_logger *log, struct oxr_handle_base *hb
 	 * xrGetSwapchainStateFB never returns a handle that has been destroyed.
 	 */
 	if (profile->sess != NULL) {
-		for (size_t i = 0; i < XRT_MAX_HANDLE_CHILDREN; ++i) {
-			struct oxr_handle_base *child = profile->sess->handle.children[i];
+		for (uint32_t i = 0; i < profile->sess->handle.children.count; ++i) {
+			struct oxr_handle_base *child = profile->sess->handle.children.handles[i];
 			if (child == NULL || child->debug != OXR_XR_DEBUG_SWAPCHAIN) {
 				continue;
 			}

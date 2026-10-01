@@ -32,7 +32,7 @@ static XrPath
 template_path(const struct oxr_instance_path_cache *cache, const char *path)
 {
 	for (size_t i = 0; i < OXR_BINDINGS_PROFILE_TEMPLATE_COUNT; i++) {
-		if (strcmp(profile_templates[i].path, path) == 0) {
+		if (strcmp(oxr_profile_templates[i].path, path) == 0) {
 			return cache->template_paths[i];
 		}
 	}

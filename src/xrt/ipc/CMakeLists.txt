@@ -4,7 +4,7 @@
 
 ###
 # Merge split protocol JSON files into single proto.json
-file(GLOB PROTO_JSON_FILES "${CMAKE_CURRENT_SOURCE_DIR}/shared/proto/*.json")
+file(GLOB PROTO_JSON_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/shared/proto/*.json")
 
 merge_json_files(
 	OUTPUT
@@ -150,10 +150,15 @@ add_library(
 	${CMAKE_CURRENT_BINARY_DIR}/ipc_client_generated.c
 	${CMAKE_CURRENT_BINARY_DIR}/ipc_client_generated.h
 	client/ipc_client.h
+	client/ipc_client_app_policy.c
 	client/ipc_client_compositor.c
 	client/ipc_client_connection.c
 	client/ipc_client_device.c
 	client/ipc_client_future.c
+	client/ipc_client_body_tracker.c
+	client/ipc_client_body_tracker.h
+	client/ipc_client_hand_tracker.c
+	client/ipc_client_hand_tracker.h
 	client/ipc_client_hmd.c
 	client/ipc_client_instance.c
 	client/ipc_client_session.c
@@ -210,6 +215,10 @@ add_library(
 	${CMAKE_CURRENT_BINARY_DIR}/ipc_server_generated.h
 	server/ipc_server.h
 	server/ipc_server_handler.c
+	server/ipc_server_handler_app_policy.c
+	server/ipc_server_handler_body_tracker.c
+	server/ipc_server_handler_hand_tracker.c
+	server/ipc_server_handler_swapchain.c
 	server/ipc_server_per_client_thread.c
 	server/ipc_server_process.c
 	server/ipc_server_objects.c

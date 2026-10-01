@@ -1,5 +1,5 @@
 // Copyright 2019-2024, Collabora, Ltd.
-// Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2025-2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -26,7 +26,7 @@
 
 #include "render/render_interface.h"
 
-#include "shaders/layer_defines.inc.glsl"
+#include "layer_defines.inc.glsl"
 
 #include "util/comp_render.h"
 #include "util/comp_render_helpers.h"
@@ -193,7 +193,14 @@ xrt_layer_to_cs_layer_type(const struct xrt_layer_data *data)
 	case XRT_LAYER_CYLINDER: return LAYER_COMP_TYPE_CYLINDER;
 	case XRT_LAYER_EQUIRECT2: return LAYER_COMP_TYPE_EQUIRECT2;
 	case XRT_LAYER_PROJECTION:
-	case XRT_LAYER_PROJECTION_DEPTH: return LAYER_COMP_TYPE_PROJECTION;
+	case XRT_LAYER_PROJECTION_DEPTH:
+		if ((data->flags & XRT_LAYER_SPLIT_QUAD_VIEW_CONTEXT) != 0) {
+			return LAYER_COMP_TYPE_CONTEXT;
+		} else if ((data->flags & XRT_LAYER_SPLIT_QUAD_VIEW_INSET) != 0) {
+			return LAYER_COMP_TYPE_INSET;
+		} else {
+			return LAYER_COMP_TYPE_PROJECTION;
+		}
 	default: U_LOG_E("Invalid layer type! %u", data->type); return LAYER_COMP_TYPE_NOOP;
 	}
 }
@@ -461,6 +468,19 @@ do_cs_projection_layer(const struct comp_layer *layer,
 		    &vd->pose, world_pose_scanout_begin, &ubo_data->layers[cur_layer].projection_new_to_source_view);
 	}
 
+	// Chroma key - per layer settings
+	const struct xrt_layer_chroma_key_data *ck = (layer_data->type == XRT_LAYER_PROJECTION_DEPTH)
+	                                                 ? &layer_data->depth.chroma_key
+	                                                 : &layer_data->proj.chroma_key;
+	ubo_data->layers[cur_layer].chroma_key.hsv_min_h = ck->hsv_min.h;
+	ubo_data->layers[cur_layer].chroma_key.hsv_min_s = ck->hsv_min.s;
+	ubo_data->layers[cur_layer].chroma_key.hsv_min_v = ck->hsv_min.v;
+	ubo_data->layers[cur_layer].chroma_key.hsv_max_h = ck->hsv_max.h;
+	ubo_data->layers[cur_layer].chroma_key.hsv_max_s = ck->hsv_max.s;
+	ubo_data->layers[cur_layer].chroma_key.hsv_max_v = ck->hsv_max.v;
+	ubo_data->layers[cur_layer].chroma_key.curve = ck->curve;
+	ubo_data->layers[cur_layer].chroma_key.despill = ck->despill;
+
 	set_post_transform_rect(                           //
 	    layer_data,                                    // data
 	    &vd->sub.norm_rect,                            // src_norm_rect
@@ -469,11 +489,15 @@ do_cs_projection_layer(const struct comp_layer *layer,
 
 	// unused if timewarp is off
 	if (do_timewarp) {
-		render_calc_time_warp_matrix(                          //
-		    &vd->pose,                                         //
-		    &vd->fov,                                          //
-		    world_pose_scanout_begin,                          //
-		    &ubo_data->layers[cur_layer].transforms_timewarp); //
+		render_calc_time_warp_matrix(                 //
+		    &vd->pose,                                //
+		    &vd->fov,                                 //
+		    world_pose_scanout_begin,                 //
+		    &ubo_data->layers[cur_layer].transforms); //
+	} else {
+		render_calc_time_warp_projection(             //
+		    &vd->fov,                                 //
+		    &ubo_data->layers[cur_layer].transforms); //
 	}
 
 	*out_cur_image = cur_image;
@@ -582,6 +606,7 @@ crc_clear_output(struct render_compute *render, const struct comp_render_dispatc
 	    render,                    //
 	    d->target.cs.image,        //
 	    d->target.cs.storage_view, // target_image_view
+	    d->target.cs.final_layout, // final_layout
 	    target_viewport_datas);    // views
 }
 
@@ -644,6 +669,7 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 		    NULL,                              // src_foveation
 		    d->target.cs.image,                //
 		    d->target.cs.storage_view,         // target_image_view
+		    d->target.cs.final_layout,         // target_final_layout
 		    target_viewport_datas);            // views
 	} else {
 		render_compute_projection_scanout_compensation( //
@@ -657,6 +683,7 @@ crc_distortion_after_squash(struct render_compute *render, const struct comp_ren
 		    world_poses_scanout_end,                    //
 		    d->target.cs.image,                         //
 		    d->target.cs.storage_view,                  // target_image_view
+		    d->target.cs.final_layout,                  // target_final_layout
 		    target_viewport_datas);                     // views
 	}
 }
@@ -762,6 +789,7 @@ crc_distortion_fast_path(struct render_compute *render,
 		    src_foveation,                     //
 		    d->target.cs.image,                //
 		    d->target.cs.storage_view,         //
+		    d->target.cs.final_layout,         //
 		    target_viewport_datas);            //
 	} else if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
 		render_compute_projection_timewarp_depth( //
@@ -779,6 +807,7 @@ crc_distortion_fast_path(struct render_compute *render,
 		    world_poses_scanout_end,              //
 		    d->target.cs.image,                   //
 		    d->target.cs.storage_view,            //
+		    d->target.cs.final_layout,            //
 		    target_viewport_datas);               //
 	} else {
 		render_compute_projection_timewarp( //
@@ -793,6 +822,7 @@ crc_distortion_fast_path(struct render_compute *render,
 		    world_poses_scanout_end,        //
 		    d->target.cs.image,             //
 		    d->target.cs.storage_view,      //
+		    d->target.cs.final_layout,      //
 		    target_viewport_datas);         //
 	}
 }
@@ -813,8 +843,8 @@ comp_render_cs_layer(struct render_compute *render,
                      const struct xrt_pose *world_pose_scanout_begin,
                      const struct xrt_pose *world_pose_scanout_end,
                      const struct xrt_pose *eye_pose,
-                     const VkImage target_image,
-                     const VkImageView target_image_view,
+                     VkImage target_image,
+                     VkImageView target_image_view,
                      const struct render_viewport_data *target_view,
                      bool do_timewarp)
 {
@@ -844,6 +874,11 @@ comp_render_cs_layer(struct render_compute *render,
 
 	ubo_data->view = *target_view;
 	ubo_data->pre_transform = *pre_transform;
+
+	// Initialize chroma key settings for all layers to zero
+	for (uint32_t i = 0; i < RENDER_MAX_LAYERS; i++) {
+		ubo_data->layers[i].chroma_key = (struct render_chroma_key_info){0};
+	}
 
 	for (uint32_t c_layer_i = 0; c_layer_i < layer_count; c_layer_i++) {
 		const struct comp_layer *layer = &layers[c_layer_i];
@@ -951,8 +986,20 @@ comp_render_cs_layer(struct render_compute *render,
 			continue;
 		}
 
-		ubo_data->layers[cur_layer].layer_data.layer_type = xrt_layer_to_cs_layer_type(data);
+		// Shared with shader source, no enums there.
+		uint32_t cs_layer_type = xrt_layer_to_cs_layer_type(data);
+
+		// Context should always have a layer after it.
+		assert((cs_layer_type != LAYER_COMP_TYPE_CONTEXT || cur_layer < (layer_count - 1)) &&
+		       "Context should always have a layer after it.");
+
+		// Inset should always have a layer before it.
+		assert((cs_layer_type != LAYER_COMP_TYPE_INSET || cur_layer >= 1) &&
+		       "Inset should always have a layer before it.");
+
+		ubo_data->layers[cur_layer].layer_data.layer_type = cs_layer_type;
 		ubo_data->layers[cur_layer].layer_data.unpremultiplied_alpha = is_layer_unpremultiplied(data);
+		ubo_data->layers[cur_layer].layer_data.inverted_alpha = is_layer_alpha_inverted(data);
 
 		apply_bias_and_scale_from_layer(data, &ubo_data->layers[cur_layer].color_scale,
 		                                &ubo_data->layers[cur_layer].color_bias);

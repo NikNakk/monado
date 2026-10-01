@@ -408,8 +408,10 @@ rift_s_tracker_create(struct xrt_tracking_origin *origin,
 		int hand_status = rift_s_create_hand_tracker(t, xfctx, masks_sink, &hand_sinks, &hand_device);
 		if (hand_status != 0 || hand_sinks == NULL || hand_device == NULL) {
 			RIFT_S_WARN("Unable to setup the hand tracker");
-			rift_s_tracker_destroy(t);
-			return NULL;
+
+			// Disable hand tracking since it failed to init
+			hand_enabled = false;
+			t->tracking.hand_enabled = false;
 		}
 	}
 
@@ -530,18 +532,21 @@ rift_s_tracker_imu_update(struct rift_s_tracker *t,
 
 	os_mutex_unlock(&t->mutex);
 
-	if (t->slam_sinks.imu) {
+	if (t->slam_sinks.imus[0]) {
 		/* Push IMU sample to the SLAM tracker */
 		struct xrt_vec3_f64 accel64 = {accel->x, accel->y, accel->z};
 		struct xrt_vec3_f64 gyro64 = {gyro->x, gyro->y, gyro->z};
 		struct xrt_imu_sample sample = {
 		    .timestamp_ns = local_timestamp_ns, .accel_m_s2 = accel64, .gyro_rad_secs = gyro64};
 
-		xrt_sink_push_imu(t->slam_sinks.imu, &sample);
+		xrt_sink_push_imu(t->slam_sinks.imus[0], &sample);
 	}
 }
 
+// @todo remove when clang-format is updated in CI
+// clang-format off
 #define UPPER_32BITS(x) ((x)&0xffffffff00000000ULL)
+// clang-format on
 
 void
 rift_s_tracker_push_slam_frames(struct rift_s_tracker *t,

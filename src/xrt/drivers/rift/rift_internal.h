@@ -1,4 +1,5 @@
 // Copyright 2025, Beyley Cardellio
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -13,16 +14,21 @@
 
 #include "util/u_device.h"
 #include "util/u_logging.h"
+#include "util/u_distortion_mesh.h"
 
 #include "math/m_imu_3dof.h"
 #include "math/m_api.h"
 #include "math/m_mathinclude.h"
 #include "math/m_clock_tracking.h"
+#include "math/m_filter_fifo.h"
 
 #include "tracking/t_imu.h"
+#include "tracking/t_constellation.h"
 
 #include "os/os_hid.h"
 #include "os/os_threading.h"
+
+#include "tracking/t_time_sync.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -44,6 +50,8 @@
 #define IMU_SAMPLE_RATE (1000)      // 1000hz
 #define NS_PER_SAMPLE (1000 * 1000) // 1ms (1,000,000 ns) per sample
 #define SERIAL_NUMBER_LENGTH 14
+#define RIFT_USB_LATENCY_BIAS (U_TIME_1US_IN_NS * 200LL) // 200us latency bias over USB
+#define RIFT_RADIO_LATENCY_BIAS (U_TIME_1MS_IN_NS * 4LL) // 4ms bias over radio
 
 #define CALIBRATION_HASH_BYTE_OFFSET 0x1bf0
 #define CALIBRATION_HASH_BYTE_LENGTH 0x10
@@ -200,7 +208,6 @@ struct rift_display_info_report
 SIZE_ASSERT(struct rift_display_info_report, 55);
 
 #define CATMULL_COEFFICIENTS 11
-#define CHROMATIC_ABBERATION_COEFFEICENT_COUNT 4
 
 struct rift_catmull_rom_distortion_report_data
 {
@@ -210,7 +217,7 @@ struct rift_catmull_rom_distortion_report_data
 	uint16_t k[CATMULL_COEFFICIENTS];
 	uint16_t max_r;
 	uint16_t meters_per_tan_angle_at_center;
-	uint16_t chromatic_abberation[CHROMATIC_ABBERATION_COEFFEICENT_COUNT];
+	uint16_t chromatic_abberation[U_RIFT_CHROMATIC_ABBERATION_COUNT];
 	uint8_t unused[14];
 };
 
@@ -236,6 +243,70 @@ struct rift_lens_distortion_report
 };
 
 SIZE_ASSERT(struct rift_lens_distortion_report, 9 + sizeof(struct rift_catmull_rom_distortion_report_data));
+
+enum rift_position_calibration_version
+{
+	// no data stored
+	RIFT_POSITION_CALIBRATION_VERSION_NONE = 0,
+	// hard-coded default positions
+	RIFT_POSITION_CALIBRATION_VERSION_DEFAULT = 1,
+	// factory calibrated
+	RIFT_POSITION_CALIBRATION_VERSION_FACTORY = 2,
+	// user calibrated
+	RIFT_POSITION_CALIBRATION_VERSION_USER = 3,
+};
+
+enum rift_position_calibration_type
+{
+	RIFT_POSITION_CALIBRATION_TYPE_LED = 0,
+	RIFT_POSITION_CALIBRATION_TYPE_INERTIAL_SENSOR = 1,
+};
+
+struct rift_position_calibration_report
+{
+	uint16_t command_id;
+	// the version/type of calibration, see rift_position_calibration_version
+	uint8_t version;
+	// the x/y/z position of the object, this is a signed integer in micrometers, position is relative to the center
+	// of the emitter plane of the display at nominal focus.
+	int32_t position[3];
+	// the x/y/z axis normal of the object, this is a signed integer in micrometers, normal is relative to the
+	// position
+	int16_t normal[3];
+	// rotation around the normal, in units of 10^-4 radians
+	uint16_t rotation;
+	// the current position in the array of LEDs, increments on reads, gets set to the value on writes
+	uint16_t position_index;
+	// read-only value of the number of LEDs
+	uint16_t position_count;
+	// the type of the object being described, see rift_position_calibration_type
+	uint16_t position_type;
+};
+
+SIZE_ASSERT(struct rift_position_calibration_report, 29);
+
+enum rift_custom_pattern_state
+{
+	RIFT_CUSTOM_PATTERN_STAT_OFF = 0,
+	RIFT_CUSTOM_PATTERN_STAT_LOW = 1,
+	RIFT_CUSTOM_PATTERN_STAT_HIGH = 3,
+};
+
+struct rift_custom_pattern_report
+{
+	uint16_t command_id;
+	// the length of the sequence that each LED goes through
+	uint8_t sequence_length;
+	// the sequence the specific LED goes through, 2 bits per state, 0 (off), 1 (low), and 3 (high), ordered from
+	// LSB to MSB
+	uint32_t sequence;
+	// the current LED being described, increments on reads, gets set to the value on writes
+	uint16_t led_index;
+	// the number of tracking LEDs present on the device
+	uint16_t led_count;
+};
+
+SIZE_ASSERT(struct rift_custom_pattern_report, 11);
 
 struct rift_dk2_keepalive_mux_report
 {
@@ -558,7 +629,7 @@ struct rift_catmull_rom_distortion_data
 	float k[CATMULL_COEFFICIENTS];
 	float max_r;
 	float meters_per_tan_angle_at_center;
-	float chromatic_abberation[CHROMATIC_ABBERATION_COEFFEICENT_COUNT];
+	float chromatic_abberation[U_RIFT_CHROMATIC_ABBERATION_COUNT];
 };
 
 struct rift_lens_distortion
@@ -571,36 +642,6 @@ struct rift_lens_distortion
 	union {
 		struct rift_catmull_rom_distortion_data lcsv_catmull_rom_10;
 	} data;
-};
-
-struct rift_scale_and_offset
-{
-	struct xrt_vec2 scale;
-	struct xrt_vec2 offset;
-};
-
-struct rift_viewport_fov_tan
-{
-	float up_tan;
-	float down_tan;
-	float left_tan;
-	float right_tan;
-};
-
-struct rift_extra_display_info
-{
-	// gap left between the two eyes
-	float screen_gap_meters;
-	// the diameter of the lenses, may need to be extended to an array
-	float lens_diameter_meters;
-	// ipd of the headset
-	float icd;
-
-	// the fov of the headset
-	struct rift_viewport_fov_tan fov;
-	// mapping from tan-angle space to target NDC space
-	struct rift_scale_and_offset eye_to_source_ndc;
-	struct rift_scale_and_offset eye_to_source_uv;
 };
 
 struct rift_imu_calibration
@@ -698,6 +739,7 @@ struct rift_touch_controller_input_state
 struct rift_touch_controller
 {
 	struct xrt_device base;
+	struct xrt_frame_node node;
 
 	struct rift_hmd *hmd;
 
@@ -773,6 +815,7 @@ enum rift_remote_inputs
 struct rift_remote
 {
 	struct xrt_device base;
+	struct xrt_frame_node node;
 
 	//! The button state of the remote, stored as an atomic to avoid needing a mutex.
 	xrt_atomic_s32_t buttons;
@@ -816,19 +859,46 @@ union rift_radio_command_data {
 	struct rift_radio_command_data_read_flash read_flash;
 };
 
+//! How many past exposures a frame can be matched against. At ~60 Hz this is a little over a quarter second.
+#define RIFT_EXPOSURE_HISTORY_SIZE 16
+
+//! One camera exposure the HMD told us about, held so that late frames can still find the exposure they belong to.
+struct rift_exposure_event
+{
+	//! The value of rift_hmd::exposure_counter at this exposure.
+	uint32_t sequence_id;
+	//! When the exposure started, in local monotonic time. This is what frames matched to it are timestamped with.
+	timepoint_ns timestamp_ns;
+	/*!
+	 * When the IN report announcing this exposure arrived, in local monotonic time.
+	 *
+	 * Frames are matched against this rather than against @ref timestamp_ns. Both the report and the frame have
+	 * travelled over USB before we see them, so their arrival times share most of that delay and land near each
+	 * other; the exposure instant on the HMD's own clock is a good deal earlier than either.
+	 */
+	timepoint_ns recv_timestamp_ns;
+};
+
 /*!
  * A rift HMD device.
  *
  * @implements xrt_device
+ * @implements t_constellation_tracker_device
+ * @implements t_constellation_tracker_tracking_source
  */
 struct rift_hmd
 {
 	struct xrt_device base;
+	struct xrt_frame_node node;
+
+	struct xrt_frame_context *xfctx;
 
 	enum u_logging_level log_level;
 
 	// has built-in mutex so thread safe
 	struct m_relation_history *relation_hist;
+
+	bool use_constellation_poses;
 
 	struct os_hid_device *hmd_dev;
 	struct os_hid_device *radio_dev;
@@ -840,9 +910,19 @@ struct rift_hmd
 	timepoint_ns last_sample_local_timestamp_ns;
 
 	uint32_t last_remote_exposure_time_us;
+	//! The time of the last exposure in remote time, only accessed from the sensor thread, not locked.
 	timepoint_ns last_remote_exposure_time_ns;
 	//! The time of the last exposure, locked by sensor_thread.
 	timepoint_ns last_local_exposure_time_ns;
+	//! A total counter for how many exposures have occurred
+	uint32_t exposure_counter;
+	uint16_t last_tracking_count;
+
+	//! The most recent exposures, newest at `(exposure_history_pushed - 1) % RIFT_EXPOSURE_HISTORY_SIZE`, locked by
+	//! sensor_thread.
+	struct rift_exposure_event exposure_history[RIFT_EXPOSURE_HISTORY_SIZE];
+	//! How many exposures have ever been pushed into the history, locked by sensor_thread.
+	uint64_t exposure_history_pushed;
 
 	struct m_imu_3dof fusion;
 	struct m_clock_windowed_skew_tracker *clock_tracker;
@@ -852,11 +932,20 @@ struct rift_hmd
 	struct rift_config_report config;
 	struct rift_display_info_report display_info;
 
+	struct t_timing_event_sink *timing_event_sink;
+	struct t_timing_event_source *timing_event_source;
+
+	struct rift_tracking_report tracking;
+
 	const struct rift_lens_distortion *lens_distortions;
 	uint16_t num_lens_distortions;
 	uint16_t distortion_in_use;
 
-	struct rift_extra_display_info extra_display_info;
+	struct u_rift_panel panel;
+	struct u_rift_eye_profile eye_profile;
+
+	//! Interpupillary distance of the headset, in meters.
+	float default_icd;
 	float icd_override_m;
 
 	bool presence;
@@ -873,6 +962,24 @@ struct rift_hmd
 	int added_devices;
 	struct xrt_device *devices[4]; // left touch, right touch, tracked object, remote
 
+	struct t_constellation_tracker *constellation_tracker;
+	struct t_constellation_tracker_device constellation_device;
+	struct t_constellation_tracker_tracking_source constellation_tracking_source;
+	t_constellation_device_id_t constellation_device_id;
+
+	struct m_ff_vec3_f32 *gyro_ff;
+	struct m_ff_vec3_f32 *accel_ff;
+	struct m_relation_history *raw_constellation_relation_hist;
+	timepoint_ns last_ff_timestamp_ns;
+	struct m_ff_f64 *gravity_correction;
+	timepoint_ns latest_constellation_ts;
+
+	struct xrt_imu_sink *constellation_imu_sink;
+
+	struct t_constellation_tracker_led_model led_model;
+	struct xrt_pose T_imu_device;
+	struct xrt_pose T_device_imu;
+
 	//! Generic state for the radio state machine
 	struct
 	{
@@ -886,11 +993,17 @@ struct rift_hmd
 	} radio_state;
 };
 
-/// Casting helper function
+//! Casting helper function from xrt_device->rift_hmd
 static inline struct rift_hmd *
 rift_hmd(struct xrt_device *xdev)
 {
 	return (struct rift_hmd *)xdev;
+}
+
+static inline struct rift_hmd *
+rift_hmd_from_node(struct xrt_frame_node *node)
+{
+	return (struct rift_hmd *)container_of(node, struct rift_hmd, node);
 }
 
 static inline struct rift_touch_controller *
@@ -899,10 +1012,22 @@ rift_touch_controller(struct xrt_device *xdev)
 	return (struct rift_touch_controller *)xdev;
 }
 
+static inline struct rift_touch_controller *
+rift_touch_controller_from_node(struct xrt_frame_node *node)
+{
+	return (struct rift_touch_controller *)container_of(node, struct rift_touch_controller, node);
+}
+
 static inline struct rift_remote *
 rift_remote(struct xrt_device *xdev)
 {
 	return (struct rift_remote *)xdev;
+}
+
+static inline struct rift_remote *
+rift_remote_from_node(struct xrt_frame_node *node)
+{
+	return (struct rift_remote *)container_of(node, struct rift_remote, node);
 }
 
 static inline size_t

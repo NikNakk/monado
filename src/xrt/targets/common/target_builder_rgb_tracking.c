@@ -222,9 +222,7 @@ rgb_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp
 
 	// Lock the device list
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
+	U_LOG_CHK_AND_RET(U_LOGGING_ERROR, xret, "xrt_prober_lock_list");
 
 	// Is tracking setup?
 	if (get_settings(config, &settings)) {
@@ -233,7 +231,7 @@ rgb_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp
 
 
 	/*
-	 * Can we find PSVR HND?
+	 * Can we find PSVR HMD?
 	 */
 
 #ifdef XRT_BUILD_DRIVER_PSVR
@@ -273,9 +271,9 @@ rgb_estimate_system(struct xrt_builder *xb, cJSON *config, struct xrt_prober *xp
 	 */
 
 	xret = xrt_prober_unlock_list(xp, &xpdevs);
-	assert(xret == XRT_SUCCESS);
+	U_LOG_CHK_AND_RET(U_LOGGING_ERROR, xret, "xrt_prober_unlock_list");
 
-	return XRT_SUCCESS;
+	return xret;
 }
 
 static xrt_result_t
@@ -285,7 +283,7 @@ rgb_open_system_impl(struct xrt_builder *xb,
                      struct xrt_tracking_origin *origin,
                      struct xrt_system_devices *xsysd,
                      struct xrt_frame_context *xfctx,
-                     struct t_builder_roles_helper *tbrh)
+                     struct t_builder_options *tbo)
 {
 	struct xrt_prober_device **xpdevs = NULL;
 	size_t xpdev_count = 0;
@@ -399,9 +397,9 @@ rgb_open_system_impl(struct xrt_builder *xb,
 	}
 
 	// Assign to role(s).
-	tbrh->head = head;
-	tbrh->left = left;
-	tbrh->right = right;
+	tbo->head = head;
+	tbo->left = left;
+	tbo->right = right;
 
 	return XRT_SUCCESS;
 }

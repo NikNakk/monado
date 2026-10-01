@@ -202,6 +202,13 @@ struct comp_renderer
 	 */
 	uint32_t buffer_count;
 
+	/*!
+	 * Only relevant when using present modes from VK_KHR_shared_presentable_image,
+	 * tracks whether we have waited on the shared present semaphore at least once,
+	 * subsequents present waits are redundant and can be skipped.
+	 */
+	bool shared_present_semaphore_wait_once;
+
 	//! @}
 };
 
@@ -699,6 +706,59 @@ calc_vertex_rot_data(struct comp_renderer *r, struct xrt_matrix_2x2 out_vertex_r
 	}
 }
 
+/*!
+ * How long to spread the begin/end scanout poses over, in nanoseconds.
+ *
+ * This is not @ref xrt_device_compositor_info::scanout_time_ns: a globally
+ * refreshing panel lights every pixel at once, so it gets 0 here even when it
+ * reports a large scanout time. Returns 0 whenever no compensation applies,
+ * which is not an error.
+ */
+static inline int64_t
+calc_scanout_compensation_ns(struct comp_renderer *r)
+{
+	struct xrt_device *xdev = r->c->xdev;
+
+	if (xdev == NULL || !xdev->supported.compositor_info) {
+		return 0;
+	}
+
+	struct xrt_device_compositor_mode compositor_mode = {
+	    .frame_interval_ns = r->c->frame_interval_ns,
+	};
+	struct xrt_device_compositor_info device_compositor_info = {0};
+	xrt_result_t xret = xrt_device_get_compositor_info( //
+	    xdev,                                           //
+	    &compositor_mode,                               //
+	    &device_compositor_info);                       //
+
+	if (xret != XRT_SUCCESS) {
+		COMP_WARN(r->c, "xrt_device_get_compositor_info failed, assuming 0 scanout time");
+		return 0;
+	}
+
+	switch (device_compositor_info.panel_refresh_type) {
+	case XRT_PANEL_REFRESH_TYPE_ROLLING:
+		if (device_compositor_info.scanout_direction == XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM) {
+			return device_compositor_info.scanout_time_ns;
+		} else {
+			COMP_SPEW(r->c,
+			          "Unable to apply rolling scanout compensation, only "
+			          "DIRECTION_TOP_TO_BOTTOM is supported");
+			return 0;
+		}
+	case XRT_PANEL_REFRESH_TYPE_GLOBAL:
+		/*!
+		 * The entire panel refreshes at once, so there is no scanout
+		 * spread to compensate for and the begin/end poses coincide.
+		 */
+		return 0;
+	}
+
+	//! No default case above, so a new refresh type warns at compile time.
+	return 0;
+}
+
 static void
 calc_pose_data(struct comp_renderer *r,
                enum comp_target_fov_source fov_source,
@@ -723,26 +783,7 @@ calc_pose_data(struct comp_renderer *r,
 	// Determine view type based on view count
 	enum xrt_view_type view_type = (view_count == 1) ? XRT_VIEW_TYPE_MONO : XRT_VIEW_TYPE_STEREO;
 
-	int64_t scanout_time_ns = 0;
-	if (r->c->xdev->supported.compositor_info) {
-		struct xrt_device_compositor_mode compositor_mode = {
-		    .frame_interval_ns = r->c->frame_interval_ns,
-		};
-		struct xrt_device_compositor_info device_compositor_info;
-		xrt_result_t xret = xrt_device_get_compositor_info( //
-		    r->c->xdev,                                     //
-		    &compositor_mode,                               //
-		    &device_compositor_info);                       //
-
-		if (xret != XRT_SUCCESS) {
-			COMP_WARN(r->c, "xrt_device_get_compositor_info failed, assuming 0 scanout time");
-		} else if (device_compositor_info.scanout_direction == XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM) {
-			scanout_time_ns = device_compositor_info.scanout_time_ns;
-		} else {
-			COMP_SPEW(r->c,
-			          "Unable to apply scanout compensation as only DIRECTION_TOP_TO_BOTTOM is supported");
-		}
-	}
+	const int64_t scanout_time_ns = calc_scanout_compensation_ns(r);
 
 	int64_t begin_timestamp_ns = r->c->frame.rendering.predicted_display_time_ns;
 	int64_t end_timestamp_ns = begin_timestamp_ns + scanout_time_ns;
@@ -884,12 +925,12 @@ renderer_create_renderings_and_fences(struct comp_renderer *r)
 	if (!use_compute) {
 		r->rtr_array = U_TYPED_ARRAY_CALLOC(struct render_gfx_target_resources, r->buffer_count);
 
-		render_gfx_render_pass_init(     //
-		    &r->target_render_pass,      // rgrp
-		    &r->c->nr,                   // struct render_resources
-		    r->c->target->format,        //
-		    VK_ATTACHMENT_LOAD_OP_CLEAR, // load_op
-		    r->c->target->final_layout); // final_layout
+		render_gfx_render_pass_init(       //
+		    &r->target_render_pass,        // rgrp
+		    &r->c->nr,                     // struct render_resources
+		    r->c->target->format,          //
+		    r->c->target->present_load_op, // load_op
+		    r->c->target->final_layout);   // final_layout
 
 		for (uint32_t i = 0; i < r->buffer_count; ++i) {
 			renderer_build_rendering_target_resources(r, &r->rtr_array[i], i);
@@ -1187,6 +1228,26 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	r->fenced_frame_id = -1;
 }
 
+static inline bool
+requires_present_acquire_wait(struct comp_renderer *r)
+{
+	/*!
+	 * With shared presentable images there is only one image
+	 * shared between the presentation layer and the compositor,
+	 *
+	 * We only need to wait on the first "acquire image",
+	 * subsueqent frames waiting is redundant.
+	 */
+	if (comp_target_is_shared_presentable_image(r->c->target)) {
+		if (r->shared_present_semaphore_wait_once) {
+			return false;
+		}
+		r->shared_present_semaphore_wait_once = true;
+	}
+
+	return true;
+}
+
 static XRT_CHECK_RESULT VkResult
 renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineStageFlags pipeline_stage_flag)
 {
@@ -1221,8 +1282,9 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	struct vk_semaphore_list_signal signal_sems = XRT_STRUCT_INIT;
 	struct vk_submit_info_builder builder = XRT_STRUCT_INIT;
 
-	// Add wait semaphore (present_complete from target).
-	ADD_WAIT(wait_sems, ct->semaphores.present_complete, pipeline_stage_flag, false);
+	if (requires_present_acquire_wait(r)) {
+		ADD_WAIT(wait_sems, ct->semaphores.present_complete, pipeline_stage_flag, false);
+	}
 
 	// Add signal semaphore (render_complete to target).
 	ADD_SIGNAL(signal_sems, ct->semaphores.render_complete, ct->semaphores.render_complete_is_timeline);
@@ -1276,7 +1338,7 @@ renderer_acquire_swapchain_image(struct comp_renderer *r)
 	}
 	ret = comp_target_acquire(r->c->target, &buffer_index);
 
-	if ((ret == VK_ERROR_OUT_OF_DATE_KHR) || (ret == VK_SUBOPTIMAL_KHR)) {
+	while ((ret == VK_ERROR_OUT_OF_DATE_KHR) || (ret == VK_SUBOPTIMAL_KHR)) {
 		COMP_DEBUG(r->c, "Received %s.", vk_result_string(ret));
 
 		if (!renderer_ensure_images_and_renderings(r, true)) {
@@ -1289,10 +1351,9 @@ renderer_acquire_swapchain_image(struct comp_renderer *r)
 
 		/* Acquire image again to silence validation error */
 		ret = comp_target_acquire(r->c->target, &buffer_index);
-		if (ret != VK_SUCCESS) {
-			COMP_ERROR(r->c, "comp_target_acquire: %s", vk_result_string(ret));
-		}
-	} else if (ret != VK_SUCCESS) {
+	}
+
+	if (ret != VK_SUCCESS) {
 		COMP_ERROR(r->c, "comp_target_acquire: %s", vk_result_string(ret));
 	}
 
@@ -1312,7 +1373,7 @@ renderer_resize(struct comp_renderer *r)
 	renderer_ensure_images_and_renderings(r, true);
 }
 
-static void
+static bool
 renderer_present_swapchain_image(struct comp_renderer *r, uint64_t desired_present_time_ns, uint64_t present_slop_ns)
 {
 	COMP_TRACE_MARKER();
@@ -1333,11 +1394,13 @@ renderer_present_swapchain_image(struct comp_renderer *r, uint64_t desired_prese
 
 	if (ret == VK_ERROR_OUT_OF_DATE_KHR || ret == VK_SUBOPTIMAL_KHR) {
 		renderer_resize(r);
-		return;
+		return ret != VK_ERROR_OUT_OF_DATE_KHR;
 	}
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(r->c, "vk_swapchain_present: %s", vk_result_string(ret));
+		return false;
 	}
+	return true;
 }
 
 static void
@@ -1487,6 +1550,7 @@ dispatch_graphics(struct comp_renderer *r,
 	    layers,                           //
 	    layer_count,                      //
 	    world_poses_scanout_begin,        //
+	    world_poses_scanout_end,          //
 	    eye_poses,                        //
 	    fovs,                             //
 	    rtr,                              //
@@ -1601,6 +1665,7 @@ dispatch_compute(struct comp_renderer *r,
 	if (target_storage_view == VK_NULL_HANDLE) {
 		target_storage_view = r->c->target->images[r->acquired_buffer].view;
 	}
+	VkImageLayout target_final_layout = r->c->target->final_layout;
 
 	// Target view information.
 	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
@@ -1618,6 +1683,7 @@ dispatch_compute(struct comp_renderer *r,
 	    fovs,                            //
 	    target_image,                    //
 	    target_storage_view,             //
+	    target_final_layout,             //
 	    target_viewport_datas);          //
 
 	// Everything is ready, submit to the queue.
@@ -1767,8 +1833,8 @@ comp_renderer_draw(struct comp_renderer *r)
 	}
 #endif
 
-	renderer_present_swapchain_image(r, c->frame.rendering.desired_present_time_ns,
-	                                 c->frame.rendering.present_slop_ns);
+	bool present_success = renderer_present_swapchain_image(r, c->frame.rendering.desired_present_time_ns,
+	                                                        c->frame.rendering.present_slop_ns);
 
 	// Save for timestamps below.
 	uint64_t frame_id = c->frame.rendering.id;
@@ -1853,7 +1919,9 @@ comp_renderer_draw(struct comp_renderer *r)
 		render_gfx_fini(&render_g);
 	}
 
-	renderer_wait_for_present(r, desired_present_time_ns);
+	if (present_success) {
+		renderer_wait_for_present(r, desired_present_time_ns);
+	}
 
 	comp_target_update_timings(ct);
 

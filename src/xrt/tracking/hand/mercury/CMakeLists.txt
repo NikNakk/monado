@@ -20,6 +20,7 @@ target_link_libraries(
 		aux_tracking
 		aux_os
 		aux_util
+		aux_onnx
 		xrt-optimized-math
 		${OpenCV_LIBRARIES}
 		ONNXRuntime::ONNXRuntime
@@ -39,13 +40,21 @@ target_link_libraries(
 		aux_tracking
 		aux_os
 		aux_util
+		aux_onnx
 		xrt-optimized-math
 		${OpenCV_LIBRARIES}
 		ONNXRuntime::ONNXRuntime # no, wrong
 	)
 
 # t_ht_mercury
-add_library(t_ht_mercury STATIC hg_sync.cpp hg_sync.hpp hg_interface.h kine_common.hpp)
+add_library(
+	t_ht_mercury STATIC
+	hg_sync.cpp
+	hg_sync.hpp
+	hg_hand_size_opt.cpp
+	hg_interface.h
+	kine_common.hpp
+	)
 
 target_link_libraries(
 	t_ht_mercury
@@ -55,6 +64,7 @@ target_link_libraries(
 		aux_tracking
 		aux_os
 		aux_util
+		aux_onnx
 		ONNXRuntime::ONNXRuntime
 		t_ht_mercury_kine_lm
 		t_ht_mercury_model

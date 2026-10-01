@@ -644,9 +644,13 @@ psvr2_hmd_update_inputs(struct xrt_device *xdev)
 
 	timepoint_ns now = os_monotonic_get_ns();
 
+	int32_t proximity = hmd->proximity_sensor;
+	hmd->base.inputs[PSVR2_HMD_INPUT_HEAD_DETECT].value.boolean = proximity;
+	hmd->base.inputs[PSVR2_HMD_INPUT_HEAD_DETECT].timestamp = now;
+
 	os_mutex_lock(&hmd->data_lock);
-	hmd->base.inputs[1].value.boolean = hmd->function_button;
-	hmd->base.inputs[1].timestamp = now;
+	hmd->base.inputs[PSVR2_HMD_INPUT_FUNCTION_BUTTON].value.boolean = hmd->function_button;
+	hmd->base.inputs[PSVR2_HMD_INPUT_FUNCTION_BUTTON].timestamp = now;
 	os_mutex_unlock(&hmd->data_lock);
 
 	return XRT_SUCCESS;
@@ -720,14 +724,17 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd, timepoint_ns at_timestamp_ns, ti
 	    latest_relation.relation_flags | XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
 
 	// Predict forward using dead reckoning
-	t_apply_dead_reckoning( //
-	    hmd->ff_gyro,       //
-	    NULL,               //
-	    NULL,               //
-	    at_timestamp_ns,    //
-	    &latest_relation,   //
-	    latest_relation_ts, //
-	    out_relation);      //
+	if (!t_apply_dead_reckoning( //
+	        hmd->ff_gyro,        //
+	        NULL,                //
+	        NULL,                //
+	        at_timestamp_ns,     //
+	        &latest_relation,    //
+	        latest_relation_ts,  //
+	        out_relation)) {
+		// If dead reckoning fails, return the latest SLAM pose
+		*out_relation = latest_relation;
+	}
 
 	// Gyro-only dead reckoning advances integ_rel_ts without advancing position,
 	// so predict linear motion over the complete SLAM->target interval.
@@ -904,18 +911,6 @@ psvr2_hmd_get_tracked_pose(struct xrt_device *xdev,
 		                         trace_latest_imu_vts_ns, trace_hw2mono_vts, out_relation);
 	}
 #endif
-
-	return XRT_SUCCESS;
-}
-
-static xrt_result_t
-psvr2_get_presence(struct xrt_device *xdev, bool *presence)
-{
-	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
-
-	int32_t value = hmd->proximity_sensor;
-
-	*presence = value;
 
 	return XRT_SUCCESS;
 }
@@ -1617,17 +1612,12 @@ set_brightness(struct psvr2_hmd *hmd, float brightness)
 }
 
 bool
-get_serial(struct psvr2_hmd *hmd, char serial[static(SERIAL_LENGTH + 1)])
+get_firmware_info(struct psvr2_hmd *hmd, struct pkt_firmware_info *out_firmware_info)
 {
-	uint8_t buf[504];
-
-	if (!get_psvr2_control(hmd, 0x81, 0x1, buf, sizeof(buf))) {
-		PSVR2_ERROR(hmd, "Failed to get device information packet.");
+	if (!get_psvr2_control(hmd, 0x81, 0x1, (uint8_t *)out_firmware_info, sizeof(*out_firmware_info))) {
+		PSVR2_ERROR(hmd, "Failed to get device firmware info packet.");
 		return false;
 	}
-
-	memcpy(serial, buf + 56, SERIAL_LENGTH);
-	serial[SERIAL_LENGTH] = '\0';
 
 	return true;
 }
@@ -1716,6 +1706,7 @@ psvr2_hmd_get_compositor_info(struct xrt_device *xdev,
 	const double scanout_duration = 2040.0 / 2200.0;
 
 	*out_info = (struct xrt_device_compositor_info){
+	    .panel_refresh_type = XRT_PANEL_REFRESH_TYPE_ROLLING,
 	    .scanout_direction = XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM,
 	    .scanout_time_ns = mode->frame_interval_ns * scanout_duration,
 	};
@@ -1927,13 +1918,13 @@ update_brightness(struct psvr2_hmd *hmd)
 static void
 psvr2_usb_stop(struct psvr2_hmd *hmd)
 {
-	int ret;
-
 #define X(xfer)                                                                                                        \
 	if (xfer) {                                                                                                    \
-		ret = libusb_cancel_transfer(xfer);                                                                    \
-		assert(ret == 0 || ret == LIBUSB_ERROR_NOT_FOUND);                                                     \
-		(void)ret;                                                                                              \
+		int ret = libusb_cancel_transfer(xfer);                                                                \
+		/* Already-completed transfers report NOT_FOUND. */                                                    \
+		if (ret != 0 && ret != LIBUSB_ERROR_NOT_FOUND) {                                                       \
+			PSVR2_ERROR(hmd, "failed to cancel transfer: %s", libusb_error_name(ret));                     \
+		}                                                                                                      \
 	}
 
 	os_mutex_lock(&hmd->data_lock);
@@ -2174,7 +2165,6 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 
 	hmd->base.update_inputs = psvr2_hmd_update_inputs;
 	hmd->base.get_view_poses = psvr2_hmd_get_view_poses;
-	hmd->base.get_presence = psvr2_get_presence;
 	hmd->base.get_brightness = psvr2_get_brightness;
 	hmd->base.set_brightness = psvr2_set_brightness;
 	hmd->base.set_output = psvr2_hmd_set_output;
@@ -2202,6 +2192,7 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->base.name = XRT_DEVICE_PSVR2;
 	hmd->base.device_type = XRT_DEVICE_TYPE_HMD;
 	hmd->base.inputs[PSVR2_HMD_INPUT_HEAD_POSE].name = XRT_INPUT_GENERIC_HEAD_POSE;
+	hmd->base.inputs[PSVR2_HMD_INPUT_HEAD_DETECT].name = XRT_INPUT_GENERIC_HEAD_DETECT;
 	hmd->base.inputs[PSVR2_HMD_INPUT_FUNCTION_BUTTON].name = XRT_INPUT_PSVR2_SYSTEM_CLICK;
 	hmd->base.inputs[PSVR2_HMD_INPUT_EYE_GAZE_POSE].name = XRT_INPUT_GENERIC_EYE_GAZE_POSE;
 	hmd->base.inputs[PSVR2_HMD_INPUT_FB_FACE_TRACKING2_VISUAL].name = XRT_INPUT_FB_FACE_TRACKING2_VISUAL;
@@ -2356,11 +2347,14 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	}
 	hmd->brightness = initial_brightness;
 
-	char serial[SERIAL_LENGTH + 1];
-	if (get_serial(hmd, serial)) {
-		snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "%s", serial);
+	struct pkt_firmware_info firmware_info;
+	if (get_firmware_info(hmd, &firmware_info)) {
+		snprintf(hmd->base.serial, XRT_DEVICE_NAME_LEN, "%.*s", (int)sizeof(firmware_info.pcb_id),
+		         firmware_info.pcb_id);
+
+		PSVR2_INFO(hmd, "Headset has firmware version of %08x", __le32_to_cpu(firmware_info.version));
 	} else {
-		PSVR2_WARN(hmd, "Failed to get serial number");
+		PSVR2_WARN(hmd, "Failed to get device firmware info, serial number will not be correct.");
 	}
 
 	// Start USB communications

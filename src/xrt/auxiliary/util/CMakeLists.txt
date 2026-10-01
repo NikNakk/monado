@@ -21,6 +21,10 @@ add_library(
 	u_autoexpgain.h
 	u_bitwise.c
 	u_bitwise.h
+	u_body_tracker.c
+	u_body_tracker.h
+	u_body_tracker_ni.c
+	u_body_tracker_ni.h
 	u_builder_helpers.c
 	u_builder_helpers.h
 	u_builder_search.c
@@ -33,12 +37,15 @@ add_library(
 	u_deque.h
 	u_device.c
 	u_device.h
+	u_device_id.c
+	u_device_id.h
 	u_device_ni.c
 	u_device_ni.h
 	u_distortion.c
 	u_distortion.h
 	u_distortion_mesh.c
 	u_distortion_mesh.h
+	u_distortion_mesh_rift.c
 	u_documentation.h
 	u_file.c
 	u_file.cpp
@@ -78,6 +85,7 @@ add_library(
 	u_metrics.h
 	u_misc.c
 	u_misc.h
+	u_native_images.h
 	u_native_images_debug.h
 	u_pacing.h
 	u_pacing_app.c
@@ -89,16 +97,20 @@ add_library(
 	u_prober.h
 	u_resampler.c
 	u_resampler.h
-	u_session.c
-	u_session.h
+	u_str_to_enum.c
+	u_str_to_enum.h
 	u_extension_list.cpp
 	u_extension_list.h
 	u_extension_list.hpp
-	u_system.c
-	u_system.h
+	u_system_devices.c
+	u_system_devices.h
+	u_system_devices_ni.c
+	u_system_devices_ni.h
 	u_system_helpers.c
 	u_system_helpers.h
 	u_template_historybuf.hpp
+	u_thread_priority.c
+	u_thread_priority.h
 	u_time.cpp
 	u_time.h
 	u_trace_marker.c
@@ -116,6 +128,7 @@ add_library(
 	u_visibility_mask.h
 	u_win32_com_guard.cpp
 	u_win32_com_guard.hpp
+	u_weak_ptr.hpp
 	u_worker.c
 	u_worker.cpp
 	u_worker.h
@@ -125,10 +138,9 @@ add_library(
 target_link_libraries(
 	aux_util
 	PUBLIC
-		xrt-external-nanopb
+		xrt-external-metrics
 		xrt-external-bcdec
 		aux-includes
-		aux_generated_bindings_helpers
 		aux_os
 		aux_math
 	)
@@ -147,6 +159,11 @@ endif()
 # Only uses POSIX/Linux libraries, doesn't add anything extra.
 if(XRT_HAVE_LINUX OR ANDROID)
 	target_sources(aux_util PRIVATE u_linux.c u_linux.h)
+endif()
+
+# Only uses Android NDK libraries, doesn't add anything extra.
+if(ANDROID)
+	target_sources(aux_util PRIVATE u_android.c u_android.h)
 endif()
 
 if(APPLE)
@@ -250,4 +267,16 @@ target_link_libraries(aux_util_process PUBLIC aux-includes aux_util)
 if(XRT_HAVE_LIBBSD)
 	target_include_directories(aux_util_process SYSTEM PRIVATE ${LIBBSD_INCLUDE_DIRS})
 	target_link_libraries(aux_util_process PUBLIC ${LIBBSD_LIBRARIES})
+endif()
+
+####
+# Scribble library
+#
+
+add_library(aux_util_scribble STATIC u_frame_scribble.cpp u_frame_scribble.h)
+target_link_libraries(aux_util_scribble PUBLIC aux-includes aux_util)
+
+if(XRT_HAVE_OPENCV)
+	target_link_libraries(aux_util_scribble PUBLIC ${OpenCV_LIBRARIES})
+	target_include_directories(aux_util_scribble SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
 endif()

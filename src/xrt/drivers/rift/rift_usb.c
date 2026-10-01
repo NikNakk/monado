@@ -68,7 +68,7 @@ rift_send_keepalive(struct rift_hmd *hmd)
 	}
 
 	hmd->last_keepalive_time = os_monotonic_get_ns();
-	HMD_TRACE(hmd, "Sent keepalive at time %ld", hmd->last_keepalive_time);
+	HMD_TRACE(hmd, "Sent keepalive at time %" PRIi64, hmd->last_keepalive_time);
 
 	return 0;
 }
@@ -86,9 +86,8 @@ rift_get_config(struct rift_hmd *hmd, struct rift_config_report *config)
 	// FIXME: handle endian differences
 	memcpy(config, buf + 1, sizeof(*config));
 
-	// this value is hardcoded in the DK1 and DK2 firmware
-	if ((hmd->variant == RIFT_VARIANT_DK1 || hmd->variant == RIFT_VARIANT_DK2) &&
-	    config->sample_rate != IMU_SAMPLE_RATE) {
+	// this value is hardcoded in the DK2 firmware
+	if ((hmd->variant == RIFT_VARIANT_DK2) && config->sample_rate != IMU_SAMPLE_RATE) {
 		HMD_ERROR(hmd, "Got invalid config from headset, got sample rate %d when expected %d",
 		          config->sample_rate, IMU_SAMPLE_RATE);
 		return -1;
@@ -129,9 +128,31 @@ rift_get_lens_distortion(struct rift_hmd *hmd, struct rift_lens_distortion_repor
 }
 
 int
+rift_get_position_calibration_report(struct rift_hmd *hmd, struct rift_position_calibration_report *position_report)
+{
+	uint8_t buf[REPORT_MAX_SIZE] = {0};
+
+	int result = rift_get_report(hmd, false, FEATURE_REPORT_POS_CALIBRATION, buf, sizeof(buf));
+	if (result < 0) {
+		return result;
+	}
+
+	// FIXME: handle endianness
+	memcpy(position_report, buf + 1, sizeof(*position_report));
+
+	return 0;
+}
+
+int
 rift_set_config(struct rift_hmd *hmd, struct rift_config_report *config)
 {
 	return rift_send_report(hmd, false, FEATURE_REPORT_CONFIG, config, sizeof(*config));
+}
+
+int
+rift_set_custom_pattern(struct rift_hmd *hmd, struct rift_custom_pattern_report *pattern)
+{
+	return rift_send_report(hmd, false, FEATURE_REPORT_CUSTOM_PATTERN, pattern, sizeof(*pattern));
 }
 
 int
@@ -183,7 +204,7 @@ rift_parse_distortion_report(struct rift_lens_distortion_report *report, struct 
 		data.max_r = rift_decode_fixed_point_uint16(report_data.max_r, 0, 14);
 		data.meters_per_tan_angle_at_center =
 		    rift_decode_fixed_point_uint16(report_data.meters_per_tan_angle_at_center, 0, 19);
-		for (uint16_t i = 0; i < CHROMATIC_ABBERATION_COEFFEICENT_COUNT; i += 1) {
+		for (uint16_t i = 0; i < U_RIFT_CHROMATIC_ABBERATION_COUNT; i += 1) {
 			data.chromatic_abberation[i] =
 			    rift_decode_fixed_point_uint16(report_data.chromatic_abberation[i], 0x8000, 19);
 		}
