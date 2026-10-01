@@ -887,8 +887,9 @@ render_compute_projection_timewarp(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, src_foveation, NULL, NULL, target_image,
-	                          target_image_view, target_final_layout, views, r->compute.distortion.timewarp_pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_norm_rects, src_foveation, NULL, NULL,
+	                          target_image, target_image_view, target_final_layout, views,
+	                          r->compute.distortion.timewarp_pipeline);
 }
 
 
@@ -932,8 +933,8 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 
 	if (!debug_get_bool_option_depth_reprojection()) {
 		render_compute_projection_timewarp(render, src_samplers, src_image_views, src_rects, NULL, src_poses,
-		                                   src_fovs, new_poses_scanout_begin, new_poses_scanout_end, target_image,
-		                                   target_image_view, target_final_layout, views);
+		                                   src_fovs, new_poses_scanout_begin, new_poses_scanout_end,
+		                                   target_image, target_image_view, target_final_layout, views);
 		return;
 	}
 
@@ -977,8 +978,8 @@ render_compute_projection_timewarp_depth(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, depth_samplers, depth_image_views,
-	                          target_image, target_image_view, target_final_layout, views,
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, NULL, depth_samplers,
+	                          depth_image_views, target_image, target_image_view, target_final_layout, views,
 	                          r->compute.distortion.timewarp_pipeline);
 }
 
@@ -1049,8 +1050,9 @@ render_compute_projection_scanout_compensation(struct render_compute *render,
 #endif
 	}
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL, target_image,
-	                          target_image_view, target_final_layout, views, r->compute.distortion.timewarp_pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL,
+	                          target_image, target_image_view, target_final_layout, views,
+	                          r->compute.distortion.timewarp_pipeline);
 }
 
 void
@@ -1067,8 +1069,9 @@ render_compute_projection_no_timewarp(struct render_compute *render,
 	assert(render->r != NULL);
 	struct render_resources *r = render->r;
 
-	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL, target_image,
-	                          target_image_view, target_final_layout, views, r->compute.distortion.pipeline);
+	dispatch_project_pipeline(render, src_samplers, src_image_views, src_rects, src_foveation, NULL, NULL,
+	                          target_image, target_image_view, target_final_layout, views,
+	                          r->compute.distortion.pipeline);
 }
 
 void
