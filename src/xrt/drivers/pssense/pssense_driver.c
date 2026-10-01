@@ -1533,15 +1533,11 @@ pssense_device_update_inputs(struct xrt_device *xdev)
 	pssense->base.inputs[PSSENSE_INDEX_THUMBSTICK_CLICK].value.boolean = pssense->state.thumbstick_click;
 	pssense->base.inputs[PSSENSE_INDEX_THUMBSTICK_TOUCH].value.boolean = pssense->state.thumbstick_touch;
 
-	if (pssense->input_diagnostics &&
-	    (!pssense->diagnostic_trigger_initialized ||
-	     pssense->diagnostic_trigger_click != pssense->state.trigger_click)) {
-		PSSENSE_WARN(pssense,
-		             "raw trigger edge: hand=%s click=%d touch=%d value=%.3f",
-		             pssense->hand == XRT_HAND_LEFT ? "left" : "right",
-		             pssense->state.trigger_click ? 1 : 0,
-		             pssense->state.trigger_touch ? 1 : 0,
-		             pssense->state.trigger_value);
+	if (pssense->input_diagnostics && (!pssense->diagnostic_trigger_initialized ||
+	                                   pssense->diagnostic_trigger_click != pssense->state.trigger_click)) {
+		PSSENSE_WARN(pssense, "raw trigger edge: hand=%s click=%d touch=%d value=%.3f",
+		             pssense->hand == XRT_HAND_LEFT ? "left" : "right", pssense->state.trigger_click ? 1 : 0,
+		             pssense->state.trigger_touch ? 1 : 0, pssense->state.trigger_value);
 		pssense->diagnostic_trigger_click = pssense->state.trigger_click;
 		pssense->diagnostic_trigger_initialized = true;
 	}
@@ -1693,9 +1689,9 @@ pssense_apply_synthetic_position(struct pssense_device *pssense, struct xrt_spac
 	 * device-local position so the builder's tracking-origin offset supplies
 	 * the synthetic translation, and advertise it as tracked.
 	 */
-	out_relation->relation_flags = (enum xrt_space_relation_flags)(
-	    out_relation->relation_flags | XRT_SPACE_RELATION_POSITION_VALID_BIT |
-	    XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
+	out_relation->relation_flags =
+	    (enum xrt_space_relation_flags)(out_relation->relation_flags | XRT_SPACE_RELATION_POSITION_VALID_BIT |
+	                                    XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
 }
 
 static void
