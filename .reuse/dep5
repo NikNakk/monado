@@ -143,12 +143,6 @@ Copyright: 2019 Google LLC
 License: Apache-2.0
 Comment: SPDX-License-Identifier missing.
 
-Files: scripts/macos/dxmt-patches/*.patch
-Copyright: 2023-2026, Feifan He for CodeWeavers
- 2026, Nick Kennedy
-License: LGPL-2.1-or-later
-Comment: Patches to DXMT, which is LGPL-2.1-or-later; they carry its license.
-
 Files: src/external/metrics/*
 Copyright: 2022, Collabora, Ltd.
 License: BSL-1.0
