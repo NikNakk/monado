@@ -263,6 +263,41 @@ monado_metal_xpc_publish_claimable_texture(void *metal_texture, uint64_t *out_to
 }
 
 int
+monado_metal_xpc_activate_service(void)
+{
+	@autoreleasepool {
+		NSString *service_name = [NSString stringWithUTF8String:IPC_METAL_XPC_SERVICE_NAME];
+		NSXPCConnection *connection = [[NSXPCConnection alloc] initWithMachServiceName:service_name options:0];
+		if (connection == nil) {
+			return -1;
+		}
+		connection.remoteObjectInterface = [NSXPCInterface interfaceWithProtocol:@protocol(IPCMetalXPCServiceProtocol)];
+		[connection resume];
+
+		__block BOOL ready = NO;
+		__block BOOL replied = NO;
+		dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
+		id<IPCMetalXPCServiceProtocol> proxy =
+		    [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+		      (void)error;
+		      dispatch_semaphore_signal(semaphore);
+		    }];
+
+		[proxy activateWithReply:^(BOOL remote_ready) {
+		  ready = remote_ready;
+		  replied = YES;
+		  dispatch_semaphore_signal(semaphore);
+		}];
+
+		long wait_result =
+		    dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, MONADO_METAL_XPC_TIMEOUT_NS));
+		[connection invalidate];
+		[connection release];
+		return wait_result == 0 && replied && ready ? 0 : -2;
+	}
+}
+
+int
 monado_metal_xpc_publish_shared_event(void *metal_shared_event, uint64_t *out_token)
 {
 	if (metal_shared_event == NULL || out_token == NULL) {
