@@ -96,11 +96,11 @@ ipc_submit_trace_get(void)
 
 static void
 ipc_submit_trace_event(const char *event,
-                        int64_t frame_id,
-                        uint64_t semaphore_value,
-                        int64_t display_time_ns,
-                        uint32_t layer_count,
-                        xrt_result_t result)
+                       int64_t frame_id,
+                       uint64_t semaphore_value,
+                       int64_t display_time_ns,
+                       uint32_t layer_count,
+                       xrt_result_t result)
 {
 	FILE *file = ipc_submit_trace_get();
 	if (file == NULL) {
@@ -120,11 +120,11 @@ ipc_submit_trace_event(const char *event,
 // Only traced on macOS.
 static inline void
 ipc_submit_trace_event(const char *event,
-                        int64_t frame_id,
-                        uint64_t semaphore_value,
-                        int64_t display_time_ns,
-                        uint32_t layer_count,
-                        xrt_result_t result)
+                       int64_t frame_id,
+                       uint64_t semaphore_value,
+                       int64_t display_time_ns,
+                       uint32_t layer_count,
+                       xrt_result_t result)
 {
 	(void)event;
 	(void)frame_id;
@@ -177,11 +177,11 @@ ipc_swapchain_trace_get(void)
 
 void
 ipc_swapchain_trace_event(const char *event,
-                           uint32_t swapchain_id,
-                           uint32_t image_index,
-                           int64_t duration_ns,
-                           int64_t timeout_ns,
-                           xrt_result_t result)
+                          uint32_t swapchain_id,
+                          uint32_t image_index,
+                          int64_t duration_ns,
+                          int64_t timeout_ns,
+                          xrt_result_t result)
 {
 	FILE *file = ipc_swapchain_trace_get();
 	if (file == NULL) {
