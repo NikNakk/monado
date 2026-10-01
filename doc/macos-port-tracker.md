@@ -17,6 +17,9 @@ high-level status/roadmap.
 - Branch:
   [`macos-wine-openvr-legacy-unity`](https://github.com/NikNakk/monado/tree/macos-wine-openvr-legacy-unity)
 - Canonical upstream remains the Monado project on freedesktop.org.
+- Upstream sync: `main` up to `045931d12` (2026-09-30) is merged on
+  `macos-upstream-sync-2026-10`, pending macOS CI and a headset run; see
+  [Upstream sync](macos-port.md#upstream-sync).
 
 The branch name is historical. It now carries the broadest integration of the
 native Apple Silicon runtime, PS VR2 HMD path, Metal/IOSurface sharing,
