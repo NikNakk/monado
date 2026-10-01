@@ -118,6 +118,23 @@ target_link_libraries(
 		aux_math
 		aux_tracking
 	)
+# Synthetic datasets with exact ground truth, for checking replay pipelines end to end.
+add_executable(constellation_synth tools/constellation_synth.cpp)
+target_include_directories(
+	constellation_synth PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/../../drivers
+	)
+target_link_libraries(
+	constellation_synth
+	PRIVATE
+		constellation
+		xrt-interfaces
+		tracking-includes
+		aux_os
+		aux_util
+		aux_math
+		aux_tracking
+	)
+
 if(XRT_HAVE_CONSTELLATION_FUSION_EVAL)
 	target_sources(constellation_replay PRIVATE tools/fusion_compare.cpp tools/fusion_compare.hpp)
 	target_compile_definitions(constellation_replay PRIVATE XRT_HAVE_CONSTELLATION_FUSION_EVAL)
