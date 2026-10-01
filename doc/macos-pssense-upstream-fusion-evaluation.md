@@ -141,7 +141,8 @@ used for fusion. Their M1/M3 results are unchanged (below). Several things are m
 3. **The HMD pose, its age, and whether it was interpolated or predicted.** Stale HMD poses cannot be detected offline.
 4. **The IMU sample's device timestamp.** Without it the clock mapping cannot be recomputed offline.
 
-**Smallest compatible extension (proposed, not implemented; no new data is needed for this evaluation):**
+**Smallest compatible extension.** This was proposed here and has since been implemented, in a different form, as
+packet 5 extension records. See `doc/macos-pssense-mr2940-frontend-evaluation.md`. The original proposal was:
 
 - packet 5, device sync event: `{device, host_ns, kind (clock_snap | led_lock | led_lost | led_scan | phase_move |
   gyro_bias), value[3]}`;
@@ -447,9 +448,9 @@ A full run of all scenarios takes about 38 s per recording.
   limitations).
 - **Epoch times are approximate:** they are bracketed from `run.log` to about one frame.
 - **Costs are single-threaded offline times on an Apple M5.**
-- **MR 2940's per-camera solver has not been run.** The harness takes any list of `FrontendRecord`s (pose,
-  correspondences, per-sample camera poses), so a 2940-based frontend can be compared by producing records from its
-  per-camera candidates.
+- **MR 2940's per-camera solver was not run here.** It now runs in upstream's own tree
+  (`constellation_upstream_replay`), and its poses are compared with M1's by `--compare-frontend`, or fed to these
+  fusion paths by `--fusion-frontend`. See `doc/macos-pssense-mr2940-frontend-evaluation.md`.
 
 ## Recommendation in detail
 

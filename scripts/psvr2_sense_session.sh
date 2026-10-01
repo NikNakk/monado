@@ -72,7 +72,11 @@ if [ "${PSVR2_SENSE_RECORD_BLOBS:-1}" != "0" ]; then
 fi
 
 cp "$CALIBRATION" "$SESSION/calibration.json"
-[ -n "$NOTE" ] && printf '%s\n' "$NOTE" > "$SESSION/note.txt"
+if [ -n "$NOTE" ]; then
+	printf '%s\n' "$NOTE" > "$SESSION/note.txt"
+	# Also stored in constellation.ctd's session record, so the recording describes itself.
+	export PSVR2_CONSTELLATION_NOTES="${PSVR2_CONSTELLATION_NOTES:-$NOTE}"
+fi
 env | grep -E '^(PSVR2_|PSSENSE_|CONSTELLATION_|T_LED_)' | sort > "$SESSION/env.txt" || true
 {
 	echo "commit $(git -C "$REPO" rev-parse HEAD)"
