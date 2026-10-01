@@ -34,7 +34,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: brew install cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
+        # PS Sense needs Ceres for upstream's constellation tracker.
+        run: brew install ceres-solver cmake eigen glslang libusb ninja molten-vk pkgconf vulkan-headers vulkan-loader
       - name: Configure generic-controller standards build
         run: >-
           cmake -S . -B build-generic-controller -G Ninja

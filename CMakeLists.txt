@@ -1,5 +1,6 @@
 # Copyright 2018-2024, Collabora, Ltd.
 # Copyright 2024-2026, NVIDIA CORPORATION.
+# Copyright 2026, Beyley Cardellio
 # SPDX-License-Identifier: BSL-1.0
 
 cmake_minimum_required(VERSION 3.22)
@@ -53,7 +54,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Generates a `compile_commands.json` to help IDE intergration
+# Generates a `compile_commands.json` to help IDE integration
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 ###
@@ -106,21 +107,24 @@ find_package(Vulkan MODULE)
 find_package(HIDAPI MODULE)
 find_package(bluetooth MODULE)
 find_package(OpenHMD MODULE)
-find_package(
-	OpenCV
-	COMPONENTS
-		core
-		calib3d
-		highgui
-		imgproc
-		imgcodecs
-		features2d
-		video
-		CONFIG
+
+set(OPENCV_COMMON_COMPONENTS
+    core
+    highgui
+    imgproc
+    imgcodecs
+    video
 	)
+
+find_package(OpenCV QUIET COMPONENTS ${OPENCV_COMMON_COMPONENTS} calib3d features2d CONFIG)
+if(NOT OpenCV_FOUND)
+	find_package(OpenCV COMPONENTS ${OPENCV_COMMON_COMPONENTS} calib features CONFIG)
+endif()
+
 find_package(Libusb1 MODULE)
 find_package(JPEG MODULE)
 find_package(realsense2 CONFIG)
+find_package(rerun_sdk CONFIG)
 find_package(depthai CONFIG)
 find_package(SDL2 CONFIG)
 find_package(ZLIB MODULE)
@@ -128,6 +132,11 @@ find_package(cJSON MODULE)
 find_package(LeapV2 MODULE)
 find_package(LeapSDK 5 CONFIG)
 find_package(ONNXRuntime MODULE)
+find_package(Ceres COMPONENTS EigenSparse NO_MODULE)
+if(Ceres_VERSION VERSION_LESS "2.1")
+	# Require Ceres 2.1.0 or greater, since we use the ProductManifold API introduced in that version.
+	set(CERES_FOUND OFF)
+endif()
 if(NOT WIN32)
 	find_package(EGL MODULE)
 	find_package(Percetto MODULE)
@@ -273,10 +282,11 @@ option_with_deps(XRT_HAVE_XLIB "Enable xlib support" DEPENDS X11_FOUND)
 option_with_deps(XRT_HAVE_XRANDR "Enable xlib-xrandr support" DEPENDS XRANDR_FOUND)
 
 # System deps to use (sorted)
-option_with_deps(XRT_HAVE_OPENCV "Enable OpenCV backend" DEPENDS OpenCV_FOUND)
+option_with_deps(XRT_HAVE_BIGCERES "Enable full non-vendored Ceres support for non-linear optimization" DEPENDS CERES_FOUND)
 option_with_deps(XRT_HAVE_DBUS "Enable dbus support (for BLE support)" DEPENDS DBUS_FOUND)
 option_with_deps(XRT_HAVE_LIBBSD "Enable libbsd support" DEPENDS LIBBSD_FOUND)
 option_with_deps(XRT_HAVE_LIBUDEV "Enable libudev (used for device probing on Linux)" DEPENDS UDEV_FOUND)
+option_with_deps(XRT_HAVE_OPENCV "Enable OpenCV backend" DEPENDS OpenCV_FOUND)
 option_with_deps(XRT_HAVE_PERCETTO "Enable percetto support" DEPENDS PERCETTO_FOUND)
 option_with_deps(XRT_HAVE_SYSTEMD "Enable systemd support" DEPENDS Systemd_FOUND)
 
@@ -293,26 +303,32 @@ option_with_deps(XRT_MODULE_COMPOSITOR_MAIN "Build main compositor host function
 	XRT_MODULE_COMPOSITOR
 	XRT_HAVE_VULKAN
 	)
+option_with_deps(XRT_MODULE_AUX_RENDER "Build auxiliary render library" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
+option_with_deps(XRT_MODULE_AUX_SHADERS "Build render shaders" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
 option_with_deps(XRT_MODULE_COMPOSITOR_MULTI "Build multi-client compositor library" DEPENDS XRT_MODULE_COMPOSITOR)
 option_with_deps(XRT_MODULE_COMPOSITOR_NULL "Build testing null compositor" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
-option_with_deps(XRT_MODULE_COMPOSITOR_RENDER "Build compositor render library" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
-option_with_deps(XRT_MODULE_COMPOSITOR_SHADERS "Build compositor shaders" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
 option_with_deps(XRT_MODULE_COMPOSITOR_UTIL "Build compositor utility library" DEPENDS XRT_MODULE_COMPOSITOR XRT_HAVE_VULKAN)
 option_with_deps(XRT_MODULE_COMPOSITOR_MOCK "Build mock compositor library" DEPENDS XRT_MODULE_COMPOSITOR)
+option_with_deps(XRT_MODULE_CONSTELLATION_TRACKING "Enable constellation tracking" DEPENDS XRT_HAVE_BIGCERES)
 option_with_deps(XRT_MODULE_MERCURY_HANDTRACKING "Enable Mercury hand tracking" DEPENDS XRT_HAVE_OPENCV XRT_HAVE_ONNXRUNTIME)
 
 option(XRT_MODULE_MONADO_CLI "Build monado-cli" ON)
 option_with_deps(XRT_MODULE_MONADO_GUI "Build monado-gui" DEPENDS XRT_HAVE_SDL2)
 option(XRT_MODULE_AUX_HTC "Build aux_htc" ON)
 option(XRT_MODULE_AUX_VIVE "Build aux_vive" ON)
+option_with_deps(XRT_MODULE_OPENVR_STATE_TRACKER "Build OpenVR State Tracker" DEPENDS XRT_HAVE_LINUX)
 option(XRT_MODULE_OPENXR_STATE_TRACKER "Build OpenXR State Tracker" ON)
 
 # Feature configuration (sorted)
 option_with_deps(XRT_FEATURE_AHARDWARE_BUFFER "Enable AHardwareBuffer for XrSwapchain images on Android (API-level 26+) platforms" DEPENDS ANDROID)
 option_with_deps(XRT_FEATURE_COLOR_LOG "Enable logging in color on supported platforms" DEPENDS XRT_HAVE_LINUX)
+option_with_deps(XRT_FEATURE_DEBUG_GUI "Enable debug window to be used" DEPENDS XRT_HAVE_SDL2)
+option(XRT_FEATURE_NO_COMPOSITOR_FOR_HEADLESS_SESSIONS "Does headless not create a compositor" OFF)
+option_with_deps(XRT_FEATURE_OPENVR "Build OpenVR runtime target" DEPENDS XRT_MODULE_OPENVR_STATE_TRACKER "XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL")
 option_with_deps(XRT_FEATURE_OPENXR "Build OpenXR runtime target" DEPENDS XRT_MODULE_OPENXR_STATE_TRACKER "XRT_MODULE_COMPOSITOR_MAIN OR XRT_MODULE_COMPOSITOR_NULL OR XRT_FEATURE_WINE_D3D11_BRIDGE")
 set(XRT_FEATURE_OPENXR_DEBUG_UTILS OFF) # Has never been enabled
 option_with_deps(XRT_FEATURE_RENDERDOC "Enable RenderDoc API" DEPENDS "RT_LIBRARY OR WIN32 OR ANDROID")
+option_with_deps(XRT_FEATURE_RERUN "Enable integration of Rerun SDK" DEFAULT OFF DEPENDS rerun_sdk_FOUND)
 option_with_deps(XRT_FEATURE_SERVICE "Enable separate service module for OpenXR runtime" DEPENDS XRT_MODULE_IPC XRT_FEATURE_OPENXR)
 option_with_deps(XRT_FEATURE_SERVICE_SYSTEMD "Enable systemd socket activation of the service" DEPENDS XRT_HAVE_SYSTEMD XRT_FEATURE_SERVICE)
 option_with_deps(XRT_FEATURE_SLAM "Enable SLAM tracking support" DEPENDS XRT_HAVE_OPENCV XRT_HAVE_LINUX)
@@ -320,7 +336,6 @@ option(XRT_FEATURE_SSE2 "Build using SSE2 instructions, if building for 32-bit x
 option_with_deps(XRT_FEATURE_STEAMVR_PLUGIN "Build SteamVR plugin" DEPENDS "NOT ANDROID")
 option_with_deps(XRT_FEATURE_TRACING "Enable debug tracing on supported platforms" DEFAULT OFF DEPENDS "XRT_HAVE_PERCETTO OR XRT_HAVE_TRACY")
 option_with_deps(XRT_FEATURE_WINDOW_PEEK "Enable a window that displays the content of the HMD on screen" DEPENDS XRT_HAVE_SDL2)
-option_with_deps(XRT_FEATURE_DEBUG_GUI "Enable debug window to be used" DEPENDS XRT_HAVE_SDL2)
 
 if (XRT_FEATURE_SERVICE)
 	# Disable the client debug gui by default for out-of-proc -
@@ -363,6 +378,7 @@ option_with_deps(XRT_BUILD_DRIVER_UVC "Enable userspace UVC driver" DEPENDS XRT_
 option_with_deps(XRT_BUILD_DRIVER_ANDROID "Enable Android sensors driver" DEPENDS ANDROID)
 option_with_deps(XRT_BUILD_DRIVER_ARDUINO "Enable Arduino input device with BLE" DEPENDS XRT_HAVE_DBUS)
 option_with_deps(XRT_BUILD_DRIVER_BLUBUR_S1 "Enable 3Glasses Blubur S1 device driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_CONTACTGLOVE "Enable Melt Interface Technologies ContactGlove (CG2) device driver" DEPENDS XRT_HAVE_LINUX) # only Linux has serial right now
 option_with_deps(XRT_BUILD_DRIVER_DAYDREAM "Enable the Google Daydream View controller driver (BLE)" DEPENDS XRT_HAVE_DBUS)
 option_with_deps(XRT_BUILD_DRIVER_DEPTHAI "DepthAI" DEPENDS depthai_FOUND)
 option_with_deps(XRT_BUILD_DRIVER_EUROC "Enable EuRoC dataset driver for SLAM evaluation" DEPENDS XRT_HAVE_OPENCV "NOT MSVC")
@@ -375,13 +391,13 @@ option_with_deps(XRT_BUILD_DRIVER_NS "Enable North Star driver" "NOT ANDROID")
 option_with_deps(XRT_BUILD_DRIVER_OHMD "Enable OpenHMD driver" DEPENDS OPENHMD_FOUND)
 option_with_deps(XRT_BUILD_DRIVER_OPENGLOVES "Enable OpenGloves driver" DEPENDS XRT_HAVE_LIBUDEV XRT_HAVE_BLUETOOTH)
 option_with_deps(XRT_BUILD_DRIVER_PSMV "Enable Playstation Move driver" DEPENDS XRT_HAVE_INTERNAL_HID "NOT MSVC")
-option_with_deps(XRT_BUILD_DRIVER_PSSENSE "Enable PlayStation Sense driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_PSSENSE "Enable PlayStation Sense driver" DEPENDS XRT_HAVE_INTERNAL_HID XRT_MODULE_CONSTELLATION_TRACKING)
 option_with_deps(XRT_BUILD_DRIVER_PSVR "Enable PSVR HMD driver" DEPENDS XRT_HAVE_HIDAPI)
 option_with_deps(XRT_BUILD_DRIVER_PSVR2 "Enable PS VR2 HMD driver" DEPENDS XRT_HAVE_LIBUSB "XRT_HAVE_LINUX OR APPLE")
 option_with_deps(XRT_BUILD_DRIVER_QWERTY "Enable Qwerty driver" DEPENDS XRT_HAVE_SDL2)
 option_with_deps(XRT_BUILD_DRIVER_REALSENSE "Enable RealSense device driver" DEPENDS XRT_HAVE_REALSENSE)
 option_with_deps(XRT_BUILD_DRIVER_REMOTE "Enable remote debugging driver" DEPENDS "XRT_HAVE_LINUX OR APPLE OR ANDROID OR WIN32")
-option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2/CV1) device driver" DEPENDS XRT_HAVE_INTERNAL_HID)
+option_with_deps(XRT_BUILD_DRIVER_RIFT "Enable Oculus Rift (DK2/CV1) device driver" DEPENDS XRT_HAVE_INTERNAL_HID XRT_MODULE_CONSTELLATION_TRACKING)
 option_with_deps(XRT_BUILD_DRIVER_RIFT_SENSOR "Enable Oculus Rift Sensor (DK2/CV1) device driver" DEPENDS XRT_BUILD_DRIVER_RIFT XRT_BUILD_DRIVER_UVC XRT_HAVE_LIBUSB)
 option_with_deps(XRT_BUILD_DRIVER_RIFT_S "Enable Oculus Rift S device driver" DEPENDS XRT_HAVE_V4L2)
 option_with_deps(XRT_BUILD_DRIVER_ROKID "Enable Rokid driver" DEPENDS "XRT_HAVE_LIBUSB")
@@ -401,6 +417,7 @@ option(XRT_BUILD_SAMPLES "Enable compiling sample code implementations that will
 set(XRT_IPC_MSG_SOCK_FILENAME monado_comp_ipc CACHE STRING "Service socket filename")
 set(XRT_IPC_SERVICE_PID_FILENAME monado.pid CACHE STRING "Service pidfile filename")
 set(XRT_OXR_RUNTIME_SUFFIX monado CACHE STRING "OpenXR client library suffix")
+set(XRT_OPENVR_STATE_TRACKER_INSTALL_DIR "share" CACHE STRING "Install the OpenVR state tracker to this directory root.")
 
 # Most users won't touch these.
 mark_as_advanced(XRT_MODULE_COMPOSITOR_MAIN XRT_MODULE_COMPOSITOR_NULL XRT_FEATURE_OPENXR)
@@ -422,17 +439,21 @@ option(XRT_FEATURE_OPENXR_FORCE_FEEDBACK_CURL "Enable XR_MNDX_force_feedback_cur
 option(XRT_FEATURE_OPENXR_FUTURE_EXT "Enable XR_EXT_future" ON)
 option(XRT_FEATURE_OPENXR_HAND_TRACKING_EXT "Enable XR_EXT_hand_tracking" ON)
 option_with_deps(XRT_FEATURE_OPENXR_HAND_TRACKING_DATA_SOURCE_EXT DEPENDS XRT_FEATURE_OPENXR_HAND_TRACKING_EXT)
-option(XRT_FEATURE_OPENXR_HAPTIC_PCM "Enable XR_FB_haptic_pcm" OFF)
+option(XRT_FEATURE_OPENXR_HAPTIC_PCM "Enable XR_FB_haptic_pcm" ON)
 option(XRT_FEATURE_OPENXR_HEADLESS "Enable XR_MND_headless" ON)
+# XRT_FEATURE_OPENXR_INVERTED_ALPHA is off by default as it is only supported on the compute path in the compositor.
+option(XRT_FEATURE_OPENXR_INVERTED_ALPHA "Enable XR_EXT_composition_layer_inverted_alpha" OFF)
 option(XRT_FEATURE_OPENXR_OVERLAY "Enable XR_EXTX_overlay" ON)
 option(XRT_FEATURE_OPENXR_PERFORMANCE_SETTINGS "Enable XR_EXT_performance_settings" OFF)
 option(XRT_FEATURE_OPENXR_PLANE_DETECTION "Enable XR_EXT_plane_detection" OFF)
 option(XRT_FEATURE_OPENXR_USER_PRESENCE "Enable XR_EXT_user_presence" ON)
+option(XRT_FEATURE_OPENXR_VARJO_QUAD_VIEWS "Enable XR_VARJO_quad_views" ON)
 option(XRT_FEATURE_OPENXR_VISIBILITY_MASK "Enable XR_KHR_visibility_mask" ON)
 option(XRT_FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST "Enable XR_KHR_vulkan_swapchain_format_list" ON)
 option(XRT_FEATURE_OPENXR_XDEV_SPACE "Enable XR_MNDX_xdev_space" ON)
 option_with_deps(XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META "Enable XR_META_body_tracking_full_body" DEPENDS XRT_FEATURE_OPENXR_BODY_TRACKING_FB)
 option_with_deps(XRT_FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META "Enable XR_META_body_tracking_calibration" DEPENDS XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META)
+option_with_deps(XRT_FEATURE_OPENXR_BODY_TRACKING_FIDELITY_META "Enable XR_META_body_tracking_fidelity" DEPENDS XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META)
 
 # Interaction extension support.
 option(XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE "Enable XR_EXT_eye_gaze_interaction" ON)
@@ -448,6 +469,7 @@ option(XRT_FEATURE_OPENXR_INTERACTION_MSFT_HAND "Enable XR_MSFT_hand_interaction
 option(XRT_FEATURE_OPENXR_INTERACTION_OPPO "Enable XR_OPPO_controller_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_WINMR "Enable XR_EXT_hp_mixed_reality_controller and XR_EXT_samsung_odyssey_controller" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_BYTEDANCE "Enable XR_BD_controller_interaction" ON)
+option(XRT_FEATURE_OPENXR_INTERACTION_CONTACTGLOVE2 "Enable XR_MND_contactglove2_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_VIVE_COSMOS "Enable XR_HTC_vive_cosmos_controller_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_VIVE_FOCUS3 "Enable XR_HTC_vive_focus3_controller_interaction" ON)
 option(XRT_FEATURE_OPENXR_INTERACTION_FB_PROXIMITY "Enable XR_FB_touch_controller_proximity" ON)
@@ -493,6 +515,7 @@ list(
 	"ANDROID"
 	"ARDUINO"
 	"BLUBUR_S1"
+	"CONTACTGLOVE"
 	"DAYDREAM"
 	"SIMULATED"
 	"HANDTRACKING"
@@ -634,6 +657,7 @@ endif()
 message(STATUS "#####----- Config -----#####")
 message(STATUS "#    GIT_DESC:        ${GIT_DESC}")
 message(STATUS "#")
+message(STATUS "#    BIGCERES:        ${XRT_HAVE_BIGCERES}")
 message(STATUS "#    BLUETOOTH:       ${XRT_HAVE_BLUETOOTH}")
 message(STATUS "#    D3D11:           ${XRT_HAVE_D3D11}")
 message(STATUS "#    D3D12:           ${XRT_HAVE_D3D12}")
@@ -664,23 +688,27 @@ message(STATUS "#    XCB:             ${XRT_HAVE_XCB}")
 message(STATUS "#    XLIB:            ${XRT_HAVE_XLIB}")
 message(STATUS "#    XRANDR:          ${XRT_HAVE_XRANDR}")
 message(STATUS "#")
-message(STATUS "#    MODULE_AUX_HTC:              ${XRT_MODULE_AUX_HTC}")
-message(STATUS "#    MODULE_AUX_VIVE:             ${XRT_MODULE_AUX_VIVE}")
-message(STATUS "#    MODULE_COMPOSITOR:           ${XRT_MODULE_COMPOSITOR}")
-message(STATUS "#    MODULE_COMPOSITOR_MAIN:      ${XRT_MODULE_COMPOSITOR_MAIN}")
-message(STATUS "#    MODULE_COMPOSITOR_NULL:      ${XRT_MODULE_COMPOSITOR_NULL}")
-message(STATUS "#    MODULE_MERCURY_HANDTRACKING: ${XRT_MODULE_MERCURY_HANDTRACKING}")
-message(STATUS "#    MODULE_IPC:                  ${XRT_MODULE_IPC}")
-message(STATUS "#    MODULE_MONADO_GUI:           ${XRT_MODULE_MONADO_GUI}")
-message(STATUS "#    MODULE_MONADO_CLI:           ${XRT_MODULE_MONADO_CLI}")
-message(STATUS "#    MODULE_OPENXR_STATE_TRACKER: ${XRT_MODULE_OPENXR_STATE_TRACKER}")
+message(STATUS "#    MODULE_AUX_HTC:                ${XRT_MODULE_AUX_HTC}")
+message(STATUS "#    MODULE_AUX_VIVE:               ${XRT_MODULE_AUX_VIVE}")
+message(STATUS "#    MODULE_COMPOSITOR:             ${XRT_MODULE_COMPOSITOR}")
+message(STATUS "#    MODULE_COMPOSITOR_MAIN:        ${XRT_MODULE_COMPOSITOR_MAIN}")
+message(STATUS "#    MODULE_COMPOSITOR_NULL:        ${XRT_MODULE_COMPOSITOR_NULL}")
+message(STATUS "#    MODULE_CONSTELLATION_TRACKING: ${XRT_MODULE_CONSTELLATION_TRACKING}")
+message(STATUS "#    MODULE_MERCURY_HANDTRACKING:   ${XRT_MODULE_MERCURY_HANDTRACKING}")
+message(STATUS "#    MODULE_IPC:                    ${XRT_MODULE_IPC}")
+message(STATUS "#    MODULE_MONADO_GUI:             ${XRT_MODULE_MONADO_GUI}")
+message(STATUS "#    MODULE_MONADO_CLI:             ${XRT_MODULE_MONADO_CLI}")
+message(STATUS "#    MODULE_OPENVR_STATE_TRACKER:   ${XRT_MODULE_OPENVR_STATE_TRACKER}")
+message(STATUS "#    MODULE_OPENXR_STATE_TRACKER:   ${XRT_MODULE_OPENXR_STATE_TRACKER}")
 message(STATUS "#")
 message(STATUS "#    FEATURE_AHARDWARE_BUFFER:                      ${XRT_FEATURE_AHARDWARE_BUFFER}")
 message(STATUS "#    FEATURE_CLIENT_DEBUG_GUI:                      ${XRT_FEATURE_CLIENT_DEBUG_GUI}")
 message(STATUS "#    FEATURE_COLOR_LOG:                             ${XRT_FEATURE_COLOR_LOG}")
 message(STATUS "#    FEATURE_DEBUG_GUI:                             ${XRT_FEATURE_DEBUG_GUI}")
+message(STATUS "#    FEATURE_OPENVR:                                ${XRT_FEATURE_OPENVR}")
 message(STATUS "#    FEATURE_OPENXR:                                ${XRT_FEATURE_OPENXR}")
 message(STATUS "#    FEATURE_RENDERDOC:                             ${XRT_FEATURE_RENDERDOC}")
+message(STATUS "#    FEATURE_RERUN:                                 ${XRT_FEATURE_RERUN}")
 message(STATUS "#    FEATURE_SERVICE:                               ${XRT_FEATURE_SERVICE}")
 message(STATUS "#    FEATURE_SERVICE_SYSTEMD:                       ${XRT_FEATURE_SERVICE_SYSTEMD}")
 message(STATUS "#    FEATURE_SLAM:                                  ${XRT_FEATURE_SLAM}")
@@ -694,6 +722,7 @@ if(XRT_MODULE_OPENXR_STATE_TRACKER)
 	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_BD:                       ${XRT_FEATURE_OPENXR_BODY_TRACKING_BD}")
 	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META:         ${XRT_FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META}")
 	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_FB:                       ${XRT_FEATURE_OPENXR_BODY_TRACKING_FB}")
+	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_FIDELITY_META:            ${XRT_FEATURE_OPENXR_BODY_TRACKING_FIDELITY_META}")
 	message(STATUS "#    FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META:           ${XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META}")
 	message(STATUS "#    FEATURE_OPENXR_DEBUG_UTILS:                            ${XRT_FEATURE_OPENXR_DEBUG_UTILS}")
 	message(STATUS "#    FEATURE_OPENXR_DISPLAY_REFRESH_RATE:                   ${XRT_FEATURE_OPENXR_DISPLAY_REFRESH_RATE}")
@@ -709,6 +738,8 @@ message(STATUS "#    FEATURE_OPENXR_FB_SWAPCHAIN_UPDATE_STATE:              ${XR
 	message(STATUS "#    FEATURE_OPENXR_HAND_TRACKING_EXT:                      ${XRT_FEATURE_OPENXR_HAND_TRACKING_EXT}")
 	message(STATUS "#    FEATURE_OPENXR_HAPTIC_PCM:                             ${XRT_FEATURE_OPENXR_HAPTIC_PCM}")
 	message(STATUS "#    FEATURE_OPENXR_HEADLESS:                               ${XRT_FEATURE_OPENXR_HEADLESS}")
+	message(STATUS "#    FEATURE_OPENXR_INVERTED_ALPHA:                         ${XRT_FEATURE_OPENXR_INVERTED_ALPHA}")
+	message(STATUS "#    FEATURE_OPENXR_INTERACTION_CONTACTGLOVE2:              ${XRT_FEATURE_OPENXR_INTERACTION_CONTACTGLOVE2}")
 	message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE:               ${XRT_FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE}")
 	message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_HAND:                   ${XRT_FEATURE_OPENXR_INTERACTION_EXT_HAND}")
 	message(STATUS "#    FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE:              ${XRT_FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE}")
@@ -746,6 +777,7 @@ endif()
 message(STATUS "#    DRIVER_ANDROID:              ${XRT_BUILD_DRIVER_ANDROID}")
 message(STATUS "#    DRIVER_ARDUINO:              ${XRT_BUILD_DRIVER_ARDUINO}")
 message(STATUS "#    DRIVER_BLUBUR_S1:            ${XRT_BUILD_DRIVER_BLUBUR_S1}")
+message(STATUS "#    DRIVER_CONTACTGLOVE:         ${XRT_BUILD_DRIVER_CONTACTGLOVE}")
 message(STATUS "#    DRIVER_DAYDREAM:             ${XRT_BUILD_DRIVER_DAYDREAM}")
 message(STATUS "#    DRIVER_DEPTHAI:              ${XRT_BUILD_DRIVER_DEPTHAI}")
 message(STATUS "#    DRIVER_EUROC:                ${XRT_BUILD_DRIVER_EUROC}")

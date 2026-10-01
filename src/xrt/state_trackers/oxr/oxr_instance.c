@@ -14,6 +14,7 @@
 #include "xrt/xrt_instance.h"
 
 #include "math/m_mathinclude.h"
+
 #include "util/u_var.h"
 #include "util/u_time.h"
 #include "util/u_misc.h"
@@ -30,7 +31,7 @@
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
-#include "oxr_handle.h"
+#include "oxr_handle_base.h"
 #include "oxr_extension_support.h"
 #include "oxr_chain.h"
 #include "oxr_roles.h"
@@ -53,6 +54,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(debug_bindings, "OXR_DEBUG_BINDINGS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(lifecycle_verbose, "OXR_LIFECYCLE_VERBOSE", false)
 DEBUG_GET_ONCE_TRISTATE_OPTION(parallel_views, "OXR_PARALLEL_VIEWS")
 DEBUG_GET_ONCE_TRISTATE_OPTION(no_texture_source_alpha, "OXR_NO_TEXTURE_SOURCE_ALPHA")
+DEBUG_GET_ONCE_TRISTATE_OPTION(disable_quad_views, "OXR_DISABLE_QUAD_VIEWS")
 DEBUG_GET_ONCE_BOOL_OPTION(map_stage_to_local_floor, "OXR_RECENTER_STAGE", false)
 
 
@@ -206,9 +208,11 @@ apply_quirks(struct oxr_logger *log, struct oxr_instance *inst, const XrInstance
 	inst->quirks.skip_end_session = false;
 	inst->quirks.disable_vulkan_format_depth = false;
 	inst->quirks.disable_vulkan_format_depth_stencil = false;
+	inst->quirks.disable_quad_views = false;
 	inst->quirks.no_validation_error_in_create_ref_space = false;
 	inst->quirks.parallel_views = false;
 	inst->quirks.no_texture_source_alpha = false;
+	inst->quirks.no_usage_bit_validation_in_create_swapchain = false;
 
 	if (starts_with("UnrealEngine", inst->appinfo.detected.engine.name) && //
 	    inst->appinfo.detected.engine.major == 4 &&                        //
@@ -222,11 +226,17 @@ apply_quirks(struct oxr_logger *log, struct oxr_instance *inst, const XrInstance
 		inst->quirks.parallel_views = true;
 	}
 
+	// Metro Awakening sets XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR without requesting the extension.
+	if (strcmp("Impact", create_info->applicationInfo.applicationName) == 0) {
+		inst->quirks.no_usage_bit_validation_in_create_swapchain = true;
+	}
+
 	// Currently always true.
 	inst->quirks.no_validation_error_in_create_ref_space = true;
 
 	enum debug_tristate_option parallel_view = debug_get_tristate_option_parallel_views();
 	enum debug_tristate_option no_texture_source_alpha = debug_get_tristate_option_no_texture_source_alpha();
+	enum debug_tristate_option disable_quad_views = debug_get_tristate_option_disable_quad_views();
 
 	// Only override hardcoded quirks when explicitly enabling or disabling, not on auto.
 	if (parallel_view == DEBUG_TRISTATE_OFF) {
@@ -240,6 +250,13 @@ apply_quirks(struct oxr_logger *log, struct oxr_instance *inst, const XrInstance
 	} else if (no_texture_source_alpha == DEBUG_TRISTATE_ON) {
 		inst->quirks.no_texture_source_alpha = true;
 	}
+
+	if (disable_quad_views == DEBUG_TRISTATE_OFF) {
+		inst->quirks.disable_quad_views = false;
+	} else if (disable_quad_views == DEBUG_TRISTATE_ON) {
+		inst->quirks.disable_quad_views = true;
+	}
+
 
 	inst->quirks.map_stage_to_local_floor = debug_get_bool_option_map_stage_to_local_floor();
 }
@@ -256,7 +273,7 @@ oxr_instance_create(struct oxr_logger *log,
 	xrt_result_t xret;
 	XrResult ret;
 
-	OXR_ALLOCATE_HANDLE_OR_RETURN(log, inst, OXR_XR_DEBUG_INSTANCE, oxr_instance_destroy, NULL);
+	OXR_ALLOCATE_HANDLE_PARENT_OR_RETURN(log, inst, OXR_XR_DEBUG_INSTANCE, oxr_instance_destroy, NULL);
 
 	inst->extensions = *extensions; // Sets the enabled extensions.
 	inst->openxr_version.major_minor = major_minor;
@@ -340,6 +357,9 @@ oxr_instance_create(struct oxr_logger *log,
 #ifdef OXR_HAVE_META_body_tracking_calibration
 	    .meta_body_tracking_calibration_enabled = extensions->META_body_tracking_calibration,
 #endif
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+	    .meta_body_tracking_fidelity_enabled = extensions->META_body_tracking_fidelity,
+#endif
 #ifdef OXR_HAVE_ANDROID_face_tracking
 	    .android_face_tracking_enabled = extensions->ANDROID_face_tracking,
 #endif
@@ -367,7 +387,7 @@ oxr_instance_create(struct oxr_logger *log,
 	xret = xrt_instance_create(&i_info, &inst->xinst);
 	if (xret != XRT_SUCCESS) {
 		ret = oxr_error(log, XR_ERROR_RUNTIME_UNAVAILABLE, "Failed to create instance '%i'", xret);
-		oxr_instance_destroy(log, &inst->handle);
+		oxr_instance_destroy(log, &inst->handle.base);
 		return ret;
 	}
 
@@ -405,28 +425,32 @@ oxr_instance_create(struct oxr_logger *log,
 	        "\tappinfo.detected.engine.version: %i.%i.%i\n"
 	        "\tquirks.disable_vulkan_format_depth: %s\n"
 	        "\tquirks.disable_vulkan_format_depth_stencil: %s\n"
+	        "\tquirks.disable_quad_views: %s\n"
 	        "\tquirks.no_validation_error_in_create_ref_space: %s\n"
 	        "\tquirks.skip_end_session: %s\n"
 	        "\tquirks.parallel_views: %s\n"
-	        "\tquirks.no_texture_source_alpha: %s\n",
-	        createInfo->applicationInfo.applicationName,                             //
-	        createInfo->applicationInfo.applicationVersion,                          //
-	        createInfo->applicationInfo.engineName,                                  //
-	        createInfo->applicationInfo.engineVersion,                               //
-	        XR_VERSION_MAJOR(createInfo->applicationInfo.apiVersion),                //
-	        XR_VERSION_MINOR(createInfo->applicationInfo.apiVersion),                //
-	        XR_VERSION_PATCH(createInfo->applicationInfo.apiVersion),                //
-	        inst->appinfo.detected.engine.name,                                      //
-	        inst->appinfo.detected.engine.major,                                     //
-	        inst->appinfo.detected.engine.minor,                                     //
-	        inst->appinfo.detected.engine.patch,                                     //
-	        inst->quirks.disable_vulkan_format_depth ? "true" : "false",             //
-	        inst->quirks.disable_vulkan_format_depth_stencil ? "true" : "false",     //
-	        inst->quirks.no_validation_error_in_create_ref_space ? "true" : "false", //
-	        inst->quirks.skip_end_session ? "true" : "false",                        //
-	        inst->quirks.parallel_views ? "true" : "false",                          //
-	        inst->quirks.no_texture_source_alpha ? "true" : "false"                  //
-	);                                                                               //
+	        "\tquirks.no_texture_source_alpha: %s\n"
+	        "\tquirks.ignore_invalid_swapchain_usage_bits: %s\n",
+	        createInfo->applicationInfo.applicationName,                                //
+	        createInfo->applicationInfo.applicationVersion,                             //
+	        createInfo->applicationInfo.engineName,                                     //
+	        createInfo->applicationInfo.engineVersion,                                  //
+	        XR_VERSION_MAJOR(createInfo->applicationInfo.apiVersion),                   //
+	        XR_VERSION_MINOR(createInfo->applicationInfo.apiVersion),                   //
+	        XR_VERSION_PATCH(createInfo->applicationInfo.apiVersion),                   //
+	        inst->appinfo.detected.engine.name,                                         //
+	        inst->appinfo.detected.engine.major,                                        //
+	        inst->appinfo.detected.engine.minor,                                        //
+	        inst->appinfo.detected.engine.patch,                                        //
+	        inst->quirks.disable_vulkan_format_depth ? "true" : "false",                //
+	        inst->quirks.disable_vulkan_format_depth_stencil ? "true" : "false",        //
+	        inst->quirks.disable_quad_views ? "true" : "false",                         //
+	        inst->quirks.no_validation_error_in_create_ref_space ? "true" : "false",    //
+	        inst->quirks.skip_end_session ? "true" : "false",                           //
+	        inst->quirks.parallel_views ? "true" : "false",                             //
+	        inst->quirks.no_texture_source_alpha ? "true" : "false",                    //
+	        inst->quirks.no_usage_bit_validation_in_create_swapchain ? "true" : "false" //
+	);                                                                                  //
 
 #ifdef XRT_FEATURE_RENDERDOC
 
@@ -436,30 +460,35 @@ oxr_instance_create(struct oxr_logger *log,
 #pragma GCC diagnostic ignored "-Wpedantic"
 #endif // __GNUC_
 
+	pRENDERDOC_GetAPI RENDERDOC_GetAPI = NULL;
+
 #if defined(XRT_OS_LINUX) && !defined(XRT_OS_ANDROID)
 	void *mod = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
 	if (mod) {
-		pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
-		XRT_MAYBE_UNUSED int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_5_0, (void **)&inst->rdoc_api);
-		assert(ret == 1);
+		RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
 	}
 #endif
 #ifdef XRT_OS_ANDROID
 	void *mod = dlopen("libVkLayer_GLES_RenderDoc.so", RTLD_NOW | RTLD_NOLOAD);
 	if (mod) {
-		pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
-		int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_5_0, (void **)&inst->rdoc_api);
-		assert(ret == 1);
+		RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
 	}
 #endif
 #ifdef XRT_OS_WINDOWS
 	HMODULE mod = GetModuleHandleA("renderdoc.dll");
 	if (mod) {
-		pRENDERDOC_GetAPI RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)GetProcAddress(mod, "RENDERDOC_GetAPI");
-		int ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_5_0, (void **)&inst->rdoc_api);
-		assert(ret == 1);
+		RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)GetProcAddress(mod, "RENDERDOC_GetAPI");
 	}
 #endif
+
+	// If we got the symbol, try to get the API and assert it succeeds.
+	if (RENDERDOC_GetAPI) {
+		ret = RENDERDOC_GetAPI(eRENDERDOC_API_Version_1_5_0, (void **)&inst->rdoc_api);
+		assert(ret == 1);
+		if (ret != 1) {
+			oxr_log(log, "RENDERDOC_GetAPI failed, got %d.", ret);
+		}
+	}
 
 #ifdef __GNUC__
 #pragma GCC diagnostic pop

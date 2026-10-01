@@ -78,7 +78,7 @@ uvc_set_cur(libusb_device_handle *dev,
             void *data,
             uint16_t data_length)
 {
-	uint8_t bmRequestType = LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE;
+	uint8_t bmRequestType = (uint8_t)LIBUSB_REQUEST_TYPE_CLASS | LIBUSB_RECIPIENT_INTERFACE;
 	uint8_t bRequest = SET_CUR;
 	uint16_t wValue = selector << 8;
 	uint16_t wIndex = entity << 8 | usb_interface;
@@ -213,6 +213,7 @@ process_payload(struct uvc_fs *stream, unsigned char *payload, size_t len)
 
 			frame->timestamp = time;
 			frame->source_timestamp = pts;
+			frame->source_sequence = stream->sequence_id++;
 			frame->stride = stream->parameters.stride;
 			frame->width = stream->parameters.width;
 			frame->height = stream->parameters.height;
@@ -223,10 +224,15 @@ process_payload(struct uvc_fs *stream, unsigned char *payload, size_t len)
 			// frame timestamp to be based on timestamps given by the device, rather than receive
 			// time.
 			timepoint_ns custom_timestamp;
+			uint64_t custom_sequence_id = frame->source_sequence;
 			if (stream->get_frame_timestamp &&
-			    stream->get_frame_timestamp(stream->get_frame_timestamp_user_data, &custom_timestamp,
-			                                pts)) {
+			    stream->get_frame_timestamp(stream->get_frame_timestamp_user_data, //
+			                                &custom_timestamp,                     //
+			                                &custom_sequence_id,                   //
+			                                time,                                  //
+			                                pts)) {                                //
 				frame->timestamp = custom_timestamp;
+				frame->source_sequence = custom_sequence_id;
 			}
 
 			if (stream->skip_frame_start != 0 && stream->cur_frame) {

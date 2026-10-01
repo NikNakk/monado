@@ -114,12 +114,12 @@ main(int argc, char **argv)
 		goto out;
 	}
 
-	if (xsysc->info.view_config_count == 0) {
+	if (xsysc->info.view_type_count == 0) {
 		fprintf(stderr, "No view configuration available\n");
 		goto out;
 	}
 	const struct xrt_begin_session_info begin_info = {
-	    .view_type = xsysc->info.view_configs[0].view_type,
+	    .view_type = xsysc->info.view_types[0],
 	};
 	xret = xrt_comp_begin_session(&xcn->base, &begin_info);
 	if (xret != XRT_SUCCESS) {

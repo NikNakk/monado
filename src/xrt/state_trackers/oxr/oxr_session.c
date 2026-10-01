@@ -41,13 +41,14 @@
 #include "oxr_objects.h"
 #include "oxr_logger.h"
 #include "oxr_two_call.h"
-#include "oxr_handle.h"
+#include "oxr_handle_base.h"
 #include "oxr_chain.h"
 #include "oxr_api_verify.h"
 #include "oxr_pretty_print.h"
 #include "oxr_conversions.h"
 #include "oxr_xret.h"
 #include "oxr_roles.h"
+
 #include "actions/oxr_input.h"
 #include "actions/oxr_session_action_context.h"
 #include "actions/oxr_session_attached_actions.h"
@@ -239,6 +240,123 @@ handle_reference_space_change_pending(struct oxr_logger *log,
 
 /*
  *
+ * Locate views helpers.
+ *
+ */
+
+struct locate_views_data
+{
+	struct xrt_fov fovs[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_VIEW_COUNT];
+	struct xrt_pose poses[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_VIEW_COUNT];
+};
+
+static XrResult
+get_device_fovs_and_poses(struct oxr_logger *log,
+                          struct oxr_session *sess,
+                          struct xrt_device *xdev,
+                          int64_t xdisplay_time_ns,
+                          uint32_t view_count,
+                          struct xrt_space_relation *out_T_xdev_head,
+                          struct locate_views_data *out_data)
+{
+	xrt_result_t xret = XRT_SUCCESS;
+
+	// To be passed down to the devices, some can override this.
+	const struct xrt_vec3 default_eye_relation = {
+	    sess->ipd_meters,
+	    0.0f,
+	    0.0f,
+	};
+
+	// Regular getting.
+	if (view_count == 2 || view_count == 1 || (view_count == 4 && xdev->supported.get_views_quad)) {
+		static_assert(ARRAY_SIZE(out_data->fovs) >= 4, "Too small array!");
+		static_assert(ARRAY_SIZE(out_data->poses) >= 4, "Too small array!");
+
+		// Determine view type based on view count
+		enum xrt_view_type view_type = XRT_VIEW_TYPE_MONO;
+
+		switch (view_count) {
+		case 1: view_type = XRT_VIEW_TYPE_MONO; break;
+		case 2: view_type = XRT_VIEW_TYPE_STEREO; break;
+		case 4: view_type = XRT_VIEW_TYPE_QUAD; break;
+		}
+
+		xret = xrt_device_get_view_poses( //
+		    xdev,                         //
+		    &default_eye_relation,        //
+		    xdisplay_time_ns,             //
+		    view_type,                    //
+		    view_count,                   //
+		    out_T_xdev_head,              //
+		    out_data->fovs,               //
+		    out_data->poses);             //
+		OXR_CHECK_XRET(log, sess, xret, xrt_device_get_view_poses);
+
+		return XR_SUCCESS; // Done now.
+	}
+
+	// Device supports stereo views but we are simulating quad views.
+	if (view_count != 4) {
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Got not 1, 2 or 4 views!");
+	}
+
+	static_assert(ARRAY_SIZE(out_data->fovs) >= 4, "Too small array!");
+	static_assert(ARRAY_SIZE(out_data->poses) >= 4, "Too small array!");
+
+	xret = xrt_device_get_view_poses( //
+	    xdev,                         //
+	    &default_eye_relation,        //
+	    xdisplay_time_ns,             //
+	    XRT_VIEW_TYPE_STEREO,         // view_type (hardcoded to stereo for this quad view case)
+	    2,                            // view_count
+	    out_T_xdev_head,              //
+	    out_data->fovs,               //
+	    out_data->poses);             //
+	OXR_CHECK_XRET(log, sess, xret, xrt_device_get_view_poses);
+
+	// Generate inset views (views 2-3) from context views (views 0-1) for quad view configuration.
+	// Each inset view uses the same pose as its corresponding context view but with half the FOV.
+	for (uint32_t i = 2; i < view_count; i++) {
+		const uint32_t src_index = i - 2;
+		struct xrt_fov src_fov = out_data->fovs[src_index];
+		struct xrt_pose src_pose = out_data->poses[src_index];
+
+		out_data->fovs[i] = (struct xrt_fov){
+		    .angle_left = src_fov.angle_left / 2,
+		    .angle_right = src_fov.angle_right / 2,
+		    .angle_up = src_fov.angle_up / 2,
+		    .angle_down = src_fov.angle_down / 2,
+		};
+
+		out_data->poses[i] = src_pose;
+	}
+
+	return XR_SUCCESS;
+}
+
+#ifdef OXR_HAVE_KHR_visibility_mask
+static bool
+is_emulated_quad_inset_view(struct xrt_device *xdev, uint32_t view_index)
+{
+	return view_index >= 2 && !xdev->supported.get_views_quad;
+}
+
+static enum xrt_visibility_mask_type
+convert_mask_type(XrVisibilityMaskTypeKHR type)
+{
+	switch (type) {
+	case XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR: return XRT_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH;
+	case XR_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH_KHR: return XRT_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH;
+	case XR_VISIBILITY_MASK_TYPE_LINE_LOOP_KHR: return XRT_VISIBILITY_MASK_TYPE_LINE_LOOP;
+	default: return (enum xrt_visibility_mask_type)0;
+	}
+}
+#endif // OXR_HAVE_KHR_visibility_mask
+
+
+/*
+ *
  * 'Exported' functions.
  *
  */
@@ -303,10 +421,9 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 		return oxr_error(log, XR_ERROR_SESSION_NOT_READY, "Session is not ready to begin");
 	}
 
+	const struct oxr_extension_status *extensions = &sess->sys->inst->extensions;
 	struct xrt_compositor *xc = sess->compositor;
 	if (xc != NULL) {
-		const struct oxr_extension_status *extensions = &sess->sys->inst->extensions;
-
 		const struct xrt_begin_session_info begin_session_info = {
 		    .view_type = (enum xrt_view_type)beginInfo->primaryViewConfigurationType,
 #ifdef OXR_HAVE_EXT_hand_tracking
@@ -339,6 +456,9 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 #ifdef OXR_HAVE_META_body_tracking_calibration
 		    .meta_body_tracking_calibration_enabled = extensions->META_body_tracking_calibration,
 #endif
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+		    .meta_body_tracking_fidelity_enabled = extensions->META_body_tracking_fidelity,
+#endif
 #ifdef OXR_HAVE_ANDROID_face_tracking
 		    .android_face_tracking_enabled = extensions->ANDROID_face_tracking,
 #endif
@@ -346,16 +466,6 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 
 		xrt_result_t xret = xrt_comp_begin_session(xc, &begin_session_info);
 		OXR_CHECK_XRET(log, sess, xret, xrt_comp_begin_session);
-
-#ifdef OXR_HAVE_EXT_user_presence
-		struct xrt_device *xdev = GET_STATIC_XDEV_BY_ROLE(sess->sys, head);
-		if (extensions->EXT_user_presence && xdev->supported.presence) {
-			bool presence = false;
-			xret = xrt_device_get_presence(xdev, &presence);
-			OXR_CHECK_XRET(log, sess, xret, xrt_device_get_presence);
-			oxr_event_push_XrEventDataUserPresenceChangedEXT(log, sess, presence);
-		}
-#endif
 	} else {
 		// Headless, pretend we got event from the compositor.
 		sess->compositor_visible = true;
@@ -379,6 +489,25 @@ oxr_session_begin(struct oxr_logger *log, struct oxr_session *sess, const XrSess
 		return oxr_error(log, ret,
 		                 "Frame sync object refused to let us begin session, probably already running");
 	}
+
+#ifdef OXR_HAVE_EXT_user_presence
+	struct xrt_device *xdev = GET_STATIC_XDEV_BY_ROLE(sess->sys, head);
+	if (extensions->EXT_user_presence && xdev->supported.presence && xdev->inputs) {
+		for (size_t i = 0; i < xdev->input_count; ++i) {
+			struct xrt_input *input = &xdev->inputs[i];
+			if (input->name != XRT_INPUT_GENERIC_HEAD_DETECT) {
+				continue;
+			}
+
+			// On init we only have the name, so trigger a sync of the inputs.
+			xrt_result_t xret = xrt_device_update_inputs(xdev);
+			OXR_CHECK_XRET(log, sess, xret, xrt_device_update_inputs);
+
+			oxr_event_push_XrEventDataUserPresenceChangedEXT(log, sess, input->value.boolean);
+			break;
+		}
+	}
+#endif
 
 	// Set the current view configuration type, used in xrEndFrame.
 	sess->current_view_config_type = beginInfo->primaryViewConfigurationType;
@@ -629,15 +758,32 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 			}
 			break;
 #endif // OXR_HAVE_KHR_visibility_mask
-		case XRT_SESSION_EVENT_USER_PRESENCE_CHANGE:
-#ifdef OXR_HAVE_EXT_user_presence
-			oxr_event_push_XrEventDataUserPresenceChangedEXT(log, sess,
-			                                                 xse.presence_change.is_user_present);
-#endif // OXR_HAVE_EXT_user_presence
-			break;
 		default: U_LOG_W("unhandled event type! %d", xse.type); break;
 		}
 	}
+
+#ifdef OXR_HAVE_EXT_user_presence
+	struct xrt_device *xdev = GET_STATIC_XDEV_BY_ROLE(sess->sys, head);
+	if (sess->sys->inst->extensions.EXT_user_presence && xdev->supported.presence && xdev->inputs) {
+		for (size_t i = 0; i < xdev->input_count; ++i) {
+			struct xrt_input *input = &xdev->inputs[i];
+			if (input->name != XRT_INPUT_GENERIC_HEAD_DETECT) {
+				continue;
+			}
+
+			// Make sure the presence input is updated.
+			xrt_result_t xret = xrt_device_update_inputs(xdev);
+			OXR_CHECK_XRET(log, sess, xret, xrt_device_update_inputs);
+
+			bool presence = input->value.boolean;
+			if (sess->presence != presence) {
+				oxr_event_push_XrEventDataUserPresenceChangedEXT(log, sess, presence);
+				sess->presence = presence;
+			}
+			break;
+		}
+	}
+#endif // OXR_HAVE_EXT_user_presence
 
 	if (sess->state == XR_SESSION_STATE_SYNCHRONIZED && sess->compositor_visible) {
 		oxr_session_change_state(log, sess, XR_SESSION_STATE_VISIBLE, now_xr);
@@ -690,7 +836,18 @@ oxr_session_locate_views(struct oxr_logger *log,
 	bool print = sess->sys->inst->debug_views;
 	struct xrt_device *xdev = GET_STATIC_XDEV_BY_ROLE(sess->sys, head);
 	struct oxr_space *baseSpc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_space *, viewLocateInfo->space);
-	uint32_t view_count = xdev->hmd->view_count;
+	XrResult ret;
+
+	uint32_t view_count = 0;
+	switch (sess->current_view_config_type) {
+	case XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO: view_count = 1; break;
+	case XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO: view_count = 2; break;
+	case XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO_WITH_FOVEATED_INSET: view_count = 4; break;
+	default:
+		assert(false && "view type validation unimplemented");
+		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "view type %d not supported",
+		                 sess->current_view_config_type);
+	}
 
 	// Start two call handling.
 	if (viewCountOutput != NULL) {
@@ -714,42 +871,40 @@ oxr_session_locate_views(struct oxr_logger *log,
 	 * Get head relation, fovs and view poses.
 	 */
 
-	// To be passed down to the devices, some can override this.
-	const struct xrt_vec3 default_eye_relation = {
-	    sess->ipd_meters,
-	    0.0f,
-	    0.0f,
-	};
-
 	const uint64_t xdisplay_time =
 	    time_state_ts_to_monotonic_ns(sess->sys->inst->timekeeping, viewLocateInfo->displayTime);
 
 	// The head pose as in the xdev's space, aka XRT_INPUT_GENERIC_HEAD_POSE.
 	struct xrt_space_relation T_xdev_head = XRT_SPACE_RELATION_ZERO;
-	struct xrt_fov fovs[XRT_MAX_VIEWS] = {0};
-	struct xrt_pose poses[XRT_MAX_VIEWS] = {0};
 
-	enum xrt_view_type view_type = view_count == 1 ? XRT_VIEW_TYPE_MONO : XRT_VIEW_TYPE_STEREO;
-
-	xrt_result_t xret = xrt_device_get_view_poses( //
-	    xdev,                                      //
-	    &default_eye_relation,                     //
-	    xdisplay_time,                             //
-	    view_type,                                 //
-	    view_count,                                //
-	    &T_xdev_head,                              //
-	    fovs,                                      //
-	    poses);
-	OXR_CHECK_XRET(log, sess, xret, xrt_device_get_view_poses);
+	// Data including fovs and poses.
+	struct locate_views_data data = {0};
+	ret = get_device_fovs_and_poses( //
+	    log,                         //
+	    sess,                        //
+	    xdev,                        //
+	    xdisplay_time,               //
+	    view_count,                  //
+	    &T_xdev_head,                //
+	    &data);                      //
+	if (ret != XR_SUCCESS) {
+		if (print) {
+			oxr_slog(&slog, "\n\tReturning invalid poses");
+			oxr_log_slog(log, &slog);
+		} else {
+			oxr_slog_cancel(&slog);
+		}
+		return ret;
+	}
 
 	// The xdev pose in the base space.
 	struct xrt_space_relation T_base_xdev = XRT_SPACE_RELATION_ZERO;
-	XrResult ret = oxr_space_locate_device( //
-	    log,                                //
-	    xdev,                               //
-	    baseSpc,                            //
-	    viewLocateInfo->displayTime,        //
-	    &T_base_xdev);                      //
+	ret = oxr_space_locate_device(   //
+	    log,                         //
+	    xdev,                        //
+	    baseSpc,                     //
+	    viewLocateInfo->displayTime, //
+	    &T_base_xdev);               //
 	if (ret != XR_SUCCESS || T_base_xdev.relation_flags == 0) {
 		if (print) {
 			oxr_slog(&slog, "\n\tReturning invalid poses");
@@ -770,8 +925,8 @@ oxr_session_locate_views(struct oxr_logger *log,
 		for (uint32_t i = 0; i < view_count; i++) {
 			char tmp[32];
 			snprintf(tmp, 32, "xdev.view[%i]", i);
-			oxr_pp_fov_indented_as_object(&slog, &fovs[i], tmp);
-			oxr_pp_pose_indented_as_object(&slog, &poses[i], tmp);
+			oxr_pp_fov_indented_as_object(&slog, &data.fovs[i], tmp);
+			oxr_pp_pose_indented_as_object(&slog, &data.poses[i], tmp);
 		}
 		oxr_pp_relation_indented(&slog, &T_xdev_head, "T_xdev_head");
 		oxr_pp_relation_indented(&slog, &T_base_xdev, "T_base_xdev");
@@ -782,7 +937,7 @@ oxr_session_locate_views(struct oxr_logger *log,
 		 * Pose
 		 */
 
-		struct xrt_pose view_pose = poses[i];
+		struct xrt_pose view_pose = data.poses[i];
 
 		bool parallelize_views =
 		    sess->sys->inst->quirks.parallel_views && !math_quat_is_identity(&view_pose.orientation, 0.0001f);
@@ -804,10 +959,13 @@ oxr_session_locate_views(struct oxr_logger *log,
 		 * Fov
 		 */
 
-		struct xrt_fov fov = fovs[i];
+		struct xrt_fov fov = data.fovs[i];
 
 		if (parallelize_views) {
-			math_compute_parallelized_fov(&fovs[i], &poses[i].orientation, &fov);
+			math_compute_parallelized_fov(  //
+			    &data.fovs[i],              // in
+			    &data.poses[i].orientation, // in
+			    &fov);                      // out
 		}
 
 		OXR_XRT_FOV_TO_XRFOVF(fov, views[i].fov);
@@ -1087,7 +1245,7 @@ oxr_session_allocate_and_init(struct oxr_logger *log,
 {
 	struct oxr_session *sess = NULL;
 	XrResult ret;
-	OXR_ALLOCATE_HANDLE_OR_RETURN(log, sess, OXR_XR_DEBUG_SESSION, oxr_session_destroy, &sys->inst->handle);
+	OXR_ALLOCATE_HANDLE_PARENT_OR_RETURN(log, sess, OXR_XR_DEBUG_SESSION, oxr_session_destroy, &sys->inst->handle);
 
 	// Needs to happen early due to mutex.
 	ret = oxr_session_attached_actions_init(&sess->attached_actions);
@@ -1459,7 +1617,7 @@ oxr_session_create(struct oxr_logger *log,
 	if (ret != XR_SUCCESS) {
 		if (sess != NULL) {
 			/* clean up allocation first */
-			XrResult cleanup_result = oxr_handle_destroy(log, &sess->handle);
+			XrResult cleanup_result = oxr_handle_parent_destroy(log, &sess->handle);
 			assert(cleanup_result == XR_SUCCESS);
 			(void)cleanup_result;
 		}
@@ -1557,17 +1715,6 @@ oxr_session_android_thread_settings(struct oxr_logger *log,
 
 #ifdef OXR_HAVE_KHR_visibility_mask
 
-static enum xrt_visibility_mask_type
-convert_mask_type(XrVisibilityMaskTypeKHR type)
-{
-	switch (type) {
-	case XR_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH_KHR: return XRT_VISIBILITY_MASK_TYPE_HIDDEN_TRIANGLE_MESH;
-	case XR_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH_KHR: return XRT_VISIBILITY_MASK_TYPE_VISIBLE_TRIANGLE_MESH;
-	case XR_VISIBILITY_MASK_TYPE_LINE_LOOP_KHR: return XRT_VISIBILITY_MASK_TYPE_LINE_LOOP;
-	default: return (enum xrt_visibility_mask_type)0;
-	}
-}
-
 XrResult
 oxr_session_get_visibility_mask(struct oxr_logger *log,
                                 struct oxr_session *sess,
@@ -1578,7 +1725,6 @@ oxr_session_get_visibility_mask(struct oxr_logger *log,
 	struct oxr_system *sys = sess->sys;
 	struct xrt_device *xdev = GET_STATIC_XDEV_BY_ROLE(sess->sys, head);
 	enum xrt_visibility_mask_type type = convert_mask_type(visibilityMaskType);
-	xrt_result_t xret;
 
 	assert(viewIndex < ARRAY_SIZE(sys->visibility_mask));
 
@@ -1593,13 +1739,17 @@ oxr_session_get_visibility_mask(struct oxr_logger *log,
 
 	// If we didn't have any cached mask get it.
 	if (mask == NULL) {
-		xret = xrt_device_get_visibility_mask(xdev, type, viewIndex, &mask);
-		if (xret == XRT_ERROR_NOT_IMPLEMENTED && xdev->hmd != NULL) {
-			const struct xrt_fov fov = xdev->hmd->distortion.fov[viewIndex];
-			u_visibility_mask_get_default(type, &fov, &mask);
-			xret = XRT_SUCCESS;
+		if (is_emulated_quad_inset_view(xdev, viewIndex)) {
+			u_visibility_mask_get_noop(type, &mask);
+		} else {
+			xrt_result_t xret = xrt_device_get_visibility_mask(xdev, type, viewIndex, &mask);
+			if (xret == XRT_ERROR_NOT_IMPLEMENTED && xdev->hmd != NULL) {
+				const struct xrt_fov fov = xdev->hmd->distortion.fov[viewIndex];
+				u_visibility_mask_get_default(type, &fov, &mask);
+			} else {
+				OXR_CHECK_XRET(log, sess, xret, get_visibility_mask);
+			}
 		}
-		OXR_CHECK_XRET(log, sess, xret, get_visibility_mask);
 		sys->visibility_mask[viewIndex] = mask;
 	}
 

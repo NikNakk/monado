@@ -1,10 +1,12 @@
 // Copyright 2018-2024, Collabora, Ltd.
 // Copyright 2023-2026, NVIDIA CORPORATION.
+// Copyright 2026, Beyley Cardellio
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
  * @brief  The objects representing OpenXR handles, and prototypes for internal functions used in the state tracker.
  * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Beyley Cardellio <ep1cm1n10n123@gmail.com>
  * @author Korcan Hussein <korcan.hussein@collabora.com>
  * @ingroup oxr_main
  */
@@ -33,6 +35,7 @@
 
 #include "oxr_extension_support.h"
 #include "oxr_defines.h"
+#include "oxr_handle_base.h"
 #include "oxr_frame_sync.h"
 #include "oxr_forward_declarations.h"
 #include "oxr_refcounted.h"
@@ -110,16 +113,7 @@ extern "C" {
  */
 
 
-#define XRT_MAX_HANDLE_CHILDREN 256
 #define OXR_MAX_BINDINGS_PER_ACTION 32
-
-/*!
- * Function pointer type for a handle destruction function.
- *
- * @relates oxr_handle_base
- */
-typedef XrResult (*oxr_handle_destroyer)(struct oxr_logger *log, struct oxr_handle_base *hb);
-
 
 
 /*
@@ -167,29 +161,6 @@ xr_action_type_to_str(XrActionType type)
 	// clang-format on
 }
 
-/*
- *
- * oxr_handle_base.c
- *
- */
-
-/*!
- * Destroy the handle's object, as well as all child handles recursively.
- *
- * This should be how all handle-associated objects are destroyed.
- *
- * @public @memberof oxr_handle_base
- */
-XrResult
-oxr_handle_destroy(struct oxr_logger *log, struct oxr_handle_base *hb);
-
-/*!
- * Returns a human-readable label for a handle state.
- *
- * @relates oxr_handle_base
- */
-const char *
-oxr_handle_state_to_string(enum oxr_handle_state state);
 
 /*!
  *
@@ -734,6 +705,9 @@ oxr_system_get_full_body_tracking_meta_support(struct oxr_logger *log, struct ox
 bool
 oxr_system_get_body_tracking_calibration_meta_support(struct oxr_logger *log, struct oxr_instance *inst);
 
+bool
+oxr_system_get_body_tracking_fidelity_meta_support(struct oxr_logger *log, struct oxr_instance *inst);
+
 /*
  *
  * oxr_event.cpp
@@ -840,6 +814,12 @@ oxr_xdev_list_space_create(struct oxr_logger *log,
                            const XrCreateXDevSpaceInfoMNDX *createInfo,
                            uint32_t index,
                            struct oxr_space **out_space);
+
+bool
+oxr_xdev_list_get_xdev(struct oxr_logger *log,
+                       struct oxr_xdev_list *xdl,
+                       XrXDevIdMNDX id,
+                       struct xrt_device **out_xdev);
 
 #endif // OXR_HAVE_MNDX_xdev_space
 
@@ -1001,6 +981,12 @@ oxr_session_populate_egl(struct oxr_logger *log,
                          XrGraphicsBindingEGLMNDX const *next,
                          struct oxr_session *sess);
 
+XrResult
+oxr_egl_get_device(struct oxr_logger *log,
+                   struct oxr_system *sys,
+                   PFN_xrEglGetProcAddressMNDX getProcAddress,
+                   EGLDeviceEXT *out_egl_device);
+
 #endif
 
 /*
@@ -1102,38 +1088,6 @@ oxr_swapchain_d3d12_create(struct oxr_logger *,
 
 
 /*!
- * Used to hold diverse child handles and ensure orderly destruction.
- *
- * Each object referenced by an OpenXR handle should have one of these as its
- * first element, thus "extending" this class.
- */
-struct oxr_handle_base
-{
-	//! Magic (per-handle-type) value for debugging.
-	uint64_t debug;
-
-	/*!
-	 * Pointer to this object's parent handle holder, if any.
-	 */
-	struct oxr_handle_base *parent;
-
-	/*!
-	 * Array of children, if any.
-	 */
-	struct oxr_handle_base *children[XRT_MAX_HANDLE_CHILDREN];
-
-	/*!
-	 * Current handle state.
-	 */
-	enum oxr_handle_state state;
-
-	/*!
-	 * Destroy the object this handle refers to.
-	 */
-	oxr_handle_destroyer destroy;
-};
-
-/*!
  * Holds the properties that a system supports for a view configuration type.
  *
  * @relates oxr_system
@@ -1187,7 +1141,7 @@ struct oxr_system
 	XrReferenceSpaceType reference_spaces[5];
 	uint32_t reference_space_count;
 
-	struct xrt_visibility_mask *visibility_mask[2];
+	struct xrt_visibility_mask *visibility_mask[XRT_MAX_COMPOSITOR_VIEW_CONFIGS_VIEW_COUNT];
 
 #ifdef OXR_HAVE_MNDX_xdev_space
 	bool supports_xdev_space;
@@ -1246,6 +1200,8 @@ struct oxr_extension_status
 };
 #undef MAKE_EXT_STATUS
 
+#define XRT_MAX_DEBUG_MESSENGERS 256
+
 /*!
  * Main object that ties everything together.
  *
@@ -1257,7 +1213,7 @@ struct oxr_extension_status
 struct oxr_instance
 {
 	//! Common structure for things referred to by OpenXR handles.
-	struct oxr_handle_base handle;
+	struct oxr_handle_parent_base handle;
 
 	struct u_debug_gui *debug_ui;
 
@@ -1337,6 +1293,12 @@ struct oxr_instance
 		 */
 		bool disable_vulkan_format_depth_stencil;
 
+		/*!
+		 * Disable the listing of quad views as a supported view config,
+		 * the extensions are still exposed.
+		 */
+		bool disable_quad_views;
+
 		//! Unreal 4 has a bug calling xrEndSession; the function should just exit
 		bool skip_end_session;
 
@@ -1358,10 +1320,17 @@ struct oxr_instance
 		 * causing most of the game to render as black, only showing glowing parts of the image.
 		 */
 		bool no_texture_source_alpha;
+
+		/*!
+		 * Don't return XR_ERROR_VALIDATION_FAILURE if an
+		 * application sets unsupported usage flags when
+		 * calling xrCreateSwapchain.
+		 */
+		bool no_usage_bit_validation_in_create_swapchain;
 	} quirks;
 
 	//! Debug messengers
-	struct oxr_debug_messenger *messengers[XRT_MAX_HANDLE_CHILDREN];
+	struct oxr_debug_messenger *messengers[XRT_MAX_DEBUG_MESSENGERS];
 
 	bool lifecycle_verbose;
 	bool debug_views;
@@ -1397,7 +1366,7 @@ struct oxr_instance
 struct oxr_session
 {
 	//! Common structure for things referred to by OpenXR handles.
-	struct oxr_handle_base handle;
+	struct oxr_handle_parent_base handle;
 	struct oxr_system *sys;
 
 	//! What graphics type was this session created with.
@@ -1421,6 +1390,9 @@ struct oxr_session
 	 * configuration the application is submitting it's frame in.
 	 */
 	XrViewConfigurationType current_view_config_type;
+
+	//! State of the head's XRT_INPUT_GENERIC_HEAD_DETECT input, for oxr_poll_event.
+	bool presence;
 
 	/*!
 	 * There is a extra state between xrBeginSession has been called and
@@ -1805,6 +1777,7 @@ oxr_space_type_is_reference(enum oxr_space_type space_type)
 	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_MSFT:
 	case OXR_SPACE_TYPE_REFERENCE_COMBINED_EYE_VARJO:
 	case OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML:
+	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_ANDROID:
 		// These are reference spaces.
 		return true;
 
@@ -2003,7 +1976,7 @@ struct oxr_action_set_ref
 struct oxr_action_set
 {
 	//! Common structure for things referred to by OpenXR handles.
-	struct oxr_handle_base handle;
+	struct oxr_handle_parent_base handle;
 
 	//! Owner of this action set.
 	struct oxr_instance *inst;
@@ -2265,8 +2238,8 @@ struct oxr_body_tracker_fb
 	//! Owner of this face tracker.
 	struct oxr_session *sess;
 
-	//! xrt_device backing this face tracker
-	struct xrt_device *xdev;
+	//! xrt_body_tracker backing this body tracker
+	struct xrt_body_tracker *xbt;
 
 	//! Type of the body joint set e.g. XR_FB_body_tracking or XR_META_body_tracking_full_body
 	enum xrt_body_joint_set_type_fb joint_set_type;
@@ -2308,8 +2281,8 @@ struct oxr_body_tracker_bd
 	//! Owner of this body tracker.
 	struct oxr_session *sess;
 
-	//! xrt_device backing this body tracker
-	struct xrt_device *xdev;
+	//! xrt_body_tracker backing this body tracker
+	struct xrt_body_tracker *xbt;
 
 	//! Type of the body joint set (with or without arms)
 	enum xrt_body_joint_set_type_bd joint_set_type;
@@ -2482,7 +2455,7 @@ XrResult
 oxr_future_create(struct oxr_logger *log,
                   struct oxr_session *sess,
                   struct xrt_future *xft,
-                  struct oxr_handle_base *parent_handle,
+                  struct oxr_handle_parent_base *parent_handle,
                   struct oxr_future_ext **out_oxr_future_ext);
 
 XrResult

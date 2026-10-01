@@ -8,7 +8,6 @@
  * @ingroup oxr_main
  */
 
-
 #include "xrt/xrt_space.h"
 
 #include "math/m_api.h"
@@ -19,7 +18,7 @@
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
-#include "oxr_handle.h"
+#include "oxr_handle_base.h"
 #include "oxr_chain.h"
 #include "oxr_pretty_print.h"
 #include "oxr_conversions.h"
@@ -118,6 +117,7 @@ get_xrt_space(struct oxr_logger *log, struct oxr_space *spc, struct xrt_space **
 	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_MSFT: xspace = spc->sess->sys->xso->semantic.unbounded; break;
 	case OXR_SPACE_TYPE_REFERENCE_COMBINED_EYE_VARJO: xspace = NULL; break;
 	case OXR_SPACE_TYPE_REFERENCE_LOCALIZATION_MAP_ML: xspace = NULL; break;
+	case OXR_SPACE_TYPE_REFERENCE_UNBOUNDED_ANDROID: xspace = NULL; break;
 	}
 
 	if (xspace == NULL) {

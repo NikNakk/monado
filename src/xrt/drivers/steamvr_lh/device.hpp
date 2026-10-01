@@ -66,17 +66,16 @@ public:
 
 class Device : public xrt_device
 {
-
 public:
 	m_relation_history *relation_hist;
+
+	//! The component handles that are attached to this device.
+	std::vector<vr::VRInputComponentHandle_t> handles;
 
 	virtual ~Device();
 
 	xrt_input *
 	get_input_from_name(std::string_view name);
-
-	xrt_result_t
-	update_inputs();
 
 	void
 	update_pose(const vr::DriverPose_t &newPose) const;
@@ -97,6 +96,15 @@ public:
 
 	xrt_result_t
 	get_battery_status(bool *out_present, bool *out_charging, float *out_charge);
+
+	//! Call with `devices_mut` held.
+	inline vr::VRInputComponentHandle_t
+	new_input_handle_locked()
+	{
+		vr::VRInputComponentHandle_t h = ++this->ctx->input.next_handle;
+		this->handles.push_back(h);
+		return h;
+	}
 
 protected:
 	Device(const DeviceBuilder &builder);
@@ -124,9 +132,6 @@ protected:
 
 private:
 	vr::ITrackedDeviceServerDriver *driver;
-	uint64_t current_frame{0};
-
-	std::mutex frame_mutex;
 
 	void
 	init_chaperone(const std::string &steam_install);
@@ -163,9 +168,10 @@ public:
 		float max{1.0f};
 	};
 
-	struct VivePro2Data vp2
-	{
-	};
+	// @todo Remove when clang-format is updated in CI
+	// clang-format off
+	struct VivePro2Data vp2{};
+	// clang-format on
 
 	HmdDevice(const DeviceBuilder &builder);
 
@@ -253,8 +259,8 @@ public:
 	void
 	set_skeleton(std::span<const vr::VRBoneTransform_t> bones, xrt_hand hand, bool is_simulated, const char *path);
 
-	void
-	set_active_hand(xrt_hand hand);
+	xrt_result_t
+	notify_chirality(bool has_chirality, xrt_hand chirality);
 
 protected:
 	void
@@ -265,6 +271,7 @@ protected:
 
 private:
 	vr::VRInputComponentHandle_t haptic_handle{0};
+	size_t latest_haptic_event{0};
 	std::unique_ptr<xrt_output> output{nullptr};
 	bool has_hand_tracking{false};
 	xrt_hand skeleton_hand = XRT_HAND_LEFT;

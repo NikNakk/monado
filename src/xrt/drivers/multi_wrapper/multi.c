@@ -1,4 +1,5 @@
 // Copyright 2021, Collabora, Ltd.
+// Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -13,6 +14,8 @@
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 #include "util/u_device.h"
+#include "util/u_device_id.h"
+#include "util/u_var.h"
 
 #include "multi.h"
 
@@ -135,6 +138,8 @@ destroy(struct xrt_device *xdev)
 	// we replaced the target device with us, but no the tracker
 	// xrt_device_destroy(&d->tracking_override.tracker);
 
+	u_var_remove_root(d);
+
 	free(d);
 }
 
@@ -158,7 +163,7 @@ get_hand_tracking(struct xrt_device *xdev,
 	struct xrt_space_relation tracker_relation;
 	xret =
 	    xrt_device_get_tracked_pose(tracker, d->tracking_override.input_name, *out_timestamp_ns, &tracker_relation);
-	U_LOG_CHK_AND_RET(d->log_level, xret, "xrt_device_get_hand_tracking");
+	U_LOG_CHK_AND_RET(d->log_level, xret, "xrt_device_get_tracked_pose");
 
 	switch (d->override_type) {
 	case XRT_TRACKING_OVERRIDE_DIRECT: direct_override(d, &tracker_relation, &out_value->hand_pose); break;
@@ -230,7 +235,7 @@ compute_distortion(struct xrt_device *xdev, uint32_t view, float u, float v, str
 {
 	struct multi_device *d = (struct multi_device *)xdev;
 	struct xrt_device *target = d->tracking_override.target;
-	return target->compute_distortion(target, view, u, v, result);
+	return xrt_device_compute_distortion(target, view, u, v, result);
 }
 
 static xrt_result_t
@@ -239,6 +244,14 @@ update_inputs(struct xrt_device *xdev)
 	struct multi_device *d = (struct multi_device *)xdev;
 	struct xrt_device *target = d->tracking_override.target;
 	return xrt_device_update_inputs(target);
+}
+
+static xrt_result_t
+get_battery_status(struct xrt_device *xdev, bool *out_present, bool *out_charging, float *out_charge)
+{
+	struct multi_device *d = (struct multi_device *)xdev;
+	struct xrt_device *target = d->tracking_override.target;
+	return xrt_device_get_battery_status(target, out_present, out_charging, out_charge);
 }
 
 
@@ -261,6 +274,9 @@ multi_create_tracking_override(enum xrt_tracking_override_type override_type,
 	// mimic the tracking override target
 	d->base = *tracking_override_target;
 
+	// The wrapper is a new device and needs its own per-process unique ID.
+	u_device_id_assign(&d->base);
+
 	// but take orientation and position tracking capabilities from tracker
 	d->base.supported.orientation_tracking = tracking_override_tracker->supported.orientation_tracking;
 	d->base.supported.position_tracking = tracking_override_tracker->supported.position_tracking;
@@ -278,13 +294,17 @@ multi_create_tracking_override(enum xrt_tracking_override_type override_type,
 	d->tracking_override.tracker = tracking_override_tracker;
 	d->tracking_override.input_name = tracking_override_input_name;
 
-	d->base.get_tracked_pose = get_tracked_pose;
-	d->base.destroy = destroy;
+	u_device_populate_function_pointers(&d->base, get_tracked_pose, destroy);
+
 	d->base.get_hand_tracking = get_hand_tracking;
 	d->base.set_output = set_output;
 	d->base.update_inputs = update_inputs;
 	d->base.compute_distortion = compute_distortion;
 	d->base.get_view_poses = get_view_poses;
+	d->base.get_battery_status = get_battery_status;
+
+	u_var_add_root(d, "Multi Tracking Override", true);
+	u_var_add_pose(d, &d->tracking_override.offset_inv, "Offset Inverse");
 
 	return &d->base;
 }

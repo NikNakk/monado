@@ -414,6 +414,10 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrGetD3D12GraphicsRequirementsKHR, KHR_D3D12_enable);
 #endif // OXR_HAVE_KHR_D3D12_enable
 
+#ifdef OXR_HAVE_MND_query_egl_device
+	ENTRY_IF_EXT(xrGetSystemEGLDeviceMND, MND_query_egl_device);
+#endif // OXR_HAVE_MND_query_egl_device
+
 #ifdef OXR_HAVE_HTC_facial_tracking
 	ENTRY_IF_EXT(xrCreateFacialTrackerHTC, HTC_facial_tracking);
 	ENTRY_IF_EXT(xrDestroyFacialTrackerHTC, HTC_facial_tracking);
@@ -456,6 +460,10 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrResetBodyTrackingCalibrationMETA, META_body_tracking_calibration);
 	ENTRY_IF_EXT(xrSuggestBodyTrackingCalibrationOverrideMETA, META_body_tracking_calibration);
 #endif // OXR_HAVE_META_body_tracking_calibration
+
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+	ENTRY_IF_EXT(xrRequestBodyTrackingFidelityMETA, META_body_tracking_fidelity);
+#endif
 
 #ifdef OXR_HAVE_EXT_future
 	ENTRY_IF_EXT(xrPollFutureEXT, EXT_future);

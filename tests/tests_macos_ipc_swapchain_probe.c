@@ -74,8 +74,11 @@ main(void)
 		goto out;
 	}
 
-	const struct xrt_view_config *view_config = &xsysc->info.view_configs[0];
-	if (xsysc->info.view_config_count == 0 || view_config->view_count < 2) {
+	struct xrt_view_config view_config_storage = {0};
+	const struct xrt_view_config *view_config = &view_config_storage;
+	if (xsysc->info.view_type_count == 0 ||
+	    xrt_syscomp_get_view_config(xsysc, xsysc->info.view_types[0], &view_config_storage) != XRT_SUCCESS ||
+	    view_config->view_count < 2) {
 		fprintf(stderr, "No stereo view configuration available.\n");
 		goto out;
 	}

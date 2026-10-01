@@ -420,7 +420,7 @@ hololens_handle_sensors_avg(struct wmr_hmd *wh, const unsigned char *buffer, int
 	os_mutex_unlock(&wh->fusion.mutex);
 
 	// SLAM tracking
-	wmr_source_push_imu_packet(wh->tracking.source, t, avg_raw_accel, avg_raw_gyro);
+	wmr_source_push_imu_packet(wh->tracking.source, WMR_HMD_IMU_INDEX, t, avg_raw_accel, avg_raw_gyro);
 }
 
 static void
@@ -470,7 +470,7 @@ hololens_handle_sensors_all(struct wmr_hmd *wh, const unsigned char *buffer, int
 	// SLAM tracking
 	for (int i = 0; i < IMU_SAMPLES_PER_PACKET; i++) {
 		timepoint_ns t = wh->packet.gyro_timestamp[i] * WMR_MS_HOLOLENS_NS_PER_TICK;
-		wmr_source_push_imu_packet(wh->tracking.source, t, raw_accel[i], raw_gyro[i]);
+		wmr_source_push_imu_packet(wh->tracking.source, WMR_HMD_IMU_INDEX, t, raw_accel[i], raw_gyro[i]);
 	}
 }
 
@@ -1798,15 +1798,18 @@ get_compositor_info_wmr(struct xrt_device *xdev,
 	struct wmr_hmd *wh = wmr_hmd(xdev);
 
 	double scanout_multiplier = 0.0;
+	enum xrt_panel_refresh_type refresh_mode = XRT_PANEL_REFRESH_TYPE_GLOBAL;
 	enum xrt_scanout_direction scanout_direction = XRT_SCANOUT_DIRECTION_NONE;
 
 	if (wh->hmd_desc->hmd_type == WMR_HEADSET_SAMSUNG_800ZAA ||
 	    wh->hmd_desc->hmd_type == WMR_HEADSET_SAMSUNG_XE700X3AI) {
+		refresh_mode = XRT_PANEL_REFRESH_TYPE_ROLLING;
 		scanout_direction = XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM;
 		scanout_multiplier = 1600.0 / 1624.0;
 	}
 
 	*out_info = (struct xrt_device_compositor_info){
+	    .panel_refresh_type = refresh_mode,
 	    .scanout_direction = scanout_direction,
 	    .scanout_time_ns = (int64_t)(mode->frame_interval_ns * scanout_multiplier),
 	};
@@ -1930,7 +1933,7 @@ wmr_hmd_create(enum wmr_headset_type hmd_type,
 		}
 
 		if (cur->dev_id_str && strncmp(wh->config_hdr.name, cur->dev_id_str, 64) == 0) {
-			hmd_type = cur->hmd_type;
+			assert(hmd_type == cur->hmd_type);
 			wh->hmd_desc = cur;
 			break;
 		}

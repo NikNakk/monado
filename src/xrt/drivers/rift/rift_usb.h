@@ -13,6 +13,9 @@
 int
 rift_get_lens_distortion(struct rift_hmd *hmd, struct rift_lens_distortion_report *lens_distortion);
 
+int
+rift_get_position_calibration_report(struct rift_hmd *hmd, struct rift_position_calibration_report *position_report);
+
 void
 rift_parse_distortion_report(struct rift_lens_distortion_report *report, struct rift_lens_distortion *out);
 
@@ -30,6 +33,9 @@ rift_get_tracking_report(struct rift_hmd *hmd, struct rift_tracking_report *trac
 
 int
 rift_set_tracking(struct rift_hmd *hmd, struct rift_tracking_report *tracking);
+
+int
+rift_set_custom_pattern(struct rift_hmd *hmd, struct rift_custom_pattern_report *pattern);
 
 int
 rift_get_display_info(struct rift_hmd *hmd, struct rift_display_info_report *display_info);

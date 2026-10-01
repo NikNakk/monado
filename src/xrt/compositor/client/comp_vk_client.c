@@ -9,12 +9,15 @@
  * @ingroup comp_client
  */
 
+#include "vk/vk_compositor_flags.h"
+
 #include "util/u_misc.h"
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
 #include "util/u_debug.h"
 
 #include "comp_vk_client.h"
+
 
 // Prefixed with OXR since the only user right now is the OpenXR state tracker.
 DEBUG_GET_ONCE_LOG_OPTION(vulkan_log, "OXR_VULKAN_LOG", U_LOGGING_INFO)
@@ -269,6 +272,19 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
 	struct client_vk_compositor *c = sc->c;
 	struct vk_bundle *vk = &c->vk;
+
+	vk_cmd_pool_lock(&c->pool);
+	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
+		if (sc->acquire[i] != VK_NULL_HANDLE) {
+			vk->vkFreeCommandBuffers(vk->device, c->pool.pool, 1, &sc->acquire[i]);
+			sc->acquire[i] = VK_NULL_HANDLE;
+		}
+		if (sc->release[i] != VK_NULL_HANDLE) {
+			vk->vkFreeCommandBuffers(vk->device, c->pool.pool, 1, &sc->release[i]);
+			sc->release[i] = VK_NULL_HANDLE;
+		}
+	}
+	vk_cmd_pool_unlock(&c->pool);
 
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
 		if (sc->base.images[i] != VK_NULL_HANDLE) {
@@ -669,8 +685,12 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	struct xrt_swapchain *xsc = &xscn->base;
 
 	VkAccessFlags barrier_access_mask = vk_csci_get_barrier_access_mask(xinfo.bits);
+
 	VkImageLayout barrier_optimal_layout = vk_csci_get_barrier_optimal_layout(xinfo.format);
+	assert(barrier_optimal_layout != VK_IMAGE_LAYOUT_UNDEFINED);
+
 	VkImageAspectFlags barrier_aspect_mask = vk_csci_get_barrier_aspect_mask(xinfo.format);
+	assert(barrier_aspect_mask != 0);
 
 	struct client_vk_swapchain *sc = U_TYPED_CALLOC(struct client_vk_swapchain);
 	sc->base.base.destroy = client_vk_swapchain_destroy;
@@ -817,35 +837,35 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	VkResult ret;
 	struct client_vk_compositor *c = U_TYPED_CALLOC(struct client_vk_compositor);
 
-	c->base.base.get_swapchain_create_properties = client_vk_compositor_get_swapchain_create_properties;
-	c->base.base.create_swapchain = client_vk_swapchain_create;
-	c->base.base.create_passthrough = client_vk_compositor_passthrough_create;
-	c->base.base.create_passthrough_layer = client_vk_compositor_passthrough_layer_create;
-	c->base.base.destroy_passthrough = client_vk_compositor_passthrough_destroy;
-	c->base.base.begin_session = client_vk_compositor_begin_session;
-	c->base.base.end_session = client_vk_compositor_end_session;
-	c->base.base.wait_frame = client_vk_compositor_wait_frame;
-	c->base.base.begin_frame = client_vk_compositor_begin_frame;
-	c->base.base.discard_frame = client_vk_compositor_discard_frame;
-	c->base.base.layer_begin = client_vk_compositor_layer_begin;
-	c->base.base.layer_projection = client_vk_compositor_layer_projection;
-	c->base.base.layer_projection_depth = client_vk_compositor_layer_stereo_projection_depth;
-	c->base.base.layer_quad = client_vk_compositor_layer_quad;
-	c->base.base.layer_cube = client_vk_compositor_layer_cube;
-	c->base.base.layer_cylinder = client_vk_compositor_layer_cylinder;
-	c->base.base.layer_equirect1 = client_vk_compositor_layer_equirect1;
-	c->base.base.layer_equirect2 = client_vk_compositor_layer_equirect2;
-	c->base.base.layer_passthrough = client_vk_compositor_layer_passthrough;
-	c->base.base.layer_commit = client_vk_compositor_layer_commit;
-	c->base.base.destroy = client_vk_compositor_destroy;
+	c->base.get_swapchain_create_properties = client_vk_compositor_get_swapchain_create_properties;
+	c->base.create_swapchain = client_vk_swapchain_create;
+	c->base.create_passthrough = client_vk_compositor_passthrough_create;
+	c->base.create_passthrough_layer = client_vk_compositor_passthrough_layer_create;
+	c->base.destroy_passthrough = client_vk_compositor_passthrough_destroy;
+	c->base.begin_session = client_vk_compositor_begin_session;
+	c->base.end_session = client_vk_compositor_end_session;
+	c->base.wait_frame = client_vk_compositor_wait_frame;
+	c->base.begin_frame = client_vk_compositor_begin_frame;
+	c->base.discard_frame = client_vk_compositor_discard_frame;
+	c->base.layer_begin = client_vk_compositor_layer_begin;
+	c->base.layer_projection = client_vk_compositor_layer_projection;
+	c->base.layer_projection_depth = client_vk_compositor_layer_stereo_projection_depth;
+	c->base.layer_quad = client_vk_compositor_layer_quad;
+	c->base.layer_cube = client_vk_compositor_layer_cube;
+	c->base.layer_cylinder = client_vk_compositor_layer_cylinder;
+	c->base.layer_equirect1 = client_vk_compositor_layer_equirect1;
+	c->base.layer_equirect2 = client_vk_compositor_layer_equirect2;
+	c->base.layer_passthrough = client_vk_compositor_layer_passthrough;
+	c->base.layer_commit = client_vk_compositor_layer_commit;
+	c->base.destroy = client_vk_compositor_destroy;
 
 	c->xcn = xcn;
 	// passthrough our formats from the native compositor to the client
 	for (uint32_t i = 0; i < xcn->base.info.format_count; i++) {
-		c->base.base.info.formats[i] = xcn->base.info.formats[i];
+		c->base.info.formats[i] = xcn->base.info.formats[i];
 	}
 
-	c->base.base.info.format_count = xcn->base.info.format_count;
+	c->base.info.format_count = xcn->base.info.format_count;
 	c->renderdoc_enabled = renderdoc_enabled;
 
 	// Default to info.
@@ -896,7 +916,7 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 		struct vk_bundle *vk = &c->vk;
 		VkPhysicalDeviceProperties pdp;
 		vk->vkGetPhysicalDeviceProperties(vk->physical_device, &pdp);
-		c->base.base.info.max_texture_size = pdp.limits.maxImageDimension2D;
+		c->base.info.max_texture_size = pdp.limits.maxImageDimension2D;
 	}
 
 	if (!c->renderdoc_enabled) {
@@ -928,4 +948,59 @@ err_free:
 	free(c);
 
 	return NULL;
+}
+
+xrt_result_t
+client_vk_compositor_blit_to_swapchain(struct client_vk_compositor *c,
+                                       struct xrt_swapchain *xsc,
+                                       const struct vk_cmd_first_mip_image *src_image,
+                                       const struct vk_cmd_blit_image_params *src_params,
+                                       uint32_t dst_index,
+                                       const struct vk_cmd_blit_image_params *dst_params)
+{
+	COMP_TRACE_MARKER();
+
+	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
+	struct vk_bundle *vk = &c->vk;
+	VkCommandBuffer cmd_buffer = VK_NULL_HANDLE;
+	VkResult ret;
+
+	vk_cmd_pool_lock(&c->pool);
+
+	ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, 0, &cmd_buffer);
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vk_cmd_pool_create_and_begin_cmd_buffer_locked: %s", vk_result_string(ret));
+		vk_cmd_pool_unlock(&c->pool);
+		return XRT_ERROR_VULKAN;
+	}
+
+	struct vk_cmd_image_transfer_info blit_info = {
+	    .src =
+	        {
+	            .params = *src_params,
+	            .fm_image = *src_image,
+	        },
+	    .dst =
+	        {
+	            .params = *dst_params,
+	            .fm_image =
+	                {
+	                    .base_array_layer = 0,
+	                    .aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT,
+	                    .image = sc->base.images[dst_index],
+	                },
+	        },
+	};
+
+	vk_cmd_blit_image_locked(vk, cmd_buffer, &blit_info);
+
+	ret = vk_cmd_pool_end_submit_wait_and_free_cmd_buffer_locked(vk, &c->pool, cmd_buffer);
+	vk_cmd_pool_unlock(&c->pool);
+
+	if (ret != VK_SUCCESS) {
+		VK_ERROR(vk, "vk_cmd_pool_end_submit_wait_and_free_cmd_buffer_locked: %s", vk_result_string(ret));
+		return XRT_ERROR_VULKAN;
+	}
+
+	return XRT_SUCCESS;
 }

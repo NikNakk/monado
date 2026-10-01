@@ -412,7 +412,7 @@ oxr_xrGetVulkanGraphicsDevice2KHR(XrInstance instance,
 
 	struct oxr_instance *inst;
 	struct oxr_logger log;
-	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetVulkanGraphicsDeviceKHR");
+	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetVulkanGraphicsDevice2KHR");
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, getInfo, XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR);
 
 	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, getInfo->systemId, sys);
@@ -450,7 +450,7 @@ oxr_xrGetVulkanGraphicsRequirements2KHR(XrInstance instance,
 
 	struct oxr_instance *inst;
 	struct oxr_logger log;
-	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetVulkanGraphicsRequirementsKHR");
+	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetVulkanGraphicsRequirements2KHR");
 	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, systemId, sys);
 	/* XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN2_KHR aliased to
 	 * XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN_KHR */
@@ -505,7 +505,7 @@ oxr_xrCreateVulkanDeviceKHR(XrInstance instance,
 	struct oxr_instance *inst;
 	struct oxr_logger log;
 
-	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetVulkanGraphicsDeviceKHR");
+	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrCreateVulkanDeviceKHR");
 	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR);
 
 	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, createInfo->systemId, sys);
@@ -534,6 +534,28 @@ oxr_xrCreateVulkanDeviceKHR(XrInstance instance,
 	return oxr_vk_create_vulkan_device(&log, sys, createInfo, vulkanDevice, vulkanResult);
 }
 #endif
+
+
+#ifdef OXR_HAVE_MND_query_egl_device
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetSystemEGLDeviceMND(XrInstance instance, const XrSystemEGLDeviceGetInfoMND *info, XrSystemEGLDeviceMND *device)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_instance *inst;
+	struct oxr_logger log;
+	OXR_VERIFY_INSTANCE_AND_INIT_LOG(&log, instance, inst, "xrGetSystemEGLDeviceMND");
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, info, XR_TYPE_SYSTEM_EGL_DEVICE_GET_INFO_MND);
+	OXR_VERIFY_SYSTEM_AND_GET(&log, inst, info->systemId, sys);
+	OXR_VERIFY_ARG_NOT_NULL(&log, info->getProcAddress);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, device, XR_TYPE_SYSTEM_EGL_DEVICE_MND);
+	OXR_VERIFY_XSYSC(&log, sys);
+
+	return oxr_egl_get_device(&log, sys, info->getProcAddress, &device->eglDevice);
+}
+
+#endif // OXR_HAVE_MND_query_egl_device
 
 
 /*

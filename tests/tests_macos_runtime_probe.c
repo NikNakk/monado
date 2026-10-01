@@ -68,14 +68,17 @@ main(int argc, char **argv)
 		goto out;
 	}
 
-	const struct xrt_view_config *view_config = &xsysc->info.view_configs[0];
-	if (xsysc->info.view_config_count == 0 || view_config->view_count < 2) {
+	struct xrt_view_config view_config_storage = {0};
+	const struct xrt_view_config *view_config = &view_config_storage;
+	if (xsysc->info.view_type_count == 0 ||
+	    xrt_syscomp_get_view_config(xsysc, xsysc->info.view_types[0], &view_config_storage) != XRT_SUCCESS ||
+	    view_config->view_count < 2) {
 		fprintf(stderr, "No stereo view configuration available.\n");
 		goto out;
 	}
 
 	fprintf(stdout, "Head device: %s\n", xsysd->static_roles.head->str);
-	fprintf(stdout, "View config count: %u\n", xsysc->info.view_config_count);
+	fprintf(stdout, "View type count: %u\n", xsysc->info.view_type_count);
 	fprintf(stdout, "Recommended view size: %ux%u\n",
 	        view_config->views[0].recommended.width_pixels,
 	        view_config->views[0].recommended.height_pixels);

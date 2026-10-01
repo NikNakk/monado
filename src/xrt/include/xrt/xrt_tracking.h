@@ -11,7 +11,12 @@
 #pragma once
 
 #define XRT_TRACKING_NAME_LEN 256
-#define XRT_TRACKING_MAX_SLAM_CAMS 5
+
+#define XRT_TRACKING_MAX_CAMS 8
+#define XRT_TRACKING_FOR_EACH_CAM(_) _(0) _(1) _(2) _(3) _(4) _(5) _(6) _(7)
+
+#define XRT_TRACKING_MAX_IMUS 3
+#define XRT_TRACKING_FOR_EACH_IMU(_) _(0) _(1) _(2)
 
 #include "xrt/xrt_defines.h"
 
@@ -50,7 +55,7 @@ enum xrt_tracking_type
 	//! The device(s) are tracked by RGB camera(s).
 	XRT_TRACKING_TYPE_RGB,
 
-	//! The device(s) are tracked by Ligthhouse
+	//! The device(s) are tracked by Lighthouse.
 	XRT_TRACKING_TYPE_LIGHTHOUSE,
 
 	//! The device(s) are tracked by magnetic fields, eg. Razer Hydra.
@@ -58,6 +63,9 @@ enum xrt_tracking_type
 
 	//! The device(s) are tracked by external SLAM
 	XRT_TRACKING_TYPE_EXTERNAL_SLAM,
+
+	//! The device(s) are tracked through a constellation of lights as seen by cameras.
+	XRT_TRACKING_TYPE_CONSTELLATION,
 
 	//! The device(s) are tracked by other methods.
 	XRT_TRACKING_TYPE_OTHER,
@@ -156,7 +164,7 @@ struct xrt_hand_masks_sample
 			bool enabled;             //!< Whether a mask for this hand is being reported
 			struct xrt_rect_f32 rect; //!< The mask itself in pixel coordinates
 		} hands[2];
-	} views[XRT_TRACKING_MAX_SLAM_CAMS];
+	} views[XRT_TRACKING_MAX_CAMS];
 };
 
 /*!
@@ -205,8 +213,9 @@ struct xrt_hand_masks_sink
 struct xrt_slam_sinks
 {
 	int cam_count;
-	struct xrt_frame_sink *cams[XRT_TRACKING_MAX_SLAM_CAMS];
-	struct xrt_imu_sink *imu;
+	int imu_count;
+	struct xrt_frame_sink *cams[XRT_TRACKING_MAX_CAMS];
+	struct xrt_imu_sink *imus[XRT_TRACKING_MAX_IMUS];
 	struct xrt_pose_sink *gt; //!< Can receive ground truth poses if available
 	struct xrt_hand_masks_sink *hand_masks;
 };

@@ -216,6 +216,9 @@ compositor_init_swapchain(struct comp_compositor *c);
 static bool
 compositor_init_renderer(struct comp_compositor *c);
 
+static void
+compositor_session_cleanup(struct comp_compositor *c);
+
 static xrt_result_t
 compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
 {
@@ -228,8 +231,7 @@ compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_sessi
 		    !compositor_init_swapchain(c) ||
 		    !compositor_init_renderer(c)) {
 			COMP_ERROR(c, "Failed to init compositor %p", (void *)c);
-			c->base.base.base.destroy(&c->base.base.base);
-
+			compositor_session_cleanup(c);
 			return XRT_ERROR_VULKAN;
 		}
 		comp_target_set_title(c->target, WINDOW_TITLE);
@@ -246,6 +248,14 @@ compositor_end_session(struct xrt_compositor *xc)
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_DEBUG(c, "END_SESSION");
 
+	compositor_session_cleanup(c);
+
+	return XRT_SUCCESS;
+}
+
+static void
+compositor_session_cleanup(struct comp_compositor *c)
+{
 	if (c->deferred_surface) {
 		// Make sure we don't have anything to destroy.
 		comp_swapchain_shared_garbage_collect(&c->base.cscs);
@@ -255,8 +265,6 @@ compositor_end_session(struct xrt_compositor *xc)
 #endif
 		comp_target_destroy(&c->target);
 	}
-
-	return XRT_SUCCESS;
 }
 
 static xrt_result_t
@@ -418,6 +426,17 @@ can_do_one_projection_layer_fast_path(struct comp_compositor *c)
 
 	enum xrt_layer_type type = layer->data.type;
 
+	// Check if chroma key is active for projection layers
+	if (type == XRT_LAYER_PROJECTION) {
+		if (layer->data.proj.chroma_key.curve > 0.0f) {
+			return false;
+		}
+	} else if (type == XRT_LAYER_PROJECTION_DEPTH) {
+		if (layer->data.depth.chroma_key.curve > 0.0f) {
+			return false;
+		}
+	}
+
 	// Handled by the distortion shader.
 	return type == XRT_LAYER_PROJECTION || //
 	       type == XRT_LAYER_PROJECTION_DEPTH;
@@ -514,7 +533,10 @@ static xrt_result_t
 compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display_refresh_rate_hz)
 {
 #ifdef XRT_OS_ANDROID
+	// @todo Remove when clang-format is updated in CI
+	// clang-format off
 	typedef int32_t (*PF_SETFRAMERATE)(ANativeWindow * window, float frameRate, int8_t compatibility);
+	// clang-format on
 
 	// Note that this will just increment the reference count, rather than actually load it again,
 	// since we are linked for other symbols too.
@@ -564,9 +586,6 @@ compositor_destroy(struct xrt_compositor *xc)
 
 	// Destroy the scratch images fully, we initialized all of them.
 	chl_scratch_fini(&c->scratch);
-
-	// Make sure we are not holding onto any swapchains.
-	u_swapchain_debug_destroy(&c->debug.sc);
 
 	// Make sure we don't have anything to destroy.
 	comp_swapchain_shared_garbage_collect(&c->base.cscs);
@@ -675,6 +694,9 @@ static const char *instance_extensions_common[] = {
 };
 
 static const char *optional_instance_extensions[] = {
+#ifdef VK_KHR_get_surface_capabilities2
+    VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME,
+#endif
 #ifdef VK_EXT_swapchain_colorspace
     VK_EXT_SWAPCHAIN_COLORSPACE_EXTENSION_NAME,
 #endif
@@ -757,8 +779,14 @@ static const char *optional_device_extensions[] = {
 #ifdef VK_KHR_present_id
     VK_KHR_PRESENT_ID_EXTENSION_NAME,
 #endif
+#ifdef VK_KHR_present_id2
+    VK_KHR_PRESENT_ID_2_EXTENSION_NAME,
+#endif
 #ifdef VK_KHR_present_wait
     VK_KHR_PRESENT_WAIT_EXTENSION_NAME,
+#endif
+#ifdef VK_KHR_present_wait2
+    VK_KHR_PRESENT_WAIT_2_EXTENSION_NAME,
 #endif
 #ifdef VK_KHR_format_feature_flags2
     VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME,
@@ -781,6 +809,9 @@ static const char *optional_device_extensions[] = {
 #ifdef VK_EXT_calibrated_timestamps
     VK_EXT_CALIBRATED_TIMESTAMPS_EXTENSION_NAME,
 #endif
+#ifdef VK_KHR_calibrated_timestamps
+    VK_KHR_CALIBRATED_TIMESTAMPS_EXTENSION_NAME,
+#endif
 #ifdef VK_EXT_robustness2
     VK_EXT_ROBUSTNESS_2_EXTENSION_NAME,
 #endif
@@ -793,6 +824,9 @@ static const char *optional_device_extensions[] = {
 #ifdef VK_KHR_portability_subset
     VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
 #endif
+#ifdef VK_KHR_shared_presentable_image
+    VK_KHR_SHARED_PRESENTABLE_IMAGE_EXTENSION_NAME,
+#endif
 };
 
 static bool
@@ -802,8 +836,7 @@ select_instances_extensions(struct comp_compositor *c,
 {
 #ifdef XRT_FEATURE_WINDOW_PEEK
 	if (!comp_window_peek_get_vk_instance_exts(required_builder)) {
-		COMP_ERROR(c, "Failed to get required vulkan instance extensions for peek window.");
-		return false;
+		COMP_WARN(c, "Failed to get vulkan instance extensions for peek window.");
 	}
 #endif
 	return true;
@@ -1220,6 +1253,23 @@ compositor_init_renderer(struct comp_compositor *c)
 	return c->r != NULL;
 }
 
+static xrt_result_t
+compositor_get_view_config(struct xrt_compositor_native *xcn,
+                           enum xrt_view_type view_type,
+                           struct xrt_view_config *out_view_config)
+{
+	struct comp_compositor *c = container_of(xcn, struct comp_compositor, base.base);
+
+	for (uint32_t i = 0; i < c->view_config_count; i++) {
+		if (c->view_configs[i].view_type == view_type) {
+			*out_view_config = c->view_configs[i];
+			return XRT_SUCCESS;
+		}
+	}
+
+	return XRT_ERROR_UNSUPPORTED_VIEW_TYPE;
+}
+
 xrt_result_t
 comp_main_create_system_compositor(struct xrt_device *xdev,
                                    const struct comp_target_factory *ctf,
@@ -1274,9 +1324,6 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 
 	// Init the settings to default.
 	comp_settings_init(&c->settings, xdev);
-
-	// Init this before the renderer.
-	u_swapchain_debug_init(&c->debug.sc);
 
 	// Init these before the renderer, not all might be used.
 	chl_scratch_init(&c->scratch);
@@ -1373,17 +1420,23 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 		uint32_t w_2 = xdev->hmd->views[i].display.w_pixels * 2;
 		uint32_t h_2 = xdev->hmd->views[i].display.h_pixels * 2;
 
-		sys_info->view_configs[0].views[i].recommended.width_pixels  = w;
-		sys_info->view_configs[0].views[i].recommended.height_pixels = h;
-		sys_info->view_configs[0].views[i].recommended.sample_count  = 1;
-		sys_info->view_configs[0].views[i].max.width_pixels          = w_2;
-		sys_info->view_configs[0].views[i].max.height_pixels         = h_2;
-		sys_info->view_configs[0].views[i].max.sample_count          = 1;
+		c->view_configs[0].views[i].recommended.width_pixels  = w;
+		c->view_configs[0].views[i].recommended.height_pixels = h;
+		c->view_configs[0].views[i].recommended.sample_count  = 1;
+		c->view_configs[0].views[i].max.width_pixels          = w_2;
+		c->view_configs[0].views[i].max.height_pixels         = h_2;
+		c->view_configs[0].views[i].max.sample_count          = 1;
 	}
 	// clang-format on
-	sys_info->view_configs[0].view_type = view_type;
-	sys_info->view_configs[0].view_count = view_count;
-	sys_info->view_config_count = 1; // Only one view config for now.
+	c->view_configs[0].view_type = view_type;
+	c->view_configs[0].view_count = view_count;
+	sys_info->view_types[0] = c->view_configs[0].view_type;
+	c->view_config_count = sys_info->view_type_count = 1; // Only one view config for now.
+
+	if (c->settings.use_compute && // Only compute for now.
+	    view_type == XRT_VIEW_TYPE_STEREO) {
+		sys_info->supports_emulated_quad_views_with_inset = true;
+	}
 
 	// If we can add e.g. video pass-through capabilities, we may need to change (augment) this list.
 	// Just copying it directly right now.
@@ -1454,7 +1507,8 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 		}
 	}
 
-	xret = comp_multi_create_system_compositor(&c->base.base, upaf, sys_info, !c->deferred_surface, out_xsysc);
+	xret = comp_multi_create_system_compositor(&c->base.base, upaf, compositor_get_view_config, sys_info,
+	                                           !c->deferred_surface, out_xsysc);
 	if (xret == XRT_SUCCESS) {
 		return xret;
 	}
