@@ -30,15 +30,6 @@ struct ipc_message_channel
 {
 	xrt_ipc_handle_t ipc_handle;
 	enum u_logging_level log_level;
-	bool frame_reads;
-	bool frame_writes;
-
-	/*
-	 * Some Windows-side compatibility transports use a byte-stream socket stored
-	 * in ipc_handle and set this flag so the Windows message-channel
-	 * implementation uses Winsock send/recv.
-	 */
-	bool stream_socket;
 };
 
 /*!
