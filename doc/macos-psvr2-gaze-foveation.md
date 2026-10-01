@@ -132,7 +132,7 @@ proof of concept.
 
 ## Legacy/reference diagnostic paths
 
-Two older paths remain useful for comparison:
+One older path remains useful for comparison:
 
 ### `--gaze-foveation`
 
@@ -143,18 +143,20 @@ application-side reconstruction into the normal OpenXR swapchain.
 It is useful as a reference implementation and for timing the cost of an
 explicit resolve pass, but it is not the desired client/runtime architecture.
 
-### `--gaze-foveation-fused`
+### `--gaze-foveation-fused` (removed)
 
-This also uses app-owned `XR_EXT_eye_gaze_interaction`, renders directly into
-the OpenXR image and supplies an experimental
-`XrCompositionLayerFoveationMapMNDX` with the projection view.
+This also used app-owned `XR_EXT_eye_gaze_interaction`, rendered directly into
+the OpenXR image and supplied an experimental
+`XrCompositionLayerFoveationMapMNDX` with the projection view. It proved the
+compositor reconstruction concept that the standard path now uses.
 
-That path proved the compositor reconstruction concept and remains useful for
-regression comparison. New clients should not build against it.
-
-The legacy `XR_MNDX_foveation` policy/layer mechanism should therefore be
-treated as development history and compatibility scaffolding, not the target
-standards surface.
+The mode, and the `XR_MNDX_foveation` extension behind it (a profile query plus
+that per-view map), were removed on 2026-10-01. Registered extensions cover
+everything it did: `XR_FB_foveation_configuration` for levels and
+`XR_META_foveation_eye_tracked` for a gaze-driven centre, with
+`XR_MNDX_foveation_metal` supplying the Metal rate map. A client that still
+asks for `XR_MNDX_foveation` (the Chromium fork's fallback path) now simply
+does not find it and renders unfoveated unless the standard path is available.
 
 ## Historical performance result
 
@@ -183,7 +185,7 @@ Remaining:
 1. run `--fb-foveation-sparse-check` on the headset, with and without
    `--passthrough`, to confirm the per-image association and layer-squasher
    reconstruction end to end;
-2. compare fixed and eye-tracked image quality against the legacy fused path;
+2. compare fixed and eye-tracked image quality;
 3. record GPU timing and rate-map revision frequency;
 4. audit compact depth coordinates before combining depth + foveation;
 5. validate the standard FB/META + Metal companion path in Chromium;

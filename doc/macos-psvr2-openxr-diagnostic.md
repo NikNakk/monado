@@ -109,5 +109,5 @@ the existing distortion/timewarp pass.
 `--depth-layer` is currently rejected with these modes until compact depth
 coordinates are implemented and validated.
 
-The older `--gaze-foveation` and `--gaze-foveation-fused` modes remain as
-reference/regression paths only.
+The older `--gaze-foveation` mode remains as a reference/regression path only.
+`--gaze-foveation-fused` was removed with `XR_MNDX_foveation`.

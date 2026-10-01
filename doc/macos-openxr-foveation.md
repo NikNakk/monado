@@ -300,9 +300,11 @@ previous images unrendered. Run it with `OXR_DEBUG_FOVEATION_BINDING=1` to see
 that `xrEndFrame` keeps submitting the render revision. Add `--passthrough` to
 force the layer-squasher path.
 
-The legacy `--gaze-foveation` and `--gaze-foveation-fused` modes remain
-useful as reference implementations, but they should not be used as the basis
-for new client integration.
+The legacy `--gaze-foveation` mode (application-side resolve) remains useful as
+a reference implementation, but should not be used as the basis for new client
+integration. The `--gaze-foveation-fused` mode and the `XR_MNDX_foveation`
+extension it used were removed on 2026-10-01; `XR_MNDX_foveation_metal` is the
+only experimental foveation extension left.
 
 ## Profile mapping
 

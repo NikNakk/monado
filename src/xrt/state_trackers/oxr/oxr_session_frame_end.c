@@ -252,6 +252,7 @@ fill_in_y_flip(struct oxr_session *sess, const XrCompositionLayerBaseHeader *lay
 #endif // OXR_HAVE_FB_composition_layer_image_layout
 }
 
+#ifdef OXR_HAVE_FB_foveation
 static bool
 validate_foveation_map(const struct xrt_foveation_map_data *map)
 {
@@ -274,6 +275,7 @@ validate_foveation_map(const struct xrt_foveation_map_data *map)
 
 	return true;
 }
+#endif // OXR_HAVE_FB_foveation
 
 static void
 fill_in_foveation_map(struct oxr_logger *log,
@@ -335,35 +337,8 @@ fill_in_foveation_map(struct oxr_logger *log,
 			return;
 		}
 	}
-#endif
-
-#ifdef OXR_HAVE_MNDX_foveation
-	/*
-	 * Legacy experimental path: applications may still provide the mapping
-	 * explicitly on each projection view. Keep this as a compatibility
-	 * fallback while new Metal clients use FB swapchain state.
-	 */
-	if (!sess->sys->inst->extensions.MNDX_foveation) {
-		return;
-	}
-
-	const XrCompositionLayerFoveationMapMNDX *map = OXR_GET_INPUT_FROM_CHAIN(
-	    view, XR_TYPE_COMPOSITION_LAYER_FOVEATION_MAP_MNDX, XrCompositionLayerFoveationMapMNDX);
-	if (map == NULL || map->boundaryCount != XRT_FOVEATION_MAP_BOUNDARY_COUNT ||
-	    map->boundaryCount != XR_MNDX_FOVEATION_MAP_BOUNDARY_COUNT) {
-		return;
-	}
-
-	struct xrt_foveation_map_data candidate = {
-	    .enabled = 1,
-	    .boundary_count = XRT_FOVEATION_MAP_BOUNDARY_COUNT,
-	};
-	memcpy(candidate.x, map->x, sizeof(candidate.x));
-	memcpy(candidate.y, map->y, sizeof(candidate.y));
-	if (validate_foveation_map(&candidate)) {
-		*out = candidate;
-	}
 #else
+	(void)log;
 	(void)view_index;
 #endif
 }
