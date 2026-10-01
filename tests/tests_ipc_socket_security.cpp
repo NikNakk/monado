@@ -1,7 +1,6 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 #include "shared/ipc_socket_security.h"
-#include "shared/ipc_tcp_auth.h"
 #include "util/u_file.h"
 #include <sys/stat.h>
 #include <fstream>
