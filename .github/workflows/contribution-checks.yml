@@ -1,0 +1,28 @@
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+name: Contribution checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  style-and-license:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned check tools
+        run: python -m pip install clang-format==23.1.1 cmakelang==0.6.13 codespell==2.4.1 reuse==6.2.0
+      - name: Check formatting, spelling and whitespace
+        run: python scripts/check-contribution-style.py
+      - name: Check license metadata
+        run: reuse lint

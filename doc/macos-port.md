@@ -674,3 +674,22 @@ export PSVR2_GAZE_PITCH_GAIN=1.0
 Use offsets for a roughly constant displacement across the field of view. Use gains only when the
 centre is approximately correct but error grows toward the edges. The gain range is intentionally
 clamped to 0.5–1.5.
+
+### IPC security and contribution follow-up
+
+Native macOS socket clients now have a kernel-verified UID/PID separate from
+application metadata. Wine TCP requires mutual HMAC authentication before IPC;
+see [the Wine transport setup](macos-wine-openxr-d3d11.md#tcp-authentication).
+Socket lifetime locking preserves live endpoints and recovers stale sockets.
+Launchd configuration containing the Wine key is written atomically with mode
+0600. XPC pending-resource quotas and 60-second expiry apply to both the direct
+service and standalone probe; the ownership-bypassing runtime broker override
+is retired. See [the XPC ownership note](macos-service-direct-xpc.md#per-client-ownership-and-pending-resource-limits).
+
+CI now checks formatting, spelling and REUSE metadata, builds both upstream
+Android ABIs, and runs the macOS default/all-feature configurations on macOS 14
+and 15. Native macOS tests exercise the actual XPC registry and private-layer
+context/host lifecycle. These checks do not replace headset or Wine application
+validation. [The upstream contribution preparation](macos-upstream-contribution.md)
+contains the proposed review units and draft changelog text; human DCO
+certification remains a prerequisite for upstream submission.

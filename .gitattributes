@@ -1,0 +1,6 @@
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+# Preserve generated CSV line endings and the whitespace inside third-party patches.
+/doc/psvr2-continuity-results/summary.csv whitespace=cr-at-eol
+/doc/psvr2-prediction-results/summary.csv whitespace=cr-at-eol
+/scripts/macos/dxmt-patches/*.patch whitespace=-blank-at-eol,-blank-at-eof

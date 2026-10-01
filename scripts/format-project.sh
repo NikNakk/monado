@@ -37,7 +37,7 @@ fi
                 src/xrt/tracking \
                 examples \
                 tests \
-                \( -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" \) \
+                \( -name "*.c" -o -name "*.cpp" -o -name "*.h" -o -name "*.hpp" -o -name "*.m" -o -name "*.mm" \) \
                 -and -not \( -ipath \*/.cxx/\* \) \
                 -exec "${CLANGFORMAT}" -i -style=file \{\} +
 )

@@ -1,0 +1,39 @@
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+name: Android NDK build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Match upstream's API level and 32/64-bit native build configurations.
+# Cross-compiled tests are built but cannot run on the host runner.
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [armeabi-v7a, arm64-v8a]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install host build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build glslang-tools libeigen3-dev python3
+      - uses: android-actions/setup-android@v3
+      - name: Install upstream NDK version
+        run: sdkmanager --install "ndk;26.3.11579264"
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DANDROID_ABI=${{ matrix.abi }} -DANDROID_PLATFORM=26
+          -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/26.3.11579264/build/cmake/android.toolchain.cmake"
+          -DEigen3_DIR=/usr/share/eigen3/cmake/
+          -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+      - name: Build
+        run: cmake --build build --parallel 4
