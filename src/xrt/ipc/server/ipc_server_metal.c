@@ -43,6 +43,18 @@ ipc_metal_server_publish_shared_event(void *event, uint64_t *out_token, pid_t ow
 	return ipc_metal_xpc_service_publish_shared_event_for_pid(event, out_token, owner_pid);
 }
 
+static inline xrt_result_t
+ipc_metal_server_take_shared_event_handle(uint64_t token, void **out_handle, pid_t owner_pid)
+{
+	return ipc_metal_xpc_service_take_shared_event_handle_for_pid(token, out_handle, owner_pid);
+}
+
+static inline void
+ipc_metal_server_release_shared_event_handle(void *handle)
+{
+	ipc_metal_xpc_service_release_shared_event_handle(handle);
+}
+
 static inline void
 ipc_metal_server_discard_token(uint64_t token, pid_t owner_pid)
 {
@@ -76,6 +88,19 @@ ipc_metal_server_publish_shared_event(void *event, uint64_t *out_token, pid_t ow
 	(void)out_token;
 	(void)owner_pid;
 	return XRT_ERROR_FEATURE_NOT_SUPPORTED;
+}
+static inline xrt_result_t
+ipc_metal_server_take_shared_event_handle(uint64_t token, void **out_handle, pid_t owner_pid)
+{
+	(void)token;
+	(void)out_handle;
+	(void)owner_pid;
+	return XRT_ERROR_FEATURE_NOT_SUPPORTED;
+}
+static inline void
+ipc_metal_server_release_shared_event_handle(void *handle)
+{
+	(void)handle;
 }
 static inline void
 ipc_metal_server_discard_token(uint64_t token, pid_t owner_pid)
@@ -678,6 +703,52 @@ ipc_handle_swapchain_import_iosurface_token(volatile struct ipc_client_state *ic
 	xret = finish_external_iosurface_swapchain(ics, info, image_count, index, out_id);
 	ipc_metal_xpc_release_iosurfaces(surfaces, image_count);
 	return xret;
+#endif
+}
+
+xrt_result_t
+ipc_handle_compositor_semaphore_import_metal(volatile struct ipc_client_state *ics,
+                                             uint64_t token,
+                                             uint32_t *out_id)
+{
+	IPC_TRACE_MARKER();
+
+#ifndef XRT_OS_OSX
+	(void)ics;
+	(void)token;
+	(void)out_id;
+	return XRT_ERROR_NOT_IMPLEMENTED;
+#else
+	if (ics == NULL || out_id == NULL || ics->xc == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+
+	uint32_t id = 0;
+	xrt_result_t xret = find_free_semaphore_index(ics, &id);
+	if (xret != XRT_SUCCESS) {
+		return xret;
+	}
+
+	void *shared_event_handle = NULL;
+	xret = ipc_metal_server_take_shared_event_handle(token, &shared_event_handle, ics->peer_pid);
+	if (xret != XRT_SUCCESS || shared_event_handle == NULL) {
+		return xret != XRT_SUCCESS ? xret : XRT_ERROR_IPC_FAILURE;
+	}
+
+	struct xrt_compositor_semaphore *xcsem = NULL;
+	xret = comp_metal_semaphore_import_shared_event_handle(shared_event_handle, &xcsem);
+	ipc_metal_server_release_shared_event_handle(shared_event_handle);
+	if (xret != XRT_SUCCESS || xcsem == NULL) {
+		return xret != XRT_SUCCESS ? xret : XRT_ERROR_VULKAN;
+	}
+
+	ics->xcsems[id] = xcsem;
+	ics->compositor_semaphore_count++;
+	*out_id = id;
+
+	IPC_INFO(ics->server, "Metal shared-event compositor semaphore active: id=%u token=0x%016llx", id,
+	         (unsigned long long)token);
+	return XRT_SUCCESS;
 #endif
 }
 
