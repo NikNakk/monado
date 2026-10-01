@@ -78,6 +78,27 @@ group_exposures(const std::vector<CameraSample> &samples)
 	return exposures;
 }
 
+struct Stats
+{
+	std::vector<double> values;
+
+	void
+	add(double v)
+	{
+		values.push_back(v);
+	}
+
+	double
+	pct(double p)
+	{
+		if (values.empty()) {
+			return NAN;
+		}
+		std::sort(values.begin(), values.end());
+		return values[std::min(values.size() - 1, (size_t)(p * (double)(values.size() - 1) + 0.5))];
+	}
+};
+
 const char *
 flags_name(xrt_space_relation_flags flags)
 {
@@ -114,6 +135,34 @@ summarise(const DatasetReader &dataset)
 
 	for (const DatasetDevice &device : dataset.devices) {
 		std::printf("device %d: %zu LEDs\n", (int)device.id, device.leds.size());
+	}
+
+	for (const std::string &info : dataset.session_info) {
+		std::printf("session: %s\n", info.c_str());
+	}
+	if (!dataset.sync_events.empty() || !dataset.imu_timing.empty() || !dataset.head_poses.empty() ||
+	    !dataset.ground_truth.empty() || !dataset.annotations.empty() || dataset.unknown_extensions > 0) {
+		std::printf("extension records: %zu sync events, %zu IMU timings, %zu head poses, %zu ground-truth poses, "
+		            "%zu annotations, %zu of unknown kinds\n",
+		            dataset.sync_events.size(), dataset.imu_timing.size(), dataset.head_poses.size(),
+		            dataset.ground_truth.size(), dataset.annotations.size(), dataset.unknown_extensions);
+	}
+	if (!dataset.head_poses.empty()) {
+		Stats age_ms;
+		size_t predicted = 0;
+		for (const DatasetHeadPose &h : dataset.head_poses) {
+			if (h.source_ns == 0) {
+				continue;
+			}
+			age_ms.add((double)(h.timestamp_ns - h.source_ns) / 1e6);
+			predicted += (h.source_flags & T_CONSTELLATION_HEAD_POSE_INTERPOLATED) == 0 ? 1 : 0;
+		}
+		std::printf("head pose at exposure minus newest SLAM pose, ms: p05 %.1f p50 %.1f p95 %.1f; %zu of %zu "
+		            "predicted past it\n",
+		            age_ms.pct(0.05), age_ms.pct(0.5), age_ms.pct(0.95), predicted, age_ms.values.size());
+	}
+	for (const DatasetAnnotation &a : dataset.annotations) {
+		std::printf("annotation at %" PRIi64 " device %d: %s\n", a.host_ns, (int)a.device_id, a.text.c_str());
 	}
 
 	std::map<uint32_t, size_t> samples_per_camera;
@@ -172,26 +221,6 @@ summarise(const DatasetReader &dataset)
  *
  */
 
-struct Stats
-{
-	std::vector<double> values;
-
-	void
-	add(double v)
-	{
-		values.push_back(v);
-	}
-
-	double
-	pct(double p)
-	{
-		if (values.empty()) {
-			return NAN;
-		}
-		std::sort(values.begin(), values.end());
-		return values[std::min(values.size() - 1, (size_t)(p * (double)(values.size() - 1) + 0.5))];
-	}
-};
 
 double
 quat_angle_deg(const xrt_quat &a, const xrt_quat &b)

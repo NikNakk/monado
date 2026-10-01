@@ -11,6 +11,7 @@
 
 #include "t_constellation_tracker_dataset.hpp"
 
+#include <cstring>
 #include <string>
 
 
@@ -29,7 +30,12 @@ enum PacketType
 	PACKET_TYPE_DEVICE_TRACKING = 3,
 	//! One IMU sample as the device pushed it to the tracker's IMU sink (host time, device IMU frame).
 	PACKET_TYPE_IMU_SAMPLE = 4,
+	//! An extension record: u32 kind, u32 payload length, payload. See @ref DatasetExtensionKind.
+	PACKET_TYPE_EXTENSION = 5,
 };
+
+//! Extension payloads larger than this are treated as corruption.
+constexpr uint32_t kMaxExtensionPayload = 1u << 20;
 
 namespace {
 
@@ -40,6 +46,151 @@ namespace {
 			throw std::runtime_error(operation);
 		}
 	}
+
+	//! Little-endian encoding of extension payloads, matching DataSerializer.
+	struct PayloadWriter
+	{
+		std::vector<uint8_t> bytes;
+
+		void
+		u8(uint8_t v)
+		{
+			bytes.push_back(v);
+		}
+		void
+		u32(uint32_t v)
+		{
+			for (int i = 0; i < 4; i++) {
+				bytes.push_back((uint8_t)(v >> (8 * i)));
+			}
+		}
+		void
+		u64(uint64_t v)
+		{
+			for (int i = 0; i < 8; i++) {
+				bytes.push_back((uint8_t)(v >> (8 * i)));
+			}
+		}
+		void
+		i64(int64_t v)
+		{
+			u64((uint64_t)v);
+		}
+		void
+		f32(float v)
+		{
+			uint32_t bits;
+			std::memcpy(&bits, &v, sizeof(bits));
+			u32(bits);
+		}
+		void
+		f64(double v)
+		{
+			uint64_t bits;
+			std::memcpy(&bits, &v, sizeof(bits));
+			u64(bits);
+		}
+		void
+		pose(const xrt_pose &p)
+		{
+			f32(p.position.x);
+			f32(p.position.y);
+			f32(p.position.z);
+			f32(p.orientation.x);
+			f32(p.orientation.y);
+			f32(p.orientation.z);
+			f32(p.orientation.w);
+		}
+		void
+		string(const std::string &text)
+		{
+			u32((uint32_t)text.size());
+			bytes.insert(bytes.end(), text.begin(), text.end());
+		}
+	};
+
+	struct PayloadReader
+	{
+		const std::vector<uint8_t> &bytes;
+		size_t at{0};
+
+		void
+		need(size_t n)
+		{
+			if (at + n > bytes.size()) {
+				throw std::runtime_error("Truncated extension record in dataset file.");
+			}
+		}
+		uint8_t
+		u8()
+		{
+			need(1);
+			return bytes[at++];
+		}
+		uint32_t
+		u32()
+		{
+			need(4);
+			uint32_t v = 0;
+			for (int i = 0; i < 4; i++) {
+				v |= (uint32_t)bytes[at++] << (8 * i);
+			}
+			return v;
+		}
+		uint64_t
+		u64()
+		{
+			need(8);
+			uint64_t v = 0;
+			for (int i = 0; i < 8; i++) {
+				v |= (uint64_t)bytes[at++] << (8 * i);
+			}
+			return v;
+		}
+		int64_t
+		i64()
+		{
+			return (int64_t)u64();
+		}
+		float
+		f32()
+		{
+			uint32_t bits = u32();
+			float v;
+			std::memcpy(&v, &bits, sizeof(v));
+			return v;
+		}
+		double
+		f64()
+		{
+			uint64_t bits = u64();
+			double v;
+			std::memcpy(&v, &bits, sizeof(v));
+			return v;
+		}
+		xrt_pose
+		pose()
+		{
+			xrt_pose p;
+			p.position.x = f32();
+			p.position.y = f32();
+			p.position.z = f32();
+			p.orientation.x = f32();
+			p.orientation.y = f32();
+			p.orientation.z = f32();
+			p.orientation.w = f32();
+			return p;
+		}
+		std::string
+		string()
+		{
+			uint32_t n = u32();
+			need(n);
+			std::string text(bytes.begin() + (ptrdiff_t)at, bytes.begin() + (ptrdiff_t)(at + n));
+			at += n;
+			return text;
+		}
+	};
 
 } // namespace
 
@@ -492,6 +643,22 @@ DataRecorder::DataRecorder(ConstellationTracker *tracker, std::string out_file) 
 	this->serializer.flush();
 }
 
+DataRecorder::DataRecorder(std::string out_file, const std::vector<std::vector<t_camera_calibration>> &mosaics)
+    : serializer(out_file, true)
+{
+	this->serializer.write(static_cast<uint32_t>(__be32_to_cpu(CT_DATA_MAGIC_VALUE)));
+
+	this->serializer.write(static_cast<uint32_t>(mosaics.size()));
+	for (const std::vector<t_camera_calibration> &cameras : mosaics) {
+		this->serializer.write(static_cast<uint32_t>(cameras.size()));
+		for (const t_camera_calibration &calibration : cameras) {
+			this->serializer.write(calibration);
+		}
+	}
+
+	this->serializer.flush();
+}
+
 void
 DataRecorder::recordSample(const CameraSample &sample)
 {
@@ -540,12 +707,102 @@ DataRecorder::recordImuSample(t_constellation_device_id_t device_id, const xrt_i
 void
 DataRecorder::recordDeviceInfo(const Device &device)
 {
+	this->recordDeviceInfo(device.id, device.params.led_model);
+}
+
+void
+DataRecorder::recordDeviceInfo(t_constellation_device_id_t device_id, const t_constellation_tracker_led_model &led_model)
+{
 	std::lock_guard<std::mutex> guard(this->lock);
 
 	this->serializer.write(static_cast<uint8_t>(PACKET_TYPE_DEVICE_INFO));
-	this->serializer.write(static_cast<uint8_t>(device.id));
-	this->serializer.write(device.params.led_model);
+	this->serializer.write(static_cast<uint8_t>(device_id));
+	this->serializer.write(led_model);
 	this->serializer.flush();
+}
+
+void
+DataRecorder::recordExtension(uint32_t kind, const std::vector<uint8_t> &payload)
+{
+	std::lock_guard<std::mutex> guard(this->lock);
+
+	this->serializer.write(static_cast<uint8_t>(PACKET_TYPE_EXTENSION));
+	this->serializer.write(kind);
+	this->serializer.write(static_cast<uint32_t>(payload.size()));
+	for (uint8_t byte : payload) {
+		this->serializer.write(byte);
+	}
+	this->serializer.flush();
+}
+
+void
+DataRecorder::recordSessionInfo(const std::string &json)
+{
+	PayloadWriter w;
+	w.string(json);
+	this->recordExtension(DATASET_EXTENSION_SESSION_INFO, w.bytes);
+}
+
+void
+DataRecorder::recordSyncEvent(const DatasetSyncEvent &event)
+{
+	PayloadWriter w;
+	w.u8(static_cast<uint8_t>(event.device_id));
+	w.i64(event.host_ns);
+	w.u32(event.kind);
+	for (double v : event.value) {
+		w.f64(v);
+	}
+	this->recordExtension(DATASET_EXTENSION_SYNC_EVENT, w.bytes);
+}
+
+void
+DataRecorder::recordImuTiming(const DatasetImuTiming &timing)
+{
+	PayloadWriter w;
+	w.u8(static_cast<uint8_t>(timing.device_id));
+	w.i64(timing.host_ns);
+	w.i64(timing.device_ns);
+	w.f64(timing.clock_offset_ns);
+	for (double v : timing.applied_gyro_bias) {
+		w.f64(v);
+	}
+	this->recordExtension(DATASET_EXTENSION_IMU_TIMING, w.bytes);
+}
+
+void
+DataRecorder::recordHeadPose(const DatasetHeadPose &pose)
+{
+	PayloadWriter w;
+	w.i64(pose.timestamp_ns);
+	w.u32(static_cast<uint32_t>(pose.relation_flags));
+	w.pose(pose.Txr_world_head);
+	w.i64(pose.source_ns);
+	w.u32(pose.source_flags);
+	this->recordExtension(DATASET_EXTENSION_HEAD_POSE, w.bytes);
+}
+
+void
+DataRecorder::recordGroundTruth(const DatasetGroundTruth &truth)
+{
+	PayloadWriter w;
+	w.u8(static_cast<uint8_t>(truth.device_id));
+	w.i64(truth.timestamp_ns);
+	w.pose(truth.Txr_world_device);
+	w.f32(truth.position_sigma_m);
+	w.f32(truth.orientation_sigma_rad);
+	w.u32(truth.flags);
+	this->recordExtension(DATASET_EXTENSION_GROUND_TRUTH, w.bytes);
+}
+
+void
+DataRecorder::recordAnnotation(const DatasetAnnotation &annotation)
+{
+	PayloadWriter w;
+	w.u8(static_cast<uint8_t>(annotation.device_id));
+	w.i64(annotation.host_ns);
+	w.string(annotation.text);
+	this->recordExtension(DATASET_EXTENSION_ANNOTATION, w.bytes);
 }
 
 /*
@@ -634,6 +891,72 @@ DatasetReader::DatasetReader(std::string filename) : serializer(filename, false)
 				this->serializer.read(imu.sample.gyro_rad_secs.z);
 				imu.device_id = static_cast<t_constellation_device_id_t>(device_id);
 				imu.sample.timestamp_ns = static_cast<timepoint_ns>(timestamp_ns);
+				break;
+			}
+			case PACKET_TYPE_EXTENSION: {
+				uint32_t kind;
+				uint32_t length;
+				this->serializer.read(kind);
+				this->serializer.read(length);
+				if (length > kMaxExtensionPayload) {
+					throw std::runtime_error("Oversized extension record in dataset file.");
+				}
+				std::vector<uint8_t> payload(length);
+				for (uint8_t &byte : payload) {
+					this->serializer.read(byte);
+				}
+				PayloadReader r{payload};
+				switch (kind) {
+				case DATASET_EXTENSION_SESSION_INFO: this->session_info.push_back(r.string()); break;
+				case DATASET_EXTENSION_SYNC_EVENT: {
+					DatasetSyncEvent &e = this->sync_events.emplace_back();
+					e.device_id = static_cast<t_constellation_device_id_t>(r.u8());
+					e.host_ns = r.i64();
+					e.kind = r.u32();
+					for (double &v : e.value) {
+						v = r.f64();
+					}
+					break;
+				}
+				case DATASET_EXTENSION_IMU_TIMING: {
+					DatasetImuTiming &t = this->imu_timing.emplace_back();
+					t.device_id = static_cast<t_constellation_device_id_t>(r.u8());
+					t.host_ns = r.i64();
+					t.device_ns = r.i64();
+					t.clock_offset_ns = r.f64();
+					for (double &v : t.applied_gyro_bias) {
+						v = r.f64();
+					}
+					break;
+				}
+				case DATASET_EXTENSION_HEAD_POSE: {
+					DatasetHeadPose &h = this->head_poses.emplace_back();
+					h.timestamp_ns = r.i64();
+					h.relation_flags = static_cast<xrt_space_relation_flags>(r.u32());
+					h.Txr_world_head = r.pose();
+					h.source_ns = r.i64();
+					h.source_flags = r.u32();
+					break;
+				}
+				case DATASET_EXTENSION_GROUND_TRUTH: {
+					DatasetGroundTruth &g = this->ground_truth.emplace_back();
+					g.device_id = static_cast<t_constellation_device_id_t>(r.u8());
+					g.timestamp_ns = r.i64();
+					g.Txr_world_device = r.pose();
+					g.position_sigma_m = r.f32();
+					g.orientation_sigma_rad = r.f32();
+					g.flags = r.u32();
+					break;
+				}
+				case DATASET_EXTENSION_ANNOTATION: {
+					DatasetAnnotation &a = this->annotations.emplace_back();
+					a.device_id = static_cast<t_constellation_device_id_t>(r.u8());
+					a.host_ns = r.i64();
+					a.text = r.string();
+					break;
+				}
+				default: this->unknown_extensions++; break;
+				}
 				break;
 			}
 			default: {

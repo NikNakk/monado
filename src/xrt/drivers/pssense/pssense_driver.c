@@ -448,6 +448,9 @@ struct pssense_device
 		//! Held dark (and frozen) because another controller owns the scan.
 		bool led_bootstrap_yielding;
 		uint32_t led_bootstrap_status_frames;
+		//! The LED bootstrap state and phase last written to a recorded dataset, to record only changes.
+		uint32_t recorded_led_state;
+		int64_t recorded_led_fudge_ns;
 		//! Exposures spent waiting for the PSSENSE_LED_BOOTSTRAP_FIRST side to lock before our first scan.
 		uint32_t led_bootstrap_first_wait_frames;
 
@@ -585,6 +588,11 @@ pssense_add_clock_offset_sample(struct pssense_device *pssense, double offset_ns
 		if (snap_us > 0 && fabs(delta) > (double)snap_us * 1000.0) {
 			PSSENSE_INFO(pssense, "CLOCK_OFFSET side=%c event=snap delta_us=%.1f",
 			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', delta / 1000.0);
+			const double value[3] = {delta, 0.0, 0.0};
+			t_constellation_tracker_record_sync_event(pssense->tracking.constellation_tracker,
+			                                          pssense->tracking.constellation_device_id,
+			                                          (int64_t)os_monotonic_get_ns(),
+			                                          T_CONSTELLATION_SYNC_EVENT_CLOCK_SNAP, value);
 		} else {
 			delta = CLAMP(delta, -2500.0, 2500.0);
 		}
@@ -733,6 +741,10 @@ pssense_update_gyro_bias(struct pssense_device *pssense,
 		PSSENSE_INFO(pssense, "GYRO_BIAS side=%c event=still bias_deg_s=%.2f,%.2f,%.2f magnitude_deg_s=%.2f updates=%u",
 		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', b->bias.x * 180.0 / M_PI, b->bias.y * 180.0 / M_PI,
 		             b->bias.z * 180.0 / M_PI, m_vec3_len(b->bias) * 180.0 / M_PI, b->updates);
+		const double value[3] = {b->bias.x, b->bias.y, b->bias.z};
+		t_constellation_tracker_record_sync_event(pssense->tracking.constellation_tracker,
+		                                          pssense->tracking.constellation_device_id, now_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_GYRO_BIAS, value);
 	}
 }
 
@@ -808,6 +820,14 @@ pssense_update_fusion(struct pssense_device *pssense)
 		                              pssense->timing.latest_imu_time_ns, //
 		                              &sample.timestamp_ns)) {            //
 			xrt_sink_push_imu(pssense->tracking.constellation_imu_sink, &sample);
+
+			const struct pssense_gyro_bias *b = &pssense->tracking.gyro_bias;
+			const double applied_bias[3] = {b->enabled ? b->bias.x : 0.0, b->enabled ? b->bias.y : 0.0,
+			                                b->enabled ? b->bias.z : 0.0};
+			t_constellation_tracker_record_imu_timing(
+			    pssense->tracking.constellation_tracker, pssense->tracking.constellation_device_id,
+			    sample.timestamp_ns, (int64_t)pssense->timing.latest_imu_time_ns,
+			    (double)((int64_t)pssense->timing.latest_imu_time_ns - sample.timestamp_ns), applied_bias);
 		}
 	}
 }
@@ -1691,6 +1711,40 @@ pssense_led_bootstrap_steady_for_probe(struct pssense_device *pssense)
 	return sqrt(x * x + y * y + z * z) < PSSENSE_LED_PROBE_MAX_ROTATION_RAD_S;
 }
 
+//! When recording a dataset: note LED scans, locks, losses and phase moves as they happen.
+static void
+pssense_led_bootstrap_record_changes(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
+{
+	const struct t_led_phase_bootstrap *b = &pssense->tracking.led_bootstrap;
+	struct t_constellation_tracker *tracker = pssense->tracking.constellation_tracker;
+	t_constellation_device_id_t id = pssense->tracking.constellation_device_id;
+	uint32_t state = (uint32_t)b->state;
+	uint32_t previous = pssense->tracking.recorded_led_state;
+	bool scanning = state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN || state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
+	bool was_scanning =
+	    previous == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN || previous == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
+
+	if (scanning && !was_scanning) {
+		t_constellation_tracker_record_sync_event(tracker, id, exposure_timestamp_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_LED_SCAN, NULL);
+	}
+	if (state == T_LED_PHASE_BOOTSTRAP_LOCKED && previous != T_LED_PHASE_BOOTSTRAP_LOCKED) {
+		const double value[3] = {(double)b->fudge_offset_ns / 1000.0, (double)b->blink_ns / 1000.0, 0.0};
+		t_constellation_tracker_record_sync_event(tracker, id, exposure_timestamp_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_LED_LOCK, value);
+	} else if (state != T_LED_PHASE_BOOTSTRAP_LOCKED && previous == T_LED_PHASE_BOOTSTRAP_LOCKED) {
+		t_constellation_tracker_record_sync_event(tracker, id, exposure_timestamp_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_LED_LOST, NULL);
+	} else if (state == T_LED_PHASE_BOOTSTRAP_LOCKED && b->fudge_offset_ns != pssense->tracking.recorded_led_fudge_ns) {
+		const double value[3] = {(double)(b->fudge_offset_ns - pssense->tracking.recorded_led_fudge_ns) / 1000.0,
+		                         0.0, 0.0};
+		t_constellation_tracker_record_sync_event(tracker, id, exposure_timestamp_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_LED_PHASE_MOVE, value);
+	}
+	pssense->tracking.recorded_led_state = state;
+	pssense->tracking.recorded_led_fudge_ns = b->fudge_offset_ns;
+}
+
 static bool
 pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
 {
@@ -1794,6 +1848,8 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 		b->locked_lit_reports = 0;
 		b->locked_reports = 0;
 	}
+
+	pssense_led_bootstrap_record_changes(pssense, exposure_timestamp_ns);
 
 	return t_led_phase_bootstrap_leds_enabled(b);
 }
@@ -3092,6 +3148,7 @@ pssense_get_constellation_diagnostics(struct xrt_device *xdev,
 	os_thread_helper_lock(&pssense->controller_thread);
 	*out_diagnostics = (struct pssense_constellation_diagnostics){
 	    .attached = pssense->tracking.constellation_tracker != NULL,
+	    .device_id = pssense->tracking.constellation_device_id,
 	    .candidate_count = pssense->tracking.candidate_count,
 	    .fused_pose_count = pssense->tracking.fused_pose_count,
 	    .disagreement_count = pssense->tracking.disagreement_count,
