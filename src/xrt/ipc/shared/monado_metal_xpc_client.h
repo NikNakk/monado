@@ -29,6 +29,10 @@ monado_metal_xpc_publish_claimable_texture(void *metal_texture, uint64_t *out_to
 __attribute__((visibility("default"))) int
 monado_metal_xpc_publish_shared_event(void *metal_shared_event, uint64_t *out_token);
 
+/*! Ask launchd to activate the native Monado service and wait until it reports ready. */
+__attribute__((visibility("default"))) int
+monado_metal_xpc_activate_service(void);
+
 __attribute__((visibility("default"))) int
 monado_metal_xpc_take_texture(uint64_t token, void **out_metal_texture);
 
