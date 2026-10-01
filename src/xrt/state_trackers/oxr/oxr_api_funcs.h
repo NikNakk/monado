@@ -274,6 +274,13 @@ oxr_xrGetD3D12GraphicsRequirementsKHR(XrInstance instance,
                                       XrGraphicsRequirementsD3D12KHR *graphicsRequirements);
 #endif // XR_USE_GRAPHICS_API_D3D12
 
+#ifdef OXR_HAVE_MND_query_egl_device
+
+//! OpenXR API function @ep{xrGetSystemEGLDeviceMND}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetSystemEGLDeviceMND(XrInstance instance, const XrSystemEGLDeviceGetInfoMND *info, XrSystemEGLDeviceMND *device);
+#endif // OXR_HAVE_MND_query_egl_device
+
 /*
  *
  * oxr_api_session.c
@@ -758,6 +765,12 @@ oxr_xrResetBodyTrackingCalibrationMETA(XrBodyTrackerFB bodyTracker);
 XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrSuggestBodyTrackingCalibrationOverrideMETA(XrBodyTrackerFB bodyTracker,
                                                  const XrBodyTrackingCalibrationInfoMETA *calibrationInfo);
+#endif
+
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+//! OpenXR API function @ep{xrRequestBodyTrackingFidelityMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestBodyTrackingFidelityMETA(XrBodyTrackerFB bodyTracker, const XrBodyTrackingFidelityMETA fidelity);
 #endif
 
 /*

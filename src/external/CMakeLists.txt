@@ -8,6 +8,8 @@ if(BUILD_TESTING)
 	target_include_directories(
 		xrt-external-catch2 SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/Catch2
 		)
+	# clang-22 gives a warning for this in our build configuration, so let's disable it.
+	target_compile_definitions(xrt-external-catch2 PUBLIC CATCH_CONFIG_NO_COUNTER)
 	if(MSVC)
 		# Needed for Visual Studio 2019.
 		# https://github.com/catchorg/Catch2/issues/2916#issuecomment-2404082203
@@ -16,10 +18,7 @@ if(BUILD_TESTING)
 endif()
 
 # OpenVR
-add_library(xrt-external-openvr INTERFACE)
-target_include_directories(
-	xrt-external-openvr SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/openvr_includes
-	)
+add_subdirectory(openvr_includes)
 
 # cJSON
 add_library(xrt-external-cjson INTERFACE)
@@ -72,8 +71,6 @@ endif()
 # Nano Protobuf
 add_library(
 	xrt-external-nanopb STATIC
-	nanopb/monado_metrics.pb.c
-	nanopb/monado_metrics.pb.h
 	nanopb/pb.h
 	nanopb/pb_common.c
 	nanopb/pb_common.h
@@ -83,6 +80,16 @@ add_library(
 	nanopb/pb_encode.h
 	)
 target_include_directories(xrt-external-nanopb PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/nanopb)
+
+add_library(xrt-external-metrics STATIC metrics/monado_metrics.pb.c metrics/monado_metrics.pb.h)
+
+if(ANDROID)
+	target_compile_options(xrt-external-metrics PRIVATE -Wno-gnu-offsetof-extensions)
+endif()
+
+target_include_directories(xrt-external-metrics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/metrics/)
+
+target_link_libraries(xrt-external-metrics PUBLIC xrt-external-nanopb)
 
 if(ANDROID)
 	add_library(
@@ -143,11 +150,12 @@ if(XRT_HAVE_OPENGL)
 	add_subdirectory(imgui)
 endif()
 
-# tinyceres
-add_library(xrt-external-tinyceres INTERFACE)
-target_include_directories(
-	xrt-external-tinyceres SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/tinyceres/include
-	)
+# Ceres, from the system if we have it
+if(XRT_HAVE_BIGCERES)
+	add_subdirectory(bigceres)
+endif()
+
+add_subdirectory(tinyceres)
 
 # Tracy
 if(XRT_HAVE_TRACY)

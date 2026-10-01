@@ -13,6 +13,7 @@
 
 #include "util/u_logging.h"
 #include "util/u_misc.h"
+#include "vk/vk_compositor_flags.h"
 #include "vk/vk_helpers.h"
 
 #include <stdbool.h>

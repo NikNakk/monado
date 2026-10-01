@@ -12,8 +12,12 @@
 #include "xrt/xrt_config_drivers.h"
 
 #include "util/u_misc.h"
-#include "util/u_system.h"
 #include "util/u_trace_marker.h"
+#include "util/u_system_devices.h"
+
+#include "b_system.h"
+#include "b_body_tracker.h"
+#include "b_hand_tracker.h"
 
 #include "target_builder_helpers.h"
 
@@ -40,6 +44,22 @@ sdl_system_devices_get_roles(struct xrt_system_devices *xsysd, struct xrt_system
 	*out_roles = roles;
 
 	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+sdl_system_devices_create_body_tracker(struct xrt_system_devices *xsysd,
+                                       const struct xrt_body_tracker_create_info *info,
+                                       struct xrt_body_tracker **out_xbt)
+{
+	return b_body_tracker_create(xsysd, info, out_xbt);
+}
+
+static xrt_result_t
+sdl_system_devices_create_hand_tracker(struct xrt_system_devices *xsysd,
+                                       const struct xrt_hand_tracker_create_info *info,
+                                       struct xrt_hand_tracker **out_xht)
+{
+	return b_hand_tracker_create(xsysd, info, out_xht);
 }
 
 static void
@@ -84,8 +104,8 @@ sdl_instance_create_system(struct xrt_instance *xinst,
 
 	struct sdl_program *sp = from_xinst(xinst);
 
-	u_system_fill_properties(sp->usys, sp->xsysd_base.static_roles.head->str);
-	*out_xsys = &sp->usys->base;
+	b_system_fill_properties(sp->bsys, sp->xsysd_base.static_roles.head->str);
+	*out_xsys = &sp->bsys->base;
 	*out_xsysd = &sp->xsysd_base;
 	*out_xso = sp->xso;
 
@@ -98,7 +118,7 @@ sdl_instance_create_system(struct xrt_instance *xinst,
 	sdl_compositor_create_system(sp, &xsysc);
 
 	// Tell the system about the system compositor.
-	u_system_set_system_compositor(sp->usys, xsysc);
+	b_system_set_system_compositor(sp->bsys, xsysc);
 
 	*out_xsysc = xsysc;
 
@@ -124,17 +144,19 @@ sdl_instance_destroy(struct xrt_instance *xinst)
 void
 sdl_system_init(struct sdl_program *sp)
 {
-	struct u_system *usys = u_system_create();
-	assert(usys != NULL); // Should never fail.
+	struct b_system *bsys = b_system_create();
+	assert(bsys != NULL); // Should never fail.
 
-	sp->usys = usys;
+	sp->bsys = bsys;
 }
 
 void
 sdl_system_devices_init(struct sdl_program *sp)
 {
-	sp->xsysd_base.destroy = sdl_system_devices_destroy;
-	sp->xsysd_base.get_roles = sdl_system_devices_get_roles;
+	u_system_devices_populate_function_pointers(&sp->xsysd_base, sdl_system_devices_get_roles,
+	                                            sdl_system_devices_destroy);
+	sp->xsysd_base.create_body_tracker = sdl_system_devices_create_body_tracker;
+	sp->xsysd_base.create_hand_tracker = sdl_system_devices_create_hand_tracker;
 
 #ifdef USE_SIMULATED
 	const struct xrt_pose center = XRT_POSE_IDENTITY;
@@ -148,8 +170,11 @@ sdl_system_devices_init(struct sdl_program *sp)
 	sp->xsysd_base.static_xdev_count = 1;
 	sp->xsysd_base.static_roles.head = head;
 
+	struct xrt_pose T_stage_local = XRT_POSE_IDENTITY;
+	T_stage_local.position.y = 1.6;
+
 	t_builder_create_space_overseer_legacy( //
-	    &sp->usys->broadcast,               // broadcast
+	    &sp->bsys->broadcast,               // broadcast
 	    head,                               // head
 	    NULL,                               // eyes
 	    NULL,                               // left
@@ -158,8 +183,21 @@ sdl_system_devices_init(struct sdl_program *sp)
 	    sp->xsysd_base.static_xdevs,        // xdevs
 	    sp->xsysd_base.static_xdev_count,   // xdev_count
 	    false,                              // root_is_unbounded
+	    &T_stage_local,                     // T_stage_local
 	    true,                               // per_app_local_spaces
 	    &sp->xso);                          // out_xso
+}
+
+static xrt_result_t
+sdl_is_system_available(struct xrt_instance *xinst, bool *out_available)
+{
+	XRT_TRACE_MARKER();
+
+	assert(out_available != NULL);
+
+	*out_available = true;
+
+	return XRT_SUCCESS;
 }
 
 void
@@ -168,6 +206,7 @@ sdl_instance_init(struct sdl_program *sp)
 	sp->xinst_base.create_system = sdl_instance_create_system;
 	sp->xinst_base.get_prober = sdl_instance_get_prober;
 	sp->xinst_base.destroy = sdl_instance_destroy;
+	sp->xinst_base.is_system_available = sdl_is_system_available;
 }
 
 xrt_result_t

@@ -295,7 +295,7 @@ do_cylinder_layer(struct render_gfx *render,
 	    src_sampler,                                 //
 	    src_image_view,                              //
 	    &descriptor_set);                            // out_descriptor_set
-	VK_CHK_AND_RET(ret, "render_gfx_layer_quad_alloc_and_write");
+	VK_CHK_AND_RET(ret, "render_gfx_layer_cylinder_alloc_and_write");
 
 	VK_NAME_DESCRIPTOR_SET(vk, descriptor_set, "render_gfx layer quad descriptor set");
 
@@ -363,7 +363,7 @@ do_equirect2_layer(struct render_gfx *render,
 	    src_sampler,                                  //
 	    src_image_view,                               //
 	    &descriptor_set);                             // out_descriptor_set
-	VK_CHK_AND_RET(ret, "render_gfx_layer_quad_alloc_and_write");
+	VK_CHK_AND_RET(ret, "render_gfx_layer_equirect2_alloc_and_write");
 
 	VK_NAME_DESCRIPTOR_SET(vk, descriptor_set, "render_gfx layer quad descriptor set");
 
@@ -543,7 +543,13 @@ crg_distortion_common(struct render_gfx *render,
 			    &md->views[i].src_pose,                //
 			    &md->views[i].src_fov,                 //
 			    &d->views[i].world_pose_scanout_begin, //
-			    &data.transform);                      //
+			    &data.transform_scanout_begin);        //
+
+			render_calc_time_warp_matrix(            //
+			    &md->views[i].src_pose,              //
+			    &md->views[i].src_fov,               //
+			    &d->views[i].world_pose_scanout_end, //
+			    &data.transform_scanout_end);        //
 		}
 
 		ret = render_gfx_mesh_alloc_and_write( //
@@ -552,7 +558,7 @@ crg_distortion_common(struct render_gfx *render,
 		    md->views[i].src_sampler,          //
 		    md->views[i].src_image_view,       //
 		    &ms.descriptor_sets[i]);           //
-		VK_CHK_WITH_GOTO(ret, "render_gfx_mesh_alloc", err_no_memory);
+		VK_CHK_WITH_GOTO(ret, "render_gfx_mesh_alloc_and_write", err_no_memory);
 
 		VK_NAME_DESCRIPTOR_SET(vk, ms.descriptor_sets[i], "render_gfx mesh descriptor sets");
 	}
@@ -571,10 +577,13 @@ crg_distortion_common(struct render_gfx *render,
 		// Convenience.
 		const struct render_viewport_data *viewport_data = &d->views[i].target.viewport_data;
 
+		const render_scissor_data_t *scissor_data = &d->views[i].target.scissor_data;
+
 		render_gfx_begin_view( //
 		    render,            //
 		    i,                 // view_index
-		    viewport_data);    //
+		    viewport_data,     //
+		    scissor_data);     //
 
 		render_gfx_mesh_draw(      //
 		    render,                //
@@ -619,10 +628,9 @@ crg_distortion_after_squash(struct render_gfx *render, const struct comp_render_
 		    src_image_view);       //
 	}
 
-	// We are passing in the same old and new poses.
 	crg_distortion_common( //
 	    render,            //
-	    false,             // do_timewarp
+	    d->do_timewarp,    //
 	    &md,               //
 	    d);                //
 }
@@ -636,7 +644,7 @@ crg_distortion_fast_path(struct render_gfx *render,
 {
 	const struct xrt_layer_data *data = &layer->data;
 
-	const VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
+	VkSampler clamp_to_border_black = render->r->samplers.clamp_to_border_black;
 
 	struct gfx_mesh_data md = XRT_STRUCT_INIT;
 	for (uint32_t i = 0; i < d->target.view_count; i++) {
@@ -651,7 +659,7 @@ crg_distortion_fast_path(struct render_gfx *render,
 		src_pose = vds[i]->pose;
 		src_fov = vds[i]->fov;
 		src_norm_rect = vds[i]->sub.norm_rect;
-		const VkImageView src_image_view = get_image_view(image, data->flags, array_index);
+		VkImageView src_image_view = get_image_view(image, data->flags, array_index);
 
 		if (data->flip_y) {
 			src_norm_rect.y += src_norm_rect.h;
@@ -826,7 +834,8 @@ comp_render_gfx_layers(struct render_gfx *render,
 		render_gfx_begin_view( //
 		    render,            //
 		    view,              // view_index
-		    viewport_data);    // viewport_data
+		    viewport_data,     // viewport_data
+		    viewport_data);    // scissor_data
 
 		// Only source for data here, read only.
 		const struct gfx_layer_view_state *state = &ls.views[view];

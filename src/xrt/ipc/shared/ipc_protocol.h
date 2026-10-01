@@ -153,8 +153,16 @@ struct ipc_device_info
 	enum xrt_device_name name;
 	enum xrt_device_type device_type;
 
+	/*!
+	 * The service-side @ref xrt_device_id, synchronized to IPC clients so that
+	 * @ref xrt_device::id matches across all clients connected to the same
+	 * service. This is distinct from the per-client-connection @c uint32_t
+	 * slot index used to look up devices in IPC messages.
+	 */
+	uint64_t xrt_device_id_val;
+
 	//! Which tracking system origin is this device attached to.
-	uint32_t tracking_origin_id;
+	XRT_ALIGNAS(8) uint32_t tracking_origin_id;
 
 	//! A string describing the device.
 	char str[XRT_DEVICE_NAME_LEN];
@@ -366,6 +374,28 @@ struct ipc_distortion_mesh_info
 };
 
 /*!
+ * Pointer-free arguments for creating an @ref xrt_hand_tracker over IPC.
+ */
+struct ipc_hand_tracker_create_info
+{
+	enum xrt_hand hand;
+	enum xrt_input_name requested_sources[2];
+	uint32_t requested_source_count;
+	bool has_locked_xdev;
+	uint32_t locked_xdev_id;
+};
+
+/*!
+ * Pointer-free arguments for creating an @ref xrt_body_tracker over IPC.
+ */
+struct ipc_body_tracker_create_info
+{
+	enum xrt_input_name body_tracking_type;
+	bool has_locked_xdev;
+	uint32_t locked_xdev_id;
+};
+
+/*!
  * Initial info from a client when it connects.
  */
 struct ipc_client_description
@@ -418,7 +448,6 @@ struct ipc_app_state
 	int64_t pid;
 	struct xrt_application_info info;
 };
-
 
 /*!
  * Arguments for creating swapchains from native images.

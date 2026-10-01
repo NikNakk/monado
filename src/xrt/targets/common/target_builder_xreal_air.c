@@ -99,10 +99,7 @@ xreal_air_estimate_system(struct xrt_builder *xb,
 	U_ZERO(estimate);
 
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
-
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
+	U_LOG_CHK_AND_RET(xreal_air_log_level, xret, "xrt_prober_lock_list");
 
 	struct xrt_prober_device *dev = NULL;
 	uint16_t product_index = 0;
@@ -122,9 +119,9 @@ xreal_air_estimate_system(struct xrt_builder *xb,
 	}
 
 	xret = xrt_prober_unlock_list(xp, &xpdevs);
-	assert(xret == XRT_SUCCESS);
+	U_LOG_CHK_AND_RET(xreal_air_log_level, xret, "xrt_prober_unlock_list");
 
-	return XRT_SUCCESS;
+	return xret;
 }
 
 static xrt_result_t
@@ -134,15 +131,13 @@ xreal_air_open_system_impl(struct xrt_builder *xb,
                            struct xrt_tracking_origin *origin,
                            struct xrt_system_devices *xsysd,
                            struct xrt_frame_context *xfctx,
-                           struct t_builder_roles_helper *tbrh)
+                           struct t_builder_options *tbo)
 {
 	struct xrt_prober_device **xpdevs = NULL;
 	size_t xpdev_count = 0;
 	xrt_result_t xret = XRT_SUCCESS;
 
 	DRV_TRACE_MARKER();
-
-	xreal_air_log_level = debug_get_log_option_xreal_air_log();
 
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
 	if (xret != XRT_SUCCESS) {
@@ -209,7 +204,7 @@ xreal_air_open_system_impl(struct xrt_builder *xb,
 	xsysd->static_xdevs[xsysd->static_xdev_count++] = xreal_air_device;
 
 	// Assign to role(s).
-	tbrh->head = xreal_air_device;
+	tbo->head = xreal_air_device;
 
 	return XRT_SUCCESS;
 
@@ -246,6 +241,8 @@ struct xrt_builder *
 xreal_air_builder_create(void)
 {
 	struct t_builder *ub = U_TYPED_CALLOC(struct t_builder);
+
+	xreal_air_log_level = debug_get_log_option_xreal_air_log();
 
 	// xrt_builder fields.
 	ub->base.estimate_system = xreal_air_estimate_system;

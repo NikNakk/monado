@@ -1,4 +1,4 @@
-// Copyright 2022-2023, Collabora, Ltd.
+// Copyright 2022-2026, Collabora, Ltd.
 // Copyright 2026, NVIDIA CORPORATION.
 // SPDX-License-Identifier: BSL-1.0
 /*!
@@ -117,9 +117,7 @@ wmr_estimate_system(struct xrt_builder *xb,
 
 	// Lock the device list
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
+	U_LOG_CHK_AND_RET(log_level, xret, "xrt_prober_lock_list");
 
 
 	/*
@@ -147,7 +145,7 @@ wmr_estimate_system(struct xrt_builder *xb,
 	 */
 
 	xret = xrt_prober_unlock_list(xp, &xpdevs);
-	assert(xret == XRT_SUCCESS);
+	U_LOG_CHK_AND_RET(log_level, xret, "xrt_prober_unlock_list");
 
 
 	/*
@@ -183,14 +181,13 @@ wmr_open_system_impl(struct xrt_builder *xb,
                      struct xrt_tracking_origin *origin,
                      struct xrt_system_devices *xsysd,
                      struct xrt_frame_context *xfctx,
-                     struct t_builder_roles_helper *tbrh)
+                     struct t_builder_options *tbo)
 {
 	enum u_logging_level log_level = debug_get_log_option_wmr_log();
 	struct wmr_bt_controllers_search_results ctrls = {0};
 	struct wmr_headset_search_results whsr = {0};
 	struct xrt_prober_device **xpdevs = NULL;
 	size_t xpdev_count = 0;
-	xrt_result_t xret_unlock = XRT_SUCCESS;
 	xrt_result_t xret = XRT_SUCCESS;
 
 	/*
@@ -221,8 +218,11 @@ wmr_open_system_impl(struct xrt_builder *xb,
 		U_LOG_IFL_E(log_level, "Could not find headset devices! (holo %p, companion %p)",
 		            (void *)whsr.xpdev_holo, (void *)whsr.xpdev_companion);
 
-		xret = XRT_ERROR_DEVICE_CREATION_FAILED;
-		goto error;
+		if (xrt_prober_unlock_list(xp, &xpdevs) != XRT_SUCCESS) {
+			U_LOG_IFL_E(log_level, "xrt_prober_unlock_list failed");
+		}
+
+		return XRT_ERROR_DEVICE_CREATION_FAILED;
 	}
 
 
@@ -270,9 +270,9 @@ wmr_open_system_impl(struct xrt_builder *xb,
 	 * Tidy
 	 */
 
-	xret_unlock = xrt_prober_unlock_list(xp, &xpdevs);
-	assert(xret_unlock == XRT_SUCCESS);
-	(void)xret_unlock;
+	if (xrt_prober_unlock_list(xp, &xpdevs) != XRT_SUCCESS) {
+		U_LOG_IFL_E(log_level, "xrt_prober_unlock_list failed");
+	}
 
 	xsysd->static_xdevs[xsysd->static_xdev_count++] = head;
 	if (left != NULL) {
@@ -298,11 +298,11 @@ wmr_open_system_impl(struct xrt_builder *xb,
 
 
 	// Assign to role(s).
-	tbrh->head = head;
-	tbrh->left = left;
-	tbrh->right = right;
-	tbrh->hand_tracking.unobstructed.left = ht_left;
-	tbrh->hand_tracking.unobstructed.right = ht_right;
+	tbo->head = head;
+	tbo->left = left;
+	tbo->right = right;
+	tbo->hand_tracking.unobstructed.left = ht_left;
+	tbo->hand_tracking.unobstructed.right = ht_right;
 
 	return XRT_SUCCESS;
 
@@ -311,8 +311,9 @@ error:
 	xrt_device_destroy(&left);
 	xrt_device_destroy(&right);
 
-	xret_unlock = xrt_prober_unlock_list(xp, &xpdevs);
-	assert(xret_unlock == XRT_SUCCESS);
+	if (xrt_prober_unlock_list(xp, &xpdevs) != XRT_SUCCESS) {
+		U_LOG_IFL_E(log_level, "xrt_prober_unlock_list failed");
+	}
 
 	return xret;
 }

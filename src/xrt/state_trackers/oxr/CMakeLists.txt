@@ -43,6 +43,10 @@ add_library(
 	actions/oxr_subaction.h
 	common/oxr_defines.h
 	common/oxr_forward_declarations.h
+	common/oxr_handle_array.c
+	common/oxr_handle_array.h
+	common/oxr_handle_base.c
+	common/oxr_handle_base.h
 	common/oxr_refcounted.h
 	path/oxr_path_store.c
 	path/oxr_path_store.h
@@ -63,7 +67,6 @@ add_library(
 	oxr_frame_sync.h
 	oxr_foveation_policy.c
 	oxr_foveation_policy.h
-	oxr_handle_base.c
 	oxr_instance.c
 	oxr_logger.c
 	oxr_logger.h
@@ -120,7 +123,7 @@ if(XRT_HAVE_OPENGL_GLX AND XRT_HAVE_XLIB)
 endif()
 
 if(XRT_HAVE_EGL)
-	target_sources(st_oxr PRIVATE oxr_session_gfx_egl.c)
+	target_sources(st_oxr PRIVATE oxr_session_gfx_egl.c oxr_egl.c)
 endif()
 
 if(XRT_FEATURE_WINE_D3D11_BRIDGE)
@@ -201,7 +204,6 @@ target_link_libraries(
 		aux_util
 		aux_math
 		aux_foveation
-		aux_generated_bindings_helpers
 		comp_client
 		aux-includes
 	PUBLIC aux_os

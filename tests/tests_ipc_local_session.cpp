@@ -6,7 +6,7 @@
 #include "multi/comp_multi_private.h"
 #include "multi/comp_multi_interface.h"
 #include "util/u_macos_hosted_client.h"
-#include "util/u_session.h"
+#include "b_session.h"
 #include "xrt/xrt_system.h"
 #include "catch_amalgamated.hpp"
 #include <vector>
@@ -113,7 +113,7 @@ ipc_call_system_get_properties(ipc_connection *, xrt_system_properties *)
 xrt_session *
 ipc_client_session_create(ipc_connection *)
 {
-	return &u_session_create(nullptr)->base;
+	return &b_session_create(nullptr)->base;
 }
 xrt_result_t
 ipc_client_create_native_compositor(xrt_system_compositor *, const xrt_session_info *, xrt_compositor_native **)

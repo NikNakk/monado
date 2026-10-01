@@ -24,6 +24,7 @@
 #include "util/u_debug.h"
 
 #include "vk/vk_helpers.h"
+#include "vk/vk_compositor_flags.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -135,7 +136,7 @@ vk_csci_get_barrier_optimal_layout(VkFormat format)
 	switch (format) {
 		VK_CSCI_FORMATS(CASE_COLOR, CASE_DS, CASE_DS, CASE_DS)
 	default: //
-		assert(false && !"Format not supported!");
+		U_LOG_E("Format '%s' is not supported.", vk_format_string(format));
 		return VK_IMAGE_LAYOUT_UNDEFINED;
 	}
 
@@ -156,7 +157,7 @@ vk_csci_get_barrier_aspect_mask(VkFormat format)
 	switch (format) {
 		VK_CSCI_FORMATS(CASE_COLOR, CASE_DS, CASE_D, CASE_S)
 	default: //
-		assert(false && !"Format not supported!");
+		U_LOG_E("Format '%s' is not supported.", vk_format_string(format));
 		return 0;
 	}
 
@@ -179,7 +180,7 @@ vk_csci_get_image_view_aspect(VkFormat format, enum xrt_swapchain_usage_bits bit
 	switch (format) {
 		VK_CSCI_FORMATS(CASE_COLOR, CASE_DS, CASE_D, CASE_S)
 	default: //
-		assert(false && !"Format not supported!");
+		U_LOG_E("Format '%s' is not supported.", vk_format_string(format));
 		return 0;
 	}
 
@@ -206,13 +207,13 @@ vk_csci_get_image_usage_flags(struct vk_bundle *vk, VkFormat format, enum xrt_sw
 	}
 
 	// clang-format off
-	TEST(XRT_SWAPCHAIN_USAGE_COLOR,            VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT,         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
-	TEST(XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT,         VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)
-	TEST(XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL,    VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
-	TEST(XRT_SWAPCHAIN_USAGE_TRANSFER_SRC,     VK_FORMAT_FEATURE_TRANSFER_SRC_BIT,             VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-	TEST(XRT_SWAPCHAIN_USAGE_TRANSFER_DST,     VK_FORMAT_FEATURE_TRANSFER_DST_BIT,             VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-	TEST(XRT_SWAPCHAIN_USAGE_SAMPLED,          VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT,            VK_IMAGE_USAGE_SAMPLED_BIT)
-	TEST(XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,            VK_IMAGE_USAGE_STORAGE_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_COLOR,            VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT,                                                  VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_INPUT_ATTACHMENT, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL,    VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT,                                          VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_TRANSFER_SRC,     VK_FORMAT_FEATURE_TRANSFER_SRC_BIT,                                                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_TRANSFER_DST,     VK_FORMAT_FEATURE_TRANSFER_DST_BIT,                                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_SAMPLED,          VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT,                                                     VK_IMAGE_USAGE_SAMPLED_BIT)
+	TEST(XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,                                                     VK_IMAGE_USAGE_STORAGE_BIT)
 	// clang-format on
 
 #undef TEST

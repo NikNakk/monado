@@ -173,6 +173,17 @@ enum xrt_distortion_model
 };
 
 /*!
+ * The type of panel refresh the device has.
+ */
+enum xrt_panel_refresh_type
+{
+	//! entire panel refreshes simultaneously
+	XRT_PANEL_REFRESH_TYPE_GLOBAL = 0,
+	//! panel refreshes progressively along scanout direction, e.g. OLED panels
+	XRT_PANEL_REFRESH_TYPE_ROLLING,
+};
+
+/*!
  * Screen scanout direction
  */
 enum xrt_scanout_direction
@@ -269,6 +280,16 @@ struct xrt_vec2
 	float x;
 	float y;
 };
+
+/*!
+ * All-zero value for @ref xrt_vec2
+ *
+ * @ingroup xrt_iface math
+ * @relates xrt_vec2
+ */
+// clang-format off
+#define XRT_VEC2_ZERO {0.f, 0.f}
+// clang-format on
 
 /*!
  * Represents a uv triplet for distortion, basically just three xrt_vec2.
@@ -402,6 +423,19 @@ struct xrt_colour_rgb_f32
 };
 
 /*!
+ * A 3 element HSV colour with floating point channels.
+ * All values are in [0, 1] range, with hue wrapping at 1.
+ *
+ * @ingroup xrt_iface math
+ */
+struct xrt_colour_hsv_f32
+{
+	float h;
+	float s;
+	float v;
+};
+
+/*!
  * A 4 element colour with floating point channels.
  *
  * @ingroup xrt_iface math
@@ -471,7 +505,7 @@ struct xrt_normalized_rect
 /*!
  * A pose composed of a position and orientation.
  *
- * @see xrt_qaut
+ * @see xrt_quat
  * @see xrt_vec3
  * @ingroup xrt_iface math
  */
@@ -2150,6 +2184,13 @@ enum xrt_body_tracking_calibration_state_meta
 	XRT_BODY_TRACKING_CALIBRATION_STATE_INVALID_META = 3,
 };
 
+/// @addtogroup XR_META_body_tracking_fidelity
+enum xrt_body_tracking_fidelity_meta
+{
+	XRT_BODY_TRACKING_FIDELITY_LOW_META = 1,
+	XRT_BODY_TRACKING_FIDELITY_HIGH_META = 2,
+};
+
 /// @addtogroup XR_FB_body_tracking
 struct xrt_body_skeleton_joint_fb
 {
@@ -2198,6 +2239,9 @@ struct xrt_base_body_joint_set_meta
 	{
 		// Requires XR_META_body_tracking_calibration, @ref xrt_device_supported::body_tracking_calibration
 		enum xrt_body_tracking_calibration_state_meta calibration_status;
+
+		// Requires XR_META_body_tracking_fidelity, @ref xrt_device_supported::body_tracking_fidelity
+		enum xrt_body_tracking_fidelity_meta fidelity_status;
 	} exts;
 };
 
@@ -2392,8 +2436,11 @@ enum xrt_form_factor
  */
 enum xrt_view_type
 {
+	XRT_VIEW_TYPE_INVALID = 0,
 	XRT_VIEW_TYPE_MONO = 1,
 	XRT_VIEW_TYPE_STEREO = 2,
+	XRT_VIEW_TYPE_QUAD = 3,
+	XRT_VIEW_TYPE_MAX,
 };
 
 /*!
@@ -2526,6 +2573,20 @@ xrt_reference_dec_and_is_zero(struct xrt_reference *xref)
 	XRT_REFERENCE_DEBUG_PRINT(Decremented, xref, count);
 
 	return count == 0;
+}
+
+static inline uint32_t
+xrt_view_type_view_count(enum xrt_view_type view_type)
+{
+	switch (view_type) {
+	case XRT_VIEW_TYPE_INVALID:
+	case XRT_VIEW_TYPE_MAX: break;
+	case XRT_VIEW_TYPE_MONO: return 1;
+	case XRT_VIEW_TYPE_STEREO: return 2;
+	case XRT_VIEW_TYPE_QUAD: return 4;
+	}
+
+	return 0;
 }
 
 #ifdef __cplusplus

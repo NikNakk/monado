@@ -26,7 +26,7 @@
 
 #include "oxr_api_funcs.h"
 #include "oxr_api_verify.h"
-#include "oxr_handle.h"
+#include "oxr_handle_base.h"
 #include "oxr_chain.h"
 #include "oxr_roles.h"
 
@@ -84,7 +84,7 @@ oxr_xrDestroySession(XrSession session)
 	}
 	*link = sess->next;
 
-	return oxr_handle_destroy(&log, &sess->handle);
+	return oxr_handle_parent_destroy(&log, &sess->handle);
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -727,7 +727,7 @@ oxr_xrGetPlaneDetectionStateEXT(XrPlaneDetectorEXT planeDetector, XrPlaneDetecti
 	struct oxr_plane_detector_ext *pd;
 	enum xrt_result xret;
 
-	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrGetPlaneDetectionsEXT");
+	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrGetPlaneDetectionStateEXT");
 
 	enum xrt_plane_detector_state_ext xstate = 0;
 
@@ -845,7 +845,7 @@ oxr_xrGetPlanePolygonBufferEXT(XrPlaneDetectorEXT planeDetector,
 {
 	struct oxr_logger log;
 	struct oxr_plane_detector_ext *pd;
-	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrGetPlaneDetectionsEXT");
+	OXR_VERIFY_PLANE_DETECTOR_AND_INIT_LOG(&log, planeDetector, pd, "xrGetPlanePolygonBufferEXT");
 
 	//! @todo can't reasonably retrieve a polygon without having retrieved plane data first.
 	if (pd->state != XR_PLANE_DETECTION_STATE_DONE_EXT) {

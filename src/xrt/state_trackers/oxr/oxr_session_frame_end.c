@@ -27,7 +27,7 @@
 #include "oxr_objects.h"
 #include "oxr_logger.h"
 #include "oxr_two_call.h"
-#include "oxr_handle.h"
+#include "oxr_handle_base.h"
 #include "oxr_chain.h"
 #include "oxr_api_verify.h"
 #include "oxr_chain.h"
@@ -50,6 +50,10 @@ DEBUG_GET_ONCE_BOOL_OPTION(debug_foveation_binding, "OXR_DEBUG_FOVEATION_BINDING
  * Helper functions and defines.
  *
  */
+
+#define XR_COMPOSITION_LAYER_FLAGS_ALL_VALID                                                                           \
+	(XR_COMPOSITION_LAYER_CORRECT_CHROMATIC_ABERRATION_BIT | XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | \
+	 XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT | XR_COMPOSITION_LAYER_INVERTED_ALPHA_BIT_EXT)
 
 static double
 ns_to_ms(int64_t ns)
@@ -119,7 +123,7 @@ convert_blend_factor(XrBlendFactorFB blend_factor)
 #endif // OXR_HAVE_FB_composition_layer_alpha_blend
 
 static enum xrt_layer_composition_flags
-convert_layer_flags(XrSwapchainUsageFlags xr_flags)
+convert_layer_flags(struct oxr_session *sess, XrSwapchainUsageFlags xr_flags)
 {
 	enum xrt_layer_composition_flags flags = 0;
 
@@ -132,6 +136,11 @@ convert_layer_flags(XrSwapchainUsageFlags xr_flags)
 	if ((xr_flags & XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT) != 0) {
 		flags |= XRT_LAYER_COMPOSITION_UNPREMULTIPLIED_ALPHA_BIT;
 	}
+#ifdef OXR_HAVE_EXT_composition_layer_inverted_alpha
+	if ((xr_flags & XR_COMPOSITION_LAYER_INVERTED_ALPHA_BIT_EXT) != 0) {
+		flags |= XRT_LAYER_COMPOSITION_INVERTED_ALPHA_BIT;
+	}
+#endif
 
 	return flags;
 }
@@ -476,10 +485,8 @@ verify_blend_factors(struct oxr_logger *log,
 			                 layer_index, alphaBlend->dstFactorAlpha);
 		}
 	}
-#else
-	// Extension isn't enabled, always pass.
-	return XR_SUCCESS;
 #endif
+	return XR_SUCCESS;
 }
 
 static XrResult
@@ -490,6 +497,33 @@ verify_space(struct oxr_logger *log, uint32_t layer_index, XrSpace space)
 		    log, XR_ERROR_VALIDATION_FAILURE,
 		    "(frameEndInfo->layers[%u]->space == XR_NULL_HANDLE) XrSpace must not be XR_NULL_HANDLE",
 		    layer_index);
+	}
+
+	return XR_SUCCESS;
+}
+
+static XrResult
+verify_layer_flags(struct oxr_logger *log,
+                   struct oxr_session *sess,
+                   uint32_t layer_index,
+                   XrCompositionLayerFlags layerFlags)
+{
+
+	// Check if any invalid bits are set
+	if ((layerFlags & ~XR_COMPOSITION_LAYER_FLAGS_ALL_VALID) != 0) {
+		return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+		                 "(frameEndInfo->layers[%u]->layerFlags == 0x%08x) has unknown flag bits set",
+		                 layer_index, (unsigned int)layerFlags);
+	}
+
+	if ((layerFlags & XR_COMPOSITION_LAYER_INVERTED_ALPHA_BIT_EXT) != 0
+#ifdef OXR_HAVE_EXT_composition_layer_inverted_alpha
+	    && !sess->sys->inst->extensions.EXT_composition_layer_inverted_alpha
+#endif
+	) {
+		return oxr_error(
+		    log, XR_ERROR_VALIDATION_FAILURE,
+		    "Application set XR_COMPOSITION_LAYER_INVERTED_ALPHA_BIT_EXT but the extension is not enabled.");
 	}
 
 	return XR_SUCCESS;
@@ -517,6 +551,11 @@ verify_quad_layer(struct oxr_session *sess,
 	}
 
 	ret = verify_blend_factors(log, sess, layer_index, (XrCompositionLayerBaseHeader *)quad);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	ret = verify_layer_flags(log, sess, layer_index, quad->layerFlags);
 	if (ret != XR_SUCCESS) {
 		return ret;
 	}
@@ -690,6 +729,11 @@ verify_projection_layer(struct oxr_session *sess,
 	}
 
 	ret = verify_blend_factors(log, sess, layer_index, (XrCompositionLayerBaseHeader *)proj);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	ret = verify_layer_flags(log, sess, layer_index, proj->layerFlags);
 	if (ret != XR_SUCCESS) {
 		return ret;
 	}
@@ -876,6 +920,11 @@ verify_cube_layer(struct oxr_session *sess,
 		return ret;
 	}
 
+	ret = verify_layer_flags(log, sess, layer_index, cube->layerFlags);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
 	if (!math_quat_validate_within_1_percent((struct xrt_quat *)&cube->orientation)) {
 		const XrQuaternionf *q = &cube->orientation;
 		return oxr_error(log, XR_ERROR_POSE_INVALID,
@@ -940,6 +989,11 @@ verify_cylinder_layer(struct oxr_session *sess,
 	}
 
 	ret = verify_blend_factors(log, sess, layer_index, (XrCompositionLayerBaseHeader *)cylinder);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	ret = verify_layer_flags(log, sess, layer_index, cylinder->layerFlags);
 	if (ret != XR_SUCCESS) {
 		return ret;
 	}
@@ -1054,6 +1108,11 @@ verify_equirect1_layer(struct oxr_session *sess,
 		return ret;
 	}
 
+	ret = verify_layer_flags(log, sess, layer_index, equirect->layerFlags);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
 	if (!math_quat_validate_within_1_percent((struct xrt_quat *)&equirect->pose.orientation)) {
 		const XrQuaternionf *q = &equirect->pose.orientation;
 		return oxr_error(log, XR_ERROR_POSE_INVALID,
@@ -1147,6 +1206,11 @@ verify_equirect2_layer(struct oxr_session *sess,
 	}
 
 	ret = verify_blend_factors(log, sess, layer_index, (XrCompositionLayerBaseHeader *)equirect);
+	if (ret != XR_SUCCESS) {
+		return ret;
+	}
+
+	ret = verify_layer_flags(log, sess, layer_index, equirect->layerFlags);
 	if (ret != XR_SUCCESS) {
 		return ret;
 	}
@@ -1346,7 +1410,7 @@ submit_quad_layer(struct oxr_session *sess,
 	struct oxr_swapchain *sc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, quad->subImage.swapchain);
 	struct oxr_space *spc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_space *, quad->space);
 
-	enum xrt_layer_composition_flags flags = convert_layer_flags(quad->layerFlags);
+	enum xrt_layer_composition_flags flags = convert_layer_flags(sess, quad->layerFlags);
 
 	struct xrt_pose *pose_ptr = (struct xrt_pose *)&quad->pose;
 
@@ -1390,6 +1454,7 @@ submit_projection_layer(struct oxr_session *sess,
                         struct oxr_logger *log,
                         XrCompositionLayerProjection *proj,
                         struct xrt_device *head,
+                        enum xrt_layer_composition_flags extra_flags,
                         uint64_t oxr_timestamp,
                         uint64_t xrt_timestamp)
 {
@@ -1407,10 +1472,14 @@ submit_projection_layer(struct oxr_session *sess,
 	const bool d_scs_valid = false;
 #endif // OXR_HAVE_KHR_composition_layer_depth
 
-	enum xrt_layer_composition_flags flags = convert_layer_flags(proj->layerFlags);
+	// From app flags.
+	enum xrt_layer_composition_flags flags = convert_layer_flags(sess, proj->layerFlags);
 	if (sess->sys->inst->quirks.no_texture_source_alpha) {
 		flags &= ~XRT_LAYER_COMPOSITION_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 	}
+
+	// One use of the extra_flags is quad view emulation.
+	flags |= extra_flags;
 
 	for (uint32_t i = 0; i < proj->viewCount; i++) {
 		scs[i] = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, proj->views[i].subImage.swapchain);
@@ -1510,7 +1579,7 @@ submit_cube_layer(struct oxr_session *sess,
 	data.type = XRT_LAYER_CUBE;
 	data.name = XRT_INPUT_GENERIC_HEAD_POSE;
 	data.timestamp = xrt_timestamp;
-	data.flags = convert_layer_flags(cube->layerFlags);
+	data.flags = convert_layer_flags(sess, cube->layerFlags);
 	fill_in_layer_settings(sess, (XrCompositionLayerBaseHeader *)cube, &data);
 
 	if (spc->space_type == OXR_SPACE_TYPE_REFERENCE_VIEW) {
@@ -1559,7 +1628,7 @@ submit_cylinder_layer(struct oxr_session *sess,
 	struct oxr_swapchain *sc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, cylinder->subImage.swapchain);
 	struct oxr_space *spc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_space *, cylinder->space);
 
-	enum xrt_layer_composition_flags flags = convert_layer_flags(cylinder->layerFlags);
+	enum xrt_layer_composition_flags flags = convert_layer_flags(sess, cylinder->layerFlags);
 	enum xrt_layer_eye_visibility visibility = convert_eye_visibility(cylinder->eyeVisibility);
 
 	struct xrt_pose *pose_ptr = (struct xrt_pose *)&cylinder->pose;
@@ -1610,7 +1679,7 @@ submit_equirect1_layer(struct oxr_session *sess,
 	struct oxr_swapchain *sc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, equirect->subImage.swapchain);
 	struct oxr_space *spc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_space *, equirect->space);
 
-	enum xrt_layer_composition_flags flags = convert_layer_flags(equirect->layerFlags);
+	enum xrt_layer_composition_flags flags = convert_layer_flags(sess, equirect->layerFlags);
 
 	struct xrt_pose *pose_ptr = (struct xrt_pose *)&equirect->pose;
 
@@ -1672,7 +1741,7 @@ submit_equirect2_layer(struct oxr_session *sess,
 	struct oxr_swapchain *sc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_swapchain *, equirect->subImage.swapchain);
 	struct oxr_space *spc = XRT_CAST_OXR_HANDLE_TO_PTR(struct oxr_space *, equirect->space);
 
-	enum xrt_layer_composition_flags flags = convert_layer_flags(equirect->layerFlags);
+	enum xrt_layer_composition_flags flags = convert_layer_flags(sess, equirect->layerFlags);
 
 	struct xrt_pose *pose_ptr = (struct xrt_pose *)&equirect->pose;
 
@@ -1719,7 +1788,7 @@ submit_passthrough_layer(struct oxr_session *sess,
                          uint64_t oxr_timestamp,
                          uint64_t xrt_timestamp)
 {
-	enum xrt_layer_composition_flags flags = convert_layer_flags(passthrough->flags);
+	enum xrt_layer_composition_flags flags = convert_layer_flags(sess, passthrough->flags);
 
 	struct xrt_layer_data data;
 	U_ZERO(&data);
@@ -1734,6 +1803,58 @@ submit_passthrough_layer(struct oxr_session *sess,
 	OXR_CHECK_XRET(log, sess, xret, xrt_comp_layer_passthrough);
 
 	return XR_SUCCESS;
+}
+
+static XrResult
+submit_4x_proj_emulation(struct oxr_session *sess,
+                         struct xrt_compositor *xc,
+                         struct oxr_logger *log,
+                         XrCompositionLayerProjection *proj,
+                         struct xrt_device *head,
+                         uint64_t oxr_timestamp,
+                         uint64_t xrt_timestamp)
+{
+	const enum xrt_layer_composition_flags context_extra_flags = XRT_LAYER_SPLIT_QUAD_VIEW_CONTEXT;
+	const enum xrt_layer_composition_flags inset_extra_flags = XRT_LAYER_SPLIT_QUAD_VIEW_INSET;
+	XrResult result = XR_SUCCESS;
+
+	XrCompositionLayerProjection context = *proj;
+	context.next = NULL; // Can't handle this well.
+	context.viewCount = 2;
+	context.views = proj->views;
+
+	XrCompositionLayerProjection inset = *proj;
+	inset.next = NULL; // Can't handle this well.
+	inset.viewCount = 2;
+	inset.views = &proj->views[2];
+
+	result = submit_projection_layer( //
+	    sess,                         //
+	    xc,                           //
+	    log,                          //
+	    &context,                     //
+	    head,                         //
+	    context_extra_flags,          //
+	    oxr_timestamp,                //
+	    xrt_timestamp);               //
+	if (result != XR_SUCCESS) {
+		return oxr_error(log, result, "Call submit_projection_layer(context) failed");
+	}
+
+	result = submit_projection_layer( //
+	    sess,                         //
+	    xc,                           //
+	    log,                          //
+	    &inset,                       //
+	    head,                         //
+	    inset_extra_flags,            //
+	    oxr_timestamp,                //
+	    xrt_timestamp);               //
+	if (result != XR_SUCCESS) {
+		return oxr_error(log, result, "Call submit_projection_layer(inset) failed");
+	}
+
+	return result;
 }
 
 XrResult
@@ -1910,10 +2031,31 @@ oxr_session_frame_end(struct oxr_logger *log, struct oxr_session *sess, const Xr
 		assert(layer != NULL);
 
 		switch (layer->type) {
-		case XR_TYPE_COMPOSITION_LAYER_PROJECTION:
-			submit_projection_layer(sess, xc, log, (XrCompositionLayerProjection *)layer, xdev,
-			                        frameEndInfo->displayTime, xrt_display_time_ns);
+		case XR_TYPE_COMPOSITION_LAYER_PROJECTION: {
+			XrCompositionLayerProjection *proj_layer = (XrCompositionLayerProjection *)layer;
+			if (proj_layer->viewCount == 4) {
+				// emulate 4x projection layer
+				submit_4x_proj_emulation(      //
+				    sess,                      //
+				    xc,                        //
+				    log,                       //
+				    proj_layer,                //
+				    xdev,                      //
+				    frameEndInfo->displayTime, //
+				    xrt_display_time_ns);      //
+			} else {
+				submit_projection_layer(       //
+				    sess,                      //
+				    xc,                        //
+				    log,                       //
+				    proj_layer,                //
+				    xdev,                      //
+				    0,                         // extra_flags
+				    frameEndInfo->displayTime, //
+				    xrt_display_time_ns);      //
+			}
 			break;
+		}
 		case XR_TYPE_COMPOSITION_LAYER_QUAD:
 			submit_quad_layer(sess, xc, log, (XrCompositionLayerQuad *)layer, xdev,
 			                  frameEndInfo->displayTime, xrt_display_time_ns);

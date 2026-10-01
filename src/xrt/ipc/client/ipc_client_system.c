@@ -13,7 +13,7 @@
 #include "xrt/xrt_session.h"
 
 #include "util/u_misc.h"
-#include "util/u_session.h"
+#include "b_session.h"
 
 #include "ipc_client_generated.h"
 
@@ -119,7 +119,7 @@ struct ipc_client_local_session
 	struct xrt_session *remote;
 
 	//! Receives the local compositor's events.
-	struct u_session *local;
+	struct b_session *local;
 
 	//! The local system compositor and this session's native compositor.
 	struct xrt_system_compositor *xsysc;
@@ -264,7 +264,7 @@ create_with_local_comp(struct ipc_client_system *icsys,
 	ils->hosted_client = icsys->hosted_client;
 	u_macos_hosted_client_reference(ils->hosted_client);
 	ils->remote = remote;
-	ils->local = u_session_create(NULL);
+	ils->local = b_session_create(NULL);
 	ils->xsysc = icsys->xsysc;
 
 	xret = xrt_syscomp_create_native_compositor( //

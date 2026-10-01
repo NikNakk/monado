@@ -43,7 +43,7 @@ static const GUID kMonadoSharedFenceBootstrapNameGuid = {
 
 struct client_d3d11_compositor
 {
-	struct xrt_compositor_d3d11 base;
+	struct xrt_compositor base;
 	struct xrt_compositor_native *xcn;
 	ID3D11Device *device;
 	ID3D11DeviceContext *context;
@@ -825,7 +825,7 @@ destroy_compositor(struct xrt_compositor *xc)
 	free(c);
 }
 
-struct xrt_compositor_d3d11 *
+struct xrt_compositor *
 client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *device)
 {
 	if (xcn == NULL || device == NULL)
@@ -842,7 +842,7 @@ client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *
 	c->device->AddRef();
 	c->device->GetImmediateContext(&c->context);
 	if (c->context == NULL) {
-		destroy_compositor(&c->base.base);
+		destroy_compositor(&c->base);
 		return NULL;
 	}
 
@@ -907,45 +907,45 @@ client_d3d11_compositor_create(struct xrt_compositor_native *xcn, ID3D11Device *
 		}
 	}
 
-	c->base.base.get_swapchain_create_properties = get_swapchain_create_properties;
-	c->base.base.create_swapchain = create_swapchain;
-	c->base.base.begin_session = begin_session;
-	c->base.base.end_session = end_session;
-	c->base.base.wait_frame = wait_frame;
-	c->base.base.begin_frame = begin_frame;
-	c->base.base.discard_frame = discard_frame;
-	c->base.base.layer_begin = layer_begin;
-	c->base.base.layer_projection = layer_projection;
-	c->base.base.layer_projection_depth = layer_projection_depth;
-	c->base.base.layer_quad = layer_quad;
-	c->base.base.layer_cube = layer_cube;
-	c->base.base.layer_cylinder = layer_cylinder;
-	c->base.base.layer_equirect1 = layer_equirect1;
-	c->base.base.layer_equirect2 = layer_equirect2;
-	c->base.base.layer_passthrough = layer_passthrough;
-	c->base.base.layer_commit = layer_commit;
-	c->base.base.destroy = destroy_compositor;
-	c->base.base.set_thread_hint = set_thread_hint;
-	c->base.base.get_display_refresh_rate = get_refresh;
-	c->base.base.request_display_refresh_rate = request_refresh;
-	c->base.base.set_performance_level = set_performance;
-	c->base.base.get_reference_bounds_rect = get_bounds;
-	c->base.base.info.max_texture_size = xcn->base.info.max_texture_size;
+	c->base.get_swapchain_create_properties = get_swapchain_create_properties;
+	c->base.create_swapchain = create_swapchain;
+	c->base.begin_session = begin_session;
+	c->base.end_session = end_session;
+	c->base.wait_frame = wait_frame;
+	c->base.begin_frame = begin_frame;
+	c->base.discard_frame = discard_frame;
+	c->base.layer_begin = layer_begin;
+	c->base.layer_projection = layer_projection;
+	c->base.layer_projection_depth = layer_projection_depth;
+	c->base.layer_quad = layer_quad;
+	c->base.layer_cube = layer_cube;
+	c->base.layer_cylinder = layer_cylinder;
+	c->base.layer_equirect1 = layer_equirect1;
+	c->base.layer_equirect2 = layer_equirect2;
+	c->base.layer_passthrough = layer_passthrough;
+	c->base.layer_commit = layer_commit;
+	c->base.destroy = destroy_compositor;
+	c->base.set_thread_hint = set_thread_hint;
+	c->base.get_display_refresh_rate = get_refresh;
+	c->base.request_display_refresh_rate = request_refresh;
+	c->base.set_performance_level = set_performance;
+	c->base.get_reference_bounds_rect = get_bounds;
+	c->base.info.max_texture_size = xcn->base.info.max_texture_size;
 
 	for (uint32_t i = 0; i < xcn->base.info.format_count; ++i) {
 		DXGI_FORMAT format = vk_to_dxgi(xcn->base.info.formats[i]);
 		if (format == DXGI_FORMAT_UNKNOWN)
 			continue;
-		c->base.base.info.formats[c->base.base.info.format_count++] = (int64_t)format;
+		c->base.info.formats[c->base.info.format_count++] = (int64_t)format;
 	}
 
-	if (c->base.base.info.format_count == 0 || c->fence == NULL || c->fence_event == NULL) {
+	if (c->base.info.format_count == 0 || c->fence == NULL || c->fence_event == NULL) {
 		U_LOG_E("Wine D3D11 bridge initialization failed: formats=%u fence=%p event=%p",
-		        c->base.base.info.format_count, (void *)c->fence, c->fence_event);
-		destroy_compositor(&c->base.base);
+		        c->base.info.format_count, (void *)c->fence, c->fence_event);
+		destroy_compositor(&c->base);
 		return NULL;
 	}
 
-	U_LOG_I("Wine D3D11 client compositor ready: formats=%u", c->base.base.info.format_count);
+	U_LOG_I("Wine D3D11 client compositor ready: formats=%u", c->base.info.format_count);
 	return &c->base;
 }

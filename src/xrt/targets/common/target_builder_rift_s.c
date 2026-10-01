@@ -77,9 +77,7 @@ rift_s_estimate_system(struct xrt_builder *xb,
 	U_ZERO(estimate);
 
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
+	U_LOG_CHK_AND_RET(rift_s_log_level, xret, "xrt_prober_lock_list");
 
 	struct xrt_prober_device *dev =
 	    u_builder_find_prober_device(xpdevs, xpdev_count, OCULUS_VR_INC_VID, OCULUS_RIFT_S_PID, XRT_BUS_TYPE_USB);
@@ -90,9 +88,9 @@ rift_s_estimate_system(struct xrt_builder *xb,
 	}
 
 	xret = xrt_prober_unlock_list(xp, &xpdevs);
-	assert(xret == XRT_SUCCESS);
+	U_LOG_CHK_AND_RET(rift_s_log_level, xret, "xrt_prober_unlock_list");
 
-	return XRT_SUCCESS;
+	return xret;
 }
 
 static xrt_result_t
@@ -102,15 +100,13 @@ rift_s_open_system_impl(struct xrt_builder *xb,
                         struct xrt_tracking_origin *origin,
                         struct xrt_system_devices *xsysd,
                         struct xrt_frame_context *xfctx,
-                        struct t_builder_roles_helper *tbrh)
+                        struct t_builder_options *tbo)
 {
 	struct xrt_prober_device **xpdevs = NULL;
 	size_t xpdev_count = 0;
 	xrt_result_t xret = XRT_SUCCESS;
 
 	DRV_TRACE_MARKER();
-
-	rift_s_log_level = debug_get_log_option_rift_s_log();
 
 	xret = xrt_prober_lock_list(xp, &xpdevs, &xpdev_count);
 	if (xret != XRT_SUCCESS) {
@@ -204,11 +200,11 @@ rift_s_open_system_impl(struct xrt_builder *xb,
 #endif
 
 	// Assign to role(s).
-	tbrh->head = hmd_xdev;
-	tbrh->left = left_xdev;
-	tbrh->right = right_xdev;
-	tbrh->hand_tracking.unobstructed.left = left_ht;
-	tbrh->hand_tracking.unobstructed.right = right_ht;
+	tbo->head = hmd_xdev;
+	tbo->left = left_xdev;
+	tbo->right = right_xdev;
+	tbo->hand_tracking.unobstructed.left = left_ht;
+	tbo->hand_tracking.unobstructed.right = right_ht;
 
 	return XRT_SUCCESS;
 
@@ -241,6 +237,8 @@ struct xrt_builder *
 rift_s_builder_create(void)
 {
 	struct t_builder *ub = U_TYPED_CALLOC(struct t_builder);
+
+	rift_s_log_level = debug_get_log_option_rift_s_log();
 
 	// xrt_builder fields.
 	ub->base.estimate_system = rift_s_estimate_system;

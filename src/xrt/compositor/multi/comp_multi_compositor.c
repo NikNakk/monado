@@ -672,6 +672,7 @@ multi_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin
 	if (!mc->state.session_active) {
 		multi_system_compositor_update_session_status(mc->msc, true);
 		mc->state.session_active = true;
+		mc->state.session_view_type = info->view_type;
 		if (mc->lifecycle_callbacks != NULL) {
 			mc->lifecycle_callbacks->set_active(mc->lifecycle_ctx, true);
 		}
@@ -1243,6 +1244,9 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = U_TYPED_CALLOC(struct multi_compositor);
+
+	// Initialize state - base session is anything that's not an overlay
+	mc->state.is_base_session = !xsi->is_overlay;
 
 	mc->base.base.get_swapchain_create_properties = multi_compositor_get_swapchain_create_properties;
 	mc->base.base.create_swapchain = multi_compositor_create_swapchain;

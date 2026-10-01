@@ -59,12 +59,18 @@ extern "C" {
  *
  */
 
+#define IPC_MAX_CLIENT_BODY_TRACKERS 16
+#define IPC_MAX_CLIENT_HAND_TRACKERS 16
+#define IPC_MAX_CLIENT_APP_INSTANCES 4
+#define IPC_MAX_CLIENT_APP_SYSTEMS (IPC_MAX_CLIENT_APP_INSTANCES * 4)
 #define IPC_MAX_CLIENT_SEMAPHORES 8
 #define IPC_MAX_CLIENT_SWAPCHAINS (XRT_MAX_LAYERS * 2)
 #define IPC_MAX_CLIENT_SPACES 128
 #define IPC_MAX_CLIENT_FUTURES 128
 
 struct xrt_instance;
+struct xrt_body_tracker;
+struct xrt_hand_tracker;
 struct xrt_compositor;
 struct xrt_compositor_native;
 
@@ -117,6 +123,26 @@ struct ipc_client_state
 		 * so we don't need to lock it.
 		 */
 		struct xrt_device *xdevs[XRT_SYSTEM_MAX_DEVICES];
+
+		/*!
+		 * Body trackers owned by this client.
+		 */
+		struct xrt_body_tracker *xbts[IPC_MAX_CLIENT_BODY_TRACKERS];
+
+		/*!
+		 * Hand trackers owned by this client.
+		 */
+		struct xrt_hand_tracker *xhts[IPC_MAX_CLIENT_HAND_TRACKERS];
+
+		/*!
+		 * Array of app instances owned by this client.
+		 */
+		struct xrt_app_instance *xainsts[IPC_MAX_CLIENT_APP_INSTANCES];
+
+		/*!
+		 * Array of app systems owned by this client.
+		 */
+		struct xrt_app_system *xasys[IPC_MAX_CLIENT_APP_SYSTEMS];
 	} objects;
 
 	//! Session for this client.
@@ -553,6 +579,39 @@ xrt_result_t
 ipc_server_set_client_io_blocks(struct ipc_server *s, uint32_t client_id, const struct ipc_client_io_blocks *blocks);
 
 /*!
+ * Get the session running state for this client.
+ *
+ * @ingroup ipc_server
+ */
+xrt_result_t
+ipc_server_get_client_session_running_state(struct ipc_server *s,
+                                            uint32_t client_id,
+                                            struct xrt_compositor_session_running_state *out_running_state);
+
+/*!
+ * Get the view configuration for this client.
+ *
+ * @ingroup ipc_server
+ */
+xrt_result_t
+ipc_server_get_client_view_config(struct ipc_server *s,
+                                  uint32_t client_id,
+                                  enum xrt_view_type view_type,
+                                  struct xrt_view_config *out_default_view_config,
+                                  struct xrt_recommended_view_config *out_recommended_view_config);
+
+/*!
+ * Set the recommended view configuration for this client.
+ *
+ * @ingroup ipc_server
+ */
+xrt_result_t
+ipc_server_set_client_recommended_view_config(struct ipc_server *s,
+                                              uint32_t client_id,
+                                              enum xrt_view_type view_type,
+                                              const struct xrt_recommended_view_config *recommended_view_config);
+
+/*!
  * Called by client threads to set a session to active.
  *
  * @ingroup ipc_server
@@ -675,6 +734,37 @@ get_ism_handle(volatile struct ipc_client_state *ics)
 {
 	return ics->ism_handle;
 }
+
+#ifdef XRT_OS_OSX
+/*!
+ * Record a swapchain wait/acquire/release for the Wine bridge timing trace.
+ * Does nothing unless the Wine submit trace is enabled.
+ */
+void
+wine_swapchain_trace_event(const char *event,
+                           uint32_t swapchain_id,
+                           uint32_t image_index,
+                           int64_t duration_ns,
+                           int64_t timeout_ns,
+                           xrt_result_t result);
+#else
+// Only traced on macOS.
+static inline void
+wine_swapchain_trace_event(const char *event,
+                           uint32_t swapchain_id,
+                           uint32_t image_index,
+                           int64_t duration_ns,
+                           int64_t timeout_ns,
+                           xrt_result_t result)
+{
+	(void)event;
+	(void)swapchain_id;
+	(void)image_index;
+	(void)duration_ns;
+	(void)timeout_ns;
+	(void)result;
+}
+#endif
 
 #ifdef __cplusplus
 }

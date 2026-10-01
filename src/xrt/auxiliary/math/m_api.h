@@ -193,6 +193,18 @@ math_vec3_translation_from_isometry(const struct xrt_matrix_4x4 *isometry, struc
 void
 math_vec3_normalize(struct xrt_vec3 *in);
 
+/*!
+ * Convert a vec3 from the OpenCV coordinate system to the OpenXR coordinate system and back. OpenCV camera space
+ * coordinates has +Y down and +Z away from the user.
+ *
+ * The input and output may be the same pointer.
+ *
+ * @relates xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_vec3_convert_from_opencv(const struct xrt_vec3 *in, struct xrt_vec3 *out);
+
 
 /*
  *
@@ -217,6 +229,18 @@ math_vec3_f64_cross(const struct xrt_vec3_f64 *l, const struct xrt_vec3_f64 *r, 
  */
 void
 math_vec3_f64_normalize(struct xrt_vec3_f64 *in);
+
+/*!
+ * Convert a vec3_f64 from the OpenCV coordinate system to the OpenXR coordinate system. OpenCV camera space coordinates
+ * has +Y down and +Z away from the user.
+ *
+ * The input and output may be the same pointer.
+ *
+ * @relates xrt_vec3
+ * @ingroup aux_math
+ */
+void
+math_vec3_f64_convert_opencv(const struct xrt_vec3_f64 *in, struct xrt_vec3_f64 *out);
 
 
 /*
@@ -430,7 +454,8 @@ math_quat_finite_difference(const struct xrt_quat *quat0,
                             struct xrt_vec3 *out_ang_vel);
 
 /*!
- * Takes a rotation vector equal to half of a Rodrigues rotation vector and returns its corresponding unit quaternion.
+ * Takes a Rodrigues rotation vector and returns its corresponding unit quaternion.
+ *
  * Useful for head tracking and pose-prediction.
  *
  * @relates xrt_quat
@@ -438,11 +463,12 @@ math_quat_finite_difference(const struct xrt_quat *quat0,
  * @ingroup aux_math
  */
 void
-math_quat_exp(const struct xrt_vec3 *axis_angle, struct xrt_quat *out_quat);
+math_quat_exp_so3(const struct xrt_vec3 *axis_angle, struct xrt_quat *out_quat);
 
 
 /*!
- * Takes a unit quaternion and returns a rotation vector equal to half of its corresponding Rodrigues rotation vector.
+ * Takes a unit quaternion and returns its corresponding Rodrigues rotation vector.
+ *
  * Useful for head tracking and pose-prediction.
  *
  * @relates xrt_quat
@@ -450,7 +476,7 @@ math_quat_exp(const struct xrt_vec3 *axis_angle, struct xrt_quat *out_quat);
  * @ingroup aux_math
  */
 void
-math_quat_ln(const struct xrt_quat *quat, struct xrt_vec3 *out_axis_angle);
+math_quat_ln_so3(const struct xrt_quat *quat, struct xrt_vec3 *out_axis_angle);
 
 /*!
  * Used to rotate a derivative like a angular velocity.
@@ -828,6 +854,18 @@ math_pose_transform(const struct xrt_pose *transform, const struct xrt_pose *pos
 void
 math_pose_transform_point(const struct xrt_pose *transform, const struct xrt_vec3 *point, struct xrt_vec3 *out_point);
 
+/*!
+ * Convert a pose from the OpenCV coordinate system to the OpenXR coordinate system and back. OpenCV camera space
+ * coordinates has +Y down and +Z away from the user.
+ *
+ * The input and output may be the same pointer.
+ *
+ * @relates xrt_pose
+ * @ingroup aux_math
+ */
+void
+math_pose_convert_from_opencv(const struct xrt_pose *in, struct xrt_pose *out);
+
 
 /*
  *
@@ -922,7 +960,7 @@ math_compute_fovs(double w_total,
  * orientation.
  *
  * When rotating the view orientation, parts of the FOV are cut off on the side
- * the view roates away from and parts of previously unseen content is pulled
+ * the view rotates away from and parts of previously unseen content is pulled
  * in from the side the view rotates towards. Therefore, when parallezing
  * views, the application should render with an adjusted FOV that covers the
  * area that will be in the FOV of the view *after* the compositor reprojects
