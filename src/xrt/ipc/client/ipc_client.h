@@ -69,7 +69,7 @@ struct ipc_connection
 	struct ipc_shared_memory *ism;
 	xrt_shmem_handle_t ism_handle;
 
-	/* Wine bridge clients own a heap snapshot instead of a mapped OS handle. */
+	/* Byte-stream clients may own a heap snapshot instead of a mapped OS handle. */
 	bool ism_is_copy;
 
 	/*
@@ -81,7 +81,7 @@ struct ipc_connection
 	/*
 	 * Serializes bytes written to the IPC transport. Unlike mutex above, this
 	 * is held only while a request is actually being written (except for the
-	 * special input-handle handshake). One-way Wine frame submissions can
+	 * special input-handle handshake). One-way byte-stream frame submissions can
 	 * therefore write while another thread is waiting for a synchronous reply.
 	 */
 	struct os_mutex send_mutex;
@@ -172,7 +172,7 @@ struct xrt_space_overseer *
 ipc_client_space_overseer_create(struct ipc_connection *ipc_c);
 
 /*!
- * Wine/macOS bridge helper: import externally-owned IOSurface-backed images
+ * macOS helper: import externally-owned IOSurface-backed images
  * into the native service compositor without pretending IOSurface IDs are
  * Windows graphics handles.
  */
@@ -196,7 +196,7 @@ ipc_client_compositor_import_iosurface_token(struct xrt_compositor_native *xcn,
                                              struct xrt_swapchain **out_xsc);
 
 /*!
- * Wine/macOS bridge helper: import DXMT shared Metal textures directly by the
+ * macOS helper: import externally shared Metal textures directly by the
  * bootstrap names of their MTLSharedTextureHandle Mach ports.
  */
 xrt_result_t
@@ -207,7 +207,7 @@ ipc_client_compositor_import_metal_bootstrap_textures(struct xrt_compositor_nati
                                                       struct xrt_swapchain **out_xsc);
 
 /*!
- * Wine/macOS bridge helper: bind an already-existing DXMT MTLSharedEvent to a
+ * macOS helper: bind an already-existing external MTLSharedEvent to a
  * native compositor semaphore by its bootstrap registration name.
  */
 xrt_result_t
