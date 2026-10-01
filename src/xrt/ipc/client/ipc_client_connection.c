@@ -476,12 +476,6 @@ err_fini:
 void
 ipc_client_connection_fini(struct ipc_connection *ipc_c)
 {
-	if (ipc_c->ism_is_copy) {
-		free(ipc_c->ism);
-		ipc_c->ism = NULL;
-		ipc_c->ism_is_copy = false;
-	}
-
 	if (ipc_c->ism_handle != XRT_SHMEM_HANDLE_INVALID) {
 		/// @todo how to tear down the shared memory?
 	}
