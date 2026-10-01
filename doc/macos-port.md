@@ -157,6 +157,11 @@ The normal Monado protocol remains on the Unix socket. XPC is a narrow macOS
 side channel used for:
 
 - launchd activation of `monado-service`;
+- IOSurface transfer for native clients' swapchains. The client creates the
+  surfaces and publishes them to the service under a token only its own PID
+  can redeem, so they travel as Mach ports and are not global. (Surfaces sent
+  by ID must be `kIOSurfaceIsGlobal`, which lets any process open them; only
+  the Wine/DXMT import still uses IDs, for surfaces DXMT creates.);
 - `MTLSharedTextureHandle` transfer where IOSurface is not the right carrier;
 - `MTLSharedEventHandle` synchronization;
 - process ownership/lifetime of shared Metal resources.

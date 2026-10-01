@@ -231,44 +231,48 @@ comp_metal_texture_create_from_bootstrap_name_for_vk_device(struct vk_bundle *vk
 }
 
 bool
-comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
-                                                          const struct xrt_swapchain_create_info *info,
-                                                          uint32_t iosurface_id,
-                                                          void **out_texture)
+comp_metal_texture_create_from_iosurface_for_vk_device(struct vk_bundle *vk,
+                                                       const struct xrt_swapchain_create_info *info,
+                                                       void *iosurface,
+                                                       void **out_texture)
 {
-	if (vk == NULL || info == NULL || iosurface_id == 0 || out_texture == NULL) return false;
+	if (vk == NULL || info == NULL || iosurface == NULL || out_texture == NULL) {
+		return false;
+	}
 	*out_texture = NULL;
+
+	IOSurfaceRef surface = (IOSurfaceRef)iosurface;
+	const uint32_t iosurface_id = IOSurfaceGetID(surface);
 	if (info->array_size != 1 || info->face_count != 1 || info->mip_count != 1 || info->sample_count != 1) {
-		U_LOG_E("IOSurface-ID import only supports 2D single-mip single-sample images: id=%u", iosurface_id);
+		U_LOG_E("IOSurface import only supports 2D single-mip single-sample images: id=%u", iosurface_id);
 		return false;
 	}
 	MTLPixelFormat pixel_format = vk_format_to_metal_color_format(info->format);
 	if (pixel_format == MTLPixelFormatInvalid) {
-		U_LOG_E("IOSurface-ID import unsupported Vulkan format: id=%u format=%lld", iosurface_id, (long long)info->format);
+		U_LOG_E("IOSurface import unsupported Vulkan format: id=%u format=%lld", iosurface_id,
+		        (long long)info->format);
 		return false;
 	}
 	id<MTLDevice> vk_device = nil;
-	if (!get_vk_metal_device(vk, &vk_device)) return false;
+	if (!get_vk_metal_device(vk, &vk_device)) {
+		return false;
+	}
 
 	@autoreleasepool {
-		IOSurfaceRef surface = IOSurfaceLookup((IOSurfaceID)iosurface_id);
-		if (surface == NULL) {
-			U_LOG_E("IOSurfaceLookup failed for external id=%u", iosurface_id);
-			return false;
-		}
 		if (IOSurfaceGetWidth(surface) != info->width || IOSurfaceGetHeight(surface) != info->height ||
 		    IOSurfaceGetBytesPerElement(surface) < 4) {
-			U_LOG_E("External IOSurface geometry mismatch: id=%u got=%zux%zu expected=%ux%u",
-			        iosurface_id, IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), info->width, info->height);
-			CFRelease(surface);
+			U_LOG_E("External IOSurface geometry mismatch: id=%u got=%zux%zu expected=%ux%u", iosurface_id,
+			        IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), info->width, info->height);
 			return false;
 		}
 		MTLTextureDescriptor *descriptor =
-		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixel_format width:info->width height:info->height mipmapped:NO];
+		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:pixel_format
+		                                                       width:info->width
+		                                                      height:info->height
+		                                                   mipmapped:NO];
 		descriptor.storageMode = MTLStorageModeShared;
 		descriptor.usage = xrt_usage_to_metal(info->bits);
 		id<MTLTexture> texture = [vk_device newTextureWithDescriptor:descriptor iosurface:surface plane:0];
-		CFRelease(surface);
 		if (texture == nil) {
 			U_LOG_E("Could not create MTLTexture from external IOSurface id=%u", iosurface_id);
 			return false;
@@ -279,10 +283,34 @@ comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
 			[texture release];
 			return false;
 		}
-		U_LOG_I("External IOSurface imported on MoltenVK device: id=%u texture=%p", iosurface_id, (__bridge void *)texture);
+		U_LOG_I("External IOSurface imported on MoltenVK device: id=%u texture=%p", iosurface_id,
+		        (__bridge void *)texture);
 		*out_texture = (__bridge void *)texture;
 		return true;
 	}
+}
+
+bool
+comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
+                                                          const struct xrt_swapchain_create_info *info,
+                                                          uint32_t iosurface_id,
+                                                          void **out_texture)
+{
+	if (vk == NULL || info == NULL || iosurface_id == 0 || out_texture == NULL) {
+		return false;
+	}
+	*out_texture = NULL;
+
+	// Only finds surfaces that are global or already open in this process.
+	IOSurfaceRef surface = IOSurfaceLookup((IOSurfaceID)iosurface_id);
+	if (surface == NULL) {
+		U_LOG_E("IOSurfaceLookup failed for external id=%u", iosurface_id);
+		return false;
+	}
+
+	bool ret = comp_metal_texture_create_from_iosurface_for_vk_device(vk, info, surface, out_texture);
+	CFRelease(surface);
+	return ret;
 }
 
 void

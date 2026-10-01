@@ -31,6 +31,15 @@ comp_metal_swapchain_import_begin_iosurface_ids(const struct xrt_swapchain_creat
                                                 uint32_t image_count,
                                                 const uint32_t *iosurface_ids);
 
+/*
+ * As above, for borrowed IOSurfaceRef objects, which the caller must keep
+ * alive until end().
+ */
+bool
+comp_metal_swapchain_import_begin_iosurfaces(const struct xrt_swapchain_create_info *info,
+                                             uint32_t image_count,
+                                             void *const *iosurfaces);
+
 bool
 comp_metal_swapchain_import_begin_bootstrap_names(const struct xrt_swapchain_create_info *info,
                                                   uint32_t image_count,

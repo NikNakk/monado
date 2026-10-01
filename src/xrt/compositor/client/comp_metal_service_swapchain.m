@@ -286,16 +286,9 @@ metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
 	const size_t alloc_size = bytes_per_row * (size_t)height;
 
 	/*
-	 * The service imports these surfaces in a different process using
-	 * IOSurfaceLookup(IOSurfaceID), so the surfaces must be globally visible.
-	 * The standalone cross-process IOSurface probe already does the same.
-	 *
-	 * kIOSurfaceIsGlobal is deprecated because any process can look such a
-	 * surface up by ID. @todo Send the surfaces to the service as Mach ports
-	 * over the existing XPC connection instead (IOSurfaceCreateXPCObject).
+	 * Not global: the service receives these surfaces as Mach ports over XPC
+	 * (ipc_metal_xpc_publish_iosurfaces), so no other process can open them.
 	 */
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 	NSDictionary *properties = @{
 		(__bridge NSString *)kIOSurfaceWidth : @(width),
 		(__bridge NSString *)kIOSurfaceHeight : @(height),
@@ -303,9 +296,7 @@ metal_service_create_bgra_iosurface(uint32_t width, uint32_t height)
 		(__bridge NSString *)kIOSurfaceBytesPerRow : @(bytes_per_row),
 		(__bridge NSString *)kIOSurfaceAllocSize : @(alloc_size),
 		(__bridge NSString *)kIOSurfacePixelFormat : @(kCVPixelFormatType_32BGRA),
-		(__bridge NSString *)kIOSurfaceIsGlobal : @YES,
 	};
-#pragma clang diagnostic pop
 
 	return IOSurfaceCreate((__bridge CFDictionaryRef)properties);
 }
@@ -406,20 +397,27 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 
 	/*
 	 * Do not ask the service to allocate and export IOSurface handles through
-	 * the generic swapchain_create IPC path. Unix-domain SCM_RIGHTS can carry
-	 * file descriptors but not IOSurfaceRef objects. Instead, create the
-	 * IOSurfaces in this Metal client and use the dedicated IOSurfaceID command
-	 * so monado-service imports exactly the same storage into Vulkan.
+	 * the generic swapchain_create IPC path: a Unix-domain socket can carry
+	 * file descriptors but not IOSurfaces. Instead, create the surfaces here,
+	 * hand them to the service over XPC, and have it import exactly the same
+	 * storage into Vulkan.
 	 */
+	uint64_t token = 0;
+	xrt_result_t xret = ipc_metal_xpc_publish_iosurfaces((void *const *)surfaces, image_count, &token);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Metal service could not publish IOSurfaces over XPC: result=%d images=%u", xret, image_count);
+		release_texture_array(textures, image_count);
+		metal_service_release_iosurfaces(surfaces, image_count);
+		return xret;
+	}
+
 	struct xrt_swapchain *native_xsc = NULL;
-	xrt_result_t xret = ipc_client_compositor_import_iosurface_ids(
-	    link->xcn, native_info, image_count, iosurface_ids, &native_xsc);
+	xret = ipc_client_compositor_import_iosurface_token(link->xcn, native_info, image_count, token, &native_xsc);
 	if (xret != XRT_SUCCESS || native_xsc == NULL) {
-		U_LOG_E("Metal service IOSurfaceID import failed: result=%d images=%u size=%ux%u",
-		        xret,
-		        image_count,
-		        info->width,
-		        info->height);
+		U_LOG_E("Metal service IOSurface import failed: result=%d images=%u size=%ux%u", xret, image_count,
+		        info->width, info->height);
+		// The service drops the token itself once it has looked at it.
+		ipc_metal_xpc_discard_token(token);
 		release_texture_array(textures, image_count);
 		metal_service_release_iosurfaces(surfaces, image_count);
 		return xret != XRT_SUCCESS ? xret : XRT_ERROR_IPC_FAILURE;

@@ -31,6 +31,20 @@ comp_metal_texture_prepare_for_vk_device(struct vk_bundle *vk,
                                          void **out_texture,
                                          bool *out_needs_release);
 
+/*!
+ * Create a texture on the Vulkan device's Metal device from a borrowed
+ * IOSurfaceRef. The returned texture keeps the surface alive.
+ */
+bool
+comp_metal_texture_create_from_iosurface_for_vk_device(struct vk_bundle *vk,
+                                                       const struct xrt_swapchain_create_info *info,
+                                                       void *iosurface,
+                                                       void **out_texture);
+
+/*!
+ * As above, for a surface identified by its global IOSurfaceID (used for
+ * surfaces created by DXMT under Wine).
+ */
 bool
 comp_metal_texture_create_from_iosurface_id_for_vk_device(struct vk_bundle *vk,
                                                           const struct xrt_swapchain_create_info *info,
