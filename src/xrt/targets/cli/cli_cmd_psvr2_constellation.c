@@ -22,6 +22,7 @@
 #include "psvr2/psvr2_interface.h"
 #include "util/u_debug.h"
 #include "util/u_file.h"
+#include "util/u_git_tag.h"
 #include "util/u_json.h"
 #include "util/u_sink.h"
 #include "util/u_time.h"
@@ -52,6 +53,8 @@ struct head_tracking_origin
 	struct t_constellation_tracker_tracking_source base;
 	struct xrt_device *head;
 	struct xrt_pose head_from_camera0;
+	//! Receives the head pose and its SLAM provenance for each query, when recording a dataset.
+	struct t_constellation_tracker *tracker;
 };
 
 static void
@@ -61,12 +64,125 @@ head_tracking_origin_get(struct t_constellation_tracker_tracking_source *source,
 {
 	struct head_tracking_origin *origin = (struct head_tracking_origin *)source;
 	struct xrt_space_relation head = XRT_SPACE_RELATION_ZERO;
+	// Taken before the query, so a SLAM pose arriving meanwhile cannot make the recorded source look newer.
+	struct psvr2_slam_timing slam = {0};
+	bool have_slam = psvr2_get_slam_timing(origin->head, &slam) && slam.valid;
 	if (xrt_device_get_tracked_pose(origin->head, XRT_INPUT_GENERIC_HEAD_POSE, when_ns, &head) != XRT_SUCCESS) {
 		*out_relation = (struct xrt_space_relation)XRT_SPACE_RELATION_ZERO;
 		return;
 	}
 	*out_relation = head;
 	math_pose_transform(&head.pose, &origin->head_from_camera0, &out_relation->pose);
+
+	if (origin->tracker != NULL) {
+		int64_t source_ns = have_slam ? slam.slam_monotonic_ns : 0;
+		uint32_t flags = have_slam && when_ns <= source_ns ? T_CONSTELLATION_HEAD_POSE_INTERPOLATED : 0;
+		t_constellation_tracker_record_head_pose(origin->tracker, when_ns, &head, source_ns, flags);
+	}
+}
+
+//! Every PSVR2_*, PSSENSE_* and CONSTELLATION_* environment variable, the settings a session depends on.
+static void
+add_session_environment(cJSON *json)
+{
+	extern char **environ;
+	cJSON *env = cJSON_AddObjectToObject(json, "environment");
+	for (char **entry = environ; entry != NULL && *entry != NULL; entry++) {
+		const char *equals = strchr(*entry, '=');
+		if (equals == NULL || (strncmp(*entry, "PSVR2_", 6) != 0 && strncmp(*entry, "PSSENSE_", 8) != 0 &&
+		                       strncmp(*entry, "CONSTELLATION_", 14) != 0)) {
+			continue;
+		}
+		char name[128];
+		size_t length = (size_t)(equals - *entry);
+		if (length >= sizeof(name)) {
+			continue;
+		}
+		memcpy(name, *entry, length);
+		name[length] = '\0';
+		cJSON_AddStringToObject(env, name, equals + 1);
+	}
+}
+
+static void
+record_session_info(struct t_constellation_tracker *tracker,
+                    const char *calibration,
+                    long duration_s,
+                    bool world,
+                    const char *capture_dir,
+                    struct xrt_device *controllers[2])
+{
+	cJSON *json = cJSON_CreateObject();
+	cJSON_AddStringToObject(json, "tool", "monado-cli psvr2-constellation");
+	cJSON_AddStringToObject(json, "git", u_git_tag);
+	cJSON_AddStringToObject(json, "calibration", calibration);
+	cJSON_AddNumberToObject(json, "duration_s", (double)duration_s);
+	cJSON_AddBoolToObject(json, "world_frame", world);
+	if (capture_dir != NULL) {
+		cJSON_AddStringToObject(json, "capture_directory", capture_dir);
+	}
+	const char *notes = getenv("PSVR2_CONSTELLATION_NOTES");
+	if (notes != NULL) {
+		cJSON_AddStringToObject(json, "notes", notes);
+	}
+	cJSON *devices = cJSON_AddObjectToObject(json, "devices");
+	for (size_t i = 0; i < 2; i++) {
+		struct pssense_constellation_diagnostics diag = {0};
+		if (controllers[i] != NULL && pssense_get_constellation_diagnostics(controllers[i], &diag) &&
+		    diag.attached) {
+			cJSON_AddNumberToObject(devices, i == 0 ? "left" : "right", (double)diag.device_id);
+		}
+	}
+	add_session_environment(json);
+	char *text = cJSON_PrintUnformatted(json);
+	if (text != NULL) {
+		t_constellation_tracker_record_session_info(tracker, text);
+		cJSON_free(text);
+	}
+	cJSON_Delete(json);
+}
+
+/*!
+ * Static-interval markers: each press of a controller's Create button toggles between "static_begin" and
+ * "static_end" for that controller. Between the two the controller should rest on something fixed, so its true
+ * world pose is constant: the replay scores drift and jitter against that.
+ */
+struct static_markers
+{
+	bool was_pressed[2];
+	bool in_interval[2];
+};
+
+static void
+poll_static_markers(struct static_markers *markers,
+                    struct t_constellation_tracker *tracker,
+                    struct xrt_device *controllers[2],
+                    int64_t now_ns)
+{
+	for (size_t i = 0; i < 2; i++) {
+		struct xrt_device *xdev = controllers[i];
+		if (xdev == NULL || xrt_device_update_inputs(xdev) != XRT_SUCCESS) {
+			continue;
+		}
+		bool pressed = false;
+		for (uint32_t j = 0; j < xdev->input_count; j++) {
+			if (xdev->inputs[j].name == XRT_INPUT_PSSENSE_SHARE_CLICK) {
+				pressed = xdev->inputs[j].value.boolean;
+			}
+		}
+		if (pressed && !markers->was_pressed[i]) {
+			struct pssense_constellation_diagnostics diag = {0};
+			t_constellation_device_id_t device_id =
+			    pssense_get_constellation_diagnostics(xdev, &diag) && diag.attached
+			        ? diag.device_id
+			        : XRT_CONSTELLATION_INVALID_DEVICE_ID;
+			markers->in_interval[i] = !markers->in_interval[i];
+			const char *text = markers->in_interval[i] ? "static_begin" : "static_end";
+			t_constellation_tracker_record_annotation(tracker, device_id, now_ns, text);
+			fprintf(stderr, "%s controller: %s\n", i == 0 ? "Left" : "Right", text);
+		}
+		markers->was_pressed[i] = pressed;
+	}
 }
 
 
@@ -414,7 +530,8 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 		return EXIT_FAILURE;
 	}
 
-	if (debug_get_bool_option_psvr2_constellation_world()) {
+	bool world_frame = debug_get_bool_option_psvr2_constellation_world();
+	if (world_frame) {
 		head_origin.head = head;
 		params.mosaics[0].tracking_origin = &head_origin.base;
 		const struct xrt_pose *x = &head_origin.head_from_camera0;
@@ -488,6 +605,15 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 			goto fail;
 		}
 	}
+	if (world_frame) {
+		head_origin.tracker = tracker;
+	}
+	record_session_info(tracker, argv[2], duration_s, world_frame, capture_dir, controllers);
+	struct static_markers markers = {0};
+	if (getenv("CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT") != NULL) {
+		fprintf(stderr, "Press Create on a controller when it is set down on something fixed, and again when it "
+		                "is picked up, to mark a static interval.\n");
+	}
 
 	printf("timestamp_ns,hand,relation_flags,px,py,pz,qx,qy,qz,qw,pose_age_ns,fused_pose_count,"
 	       "fused_camera_count,candidate_count,disagreement_count,jump_rejection_count,"
@@ -498,6 +624,7 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	int64_t next_print_ns = 0;
 	while (os_monotonic_get_ns() < end_ns) {
 		int64_t now_ns = os_monotonic_get_ns();
+		poll_static_markers(&markers, tracker, controllers, now_ns);
 		if (now_ns >= next_print_ns) {
 			if (controllers[0] != NULL) print_relation("left", controllers[0], now_ns, &saw_position[0]);
 			if (controllers[1] != NULL) print_relation("right", controllers[1], now_ns, &saw_position[1]);

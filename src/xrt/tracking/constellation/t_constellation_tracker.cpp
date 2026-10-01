@@ -1318,3 +1318,99 @@ t_constellation_tracker_get_tracking_origin(t_constellation_tracker *raw_tracker
 
 	return &tracker->tracking_origin;
 }
+
+
+/*
+ *
+ * Dataset extension records.
+ *
+ */
+
+static DataRecorder *
+recorder_of(t_constellation_tracker *raw_tracker)
+{
+	if (raw_tracker == nullptr) {
+		return nullptr;
+	}
+	return ConstellationTracker::Get(raw_tracker)->data_recorder.get();
+}
+
+void
+t_constellation_tracker_record_session_info(t_constellation_tracker *tracker, const char *json)
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr && json != nullptr) {
+		recorder->recordSessionInfo(json);
+	}
+}
+
+void
+t_constellation_tracker_record_sync_event(t_constellation_tracker *tracker,
+                                          t_constellation_device_id_t device_id,
+                                          int64_t host_ns,
+                                          enum t_constellation_sync_event_kind kind,
+                                          const double value[3])
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr) {
+		DatasetSyncEvent event{device_id, host_ns, (uint32_t)kind, {0.0, 0.0, 0.0}};
+		for (int i = 0; value != nullptr && i < 3; i++) {
+			event.value[i] = value[i];
+		}
+		recorder->recordSyncEvent(event);
+	}
+}
+
+void
+t_constellation_tracker_record_imu_timing(t_constellation_tracker *tracker,
+                                          t_constellation_device_id_t device_id,
+                                          int64_t host_ns,
+                                          int64_t device_ns,
+                                          double clock_offset_ns,
+                                          const double applied_gyro_bias[3])
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr) {
+		DatasetImuTiming timing{device_id, host_ns, device_ns, clock_offset_ns, {0.0, 0.0, 0.0}};
+		for (int i = 0; applied_gyro_bias != nullptr && i < 3; i++) {
+			timing.applied_gyro_bias[i] = applied_gyro_bias[i];
+		}
+		recorder->recordImuTiming(timing);
+	}
+}
+
+void
+t_constellation_tracker_record_head_pose(t_constellation_tracker *tracker,
+                                         int64_t timestamp_ns,
+                                         const xrt_space_relation *Txr_world_head,
+                                         int64_t source_ns,
+                                         uint32_t source_flags)
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr && Txr_world_head != nullptr) {
+		recorder->recordHeadPose(DatasetHeadPose{timestamp_ns, Txr_world_head->relation_flags,
+		                                         Txr_world_head->pose, source_ns, source_flags});
+	}
+}
+
+void
+t_constellation_tracker_record_ground_truth(t_constellation_tracker *tracker,
+                                            t_constellation_device_id_t device_id,
+                                            int64_t timestamp_ns,
+                                            const xrt_pose *Txr_world_device,
+                                            float position_sigma_m,
+                                            float orientation_sigma_rad,
+                                            uint32_t flags)
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr && Txr_world_device != nullptr) {
+		recorder->recordGroundTruth(DatasetGroundTruth{device_id, timestamp_ns, *Txr_world_device, position_sigma_m,
+		                                               orientation_sigma_rad, flags});
+	}
+}
+
+void
+t_constellation_tracker_record_annotation(t_constellation_tracker *tracker,
+                                          t_constellation_device_id_t device_id,
+                                          int64_t host_ns,
+                                          const char *text)
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr && text != nullptr) {
+		recorder->recordAnnotation(DatasetAnnotation{device_id, host_ns, text});
+	}
+}

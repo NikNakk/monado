@@ -12,6 +12,8 @@
 #include "t_constellation_tracker_internal.hpp"
 
 #include <mutex>
+#include <string>
+#include <vector>
 
 
 namespace xrt::tracking::constellation {
@@ -139,6 +141,9 @@ private: // Fields
 public: // Methods
 	DataRecorder(ConstellationTracker *tracker, std::string out_file);
 
+	//! A recorder without a tracker, for writing datasets offline (synthetic recordings, conversions).
+	DataRecorder(std::string out_file, const std::vector<std::vector<t_camera_calibration>> &mosaics);
+
 	~DataRecorder() = default;
 
 	void
@@ -148,12 +153,109 @@ public: // Methods
 	recordDeviceInfo(const Device &device);
 
 	void
+	recordDeviceInfo(t_constellation_device_id_t device_id, const t_constellation_tracker_led_model &led_model);
+
+	void
 	recordImuSample(t_constellation_device_id_t device_id, const xrt_imu_sample &sample);
 
 	void
 	recordDeviceTracking(const CameraSample &sample,
 	                     t_constellation_device_id_t device_id,
 	                     const xrt_space_relation &relation);
+
+	//! Write one extension record (packet 5): its kind, then the payload with its length, so readers can skip it.
+	void
+	recordExtension(uint32_t kind, const std::vector<uint8_t> &payload);
+
+	void
+	recordSessionInfo(const std::string &json);
+	void
+	recordSyncEvent(const struct DatasetSyncEvent &event);
+	void
+	recordImuTiming(const struct DatasetImuTiming &timing);
+	void
+	recordHeadPose(const struct DatasetHeadPose &pose);
+	void
+	recordGroundTruth(const struct DatasetGroundTruth &truth);
+	void
+	recordAnnotation(const struct DatasetAnnotation &annotation);
+};
+
+/*!
+ * Kinds of extension record (packet 5). Each is length-prefixed, so a reader skips kinds it does not know and the
+ * format can grow without breaking older readers of newer files. Readers from before packet 5 stop at the first one.
+ */
+enum DatasetExtensionKind : uint32_t
+{
+	//! UTF-8 JSON describing the session: tool, versions, settings, notes.
+	DATASET_EXTENSION_SESSION_INFO = 1,
+	//! @ref DatasetSyncEvent
+	DATASET_EXTENSION_SYNC_EVENT = 2,
+	//! @ref DatasetImuTiming, one per IMU sample (packet 4), in the same order.
+	DATASET_EXTENSION_IMU_TIMING = 3,
+	//! @ref DatasetHeadPose, one per tracking-origin query.
+	DATASET_EXTENSION_HEAD_POSE = 4,
+	//! @ref DatasetGroundTruth
+	DATASET_EXTENSION_GROUND_TRUTH = 5,
+	//! @ref DatasetAnnotation
+	DATASET_EXTENSION_ANNOTATION = 6,
+};
+
+//! A timing or synchronisation event from a device driver, see @ref t_constellation_sync_event_kind.
+struct DatasetSyncEvent
+{
+	t_constellation_device_id_t device_id;
+	int64_t host_ns;
+	uint32_t kind;
+	double value[3];
+};
+
+//! How an IMU sample's host time was derived, and what the driver had already subtracted from it.
+struct DatasetImuTiming
+{
+	t_constellation_device_id_t device_id;
+	//! The host time of the matching packet 4 sample.
+	int64_t host_ns;
+	//! The sample's own device time, unwrapped.
+	int64_t device_ns;
+	//! The device-to-host clock offset applied, host = device - offset.
+	double clock_offset_ns;
+	//! Online gyro bias already subtracted from the packet 4 gyro (rad/s, IMU frame).
+	double applied_gyro_bias[3];
+};
+
+//! The head pose a tracking-origin query returned, and where it came from.
+struct DatasetHeadPose
+{
+	//! The time the pose was queried for (a camera exposure).
+	int64_t timestamp_ns;
+	xrt_space_relation_flags relation_flags;
+	xrt_pose Txr_world_head;
+	//! Host time of the newest SLAM pose the head pose was derived from.
+	int64_t source_ns;
+	//! @ref t_constellation_head_pose_source_flags
+	uint32_t source_flags;
+};
+
+//! An externally known device pose, in the tracking world the camera poses use.
+struct DatasetGroundTruth
+{
+	t_constellation_device_id_t device_id;
+	int64_t timestamp_ns;
+	xrt_pose Txr_world_device;
+	float position_sigma_m;
+	float orientation_sigma_rad;
+	//! @ref t_constellation_ground_truth_flags
+	uint32_t flags;
+};
+
+//! A free-text marker, such as the start of a scripted motion or a controller set down on a fixture.
+struct DatasetAnnotation
+{
+	//! @ref XRT_CONSTELLATION_INVALID_DEVICE_ID when not about one device.
+	t_constellation_device_id_t device_id;
+	int64_t host_ns;
+	std::string text;
 };
 
 struct DatasetMosaic
@@ -198,6 +300,16 @@ public: // Fields
 	std::vector<CameraSample> samples;
 	std::vector<DatasetDeviceTracking> device_tracking;
 	std::vector<DatasetImuSample> imu_samples;
+
+	// Extension records (packet 5).
+	std::vector<std::string> session_info;
+	std::vector<DatasetSyncEvent> sync_events;
+	std::vector<DatasetImuTiming> imu_timing;
+	std::vector<DatasetHeadPose> head_poses;
+	std::vector<DatasetGroundTruth> ground_truth;
+	std::vector<DatasetAnnotation> annotations;
+	//! Extension records of kinds this reader does not know, skipped.
+	size_t unknown_extensions{0};
 
 	//! Why reading stopped: empty at a clean end of file; anything else means the file is truncated or corrupt.
 	std::string stop_reason;

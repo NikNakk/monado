@@ -68,6 +68,8 @@ pssense_remove_from_constellation_tracker(struct xrt_device *xdev);
 struct pssense_constellation_diagnostics
 {
 	bool attached;
+	//! The controller's device id in the constellation tracker, while attached.
+	t_constellation_device_id_t device_id;
 	uint64_t candidate_count;
 	uint64_t camera_candidate_count[4];
 	uint64_t fused_pose_count;

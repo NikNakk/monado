@@ -15,6 +15,7 @@ set(tests
     tests_lowpass_integer
     tests_imu_optical_filter
     tests_led_phase_bootstrap
+    tests_constellation_dataset
     tests_joint_pose_solver
     tests_pacing
     tests_pose_metrics
@@ -79,6 +80,8 @@ target_link_libraries(tests_led_phase_bootstrap PRIVATE constellation)
 target_link_libraries(tests_imu_optical_filter PRIVATE constellation)
 target_include_directories(tests_imu_optical_filter PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
 target_link_libraries(tests_joint_pose_solver PRIVATE constellation aux_math aux_tracking)
+target_link_libraries(tests_constellation_dataset PRIVATE constellation aux_math aux_tracking)
+target_include_directories(tests_constellation_dataset PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
 target_include_directories(tests_joint_pose_solver PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
 target_include_directories(tests_led_phase_bootstrap PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
 target_include_directories(tests_pose_metrics PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation)
