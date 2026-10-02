@@ -161,3 +161,20 @@ The external bridge now checks the selected sharing path and rejects any Monado
 swapchain using `gpu-blit`; its GPU pattern probe validates every returned image
 for both 2D and array swapchains (four images per Monado swapchain, three per Meta
 swapchain), with zero pixel mismatches.
+
+## Remaining transitional pacing policy
+
+The native PID aggregates use upstream `pid_t` again. The external proxy freezes
+Wine's `int64_t` client-description/app-state layouts and converts
+`instance_describe_client` requests and `system_get_client_info` replies. Native
+clients and the service continue to share their platform ABI; rebuild both after
+the layout revert. Neither aggregate is embedded in shared memory.
+
+Keep the per-session pacing policy in this integration branch until the
+transitional proxy retires, but exclude it from the upstream series:
+`xrt_session_info.pacing_flags`, `XRT_SESSION_PACING_USE_MIN_FRAME_PERIOD_BIT`,
+`u_pacing`'s `set_use_min_frame_period` vtable entry, its multi-compositor hook and
+the OpenVR `.pacing_flags = 0` initializer. Only the external proxy sets the bit;
+the native OpenXR host uses ordinary `xrWaitFrame` pacing. Upstream already offers
+the global `U_PACING_APP_USE_MIN_FRAME_PERIOD` option. Prepare the upstream slice
+without these additions rather than changing proxy pacing in this branch.
