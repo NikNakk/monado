@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+> **2026-10-02 Wine hardware gate:** the experimental in-process runtime passed
+> PS VR2 runtime-owned 2D/array image pixel checks and Opaque hello_xr. Hosted
+> compositing initializes inside Wine, but currently runs at 60 Hz on the 120 Hz
+> display. Visual confirmation and full-rate validation remain pending. See
+> [the hardware evidence](macos-wine-in-process-endpoint.md#ps-vr2-hardware-gate-2026-10-02).
+
 This document is the high-level status and roadmap for the experimental Monado
 port to Apple Silicon macOS, with PS VR2 as the primary headset.
 

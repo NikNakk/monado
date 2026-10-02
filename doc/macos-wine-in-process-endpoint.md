@@ -41,3 +41,36 @@ service recorded its app-pacer inputs in `monado_psvr2_85937_app_pacing.csv` in
 the bridge's `build-in-process/traces`. This is a desktop simulated test;
 it makes no claim about headset pacing, Game Mode, alpha blending or PS VR2.
 The bridge's `docs/in-process-openxr.md` holds the acceptance ledger and commands.
+
+## PS VR2 hardware gate, 2026-10-02
+
+The user authorized agent-run tests on the connected PS VR2. The installed
+ARM64 service was built from 7fd7f2835693d447d46da933e9a54c9f71ddfae9, so a clean,
+matching x86_64 client was built in `.build/in-process-native-hardware/monado-x64`.
+The client/service version check stayed enabled. Source checkout:
+`.build/in-process-monado-hardware-source`, detached at that exact revision.
+No hardware service configuration or Monado source change was made.
+
+After the user power-cycled/reconnected USB to clear a status-interface setup
+failure, all four runtime-owned 2D images and both slices of all four array
+images passed D3D11 pixel verification and shared-event/release ordering.
+Opaque D3D11 hello_xr completed 45 seconds and exited 0. It selected PS VR2,
+reported 6DoF tracking support, and imported four images per eye at 2800x2856.
+A 30-second client-compositor run also exited 0 and created a visible hosted
+CAContext/layer from inside Wine. Client Metal validation was enabled.
+
+Timing remains limited: service-compositor priority was clamped to 4 throughout
+and physical presented intervals were 91.757 ms median / 108.441 ms p95. The
+hosted Wine compositor retained realtime priority 97, but its display link and
+pacer ran at 60 Hz despite the headset's 120 Hz mode: presented intervals
+16.683 ms median / 16.684 ms p95. The Game Mode flag was not measured; no cause
+for the service clamp or the hosted 60 Hz period is asserted. No pacing fix
+was applied. The minimum-frame-period hint was unused in these runs.
+
+These are API/resource/presentation-plumbing tests. The user's confirmation of
+the visible stereo picture and head tracking remains pending; full 120 Hz,
+OpenComposite rendering and matched three-path benchmarks remain outstanding.
+The bridge's `docs/in-process-openxr.md` and
+`docs/results/psvr2-in-process-2026-10-02/` contain the receipts, compressed raw
+traces, call-latency measurements and exact results. Bridge hardware-evidence
+commit: d9c17ed.
