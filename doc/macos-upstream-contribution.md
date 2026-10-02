@@ -123,8 +123,9 @@ to 128. Representative old -> new IDs:
 | `swapchain_import_metal` | 104 | 96 |
 | `compositor_semaphore_import_metal` | 137 | 128 |
 
-Linux and Android retain their existing Unix-channel receive loop; Windows pipe
-handling is unchanged. Only macOS returns to reading complete native requests.
+Follow-up cleanup restores the original native Unix packet receive on macOS,
+Linux and Android, and removes orphaned bootstrap texture/event reconstruction
+helpers and declarations. Windows pipe handling is unchanged.
 Surviving native commands and shared-memory/layer layouts are unchanged. Rebuild
 native clients with the service after this protocol revision. The proxy pins the
 Monado header commit at CMake configuration and logs that commit plus the protocol
@@ -146,7 +147,7 @@ only the existing resolve/publish helpers; it adds no GPU queue or blit API.
 After deletion, the proxy hello_xr and 2D/array probes pass again; the public
 `run-generic-openxr.zsh` native host selects `shared-metal-zero-copy` against the
 synthetic service and completed 643 frames with Metal validation. All 35 macOS
-CTest tests, contribution style and REUSE lint pass. The external bridge's five
+CTest tests, contribution style and REUSE lint pass. The external bridge's six
 configured regression tests pass, including native command-ID shifts and actual
 socket/shared-memory transactions. Meta XR Simulator's generic bridge hello_xr
 also exited 0 with validation (46 frames), using its existing unshareable-image
@@ -154,4 +155,9 @@ GPU-blit fallback. That fallback does not run on the Monado paths.
 
 Physical PS VR2 pacing, visual output and controller regression remain untested.
 Simulator success does not establish hardware validation. Linux/Windows/Android
-build coverage is provided by the existing CI workflows.
+build coverage is provided by the existing CI workflows. The follow-up cleanup
+revision `50855002b` passes Linux, Windows, Android, macOS and contribution CI.
+The external bridge now checks the selected sharing path and rejects any Monado
+swapchain using `gpu-blit`; its GPU pattern probe validates every returned image
+for both 2D and array swapchains (four images per Monado swapchain, three per Meta
+swapchain), with zero pixel mismatches.
