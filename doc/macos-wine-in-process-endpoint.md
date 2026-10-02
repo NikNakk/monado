@@ -64,8 +64,8 @@ and physical presented intervals were 91.757 ms median / 108.441 ms p95. The
 hosted Wine compositor retained realtime priority 97, but its display link and
 pacer ran at 60 Hz despite the headset's 120 Hz mode: presented intervals
 16.683 ms median / 16.684 ms p95. The Game Mode flag was not measured; no cause
-for the service clamp or the hosted 60 Hz period is asserted. No pacing fix
-was applied. The minimum-frame-period hint was unused in these runs.
+for the service clamp is asserted. The hosted 60 Hz source was subsequently
+isolated by the architecture probe below. No pacing fix was applied. The minimum-frame-period hint was unused in these runs.
 
 These are API/resource/presentation-plumbing tests. The user's confirmation of
 the visible stereo picture and head tracking remains pending; full 120 Hz,
@@ -74,3 +74,15 @@ The bridge's `docs/in-process-openxr.md` and
 `docs/results/psvr2-in-process-2026-10-02/` contain the receipts, compressed raw
 traces, call-latency measurements and exact results. Bridge hardware-evidence
 commit: d9c17ed.
+
+### Hosted 60 Hz cause isolated
+
+A standalone display-link diagnostic outside Wine reproduced the discrepancy:
+ARM64 reported nominal 119.880 Hz with callbacks at 119.789 Hz, while the same
+source compiled for x64 and translated by Rosetta reported nominal 60.000 Hz
+with callbacks at 59.982 Hz. Both CoreGraphics mode queries returned 120.000 Hz
+for the PS VR2 display. This isolates the observed behavior to the translated
+x64 CoreVideo path on this machine; no universal Rosetta limit is claimed.
+Monado adopts that nominal display-link period as its compositor frame interval,
+which explains the hosted client's 16.667 ms app-pacer periods. No Monado source
+change was made. The bridge ledger contains the source and raw outputs.
