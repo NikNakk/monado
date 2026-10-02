@@ -35,6 +35,19 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 > project's transitional proxy (2026-10-02). Its transport rows are removed;
 > the dated counts and findings remain historical audit evidence.
 
+## Isolated Metal XPC endpoints (2026-10-02)
+
+`XRT_MACOS_METAL_IPC_SERVICE_NAME` selects the Mach-service name used by
+Metal clients, listeners and the optional broker. An unset or empty value keeps
+`org.freedesktop.monado.metal-ipc`. Set it before starting the process and use
+exactly the same name in the LaunchAgent's `MachServices` entry and every client.
+Pair it with a separate `XDG_RUNTIME_DIR` for an independent service. It does not
+change the Unix IPC protocol or select a compositor. Linux ignores the override.
+
+This is for isolated testing alongside the registered hardware service. See
+[Wine native-client endpoint validation](macos-wine-in-process-endpoint.md).
+The inventory counts below remain the historical audit snapshot.
+
 ## Summary
 
 | Category | Count | Meaning |

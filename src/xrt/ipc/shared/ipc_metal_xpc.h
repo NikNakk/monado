@@ -14,12 +14,29 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define IPC_METAL_XPC_SERVICE_NAME "org.freedesktop.monado.metal-ipc"
+#define IPC_METAL_XPC_DEFAULT_SERVICE_NAME "org.freedesktop.monado.metal-ipc"
+
+/* Select before starting listeners or making connections. The default stays
+ * compatible with the installed service; the override permits isolated tests. */
+static inline const char *
+ipc_metal_xpc_service_name(void)
+{
+#ifdef XRT_OS_OSX
+	const char *name = getenv("XRT_MACOS_METAL_IPC_SERVICE_NAME");
+	if (name != NULL && name[0] != '\0') {
+		return name;
+	}
+#endif
+	return IPC_METAL_XPC_DEFAULT_SERVICE_NAME;
+}
+
+#define IPC_METAL_XPC_SERVICE_NAME ipc_metal_xpc_service_name()
 /*
  * Keep tokens representable in the legacy uint32_t ipc_arg_swapchain_from_native::sizes[]
  * field used by swapchain_import. The upper byte is a Metal-XPC tag and the lower
