@@ -400,11 +400,7 @@ struct ipc_body_tracker_create_info
  */
 struct ipc_client_description
 {
-	/*
-	 * Wire-format process ID. pid_t is 64-bit in our MinGW environment but
-	 * 32-bit on macOS, so it must never appear in a cross-OS IPC aggregate.
-	 */
-	int64_t pid;
+	pid_t pid;
 	struct xrt_application_info info;
 };
 
@@ -444,8 +440,7 @@ struct ipc_app_state
 	bool session_overlay;
 	struct ipc_client_io_blocks io_blocks;
 	uint32_t z_order;
-	/* Fixed-width for cross-ABI IPC wire compatibility: see ipc_client_description. */
-	int64_t pid;
+	pid_t pid;
 	struct xrt_application_info info;
 };
 

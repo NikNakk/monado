@@ -5,7 +5,7 @@
  * @file
  * @brief  Just the client connection setup/teardown bits.
  * @author Jakob Bornecrantz <jakob@collabora.com>
- * @author Rylie Pavlik <rpavlik@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
  * @ingroup ipc_client
  */
 
@@ -372,14 +372,14 @@ static xrt_result_t
 ipc_client_describe_client(struct ipc_connection *ipc_c, const struct xrt_application_info *a_info)
 {
 #ifdef XRT_OS_WINDOWS
-	int64_t pid = (int64_t)GetCurrentProcessId();
+	DWORD pid = GetCurrentProcessId();
 #else
-	int64_t pid = (int64_t)getpid();
+	pid_t pid = getpid();
 #endif
 
 	struct ipc_client_description desc = {0};
 	desc.info = *a_info;
-	desc.pid = pid; // Fixed-width wire value.
+	desc.pid = pid; // Extra info.
 
 	xrt_result_t xret = ipc_call_instance_describe_client(ipc_c, &desc);
 	if (xret != XRT_SUCCESS) {
