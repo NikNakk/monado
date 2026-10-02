@@ -5,15 +5,6 @@
 		"out_handles": {"type": "xrt_shmem_handle_t"}
 	},
 
-	"instance_get_shm_chunk": {
-		"in": [
-			{"name": "offset", "type": "uint32_t"}
-		],
-		"out": [
-			{"name": "chunk", "type": "struct ipc_shm_copy_chunk"}
-		]
-	},
-
 	"instance_describe_client": {
 		"in": [
 			{"name": "desc", "type": "struct ipc_client_description"}

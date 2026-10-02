@@ -970,12 +970,9 @@ compositor_init_vulkan(struct comp_compositor *c)
 
 #ifdef XRT_OS_OSX
 	/*
-	 * Register the compositor Vulkan bundle as soon as it is valid. Wine's
-	 * DXMT/IOSurface path imports externally-created swapchains and therefore
-	 * never necessarily calls base_create_swapchain(), where this probe used
-	 * to be performed lazily. Without this eager registration a fresh service
-	 * falls back to CPU fence waits until some unrelated native client happens
-	 * to create a swapchain first.
+	 * Register the compositor Vulkan bundle before importing external Metal
+	 * swapchains, so shared-event synchronization is available even when no
+	 * service-created swapchain has initialized the allocator yet.
 	 */
 	comp_metal_semaphore_probe(vk);
 #endif

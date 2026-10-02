@@ -52,63 +52,6 @@
 		]
 	},
 
-	"compositor_layer_sync_single": {
-		"in": [
-			{"name": "payload", "type": "struct ipc_layer_single_payload"}
-		],
-		"out": [
-			{"name": "free_slot_id", "type": "uint32_t"}
-		]
-	},
-
-	"compositor_layer_sync_single_semaphore": {
-		"in": [
-			{"name": "payload", "type": "struct ipc_layer_single_payload"},
-			{"name": "semaphore_id", "type": "uint32_t"},
-			{"name": "semaphore_value", "type": "uint64_t"}
-		],
-		"out": [
-			{"name": "free_slot_id", "type": "uint32_t"}
-		]
-	},
-
-	"compositor_layer_sync_single_semaphore_async": {
-		"varlen": true,
-		"in": [
-			{"name": "payload", "type": "struct ipc_layer_single_payload"},
-			{"name": "semaphore_id", "type": "uint32_t"},
-			{"name": "semaphore_value", "type": "uint64_t"}
-		]
-	},
-
-	"compositor_layer_copy_chunk": {
-		"in": [
-			{"name": "offset", "type": "uint32_t"},
-			{"name": "total_size", "type": "uint32_t"},
-			{"name": "chunk", "type": "struct ipc_layer_copy_chunk"}
-		]
-	},
-
-	"compositor_layer_sync_copy_commit": {
-		"in": [
-			{"name": "total_size", "type": "uint32_t"}
-		],
-		"out": [
-			{"name": "free_slot_id", "type": "uint32_t"}
-		]
-	},
-
-	"compositor_layer_sync_copy_commit_semaphore": {
-		"in": [
-			{"name": "total_size", "type": "uint32_t"},
-			{"name": "semaphore_id", "type": "uint32_t"},
-			{"name": "semaphore_value", "type": "uint64_t"}
-		],
-		"out": [
-			{"name": "free_slot_id", "type": "uint32_t"}
-		]
-	},
-
 	"compositor_layer_sync_with_semaphore": {
 		"in": [
 			{"name": "slot_id", "type": "uint32_t"},
@@ -174,16 +117,6 @@
 			{"name": "id", "type": "uint32_t"}
 		],
 		"out_handles": {"type": "xrt_graphics_sync_handle_t"}
-	},
-
-	"compositor_semaphore_import_metal_bootstrap": {
-		"ifdef": "__APPLE__",
-		"in": [
-			{"name": "bootstrap", "type": "struct ipc_metal_bootstrap_name"}
-		],
-		"out": [
-			{"name": "id", "type": "uint32_t"}
-		]
 	},
 
 	"compositor_semaphore_create_metal": {

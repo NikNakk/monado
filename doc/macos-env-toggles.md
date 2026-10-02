@@ -31,10 +31,9 @@ string to that file (`git log -S`). "Last" is the newest commit touching a line
 that names the variable or its `debug_get_*` accessor (`git log -G`).
 
 > **Repository split note (2026-10-01):** Wine-specific build, test and
-> compatibility tooling has moved to `NikNakk/macos-wine-xr`. Wine transport
-> rows below are retained as historical audit evidence while transport
-> extraction is completed; they are not part of the intended upstream macOS
-> runtime surface.
+> compatibility tooling has moved to `NikNakk/macos-wine-xr`. The remaining Wine protocol has also moved into that
+> project's transitional proxy (2026-10-02). Its transport rows are removed;
+> the dated counts and findings remain historical audit evidence.
 
 ## Summary
 
@@ -572,9 +571,6 @@ are the ones that matter in practice.
 | `XRT_MACOS_DISPLAY_LOSS_DELAY_MS` | same | 3000 | Grace period before stopping | `4135890` / `4135890` | a |
 | `XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS` | same | 5000 | Hard-exit watchdog after display-loss shutdown | `eaa4d7f` / `eaa4d7f` | a |
 | ~~`XRT_MACOS_LAUNCHD_PROCESS_TYPE`~~ | removed 2026-09-30 | `Interactive` | LaunchAgent `ProcessType` | `b38ccd0` / removed | c |
-| `IPC_WINE_TCP_PORT` | `ipc/server/ipc_server_mainloop_apple.c` | 0 (off) | Authenticated loopback TCP listener for Wine clients | `68b8620` / `68b8620` | a |
-| `IPC_WINE_TCP_TOKEN` | `ipc/shared/ipc_tcp_auth.c`, service/client connection setup | required when TCP is enabled | 256-bit shared authentication key, encoded as 64 lowercase hexadecimal characters; excluded from option logging | security hardening / security hardening | a |
-| `MONADO_WINE_TCP_PORT` | `ipc/client/ipc_client_connection.c` | unset (named pipe) | Windows client connects over TCP instead | `17f9d14` / `17f9d14` | a |
 | `XRT_MACOS_PROCESS_ACTIVITY` | `ipc/server/ipc_server_macos_activity.m` | unset (off) | Process-lifetime `NSProcessInfo` activity (`user-interactive` or `latency-critical`) | `69ca4d0` / `69ca4d0` | d |
 | ~~`XRT_MACOS_XPC_IMPORTANCE`~~ | removed 2026-09-30 | — | Client held an XPC importance lease for the session | `472c930` / removed | c |
 | `XRT_MACOS_METAL_XPC_EXTERNAL_BROKER` | `ipc/shared/ipc_metal_xpc_service.m` | off | Retired override; service startup rejects it | `1cec3f6` / `1cec3f6` | d |
@@ -585,7 +581,6 @@ are the ones that matter in practice.
 | Variable | File | Default | What it changes | Intro / last | Cat |
 | --- | --- | --- | --- | --- | :-: |
 | `PSVR2_OPENXR_LOADER` | `targets/psvr2_openxr_test/psvr2_openxr_test.mm` | search `$HOME` | OpenXR loader path for the test app | `85832da` / `afd08e5` | b |
-| `MONADO_IOSURFACE_DONE_FILE` | `tests/windows/macos_wine_d3d11_iosurface_producer.cpp` | unset | Handshake file for the Wine D3D11 IOSurface test | `45de2f5` / `45de2f5` | b |
 
 ### Out of scope
 
