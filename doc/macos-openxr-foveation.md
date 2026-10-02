@@ -278,16 +278,16 @@ releases it.
 The native diagnostic contains two standard-path tests:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-  ./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/openxr_monado-dev.json" \
+  ./build/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --fb-foveation --foveation-profile aggressive
 ```
 
 and:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-  ./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/openxr_monado-dev.json" \
+  ./build/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --fb-eye-foveation --foveation-profile aggressive
 ```
 
@@ -334,9 +334,8 @@ path.
 
 ## Feature gates
 
-The extensions remain opt-in at build time (default-OFF) so that ordinary,
-Unity/OpenVR and Wine builds of this branch do not advertise experimental
-extensions. A development build that uses them needs:
+The extensions remain opt-in at build time (default-OFF) so that ordinary
+native builds of this branch do not advertise experimental extensions. A development build that uses them needs:
 
 ```sh
 cmake -S . -B build -G Ninja \

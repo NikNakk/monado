@@ -295,8 +295,8 @@ If it is bad, the options are:
   `ProcessType` default are removed; the LaunchAgent is `Interactive` again.
   They addressed a cause (adaptive-daemon background) that Game Mode does not
   use.
-- The process-activity diagnostic is already gone. The external Metal broker
-  stays: the Wine trace script needs it.
+- The process-activity diagnostic is already gone. The direct service hosts the native Metal XPC registry. External
+  compatibility tracing and launch tooling live in `macos-wine-xr`.
 
 ## Phases
 
@@ -551,8 +551,9 @@ client's environment. Without it, clients take exactly the old service path.
   distortion grid above. Requires `PSVR2_CAMERA_STREAMS=1` for the service,
   as before. Not yet run on hardware.
 
-The shared-memory layout changed, so rebuild the Wine client alongside the
-service.
+The shared-memory layout changed, so rebuild native IPC clients alongside
+the service. The external compatibility proxy must use the matching Monado
+headers; its Wine-facing ABI is maintained in `macos-wine-xr`.
 
 - **Session and focus** (`compositor_hosted_session_active`): a hosted
   client never waits for frames in the service, which is what normally marks

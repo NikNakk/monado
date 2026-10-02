@@ -212,10 +212,6 @@ struct ipc_client_state
 	//! Kernel-verified native peer PID, zero for transports without peer credentials.
 	int64_t peer_pid;
 
-	//! Staging area for compact byte-stream layer uploads.
-	struct ipc_layer_slot stream_layer_slot_upload;
-	uint32_t stream_layer_slot_received;
-	uint32_t stream_layer_slot_total_size;
 
 	uint64_t plane_detection_size;
 	uint64_t plane_detection_count;

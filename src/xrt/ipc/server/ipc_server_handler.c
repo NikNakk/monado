@@ -499,30 +499,6 @@ ipc_handle_instance_get_shm_fd(volatile struct ipc_client_state *ics,
 	return XRT_SUCCESS;
 }
 
-xrt_result_t
-ipc_handle_instance_get_shm_chunk(volatile struct ipc_client_state *ics,
-                                  uint32_t offset,
-                                  struct ipc_shm_copy_chunk *out_chunk)
-{
-	IPC_TRACE_MARKER();
-
-	if (ics == NULL || out_chunk == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	const size_t total_size = sizeof(struct ipc_shared_memory);
-	if ((size_t)offset >= total_size) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	size_t remaining = total_size - (size_t)offset;
-	size_t copy_size = remaining < IPC_SHM_COPY_CHUNK_SIZE ? remaining : IPC_SHM_COPY_CHUNK_SIZE;
-
-	memset(out_chunk, 0, sizeof(*out_chunk));
-	out_chunk->size = (uint32_t)copy_size;
-	memcpy(out_chunk->data, ((const uint8_t *)get_ism(ics)) + offset, copy_size);
-	return XRT_SUCCESS;
-}
 
 xrt_result_t
 ipc_handle_instance_describe_client(volatile struct ipc_client_state *ics,
@@ -1598,17 +1574,25 @@ ipc_handle_compositor_layer_sync(volatile struct ipc_client_state *ics,
 
 	// Copy the layer slot in case the shared memory gets overwritten during update
 	struct ipc_layer_slot slot = ism->slots[slot_id];
+	ipc_submit_trace_event("handler_entry", slot.data.frame_id, 0, slot.data.display_time_ns, slot.layer_count,
+	                       XRT_SUCCESS);
 
 	/*
 	 * Transfer data to underlying compositor.
 	 */
 
-	xrt_comp_layer_begin(ics->xc, &slot.data);
+	xrt_result_t begin_result = xrt_comp_layer_begin(ics->xc, &slot.data);
+	ipc_submit_trace_event("after_layer_begin", slot.data.frame_id, 0, slot.data.display_time_ns, slot.layer_count,
+	                       begin_result);
 
 	xrt_result_t xret = _update_layers(ics, &slot);
+	ipc_submit_trace_event(xret == XRT_SUCCESS ? "after_update_layers" : "update_layers_failed", slot.data.frame_id,
+	                       0, slot.data.display_time_ns, slot.layer_count, xret);
 	IPC_CHK_AND_RET(ics->server, xret, "_update_layers");
 
-	xrt_comp_layer_commit(ics->xc, sync_handle);
+	xrt_result_t commit_result = xrt_comp_layer_commit(ics->xc, sync_handle);
+	ipc_submit_trace_event("after_commit", slot.data.frame_id, 0, slot.data.display_time_ns, slot.layer_count,
+	                       commit_result);
 
 
 	/*
@@ -1625,335 +1609,7 @@ ipc_handle_compositor_layer_sync(volatile struct ipc_client_state *ics,
 	return xret;
 }
 
-xrt_result_t
-ipc_handle_compositor_layer_sync_single(volatile struct ipc_client_state *ics,
-                                        const struct ipc_layer_single_payload *payload,
-                                        uint32_t *out_free_slot_id)
-{
-	IPC_TRACE_MARKER();
 
-	if (ics == NULL || payload == NULL || out_free_slot_id == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (ics->xc == NULL) {
-		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
-	}
-	if (payload->size == 0 || payload->size > IPC_LAYER_SINGLE_PAYLOAD_SIZE ||
-	    payload->size > sizeof(struct ipc_layer_slot)) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	struct ipc_layer_slot slot = {0};
-	memcpy(&slot, payload->data, payload->size);
-	const int64_t trace_frame_id = slot.data.frame_id;
-	const int64_t trace_display_time_ns = slot.data.display_time_ns;
-	const uint32_t trace_layer_count = slot.layer_count;
-	ipc_submit_trace_event("handler_entry", trace_frame_id, 0, trace_display_time_ns, trace_layer_count,
-	                       XRT_SUCCESS);
-	if (slot.layer_count != 1) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	const size_t expected_size = offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
-	if ((size_t)payload->size != expected_size) {
-		IPC_ERROR(ics->server, "Byte-stream single-layer wire-layout mismatch: received=%u expected_native=%zu",
-		          payload->size, expected_size);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	xrt_result_t xret = xrt_comp_layer_begin(ics->xc, &slot.data);
-	ipc_submit_trace_event("after_layer_begin", trace_frame_id, 0, trace_display_time_ns, trace_layer_count, xret);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
-	if (_update_layers(ics, &slot) != XRT_SUCCESS) {
-		ipc_submit_trace_event("update_layers_failed", trace_frame_id, 0, trace_display_time_ns,
-		                       trace_layer_count, XRT_ERROR_IPC_FAILURE);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-	ipc_submit_trace_event("after_update_layers", trace_frame_id, 0, trace_display_time_ns, trace_layer_count,
-	                       XRT_SUCCESS);
-
-	xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
-	ipc_submit_trace_event("after_commit", trace_frame_id, 0, trace_display_time_ns, trace_layer_count, xret);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
-
-	os_mutex_lock(&ics->server->global_state.lock);
-	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
-	ics->server->current_slot_index = *out_free_slot_id;
-	os_mutex_unlock(&ics->server->global_state.lock);
-
-	return XRT_SUCCESS;
-}
-
-xrt_result_t
-ipc_handle_compositor_layer_sync_single_semaphore(volatile struct ipc_client_state *ics,
-                                                  const struct ipc_layer_single_payload *payload,
-                                                  uint32_t semaphore_id,
-                                                  uint64_t semaphore_value,
-                                                  uint32_t *out_free_slot_id)
-{
-	IPC_TRACE_MARKER();
-
-	if (ics == NULL || payload == NULL || out_free_slot_id == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (ics->xc == NULL) {
-		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
-	}
-	if (semaphore_id >= IPC_MAX_CLIENT_SEMAPHORES || ics->xcsems[semaphore_id] == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (payload->size == 0 || payload->size > IPC_LAYER_SINGLE_PAYLOAD_SIZE ||
-	    payload->size > sizeof(struct ipc_layer_slot)) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	struct ipc_layer_slot slot = {0};
-	memcpy(&slot, payload->data, payload->size);
-	if (slot.layer_count != 1) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	const size_t expected_size = offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
-	if ((size_t)payload->size != expected_size) {
-		IPC_ERROR(ics->server,
-		          "Byte-stream single-layer semaphore wire-layout mismatch: received=%u expected_native=%zu",
-		          payload->size, expected_size);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	xrt_comp_layer_begin(ics->xc, &slot.data);
-	if (_update_layers(ics, &slot) != XRT_SUCCESS) {
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	xrt_result_t xret = xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
-
-	os_mutex_lock(&ics->server->global_state.lock);
-	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
-	ics->server->current_slot_index = *out_free_slot_id;
-	os_mutex_unlock(&ics->server->global_state.lock);
-
-	return XRT_SUCCESS;
-}
-
-xrt_result_t
-ipc_handle_compositor_layer_sync_single_semaphore_async(volatile struct ipc_client_state *ics,
-                                                        const struct ipc_layer_single_payload *payload,
-                                                        uint32_t semaphore_id,
-                                                        uint64_t semaphore_value)
-{
-	IPC_TRACE_MARKER();
-
-	int64_t trace_frame_id = -1;
-	int64_t trace_display_time_ns = 0;
-	uint32_t trace_layer_count = 0;
-
-	if (ics == NULL || payload == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (ics->xc == NULL) {
-		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
-	}
-	if (semaphore_id >= IPC_MAX_CLIENT_SEMAPHORES || ics->xcsems[semaphore_id] == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (payload->size == 0 || payload->size > IPC_LAYER_SINGLE_PAYLOAD_SIZE ||
-	    payload->size > sizeof(struct ipc_layer_slot)) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	struct ipc_layer_slot slot = {0};
-	memcpy(&slot, payload->data, payload->size);
-	trace_frame_id = slot.data.frame_id;
-	trace_display_time_ns = slot.data.display_time_ns;
-	trace_layer_count = slot.layer_count;
-	ipc_submit_trace_event("handler_entry", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                       trace_layer_count, XRT_SUCCESS);
-	if (slot.layer_count != 1) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	const size_t expected_size = offsetof(struct ipc_layer_slot, layers) + sizeof(struct ipc_layer_entry);
-	if ((size_t)payload->size != expected_size) {
-		IPC_ERROR(
-		    ics->server,
-		    "Byte-stream async single-layer semaphore wire-layout mismatch: received=%u expected_native=%zu",
-		    payload->size, expected_size);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	xrt_result_t xret = xrt_comp_layer_begin(ics->xc, &slot.data);
-	ipc_submit_trace_event("after_layer_begin", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                       trace_layer_count, xret);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
-	if (_update_layers(ics, &slot) != XRT_SUCCESS) {
-		ipc_submit_trace_event("update_layers_failed", trace_frame_id, semaphore_value, trace_display_time_ns,
-		                       trace_layer_count, XRT_ERROR_IPC_FAILURE);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-	ipc_submit_trace_event("after_update_layers", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                       trace_layer_count, XRT_SUCCESS);
-
-	/*
-	 * No IPC reply is sent for this command. The TCP stream itself preserves
-	 * ordering, and the byte-stream client copied the complete active layer into this request,
-	 * so there is no shared-memory slot to return to the client. If the native
-	 * compositor needs time here, the next synchronous request (normally
-	 * wait_frame) naturally queues behind it instead of stalling xrEndFrame.
-	 */
-	xret = xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
-	ipc_submit_trace_event("after_commit", trace_frame_id, semaphore_value, trace_display_time_ns,
-	                       trace_layer_count, xret);
-	return xret;
-}
-
-xrt_result_t
-ipc_handle_compositor_layer_copy_chunk(volatile struct ipc_client_state *ics,
-                                       uint32_t offset,
-                                       uint32_t total_size,
-                                       const struct ipc_layer_copy_chunk *chunk)
-{
-	IPC_TRACE_MARKER();
-
-	if (ics == NULL || chunk == NULL || chunk->size == 0 || chunk->size > IPC_LAYER_COPY_CHUNK_SIZE) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (total_size == 0 || total_size > sizeof(struct ipc_layer_slot)) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (offset == 0) {
-		memset((void *)&ics->stream_layer_slot_upload, 0, sizeof(ics->stream_layer_slot_upload));
-		ics->stream_layer_slot_received = 0;
-		ics->stream_layer_slot_total_size = total_size;
-	}
-	if (ics->stream_layer_slot_total_size != total_size || offset != ics->stream_layer_slot_received) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if ((size_t)offset + chunk->size > total_size) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	memcpy(((uint8_t *)(void *)&ics->stream_layer_slot_upload) + offset, chunk->data, chunk->size);
-	ics->stream_layer_slot_received += chunk->size;
-	return XRT_SUCCESS;
-}
-
-xrt_result_t
-ipc_handle_compositor_layer_sync_copy_commit(volatile struct ipc_client_state *ics,
-                                             uint32_t total_size,
-                                             uint32_t *out_free_slot_id)
-{
-	IPC_TRACE_MARKER();
-
-	if (ics == NULL || out_free_slot_id == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (ics->xc == NULL) {
-		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
-	}
-	if (total_size != ics->stream_layer_slot_total_size || total_size != ics->stream_layer_slot_received) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	struct ipc_layer_slot *slot = (struct ipc_layer_slot *)(void *)&ics->stream_layer_slot_upload;
-	if (slot->layer_count > IPC_MAX_LAYERS) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	const size_t expected_size =
-	    offsetof(struct ipc_layer_slot, layers) + ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
-	if ((size_t)total_size != expected_size) {
-		IPC_ERROR(ics->server,
-		          "Byte-stream layer wire-layout mismatch: received=%u expected_native=%zu layers=%u",
-		          total_size, expected_size, slot->layer_count);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	xrt_comp_layer_begin(ics->xc, &slot->data);
-	if (_update_layers(ics, slot) != XRT_SUCCESS) {
-		return XRT_ERROR_IPC_FAILURE;
-	}
-	xrt_result_t xret = xrt_comp_layer_commit(ics->xc, XRT_GRAPHICS_SYNC_HANDLE_INVALID);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
-
-	ics->stream_layer_slot_received = 0;
-	ics->stream_layer_slot_total_size = 0;
-
-	os_mutex_lock(&ics->server->global_state.lock);
-	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
-	ics->server->current_slot_index = *out_free_slot_id;
-	os_mutex_unlock(&ics->server->global_state.lock);
-
-	return XRT_SUCCESS;
-}
-
-xrt_result_t
-ipc_handle_compositor_layer_sync_copy_commit_semaphore(volatile struct ipc_client_state *ics,
-                                                       uint32_t total_size,
-                                                       uint32_t semaphore_id,
-                                                       uint64_t semaphore_value,
-                                                       uint32_t *out_free_slot_id)
-{
-	IPC_TRACE_MARKER();
-
-	if (ics == NULL || out_free_slot_id == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (ics->xc == NULL) {
-		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
-	}
-	if (semaphore_id >= IPC_MAX_CLIENT_SEMAPHORES || ics->xcsems[semaphore_id] == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	if (total_size != ics->stream_layer_slot_total_size || total_size != ics->stream_layer_slot_received) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	struct ipc_layer_slot *slot = (struct ipc_layer_slot *)(void *)&ics->stream_layer_slot_upload;
-	if (slot->layer_count > IPC_MAX_LAYERS) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-
-	const size_t expected_size =
-	    offsetof(struct ipc_layer_slot, layers) + ((size_t)slot->layer_count * sizeof(struct ipc_layer_entry));
-	if ((size_t)total_size != expected_size) {
-		IPC_ERROR(ics->server,
-		          "Byte-stream layer semaphore wire-layout mismatch: received=%u expected_native=%zu layers=%u",
-		          total_size, expected_size, slot->layer_count);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	xrt_comp_layer_begin(ics->xc, &slot->data);
-	if (_update_layers(ics, slot) != XRT_SUCCESS) {
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	xrt_result_t xret = xrt_comp_layer_commit_with_semaphore(ics->xc, ics->xcsems[semaphore_id], semaphore_value);
-	if (xret != XRT_SUCCESS) {
-		return xret;
-	}
-
-	ics->stream_layer_slot_received = 0;
-	ics->stream_layer_slot_total_size = 0;
-
-	os_mutex_lock(&ics->server->global_state.lock);
-	*out_free_slot_id = (ics->server->current_slot_index + 1) % IPC_MAX_SLOTS;
-	ics->server->current_slot_index = *out_free_slot_id;
-	os_mutex_unlock(&ics->server->global_state.lock);
-
-	return XRT_SUCCESS;
-}
 
 xrt_result_t
 ipc_handle_compositor_layer_sync_with_semaphore(volatile struct ipc_client_state *ics,
@@ -1982,17 +1638,25 @@ ipc_handle_compositor_layer_sync_with_semaphore(volatile struct ipc_client_state
 
 	// Copy the layer slot in case the shared memory gets overwritten during update
 	struct ipc_layer_slot slot = ism->slots[slot_id];
+	ipc_submit_trace_event("handler_entry", slot.data.frame_id, semaphore_value, slot.data.display_time_ns,
+	                       slot.layer_count, XRT_SUCCESS);
 
 	/*
 	 * Transfer data to underlying compositor.
 	 */
 
-	xrt_comp_layer_begin(ics->xc, &slot.data);
+	xrt_result_t begin_result = xrt_comp_layer_begin(ics->xc, &slot.data);
+	ipc_submit_trace_event("after_layer_begin", slot.data.frame_id, semaphore_value, slot.data.display_time_ns,
+	                       slot.layer_count, begin_result);
 
 	xrt_result_t xret = _update_layers(ics, &slot);
+	ipc_submit_trace_event(xret == XRT_SUCCESS ? "after_update_layers" : "update_layers_failed", slot.data.frame_id,
+	                       semaphore_value, slot.data.display_time_ns, slot.layer_count, xret);
 	IPC_CHK_AND_RET(ics->server, xret, "_update_layers");
 
-	xrt_comp_layer_commit_with_semaphore(ics->xc, xcsem, semaphore_value);
+	xrt_result_t commit_result = xrt_comp_layer_commit_with_semaphore(ics->xc, xcsem, semaphore_value);
+	ipc_submit_trace_event("after_commit", slot.data.frame_id, semaphore_value, slot.data.display_time_ns,
+	                       slot.layer_count, commit_result);
 
 
 	/*
