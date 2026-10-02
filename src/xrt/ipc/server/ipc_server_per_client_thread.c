@@ -353,34 +353,14 @@ client_loop(volatile struct ipc_client_state *ics)
 			break;
 		}
 
+		// Read the whole command now that we know its size
 		uint8_t buf[IPC_BUF_SIZE] = {0};
-#ifdef XRT_OS_OSX
-		// Native macOS clients send complete IPC messages on the Unix socket.
-		len = recv(ics->imc.ipc_handle, buf, cmd_size, 0);
+
+		len = recv(ics->imc.ipc_handle, &buf, cmd_size, 0);
 		if (len != (ssize_t)cmd_size) {
-			IPC_ERROR(ics->server, "Invalid/short packet received (%zd/%zu bytes), disconnecting client.",
-			          len, cmd_size);
+			IPC_ERROR(ics->server, "Invalid packet received, disconnecting client.");
 			break;
 		}
-#else
-		// Preserve the existing Unix-channel read behavior on Linux and Android.
-		size_t received = 0;
-		while (received < cmd_size) {
-			len = recv(ics->imc.ipc_handle, buf + received, cmd_size - received, 0);
-			if (len < 0 && errno == EINTR) {
-				continue;
-			}
-			if (len <= 0) {
-				break;
-			}
-			received += (size_t)len;
-		}
-		if (received != cmd_size) {
-			IPC_ERROR(ics->server, "Invalid/short packet received (%zu/%zu bytes), disconnecting client.",
-			          received, cmd_size);
-			break;
-		}
-#endif
 
 		// Check the first 4 bytes of the message and dispatch.
 		ipc_command_t *ipc_command = (ipc_command_t *)buf;
