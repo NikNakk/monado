@@ -7,8 +7,6 @@
  */
 
 #import <Metal/Metal.h>
-#import <mach/mach.h>
-#import <servers/bootstrap.h>
 
 #include "util/comp_metal_semaphore_probe.h"
 #include "util/comp_semaphore.h"
@@ -104,10 +102,6 @@ comp_metal_semaphore_create_client_pair(struct xrt_compositor_semaphore **out_xc
 }
 
 
-@protocol MonadoMTLDeviceSharedEventSPI <MTLDevice>
-- (id<MTLSharedEvent>)newSharedEventWithMachPort:(mach_port_t)machPort;
-@end
-
 xrt_result_t
 comp_metal_semaphore_import_shared_event_handle(void *mtl_shared_event_handle,
                                                 struct xrt_compositor_semaphore **out_xcsem)
@@ -149,82 +143,6 @@ comp_metal_semaphore_import_shared_event_handle(void *mtl_shared_event_handle,
 	xrt_result_t xret =
 	    comp_semaphore_import_metal_shared_event(vk, (__bridge void *)event, initial_value, out_xcsem);
 	[event release];
-	pthread_mutex_unlock(&g_provider.mutex);
-	return xret;
-}
-
-xrt_result_t
-comp_metal_semaphore_import_bootstrap_event(const char *bootstrap_name, struct xrt_compositor_semaphore **out_xcsem)
-{
-	if (bootstrap_name == NULL || bootstrap_name[0] == '\0' || out_xcsem == NULL) {
-		return XRT_ERROR_INVALID_ARGUMENT;
-	}
-	*out_xcsem = NULL;
-
-	pthread_mutex_lock(&g_provider.mutex);
-	struct vk_bundle *vk = g_provider.vk;
-	if (vk == NULL) {
-		pthread_mutex_unlock(&g_provider.mutex);
-		U_LOG_E("Native Metal shared-event import unavailable: Metal semaphore provider is not registered");
-		return XRT_ERROR_VULKAN;
-	}
-	if (vk->vkExportMetalObjectsEXT == NULL) {
-		pthread_mutex_unlock(&g_provider.mutex);
-		U_LOG_E("Native Metal shared-event import unavailable: vkExportMetalObjectsEXT is not available");
-		return XRT_ERROR_VULKAN;
-	}
-
-	VkExportMetalDeviceInfoEXT device_info = {
-	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_DEVICE_INFO_EXT,
-	};
-	VkExportMetalObjectsInfoEXT objects_info = {
-	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT,
-	    .pNext = &device_info,
-	};
-	vk->vkExportMetalObjectsEXT(vk->device, &objects_info);
-	id<MTLDevice> device = (__bridge id<MTLDevice>)device_info.mtlDevice;
-	if (device == nil) {
-		pthread_mutex_unlock(&g_provider.mutex);
-		U_LOG_E("Native Metal shared-event import unavailable: Vulkan Metal device export returned nil");
-		return XRT_ERROR_VULKAN;
-	}
-
-	mach_port_t bootstrap_port = MACH_PORT_NULL;
-	kern_return_t kr = task_get_bootstrap_port(mach_task_self(), &bootstrap_port);
-	if (kr != KERN_SUCCESS || bootstrap_port == MACH_PORT_NULL) {
-		pthread_mutex_unlock(&g_provider.mutex);
-		U_LOG_E("Native Metal shared-event import could not get bootstrap port: %d", kr);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	mach_port_t event_port = MACH_PORT_NULL;
-	kr = bootstrap_look_up(bootstrap_port, (char *)bootstrap_name, &event_port);
-	mach_port_deallocate(mach_task_self(), bootstrap_port);
-	if (kr != KERN_SUCCESS || event_port == MACH_PORT_NULL) {
-		pthread_mutex_unlock(&g_provider.mutex);
-		U_LOG_E("Native Metal shared-event bootstrap lookup failed for '%s': %d", bootstrap_name, kr);
-		return XRT_ERROR_IPC_FAILURE;
-	}
-
-	xrt_result_t xret = XRT_ERROR_VULKAN;
-	@autoreleasepool {
-		id<MonadoMTLDeviceSharedEventSPI> spi_device = (id<MonadoMTLDeviceSharedEventSPI>)device;
-		id<MTLSharedEvent> event = [spi_device newSharedEventWithMachPort:event_port];
-		if (event == nil) {
-			U_LOG_E("Native Metal shared-event reconstruction failed for '%s'", bootstrap_name);
-		} else {
-			uint64_t initial_value = event.signaledValue;
-			xret = comp_semaphore_import_metal_shared_event(vk, (__bridge void *)event, initial_value,
-			                                                out_xcsem);
-			if (xret == XRT_SUCCESS) {
-				U_LOG_I("Native Metal shared-event imported: name='%s' initial_value=%llu event=%p",
-				        bootstrap_name, (unsigned long long)initial_value, (__bridge void *)event);
-			}
-			[event release];
-		}
-	}
-
-	mach_port_deallocate(mach_task_self(), event_port);
 	pthread_mutex_unlock(&g_provider.mutex);
 	return xret;
 }

@@ -27,7 +27,6 @@ enum metal_swapchain_import_source
 	METAL_SWAPCHAIN_IMPORT_TEXTURES,
 	METAL_SWAPCHAIN_IMPORT_IOSURFACE_IDS,
 	METAL_SWAPCHAIN_IMPORT_IOSURFACES,
-	METAL_SWAPCHAIN_IMPORT_BOOTSTRAP_NAMES,
 };
 
 struct metal_swapchain_import_request
@@ -41,7 +40,6 @@ struct metal_swapchain_import_request
 	void *textures[XRT_MAX_SWAPCHAIN_IMAGES];
 	uint32_t iosurface_ids[XRT_MAX_SWAPCHAIN_IMAGES];
 	void *iosurfaces[XRT_MAX_SWAPCHAIN_IMAGES];
-	char bootstrap_names[XRT_MAX_SWAPCHAIN_IMAGES][64];
 };
 
 static __thread struct metal_swapchain_import_request g_request = {0};
@@ -133,36 +131,6 @@ comp_metal_swapchain_import_begin_iosurfaces(const struct xrt_swapchain_create_i
 			return false;
 		}
 		g_request.iosurfaces[i] = iosurfaces[i];
-	}
-	return true;
-}
-
-bool
-comp_metal_swapchain_import_begin_bootstrap_names(const struct xrt_swapchain_create_info *info,
-                                                  uint32_t image_count,
-                                                  const char *const *bootstrap_names)
-{
-	if (info == NULL || bootstrap_names == NULL || image_count == 0 || image_count > XRT_MAX_SWAPCHAIN_IMAGES ||
-	    g_request.active) {
-		return false;
-	}
-	memset(&g_request, 0, sizeof(g_request));
-	g_request.active = true;
-	g_request.source = METAL_SWAPCHAIN_IMPORT_BOOTSTRAP_NAMES;
-	g_request.info = *info;
-	g_request.image_count = image_count;
-	for (uint32_t i = 0; i < image_count; i++) {
-		if (bootstrap_names[i] == NULL) {
-			memset(&g_request, 0, sizeof(g_request));
-			return false;
-		}
-		const char *nul = memchr(bootstrap_names[i], '\0', sizeof(g_request.bootstrap_names[i]));
-		if (nul == NULL || nul == bootstrap_names[i]) {
-			memset(&g_request, 0, sizeof(g_request));
-			return false;
-		}
-		size_t len = (size_t)(nul - bootstrap_names[i]);
-		memcpy(g_request.bootstrap_names[i], bootstrap_names[i], len + 1);
 	}
 	return true;
 }
@@ -365,15 +333,6 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 				return VK_ERROR_INITIALIZATION_FAILED;
 			}
 			source_texture_owned = true;
-		} else if (g_request.source == METAL_SWAPCHAIN_IMPORT_BOOTSTRAP_NAMES) {
-			if (!comp_metal_texture_create_from_bootstrap_name_for_vk_device(
-			        vk, info, g_request.bootstrap_names[i], &source_texture)) {
-				U_LOG_E("Could not import shared Metal texture '%s' image=%u",
-				        g_request.bootstrap_names[i], i);
-				destroy_direct_images(vk, out_vkic);
-				return VK_ERROR_INITIALIZATION_FAILED;
-			}
-			source_texture_owned = true;
 		} else {
 			destroy_direct_images(vk, out_vkic);
 			return VK_ERROR_INITIALIZATION_FAILED;
@@ -404,7 +363,6 @@ comp_metal_swapchain_import_allocate_or_default(struct vk_bundle *vk,
 	switch (g_request.source) {
 	case METAL_SWAPCHAIN_IMPORT_IOSURFACE_IDS: source_name = "iosurface-id"; break;
 	case METAL_SWAPCHAIN_IMPORT_IOSURFACES: source_name = "iosurface"; break;
-	case METAL_SWAPCHAIN_IMPORT_BOOTSTRAP_NAMES: source_name = "metal-bootstrap"; break;
 	default: break;
 	}
 	U_LOG_I(
