@@ -322,18 +322,24 @@ Fifth batch (2026-10-01), no default changes:
   `u_timing_trace_open()` replaces about a dozen copies of the file-opening
   code. The names are unchanged; the rename proposed below has not been done.
   As with other Monado boolean options, `true`, `on` and `yes` now also enable
-  them. Fully buffered captures now use 16 MiB for every trace.
+  them. Fully buffered captures request at least 16 MiB per trace; IMU now requests
+  64 MiB. See the 2026-10-03 buffering correction in the timing diagnostics.
 - **No more redefined functions.** The force-included headers and `-D`
   renames are gone (including the ones that redefined `fflush`, `setvbuf` and
   `presentDrawable`); callers call the macOS hooks by name.
 - **Other raw `getenv` reads now use `DEBUG_GET_ONCE_*`**, including
   `MONADO_WINE_TCP_PORT` (finding 5 below) and the macOS wait diagnostics.
 
-Added 2026-10-01: `XRT_MACOS_DISPLAY_LINK` (`cv` default, `ca`), an A/B switch
-for moving from the deprecated CVDisplayLink to CADisplayLink. It is category
-(d) until the headset comparison in
-[the timing notes](macos-psvr2-timing-diagnostics.md#cvdisplaylink-against-cadisplaylink)
-is done; then one source should be removed.
+Added 2026-10-01: `XRT_MACOS_DISPLAY_LINK` (`ca` default since 2026-10-03,
+`cv` legacy fallback), a comparison switch for migration from deprecated
+CVDisplayLink. Corrected CA closely matches CV in native service and hosted
+headset captures; the heavy UE/Game Mode pair favours CA in completion logs.
+The low UE frame rate is an intentional stress condition. Keep the switch as
+category (d) for comparison/fallback; fully buffered hosted repeats now physically favour CA under heavy load
+(105.18 vs 100.08 Hz); 90 Hz still needs coverage. The selector belongs in the presenting process: the service
+launchd environment for IPC compositing, or the app for client compositing.
+Older macOS or CA creation failure falls back to CV automatically. See
+[the default decision](macos-psvr2-timing-diagnostics.md#cadisplaylink-promoted-to-default--2026-10-03).
 
 Still not done: `PRESENT_PRELATCH_US` and `PRESENT_MIN_LEAD_US` (inert under the
 default minimum present duration, but kept because the Wine trace script still
@@ -542,7 +548,7 @@ are the ones that matter in practice.
 | `XRT_MACOS_PRESENT_MIN_DURATION_US` | same | 0 (off) | Replace `atTime:` with `afterMinimumDuration:`. **L** | `d11d38f` / `d11d38f` | d |
 | `PSVR2_TIMING_TRACE` | 13 files (see finding 1) | off | Master switch for all timing CSVs | `ca55a39` / `38624ef` | b |
 | `PSVR2_TIMING_TRACE_DIR` | 11 files | `/tmp` | CSV directory | `ca55a39` / `38624ef` | b |
-| `PSVR2_TIMING_TRACE_FULLY_BUFFERED` | 7 files, incl. `comp_window_macos_trace_buffer.h`, `psvr2_trace_buffer.h` | off | 16 MiB stdio buffers, flush only at close | `ed2e5a3` / `eb607ca` | b |
+| `PSVR2_TIMING_TRACE_FULLY_BUFFERED` | 7 files, incl. `comp_window_macos_trace_buffer.h`, `psvr2_trace_buffer.h` | off | at least 16 MiB (IMU 64 MiB); periodic flushes suppressed after 2026-10-03 correction | `ed2e5a3` / `eb607ca` | b |
 
 - **`ASYNC_PRESENT` is (c).** The ledger says "Synchronous Metal
   `waitUntilCompleted` ... **Not required**". The default has been `on` since
@@ -799,3 +805,60 @@ go away with the single trace helper from finding 1.
 
 Recommended order: step 1, then D1b (default flip to the D1 configuration, as its
 own commit so it can be reverted on its own), then step 3, then step 2.
+
+
+### Retired CA compositor-thread experiment (2026-10-03)
+
+`XRT_MACOS_CA_COMPOSITOR` has been removed. Both execution inside the CA callback
+and a deferred render on its run loop failed to demonstrate a benefit over
+ordinary CA pacing. The latter kept callbacks short, but its five-pair comparison
+had slightly worse physical cadence and a longer typical latency tail. This does
+not retire CADisplayLink pacing or client-hosted compositing; both are retained.
+See the [follow-up decision](macos-psvr2-timing-diagnostics.md#deferred-run-loop-results-and-retirement).
+
+`PSVR2_TIMING_TRACE=1` retains the useful passive `ca_callback.csv` and
+`renderer_stage.csv` diagnostics. CA callbacks only record clock timing; their
+historical frame columns remain zero. Renderer stages separate the previous GPU
+fence wait, feedback, submission, draw dispatch, acquisition and present enqueue.
+
+## Shared tracking experiment (2026-10-03)
+
+`XRT_MACOS_SHARED_TRACKING=1` is **off by default** and read in the client.
+With `XRT_MACOS_CLIENT_COMPOSITOR=1`, it requests the PS VR2 driver's read-only
+tracking snapshot and predicts future head/view poses locally. The service
+publishes automatically on request; no service environment override is needed.
+Use matching newly built service and client binaries. Startup/recenter and
+historical poses keep the service path, as do unsupported devices/inputs and
+general IPC space-overseer operations. Snapshot contention retains the last
+coherent state, with the existing 500 ms SLAM tracking-loss rule. It cannot
+remove USB/source-update stalls.
+
+`PSVR2_TIMING_TRACE=1` records `shared_tracking.csv` when this path is active;
+`PSVR2_TIMING_TRACE_FULLY_BUFFERED=1` applies to it too. Inspect publication,
+SLAM and IMU age, validity and fallback fields. See the
+[transport design](macos-client-compositor-design.md#shared-ps-vr2-tracking-experiment--2026-10-03)
+and the hardware evidence in the timing diagnostics.
+
+The prepared moving-head runner checks zero-byte required traces throughout its
+window and verifies nonempty files after normal shutdown. Shared tracking version
+2 records actual USB callback/SLAM receipt and raw device timestamps alongside
+returned poses. See [the capture protocol](macos-psvr2-timing-diagnostics.md#prepared-moving-head-freshness-capture--2026-10-03).
+
+With timing tracing and full buffering enabled on macOS, the compositor worker
+and service main loop can acknowledge owned `.flush-request` markers in the
+trace directory. The capture runner uses these only before/after measurement,
+checks source health after warmup, and requires fixed file sizes inside the
+window. New `present_scheduled` and `appkit_pump` traces are passive; presentation
+and Game Mode defaults are unchanged. See the
+[completed-frame investigation](macos-psvr2-timing-diagnostics.md#completed-frame-presentation-investigation--2026-10-03).
+
+## Pixel-sample diagnostics cleanup — 2026-10-03
+
+`XRT_COMPOSITOR_LOG_APPLE_SAMPLES=1` now controls debug buffer allocation and
+GPU pixel readbacks, as well as their output. With the default `0`, these
+copies and their barriers are absent. Samples require four-byte RGBA/BGRA
+color images with transfer-source usage; multisampled sources are skipped.
+Unsupported images are skipped without failing normal rendering. Target
+readbacks honor the requested final layout. The previous log-only gating
+left the GPU work active every frame. See the
+[inherited compositor audit](macos-inherited-compositor-audit.md).

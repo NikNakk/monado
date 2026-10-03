@@ -649,3 +649,61 @@ Game Mode), then complete in about 30–40 ms.
   swap), and whether fence ports are needed for that case.
 - A GPU-heavy renderer, and whether direct scanout is kept.
 - Integration with the multi-client compositor.
+
+
+### Hosted UE tracking dependency check — 2026-10-03
+
+During a separate hosted MonadoMacTest run, eight read-only policy/thread
+snapshots over about 21 seconds found service PID 9959 `ext_darwinbg=1`, with
+all 12–13 enumerated threads at priority 4 / policy 1. UE PID 9801 remained
+`ext_darwinbg=0`, UI-focal, with its compositor threads at priority 97. The
+Game Mode bit was unreadable under the query permission; external demotion was
+directly observed. Client-hosted rendering still bypasses this service render
+throttling, but synchronous view-pose queries remain a dependency on the
+throttled process. Shared-event client-GPU readiness waits were active.
+
+The failed CA-thread compositor variants were retired; client-hosted Monado is
+retained. Shared timestamped tracking state with local prediction is the next
+proposed way to remove the synchronous dependency, with publication-age checks
+needed to distinguish transport stalls from delayed tracking production.
+Evidence: `/tmp/monado-ca-stage-20261003/policy-check/policy-samples.json` and the
+[complete timing follow-up](macos-psvr2-timing-diagnostics.md#deferred-run-loop-results-and-retirement).
+
+## Shared tracking experiment (2026-10-03)
+
+The hosted layer architecture remains unchanged. `XRT_MACOS_SHARED_TRACKING=1`
+in the client adds opt-in PS VR2 ingestion snapshots and client-local future
+head/view prediction. Static UE repeats consistently remove the long pose-query
+IPC tail, while physical timing remains variable and moving-head validation is
+pending. Service-side tracking production and general space IPC remain. See the
+[design](macos-client-compositor-design.md#shared-ps-vr2-tracking-experiment--2026-10-03)
+and [hardware comparison](macos-psvr2-timing-diagnostics.md#shared-tracking-and-client-local-prediction--2026-10-03).
+
+Moving-head shared-tracking validation is prepared for the user to run later.
+The version-2 trace adds actual sensor receipt/device-clock evidence and returned
+poses. A static preflight verified buffering and exact physical pose-target joins;
+movement and confirmed Game Mode transitions remain untested. Earlier fully
+buffered claims require qualification because some writers still flushed
+periodically; these are now corrected. See the
+[capture protocol and preflight evidence](macos-psvr2-timing-diagnostics.md#prepared-moving-head-freshness-capture--2026-10-03).
+
+The first buffered moving-head shared-tracking capture is now analysed. Local
+pose queries remain fast (p99 0.011 ms) during substantial rotation and observed
+service background/menu policy transitions. Internal SLAM disagreement p95 is
+0.209 degrees at the pose target and 0.226 degrees at physical presentation,
+but rare receipt gaps reach 63 ms and physical gaps 142 ms. The largest physical
+hitch occurs after Metal completion while CA callbacks remain on cadence,
+with matching drawable backpressure. The user confirms Game Mode in the first
+and last thirds and reports improvement, but persisting judder of a different
+quality. Keep the path opt-in. Next isolate delayed presentation of completed frames,
+rather than treating this result as proof that service acquisition must move.
+See the [moving-head evidence](macos-psvr2-timing-diagnostics.md#first-buffered-moving-head-shared-tracking-run--2026-10-03).
+
+Completed-frame presentation diagnostics now join GPU completion to physical
+output, with passive scheduled-callback and service AppKit-pump traces. The
+moving-head run has 94 frames displayed >20 ms after GPU end, while the largest
+pause clears after two old frames rather than producing a persistent latency
+ratchet. Capture now acknowledges flushes before UE teardown and checks source
+health before measurement. Static lifecycle checks pass; the next moving-head
+capture is prepared. See the
+[investigation and capture command](macos-psvr2-timing-diagnostics.md#completed-frame-presentation-investigation--2026-10-03).

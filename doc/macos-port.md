@@ -6,6 +6,37 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+> **Visual regression resolved:** the user confirms the explicit macOS
+> output-image barrier removes black noise with diagnostic readbacks off.
+> Client-hosted GPU-reuse protection remains active. Keep both protections;
+> rapid-rotation edge borders are a separate reported phenomenon. See the
+> [recurrence record](macos-psvr2-timing-diagnostics.md#black-corruption-recurrence-after-cleanup--2026-10-03).
+
+
+The [2026-10-03 inherited compositor audit](macos-inherited-compositor-audit.md)
+summarises the validated pose/reuse fixes and the implemented pixel-readback,
+non-macOS pose-selection and compatibility cleanup. This follow-up restores
+upstream pose selection on every platform and removes default debug readbacks;
+The output-barrier correction is headset-confirmed; Linux CI and residual-stall
+work remain separate.
+
+> **2026-10-03 target-pose correction:** the macOS compute renderer now retains
+> freshly predicted scanout poses rather than overwriting them with recently
+> submitted application poses. A low-cost UE preflight verifies all 609 compared
+> renderer/query orientations match. The subsequent moving-head UE pair confirms
+> regular judder is gone, while separate presentation stalls persist. Build,
+> all 36 macOS CTests and 15 Python diagnostics pass. See the
+> [fix and next workload pair](macos-psvr2-timing-diagnostics.md#fresh-scanout-target-fix--2026-10-03).
+
+> **Local Metal reuse correction:** shared-event readiness and presentation
+> waits are active, but the local swapchain path lacked GPU-read completion
+> protection before returning source images to the app. It now enables the same
+> timeline guard as service-owned Metal swapchains. Actual reuse-wait checks
+> pass; the user now confirms this fixes the partial black frames/black noise.
+> Regular judder and source-image corruption are resolved in the tested UE path;
+> occasional stalls remain unresolved.
+> See the [handoff evidence](macos-psvr2-timing-diagnostics.md#moving-head-confirmation-and-local-metal-image-reuse--2026-10-03).
+
 > **2026-10-02 Wine hardware gate:** the experimental in-process runtime passed
 > PS VR2 runtime-owned 2D/array image pixel checks and Opaque hello_xr. Hosted
 > compositing initializes inside Wine, but currently runs at 60 Hz on the 120 Hz
@@ -17,10 +48,16 @@ port to Apple Silicon macOS, with PS VR2 as the primary headset.
 
 **Status date:** 2026-09-30
 
-**Current integration branch:** `macos-wine-openvr-legacy-unity`
+**Current integration branch:** `macos-upstream-clean`
 
-Despite its historical name, this is now the best single integration branch for
-the macOS port. It contains most of the recent native macOS, PS VR2, compositor,
+The integration includes the
+[failed CADisplayLink-owned compositor experiment record](macos-cadisplaylink-owned-compositor-experiment.md)
+as required documentation. Its rejected execution modes remain removed;
+ordinary CA pacing and client-hosted compositing remain the chosen architecture.
+The record and detailed evidence accompany this integration.
+
+The user confirmed this integration target on 2026-10-03, superseding the older
+Wine-named and Game Mode sync targets. It contains the native macOS, PS VR2, compositor,
 depth, passthrough, foveation, service/XPC, Chromium-sharing and Wine/OpenVR
 work, plus the `standards/*` branches for `XR_KHR_generic_controller` and
 `XR_FB_foveation` / `XR_META_foveation_eye_tracked`. PS Sense optical 6DoF
@@ -86,7 +123,13 @@ keeps Monado's Vulkan compositor, exports the completed compositor images throug
 Apple-compatible Metal/IOSurface mechanisms, and performs final presentation
 through a native `CAMetalLayer`.
 
-CVDisplayLink vblanks drive the compositor's pacing. Presentation is
+CADisplayLink drives compositor pacing by default, using actual refresh
+timestamps and the measured period. Corrected 2026-10-03 headset captures
+closely match CV; the heavy Unreal/Game Mode pair favours CA in completion
+cadence. `XRT_MACOS_DISPLAY_LINK=cv` retains the legacy fallback, also selected
+automatically if CA is unavailable. Fully buffered hosted UE repeats physically favour CA under heavy load
+(105.18 vs 100.08 Hz); 90 Hz and subjective coverage remain pending. See [the default decision](macos-psvr2-timing-diagnostics.md#cadisplaylink-promoted-to-default--2026-10-03).
+Presentation is
 asynchronous: a newest-frame worker acquires drawables off the compositor
 thread and presents with a minimum duration of 8 ms, and the compositor thread
 runs under a Mach time constraint. GPU hand-off uses Metal shared events. The
@@ -229,6 +272,36 @@ Depth submission can be exercised with:
 XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
   ./build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --depth-layer
 ```
+
+Environment blending can be compared with `--blendmode Opaque` (the default)
+and `--blendmode AlphaBlend`. The app logs the runtime's advertised primary-stereo
+blend modes and rejects an unsupported selection before creating a session.
+AlphaBlend clears the projection background transparent and enables source-alpha
+composition. It does not require `XR_FB_passthrough`; that extension is tested
+separately by `--passthrough`. `XR_RUNTIME_JSON` can select Meta XR Simulator for
+a native Metal reproduction without Wine/DXMT or a connected PS VR2. This mode
+has not yet been validated on hardware.
+
+On 2026-10-02, the user confirmed that the native test app ran against Meta XR
+Simulator with `--blendmode AlphaBlend`, without `--passthrough`, and did not
+crash. The tested source was `7fd7f2835693d447d46da933e9a54c9f71ddfae9` plus the
+local blend-mode selection changes. Run duration and Metal validation settings
+were not recorded. This does not reproduce the Wine `hello_xr` assertion through
+the generic bridge; compare swapchain configuration and frame/layer submission
+before attributing that failure to general runtime alpha-blend support.
+
+Controlled repeats later that day isolated Metal validation: native Opaque
+survived 6 seconds with `MTL_DEBUG_LAYER=1` and exited cleanly on SIGINT; native
+AlphaBlend aborted with the same IOSurface shared/managed-storage assertion.
+With `MTL_DEBUG_LAYER` unset, native AlphaBlend survived 8 seconds and exited
+cleanly on SIGINT. Both runs used Meta XR Simulator 207.0.0 on Apple M5, the
+same source above, and no PS VR2 hardware. This gives a native reproduction of
+the assertion independent of Wine/DXMT. The bridge comparison also corrected an
+invalid shared-event device check; bridged hello_xr then completed 348 alpha
+frames without validation. See the
+[external evidence ledger](https://github.com/NikNakk/macos-wine-xr/blob/main/docs/native-openxr-backend.md)
+for swapchain/layer differences and the local follow-up results. The correction
+and evidence updates are local pending publication.
 
 The same target also has `--passthrough` / `--passthrough-only`,
 `--generic-controller`, `--gaze` / `--gaze-calibrate`, and `--fb-foveation` /
@@ -686,3 +759,67 @@ context/host lifecycle. These checks do not replace headset or Wine application
 validation. [The upstream contribution preparation](macos-upstream-contribution.md)
 contains the proposed review units and draft changelog text; human DCO
 certification remains a prerequisite for upstream submission.
+
+
+The compositor-on-CA-thread variants tested on
+`codex/cadisplaylink-compositor` were retired after a deferred run-loop follow-up
+also failed to improve physical timing. Ordinary CA pacing and client-hosted
+compositing remain. Passive callback and renderer-stage diagnostics are retained;
+see the [final experiment decision](macos-psvr2-timing-diagnostics.md#deferred-run-loop-results-and-retirement).
+
+
+Five alternating static UE runs per mode on `codex/cadisplaylink-compositor`
+favour ordinary CA pacing over compositor execution on the CA callback thread
+(mean physical cadence 108.96 vs 102.03 Hz). A deferred follow-up also failed to improve physical timing; the experimental
+dispatch and switch were removed. Game Mode was
+unconfirmed and moving-head validation remains pending. See the
+[five-pair evidence](macos-psvr2-timing-diagnostics.md#five-alternating-pairs-with-fully-buffered-traces--2026-10-03).
+
+
+A separate hosted UE policy check confirms `ext_darwinbg=1` and priority 4 on
+all sampled service threads while UE's compositor threads retain priority 97.
+Shared-event readiness waits are active. Client-hosted rendering is retained;
+the next architecture priority is removing synchronous pose IPC through shared
+tracking state and local prediction, with source-age validation. See the
+[follow-up evidence](macos-psvr2-timing-diagnostics.md#deferred-run-loop-results-and-retirement).
+
+## Shared tracking follow-up (2026-10-03)
+
+`codex/macos-shared-tracking` implements opt-in PS VR2 shared tracking for the
+client-hosted compositor (`XRT_MACOS_SHARED_TRACKING=1` in the client).
+It publishes raw SLAM/gyro/prediction state at USB ingestion and uses the same
+future-pose predictor in the client, removing that compositor query's synchronous
+IPC dependency. The service still owns tracking and the general space graph.
+Full macOS build and all 36 CTests pass. Five alternating static captures per path reduce median run pose-query p99
+from 0.185 to 0.016 ms, but physical timing does not consistently improve.
+Moving-head smoothness and Linux CI remain unvalidated. Keep it opt-in.
+See the [design and freshness limits](macos-client-compositor-design.md#shared-ps-vr2-tracking-experiment--2026-10-03).
+
+Moving-head shared-tracking validation is prepared for the user to run later.
+The version-2 trace adds actual sensor receipt/device-clock evidence and returned
+poses. A static preflight verified buffering and exact physical pose-target joins;
+movement and confirmed Game Mode transitions remain untested. Earlier fully
+buffered claims require qualification because some writers still flushed
+periodically; these are now corrected. See the
+[capture protocol and preflight evidence](macos-psvr2-timing-diagnostics.md#prepared-moving-head-freshness-capture--2026-10-03).
+
+The first buffered moving-head shared-tracking capture is now analysed. Local
+pose queries remain fast (p99 0.011 ms) during substantial rotation and observed
+service background/menu policy transitions. Internal SLAM disagreement p95 is
+0.209 degrees at the pose target and 0.226 degrees at physical presentation,
+but rare receipt gaps reach 63 ms and physical gaps 142 ms. The largest physical
+hitch occurs after Metal completion while CA callbacks remain on cadence,
+with matching drawable backpressure. The user confirms Game Mode in the first
+and last thirds and reports improvement, but persisting judder of a different
+quality. Keep the path opt-in. Next isolate delayed presentation of completed frames,
+rather than treating this result as proof that service acquisition must move.
+See the [moving-head evidence](macos-psvr2-timing-diagnostics.md#first-buffered-moving-head-shared-tracking-run--2026-10-03).
+
+Completed-frame presentation diagnostics now join GPU completion to physical
+output, with passive scheduled-callback and service AppKit-pump traces. The
+moving-head run has 94 frames displayed >20 ms after GPU end, while the largest
+pause clears after two old frames rather than producing a persistent latency
+ratchet. Capture now acknowledges flushes before UE teardown and checks source
+health before measurement. Static lifecycle checks pass; the next moving-head
+capture is prepared. See the
+[investigation and capture command](macos-psvr2-timing-diagnostics.md#completed-frame-presentation-investigation--2026-10-03).
