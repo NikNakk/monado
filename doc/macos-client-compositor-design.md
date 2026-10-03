@@ -690,3 +690,222 @@ demotion from the display path, which was the aim of phase 2.
    changes. `U_LOG_W` "In-process compositor unavailable" means it fell back.
 4. Repeat the phase 1 Unreal run with `PSVR2_TIMING_TRACE=1`, with and without
    Game Mode. The compositor RT trace now comes from the client process.
+
+### UE display-link follow-up (2026-10-03)
+
+The four user-run MonadoMacTest sessions reproduce service priority-4
+throttling (17–18 Hz physical presentation) and recovery at priority 97
+(about 119 Hz). The hosted CA/CV pair completes presentation work at about
+113/109 Hz, but UE submits only 7.62/7.44 new frames/s and reports 90/195
+shared-event waits over 100 ms. The user confirms the app normally runs at 13–14 FPS and intentionally
+stresses compositor behaviour with a heavy client. Slow updates and event
+waits do not by themselves establish a regression; these captures measure
+compositor resilience under load rather than healthy 120 FPS app rendering. The client selector did not change the display link in the
+two service-compositor runs: both used CV. Hosted physical presentation and
+RT CSVs are empty, so do not infer scanout rate or priority from command
+completion. See [the run mapping and limitations](macos-psvr2-timing-diagnostics.md#unreal-game-mode-follow-up--2026-10-03).
+
+The user confirms Game Mode was active in all these runs, with the Cmd+Esc
+menu temporarily suspending it during the middle third. A subsequent CA
+service run (PID 48751) reproduces 17.7 Hz during active Game Mode and
+119.03 Hz during the menu interval; its physical presentation traces flushed
+successfully with buffering unchanged. Changing CV to CA cannot avoid the
+service's external scheduler demotion.
+
+### Fully buffered UE stress repeats (2026-10-03)
+
+Normal Cmd+Q shutdown now demonstrated usable fully buffered hosted physical
+presentation and RT traces. In matched 40-second heavy-client windows, CA/CV
+physically present at 105.18/100.08 Hz, with 13.86/19.49% intervals over 12 ms,
+while each app submits 6.61 new frames/s. Both hosted compositor threads remain
+priority 97 throughout; the service is externally backgrounded. Direct Game
+Mode flag verification was unavailable. An attempted fullscreen transition
+crashed UE during swapchain format/render-target recreation, so successful
+repeats retained startup window state without a menu interval. See
+[the physical evidence and limitations](macos-psvr2-timing-diagnostics.md#fully-buffered-hosted-unreal-repeats--2026-10-03).
+
+
+## Remaining tracking dependency — 2026-10-03
+
+Client-hosted compositing remains the Game Mode architecture. A separate UE
+policy diagnostic (game PID 9801, service PID 9959) shows the service externally
+backgrounded with every sampled thread at priority 4 while UE's compositor
+threads remain priority 97. Rendering in UE avoids service render throttling;
+synchronous view-pose IPC still reaches the throttled service and shares the
+app's transaction connection. Some measured renderer stalls coincide with long
+pose retrieval, but the current timing stages do not separate connection
+contention from service/client scheduling for each stall.
+
+Active shared-event wait-thread readiness is verified by client GPU trace
+semaphore pushes, waits and ready/scheduled events, plus presenter shared-event
+handoff logs. It gates new source-frame readiness without blocking each headset
+refresh. It does not remove the tracking IPC dependency.
+
+The compositor-on-CA-thread experiment, including a deferred run-loop revision,
+was removed after repeated comparisons showed no physical timing benefit.
+Retain ordinary CA pacing and client-hosted rendering. The next experiment
+is a timestamped shared tracking snapshot/stream published at driver ingestion,
+with equivalent client-local prediction. Validate freshness, validity, sequence
+consistency and moving-head physical pose timing before making it a default.
+It is implemented opt-in below; a shared snapshot cannot fix
+stale service-side production by itself. See the
+[experiment and policy evidence](macos-psvr2-timing-diagnostics.md#deferred-run-loop-results-and-retirement).
+
+## Shared PS VR2 tracking experiment — 2026-10-03
+
+Branch `codex/macos-shared-tracking`, based on `2276cfba9` with the existing
+uncommitted CA pacing/diagnostic changes preserved. Opt in on the **client** with
+`XRT_MACOS_SHARED_TRACKING=1` alongside `XRT_MACOS_CLIENT_COMPOSITOR=1`.
+Use matching newly built client and service binaries. This experiment replaces
+future head/view-pose queries from the hosted compositor with local prediction;
+it does not move USB ownership or the service's general space graph into UE.
+Application `locate_space`, `locate_spaces`, and `locate_device` operations through
+the IPC space overseer still use the service.
+
+The driver publishes a pointer-free snapshot under its existing `data_lock`
+after each status/IMU USB batch, SLAM update, and first-pose recenter query.
+The snapshot includes the latest raw SLAM relation, gyro samples back through
+that SLAM timestamp (up to the existing 1024-sample FIFO capacity), latest gyro,
+VTS-to-host clock offset, acceleration and continuity predictor state/parameters,
+tracker-to-head and recenter transforms, and current IPD. The consumer rebuilds the needed gyro window in an existing local FIFO allocation
+for each new coherent snapshot, preserving distinct equal-timestamp samples,
+and uses the **same extracted
+future-pose helper** as the driver. Full SLAM-to-target position prediction,
+optional acceleration/continuity, angular-velocity seeding, tracker-to-head lever
+arm velocity, and recenter rotation are preserved.
+
+A new appended macOS IPC command negotiates version and exact mapping size;
+the established per-client IPC shared-memory layout is unchanged. The producer
+mapping is writable only in the service, and clients receive a read-only
+file descriptor/mapping. Publication and reads use atomic 64-bit payload words
+and a sequence check, rather than non-atomic seqlock memcpy. Readers make at most
+three attempts and retain their last coherent state on contention. A local
+mutex protects each HMD's cache/FIFO across application and compositor callers.
+The service detaches the driver producer under `data_lock` before unmapping it
+when the last reader disconnects, including abnormal IPC disconnects. Publication
+is inactive in the ordinary IPC baseline.
+
+Calibration startup, initial recenter initialization, historical targets at or
+before the latest SLAM sample, unsupported devices, and other inputs retain
+service queries. Future queries from a coherent snapshot keep the existing
+500 ms SLAM staleness rule: preserve VALID, clear TRACKED and velocity validity,
+zero velocities, and freeze the raw pose. This is the driver's existing rule;
+it does **not** impose a new freshness guarantee for IMU samples. The shared
+transport cannot repair stalled USB production or a stale source clock mapping.
+
+`PSVR2_TIMING_TRACE=1` adds `shared_tracking.csv`, respecting
+`PSVR2_TIMING_TRACE_FULLY_BUFFERED=1`. Each query records query/target/end host
+times, snapshot sequence, producer publication time, mapped SLAM and IMU times,
+gyro count, resulting flags, RPC fallback, and snapshot-read miss. Source ages
+must be inspected alongside compositor pose-query and physical presentation
+traces. The initial static-headset pilot had no measured-window RPC fallbacks,
+pose-query p99 0.016 ms, mapped IMU-age p99 1.53 ms and maximum 75.93 ms; this
+establishes transport operation, not moving-head smoothness.
+
+Validation: full `build-wine` build and all 36 macOS CTests passed, including
+concurrent snapshot coherence/bounded read failure, future gyro prediction
+against the full FIFO across targets before/after the latest IMU, host-domain
+staleness, tracker-to-head/recenter velocity behavior, and acceleration/continuity
+state transfer. Linux CI and moving-head visual validation remain pending.
+
+Five alternating static UE captures per path confirm median run pose-query p99
+0.185→0.016 ms and worst query 31.197→0.132 ms. Physical means favour local
+tracking while medians favour IPC, so there is no demonstrated smoothness gain.
+The final FIFO importer was tightened after those repeats to preserve distinct
+equal-timestamp samples; its verification is separate. See the
+[comparison and source-age evidence](macos-psvr2-timing-diagnostics.md#shared-tracking-and-client-local-prediction--2026-10-03).
+
+The final allocation-free importer also passes all 36 macOS CTests and a separate
+static headset capture (UE 27689): 10,488 local queries, no RPC fallback,
+IMU-age p99 1.289 ms / max 12.605 ms, and physical presentation 117.35 Hz.
+Keep the path opt-in; moving-head validation is the next hardware gate.
+
+### Moving-head gate prepared
+
+The shared snapshot is now version 2 and carries actual IMU callback receipt,
+reconstructed sample time and SLAM receipt. Client traces include raw device
+clock values and the returned pose, allowing source delivery and prediction to
+be joined to physical presentation without treating mapped ages as ground truth.
+The capture runner verifies required traces stay buffered, closes UE and the
+service normally after measurement, then restores the original registration.
+A static preflight verified all 1,204 physical frames join to exact pose targets;
+the user will run the moving-head/Game Mode transition later. See the
+[protocol, buffering correction and evidence](macos-psvr2-timing-diagnostics.md#prepared-moving-head-freshness-capture--2026-10-03).
+
+Longer term, extend the transport to coherent device/input state and evaluate
+spaces/prediction in the client. Controller/hand/space calls still use service
+IPC today. Shared memory only removes query blocking; it cannot make delayed
+sensor acquisition timely. The moving-head receipt/device-clock evidence is the
+gate for deciding whether acquisition itself needs a client process or a helper
+whose scheduling remains adequate under Game Mode.
+
+The first buffered moving-head shared-tracking capture is now analysed. Local
+pose queries remain fast (p99 0.011 ms) during substantial rotation and observed
+service background/menu policy transitions. Internal SLAM disagreement p95 is
+0.209 degrees at the pose target and 0.226 degrees at physical presentation,
+but rare receipt gaps reach 63 ms and physical gaps 142 ms. The largest physical
+hitch occurs after Metal completion while CA callbacks remain on cadence,
+with matching drawable backpressure. The user confirms Game Mode in the first
+and last thirds and reports improvement, but persisting judder of a different
+quality. Keep the path opt-in. Next isolate delayed presentation of completed frames,
+rather than treating this result as proof that service acquisition must move.
+See the [moving-head evidence](macos-psvr2-timing-diagnostics.md#first-buffered-moving-head-shared-tracking-run--2026-10-03).
+
+Completed-frame presentation diagnostics now join GPU completion to physical
+output, with passive scheduled-callback and service AppKit-pump traces. The
+moving-head run has 94 frames displayed >20 ms after GPU end, while the largest
+pause clears after two old frames rather than producing a persistent latency
+ratchet. Capture now acknowledges flushes before UE teardown and checks source
+health before measurement. Static lifecycle checks pass; the next moving-head
+capture is prepared. See the
+[investigation and capture command](macos-psvr2-timing-diagnostics.md#completed-frame-presentation-investigation--2026-10-03).
+
+The recovered second moving capture retains fast shared queries (p99 0.012 ms,
+no RPC fallbacks) and 117.59 Hz physical output, but the user reports persisting
+movement jumpiness. Completed-frame stalls are reproduced independently of
+sensor gaps in some events; uncorrected translation at low-rate UE source
+refreshes remains a separate candidate. Keep shared tracking opt-in and do not
+claim a complete smoothness fix. See the
+[second moving capture](macos-psvr2-timing-diagnostics.md#recovered-second-moving-head-capture--2026-10-03).
+
+The workload A/B qualifies the raw-query result: the compute renderer can replace
+the queried scanout targets with submitted projection poses. In the low-cost
+run, effective source/target orientations are identical for 96.8% of matched
+frames even though timewarp is enabled. Shared tracking is functioning, but
+query timing/accuracy alone does not establish the pose actually used for drawing.
+Correct this macOS selection before judging its visual benefit; see the
+[effective timewarp evidence](macos-psvr2-timing-diagnostics.md#ue-workload-ab-results-and-effective-timewarp--2026-10-03).
+
+The macOS target-pose override is now removed from the compute path. A low-cost
+UE preflight verifies the renderer uses the exact fresh shared query on all 609
+compared physical frames. Full build, 36 macOS CTests and 15 Python diagnostics
+pass. Moving-head subjective confirmation remains pending; this does not fix
+all acquisition or presentation stalls. See the
+[target-pose correction](macos-psvr2-timing-diagnostics.md#fresh-scanout-target-fix--2026-10-03).
+
+The next user moving pair confirms regular judder is gone after the target-pose
+fix, while stalls and occasional partly black frames/noise persist. Both
+app-release semaphore waits and compositor-output shared-event waits are active.
+Inspection finds local Metal swapchains missing the service path's opposite
+direction of protection: GPU completion before returning a source image for
+application reuse. Direct and ordinary local Metal paths now enable the existing
+per-image Vulkan timeline guard. A logging check verifies actual reuse waits;
+visual corruption validation remains pending. See the
+[handoff evidence and next check](macos-psvr2-timing-diagnostics.md#moving-head-confirmation-and-local-metal-image-reuse--2026-10-03).
+
+The user now confirms the local Metal reuse guard fixes the partial black frames
+and black noise. Retain both this guard and fresh target poses. Occasional stalls
+remain a separate unresolved issue; no new timing capture is attributed to this
+confirmation. See the
+[visual result](macos-psvr2-timing-diagnostics.md#user-confirms-image-reuse-correction).
+
+### Output visibility after diagnostic cleanup — 2026-10-03
+
+GPU image-reuse protection remained enabled when black noise recurred after
+pixel-readback cleanup. A readback-on comparison logged 453 reuse waits and
+453 completions and removed the noise subjectively. The macOS compute output
+now retains a full GPU memory barrier before the Metal handoff even with
+readbacks off; the user confirmed this fixes the regression. Per-image reuse
+protection, output visibility and readiness shared-event ordering serve
+different purposes and all remain required. See the
+[timing confirmation](macos-psvr2-timing-diagnostics.md#user-confirms-explicit-output-barrier--2026-10-03).
