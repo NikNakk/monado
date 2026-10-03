@@ -13,7 +13,7 @@ commits. It is not an exhaustive review of all his commits or a claim about
 the latest upstream checkout. Git commit dates describe the inherited history,
 not when Nick started working on this fork. The investigation used `codex/macos-shared-tracking`, based on `2276cfba9`
 with the later per-thread scheduling fix `1b400a8e7`. Its fixes and evidence
-are now packaged for integration into `macos-upstream-clean`.
+are now integrated and pushed to `macos-upstream-clean`.
 
 The follow-up cleanup described below is now implemented; the findings section
 records what was present at the start of this audit.
@@ -48,7 +48,9 @@ records what was present at the start of this audit.
   work; the audit does not attribute it to Kyle.
 
 Build and all 36 macOS CTests passed after the reuse fix; the 15 Python
-diagnostic checks passed. Linux CI has not been run for these changes.
+diagnostic checks passed. Subsequent integration CI at `1dd1d9cfd` passed
+Linux build/tests, Android NDK, macOS 14/15 default/all-feature builds and
+contribution checks. Hardware results below remain specific to the user runs.
 Occasional stalls remain. See the [timing evidence](macos-psvr2-timing-diagnostics.md)
 and [judder ledger](macos-psvr2-judder-evidence.md) for captures and limits.
 
@@ -90,7 +92,8 @@ BGRA reporting and honors the requested final layout.
 The confirmed override originated in `816d372cf`. The initial hardware-validated fix was guarded
 to macOS; the same override remained under `#ifndef XRT_OS_OSX`, with the
 same source/target confusion there. The follow-up removes that remaining block/helper too, restoring upstream
-pose selection on all platforms. Linux build/run validation remains pending. It is not an upstream bug.
+pose selection on all platforms. Linux build/tests subsequently passed in
+integration CI; Linux headset validation was not performed. It is not an upstream bug.
 
 ### 3. Review scope and remove dormant compatibility leftovers
 
@@ -128,8 +131,8 @@ handles. Remove obsolete scaffolding rather than reviving the FD workaround.
   fixture now requests MoltenVK portability extensions; with desktop access
   and the installed ICD selected, all eight GPU pipeline cases run and pass
   (78 assertions), including distinct opaque/alpha output keys. No new headset run or measured
-  stall improvement is claimed. Linux validation remains pending: Docker is
-  installed locally but its daemon is unavailable.
+  stall improvement is claimed. Linux build/tests subsequently passed in
+  integration CI; this does not establish Linux headset behavior.
 
 ## Changes to keep
 
@@ -167,5 +170,5 @@ See the [timing evidence](macos-psvr2-timing-diagnostics.md#readback-on-result-a
 
 The user subsequently confirmed the explicit output barrier fixes black noise
 with readbacks off. The earlier pending headset confirmation for this barrier
-is now satisfied; Linux validation and quantitative residual-stall work remain
-separate.
+is now satisfied. Linux build/tests passed in integration CI; Linux headset
+validation and quantitative residual-stall work remain separate.
