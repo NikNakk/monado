@@ -152,6 +152,10 @@ if(XRT_HAVE_VULKAN)
 		tests_render_pipeline_cache SYSTEM PRIVATE ${_aux_shaders_binary_dir}
 		)
 	add_dependencies(tests_render_pipeline_cache aux_shaders render_shader_specialization)
+	if(APPLE)
+		target_sources(tests_render_pipeline_cache PRIVATE tests_macos_metal_device.mm)
+		target_link_libraries(tests_render_pipeline_cache PRIVATE "-framework Metal")
+	endif()
 endif()
 
 if(XRT_FEATURE_OPENXR)
