@@ -803,7 +803,7 @@ their age.
 Use `scripts/psvr2_sense_session.sh` as before. For recordings meant for evaluation:
 
 - **Record in world frame** (`PSVR2_CONSTELLATION_WORLD=1`). Head poses and their age are recorded only then.
-- **Mark still intervals.** Press a controller's Create button when it is resting on something fixed, and again
+- **Mark still intervals.** Press Create on the left controller, or Options on the right (the right has no Create button), when it is resting on something fixed, and again
   before picking it up. Each press toggles `static_begin` / `static_end` for that controller, and the CLI echoes it.
   The replay then scores spread and drift against a pose that is known to be constant. This is the closest thing to
   ground truth without a fixture. A few 5–10 s rests, near and far, at different orientations, are enough.
