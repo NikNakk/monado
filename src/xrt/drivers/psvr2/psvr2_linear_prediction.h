@@ -47,7 +47,7 @@ psvr2_linear_clip(struct xrt_vec3 v, float limit)
 {
 	float length = psvr2_linear_length(v);
 	float scale = length > limit ? limit / length : 1.0f;
-	return (struct xrt_vec3){v.x * scale, v.y * scale, v.z * scale};
+	return XRT_C11_COMPOUND(struct xrt_vec3){v.x * scale, v.y * scale, v.z * scale};
 }
 
 static inline void
@@ -75,7 +75,7 @@ psvr2_linear_update(struct psvr2_linear_prediction *state,
 		state->acceleration.z += params->alpha * (a.z - state->acceleration.z);
 		state->acceleration = psvr2_linear_clip(state->acceleration, params->max_acceleration);
 	} else {
-		state->acceleration = (struct xrt_vec3){0};
+		state->acceleration = XRT_C11_COMPOUND(struct xrt_vec3) XRT_VEC3_ZERO;
 	}
 	state->timestamp_ns = timestamp_ns;
 	state->position = position;
@@ -103,11 +103,12 @@ psvr2_linear_predict(const struct psvr2_linear_prediction *state,
 	// The h*interval term corrects the half-sample age of backward velocity.
 	float pc = params->gain * 0.5f * h * (h + state->interval_s);
 	float vc = dt < params->max_horizon_s ? params->gain * (h + 0.5f * state->interval_s) : 0.0f;
-	*position = (struct xrt_vec3){state->position.x + state->velocity.x * dt + state->acceleration.x * pc,
-	                              state->position.y + state->velocity.y * dt + state->acceleration.y * pc,
-	                              state->position.z + state->velocity.z * dt + state->acceleration.z * pc};
-	*velocity = (struct xrt_vec3){state->velocity.x + state->acceleration.x * vc,
-	                              state->velocity.y + state->acceleration.y * vc,
-	                              state->velocity.z + state->acceleration.z * vc};
+	*position =
+	    XRT_C11_COMPOUND(struct xrt_vec3){state->position.x + state->velocity.x * dt + state->acceleration.x * pc,
+	                                      state->position.y + state->velocity.y * dt + state->acceleration.y * pc,
+	                                      state->position.z + state->velocity.z * dt + state->acceleration.z * pc};
+	*velocity = XRT_C11_COMPOUND(struct xrt_vec3){state->velocity.x + state->acceleration.x * vc,
+	                                              state->velocity.y + state->acceleration.y * vc,
+	                                              state->velocity.z + state->acceleration.z * vc};
 	return true;
 }

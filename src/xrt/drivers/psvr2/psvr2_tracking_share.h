@@ -138,8 +138,8 @@ psvr2_tracking_predict_raw(const struct psvr2_tracking_state *state,
 		    latest_relation.relation_flags &
 		    ~(XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
 		      XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT | XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT));
-		latest_relation.angular_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
-		latest_relation.linear_velocity = (struct xrt_vec3)XRT_VEC3_ZERO;
+		latest_relation.angular_velocity = XRT_C11_COMPOUND(struct xrt_vec3) XRT_VEC3_ZERO;
+		latest_relation.linear_velocity = XRT_C11_COMPOUND(struct xrt_vec3) XRT_VEC3_ZERO;
 		*out_relation = latest_relation;
 		return;
 	}
@@ -170,10 +170,10 @@ psvr2_tracking_predict_raw(const struct psvr2_tracking_state *state,
 	if ((latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
 	    (latest_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
 		float dt = (float)((double)(at_timestamp_ns - state->slam_ns) * 1e-9);
-		out_relation->pose.position =
-		    (struct xrt_vec3){latest_relation.pose.position.x + latest_relation.linear_velocity.x * dt,
-		                      latest_relation.pose.position.y + latest_relation.linear_velocity.y * dt,
-		                      latest_relation.pose.position.z + latest_relation.linear_velocity.z * dt};
+		out_relation->pose.position = XRT_C11_COMPOUND(struct xrt_vec3){
+		    latest_relation.pose.position.x + latest_relation.linear_velocity.x * dt,
+		    latest_relation.pose.position.y + latest_relation.linear_velocity.y * dt,
+		    latest_relation.pose.position.z + latest_relation.linear_velocity.z * dt};
 		out_relation->linear_velocity = latest_relation.linear_velocity;
 	}
 
