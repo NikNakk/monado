@@ -31,20 +31,20 @@ static FILE *g_macos_compositor_rt_trace = NULL;
 static bool g_macos_compositor_rt_trace_failed = false;
 static bool g_macos_compositor_rt_trace_atexit_registered = false;
 static uint64_t g_macos_compositor_rt_trace_rows = 0;
-static uint64_t g_macos_compositor_rt_last_cpu_ns = 0;
-static uint64_t g_macos_compositor_rt_last_sample_ns = 0;
-static uint64_t g_macos_compositor_rt_thread_id = 0;
-static int g_macos_compositor_rt_last_observed_basic_policy = -1;
-static int g_macos_compositor_rt_last_policy_get_kr = -1;
-static int g_macos_compositor_rt_last_policy_default = -1;
-static uint32_t g_macos_compositor_rt_last_period_ticks = 0;
-static uint32_t g_macos_compositor_rt_last_computation_ticks = 0;
-static uint32_t g_macos_compositor_rt_last_constraint_ticks = 0;
-static int g_macos_compositor_rt_last_extended_kr = -1;
-static int g_macos_compositor_rt_last_extended_policy = -1;
-static int g_macos_compositor_rt_last_curpri = -1;
-static int g_macos_compositor_rt_last_priority = -1;
-static int g_macos_compositor_rt_last_maxpriority = -1;
+static _Thread_local uint64_t g_macos_compositor_rt_last_cpu_ns = 0;
+static _Thread_local uint64_t g_macos_compositor_rt_last_sample_ns = 0;
+static _Thread_local uint64_t g_macos_compositor_rt_thread_id = 0;
+static _Thread_local int g_macos_compositor_rt_last_observed_basic_policy = -1;
+static _Thread_local int g_macos_compositor_rt_last_policy_get_kr = -1;
+static _Thread_local int g_macos_compositor_rt_last_policy_default = -1;
+static _Thread_local uint32_t g_macos_compositor_rt_last_period_ticks = 0;
+static _Thread_local uint32_t g_macos_compositor_rt_last_computation_ticks = 0;
+static _Thread_local uint32_t g_macos_compositor_rt_last_constraint_ticks = 0;
+static _Thread_local int g_macos_compositor_rt_last_extended_kr = -1;
+static _Thread_local int g_macos_compositor_rt_last_extended_policy = -1;
+static _Thread_local int g_macos_compositor_rt_last_curpri = -1;
+static _Thread_local int g_macos_compositor_rt_last_priority = -1;
+static _Thread_local int g_macos_compositor_rt_last_maxpriority = -1;
 
 static void
 macos_compositor_rt_trace_close(void)
@@ -180,7 +180,7 @@ macos_compositor_rt_trace_record(int64_t frame_id, int64_t display_period_ns)
 	g_macos_compositor_rt_last_observed_basic_policy = basic_policy;
 
 	g_macos_compositor_rt_trace_rows++;
-	bool detail_sampled = g_macos_compositor_rt_trace_rows == 1 || (g_macos_compositor_rt_trace_rows % 60) == 0 ||
+	bool detail_sampled = g_macos_compositor_rt_thread_id == 0 || (g_macos_compositor_rt_trace_rows % 60) == 0 ||
 	                      over_budget || policy_transition;
 	if (detail_sampled) {
 		macos_compositor_rt_sample_details(thread);

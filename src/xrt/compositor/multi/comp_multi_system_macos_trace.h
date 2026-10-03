@@ -43,7 +43,9 @@ static bool g_macos_client_frame_trace_atexit_registered = false;
 static bool g_macos_client_frame_trace_have_last[MULTI_MAX_CLIENTS];
 static int64_t g_macos_client_frame_trace_last_frame[MULTI_MAX_CLIENTS];
 static uint32_t g_macos_client_frame_trace_source_use_ordinal[MULTI_MAX_CLIENTS];
-static int64_t g_macos_compositor_time_constraint_period_ns = 0;
+// Mach scheduling policy belongs to each compositor thread. A replacement
+// hosted compositor must apply it even when the display period is unchanged.
+static _Thread_local int64_t g_macos_compositor_time_constraint_period_ns = 0;
 
 /* Elastic minimum-hold state, indexed by multi-system client slot. */
 static bool g_macos_client_frame_hold_initialized[MULTI_MAX_CLIENTS];
