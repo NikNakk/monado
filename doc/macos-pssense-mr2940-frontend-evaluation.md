@@ -600,6 +600,14 @@ moves, about 10 s still, then grip and movement with fast turns.
 - **The always-lit fault recurred** on the left in the distance run, with its status LED off (confirmed). As before,
   it followed a full scan with the 2.1 ms (`period_id` 42) wide pulse. This time the full scan ran because both
   hinted scans failed with the controller out of view.
+- **Fewer full scans, shorter wide pulse.** Two changes, offline and simulator-tested only:
+  - Strict mode now retries a failed hinted scan 4 times, with pauses of 1, 2, 4 and 8 s, before the full scan (it
+    was once after 1 s).
+  - `psvr2_sense_session.sh` sets `PSSENSE_LED_BOOTSTRAP_WIDE_PERIOD_ID=32` (1.6 ms, the most Sony's driver uses).
+    Set 42 to compare.
+
+  In simulation both pulse widths lock within one narrow step. Whether either change lowers the fault rate needs
+  hardware runs.
 - **The right Sense has no Create button** (it has Options), so its static markers were never recorded. Fixed in
   `461a66dcb`: Options marks them too.
 

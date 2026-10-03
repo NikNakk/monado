@@ -192,7 +192,8 @@ struct t_led_phase_bootstrap_options
 	 */
 	time_duration_ns hint_fudge_ns;
 	time_duration_ns hint_span_ns;
-	//! Failed hinted scans retried (after a dark failed_backoff_frames pause) before falling back to the full scan.
+	//! Failed hinted scans retried before falling back to the full scan, after dark pauses of failed_backoff_frames
+	//! doubling with each retry (capped at max_failed_backoff_frames).
 	uint32_t hint_retries;
 };
 
