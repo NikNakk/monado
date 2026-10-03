@@ -576,6 +576,33 @@ moves, about 10 s still, then grip and movement with fast turns.
 - These recordings are the first with packet 5 records. Of 14386 head poses at exposures, 11532 were predicted about
   11.5 ms past the newest SLAM pose rather than interpolated.
 
+**Hard cases and distance (4 Oct, `1402b9185`, correction on).**
+
+- `20261003-235855-corr-on-grip-2`, the same moves as the A/B with the narrow-scan fix:
+  - The left locked a 1700 µs window centred at 16475 µs, as the replay of its earlier scans predicted.
+  - Left: 2695 poses (80% tracked). Right: 3310 (95%).
+- `20261004-000405-hard-cases` (the first press bounced, so each later press marked the start of the next step):
+
+  | step | left tracked | right tracked | notes |
+  |---|---|---|---|
+  | rings 122 mm apart, resting | 93% after its LED lock | 96% | the two stayed apart in the tracker, with no wrong-controller fits |
+  | head moved 67 cm away and back, controllers resting | | | world position held within 2.5–4.3 mm RMS |
+  | held up with a lamp in view | 95% | 85% | |
+  | fast swings | 93% | 100% | |
+
+- `20261004-000909-distance`:
+  - Up to about 0.85 m both front ends track, M1 and MR 2940's alike. At 0.85 m only about half the predicted LEDs are
+    detected (18 of 34), and the right controller dropped to 35–78% tracked.
+  - Beyond about 1 m neither front end solves anything. The rings are imaged (around 20 LED dots per camera at about
+    1.5 m) but only about 5 become blobs, so the blob detector is the limit, not the solvers. Hand-held controllers
+    rarely go beyond 1 m, so only the arm's-length loss matters.
+  - Upstream cost 7 ms per exposure on average and overran the frame interval on 19% of exposures.
+- **The always-lit fault recurred** on the left in the distance run, with its status LED off (confirmed). As before,
+  it followed a full scan with the 2.1 ms (`period_id` 42) wide pulse. This time the full scan ran because both
+  hinted scans failed with the controller out of view.
+- **The right Sense has no Create button** (it has Options), so its static markers were never recorded. Fixed in
+  `461a66dcb`: Options marks them too.
+
 **LED lock across a weak narrow step.** The narrow scan's lit run now bridges one step below half the peak when a step
 beyond it is lit again (`narrow_gap_steps`, default 1; 0 restores the old rule). Applied to the 3 Oct left scans, it
 would have locked at centres of about 16475 µs and 16600 µs. The right locked at 16350 µs and 16850 µs in the same
