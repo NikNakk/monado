@@ -600,6 +600,21 @@ moves, about 10 s still, then grip and movement with fast turns.
 - **The always-lit fault recurred** on the left in the distance run, with its status LED off (confirmed). As before,
   it followed a full scan with the 2.1 ms (`period_id` 42) wide pulse. This time the full scan ran because both
   hinted scans failed with the controller out of view.
+- **Blob detection at arm's length.** Offline, on `000909`'s captured frames, the detector's rules were re-run with
+  other thresholds. The script is `experiments/20261004-distance/analysis/blob_threshold_sweep.py`. Mean LED-shaped
+  blobs per camera frame, both rings in view:
+
+  | pixel / required threshold | 0.37 m | 0.84 m | beyond 1 m | LEDs dark |
+  |---|---|---|---|---|
+  | 80 / 180 (default) | 14.8 | 11.5 | 5.5 | 0.45 |
+  | 80 / 120 | 15.9 | 13.7 | 8.0 | 0.68 |
+  | 50 / 120 | 16.0 | 14.6 | 9.8 | 0.81 |
+  | 50 / 120, keeping 1×1 blobs | 16.0 | 15.2 | 12.0 | 0.90 |
+
+  Lower thresholds recover about a quarter of the arm's-length blobs. Keeping single-pixel blobs adds little there,
+  and those are the least precise centroids. Not adopted yet. The test is a hardware A/B at arm's length with
+  `PSVR2_BLOB_PIXEL_THRESHOLD=50 PSVR2_BLOB_REQUIRED_THRESHOLD=120` against the defaults, checking tracked fraction
+  at 0.6–0.9 m and reprojection RMS up close.
 - **Fewer full scans, shorter wide pulse.** Two changes, offline and simulator-tested only:
   - Strict mode now retries a failed hinted scan 4 times, with pauses of 1, 2, 4 and 8 s, before the full scan (it
     was once after 1 s).
