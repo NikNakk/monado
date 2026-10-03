@@ -203,6 +203,7 @@ teardown_all(struct ipc_server *s)
 	join_all_client_threads(s);
 #ifdef __APPLE__
 	// Stop the compositor publishing into the share before unmapping it.
+	ipc_server_tracking_share_fini(s);
 	ipc_server_passthrough_share_fini(s);
 #endif
 
@@ -380,6 +381,7 @@ init_all(struct ipc_server *s,
 	}
 
 #ifdef __APPLE__
+	ipc_server_tracking_share_init(s);
 	ipc_server_passthrough_share_init(s);
 #endif
 

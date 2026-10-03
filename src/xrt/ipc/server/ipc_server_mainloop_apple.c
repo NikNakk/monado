@@ -18,6 +18,7 @@
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
+#include "util/u_timing_trace.h"
 #include "util/u_file.h"
 #include "util/u_truncate_printf.h"
 
@@ -152,6 +153,40 @@ handle_listen(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 
 #define NO_SLEEP 0
 
+/* Passive, decimated observation: no timer or transaction is introduced. */
+static FILE *g_appkit_pump_trace;
+static bool g_appkit_pump_trace_attempted;
+static uint64_t g_appkit_pump_previous_begin_ns, g_appkit_pump_previous_end_ns, g_appkit_pump_last_row_ns;
+
+static void
+trace_appkit_pump(uint64_t begin_ns, uint64_t end_ns)
+{
+	if (!u_timing_trace_enabled()) {
+		return;
+	}
+	if (!g_appkit_pump_trace_attempted) {
+		g_appkit_pump_trace_attempted = true;
+		g_appkit_pump_trace = u_timing_trace_open("appkit_pump", 64 * 1024);
+		if (g_appkit_pump_trace != NULL) {
+			fputs("begin_ns,end_ns,previous_begin_ns,previous_end_ns,nsapp_present,main_thread\n",
+			      g_appkit_pump_trace);
+		}
+	}
+	if (g_appkit_pump_trace != NULL &&
+	    (end_ns - g_appkit_pump_last_row_ns >= 10000000 || end_ns - begin_ns >= 10000000)) {
+		fprintf(g_appkit_pump_trace, "%llu,%llu,%llu,%llu,%u,%u\n", (unsigned long long)begin_ns,
+		        (unsigned long long)end_ns, (unsigned long long)g_appkit_pump_previous_begin_ns,
+		        (unsigned long long)g_appkit_pump_previous_end_ns, NSApp != nil ? 1u : 0u,
+		        [NSThread isMainThread] ? 1u : 0u);
+		if (!u_timing_trace_fully_buffered()) {
+			fflush(g_appkit_pump_trace);
+		}
+		g_appkit_pump_last_row_ns = end_ns;
+	}
+	g_appkit_pump_previous_begin_ns = begin_ns;
+	g_appkit_pump_previous_end_ns = end_ns;
+}
+
 static void
 pump_appkit_events(void)
 {
@@ -182,7 +217,12 @@ void
 ipc_server_mainloop_apple_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 {
 	IPC_TRACE_MARKER();
+	u_timing_trace_poll_flush_request();
+	uint64_t pump_begin_ns = u_timing_trace_enabled() ? os_monotonic_get_ns() : 0;
 	pump_appkit_events();
+	if (pump_begin_ns != 0) {
+		trace_appkit_pump(pump_begin_ns, os_monotonic_get_ns());
+	}
 
 	struct pollfd pollfds[2] = {0};
 	nfds_t nfds = 0;
@@ -262,6 +302,12 @@ ipc_server_mainloop_apple_init(struct ipc_server_mainloop *ml, bool no_stdin)
 void
 ipc_server_mainloop_apple_deinit(struct ipc_server_mainloop *ml)
 {
+	if (g_appkit_pump_trace != NULL) {
+		fclose(g_appkit_pump_trace);
+		g_appkit_pump_trace = NULL;
+	}
+	g_appkit_pump_trace_attempted = false;
+	g_appkit_pump_previous_begin_ns = g_appkit_pump_previous_end_ns = g_appkit_pump_last_row_ns = 0;
 	IPC_TRACE_MARKER();
 
 	if (ml == NULL) {

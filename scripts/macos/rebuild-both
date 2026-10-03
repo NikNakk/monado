@@ -1,0 +1,27 @@
+#!/bin/zsh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+# Rebuild the configured native and translated development runtimes.
+
+cd "${0:A:h:h:h}"
+
+(
+  set -eu
+  x64=.build/in-process-native-hardware-current/monado-x64
+
+  # Refresh revision tags while preserving existing build settings.
+  cmake -S . -B build-wine -U GIT_DESC
+  cmake -S . -B "$x64" -U GIT_DESC
+
+  # ARM64 service and native client.
+  cmake --build build-wine \
+    --target monado-service openxr_monado --parallel 6
+
+  # x86-64 native client used inside Wine.
+  cmake --build "$x64" \
+    --target openxr_monado --parallel 6
+
+  # Restart the registered service using the rebuilt executable.
+  launchctl kickstart -k \
+    "gui/$(id -u)/org.freedesktop.monado.service"
+)

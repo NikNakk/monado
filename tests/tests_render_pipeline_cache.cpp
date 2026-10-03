@@ -37,6 +37,7 @@ make_test_distortion_spec(VkBool32 do_timewarp, int32_t view_count = 2)
 	    .do_timewarp = do_timewarp,
 	    .view_count = view_count,
 	    .use_identity_distortion = VK_FALSE,
+	    .preserve_source_alpha = VK_FALSE,
 	};
 }
 
@@ -74,9 +75,17 @@ struct MinimalVulkanContext
 		static const char *required_instance_extensions[] = {nullptr};
 		static const char *optional_instance_extensions[] = {
 		    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
+#ifdef XRT_OS_OSX
+		    VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
+#endif
 		};
 		static const char *required_device_extensions[] = {nullptr};
-		static const char *optional_device_extensions[] = {nullptr};
+		static const char *optional_device_extensions[] = {
+#ifdef XRT_OS_OSX
+		    "VK_KHR_portability_subset", // May be absent from non-beta Vulkan headers.
+#endif
+		    nullptr,
+		};
 
 		auto required_instance_ext_list = u_extension_list_create_from_array(
 		    required_instance_extensions, ARRAY_SIZE(required_instance_extensions));
@@ -535,16 +544,24 @@ struct BlitMsPipelineCacheFixture
 TEST_CASE("render_distortion_spec is a padding-free specialization key", "[aux_render][pipeline_cache]")
 {
 	STATIC_REQUIRE(std::is_trivially_copyable_v<render_distortion_spec>);
-	// distortion.comp has four specialization constants (k_distortion_texel_count,
-	// k_do_timewarp, k_view_count, k_use_identity_distortion); the generated POD
+	// distortion.comp has five specialization constants (k_distortion_texel_count,
+	// k_do_timewarp, k_view_count, k_use_identity_distortion, k_preserve_source_alpha); the generated POD
 	// stores each as a 4-byte field.
-	STATIC_REQUIRE(sizeof(render_distortion_spec) == 4u * sizeof(int32_t));
+	STATIC_REQUIRE(sizeof(render_distortion_spec) == 5u * sizeof(int32_t));
 
 	const render_distortion_spec key = make_test_distortion_spec(VK_FALSE);
 	CHECK(key.distortion_texel_count == 2);
 	CHECK(key.do_timewarp == VK_FALSE);
 	CHECK(key.view_count == 2);
 	CHECK(key.use_identity_distortion == VK_FALSE);
+	CHECK(key.preserve_source_alpha == VK_FALSE);
+
+	const auto runtime_key = render_make_distortion_spec(2, VK_FALSE, 2);
+#ifdef XRT_OS_OSX
+	CHECK(runtime_key.preserve_source_alpha == VK_TRUE);
+#else
+	CHECK(runtime_key.preserve_source_alpha == VK_FALSE);
+#endif
 }
 
 TEST_CASE("ComputePipelineCache<render_distortion_spec> caches by key", "[aux_render][pipeline_cache][gpu]")
@@ -565,6 +582,13 @@ TEST_CASE("ComputePipelineCache<render_distortion_spec> caches by key", "[aux_re
 
 	CHECK(first == second);
 	CHECK(first != timewarp_pipeline);
+
+	// Alpha specialization must not reuse an opaque-output pipeline.
+	auto alpha = non_timewarp;
+	alpha.preserve_source_alpha = VK_TRUE;
+	VkPipeline alpha_pipeline = VK_NULL_HANDLE;
+	REQUIRE(fixture.cache.get(&fixture.ctx.vk, alpha, alpha_pipeline) == VK_SUCCESS);
+	CHECK(first != alpha_pipeline);
 }
 
 TEST_CASE("render_distortion C pipeline cache wrapper", "[aux_render][pipeline_cache][gpu]")

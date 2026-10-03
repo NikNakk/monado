@@ -158,6 +158,7 @@ struct xr_api
 	PFN_xrGetMetalGraphicsRequirementsKHR get_metal_graphics_requirements = nullptr;
 	PFN_xrCreateSession create_session = nullptr;
 	PFN_xrDestroySession destroy_session = nullptr;
+	PFN_xrEnumerateEnvironmentBlendModes enumerate_environment_blend_modes = nullptr;
 	PFN_xrEnumerateViewConfigurationViews enumerate_view_configuration_views = nullptr;
 	PFN_xrEnumerateSwapchainFormats enumerate_swapchain_formats = nullptr;
 	PFN_xrCreateSwapchain create_swapchain = nullptr;
@@ -276,6 +277,7 @@ load_instance_xr_functions(xr_api &xr, XrInstance instance)
 	LOAD_XR("xrGetMetalGraphicsRequirementsKHR", get_metal_graphics_requirements);
 	LOAD_XR("xrCreateSession", create_session);
 	LOAD_XR("xrDestroySession", destroy_session);
+	LOAD_XR("xrEnumerateEnvironmentBlendModes", enumerate_environment_blend_modes);
 	LOAD_XR("xrEnumerateViewConfigurationViews", enumerate_view_configuration_views);
 	LOAD_XR("xrEnumerateSwapchainFormats", enumerate_swapchain_formats);
 	LOAD_XR("xrCreateSwapchain", create_swapchain);
@@ -935,6 +937,7 @@ struct application
 	xr_api xr;
 	XrInstance instance = XR_NULL_HANDLE;
 	XrSystemId system_id = XR_NULL_SYSTEM_ID;
+	XrEnvironmentBlendMode blend_mode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 	XrSession session = XR_NULL_HANDLE;
 	XrSpace app_space = XR_NULL_HANDLE;
 	XrSpace view_space = XR_NULL_HANDLE;
@@ -1126,12 +1129,48 @@ create_instance(application &app)
 	        XR_VERSION_PATCH(instance_properties.runtimeVersion));
 }
 
+static const char *
+blend_mode_name(XrEnvironmentBlendMode mode)
+{
+	switch (mode) {
+	case XR_ENVIRONMENT_BLEND_MODE_OPAQUE: return "Opaque";
+	case XR_ENVIRONMENT_BLEND_MODE_ADDITIVE: return "Additive";
+	case XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND: return "AlphaBlend";
+	default: return "Unknown";
+	}
+}
+
+static void
+validate_blend_mode(application &app)
+{
+	uint32_t count = 0;
+	check_xr(app.xr.enumerate_environment_blend_modes(
+	             app.instance, app.system_id, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &count, nullptr),
+	         "xrEnumerateEnvironmentBlendModes(count)");
+	std::vector<XrEnvironmentBlendMode> modes(count);
+	check_xr(app.xr.enumerate_environment_blend_modes(app.instance, app.system_id,
+	                                                  XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, count, &count,
+	                                                  modes.data()),
+	         "xrEnumerateEnvironmentBlendModes");
+	bool supported = false;
+	fprintf(stderr, "psvr2-openxr-test: supported environment blend modes:");
+	for (uint32_t i = 0; i < count; ++i) {
+		fprintf(stderr, " %s", blend_mode_name(modes[i]));
+		supported |= modes[i] == app.blend_mode;
+	}
+	fprintf(stderr, "\npsvr2-openxr-test: requested environment blend mode %s\n", blend_mode_name(app.blend_mode));
+	if (!supported) {
+		fatal("requested environment blend mode is not supported by this runtime for primary stereo");
+	}
+}
+
 static void
 create_system_and_session(application &app)
 {
 	XrSystemGetInfo system_info = xr_struct<XrSystemGetInfo>(XR_TYPE_SYSTEM_GET_INFO);
 	system_info.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
 	check_xr(app.xr.get_system(app.instance, &system_info, &app.system_id), "xrGetSystem");
+	validate_blend_mode(app);
 
 	XrSystemEyeGazeInteractionPropertiesEXT gaze_properties =
 	    xr_struct<XrSystemEyeGazeInteractionPropertiesEXT>(XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT);
@@ -2476,9 +2515,10 @@ render_views(application &app, XrTime predicted_display_time)
 		    app.gaze_foveation ? swapchain.foveation_color_texture : color_texture;
 		render_pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 		render_pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-		render_pass.colorAttachments[0].clearColor = app.submit_passthrough
-		                                                 ? MTLClearColorMake(0.0, 0.0, 0.0, 0.0)
-		                                                 : MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
+		render_pass.colorAttachments[0].clearColor =
+		    (app.submit_passthrough || app.blend_mode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND)
+		        ? MTLClearColorMake(0.0, 0.0, 0.0, 0.0)
+		        : MTLClearColorMake(0.012, 0.018, 0.024, 1.0);
 		id<MTLTexture> depth_texture =
 		    app.gaze_foveation ? swapchain.foveation_depth_texture : swapchain.depth_texture;
 		if (app.submit_depth_layer) {
@@ -2664,7 +2704,7 @@ render_frame(application &app)
 			layer.space = app.app_space;
 			layer.viewCount = (uint32_t)app.projection_views.size();
 			layer.views = app.projection_views.data();
-			if (app.submit_passthrough) {
+			if (app.submit_passthrough || app.blend_mode == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND) {
 				layer.layerFlags |= XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 			}
 			submit_projection = !app.passthrough_only;
@@ -2688,7 +2728,7 @@ render_frame(application &app)
 
 	XrFrameEndInfo end_info = xr_struct<XrFrameEndInfo>(XR_TYPE_FRAME_END_INFO);
 	end_info.displayTime = frame_state.predictedDisplayTime;
-	end_info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+	end_info.environmentBlendMode = app.blend_mode;
 	end_info.layerCount = layer_count;
 	end_info.layers = layer_count > 0 ? layers : nullptr;
 	check_xr(app.xr.end_frame(app.session, &end_info), "xrEndFrame");
@@ -2861,6 +2901,7 @@ static int
 run(int argc, char **argv)
 {
 	const char *loader_path = nullptr;
+	XrEnvironmentBlendMode blend_mode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
 	bool submit_depth_layer = false;
 	bool submit_passthrough = false;
 	bool passthrough_only = false;
@@ -2875,6 +2916,18 @@ run(int argc, char **argv)
 	for (int i = 1; i < argc; ++i) {
 		if (strcmp(argv[i], "--loader") == 0 && i + 1 < argc) {
 			loader_path = argv[++i];
+		} else if (strcmp(argv[i], "--blendmode") == 0) {
+			if (i + 1 >= argc) {
+				fatal("--blendmode requires Opaque or AlphaBlend");
+			}
+			const char *value = argv[++i];
+			if (strcmp(value, "Opaque") == 0) {
+				blend_mode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+			} else if (strcmp(value, "AlphaBlend") == 0) {
+				blend_mode = XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND;
+			} else {
+				fatal("--blendmode requires Opaque or AlphaBlend");
+			}
 		} else if (strcmp(argv[i], "--depth-layer") == 0) {
 			submit_depth_layer = true;
 		} else if (strcmp(argv[i], "--passthrough") == 0) {
@@ -2911,11 +2964,14 @@ run(int argc, char **argv)
 		} else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
 			fprintf(
 			    stderr,
-			    "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--depth-layer] "
+			    "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--blendmode Opaque|AlphaBlend] "
+			    "[--depth-layer] "
 			    "[--passthrough|--passthrough-only] [--generic-controller] "
 			    "[--gaze|--gaze-calibrate|--gaze-foveation] "
 			    "[--fb-foveation|--fb-eye-foveation] [--fb-foveation-sparse-check] "
 			    "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
+			    "  --blendmode selects a supported environment blend mode (default Opaque). "
+			    "AlphaBlend clears the background transparent and submits source alpha.\n"
 			    "  --depth-layer submits the rendered Depth32Float attachment through "
 			    "XR_KHR_composition_layer_depth.\n"
 			    "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
@@ -2947,6 +3003,7 @@ run(int argc, char **argv)
 	}
 
 	application app;
+	app.blend_mode = blend_mode;
 	app.submit_depth_layer = submit_depth_layer;
 	app.submit_passthrough = submit_passthrough;
 	app.passthrough_only = passthrough_only;

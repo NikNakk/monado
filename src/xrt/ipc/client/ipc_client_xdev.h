@@ -24,6 +24,7 @@ extern "C" {
 struct ipc_connection;
 struct ipc_client_tracking_origin_manager;
 struct ipc_client_passthrough;
+struct ipc_client_tracking_share;
 
 /*!
  * An IPC client proxy for an @ref xrt_device.
@@ -58,6 +59,7 @@ struct ipc_client_xdev
 
 	//! Passthrough frames from the service, for a compositor in this process.
 	struct ipc_client_passthrough *passthrough;
+	struct ipc_client_tracking_share *tracking_share;
 };
 
 /*!

@@ -11,6 +11,7 @@
 #include "math/m_filter_fifo.h"
 
 #include <assert.h>
+#include <string.h>
 
 
 /*
@@ -88,6 +89,14 @@ m_ff_vec3_f32_free(struct m_ff_vec3_f32 **ff_ptr)
 	vec3_f32_destroy(ff);
 	free(ff);
 	*ff_ptr = NULL;
+}
+
+void
+m_ff_vec3_f32_clear(struct m_ff_vec3_f32 *ff)
+{
+	memset(ff->samples, 0, ff->num * sizeof(*ff->samples));
+	memset(ff->timestamps_ns, 0, ff->num * sizeof(*ff->timestamps_ns));
+	ff->latest = 0;
 }
 
 size_t

@@ -509,7 +509,8 @@ dispatch_project_pipeline(struct render_compute *render,
 #ifdef XRT_OS_OSX
 	{
 		struct render_buffer *buffer = &r->apple_target_debug.buffer;
-		if (buffer->buffer != VK_NULL_HANDLE) {
+		if (buffer->buffer != VK_NULL_HANDLE &&
+		    render_debug_sample_format_supported(r->apple_target_debug.format)) {
 			uint32_t target_width = 0;
 			uint32_t target_height = 0;
 			for (uint32_t i = 0; i < render->r->view_count; ++i) {
@@ -612,13 +613,23 @@ dispatch_project_pipeline(struct render_compute *render,
 				    VK_ACCESS_TRANSFER_READ_BIT, //
 				    VK_ACCESS_MEMORY_READ_BIT,   //
 				    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-				    VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, //
-				    target_subresource_range);       //
+				    target_final_layout,       //
+				    target_subresource_range); //
 
 				r->apple_target_debug.pending = true;
+				return; // Sampling already transitioned to the requested final layout.
 			}
 		}
 	}
+	/*
+	 * Metal consumes this shared image outside the Vulkan pipeline. Keep the
+	 * full GPU memory dependency that the diagnostic transfer path provided:
+	 * TOP_OF_PIPE has no memory accesses and cannot make shader writes visible
+	 * to that consumer. The shared event orders completion, while this barrier
+	 * makes the image writes available before it is signalled.
+	 */
+	vk_cmd_image_barrier_gpu_locked(vk, r->cmd, target_image, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+	                                VK_IMAGE_LAYOUT_GENERAL, target_final_layout, subresource_range);
 #else
 	VkImageMemoryBarrier memoryBarrier = {
 	    .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,

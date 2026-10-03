@@ -19,6 +19,8 @@ layout(constant_id = 2) const int k_view_count = 2;
 
 // For NONE-distortion devices, bypass sampled distortion textures entirely.
 layout(constant_id = 3) const bool k_use_identity_distortion = false;
+// Apple output layers retain alpha; ordinary compositor targets are opaque.
+layout(constant_id = 4) const bool k_preserve_source_alpha = false;
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
@@ -291,7 +293,7 @@ void main()
 	    texture(source[iz], r_uv).r, //
 	    texture(source[iz], g_uv).g, //
 	    texture(source[iz], b_uv).b, //
-	    texture(source[iz], g_uv).a); //
+	    k_preserve_source_alpha ? texture(source[iz], g_uv).a : 1.0); //
 
 	// Do colour correction here since there are no automatic conversion in hardware available.
 	colour = vec4(from_linear_to_srgb(colour.rgb), colour.a);

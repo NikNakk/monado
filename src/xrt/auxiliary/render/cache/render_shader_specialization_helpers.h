@@ -9,6 +9,7 @@
 #pragma once
 
 #include "cache/render_shader_specialization.h"
+#include "xrt/xrt_config_os.h"
 
 #include <stdint.h>
 
@@ -24,6 +25,11 @@ render_make_distortion_spec(uint32_t distortion_texel_count, VkBool32 do_timewar
 	    .do_timewarp = do_timewarp,
 	    .view_count = (int32_t)view_count,
 	    .use_identity_distortion = VK_FALSE,
+#ifdef XRT_OS_OSX
+	    .preserve_source_alpha = VK_TRUE,
+#else
+	    .preserve_source_alpha = VK_FALSE,
+#endif
 	};
 
 	return spec;

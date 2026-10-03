@@ -97,7 +97,9 @@ reprojection_source_trace_open(void)
 	    "left_src_qx,left_src_qy,left_src_qz,left_src_qw,left_src_px,left_src_py,left_src_pz,"
 	    "right_src_qx,right_src_qy,right_src_qz,right_src_qw,right_src_px,right_src_py,right_src_pz\n",
 	    g_reprojection_source_trace);
-	fflush(g_reprojection_source_trace);
+	if (!u_timing_trace_fully_buffered()) {
+		fflush(g_reprojection_source_trace);
+	}
 	U_LOG_I("Reprojection source trace enabled");
 }
 
@@ -225,7 +227,7 @@ trace_reprojection_source(struct multi_compositor **array,
 
 flush_maybe:
 	g_reprojection_source_rows++;
-	if ((g_reprojection_source_rows % 240) == 0) {
+	if (!u_timing_trace_fully_buffered() && ((g_reprojection_source_rows % 240) == 0)) {
 		fflush(g_reprojection_source_trace);
 	}
 }

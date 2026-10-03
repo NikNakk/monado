@@ -346,10 +346,6 @@ render_sub_alloc_ubo_alloc_and_write(struct vk_bundle *vk,
  */
 struct render_resources
 {
-#ifndef RENDER_FOVEATION_BUFFER_DIMENSIONS
-#define RENDER_FOVEATION_BUFFER_DIMENSIONS (4096 + 1)
-#endif
-
 	//! The count of views that we are rendering to.
 	uint32_t view_count;
 
@@ -554,12 +550,6 @@ struct render_resources
 
 	struct
 	{
-		//! Temporary WiVRn compatibility handle until the foveation path is ported.
-		VkBuffer buffer;
-
-		//! Temporary WiVRn compatibility memory handle until the foveation path is ported.
-		VkDeviceMemory device_memory;
-
 		//! Transform to go from UV to tangle angles.
 		struct xrt_normalized_rect uv_to_tanangle[XRT_MAX_VIEWS];
 
@@ -582,6 +572,7 @@ struct render_resources
 		struct render_buffer buffers[XRT_MAX_VIEWS];
 		uint64_t frame_id;
 		uint32_t image_indices[XRT_MAX_VIEWS];
+		VkFormat formats[XRT_MAX_VIEWS];
 		uint32_t active_view_mask;
 		bool pending;
 		uint64_t log_count;
@@ -590,12 +581,29 @@ struct render_resources
 	struct
 	{
 		struct render_buffer buffer;
+		VkFormat format;
 		uint64_t frame_id;
 		bool pending;
 		uint64_t log_count;
 	} apple_target_debug;
 #endif
 };
+
+#ifdef XRT_OS_OSX
+// Pixel diagnostics use four-byte RGBA/BGRA samples only.
+static inline bool
+render_debug_sample_format_supported(VkFormat format)
+{
+	return format == VK_FORMAT_R8G8B8A8_UNORM || format == VK_FORMAT_R8G8B8A8_SRGB ||
+	       format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
+}
+
+static inline bool
+render_debug_sample_is_bgra(VkFormat format)
+{
+	return format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
+}
+#endif
 
 /*!
  * Allocate pools and static resources.
@@ -1518,17 +1526,6 @@ struct render_compute_distortion_ubo_data
 		uint32_t padding0;
 		uint32_t padding1;
 	} foveation[XRT_MAX_VIEWS];
-};
-
-/*!
- * Temporary WiVRn compatibility UBO layout until the foveation path is ported.
- *
- * @relates render_compute
- */
-struct render_compute_distortion_foveation_data
-{
-	uint32_t x[XRT_MAX_VIEWS * RENDER_FOVEATION_BUFFER_DIMENSIONS];
-	uint32_t y[XRT_MAX_VIEWS * RENDER_FOVEATION_BUFFER_DIMENSIONS];
 };
 
 /*!

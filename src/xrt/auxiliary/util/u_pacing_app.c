@@ -152,7 +152,7 @@ macos_app_pacing_trace_event(const char *event,
 	        event, session_id, frame_id, event_ns, wake_ns, predicted_display_ns, predicted_period_ns,
 	        display_time_ns, cpu_est_ns, draw_est_ns, gpu_est_ns, cpu_actual_ns, draw_actual_ns, gpu_actual_ns);
 	g_macos_app_pacing_trace_rows++;
-	if (g_macos_app_pacing_trace_rows % 512 == 0) {
+	if (!u_timing_trace_fully_buffered() && (g_macos_app_pacing_trace_rows % 512 == 0)) {
 		fflush(file);
 	}
 	funlockfile(file);

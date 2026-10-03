@@ -107,7 +107,7 @@ ipc_submit_trace_event(const char *event,
 	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 ",%u,%d\n", event, frame_id,
 	        os_monotonic_get_ns(), semaphore_value, display_time_ns, layer_count, (int)result);
 	g_ipc_submit_trace_rows++;
-	if (g_ipc_submit_trace_rows % 512 == 0) {
+	if (!u_timing_trace_fully_buffered() && (g_ipc_submit_trace_rows % 512 == 0)) {
 		fflush(file);
 	}
 	funlockfile(file);
@@ -187,7 +187,7 @@ ipc_swapchain_trace_event(const char *event,
 	fprintf(file, "%s,%u,%u,%" PRId64 ",%" PRId64 ",%" PRId64 ",%d\n", event, swapchain_id, image_index,
 	        os_monotonic_get_ns(), duration_ns, timeout_ns, (int)result);
 	g_ipc_swapchain_trace_rows++;
-	if (g_ipc_swapchain_trace_rows % 512 == 0) {
+	if (!u_timing_trace_fully_buffered() && (g_ipc_swapchain_trace_rows % 512 == 0)) {
 		fflush(file);
 	}
 	funlockfile(file);

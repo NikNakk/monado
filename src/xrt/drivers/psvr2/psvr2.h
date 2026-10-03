@@ -191,6 +191,10 @@ struct psvr2_hmd
 	enum u_logging_level log_level;
 
 	struct os_mutex data_lock;
+#ifdef XRT_OS_OSX
+	struct psvr2_tracking_share *tracking_share;
+	int64_t tracking_imu_received_ns, tracking_imu_estimated_ns, tracking_slam_received_ns;
+#endif
 	bool data_lock_initialized;
 
 	/* Device status */

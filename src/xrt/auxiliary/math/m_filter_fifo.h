@@ -32,6 +32,10 @@ m_ff_vec3_f32_alloc(struct m_ff_vec3_f32 **ff_out, size_t num);
 void
 m_ff_vec3_f32_free(struct m_ff_vec3_f32 **ff_ptr);
 
+//! Clear retained samples without allocating or changing capacity.
+void
+m_ff_vec3_f32_clear(struct m_ff_vec3_f32 *ff);
+
 /*!
  * Return the number of samples that can fill the fifo.
  */

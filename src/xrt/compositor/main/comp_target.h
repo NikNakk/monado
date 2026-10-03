@@ -65,8 +65,6 @@ struct comp_target_image
 	VkImageView view;
 	//! Direct-value/storage view, falls back to @ref view when no split is needed.
 	VkImageView storage_view;
-	//! Temporary WiVRn compatibility field until the CbCr target path is ported.
-	VkImageView view_cbcr;
 };
 
 /*!
@@ -146,6 +144,9 @@ struct comp_target
 
 	//! The format that the renderpass targeting this target should use.
 	VkFormat format;
+
+	//! Known Vulkan image usage; zero when the target does not report it.
+	VkImageUsageFlags image_usage;
 
 	//! The final layout that the renderpass should leave this target in.
 	VkImageLayout final_layout;

@@ -225,6 +225,9 @@ struct ipc_client_state
 	int server_thread_index;
 
 	xrt_shmem_handle_t ism_handle;
+#ifdef __APPLE__
+	bool shared_tracking_user;
+#endif
 };
 
 enum ipc_thread_state
@@ -531,6 +534,14 @@ struct ipc_server
 		void *mem;
 		size_t size;
 	} passthrough_share;
+	struct
+	{
+		struct os_mutex lock;
+		xrt_shmem_handle_t handle;
+		void *mem;
+		struct xrt_device *xdev;
+		uint32_t users;
+	} tracking_share;
 #endif
 };
 
@@ -657,6 +668,13 @@ void
 ipc_server_macos_display_host_client_gone(volatile struct ipc_client_state *ics);
 
 //! Set up and tear down the passthrough share state; the memory itself is created on request.
+void
+ipc_server_tracking_share_init(struct ipc_server *s);
+void
+ipc_server_tracking_share_fini(struct ipc_server *s);
+void
+ipc_server_tracking_share_client_gone(volatile struct ipc_client_state *ics);
+
 void
 ipc_server_passthrough_share_init(struct ipc_server *s);
 

@@ -152,6 +152,8 @@ struct comp_renderer
 	uint64_t late_render_trace_rows;
 
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	FILE *renderer_stage_trace;
+	uint64_t renderer_stage_trace_rows;
 	FILE *reprojection_trace;
 	uint64_t reprojection_trace_rows;
 	bool reprojection_prev_source_valid;
@@ -265,7 +267,9 @@ renderer_reprojection_trace_open(struct comp_renderer *r)
 		fprintf(r->reprojection_trace, ",left_tw_end_m%02u", i);
 	}
 	fputc('\n', r->reprojection_trace);
-	fflush(r->reprojection_trace);
+	if (!u_timing_trace_fully_buffered()) {
+		fflush(r->reprojection_trace);
+	}
 }
 
 static void
@@ -449,7 +453,7 @@ renderer_reprojection_trace_frame(struct comp_renderer *r,
 
 flush_maybe:
 	r->reprojection_trace_rows++;
-	if ((r->reprojection_trace_rows % 240) == 0) {
+	if (!u_timing_trace_fully_buffered() && ((r->reprojection_trace_rows % 240) == 0)) {
 		fflush(r->reprojection_trace);
 	}
 }
@@ -472,7 +476,9 @@ renderer_late_render_trace_open(struct comp_renderer *r)
 	    "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns,"
 	    "desired_offset_us,wait_mode,target_minus_desired_ns,pose_begin_minus_desired_ns\n",
 	    r->late_render_trace);
-	fflush(r->late_render_trace);
+	if (!u_timing_trace_fully_buffered()) {
+		fflush(r->late_render_trace);
+	}
 }
 
 static void
@@ -555,12 +561,60 @@ renderer_late_render_trace_frame(struct comp_renderer *r)
 	        (long long)target_minus_desired_ns, (long long)pose_begin_minus_desired_ns);
 
 	r->late_render_trace_rows++;
-	if (r->late_render_trace_rows % 256 == 0) {
+	if (!u_timing_trace_fully_buffered() && (r->late_render_trace_rows % 256 == 0)) {
 		fflush(r->late_render_trace);
 	}
 }
 #endif
 
+#endif
+
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+static uint64_t
+renderer_stage_begin(struct comp_renderer *r)
+{
+	(void)r;
+	return debug_get_bool_option_comp_psvr2_timing_trace() ? os_monotonic_get_ns() : 0;
+}
+
+static void
+renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns, int32_t result)
+{
+	if (begin_ns == 0) {
+		return;
+	}
+	// Sample before formatting or opening the trace, so logging is outside the duration.
+	uint64_t end_ns = os_monotonic_get_ns();
+	if (r->renderer_stage_trace == NULL) {
+		r->renderer_stage_trace = u_timing_trace_open("renderer_stage", 64 * 1024);
+		if (r->renderer_stage_trace == NULL) {
+			return;
+		}
+		fputs("frame_id,stage,begin_ns,end_ns,result\n", r->renderer_stage_trace);
+	}
+	int64_t frame_id = r->c->frame.rendering.id >= 0 ? r->c->frame.rendering.id : r->c->frame.waited.id;
+	fprintf(r->renderer_stage_trace, "%lld,%s,%llu,%llu,%d\n", (long long)frame_id, stage,
+	        (unsigned long long)begin_ns, (unsigned long long)end_ns, result);
+	if (++r->renderer_stage_trace_rows % 256 == 0 && !u_timing_trace_fully_buffered()) {
+		fflush(r->renderer_stage_trace);
+	}
+}
+#else
+static inline uint64_t
+renderer_stage_begin(struct comp_renderer *r)
+{
+	(void)r;
+	return 0;
+}
+
+static inline void
+renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns, int32_t result)
+{
+	(void)r;
+	(void)stage;
+	(void)begin_ns;
+	(void)result;
+}
 #endif
 
 static void
@@ -1096,12 +1150,15 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	struct vk_bundle *vk = &r->c->base.vk;
 	VkResult ret;
 
+	uint64_t fence_begin_ns = renderer_stage_begin(r);
 	ret = vk->vkWaitForFences(vk->device, 1, &r->fences[r->fenced_buffer], VK_TRUE, UINT64_MAX);
+	renderer_stage_end(r, "previous_fence_wait", fence_begin_ns, ret);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(r->c, "vkWaitForFences: %s", vk_result_string(ret));
 	}
 
 #ifdef XRT_OS_OSX
+	uint64_t feedback_begin_ns = renderer_stage_begin(r);
 	if (ret == VK_SUCCESS && r->fenced_frame_id >= 0) {
 		/*
 		 * The previous frame fence guarantees these query results are ready.
@@ -1130,12 +1187,16 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 				}
 
 				const uint8_t *sample = r->c->nr.apple_source_debug.buffers[i].mapped;
+				const bool bgra = render_debug_sample_is_bgra(r->c->nr.apple_source_debug.formats[i]);
+				const uint32_t red = bgra ? 2 : 0;
+				const uint32_t blue = bgra ? 0 : 2;
 				U_LOG_RAW(
 				    "vk-source frame=%lld eye=%u image=%u rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)",
 				    (long long)r->c->nr.apple_source_debug.frame_id, i,
-				    r->c->nr.apple_source_debug.image_indices[i], (unsigned)sample[0],
-				    (unsigned)sample[1], (unsigned)sample[2], (unsigned)sample[3], (unsigned)sample[4],
-				    (unsigned)sample[5], (unsigned)sample[6], (unsigned)sample[7]);
+				    r->c->nr.apple_source_debug.image_indices[i], (unsigned)sample[red],
+				    (unsigned)sample[1], (unsigned)sample[blue], (unsigned)sample[3],
+				    (unsigned)sample[4 + red], (unsigned)sample[5], (unsigned)sample[4 + blue],
+				    (unsigned)sample[7]);
 			}
 		}
 
@@ -1150,18 +1211,21 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 		if (debug_get_bool_option_log_apple_samples() &&
 		    (r->c->nr.apple_target_debug.log_count <= 5 || r->c->nr.apple_target_debug.log_count % 120 == 0)) {
 			const uint8_t *sample = r->c->nr.apple_target_debug.buffer.mapped;
+			const bool bgra = render_debug_sample_is_bgra(r->c->nr.apple_target_debug.format);
+			const uint32_t red = bgra ? 2 : 0;
+			const uint32_t blue = bgra ? 0 : 2;
 			U_LOG_RAW(
 			    "vk-target frame=%lld layer=0 rgbaL=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u) rgbaR=(%u,%u,%u,%u)",
-			    (long long)r->c->nr.apple_target_debug.frame_id, (unsigned)sample[0], (unsigned)sample[1],
-			    (unsigned)sample[2], (unsigned)sample[3], (unsigned)sample[4], (unsigned)sample[5],
-			    (unsigned)sample[6], (unsigned)sample[7], (unsigned)sample[8], (unsigned)sample[9],
-			    (unsigned)sample[10], (unsigned)sample[11]);
+			    (long long)r->c->nr.apple_target_debug.frame_id, (unsigned)sample[red], (unsigned)sample[1],
+			    (unsigned)sample[blue], (unsigned)sample[3], (unsigned)sample[4 + red], (unsigned)sample[5],
+			    (unsigned)sample[4 + blue], (unsigned)sample[7], (unsigned)sample[8 + red],
+			    (unsigned)sample[9], (unsigned)sample[8 + blue], (unsigned)sample[11]);
 		}
 
 		r->c->nr.apple_target_debug.pending = false;
 	}
+	renderer_stage_end(r, "previous_gpu_feedback", feedback_begin_ns, ret);
 #endif
-
 	r->fenced_buffer = -1;
 	r->fenced_frame_id = -1;
 }
@@ -1249,8 +1313,11 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	 * us avoid taking a lot of locks. The queue lock will be taken by
 	 * @ref vk_cmd_submit_locked tho.
 	 */
+	uint64_t submit_begin_ns = renderer_stage_begin(r);
 	ret = comp_swapchain_gpu_reuse_vk_cmd_submit_locked(vk, vk->main_queue, 1, &builder.submit_info,
 	                                                    r->fences[r->acquired_buffer]);
+
+	renderer_stage_end(r, "queue_submit", submit_begin_ns, ret);
 
 	// We have now completed the submit, even if we failed.
 	comp_target_mark_submit_end(ct, frame_id, os_monotonic_get_ns());
@@ -1279,7 +1346,9 @@ renderer_acquire_swapchain_image(struct comp_renderer *r)
 		// Not ready yet.
 		return;
 	}
+	uint64_t acquire_begin_ns = renderer_stage_begin(r);
 	ret = comp_target_acquire(r->c->target, &buffer_index);
+	renderer_stage_end(r, "target_acquire", acquire_begin_ns, ret);
 
 	while ((ret == VK_ERROR_OUT_OF_DATE_KHR) || (ret == VK_SUBOPTIMAL_KHR)) {
 		COMP_DEBUG(r->c, "Received %s.", vk_result_string(ret));
@@ -1406,6 +1475,11 @@ renderer_fini(struct comp_renderer *r)
 
 #ifdef XRT_OS_OSX
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	if (r->renderer_stage_trace != NULL) {
+		fflush(r->renderer_stage_trace);
+		fclose(r->renderer_stage_trace);
+		r->renderer_stage_trace = NULL;
+	}
 	renderer_late_render_trace_close(r);
 	renderer_reprojection_trace_close(r);
 #endif
@@ -1508,25 +1582,6 @@ dispatch_graphics(struct comp_renderer *r,
  *
  */
 
-static struct comp_layer *
-get_projection_layer(struct comp_layer_accum *layers)
-{
-	for (uint32_t layer = 0; layer < layers->layer_count; ++layer) {
-		switch (layers->layers[layer].data.type) {
-		case XRT_LAYER_PROJECTION:
-		case XRT_LAYER_PROJECTION_DEPTH: return &layers->layers[layer];
-		case XRT_LAYER_QUAD:
-		case XRT_LAYER_CUBE:
-		case XRT_LAYER_CYLINDER:
-		case XRT_LAYER_EQUIRECT1:
-		case XRT_LAYER_EQUIRECT2:
-		case XRT_LAYER_PASSTHROUGH: break;
-		}
-	}
-
-	return NULL;
-}
-
 /*!
  * @pre render_compute_init(render, &c->nr)
  */
@@ -1560,27 +1615,9 @@ dispatch_compute(struct comp_renderer *r,
 	    eye_poses,                 //
 	    render->r->view_count);    //
 
-	if (!c->base.frame_params.one_projection_layer_fast_path) {
-		struct comp_layer *proj_layer = get_projection_layer(&c->base.layer_accum);
-		int64_t predicted_display_time_ns = c->frame.rendering.predicted_display_time_ns;
-		int64_t cutoff_ns = 3 * c->frame_interval_ns;
+	// Submitted poses describe source images. Keep freshly predicted scanout
+	// targets for timewarp on every platform, including remote targets.
 
-		if (proj_layer != NULL && llabs(predicted_display_time_ns - proj_layer->data.timestamp) <= cutoff_ns) {
-			struct xrt_layer_projection_view_data *data = proj_layer->data.proj.v;
-			COMP_SPEW(c, "Using submitted projection layer pose data in compute compositor");
-
-			// projection_depth shares the same initial view layout as projection
-			for (uint32_t view = 0; view < render->r->view_count; ++view) {
-				fovs[view] = data[view].fov;
-				world_poses_scanout_begin[view] = data[view].pose;
-				world_poses_scanout_end[view] = data[view].pose;
-				eye_poses[view] = data[view].pose;
-
-				c->base.frame_params.fovs[view] = data[view].fov;
-				c->base.frame_params.poses[view] = data[view].pose;
-			}
-		}
-	}
 
 #ifdef XRT_OS_OSX
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
@@ -1597,6 +1634,11 @@ dispatch_compute(struct comp_renderer *r,
 		target_storage_view = r->c->target->images[r->acquired_buffer].view;
 	}
 	VkImageLayout target_final_layout = r->c->target->final_layout;
+#ifdef XRT_OS_OSX
+	render->r->apple_target_debug.format = (r->c->target->image_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0
+	                                           ? r->c->target->format
+	                                           : VK_FORMAT_UNDEFINED;
+#endif
 
 	// Target view information.
 	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
@@ -1714,6 +1756,7 @@ comp_renderer_draw(struct comp_renderer *r)
 	renderer_late_render_trace_begin(r);
 #endif
 
+	uint64_t dispatch_begin_ns = renderer_stage_begin(r);
 	VkResult res = VK_SUCCESS;
 	if (use_compute) {
 		render_compute_init(&render_c, &c->nr);
@@ -1722,6 +1765,7 @@ comp_renderer_draw(struct comp_renderer *r)
 		render_gfx_init(&render_g, &c->nr);
 		res = dispatch_graphics(r, &render_g, &frame_state, fov_source);
 	}
+	renderer_stage_end(r, "draw_dispatch", dispatch_begin_ns, res);
 	if (res != VK_SUCCESS) {
 		return XRT_ERROR_VULKAN;
 	}
@@ -1764,8 +1808,11 @@ comp_renderer_draw(struct comp_renderer *r)
 	}
 #endif
 
+	uint64_t present_begin_ns = renderer_stage_begin(r);
 	bool present_success = renderer_present_swapchain_image(r, c->frame.rendering.desired_present_time_ns,
 	                                                        c->frame.rendering.present_slop_ns);
+
+	renderer_stage_end(r, "present_enqueue", present_begin_ns, present_success ? 0 : -1);
 
 	// Save for timestamps below.
 	uint64_t frame_id = c->frame.rendering.id;

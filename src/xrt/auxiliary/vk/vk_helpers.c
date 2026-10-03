@@ -728,7 +728,11 @@ vk_create_sampler_with_filter(struct vk_bundle *vk,
 	    .addressModeU = clamp_mode,
 	    .addressModeV = clamp_mode,
 	    .addressModeW = clamp_mode,
+#ifdef XRT_OS_OSX
 	    .borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+#else
+	    .borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK,
+#endif
 	    .unnormalizedCoordinates = VK_FALSE,
 	};
 

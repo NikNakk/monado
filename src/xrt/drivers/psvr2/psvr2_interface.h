@@ -18,9 +18,17 @@
 #include <stdint.h>
 
 struct xrt_frame_sink;
+struct psvr2_tracking_share;
 
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+#ifdef __APPLE__
+/* macOS experiment: install/detach a single producer target. Detach waits for
+ * in-flight publication under data_lock; caller owns mapping lifetime. */
+bool
+psvr2_set_tracking_share(struct xrt_device *xdev, struct psvr2_tracking_share *share);
 #endif
 
 /*!

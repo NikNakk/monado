@@ -206,9 +206,10 @@ if(APPLE AND XRT_FEATURE_SERVICE)
 			ipc_client
 			PRIVATE client/ipc_client_macos_hosted.c client/ipc_client_macos_hosted.h
 				client/ipc_client_passthrough.c client/ipc_client_passthrough.h
+				client/ipc_client_tracking_share.c client/ipc_client_tracking_share.h
 			)
 		target_compile_definitions(ipc_client PRIVATE XRT_IPC_MACOS_HOSTED_COMPOSITOR)
-		target_link_libraries(ipc_client PRIVATE comp_main comp_multi)
+		target_link_libraries(ipc_client PRIVATE comp_main comp_multi aux_tracking)
 	endif()
 endif()
 
@@ -274,9 +275,14 @@ elseif(XRT_HAVE_LINUX)
 		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_linux.c
 		)
 elseif(APPLE)
+	if(XRT_BUILD_DRIVER_PSVR2)
+		target_compile_definitions(ipc_server PRIVATE XRT_IPC_PSVR2_TRACKING_SHARE)
+		target_link_libraries(ipc_server PRIVATE drv_psvr2)
+	endif()
 	target_sources(
 		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
 				   server/ipc_server_metal.c server/ipc_server_macos_display_host.c
+				   server/ipc_server_tracking_share.c
 		)
 
 	if(XRT_FEATURE_SERVICE)

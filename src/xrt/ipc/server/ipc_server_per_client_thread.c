@@ -109,6 +109,7 @@ common_shutdown(volatile struct ipc_client_state *ics)
 #ifdef __APPLE__
 	// Take a hosted layer off the headset before the client state is cleared.
 	ipc_server_macos_display_host_client_gone(ics);
+	ipc_server_tracking_share_client_gone(ics);
 #endif
 
 	/*
