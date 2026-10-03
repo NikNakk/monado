@@ -33,11 +33,11 @@ psvr2_continuity_update(struct psvr2_continuity_prediction *state,
                         const struct psvr2_linear_prediction_params *linear_params,
                         int64_t received_ns)
 {
-	struct xrt_vec3 a = {0};
+	struct xrt_vec3 a = XRT_VEC3_ZERO;
 	if (linear->ready && psvr2_linear_length(linear->velocity) >= linear_params->min_speed) {
-		a = (struct xrt_vec3){linear->acceleration.x * linear_params->gain,
-		                      linear->acceleration.y * linear_params->gain,
-		                      linear->acceleration.z * linear_params->gain};
+		a = XRT_C11_COMPOUND(struct xrt_vec3){linear->acceleration.x * linear_params->gain,
+		                                      linear->acceleration.y * linear_params->gain,
+		                                      linear->acceleration.z * linear_params->gain};
 	}
 	float half_interval = 0.5f * linear->interval_s;
 	struct xrt_vec3 v = {linear->velocity.x + a.x * half_interval, linear->velocity.y + a.y * half_interval,
@@ -67,9 +67,9 @@ psvr2_continuity_update(struct psvr2_continuity_prediction *state,
 		PSVR2_CONTINUITY_AXIS(z);
 #undef PSVR2_CONTINUITY_AXIS
 	} else {
-		state->correction_position = (struct xrt_vec3){0};
-		state->correction_velocity = (struct xrt_vec3){0};
-		state->correction_acceleration = (struct xrt_vec3){0};
+		state->correction_position = XRT_C11_COMPOUND(struct xrt_vec3) XRT_VEC3_ZERO;
+		state->correction_velocity = XRT_C11_COMPOUND(struct xrt_vec3) XRT_VEC3_ZERO;
+		state->correction_acceleration = XRT_C11_COMPOUND(struct xrt_vec3) XRT_VEC3_ZERO;
 	}
 	state->position = linear->position;
 	state->velocity = v;
@@ -110,9 +110,11 @@ psvr2_continuity_predict(const struct psvr2_continuity_prediction *state,
 		struct xrt_vec3 n = {c.x / length, c.y / length, c.z / length};
 		float projection = n.x * d.x + n.y * d.y + n.z * d.z;
 		float scale = params->limit_m / length;
-		d = (struct xrt_vec3){scale * (d.x - n.x * projection), scale * (d.y - n.y * projection),
-		                      scale * (d.z - n.z * projection)};
-		c = (struct xrt_vec3){n.x * params->limit_m, n.y * params->limit_m, n.z * params->limit_m};
+		d = XRT_C11_COMPOUND(struct xrt_vec3){scale * (d.x - n.x * projection),
+		                                      scale * (d.y - n.y * projection),
+		                                      scale * (d.z - n.z * projection)};
+		c = XRT_C11_COMPOUND(struct xrt_vec3){n.x * params->limit_m, n.y * params->limit_m,
+		                                      n.z * params->limit_m};
 	}
 	position->x += c.x;
 	position->y += c.y;

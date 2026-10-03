@@ -1,8 +1,14 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 **Review of macos-upstream-clean**
 
-**Reviewed branch:** NikNakk/monado:macos-upstream-clean  
-**Reviewed tip:** 0f919ce71f7b71c997d7ef22abffbbaadb9cce5f  
-**Recorded upstream sync base:** 045931d12f1cc9afde942f7905db08e6f51b9d8e  
+**Reviewed branch:** NikNakk/monado:macos-upstream-clean
+**Reviewed tip:** 0f919ce71f7b71c997d7ef22abffbbaadb9cce5f
+**Recorded upstream sync base:** 045931d12f1cc9afde942f7905db08e6f51b9d8e
 **Review date:** 2 October 2026
 
 | **Purpose: turn the mature integration branch into a small, reviewable, dependency-aware series of upstream Monado merge requests, while keeping experimental and compatibility work out of the upstream core.** |
