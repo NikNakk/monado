@@ -77,6 +77,11 @@ cmd_sample_projection_source_image(struct render_compute *render,
 
 	struct vk_bundle *vk = r->vk;
 	struct comp_swapchain *sc = (struct comp_swapchain *)comp_layer_get_swapchain(layer, swapchain_index);
+	// Debug copies require transfer-source usage and a known four-byte format.
+	if (!render_debug_sample_format_supported((VkFormat)sc->vkic.info.format) ||
+	    (sc->vkic.info.bits & XRT_SWAPCHAIN_USAGE_TRANSFER_SRC) == 0 || sc->vkic.info.sample_count != 1) {
+		return;
+	}
 	const uint32_t base_array_layer = array_index * sc->vkic.info.face_count;
 	const VkImage image = sc->vkic.images[image_index].handle;
 	const VkImageSubresourceRange subresource_range = {
@@ -168,6 +173,7 @@ cmd_sample_projection_source_image(struct render_compute *render,
 	    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, //
 	    subresource_range);                       //
 
+	r->apple_source_debug.formats[swapchain_index] = (VkFormat)sc->vkic.info.format;
 	r->apple_source_debug.image_indices[swapchain_index] = image_index;
 	r->apple_source_debug.active_view_mask |= (1u << swapchain_index);
 	r->apple_source_debug.pending = true;

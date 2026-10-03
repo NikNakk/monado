@@ -129,7 +129,7 @@ macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semap
 	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 "\n", event, frame_id, os_monotonic_get_ns(),
 	        semaphore_value, duration_ns);
 	g_macos_client_gpu_trace_rows++;
-	if (g_macos_client_gpu_trace_rows % 512 == 0) {
+	if (!u_timing_trace_fully_buffered() && (g_macos_client_gpu_trace_rows % 512 == 0)) {
 		fflush(file);
 	}
 	funlockfile(file);

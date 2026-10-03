@@ -151,7 +151,9 @@ macos_frame_pipeline_trace_get(void)
 	}
 	fputs("event,frame_id,event_ns,point_ns,wake_time_ns,desired_present_ns,predicted_display_ns,present_slop_ns\n",
 	      g_macos_frame_pipeline_trace);
-	fflush(g_macos_frame_pipeline_trace);
+	if (!u_timing_trace_fully_buffered()) {
+		fflush(g_macos_frame_pipeline_trace);
+	}
 	return g_macos_frame_pipeline_trace;
 }
 
@@ -175,7 +177,7 @@ macos_frame_pipeline_trace_event(const char *event,
 	        (long long)point_ns, (long long)wake_time_ns, (long long)desired_present_ns,
 	        (long long)predicted_display_ns, (long long)present_slop_ns);
 	g_macos_frame_pipeline_trace_rows++;
-	if (g_macos_frame_pipeline_trace_rows % 512 == 0) {
+	if (!u_timing_trace_fully_buffered() && (g_macos_frame_pipeline_trace_rows % 512 == 0)) {
 		fflush(file);
 	}
 	funlockfile(file);

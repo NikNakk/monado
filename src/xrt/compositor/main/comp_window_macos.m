@@ -24,7 +24,9 @@
 #include "main/comp_window_macos_hosted.h"
 #include "util/u_misc.h"
 #include "util/u_pacing.h"
+#include "util/u_thread_priority.h"
 #include "vk/vk_image_allocator.h"
+#include "vk/vk_compositor_flags.h"
 
 #include <dispatch/dispatch.h>
 #include <inttypes.h>
@@ -111,8 +113,8 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_refresh_rate_hz, "XRT_MACOS_REFRESH_RATE_HZ", 0)
-// Vblank timing source: "cv" (CVDisplayLink, the default) or "ca" (CADisplayLink, macOS 14+).
-DEBUG_GET_ONCE_OPTION(macos_display_link, "XRT_MACOS_DISPLAY_LINK", "cv")
+// Vblank timing source: "ca" (default, macOS 14+) or "cv" (legacy fallback).
+DEBUG_GET_ONCE_OPTION(macos_display_link, "XRT_MACOS_DISPLAY_LINK", "ca")
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASSTHROUGH_BRIGHTNESS_PERCENT", 160)
@@ -120,9 +122,9 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASST
 /*
  * CVDisplayLink is deprecated from macOS 15 in favour of CADisplayLink
  * (-[NSScreen displayLinkWithTarget:selector:]). Pacing and present timing
- * were validated on the PS VR2 with CVDisplayLink, so it stays the default
- * until XRT_MACOS_DISPLAY_LINK=ca (CADisplayLink, below) has been compared
- * with it on the headset.
+ * were compared on the PS VR2 in native and heavy Unreal/Game Mode runs.
+ * CADisplayLink is the default; XRT_MACOS_DISPLAY_LINK=cv retains the legacy
+ * path, also used when CADisplayLink is unavailable.
  */
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -189,6 +191,8 @@ struct comp_window_macos
 	atomic_uint_fast64_t latest_displaylink_now_ns;
 	atomic_uint_fast64_t latest_displaylink_output_ns;
 	atomic_uint_fast64_t latest_displaylink_callback_ns;
+	//! CADisplayLink's timestamp-to-target interval, consumed on the compositor thread.
+	atomic_int_fast64_t latest_displaylink_period_ns;
 	atomic_int_fast64_t host_to_monotonic_offset_ns;
 	atomic_int_fast64_t latest_observed_present_offset_ns;
 	atomic_uint_fast64_t present_offset_sample_serial;
@@ -209,7 +213,7 @@ struct comp_window_macos
 	uint64_t present_missed_intervals;
 	uint64_t present_vk_wait_total_ns;
 	uint64_t present_drawable_wait_total_ns;
-	int64_t display_period_ns;
+	atomic_int_fast64_t display_period_ns;
 	uint32_t pixel_width;
 	uint32_t pixel_height;
 	uint32_t next_image;
@@ -217,6 +221,7 @@ struct comp_window_macos
 	FILE *trace_present;
 	FILE *trace_presented;
 	FILE *trace_present_complete;
+	FILE *trace_present_scheduled;
 	FILE *trace_present_worker;
 	FILE *trace_drawable_prefetch;
 	FILE *trace_vblank;
@@ -278,6 +283,10 @@ macos_timing_trace_open(struct comp_window_macos *cwm)
 	    "present_complete",
 	    "frame_id,completion_handler_ns,image_index,timeline_value,status,commit_to_completion_ns,"
 	    "gpu_start_time_s,gpu_end_time_s,shared_event_wait");
+	cwm->trace_present_scheduled = macos_timing_trace_open_file(
+	    "present_scheduled",
+	    "frame_id,scheduled_callback_ns,observer_registered_ns,image_index,timeline_value,status,"
+	    "minimum_duration_us,presents_with_transaction");
 	cwm->trace_present_worker = NULL;
 	if (cwm->present_worker_enabled) {
 		cwm->trace_present_worker = macos_timing_trace_open_file(
@@ -325,6 +334,11 @@ macos_timing_trace_close(struct comp_window_macos *cwm)
 		macos_trace_buffered_fflush(cwm->trace_present_complete);
 		fclose(cwm->trace_present_complete);
 		cwm->trace_present_complete = NULL;
+	}
+	if (cwm->trace_present_scheduled != NULL) {
+		macos_trace_buffered_fflush(cwm->trace_present_scheduled);
+		fclose(cwm->trace_present_scheduled);
+		cwm->trace_present_scheduled = NULL;
 	}
 	if (cwm->trace_present_worker != NULL) {
 		macos_trace_buffered_fflush(cwm->trace_present_worker);
@@ -395,12 +409,15 @@ derive_last_vblank_ns(struct comp_window_macos *cwm, uint64_t output_ns, uint64_
 
 /*!
  * One vblank from whichever display link is in use. Host times are in
- * nanoseconds of mach_absolute_time, zero if unknown: @p now_host_ns is the
- * vblank that has just happened and @p output_host_ns when the next frame
- * will be shown.
+ * nanoseconds of mach_absolute_time, zero if unknown. For CA, @p now_host_ns
+ * identifies the previous refresh (@p now_is_vblank); CV supplies its current
+ * host time instead. @p output_host_ns identifies the upcoming output.
  */
 static void
-macos_display_link_tick(struct comp_window_macos *cwm, uint64_t now_host_ns, uint64_t output_host_ns)
+macos_display_link_tick(struct comp_window_macos *cwm,
+                        uint64_t now_host_ns,
+                        uint64_t output_host_ns,
+                        bool now_is_vblank)
 {
 	int64_t offset_ns = refresh_host_to_monotonic_offset_ns(cwm);
 	uint64_t callback_ns = (uint64_t)os_monotonic_get_ns();
@@ -419,7 +436,10 @@ macos_display_link_tick(struct comp_window_macos *cwm, uint64_t now_host_ns, uin
 	}
 
 	if (output_ns != 0) {
-		uint64_t last_vblank_ns = derive_last_vblank_ns(cwm, output_ns, now_ns);
+		// CA's timestamp already identifies the previous refresh. Projecting its target
+		// with a rounded mode period (120 Hz vs actual 119.88 Hz) subtracts two periods.
+		uint64_t last_vblank_ns =
+		    now_is_vblank && now_host_ns != 0 ? now_ns : derive_last_vblank_ns(cwm, output_ns, now_ns);
 		atomic_store_explicit(&cwm->latest_vblank_ns, last_vblank_ns, memory_order_release);
 	}
 	atomic_store_explicit(&cwm->latest_displaylink_callback_ns, callback_ns, memory_order_release);
@@ -446,7 +466,7 @@ display_link_callback(CVDisplayLinkRef display_link,
 	if ((in_output_time->flags & kCVTimeStampHostTimeValid) != 0) {
 		output_host_ns = host_time_to_ns(cwm, in_output_time->hostTime);
 	}
-	macos_display_link_tick(cwm, now_host_ns, output_host_ns);
+	macos_display_link_tick(cwm, now_host_ns, output_host_ns, false);
 	return kCVReturnSuccess;
 }
 
@@ -470,6 +490,10 @@ API_AVAILABLE(macos(14.0))
 	BOOL _created;
 	BOOL _stop;
 	uint64_t _tickCount;
+	FILE *_callbackTrace;
+	uint64_t _traceRows;
+	uint64_t _previousCallbackNS;
+	uint64_t _previousTimestampNS;
 }
 - (instancetype)initWithWindow:(struct comp_window_macos *)cwm displayID:(CGDirectDisplayID)displayID;
 - (BOOL)isRunning;
@@ -528,6 +552,17 @@ API_AVAILABLE(macos(14.0))
 			[_link addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
 			_created = YES;
 		}
+		if (_created && u_timing_trace_enabled()) {
+			_callbackTrace = u_timing_trace_open("ca_callback", 128 * 1024);
+			if (_callbackTrace != NULL) {
+				fputs(
+				    "sample,callback_entry_ns,callback_exit_ns,timestamp_ns,target_timestamp_ns,"
+				    "callback_interval_ns,timestamp_interval_ns,frame_executed,frame_begin_ns,frame_"
+				    "end_ns,"
+				    "callback_minus_timestamp_ns,remaining_to_target_ns\n",
+				    _callbackTrace);
+			}
+		}
 		dispatch_semaphore_signal(_ready);
 
 		while (_created && !_stop) {
@@ -538,19 +573,58 @@ API_AVAILABLE(macos(14.0))
 		}
 
 		[_link invalidate];
+		if (_callbackTrace != NULL) {
+			fflush(_callbackTrace);
+			fclose(_callbackTrace);
+			_callbackTrace = NULL;
+		}
 	}
 	dispatch_semaphore_signal(_finished);
 }
 
 - (void)tick:(CADisplayLink *)link
 {
+	uint64_t entry_ns = os_monotonic_get_ns();
 	_tickCount++;
 
 	// Both are in seconds of mach_absolute_time, like CACurrentMediaTime().
 	const CFTimeInterval now_s = link.timestamp;
 	const CFTimeInterval output_s = link.targetTimestamp;
-	macos_display_link_tick(_cwm, now_s > 0.0 ? (uint64_t)(now_s * (double)U_TIME_1S_IN_NS) : 0,
-	                        output_s > 0.0 ? (uint64_t)(output_s * (double)U_TIME_1S_IN_NS) : 0);
+	const uint64_t now_ns = now_s > 0.0 ? (uint64_t)llround(now_s * (double)U_TIME_1S_IN_NS) : 0;
+	const uint64_t output_ns = output_s > 0.0 ? (uint64_t)llround(output_s * (double)U_TIME_1S_IN_NS) : 0;
+	const int64_t nominal_period_ns = _cwm->display_period_ns;
+	if (now_ns != 0 && output_ns > now_ns && nominal_period_ns > 0) {
+		const uint64_t period_ns = output_ns - now_ns;
+		// A callback rate divisor or a discontinuity must not change the physical
+		// refresh period. Accept only small corrections to the selected display mode.
+		if (period_ns > (uint64_t)nominal_period_ns * 9 / 10 &&
+		    period_ns < (uint64_t)nominal_period_ns * 11 / 10) {
+			atomic_store_explicit(&_cwm->latest_displaylink_period_ns, (int64_t)period_ns,
+			                      memory_order_release);
+		}
+	}
+	macos_display_link_tick(_cwm, now_ns, output_ns, true);
+
+	uint64_t exit_ns = os_monotonic_get_ns();
+	if (_callbackTrace != NULL) {
+		// Host timestamps and callback times use different clock domains: map explicitly.
+		int64_t offset_ns = atomic_load_explicit(&_cwm->host_to_monotonic_offset_ns, memory_order_acquire);
+		uint64_t timestamp_ns = host_ns_to_monotonic_ns(now_ns, offset_ns);
+		uint64_t target_ns = host_ns_to_monotonic_ns(output_ns, offset_ns);
+		fprintf(_callbackTrace, "%llu,%llu,%llu,%llu,%llu,%llu,%llu,%u,%llu,%llu,%lld,%lld\n",
+		        (unsigned long long)++_traceRows, (unsigned long long)entry_ns, (unsigned long long)exit_ns,
+		        (unsigned long long)timestamp_ns, (unsigned long long)target_ns,
+		        (unsigned long long)(_previousCallbackNS != 0 ? entry_ns - _previousCallbackNS : 0),
+		        (unsigned long long)(_previousTimestampNS != 0 ? timestamp_ns - _previousTimestampNS : 0), 0u,
+		        0ull, 0ull, (long long)((int64_t)entry_ns - (int64_t)timestamp_ns),
+		        (long long)((int64_t)target_ns - (int64_t)exit_ns));
+		if (!u_timing_trace_fully_buffered() && (_traceRows % 256) == 0) {
+			fflush(_callbackTrace);
+		}
+	}
+	_previousCallbackNS = entry_ns;
+	_previousTimestampNS = host_ns_to_monotonic_ns(
+	    now_ns, atomic_load_explicit(&_cwm->host_to_monotonic_offset_ns, memory_order_acquire));
 }
 
 - (void)applyPaused:(NSNumber *)paused
@@ -568,7 +642,7 @@ API_AVAILABLE(macos(14.0))
 	if (_tickCount == 0 && !_link.paused && !_stop) {
 		U_LOG_W(
 		    "CADisplayLink has not fired in its first second (is the display asleep?); pacing is "
-		    "running on estimates. Unset XRT_MACOS_DISPLAY_LINK to use CVDisplayLink.");
+		    "running on estimates. Set XRT_MACOS_DISPLAY_LINK=cv to use CVDisplayLink.");
 	} else if (!_stop) {
 		U_LOG_I("CADisplayLink fired %llu times in its first second", (unsigned long long)_tickCount);
 	}
@@ -1540,6 +1614,7 @@ comp_window_macos_create_images(struct comp_target *ct,
 	ct->width = cwm->pixel_width;
 	ct->height = cwm->pixel_height;
 	ct->format = VK_FORMAT_B8G8R8A8_UNORM;
+	ct->image_usage = vk_csci_get_image_usage_flags(&ct->c->base.vk, (VkFormat)info.format, info.bits);
 	ct->final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	// Same as comp_target_swapchain: the graphics path clears the target.
 	ct->present_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -1609,6 +1684,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	uint64_t timeline_semaphore_value = job->timeline_value;
 	int64_t desired_present_time_ns = job->desired_present_time_ns;
 	int64_t present_slop_ns = job->present_slop_ns;
+	u_timing_trace_poll_flush_request();
 	uint64_t worker_start_ns = os_monotonic_get_ns();
 	uint64_t next_drawable_begin_ns = 0;
 	uint64_t after_drawable_ns = 0;
@@ -1883,6 +1959,28 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		  macos_release_source_image(cwm, traced_index);
 		  dispatch_group_leave(command_group);
 		}];
+		/* Passive observer of Metal scheduling. The timed-present convenience
+		 * method has its own scheduled handler; this is not a timestamp of
+		 * that private handler or of WindowServer accepting the drawable. */
+		FILE *scheduled_trace = cwm->trace_present_scheduled;
+		if (scheduled_trace != NULL) {
+			uint64_t registered_ns = os_monotonic_get_ns();
+			uint64_t minimum_duration_us = macos_present_min_duration_us();
+			bool presents_with_transaction = [cwm->metal_layer presentsWithTransaction];
+			dispatch_group_enter(command_group);
+			[command_buffer addScheduledHandler:^(id<MTLCommandBuffer> scheduled_buffer) {
+			  uint64_t scheduled_ns = os_monotonic_get_ns();
+			  flockfile(scheduled_trace);
+			  fprintf(scheduled_trace, "%llu,%llu,%llu,%u,%llu,%lu,%llu,%u\n",
+				  (unsigned long long)traced_frame_id, (unsigned long long)scheduled_ns,
+				  (unsigned long long)registered_ns, traced_index,
+				  (unsigned long long)traced_timeline_value, (unsigned long)[scheduled_buffer status],
+				  (unsigned long long)minimum_duration_us, presents_with_transaction ? 1u : 0u);
+			  macos_trace_buffered_fflush(scheduled_trace);
+			  funlockfile(scheduled_trace);
+			  dispatch_group_leave(command_group);
+			}];
+		}
 		[command_buffer commit];
 		after_commit_ns = os_monotonic_get_ns();
 		after_metal_wait_ns = after_commit_ns;
@@ -2191,6 +2289,17 @@ static VkResult
 comp_window_macos_update_timings(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	int64_t observed_period_ns = atomic_load_explicit(&cwm->latest_displaylink_period_ns, memory_order_acquire);
+	// Ignore nanosecond conversion noise, and update the existing pacer so outstanding
+	// frame IDs and feedback remain valid. The presentation worker reads this atomically.
+	if (observed_period_ns > 0 && llabs(observed_period_ns - cwm->display_period_ns) > 100 &&
+	    cwm->base.upc != NULL) {
+		u_pc_fake_set_frame_period(cwm->base.upc, observed_period_ns);
+		cwm->display_period_ns = observed_period_ns;
+		ct->c->frame_interval_ns = observed_period_ns;
+		COMP_INFO(ct->c, "CADisplayLink measured display period %.6fms (%.3f Hz)",
+		          (double)observed_period_ns / 1000000.0, (double)U_TIME_1S_IN_NS / observed_period_ns);
+	}
 	macos_schedule_drawable_slot(cwm);
 	uint64_t vblank_ns = atomic_exchange_explicit(&cwm->latest_vblank_ns, 0, memory_order_acquire);
 	uint64_t displaylink_now_host_ns =
@@ -2761,6 +2870,7 @@ macos_recreate_display_link(struct comp_window_macos *cwm, CGDirectDisplayID dis
 	atomic_store_explicit(&cwm->latest_displaylink_now_ns, 0, memory_order_release);
 	atomic_store_explicit(&cwm->latest_displaylink_output_ns, 0, memory_order_release);
 	atomic_store_explicit(&cwm->latest_displaylink_callback_ns, 0, memory_order_release);
+	atomic_store_explicit(&cwm->latest_displaylink_period_ns, 0, memory_order_release);
 	cwm->last_vblank_ns = 0;
 	cwm->cadence_sample_count = 0;
 	cwm->cadence_total_ns = 0;

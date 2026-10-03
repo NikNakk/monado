@@ -449,6 +449,14 @@ pc_destroy(struct u_pacing_compositor *upc)
 	free(ft);
 }
 
+void
+u_pc_fake_set_frame_period(struct u_pacing_compositor *upc, int64_t frame_period_ns)
+{
+	assert(upc != NULL && upc->predict == pc_predict);
+	assert(frame_period_ns > 0);
+	fake_timing(upc)->frame_period_ns = frame_period_ns;
+}
+
 
 /*
  *

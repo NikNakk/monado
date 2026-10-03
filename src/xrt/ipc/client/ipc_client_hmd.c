@@ -29,6 +29,7 @@
 
 #ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
 #include "client/ipc_client_passthrough.h"
+#include "client/ipc_client_tracking_share.h"
 #endif
 
 #include <math.h>
@@ -161,6 +162,18 @@ ipc_client_hmd_get_view_poses(struct xrt_device *xdev,
 		return XRT_ERROR_IPC_FAILURE;
 	}
 
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	float ipd_m = 0;
+	if (view_count == 2 && ipc_client_tracking_share_pose(ich, at_timestamp_ns, out_head_relation, &ipd_m)) {
+		struct xrt_vec3 eye_relation = *default_eye_relation;
+		eye_relation.x = ipd_m;
+		for (uint32_t i = 0; i < view_count; ++i) {
+			out_fovs[i] = xdev->hmd->distortion.fov[i];
+			u_device_get_view_pose(&eye_relation, i, &out_poses[i]);
+		}
+		return XRT_SUCCESS;
+	}
+#endif
 	// Fast path.
 	if (view_count == 2) {
 		struct ipc_info_get_view_poses_2 info = {0};
@@ -410,6 +423,7 @@ ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 	}
 
 #ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	ipc_client_tracking_share_create(ich);
 	// Passthrough, if the service's compositor has camera frames to share.
 	if (ism->hmd.passthrough_share_available != 0) {
 		xdev->set_passthrough_sinks = ipc_client_hmd_set_passthrough_sinks;
@@ -558,6 +572,7 @@ ipc_client_hmd_destroy(struct xrt_device *xdev)
 
 #ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
 	ipc_client_passthrough_destroy(&ich->passthrough);
+	ipc_client_tracking_share_destroy(&ich->tracking_share);
 #endif
 
 	// Free and de-init the shared things.

@@ -903,6 +903,7 @@ comp_target_swapchain_create_images(struct comp_target *ct,
 	cts->base.width = extent.width;
 	cts->base.height = extent.height;
 	cts->base.format = cts->surface.format.format;
+	cts->base.image_usage = create_info->image_usage;
 	cts->base.final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	cts->base.surface_transform = surface_caps.currentTransform;
 	cts->base.present_load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;

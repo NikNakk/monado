@@ -30,6 +30,7 @@
 #include "math/m_space.h"
 
 #include "tracking/t_dead_reckoning.h"
+#include "psvr2_tracking_share.h"
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
@@ -168,7 +169,10 @@ static struct psvr2_timing_trace_state g_psvr2_timing_trace;
 static FILE *
 psvr2_timing_trace_open_file(const char *suffix, const char *header)
 {
-	FILE *file = u_timing_trace_open(suffix, 64 * 1024);
+	// At 2 kHz, raw IMU CSVs can exceed 16 MiB during a one-minute capture.
+	size_t buffer_size =
+	    u_timing_trace_fully_buffered() && strcmp(suffix, "imu") == 0 ? 64u * 1024u * 1024u : 64u * 1024u;
+	FILE *file = u_timing_trace_open(suffix, buffer_size);
 	if (file == NULL) {
 		return NULL;
 	}
@@ -193,7 +197,7 @@ psvr2_timing_trace_open(void)
 	    "imu",
 	    "host_estimated_sample_ns,vts_ns,imu_ns,vts_mapped_host_ns,imu_mapped_host_ns,vts_us,imu_ts_us,"
 	    "dp_frame_cnt,dp_line_cnt,status,hw2mono_vts_ns,hw2mono_imu_ns,gyro_x,gyro_y,gyro_z,accel_x,accel_y,"
-	    "accel_z");
+	    "accel_z,host_callback_ns");
 	g_psvr2_timing_trace.slam = psvr2_timing_trace_open_file(
 	    "slam",
 	    "host_received_ns,slam_vts_ns,slam_mapped_host_ns,latest_imu_vts_ns,latest_imu_mapped_host_ns,"
@@ -283,11 +287,12 @@ psvr2_timing_trace_imu(struct psvr2_hmd *hmd,
 
 	fprintf(file,
 	        "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%u,%u,%u,%u,%u,%" PRIi64 ",%" PRIi64
-	        ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
+	        ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%" PRIi64 "\n",
 	        (int64_t)estimated_sample_time, (int64_t)vts_ns, (int64_t)imu_ns, (int64_t)(vts_ns + hmd->hw2mono_vts),
 	        (int64_t)(imu_ns + hmd->hw2mono_imu), imu->vts_us, imu->imu_ts_us, imu->dp_frame_cnt, imu->dp_line_cnt,
 	        imu->status, (int64_t)hmd->hw2mono_vts, (int64_t)hmd->hw2mono_imu, hmd->last_gyro.x, hmd->last_gyro.y,
-	        hmd->last_gyro.z, hmd->last_accel.x, hmd->last_accel.y, hmd->last_accel.z);
+	        hmd->last_gyro.z, hmd->last_accel.x, hmd->last_accel.y, hmd->last_accel.z,
+	        hmd->tracking_imu_received_ns);
 	g_psvr2_timing_trace.imu_rows++;
 	psvr2_timing_trace_maybe_flush(file, g_psvr2_timing_trace.imu_rows, 2048);
 }
@@ -688,6 +693,59 @@ psvr2_hmd_update_inputs(struct xrt_device *xdev)
 	return XRT_SUCCESS;
 }
 
+#ifdef XRT_OS_OSX
+/* Caller holds data_lock. One publication per USB batch or SLAM record. */
+static void
+psvr2_publish_tracking_locked(struct psvr2_hmd *hmd)
+{
+	if (hmd->tracking_share == NULL)
+		return;
+	struct psvr2_tracking_snapshot snapshot = {0};
+	struct psvr2_tracking_state *s = &snapshot.state;
+	s->ready = hmd->timestamp_samples >= TIMESTAMP_SAMPLES &&
+	           m_relation_history_get_latest(hmd->slam_relation_history, &s->slam_ns, &s->relation);
+	s->hw2mono_vts = hmd->hw2mono_vts;
+	s->published_ns = os_monotonic_get_ns();
+	s->imu_received_ns = hmd->tracking_imu_received_ns;
+	s->imu_estimated_ns = hmd->tracking_imu_estimated_ns;
+	s->slam_received_ns = hmd->tracking_slam_received_ns;
+	s->last_gyro = hmd->last_gyro;
+	s->T_imu_head = hmd->T_imu_head;
+	s->recenter_transform = hmd->recenter_transform;
+	s->recenter_on_first_pose = hmd->recenter_on_first_pose;
+	s->recenter_initialized = hmd->recenter_initialized;
+	s->ipd_m = hmd->ipd_mm ? hmd->ipd_mm / 1000.0f : hmd->info.lens_horizontal_separation_meters;
+	s->linear_prediction = hmd->linear_prediction;
+	s->linear_prediction_params = hmd->linear_prediction_params;
+	s->continuity_prediction = hmd->continuity_prediction;
+	s->continuity_params = hmd->continuity_params;
+	s->acceleration_prediction_enabled = hmd->acceleration_prediction_enabled;
+	s->continuity_prediction_enabled = hmd->continuity_prediction_enabled;
+	for (uint32_t i = 0; i < PSVR2_TRACKING_GYRO_CAPACITY; ++i) {
+		if (!m_ff_vec3_f32_get(hmd->ff_gyro, i, &snapshot.gyro[i].value, &snapshot.gyro[i].timestamp_ns))
+			break;
+		snapshot.gyro_count++;
+		// Keep one older sample as well, so the predictor finds the same boundary.
+		if ((int64_t)snapshot.gyro[i].timestamp_ns < s->slam_ns)
+			break;
+	}
+	psvr2_tracking_share_publish(hmd->tracking_share, &snapshot);
+}
+
+bool
+psvr2_set_tracking_share(struct xrt_device *xdev, struct psvr2_tracking_share *share)
+{
+	if (xdev == NULL || xdev->name != XRT_DEVICE_PSVR2)
+		return false;
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	os_mutex_lock(&hmd->data_lock);
+	hmd->tracking_share = share;
+	psvr2_publish_tracking_locked(hmd);
+	os_mutex_unlock(&hmd->data_lock);
+	return true;
+}
+#endif
+
 static void
 hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd,
                          timepoint_ns at_timestamp_ns,
@@ -749,51 +807,19 @@ hmd_get_raw_tracker_pose(struct psvr2_hmd *hmd,
 		}
 	}
 
-	// Status and SLAM transfers are independent. A pose query can arrive after a
-	// new SLAM pose but just before the next status packet, leaving no gyro sample
-	// newer than the pose. Seed prediction with the most recent high-rate gyro in
-	// that case instead of relying on noisier velocity estimated from 60 Hz SLAM.
-	math_quat_rotate_derivative(&latest_relation.pose.orientation, &hmd->last_gyro,
-	                            &latest_relation.angular_velocity);
-	latest_relation.relation_flags = (enum xrt_space_relation_flags)(latest_relation.relation_flags |
-	                                                                 XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
-
-	// Predict forward using dead reckoning
-	if (!t_apply_dead_reckoning( //
-	        hmd->ff_gyro,        //
-	        NULL,                //
-	        NULL,                //
-	        at_timestamp_ns,     //
-	        &latest_relation,    //
-	        latest_relation_ts,  //
-	        out_relation)) {
-		// If dead reckoning fails, return the latest SLAM pose
-		*out_relation = latest_relation;
-	}
-
-	// Gyro-only dead reckoning advances integ_rel_ts without advancing position,
-	// so predict linear motion over the complete SLAM->target interval.
-	if ((latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
-	    (latest_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
-		float dt = (float)((double)(at_timestamp_ns - latest_relation_ts) * 1e-9);
-		out_relation->pose.position =
-		    (struct xrt_vec3){latest_relation.pose.position.x + latest_relation.linear_velocity.x * dt,
-		                      latest_relation.pose.position.y + latest_relation.linear_velocity.y * dt,
-		                      latest_relation.pose.position.z + latest_relation.linear_velocity.z * dt};
-		out_relation->linear_velocity = latest_relation.linear_velocity;
-	}
-
-	if (hmd->acceleration_prediction_enabled && hmd->linear_prediction.timestamp_ns == latest_relation_ts &&
-	    (latest_relation.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0 &&
-	    (latest_relation.relation_flags & XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT) != 0) {
-		psvr2_linear_predict(&hmd->linear_prediction, &hmd->linear_prediction_params, at_timestamp_ns,
-		                     &out_relation->pose.position, &out_relation->linear_velocity);
-		if (hmd->continuity_prediction_enabled && hmd->continuity_prediction.source_ns == latest_relation_ts) {
-			psvr2_continuity_predict(&hmd->continuity_prediction, &hmd->continuity_params, at_timestamp_ns,
-			                         query_host_ns, &out_relation->pose.position,
-			                         &out_relation->linear_velocity);
-		}
-	}
+	struct psvr2_tracking_state state = {
+	    .relation = latest_relation,
+	    .slam_ns = latest_relation_ts,
+	    .hw2mono_vts = hmd->hw2mono_vts,
+	    .last_gyro = hmd->last_gyro,
+	    .linear_prediction = hmd->linear_prediction,
+	    .linear_prediction_params = hmd->linear_prediction_params,
+	    .continuity_prediction = hmd->continuity_prediction,
+	    .continuity_params = hmd->continuity_params,
+	    .acceleration_prediction_enabled = hmd->acceleration_prediction_enabled,
+	    .continuity_prediction_enabled = hmd->continuity_prediction_enabled,
+	};
+	psvr2_tracking_predict_raw(&state, hmd->ff_gyro, at_timestamp_ns, query_host_ns, out_relation);
 }
 
 static void
@@ -848,6 +874,9 @@ psvr2_apply_first_pose_recenter(struct psvr2_hmd *hmd, struct xrt_space_relation
 	}
 	transform = hmd->recenter_transform;
 	bool initialized = hmd->recenter_initialized;
+#ifdef XRT_OS_OSX
+	psvr2_publish_tracking_locked(hmd);
+#endif
 	os_mutex_unlock(&hmd->data_lock);
 
 	if (!initialized) {
@@ -1020,6 +1049,9 @@ process_imu_record(struct psvr2_hmd *hmd, size_t index, struct imu_usb_record *i
 	hmd->last_imu_vts_ns += (timepoint_ns)imu_vts_delta_us * U_TIME_1US_IN_NS;
 	hmd->last_imu_ns += (timepoint_ns)imu_delta_us * U_TIME_1US_IN_NS;
 
+#ifdef XRT_OS_OSX
+	hmd->tracking_imu_estimated_ns = estimated_sample_time;
+#endif
 	const timepoint_ns now_vts = hmd->last_imu_vts_ns;
 	const timepoint_ns now_imu = hmd->last_imu_ns;
 
@@ -1067,6 +1099,10 @@ process_status_report(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timep
 	uint8_t *cur = buf + sizeof(struct status_record_hdr);
 	uint8_t *end = buf + bytes_read;
 	size_t num_imu_samples = (size_t)(end - cur) / sizeof(struct imu_usb_record);
+#ifdef XRT_OS_OSX
+	if (num_imu_samples > 0)
+		hmd->tracking_imu_received_ns = received_ns;
+#endif
 	while (cur < end && i < num_imu_samples) {
 		struct imu_usb_record imu;
 		memcpy(&imu, cur, sizeof(struct imu_usb_record));
@@ -1124,6 +1160,9 @@ status_xfer_cb(struct libusb_transfer *xfer)
 		PSVR2_TRACE_HEX(hmd, xfer->buffer, xfer->actual_length);
 
 		process_status_report(hmd, xfer->buffer, xfer->actual_length, received_ns);
+#ifdef XRT_OS_OSX
+		psvr2_publish_tracking_locked(hmd);
+#endif
 	}
 
 	libusb_submit_transfer(xfer);
@@ -1284,6 +1323,9 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 
 	os_mutex_lock(&hmd->data_lock);
 
+#ifdef XRT_OS_OSX
+	hmd->tracking_slam_received_ns = received_ns;
+#endif
 	const struct xrt_quat old_pose_orientation = hmd->last_slam_pose.orientation;
 
 	uint32_t last_slam_vts_us = hmd->last_slam_vts_us;
@@ -1393,6 +1435,9 @@ process_slam_record(struct psvr2_hmd *hmd, uint8_t *buf, int bytes_read, timepoi
 	}
 #endif
 
+#ifdef XRT_OS_OSX
+	psvr2_publish_tracking_locked(hmd);
+#endif
 	os_mutex_unlock(&hmd->data_lock);
 }
 

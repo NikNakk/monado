@@ -18,12 +18,17 @@
 #include "vk/vk_mini_helpers.h"
 
 #include "render/render_interface.h"
+#include "util/u_debug.h"
 
 #include "cache/render_compute_pipeline_cache.h"
 #include "cache/render_shader_specialization_helpers.h"
 
 
 #include <stdio.h>
+
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+#endif
 
 
 /*
@@ -543,31 +548,33 @@ render_resources_init(struct render_resources *r,
 	VK_NAME_COMMAND_POOL(vk, r->cmd_pool, "render_resources command pool");
 
 #ifdef XRT_OS_OSX
-	for (uint32_t i = 0; i < r->view_count; ++i) {
+	if (debug_get_bool_option_log_apple_samples()) {
+		for (uint32_t i = 0; i < r->view_count; ++i) {
+			ret = render_buffer_init(                                                          //
+			    vk,                                                                            //
+			    &r->apple_source_debug.buffers[i],                                             //
+			    VK_BUFFER_USAGE_TRANSFER_DST_BIT,                                              //
+			    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |                                          //
+			        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, //
+			    8);                                                                            //
+			VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+
+			ret = render_buffer_map(vk, &r->apple_source_debug.buffers[i]);
+			VK_CHK_WITH_RET(ret, "render_buffer_map", false);
+		}
+
 		ret = render_buffer_init(                                                          //
 		    vk,                                                                            //
-		    &r->apple_source_debug.buffers[i],                                             //
+		    &r->apple_target_debug.buffer,                                                 //
 		    VK_BUFFER_USAGE_TRANSFER_DST_BIT,                                              //
 		    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |                                          //
 		        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, //
-		    8);                                                                            //
+		    12);                                                                           //
 		VK_CHK_WITH_RET(ret, "render_buffer_init", false);
 
-		ret = render_buffer_map(vk, &r->apple_source_debug.buffers[i]);
+		ret = render_buffer_map(vk, &r->apple_target_debug.buffer);
 		VK_CHK_WITH_RET(ret, "render_buffer_map", false);
 	}
-
-	ret = render_buffer_init(                                                          //
-	    vk,                                                                            //
-	    &r->apple_target_debug.buffer,                                                 //
-	    VK_BUFFER_USAGE_TRANSFER_DST_BIT,                                              //
-	    VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |                                          //
-	        VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT, //
-	    12);                                                                           //
-	VK_CHK_WITH_RET(ret, "render_buffer_init", false);
-
-	ret = render_buffer_map(vk, &r->apple_target_debug.buffer);
-	VK_CHK_WITH_RET(ret, "render_buffer_map", false);
 #endif
 
 

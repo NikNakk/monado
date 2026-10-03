@@ -78,15 +78,9 @@ get_image_memory_handle_type(void)
 static bool
 use_external_memory_handles(void)
 {
-#if defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
-	// macOS can still compile through the FD handle path in some configurations,
-	// but the current Apple backend does not support exporting swapchain images
-	// through that handle type. Allow native compositor allocations to proceed
-	// without external-memory export metadata.
-	return false;
-#elif defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
-	// The macOS graphics buffer handle model is now IOSurface-based, but Vulkan shared-image import/export is not
-	// wired up yet. Native compositor allocations can still proceed without external-memory export metadata.
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	// IOSurfaces are shared through VK_EXT_metal_objects rather than Vulkan
+	// external-memory FD/Win32 export metadata.
 	return false;
 #else
 	return true;
@@ -748,13 +742,6 @@ vk_ic_get_handles(struct vk_bundle *vk,
                   uint32_t max_handles,
                   xrt_graphics_buffer_handle_t *out_handles)
 {
-#if defined(XRT_OS_OSX) && defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_FD)
-	for (size_t i = 0; i < vkic->image_count && i < max_handles; i++) {
-		out_handles[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
-	}
-	return VK_SUCCESS;
-#endif
-
 #if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
 	if (vkic->info.array_size > 1 || (vkic->info.bits & XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL) != 0) {
 		// IOSurface-backed Metal textures must be ordinary color 2D textures.

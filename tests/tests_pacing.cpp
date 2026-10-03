@@ -402,3 +402,29 @@ TEST_CASE("u_pacing_compositor_fake")
 	}
 	u_pc_destroy(&upc);
 }
+
+TEST_CASE("Fake pacer refines refresh period without resetting outstanding frame IDs")
+{
+	struct u_pacing_compositor *upc = nullptr;
+	const int64_t now_ns = 1000000000;
+	REQUIRE(u_pc_fake_create(8333333, now_ns, &upc) == XRT_SUCCESS);
+	CompositorPredictions before, after;
+	auto predict = [&](CompositorPredictions &p) {
+		u_pc_predict(upc, now_ns, &p.frame_id, &p.wake_up_time_ns, &p.desired_present_time_ns,
+		             &p.present_slop_ns, &p.predicted_display_time_ns, &p.predicted_display_period_ns,
+		             &p.min_display_period_ns);
+	};
+	predict(before);
+	u_pc_update_present_offset(upc, before.frame_id, 25000000);
+	u_pc_update_vblank_from_display_control(upc, now_ns);
+	u_pc_fake_set_frame_period(upc, 8341708);
+	predict(after);
+	CHECK(after.frame_id == before.frame_id + 1);
+	CHECK(after.predicted_display_period_ns == 8341708);
+	CHECK(after.min_display_period_ns == 8341708);
+	CHECK(after.predicted_display_time_ns - after.desired_present_time_ns == 25000000);
+	CHECK((after.desired_present_time_ns - now_ns) % 8341708 == 0);
+	// Feedback for the frame predicted before refinement must still be accepted.
+	u_pc_mark_point(upc, U_TIMING_POINT_WAKE_UP, before.frame_id, before.wake_up_time_ns);
+	u_pc_destroy(&upc);
+}

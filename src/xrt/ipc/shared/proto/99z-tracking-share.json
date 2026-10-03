@@ -1,0 +1,29 @@
+{
+    "$schema": "../proto.schema.json",
+    "device_tracking_share_get": {
+        "ifdef": "__APPLE__",
+        "in": [
+            {
+                "name": "id",
+                "type": "uint32_t"
+            },
+            {
+                "name": "version",
+                "type": "uint32_t"
+            },
+            {
+                "name": "expected_size",
+                "type": "uint64_t"
+            }
+        ],
+        "out": [
+            {
+                "name": "size",
+                "type": "uint64_t"
+            }
+        ],
+        "out_handles": {
+            "type": "xrt_shmem_handle_t"
+        }
+    }
+}

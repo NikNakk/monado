@@ -775,6 +775,14 @@ xrt_result_t
 u_pc_fake_create(int64_t estimated_frame_period_ns, int64_t now_ns, struct u_pacing_compositor **out_upc);
 
 /*!
+ * Refine the frame period of a fake pacer without discarding outstanding frames,
+ * frame IDs, phase or present-offset feedback. Call on the pacer's owning thread.
+ * The compositor time budget remains unchanged.
+ */
+void
+u_pc_fake_set_frame_period(struct u_pacing_compositor *upc, int64_t frame_period_ns);
+
+/*!
  * Creates a new application pacing factory helper.
  *
  * @ingroup aux_pacing

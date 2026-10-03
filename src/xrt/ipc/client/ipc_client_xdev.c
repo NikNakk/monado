@@ -24,6 +24,9 @@
 #include "client/ipc_client.h"
 #include "client/ipc_client_connection.h"
 #include "client/ipc_client_xdev.h"
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+#include "client/ipc_client_tracking_share.h"
+#endif
 #include "ipc_client_generated.h"
 
 
@@ -89,6 +92,12 @@ ipc_client_xdev_get_tracked_pose(struct xrt_device *xdev,
 {
 	struct ipc_client_xdev *icx = ipc_client_xdev(xdev);
 
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	float ipd_m = 0;
+	if (name == XRT_INPUT_GENERIC_HEAD_POSE &&
+	    ipc_client_tracking_share_pose(icx, at_timestamp_ns, out_relation, &ipd_m))
+		return XRT_SUCCESS;
+#endif
 	xrt_result_t xret = ipc_call_device_get_tracked_pose( //
 	    icx->ipc_c,                                       //
 	    icx->device_id,                                   //
