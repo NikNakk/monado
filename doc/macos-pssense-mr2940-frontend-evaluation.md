@@ -549,6 +549,40 @@ for each pair of runs:
 
 Record the results here, with the commit tested.
 
+**Hardware results (3 Oct, commit `3185a8a4e`, combined calibration, both controllers, the shipped path with
+`PSSENSE_FILTER=1`, world frame).** Sessions `20261003-234218-corr-off-grip` and `20261003-234436-corr-on-grip`: the same
+moves, about 10 s still, then grip and movement with fast turns.
+
+| | right, off | right, on | left, off | left, on |
+|---|---|---|---|---|
+| fused poses | 2681 | **3222 (+20%)** | 1922 | 946 |
+| reprojection p50 / p95 px | 0.567 / 0.862 | **0.326 / 0.704** | 0.367 / 0.610 | 0.313 / 0.534 |
+| position tracked | 82% | **92%** | 59% | 41% |
+| reacquisitions | 16 | 4 | 14 | 20 |
+| locked lit fraction | 0.83 | 0.78 | 0.53 | 0.29 |
+
+- **The correction carries over to a new day.** Replaying the correction-off recording through `--tracker-filter` with
+  the fitted offsets gives, on identical input: right 2734 → 3146 poses (+15%), RMS p50 0.562 → 0.313 px; left
+  1930 → 2023 (+5%), 0.386 → 0.292 px. Offline it had predicted +10% and 0.53 → 0.38 px for the right.
+- **The left's drop is its LED lock, not the correction.** Both of its narrow scans saw a lit window, but one weak
+  step beside the peak cut the lit run to the peak step alone (450 µs). The lock sat at the window's edge, so the
+  ring was lit in 53% and then 29% of frames. Fixed in `t_led_phase_bootstrap` (`narrow_gap_steps`, below).
+- **The ruler test is not needed, and could not resolve the question.** The correction changes tracked distances by
+  only 0.55%: single-controller displacements by 1.0055–1.0059 and the left-to-right separation by 1.0055. The
+  four-camera stereo already fixes most of the scale. Instead, the printed ChArUco board was measured with digital
+  calipers: 3 squares measure 120 mm in both directions, against the solver's assumed 40.0 mm squares. A 1% short
+  print would have measured 118.8 mm. The rig's scale is right, and **the LED model really is about 1% small**.
+  The correction stays, still fitted on one pair of controllers.
+- These recordings are the first with packet 5 records. Of 14386 head poses at exposures, 11532 were predicted about
+  11.5 ms past the newest SLAM pose rather than interpolated.
+
+**LED lock across a weak narrow step.** The narrow scan's lit run now bridges one step below half the peak when a step
+beyond it is lit again (`narrow_gap_steps`, default 1; 0 restores the old rule). Applied to the 3 Oct left scans, it
+would have locked at centres of about 16475 µs and 16600 µs. The right locked at 16350 µs and 16850 µs in the same
+runs, so the two controllers now agree. In simulation, with a seven-step window whose second step is dark, the old rule
+locks more than 500 µs off the exposure centre and the new one within one narrow step
+(`tests_led_phase_bootstrap`).
+
 The scripts and the fitted offsets are in the experiment directory, under `analysis/led/`.
 
 ## Synthetic results

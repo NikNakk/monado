@@ -45,6 +45,10 @@ struct Sim
 	bool push_own = false;
 	//! From this frame on the ring is lit whatever it is told (the always-lit fault); UINT32_MAX never.
 	uint32_t stuck_from_frame = UINT32_MAX;
+	//! The ring stays dark while the applied fudge (wrapped) lies in (dark_from_ns, dark_to_ns]: a step that a hand
+	//! or a turn darkened. Disabled when equal.
+	int64_t dark_from_ns = 0;
+	int64_t dark_to_ns = 0;
 	uint32_t frames_run = 0;
 	uint32_t frames_lit = 0;
 
@@ -57,6 +61,14 @@ struct Sim
 	{
 		if (!visible || blink <= 0) {
 			return false;
+		}
+		if (dark_to_ns != dark_from_ns) {
+			int64_t f = ((fudge % kPeriod) + kPeriod) % kPeriod;
+			int64_t from = ((dark_from_ns % kPeriod) + kPeriod) % kPeriod;
+			int64_t d = ((f - from) % kPeriod + kPeriod) % kPeriod;
+			if (d > 0 && d <= dark_to_ns - dark_from_ns) {
+				return false;
+			}
 		}
 		// Compare in a frame one period either side to handle wrap.
 		for (int k = -1; k <= 1; k++) {
@@ -173,6 +185,43 @@ TEST_CASE("LED phase bootstrap locks the pulse centre onto the exposure centre")
 		sim.run(b, 1000, frame);
 		CHECK(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
 		CHECK(b.locks_acquired == 1);
+	}
+}
+
+TEST_CASE("LED phase bootstrap centres its lock across one dark narrow step")
+{
+	/*
+	 * A lit window about seven narrow steps wide, as on hardware (1.2 ms exposure + 0.45 ms pulse), with the
+	 * second lit step dark. Every lit step scores the same, so the peak is the window's first step, and the old rule
+	 * (stop at the first weak step) locked on that step alone: the window's edge, as the left did on 3 Oct.
+	 */
+	const int64_t latency = 3600000;
+	for (uint32_t gap : {0u, 1u}) {
+		CAPTURE(gap);
+		t_led_phase_bootstrap_options options = test_options();
+		options.narrow_gap_steps = gap;
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+
+		Sim sim{.latency_ns = latency};
+		sim.exposure_ns = 1200000;
+		// Lit starts lie in (-narrow_blink - latency, exposure - latency); darken the second narrow step in it.
+		sim.dark_from_ns = -options.narrow_blink_ns - latency + options.narrow_step_ns;
+		sim.dark_to_ns = sim.dark_from_ns + options.narrow_step_ns;
+		uint32_t frame = 0;
+		sim.run(b, 2000, frame);
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+
+		int64_t pulse_centre = b.fudge_offset_ns + latency + b.blink_ns / 2;
+		int64_t exposure_centre = sim.exposure_start_ns + sim.exposure_ns / 2;
+		int64_t error = circular_distance(pulse_centre, exposure_centre);
+		CAPTURE(error);
+		if (gap == 0) {
+			CHECK(error > 2 * options.narrow_step_ns);
+		} else {
+			CHECK(error <= options.narrow_step_ns);
+		}
 	}
 }
 

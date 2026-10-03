@@ -109,6 +109,13 @@ struct t_led_phase_bootstrap_options
 	 * 1.9-camera peak 600 us late of its true centre and stayed lit in only half its frames.
 	 */
 	float min_lock_peak_score;
+	/*!
+	 * The narrow scan's lit run may bridge this many consecutive steps below half the peak, when a step beyond them
+	 * is lit again. On 3 Oct (234218, 234436) one weak step beside the left's peak (0.75 among 2.2-2.9) cut its run
+	 * to the peak step alone, so it locked at the window's edge and was lit in 29-53% of frames. 0 restores the old
+	 * behaviour.
+	 */
+	uint32_t narrow_gap_steps;
 
 	//! Once locked, rescan after this many exposures without any lit camera frame.
 	uint32_t lost_frames;

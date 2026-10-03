@@ -288,15 +288,20 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		return;
 	}
 
-	// Grow the lit run around the peak while steps stay above half the peak score.
+	// Grow the lit run around the peak while steps stay above half the peak score, bridging up to narrow_gap_steps
+	// weak steps when a lit one follows them.
 	float threshold = 0.5f * peak;
 	uint32_t left = peak_index;
 	uint32_t right = peak_index;
-	while (left > 0 && b->steps[left - 1].score >= threshold) {
-		left--;
+	for (uint32_t i = left; i > 0 && left - (i - 1) <= b->options.narrow_gap_steps + 1; i--) {
+		if (b->steps[i - 1].score >= threshold) {
+			left = i - 1;
+		}
 	}
-	while (right + 1 < n && b->steps[right + 1].score >= threshold) {
-		right++;
+	for (uint32_t i = right + 1; i < n && i - right <= b->options.narrow_gap_steps + 1; i++) {
+		if (b->steps[i].score >= threshold) {
+			right = i;
+		}
 	}
 
 	if (left == 0 || right == n - 1) {
@@ -612,6 +617,7 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .min_blobs_per_camera = 3,
 	    .min_peak_score = 1.0f,
 	    .min_peak_contrast = 0.75f,
+	    .narrow_gap_steps = 1,
 	    .lost_frames = 300,
 	    .failed_backoff_frames = 60,
 	    .max_failed_backoff_frames = 600,
