@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cstring>
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <fstream>
 #include <future>
@@ -398,7 +399,7 @@ static timepoint_ns
 os_monotonic_get_ts()
 {
 	uint64_t uts = os_monotonic_get_ns();
-	EUROC_ASSERT(uts < INT64_MAX, "Timestamp=%" PRId64 " was greater than INT64_MAX=%ld", uts, INT64_MAX);
+	EUROC_ASSERT(uts < INT64_MAX, "Timestamp=%" PRIu64 " was greater than INT64_MAX=%" PRId64, uts, INT64_MAX);
 	int64_t its = uts;
 	return its;
 }
@@ -438,7 +439,7 @@ euroc_player_load_next_frame(struct euroc_player *ep, int cam_index, struct xrt_
 	// Load image from disk
 	timepoint_ns timestamp = euroc_player_mapped_playback_ts(ep, sample.first);
 	string img_name = sample.second;
-	EUROC_TRACE(ep, "cam%d img t = %ld filename = %s", cam_index, timestamp, img_name.c_str());
+	EUROC_TRACE(ep, "cam%d img t = %" PRId64 " filename = %s", cam_index, timestamp, img_name.c_str());
 	cv::ImreadModes read_mode = allow_color ? cv::IMREAD_ANYCOLOR : cv::IMREAD_GRAYSCALE;
 	cv::Mat img = cv::imread(img_name, read_mode); // If colored, reads in BGR order
 
@@ -492,7 +493,7 @@ euroc_player_push_next_frame(struct euroc_player *ep)
 
 	size_t fcount = ep->imgs->at(0).size();
 	(void)snprintf(ep->progress_text, sizeof(ep->progress_text),
-	               "Playback %.2f%% - Frame %" PRId64 "/%" PRId64 " - IMU %" PRId64 "/%" PRId64,
+	               "Playback %.2f%% - Frame %" PRId64 "/%zu - IMU %" PRId64 "/%zu",
 	               float(ep->img_seq) / float(fcount) * 100, ep->img_seq, fcount, ep->imu_seq, ep->imus->size());
 
 	if (ep->playback.print_progress) {
@@ -680,7 +681,8 @@ euroc_player_configure_capture(struct xrt_fs *xfs, struct xrt_fs_capture_paramet
 	static void receive_cam##cam_id(struct xrt_frame_sink *sink, struct xrt_frame *xf)                             \
 	{                                                                                                              \
 		struct euroc_player *ep = container_of(sink, struct euroc_player, cam_sinks[cam_id]);                  \
-		EUROC_TRACE(ep, "cam%d img t=%ld source_t=%ld", cam_id, xf->timestamp, xf->source_timestamp);          \
+		EUROC_TRACE(ep, "cam%d img t=%" PRId64 " source_t=%" PRId64, cam_id, xf->timestamp,                    \
+		            xf->source_timestamp);                                                                     \
 		u_sink_debug_push_frame(&ep->ui_cam_sinks[cam_id], xf);                                                \
 		if (ep->out_sinks.cams[cam_id]) {                                                                      \
 			xrt_sink_push_frame(ep->out_sinks.cams[cam_id], xf);                                           \
@@ -725,7 +727,7 @@ receive_imu_sample(struct xrt_imu_sink *sink, struct xrt_imu_sample *s)
 	m_ff_vec3_f32_push(ep->accel_ff, &accel, ts);
 
 	// Trace log
-	EUROC_TRACE(ep, "imu t=%ld ax=%f ay=%f az=%f wx=%f wy=%f wz=%f", ts, a.x, a.y, a.z, w.x, w.y, w.z);
+	EUROC_TRACE(ep, "imu t=%" PRId64 " ax=%f ay=%f az=%f wx=%f wy=%f wz=%f", ts, a.x, a.y, a.z, w.x, w.y, w.z);
 	if (ep->out_sinks.imus[IMU_SINK_IDX]) {
 		xrt_sink_push_imu(ep->out_sinks.imus[IMU_SINK_IDX], s);
 	}
