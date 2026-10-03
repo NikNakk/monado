@@ -320,11 +320,13 @@ metal_service_create_iosurface_swapchain(struct metal_service_compositor_link *l
 		return XRT_ERROR_ALLOCATION;
 	}
 
+	// The convenience constructor returns an autoreleased object; cleanup below
+	// releases our own reference on both success and failure paths.
 	MTLTextureDescriptor *descriptor =
-	    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)info->format
-	                                                       width:info->width
-	                                                      height:info->height
-	                                                   mipmapped:NO];
+	    [[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:(MTLPixelFormat)info->format
+	                                                        width:info->width
+	                                                       height:info->height
+	                                                    mipmapped:NO] retain];
 	descriptor.storageMode = MTLStorageModeShared;
 	descriptor.usage = xrt_usage_to_metal(native_info->bits);
 

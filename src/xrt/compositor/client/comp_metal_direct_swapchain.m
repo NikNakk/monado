@@ -16,6 +16,7 @@
 #include "comp_metal_foveation_cache.h"
 #include "util/comp_metal_swapchain_import.h"
 #include "util/comp_swapchain.h"
+#include "util/comp_swapchain_gpu_reuse.h"
 #include "util/u_logging.h"
 
 #include <pthread.h>
@@ -353,6 +354,20 @@ metal_direct_create_swapchain(struct xrt_compositor *xc,
 		xrt_swapchain_native_reference(&xscn, NULL);
 		release_texture_array(textures, xsccp.image_count);
 		return XRT_ERROR_ALLOCATION;
+	}
+
+	/*
+	 * Metal and Vulkan share these textures in-process, but use different
+	 * queues. App-release readiness only orders producer writes before reads;
+	 * also wait for the compositor's last GPU read before returning an image
+	 * to the producer. Service-owned Metal swapchains already use this guard.
+	 */
+	xret = comp_swapchain_gpu_reuse_enable(&xscn->base);
+	if (xret != XRT_SUCCESS) {
+		U_LOG_E("Failed to enable direct Metal swapchain GPU reuse tracking: result=%d", xret);
+		xrt_swapchain_native_reference(&xscn, NULL);
+		release_texture_array(textures, xsccp.image_count);
+		return xret;
 	}
 
 	for (uint32_t i = 0; i < xsccp.image_count; i++) {
