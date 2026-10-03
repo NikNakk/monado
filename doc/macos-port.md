@@ -596,6 +596,15 @@ branch-oriented companion to this document.
 
 ## Upstream sync
 
+On 2026-10-03, `macos-upstream-clean` merged GitLab upstream `main` through
+`22d5c936c` (2026-10-02), preserving existing commit history. The ten new
+commits add configurable remote-HMD resolution and null-compositor frame rate,
+use the HMD's per-view resolution in the null compositor, correct SteamVR
+lighthouse pose-time units, and add runtime checks and static-analysis fixes.
+The macOS `.build/native-service-check` build succeeded and all 35 CTest suites
+passed (three IPC/layer suites required a rerun outside the sandbox). Headset
+validation and Linux CI for this follow-up remain pending.
+
 The integration branch was forked from upstream at `ac3f23f71` (2026-03-31).
 Upstream `main` up to `045931d12` (2026-09-30) has been merged on
 `macos-upstream-sync-2026-10`; it builds and passes tests on Linux, and

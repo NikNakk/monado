@@ -25,6 +25,10 @@ high-level status/roadmap.
 - Upstream-oriented cleanup branch:
   [`macos-upstream-clean`](https://github.com/NikNakk/monado/tree/macos-upstream-clean)
 - Canonical upstream remains the Monado project on freedesktop.org.
+- Cleanup branch sync: `macos-upstream-clean` merged GitLab `main` through
+  `22d5c936c` (2026-10-02) on 2026-10-03, without rebasing. The macOS service
+  check build and all 35 CTest suites passed; headset validation and Linux CI
+  for this follow-up remain pending.
 - Upstream sync: `main` up to `045931d12` (2026-09-30) is merged on
   `macos-upstream-sync-2026-10`, pending macOS CI and a headset run; see
   [Upstream sync](macos-port.md#upstream-sync).
