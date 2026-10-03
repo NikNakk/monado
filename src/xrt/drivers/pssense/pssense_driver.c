@@ -2989,7 +2989,12 @@ pssense_create(struct xrt_prober *xp,
 			bootstrap_options.track_max_step_ns = 200 * U_TIME_1US_IN_NS;
 			// Needs the joint tracker's per-device matched counts (push_camera_led_blob_count).
 			bootstrap_options.detect_stuck_lit = true;
-			bootstrap_options.hint_retries = 1;
+			/*
+			 * Retry a failed hinted scan (1, 2, 4, 8 s apart) before the full scan. On 4 Oct (000909) two hinted scans
+			 * failed with the left out of view, the full scan followed, and its long wide pulses were followed by the
+			 * always-lit fault, as at every onset so far. Lock centres have stayed inside the hint's +-1.5 ms.
+			 */
+			bootstrap_options.hint_retries = 4;
 			// LED-shaped counts are nearly background-free, but average over every camera: a ring three of four
 			// cameras saw added 2.9 per camera on 25 Sep. Raw counts need more margin over their noise.
 			bootstrap_options.track_min_ring_blobs = pssense->tracking.led_bootstrap_led_blobs ? 1.5f : 3.0f;

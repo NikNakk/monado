@@ -271,7 +271,10 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 			      b->options.label, weak, b->hint_failures, b->options.hint_retries);
 			b->hinted_scan = false;
 			b->state = T_LED_PHASE_BOOTSTRAP_IDLE;
-			b->idle_backoff_frames = b->options.failed_backoff_frames;
+			// Doubling pauses: a controller that is only out of view gets time to come back before the full scan,
+			// whose long wide pulses have preceded every always-lit fault so far.
+			uint64_t pause = (uint64_t)b->options.failed_backoff_frames << MIN(b->hint_failures - 1, 16u);
+			b->idle_backoff_frames = (uint32_t)MIN(pause, (uint64_t)b->options.max_failed_backoff_frames);
 			b->output_generation++;
 			return;
 		}

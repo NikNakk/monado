@@ -158,9 +158,12 @@ circular_distance(int64_t a, int64_t b)
 TEST_CASE("LED phase bootstrap locks the pulse centre onto the exposure centre")
 {
 	// Latencies chosen to put the lit window at, and across, the period wrap.
+	// 2.1 ms is the protocol maximum the wide scan used; 1.6 ms (period id 32) is what the session script uses now.
+	for (int64_t wide_blink : {int64_t(2100000), int64_t(1600000)})
 	for (int64_t latency : {int64_t(0), int64_t(3600000), int64_t(-1100000), int64_t(14000000), int64_t(9000000)}) {
-		CAPTURE(latency);
+		CAPTURE(wide_blink, latency);
 		t_led_phase_bootstrap_options options = test_options();
+		options.wide_blink_ns = wide_blink;
 		t_led_phase_bootstrap b;
 		t_led_phase_bootstrap_init(&b, &options);
 		REQUIRE(t_led_phase_bootstrap_ready_to_scan(&b));
@@ -746,7 +749,7 @@ TEST_CASE("LED phase bootstrap hinted scan locks with far fewer setting changes,
 
 	// A hint 5 ms off finds nothing and falls back to the full scan, which still locks; with a retry, after a
 	// second short scan.
-	for (uint32_t retries : {0u, 1u}) {
+	for (uint32_t retries : {0u, 1u, 4u}) {
 	CAPTURE(retries);
 	t_led_phase_bootstrap_options options = test_options();
 	options.hint_retries = retries;
