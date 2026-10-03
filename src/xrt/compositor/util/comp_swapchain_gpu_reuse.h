@@ -19,8 +19,8 @@ extern "C" {
 
 /*!
  * Enable fine-grained GPU reuse tracking on one native compositor swapchain.
- * Used by service-side Metal shared-texture swapchains, where client writes and
- * compositor Vulkan sampling access the same MTLTexture storage cross-process.
+ * Used by local and service-side Metal shared-texture swapchains, where client
+ * writes and compositor Vulkan sampling access the same storage on separate queues.
  */
 xrt_result_t
 comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc);
@@ -41,7 +41,7 @@ comp_swapchain_gpu_reuse_release_image(struct xrt_swapchain *xsc, uint32_t image
 
 #else
 
-// Tracking is only used by the macOS service; nothing is ever tracked elsewhere.
+// Tracking is only used on macOS; nothing is ever tracked on other platforms.
 static inline bool
 comp_swapchain_gpu_reuse_claim_image(struct xrt_swapchain *xsc, uint32_t image_index)
 {

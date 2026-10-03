@@ -58,7 +58,7 @@ comp_swapchain_gpu_reuse_vk_cmd_submit_locked(
 
 #else
 
-// Tracking is only used by the macOS service; the layer accumulator has nothing to claim elsewhere.
+// Tracking is only used on macOS; the layer accumulator has nothing to claim elsewhere.
 static inline void
 comp_swapchain_gpu_reuse_native_accum_begin(struct comp_layer_accum *cla)
 {

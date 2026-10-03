@@ -11,9 +11,13 @@
 #import <IOSurface/IOSurface.h>
 
 #include "client/comp_metal_client.h"
+#include "xrt/xrt_config_build.h"
 #include "comp_metal_foveation_cache.h"
 #include "os/os_time.h"
 #include "util/comp_swapchain.h"
+#ifdef XRT_MODULE_COMPOSITOR_UTIL
+#include "util/comp_swapchain_gpu_reuse.h"
+#endif
 #include "util/u_debug.h"
 #include "util/u_timing_trace.h"
 
@@ -161,7 +165,9 @@ client_metal_release_trace_open(struct client_metal_compositor *c)
 	    "after_commit_ns,after_wait_ns,create_duration_ns,commit_duration_ns,wait_duration_ns,"
 	    "total_barrier_duration_ns,metal_status,gpu_start_time_s,gpu_end_time_s,gpu_duration_ns\n",
 	    c->release_trace.file);
-	fflush(c->release_trace.file);
+	if (!u_timing_trace_fully_buffered()) {
+		fflush(c->release_trace.file);
+	}
 }
 
 static void
@@ -280,7 +286,7 @@ client_metal_release_trace_record(struct client_metal_compositor *c, const struc
 		}
 	}
 
-	if (trace->rows % METAL_RELEASE_TRACE_WINDOW == 0) {
+	if (!u_timing_trace_fully_buffered() && (trace->rows % METAL_RELEASE_TRACE_WINDOW == 0)) {
 		fflush(trace->file);
 	}
 	pthread_mutex_unlock(&trace->mutex);
@@ -638,6 +644,19 @@ client_metal_compositor_create_swapchain(struct xrt_compositor *xc,
 	}
 	U_LOG_I("Metal swapchain native Vulkan allocation succeeded: path=%s images=%u array_size=%u vk_format=%u",
 	        path, xscn->base.image_count, info->array_size, vk_format);
+
+#ifdef XRT_MODULE_COMPOSITOR_UTIL
+	// Protect the ordinary local Metal path too, including direct-wrapper fallback.
+	// Remote swapchains are proxies; their service already installs this guard.
+	if (!c->xcn->is_remote) {
+		xret = comp_swapchain_gpu_reuse_enable(&xscn->base);
+		if (xret != XRT_SUCCESS) {
+			U_LOG_E("Failed to enable local Metal swapchain GPU reuse tracking: result=%d", xret);
+			xrt_swapchain_native_reference(&xscn, NULL);
+			return xret;
+		}
+	}
+#endif
 
 	struct client_metal_swapchain *sc = calloc(1, sizeof(*sc));
 	if (sc == NULL) {
