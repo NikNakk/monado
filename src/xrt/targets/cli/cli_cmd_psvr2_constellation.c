@@ -166,8 +166,10 @@ poll_static_markers(struct static_markers *markers,
 		}
 		bool pressed = false;
 		for (uint32_t j = 0; j < xdev->input_count; j++) {
-			if (xdev->inputs[j].name == XRT_INPUT_PSSENSE_SHARE_CLICK) {
-				pressed = xdev->inputs[j].value.boolean;
+			// The left Sense has Create (share), the right has Options in its place.
+			if (xdev->inputs[j].name == XRT_INPUT_PSSENSE_SHARE_CLICK ||
+			    xdev->inputs[j].name == XRT_INPUT_PSSENSE_OPTIONS_CLICK) {
+				pressed = pressed || xdev->inputs[j].value.boolean;
 			}
 		}
 		if (pressed && !markers->was_pressed[i]) {
@@ -611,8 +613,8 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	record_session_info(tracker, argv[2], duration_s, world_frame, capture_dir, controllers);
 	struct static_markers markers = {0};
 	if (getenv("CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT") != NULL) {
-		fprintf(stderr, "Press Create on a controller when it is set down on something fixed, and again when it "
-		                "is picked up, to mark a static interval.\n");
+		fprintf(stderr, "Press Create (left) or Options (right) on a controller when it is set down on something "
+		                "fixed, and again when it is picked up, to mark a static interval.\n");
 	}
 
 	printf("timestamp_ns,hand,relation_flags,px,py,pz,qx,qy,qz,qw,pose_age_ns,fused_pose_count,"
