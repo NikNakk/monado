@@ -27,6 +27,11 @@
 #include <cstring>
 #include <type_traits>
 
+#ifdef XRT_OS_OSX
+extern "C" bool
+tests_macos_has_metal_device(void);
+#endif
+
 namespace {
 
 static render_distortion_spec
@@ -72,6 +77,13 @@ struct MinimalVulkanContext
 	bool
 	init()
 	{
+#ifdef XRT_OS_OSX
+		// Hosted macOS VMs may not expose a Metal GPU. Avoid entering the ICD
+		// in that case; the fixture reports the unavailable device as a skip.
+		if (!tests_macos_has_metal_device()) {
+			return false;
+		}
+#endif
 		static const char *required_instance_extensions[] = {nullptr};
 		static const char *optional_instance_extensions[] = {
 		    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
