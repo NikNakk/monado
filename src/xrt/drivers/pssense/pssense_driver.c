@@ -94,6 +94,15 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
 #define PSSENSE_NATIVE_LED_PHASES_DEFAULT false
 #endif
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_native_led_phases, "PSSENSE_NATIVE_LED_PHASES", PSSENSE_NATIVE_LED_PHASES_DEFAULT)
+/*
+ * Conservative phase advancement is separate from the native-safety fixes. The successful Sony trace shows that
+ * tracking validity does not map directly to PRESCAN/BROAD/BG: Sony deliberately changes phase while tracking remains
+ * valid, and reacquires without changing phase. Keep the default experiment in PRESCAN/40 until we have captured the
+ * native per-LED/mask policy. Set PSSENSE_NATIVE_LED_ADVANCE=1 to test the evidence-backed first transition only:
+ * after the first accepted optical pose has remained available for a short hold, PRESCAN -> BROAD/42.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_native_led_advance, "PSSENSE_NATIVE_LED_ADVANCE", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_native_led_acquire_hold_ms, "PSSENSE_NATIVE_LED_ACQUIRE_HOLD_MS", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
 
 #define PSSENSE_NATIVE_PRESCAN_PERIOD_ID 40
@@ -435,6 +444,8 @@ struct pssense_device
 		//! Native-style LED phase controller (PSSENSE_NATIVE_LED_PHASES).
 		uint8_t native_led_phase;
 		bool native_led_phase_initialised;
+		bool native_led_acquired;
+		timepoint_ns native_led_acquired_ns;
 
 		int32_t timing_fudge_100us;
 
@@ -1832,13 +1843,18 @@ pssense_signed_ns_to_imu_ticks(time_duration_ns offset_ns)
 }
 
 /*
- * Select the native-style LED phase around the existing timing bootstrap and pose solver.
+ * Select a conservative native-style LED phase around the existing timing bootstrap and pose solver.
  *
- * Initial wide/narrow scans remain PRESCAN because their absolute schedule is deliberately swept. Once the bootstrap
- * is locked, closed-loop timing probes keep the current tracked/reacquisition phase and only move its relative offset.
- * A fresh accepted optical pose uses BG; a missing/stale pose uses BROAD for reacquisition. This is intentionally
- * simpler than Sony's complete internal policy, but preserves the two key semantics shown by the successful oracle:
- * PRESCAN uses an absolute device-time anchor, while BROAD/BG use a signed offset from the camera cycle.
+ * The successful Sony oracle disproves a simple tracked=BG / lost=BROAD mapping: 6DoF was valid in PRESCAN,
+ * BROAD and BG; Sony also changed BG->PRESCAN->BROAD while tracking remained valid. Therefore the default
+ * PSSENSE_NATIVE_LED_PHASES experiment applies only the parts we can support directly:
+ *   - PRESCAN never uses period > 40 unless the user explicitly overrides it;
+ *   - schedule sequence numbers are not relatched every camera exposure.
+ *
+ * Optional PSSENSE_NATIVE_LED_ADVANCE=1 tests only the first evidence-backed phase progression. After timing lock,
+ * the first accepted optical pose starts an acquisition hold; after that hold the controller enters BROAD/42 and
+ * stays there except when the bootstrap itself must rescan in PRESCAN. BG is deliberately deferred until the native
+ * selective LED-mask policy has been captured.
  */
 static uint8_t
 pssense_select_native_led_phase_locked(struct pssense_device *pssense,
@@ -1861,12 +1877,32 @@ pssense_select_native_led_phase_locked(struct pssense_device *pssense,
 		return LED_SYNC_PHASE_PRESCAN;
 	}
 
+	// Safety-only default: retain PRESCAN but use Sony's observed period-40 envelope and native-style relatching.
+	if (!debug_get_bool_option_pssense_native_led_advance()) {
+		*inout_period_id = MIN(*inout_period_id, PSSENSE_NATIVE_PRESCAN_PERIOD_ID);
+		return LED_SYNC_PHASE_PRESCAN;
+	}
+
 	bool optical_fresh = pssense->tracking.last_optical_timestamp_ns > 0 &&
 	                     now_ns >= pssense->tracking.last_optical_timestamp_ns &&
 	                     now_ns - pssense->tracking.last_optical_timestamp_ns <= PSSENSE_CONSTELLATION_STALE_NS;
-	if (optical_fresh) {
-		*inout_period_id = PSSENSE_NATIVE_BG_PERIOD_ID;
-		return LED_SYNC_PHASE_BG;
+
+	if (!pssense->tracking.native_led_acquired) {
+		if (!optical_fresh) {
+			*inout_period_id = MIN(*inout_period_id, PSSENSE_NATIVE_PRESCAN_PERIOD_ID);
+			return LED_SYNC_PHASE_PRESCAN;
+		}
+		pssense->tracking.native_led_acquired = true;
+		pssense->tracking.native_led_acquired_ns = now_ns;
+		PSSENSE_INFO(pssense, "LED_NATIVE_PHASE side=%c event=optical_acquired; holding PRESCAN before BROAD",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R');
+	}
+
+	long hold_ms = MAX(debug_get_num_option_pssense_native_led_acquire_hold_ms(), 0);
+	time_duration_ns hold_ns = (time_duration_ns)hold_ms * U_TIME_1MS_IN_NS;
+	if (now_ns - pssense->tracking.native_led_acquired_ns < hold_ns) {
+		*inout_period_id = MIN(*inout_period_id, PSSENSE_NATIVE_PRESCAN_PERIOD_ID);
+		return LED_SYNC_PHASE_PRESCAN;
 	}
 
 	*inout_period_id = PSSENSE_NATIVE_BROAD_PERIOD_ID;
@@ -2893,6 +2929,8 @@ pssense_create(struct xrt_prober *xp,
 	pssense->tracking.increment_sequence_num = !debug_get_bool_option_pssense_native_led_phases();
 	pssense->tracking.native_led_phase = LED_SYNC_PHASE_LED_ALL_OFF;
 	pssense->tracking.native_led_phase_initialised = false;
+	pssense->tracking.native_led_acquired = false;
+	pssense->tracking.native_led_acquired_ns = 0;
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);
 	m_relation_history_create(&pssense->tracking.constellation_relation_history);
@@ -3044,9 +3082,11 @@ pssense_create(struct xrt_prober *xp,
 	}
 	if (debug_get_bool_option_pssense_native_led_phases()) {
 		PSSENSE_INFO(pssense,
-		             "Native LED phase controller enabled: PRESCAN/%u during scans, BROAD/%u on optical loss, BG/%u "
-		             "while optical tracking is fresh; per-frame LED sequence relatching disabled",
-		             PSSENSE_NATIVE_PRESCAN_PERIOD_ID, PSSENSE_NATIVE_BROAD_PERIOD_ID, PSSENSE_NATIVE_BG_PERIOD_ID);
+		             "Native LED safety mode enabled: PRESCAN capped at %u; per-frame LED sequence relatching disabled; "
+		             "phase advance=%s%s",
+		             PSSENSE_NATIVE_PRESCAN_PERIOD_ID,
+		             debug_get_bool_option_pssense_native_led_advance() ? "PRESCAN->BROAD/" : "off",
+		             debug_get_bool_option_pssense_native_led_advance() ? "42 after optical acquisition" : "");
 	}
 	if (pssense->tracking.use_led_bootstrap) {
 		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)%s%s%s",
