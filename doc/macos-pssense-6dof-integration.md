@@ -510,3 +510,25 @@ normal-endpoint plist and native environment snippet are in
 `build-wine/local-sense-default/`. Registration, client selection and the new
 Wine/native hardware trial remain user steps; the existing live service was
 not restarted or unloaded during preparation.
+
+### Both controllers lock out after clients disconnect (2026-10-04)
+
+The user reports that leaving the service running with no clients eventually
+caused both controllers to enter the IR-always-on/status-LED-off state. An active
+XR application is therefore not necessary for the observed fault. This does not
+establish the exact onset time or a timer-based cause: the service continues
+camera tracking and LED scans independently of client presence.
+
+In the latest `4a03bc0fb` service log, after client 1 disconnected at line 71589,
+each controller performed nine further full scans, all failed, with no accepted
+optical poses. No `stuck_lit` event or HID output failure identifies the onset.
+The snapshot is retained in
+`build-macos-sense-rel/diagnostics/20261004-both-stuck-after-idle/`.
+
+The prepared normal local default already has `IPC_EXIT_WHEN_IDLE=1` and a
+5000 ms delay. The isolated test agent omitted these settings, allowing endless
+idle scanning. Its preparation script and generated plist now include the same
+idle-exit policy. Reload is required to change the loaded environment; no live
+service was stopped or restarted here. The next client activates the service
+on demand. This limits idle exposure to the fault-triggering command stream; it
+does not cure the controller firmware state or clear a ring already stuck on.
