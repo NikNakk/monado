@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
- * @brief  PlayStation Sense controller LED models. Data extracted from Sony's PC driver.
+ * @brief  Experimental PlayStation Sense controller LED models.
+ *
+ * @warning The coordinate table below has legacy research provenance: it was extracted from Sony's PC driver.
+ * It is retained on this experimental branch only so the existing runtime-tested pose solver can continue to be
+ * evaluated. Under the PSVR2Toolkit AGENTS.md clean-room policy it is NOT suitable provenance for an eventual
+ * upstream Monado contribution and must be replaced by independently measured/derived geometry first.
+ *
  * @author Beyley Cardellio <ep1cm1n10n123@gmail.com>
  * @ingroup drv_pssense
  */
