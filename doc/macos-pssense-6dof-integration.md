@@ -575,3 +575,9 @@ exposure reduction, not a firmware fix.
 A mocked real driver-loop test passes with tracing enabled, exercising failed
 and recovered writes plus input disconnect. The captured hex reports have the
 expected byte counts. No hardware was used for this validation.
+
+The forced-rescan path was also found to retain the previous lock's phase hint,
+contrary to the historical "full scan" description. It now clears that hint
+only for the explicitly requested stress rescan, so trial C actually exercises
+wide-to-narrow scanning. Ordinary acquisition and loss-driven rescans retain
+their hinted behavior.
