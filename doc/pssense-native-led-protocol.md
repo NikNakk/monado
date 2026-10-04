@@ -2,6 +2,22 @@
 
 Status: experimental reverse-engineering note, 2026-10-04.
 
+## Provenance
+
+Feature: Sense controller LED synchronisation
+Source of knowledge: Sony Windows driver used as a behavioural oracle
+Method: Bluetooth HCI/ETW capture of native A2/31 output, USB camera/timing observation, and controlled state-change
+experiments; narrow in-process hooks were used only to timestamp behavioural events and were cross-checked against the
+wire capture where applicable
+Observed protocol/behaviour: A2/31 LED field layout, phases/periods, timing units, schedule-generation semantics,
+phase/mask/base-time transitions, and controller tracking-state correlations
+Implementation provenance: independently implemented in Monado using Monado's existing pssense architecture and pose
+solver; no Sony source, decompiled implementation, proprietary payload, SDK material or internal Sony data structure is
+copied into Monado
+
+This follows the PSVR2Toolkit `AGENTS.md` clean-room boundary:
+`observation -> protocol description/test vector -> independent implementation`.
+
 This document records the native Sony Sense-controller optical LED schedule observed from the Windows
 PlayStation VR2 SteamVR driver and explains how it maps onto Monado's existing `pssense` timing/bootstrap and
 6DoF pose solver.
