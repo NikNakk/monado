@@ -294,7 +294,17 @@ The preparation command validates the checkout, cache and effective solver,
 driver and compositor optimisation flags. It writes an isolated LaunchAgent
 at `build-macos-sense-rel/pssense-6dof.plist` and prints three commands to load
 it, run `psvr2-openxr-test --generic-controller` with client-hosted compositing,
-and unload it after the app closes. The agent uses `RunAtLoad=false`: loading
+and unload it after the app closes. With `--generic-controller`, the app now draws
+6 cm grip cubes and 40 cm aim rays: cyan left, orange right. Both are located in
+the app reference space at predicted display time. Grey means both pose
+components are valid but at least one is untracked; missing position/orientation
+validity or an inactive action hides the marker. Terminal logs report flags,
+tracking status and positions, periodically and on flag changes. This is actual
+OpenXR grip/aim placement; the diagnostic does not fabricate positions. Close and
+relaunch the test app to pick up a rebuilt binary; the tracking service need not
+restart for this client-only change.
+
+ The agent uses `RunAtLoad=false`: loading
 it registers the Mach endpoint; the client's XPC activation starts the service
 on demand. **Preparation does not start hardware.**
 The agent and client share an isolated Unix socket directory and Mach endpoint;
@@ -339,3 +349,13 @@ The isolated agent also now uses `RunAtLoad=false`, matching the normal direct
 XPC helper. The original test generator eagerly started it at bootstrap. After
 reloading the corrected plist, it stays stopped until a client requests the
 registered Mach service. No-stdin remains required once launchd starts it.
+
+### Controller visualization checks (2026-10-04)
+
+The optimised diagnostic app rebuild passes without compiler warnings. Three
+mocked OpenXR tests (21 assertions) verify left/right grip placement, rotated
+local -Z aim rays, the reference space and display timestamp, invalid/inactive
+and failed queries, valid-but-untracked colouring, and keeping controller/gaze
+action sets active together. The visual result on the headset remains for the
+user to validate. The earlier `--generic-controller` implementation logged
+only action state and did not locate/render controller poses.

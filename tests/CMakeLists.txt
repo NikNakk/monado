@@ -431,3 +431,18 @@ if(XRT_BUILD_DRIVER_PSVR2 AND XRT_BUILD_DRIVER_PSSENSE)
 		)
 	add_test(NAME tests_psvr2_sense_tracking COMMAND tests_psvr2_sense_tracking)
 endif()
+
+if(APPLE AND TARGET psvr2-openxr-test)
+	add_executable(tests_psvr2_controller_visuals tests_psvr2_controller_visuals.mm)
+	target_compile_features(tests_psvr2_controller_visuals PRIVATE cxx_std_17)
+	target_link_libraries(
+		tests_psvr2_controller_visuals
+		PRIVATE
+			xrt-external-catch2
+			xrt-external-openxr
+			aux_metal_foveation
+			"-framework Foundation"
+			"-framework Metal"
+		)
+	add_test(NAME tests_psvr2_controller_visuals COMMAND tests_psvr2_controller_visuals)
+endif()
