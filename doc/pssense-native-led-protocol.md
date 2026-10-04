@@ -343,6 +343,21 @@ This supports the conservative optional Monado experiment: remain in PRESCAN unt
 accepted a pose, hold for about 2 s, then test BROAD/42. It does **not** support advancing to BROAD merely because a
 fixed amount of time has elapsed since PRESCAN began.
 
+## BG does not have a simple tracking-time threshold
+
+The two successful sessions do not support a fixed "tracked for N seconds -> BG" rule:
+
+- first session: BROAD began at 11:14:57.341, full tracking was reacquired at 11:14:59.560, and BG began at
+  11:15:11.320 — about 11.76 s of stable tracking after reacquisition;
+- second session: after the later PRESCAN/BROAD identification cycle, tracking was reacquired at 11:17:19.463 and BG
+  began at 11:17:36.944 — about 17.48 s later;
+- in the second session Sony had already spent ~18.7 s in the earlier BROAD interval while tracked, yet chose
+  BROAD -> PRESCAN -> BROAD rather than entering BG.
+
+Therefore BG likely depends on confidence/identification state, mask-search outcome, timing quality, or another
+observable input rather than elapsed tracking time alone. Monado should not synthesize BG until that criterion is
+understood.
+
 ## LED-pattern changes around loss and reacquisition
 
 The second successful native session gives a stronger clue about the four-byte `leds[]` field. It should not yet be
@@ -540,10 +555,10 @@ reconstruction.
 
 ## Remaining reverse-engineering
 
-- Exact opcode name for Sony command type 6. Timing strongly suggests a PRESCAN absolute-epoch maintenance operation:
-  while in PRESCAN it occurs about once per second and is followed by `seq += 1` plus a median base-time advance of
-  1,000,991 us; in BROAD/BG, the same periodic command usually leaves sequence and relative base offset unchanged.
-  The next Toolkit capture logs its two payload bytes to identify it more precisely.
+- The observable meaning behind the roughly camera-second PRESCAN epoch refresh. An internal Sony maintenance call
+  happens near the same cadence, but upstream-oriented work should not depend on its internal opcode/payload. The wire
+  fact is sufficient: in PRESCAN the A2/31 schedule is periodically relatched with a new absolute epoch; in BROAD/BG
+  the same periodic relatch is absent unless the schedule itself changes.
 - Exact policy that causes BROAD -> BG, BG -> PRESCAN, and subsequent PRESCAN -> BROAD.
 - Selective LED-pattern meaning and physical-emitter mapping. The prepared Toolkit capture saves raw VI packets
   before and after native phase/mask changes, periodic VI samples, the observable IF8/0x89 LED-detector USB stream,
