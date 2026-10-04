@@ -241,10 +241,12 @@ Branch: `experiment/pssense-native-led-phases`.
 
 The first implementation deliberately keeps the existing runtime-tested pose solver and timing bootstrap:
 
-1. **Before timing lock / during a scan or probe**
+1. **Before timing lock / during the initial wide/narrow scan**
    - phase PRESCAN;
-   - pulse width is whatever the bootstrap requests, capped at period 40;
+   - normal default wide scan is period 40 rather than 42; narrower bootstrap steps are left narrow;
    - `cycle_position` remains an absolute device-time anchor.
+   - once locked, closed-loop timing probes remain in BG/BROAD and move only the relative timing offset instead of
+     bouncing the controller back into PRESCAN.
 
 2. **Bootstrap locked, no fresh accepted optical pose**
    - phase BROAD;
@@ -266,6 +268,11 @@ The first implementation deliberately keeps the existing runtime-tested pose sol
 "Fresh" currently uses the driver's existing `PSSENSE_CONSTELLATION_STALE_NS` threshold, so phase selection follows
 the same authoritative optical pose that is already exposed to the runtime.
 
+The bootstrap stores a **pulse-start** offset. Native phase widths differ from the 1.0 ms locked bootstrap pulse, so
+the scheduler first reconstructs the centre using the *source/calibrated* pulse width, then changes the output width.
+Thus a transition from lock/20 to BG/30 or BROAD/42 does not move the calibrated illumination centre by 250/550 us.
+`PSSENSE_LED_PERIOD_ID`, when explicitly set, remains a true diagnostic output-width override.
+
 This policy is intentionally **native-inspired, not claimed to be Sony-exact**. It addresses the two immediate
 problems: permanent PRESCAN and the lockout-prone scan pattern, while reusing the pose solver that is already working.
 
@@ -284,15 +291,15 @@ Record at least:
 Useful log events:
 
 ```
-LED_NATIVE_PHASE side=R old=1 new=2 period=42 ...
-LED_NATIVE_PHASE side=R old=2 new=3 period=30 ...
-LED_NATIVE_PHASE side=R old=3 new=2 period=42 ...
+LED_NATIVE_PHASE side=R old=1 new=2 source_period=20 output_period=42 ...
+LED_NATIVE_PHASE side=R old=2 new=3 source_period=20 output_period=30 ...
+LED_NATIVE_PHASE side=R old=3 new=2 source_period=20 output_period=42 ...
 ```
 
 Acceptance for the first pass:
 
 - no controller enters the irreversible always-lit/status-LED-off lockout;
-- scan phase never emits PRESCAN with period > 40;
+- with no explicit diagnostic period override, the default wide scan no longer emits PRESCAN/42;
 - after bootstrap lock, the controller is no longer permanently PRESCAN;
 - valid optical poses still reach the runtime;
 - deliberate occlusion changes BG -> BROAD and reacquisition returns BROAD -> BG;
