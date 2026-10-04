@@ -294,7 +294,9 @@ The preparation command validates the checkout, cache and effective solver,
 driver and compositor optimisation flags. It writes an isolated LaunchAgent
 at `build-macos-sense-rel/pssense-6dof.plist` and prints three commands to load
 it, run `psvr2-openxr-test --generic-controller` with client-hosted compositing,
-and unload it after the app closes. **Preparation does not start hardware.**
+and unload it after the app closes. The agent uses `RunAtLoad=false`: loading
+it registers the Mach endpoint; the client's XPC activation starts the service
+on demand. **Preparation does not start hardware.**
 The agent and client share an isolated Unix socket directory and Mach endpoint;
 the installed runtime is not overwritten. The agent sets `XRT_NO_STDIN=1`
 so launchd's closed stdin cannot terminate the service. Close other headset tools and unload
@@ -332,3 +334,8 @@ failures. The generator now forces no-stdin, matching the normal XPC bootstrap
 helper. Reload the agent after regenerating or correcting its plist; changing
 the file does not change launchd's already loaded environment. The corrected
 hardware run remains pending.
+
+The isolated agent also now uses `RunAtLoad=false`, matching the normal direct
+XPC helper. The original test generator eagerly started it at bootstrap. After
+reloading the corrected plist, it stays stopped until a client requests the
+registered Mach service. No-stdin remains required once launchd starts it.

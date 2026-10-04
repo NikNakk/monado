@@ -51,7 +51,7 @@ def main():
     plist = build / "pssense-6dof.plist"
     plist.write_bytes(plistlib.dumps(dict(
         Label=label, ProgramArguments=[str(service)], WorkingDirectory=str(ROOT),
-        RunAtLoad=True, KeepAlive=False, ProcessType="Interactive",
+        RunAtLoad=False, KeepAlive=False, ProcessType="Interactive",
         MachServices={endpoint: True}, EnvironmentVariables=env,
         StandardOutPath=str(build / "sense-service.log"), StandardErrorPath=str(build / "sense-service.log"))))
     print("Prepared", plist)
