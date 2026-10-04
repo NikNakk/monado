@@ -93,6 +93,21 @@ The pulse-width period ID uses 50 microseconds per unit:
 - 20 -> 1.00 ms
 - 9 -> 0.45 ms
 
+## Output cadence and report timestamp
+
+The successful Bluetooth capture contains 5,949 CRC-valid native A2/31 reports over 78.46 seconds. Delivery is
+asynchronous to the 59.94/60 Hz camera stream: the overall output rate is about 76 reports/s with substantial Windows/
+Bluetooth scheduling jitter (median inter-report spacing about 14.94 ms).
+
+Report bytes 17..20 form a little-endian microsecond-scale timestamp. Across the capture its delta tracks the packet
+capture time essentially 1:1 (median device/host interval ratio ~1.0000006). This is a separate time domain from the LED
+`cycle_position`, which uses 3 MHz ticks.
+
+Monado currently writes Bluetooth output at the 32/3000 s PCM-haptics cadence (~93.75 Hz). That difference is worth
+keeping visible, but it is not by itself evidence for the lockout: the controller has already tolerated ~93.75 Hz in
+standalone LED tests. The more important native distinction is that the LED schedule generation/sequence is held across
+many output packets.
+
 ## Native phases observed
 
 The successful capture contained:
@@ -176,9 +191,17 @@ starting at approximately 11:16:44.856.
 | 76.020 | offset -250 us / wire -750 |
 | 78.457 | shutdown / INIT-zero packet |
 
-The native transition policy clearly contains more state than a simple tracked/not-tracked switch. In particular,
-Sony can return from BG to PRESCAN without a preceding logged tracking loss. That part remains to be reverse engineered.
-Monado should therefore use the observed phases conservatively rather than claiming an exact clone of Sony's internal
+The native transition policy clearly contains more state than a simple tracked/not-tracked switch:
+
+- the controller reaches tracking flag 9 while still in PRESCAN;
+- Sony changes PRESCAN -> BROAD while tracking remains valid;
+- Sony later changes BROAD -> BG while tracking remains valid;
+- Sony changes BG -> PRESCAN -> BROAD with no intervening logged tracking loss;
+- tracking can be lost and reacquired without a phase change in either BROAD or BG.
+
+Therefore **tracking freshness must not be treated as the phase state machine**. Phase changes look more like optical
+identification/timing-maintenance modes around an independently valid pose estimate. Exact policy remains to be reverse
+engineered. Monado should use the observed phases conservatively rather than claiming an exact clone of Sony's internal
 state machine.
 
 ## LED masks
@@ -190,9 +213,18 @@ this run included:
 
 The remaining three bytes stayed `ff` in the recovered A2/31 reports.
 
-These changes correlate with Sony's `SET_LEDS_IMMEDIATE` commands and probably select useful LED subsets for optical
-identification/search. The current Monado pose solver benefits from having the full constellation visible, so the first
-native-phase implementation intentionally keeps `ff ff ff ff`. Selective-mask policy is a separate experiment.
+The distribution is phase-dependent:
+
+- PRESCAN: 825/825 reports used `ff ff ff ff`.
+- BROAD: only 225/4,085 reports used all-`ff`; most used `01`, `0a`, `03`, `0c` or `07`.
+- BG: **0/1,001 reports used all-`ff`**; masks were `07`, `01`, `06`, `03` or briefly `0a`.
+
+These changes correlate with Sony's `SET_LEDS_IMMEDIATE` commands and clearly form part of optical identification/
+maintenance rather than being cosmetic. A particularly strong example is BROAD reacquisition at 11:17:19: Sony changes
+the mask to `0a ff ff ff` and the tracking flag changes 6 -> 9 about 2 ms later.
+
+Until the bit-to-physical-LED mapping and Sony's selection policy are captured, Monado should **not** assume that
+`BG/30 + ff ff ff ff` is a native-like steady state; that combination never occurs in this successful capture.
 
 ## Schedule sequence number
 
@@ -209,8 +241,12 @@ stuck on" lockout.
 Native-style mode therefore:
 
 - increments the schedule sequence when the bootstrap/refinement output generation changes;
-- increments it on an explicit phase transition;
-- does **not** increment it merely because another camera exposure occurred.
+- increments it on an explicit phase/mask/base-time schedule mutation;
+- does **not** increment it merely because another camera exposure or A2/31 packet occurred.
+
+The PCAP makes this concrete: BROAD sequence 8 persists for about 16.8 seconds while Sony emits command type 6 roughly
+once per second; the sequence changes to 9 only when the LED mask changes. Thus command type 6 is not itself a generic
+"increment LED generation" operation.
 
 The independent output report / haptics packet counters continue normally.
 
@@ -237,44 +273,53 @@ much stronger and safer operating envelope than the previous Monado scan behavio
 
 Branch: `experiment/pssense-native-led-phases`.
 
-`PSSENSE_NATIVE_LED_PHASES` is enabled by default on macOS on this branch and can be set to 0 for A/B comparison.
+The successful trace now rules out the first heuristic implementation (`fresh pose -> BG`, `stale pose -> BROAD`),
+so the branch has been made deliberately conservative.
 
-The first implementation deliberately keeps the existing runtime-tested pose solver and timing bootstrap:
+`PSSENSE_NATIVE_LED_PHASES=1` is enabled by default on macOS and applies the two evidence-backed safety changes while
+leaving the pose solver untouched:
 
-1. **Before timing lock / during the initial wide/narrow scan**
-   - phase PRESCAN;
-   - normal default wide scan is period 40 rather than 42; narrower bootstrap steps are left narrow;
+1. **PRESCAN safety envelope**
+   - initial/bootstrap scans remain PRESCAN;
+   - the normal wide scan is capped at Sony's observed period 40 rather than period 42;
+   - narrower bootstrap pulses remain narrow;
    - `cycle_position` remains an absolute device-time anchor.
-   - once locked, closed-loop timing probes remain in BG/BROAD and move only the relative timing offset instead of
-     bouncing the controller back into PRESCAN.
 
-2. **Bootstrap locked, no fresh accepted optical pose**
-   - phase BROAD;
-   - period 42;
-   - `cycle_position` is the calibrated pulse centre, folded into the nearest signed camera-cycle offset and converted
-     to 3 MHz ticks.
+2. **Native-style schedule relatching**
+   - the LED sequence is no longer incremented every camera exposure;
+   - bootstrap/refinement output-generation changes still relatch the schedule;
+   - explicit phase changes relatch it.
 
-3. **Bootstrap locked, fresh accepted optical pose**
-   - phase BG;
-   - period 30;
-   - same relative-offset encoding.
+By default the controller therefore remains in PRESCAN after lock. This is intentional: it isolates the two strongest
+lockout hypotheses without introducing an unsupported BG mask/phase combination.
 
-4. **LEDs intentionally disabled**
-   - LED_ALL_OFF.
+### Optional first phase transition
 
-5. **STABLE**
-   - not emitted in this first implementation, because the successful Sony trace proves it is not necessary for 6DoF.
+Set:
 
-"Fresh" currently uses the driver's existing `PSSENSE_CONSTELLATION_STALE_NS` threshold, so phase selection follows
-the same authoritative optical pose that is already exposed to the runtime.
+```
+PSSENSE_NATIVE_LED_ADVANCE=1
+```
 
-The bootstrap stores a **pulse-start** offset. Native phase widths differ from the 1.0 ms locked bootstrap pulse, so
-the scheduler first reconstructs the centre using the *source/calibrated* pulse width, then changes the output width.
-Thus a transition from lock/20 to BG/30 or BROAD/42 does not move the calibrated illumination centre by 250/550 us.
-`PSSENSE_LED_PERIOD_ID`, when explicitly set, remains a true diagnostic output-width override.
+to test only the first transition for which the native trace gives reasonable support:
 
-This policy is intentionally **native-inspired, not claimed to be Sony-exact**. It addresses the two immediate
-problems: permanent PRESCAN and the lockout-prone scan pattern, while reusing the pose solver that is already working.
+- wait for timing/bootstrap lock;
+- wait for the first accepted optical pose;
+- hold PRESCAN for `PSSENSE_NATIVE_LED_ACQUIRE_HOLD_MS` (default 2000 ms);
+- then enter BROAD/42;
+- remain in BROAD while tracking continues or is temporarily lost;
+- return to PRESCAN only when the bootstrap itself must rescan.
+
+This approximates Sony's observed "acquire in PRESCAN, then continue in BROAD" behaviour without pretending that pose
+validity controls the phase. BG is deliberately not emitted yet because native BG always used selective LED masks in
+this capture and we do not yet know their physical/policy mapping.
+
+For BROAD, `cycle_position` uses the calibrated pulse centre folded into the nearest signed camera-cycle offset and
+converted to 3 MHz ticks, matching the native relative-offset semantics.
+
+The bootstrap stores a **pulse-start** offset. When the output width changes, the scheduler reconstructs the centre from
+the calibrated/source pulse width first, so PRESCAN -> BROAD does not shift the illuminated centre simply because the
+pulse became wider. `PSSENSE_LED_PERIOD_ID`, when explicitly set, remains a true diagnostic output-width override.
 
 ## Test plan
 
@@ -291,28 +336,30 @@ Record at least:
 Useful log events:
 
 ```
+LED_NATIVE_PHASE side=R event=optical_acquired; holding PRESCAN before BROAD
 LED_NATIVE_PHASE side=R old=1 new=2 source_period=20 output_period=42 ...
-LED_NATIVE_PHASE side=R old=2 new=3 source_period=20 output_period=30 ...
-LED_NATIVE_PHASE side=R old=3 new=2 source_period=20 output_period=42 ...
 ```
 
 Acceptance for the first pass:
 
 - no controller enters the irreversible always-lit/status-LED-off lockout;
 - with no explicit diagnostic period override, the default wide scan no longer emits PRESCAN/42;
-- after bootstrap lock, the controller is no longer permanently PRESCAN;
-- valid optical poses still reach the runtime;
-- deliberate occlusion changes BG -> BROAD and reacquisition returns BROAD -> BG;
+- in safety-only mode, valid optical poses still reach the runtime without irreversible lockout;
+- with `PSSENSE_NATIVE_LED_ADVANCE=1`, acquisition remains in PRESCAN for the hold interval then changes once to
+  BROAD/42 without losing the already-working pose solver;
+- temporary optical loss/reacquisition can occur while remaining in BROAD;
 - no regression in pose jitter/age compared with the same solver on `macos-pssense-6dof`.
 
-If relative BROAD/BG scheduling is wrong, the failure should be obvious as an immediate illumination/pose loss after
-the phase transition. Set `PSSENSE_NATIVE_LED_PHASES=0` to restore the historical scheduling for comparison.
+Set `PSSENSE_NATIVE_LED_PHASES=0` to restore the historical scheduling for comparison. Keep
+`PSSENSE_NATIVE_LED_ADVANCE=0` for the minimal lockout-safety test.
 
 ## Remaining reverse-engineering
 
-- Exact meaning of Sony command type 6, seen approximately once per second.
+- Exact meaning of Sony command type 6. It is strongly periodic (~1 s) in PRESCAN and continues in other phases, but
+  does not necessarily change the on-wire LED generation; the next Toolkit capture logs its two payload bytes.
 - Exact policy that causes BROAD -> BG, BG -> PRESCAN, and subsequent PRESCAN -> BROAD.
-- Selective LED-mask meaning and bit-to-LED mapping.
+- Selective LED-mask meaning and bit-to-LED mapping. The prepared Toolkit capture saves event-triggered raw BC4 frames
+  plus Sony's internal 4-camera x 17-LED blob associations to answer this.
 - Whether STABLE is used in longer/cleaner sessions and what condition enters it.
 - Whether the native fixed output mode byte `0xA2` matters for long-term LED reliability; Monado's current output
   formatting is already accepted by the controllers and is not changed in this experiment.
