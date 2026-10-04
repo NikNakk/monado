@@ -45,6 +45,19 @@ at 60 Hz and Sony reported one VI / tracking11 packet for each frame.
 
 The right Sense then achieved Sony tracking flag 9 (full optical tracking / 6DoF) repeatedly.
 
+## Reproducible oracle test vector
+
+A compact protocol-fact fixture derived directly from the successful PCAP is checked in as:
+
+```
+tests/data/pssense_native_led_oracle.csv
+tests/data/pssense_native_led_oracle.md
+```
+
+It contains the 40 consecutive runs of identical LED schedule fields from all 5,949 CRC-valid A2/31 reports. The CSV
+was regenerated and checked against the source PCAP; report counts sum to 5,949. It intentionally contains protocol
+fields and timing summaries only, not proprietary Sony payload/code.
+
 ## Bluetooth A2/31 report
 
 The native controller output is HIDP output `0xA2` followed by report ID `0x31`.
@@ -492,7 +505,7 @@ it with geometry derived independently from observable behaviour or direct hardw
 
 Prepared clean-room route:
 
-1. capture raw stereo type-11 camera frames from the PSVR2 USB interface;
+1. capture raw VI camera packets directly from PSVR2 USB interface 6 / endpoint 0x87;
 2. capture HMD and Sense poses Sony publishes through the standard OpenVR driver-host interface;
 3. use independently obtained HMD camera calibration;
 4. identify/associate visible IR emitters across stereo frames and multiple controller poses;
