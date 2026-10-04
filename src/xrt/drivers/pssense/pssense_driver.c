@@ -81,12 +81,12 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
                            PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
 /*
- * Reproduce the phase semantics observed from Sony's Windows driver rather than keeping the controller in PRESCAN
- * forever. On macOS this experimental branch enables it by default; set PSSENSE_NATIVE_LED_PHASES=0 for A/B tests.
+ * Apply only the LED-scheduling semantics directly supported by Sony's successful Windows trace. On macOS this
+ * experimental branch enables the safety changes by default; set PSSENSE_NATIVE_LED_PHASES=0 for A/B tests.
  *
- * The successful 2026-10-04 oracle trace used PRESCAN/40 for acquisition, BROAD/42 for reacquisition/search and
- * BG/30 while tracking. STABLE was not required for 6DoF. Outside PRESCAN, cycle_position is a signed offset from
- * the camera cycle rather than an absolute controller timestamp.
+ * The oracle used PRESCAN/40, BROAD/42 and BG/30, but tracking validity did not map one-to-one onto those phases:
+ * full 6DoF occurred in all three. The default path therefore fixes the PRESCAN period/relatching behaviour without
+ * inventing a BG policy. Optional PSSENSE_NATIVE_LED_ADVANCE tests only a conservative PRESCAN -> BROAD transition.
  */
 #ifdef XRT_OS_OSX
 #define PSSENSE_NATIVE_LED_PHASES_DEFAULT true
