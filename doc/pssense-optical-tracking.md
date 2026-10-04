@@ -1,0 +1,1216 @@
+# PS Sense optical (6DoF) tracking on macOS
+
+Working branch: `macos-pssense-6dof`, based on `macos-psvr2-camera-calibration`.
+Background and earlier results: `doc/psvr2-camera-calibration.md` and `doc/pssense-led-blink-waveform.md`.
+
+## Where things stand (2026-09-24)
+
+- Camera plumbing, the visible-mode fisheye rig and the direct mode-4 ChArUco solve are described in the
+  calibration doc. Its numbers stand, but **most of their inputs and outputs are lost**. macOS purges `/tmp`,
+  and every capture, log and calibration JSON from 8–15 September was recorded there. That includes
+  `char-mode-12`, `sense-validation`, the force-IR runs, the phase sweep, the reviewed rig and the aligned
+  ChArUco candidate. Partial copies were recovered to `~/Code/psvr2-datasets/old`:
+  - `psvr2-mode4-tracking-calibration-provisional.json`: the pre-ChArUco provisional calibration. The CLI
+    accepts it. It is fine for LED illumination work, but it is the calibration that could not bootstrap
+    poses.
+  - `psvr2-mode4-forced-joint-rig.{json,log}` and `psvr2-native-model-comparison.json`: diagnostics only.
+- The original 21-pose mode-4 ChArUco capture (`char-mode-12`) was later recovered from a zip. It is unpacked
+  at `~/Code/psvr2-datasets/calibration/20260913-char-mode-12/`, and the direct solve was re-run there on
+  2026-09-24 (`psvr2-mode4-charuco-direct.json`, `direct-solve.log`). Fisheye RMS was 0.44 / 0.45 / 0.45 /
+  0.35 px, and the upper cameras' leave-one-pose-out RMS was 0.47 / 0.38 px. The joint rig reached 0.50 px
+  RMS (median 0.30, p95 0.93). The lower baseline is 81.0 mm and the lower-to-upper baselines are 75.3 and
+  74.9 mm.
+- The reviewed visible-mode rig is still lost, so the candidate can't be aligned into visible camera0 as on
+  13 September. `scripts/psvr2_tracking_charuco_native_origin.py` builds a `psvr2-constellation` calibration
+  with **native mode-4 camera0 as the tracking origin** instead:
+  `psvr2-mode4-charuco-native-origin-candidate.json`. The geometry between cameras, and so every
+  camera-relative controller pose, matches the aligned candidate; only the origin's placement relative to
+  the headset differs. That placement was never trusted anyway. Sense held-out validation must be repeated,
+  because the `sense-validation` captures were lost. Use this candidate, not the provisional file, for pose
+  work. Record everything under `~/Code/psvr2-datasets`, never `/tmp`.
+- The immediate blocker for live tracking is illumination. The controller LEDs are usually dark when the
+  cameras expose (see "Static LED phase sweep" in the calibration doc).
+
+## Plan
+
+1. **Illumination (this branch).** Lock the LED phase from raw blob counts, then check that it holds
+   (below).
+2. **Recapture the mode-4 calibration.** Run the direct ChArUco capture and solve again, save it under
+   `psvr2-datasets/calibration/`, and validate it on held-out Sense poses. Explain or eliminate the 15.5°
+   lower-camera disagreement with the visible rig.
+3. **Solve jointly across cameras.** Replace per-camera PnP followed by averaging with one pose optimised
+   against every camera's blobs in the same exposure. Bootstrap by triangulating the lower and upper stereo
+   pairs, with an IMU gravity prior.
+4. **Filter.** Use an EKF/UKF with IMU propagation, taking the optical pose as a measurement, in place of the
+   jump, stale and agreement gates.
+5. **Integrate.** Expose 6DoF through OpenXR only once recorded sessions pass the acceptance numbers.
+
+Every live run should be recorded and scored with the session tools, so runs can be compared.
+
+## LED phase bootstrap (`PSSENSE_LED_BOOTSTRAP=1`)
+
+The previous search was the pose-driven `t_led_sync_refinement`. It only counts a frame as lit once a pose
+is solved, which now means a multi-camera fused pose. Its search range on macOS (programmed pulse centre
+3.8–11.8 ms after the projected exposure) also misses the lit window seen in the static sweep, at about
+2.5–3.0 ms.
+
+`t_led_phase_bootstrap` (`src/xrt/tracking/constellation/`) instead scores each commanded phase by the raw
+blob count every camera reports. The constellation tracker reports blob counts for every frame through the
+optional `push_camera_blob_count` device callback.
+
+0. **Dark baseline.** The LEDs are held off for 24 exposures to let any controller that was just lit go dark,
+   then each camera's median blob count over 8 exposures is recorded. A frame counts as lit only with at least 3 blobs above its camera's baseline.
+1. **Wide scan.** A 2.1 ms pulse is stepped in 1 ms steps across the whole camera period (17 steps). Each
+   step waits 8 exposures to settle, measures 8, then allows 4 of grace for late reports. That is 20
+   exposures, about 0.33 s per step.
+2. The best step (circularly smoothed) must score at least 1.0 and beat the median step by 0.75. The score
+   is the sum over cameras of the fraction of lit frames. Otherwise the scan fails and
+   the controller idles for 60 exposures, doubling per consecutive failure up to 600 (10 s).
+3. **Narrow scan.** A 450 µs pulse is stepped in 250 µs steps from 1.5 ms before to 1.5 ms after the best
+   wide pulse (21 steps). The lit run is the contiguous set of steps at or above half the peak score.
+4. **Lock.** The pulse is centred in the lit run, 1.0 ms wide by default (`PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID`,
+   50 µs per id, default 20). If no camera sees at least 3 blobs for 300 exposures (~5 s), it rescans.
+
+A full bootstrap takes about 14 s. Only one controller scans at a time, because blob counts cannot tell
+the controllers apart. The other controller holds its LEDs off, and its own state is frozen, until the scan
+finishes. The fixed macOS `PSSENSE_TIMING_FUDGE_100US` (3.6 ms) is still added, but it doesn't matter
+because the scan covers the whole period. With the variable unset, behaviour is unchanged.
+
+Log lines use the form `LED_BOOTSTRAP side=L event=...`. The events are `baseline`, `scan_start`, `step`,
+`wide_result`, `locked`, `locked_status` (every 300 exposures), `scan_failed` and `lost`. The
+`PSSENSE_LED_BOOTSTRAP_TRACK=1` (experimental) adds closed-loop phase tracking while locked. Every 120
+exposures (`PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES`) the controller takes the scan token, measures the mean blob count
+at its lock (12 exposures), then with the pulse moved earlier and later by 60% of half the measured lit span (each
+settling 24 exposures, then measuring 8). The normalised imbalance (late − early) / ring size at lock time moves
+the lock towards the brighter side (gain 1.0, at most 400 µs, deadband 0.1). Blob counts rather than the lit test
+are compared, so another controller's steady light cancels out. A cycle takes about 3.4 s. Log lines are
+`event=track result=moved|centred|ring_too_small`. The probe offset is capped at 300 µs, the gain is 1.5 and the
+dead band is 0.2 (see "M3" below for why), and `score.txt` summarises probes, moves and the net shift. In
+the unit simulator, with the latency drifting 60 µs/s for 50 s (3 ms in all, 1.5× the worst drift seen on hardware),
+tracking keeps 91–92% of frames lit against 46–47% open loop. With no drift it stays put at 100% lit.
+
+`PSSENSE_LED_BOOTSTRAP_FIRST=L|R` (diagnostic) lets only the named side start the first scan; the other waits
+until it has locked (or 1200 exposures, logging `event=first_wait_timeout`).
+
+`PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1` (experimental) keeps a locked controller lit while another scans, instead of
+yielding. Its steady light is absorbed into the scanning controller's dark baseline. A controller without a
+lock still stays dark. (An earlier empty-blink-mask yield did not darken a lit controller; see the hardware
+results.) The
+`psvr2-constellation` CSV gains the columns `led_bootstrap_state` (0 idle, 1 wide, 2 narrow, 3 locked, 4 baseline),
+`led_bootstrap_fudge_us`, `led_bootstrap_pulse_us`, `led_bootstrap_scans` and `led_bootstrap_locks`.
+
+Unit tests: `tests/tests_led_phase_bootstrap.cpp` simulates a controller with unknown latency, including
+across the period wrap, partial camera visibility, a constantly lit background, loss and relock.
+
+### Hardware test
+
+Wake only the left controller for the first run. Hold it still, ring facing the headset, where all four
+cameras can see it:
+
+```sh
+cmake --build build-sense --target cli
+scripts/psvr2_sense_session.sh bootstrap-static-left \
+  ~/Code/psvr2-datasets/calibration/20260913-char-mode-12/psvr2-mode4-charuco-native-origin-candidate.json 45 \
+  "left only, static, ring facing headset"
+```
+
+Then repeat with slow movement between held positions, and then with both controllers awake.
+
+Acceptance, judged from `score.txt`. The LED bootstrap does not use the calibration at all; pose numbers are
+a bonus at this stage:
+
+- the first lock arrives within about 15 s;
+- the wide scan shows one clear peak, and the narrow scan's lit window is roughly 0.5–1.5 ms wide;
+- the locked lit fraction in `locked_status`, and the captured-frame lit fraction while locked, stay above
+  90% for a stationary controller in view;
+- the lock position (`lock_fudge_us`) is consistent across runs and restarts. If it moves between runs, the
+  clock mapping is the next thing to look at.
+
+If the wide scan never finds a peak, check `PSSENSE_FORCE_IR=1` at the same placement. If that doesn't
+show a lit ring either, the problem is framing, not timing.
+
+### Hardware results
+
+> **Load caveat (reported by the user):** a large compilation was running in the background during every session
+> from the evening of 24 September, i.e. `20260924-224609-bootstrap-slow-left` onwards (22:46–23:19: the drift-capped
+> slow-left run, all two-controller runs and the right-only run). Their host timing figures (exposure timestamp
+> residuals and ages, controller clock creep and snaps, slow-sample drops) include that load. That probably
+> includes the 1 ms/s clock excursion at 47–60 s in `231910`. The illumination passes in those runs held despite
+> it. Whether the afternoon sessions (17:46–18:05) had background load is unknown.
+>
+> The logs can't separate the two cases. Late exposures (schedule age over 30 ms) track the tracker's own slow-sample
+> drops, not the background build: `224609` (build running, 1504 drops) had 0.1% late with p99 26 ms, while
+> `180557` (afternoon, 5240 drops) had 22.5% late with p99 110 ms and `231910` (build, 9756 drops) 9.5% with p99
+> 47 ms. **The tracker's own CPU use is the largest measured timing disturbance**, so bounding its cost (plan item
+> 3) is also the main timing-robustness fix. Record future runs without background builds
+> unless the run is a deliberate stress test, and note the load in the session note.
+>
+> `20260924-175814-bootstrap-static-left` is a failed start (no Sense controller connected, exit status 1, no data);
+> `175831` is the rerun.
+
+**2026-09-24, `sessions/20260924-174601-bootstrap-static-left`** (left only, static, ring facing headset,
+45 s, commit `0a2cd3902`). Failed acceptance, but the cause is the clock mapping, not the bootstrap.
+
+- First lock at 12.9 s. The wide scan's best step was at 0–1 ms, and the narrow scan found a lit window at
+  2250–2500 µs (lock fudge 2100 µs). The first 5 s of lock were lit 808/1196 camera reports (68%), then
+  dropped to 0 lit and were declared lost at 22.2 s. The rescan locked at fudge 15725 µs (about 3 ms
+  earlier), lit only 117/1200, and was lost again at 42.9 s. Median locked lit fraction was 0.10. All four
+  cameras saw the ring whenever the pulse was in phase (captured frames: 39–41 of 174 lit per camera while
+  locked). Placement was fine.
+- Cause: the scheduling clock offset (controller minus host, `controller_now - now` in `LED_SCHEDULE`)
+  rose linearly by 5460 µs over the first 32.7 s (about 165 µs/s), then went flat. Every per-frame
+  step during the ramp is an exact multiple of 2.5 µs. That's the `±2.5 µs per sample` slew clamp in
+  `pssense_add_clock_offset_sample` catching up after the first HID report arrived about 5.4 ms late,
+  with about 66 input reports/s. It isn't real clock drift.
+- The lit position is constant in *fudge + offset* coordinates: 2375 + 1830 = 4205 µs at 11 s and
+  15750 + 5125 − 16683 = 4192 µs at 31 s. So the bootstrap measured the right phase, the ramp carried the
+  lock away, and the second narrow scan ran during the tail of the ramp. That makes it ragged and biased.
+- Fix: `PSSENSE_CLOCK_OFFSET_SNAP_US` (default 0, off) lets the smoothed offset jump to the max-tracked
+  offset when the gap exceeds the threshold, logging `CLOCK_OFFSET side=L event=snap`.
+  `psvr2_sense_session.sh` sets it to 250. `score.txt` now reports `clock offset: creep`, the settle time
+  and the snap count. A creep of more than ~100 µs after the first lock invalidates the run.
+- Also seen: occasional partially lit steps away from the main window (for example narrow 3000–3250 µs at
+  12 s, and 14000 µs at 29 s). These may be ramp artefacts; recheck them once the offset is stable.
+
+**2026-09-24, `sessions/20260924-175254-bootstrap-static-left`** (same placement, commit `af05d7ed2`,
+`PSSENSE_CLOCK_OFFSET_SNAP_US=250`). The snap works: two snaps at start-up (507 µs and 380 µs), and the offset
+then stays within ±150 µs. Close, but not yet a pass.
+
+- The wide scan had one clean peak at 12–14 ms (8/8, 8/8, 7/8). The narrow lit window was 14500–14750 µs
+  (700 µs), with the lock at fudge 14350 µs at 12.9 s. **It held for the whole run with no rescans.**
+  Lit reports per 5 s window were 78, 70, 99, 74, 80 and 99%, with a median of 0.79. Captured frames while
+  locked were about 85% lit (274/321 on camera 0). Position was tracked 77.9% of the time, against 26.4%
+  before; median pose age was 39 ms. There were 1743 two-camera fused poses and static jitter was 0.85 mm
+  median.
+- The dark frames are shared by all four cameras and come in episodes, including a 1 s blackout at 19 s.
+  They follow the **host-time exposure timestamps**, not the controller clock. `raw_exposure` in
+  `LED_SCHEDULE` has a residual of std 0.9 ms against the camera grid, with excursions of +1 to +5 ms, and
+  its per-second median wanders by ±600 µs. The ~100% lit stretches (23–26 s, 38–44 s) are exactly the
+  seconds where that residual is tight. The captured VTS exposure times sit on a 16683.03 µs grid to
+  0.4 µs, so the noise is entirely in the VTS→host mapping (`hw2mono_vts`, the exponential
+  `m_clock_offset_a2b` fed by delayed libusb IMU observations).
+- `PSVR2_ROBUST_CLOCK=1`, the existing minimum-delay `hw2mono_vts` filter already used for calibration
+  capture, targets exactly this. `psvr2_sense_session.sh` now sets it by default. `score.txt` gains an
+  `exposure timestamp residual` line: p5/median/p95 were −1081/−466/3077 µs for the first run and
+  −718/−230/1532 µs for this one.
+
+**2026-09-24, `sessions/20260924-175831-bootstrap-static-left`** (same placement, commit `adb03d70c`, snap 250 µs
+plus `PSVR2_ROBUST_CLOCK=1`). **Passes the static acceptance criteria.**
+
+- First lock at 12.9 s, with no losses and no rescans. The wide scan had one clean peak at 13–15 ms (3.5, 4.0,
+  4.0; every other step 0.0 except 16000 at 0.5). The narrow lit window was 15250–16000 µs (1200 µs), locked
+  at fudge 15350 µs. The narrow scan still has weak partial steps at its edges (14750 µs at 1.75,
+  16500 µs at 2.07).
+- Locked lit reports per 5 s window were 93, 99, 100, 100, 100 and 100%, median 1.00. Captured frames while
+  locked were 319/320 lit on every camera.
+- The exposure timestamp residual (p5/median/p95) fell from −718/−230/1532 µs to −348/−22/416 µs. Three
+  controller offset snaps at start-up (3536, 304 and 293 µs); the offset then drifted −289 µs over the run
+  without losing light.
+- Poses (bonus): position tracked 79.2%, median pose age 38 ms, static jitter 0.52 mm median (0.78 p95).
+  There were 2047 fused poses, all two-camera, because `PSSENSE_CONSTELLATION_LIVE_RECOVERY` was unset.
+  107 slow and 25 fast tracker sample drops.
+- The lock fudge was 14350 µs in the previous run and 15350 µs here. Robust clock changes the absolute
+  `hw2mono_vts` mapping (minimum-delay instead of exponential), so a shift between these two configurations
+  is expected. Repeatability still has to be judged across restarts with the same configuration.
+
+**2026-09-24, `sessions/20260924-180054-bootstrap-slow-left`** (60 s: still for 15 s, then slow moves between
+held positions; commit `6f62ebf11`). The lock held (1 scan, 1 lock, 0 lost), but it was **placed about 1 ms
+off-centre**, because a background source fooled the scoring.
+
+- Cameras 0 and 2 could see bright window panes, which gave 3–7 compact blobs with the LEDs dark. Camera 2
+  was "lit" in 56/56 wide-scan frames and in the idle frames. Every wide and narrow step therefore scored
+  at least 2.0, and the narrow "half the peak" rule accepted the whole floor: lit window 12500–817 µs
+  (5450 µs, `narrow_edge_unbounded`), lock at 14725 µs. The real plateau was 15750–16250 µs.
+- Locked lit reports per 5 s window were 76, 85, 87, 79, 80, 51, 71, 91 and 78% (median 0.79). This is
+  inflated by the two background cameras. Captured lit frames while locked: camera 1 at 355/469 and
+  camera 3 at 195/468. The movement took the controller out of some views.
+- The tracker dropped 3219 slow samples (about 100 in the static runs). Correspondence search can't keep
+  up with a moving controller; this has to be addressed with the pose-solver work.
+- Fix (bootstrap, still opt-in): every scan now starts with a **dark baseline step**. The LEDs are held off
+  for one 20-exposure step (state 4, `baseline` in the CSV), and each camera's highest blob count is
+  logged as `event=baseline blobs=...`. From then on a frame is lit only when it has at least 3 blobs above
+  that camera's baseline. This applies to scan scoring, the locked lit fraction and loss detection alike.
+  A scan now takes about 13.5 s. The baseline is fixed for the scan and the lock that follows; if the
+  headset turns so the background changes, it is only re-measured on the next rescan.
+
+**2026-09-24, `sessions/20260924-180557-bootstrap-slow-left`** (same placement with the windows in view, slow
+moves, commit `8a87ece6b`). **The dark baseline works.** Illumination under movement is close to passing;
+pose tracking is not.
+
+- Baseline `1,0,8,0`. The wide scan had one clean peak (13000: 1.0, 14000 and 15000: 4.0, 16000: 3.5, all
+  other steps ≤ 0.12). Narrow lit window 15750–16500 µs (1200 µs), centred at 16350 µs, locked at fudge
+  15850 µs. That is where the plateau really was in the previous run. 1 scan, 1 lock, 0 lost.
+- Locked lit reports per 5 s window were 69, 83, 90, 84, 64, 58, 77, 72 and 60% (median 0.72). The
+  image-based per-second lit counts, with camera 2 measured against its baseline, show two causes:
+  - Visibility: the controller left camera 3 for 12–18 s, 31–40 s and 53–57 s, and camera 2 for 21–26 s.
+  - Timing (37–49 s): lit fell to 5–8/10 on every camera at once. The exposure timestamp residual
+    swung by −0.7 to +1.5 ms within single seconds, and 749 schedules saw exposure ages over 30 ms
+    (normally ~24 ms). The machine was loaded (below). `PSVR2_ROBUST_CLOCK` limits upward offset movement
+    to 2.5 µs per IMU sample, but at 2 kHz that is 5 ms/s, so sustained USB delays still leak into the
+    mapping. Fix: `PSVR2_ROBUST_CLOCK_MAX_PPM` (default 0, unchanged) caps upward movement at a clock-drift
+    rate instead. The two clocks differ by ~20 ppm here (host fit 16683.42 µs vs VTS 16683.03 µs per
+    frame). `psvr2_sense_session.sh` sets 200 ppm.
+- **Pose tracking collapsed:** 26% of samples position-tracked, median pose age 4.5 s, 5240 slow-sample
+  drops. From 31 s to the end, cameras 0–2 were lit in 5–10 of 10 frames per second, but the tracker
+  produced almost no candidates (a handful per second at most) and no fused poses. Meanwhile the slow
+  correspondence thread dropped 20–35 samples per second in each of its five slots. The same pattern, in
+  a shorter form, appeared at 16–17 s and recovered at 18 s. Once the fast path loses the controller, the
+  slow search can't keep up with a moving target and never re-acquires. This is the tracker, not
+  illumination, and belongs with plan item 3 (joint multi-camera solve seeded by the IMU).
+
+**2026-09-24 22:46, `sessions/20260924-224609-bootstrap-slow-left`** (slow moves, commit `dc266c4ee`,
+`PSVR2_ROBUST_CLOCK_MAX_PPM=200`). **Illumination under slow movement passes.** Not a controlled comparison
+with the 18:05 run: it was evening (baseline `3,1,5,1`, window panes dimmer) and the moves differed.
+
+- 1 scan, 1 lock, 0 lost, first lock at 13.2 s. The wide scan had one peak (13000–15000 µs; every other
+  step 0 except 16000 at 0.38). Narrow lit window 15000–16250 µs (reported 1700 µs; camera 3 couldn't see
+  the controller during the narrow scan, which flattens the plateau at 3.0), locked at fudge 15350 µs.
+- Locked lit reports per 5 s window were 85, 98, 89, 95, 90, 89, 88, 99 and 92% (median 0.90). Captured
+  frames lit while locked: 466/467 on cameras 0–2, and 384/467 on camera 3, which is visibility.
+- Exposure timestamp residual std fell to 190 µs, with p99 +159 µs (18:05 run: std 372 µs, p99
+  +1159 µs); p5/median/p95 were −376/89/138 µs. Schedules projected 5 periods forward, apart from 3 frames
+  at 6 periods (the 18:05 run needed up to 12). The remaining negative tail (p1 −755 µs) is the minimum
+  filter stepping down.
+- Poses: position tracked 83.6% (18:05 run: 26.4%), median pose age 39 ms, 2778 two-camera fused poses,
+  231 disagreements, 12 jumps, 1504 slow-sample drops (18:05 run: 5240). Some candidates still flip about
+  80° (for example camera 0 at `imu_aligned_delta_deg=78`) and get rejected by the pair-agreement gate. This
+  is a correspondence ambiguity for the joint solver to settle.
+- Lock positions so far with the robust clock (fudge µs): 15350 (static), 14725 (background-biased,
+  discard), 15850 and 15350. That is within ±250 µs of 15600 across four restarts, well inside the 1 ms
+  lock pulse. The two-controller and dedicated restart runs are still to come.
+
+**2026-09-24 22:48, `sessions/20260924-224851-bootstrap-both`** (both controllers, 30 s still, then slow
+moves; commit `320ed19be`). **Left passes; right never locked**, and its retries starved the left.
+
+- Left: baseline `3,1,5,1`, one clean wide peak (14000–16000 µs at 3.0), narrow window 15750–66 µs
+  (1450 µs, across the period wrap), locked at fudge 15975 µs at 13.2 s. Locked lit 1192/1196 whenever it
+  was allowed to be lit. The exposure timestamp residual was p5/p95 −30/+31 µs, the tightest so far.
+- Right: 9 scans, 0 locks (7 `wide_peak_below_minimum`, 1 `wide_peak_not_distinct`). Its baselines were
+  `11,10,11,1`, then 17–21 blobs per camera on the next scans. The right controller really was lit during
+  its scans (170–237 candidates/s at 35–49 s), but nothing could reach baseline + 3.
+- Cause: the left controller yields correctly. It produced 0 candidates in every second where it was only
+  sent `LED_ALL_OFF`. But its light persists **90–256 ms** after the first off command (latest left
+  candidate exposure after the off was sent, per handover), from the ~58 ms look-ahead LED schedule plus
+  Bluetooth latency. The baseline settled for only 8 exposures (133 ms) and took the per-camera maximum, so
+  one leaked frame poisoned it. The 1 s failed-scan backoff then let the right retry every ~7 s, keeping the
+  left dark ~85% of the time (left position tracked 16.2%).
+- Fixes (bootstrap, opt-in):
+  - The baseline now settles for 24 exposures (400 ms, `baseline_settle_frames`) and takes the per-camera
+    **median**.
+  - After consecutive failed scans the backoff doubles (60, 120, 240, 480, then capped at 600 exposures,
+    10 s) and resets on a lock.
+  - A scan now takes about 14 s.
+- The same 90–256 ms off-latency probably exceeds the 8-exposure settle between *scan steps* too, and may
+  explain the weak partial steps at the edges of some narrow scans. Not changed yet; check the step pattern
+  before lengthening the scan.
+
+**2026-09-24 22:55, `sessions/20260924-225515-bootstrap-both`** (both; full ring held still, then normal grip
+and slow moves after ~30 s; commit `76601136a`). **Invalid as a bootstrap test: the right controller ignored
+its LED commands.**
+
+- The right Sense emitted continuously from t=0 to 47.75 s (190–240 candidates/s, i.e. every frame) even
+  though it was sent `LED_ALL_OFF` (phase 5) most of that time. Its light was in every baseline: left
+  `11,9,11,8`, right `10,9,10,8` and so on, against the `3,1,5,1` window-only background. The left still
+  locked (fudge 15975 µs, the same as the previous run), but its locked lit fraction was 0.74. The right
+  failed 3 wide scans and then locked on a bogus flat window (12500–15500 µs, 3450 µs).
+- The state began in the *previous* run (`224851`) at 34.0 s, on the right controller's first wide-scan
+  command after a baseline (phase 1, `period_id` 42, fudge 0). It persisted through all later commands and
+  across the monado restart. It ended at 47.75 s here, on a narrow-scan command (phase 1, `period_id` 9,
+  fudge 13750 µs). Its output reports were delivered normally (about 3,900 per run, no `SetReport` failures,
+  sequence number advancing). The left controller received the same command types and always obeyed
+  (0 candidates while off).
+- The user noticed the right controller's **visible status LED was off**. The driver never sets `flag2`,
+  `STATUS_LED_SET_ENABLE` or `status_led_enable`, so this is the controller's own state, probably the same
+  abnormal firmware mode. Cause unknown.
+- After ~48 s neither controller produced many candidates while commanded lit (slow-sample drops 6776).
+  That's the same tracker saturation seen in the slow-movement run, made worse by the grip change.
+- The scorer now reports `candidates while commanded off > 400 ms` per side and flags more than 20:
+  `224851` R 665 in 11 s, `225515` R 4731 in 25 s, every left run 0–1. A flagged run's baselines and scans
+  must not be used.
+
+**2026-09-24 23:00, `sessions/20260924-230002-bootstrap-both-static`** (both still, full ring; right controller
+power-cycled first; commit `3c1e722ac`). **The right-controller fault reproduced.**
+
+- Left: baseline `1,1,4,1`, locked at 13.4 s at fudge 15475 µs (window 1450 µs), 1.00 lit while allowed.
+  Lock positions so far: 15350, 15850, 15350, 15975, 15975, 15475 µs.
+- Right: its first baseline was clean (`2,1,3,1`). Wide steps 1–2 (fudge 0 and 1000 µs) were dark as
+  expected. **From step 3 (fudge 2000 µs, about 14.6 s) it was lit in every frame (about 38 blobs across four
+  cameras) at every phase and under `LED_ALL_OFF`.** The scorer flagged 620 candidates while commanded off.
+  Its later baselines were `10,9,9,10` and similar, so every scan failed.
+- The user saw the right controller's **status LED go off at about 20–30 s**.
+- The link stayed healthy: the right controller's input reports kept arriving every ~17 ms (clock sample age
+  ≤ 31 ms throughout, the same as the left), and its output reports went out normally. Nothing in the
+  commands changed at step 3 (phase 1, `period_id` 42, schedule 50–70 ms ahead, sequence number
+  advancing). The left controller receives the same command types and has never done this.
+- Working hypothesis: a controller-side fallback or fault mode (LEDs always on, status LED off). The
+  trigger is unknown. The next run isolates the right controller alone.
+
+**2026-09-24 23:02, `sessions/20260924-230238-bootstrap-static-right`** (right only, power-cycled, full ring,
+still; commit `1ce3c7fff`). **The right controller passes on its own.**
+
+- Baseline `1,0,3,1`. One peak (14000–16000 µs, wrapping into the 0 step at 2.88). Narrow window 1450 µs,
+  locked at fudge 15725 µs at 13.5 s: the same as the left controller's locks. Locked lit reports median
+  0.87 (the tracker's reports). Captured frames lit while locked: 314/315 on every camera. **0 candidates
+  while commanded off**, and the user saw the status LED stay on throughout.
+- So the always-on / status-LED-off fault needs both controllers running. It isn't a faulty right
+  controller.
+- Pose tracking failed despite good light: 77 candidates (76 from camera 2), 0 fused poses, 4860 slow-sample
+  drops. Frames show the ring clearly (6 compact blobs on camera 0, 8+ on camera 2), but also two bright
+  ceiling lamps in view (blob areas ~100 and ~1150 px). A tracker problem for plan item 3; the lamps may be
+  feeding the correspondence search.
+
+Illumination status after these runs: a single controller passes, static and under slow movement (left
+static, left slow twice, right static). Lock positions across runs and controllers: 15350–15975 µs. With
+both controllers, the handover sequence triggers a controller-side fault. That is the open illumination
+issue.
+
+**2026-09-24 23:07, `sessions/20260924-230720-bootstrap-both-yieldmask`** (both power-cycled, still, full ring,
+`PSSENSE_LED_BOOTSTRAP_YIELD_MASK=1`, commit `87af35d88`). **An empty blink mask is not an off command.**
+
+- Left scanned first. Baseline `5,3,7,2`. The wide scan had an unexpected floor (1.0–2.5 across 5000–13000 µs;
+  previous both-static run: all 0), but it still locked at 15350 µs, with a noisy narrow window (4700 µs).
+- While yielding with `masks=00000000` during the right controller's scan (13–26 s), the **left kept
+  emitting** at full rate (~900 candidates per 5 s at x ≈ −0.03 m; the scorer flagged 2311 in 14 s).
+  Positions confirm these were the left ring, not a mirror-image fit to the right ring (right at x ≈ +0.17 m).
+- The right controller, with the left steadily lit, still **scanned cleanly**: baseline `8,9,10,2` (window
+  background plus the left ring), wide peak 13000–15000 µs, narrow window 1200 µs, lock at 15600 µs, and 0
+  candidates while off. The steady light of another controller is absorbed by the dark baseline.
+- Unexplained: after the right controller locked (26.6 s), its locked lit fraction was only 0.12, with 8–14
+  candidates per 5 s until 35 s and 138–160 afterwards. The two locks were 250 µs apart, so both controllers
+  were pulsing in the same exposures.
+- Both status LEDs stayed on (user). So far the always-lit/status-LED-off fault has appeared only in
+  two-controller runs that yielded with `LED_ALL_OFF` (`224851`, `225515`, `230002`); it didn't appear in the
+  right-only run or in this one.
+- The empty-mask option is removed. It is replaced by `PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1`: a locked
+  controller stays lit (and keeps tracking) while the other scans; a controller without a lock stays
+  dark. This avoids switching a lit controller to `LED_ALL_OFF` and back.
+
+**2026-09-24 23:11, `sessions/20260924-231119-bootstrap-both-keeplock`** (both power-cycled, still, full ring,
+`PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1`, commit `ebf28f129`). **The handover works; the lock drifts.**
+
+- Both controllers locked once with clean scans and **0 candidates while off** on either side. Left: baseline
+  `2,2,3,1`, lock at 16408 µs. Right: baseline `5,8,8,2` (includes the left ring, which stayed lit), clean
+  wide peak 14000–16000 µs, narrow window 1450 µs, lock at 16225 µs. No always-lit fault.
+- Locked lit per 5 s window: left 81, 68 and 45%; right 42, 37 and 7%. With both lit, the right controller's
+  figure is confounded (the left ring is in its baseline, so any dip in the left counts against the right),
+  but the left's own decline is real.
+- Cause of the decline: slow wander in the timing chain, not jitter. The exposure timestamp residual is steady
+  within each second, but its per-second median went +636 µs (13 s) → +49 µs (33 s) → −448 µs (36 s).
+  The controllers' clock offsets moved −253 µs (left) and +524 µs (right) over the run. Together that
+  exceeds the ~±400 µs margin of a 1 ms lock pulse around a ~0.5 ms lit window.
+- Pose tracking: almost no left candidates after 14 s despite the ring being lit (81% in its first
+  locked window), with 50–200 slow-sample drops per second. Tracker saturation again, now with two rings.
+- Conclusion: an open-loop lock (a fixed fudge after one scan) isn't robust to the millisecond-scale wander
+  of the host clock mappings. The lock needs closed-loop phase tracking from brightness, and the tracker
+  needs the plan item 3 work.
+
+**2026-09-24 23:19, `sessions/20260924-231910-bootstrap-both-track`** (both power-cycled, still, full ring, 60 s,
+`PSSENSE_LED_BOOTSTRAP_KEEP_LOCK=1 PSSENSE_LED_BOOTSTRAP_TRACK=1`, commit `35cc29382`). **Two-controller
+illumination passes.** Both status LEDs stayed on.
+
+- Left: baseline `0,0,3,0`, lock at 15600 µs (13.4 s). Locked lit reports per 5 s window: 1192/1196,
+  1200/1200, 1196/1200 and 1200/1200 (median 1.00). **Captured frames lit while locked: 339/339 on every
+  camera.** Tracking: 7 probes, 4 moves (+230, +88, −400, +400 µs), final lock 15918 µs.
+- Right: baseline `12,5,11,3` (includes the left ring), clean wide peak and narrow window (1450 µs), lock at
+  15725 µs (26.7 s). Tracking: 6 probes, 4 moves, net +146 µs. Its lit-test fraction (79, 74, 68, 62%) is
+  confounded by the left ring in its baseline. Its probe reference windows averaged 11–13 blobs per camera,
+  about both rings (ring sizes 4.6 and 5.7) plus background, so the ring was present most of the time.
+- 0 candidates while commanded off on either side, and no always-lit fault.
+- Host timing under load: the tracker dropped over 1000 slow samples per 5 s from 15 s, and exposure ages
+  peaked at 94 ms. From 47 s **both controllers' clock offsets rose together by ~1 ms/s** (10.4 ms by the end,
+  66 snaps of +250–670 µs). Receive times are stamped in the IOKit callback, so the samples are genuine: the
+  controllers' device time ran fast relative to the host. The likely mechanism is the controllers
+  disciplining their clocks from the host timestamps in our output reports, which became irregular under
+  load; unconfirmed. The snap followed it, and tracking made the ±400 µs corrections at 45–60 s. The
+  left's lit fraction didn't drop.
+- Latent bug spotted: `device_ticks - device_ticks_last` is computed in `uint32_t` before widening, so the
+  "went backwards" branch can't fire. An out-of-order report would add ~1431 s to device time. Not seen in
+  this data.
+- Pose tracking remains the blocker: 353 left and 116 right candidates in 60 s, with the slow thread saturated.
+
+**Illumination status:** passes for one controller static and under slow movement, and for two controllers
+static with `KEEP_LOCK` + `TRACK`. Still to confirm: two controllers moving, and both options' behaviour
+across restarts.
+
+**2026-09-24 23:36, `sessions/20260924-233615-replay-both-static`** (both still, full ring, keep-lock + tracking,
+no background load, commit `7a5a963d1`, first `.ctd` replay recording with both controllers). **The right-controller
+fault recurred without any yield.**
+
+- Left: 1.00 lit, lock at 15975 µs, 1983 fused poses, exposure residual ±40 µs. Tracking made 3 moves (net −257 µs).
+- Right: baseline `11,10,10,1` (includes the lit left ring). The wide scan found the correct peak (14000–16000 µs,
+  mean blobs 62–65 against ~33 elsewhere). **From narrow step 9 (fudge 15500 µs, 450 µs pulse, 22.5 s) every step
+  had ~60–65 mean blobs**, so the right controller was lit continuously. It then locked on a meaningless 3.45 ms
+  window (fudge 42 µs), and the tracker found it only 3 times. The user saw its status LED go off about halfway
+  through the run.
+- So the fault doesn't need the `LED_ALL_OFF` yield: with keep-lock the right controller was never switched off
+  after lighting. Every occurrence so far (`224851`, `225515`, `230002`, `233615`) is on the right controller, while
+  it was scanning (settings changing every 20 exposures), with the left controller also connected. It hasn't occurred in
+  the right-only run or on the left controller. The triggering commands differ (wide fudge 0, wide 2000 µs, narrow
+  15500 µs).
+- Open question: role (the second controller to scan) or device (this right controller). Test: make the right
+  controller scan first.
+
+**2026-09-24 23:39, `sessions/20260924-233900-both-static-right-first`** (both still, full ring, keep-lock +
+tracking, `PSSENSE_LED_BOOTSTRAP_FIRST=R`, no background load, commit `4ace64d83`). **No fault either side.**
+
+- Right (first): baseline `2,1,3,1`, clean scans, lock at 16475 µs, 0.97 lit, 0 candidates while off.
+- Left (second): baseline `11,6,11,7` (includes the right ring), plateau 2–3 (lower because of the baseline),
+  lock at 15350 µs, 0 candidates while off. Narrow steps outside the window stayed at 0.00, so it wasn't stuck
+  on. Its 0.64 lit fraction is confounded by the right ring.
+- Neither controller faulted with the right controller scanning first (both status LEDs stayed on, per the user). That fits a right-scans-second trigger,
+  but the fault has been intermittent, so this isn't conclusive. Replay recordings use `FIRST=R`.
+- **Tracker collapse with two lit rings:** 0 fused poses in 45 s (left 8 candidates, right 108), 5854 slow-sample
+  drops, while 186/188 captured frames were lit. At the same placement in `233615` the left alone had 1983
+  fused poses. The headline replay case for M1/M2.
+
+## Joint multi-camera solve (plan item 3)
+
+Why the current tracker fails even with good light: each camera solves on its own (a fast path from
+last-frame blob labels or the predicted pose, then a slow 2D–3D correspondence search per camera). The driver
+accepts a pose only when two per-camera candidates agree within 80 mm / 35°, and then averages them. After
+optical loss only an IMU orientation prior remains. The per-camera slow searches then saturate: each keeps
+only its newest sample, and thousands of samples are dropped per run. They rarely re-acquire a moving
+controller, and they load the host enough to disturb USB/HID timing.
+
+Milestones:
+
+- **M0 – offline replay.** `psvr2_sense_session.sh` records the tracker input as `constellation.ctd`:
+  every camera's blobs, the camera world poses, each device's prior, and (packet type 3) each device's
+  tracking-source relation at every sample, including orientation-only ones. A replay tool regroups the
+  samples into exposures and runs a solver on identical input. It reports solve rate, cameras and blobs used,
+  reprojection error, static jitter, jumps and CPU time per exposure.
+- **M1 – joint tracking solve.** From a prior (last solution propagated with the IMU), project the LEDs into
+  all four cameras, associate blobs with gating, and run one robust Gauss–Newton over 6DoF on every camera's
+  correspondences together, re-associating between iterations. This replaces per-camera PnP, the pairwise
+  agreement gate and averaging. Target cost well under 1 ms per exposure.
+- **M2 – bootstrap.** Match blobs across the lower (0/1) and upper (2/3) stereo pairs by epipolar
+  distance, triangulate them to 3D, and register against the ring model with the IMU gravity prior (roughly one
+  free rotation) using a small RANSAC over 3D–3D correspondences, respecting LED normals. Then refine with M1.
+  Runs under a fixed time budget per exposure.
+- **M3 – integration.** An opt-in exposure-level path in the tracker: collect the four synchronised camera
+  samples, try M1, and fall back to M2. Push one joint pose per exposure, which the driver accepts without the
+  candidate-fusion gates. Exposures that miss the budget are skipped, not queued.
+
+### M1 replay results and an unoptimised build (2026-09-25)
+
+**Every build directory in this checkout, including `build-sense`, has an empty `CMAKE_BUILD_TYPE`,** so the whole
+tracking stack (correspondence search, blobwatch, PnP, the PSVR2 and Sense drivers) has been built without
+optimisation. Only 32 of 422 translation units carry any `-O` flag. Every live session so far used that
+`monado-cli`. `build-sense-rel` is configured with the same options and `CMAKE_BUILD_TYPE=RelWithDebInfo`
+(`-O2 -g -DNDEBUG`). The same M1 replay runs 90× faster there, so the live tracker's slow-thread saturation (thousands of dropped
+samples per run), and some of the CPU-load timing disturbance, were probably inflated by `-O0` code.
+
+M1 on `20260924-233615-replay-both-static`, left controller (`constellation_replay --m1`):
+
+| | `build-sense` (-O0) | `build-sense-rel` (-O2) |
+|---|---|---|
+| exposures solved | 1950 / 2698 (the rest are before the first LED lock at 13.4 s) | same |
+| cameras per solve | 3 (camera 3 barely sees it) | same |
+| RMS px p50 / p95 | 0.299 / 0.349 | same |
+| LED coverage p50 / p05 | 0.95 / 0.85 | same |
+| static jitter (1 s windows) p50 / p95 | 1.11 / 4.32 mm | same |
+| **CPU per solve p50 / p95 / max** | 4388 / 4544 / 4898 µs | **48 / 52 / 76 µs** |
+
+Live, the same run fused 1983 two-camera poses with 1.37 mm static jitter p50. M1 uses all three cameras that see the
+ring every frame. Its real cross-camera RMS (0.30 px) is close to the synthetic noise floor, so the rig calibration
+is consistent across cameras. M1 differs from the live per-camera candidates by 1.9 mm / 3.3° p50 (13 mm / 23° p95).
+Those candidates include the rejected single-camera solves, whose tilt is weakly constrained.
+
+**M1 coverage fix and two-controller seeds.** Coverage now counts only LEDs at least 20° inside their visibility
+cone. Edge-on LEDs, and LEDs the ring hides from itself (the Sense model's occlusion callback can't be recorded), had
+rejected correct poses at 0.73–0.79 coverage with 0.5 px RMS. On `234059` (left, slow moves) M1 then solves 2896 of
+3596 exposures, about every lit one, with 4 cameras in 2282 of them. It needed 5 recorded seeds, down from 24.
+RMS was 0.48 px p50, static jitter 0.99 mm p50 and CPU 58 µs p50. On `233900` (two rings, live collapse) there are no seeds:
+the recorder only writes fast-path per-camera poses, and every live candidate there came from the slow search.
+
+**The recorded tracking-source orientation is not a clean IMU signal.** The optical-from-IMU alignment contains
+27–54° of tilt that varies between sessions and with orientation. Fitting a fixed IMU-to-model body rotation B
+(`q_opt = A q_imu B`) still leaves the world alignment varying by 26° p50. When optical tracking is active the driver
+returns its fused, optically corrected pose (11524 of 14061 packets in `234059` were full poses). So M2 is purely
+geometric for now: stereo triangulation plus 3-point rigid registration, no gravity prior. A raw IMU orientation
+should be recorded separately before gravity is used.
+
+### M2 stereo bootstrap: replay results (2026-09-25)
+
+`stereo_bootstrap()` (`stereo_bootstrap.{hpp,cpp}`) finds a device with no prior. It pairs blob rays across cameras
+that pass within 4 mm, merges points seen by several pairs, and registers them against the LED model with a
+three-point RANSAC on pairwise distances (Kabsch). The explaining LED must face a camera that saw the point. The best
+hypotheses are refined with M1, with a stricter 0.8 px RMS limit. Synthetic tests: 30/30 found from no prior, two
+mirror-image rings separated, and 0/30 mirror-image acceptances (one appeared at 0.96 px before the stricter limit).
+
+`constellation_replay --m1` now bootstraps with M2 whenever a device isn't tracked (`--seed-recorded` keeps the old
+recorded-pose seeding). Build: `build-sense-rel`.
+
+| session | device | live (-O0 tracker) | M1 + M2 replay |
+|---|---|---|---|
+| `233900` two rings, right first | left | 8 candidates, 0 fused | 1297 solved, 3 bootstraps, 3 cameras, 0.30 px, jitter 1.0 mm |
+| | right | 108 candidates, 0 fused | 1571 solved, 25 bootstraps, 4 cameras, 0.54 px, jitter 1.4 mm |
+| `233615` two rings, right faulted always-on | left | 1983 fused (2 cameras) | 2048 solved, 3 cameras, 0.30 px, jitter 1.1 mm |
+| | right | 3 candidates | 1411 solved, 4 cameras, 0.62 px, jitter 1.5 mm |
+| `234059` left, slow moves | left | 2841 fused (2 cameras) | 2896 solved, 5 bootstraps, 4 cameras in 2284, 0.48 px, jitter 0.96 mm |
+
+Cost per exposure and device: tracking 49–58 µs p50 (≤ 173 µs max). A bootstrap attempt takes about 1 µs when
+nothing is visible, and at most 0.67 ms.
+
+Identity check: on `233615` M1's left pose matches the live left candidates to 2 mm (XR −0.086, −0.051, −0.266
+against −0.084, −0.052, −0.265), and the right ring is 25 cm to the right. On `233900` the live tracker's 8 "left"
+candidates were at the **right** ring's position (x +0.19 m): it had fitted the left model to the mirror-image
+ring. M2 places the left ring at x −0.06 and the right at x +0.19.
+
+Still missing: M3 (live integration), and the remaining recordings (two rings in the normal grip while moving; left,
+faster with occlusion) to test tracking through motion and occlusion.
+
+### M3: joint path in the live tracker (2026-09-25)
+
+`CONSTELLATION_TRACKER_JOINT=1` (opt-in, `t_constellation_tracker_joint.cpp`) replaces per-camera fast/slow
+processing. Camera threads deposit every frame, empty ones included, into an exposure assembler. One worker, keeping
+only the newest exposure, runs two phases:
+
+1. Tracked devices refine with M1 from the driver's predicted pose (3° orientation prior) and claim their blobs.
+2. Everything else enters a **bootstrap contest**: each candidate model bootstraps against the same free blobs, the
+   best fit (more matches, then lower RMS) wins and claims its blobs, and the rest retry.
+
+A freshly bootstrapped track is **tentative** until 3 consecutive solves, which adds 33 ms on re-acquisition. It claims
+blobs but pushes nothing. The Sense driver accepts `joint_camera_count > 0` samples directly: no per-camera grouping,
+agreement gate, averaging or fresh-pose jump gate. They share the fused acceptance tail
+(`pssense_commit_optical_pose_locked`: IMU alignment, LED sync, relation history), and the log gets `joint=1` on
+`CONSTELLATION_FUSED_ACCEPT`. In joint mode the recorder writes every camera sample, closing the gaps where slow
+cameras dropped out of recordings.
+
+`constellation_replay DATASET --tracker[-csv OUT]` runs a recording through the real `ConstellationTracker`
+(deterministic, fake origin and device sources), exercising assembly, the worker and pushes. Poses pushed, against the
+live per-camera fusion of the same session:
+
+| session | build (live) | live fused L / R | joint path L / R | µs per exposure |
+|---|---|---|---|---|
+| `233615` both still (right faulted) | -O0 | 1983 / 0 | 2042 / 1407 | 71 |
+| `233900` both still, right first | -O0 | 0 / 0 | 1290 / 1530 | 61 |
+| `234059` left slow | -O0 | 2841 | 2886 | 50 |
+| `234425` both grip (no FIRST=R, right faulted) | -O0 | 611 / 1598 | 604 / 3549 | 107 |
+| `000029` both grip, right first | -O2 | 2723 / 799 | 2582 / 1788 | 105 |
+| `234623` left fast | -O0 | 1186 | ~1340 | 29 |
+| `000212` left fast (right on, off-screen) | -O2 | 1649 / 174 | 2584 / 0 | 71 |
+| `000423` left fast `-2` (left only) | -O2 | 1772 | 2548 | 51 |
+
+Joint poses use 3–4 cameras. RMS p50 is 0.30–0.50 px for the left and 0.54–0.66 px for the right; the right's rig
+residual is consistently higher, worth a calibration look.
+
+Findings on the way:
+
+- **Mirror false positive.** On `000212` the right model bootstrapped the left ring (0.80 px) while the left's
+  tracking had lapsed, and tracked it for one more frame (0.93 px). The contest alone didn't stop it because the
+  left's own bootstrap failed in that exposure. Tentative confirmation removes it (right: 0 poses). It costs 0.3–2%
+  of poses on most runs, and 9% on the grip run, which needed 126 re-acquisitions.
+- **Phase-tracking probes darkened the ring.** On `000423` the narrow scan measured an inflated 1950 µs window, so
+  probes stepped ±690 µs past the real edges. The ring went dark for each 0.6 s probe side: joint-path gaps of
+  650–670 ms every ~3.4 s. Blob counts of a moving ring also change on their own between probe windows, so the lock
+  wandered ±300–400 µs. Now the offset is capped at 300 µs, the dead band is 0.2 and the gain 1.5. Simulator: 92%
+  lit under 60 µs/s drift (the gate is 90%), 100% with no drift, 92.6% with another controller lit. The proper fix is
+  to drive phase tracking from each joint pose's matched/visible LED ratio. That is per ring, and independent of
+  motion and of the other controller's light.
+- **Optimised build, live.** Slow-sample drops fell from 6514 (-O0, both grip) to 649 (-O2), and on the
+  left-only fast run from 370 to 19.
+- **Right-controller fault.** It recurred in `234425`, which scanned without `FIRST=R`: 3657 candidates while off.
+  That makes four occurrences, all with the right controller scanning second; none in three right-first runs.
+
+**First live M3 run, `sessions/20260925-001238-joint-both-grip`** (both, right first, 30 s still then grip and moves,
+`CONSTELLATION_TRACKER_JOINT=1`, -O2, commit `553ea0159`). **It failed: 0 left poses and 21 right poses**, while
+488/488 captured frames were lit. `JOINT_STATUS` showed `tracked=0` throughout and 1935 bootstraps, all
+unconfirmed. Tentative tracks push nothing, so the driver had no optical history, and its prediction was the
+orientation-only, *unaligned* IMU pose. M1 was anchored to that orientation with a 3° prior, failed, and the next
+bootstrap reset the confirmation count. The replay's fake device returned nothing before its first push, so it
+missed this. It now returns the recorded orientation-only relation as the driver does, which reproduces the
+failure offline exactly (0 / 21 poses, 852 µs per exposure). Fix: the joint path uses the device's prediction only when it
+includes a position (so it rests on optical history and is aligned); otherwise it tracks from its own last pose
+without an orientation prior. The same recording then replays to 2998 / 2410 poses (3–4 cameras, 0.40 / 0.62 px,
+110 µs per exposure), and the other recordings are unchanged.
+
+**Second live M3 run, `sessions/20260925-001537-joint-both-grip-2`** (commit `065b31fde`). Better but still low:
+177 left and 39 right joint poses, 176 of the left's logged as re-acquisitions. `JOINT_STATUS`: tracked=400,
+bootstrapped=2791. The recorded predictions show why: **the Sense driver's predicted position is right (p50 3.8 mm) but
+its predicted orientation is 50–110° off.** `pssense_get_constellation_pose` takes orientation from
+`pssense_get_corrected_imu_pose`, which applies only the fixed `T_led_imu` body correction and never the optical-world
+alignment. `optical_from_imu_orientation` is computed on every fused pose but used only in diagnostic logs. So the
+driver's predicted pose, and probably the orientation it reports to applications, mixes an optical-frame position with
+an IMU-world orientation. **This must be fixed before 6DoF goes to OpenXR (plan item 5)**; it also degraded the
+per-camera path's priors.
+
+Joint-path fix: keep a per-device alignment from every solve (`align = q_solved · q_predicted⁻¹`) and predict
+orientation as `align · q_predicted(t)`. That carries the IMU's rotation between exposures into the optical world,
+whatever world the driver uses. The replay's fake device now behaves like the driver (IMU-world orientation from the
+recording, optical position while fresh). With the previous code it reproduces this run (400 / 78 poses, against
+`tracked=400` live), and with the fix gives 2812 / 559. Other recordings: unchanged within 3%.
+
+This run also had host-timing trouble: exposure timestamp residual p5/p95 ±7 ms, and both controllers' clock offsets
+crept ~15 ms with 33–35 snaps, the same pattern as the 1 ms/s excursion in `231910`. The worker averaged ≤ 0.5 ms per
+exposure (3% of a core), so it is unlikely to be the cause; keep watching.
+
+**Driver-side fix, `PSSENSE_ALIGN_IMU_ORIENTATION=1`** (opt-in, default off). When set, and once an optical pose
+has been committed, `pssense_get_constellation_pose` turns the corrected IMU orientation into the optical world as
+`optical_from_imu_orientation · q_imu(t)`, and rotates the angular velocity the same way. That function is used
+both for the tracker's prediction (the constellation tracking source) and for `pssense_get_tracked_pose`, the grip
+and aim poses OpenXR apps get. So with the option on, both report optical position with aligned orientation.
+The alignment itself is still computed from the unaligned corrected IMU pose, so it doesn't feed back on itself.
+The per-camera candidate diagnostics are unchanged. Before the first optical commit, and with the option off, the
+orientation stays unaligned as before. Not yet tested on hardware.
+
+**Third live M3 run, `sessions/20260925-002110-joint-both-grip-3`** (commit `8c932b8d6`; `002058` before it is an
+empty failed start with no controllers connected). **The joint path works live.**
+
+| | per-camera path `000029` (same scenario) | joint path live `002110` |
+|---|---|---|
+| left fused poses | 2723 (2 cameras) | 1972 (1922 × 3 cameras, 50 × 4) |
+| right fused poses | 799 (2 cameras) | 3118 (1303 × 3, 1815 × 4) |
+| right position tracked | 26.2% | 75.5% |
+| re-acquisitions L / R | 7 / 10 | 5 / 11 |
+| disagreements, jumps | 498, 82 | 0, 0 |
+| exposure timestamp residual p5/p95 | −152 / 81 µs | −48 / 46 µs |
+
+`JOINT_STATUS`: 0 skipped exposures, 91 µs mean solve, max 1.25 ms. The tracker replay of this recording predicts
+the live result almost exactly (1974 / 3127 poses against 1972 / 3118 live).
+
+The left produced nothing from 35 to 40 s although it was lit (locked lit 1025/1200) and in view. It was bootstrapping
+the whole time: the ring was found (13–14 matches, 4 cameras, coverage 0.85) but at 1.2–1.3 px RMS, over the
+bootstrap's 0.8 px and tracking's 1.0 px limits. Per-camera residuals (`--m1 --csv` now writes `rms_camN` and
+`n_camN`) show the rig calibration's limits:
+
+| median residual px | cam0 | cam1 | cam2 | cam3 |
+|---|---|---|---|---|
+| left, accepted (`002110`) | 0.50 | 0.55 | 0.39 | 0.70 |
+| left, rejected RMS > 1 | 0.96 | 1.21 | 1.52 | 1.06 |
+| right, accepted | 0.45 | 0.87 | 0.66 | 0.71 |
+| right, rejected RMS > 1 | 0.87 | 1.63 | 2.31 | 0.71 |
+| left, accepted (`234059`) | 0.42 | 0.44 | 0.36 | 0.70 |
+
+Camera 3 sits at ~0.7 px even in good solves, and the rejected solves are mostly one camera (usually camera 2)
+going bad in part of its field of view. The per-camera path hid this because each camera fitted separately. This is
+more evidence for recapturing the rig calibration (plan item 2).
+
+**Camera dropout in M1.** When one camera's residual is at least 1.8× the median of the others in a solve over three
+or more cameras, M1 re-solves without it, starting from the first solve's pose. A failed solve takes the retry if the retry
+passes; a passed one takes it only at under 0.8× the RMS, since a miscalibrated camera biased synthetic poses by ~6 mm
+at 0.92–0.97 px. Synthetic, with camera 2 rotated 0.8°: 30/30 accepted within 3 mm / 1.5° (9/30 without dropout).
+The never-wrong test is unchanged (99/100 accepted, none wrong). Tracker replay: right-controller poses +5–14% where a
+camera misbehaves (e.g. `002110` 3127 → 3342, `001537` 559 → 638), lower RMS (e.g. `000029` right 0.62 → 0.42 px p50),
+and still 0 false right poses on `000212`. The left's 35–40 s blackout in `002110` is not rescued: three cameras were
+elevated at once there (1.1–1.5 px), which needs the calibration recapture.
+
+## Mode-4 calibration recapture (plan item 2, 2026-09-25)
+
+**Capture.** `scripts/psvr2_charuco_capture_pose.py SESSION LABEL --frames 32` captures one static pose with the
+`char-mode-12` survey settings, detects the board with the direct solver's detector and prints the session's
+coverage: usable poses per camera (at least 6 corners), which cells of a 3×3 image grid hold at least 3 corners, and
+poses shared by each camera pair. Session: `~/Code/psvr2-datasets/calibration/20260925-charuco-mode4/` (22 poses).
+
+- In mode 4 the board's light squares are only ~3 DN of 255 in ordinary room light. Averaging copes: splitting a
+  pose's 8 frames in half puts the corner noise of an 8-frame average at 0.13–0.3 px, and `--frames 32` halves it.
+  Brightness was not what limited the old calibration.
+- Coverage was. On the corner count, the September set never had a corner in the bottom third of cameras 0 and 1
+  (6/6/7/5 cells of 9). The new set has 9/8/8/9.
+- Camera 2 looks out to the headset's left and camera 3 to its right. The bottom third of cameras 0 and 1 needs the
+  board below the headset: headset overhanging a table edge, board low and about 30 cm in front. The board at 80 cm
+  gave no detections.
+
+**Solve.** `20260925-charuco-mode4-direct.json` gives fisheye RMS 0.30 / 0.23 / 0.26 / 0.26 px (old set with the same
+code: 0.37 / 0.34 / 0.37 / 0.28). Upper-camera LOO RMS is 0.29 / 0.28 px (old 0.40 / 0.29), and rig RMS is 0.37 px (old
+0.40). Focal lengths moved by up to 2.6% (camera 0 fx 187.9 → 192.7); the old fit was extrapolating its distortion
+over the uncovered half of the image. Camera poses moved by 2.9–4.9 mm and under 1°. The lower baseline is 80.2 mm.
+`20260925-charuco-mode4-native-origin-candidate.json` was built with `psvr2_tracking_charuco_native_origin.py` and
+keeps `runtime_usable: false`.
+
+**Replay.** `constellation_replay --calibration CAL.json` swaps a recording's calibration: intrinsics are replaced, and
+camera poses are re-expressed in the recorded camera-0 origin. Beware: the replay is chaotic at rounding level.
+Re-applying the *same* calibration changes the M1 solve counts by ~4% (2204 → 2301) while the RMS barely moves. Compare
+residuals, and treat count changes under ~5% as noise. On `20260925-002110-joint-both-grip-3`, old → new:
+
+| | old | new |
+| --- | --- | --- |
+| M1 per-camera RMS p50 / p95, left (cams 0–3) | 0.52/0.94, 0.56/0.80, 0.37/0.89, 0.95/1.08 | 0.34/0.50, 0.35/0.51, 0.45/0.56, 0.52/0.66 |
+| M1 per-camera RMS p50 / p95, right | 0.45/0.81, 0.85/1.10, 0.52/0.84, 0.63/0.92 | 0.45/0.91, 0.36/0.94, 0.43/0.82, 0.52/0.82 |
+| joint tracker, left pushed (RMS p50 / p95) | 1974 (0.47 / 0.80) | 2268 (0.38 / 0.50) |
+| joint tracker, right pushed (4-camera solves) | 3337 (1113) | 3392 (1726) |
+
+The left's 30–35 s blackout is gone (0 → 241 poses in that 5 s bin). The left's remaining gaps are the bootstrap at the
+start and spells when the ring was out of view. The right controller's camera 1 went from the worst camera to one of the
+best. It still needs a live run, and the held-out Sense validation from plan item 2 is still outstanding.
+
+**Live run with the new calibration** (`20260925-083326-joint-both-grip-newcal`, same moves as grip-3): R 3289 fused
+(2396 with four cameras, reproj p50 0.57 px; grip-3 had 3118, 1815 and 0.72), 0 disagreements. The left got only 1288.
+That was illumination, not calibration: its first lock came at 26.8 s, the locked lit fraction was 0.49, and the dark
+baseline was 9,8,6,8 blobs. Replaying the recording gives ~1310 left poses whatever the calibration.
+
+**The new set alone is not better everywhere.** On `grip-newcal` its per-camera residuals are 0.05–0.13 px *worse*
+than the old set's for the left (e.g. camera 0 0.43 → 0.50 px p50). The 22 new poses concentrate on the image edges,
+and camera 0's fx (192.7) overshoots. Solving the **old and new poses together** (43 poses; directory of symlinks
+`20260925-charuco-mode4-combined/`; the direct solver now follows symlinks) gives fisheye RMS
+0.34 / 0.30 / 0.32 / 0.27 px, rig 0.38 px, camera 0 fx 190.4. It is the best of the three on grip-3 and ties the old
+set on grip-newcal:
+
+| replay (joint tracker), pushed / RMS p50 | old | new | combined |
+| --- | --- | --- | --- |
+| grip-3 left | 1974 / 0.47 | 2268 / 0.38 | 2296 / 0.32 |
+| grip-3 right | 3337 / 0.69 | 3392 / 0.47 | 3443 / 0.43 |
+| grip-newcal left | 1314 / 0.40 | 1306 / 0.48 | 1318 / 0.41 |
+| grip-newcal right (4-camera) | 3166 (1959) / 0.55 | 3289 (2396) / 0.57 | 3290 (2340) / 0.55 |
+
+Use `20260925-charuco-mode4-combined-native-origin-candidate.json` (`runtime_usable: false`). Residuals of ~0.4–0.5 px
+at the image centre no longer move with the calibration, so the remaining floor is probably the LED model or blob
+centroids rather than the rig.
+
+## Background light and the other controller in the LED bootstrap (25 Sep)
+
+**The failure** (`20260925-083326-joint-both-grip-newcal`): the right locked at 13.5 s and stayed lit (keep-lock)
+while the left measured its dark baseline. The left's baseline was 9,8,6,8 blobs per camera, against 6,5,2,4 the night
+before. The blob dump shows 5.4 blobs per camera of the right's ring during it (grip-3: 2.6); the room lighting was the
+same (blinds closed, two lamps). The inflated baseline hid the left's ring. Its narrow scan peaked at 1.9 of 4 cameras,
+it locked on a 950 µs window about 600 µs late, and its ring normaliser was only 2.9 blobs. Every probe then saturated
+the imbalance at ±1 and moved ±400 µs (9 moves in 10 probes, net +778 µs). The lock left the lit window and the left
+was lit in 49% of frames (grip-3: 85%). The right's lock landed within 50 µs of the night before, so the timing itself
+had not changed.
+
+**What background blobs look like.** `constellation_replay --blobs-csv` dumps every blob with its joint-solve owner. Blobs
+matched to Sense LEDs are small and round: median 6×8 px, area p95 132 px², aspect p95 2.5. Blobs with every LED dark
+(lamps, and light round the blinds of the two windows in the left cameras' view) are large or elongated: median area
+966 px², aspect up to 6. A filter keeping blobs with longest side ≤ 16 px, area ≤ 200 px² and aspect ≤ 3 keeps 98.3–99.7%
+of LED blobs and 0–4% of dark blobs. It is `t_constellation_blob_is_led_shaped()`.
+
+**Fixes (opt-in):**
+
+- The tracker now reports a per-controller count to a new optional device callback, `push_camera_led_blob_count`. The
+  count is LED-shaped blobs no other device has claimed, plus the device's own matches. On the joint path it is sent after
+  the exposure is solved, so a tracked controller's ring is excluded. The per-camera path only has the shape filter.
+  `PSSENSE_LED_BOOTSTRAP_LED_BLOBS=1` feeds this to the bootstrap instead of raw counts; it needs
+  `CONSTELLATION_TRACKER_JOINT=1` to exclude the other ring. Offline on the failed run, during the left's baseline the
+  raw count was ~7.3 blobs per camera, 5.4 of them the right ring's. The left's LED count was ~0.3.
+- `PSSENSE_LED_BOOTSTRAP_STRICT=1` fails a narrow scan whose peak is below 2 cameras' worth of lit frames
+  (`event=narrow_peak_weak`, then the usual back-off and rescan). It also skips phase tracking when the ring added fewer
+  than 3 blobs per camera at lock.
+- Requiring two agreeing probes before moving was tried and dropped. In simulation it was worse under changing
+  background (83% lit against 97%) and could not follow 60 µs/s drift.
+
+**Caveat: `grip-newcal` and `ledblobs` ran the unoptimised build.** The session script defaulted to `build-sense`
+(-O0), and the commands for those two runs did not set `MONADO_CLI`. At -O0 the joint worker falls behind and skips
+exposures. `grip-newcal` recorded 4101 of ~4495, and `20260925-204758-joint-both-ledblobs` only 3235, falling to 5–9
+exposures per second while the left scanned. Skipped exposures send no LED-blob counts, so the left's LED-count steps
+got 1–3 reports per camera instead of 8. Even so, it locked where grip-3 did (centre 16350 µs, peak 3.75), and phase
+tracking was stable (7 probes, net +41 µs). The script now prefers `build-sense-rel`. The joint worker logs
+`JOINT_SLOW` with a time breakdown when an exposure takes over 8 ms.
+
+**Optimised re-run** (`20260925-205419-joint-both-ledblobs-rel`, LED-blob counts + strict, right ring held in view
+during the left's scan): 4201/4201 exposures processed, 0 skipped, no `JOINT_SLOW`. The left's dark baseline was
+1,2,1,5 (morning: 9,8,6,8). Its scan was clean: lit narrow steps ~20 LED blobs over three cameras, dark steps 1.5–3.5.
+It locked at centre 16350 µs, peak 3.0, window 1700 µs, the same place as grip-3. The left had 2524 fused poses, the
+most yet (grip-3: 1972), with 0 disagreements. The right had 2816, 2536 of them with four cameras. The left's phase
+tracking never ran (10× `ring_too_small`): LED counts average the ring over all four cameras, and three saw it, giving
+2.91 against the strict threshold of 3. Its probe counts also swung 4.6 → 8.8 between probes as the hand moved.
+
+So strict mode's ring threshold is 1.5 with LED-blob counts, and there is a better probe signal:
+`PSSENSE_LED_BOOTSTRAP_TRACK_COVERAGE=1` scores each probe stage by joint-solve pose coverage (matched / predicted-visible
+LEDs, capped at 1). The stage score is summed over its exposures and divided by the exposure count, so an exposure that
+does not solve scores 0. Background light and how much of the ring is in view drop out. The imbalance is normalised by
+the reference stage, and tracking is skipped when the reference scores under 0.5 (`reference_not_tracked`). In
+simulation it follows ±60 µs/s drift (>90% lit), and holds its lock with the background changing by 0–8 blobs and one
+block in four losing every solve (>95% lit).
+
+**2026-09-25 20:59, `sessions/20260925-205908-joint-both-coverage`** (LED-blob counts, strict, coverage probes,
+`FIRST=R`). **The right-controller always-lit fault, this time with the right scanning first.** The user saw its
+status LED go off.
+
+- Scan 1: the right ring was barely in view (wide peak 1.0 at 13000 µs, mean ~1 LED blob elsewhere), and the narrow
+  scan failed (`narrow_peak_below_minimum`, 0.5).
+- Scan 2 (clean baseline `0,0,0,0`): wide steps 1–3 were dark. **From wide step 4 (fudge 3000 µs, `period_id` 42) it
+  was lit in every frame at every phase** (~25 LED blobs across four cameras). The following baselines, `9,5,6,3`,
+  `7,7,2,7` and `8,6,9,7`, were taken while commanded off. Every later scan failed, and the left never got a turn
+  (idle 97%). The right was still tracked 2791 times, because its ring stayed lit.
+- So the fault isn't limited to the right scanning second. Every occurrence is still on the right controller, while it
+  is scanning, with the left connected. Onsets were: wide fudge 0 (`224851`), wide 2000 µs (`230002`), narrow 15500 µs
+  (`233615`), and now wide 3000 µs after a failed first scan. Three of the five are early wide steps at `period_id` 42.
+  The right scanned cleanly in the eight right-first runs before this one; this is the first run where it needed a
+  second scan.
+- The coverage probes went untested: neither controller locked.
+
+**2026-09-25 21:26, `sessions/20260925-212653-joint-both-coverage`** (right power-cycled; LED-blob counts, strict,
+coverage probes; right in view during the left's scan, both moving afterwards). No fault, 4201/4201 exposures, no
+`JOINT_SLOW`.
+
+- **Right: its best run yet.** Scan peak 4.0, 1700 µs window, lit fraction 0.98, 3598 fused poses (3410 of them with four
+  cameras), 0 disagreements. Coverage probes: 6 `centred`, 3 `reference_not_tracked`, and 1 move of +394 µs. That move
+  came from a single probe whose early stage solved in only 1 of 8 exposures while the hand moved. The lock stayed in
+  the window.
+- **Left:** 2151 poses (grip-3: 1972). It locked on a weak scan (narrow peak 2.0, exactly the strict minimum; window
+  700 µs), but at the usual centre of 16350 µs. Its coverage probes moved it twice (−129, −225 µs) on imbalances of
+  0.12–0.25; the other probes were `centred`, or `reference_not_tracked` once it left view. The lit fraction of 0.40 is an
+  artefact of its baseline.
+- **Why the left's scan was weak:** its dark baseline was 3,3,8,8. The blob dump shows cameras 2 and 3 saw 3–5
+  LED-shaped blobs per frame that no device owned between 13 and 14.5 s. They were the right ring, which locked at
+  13.5 s and was only picked up by the joint tracker at ~15 s (7 right-owned blobs per camera, 0.4–0.9 unowned). So
+  cameras 2 and 3 never passed the left's lit test, and only cameras 0 and 1 scored its scan.
+- Fix: with LED-blob counts, a controller now waits 1.5 s after another releases the scan token before starting its
+  own scan (`PSSENSE_LED_BOOTSTRAP_HANDOFF_MS`), so the joint tracker can claim the newly locked ring first.
+
+## Orientation, distance and rotation speed (25 Sep replays)
+
+`scripts/psvr2_sense_rotation_coverage.py` measures tracking success against controller orientation, distance and
+rotation speed. Every exposure's IMU orientation is carried into the optical world with the alignment from the nearest
+optical pose, and position is taken from that pose. Its inputs come from `constellation_replay --geometry PREFIX
+--tracking-csv --tracker-csv` (joint tracker, combined calibration). Only exposures after the first optical pose and
+within 10 s of one are counted, so the LED bootstrap does not count as a loss.
+
+**Orientation is not the limit.** The Sense ring has no front: its 17 LED normals point all round it (their mean has
+length 0.16). A first version of the script measured a "facing angle" from that mean normal, and its apparent fall-off
+past 60–90° was an artefact. The script now uses the ring plane: 0° face-on to the headset, 90° edge-on. The deliberate
+sweep `20260925-232548-rotation-sweep` (slow full roll, pitch and yaw of each controller, then flicks) tracked 87.6% (L)
+and 79.5% (R) of exposures. Every 15° bin from face-on to edge-on was 79–98% (L) and 61–88% (R), with the low right bins
+face-on. Over grip-3, left-fast-2 and coverage, no bin is consistently worse, and edge-on is as often the best as the
+worst.
+
+**Distance is.** Within ~20 cm of the headset tracking collapses: 4% (R, 118 exposures) and 56% (L, 68) in the sweep,
+15% (R) in the coverage run. At 20–50 cm it is 55–98%, varying more between runs than between bins. That fits LED
+blobs growing past the LED-shape and blob limits and the rings falling out of the cameras' shared view up close. It is
+not investigated further yet.
+
+**Rotation speed is not the limit so far.** Tracking holds at 84–100% for 180–360°/s, and the joint path has tracked
+rotations up to 650°/s (left-fast runs). Nothing above 720°/s was recorded; the flicks in the sweep peaked at ~400°/s.
+
+The remaining losses at normal distances are more likely a hand covering the ring (normal grip), or the controller
+leaving the cameras' view, than orientation.
+
+**The sweep also caught the always-lit fault on the left controller.** From ~20 s, the start of its narrow scan, the left
+ring was lit and tracked in every frame (3–6 matched blobs per camera) whatever the 450 µs scan step. Its narrow scan
+scored ~3.0 across all 21 steps (a 5.45 ms "window"), whereas the right's narrow scan in the same run shows a crisp
+1.5 ms window. So the fault is not specific to the right controller. Both occurrences today came while a controller was
+scanning. With a stuck-on ring, coverage probes read the same at every offset, so the left's 10 `centred` results are
+uninformative. Its handoff baseline was clean (`0,0,0,0`), so the 1.5 s hand-off delay worked.
+
+**Probing the stuck left controller (25 Sep, 23:31, after the sweep; `experiments/*-stuck-left-*`).** With the ring
+in view of the headset and Monado closed, `scripts/pssense_led_poke.py` showed the ring lit (8, 6, 4, 5 LED blobs per
+camera). It stayed lit, with unchanged brightness, through ~2.5 s each of: `LED_ALL_OFF`, status-LED set-enable on and
+off, phase `INIT`, `LED_ALL_ON` then off, `PRESCAN` then off, `DEBUG` then off, a re-read of calibration feature report
+0x05, and the calibration probe's force-IR hold (`pssense_hid_probe --force-ir-seconds 10`). The same tool's off
+command had darkened the healthy ring earlier that evening. **A vibration command in the same reports worked** (the user
+felt it). So in this state the controller still receives and acts on output reports, and only its tracking-LED control
+is stuck on. Nothing short of a power cycle has cleared it so far. A stuck controller keeps its ring lit, so it stays
+trackable: the sweep's left tracked 88%.
+
+## The always-lit fault: pattern, detection and fewer triggers (25 Sep)
+
+`scripts/pssense_stuck_lit_survey.py` scans every session's log for the fault. A scan step is "lit out of window" when it
+scores ≥ 1 camera with its pulse far from every healthy lock; the onset is the first of three such steps in a row. It
+finds five of the six confirmed occurrences: `224851` R, `225515` R, `230002` R, `205908` R, and `232548` L. It misses
+`233615` R, whose onset step lay inside the normal window. It also flags five unconfirmed ones on 24 Sep, some from
+before the dark baseline existed.
+
+- **Only while scanning, at an apparently random step.** Onsets fall on wide steps 3–8 and narrow steps 1–20, on both
+  controllers, at controller uptimes of 31–706 s, at any LED sequence number, and with the other controller lit or dark.
+  That is ~6 faults in ~40 scans of ~38 steps: ~15% per scan, ~0.4% per step.
+- **Never while locked**, although a locked controller re-latches its settings (a new sequence number) on every frame,
+  hundreds of thousands of times so far. The risk seems to come with changes in content (phase jumps, pulse-width
+  changes), not with latching.
+- **Not a late schedule.** In the 3 s before each onset, the schedule lead on the controller's clock was 43–59 ms (normal),
+  and the clock samples were fresh (age ≤ 25 ms).
+
+**Detection** (`PSSENSE_LED_BOOTSTRAP_STRICT=1`, needs the joint path). The tracker already reports each device's own
+matched blobs per camera frame. The bootstrap declares `stuck_lit` if the controller's own ring is solved in ≥ 25% of the
+dark baseline's camera frames, in ≥ 60% of wide-scan steps (a healthy scan: ~3 of 17), or in all but one narrow-scan
+step. A stuck controller stops scanning and probing, releases the scan token, counts as locked for the `FIRST` ordering,
+and keeps tracking. It logs `event=stuck_lit ... power-cycle the controller`.
+
+**Fewer triggers.** `PSSENSE_LED_BOOTSTRAP_HINT_US=16350` (a lit-window centre) replaces the first full scan (17 wide +
+21 narrow steps across two pulse widths) with the dark baseline plus a 13-step narrow scan of ±1.5 ms around the hint.
+Rescans then start around the last lock. If the hinted scan finds nothing it falls back to the full scan. Every lock
+centre so far lies between 15850 and 16600 µs, or just past the wrap (42–542 µs), apart from three outliers (2600,
+12850, 14225 µs). In simulation a hinted scan locks with ≤ 16 setting changes, with the hint up to 0.9 ms off, and a
+hint 5 ms off falls back and still locks.
+
+**2026-09-25 23:41, `sessions/20260925-234101-joint-both-hinted`** (hinted scans at 16350 µs, stuck-lit detection,
+LED-blob counts, strict, coverage probes; both moving after lock). No fault and no `stuck_lit`.
+
+- **Hinted scans work.** The right locked at 5.1 s (previously 13.5 s) and the left at 11.6 s (previously ~27 s). Each did one
+  13-step narrow scan with a clean 1700 µs window: centres 15975 µs (R) and 16225 µs (L), baselines `1,0,0,0`. That is 13
+  setting changes instead of 38 per controller.
+- Left 2919 fused poses, right 3313 (2403 of them with four cameras), 0 disagreements.
+- **Coverage probes were fooled by solve dropouts.** Stages read all-or-nothing (e.g. ref 1.00, early 1.00, late
+  0.00): a hand or fast motion lost every solve for the stage's 8 exposures while the ring stayed lit. The left's lock
+  moved 400 µs at a time, net −1188 µs, to 14538 µs, outside its lit window (lit fraction 0.62). A lock centred in a
+  1.4 ms window cannot go dark at ±300 µs, so these were not dimming. Fix: in coverage mode a move now also needs the
+  blob counts to agree. The dimmer side must have lost ≥ 25% of the ring's blobs; otherwise the probe logs
+  `unconfirmed`. In simulation, with one block in three losing every solve and no drift, the lock no longer moves
+  (it did before), and ±60 µs/s drift is still followed. The track log now includes each stage's blob means.
+- The scorer counts hinted scans (it counts dark baselines) and reports `stuck_lit` and hint fall-backs.
+
+**2026-09-25 23:46, `sessions/20260925-234624-head-motion`** (headset worn; 0–30 s lock, 30–60 s controllers resting
+on the desk while only the head moved, 60–90 s natural movement). Two findings.
+
+- **Controller poses are head-relative, not world poses.** The CLI creates the tracker with `params = {0}`, so the mosaic
+  has no `tracking_origin`, `CameraMosaic::getTrackingOriginPose` returns identity, and every camera pose is fixed in
+  the calibration's native camera-0 frame (the recorded camera-0 pose has zero spread over the run). Resting
+  controllers therefore "moved" 23–30 cm (median) and up to 66 cm as the head turned. It also undermines tracking during
+  head motion: the joint path's orientation prior is `align · q_IMU`, which assumes a non-rotating frame. The right had 60
+  re-acquisitions in this run. World-frame tracking needs (a) the PS VR2 head pose at each exposure as the mosaic's
+  tracking origin, and (b) the camera-0-to-head-pose transform (hand-eye), which the calibration has never had. The
+  poses and dataset do not record the head pose, so this run cannot estimate (b). A resting-controller head-motion run
+  recorded with the head pose can: world = H_i · X · C_i must stay constant.
+- **The left's LED timing slid out of its window 8 s after locking,** with its lock setting unchanged. Its host↔controller
+  clock-offset estimate rose ~900 µs between 12 and 22 s (~2.5 ms over the run), more than the ±~700 µs lit window. At
+  24–27 s the camera frames show the left ring on the desk, in view and dark, next to the lit right ring. Coverage probes
+  cannot recover this: they need the controller tracked at the reference, and 14 of 16 left probes were
+  `reference_not_tracked`. The lock never counts as lost either, because a few lit camera frames keep resetting
+  `frames_since_lit`. The left made 1401 fused poses (tracked 36%); the right made 3214. In the previous (hinted) run
+  both controllers' offset estimates jumped ~3.5 ms together at 60–65 s, which points to the host side of the mapping.
+
+## World-frame tracking and the camera-0-to-head transform (plan, 26 Sep)
+
+- `PSVR2_CONSTELLATION_WORLD=1` (CLI) gives the camera mosaic a tracking origin: the PS VR2 head pose at each exposure
+  (`XRT_INPUT_GENERIC_HEAD_POSE`; interpolated from the SLAM history, or predicted a few ms past it) composed with the
+  calibration's optional `head_from_camera0_xrt`, identity if absent. Controller poses, the joint tracker's IMU alignment
+  and the driver's predictions are then in the world, and the dataset's camera poses record head · X. Off by default.
+- `scripts/psvr2_head_from_camera0.py` estimates X from a world-frame recording in which the controllers rest while the
+  head turns. For each rest (the controller's IMU rotating < 3°/s for ≥ 1 s), head_i · X · C_i must be constant, where
+  head_i = camera0_i · X_recorded⁻¹ and C_i = camera0_i⁻¹ · world_i. It starts from the classic hand-eye solution
+  (A X = X B, rotation by aligning rotation axes, translation by linear least squares), then refines X jointly with
+  each rest's world pose (Huber). It reports the resting controllers' world spread for the recorded, initial and refined
+  X, and can write the calibration plus `head_from_camera0_xrt` (`runtime_usable` stays false). The synthetic test
+  recovers a 27°, 7 cm X within 2 mm and 0.5°, and refuses a recording without head rotation.
+- `constellation_replay --calibration CAL --recorded-calibration SESSION/calibration.json` swaps X on a world-frame
+  recording (camera 0 becomes recorded camera 0 · X_recorded⁻¹ · X_new), so a fitted X can be judged offline.
+
+**LED timing recovery.** With LED-blob counts on, coverage probes whose reference stage is not tracked now steer by the
+LED-blob imbalance (`blob_moved` / `blob_centred`) instead of skipping (`track_blob_fallback`). In simulation a lit
+window that slides 0.9 ms off the lock stays dark without it (< 30% lit) and is recovered with it (> 70%). The fast
+clock-offset excursions (~90 µs/s for ~10 s, well beyond crystal drift) are still unexplained. The max-tracker decays at
+a fixed 50 µs/s and snaps upwards, so a change in the Bluetooth latency floor could move it.
+
+**2026-09-26 00:09, `sessions/20260926-000957-head-from-camera0`** (`PSVR2_CONSTELLATION_WORLD=1`, X = identity;
+controllers resting in two spots while the head turned, nodded and tilted). Camera 0's world position varied by 5–11 cm
+(std), so the head pose is flowing into the tracker. The left made 3230 fused poses and the right 3000, with 0
+disagreements. The blob-count fallback steered the left (6 `blob_moved`, net +177 µs), and both lit fractions were
+0.69–0.75.
+
+- **Fitted head_from_camera0:** camera 0 is at (−42.5, −19.4, −104.6) mm in the head frame (4 cm left, 2 cm down, 10.5 cm
+  forward), rotated 32.8° about (−0.89, 0.44, −0.13), i.e. tipped down. The estimator used 14 left-controller rests
+  (IMU < 5°/s for ≥ 1 s, head turning 15–99°); the right's IMU never met the rest test. The resting-controller world
+  spread over those rests fell from 47 mm p50 / 455 mm p95 (identity) to 2.5 / 16.5 mm (hand-eye alone: 4.7 / 31).
+  Fitting each spot separately agrees within 0.86° and 12.7 mm, mostly along the forward axis. Written to
+  `calibration/20260926-charuco-mode4-combined-head.json` (`runtime_usable: false`).
+- **Check on the right controller, which the fit did not use:** during the second rest (62–88 s) its world position
+  varied by 5.4 mm p50 / 11.2 mm p95 (identity: 73.6 / 325.6); the left's by 4.9 / 18.0 (76.3 / 463.0). Replay pose
+  counts barely change (L 3241 → 3307, R 3058 → 3165), because the replay's stand-in driver does not reproduce the
+  live world-frame prediction.
+
+**2026-09-26 00:22, `sessions/20260926-002244-world-head-motion`** (world frame with the fitted head_from_camera0).
+
+- **World frame confirmed live.** The estimator found a 22 s rest of the left controller while the head turned up to 71°.
+  Under the live calibration its world position stayed within 4.5 mm p50 / 17.9 mm p95 (0.12 m of head movement in
+  height alone). Re-fitting on this run gives (−46.1, −18.9, −96.6) mm and 32.2°, within 9 mm and 0.6° of the first
+  fit.
+- The right did poorly: tracked 36%, 1282 poses, lit 0.42. Its hinted scan found only a weak peak (the ring was
+  probably barely in view) and fell back to the full scan, locking at 17.8 s.
+- **The right controller's IMU turns at 16–20°/s at rest, in every session since 25 Sep** (lowest-decile rotation
+  speed of its fused orientation; the left: 1.7–4°/s, up to ~10°/s in the hand-held runs). The driver applies only the
+  factory gyro bias from the calibration report, and `m_imu_3dof` estimates a bias only when fired by hand. This is why
+  the right never qualifies as "resting" for the hand-eye estimator. It also strains the joint tracker, whose
+  orientation prior is `align · q_IMU` with a 3° sigma: the right's prior is several degrees off within a few tenths of
+  a second of its last solve.
+- Fix (opt-in `PSSENSE_GYRO_BIAS_AUTO=1`): exponential (τ 0.25 s) mean and variance of the factory-corrected gyro and
+  accelerometer. While the gyro std < 0.03 rad/s, the accelerometer std < 0.1 m/s² and |a| is within 0.6 m/s² of g for
+  ≥ 0.6 s, the gyro mean becomes the bias. It is subtracted before the fusion, the angular velocity and the IMU samples
+  sent to the tracker. It logs `GYRO_BIAS side=… event=still bias_deg_s=…` once per still spell. Stillness is judged
+  from the spread of the readings, not their size, so any bias can be learnt.
+
+**2026-09-26 00:34, `sessions/20260926-003433-world-gyro-bias`** (`PSSENSE_GYRO_BIAS_AUTO=1`, world frame; both
+controllers resting in view for the first seconds).
+
+- **Gyro bias learnt as predicted:** R 19.9°/s (6.0, −18.2, 5.5), L 1.8°/s (−0.5, −0.3, −1.7), steady across every still
+  spell. With it subtracted, both controllers' resting IMU rotation (lowest decile) is ~0°/s. The right now yields rests:
+  one of 22.4 s while the head turned up to 63°, during which its world position stayed within 3.7 mm p50 / 10.7 mm p95
+  under the live head_from_camera0. A third, right-only fit gives (−48.1, −16.3, −95.3) mm and 32.2°, within ~6 mm and
+  0.6° of the first two.
+- **`stuck_lit` fired on the right** (`own_ring_lit_across_narrow_scan`) after a weak hinted scan and a failed wide pass.
+  **The user confirmed its status LED went off: a true detection**, the first of the always-lit fault by the driver.
+  The session carried on: the right tracked 71% (3463 poses) with its stuck-lit ring, and the left then scanned and
+  locked (at 32 s). (The scorer crashed on the unknown state 5; fixed.)
+- **Probes in normal movement did harm.** The left locked at a 0.79 lit fraction. One coverage probe, confirmed by blobs
+  (late coverage 0.11, blobs 6.5/7.3/2.9), moved it 400 µs early, and later probes read patterns a single window cannot
+  produce, e.g. 1.6/5.3/4.9 blobs (dark in the middle). The lock ended 1.04 ms off, at a 0.3 lit fraction; the left
+  tracked 27%. Stages are consecutive ~0.2 s windows, and a moving, turning or covered ring changes its light between
+  them. Now, in strict mode: probes start only while the controller turns slower than 20°/s (bias-corrected gyro,
+  0.25 s mean; needs `PSSENSE_GYRO_BIAS_AUTO`), and one probe moves the lock at most 200 µs (was 400), so a noisy probe
+  cannot take a centred lock (±700 µs) out of its window.
+
+**2026-09-26 00:44, `sessions/20260926-004424-world-steady-probes`** (steady-only probes, 200 µs steps; gyro bias,
+world frame). No fault.
+
+- **Left: its best world-frame run.** Tracked 76% (3718 poses), lit fraction 0.70, 11 probes with a net shift of only
+  +186 µs, static jitter 1.9 mm p50. Gyro biases were learnt again: R 19.9 → 20.1°/s, matching the previous run.
+- **Right: tracked 36%, lit 0.26, but not because of its LED timing.** Its lit fraction fell to 188/1200 before any
+  probe had moved anything, so the ring was out of view or covered for long stretches. During them, the blob-count
+  fallback moved the lock on stray blobs: 1.0/2.0/0.1 against a 4.9-blob ring cleared the 0.2 deadband. That added
+  −610 µs in six moves of at most 200 µs (the new cap held).
+- Fix: the fallback moves only if its brighter probe stage saw at least half the ring above the dark baseline
+  (`track_blob_fallback_min_fraction`, 0.5); otherwise it logs `blob_too_dim`. Applied to this run's right probes, it
+  blocks the moves made on 1–2 blobs and keeps those where a stage saw 5–9. In simulation an out-of-view ring with a
+  stray blob now never moves the lock, and a lock whose window slid 0.9 ms is still recovered.
+
+**2026-09-26 00:48, `sessions/20260926-004811-world-confirm`** (same settings as 004424).
+
+- Left: tracked 69% (3323 poses), lit 0.82, 17 probes (13 `centred`, net +313 µs), static jitter 2.0 mm p50.
+- Right: `stuck_lit` again (`own_ring_lit_at_every_phase`, from wide step 2), and it tracked 86% (4288 poses) on its
+  stuck-lit ring.
+- **The right's failed hinted scans share a signature.** In 002244, 003433 and 004811 the steps at the right timing
+  were lit in the same few frames on every camera: 3/8 at 15625 µs, then 1/8 at 15875 and 16125 µs. The ring lit
+  briefly after each setting change and then went dark, rather than the pulse missing the exposures. In the
+  successful 004424 scan the same steps were lit 8/8. Twice the full scan that followed put the right into the
+  always-lit fault (at wide steps 3 and 2). The right's hinted scan succeeded in the first run after each power cycle
+  (234101, 004424), and in 234624.
+- **Both controllers stuck at once, for the first time:** the user saw the left's status LED off at the end of 004811.
+  Its log is ordinary to the last line (locked, 17 probes, normal commands), and the detector only looks during scans,
+  so it stuck in the last moments, or at or after shutdown. At shutdown the driver stops its thread and closes the HID
+  device with the controller mid-schedule. `PSSENSE_LEDS_OFF_ON_EXIT=1` sends `LED_ALL_OFF` (a new sequence number, so
+  it latches) for ~150 ms first, to test whether that matters. A controller left stuck, or half-broken, by one session's
+  end may also explain the next session's odd hinted scan.
+- Mitigation (strict mode, `hint_retries = 1`): a failed hinted scan is retried once, after a 1 s dark pause, before
+  the full scan. Whether that avoids the fault is untested.
+
+## IMU + optical filter (plan item 4, 26 Sep)
+
+- **Recording:** datasets now carry every IMU sample the Sense driver pushes to the tracker (packet type 4; host time,
+  factory- and online-bias-corrected, IMU frame). `Device::pushImuSample` had been an empty stub and `Device::tracker`
+  was never set. `constellation_replay --imu-csv` exports them.
+- **`t_imu_optical_filter`** (constellation library, C API) is an error-state EKF with 15 error states: position,
+  velocity, orientation, gyro bias and accelerometer bias. IMU samples propagate it. An optical pose updates it at its
+  exposure time: the filter rewinds a 250 ms state history, updates, and re-propagates the buffered IMU samples. It
+  gates on Mahalanobis² > 30 (6 DOF), and re-initialises position and velocity (keeping the biases) after 0.5 s
+  without an accepted pose or after 5 consecutive rejections. It predicts forward at most 100 ms, and reports position
+  as tracked for 250 ms after the last accepted pose. The body frame is the LED model frame; gravity is −9.80665 m/s²
+  along the world y axis, so it needs `PSVR2_CONSTELLATION_WORLD=1`.
+  Synthetic tests (1 kHz IMU with biases and noise, 60 Hz poses with 1.5 mm / 0.23° noise arriving 40 ms late):
+  - "now" is within 2.1 mm and 0.08° RMS of the truth, better than the raw optical noise (2.6 mm) while also carrying
+    each pose 40 ms forward;
+  - a 0.06 rad/s gyro bias is learnt to within 0.01 rad/s;
+  - a 300 ms dropout is bridged within 2 cm and 1°;
+  - a 20 cm outlier is rejected, and 2 s hidden then re-initialises.
+- **Driver:** `PSSENSE_FILTER=1` feeds the filter the bias-corrected IMU, rotated into the LED frame by the mounting
+  angle (the inverse of `T_led_imu`), and every accepted joint pose. The pose noise is 2 mm / 0.46°, scaled up with
+  reprojection RMS above 0.5 px. The driver's pose output, which is also the joint tracker's prior, then comes from the
+  filter: position and orientation both in the world. It logs `FILTER side=… event=initialised|reinitialised|status`
+  with the update, rejection and re-initialisation counts, the last Mahalanobis² and the learnt biases.
+- **Offline evaluation:** `constellation_replay DATASET --filter-eval TRACKER.csv [--filter-out OUT.csv]` replays the
+  recorded IMU and the tracker's poses through the filter, each pose arriving 35 ms after its exposure. It hides
+  optical for 300 ms every 2 s and compares the filter at each hidden exposure with the hidden pose and with holding the
+  last pose. It also reports filter-versus-optical on visible exposures, the still accelerometer rotated into the world
+  (a gravity-axis check) and the learnt biases.
+
+**Offline, on `sessions/20260926-010135-imu-capture`** (the first recording with IMU samples). The Sense IMU arrives at
+only 66 Hz, one sample per Bluetooth report (~15 ms).
+
+- **Gravity check passes:** the ~1 g accelerometer, rotated into the world by a fresh optical orientation, reads
+  L (0.19, 9.65, −0.23) and R (−0.04, 9.59, −0.41). So the world is y-up and the IMU→LED rotation (50.27° about x) is
+  right for both sides. (A first check read R 39° off because it used orientations from before the controller was put
+  down out of view.)
+- **Tuning:** sweeping the noise densities (`FILTER_*` overrides in the replay) gives gyro 0.02 rad/s/√Hz and accel
+  0.3 m/s²/√Hz as defaults. The synthetic tests keep noise matching their 1 kHz simulation.
+- **Hidden 300 ms gaps** (filter vs holding the last pose, p50/p95): L 3.3/16 mm (6.6/218), 0.57/1.7° (2.0/43);
+  R 4.4/21 mm (59/150), 0.54/1.6° (9.6/40). With optical visible the filter is within ~1 mm p50 of the optical
+  poses.
+
+**First live run, `sessions/20260926-014505-filter-live` (`PSSENSE_FILTER=1`): tracking collapsed** (L 1 pose, R 234).
+After ~10 s, `tracked` stayed at 240 while `bootstrapped` and `unconfirmed` climbed together: every re-acquisition failed
+before its third confirming solve. Unconfirmed tracks are not pushed to the driver, so the filter got no updates. Its
+IMU-only dead-reckoned position was still reported as valid and drifted, and the joint tracker used it as the prior,
+so the tracking solves failed. The load also delayed LED scheduling from 25 to 41 ms. Fix: the filter reports position
+as valid only for 300 ms after an accepted optical pose (`position_valid_ns`); orientation stays valid. After that the
+tracker falls back on its own last solve, as before the filter. `constellation_replay --tracker-filter` now replays
+the tracker with the filter as the stand-in driver's prior (recorded IMU fused up to 30 ms past each exposure), which
+would have caught this. With the fix, pushed poses: imu-capture L 3605 → 4259 (+18%), R 1693 → 1973 (+17%);
+filter-live L 1957 → 2030, R 3866 → 4222.
+The `PSSENSE_LEDS_OFF_ON_EXIT` shutdown ran on both sides.
+
+## The always-lit fault: what the logs and PSVR2Toolkit say (26 Sep)
+
+**Command stream at the 7 located onsets** (6 right, 1 left; from `PSSENSE_TIMING`, 1.5 s before each onset):
+
+- No 32-bit device-tick wrap nearby (uptimes 31–700 s; the wrap is at ~1432 s).
+- No link trouble: output-report gaps and input-report age were within the session's normal range.
+- The schedule lead was normal (47–61 ms), the sequence numbers were unremarkable, and the phase was always PRESCAN.
+- **Every onset followed `period_id` 42 (2.1 ms) pulses within 1.5 s**: five during wide scans and two at the first
+  narrow step straight after one. No hinted scan (period 9 then 20) has faulted in ~15 so far; the "hinted" sessions'
+  faults came after a fall-back to the full scan.
+
+**PSVR2Toolkit** (`projects/psvr2_openvr_driver_ex/driver_hooks/libpad_hooks.cpp`) hooks Sony's libpad, whose LED
+protocol is command-based: `SET_SYNC_PHASE`, `SET_LEDS_IMMEDIATE`, `ADJUST_FRAME_CYCLE`, `ADJUST_BASE_TIME`,
+`ADJUST_TIME_AND_CYCLE`, `SYSTEM_CONTROL`. Sony's driver steps through PRESCAN → BROAD → BG → STABLE, and outside
+PRESCAN the cycle position is an offset, not an absolute position. The toolkit's own latency calibration:
+
+- **Never uses more than period 32** (1.6 ms): PRESCAN and BROAD 32, BG 20, STABLE 9, "for better battery life".
+- Binary-searches each edge of the lit window, with inner and outer confirmations, and changes the offset at most every
+  4 optical frames, using one `SET_SYNC_PHASE` per change.
+- Starts with the LEDs off (`LED_ALL_OFF`), like our baseline, and afterwards resets Sony's tracking so its driver
+  resumes the phase sequence.
+
+Our driver stays in PRESCAN, re-latched with a new sequence number every frame, and our full scan's wide pass uses
+the protocol maximum, period 42.
+
+**Diagnostics and experiments (all opt-in):**
+
+- `PSSENSE_INPUT_DIAG=1` watches the 24 input-report bytes the driver ignores: `unknown1..5`, `crc_failure_count`,
+  `padding` and `bt_header`. It logs every change of a byte that changes at most 20 times (flags and states) and a 10 s
+  summary of change counts (counters). This is to find a controller-side flag or rejected-report count at the next
+  onset.
+- `PSSENSE_LED_BOOTSTRAP_WIDE_PERIOD_ID=N` sets the wide scan's pulse (default 42). At 32 the lit window is still 2 ms,
+  wider than the 1 ms wide step.
+- `PSSENSE_LED_BOOTSTRAP_STRESS_RESCAN_S=N` forces a full rescan once a controller has been locked N s and the scan
+  token is free. This gives several full scans per run, so fault rates for period 42 and 32 can be compared.
+
+## Upstream fusion evaluation (28 Sep)
+
+MR 3015's sliding-window IMU + optical fusion was adapted for moving PS VR2 cameras and compared offline with the raw
+M1/M2 poses and the EKF on identical input (`constellation_replay --fusion-compare`). It matches the EKF's availability
+and is modestly better in some consistency metrics, at about 300× the cost. The recommendation is to keep M3 + EKF and
+take selected components. See `doc/macos-pssense-upstream-fusion-evaluation.md`.
+
+## Upstream front end (MR 2940) and recording for evaluation (1 Oct)
+
+Upstream's per-camera front end now runs on recordings in its own tree (`constellation_upstream_replay`, branch
+`claude/pssense-upstream-frontend-replay`). `constellation_replay --compare-frontend` scores its poses beside M1's by one
+evaluator. On synthetic recordings with ground truth, it solved 15–20% more exposures than M1, at 2–3× the pose error
+and about 10× the cost. M1's misses there come from its coverage gate on merged blobs.
+
+On the 27 Mac recordings (1 Oct) upstream solved 63% of controller-exposures against the replay M1 loop's 56%. M1 had
+the lower evaluator RMS in every session, about half the gyro residual, no jumps in the IMU sessions (upstream: 185
+rotation and 233 position jumps), and about 1/70 of the cost. The coverage gate explains 3–4% of the exposures only
+upstream solved, so it stays as it is. About 40% are the M1 loop losing lock, mostly at 1 m/s or more, which the live
+tracker with the EKF prior mostly solves. 18% are the right controller fitting at about 1 px, over the bootstrap RMS
+limit. A quarter are poses where one front end fitted the wrong controller's ring, which the evaluator does not
+detect. The decision stands: keep our front end.
+
+The right controller's fit was then measured from per-LED residuals (`constellation_replay --residuals-csv`). It is not
+specific to the right controller: both rings fit the cameras better about 1% larger than the model, as mirror-image
+per-LED offsets of about 1 mm. Offsets fitted on the 25 Sep sessions and applied to the 26 Sep ones
+(`--led-offsets`) give the right controller 10% more poses in the shipped path and take its RMS from 0.53 px to
+0.38 px. The cause is not settled between the LED model and the rig calibration. `PSSENSE_LED_CORRECTION=1` applies
+the offsets in the driver. It is off by default, belongs with the combined calibration, and has not been run on the
+headset. The hardware test is described in `doc/macos-pssense-mr2940-frontend-evaluation.md`.
+
+Recordings now carry session info, sync events, IMU timing, head-pose age and Create-button static markers (packet 5).
+See `doc/macos-pssense-mr2940-frontend-evaluation.md` for the results, the commands and recording guidance.
+
+## Session tools
+
+- `scripts/psvr2_sense_session.sh NAME CALIBRATION [DURATION] [NOTE]` records into
+  `$PSVR2_DATASETS/sessions/<timestamp>-NAME/` (default `~/Code/psvr2-datasets`). Each session gets `run.log`,
+  `poses.csv`, frames captured every sixth sequence, `env.txt`, `git.txt` and a copy of the calibration.
+  The script scores the session and appends checksums to `SHA256SUMS`.
+- `scripts/psvr2_sense_session_score.py SESSION [--json OUT]` reports:
+  - the bootstrap timeline, with bar charts of the last wide and narrow scans;
+  - locked lit fraction;
+  - per-camera lit-frame fraction from captured images, split by bootstrap state;
+  - candidates per camera, and fused poses by camera count;
+  - reacquisitions, slow/fast sample drops, and optical-vs-aligned-IMU residuals;
+  - position-tracked fraction, pose age, and static jitter.
+
+It is tested by `tests/test_psvr2_sense_session_score.py`.
+
+`constellation_replay` replays a session's `constellation.ctd` (blobs, camera poses, IMU, and, from 1 Oct, the
+packet 5 extension records) through M1/M2, the tracker, the fusion paths and other front ends. `--residuals-csv` writes
+M1's residual per LED and camera, and `--led-offsets` replays with a corrected LED model. `constellation_synth`
+writes synthetic sessions with ground truth for checking those pipelines.
