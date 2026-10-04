@@ -60,6 +60,9 @@ mkdir -p "$SESSION"
 export PSVR2_CAMERA_STREAMS="${PSVR2_CAMERA_STREAMS:-1}"
 export PSVR2_CAMERA_MODE="${PSVR2_CAMERA_MODE:-4}"
 export PSSENSE_TIMING_DIAG="${PSSENSE_TIMING_DIAG:-1}"
+# This experimental branch tests Sony-like PRESCAN/BROAD/BG phase semantics around the existing pose solver.
+# Keep it explicit so env.txt records which policy produced each session; set 0 for the historical PRESCAN-only A/B.
+export PSSENSE_NATIVE_LED_PHASES="${PSSENSE_NATIVE_LED_PHASES:-1}"
 export PSSENSE_LED_BOOTSTRAP="${PSSENSE_LED_BOOTSTRAP:-1}"
 export PSSENSE_FORCE_IR="${PSSENSE_FORCE_IR:-0}"
 export PSSENSE_CLOCK_OFFSET_SNAP_US="${PSSENSE_CLOCK_OFFSET_SNAP_US:-250}"
