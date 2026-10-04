@@ -5,6 +5,7 @@ on:
     branches:
       - macos-pssense-hid
       - macos-psvr2-camera-calibration
+      - experiment/pssense-native-led-phases
     paths:
       - .github/workflows/macos-pssense-hid.yml
       - CMakeLists.txt
