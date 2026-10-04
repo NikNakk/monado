@@ -133,14 +133,22 @@ options enabled.
 
 ### PS Sense optical 6DoF
 
+The [2026-10-04 integration](macos-pssense-6dof-integration.md) ports
+`claude/pssense-mr2940-evaluation` at `e54478a16` and its uncommitted runtime
+hookup from `~/Code/monado`. The joint solver + EKF is available here with
+`PSVR2_SENSE_6DOF=1` and an explicit calibration path. Optimised runtime builds,
+local tests and byte-identical recorded-session replay pass. OpenXR hardware
+validation and Linux CI remain pending. The note includes launch commands and
+retains the source's calibration/tracking evidence.
+
 - [`macos-pssense-6dof`](https://github.com/NikNakk/monado/tree/macos-pssense-6dof)
 - [tracking notes](https://github.com/NikNakk/monado/blob/macos-pssense-6dof/doc/pssense-optical-tracking.md)
 - [camera calibration notes](https://github.com/NikNakk/monado/blob/macos-pssense-6dof/doc/psvr2-camera-calibration.md)
 
-This is intentionally separate from the integration branch. Camera calibration,
-LED phase/bootstrap and multi-camera pose solving work, but sustained dynamic
-two-controller tracking, fusion/filtering and reacquisition are not yet reliable
-enough to merge.
+Ongoing development remains separate; the opt-in runtime port is integrated.
+Camera calibration, LED phase/bootstrap, multi-camera solving and EKF have
+recorded-session evidence. Sustained two-controller OpenXR tracking, alignment,
+reacquisition and teardown need hardware validation before default enablement.
 
 ### Earlier camera calibration
 
@@ -161,7 +169,7 @@ branch. Keep this branch mainly for development history/comparison.
    hardware, merge into the integration branch, then overlays and Chromium,
    and make it the default
    ([design](macos-client-compositor-design.md)).
-2. Make PS Sense optical 6DoF reliable enough to merge.
+2. Validate the integrated opt-in PS Sense optical 6DoF path in OpenXR.
 3. Turn existing PS VR2 camera acquisition into a calibrated passthrough/MR
    pipeline.
 4. Bring the validated FB/META foveation path to engines and Chromium,

@@ -50,6 +50,14 @@ port to Apple Silicon macOS, with PS VR2 as the primary headset.
 
 **Current integration branch:** `macos-upstream-clean`
 
+**PS Sense 6DoF integration, 2026-10-04:** the joint multi-camera solver, EKF,
+LED bootstrap, calibration/session tools and source evidence are now ported from
+`~/Code/monado`, including its uncommitted runtime hookup. The opt-in path builds
+with full-runtime optimisation and matches source recorded-session replay byte
+for byte. Local tests pass; OpenXR hardware validation and Linux CI remain
+pending. See the [integration and launch procedure](macos-pssense-6dof-integration.md).
+Display-pacing benefits from optimisation remain to be measured independently.
+
 The integration includes the
 [failed CADisplayLink-owned compositor experiment record](macos-cadisplaylink-owned-compositor-experiment.md)
 as required documentation. Its rejected execution modes remain removed;
@@ -61,8 +69,8 @@ Wine-named and Game Mode sync targets. It contains the native macOS, PS VR2, com
 depth, passthrough, foveation, service/XPC, Chromium-sharing and Wine/OpenVR
 work, plus the `standards/*` branches for `XR_KHR_generic_controller` and
 `XR_FB_foveation` / `XR_META_foveation_eye_tracked`. PS Sense optical 6DoF
-development deliberately remains on a separate branch until it is reliable
-enough to merge.
+development continues separately, with an experimental opt-in runtime port
+now available here for hardware validation.
 
 Game Mode work (client-side compositing, below) is on
 `claude/game-mode-priority-issue-xkx6m7`, which builds on the integration
@@ -86,7 +94,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Swift OpenXR wrapper | **Working** | SwiftXR provides the native Swift-facing layer used by shell experiments. |
 | Swift VR home/shell | **Working experimental shell** | SwiftXRShell provides launcher/home, immersive video, desktop/panel support and system-overlay experiments. |
 | PS Sense 3DoF, buttons and haptics | **Working experimental** | Native IOKit HID discovery/input is present on the integration branch. Sense also maps to `XR_KHR_generic_controller` (opt-in, `XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC`). |
-| PS Sense optical 6DoF | **In development on a separate branch** | Static/recorded optical results are encouraging, but dynamic tracking is not yet reliable enough to merge. |
+| PS Sense optical 6DoF | **Integrated, experimental opt-in** | Joint tracker + EKF; optimised build and replay/tests pass. OpenXR hardware validation pending. See the [launch procedure](macos-pssense-6dof-integration.md#build-and-run-the-opt-in-openxr-trial). |
 | Depth layers | **Off by default** | `XR_KHR_composition_layer_depth` is not exposed on macOS unless configured with `-DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON`; depth-aware reprojection additionally needs `XRT_COMPOSITOR_DEPTH_REPROJECTION=1`. Depth swapchain formats (including `Depth32Float_Stencil8`) are still creatable. |
 | Wine OpenXR / OpenVR | **External compatibility project** | Wine/OpenVR integration has moved to [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr); Monado retains only generic macOS/Metal runtime and resource-handoff support. |
 | SteamVR games under Wine | **External experimental path** | Game compatibility and launch policy are tracked in [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr) and the relevant OpenVR compatibility projects. |
@@ -440,7 +448,10 @@ Wine/OpenVR interaction testing.
 
 ### Optical 6DoF branch
 
-Reliable positional tracking is intentionally being developed separately:
+Tracking development and diagnostic evidence originated on a separate branch;
+the current joint + EKF path is now ported here behind `PSVR2_SENSE_6DOF=1`.
+Use the [current integration procedure](macos-pssense-6dof-integration.md) for
+runtime testing. Historical branch references:
 
 - branch:
   [`macos-pssense-6dof`](https://github.com/NikNakk/monado/tree/macos-pssense-6dof)
@@ -573,9 +584,9 @@ than a Monado runtime target. Recreating Valve's compositor is not a goal.
 ### Major capability gaps
 
 1. **Reliable PS Sense 6DoF**
-   - make the optical branch reliable in dynamic, two-controller sessions;
-   - add robust IMU/optical fusion and reacquisition;
-   - validate latency/jitter and then merge into the integration branch.
+   - validate the integrated joint + EKF path in dynamic, two-controller OpenXR sessions;
+   - confirm world alignment, reacquisition, shutdown and validity expiry on hardware;
+   - measure latency/jitter and display load before considering default enablement.
 
 2. **Passthrough / mixed reality**
    - replace the fisheye approximation with calibrated camera geometry;
@@ -651,8 +662,9 @@ branch is an alternative complete port:
 - **`claude/game-mode-priority-issue-xkx6m7`** — client-side compositing for
   Game Mode, on top of the integration branch; to be merged into it once
   handoff is validated on hardware.
-- **`macos-pssense-6dof`** — active Sense optical-position development; not
-  yet merged because reliability is the gate.
+- **`macos-pssense-6dof`** / **`claude/pssense-mr2940-evaluation`** — Sense
+  optical development and evaluation history. The latest joint + EKF path is
+  now ported here for opt-in hardware testing; default enablement remains gated.
 - **`macos-psvr2-camera-calibration`** — earlier camera/calibration work that
   underpins the Sense branch.
 - **`macos-depth-aware-reprojection`** — development history for depth-aware
@@ -716,11 +728,9 @@ Points that change behaviour or need checking on hardware:
   cost and with a Ceres dependency. Upstream's Ceres frontend (MR 2940, in
   this merge) was not benchmarked. See
   [the evaluation](https://github.com/NikNakk/monado/blob/codex/pssense-upstream-fusion-evaluation/doc/macos-pssense-upstream-fusion-evaluation.md).
-  The plan is therefore to bring that branch forward onto this upstream
-  keeping its frontend and EKF, adopting upstream pieces selectively (SO(3)
-  maths, IMU preintegration, a reprojection-based gate), not to switch to
-  upstream's tracker. Its driver has diverged by about 3000 lines, so expect
-  API conflicts in the constellation tracker and Sense driver.
+  The 2026-10-04 selective port now brings its joint frontend and EKF forward
+  onto the newer tracker API, preserving the Ceres per-camera fallback. See
+  [the completed integration](macos-pssense-6dof-integration.md).
 
 
 ### PS VR2 eye-gaze calibration tuning
