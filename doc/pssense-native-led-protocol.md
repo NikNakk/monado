@@ -109,6 +109,25 @@ The pulse-width period ID uses 50 microseconds per unit:
 - 20 -> 1.00 ms
 - 9 -> 0.45 ms
 
+## Observable HMD USB streams in the successful run
+
+The successful Windows session also provides two useful external data-plane cross-checks:
+
+- camera interface 6 / endpoint `0x87`: 60 successful reads/s, each 1,040,640 bytes;
+- interface 8 / endpoint `0x89`: 60 successful reads/s, each 36,944 bytes.
+
+The independently written Monado PSVR2 protocol definitions identify interface 8 / endpoint 9 as the LED-detector
+(`PSVR2_LD`) stream and define `USB_LD_XFER_SIZE=36944`. Thus the successful Windows log's
+`2,216,640 bytes/s` on IF8 is exactly `36944 * 60`.
+
+This is externally observable USB traffic and is a better clean-room target for future analysis than Sony internal
+optical-processing state. The prepared Toolkit oracle branch records the raw IF8 packets without assigning internal
+structure to them.
+
+The 1,040,640-byte camera packet should likewise be treated as a raw VI packet until its observable lane packing is
+validated. Toolkit's older BC4 interpretation and Monado's current diagnostic 8-byte-lane interpretation disagree on
+semantics despite the same packet size, so the capture records raw header metadata and preserves the bytes.
+
 ## Output cadence and report timestamp
 
 The successful Bluetooth capture contains 5,949 CRC-valid native A2/31 reports over 78.46 seconds. Delivery is
