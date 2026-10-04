@@ -15,6 +15,8 @@
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_time.h"
+#include "os/os_time.h"
 
 #include "psvr2.h"
 #include "psvr2_interface.h"
@@ -48,6 +50,84 @@ psvr2_get_slam_timing(struct xrt_device *xdev, struct psvr2_slam_timing *out)
 	out->valid = hmd->timestamp_samples >= TIMESTAMP_SAMPLES && hmd->last_slam_vts_ns != 0;
 	os_mutex_unlock(&hmd->data_lock);
 
+	return true;
+}
+
+bool
+psvr2_get_camera_diagnostics(struct xrt_device *xdev, struct psvr2_camera_diagnostics *out)
+{
+	if (xdev == NULL || out == NULL) {
+		return false;
+	}
+
+	*out = (struct psvr2_camera_diagnostics){0};
+	if (strstr(xdev->str, "PS VR2") == NULL) {
+		return false;
+	}
+
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	os_mutex_lock(&hmd->data_lock);
+	*out = hmd->camera_diagnostics;
+	os_mutex_unlock(&hmd->data_lock);
+
+	return true;
+}
+
+struct t_timing_event_source *
+psvr2_get_timing_event_source(struct xrt_device *xdev)
+{
+	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
+		return NULL;
+	}
+
+	return &psvr2_hmd(xdev)->camera_timing_source;
+}
+
+bool
+psvr2_set_camera_frame_sinks(struct xrt_device *xdev, struct xrt_frame_sink *const sinks[4])
+{
+	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
+		return false;
+	}
+
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	os_mutex_lock(&hmd->data_lock);
+	if (sinks == NULL) {
+		memset(hmd->camera_frame_sinks, 0, sizeof(hmd->camera_frame_sinks));
+	} else {
+		// Detach and drain before replacing sinks; never overwrite a live consumer.
+		for (size_t i = 0; i < 4; i++) {
+			if (hmd->camera_frame_sinks[i] != NULL) {
+				os_mutex_unlock(&hmd->data_lock);
+				return false;
+			}
+		}
+		memcpy(hmd->camera_frame_sinks, sinks, sizeof(hmd->camera_frame_sinks));
+	}
+	// The USB thread pushes frames outside the lock: once cleared, wait out any push still using the old sinks,
+	// so the caller may destroy them on return.
+	while (sinks == NULL && hmd->camera_frame_pushes_in_flight > 0) {
+		os_mutex_unlock(&hmd->data_lock);
+		os_nanosleep(U_TIME_1MS_IN_NS);
+		os_mutex_lock(&hmd->data_lock);
+	}
+	os_mutex_unlock(&hmd->data_lock);
+	return true;
+}
+
+bool
+psvr2_set_teardown_hook(struct xrt_device *xdev, void (*hook)(void *data), void *data)
+{
+	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
+		return false;
+	}
+
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	if (hook != NULL && hmd->teardown_hook != NULL) {
+		return false;
+	}
+	hmd->teardown_hook = hook;
+	hmd->teardown_hook_data = data;
 	return true;
 }
 

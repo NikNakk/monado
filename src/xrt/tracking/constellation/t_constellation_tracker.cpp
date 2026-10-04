@@ -24,6 +24,7 @@ namespace xrt::tracking::constellation {
 
 DEBUG_GET_ONCE_LOG_OPTION(constellation_tracker_log, "CONSTELLATION_TRACKER_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_OPTION(constellation_tracker_data_recorder_output, "CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT", "")
+DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_joint, "CONSTELLATION_TRACKER_JOINT", false)
 
 // Unconditionally present to allow warning that the feature is not enabled.
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_enable_rerun, "CONSTELLATION_TRACKER_RERUN_ENABLE", false)
@@ -608,6 +609,10 @@ Camera::processSampleFast(CameraSample &sample)
 			                    &Tcv_cam_device_predicted.value());
 		}
 
+		if (tracker->data_recorder) {
+			tracker->data_recorder->recordDeviceTracking(sample, device->id, device_predicted_relation);
+		}
+
 		auto &device_state = sample.putDeviceState(device->id);
 		device_state.Txr_world_device_prior =
 		    prior_pose_valid ? std::optional<xrt_pose>(device_predicted_relation.pose) : std::nullopt;
@@ -846,7 +851,10 @@ Camera::pushPose(CameraSample &camera_sample,
 		    .average_brightness = average_brightness, // @todo compute this
 		    .metrics = metrics,
 		};
-		t_constellation_tracker_device_push_sample(device->device, &sample);
+		if (!t_constellation_tracker_device_push_sample(device->device, &sample)) {
+			return;
+		}
+		Txr_world_device = sample.pose;
 	}
 
 	{
@@ -972,7 +980,12 @@ Device::~Device()
 
 void
 Device::pushImuSample(const xrt_imu_sample &raw_sample)
-{}
+{
+	// Recorded for offline filter work; the tracker itself does not use IMU samples yet.
+	if (this->tracker != nullptr && this->tracker->data_recorder) {
+		this->tracker->data_recorder->recordImuSample(this->id, raw_sample);
+	}
+}
 
 /*
  *
@@ -1025,6 +1038,12 @@ ConstellationTracker::ConstellationTracker(t_constellation_tracker_params *param
 	}
 
 	this->params = *params;
+
+	if (debug_get_bool_option_constellation_tracker_joint() && !this->mosaics.empty()) {
+		this->joint = std::make_unique<JointProcessor>(this, this->mosaics[0]->cameras.size());
+		CT_INFO(this, "Constellation tracker joint multi-camera path enabled (%zu cameras)",
+		        this->mosaics[0]->cameras.size());
+	}
 
 	std::string data_recorder_output = debug_get_option_constellation_tracker_data_recorder_output();
 	if (!data_recorder_output.empty()) {
@@ -1201,6 +1220,37 @@ constellation_tracker_camera_push_blobs(t_blob_sink *tbs, t_blob_observation *tb
 
 	CT_TRACE(tracker, "Received blob observation at %" PRIi64 " with %u blobs", tbo->timestamp_ns, tbo->num_blobs);
 
+	// Report raw per-camera blob counts before any pose work, so devices can judge LED illumination even
+	// when no pose can be solved. This runs for empty frames too.
+	{
+		std::shared_lock lock(tracker->device_lock);
+		for (std::unique_ptr<Device> &device : tracker->devices) {
+			if (device->device->push_camera_blob_count != nullptr) {
+				device->device->push_camera_blob_count(device->device, camera->index, tbo->timestamp_ns,
+				                                       tbo->num_blobs);
+			}
+		}
+		// The joint path reports LED-shaped counts after solving, when other devices' blobs are known.
+		if (!tracker->joint) {
+			uint32_t led_shaped = 0;
+			for (uint32_t b = 0; b < tbo->num_blobs; b++) {
+				led_shaped += t_constellation_blob_is_led_shaped(tbo->blobs[b]) ? 1 : 0;
+			}
+			for (std::unique_ptr<Device> &device : tracker->devices) {
+				if (device->device->push_camera_led_blob_count != nullptr) {
+					device->device->push_camera_led_blob_count(device->device, camera->index,
+					                                           tbo->timestamp_ns, led_shaped, 0);
+				}
+			}
+		}
+	}
+
+	// The joint path wants every camera's frame, empty ones included, so it knows when an exposure is complete.
+	if (tracker->joint) {
+		tracker->joint->push(CameraSample(*tbo, camera));
+		return;
+	}
+
 	if (tbo->num_blobs == 0) {
 		CT_TRACE(tracker, "No blobs in observation, skipping processing");
 		return;
@@ -1249,6 +1299,10 @@ constellation_tracker_node_break_apart(xrt_frame_node *node)
 	ConstellationTracker *tracker = ConstellationTracker::Get(node);
 
 	tracker->running = false;
+
+	if (tracker->joint && tracker->joint->thread.initialized) {
+		os_thread_helper_stop_and_wait(&tracker->joint->thread);
+	}
 
 	// Stop all the threads
 	for (auto &mosaic : tracker->mosaics) {
@@ -1336,4 +1390,100 @@ t_constellation_tracker_get_tracking_origin(t_constellation_tracker *raw_tracker
 	ConstellationTracker *tracker = ConstellationTracker::Get(raw_tracker);
 
 	return &tracker->tracking_origin;
+}
+
+
+/*
+ *
+ * Dataset extension records.
+ *
+ */
+
+static DataRecorder *
+recorder_of(t_constellation_tracker *raw_tracker)
+{
+	if (raw_tracker == nullptr) {
+		return nullptr;
+	}
+	return ConstellationTracker::Get(raw_tracker)->data_recorder.get();
+}
+
+void
+t_constellation_tracker_record_session_info(t_constellation_tracker *tracker, const char *json)
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr && json != nullptr) {
+		recorder->recordSessionInfo(json);
+	}
+}
+
+void
+t_constellation_tracker_record_sync_event(t_constellation_tracker *tracker,
+                                          t_constellation_device_id_t device_id,
+                                          int64_t host_ns,
+                                          enum t_constellation_sync_event_kind kind,
+                                          const double value[3])
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr) {
+		DatasetSyncEvent event{device_id, host_ns, (uint32_t)kind, {0.0, 0.0, 0.0}};
+		for (int i = 0; value != nullptr && i < 3; i++) {
+			event.value[i] = value[i];
+		}
+		recorder->recordSyncEvent(event);
+	}
+}
+
+void
+t_constellation_tracker_record_imu_timing(t_constellation_tracker *tracker,
+                                          t_constellation_device_id_t device_id,
+                                          int64_t host_ns,
+                                          int64_t device_ns,
+                                          double clock_offset_ns,
+                                          const double applied_gyro_bias[3])
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr) {
+		DatasetImuTiming timing{device_id, host_ns, device_ns, clock_offset_ns, {0.0, 0.0, 0.0}};
+		for (int i = 0; applied_gyro_bias != nullptr && i < 3; i++) {
+			timing.applied_gyro_bias[i] = applied_gyro_bias[i];
+		}
+		recorder->recordImuTiming(timing);
+	}
+}
+
+void
+t_constellation_tracker_record_head_pose(t_constellation_tracker *tracker,
+                                         int64_t timestamp_ns,
+                                         const xrt_space_relation *Txr_world_head,
+                                         int64_t source_ns,
+                                         uint32_t source_flags)
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr && Txr_world_head != nullptr) {
+		recorder->recordHeadPose(DatasetHeadPose{timestamp_ns, Txr_world_head->relation_flags,
+		                                         Txr_world_head->pose, source_ns, source_flags});
+	}
+}
+
+void
+t_constellation_tracker_record_ground_truth(t_constellation_tracker *tracker,
+                                            t_constellation_device_id_t device_id,
+                                            int64_t timestamp_ns,
+                                            const xrt_pose *Txr_world_device,
+                                            float position_sigma_m,
+                                            float orientation_sigma_rad,
+                                            uint32_t flags)
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr && Txr_world_device != nullptr) {
+		recorder->recordGroundTruth(DatasetGroundTruth{device_id, timestamp_ns, *Txr_world_device,
+		                                               position_sigma_m, orientation_sigma_rad, flags});
+	}
+}
+
+void
+t_constellation_tracker_record_annotation(t_constellation_tracker *tracker,
+                                          t_constellation_device_id_t device_id,
+                                          int64_t host_ns,
+                                          const char *text)
+{
+	if (DataRecorder *recorder = recorder_of(tracker); recorder != nullptr && text != nullptr) {
+		recorder->recordAnnotation(DatasetAnnotation{device_id, host_ns, text});
+	}
 }

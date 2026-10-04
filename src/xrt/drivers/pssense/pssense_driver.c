@@ -15,12 +15,15 @@
 #include "os/os_time.h"
 
 #include "math/m_api.h"
+#include "math/m_vec3.h"
 
 #include "tracking/t_constellation.h"
 #include "tracking/t_imu.h"
 
 #include "constellation/t_constellation_tracker.h"
 #include "constellation/t_led_sync_refinement.h"
+#include "constellation/t_led_phase_bootstrap.h"
+#include "constellation/t_imu_optical_filter.h"
 
 #include "util/u_debug.h"
 #include "util/u_device.h"
@@ -39,9 +42,12 @@
 #include "pssense_interface.h"
 #include "pssense_led_model.h"
 #include "pssense_protocol.h"
+#include "pssense_led_correction.h"
 
-#include <stdio.h>
 #include <errno.h>
+#include <inttypes.h>
+#include <limits.h>
+#include <stdio.h>
 
 
 /*!
@@ -52,8 +58,18 @@
 #define PSSENSE_TRACE(p, ...) U_LOG_XDEV_IFL_T(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_DEBUG(p, ...) U_LOG_XDEV_IFL_D(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_DEBUG_HEX(p, data, data_size) U_LOG_XDEV_IFL_D_HEX(&p->base, p->log_level, data, data_size)
+#define PSSENSE_INFO(p, ...) U_LOG_XDEV_IFL_I(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_WARN(p, ...) U_LOG_XDEV_IFL_W(&p->base, p->log_level, __VA_ARGS__)
 #define PSSENSE_ERROR(p, ...) U_LOG_XDEV_IFL_E(&p->base, p->log_level, __VA_ARGS__)
+
+#define PSSENSE_CONSTELLATION_GROUP_COUNT 32
+#define PSSENSE_CONSTELLATION_CAMERA_COUNT 4
+#define PSSENSE_CONSTELLATION_SYNC_TOLERANCE_NS U_TIME_1MS_IN_NS
+#define PSSENSE_CONSTELLATION_STALE_NS (250 * U_TIME_1MS_IN_NS)
+#define PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M 0.08f
+#define PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD (35.0f * (float)M_PI / 180.0f)
+#define PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M 0.15f
+#define PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD (60.0f * (float)M_PI / 180.0f)
 
 DEBUG_GET_ONCE_LOG_OPTION(pssense_log, "PSSENSE_LOG", U_LOGGING_INFO)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_synthetic_position, "PSSENSE_SYNTHETIC_POSITION", false)
@@ -62,6 +78,105 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_synthetic_arm_model, "PSSENSE_SYNTHETIC_ARM_M
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_input_diagnostics, "PSSENSE_INPUT_DIAGNOSTICS", false)
 
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_pc_polling_rate, "PSSENSE_SET_PC_POLLING_RATE", true)
+#ifdef XRT_OS_OSX
+#define PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT false
+#else
+#define PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT false
+#endif
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
+                           "PSSENSE_FUTURE_LED_SCHEDULE",
+                           PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lock_period_id, "PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", 20)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_clock_offset_snap_us, "PSSENSE_CLOCK_OFFSET_SNAP_US", 0)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
+DEBUG_GET_ONCE_OPTION(pssense_led_bootstrap_first, "PSSENSE_LED_BOOTSTRAP_FIRST", "")
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_align_imu_orientation, "PSSENSE_ALIGN_IMU_ORIENTATION", false)
+/*
+ * Score LED illumination by the tracker's per-controller LED-shaped blob counts (other controllers' claimed blobs,
+ * lamps and window glare removed) instead of raw blob counts.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_led_blobs, "PSSENSE_LED_BOOTSTRAP_LED_BLOBS", false)
+/*
+ * Stricter bootstrap: reject locks seen by fewer than two cameras' worth of lit frames, and track only a ring that
+ * added at least three blobs per camera (a smaller one turns every blob of noise into a full-scale correction).
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_strict, "PSSENSE_LED_BOOTSTRAP_STRICT", false)
+/*!
+ * Start the first scan as a short narrow scan around this lit-window centre (the bootstrap's centre_us; locks have
+ * been 16100-16600 us on this setup) instead of the full 38-step scan; rescans then start around the last lock.
+ * Unset (-1) for the full scan. The always-lit fault starts during scans at ~0.4% per step.
+ */
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_hint_us, "PSSENSE_LED_BOOTSTRAP_HINT_US", -1)
+//! Phase-tracking probes score joint-solve pose coverage (fraction of visible LEDs matched) instead of blob counts.
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track_coverage, "PSSENSE_LED_BOOTSTRAP_TRACK_COVERAGE", false)
+/*
+ * Estimate the gyro bias online while the controller is still (gyro and accelerometer steady, reading 1 g) and subtract
+ * it. The factory bias alone leaves the right Sense turning at 16-20 deg/s at rest in every session since 25 Sep (the
+ * left at 2-4 deg/s), which the joint tracker's 3-degree orientation prior cannot absorb for long.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_gyro_bias_auto, "PSSENSE_GYRO_BIAS_AUTO", false)
+/*
+ * Fuse the IMU and the optical poses with an error-state EKF (t_imu_optical_filter) and report its pose: position and
+ * orientation both in the optical (world) frame, predicted through optical gaps. Without it the output takes position
+ * from interpolated optical poses and orientation from the IMU fusion's own world.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_filter, "PSSENSE_FILTER", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_joint, "CONSTELLATION_TRACKER_JOINT", false)
+/*
+ * On shutdown, send LED_ALL_OFF for ~150 ms before closing, instead of stopping mid-schedule. The always-lit fault has
+ * been seen "at the end" of a session (26 Sep, left, 004811), and two of the right's failed hinted scans came in the
+ * first session after one that ended without a power cycle.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_leds_off_on_exit, "PSSENSE_LEDS_OFF_ON_EXIT", false)
+/*
+ * Log every change in the input-report bytes the driver does not otherwise use (unknown fields, the controller's CRC
+ * failure count and padding), and a periodic count of changes per byte. For finding a controller-side flag when the
+ * always-lit fault starts.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_input_diag, "PSSENSE_INPUT_DIAG", false)
+/*
+ * Pulse width (period id) for the LED bootstrap's wide scan; default MAX_PERIOD_ID (42, 2.1 ms). All seven located
+ * onsets of the always-lit fault followed period-42 pulses within 1.5 s; PSVR2Toolkit's own latency calibration never
+ * uses more than 32 (1.6 ms).
+ */
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_wide_period_id, "PSSENSE_LED_BOOTSTRAP_WIDE_PERIOD_ID", -1)
+
+/*
+ * Stress test for the always-lit fault: once a controller has been locked this many seconds, and no other controller
+ * holds the scan token, rescan it from scratch (a full scan unless PSSENSE_LED_BOOTSTRAP_HINT_US is set). 0 = off.
+ */
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_stress_rescan_s, "PSSENSE_LED_BOOTSTRAP_STRESS_RESCAN_S", 0)
+/*
+ * Move each LED of the model by its measured offset (pssense_led_correction.h) before the model goes to the
+ * constellation tracker. Replayed on recordings the corrected rings fit the cameras at 0.38-0.40 px instead of
+ * 0.42-0.53 px, and the right controller gains 10% more poses. Fitted with the combined mode-4 calibration of 25 Sep
+ * and worse with the older one. Not yet run on the headset.
+ */
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_correction, "PSSENSE_LED_CORRECTION", false)
+_Static_assert(ARRAY_SIZE(pssense_left_led_corrections) == ARRAY_SIZE(pssense_left_leds) &&
+                   ARRAY_SIZE(pssense_right_led_corrections) == ARRAY_SIZE(pssense_right_leds) &&
+                   ARRAY_SIZE(pssense_left_leds) == ARRAY_SIZE(pssense_right_leds),
+               "one correction per LED, and both rings the same size");
+
+//! Unused input-report bytes watched by PSSENSE_INPUT_DIAG.
+#define PSSENSE_INPUT_DIAG_BYTES 24
+
+//! Stillness statistics time constant, and how long the controller must be still before its mean gyro is the bias.
+#define PSSENSE_GYRO_BIAS_TAU_S 0.25
+#define PSSENSE_GYRO_BIAS_STILL_NS (600 * U_TIME_1MS_IN_NS)
+//! Still: gyro standard deviation below this (rad/s), accelerometer standard deviation below this (m/s^2), and the
+//! accelerometer within this of 1 g (m/s^2).
+#define PSSENSE_GYRO_BIAS_MAX_GYRO_STD 0.03
+#define PSSENSE_GYRO_BIAS_MAX_ACCEL_STD 0.10
+#define PSSENSE_GYRO_BIAS_MAX_GRAVITY_ERROR 0.6
+
+#define PSSENSE_FUTURE_LED_LEAD_NS (50 * U_TIME_1MS_IN_NS)
 
 static struct xrt_binding_input_pair touch_inputs_pssense[] = {
     {XRT_INPUT_TOUCH_X_CLICK, XRT_INPUT_PSSENSE_SQUARE_CLICK},
@@ -337,12 +452,27 @@ struct pssense_input_state
  * @implements t_constellation_tracker_led_model
  * @implements t_constellation_tracker_device
  */
+//! Online gyro bias state (PSSENSE_GYRO_BIAS_AUTO): exponential statistics of the factory-corrected IMU.
+struct pssense_gyro_bias
+{
+	bool enabled;
+	bool have_stats;
+	double gyro_mean[3], gyro_sq[3], accel_mean[3], accel_sq[3];
+	timepoint_ns last_ns;
+	timepoint_ns still_since_ns;
+	bool still_logged;
+	uint32_t updates;
+	struct xrt_vec3 bias;
+};
+
 struct pssense_device
 {
 	struct xrt_device base;
 	struct xrt_frame_node node;
 	struct t_timing_event_sink timing_event_sink;
 	struct t_constellation_tracker_led_model led_model;
+	//! This controller's own copy of the LEDs when PSSENSE_LED_CORRECTION moves them; led_model then points here.
+	struct t_constellation_tracker_led corrected_leds[ARRAY_SIZE(pssense_left_leds)];
 	struct t_constellation_tracker_device constellation_device;
 	struct t_constellation_tracker_tracking_source constellation_tracking_source;
 
@@ -353,6 +483,10 @@ struct pssense_device
 	struct
 	{
 		struct m_clock_windowed_skew_tracker *clock_tracker;
+		double timestamp_offset_ns;
+		double filtered_offset_ns;
+		bool has_clock_offset;
+		timepoint_ns last_clock_sample_ns;
 
 		timepoint_ns latest_imu_time_ns;
 
@@ -369,8 +503,51 @@ struct pssense_device
 
 	struct
 	{
+		struct pssense_constellation_candidate_group
+		{
+			int64_t timestamp_ns;
+			bool emitted;
+			bool disagreement_recorded;
+			bool present[PSSENSE_CONSTELLATION_CAMERA_COUNT];
+			struct t_constellation_tracker_sample samples[PSSENSE_CONSTELLATION_CAMERA_COUNT];
+		} candidate_groups[PSSENSE_CONSTELLATION_GROUP_COUNT];
+		uint32_t next_candidate_group;
+		uint64_t candidate_count;
+		uint64_t camera_candidate_count[PSSENSE_CONSTELLATION_CAMERA_COUNT];
+		uint64_t fused_pose_count;
+		uint64_t disagreement_count;
+		uint64_t jump_rejection_count;
+		int64_t last_optical_timestamp_ns;
+		int64_t last_fused_timestamp_ns;
+		uint32_t last_fused_camera_count;
+		struct xrt_pose last_fused_pose;
+		bool have_last_fused_pose;
+
+		/* World-space rotation that aligns the corrected IMU orientation to trusted optical orientation. */
+		struct xrt_quat optical_from_imu_orientation;
+		bool have_optical_from_imu_orientation;
+		int64_t optical_from_imu_timestamp_ns;
+
 		struct m_relation_history *imu_relation_history;
 		struct m_imu_3dof fusion;
+
+		//! Online gyro bias (PSSENSE_GYRO_BIAS_AUTO): exponential statistics of the factory-corrected IMU.
+		struct pssense_gyro_bias gyro_bias;
+
+		//! PSSENSE_INPUT_DIAG: last value and change count of each watched byte, and when the summary last
+		//! printed. PSSENSE_LED_BOOTSTRAP_STRESS_RESCAN_S: when the current lock began (0 when not locked).
+		timepoint_ns stress_locked_since_ns;
+		uint32_t stress_rescans;
+
+		bool input_diag;
+		bool input_diag_have;
+		uint8_t input_diag_last[PSSENSE_INPUT_DIAG_BYTES];
+		uint32_t input_diag_changes[PSSENSE_INPUT_DIAG_BYTES];
+		timepoint_ns input_diag_summary_ns;
+
+		//! PSSENSE_FILTER: IMU + optical EKF; NULL when off. Locked by controller_thread.
+		struct t_imu_optical_filter *filter;
+		uint64_t filter_last_logged_updates;
 		struct xrt_pose pose;
 
 		uint32_t received_frames;
@@ -388,6 +565,7 @@ struct pssense_device
 
 		bool use_constellation;
 		struct t_constellation_tracker *constellation_tracker;
+		struct xrt_tracking_origin *tracking_origin_before_constellation;
 		t_constellation_device_id_t constellation_device_id;
 		struct xrt_imu_sink *constellation_imu_sink;
 		struct m_relation_history *constellation_relation_history;
@@ -398,6 +576,27 @@ struct pssense_device
 		bool led_sync_sample_needs_marking;
 		bool led_sync_sample_needs_sending;
 		struct t_led_sync_sample latest_led_sync_sample;
+
+		/*!
+		 * Opt-in brightness-driven LED phase bootstrap (PSSENSE_LED_BOOTSTRAP=1). Replaces the pose-driven
+		 * @ref t_led_sync_refinement while enabled. Locked by controller_thread.
+		 */
+		bool use_led_bootstrap;
+		//! Feed the bootstrap LED-shaped per-controller counts rather than raw blob counts.
+		bool led_bootstrap_led_blobs;
+		//! PSSENSE_LED_BOOTSTRAP_STRICT is set.
+		bool led_bootstrap_strict;
+		struct t_led_phase_bootstrap led_bootstrap;
+		//! Output generation last programmed into the LED settings.
+		uint32_t led_bootstrap_programmed_generation;
+		//! Held dark (and frozen) because another controller owns the scan.
+		bool led_bootstrap_yielding;
+		uint32_t led_bootstrap_status_frames;
+		//! The LED bootstrap state and phase last written to a recorded dataset, to record only changes.
+		uint32_t recorded_led_state;
+		int64_t recorded_led_fudge_ns;
+		//! Exposures spent waiting for the PSSENSE_LED_BOOTSTRAP_FIRST side to lock before our first scan.
+		uint32_t led_bootstrap_first_wait_frames;
 
 		struct xrt_pose T_led_imu;
 	} tracking;
@@ -428,6 +627,11 @@ struct pssense_device
 		uint64_t vibration_end_timestamp_ns;
 
 		bool send_trigger_feedback;
+
+		//! PSSENSE_LEDS_OFF_ON_EXIT: shutting down; send LED_ALL_OFF (latched with exit_led_sequence) until
+		//! closed.
+		bool exiting;
+		uint8_t exit_led_sequence;
 		enum pssense_adaptive_trigger_mode trigger_feedback_mode;
 	} output;
 
@@ -509,20 +713,99 @@ crc32_le(uint32_t crc, uint8_t const *p, size_t len)
 }
 
 static void
+pssense_add_clock_offset_sample_locked_experimental(struct pssense_device *pssense, double offset_ns)
+{
+	if (!pssense->timing.has_clock_offset) {
+		pssense->timing.timestamp_offset_ns = offset_ns;
+		pssense->timing.filtered_offset_ns = offset_ns;
+		pssense->timing.has_clock_offset = true;
+	} else {
+		uint64_t now_ns = os_monotonic_get_ns();
+		double elapsed_ns = (double)(now_ns - pssense->timing.last_clock_sample_ns);
+
+		// Counter drift at 5e-5 per ns elapsed.
+		// See: PSVR2Toolkit/projects/psvr2_openvr_driver_ex/libpad_hooks.cpp
+		pssense->timing.timestamp_offset_ns -= elapsed_ns * 5.0e-5;
+
+		// Max-tracking: keep the largest (least-negative) observed offset.
+		if (pssense->timing.timestamp_offset_ns < offset_ns) {
+			pssense->timing.timestamp_offset_ns = offset_ns;
+		}
+
+		// Smooth: limit rate of change to ±2500ns (±2.5µs) per sample.
+		double delta = pssense->timing.timestamp_offset_ns - pssense->timing.filtered_offset_ns;
+
+		/*
+		 * Opt-in (PSSENSE_CLOCK_OFFSET_SNAP_US > 0): jump straight to the max-tracked offset when the
+		 * smoothed one lags it by more than the threshold. The first report can arrive milliseconds late,
+		 * and at ±2.5µs per sample the smoothed offset then creeps for tens of seconds, sliding every
+		 * scheduled LED pulse against the camera exposures by the same amount.
+		 */
+		long snap_us = debug_get_num_option_pssense_clock_offset_snap_us();
+		if (snap_us > 0 && fabs(delta) > (double)snap_us * 1000.0) {
+			PSSENSE_INFO(pssense, "CLOCK_OFFSET side=%c event=snap delta_us=%.1f",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', delta / 1000.0);
+			const double value[3] = {delta, 0.0, 0.0};
+			t_constellation_tracker_record_sync_event(
+			    pssense->tracking.constellation_tracker, pssense->tracking.constellation_device_id,
+			    (int64_t)os_monotonic_get_ns(), T_CONSTELLATION_SYNC_EVENT_CLOCK_SNAP, value);
+		} else {
+			delta = CLAMP(delta, -2500.0, 2500.0);
+		}
+
+		pssense->timing.filtered_offset_ns += delta;
+
+		t_led_sync_push_host_device_clock_offset(&pssense->tracking.led_sync_refinement,
+		                                         (time_duration_ns)(pssense->timing.filtered_offset_ns));
+	}
+	pssense->timing.last_clock_sample_ns = os_monotonic_get_ns();
+}
+
+static void
 pssense_add_clock_offset_sample_locked(struct pssense_device *pssense, timepoint_ns local_ns, timepoint_ns remote_ns)
 {
-	m_clock_windowed_skew_tracker_push(pssense->timing.clock_tracker, local_ns, remote_ns);
-
-	time_duration_ns skew_ns;
-	if (m_clock_windowed_skew_tracker_get_skew(pssense->timing.clock_tracker, &skew_ns)) {
-		t_led_sync_push_host_device_clock_offset(&pssense->tracking.led_sync_refinement, -skew_ns);
+	if (debug_get_bool_option_pssense_led_bootstrap() || debug_get_bool_option_pssense_future_led_schedule()) {
+		pssense_add_clock_offset_sample_locked_experimental(pssense, (double)(remote_ns - local_ns));
+	} else {
+		m_clock_windowed_skew_tracker_push(pssense->timing.clock_tracker, local_ns, remote_ns);
+		time_duration_ns skew_ns;
+		if (m_clock_windowed_skew_tracker_get_skew(pssense->timing.clock_tracker, &skew_ns)) {
+			pssense->timing.has_clock_offset = true;
+			pssense->timing.filtered_offset_ns = -skew_ns;
+			t_led_sync_push_host_device_clock_offset(&pssense->tracking.led_sync_refinement, -skew_ns);
+		}
 	}
+}
+static bool
+pssense_host_ts_to_device_experimental(struct pssense_device *pssense,
+                                       timepoint_ns host_timestamp_ns,
+                                       timepoint_ns *out_device_timestamp_ns)
+{
+	if (!pssense->timing.has_clock_offset) {
+		return false;
+	}
+
+	switch (pssense->tracking.latest_led_sync_sample.timestamp_mode) {
+	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_INVALID:
+	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_DEVICE_HOST_LATENCY: {
+		*out_device_timestamp_ns = host_timestamp_ns + (timepoint_ns)(pssense->timing.filtered_offset_ns) +
+		                           pssense->tracking.latest_led_sync_sample.timestamp.device_host_latency_ns;
+		return true;
+	}
+	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_HOST_DEVICE_CLOCK_OFFSET: {
+		*out_device_timestamp_ns =
+		    host_timestamp_ns + pssense->tracking.latest_led_sync_sample.timestamp.host_device_clock_offset_ns;
+		return true;
+	}
+	}
+
+	return false;
 }
 
 static bool
-pssense_host_ts_to_device(struct pssense_device *pssense,
-                          timepoint_ns host_timestamp_ns,
-                          timepoint_ns *out_device_timestamp_ns)
+pssense_host_ts_to_device_upstream(struct pssense_device *pssense,
+                                   timepoint_ns host_timestamp_ns,
+                                   timepoint_ns *out_device_timestamp_ns)
 {
 	switch (pssense->tracking.latest_led_sync_sample.timestamp_mode) {
 	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_INVALID:
@@ -547,9 +830,46 @@ pssense_host_ts_to_device(struct pssense_device *pssense,
 }
 
 static bool
-pssense_device_ts_to_host(struct pssense_device *pssense,
-                          timepoint_ns device_timestamp_ns,
-                          timepoint_ns *out_host_timestamp_ns)
+pssense_host_ts_to_device(struct pssense_device *pssense,
+                          timepoint_ns host_timestamp_ns,
+                          timepoint_ns *out_device_timestamp_ns)
+{
+	if (debug_get_bool_option_pssense_led_bootstrap() || debug_get_bool_option_pssense_future_led_schedule()) {
+		return pssense_host_ts_to_device_experimental(pssense, host_timestamp_ns, out_device_timestamp_ns);
+	}
+	return pssense_host_ts_to_device_upstream(pssense, host_timestamp_ns, out_device_timestamp_ns);
+}
+
+static bool
+pssense_device_ts_to_host_experimental(struct pssense_device *pssense,
+                                       timepoint_ns device_timestamp_ns,
+                                       timepoint_ns *out_host_timestamp_ns)
+{
+	if (!pssense->timing.has_clock_offset) {
+		return false;
+	}
+
+	switch (pssense->tracking.latest_led_sync_sample.timestamp_mode) {
+	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_INVALID:
+	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_DEVICE_HOST_LATENCY: {
+		*out_host_timestamp_ns = device_timestamp_ns - (timepoint_ns)(pssense->timing.filtered_offset_ns) -
+		                         pssense->tracking.latest_led_sync_sample.timestamp.device_host_latency_ns;
+		return true;
+	}
+	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_HOST_DEVICE_CLOCK_OFFSET: {
+		*out_host_timestamp_ns = device_timestamp_ns -
+		                         pssense->tracking.latest_led_sync_sample.timestamp.host_device_clock_offset_ns;
+		return true;
+	}
+	}
+
+	return false;
+}
+
+static bool
+pssense_device_ts_to_host_upstream(struct pssense_device *pssense,
+                                   timepoint_ns device_timestamp_ns,
+                                   timepoint_ns *out_host_timestamp_ns)
 {
 	switch (pssense->tracking.latest_led_sync_sample.timestamp_mode) {
 	case T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_INVALID:
@@ -571,14 +891,28 @@ pssense_device_ts_to_host(struct pssense_device *pssense,
 	return false;
 }
 
+static bool
+pssense_device_ts_to_host(struct pssense_device *pssense,
+                          timepoint_ns device_timestamp_ns,
+                          timepoint_ns *out_host_timestamp_ns)
+{
+	if (debug_get_bool_option_pssense_led_bootstrap() || debug_get_bool_option_pssense_future_led_schedule()) {
+		return pssense_device_ts_to_host_experimental(pssense, device_timestamp_ns, out_host_timestamp_ns);
+	}
+	return pssense_device_ts_to_host_upstream(pssense, device_timestamp_ns, out_host_timestamp_ns);
+}
+
 /*!
  * Reads one packet from the device, wrapping no data as EAGAIN. Does not block.
  */
 static int
-pssense_read_packet_data(struct pssense_device *pssense, uint8_t *buffer, size_t size)
+pssense_read_packet_data(struct pssense_device *pssense,
+                         uint8_t *buffer,
+                         size_t size,
+                         timepoint_ns *out_receive_timestamp_ns)
 {
 	// Poll, don't block. Outer thread needs to run quick
-	int ret = os_hid_read(pssense->hid, buffer, size, 0);
+	int ret = os_hid_read_with_timestamp(pssense->hid, buffer, size, 0, out_receive_timestamp_ns);
 
 	// No data yet
 	if (ret == 0) {
@@ -591,6 +925,74 @@ pssense_read_packet_data(struct pssense_device *pssense, uint8_t *buffer, size_t
 	}
 
 	return ret;
+}
+
+/*!
+ * Track exponential mean and variance of the factory-corrected gyro and accelerometer; while they show the controller
+ * still for long enough, take the gyro mean as the bias. Stillness is judged from the spread of the readings, not
+ * their size, so it works whatever the bias is.
+ */
+static void
+pssense_update_gyro_bias(struct pssense_device *pssense,
+                         timepoint_ns now_ns,
+                         const struct xrt_vec3 *gyro,
+                         const struct xrt_vec3 *accel)
+{
+	struct pssense_gyro_bias *b = &pssense->tracking.gyro_bias;
+	const double g[3] = {gyro->x, gyro->y, gyro->z};
+	const double a[3] = {accel->x, accel->y, accel->z};
+	if (!b->have_stats || now_ns <= b->last_ns) {
+		for (int i = 0; i < 3; i++) {
+			b->gyro_mean[i] = g[i];
+			b->gyro_sq[i] = g[i] * g[i];
+			b->accel_mean[i] = a[i];
+			b->accel_sq[i] = a[i] * a[i];
+		}
+		b->have_stats = true;
+		b->last_ns = now_ns;
+		b->still_since_ns = 0;
+		return;
+	}
+	double dt = (double)(now_ns - b->last_ns) * 1e-9;
+	b->last_ns = now_ns;
+	double alpha = dt / (PSSENSE_GYRO_BIAS_TAU_S + dt);
+	double gyro_var = 0.0, accel_var = 0.0, accel_len2 = 0.0;
+	for (int i = 0; i < 3; i++) {
+		b->gyro_mean[i] += alpha * (g[i] - b->gyro_mean[i]);
+		b->gyro_sq[i] += alpha * (g[i] * g[i] - b->gyro_sq[i]);
+		b->accel_mean[i] += alpha * (a[i] - b->accel_mean[i]);
+		b->accel_sq[i] += alpha * (a[i] * a[i] - b->accel_sq[i]);
+		gyro_var += fmax(0.0, b->gyro_sq[i] - b->gyro_mean[i] * b->gyro_mean[i]);
+		accel_var += fmax(0.0, b->accel_sq[i] - b->accel_mean[i] * b->accel_mean[i]);
+		accel_len2 += b->accel_mean[i] * b->accel_mean[i];
+	}
+	bool still = sqrt(gyro_var) < PSSENSE_GYRO_BIAS_MAX_GYRO_STD &&
+	             sqrt(accel_var) < PSSENSE_GYRO_BIAS_MAX_ACCEL_STD &&
+	             fabs(sqrt(accel_len2) - MATH_GRAVITY_M_S2) < PSSENSE_GYRO_BIAS_MAX_GRAVITY_ERROR;
+	if (!still) {
+		b->still_since_ns = 0;
+		b->still_logged = false;
+		return;
+	}
+	if (b->still_since_ns == 0) {
+		b->still_since_ns = now_ns;
+	}
+	if (now_ns - b->still_since_ns < PSSENSE_GYRO_BIAS_STILL_NS) {
+		return;
+	}
+	b->bias = (struct xrt_vec3){(float)b->gyro_mean[0], (float)b->gyro_mean[1], (float)b->gyro_mean[2]};
+	b->updates++;
+	if (!b->still_logged) {
+		b->still_logged = true;
+		PSSENSE_INFO(
+		    pssense, "GYRO_BIAS side=%c event=still bias_deg_s=%.2f,%.2f,%.2f magnitude_deg_s=%.2f updates=%u",
+		    pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', b->bias.x * 180.0 / M_PI, b->bias.y * 180.0 / M_PI,
+		    b->bias.z * 180.0 / M_PI, m_vec3_len(b->bias) * 180.0 / M_PI, b->updates);
+		const double value[3] = {b->bias.x, b->bias.y, b->bias.z};
+		t_constellation_tracker_record_sync_event(pssense->tracking.constellation_tracker,
+		                                          pssense->tracking.constellation_device_id, now_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_GYRO_BIAS, value);
+	}
 }
 
 static void
@@ -613,6 +1015,13 @@ pssense_update_fusion(struct pssense_device *pssense)
 	    .z = (pssense->state.accel_raw.z - pssense->calibration.accel_bias.z) * pssense->calibration.accel_scale.z,
 	};
 
+	if (pssense->tracking.gyro_bias.enabled) {
+		pssense_update_gyro_bias(pssense, pssense->timing.latest_imu_time_ns, &gyro, &accel);
+		gyro.x -= pssense->tracking.gyro_bias.bias.x;
+		gyro.y -= pssense->tracking.gyro_bias.bias.y;
+		gyro.z -= pssense->tracking.gyro_bias.bias.z;
+	}
+
 	m_imu_3dof_update(&pssense->tracking.fusion, pssense->timing.latest_imu_time_ns, &accel, &gyro);
 	pssense->tracking.pose.orientation = pssense->tracking.fusion.rot;
 
@@ -624,6 +1033,19 @@ pssense_update_fusion(struct pssense_device *pssense)
 	};
 	m_relation_history_push(pssense->tracking.imu_relation_history, &space_relation,
 	                        pssense->timing.latest_imu_time_ns);
+
+	if (pssense->tracking.filter != NULL) {
+		// The filter's body frame is the LED model frame the optical poses use: rotate the IMU vectors into it.
+		struct xrt_quat led_from_imu;
+		math_quat_invert(&pssense->tracking.T_led_imu.orientation, &led_from_imu);
+		struct xrt_vec3 gyro_led, accel_led;
+		math_quat_rotate_vec3(&led_from_imu, &gyro, &gyro_led);
+		math_quat_rotate_vec3(&led_from_imu, &accel, &accel_led);
+		timepoint_ns host_ns;
+		if (pssense_device_ts_to_host(pssense, pssense->timing.latest_imu_time_ns, &host_ns)) {
+			t_imu_optical_filter_push_imu(pssense->tracking.filter, host_ns, &accel_led, &gyro_led);
+		}
+	}
 
 	if (pssense->tracking.constellation_imu_sink != NULL) {
 		struct xrt_imu_sample sample = {
@@ -645,6 +1067,14 @@ pssense_update_fusion(struct pssense_device *pssense)
 		                              pssense->timing.latest_imu_time_ns, //
 		                              &sample.timestamp_ns)) {            //
 			xrt_sink_push_imu(pssense->tracking.constellation_imu_sink, &sample);
+
+			const struct pssense_gyro_bias *b = &pssense->tracking.gyro_bias;
+			const double applied_bias[3] = {b->enabled ? b->bias.x : 0.0, b->enabled ? b->bias.y : 0.0,
+			                                b->enabled ? b->bias.z : 0.0};
+			t_constellation_tracker_record_imu_timing(
+			    pssense->tracking.constellation_tracker, pssense->tracking.constellation_device_id,
+			    sample.timestamp_ns, (int64_t)pssense->timing.latest_imu_time_ns,
+			    (double)((int64_t)pssense->timing.latest_imu_time_ns - sample.timestamp_ns), applied_bias);
 		}
 	}
 }
@@ -707,9 +1137,11 @@ pssense_handle_packet(struct pssense_device *pssense,
 
 	// Update IMU data
 	uint32_t imu_ticks = __le32_to_cpu(data->imu_ticks);
-	int64_t imu_ticks_delta = imu_ticks - pssense->timing.imu_ticks_last;
-	if (imu_ticks_delta >= 0) {
-		pssense->timing.imu_ticks_total += imu_ticks_delta;
+	// Wrap-aware signed delta; negative means an out-of-order report. The first
+	// sample is always accepted since there is no previous tick to compare with.
+	int32_t imu_ticks_delta = (int32_t)(imu_ticks - pssense->timing.imu_ticks_last);
+	if (imu_ticks_delta >= 0 || pssense->timing.imu_ticks_total == 0) {
+		pssense->timing.imu_ticks_total += (uint32_t)(imu_ticks - pssense->timing.imu_ticks_last);
 		pssense->timing.imu_ticks_last = imu_ticks;
 
 		pssense->timing.latest_imu_time_ns = IMU_TICKS_TO_NS(pssense->timing.imu_ticks_total);
@@ -726,9 +1158,9 @@ pssense_handle_packet(struct pssense_device *pssense,
 	}
 
 	uint32_t device_ticks = __le32_to_cpu(data->device_timestamp_ticks);
-	int64_t device_ticks_delta = device_ticks - pssense->timing.device_ticks_last;
-	if (device_ticks_delta >= 0) {
-		pssense->timing.device_ticks_total += device_ticks_delta;
+	int32_t device_ticks_delta = (int32_t)(device_ticks - pssense->timing.device_ticks_last);
+	if (device_ticks_delta >= 0 || pssense->timing.device_ticks_total == 0) {
+		pssense->timing.device_ticks_total += (uint32_t)(device_ticks - pssense->timing.device_ticks_last);
 		pssense->timing.device_ticks_last = device_ticks;
 
 		pssense->timing.latest_device_time_ns = IMU_TICKS_TO_NS(pssense->timing.device_ticks_total);
@@ -798,6 +1230,68 @@ pssense_handle_packet(struct pssense_device *pssense,
 	return 0;
 }
 
+
+/*!
+ * PSSENSE_INPUT_DIAG: watch the input-report bytes nothing else reads. Bytes that change at most 20 times are logged on
+ * each change (flags, states); busier ones (counters) only appear in the 10 s summary of change counts.
+ */
+static void
+pssense_input_diag(struct pssense_device *pssense,
+                   timepoint_ns recv_time_ns,
+                   const struct pssense_bluetooth_input_report *report)
+{
+	static const char *const names[PSSENSE_INPUT_DIAG_BYTES] = {
+	    "unknown1[0]", "unknown1[1]", "unknown2",    "unknown3[0]",       "unknown3[1]", "unknown3[2]",
+	    "unknown3[3]", "unknown3[4]", "unknown3[5]", "unknown3[6]",       "unknown4[0]", "unknown4[1]",
+	    "unknown4[2]", "unknown4[3]", "unknown5",    "crc_failure_count", "padding[0]",  "padding[1]",
+	    "padding[2]",  "padding[3]",  "padding[4]",  "padding[5]",        "padding[6]",  "bt_header",
+	};
+	const struct pssense_input_report_common *c = &report->common;
+	uint8_t now[PSSENSE_INPUT_DIAG_BYTES] = {
+	    c->unknown1[0],     c->unknown1[1],     c->unknown2,        c->unknown3[0],
+	    c->unknown3[1],     c->unknown3[2],     c->unknown3[3],     c->unknown3[4],
+	    c->unknown3[5],     c->unknown3[6],     c->unknown4[0],     c->unknown4[1],
+	    c->unknown4[2],     c->unknown4[3],     report->unknown5,   report->crc_failure_count,
+	    report->padding[0], report->padding[1], report->padding[2], report->padding[3],
+	    report->padding[4], report->padding[5], report->padding[6], report->bt_header,
+	};
+	const char side = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+	if (!pssense->tracking.input_diag_have) {
+		memcpy(pssense->tracking.input_diag_last, now, sizeof(now));
+		pssense->tracking.input_diag_have = true;
+		pssense->tracking.input_diag_summary_ns = recv_time_ns;
+		char buf[PSSENSE_INPUT_DIAG_BYTES * 3 + 1];
+		for (int i = 0; i < PSSENSE_INPUT_DIAG_BYTES; i++) {
+			snprintf(buf + i * 3, 4, "%02x ", now[i]);
+		}
+		PSSENSE_INFO(pssense, "INPUT_DIAG side=%c event=initial host_ns=%" PRIi64 " bytes=%s", side,
+		             recv_time_ns, buf);
+		return;
+	}
+	for (int i = 0; i < PSSENSE_INPUT_DIAG_BYTES; i++) {
+		if (now[i] == pssense->tracking.input_diag_last[i]) {
+			continue;
+		}
+		if (++pssense->tracking.input_diag_changes[i] <= 20) {
+			PSSENSE_INFO(pssense, "INPUT_DIAG side=%c event=change host_ns=%" PRIi64 " field=%s %02x->%02x",
+			             side, recv_time_ns, names[i], pssense->tracking.input_diag_last[i], now[i]);
+		}
+		pssense->tracking.input_diag_last[i] = now[i];
+	}
+	if (recv_time_ns - pssense->tracking.input_diag_summary_ns >= (timepoint_ns)10 * U_TIME_1S_IN_NS) {
+		char buf[PSSENSE_INPUT_DIAG_BYTES * 12 + 1] = {0};
+		size_t used = 0;
+		for (int i = 0; i < PSSENSE_INPUT_DIAG_BYTES && used < sizeof(buf); i++) {
+			if (pssense->tracking.input_diag_changes[i] > 0) {
+				used += (size_t)snprintf(buf + used, sizeof(buf) - used, "%d:%u ", i,
+				                         pssense->tracking.input_diag_changes[i]);
+			}
+		}
+		PSSENSE_INFO(pssense, "INPUT_DIAG side=%c event=summary changes_by_byte=%s", side, used ? buf : "none");
+		pssense->tracking.input_diag_summary_ns = recv_time_ns;
+	}
+}
+
 static int
 pssense_handle_read(struct pssense_device *pssense)
 {
@@ -805,10 +1299,13 @@ pssense_handle_read(struct pssense_device *pssense)
 
 	// Report data
 	uint8_t buf[INPUT_REPORT_BLUETOOTH_LENGTH] = {0};
-	ret = pssense_read_packet_data(pssense, buf, sizeof(buf));
+	timepoint_ns recv_time_ns = 0;
+	ret = pssense_read_packet_data(pssense, buf, sizeof(buf), &recv_time_ns);
 
-	// Get the receive time as close to the packet read as possible
-	timepoint_ns recv_time_ns = os_monotonic_get_ns();
+	// Backends without receive timestamps use the dequeue time as before.
+	if (recv_time_ns == 0) {
+		recv_time_ns = os_monotonic_get_ns();
+	}
 
 	if (ret == -EAGAIN) {
 		// No data yet, not an error
@@ -852,6 +1349,10 @@ pssense_handle_read(struct pssense_device *pssense)
 			return -EINVAL;
 		}
 
+		if (pssense->tracking.input_diag) {
+			pssense_input_diag(pssense, recv_time_ns, &data);
+		}
+
 		return pssense_handle_packet(pssense, recv_time_ns, &data.common);
 	}
 	default: {
@@ -885,7 +1386,11 @@ pssense_set_output_report_settings_locked(struct pssense_device *pssense,
 	}
 
 	// Give it some time to settle
-	if (pssense->tracking.received_frames > 10) {
+	if (pssense->output.exiting) {
+		settings->led_settings = pssense->tracking.led_settings;
+		settings->led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
+		settings->led_settings.sequence_number = pssense->output.exit_led_sequence;
+	} else if (pssense->tracking.received_frames > 10) {
 		settings->led_settings = pssense->tracking.led_settings;
 
 #if 0
@@ -915,8 +1420,8 @@ pssense_set_output_report_settings_locked(struct pssense_device *pssense,
 	}
 }
 
-static int
-pssense_send_bluetooth_output_report_locked(struct pssense_device *pssense)
+static size_t
+pssense_prepare_bluetooth_output_report_locked(struct pssense_device *pssense, uint8_t *out_report)
 {
 	uint64_t timestamp_ns = os_monotonic_get_ns();
 
@@ -950,21 +1455,16 @@ pssense_send_bluetooth_output_report_locked(struct pssense_device *pssense)
 	              "samples: %zu",
 	              pssense->output.vibration_amplitude, pssense->output.vibration_mode,
 	              pssense->output.trigger_feedback_mode, pssense->output.next_seq_no, read_pcm_samples);
-	int ret = os_hid_write(pssense->hid, (uint8_t *)&report, sizeof(report));
-	if (ret != sizeof(report)) {
-		PSSENSE_WARN(pssense, "Failed to send output report: %d", ret);
-		return ret < 0 ? ret : -EIO;
-	}
-
 #if 0
 	PSSENSE_DEBUG_HEX(pssense, (uint8_t *)&report, sizeof(report));
 #endif
 
-	return 0;
+	memcpy(out_report, &report, sizeof(report));
+	return sizeof(report);
 }
 
-static int
-pssense_send_usb_report_locked(struct pssense_device *pssense)
+static size_t
+pssense_prepare_usb_report_locked(struct pssense_device *pssense, uint8_t *out_report)
 {
 	uint64_t timestamp_ns = os_monotonic_get_ns();
 
@@ -974,22 +1474,17 @@ pssense_send_usb_report_locked(struct pssense_device *pssense)
 
 	pssense_set_output_report_settings_locked(pssense, &report.settings, true, timestamp_ns);
 
-	int ret = os_hid_write(pssense->hid, (uint8_t *)&report, sizeof(report));
-	if (ret != sizeof(report)) {
-		PSSENSE_WARN(pssense, "Failed to send output report: %d", ret);
-		return ret < 0 ? ret : -EIO;
-	}
-
-	return 0;
+	memcpy(out_report, &report, sizeof(report));
+	return sizeof(report);
 }
 
-static int
-pssense_send_output_report_locked(struct pssense_device *pssense)
+static size_t
+pssense_prepare_output_report_locked(struct pssense_device *pssense, uint8_t *out_report)
 {
 	if (pssense->usb) {
-		return pssense_send_usb_report_locked(pssense);
+		return pssense_prepare_usb_report_locked(pssense, out_report);
 	} else {
-		return pssense_send_bluetooth_output_report_locked(pssense);
+		return pssense_prepare_bluetooth_output_report_locked(pssense, out_report);
 	}
 
 	assert(!"unreachable");
@@ -1048,11 +1543,21 @@ pssense_run_thread(void *ptr)
 			timepoint_ns now = os_monotonic_get_ns();
 
 			if (now >= next_output_ns) {
+				uint8_t output_report[sizeof(struct pssense_ps5_output_report)] = {0};
 				os_thread_helper_lock(&pssense->controller_thread);
-				result = pssense_send_output_report_locked(pssense);
+				size_t output_size = pssense_prepare_output_report_locked(pssense, output_report);
 				os_thread_helper_unlock(&pssense->controller_thread);
 
-				next_output_ns = next_output_ns + pcm_haptics_period_ns;
+				int written = os_hid_write(pssense->hid, output_report, output_size);
+				if (written != (int)output_size) {
+					PSSENSE_WARN(pssense, "Failed to send output report: %d", written);
+					result = written < 0 ? written : -EIO;
+				}
+
+				timepoint_ns write_done_ns = os_monotonic_get_ns();
+				do {
+					next_output_ns += pcm_haptics_period_ns;
+				} while (next_output_ns <= write_done_ns);
 			}
 		}
 
@@ -1095,9 +1600,25 @@ pssense_get_imu_fusion_pose(struct pssense_device *pssense,
 }
 
 static void
-pssense_get_constellation_pose(struct pssense_device *pssense,
+pssense_get_corrected_imu_pose(struct pssense_device *pssense,
                                int64_t at_timestamp_ns,
                                struct xrt_space_relation *out_relation)
+{
+	pssense_get_imu_fusion_pose(pssense, at_timestamp_ns, out_relation);
+
+	/* Put the IMU orientation in the same LED-model coordinate frame used by optical tracking. */
+	struct xrt_relation_chain imu_chain = {0};
+	struct xrt_pose imu_correction = XRT_POSE_IDENTITY;
+	imu_correction.orientation = pssense->tracking.T_led_imu.orientation;
+	m_relation_chain_push_pose(&imu_chain, &imu_correction);
+	*m_relation_chain_reserve(&imu_chain) = *out_relation;
+	m_relation_chain_resolve(&imu_chain, out_relation);
+}
+
+static void
+pssense_get_constellation_pose_upstream(struct pssense_device *pssense,
+                                        int64_t at_timestamp_ns,
+                                        struct xrt_space_relation *out_relation)
 {
 	timepoint_ns device_ts;
 	if (!pssense_host_ts_to_device(pssense, at_timestamp_ns, &device_ts)) {
@@ -1106,6 +1627,67 @@ pssense_get_constellation_pose(struct pssense_device *pssense,
 	}
 
 	m_relation_history_get(pssense->tracking.constellation_relation_history, device_ts, out_relation);
+}
+
+static void
+pssense_get_constellation_pose(struct pssense_device *pssense,
+                               int64_t at_timestamp_ns,
+                               struct xrt_space_relation *out_relation)
+{
+	if (!pssense->tracking.use_led_bootstrap && pssense->tracking.filter == NULL &&
+	    !debug_get_bool_option_pssense_joint() && !debug_get_bool_option_pssense_align_imu_orientation()) {
+		pssense_get_constellation_pose_upstream(pssense, at_timestamp_ns, out_relation);
+		return;
+	}
+
+	timepoint_ns device_ts;
+	if (!pssense_host_ts_to_device(pssense, at_timestamp_ns, &device_ts)) {
+		(*out_relation) = (struct xrt_space_relation){0};
+		return;
+	}
+
+	if (pssense->tracking.filter != NULL &&
+	    t_imu_optical_filter_get_relation(pssense->tracking.filter, at_timestamp_ns, out_relation)) {
+		return;
+	}
+
+	struct xrt_space_relation optical = XRT_SPACE_RELATION_ZERO;
+	struct xrt_space_relation imu = XRT_SPACE_RELATION_ZERO;
+	m_relation_history_get(pssense->tracking.constellation_relation_history, device_ts, &optical);
+	pssense_get_corrected_imu_pose(pssense, at_timestamp_ns, &imu);
+	*out_relation = optical;
+	bool optical_fresh =
+	    pssense->tracking.last_optical_timestamp_ns > 0 &&
+	    at_timestamp_ns >= pssense->tracking.last_optical_timestamp_ns &&
+	    at_timestamp_ns - pssense->tracking.last_optical_timestamp_ns <= PSSENSE_CONSTELLATION_STALE_NS;
+	if (!optical_fresh) {
+		out_relation->relation_flags &=
+		    ~(XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT |
+		      XRT_SPACE_RELATION_LINEAR_VELOCITY_VALID_BIT);
+	}
+	/* Optical history supplies translation; the continuously integrated IMU supplies orientation. */
+	if ((imu.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0) {
+		/* Opt-in: rotate the IMU-world orientation into the optical world that the position is in. */
+		if (debug_get_bool_option_pssense_align_imu_orientation() &&
+		    pssense->tracking.have_optical_from_imu_orientation) {
+			const struct xrt_quat *align = &pssense->tracking.optical_from_imu_orientation;
+			struct xrt_quat aligned_orientation;
+			struct xrt_vec3 aligned_angular_velocity;
+			math_quat_rotate(align, &imu.pose.orientation, &aligned_orientation);
+			math_quat_normalize(&aligned_orientation);
+			math_quat_rotate_vec3(align, &imu.angular_velocity, &aligned_angular_velocity);
+			imu.pose.orientation = aligned_orientation;
+			imu.angular_velocity = aligned_angular_velocity;
+		}
+		out_relation->pose.orientation = imu.pose.orientation;
+		out_relation->angular_velocity = imu.angular_velocity;
+		out_relation->relation_flags &=
+		    ~(XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		      XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+		out_relation->relation_flags |= imu.relation_flags & (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+		                                                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		                                                      XRT_SPACE_RELATION_ANGULAR_VELOCITY_VALID_BIT);
+	}
 }
 
 static void
@@ -1174,9 +1756,18 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 {
 	struct pssense_calibration_data calibration_data = {0};
 
+	// A read occasionally returns something other than a calibration part (seen on macOS: part ID 49, i.e. the 0x31
+	// input report ID), which used to fail device creation outright. Retry it like a bad CRC, a bounded number of
+	// times.
+	const int max_attempts = 5;
+	int attempt = 0;
 	bool invalid_crc;
 	do {
 		invalid_crc = false;
+		if (++attempt > max_attempts) {
+			PSSENSE_ERROR(pssense, "Giving up on calibration data after %d attempts", max_attempts);
+			return false;
+		}
 
 		// Calibration has to be read in two parts with two feature reads.
 		for (int i = 0; i < 2; i++) {
@@ -1206,8 +1797,10 @@ pssense_get_calibration_data(struct pssense_device *pssense)
 				break;
 			}
 			default: {
-				PSSENSE_ERROR(pssense, "Unknown calibration data part ID %u", report_buffer.part_id);
-				return false;
+				PSSENSE_WARN(pssense, "Unknown calibration data part ID %u (attempt %d), retrying",
+				             report_buffer.part_id, attempt);
+				invalid_crc = true;
+				continue;
 			}
 			}
 
@@ -1257,10 +1850,93 @@ pssense_node_break_apart(struct xrt_frame_node *node)
 	os_thread_helper_stop_and_wait(&pssense->controller_thread);
 }
 
+/*!
+ * Only one controller may scan at a time: blob counts cannot tell the controllers apart, so every other
+ * controller holds its LEDs off while a scan runs. 0 = free, otherwise 1 + hand.
+ */
+static xrt_atomic_s32_t pssense_led_bootstrap_owner = 0;
+//! Set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has locked.
+static xrt_atomic_s32_t pssense_led_bootstrap_first_locked = 0;
+//! Exposure time (ms, wrapping) at which a controller last released the scan token; 0 before any release.
+static xrt_atomic_s32_t pssense_led_bootstrap_release_ms = 0;
+
+/*!
+ * With LED-blob counts, a controller that has just locked stays lit (keep-lock), but the joint tracker needs a moment
+ * to bootstrap and confirm its ring before its blobs are claimed. Until then they count as the next scanner's
+ * background: on 25 Sep (212653) the right locked at 13.5 s, was tracked from ~15 s, and the left's baseline in
+ * between took 3-5 of its blobs per camera on cameras 2 and 3, which then never reached the lit threshold.
+ */
+#define PSSENSE_LED_BOOTSTRAP_HANDOFF_MS 1500
+
+//! Waiting longer than this (~20 s) for the preferred side gives up, in case it never connects.
+#define PSSENSE_LED_BOOTSTRAP_FIRST_WAIT_FRAMES 1200
+
+/*!
+ * Opt-in (PSSENSE_LED_BOOTSTRAP_FIRST=L or R): only the named side may start the first scan. The right Sense has
+ * repeatedly fallen into an always-lit, status-LED-off state while scanning second; scanning it first separates a
+ * role effect from a device one.
+ */
+static bool
+pssense_led_bootstrap_may_start_first_scan(struct pssense_device *pssense)
+{
+	const char *first = debug_get_option_pssense_led_bootstrap_first();
+	if (first == NULL || (first[0] != 'L' && first[0] != 'R' && first[0] != 'l' && first[0] != 'r')) {
+		return true;
+	}
+	char mine = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+	char wanted = (first[0] == 'l' || first[0] == 'L') ? 'L' : 'R';
+	if (mine == wanted || xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_first_locked, 1, 1) == 1 ||
+	    pssense->tracking.led_bootstrap.locks_acquired > 0) {
+		return true;
+	}
+	if (++pssense->tracking.led_bootstrap_first_wait_frames > PSSENSE_LED_BOOTSTRAP_FIRST_WAIT_FRAMES) {
+		if (pssense->tracking.led_bootstrap_first_wait_frames == PSSENSE_LED_BOOTSTRAP_FIRST_WAIT_FRAMES + 1) {
+			PSSENSE_WARN(pssense, "LED_BOOTSTRAP side=%c event=first_wait_timeout waiting_for=%c", mine,
+			             wanted);
+		}
+		return true;
+	}
+	return false;
+}
+
+static int32_t
+pssense_led_bootstrap_token(struct pssense_device *pssense)
+{
+	return pssense->hand == XRT_HAND_LEFT ? 1 : 2;
+}
+
+static void
+pssense_led_bootstrap_release(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
+{
+	if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, pssense_led_bootstrap_token(pssense), 0) ==
+	        pssense_led_bootstrap_token(pssense) &&
+	    exposure_timestamp_ns > 0) {
+		int32_t ms = (int32_t)(exposure_timestamp_ns / U_TIME_1MS_IN_NS);
+		xrt_atomic_s32_store(&pssense_led_bootstrap_release_ms, ms == 0 ? 1 : ms);
+	}
+}
+
+//! Whether enough time has passed since another controller released the scan token (LED-blob counts only).
+static bool
+pssense_led_bootstrap_handoff_settled(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
+{
+	if (!pssense->tracking.led_bootstrap_led_blobs) {
+		return true;
+	}
+	int32_t released = xrt_atomic_s32_load(&pssense_led_bootstrap_release_ms);
+	if (released == 0) {
+		return true;
+	}
+	int32_t now_ms = (int32_t)(exposure_timestamp_ns / U_TIME_1MS_IN_NS);
+	int32_t elapsed = (int32_t)((uint32_t)now_ms - (uint32_t)released);
+	return elapsed < 0 || elapsed >= PSSENSE_LED_BOOTSTRAP_HANDOFF_MS;
+}
+
 static void
 pssense_node_destroy(struct xrt_frame_node *node)
 {
 	struct pssense_device *pssense = from_node(node);
+
 
 	// Destroy the controller thread
 	os_thread_helper_destroy(&pssense->controller_thread);
@@ -1274,6 +1950,7 @@ pssense_node_destroy(struct xrt_frame_node *node)
 	}
 
 	m_imu_3dof_close(&pssense->tracking.fusion);
+	m_clock_windowed_skew_tracker_destroy(pssense->timing.clock_tracker);
 
 	if (pssense->hid != NULL) {
 		os_hid_destroy(pssense->hid);
@@ -1283,9 +1960,11 @@ pssense_node_destroy(struct xrt_frame_node *node)
 	// Relation histories are used from the frame context lifecycle in the constellation tracker device callbacks.
 	m_relation_history_destroy(&pssense->tracking.imu_relation_history);
 	m_relation_history_destroy(&pssense->tracking.constellation_relation_history);
+	t_imu_optical_filter_destroy(&pssense->tracking.filter);
 
 	// LED sync is used on the frame context lifecycle, so it needs to be destroyed in here.
 	t_led_sync_refinement_destroy(&pssense->tracking.led_sync_refinement);
+	pssense_led_bootstrap_release(pssense, 0);
 
 	// Remove the variable tracking.
 	u_var_remove_root(pssense);
@@ -1299,6 +1978,174 @@ pssense_node_destroy(struct xrt_frame_node *node)
  * Timing event sink implementation
  *
  */
+
+/*!
+ * Advance the LED bootstrap for one exposure. Must be called with controller_thread locked.
+ *
+ * @return true if this controller's LEDs should be lit.
+ */
+/*!
+ * With strict mode and the online gyro bias, probe only while the controller turns slower than this. A probe compares
+ * three consecutive ~0.2 s stages; a moving, turning or covered ring changes its light between them. On 26 Sep (003433)
+ * probes taken in normal movement read patterns like 1.6/5.3/4.9 blobs (dark in the middle) and walked the left's lock
+ * 1 ms off its window.
+ */
+#define PSSENSE_LED_PROBE_MAX_ROTATION_RAD_S 0.35
+
+static bool
+pssense_led_bootstrap_steady_for_probe(struct pssense_device *pssense)
+{
+	struct pssense_gyro_bias *g = &pssense->tracking.gyro_bias;
+	if (!pssense->tracking.led_bootstrap_strict || !g->enabled || !g->have_stats) {
+		return true;
+	}
+	double x = g->gyro_mean[0] - g->bias.x, y = g->gyro_mean[1] - g->bias.y, z = g->gyro_mean[2] - g->bias.z;
+	return sqrt(x * x + y * y + z * z) < PSSENSE_LED_PROBE_MAX_ROTATION_RAD_S;
+}
+
+//! When recording a dataset: note LED scans, locks, losses and phase moves as they happen.
+static void
+pssense_led_bootstrap_record_changes(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
+{
+	const struct t_led_phase_bootstrap *b = &pssense->tracking.led_bootstrap;
+	struct t_constellation_tracker *tracker = pssense->tracking.constellation_tracker;
+	t_constellation_device_id_t id = pssense->tracking.constellation_device_id;
+	uint32_t state = (uint32_t)b->state;
+	uint32_t previous = pssense->tracking.recorded_led_state;
+	bool scanning = state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN || state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
+	bool was_scanning =
+	    previous == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN || previous == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
+
+	if (scanning && !was_scanning) {
+		t_constellation_tracker_record_sync_event(tracker, id, exposure_timestamp_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_LED_SCAN, NULL);
+	}
+	if (state == T_LED_PHASE_BOOTSTRAP_LOCKED && previous != T_LED_PHASE_BOOTSTRAP_LOCKED) {
+		const double value[3] = {(double)b->fudge_offset_ns / 1000.0, (double)b->blink_ns / 1000.0, 0.0};
+		t_constellation_tracker_record_sync_event(tracker, id, exposure_timestamp_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_LED_LOCK, value);
+	} else if (state != T_LED_PHASE_BOOTSTRAP_LOCKED && previous == T_LED_PHASE_BOOTSTRAP_LOCKED) {
+		t_constellation_tracker_record_sync_event(tracker, id, exposure_timestamp_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_LED_LOST, NULL);
+	} else if (state == T_LED_PHASE_BOOTSTRAP_LOCKED &&
+	           b->fudge_offset_ns != pssense->tracking.recorded_led_fudge_ns) {
+		const double value[3] = {
+		    (double)(b->fudge_offset_ns - pssense->tracking.recorded_led_fudge_ns) / 1000.0, 0.0, 0.0};
+		t_constellation_tracker_record_sync_event(tracker, id, exposure_timestamp_ns,
+		                                          T_CONSTELLATION_SYNC_EVENT_LED_PHASE_MOVE, value);
+	}
+	pssense->tracking.recorded_led_state = state;
+	pssense->tracking.recorded_led_fudge_ns = b->fudge_offset_ns;
+}
+
+static bool
+pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
+{
+	struct t_led_phase_bootstrap *b = &pssense->tracking.led_bootstrap;
+	const int32_t me = pssense_led_bootstrap_token(pssense);
+	int32_t owner = xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, 0);
+
+	if (owner != 0 && owner != me) {
+		// Another controller is scanning. Do not advance, so our own lock is not declared lost meanwhile.
+		pssense->tracking.led_bootstrap_yielding = true;
+		if (debug_get_bool_option_pssense_led_bootstrap_keep_lock() &&
+		    b->state == T_LED_PHASE_BOOTSTRAP_LOCKED) {
+			/*
+			 * Opt-in: keep a locked controller lit. Its steady light becomes part of the scanning
+			 * controller's dark baseline, which then scans cleanly (24 Sep, 230720), and it keeps
+			 * tracking. Yielding means switching a lit controller to LED_ALL_OFF and back, and in the
+			 * two-controller runs one controller repeatedly fell into an always-lit, status-LED-off state.
+			 */
+			return true;
+		}
+		return false;
+	}
+	pssense->tracking.led_bootstrap_yielding = false;
+
+	if (owner == 0 && t_led_phase_bootstrap_ready_to_scan(b) &&
+	    pssense_led_bootstrap_may_start_first_scan(pssense) &&
+	    pssense_led_bootstrap_handoff_settled(pssense, exposure_timestamp_ns)) {
+		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
+			owner = me;
+			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
+		}
+	}
+
+	long stress_s = debug_get_num_option_pssense_led_bootstrap_stress_rescan_s();
+	if (stress_s > 0) {
+		if (b->state != T_LED_PHASE_BOOTSTRAP_LOCKED) {
+			pssense->tracking.stress_locked_since_ns = 0;
+		} else if (pssense->tracking.stress_locked_since_ns == 0) {
+			pssense->tracking.stress_locked_since_ns = exposure_timestamp_ns;
+		} else if (exposure_timestamp_ns - pssense->tracking.stress_locked_since_ns >=
+		               (timepoint_ns)stress_s * U_TIME_1S_IN_NS &&
+		           owner == 0 && !t_led_phase_bootstrap_is_probing(b) &&
+		           xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
+			owner = me;
+			pssense->tracking.stress_locked_since_ns = 0;
+			pssense->tracking.stress_rescans++;
+			PSSENSE_INFO(pssense, "LED_BOOTSTRAP side=%c event=stress_rescan count=%u",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', pssense->tracking.stress_rescans);
+			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
+		}
+	}
+
+	(void)t_led_phase_bootstrap_push_exposure(b, exposure_timestamp_ns);
+
+	if (b->locks_acquired > 0 || t_led_phase_bootstrap_is_stuck_lit(b)) {
+		const char *first = debug_get_option_pssense_led_bootstrap_first();
+		char mine = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+		if (first != NULL && (first[0] == mine || first[0] == mine + ('a' - 'A'))) {
+			xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_first_locked, 0, 1);
+		}
+	}
+
+	// A tracking probe changes this controller's light, so like a scan it needs the LEDs to itself.
+	if (t_led_phase_bootstrap_wants_probe(b) && pssense_led_bootstrap_steady_for_probe(pssense) &&
+	    (owner == me || (owner == 0 && xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0))) {
+		owner = me;
+		t_led_phase_bootstrap_begin_probe(b);
+	}
+
+	if (t_led_phase_bootstrap_is_scanning(b) && owner != me) {
+		// A locked controller lost its LEDs and wants to rescan; it needs the token first.
+		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) != 0) {
+			t_led_phase_bootstrap_stop(b);
+		}
+	} else if (!t_led_phase_bootstrap_is_scanning(b) && !t_led_phase_bootstrap_is_probing(b) && owner == me) {
+		pssense_led_bootstrap_release(pssense, exposure_timestamp_ns);
+	}
+
+	if (b->output_generation != pssense->tracking.led_bootstrap_programmed_generation) {
+		pssense->tracking.led_bootstrap_programmed_generation = b->output_generation;
+		// All timing is absorbed into the fudge offset; the driver's own clock sync handles device time.
+		pssense->tracking.latest_led_sync_sample = (struct t_led_sync_sample){
+		    .timestamp.device_host_latency_ns = 0,
+		    .timestamp_mode = T_LED_SYNC_SAMPLE_TIMESTAMP_MODE_DEVICE_HOST_LATENCY,
+		    .fudge_offset_ns = b->fudge_offset_ns,
+		    .blink_duration_ns = b->blink_ns,
+		};
+		pssense->tracking.period_id = DURATION_NS_TO_PERIOD_ID(b->blink_ns);
+		pssense->tracking.led_sync_sample_needs_sending = true;
+		pssense->tracking.led_sequence_num += 1;
+	}
+
+	if (b->state == T_LED_PHASE_BOOTSTRAP_LOCKED && ++pssense->tracking.led_bootstrap_status_frames >= 300) {
+		pssense->tracking.led_bootstrap_status_frames = 0;
+		PSSENSE_INFO(pssense,
+		             "LED_BOOTSTRAP side=%c event=locked_status fudge_us=%.1f pulse_us=%.1f lit_reports=%u/%u "
+		             "frames_since_lit=%u",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', (double)b->fudge_offset_ns / 1000.0,
+		             (double)b->blink_ns / 1000.0, b->locked_lit_reports, b->locked_reports,
+		             b->frames_since_lit);
+		b->locked_lit_reports = 0;
+		b->locked_reports = 0;
+	}
+
+	pssense_led_bootstrap_record_changes(pssense, exposure_timestamp_ns);
+
+	return t_led_phase_bootstrap_leds_enabled(b);
+}
 
 static void
 pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_timing_event *event)
@@ -1322,6 +2169,9 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 	}
 
 	uint32_t sequence_id_delta = camera_exposure.sequence_id - pssense->tracking.last_exposure_sequence_id;
+	if (sequence_id_delta == 0) {
+		return;
+	}
 
 	time_duration_ns estimated_interval =
 	    (camera_exposure.timestamp_ns - pssense->tracking.last_exposure_local_timestamp_ns) / (sequence_id_delta);
@@ -1346,7 +2196,11 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 	pssense->tracking.last_exposure_sequence_id = camera_exposure.sequence_id;
 	pssense->tracking.last_exposure_local_timestamp_ns = camera_exposure.timestamp_ns;
 
-	if (pssense->tracking.average_exposure_interval_ns > 0) {
+	bool future_led_schedule = debug_get_bool_option_pssense_future_led_schedule();
+	bool use_led_bootstrap = pssense->tracking.use_led_bootstrap && pssense->tracking.use_constellation;
+	bool run_optical_refinement =
+	    !use_led_bootstrap && (!future_led_schedule || pssense->tracking.use_constellation);
+	if (pssense->tracking.average_exposure_interval_ns > 0 && run_optical_refinement) {
 		// Update the frame period to the one we're using internally and push the timing event
 		struct t_timing_event_camera_exposure_start led_sync_event = event->camera_exposure_start;
 		led_sync_event.frame_period_ns = pssense->tracking.average_exposure_interval_ns;
@@ -1356,10 +2210,15 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 	os_thread_helper_lock(&pssense->controller_thread);
 
 	// update the LED settings
-	if (pssense->tracking.received_frames > 10) {
+	if (pssense->tracking.received_frames > 10 && pssense->timing.has_clock_offset) {
+		bool leds_lit = true;
+		if (use_led_bootstrap && pssense->tracking.average_exposure_interval_ns > 0) {
+			leds_lit = pssense_led_bootstrap_update_locked(pssense, camera_exposure.timestamp_ns);
+		}
+
 		// Update the sample from the LED sync routine
-		if (t_led_sync_get_sample(&pssense->tracking.led_sync_refinement,
-		                          &pssense->tracking.latest_led_sync_sample)) {
+		if (run_optical_refinement && t_led_sync_get_sample(&pssense->tracking.led_sync_refinement,
+		                                                    &pssense->tracking.latest_led_sync_sample)) {
 			pssense->tracking.led_sync_sample_needs_sending = true;
 			pssense->tracking.period_id =
 			    DURATION_NS_TO_PERIOD_ID(pssense->tracking.latest_led_sync_sample.blink_duration_ns);
@@ -1367,12 +2226,30 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		}
 
 		uint8_t period_id = pssense->tracking.period_id;
+		long requested_period_id = debug_get_num_option_pssense_led_period_id();
+		if (requested_period_id > 0 && requested_period_id <= UINT8_MAX) {
+			period_id = (uint8_t)requested_period_id;
+		}
 
 		// Convert the timestamp, latency offset will be applied within here. Must happen after fetching the
 		// sample above, so the latency and the fudge offset below come from the same sample.
 		timepoint_ns next_blink_time = 0;
-		if (!pssense_host_ts_to_device(pssense, pssense->tracking.last_exposure_local_timestamp_ns,
-		                               &next_blink_time)) {
+		timepoint_ns now_ns = os_monotonic_get_ns();
+		timepoint_ns schedule_host_ns = pssense->tracking.last_exposure_local_timestamp_ns;
+		uint64_t periods_forward = 0;
+		if (future_led_schedule && pssense->tracking.average_exposure_interval_ns > 0) {
+			timepoint_ns target_host_ns = now_ns + PSSENSE_FUTURE_LED_LEAD_NS;
+			if (schedule_host_ns < target_host_ns) {
+				time_duration_ns delta_ns = target_host_ns - schedule_host_ns;
+				time_duration_ns period_ns = pssense->tracking.average_exposure_interval_ns;
+				periods_forward = (uint64_t)((delta_ns + period_ns - 1) / period_ns);
+				schedule_host_ns += (time_duration_ns)periods_forward * period_ns;
+			}
+		}
+		// Convert the timestamp, latency offset will be applied within here
+		bool ts_valid = pssense_host_ts_to_device(pssense, schedule_host_ns, &next_blink_time);
+		// We check if we have a clock offset above, so this will always return true
+		if (!ts_valid) {
 			os_thread_helper_unlock(&pssense->controller_thread);
 			return;
 		}
@@ -1389,6 +2266,27 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
 		// in IMU ticks
 		uint32_t cycle_position = NS_TO_IMU_TICKS(next_blink_time);
+
+		if (debug_get_bool_option_pssense_timing_diag()) {
+			timepoint_ns controller_now_ns = 0;
+			timepoint_ns blink_host_est_ns = 0;
+			bool controller_now_valid = pssense_host_ts_to_device(pssense, now_ns, &controller_now_ns);
+			bool blink_host_valid = pssense_device_ts_to_host(pssense, next_blink_time, &blink_host_est_ns);
+			PSSENSE_INFO(pssense,
+			             "LED_SCHEDULE side=%c now=%" PRIi64 " raw_exposure=%" PRIi64 " age=%" PRIi64
+			             " period=%" PRIi64 " forward=%" PRIu64 " projected=%" PRIi64
+			             " projected_lead=%" PRIi64 " controller_now=%" PRIi64
+			             " cycle_position=%u blink_host=%" PRIi64 " blink_minus_projected=%" PRIi64
+			             " period_id=%u pulse=%" PRIi64,
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', now_ns,
+			             pssense->tracking.last_exposure_local_timestamp_ns,
+			             now_ns - pssense->tracking.last_exposure_local_timestamp_ns,
+			             pssense->tracking.average_exposure_interval_ns, periods_forward, schedule_host_ns,
+			             schedule_host_ns - now_ns, controller_now_valid ? controller_now_ns : -1,
+			             cycle_position, blink_host_valid ? blink_host_est_ns : -1,
+			             blink_host_valid ? blink_host_est_ns - schedule_host_ns : 0, period_id,
+			             PERIOD_ID_TO_DURATION_NS(period_id));
+		}
 
 #if 0
 		static int64_t jitter_integration = 0;
@@ -1410,6 +2308,9 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		    .led_blink = {0xFF, 0xFF, 0xFF, 0xFF},
 		    .period_id = period_id,
 		};
+		if (!leds_lit) {
+			pssense->tracking.led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
+		}
 
 		if (pssense->tracking.increment_sequence_num) {
 			pssense->tracking.led_sequence_num += 1;
@@ -1432,8 +2333,188 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
  */
 
 static void
-pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device *device,
-                                          struct t_constellation_tracker_sample *sample)
+pssense_push_camera_blob_count(struct t_constellation_tracker_device *device,
+                               size_t camera_index,
+                               int64_t timestamp_ns,
+                               uint32_t blob_count)
+{
+	struct pssense_device *pssense = from_constellation_device(device);
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	if (pssense->tracking.use_led_bootstrap && !pssense->tracking.led_bootstrap_led_blobs &&
+	    !pssense->tracking.led_bootstrap_yielding) {
+		t_led_phase_bootstrap_push_blob_count(&pssense->tracking.led_bootstrap, (uint32_t)camera_index,
+		                                      timestamp_ns, blob_count);
+	}
+	os_thread_helper_unlock(&pssense->controller_thread);
+}
+
+static void
+pssense_push_camera_led_blob_count(struct t_constellation_tracker_device *device,
+                                   size_t camera_index,
+                                   int64_t timestamp_ns,
+                                   uint32_t led_blob_count,
+                                   uint32_t matched_blob_count)
+{
+	struct pssense_device *pssense = from_constellation_device(device);
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	if (pssense->tracking.use_led_bootstrap && pssense->tracking.led_bootstrap_led_blobs &&
+	    !pssense->tracking.led_bootstrap_yielding) {
+		t_led_phase_bootstrap_push_blob_count(&pssense->tracking.led_bootstrap, (uint32_t)camera_index,
+		                                      timestamp_ns, led_blob_count);
+	}
+	if (pssense->tracking.use_led_bootstrap && !pssense->tracking.led_bootstrap_yielding) {
+		t_led_phase_bootstrap_push_own_matched(&pssense->tracking.led_bootstrap, (uint32_t)camera_index,
+		                                       timestamp_ns, matched_blob_count);
+	}
+	os_thread_helper_unlock(&pssense->controller_thread);
+}
+
+/*!
+ * Commit an authoritative optical pose (a fused per-camera group, or a joint multi-camera solve): refresh the
+ * optical<-IMU alignment, the last fused pose, LED sync and the optical relation history. Called with the
+ * controller_thread lock held; returns with it released.
+ */
+static bool
+pssense_commit_optical_pose_locked(struct pssense_device *pssense,
+                                   struct t_constellation_tracker_sample *sample,
+                                   uint32_t camera_count,
+                                   bool reacquiring,
+                                   bool joint)
+{
+	/* Refresh the optical<-IMU orientation alignment from every trusted fused pose. */
+	struct xrt_space_relation fused_imu_relation = XRT_SPACE_RELATION_ZERO;
+	pssense_get_corrected_imu_pose(pssense, sample->timestamp_ns, &fused_imu_relation);
+	bool have_fused_imu_orientation =
+	    (fused_imu_relation.relation_flags &
+	     (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT)) ==
+	    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	if (have_fused_imu_orientation) {
+		struct xrt_quat inverse_imu_orientation;
+		math_quat_invert(&fused_imu_relation.pose.orientation, &inverse_imu_orientation);
+		math_quat_rotate(&sample->pose.orientation, &inverse_imu_orientation,
+		                 &pssense->tracking.optical_from_imu_orientation);
+		math_quat_normalize(&pssense->tracking.optical_from_imu_orientation);
+		pssense->tracking.have_optical_from_imu_orientation = true;
+		pssense->tracking.optical_from_imu_timestamp_ns = sample->timestamp_ns;
+	}
+
+	if (pssense->tracking.filter != NULL) {
+		// Noise grows with the solve's reprojection error: 2 mm and 0.46 deg at 0.5 px or better.
+		float scale = (float)fmax(1.0, sample->metrics.reprojection_error / 0.5);
+		enum t_imu_optical_filter_update_result result = t_imu_optical_filter_push_pose(
+		    pssense->tracking.filter, sample->timestamp_ns, &sample->pose, 0.002f * scale, 0.008f * scale);
+		struct t_imu_optical_filter_stats stats;
+		t_imu_optical_filter_get_stats(pssense->tracking.filter, &stats);
+		if (result == T_IMU_OPTICAL_FILTER_INITIALISED || result == T_IMU_OPTICAL_FILTER_REINITIALISED ||
+		    stats.updates >= pssense->tracking.filter_last_logged_updates + 300) {
+			pssense->tracking.filter_last_logged_updates = stats.updates;
+			PSSENSE_INFO(pssense,
+			             "FILTER side=%c event=%s updates=%" PRIu64 " rejections=%" PRIu64
+			             " reinitialisations=%" PRIu64
+			             " mahalanobis2=%.2f gyro_bias_deg_s=%.2f,%.2f,%.2f "
+			             "accel_bias_m_s2=%.3f,%.3f,%.3f",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+			             result == T_IMU_OPTICAL_FILTER_INITIALISED     ? "initialised"
+			             : result == T_IMU_OPTICAL_FILTER_REINITIALISED ? "reinitialised"
+			                                                            : "status",
+			             stats.updates, stats.rejections, stats.reinitialisations, stats.last_mahalanobis2,
+			             stats.gyro_bias_rad_s.x * 180.0 / M_PI, stats.gyro_bias_rad_s.y * 180.0 / M_PI,
+			             stats.gyro_bias_rad_s.z * 180.0 / M_PI, stats.accel_bias_m_s2.x,
+			             stats.accel_bias_m_s2.y, stats.accel_bias_m_s2.z);
+		}
+	}
+
+	pssense->tracking.last_fused_pose = sample->pose;
+	pssense->tracking.have_last_fused_pose = true;
+	pssense->tracking.last_fused_timestamp_ns = sample->timestamp_ns;
+	pssense->tracking.last_fused_camera_count = camera_count;
+	pssense->tracking.fused_pose_count++;
+	os_thread_helper_unlock(&pssense->controller_thread);
+
+	/*
+	 * The device callback contract allows replacing the camera-local solve. Only the
+	 * synchronized fused (or jointly solved) pose is authoritative: it seeds tracker state,
+	 * LED timing, and optical translation history exactly once for this camera epoch.
+	 */
+	t_led_sync_push_constellation_sample(&pssense->tracking.led_sync_refinement, sample);
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	timepoint_ns optical_device_ts;
+	bool have_optical_device_ts = pssense_host_ts_to_device(pssense, sample->timestamp_ns, &optical_device_ts);
+	os_thread_helper_unlock(&pssense->controller_thread);
+
+	if (have_optical_device_ts) {
+		struct xrt_space_relation optical_relation = {
+		    .pose = sample->pose,
+		    .relation_flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+		                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT |
+		                      XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT,
+		};
+		if (m_relation_history_push(pssense->tracking.constellation_relation_history, &optical_relation,
+		                            optical_device_ts)) {
+			os_thread_helper_lock(&pssense->controller_thread);
+			pssense->tracking.last_optical_timestamp_ns =
+			    MAX(pssense->tracking.last_optical_timestamp_ns, sample->timestamp_ns);
+			os_thread_helper_unlock(&pssense->controller_thread);
+		}
+	}
+
+	PSSENSE_INFO(pssense,
+	             "CONSTELLATION_FUSED_ACCEPT side=%c ts=%" PRIi64
+	             " cameras=%u matched=%u reproj=%.3f reacquired=%u imu_alignment_valid=%u joint=%u",
+	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns, camera_count,
+	             sample->metrics.matched_blob_count, sample->metrics.reprojection_error, reacquiring ? 1u : 0u,
+	             have_fused_imu_orientation ? 1u : 0u, joint ? 1u : 0u);
+	return true;
+}
+
+/*!
+ * A pose solved jointly across cameras by the tracker (CONSTELLATION_TRACKER_JOINT=1). It is already the consensus
+ * for its exposure, so the per-camera grouping, pairwise agreement gate and averaging are skipped. So is the
+ * fresh-pose jump gate: the joint path re-acquires by bootstrap, which carries its own acceptance tests.
+ */
+static bool
+pssense_accept_joint_sample(struct pssense_device *pssense, struct t_constellation_tracker_sample *sample)
+{
+	os_thread_helper_lock(&pssense->controller_thread);
+	pssense->tracking.candidate_count++;
+
+	bool reacquiring = false;
+	if (pssense->tracking.have_last_fused_pose) {
+		if (sample->timestamp_ns <= pssense->tracking.last_fused_timestamp_ns) {
+			pssense->tracking.jump_rejection_count++;
+			os_thread_helper_unlock(&pssense->controller_thread);
+			return false;
+		}
+		int64_t age_ns = sample->timestamp_ns - pssense->tracking.last_fused_timestamp_ns;
+		if (age_ns > PSSENSE_CONSTELLATION_STALE_NS) {
+			reacquiring = true;
+			struct xrt_pose *last = &pssense->tracking.last_fused_pose;
+			float dx = last->position.x - sample->pose.position.x;
+			float dy = last->position.y - sample->pose.position.y;
+			float dz = last->position.z - sample->pose.position.z;
+			PSSENSE_INFO(pssense,
+			             "CONSTELLATION_REACQUIRE side=%c ts=%" PRIi64
+			             " gap_ms=%.1f cameras=%u pos_delta_mm=%.1f joint=1",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns,
+			             (double)age_ns / 1000000.0, sample->joint_camera_count,
+			             sqrtf(dx * dx + dy * dy + dz * dz) * 1000.0f);
+		}
+	}
+	if (pssense->tracking.use_led_bootstrap && !pssense->tracking.led_bootstrap_yielding &&
+	    sample->metrics.visible_led_count > 0) {
+		t_led_phase_bootstrap_push_pose_coverage(&pssense->tracking.led_bootstrap, sample->timestamp_ns,
+		                                         (float)sample->metrics.matched_blob_count /
+		                                             (float)sample->metrics.visible_led_count);
+	}
+	return pssense_commit_optical_pose_locked(pssense, sample, sample->joint_camera_count, reacquiring, true);
+}
+
+static void
+pssense_push_constellation_tracker_sample_upstream(struct t_constellation_tracker_device *device,
+                                                   struct t_constellation_tracker_sample *sample)
 {
 	struct pssense_device *pssense = from_constellation_device(device);
 
@@ -1454,6 +2535,286 @@ pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device 
 	};
 
 	m_relation_history_push(pssense->tracking.constellation_relation_history, &relation, device_ts);
+}
+
+static bool
+pssense_push_constellation_tracker_sample(struct t_constellation_tracker_device *device,
+                                          struct t_constellation_tracker_sample *sample)
+{
+	struct pssense_device *pssense = from_constellation_device(device);
+	struct t_constellation_tracker_sample fused = {0};
+
+	if (sample->joint_camera_count > 0) {
+		return pssense_accept_joint_sample(pssense, sample);
+	}
+
+	/*
+	 * Camera-local solves are candidates only. Do not let one sparse or incorrect
+	 * correspondence update LED timing, optical history, or the tracker's persistent
+	 * pose prior before a synchronized multi-camera consensus exists.
+	 */
+
+	os_thread_helper_lock(&pssense->controller_thread);
+
+	/*
+	 * Diagnostic only: sample the same corrected IMU orientation used by the
+	 * constellation tracking source at this camera exposure timestamp, then
+	 * measure the camera-local optical candidate against it. Do not gate on
+	 * this residual yet.
+	 */
+	struct xrt_space_relation imu_orientation_relation = XRT_SPACE_RELATION_ZERO;
+	pssense_get_corrected_imu_pose(pssense, sample->timestamp_ns, &imu_orientation_relation);
+	bool have_imu_orientation =
+	    (imu_orientation_relation.relation_flags &
+	     (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT)) ==
+	    (XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
+	float imu_delta_deg = NAN;
+	float imu_aligned_delta_deg = NAN;
+	double imu_alignment_age_ms = NAN;
+	if (have_imu_orientation) {
+		float imu_dot = fabsf(sample->pose.orientation.x * imu_orientation_relation.pose.orientation.x +
+		                      sample->pose.orientation.y * imu_orientation_relation.pose.orientation.y +
+		                      sample->pose.orientation.z * imu_orientation_relation.pose.orientation.z +
+		                      sample->pose.orientation.w * imu_orientation_relation.pose.orientation.w);
+		imu_delta_deg = 2.0f * acosf(CLAMP(imu_dot, 0.0f, 1.0f)) * 180.0f / (float)M_PI;
+
+		if (pssense->tracking.have_optical_from_imu_orientation) {
+			struct xrt_quat aligned_imu_orientation;
+			math_quat_rotate(&pssense->tracking.optical_from_imu_orientation,
+			                 &imu_orientation_relation.pose.orientation, &aligned_imu_orientation);
+			float aligned_dot = fabsf(sample->pose.orientation.x * aligned_imu_orientation.x +
+			                          sample->pose.orientation.y * aligned_imu_orientation.y +
+			                          sample->pose.orientation.z * aligned_imu_orientation.z +
+			                          sample->pose.orientation.w * aligned_imu_orientation.w);
+			imu_aligned_delta_deg = 2.0f * acosf(CLAMP(aligned_dot, 0.0f, 1.0f)) * 180.0f / (float)M_PI;
+			imu_alignment_age_ms =
+			    (double)(sample->timestamp_ns - pssense->tracking.optical_from_imu_timestamp_ns) /
+			    1000000.0;
+		}
+	}
+
+	pssense->tracking.candidate_count++;
+	if (sample->camera_index < PSSENSE_CONSTELLATION_CAMERA_COUNT) {
+		pssense->tracking.camera_candidate_count[sample->camera_index]++;
+	}
+	PSSENSE_INFO(pssense,
+	             "CONSTELLATION_CANDIDATE side=%c ts=%" PRIi64
+	             " cam=%zu pos=(%.6f,%.6f,%.6f) quat=(%.6f,%.6f,%.6f,%.6f) matched=%u visible=%u reproj=%.3f "
+	             "brightness=%.3f imu_valid=%u imu_quat=(%.6f,%.6f,%.6f,%.6f) imu_delta_deg=%.2f "
+	             "imu_aligned_valid=%u imu_aligned_delta_deg=%.2f imu_alignment_age_ms=%.1f",
+	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', sample->timestamp_ns, sample->camera_index,
+	             sample->pose.position.x, sample->pose.position.y, sample->pose.position.z,
+	             sample->pose.orientation.x, sample->pose.orientation.y, sample->pose.orientation.z,
+	             sample->pose.orientation.w, sample->metrics.matched_blob_count, sample->metrics.visible_led_count,
+	             sample->metrics.reprojection_error, sample->average_brightness, have_imu_orientation ? 1u : 0u,
+	             imu_orientation_relation.pose.orientation.x, imu_orientation_relation.pose.orientation.y,
+	             imu_orientation_relation.pose.orientation.z, imu_orientation_relation.pose.orientation.w,
+	             imu_delta_deg,
+	             have_imu_orientation && pssense->tracking.have_optical_from_imu_orientation ? 1u : 0u,
+	             imu_aligned_delta_deg, imu_alignment_age_ms);
+	if (sample->camera_index >= PSSENSE_CONSTELLATION_CAMERA_COUNT || sample->metrics.matched_blob_count < 3 ||
+	    !isfinite(sample->metrics.reprojection_error) || sample->metrics.reprojection_error > 5.0) {
+		pssense->tracking.disagreement_count++;
+		os_thread_helper_unlock(&pssense->controller_thread);
+		return false;
+	}
+
+	struct pssense_constellation_candidate_group *group = NULL;
+	for (size_t i = 0; i < PSSENSE_CONSTELLATION_GROUP_COUNT; i++) {
+		if (llabs(pssense->tracking.candidate_groups[i].timestamp_ns - sample->timestamp_ns) <=
+		    PSSENSE_CONSTELLATION_SYNC_TOLERANCE_NS) {
+			group = &pssense->tracking.candidate_groups[i];
+			break;
+		}
+	}
+	if (group == NULL) {
+		group = &pssense->tracking.candidate_groups[pssense->tracking.next_candidate_group];
+		pssense->tracking.next_candidate_group =
+		    (pssense->tracking.next_candidate_group + 1) % PSSENSE_CONSTELLATION_GROUP_COUNT;
+		*group = (struct pssense_constellation_candidate_group){.timestamp_ns = sample->timestamp_ns};
+	}
+	group->samples[sample->camera_index] = *sample;
+	group->present[sample->camera_index] = true;
+	if (group->emitted) {
+		os_thread_helper_unlock(&pssense->controller_thread);
+		return false;
+	}
+
+	uint32_t best_anchor = 0;
+	uint32_t best_camera_count = 0;
+	for (uint32_t anchor = 0; anchor < PSSENSE_CONSTELLATION_CAMERA_COUNT; anchor++) {
+		if (!group->present[anchor]) {
+			continue;
+		}
+		uint32_t compatible = 0;
+		for (uint32_t camera = 0; camera < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera++) {
+			if (!group->present[camera]) {
+				continue;
+			}
+			struct xrt_pose *a = &group->samples[anchor].pose;
+			struct xrt_pose *b = &group->samples[camera].pose;
+			float dx = a->position.x - b->position.x;
+			float dy = a->position.y - b->position.y;
+			float dz = a->position.z - b->position.z;
+			float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+			float dot = fabsf(a->orientation.x * b->orientation.x + a->orientation.y * b->orientation.y +
+			                  a->orientation.z * b->orientation.z + a->orientation.w * b->orientation.w);
+			float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
+			if (position_delta <= PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M &&
+			    orientation_delta <= PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD) {
+				compatible++;
+			}
+		}
+		if (compatible > best_camera_count) {
+			best_camera_count = compatible;
+			best_anchor = anchor;
+		}
+	}
+	if (best_camera_count < 2) {
+		uint32_t present_count = 0;
+		for (uint32_t camera = 0; camera < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera++) {
+			present_count += group->present[camera] ? 1 : 0;
+		}
+		if (present_count >= 2 && !group->disagreement_recorded) {
+			group->disagreement_recorded = true;
+			pssense->tracking.disagreement_count++;
+			for (uint32_t camera_a = 0; camera_a < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera_a++) {
+				if (!group->present[camera_a]) {
+					continue;
+				}
+				for (uint32_t camera_b = camera_a + 1; camera_b < PSSENSE_CONSTELLATION_CAMERA_COUNT;
+				     camera_b++) {
+					if (!group->present[camera_b]) {
+						continue;
+					}
+					struct t_constellation_tracker_sample *candidate_a = &group->samples[camera_a];
+					struct t_constellation_tracker_sample *candidate_b = &group->samples[camera_b];
+					float dx = candidate_a->pose.position.x - candidate_b->pose.position.x;
+					float dy = candidate_a->pose.position.y - candidate_b->pose.position.y;
+					float dz = candidate_a->pose.position.z - candidate_b->pose.position.z;
+					float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+					float dot =
+					    fabsf(candidate_a->pose.orientation.x * candidate_b->pose.orientation.x +
+					          candidate_a->pose.orientation.y * candidate_b->pose.orientation.y +
+					          candidate_a->pose.orientation.z * candidate_b->pose.orientation.z +
+					          candidate_a->pose.orientation.w * candidate_b->pose.orientation.w);
+					float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
+					PSSENSE_INFO(
+					    pssense,
+					    "CONSTELLATION_PAIR_REJECT side=%c ts=%" PRIi64
+					    " cams=%u/%u dt_us=%.1f pos_delta_mm=%.1f orientation_delta_deg=%.1f",
+					    pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', group->timestamp_ns, camera_a,
+					    camera_b,
+					    (double)llabs(candidate_a->timestamp_ns - candidate_b->timestamp_ns) /
+					        1000.0,
+					    position_delta * 1000.0f, orientation_delta * 180.0f / (float)M_PI);
+				}
+			}
+			PSSENSE_INFO(pssense,
+			             "Rejecting synchronized constellation candidates at %" PRIi64
+			             ": %u cameras but no pair agrees within %.0f mm / %.0f deg",
+			             sample->timestamp_ns, present_count,
+			             PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M * 1000.0f,
+			             PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD * 180.0f / (float)M_PI);
+		}
+		os_thread_helper_unlock(&pssense->controller_thread);
+		return false;
+	}
+
+	fused = group->samples[best_anchor];
+	fused.pose = (struct xrt_pose)XRT_POSE_IDENTITY;
+	fused.metrics = (struct t_constellation_tracker_sample_metrics){0};
+	float quaternion[4] = {0};
+	float total_weight = 0.0f;
+	uint32_t fused_camera_count = 0;
+	struct xrt_pose *anchor_pose = &group->samples[best_anchor].pose;
+	for (uint32_t camera = 0; camera < PSSENSE_CONSTELLATION_CAMERA_COUNT; camera++) {
+		if (!group->present[camera]) {
+			continue;
+		}
+		struct t_constellation_tracker_sample *candidate = &group->samples[camera];
+		float dx = anchor_pose->position.x - candidate->pose.position.x;
+		float dy = anchor_pose->position.y - candidate->pose.position.y;
+		float dz = anchor_pose->position.z - candidate->pose.position.z;
+		float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+		float dot = anchor_pose->orientation.x * candidate->pose.orientation.x +
+		            anchor_pose->orientation.y * candidate->pose.orientation.y +
+		            anchor_pose->orientation.z * candidate->pose.orientation.z +
+		            anchor_pose->orientation.w * candidate->pose.orientation.w;
+		float orientation_delta = 2.0f * acosf(CLAMP(fabsf(dot), 0.0f, 1.0f));
+		if (position_delta > PSSENSE_CONSTELLATION_MAX_CAMERA_POSITION_DELTA_M ||
+		    orientation_delta > PSSENSE_CONSTELLATION_MAX_CAMERA_ORIENTATION_DELTA_RAD) {
+			continue;
+		}
+		float weight =
+		    (float)candidate->metrics.matched_blob_count /
+		    (1.0f + (float)(candidate->metrics.reprojection_error * candidate->metrics.reprojection_error));
+		float sign = dot < 0.0f ? -1.0f : 1.0f;
+		fused.pose.position.x += weight * candidate->pose.position.x;
+		fused.pose.position.y += weight * candidate->pose.position.y;
+		fused.pose.position.z += weight * candidate->pose.position.z;
+		quaternion[0] += weight * sign * candidate->pose.orientation.x;
+		quaternion[1] += weight * sign * candidate->pose.orientation.y;
+		quaternion[2] += weight * sign * candidate->pose.orientation.z;
+		quaternion[3] += weight * sign * candidate->pose.orientation.w;
+		fused.metrics.matched_blob_count += candidate->metrics.matched_blob_count;
+		fused.metrics.visible_led_count += candidate->metrics.visible_led_count;
+		fused.metrics.reprojection_error += weight * candidate->metrics.reprojection_error;
+		fused.timestamp_ns = MAX(fused.timestamp_ns, candidate->timestamp_ns);
+		total_weight += weight;
+		fused_camera_count++;
+	}
+	fused.pose.position.x /= total_weight;
+	fused.pose.position.y /= total_weight;
+	fused.pose.position.z /= total_weight;
+	fused.metrics.reprojection_error /= total_weight;
+	float quaternion_norm = sqrtf(quaternion[0] * quaternion[0] + quaternion[1] * quaternion[1] +
+	                              quaternion[2] * quaternion[2] + quaternion[3] * quaternion[3]);
+	fused.pose.orientation = (struct xrt_quat){quaternion[0] / quaternion_norm, quaternion[1] / quaternion_norm,
+	                                           quaternion[2] / quaternion_norm, quaternion[3] / quaternion_norm};
+
+	bool reacquiring = false;
+	if (pssense->tracking.have_last_fused_pose) {
+		if (fused.timestamp_ns <= pssense->tracking.last_fused_timestamp_ns) {
+			group->emitted = true;
+			pssense->tracking.jump_rejection_count++;
+			os_thread_helper_unlock(&pssense->controller_thread);
+			return false;
+		}
+
+		struct xrt_pose *last = &pssense->tracking.last_fused_pose;
+		float dx = last->position.x - fused.pose.position.x;
+		float dy = last->position.y - fused.pose.position.y;
+		float dz = last->position.z - fused.pose.position.z;
+		float position_delta = sqrtf(dx * dx + dy * dy + dz * dz);
+		float dot = fabsf(
+		    last->orientation.x * fused.pose.orientation.x + last->orientation.y * fused.pose.orientation.y +
+		    last->orientation.z * fused.pose.orientation.z + last->orientation.w * fused.pose.orientation.w);
+		float orientation_delta = 2.0f * acosf(CLAMP(dot, 0.0f, 1.0f));
+		int64_t age_ns = fused.timestamp_ns - pssense->tracking.last_fused_timestamp_ns;
+
+		if (age_ns <= PSSENSE_CONSTELLATION_STALE_NS) {
+			if (position_delta > PSSENSE_CONSTELLATION_MAX_JUMP_POSITION_M ||
+			    orientation_delta > PSSENSE_CONSTELLATION_MAX_JUMP_ORIENTATION_RAD) {
+				group->emitted = true;
+				pssense->tracking.jump_rejection_count++;
+				os_thread_helper_unlock(&pssense->controller_thread);
+				return false;
+			}
+		} else {
+			reacquiring = true;
+			PSSENSE_INFO(pssense,
+			             "CONSTELLATION_REACQUIRE side=%c ts=%" PRIi64
+			             " gap_ms=%.1f cameras=%u pos_delta_mm=%.1f orientation_delta_deg=%.1f",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', fused.timestamp_ns,
+			             (double)age_ns / 1000000.0, fused_camera_count, position_delta * 1000.0f,
+			             orientation_delta * 180.0f / (float)M_PI);
+		}
+	}
+
+	group->emitted = true;
+	*sample = fused;
+	return pssense_commit_optical_pose_locked(pssense, sample, fused_camera_count, reacquiring, false);
 }
 
 /*
@@ -1484,6 +2845,18 @@ static void
 pssense_device_destroy(struct xrt_device *xdev)
 {
 	struct pssense_device *pssense = from_device(xdev);
+
+	if (debug_get_bool_option_pssense_leds_off_on_exit() && pssense->hid != NULL &&
+	    pssense->controller_thread.initialized && os_thread_helper_is_running(&pssense->controller_thread)) {
+		// Let the controller thread send LED_ALL_OFF (a new sequence number, so it latches) for a while first.
+		os_thread_helper_lock(&pssense->controller_thread);
+		pssense->output.exit_led_sequence = (uint8_t)(pssense->tracking.led_settings.sequence_number + 1);
+		pssense->output.exiting = true;
+		os_thread_helper_unlock(&pssense->controller_thread);
+		os_nanosleep(150 * U_TIME_1MS_IN_NS);
+		PSSENSE_INFO(pssense, "LEDS_OFF_ON_EXIT side=%c sent LED_ALL_OFF for 150 ms before closing",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R');
+	}
 
 	// Stop the thread helper
 	os_thread_helper_stop_and_wait(&pssense->controller_thread);
@@ -1945,7 +3318,14 @@ pssense_create(struct xrt_prober *xp,
 
 	pssense->timing_event_sink.push_timing_event = pssense_timing_event_sink_push;
 
-	pssense->constellation_device.push_constellation_tracker_sample = pssense_push_constellation_tracker_sample;
+	pssense->constellation_device.push_constellation_tracker_sample =
+	    pssense_push_constellation_tracker_sample_upstream;
+	if (debug_get_bool_option_pssense_led_bootstrap() || debug_get_bool_option_pssense_filter() ||
+	    debug_get_bool_option_pssense_joint()) {
+		pssense->constellation_device.push_optical_sample = pssense_push_constellation_tracker_sample;
+	}
+	pssense->constellation_device.push_camera_blob_count = pssense_push_camera_blob_count;
+	pssense->constellation_device.push_camera_led_blob_count = pssense_push_camera_led_blob_count;
 
 	pssense->constellation_tracking_source.get_tracked_pose = pssense_get_constellation_tracking_source_pose;
 
@@ -1965,8 +3345,23 @@ pssense_create(struct xrt_prober *xp,
 	pssense->usb = xpdev->bus == XRT_BUS_TYPE_USB;
 
 	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
+	pssense->tracking.gyro_bias.enabled = debug_get_bool_option_pssense_gyro_bias_auto();
+	pssense->tracking.input_diag = debug_get_bool_option_pssense_input_diag();
+	if (debug_get_bool_option_pssense_filter()) {
+		struct t_imu_optical_filter_params filter_params;
+		t_imu_optical_filter_default_params(&filter_params);
+		pssense->tracking.filter = t_imu_optical_filter_create(&filter_params);
+	}
 
-	// pssense->tracking.timing_fudge_100us = 20; // 2.0ms fudge
+	long timing_fudge_100us = debug_get_num_option_pssense_timing_fudge_100us();
+	if (timing_fudge_100us == LONG_MIN) {
+#ifdef XRT_OS_OSX
+		timing_fudge_100us = debug_get_bool_option_pssense_future_led_schedule() ? 36 : 0;
+#else
+		timing_fudge_100us = 0;
+#endif
+	}
+	pssense->tracking.timing_fudge_100us = (int32_t)CLAMP(timing_fudge_100us, INT32_MIN, INT32_MAX);
 	pssense->tracking.increment_sequence_num = true;
 	pssense->timing.clock_tracker = m_clock_windowed_skew_tracker_alloc(2048);
 
@@ -2035,6 +3430,22 @@ pssense_create(struct xrt_prober *xp,
 		return NULL;
 	}
 
+	pssense->led_model.unique_blob_matches = debug_get_bool_option_pssense_led_bootstrap() ||
+	                                         debug_get_bool_option_pssense_filter() ||
+	                                         debug_get_bool_option_pssense_joint();
+
+	if (debug_get_bool_option_pssense_led_correction()) {
+		const struct xrt_vec3 *corrections =
+		    pssense->hand == XRT_HAND_LEFT ? pssense_left_led_corrections : pssense_right_led_corrections;
+		for (size_t i = 0; i < pssense->led_model.led_count; i++) {
+			pssense->corrected_leds[i] = pssense->led_model.leds[i];
+			math_vec3_accum(&corrections[i], &pssense->corrected_leds[i].position);
+		}
+		pssense->led_model.leds = pssense->corrected_leds;
+		PSSENSE_INFO(pssense, "LED_CORRECTION side=%c leds=%zu", pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+		             pssense->led_model.led_count);
+	}
+
 	SET_INPUT(PS_CLICK);
 	SET_INPUT(SHARE_CLICK);
 	SET_INPUT(OPTIONS_CLICK);
@@ -2095,6 +3506,67 @@ pssense_create(struct xrt_prober *xp,
 	}
 
 	pssense->tracking.period_id = DURATION_NS_TO_PERIOD_ID(led_sync_refinement_options.initial_blink_duration_ns);
+
+	pssense->tracking.use_led_bootstrap = debug_get_bool_option_pssense_led_bootstrap();
+	{
+		struct t_led_phase_bootstrap_options bootstrap_options;
+		t_led_phase_bootstrap_default_options(&bootstrap_options);
+		bootstrap_options.log_level = pssense->log_level;
+		bootstrap_options.label = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+		long wide_period_id = debug_get_num_option_pssense_led_bootstrap_wide_period_id();
+		wide_period_id = wide_period_id > 0 ? CLAMP(wide_period_id, 1, MAX_PERIOD_ID) : MAX_PERIOD_ID;
+		bootstrap_options.wide_blink_ns = PERIOD_ID_TO_DURATION_NS(wide_period_id);
+		bootstrap_options.narrow_blink_ns = PERIOD_ID_TO_DURATION_NS(9);
+		long lock_period_id = debug_get_num_option_pssense_led_bootstrap_lock_period_id();
+		lock_period_id = CLAMP(lock_period_id, 1, MAX_PERIOD_ID);
+		bootstrap_options.lock_blink_ns = PERIOD_ID_TO_DURATION_NS(lock_period_id);
+		if (debug_get_bool_option_pssense_led_bootstrap_track()) {
+			long frames = debug_get_num_option_pssense_led_bootstrap_track_frames();
+			bootstrap_options.track_interval_frames = frames > 0 ? (uint32_t)frames : 120;
+		}
+		pssense->tracking.led_bootstrap_led_blobs = debug_get_bool_option_pssense_led_bootstrap_led_blobs();
+		pssense->tracking.led_bootstrap_strict = debug_get_bool_option_pssense_led_bootstrap_strict();
+		if (debug_get_bool_option_pssense_led_bootstrap_strict()) {
+			bootstrap_options.min_lock_peak_score = 2.0f;
+			// One probe moves the lock at most 200 us: a noisy probe cannot take a centred lock (+-700 us)
+			// out of its window, and three consistent probes still follow ~60 us/s.
+			bootstrap_options.track_max_step_ns = 200 * U_TIME_1US_IN_NS;
+			// Needs the joint tracker's per-device matched counts (push_camera_led_blob_count).
+			bootstrap_options.detect_stuck_lit = true;
+			/*
+			 * Retry a failed hinted scan (1, 2, 4, 8 s apart) before the full scan. On 4 Oct (000909) two
+			 * hinted scans failed with the left out of view, the full scan followed, and its long wide
+			 * pulses were followed by the always-lit fault, as at every onset so far. Lock centres have
+			 * stayed inside the hint's +-1.5 ms.
+			 */
+			bootstrap_options.hint_retries = 4;
+			// LED-shaped counts are nearly background-free, but average over every camera: a ring three of
+			// four cameras saw added 2.9 per camera on 25 Sep. Raw counts need more margin over their
+			// noise.
+			bootstrap_options.track_min_ring_blobs =
+			    pssense->tracking.led_bootstrap_led_blobs ? 1.5f : 3.0f;
+		}
+		bootstrap_options.track_use_pose_coverage =
+		    debug_get_bool_option_pssense_led_bootstrap_track_coverage();
+		// Only meaningful with LED-shaped counts: raw counts include the other ring and background light.
+		bootstrap_options.track_blob_fallback = pssense->tracking.led_bootstrap_led_blobs;
+		long hint_us = debug_get_num_option_pssense_led_bootstrap_hint_us();
+		if (hint_us >= 0) {
+			// The hint is a narrow-pulse start offset, like the scan steps: centre minus half the narrow
+			// pulse.
+			bootstrap_options.hint_fudge_ns =
+			    (time_duration_ns)hint_us * U_TIME_1US_IN_NS - bootstrap_options.narrow_blink_ns / 2;
+		}
+		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
+		// Force the first update to program the bootstrap's output, replacing any refinement sample.
+		pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
+	}
+	if (pssense->tracking.use_led_bootstrap) {
+		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)%s%s%s",
+		             pssense->tracking.led_bootstrap_led_blobs ? ", LED-shaped per-controller blob counts" : "",
+		             debug_get_bool_option_pssense_led_bootstrap_strict() ? ", strict" : "",
+		             debug_get_bool_option_pssense_led_bootstrap_track_coverage() ? ", coverage probes" : "");
+	}
 
 	ret = os_thread_helper_init(&pssense->controller_thread);
 	if (ret != 0) {
@@ -2214,6 +3686,10 @@ int
 pssense_add_to_constellation_tracker(struct xrt_device *xdev, struct t_constellation_tracker *tracker)
 {
 	struct pssense_device *pssense = from_device(xdev);
+	if (pssense->tracking.constellation_tracker != NULL) {
+		PSSENSE_ERROR(pssense, "Controller is already attached to a constellation tracker");
+		return -1;
+	}
 
 	struct t_constellation_tracker_device_params params = {
 	    .led_model = pssense->led_model,
@@ -2224,16 +3700,80 @@ pssense_add_to_constellation_tracker(struct xrt_device *xdev, struct t_constella
 	if (ret < 0) {
 		PSSENSE_ERROR(pssense, "Failed to add device to constellation tracker: %d", ret);
 		return -1;
-	} else {
-		pssense->tracking.use_constellation = true;
 	}
 
+	os_thread_helper_lock(&pssense->controller_thread);
 	pssense->tracking.constellation_imu_sink = params.imu_sink;
 	pssense->tracking.constellation_tracker = tracker;
+	pssense->tracking.use_constellation = true;
+	pssense->base.supported.position_tracking = true;
+	os_thread_helper_unlock(&pssense->controller_thread);
 
+	pssense->tracking.tracking_origin_before_constellation = pssense->base.tracking_origin;
 	pssense->base.tracking_origin = t_constellation_tracker_get_tracking_origin(tracker);
 
 	return 0;
+}
+
+void
+pssense_remove_from_constellation_tracker(struct xrt_device *xdev)
+{
+	struct pssense_device *pssense = from_device(xdev);
+	struct t_constellation_tracker *tracker = NULL;
+	t_constellation_device_id_t device_id = XRT_CONSTELLATION_INVALID_DEVICE_ID;
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	tracker = pssense->tracking.constellation_tracker;
+	if (tracker == NULL) {
+		os_thread_helper_unlock(&pssense->controller_thread);
+		return;
+	}
+	device_id = pssense->tracking.constellation_device_id;
+	pssense->tracking.constellation_imu_sink = NULL;
+	pssense->tracking.constellation_tracker = NULL;
+	pssense->tracking.constellation_device_id = XRT_CONSTELLATION_INVALID_DEVICE_ID;
+	pssense->tracking.use_constellation = false;
+	pssense->base.supported.position_tracking = pssense->synthetic_position;
+	t_led_phase_bootstrap_stop(&pssense->tracking.led_bootstrap);
+	pssense_led_bootstrap_release(pssense, 0);
+	os_thread_helper_unlock(&pssense->controller_thread);
+	pssense->base.tracking_origin = pssense->tracking.tracking_origin_before_constellation;
+	pssense->tracking.tracking_origin_before_constellation = NULL;
+
+	if (tracker != NULL && device_id != XRT_CONSTELLATION_INVALID_DEVICE_ID) {
+		(void)t_constellation_tracker_remove_device(tracker, device_id);
+	}
+}
+
+bool
+pssense_get_constellation_diagnostics(struct xrt_device *xdev,
+                                      struct pssense_constellation_diagnostics *out_diagnostics)
+{
+	if (xdev == NULL || xdev->name != XRT_DEVICE_PSSENSE || out_diagnostics == NULL) {
+		return false;
+	}
+	struct pssense_device *pssense = from_device(xdev);
+	os_thread_helper_lock(&pssense->controller_thread);
+	*out_diagnostics = (struct pssense_constellation_diagnostics){
+	    .attached = pssense->tracking.constellation_tracker != NULL,
+	    .device_id = pssense->tracking.constellation_device_id,
+	    .candidate_count = pssense->tracking.candidate_count,
+	    .fused_pose_count = pssense->tracking.fused_pose_count,
+	    .disagreement_count = pssense->tracking.disagreement_count,
+	    .jump_rejection_count = pssense->tracking.jump_rejection_count,
+	    .last_fused_timestamp_ns = pssense->tracking.last_fused_timestamp_ns,
+	    .last_fused_camera_count = pssense->tracking.last_fused_camera_count,
+	    .led_bootstrap_enabled = pssense->tracking.use_led_bootstrap,
+	    .led_bootstrap_state = (uint32_t)pssense->tracking.led_bootstrap.state,
+	    .led_bootstrap_fudge_ns = pssense->tracking.led_bootstrap.fudge_offset_ns,
+	    .led_bootstrap_pulse_ns = pssense->tracking.led_bootstrap.blink_ns,
+	    .led_bootstrap_scans = pssense->tracking.led_bootstrap.scans_attempted,
+	    .led_bootstrap_locks = pssense->tracking.led_bootstrap.locks_acquired,
+	};
+	memcpy(out_diagnostics->camera_candidate_count, pssense->tracking.camera_candidate_count,
+	       sizeof(out_diagnostics->camera_candidate_count));
+	os_thread_helper_unlock(&pssense->controller_thread);
+	return true;
 }
 
 /*!

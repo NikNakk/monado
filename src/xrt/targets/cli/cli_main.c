@@ -31,6 +31,12 @@ cli_print_help(int argc, const char **argv)
 	P("  test       - List found devices, for prober testing.\n");
 	P("  probe      - Just probe and then exit.\n");
 	P("  psvr2-pose - Print and validate live PS VR2 head poses.\n");
+	P("  psvr2-camera - Dump raw PS VR2 camera packet metadata.\n");
+	P("  psvr2-constellation - Probe provisional mode-4 Sense optical tracking.\n");
+#ifndef XRT_OS_WINDOWS
+	P("  psvr2-calibration-record - Record synchronized mode-4 frames and HMD poses for offline calibration.\n");
+#endif
+	P("  pssense-test - Validate live PS Sense inputs, battery and 3DoF pose.\n");
 	P("  pose-dump  - Continuously dump the HMD xrt pose as CSV.\n");
 	P("  lighthouse - Control the power of lighthouses [on|off].\n");
 	P("  calibrate  - Calibrate a camera and save config (not implemented yet).\n");
@@ -58,6 +64,20 @@ main(int argc, const char **argv)
 	}
 	if (strcmp(argv[1], "psvr2-pose") == 0) {
 		return cli_cmd_psvr2_pose(argc, argv);
+	}
+	if (strcmp(argv[1], "psvr2-camera") == 0) {
+		return cli_cmd_psvr2_camera(argc, argv);
+	}
+	if (strcmp(argv[1], "psvr2-constellation") == 0) {
+		return cli_cmd_psvr2_constellation(argc, argv);
+	}
+#ifndef XRT_OS_WINDOWS
+	if (strcmp(argv[1], "psvr2-calibration-record") == 0) {
+		return cli_cmd_psvr2_calibration_record(argc, argv);
+	}
+#endif
+	if (strcmp(argv[1], "pssense-test") == 0) {
+		return cli_cmd_pssense_test(argc, argv);
 	}
 	if (strcmp(argv[1], "pose-dump") == 0) {
 		return cli_cmd_pose_dump(argc, argv);

@@ -1,0 +1,406 @@
+// Copyright 2026, Nick Kennedy
+// SPDX-License-Identifier: BSL-1.0
+/*!
+ * @file
+ * @brief  Brightness-driven LED phase bootstrap for constellation-tracked controllers.
+ *
+ * The pose-driven @ref t_led_sync_refinement only learns that a controller is lit once a pose has been
+ * solved. On PS VR2 that is too strict: the lit window is narrow, a single camera often sees only a few LEDs,
+ * and a bootstrap that depends on successful pose solves can scan forever over dark frames.
+ *
+ * This bootstrap instead scores each commanded LED phase by the raw blob counts reported by every camera.
+ * It first scans the whole camera period with a wide pulse, then scans the neighbourhood of the best wide
+ * phase with a narrow pulse to find the edges of the lit window, and finally locks the pulse centre in the
+ * middle of that window. Each scan starts with one step with the LEDs dark to measure every camera's background
+ * blob count (windows, lamps, reflections); a frame is lit only when it sees enough blobs above that. It holds no locks
+ * of its own; the caller serialises every call.
+ *
+ * @author Nick Kennedy
+ * @ingroup tracking
+ */
+
+#pragma once
+
+#include "util/u_time.h"
+#include "util/u_logging.h"
+
+#include <stdbool.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS 8
+#define T_LED_PHASE_BOOTSTRAP_MAX_STEPS 128
+#define T_LED_PHASE_BOOTSTRAP_MAX_BASELINE_REPORTS 32
+
+enum t_led_phase_bootstrap_state
+{
+	//! Not scanning. The LEDs should be held off. Waiting for @ref t_led_phase_bootstrap_start.
+	T_LED_PHASE_BOOTSTRAP_IDLE = 0,
+	//! Stepping a wide pulse over the whole camera period.
+	T_LED_PHASE_BOOTSTRAP_WIDE_SCAN = 1,
+	//! Stepping a narrow pulse around the best wide phase to find the lit window's edges.
+	T_LED_PHASE_BOOTSTRAP_NARROW_SCAN = 2,
+	//! Holding the pulse centred in the measured lit window.
+	T_LED_PHASE_BOOTSTRAP_LOCKED = 3,
+	//! LEDs held dark for one step at the start of a scan, measuring each camera's background blob count.
+	T_LED_PHASE_BOOTSTRAP_BASELINE = 4,
+	/*!
+	 * The controller's ring is lit whatever it is told (the Sense always-lit fault: status LED off, only a power
+	 * cycle clears it). Scanning and probing stop; the ring stays trackable. See
+	 * t_led_phase_bootstrap_options::detect_stuck_lit.
+	 */
+	T_LED_PHASE_BOOTSTRAP_STUCK_LIT = 5,
+};
+
+//! Stages of closed-loop phase tracking while locked.
+enum t_led_phase_bootstrap_track_stage
+{
+	T_LED_PHASE_BOOTSTRAP_TRACK_NONE = 0,
+	//! Measuring blob counts at the lock itself.
+	T_LED_PHASE_BOOTSTRAP_TRACK_REF = 1,
+	//! Pulse moved earlier by the probe offset.
+	T_LED_PHASE_BOOTSTRAP_TRACK_EARLY = 2,
+	//! Pulse moved later by the probe offset.
+	T_LED_PHASE_BOOTSTRAP_TRACK_LATE = 3,
+};
+
+struct t_led_phase_bootstrap_options
+{
+	//! Logging level and a short label (e.g. "L"/"R") used in log lines.
+	enum u_logging_level log_level;
+	char label;
+
+	//! Number of cameras that will report blob counts, at most @ref T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS.
+	uint32_t camera_count;
+
+	//! Pulse width and step for the full-period wide scan.
+	time_duration_ns wide_blink_ns;
+	time_duration_ns wide_step_ns;
+
+	//! Pulse width and step for the narrow edge scan.
+	time_duration_ns narrow_blink_ns;
+	time_duration_ns narrow_step_ns;
+	//! How far beyond the wide pulse on each side the narrow scan extends.
+	time_duration_ns narrow_margin_ns;
+
+	//! Pulse width used once locked.
+	time_duration_ns lock_blink_ns;
+
+	//! Exposures to ignore after changing the phase, while the new setting reaches the controller.
+	uint32_t settle_frames;
+	//! Exposures to wait with the LEDs dark before measuring the baseline. A controller that was lit a moment
+	//! ago (this one, or another that just yielded) keeps emitting for up to ~250 ms after being told to stop.
+	uint32_t baseline_settle_frames;
+	//! Exposures measured for each step.
+	uint32_t measure_frames;
+	//! Extra exposures to wait for late blob reports before scoring a step.
+	uint32_t grace_frames;
+
+	//! A camera frame counts as lit when it reports at least this many blobs above that camera's background.
+	uint32_t min_blobs_per_camera;
+	//! The best step must reach this score (camera-equivalents of lit frames) to be accepted.
+	float min_peak_score;
+	//! The best wide step must exceed the median wide step score by this much.
+	float min_peak_contrast;
+	/*!
+	 * The narrow scan's best step must reach this score to lock; below it the scan fails and is retried. 0 uses
+	 * min_peak_score. A lock from a weak peak sits on the edge of the lit window: on 25 Sep the left locked at a
+	 * 1.9-camera peak 600 us late of its true centre and stayed lit in only half its frames.
+	 */
+	float min_lock_peak_score;
+	/*!
+	 * The narrow scan's lit run may bridge this many consecutive steps below half the peak, when a step beyond them
+	 * is lit again. On 3 Oct (234218, 234436) one weak step beside the left's peak (0.75 among 2.2-2.9) cut its run
+	 * to the peak step alone, so it locked at the window's edge and was lit in 29-53% of frames. 0 restores the old
+	 * behaviour.
+	 */
+	uint32_t narrow_gap_steps;
+
+	//! Once locked, rescan after this many exposures without any lit camera frame.
+	uint32_t lost_frames;
+
+	//! Exposures to stay idle after a failed scan; doubled for each further consecutive failure, up to the max,
+	//! so a controller that cannot lock does not keep every other controller dark.
+	uint32_t failed_backoff_frames;
+	uint32_t max_failed_backoff_frames;
+
+	/*!
+	 * Closed-loop phase tracking while locked; 0 disables it. After this many locked exposures the bootstrap
+	 * asks to probe (@ref t_led_phase_bootstrap_wants_probe). A probe measures the mean blob count at the lock,
+	 * with the pulse moved earlier, then later, and moves the lock towards the brighter side. Blob counts
+	 * rather than the lit test are compared, so another controller's steady light cancels out.
+	 */
+	uint32_t track_interval_frames;
+	//! Probe offset as a fraction of half the measured lit span of the lock pulse, capped at track_max_probe_ns.
+	float track_probe_fraction;
+	/*!
+	 * Largest probe offset. A narrow scan that loses a camera measures an inflated lit span, and probes scaled from
+	 * it step past the real window: in the 25 Sep fast-motion run the ring went dark for each 0.6 s probe side at
+	 * +-690 us.
+	 */
+	time_duration_ns track_max_probe_ns;
+	//! Fraction of the probe offset to move per unit of normalised early/late imbalance.
+	float track_gain;
+	//! Largest single correction.
+	time_duration_ns track_max_step_ns;
+	//! Imbalances (as a fraction of the ring's blob count) below this are ignored.
+	float track_deadband;
+	//! Skip tracking unless the ring added at least this many mean blobs per camera at lock time.
+	float track_min_ring_blobs;
+	/*!
+	 * Probe with pose coverage instead of blob counts: each probe stage scores the sum over its exposures of the
+	 * fraction of predicted-visible LEDs the pose solve matched (@ref t_led_phase_bootstrap_push_pose_coverage),
+	 * divided by the stage's exposure count, so an exposure that did not solve scores 0. Background light and the
+	 * ring's size in view both drop out; blob counts swung 4.6 -> 8.8 between the left's probes on 25 Sep as the
+	 * hand moved.
+	 */
+	bool track_use_pose_coverage;
+	/*!
+	 * With track_use_pose_coverage, move only when the blob counts agree: the dimmer side must also have lost at
+	 * least this fraction of the ring's blobs. A stage whose solves all dropped out (hand, motion) reads coverage 0
+	 * with the ring still lit; on 25 Sep (234101) such stages moved the left's lock by 400 us at a time, 1.2 ms in
+	 * all.
+	 */
+	float track_coverage_min_blob_imbalance;
+	/*!
+	 * With track_use_pose_coverage: when the reference stage is not tracked, steer by the blob-count imbalance
+	 * (normalised by the ring's blobs at lock) instead of skipping the probe. A ring whose lit window has slid off
+	 * the lock is dark or half lit, so it is not tracked, and coverage probes alone can never bring it back.
+	 */
+	bool track_blob_fallback;
+	//! The fallback moves only if the brighter probe stage saw at least this fraction of the ring's blobs at lock.
+	float track_blob_fallback_min_fraction;
+	//! With track_use_pose_coverage: skip tracking unless the reference stage scored at least this.
+	float track_min_reference_coverage;
+
+	/*!
+	 * Detect the always-lit fault from the controller's own matched blobs
+	 * (@ref t_led_phase_bootstrap_push_own_matched): stuck if its ring is solved during the dark baseline, in most
+	 * wide-scan steps, or in nearly every narrow-scan step. A healthy wide scan is lit in ~3 of 17 steps.
+	 */
+	bool detect_stuck_lit;
+	//! A camera frame counts as "own ring seen" when the device's solve matched at least this many of its blobs.
+	uint32_t stuck_min_matched;
+	//! A step (or the baseline) counts as own-lit when at least this fraction of its camera frames saw the ring.
+	float stuck_own_fraction;
+	//! Stuck if at least this fraction of wide-scan steps were own-lit.
+	float stuck_wide_step_fraction;
+
+	/*!
+	 * Hinted scan: when hint_fudge_ns >= 0, scan only a narrow window of +-hint_span_ns around it (about 13 steps
+	 * instead of 38), falling back to the full scan if that finds nothing. After a lock, rescans use the lock as
+	 * the hint. The always-lit fault has only ever started during scans, at about 0.4% per step, so fewer steps
+	 * means fewer faults.
+	 */
+	time_duration_ns hint_fudge_ns;
+	time_duration_ns hint_span_ns;
+	//! Failed hinted scans retried before falling back to the full scan, after dark pauses of failed_backoff_frames
+	//! doubling with each retry (capped at max_failed_backoff_frames).
+	uint32_t hint_retries;
+};
+
+//! Result of one scan step, for logging and tests.
+struct t_led_phase_bootstrap_step
+{
+	time_duration_ns fudge_offset_ns;
+	time_duration_ns blink_ns;
+	//! Sum over cameras of the fraction of reported frames that were lit.
+	float score;
+	//! Mean blob count per reported frame, summed over cameras.
+	float mean_blobs;
+	uint32_t reported[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+	uint32_t lit[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+	//! Camera frames in the step's window, and those in which the device's own solve matched its ring.
+	uint32_t own_reports;
+	uint32_t own_frames;
+};
+
+struct t_led_phase_bootstrap
+{
+	struct t_led_phase_bootstrap_options options;
+
+	enum t_led_phase_bootstrap_state state;
+	//! Camera period used for the current scan.
+	time_duration_ns period_ns;
+
+	//! Output: what the driver should program.
+	time_duration_ns fudge_offset_ns;
+	time_duration_ns blink_ns;
+	//! Incremented whenever the output changes, so the driver can latch a new LED sequence.
+	uint32_t output_generation;
+
+	//! Steps of the current scan.
+	struct t_led_phase_bootstrap_step steps[T_LED_PHASE_BOOTSTRAP_MAX_STEPS];
+	uint32_t step_count;
+	uint32_t step_index;
+	time_duration_ns scan_start_ns;
+	time_duration_ns scan_step_ns;
+
+	//! Exposure accounting for the current step.
+	uint32_t exposures_in_step;
+	bool window_pending;
+	bool window_open;
+	int64_t window_start_ns;
+	int64_t window_end_ns;
+	uint64_t blob_sum[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+
+	//! Median blob count each camera reported during the dark baseline step of the current scan.
+	uint32_t baseline_blobs[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+	uint32_t baseline_reported[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS];
+	uint32_t baseline_samples[T_LED_PHASE_BOOTSTRAP_MAX_CAMERAS][T_LED_PHASE_BOOTSTRAP_MAX_BASELINE_REPORTS];
+
+	//! Result of the last completed bootstrap.
+	bool have_lock;
+	time_duration_ns lit_start_ns;
+	time_duration_ns lit_end_ns;
+	uint32_t scans_attempted;
+	uint32_t locks_acquired;
+
+	//! Exposures left before a failed scan may be retried.
+	uint32_t idle_backoff_frames;
+	//! Failed scans since the last lock.
+	uint32_t consecutive_failures;
+
+	//! Locked-state monitoring.
+	uint32_t frames_since_lit;
+	uint32_t locked_reports;
+	uint32_t locked_lit_reports;
+
+	//! Phase tracking.
+	time_duration_ns lock_fudge_ns;
+	time_duration_ns track_offset_ns;
+	//! Mean blobs per camera the ring added at the narrow scan's peak: normalises the early/late imbalance.
+	float ring_blobs;
+	enum t_led_phase_bootstrap_track_stage track_stage;
+	uint32_t track_countdown;
+	bool track_wants_probe;
+	uint64_t track_blob_sum;
+	//! Sum of pushed pose coverages in the current probe stage's window.
+	float track_coverage_sum;
+
+	//! Own-ring frames during the dark baseline, for stuck-lit detection.
+	uint32_t baseline_own_reports;
+	uint32_t baseline_own_frames;
+	//! The current scan is a hinted narrow scan (a failure falls back to the full scan).
+	bool hinted_scan;
+	//! Where rescans start: the hint option, then the last lock. Negative for none.
+	time_duration_ns next_hint_ns;
+	uint32_t stuck_detections;
+	//! Hinted scans failed since the last lock.
+	uint32_t hint_failures;
+	uint32_t track_reports;
+	float track_means[3];
+	//! Mean blob count per camera frame for each probe stage (also kept in coverage mode, to cross-check it).
+	float track_blob_means[3];
+	uint32_t track_cycles;
+	uint32_t track_moves;
+	time_duration_ns track_total_shift_ns;
+};
+
+//! Fills in the defaults used by the PS Sense driver (PS VR2 mode-4 cameras).
+void
+t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *options);
+
+void
+t_led_phase_bootstrap_init(struct t_led_phase_bootstrap *b, const struct t_led_phase_bootstrap_options *options);
+
+//! Begin (or restart) a full scan using the given camera period.
+void
+t_led_phase_bootstrap_start(struct t_led_phase_bootstrap *b, time_duration_ns period_ns);
+
+//! Stop scanning and return to IDLE; the lock result is kept for diagnostics.
+void
+t_led_phase_bootstrap_stop(struct t_led_phase_bootstrap *b);
+
+/*!
+ * Push one camera exposure event. Advances the scan once a step's measurement window has completed.
+ *
+ * @return true if the output (phase or pulse width) changed and must be sent to the controller.
+ */
+bool
+t_led_phase_bootstrap_push_exposure(struct t_led_phase_bootstrap *b, int64_t exposure_timestamp_ns);
+
+//! Push the number of blobs one camera saw in the frame exposed at @p exposure_timestamp_ns.
+void
+t_led_phase_bootstrap_push_blob_count(struct t_led_phase_bootstrap *b,
+                                      uint32_t camera_index,
+                                      int64_t exposure_timestamp_ns,
+                                      uint32_t blob_count);
+
+//! True while the bootstrap wants the IR emitters lit (scanning with a pulse, or locked).
+static inline bool
+t_led_phase_bootstrap_leds_enabled(const struct t_led_phase_bootstrap *b)
+{
+	return b->state != T_LED_PHASE_BOOTSTRAP_IDLE && b->state != T_LED_PHASE_BOOTSTRAP_BASELINE;
+}
+
+//! True when idle and not backing off after a failed scan, i.e. the caller may call start.
+static inline bool
+t_led_phase_bootstrap_ready_to_scan(const struct t_led_phase_bootstrap *b)
+{
+	return b->state == T_LED_PHASE_BOOTSTRAP_IDLE && b->idle_backoff_frames == 0;
+}
+
+//! True while a scan is in progress (the scanning controller must be the only one lit).
+static inline bool
+t_led_phase_bootstrap_is_scanning(const struct t_led_phase_bootstrap *b)
+{
+	return b->state == T_LED_PHASE_BOOTSTRAP_BASELINE || b->state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN ||
+	       b->state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN;
+}
+
+/*!
+ * Push the pose coverage of one solved exposure (matched / predicted-visible LEDs, 0-1). Only used by probes with
+ * @ref t_led_phase_bootstrap_options::track_use_pose_coverage; exposures that did not solve are simply not pushed.
+ */
+void
+t_led_phase_bootstrap_push_pose_coverage(struct t_led_phase_bootstrap *b,
+                                         int64_t exposure_timestamp_ns,
+                                         float coverage);
+
+/*!
+ * Push how many of one camera frame's blobs the device's own pose solve matched (0 if it was not solved). Used by
+ * @ref t_led_phase_bootstrap_options::detect_stuck_lit.
+ */
+void
+t_led_phase_bootstrap_push_own_matched(struct t_led_phase_bootstrap *b,
+                                       uint32_t camera_index,
+                                       int64_t exposure_timestamp_ns,
+                                       uint32_t matched);
+
+//! True once the always-lit fault has been detected; only restarting the bootstrap leaves this state.
+static inline bool
+t_led_phase_bootstrap_is_stuck_lit(const struct t_led_phase_bootstrap *b)
+{
+	return b->state == T_LED_PHASE_BOOTSTRAP_STUCK_LIT;
+}
+
+//! True while locked and due a tracking probe. The caller must get exclusive use of the LEDs (no other controller
+//! scanning or probing) and then call @ref t_led_phase_bootstrap_begin_probe.
+static inline bool
+t_led_phase_bootstrap_wants_probe(const struct t_led_phase_bootstrap *b)
+{
+	return b->state == T_LED_PHASE_BOOTSTRAP_LOCKED && b->track_wants_probe;
+}
+
+//! True while a tracking probe is in progress (this controller must be the only one changing its light).
+static inline bool
+t_led_phase_bootstrap_is_probing(const struct t_led_phase_bootstrap *b)
+{
+	return b->state == T_LED_PHASE_BOOTSTRAP_LOCKED && b->track_stage != T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
+}
+
+//! Start the tracking probe requested by @ref t_led_phase_bootstrap_wants_probe.
+void
+t_led_phase_bootstrap_begin_probe(struct t_led_phase_bootstrap *b);
+
+//! Wrap an offset into [0, period).
+time_duration_ns
+t_led_phase_bootstrap_wrap(time_duration_ns offset_ns, time_duration_ns period_ns);
+
+#ifdef __cplusplus
+}
+#endif

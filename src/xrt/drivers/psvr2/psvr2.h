@@ -49,15 +49,110 @@ extern "C" {
 #include "util/u_debug.h"
 
 #include "psvr2_protocol.h"
+#include "psvr2_interface.h"
 #include "psvr2_linear_prediction.h"
 #include "psvr2_continuity_prediction.h"
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <libusb.h>
 
+#ifdef XRT_OS_OSX
+/*
+ * Diagnostic clock filter for the macOS PSVR2 path.
+ *
+ * m_clock_offset_a2b() is intentionally a simple exponential filter and its
+ * documentation says it expects low delay and small jitter. Camera mode 4 on
+ * macOS can heavily delay the libusb event loop: the camera VTS itself remains
+ * precise, while the host-side observation time can move by hundreds of
+ * milliseconds. Feeding those delayed observations into the normal exponential
+ * filter moves hw2mono_vts and therefore makes camera exposure timestamps
+ * jitter/backtrack even though the hardware clock is stable.
+ *
+ * With PSVR2_ROBUST_CLOCK=1, PSVR2 translation units use a minimum-delay style
+ * scalar filter instead: lower host-minus-device offsets are accepted
+ * immediately (they represent a less delayed observation), while movement
+ * toward larger offsets is limited to 2.5us per sample so queued USB work cannot
+ * drag the clock mapping around. This is deliberately env-gated for diagnosis.
+ *
+ * At the 2 kHz IMU rate 2.5us per sample still lets the offset climb 5 ms per
+ * second, so USB delays lasting a few hundred milliseconds under CPU load leak
+ * into camera exposure timestamps. PSVR2_ROBUST_CLOCK_MAX_PPM > 0 instead caps the
+ * upward movement at that clock drift rate (the headset and host clocks differ
+ * by ~20 ppm).
+ */
+static inline double
+psvr2_robust_clock_max_ppm(void)
+{
+	static double ppm = -1.0;
+	if (ppm < 0.0) {
+		const char *value = getenv("PSVR2_ROBUST_CLOCK_MAX_PPM");
+		ppm = value != NULL ? atof(value) : 0.0;
+		if (ppm < 0.0) {
+			ppm = 0.0;
+		}
+		if (ppm > 0.0) {
+			fprintf(stderr,
+			        "psvr2: PSVR2_ROBUST_CLOCK_MAX_PPM=%.1f caps upward hardware clock offset drift\n",
+			        ppm);
+		}
+	}
+	return ppm;
+}
+
+static inline bool
+psvr2_robust_clock_enabled(void)
+{
+	static int enabled = -1;
+	if (enabled < 0) {
+		const char *value = getenv("PSVR2_ROBUST_CLOCK");
+		enabled = value != NULL && value[0] != '\0' && strcmp(value, "0") != 0 && strcmp(value, "false") != 0 &&
+		          strcmp(value, "FALSE") != 0;
+		if (enabled) {
+			fprintf(stderr,
+			        "psvr2: PSVR2_ROBUST_CLOCK=1 enabled; using minimum-delay hardware clock filtering on "
+			        "macOS\n");
+		}
+	}
+	return enabled != 0;
+}
+
+static inline timepoint_ns
+psvr2_clock_offset_a2b_macos(float freq, timepoint_ns a, timepoint_ns b, time_duration_ns *inout_a2b)
+{
+	if (!psvr2_robust_clock_enabled()) {
+		return m_clock_offset_a2b(freq, a, b, inout_a2b);
+	}
+
+	const time_duration_ns got_a2b = b - a;
+	const time_duration_ns old_a2b = *inout_a2b;
+	time_duration_ns new_a2b = got_a2b;
+
+	if (old_a2b != 0) {
+		if (got_a2b < old_a2b) {
+			/* Lower skew means a lower-latency observation: take it immediately. */
+			new_a2b = got_a2b;
+		} else {
+			/* Permit real clock drift, but do not follow USB queueing latency. */
+			const double max_ppm = psvr2_robust_clock_max_ppm();
+			const time_duration_ns max_upward_step_ns =
+			    max_ppm > 0.0 ? MAX((time_duration_ns)(1e9 / freq * max_ppm * 1e-6), 1) : 2500;
+			const time_duration_ns delta = got_a2b - old_a2b;
+			new_a2b = old_a2b + MIN(delta, max_upward_step_ns);
+		}
+	}
+
+	*inout_a2b = new_a2b;
+	return a + new_a2b;
+}
+
+/* psvr2.c includes this header before its m_clock_offset_a2b() call sites. */
+#define m_clock_offset_a2b(...) psvr2_clock_offset_a2b_macos(__VA_ARGS__)
+#endif
 
 #define NUM_CAM_XFERS 1
 
@@ -240,6 +335,17 @@ struct psvr2_hmd
 
 	/* Camera debug sinks */
 	struct u_sink_debug debug_sinks[4];
+	struct psvr2_camera_diagnostics camera_diagnostics;
+	struct t_timing_event_source camera_timing_source;
+	struct t_timing_event_sink *camera_timing_sinks[2];
+	struct xrt_frame_sink *camera_frame_sinks[4];
+	//! Frame pushes to camera_frame_sinks running outside data_lock; clearing the sinks waits for them.
+	uint32_t camera_frame_pushes_in_flight;
+	//! Run first in destroy, while every other device still exists (psvr2_set_teardown_hook).
+	void (*teardown_hook)(void *data);
+	void *teardown_hook_data;
+	uint32_t last_camera_event_vts_us;
+	uint32_t last_camera_event_sequence;
 
 	/* Optional consumers for the two 640x640 passthrough camera views.
 	 * Lifetime is owned by the caller, following the WMR camera sink pattern. */

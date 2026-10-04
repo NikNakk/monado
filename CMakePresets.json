@@ -79,6 +79,20 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo"
             }
+        },
+        {
+            "name": "macos-sense-relwithdebinfo",
+            "displayName": "Optimised macOS integration with Sense diagnostics",
+            "inherits": "service-relwithdebinfo",
+            "binaryDir": "${sourceDir}/build-macos-sense-rel",
+            "cacheVariables": {
+                "CMAKE_FIND_FRAMEWORK": "LAST",
+                "Python3_EXECUTABLE": "/opt/homebrew/bin/python3",
+                "XRT_BUILD_DRIVER_PSVR2": "ON",
+                "XRT_BUILD_DRIVER_PSSENSE": "ON",
+                "XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC": "ON",
+                "XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -87,6 +101,19 @@
             "displayName": "Build and install",
             "configurePreset": "default",
             "targets": "install"
+        },
+        {
+            "name": "macos-sense-relwithdebinfo",
+            "configurePreset": "macos-sense-relwithdebinfo"
+        }
+    ],
+    "testPresets": [
+        {
+            "name": "macos-sense-relwithdebinfo",
+            "configurePreset": "macos-sense-relwithdebinfo",
+            "output": {
+                "outputOnFailure": true
+            }
         }
     ]
 }

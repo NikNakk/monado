@@ -263,6 +263,13 @@ struct t_constellation_tracker_led
 	t_constellation_led_id_it id;
 };
 
+/*!
+ * @interface t_constellation_tracker_led_model
+ *
+ * The LED model is a series of points which define the real-world positions of all LEDs. Some LED
+ * models may have self-occluding areas, such as WMR, where inner LEDs can be blocked by the ring,
+ * such occlusions are modelled through the LED visibility computation function.
+ */
 struct t_constellation_tracker_led_model_match_parameters
 {
 	//! The minimum number of LEDs required to accept a brute-force solve without a prior.
@@ -275,22 +282,16 @@ struct t_constellation_tracker_led_model_match_parameters
 	uint32_t min_leds_for_correspondence_search_with_prior;
 };
 
-/*!
- * @interface t_constellation_tracker_led_model
- *
- * The LED model is a series of points which define the real-world positions of all LEDs. Some LED
- * models may have self-occluding areas, such as WMR, where inner LEDs can be blocked by the ring,
- * such occlusions are modelled through the LED visibility computation function.
- */
+
 struct t_constellation_tracker_led_model
 {
 	//! The LEDs in this model.
 	struct t_constellation_tracker_led *leds;
 	//! The number of LEDs in this model.
 	size_t led_count;
-
-	//! The match parameters to tweak how the tracker works.
 	struct t_constellation_tracker_led_model_match_parameters match_parameters;
+	//! Opt-in one-to-one correspondence assignment for the experimental Sense frontend.
+	bool unique_blob_matches;
 
 	/*!
 	 * A function to compute whether a given LED is visible from a given position. This is used
@@ -349,6 +350,11 @@ struct t_constellation_tracker_sample
 	float average_brightness;
 	//! Metrics about the sample, such as reprojection error and matched LED count.
 	struct t_constellation_tracker_sample_metrics metrics;
+	/*!
+	 * 0 for a camera-local candidate (solved from @ref camera_index alone). Otherwise the pose was solved jointly
+	 * against this many synchronised cameras' blobs and is already the tracker's consensus for the exposure.
+	 */
+	uint32_t joint_camera_count;
 };
 
 /*!
@@ -365,11 +371,48 @@ struct t_constellation_tracker_device
 	 * pose as it tracks it.
 	 *
 	 * @param connection The device to push the sample to.
-	 * @param sample     The sample containing the current pose of the device and the timestamp of
-	 *                   the original blobservation that led to this pose being computed.
+	 * @param sample     The camera-local sample. The device may replace it with a fused sample.
 	 */
 	void (*push_constellation_tracker_sample)(struct t_constellation_tracker_device *connection,
 	                                          struct t_constellation_tracker_sample *sample);
+
+	//! Optional acceptance callback. Supersedes the legacy callback; rejected poses must not seed tracker state.
+	bool (*push_optical_sample)(struct t_constellation_tracker_device *connection,
+	                            struct t_constellation_tracker_sample *sample);
+
+	/*!
+	 * Optional, may be NULL. Called once per camera frame, before any pose solving, with the number of
+	 * blobs the camera's blob detector found. Frames with no blobs are reported too. Devices use this to
+	 * judge LED illumination independently of whether a pose could be solved.
+	 *
+	 * @param connection   The device.
+	 * @param camera_index Index of the camera within its mosaic, matching sample camera_index.
+	 * @param timestamp_ns Exposure timestamp of the frame.
+	 * @param blob_count   Number of blobs detected in the frame.
+	 */
+	void (*push_camera_blob_count)(struct t_constellation_tracker_device *connection,
+	                               size_t camera_index,
+	                               int64_t timestamp_ns,
+	                               uint32_t blob_count);
+
+	/*!
+	 * Optional, may be NULL. Called once per camera frame with a count of the blobs that could be this device's
+	 * LEDs: LED-shaped blobs (small and round, which excludes lamps, windows and glare) that no other device has
+	 * claimed, plus every blob this device's own solve matched. On the joint path this is called after the
+	 * exposure has been solved, so another tracked controller's ring is excluded; the per-camera path has no
+	 * ownership yet when it calls this, so there it is the shape filter alone. Frames with no blobs are reported.
+	 *
+	 * @param connection         The device.
+	 * @param camera_index       Index of the camera within its mosaic.
+	 * @param timestamp_ns       Exposure timestamp of the frame.
+	 * @param led_blob_count     LED-shaped blobs not claimed by another device, plus this device's matched blobs.
+	 * @param matched_blob_count Blobs this device's solve matched in the frame (0 if it was not solved).
+	 */
+	void (*push_camera_led_blob_count)(struct t_constellation_tracker_device *connection,
+	                                   size_t camera_index,
+	                                   int64_t timestamp_ns,
+	                                   uint32_t led_blob_count,
+	                                   uint32_t matched_blob_count);
 };
 
 /*!
@@ -379,11 +422,15 @@ struct t_constellation_tracker_device
  *
  * @public @memberof t_constellation_tracker_device
  */
-XRT_NONNULL_ALL static inline void
+XRT_NONNULL_ALL static inline bool
 t_constellation_tracker_device_push_sample(struct t_constellation_tracker_device *device,
                                            struct t_constellation_tracker_sample *sample)
 {
+	if (device->push_optical_sample != NULL) {
+		return device->push_optical_sample(device, sample);
+	}
 	device->push_constellation_tracker_sample(device, sample);
+	return true;
 }
 
 #ifdef __cplusplus

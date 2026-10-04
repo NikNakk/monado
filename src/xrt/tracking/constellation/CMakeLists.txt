@@ -9,6 +9,15 @@ add_library(
 	correspondence_search.h
 	image_point_sort.cpp
 	image_point_sort.h
+	joint_pose_solver.cpp
+	joint_pose_solver.hpp
+	stereo_bootstrap.cpp
+	stereo_bootstrap.hpp
+	t_constellation_tracker_joint.cpp
+	t_imu_optical_filter.cpp
+	t_imu_optical_filter.h
+	t_led_phase_bootstrap.c
+	t_led_phase_bootstrap.h
 	led_search_model.c
 	led_search_model.h
 	pose_metrics.c
@@ -57,4 +66,83 @@ if(XRT_FEATURE_RERUN)
 		PRIVATE constellation_tracker_rerun.cpp constellation_tracker_rerun.hpp
 			constellation_tracker_rerun_blobwatch.h
 		)
+endif()
+
+# Experimental IMU + optical sliding-window fusion adapted from Monado MR 3015, for offline evaluation only. The
+# live tracker never links it. Needs Ceres >= 2.1 (ProductManifold).
+find_package(Ceres 2.1 CONFIG QUIET)
+if(Ceres_FOUND)
+	set(XRT_HAVE_CONSTELLATION_FUSION_EVAL
+	    ON
+	    CACHE INTERNAL "Experimental constellation fusion evaluation"
+		)
+	add_library(
+		constellation_fusion STATIC
+		fusion/fusion_math.cpp
+		fusion/fusion_math.hpp
+		fusion/imu_preintegration.cpp
+		fusion/imu_preintegration.hpp
+		fusion/psvr2_fusion_frames.hpp
+		fusion/sliding_window_fusion.cpp
+		fusion/sliding_window_fusion.hpp
+		)
+	target_compile_features(constellation_fusion PUBLIC cxx_std_20)
+	target_include_directories(constellation_fusion PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+	target_link_libraries(
+		constellation_fusion
+		PUBLIC
+			xrt-interfaces
+			tracking-includes
+			aux_math
+			aux_tracking
+			Ceres::ceres
+		)
+else()
+	set(XRT_HAVE_CONSTELLATION_FUSION_EVAL
+	    OFF
+	    CACHE INTERNAL "Experimental constellation fusion evaluation"
+		)
+endif()
+
+# Offline replay of datasets written by the tracker's data recorder (CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT).
+add_executable(
+	constellation_replay tools/constellation_replay.cpp tools/frontend_compare.cpp
+			     tools/frontend_compare.hpp
+	)
+target_include_directories(constellation_replay PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(
+	constellation_replay
+	PRIVATE
+		constellation
+		xrt-interfaces
+		tracking-includes
+		aux_os
+		aux_util
+		aux_math
+		aux_tracking
+	)
+# Synthetic datasets with exact ground truth, for checking replay pipelines end to end.
+add_executable(constellation_synth tools/constellation_synth.cpp)
+target_include_directories(
+	constellation_synth PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+				    ${CMAKE_CURRENT_SOURCE_DIR}/../../drivers
+	)
+target_link_libraries(
+	constellation_synth
+	PRIVATE
+		constellation
+		xrt-interfaces
+		tracking-includes
+		aux_os
+		aux_util
+		aux_math
+		aux_tracking
+	)
+
+if(XRT_HAVE_CONSTELLATION_FUSION_EVAL)
+	target_sources(
+		constellation_replay PRIVATE tools/fusion_compare.cpp tools/fusion_compare.hpp
+		)
+	target_compile_definitions(constellation_replay PRIVATE XRT_HAVE_CONSTELLATION_FUSION_EVAL)
+	target_link_libraries(constellation_replay PRIVATE constellation_fusion)
 endif()

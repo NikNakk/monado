@@ -111,11 +111,53 @@ DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_gain, "PSVR2_ACCELERATION_GAIN", 
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_limit, "PSVR2_ACCELERATION_LIMIT", 2.0f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_min_speed, "PSVR2_ACCELERATION_MIN_SPEED", 0.01f)
 DEBUG_GET_ONCE_FLOAT_OPTION(psvr2_acceleration_horizon_ms, "PSVR2_ACCELERATION_HORIZON_MS", 90.0f)
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_camera_mode, "PSVR2_CAMERA_MODE", -1)
+
+#define PSVR2_MODE4_ACTIVE_IMAGE_WIDTH 508
 
 static float
 psvr2_prediction_parameter(float value, float fallback, float minimum, float maximum)
 {
 	return isfinite(value) ? fminf(maximum, fmaxf(minimum, value)) : fallback;
+}
+
+static struct psvr2_hmd *
+psvr2_from_timing_source(struct t_timing_event_source *source)
+{
+	return container_of(source, struct psvr2_hmd, camera_timing_source);
+}
+
+static int
+psvr2_timing_source_add_sink(struct t_timing_event_source *source, struct t_timing_event_sink *sink)
+{
+	struct psvr2_hmd *hmd = psvr2_from_timing_source(source);
+	os_mutex_lock(&hmd->data_lock);
+	for (size_t i = 0; i < ARRAY_SIZE(hmd->camera_timing_sinks); i++) {
+		if (hmd->camera_timing_sinks[i] == sink) {
+			os_mutex_unlock(&hmd->data_lock);
+			return 0;
+		}
+		if (hmd->camera_timing_sinks[i] == NULL) {
+			hmd->camera_timing_sinks[i] = sink;
+			os_mutex_unlock(&hmd->data_lock);
+			return 0;
+		}
+	}
+	os_mutex_unlock(&hmd->data_lock);
+	return -1;
+}
+
+static void
+psvr2_timing_source_remove_sink(struct t_timing_event_source *source, struct t_timing_event_sink *sink)
+{
+	struct psvr2_hmd *hmd = psvr2_from_timing_source(source);
+	os_mutex_lock(&hmd->data_lock);
+	for (size_t i = 0; i < ARRAY_SIZE(hmd->camera_timing_sinks); i++) {
+		if (hmd->camera_timing_sinks[i] == sink) {
+			hmd->camera_timing_sinks[i] = NULL;
+		}
+	}
+	os_mutex_unlock(&hmd->data_lock);
 }
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
@@ -621,10 +663,21 @@ psvr2_usb_stop(struct psvr2_hmd *hmd);
 static void
 psvr2_usb_destroy(struct psvr2_hmd *hmd);
 
+static bool
+set_camera_mode(struct psvr2_hmd *hmd, enum psvr2_camera_mode mode);
+
 static void
 psvr2_hmd_destroy(struct xrt_device *xdev)
 {
 	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	if (hmd->teardown_hook != NULL) {
+		hmd->teardown_hook(hmd->teardown_hook_data);
+		hmd->teardown_hook = NULL;
+	}
+	if (hmd->dev != NULL && hmd->camera_enable) {
+		(void)set_camera_mode(hmd, PSVR2_CAMERA_MODE_OFF);
+		hmd->camera_enable = false;
+	}
 
 	psvr2_free_et_data(hmd);
 
@@ -1179,7 +1232,126 @@ img_xfer_cb(struct libusb_transfer *xfer)
 	}
 
 	struct psvr2_hmd *hmd = xfer->user_data;
+	timepoint_ns received_ns = os_monotonic_get_ns();
+	struct t_timing_event_sink *timing_sinks[2] = {0};
+	struct xrt_frame_sink *frame_sinks[2] = {0};
+	struct t_timing_event timing_event = {0};
+	bool push_timing_event = false;
+	uint32_t camera_vts_us = 0;
+	uint32_t camera_sequence_id = 0;
+	uint16_t camera_set = 0;
+	uint16_t camera_width = 0;
+	uint16_t camera_height = 0;
+	int64_t camera_timestamp_ns = 0;
 	if (xfer->actual_length > 0) {
+		os_mutex_lock(&hmd->data_lock);
+		struct psvr2_camera_diagnostics *diag = &hmd->camera_diagnostics;
+		diag->frame_count++;
+		diag->last_packet_size = (uint32_t)xfer->actual_length;
+		diag->last_interval_ns = diag->last_arrival_ns == 0 ? 0 : received_ns - diag->last_arrival_ns;
+		if (diag->first_arrival_ns == 0) {
+			diag->first_arrival_ns = received_ns;
+		}
+		diag->last_arrival_ns = received_ns;
+		if (xfer->actual_length >= 2 && xfer->buffer[0] == 'V' && xfer->buffer[1] == 'I') {
+			diag->vi_signature_count++;
+			if ((size_t)xfer->actual_length >= sizeof(struct camera_usb_header)) {
+				struct camera_usb_header header;
+				memcpy(&header, xfer->buffer, sizeof(header));
+				camera_vts_us = diag->last_vts_us = __le32_to_cpu(header.vts_us);
+				camera_sequence_id = diag->last_sequence_id = __le32_to_cpu(header.sequence_id);
+				camera_set = diag->last_camera_set = __le16_to_cpu(header.camera_set);
+				camera_width = diag->last_image_width = __le16_to_cpu(header.image_width);
+				camera_height = diag->last_image_height = __le16_to_cpu(header.image_height);
+				if (hmd->timestamp_samples >= TIMESTAMP_SAMPLES) {
+					int32_t camera_to_imu_us = (int32_t)(diag->last_vts_us - hmd->last_imu_vts_us);
+					diag->last_vts_monotonic_ns = hmd->last_imu_vts_ns + hmd->hw2mono_vts +
+					                              (int64_t)camera_to_imu_us * U_TIME_1US_IN_NS;
+					camera_timestamp_ns = diag->last_vts_monotonic_ns;
+					if (diag->last_vts_us != hmd->last_camera_event_vts_us) {
+						uint32_t interval_us =
+						    diag->last_vts_us - hmd->last_camera_event_vts_us;
+						uint32_t sequence_delta =
+						    diag->last_sequence_id - hmd->last_camera_event_sequence;
+						bool have_previous_event =
+						    hmd->last_camera_event_vts_us != 0 && sequence_delta != 0;
+						hmd->last_camera_event_vts_us = diag->last_vts_us;
+						hmd->last_camera_event_sequence = diag->last_sequence_id;
+						timing_event = (struct t_timing_event){
+						    .type = T_TIMING_EVENT_TYPE_CAMERA_EXPOSURE_START,
+						    .camera_exposure_start =
+						        {
+						            .sequence_id = diag->last_sequence_id,
+						            .timestamp_ns = diag->last_vts_monotonic_ns,
+						            .frame_period_ns = have_previous_event
+						                                   ? (uint64_t)interval_us *
+						                                         U_TIME_1US_IN_NS /
+						                                         sequence_delta
+						                                   : 0,
+						            .exposure_time_ns = 0,
+						        },
+						};
+						memcpy(timing_sinks, hmd->camera_timing_sinks, sizeof(timing_sinks));
+						push_timing_event = true;
+					}
+				}
+				if (hmd->camera_mode == PSVR2_CAMERA_MODE_4 && camera_set >= 4 && camera_set <= 5 &&
+				    camera_width == 512 && camera_height == 508 && camera_timestamp_ns != 0 &&
+				    xfer->actual_length == USB_CAM_HEADER_SIZE + 2 * camera_width * camera_height) {
+					size_t first_sink = (camera_set - 4) * 2;
+					frame_sinks[0] = hmd->camera_frame_sinks[first_sink];
+					frame_sinks[1] = hmd->camera_frame_sinks[first_sink + 1];
+					if (frame_sinks[0] != NULL || frame_sinks[1] != NULL) {
+						hmd->camera_frame_pushes_in_flight++;
+					}
+				}
+			}
+		}
+		diag->last_header_size = MIN((uint32_t)xfer->actual_length, (uint32_t)sizeof(diag->last_header));
+		memcpy(diag->last_header, xfer->buffer, diag->last_header_size);
+		for (size_t i = 0; i < ARRAY_SIZE(diag->packet_sizes); i++) {
+			if (diag->packet_sizes[i].size == (uint32_t)xfer->actual_length ||
+			    diag->packet_sizes[i].size == 0) {
+				diag->packet_sizes[i].size = (uint32_t)xfer->actual_length;
+				diag->packet_sizes[i].count++;
+				break;
+			}
+		}
+		os_mutex_unlock(&hmd->data_lock);
+		if (push_timing_event) {
+			for (size_t i = 0; i < ARRAY_SIZE(timing_sinks); i++) {
+				if (timing_sinks[i] != NULL) {
+					t_timing_event_sink_push_timing_event(timing_sinks[i], &timing_event);
+				}
+			}
+		}
+		for (size_t i = 0; i < ARRAY_SIZE(frame_sinks); i++) {
+			if (frame_sinks[i] == NULL) {
+				continue;
+			}
+			struct xrt_frame *frame = NULL;
+			u_frame_create_one_off(XRT_FORMAT_L8, camera_width, camera_height, &frame);
+			memcpy(frame->data, xfer->buffer + USB_CAM_HEADER_SIZE + i * camera_width * camera_height,
+			       camera_width * camera_height);
+			// Mode 4 stores 508 image pixels in a 512-byte row. The final four bytes are transport padding,
+			// usually 0xff but occasionally patterned, and must not be exposed as bright optical blobs.
+			for (uint32_t y = 0; y < camera_height; y++) {
+				memset(frame->data + y * frame->stride + PSVR2_MODE4_ACTIVE_IMAGE_WIDTH, 0,
+				       camera_width - PSVR2_MODE4_ACTIVE_IMAGE_WIDTH);
+			}
+			frame->timestamp = camera_timestamp_ns;
+			frame->source_timestamp = (int64_t)camera_vts_us * U_TIME_1US_IN_NS;
+			frame->source_sequence = camera_sequence_id;
+			frame->source_id = (camera_set - 4) * 2 + i;
+			xrt_sink_push_frame(frame_sinks[i], frame);
+			xrt_frame_reference(&frame, NULL);
+		}
+		if (frame_sinks[0] != NULL || frame_sinks[1] != NULL) {
+			os_mutex_lock(&hmd->data_lock);
+			hmd->camera_frame_pushes_in_flight--;
+			os_mutex_unlock(&hmd->data_lock);
+		}
+
 		PSVR2_TRACE(hmd, "Camera frame - %d bytes", xfer->actual_length);
 		PSVR2_TRACE_HEX(hmd, xfer->buffer, MIN(256, xfer->actual_length));
 
@@ -1849,6 +2021,12 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	/* Camera data is not needed for HMD tracking. */
 	hmd->camera_enable = hmd->camera_streams_enabled;
 	hmd->camera_mode = hmd->auxiliary_streams_enabled ? PSVR2_CAMERA_MODE_10 : PSVR2_CAMERA_MODE_BOTTOM_SBS_BC4;
+	long requested_camera_mode = debug_get_num_option_psvr2_camera_mode();
+	if (requested_camera_mode >= PSVR2_CAMERA_MODE_BOTTOM_SBS_CROPPED &&
+	    requested_camera_mode <= PSVR2_CAMERA_MODE_BOTTOM_SBS_BC4) {
+		hmd->camera_mode = (enum psvr2_camera_mode)requested_camera_mode;
+	}
+	hmd->camera_diagnostics.configured_mode = (uint8_t)hmd->camera_mode;
 	if (hmd->camera_streams_enabled) {
 		set_camera_mode(hmd, hmd->camera_mode);
 
@@ -1859,11 +2037,11 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 				goto out;
 			}
 
-			uint8_t *recv_buf = malloc(USB_CAM_MODE10_XFER_SIZE);
+			uint8_t *recv_buf = malloc(USB_CAM_MAX_XFER_SIZE);
 
 			libusb_fill_bulk_transfer(hmd->camera_xfers[i], hmd->dev,
 			                          LIBUSB_ENDPOINT_IN | PSVR2_CAMERA_ENDPOINT, recv_buf,
-			                          USB_CAM_MODE10_XFER_SIZE, img_xfer_cb, hmd, 0);
+			                          USB_CAM_MAX_XFER_SIZE, img_xfer_cb, hmd, 0);
 			hmd->camera_xfers[i]->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
 
 			res = libusb_submit_transfer(hmd->camera_xfers[i]);
@@ -2206,6 +2384,10 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 		           "PSVR2_STAGE_SPACE enabled without PSVR2_RECENTER_ON_FIRST_POSE: "
 		           "stage Y=0 is the raw SLAM origin, not a calibrated physical floor");
 	}
+	hmd->camera_diagnostics.enabled = hmd->camera_streams_enabled;
+	hmd->camera_diagnostics.configured_mode = (uint8_t)hmd->camera_mode;
+	hmd->camera_timing_source.add_sink = psvr2_timing_source_add_sink;
+	hmd->camera_timing_source.remove_sink = psvr2_timing_source_remove_sink;
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	psvr2_timing_trace_open();
