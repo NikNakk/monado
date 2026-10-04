@@ -80,7 +80,25 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
                            "PSSENSE_FUTURE_LED_SCHEDULE",
                            PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
+/*
+ * Reproduce the phase semantics observed from Sony's Windows driver rather than keeping the controller in PRESCAN
+ * forever. On macOS this experimental branch enables it by default; set PSSENSE_NATIVE_LED_PHASES=0 for A/B tests.
+ *
+ * The successful 2026-10-04 oracle trace used PRESCAN/40 for acquisition, BROAD/42 for reacquisition/search and
+ * BG/30 while tracking. STABLE was not required for 6DoF. Outside PRESCAN, cycle_position is a signed offset from
+ * the camera cycle rather than an absolute controller timestamp.
+ */
+#ifdef XRT_OS_OSX
+#define PSSENSE_NATIVE_LED_PHASES_DEFAULT true
+#else
+#define PSSENSE_NATIVE_LED_PHASES_DEFAULT false
+#endif
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_native_led_phases, "PSSENSE_NATIVE_LED_PHASES", PSSENSE_NATIVE_LED_PHASES_DEFAULT)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
+
+#define PSSENSE_NATIVE_PRESCAN_PERIOD_ID 40
+#define PSSENSE_NATIVE_BROAD_PERIOD_ID 42
+#define PSSENSE_NATIVE_BG_PERIOD_ID 30
 DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lock_period_id, "PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", 20)
@@ -133,9 +151,9 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_leds_off_on_exit, "PSSENSE_LEDS_OFF_ON_EXIT",
  */
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_input_diag, "PSSENSE_INPUT_DIAG", false)
 /*
- * Pulse width (period id) for the LED bootstrap's wide scan; default MAX_PERIOD_ID (42, 2.1 ms). All seven located
- * onsets of the always-lit fault followed period-42 pulses within 1.5 s; PSVR2Toolkit's own latency calibration never
- * uses more than 32 (1.6 ms).
+ * Pulse width (period id) for the LED bootstrap's wide scan. With native LED phases enabled the default is Sony's
+ * observed PRESCAN period 40 (2.0 ms), not 42: all seven located always-lit lockout onsets followed period-42 pulses
+ * while Monado was still in PRESCAN. Without native phases the historical default remains MAX_PERIOD_ID (42).
  */
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_wide_period_id, "PSSENSE_LED_BOOTSTRAP_WIDE_PERIOD_ID", -1)
 
@@ -413,6 +431,10 @@ struct pssense_device
 
 		bool increment_sequence_num;
 		uint8_t led_sequence_num;
+
+		//! Native-style LED phase controller (PSSENSE_NATIVE_LED_PHASES).
+		uint8_t native_led_phase;
+		bool native_led_phase_initialised;
 
 		int32_t timing_fudge_100us;
 
@@ -1798,6 +1820,59 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	return t_led_phase_bootstrap_leds_enabled(b);
 }
 
+/*
+ * Convert a small signed host/camera offset to the controller's 3 MHz tick domain.
+ * NS_TO_IMU_TICKS casts through uint64_t and is therefore unsuitable for negative offsets.
+ */
+static uint32_t
+pssense_signed_ns_to_imu_ticks(time_duration_ns offset_ns)
+{
+	int64_t ticks = (offset_ns * 3) / 1000;
+	return (uint32_t)(int32_t)ticks;
+}
+
+/*
+ * Select the native-style LED phase around the existing timing bootstrap and pose solver.
+ *
+ * Scans/probes remain PRESCAN because their absolute schedule is deliberately swept. Once the bootstrap is locked,
+ * a fresh accepted optical pose uses BG; a missing/stale pose uses BROAD for reacquisition. This is intentionally
+ * simpler than Sony's complete internal policy, but preserves the two key semantics shown by the successful oracle:
+ * PRESCAN uses an absolute device-time anchor, while BROAD/BG use a signed offset from the camera cycle.
+ */
+static uint8_t
+pssense_select_native_led_phase_locked(struct pssense_device *pssense,
+                                       bool use_led_bootstrap,
+                                       bool leds_lit,
+                                       timepoint_ns now_ns,
+                                       uint8_t *inout_period_id)
+{
+	if (!leds_lit) {
+		return LED_SYNC_PHASE_LED_ALL_OFF;
+	}
+
+	if (!debug_get_bool_option_pssense_native_led_phases() || !use_led_bootstrap) {
+		return LED_SYNC_PHASE_PRESCAN;
+	}
+
+	struct t_led_phase_bootstrap *b = &pssense->tracking.led_bootstrap;
+	if (t_led_phase_bootstrap_is_scanning(b) || t_led_phase_bootstrap_is_probing(b) ||
+	    b->state != T_LED_PHASE_BOOTSTRAP_LOCKED) {
+		*inout_period_id = MIN(*inout_period_id, PSSENSE_NATIVE_PRESCAN_PERIOD_ID);
+		return LED_SYNC_PHASE_PRESCAN;
+	}
+
+	bool optical_fresh = pssense->tracking.last_optical_timestamp_ns > 0 &&
+	                     now_ns >= pssense->tracking.last_optical_timestamp_ns &&
+	                     now_ns - pssense->tracking.last_optical_timestamp_ns <= PSSENSE_CONSTELLATION_STALE_NS;
+	if (optical_fresh) {
+		*inout_period_id = PSSENSE_NATIVE_BG_PERIOD_ID;
+		return LED_SYNC_PHASE_BG;
+	}
+
+	*inout_period_id = PSSENSE_NATIVE_BROAD_PERIOD_ID;
+	return LED_SYNC_PHASE_BROAD;
+}
+
 static void
 pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_timing_event *event)
 {
@@ -1909,10 +1984,58 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		// start of the exposure, so we need to make it blink later to account
 		next_blink_time += PERIOD_ID_TO_DURATION_NS(period_id) / 2;
 
-		// inside thirds of a nanosecond
+		// cycle_length is always expressed in controller 3 MHz ticks.
 		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
-		// in IMU ticks
-		uint32_t cycle_position = NS_TO_IMU_TICKS(next_blink_time);
+
+		uint8_t led_phase =
+		    pssense_select_native_led_phase_locked(pssense, use_led_bootstrap, leds_lit, now_ns, &period_id);
+
+		/*
+		 * Sony's wire semantics differ by phase:
+		 *  - PRESCAN: cycle_position is an absolute controller-time phase anchor.
+		 *  - BROAD/BG: cycle_position is a signed offset from the camera cycle.
+		 *
+		 * Keep the calibrated pulse centre fixed when changing phase. The bootstrap fudge is relative to exposure
+		 * start; fold it into the nearest signed camera-cycle offset for BROAD/BG.
+		 */
+		uint32_t cycle_position;
+		time_duration_ns relative_center_ns =
+		    (int64_t)pssense->tracking.timing_fudge_100us * 100 * U_TIME_1US_IN_NS +
+		    (int64_t)pssense->tracking.latest_led_sync_sample.fudge_offset_ns +
+		    PERIOD_ID_TO_DURATION_NS(period_id) / 2;
+		if (led_phase == LED_SYNC_PHASE_PRESCAN) {
+			cycle_position = NS_TO_IMU_TICKS(next_blink_time);
+		} else if (led_phase == LED_SYNC_PHASE_BROAD || led_phase == LED_SYNC_PHASE_BG ||
+		           led_phase == LED_SYNC_PHASE_STABLE) {
+			time_duration_ns frame_ns = pssense->tracking.average_exposure_interval_ns;
+			if (frame_ns > 0) {
+				relative_center_ns %= frame_ns;
+				if (relative_center_ns > frame_ns / 2) {
+					relative_center_ns -= frame_ns;
+				} else if (relative_center_ns < -frame_ns / 2) {
+					relative_center_ns += frame_ns;
+				}
+			}
+			cycle_position = pssense_signed_ns_to_imu_ticks(relative_center_ns);
+		} else {
+			cycle_position = 0;
+		}
+
+		if (debug_get_bool_option_pssense_native_led_phases()) {
+			if (!pssense->tracking.native_led_phase_initialised || pssense->tracking.native_led_phase != led_phase) {
+				uint8_t old_phase = pssense->tracking.native_led_phase;
+				pssense->tracking.native_led_phase = led_phase;
+				pssense->tracking.native_led_phase_initialised = true;
+				pssense->tracking.led_sequence_num += 1;
+				PSSENSE_INFO(pssense,
+				             "LED_NATIVE_PHASE side=%c old=%u new=%u period=%u offset_us=%.1f optical_age_ms=%.1f",
+				             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', old_phase, led_phase, period_id,
+				             (double)relative_center_ns / 1000.0,
+				             pssense->tracking.last_optical_timestamp_ns > 0 && now_ns >= pssense->tracking.last_optical_timestamp_ns
+				                 ? (double)(now_ns - pssense->tracking.last_optical_timestamp_ns) / 1000000.0
+				                 : -1.0);
+			}
+		}
 
 		if (debug_get_bool_option_pssense_timing_diag()) {
 			timepoint_ns controller_now_ns = 0;
@@ -1922,51 +2045,29 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			PSSENSE_INFO(pssense,
 			             "LED_SCHEDULE side=%c now=%" PRIi64 " raw_exposure=%" PRIi64 " age=%" PRIi64
 			             " period=%" PRIi64 " forward=%" PRIu64 " projected=%" PRIi64 " projected_lead=%" PRIi64
-			             " controller_now=%" PRIi64 " cycle_position=%u blink_host=%" PRIi64
+			             " controller_now=%" PRIi64 " phase=%u cycle_position=%u relative_us=%.1f blink_host=%" PRIi64
 			             " blink_minus_projected=%" PRIi64 " period_id=%u pulse=%" PRIi64,
 			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', now_ns,
 			             pssense->tracking.last_exposure_local_timestamp_ns,
 			             now_ns - pssense->tracking.last_exposure_local_timestamp_ns,
 			             pssense->tracking.average_exposure_interval_ns, periods_forward, schedule_host_ns,
-			             schedule_host_ns - now_ns, controller_now_valid ? controller_now_ns : -1, cycle_position,
-			             blink_host_valid ? blink_host_est_ns : -1,
+			             schedule_host_ns - now_ns, controller_now_valid ? controller_now_ns : -1, led_phase,
+			             cycle_position, (double)relative_center_ns / 1000.0, blink_host_valid ? blink_host_est_ns : -1,
 			             blink_host_valid ? blink_host_est_ns - schedule_host_ns : 0, period_id,
 			             PERIOD_ID_TO_DURATION_NS(period_id));
 		}
 
-#if 0
-		static int64_t jitter_integration = 0;
-
-		PSSENSE_DEBUG(pssense, "(blink length %uus) drift %ldus",
-		              (uint32_t)(IMU_TICKS_TO_NS(150LLU * 32 + 1250) / 1000), jitter_integration / 1000);
-		jitter_integration += jitter;
-
-		if (jitter_integration > U_TIME_1S_IN_NS) {
-			jitter_integration = 0;
-		}
-#endif
-
 		pssense->tracking.led_settings = (struct pssense_led_settings){
-		    .phase = LED_SYNC_PHASE_PRESCAN,
+		    .phase = led_phase,
 		    .cycle_length = __cpu_to_le32(cycle_length),
 		    .cycle_position = __cpu_to_le32(cycle_position),
 		    .sequence_number = pssense->tracking.led_sequence_num,
 		    .led_blink = {0xFF, 0xFF, 0xFF, 0xFF},
 		    .period_id = period_id,
 		};
-		if (!leds_lit) {
-			pssense->tracking.led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
-		}
 
 		if (pssense->tracking.increment_sequence_num) {
 			pssense->tracking.led_sequence_num += 1;
-#if 0
-			PSSENSE_DEBUG(pssense, "%lu\t%lu",
-			              (pssense->tracking.last_exposure_local_timestamp_ns %
-			               pssense->tracking.average_exposure_interval_ns) /
-			                  1000,
-			              (next_blink_time % pssense->tracking.average_exposure_interval_ns) / 1000);
-#endif
 		}
 	}
 	os_thread_helper_unlock(&pssense->controller_thread);
@@ -2777,7 +2878,14 @@ pssense_create(struct xrt_prober *xp,
 #endif
 	}
 	pssense->tracking.timing_fudge_100us = (int32_t)CLAMP(timing_fudge_100us, INT32_MIN, INT32_MAX);
-	pssense->tracking.increment_sequence_num = true;
+	/*
+	 * Sony holds the LED sequence number while a schedule is active and only relatches it when the schedule changes.
+	 * The historical Monado path incremented it every camera exposure. Native phase mode instead relies on explicit
+	 * increments from bootstrap/refinement output generations and phase transitions.
+	 */
+	pssense->tracking.increment_sequence_num = !debug_get_bool_option_pssense_native_led_phases();
+	pssense->tracking.native_led_phase = LED_SYNC_PHASE_LED_ALL_OFF;
+	pssense->tracking.native_led_phase_initialised = false;
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);
 	m_relation_history_create(&pssense->tracking.constellation_relation_history);
@@ -2888,7 +2996,9 @@ pssense_create(struct xrt_prober *xp,
 		bootstrap_options.log_level = pssense->log_level;
 		bootstrap_options.label = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
 		long wide_period_id = debug_get_num_option_pssense_led_bootstrap_wide_period_id();
-		wide_period_id = wide_period_id > 0 ? CLAMP(wide_period_id, 1, MAX_PERIOD_ID) : MAX_PERIOD_ID;
+		long default_wide_period_id =
+		    debug_get_bool_option_pssense_native_led_phases() ? PSSENSE_NATIVE_PRESCAN_PERIOD_ID : MAX_PERIOD_ID;
+		wide_period_id = wide_period_id > 0 ? CLAMP(wide_period_id, 1, MAX_PERIOD_ID) : default_wide_period_id;
 		bootstrap_options.wide_blink_ns = PERIOD_ID_TO_DURATION_NS(wide_period_id);
 		bootstrap_options.narrow_blink_ns = PERIOD_ID_TO_DURATION_NS(9);
 		long lock_period_id = debug_get_num_option_pssense_led_bootstrap_lock_period_id();
@@ -2924,6 +3034,12 @@ pssense_create(struct xrt_prober *xp,
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
 		// Force the first update to program the bootstrap's output, replacing any refinement sample.
 		pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
+	}
+	if (debug_get_bool_option_pssense_native_led_phases()) {
+		PSSENSE_INFO(pssense,
+		             "Native LED phase controller enabled: PRESCAN/%u during scans, BROAD/%u on optical loss, BG/%u "
+		             "while optical tracking is fresh; per-frame LED sequence relatching disabled",
+		             PSSENSE_NATIVE_PRESCAN_PERIOD_ID, PSSENSE_NATIVE_BROAD_PERIOD_ID, PSSENSE_NATIVE_BG_PERIOD_ID);
 	}
 	if (pssense->tracking.use_led_bootstrap) {
 		PSSENSE_INFO(pssense, "LED phase bootstrap enabled (replaces pose-driven LED sync refinement)%s%s%s",
@@ -3007,6 +3123,7 @@ pssense_create(struct xrt_prober *xp,
 	u_var_add_ro_i64_ns(pssense, &pssense->tracking.average_exposure_interval_ns, "Average Exposure Interval (ns)");
 	u_var_add_bool(pssense, &pssense->tracking.increment_sequence_num, "Increment LED Sequence Number");
 	u_var_add_u8(pssense, &pssense->tracking.led_sequence_num, "LED Sequence Number");
+	u_var_add_u8(pssense, &pssense->tracking.led_settings.phase, "LED Sync Phase");
 	u_var_add_u8(pssense, &pssense->tracking.period_id, "LED Blink Period ID");
 	u_var_add_i32(pssense, &pssense->tracking.timing_fudge_100us, "Timing Fudge (100us)");
 	u_var_add_bool(pssense, &pssense->tracking.use_constellation, "Use Constellation Tracking");
