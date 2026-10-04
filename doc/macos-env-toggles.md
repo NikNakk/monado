@@ -76,6 +76,14 @@ and macOS's conservative camera-off default are unchanged when it is absent.
 The detailed tuning/evidence remain in [optical tracking](pssense-optical-tracking.md)
 and [front-end evaluation](macos-pssense-mr2940-frontend-evaluation.md).
 
+Opt-in, not set by the helper: `PSSENSE_CLOCK_STEADY=1` holds a controller's
+host/device clock offset once its LED schedule has locked, advancing only at a
+fitted drift rate (see `drivers/pssense/pssense_clock.h`). It is unvalidated on
+hardware. With `PSSENSE_TIMING_DIAG=1`, every controller also logs
+`PSSENSE_CLOCK`: the lowest-latency (arrival, controller clock) pair of each
+100 ms window, the max-tracked envelope, the offset in use, and the hold and
+rate, for offline replay of clock mappings.
+
 Build optimisation is required for both solver and runtime. Use the
 `macos-sense-relwithdebinfo` preset; do not use an empty build type or Debug for
 performance/hardware comparisons. The following audit counts are historical.

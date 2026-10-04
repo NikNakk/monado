@@ -877,3 +877,33 @@ Keep the startup snap, which fixes a genuinely late first report. Develop it
 offline: next sessions should set `PSSENSE_TIMING_DIAG=1` so the mapping is
 logged around snaps. Check whether the A-steady CTD recording's IMU/sync
 records allow offline estimator replay.
+
+### Opt-in steady clock mapping (2026-10-05)
+
+The Sense clock mapping moved into `drivers/pssense/pssense_clock.{c,h}`. By
+default it reproduces the previous max-envelope/leak/snap mapping exactly; a
+test compares them sample by sample through latency steps.
+
+`PSSENSE_CLOCK_STEADY=1` (opt-in, not in the runtime defaults) holds the
+offset once the controller's LED bootstrap has locked. From then on it advances
+only at a fitted drift rate: the median of differences between per-second
+best-latency samples 10 s apart over 90 s (4 s apart from 8 s of data, so the
+hold starts about 8 s in). A latency step contaminates only the differences
+straddling it. The rate is clamped to ±200 ppm. The hold lasts the controller's
+lifetime, so rescans calibrate against the held mapping. It logs `CLOCK_OFFSET
+event=hold` with the rate and its gap from the envelope.
+
+Simulation: 20 ppm drift, report latency floor plus 0–10 ms, floor stepping
+−1 ms at 40 s and +2 ms at 70 s, hold requested at 10 s. The held offset stays
+within 90 µs of truth (after the constant bias at hold), and the fitted rate
+ends within 0.6 ppm. The previous mapping moves by up to 1.1 ms. Not yet run on
+hardware.
+
+`PSSENSE_TIMING_DIAG=1` now also logs `PSSENSE_CLOCK` (best sample per
+100 ms window) so recorded sessions can replay clock mappings offline.
+
+Next hardware A/B: the normal profile with `PSSENSE_TIMING_DIAG=1`, then
+adding `PSSENSE_CLOCK_STEADY=1`. Compare per-hand lit fraction, `JOINT_LOSS`
+classes and, in the first run, whether snaps precede losses. Long sessions
+should also check for slow residual drift, which phase tracking is expected to
+absorb.
