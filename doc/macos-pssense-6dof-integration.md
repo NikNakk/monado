@@ -296,7 +296,8 @@ at `build-macos-sense-rel/pssense-6dof.plist` and prints three commands to load
 it, run `psvr2-openxr-test --generic-controller` with client-hosted compositing,
 and unload it after the app closes. **Preparation does not start hardware.**
 The agent and client share an isolated Unix socket directory and Mach endpoint;
-the installed runtime is not overwritten. Close other headset tools and unload
+the installed runtime is not overwritten. The agent sets `XRT_NO_STDIN=1`
+so launchd's closed stdin cannot terminate the service. Close other headset tools and unload
 the existing hardware Monado agent first because USB ownership is exclusive;
 restore that registration after the trial. Logs go to
 `build-macos-sense-rel/sense-service.log`.
@@ -318,3 +319,16 @@ Record the final integration commit, calibration checksum, launch environment,
 log and headset observations against the acceptance checklist above. Test with
 Sense disabled using the same optimised build before attributing any display
 pacing change to tracking or optimisation.
+
+### LaunchAgent startup correction (2026-10-04)
+
+The first user trial with `7b0ebe154` started the experimental tracker for both
+controllers and initialised the PS VR2 compositor, then exited with code 0
+before the client could obtain shared memory. The generated isolated agent
+omitted `XRT_NO_STDIN=1`: the macOS main loop monitors stdin by default and
+interprets launchd's closed stdin as a shutdown request. The resulting missing
+Unix socket/`recvmsg: no data` messages are startup/lifecycle symptoms, not solver
+failures. The generator now forces no-stdin, matching the normal XPC bootstrap
+helper. Reload the agent after regenerating or correcting its plist; changing
+the file does not change launchd's already loaded environment. The corrected
+hardware run remains pending.
