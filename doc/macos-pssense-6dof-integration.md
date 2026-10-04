@@ -7,8 +7,9 @@ SPDX-License-Identifier: BSL-1.0
 # PS Sense 6DoF integration
 
 Integration date: 2026-10-04. **The runtime port is implemented and locally
-validated, ready for an opt-in OpenXR hardware trial.** Hardware validation and
-Linux CI remain pending. The review and original implementation plan below
+validated, with the first OpenXR trial reporting working right-controller
+tracking but no visible left-controller tracking.** Left acquisition remains
+unresolved and Linux CI remains pending. The review and original implementation plan below
 explain the selection; the completed checks and launch procedure follow.
 
 ## Sources reviewed
@@ -342,8 +343,8 @@ interprets launchd's closed stdin as a shutdown request. The resulting missing
 Unix socket/`recvmsg: no data` messages are startup/lifecycle symptoms, not solver
 failures. The generator now forces no-stdin, matching the normal XPC bootstrap
 helper. Reload the agent after regenerating or correcting its plist; changing
-the file does not change launchd's already loaded environment. The corrected
-hardware run remains pending.
+the file does not change launchd's already loaded environment. The subsequent
+hardware run starts successfully; controller observations are recorded below.
 
 The isolated agent also now uses `RunAtLoad=false`, matching the normal direct
 XPC helper. The original test generator eagerly started it at bootstrap. After
@@ -359,3 +360,45 @@ and failed queries, valid-but-untracked colouring, and keeping controller/gaze
 action sets active together. The visual result on the headset remains for the
 user to validate. The earlier `--generic-controller` implementation logged
 only action state and did not locate/render controller poses.
+
+### First controller visualization hardware report (2026-10-04)
+
+The user reports that the right works well and the left never starts tracking
+visibly. The running service identifies itself as `7b0ebe154`; the controller
+visualization client was rebuilt at `5ae61987d`. The corrected LaunchAgent starts
+and serves the client successfully.
+
+The service log shows that the left acquired an LED timing lock and accepted
+many optical poses earlier in this service lifetime. It subsequently lost the
+lock after 301 exposures without detected illumination, exhausted four hinted
+retries, and repeatedly failed full scans with `wide_peak_below_minimum`.
+During client 3, the left accepted only six optical poses in two short bursts,
+while the right continued accepting poses. The left's subsequent wide scan
+reported zero lit camera samples at every phase, despite the right tracking.
+No `stuck_lit` event was logged. These observations point to optical/illumination
+reacquisition; they do not establish its cause or exclude a separate client pose
+problem. Position validity expires after 300 ms without accepted optical data,
+so sustained loss should hide the diagnostic cube.
+
+A snapshot of the log, loaded plist source and count summary is retained in
+`build-macos-sense-rel/diagnostics/20261004-left-reacquisition/`. This is an ignored
+local evidence directory. Controlled left-ring visibility and button/pose-state
+observations remain necessary before changing illumination or blob thresholds.
+
+The user subsequently confirmed that holding the left ring 30–50 cm in front
+of the headset does not make it appear, while the right starts almost
+immediately. Button response could not conveniently be checked from terminal
+output while wearing the headset. The diagnostic now adds head-relative LEFT
+and RIGHT panels below the fixation cross, independent of controller pose:
+FACE 1/2 (Square/Triangle on left, Cross/Circle on right), TRIGGER, GRIP
+(L1/R1) and STICK show green on input, grey when released and red when their
+OpenXR action is inactive. Bars show trigger/grip level and stick deflection.
+The footer reports TRACKED, POSE ONLY or NO POSE separately from input state.
+Close and relaunch the same `--generic-controller` command after rebuilding;
+this client-only addition does not require restarting the service. It does not
+yet resolve the left optical acquisition failure.
+
+The optimised client rebuild succeeds without compiler warnings. The controller
+visual checks pass all 29 assertions in four cases, including visible input
+panels with missing controller poses, head-relative placement, active input and
+inactive-action colours. Headset readability remains to be confirmed.

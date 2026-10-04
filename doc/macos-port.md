@@ -54,8 +54,10 @@ port to Apple Silicon macOS, with PS VR2 as the primary headset.
 LED bootstrap, calibration/session tools and source evidence are now ported from
 `~/Code/monado`, including its uncommitted runtime hookup. The opt-in path builds
 with full-runtime optimisation and matches source recorded-session replay byte
-for byte. Local tests pass; OpenXR hardware validation and Linux CI remain
-pending. See the [integration and launch procedure](macos-pssense-6dof-integration.md).
+for byte. Local tests pass. The first OpenXR controller trial reports the right
+working well; the left remains invisible after optical/LED-lock loss and failed
+reacquisition. Full hardware validation and Linux CI remain pending. See the
+[integration and launch procedure](macos-pssense-6dof-integration.md).
 Display-pacing benefits from optimisation remain to be measured independently.
 
 The integration includes the

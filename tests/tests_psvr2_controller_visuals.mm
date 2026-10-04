@@ -108,3 +108,31 @@ TEST_CASE("Controller and gaze action sets stay active together")
 	CHECK(sync_diagnostic_actions(app) == XR_SUCCESS);
 	CHECK(synced_sets == 2);
 }
+
+TEST_CASE("Controller input panels remain visible without controller poses")
+{
+	auto app = mock_controller_app();
+	app.controller_pose_flags = {};
+	app.controller_inputs[0].active = {true, true, true, true, true};
+	app.controller_inputs[0].primary = true;
+	app.controller_inputs[0].trigger = 0.75f;
+	XrPosef head = {{0, 0, 0, 1}, {1, 2, 3}};
+	append_controller_input_panels(app, head);
+	REQUIRE_FALSE(app.frame_instances.empty());
+	CHECK(app.frame_instances.size() < app.renderer.max_instances);
+	CHECK(app.frame_instances[0].model.columns[3].x == Catch::Approx(0.82));
+	CHECK(app.frame_instances[0].model.columns[3].y == Catch::Approx(1.80));
+	CHECK(app.frame_instances[0].model.columns[3].z == Catch::Approx(2.18));
+	bool green = false;
+	bool red = false;
+	for (const auto &instance : app.frame_instances) {
+		green |= instance.color.y > 0.9f && instance.color.x < 0.2f;
+		red |= instance.color.x > 0.9f && instance.color.y < 0.2f;
+	}
+	CHECK(green); // Active left button/trigger, despite no optical pose.
+	CHECK(red);   // Inactive right actions and missing poses.
+	app.frame_instances.clear();
+	app.test_generic_controller = false;
+	append_controller_input_panels(app, head);
+	CHECK(app.frame_instances.empty());
+}

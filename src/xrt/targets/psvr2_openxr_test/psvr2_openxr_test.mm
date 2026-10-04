@@ -417,6 +417,9 @@ glyph_5x7(char c)
 {
 	switch (c) {
 	case 'A': return {0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11, 0x11};
+	case 'C': return {0x0e, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0e};
+	case 'G': return {0x0e, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0f};
+	case 'K': return {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11};
 	case 'D': return {0x1e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1e};
 	case 'E': return {0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x1f};
 	case 'F': return {0x1f, 0x10, 0x10, 0x1e, 0x10, 0x10, 0x10};
@@ -780,7 +783,7 @@ struct metal_renderer
 	id<MTLDepthStencilState> depth_state = nil;
 	id<MTLBuffer> cube_vertex_buffer = nil;
 	id<MTLBuffer> instance_buffer = nil;
-	size_t max_instances = 1536;
+	size_t max_instances = 4096;
 
 	void
 	initialize(id<MTLDevice> device, MTLPixelFormat color_format)
@@ -989,6 +992,16 @@ struct application
 	std::array<XrSpace, 2> controller_grip_spaces = {XR_NULL_HANDLE, XR_NULL_HANDLE};
 	std::array<XrSpace, 2> controller_aim_spaces = {XR_NULL_HANDLE, XR_NULL_HANDLE};
 	std::array<std::array<XrSpaceLocationFlags, 2>, 2> controller_pose_flags = {};
+	struct controller_input_state
+	{
+		std::array<bool, 5> active{};
+		bool primary = false;
+		bool secondary = false;
+		float trigger = 0;
+		float squeeze = 0;
+		XrVector2f stick{};
+	};
+	std::array<controller_input_state, 2> controller_inputs{};
 	XrPassthroughFB passthrough = XR_NULL_HANDLE;
 	XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
 	id<MTLCommandQueue> command_queue = nil;
@@ -1493,6 +1506,7 @@ poll_generic_controller(application &app)
 		return;
 	}
 
+	app.controller_inputs = {};
 	if (XR_FAILED(sync_diagnostic_actions(app))) {
 		return;
 	}
@@ -1544,6 +1558,15 @@ poll_generic_controller(application &app)
 		XrActionStatePose aim = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
 		get_info.action = app.controller_aim_action;
 		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &aim), "xrGetActionStatePose(aim)");
+
+		app.controller_inputs[hand_index] = {
+		    {primary.isActive == XR_TRUE, secondary.isActive == XR_TRUE, trigger.isActive == XR_TRUE,
+		     squeeze.isActive == XR_TRUE, thumbstick.isActive == XR_TRUE},
+		    primary.isActive && primary.currentState,
+		    secondary.isActive && secondary.currentState,
+		    trigger.isActive ? trigger.currentState : 0.0f,
+		    squeeze.isActive ? squeeze.currentState : 0.0f,
+		    thumbstick.isActive ? thumbstick.currentState : XrVector2f{}};
 
 		const bool changed = primary.changedSinceLastSync || secondary.changedSinceLastSync ||
 		                     trigger.changedSinceLastSync || squeeze.changedSinceLastSync ||
@@ -2503,6 +2526,57 @@ append_controller_markers(application &app, XrTime predicted_display_time)
 	}
 }
 
+// These head-relative panels require no controller pose, so input can be checked after optical loss.
+static void
+append_controller_input_panels(application &app, const XrPosef &head_pose)
+{
+	if (!app.test_generic_controller)
+		return;
+	diagnostic_scene panel;
+	panel.origin = xr_position(head_pose.position);
+	panel.right = rotate_vector(head_pose.orientation, make_float3(1, 0, 0));
+	panel.up = rotate_vector(head_pose.orientation, make_float3(0, 1, 0));
+	panel.forward = rotate_vector(head_pose.orientation, make_float3(0, 0, -1));
+	const simd_float4 off = make_float4(0.35f, 0.38f, 0.42f, 1);
+	const simd_float4 on = make_float4(0.15f, 1, 0.25f, 1);
+	const simd_float4 inactive = make_float4(1, 0.12f, 0.12f, 1);
+	for (size_t hand = 0; hand < 2; ++hand) {
+		const float x = hand == 0 ? -0.18f : 0.18f;
+		const auto &input = app.controller_inputs[hand];
+		add_world_box(panel, x, -0.20f, 0.82f, make_float3(0.34f, 0.35f, 0.008f),
+		              make_float4(0.015f, 0.02f, 0.025f, 1));
+		add_world_text(panel, x, -0.065f, 0.80f, 0.006f, hand == 0 ? "LEFT" : "RIGHT",
+		               hand == 0 ? make_float4(0.05f, 0.85f, 1, 1) : make_float4(1, 0.35f, 0.05f, 1));
+		const char *labels[] = {"FACE 1", "FACE 2", "TRIGGER", "GRIP", "STICK"};
+		const float levels[] = {input.primary ? 1.0f : 0.0f, input.secondary ? 1.0f : 0.0f,
+		                        std::clamp(input.trigger, 0.0f, 1.0f),
+		                        std::clamp(input.squeeze, 0.0f, 1.0f),
+		                        std::min(1.0f, std::hypot(input.stick.x, input.stick.y))};
+		for (size_t row = 0; row < 5; ++row) {
+			const float y = -0.11f - (float)row * 0.042f;
+			const simd_float4 color = !input.active[row] ? inactive : levels[row] > 0.05f ? on : off;
+			add_world_text(panel, x - 0.04f, y, 0.80f, 0.0045f, labels[row], color);
+			add_world_box(panel, x + 0.108f, y, 0.80f, make_float3(0.066f, 0.019f, 0.005f), off);
+			if (input.active[row] && levels[row] > 0) {
+				const float width = 0.066f * levels[row];
+				add_world_box(panel, x + 0.075f + width / 2, y, 0.795f,
+				              make_float3(width, 0.019f, 0.005f), on);
+			}
+		}
+		const auto flags = app.controller_pose_flags[hand][0];
+		const XrSpaceLocationFlags valid =
+		    XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+		const XrSpaceLocationFlags tracked =
+		    XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+		const bool have_pose = (flags & valid) == valid;
+		const bool tracking = have_pose && (flags & tracked) == tracked;
+		add_world_text(panel, x, -0.33f, 0.80f, 0.0045f,
+		               tracking ? "TRACKED" : have_pose ? "POSE ONLY" : "NO POSE",
+		               tracking ? on : have_pose ? off : inactive);
+	}
+	app.frame_instances.insert(app.frame_instances.end(), panel.world_instances.begin(), panel.world_instances.end());
+}
+
 static void
 render_views(application &app, XrTime predicted_display_time)
 {
@@ -2518,6 +2592,7 @@ render_views(application &app, XrTime predicted_display_time)
 		append_head_locked_cross(app.frame_instances, head_pose);
 		append_gaze_marker(app, predicted_display_time);
 		append_controller_markers(app, predicted_display_time);
+		append_controller_input_panels(app, head_pose);
 	}
 	if (app.frame_instances.size() > app.renderer.max_instances) {
 		fatal("diagnostic scene exceeded Metal instance buffer capacity");
@@ -3076,7 +3151,7 @@ run(int argc, char **argv)
 			    "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			    "  --passthrough-only submits only XR_FB_passthrough.\n"
 			    "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action "
-			    "state and draws cyan/orange grip cubes and aim rays (grey when untracked).\n"
+			    "state, draws controller poses and head-relative input panels (green pressed, red inactive).\n"
 			    "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			    "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			    "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve "
