@@ -907,3 +907,30 @@ adding `PSSENSE_CLOCK_STEADY=1`. Compare per-hand lit fraction, `JOINT_LOSS`
 classes and, in the first run, whether snaps precede losses. Long sessions
 should also check for slow residual drift, which phase tracking is expected to
 absorb.
+
+### Best OpenBrush run, and a timing-trace correlation (2026-10-05)
+
+The user reports the best session so far: 145 s, normal profile plus
+`PSSENSE_TIMING_DIAG=1`, the minimum-window build (before the clock-module
+commit, so default clock mapping). Left accepted 54.8 poses/s, lit 0.88, 4
+filter resets; right 54.6/s, lit 0.81, 6 resets, both near 300 accepts per 5 s
+until the right fell off in the last ~15 s. Both startup locks were healthy
+(1450 µs windows).
+
+It had **12 mid-session clock snaps of 250–840 µs without losses**, so snaps
+alone do not explain the losses recorded above.
+
+Across six OpenBrush sessions, the two with `PSSENSE_TIMING_DIAG=1` (A-steady
+and this one) had a good left (lit 0.86 and 0.88). The four without it had a
+poor left (0.32–0.64). The flag only adds a log line after each HID output
+write on the controller I/O thread, so this may be chance with uncontrolled
+hand use. With n=6, 2 of 6, it is a correlation to test, not a cause.
+
+In both traced runs, HID output writes block 8.6–8.8 ms median, 19 ms p99 (up
+to 111 ms), so 10% of output intervals are 21 ms instead of 10.7 ms. Input
+age at write is 5.5–5.7 ms median. Both hands are alike. There is no trace of
+a bad run to compare.
+
+Next: rebuild `build-wine` (steady option and `PSSENSE_CLOCK` logging), repeat
+with `PSSENSE_TIMING_DIAG=1`, then once with it removed, before the
+`PSSENSE_CLOCK_STEADY` A/B.
