@@ -140,6 +140,20 @@ Observed examples:
 No standalone `ADJUST_FRAME_CYCLE` command was seen in this successful log; the combined command was used for the
 fine long-term correction once BG was active.
 
+## Native fine timing commands
+
+The first successful Windows session also exposes the semantics of Sony's combined time/cycle adjustment:
+
+- `ADJUST_TIME_AND_CYCLE factor=-4.5034726e-06 offset=-18` with current `frameCycle=16683350` is followed by
+  `frameCycle=16683274`, matching `floor(16683350 * (1 - 4.5034726e-06))`;
+- a later `factor=-6.465052e-07 offset=-9` changes `16683274 -> 16683263`, again matching a multiplicative
+  fractional correction.
+
+The offset component becomes the new relative `baseTime`. This strongly suggests the factor is a fractional
+frame-period/frequency correction rather than an arbitrary tuning value. The successful Bluetooth PCAP covers the
+second session, which did not contain these two combined adjustments, so the corresponding on-wire cycle-length
+update has not yet been independently verified there.
+
 ## Native phases observed
 
 The successful capture contained:
