@@ -372,7 +372,11 @@ leaving the pose solver untouched:
 2. **Native-style schedule relatching**
    - the LED sequence is no longer incremented every camera exposure;
    - bootstrap/refinement output-generation changes still relatch the schedule;
-   - explicit phase changes relatch it.
+   - explicit phase changes relatch it;
+   - while locked in PRESCAN with no other schedule change, Monado re-anchors the absolute `cycle_position` with a
+     new sequence approximately once per second, matching the native Sony maintenance cadence;
+   - BROAD/BG receive no periodic 1 Hz relatch because their native schedule uses relative offsets and the successful
+     trace holds the same sequence for long intervals there.
 
 By default the controller therefore remains in PRESCAN after lock. This is intentional: it isolates the two strongest
 lockout hypotheses without introducing an unsupported BG mask/phase combination.
