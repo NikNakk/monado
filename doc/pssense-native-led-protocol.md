@@ -320,6 +320,29 @@ the mask to `0a ff ff ff` and the tracking flag changes 6 -> 9 about 2 ms later.
 Until the bit-to-physical-LED mapping and Sony's selection policy are captured, Monado should **not** assume that
 `BG/30 + ff ff ff ff` is a native-like steady state; that combination never occurs in this successful capture.
 
+## PRESCAN -> BROAD is acquisition-driven
+
+The two successful Windows sessions rule out a simple fixed-duration PRESCAN timeout.
+
+First session:
+
+- PRESCAN entered at approximately 11:14:05.758;
+- the controller did not reach full tracking until 11:14:54.357;
+- Sony remained in PRESCAN throughout that ~48.6 s pre-acquisition interval;
+- BROAD began at 11:14:57.341, about 2.98 s after the first full-track transition. Tracking briefly dropped again
+  before BROAD, so this is not a clean dwell-time measurement.
+
+Second/PCAP session:
+
+- PRESCAN entered at 11:16:45.337;
+- full tracking (flag 6 -> 9) occurred at 11:16:48.816;
+- BROAD began at 11:16:50.632;
+- the clean post-acquisition dwell was therefore 1.816 s.
+
+This supports the conservative optional Monado experiment: remain in PRESCAN until the existing optical solver has
+accepted a pose, hold for about 2 s, then test BROAD/42. It does **not** support advancing to BROAD merely because a
+fixed amount of time has elapsed since PRESCAN began.
+
 ## LED-pattern changes around loss and reacquisition
 
 The second successful native session gives a stronger clue about the four-byte `leds[]` field. It should not yet be
