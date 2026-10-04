@@ -432,6 +432,19 @@ if(XRT_BUILD_DRIVER_PSVR2 AND XRT_BUILD_DRIVER_PSSENSE)
 	add_test(NAME tests_psvr2_sense_tracking COMMAND tests_psvr2_sense_tracking)
 endif()
 
+if(XRT_BUILD_DRIVER_PSSENSE)
+	add_executable(
+		tests_pssense_clock
+		tests_pssense_clock.cpp
+		${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers/pssense/pssense_clock.c
+		)
+	target_link_libraries(tests_pssense_clock PRIVATE xrt-external-catch2)
+	target_include_directories(
+		tests_pssense_clock PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/drivers/pssense
+		)
+	add_test(NAME tests_pssense_clock COMMAND tests_pssense_clock)
+endif()
+
 if(APPLE AND TARGET psvr2-openxr-test)
 	add_executable(tests_psvr2_controller_visuals tests_psvr2_controller_visuals.mm)
 	target_compile_features(tests_psvr2_controller_visuals PRIVATE cxx_std_17)
