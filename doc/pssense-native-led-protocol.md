@@ -532,26 +532,39 @@ model and bounded smoothing. Its parameters should be justified by recorded time
 from Toolkit constants. The current implementation is intentionally left unchanged on this experimental branch so the
 LED scheduling experiments do not simultaneously change the already-working tracking clock.
 
-## Upstream provenance blocker: current LED geometry
+## Upstream provenance: 17-LED outputs versus canonical geometry
 
-The current experimental Monado file `src/xrt/drivers/pssense/pssense_led_model.h` explicitly states that its 17 LED
-coordinates were extracted from Sony's PC driver. Under the PSVR2Toolkit `AGENTS.md` clean-room policy, that table is
-not suitable provenance for an eventual upstream contribution.
+The revised PSVR2Toolkit `AGENTS.md` explicitly permits Sony's **17-LED optical-processing outputs** to be used as
+behavioural ground truth. In particular, research instrumentation may record:
 
-It remains useful for local experimental validation of the optical pipeline, but upstream-oriented work should replace
-it with geometry derived independently from observable behaviour or direct hardware measurement.
+- whether each physical LED ID 0..16 was detected;
+- which camera detected it;
+- Sony's LED-to-image-blob correspondence;
+- image-space coordinates, where available;
+- timestamps/frame indices, tracking-validity state and Sony's published controller pose.
 
-Prepared clean-room route:
+Those labels may be paired with raw camera frames to build tests and evaluate an independently written Monado
+detector/matcher. The private hook/offset/layout used by Toolkit to observe those outputs remains research
+instrumentation only and is not transferred into Monado.
 
-1. capture raw VI camera packets directly from PSVR2 USB interface 6 / endpoint 0x87;
-2. capture HMD and Sense poses Sony publishes through the standard OpenVR driver-host interface;
-3. use independently obtained HMD camera calibration;
-4. identify/associate visible IR emitters across stereo frames and multiple controller poses;
-5. triangulate emitter positions into controller coordinates and fit/refine the constellation;
-6. validate the independently derived model on held-out frames and with Monado's existing pose solver.
+A different rule applies to the current experimental Monado file
+`src/xrt/drivers/pssense/pssense_led_model.h`, whose exact canonical 3-D coordinates were extracted from a Sony
+internal model table. The revised policy says not to copy such a table automatically into upstream-oriented code.
+It remains acceptable for local experimentation, but the preferred upstream route is independently reconstructed
+geometry.
 
-The Sony-derived coordinate table must not be used as a target, prior or optimisation constraint for that
-reconstruction.
+Prepared reconstruction route:
+
+1. capture raw VI camera packets from observable PSVR2 USB I/O;
+2. capture Sony's permitted per-camera/per-LED ground-truth labels;
+3. capture HMD and Sense poses Sony publishes through standard OpenVR;
+4. use independently obtained HMD camera calibration;
+5. triangulate labelled emitter observations over many poses into controller coordinates;
+6. fit/refine the constellation independently and validate on held-out captures with Monado's existing pose solver.
+
+To preserve independence, the Sony internal coordinate table should not be used as a target, prior or optimisation
+constraint during reconstruction. If an exact internal table later appears genuinely necessary for interoperability,
+the revised `AGENTS.md` calls for explicit provenance/legal review before putting it into upstream-oriented code.
 
 ## Remaining reverse-engineering
 
@@ -562,8 +575,9 @@ reconstruction.
 - Exact policy that causes BROAD -> BG, BG -> PRESCAN, and subsequent PRESCAN -> BROAD.
 - Selective LED-pattern meaning and physical-emitter mapping. The prepared Toolkit capture saves raw VI packets
   before and after native phase/mask changes, periodic VI samples, the observable IF8/0x89 LED-detector USB stream,
-  and poses Sony publishes through OpenVR. Semantics-free byte-lane differencing plus static-controller captures can
-  therefore answer this without Sony internal tracker data.
+  poses Sony publishes through OpenVR, and the revised-policy-permitted 17-LED correspondence outputs as semantic
+  ground-truth labels. These labels can validate our independent image detector/matcher without importing Sony's
+  implementation.
 - Whether STABLE is used in longer/cleaner sessions and what condition enters it.
 - Whether the native fixed output mode byte `0xA2` matters for long-term LED reliability; Monado's current output
   formatting is already accepted by the controllers and is not changed in this experiment.
