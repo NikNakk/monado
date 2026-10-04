@@ -108,6 +108,38 @@ keeping visible, but it is not by itself evidence for the lockout: the controlle
 standalone LED tests. The more important native distinction is that the LED schedule generation/sequence is held across
 many output packets.
 
+## Native timing refinements
+
+Two native operations can now be characterized from the successful log.
+
+### BROAD -> BG centre preservation
+
+Sony enters BG/30 from BROAD/42 with `offset=+300 us`. This exactly preserves the pulse centre:
+
+```
+(42 - 30) * 50 us / 2 = 300 us
+```
+
+This independently confirms that phase-width changes must compensate the pulse **start** by half the width difference.
+It supports Monado's centre-preservation rule when changing output period.
+
+### Combined frame-cycle/base-time correction
+
+Sony also emits `ADJUST_TIME_AND_CYCLE(adjustmentFactor, offset)`. The next `frameCycle` shows that the factor is a
+fractional multiplicative correction:
+
+```
+new_frame_cycle = trunc(old_frame_cycle * (1 + adjustmentFactor))
+```
+
+Observed examples:
+
+- `16,683,350 * (1 - 4.5034726e-6) = 16,683,274.87` -> Sony stores `16,683,274`, with base offset `-18 us`.
+- `16,683,274 * (1 - 6.465052e-7) = 16,683,263.21` -> Sony stores `16,683,263`, with base offset `-9 us`.
+
+No standalone `ADJUST_FRAME_CYCLE` command was seen in this successful log; the combined command was used for the
+fine long-term correction once BG was active.
+
 ## Native phases observed
 
 The successful capture contained:
