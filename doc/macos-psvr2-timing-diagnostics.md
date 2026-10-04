@@ -12,6 +12,13 @@ SPDX-License-Identifier: BSL-1.0
 > windows were not free of trace writes. The moving-head runner below verifies
 > fixed required-file sizes during measurement, followed by acknowledged flushes.
 
+> **Optimisation comparison pending, 2026-10-04:** the Sense integration now
+> has a full-runtime `RelWithDebInfo` preset with verified `-O2` solver, driver
+> and compositor flags. Optimisation is mandatory for 6DoF throughput. Compare
+> it with cameras/Sense disabled first, using the same UE workload and buffered
+> traces, then measure added tracking load. No new display-pacing result has
+> been established. See [the integration note](macos-pssense-6dof-integration.md).
+
 ## Current presentation defaults
 
 Presentation uses CADisplayLink pacing with timed Metal presents.

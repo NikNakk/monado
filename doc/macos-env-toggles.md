@@ -48,6 +48,38 @@ This is for isolated testing alongside the registered hardware service. See
 [Wine native-client endpoint validation](macos-wine-in-process-endpoint.md).
 The inventory counts below remain the historical audit snapshot.
 
+## PS Sense runtime 6DoF opt-in (2026-10-04)
+
+The [integration procedure](macos-pssense-6dof-integration.md) is the current
+build, replay and hardware-run reference. Set these in the **service**, before
+constructing devices; they also work in an in-process runtime:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PSVR2_SENSE_6DOF` | off | Start four-camera Sense tracking with the joint solver + EKF. |
+| `PSVR2_SENSE_6DOF_CALIBRATION` | unset | Required absolute mode-4 calibration path; invalid/missing calibration leaves the existing fallback. |
+| `PSVR2_BLOB_PIXEL_THRESHOLD` | 80 | Pixel threshold; keep unchanged for the first hardware run. |
+| `PSVR2_BLOB_REQUIRED_THRESHOLD` | 180 | Blob seed threshold; lower values are only offline-proven so far. |
+| `PSVR2_BLOB_MAX_WIDTH` | 50 | Largest detected blob width. |
+
+When requested, the common helper sets defaults with `setenv(..., 0)` so
+explicit overrides win: camera streams on/mode 4, robust camera clock on with
+200 ppm limit, `CONSTELLATION_TRACKER_JOINT=1`, `PSSENSE_FILTER=1`, future LED
+scheduling, online gyro bias, 250 µs clock snap, LED correction and LED-off on
+exit. It enables LED bootstrap, first controller R, phase hint 16350 µs,
+keep-lock/LED-shape/strict/tracking/coverage options, and wide pulse period ID
+32 (1.6 ms). See `sense_tracking_defaults` in
+`targets/common/target_psvr2_sense_tracking.c` for exact names. Future LED
+scheduling, experimental clock/filter/bootstrap/model options remain off unless
+requested explicitly or through this 6DoF switch. Linux's full-stream default
+and macOS's conservative camera-off default are unchanged when it is absent.
+The detailed tuning/evidence remain in [optical tracking](pssense-optical-tracking.md)
+and [front-end evaluation](macos-pssense-mr2940-frontend-evaluation.md).
+
+Build optimisation is required for both solver and runtime. Use the
+`macos-sense-relwithdebinfo` preset; do not use an empty build type or Debug for
+performance/hardware comparisons. The following audit counts are historical.
+
 ## Summary
 
 | Category | Count | Meaning |
