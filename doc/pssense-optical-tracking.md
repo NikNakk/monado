@@ -3,6 +3,12 @@
 Working branch: `macos-pssense-6dof`, based on `macos-psvr2-camera-calibration`.
 Background and earlier results: `doc/psvr2-camera-calibration.md` and `doc/pssense-led-blink-waveform.md`.
 
+**2026-10-04 native Sony oracle update:** the Windows Sony driver has now been made to run its real tracking-camera
+stream and produced full right-Sense 6DoF while its native LED state machine was passively captured. See
+`doc/pssense-native-led-protocol.md`. The key consequence for this branch is that the existing Monado pose solver is
+retained; the new experiment targets the illumination side only: avoid permanent PRESCAN, reduce the irreversible
+always-lit lockout, and use native-style PRESCAN/BROAD/BG semantics for acquisition and reacquisition.
+
 ## Where things stand (2026-09-24)
 
 - Camera plumbing, the visible-mode fisheye rig and the direct mode-4 ChArUco solve are described in the
