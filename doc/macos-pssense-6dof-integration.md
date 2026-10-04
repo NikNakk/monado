@@ -6,11 +6,13 @@ SPDX-License-Identifier: BSL-1.0
 
 # PS Sense 6DoF integration
 
-Integration date: 2026-10-04. **The runtime port is implemented and locally
-validated, with the first OpenXR trial reporting working right-controller
-tracking but no visible left-controller tracking.** Left acquisition remains
-unresolved and Linux CI remains pending. The review and original implementation plan below
-explain the selection; the completed checks and launch procedure follow.
+Integration date: 2026-10-04. **The runtime port now has user-confirmed
+6DoF use in OpenBrush: the user could paint in 3D, the first non-test
+application validation.** Left-controller tracking still drops more often than
+desired, and the separate persistent LED lockout remains unresolved. Corrected
+Linux CI and broader hardware validation remain pending. The review and original
+implementation plan below explain the selection; completed checks and the
+launch procedure follow.
 
 ## Sources reviewed
 
@@ -671,3 +673,207 @@ warnings. All 44 CTest suites pass (three IPC/remote-layer suites needed a
 sandbox-free rerun to create OS resources). Rift hardware has not been tested.
 Linux CI still needs to run on the corrected revision; Docker is installed but
 its local daemon is not running, so a Linux build was not claimed locally.
+
+### First non-test application: OpenBrush (2026-10-04)
+
+The user confirms that OpenBrush works and they could paint in 3D. This is the
+first reported non-test application exercising the integrated Sense 6DoF path,
+following the controller test application. The left controller still dropped
+tracking more often than desired. This validates practical application use of
+controller poses, not sustained reliability, quantitative alignment/latency or
+a fix for the persistent IR LED lockout.
+
+The normal LaunchAgent was verified loaded with `PSVR2_SENSE_6DOF=1` and the
+optimized `build-wine` native service, starting on demand. Its latest logged
+service version is `v25.1.0-2095-g6c76552ed`; association of that specific service
+lifetime with OpenBrush is inferred from the local setup rather than an
+application-name marker. Repository HEAD at report time is `27f5123a3`; do not
+label the hardware run as validating its subsequent Rift/CI changes.
+
+Next reliability work should distinguish left-controller optical dropouts
+(visibility, illumination timing, correspondence and reacquisition) from the
+persistent LED-command fault. Record both hands' tracking quality during real
+app movement alongside any observable LED fault onset; successful painting alone
+does not establish which cause dominates the left dropouts.
+
+### Left/right asymmetry: offline analysis of existing runs (2026-10-04)
+
+No new hardware run. Sources: the last service lifetime in
+`/tmp/monado-service-launchd.501.err.log` (`6c76552ed`, 111 s of real use,
+inferred to be OpenBrush), and `build-macos-sense-rel` `constellation_replay
+--tracker-filter` over the 3–4 Oct CLI sessions. Device 0 is the left.
+
+| Evidence | Left | Right |
+| --- | --- | --- |
+| Service: accepted poses per 5 s window | 0–300; lost 15–20 s and 45–60 s, ~300 after 65 s | 252–300 throughout |
+| Service: filter reinitialisations / reacquisitions | 13 / 16 | 2 / 5 |
+| Service: reacquisition gaps | mostly 1.1–5.9 s, hand moved 70–435 mm | mostly 317 ms, 5–114 mm |
+| Service: matched p50, reprojection p50 when accepted | 27, 0.298 px | 25, 0.271 px |
+| `000405-hard-cases` replay (both resting, symmetric) | 66.7% solved | 65.3% solved |
+| `235855-grip-2` replay, after both locked (≥ 15 s) | ≈ 82% | ≈ 87% |
+
+- **When the left is tracked, it tracks as well as the right**, and when both rest
+  symmetrically they solve equally. A left-specific LED model, calibration or
+  solver defect is therefore unlikely. Blob sizes against range also match.
+- **The deficit is long losses plus slow reacquisition.** In the service run,
+  the left's phase probes during losses mostly read `blob_too_dim` with about
+  1–2 LED-shaped blobs at reference, early and late offsets: the ring was
+  not seen at all, which looks like out of view or covered, not off-phase.
+  Without frames this cannot separate posture (OpenBrush's palette hand)
+  from a tracker failure.
+- **Some phase disturbance exists on the left only.** Left probes moved the
+  lock −200 µs and later +200 µs. A 378 µs left clock snap at 83.2 s precedes a
+  reacquisition and a probe that found early dark and late lit. At 33.4 s a
+  probe read 0.25/2.66/4.69 blobs (late brighter) but was discarded as
+  `blob_too_dim`. Right probes were centred throughout.
+- **CLI sessions start the left late.** Bootstrap scans are serialized and the
+  left scanned second (first lock 11.6 s vs 5.1 s in `grip-2`), inflating
+  whole-session left deficits.
+- Unrelated anomaly: right `GYRO_BIAS event=still` reports about 20 deg/s
+  (6, −18, 5) repeatedly while the left reports about 1.6 deg/s.
+
+The joint worker's ordering does not disadvantage the left: tracked devices
+refine in device order (left first) and bootstrap is a best-fit contest.
+
+Next steps, in order:
+
+1. **Classify each loss.** Implemented as `JOINT_LOSS`; see the next section.
+2. **Mirrored hardware protocol.** Using the CLI session tool with frame capture,
+   run identical mirrored movements with both hands, then swap which hand does
+   the "painting" and which holds still. Also scan the left first. If the
+   deficit follows the role, it is posture/visibility; if it stays with the
+   left controller, it is the controller or its timing.
+3. **Fix by category.** For out-of-view losses, make reacquisition faster (for
+   example, IMU-predicted re-entry). For dark losses, act on probe imbalance
+   and clock snaps. For lit losses, examine the bootstrap contest.
+
+### Loss classification log: `JOINT_LOSS` (2026-10-04)
+
+The joint worker now logs one `JOINT_LOSS` warning per device loss of at
+least 250 ms, when the track is confirmed again. It is always on in the joint
+path, rate-limited by losses, and changes no solve: replaying `grip-2` pushes
+the identical 2837/3382 poses. In the Sense runtime, device 0 is the left.
+
+Each exposure between the last confirmed solve and the next is put in one
+class. LED-shaped blobs no device claimed count against a per-camera background
+measured while every device is solved. A camera is "lit" with at least three
+such blobs above background.
+
+| Field | Meaning |
+| --- | --- |
+| `acquiring` | Tentative bootstrap/track, not yet confirmed (three solves) |
+| `lit_multi` | Lit in two or more cameras while all other devices are solved: visible but not re-acquired |
+| `lit_ambiguous` | As above, but another device is also unsolved, so the light may be its ring |
+| `lit_single` | Lit in one camera only, which stereo bootstrap cannot use |
+| `dark_in_view` | Nothing lit, predicted position inside some camera's image: suspect LED timing |
+| `dark_out_of_view` | Nothing lit, predicted position outside every image |
+| `dark_unpredicted` | Nothing lit after the filter's position expired (about 300 ms); location unknown |
+
+`start_cameras`, `start_in_view` and `start_margin_px` describe the last
+confirmed solve: cameras used, cameras it projects into and its best distance to
+an image edge. A small margin suggests leaving the field of view.
+
+Replay of 3–4 Oct sessions (`--tracker-filter`): in `234436-corr-on-grip`,
+where the left's LED lock was known to sit at its window edge, left losses are
+predominantly dark (186 `dark_in_view`, 1126 `dark_unpredicted` of 1846
+exposures), consistent with that illumination fault. `000405-hard-cases`
+shows 120 left `lit_multi` exposures, a real reacquisition delay with the ring
+visible. `lit_single` is common in all three sessions. These replays are offline
+checks of the classifier, not new hardware evidence.
+
+Validation: full `build-macos-sense-rel` RelWithDebInfo build without
+warnings; all 44 CTest suites pass; pinned clang-format 23.1.1 clean. No
+synthetic test covers the classification itself.
+
+### Phase tracking A/B in OpenBrush, and a minimum lit window (2026-10-05)
+
+Three user OpenBrush sessions with `JOINT_LOSS` logging (`27f5123a3` plus the
+uncommitted loss diagnostic), all with the same calibration:
+
+| Session | Phase tracking | Left lit fraction / filter resets | Right lit fraction / filter resets |
+| --- | --- | --- | --- |
+| 4 Oct, normal profile | on (coverage + blob fallback) | 0.61 / 13 in 111 s | 0.85 / 2 |
+| 4 Oct, A-steady profile | off | **0.86 / 3 in 160 s** | 0.68 / 11 |
+| 5 Oct, normal profile | on | **0.32 / 8 in 72 s** | 0.85 / 2 |
+
+The A-steady and normal profiles differ only in phase tracking, diagnostics
+(`PSSENSE_TIMING_DIAG`, `PSSENSE_INPUT_DIAG`, recording) and the wide-scan
+period, which no full scan used. The user reports the left better under A.
+
+- **Right under A: a one-step lock.** Its hinted narrow scan saw the ring in a
+  single 250 µs step and locked on it, about 1 ms from the left's centre. With
+  tracking off it was never corrected: lit 0.68, collapsing to 0.07–0.29 from
+  118 s. Its host/device clock estimate stayed within ±60 µs of trend until
+  155 s, so clock drift did not cause this.
+- **Left with tracking on: steered while untracked.** Its scans were healthy
+  (1700 µs windows). When its reference probe window is not tracked, the probe
+  falls back to blob counts. In the 5 Oct run these moved the lock −200, +200
+  and −200 µs on counts like 0.50/5.88/1.41 (reference/early/late), the
+  signature of a moving hand rather than a slid window. Long left losses
+  followed (up to 16 s), with many unconfirmed bootstraps (`acquiring` up to
+  117 exposures per loss) and `lit_single`, consistent with a ring at the edge
+  of its lit window. The right is mostly tracked during its probes, so it
+  steers on pose coverage and stays `centred`.
+- Working hypothesis: blob-fallback steering on an untracked, moving controller
+  moves a good lock off-centre. The hand that is more often untracked (the
+  palette hand) suffers most. This is three sessions with uncontrolled motion,
+  not a controlled A/B.
+
+**Change: minimum lit window.** The narrow scan now treats a lit run (after
+bridging) shorter than `narrow_min_lit_steps` (default 3 steps, 750 µs) as a
+weak scan, retried like a low peak. Healthy hardware windows are 6–11 steps.
+The simulator test reproduces the one-step lock with the rule disabled and a
+centred lock after rejection with it enabled. The simulator's delayed reports
+now persist across `run()` calls. All 21 bootstrap tests and the Sense tests
+pass; no hardware validation yet.
+
+Next A/B: the normal profile with the minimum-window build, then the same with
+`PSSENSE_LED_BOOTSTRAP_TRACK=0`, comparing per-hand lit fraction and
+`JOINT_LOSS` classes. If tracking-off wins, restrict steering to tracked probes
+(no blob fallback), re-centring by a hinted rescan after long losses instead.
+
+### Tracking on/off A/B: clock-offset snaps precede the losses (2026-10-05)
+
+Two further OpenBrush sessions with the minimum-window build: the normal profile
+(tracking on, 75 s), then the same with `PSSENSE_LED_BOOTSTRAP_TRACK=0`
+(70 s). No narrow scan was rejected by the new rule in either.
+
+| Session | Left accepted poses/s, lit | Right accepted poses/s, lit |
+| --- | --- | --- |
+| Tracking on | 38.0, 0.61 | 56.9, 0.80 |
+| Tracking off | 37.4, 0.64 | 37.8, 0.64 |
+
+The left is no better with tracking off, so the blob-fallback hypothesis above
+is **not supported**. The user saw both hands lose tracking in turn with
+tracking off.
+
+What the sessions share is a mid-session `CLOCK_OFFSET event=snap` shortly
+before each long loss, on either hand:
+
+| Session | Snap | Effect |
+| --- | --- | --- |
+| 5 Oct normal, old build | L +293 µs at 15.7 s | L losses from 16.3 s, lit 0.13–0.37 for the rest of the run |
+| Tracking on | L +351 µs at 48.1 s | L lit 0.79 → 0.50 → 0.15, an 11.5 s loss |
+| Tracking off | R +980 µs at 12.4 s | R lit 0.70 → 0.06 → 0.03; lock lost and rescanned at 26.7 s |
+| Tracking off | L +252 µs at 43.2 s | L lit 0.75 → 0.55 → 0.32 → 0.11; losses from 51.7 s |
+| 4 Oct A-steady | L +291 µs at 45.2 s | Followed a ~150 µs sag in the estimate and a lit dip to 0.63; restored to 0.92–1.00 |
+
+The LED lock is measured relative to the host/device clock mapping at scan
+time, so a later step in that mapping moves the pulse against the exposure by
+the same amount. Lock tolerance is about ±350 µs. The mapping keeps the largest
+recent `device − arrival` offset, drags it down at a fixed 50 ppm, and jumps
+(snaps) when the gap exceeds 250 µs. Real controller drift measured 9–28 ppm.
+A device clock does not step, so a step in the estimate is almost certainly a
+Bluetooth latency change (for example a connection-event anchor shift). The
+estimator applies it to the LED schedule all the same. Gradual sags (50 ppm
+leak against true drift during slow-report stretches) and snaps are two
+outcomes of the same design. This also explains why the affected hand varies
+between sessions.
+
+Next: replace the leak/snap mapping, while locked, with a fitted offset and
+drift rate on the lower latency envelope. Treat step changes as latency
+artefacts unless they persist, and slew at no more than physical drift rates.
+Keep the startup snap, which fixes a genuinely late first report. Develop it
+offline: next sessions should set `PSSENSE_TIMING_DIAG=1` so the mapping is
+logged around snaps. Check whether the A-steady CTD recording's IMU/sync
+records allow offline estimator replay.

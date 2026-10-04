@@ -349,3 +349,10 @@ original optimizer remain unchanged by the Sense integration, and an explicit
 caller flag now prevents inherited Sense joint settings from switching Rift to
 the experimental worker. See the [audit and validation](macos-pssense-6dof-integration.md#linux-ci-warning-fixes-and-rift-isolation-audit-2026-10-04).
 Linux rerun and Rift hardware validation remain pending.
+
+## Sense application milestone: OpenBrush (2026-10-04)
+
+The user confirms successful 3D painting in OpenBrush, the first non-test
+application validation of integrated Sense 6DoF. Left-controller tracking still
+drops too often; persistent LED lockout remains a separate unresolved fault.
+See the [application evidence](macos-pssense-6dof-integration.md#first-non-test-application-openbrush-2026-10-04).

@@ -51,22 +51,18 @@ port to Apple Silicon macOS, with PS VR2 as the primary headset.
 **Current integration branch:** `macos-upstream-clean`
 
 **PS Sense 6DoF integration, 2026-10-04:** the joint multi-camera solver, EKF,
-LED bootstrap, calibration/session tools and source evidence are now ported from
-`~/Code/monado`, including its uncommitted runtime hookup. The opt-in path builds
-with full-runtime optimisation and matches source recorded-session replay byte
-for byte. Local tests pass. The first OpenXR controller trial reports the right
-working well; the left remains invisible after optical/LED-lock loss and failed
-reacquisition. Left buttons also fail; a failed HID output write could have
-terminated its I/O thread. A macOS correction now preserves input and retries
-output. The user confirms the corrected setup works well, and requests local
-native/Wine defaults; matching optimised builds and a persistent local profile
-are prepared, with user activation pending. The IR-always-on/status-LED-off fault still recurs with the
-1.6 ms scan pulse. Controlled trial A also reports a right-controller lockout
-without any rescan or phase probe after acquisition; a large HID transport
-stall is under investigation, with onset correlation pending. Linux CI warning failures are corrected locally,
-and the shared-tracker audit now explicitly isolates Rift from Sense joint
-settings; corrected Linux CI and full hardware validation remain pending. See the
-[integration and launch procedure](macos-pssense-6dof-integration.md).
+LED bootstrap and calibration/session tools are integrated from `~/Code/monado`.
+The optimized runtime matches source recorded-session replay byte for byte.
+The user now confirms **OpenBrush works and they could paint in 3D**, the first
+non-test application validation. Left-controller tracking still drops more than
+desired. The earlier left input-thread failure is corrected, and the normal
+on-demand local service is loaded with Sense enabled. The separate persistent
+IR-always-on/status-LED-off fault remains unresolved; trial A reproduced it
+without a rescan or phase probe after acquisition. Linux warning fixes and
+explicit Rift isolation pass local checks; corrected Linux CI and broader
+hardware validation remain pending. See the
+[integration and application evidence](macos-pssense-6dof-integration.md).
+
 Display-pacing benefits from optimisation remain to be measured independently.
 
 The integration includes the
@@ -105,7 +101,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Swift OpenXR wrapper | **Working** | SwiftXR provides the native Swift-facing layer used by shell experiments. |
 | Swift VR home/shell | **Working experimental shell** | SwiftXRShell provides launcher/home, immersive video, desktop/panel support and system-overlay experiments. |
 | PS Sense 3DoF, buttons and haptics | **Working experimental** | Native IOKit HID discovery/input is present on the integration branch. Sense also maps to `XR_KHR_generic_controller` (opt-in, `XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC`). |
-| PS Sense optical 6DoF | **Integrated, experimental opt-in** | Joint tracker + EKF; optimised build and replay/tests pass. OpenXR hardware validation pending. See the [launch procedure](macos-pssense-6dof-integration.md#build-and-run-the-opt-in-openxr-trial). |
+| PS Sense optical 6DoF | **Integrated, experimental opt-in** | Joint tracker + EKF; user-confirmed 3D painting in OpenBrush. Left tracking dropouts and persistent LED lockout remain. See the [launch procedure](macos-pssense-6dof-integration.md#build-and-run-the-opt-in-openxr-trial). |
 | Depth layers | **Off by default** | `XR_KHR_composition_layer_depth` is not exposed on macOS unless configured with `-DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON`; depth-aware reprojection additionally needs `XRT_COMPOSITOR_DEPTH_REPROJECTION=1`. Depth swapchain formats (including `Depth32Float_Stencil8`) are still creatable. |
 | Wine OpenXR / OpenVR | **External compatibility project** | Wine/OpenVR integration has moved to [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr); Monado retains only generic macOS/Metal runtime and resource-handoff support. |
 | SteamVR games under Wine | **External experimental path** | Game compatibility and launch policy are tracked in [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr) and the relevant OpenVR compatibility projects. |
