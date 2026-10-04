@@ -53,6 +53,8 @@ struct Sim
 	uint32_t frames_lit = 0;
 
 	std::deque<std::pair<int64_t, int64_t>> pending_outputs{}; // (fudge, blink) queued for delayed application
+	//! (timestamp, lit) awaiting delayed report; kept across run() calls so short runs lose none.
+	std::deque<std::pair<int64_t, bool>> reports{};
 	int64_t applied_fudge = 0;
 	int64_t applied_blink = 0;
 
@@ -86,7 +88,6 @@ struct Sim
 	void
 	run(t_led_phase_bootstrap &b, uint32_t frames, uint32_t &frame_index)
 	{
-		std::deque<std::pair<int64_t, bool>> reports; // (timestamp, lit) awaiting delayed report
 		for (uint32_t i = 0; i < frames; i++, frame_index++) {
 			int64_t ts = (int64_t)frame_index * kPeriod;
 
@@ -207,6 +208,8 @@ TEST_CASE("LED phase bootstrap centres its lock across one dark narrow step")
 		CAPTURE(gap);
 		t_led_phase_bootstrap_options options = test_options();
 		options.narrow_gap_steps = gap;
+		// Without bridging the run is the edge step alone, which the minimum window would now reject outright.
+		options.narrow_min_lit_steps = gap == 0 ? 1 : options.narrow_min_lit_steps;
 		t_led_phase_bootstrap b;
 		t_led_phase_bootstrap_init(&b, &options);
 		t_led_phase_bootstrap_start(&b, kPeriod);
@@ -229,6 +232,63 @@ TEST_CASE("LED phase bootstrap centres its lock across one dark narrow step")
 		} else {
 			CHECK(error <= options.narrow_step_ns);
 		}
+	}
+}
+
+TEST_CASE("LED phase bootstrap rejects a narrow scan that saw the ring for a single step")
+{
+	/*
+	 * 4 Oct (A-steady, OpenBrush): the right's narrow scan lit one step only, the ring being out of view for the
+	 * rest, and it locked on that step about 1 ms from the window's centre. Here the hardware-sized window (1.2 ms
+	 * exposure) is dark everywhere but its first step.
+	 */
+	const int64_t latency = 3600000;
+	for (uint32_t min_steps : {1u, 3u}) {
+		CAPTURE(min_steps);
+		t_led_phase_bootstrap_options options = test_options();
+		options.narrow_min_lit_steps = min_steps;
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+
+		Sim sim{.latency_ns = latency};
+		sim.exposure_ns = 1200000;
+		uint32_t frame = 0;
+		// The wide stage sees the whole window; the ring then turns away for all but the first narrow step.
+		while (frame < 4000 && b.state != T_LED_PHASE_BOOTSTRAP_NARROW_SCAN) {
+			sim.run(b, 1, frame);
+		}
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN);
+		// Lit starts lie in (-narrow_blink - latency, exposure - latency); keep only the first narrow step.
+		sim.dark_from_ns = -options.narrow_blink_ns - latency + options.narrow_step_ns;
+		sim.dark_to_ns = sim.dark_from_ns + sim.exposure_ns + options.narrow_blink_ns;
+		while (frame < 8000 && b.locks_acquired == 0 && b.consecutive_failures == 0) {
+			sim.run(b, 1, frame);
+		}
+
+		int64_t exposure_centre = sim.exposure_start_ns + sim.exposure_ns / 2;
+		if (min_steps == 1) {
+			// The old behaviour: a lock well off the exposure centre.
+			REQUIRE(b.locks_acquired == 1);
+			int64_t pulse_centre = b.fudge_offset_ns + latency + b.blink_ns / 2;
+			CHECK(circular_distance(pulse_centre, exposure_centre) > 2 * options.narrow_step_ns);
+			continue;
+		}
+
+		// The scan fails instead, and once the whole window is visible the next one locks on its centre.
+		REQUIRE(b.locks_acquired == 0);
+		CHECK(b.consecutive_failures == 1);
+		sim.dark_from_ns = sim.dark_to_ns = 0;
+		// The driver restarts a failed bootstrap once its back-off has passed.
+		while (frame < 12000 && !t_led_phase_bootstrap_ready_to_scan(&b)) {
+			sim.run(b, 1, frame);
+		}
+		REQUIRE(t_led_phase_bootstrap_ready_to_scan(&b));
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		sim.run(b, 4000, frame);
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		int64_t pulse_centre = b.fudge_offset_ns + latency + b.blink_ns / 2;
+		CHECK(circular_distance(pulse_centre, exposure_centre) <= options.narrow_step_ns);
 	}
 }
 

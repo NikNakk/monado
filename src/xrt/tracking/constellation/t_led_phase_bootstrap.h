@@ -118,6 +118,11 @@ struct t_led_phase_bootstrap_options
 	 * behaviour.
 	 */
 	uint32_t narrow_gap_steps;
+	/*!
+	 * The narrow scan's lit run (after bridging) must cover at least this many steps, or the scan counts as weak
+	 * and is retried like a low peak. 0 or 1 accepts any run.
+	 */
+	uint32_t narrow_min_lit_steps;
 
 	//! Once locked, rescan after this many exposures without any lit camera frame.
 	uint32_t lost_frames;
