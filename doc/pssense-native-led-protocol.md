@@ -392,9 +392,12 @@ leaving the pose solver untouched:
    - the LED sequence is no longer incremented every camera exposure;
    - bootstrap/refinement output-generation changes still relatch the schedule;
    - explicit phase changes relatch it;
-   - while locked in PRESCAN with no other schedule change, Monado re-anchors the absolute `cycle_position` with a
-     new sequence approximately once per second, matching the native Sony maintenance cadence;
-   - BROAD/BG receive no periodic 1 Hz relatch because their native schedule uses relative offsets and the successful
+   - while locked in PRESCAN with no other schedule change, Monado re-anchors the absolute `cycle_position` after
+     60 camera exposure-sequence steps;
+   - the native PCAP shows successive anchors separated by 60 or 61 camera periods (examples: 1,001,141 us =
+     60.008 x 16,683.35 us and 1,017,750 us = 61.004 x), so this is better described as camera-cadence maintenance
+     than an unrelated wall-clock 1 Hz timer;
+   - BROAD/BG receive no periodic relatch because their native schedule uses relative offsets and the successful
      trace holds the same sequence for long intervals there.
 
 By default the controller therefore remains in PRESCAN after lock. This is intentional: it isolates the two strongest
@@ -488,9 +491,10 @@ reconstruction.
   1,000,991 us; in BROAD/BG, the same periodic command usually leaves sequence and relative base offset unchanged.
   The next Toolkit capture logs its two payload bytes to identify it more precisely.
 - Exact policy that causes BROAD -> BG, BG -> PRESCAN, and subsequent PRESCAN -> BROAD.
-- Selective LED-pattern meaning and physical-emitter mapping. The prepared Toolkit capture saves two raw BC4 frames
-  before and three after native phase/mask changes, plus the poses Sony publishes through OpenVR. Static-controller
-  image differencing can therefore answer this without Sony internal tracker data.
+- Selective LED-pattern meaning and physical-emitter mapping. The prepared Toolkit capture saves raw VI packets
+  before and after native phase/mask changes, periodic VI samples, the observable IF8/0x89 LED-detector USB stream,
+  and poses Sony publishes through OpenVR. Semantics-free byte-lane differencing plus static-controller captures can
+  therefore answer this without Sony internal tracker data.
 - Whether STABLE is used in longer/cleaner sessions and what condition enters it.
 - Whether the native fixed output mode byte `0xA2` matters for long-term LED reliability; Monado's current output
   formatting is already accepted by the controllers and is not changed in this experiment.
