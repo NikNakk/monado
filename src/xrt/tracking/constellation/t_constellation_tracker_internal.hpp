@@ -106,6 +106,7 @@ struct CameraMosaic;
 struct ConstellationTracker;
 struct DataRecorder;
 struct Device;
+struct JointSolveCamera;
 
 struct FoundDevicePose
 {
@@ -446,6 +447,37 @@ struct JointDeviceState
 	 */
 	bool have_align{false};
 	xrt_quat align{0.0f, 0.0f, 0.0f, 1.0f};
+	//! Cameras used by the last solve.
+	uint32_t last_cameras_used{0};
+
+	/*!
+	 * The current loss, from the first exposure without a confirmed solve after a confirmed track until the track
+	 * is confirmed again. Each exposure is put in one class, so a JOINT_LOSS line tells whether the device was out
+	 * of view, in view but dark, or lit but not re-acquired. Free LED-shaped blobs above the background in two or
+	 * more cameras count as lit (lit_multi, or lit_ambiguous while another device is unsolved too), in one camera
+	 * as lit_single, which stereo bootstrap cannot use.
+	 */
+	struct Loss
+	{
+		bool active{false};
+		int64_t last_confirmed_ns{0};
+		//! Position of the last confirmed solve, the reference while the device has no predicted position.
+		xrt_vec3 last_confirmed_position{};
+		uint32_t exposures{0};
+		uint32_t acquiring{0};
+		uint32_t lit_multi{0};
+		uint32_t lit_ambiguous{0};
+		uint32_t lit_single{0};
+		//! No ring anywhere, with the predicted position in or out of every camera's view, or no prediction.
+		uint32_t dark_in_view{0};
+		uint32_t dark_out_of_view{0};
+		uint32_t dark_unpredicted{0};
+		float max_excess_blobs{0.0f};
+		//! The last solve before the loss: cameras used, cameras it projects into and its best edge margin.
+		uint32_t start_cameras{0};
+		uint32_t start_in_view{0};
+		float start_margin_px{-1.0f};
+	} loss;
 };
 
 //! The camera samples of one synchronised exposure, indexed by camera.
@@ -486,6 +518,9 @@ struct JointProcessor
 	double solve_us_total{0.0};
 	double solve_us_max{0.0};
 	int64_t last_status_ns{0};
+	//! Per camera index: running mean of LED-shaped blobs no device owns while every device is solved.
+	std::vector<float> free_led_background{};
+	std::vector<bool> free_led_background_seeded{};
 	//! Last JOINT_SLOW warning (steady clock), to rate-limit them.
 	int64_t last_slow_log_ns{0};
 
@@ -500,6 +535,15 @@ struct JointProcessor
 	process(JointExposure &exposure);
 
 private:
+	//! Classifies this exposure for every device in a loss, and logs each loss once it ends (JOINT_LOSS).
+	void
+	accountLosses(int64_t timestamp_ns,
+	              const std::vector<JointSolveCamera> &cameras,
+	              const std::vector<std::vector<t_constellation_device_id_t>> &owners,
+	              const std::vector<CameraSample *> &samples,
+	              const std::map<t_constellation_device_id_t, xrt_space_relation> &predictions,
+	              const std::map<t_constellation_device_id_t, bool> &solved);
+
 	//! Moves @ref building to @ref ready and wakes the worker. Called with the thread lock held.
 	void
 	finishBuildingLocked();

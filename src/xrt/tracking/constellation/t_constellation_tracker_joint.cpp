@@ -18,6 +18,8 @@
 #include <chrono>
 #include <cinttypes>
 #include <cmath>
+#include <cstdio>
+#include <string>
 
 using namespace xrt::tracking::constellation;
 
@@ -43,10 +45,46 @@ constexpr int64_t kStatusIntervalNs = 5'000'000'000;
 constexpr double kSlowProcessMs = 8.0;
 constexpr int64_t kSlowLogIntervalNs = 250'000'000;
 
+//! A loss is logged (JOINT_LOSS) once it lasts this long, the point where the device is re-acquired by bootstrap.
+constexpr int64_t kLossLogMinNs = kTrackingTimeoutNs;
+//! A camera counts as seeing a lost device's ring with this many free LED-shaped blobs above its background.
+constexpr float kLitExcessBlobs = 3.0f;
+//! Weight of each all-solved exposure in the free-blob background.
+constexpr float kBackgroundAlpha = 0.02f;
+
 bool
 relation_has(const xrt_space_relation &relation, uint32_t flags)
 {
 	return (relation.relation_flags & flags) == flags;
+}
+
+/*!
+ * Cameras into whose image @p p_world projects. @p out_margin_px gets the largest distance to an image edge among
+ * them, or -1 if there are none.
+ */
+uint32_t
+cameras_in_view(const std::vector<JointSolveCamera> &cameras, const xrt_vec3 &p_world, float *out_margin_px)
+{
+	uint32_t count = 0;
+	float best = -1.0f;
+	for (const JointSolveCamera &camera : cameras) {
+		xrt_pose Tcv_cam_world;
+		math_pose_invert(&camera.Tcv_world_cam, &Tcv_cam_world);
+		xrt_vec3 p_cam;
+		math_pose_transform_point(&Tcv_cam_world, &p_world, &p_cam);
+		float u, v;
+		if (p_cam.z <= 0.02f || !t_camera_models_project(camera.model, p_cam.x, p_cam.y, p_cam.z, &u, &v)) {
+			continue;
+		}
+		float margin = std::min(std::min(u, v), std::min((float)camera.width - u, (float)camera.height - v));
+		if (margin < 0.0f) {
+			continue;
+		}
+		count++;
+		best = std::max(best, margin);
+	}
+	*out_margin_px = best;
+	return count;
 }
 
 } // namespace
@@ -203,6 +241,8 @@ JointProcessor::process(JointExposure &exposure)
 
 	// The device's prediction for this exposure, by device (filled in phase 1).
 	std::map<t_constellation_device_id_t, xrt_space_relation> predictions;
+	// Devices solved in this exposure: true once the track is confirmed, false while still tentative.
+	std::map<t_constellation_device_id_t, bool> solved;
 
 	// Accept a solve: claim its blobs, update the device state and push the pose.
 	auto commit = [&](Device *device, const JointSolveResult &result, bool bootstrapped) {
@@ -222,6 +262,8 @@ JointProcessor::process(JointExposure &exposure)
 		state.confirmations = bootstrapped ? 1 : state.confirmations + 1;
 		state.Tcv_world_device = result.Tcv_world_device;
 		state.last_solved_ns = exposure.timestamp_ns;
+		state.last_cameras_used = result.cameras_used;
+		solved[device->id] = state.confirmations >= kConfirmSolves;
 		if (bootstrapped) {
 			this->device_bootstrapped++;
 		} else {
@@ -433,6 +475,10 @@ JointProcessor::process(JointExposure &exposure)
 
 	led_count_ms = ms_since(led_count_start);
 
+	if (!cameras.empty()) {
+		accountLosses(exposure.timestamp_ns, cameras, owners, samples, predictions, solved);
+	}
+
 	Clock::time_point record_start = Clock::now();
 	if (ct->data_recorder) {
 		for (CameraSample *sample : samples) {
@@ -475,5 +521,143 @@ JointProcessor::process(JointExposure &exposure)
 		        solves ? this->solve_us_total / (double)solves : 0.0, this->solve_us_max);
 		this->last_status_ns = exposure.timestamp_ns;
 		this->solve_us_max = 0.0;
+	}
+}
+
+void
+JointProcessor::accountLosses(int64_t timestamp_ns,
+                              const std::vector<JointSolveCamera> &cameras,
+                              const std::vector<std::vector<t_constellation_device_id_t>> &owners,
+                              const std::vector<CameraSample *> &samples,
+                              const std::map<t_constellation_device_id_t, xrt_space_relation> &predictions,
+                              const std::map<t_constellation_device_id_t, bool> &solved)
+{
+	ConstellationTracker *ct = this->tracker;
+
+	// LED-shaped blobs no device claimed, by camera of this exposure.
+	std::vector<float> free_blobs(cameras.size(), 0.0f);
+	for (size_t i = 0; i < cameras.size(); i++) {
+		for (uint32_t b = 0; b < cameras[i].blob_count; b++) {
+			if (owners[i][b] == XRT_CONSTELLATION_INVALID_DEVICE_ID &&
+			    t_constellation_blob_is_led_shaped(cameras[i].blobs[b])) {
+				free_blobs[i] += 1.0f;
+			}
+		}
+	}
+
+	auto confirmed = [&](t_constellation_device_id_t id) {
+		auto it = solved.find(id);
+		return it != solved.end() && it->second;
+	};
+
+	// Lamps, window glare and stray blobs: what is left over while every device is solved.
+	bool all_confirmed = !ct->devices.empty();
+	for (std::unique_ptr<Device> &owned : ct->devices) {
+		all_confirmed = all_confirmed && confirmed(owned->id);
+	}
+	if (this->free_led_background.size() < this->camera_count) {
+		this->free_led_background.resize(this->camera_count, 0.0f);
+		this->free_led_background_seeded.resize(this->camera_count, false);
+	}
+	std::vector<float> excess(cameras.size(), 0.0f);
+	for (size_t i = 0; i < cameras.size(); i++) {
+		uint32_t index = samples[i]->camera_index;
+		if (index >= this->camera_count) {
+			continue;
+		}
+		float &background = this->free_led_background[index];
+		if (all_confirmed) {
+			background = this->free_led_background_seeded[index]
+			                 ? background + kBackgroundAlpha * (free_blobs[i] - background)
+			                 : free_blobs[i];
+			this->free_led_background_seeded[index] = true;
+		}
+		excess[i] = free_blobs[i] - background;
+	}
+
+	for (std::unique_ptr<Device> &owned : ct->devices) {
+		Device *device = owned.get();
+		JointDeviceState &state = this->devices[device->id];
+		JointDeviceState::Loss &loss = state.loss;
+
+		if (confirmed(device->id)) {
+			const int64_t gap_ns = timestamp_ns - loss.last_confirmed_ns;
+			if (loss.active && gap_ns >= kLossLogMinNs) {
+				std::string background;
+				for (size_t c = 0; c < this->free_led_background.size(); c++) {
+					char value[16];
+					snprintf(value, sizeof(value), "%s%.1f", c ? "," : "",
+					         this->free_led_background[c]);
+					background += value;
+				}
+				CT_WARN(ct,
+				        "JOINT_LOSS device=%u gap_ms=%.1f exposures=%u acquiring=%u lit_multi=%u "
+				        "lit_ambiguous=%u lit_single=%u dark_in_view=%u dark_out_of_view=%u "
+				        "dark_unpredicted=%u "
+				        "max_excess_blobs=%.1f start_cameras=%u start_in_view=%u start_margin_px=%.0f "
+				        "background=%s",
+				        (unsigned)device->id, (double)gap_ns / 1e6, loss.exposures, loss.acquiring,
+				        loss.lit_multi, loss.lit_ambiguous, loss.lit_single, loss.dark_in_view,
+				        loss.dark_out_of_view, loss.dark_unpredicted, loss.max_excess_blobs,
+				        loss.start_cameras, loss.start_in_view, loss.start_margin_px,
+				        background.c_str());
+			}
+			loss = JointDeviceState::Loss{};
+			loss.last_confirmed_ns = timestamp_ns;
+			loss.last_confirmed_position = state.Tcv_world_device.position;
+			loss.start_cameras = state.last_cameras_used;
+			continue;
+		}
+		// Only a loss after a confirmed track; the first acquisition is the LED bootstrap's business.
+		if (loss.last_confirmed_ns == 0) {
+			continue;
+		}
+
+		if (!loss.active) {
+			loss.active = true;
+			loss.start_in_view =
+			    cameras_in_view(cameras, loss.last_confirmed_position, &loss.start_margin_px);
+		}
+		loss.exposures++;
+
+		// Where the device should be, while its prediction still has a position (the filter expires it).
+		bool have_prediction = false;
+		uint32_t in_view = 0;
+		auto prediction = predictions.find(device->id);
+		if (prediction != predictions.end() &&
+		    relation_has(prediction->second, XRT_SPACE_RELATION_POSITION_VALID_BIT)) {
+			xrt_pose Tcv_predicted;
+			math_pose_convert_from_opencv(&prediction->second.pose, &Tcv_predicted);
+			float margin_px;
+			in_view = cameras_in_view(cameras, Tcv_predicted.position, &margin_px);
+			have_prediction = true;
+		}
+
+		uint32_t lit_cameras = 0;
+		for (size_t i = 0; i < cameras.size(); i++) {
+			loss.max_excess_blobs = std::max(loss.max_excess_blobs, excess[i]);
+			lit_cameras += excess[i] >= kLitExcessBlobs ? 1 : 0;
+		}
+		// Another lost device's ring is just as free; with one around, lit cameras do not identify this one.
+		bool others_solved = true;
+		for (std::unique_ptr<Device> &other : ct->devices) {
+			if (other->id != device->id && solved.find(other->id) == solved.end()) {
+				others_solved = false;
+			}
+		}
+
+		if (solved.find(device->id) != solved.end()) {
+			loss.acquiring++;
+		} else if (lit_cameras >= 2) {
+			(others_solved ? loss.lit_multi : loss.lit_ambiguous)++;
+		} else if (lit_cameras == 1) {
+			loss.lit_single++;
+		} else if (!have_prediction) {
+			loss.dark_unpredicted++;
+		} else if (in_view > 0) {
+			loss.dark_in_view++;
+		} else {
+			loss.dark_out_of_view++;
+		}
 	}
 }
