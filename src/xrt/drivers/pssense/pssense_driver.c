@@ -1855,8 +1855,7 @@ pssense_select_native_led_phase_locked(struct pssense_device *pssense,
 	}
 
 	struct t_led_phase_bootstrap *b = &pssense->tracking.led_bootstrap;
-	if (t_led_phase_bootstrap_is_scanning(b) || t_led_phase_bootstrap_is_probing(b) ||
-	    b->state != T_LED_PHASE_BOOTSTRAP_LOCKED) {
+	if (t_led_phase_bootstrap_is_scanning(b) || b->state != T_LED_PHASE_BOOTSTRAP_LOCKED) {
 		*inout_period_id = MIN(*inout_period_id, PSSENSE_NATIVE_PRESCAN_PERIOD_ID);
 		return LED_SYNC_PHASE_PRESCAN;
 	}
@@ -1949,11 +1948,14 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			pssense->tracking.led_sequence_num += 1;
 		}
 
-		uint8_t period_id = pssense->tracking.period_id;
+		uint8_t source_period_id = pssense->tracking.period_id;
 		long requested_period_id = debug_get_num_option_pssense_led_period_id();
-		if (requested_period_id > 0 && requested_period_id <= UINT8_MAX) {
-			period_id = (uint8_t)requested_period_id;
+		bool period_override =
+		    requested_period_id > 0 && requested_period_id <= UINT8_MAX;
+		if (period_override) {
+			source_period_id = (uint8_t)requested_period_id;
 		}
+		uint8_t period_id = source_period_id;
 
 		// We don't need the = 0 in theory but the assert going away in release confuses the compiler. It will
 		// always be initialized.
@@ -1961,7 +1963,10 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		timepoint_ns now_ns = os_monotonic_get_ns();
 		uint8_t led_phase =
 		    pssense_select_native_led_phase_locked(pssense, use_led_bootstrap, leds_lit, now_ns, &period_id);
-		pssense->tracking.period_id = period_id;
+		if (period_override) {
+			// Explicit diagnostic override wins over the native phase's normal pulse width.
+			period_id = source_period_id;
+		}
 		timepoint_ns schedule_host_ns = pssense->tracking.last_exposure_local_timestamp_ns;
 		uint64_t periods_forward = 0;
 		if (future_led_schedule && pssense->tracking.average_exposure_interval_ns > 0) {
@@ -1983,9 +1988,9 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		// Apply the fudge offset, which will line up the blink center with exposure center
 		next_blink_time += (int64_t)pssense->tracking.latest_led_sync_sample.fudge_offset_ns;
 
-		// PSSENSE cycle position on the wire is the *center* of the exposure, but our LED sync assumes it's the
-		// start of the exposure, so we need to make it blink later to account
-		next_blink_time += PERIOD_ID_TO_DURATION_NS(period_id) / 2;
+		// The bootstrap/refinement fudge is a pulse-start offset. Preserve its calibrated pulse centre even when
+		// native phase mode changes the output pulse width (for example lock period 20 -> BG period 30).
+		next_blink_time += PERIOD_ID_TO_DURATION_NS(source_period_id) / 2;
 
 		// cycle_length is always expressed in controller 3 MHz ticks.
 		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
@@ -2002,7 +2007,7 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		time_duration_ns relative_center_ns =
 		    (int64_t)pssense->tracking.timing_fudge_100us * 100 * U_TIME_1US_IN_NS +
 		    (int64_t)pssense->tracking.latest_led_sync_sample.fudge_offset_ns +
-		    PERIOD_ID_TO_DURATION_NS(period_id) / 2;
+		    PERIOD_ID_TO_DURATION_NS(source_period_id) / 2;
 		if (led_phase == LED_SYNC_PHASE_PRESCAN) {
 			cycle_position = NS_TO_IMU_TICKS(next_blink_time);
 		} else if (led_phase == LED_SYNC_PHASE_BROAD || led_phase == LED_SYNC_PHASE_BG ||
@@ -2028,9 +2033,10 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 				pssense->tracking.native_led_phase_initialised = true;
 				pssense->tracking.led_sequence_num += 1;
 				PSSENSE_INFO(pssense,
-				             "LED_NATIVE_PHASE side=%c old=%u new=%u period=%u offset_us=%.1f optical_age_ms=%.1f",
-				             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', old_phase, led_phase, period_id,
-				             (double)relative_center_ns / 1000.0,
+				             "LED_NATIVE_PHASE side=%c old=%u new=%u source_period=%u output_period=%u "
+				             "offset_us=%.1f optical_age_ms=%.1f",
+				             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', old_phase, led_phase, source_period_id,
+				             period_id, (double)relative_center_ns / 1000.0,
 				             pssense->tracking.last_optical_timestamp_ns > 0 && now_ns >= pssense->tracking.last_optical_timestamp_ns
 				                 ? (double)(now_ns - pssense->tracking.last_optical_timestamp_ns) / 1000000.0
 				                 : -1.0);
@@ -2046,14 +2052,14 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			             "LED_SCHEDULE side=%c now=%" PRIi64 " raw_exposure=%" PRIi64 " age=%" PRIi64
 			             " period=%" PRIi64 " forward=%" PRIu64 " projected=%" PRIi64 " projected_lead=%" PRIi64
 			             " controller_now=%" PRIi64 " phase=%u cycle_position=%u relative_us=%.1f blink_host=%" PRIi64
-			             " blink_minus_projected=%" PRIi64 " period_id=%u pulse=%" PRIi64,
+			             " blink_minus_projected=%" PRIi64 " source_period_id=%u period_id=%u pulse=%" PRIi64,
 			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', now_ns,
 			             pssense->tracking.last_exposure_local_timestamp_ns,
 			             now_ns - pssense->tracking.last_exposure_local_timestamp_ns,
 			             pssense->tracking.average_exposure_interval_ns, periods_forward, schedule_host_ns,
 			             schedule_host_ns - now_ns, controller_now_valid ? controller_now_ns : -1, led_phase,
 			             cycle_position, (double)relative_center_ns / 1000.0, blink_host_valid ? blink_host_est_ns : -1,
-			             blink_host_valid ? blink_host_est_ns - schedule_host_ns : 0, period_id,
+			             blink_host_valid ? blink_host_est_ns - schedule_host_ns : 0, source_period_id, period_id,
 			             PERIOD_ID_TO_DURATION_NS(period_id));
 		}
 
