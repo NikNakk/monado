@@ -532,3 +532,46 @@ idle-exit policy. Reload is required to change the loaded environment; no live
 service was stopped or restarted here. The next client activates the service
 on demand. This limits idle exposure to the fault-triggering command stream; it
 does not cure the controller firmware state or clear a ring already stuck on.
+
+### Controlled lockout investigation prepared (2026-10-04)
+
+The next step is to locate the onset in the command stream, rather than infer it
+from the final stuck state. `PSSENSE_TIMING_DIAG=1` now also logs each actual HID
+write as `PSSENSE_OUTPUT`: full report bytes, start/end monotonic timestamps,
+result/expected byte count, latest input timestamp, estimated device time,
+phase, LED sequence, pulse period, cycle position/length and flags/status-LED
+field. This is opt-in; it does not change the transmitted report. Input diagnostic
+summaries now include current ignored bytes as well as change counts, so busy
+counters are still inspectable after the first 20 individual changes.
+
+`scripts/macos/prepare-sense-lockout-trials.py --output NEW_DIRECTORY` prepares
+three normal-endpoint service profiles without operating launchd or hardware:
+
+| Trial | Phase probes | Forced full scans | Condition |
+| --- | --- | --- | --- |
+| A-steady | Off | Off | Both rings continuously visible; steady-lock control. |
+| B-probes | On | Off | Same visibility; isolates phase-adjustment probes. |
+| C-rescans | Off | Every 20 s after lock | Same visibility; isolates full-scan transitions. |
+
+The initial profiles and detailed user procedure are in
+`build-wine/diagnostics/20261004-lockout-abc/`. Each has a separate service log and
+constellation recording. Power-cycle both controllers before each run, keep the
+XR client open, hold rings unobstructed 30–50 cm away, and use the same optimized
+build/calibration/period-32 pulse throughout. Observe for 180 seconds or until a
+fault; record hand, approximate elapsed time, status LED, IR state and whether
+buttons still respond. A spontaneous loss/rescan contaminates a steady-lock
+control and must be noted. Repeats require a fresh evidence directory; a short
+fault-free run does not establish prevention.
+
+If A fails before any scan/probe, audit the steady command stream and clock
+mapping first. Repeated faults confined to B implicate probes; faults confined
+to C implicate scan transitions. Candidate prevention then follows the evidence:
+disable implicated probes, replace the repeated full-scan fallback, or correct
+command/state semantics. Do not blindly switch to BROAD/BG/STABLE: position
+semantics differ from PRESCAN. Confirm any mitigation with verbose diagnostics
+off afterwards; logging itself adds overhead. Idle exit remains enabled as an
+exposure reduction, not a firmware fix.
+
+A mocked real driver-loop test passes with tracing enabled, exercising failed
+and recovered writes plus input disconnect. The captured hex reports have the
+expected byte counts. No hardware was used for this validation.
