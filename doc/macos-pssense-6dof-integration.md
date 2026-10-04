@@ -465,8 +465,11 @@ endpoint. Existing Wine launchers must retain their x86-64 manifest override.
 The macOS SDK loader falls back to `/usr/local/share/openxr/1`, currently pointing
 at Meta XR Simulator on this machine, so service registration alone does not
 make unconfigured native applications select Monado. Use the generated client
-environment for shell launches, or set those two variables with `launchctl
-setenv` for subsequently launched GUI apps; the latter must be reapplied at login.
+environment for the current shell. The preparation tool also writes a companion
+client-environment LaunchAgent that sets those two variables with `launchctl
+setenv` at login for subsequently launched GUI apps. It does not start hardware.
+Restart already-open terminals/apps to inherit that environment. Wine launchers
+must continue overriding XR_RUNTIME_JSON with the x86-64 manifest.
 
 The user still observes the IR-ring-always-on/status-LED-off fault. This is
 distinct from the exited I/O thread: Claude's historical fault runs had healthy
