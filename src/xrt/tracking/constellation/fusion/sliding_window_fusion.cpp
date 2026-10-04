@@ -714,9 +714,9 @@ struct SlidingWindowFusion::Impl
 			    new FirstEstimateJacobianCostFunction(
 			        new ImuCostFunction(new ImuCostFunctor{end.preintegration}),
 			        {{nullptr, nullptr},
-			         {nullptr, nullptr},
-			         {start.pose.anchorData(), &pose_manifold},
-			         {end.pose.anchorData(), &pose_manifold}}),
+				 {nullptr, nullptr},
+				 {start.pose.anchorData(), &pose_manifold},
+				 {end.pose.anchorData(), &pose_manifold}}),
 			    nullptr, gravity.data(), start.bias.data(), start.pose.data(), end.pose.data());
 			keyframe_residuals[k - 1].push_back(imu_id);
 

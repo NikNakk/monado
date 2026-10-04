@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # PS Sense: upstream's optical front end (MR 2940) against M1, and recording for evaluation
 
 Branch `claude/pssense-mr2940-evaluation`, on top of `codex/pssense-upstream-fusion-evaluation`. The upstream side is

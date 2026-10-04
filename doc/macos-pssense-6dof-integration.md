@@ -581,3 +581,93 @@ contrary to the historical "full scan" description. It now clears that hint
 only for the explicitly requested stress rescan, so trial C actually exercises
 wide-to-narrow scanning. Ordinary acquisition and loss-driven rescans retain
 their hinted behavior.
+
+### Trial A: right lockout during steady timing lock (2026-10-04)
+
+The user reports that the right controller locked out during A. The captured
+service identifies `v25.1.0-2095-g6c76552ed`; the A plist disables phase probes
+and forced rescans. Evidence is retained in
+`build-wine/diagnostics/20261004-lockout-abc/A-steady/` (`service.log`,
+`constellation.ctd`, `service.plist`). The log includes an initial short service
+lifetime with a display-selection error, followed by the actual recorded run.
+The recorded HID-write span is about 146 seconds, shorter than the requested
+180 seconds. The user reports no fault during approximately the first minute, while the
+headset was off and the controllers stationary; the fault was noticed only
+after removing the headset at the end. Exact onset, post-fault buttons and
+pre-run power-cycle confirmation remain pending.
+
+Both controllers perform one narrow acquisition and reach timing lock. Neither
+logs a subsequent loss, scan, scan failure or stuck-lit detection. The right
+continues yielding accepted optical poses through the final camera frames.
+Consequently, the reported fault is not confined to rescanning or phase probes;
+the historical scan-only pattern must not be treated as a general exclusion of
+steady-state triggers. LED visibility and accepted poses do not prove that the
+controller is still obeying the requested blink schedule.
+
+All 9,627 right and 9,626 left traced writes return their expected 78 bytes.
+Ignored input fields remain unchanged except the previously active counter at
+byte 14 and Bluetooth header at byte 23. There is no new clock snap after the
+initial acquisition. These checks do not establish firmware acceptance of the
+LED command or button behavior after the observed fault.
+
+A significant transport delay occurs around 72.7 seconds from the first traced
+write: right write at log line 26462 takes 806.945 ms; left at line 26463 takes
+811.474 ms. Both report success. Their estimated cycle centers are about
+63/68 ms ahead at write entry, and about 744 ms behind at return, assuming the
+clock mapping remains applicable. Input servicing also stalls for about
+0.82 seconds. This is a candidate scheduling hazard, not an identified onset:
+SetReport return time does not reveal when the controller received the report,
+and only the right is reported to lock out. Camera scheduling and optical
+accepts continue across the stall. Negative right scheduling lead at the very
+end of the log occurs during teardown and must not be mistaken for the
+user-observed onset.
+
+The 73-second delay falls within the user's possible onset window, but does
+not establish causation. Repeat A with both controllers freshly power-cycled and an
+explicit elapsed-time marker when the fault is noticed. Audit steady PRESCAN
+re-latching, the actual HID transport cadence and late report behavior before
+changing phase semantics. B/C are no longer necessary to establish that scans
+or probes are not required, though they can still compare fault rates. No
+prevention or recovery is validated by this run.
+
+### Linux CI warning fixes and Rift isolation audit (2026-10-04)
+
+[Linux run 37195947341](https://github.com/NikNakk/monado/actions/runs/37195947341)
+built successfully, then failed its compiler-warning gate. GCC reported an
+omitted `joint_camera_count` initializer, conditionally supported `offsetof`
+on the replay's non-standard-layout fake device, and partially initialized
+pose-metrics test aggregates. These are corrected with an explicit zero camera
+count, a typed tracking-source owner link, and zero initialization followed by
+field assignments. The warning gate remains unchanged.
+
+[Contribution run 37195947368](https://github.com/NikNakk/monado/actions/runs/37195947368)
+failed formatting on imported/edited files. Those files now pass the pinned
+clang-format 23.1.1 check. Local REUSE also exposed missing metadata in five
+imported notes and two calibration scripts; matching fork copyright/BSL-1.0
+headers were added. Full contribution-style and REUSE checks now pass.
+
+The audit compares the integration against the pre-Sense tree (`80481ea41^`):
+Rift driver/builder, correspondence search, original Ceres optimizer and LED
+refinement are unchanged. The legacy pose matcher body is identical, ignoring
+whitespace and its renamed wrapper. Rift's calloc-initialized model keeps
+`unique_blob_matches=false`, and its legacy callback does not edit the sample.
+The new acceptance callback, filter, LED bootstrap and joint worker belong to
+the Sense opt-in path. Optional HID timestamps leave existing Rift reads alone;
+the unchanged Linux hidraw backend zero-initializes the added function pointer.
+
+One process-wide boundary was strengthened: `CONSTELLATION_TRACKER_JOINT=1`
+now additionally requires `T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT` from the
+caller. Only Sense runtime and PS VR2 diagnostic/replay callers set it; Rift's
+existing flags remain unchanged. Thus even an inherited Sense joint option
+cannot select the new worker for Rift. Legacy callbacks retain the original
+tracker pose-cache behavior, and LED shape counting is skipped unless a device
+actually requests the new callback.
+
+Regression tests verify legacy blob assignment/degeneracy, legacy sample
+callback routing, opt-in rejection, and real tracker construction with the joint
+environment option enabled: legacy stays per-camera while the explicit Sense
+caller creates the joint worker. The optimized macOS full build has no compiler
+warnings. All 44 CTest suites pass (three IPC/remote-layer suites needed a
+sandbox-free rerun to create OS resources). Rift hardware has not been tested.
+Linux CI still needs to run on the corrected revision; Docker is installed but
+its local daemon is not running, so a Linux build was not claimed locally.

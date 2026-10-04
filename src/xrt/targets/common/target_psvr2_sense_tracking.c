@@ -295,6 +295,7 @@ psvr2_sense_tracking_start(struct xrt_device *head, struct xrt_device *left, str
 	st->controllers[1] = right;
 
 	struct t_constellation_tracker_params params = {0};
+	params.flags = T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT;
 	psvr2_head_tracking_origin_init(&st->origin, head);
 	bool have_head_from_camera0 = false;
 	if (!psvr2_constellation_load_calibration(calibration, &params, &st->origin.head_from_camera0,

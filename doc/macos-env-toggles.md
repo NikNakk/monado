@@ -894,3 +894,10 @@ Unsupported images are skipped without failing normal rendering. Target
 readbacks honor the requested final layout. The previous log-only gating
 left the GPU work active every frame. See the
 [inherited compositor audit](macos-inherited-compositor-audit.md).
+
+## Sense joint solver isolation (2026-10-04)
+
+`CONSTELLATION_TRACKER_JOINT=1` now also requires the caller's
+`T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT` flag. Only the Sense runtime and
+PS VR2 diagnostic/replay callers set it. Rift retains its original per-camera
+solver even when the process inherits this environment option.

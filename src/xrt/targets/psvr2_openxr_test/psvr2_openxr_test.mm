@@ -1559,14 +1559,14 @@ poll_generic_controller(application &app)
 		get_info.action = app.controller_aim_action;
 		check_xr(app.xr.get_action_state_pose(app.session, &get_info, &aim), "xrGetActionStatePose(aim)");
 
-		app.controller_inputs[hand_index] = {
-		    {primary.isActive == XR_TRUE, secondary.isActive == XR_TRUE, trigger.isActive == XR_TRUE,
-		     squeeze.isActive == XR_TRUE, thumbstick.isActive == XR_TRUE},
-		    primary.isActive && primary.currentState,
-		    secondary.isActive && secondary.currentState,
-		    trigger.isActive ? trigger.currentState : 0.0f,
-		    squeeze.isActive ? squeeze.currentState : 0.0f,
-		    thumbstick.isActive ? thumbstick.currentState : XrVector2f{}};
+		app.controller_inputs[hand_index] = {{primary.isActive == XR_TRUE, secondary.isActive == XR_TRUE,
+		                                      trigger.isActive == XR_TRUE, squeeze.isActive == XR_TRUE,
+		                                      thumbstick.isActive == XR_TRUE},
+		                                     primary.isActive && primary.currentState,
+		                                     secondary.isActive && secondary.currentState,
+		                                     trigger.isActive ? trigger.currentState : 0.0f,
+		                                     squeeze.isActive ? squeeze.currentState : 0.0f,
+		                                     thumbstick.isActive ? thumbstick.currentState : XrVector2f{}};
 
 		const bool changed = primary.changedSinceLastSync || secondary.changedSinceLastSync ||
 		                     trigger.changedSinceLastSync || squeeze.changedSinceLastSync ||
@@ -2549,8 +2549,7 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 		               hand == 0 ? make_float4(0.05f, 0.85f, 1, 1) : make_float4(1, 0.35f, 0.05f, 1));
 		const char *labels[] = {"FACE 1", "FACE 2", "TRIGGER", "GRIP", "STICK"};
 		const float levels[] = {input.primary ? 1.0f : 0.0f, input.secondary ? 1.0f : 0.0f,
-		                        std::clamp(input.trigger, 0.0f, 1.0f),
-		                        std::clamp(input.squeeze, 0.0f, 1.0f),
+		                        std::clamp(input.trigger, 0.0f, 1.0f), std::clamp(input.squeeze, 0.0f, 1.0f),
 		                        std::min(1.0f, std::hypot(input.stick.x, input.stick.y))};
 		for (size_t row = 0; row < 5; ++row) {
 			const float y = -0.11f - (float)row * 0.042f;
@@ -2571,10 +2570,15 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 		const bool have_pose = (flags & valid) == valid;
 		const bool tracking = have_pose && (flags & tracked) == tracked;
 		add_world_text(panel, x, -0.33f, 0.80f, 0.0045f,
-		               tracking ? "TRACKED" : have_pose ? "POSE ONLY" : "NO POSE",
-		               tracking ? on : have_pose ? off : inactive);
+		               tracking    ? "TRACKED"
+		               : have_pose ? "POSE ONLY"
+		                           : "NO POSE",
+		               tracking    ? on
+		               : have_pose ? off
+		                           : inactive);
 	}
-	app.frame_instances.insert(app.frame_instances.end(), panel.world_instances.begin(), panel.world_instances.end());
+	app.frame_instances.insert(app.frame_instances.end(), panel.world_instances.begin(),
+	                           panel.world_instances.end());
 }
 
 static void
@@ -3151,7 +3155,8 @@ run(int argc, char **argv)
 			    "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			    "  --passthrough-only submits only XR_FB_passthrough.\n"
 			    "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action "
-			    "state, draws controller poses and head-relative input panels (green pressed, red inactive).\n"
+			    "state, draws controller poses and head-relative input panels (green pressed, red "
+			    "inactive).\n"
 			    "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			    "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			    "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve "

@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # PS VR2 Sense `led_blink[4]` semantics
 
 This note records the latch-aware macOS hardware experiment used to determine whether the four Sense `led_blink` bytes are a spatial per-LED mask or a temporal blink waveform.

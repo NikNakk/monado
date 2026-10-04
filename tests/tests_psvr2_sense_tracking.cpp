@@ -234,7 +234,8 @@ struct FaultHid : os_hid_device
 			report.report_id = id;
 			const int part = self.feature_part++ % 2;
 			report.part_id = part == 0 ? CALIBRATION_DATA_PART_ID_1 : CALIBRATION_DATA_PART_ID_2;
-			std::memcpy(report.data, (const uint8_t *)&calibration + part * sizeof(report.data), sizeof(report.data));
+			std::memcpy(report.data, (const uint8_t *)&calibration + part * sizeof(report.data),
+			            sizeof(report.data));
 			std::memcpy(out, &report, sizeof(report));
 			return (int)sizeof(report);
 		};
@@ -251,13 +252,14 @@ struct FaultProber : xrt_prober
 			*out = &static_cast<FaultProber *>(base)->hid;
 			return 0;
 		};
-		get_string_descriptor = [](xrt_prober *, xrt_prober_device *, xrt_prober_string, unsigned char *out, size_t) {
+		get_string_descriptor = [](xrt_prober *, xrt_prober_device *, xrt_prober_string, unsigned char *out,
+		                           size_t) {
 			std::memcpy(out, "Mock Sense", 11);
 			return 11;
 		};
 	}
 };
-}
+} // namespace
 
 TEST_CASE("macOS Sense keeps input alive across output failures and retries")
 {

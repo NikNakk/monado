@@ -1284,10 +1284,10 @@ img_xfer_cb(struct libusb_transfer *xfer)
 						            .sequence_id = diag->last_sequence_id,
 						            .timestamp_ns = diag->last_vts_monotonic_ns,
 						            .frame_period_ns = have_previous_event
-						                                   ? (uint64_t)interval_us *
-						                                         U_TIME_1US_IN_NS /
-						                                         sequence_delta
-						                                   : 0,
+							                           ? (uint64_t)interval_us *
+							                                 U_TIME_1US_IN_NS /
+							                                 sequence_delta
+							                           : 0,
 						            .exposure_time_ns = 0,
 						        },
 						};

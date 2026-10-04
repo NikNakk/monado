@@ -350,8 +350,8 @@ iokit_set_report(struct hid_iokit *hid, IOHIDReportType type, const uint8_t *dat
 	if (ret != kIOReturnSuccess) {
 		int64_t now = os_monotonic_get_ns();
 		pthread_mutex_lock(&hid->mutex);
-		bool log_error = hid->last_output_error_log_ns == 0 ||
-		                 now - hid->last_output_error_log_ns >= 1000000000;
+		bool log_error =
+		    hid->last_output_error_log_ns == 0 || now - hid->last_output_error_log_ns >= 1000000000;
 		if (log_error)
 			hid->last_output_error_log_ns = now;
 		pthread_mutex_unlock(&hid->mutex);

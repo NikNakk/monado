@@ -370,6 +370,7 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	}
 
 	struct t_constellation_tracker_params params = {0};
+	params.flags = T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT;
 	struct psvr2_head_tracking_origin head_origin;
 	psvr2_head_tracking_origin_init(&head_origin, NULL);
 	bool have_head_from_camera0 = false;
