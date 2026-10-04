@@ -258,6 +258,28 @@ the mask to `0a ff ff ff` and the tracking flag changes 6 -> 9 about 2 ms later.
 Until the bit-to-physical-LED mapping and Sony's selection policy are captured, Monado should **not** assume that
 `BG/30 + ff ff ff ff` is a native-like steady state; that combination never occurs in this successful capture.
 
+## LED-pattern changes around loss and reacquisition
+
+The second successful native session gives a stronger clue about the four-byte `leds[]` field. It should not yet be
+treated as a literal 32-bit physical-LED mask, but its changes are tightly coupled to Sony's optical search state.
+
+During the BROAD loss/reacquisition interval:
+
+- `0x0c ff ff ff` was selected about 0.34 s before tracking flag 9 -> 6 and remained on wire throughout the ~2.6 s
+  flag-6 interval;
+- Sony then issued `SET_LEDS_IMMEDIATE 0x0a ff ff ff` essentially at the 6 -> 9 reacquisition transition;
+- roughly one second later it moved to `0x01 ff ff ff`.
+
+During the later BG loss/reacquisition interval:
+
+- `0x01 ff ff ff` remained active through tracking flag 9 -> 3;
+- Sony again issued `0x0a ff ff ff` immediately around the 3 -> 9 reacquisition;
+- it then moved quickly through `0x07`, later `0x01`, `0x07`, `0x06`, and `0x03`.
+
+This is consistent with the field selecting an optical identification/search pattern or LED subset, but the current
+logs do not establish its physical meaning. The prepared Windows optical-capture branch records raw tracking frames plus
+Sony's 4-camera x 17-LED blob associations so that the mapping can be measured directly.
+
 ## Schedule sequence number
 
 The LED schedule sequence is a **generation/latch counter**, not an output-packet counter.
