@@ -435,3 +435,57 @@ The optimised service rebuild and Sense tracking tests pass. A hardware-free
 mock exercises the actual controller thread: input reaches `update_inputs`
 while three output writes fail, a later write recovers, and a subsequent input
 disconnect stops further output. Hardware confirmation remains pending.
+
+When rebuilding after a commit, build the whole `build-macos-sense-rel` tree
+before restarting the agent. The IPC handshake checks the embedded Git version
+of both `monado-service` and `libopenxr_monado.dylib`. Building only the service
+can leave the runtime library behind; rebuilding both while a service is running
+can leave the process behind. The user's subsequent conflict had matching
+`4a03bc0fb` binaries on disk but the latest service startup still identified
+`f326247b5`. Close clients, finish the full build, boot out/bootstrap the isolated
+agent, then reopen clients. Do not bypass this check with `IPC_IGNORE_VERSION`.
+
+### Local default preparation and remaining LED fault (2026-10-04)
+
+The user confirms the corrected setup works well and requests native and Wine /
+OpenVR use as the local default. `scripts/macos/rebuild-both` now explicitly
+configures the existing native `build-wine` and x86-64 client build with
+RelWithDebInfo and generic-controller interaction enabled. Keep their existing
+paths and other feature selections; build both clients and service together.
+The script's final kickstart is a user hardware action.
+
+`scripts/macos/prepare-local-sense-default.py CALIBRATION.json` prepares a
+persistent normal-endpoint LaunchAgent from the existing normal plist, retaining
+its tuning while enabling Sense with the supplied calibration. It prints the
+user steps to unload both old registrations, copy the prepared plist into
+`~/Library/LaunchAgents`, and bootstrap the normal agent. It does not start or
+stop hardware. Generated native-client environment instructions select
+`build-wine/openxr_monado-dev.json`, client-hosted compositing, and the normal
+endpoint. Existing Wine launchers must retain their x86-64 manifest override.
+The macOS SDK loader falls back to `/usr/local/share/openxr/1`, currently pointing
+at Meta XR Simulator on this machine, so service registration alone does not
+make unconfigured native applications select Monado. Use the generated client
+environment for shell launches, or set those two variables with `launchctl
+setenv` for subsequently launched GUI apps; the latter must be reapplied at login.
+
+The user still observes the IR-ring-always-on/status-LED-off fault. This is
+distinct from the exited I/O thread: Claude's historical fault runs had healthy
+input and output traffic, and LED_ALL_OFF could not clear it. All seven located
+historical onsets followed period-42 wide pulses; the current opt-in runtime
+already defaults to period 32. Thus shorter pulses are a mitigation, not a
+proven cure. No command-based recovery is established; power cycling remains
+the only demonstrated recovery.
+
+The next useful controlled run should start from power-cycled controllers,
+verify period 32 on the wire with `PSSENSE_TIMING_DIAG=1`, and enable
+`PSSENSE_INPUT_DIAG=1` to capture ignored status/counter bytes at onset. Compare
+against `PSSENSE_LED_BOOTSTRAP_TRACK=0` to remove phase-adjustment probes while
+retaining initial acquisition and loss-triggered rescans. Keep rings in view;
+record whether the onset follows a full scan, probe or write failure. This is
+an A/B investigation, not a new default. If content transitions are implicated,
+compare holding a changed setting for at least four optical frames, as the
+Toolkit does, before pursuing Sony's PRESCAN/BROAD/BG/STABLE state sequence.
+Those phases have different cycle-position semantics; merely switching the
+phase enum is not a correct implementation. Any Toolkit-derived work must
+first check licensing. See the original
+[fault ledger](pssense-optical-tracking.md#the-always-lit-fault-what-the-logs-and-psvr2toolkit-say-26-sep).
