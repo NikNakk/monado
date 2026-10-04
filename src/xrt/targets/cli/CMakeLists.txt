@@ -9,6 +9,9 @@ add_executable(
 	cli_cmd_calibration_dump.c
 	cli_cmd_info.c
 	cli_cmd_lighthouse.c
+	cli_cmd_pssense_test.c
+	cli_cmd_psvr2_camera.c
+	cli_cmd_psvr2_constellation.c
 	cli_cmd_psvr2_pose.c
 	cli_cmd_probe.c
 	cli_cmd_pose_dump.c
@@ -18,10 +21,11 @@ add_executable(
 	cli_main.c
 	)
 add_sanitizers(cli)
+target_include_directories(cli PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../tracking)
 
 if(NOT WIN32)
 	# No getline on Windows, so until we have a portable impl
-	target_sources(cli PRIVATE cli_cmd_calibrate.c)
+	target_sources(cli PRIVATE cli_cmd_calibrate.c cli_cmd_psvr2_calibration_record.c)
 endif()
 
 if(XRT_HAVE_OPENCV)
@@ -42,3 +46,7 @@ target_link_libraries(
 	)
 
 install(TARGETS cli RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+if(TARGET constellation)
+	target_link_libraries(cli PRIVATE constellation)
+endif()

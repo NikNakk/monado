@@ -29,6 +29,10 @@ struct os_hid_device
 {
 	int (*read)(struct os_hid_device *hid_dev, uint8_t *data, size_t size, int milliseconds);
 
+	//! Optional OS receipt timestamp; NULL on backends that cannot provide it.
+	int (*read_with_timestamp)(
+	    struct os_hid_device *hid_dev, uint8_t *data, size_t size, int milliseconds, int64_t *out_timestamp_ns);
+
 	int (*write)(struct os_hid_device *hid_dev, const uint8_t *data, size_t size);
 
 	int (*get_feature)(struct os_hid_device *hid_dev, uint8_t report_num, uint8_t *data, size_t size);
@@ -53,6 +57,19 @@ struct os_hid_device
 static inline int
 os_hid_read(struct os_hid_device *hid_dev, uint8_t *data, size_t size, int milliseconds)
 {
+	return hid_dev->read(hid_dev, data, size, milliseconds);
+}
+
+static inline int
+os_hid_read_with_timestamp(
+    struct os_hid_device *hid_dev, uint8_t *data, size_t size, int milliseconds, int64_t *out_timestamp_ns)
+{
+	if (out_timestamp_ns != NULL) {
+		*out_timestamp_ns = 0;
+	}
+	if (hid_dev->read_with_timestamp != NULL) {
+		return hid_dev->read_with_timestamp(hid_dev, data, size, milliseconds, out_timestamp_ns);
+	}
 	return hid_dev->read(hid_dev, data, size, milliseconds);
 }
 

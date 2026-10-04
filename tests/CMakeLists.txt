@@ -65,6 +65,21 @@ if(XRT_BUILD_DRIVER_HANDTRACKING)
 	list(APPEND tests tests_levenbergmarquardt)
 endif()
 
+if(TARGET constellation)
+	list(
+		APPEND
+		tests
+		tests_pose_metrics
+		tests_led_phase_bootstrap
+		tests_imu_optical_filter
+		tests_joint_pose_solver
+		tests_constellation_dataset
+		)
+endif()
+if(TARGET constellation_fusion)
+	list(APPEND tests tests_pssense_fusion)
+endif()
+
 foreach(testname ${tests})
 	add_executable(${testname} ${testname}.cpp)
 	target_link_libraries(${testname} PRIVATE xrt-external-catch2)
@@ -371,4 +386,48 @@ if(APPLE AND TARGET comp_main)
 		)
 	add_test(NAME tests_macos_remote_layer COMMAND tests_macos_remote_layer)
 	set_target_properties(tests_macos_remote_layer PROPERTIES FOLDER monado_tests)
+endif()
+
+if(TARGET constellation)
+	foreach(
+		testname
+		tests_pose_metrics
+		tests_led_phase_bootstrap
+		tests_imu_optical_filter
+		tests_joint_pose_solver
+		tests_constellation_dataset
+		)
+		target_link_libraries(${testname} PRIVATE constellation aux_math aux_tracking)
+		target_include_directories(
+			${testname}
+			PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking/constellation
+				${CMAKE_CURRENT_SOURCE_DIR}/../src/xrt/tracking
+			)
+		target_link_libraries(${testname} PRIVATE Eigen3::Eigen xrt-external-bigceres)
+	endforeach()
+endif()
+if(TARGET constellation_fusion)
+	target_link_libraries(
+		tests_pssense_fusion PRIVATE constellation_fusion aux_math aux_tracking
+		)
+endif()
+
+if(XRT_BUILD_DRIVER_PSVR2 AND XRT_BUILD_DRIVER_PSSENSE)
+	add_executable(tests_psvr2_sense_tracking tests_psvr2_sense_tracking.cpp)
+	target_link_libraries(
+		tests_psvr2_sense_tracking
+		PRIVATE
+			target_lists
+			xrt-external-catch2
+			xrt-interfaces
+			tracking-includes
+			aux_util
+			aux_math
+			aux_tracking
+			drv_includes
+		)
+	target_include_directories(
+		tests_psvr2_sense_tracking SYSTEM PRIVATE ${LIBUSB1_INCLUDE_DIRS}
+		)
+	add_test(NAME tests_psvr2_sense_tracking COMMAND tests_psvr2_sense_tracking)
 endif()

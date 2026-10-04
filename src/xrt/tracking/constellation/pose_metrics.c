@@ -107,6 +107,68 @@ find_best_matching_led(struct pose_metrics_visible_led_info *led_points,
 	return best_led_index;
 }
 
+static bool
+blob_matches_led(const struct pose_metrics_visible_led_info *led_info, const struct t_blob *blob, double *out_sqerror)
+{
+	// If the blob is much larger than the LED in either dimension, don't match.
+	if (blob->size.x > led_info->led_radius_px * 4 || blob->size.y > led_info->led_radius_px * 4) {
+		return false;
+	}
+
+	double dx = (double)led_info->pos_px.x - blob->center.x;
+	double dy = (double)led_info->pos_px.y - blob->center.y;
+	double sqerror = dx * dx + dy * dy;
+	*out_sqerror = sqerror;
+	return sqerror < led_info->led_radius_px * led_info->led_radius_px;
+}
+
+/*
+ * Find an augmenting path in the blob/LED compatibility graph. Trying LEDs in
+ * increasing reprojection-error order gives a low-error maximum-cardinality
+ * one-to-one assignment without allowing two image blobs to inflate one LED's
+ * match count.
+ */
+static bool
+assign_blob_to_led(int blob_index,
+                   struct t_blob **blobs,
+                   struct pose_metrics_visible_led_info *leds,
+                   int num_leds,
+                   int *blob_to_led,
+                   int *led_to_blob,
+                   bool *visited_leds)
+{
+	for (int candidate = 0; candidate < num_leds; candidate++) {
+		int best_led = -1;
+		double best_sqerror = INFINITY;
+		for (int led_index = 0; led_index < num_leds; led_index++) {
+			if (visited_leds[led_index]) {
+				continue;
+			}
+
+			double sqerror = 0.0;
+			if (blob_matches_led(&leds[led_index], blobs[blob_index], &sqerror) && sqerror < best_sqerror) {
+				best_led = led_index;
+				best_sqerror = sqerror;
+			}
+		}
+
+		if (best_led < 0) {
+			break;
+		}
+
+		visited_leds[best_led] = true;
+		int displaced_blob = led_to_blob[best_led];
+		if (displaced_blob < 0 ||
+		    assign_blob_to_led(displaced_blob, blobs, leds, num_leds, blob_to_led, led_to_blob, visited_leds)) {
+			blob_to_led[blob_index] = best_led;
+			led_to_blob[best_led] = blob_index;
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static void
 check_pose_prior(struct pose_metrics *score,
                  const struct xrt_pose *pose,
@@ -274,14 +336,14 @@ get_visible_leds_and_bounds(const struct xrt_pose *T_cam_obj,
  * Exported functions.
  */
 
-void
-pose_metrics_match_pose_to_blobs(const struct xrt_pose *pose,
-                                 struct t_blob *blobs,
-                                 int num_blobs,
-                                 struct t_constellation_tracker_led_model *led_model,
-                                 t_constellation_device_id_t device_id,
-                                 struct camera_model *calib,
-                                 struct pose_metrics_blob_match_info *match_info)
+static void
+pose_metrics_match_pose_to_blobs_legacy(const struct xrt_pose *pose,
+                                        struct t_blob *blobs,
+                                        int num_blobs,
+                                        struct t_constellation_tracker_led_model *led_model,
+                                        t_constellation_device_id_t device_id,
+                                        struct camera_model *calib,
+                                        struct pose_metrics_blob_match_info *match_info)
 {
 	struct pose_rect *bounds = &match_info->bounds;
 
@@ -349,6 +411,106 @@ pose_metrics_match_pose_to_blobs(const struct xrt_pose *pose,
 	if (match_info->matched_blobs <= 3) {
 		match_info->degenerate_solution = true;
 	}
+}
+
+void
+pose_metrics_match_pose_to_blobs(const struct xrt_pose *pose,
+                                 struct t_blob *blobs,
+                                 int num_blobs,
+                                 struct t_constellation_tracker_led_model *led_model,
+                                 t_constellation_device_id_t device_id,
+                                 struct camera_model *calib,
+                                 struct pose_metrics_blob_match_info *match_info)
+{
+	if (!led_model->unique_blob_matches) {
+		pose_metrics_match_pose_to_blobs_legacy(pose, blobs, num_blobs, led_model, device_id, calib,
+		                                        match_info);
+		return;
+	}
+
+	struct pose_rect *bounds = &match_info->bounds;
+
+	match_info->reprojection_error = 0.0;
+	match_info->matched_blobs = 0;
+	match_info->unmatched_blobs = 0;
+	match_info->degenerate_solution = false;
+
+	get_visible_leds_and_bounds(pose, led_model, calib, match_info->visible_leds, &match_info->num_visible_leds,
+	                            &match_info->bounds);
+
+	LOG_SPEW("Bounding box for pose is %f,%f -> %f,%f", bounds->left, bounds->top, bounds->right, bounds->bottom);
+
+	// Collect blobs within the projected constellation bounds, then compute a
+	// maximum-cardinality one-to-one assignment to compatible visible LEDs.
+	struct t_blob *candidate_blobs[XRT_CONSTELLATION_MAX_BLOBS_PER_FRAME];
+	int num_candidate_blobs = 0;
+
+	for (int i = 0; i < num_blobs; i++) {
+		struct t_blob *b = blobs + i;
+		t_constellation_device_id_t led_object_id = b->matched_device_id;
+
+		// Skip blobs which already have an ID not belonging to this device
+		if (led_object_id != XRT_CONSTELLATION_INVALID_DEVICE_ID && led_object_id != device_id) {
+			continue;
+		}
+
+		// Ignore blobs that are outside the pose bounding box
+		if (b->center.x < bounds->left || b->center.y < bounds->top || b->center.x > bounds->right ||
+		    b->center.y > bounds->bottom) {
+			continue;
+		}
+
+		if (num_candidate_blobs == XRT_CONSTELLATION_MAX_BLOBS_PER_FRAME) {
+			match_info->unmatched_blobs++;
+			continue;
+		}
+		candidate_blobs[num_candidate_blobs++] = b;
+	}
+
+	int blob_to_led[XRT_CONSTELLATION_MAX_BLOBS_PER_FRAME];
+	int led_to_blob[MAX_OBJECT_LEDS];
+	for (int i = 0; i < num_candidate_blobs; i++) {
+		blob_to_led[i] = -1;
+	}
+	for (int i = 0; i < match_info->num_visible_leds; i++) {
+		led_to_blob[i] = -1;
+	}
+	for (int blob_index = 0; blob_index < num_candidate_blobs; blob_index++) {
+		bool visited_leds[MAX_OBJECT_LEDS] = {false};
+		(void)assign_blob_to_led(blob_index, candidate_blobs, match_info->visible_leds,
+		                         match_info->num_visible_leds, blob_to_led, led_to_blob, visited_leds);
+	}
+
+	bool all_led_ids_matched = true;
+	for (int blob_index = 0; blob_index < num_candidate_blobs; blob_index++) {
+		struct t_blob *blob = candidate_blobs[blob_index];
+		int led_index = blob_to_led[blob_index];
+		if (led_index < 0) {
+			match_info->unmatched_blobs++;
+			continue;
+		}
+
+		struct pose_metrics_visible_led_info *led_info = &match_info->visible_leds[led_index];
+		double sqerror = 0.0;
+		bool compatible = blob_matches_led(led_info, blob, &sqerror);
+		assert(compatible);
+		(void)compatible;
+		match_info->reprojection_error += sqerror;
+		match_info->matched_blobs++;
+		led_info->matched_blob = blob;
+
+		if (blob->matched_device_led_id != XRT_CONSTELLATION_INVALID_LED_ID &&
+		    (blob->matched_device_led_id != led_info->led->id || blob->matched_device_id != device_id)) {
+			LOG_SPEW("mismatched LED id %d blob %d (@ %f,%f) has %d/%d", led_info->led->id, blob_index,
+			         blob->center.x, blob->center.y, blob->matched_device_id, blob->matched_device_led_id);
+			all_led_ids_matched = false;
+		}
+	}
+
+	match_info->all_led_ids_matched = all_led_ids_matched;
+
+	// Preserve the upstream degeneracy gate: three correspondences cannot verify the solve.
+	match_info->degenerate_solution = match_info->matched_blobs <= 3;
 }
 
 void

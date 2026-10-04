@@ -7,6 +7,7 @@
  */
 
 #include "os_hid.h"
+#include "os_time.h"
 
 #ifdef XRT_OS_OSX
 
@@ -31,6 +32,7 @@ struct iokit_input_report
 {
 	uint8_t *data;
 	size_t length;
+	int64_t timestamp_ns;
 	struct iokit_input_report *next;
 };
 
@@ -118,6 +120,7 @@ iokit_input_report_callback(void *context,
 	(void)report_type;
 	(void)report_id;
 
+	int64_t receipt_ns = os_monotonic_get_ns();
 	struct hid_iokit *hid = (struct hid_iokit *)context;
 	if (result != kIOReturnSuccess || report == NULL || report_length <= 0) {
 		return;
@@ -135,6 +138,7 @@ iokit_input_report_callback(void *context,
 	}
 	memcpy(queued->data, report, (size_t)report_length);
 	queued->length = (size_t)report_length;
+	queued->timestamp_ns = receipt_ns;
 
 	pthread_mutex_lock(&hid->mutex);
 	if (!hid->running || hid->disconnected) {
@@ -269,7 +273,8 @@ iokit_wait_for_report_locked(struct hid_iokit *hid, int milliseconds)
 }
 
 static int
-iokit_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds)
+iokit_read_with_timestamp(
+    struct os_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds, int64_t *out_timestamp_ns)
 {
 	struct hid_iokit *hid = (struct hid_iokit *)ohdev;
 	if (data == NULL || length == 0) {
@@ -301,11 +306,20 @@ iokit_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int millis
 	}
 	pthread_mutex_unlock(&hid->mutex);
 
+	if (out_timestamp_ns != NULL) {
+		*out_timestamp_ns = report->timestamp_ns;
+	}
 	size_t copy_length = report->length < length ? report->length : length;
 	memcpy(data, report->data, copy_length);
 	iokit_free_report(report);
 
 	return (int)copy_length;
+}
+
+static int
+iokit_read(struct os_hid_device *ohdev, uint8_t *data, size_t length, int milliseconds)
+{
+	return iokit_read_with_timestamp(ohdev, data, length, milliseconds, NULL);
 }
 
 static int
@@ -501,6 +515,7 @@ os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
 	}
 
 	hid->base.read = iokit_read;
+	hid->base.read_with_timestamp = iokit_read_with_timestamp;
 	hid->base.write = iokit_write;
 	hid->base.get_feature = iokit_get_feature;
 	hid->base.get_feature_timeout = iokit_get_feature_timeout;

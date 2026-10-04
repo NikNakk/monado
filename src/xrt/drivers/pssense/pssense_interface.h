@@ -68,6 +68,36 @@ pssense_set_head_device(struct xrt_device *controller, struct xrt_device *head);
 int
 pssense_add_to_constellation_tracker(struct xrt_device *xdev, struct t_constellation_tracker *tracker);
 
+/* Detach a controller before destroying an externally-owned tracker. */
+void
+pssense_remove_from_constellation_tracker(struct xrt_device *xdev);
+
+struct pssense_constellation_diagnostics
+{
+	bool attached;
+	//! The controller's device id in the constellation tracker, while attached.
+	t_constellation_device_id_t device_id;
+	uint64_t candidate_count;
+	uint64_t camera_candidate_count[4];
+	uint64_t fused_pose_count;
+	uint64_t disagreement_count;
+	uint64_t jump_rejection_count;
+	int64_t last_fused_timestamp_ns;
+	uint32_t last_fused_camera_count;
+
+	//! PSSENSE_LED_BOOTSTRAP state: 0 idle, 1 wide scan, 2 narrow scan, 3 locked.
+	bool led_bootstrap_enabled;
+	uint32_t led_bootstrap_state;
+	int64_t led_bootstrap_fudge_ns;
+	int64_t led_bootstrap_pulse_ns;
+	uint32_t led_bootstrap_scans;
+	uint32_t led_bootstrap_locks;
+};
+
+bool
+pssense_get_constellation_diagnostics(struct xrt_device *xdev,
+                                      struct pssense_constellation_diagnostics *out_diagnostics);
+
 /*!
  * @dir drivers/pssense
  *

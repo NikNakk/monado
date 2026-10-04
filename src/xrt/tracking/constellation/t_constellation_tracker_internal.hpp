@@ -34,6 +34,7 @@
 #include <stdexcept>
 #include <array>
 #include <fstream>
+#include <map>
 
 #include "correspondence_search.h"
 #include "led_search_model.h"
@@ -50,6 +51,23 @@
 
 #define MIN_ROT_ERROR DEG_TO_RAD(30)
 #define MIN_POS_ERROR 0.10
+
+/*!
+ * Whether a blob has the shape of a controller LED: small and round. Lamps, windows and glare make large or elongated
+ * blobs. On PS VR2 mode-4 recordings (25 Sep) this kept 98.3-99.7% of the blobs matched to Sense LEDs and 0-4% of the
+ * blobs seen with every LED dark. A blob without a size (some blobwatches leave it {0,0}) counts as an LED.
+ */
+static inline bool
+t_constellation_blob_is_led_shaped(const t_blob &blob)
+{
+	const float longest = blob.size.x > blob.size.y ? blob.size.x : blob.size.y;
+	const float shortest = blob.size.x > blob.size.y ? blob.size.y : blob.size.x;
+	if (longest <= 0.0f) {
+		return true;
+	}
+	return longest <= 16.0f && blob.size.x * blob.size.y <= 200.0f &&
+	       longest <= 3.0f * (shortest > 1.0f ? shortest : 1.0f);
+}
 
 /*
  *
@@ -357,14 +375,14 @@ public: // Fields
 
 	t_constellation_device_id_t id;
 
-	//! The owner tracker, so we can retrieve it from the IMU sink callback
-	ConstellationTracker *tracker;
+	//! The owner tracker, so we can retrieve it from the IMU sink callback (set by the tracker when added).
+	ConstellationTracker *tracker{nullptr};
 
 	// @todo remove when clang-format is updated in CI
 	// clang-format off
 	t_constellation_search_model *search_model{nullptr};
 
-	// @todo These need to be pulled from the device and put into the sample. 
+	// @todo These need to be pulled from the device and put into the sample.
 	//       Right now we just hardcode them since we don't have any real sensor fusion.
 	xrt_vec3 prior_pos_error{MIN_POS_ERROR, MIN_POS_ERROR, MIN_POS_ERROR};
 	xrt_vec3 prior_rot_error{MIN_ROT_ERROR, MIN_ROT_ERROR, MIN_ROT_ERROR};
@@ -405,6 +423,88 @@ public: // Methods
 	pushImuSample(const xrt_imu_sample &sample);
 };
 
+/*
+ *
+ * Joint multi-camera path (CONSTELLATION_TRACKER_JOINT=1, t_constellation_tracker_joint.cpp)
+ *
+ */
+
+//! Per-device state of the joint path, owned by its worker thread.
+struct JointDeviceState
+{
+	bool tracking{false};
+	//! Last joint solve, in the tracker's OpenCV-convention world.
+	xrt_pose Tcv_world_device{};
+	int64_t last_solved_ns{0};
+	uint32_t consecutive_failures{0};
+	//! Consecutive solves since the last bootstrap; poses are only pushed once this confirms the track.
+	uint32_t confirmations{0};
+	/*!
+	 * Rotation from the device's predicted-orientation world into this world, refreshed from every solve
+	 * (align = solved * predicted^-1). The predicted orientation is the device's IMU orientation, which need not be
+	 * in the optical world (the Sense driver's is not), but it rotates consistently between exposures.
+	 */
+	bool have_align{false};
+	xrt_quat align{0.0f, 0.0f, 0.0f, 1.0f};
+};
+
+//! The camera samples of one synchronised exposure, indexed by camera.
+struct JointExposure
+{
+	int64_t timestamp_ns{0};
+	std::vector<std::optional<CameraSample>> samples;
+	uint32_t received{0};
+};
+
+/*!
+ * Replaces per-camera fast/slow processing with one solve per exposure. Camera threads deposit samples here; once
+ * every camera has reported (or the next exposure starts) the exposure goes to a single worker, which tracks each
+ * device with @ref joint_solve_refine from its predicted pose and re-acquires lost devices with
+ * @ref stereo_bootstrap. The worker keeps only the newest exposure: a slow solve skips exposures instead of queueing
+ * them.
+ */
+struct JointProcessor
+{
+	ConstellationTracker *tracker;
+	size_t camera_count;
+
+	//! Its lock also guards @ref building, @ref ready and the assembly counters.
+	os_thread_helper thread{};
+	std::optional<JointExposure> building{std::nullopt};
+	std::optional<JointExposure> ready{std::nullopt};
+	uint64_t exposures_assembled{0};
+	uint64_t exposures_skipped{0};
+	uint64_t late_samples{0};
+
+	// Worker-only.
+	std::map<t_constellation_device_id_t, JointDeviceState> devices;
+	uint64_t processed{0};
+	uint64_t device_tracked{0};
+	uint64_t device_bootstrapped{0};
+	uint64_t device_failed{0};
+	uint64_t unconfirmed_dropped{0};
+	double solve_us_total{0.0};
+	double solve_us_max{0.0};
+	int64_t last_status_ns{0};
+	//! Last JOINT_SLOW warning (steady clock), to rate-limit them.
+	int64_t last_slow_log_ns{0};
+
+	JointProcessor(ConstellationTracker *tracker, size_t camera_count);
+	~JointProcessor();
+
+	//! Called from camera threads with each camera's sample (including frames with no blobs).
+	void
+	push(CameraSample &&sample);
+
+	void
+	process(JointExposure &exposure);
+
+private:
+	//! Moves @ref building to @ref ready and wakes the worker. Called with the thread lock held.
+	void
+	finishBuildingLocked();
+};
+
 // Separate base struct with our interface implementations so that `ConstellationTrackerBase` remains a standard layout
 // type and we can safely use `container_of` on it.
 struct ConstellationTrackerBase
@@ -441,6 +541,9 @@ public: // Fields
 	t_constellation_device_id_t next_device_id{0};
 
 	std::unique_ptr<DataRecorder> data_recorder{};
+
+	//! Joint multi-camera path, when CONSTELLATION_TRACKER_JOINT=1.
+	std::unique_ptr<JointProcessor> joint{};
 
 #ifdef XRT_FEATURE_RERUN
 	std::unique_ptr<struct RerunContext> rerun_stream{};
