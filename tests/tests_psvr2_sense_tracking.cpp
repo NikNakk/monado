@@ -188,3 +188,117 @@ TEST_CASE("Load a supplied PS VR2 calibration without hardware", "[.sense-calibr
 	REQUIRE(params.mosaics[0].num_cameras == 4);
 	REQUIRE(have);
 }
+
+#ifdef XRT_OS_OSX
+#include "pssense/pssense_interface.h"
+#include "pssense/pssense_protocol.h"
+#include "xrt/xrt_prober.h"
+#include <atomic>
+#include <cstring>
+
+namespace {
+struct FaultHid : os_hid_device
+{
+	std::atomic<int> writes{0};
+	std::atomic<int> reads{0};
+	std::atomic<bool> disconnected{false};
+	int feature_part = 0;
+	FaultHid() : os_hid_device{}
+	{
+		read = [](os_hid_device *base, uint8_t *out, size_t, int) {
+			auto &self = *static_cast<FaultHid *>(base);
+			if (self.disconnected)
+				return -1;
+			const int n = ++self.reads;
+			pssense_usb_input_report report{};
+			report.report_id = INPUT_REPORT_ID_USB;
+			report.common.thumbstick_x = report.common.thumbstick_y = 128;
+			report.common.trigger_value = self.writes >= 1 ? 255 : 0;
+			report.common.imu_ticks = __cpu_to_le32(n * 3000);
+			report.common.device_timestamp_ticks = __cpu_to_le32(n * 3000);
+			std::memcpy(out, &report, sizeof(report));
+			return (int)sizeof(report);
+		};
+		write = [](os_hid_device *base, const uint8_t *, size_t size) {
+			auto &self = *static_cast<FaultHid *>(base);
+			return ++self.writes <= 3 ? -1 : (int)size;
+		};
+		get_feature = [](os_hid_device *base, uint8_t id, uint8_t *out, size_t) {
+			auto &self = *static_cast<FaultHid *>(base);
+			pssense_calibration_data calibration{};
+			calibration.accel_plus_x = calibration.accel_plus_y = calibration.accel_plus_z = 1000;
+			calibration.accel_minus_x = calibration.accel_minus_y = calibration.accel_minus_z = -1000;
+			calibration.gyro_plus_x = calibration.gyro_plus_y = calibration.gyro_plus_z = 1000;
+			calibration.gyro_minus_x = calibration.gyro_minus_y = calibration.gyro_minus_z = -1000;
+			pssense_feature_report report{};
+			report.report_id = id;
+			const int part = self.feature_part++ % 2;
+			report.part_id = part == 0 ? CALIBRATION_DATA_PART_ID_1 : CALIBRATION_DATA_PART_ID_2;
+			std::memcpy(report.data, (const uint8_t *)&calibration + part * sizeof(report.data), sizeof(report.data));
+			std::memcpy(out, &report, sizeof(report));
+			return (int)sizeof(report);
+		};
+		set_feature = [](os_hid_device *, const uint8_t *, size_t size) { return (int)size; };
+		destroy = [](os_hid_device *) {};
+	}
+};
+struct FaultProber : xrt_prober
+{
+	FaultHid hid;
+	FaultProber() : xrt_prober{}
+	{
+		open_hid_interface = [](xrt_prober *base, xrt_prober_device *, int, os_hid_device **out) {
+			*out = &static_cast<FaultProber *>(base)->hid;
+			return 0;
+		};
+		get_string_descriptor = [](xrt_prober *, xrt_prober_device *, xrt_prober_string, unsigned char *out, size_t) {
+			std::memcpy(out, "Mock Sense", 11);
+			return 11;
+		};
+	}
+};
+}
+
+TEST_CASE("macOS Sense keeps input alive across output failures and retries")
+{
+	FaultProber prober;
+	xrt_prober_device device{};
+	device.product_id = 0x0e45;
+	device.bus = XRT_BUS_TYPE_USB;
+	xrt_frame_context frames{};
+	t_timing_event_sink *sink = nullptr;
+	xrt_device *sense = pssense_create(&prober, &device, &frames, &sink);
+	REQUIRE(sense != nullptr);
+	// Confirm changed input reaches the app while output is still failing.
+	bool input_during_failure = false;
+	for (int n = 0; n < 100 && !input_during_failure; ++n) {
+		sense->update_inputs(sense);
+		for (uint32_t i = 0; i < sense->input_count; ++i)
+			if (sense->inputs[i].name == XRT_INPUT_PSSENSE_TRIGGER_VALUE)
+				input_during_failure = sense->inputs[i].value.vec1.x > 0.9f;
+		if (!input_during_failure)
+			std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	}
+	CHECK(input_during_failure);
+	CHECK(prober.hid.writes < 4);
+	// The real driver loop sees three failed writes, then a successful retry.
+	for (int i = 0; i < 1000 && prober.hid.writes < 4; ++i)
+		std::this_thread::sleep_for(std::chrono::milliseconds(1));
+	CHECK(prober.hid.writes >= 4);
+	CHECK(prober.hid.reads > 10);
+	sense->update_inputs(sense);
+	bool pressed = false;
+	for (uint32_t i = 0; i < sense->input_count; ++i)
+		if (sense->inputs[i].name == XRT_INPUT_PSSENSE_TRIGGER_VALUE)
+			pressed = sense->inputs[i].value.vec1.x > 0.9f;
+	CHECK(pressed);
+	// An actual input disconnection must still terminate polling.
+	prober.hid.disconnected = true;
+	std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	const int writes = prober.hid.writes;
+	std::this_thread::sleep_for(std::chrono::milliseconds(20));
+	CHECK(prober.hid.writes == writes);
+	sense->destroy(sense);
+	xrt_frame_context_destroy_nodes(&frames);
+}
+#endif

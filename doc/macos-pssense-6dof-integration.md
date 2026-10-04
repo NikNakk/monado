@@ -402,3 +402,36 @@ The optimised client rebuild succeeds without compiler warnings. The controller
 visual checks pass all 29 assertions in four cases, including visible input
 panels with missing controller poses, head-relative placement, active input and
 inactive-action colours. Headset readability remains to be confirmed.
+
+### Left input loss and HID output failure (2026-10-04)
+
+The user confirmed that left buttons also fail to respond in the visual panel,
+while right input works. This broadens the investigation beyond optical
+acquisition. The original service log contains a single
+`Failed to send output report: -1` before the visualization clients connected
+(snapshot line 35852). That message did not identify the hand. The driver's
+loop exits on any failed output write, stopping input reads, IMU propagation
+and future LED writes together; no automatic restart exists for that thread.
+Left gyro-bias updates cease before this error, while right updates continue.
+The evidence makes an exited left I/O thread a likely cause, but hand attribution
+and the native IOKit failure reason are not yet proven.
+
+On macOS, failed output writes now leave input reads running and retry fresh
+settings after 100 ms. Warnings identify the hand and are rate-limited; a
+successful write logs recovery. Genuine input errors still terminate the loop
+and now identify the hand explicitly. Non-macOS write-failure behavior is
+preserved. The IOKit backend also logs the native failing IOReturn, rate-limited,
+instead of reducing the only diagnostic evidence to `-1`.
+
+The hardware log before this fix is saved in
+`build-macos-sense-rel/diagnostics/20261004-left-no-input/`. The service must be
+restarted by the user to replace the already exited thread and load the rebuilt
+binary. No hardware restart was performed during investigation. This correction
+does not establish whether the underlying write failure was transient or a
+controller disconnect; the next run's hand-labelled errors and input behavior
+will distinguish them.
+
+The optimised service rebuild and Sense tracking tests pass. A hardware-free
+mock exercises the actual controller thread: input reaches `update_inputs`
+while three output writes fail, a later write recovers, and a subsequent input
+disconnect stops further output. Hardware confirmation remains pending.
