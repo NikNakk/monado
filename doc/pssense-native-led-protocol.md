@@ -355,8 +355,10 @@ Set `PSSENSE_NATIVE_LED_PHASES=0` to restore the historical scheduling for compa
 
 ## Remaining reverse-engineering
 
-- Exact meaning of Sony command type 6. It is strongly periodic (~1 s) in PRESCAN and continues in other phases, but
-  does not necessarily change the on-wire LED generation; the next Toolkit capture logs its two payload bytes.
+- Exact opcode name for Sony command type 6. Timing strongly suggests a PRESCAN absolute-epoch maintenance operation:
+  while in PRESCAN it occurs about once per second and is followed by `seq += 1` plus a median base-time advance of
+  1,000,991 us; in BROAD/BG, the same periodic command usually leaves sequence and relative base offset unchanged.
+  The next Toolkit capture logs its two payload bytes to identify it more precisely.
 - Exact policy that causes BROAD -> BG, BG -> PRESCAN, and subsequent PRESCAN -> BROAD.
 - Selective LED-mask meaning and bit-to-LED mapping. The prepared Toolkit capture saves event-triggered raw BC4 frames
   plus Sony's internal 4-camera x 17-LED blob associations to answer this.
