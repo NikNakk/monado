@@ -1533,6 +1533,10 @@ pssense_run_thread(void *ptr)
 
 	timepoint_ns next_output_ns = os_monotonic_get_ns();
 
+#ifdef XRT_OS_OSX
+	uint32_t output_failures = 0;
+	int64_t last_output_error_log_ns = 0;
+#endif
 	int result = 0;
 	while (os_thread_helper_is_running_locked(&pssense->controller_thread) && result >= 0) {
 		os_thread_helper_unlock(&pssense->controller_thread);
@@ -1550,14 +1554,39 @@ pssense_run_thread(void *ptr)
 
 				int written = os_hid_write(pssense->hid, output_report, output_size);
 				if (written != (int)output_size) {
-					PSSENSE_WARN(pssense, "Failed to send output report: %d", written);
+#ifdef XRT_OS_OSX
+					// IOKit output failures need not mean input has disconnected. Keep draining HID
+					// input, retry fresh LED/haptic settings with backoff, and let read errors end
+					// the loop on disconnect. A single failed write used to freeze the whole hand.
+					output_failures++;
+					if (output_failures == 1 || now - last_output_error_log_ns >= U_TIME_1S_IN_NS) {
+						PSSENSE_WARN(pssense, "HID_OUTPUT side=%c event=failed result=%d consecutive=%u; "
+						             "keeping input alive, retrying in 100 ms",
+						             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', written, output_failures);
+						last_output_error_log_ns = now;
+					}
+#else
+					PSSENSE_WARN(pssense, "Failed to send output report side=%c: %d",
+					             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', written);
 					result = written < 0 ? written : -EIO;
+#endif
 				}
+#ifdef XRT_OS_OSX
+				else if (output_failures > 0) {
+					PSSENSE_INFO(pssense, "HID_OUTPUT side=%c event=recovered failures=%u",
+					             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', output_failures);
+					output_failures = 0;
+				}
+#endif
 
 				timepoint_ns write_done_ns = os_monotonic_get_ns();
 				do {
 					next_output_ns += pcm_haptics_period_ns;
 				} while (next_output_ns <= write_done_ns);
+#ifdef XRT_OS_OSX
+				if (output_failures > 0)
+					next_output_ns = write_done_ns + 100 * U_TIME_1MS_IN_NS;
+#endif
 			}
 		}
 
@@ -1580,6 +1609,10 @@ pssense_run_thread(void *ptr)
 		os_thread_helper_lock(&pssense->controller_thread);
 	}
 
+	if (result < 0) {
+		PSSENSE_ERROR(pssense, "HID_INPUT side=%c event=thread_stopped result=%d",
+		              pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', result);
+	}
 	os_thread_helper_unlock(&pssense->controller_thread);
 
 	return NULL;

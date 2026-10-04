@@ -12,6 +12,7 @@
 #ifdef XRT_OS_OSX
 
 #include "util/u_misc.h"
+#include "util/u_logging.h"
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/hid/IOHIDKeys.h>
@@ -53,6 +54,7 @@ struct hid_iokit
 	bool thread_started;
 	bool thread_ready;
 	bool running;
+	int64_t last_output_error_log_ns;
 	bool disconnected;
 	CFRunLoopRef run_loop;
 
@@ -345,6 +347,18 @@ iokit_set_report(struct hid_iokit *hid, IOHIDReportType type, const uint8_t *dat
 	}
 
 	IOReturn ret = IOHIDDeviceSetReport(hid->device, type, report_id, report, report_length);
+	if (ret != kIOReturnSuccess) {
+		int64_t now = os_monotonic_get_ns();
+		pthread_mutex_lock(&hid->mutex);
+		bool log_error = hid->last_output_error_log_ns == 0 ||
+		                 now - hid->last_output_error_log_ns >= 1000000000;
+		if (log_error)
+			hid->last_output_error_log_ns = now;
+		pthread_mutex_unlock(&hid->mutex);
+		if (log_error)
+			U_LOG_W("IOHIDDeviceSetReport device=%p type=%d report=0x%02x failed: IOReturn=0x%08x",
+			        (void *)hid->device, (int)type, report_id, (unsigned int)ret);
+	}
 	return ret == kIOReturnSuccess ? (int)length : -1;
 }
 
