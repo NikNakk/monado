@@ -482,10 +482,28 @@ verify period 32 on the wire with `PSSENSE_TIMING_DIAG=1`, and enable
 against `PSSENSE_LED_BOOTSTRAP_TRACK=0` to remove phase-adjustment probes while
 retaining initial acquisition and loss-triggered rescans. Keep rings in view;
 record whether the onset follows a full scan, probe or write failure. This is
-an A/B investigation, not a new default. If content transitions are implicated,
-compare holding a changed setting for at least four optical frames, as the
-Toolkit does, before pursuing Sony's PRESCAN/BROAD/BG/STABLE state sequence.
+an A/B investigation, not a new default. Scan steps already have eight settling
+and eight measurement frames, so simply increasing dwell is not the first
+untried fix. If content transitions are implicated, compare command application
+and transition semantics with Sony's PRESCAN/BROAD/BG/STABLE state sequence.
 Those phases have different cycle-position semantics; merely switching the
 phase enum is not a correct implementation. Any Toolkit-derived work must
 first check licensing. See the original
 [fault ledger](pssense-optical-tracking.md#the-always-lit-fault-what-the-logs-and-psvr2toolkit-say-26-sep).
+
+The latest `4a03bc0fb` hardware log confirms `pulse_us=1600.0` for full scans,
+with no HID output failures in that service lifetime. Despite the user's visual
+fault report, no `event=stuck_lit` was logged; detection is not yet demonstrated
+for this occurrence. This remains an unresolved LED-control fault, not proof of
+an output-transport failure. Historical recovery attempts included LED_ALL_OFF,
+INIT/ALL_ON/PRESCAN/DEBUG sequences, status-LED toggles and calibration rereads;
+none cleared the stuck ring, while vibration still worked.
+
+Local-default preparation completed: the ARM `build-wine` service, ARM OpenXR
+runtime and x86-64 native Wine runtime build successfully without compiler
+warnings and all identify `v25.1.0-2090-g1e9421909`. Effective solver, driver and
+compositor optimization was checked by the preparation tool. The persistent
+normal-endpoint plist and native environment snippet are in
+`build-wine/local-sense-default/`. Registration, client selection and the new
+Wine/native hardware trial remain user steps; the existing live service was
+not restarted or unloaded during preparation.
