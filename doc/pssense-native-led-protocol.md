@@ -463,6 +463,24 @@ Acceptance for the first pass:
 Set `PSSENSE_NATIVE_LED_PHASES=0` to restore the historical scheduling for comparison. Keep
 `PSSENSE_NATIVE_LED_ADVANCE=0` for the minimal lockout-safety test.
 
+## Upstream provenance blocker: current controller clock estimator
+
+The experimental `pssense_driver.c` clock-offset estimator also has legacy research provenance: comments in the
+original branch explicitly said that it followed PSVR2Toolkit's Sense clock-tracking implementation.
+
+That is acceptable for local experimentation, but it is not an upstream-clean implementation under the clean-room
+rule. Before upstreaming, replace it with an independently specified estimator whose inputs are only observable facts:
+
+- controller/device timestamp carried in incoming HID reports;
+- host/QPC receive timestamp;
+- wraparound modulus and timestamp units established from the wire;
+- an explicit transport-delay/noise model.
+
+A suitable independent design is a conventional lower-envelope/minimum-delay clock-offset estimator plus a slow drift
+model and bounded smoothing. Its parameters should be justified by recorded timestamp-pair traces rather than copied
+from Toolkit constants. The current implementation is intentionally left unchanged on this experimental branch so the
+LED scheduling experiments do not simultaneously change the already-working tracking clock.
+
 ## Upstream provenance blocker: current LED geometry
 
 The current experimental Monado file `src/xrt/drivers/pssense/pssense_led_model.h` explicitly states that its 17 LED
