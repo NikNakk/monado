@@ -2163,6 +2163,8 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 			pssense->tracking.stress_rescans++;
 			PSSENSE_INFO(pssense, "LED_BOOTSTRAP side=%c event=stress_rescan count=%u",
 			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', pssense->tracking.stress_rescans);
+			// This opt-in experiment must exercise the wide/narrow transition, not reuse the last hint.
+			b->next_hint_ns = -1;
 			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
 		}
 	}
