@@ -10,8 +10,12 @@ cd "${0:A:h:h:h}"
   x64=.build/in-process-native-hardware-current/monado-x64
 
   # Refresh revision tags while preserving existing build settings.
-  cmake -S . -B build-wine -U GIT_DESC
-  cmake -S . -B "$x64" -U GIT_DESC
+  cmake -S . -B build-wine -U GIT_DESC \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DXRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON
+  cmake -S . -B "$x64" -U GIT_DESC \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DXRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON
 
   # ARM64 service and native client.
   cmake --build build-wine \
