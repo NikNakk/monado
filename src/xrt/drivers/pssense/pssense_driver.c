@@ -1959,6 +1959,9 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		// always be initialized.
 		timepoint_ns next_blink_time = 0;
 		timepoint_ns now_ns = os_monotonic_get_ns();
+		uint8_t led_phase =
+		    pssense_select_native_led_phase_locked(pssense, use_led_bootstrap, leds_lit, now_ns, &period_id);
+		pssense->tracking.period_id = period_id;
 		timepoint_ns schedule_host_ns = pssense->tracking.last_exposure_local_timestamp_ns;
 		uint64_t periods_forward = 0;
 		if (future_led_schedule && pssense->tracking.average_exposure_interval_ns > 0) {
@@ -1986,9 +1989,6 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 
 		// cycle_length is always expressed in controller 3 MHz ticks.
 		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
-
-		uint8_t led_phase =
-		    pssense_select_native_led_phase_locked(pssense, use_led_bootstrap, leds_lit, now_ns, &period_id);
 
 		/*
 		 * Sony's wire semantics differ by phase:
