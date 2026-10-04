@@ -46,7 +46,7 @@ def main():
     endpoint = "org.freedesktop.monado.metal-ipc.sense-integration"
     env = {k: v for k, v in os.environ.items()
            if k.startswith(("PSVR2_", "PSSENSE_", "CONSTELLATION_", "XRT_MACOS_", "XRT_COMPOSITOR_", "VK_"))}
-    env.update(PSVR2_SENSE_6DOF="1", PSVR2_SENSE_6DOF_CALIBRATION=str(calibration),
+    env.update(XRT_NO_STDIN="1", PSVR2_SENSE_6DOF="1", PSVR2_SENSE_6DOF_CALIBRATION=str(calibration),
                XDG_RUNTIME_DIR=str(runtime), XRT_MACOS_METAL_IPC_SERVICE_NAME=endpoint)
     plist = build / "pssense-6dof.plist"
     plist.write_bytes(plistlib.dumps(dict(
