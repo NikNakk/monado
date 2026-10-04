@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 """Register PSVR2 visible and controller-tracking camera readout modes.
 
 The preferred input is a stationary --sequence 3,12,3 --repeat N capture from

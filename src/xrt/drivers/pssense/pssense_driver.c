@@ -1290,8 +1290,9 @@ pssense_input_diag(struct pssense_device *pssense,
 		char values[PSSENSE_INPUT_DIAG_BYTES * 2 + 1];
 		for (int i = 0; i < PSSENSE_INPUT_DIAG_BYTES; ++i)
 			snprintf(values + i * 2, 3, "%02x", now[i]);
-		PSSENSE_INFO(pssense, "INPUT_DIAG side=%c event=summary host_ns=%" PRIi64
-		             " bytes=%s changes_by_byte=%s", side, recv_time_ns, values, used ? buf : "none");
+		PSSENSE_INFO(pssense,
+		             "INPUT_DIAG side=%c event=summary host_ns=%" PRIi64 " bytes=%s changes_by_byte=%s", side,
+		             recv_time_ns, values, used ? buf : "none");
 		pssense->tracking.input_diag_summary_ns = recv_time_ns;
 	}
 }
@@ -1521,16 +1522,12 @@ pssense_set_pc_polling_rate(struct pssense_device *pssense)
 
 /* Opt-in evidence at the actual HID boundary; planned schedules alone do not prove a report was sent. */
 static void
-pssense_log_written_report(struct pssense_device *pssense,
-                           const uint8_t *report,
-                           size_t size,
-                           int64_t start_ns,
-                           int64_t end_ns,
-                           int written)
+pssense_log_written_report(
+    struct pssense_device *pssense, const uint8_t *report, size_t size, int64_t start_ns, int64_t end_ns, int written)
 {
 	struct pssense_output_settings settings;
 	const size_t offset = pssense->usb ? offsetof(struct pssense_usb_output_report, settings)
-	                                  : offsetof(struct pssense_ps5_output_report, settings);
+	                                   : offsetof(struct pssense_ps5_output_report, settings);
 	memcpy(&settings, report + offset, sizeof(settings));
 	char bytes[sizeof(struct pssense_ps5_output_report) * 2 + 1];
 	for (size_t i = 0; i < size; ++i)
@@ -1545,10 +1542,9 @@ pssense_log_written_report(struct pssense_device *pssense,
 	             " result=%d expected=%zu input_ns=%" PRIi64 " clock_valid=%d device_est_ns=%" PRIi64
 	             " phase=%u led_seq=%u period_id=%u cycle_position=%u cycle_length=%u "
 	             "flag1=%02x flag2=%02x status_led=%u bytes=%s",
-	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', start_ns, end_ns, written, size,
-	             input_ns, have_clock, device_est_ns, settings.led_settings.phase,
-	             settings.led_settings.sequence_number, settings.led_settings.period_id,
-	             __le32_to_cpu(settings.led_settings.cycle_position),
+	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', start_ns, end_ns, written, size, input_ns, have_clock,
+	             device_est_ns, settings.led_settings.phase, settings.led_settings.sequence_number,
+	             settings.led_settings.period_id, __le32_to_cpu(settings.led_settings.cycle_position),
 	             __le32_to_cpu(settings.led_settings.cycle_length), settings.flag1, settings.flag2,
 	             settings.status_led_enable, bytes);
 }
@@ -1596,7 +1592,7 @@ pssense_run_thread(void *ptr)
 				int64_t write_end_ns = trace_write ? os_monotonic_get_ns() : 0;
 				if (trace_write)
 					pssense_log_written_report(pssense, output_report, output_size, write_start_ns,
-					                            write_end_ns, written);
+					                           write_end_ns, written);
 				if (written != (int)output_size) {
 #ifdef XRT_OS_OSX
 					// IOKit output failures need not mean input has disconnected. Keep draining HID
@@ -1604,9 +1600,12 @@ pssense_run_thread(void *ptr)
 					// the loop on disconnect. A single failed write used to freeze the whole hand.
 					output_failures++;
 					if (output_failures == 1 || now - last_output_error_log_ns >= U_TIME_1S_IN_NS) {
-						PSSENSE_WARN(pssense, "HID_OUTPUT side=%c event=failed result=%d consecutive=%u; "
-						             "keeping input alive, retrying in 100 ms",
-						             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', written, output_failures);
+						PSSENSE_WARN(
+						    pssense,
+						    "HID_OUTPUT side=%c event=failed result=%d consecutive=%u; "
+						    "keeping input alive, retrying in 100 ms",
+						    pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', written,
+						    output_failures);
 						last_output_error_log_ns = now;
 					}
 #else

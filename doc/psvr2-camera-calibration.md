@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # PS VR2 mode-4 camera calibration
 
 This branch adds the first stages of a repeatable four-camera calibration workflow for the PS VR2 controller-tracking cameras.

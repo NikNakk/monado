@@ -1004,11 +1004,18 @@ fake_origin_get(t_constellation_tracker_tracking_source *source, int64_t when_ns
 	                                                 XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT);
 }
 
+struct FakeDevice;
+
+struct FakeTrackingSource : t_constellation_tracker_tracking_source
+{
+	FakeDevice *device{nullptr};
+};
+
 //! Stands in for the device driver: accepts every pushed sample and predicts the last one while it is recent.
 struct FakeDevice
 {
 	t_constellation_tracker_device base;
-	t_constellation_tracker_tracking_source source;
+	FakeTrackingSource source;
 	std::vector<t_constellation_tracker_led> leds; // XR convention, as a driver provides them
 	t_constellation_device_id_t id{XRT_CONSTELLATION_INVALID_DEVICE_ID};
 
@@ -1031,7 +1038,7 @@ struct FakeDevice
 FakeDevice *
 fake_device_of_source(t_constellation_tracker_tracking_source *source)
 {
-	return (FakeDevice *)((char *)source - offsetof(FakeDevice, source));
+	return static_cast<FakeTrackingSource *>(source)->device;
 }
 
 bool
@@ -1134,7 +1141,8 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
 	          [](const auto &a, const auto &b) { return a.first < b.first; });
 
 	t_constellation_tracker_params params{};
-	params.flags = T_CONSTELLATION_TRACKER_FLAGS_DETERMINISTIC;
+	params.flags = (t_constellation_tracker_flags)(T_CONSTELLATION_TRACKER_FLAGS_DETERMINISTIC |
+	                                               T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT);
 	params.num_mosaics = 1;
 	params.mosaics[0].tracking_origin = &origin.base;
 	params.mosaics[0].num_cameras = camera_count;
@@ -1162,6 +1170,7 @@ replay_tracker(const DatasetReader &dataset, const char *csv_path, bool use_filt
 		fake->base.push_camera_blob_count = nullptr;
 		fake->base.push_camera_led_blob_count = nullptr;
 		fake->source.get_tracked_pose = fake_device_get;
+		fake->source.device = fake.get();
 		fake->csv = csv;
 		for (const DatasetDeviceTracking &t : dataset.device_tracking) {
 			if (t.device_id == device.id) {

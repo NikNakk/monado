@@ -61,7 +61,11 @@ terminated its I/O thread. A macOS correction now preserves input and retries
 output. The user confirms the corrected setup works well, and requests local
 native/Wine defaults; matching optimised builds and a persistent local profile
 are prepared, with user activation pending. The IR-always-on/status-LED-off fault still recurs with the
-1.6 ms scan pulse. Full hardware validation and Linux CI remain pending. See the
+1.6 ms scan pulse. Controlled trial A also reports a right-controller lockout
+without any rescan or phase probe after acquisition; a large HID transport
+stall is under investigation, with onset correlation pending. Linux CI warning failures are corrected locally,
+and the shared-tracker audit now explicitly isolates Rift from Sense joint
+settings; corrected Linux CI and full hardware validation remain pending. See the
 [integration and launch procedure](macos-pssense-6dof-integration.md).
 Display-pacing benefits from optimisation remain to be measured independently.
 

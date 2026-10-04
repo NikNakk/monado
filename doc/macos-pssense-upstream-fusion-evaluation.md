@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # PS Sense: evaluating Monado's upstream constellation fusion (MR 2940, MR 3015)
 
 Branch `codex/pssense-upstream-fusion-evaluation`, based on local `macos-pssense-6dof` at `c1ca162de`. That tip is

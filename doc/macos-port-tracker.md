@@ -339,3 +339,13 @@ The user confirms the local Metal GPU reuse guard removes the black corruption.
 Both it and the fresh-target fix are visually validated in the tested UE path;
 occasional stalls remain unresolved. See the
 [confirmation](macos-psvr2-timing-diagnostics.md#user-confirms-image-reuse-correction).
+
+## Sense follow-up: Linux CI and Rift isolation (2026-10-04)
+
+The Linux job compiled but failed its warning gate on new replay/test code;
+those warnings are fixed without relaxing the gate. Formatting and license
+checks pass locally, as do all 44 macOS CTest suites. The Rift driver/builder and
+original optimizer remain unchanged by the Sense integration, and an explicit
+caller flag now prevents inherited Sense joint settings from switching Rift to
+the experimental worker. See the [audit and validation](macos-pssense-6dof-integration.md#linux-ci-warning-fixes-and-rift-isolation-audit-2026-10-04).
+Linux rerun and Rift hardware validation remain pending.

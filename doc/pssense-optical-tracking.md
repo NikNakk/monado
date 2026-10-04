@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # PS Sense optical (6DoF) tracking on macOS
 
 Working branch: `macos-pssense-6dof`, based on `macos-psvr2-camera-calibration`.
@@ -1214,3 +1220,14 @@ It is tested by `tests/test_psvr2_sense_session_score.py`.
 packet 5 extension records) through M1/M2, the tracker, the fusion paths and other front ends. `--residuals-csv` writes
 M1's residual per LED and camera, and `--led-offsets` replays with a corrected LED model. `constellation_synth`
 writes synthetic sessions with ground truth for checking those pipelines.
+
+## Integration follow-up: steady-lock fault (2026-10-04)
+
+The optimized integration build `6c76552ed`, trial A with phase probes and
+forced rescans disabled, produced a user-reported right-controller lockout.
+Both controllers acquired once and neither rescanned; optical accepts continued
+through shutdown. This supersedes the earlier scan-only pattern as a general
+constraint on possible triggers. An approximately 0.8-second simultaneous HID
+write/input-service stall at about 73 seconds is a candidate, with onset timing
+still unconfirmed. Successful host writes do not establish firmware acceptance.
+See [the A evidence and next investigation](macos-pssense-6dof-integration.md#trial-a-right-lockout-during-steady-timing-lock-2026-10-04).

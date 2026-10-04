@@ -101,6 +101,9 @@ enum t_constellation_tracker_flags
 	 * Turn this on if you require consistent results, at the cost of performance.
 	 */
 	T_CONSTELLATION_TRACKER_FLAGS_DETERMINISTIC = 1 << 0,
+	//! Allow the experimental joint solver when requested by CONSTELLATION_TRACKER_JOINT.
+	//! Legacy callers (including Rift) must not inherit Sense solver settings from the process environment.
+	T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT = 1 << 1,
 };
 
 /*!

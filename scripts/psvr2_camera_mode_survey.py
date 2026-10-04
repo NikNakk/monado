@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 """Survey PS VR2 camera modes over libusb without starting Monado.
 
 The tool claims only interface 6 (camera), cycles selected modes, records packet

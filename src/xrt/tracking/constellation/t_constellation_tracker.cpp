@@ -850,11 +850,14 @@ Camera::pushPose(CameraSample &camera_sample,
 		    .camera_index = this->index,
 		    .average_brightness = average_brightness, // @todo compute this
 		    .metrics = metrics,
+		    .joint_camera_count = 0,
 		};
 		if (!t_constellation_tracker_device_push_sample(device->device, &sample)) {
 			return;
 		}
-		Txr_world_device = sample.pose;
+		if (device->device->push_optical_sample != nullptr) {
+			Txr_world_device = sample.pose;
+		}
 	}
 
 	{
@@ -1039,7 +1042,8 @@ ConstellationTracker::ConstellationTracker(t_constellation_tracker_params *param
 
 	this->params = *params;
 
-	if (debug_get_bool_option_constellation_tracker_joint() && !this->mosaics.empty()) {
+	if ((params->flags & T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT) != 0 &&
+	    debug_get_bool_option_constellation_tracker_joint() && !this->mosaics.empty()) {
 		this->joint = std::make_unique<JointProcessor>(this, this->mosaics[0]->cameras.size());
 		CT_INFO(this, "Constellation tracker joint multi-camera path enabled (%zu cameras)",
 		        this->mosaics[0]->cameras.size());
@@ -1224,14 +1228,16 @@ constellation_tracker_camera_push_blobs(t_blob_sink *tbs, t_blob_observation *tb
 	// when no pose can be solved. This runs for empty frames too.
 	{
 		std::shared_lock lock(tracker->device_lock);
+		bool need_led_counts = false;
 		for (std::unique_ptr<Device> &device : tracker->devices) {
+			need_led_counts |= device->device->push_camera_led_blob_count != nullptr;
 			if (device->device->push_camera_blob_count != nullptr) {
 				device->device->push_camera_blob_count(device->device, camera->index, tbo->timestamp_ns,
 				                                       tbo->num_blobs);
 			}
 		}
 		// The joint path reports LED-shaped counts after solving, when other devices' blobs are known.
-		if (!tracker->joint) {
+		if (!tracker->joint && need_led_counts) {
 			uint32_t led_shaped = 0;
 			for (uint32_t b = 0; b < tbo->num_blobs; b++) {
 				led_shaped += t_constellation_blob_is_led_shaped(tbo->blobs[b]) ? 1 : 0;
