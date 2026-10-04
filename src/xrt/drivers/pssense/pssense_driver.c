@@ -446,8 +446,9 @@ struct pssense_device
 		bool native_led_phase_initialised;
 		bool native_led_acquired;
 		timepoint_ns native_led_acquired_ns;
-		//! Sony re-anchors an otherwise stable PRESCAN schedule at roughly 1 Hz.
-		timepoint_ns native_led_last_prescan_reanchor_ns;
+		//! Sony re-anchors stable PRESCAN on camera cadence: ~60 exposure sequence steps.
+		bool native_led_have_prescan_reanchor_sequence;
+		uint32_t native_led_last_prescan_reanchor_sequence_id;
 
 		int32_t timing_fudge_100us;
 
@@ -2074,8 +2075,10 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 				pssense->tracking.native_led_phase = led_phase;
 				pssense->tracking.native_led_phase_initialised = true;
 				pssense->tracking.led_sequence_num += 1;
-				pssense->tracking.native_led_last_prescan_reanchor_ns =
-				    led_phase == LED_SYNC_PHASE_PRESCAN ? now_ns : 0;
+				pssense->tracking.native_led_have_prescan_reanchor_sequence =
+				    led_phase == LED_SYNC_PHASE_PRESCAN;
+				pssense->tracking.native_led_last_prescan_reanchor_sequence_id =
+				    camera_exposure.sequence_id;
 				PSSENSE_INFO(pssense,
 				             "LED_NATIVE_PHASE side=%c old=%u new=%u source_period=%u output_period=%u "
 				             "offset_us=%.1f optical_age_ms=%.1f",
@@ -2088,10 +2091,10 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			}
 
 			/*
-			 * In the native trace PRESCAN's absolute anchor is refreshed at ~1 Hz, with a new schedule
-			 * generation. BROAD/BG use relative offsets and do not get this periodic relatch. If the
-			 * bootstrap/refinement already changed the sequence this frame, that change itself is the
-			 * re-anchor and resets the timer.
+			 * The native PCAP sharpens the earlier "~1 Hz" observation: successive PRESCAN anchors are
+			 * separated by almost exactly 60 or 61 camera periods. Drive the refresh from the exposure
+			 * sequence itself rather than a wall-clock timer. BROAD/BG use relative offsets and do not
+			 * receive this periodic relatch.
 			 */
 			bool sequence_changed_this_frame =
 			    pssense->tracking.led_sequence_num != native_sequence_at_frame_start;
@@ -2099,17 +2102,29 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			                      pssense->tracking.led_bootstrap.state == T_LED_PHASE_BOOTSTRAP_LOCKED &&
 			                      led_phase == LED_SYNC_PHASE_PRESCAN;
 			if (locked_prescan) {
-				if (sequence_changed_this_frame) {
-					pssense->tracking.native_led_last_prescan_reanchor_ns = now_ns;
-				} else if (pssense->tracking.native_led_last_prescan_reanchor_ns == 0 ||
-				           now_ns - pssense->tracking.native_led_last_prescan_reanchor_ns >= U_TIME_1S_IN_NS) {
-					pssense->tracking.led_sequence_num += 1;
-					pssense->tracking.native_led_last_prescan_reanchor_ns = now_ns;
-					PSSENSE_INFO(pssense,
-					             "LED_NATIVE_REANCHOR side=%c seq=%u cycle_position=%u period=%u",
-					             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
-					             pssense->tracking.led_sequence_num, cycle_position, period_id);
+				if (sequence_changed_this_frame ||
+				    !pssense->tracking.native_led_have_prescan_reanchor_sequence) {
+					pssense->tracking.native_led_have_prescan_reanchor_sequence = true;
+					pssense->tracking.native_led_last_prescan_reanchor_sequence_id =
+					    camera_exposure.sequence_id;
+				} else {
+					uint32_t exposure_delta =
+					    camera_exposure.sequence_id -
+					    pssense->tracking.native_led_last_prescan_reanchor_sequence_id;
+					if (exposure_delta >= 60) {
+						pssense->tracking.led_sequence_num += 1;
+						pssense->tracking.native_led_last_prescan_reanchor_sequence_id =
+						    camera_exposure.sequence_id;
+						PSSENSE_INFO(pssense,
+						             "LED_NATIVE_REANCHOR side=%c seq=%u exposure_delta=%u "
+						             "cycle_position=%u period=%u",
+						             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+						             pssense->tracking.led_sequence_num, exposure_delta,
+						             cycle_position, period_id);
+					}
 				}
+			} else {
+				pssense->tracking.native_led_have_prescan_reanchor_sequence = false;
 			}
 		}
 
@@ -2964,7 +2979,8 @@ pssense_create(struct xrt_prober *xp,
 	pssense->tracking.native_led_phase_initialised = false;
 	pssense->tracking.native_led_acquired = false;
 	pssense->tracking.native_led_acquired_ns = 0;
-	pssense->tracking.native_led_last_prescan_reanchor_ns = 0;
+	pssense->tracking.native_led_have_prescan_reanchor_sequence = false;
+	pssense->tracking.native_led_last_prescan_reanchor_sequence_id = 0;
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);
 	m_relation_history_create(&pssense->tracking.constellation_relation_history);
