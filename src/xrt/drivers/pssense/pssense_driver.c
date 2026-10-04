@@ -446,6 +446,8 @@ struct pssense_device
 		bool native_led_phase_initialised;
 		bool native_led_acquired;
 		timepoint_ns native_led_acquired_ns;
+		//! Sony re-anchors an otherwise stable PRESCAN schedule at roughly 1 Hz.
+		timepoint_ns native_led_last_prescan_reanchor_ns;
 
 		int32_t timing_fudge_100us;
 
@@ -1971,6 +1973,7 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 	// update the LED settings
 	if (pssense->tracking.received_frames > 10 && pssense->timing.has_clock_offset) {
 		bool leds_lit = true;
+		uint8_t native_sequence_at_frame_start = pssense->tracking.led_sequence_num;
 		if (use_led_bootstrap && pssense->tracking.average_exposure_interval_ns > 0) {
 			leds_lit = pssense_led_bootstrap_update_locked(pssense, camera_exposure.timestamp_ns);
 		}
@@ -2064,19 +2067,49 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		}
 
 		if (debug_get_bool_option_pssense_native_led_phases()) {
-			if (!pssense->tracking.native_led_phase_initialised || pssense->tracking.native_led_phase != led_phase) {
+			bool phase_changed =
+			    !pssense->tracking.native_led_phase_initialised || pssense->tracking.native_led_phase != led_phase;
+			if (phase_changed) {
 				uint8_t old_phase = pssense->tracking.native_led_phase;
 				pssense->tracking.native_led_phase = led_phase;
 				pssense->tracking.native_led_phase_initialised = true;
 				pssense->tracking.led_sequence_num += 1;
+				pssense->tracking.native_led_last_prescan_reanchor_ns =
+				    led_phase == LED_SYNC_PHASE_PRESCAN ? now_ns : 0;
 				PSSENSE_INFO(pssense,
 				             "LED_NATIVE_PHASE side=%c old=%u new=%u source_period=%u output_period=%u "
 				             "offset_us=%.1f optical_age_ms=%.1f",
 				             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', old_phase, led_phase, source_period_id,
 				             period_id, (double)relative_center_ns / 1000.0,
-				             pssense->tracking.last_optical_timestamp_ns > 0 && now_ns >= pssense->tracking.last_optical_timestamp_ns
+				             pssense->tracking.last_optical_timestamp_ns > 0 &&
+				                     now_ns >= pssense->tracking.last_optical_timestamp_ns
 				                 ? (double)(now_ns - pssense->tracking.last_optical_timestamp_ns) / 1000000.0
 				                 : -1.0);
+			}
+
+			/*
+			 * In the native trace PRESCAN's absolute anchor is refreshed at ~1 Hz, with a new schedule
+			 * generation. BROAD/BG use relative offsets and do not get this periodic relatch. If the
+			 * bootstrap/refinement already changed the sequence this frame, that change itself is the
+			 * re-anchor and resets the timer.
+			 */
+			bool sequence_changed_this_frame =
+			    pssense->tracking.led_sequence_num != native_sequence_at_frame_start;
+			bool locked_prescan = use_led_bootstrap &&
+			                      pssense->tracking.led_bootstrap.state == T_LED_PHASE_BOOTSTRAP_LOCKED &&
+			                      led_phase == LED_SYNC_PHASE_PRESCAN;
+			if (locked_prescan) {
+				if (sequence_changed_this_frame) {
+					pssense->tracking.native_led_last_prescan_reanchor_ns = now_ns;
+				} else if (pssense->tracking.native_led_last_prescan_reanchor_ns == 0 ||
+				           now_ns - pssense->tracking.native_led_last_prescan_reanchor_ns >= U_TIME_1S_IN_NS) {
+					pssense->tracking.led_sequence_num += 1;
+					pssense->tracking.native_led_last_prescan_reanchor_ns = now_ns;
+					PSSENSE_INFO(pssense,
+					             "LED_NATIVE_REANCHOR side=%c seq=%u cycle_position=%u period=%u",
+					             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R',
+					             pssense->tracking.led_sequence_num, cycle_position, period_id);
+				}
 			}
 		}
 
@@ -2931,6 +2964,7 @@ pssense_create(struct xrt_prober *xp,
 	pssense->tracking.native_led_phase_initialised = false;
 	pssense->tracking.native_led_acquired = false;
 	pssense->tracking.native_led_acquired_ns = 0;
+	pssense->tracking.native_led_last_prescan_reanchor_ns = 0;
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);
 	m_relation_history_create(&pssense->tracking.constellation_relation_history);
