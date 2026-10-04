@@ -58,8 +58,10 @@ for byte. Local tests pass. The first OpenXR controller trial reports the right
 working well; the left remains invisible after optical/LED-lock loss and failed
 reacquisition. Left buttons also fail; a failed HID output write could have
 terminated its I/O thread. A macOS correction now preserves input and retries
-output, pending a hardware restart and confirmation. Full hardware validation
-and Linux CI remain pending. See the
+output. The user confirms the corrected setup works well, and requests local
+native/Wine defaults; matching optimised builds and a persistent local profile
+are prepared, with user activation pending. The IR-always-on/status-LED-off fault still recurs with the
+1.6 ms scan pulse. Full hardware validation and Linux CI remain pending. See the
 [integration and launch procedure](macos-pssense-6dof-integration.md).
 Display-pacing benefits from optimisation remain to be measured independently.
 
