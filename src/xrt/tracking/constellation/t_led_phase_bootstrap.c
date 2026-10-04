@@ -252,6 +252,22 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 	}
 
 	float peak = b->steps[peak_index].score;
+	// Grow the lit run around the peak while steps stay above half the peak score, bridging up to narrow_gap_steps
+	// weak steps when a lit one follows them.
+	float threshold = 0.5f * peak;
+	uint32_t left = peak_index;
+	uint32_t right = peak_index;
+	for (uint32_t i = left; i > 0 && left - (i - 1) <= b->options.narrow_gap_steps + 1; i--) {
+		if (b->steps[i - 1].score >= threshold) {
+			left = i - 1;
+		}
+	}
+	for (uint32_t i = right + 1; i < n && i - right <= b->options.narrow_gap_steps + 1; i++) {
+		if (b->steps[i].score >= threshold) {
+			right = i;
+		}
+	}
+
 	const char *weak = NULL;
 	if (peak < b->options.min_peak_score) {
 		weak = "narrow_peak_below_minimum";
@@ -259,6 +275,16 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		LOG_W(b, "LED_BOOTSTRAP side=%c event=narrow_peak_weak peak=%.3f min=%.3f", b->options.label, peak,
 		      b->options.min_lock_peak_score);
 		weak = "narrow_peak_weak";
+	} else if (right - left + 1 < b->options.narrow_min_lit_steps) {
+		/*
+		 * A real lit window spans the exposure plus the pulse, 6-11 narrow steps on hardware. A run of one or
+		 * two means the ring was only seen briefly (moving, turning, out of view), and centring on it locks at
+		 * an unknown point of the window: on 4 Oct (A-steady, OpenBrush) the right locked on a single lit step,
+		 * about 1 ms from the left's centre, and was lit in 68% of frames, then 7-29% after 113 s.
+		 */
+		LOG_W(b, "LED_BOOTSTRAP side=%c event=narrow_window_narrow lit_steps=%u min=%u", b->options.label,
+		      right - left + 1, b->options.narrow_min_lit_steps);
+		weak = "narrow_window_below_minimum";
 	}
 	if (weak != NULL) {
 		if (b->hinted_scan && b->hint_failures < b->options.hint_retries) {
@@ -292,22 +318,6 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		}
 		fail_scan(b, weak);
 		return;
-	}
-
-	// Grow the lit run around the peak while steps stay above half the peak score, bridging up to narrow_gap_steps
-	// weak steps when a lit one follows them.
-	float threshold = 0.5f * peak;
-	uint32_t left = peak_index;
-	uint32_t right = peak_index;
-	for (uint32_t i = left; i > 0 && left - (i - 1) <= b->options.narrow_gap_steps + 1; i--) {
-		if (b->steps[i - 1].score >= threshold) {
-			left = i - 1;
-		}
-	}
-	for (uint32_t i = right + 1; i < n && i - right <= b->options.narrow_gap_steps + 1; i++) {
-		if (b->steps[i].score >= threshold) {
-			right = i;
-		}
 	}
 
 	if (left == 0 || right == n - 1) {
@@ -625,6 +635,7 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .min_peak_score = 1.0f,
 	    .min_peak_contrast = 0.75f,
 	    .narrow_gap_steps = 1,
+	    .narrow_min_lit_steps = 3,
 	    .lost_frames = 300,
 	    .failed_backoff_frames = 60,
 	    .max_failed_backoff_frames = 600,
