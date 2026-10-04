@@ -40,6 +40,13 @@ output.mkdir(exist_ok=True)
 prepared = output / 'org.freedesktop.monado.service.plist'
 prepared.write_bytes(plistlib.dumps(plist))
 manifest = build / 'openxr_monado-dev.json'
+client_label = 'org.freedesktop.monado.client-environment'
+client_plist = output / f'{client_label}.plist'
+client_plist.write_bytes(plistlib.dumps(dict(
+    Label=client_label, RunAtLoad=True, KeepAlive=False,
+    ProgramArguments=['/bin/sh', '-c',
+                      f'/bin/launchctl setenv XR_RUNTIME_JSON {shlex.quote(str(manifest))} && '
+                      '/bin/launchctl setenv XRT_MACOS_CLIENT_COMPOSITOR 1'])))
 (output / 'native-client.env').write_text(
     f'export XR_RUNTIME_JSON={shlex.quote(str(manifest))}\n'
     'export XRT_MACOS_CLIENT_COMPOSITOR=1\n'
@@ -55,4 +62,7 @@ print(f'launchctl bootout gui/{os.getuid()}/org.freedesktop.monado.sense-integra
 print(f'launchctl bootout gui/{os.getuid()}/org.freedesktop.monado.service')
 print('mkdir -p "$HOME/Library/LaunchAgents"')
 print(f'cp {shlex.quote(str(prepared))} "$HOME/Library/LaunchAgents/org.freedesktop.monado.service.plist"')
+print(f'cp {shlex.quote(str(client_plist))} "$HOME/Library/LaunchAgents/{client_label}.plist"')
+print(f'launchctl bootout gui/{os.getuid()}/{client_label} 2>/dev/null || true')
+print(f'launchctl bootstrap gui/{os.getuid()} "$HOME/Library/LaunchAgents/{client_label}.plist"')
 print(f'launchctl bootstrap gui/{os.getuid()} "$HOME/Library/LaunchAgents/org.freedesktop.monado.service.plist"')
