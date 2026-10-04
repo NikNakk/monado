@@ -437,6 +437,27 @@ Acceptance for the first pass:
 Set `PSSENSE_NATIVE_LED_PHASES=0` to restore the historical scheduling for comparison. Keep
 `PSSENSE_NATIVE_LED_ADVANCE=0` for the minimal lockout-safety test.
 
+## Upstream provenance blocker: current LED geometry
+
+The current experimental Monado file `src/xrt/drivers/pssense/pssense_led_model.h` explicitly states that its 17 LED
+coordinates were extracted from Sony's PC driver. Under the PSVR2Toolkit `AGENTS.md` clean-room policy, that table is
+not suitable provenance for an eventual upstream contribution.
+
+It remains useful for local experimental validation of the optical pipeline, but upstream-oriented work should replace
+it with geometry derived independently from observable behaviour or direct hardware measurement.
+
+Prepared clean-room route:
+
+1. capture raw stereo type-11 camera frames from the PSVR2 USB interface;
+2. capture HMD and Sense poses Sony publishes through the standard OpenVR driver-host interface;
+3. use independently obtained HMD camera calibration;
+4. identify/associate visible IR emitters across stereo frames and multiple controller poses;
+5. triangulate emitter positions into controller coordinates and fit/refine the constellation;
+6. validate the independently derived model on held-out frames and with Monado's existing pose solver.
+
+The Sony-derived coordinate table must not be used as a target, prior or optimisation constraint for that
+reconstruction.
+
 ## Remaining reverse-engineering
 
 - Exact opcode name for Sony command type 6. Timing strongly suggests a PRESCAN absolute-epoch maintenance operation:
@@ -444,8 +465,9 @@ Set `PSSENSE_NATIVE_LED_PHASES=0` to restore the historical scheduling for compa
   1,000,991 us; in BROAD/BG, the same periodic command usually leaves sequence and relative base offset unchanged.
   The next Toolkit capture logs its two payload bytes to identify it more precisely.
 - Exact policy that causes BROAD -> BG, BG -> PRESCAN, and subsequent PRESCAN -> BROAD.
-- Selective LED-mask meaning and bit-to-LED mapping. The prepared Toolkit capture saves event-triggered raw BC4 frames
-  plus Sony's internal 4-camera x 17-LED blob associations to answer this.
+- Selective LED-pattern meaning and physical-emitter mapping. The prepared Toolkit capture saves two raw BC4 frames
+  before and three after native phase/mask changes, plus the poses Sony publishes through OpenVR. Static-controller
+  image differencing can therefore answer this without Sony internal tracker data.
 - Whether STABLE is used in longer/cleaner sessions and what condition enters it.
 - Whether the native fixed output mode byte `0xA2` matters for long-term LED reliability; Monado's current output
   formatting is already accepted by the controllers and is not changed in this experiment.
