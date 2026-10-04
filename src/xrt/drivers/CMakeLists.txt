@@ -210,8 +210,13 @@ endif()
 
 if(XRT_BUILD_DRIVER_PSSENSE)
 	add_library(
-		drv_pssense STATIC pssense/pssense_driver.c pssense/pssense_interface.h
-				   pssense/pssense_protocol.h pssense/pssense_led_model.h
+		drv_pssense STATIC
+		pssense/pssense_driver.c
+		pssense/pssense_clock.c
+		pssense/pssense_clock.h
+		pssense/pssense_interface.h
+		pssense/pssense_protocol.h
+		pssense/pssense_led_model.h
 		)
 	target_link_libraries(
 		drv_pssense

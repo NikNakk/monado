@@ -43,6 +43,7 @@
 #include "pssense_led_model.h"
 #include "pssense_protocol.h"
 #include "pssense_led_correction.h"
+#include "pssense_clock.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -92,6 +93,7 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100U
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lock_period_id, "PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", 20)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_clock_offset_snap_us, "PSSENSE_CLOCK_OFFSET_SNAP_US", 0)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_clock_steady, "PSSENSE_CLOCK_STEADY", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
@@ -483,10 +485,17 @@ struct pssense_device
 	struct
 	{
 		struct m_clock_windowed_skew_tracker *clock_tracker;
-		double timestamp_offset_ns;
+		//! Offset for the LED schedule and IMU timestamps (bootstrap/future-schedule path), see
+		//! pssense_clock.h.
+		struct pssense_clock clock;
 		double filtered_offset_ns;
 		bool has_clock_offset;
-		timepoint_ns last_clock_sample_ns;
+		//! PSSENSE_TIMING_DIAG: best (largest-offset) sample of the current 100 ms window, logged as
+		//! PSSENSE_CLOCK.
+		timepoint_ns clock_log_window_ns;
+		timepoint_ns clock_log_local_ns;
+		timepoint_ns clock_log_remote_ns;
+		uint32_t clock_log_samples;
 
 		timepoint_ns latest_imu_time_ns;
 
@@ -713,59 +722,80 @@ crc32_le(uint32_t crc, uint8_t const *p, size_t len)
 }
 
 static void
-pssense_add_clock_offset_sample_locked_experimental(struct pssense_device *pssense, double offset_ns)
+pssense_log_clock_sample_locked(struct pssense_device *pssense, timepoint_ns local_ns, timepoint_ns remote_ns)
 {
-	if (!pssense->timing.has_clock_offset) {
-		pssense->timing.timestamp_offset_ns = offset_ns;
-		pssense->timing.filtered_offset_ns = offset_ns;
-		pssense->timing.has_clock_offset = true;
-	} else {
-		uint64_t now_ns = os_monotonic_get_ns();
-		double elapsed_ns = (double)(now_ns - pssense->timing.last_clock_sample_ns);
+	const timepoint_ns window_ns = 100 * U_TIME_1MS_IN_NS;
+	if (pssense->timing.clock_log_samples > 0 && local_ns - pssense->timing.clock_log_window_ns >= window_ns) {
+		const struct pssense_clock *c = &pssense->timing.clock;
+		PSSENSE_INFO(pssense,
+		             "PSSENSE_CLOCK side=%c local_ns=%" PRId64 " remote_ns=%" PRId64
+		             " samples=%u envelope_ns=%.0f offset_ns=%.0f holding=%d rate_ppm=%.2f",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', pssense->timing.clock_log_local_ns,
+		             pssense->timing.clock_log_remote_ns, pssense->timing.clock_log_samples, c->envelope_ns,
+		             c->offset_ns, c->holding ? 1 : 0, c->have_rate ? c->rate * 1e6 : 0.0);
+		pssense->timing.clock_log_samples = 0;
+	}
+	if (pssense->timing.clock_log_samples == 0) {
+		pssense->timing.clock_log_window_ns = local_ns;
+	}
+	if (pssense->timing.clock_log_samples == 0 ||
+	    remote_ns - local_ns > pssense->timing.clock_log_remote_ns - pssense->timing.clock_log_local_ns) {
+		pssense->timing.clock_log_local_ns = local_ns;
+		pssense->timing.clock_log_remote_ns = remote_ns;
+	}
+	pssense->timing.clock_log_samples++;
+}
 
-		// Counter drift at 5e-5 per ns elapsed.
-		// See: PSVR2Toolkit/projects/psvr2_openvr_driver_ex/libpad_hooks.cpp
-		pssense->timing.timestamp_offset_ns -= elapsed_ns * 5.0e-5;
+static void
+pssense_add_clock_offset_sample_locked_experimental(struct pssense_device *pssense,
+                                                    timepoint_ns local_ns,
+                                                    timepoint_ns remote_ns)
+{
+	struct pssense_clock *clock = &pssense->timing.clock;
+	const bool first = !clock->have_offset;
 
-		// Max-tracking: keep the largest (least-negative) observed offset.
-		if (pssense->timing.timestamp_offset_ns < offset_ns) {
-			pssense->timing.timestamp_offset_ns = offset_ns;
-		}
-
-		// Smooth: limit rate of change to ±2500ns (±2.5µs) per sample.
-		double delta = pssense->timing.timestamp_offset_ns - pssense->timing.filtered_offset_ns;
-
+	/*
+	 * PSSENSE_CLOCK_STEADY: hold the mapping once the LED schedule has locked, advancing only at the fitted drift
+	 * rate. The lock is measured against this mapping, so later sags and steps of the link's latency floor would
+	 * otherwise move the pulse against the exposure (4-5 Oct: snaps of 250-980 us preceded long ring losses).
+	 */
+	pssense_clock_set_hold(clock, pssense->tracking.led_bootstrap.locks_acquired > 0);
+	const bool was_holding = clock->holding;
+	pssense_clock_push(clock, local_ns, remote_ns);
+	const char side = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+	if (clock->holding && !was_holding) {
+		PSSENSE_INFO(pssense, "CLOCK_OFFSET side=%c event=hold rate_ppm=%.2f envelope_gap_us=%.1f", side,
+		             clock->rate * 1e6, (clock->envelope_ns - clock->offset_ns) / 1000.0);
+	}
+	if (clock->snapped) {
 		/*
-		 * Opt-in (PSSENSE_CLOCK_OFFSET_SNAP_US > 0): jump straight to the max-tracked offset when the
-		 * smoothed one lags it by more than the threshold. The first report can arrive milliseconds late,
-		 * and at ±2.5µs per sample the smoothed offset then creeps for tens of seconds, sliding every
-		 * scheduled LED pulse against the camera exposures by the same amount.
+		 * The first report can arrive milliseconds late, and at the smoothing rate the offset then creeps for
+		 * tens of seconds, sliding every scheduled LED pulse against the camera exposures by the same amount.
 		 */
-		long snap_us = debug_get_num_option_pssense_clock_offset_snap_us();
-		if (snap_us > 0 && fabs(delta) > (double)snap_us * 1000.0) {
-			PSSENSE_INFO(pssense, "CLOCK_OFFSET side=%c event=snap delta_us=%.1f",
-			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', delta / 1000.0);
-			const double value[3] = {delta, 0.0, 0.0};
-			t_constellation_tracker_record_sync_event(
-			    pssense->tracking.constellation_tracker, pssense->tracking.constellation_device_id,
-			    (int64_t)os_monotonic_get_ns(), T_CONSTELLATION_SYNC_EVENT_CLOCK_SNAP, value);
-		} else {
-			delta = CLAMP(delta, -2500.0, 2500.0);
-		}
+		PSSENSE_INFO(pssense, "CLOCK_OFFSET side=%c event=snap delta_us=%.1f", side,
+		             clock->snap_delta_ns / 1000.0);
+		const double value[3] = {clock->snap_delta_ns, 0.0, 0.0};
+		t_constellation_tracker_record_sync_event(
+		    pssense->tracking.constellation_tracker, pssense->tracking.constellation_device_id,
+		    (int64_t)os_monotonic_get_ns(), T_CONSTELLATION_SYNC_EVENT_CLOCK_SNAP, value);
+	}
+	if (debug_get_bool_option_pssense_timing_diag()) {
+		pssense_log_clock_sample_locked(pssense, local_ns, remote_ns);
+	}
 
-		pssense->timing.filtered_offset_ns += delta;
-
+	pssense->timing.filtered_offset_ns = clock->offset_ns;
+	pssense->timing.has_clock_offset = true;
+	if (!first) {
 		t_led_sync_push_host_device_clock_offset(&pssense->tracking.led_sync_refinement,
 		                                         (time_duration_ns)(pssense->timing.filtered_offset_ns));
 	}
-	pssense->timing.last_clock_sample_ns = os_monotonic_get_ns();
 }
 
 static void
 pssense_add_clock_offset_sample_locked(struct pssense_device *pssense, timepoint_ns local_ns, timepoint_ns remote_ns)
 {
 	if (debug_get_bool_option_pssense_led_bootstrap() || debug_get_bool_option_pssense_future_led_schedule()) {
-		pssense_add_clock_offset_sample_locked_experimental(pssense, (double)(remote_ns - local_ns));
+		pssense_add_clock_offset_sample_locked_experimental(pssense, local_ns, remote_ns);
 	} else {
 		m_clock_windowed_skew_tracker_push(pssense->timing.clock_tracker, local_ns, remote_ns);
 		time_duration_ns skew_ns;
@@ -3442,6 +3472,12 @@ pssense_create(struct xrt_prober *xp,
 	pssense->tracking.timing_fudge_100us = (int32_t)CLAMP(timing_fudge_100us, INT32_MIN, INT32_MAX);
 	pssense->tracking.increment_sequence_num = true;
 	pssense->timing.clock_tracker = m_clock_windowed_skew_tracker_alloc(2048);
+	struct pssense_clock_options clock_options;
+	pssense_clock_default_options(&clock_options);
+	// Opt-in (PSSENSE_CLOCK_OFFSET_SNAP_US > 0): jump straight to the max-tracked offset on a large gap.
+	clock_options.snap_ns = (double)debug_get_num_option_pssense_clock_offset_snap_us() * 1000.0;
+	clock_options.steady = debug_get_bool_option_pssense_clock_steady();
+	pssense_clock_init(&pssense->timing.clock, &clock_options);
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);
 	m_relation_history_create(&pssense->tracking.constellation_relation_history);
