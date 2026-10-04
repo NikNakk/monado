@@ -312,7 +312,8 @@ for swapchain/layer differences and the local follow-up results. The correction
 and evidence updates are local pending publication.
 
 The same target also has `--passthrough` / `--passthrough-only`,
-`--generic-controller`, `--gaze` / `--gaze-calibrate`, and `--fb-foveation` /
+`--generic-controller` (cyan left/orange right grip cubes and aim rays; grey
+when valid but untracked, hidden when invalid), `--gaze` / `--gaze-calibrate`, and `--fb-foveation` /
 `--fb-eye-foveation` modes for the corresponding extensions. The generic
 controller and foveation modes need their opt-in CMake features.
 

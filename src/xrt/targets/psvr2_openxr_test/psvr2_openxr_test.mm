@@ -986,6 +986,9 @@ struct application
 	XrAction controller_aim_action = XR_NULL_HANDLE;
 	std::array<XrPath, 2> controller_hand_paths = {XR_NULL_PATH, XR_NULL_PATH};
 	uint64_t controller_frame_count = 0;
+	std::array<XrSpace, 2> controller_grip_spaces = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+	std::array<XrSpace, 2> controller_aim_spaces = {XR_NULL_HANDLE, XR_NULL_HANDLE};
+	std::array<std::array<XrSpaceLocationFlags, 2>, 2> controller_pose_flags = {};
 	XrPassthroughFB passthrough = XR_NULL_HANDLE;
 	XrPassthroughLayerFB passthrough_layer = XR_NULL_HANDLE;
 	id<MTLCommandQueue> command_queue = nil;
@@ -1401,6 +1404,22 @@ create_generic_controller_resources(application &app)
 	check_xr(app.xr.suggest_interaction_profile_bindings(app.instance, &suggested),
 	         "xrSuggestInteractionProfileBindings(generic controller)");
 
+	for (size_t hand = 0; hand < app.controller_hand_paths.size(); ++hand) {
+		XrActionSpaceCreateInfo space_info =
+		    xr_struct<XrActionSpaceCreateInfo>(XR_TYPE_ACTION_SPACE_CREATE_INFO);
+		space_info.subactionPath = app.controller_hand_paths[hand];
+		space_info.poseInActionSpace.orientation.w = 1.0f;
+		space_info.action = app.controller_grip_action;
+		check_xr(app.xr.create_action_space(app.session, &space_info, &app.controller_grip_spaces[hand]),
+		         "xrCreateActionSpace(controller grip)");
+		space_info.action = app.controller_aim_action;
+		check_xr(app.xr.create_action_space(app.session, &space_info, &app.controller_aim_spaces[hand]),
+		         "xrCreateActionSpace(controller aim)");
+	}
+	fprintf(stderr,
+	        "psvr2-openxr-test: controller visuals: left cyan, right orange; "
+	        "grip cubes and 0.4 m aim rays; grey means valid but untracked; invalid poses hidden\n");
+
 	fprintf(stderr,
 	        "psvr2-openxr-test: XR_KHR_generic_controller actions ready; "
 	        "press face buttons, L1/R1, triggers and move/click sticks\n");
@@ -1451,6 +1470,22 @@ xr_path_string(application &app, XrPath path)
 	return std::string(buffer.data());
 }
 
+
+static XrResult
+sync_diagnostic_actions(application &app)
+{
+	std::array<XrActiveActionSet, 2> active_sets{};
+	uint32_t count = 0;
+	if (app.controller_action_set != XR_NULL_HANDLE)
+		active_sets[count++] = {app.controller_action_set, XR_NULL_PATH};
+	if (app.gaze_action_set != XR_NULL_HANDLE)
+		active_sets[count++] = {app.gaze_action_set, XR_NULL_PATH};
+	XrActionsSyncInfo info = xr_struct<XrActionsSyncInfo>(XR_TYPE_ACTIONS_SYNC_INFO);
+	info.countActiveActionSets = count;
+	info.activeActionSets = active_sets.data();
+	return app.xr.sync_actions(app.session, &info);
+}
+
 static void
 poll_generic_controller(application &app)
 {
@@ -1458,11 +1493,7 @@ poll_generic_controller(application &app)
 		return;
 	}
 
-	XrActiveActionSet active_set{app.controller_action_set, XR_NULL_PATH};
-	XrActionsSyncInfo sync_info = xr_struct<XrActionsSyncInfo>(XR_TYPE_ACTIONS_SYNC_INFO);
-	sync_info.countActiveActionSets = 1;
-	sync_info.activeActionSets = &active_set;
-	if (XR_FAILED(app.xr.sync_actions(app.session, &sync_info))) {
+	if (XR_FAILED(sync_diagnostic_actions(app))) {
 		return;
 	}
 
@@ -2362,12 +2393,7 @@ append_gaze_marker(application &app, XrTime predicted_display_time)
 		return;
 	}
 
-	XrActiveActionSet active_set{app.gaze_action_set, XR_NULL_PATH};
-	XrActionsSyncInfo sync_info = xr_struct<XrActionsSyncInfo>(XR_TYPE_ACTIONS_SYNC_INFO);
-	sync_info.countActiveActionSets = 1;
-	sync_info.activeActionSets = &active_set;
-	XrResult sync_result = app.xr.sync_actions(app.session, &sync_info);
-	if (XR_FAILED(sync_result)) {
+	if (XR_FAILED(sync_diagnostic_actions(app))) {
 		return;
 	}
 
@@ -2415,6 +2441,68 @@ append_gaze_marker(application &app, XrTime predicted_display_time)
 	}
 }
 
+
+static void
+append_controller_markers(application &app, XrTime predicted_display_time)
+{
+	if (!app.test_generic_controller)
+		return;
+	const XrSpaceLocationFlags valid =
+	    XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+	const XrSpaceLocationFlags tracked =
+	    XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+	for (size_t hand = 0; hand < 2; ++hand) {
+		for (size_t kind = 0; kind < 2; ++kind) {
+			const XrAction action = kind == 0 ? app.controller_grip_action : app.controller_aim_action;
+			const XrSpace space =
+			    kind == 0 ? app.controller_grip_spaces[hand] : app.controller_aim_spaces[hand];
+			XrActionStateGetInfo info = xr_struct<XrActionStateGetInfo>(XR_TYPE_ACTION_STATE_GET_INFO);
+			info.action = action;
+			info.subactionPath = app.controller_hand_paths[hand];
+			XrActionStatePose state = xr_struct<XrActionStatePose>(XR_TYPE_ACTION_STATE_POSE);
+			XrSpaceLocation location = xr_struct<XrSpaceLocation>(XR_TYPE_SPACE_LOCATION);
+			if (space != XR_NULL_HANDLE &&
+			    XR_SUCCEEDED(app.xr.get_action_state_pose(app.session, &info, &state)) &&
+			    state.isActive == XR_TRUE &&
+			    XR_FAILED(app.xr.locate_space(space, app.app_space, predicted_display_time, &location))) {
+				location.locationFlags = 0;
+			}
+			const bool have_pose = (location.locationFlags & valid) == valid;
+			const bool is_tracked = (location.locationFlags & tracked) == tracked;
+			if (location.locationFlags != app.controller_pose_flags[hand][kind] ||
+			    (app.controller_frame_count % 120) == 1) {
+				fprintf(stderr,
+				        "psvr2-openxr-test: %s %s flags=0x%llx valid=%d tracked=%d "
+				        "position=(%+.3f,%+.3f,%+.3f)\n",
+				        hand == 0 ? "left" : "right", kind == 0 ? "grip" : "aim",
+				        (unsigned long long)location.locationFlags, have_pose, is_tracked,
+				        have_pose ? location.pose.position.x : 0.0f,
+				        have_pose ? location.pose.position.y : 0.0f,
+				        have_pose ? location.pose.position.z : 0.0f);
+				app.controller_pose_flags[hand][kind] = location.locationFlags;
+			}
+			if (!have_pose)
+				continue;
+			const simd_float4 color = !is_tracked ? make_float4(0.45f, 0.45f, 0.45f, 1.0f)
+			                          : hand == 0 ? make_float4(0.05f, 0.85f, 1.0f, 1.0f)
+			                                      : make_float4(1.0f, 0.35f, 0.05f, 1.0f);
+			const simd_float3 right = rotate_vector(location.pose.orientation, make_float3(1, 0, 0));
+			const simd_float3 up = rotate_vector(location.pose.orientation, make_float3(0, 1, 0));
+			const simd_float3 back = rotate_vector(location.pose.orientation, make_float3(0, 0, 1));
+			const simd_float3 origin = xr_position(location.pose.position);
+			if (kind == 0) {
+				app.frame_instances.push_back(
+				    {basis_model(origin, right, up, back, make_float3(0.06f, 0.06f, 0.06f)), color});
+			} else {
+				// OpenXR aim points along local -Z. Centre the ray halfway along its 0.4 m length.
+				app.frame_instances.push_back({basis_model(origin - back * 0.20f, right, up, back,
+				                                           make_float3(0.006f, 0.006f, 0.40f)),
+				                               color});
+			}
+		}
+	}
+}
+
 static void
 render_views(application &app, XrTime predicted_display_time)
 {
@@ -2429,6 +2517,7 @@ render_views(application &app, XrTime predicted_display_time)
 		app.frame_instances = app.scene.world_instances;
 		append_head_locked_cross(app.frame_instances, head_pose);
 		append_gaze_marker(app, predicted_display_time);
+		append_controller_markers(app, predicted_display_time);
 	}
 	if (app.frame_instances.size() > app.renderer.max_instances) {
 		fatal("diagnostic scene exceeded Metal instance buffer capacity");
@@ -2853,6 +2942,16 @@ cleanup(application &app)
 		app.xr.destroy_action_set(app.gaze_action_set);
 		app.gaze_action_set = XR_NULL_HANDLE;
 	}
+	for (size_t hand = 0; hand < 2; ++hand) {
+		if (app.controller_grip_spaces[hand] != XR_NULL_HANDLE) {
+			app.xr.destroy_space(app.controller_grip_spaces[hand]);
+			app.controller_grip_spaces[hand] = XR_NULL_HANDLE;
+		}
+		if (app.controller_aim_spaces[hand] != XR_NULL_HANDLE) {
+			app.xr.destroy_space(app.controller_aim_spaces[hand]);
+			app.controller_aim_spaces[hand] = XR_NULL_HANDLE;
+		}
+	}
 	if (app.controller_action_set != XR_NULL_HANDLE && app.xr.destroy_action_set != nullptr) {
 		app.xr.destroy_action_set(app.controller_action_set);
 		app.controller_action_set = XR_NULL_HANDLE;
@@ -2977,7 +3076,7 @@ run(int argc, char **argv)
 			    "  --passthrough submits XR_FB_passthrough behind the diagnostic scene.\n"
 			    "  --passthrough-only submits only XR_FB_passthrough.\n"
 			    "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action "
-			    "state.\n"
+			    "state and draws cyan/orange grip cubes and aim rays (grey when untracked).\n"
 			    "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			    "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			    "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve "
