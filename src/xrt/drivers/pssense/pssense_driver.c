@@ -361,8 +361,12 @@ struct pssense_device
 
 	struct
 	{
-		// Follows PSVR2TK's known-good clock tracking for sense controllers
-		// See: PSVR2Toolkit/projects/psvr2_openvr_driver_ex/sense_controller.h, SenseController
+		/*
+		 * Legacy experimental clock estimator. Its current implementation was informed by PSVR2Toolkit code and
+		 * therefore is NOT upstream-clean under the PSVR2Toolkit AGENTS.md provenance rule. Retain it here only
+		 * to avoid changing the already-working experimental tracker while a replacement is specified and
+		 * validated from observable controller timestamps + host receive times.
+		 */
 
 		//! Raw max-tracked offset: imu_time_ns - host_receive_time_ns
 		double timestamp_offset_ns;
@@ -582,11 +586,12 @@ crc32_le(uint32_t crc, uint8_t const *p, size_t len)
 }
 
 /*!
- * Update the max-tracking clock filter with a new offset sample.
+ * Update the legacy experimental max-tracking clock filter with a new offset sample.
  * Must be called under the controller_thread lock.
  *
- * Corresponds to SenseController::AddTimestampOffsetSample in:
- * PSVR2Toolkit/projects/psvr2_openvr_driver_ex/sense_controller.h
+ * @warning Research provenance only: this implementation was informed by PSVR2Toolkit code and is not suitable for
+ * an upstream-clean contribution. Replace with an independently specified estimator derived from observable timestamp
+ * pairs before upstreaming.
  */
 static void
 pssense_add_clock_offset_sample(struct pssense_device *pssense, double offset_ns)
@@ -599,8 +604,7 @@ pssense_add_clock_offset_sample(struct pssense_device *pssense, double offset_ns
 		uint64_t now_ns = os_monotonic_get_ns();
 		double elapsed_ns = (double)(now_ns - pssense->timing.last_clock_sample_ns);
 
-		// Counter drift at 5e-5 per ns elapsed.
-		// See: PSVR2Toolkit/projects/psvr2_openvr_driver_ex/libpad_hooks.cpp
+		// Legacy experimental drift term; see provenance warning above.
 		pssense->timing.timestamp_offset_ns -= elapsed_ns * 5.0e-5;
 
 		// Max-tracking: keep the largest (least-negative) observed offset.
@@ -979,9 +983,8 @@ pssense_handle_packet(struct pssense_device *pssense,
 		pssense->tracking.led_sync_sample_needs_marking = false;
 	}
 
-	// Update the clock offset from accumulated IMU time vs host receive time.
-	// Corresponds to PSVR2TK's libpad_deviceToHostHook + SenseController::AddTimestampOffsetSample.
-	// See: PSVR2Toolkit/projects/psvr2_openvr_driver_ex/libpad_hooks.cpp, sense_controller.h
+	// Update the legacy experimental clock offset from accumulated device time vs host receive time.
+	// See the provenance warning on pssense_add_clock_offset_sample().
 	pssense_add_clock_offset_sample(pssense, (double)pssense->timing.latest_device_time_ns - (double)recv_time_ns);
 
 	pssense->state = input;
