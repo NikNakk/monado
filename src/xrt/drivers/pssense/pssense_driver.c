@@ -1834,8 +1834,9 @@ pssense_signed_ns_to_imu_ticks(time_duration_ns offset_ns)
 /*
  * Select the native-style LED phase around the existing timing bootstrap and pose solver.
  *
- * Scans/probes remain PRESCAN because their absolute schedule is deliberately swept. Once the bootstrap is locked,
- * a fresh accepted optical pose uses BG; a missing/stale pose uses BROAD for reacquisition. This is intentionally
+ * Initial wide/narrow scans remain PRESCAN because their absolute schedule is deliberately swept. Once the bootstrap
+ * is locked, closed-loop timing probes keep the current tracked/reacquisition phase and only move its relative offset.
+ * A fresh accepted optical pose uses BG; a missing/stale pose uses BROAD for reacquisition. This is intentionally
  * simpler than Sony's complete internal policy, but preserves the two key semantics shown by the successful oracle:
  * PRESCAN uses an absolute device-time anchor, while BROAD/BG use a signed offset from the camera cycle.
  */
@@ -3130,7 +3131,8 @@ pssense_create(struct xrt_prober *xp,
 	u_var_add_bool(pssense, &pssense->tracking.increment_sequence_num, "Increment LED Sequence Number");
 	u_var_add_u8(pssense, &pssense->tracking.led_sequence_num, "LED Sequence Number");
 	u_var_add_u8(pssense, &pssense->tracking.led_settings.phase, "LED Sync Phase");
-	u_var_add_u8(pssense, &pssense->tracking.period_id, "LED Blink Period ID");
+	u_var_add_u8(pssense, &pssense->tracking.period_id, "LED Calibrated/Source Period ID");
+	u_var_add_u8(pssense, &pssense->tracking.led_settings.period_id, "LED Output Period ID");
 	u_var_add_i32(pssense, &pssense->tracking.timing_fudge_100us, "Timing Fudge (100us)");
 	u_var_add_bool(pssense, &pssense->tracking.use_constellation, "Use Constellation Tracking");
 
