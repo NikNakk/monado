@@ -94,6 +94,9 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lock_period_id, "PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", 20)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_clock_offset_snap_us, "PSSENSE_CLOCK_OFFSET_SNAP_US", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_clock_steady, "PSSENSE_CLOCK_STEADY", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_latch_interval_ms, "PSSENSE_LED_LATCH_INTERVAL_MS", 0)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_s, "PSSENSE_LED_BROAD_S", 0)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_period_id, "PSSENSE_LED_BROAD_PERIOD_ID", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
@@ -566,6 +569,17 @@ struct pssense_device
 
 		bool increment_sequence_num;
 		uint8_t led_sequence_num;
+		//! Bumped whenever the LED schedule's content changes (new bootstrap output or sync sample).
+		uint32_t led_content_generation;
+		//! PSSENSE_LED_LATCH_INTERVAL_MS: the last latched schedule's content generation and host time.
+		bool led_latched;
+		uint32_t led_latched_content_generation;
+		timepoint_ns led_latched_ns;
+		//! PSSENSE_LED_BROAD_S: BROAD free-run in progress, since when, and PRESCAN anchors latched before it.
+		bool led_broad_active;
+		timepoint_ns led_broad_started_ns;
+		uint32_t led_broad_anchors;
+		uint32_t led_broad_windows;
 
 		int32_t timing_fudge_100us;
 
@@ -2209,7 +2223,9 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	}
 
 	// A tracking probe changes this controller's light, so like a scan it needs the LEDs to itself.
+	// Not during a BROAD free-run: the probe's offsets need PRESCAN anchors.
 	if (t_led_phase_bootstrap_wants_probe(b) && pssense_led_bootstrap_steady_for_probe(pssense) &&
+	    !pssense->tracking.led_broad_active &&
 	    (owner == me || (owner == 0 && xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0))) {
 		owner = me;
 		t_led_phase_bootstrap_begin_probe(b);
@@ -2236,6 +2252,7 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 		pssense->tracking.period_id = DURATION_NS_TO_PERIOD_ID(b->blink_ns);
 		pssense->tracking.led_sync_sample_needs_sending = true;
 		pssense->tracking.led_sequence_num += 1;
+		pssense->tracking.led_content_generation++;
 	}
 
 	if (b->state == T_LED_PHASE_BOOTSTRAP_LOCKED && ++pssense->tracking.led_bootstrap_status_frames >= 300) {
@@ -2331,6 +2348,7 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			pssense->tracking.period_id =
 			    DURATION_NS_TO_PERIOD_ID(pssense->tracking.latest_led_sync_sample.blink_duration_ns);
 			pssense->tracking.led_sequence_num += 1;
+			pssense->tracking.led_content_generation++;
 		}
 
 		uint8_t period_id = pssense->tracking.period_id;
@@ -2374,6 +2392,94 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
 		// in IMU ticks
 		uint32_t cycle_position = NS_TO_IMU_TICKS(next_blink_time);
+
+		/*
+		 * PSSENSE_LED_LATCH_INTERVAL_MS: keep the latched anchor, letting the controller run on cycle_length,
+		 * and re-latch only after the interval or when the schedule's content changes. Every new anchor carries
+		 * the host/device mapping error of its moment; Sony's driver latches about once per second in PRESCAN
+		 * (anchors 60 frames apart), where this driver otherwise latches every exposure.
+		 */
+		long latch_interval_ms = debug_get_num_option_pssense_led_latch_interval_ms();
+		const uint8_t phase = leds_lit ? LED_SYNC_PHASE_PRESCAN : LED_SYNC_PHASE_LED_ALL_OFF;
+		const char side = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+
+		/*
+		 * PSSENSE_LED_BROAD_S (experimental): Sony's driver, once tracking, alternates 10 s of BROAD with about
+		 * 3 s of PRESCAN (three anchors 1 s apart). BROAD carries cycle_position 0: the controller keeps the
+		 * last PRESCAN anchor and free-runs on cycle_length, so no anchor depends on the host/device mapping.
+		 * Here: once the LED bootstrap holds its lock, latch three PRESCAN anchors 1 s apart, then BROAD for
+		 * the configured time, and repeat. Any change of schedule content, LEDs going dark or losing the lock
+		 * ends BROAD at once.
+		 */
+		const long broad_s = debug_get_num_option_pssense_led_broad_s();
+		if (broad_s > 0) {
+			const struct t_led_phase_bootstrap *b = &pssense->tracking.led_bootstrap;
+			const bool steady = use_led_bootstrap && leds_lit && b->state == T_LED_PHASE_BOOTSTRAP_LOCKED &&
+			                    !t_led_phase_bootstrap_is_probing(b) && pssense->tracking.led_latched &&
+			                    pssense->tracking.led_latched_content_generation ==
+			                        pssense->tracking.led_content_generation;
+			latch_interval_ms = latch_interval_ms > 1000 ? latch_interval_ms : 1000;
+			bool force_latch = false;
+			if (pssense->tracking.led_broad_active) {
+				const timepoint_ns elapsed_ns = now_ns - pssense->tracking.led_broad_started_ns;
+				if (steady && elapsed_ns < (timepoint_ns)broad_s * U_TIME_1S_IN_NS) {
+					os_thread_helper_unlock(&pssense->controller_thread);
+					return;
+				}
+				PSSENSE_INFO(pssense, "LED_BROAD side=%c event=%s window=%u elapsed_ms=%.0f", side,
+				             steady ? "end" : "abort", pssense->tracking.led_broad_windows,
+				             (double)elapsed_ns / 1e6);
+				pssense->tracking.led_broad_active = false;
+				pssense->tracking.led_broad_anchors = 0;
+				force_latch = true;
+			} else if (!steady) {
+				pssense->tracking.led_broad_anchors = 0;
+			} else if (pssense->tracking.led_broad_anchors >= 3 &&
+			           now_ns - pssense->tracking.led_latched_ns >= 75 * U_TIME_1MS_IN_NS) {
+				uint8_t broad_period_id = period_id;
+				long requested_broad = debug_get_num_option_pssense_led_broad_period_id();
+				if (requested_broad > 0 && requested_broad <= UINT8_MAX) {
+					broad_period_id = (uint8_t)requested_broad;
+				}
+				pssense->tracking.led_settings = (struct pssense_led_settings){
+				    .phase = LED_SYNC_PHASE_BROAD,
+				    .cycle_length = __cpu_to_le32(cycle_length),
+				    .cycle_position = __cpu_to_le32(0),
+				    .sequence_number = pssense->tracking.led_sequence_num++,
+				    .led_blink = {0xFF, 0xFF, 0xFF, 0xFF},
+				    .period_id = broad_period_id,
+				};
+				pssense->tracking.led_broad_active = true;
+				pssense->tracking.led_broad_started_ns = now_ns;
+				pssense->tracking.led_broad_windows++;
+				pssense->tracking.led_latched_ns = now_ns;
+				PSSENSE_INFO(pssense, "LED_BROAD side=%c event=start window=%u period_id=%u", side,
+				             pssense->tracking.led_broad_windows, broad_period_id);
+				os_thread_helper_unlock(&pssense->controller_thread);
+				return;
+			}
+			if (!force_latch && steady && pssense->tracking.led_settings.phase == phase &&
+			    now_ns - pssense->tracking.led_latched_ns <
+			        (timepoint_ns)latch_interval_ms * U_TIME_1MS_IN_NS) {
+				os_thread_helper_unlock(&pssense->controller_thread);
+				return;
+			}
+			if (steady || force_latch) {
+				pssense->tracking.led_broad_anchors++;
+			}
+		} else if (latch_interval_ms > 0 && pssense->tracking.led_latched &&
+		           pssense->tracking.led_settings.phase == phase &&
+		           pssense->tracking.led_settings.period_id == period_id &&
+		           pssense->tracking.led_latched_content_generation ==
+		               pssense->tracking.led_content_generation &&
+		           now_ns - pssense->tracking.led_latched_ns <
+		               (timepoint_ns)latch_interval_ms * U_TIME_1MS_IN_NS) {
+			os_thread_helper_unlock(&pssense->controller_thread);
+			return;
+		}
+		pssense->tracking.led_latched = true;
+		pssense->tracking.led_latched_content_generation = pssense->tracking.led_content_generation;
+		pssense->tracking.led_latched_ns = now_ns;
 
 		if (debug_get_bool_option_pssense_timing_diag()) {
 			timepoint_ns controller_now_ns = 0;
