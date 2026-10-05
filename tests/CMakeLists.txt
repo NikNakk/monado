@@ -6,6 +6,7 @@
 set(tests
     tests_cxx_wrappers
     tests_deque
+    tests_floor_calibration
     tests_generic_callbacks
     tests_foveation
     tests_glue_device
@@ -118,6 +119,7 @@ target_link_libraries(tests_quatexpmap PRIVATE xrt-external-tinyceres aux_math)
 target_link_libraries(tests_rational PRIVATE aux_math)
 target_link_libraries(tests_relation_chain PRIVATE aux_math)
 target_link_libraries(tests_space_overseer PRIVATE xrt-interfaces base aux_math aux_os)
+target_link_libraries(tests_floor_calibration PRIVATE xrt-interfaces base aux_math aux_os)
 target_link_libraries(tests_pose PRIVATE aux_math)
 if(NOT MSVC)
 	target_link_libraries(tests_psvr2_tracking_share PRIVATE aux_tracking)
