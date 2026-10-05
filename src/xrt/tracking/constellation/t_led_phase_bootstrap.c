@@ -306,7 +306,10 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		narrow_window = true;
 	}
 	if (weak != NULL) {
-		if (b->hinted_scan && b->hint_failures < b->options.hint_retries) {
+		// Without the full-scan fallback, retry indefinitely, except that a weak but placed run is locked
+		// below.
+		if (b->hinted_scan && (b->hint_failures < b->options.hint_retries ||
+		                       (!b->options.full_scan_fallback && !narrow_window))) {
 			/*
 			 * Retry the short scan after a dark pause before trying the long one. On 26 Sep the right's
 			 * failed hinted scans lit only briefly after each setting change (3/8 then 1/8 frames, the same
@@ -315,8 +318,9 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 			b->hint_failures++;
 			LOG_W(b,
 			      "LED_BOOTSTRAP side=%c event=hint_failed reason=%s, retrying the hinted scan after a "
-			      "pause (%u/%u)",
-			      b->options.label, weak, b->hint_failures, b->options.hint_retries);
+			      "pause (%u/%u%s)",
+			      b->options.label, weak, b->hint_failures, b->options.hint_retries,
+			      b->options.full_scan_fallback ? "" : ", no full-scan fallback");
 			b->hinted_scan = false;
 			b->state = T_LED_PHASE_BOOTSTRAP_IDLE;
 			// Doubling pauses: a controller that is only out of view gets time to come back before the full
@@ -728,6 +732,7 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .hint_fudge_ns = -1,
 	    .hint_span_ns = 1500 * U_TIME_1US_IN_NS,
 	    .hint_retries = 0,
+	    .full_scan_fallback = true,
 	};
 }
 

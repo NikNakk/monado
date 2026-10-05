@@ -431,6 +431,57 @@ TEST_CASE("LED phase bootstrap locks a weak hinted ring instead of falling back 
 	CHECK(sim.lit(sim.applied_fudge, sim.applied_blink));
 }
 
+TEST_CASE("LED phase bootstrap without full-scan fallback keeps retrying the hinted scan")
+{
+	// 5 Oct: every always-lit fault began on entering a full scan. With a hint, retry hinted scans instead.
+	const int64_t latency = 3600000;
+	for (bool fallback : {true, false}) {
+		CAPTURE(fallback);
+		t_led_phase_bootstrap_options options = test_options();
+		options.hint_retries = 2;
+		options.failed_backoff_frames = 10;
+		options.max_failed_backoff_frames = 40;
+		options.full_scan_fallback = fallback;
+		options.hint_fudge_ns = t_led_phase_bootstrap_wrap(-latency + 300000, kPeriod);
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+
+		// Out of view for long enough to exhaust the retries several times over.
+		Sim sim{.latency_ns = latency};
+		sim.visible = false;
+		uint32_t frame = 0;
+		bool wide = false;
+		for (uint32_t i = 0; i < 3000; i++) {
+			sim.run(b, 1, frame);
+			wide = wide || b.state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN;
+			if (t_led_phase_bootstrap_ready_to_scan(&b)) {
+				t_led_phase_bootstrap_start(&b, kPeriod);
+			}
+		}
+		CHECK(wide == fallback);
+		if (fallback) {
+			continue;
+		}
+		CHECK(b.hint_failures > options.hint_retries);
+
+		// Back in view: the next hinted scan locks on the exposure centre.
+		sim.visible = true;
+		for (uint32_t i = 0; i < 3000 && b.locks_acquired == 0; i++) {
+			sim.run(b, 1, frame);
+			wide = wide || b.state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN;
+			if (t_led_phase_bootstrap_ready_to_scan(&b)) {
+				t_led_phase_bootstrap_start(&b, kPeriod);
+			}
+		}
+		CHECK_FALSE(wide);
+		REQUIRE(b.locks_acquired == 1);
+		int64_t pulse_centre = b.fudge_offset_ns + latency + b.blink_ns / 2;
+		int64_t exposure_centre = sim.exposure_start_ns + sim.exposure_ns / 2;
+		CHECK(circular_distance(pulse_centre, exposure_centre) <= options.narrow_step_ns);
+	}
+}
+
 TEST_CASE("LED phase bootstrap measures against each camera's background")
 {
 	// 24 Sep slow-movement run: windows put 3-7 blobs in cameras 0 and 2 with the LEDs dark, which made those
