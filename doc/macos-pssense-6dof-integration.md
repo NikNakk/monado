@@ -1081,3 +1081,28 @@ Candidate fixes, in order of cost:
    probe that darkens a ring that was lit at the reference, and end a probe
    window early when the ring vanishes.
 3. Probe less often once stable.
+
+### 1.6 ms lock pulse and lower blob thresholds: the left holds (2026-10-05)
+
+OpenBrush, build `9fc55e368`, normal profile plus `PSSENSE_CLOCK_STEADY=1`,
+`PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT=25`, `PSSENSE_TIMING_DIAG=1`,
+**`PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID=32`** (1.6 ms) and
+**`PSVR2_BLOB_PIXEL_THRESHOLD=50`, `PSVR2_BLOB_REQUIRED_THRESHOLD=120`**
+(both changed together). The user reports the left took a while to settle,
+then was good for a long time.
+
+- 208 s: left 48.8 accepted poses/s, lit mean 0.80; right 58.9/s, 0.81. From
+  62 s the left ran at about 300 per 5 s for about 140 s, matching the right.
+- Every left probe in that stretch was `centred` with equal light at the
+  reference and both ±300 µs offsets (for example 8.12/8.66/7.34 blobs). The
+  previous session's blackout signature (0.00 at both offsets) is gone, as
+  expected when the pulse outlasts the ~1 ms exposure.
+- Settling, 30–62 s: the first lock (8.6 s) held until about 31 s, then went
+  dark. Dim rescans at 37.0 s and 57.3 s, one weak hinted scan, relocks at
+  50.9 s and 62.2 s. Successive lock centres moved by about +500 µs (15550 →
+  15425 → 16050 µs fudge), consistent with early drift against the held clock
+  mapping (fitted −13.8 ppm 8 s in) or scans taken while the hand moved. The
+  dim-rescan rule recovered both times, as intended.
+
+Not yet separated: how much comes from the longer pulse and how much from the
+thresholds. Neither is a runtime default yet.
