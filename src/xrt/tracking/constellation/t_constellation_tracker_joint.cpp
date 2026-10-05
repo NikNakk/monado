@@ -14,6 +14,7 @@
 #include "oriented_bootstrap.hpp"
 
 #include "util/u_time.h"
+#include "os/os_time.h"
 
 #include <algorithm>
 #include <chrono>
@@ -552,7 +553,19 @@ JointProcessor::process(JointExposure &exposure)
 		this->last_slow_log_ns = now_ns;
 	}
 
+	// Only meaningful live: a replay's exposures are far in the past.
+	const int64_t age_ns = (int64_t)os_monotonic_get_ns() - exposure.timestamp_ns;
+	if (age_ns >= 0 && age_ns < 1'000'000'000) {
+		this->pose_age_ms.push_back((float)age_ns / 1e6f);
+	}
 	if (exposure.timestamp_ns - this->last_status_ns >= kStatusIntervalNs) {
+		float age_p50 = 0.0f, age_p95 = 0.0f;
+		if (!this->pose_age_ms.empty()) {
+			std::sort(this->pose_age_ms.begin(), this->pose_age_ms.end());
+			age_p50 = this->pose_age_ms[this->pose_age_ms.size() / 2];
+			age_p95 = this->pose_age_ms[this->pose_age_ms.size() * 95 / 100];
+		}
+		this->pose_age_ms.clear();
 		uint64_t assembled, skipped, late;
 		os_thread_helper_lock(&this->thread);
 		assembled = this->exposures_assembled;
@@ -563,10 +576,12 @@ JointProcessor::process(JointExposure &exposure)
 		CT_INFO(ct,
 		        "JOINT_STATUS exposures=%" PRIu64 " processed=%" PRIu64 " skipped=%" PRIu64
 		        " late_samples=%" PRIu64 " tracked=%" PRIu64 " bootstrapped=%" PRIu64 " oriented=%" PRIu64
-		        " failed=%" PRIu64 " unconfirmed=%" PRIu64 " mean_solve_us=%.0f max_solve_us=%.0f",
+		        " failed=%" PRIu64 " unconfirmed=%" PRIu64
+		        " mean_solve_us=%.0f max_solve_us=%.0f pose_age_ms_p50=%.2f pose_age_ms_p95=%.2f",
 		        assembled, this->processed, skipped, late, this->device_tracked, this->device_bootstrapped,
 		        this->device_oriented, this->device_failed, this->unconfirmed_dropped,
-		        solves ? this->solve_us_total / (double)solves : 0.0, this->solve_us_max);
+		        solves ? this->solve_us_total / (double)solves : 0.0, this->solve_us_max, (double)age_p50,
+		        (double)age_p95);
 		this->last_status_ns = exposure.timestamp_ns;
 		this->solve_us_max = 0.0;
 	}

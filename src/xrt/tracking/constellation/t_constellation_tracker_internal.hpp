@@ -522,6 +522,8 @@ struct JointProcessor
 	uint64_t unconfirmed_dropped{0};
 	double solve_us_total{0.0};
 	double solve_us_max{0.0};
+	//! Per exposure in the status window: host time at the end of processing minus the exposure time, in ms.
+	std::vector<float> pose_age_ms{};
 	int64_t last_status_ns{0};
 	//! Per camera index: running mean of LED-shaped blobs no device owns while every device is solved.
 	std::vector<float> free_led_background{};

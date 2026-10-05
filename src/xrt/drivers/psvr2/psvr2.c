@@ -643,6 +643,7 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_auxiliary_streams, "PSVR2_AUXILIARY_STREAMS", PSVR2_AUXILIARY_STREAMS_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_camera_streams, "PSVR2_CAMERA_STREAMS", false)
 DEBUG_GET_ONCE_OPTION(psvr2_led_detector_record, "PSVR2_LED_DETECTOR_RECORD", "")
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_latency_diag, "PSVR2_LATENCY_DIAG", false)
 /*
  * Provision the PS VR2 gaze USB interface by default so runtime-owned
  * eye-tracked features can be requested without a startup environment flag.
@@ -1228,6 +1229,55 @@ status_xfer_cb(struct libusb_transfer *xfer)
 	os_mutex_unlock(&hmd->data_lock);
 }
 
+static int
+compare_i32(const void *a, const void *b)
+{
+	int32_t x = *(const int32_t *)a, y = *(const int32_t *)b;
+	return (x > y) - (x < y);
+}
+
+//! Adds one PSVR2_LATENCY_DIAG sample (arrival minus exposure). Called with data_lock held.
+static void
+psvr2_latency_diag_add_locked(struct psvr2_hmd *hmd, int kind, timepoint_ns received_ns, int64_t exposure_ns)
+{
+	if (exposure_ns == 0) {
+		return;
+	}
+	uint32_t *count = &hmd->latency_diag.count[kind];
+	if (*count < ARRAY_SIZE(hmd->latency_diag.us[kind])) {
+		hmd->latency_diag.us[kind][(*count)++] = (int32_t)((received_ns - exposure_ns) / U_TIME_1US_IN_NS);
+	}
+}
+
+//! Logs and resets the PSVR2_LATENCY_DIAG window once it is 5 s old. Called with data_lock held.
+static void
+psvr2_latency_diag_maybe_log_locked(struct psvr2_hmd *hmd, timepoint_ns now_ns)
+{
+	if (hmd->latency_diag.window_start_ns == 0) {
+		hmd->latency_diag.window_start_ns = now_ns;
+		return;
+	}
+	if (now_ns - hmd->latency_diag.window_start_ns < 5 * (int64_t)U_TIME_1S_IN_NS) {
+		return;
+	}
+	char text[3][48];
+	for (int k = 0; k < 3; k++) {
+		uint32_t n = hmd->latency_diag.count[k];
+		int32_t *v = hmd->latency_diag.us[k];
+		if (n == 0) {
+			snprintf(text[k], sizeof(text[k]), "n=0");
+			continue;
+		}
+		qsort(v, n, sizeof(v[0]), compare_i32);
+		snprintf(text[k], sizeof(text[k]), "n=%u p5=%.2f p50=%.2f p95=%.2f", n, v[n * 5 / 100] / 1000.0,
+		         v[n / 2] / 1000.0, v[n * 95 / 100] / 1000.0);
+	}
+	PSVR2_WARN(hmd, "LATENCY_DIAG arrival minus exposure, ms: camera_set4 %s | camera_set5 %s | led_detector %s",
+	           text[0], text[1], text[2]);
+	memset(hmd->latency_diag.count, 0, sizeof(hmd->latency_diag.count));
+	hmd->latency_diag.window_start_ns = now_ns;
+}
+
 static void LIBUSB_CALL
 img_xfer_cb(struct libusb_transfer *xfer)
 {
@@ -1300,6 +1350,11 @@ img_xfer_cb(struct libusb_transfer *xfer)
 						memcpy(timing_sinks, hmd->camera_timing_sinks, sizeof(timing_sinks));
 						push_timing_event = true;
 					}
+				}
+				if (hmd->latency_diag.enabled && camera_set >= 4 && camera_set <= 5) {
+					psvr2_latency_diag_add_locked(hmd, camera_set - 4, received_ns,
+					                              camera_timestamp_ns);
+					psvr2_latency_diag_maybe_log_locked(hmd, received_ns);
 				}
 				if (hmd->camera_mode == PSVR2_CAMERA_MODE_4 && camera_set >= 4 && camera_set <= 5 &&
 				    camera_width == 512 && camera_height == 508 && camera_timestamp_ns != 0 &&
@@ -1702,6 +1757,22 @@ led_detector_xfer_cb(struct libusb_transfer *xfer)
 	}
 	if (hmd->led_detector_record != NULL && xfer->actual_length > 0) {
 		psvr2_led_detector_record_packet(hmd, xfer->buffer, (uint32_t)xfer->actual_length);
+	}
+	if (hmd->latency_diag.enabled && xfer->actual_length >= PSVR2_LD_HEADER_SIZE) {
+		// Assumes the header's device time (offset 8) is on the camera's VTS clock, mapped like a camera
+		// frame; offline centroid matching put arrival 8.7 ms after exposure, which checks it.
+		timepoint_ns received_ns = os_monotonic_get_ns();
+		uint32_t vts_us = (uint32_t)xfer->buffer[8] | (uint32_t)xfer->buffer[9] << 8 |
+		                  (uint32_t)xfer->buffer[10] << 16 | (uint32_t)xfer->buffer[11] << 24;
+		os_mutex_lock(&hmd->data_lock);
+		if (hmd->timestamp_samples >= TIMESTAMP_SAMPLES) {
+			int32_t to_imu_us = (int32_t)(vts_us - hmd->last_imu_vts_us);
+			psvr2_latency_diag_add_locked(hmd, 2, received_ns,
+			                              hmd->last_imu_vts_ns + hmd->hw2mono_vts +
+			                                  (int64_t)to_imu_us * U_TIME_1US_IN_NS);
+			psvr2_latency_diag_maybe_log_locked(hmd, received_ns);
+		}
+		os_mutex_unlock(&hmd->data_lock);
 	}
 	PSVR2_TRACE(hmd, "LED Detector xfer size %u", xfer->actual_length);
 
@@ -2460,6 +2531,9 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
 	hmd->led_detector_enabled = hmd->auxiliary_streams_enabled;
+	hmd->latency_diag.enabled = debug_get_bool_option_psvr2_latency_diag();
+	// The latency diagnostic compares the LED detector stream with the camera frames, so it opens the stream too.
+	hmd->led_detector_enabled = hmd->led_detector_enabled || hmd->latency_diag.enabled;
 	const char *led_detector_path = debug_get_option_psvr2_led_detector_record();
 	if (led_detector_path != NULL && led_detector_path[0] != '\0') {
 		/*

@@ -362,6 +362,18 @@ struct psvr2_hmd
 	//! PSVR2_LED_DETECTOR_RECORD output (a FILE *), written from the LED detector transfer callback only.
 	void *led_detector_record;
 	uint64_t led_detector_packets;
+	/*!
+	 * PSVR2_LATENCY_DIAG: arrival time minus exposure time, in µs, for the two mode-4 camera transfers (camera
+	 * sets 4 and 5) and the LED detector stream, logged as percentiles every 5 s (LATENCY_DIAG). Guarded by
+	 * data_lock.
+	 */
+	struct
+	{
+		bool enabled;
+		int64_t window_start_ns;
+		uint32_t count[3];
+		int32_t us[3][1024];
+	} latency_diag;
 	bool camera_streams_enabled;
 	bool gaze_streams_enabled;
 

@@ -1530,6 +1530,42 @@ each packet with an exposure by centroid matching:
   more extra spots are 0.2–0.8% throughout. The remaining losses are rings that
   were not visible, not detection failures.
 
-So the stream offers no recovery gain as a blob source. Its possible value is
-latency, since the detections arrive 8.7 ms after exposure; how this compares
-with the camera-frame path's latency has not been measured.
+So the stream offers no recovery gain as a blob source. Its value would be
+latency and load (below).
+
+### Camera-path latency against the LED detector stream (2026-10-05)
+
+`PSVR2_LATENCY_DIAG=1` (CLI session `20261005-201940-latency-diag`, 45 s,
+nine 5 s windows, controllers off; values in ms after the exposure timestamp,
+stable to ±0.1 ms across windows):
+
+| Stage | p5 | p50 | p95 |
+| --- | --- | --- | --- |
+| LED detector packet arrives | 7.9 | 8.2 | 8.6 |
+| Camera transfer, cameras 0–1 (set 4) arrives | 25.1 | 25.2 | 25.7 |
+| Camera transfer, cameras 2–3 (set 5) arrives | 28.0 | 28.2 | 28.7 |
+| Joint solve finished (`pose_age_ms`) | — | 28.6 | 29.1 |
+
+The live 8.2 ms agrees with the offline alignment (8.7 ms, measured against
+recorded host times), which confirms that the stream's device time is on the
+camera VTS clock. The camera path's latency is almost all transport. The
+second transfer of each exposure lands 28 ms after it, and blob detection plus
+the joint solve then take about 0.4 ms. Tracking from the detector stream would
+make optical poses about 20 ms fresher. The IMU covers that gap between
+optical updates, so the gain is mainly in how quickly position drift is
+corrected after fast motion, and in re-acquisition.
+
+Load: the camera path moves 2 × (header + 2 × 512 × 508 bytes) per exposure,
+about 62 MB/s of USB bulk traffic, plus four 258 KB frame copies and blob
+detection. The detector stream is 37 KB per packet, 2.2 MB/s, and only ~2 KB
+of that is populated. The whole CLI process (camera path, IMU, SLAM, LED
+output, controllers untracked) used 11–17% of one core. A profile splitting
+out blob detection was not taken: the controllers went to sleep.
+
+With `PSVR2_CAMERA_STREAMS=0` the stream still arrived at 60 Hz with populated
+records (`20261005-202046-if8-no-cameras`). The CLI exits without mode-4
+cameras, so that run covered only 14 packets. The headset may therefore detect
+without our camera streams, but this is unconfirmed over a real session and in
+the camera mode the headset then runs. Moving to the detector stream would
+also mean feeding the LED bootstrap's lit counts from it, and losing the
+thresholds we tune ourselves.
