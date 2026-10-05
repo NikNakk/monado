@@ -116,6 +116,39 @@ psvr2_set_camera_frame_sinks(struct xrt_device *xdev, struct xrt_frame_sink *con
 }
 
 bool
+psvr2_set_led_detector_blob_sinks(struct xrt_device *xdev, struct t_blob_sink *const sinks[4])
+{
+	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
+		return false;
+	}
+
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	os_mutex_lock(&hmd->data_lock);
+	if (sinks != NULL && !hmd->led_detector_blobs) {
+		os_mutex_unlock(&hmd->data_lock);
+		return false;
+	}
+	if (sinks == NULL) {
+		memset(hmd->led_detector_blob_sinks, 0, sizeof(hmd->led_detector_blob_sinks));
+	} else {
+		for (size_t i = 0; i < 4; i++) {
+			if (hmd->led_detector_blob_sinks[i] != NULL) {
+				os_mutex_unlock(&hmd->data_lock);
+				return false;
+			}
+		}
+		memcpy(hmd->led_detector_blob_sinks, sinks, sizeof(hmd->led_detector_blob_sinks));
+	}
+	while (sinks == NULL && hmd->led_detector_pushes_in_flight > 0) {
+		os_mutex_unlock(&hmd->data_lock);
+		os_nanosleep(U_TIME_1MS_IN_NS);
+		os_mutex_lock(&hmd->data_lock);
+	}
+	os_mutex_unlock(&hmd->data_lock);
+	return true;
+}
+
+bool
 psvr2_set_teardown_hook(struct xrt_device *xdev, void (*hook)(void *data), void *data)
 {
 	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {

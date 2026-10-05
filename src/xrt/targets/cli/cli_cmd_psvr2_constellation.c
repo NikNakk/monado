@@ -403,8 +403,11 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 		if (xdev->device_type == XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER)
 			controllers[1] = xdev;
 	}
+	// PSVR2_LED_DETECTOR_BLOBS: the headset's own LED detections replace blob detection on the camera images.
+	const bool detector_blobs = psvr2_led_detector_blobs_requested();
 	struct psvr2_camera_diagnostics diag = {0};
-	if (head == NULL || !psvr2_get_camera_diagnostics(head, &diag) || !diag.enabled || diag.configured_mode != 4 ||
+	if (head == NULL || !psvr2_get_camera_diagnostics(head, &diag) ||
+	    (!detector_blobs && (!diag.enabled || diag.configured_mode != 4)) ||
 	    (controllers[0] == NULL && controllers[1] == NULL)) {
 		fprintf(stderr, "Need a PS VR2 in camera mode 4 and at least one connected Sense controller.\n");
 		destroy_system(&xi, &xsys, &xsysd, &xso);
@@ -456,7 +459,20 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 		fprintf(stderr, "Failed to create constellation tracker.\n");
 		goto fail;
 	}
+	struct t_blob_sink *blob_sinks[4] = {0};
 	for (size_t i = 0; i < 4; i++) {
+		blob_sinks[i] = params.mosaics[0].cameras[i].blob_sink;
+		if (detector_blobs) {
+			// Camera images (if streaming) only feed the capture.
+			if (capture_initialized) {
+				frame_sinks[i] = &capture_sinks[i].base;
+				if (!u_sink_simple_queue_create(&tracking_xfctx, frame_sinks[i], &frame_sinks[i])) {
+					fprintf(stderr, "Failed to create capture queue for camera %zu.\n", i);
+					goto fail;
+				}
+			}
+			continue;
+		}
 		struct t_rift_blobwatch_params blob_params = {
 		    .pixel_threshold = blob_pixel_threshold,
 		    .blob_required_threshold = blob_required_threshold,
@@ -478,7 +494,16 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 			u_sink_split_create(&tracking_xfctx, frame_sinks[i], capture_sink, &frame_sinks[i]);
 		}
 	}
-	if (!psvr2_set_camera_frame_sinks(head, frame_sinks)) {
+	if (detector_blobs) {
+		if (!psvr2_set_led_detector_blob_sinks(head, blob_sinks)) {
+			fprintf(stderr, "Failed to attach the LED detector blob sinks.\n");
+			goto fail;
+		}
+		fprintf(stderr,
+		        "Blobs from the headset's LED detector (PSVR2_LED_DETECTOR_BLOBS); camera streams %s.\n",
+		        diag.enabled ? "on" : "off");
+	}
+	if ((!detector_blobs || capture_initialized) && !psvr2_set_camera_frame_sinks(head, frame_sinks)) {
 		fprintf(stderr, "Failed to attach tracking camera sinks.\n");
 		goto fail;
 	}
@@ -521,6 +546,7 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 		os_nanosleep(U_TIME_1MS_IN_NS);
 	}
 	(void)psvr2_set_camera_frame_sinks(head, NULL);
+	(void)psvr2_set_led_detector_blob_sinks(head, NULL);
 	struct pssense_constellation_diagnostics final_diagnostics[2] = {0};
 	for (size_t i = 0; i < 2; i++) {
 		if (controllers[i] != NULL) {
@@ -542,7 +568,7 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	}
 	(void)psvr2_get_camera_diagnostics(head, &diag);
 	destroy_system(&xi, &xsys, &xsysd, &xso);
-	bool pass = diag.frame_count > 0;
+	bool pass = diag.frame_count > 0 || detector_blobs;
 	for (size_t i = 0; i < 2; i++) {
 		if (controllers[i] != NULL) {
 			pass &= saw_position[i] && final_diagnostics[i].fused_pose_count >= 2;
@@ -567,6 +593,7 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 
 fail:
 	(void)psvr2_set_camera_frame_sinks(head, NULL);
+	(void)psvr2_set_led_detector_blob_sinks(head, NULL);
 	for (size_t i = 0; i < 2; i++) {
 		if (controllers[i] != NULL)
 			pssense_remove_from_constellation_tracker(controllers[i]);

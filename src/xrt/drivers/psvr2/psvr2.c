@@ -644,6 +644,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(psvr2_auxiliary_streams, "PSVR2_AUXILIARY_STREAMS", P
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_camera_streams, "PSVR2_CAMERA_STREAMS", false)
 DEBUG_GET_ONCE_OPTION(psvr2_led_detector_record, "PSVR2_LED_DETECTOR_RECORD", "")
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_latency_diag, "PSVR2_LATENCY_DIAG", false)
+DEBUG_GET_ONCE_BOOL_OPTION(psvr2_led_detector_blobs, "PSVR2_LED_DETECTOR_BLOBS", false)
+DEBUG_GET_ONCE_NUM_OPTION(psvr2_led_detector_vts_offset_us, "PSVR2_LED_DETECTOR_VTS_OFFSET_US", 0)
 /*
  * Provision the PS VR2 gaze USB interface by default so runtime-owned
  * eye-tracked features can be requested without a startup environment flag.
@@ -1229,6 +1231,12 @@ status_xfer_cb(struct libusb_transfer *xfer)
 	os_mutex_unlock(&hmd->data_lock);
 }
 
+bool
+psvr2_led_detector_blobs_requested(void)
+{
+	return debug_get_bool_option_psvr2_led_detector_blobs();
+}
+
 static int
 compare_i32(const void *a, const void *b)
 {
@@ -1260,8 +1268,8 @@ psvr2_latency_diag_maybe_log_locked(struct psvr2_hmd *hmd, timepoint_ns now_ns)
 	if (now_ns - hmd->latency_diag.window_start_ns < 5 * (int64_t)U_TIME_1S_IN_NS) {
 		return;
 	}
-	char text[3][48];
-	for (int k = 0; k < 3; k++) {
+	char text[4][48];
+	for (int k = 0; k < 4; k++) {
 		uint32_t n = hmd->latency_diag.count[k];
 		int32_t *v = hmd->latency_diag.us[k];
 		if (n == 0) {
@@ -1272,8 +1280,10 @@ psvr2_latency_diag_maybe_log_locked(struct psvr2_hmd *hmd, timepoint_ns now_ns)
 		snprintf(text[k], sizeof(text[k]), "n=%u p5=%.2f p50=%.2f p95=%.2f", n, v[n * 5 / 100] / 1000.0,
 		         v[n / 2] / 1000.0, v[n * 95 / 100] / 1000.0);
 	}
-	PSVR2_WARN(hmd, "LATENCY_DIAG arrival minus exposure, ms: camera_set4 %s | camera_set5 %s | led_detector %s",
-	           text[0], text[1], text[2]);
+	PSVR2_WARN(hmd,
+	           "LATENCY_DIAG arrival minus exposure, ms: camera_set4 %s | camera_set5 %s | led_detector %s | "
+	           "led_detector device time minus camera VTS %s",
+	           text[0], text[1], text[2], text[3]);
 	memset(hmd->latency_diag.count, 0, sizeof(hmd->latency_diag.count));
 	hmd->latency_diag.window_start_ns = now_ns;
 }
@@ -1349,6 +1359,26 @@ img_xfer_cb(struct libusb_transfer *xfer)
 						};
 						memcpy(timing_sinks, hmd->camera_timing_sinks, sizeof(timing_sinks));
 						push_timing_event = true;
+					}
+				}
+				hmd->last_camera_frame_ns = received_ns;
+				if (camera_set == 4 && hmd->led_detector_enabled) {
+					// Pair this exposure with the detector packet sent for it (which arrives
+					// first).
+					int32_t best = INT32_MAX;
+					for (size_t r = 0; r < ARRAY_SIZE(hmd->led_detector_recent_vts_us); r++) {
+						uint32_t ld = hmd->led_detector_recent_vts_us[r];
+						int32_t d = (int32_t)(ld - camera_vts_us);
+						if (ld != 0 && abs(d) < 4000 && abs(d) < abs(best)) {
+							best = d;
+						}
+					}
+					if (best != INT32_MAX) {
+						hmd->led_detector_vts_offset_us = best;
+						if (hmd->latency_diag.enabled &&
+						    hmd->latency_diag.count[3] < ARRAY_SIZE(hmd->latency_diag.us[3])) {
+							hmd->latency_diag.us[3][hmd->latency_diag.count[3]++] = best;
+						}
 					}
 				}
 				if (hmd->latency_diag.enabled && camera_set >= 4 && camera_set <= 5) {
@@ -1746,6 +1776,161 @@ psvr2_led_detector_record_packet(struct psvr2_hmd *hmd, const uint8_t *data, uin
 	hmd->led_detector_packets++;
 }
 
+static uint32_t
+read_le32(const uint8_t *p)
+{
+	return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+//! A no-op blob source for detector observations: the joint tracker does not call back into it.
+static void
+led_detector_blobwatch_mark(struct t_blobwatch *tbw,
+                            const struct t_blob_observation *tbo,
+                            t_constellation_device_id_t device_id)
+{
+	(void)tbw;
+	(void)tbo;
+	(void)device_id;
+}
+
+static struct t_blobwatch led_detector_blobwatch = {
+    .mark_blob_device = led_detector_blobwatch_mark,
+    .destroy = NULL,
+};
+
+/*!
+ * One detector packet: timing (PSVR2_LATENCY_DIAG, exposure events while no camera frames arrive) and, with
+ * PSVR2_LED_DETECTOR_BLOBS, one blob observation per camera.
+ *
+ * The packet is a 64-byte header (device time in µs at offset 8, frame counter at 20) and four camera sections,
+ * each a u32 count and up to 256 36-byte records. A record holds a bounding box (u16 xmin, xmax, ymin, ymax at 4)
+ * and u32 intensity moments m00, m10, m01 at 12, the first moments measured from xmin and ymin, in mode-4 image
+ * pixels (layout and coordinates established against Monado's own blobs, see
+ * doc/macos-pssense-6dof-integration.md).
+ */
+static void
+psvr2_led_detector_process(struct psvr2_hmd *hmd, const uint8_t *data, uint32_t length)
+{
+	const timepoint_ns received_ns = os_monotonic_get_ns();
+	const uint32_t device_us = read_le32(data + 8);
+	const uint32_t counter = read_le32(data + 20);
+	const uint32_t section_size = 4 + PSVR2_LD_SECTION_RECORDS * PSVR2_LD_RECORD_SIZE;
+
+	struct t_blob_sink *sinks[4] = {0};
+	struct t_timing_event_sink *timing_sinks[2] = {0};
+	struct t_timing_event timing_event = {0};
+	bool push_timing_event = false;
+	int64_t exposure_ns = 0;
+
+	os_mutex_lock(&hmd->data_lock);
+	hmd->led_detector_recent_vts_us[hmd->led_detector_recent_next++ % ARRAY_SIZE(hmd->led_detector_recent_vts_us)] =
+	    device_us;
+	if (hmd->timestamp_samples >= TIMESTAMP_SAMPLES) {
+		// The exposure's camera VTS, mapped to host time as a camera frame's is.
+		uint32_t vts_us = device_us - (uint32_t)hmd->led_detector_vts_offset_us;
+		int32_t to_imu_us = (int32_t)(vts_us - hmd->last_imu_vts_us);
+		exposure_ns = hmd->last_imu_vts_ns + hmd->hw2mono_vts + (int64_t)to_imu_us * U_TIME_1US_IN_NS;
+		if (hmd->latency_diag.enabled) {
+			psvr2_latency_diag_add_locked(hmd, 2, received_ns, exposure_ns);
+			psvr2_latency_diag_maybe_log_locked(hmd, received_ns);
+		}
+		// Without camera frames nothing else announces exposures, which the Sense LED schedule follows.
+		bool cameras_flowing = hmd->last_camera_frame_ns != 0 &&
+		                       received_ns - hmd->last_camera_frame_ns < 200 * (int64_t)U_TIME_1MS_IN_NS;
+		if (hmd->led_detector_blobs && !cameras_flowing) {
+			uint32_t interval_us = device_us - hmd->last_led_detector_event_vts_us;
+			uint32_t frames = counter - hmd->last_led_detector_event_counter;
+			bool have_previous = hmd->last_led_detector_event_vts_us != 0 && frames != 0 && frames < 8;
+			timing_event = (struct t_timing_event){
+			    .type = T_TIMING_EVENT_TYPE_CAMERA_EXPOSURE_START,
+			    .camera_exposure_start =
+			        {
+			            .sequence_id = counter,
+			            .timestamp_ns = exposure_ns,
+			            .frame_period_ns =
+			                have_previous ? (uint64_t)interval_us * U_TIME_1US_IN_NS / frames : 0,
+			            .exposure_time_ns = 0,
+			        },
+			};
+			memcpy(timing_sinks, hmd->camera_timing_sinks, sizeof(timing_sinks));
+			push_timing_event = true;
+		}
+		hmd->last_led_detector_event_vts_us = device_us;
+		hmd->last_led_detector_event_counter = counter;
+	}
+	bool push_blobs = exposure_ns != 0 && length == PSVR2_LD_HEADER_SIZE + PSVR2_LD_SECTIONS * section_size;
+	if (push_blobs) {
+		memcpy(sinks, hmd->led_detector_blob_sinks, sizeof(sinks));
+		push_blobs = sinks[0] != NULL || sinks[1] != NULL || sinks[2] != NULL || sinks[3] != NULL;
+		if (push_blobs) {
+			hmd->led_detector_pushes_in_flight++;
+		}
+	}
+	os_mutex_unlock(&hmd->data_lock);
+
+	if (push_timing_event) {
+		for (size_t i = 0; i < ARRAY_SIZE(timing_sinks); i++) {
+			if (timing_sinks[i] != NULL) {
+				t_timing_event_sink_push_timing_event(timing_sinks[i], &timing_event);
+			}
+		}
+	}
+	if (!push_blobs) {
+		return;
+	}
+
+	// Only the USB event thread runs this, one packet at a time; the sinks copy the blobs.
+	static struct t_blob blobs[XRT_CONSTELLATION_MAX_BLOBS_PER_FRAME];
+	for (uint32_t s = 0; s < PSVR2_LD_SECTIONS && s < 4; s++) {
+		if (sinks[s] == NULL) {
+			continue;
+		}
+		const uint8_t *section = data + PSVR2_LD_HEADER_SIZE + s * section_size;
+		uint32_t count = read_le32(section);
+		if (count > PSVR2_LD_SECTION_RECORDS) {
+			count = PSVR2_LD_SECTION_RECORDS;
+		}
+		uint32_t n = 0;
+		for (uint32_t r = 0; r < count && n < XRT_CONSTELLATION_MAX_BLOBS_PER_FRAME; r++) {
+			const uint8_t *rec = section + 4 + r * PSVR2_LD_RECORD_SIZE;
+			uint16_t xmin = (uint16_t)(rec[4] | rec[5] << 8), xmax = (uint16_t)(rec[6] | rec[7] << 8);
+			uint16_t ymin = (uint16_t)(rec[8] | rec[9] << 8), ymax = (uint16_t)(rec[10] | rec[11] << 8);
+			uint32_t m00 = read_le32(rec + 12);
+			if (m00 == 0 || xmax < xmin || ymax < ymin) {
+				continue;
+			}
+			struct t_blob *b = &blobs[n];
+			*b = (struct t_blob){0};
+			b->blob_id = n;
+			b->matched_device_id = XRT_CONSTELLATION_INVALID_DEVICE_ID;
+			b->matched_device_led_id = XRT_CONSTELLATION_INVALID_LED_ID;
+			b->center.x = (float)xmin + (float)((double)read_le32(rec + 16) / m00);
+			b->center.y = (float)ymin + (float)((double)read_le32(rec + 20) / m00);
+			b->bounding_box.offset.w = xmin;
+			b->bounding_box.offset.h = ymin;
+			b->bounding_box.extent.w = xmax - xmin + 1;
+			b->bounding_box.extent.h = ymax - ymin + 1;
+			b->size.x = (float)(xmax - xmin + 1);
+			b->size.y = (float)(ymax - ymin + 1);
+			// The records carry no peak value.
+			b->brightness = 1.0f;
+			n++;
+		}
+		struct t_blob_observation observation = {
+		    .source = &led_detector_blobwatch,
+		    .id = counter,
+		    .timestamp_ns = exposure_ns,
+		    .blobs = blobs,
+		    .num_blobs = n,
+		};
+		t_blob_sink_push_blobs(sinks[s], &observation);
+	}
+
+	os_mutex_lock(&hmd->data_lock);
+	hmd->led_detector_pushes_in_flight--;
+	os_mutex_unlock(&hmd->data_lock);
+}
+
 static void LIBUSB_CALL
 led_detector_xfer_cb(struct libusb_transfer *xfer)
 {
@@ -1758,21 +1943,8 @@ led_detector_xfer_cb(struct libusb_transfer *xfer)
 	if (hmd->led_detector_record != NULL && xfer->actual_length > 0) {
 		psvr2_led_detector_record_packet(hmd, xfer->buffer, (uint32_t)xfer->actual_length);
 	}
-	if (hmd->latency_diag.enabled && xfer->actual_length >= PSVR2_LD_HEADER_SIZE) {
-		// Assumes the header's device time (offset 8) is on the camera's VTS clock, mapped like a camera
-		// frame; offline centroid matching put arrival 8.7 ms after exposure, which checks it.
-		timepoint_ns received_ns = os_monotonic_get_ns();
-		uint32_t vts_us = (uint32_t)xfer->buffer[8] | (uint32_t)xfer->buffer[9] << 8 |
-		                  (uint32_t)xfer->buffer[10] << 16 | (uint32_t)xfer->buffer[11] << 24;
-		os_mutex_lock(&hmd->data_lock);
-		if (hmd->timestamp_samples >= TIMESTAMP_SAMPLES) {
-			int32_t to_imu_us = (int32_t)(vts_us - hmd->last_imu_vts_us);
-			psvr2_latency_diag_add_locked(hmd, 2, received_ns,
-			                              hmd->last_imu_vts_ns + hmd->hw2mono_vts +
-			                                  (int64_t)to_imu_us * U_TIME_1US_IN_NS);
-			psvr2_latency_diag_maybe_log_locked(hmd, received_ns);
-		}
-		os_mutex_unlock(&hmd->data_lock);
+	if (xfer->actual_length >= PSVR2_LD_HEADER_SIZE) {
+		psvr2_led_detector_process(hmd, xfer->buffer, (uint32_t)xfer->actual_length);
 	}
 	PSVR2_TRACE(hmd, "LED Detector xfer size %u", xfer->actual_length);
 
@@ -2533,7 +2705,9 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->led_detector_enabled = hmd->auxiliary_streams_enabled;
 	hmd->latency_diag.enabled = debug_get_bool_option_psvr2_latency_diag();
 	// The latency diagnostic compares the LED detector stream with the camera frames, so it opens the stream too.
-	hmd->led_detector_enabled = hmd->led_detector_enabled || hmd->latency_diag.enabled;
+	hmd->led_detector_blobs = debug_get_bool_option_psvr2_led_detector_blobs();
+	hmd->led_detector_vts_offset_us = (int32_t)debug_get_num_option_psvr2_led_detector_vts_offset_us();
+	hmd->led_detector_enabled = hmd->led_detector_enabled || hmd->latency_diag.enabled || hmd->led_detector_blobs;
 	const char *led_detector_path = debug_get_option_psvr2_led_detector_record();
 	if (led_detector_path != NULL && led_detector_path[0] != '\0') {
 		/*
