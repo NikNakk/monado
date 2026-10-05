@@ -642,6 +642,7 @@ psvr2_timing_trace_score_horizon(timepoint_ns previous_slam_vts_ns,
 
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_auxiliary_streams, "PSVR2_AUXILIARY_STREAMS", PSVR2_AUXILIARY_STREAMS_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_camera_streams, "PSVR2_CAMERA_STREAMS", false)
+DEBUG_GET_ONCE_OPTION(psvr2_led_detector_record, "PSVR2_LED_DETECTOR_RECORD", "")
 /*
  * Provision the PS VR2 gaze USB interface by default so runtime-owned
  * eye-tracked features can be requested without a startup environment flag.
@@ -690,6 +691,11 @@ psvr2_hmd_destroy(struct xrt_device *xdev)
 
 	if (hmd->usb_transfers_drained) {
 		psvr2_usb_destroy(hmd);
+	}
+	if (hmd->led_detector_record != NULL) {
+		fclose(hmd->led_detector_record);
+		hmd->led_detector_record = NULL;
+		PSVR2_INFO(hmd, "LED detector recording closed after %" PRIu64 " packets", hmd->led_detector_packets);
 	}
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
@@ -1633,6 +1639,77 @@ slam_xfer_cb(struct libusb_transfer *xfer)
 	os_mutex_unlock(&hmd->data_lock);
 }
 
+/*
+ * PSVR2_LED_DETECTOR_RECORD format (little-endian): "PSLD" then a u32 version (1); per packet a u64 host
+ * monotonic receipt time in ns, the u32 transfer length and the u32 stored length, then the stored bytes. A
+ * full-size packet is stored compactly: its 64-byte header, then per section the u32 record count and only that
+ * many 36-byte records (unused slots are always zero). Other lengths are stored raw.
+ */
+#define PSVR2_LD_HEADER_SIZE 64
+#define PSVR2_LD_SECTIONS 4
+#define PSVR2_LD_RECORD_SIZE 36
+#define PSVR2_LD_SECTION_RECORDS 256
+
+static void
+psvr2_led_detector_record_packet(struct psvr2_hmd *hmd, const uint8_t *data, uint32_t length)
+{
+	FILE *file = hmd->led_detector_record;
+	const uint64_t now_ns = (uint64_t)os_monotonic_get_ns();
+	const uint32_t section_size = 4 + PSVR2_LD_SECTION_RECORDS * PSVR2_LD_RECORD_SIZE;
+	uint8_t compact[USB_LD_XFER_SIZE];
+	const uint8_t *stored = data;
+	uint32_t stored_length = length;
+
+	if (length == PSVR2_LD_HEADER_SIZE + PSVR2_LD_SECTIONS * section_size && length <= sizeof(compact)) {
+		memcpy(compact, data, PSVR2_LD_HEADER_SIZE);
+		stored_length = PSVR2_LD_HEADER_SIZE;
+		for (uint32_t s = 0; s < PSVR2_LD_SECTIONS; s++) {
+			const uint8_t *section = data + PSVR2_LD_HEADER_SIZE + s * section_size;
+			uint32_t count = (uint32_t)section[0] | (uint32_t)section[1] << 8 | (uint32_t)section[2] << 16 |
+			                 (uint32_t)section[3] << 24;
+			uint32_t kept = count < PSVR2_LD_SECTION_RECORDS ? count : PSVR2_LD_SECTION_RECORDS;
+			memcpy(compact + stored_length, section, 4 + kept * PSVR2_LD_RECORD_SIZE);
+			stored_length += 4 + kept * PSVR2_LD_RECORD_SIZE;
+		}
+		stored = compact;
+	}
+
+	uint8_t prefix[16];
+	for (int i = 0; i < 8; i++) {
+		prefix[i] = (uint8_t)(now_ns >> (8 * i));
+	}
+	for (int i = 0; i < 4; i++) {
+		prefix[8 + i] = (uint8_t)(length >> (8 * i));
+		prefix[12 + i] = (uint8_t)(stored_length >> (8 * i));
+	}
+	if (fwrite(prefix, sizeof(prefix), 1, file) != 1 || fwrite(stored, stored_length, 1, file) != 1) {
+		PSVR2_ERROR(hmd, "PSVR2_LED_DETECTOR_RECORD: write failed, recording stopped");
+		fclose(file);
+		hmd->led_detector_record = NULL;
+		return;
+	}
+	hmd->led_detector_packets++;
+}
+
+static void LIBUSB_CALL
+led_detector_xfer_cb(struct libusb_transfer *xfer)
+{
+	DRV_TRACE_MARKER();
+	struct psvr2_hmd *hmd = xfer->user_data;
+
+	if (!psvr2_usb_xfer_continue(xfer, "LED Detector")) {
+		return;
+	}
+	if (hmd->led_detector_record != NULL && xfer->actual_length > 0) {
+		psvr2_led_detector_record_packet(hmd, xfer->buffer, (uint32_t)xfer->actual_length);
+	}
+	PSVR2_TRACE(hmd, "LED Detector xfer size %u", xfer->actual_length);
+
+	os_mutex_lock(&hmd->data_lock);
+	libusb_submit_transfer(xfer);
+	os_mutex_unlock(&hmd->data_lock);
+}
+
 static void LIBUSB_CALL
 dump_xfer_cb(struct libusb_transfer *xfer)
 {
@@ -1757,8 +1834,12 @@ psvr2_usb_open(struct psvr2_hmd *hmd, struct xrt_prober_device *xpdev)
 		if (intf_no == PSVR2_GAZE_INTERFACE && !hmd->gaze_streams_enabled) {
 			continue;
 		}
+		if (intf_no == PSVR2_LD_INTERFACE && !hmd->led_detector_enabled) {
+			continue;
+		}
 		if (interface_list[i].auxiliary && intf_no != PSVR2_CAMERA_INTERFACE &&
-		    intf_no != PSVR2_GAZE_INTERFACE && !hmd->auxiliary_streams_enabled) {
+		    intf_no != PSVR2_GAZE_INTERFACE && intf_no != PSVR2_LD_INTERFACE &&
+		    !hmd->auxiliary_streams_enabled) {
 			continue;
 		}
 
@@ -2071,7 +2152,7 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 	}
 	hmd->usb_active_xfers++;
 
-	if (hmd->auxiliary_streams_enabled) {
+	if (hmd->led_detector_enabled) {
 		/* LD endpoint */
 		hmd->led_detector_xfer = libusb_alloc_transfer(0);
 		if (hmd->led_detector_xfer == NULL) {
@@ -2080,7 +2161,7 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 		}
 		uint8_t *led_detector_buf = malloc(USB_LD_XFER_SIZE);
 		libusb_fill_bulk_transfer(hmd->led_detector_xfer, hmd->dev, LIBUSB_ENDPOINT_IN | PSVR2_LD_ENDPOINT,
-		                          led_detector_buf, USB_LD_XFER_SIZE, dump_xfer_cb, hmd, 0);
+		                          led_detector_buf, USB_LD_XFER_SIZE, led_detector_xfer_cb, hmd, 0);
 		hmd->led_detector_xfer->flags |= LIBUSB_TRANSFER_FREE_BUFFER;
 
 		res = libusb_submit_transfer(hmd->led_detector_xfer);
@@ -2089,7 +2170,9 @@ psvr2_usb_start(struct psvr2_hmd *hmd)
 			goto out;
 		}
 		hmd->usb_active_xfers++;
+	}
 
+	if (hmd->auxiliary_streams_enabled) {
 		/* RP endpoint */
 		hmd->relocalizer_xfer = libusb_alloc_transfer(0);
 		if (hmd->relocalizer_xfer == NULL) {
@@ -2376,6 +2459,26 @@ psvr2_hmd_create(struct xrt_prober_device *xpdev)
 	hmd->usb_transfers_drained = true;
 	hmd->log_level = debug_get_log_option_psvr2_log();
 	hmd->auxiliary_streams_enabled = debug_get_bool_option_psvr2_auxiliary_streams();
+	hmd->led_detector_enabled = hmd->auxiliary_streams_enabled;
+	const char *led_detector_path = debug_get_option_psvr2_led_detector_record();
+	if (led_detector_path != NULL && led_detector_path[0] != '\0') {
+		/*
+		 * Opt-in: record the headset's LED detector stream (interface 8) without the other auxiliary streams,
+		 * so camera mode 4 and the conservative macOS USB set are otherwise unchanged.
+		 */
+		FILE *file = fopen(led_detector_path, "wb");
+		static const uint8_t magic[8] = {'P', 'S', 'L', 'D', 1, 0, 0, 0};
+		if (file != NULL && fwrite(magic, sizeof(magic), 1, file) == 1) {
+			hmd->led_detector_record = file;
+			hmd->led_detector_enabled = true;
+			PSVR2_INFO(hmd, "Recording the LED detector stream to '%s'", led_detector_path);
+		} else {
+			PSVR2_ERROR(hmd, "PSVR2_LED_DETECTOR_RECORD: cannot write '%s'", led_detector_path);
+			if (file != NULL) {
+				fclose(file);
+			}
+		}
+	}
 	hmd->camera_streams_enabled = hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_camera_streams();
 	hmd->gaze_streams_enabled = hmd->auxiliary_streams_enabled || debug_get_bool_option_psvr2_gaze_streams();
 	hmd->stage_space_enabled = debug_get_bool_option_psvr2_stage_space();

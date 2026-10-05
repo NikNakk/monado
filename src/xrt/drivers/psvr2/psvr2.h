@@ -357,6 +357,11 @@ struct psvr2_hmd
 	/* Optional USB streams. auxiliary_streams_enabled retains the historical
 	 * all-streams switch; camera and gaze can now be enabled independently. */
 	bool auxiliary_streams_enabled;
+	//! LED detector stream (interface 8) open: with the auxiliary streams, or PSVR2_LED_DETECTOR_RECORD alone.
+	bool led_detector_enabled;
+	//! PSVR2_LED_DETECTOR_RECORD output (a FILE *), written from the LED detector transfer callback only.
+	void *led_detector_record;
+	uint64_t led_detector_packets;
 	bool camera_streams_enabled;
 	bool gaze_streams_enabled;
 
