@@ -392,6 +392,45 @@ TEST_CASE("LED phase bootstrap stuck check passes a healthy ring and then locks"
 	CHECK(b.locks_acquired == 1);
 }
 
+TEST_CASE("LED phase bootstrap locks a weak hinted ring instead of falling back to the full scan")
+{
+	/*
+	 * 5 Oct (083028): the right ring, seen by two cameras, lit only 1-2 steps of every hinted scan; after the
+	 * retries the full scan's wide pulses preceded the always-lit fault. Here the window is dark everywhere but
+	 * one narrow step, at the hinted place.
+	 */
+	const int64_t latency = 3600000;
+	t_led_phase_bootstrap_options options = test_options();
+	options.hint_retries = 2;
+	options.failed_backoff_frames = 10;
+	// Lit starts lie in (-narrow_blink - latency, exposure - latency): hint the window's middle.
+	options.hint_fudge_ns = t_led_phase_bootstrap_wrap(-latency + 300000, kPeriod);
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+	t_led_phase_bootstrap_start(&b, kPeriod);
+
+	Sim sim{.latency_ns = latency};
+	sim.exposure_ns = 1200000;
+	sim.dark_from_ns = -options.narrow_blink_ns - latency + options.narrow_step_ns;
+	sim.dark_to_ns = sim.dark_from_ns + sim.exposure_ns + options.narrow_blink_ns;
+	uint32_t frame = 0;
+	bool wide = false;
+	for (uint32_t i = 0; i < 6000 && b.locks_acquired == 0; i++) {
+		sim.run(b, 1, frame);
+		wide = wide || b.state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN;
+		if (t_led_phase_bootstrap_ready_to_scan(&b)) {
+			t_led_phase_bootstrap_start(&b, kPeriod);
+		}
+	}
+	CHECK_FALSE(wide);
+	REQUIRE(b.locks_acquired == 1);
+	CHECK(b.hint_failures == 0);
+	// Locked on the lit step, within the window though not centred.
+	sim.dark_from_ns = sim.dark_to_ns = 0;
+	sim.run(b, 120, frame);
+	CHECK(sim.lit(sim.applied_fudge, sim.applied_blink));
+}
+
 TEST_CASE("LED phase bootstrap measures against each camera's background")
 {
 	// 24 Sep slow-movement run: windows put 3-7 blobs in cameras 0 and 2 with the LEDs dark, which made those
