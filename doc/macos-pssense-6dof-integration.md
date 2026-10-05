@@ -1425,3 +1425,45 @@ The remaining losses are re-acquisition and visibility, not the LED faults.
 Candidates: single-camera re-acquisition using the IMU orientation as a prior
 (for `lit_single`), and recorded replays of `lit_multi` intervals to find why
 stereo bootstrap fails with the ring visible.
+
+### Opt-in oriented re-acquisition (2026-10-05)
+
+`CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1` (default off) adds a fallback to
+the joint tracker's bootstrap contest. When stereo bootstrap fails for a device
+with an IMU orientation and an alignment from earlier solves, the orientation
+is taken as known. Two blob–LED pairs in one camera then fix the position
+linearly. Hypotheses are scored by projection, and the best few are refined
+against every camera with the orientation as a 4° prior. The result enters the
+same best-fit contest and needs the usual three confirming solves. The unit
+tests re-acquire a ring seen by only one camera (60 of 60, 40 of 40 with 5° of
+orientation error) and never accept the other hand's mirror-image ring (0 of
+60).
+
+Instrumenting the replay showed what had blocked re-acquisition. Most fits
+that failed were correct poses: 12–21 matches over three or four cameras at
+0.2–0.3 px, rejected only by the 0.8 coverage rule because part of the ring was
+occluded. Phase-1 tracking applies the same rule, so it dropped these poses too.
+Coverage exists to catch a pose slipped round the ring. The orientation prior
+already rules that out, since adjacent LEDs are about 20° apart and the prior's
+sigma is 3–4°. The opt-in therefore also lowers the coverage limit to 0.5 for
+any solve anchored to the IMU orientation. The mirror-ring test still accepts
+nothing.
+
+Replay of `20261005-0810-openbrush-left-recorded` (pre-Sony-like profile; at
+`2eb074e96` plus this change), off / on:
+
+- Left: 5201 / 5294 poses pushed (+1.8%). `lit_multi` exposures 222 / 83,
+  `lit_single` 193 / 160, total loss time 50.5 / 46.5 s. RMS p50 0.265 /
+  0.266 px, p95 0.419 / 0.441 px.
+- Right: 8272 / 8274 poses pushed, loss time 10.0 / 10.5 s (noise level).
+- Cost: mean solve 59 / 73 µs, worst 0.74 / 1.25 ms per exposure.
+- Most of this session's left loss is `dark_unpredicted` (2156 exposures), which
+  no solver change can recover.
+- The Sony-like still sessions (`sonylike*-still-*`, `135030-latchhold-check`)
+  are unchanged, because their losses are dark rings.
+
+The single-camera path accounts for little of the gain here; the lower
+coverage accounts for most of it. A moving session recorded with the Sony-like
+profile, which had 1534 left `lit_single` exposures live, is the next test.
+Known limitation: a ring seen in one camera, but predicted clearly visible in
+others where it is hidden, still fails coverage below 0.5.

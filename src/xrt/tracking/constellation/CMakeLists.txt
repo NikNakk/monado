@@ -11,6 +11,8 @@ add_library(
 	image_point_sort.h
 	joint_pose_solver.cpp
 	joint_pose_solver.hpp
+	oriented_bootstrap.cpp
+	oriented_bootstrap.hpp
 	stereo_bootstrap.cpp
 	stereo_bootstrap.hpp
 	t_constellation_tracker_joint.cpp

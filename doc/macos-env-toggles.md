@@ -100,6 +100,15 @@ on hardware:
 | `PSSENSE_LED_BLINK_SWEEP_S` | 4 | Seconds per sweep step. |
 | `PSSENSE_LED_BROAD_PERIOD_ID` | lock period | BROAD pulse period ID. Sony uses 42 (2.1 ms), which is historically associated with the always-lit fault in wide scans, so test it separately. |
 
+Opt-in tracker experiment, also not set by the helper and unvalidated on
+hardware: `CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1` re-acquires a lost
+device from its IMU orientation (carried into the optical world by the
+alignment from earlier solves) when stereo bootstrap fails, from one camera's
+blobs, and lowers the coverage limit from 0.8 to 0.5 for any solve anchored to
+the IMU orientation, tracking included (see
+`tracking/constellation/oriented_bootstrap.hpp`). Counted as `oriented=` in
+`JOINT_STATUS` and `JOINT_LOSS`.
+
 Build optimisation is required for both solver and runtime. Use the
 `macos-sense-relwithdebinfo` preset; do not use an empty build type or Debug for
 performance/hardware comparisons. The following audit counts are historical.

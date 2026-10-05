@@ -472,6 +472,8 @@ struct JointDeviceState
 		uint32_t dark_in_view{0};
 		uint32_t dark_out_of_view{0};
 		uint32_t dark_unpredicted{0};
+		//! Re-acquisitions from one camera with the IMU orientation (accepted, confirmed or not).
+		uint32_t oriented{0};
 		float max_excess_blobs{0.0f};
 		//! The last solve before the loss: cameras used, cameras it projects into and its best edge margin.
 		uint32_t start_cameras{0};
@@ -513,6 +515,9 @@ struct JointProcessor
 	uint64_t processed{0};
 	uint64_t device_tracked{0};
 	uint64_t device_bootstrapped{0};
+	//! Of those, re-acquired by @ref oriented_bootstrap (CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1).
+	uint64_t device_oriented{0};
+	bool oriented_bootstrap_enabled{false};
 	uint64_t device_failed{0};
 	uint64_t unconfirmed_dropped{0};
 	double solve_us_total{0.0};
@@ -524,7 +529,7 @@ struct JointProcessor
 	//! Last JOINT_SLOW warning (steady clock), to rate-limit them.
 	int64_t last_slow_log_ns{0};
 
-	JointProcessor(ConstellationTracker *tracker, size_t camera_count);
+	JointProcessor(ConstellationTracker *tracker, size_t camera_count, bool oriented_bootstrap_enabled);
 	~JointProcessor();
 
 	//! Called from camera threads with each camera's sample (including frames with no blobs).
