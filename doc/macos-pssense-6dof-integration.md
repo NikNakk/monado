@@ -1467,3 +1467,33 @@ coverage accounts for most of it. A moving session recorded with the Sony-like
 profile, which had 1534 left `lit_single` exposures live, is the next test.
 Known limitation: a ring seen in one camera, but predicted clearly visible in
 others where it is hidden, still fails coverage below 0.5.
+
+### OpenBrush with oriented re-acquisition, recorded (2026-10-05)
+
+Build `caae3a05a`, the Sony-like profile of the previous OpenBrush run plus
+`CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1`, recording blobs and the LED
+detector stream (session `20261005-2001-openbrush-oriented-recorded`, 458 s).
+The user reports a few seconds before the left was first tracked, then no
+losses apart from deliberate occlusion, with quick recovery.
+
+- LED schedule: one hinted narrow scan per controller, locked once, never lost
+  or rescanned, no `stuck_lit`. The left's delayed start is the bootstrap order:
+  the right scans first and the left begins after it locks. Batteries: left 100%,
+  right 85 → 75%.
+- Live `JOINT_LOSS` (left / right): 8 / 17 losses, 6.6 / 9.8 s in total, the
+  longest 1.4 / 1.6 s; 5 / 5 oriented re-acquisitions.
+- Replay of the recording, off / on (the same blobs both times, so a
+  counterfactual for the tracker only):
+  - Left: 25906 / 26275 poses pushed (94.3% / 95.7% of exposures), 18 / 7
+    losses, 13.2 / 6.4 s lost, `lit_multi` 350 / 22, `lit_single` 85 / 65.
+  - Right: 25591 / 25643 poses, 31 / 30 losses, 15.8 / 15.0 s lost.
+  - RMS p95 0.450 / 0.453 px (left), 0.449 / 0.453 px (right). Mean solve 87 /
+    82 µs, worst 0.2 ms.
+  - The replay with the option on matches the live log (7 left losses against 8
+    live, 6.4 s against 6.6 s).
+- LED detector stream: 27,461 packets at 59.9/s over the whole session (a few
+  counter gaps), 12–17 records per camera per packet.
+
+On this session the option halves the left's lost time, mainly by keeping and
+recovering partly occluded rings (`lit_multi`). The remaining loss for both
+hands is mostly `dark_unpredicted`, which here is deliberate hiding.
