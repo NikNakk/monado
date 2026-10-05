@@ -1038,3 +1038,46 @@ Out-of-view controllers with stray frames can now rescan sooner than before;
 hinted retries back off for 15 s before any full scan, as for the existing
 loss rule. Hardware validation is pending, with `PSSENSE_CLOCK_STEADY=1`
 already set in the normal profile.
+
+### The phase probes black out the left ring (2026-10-05)
+
+Recorded OpenBrush session `~/Code/psvr2-datasets/sessions/20261005-0810-openbrush-left-recorded/`
+(build `9fc55e368`, steady clock, lost-lit 25%, blinds closed with daylight at
+the edges). The user saw the left alternate almost regularly between tracking
+and not. Replay (`constellation_replay --tracker-filter`):
+
+- Left 60% of exposures solved, right 91%. The left ring sits at a median 0.41 m
+  from the cameras against 0.24 m for the right, so its blobs are smaller (median
+  area 20 px against 48). Area × range² is similar (3.6 against 3.0), so the left
+  LEDs are not intrinsically weaker.
+- Light leaking round the blinds forms 4–11 static bright patches per camera, most
+  in camera 2. The left ring was never within 60 px of one, tracked or at a loss.
+  It is not the cause here.
+- Of 34 left losses (at least 30 unsolved exposures), most started from 20–33
+  matched LEDs in 3–4 cameras. **The next exposure had no blobs at all near the
+  ring**, in every camera, for at least 0.5 s. That is the LEDs leaving the
+  exposure, not occlusion.
+- From 26 to 105 s **every left loss began 0.5–1.1 s before a phase-probe result
+  was logged** (onsets 35.3, 40.2, 44.9 … 105.2 s; probe results 35.9, 40.7,
+  45.5 … 105.7 s). The median onset interval is 3.4–4.9 s, matching the probe
+  cadence.
+
+The probes shift the 1.0 ms locked pulse ±300 µs. With the exposure about 1 ms
+(1450 µs narrow windows less the 450 µs narrow pulse), pulse and exposure are
+the same length. Any offset reduces the overlap, and ±300 µs costs about 30% of
+the light. The right, close and bright, survives (probe edge/centre blob ratio
+0.99, 1% of probes below 0.3). The left, further away, drops below the blob
+threshold (15% of its centred probes below 0.3; in this session nearly every
+probe read 0.00 at both offsets). Each probe therefore blacks out the left for
+its early and late windows, so the tracker loses it every few seconds. The
+A-steady run, with tracking off, had the best left lit fraction (0.86).
+
+Candidate fixes, in order of cost:
+
+1. A lock pulse longer than the exposure (`PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID=32`,
+   1.6 ms, within Sony's range). This gives a plateau of about ±300 µs where
+   the overlap stays complete, so probes and small drifts cost no light.
+2. Probe amplitude scaled to what the ring tolerates: halve the offset after a
+   probe that darkens a ring that was lit at the reference, and end a probe
+   window early when the ring vanishes.
+3. Probe less often once stable.
