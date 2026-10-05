@@ -84,6 +84,15 @@ hardware. With `PSSENSE_TIMING_DIAG=1`, every controller also logs
 100 ms window, the max-tracked envelope, the offset in use, and the hold and
 rate, for offline replay of clock mappings.
 
+Opt-in LED scheduling experiments, also not set by the helper and unvalidated
+on hardware:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PSSENSE_LED_LATCH_INTERVAL_MS` | 0 | Keep the latched PRESCAN anchor and re-latch only after this interval or on a content change (bootstrap/sync output, phase, period). 0 latches every exposure, as before. Sony's driver latches about every 1000 ms. |
+| `PSSENSE_LED_BROAD_S` | 0 | Once the LED bootstrap holds its lock: three PRESCAN anchors 1 s apart, then BROAD (`cycle_position` 0) for this many seconds, repeated. Probes are only granted outside BROAD. Logs `LED_BROAD event=start/end/abort`. |
+| `PSSENSE_LED_BROAD_PERIOD_ID` | lock period | BROAD pulse period ID. Sony uses 42 (2.1 ms), which is historically associated with the always-lit fault in wide scans, so test it separately. |
+
 Build optimisation is required for both solver and runtime. Use the
 `macos-sense-relwithdebinfo` preset; do not use an empty build type or Debug for
 performance/hardware comparisons. The following audit counts are historical.
