@@ -6,6 +6,6 @@ add_sanitizers(monado-ctl)
 
 target_include_directories(monado-ctl PRIVATE ipc)
 
-target_link_libraries(monado-ctl PRIVATE aux_util ipc_client)
+target_link_libraries(monado-ctl PRIVATE aux_util aux_math aux_os ipc_client)
 
 install(TARGETS monado-ctl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
