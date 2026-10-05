@@ -2483,7 +2483,17 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 				os_thread_helper_unlock(&pssense->controller_thread);
 				return;
 			}
-			if (!force_latch && steady && pssense->tracking.led_settings.phase == phase &&
+			/*
+			 * Hold whenever the schedule's content is unchanged, not only when steady: scans, probes and
+			 * LED-off periods otherwise re-latched every exposure (~50/s). On 5 Oct two right lockouts
+			 * began in such bursts (a probe after a BROAD window, and one during a weak lock); Sony's
+			 * driver never latches per frame.
+			 */
+			if (!force_latch && pssense->tracking.led_latched &&
+			    pssense->tracking.led_settings.phase == phase &&
+			    pssense->tracking.led_settings.period_id == period_id &&
+			    pssense->tracking.led_latched_content_generation ==
+			        pssense->tracking.led_content_generation &&
 			    now_ns - pssense->tracking.led_latched_ns <
 			        (timepoint_ns)latch_interval_ms * U_TIME_1MS_IN_NS) {
 				os_thread_helper_unlock(&pssense->controller_thread);
