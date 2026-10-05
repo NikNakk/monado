@@ -1509,3 +1509,27 @@ like the helper's other defaults. Evidence: the `sonylike2-*` CLI series and the
 two OpenBrush runs above, none with a lockout or `stuck_lit`. The driver and
 tracker defaults without the helper are unchanged, as are Linux and the
 non-Sense macOS paths. The service plist no longer needs these entries.
+
+### The headset's LED detections against ours (2026-10-05)
+
+Comparison of the LED detector stream with Monado's blobs over the whole of
+`20261005-2001-openbrush-oriented-recorded` (blob thresholds 50/120), pairing
+each packet with an exposure by centroid matching:
+
+- Timing: packets arrive a steady 8.7 ms after the exposure timestamp (p5 8.5,
+  p95 9.7 ms), host clock, 136 of 138 sampled packets aligned.
+- Detections are nearly the same set: 15.0 headset spots against 15.2 of ours
+  per camera frame while both controllers are tracked. About 0.6 per frame on
+  each side have no counterpart within 2 px. The headset-only spots are faint
+  (summed intensity deciles 177–792, against a median of 4078 for matched
+  spots), plus a few very large bright ones. Ours-only blobs are large (box area
+  deciles 30–780 px²). With the lower thresholds we no longer miss spots that
+  the headset finds; the earlier one-spot deficit was at the old thresholds.
+- During losses the headset sees no more than we do: frames with the left lost
+  have 8.8 headset spots against 9.1 of ours, and frames where it has three or
+  more extra spots are 0.2–0.8% throughout. The remaining losses are rings that
+  were not visible, not detection failures.
+
+So the stream offers no recovery gain as a blob source. Its possible value is
+latency, since the detections arrive 8.7 ms after exposure; how this compares
+with the camera-frame path's latency has not been measured.
