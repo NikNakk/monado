@@ -339,6 +339,59 @@ TEST_CASE("LED phase bootstrap rescans a lock that stray lit frames keep from ti
 	}
 }
 
+TEST_CASE("LED phase bootstrap checks a narrow run lit to the end of the scan for a stuck ring")
+{
+	// 5 Oct: the left became stuck lit midway through a narrow scan, which then "locked" on a run lit from its
+	// sixth step to the end.
+	for (uint32_t check_steps : {0u, 8u}) {
+		CAPTURE(check_steps);
+		t_led_phase_bootstrap_options options = test_options();
+		options.detect_stuck_lit = true;
+		options.stuck_check_unbounded_steps = check_steps;
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+
+		Sim sim{.latency_ns = 3600000};
+		sim.push_own = true;
+		uint32_t frame = 0;
+		while (frame < 4000 && !(b.state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN && b.step_index == 3)) {
+			sim.run(b, 1, frame);
+		}
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_NARROW_SCAN);
+		sim.stuck_from_frame = frame;
+		while (frame < 8000 && b.state != T_LED_PHASE_BOOTSTRAP_LOCKED &&
+		       b.state != T_LED_PHASE_BOOTSTRAP_STUCK_LIT) {
+			sim.run(b, 1, frame);
+		}
+		if (check_steps == 0) {
+			// The old behaviour: a lock on the stuck ring.
+			CHECK(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		} else {
+			CHECK(b.state == T_LED_PHASE_BOOTSTRAP_STUCK_LIT);
+			CHECK(b.locks_acquired == 0);
+		}
+	}
+}
+
+TEST_CASE("LED phase bootstrap stuck check passes a healthy ring and then locks")
+{
+	// A healthy run lit to the end of the scan (a long exposure) passes the dark check and locks centred.
+	t_led_phase_bootstrap_options options = test_options();
+	options.detect_stuck_lit = true;
+	options.stuck_check_unbounded_steps = 4;
+	t_led_phase_bootstrap b;
+	t_led_phase_bootstrap_init(&b, &options);
+	t_led_phase_bootstrap_start(&b, kPeriod);
+	Sim sim{.latency_ns = 3600000};
+	sim.push_own = true;
+	sim.exposure_ns = 2600000;
+	uint32_t frame = 0;
+	sim.run(b, 3000, frame);
+	REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	CHECK(b.locks_acquired == 1);
+}
+
 TEST_CASE("LED phase bootstrap measures against each camera's background")
 {
 	// 24 Sep slow-movement run: windows put 3-7 blobs in cameras 0 and 2 with the LEDs dark, which made those

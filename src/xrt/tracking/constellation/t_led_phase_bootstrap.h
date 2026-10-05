@@ -133,6 +133,16 @@ struct t_led_phase_bootstrap_options
 	 * after a 0.9 ms clock step with 2-4% of reports lit, and never rescanned.
 	 */
 	float lost_lit_fraction;
+	//! Exposures after a dim rescan (lost_lit_fraction) before another may start; 0 no limit. Scans have
+	//! preceded the always-lit fault, and on 5 Oct a 25% threshold rescanned three times in 25 s before it.
+	uint32_t dim_rescan_cooldown_frames;
+	/*!
+	 * With detect_stuck_lit: a narrow lit run that reaches either end of the scan and covers at least this many
+	 * steps is checked before locking, by holding the LEDs dark for a baseline; a ring still lit is stuck. 0
+	 * disables. On 5 Oct the left became stuck lit midway through a narrow scan: lit from its sixth step to the
+	 * end (2200 us, wider than any healthy window), too few steps for own_ring_lit_across_narrow_scan.
+	 */
+	uint32_t stuck_check_unbounded_steps;
 
 	//! Exposures to stay idle after a failed scan; doubled for each further consecutive failure, up to the max,
 	//! so a controller that cannot lock does not keep every other controller dark.
@@ -284,6 +294,11 @@ struct t_led_phase_bootstrap
 	uint32_t dim_window_frames;
 	uint32_t dim_window_reports;
 	uint32_t dim_window_lit_reports;
+	uint32_t dim_rescan_cooldown;
+
+	//! Holding the LEDs dark (a BASELINE) to check a suspicious narrow run before locking on it.
+	bool verifying_lock;
+	uint32_t pending_left, pending_right, pending_peak;
 
 	//! Phase tracking.
 	time_duration_ns lock_fudge_ns;

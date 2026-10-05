@@ -1131,3 +1131,21 @@ Consequences:
 - Stuck-lit detection should also catch a narrow run lit to the end of the scan
   with a window well above the expected 1.2–1.95 ms.
 - Power-cycle the left controller to clear the fault.
+
+### Stuck check before unbounded locks, and a dim-rescan cooldown (2026-10-05)
+
+Two bootstrap changes after the lockout above:
+
+- `stuck_check_unbounded_steps` (Sense driver: 8 steps, 2200 µs): a narrow lit
+  run that reaches either end of the scan and is at least that long is not
+  locked at once. The LEDs are held dark for one baseline. A ring still matched
+  while commanded off enters `stuck_lit`
+  (`own_ring_lit_after_unbounded_scan`); otherwise the pending lock is applied
+  (`event=stuck_check result=dark`). Healthy windows seen so far span at most
+  7 steps (1950 µs), so this costs one dark baseline only on suspicious scans.
+- `dim_rescan_cooldown_frames` (Sense driver: 1800 exposures, 30 s): at most
+  one dim rescan per 30 s.
+
+Simulator tests: a ring that becomes stuck lit at the fourth narrow step locks
+without the check and enters `stuck_lit` with it; a healthy ring whose long
+exposure lights a run to the end of the scan passes the dark check and locks.
