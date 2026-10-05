@@ -320,21 +320,18 @@ set_brightness(struct ipc_connection *ipc_c, int device_id, const char *value)
 
 // Grip poses tried, in order, to find a controller's pose input.
 static const enum xrt_input_name grip_pose_names[] = {
-    XRT_INPUT_PSSENSE_GRIP_POSE,    XRT_INPUT_INDEX_GRIP_POSE,       XRT_INPUT_TOUCH_GRIP_POSE,
-    XRT_INPUT_TOUCH_PLUS_GRIP_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE,   XRT_INPUT_VIVE_GRIP_POSE,
+    XRT_INPUT_PSSENSE_GRIP_POSE,    XRT_INPUT_INDEX_GRIP_POSE,         XRT_INPUT_TOUCH_GRIP_POSE,
+    XRT_INPUT_TOUCH_PLUS_GRIP_POSE, XRT_INPUT_TOUCH_PRO_GRIP_POSE,     XRT_INPUT_VIVE_GRIP_POSE,
     XRT_INPUT_WMR_GRIP_POSE,        XRT_INPUT_G2_CONTROLLER_GRIP_POSE, XRT_INPUT_PSMV_GRIP_POSE,
-    XRT_INPUT_SIMPLE_GRIP_POSE,     XRT_INPUT_GENERIC_GRIP_POSE,     XRT_INPUT_GENERIC_TRACKER_POSE,
+    XRT_INPUT_SIMPLE_GRIP_POSE,     XRT_INPUT_GENERIC_GRIP_POSE,       XRT_INPUT_GENERIC_TRACKER_POSE,
 };
 
 /*!
  * Height of one tracked pose of a device in the root space.
  */
 static bool
-sample_height_in_root(struct ipc_connection *ipc_c,
-                      uint32_t root_id,
-                      uint32_t device_id,
-                      enum xrt_input_name name,
-                      float *out_height)
+sample_height_in_root(
+    struct ipc_connection *ipc_c, uint32_t root_id, uint32_t device_id, enum xrt_input_name name, float *out_height)
 {
 	struct xrt_pose identity = XRT_POSE_IDENTITY;
 	int64_t now = os_monotonic_get_ns();
