@@ -48,6 +48,17 @@ This is for isolated testing alongside the registered hardware service. See
 [Wine native-client endpoint validation](macos-wine-in-process-endpoint.md).
 The inventory counts below remain the historical audit snapshot.
 
+## Automatic floor calibration (2026-10-06)
+
+`XRT_FLOOR_EYE_HEIGHT_M` (unset, 0.5-2.5) is set in the **service**. Once the
+system exists, the service waits until the head device reports it is worn,
+its position is tracked, it is roughly level (pitch within 20 degrees) and
+steady (1 cm over 1 s). It then sets the managed STAGE floor that far below
+the head, once per service run. It is skipped if the STAGE was already moved,
+for example by `monado-ctl --floor-eye-height`, and cannot move a
+driver-provided STAGE (`PSVR2_STAGE_SPACE`). The result is logged at info
+level. See [floor calibration](macos-floor-calibration.md).
+
 ## PS Sense runtime 6DoF opt-in (2026-10-04)
 
 The [integration procedure](macos-pssense-6dof-integration.md) is the current
