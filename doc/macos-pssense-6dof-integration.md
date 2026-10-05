@@ -934,3 +934,45 @@ a bad run to compare.
 Next: rebuild `build-wine` (steady option and `PSSENSE_CLOCK` logging), repeat
 with `PSSENSE_TIMING_DIAG=1`, then once with it removed, before the
 `PSSENSE_CLOCK_STEADY` A/B.
+
+### Sony's LED phase sequence on the wire (analysis of existing capture, 2026-10-05)
+
+Source: `~/Code/psvr2-datasets/experiments/20261004-sony-wire-preparation/wire-reports.jsonl`,
+CRC-validated Bluetooth A2/31 output reports from Sony's Windows driver
+(PSVR2Toolkit fork oracle capture, both controllers, 185 s, about 77 reports/s
+per controller). Wire observations only; no Sony implementation was used. The
+38-byte settings block starts at report byte 2. Phase, sequence and period are
+at block offsets 19–21; cycle position and length (LE u32) at 22 and 26;
+`led_blink` at 30.
+
+- **Sony latches rarely.** A new LED sequence (a latch) occurs about once per
+  second in PRESCAN: 94 latches in about 70 s of PRESCAN on one controller.
+  Successive PRESCAN anchors are 60 nominal frames apart (position advances by
+  about 3,003,000 ticks, 1,001,001 µs), and their phase moves smoothly by tens
+  of µs between latches. Our driver latches a new PRESCAN anchor with every
+  output report (every 10.7–21 ms), so each report carries that instant's
+  host/device mapping error.
+- **`cycle_length` is constant at 50,050,050** (thirds of a ns) = 16.68335 ms,
+  one nominal 59.94 Hz frame, in every report and every phase. Sony never
+  trims it. Rate mismatch between controller and camera is handled by
+  re-anchoring. (An earlier session note called it three frames; that was
+  wrong.)
+- **Phase sequence:** OFF (phase 5) for 5 s, PRESCAN (period 32 then 40) until
+  acquisition (about 49 s in this capture), then alternating **BROAD (phase 2,
+  period 42) for 10.0 s** and **PRESCAN for about 3 s** (three latches 1 s
+  apart, occasionally 5–9 s). BROAD starts 75 ms after the last PRESCAN latch
+  with `cycle_position = 0`. The controller keeps the PRESCAN anchor and
+  free-runs on `cycle_length`. During BROAD Sony re-latches only to change
+  `led_blink[0]` (ff, then 0a/0c/0d/0e about once per second, or not at all).
+- **BG (3) and STABLE (4) never occur** on either controller in this or the
+  second capture, including quiet holds.
+
+Implications, untested here:
+
+- BROAD looks like a bounded free-run: anchor once, run 10 s on the
+  controller's own oscillator with a wider pulse (2.1 ms) for drift tolerance,
+  then re-anchor. Over 10 s, 10–30 ppm of relative drift is 100–300 µs.
+- Our per-report latching couples the LED phase to every host/device mapping
+  wobble, and it is far more latch churn than Sony ever produces. Content
+  transitions have been associated with the always-lit fault; latch rate is a
+  candidate factor alongside period 42.
