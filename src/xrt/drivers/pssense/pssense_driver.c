@@ -2008,6 +2008,8 @@ pssense_node_break_apart(struct xrt_frame_node *node)
 static xrt_atomic_s32_t pssense_led_bootstrap_owner = 0;
 //! Set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has locked.
 static xrt_atomic_s32_t pssense_led_bootstrap_first_locked = 0;
+//! With quick lock: set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has failed a scan (its ring not in view).
+static xrt_atomic_s32_t pssense_led_bootstrap_first_failed = 0;
 //! Exposure time (ms, wrapping) at which a controller last released the scan token; 0 before any release.
 static xrt_atomic_s32_t pssense_led_bootstrap_release_ms = 0;
 /*!
@@ -2047,6 +2049,12 @@ pssense_led_bootstrap_may_start_first_scan(struct pssense_device *pssense)
 	char wanted = (first[0] == 'l' || first[0] == 'L') ? 'L' : 'R';
 	if (mine == wanted || xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_first_locked, 1, 1) == 1 ||
 	    pssense->tracking.led_bootstrap.locks_acquired > 0) {
+		return true;
+	}
+	// Do not wait behind a controller that cannot be seen: on 5 Oct the left waited 45 s while the right was out
+	// of view.
+	if (pssense->tracking.led_bootstrap.options.quick_lock &&
+	    xrt_atomic_s32_load(&pssense_led_bootstrap_first_failed) != 0) {
 		return true;
 	}
 	if (++pssense->tracking.led_bootstrap_first_wait_frames > PSSENSE_LED_BOOTSTRAP_FIRST_WAIT_FRAMES) {
@@ -2355,6 +2363,13 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 		    (int32_t)(t_led_phase_bootstrap_wrap(b->next_hint_ns, b->period_ns) / U_TIME_1US_IN_NS));
 	}
 
+	if (b->options.quick_lock && b->locks_acquired == 0 && b->hint_failures > 0) {
+		const char *first = debug_get_option_pssense_led_bootstrap_first();
+		char mine = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+		if (first != NULL && (first[0] == mine || first[0] == mine + ('a' - 'A'))) {
+			xrt_atomic_s32_store(&pssense_led_bootstrap_first_failed, 1);
+		}
+	}
 	if (b->locks_acquired > 0 || t_led_phase_bootstrap_is_stuck_lit(b)) {
 		const char *first = debug_get_option_pssense_led_bootstrap_first();
 		char mine = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
@@ -3987,6 +4002,8 @@ pssense_create(struct xrt_prober *xp,
 			bootstrap_options.full_scan_fallback =
 			    debug_get_bool_option_pssense_led_bootstrap_full_scan_fallback();
 			bootstrap_options.quick_lock = debug_get_bool_option_pssense_led_bootstrap_quick_lock();
+			// After a failed scan, a quick check every ~0.5 s idle (about 1.5 s a cycle with the baseline).
+			bootstrap_options.quick_retry_frames = bootstrap_options.quick_lock ? 30 : 0;
 		}
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
 		// Force the first update to program the bootstrap's output, replacing any refinement sample.

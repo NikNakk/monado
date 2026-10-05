@@ -236,6 +236,14 @@ struct t_led_phase_bootstrap_options
 	 */
 	bool quick_lock;
 	float quick_lock_min_score;
+	/*!
+	 * With quick_lock, once a hinted scan has failed (the ring out of view), retry with a quick check alone after
+	 * this many idle exposures instead of the doubling pause, and run the full hinted scan only every
+	 * quick_scan_every attempts. A ring that comes back into view then locks within ~1.5 s rather than after a
+	 * pause of up to 10 s and a 4.3 s scan. 0 keeps the doubling pauses.
+	 */
+	uint32_t quick_retry_frames;
+	uint32_t quick_scan_every;
 };
 
 //! Result of one scan step, for logging and tests.
@@ -317,6 +325,8 @@ struct t_led_phase_bootstrap
 	bool quick_check;
 	bool quick_tried;
 	uint32_t quick_locks;
+	//! Quick checks that failed since the last hinted scan, while retrying.
+	uint32_t quick_misses;
 
 	//! Phase tracking.
 	time_duration_ns lock_fudge_ns;
