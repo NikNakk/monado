@@ -47,7 +47,9 @@ monado-ctl --floor-device right --floor-device-height 0.03
   existing IPC calls and averaged over 0.5 s. Untracked poses, or movement of
   more than 1 cm, are refused. Only the stage height changes. The
   controller's resting grip height (default 0.03 m) is provisional and should
-  be measured against the eye-height method on hardware.
+  be measured against the eye-height method on hardware. On PS VR2 a
+  controller lying on the floor is usually not tracked from standing height
+  (see Validation); the eye-height method is the practical one.
 
 No IPC protocol, OpenXR or driver change is involved; any app or tool can use
 the same reference-space-offset calls.
@@ -75,7 +77,15 @@ the same reference-space-offset calls.
   2.8 m without restarting the app.
 - `monado-ctl` correctly refused the simulated head, whose position is not
   tracked.
-- PS VR2 hardware: pending (user-run).
+- PS VR2 hardware, 2026-10-05: service and x86_64 in-process client built from
+  `ba9bdd6ae`, Underture through the in-process D3DMetal bridge with the
+  client compositor. Running `monado-ctl --floor-eye-height 1.75` during the
+  game placed the floor correctly, as the user confirmed.
+  `--floor-device left` with the controller lying on the floor was refused as
+  untracked: the headset cameras do not track a Sense controller on the floor
+  from standing height. The refusal is intended; the controller method needs
+  the controller in view (for example crouching and looking at it), and its
+  0.03 m resting height remains unmeasured. Use the eye-height method.
 
 ## Future work
 

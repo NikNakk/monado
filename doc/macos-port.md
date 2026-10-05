@@ -620,8 +620,8 @@ than a Monado runtime target. Recreating Valve's compositor is not a goal.
 
 5. **Tracking-space UX**
    - reliable local-floor/stage behaviour: runtime floor calibration of the
-     managed STAGE via `monado-ctl` ([floor calibration](macos-floor-calibration.md),
-     hardware validation pending);
+     managed STAGE via `monado-ctl --floor-eye-height`
+     ([floor calibration](macos-floor-calibration.md), PS VR2-validated);
    - recenter and persisted calibration;
    - eventually a boundary/guardian-equivalent strategy.
 
