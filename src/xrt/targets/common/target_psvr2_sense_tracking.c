@@ -238,6 +238,7 @@ struct psvr2_sense_tracking
 	struct xrt_device *head;
 	struct xrt_device *controllers[2];
 	bool owns_camera_sinks;
+	bool owns_led_detector_sinks;
 };
 
 bool
@@ -263,6 +264,9 @@ sense_tracking_stop(void *data)
 	if (st->owns_camera_sinks) {
 		(void)psvr2_set_camera_frame_sinks(st->head, NULL);
 	}
+	if (st->owns_led_detector_sinks) {
+		(void)psvr2_set_led_detector_blob_sinks(st->head, NULL);
+	}
 	for (size_t i = 0; i < 2; i++) {
 		if (st->controllers[i] != NULL) {
 			pssense_remove_from_constellation_tracker(st->controllers[i]);
@@ -283,8 +287,11 @@ psvr2_sense_tracking_start(struct xrt_device *head, struct xrt_device *left, str
 		    "orientation-only.");
 		return false;
 	}
+	// The headset's own LED detections replace blob detection on the camera images, which then need not stream.
+	const bool detector_blobs = psvr2_led_detector_blobs_requested();
 	struct psvr2_camera_diagnostics diag = {0};
-	if (head == NULL || !psvr2_get_camera_diagnostics(head, &diag) || !diag.enabled || diag.configured_mode != 4) {
+	if (head == NULL || !psvr2_get_camera_diagnostics(head, &diag) ||
+	    (!detector_blobs && (!diag.enabled || diag.configured_mode != 4))) {
 		U_LOG_E(
 		    "PS Sense optical tracking needs the PS VR2 cameras in mode 4: controllers stay orientation-only.");
 		return false;
@@ -334,7 +341,12 @@ psvr2_sense_tracking_start(struct xrt_device *head, struct xrt_device *left, str
 	    .max_blob_width = (uint16_t)CLAMP(debug_get_num_option_psvr2_sense_blob_max_width(), 1, UINT16_MAX),
 	};
 	struct xrt_frame_sink *frame_sinks[SENSE_TRACKING_CAMERAS] = {0};
+	struct t_blob_sink *blob_sinks[SENSE_TRACKING_CAMERAS] = {0};
 	for (size_t i = 0; i < SENSE_TRACKING_CAMERAS; i++) {
+		blob_sinks[i] = params.mosaics[0].cameras[i].blob_sink;
+		if (detector_blobs) {
+			continue;
+		}
 		struct t_blobwatch *blobwatch = NULL;
 		if (t_rift_blobwatch_create(&blob_params, &st->xfctx, params.mosaics[0].cameras[i].blob_sink,
 		                            &frame_sinks[i], &blobwatch) != 0 ||
@@ -377,14 +389,19 @@ psvr2_sense_tracking_start(struct xrt_device *head, struct xrt_device *left, str
 		sense_tracking_stop(st);
 		return false;
 	}
-	if (!psvr2_set_camera_frame_sinks(head, frame_sinks)) {
+	if (detector_blobs ? !psvr2_set_led_detector_blob_sinks(head, blob_sinks)
+	                   : !psvr2_set_camera_frame_sinks(head, frame_sinks)) {
 		U_LOG_E("Failed to attach the PS Sense tracker to the PS VR2.");
 		(void)psvr2_set_teardown_hook(head, NULL, NULL);
 		sense_tracking_stop(st);
 		return false;
 	}
 
-	st->owns_camera_sinks = true;
+	st->owns_camera_sinks = !detector_blobs;
+	st->owns_led_detector_sinks = detector_blobs;
+	if (detector_blobs) {
+		U_LOG_W("PS Sense optical tracking uses the headset's own LED detections (PSVR2_LED_DETECTOR_BLOBS).");
+	}
 	U_LOG_W("EXPERIMENTAL: PS Sense optical (6DoF) tracking started for %zu controller(s), calibration '%s'.",
 	        attached, calibration);
 	return true;

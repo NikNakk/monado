@@ -25,6 +25,7 @@ extern "C" {
 #include "xrt/xrt_device.h"
 #include "xrt/xrt_prober.h"
 #include "xrt/xrt_tracking.h"
+#include "tracking/t_constellation.h"
 
 #include "os/os_threading.h"
 #include "os/os_time.h"
@@ -363,6 +364,26 @@ struct psvr2_hmd
 	void *led_detector_record;
 	uint64_t led_detector_packets;
 	/*!
+	 * PSVR2_LED_DETECTOR_BLOBS: the headset's own LED detections, pushed per camera as blob observations in place
+	 * of blob detection on the camera images. Sinks and the in-flight count are guarded by data_lock.
+	 */
+	bool led_detector_blobs;
+	struct t_blob_sink *led_detector_blob_sinks[4];
+	uint32_t led_detector_pushes_in_flight;
+	/*!
+	 * The detector's device time minus the camera VTS of the same exposure, in µs: learned from camera frames
+	 * while they stream, otherwise PSVR2_LED_DETECTOR_VTS_OFFSET_US. Guarded by data_lock.
+	 */
+	int32_t led_detector_vts_offset_us;
+	//! Device times of the latest detector packets, to pair with camera frames that arrive later.
+	uint32_t led_detector_recent_vts_us[8];
+	uint32_t led_detector_recent_next;
+	//! Last camera frame arrival, to tell whether camera exposure events are flowing.
+	timepoint_ns last_camera_frame_ns;
+	uint32_t last_led_detector_event_vts_us;
+	uint32_t last_led_detector_event_counter;
+
+	/*!
 	 * PSVR2_LATENCY_DIAG: arrival time minus exposure time, in µs, for the two mode-4 camera transfers (camera
 	 * sets 4 and 5) and the LED detector stream, logged as percentiles every 5 s (LATENCY_DIAG). Guarded by
 	 * data_lock.
@@ -371,8 +392,8 @@ struct psvr2_hmd
 	{
 		bool enabled;
 		int64_t window_start_ns;
-		uint32_t count[3];
-		int32_t us[3][1024];
+		uint32_t count[4];
+		int32_t us[4][1024];
 	} latency_diag;
 	bool camera_streams_enabled;
 	bool gaze_streams_enabled;

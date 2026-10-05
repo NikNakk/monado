@@ -148,6 +148,23 @@ psvr2_get_timing_event_source(struct xrt_device *xdev);
 bool
 psvr2_set_camera_frame_sinks(struct xrt_device *xdev, struct xrt_frame_sink *const sinks[4]);
 
+struct t_blob_sink;
+
+/*!
+ * Attach four sinks for the headset's own LED detections (PSVR2_LED_DETECTOR_BLOBS=1), one per mode-4 camera in
+ * Monado's camera order, each fed one blob observation per exposure. Same attach/detach rules as
+ * @ref psvr2_set_camera_frame_sinks. Fails if the detector stream was not opened.
+ */
+bool
+psvr2_set_led_detector_blob_sinks(struct xrt_device *xdev, struct t_blob_sink *const sinks[4]);
+
+/*!
+ * Whether PSVR2_LED_DETECTOR_BLOBS is set: the caller should attach blob sinks with
+ * @ref psvr2_set_led_detector_blob_sinks instead of running blob detection on the camera images.
+ */
+bool
+psvr2_led_detector_blobs_requested(void);
+
 /*!
  * Register a function run at the start of the headset's destroy, before anything of the headset is torn down. The
  * headset is destroyed before the other system devices, so the hook can stop a pipeline that uses the headset and the

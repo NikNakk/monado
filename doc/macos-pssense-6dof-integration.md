@@ -1569,3 +1569,34 @@ without our camera streams, but this is unconfirmed over a real session and in
 the camera mode the headset then runs. Moving to the detector stream would
 also mean feeding the LED bootstrap's lit counts from it, and losing the
 thresholds we tune ourselves.
+
+### Tracking from the headset's LED detections (2026-10-05)
+
+`PSVR2_LED_DETECTOR_BLOBS=1` (opt-in, in the 6DoF helper and the CLI) decodes
+each detector packet into four blob observations. Each blob's centre is
+`xmin + m10/m00`, `ymin + m01/m00`, its box is the record's bounds and its
+brightness is 1.0, since the records carry no peak. The observations go to the
+tracker's per-camera blob sinks in place of image blob detection, so the joint
+solvers, LED bootstrap and scheduling are unchanged. The exposure time is the
+packet's device time mapped on the camera VTS clock. Its offset from the
+camera VTS of the same exposure was 0 in every frame, so detector observations
+and camera exposure events share one timestamp. Without camera frames (for
+200 ms), the driver announces exposures from the detector stream instead, so
+the Sense LED schedule keeps its reference with `PSVR2_CAMERA_STREAMS=0`.
+
+CLI sessions (headset resting, both controllers resting in view, Sony-like
+profile, 60 s each, run by Claude):
+
+| Session | Blobs | Cameras | Tracked L / R | First lock L / R | Pose ready after exposure (p50 / p95) | Mean solve |
+| --- | --- | --- | --- | --- | --- | --- |
+| `202915-ldblobs-cams-on` | detector | on | 83.7 / 94.8% | 11.6 / 5.1 s | 9.1 / 9.8 ms | 290 µs |
+| `203025-ldblobs-baseline` | ours | on | 83.9 / 95.0% | 11.6 / 5.1 s | 29.8 / 30.9 ms | 232 µs |
+| `203133-ldblobs-cams-off` | detector | off | 83.8 / 94.8% | 11.6 / 5.1 s | 8.8 / 9.6 ms | 271 µs |
+
+The LED bootstrap scans and locks the same way from detector counts as from
+our own: one narrow scan each, with lit steps at the same phases. With the
+cameras off, the pose is ready about 21 ms earlier. USB traffic for tracking
+falls from about 62 MB/s to 2.2 MB/s, and blob detection on the camera images
+no longer runs. The tracked fraction is set by the left's late first lock; see
+below. Still to do: a moving session (OpenBrush) and a comparison of pose
+jitter and RMS against our own blobs.
