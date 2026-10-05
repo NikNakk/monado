@@ -1651,3 +1651,34 @@ found every lock centred (imbalance 0). Each lit fraction (about 50% of
 reports, its two cameras out of four) held for the whole session, with no
 `stuck_lit` or lost lock. A ring seen by only one camera fails the check and
 gets the usual scan.
+
+### Quick lock when the rings start out of view (2026-10-05)
+
+An OpenBrush session at `a80293ef0` locked late: the left at 90 s and the right
+at 96 s. The service was loaded before the plist gained the quick-lock and
+detector-blob entries, so both were still off (a LaunchAgent's environment is
+read only at `launchctl bootstrap`). The log also shows the rings mostly out of
+view for the first ~85 s:
+
+- The right's five hinted scans (1–45 s) were dark in all 103 steps on every
+  camera.
+- The left waited behind it until `first_wait_timeout` at 45 s. Its scans then
+  saw the ring in camera 0 alone, too weak to lock.
+- Each failure doubled the pause before the next scan, up to 10 s. So a ring
+  that came into view could wait 5–15 s for a lock.
+- The right's clock drifted at about 190 ppm for its first minute (a controller
+  just woken). The mapping followed it.
+
+Two additions to `PSSENSE_LED_BOOTSTRAP_QUICK_LOCK`:
+
+- After a failed scan, a controller that has never locked retries with a
+  quick check alone after 30 idle exposures, about 1.5 s a cycle with the dark
+  baseline. A full hinted scan runs only every fourth attempt, in case the
+  window has moved away from the hint. The quick check uses only the lock
+  pulse: about two LED setting changes per cycle, close to Sony's ~1 latch/s.
+- If the controller named by `PSSENSE_LED_BOOTSTRAP_FIRST` fails a scan, the
+  other may scan without waiting for it.
+
+Unit test: a ring that is out of view at start locks 76 exposures (1.3 s)
+after coming into view, against 136 or more with doubling pauses. Not yet run
+on hardware.

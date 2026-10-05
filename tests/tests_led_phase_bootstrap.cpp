@@ -1077,6 +1077,55 @@ TEST_CASE("LED phase bootstrap quick lock locks on a good hint at once and scans
 	}
 }
 
+TEST_CASE("LED phase bootstrap quick retries lock soon after an out-of-view ring comes into view")
+{
+	t_led_phase_bootstrap_options full = test_options();
+	t_led_phase_bootstrap reference;
+	t_led_phase_bootstrap_init(&reference, &full);
+	t_led_phase_bootstrap_start(&reference, kPeriod);
+	Sim ref_sim{.latency_ns = 5000000};
+	uint32_t frame = 0;
+	ref_sim.run(reference, 2000, frame);
+	REQUIRE(reference.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	const int64_t true_hint = reference.lock_fudge_ns + full.lock_blink_ns / 2 - full.narrow_blink_ns / 2;
+
+	// Frames from the ring coming into view until the lock, with and without quick retries.
+	auto frames_to_lock = [&](uint32_t quick_retry_frames, uint32_t &scans) {
+		t_led_phase_bootstrap_options options = test_options();
+		options.quick_lock = true;
+		options.quick_retry_frames = quick_retry_frames;
+		options.hint_retries = 4;
+		options.full_scan_fallback = false;
+		options.max_failed_backoff_frames = 600;
+		options.hint_fudge_ns = t_led_phase_bootstrap_wrap(true_hint, kPeriod);
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		Sim sim{.latency_ns = 5000000};
+		sim.visible = false;
+		uint32_t f = 0;
+		uint32_t visible_from = 3000;
+		while (f < 8000 && b.state != T_LED_PHASE_BOOTSTRAP_LOCKED) {
+			sim.visible = f >= visible_from;
+			if (t_led_phase_bootstrap_ready_to_scan(&b)) {
+				t_led_phase_bootstrap_start(&b, kPeriod);
+			}
+			sim.run(b, 1, f);
+		}
+		scans = b.scans_attempted;
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		CHECK(circular_distance(b.lock_fudge_ns, reference.lock_fudge_ns) <= 1000);
+		return f - visible_from;
+	};
+	uint32_t quick_scans = 0, slow_scans = 0;
+	uint32_t quick = frames_to_lock(30, quick_scans);
+	uint32_t slow = frames_to_lock(0, slow_scans);
+	CAPTURE(quick, slow, quick_scans, slow_scans);
+	// About one retry cycle: a 30-frame pause, the dark baseline and the quick check.
+	CHECK(quick <= 120);
+	CHECK(quick < slow);
+}
+
 TEST_CASE("LED phase bootstrap wraps offsets into the period")
 {
 	CHECK(t_led_phase_bootstrap_wrap(-1, kPeriod) == kPeriod - 1);

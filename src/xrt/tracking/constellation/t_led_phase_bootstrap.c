@@ -267,8 +267,20 @@ finish_quick_check(struct t_led_phase_bootstrap *b)
 		apply_lock(b, 0, 0, 0);
 		return;
 	}
+	// Retrying after a failed scan: check again shortly, and scan only every quick_scan_every attempts.
+	if (b->options.quick_retry_frames > 0 && b->hint_failures > 0 &&
+	    ++b->quick_misses % MAX(b->options.quick_scan_every, 1u) != 0) {
+		LOG_I(b, "LED_BOOTSTRAP side=%c event=quick_lock_failed score=%.3f min=%.3f, retrying in %u frames",
+		      b->options.label, (double)step->score, (double)b->options.quick_lock_min_score,
+		      b->options.quick_retry_frames);
+		b->state = T_LED_PHASE_BOOTSTRAP_IDLE;
+		b->idle_backoff_frames = b->options.quick_retry_frames;
+		b->output_generation++;
+		return;
+	}
 	LOG_I(b, "LED_BOOTSTRAP side=%c event=quick_lock_failed score=%.3f min=%.3f, scanning", b->options.label,
 	      (double)step->score, (double)b->options.quick_lock_min_score);
+	b->quick_misses = 0;
 	begin_hinted_scan(b);
 }
 
@@ -358,6 +370,11 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 			// scan, whose long wide pulses have preceded every always-lit fault so far.
 			uint64_t pause = (uint64_t)b->options.failed_backoff_frames << MIN(b->hint_failures - 1, 16u);
 			b->idle_backoff_frames = (uint32_t)MIN(pause, (uint64_t)b->options.max_failed_backoff_frames);
+			if (b->options.quick_lock && b->options.quick_retry_frames > 0) {
+				// Quick checks follow, which only use the lock pulse.
+				b->idle_backoff_frames = b->options.quick_retry_frames;
+				b->quick_misses = 0;
+			}
 			b->output_generation++;
 			return;
 		}
@@ -781,6 +798,8 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .full_scan_fallback = true,
 	    .quick_lock = false,
 	    .quick_lock_min_score = 2.0f,
+	    .quick_retry_frames = 0,
+	    .quick_scan_every = 4,
 	};
 }
 
