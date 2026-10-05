@@ -1639,6 +1639,9 @@ static void
 pssense_set_connected_bit(struct pssense_device *pssense, bool connected);
 
 static void
+pssense_led_bootstrap_set_waiting(int32_t bit, bool waiting);
+
+static void
 pssense_led_bootstrap_release(struct pssense_device *pssense, int64_t exposure_timestamp_ns);
 
 /*!
@@ -1683,6 +1686,8 @@ pssense_reset_connection_locked(struct pssense_device *pssense)
 
 	t_led_phase_bootstrap_stop(&pssense->tracking.led_bootstrap);
 	pssense_led_bootstrap_release(pssense, 0);
+	// Not waiting for a turn while disconnected, or the other controller would keep deferring to us.
+	pssense_led_bootstrap_set_waiting(pssense->hand == XRT_HAND_LEFT ? 1 : 2, false);
 	pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
 	pssense->tracking.led_sync_sample_needs_sending = true;
 
@@ -2150,10 +2155,30 @@ pssense_node_break_apart(struct xrt_frame_node *node)
 static xrt_atomic_s32_t pssense_led_bootstrap_owner = 0;
 //! Set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has locked.
 static xrt_atomic_s32_t pssense_led_bootstrap_first_locked = 0;
+/*!
+ * Fair turns at the scan token: the controller that last held it, and the controllers waiting for it (bit 0 left,
+ * bit 1 right). With quick retries both unlocked controllers become ready together, and on 5 Oct the left took every
+ * turn for 110 s while the right never scanned again.
+ */
+static xrt_atomic_s32_t pssense_led_bootstrap_last_owner = 0;
+static xrt_atomic_s32_t pssense_led_bootstrap_waiting = 0;
 //! Connected controllers (PSSENSE_RECONNECT): bit 0 left, bit 1 right. A side waits for the first only if connected.
 static xrt_atomic_s32_t pssense_connected_mask = 0;
 //! With quick lock: set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has failed a scan (its ring not in view).
 static xrt_atomic_s32_t pssense_led_bootstrap_first_failed = 0;
+
+static void
+pssense_led_bootstrap_set_waiting(int32_t bit, bool waiting)
+{
+	int32_t mask;
+	do {
+		mask = xrt_atomic_s32_load(&pssense_led_bootstrap_waiting);
+		if (((mask & bit) != 0) == waiting) {
+			return;
+		}
+	} while (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_waiting, mask, waiting ? (mask | bit) : (mask & ~bit)) !=
+	         mask);
+}
 
 static void
 pssense_set_connected_bit(struct pssense_device *pssense, bool connected)
@@ -2466,6 +2491,10 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	if (owner != 0 && owner != me) {
 		// Another controller is scanning. Do not advance, so our own lock is not declared lost meanwhile.
 		pssense->tracking.led_bootstrap_yielding = true;
+		if (b->options.quick_lock && b->state == T_LED_PHASE_BOOTSTRAP_IDLE && b->locks_acquired == 0) {
+			// Unlocked and kept from retrying: our turn comes next.
+			pssense_led_bootstrap_set_waiting(pssense->hand == XRT_HAND_LEFT ? 1 : 2, true);
+		}
 		if (debug_get_bool_option_pssense_led_bootstrap_keep_lock() &&
 		    b->state == T_LED_PHASE_BOOTSTRAP_LOCKED) {
 			/*
@@ -2480,10 +2509,17 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	}
 	pssense->tracking.led_bootstrap_yielding = false;
 
+	const int32_t my_bit = pssense->hand == XRT_HAND_LEFT ? 1 : 2;
+	const int32_t other_bit = 3 - my_bit;
+	// Let a waiting controller go before us if we had the last turn.
+	bool defer = b->options.quick_lock && xrt_atomic_s32_load(&pssense_led_bootstrap_last_owner) == me &&
+	             (xrt_atomic_s32_load(&pssense_led_bootstrap_waiting) & other_bit) != 0;
 	if (owner == 0 && t_led_phase_bootstrap_ready_to_scan(b) &&
 	    pssense_led_bootstrap_may_start_first_scan(pssense) &&
-	    pssense_led_bootstrap_handoff_settled(pssense, exposure_timestamp_ns)) {
+	    pssense_led_bootstrap_handoff_settled(pssense, exposure_timestamp_ns) && !defer) {
 		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
+			pssense_led_bootstrap_set_waiting(my_bit, false);
+			xrt_atomic_s32_store(&pssense_led_bootstrap_last_owner, me);
 			owner = me;
 			int32_t shared_hint_us = xrt_atomic_s32_load(&pssense_led_bootstrap_shared_hint_us);
 			if (b->options.quick_lock && b->locks_acquired == 0 && shared_hint_us >= 0) {
@@ -2492,6 +2528,9 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 			}
 			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
 		}
+	}
+	if (b->options.quick_lock && t_led_phase_bootstrap_ready_to_scan(b) && owner != me) {
+		pssense_led_bootstrap_set_waiting(my_bit, true);
 	}
 
 	long stress_s = debug_get_num_option_pssense_led_bootstrap_stress_rescan_s();

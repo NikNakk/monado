@@ -1717,4 +1717,18 @@ rotation, because it has no clock mapping. A side named by
 `PSSENSE_LED_BOOTSTRAP_FIRST` that is not connected no longer makes the other
 side wait.
 
-Builds without warnings; all 45 tests pass. Not yet run on hardware.
+Builds without warnings; all 45 tests pass.
+
+First hardware run (`222439-reconnect-cycle`, 120 s): no ring was lit in any
+camera for the whole session, on Monado's blobs or the headset's own. The
+rings were evidently out of view, and the left was not power-cycled (no
+`CONNECTION` event). The run did expose a fairness bug in the quick retries.
+Both unlocked controllers become ready together, and the left took the scan
+token on every turn for 110 s while the right never scanned again.
+
+The fix gives fair turns when quick lock is on. A controller ready to scan, or
+unlocked and kept from retrying, marks itself waiting. The controller that
+held the token last defers to a waiting one. The waiting mark is cleared on
+disconnect, so a controller that goes away is never waited for. Check
+(`222804-fairness-check`, 40 s, both resting in view): quick locks at 1.1 s (right,
+score 4) and 2.1 s (left, score 3); 95.0% and 94.5% tracked.
