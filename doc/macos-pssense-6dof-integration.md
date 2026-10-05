@@ -1402,3 +1402,26 @@ negative variances 18% of the time, so it is unconfirmed. The headset reports
 about one more spot per camera than Monado (5.9 against 4.0 on camera 0);
 roughly 10% of its records have no Monado blob within ~7 px. The u16 at 2 has
 low byte 0xff and an unknown high byte.
+
+### OpenBrush with the Sony-like profile: no lockouts, left on par (2026-10-05)
+
+Build `4342d178e`, normal profile with `PSSENSE_CLOCK_STEADY=1`,
+`PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID=32`, `PSSENSE_LED_BROAD_S=10`,
+`PSSENSE_LED_LATCH_INTERVAL_MS=1000`, `PSSENSE_LED_NOMINAL_CYCLE=1`,
+`PSSENSE_TIMING_DIAG=1` and blob thresholds 50/120. 388 s session; the user
+reports no lockouts, with some tracking loss.
+
+- No `stuck_lit` event. Latches 0.99/s (left) and 0.59/s (right); 16 left and 25
+  right BROAD windows. Batteries normal (left 75%, right 95 → 85%).
+- Left 43.4 accepted poses/s, lit 0.62, 56 losses (96 s total); right 46.7/s,
+  0.75, 55 losses (71 s). The earlier left/right gap has largely closed.
+- `JOINT_LOSS` exposures (left / right): `dark_unpredicted` 2393 / 1562 (no light
+  after the prediction expired: mostly out of view or covered), `lit_single`
+  1534 / 903 (ring lit in one camera only; stereo bootstrap cannot use it),
+  `lit_multi` 796 / 598 and `lit_ambiguous` 587 / 562 (lit in two or more cameras
+  but not re-acquired), `acquiring` 170 / 212.
+
+The remaining losses are re-acquisition and visibility, not the LED faults.
+Candidates: single-camera re-acquisition using the IMU orientation as a prior
+(for `lit_single`), and recorded replays of `lit_multi` intervals to find why
+stereo bootstrap fails with the ring visible.
