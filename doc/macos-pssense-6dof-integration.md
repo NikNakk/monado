@@ -1106,3 +1106,28 @@ then was good for a long time.
 
 Not yet separated: how much comes from the longer pulse and how much from the
 thresholds. Neither is a runtime default yet.
+
+**Correction (same day): the long good stretch was the always-lit fault.** The
+user reports the left locked out, with its ring permanently lit. The left's
+third narrow scan in 25 s (57.9–62.2 s, after dim rescans at 37.0 s and
+57.3 s) shows the onset. From step 6 (59.9 s) to the last step (62.2 s),
+cameras 0 and 1 saw the ring lit at every remaining phase (8/8), so the "lock"
+had an unbounded 2200 µs window. `own_ring_lit_across_narrow_scan` did not fire:
+the first five steps were dark, and it needs nearly every step lit. From then
+on, equal light at all probe offsets is the stuck ring, not evidence for the
+longer pulse. The 62–208 s results above are void.
+
+What remains valid is 8–31 s, with the 1.6 ms lock and before the fault: probes
+were lit at the reference and at ±300 µs (8.12/8.66/7.34, 6.56/6.12/5.62,
+7.94/7.47/5.50 blobs) and the left tracked about 270–300 per 5 s. That is short
+supporting evidence that a pulse longer than the exposure removes the probe
+blackout.
+
+Consequences:
+
+- The dim-rescan rule at 25% caused three scans in 25 s, and scans have preceded
+  the fault before. Rescans need a rate limit, and the threshold should go back
+  to the 10% default.
+- Stuck-lit detection should also catch a narrow run lit to the end of the scan
+  with a window well above the expected 1.2–1.95 ms.
+- Power-cycle the left controller to clear the fault.
