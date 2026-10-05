@@ -58,6 +58,7 @@ constructing devices; they also work in an in-process runtime:
 | --- | --- | --- |
 | `PSVR2_SENSE_6DOF` | off | Start four-camera Sense tracking with the joint solver + EKF. |
 | `PSVR2_SENSE_6DOF_CALIBRATION` | unset | Required absolute mode-4 calibration path; invalid/missing calibration leaves the existing fallback. |
+| `PSVR2_LED_DETECTOR_RECORD` | unset | Path: open the headset's LED detector stream (USB interface 8) on its own, without the other auxiliary streams or a camera-mode change, and record it compactly (header plus populated records). Read with `scripts/psvr2_led_detector_dump.py`. The session script sets it with `PSVR2_SENSE_RECORD_LED_DETECTOR=1`. |
 | `PSVR2_BLOB_PIXEL_THRESHOLD` | 80 | Pixel threshold; keep unchanged for the first hardware run. |
 | `PSVR2_BLOB_REQUIRED_THRESHOLD` | 180 | Blob seed threshold; lower values are only offline-proven so far. |
 | `PSVR2_BLOB_MAX_WIDTH` | 50 | Largest detected blob width. |

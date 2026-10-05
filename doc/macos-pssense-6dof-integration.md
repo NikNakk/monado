@@ -1335,3 +1335,33 @@ LED-off baseline, and prints per value: lit fraction, strongest repeat period
 (autocorrelation over 1–40 frames), and frames folded modulo 32 beside the
 value's bits in both bit orders. Run with one controller awake. Smoke-tested on
 an existing recording; not yet run on a sweep.
+
+### Recording the headset's LED detector stream (2026-10-05)
+
+The headset sends its own LED-spot detections on USB interface 8 (endpoint
+0x89), 36,944 bytes at 60 Hz: a 64-byte header (`LD`, length, device µs
+timestamp at offset 8, frame counter at offset 20), then four camera sections,
+each a u32 count and up to 256 36-byte records. Sony's matched LED indices
+point into these records, so Sony's driver appears to track from these
+detections. Monado's PS VR2 driver previously opened the stream only with
+`PSVR2_AUXILIARY_STREAMS` (which also selects camera mode 10) and dumped it at
+trace level.
+
+`PSVR2_LED_DETECTOR_RECORD=<file>` now opens interface 8 alone (camera mode 4
+and the other auxiliary interfaces unchanged) and records each packet compactly:
+host receipt time, header, and only the populated records.
+`scripts/psvr2_led_detector_dump.py` summarises the file and exports records
+to CSV. The session script records it into `led_detector.bin` with
+`PSVR2_SENSE_RECORD_LED_DETECTOR=1`.
+
+Reader validation: the 4 Oct mode-4/mode-16 survey's raw packets
+(`20261004-lower-wearer-left-covered`) converted to this format read back as 906
+packets at 60.1/s, counter steps of 1 (one 35,711 jump at the start), device
+time 16,683 µs per frame and 3,866 records; 226 KB against 33.5 MB raw. That
+survey shows the stream populated in mode 4. The first records suggest the four
+u16 fields are a bounding box (`x0,x1,y0,y1` = 344,348,165,168), not two points.
+The driver writer has not yet run on hardware (headset and controllers were
+off); full macOS build without warnings, all 45 tests pass.
+
+Next: correlate records with our blobs frame by frame (coordinate mapping, size
+and brightness fields), then compare detection rates on dim and far rings.

@@ -12,6 +12,8 @@
 #   capture/     stride-sampled camera frames (PSVR2_CONSTELLATION_CAPTURE_STRIDE, default 6; 0 disables)
 #   constellation.ctd  every camera's blobs, camera poses and device priors for offline solver replay
 #                (set PSVR2_SENSE_RECORD_BLOBS=0 to skip)
+#   led_detector.bin  with PSVR2_SENSE_RECORD_LED_DETECTOR=1: the headset's LED detector stream
+#                (read with scripts/psvr2_led_detector_dump.py)
 #   env.txt      every PSVR2_/PSSENSE_/CONSTELLATION_/T_LED_ variable in effect
 #   git.txt      commit, branch and dirty state of the monado checkout
 #   calibration.json, note.txt, score.txt, score.json
@@ -80,6 +82,10 @@ STRIDE="${PSVR2_CONSTELLATION_CAPTURE_STRIDE:-6}"
 
 if [ "${PSVR2_SENSE_RECORD_BLOBS:-1}" != "0" ]; then
 	export CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT="$SESSION/constellation.ctd"
+fi
+# Opt-in: the headset's own LED detector stream (USB interface 8), compactly, for comparison with our blobs.
+if [ "${PSVR2_SENSE_RECORD_LED_DETECTOR:-0}" = "1" ]; then
+	export PSVR2_LED_DETECTOR_RECORD="$SESSION/led_detector.bin"
 fi
 
 cp "$CALIBRATION" "$SESSION/calibration.json"
