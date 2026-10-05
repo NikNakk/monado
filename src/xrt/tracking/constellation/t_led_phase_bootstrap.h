@@ -222,6 +222,12 @@ struct t_led_phase_bootstrap_options
 	//! Failed hinted scans retried before falling back to the full scan, after dark pauses of failed_backoff_frames
 	//! doubling with each retry (capped at max_failed_backoff_frames).
 	uint32_t hint_retries;
+	/*!
+	 * Once hint_retries are spent, fall back to the full (wide) scan. When false, keep retrying the hinted scan
+	 * with backoff instead. Every always-lit fault on 5 Oct began on entering a full scan or in a burst of scans,
+	 * while lock centres have always stayed within the hint's +-1.5 ms.
+	 */
+	bool full_scan_fallback;
 };
 
 //! Result of one scan step, for logging and tests.

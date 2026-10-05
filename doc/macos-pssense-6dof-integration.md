@@ -1209,3 +1209,13 @@ ring weakly visible from this resting place (two cameras). The runtime always
 has a hint (`PSSENSE_LED_BOOTSTRAP_HINT_US=16350`), and lock centres have stayed
 within its ±1.5 ms. The next change to consider is never falling back to the
 full scan while a hint exists, retrying hinted scans with backoff instead.
+
+**Change:** with a hint (always, in the Sense runtime), the bootstrap no longer
+falls back to the full scan. Failed hinted scans retry with doubling pauses
+capped at 10 s, indefinitely. A weak run at the hint is still locked once the
+retries are spent. New option `full_scan_fallback` (library default on); the
+Sense driver turns it off unless `PSSENSE_LED_BOOTSTRAP_FULL_SCAN_FALLBACK=1`.
+Trade-off: if the true phase ever left the hint's ±1.5 ms, the controller would
+never lock. That has not been seen, and the hint follows each lock's centre. A
+simulator test covers a long out-of-view spell: a wide scan with the fallback,
+none without it, and a centred lock once back in view.

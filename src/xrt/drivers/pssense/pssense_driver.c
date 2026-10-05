@@ -99,6 +99,7 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_s, "PSSENSE_LED_BROAD_S", 0)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_period_id, "PSSENSE_LED_BROAD_PERIOD_ID", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_blob_fallback, "PSSENSE_LED_BOOTSTRAP_BLOB_FALLBACK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lost_lit_percent, "PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT", 10)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_full_scan_fallback, "PSSENSE_LED_BOOTSTRAP_FULL_SCAN_FALLBACK", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
@@ -3804,6 +3805,14 @@ pssense_create(struct xrt_prober *xp,
 			// pulse.
 			bootstrap_options.hint_fudge_ns =
 			    (time_duration_ns)hint_us * U_TIME_1US_IN_NS - bootstrap_options.narrow_blink_ns / 2;
+			/*
+			 * With a hint, never fall back to the full scan: retry hinted scans with backoff. Every
+			 * always-lit fault on 5 Oct began on entering a full scan or in a burst of scans, and lock
+			 * centres have always stayed within the hint's +-1.5 ms.
+			 * PSSENSE_LED_BOOTSTRAP_FULL_SCAN_FALLBACK=1 restores it.
+			 */
+			bootstrap_options.full_scan_fallback =
+			    debug_get_bool_option_pssense_led_bootstrap_full_scan_fallback();
 		}
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
 		// Force the first update to program the bootstrap's output, replacing any refinement sample.
