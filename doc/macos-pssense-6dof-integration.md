@@ -976,3 +976,36 @@ Implications, untested here:
   wobble, and it is far more latch churn than Sony ever produces. Content
   transitions have been associated with the always-lit fault; latch rate is a
   candidate factor alongside period 42.
+
+### Opt-in Sony-like latching and an experimental BROAD cycle (2026-10-05)
+
+Two opt-in scheduler options follow the wire observations above. Both leave
+scans, probes, LED-off and the unlocked state latching every exposure as
+before.
+
+- `PSSENSE_LED_LATCH_INTERVAL_MS=1000` holds the PRESCAN anchor (same sequence
+  number, so the controller keeps it and free-runs on `cycle_length`) and
+  re-latches once per interval, or immediately on new bootstrap or
+  sync-refinement output, phase or period.
+- `PSSENSE_LED_BROAD_S=N`, once locked and not probing: PRESCAN anchors 1 s
+  apart; after the third, BROAD with `cycle_position = 0` and `led_blink`
+  `ffffffff` 75 ms later, held N s, then a fresh PRESCAN anchor and repeat.
+  Losing the lock, LEDs going dark or any content change aborts BROAD. The
+  bootstrap's probes are only granted outside BROAD. The BROAD pulse defaults
+  to the lock period (period 20, 1.0 ms); `PSSENSE_LED_BROAD_PERIOD_ID=42`
+  tries Sony's 2.1 ms separately.
+
+Not covered by unit tests (the driver I/O loop has no harness); built without
+warnings, Sense tests pass. Hardware plan, each a separate session with
+`PSSENSE_TIMING_DIAG=1` so `PSSENSE_OUTPUT` shows the latch rate:
+
+1. `PSSENSE_LED_LATCH_INTERVAL_MS=1000` in normal use: sequence numbers should
+   change about once per second when steady. Compare lit fraction and
+   `JOINT_LOSS` with the previous runs, and watch for the always-lit fault.
+2. Still test with both rings resting in view: `PSSENSE_LED_BROAD_S=10`, then
+   30 and 60. Measure lit fraction against time within each BROAD window
+   (drift with no anchors) and confirm clean PRESCAN re-anchors.
+3. Only then `PSSENSE_LED_BROAD_PERIOD_ID=42`, watching for the always-lit
+   fault.
+
+BG and STABLE remain untouched: Sony never used them in either capture.
