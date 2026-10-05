@@ -1290,3 +1290,29 @@ latches once when it changes, and LED-off periods do not re-latch.
 `20261005-123344-latchhold-check` was meant to verify the rate on hardware, but
 both controllers had powered off, so it did not run. Hardware verification is
 pending.
+
+**Sony-like profile with latch hold (build `7cdff048a`, run by Claude, right
+power-cycled, controllers charged):**
+
+| Session | Latches/s L / R | BROAD windows L / R | Tracked L / R | Lockout |
+| --- | --- | --- | --- | --- |
+| `20261005-135030-latchhold-check` (60 s) | 1.11 / 1.11 | 2 / 2 (+1 cut by session end) | 83.6% / 94.3% | none |
+| `20261005-135147-sonylike2-broad10-still-1` | 1.05 / 0.97 | 4 / 5 | 91.7% / 96.9% | none |
+| `…-135353-…-still-2` | 1.05 / 0.97 | 4 / 5 | 91.9% / 97.5% | none |
+| `…-135559-…-still-3` | 1.05 / 0.97 | 4 / 5 | 91.8% / 97.2% | none |
+| `…-135805-…-still-4` | 1.07 / 1.11 (first 55 s) | 2 / 4 | 38% / 49% | none |
+
+- Every BROAD window held tracking fully (100% of 10 Hz samples with fused poses
+  in sessions 1–3). One `cycle_length` value per session.
+- Session 4: at about 55 s both controllers stopped together (`pssense_handle_read`
+  errors, zero blobs on all cameras for both rings). That was idle power-off
+  after about 15 minutes resting, not the fault. Sessions `…-140009-…-still-5`
+  and `…-p42-still` found no controllers and are empty. Period 42 in BROAD is
+  still untested.
+- The right battery held at 95% throughout. On the morning's stuck episodes it
+  had fallen to 15%.
+
+About 7.5 minutes of Sony-like operation without a lockout, against roughly one
+lockout per two sessions earlier today with per-exposure latching. That is
+supporting evidence, not proof, that per-exposure latch bursts trigger the
+always-lit fault. Next: the same profile in longer OpenBrush sessions.
