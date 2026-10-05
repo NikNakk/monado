@@ -59,8 +59,8 @@ constructing devices; they also work in an in-process runtime:
 | `PSVR2_SENSE_6DOF` | off | Start four-camera Sense tracking with the joint solver + EKF. |
 | `PSVR2_SENSE_6DOF_CALIBRATION` | unset | Required absolute mode-4 calibration path; invalid/missing calibration leaves the existing fallback. |
 | `PSVR2_LED_DETECTOR_RECORD` | unset | Path: open the headset's LED detector stream (USB interface 8) on its own, without the other auxiliary streams or a camera-mode change, and record it compactly (header plus populated records). Read with `scripts/psvr2_led_detector_dump.py`. The session script sets it with `PSVR2_SENSE_RECORD_LED_DETECTOR=1`. |
-| `PSVR2_BLOB_PIXEL_THRESHOLD` | 80 | Pixel threshold; keep unchanged for the first hardware run. |
-| `PSVR2_BLOB_REQUIRED_THRESHOLD` | 180 | Blob seed threshold; lower values are only offline-proven so far. |
+| `PSVR2_BLOB_PIXEL_THRESHOLD` | 80 (50 with `PSVR2_SENSE_6DOF`) | Pixel threshold. |
+| `PSVR2_BLOB_REQUIRED_THRESHOLD` | 180 (120 with `PSVR2_SENSE_6DOF`) | Blob seed threshold. |
 | `PSVR2_BLOB_MAX_WIDTH` | 50 | Largest detected blob width. |
 
 When requested, the common helper sets defaults with `setenv(..., 0)` so
@@ -69,7 +69,12 @@ explicit overrides win: camera streams on/mode 4, robust camera clock on with
 scheduling, online gyro bias, 250 µs clock snap, LED correction and LED-off on
 exit. It enables LED bootstrap, first controller R, phase hint 16350 µs,
 keep-lock/LED-shape/strict/tracking/coverage options, and wide pulse period ID
-32 (1.6 ms). See `sense_tracking_defaults` in
+32 (1.6 ms). Since 5 Oct it also sets the Sony-like LED profile
+(`PSSENSE_CLOCK_STEADY=1`, `PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID=32`,
+`PSSENSE_LED_BROAD_S=10`, `PSSENSE_LED_LATCH_INTERVAL_MS=1000`,
+`PSSENSE_LED_NOMINAL_CYCLE=1`), blob thresholds 50/120 and
+`CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1`, all validated in the 5 Oct
+CLI series and two OpenBrush runs without lockouts. See `sense_tracking_defaults` in
 `targets/common/target_psvr2_sense_tracking.c` for exact names. Future LED
 scheduling, experimental clock/filter/bootstrap/model options remain off unless
 requested explicitly or through this 6DoF switch. Linux's full-stream default
@@ -77,16 +82,16 @@ and macOS's conservative camera-off default are unchanged when it is absent.
 The detailed tuning/evidence remain in [optical tracking](pssense-optical-tracking.md)
 and [front-end evaluation](macos-pssense-mr2940-frontend-evaluation.md).
 
-Opt-in, not set by the helper: `PSSENSE_CLOCK_STEADY=1` holds a controller's
+`PSSENSE_CLOCK_STEADY=1` (set by the helper) holds a controller's
 host/device clock offset once its LED schedule has locked, advancing only at a
-fitted drift rate (see `drivers/pssense/pssense_clock.h`). It is unvalidated on
-hardware. With `PSSENSE_TIMING_DIAG=1`, every controller also logs
+fitted drift rate (see `drivers/pssense/pssense_clock.h`). With `PSSENSE_TIMING_DIAG=1`, every controller also logs
 `PSSENSE_CLOCK`: the lowest-latency (arrival, controller clock) pair of each
 100 ms window, the max-tracked envelope, the offset in use, and the hold and
 rate, for offline replay of clock mappings.
 
-Opt-in LED scheduling experiments, also not set by the helper and unvalidated
-on hardware:
+LED scheduling options. The helper sets `PSSENSE_LED_LATCH_INTERVAL_MS=1000`,
+`PSSENSE_LED_BROAD_S=10` and `PSSENSE_LED_NOMINAL_CYCLE=1`; the defaults below
+are the driver's own, which apply without the helper:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -100,8 +105,8 @@ on hardware:
 | `PSSENSE_LED_BLINK_SWEEP_S` | 4 | Seconds per sweep step. |
 | `PSSENSE_LED_BROAD_PERIOD_ID` | lock period | BROAD pulse period ID. Sony uses 42 (2.1 ms), which is historically associated with the always-lit fault in wide scans, so test it separately. |
 
-Opt-in tracker experiment, also not set by the helper and unvalidated on
-hardware: `CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1` re-acquires a lost
+`CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1` (set by the helper; the tracker's
+own default is off) re-acquires a lost
 device from its IMU orientation (carried into the optical world by the
 alignment from earlier solves) when stereo bootstrap fails, from one camera's
 blobs, and lowers the coverage limit from 0.8 to 0.5 for any solve anchored to

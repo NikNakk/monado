@@ -219,6 +219,15 @@ static const char *const sense_tracking_defaults[][2] = {
     {"PSSENSE_LED_BOOTSTRAP_TRACK", "1"},
     {"PSSENSE_LED_BOOTSTRAP_TRACK_COVERAGE", "1"},
     {"PSSENSE_LED_BOOTSTRAP_WIDE_PERIOD_ID", "32"},
+    // Sony-like LED schedule: no always-lit fault or lockout in any run since 5 Oct.
+    {"PSSENSE_CLOCK_STEADY", "1"},
+    {"PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID", "32"},
+    {"PSSENSE_LED_BROAD_S", "10"},
+    {"PSSENSE_LED_LATCH_INTERVAL_MS", "1000"},
+    {"PSSENSE_LED_NOMINAL_CYCLE", "1"},
+    {"PSVR2_BLOB_PIXEL_THRESHOLD", "50"},
+    {"PSVR2_BLOB_REQUIRED_THRESHOLD", "120"},
+    {"CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP", "1"},
 };
 
 struct psvr2_sense_tracking
