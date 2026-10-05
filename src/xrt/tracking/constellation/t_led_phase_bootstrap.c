@@ -82,6 +82,9 @@ step_fudge(const struct t_led_phase_bootstrap *b, uint32_t index)
 static time_duration_ns
 current_scan_blink(const struct t_led_phase_bootstrap *b)
 {
+	if (b->quick_check) {
+		return b->options.lock_blink_ns;
+	}
 	return b->state == T_LED_PHASE_BOOTSTRAP_WIDE_SCAN ? b->options.wide_blink_ns : b->options.narrow_blink_ns;
 }
 
@@ -92,6 +95,10 @@ begin_step(struct t_led_phase_bootstrap *b)
 	memset(step, 0, sizeof(*step));
 	step->fudge_offset_ns = step_fudge(b, b->step_index);
 	step->blink_ns = current_scan_blink(b);
+	if (b->quick_check) {
+		// The lock pulse exactly as apply_lock would place it for a lit run at this (narrow-pulse) start.
+		step->fudge_offset_ns += (b->options.narrow_blink_ns - b->options.lock_blink_ns) / 2;
+	}
 
 	reset_step_window(b);
 
@@ -246,8 +253,32 @@ begin_dark_check(struct t_led_phase_bootstrap *b)
 }
 
 static void
+begin_hinted_scan(struct t_led_phase_bootstrap *b);
+
+static void
+finish_quick_check(struct t_led_phase_bootstrap *b)
+{
+	b->quick_check = false;
+	const struct t_led_phase_bootstrap_step *step = &b->steps[0];
+	if (step->score >= b->options.quick_lock_min_score) {
+		LOG_I(b, "LED_BOOTSTRAP side=%c event=quick_lock score=%.3f min=%.3f", b->options.label,
+		      (double)step->score, (double)b->options.quick_lock_min_score);
+		b->quick_locks++;
+		apply_lock(b, 0, 0, 0);
+		return;
+	}
+	LOG_I(b, "LED_BOOTSTRAP side=%c event=quick_lock_failed score=%.3f min=%.3f, scanning", b->options.label,
+	      (double)step->score, (double)b->options.quick_lock_min_score);
+	begin_hinted_scan(b);
+}
+
+static void
 finish_narrow_scan(struct t_led_phase_bootstrap *b)
 {
+	if (b->quick_check) {
+		finish_quick_check(b);
+		return;
+	}
 	const uint32_t n = b->step_count;
 	uint32_t peak_index = 0;
 	for (uint32_t i = 1; i < n; i++) {
@@ -621,16 +652,31 @@ finish_baseline(struct t_led_phase_bootstrap *b)
 		return;
 	}
 	if (b->next_hint_ns >= 0 && b->options.hint_span_ns > 0) {
-		b->hinted_scan = true;
-		time_duration_ns start = b->next_hint_ns - b->options.hint_span_ns;
-		uint32_t count = (uint32_t)(2 * b->options.hint_span_ns / b->options.narrow_step_ns) + 1;
-		LOG_I(b, "LED_BOOTSTRAP side=%c event=hinted_scan hint_us=%.1f span_us=%.1f", b->options.label,
-		      (double)t_led_phase_bootstrap_wrap(b->next_hint_ns, b->period_ns) / 1000.0,
-		      (double)b->options.hint_span_ns / 1000.0);
-		begin_scan(b, T_LED_PHASE_BOOTSTRAP_NARROW_SCAN, start, b->options.narrow_step_ns, count);
+		if (b->options.quick_lock && !b->quick_tried) {
+			b->quick_tried = true;
+			b->quick_check = true;
+			LOG_I(b, "LED_BOOTSTRAP side=%c event=quick_check hint_us=%.1f pulse_us=%.1f", b->options.label,
+			      (double)t_led_phase_bootstrap_wrap(b->next_hint_ns, b->period_ns) / 1000.0,
+			      (double)b->options.lock_blink_ns / 1000.0);
+			begin_scan(b, T_LED_PHASE_BOOTSTRAP_NARROW_SCAN, b->next_hint_ns, b->options.narrow_step_ns, 1);
+			return;
+		}
+		begin_hinted_scan(b);
 		return;
 	}
 	begin_wide_scan(b);
+}
+
+static void
+begin_hinted_scan(struct t_led_phase_bootstrap *b)
+{
+	b->hinted_scan = true;
+	time_duration_ns start = b->next_hint_ns - b->options.hint_span_ns;
+	uint32_t count = (uint32_t)(2 * b->options.hint_span_ns / b->options.narrow_step_ns) + 1;
+	LOG_I(b, "LED_BOOTSTRAP side=%c event=hinted_scan hint_us=%.1f span_us=%.1f", b->options.label,
+	      (double)t_led_phase_bootstrap_wrap(b->next_hint_ns, b->period_ns) / 1000.0,
+	      (double)b->options.hint_span_ns / 1000.0);
+	begin_scan(b, T_LED_PHASE_BOOTSTRAP_NARROW_SCAN, start, b->options.narrow_step_ns, count);
 }
 
 static void
@@ -733,6 +779,8 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .hint_span_ns = 1500 * U_TIME_1US_IN_NS,
 	    .hint_retries = 0,
 	    .full_scan_fallback = true,
+	    .quick_lock = false,
+	    .quick_lock_min_score = 2.0f,
 	};
 }
 
@@ -764,6 +812,8 @@ t_led_phase_bootstrap_start(struct t_led_phase_bootstrap *b, time_duration_ns pe
 	b->hinted_scan = false;
 	b->idle_backoff_frames = 0;
 	b->verifying_lock = false;
+	b->quick_check = false;
+	b->quick_tried = false;
 
 	// Measure the background with the LEDs dark before scanning.
 	b->state = T_LED_PHASE_BOOTSTRAP_BASELINE;
@@ -783,6 +833,7 @@ t_led_phase_bootstrap_stop(struct t_led_phase_bootstrap *b)
 		b->state = T_LED_PHASE_BOOTSTRAP_IDLE;
 		b->output_generation++;
 	}
+	b->quick_check = false;
 	b->track_stage = T_LED_PHASE_BOOTSTRAP_TRACK_NONE;
 	b->track_wants_probe = false;
 }

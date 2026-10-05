@@ -1027,6 +1027,56 @@ TEST_CASE("LED phase bootstrap hinted scan locks with far fewer setting changes,
 	}
 }
 
+TEST_CASE("LED phase bootstrap quick lock locks on a good hint at once and scans after a poor one")
+{
+	t_led_phase_bootstrap_options full = test_options();
+	t_led_phase_bootstrap reference;
+	t_led_phase_bootstrap_init(&reference, &full);
+	t_led_phase_bootstrap_start(&reference, kPeriod);
+	Sim ref_sim{.latency_ns = 5000000};
+	uint32_t frame = 0;
+	ref_sim.run(reference, 2000, frame);
+	REQUIRE(reference.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+	const int64_t true_hint = reference.lock_fudge_ns + full.lock_blink_ns / 2 - full.narrow_blink_ns / 2;
+
+	// A hint inside the window: locked on the quick check, in about a third of the time a hinted scan needs.
+	for (int64_t error_ns : {int64_t(0), int64_t(300000), int64_t(-300000)}) {
+		CAPTURE(error_ns);
+		t_led_phase_bootstrap_options options = test_options();
+		options.quick_lock = true;
+		options.hint_fudge_ns = t_led_phase_bootstrap_wrap(true_hint + error_ns, kPeriod);
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		Sim sim{.latency_ns = 5000000};
+		frame = 0;
+		sim.run(b, 80, frame);
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		CHECK(b.quick_locks == 1);
+		CHECK(circular_distance(b.lock_fudge_ns, reference.lock_fudge_ns) <= std::abs(error_ns) + 1000);
+		// The lock holds: lit in every frame.
+		uint32_t lit_before = sim.frames_lit, run_before = sim.frames_run;
+		sim.run(b, 300, frame);
+		CHECK(sim.frames_lit - lit_before == sim.frames_run - run_before);
+	}
+
+	// A hint whose lock pulse misses the exposure: the quick check is dark, and the hinted scan finds the window.
+	{
+		t_led_phase_bootstrap_options options = test_options();
+		options.quick_lock = true;
+		options.hint_fudge_ns = t_led_phase_bootstrap_wrap(true_hint + 1200000, kPeriod);
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+		Sim sim{.latency_ns = 5000000};
+		frame = 0;
+		sim.run(b, 1000, frame);
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		CHECK(b.quick_locks == 0);
+		CHECK(circular_distance(b.lock_fudge_ns, reference.lock_fudge_ns) <= full.narrow_step_ns);
+	}
+}
+
 TEST_CASE("LED phase bootstrap wraps offsets into the period")
 {
 	CHECK(t_led_phase_bootstrap_wrap(-1, kPeriod) == kPeriod - 1);
