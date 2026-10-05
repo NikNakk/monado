@@ -95,6 +95,8 @@ on hardware:
 | `PSSENSE_LED_BOOTSTRAP_FULL_SCAN_FALLBACK` | off | With a phase hint, fall back to the full (wide-pulse) scan after the hinted retries. Off keeps retrying hinted scans with backoff; every always-lit fault on 5 Oct began on entering a full scan or in a burst of scans. |
 | `PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT` | 10 | Rescan a locked controller when fewer than this percentage of its camera reports were lit over a 300-exposure window, even if stray lit frames keep the 300-dark-frame rule from firing; 0 disables. |
 | `PSSENSE_LED_NOMINAL_CYCLE` | off | Send Sony's constant `cycle_length` (50,050,050 thirds of a ns, one nominal 59.94 Hz frame) instead of the measured average, which changes on almost every latch. |
+| `PSSENSE_LED_BLINK_SWEEP` | unset | Diagnostic: comma-separated `led_blink` values (8 hex digits in report byte order, e.g. `0affffff`, or 2 for byte 0 with `ff` after) stepped through once the LED lock is held, one latch per step (inside BROAD without leaving it). Probes are suspended while sweeping; each step logs `LED_BLINK_SWEEP`. |
+| `PSSENSE_LED_BLINK_SWEEP_S` | 4 | Seconds per sweep step. |
 | `PSSENSE_LED_BROAD_PERIOD_ID` | lock period | BROAD pulse period ID. Sony uses 42 (2.1 ms), which is historically associated with the always-lit fault in wide scans, so test it separately. |
 
 Build optimisation is required for both solver and runtime. Use the
