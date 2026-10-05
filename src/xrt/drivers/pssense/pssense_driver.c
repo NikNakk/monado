@@ -97,6 +97,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_clock_steady, "PSSENSE_CLOCK_STEADY", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_latch_interval_ms, "PSSENSE_LED_LATCH_INTERVAL_MS", 0)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_s, "PSSENSE_LED_BROAD_S", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_nominal_cycle, "PSSENSE_LED_NOMINAL_CYCLE", false)
+DEBUG_GET_ONCE_OPTION(pssense_led_blink_sweep, "PSSENSE_LED_BLINK_SWEEP", "")
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_blink_sweep_s, "PSSENSE_LED_BLINK_SWEEP_S", 4)
 //! One nominal 59.94 Hz camera frame in thirds of a nanosecond, as observed in every Sony output report.
 #define PSSENSE_NOMINAL_CYCLE_LENGTH 50050050u
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_period_id, "PSSENSE_LED_BROAD_PERIOD_ID", 0)
@@ -586,6 +588,17 @@ struct pssense_device
 		timepoint_ns led_latched_ns;
 		//! PSSENSE_LED_BROAD_S: BROAD free-run in progress, since when, and PRESCAN anchors latched before it.
 		bool led_broad_active;
+		/*!
+		 * PSSENSE_LED_BLINK_SWEEP (diagnostic): led_blink values stepped through once the lock is held, the
+		 * current value, and generations so each step latches exactly once.
+		 */
+		uint8_t led_sweep_values[32][4];
+		uint32_t led_sweep_count;
+		uint32_t led_sweep_index;
+		bool led_sweep_started, led_sweep_done;
+		timepoint_ns led_sweep_step_ns;
+		uint8_t led_blink[4];
+		uint32_t led_sweep_generation, led_sweep_latched_generation;
 		timepoint_ns led_broad_started_ns;
 		uint32_t led_broad_anchors;
 		uint32_t led_broad_windows;
@@ -2175,6 +2188,86 @@ pssense_led_bootstrap_record_changes(struct pssense_device *pssense, int64_t exp
 	pssense->tracking.recorded_led_fudge_ns = b->fudge_offset_ns;
 }
 
+static void
+pssense_led_sweep_parse(struct pssense_device *pssense)
+{
+	memset(pssense->tracking.led_blink, 0xff, sizeof(pssense->tracking.led_blink));
+	const char *list = debug_get_option_pssense_led_blink_sweep();
+	const char *p = list;
+	while (p != NULL && *p != '\0' &&
+	       pssense->tracking.led_sweep_count < ARRAY_SIZE(pssense->tracking.led_sweep_values)) {
+		char token[16] = {0};
+		size_t n = strcspn(p, ",");
+		if (n > 0 && n < sizeof(token)) {
+			memcpy(token, p, n);
+			// Report byte order as in Sony's notation: "0affffff" is led_blink[0] = 0x0a, then three 0xff.
+			uint8_t *v = pssense->tracking.led_sweep_values[pssense->tracking.led_sweep_count];
+			unsigned int b[4] = {0xff, 0xff, 0xff, 0xff};
+			int got = n == 2 ? sscanf(token, "%2x", &b[0])
+			                 : sscanf(token, "%2x%2x%2x%2x", &b[0], &b[1], &b[2], &b[3]);
+			if ((n == 2 && got == 1) || (n == 8 && got == 4)) {
+				for (int i = 0; i < 4; i++) {
+					v[i] = (uint8_t)b[i];
+				}
+				pssense->tracking.led_sweep_count++;
+			} else {
+				PSSENSE_WARN(pssense, "PSSENSE_LED_BLINK_SWEEP: ignoring '%s' (want 2 or 8 hex digits)",
+				             token);
+			}
+		}
+		p += n;
+		if (*p == ',') {
+			p++;
+		}
+	}
+}
+
+static bool
+pssense_led_sweep_active(const struct pssense_device *pssense)
+{
+	return pssense->tracking.led_sweep_count > 0 && !pssense->tracking.led_sweep_done;
+}
+
+//! Steps the led_blink sweep once the LED bootstrap holds its lock. Called with the controller thread locked.
+static void
+pssense_led_sweep_update_locked(struct pssense_device *pssense, timepoint_ns now_ns, bool locked)
+{
+	if (!pssense_led_sweep_active(pssense) || !locked) {
+		return;
+	}
+	const timepoint_ns hold_ns =
+	    (timepoint_ns)MAX(debug_get_num_option_pssense_led_blink_sweep_s(), 1) * U_TIME_1S_IN_NS;
+	if (!pssense->tracking.led_sweep_started) {
+		pssense->tracking.led_sweep_started = true;
+		pssense->tracking.led_sweep_index = 0;
+	} else if (now_ns - pssense->tracking.led_sweep_step_ns >= hold_ns) {
+		pssense->tracking.led_sweep_index++;
+	} else {
+		return;
+	}
+	pssense->tracking.led_sweep_step_ns = now_ns;
+	const char side = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
+	if (pssense->tracking.led_sweep_index >= pssense->tracking.led_sweep_count) {
+		pssense->tracking.led_sweep_done = true;
+		memset(pssense->tracking.led_blink, 0xff, sizeof(pssense->tracking.led_blink));
+		PSSENSE_INFO(pssense, "LED_BLINK_SWEEP side=%c event=done exposure_ns=%" PRIi64, side,
+		             pssense->tracking.last_exposure_local_timestamp_ns);
+	} else {
+		memcpy(pssense->tracking.led_blink,
+		       pssense->tracking.led_sweep_values[pssense->tracking.led_sweep_index],
+		       sizeof(pssense->tracking.led_blink));
+		const uint8_t *v = pssense->tracking.led_blink;
+		PSSENSE_INFO(
+		    pssense,
+		    "LED_BLINK_SWEEP side=%c event=step step=%u/%u value=%02x%02x%02x%02x broad=%d exposure_ns=%" PRIi64
+		    " host_ns=%" PRIi64,
+		    side, pssense->tracking.led_sweep_index + 1, pssense->tracking.led_sweep_count, v[0], v[1], v[2],
+		    v[3], pssense->tracking.led_broad_active ? 1 : 0,
+		    pssense->tracking.last_exposure_local_timestamp_ns, now_ns);
+	}
+	pssense->tracking.led_sweep_generation++;
+}
+
 static bool
 pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t exposure_timestamp_ns)
 {
@@ -2242,7 +2335,7 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	// A tracking probe changes this controller's light, so like a scan it needs the LEDs to itself.
 	// Not during a BROAD free-run: the probe's offsets need PRESCAN anchors.
 	if (t_led_phase_bootstrap_wants_probe(b) && pssense_led_bootstrap_steady_for_probe(pssense) &&
-	    !pssense->tracking.led_broad_active &&
+	    !pssense->tracking.led_broad_active && !pssense_led_sweep_active(pssense) &&
 	    (owner == me || (owner == 0 && xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0))) {
 		owner = me;
 		t_led_phase_bootstrap_begin_probe(b);
@@ -2424,6 +2517,12 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		 * the host/device mapping error of its moment; Sony's driver latches about once per second in PRESCAN
 		 * (anchors 60 frames apart), where this driver otherwise latches every exposure.
 		 */
+		pssense_led_sweep_update_locked(pssense, now_ns,
+		                                use_led_bootstrap && leds_lit &&
+		                                    pssense->tracking.led_bootstrap.state ==
+		                                        T_LED_PHASE_BOOTSTRAP_LOCKED);
+		const bool sweep_changed =
+		    pssense->tracking.led_sweep_latched_generation != pssense->tracking.led_sweep_generation;
 		long latch_interval_ms = debug_get_num_option_pssense_led_latch_interval_ms();
 		const uint8_t phase = leds_lit ? LED_SYNC_PHASE_PRESCAN : LED_SYNC_PHASE_LED_ALL_OFF;
 		const char side = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
@@ -2448,6 +2547,17 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			if (pssense->tracking.led_broad_active) {
 				const timepoint_ns elapsed_ns = now_ns - pssense->tracking.led_broad_started_ns;
 				if (steady && elapsed_ns < (timepoint_ns)broad_s * U_TIME_1S_IN_NS) {
+					if (sweep_changed) {
+						// As Sony's driver does within BROAD: latch a new led_blink, keep the
+						// anchor.
+						memcpy(pssense->tracking.led_settings.led_blink,
+						       pssense->tracking.led_blink,
+						       sizeof(pssense->tracking.led_blink));
+						pssense->tracking.led_settings.sequence_number =
+						    pssense->tracking.led_sequence_num++;
+						pssense->tracking.led_sweep_latched_generation =
+						    pssense->tracking.led_sweep_generation;
+					}
 					os_thread_helper_unlock(&pssense->controller_thread);
 					return;
 				}
@@ -2474,6 +2584,9 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 				    .led_blink = {0xFF, 0xFF, 0xFF, 0xFF},
 				    .period_id = broad_period_id,
 				};
+				memcpy(pssense->tracking.led_settings.led_blink, pssense->tracking.led_blink,
+				       sizeof(pssense->tracking.led_blink));
+				pssense->tracking.led_sweep_latched_generation = pssense->tracking.led_sweep_generation;
 				pssense->tracking.led_broad_active = true;
 				pssense->tracking.led_broad_started_ns = now_ns;
 				pssense->tracking.led_broad_windows++;
@@ -2489,7 +2602,7 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			 * began in such bursts (a probe after a BROAD window, and one during a weak lock); Sony's
 			 * driver never latches per frame.
 			 */
-			if (!force_latch && pssense->tracking.led_latched &&
+			if (!force_latch && !sweep_changed && pssense->tracking.led_latched &&
 			    pssense->tracking.led_settings.phase == phase &&
 			    pssense->tracking.led_settings.period_id == period_id &&
 			    pssense->tracking.led_latched_content_generation ==
@@ -2502,7 +2615,7 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 			if (steady || force_latch) {
 				pssense->tracking.led_broad_anchors++;
 			}
-		} else if (latch_interval_ms > 0 && pssense->tracking.led_latched &&
+		} else if (latch_interval_ms > 0 && !sweep_changed && pssense->tracking.led_latched &&
 		           pssense->tracking.led_settings.phase == phase &&
 		           pssense->tracking.led_settings.period_id == period_id &&
 		           pssense->tracking.led_latched_content_generation ==
@@ -2515,6 +2628,7 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		pssense->tracking.led_latched = true;
 		pssense->tracking.led_latched_content_generation = pssense->tracking.led_content_generation;
 		pssense->tracking.led_latched_ns = now_ns;
+		pssense->tracking.led_sweep_latched_generation = pssense->tracking.led_sweep_generation;
 
 		if (debug_get_bool_option_pssense_timing_diag()) {
 			timepoint_ns controller_now_ns = 0;
@@ -2557,6 +2671,8 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 		    .led_blink = {0xFF, 0xFF, 0xFF, 0xFF},
 		    .period_id = period_id,
 		};
+		memcpy(pssense->tracking.led_settings.led_blink, pssense->tracking.led_blink,
+		       sizeof(pssense->tracking.led_blink));
 		if (!leds_lit) {
 			pssense->tracking.led_settings.phase = LED_SYNC_PHASE_LED_ALL_OFF;
 		}
@@ -3620,6 +3736,7 @@ pssense_create(struct xrt_prober *xp,
 	clock_options.snap_ns = (double)debug_get_num_option_pssense_clock_offset_snap_us() * 1000.0;
 	clock_options.steady = debug_get_bool_option_pssense_clock_steady();
 	pssense_clock_init(&pssense->timing.clock, &clock_options);
+	pssense_led_sweep_parse(pssense);
 
 	m_relation_history_create(&pssense->tracking.imu_relation_history);
 	m_relation_history_create(&pssense->tracking.constellation_relation_history);

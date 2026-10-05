@@ -1316,3 +1316,22 @@ About 7.5 minutes of Sony-like operation without a lockout, against roughly one
 lockout per two sessions earlier today with per-exposure latching. That is
 supporting evidence, not proof, that per-exposure latch bursts trigger the
 always-lit fault. Next: the same profile in longer OpenBrush sessions.
+
+### `led_blink` sweep diagnostic (2026-10-05)
+
+Purpose: resolve what the four `led_blink` bytes do, using the headset cameras
+as the light sensor. The earlier single-bit test held a bit and saw dark and lit
+frames alternate, which fits 32 frame-slots (one bit per camera cycle) better
+than 32 slots within a frame. Under that reading Sony's BROAD values darken a few
+of the first eight frames in each 32 (`0a`: bits 1 and 3 set). Those earlier
+tests re-latched constantly; the latch-hold scheduler now lets one value run
+undisturbed.
+
+`PSSENSE_LED_BLINK_SWEEP` steps through the listed values once the lock is held
+(see the toggles document), with one latch per step and probes suspended.
+`scripts/pssense_blink_sweep_analyze.py SESSION` replays the session's
+`constellation.ctd`, marks each frame lit or dark against each camera's
+LED-off baseline, and prints per value: lit fraction, strongest repeat period
+(autocorrelation over 1–40 frames), and frames folded modulo 32 beside the
+value's bits in both bit orders. Run with one controller awake. Smoke-tested on
+an existing recording; not yet run on a sweep.
