@@ -1755,3 +1755,29 @@ Not settled: whether the left was out of view after the power cycle, or did
 not accept the LED schedule after power-on and later fell into the always-lit
 state. The next test needs both rings clearly in view, at least two cameras
 each, and a note of where the left is put down after it is switched back on.
+
+Repeat test (`224123-reconnect-cycle-3`, build `eaa10e1aa`, 120 s, headset
+moved further back so both rings were in all four cameras, the user
+power-cycling the left):
+
+| Time | Event |
+| --- | --- |
+| 1.3 s / 2.3 s | Right / left quick lock, score 4.0 |
+| 34.9 s | Left read error, `CONNECTION event=disconnected` |
+| 48.1 s | `CONNECTION event=connected`, calibration read |
+| 48.7 s | Dark baseline |
+| 49.0 s | Quick lock, score 4.0, 0.9 s after reconnecting |
+
+- Accepted left poses per 10 s: 599–600 before the power cycle, 301 and 68 in
+  the windows containing it, and 598–600 from 50 s to the end.
+- The right was unaffected throughout (590–600 per 10 s).
+- Tracked over the whole session: left 86.8% (it was off for 13 s), right 99.2%.
+
+The previous run's failures came from the headset's position. A fresh
+40 s session (`224019-headset-moved-check`) locked both at 1.1 and 2.1 s with score 4.
+The earlier `stuck_lit` on the left was most likely a false positive: with the
+headset close and the left barely in view, the left's model matched the locked
+right ring weakly (5 matches, 3 cameras). The dark baseline then counted that
+as the left ring lit while commanded off. The stuck state only stops scanning
+and probing, but this false positive is possible when rings are poorly
+visible.
