@@ -286,6 +286,7 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 	}
 
 	const char *weak = NULL;
+	bool narrow_window = false;
 	if (peak < b->options.min_peak_score) {
 		weak = "narrow_peak_below_minimum";
 	} else if (b->options.min_lock_peak_score > 0.0f && peak < b->options.min_lock_peak_score) {
@@ -302,6 +303,7 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		LOG_W(b, "LED_BOOTSTRAP side=%c event=narrow_window_narrow lit_steps=%u min=%u", b->options.label,
 		      right - left + 1, b->options.narrow_min_lit_steps);
 		weak = "narrow_window_below_minimum";
+		narrow_window = true;
 	}
 	if (weak != NULL) {
 		if (b->hinted_scan && b->hint_failures < b->options.hint_retries) {
@@ -322,6 +324,21 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 			uint64_t pause = (uint64_t)b->options.failed_backoff_frames << MIN(b->hint_failures - 1, 16u);
 			b->idle_backoff_frames = (uint32_t)MIN(pause, (uint64_t)b->options.max_failed_backoff_frames);
 			b->output_generation++;
+			return;
+		}
+		if (b->hinted_scan && narrow_window) {
+			/*
+			 * The ring is lit where the hint says, but too briefly to measure the window's width: it is
+			 * only weakly visible. Lock on the run and let tracking probes refine it rather than falling
+			 * back to the full scan. On 5 Oct (083028) a right ring seen by two cameras failed five hinted
+			 * scans this way, and the full scans that followed put it into the always-lit fault.
+			 */
+			LOG_W(
+			    b,
+			    "LED_BOOTSTRAP side=%c event=narrow_window_accepted lit_steps=%u after %u hinted retries, "
+			    "locking instead of falling back to the full scan",
+			    b->options.label, right - left + 1, b->hint_failures);
+			apply_lock(b, left, right, peak_index);
 			return;
 		}
 		if (b->hinted_scan) {

@@ -1181,3 +1181,11 @@ scan when a controller is only weakly visible. A weak but correctly placed
 narrow run should retry or lock (letting probes refine it), not fall back to a
 full scan; full-scan fallback should be reserved for scans that found no light
 near the hint.
+
+**Change:** a hinted scan rejected only for `narrow_window_below_minimum` (the
+ring is lit at the hinted place, but for too few steps) no longer falls back to
+the full scan once its retries are exhausted. It locks on that run
+(`event=narrow_window_accepted`) and leaves refinement to the tracking probes.
+Low peaks, and scans that found nothing, still fall back as before. A simulator
+test with a ring lit at a single hinted step confirms the lock arrives after
+the retries with no wide scan.
