@@ -619,7 +619,9 @@ than a Monado runtime target. Recreating Valve's compositor is not a goal.
 ### Runtime quality and platform completeness
 
 5. **Tracking-space UX**
-   - reliable local-floor/stage behaviour;
+   - reliable local-floor/stage behaviour: runtime floor calibration of the
+     managed STAGE via `monado-ctl` ([floor calibration](macos-floor-calibration.md),
+     hardware validation pending);
    - recenter and persisted calibration;
    - eventually a boundary/guardian-equivalent strategy.
 
