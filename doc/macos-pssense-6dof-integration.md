@@ -1219,3 +1219,24 @@ Trade-off: if the true phase ever left the hint's ±1.5 ms, the controller would
 never lock. That has not been seen, and the hint follows each lock's centre. A
 simulator test covers a long out-of-view spell: a wide scan with the fallback,
 none without it, and a centred lock once back in view.
+
+**Still sessions after the no-full-scan change (build `2ca7cc39a`, run by Claude,
+right power-cycled and repositioned by the user):**
+
+- `20261005-084947-broad60-still`: **the left ran one 60.0 s BROAD window with
+  fused poses in every 10 Hz sample, all thirds.** With the 1.6 ms pulse, BROAD
+  windows of 10, 30 and 60 s have each held fully in the still tests. The right's
+  hinted scans failed five times (weak peak / one lit step), retried without any
+  full scan, then locked on a one-step run (`narrow_window_accepted`). It was lit
+  in 40–62% of reports, then became stuck lit while locked. The onset coincided
+  with a probe (blobs 2.38/5.88/5.88, then equal at every offset and 1200/1200
+  lit). No scan was involved.
+- `20261005-085152-broad10-p42-still`: the right was already stuck at the first
+  baseline (`own_ring_lit_while_commanded_off`, 24/32); the queue stopped.
+  Period 42 in BROAD remains untested.
+- **Right battery:** 95% this morning, 75% and 65% during the earlier stuck
+  episode, 65% at the start of this session, 25% at its end, then 15%. The left
+  stayed at 85%. Every lockout today was on the right except the left's at
+  57.9–62.2 s in the OpenBrush session. Whether a sagging or failing battery
+  contributes to the fault, or the stuck ring simply drains it, is open. Repeat
+  the period-42 and right-hand tests only with the right fully charged.
