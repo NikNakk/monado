@@ -1781,3 +1781,18 @@ right ring weakly (5 matches, 3 cameras). The dark baseline then counted that
 as the left ring lit while commanded off. The stuck state only stops scanning
 and probing, but this false positive is possible when rings are poorly
 visible.
+
+### Quick lock, detector blobs and reconnect become 6DoF defaults (2026-10-05)
+
+`PSVR2_SENSE_6DOF=1` now also sets `PSSENSE_LED_BOOTSTRAP_QUICK_LOCK=1`,
+`PSVR2_LED_DETECTOR_BLOBS=1` and `PSSENSE_RECONNECT=1`, each only when unset,
+like the helper's other defaults. Evidence (CLI, this document):
+
+- quick lock: first locks at 1.1 s and 2.1 s instead of 5.1 s and 11.6 s;
+- detector blobs: same tracking, pose ready 9 ms after exposure instead of
+  29 ms;
+- reconnect: a power-cycled left relocked 0.9 s after reconnecting.
+
+The camera streams stay on, so passthrough is unaffected. Setting any of the
+three to 0 restores the earlier behaviour. Not yet run together in a game
+session.

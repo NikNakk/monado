@@ -59,7 +59,7 @@ constructing devices; they also work in an in-process runtime:
 | `PSVR2_SENSE_6DOF` | off | Start four-camera Sense tracking with the joint solver + EKF. |
 | `PSVR2_SENSE_6DOF_CALIBRATION` | unset | Required absolute mode-4 calibration path; invalid/missing calibration leaves the existing fallback. |
 | `PSVR2_LED_DETECTOR_RECORD` | unset | Path: open the headset's LED detector stream (USB interface 8) on its own, without the other auxiliary streams or a camera-mode change, and record it compactly (header plus populated records). Read with `scripts/psvr2_led_detector_dump.py`. The session script sets it with `PSVR2_SENSE_RECORD_LED_DETECTOR=1`. |
-| `PSVR2_LED_DETECTOR_BLOBS` | off | Track the Sense controllers from the headset's own LED detections (USB interface 8) instead of blob detection on the camera images. The solvers and LED scheduling are unchanged. Works with `PSVR2_CAMERA_STREAMS=0`: the driver then announces exposures from the detector stream. |
+| `PSVR2_LED_DETECTOR_BLOBS` | off (on with `PSVR2_SENSE_6DOF`) | Track the Sense controllers from the headset's own LED detections (USB interface 8) instead of blob detection on the camera images. The solvers and LED scheduling are unchanged. Works with `PSVR2_CAMERA_STREAMS=0`: the driver then announces exposures from the detector stream. |
 | `PSVR2_LED_DETECTOR_VTS_OFFSET_US` | 0 | Detector device time minus camera VTS for the same exposure, used until camera frames supply it (measured 0 on 5 Oct). |
 | `PSVR2_LATENCY_DIAG` | off | Diagnostic: log `LATENCY_DIAG` every 5 s with percentiles of arrival minus exposure time for the two mode-4 camera transfers and the LED detector stream (which it opens). With `CONSTELLATION_TRACKER_LOG=info`, `JOINT_STATUS` gives `pose_age_ms_p50/p95`, exposure to the end of the joint solve. |
 | `PSVR2_BLOB_PIXEL_THRESHOLD` | 80 (50 with `PSVR2_SENSE_6DOF`) | Pixel threshold. |
@@ -77,7 +77,10 @@ keep-lock/LED-shape/strict/tracking/coverage options, and wide pulse period ID
 `PSSENSE_LED_BROAD_S=10`, `PSSENSE_LED_LATCH_INTERVAL_MS=1000`,
 `PSSENSE_LED_NOMINAL_CYCLE=1`), blob thresholds 50/120 and
 `CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1`, all validated in the 5 Oct
-CLI series and two OpenBrush runs without lockouts. See `sense_tracking_defaults` in
+CLI series and two OpenBrush runs without lockouts. Later on 5 Oct it also gained
+`PSSENSE_LED_BOOTSTRAP_QUICK_LOCK=1`, `PSVR2_LED_DETECTOR_BLOBS=1` and
+`PSSENSE_RECONNECT=1` (macOS only; ignored elsewhere), validated in CLI
+sessions; the camera streams stay on, so passthrough is unaffected. See `sense_tracking_defaults` in
 `targets/common/target_psvr2_sense_tracking.c` for exact names. Future LED
 scheduling, experimental clock/filter/bootstrap/model options remain off unless
 requested explicitly or through this 6DoF switch. Linux's full-stream default
@@ -101,8 +104,8 @@ are the driver's own, which apply without the helper:
 | `PSSENSE_LED_LATCH_INTERVAL_MS` | 0 | Keep the latched PRESCAN anchor and re-latch only after this interval or on a content change (bootstrap/sync output, phase, period). 0 latches every exposure, as before. Sony's driver latches about every 1000 ms. |
 | `PSSENSE_LED_BROAD_S` | 0 | Once the LED bootstrap holds its lock: three PRESCAN anchors 1 s apart, then BROAD (`cycle_position` 0) for this many seconds, repeated. Probes are only granted outside BROAD. Logs `LED_BROAD event=start/end/abort`. |
 | `PSSENSE_LED_BOOTSTRAP_BLOB_FALLBACK` | off | Let a phase probe whose reference window was untracked steer the lock by LED-shaped blob counts (previously always on with LED-shaped counts). |
-| `PSSENSE_RECONNECT` | off | macOS: Sense controllers not connected when the system starts are created anyway, report inactive inputs and no pose, and attach when they connect. A controller that disconnects (sleep, power-off) waits to reconnect instead of stopping for good. Each connection starts its clock mapping, histories and LED lock afresh. |
-| `PSSENSE_LED_BOOTSTRAP_QUICK_LOCK` | off | Before a hinted scan, try the 1.6 ms lock pulse at the hint for one step (~0.3 s) and lock there if lit; otherwise scan as before. The second controller uses the first one's lock as its hint, and the scan handoff ends once the first controller's pose is accepted instead of after a fixed 1.5 s. After a failed scan (ring out of view), it retries with a quick check about every 1.5 s, with a full hinted scan every fourth attempt, instead of doubling pauses; and if the first controller fails a scan, the other no longer waits for it. |
+| `PSSENSE_RECONNECT` | off (on with `PSVR2_SENSE_6DOF`) | macOS: Sense controllers not connected when the system starts are created anyway, report inactive inputs and no pose, and attach when they connect. A controller that disconnects (sleep, power-off) waits to reconnect instead of stopping for good. Each connection starts its clock mapping, histories and LED lock afresh. |
+| `PSSENSE_LED_BOOTSTRAP_QUICK_LOCK` | off (on with `PSVR2_SENSE_6DOF`) | Before a hinted scan, try the 1.6 ms lock pulse at the hint for one step (~0.3 s) and lock there if lit; otherwise scan as before. The second controller uses the first one's lock as its hint, and the scan handoff ends once the first controller's pose is accepted instead of after a fixed 1.5 s. After a failed scan (ring out of view), it retries with a quick check about every 1.5 s, with a full hinted scan every fourth attempt, instead of doubling pauses; and if the first controller fails a scan, the other no longer waits for it. |
 | `PSSENSE_LED_BOOTSTRAP_FULL_SCAN_FALLBACK` | off | With a phase hint, fall back to the full (wide-pulse) scan after the hinted retries. Off keeps retrying hinted scans with backoff; every always-lit fault on 5 Oct began on entering a full scan or in a burst of scans. |
 | `PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT` | 10 | Rescan a locked controller when fewer than this percentage of its camera reports were lit over a 300-exposure window, even if stray lit frames keep the 300-dark-frame rule from firing; 0 disables. |
 | `PSSENSE_LED_NOMINAL_CYCLE` | off | Send Sony's constant `cycle_length` (50,050,050 thirds of a ns, one nominal 59.94 Hz frame) instead of the measured average, which changes on almost every latch. |
