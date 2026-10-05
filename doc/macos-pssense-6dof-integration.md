@@ -1631,5 +1631,23 @@ hint (15.4–16.5 ms), well within the reach of the 1.6 ms lock pulse.
   ring. Before, the handoff waited a fixed 1.5 s.
 
 Unit tests: a hint within ±0.3 ms locks on the quick check and stays lit; a
-hint 1.2 ms off falls through to the scan and locks at the true centre. Not
-yet run on hardware (the controllers had gone to sleep).
+hint 1.2 ms off falls through to the scan and locks at the true centre.
+
+Hardware (build `e82dce351`, CLI, headset and both controllers resting in
+view, Sony-like profile, 60 s, run by Claude), against the earlier sessions
+under the same conditions:
+
+| Session | Blobs | First lock L / R | Tracked L / R |
+| --- | --- | --- | --- |
+| `202915-ldblobs-cams-on` (no quick lock) | detector | 11.6 / 5.1 s | 83.7 / 94.8% |
+| `203025-ldblobs-baseline` (no quick lock) | ours | 11.6 / 5.1 s | 83.9 / 95.0% |
+| `204030-quicklock-ldblobs` | detector | 2.1 / 1.1 s | 96.8 / 98.5% |
+| `204147-quicklock-ourblobs` | ours | 2.1 / 1.1 s | 96.1 / 98.5% |
+
+Every quick check passed. The right locked 0.33 s after its baseline and the
+left 0.6 s after the right. Scores were 2.0–2.75: from where each ring rested,
+two cameras saw it, and both were lit in all eight frames. Phase tracking
+found every lock centred (imbalance 0). Each lit fraction (about 50% of
+reports, its two cameras out of four) held for the whole session, with no
+`stuck_lit` or lost lock. A ring seen by only one camera fails the check and
+gets the usual scan.
