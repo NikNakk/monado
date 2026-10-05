@@ -1149,3 +1149,35 @@ Two bootstrap changes after the lockout above:
 Simulator tests: a ring that becomes stuck lit at the fourth narrow step locks
 without the check and enters `stuck_lit` with it; a healthy ring whose long
 exposure lights a run to the end of the scan passes the dark check and locks.
+
+### Still BROAD sessions (2026-10-05)
+
+CLI sessions with both rings resting, build `6a07fc2b2`, steady clock, 1.6 ms
+lock pulse (`PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID=32`), runtime bootstrap
+options, no blob-threshold overrides.
+
+- `20261005-082835-broad10-still` (user): `PSSENSE_LED_BROAD_S=10`. Two BROAD
+  windows per controller, each 10.01 s. **Every 10 Hz sample in every BROAD
+  window had fused optical poses for both hands, in the first, middle and last
+  thirds.** So 10 s of free-running with no new PRESCAN anchor lost nothing
+  with a 1.6 ms pulse. Left probes centred at all offsets (6/6), locked lit
+  median 1.00. Startup was slow: the right, seen by only two cameras, needed
+  five hinted scans and first locked at 40 s.
+- `20261005-083028-broad10-p42-still` (run by Claude): `PSSENSE_LED_BROAD_PERIOD_ID=42`.
+  **BROAD never started.** All five of the right's hinted scans lit only 1–2
+  steps and were rejected by `narrow_min_lit_steps`. It fell back to the full
+  scan (1.6 ms wide pulses, period 32), which failed once and found the ring
+  on the second attempt. The following narrow scan then found the ring lit at
+  every step: `stuck_lit own_ring_lit_across_narrow_scan`. The fault again
+  followed full scans, without any period 42. The right's reported battery fell
+  95 → 75 → 65% during the stuck state.
+- The 30 s and 60 s runs were not made: the CLI caps sessions at 120 s (the
+  first attempts at 150/180 s exited immediately, leaving the empty folders
+  `20261005-083028-broad30-still` and `-broad60-still`), and the queue then
+  stopped at the fault. They need a power-cycled right controller.
+
+Consequence: rejecting narrow windows escalates to the fault-associated full
+scan when a controller is only weakly visible. A weak but correctly placed
+narrow run should retry or lock (letting probes refine it), not fall back to a
+full scan; full-scan fallback should be reserved for scans that found no light
+near the hint.
