@@ -1080,13 +1080,31 @@ create_local_space(struct xrt_space_overseer *xso,
 	}
 
 	if (out_local_floor_space != NULL) {
-		if (xso->semantic.stage != NULL) {
-			struct u_space *ustage = u_space(xso->semantic.stage);
+		struct u_space *ustage = u_space(xso->semantic.stage);
+		struct xrt_space *parent = xso->semantic.root;
+
+		pthread_rwlock_rdlock(&uso->lock);
+		if (space_is_offset_compatible(ustage) && ustage->next == u_space(xso->semantic.root)) {
+			/*
+			 * Managed stage: parent LOCAL_FLOOR to the stage, at its
+			 * floor, so a later stage offset change (such as a floor
+			 * calibration) also moves this application's floor.
+			 */
+			struct xrt_pose stage, stage_inv, in_stage;
+			get_offset_or_ident_read_locked(ustage, &stage);
+			math_pose_invert(&stage, &stage_inv);
+			math_pose_transform(&stage_inv, &xsr.pose, &in_stage);
+			in_stage.position.y = 0;
+			xsr.pose = in_stage;
+			parent = xso->semantic.stage;
+		} else if (ustage != NULL) {
 			xsr.pose.position.y = ustage->offset.pose.position.y;
 		} else {
 			xsr.pose.position.y = 0;
 		}
-		xret = create_offset_space(xso, xso->semantic.root, &xsr.pose, out_local_floor_space);
+		pthread_rwlock_unlock(&uso->lock);
+
+		xret = create_offset_space(xso, parent, &xsr.pose, out_local_floor_space);
 		if (xret != XRT_SUCCESS) {
 			U_LOG_E("Failed to create offset space LOCAL_FLOOR!");
 			return xret;
