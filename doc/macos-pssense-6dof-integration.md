@@ -1240,3 +1240,33 @@ right power-cycled and repositioned by the user):**
   57.9–62.2 s in the OpenBrush session. Whether a sagging or failing battery
   contributes to the fault, or the stuck ring simply drains it, is open. Repeat
   the period-42 and right-hand tests only with the right fully charged.
+
+### The always-lit fault as a command-stream problem, and a Sony-like profile (2026-10-05)
+
+The user reports that a stuck-lit controller becomes warm, which explains the
+battery drain, and that the fault has never occurred with a PS5. That points to
+this driver's command stream rather than the hardware. Onsets on 4–5 Oct
+occurred in every context: a steady lock with no scans or probes (A-steady),
+during narrow scans, on entering a full scan, and during a probe. So the trigger
+is probably something constant in our stream rather than one scan step.
+
+Differences from Sony's stream in the wire capture:
+
+| | Sony | This driver |
+| --- | --- | --- |
+| New LED latches | ~1/s in PRESCAN; in BROAD only to change `led_blink[0]` | every camera exposure (~60/s) |
+| `cycle_length` | constant 50,050,050 | measured average, changing almost every latch |
+| Pulse widths | 1.6–2.1 ms (periods 32/40/42) | 0.45 ms scan steps, 1.0 ms lock, 1.6 ms wide |
+| LED off (phase 5) | ~5 s at start only | baselines, yields, dark checks |
+
+New opt-in `PSSENSE_LED_NOMINAL_CYCLE=1` sends the constant value. Test
+profile for long OpenBrush sessions, counting lockouts against the earlier rate
+(roughly one per session today):
+
+```
+PSSENSE_CLOCK_STEADY=1
+PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID=32
+PSSENSE_LED_BROAD_S=10
+PSSENSE_LED_LATCH_INTERVAL_MS=1000
+PSSENSE_LED_NOMINAL_CYCLE=1
+```
