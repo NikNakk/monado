@@ -1052,8 +1052,11 @@ create_local_space(struct xrt_space_overseer *xso,
 
 	struct xrt_pose identity = XRT_POSE_IDENTITY;
 	struct xrt_space_relation xsr = XRT_SPACE_RELATION_ZERO;
-	xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, os_monotonic_get_ns(), xso->semantic.view,
-	                                &identity, &xsr);
+	// A system without a head has no view space; use the default pose below.
+	if (xso->semantic.view != NULL) {
+		xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, os_monotonic_get_ns(),
+		                                xso->semantic.view, &identity, &xsr);
+	}
 
 	bool pos_valid = (xsr.relation_flags & XRT_SPACE_RELATION_POSITION_VALID_BIT) != 0;
 	bool ori_valid = (xsr.relation_flags & XRT_SPACE_RELATION_ORIENTATION_VALID_BIT) != 0;
