@@ -1497,3 +1497,15 @@ losses apart from deliberate occlusion, with quick recovery.
 On this session the option halves the left's lost time, mainly by keeping and
 recovering partly occluded rings (`lit_multi`). The remaining loss for both
 hands is mostly `dark_unpredicted`, which here is deliberate hiding.
+
+### Sony-like profile and oriented re-acquisition become the 6DoF defaults (2026-10-05)
+
+`PSVR2_SENSE_6DOF=1` now also sets `PSSENSE_CLOCK_STEADY=1`,
+`PSSENSE_LED_BOOTSTRAP_LOCK_PERIOD_ID=32`, `PSSENSE_LED_BROAD_S=10`,
+`PSSENSE_LED_LATCH_INTERVAL_MS=1000`, `PSSENSE_LED_NOMINAL_CYCLE=1`,
+`PSVR2_BLOB_PIXEL_THRESHOLD=50`, `PSVR2_BLOB_REQUIRED_THRESHOLD=120` and
+`CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP=1`, each only when not already set,
+like the helper's other defaults. Evidence: the `sonylike2-*` CLI series and the
+two OpenBrush runs above, none with a lockout or `stuck_lit`. The driver and
+tracker defaults without the helper are unchanged, as are Linux and the
+non-Sense macOS paths. The service plist no longer needs these entries.
