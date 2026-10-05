@@ -1270,3 +1270,23 @@ PSSENSE_LED_BROAD_S=10
 PSSENSE_LED_LATCH_INTERVAL_MS=1000
 PSSENSE_LED_NOMINAL_CYCLE=1
 ```
+
+**Sony-like profile, first CLI series (build `2102f4e0f`, charged controllers,
+run by Claude):** `sonylike-broad10-still-1` to `-3` (`20261005-1223xx`–`1228xx`)
+ran BROAD 10 s with `LATCH_INTERVAL_MS=1000` and `NOMINAL_CYCLE=1`. Each sent
+one `cycle_length` value, against 150–200 before. But **latches still averaged
+12–33 per second per controller**. Steady PRESCAN latched about 1/s and BROAD
+not at all, as intended. Scans, probes and LED-off (yield) periods still
+latched on every exposure (~50/s), because the BROAD branch held latches only
+when steady. The right's long hinted-scan sequence (60 s) was all
+per-exposure latching. **The right became stuck lit in run 3 at about 84–88 s**,
+just after BROAD window 1 ended (83.1 s), during the probe that followed
+(31–45 latches/s); it was stuck at the next session's first baseline. The
+earlier `broad60` right lockout also began during a probe.
+
+**Change:** in BROAD mode, latches are held whenever the schedule content,
+phase and period are unchanged, in every state. A scan step or probe stage
+latches once when it changes, and LED-off periods do not re-latch.
+`20261005-123344-latchhold-check` was meant to verify the rate on hardware, but
+both controllers had powered off, so it did not run. Hardware verification is
+pending.
