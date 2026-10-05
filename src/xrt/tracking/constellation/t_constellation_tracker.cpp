@@ -25,6 +25,7 @@ namespace xrt::tracking::constellation {
 DEBUG_GET_ONCE_LOG_OPTION(constellation_tracker_log, "CONSTELLATION_TRACKER_LOG", U_LOGGING_WARN)
 DEBUG_GET_ONCE_OPTION(constellation_tracker_data_recorder_output, "CONSTELLATION_TRACKER_DATA_RECORDER_OUTPUT", "")
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_joint, "CONSTELLATION_TRACKER_JOINT", false)
+DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_oriented_bootstrap, "CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP", false)
 
 // Unconditionally present to allow warning that the feature is not enabled.
 DEBUG_GET_ONCE_BOOL_OPTION(constellation_tracker_enable_rerun, "CONSTELLATION_TRACKER_RERUN_ENABLE", false)
@@ -1044,9 +1045,11 @@ ConstellationTracker::ConstellationTracker(t_constellation_tracker_params *param
 
 	if ((params->flags & T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT) != 0 &&
 	    debug_get_bool_option_constellation_tracker_joint() && !this->mosaics.empty()) {
-		this->joint = std::make_unique<JointProcessor>(this, this->mosaics[0]->cameras.size());
-		CT_INFO(this, "Constellation tracker joint multi-camera path enabled (%zu cameras)",
-		        this->mosaics[0]->cameras.size());
+		bool oriented = debug_get_bool_option_constellation_tracker_oriented_bootstrap();
+		this->joint = std::make_unique<JointProcessor>(this, this->mosaics[0]->cameras.size(), oriented);
+		CT_INFO(this,
+		        "Constellation tracker joint multi-camera path enabled (%zu cameras, oriented bootstrap %s)",
+		        this->mosaics[0]->cameras.size(), oriented ? "on" : "off");
 	}
 
 	std::string data_recorder_output = debug_get_option_constellation_tracker_data_recorder_output();

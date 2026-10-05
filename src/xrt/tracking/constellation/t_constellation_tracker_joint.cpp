@@ -11,6 +11,7 @@
 #include "t_constellation_tracker_dataset.hpp"
 #include "joint_pose_solver.hpp"
 #include "stereo_bootstrap.hpp"
+#include "oriented_bootstrap.hpp"
 
 #include "util/u_time.h"
 
@@ -39,6 +40,12 @@ constexpr float kOrientationPriorSigmaDeg = 3.0f;
  * but rarely persists; a real re-acquisition does. Costs two exposures (33 ms) of latency on re-acquisition.
  */
 constexpr uint32_t kConfirmSolves = 3;
+/*!
+ * Coverage a solve anchored to the IMU orientation must reach when oriented bootstrap is enabled. Coverage catches a
+ * pose slipped round the ring, which the orientation prior already rules out (the LEDs are ~20 deg apart, the prior
+ * 3-4 deg). At 0.8 a partly occluded ring was rejected with 12-21 matches over three or four cameras at 0.2-0.3 px.
+ */
+constexpr float kOrientedMinCoverage = 0.5f;
 //! Status log interval.
 constexpr int64_t kStatusIntervalNs = 5'000'000'000;
 //! An exposure slower than this is logged (JOINT_SLOW), at most every kSlowLogIntervalNs.
@@ -112,8 +119,8 @@ constellation_tracker_joint_thread(void *ptr)
 	return nullptr;
 }
 
-JointProcessor::JointProcessor(ConstellationTracker *tracker, size_t camera_count)
-    : tracker(tracker), camera_count(camera_count)
+JointProcessor::JointProcessor(ConstellationTracker *tracker, size_t camera_count, bool oriented_bootstrap_enabled)
+    : tracker(tracker), camera_count(camera_count), oriented_bootstrap_enabled(oriented_bootstrap_enabled)
 {
 	if (os_thread_helper_init(&this->thread) < 0) {
 		throw std::runtime_error("Joint processing thread failed to init");
@@ -333,6 +340,21 @@ JointProcessor::process(JointExposure &exposure)
 		return value;
 	};
 
+	// The device's predicted (IMU) orientation in this world, if it has one and an alignment from earlier solves.
+	auto aligned_orientation = [&](t_constellation_device_id_t id, xrt_quat &out) {
+		const JointDeviceState &state = this->devices[id];
+		const xrt_space_relation &predicted = predictions[id];
+		if (!state.have_align || !relation_has(predicted, XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+		                                                      XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT)) {
+			return false;
+		}
+		xrt_pose Tcv_predicted;
+		math_pose_convert_from_opencv(&predicted.pose, &Tcv_predicted);
+		math_quat_rotate(&state.align, &Tcv_predicted.orientation, &out);
+		math_quat_normalize(&out);
+		return true;
+	};
+
 	// Phase 1: devices being tracked refine from their predicted pose and claim their blobs first.
 	std::vector<Device *> need_bootstrap;
 	for (std::unique_ptr<Device> &owned : ct->devices) {
@@ -385,6 +407,9 @@ JointProcessor::process(JointExposure &exposure)
 			JointSolveParams params;
 			if (have_orientation) {
 				params.orientation_prior_sigma_deg = kOrientationPriorSigmaDeg;
+				if (this->oriented_bootstrap_enabled) {
+					params.min_coverage = kOrientedMinCoverage;
+				}
 				return joint_solve_refine(cameras, device->params.led_model, prior, prior.orientation,
 				                          params, result);
 			}
@@ -406,12 +431,30 @@ JointProcessor::process(JointExposure &exposure)
 	while (!need_bootstrap.empty() && !cameras.empty()) {
 		int best = -1;
 		StereoBootstrapResult best_result;
+		bool best_oriented = false;
 		for (size_t i = 0; i < need_bootstrap.size(); i++) {
 			StereoBootstrapResult result;
+			bool oriented = false;
 			bool ok = timed([&] {
 				return stereo_bootstrap(cameras, need_bootstrap[i]->params.led_model,
 				                        StereoBootstrapParams{}, result);
 			});
+			// A ring in one camera, or partly occluded: re-acquire from the IMU orientation, carried into
+			// this world by the alignment from earlier solves.
+			xrt_quat orientation;
+			if (!ok && this->oriented_bootstrap_enabled &&
+			    aligned_orientation(need_bootstrap[i]->id, orientation)) {
+				OrientedBootstrapResult oriented_result;
+				ok = timed([&] {
+					return oriented_bootstrap(cameras, need_bootstrap[i]->params.led_model,
+					                          orientation, OrientedBootstrapParams{},
+					                          oriented_result);
+				});
+				if (ok) {
+					result.refined = oriented_result.refined;
+					oriented = true;
+				}
+			}
 			if (!ok) {
 				continue;
 			}
@@ -423,10 +466,15 @@ JointProcessor::process(JointExposure &exposure)
 			if (better) {
 				best = (int)i;
 				best_result = result;
+				best_oriented = oriented;
 			}
 		}
 		if (best < 0) {
 			break;
+		}
+		if (best_oriented) {
+			this->device_oriented++;
+			this->devices[need_bootstrap[best]->id].loss.oriented++;
 		}
 		commit(need_bootstrap[best], best_result.refined, true);
 		need_bootstrap.erase(need_bootstrap.begin() + best);
@@ -514,10 +562,10 @@ JointProcessor::process(JointExposure &exposure)
 		uint64_t solves = this->device_tracked + this->device_bootstrapped + this->device_failed;
 		CT_INFO(ct,
 		        "JOINT_STATUS exposures=%" PRIu64 " processed=%" PRIu64 " skipped=%" PRIu64
-		        " late_samples=%" PRIu64 " tracked=%" PRIu64 " bootstrapped=%" PRIu64 " failed=%" PRIu64
-		        " unconfirmed=%" PRIu64 " mean_solve_us=%.0f max_solve_us=%.0f",
+		        " late_samples=%" PRIu64 " tracked=%" PRIu64 " bootstrapped=%" PRIu64 " oriented=%" PRIu64
+		        " failed=%" PRIu64 " unconfirmed=%" PRIu64 " mean_solve_us=%.0f max_solve_us=%.0f",
 		        assembled, this->processed, skipped, late, this->device_tracked, this->device_bootstrapped,
-		        this->device_failed, this->unconfirmed_dropped,
+		        this->device_oriented, this->device_failed, this->unconfirmed_dropped,
 		        solves ? this->solve_us_total / (double)solves : 0.0, this->solve_us_max);
 		this->last_status_ns = exposure.timestamp_ns;
 		this->solve_us_max = 0.0;
@@ -593,14 +641,14 @@ JointProcessor::accountLosses(int64_t timestamp_ns,
 				CT_WARN(ct,
 				        "JOINT_LOSS device=%u gap_ms=%.1f exposures=%u acquiring=%u lit_multi=%u "
 				        "lit_ambiguous=%u lit_single=%u dark_in_view=%u dark_out_of_view=%u "
-				        "dark_unpredicted=%u "
+				        "dark_unpredicted=%u oriented=%u "
 				        "max_excess_blobs=%.1f start_cameras=%u start_in_view=%u start_margin_px=%.0f "
 				        "background=%s",
 				        (unsigned)device->id, (double)gap_ns / 1e6, loss.exposures, loss.acquiring,
 				        loss.lit_multi, loss.lit_ambiguous, loss.lit_single, loss.dark_in_view,
-				        loss.dark_out_of_view, loss.dark_unpredicted, loss.max_excess_blobs,
-				        loss.start_cameras, loss.start_in_view, loss.start_margin_px,
-				        background.c_str());
+				        loss.dark_out_of_view, loss.dark_unpredicted, loss.oriented,
+				        loss.max_excess_blobs, loss.start_cameras, loss.start_in_view,
+				        loss.start_margin_px, background.c_str());
 			}
 			loss = JointDeviceState::Loss{};
 			loss.last_confirmed_ns = timestamp_ns;

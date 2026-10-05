@@ -4,6 +4,7 @@
 #include "catch_amalgamated.hpp"
 #include "joint_pose_solver.hpp"
 #include "stereo_bootstrap.hpp"
+#include "oriented_bootstrap.hpp"
 
 #include <Eigen/Geometry>
 
@@ -434,4 +435,134 @@ TEST_CASE("Joint solve drops a miscalibrated camera")
 	INFO("plain accepted " << plain_ok << ", with dropout " << dropout_ok << " of 30");
 	CHECK(dropout_ok > plain_ok);
 	CHECK(dropout_ok >= 25);
+}
+
+namespace {
+
+//! Keep only camera @p keep's blobs, as when the ring is seen by a single camera.
+std::vector<std::vector<t_blob>>
+only_camera(std::vector<std::vector<t_blob>> blobs, size_t keep)
+{
+	for (size_t c = 0; c < blobs.size(); c++) {
+		if (c != keep) {
+			blobs[c].clear();
+		}
+	}
+	return blobs;
+}
+
+//! @p truth's orientation rotated by @p deg about a random axis: the IMU orientation as the tracker knows it.
+xrt_quat
+perturbed_orientation(const xrt_pose &truth, double deg, std::mt19937 &rng)
+{
+	std::uniform_real_distribution<double> u(-1.0, 1.0);
+	Eigen::Vector3d axis = Eigen::Vector3d(u(rng), u(rng), u(rng)).normalized();
+	Eigen::Quaterniond q = Eigen::AngleAxisd(deg * M_PI / 180.0, axis) * quat_of(truth);
+	return make_pose(q, Eigen::Vector3d::Zero()).orientation;
+}
+
+} // namespace
+
+TEST_CASE("Oriented bootstrap finds a ring that only one camera sees")
+{
+	// 5 Oct OpenBrush: rings lit in a single camera for 15-25 s of 6.5 minutes were never re-acquired.
+	Ring ring;
+	Rig rig;
+	std::mt19937 rng(31);
+
+	int trials = 0, found = 0, stereo_found = 0;
+	for (int i = 0; i < 60; i++) {
+		CAPTURE(i);
+		xrt_pose truth = random_pose(rng, 0.0);
+		size_t camera = (size_t)i % rig.cam_poses.size();
+		auto blobs = only_camera(render(rig, ring, truth, 0.2, 3, rng), camera);
+		if (blobs[camera].size() < 3 + 6) { // Too few of the ring's LEDs in that camera.
+			continue;
+		}
+		trials++;
+		/*
+		 * Only that camera, as when the ring is outside the others' fields of view: they then predict none of
+		 * its LEDs visible. (A ring the others should see but do not, being covered, fails the joint coverage
+		 * test in tracking as well as here.)
+		 */
+		auto all = cameras_for(rig, blobs);
+		std::vector<JointSolveCamera> cams{all[camera]};
+
+		StereoBootstrapResult stereo;
+		stereo_found += stereo_bootstrap(cams, ring.model, StereoBootstrapParams{}, stereo) ? 1 : 0;
+
+		OrientedBootstrapResult result;
+		xrt_quat orientation = perturbed_orientation(truth, 3.0 * (i % 4) / 3.0, rng);
+		if (!oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, result)) {
+			continue;
+		}
+		found++;
+		CAPTURE(result.camera, result.inliers, result.hypotheses, result.refined.matches,
+		        result.refined.rms_px);
+		CHECK(result.camera == 0);
+		// One camera constrains depth less well than stereo.
+		CHECK((pos_of(result.refined.Tcv_world_device) - pos_of(truth)).norm() < 0.01);
+		CHECK(angle_deg(quat_of(result.refined.Tcv_world_device), quat_of(truth)) < 3.0);
+	}
+	INFO("found " << found << " of " << trials << ", stereo " << stereo_found);
+	REQUIRE(trials >= 20);
+	CHECK(stereo_found == 0);
+	CHECK(found >= trials * 8 / 10);
+}
+
+TEST_CASE("Oriented bootstrap tolerates a few degrees of orientation error")
+{
+	Ring ring;
+	Rig rig;
+	std::mt19937 rng(37);
+
+	int trials = 0, found = 0;
+	for (int i = 0; i < 40; i++) {
+		xrt_pose truth = random_pose(rng, 0.0);
+		auto blobs = render(rig, ring, truth, 0.2, 3, rng);
+		trials++;
+		auto cams = cameras_for(rig, blobs);
+		OrientedBootstrapResult result;
+		if (oriented_bootstrap(cams, ring.model, perturbed_orientation(truth, 5.0, rng),
+		                       OrientedBootstrapParams{}, result)) {
+			found++;
+			CHECK((pos_of(result.refined.Tcv_world_device) - pos_of(truth)).norm() < 0.01);
+		}
+	}
+	INFO("found " << found << " of " << trials);
+	CHECK(found >= trials * 8 / 10);
+}
+
+TEST_CASE("Oriented bootstrap does not fit the other hand's ring")
+{
+	// The other controller's ring, untracked and seen by one camera, with this hand's model and orientation.
+	Ring ring;
+	Ring mirror(true);
+	Rig rig;
+	std::mt19937 rng(41);
+
+	int accepted = 0, trials = 0;
+	for (int i = 0; i < 60; i++) {
+		xrt_pose other = random_pose(rng, 0.0);
+		size_t camera = (size_t)i % rig.cam_poses.size();
+		auto blobs = only_camera(render(rig, mirror, other, 0.2, 3, rng), camera);
+		if (blobs[camera].size() < 3 + 6) {
+			continue;
+		}
+		trials++;
+		auto all = cameras_for(rig, blobs);
+		std::vector<JointSolveCamera> cams{all[camera]};
+		// This hand's orientation: unrelated to the other ring's, or the same (the worst case).
+		xrt_quat orientation =
+		    i % 2 ? random_pose(rng, 0.0).orientation : perturbed_orientation(other, 2.0, rng);
+		OrientedBootstrapResult result;
+		if (oriented_bootstrap(cams, ring.model, orientation, OrientedBootstrapParams{}, result)) {
+			accepted++;
+			CAPTURE(i, result.inliers, result.refined.matches, result.refined.rms_px,
+			        result.refined.coverage);
+		}
+	}
+	INFO("accepted " << accepted << " of " << trials);
+	REQUIRE(trials >= 20);
+	CHECK(accepted == 0);
 }
