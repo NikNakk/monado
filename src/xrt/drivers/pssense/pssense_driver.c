@@ -3767,6 +3767,9 @@ pssense_create(struct xrt_prober *xp,
 			bootstrap_options.track_max_step_ns = 200 * U_TIME_1US_IN_NS;
 			// Needs the joint tracker's per-device matched counts (push_camera_led_blob_count).
 			bootstrap_options.detect_stuck_lit = true;
+			// Healthy windows span at most 7 narrow steps (1950 us); a run lit to the scan's end beyond
+			// that is checked dark before locking (5 Oct: 8 steps, the ring stuck lit mid-scan).
+			bootstrap_options.stuck_check_unbounded_steps = 8;
 			/*
 			 * Retry a failed hinted scan (1, 2, 4, 8 s apart) before the full scan. On 4 Oct (000909) two
 			 * hinted scans failed with the left out of view, the full scan followed, and its long wide
@@ -3793,6 +3796,8 @@ pssense_create(struct xrt_prober *xp,
 		                                        debug_get_bool_option_pssense_led_bootstrap_blob_fallback();
 		long lost_lit_percent = debug_get_num_option_pssense_led_bootstrap_lost_lit_percent();
 		bootstrap_options.lost_lit_fraction = (float)CLAMP(lost_lit_percent, 0, 100) / 100.0f;
+		// At most one dim rescan per 30 s (1800 exposures): scans have preceded the always-lit fault.
+		bootstrap_options.dim_rescan_cooldown_frames = 1800;
 		long hint_us = debug_get_num_option_pssense_led_bootstrap_hint_us();
 		if (hint_us >= 0) {
 			// The hint is a narrow-pulse start offset, like the scan steps: centre minus half the narrow

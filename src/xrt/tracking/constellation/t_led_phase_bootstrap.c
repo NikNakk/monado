@@ -229,6 +229,23 @@ finish_wide_scan(struct t_led_phase_bootstrap *b)
 }
 
 static void
+apply_lock(struct t_led_phase_bootstrap *b, uint32_t left, uint32_t right, uint32_t peak_index);
+
+//! Hold the LEDs dark for one baseline, as at the start of a scan, without starting a new scan.
+static void
+begin_dark_check(struct t_led_phase_bootstrap *b)
+{
+	b->state = T_LED_PHASE_BOOTSTRAP_BASELINE;
+	b->baseline_own_reports = 0;
+	b->baseline_own_frames = 0;
+	memset(b->baseline_blobs, 0, sizeof(b->baseline_blobs));
+	memset(b->baseline_reported, 0, sizeof(b->baseline_reported));
+	memset(b->baseline_samples, 0, sizeof(b->baseline_samples));
+	reset_step_window(b);
+	b->output_generation++;
+}
+
+static void
 finish_narrow_scan(struct t_led_phase_bootstrap *b)
 {
 	const uint32_t n = b->step_count;
@@ -327,6 +344,27 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 		      b->options.label, left, right, n);
 	}
 
+	const uint32_t run = right - left + 1;
+	if (b->options.detect_stuck_lit && b->options.stuck_check_unbounded_steps > 0 &&
+	    (left == 0 || right == n - 1) && run >= b->options.stuck_check_unbounded_steps) {
+		LOG_W(b,
+		      "LED_BOOTSTRAP side=%c event=stuck_check lit_steps=%u steps=%u, holding the LEDs dark before "
+		      "locking",
+		      b->options.label, run, n);
+		b->verifying_lock = true;
+		b->pending_left = left;
+		b->pending_right = right;
+		b->pending_peak = peak_index;
+		begin_dark_check(b);
+		return;
+	}
+	apply_lock(b, left, right, peak_index);
+}
+
+static void
+apply_lock(struct t_led_phase_bootstrap *b, uint32_t left, uint32_t right, uint32_t peak_index)
+{
+	const float peak = b->steps[peak_index].score;
 	// Steps are narrow pulse *start* offsets. Centre the locked pulse on the middle of the lit run.
 	b->lit_start_ns = step_fudge(b, left);
 	b->lit_end_ns = step_fudge(b, right);
@@ -548,9 +586,17 @@ finish_baseline(struct t_led_phase_bootstrap *b)
 	      b->options.label, b->baseline_blobs[0], b->baseline_blobs[1], b->baseline_blobs[2], b->baseline_blobs[3],
 	      b->baseline_reported[0], b->baseline_reported[1], b->baseline_reported[2], b->baseline_reported[3],
 	      b->baseline_own_frames, b->baseline_own_reports);
+	const bool verifying = b->verifying_lock;
+	b->verifying_lock = false;
 	if (b->options.detect_stuck_lit && b->baseline_own_reports >= 8 &&
 	    own_lit(b, b->baseline_own_frames, b->baseline_own_reports)) {
-		enter_stuck_lit(b, "own_ring_lit_while_commanded_off");
+		enter_stuck_lit(b,
+		                verifying ? "own_ring_lit_after_unbounded_scan" : "own_ring_lit_while_commanded_off");
+		return;
+	}
+	if (verifying) {
+		LOG_I(b, "LED_BOOTSTRAP side=%c event=stuck_check result=dark", b->options.label);
+		apply_lock(b, b->pending_left, b->pending_right, b->pending_peak);
 		return;
 	}
 	if (b->next_hint_ns >= 0 && b->options.hint_span_ns > 0) {
@@ -641,6 +687,8 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .narrow_min_lit_steps = 3,
 	    .lost_frames = 300,
 	    .lost_lit_fraction = 0.0f,
+	    .dim_rescan_cooldown_frames = 0,
+	    .stuck_check_unbounded_steps = 0,
 	    .failed_backoff_frames = 60,
 	    .max_failed_backoff_frames = 600,
 	    .track_interval_frames = 0,
@@ -693,6 +741,7 @@ t_led_phase_bootstrap_start(struct t_led_phase_bootstrap *b, time_duration_ns pe
 	b->baseline_own_frames = 0;
 	b->hinted_scan = false;
 	b->idle_backoff_frames = 0;
+	b->verifying_lock = false;
 
 	// Measure the background with the LEDs dark before scanning.
 	b->state = T_LED_PHASE_BOOTSTRAP_BASELINE;
@@ -750,13 +799,18 @@ t_led_phase_bootstrap_push_exposure(struct t_led_phase_bootstrap *b, int64_t exp
 			t_led_phase_bootstrap_start(b, b->period_ns);
 			break;
 		}
+		if (b->dim_rescan_cooldown > 0) {
+			b->dim_rescan_cooldown--;
+		}
 		if (b->options.lost_lit_fraction > 0.0f && ++b->dim_window_frames >= b->options.lost_frames) {
 			uint32_t reports = b->dim_window_reports;
 			uint32_t lit_reports = b->dim_window_lit_reports;
 			b->dim_window_frames = 0;
 			b->dim_window_reports = 0;
 			b->dim_window_lit_reports = 0;
-			if (reports > 0 && (float)lit_reports < b->options.lost_lit_fraction * (float)reports) {
+			if (reports > 0 && (float)lit_reports < b->options.lost_lit_fraction * (float)reports &&
+			    b->dim_rescan_cooldown == 0) {
+				b->dim_rescan_cooldown = b->options.dim_rescan_cooldown_frames;
 				LOG_W(
 				    b,
 				    "LED_BOOTSTRAP side=%c event=lost reason=dim lit_reports=%u/%u min_fraction=%.2f, "
