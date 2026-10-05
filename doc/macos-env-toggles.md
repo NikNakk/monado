@@ -91,6 +91,8 @@ on hardware:
 | --- | --- | --- |
 | `PSSENSE_LED_LATCH_INTERVAL_MS` | 0 | Keep the latched PRESCAN anchor and re-latch only after this interval or on a content change (bootstrap/sync output, phase, period). 0 latches every exposure, as before. Sony's driver latches about every 1000 ms. |
 | `PSSENSE_LED_BROAD_S` | 0 | Once the LED bootstrap holds its lock: three PRESCAN anchors 1 s apart, then BROAD (`cycle_position` 0) for this many seconds, repeated. Probes are only granted outside BROAD. Logs `LED_BROAD event=start/end/abort`. |
+| `PSSENSE_LED_BOOTSTRAP_BLOB_FALLBACK` | off | Let a phase probe whose reference window was untracked steer the lock by LED-shaped blob counts (previously always on with LED-shaped counts). |
+| `PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT` | 10 | Rescan a locked controller when fewer than this percentage of its camera reports were lit over a 300-exposure window, even if stray lit frames keep the 300-dark-frame rule from firing; 0 disables. |
 | `PSSENSE_LED_BROAD_PERIOD_ID` | lock period | BROAD pulse period ID. Sony uses 42 (2.1 ms), which is historically associated with the always-lit fault in wide scans, so test it separately. |
 
 Build optimisation is required for both solver and runtime. Use the

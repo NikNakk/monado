@@ -1009,3 +1009,32 @@ warnings, Sense tests pass. Hardware plan, each a separate session with
    fault.
 
 BG and STABLE remain untouched: Sony never used them in either capture.
+
+### Stuck-dark trap and two bootstrap fixes (2026-10-05)
+
+In the morning's last OpenBrush session (left lit 0.33), the left locked
+normally at 8 s. Untracked probes then moved its lock +200 µs at 17.8 s and
+21.2 s by blob-count fallback. From 26 s it was lit only at the centre (±300 µs
+probes dark: 5.9/0.2/0.2 blobs). After an 896 µs clock snap at 41 s, probes saw
+nothing, so they stopped steering. Stray lit frames kept `frames_since_lit`
+below 300, so it never rescanned: lit 22–44 of 1200 reports per 5 s until the
+end. Moving the controller did not help (user report). The centre-only signature
+appears only on the left and only in that morning's two sessions (2/7 and 3/5
+lit probes), never in earlier runs. The user reports both controllers were
+fully charged overnight. Backgrounds were low and similar in all sessions.
+
+Fixes (Sense runtime defaults; environment restores the old behaviour):
+
+- Blob-fallback steering of untracked probes is now opt-in
+  (`PSSENSE_LED_BOOTSTRAP_BLOB_FALLBACK=1`). Untracked probes log and hold.
+- New `lost_lit_fraction` (driver default 10%,
+  `PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT`): a locked controller with fewer
+  lit camera reports than that over a 300-exposure window rescans (hinted
+  ±1.5 ms, then the existing retries). Logs `event=lost reason=dim`. A
+  simulator test reproduces the trap: a 2 ms phase step with one stray lit
+  frame in 20 stays locked with the rule off and relocks centred with it on.
+
+Out-of-view controllers with stray frames can now rescan sooner than before;
+hinted retries back off for 15 s before any full scan, as for the existing
+loss rule. Hardware validation is pending, with `PSSENSE_CLOCK_STEADY=1`
+already set in the normal profile.

@@ -97,6 +97,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_clock_steady, "PSSENSE_CLOCK_STEADY", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_latch_interval_ms, "PSSENSE_LED_LATCH_INTERVAL_MS", 0)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_s, "PSSENSE_LED_BROAD_S", 0)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_period_id, "PSSENSE_LED_BROAD_PERIOD_ID", 0)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_blob_fallback, "PSSENSE_LED_BOOTSTRAP_BLOB_FALLBACK", false)
+DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lost_lit_percent, "PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT", 10)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
@@ -3780,8 +3782,17 @@ pssense_create(struct xrt_prober *xp,
 		}
 		bootstrap_options.track_use_pose_coverage =
 		    debug_get_bool_option_pssense_led_bootstrap_track_coverage();
-		// Only meaningful with LED-shaped counts: raw counts include the other ring and background light.
-		bootstrap_options.track_blob_fallback = pssense->tracking.led_bootstrap_led_blobs;
+		/*
+		 * Opt-in (PSSENSE_LED_BOOTSTRAP_BLOB_FALLBACK, and only with LED-shaped counts, as raw counts include
+		 * the other ring and background light): steer an untracked probe by blob counts. On 5 Oct such probes
+		 * moved a healthy left lock +400 us on counts like 0.50/2.12/6.12, from a moving hand rather than a
+		 * slid window; it was then lit only at the window's centre. A lock that has really slid is now
+		 * rescanned instead (lost_lit_fraction).
+		 */
+		bootstrap_options.track_blob_fallback = pssense->tracking.led_bootstrap_led_blobs &&
+		                                        debug_get_bool_option_pssense_led_bootstrap_blob_fallback();
+		long lost_lit_percent = debug_get_num_option_pssense_led_bootstrap_lost_lit_percent();
+		bootstrap_options.lost_lit_fraction = (float)CLAMP(lost_lit_percent, 0, 100) / 100.0f;
 		long hint_us = debug_get_num_option_pssense_led_bootstrap_hint_us();
 		if (hint_us >= 0) {
 			// The hint is a narrow-pulse start offset, like the scan steps: centre minus half the narrow
