@@ -484,6 +484,9 @@ struct pssense_device
 	bool usb;
 	struct os_hid_device *hid;
 	struct os_thread_helper controller_thread;
+	//! Battery level last logged (BATTERY), so a low controller shows up in ordinary session logs; -1 none yet.
+	float logged_battery_percent;
+	bool logged_battery_charging;
 
 	struct
 	{
@@ -1251,6 +1254,14 @@ pssense_handle_packet(struct pssense_device *pssense,
 		}
 		input.battery_charging = charging;
 		input.battery_charge_percent = battery_percent;
+		if (pssense->logged_battery_percent < 0.0f || charging != pssense->logged_battery_charging ||
+		    fabsf(battery_percent - pssense->logged_battery_percent) >= 0.05f) {
+			PSSENSE_INFO(pssense, "BATTERY side=%c percent=%.0f charging=%d",
+			             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', battery_percent * 100.0f,
+			             charging ? 1 : 0);
+			pssense->logged_battery_percent = battery_percent;
+			pssense->logged_battery_charging = charging;
+		}
 	}
 
 	os_thread_helper_lock(&pssense->controller_thread);
@@ -3577,6 +3588,7 @@ pssense_create(struct xrt_prober *xp,
 	}
 	pssense->tracking.timing_fudge_100us = (int32_t)CLAMP(timing_fudge_100us, INT32_MIN, INT32_MAX);
 	pssense->tracking.increment_sequence_num = true;
+	pssense->logged_battery_percent = -1.0f;
 	pssense->timing.clock_tracker = m_clock_windowed_skew_tracker_alloc(2048);
 	struct pssense_clock_options clock_options;
 	pssense_clock_default_options(&clock_options);
