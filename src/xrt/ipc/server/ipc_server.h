@@ -522,6 +522,9 @@ struct ipc_server
 	//! Disable listening on stdin for server stop.
 	bool no_stdin;
 
+	//! Optional automatic floor calibration, see XRT_FLOOR_EYE_HEIGHT_M.
+	struct ipc_server_floor_calibration *floor_calibration;
+
 #ifdef __APPLE__
 	/*!
 	 * Passthrough camera frames for clients that composite in-process,
@@ -658,6 +661,17 @@ ipc_server_client_thread(void *_ics);
  */
 void
 ipc_server_client_destroy_session_and_compositor(volatile struct ipc_client_state *ics);
+
+/*!
+ * Start the optional automatic floor calibration once the system exists. Sets
+ * the managed STAGE floor from XRT_FLOOR_EYE_HEIGHT_M and the head pose.
+ */
+void
+ipc_server_floor_calibration_start(struct ipc_server *s);
+
+//! Stop the floor calibration thread, if any. Called before the system is destroyed.
+void
+ipc_server_floor_calibration_stop(struct ipc_server *s);
 
 #ifdef __APPLE__
 /*!

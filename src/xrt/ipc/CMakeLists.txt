@@ -232,6 +232,7 @@ add_library(
 	server/ipc_server_handler_hand_tracker.c
 	server/ipc_server_handler_swapchain.c
 	server/ipc_server_per_client_thread.c
+	server/ipc_server_floor_calibration.c
 	server/ipc_server_process.c
 	server/ipc_server_thread_shutdown.c
 	server/ipc_server_thread_shutdown.h

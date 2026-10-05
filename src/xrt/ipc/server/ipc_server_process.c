@@ -201,6 +201,7 @@ teardown_all(struct ipc_server *s)
 
 	// Client threads reference the resources destroyed below; wait them out first.
 	join_all_client_threads(s);
+	ipc_server_floor_calibration_stop(s);
 #ifdef __APPLE__
 	// Stop the compositor publishing into the share before unmapping it.
 	ipc_server_tracking_share_fini(s);
@@ -911,6 +912,8 @@ ipc_server_init_system_if_available_locked(struct ipc_server *s,
 		if (available) {
 			xret = xrt_instance_create_system(s->xinst, &s->xsys, &s->xsysd, &s->xso, &s->xsysc);
 			IPC_CHK_WITH_GOTO(s, xret, "xrt_instance_create_system", error);
+
+			ipc_server_floor_calibration_start(s);
 		}
 	}
 
