@@ -1189,3 +1189,23 @@ the full scan once its retries are exhausted. It locks on that run
 Low peaks, and scans that found nothing, still fall back as before. A simulator
 test with a ring lit at a single hinted step confirms the lock arrives after
 the retries with no wide scan.
+
+**Further still sessions (build `90f8345ef`, run by Claude, controllers
+power-cycled by the user beforehand):**
+
+- `20261005-083844-broad30-still`: `PSSENSE_LED_BROAD_S=30`, 120 s. Two 30.0 s
+  BROAD windows per controller. **Every 10 Hz sample in every window had fused
+  poses for both hands, in all thirds.** No fault.
+- `20261005-084050-broad60-still`: the right's first hinted scan lit one step
+  (`narrow_window_below_minimum`); the next three were `narrow_peak_weak`, which
+  still falls back to the full scan. The dark baselines before each hinted scan
+  were clean (`own=0/32`). The full scan's wide stage then found the ring lit at
+  every phase (`stuck_lit own_ring_lit_at_every_phase`), so the fault began on
+  entering the full scan. The queue stopped; the 60 s and period-42 BROAD runs
+  remain undone.
+
+All three lockouts today followed a full scan or a burst of scans, on a right
+ring weakly visible from this resting place (two cameras). The runtime always
+has a hint (`PSSENSE_LED_BOOTSTRAP_HINT_US=16350`), and lock centres have stayed
+within its ±1.5 ms. The next change to consider is never falling back to the
+full scan while a hint exists, retrying hinted scans with backoff instead.
