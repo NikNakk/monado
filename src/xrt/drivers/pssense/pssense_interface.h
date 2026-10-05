@@ -50,6 +50,23 @@ pssense_create(struct xrt_prober *xp,
                struct t_timing_event_sink **out_timing_sink);
 
 /*!
+ * Whether PSSENSE_RECONNECT is set (macOS only): controllers reconnect after dropping out, and builders should
+ * create the missing ones with @ref pssense_create_disconnected.
+ */
+bool
+pssense_reconnect_requested(void);
+
+/*!
+ * Create a Sense controller that is not connected yet (PSSENSE_RECONNECT). Its thread attaches it when a Bluetooth
+ * controller with @p product_id (PSSENSE_PID_LEFT or PSSENSE_PID_RIGHT) appears; until then its inputs are inactive
+ * and it reports no pose. Returns NULL unless PSSENSE_RECONNECT is set.
+ */
+struct xrt_device *
+pssense_create_disconnected(uint16_t product_id,
+                            struct xrt_frame_context *xfctx,
+                            struct t_timing_event_sink **out_timing_sink);
+
+/*!
  * Give a Sense controller access to the HMD pose for synthetic 6DoF arm-model
  * positioning. The HMD pointer is borrowed and remains owned by the system.
  */

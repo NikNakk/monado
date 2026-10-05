@@ -162,9 +162,11 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 	struct xrt_device *left_xdev = NULL;
 	struct xrt_prober_device *left_xpdev =
 	    u_builder_find_prober_device(xpdevs, xpdev_count, PSSENSE_VID, PSSENSE_PID_LEFT, XRT_BUS_TYPE_ANY);
-	if (left_xpdev != NULL) {
+	// PSSENSE_RECONNECT: a controller not connected yet is created anyway, and attaches when it connects.
+	if (left_xpdev != NULL || pssense_reconnect_requested()) {
 		struct t_timing_event_sink *timing_sink = NULL;
-		left_xdev = pssense_create(xp, left_xpdev, xfctx, &timing_sink);
+		left_xdev = left_xpdev != NULL ? pssense_create(xp, left_xpdev, xfctx, &timing_sink)
+		                               : pssense_create_disconnected(PSSENSE_PID_LEFT, xfctx, &timing_sink);
 		if (left_xdev == NULL) {
 			PSVR2_ERROR(psvr2_builder(xb), "PS Sense left controller device creation failed");
 		} else {
@@ -180,9 +182,11 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 	struct xrt_device *right_xdev = NULL;
 	struct xrt_prober_device *right_xpdev =
 	    u_builder_find_prober_device(xpdevs, xpdev_count, PSSENSE_VID, PSSENSE_PID_RIGHT, XRT_BUS_TYPE_ANY);
-	if (right_xpdev != NULL) {
+	// PSSENSE_RECONNECT: a controller not connected yet is created anyway, and attaches when it connects.
+	if (right_xpdev != NULL || pssense_reconnect_requested()) {
 		struct t_timing_event_sink *timing_sink = NULL;
-		right_xdev = pssense_create(xp, right_xpdev, xfctx, &timing_sink);
+		right_xdev = right_xpdev != NULL ? pssense_create(xp, right_xpdev, xfctx, &timing_sink)
+		                                 : pssense_create_disconnected(PSSENSE_PID_RIGHT, xfctx, &timing_sink);
 		if (right_xdev == NULL) {
 			PSVR2_ERROR(psvr2_builder(xb), "PS Sense right controller device creation failed");
 		} else {

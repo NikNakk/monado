@@ -15,6 +15,7 @@
 #include "util/u_logging.h"
 
 #include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
 #include <IOKit/hid/IOHIDKeys.h>
 #include <IOKit/hid/IOHIDManager.h>
 
@@ -563,6 +564,66 @@ os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
 
 	*out_hid = &hid->base;
 	return 0;
+}
+
+int
+os_hid_open_iokit_bluetooth(
+    uint16_t vendor_id, uint16_t product_id, struct os_hid_device **out_hid, char *out_product, size_t product_size)
+{
+	if (out_hid == NULL) {
+		return -1;
+	}
+
+	CFMutableDictionaryRef matching = IOServiceMatching(kIOHIDDeviceKey);
+	if (matching == NULL) {
+		return -1;
+	}
+	int32_t vendor_value = vendor_id;
+	int32_t product_value = product_id;
+	CFNumberRef vendor = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &vendor_value);
+	CFNumberRef product = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &product_value);
+	if (vendor != NULL) {
+		CFDictionarySetValue(matching, CFSTR(kIOHIDVendorIDKey), vendor);
+		CFRelease(vendor);
+	}
+	if (product != NULL) {
+		CFDictionarySetValue(matching, CFSTR(kIOHIDProductIDKey), product);
+		CFRelease(product);
+	}
+
+	// Consumes the matching dictionary.
+	io_iterator_t iterator = IO_OBJECT_NULL;
+	if (IOServiceGetMatchingServices(MACH_PORT_NULL, matching, &iterator) != KERN_SUCCESS) {
+		return -1;
+	}
+
+	int ret = -1;
+	io_service_t service;
+	while (ret != 0 && (service = IOIteratorNext(iterator)) != IO_OBJECT_NULL) {
+		// A fresh device object of our own, independent of any IOHIDManager (such as the prober's).
+		IOHIDDeviceRef device = IOHIDDeviceCreate(kCFAllocatorDefault, service);
+		IOObjectRelease(service);
+		if (device == NULL) {
+			continue;
+		}
+		CFTypeRef transport = IOHIDDeviceGetProperty(device, CFSTR(kIOHIDTransportKey));
+		bool bluetooth = transport != NULL && CFGetTypeID(transport) == CFStringGetTypeID() &&
+		                 CFStringCompare((CFStringRef)transport, CFSTR("Bluetooth"), 0) == kCFCompareEqualTo;
+		if (bluetooth) {
+			if (out_product != NULL && product_size > 0) {
+				out_product[0] = '\0';
+				CFTypeRef name = IOHIDDeviceGetProperty(device, CFSTR(kIOHIDProductKey));
+				if (name != NULL && CFGetTypeID(name) == CFStringGetTypeID()) {
+					CFStringGetCString((CFStringRef)name, out_product, (CFIndex)product_size,
+					                   kCFStringEncodingUTF8);
+				}
+			}
+			ret = os_hid_open_iokit(device, out_hid);
+		}
+		CFRelease(device);
+	}
+	IOObjectRelease(iterator);
+	return ret;
 }
 
 #endif // XRT_OS_OSX
