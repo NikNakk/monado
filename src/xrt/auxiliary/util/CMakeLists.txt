@@ -50,6 +50,8 @@ add_library(
 	u_file.c
 	u_file.cpp
 	u_file.h
+	u_floor_calibration.c
+	u_floor_calibration.h
 	u_format.c
 	u_format.h
 	u_frame.c
