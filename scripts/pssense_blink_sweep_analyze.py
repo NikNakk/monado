@@ -8,7 +8,8 @@ Usage:
 
 The session must hold run.log (with LED_BLINK_SWEEP markers) and constellation.ctd. Run it with one controller
 awake so every bright blob belongs to it. A frame counts as lit when at least --min-cameras cameras each see at
-least --min-blobs more blobs than that camera's 2nd-percentile count over the session (the LED-off baselines).
+least --min-blobs more blobs than that camera's background: the lowest count seen in at least 0.3% of frames,
+which the LED-off baselines supply.
 
 For every step it prints the lit fraction, the strongest repeat period (1-40 frames, by autocorrelation) and the
 frames folded modulo 32 from the step's first frame ('#' lit in most cycles, '+' in some, '.' never), next to the
@@ -67,9 +68,13 @@ def main():
     frames = sorted(counts)
     cameras = sorted({c for f in counts.values() for c in f})
 
-    # Background: each camera's 2nd percentile over the whole session, which the LED-off baseline frames before
-    # the lock (and any dark sweep frames) supply; a lit ring is present in most frames.
-    background = {c: sorted(counts[t].get(c, 0) for t in frames)[len(frames) // 50] for c in cameras}
+    # The lowest count seen in at least 0.3% of frames: a percentile fails when the ring is lit almost throughout.
+    background = {}
+    for c in cameras:
+        hist = defaultdict(int)
+        for t in frames:
+            hist[counts[t].get(c, 0)] += 1
+        background[c] = min(v for v, n in hist.items() if n >= 0.003 * len(frames))
 
     def lit(t):
         return sum(1 for c in cameras if counts[t].get(c, 0) - background[c] >= args.min_blobs) >= args.min_cameras
