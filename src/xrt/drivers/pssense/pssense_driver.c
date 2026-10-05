@@ -105,6 +105,7 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_period_id, "PSSENSE_LED_BROAD_PERIOD
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_blob_fallback, "PSSENSE_LED_BOOTSTRAP_BLOB_FALLBACK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lost_lit_percent, "PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT", 10)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_full_scan_fallback, "PSSENSE_LED_BOOTSTRAP_FULL_SCAN_FALLBACK", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_quick_lock, "PSSENSE_LED_BOOTSTRAP_QUICK_LOCK", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
@@ -2009,6 +2010,15 @@ static xrt_atomic_s32_t pssense_led_bootstrap_owner = 0;
 static xrt_atomic_s32_t pssense_led_bootstrap_first_locked = 0;
 //! Exposure time (ms, wrapping) at which a controller last released the scan token; 0 before any release.
 static xrt_atomic_s32_t pssense_led_bootstrap_release_ms = 0;
+/*!
+ * PSSENSE_LED_BOOTSTRAP_QUICK_LOCK: the hint (µs, a narrow-pulse start) from the most recent lock of any controller,
+ * or -1. Both controllers' windows sit within ~1 ms of each other, so the second tries the first's lock before
+ * scanning.
+ */
+static xrt_atomic_s32_t pssense_led_bootstrap_shared_hint_us = -1;
+//! Token of the controller that last released the scan token, and whether it has been tracked since.
+static xrt_atomic_s32_t pssense_led_bootstrap_release_token = 0;
+static xrt_atomic_s32_t pssense_led_bootstrap_released_tracked = 0;
 
 /*!
  * With LED-blob counts, a controller that has just locked stays lit (keep-lock), but the joint tracker needs a moment
@@ -2062,6 +2072,8 @@ pssense_led_bootstrap_release(struct pssense_device *pssense, int64_t exposure_t
 	        pssense_led_bootstrap_token(pssense) &&
 	    exposure_timestamp_ns > 0) {
 		int32_t ms = (int32_t)(exposure_timestamp_ns / U_TIME_1MS_IN_NS);
+		xrt_atomic_s32_store(&pssense_led_bootstrap_released_tracked, 0);
+		xrt_atomic_s32_store(&pssense_led_bootstrap_release_token, pssense_led_bootstrap_token(pssense));
 		xrt_atomic_s32_store(&pssense_led_bootstrap_release_ms, ms == 0 ? 1 : ms);
 	}
 }
@@ -2079,6 +2091,14 @@ pssense_led_bootstrap_handoff_settled(struct pssense_device *pssense, int64_t ex
 	}
 	int32_t now_ms = (int32_t)(exposure_timestamp_ns / U_TIME_1MS_IN_NS);
 	int32_t elapsed = (int32_t)((uint32_t)now_ms - (uint32_t)released);
+	/*
+	 * With quick lock: the wait exists until the joint tracker claims the released controller's ring, so end it
+	 * once that controller's optical pose is accepted rather than after the fixed time.
+	 */
+	if (debug_get_bool_option_pssense_led_bootstrap_quick_lock() &&
+	    xrt_atomic_s32_load(&pssense_led_bootstrap_released_tracked) != 0) {
+		return true;
+	}
 	return elapsed < 0 || elapsed >= PSSENSE_LED_BOOTSTRAP_HANDOFF_MS;
 }
 
@@ -2297,6 +2317,11 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 	    pssense_led_bootstrap_handoff_settled(pssense, exposure_timestamp_ns)) {
 		if (xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, me) == 0) {
 			owner = me;
+			int32_t shared_hint_us = xrt_atomic_s32_load(&pssense_led_bootstrap_shared_hint_us);
+			if (b->options.quick_lock && b->locks_acquired == 0 && shared_hint_us >= 0) {
+				// Not locked yet: try the other controller's lock first.
+				b->next_hint_ns = (time_duration_ns)shared_hint_us * U_TIME_1US_IN_NS;
+			}
 			t_led_phase_bootstrap_start(b, pssense->tracking.average_exposure_interval_ns);
 		}
 	}
@@ -2322,7 +2347,13 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 		}
 	}
 
+	uint32_t locks_before = b->locks_acquired;
 	(void)t_led_phase_bootstrap_push_exposure(b, exposure_timestamp_ns);
+	if (b->options.quick_lock && b->locks_acquired != locks_before && b->next_hint_ns >= 0) {
+		xrt_atomic_s32_store(
+		    &pssense_led_bootstrap_shared_hint_us,
+		    (int32_t)(t_led_phase_bootstrap_wrap(b->next_hint_ns, b->period_ns) / U_TIME_1US_IN_NS));
+	}
 
 	if (b->locks_acquired > 0 || t_led_phase_bootstrap_is_stuck_lit(b)) {
 		const char *first = debug_get_option_pssense_led_bootstrap_first();
@@ -2824,6 +2855,10 @@ pssense_commit_optical_pose_locked(struct pssense_device *pssense,
 			    MAX(pssense->tracking.last_optical_timestamp_ns, sample->timestamp_ns);
 			os_thread_helper_unlock(&pssense->controller_thread);
 		}
+	}
+
+	if (xrt_atomic_s32_load(&pssense_led_bootstrap_release_token) == pssense_led_bootstrap_token(pssense)) {
+		xrt_atomic_s32_store(&pssense_led_bootstrap_released_tracked, 1);
 	}
 
 	PSSENSE_INFO(pssense,
@@ -3951,6 +3986,7 @@ pssense_create(struct xrt_prober *xp,
 			 */
 			bootstrap_options.full_scan_fallback =
 			    debug_get_bool_option_pssense_led_bootstrap_full_scan_fallback();
+			bootstrap_options.quick_lock = debug_get_bool_option_pssense_led_bootstrap_quick_lock();
 		}
 		t_led_phase_bootstrap_init(&pssense->tracking.led_bootstrap, &bootstrap_options);
 		// Force the first update to program the bootstrap's output, replacing any refinement sample.

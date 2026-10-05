@@ -1600,3 +1600,36 @@ falls from about 62 MB/s to 2.2 MB/s, and blob detection on the camera images
 no longer runs. The tracked fraction is set by the left's late first lock; see
 below. Still to do: a moving session (OpenBrush) and a comparison of pose
 jitter and RMS against our own blobs.
+
+### The left's late first lock, and opt-in quick lock (2026-10-05)
+
+In the three detector-blob sessions above, the bootstrap ran the same way
+every time:
+
+| Time | Event |
+| --- | --- |
+| 1.0 s | Right starts a 13-step hinted scan |
+| 5.3 s | Right locks |
+| 5.3–7.4 s | Fixed 1.5 s handoff, then the left's dark baseline |
+| 7.4 s | Left starts the same scan |
+| 11.7 s | Left locks |
+
+Lock centres have stayed within about 1 ms of each other and of the default
+hint (15.4–16.5 ms), well within the reach of the 1.6 ms lock pulse.
+
+`PSSENSE_LED_BOOTSTRAP_QUICK_LOCK=1` (opt-in) changes three things:
+
+- After the dark baseline, a single quick-check step applies the lock pulse
+  exactly where a lock at the hint would put it. If the ring scores at least 2
+  (two cameras' worth of lit frames), it locks there and phase tracking centres
+  it. Otherwise the usual hinted scan follows. This takes about 0.3 s instead
+  of 4.3 s.
+- A controller that has never locked takes the most recent lock of either
+  controller as its hint.
+- The scan handoff ends as soon as the controller that released the scan token
+  has an optical pose accepted, which means the joint tracker has claimed its
+  ring. Before, the handoff waited a fixed 1.5 s.
+
+Unit tests: a hint within ±0.3 ms locks on the quick check and stays lit; a
+hint 1.2 ms off falls through to the scan and locks at the true centre. Not
+yet run on hardware (the controllers had gone to sleep).

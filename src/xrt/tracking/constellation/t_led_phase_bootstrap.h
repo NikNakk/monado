@@ -228,6 +228,14 @@ struct t_led_phase_bootstrap_options
 	 * while lock centres have always stayed within the hint's +-1.5 ms.
 	 */
 	bool full_scan_fallback;
+	/*!
+	 * Before a hinted scan, try the lock pulse centred on the hint for one step, and lock there if the ring is lit
+	 * with a score of at least quick_lock_min_score; otherwise scan as usual. Phase tracking then centres the lock.
+	 * On 5 Oct every lock centre of both controllers fell within ~1 ms of each other and of the default hint,
+	 * inside the 1.6 ms lock pulse's reach, while each 13-step scan took 4.3 s.
+	 */
+	bool quick_lock;
+	float quick_lock_min_score;
 };
 
 //! Result of one scan step, for logging and tests.
@@ -305,6 +313,10 @@ struct t_led_phase_bootstrap
 	//! Holding the LEDs dark (a BASELINE) to check a suspicious narrow run before locking on it.
 	bool verifying_lock;
 	uint32_t pending_left, pending_right, pending_peak;
+	//! The current step is the quick-lock check; tried at most once per started scan.
+	bool quick_check;
+	bool quick_tried;
+	uint32_t quick_locks;
 
 	//! Phase tracking.
 	time_duration_ns lock_fudge_ns;
