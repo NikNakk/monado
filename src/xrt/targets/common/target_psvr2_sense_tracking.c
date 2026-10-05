@@ -228,6 +228,11 @@ static const char *const sense_tracking_defaults[][2] = {
     {"PSVR2_BLOB_PIXEL_THRESHOLD", "50"},
     {"PSVR2_BLOB_REQUIRED_THRESHOLD", "120"},
     {"CONSTELLATION_TRACKER_ORIENTED_BOOTSTRAP", "1"},
+    // Validated on 5 Oct: first locks at 1.1/2.1 s, tracking from the headset's LED detections (pose ready 9 ms
+    // after exposure instead of 29 ms), and a power-cycled controller relocked 0.9 s after reconnecting.
+    {"PSSENSE_LED_BOOTSTRAP_QUICK_LOCK", "1"},
+    {"PSVR2_LED_DETECTOR_BLOBS", "1"},
+    {"PSSENSE_RECONNECT", "1"},
 };
 
 struct psvr2_sense_tracking
