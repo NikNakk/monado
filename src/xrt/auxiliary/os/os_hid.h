@@ -171,6 +171,16 @@ os_hid_open_hidraw(const char *path, struct os_hid_device **out_hid);
  */
 int
 os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid);
+
+/*!
+ * Find and open a Bluetooth HID device by vendor and product ID, without a prober: used to attach a device that
+ * connects after start-up. @p out_product (optional) receives its product name.
+ *
+ * @return 0 on success, negative if no such device is connected or it could not be opened.
+ */
+int
+os_hid_open_iokit_bluetooth(
+    uint16_t vendor_id, uint16_t product_id, struct os_hid_device **out_hid, char *out_product, size_t product_size);
 #endif
 
 #ifdef __cplusplus

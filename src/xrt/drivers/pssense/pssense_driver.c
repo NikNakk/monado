@@ -106,6 +106,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_blob_fallback, "PSSENSE_LED_BOO
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lost_lit_percent, "PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT", 10)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_full_scan_fallback, "PSSENSE_LED_BOOTSTRAP_FULL_SCAN_FALLBACK", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_quick_lock, "PSSENSE_LED_BOOTSTRAP_QUICK_LOCK", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_reconnect, "PSSENSE_RECONNECT", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
@@ -492,6 +493,13 @@ struct pssense_device
 
 	bool usb;
 	struct os_hid_device *hid;
+	/*!
+	 * PSSENSE_RECONNECT: the controller thread opens the HID itself when the controller connects (also after a
+	 * disconnect) instead of ending. connected is guarded by the controller thread lock.
+	 */
+	bool reconnect;
+	bool connected;
+	uint16_t product_id;
 	struct os_thread_helper controller_thread;
 	//! Battery level last logged (BATTERY), so a low controller shows up in ordinary session logs; -1 none yet.
 	float logged_battery_percent;
@@ -1624,6 +1632,123 @@ pssense_log_written_report(
 	             settings.status_led_enable, bytes);
 }
 
+static bool
+pssense_get_calibration_data(struct pssense_device *pssense);
+
+static void
+pssense_set_connected_bit(struct pssense_device *pssense, bool connected);
+
+static void
+pssense_led_bootstrap_release(struct pssense_device *pssense, int64_t exposure_timestamp_ns);
+
+/*!
+ * Forget everything tied to one connection: the device clock restarts when the controller does, so the clock
+ * mapping, the tick unwrapping and the histories keyed by device time all start again, and the LED schedule is
+ * re-acquired. Called with the controller thread lock held.
+ */
+static void
+pssense_reset_connection_locked(struct pssense_device *pssense)
+{
+	m_clock_windowed_skew_tracker_destroy(pssense->timing.clock_tracker);
+	pssense->timing.clock_tracker = m_clock_windowed_skew_tracker_alloc(2048);
+	struct pssense_clock_options clock_options = pssense->timing.clock.options;
+	pssense_clock_init(&pssense->timing.clock, &clock_options);
+	pssense->timing.filtered_offset_ns = 0.0;
+	pssense->timing.has_clock_offset = false;
+	pssense->timing.clock_log_window_ns = 0;
+	pssense->timing.clock_log_local_ns = 0;
+	pssense->timing.clock_log_remote_ns = 0;
+	pssense->timing.clock_log_samples = 0;
+	pssense->timing.latest_imu_time_ns = 0;
+	pssense->timing.imu_ticks_last = 0;
+	pssense->timing.imu_ticks_total = 0;
+	pssense->timing.latest_device_time_ns = 0;
+	pssense->timing.device_ticks_last = 0;
+	pssense->timing.device_ticks_total = 0;
+	pssense->timing.last_sent_host_timestamp_us = 0;
+
+	m_relation_history_clear(pssense->tracking.imu_relation_history);
+	m_relation_history_clear(pssense->tracking.constellation_relation_history);
+	m_imu_3dof_close(&pssense->tracking.fusion);
+	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
+	if (pssense->tracking.filter != NULL) {
+		struct t_imu_optical_filter_params filter_params;
+		t_imu_optical_filter_default_params(&filter_params);
+		t_imu_optical_filter_destroy(&pssense->tracking.filter);
+		pssense->tracking.filter = t_imu_optical_filter_create(&filter_params);
+	}
+	pssense->tracking.have_last_fused_pose = false;
+	pssense->tracking.last_optical_timestamp_ns = 0;
+	pssense->orientation_alignment_initialized = false;
+
+	t_led_phase_bootstrap_stop(&pssense->tracking.led_bootstrap);
+	pssense_led_bootstrap_release(pssense, 0);
+	pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
+	pssense->tracking.led_sync_sample_needs_sending = true;
+
+	memset(&pssense->state, 0, sizeof(pssense->state));
+}
+
+//! PSSENSE_RECONNECT: open the controller if it is connected, and start a fresh connection. Thread lock not held.
+static bool
+pssense_try_connect(struct pssense_device *pssense)
+{
+#ifdef XRT_OS_OSX
+	struct os_hid_device *hid = NULL;
+	char product[128] = {0};
+	if (os_hid_open_iokit_bluetooth(PSSENSE_VID, pssense->product_id, &hid, product, sizeof(product)) != 0) {
+		return false;
+	}
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	pssense_reset_connection_locked(pssense);
+	pssense->hid = hid;
+	os_thread_helper_unlock(&pssense->controller_thread);
+
+	if (!pssense_get_calibration_data(pssense)) {
+		PSSENSE_ERROR(pssense, "CONNECTION side=%c event=calibration_failed, closing and retrying",
+		              pssense->hand == XRT_HAND_LEFT ? 'L' : 'R');
+		os_thread_helper_lock(&pssense->controller_thread);
+		pssense->hid = NULL;
+		os_thread_helper_unlock(&pssense->controller_thread);
+		os_hid_destroy(hid);
+		return false;
+	}
+	if (debug_get_bool_option_pssense_pc_polling_rate() && !pssense_set_pc_polling_rate(pssense)) {
+		PSSENSE_ERROR(pssense, "PC polling rate requested, but got error when attempting to apply.");
+	}
+
+	os_thread_helper_lock(&pssense->controller_thread);
+	pssense->connected = true;
+	os_thread_helper_unlock(&pssense->controller_thread);
+	pssense_set_connected_bit(pssense, true);
+	PSSENSE_WARN(pssense, "CONNECTION side=%c event=connected product='%s'",
+	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', product);
+	return true;
+#else
+	(void)pssense;
+	return false;
+#endif
+}
+
+//! PSSENSE_RECONNECT: the controller has gone (read error); close it and wait for it again. Thread lock not held.
+static void
+pssense_disconnect(struct pssense_device *pssense, int result)
+{
+	os_thread_helper_lock(&pssense->controller_thread);
+	struct os_hid_device *hid = pssense->hid;
+	pssense->hid = NULL;
+	pssense->connected = false;
+	pssense_reset_connection_locked(pssense);
+	os_thread_helper_unlock(&pssense->controller_thread);
+	pssense_set_connected_bit(pssense, false);
+	if (hid != NULL) {
+		os_hid_destroy(hid);
+	}
+	PSSENSE_WARN(pssense, "CONNECTION side=%c event=disconnected result=%d, waiting for it to reconnect",
+	             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', result);
+}
+
 static void *
 pssense_run_thread(void *ptr)
 {
@@ -1648,9 +1773,26 @@ pssense_run_thread(void *ptr)
 #endif
 	int result = 0;
 	while (os_thread_helper_is_running_locked(&pssense->controller_thread) && result >= 0) {
+		if (pssense->hid == NULL) {
+			// PSSENSE_RECONNECT: wait for the controller to connect.
+			os_thread_helper_unlock(&pssense->controller_thread);
+			bool attached = pssense_try_connect(pssense);
+			if (!attached) {
+				os_nanosleep(500 * U_TIME_1MS_IN_NS);
+			}
+			next_output_ns = os_monotonic_get_ns();
+			os_thread_helper_lock(&pssense->controller_thread);
+			continue;
+		}
 		os_thread_helper_unlock(&pssense->controller_thread);
 
 		result = pssense_handle_read(pssense);
+		if (result < 0 && pssense->reconnect) {
+			pssense_disconnect(pssense, result);
+			result = 0;
+			os_thread_helper_lock(&pssense->controller_thread);
+			continue;
+		}
 
 		if (result >= 0) {
 			timepoint_ns now = os_monotonic_get_ns();
@@ -2008,8 +2150,21 @@ pssense_node_break_apart(struct xrt_frame_node *node)
 static xrt_atomic_s32_t pssense_led_bootstrap_owner = 0;
 //! Set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has locked.
 static xrt_atomic_s32_t pssense_led_bootstrap_first_locked = 0;
+//! Connected controllers (PSSENSE_RECONNECT): bit 0 left, bit 1 right. A side waits for the first only if connected.
+static xrt_atomic_s32_t pssense_connected_mask = 0;
 //! With quick lock: set once the side named by PSSENSE_LED_BOOTSTRAP_FIRST has failed a scan (its ring not in view).
 static xrt_atomic_s32_t pssense_led_bootstrap_first_failed = 0;
+
+static void
+pssense_set_connected_bit(struct pssense_device *pssense, bool connected)
+{
+	int32_t bit = pssense->hand == XRT_HAND_LEFT ? 1 : 2;
+	int32_t mask;
+	do {
+		mask = xrt_atomic_s32_load(&pssense_connected_mask);
+	} while (xrt_atomic_s32_cmpxchg(&pssense_connected_mask, mask, connected ? (mask | bit) : (mask & ~bit)) !=
+	         mask);
+}
 //! Exposure time (ms, wrapping) at which a controller last released the scan token; 0 before any release.
 static xrt_atomic_s32_t pssense_led_bootstrap_release_ms = 0;
 /*!
@@ -2049,6 +2204,11 @@ pssense_led_bootstrap_may_start_first_scan(struct pssense_device *pssense)
 	char wanted = (first[0] == 'l' || first[0] == 'L') ? 'L' : 'R';
 	if (mine == wanted || xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_first_locked, 1, 1) == 1 ||
 	    pssense->tracking.led_bootstrap.locks_acquired > 0) {
+		return true;
+	}
+	// Nor behind one that is not connected (PSSENSE_RECONNECT).
+	int32_t wanted_bit = wanted == 'L' ? 1 : 2;
+	if (pssense->reconnect && (xrt_atomic_s32_load(&pssense_connected_mask) & wanted_bit) == 0) {
 		return true;
 	}
 	// Do not wait behind a controller that cannot be seen: on 5 Oct the left waited 45 s while the right was out
@@ -3296,6 +3456,7 @@ pssense_device_update_inputs(struct xrt_device *xdev)
 	// Update all the inputs to the correct timestamp
 	for (uint32_t i = 0; i < ((uint32_t)PSSENSE_INPUT_COUNT); i++) {
 		pssense->base.inputs[i].timestamp = (int64_t)host_update_time_ns;
+		pssense->base.inputs[i].active = pssense->connected;
 	}
 	pssense->base.inputs[PSSENSE_INDEX_PS_CLICK].value.boolean = pssense->state.ps_click;
 	pssense->base.inputs[PSSENSE_INDEX_SHARE_CLICK].value.boolean = pssense->state.share_click;
@@ -3695,6 +3856,14 @@ pssense_get_battery_status(struct xrt_device *xdev, bool *out_present, bool *out
 
 #define SET_INPUT(NAME) (pssense->base.inputs[PSSENSE_INDEX_##NAME].name = XRT_INPUT_PSSENSE_##NAME)
 
+static struct xrt_device *
+pssense_create_internal(struct os_hid_device *hid,
+                        const char *product_name,
+                        uint16_t product_id,
+                        bool usb,
+                        struct xrt_frame_context *xfctx,
+                        struct t_timing_event_sink **out_timing_sink);
+
 struct xrt_device *
 pssense_create(struct xrt_prober *xp,
                struct xrt_prober_device *xpdev,
@@ -3724,6 +3893,42 @@ pssense_create(struct xrt_prober *xp,
 		return NULL;
 	}
 
+	return pssense_create_internal(hid, (const char *)product_name, xpdev->product_id,
+	                               xpdev->bus == XRT_BUS_TYPE_USB, xfctx, out_timing_sink);
+}
+
+bool
+pssense_reconnect_requested(void)
+{
+#ifdef XRT_OS_OSX
+	return debug_get_bool_option_pssense_reconnect();
+#else
+	return false;
+#endif
+}
+
+struct xrt_device *
+pssense_create_disconnected(uint16_t product_id,
+                            struct xrt_frame_context *xfctx,
+                            struct t_timing_event_sink **out_timing_sink)
+{
+	if (!pssense_reconnect_requested() || (product_id != PSSENSE_PID_LEFT && product_id != PSSENSE_PID_RIGHT)) {
+		return NULL;
+	}
+	const char *name =
+	    product_id == PSSENSE_PID_LEFT ? "PS VR2 Sense Controller (L)" : "PS VR2 Sense Controller (R)";
+	return pssense_create_internal(NULL, name, product_id, false, xfctx, out_timing_sink);
+}
+
+static struct xrt_device *
+pssense_create_internal(struct os_hid_device *hid,
+                        const char *product_name,
+                        uint16_t product_id,
+                        bool usb,
+                        struct xrt_frame_context *xfctx,
+                        struct t_timing_event_sink **out_timing_sink)
+{
+	int ret;
 	enum u_device_alloc_flags flags = U_DEVICE_ALLOC_TRACKING_NONE;
 	struct pssense_device *pssense = U_DEVICE_ALLOCATE(struct pssense_device, flags, PSSENSE_INPUT_COUNT, 2);
 	PSSENSE_DEBUG(pssense, "PlayStation Sense controller found");
@@ -3757,7 +3962,10 @@ pssense_create(struct xrt_prober *xp,
 	pssense->base.supported.battery_status = true;
 	pssense->base.supported.force_feedback = true;
 
-	pssense->usb = xpdev->bus == XRT_BUS_TYPE_USB;
+	pssense->usb = usb;
+	pssense->product_id = product_id;
+	pssense->reconnect = pssense_reconnect_requested() && !usb;
+	pssense->connected = hid != NULL;
 
 	m_imu_3dof_init(&pssense->tracking.fusion, M_IMU_3DOF_USE_GRAVITY_DUR_20MS);
 	pssense->tracking.gyro_bias.enabled = debug_get_bool_option_pssense_gyro_bias_auto();
@@ -3817,7 +4025,7 @@ pssense_create(struct xrt_prober *xp,
 	// Initialize the IMU orientation to be correct
 	struct xrt_quat imu_orientation_quat = quat_from_x_rot(pssense_imu_angle);
 
-	if (xpdev->product_id == PSSENSE_PID_LEFT) {
+	if (product_id == PSSENSE_PID_LEFT) {
 		pssense->base.device_type = XRT_DEVICE_TYPE_LEFT_HAND_CONTROLLER;
 		pssense->hand = XRT_HAND_LEFT;
 		pssense->base.binding_profiles = binding_profiles_pssense_left;
@@ -3832,7 +4040,7 @@ pssense_create(struct xrt_prober *xp,
 		    .orientation = imu_orientation_quat,
 		    .position = T_led_imu_left,
 		};
-	} else if (xpdev->product_id == PSSENSE_PID_RIGHT) {
+	} else if (product_id == PSSENSE_PID_RIGHT) {
 		pssense->base.device_type = XRT_DEVICE_TYPE_RIGHT_HAND_CONTROLLER;
 		pssense->hand = XRT_HAND_RIGHT;
 		pssense->base.binding_profiles = binding_profiles_pssense_right;
@@ -3894,6 +4102,11 @@ pssense_create(struct xrt_prober *xp,
 	SET_INPUT(THUMBSTICK_TOUCH);
 	SET_INPUT(GRIP_POSE);
 	SET_INPUT(AIM_POSE);
+
+	// A controller created before it connects (PSSENSE_RECONNECT) reports inactive inputs until it does.
+	for (uint32_t i = 0; i < ((uint32_t)PSSENSE_INPUT_COUNT); i++) {
+		pssense->base.inputs[i].active = pssense->connected;
+	}
 
 	pssense->base.outputs[0].name = XRT_OUTPUT_NAME_PSSENSE_VIBRATION;
 	pssense->base.outputs[1].name = XRT_OUTPUT_NAME_PSSENSE_TRIGGER_FEEDBACK;
@@ -4030,13 +4243,18 @@ pssense_create(struct xrt_prober *xp,
 		return NULL;
 	}
 
-	// Try to set the PC polling rate if the user requested it.
-	if (debug_get_bool_option_pssense_pc_polling_rate() && //
+	// Try to set the PC polling rate if the user requested it. Without a connection yet, the thread does this and
+	// reads the calibration once the controller connects.
+	if (hid != NULL && debug_get_bool_option_pssense_pc_polling_rate() && //
 	    !pssense_set_pc_polling_rate(pssense)) {
 		PSSENSE_ERROR(pssense, "PC polling rate requested, but got error when attempting to apply.");
 	}
 
-	if (!pssense_get_calibration_data(pssense)) {
+	pssense_set_connected_bit(pssense, hid != NULL);
+	if (hid == NULL) {
+		PSSENSE_WARN(pssense, "CONNECTION side=%c event=waiting: created before the controller connected",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R');
+	} else if (!pssense_get_calibration_data(pssense)) {
 		PSSENSE_ERROR(pssense, "Failed to retrieve calibration data");
 		pssense_device_destroy(&pssense->base);
 		return NULL;

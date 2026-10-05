@@ -1682,3 +1682,39 @@ Two additions to `PSSENSE_LED_BOOTSTRAP_QUICK_LOCK`:
 Unit test: a ring that is out of view at start locks 76 exposures (1.3 s)
 after coming into view, against 136 or more with doubling pauses. Not yet run
 on hardware.
+
+### Controllers that connect late or reconnect (2026-10-05)
+
+Monado creates the Sense controllers once, when the system starts. Before this
+change, a controller that was off at start never appeared, and one that
+dropped out (asleep, powered off) stopped for good, because its read thread
+ended on the first read error.
+
+`PSSENSE_RECONNECT=1` (opt-in, macOS) changes this:
+
+- The PS VR2 builder creates a missing controller anyway with
+  `pssense_create_disconnected`.
+- The controller's thread looks for its Bluetooth HID by vendor and product ID
+  every 0.5 s (`os_hid_open_iokit_bluetooth`, independent of the prober's
+  IOHIDManager). It attaches the controller when it appears: calibration, PC
+  polling rate, then the usual read loop. It logs `CONNECTION event=connected`.
+- On a read error the controller is closed and the thread waits again
+  (`CONNECTION event=disconnected`). This applies to controllers present at
+  start too.
+
+Each new connection resets the per-connection state, because the controller's
+clock restarts:
+
+- the clock mapping and skew tracker, and the tick unwrapping;
+- the IMU and optical relation histories, the 3DoF fusion and the optical
+  filter;
+- the LED bootstrap. Its last lock is kept as the hint, so quick lock
+  re-acquires it.
+
+While disconnected, the controller's inputs are inactive (OpenXR reports its
+actions as inactive), it has no pose, and it stays out of the LED scan
+rotation, because it has no clock mapping. A side named by
+`PSSENSE_LED_BOOTSTRAP_FIRST` that is not connected no longer makes the other
+side wait.
+
+Builds without warnings; all 45 tests pass. Not yet run on hardware.
