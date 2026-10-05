@@ -1365,3 +1365,40 @@ off); full macOS build without warnings, all 45 tests pass.
 
 Next: correlate records with our blobs frame by frame (coordinate mapping, size
 and brightness fields), then compare detection rates on dim and far rings.
+
+**First sweeps (build `327be507f`, run by Claude, right controller only, resting):**
+`20261005-174245-blinksweep-prescan` (PRESCAN, 4 s per value, latched only on
+change) and `20261005-174418-blinksweep-broad` (the same list inside one BROAD
+window). Wire check: each value was sent ~265 times in the intended phase.
+
+- **No value changed which frames show the ring, or how many spots.** Our blobs
+  per camera were constant at 4/5/5/5–6 (minimum equal to mean, so no dark
+  frames), and the headset's own detections were constant at 5–6 per camera,
+  for every value including `01000000`, `80000000`, `00ffffff` and `000000ff`.
+  So in PRESCAN and BROAD, at camera-frame level, `led_blink` is neither a
+  32-frame on/off code nor a spatial LED selector.
+- Spot brightness (headset `m00`) drifted monotonically over each sweep (PRESCAN
+  up to +20%, BROAD down to −15%), consistent with phase drift between
+  re-anchors, not value effects. In BROAD only `01000000` stood out (−10 to −20%
+  against its neighbours, box area 36 against 45–54): weak and unconfirmed.
+- The earlier finding that a held single bit alternates dark and lit frames came
+  from the FORCE-IR diagnostic path, not PRESCAN/BROAD. The bits may only apply
+  there, or act below camera-frame resolution. Sony's varying `led_blink[0]` in
+  BROAD remains unexplained, but sending `ff` costs us nothing visible.
+
+The analysis script's background estimate was corrected twice for sessions in
+which the ring is lit almost throughout. It now uses the lowest per-camera count
+seen in at least 0.3% of frames. With no dark frames at all, as here, use the
+headset's per-section detection counts or the raw counts.
+
+**LED detector records decoded (from `20261005-174149-ld-record-check`, right
+only):** sections are Monado's cameras 0–3 in the same mode-4 pixel grid. Bytes
+4–11 are the bounding box `xmin, xmax, ymin, ymax`. u32 at 12 is the summed
+intensity `m00`, and u32 at 16 and 20 are the intensity-weighted x and y sums
+measured from `xmin`, `ymin`: `xmin + m10/m00` matches Monado's blob centroid to
+0.011 px median. The u32 at 24, 28 and 32 scale with spot size (correlation with
+box area 0.87–0.96), probably second moments; the obvious assignment gives
+negative variances 18% of the time, so it is unconfirmed. The headset reports
+about one more spot per camera than Monado (5.9 against 4.0 on camera 0);
+roughly 10% of its records have no Monado blob within ~7 px. The u16 at 2 has
+low byte 0xff and an unknown high byte.
