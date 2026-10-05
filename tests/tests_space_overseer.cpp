@@ -85,8 +85,7 @@ TEST_CASE("Floor calibration of a managed stage moves LOCAL_FLOOR")
 			// An application created after the calibration sees the same floor.
 			struct xrt_space *later_local = nullptr;
 			struct xrt_space *later_floor = nullptr;
-			REQUIRE(xrt_space_overseer_create_local_space(xso, &later_local, &later_floor) ==
-			        XRT_SUCCESS);
+			REQUIRE(xrt_space_overseer_create_local_space(xso, &later_local, &later_floor) == XRT_SUCCESS);
 			CHECK(height_in_root(xso, later_floor) == Catch::Approx(-1.2f).margin(1e-5));
 
 			xrt_space_reference(&later_floor, nullptr);
