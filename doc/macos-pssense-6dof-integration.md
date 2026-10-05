@@ -1732,3 +1732,26 @@ held the token last defers to a waiting one. The waiting mark is cleared on
 disconnect, so a controller that goes away is never waited for. Check
 (`222804-fairness-check`, 40 s, both resting in view): quick locks at 1.1 s (right,
 score 4) and 2.1 s (left, score 3); 95.0% and 94.5% tracked.
+
+Power-cycle test (`222947-reconnect-cycle-2`, build `eaa10e1aa`, 120 s, both
+controllers said to be in view, the user power-cycling the left):
+
+- Reconnect works. The left locked by quick lock at 8.1 s. At 28.6 s a read
+  error ended its connection (`CONNECTION event=disconnected`). At 37.8 s it
+  was attached again (`event=connected`), the calibration read succeeded, and
+  its output reports resumed (result 78).
+- The new clock mapping was healthy: device time restarted from 1.9 s, and the
+  mapping was holding at −7 ppm within about 8 s, as before the power cycle.
+- The left never relocked. Its baselines and scans after the reconnect were
+  dark in every camera for 80 s, and its quick checks scored 0. The right was
+  lit in only one camera for most of the session (scores 1.0–1.9) and locked
+  only at 109 s.
+- A fresh 30 s session right after it (`223255-after-reconnect-check`) also failed to
+  lock the left. Its baseline then caught it lit while commanded off
+  (`own=16/32`, `stuck_lit`). Its ring was solved in three cameras at 5
+  matches, 445 times.
+
+Not settled: whether the left was out of view after the power cycle, or did
+not accept the LED schedule after power-on and later fell into the always-lit
+state. The next test needs both rings clearly in view, at least two cameras
+each, and a note of where the left is put down after it is switched back on.
