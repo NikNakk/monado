@@ -340,6 +340,9 @@ finish_narrow_scan(struct t_led_phase_bootstrap *b)
 	b->frames_since_lit = 0;
 	b->locked_reports = 0;
 	b->locked_lit_reports = 0;
+	b->dim_window_frames = 0;
+	b->dim_window_reports = 0;
+	b->dim_window_lit_reports = 0;
 	set_output(b, lock_fudge, b->options.lock_blink_ns);
 
 	// Half the span of lock-pulse starts that light the exposure, from the narrow run plus the wider pulse.
@@ -637,6 +640,7 @@ t_led_phase_bootstrap_default_options(struct t_led_phase_bootstrap_options *opti
 	    .narrow_gap_steps = 1,
 	    .narrow_min_lit_steps = 3,
 	    .lost_frames = 300,
+	    .lost_lit_fraction = 0.0f,
 	    .failed_backoff_frames = 60,
 	    .max_failed_backoff_frames = 600,
 	    .track_interval_frames = 0,
@@ -746,6 +750,22 @@ t_led_phase_bootstrap_push_exposure(struct t_led_phase_bootstrap *b, int64_t exp
 			t_led_phase_bootstrap_start(b, b->period_ns);
 			break;
 		}
+		if (b->options.lost_lit_fraction > 0.0f && ++b->dim_window_frames >= b->options.lost_frames) {
+			uint32_t reports = b->dim_window_reports;
+			uint32_t lit_reports = b->dim_window_lit_reports;
+			b->dim_window_frames = 0;
+			b->dim_window_reports = 0;
+			b->dim_window_lit_reports = 0;
+			if (reports > 0 && (float)lit_reports < b->options.lost_lit_fraction * (float)reports) {
+				LOG_W(
+				    b,
+				    "LED_BOOTSTRAP side=%c event=lost reason=dim lit_reports=%u/%u min_fraction=%.2f, "
+				    "rescanning",
+				    b->options.label, lit_reports, reports, (double)b->options.lost_lit_fraction);
+				t_led_phase_bootstrap_start(b, b->period_ns);
+				break;
+			}
+		}
 		if (b->track_stage == T_LED_PHASE_BOOTSTRAP_TRACK_NONE) {
 			if (b->options.track_interval_frames > 0 && !b->track_wants_probe &&
 			    ++b->track_countdown >= b->options.track_interval_frames) {
@@ -833,8 +853,10 @@ t_led_phase_bootstrap_push_blob_count(struct t_led_phase_bootstrap *b,
 
 	if (b->state == T_LED_PHASE_BOOTSTRAP_LOCKED) {
 		b->locked_reports++;
+		b->dim_window_reports++;
 		if (lit) {
 			b->locked_lit_reports++;
+			b->dim_window_lit_reports++;
 			b->frames_since_lit = 0;
 		}
 		if (t_led_phase_bootstrap_is_probing(b) && window_accepts(b, exposure_timestamp_ns)) {

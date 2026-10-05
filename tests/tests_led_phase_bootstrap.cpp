@@ -45,6 +45,9 @@ struct Sim
 	bool push_own = false;
 	//! From this frame on the ring is lit whatever it is told (the always-lit fault); UINT32_MAX never.
 	uint32_t stuck_from_frame = UINT32_MAX;
+	//! Every this many frames a visible ring counts as lit whatever its phase (a reflection, a hand passing
+	//! through the edge of the window); 0 never.
+	uint32_t stray_lit_every = 0;
 	//! The ring stays dark while the applied fudge (wrapped) lies in (dark_from_ns, dark_to_ns]: a step that a hand
 	//! or a turn darkened. Disabled when equal.
 	int64_t dark_from_ns = 0;
@@ -100,8 +103,9 @@ struct Sim
 				pending_outputs.pop_front();
 			}
 
-			bool frame_lit =
-			    lit(applied_fudge, applied_blink) || (visible && frame_index >= stuck_from_frame);
+			bool frame_lit = lit(applied_fudge, applied_blink) ||
+			                 (visible && frame_index >= stuck_from_frame) ||
+			                 (visible && stray_lit_every > 0 && frame_index % stray_lit_every == 0);
 			frames_run++;
 			frames_lit += frame_lit ? 1 : 0;
 			reports.emplace_back(ts, frame_lit);
@@ -288,6 +292,49 @@ TEST_CASE("LED phase bootstrap rejects a narrow scan that saw the ring for a sin
 		sim.run(b, 4000, frame);
 		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
 		int64_t pulse_centre = b.fudge_offset_ns + latency + b.blink_ns / 2;
+		CHECK(circular_distance(pulse_centre, exposure_centre) <= options.narrow_step_ns);
+	}
+}
+
+TEST_CASE("LED phase bootstrap rescans a lock that stray lit frames keep from timing out")
+{
+	/*
+	 * 5 Oct: after a 0.9 ms clock step the left's lock no longer lit the ring, but an occasional lit frame kept
+	 * resetting frames_since_lit, so it never rescanned and stayed dark for 25 s.
+	 */
+	for (float fraction : {0.0f, 0.1f}) {
+		CAPTURE(fraction);
+		t_led_phase_bootstrap_options options = test_options();
+		options.lost_lit_fraction = fraction;
+		t_led_phase_bootstrap b;
+		t_led_phase_bootstrap_init(&b, &options);
+		t_led_phase_bootstrap_start(&b, kPeriod);
+
+		Sim sim{.latency_ns = 3600000};
+		sim.exposure_ns = 1200000;
+		uint32_t frame = 0;
+		sim.run(b, 2000, frame);
+		REQUIRE(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+		REQUIRE(b.locks_acquired == 1);
+
+		// The pulse now lands 2 ms away from the exposure; one frame in 20 still looks lit.
+		sim.latency_ns += 2000000;
+		sim.stray_lit_every = 20;
+		for (uint32_t i = 0; i < 3000 && b.locks_acquired == 1; i++) {
+			sim.run(b, 1, frame);
+			if (t_led_phase_bootstrap_ready_to_scan(&b)) {
+				t_led_phase_bootstrap_start(&b, kPeriod);
+			}
+		}
+		if (fraction == 0.0f) {
+			// frames_since_lit alone never times out: still on the stale lock.
+			CHECK(b.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
+			CHECK(b.locks_acquired == 1);
+			continue;
+		}
+		REQUIRE(b.locks_acquired == 2);
+		int64_t pulse_centre = b.fudge_offset_ns + sim.latency_ns + b.blink_ns / 2;
+		int64_t exposure_centre = sim.exposure_start_ns + sim.exposure_ns / 2;
 		CHECK(circular_distance(pulse_centre, exposure_centre) <= options.narrow_step_ns);
 	}
 }

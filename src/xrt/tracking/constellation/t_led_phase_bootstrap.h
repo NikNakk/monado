@@ -126,6 +126,13 @@ struct t_led_phase_bootstrap_options
 
 	//! Once locked, rescan after this many exposures without any lit camera frame.
 	uint32_t lost_frames;
+	/*!
+	 * Once locked, also rescan when fewer than this fraction of camera reports were lit over a window of
+	 * lost_frames exposures; 0 disables. A lock that has slid to the edge of the lit window, or far off it, still
+	 * lights an occasional frame, which keeps resetting frames_since_lit: on 5 Oct the left stayed dark for 25 s
+	 * after a 0.9 ms clock step with 2-4% of reports lit, and never rescanned.
+	 */
+	float lost_lit_fraction;
 
 	//! Exposures to stay idle after a failed scan; doubled for each further consecutive failure, up to the max,
 	//! so a controller that cannot lock does not keep every other controller dark.
@@ -273,6 +280,10 @@ struct t_led_phase_bootstrap
 	uint32_t frames_since_lit;
 	uint32_t locked_reports;
 	uint32_t locked_lit_reports;
+	//! The current lost_lit_fraction window: exposures, camera reports and lit ones.
+	uint32_t dim_window_frames;
+	uint32_t dim_window_reports;
+	uint32_t dim_window_lit_reports;
 
 	//! Phase tracking.
 	time_duration_ns lock_fudge_ns;
