@@ -96,6 +96,9 @@ DEBUG_GET_ONCE_NUM_OPTION(pssense_clock_offset_snap_us, "PSSENSE_CLOCK_OFFSET_SN
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_clock_steady, "PSSENSE_CLOCK_STEADY", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_latch_interval_ms, "PSSENSE_LED_LATCH_INTERVAL_MS", 0)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_s, "PSSENSE_LED_BROAD_S", 0)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_nominal_cycle, "PSSENSE_LED_NOMINAL_CYCLE", false)
+//! One nominal 59.94 Hz camera frame in thirds of a nanosecond, as observed in every Sony output report.
+#define PSSENSE_NOMINAL_CYCLE_LENGTH 50050050u
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_broad_period_id, "PSSENSE_LED_BROAD_PERIOD_ID", 0)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_blob_fallback, "PSSENSE_LED_BOOTSTRAP_BLOB_FALLBACK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lost_lit_percent, "PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT", 10)
@@ -2404,6 +2407,14 @@ pssense_timing_event_sink_push(struct t_timing_event_sink *sink, const struct t_
 
 		// inside thirds of a nanosecond
 		uint32_t cycle_length = pssense->tracking.average_exposure_interval_ns * 3;
+		/*
+		 * PSSENSE_LED_NOMINAL_CYCLE: Sony's driver sends a constant 50,050,050 (one nominal 59.94 Hz frame) in
+		 * every report and corrects drift by re-anchoring; the measured average changes the value on almost
+		 * every latch. Opt-in while the always-lit fault is investigated against Sony's command stream.
+		 */
+		if (debug_get_bool_option_pssense_led_nominal_cycle()) {
+			cycle_length = PSSENSE_NOMINAL_CYCLE_LENGTH;
+		}
 		// in IMU ticks
 		uint32_t cycle_position = NS_TO_IMU_TICKS(next_blink_time);
 
