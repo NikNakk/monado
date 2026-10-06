@@ -26,6 +26,8 @@ restart_window(struct u_floor_calibration *fc, const struct u_floor_calibration_
 	fc->steady_since_ns = sample->timestamp_ns;
 	fc->anchor = sample->head.position;
 	fc->height_sum = 0;
+	fc->x_sum = fc->z_sum = 0;
+	fc->forward_x_sum = fc->forward_z_sum = 0;
 	fc->height_count = 0;
 }
 
@@ -66,6 +68,13 @@ u_floor_calibration_push(struct u_floor_calibration *fc,
 	}
 
 	fc->height_sum += sample->head.position.y;
+	fc->x_sum += sample->head.position.x;
+	fc->z_sum += sample->head.position.z;
+	struct xrt_vec3 forward = {0, 0, -1};
+	struct xrt_vec3 facing;
+	math_quat_rotate_vec3(&sample->head.orientation, &forward, &facing);
+	fc->forward_x_sum += facing.x;
+	fc->forward_z_sum += facing.z;
 	fc->height_count++;
 
 	if (sample->timestamp_ns - fc->steady_since_ns < U_FLOOR_CALIBRATION_STEADY_NS) {
@@ -74,6 +83,10 @@ u_floor_calibration_push(struct u_floor_calibration *fc,
 
 	fc->done = true;
 	*out_floor_y = (float)(fc->height_sum / fc->height_count) - fc->eye_height_m;
+	fc->head_x = (float)(fc->x_sum / fc->height_count);
+	fc->head_z = (float)(fc->z_sum / fc->height_count);
+	// Level within the pitch limit, so the horizontal forward is never zero.
+	fc->head_yaw = (float)atan2(-fc->forward_x_sum, -fc->forward_z_sum);
 	return true;
 }
 
@@ -144,8 +157,14 @@ u_floor_calibration_poll(struct u_floor_calibration *fc,
 		return true;
 	}
 
-	// Only the floor height changes; the stage keeps its position and heading.
 	stage.position.y = floor_y;
+	if (fc->align) {
+		// Centred under the head, with -Z the way the head faced.
+		struct xrt_vec3 up = {0, 1, 0};
+		stage.position.x = fc->head_x;
+		stage.position.z = fc->head_z;
+		math_quat_from_angle_vector(fc->head_yaw, &up, &stage.orientation);
+	}
 	xret = xrt_space_overseer_set_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage);
 	if (xret != XRT_SUCCESS) {
 		U_LOG_W("Floor calibration: cannot set the STAGE offset (%d); a driver-provided STAGE cannot be moved.",
@@ -153,7 +172,13 @@ u_floor_calibration_poll(struct u_floor_calibration *fc,
 		return true;
 	}
 
-	U_LOG_I("Floor calibration: STAGE floor set to y %.3f m, %.2f m below the steady head.", floor_y,
-	        fc->eye_height_m);
+	if (fc->align) {
+		U_LOG_I("Floor calibration: STAGE floor set to y %.3f m, %.2f m below the steady head, centred at "
+		        "x %.3f z %.3f and facing the head (yaw %.1f deg).",
+		        floor_y, fc->eye_height_m, fc->head_x, fc->head_z, fc->head_yaw * 180.0f / (float)M_PI);
+	} else {
+		U_LOG_I("Floor calibration: STAGE floor set to y %.3f m, %.2f m below the steady head.", floor_y,
+		        fc->eye_height_m);
+	}
 	return true;
 }

@@ -216,6 +216,35 @@ TEST_CASE("Floor calibration sets the managed STAGE from the head")
 		CHECK(stage.position.y == Catch::Approx(0.4f - 1.75f));
 	}
 
+	SECTION("aligned: centred under the head and facing its way")
+	{
+		fc.align = true;
+		// Off-centre, facing -X: 90 degrees about +Y turns -Z into -X.
+		struct xrt_vec3 up = {0, 1, 0};
+		math_quat_from_angle_vector((float)M_PI / 2.0f, &up, &head.pose.orientation);
+		head.pose.position = {0.3f, 0.4f, -0.2f};
+		bool finished = false;
+		for (int i = 0; i < 40 && !finished; i++) {
+			finished = u_floor_calibration_poll(&fc, xso, &head.base, i * kStepNs);
+		}
+		REQUIRE(finished);
+
+		struct xrt_pose stage;
+		REQUIRE(xrt_space_overseer_get_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
+		        XRT_SUCCESS);
+		// The head in STAGE: at the origin, at eye height, facing -Z.
+		struct xrt_pose inverse, in_stage;
+		math_pose_invert(&stage, &inverse);
+		math_pose_transform(&inverse, &head.pose, &in_stage);
+		CHECK(in_stage.position.x == Catch::Approx(0.0f).margin(1e-5));
+		CHECK(in_stage.position.y == Catch::Approx(1.75f));
+		CHECK(in_stage.position.z == Catch::Approx(0.0f).margin(1e-5));
+		struct xrt_vec3 forward = {0, 0, -1}, facing;
+		math_quat_rotate_vec3(&in_stage.orientation, &forward, &facing);
+		CHECK(facing.x == Catch::Approx(0.0f).margin(1e-5));
+		CHECK(facing.z == Catch::Approx(-1.0f));
+	}
+
 	SECTION("an explicit calibration is not overridden")
 	{
 		struct xrt_pose manual = XRT_POSE_IDENTITY;
