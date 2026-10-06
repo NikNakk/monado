@@ -12,6 +12,7 @@
  */
 
 #include "render/render_interface.h"
+#include "xrt/xrt_config_build.h"
 #include "xrt/xrt_defines.h"
 #include "xrt/xrt_frame.h"
 #include "xrt/xrt_compositor.h"
@@ -34,6 +35,8 @@
 
 #include "util/comp_render.h"
 #include "util/comp_high_level_render.h"
+#include "util/comp_swapchain.h"
+#include "util/comp_swapchain_gpu_reuse.h"
 #include "util/comp_swapchain_gpu_reuse_internal.h"
 
 #include "main/comp_frame.h"
@@ -146,6 +149,9 @@ struct comp_renderer
 	struct comp_settings *settings;
 
 	struct comp_mirror_to_debug_gui mirror_to_debug_gui;
+
+	//! A display image layer could not be shown as one; logged once.
+	bool logged_display_image_fallback;
 
 #ifdef XRT_OS_OSX
 	FILE *late_render_trace;
@@ -1051,6 +1057,10 @@ renderer_ensure_images_and_renderings(struct comp_renderer *r, bool force_recrea
 	if (c->peek) {
 		image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	}
+#ifdef XRT_FEATURE_OPENXR_MNDX_DISPLAY_DISTORTION
+	// Display image layers are blitted on targets without present_external.
+	image_usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+#endif
 
 	struct comp_target_create_images_info info = {
 	    .extent =
@@ -1578,6 +1588,194 @@ dispatch_graphics(struct comp_renderer *r,
 
 /*
  *
+ * Display images, see XRT_LAYER_COMPOSITION_DISPLAY_IMAGE_BIT.
+ *
+ */
+
+/*!
+ * The frame's display image layer, or NULL to render the frame normally. A
+ * display image can only be shown on its own: one projection layer whose views
+ * all use one swapchain image, which the renderer can read.
+ */
+static const struct comp_layer *
+renderer_get_display_image_layer(struct comp_renderer *r)
+{
+	const struct comp_layer_accum *cla = &r->c->base.layer_accum;
+	bool flagged = false;
+	for (uint32_t i = 0; i < cla->layer_count; i++) {
+		flagged = flagged || (cla->layers[i].data.flags & XRT_LAYER_COMPOSITION_DISPLAY_IMAGE_BIT) != 0;
+	}
+	if (!flagged) {
+		return NULL;
+	}
+
+	const struct comp_layer *layer = &cla->layers[0];
+	bool usable = cla->layer_count == 1 && layer->data.type == XRT_LAYER_PROJECTION;
+	for (uint32_t i = 1; usable && i < layer->data.view_count; i++) {
+		usable = layer->sc_array[i] == layer->sc_array[0] &&
+		         layer->data.proj.v[i].sub.image_index == layer->data.proj.v[0].sub.image_index;
+	}
+	if (!usable) {
+		if (!r->logged_display_image_fallback) {
+			COMP_WARN(r->c,
+			          "A display image layer was not the only layer, or its views use different images; "
+			          "rendering it as an ordinary projection layer");
+			r->logged_display_image_fallback = true;
+		}
+		return NULL;
+	}
+	return layer;
+}
+
+struct renderer_display_image
+{
+	struct xrt_swapchain *xsc;
+	uint32_t image_index;
+	bool claimed;
+};
+
+static void
+renderer_display_image_release(void *data)
+{
+	struct renderer_display_image *di = data;
+	if (di->claimed) {
+		comp_swapchain_gpu_reuse_release_image(di->xsc, di->image_index);
+	}
+	xrt_swapchain_reference(&di->xsc, NULL);
+	free(di);
+}
+
+/*!
+ * Hand the display image to the target to present as it is, with no rendering.
+ * Returns false, having done nothing, when the target or image cannot do that.
+ */
+static bool
+renderer_present_display_image(struct comp_renderer *r, const struct comp_layer *layer)
+{
+	struct comp_compositor *c = r->c;
+	struct comp_target *ct = c->target;
+	if (ct->present_external == NULL) {
+		return false;
+	}
+
+	struct xrt_swapchain *xsc = layer->sc_array[0];
+	uint32_t image_index = layer->data.proj.v[0].sub.image_index;
+	void *texture = NULL;
+#ifdef XRT_OS_OSX
+	if (comp_swapchain_export_metal_texture((struct xrt_swapchain_native *)xsc, image_index, &texture, NULL) !=
+	    VK_SUCCESS) {
+		texture = NULL;
+	}
+#endif
+	if (texture == NULL) {
+		return false;
+	}
+
+	struct renderer_display_image *di = U_TYPED_CALLOC(struct renderer_display_image);
+	if (di == NULL) {
+		return false;
+	}
+	xrt_swapchain_reference(&di->xsc, xsc);
+	di->image_index = image_index;
+	// Keeps the app from reusing the image until the target is done with it.
+	di->claimed = comp_swapchain_gpu_reuse_claim_image(xsc, image_index);
+
+	struct comp_target_external_image image = {
+	    .native_texture = texture,
+	    .release = renderer_display_image_release,
+	    .release_data = di,
+	};
+	int64_t frame_id = c->frame.rendering.id;
+	comp_target_mark_submit_begin(ct, frame_id, os_monotonic_get_ns());
+	VkResult ret = comp_target_present_external(ct, &image, c->frame.rendering.desired_present_time_ns,
+	                                            c->frame.rendering.present_slop_ns);
+	comp_target_mark_submit_end(ct, frame_id, os_monotonic_get_ns());
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(c, "comp_target_present_external: %s", vk_result_string(ret));
+	}
+
+	comp_frame_clear_locked(&c->frame.rendering);
+	comp_target_update_timings(ct);
+	return true;
+}
+
+//! Whether the display image can be blitted into the target.
+static bool
+renderer_can_blit_display_image(struct comp_renderer *r, const struct comp_layer *layer)
+{
+	struct comp_swapchain *sc = comp_swapchain(layer->sc_array[0]);
+	bool can = (sc->vkic.info.bits & XRT_SWAPCHAIN_USAGE_TRANSFER_SRC) != 0 &&
+	           (r->c->target->image_usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) != 0;
+	if (!can && !r->logged_display_image_fallback) {
+		COMP_WARN(r->c,
+		          "Cannot blit a display image (swapchain without TRANSFER_SRC or target without "
+		          "TRANSFER_DST); rendering it as an ordinary projection layer");
+		r->logged_display_image_fallback = true;
+	}
+	return can;
+}
+
+/*!
+ * For targets that cannot present an external image: blit the display image
+ * into the target image, scaling and converting the format as needed.
+ */
+static XRT_CHECK_RESULT VkResult
+dispatch_display_image_blit(struct comp_renderer *r, struct render_gfx *render, const struct comp_layer *layer)
+{
+	COMP_TRACE_MARKER();
+
+	struct vk_bundle *vk = &r->c->base.vk;
+	struct comp_target *ct = r->c->target;
+	struct comp_swapchain *sc = comp_swapchain(layer->sc_array[0]);
+	const struct xrt_layer_projection_view_data *view = &layer->data.proj.v[0];
+	VkImage src = sc->vkic.images[view->sub.image_index].handle;
+	VkImage dst = ct->images[r->acquired_buffer].handle;
+	VkCommandBuffer cmd = render->r->cmd;
+	VkImageSubresourceRange src_range = {
+	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .levelCount = 1,
+	    .baseArrayLayer = view->sub.array_index,
+	    .layerCount = 1,
+	};
+	VkImageSubresourceRange dst_range = {
+	    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+	    .levelCount = 1,
+	    .layerCount = 1,
+	};
+
+	if (!render_gfx_begin(render)) {
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+	vk_cmd_image_barrier_gpu_locked(vk, cmd, src, VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+	                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, src_range);
+	vk_cmd_image_barrier_gpu_locked(vk, cmd, dst, 0, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED,
+	                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dst_range);
+	VkImageBlit blit = {
+	    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, view->sub.array_index, 1},
+	    .srcOffsets = {{0, 0, 0}, {(int32_t)sc->vkic.info.width, (int32_t)sc->vkic.info.height, 1}},
+	    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+	    .dstOffsets = {{0, 0, 0}, {(int32_t)ct->width, (int32_t)ct->height, 1}},
+	};
+	vk->vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+	                   &blit, VK_FILTER_LINEAR);
+	vk_cmd_image_barrier_gpu_locked(vk, cmd, src, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_READ_BIT,
+	                                VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+	                                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, src_range);
+	vk_cmd_image_barrier_gpu_locked(vk, cmd, dst, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
+	                                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, ct->final_layout, dst_range);
+	if (!render_gfx_end(render)) {
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	VkResult ret = renderer_submit_queue(r, cmd, VK_PIPELINE_STAGE_TRANSFER_BIT);
+	VK_CHK_AND_RET(ret, "renderer_submit_queue");
+	return ret;
+}
+
+
+/*
+ *
  * Compute
  *
  */
@@ -1707,6 +1905,14 @@ comp_renderer_draw(struct comp_renderer *r)
 
 	comp_target_update_timings(ct);
 
+	const struct comp_layer *display_layer = renderer_get_display_image_layer(r);
+	if (display_layer != NULL && renderer_present_display_image(r, display_layer)) {
+		return XRT_SUCCESS;
+	}
+	if (display_layer != NULL && !renderer_can_blit_display_image(r, display_layer)) {
+		display_layer = NULL;
+	}
+
 	if (r->acquired_buffer < 0) {
 		// Ensures that renderings are created.
 		renderer_acquire_swapchain_image(r);
@@ -1758,7 +1964,11 @@ comp_renderer_draw(struct comp_renderer *r)
 
 	uint64_t dispatch_begin_ns = renderer_stage_begin(r);
 	VkResult res = VK_SUCCESS;
-	if (use_compute) {
+	if (display_layer != NULL) {
+		use_compute = false;
+		render_gfx_init(&render_g, &c->nr);
+		res = dispatch_display_image_blit(r, &render_g, display_layer);
+	} else if (use_compute) {
 		render_compute_init(&render_c, &c->nr);
 		res = dispatch_compute(r, &render_c, &frame_state, fov_source);
 	} else {

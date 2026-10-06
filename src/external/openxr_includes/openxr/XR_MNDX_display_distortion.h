@@ -26,6 +26,7 @@ extern "C" {
 #define XR_MNDX_DISPLAY_DISTORTION_MAX_VIEWS 2
 
 XR_STRUCT_ENUM(XR_TYPE_DISPLAY_DISTORTION_PROPERTIES_MNDX, 0x7fff5060);
+XR_STRUCT_ENUM(XR_TYPE_COMPOSITION_LAYER_DISPLAY_IMAGE_MNDX, 0x7fff5061);
 
 /*!
  * One view of the display.
@@ -48,6 +49,28 @@ typedef struct XrDisplayDistortionPropertiesMNDX {
     uint32_t                       viewCount;
     XrDisplayDistortionViewMNDX    views[XR_MNDX_DISPLAY_DISTORTION_MAX_VIEWS];
 } XrDisplayDistortionPropertiesMNDX;
+
+/*!
+ * Chained to an XrCompositionLayerProjection whose image is already the final
+ * display image, distorted with xrComputeDisplayDistortionMNDX. The runtime
+ * presents it as it is, without distortion or reprojection, so the views'
+ * poses and FOVs only describe it.
+ *
+ * - The layer must be the frame's only layer.
+ * - All views must use the same image of one swapchain, created with
+ *   XR_SWAPCHAIN_USAGE_SAMPLED_BIT and XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT,
+ *   at the display size. Each view's imageRect should be its viewport.
+ * - The values are sent to the display as stored. Use a UNORM format holding
+ *   display-encoded values; an sRGB format may be decoded on the way.
+ *
+ * Runtimes that cannot present the image directly copy it to the display, and
+ * render it as an ordinary projection layer when they cannot do that either
+ * (for example when other layers are present).
+ */
+typedef struct XrCompositionLayerDisplayImageMNDX {
+    XrStructureType       type;
+    const void* XR_MAY_ALIAS    next;
+} XrCompositionLayerDisplayImageMNDX;
 
 /*!
  * Properties of the system's head-mounted display. Returns
