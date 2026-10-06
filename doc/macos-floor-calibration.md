@@ -79,6 +79,13 @@ run, so taking the headset off and on does not move the floor. It is skipped
 if the STAGE has already been moved, for example by `monado-ctl`, which can
 still correct it at any time.
 
+By default (`XRT_FLOOR_ALIGN`, on) it also centres the STAGE under the head
+and turns it so that its -Z is the way the head faced, both averaged over the
+steady second. Without this, STAGE kept the PS VR2 tracking origin's
+heading: on 2026-10-06, SteamVR games started with the user facing about 90
+degrees to the left. `XRT_FLOOR_ALIGN=0` restores the height-only
+calibration.
+
 Put the headset on standing and look ahead for a second. Putting it on while
 seated puts the floor too high by the difference in eye height; stand and run
 `monado-ctl --floor-eye-height` to correct it.

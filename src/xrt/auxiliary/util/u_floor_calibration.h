@@ -37,18 +37,29 @@ struct u_floor_calibration_sample
 
 /*!
  * Waits for a worn, tracked, level and steady head, then derives the floor
- * height as head height minus the configured eye height.
+ * height as head height minus the configured eye height. With @p align, the
+ * STAGE is also centred under the head and turned so that its -Z is the
+ * direction the head faced, both averaged over the steady window.
  */
 struct u_floor_calibration
 {
 	float eye_height_m;
+	//! Also set the STAGE's horizontal position and heading from the head.
+	bool align;
 	bool done;
 
 	bool steady;
 	int64_t steady_since_ns;
 	struct xrt_vec3 anchor;
 	double height_sum;
+	double x_sum, z_sum;
+	double forward_x_sum, forward_z_sum;
 	uint32_t height_count;
+
+	//! Valid once done: the head's mean horizontal position and heading in root.
+	float head_x, head_z;
+	//! Rotation about +Y that turns -Z into the head's mean forward direction.
+	float head_yaw;
 };
 
 void

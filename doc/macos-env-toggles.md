@@ -91,6 +91,13 @@ for example by `monado-ctl --floor-eye-height`, and cannot move a
 driver-provided STAGE (`PSVR2_STAGE_SPACE`). The result is logged at info
 level. See [floor calibration](macos-floor-calibration.md).
 
+`XRT_FLOOR_ALIGN` (default on) makes the same calibration also centre the
+STAGE under the head and turn it so that its -Z is the way the head faced,
+both averaged over the steady second. Apps on a floor-based space (SteamVR,
+OpenComposite titles) then start facing forward, rather than wherever the
+PS VR2's tracking origin happened to point. `XRT_FLOOR_ALIGN=0` sets only the
+height.
+
 ## PS Sense runtime 6DoF opt-in (2026-10-04)
 
 The [integration procedure](macos-pssense-6dof-integration.md) is the current
