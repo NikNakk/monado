@@ -76,3 +76,4 @@ typedef __eglMustCastToProperFunctionPointerType (*PFNEGLGETPROCADDRESSPROC)(con
 #include "openxr/XR_MND_query_egl_device.h"
 #include "openxr/XR_MND_contactglove2_interaction.h"
 #include "openxr/XR_MNDX_foveation_metal.h"
+#include "openxr/XR_MNDX_display_distortion.h"
