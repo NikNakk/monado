@@ -738,6 +738,22 @@ verify_projection_layer(struct oxr_session *sess,
 		return ret;
 	}
 
+#ifdef OXR_HAVE_MNDX_display_distortion
+	if (sess->sys->inst->extensions.MNDX_display_distortion &&
+	    OXR_GET_INPUT_FROM_CHAIN(proj, XR_TYPE_COMPOSITION_LAYER_DISPLAY_IMAGE_MNDX,
+	                             XrCompositionLayerDisplayImageMNDX) != NULL) {
+		for (uint32_t i = 1; i < proj->viewCount; i++) {
+			if (proj->views[i].subImage.swapchain != proj->views[0].subImage.swapchain ||
+			    proj->views[i].subImage.imageArrayIndex != proj->views[0].subImage.imageArrayIndex) {
+				return oxr_error(log, XR_ERROR_VALIDATION_FAILURE,
+				                 "(frameEndInfo->layers[%u]) is a display image, but its views do not "
+				                 "all use one swapchain image",
+				                 layer_index);
+			}
+		}
+	}
+#endif
+
 	switch (sess->current_view_config_type) {
 	case XR_VIEW_CONFIGURATION_TYPE_PRIMARY_MONO:
 		if (proj->viewCount != 1) {
@@ -1493,6 +1509,14 @@ submit_projection_layer(struct oxr_session *sess,
 	if (spc->space_type == OXR_SPACE_TYPE_REFERENCE_VIEW) {
 		flags |= XRT_LAYER_COMPOSITION_VIEW_SPACE_BIT;
 	}
+
+#ifdef OXR_HAVE_MNDX_display_distortion
+	if (sess->sys->inst->extensions.MNDX_display_distortion &&
+	    OXR_GET_INPUT_FROM_CHAIN(proj, XR_TYPE_COMPOSITION_LAYER_DISPLAY_IMAGE_MNDX,
+	                             XrCompositionLayerDisplayImageMNDX) != NULL) {
+		flags |= XRT_LAYER_COMPOSITION_DISPLAY_IMAGE_BIT;
+	}
+#endif
 
 
 	struct xrt_layer_data data;

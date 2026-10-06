@@ -153,6 +153,14 @@ enum xrt_layer_composition_flags
 	 * layer below it.
 	 */
 	XRT_LAYER_SPLIT_QUAD_VIEW_INSET = 1u << 13u,
+
+	/*!
+	 * The projection layer's image is already the final display image,
+	 * distorted for the lenses, and is presented as it is. All views use
+	 * one swapchain image, and it must be the frame's only layer; see
+	 * XR_MNDX_display_distortion.
+	 */
+	XRT_LAYER_COMPOSITION_DISPLAY_IMAGE_BIT = 1u << 14u,
 };
 
 /*!
