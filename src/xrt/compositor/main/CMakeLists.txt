@@ -57,6 +57,18 @@ if(WIN32)
 	target_sources(comp_main PRIVATE comp_window_mswin.c)
 endif()
 if(APPLE)
+	# Final copy into the drawable, separate so it can be unit tested.
+	add_library(
+		comp_macos_present_copy STATIC comp_macos_present_copy.h comp_macos_present_copy.m
+		)
+	target_link_libraries(
+		comp_macos_present_copy PUBLIC aux_util xrt-interfaces "-framework Metal"
+		)
+	target_include_directories(
+		comp_macos_present_copy PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..
+		)
+	target_link_libraries(comp_main PRIVATE comp_macos_present_copy)
+
 	target_sources(
 		comp_main
 		PRIVATE

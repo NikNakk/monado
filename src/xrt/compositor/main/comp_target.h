@@ -120,6 +120,26 @@ struct comp_target_semaphores
 };
 
 /*!
+ * An image that a client has already composited for the whole display, given
+ * to @ref comp_target::present_external instead of being rendered.
+ *
+ * @ingroup comp_main
+ */
+struct comp_target_external_image
+{
+	//! The image, borrowed for the call: an `id<MTLTexture>` on macOS.
+	void *native_texture;
+
+	/*!
+	 * Called exactly once, from any thread, when the target no longer reads
+	 * the image: after the GPU has finished with it, or when the frame is
+	 * dropped or the call fails.
+	 */
+	void (*release)(void *data);
+	void *release_data;
+};
+
+/*!
  * @brief A compositor target: where the compositor renders to.
  *
  * A target is essentially a swapchain, but it is such a overloaded term so
@@ -251,6 +271,22 @@ struct comp_target
 	                    uint64_t timeline_semaphore_value,
 	                    int64_t desired_present_time_ns,
 	                    int64_t present_slop_ns);
+
+	/*!
+	 * Optional, NULL when unsupported: present an image composited for the
+	 * display elsewhere, instead of an acquired target image. Pacing and
+	 * timing are the same as for @ref present. The image must be complete
+	 * when this is called.
+	 *
+	 * @param ct self
+	 * @param image The image; its release is called in every case.
+	 * @param desired_present_time_ns The timestamp to present at, ideally.
+	 * @param present_slop_ns TODO
+	 */
+	VkResult (*present_external)(struct comp_target *ct,
+	                             const struct comp_target_external_image *image,
+	                             int64_t desired_present_time_ns,
+	                             int64_t present_slop_ns);
 
 	/*!
 	 * Wait for the latest presented image to be displayed to the user.
@@ -498,6 +534,27 @@ comp_target_present(struct comp_target *ct,
 	    timeline_semaphore_value, //
 	    desired_present_time_ns,  //
 	    present_slop_ns);         //
+}
+
+/*!
+ * @copydoc comp_target::present_external
+ *
+ * @public @memberof comp_target
+ * @ingroup comp_main
+ */
+static inline VkResult
+comp_target_present_external(struct comp_target *ct,
+                             const struct comp_target_external_image *image,
+                             int64_t desired_present_time_ns,
+                             int64_t present_slop_ns)
+{
+	COMP_TRACE_MARKER();
+
+	if (ct->present_external == NULL) {
+		image->release(image->release_data);
+		return VK_ERROR_FEATURE_NOT_PRESENT;
+	}
+	return ct->present_external(ct, image, desired_present_time_ns, present_slop_ns);
 }
 
 /*!
