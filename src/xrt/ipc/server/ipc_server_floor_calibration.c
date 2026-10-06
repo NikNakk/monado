@@ -23,6 +23,8 @@
 
 
 DEBUG_GET_ONCE_FLOAT_OPTION(floor_eye_height, "XRT_FLOOR_EYE_HEIGHT_M", 0.0f)
+// Also centre the STAGE under the head and face it the head's way.
+DEBUG_GET_ONCE_BOOL_OPTION(floor_align, "XRT_FLOOR_ALIGN", true)
 
 #define POLL_INTERVAL_NS (100 * U_TIME_1MS_IN_NS)
 
@@ -79,6 +81,7 @@ ipc_server_floor_calibration_start(struct ipc_server *s)
 
 	struct ipc_server_floor_calibration *fcal = U_TYPED_CALLOC(struct ipc_server_floor_calibration);
 	u_floor_calibration_init(&fcal->fc, eye_height);
+	fcal->fc.align = debug_get_bool_option_floor_align();
 	fcal->xso = s->xso;
 	fcal->head = head;
 
