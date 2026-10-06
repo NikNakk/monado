@@ -304,6 +304,11 @@ handle_non_null(struct oxr_instance *inst, struct oxr_logger *log, const char *n
 	ENTRY_IF_EXT(xrGetFoveationMetalStateMNDX, MNDX_foveation_metal);
 #endif
 
+#ifdef OXR_HAVE_MNDX_display_distortion
+	ENTRY_IF_EXT(xrGetDisplayDistortionPropertiesMNDX, MNDX_display_distortion);
+	ENTRY_IF_EXT(xrComputeDisplayDistortionMNDX, MNDX_display_distortion);
+#endif
+
 #ifdef OXR_HAVE_FB_passthrough
 	ENTRY_IF_EXT(xrCreateGeometryInstanceFB, FB_passthrough);
 	ENTRY_IF_EXT(xrCreatePassthroughFB, FB_passthrough);

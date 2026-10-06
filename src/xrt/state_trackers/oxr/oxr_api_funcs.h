@@ -435,6 +435,24 @@ XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetFoveationEyeTrackedStateMETA(XrSession session, XrFoveationEyeTrackedStateMETA *foveationState);
 #endif
 
+#ifdef OXR_HAVE_MNDX_display_distortion
+//! Experimental display layout and lens distortion access.
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetDisplayDistortionPropertiesMNDX(XrInstance instance,
+                                         XrSystemId systemId,
+                                         XrDisplayDistortionPropertiesMNDX *properties);
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrComputeDisplayDistortionMNDX(XrInstance instance,
+                                   XrSystemId systemId,
+                                   uint32_t viewIndex,
+                                   uint32_t pointCount,
+                                   const XrVector2f *points,
+                                   XrVector2f *red,
+                                   XrVector2f *green,
+                                   XrVector2f *blue);
+#endif
+
 #ifdef OXR_HAVE_MNDX_foveation_metal
 //! Experimental Metal companion for XR_FB_foveation.
 XRAPI_ATTR XrResult XRAPI_CALL
