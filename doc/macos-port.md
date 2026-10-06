@@ -587,6 +587,23 @@ translation-layer-specific or game-specific behavior.
 SteamVR Home remains an experiment in the external compatibility layer rather
 than a Monado runtime target. Recreating Valve's compositor is not a goal.
 
+For that experiment Monado has one generic, experimental extension,
+`XR_MNDX_display_distortion` (branch `claude/display-distortion-mndx`; build
+option `XRT_FEATURE_OPENXR_MNDX_DISPLAY_DISTORTION`, off by default). It lets
+an application that composites and distorts its own frames (SteamVR's
+compositor in `IVRVirtualDisplay` mode) produce the panel image:
+
+- it reports the display layout and evaluates the device's distortion;
+- a projection layer can carry `XrCompositionLayerDisplayImageMNDX`, marking
+  its image as already distorted. When it is the only layer, `comp_main`
+  skips distortion and timewarp. The macOS presenter then draws the swapchain
+  image straight into the drawable (`comp_target::present_external`), and
+  other targets blit it.
+
+Checked on 2026-10-06 against a simulated HMD on the attached PS VR2 panel:
+120 Hz pacing with no Monado rendering. The PS VR2 run is pending. Details are
+in the external project's `docs/steamvr-home.md`.
+
 ## What is left
 
 ### Major capability gaps
