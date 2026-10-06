@@ -213,6 +213,16 @@ if(APPLE)
 	set_target_properties(tests_macos_runtime_probe PROPERTIES FOLDER monado_tests)
 endif()
 
+if(APPLE AND TARGET comp_macos_present_copy)
+	add_executable(tests_macos_present_copy tests_macos_present_copy.mm)
+	target_compile_features(tests_macos_present_copy PRIVATE cxx_std_17)
+	target_link_libraries(
+		tests_macos_present_copy PRIVATE comp_macos_present_copy xrt-external-catch2
+		)
+	add_test(NAME tests_macos_present_copy COMMAND tests_macos_present_copy --success)
+	set_target_properties(tests_macos_present_copy PROPERTIES FOLDER monado_tests)
+endif()
+
 if(APPLE AND TARGET comp_metal_foveation_cache)
 	# Per-image Metal foveation map association. Skips itself when the Metal
 	# device cannot create rasterization-rate maps.

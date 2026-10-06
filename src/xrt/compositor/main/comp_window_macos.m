@@ -14,6 +14,7 @@
 
 #include "main/comp_window.h"
 #include "main/comp_macos_frontend.h"
+#include "main/comp_macos_present_copy.h"
 #include "main/comp_window_macos_trace_buffer.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
@@ -56,6 +57,14 @@ struct macos_present_job
 	struct vk_bundle_queue *present_queue;
 	bool passthrough_active;
 	bool passthrough_has_application_layers;
+	/*
+	 * Set for present_external: a finished image, retained, presented instead
+	 * of metal_images[image_index]. It needs no render-complete wait, and
+	 * external_release runs once the presenter has finished with it.
+	 */
+	id<MTLTexture> external_texture;
+	void (*external_release)(void *data);
+	void *external_release_data;
 };
 
 /*
@@ -148,6 +157,7 @@ struct comp_window_macos
 	CGDirectDisplayID display_id;
 	char display_name[128];
 	id<MTLCommandQueue> present_queue;
+	struct comp_macos_present_copy *present_copy;
 	id<MTLTexture> metal_images[MACOS_TARGET_IMAGE_COUNT];
 
 	/* Camera-backed XR_FB_passthrough resources. */
@@ -218,6 +228,7 @@ struct comp_window_macos
 	uint32_t pixel_height;
 	uint32_t next_image;
 	bool logged_layer_state;
+	bool logged_external_present;
 	FILE *trace_present;
 	FILE *trace_presented;
 	FILE *trace_present_complete;
@@ -1149,6 +1160,18 @@ macos_release_source_image(struct comp_window_macos *cwm, uint32_t index)
 	}
 }
 
+//! Ends the presenter's use of a job's source image, whichever kind it is.
+static void
+macos_release_job_source(struct comp_window_macos *cwm, const struct macos_present_job *job)
+{
+	if (job->external_texture != nil) {
+		[job->external_texture release];
+		job->external_release(job->external_release_data);
+		return;
+	}
+	macos_release_source_image(cwm, job->image_index);
+}
+
 static void
 macos_trace_drawable_prefetch(struct comp_window_macos *cwm,
                               const char *event,
@@ -1356,6 +1379,13 @@ comp_window_macos_init(struct comp_target *ct)
 			return false;
 		}
 		cwm->present_queue = present_queue;
+		cwm->present_copy = comp_macos_present_copy_create([metal_layer device]);
+		if (cwm->present_copy == NULL) {
+			comp_macos_frontend_destroy(&cwm->frontend);
+			cwm->metal_layer = nil;
+			COMP_ERROR(ct->c, "Failed to create the macOS presentation copy");
+			return false;
+		}
 
 		comp_macos_frontend_show(cwm->frontend);
 
@@ -1695,23 +1725,27 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	uint64_t target_output_ns = 0;
 	uint64_t metal_request_ns = 0;
 	const char *wait_mode = "queue_idle";
-	bool shared_event_wait = cwm->render_complete_event != nil;
+	bool external = job->external_texture != nil;
+	bool shared_event_wait = !external && cwm->render_complete_event != nil;
 	uint64_t image_reuse_wait_ns = job->image_reuse_wait_ns;
 	double scheduled_present_host_s = 0.0;
 	double gpu_start_time_s = 0.0;
 	double gpu_end_time_s = 0.0;
 	macos_trace_present_worker(cwm, "worker_start", job, worker_start_ns, 0, worker_start_ns, 0, 0, 0, 0,
 	                           shared_event_wait);
-	assert(present_queue != NULL);
-	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
+	assert(external || present_queue != NULL);
+	if (!external && (index >= ct->image_count || cwm->metal_images[index] == nil)) {
 		macos_retire_unpresented_job(cwm, job, "invalid", 0);
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
+	id<MTLTexture> source_texture = external ? job->external_texture : cwm->metal_images[index];
 
 	uint64_t host_call_ns = job->enqueue_ns;
 	uint64_t before_vk_wait_ns = os_monotonic_get_ns();
 	VkResult ret = VK_SUCCESS;
-	if (shared_event_wait) {
+	if (external) {
+		wait_mode = "external";
+	} else if (shared_event_wait) {
 		wait_mode = "metal_shared_event";
 	} else if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&
 	           vk->vkWaitSemaphores != NULL) {
@@ -1731,7 +1765,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	uint64_t after_vk_wait_ns = os_monotonic_get_ns();
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));
-		macos_release_source_image(cwm, index);
+		macos_release_job_source(cwm, job);
 		return ret;
 	}
 
@@ -1808,28 +1842,15 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		}
 		bool encoded_passthrough = false;
 		if (job->passthrough_active) {
-			encoded_passthrough =
-			    macos_passthrough_encode(cwm, command_buffer, drawable, cwm->metal_images[index],
-			                             job->passthrough_has_application_layers);
+			encoded_passthrough = macos_passthrough_encode(cwm, command_buffer, drawable, source_texture,
+			                                               job->passthrough_has_application_layers);
 		}
-		if (!encoded_passthrough) {
-			id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
-			if (blit == nil) {
-				COMP_ERROR(ct->c, "Could not create Metal blit encoder");
-				macos_retire_unpresented_job(cwm, job, "blit_error", 0);
-				return VK_ERROR_DEVICE_LOST;
-			}
-			MTLSize size = MTLSizeMake(ct->width, ct->height, 1);
-			[blit copyFromTexture:cwm->metal_images[index]
-			          sourceSlice:0
-			          sourceLevel:0
-			         sourceOrigin:MTLOriginMake(0, 0, 0)
-			           sourceSize:size
-			            toTexture:[drawable texture]
-			     destinationSlice:0
-			     destinationLevel:0
-			    destinationOrigin:MTLOriginMake(0, 0, 0)];
-			[blit endEncoding];
+		if (!encoded_passthrough &&
+		    !comp_macos_present_copy_encode(cwm->present_copy, command_buffer, source_texture,
+		                                    [drawable texture])) {
+			COMP_ERROR(ct->c, "Could not encode the copy into the drawable");
+			macos_retire_unpresented_job(cwm, job, "blit_error", 0);
+			return VK_ERROR_DEVICE_LOST;
 		}
 
 		before_present_call_ns = os_monotonic_get_ns();
@@ -1932,6 +1953,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		after_present_call_ns = os_monotonic_get_ns();
 		uint64_t traced_frame_id = frame_id;
 		uint32_t traced_index = index;
+		struct macos_present_job source_job = *job;
 		uint64_t traced_timeline_value = timeline_semaphore_value;
 		uint64_t commit_begin_ns = os_monotonic_get_ns();
 		bool traced_shared_event_wait = shared_event_wait;
@@ -1956,7 +1978,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				  completed_gpu_end_s, traced_shared_event_wait ? 1u : 0u);
 			  funlockfile(complete_trace);
 		  }
-		  macos_release_source_image(cwm, traced_index);
+		  macos_release_job_source(cwm, &source_job);
 		  dispatch_group_leave(command_group);
 		}];
 		/* Passive observer of Metal scheduling. The timed-present convenience
@@ -2096,6 +2118,11 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 	uint64_t event_ns = os_monotonic_get_ns();
 	macos_trace_present_worker(cwm, trace_event, &retired_job, event_ns, 0, 0, 0, 0, 0, queue_depth,
 	                           shared_event_wait);
+	if (retired_job.external_texture != nil) {
+		// Complete before it was handed over, and never encoded here.
+		macos_release_job_source(cwm, &retired_job);
+		return;
+	}
 
 	/*
 	 * Dropping presentation does not mean Vulkan has stopped writing the source.
@@ -2206,6 +2233,9 @@ macos_present_worker_run_one(struct comp_window_macos *cwm)
 }
 
 static VkResult
+macos_enqueue_present_job(struct comp_window_macos *cwm, const struct macos_present_job *in_job);
+
+static VkResult
 comp_window_macos_present(struct comp_target *ct,
                           struct vk_bundle_queue *present_queue,
                           uint32_t index,
@@ -2234,7 +2264,49 @@ comp_window_macos_present(struct comp_target *ct,
 		macos_retire_unpresented_job(cwm, &job, "invalid", 0);
 		return VK_ERROR_INITIALIZATION_FAILED;
 	}
+	return macos_enqueue_present_job(cwm, &job);
+}
 
+static VkResult
+comp_window_macos_present_external(struct comp_target *ct,
+                                   const struct comp_target_external_image *image,
+                                   int64_t desired_present_time_ns,
+                                   int64_t present_slop_ns)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	id<MTLTexture> texture = (id<MTLTexture>)image->native_texture;
+	if (texture == nil || cwm->present_copy == NULL) {
+		image->release(image->release_data);
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+	struct macos_present_job job = {
+	    .frame_id = ++cwm->trace_frame_id,
+	    .enqueue_ns = os_monotonic_get_ns(),
+	    .image_index = UINT32_MAX,
+	    .desired_present_time_ns = desired_present_time_ns,
+	    .present_slop_ns = present_slop_ns,
+	    .external_texture = [texture retain],
+	    .external_release = image->release,
+	    .external_release_data = image->release_data,
+	};
+	if (!cwm->logged_external_present) {
+		cwm->logged_external_present = true;
+		COMP_INFO(ct->c, "Presenting an externally composited %lux%lu image (format %lu, %s)",
+		          (unsigned long)[texture width], (unsigned long)[texture height],
+		          (unsigned long)[texture pixelFormat],
+		          comp_macos_present_copy_needs_draw(texture, cwm->metal_images[0]) ? "drawn" : "blitted");
+	}
+	if (!cwm->present_worker_enabled) {
+		return macos_execute_present_job(cwm, &job);
+	}
+	return macos_enqueue_present_job(cwm, &job);
+}
+
+//! Make @p job the single pending job of the present worker.
+static VkResult
+macos_enqueue_present_job(struct comp_window_macos *cwm, const struct macos_present_job *in_job)
+{
+	struct macos_present_job job = *in_job;
 	struct macos_present_job superseded_job;
 	bool superseded = false;
 	bool schedule_present = false;
@@ -2510,6 +2582,7 @@ comp_window_macos_destroy(struct comp_target *ct)
 			comp_macos_frontend_destroy(&cwm->frontend);
 		}
 		[cwm->present_queue release];
+		comp_macos_present_copy_destroy(&cwm->present_copy);
 		for (uint32_t eye = 0; eye < 2; eye++) {
 			[cwm->passthrough_camera_textures[eye] release];
 			cwm->passthrough_camera_textures[eye] = nil;
@@ -2585,6 +2658,7 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 	cwm->base.base.has_images = comp_window_macos_has_images;
 	cwm->base.base.acquire = comp_window_macos_acquire;
 	cwm->base.base.present = comp_window_macos_present;
+	cwm->base.base.present_external = comp_window_macos_present_external;
 	cwm->base.base.wait_for_present = comp_window_macos_wait_for_present;
 	cwm->base.base.update_timings = comp_window_macos_update_timings;
 	cwm->base.base.queue_supports_present = comp_window_macos_queue_supports_present;
