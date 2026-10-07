@@ -161,6 +161,50 @@ TEST_CASE("Sense clock steady mode holds through latency steps at the fitted dri
 	CHECK(max_reference_error > 500000.0);
 }
 
+TEST_CASE("Sense clock recovers the measured offset when a drifted hold is released")
+{
+	pssense_clock_options options;
+	pssense_clock_default_options(&options);
+	options.snap_ns = 250000.0;
+	options.steady = true;
+	pssense_clock clock;
+	pssense_clock_init(&clock, &options);
+
+	// The controller's drift changes while the mapping is held, as it did on 7 Oct when a held mapping ended
+	// about 10 ms off and the hinted LED scans, placed by it, saw nothing.
+	Link link;
+	double base = link.true_offset_ns;
+	link.drift_ppm = 20.0;
+	int64_t t = 0;
+	auto truth = [&](int64_t at) {
+		return at < 60 * kS ? base + 20e-6 * (double)at : base + 20e-6 * 60e9 + 200e-6 * (double)(at - 60 * kS);
+	};
+	auto push = [&](int64_t at) {
+		double latency = 4.0 * kMs + 10.0 * kMs * link.rng.next();
+		pssense_clock_push(&clock, at, (int64_t)(truth(at) - latency) + at);
+	};
+	for (; t < 120 * kS; t += kReportNs) {
+		pssense_clock_set_hold(&clock, t >= 10 * kS);
+		push(t);
+	}
+	REQUIRE(clock.holding);
+	double held_error = std::fabs(clock.offset_ns - truth(t));
+	CAPTURE(held_error);
+	CHECK(held_error > 2.0 * kMs);
+
+	// Lock lost: the hold is released, and the default mapping converges on (snaps to) the measured offset.
+	pssense_clock_set_hold(&clock, false);
+	for (int64_t end = t + 2 * kS; t < end; t += kReportNs) {
+		push(t);
+	}
+	CHECK_FALSE(clock.holding);
+	double released_error = std::fabs(clock.offset_ns - truth(t));
+	CAPTURE(released_error);
+	// Within the 4-14 ms latency band of the samples, as the default mapping always is.
+	CHECK(released_error < 15.0 * kMs);
+	CHECK(released_error < held_error);
+}
+
 TEST_CASE("Sense clock steady mode waits for a rate and clamps it")
 {
 	pssense_clock_options options;
