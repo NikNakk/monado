@@ -403,13 +403,14 @@ ipc_client_hmd_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_s
 }
 #endif
 
-void
-ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
+/*!
+ * Copy the service's description of the display (screen size, viewports and
+ * view rotations), which a local compositor and XR_MNDX_display_distortion
+ * both need.
+ */
+static void
+ipc_client_hmd_copy_display(struct ipc_shared_memory *ism, struct xrt_hmd_parts *hmd)
 {
-	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
-	struct ipc_shared_memory *ism = ich->ipc_c->ism;
-	struct xrt_hmd_parts *hmd = xdev->hmd;
-
 	hmd->screens[0].w_pixels = (int)ism->hmd.compositor.w_pixels;
 	hmd->screens[0].h_pixels = (int)ism->hmd.compositor.h_pixels;
 	hmd->screens[0].nominal_frame_interval_ns = ism->hmd.compositor.nominal_frame_interval_ns;
@@ -421,6 +422,16 @@ ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 		hmd->views[i].rot = ism->hmd.compositor.views[i].rot;
 		hmd->distortion.fov[i] = ism->hmd.compositor.views[i].distortion_fov;
 	}
+}
+
+void
+ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
+{
+	ipc_client_hmd_t *ich = ipc_client_hmd(xdev);
+	struct ipc_shared_memory *ism = ich->ipc_c->ism;
+	struct xrt_hmd_parts *hmd = xdev->hmd;
+
+	ipc_client_hmd_copy_display(ism, hmd);
 
 #ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
 	ipc_client_tracking_share_create(ich);
@@ -662,6 +673,7 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c,
 
 	// Distortion information, fills in xdev->compute_distortion().
 	u_distortion_mesh_set_none(&ich->base);
+	ipc_client_hmd_copy_display(ism, ich->base.hmd);
 
 	// Setup variable tracker.
 	u_var_add_root(ich, ich->base.str, true);
