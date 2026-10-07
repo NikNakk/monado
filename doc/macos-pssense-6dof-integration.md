@@ -1805,3 +1805,33 @@ The camera streams stay on, so passthrough is unaffected. Setting any of the
 three to 0 restores the earlier behaviour. Combined defaults subsequently
 exercised in games for 10–20 minutes, as confirmed by the user on 2026-10-08;
 see the current status above.
+
+### Steady clock hold kept after a lost lock, 2026-10-07
+
+**Field failure.** A SteamVR session with the CrossOver rig ran for about 30 minutes
+(`steamvr-crossover/run-mwxr-20261007-224508`). When Half-Life: Alyx exited
+(22:56:17), both controllers were put down and lost their optical lock
+(last fused pose 22:56:19). They never relocked: every hinted scan found
+`lit=0/8` at every step and retried with backoff, so the hands stayed in
+3DoF until the service restarted.
+
+**Cause.** The driver requested the steady clock hold whenever a lock had *ever*
+been acquired (`locks_acquired > 0`), so the hold continued after the lock was lost.
+While held, the mapping only extrapolates its fitted rate. The fit swung from
++0.2 to −5.9 ppm, and the held offset drifted 10.8 ms (left) and 9.5 ms (right)
+from the measured one. Against the 16.7 ms LED cycle, that put every hinted
+scan's ±1.5 ms window on the wrong part of the cycle. This was not the
+always-lit fault: the LEDs ran normally, but the scans looked in the wrong place.
+
+**Change.** Hold only while the bootstrap is `LOCKED`. When the lock is lost,
+the mapping returns to the measured (default) offset, as at start-up. The
+lock, and so the hint, was measured against that offset. Recovery uses the same
+quick hinted scan as start-up, and the full-scan policy is unchanged.
+`CLOCK_OFFSET event=release` logs each release. A new clock test reproduces
+the drift: a drift change during a hold leaves the held mapping 12.2 ms off,
+and two seconds after the release it is back at the 4.3 ms latency floor. The hold
+was introduced to stop latency snaps moving the pulse while locked, and that
+case is unchanged. Hardware validation is pending: the next session should
+log `event=release` and then a quick hinted relock after the controllers have been put
+down and picked up again.
+
