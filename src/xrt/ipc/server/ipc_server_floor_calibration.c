@@ -38,7 +38,7 @@ static void *
 run_floor_calibration(void *ptr)
 {
 	struct ipc_server_floor_calibration *fcal = ptr;
-	os_thread_helper_name(&fcal->oth, "Floor calibration");
+	os_thread_name_self("Floor calibration");
 
 	U_LOG_I("Floor calibration: waiting for a worn, tracked, level and steady head (eye height %.2f m).",
 	        fcal->fc.eye_height_m);
