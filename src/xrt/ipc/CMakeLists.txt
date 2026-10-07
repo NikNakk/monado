@@ -305,6 +305,7 @@ elseif(APPLE)
 			"-framework AppKit"
 			"-framework CoreGraphics"
 			"-framework Foundation"
+			"-framework IOKit"
 			"-framework Metal"
 		)
 elseif(WIN32)
