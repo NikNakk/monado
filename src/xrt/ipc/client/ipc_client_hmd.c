@@ -674,6 +674,9 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c,
 	// Distortion information, fills in xdev->compute_distortion().
 	u_distortion_mesh_set_none(&ich->base);
 	ipc_client_hmd_copy_display(ism, ich->base.hmd);
+	// The placeholder above replaces compute_distortion with an identity; ask
+	// the service instead (XR_MNDX_display_distortion).
+	ich->base.compute_distortion = ipc_client_hmd_compute_distortion;
 
 	// Setup variable tracker.
 	u_var_add_root(ich, ich->base.str, true);
