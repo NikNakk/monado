@@ -803,14 +803,25 @@ pssense_add_clock_offset_sample_locked_experimental(struct pssense_device *pssen
 	 * PSSENSE_CLOCK_STEADY: hold the mapping once the LED schedule has locked, advancing only at the fitted drift
 	 * rate. The lock is measured against this mapping, so later sags and steps of the link's latency floor would
 	 * otherwise move the pulse against the exposure (4-5 Oct: snaps of 250-980 us preceded long ring losses).
+	 *
+	 * Hold only while locked. A hold kept after the lock is lost extrapolates a fitted rate that nothing checks:
+	 * on 7 Oct, after both controllers were put down, it drifted about 10 ms in a few minutes, and every hinted
+	 * scan, placed by it, looked at the wrong part of the cycle and saw no light. Released, the mapping
+	 * returns to the measured offset, as at start-up, where the lock (and so the hint) was measured.
 	 */
-	pssense_clock_set_hold(clock, pssense->tracking.led_bootstrap.locks_acquired > 0);
+	const bool was_hold_requested = clock->hold_requested;
+	pssense_clock_set_hold(clock, pssense->tracking.led_bootstrap.state == T_LED_PHASE_BOOTSTRAP_LOCKED);
 	const bool was_holding = clock->holding;
+	const double before_ns = clock->offset_ns;
 	pssense_clock_push(clock, local_ns, remote_ns);
 	const char side = pssense->hand == XRT_HAND_LEFT ? 'L' : 'R';
 	if (clock->holding && !was_holding) {
 		PSSENSE_INFO(pssense, "CLOCK_OFFSET side=%c event=hold rate_ppm=%.2f envelope_gap_us=%.1f", side,
 		             clock->rate * 1e6, (clock->envelope_ns - clock->offset_ns) / 1000.0);
+	}
+	if (was_hold_requested && !clock->hold_requested) {
+		PSSENSE_INFO(pssense, "CLOCK_OFFSET side=%c event=release envelope_gap_us=%.1f step_us=%.1f", side,
+		             (clock->envelope_ns - clock->offset_ns) / 1000.0, (clock->offset_ns - before_ns) / 1000.0);
 	}
 	if (clock->snapped) {
 		/*
