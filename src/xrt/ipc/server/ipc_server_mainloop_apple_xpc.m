@@ -8,6 +8,7 @@
 
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
+#include <IOKit/pwr_mgt/IOPMLib.h>
 
 #include <dispatch/dispatch.h>
 
@@ -24,6 +25,7 @@
 DEBUG_GET_ONCE_BOOL_OPTION(macos_exit_on_display_loss, "XRT_MACOS_EXIT_ON_DISPLAY_LOSS", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_display_loss_delay_ms, "XRT_MACOS_DISPLAY_LOSS_DELAY_MS", 3000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_display_loss_shutdown_watchdog_ms, "XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS", 5000)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_prevent_display_sleep, "XRT_MACOS_PREVENT_DISPLAY_SLEEP", false)
 
 
 /*
@@ -302,6 +304,53 @@ poll_compositor_display_lifecycle(struct ipc_server *vs)
 	}
 }
 
+/*
+ * Idle display sleep turns a headset's display off like any other, which also
+ * looks like display loss above. While clients are connected, keep displays
+ * awake as a video player does. Opt-in with XRT_MACOS_PREVENT_DISPLAY_SLEEP=1.
+ */
+static IOPMAssertionID g_display_sleep_assertion = kIOPMNullAssertionID;
+
+static void
+release_display_sleep_assertion(void)
+{
+	if (g_display_sleep_assertion == kIOPMNullAssertionID) {
+		return;
+	}
+	IOPMAssertionRelease(g_display_sleep_assertion);
+	g_display_sleep_assertion = kIOPMNullAssertionID;
+	U_LOG_I("No clients connected; displays may sleep again");
+}
+
+static void
+poll_display_sleep_assertion(struct ipc_server *vs)
+{
+	if (!debug_get_bool_option_macos_prevent_display_sleep()) {
+		return;
+	}
+
+	os_mutex_lock(&vs->global_state.lock);
+	uint32_t connected_clients = vs->global_state.connected_client_count;
+	os_mutex_unlock(&vs->global_state.lock);
+
+	if (connected_clients == 0) {
+		release_display_sleep_assertion();
+		return;
+	}
+	if (g_display_sleep_assertion != kIOPMNullAssertionID) {
+		return;
+	}
+	IOReturn ret = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep, kIOPMAssertionLevelOn,
+	                                           CFSTR("Monado: an XR application is running"),
+	                                           &g_display_sleep_assertion);
+	if (ret != kIOReturnSuccess) {
+		g_display_sleep_assertion = kIOPMNullAssertionID;
+		U_LOG_W("Could not prevent idle display sleep (0x%x)", ret);
+		return;
+	}
+	U_LOG_I("Clients connected; preventing idle display sleep");
+}
+
 int
 ipc_server_mainloop_init(struct ipc_server_mainloop *ml, bool no_stdin)
 {
@@ -334,12 +383,14 @@ ipc_server_mainloop_poll(struct ipc_server *vs, struct ipc_server_mainloop *ml)
 	ipc_server_mainloop_apple_poll(vs, ml);
 	ipc_metal_xpc_service_expire_tokens();
 	poll_compositor_display_lifecycle(vs);
+	poll_display_sleep_assertion(vs);
 }
 
 void
 ipc_server_mainloop_deinit(struct ipc_server_mainloop *ml)
 {
 	reset_compositor_window_tracking();
+	release_display_sleep_assertion();
 	ipc_metal_xpc_service_stop();
 	ipc_server_mainloop_apple_deinit(ml);
 }
