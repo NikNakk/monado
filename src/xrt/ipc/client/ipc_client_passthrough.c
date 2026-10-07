@@ -49,7 +49,7 @@ reader_thread(void *ptr)
 	struct ipc_client_passthrough *icp = ptr;
 	uint64_t sequences[2] = {0, 0};
 
-	os_thread_helper_name(&icp->oth, "IPC passthrough");
+	os_thread_name_self("IPC passthrough");
 
 	os_thread_helper_lock(&icp->oth);
 	while (os_thread_helper_is_running_locked(&icp->oth)) {

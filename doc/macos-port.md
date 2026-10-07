@@ -691,6 +691,18 @@ branch-oriented companion to this document.
 
 ## Upstream sync
 
+On 2026-10-07, `macos-upstream-clean` merged GitLab upstream `main` through
+`ec188bb13` in merge commit `753698f92`, with no merge conflicts. The eight
+new commits replace thread naming with a current-thread API, correct WMR
+distortion coordinates and remove its view-Y overrides, make 13-bit sign
+extension portable, expose SteamVR lighthouse `IVRDriverInput_005`, and size
+SLAM tracking by the cameras actually played back. The fork's passthrough and
+floor-calibration workers were updated to the replacement thread-naming API.
+The macOS `.build/native-service-check` build succeeded and all 45 CTest
+suites passed (shared-memory, socket-security and remote-layer tests required
+a rerun outside the sandbox). Headset validation and Linux CI for this sync
+remain pending.
+
 On 2026-10-03, `macos-upstream-clean` merged GitLab upstream `main` through
 `22d5c936c` (2026-10-02), preserving existing commit history. The ten new
 commits add configurable remote-HMD resolution and null-compositor frame rate,

@@ -41,6 +41,12 @@ record are carried with the runtime corrections.
   per-thread scheduling fix, followed by the tracking, pose, image-reuse,
   output-barrier and diagnostics work. Shared tracking stays opt-in.
 - Canonical upstream remains the Monado project on freedesktop.org.
+- Latest local sync: `macos-upstream-clean` merged GitLab `main` through
+  `ec188bb13` on 2026-10-07 in `753698f92`, without conflicts. The fork's
+  passthrough and floor-calibration workers now use upstream's replacement
+  thread-naming API. The macOS service check build and all 45 CTest suites
+  passed (three suites needed a rerun outside the sandbox); headset validation
+  and Linux CI remain pending. See [Upstream sync](macos-port.md#upstream-sync).
 - Local cleanup branch sync: `macos-upstream-clean` merged GitLab `main` through
   `22d5c936c` (2026-10-02) on 2026-10-03, without rebasing. The macOS service
   check build and all 35 CTest suites passed; headset validation and Linux CI
