@@ -74,9 +74,8 @@ It also carries the standards-facing slices, merged in this order:
   remap of the rate map, packed multi-view support, and runtime-owned
   `XR_META_foveation_eye_tracked`.
 
-Game Mode work is on
-[`claude/game-mode-priority-issue-xkx6m7`](https://github.com/NikNakk/monado/tree/claude/game-mode-priority-issue-xkx6m7),
-which builds on the integration branch and is not merged into it yet.
+Client-side compositing from `claude/game-mode-priority-issue-xkx6m7` is
+present in this integration branch; multi-client hardware validation remains.
 
 All foveation options are opt-in at build time (default OFF). Fixed FB
 foveation works without eye tracking; META eye-tracked foveation uses
@@ -143,8 +142,9 @@ The [2026-10-04 integration](macos-pssense-6dof-integration.md) ports
 `claude/pssense-mr2940-evaluation` at `e54478a16` and its uncommitted runtime
 hookup from `~/Code/monado`. The joint solver + EKF is available here with
 `PSVR2_SENSE_6DOF=1` and an explicit calibration path. Optimised runtime builds,
-local tests and byte-identical recorded-session replay pass. OpenXR hardware
-validation and Linux CI remain pending. The note includes launch commands and
+local tests and byte-identical recorded-session replay pass. OpenBrush and
+10–20 minute game sessions are user-confirmed; broader hardware coverage and
+the latest Linux CI remain pending. The note includes launch commands and
 retains the source's calibration/tracking evidence.
 
 - [`macos-pssense-6dof`](https://github.com/NikNakk/monado/tree/macos-pssense-6dof)
@@ -169,24 +169,22 @@ Historical/base work for the current optical tracking branch.
 The useful depth path has since been integrated into the main macOS integration
 branch. Keep this branch mainly for development history/comparison.
 
-## Immediate priorities
+## Immediate priorities (updated 2026-10-08)
 
-1. Finish client-side compositing for Game Mode: validate handoff on
-   hardware, merge into the integration branch, then overlays and Chromium,
-   and make it the default
-   ([design](macos-client-compositor-design.md)).
-2. Validate the integrated opt-in PS Sense optical 6DoF path in OpenXR.
-3. Turn existing PS VR2 camera acquisition into a calibrated passthrough/MR
-   pipeline.
-4. Bring the validated FB/META foveation path to engines and Chromium,
-   and refine the experimental Metal rendering companion for upstream review.
-5. Continue hardening Chromium's sandboxed IOSurface/shared-event graphics path.
-6. Keep the generic macOS/Metal handoff stable for external compatibility
-   clients; Wine/OpenVR breadth is tracked in `macos-wine-xr`.
-7. Continue compositor pacing/reprojection robustness work, including depth +
-   foveation coordinate handling.
-8. Add broader OpenXR regression/conformance coverage.
-9. Package and notarize the runtime with a simple settings/diagnostics surface.
+1. Finish formatting/documentation cleanup and publish the October 7 upstream
+   integration for Linux/macOS CI; complete its headset regression separately.
+2. Continue presentation-stall diagnosis and hosted-client handoff/teardown
+   validation. Shared tracking remains opt-in.
+3. Sense combined defaults have already been used in games for 10–20 minutes,
+   confirmed by the user. Broaden reliability coverage without repeating this
+   completed gate as outstanding work.
+4. Confirm visible camera-only and camera-plus-scene passthrough, then calibrate
+   its actual camera mode, geometry and timing.
+5. Validate fixed and eye-tracked foveation in Unity or Unreal, then investigate
+   Wine graphics-backend integration.
+6. Continue Chromium graphics sharing, OpenXR regression coverage and packaging.
+7. Upstream submissions are paused while the first MR awaits merge and the
+   contributor learns the review process.
 
 ## Related repositories
 
@@ -359,6 +357,7 @@ Linux rerun and Rift hardware validation remain pending.
 ## Sense application milestone: OpenBrush (2026-10-04)
 
 The user confirms successful 3D painting in OpenBrush, the first non-test
-application validation of integrated Sense 6DoF. Left-controller tracking still
-drops too often; persistent LED lockout remains a separate unresolved fault.
+application validation of integrated Sense 6DoF. This is a historical milestone:
+the October 5 profile/reacquisition work and October 8 confirmation of 10–20
+minute game sessions supersede its initial reliability status.
 See the [application evidence](macos-pssense-6dof-integration.md#first-non-test-application-openbrush-2026-10-04).

@@ -1,3 +1,9 @@
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
+
 # Floor calibration of the managed STAGE space
 
 Date: 2026-10-05. Branch `claude/stage-floor-calibration`, based on `619b57c84`.

@@ -148,3 +148,46 @@ GAV's double-press behaviour is application logic: two function-button clicks
 within its timeout toggle the camera view. Once the runtime path is validated,
 SwiftXRShell can implement the same interaction while keeping applications on
 standard OpenXR.
+
+## Validation and calibration plan, 2026-10-08
+
+The API is exposed to applications through `XR_FB_passthrough`, but a visible
+PS VR2 camera-plus-scene hardware result has not been established in the
+current evidence. Extension enumeration and successful lifecycle calls alone
+are insufficient. PS VR2 currently advertises only the `Opaque` environment
+blend mode (`psvr2.c`); selecting `AlphaBlend` in hello_xr is therefore not the
+passthrough test. FB passthrough submits a camera layer beneath a projection
+layer whose background is transparent. The native diagnostic's `--passthrough`
+mode exercises this path; `--passthrough-only` isolates camera delivery.
+
+First run those two modes with cameras enabled in the service environment,
+then repeat with client-hosted compositing. Record the exact build, session
+lifecycle, visible camera image, virtual-object opacity, head motion and
+teardown. Audit unsupported purposes/style requests before describing the
+implementation as a complete FB passthrough implementation. Automatic room
+view for arbitrary opaque applications is not implemented.
+
+Recommended calibration sequence:
+
+1. Record the actual mode-0x10 BC4 stereo images used for passthrough, including
+   native dimensions, crop/orientation, frame sequence, hardware timestamps and
+   HMD poses. Do not assume the mode-4 512x508 tracking calibration can be scaled
+   into the 1024x1016 passthrough images without validating their correspondence.
+2. Reuse the existing printed ChArUco target and offline tooling, adapting the
+   dataset reader to this stereo mode. Measure the printed square size. Capture
+   synchronized pairs across the image, at varied distances and board tilts.
+3. Fit each fisheye camera's intrinsics/distortion, then stereo extrinsics;
+   check withheld views and epipolar residuals, not only fitting error. OpenCV's
+   [fisheye model and stereo calibration](https://docs.opencv.org/4.13.0/db/d58/group__calib3d__fisheye.html)
+   provide the underlying operations already used by the calibration workflow.
+4. Solve and verify camera-to-head alignment against timestamped SLAM poses,
+   with explicit coordinate conventions. Replace the FOV/convergence UV map
+   with calibrated camera rays projected from each eye. Camera and eye centres
+   differ: calibration alone cannot remove near-field parallax at every depth.
+5. Measure camera age and time alignment, then add rotational late correction.
+   Positional reprojection and near-field occlusion need scene depth or a
+   declared reference plane; they are later work.
+
+Keep calibration per headset and versioned, and retain the current approximate
+path as an explicitly experimental fallback until the calibrated path passes
+stationary and moving-head checks.

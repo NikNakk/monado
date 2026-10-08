@@ -6,13 +6,21 @@ SPDX-License-Identifier: BSL-1.0
 
 # PS Sense 6DoF integration
 
-Integration date: 2026-10-04. **The runtime port now has user-confirmed
-6DoF use in OpenBrush: the user could paint in 3D, the first non-test
-application validation.** Left-controller tracking still drops more often than
-desired, and the separate persistent LED lockout remains unresolved. Corrected
-Linux CI and broader hardware validation remain pending. The review and original
-implementation plan below explain the selection; completed checks and the
-launch procedure follow.
+Integration date: 2026-10-04. **The opt-in runtime path has user-confirmed
+OpenBrush 3D painting and game sessions lasting 10–20 minutes.** On 2026-10-08,
+the user confirmed that the combined quick-lock, headset-detector and reconnect
+defaults have already been exercised in games. This supersedes the pending
+combined-game check at the end of the October 5 record. Exact game names,
+commits, settings and instrumented loss statistics were not recorded for this
+confirmation; it establishes practical sustained use, not complete coverage of
+all reconnect, occlusion or teardown cases.
+
+The Sony-like LED profile and oriented reacquisition improved the earlier
+left/right imbalance and avoided lockouts in the recorded successful sessions.
+Earlier LED faults remain historical evidence rather than an established fault
+in the current profile. Broad reliability validation and the latest Linux CI
+remain outstanding. The dated investigation below preserves the evidence and
+implementation history.
 
 ## Sources reviewed
 
@@ -1794,5 +1802,6 @@ like the helper's other defaults. Evidence (CLI, this document):
 - reconnect: a power-cycled left relocked 0.9 s after reconnecting.
 
 The camera streams stay on, so passthrough is unaffected. Setting any of the
-three to 0 restores the earlier behaviour. Not yet run together in a game
-session.
+three to 0 restores the earlier behaviour. Combined defaults subsequently
+exercised in games for 10–20 minutes, as confirmed by the user on 2026-10-08;
+see the current status above.

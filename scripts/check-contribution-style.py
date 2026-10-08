@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--base-ref", default="045931d12", help="upstream commit used for the current sync")
+parser.add_argument("--base-ref", default="ec188bb13", help="upstream commit used for the current sync")
 args = parser.parse_args()
 root = Path(__file__).resolve().parent.parent
 
