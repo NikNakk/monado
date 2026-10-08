@@ -1874,3 +1874,25 @@ the remaining 4.5 minutes no scan saw a lit frame.
   bit 1 always and bit 4 while locked. Both bits are undocumented and we have
   always sent 0.
 - The CLI's session limit is raised from 120 s to 900 s, for put-down tests.
+
+**CLI put-down tests** (build `34d328038`, helper-equivalent settings plus
+`PSSENSE_TIMING_DIAG=1`, no recovery options, 8 min each, run by Claude with the user
+handling the controllers):
+
+- `20261008-194518-putdown-1-baseline`: put down at 70 s, picked up at 318 s.
+  Each ring stayed lit and seen by one camera (exactly 300 of 1,200 reports
+  lit), so neither lock was lost and nothing rescanned. Tracking resumed
+  within about 2 s of pickup.
+- `20261008-195429-putdown-2-out-of-view` (put down out of view): the locks were lost at 75 s
+  (left) and 82 s (right), and hinted rescans with dark baselines ran for four
+  minutes. The controllers were picked up at 325 s, the right quick-locked at
+  328 s and the left at 330 s, and both were fully tracked to the end.
+
+Neither reproduced the field failure. The field session's distinctive sign
+was both controllers' reports slowing together by about 19 ms. Here the best
+`remote − local` moved only 4–7 ms over 8 minutes (ordinary drift), and the
+echoed-timestamp round trip stayed in its usual steps of about 15 ms (35–110
+ms). So the trigger is in the SteamVR session's conditions, most likely
+Bluetooth load (audio streaming to paired Bluetooth headphones is a
+candidate), not the put-down or the rescans themselves. No display or system
+sleep occurred during that session (`caffeinate` held an assertion).
