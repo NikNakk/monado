@@ -57,7 +57,8 @@ A valid file replaces approximate FOV/convergence with calibrated fisheye lens
 projection and camera-to-head rotation, at infinity. Brightness still applies.
 An invalid/unreadable file or supplied serial mismatch warns and falls back.
 The user visually confirmed camera-only and blended-scene service compositing
-on 2026-10-08; perceived lag remains. The hosted path needs a separate check. Camera streams
+on 2026-10-08, followed by a successful blended hosted-compositor run. Perceived
+lag remains. Camera streams
 remain opt-in. See the [calibration guide](macos-psvr2-passthrough-calibration.md#experimental-transferred-runtime-mapping-2026-10-08).
 
 ## Automatic floor calibration (2026-10-06)

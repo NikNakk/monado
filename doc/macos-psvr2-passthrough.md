@@ -147,8 +147,8 @@ geometrically calibrated MR camera system.
 
 Remaining work includes:
 
-- validate hosted compositing with the transferred mapping (camera-only and
-  blended-scene service compositing are visually confirmed);
+- measure camera timing and improve exposure-pose association (camera-only and
+  blended service compositing, plus blended hosted compositing, are visually confirmed);
 - associate camera frames with hardware timestamps and head poses;
 - camera reprojection / late correction;
 - robust stream restart if camera delivery stalls;
@@ -227,3 +227,12 @@ The follow-up `--passthrough` run with service compositing also received the
 user's “Works well” confirmation. Both native diagnostic camera modes are now
 visually confirmed. Hosted compositing and latency work remain separate; see
 [the detailed record](macos-psvr2-passthrough-calibration.md#calibrated-blended-scene-visually-confirmed-2026-10-08).
+
+
+## Calibrated hosted result, 2026-10-08
+
+The user also reports “All good” with `--passthrough`,
+`XRT_MACOS_CLIENT_COMPOSITOR=1` and the same calibration file in the client.
+This confirms the native diagnostic's camera sharing and calibrated blended
+rendering through hosted compositing. The previously reported lag remains an
+unmeasured timing/reprojection issue. See the [detailed record](macos-psvr2-passthrough-calibration.md#calibrated-hosted-blended-scene-visually-confirmed-2026-10-08).
