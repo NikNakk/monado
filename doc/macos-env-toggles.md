@@ -48,6 +48,17 @@ This is for isolated testing alongside the registered hardware service. See
 [Wine native-client endpoint validation](macos-wine-in-process-endpoint.md).
 The inventory counts below remain the historical audit snapshot.
 
+## Calibrated passthrough candidate (2026-10-08)
+
+`XRT_MACOS_PASSTHROUGH_CALIBRATION` (unset by default) selects an experimental
+`psvr2-passthrough-calibration-v1` JSON file for the macOS PS VR2 presenter.
+Set an absolute path in the service and in clients using in-process compositing.
+A valid file replaces approximate FOV/convergence with calibrated fisheye lens
+projection and camera-to-head rotation, at infinity. Brightness still applies.
+An invalid/unreadable file or supplied serial mismatch warns and falls back.
+No hardware validation of this mapping is claimed yet. Camera streams remain
+opt-in. See the [calibration guide](macos-psvr2-passthrough-calibration.md#experimental-transferred-runtime-mapping-2026-10-08).
+
 ## Automatic floor calibration (2026-10-06)
 
 `XRT_FLOOR_EYE_HEIGHT_M` (unset, 0.5-2.5) is set in the **service**. Once the
