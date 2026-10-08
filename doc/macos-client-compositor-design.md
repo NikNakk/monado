@@ -551,7 +551,9 @@ client's environment. Without it, clients take exactly the old service path.
   into the client compositor's sinks, polling every 2 ms, so the existing
   Metal passthrough code runs unchanged. The UV maps come from the
   distortion grid above. Requires `PSVR2_CAMERA_STREAMS=1` for the service,
-  as before. Not yet run on hardware.
+  as before. The user confirmed calibrated camera background plus virtual scene
+  with the native diagnostic on 2026-10-08; see the
+  [hardware record](macos-psvr2-passthrough-calibration.md#calibrated-hosted-blended-scene-visually-confirmed-2026-10-08).
 
 The shared-memory layout changed, so rebuild native IPC clients alongside
 the service. The external compatibility proxy must use the matching Monado

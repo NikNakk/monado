@@ -9,7 +9,7 @@ SPDX-License-Identifier: BSL-1.0
 Updated 2026-10-08. Eight user-operated ChArUco captures support the transferred
 lens/stereo calibration, and the user now confirms the service-composited
 camera-only and blended-scene images look good with service compositing.
-Perceived motion lag remains; hosted-client validation is outstanding. The dated evidence
+Blended hosted/client compositing is also confirmed; perceived motion lag remains. The dated evidence
 below preserves the capture, implementation and failed-startup history.
 
 ## Tooling audit and existing evidence
@@ -609,3 +609,22 @@ service camera settings and supply `XRT_MACOS_CLIENT_COMPOSITOR=1` and the same
 absolute calibration path in the diagnostic's environment. Check both camera
 visibility and virtual content. No Unity/Unreal/Wine passthrough result or
 full-field metric calibration is implied by these native diagnostic runs.
+
+
+## Calibrated hosted blended scene visually confirmed, 2026-10-08
+
+The user repeated `--passthrough` with `XRT_MACOS_CLIENT_COMPOSITOR=1` and the
+same absolute calibration path in the client, retaining the launchd service's
+mode-16 camera settings, and reported “All good.” Rendering source remains
+`c0c24f1a0`; the subsequent commits only updated documentation. This confirms
+camera sharing, calibrated client-side mapping and virtual content over the
+camera background in the native diagnostic's hosted-compositor path.
+
+The session now has positive visual results for service-composited camera-only,
+service-composited blended, and hosted blended passthrough. Preserve these
+results rather than repeating them as outstanding gates. The earlier perceived
+lag has not been measured or resolved. Next software work is timing evidence
+and exposure/head-pose association for camera reprojection. Unity, Unreal and
+Wine application coverage, full-field metric alignment, depth-dependent
+parallax and lifecycle/handoff robustness remain separate work. Keep the
+calibration and camera streams opt-in.
