@@ -4,8 +4,9 @@
 set -euo pipefail
 
 script_dir=${0:A:h}
-repo_root=${script_dir:h:h}
-root=${MONADO_WINE_DXMT_ROOT:-${repo_root}/build-wine-dxmt}
+# Provisioned OpenVR runtimes live beside the Windows prefix (doc/macos-port.md,
+# "Local workspace layout").
+root=${MONADO_OPENVR_RUNTIMES_ROOT:-${HOME}/Windows/openvr-runtimes}
 xrizer_dir=${MONADO_XRIZER_ROOT:-${root}/xrizer}
 out=${xrizer_dir}/openvr_api.dll
 runtime_bin=${xrizer_dir}/bin
