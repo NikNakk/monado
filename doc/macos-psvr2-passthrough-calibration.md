@@ -62,11 +62,13 @@ passthrough-mode or live-service recorder.
 
 Use the same physical target as Sense calibration:
 
-- A3 landscape, matte print, rigid flat backing;
-- 7 by 5 squares, nominal square size 40 mm, marker size 30 mm;
-- `DICT_4X4_50`; the patterned rectangle is nominally 280 by 200 mm.
+- Reuse the existing A4 board, with a matte surface and rigid flat backing;
+- 7 by 5 squares and `DICT_4X4_50`; the generator uses nominal 40 mm
+  squares and 30 mm markers, but an A4 print may be scaled;
+- Measure the actual printed square and marker size. Cross-mode corner-ID
+  comparison is independent of this physical scale; the metric solve is not.
 
-Generate it from this checkout:
+Only if a replacement is needed, generate the original A3 design from this checkout:
 
 ```sh
 cd ~/Code/monado-2
@@ -201,5 +203,288 @@ After sufficient coverage, the next implementation should:
    declared reference plane.
 
 Do not overwrite the existing Sense JSON or claim the generic `solve` command
-has installed passthrough calibration. Passthrough's approximate renderer still
-needs the runtime integration above.
+has installed passthrough calibration. The experimental runtime integration
+below now permits testing a transferred candidate; it has no hardware result yet.
+
+## First new capture: P00-centre, 2026-10-08
+
+The user captured `~/Code/psvr2-datasets/passthrough/20261008-charuco/P00-centre`
+with the existing A4 board, source `8dae28b60aff6674eb23fa50cde49e7cf846efce`.
+The user confirms the printed square size is 40 mm. Marker size has not been
+separately confirmed; do not infer it from paper size. All six requested mode visits
+synchronized and received frames. The decoded stereo views show a coherent board.
+All 16 saved images per passthrough view detect all 24 board corners, without
+stationary averaging. Mode-4 lower cameras detect 3–19 and 9–24 corners per frame;
+stationary averaging recovers 24/24 lower-camera corners (20/24 in the upper pair).
+
+The lower-camera correspondence repeats the earlier result: using median corners
+from individual frames, exact doubling gives RMS 0.90/0.77 passthrough pixels and
+an affine fit gives 0.49/0.29 pixels. Stationary-mean results give exact doubling
+RMS 0.87/0.78 and affine fit 0.44/0.31 pixels. These are single-position fitting
+results, not held-position validation. The next capture should move the board
+left in the camera image, keeping both cameras' board coverage and the headset
+fixed. No reason to reprint the A4 target is established by this capture.
+
+The BC4 visits report 19/17 invalid-header candidates and 975104 prefix bytes
+while framing the stream; decoded examples and detections succeed. Preserve
+these counters for comparison in subsequent captures rather than treating them
+as proof of corrupt saved images or silently discarding them.
+
+Analysis artifacts are under this checkout's
+`.build/passthrough-calibration-guide/P00-centre-{individual,mean}/comparison.json`.
+The raw capture is unchanged. The guide deliberately keeps those two analysis
+treatments separate.
+
+## Second new capture: P01-left, 2026-10-08
+
+The user completed `P01-left` in the same session, with the 40 mm-square A4
+board. All six visits synchronized and received frames. The board has visibly
+moved left relative to `P00-centre`. Passthrough view 0 detects 24 corners in
+all 16 saved images; view 1 detects 22–24. The mode-4 lower pair detects 10–22
+and 0–8 corners per individual frame; stationary averaging recovers all 24 in
+both lower cameras and both passthrough views. This is a usable second position,
+with averaging important for the darker tracking readout.
+
+Across both positions, stationary-mean exact-doubling RMS is 0.79/0.91
+passthrough pixels and affine-fit RMS is 0.43/0.51. Individual-frame-median
+results give exact doubling 0.86/0.91 and affine fit 0.44/0.60. These remain
+fitting results; the comparator requires a third usable position for
+held-position-out checks. BC4 invalid-header candidate counts are 23/15 at
+stream framing, with successful decoded images retained.
+
+Reports are under `.build/passthrough-calibration-guide/P00-P01-{individual,mean}`.
+Next capture: `P02-right`, with the board right of centre in both camera views
+and a modest change in tilt, while the headset stays fixed.
+
+## Third new capture: P02-right, 2026-10-08
+
+All six visits synchronized and received frames. Both passthrough views detect
+all 24 corners in all 16 saved images each. Averaging recovers all 24 in both
+lower tracking cameras (upper cameras: 14/24). Across P00/P01/P02, the
+stationary-mean affine fit RMS is 0.47/0.48 passthrough pixels. Leaving each
+whole position out of fitting gives RMS ranges 0.49–0.60 and 0.33–0.69 pixels
+for the matching lower-camera/view pairs. Individual-frame-median checks give
+held-position ranges 0.55–0.60 and 0.42–1.00 pixels. These support correspondence
+across the sampled positions rather than only within one fitted board plane.
+
+Exact doubling gives RMS 0.83/0.87; doubling plus a half-pixel offset gives
+0.48/0.50. This supports the pixel-centre hypothesis over the present coverage,
+without settling full-field intrinsics or camera-to-head alignment. Three
+positions remain insufficient to claim complete passthrough calibration.
+BC4 invalid-header candidate counts are 9/26, with successful saved-image
+detection. Reports: `.build/passthrough-calibration-guide/P00-P02-{individual,mean}`.
+Next: vary vertical coverage with `P03-upper`, board centred horizontally and
+raised slightly, headset fixed.
+
+## Fourth new capture: P03-upper, 2026-10-08
+
+All six visits synchronized and received frames; source remains `8dae28b60`
+with documentation-only local updates. The elevated board is visible in the
+upper image. Passthrough detections are 22–24 corners in view 0 and all 24 in
+view 1, in every saved frame; stationary averaging recovers 24 corners in all
+four mode-4 cameras and both passthrough views. Across four positions, mean
+image affine RMS is 0.48/0.49 pixels and held-position RMS spans 0.45–0.54 and
+0.33–0.68. Exact doubling RMS is 0.81/0.86, and doubling plus half a pixel is
+0.48/0.51. The added upper coverage does not degrade the correspondence.
+BC4 invalid-header candidate counts are 38/32; all saved views detect the board.
+Report: `.build/passthrough-calibration-guide/P00-P03-mean/comparison.json`.
+
+Next is lower image coverage (`P04-lower`). Put the board back on its original
+surface and, if needed, aim the headset slightly above it so the board appears
+lower in the camera image. Headset movement between separate pose roots is
+permitted for this cross-mode comparison: only the headset and scene within
+each root must stay fixed across its sequential mode visits. No SLAM alignment
+is being solved by this survey. Prefer modest pitch changes and keep the board
+fully visible to both lower cameras where possible.
+
+## Fifth new capture: P04-lower, 2026-10-08
+
+All six visits synchronized and received frames. Both passthrough views detect
+24 corners in every saved image, and the lower tracking cameras detect 18–24
+and 19–24 per individual frame. Stationary means recover all 24 in the lower
+pair and both passthrough views. The upper tracking cameras have only 6/5
+corners in their means and do not pass the eight-corner gate; that does not
+invalidate this lower-pair passthrough capture.
+
+This position adds substantial lower-image coverage and a larger board image:
+matched passthrough corners span y=398–829 and 393–825, compared with earlier
+positions ending around y=420. Across all five positions, stationary-mean
+affine RMS is 0.45/0.46 pixels; held-position RMS ranges 0.36–0.53 and 0.34–0.72.
+P04 itself is predicted with 0.36/0.64 pixel RMS when excluded from fitting.
+Exact doubling RMS is 0.80/0.83; adding a half-pixel offset gives 0.46/0.47.
+BC4 invalid-header candidate counts are 39/25; all saved passthrough images
+successfully detect the board. Report:
+`.build/passthrough-calibration-guide/P00-P04-mean/comparison.json`.
+
+Next: `P05-tilted`, with the board centred and rotated about its vertical axis
+by approximately 25–30 degrees (one side nearer the headset), keeping both
+views' corners visible. Keep the board and headset fixed during the command.
+
+## Sixth new capture: P05-tilted, 2026-10-08
+
+All six visits synchronized and received frames. Both passthrough views detect
+all 24 corners in every saved image. The lower tracking pair detects 18–24 and
+16–24 individually and 24/24 in stationary means; the upper cameras' means
+have 5/5 corners and are excluded by the eight-corner gate. This tilted view is
+usable for lower-camera correspondence.
+
+Across P00–P05, stationary-mean affine RMS is 0.42/0.44 passthrough pixels.
+Held-position RMS spans 0.19–0.53 and 0.27–0.71. P05 itself, excluded from
+fitting, gives 0.19/0.29 pixels. Exact doubling RMS is 0.79/0.81; doubling plus
+half a pixel gives 0.43/0.44. BC4 invalid-header candidate counts are 25/30;
+all decoded passthrough views detect the board. Source remains `8dae28b60`
+with documentation-only local updates. Report:
+`.build/passthrough-calibration-guide/P00-P05-mean/comparison.json`.
+
+Six useful positions give strong cross-mode evidence over their sampled area;
+they do not yet constitute full-field intrinsic calibration. Next capture:
+`P06-opposite-tilt`, rotating the board the other way at approximately the same
+distance, followed by a farther position to vary depth before reassessing
+coverage and the need for further captures.
+
+## Seventh new capture: P06-opposite-tilt, 2026-10-08
+
+All six visits synchronized and received frames. Passthrough detections are
+24 corners throughout view 0 and 22–24 in view 1. Lower tracking-camera
+individual detections are 18–24 and 19–24; stationary means recover 24 corners
+in both lower cameras and both passthrough views. Upper-camera means are 11/3,
+with the latter excluded. Source remains `8dae28b60` with documentation-only
+local updates.
+
+Across seven positions, stationary-mean affine RMS is 0.40/0.42 pixels.
+Held-position RMS ranges 0.19–0.53 and 0.26–0.71; P06 itself gives 0.23/0.28
+when excluded. Exact doubling RMS is 0.78/0.81 and doubling plus a half-pixel
+offset gives 0.40/0.42. The opposite tilt does not degrade correspondence.
+BC4 invalid-header candidate counts are 27/27; saved passthrough images detect
+the board successfully. Report:
+`.build/passthrough-calibration-guide/P00-P06-mean/comparison.json`.
+
+Next: `P07-far`, straighten the board and place it approximately 1.5–2 times
+farther away than P06, centred in the stereo views. Keep everything stationary
+throughout the command. After P07, reassess coverage and the offline solve
+rather than automatically continuing a long capture sequence.
+
+## Eighth new capture and capture-stage reassessment: P07-far, 2026-10-08
+
+All six visits synchronized and received frames. Both passthrough views detect
+24 corners in every saved image. Stationary-mean lower tracking detections are
+24/8 corners; both meet the comparator gate, but only eight right-eye IDs are
+available for cross-mode matching at this distance. Upper means are 20/12.
+Source remains `8dae28b60` with documentation-only local updates. BC4
+invalid-header candidate counts are 44/35, with all saved passthrough images
+detecting the board.
+
+Across all eight positions, mean-image affine RMS is 0.43/0.42 passthrough
+pixels; held-position RMS ranges 0.20–0.60 and 0.26–0.71. The fitted diagonal
+scales are 2.00040/1.99992 and 1.99969/1.99968. Doubling plus a half-pixel offset
+has RMS 0.44/0.43. In a 3x3 diagnostic grid the matched corners occupy six cells
+in view 0 (leftmost column missing) and eight in view 1 (bottom-right missing).
+This is strong cross-mode evidence across multiple depths/tilts, with incomplete
+full-field coverage. Report:
+`.build/passthrough-calibration-guide/P00-P07-mean/comparison.json`.
+
+Before requesting further captures, an offline check transferred the existing
+`20260926-charuco-mode4-combined-head.json` lower-camera intrinsics using
+`fx/fy *= 2`, `cx/cy = 2*cx/cy + 0.5`, retaining distortion and stereo transforms.
+It fitted only one six-parameter board pose per capture jointly against both
+cameras, using the confirmed 40 mm square size; the camera model was held fixed.
+All eight fits converged. Per-position stereo reprojection RMS is 0.32, 0.34,
+0.35, 0.39, 0.61, 0.70, 0.60 and 0.87 passthrough pixels. The far position has
+32 matched corner observations; each other position has 48. This supports
+reusing the existing lens/stereo geometry over the sampled area rather than
+refitting it from these eight captures.
+
+The scratch check and report are
+`.build/passthrough-calibration-guide/check_existing_stereo.py` and
+`existing-stereo-validation.json`. They preserve the original calibration and
+raw capture. This is an independent check of fixed camera geometry, not a new
+production calibration: the source remains `runtime_usable: false`, edge
+coverage is incomplete, and this capture does not independently validate
+camera-to-head alignment or latency. Stop this capture sequence here for now.
+The next step is a versioned transferred-calibration candidate and calibrated
+presenter UV mapping, followed by visual validation and a separate alignment/
+timing assessment. Do not request arbitrary additional poses merely to meet
+the guide's initial 15–25-position planning target.
+
+## Experimental transferred runtime mapping, 2026-10-08
+
+The presenter now accepts `XRT_MACOS_PASSTHROUGH_CALIBRATION`, an absolute path
+to `psvr2-passthrough-calibration-v1` JSON. It is opt-in and PS VR2-specific.
+Unset, unreadable or invalid files retain the previous approximate mapping;
+a supplied invalid file produces a warning. The calibrated path logs
+`Experimental calibrated passthrough` at info level.
+
+Generate a fresh candidate (the converter refuses to overwrite files):
+
+```sh
+.venv/bin/python scripts/psvr2_passthrough_calibration_transfer.py \
+  "$HOME/Code/psvr2-datasets/calibration/20260926-charuco-mode4-combined-head.json" \
+  .build/passthrough-calibration-guide/passthrough-candidate-v1.json
+```
+
+That candidate has already been generated locally. The source and captures are
+unchanged. The converter records the source SHA-256 and experimental status,
+transfers intrinsics as above, keeps all four distortion coefficients, and
+composes `head_from_camera0_xrt * camera0_from_camera_xrt` for each lower camera.
+The source's serial is null, so this candidate is unbound to a serial; use it
+only with the headset that supplied these captures. A non-null serial in a
+candidate must match the runtime device serial.
+
+The v1 file requires `projection: "rotation-only"` and two unique views, 0/1,
+each with `width: 1024`, `height: 1016`, `model: "fisheye_equidistant4"`,
+`intrinsics: {fx,fy,cx,cy}`, `distortion: {k1,k2,k3,k4}` and
+`head_from_camera_xrt: {orientation: {x,y,z,w}, position: {x,y,z}}`.
+All numbers must be finite; focal lengths are positive and quaternions unit.
+`runtime_usable: false` is retained as evidence of experimental status; the
+explicit environment setting permits testing this candidate.
+
+The presenter recovers each optical green-channel tangent ray as before,
+rotates from head to camera, converts XRT camera axes to OpenCV, and applies
+the four-coefficient fisheye model. Pixel centres become normalized Metal UVs
+with `(pixel + 0.5) / dimension`. This sampling half pixel is separate from
+the half-pixel principal-point transfer. Rays behind the camera or outside the
+image are masked. Camera/eye translations are intentionally unused at infinity;
+this does not correct nearby-object parallax or camera latency. The previous
+FOV/convergence settings affect only the approximate fallback. Brightness
+continues to apply to both paths.
+
+### Next headset check
+
+Use the rebuilt `.build/native-service-check` service and matching diagnostic.
+Stop the installed service/LaunchAgent and GAV first, using the existing local
+service procedure; only one process may claim the headset. Do not mix this
+new runtime with an older active service. In the service terminal:
+
+```sh
+cd ~/Code/monado-2
+export XRT_MACOS_PASSTHROUGH_CALIBRATION="$PWD/.build/passthrough-calibration-guide/passthrough-candidate-v1.json"
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=16 PSVR2_AUXILIARY_STREAMS=0 \
+PSVR2_SENSE_6DOF=0 \
+  .build/native-service-check/src/xrt/targets/service/monado-service
+```
+
+In a second terminal, first use service compositing:
+
+```sh
+cd ~/Code/monado-2
+XR_RUNTIME_JSON="$PWD/.build/native-service-check/openxr_monado-dev.json" \
+XRT_MACOS_CLIENT_COMPOSITOR=0 \
+  .build/native-service-check/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  --passthrough-only
+```
+
+Confirm the calibration info log before interpreting the image. Check left/right
+assignment, upright orientation, comfortable stereo and stationary board/room
+geometry first. Then exit and run the same diagnostic with `--passthrough` to
+check transparent virtual content over the cameras. For the hosted-client check,
+set `XRT_MACOS_CLIENT_COMPOSITOR=1` **and** the calibration path in the client
+terminal too: each process builds its own UV maps from the same file. Keep the
+service's camera settings above. Record the tested commit and distinguish
+stationary geometry from movement-induced lag, near-object parallax and edge
+artifacts. An unset calibration path plus a restarted presenter provides the
+approximate-map comparison.
+
+Offline validation: macOS service/runtime/diagnostic build, schema/projection
+CTest (including OpenCV fisheye reference values, coordinate signs, inverse
+rotation and invalid-file handling), and Python transfer tests. No calibrated
+hardware rendering result is claimed yet.

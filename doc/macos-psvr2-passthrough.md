@@ -92,6 +92,16 @@ XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
 Both modes use the real `XR_FB_passthrough` API. They are not private
 compositor debug switches.
 
+## Experimental calibrated projection (2026-10-08)
+
+`XRT_MACOS_PASSTHROUGH_CALIBRATION` selects a transferred, versioned calibration
+file. The presenter applies calibrated lens distortion and camera-to-head
+rotation to its optical rays. This is a rotation-only mapping at infinity;
+head alignment, edge coverage and latency still need hardware validation.
+See the [candidate and headset commands](macos-psvr2-passthrough-calibration.md#experimental-transferred-runtime-mapping-2026-10-08).
+Set the path in the service and, for client compositing, the client environment.
+Invalid files warn and use the approximate mapping. Unset keeps the default.
+
 ## Initial projection model
 
 The first implementation deliberately uses the simple model already proven by
@@ -134,8 +144,7 @@ geometrically calibrated MR camera system.
 
 Remaining work includes:
 
-- use the PS VR2 camera intrinsics/extrinsics rather than the initial tunable
-  fisheye/convergence approximation;
+- validate the opt-in transferred intrinsics/rotation mapping on hardware;
 - associate camera frames with hardware timestamps and head poses;
 - camera reprojection / late correction;
 - robust stream restart if camera delivery stalls;

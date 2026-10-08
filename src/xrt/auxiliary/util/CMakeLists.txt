@@ -93,6 +93,8 @@ add_library(
 	u_pacing_app.c
 	u_pacing_compositor.c
 	u_pacing_compositor_fake.c
+	u_passthrough_calibration.c
+	u_passthrough_calibration.h
 	u_pretty_print.c
 	u_pretty_print.h
 	u_prober.c

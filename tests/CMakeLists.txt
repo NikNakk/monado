@@ -17,6 +17,7 @@ set(tests
     tests_lowpass_float
     tests_lowpass_integer
     tests_pacing
+    tests_passthrough_calibration
     tests_quatexpmap
     tests_quat_change_of_basis
     tests_quat_swing_twist

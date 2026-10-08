@@ -17,6 +17,8 @@
 #include "main/comp_window_macos_trace_buffer.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
+#include "util/u_file.h"
+#include "util/u_passthrough_calibration.h"
 #include "util/u_timing_trace.h"
 #include "util/u_frame_share.h"
 #include "util/u_handles.h"
@@ -848,6 +850,25 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 		return false;
 	}
 
+	struct u_passthrough_calibration calibration = {0};
+	bool calibrated = false;
+	const char *calibration_path = getenv("XRT_MACOS_PASSTHROUGH_CALIBRATION");
+	if (calibration_path != NULL && calibration_path[0] != '\0') {
+		char *json = u_file_read_content_from_path(calibration_path, NULL);
+		calibrated =
+		    xdev->name == XRT_DEVICE_PSVR2 && u_passthrough_calibration_parse(json, xdev->serial, &calibration);
+		free(json);
+		if (calibrated) {
+			COMP_INFO(cwm->base.base.c, "Experimental calibrated passthrough: %s (rotation only)",
+			          calibration_path);
+		} else {
+			COMP_WARN(cwm->base.base.c,
+			          "Invalid/unreadable passthrough calibration or headset mismatch: %s; using "
+			          "approximate mapping",
+			          calibration_path);
+		}
+	}
+
 	const float fx = 0.3585564f;
 	const float fy = 0.3762281f;
 	const float camera_width_ratio = 1016.0f / 1024.0f;
@@ -895,6 +916,21 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 				 * equidistant camera model. */
 				float tan_x = (distortion.g.x - cx) / fx;
 				float tan_y_down = (distortion.g.y - 0.5f) / fy;
+				if (calibrated) {
+					/* PS VR2 view orientations are identity relative to the head.
+					 * At infinity, eye/camera translations do not affect the ray. */
+					struct xrt_vec3 head_ray = {tan_x, -tan_y_down, -1.0f};
+					struct xrt_vec2 uv;
+					if (u_passthrough_calibration_project(&calibration.cameras[eye], &head_ray,
+					                                      &uv)) {
+						map[index + 0] = uv.x;
+						map[index + 1] = uv.y;
+					} else {
+						map[index + 0] = -1.0f;
+						map[index + 1] = -1.0f;
+					}
+					continue;
+				}
 				float len = sqrtf(tan_x * tan_x + tan_y_down * tan_y_down + 1.0f);
 				float dir_x = tan_x / len;
 				float dir_y = -tan_y_down / len;
