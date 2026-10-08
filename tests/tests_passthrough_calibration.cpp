@@ -26,6 +26,8 @@ TEST_CASE("Passthrough schema rejects mismatches and malformed geometry atomical
 	struct u_passthrough_calibration cal = {};
 	const auto json = candidate();
 	REQUIRE(u_passthrough_calibration_parse(json.c_str(), "test", &cal));
+	REQUIRE(u_passthrough_calibration_parse_default(json.c_str(), "test", &cal));
+	REQUIRE_FALSE(u_passthrough_calibration_parse_default(json.c_str(), "other", &cal));
 	REQUIRE_FALSE(u_passthrough_calibration_parse(json.c_str(), "other", &cal));
 	REQUIRE_FALSE(u_passthrough_calibration_parse(nullptr, "test", &cal));
 	for (const char *key : {"format", "projection", "headset_serial", "view", "width", "height", "model", "fx",
@@ -38,6 +40,7 @@ TEST_CASE("Passthrough schema rejects mismatches and malformed geometry atomical
 	auto unbound = json;
 	unbound.replace(unbound.find("\"test\""), 6, "null");
 	REQUIRE(u_passthrough_calibration_parse(unbound.c_str(), "other", &cal));
+	REQUIRE_FALSE(u_passthrough_calibration_parse_default(unbound.c_str(), "other", &cal));
 	auto duplicate = json;
 	duplicate.replace(duplicate.find("\"view\":1"), 8, "\"view\":0");
 	REQUIRE_FALSE(u_passthrough_calibration_parse(duplicate.c_str(), "test", &cal));

@@ -52,7 +52,12 @@ The inventory counts below remain the historical audit snapshot.
 
 `XRT_MACOS_PASSTHROUGH_CALIBRATION` (unset by default) selects an experimental
 `psvr2-passthrough-calibration-v1` JSON file for the macOS PS VR2 presenter.
-Set an absolute path in the service and in clients using in-process compositing.
+Set an absolute path in the service and in clients using in-process compositing
+to override automatic selection. When unset, both presenters look for
+`~/Library/Application Support/monado/psvr2/passthrough.json`. Automatic selection
+requires a non-null `headset_serial` matching the current headset's PCB serial.
+An explicitly empty value disables calibration lookup for an approximate-mapping
+comparison. A missing default file silently retains approximate mapping.
 A valid file replaces approximate FOV/convergence with calibrated fisheye lens
 projection and camera-to-head rotation, at infinity. Brightness still applies.
 An invalid/unreadable file or supplied serial mismatch warns and falls back.
@@ -63,14 +68,16 @@ remain opt-in. See the [calibration guide](macos-psvr2-passthrough-calibration.m
 
 ## Passthrough rotational reprojection (2026-10-08)
 
-`XRT_MACOS_PASSTHROUGH_ROTATION` (default `0`) opts the macOS presenter into
-camera rotational reprojection. It requires a valid
-`XRT_MACOS_PASSTHROUGH_CALIBRATION`. Set it in the service for service compositing
-and in the client for hosted compositing. The camera header's mapped timestamp
+`XRT_MACOS_PASSTHROUGH_ROTATION` (default `1`) enables the macOS presenter's
+camera rotational reprojection when a valid calibration is loaded, either
+automatically or through `XRT_MACOS_PASSTHROUGH_CALIBRATION`. Set it to `0`
+in the service for service compositing or in the client for hosted compositing
+to disable correction. The camera header's mapped timestamp
 selects a capture orientation; the camera rays rotate to the same predicted
 head orientation used for the virtual scene's timewarp. Missing/stale timing
 or tracking retains static mapping. Translation is deferred. The CPU and
-headless Metal tests pass; headset validation is pending. See the
+headless Metal tests pass; the user confirmed hosted camera/virtual alignment
+during yaw, pitch and roll on 2026-10-08. See the
 [implementation and launchd test](macos-psvr2-passthrough-calibration.md#opt-in-camera-rotational-reprojection-2026-10-08).
 
 ## Automatic floor calibration (2026-10-06)

@@ -651,8 +651,9 @@ plane. Disabling virtual-scene ATW is not the intended fix.
 
 The user explicitly scoped the next change to rotation; translation is deferred.
 `XRT_MACOS_PASSTHROUGH_ROTATION=1` now enables camera rotational reprojection
-when a valid transferred calibration is loaded. It is off by default pending a
-hardware result. The static calibration file and its positive visual results
+when a valid transferred calibration is loaded. Following the hosted hardware
+confirmation below, rotation correction is enabled by default; set the toggle
+to `0` for a static-mapping comparison. The static calibration file and its positive visual results
 remain applicable.
 
 On macOS the BC4 driver preserves the camera header timestamp mapped through
@@ -696,7 +697,7 @@ invalid poses and stale/invalid timestamps; existing BC4 frame-share timestamp
 round trip and IPC/hosted-session tests. The shared production Metal shader
 compiles and its headless GPU test passes 4,380 assertions against CPU fisheye
 projection across 2,178 rays/rotations on the local GPU. That test skips when
-no Metal device is available. No headset rotation result is claimed yet.
+no Metal device is available. The subsequent headset result is recorded below.
 
 ### First rotation check through launchd
 
@@ -724,6 +725,11 @@ in the wrong direction. The stationary geometry should remain as before.
 
 After the service-composited result, repeat with hosted compositing:
 
+The client must receive both passthrough settings explicitly: environment
+variables supplied to the launchd service do not configure the client presenter.
+In the client output, verify `Experimental calibrated passthrough` and then
+`Passthrough rotation active` before assessing alignment and motion.
+
 ```sh
 XR_RUNTIME_JSON="$PWD/.build/native-service-check/openxr_monado-dev.json" \
 XRT_MACOS_CLIENT_COMPOSITOR=1 XRT_MACOS_PASSTHROUGH_ROTATION=1 \
@@ -736,3 +742,53 @@ For an A/B comparison, use `XRT_MACOS_PASSTHROUGH_ROTATION=0` in the process
 that composites (refresh the launchd job for service compositing). Keep the
 calibration file identical. Restore the persistent registration using the
 commands above when finished.
+
+### Hosted configuration mismatch reported — 2026-10-08
+
+With the rotation implementation at `3d6f136e5`, the user reported that camera
+pitch, yaw and roll felt consistently wrong with client compositing, whereas
+service compositing looked correct. The supplied client command set only
+`XR_RUNTIME_JSON` and `XRT_MACOS_CLIENT_COMPOSITOR=1`; it omitted both the
+calibration path and rotation opt-in. Its output contained the approximate
+FOV/convergence attachment log and no calibrated-mapping acceptance log.
+This run therefore compared different mappings and cannot establish a hosted
+coordinate or reprojection defect. After repeating with the explicit client
+settings above, the user reported “Yes that's much better”. This confirms
+subjective improvement with calibrated, rotation-enabled hosted compositing.
+The user then explicitly confirmed that virtual details stay aligned with the
+camera during gentle yaw, pitch and roll. This is a positive subjective hardware
+result for rotation-only alignment with client compositing at `3d6f136e5`, using
+the transferred calibration and rotation opt-in. It does not quantify residual
+alignment error or latency; translation remains deferred.
+
+### Saved headset default — 2026-10-08
+
+At the user's request, rotation correction now defaults on when a valid
+calibration is available. Both service and hosted client presenters automatically
+load `psvr2/passthrough.json` from Monado's user config directory when
+`XRT_MACOS_PASSTHROUGH_CALIBRATION` is unset. On macOS this is
+`~/Library/Application Support/monado/psvr2/passthrough.json`.
+Automatic selection requires a non-null serial matching the current headset;
+missing files retain the approximate mapping, while invalid files or serial
+mismatches warn and fall back. Explicit paths retain precedence, including the
+experimental unbound-file support. An explicitly empty override disables lookup.
+
+The tested candidate was copied to this local config path, with camera values
+unchanged and its serial bound to the headset's PCB ID read from firmware report
+`0x81`. The original candidate and source calibration remain intact. The local
+calibration is not committed to the repository. No calibration or rotation
+environment variables are needed for this headset in either compositor mode.
+Camera stream opt-in and application passthrough activation remain necessary.
+
+### Default configuration confirmed — 2026-10-09
+
+The user confirmed the follow-up defaults check: blended client compositing
+works without explicit calibration or rotation environment variables. This
+tests the default-selection changes in the working tree based on `3d6f136e5`
+(the defaults changes are not yet committed), with the saved serial-bound
+calibration above.
+
+The user also reports that latency now feels fine with rotational timewarp.
+The earlier subjective lag concern is therefore no longer an immediate blocker.
+Formal camera-age, exposure/display timing and latency measurements remain a
+later follow-up; no measured latency value is claimed. Translation stays deferred.

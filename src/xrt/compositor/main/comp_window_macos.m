@@ -121,7 +121,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_refresh_rate_hz, "XRT_MACOS_REFRESH_RATE_HZ", 0)
 // Vblank timing source: "ca" (default, macOS 14+) or "cv" (legacy fallback).
 DEBUG_GET_ONCE_OPTION(macos_display_link, "XRT_MACOS_DISPLAY_LINK", "ca")
-DEBUG_GET_ONCE_BOOL_OPTION(macos_passthrough_rotation, "XRT_MACOS_PASSTHROUGH_ROTATION", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_passthrough_rotation, "XRT_MACOS_PASSTHROUGH_ROTATION", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASSTHROUGH_BRIGHTNESS_PERCENT", 160)
@@ -864,15 +864,25 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 	struct u_passthrough_calibration calibration = {0};
 	bool calibrated = false;
 	const char *calibration_path = getenv("XRT_MACOS_PASSTHROUGH_CALIBRATION");
+	bool automatic = calibration_path == NULL;
+	char default_path[4096] = {0};
+	if (automatic && xdev->name == XRT_DEVICE_PSVR2) {
+		int size = u_file_get_path_in_config_dir("psvr2/passthrough.json", default_path, sizeof(default_path));
+		if (size > 0 && (size_t)size < sizeof(default_path)) {
+			calibration_path = default_path;
+		}
+	}
 	if (calibration_path != NULL && calibration_path[0] != '\0') {
 		char *json = u_file_read_content_from_path(calibration_path, NULL);
-		calibrated =
-		    xdev->name == XRT_DEVICE_PSVR2 && u_passthrough_calibration_parse(json, xdev->serial, &calibration);
+		calibrated = xdev->name == XRT_DEVICE_PSVR2 &&
+		             (automatic ? u_passthrough_calibration_parse_default(json, xdev->serial, &calibration)
+		                        : u_passthrough_calibration_parse(json, xdev->serial, &calibration));
+		bool report_failure = !automatic || json != NULL;
 		free(json);
 		if (calibrated) {
 			COMP_INFO(cwm->base.base.c, "Experimental calibrated passthrough: %s (rotation only)",
 			          calibration_path);
-		} else {
+		} else if (report_failure) {
 			COMP_WARN(cwm->base.base.c,
 			          "Invalid/unreadable passthrough calibration or headset mismatch: %s; using "
 			          "approximate mapping",
@@ -882,7 +892,7 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 
 	cwm->passthrough_calibration = calibration;
 	cwm->passthrough_rotation_enabled = calibrated && debug_get_bool_option_macos_passthrough_rotation();
-	if (debug_get_bool_option_macos_passthrough_rotation() && !calibrated) {
+	if (debug_get_bool_option_macos_passthrough_rotation() && !calibrated && !automatic) {
 		COMP_WARN(cwm->base.base.c,
 		          "Passthrough rotation requires a valid calibrated mapping; using static view");
 	}

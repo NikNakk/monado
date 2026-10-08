@@ -25,6 +25,10 @@ struct u_passthrough_calibration
 bool
 u_passthrough_calibration_parse(const char *json, const char *serial, struct u_passthrough_calibration *out);
 
+//! Automatically selected files must bind to the current headset serial.
+bool
+u_passthrough_calibration_parse_default(const char *json, const char *serial, struct u_passthrough_calibration *out);
+
 //! Project a head-space XRT direction at infinity. False means outside the image or invalid.
 bool
 u_passthrough_calibration_project(const struct u_passthrough_camera *camera,
