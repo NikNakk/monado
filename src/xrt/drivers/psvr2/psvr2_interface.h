@@ -128,6 +128,14 @@ bool
 psvr2_set_camera_frame_sinks(struct xrt_device *xdev, struct xrt_frame_sink *const sinks[4]);
 
 /*!
+ * Register a function run at the start of the headset's destroy, before anything of the headset is torn down. The
+ * headset is destroyed before the other system devices, so the hook can stop a pipeline that uses the headset and the
+ * controllers (the Sense optical tracker) while all of them still exist.
+ */
+bool
+psvr2_set_teardown_hook(struct xrt_device *xdev, void (*hook)(void *data), void *data);
+
+/*!
  * Probing function for PlayStation VR2 devices.
  *
  * @ingroup drv_psvr2

@@ -20,6 +20,7 @@
 #include "os/os_time.h"
 #include "pssense/pssense_interface.h"
 #include "psvr2/psvr2_interface.h"
+#include "target_psvr2_sense_tracking.h"
 #include "util/u_debug.h"
 #include "util/u_file.h"
 #include "util/u_git_tag.h"
@@ -46,40 +47,6 @@ DEBUG_GET_ONCE_NUM_OPTION(psvr2_constellation_capture_stride, "PSVR2_CONSTELLATI
  * it every camera pose is fixed, so controller poses are head-relative and resting controllers "move" when the head does.
  */
 DEBUG_GET_ONCE_BOOL_OPTION(psvr2_constellation_world, "PSVR2_CONSTELLATION_WORLD", false)
-
-//! Tracking origin for the camera mosaic: the head pose at the requested time, times camera 0 in the head frame.
-struct head_tracking_origin
-{
-	struct t_constellation_tracker_tracking_source base;
-	struct xrt_device *head;
-	struct xrt_pose head_from_camera0;
-	//! Receives the head pose and its SLAM provenance for each query, when recording a dataset.
-	struct t_constellation_tracker *tracker;
-};
-
-static void
-head_tracking_origin_get(struct t_constellation_tracker_tracking_source *source,
-                         int64_t when_ns,
-                         struct xrt_space_relation *out_relation)
-{
-	struct head_tracking_origin *origin = (struct head_tracking_origin *)source;
-	struct xrt_space_relation head = XRT_SPACE_RELATION_ZERO;
-	// Taken before the query, so a SLAM pose arriving meanwhile cannot make the recorded source look newer.
-	struct psvr2_slam_timing slam = {0};
-	bool have_slam = psvr2_get_slam_timing(origin->head, &slam) && slam.valid;
-	if (xrt_device_get_tracked_pose(origin->head, XRT_INPUT_GENERIC_HEAD_POSE, when_ns, &head) != XRT_SUCCESS) {
-		*out_relation = (struct xrt_space_relation)XRT_SPACE_RELATION_ZERO;
-		return;
-	}
-	*out_relation = head;
-	math_pose_transform(&head.pose, &origin->head_from_camera0, &out_relation->pose);
-
-	if (origin->tracker != NULL) {
-		int64_t source_ns = have_slam ? slam.slam_monotonic_ns : 0;
-		uint32_t flags = have_slam && when_ns <= source_ns ? T_CONSTELLATION_HEAD_POSE_INTERPOLATED : 0;
-		t_constellation_tracker_record_head_pose(origin->tracker, when_ns, &head, source_ns, flags);
-	}
-}
 
 //! Every PSVR2_*, PSSENSE_* and CONSTELLATION_* environment variable, the settings a session depends on.
 static void
@@ -360,99 +327,6 @@ destroy_system(struct xrt_instance **xi,
 	xrt_instance_destroy(xi);
 }
 
-static bool
-get_number(const cJSON *object, const char *name, double *out_value)
-{
-	return object != NULL && u_json_get_double(u_json_get(object, name), out_value);
-}
-
-static bool
-load_camera(const cJSON *json, struct t_constellation_tracker_camera *out_camera)
-{
-	const cJSON *calibration = u_json_get(json, "calibration");
-	const cJSON *resolution = u_json_get(calibration, "resolution");
-	const cJSON *intrinsics = u_json_get(calibration, "intrinsics");
-	const cJSON *distortion = u_json_get(calibration, "distortion");
-	const cJSON *pose = u_json_get(json, "pose_in_tracking_origin_xrt");
-	char model[64] = {0};
-	int width = 0;
-	int height = 0;
-	double fx = 0.0, fy = 0.0, cx = 0.0, cy = 0.0;
-	double k[4] = {0};
-
-	bool good = u_json_get_string_into_array(u_json_get(calibration, "model"), model, sizeof(model));
-	good = good && strcmp(model, "fisheye_equidistant4") == 0;
-	good = good && u_json_get_int(u_json_get(resolution, "width"), &width);
-	good = good && u_json_get_int(u_json_get(resolution, "height"), &height);
-	good = good && width == 512 && height == 508;
-	good = good && get_number(intrinsics, "fx", &fx) && get_number(intrinsics, "fy", &fy);
-	good = good && get_number(intrinsics, "cx", &cx) && get_number(intrinsics, "cy", &cy);
-	good = good && get_number(distortion, "k1", &k[0]) && get_number(distortion, "k2", &k[1]);
-	good = good && get_number(distortion, "k3", &k[2]) && get_number(distortion, "k4", &k[3]);
-	good = good && fx > 0.0 && fy > 0.0 && u_json_get_pose(pose, &out_camera->pose_in_origin);
-	if (!good) {
-		return false;
-	}
-
-	out_camera->calibration.image_size_pixels = (struct xrt_size){(uint32_t)width, (uint32_t)height};
-	out_camera->calibration.intrinsics[0][0] = fx;
-	out_camera->calibration.intrinsics[0][2] = cx;
-	out_camera->calibration.intrinsics[1][1] = fy;
-	out_camera->calibration.intrinsics[1][2] = cy;
-	out_camera->calibration.intrinsics[2][2] = 1.0;
-	out_camera->calibration.kb4 = (struct t_camera_calibration_kb4_params){k[0], k[1], k[2], k[3]};
-	out_camera->calibration.distortion_model = T_DISTORTION_FISHEYE_KB4;
-	out_camera->has_concrete_pose = true;
-	return true;
-}
-
-static bool
-load_calibration(const char *path,
-                 struct t_constellation_tracker_params *out_params,
-                 struct xrt_pose *out_head_from_camera0,
-                 bool *out_have_head_from_camera0)
-{
-	char *contents = u_file_read_content_from_path(path, NULL);
-	if (contents == NULL) {
-		fprintf(stderr, "Could not read calibration '%s'.\n", path);
-		return false;
-	}
-	cJSON *root = cJSON_Parse(contents);
-	free(contents);
-	if (root == NULL) {
-		fprintf(stderr, "Could not parse calibration '%s'.\n", path);
-		return false;
-	}
-
-	char format[64] = {0};
-	const cJSON *cameras = u_json_get(root, "cameras");
-	bool good = u_json_get_string_into_array(u_json_get(root, "format"), format, sizeof(format));
-	good = good && strcmp(format, "psvr2-mode4-constellation-calibration-v1") == 0;
-	good = good && cJSON_IsArray(cameras) && cJSON_GetArraySize(cameras) == 4;
-	bool seen[4] = {false};
-	for (int index = 0; good && index < 4; index++) {
-		const cJSON *camera = cJSON_GetArrayItem(cameras, index);
-		int camera_index = -1;
-		good = u_json_get_int(u_json_get(camera, "camera"), &camera_index);
-		good = good && camera_index >= 0 && camera_index < 4 && !seen[camera_index];
-		if (good) {
-			seen[camera_index] = true;
-			good = load_camera(camera, &out_params->mosaics[0].cameras[camera_index]);
-		}
-	}
-	*out_head_from_camera0 = (struct xrt_pose)XRT_POSE_IDENTITY;
-	*out_have_head_from_camera0 =
-	    good && u_json_get_pose(u_json_get(root, "head_from_camera0_xrt"), out_head_from_camera0);
-	cJSON_Delete(root);
-	if (!good) {
-		fprintf(stderr, "Calibration is not a valid four-camera provisional mode-4 artifact.\n");
-		return false;
-	}
-	out_params->num_mosaics = 1;
-	out_params->mosaics[0].num_cameras = 4;
-	return true;
-}
-
 static void
 print_relation(const char *hand, struct xrt_device *controller, int64_t now_ns, bool *out_saw_position)
 {
@@ -495,9 +369,11 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 	}
 
 	struct t_constellation_tracker_params params = {0};
-	struct head_tracking_origin head_origin = {.base.get_tracked_pose = head_tracking_origin_get};
+	struct psvr2_head_tracking_origin head_origin;
+	psvr2_head_tracking_origin_init(&head_origin, NULL);
 	bool have_head_from_camera0 = false;
-	if (!load_calibration(argv[2], &params, &head_origin.head_from_camera0, &have_head_from_camera0)) {
+	if (!psvr2_constellation_load_calibration(argv[2], &params, &head_origin.head_from_camera0,
+	                                          &have_head_from_camera0)) {
 		return EXIT_FAILURE;
 	}
 	fprintf(stderr, "WARNING: using a provisional calibration for an opt-in diagnostic only.\n");
