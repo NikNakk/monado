@@ -8,8 +8,8 @@ SPDX-License-Identifier: BSL-1.0
 
 Updated 2026-10-08. Eight user-operated ChArUco captures support the transferred
 lens/stereo calibration, and the user now confirms the service-composited
-camera-only image looks good. Perceived motion lag remains; blended-scene and
-hosted-client validation are separate outstanding checks. The dated evidence
+camera-only and blended-scene images look good with service compositing.
+Perceived motion lag remains; hosted-client validation is outstanding. The dated evidence
 below preserves the capture, implementation and failed-startup history.
 
 ## Tooling audit and existing evidence
@@ -593,3 +593,19 @@ BC4 exposure timestamps/pose association before adding late rotational camera
 reprojection. Arrival age alone cannot measure exposure-to-display latency;
 near-object translational parallax still requires depth or a reference plane.
 Do not request more board captures merely because this timing issue remains.
+
+
+## Calibrated blended scene visually confirmed, 2026-10-08
+
+Following the camera-only confirmation, the user ran the same service-composited
+diagnostic with `--passthrough` and reported “Works well.” The tested rendering
+code remains `c0c24f1a0`; `c1557c661` only updated documentation. This confirms
+visible virtual content over the calibrated cameras through the standard
+`XR_FB_passthrough` layer path, in addition to camera-only output. The earlier
+subjective lag observation remains open; this result does not measure latency.
+
+The next independent hardware gate is hosted/client-side compositing: keep the
+service camera settings and supply `XRT_MACOS_CLIENT_COMPOSITOR=1` and the same
+absolute calibration path in the diagnostic's environment. Check both camera
+visibility and virtual content. No Unity/Unreal/Wine passthrough result or
+full-field metric calibration is implied by these native diagnostic runs.

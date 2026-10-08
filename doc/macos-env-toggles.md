@@ -56,8 +56,8 @@ Set an absolute path in the service and in clients using in-process compositing.
 A valid file replaces approximate FOV/convergence with calibrated fisheye lens
 projection and camera-to-head rotation, at infinity. Brightness still applies.
 An invalid/unreadable file or supplied serial mismatch warns and falls back.
-The user visually confirmed camera-only service compositing on 2026-10-08;
-perceived lag remains. Blended/hosted paths need separate checks. Camera streams
+The user visually confirmed camera-only and blended-scene service compositing
+on 2026-10-08; perceived lag remains. The hosted path needs a separate check. Camera streams
 remain opt-in. See the [calibration guide](macos-psvr2-passthrough-calibration.md#experimental-transferred-runtime-mapping-2026-10-08).
 
 ## Automatic floor calibration (2026-10-06)
