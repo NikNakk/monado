@@ -446,3 +446,27 @@ includes:
 - Metal swapchain transport across vanilla, direct and service/XPC paths;
 - compositor use of the matching dense map;
 - the end-to-end diagnostic build.
+
+## Framework and Wine validation plan, 2026-10-08
+
+Native diagnostic validation is complete enough to move to a real framework.
+Use Unity/OpenBrush or Unreal, starting with fixed FB foveation before adding
+META eye tracking. The engine must consume `XR_MNDX_foveation_metal`, attach the
+returned Metal rate map to the actual scene render pass and render in compact
+physical coordinates. Merely enabling the extensions or changing a profile
+does not prove reduced rendering work.
+
+Compare off/fixed/eye-tracked runs of the same scene and workload. Verify both
+eyes, packed or array layouts, map revision/image association, gaze alignment,
+visual quality, GPU frame time and physical pixel count. Keep depth disabled
+until the documented compact-depth restrictions are resolved. Start through
+the service, then repeat with client-hosted compositing and Game Mode.
+
+Wine support is a feasibility task in `macos-wine-xr` plus the selected graphics
+translator. D3D applications cannot directly use a borrowed Objective-C Metal
+rate-map object. The bridge/translator needs a supported rendering mechanism
+that preserves the runtime's map and compact coordinates; extension forwarding
+alone does not deliver foveation. Audit D3DMetal/DXMT capabilities and engine
+hooks before choosing an implementation. A Vulkan client would likewise need
+a real Vulkan foveation backend, which is not implemented here. Prove a fixed
+map on one Wine-rendered scene before adding gaze and game compatibility.

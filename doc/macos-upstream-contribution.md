@@ -8,8 +8,12 @@ SPDX-License-Identifier: BSL-1.0
 This integration branch combines hardware, platform, IPC, compositor and
 experimental OpenXR work. Submit independently buildable review units against
 upstream, with optional features disabled by default. The current sync base is
-`045931d12`; update the base in `scripts/check-contribution-style.py` when the
+`ec188bb13`; update the base in `scripts/check-contribution-style.py` when the
 next upstream sync is reviewed.
+
+Upstream submissions are paused as of 2026-10-08 while the first merge request
+awaits merge and the contributor learns the review process. Local integration,
+CI and evidence maintenance continue; the review units below are future work.
 
 ## Review units
 
@@ -178,3 +182,15 @@ the OpenVR `.pacing_flags = 0` initializer. Only the external proxy sets the bit
 the native OpenXR host uses ordinary `xrWaitFrame` pacing. Upstream already offers
 the global `U_PACING_APP_USE_MIN_FRAME_PERIOD` option. Prepare the upstream slice
 without these additions rather than changing proxy pacing in this branch.
+
+## Integration cleanup checks, 2026-10-08
+
+Before publishing the October 7 upstream sync, the local check used the CI-pinned
+clang-format 23.1.1, cmakelang 0.6.13, codespell 2.4.1 and REUSE 6.2.0. The style
+base is now `ec188bb13`, the merged upstream tip, so upstream-only edits are
+not misclassified as fork formatting changes. All 300 changed C/C++/Objective-C
+files and 29 CMake files pass without source reformatting. Spelling and diff
+whitespace checks also pass. REUSE passes after adding the missing license
+header to the floor-calibration note. The existing `.build/native-service-check`
+macOS build succeeds without compiler warnings. Linux and macOS CI results for
+the published revision remain to be checked; hardware runs remain user-owned.

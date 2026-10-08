@@ -46,21 +46,17 @@ work remain separate.
 This document is the high-level status and roadmap for the experimental Monado
 port to Apple Silicon macOS, with PS VR2 as the primary headset.
 
-**Status date:** 2026-09-30
+**Status date:** 2026-10-08
 
 **Current integration branch:** `macos-upstream-clean`
 
-**PS Sense 6DoF integration, 2026-10-04:** the joint multi-camera solver, EKF,
-LED bootstrap and calibration/session tools are integrated from `~/Code/monado`.
-The optimized runtime matches source recorded-session replay byte for byte.
-The user now confirms **OpenBrush works and they could paint in 3D**, the first
-non-test application validation. Left-controller tracking still drops more than
-desired. The earlier left input-thread failure is corrected, and the normal
-on-demand local service is loaded with Sense enabled. The separate persistent
-IR-always-on/status-LED-off fault remains unresolved; trial A reproduced it
-without a rescan or phase probe after acquisition. Linux warning fixes and
-explicit Rift isolation pass local checks; corrected Linux CI and broader
-hardware validation remain pending. See the
+**PS Sense 6DoF integration, updated 2026-10-08:** the joint multi-camera
+solver, EKF, LED bootstrap and calibration/session tools are integrated.
+OpenBrush 3D painting is confirmed. The user has also exercised the combined
+quick-lock, headset-detector and reconnect defaults in games for 10–20 minutes.
+The revised LED profile and oriented reacquisition improved tracking and
+avoided lockouts in the recorded successful sessions. Keep 6DoF opt-in while
+broader reliability and Linux CI validation continue. See the
 [integration and application evidence](macos-pssense-6dof-integration.md).
 
 Display-pacing benefits from optimisation remain to be measured independently.
@@ -79,9 +75,9 @@ work, plus the `standards/*` branches for `XR_KHR_generic_controller` and
 development continues separately, with an experimental opt-in runtime port
 now available here for hardware validation.
 
-Game Mode work (client-side compositing, below) is on
-`claude/game-mode-priority-issue-xkx6m7`, which builds on the integration
-branch and has not been merged into it yet.
+Client-side compositing originated on `claude/game-mode-priority-issue-xkx6m7`
+and is present on the current integration branch. Multi-client handoff and
+teardown still need hardware validation.
 
 This is development work, not an upstream-supported or packaged Monado target.
 
@@ -101,7 +97,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Swift OpenXR wrapper | **Working** | SwiftXR provides the native Swift-facing layer used by shell experiments. |
 | Swift VR home/shell | **Working experimental shell** | SwiftXRShell provides launcher/home, immersive video, desktop/panel support and system-overlay experiments. |
 | PS Sense 3DoF, buttons and haptics | **Working experimental** | Native IOKit HID discovery/input is present on the integration branch. Sense also maps to `XR_KHR_generic_controller` (opt-in, `XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC`). |
-| PS Sense optical 6DoF | **Integrated, experimental opt-in** | Joint tracker + EKF; user-confirmed 3D painting in OpenBrush. Left tracking dropouts and persistent LED lockout remain. See the [launch procedure](macos-pssense-6dof-integration.md#build-and-run-the-opt-in-openxr-trial). |
+| PS Sense optical 6DoF | **Integrated, experimental opt-in** | Joint tracker + EKF; user-confirmed 3D painting in OpenBrush. Revised defaults validated in 10–20 minute game sessions; broader reliability checks remain. See the [launch procedure](macos-pssense-6dof-integration.md#build-and-run-the-opt-in-openxr-trial). |
 | Depth layers | **Off by default** | `XR_KHR_composition_layer_depth` is not exposed on macOS unless configured with `-DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON`; depth-aware reprojection additionally needs `XRT_COMPOSITOR_DEPTH_REPROJECTION=1`. Depth swapchain formats (including `Depth32Float_Stencil8`) are still creatable. |
 | Wine OpenXR / OpenVR | **External compatibility project** | Wine/OpenVR integration has moved to [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr); Monado retains only generic macOS/Metal runtime and resource-handoff support. |
 | SteamVR games under Wine | **External experimental path** | Game compatibility and launch policy are tracked in [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr) and the relevant OpenVR compatibility projects. |
@@ -602,8 +598,10 @@ than a Monado runtime target. Recreating Valve's compositor is not a goal.
    - add projected passthrough, style controls and depth-aware occlusion.
 
 3. **Eye tracking and foveation**
-   - hardware-validate gaze accuracy and the fixed FB and eye-tracked META
-     foveation paths;
+   - broaden gaze-accuracy validation; fixed FB and eye-tracked META foveation
+     already have native diagnostic hardware evidence;
+   - validate actual foveated rendering in Unity or Unreal, then investigate
+     Wine graphics-backend support;
    - add a foveation backend for non-Metal clients (for example
      `XR_FB_foveation_vulkan`);
    - validate lazy/private gaze activation and lifetime;
@@ -629,7 +627,7 @@ than a Monado runtime target. Recreating Valve's compositor is not a goal.
    - finish client-side compositing: hardware-validate handoff between hosted
      clients, pause hidden presenters, handle overlays, Wine and Chromium, then
      make it the default;
-   - move pose queries to a shared-memory ring;
+   - validate the existing opt-in shared tracking path more broadly;
    - continue reducing pacing sensitivity and late-frame artefacts;
    - harden depth reprojection;
    - verify hot-plug, display-mode changes, sleep/wake and long sessions;
@@ -667,11 +665,11 @@ than a Monado runtime target. Recreating Valve's compositor is not a goal.
 Use these as the current mental model rather than assuming every experimental
 branch is an alternative complete port:
 
-- **`macos-wine-openvr-legacy-unity`** — current integration branch and source
-  of truth for the broad macOS runtime.
-- **`claude/game-mode-priority-issue-xkx6m7`** — client-side compositing for
-  Game Mode, on top of the integration branch; to be merged into it once
-  handoff is validated on hardware.
+- **`macos-upstream-clean`** — current integration branch and source of truth
+  for the broad macOS runtime. `macos-wine-openvr-legacy-unity` is an older target.
+- **`claude/game-mode-priority-issue-xkx6m7`** — client-side compositing
+  development history; the implementation is integrated, with multi-client
+  handoff still awaiting hardware validation.
 - **`macos-pssense-6dof`** / **`claude/pssense-mr2940-evaluation`** — Sense
   optical development and evaluation history. The latest joint + EKF path is
   now ported here for opt-in hardware testing; default enablement remains gated.
@@ -855,3 +853,20 @@ ratchet. Capture now acknowledges flushes before UE teardown and checks source
 health before measurement. Static lifecycle checks pass; the next moving-head
 capture is prepared. See the
 [investigation and capture command](macos-psvr2-timing-diagnostics.md#completed-frame-presentation-investigation--2026-10-03).
+
+## Current plan, 2026-10-08
+
+- Controller integration has sustained game use; do not repeat the completed
+  combined-default smoke test as a prerequisite. Preserve the opt-in gate.
+- Continue presentation-stall diagnosis and hosted-client handoff/teardown work.
+- Check fork formatting with CI-pinned clang-format and cmakelang, update this
+  roadmap, and publish the integration branch for Linux/macOS CI after the
+  October 7 upstream merge. Hardware regression of that merge remains separate.
+- Establish visible PS VR2 camera-only and camera-plus-scene passthrough before
+  claiming blended application validation. Calibrate the actual passthrough
+  camera mode; see the [validation and calibration plan](macos-psvr2-passthrough.md#validation-and-calibration-plan-2026-10-08).
+- Validate fixed then eye-tracked foveation in Unity or Unreal; Wine requires
+  rendering-backend work as well as extension transport. See the
+  [framework plan](macos-openxr-foveation.md#framework-and-wine-validation-plan-2026-10-08).
+- Upstream submissions are paused pending the first MR's merge and a clearer
+  understanding of the process. Continue local quality and CI work.
