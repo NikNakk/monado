@@ -541,3 +541,26 @@ head without cameras produces an explicit error instead of a misleading black
 camera view. Before repeating the hardware run, re-run the launchd bootstrap
 command above and confirm the service selects `PS VR2`, not `Simulated HMD`.
 A calibrated hardware result remains pending.
+
+## Second runtime attempt exposed IPC capability reporting, 2026-10-08
+
+With both hardware drivers enabled, the user received the diagnostic's explicit
+`runtime system has no passthrough camera support` error. The service log now
+selected `PS VR2 HMD`, accepted the transferred file (`Experimental calibrated
+passthrough`) and reported `PS VR2 BC4 passthrough attached`. This fixes the
+previous simulated-HMD selection, but does not establish visible camera output.
+
+The service's shared-memory camera-availability flag was propagated to an IPC
+head device's `set_passthrough_sinks` hook only inside local-compositor
+preparation. With `XRT_MACOS_CLIENT_COMPOSITOR=0`, OpenXR's system capability
+query therefore returned false despite the service's attached camera source.
+The IPC head now installs that hook at device creation whenever the service
+publishes camera availability. Both service and hosted compositing can report
+the capability before session creation. The frame-share consumer remains lazy,
+so reporting support does not itself attach sinks or start a consumer thread.
+The diagnostic capability check remains active. Linux behaviour is unchanged.
+
+The hardware-enabled macOS build and existing passthrough/frame-share/hosted-
+client/session CTests pass after the fix. Re-run the same launchd bootstrap and
+camera-only diagnostic commands above with the rebuilt binaries; the actual
+calibrated image and motion remain unvalidated.

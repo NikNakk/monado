@@ -544,8 +544,10 @@ client's environment. Without it, clients take exactly the old service path.
   to consumers is opened read-only and mapped with `PROT_READ`. Consumers
   cannot use that descriptor to mutate the frame-share layout, truncate the
   object, or create a writable shared mapping. The shared memory's
-  `passthrough_share_available` says whether the service has camera frames. If so, a hosted client's IPC head device gains
-  `set_passthrough_sinks`: it maps the share and a thread pushes new frames
+  `passthrough_share_available` says whether the service has an attached camera
+  source. The IPC head device gains `set_passthrough_sinks` at device creation,
+  so OpenXR reports the capability before session creation for both service and
+  hosted compositing (corrected 2026-10-08). When a hosted compositor attaches sinks, it maps the share and a thread pushes new frames
   into the client compositor's sinks, polling every 2 ms, so the existing
   Metal passthrough code runs unchanged. The UV maps come from the
   distortion grid above. Requires `PSVR2_CAMERA_STREAMS=1` for the service,
