@@ -1835,3 +1835,42 @@ case is unchanged. Hardware validation is pending: the next session should
 log `event=release` and then a quick hinted relock after the controllers have been put
 down and picked up again.
 
+### Rings that stay dark after the controllers are put down, 2026-10-08
+
+**Field failure.** SteamVR Home (`steamvr-crossover/run-mwxr-20261008-082935`, build
+`5f456920d`). The user put both controllers down at about 27 s (gyro stillness from
+27 to 130 s), then picked them up and used them. Neither relocked until it was
+power-cycled at 162 s; the left then quick-locked at once at the same hint. The
+same happened again from 359 s: after 445 s the controllers were moving, yet in
+the remaining 4.5 minutes no scan saw a lit frame.
+
+- This is not a search problem. Between 37 and 160 s there were eight full
+  hinted scans and dozens of quick checks with no lit frame on either
+  controller, and the same after 455 s. Our LED commands went out as usual
+  (PRESCAN at period 9 and 32).
+- The clock-hold release (`5f456920d`) fired on each loss as intended, and in
+  `234635` it relocked a lost right in 0.9 s. It cannot help a ring that is
+  not lit.
+- As the controllers went still, the arrival of both controllers' input
+  reports slowed together by about 19 ms over 70 s and stayed there until the
+  power cycle (best `remote − local` per 10 s: −2.4 ms at 30 s, −10 ms at
+  40 s, −17 ms at 60 s, −19 ms from 90 s). That looks like the controllers'
+  Bluetooth power saving. Two independent clocks cannot shift in step.
+- CLI sessions with controllers resting for one or two minutes never showed
+  this, so the trigger is not stillness alone.
+
+**Diagnostics and opt-in recovery** (build `build-hw` on this branch):
+
+- `MOTION side=… event=moving|still`, from the bias-corrected IMU: moving above
+  20°/s or 1.5 m/s² from 1 g, still after 3 s below.
+- `PSSENSE_RTT` every 5 s with `PSSENSE_TIMING_DIAG=1`: the round trip of our
+  host timestamp, which the controller echoes in its input reports.
+- `PSSENSE_LED_SOFT_RESET=1`: a controller that has locked before, is moving,
+  and has had no optical pose for 10 s gets the LED side of a fresh
+  connection. The bootstrap restarts behind a dark baseline, the LED sequence
+  restarts at 0, and the latch and BROAD state are cleared. At most once per
+  20 s. Logs `LED_WAKE event=soft_reset`.
+- `PSSENSE_LED_SONY_FLAGS=1`: send `flag2` as Sony's driver does on the wire,
+  bit 1 always and bit 4 while locked. Both bits are undocumented and we have
+  always sent 0.
+- The CLI's session limit is raised from 120 s to 900 s, for put-down tests.

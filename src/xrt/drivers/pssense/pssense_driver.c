@@ -88,6 +88,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_future_led_schedule,
                            "PSSENSE_FUTURE_LED_SCHEDULE",
                            PSSENSE_FUTURE_LED_SCHEDULE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_timing_diag, "PSSENSE_TIMING_DIAG", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_soft_reset, "PSSENSE_LED_SOFT_RESET", false)
+DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_sony_flags, "PSSENSE_LED_SONY_FLAGS", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_period_id, "PSSENSE_LED_PERIOD_ID", -1)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_timing_fudge_100us, "PSSENSE_TIMING_FUDGE_100US", LONG_MIN)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap, "PSSENSE_LED_BOOTSTRAP", false)
@@ -591,6 +593,20 @@ struct pssense_device
 
 		bool increment_sequence_num;
 		uint8_t led_sequence_num;
+		/*!
+		 * Motion from the bias-corrected IMU (MOTION log): moving while any recent sample exceeded the motion
+		 * thresholds, still after 3 s without one. Host times.
+		 */
+		bool motion_moving;
+		timepoint_ns motion_last_ns;
+		//! PSSENSE_LED_SOFT_RESET: last reset (host time) and the count.
+		timepoint_ns led_soft_reset_ns;
+		uint32_t led_soft_resets;
+		//! PSSENSE_TIMING_DIAG: round trips of our host timestamp, echoed in input reports (PSSENSE_RTT).
+		uint32_t rtt_last_echo_us;
+		uint32_t rtt_count;
+		int32_t rtt_us[256];
+		timepoint_ns rtt_window_ns;
 		//! Bumped whenever the LED schedule's content changes (new bootstrap output or sync sample).
 		uint32_t led_content_generation;
 		//! PSSENSE_LED_LATCH_INTERVAL_MS: the last latched schedule's content generation and host time.
@@ -1110,6 +1126,27 @@ pssense_update_fusion(struct pssense_device *pssense)
 		gyro.z -= pssense->tracking.gyro_bias.bias.z;
 	}
 
+	// Motion state (MOTION): in a hand the gyro or the accelerometer's departure from 1 g exceeds these within
+	// seconds; resting on a surface they stay far below.
+	{
+		const float gyro_norm = m_vec3_len(gyro);
+		const float accel_dev = fabsf(m_vec3_len(accel) - (float)MATH_GRAVITY_M_S2);
+		const timepoint_ns now_ns = os_monotonic_get_ns();
+		if (gyro_norm > 0.35f || accel_dev > 1.5f) {
+			pssense->tracking.motion_last_ns = now_ns;
+			if (!pssense->tracking.motion_moving) {
+				pssense->tracking.motion_moving = true;
+				PSSENSE_INFO(pssense, "MOTION side=%c event=moving gyro_deg_s=%.1f accel_dev=%.2f",
+				             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', gyro_norm * 57.2958f,
+				             accel_dev);
+			}
+		} else if (pssense->tracking.motion_moving &&
+		           now_ns - pssense->tracking.motion_last_ns > 3 * (int64_t)U_TIME_1S_IN_NS) {
+			pssense->tracking.motion_moving = false;
+			PSSENSE_INFO(pssense, "MOTION side=%c event=still", pssense->hand == XRT_HAND_LEFT ? 'L' : 'R');
+		}
+	}
+
 	m_imu_3dof_update(&pssense->tracking.fusion, pssense->timing.latest_imu_time_ns, &accel, &gyro);
 	pssense->tracking.pose.orientation = pssense->tracking.fusion.rot;
 
@@ -1309,6 +1346,42 @@ pssense_handle_packet(struct pssense_device *pssense,
 
 	// Mark the LED sync refinement sample as applied
 	uint32_t latest_host_send_time = __le32_to_cpu(data->host_timestamp);
+
+	/*
+	 * PSSENSE_TIMING_DIAG: the report echoes the host timestamp of the last output report the controller took
+	 * in. The first input carrying a new one bounds the round trip (downlink, controller, uplink, report
+	 * interval); a slower Bluetooth link raises it.
+	 */
+	if (debug_get_bool_option_pssense_timing_diag() && latest_host_send_time != 0 &&
+	    latest_host_send_time != pssense->tracking.rtt_last_echo_us) {
+		pssense->tracking.rtt_last_echo_us = latest_host_send_time;
+		int32_t rtt = (int32_t)((uint32_t)(recv_time_ns / U_TIME_1US_IN_NS) - latest_host_send_time);
+		if (rtt >= 0 && rtt < 1000000 && pssense->tracking.rtt_count < ARRAY_SIZE(pssense->tracking.rtt_us)) {
+			pssense->tracking.rtt_us[pssense->tracking.rtt_count++] = rtt;
+		}
+		if (pssense->tracking.rtt_window_ns == 0) {
+			pssense->tracking.rtt_window_ns = recv_time_ns;
+		} else if (recv_time_ns - pssense->tracking.rtt_window_ns >= 5 * (int64_t)U_TIME_1S_IN_NS) {
+			uint32_t n = pssense->tracking.rtt_count;
+			if (n > 0) {
+				int32_t *v = pssense->tracking.rtt_us;
+				for (uint32_t i = 1; i < n; i++) { // insertion sort, n <= 256
+					int32_t x = v[i];
+					uint32_t j = i;
+					for (; j > 0 && v[j - 1] > x; j--) {
+						v[j] = v[j - 1];
+					}
+					v[j] = x;
+				}
+				PSSENSE_INFO(
+				    pssense, "PSSENSE_RTT side=%c n=%u min_ms=%.2f p50_ms=%.2f p95_ms=%.2f moving=%u",
+				    pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', n, v[0] / 1000.0, v[n / 2] / 1000.0,
+				    v[n * 95 / 100] / 1000.0, pssense->tracking.motion_moving ? 1u : 0u);
+			}
+			pssense->tracking.rtt_count = 0;
+			pssense->tracking.rtt_window_ns = recv_time_ns;
+		}
+	}
 	if (latest_host_send_time != pssense->timing.last_sent_host_timestamp_us &&
 	    pssense->tracking.led_sync_sample_needs_marking) {
 		t_led_sync_mark_latest_sample_applied(&pssense->tracking.led_sync_refinement, recv_time_ns);
@@ -1470,6 +1543,18 @@ pssense_set_output_report_settings_locked(struct pssense_device *pssense,
                                           bool do_vibration,
                                           uint64_t now_ns)
 {
+	/*
+	 * PSSENSE_LED_SONY_FLAGS (experimental): flag2 as Sony's driver sends it on the wire: bit 1 always, bit 4
+	 * while tracking (here: while the LED schedule is locked). Both bits are otherwise undocumented; on 8 Oct
+	 * controllers put down for a minute stopped lighting their rings until power-cycled under our flag2 0.
+	 */
+	if (debug_get_bool_option_pssense_led_sony_flags()) {
+		settings->flag2 |= PSSENSE_OUTPUT_SETTINGS_FLAG2_UNK1;
+		if (pssense->tracking.led_bootstrap.state == T_LED_PHASE_BOOTSTRAP_LOCKED) {
+			settings->flag2 |= PSSENSE_OUTPUT_SETTINGS_FLAG2_UNK4;
+		}
+	}
+
 	if (now_ns >= pssense->output.vibration_end_timestamp_ns) {
 		pssense->output.vibration_amplitude = 0;
 	}
@@ -2499,6 +2584,33 @@ pssense_led_bootstrap_update_locked(struct pssense_device *pssense, int64_t expo
 {
 	struct t_led_phase_bootstrap *b = &pssense->tracking.led_bootstrap;
 	const int32_t me = pssense_led_bootstrap_token(pssense);
+
+	/*
+	 * PSSENSE_LED_SOFT_RESET (experimental): on 8 Oct both controllers, put down for a minute, stopped lighting
+	 * their rings and stayed dark after being picked up, through minutes of scans, until power-cycled. A
+	 * controller that has locked before, is in a hand (moving) and has had no optical pose for 10 s gets the LED
+	 * side of a fresh connection: the schedule restarted from sequence 0 behind a dark baseline.
+	 */
+	if (debug_get_bool_option_pssense_led_soft_reset() && b->locks_acquired > 0 &&
+	    b->state != T_LED_PHASE_BOOTSTRAP_LOCKED && pssense->tracking.motion_moving &&
+	    exposure_timestamp_ns - pssense->tracking.last_optical_timestamp_ns > 10 * (int64_t)U_TIME_1S_IN_NS &&
+	    exposure_timestamp_ns - pssense->tracking.led_soft_reset_ns > 20 * (int64_t)U_TIME_1S_IN_NS) {
+		pssense->tracking.led_soft_reset_ns = exposure_timestamp_ns;
+		pssense->tracking.led_soft_resets++;
+		PSSENSE_WARN(pssense, "LED_WAKE side=%c event=soft_reset count=%u dark_s=%.1f",
+		             pssense->hand == XRT_HAND_LEFT ? 'L' : 'R', pssense->tracking.led_soft_resets,
+		             (double)(exposure_timestamp_ns - pssense->tracking.last_optical_timestamp_ns) / 1e9);
+		t_led_phase_bootstrap_stop(b);
+		pssense_led_bootstrap_release(pssense, 0);
+		pssense->tracking.led_sequence_num = 0;
+		pssense->tracking.led_latched = false;
+		pssense->tracking.led_broad_active = false;
+		pssense->tracking.led_broad_anchors = 0;
+		pssense->tracking.led_content_generation++;
+		pssense->tracking.led_bootstrap_programmed_generation = UINT32_MAX;
+		pssense->tracking.led_sync_sample_needs_sending = true;
+	}
+
 	int32_t owner = xrt_atomic_s32_cmpxchg(&pssense_led_bootstrap_owner, 0, 0);
 
 	if (owner != 0 && owner != me) {
