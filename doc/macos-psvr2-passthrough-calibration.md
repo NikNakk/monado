@@ -451,6 +451,19 @@ continues to apply to both paths.
 ### Next headset check
 
 Use the rebuilt `.build/native-service-check` service and matching diagnostic.
+This build directory previously had PS VR2 and Sense drivers disabled; a
+successful software build alone was not a headset-ready build. Configure and
+check the hardware drivers before using it:
+
+```sh
+cmake -S . -B .build/native-service-check \
+  -DXRT_BUILD_DRIVER_PSVR2=ON -DXRT_BUILD_DRIVER_PSSENSE=ON
+cmake --build .build/native-service-check --parallel 8
+rg '^XRT_BUILD_DRIVER_(PSVR2|PSSENSE):BOOL=' .build/native-service-check/CMakeCache.txt
+```
+
+Both cache values must be `ON`. The configuration and build have now been
+corrected locally after the first unsuccessful test described below.
 Close XR clients and GAV first; only one process may claim the headset.
 Use launchd for the direct Metal XPC endpoint, rather than starting
 `monado-service` in the foreground. The development helper below unloads the
@@ -507,3 +520,24 @@ Offline validation: macOS service/runtime/diagnostic build, schema/projection
 CTest (including OpenCV fisheye reference values, coordinate signs, inverse
 rotation and invalid-file handling), and Python transfer tests. No calibrated
 hardware rendering result is claimed yet.
+
+
+## First runtime attempt selected a simulated HMD, 2026-10-08
+
+At `1f7186287`, the user reported black passthrough, badly distorted normal
+rendering and no head tracking using the development launchd registration.
+The loaded job pointed at `.build/native-service-check`, with camera mode 16
+and the candidate path correctly supplied. Both hardware drivers were `OFF`
+in that build's CMake cache. The service log selected `Simulated HMD`, while
+the macOS presenter still selected the attached physical PS VR2 display, and
+logged `PS VR2 passthrough unavailable: the head device has no camera source here`.
+This run did not exercise PS VR2 tracking, optical distortion or the calibrated
+camera mapping; it is not evidence against the transferred calibration.
+
+The software-check build has now been reconfigured with both hardware drivers
+`ON` and rebuilt. The native diagnostic now checks the system's reported
+passthrough capability before creating a passthrough session, so a simulated
+head without cameras produces an explicit error instead of a misleading black
+camera view. Before repeating the hardware run, re-run the launchd bootstrap
+command above and confirm the service selects `PS VR2`, not `Simulated HMD`.
+A calibrated hardware result remains pending.

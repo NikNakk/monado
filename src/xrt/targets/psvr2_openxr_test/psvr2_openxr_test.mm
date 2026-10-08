@@ -1192,6 +1192,8 @@ create_system_and_session(application &app)
 	    xr_struct<XrSystemEyeGazeInteractionPropertiesEXT>(XR_TYPE_SYSTEM_EYE_GAZE_INTERACTION_PROPERTIES_EXT);
 	XrSystemFoveationEyeTrackedPropertiesMETA eye_foveation_properties =
 	    xr_struct<XrSystemFoveationEyeTrackedPropertiesMETA>(XR_TYPE_SYSTEM_FOVEATION_EYE_TRACKED_PROPERTIES_META);
+	XrSystemPassthroughPropertiesFB passthrough_properties =
+	    xr_struct<XrSystemPassthroughPropertiesFB>(XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES_FB);
 	XrSystemProperties properties = xr_struct<XrSystemProperties>(XR_TYPE_SYSTEM_PROPERTIES);
 	if (app.standard_eye_foveation) {
 		properties.next = &eye_foveation_properties;
@@ -1199,8 +1201,17 @@ create_system_and_session(application &app)
 	} else if (app.test_gaze) {
 		properties.next = &gaze_properties;
 	}
+	if (app.submit_passthrough) {
+		passthrough_properties.next = properties.next;
+		properties.next = &passthrough_properties;
+	}
 	check_xr(app.xr.get_system_properties(app.instance, app.system_id, &properties), "xrGetSystemProperties");
 	fprintf(stderr, "psvr2-openxr-test: system %s\n", properties.systemName);
+	if (app.submit_passthrough && passthrough_properties.supportsPassthrough != XR_TRUE) {
+		fatal(
+		    "runtime system has no passthrough camera support; check the selected HMD and enable the PS VR2 "
+		    "driver/camera streams");
+	}
 	if (app.test_gaze) {
 		app.gaze_supported = gaze_properties.supportsEyeGazeInteraction == XR_TRUE;
 		fprintf(stderr, "psvr2-openxr-test: eye gaze interaction %s\n",
