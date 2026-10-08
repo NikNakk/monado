@@ -424,10 +424,6 @@ ipc_client_hmd_prepare_for_local_compositor(struct xrt_device *xdev)
 
 #ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
 	ipc_client_tracking_share_create(ich);
-	// Passthrough, if the service's compositor has camera frames to share.
-	if (ism->hmd.passthrough_share_available != 0) {
-		xdev->set_passthrough_sinks = ipc_client_hmd_set_passthrough_sinks;
-	}
 #endif
 
 	// Replace the placeholder mesh with the service device's distortion.
@@ -646,6 +642,16 @@ ipc_client_hmd_create(struct ipc_connection *ipc_c,
 	ich->base.get_visibility_mask = ipc_client_hmd_get_visibility_mask;
 	ich->base.get_brightness = ipc_client_hmd_get_brightness;
 	ich->base.set_brightness = ipc_client_hmd_set_brightness;
+
+#ifdef XRT_IPC_MACOS_HOSTED_COMPOSITOR
+	/* OpenXR queries camera capability before creating a session, including
+	 * when compositing stays in the service. Publish the hook at device
+	 * creation, independently of local-compositor preparation. The camera
+	 * share consumer is allocated lazily when sinks are actually attached. */
+	if (ism->hmd.passthrough_share_available != 0) {
+		ich->base.set_passthrough_sinks = ipc_client_hmd_set_passthrough_sinks;
+	}
+#endif
 
 	// Setup blend-modes.
 	ich->base.hmd->blend_mode_count = ipc_c->ism->hmd.blend_mode_count;
