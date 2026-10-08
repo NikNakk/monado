@@ -870,3 +870,9 @@ capture is prepared. See the
   [framework plan](macos-openxr-foveation.md#framework-and-wine-validation-plan-2026-10-08).
 - Upstream submissions are paused pending the first MR's merge and a clearer
   understanding of the process. Continue local quality and CI work.
+
+Passthrough calibration now has a [live USB capture guide](macos-psvr2-passthrough-calibration.md)
+and the previously uncommitted mode-4/BC4 comparison tooling from the separate
+Sense checkout. The three-position cross-mode evidence supports approximately
+2x lower-camera correspondence; full-field calibration and runtime loading
+remain work (2026-10-08).

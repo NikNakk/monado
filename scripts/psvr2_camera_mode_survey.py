@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
 import struct
 import sys
 import time
+import threading
 from collections import defaultdict
 from pathlib import Path
 
@@ -55,13 +57,15 @@ EXPECTED_CAMERA_SETS = {
     3: {0, 3},
     4: {4, 5},
     12: {8, 9},
+    16: {11},
 }
 CAMERA_MODE_SYNC_TIMEOUT_S = 3.0
 
 
-def set_camera_mode(dev, mode: int) -> None:
+def set_camera_mode(dev, mode: int, out_dir: Path | None = None) -> None:
     payload = struct.pack("<HHI", REPORT_SET_CAMERA_MODE, CAMERA_SUBCMD, 8)
     payload += struct.pack("<II", 1, mode)
+    started = time.monotonic_ns()
     written = dev.ctrl_transfer(
         CAMERA_CTRL_REQUEST_TYPE,
         CAMERA_CTRL_REQUEST,
@@ -70,6 +74,12 @@ def set_camera_mode(dev, mode: int) -> None:
         payload,
         timeout=500,
     )
+    if out_dir is not None:
+        with (out_dir / "actions.jsonl").open("a") as log:
+            log.write(json.dumps(dict(event="camera_mode", mode=mode, start_monotonic_ns=started,
+                                      end_monotonic_ns=time.monotonic_ns(), host_realtime_ns=time.time_ns(),
+                                      request_type=CAMERA_CTRL_REQUEST_TYPE, request=CAMERA_CTRL_REQUEST,
+                                      value=REPORT_SET_CAMERA_MODE, index=0, data_hex=payload.hex(), written=written)) + "\n")
     if written != len(payload):
         raise RuntimeError(f"short camera-mode control write: {written}/{len(payload)}")
 
@@ -179,6 +189,117 @@ def write_pgm(path: Path, width: int, height: int, pixels: bytes | bytearray) ->
         f.write(pixels)
 
 
+def decode_bc4_unorm(payload: bytes, width: int, height: int) -> bytes:
+    """Public RGTC1/BC4 layout: two endpoints and sixteen little-endian 3-bit indices.
+
+    Khronos Data Format Specification 1.4, RGTC. Output is unamplified L8,
+    rounded to nearest DN. This function says nothing about camera identity.
+    """
+    if width <= 0 or height <= 0 or len(payload) != ((width + 3) // 4) * ((height + 3) // 4) * 8:
+        raise ValueError("BC4 payload does not match dimensions")
+    if width * height > 4096:
+        # Avoid Python per-texel work perturbing USB receipt on full-size mode 0x10.
+        import numpy as np
+        blocks = np.frombuffer(payload, dtype=np.uint8).reshape(-1, 8)
+        a, b = blocks[:, 0].astype(np.uint16), blocks[:, 1].astype(np.uint16)
+        table = np.empty((len(blocks), 8), dtype=np.uint16)
+        table[:, 0], table[:, 1] = a, b
+        for i in range(2, 8):
+            seven = ((8 - i) * a + (i - 1) * b + 3) // 7
+            five = ((6 - i) * a + (i - 1) * b + 2) // 5 if i < 6 else (0 if i == 6 else 255)
+            table[:, i] = np.where(a > b, seven, five)
+        packed = np.zeros(len(blocks), dtype=np.uint64)
+        for i in range(6):
+            packed |= blocks[:, i + 2].astype(np.uint64) << (8 * i)
+        indices = ((packed[:, None] >> (np.arange(16, dtype=np.uint64) * 3)) & 7).astype(np.intp)
+        texels = np.take_along_axis(table, indices, axis=1).astype(np.uint8)
+        raster = texels.reshape((height + 3) // 4, (width + 3) // 4, 4, 4).transpose(0, 2, 1, 3)
+        return raster.reshape(((height + 3) // 4) * 4, ((width + 3) // 4) * 4)[:height, :width].tobytes()
+    pixels = bytearray(width * height)
+    offset = 0
+    for by in range(0, height, 4):
+        for bx in range(0, width, 4):
+            a, b = payload[offset:offset + 2]
+            if a > b:
+                palette = [a, b] + [((7 - i) * a + i * b + 3) // 7 for i in range(1, 7)]
+            else:
+                palette = [a, b] + [((5 - i) * a + i * b + 2) // 5 for i in range(1, 5)] + [0, 255]
+            indices = int.from_bytes(payload[offset + 2:offset + 8], "little")
+            for y in range(4):
+                for x in range(4):
+                    if bx + x < width and by + y < height:
+                        pixels[(by + y) * width + bx + x] = palette[(indices >> (3 * (4 * y + x))) & 7]
+            offset += 8
+    return bytes(pixels)
+
+
+def decode_bc4_views(packet: bytes, header: dict, prefix: Path, layout: str) -> tuple[list[str], str]:
+    """Explicit candidate packing; never infer packing or physical views from byte count alone."""
+    width, height = int(header["image_width"]), int(header["image_height"])
+    payload = packet[USB_CAM_HEADER_SIZE:]
+    if layout == "sbs":
+        raster = decode_bc4_unorm(payload, width * 2, height)
+        views = [b"".join(raster[y * width * 2 + p * width:y * width * 2 + (p + 1) * width]
+                          for y in range(height)) for p in range(2)]
+    elif layout == "stacked":
+        raster = decode_bc4_unorm(payload, width, height * 2)
+        views = [raster[p * width * height:(p + 1) * width * height] for p in range(2)]
+    elif layout == "planar":
+        size = ((width + 3) // 4) * ((height + 3) // 4) * 8
+        if len(payload) != size * 2:
+            raise ValueError("two-view BC4 payload does not match dimensions")
+        views = [decode_bc4_unorm(payload[p * size:(p + 1) * size], width, height) for p in range(2)]
+    else:
+        raise ValueError("BC4 layout must be sbs, stacked or planar")
+    paths = []
+    for p, pixels in enumerate(views):
+        path = Path(f"{prefix}-plane{p}.pgm")
+        write_pgm(path, width, height, pixels)
+        paths.append(path.name)
+    return paths, f"bc4_unorm_{layout}_candidate"
+
+
+def compact_decoded_images(directory: Path, names: list[str]) -> list[str]:
+    from PIL import Image
+    result = []
+    for name in names:
+        source = directory / name
+        destination = source.with_suffix(".png")
+        with Image.open(source) as im:
+            if im.mode != "L":
+                raise ValueError("compact diagnostic requires unmodified L8")
+            im.save(destination, compress_level=1)
+        source.unlink()
+        result.append(destination.name)
+    return result
+
+
+class IF8Recorder:
+    """Save every IF8/0x89 read verbatim. Read boundaries are not asserted packet boundaries."""
+
+    def __init__(self, dev, out: Path):
+        self.dev, self.out = dev, out
+        self.stop = threading.Event()
+        self.error = None
+        self.thread = threading.Thread(target=self.run, daemon=True)
+
+    def run(self):
+        try:
+            with (self.out / "if8.bin").open("wb") as raw, (self.out / "if8.csv").open("w", newline="") as meta:
+                writer = csv.writer(meta)
+                writer.writerow(["host_monotonic_ns", "host_realtime_ns", "offset", "length"])
+                while not self.stop.is_set():
+                    try:
+                        data = bytes(self.dev.read(0x89, 36944, timeout=100))
+                    except usb.core.USBTimeoutError:
+                        continue
+                    writer.writerow([time.monotonic_ns(), time.time_ns(), raw.tell(), len(data)])
+                    raw.write(data)
+                    meta.flush()
+        except Exception as exc:
+            self.error = str(exc)
+
+
 def decode_l8(packet: bytes, header: dict[str, int | bool], out_prefix: Path) -> tuple[list[str], str | None]:
     """Decode layouts demonstrated by captures, otherwise only safe planar L8.
 
@@ -252,10 +373,12 @@ def survey_mode(
     max_examples: int,
     save_every: int = 1,
     visit_index: int | None = None,
+    bc4_layout: str | None = None,
+    compact_examples: bool = False,
 ) -> dict:
     visit_text = f" visit {visit_index}" if visit_index is not None else ""
     print(f"mode 0x{mode:02x}{visit_text}: selecting", flush=True)
-    set_camera_mode(dev, mode)
+    set_camera_mode(dev, mode, out_dir)
     drain(dev, settle_s)
 
     expected_camera_sets = EXPECTED_CAMERA_SETS.get(mode)
@@ -323,9 +446,15 @@ def survey_mode(
                 stem = out_dir / (
                     f"{visit_prefix}mode-{mode:02x}-size-{len(packet)}-set-{camera_set}-example-{example_no}"
                 )
-                raw_path = Path(f"{stem}.bin")
-                raw_path.write_bytes(packet)
-                image_names, layout = decode_l8(packet, header, stem)
+                raw_path = Path(f"{stem}.bin.gz" if compact_examples else f"{stem}.bin")
+                raw_path.write_bytes(gzip.compress(packet, compresslevel=1, mtime=0) if compact_examples else packet)
+                if mode == 16:
+                    # Mode 0x10 is compressed: never fall through to planar L8.
+                    image_names, layout = decode_bc4_views(packet, header, stem, bc4_layout) if bc4_layout else ([], None)
+                else:
+                    image_names, layout = decode_l8(packet, header, stem)
+                if compact_examples:
+                    image_names = compact_decoded_images(out_dir, image_names)
                 row["raw_file"] = raw_path.name
                 row["decoded_files"] = ";".join(image_names)
                 decoded.extend(image_names)
@@ -454,6 +583,9 @@ def main() -> int:
     parser.add_argument("--modes", default="1-16", help="normal survey, e.g. 1-16 or 1,2,3,4,12")
     parser.add_argument("--sequence", help="ordered mode visits preserving duplicates, e.g. 3,12,3")
     parser.add_argument("--repeat", type=int, default=1, help="repeat --sequence this many times")
+    parser.add_argument("--bc4-layout", choices=["sbs", "stacked", "planar"], help="explicit candidate mode-0x10 packing; verify with raw packet/reference")
+    parser.add_argument("--raw-if8", action="store_true", help="also claim IF8 and save every 0x89 read verbatim")
+    parser.add_argument("--compact-examples", action="store_true", help="lossless raw .bin.gz and decoded L8 PNG; same frame selection")
     args = parser.parse_args()
 
     if usb is None:
@@ -475,7 +607,12 @@ def main() -> int:
         base_sequence = None
         modes = parse_mode_list(args.modes)
 
+    args.output_dir = args.output_dir.expanduser().resolve()
+    if args.output_dir == Path("/private/tmp") or Path("/private/tmp") in args.output_dir.parents:
+        raise SystemExit("refusing to record under /tmp")
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    if any(args.output_dir.iterdir()):
+        raise SystemExit("output directory must be empty (avoid overwriting a recording)")
     dev = usb.core.find(idVendor=PSVR2_VID, idProduct=PSVR2_PID)
     if dev is None:
         raise SystemExit("PS VR2 USB device not found")
@@ -485,6 +622,8 @@ def main() -> int:
         print("Capture plan: " + " -> ".join(f"0x{mode:02x}" for mode in modes), flush=True)
 
     claimed = False
+    if8_claimed = False
+    if8 = None
     summaries: list[dict] = []
     try:
         try:
@@ -493,6 +632,11 @@ def main() -> int:
             pass
         usb.util.claim_interface(dev, CAMERA_INTERFACE)
         claimed = True
+        if args.raw_if8:
+            usb.util.claim_interface(dev, 8)
+            if8_claimed = True
+            if8 = IF8Recorder(dev, args.output_dir)
+            if8.thread.start()
         try:
             dev.set_interface_altsetting(interface=CAMERA_INTERFACE, alternate_setting=0)
         except usb.core.USBError:
@@ -511,6 +655,8 @@ def main() -> int:
                         args.examples,
                         args.save_every,
                         visit_index=preserved_visit,
+                        bc4_layout=args.bc4_layout,
+                        compact_examples=args.compact_examples,
                     )
                 )
             except Exception as exc:
@@ -519,8 +665,13 @@ def main() -> int:
                     {"mode": mode, "visit_index": preserved_visit, "error": str(exc), "packet_count": 0, "packet_types": []}
                 )
     finally:
+        if if8 is not None:
+            if8.stop.set()
+            if8.thread.join()
+        if if8_claimed:
+            usb.util.release_interface(dev, 8)
         try:
-            set_camera_mode(dev, 0)
+            set_camera_mode(dev, 0, args.output_dir)
         except Exception:
             pass
         if claimed:
@@ -545,6 +696,10 @@ def main() -> int:
         "sample_s": args.sample,
         "examples_per_packet_type": args.examples,
         "save_every_per_packet_type": args.save_every,
+        "bc4_layout_candidate": args.bc4_layout,
+        "compact_examples": args.compact_examples,
+        "if8_requested": args.raw_if8,
+        "if8_error": if8.error if if8 else None,
         "modes": summaries,
         "contact_sheet": contact_sheet,
         "notes": [
@@ -562,7 +717,7 @@ def main() -> int:
         print(f"wrote {args.output_dir / contact_sheet}")
     else:
         print(f"no contact sheet generated ({contact_sheet_error})")
-    return 0
+    return 1 if any(s.get("error") or not s.get("packet_count") for s in summaries) or (if8 and if8.error) else 0
 
 
 if __name__ == "__main__":

@@ -191,3 +191,7 @@ Recommended calibration sequence:
 Keep calibration per headset and versioned, and retain the current approximate
 path as an explicitly experimental fallback until the calibrated path passes
 stationary and moving-head checks.
+
+The [step-by-step ChArUco capture guide](macos-psvr2-passthrough-calibration.md)
+includes the tooling audit, existing mode-4/0x10 correspondence evidence, live
+USB-session commands, and the remaining solve/runtime work (2026-10-08).
