@@ -5,12 +5,13 @@
 import struct
 import sys
 import unittest
+import tempfile
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from psvr2_camera_mode_survey import CameraPacketFramer, parse_vi_header  # noqa: E402
+from psvr2_camera_mode_survey import CameraPacketFramer, parse_vi_header, decode_bc4_unorm, compact_decoded_images, write_pgm  # noqa: E402
 from psvr2_tracking_mask_analyze import (  # noqa: E402
     centroid_match_fraction,
     classify_led_blink_semantics,
@@ -41,6 +42,46 @@ def camera_packet(size, sequence, camera_set=8, width=4, height=3):
 
 
 class CameraPacketFramerTests(unittest.TestCase):
+    def test_lossless_png_preserves_every_original_dn(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            pixels = bytes(range(256)) * 16
+            write_pgm(directory / 'frame.pgm', 64, 64, pixels)
+            names = compact_decoded_images(directory, ['frame.pgm'])
+            self.assertEqual(names, ['frame.png'])
+            with Image.open(directory / names[0]) as image:
+                self.assertEqual(image.mode, 'L')
+                self.assertEqual(image.tobytes(), pixels)
+
+    def test_full_size_decoder_matches_scalar_blocks_with_partial_edges(self):
+        width, height = 101, 53
+        blocks = []
+        expected = np.zeros((56, 104), dtype=np.uint8)
+        for by in range(14):
+            for bx in range(26):
+                a, b = (210, 0) if (bx + by) % 2 else (0, 200)
+                indices = sum(((i + bx + by) % 8) << (3 * i) for i in range(16))
+                block = bytes([a, b]) + indices.to_bytes(6, "little")
+                blocks.append(block)
+                expected[by * 4:by * 4 + 4, bx * 4:bx * 4 + 4] = np.frombuffer(
+                    decode_bc4_unorm(block, 4, 4), dtype=np.uint8).reshape(4, 4)
+        self.assertEqual(decode_bc4_unorm(b"".join(blocks), width, height),
+                         expected[:height, :width].tobytes())
+
+    def test_bc4_indices_are_texels_not_eight_camera_lanes(self):
+        indices = sum((i % 8) << (3 * i) for i in range(16))
+        block = bytes([210, 0]) + indices.to_bytes(6, "little")
+        self.assertEqual(list(decode_bc4_unorm(block, 4, 4)), [210, 0, 180, 150, 120, 90, 60, 30] * 2)
+
+    def test_bc4_six_value_palette_and_partial_block(self):
+        indices = sum((i % 8) << (3 * i) for i in range(16))
+        block = bytes([0, 200]) + indices.to_bytes(6, "little")
+        self.assertEqual(list(decode_bc4_unorm(block, 4, 4)), [0, 200, 40, 80, 120, 160, 0, 255] * 2)
+        self.assertEqual(list(decode_bc4_unorm(block, 3, 2)), [0, 200, 40, 120, 160, 0])
+        with self.assertRaises(ValueError):
+            decode_bc4_unorm(block[:-1], 4, 4)
+
     def test_mask_segment_assignment_excludes_transition_edges(self):
         segments = [{"start_monotonic_ns": "1000", "end_monotonic_ns": "2000", "label": "bit_00"}]
         self.assertIsNone(segment_for_time(1099, segments, 100))
