@@ -29,16 +29,21 @@ check them before re-testing a hypothesis.
 
 ## Branches
 
-- `macos-wine-openvr-legacy-unity`: the integration branch, despite its name.
-  It carries the native runtime, PS VR2, Metal/IOSurface sharing,
-  launchd/XPC, depth, passthrough, eye gaze, foveation and Wine/OpenVR work.
-- `claude/game-mode-priority-issue-xkx6m7`: client-side compositing for Game
-  Mode, built on the integration branch and not merged into it yet.
-- `macos-pssense-6dof`: PS Sense optical tracking, deliberately separate until
-  it is reliable.
+- `macos-upstream-clean`: the integration branch. It carries the native
+  runtime, PS VR2, Metal/IOSurface sharing, launchd/XPC, client-side
+  compositing for Game Mode, depth, passthrough, eye gaze, foveation and the
+  opt-in PS Sense optical tracking. Wine/OpenVR work lives in
+  `NikNakk/macos-wine-xr`.
+- `macos-wine-openvr-legacy-unity`: the previous integration branch, now an
+  older target.
+- `claude/game-mode-priority-issue-xkx6m7`, `macos-pssense-6dof` and
+  `claude/pssense-mr2940-evaluation`: development history for work already
+  ported into the integration branch.
 - `standards/*`: smaller review units for upstreaming, already merged into the
-  integration branch.
-- `main` tracks upstream Monado. Most other `macos-*` branches are history.
+  integration branch. Upstream merge requests are prepared in the separate
+  `~/Code/monado-upstreaming` checkout.
+- `main` tracks upstream Monado. Most other `macos-*` branches are history;
+  `doc/macos-port.md` has the full branch map.
 
 Check the remote branch before publishing. Commits may have been made through
 the GitHub integration, so local and remote hashes can differ even when the
@@ -76,9 +81,12 @@ Linux CI (`linux-build.yml`) must stay green too. The driver-only and
 standards-slice jobs are in the other workflows. On-headset regression
 testing uses `psvr2-openxr-test`; see `doc/macos-port.md` for its modes.
 
-Several existing `build*` directories belong to other checkouts or to the
-installed LaunchAgent. Check `CMAKE_HOME_DIRECTORY` in a build directory's
-`CMakeCache.txt` before building into it.
+Local builds live in `build/arm64` (service, native client and tests; the
+installed LaunchAgents run it) and `build/x86_64` (the Wine client).
+`scripts/macos/rebuild-both` rebuilds both. The bridge, DXMT, CrossOver Wine
+and the Windows Steam prefix live outside this checkout; see "Local workspace
+layout" in `doc/macos-port.md`. Do not create further `build-*` or `.build/*`
+folders here without a reason to keep them.
 
 ## Hardware
 

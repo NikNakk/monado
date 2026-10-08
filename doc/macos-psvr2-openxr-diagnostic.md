@@ -15,17 +15,17 @@ The application deliberately has no build-time dependency on the Khronos sample 
 From the Monado checkout:
 
 ```sh
-cmake --build build-macos-psvr2-display \
+cmake --build build/arm64 \
   --target psvr2-openxr-test \
   --parallel 4
 ```
 
-If the existing build directory predates the target and CMake does not regenerate automatically, rerun the same CMake configure command used to create `build-macos-psvr2-display`, then run the build command above.
+If the existing build directory predates the target and CMake does not regenerate automatically, rerun the same CMake configure command used to create `build/arm64`, then run the build command above.
 
 The executable is normally produced at:
 
 ```text
-build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
+build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
 ```
 
 ## OpenXR loader
@@ -49,9 +49,9 @@ The runtime is still selected in the normal OpenXR way with `XR_RUNTIME_JSON`.
 For example:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
 PSVR2_OPENXR_LOADER="/path/to/libopenxr_loader.1.dylib" \
-./build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
+./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
 ```
 
 Use Ctrl-C to exit.
@@ -84,16 +84,16 @@ The diagnostic also exercises the standards-facing foveation path described in
 Fixed FB foveation:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-  ./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+  ./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --fb-foveation --foveation-profile aggressive
 ```
 
 Runtime-owned eye-tracked foveation:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-  ./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+  ./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --fb-eye-foveation --foveation-profile aggressive
 ```
 

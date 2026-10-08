@@ -16,10 +16,10 @@ parser.add_argument('calibration', type=Path)
 parser.add_argument('--base-plist', type=Path, default=Path(f'/private/tmp/org.freedesktop.monado.service.{os.getuid()}.plist'))
 args = parser.parse_args()
 calibration = args.calibration.resolve(strict=True)
-build = root / 'build-wine'
+build = root / 'build' / 'arm64'
 cache = (build / 'CMakeCache.txt').read_text()
 if f'CMAKE_HOME_DIRECTORY:INTERNAL={root}\n' not in cache:
-    parser.error('build-wine belongs to another checkout')
+    parser.error('build/arm64 belongs to another checkout')
 commands = json.loads((build / 'compile_commands.json').read_text())
 for suffix in ('joint_pose_solver.cpp', 'pssense_driver.c', 'comp_renderer.c', 'comp_window_macos.m'):
     found = [c for c in commands if c['file'].endswith('/' + suffix)]
@@ -52,7 +52,7 @@ client_plist.write_bytes(plistlib.dumps(dict(
     'export XRT_MACOS_CLIENT_COMPOSITOR=1\n'
     '# Remove the isolated test endpoint overrides when using the normal service.\n'
     'unset XRT_MACOS_METAL_IPC_SERVICE_NAME\n'
-    f'if [ "${{XDG_RUNTIME_DIR:-}}" = {shlex.quote(str(root / "build-macos-sense-rel/sense-runtime"))} ]; then unset XDG_RUNTIME_DIR; fi\n')
+    f'if [ "${{XDG_RUNTIME_DIR:-}}" = {shlex.quote(str(root / "build/arm64/sense-runtime"))} ]; then unset XDG_RUNTIME_DIR; fi\n')
 print('Prepared', prepared)
 print('Preserved normal service tuning; enabled Sense only in this local profile.')
 print('Native clients: source', output / 'native-client.env')

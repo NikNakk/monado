@@ -7,10 +7,11 @@ cd "${0:A:h:h:h}"
 
 (
   set -eu
-  x64=.build/in-process-native-hardware-current/monado-x64
+  arm64=build/arm64
+  x64=build/x86_64
 
   # Refresh revision tags while preserving existing build settings.
-  cmake -S . -B build-wine -U GIT_DESC \
+  cmake -S . -B "$arm64" -U GIT_DESC \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DXRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON
   cmake -S . -B "$x64" -U GIT_DESC \
@@ -18,7 +19,7 @@ cd "${0:A:h:h:h}"
     -DXRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON
 
   # ARM64 service and native client.
-  cmake --build build-wine \
+  cmake --build "$arm64" \
     --target monado-service openxr_monado --parallel 6
 
   # x86-64 native client used inside Wine.

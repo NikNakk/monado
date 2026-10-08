@@ -75,7 +75,7 @@ Only if a replacement is needed, generate the original A3 design from this check
 ```sh
 cd ~/Code/monado-2
 .venv/bin/python scripts/psvr2_charuco_calibrate.py board \
-  .build/passthrough-calibration-guide/psvr2-charuco-a3.png
+  ~/Code/psvr2-datasets/passthrough/calibration-guide/psvr2-charuco-a3.png
 ```
 
 Print the whole image onto A3 landscape, preserving aspect ratio. The generated
@@ -233,7 +233,7 @@ these counters for comparison in subsequent captures rather than treating them
 as proof of corrupt saved images or silently discarding them.
 
 Analysis artifacts are under this checkout's
-`.build/passthrough-calibration-guide/P00-centre-{individual,mean}/comparison.json`.
+`~/Code/psvr2-datasets/passthrough/calibration-guide/P00-centre-{individual,mean}/comparison.json`.
 The raw capture is unchanged. The guide deliberately keeps those two analysis
 treatments separate.
 
@@ -254,7 +254,7 @@ fitting results; the comparator requires a third usable position for
 held-position-out checks. BC4 invalid-header candidate counts are 23/15 at
 stream framing, with successful decoded images retained.
 
-Reports are under `.build/passthrough-calibration-guide/P00-P01-{individual,mean}`.
+Reports are under `~/Code/psvr2-datasets/passthrough/calibration-guide/P00-P01-{individual,mean}`.
 Next capture: `P02-right`, with the board right of centre in both camera views
 and a modest change in tilt, while the headset stays fixed.
 
@@ -274,7 +274,7 @@ Exact doubling gives RMS 0.83/0.87; doubling plus a half-pixel offset gives
 without settling full-field intrinsics or camera-to-head alignment. Three
 positions remain insufficient to claim complete passthrough calibration.
 BC4 invalid-header candidate counts are 9/26, with successful saved-image
-detection. Reports: `.build/passthrough-calibration-guide/P00-P02-{individual,mean}`.
+detection. Reports: `~/Code/psvr2-datasets/passthrough/calibration-guide/P00-P02-{individual,mean}`.
 Next: vary vertical coverage with `P03-upper`, board centred horizontally and
 raised slightly, headset fixed.
 
@@ -289,7 +289,7 @@ image affine RMS is 0.48/0.49 pixels and held-position RMS spans 0.45–0.54 and
 0.33–0.68. Exact doubling RMS is 0.81/0.86, and doubling plus half a pixel is
 0.48/0.51. The added upper coverage does not degrade the correspondence.
 BC4 invalid-header candidate counts are 38/32; all saved views detect the board.
-Report: `.build/passthrough-calibration-guide/P00-P03-mean/comparison.json`.
+Report: `~/Code/psvr2-datasets/passthrough/calibration-guide/P00-P03-mean/comparison.json`.
 
 Next is lower image coverage (`P04-lower`). Put the board back on its original
 surface and, if needed, aim the headset slightly above it so the board appears
@@ -316,7 +316,7 @@ P04 itself is predicted with 0.36/0.64 pixel RMS when excluded from fitting.
 Exact doubling RMS is 0.80/0.83; adding a half-pixel offset gives 0.46/0.47.
 BC4 invalid-header candidate counts are 39/25; all saved passthrough images
 successfully detect the board. Report:
-`.build/passthrough-calibration-guide/P00-P04-mean/comparison.json`.
+`~/Code/psvr2-datasets/passthrough/calibration-guide/P00-P04-mean/comparison.json`.
 
 Next: `P05-tilted`, with the board centred and rotated about its vertical axis
 by approximately 25–30 degrees (one side nearer the headset), keeping both
@@ -336,7 +336,7 @@ fitting, gives 0.19/0.29 pixels. Exact doubling RMS is 0.79/0.81; doubling plus
 half a pixel gives 0.43/0.44. BC4 invalid-header candidate counts are 25/30;
 all decoded passthrough views detect the board. Source remains `8dae28b60`
 with documentation-only local updates. Report:
-`.build/passthrough-calibration-guide/P00-P05-mean/comparison.json`.
+`~/Code/psvr2-datasets/passthrough/calibration-guide/P00-P05-mean/comparison.json`.
 
 Six useful positions give strong cross-mode evidence over their sampled area;
 they do not yet constitute full-field intrinsic calibration. Next capture:
@@ -359,7 +359,7 @@ when excluded. Exact doubling RMS is 0.78/0.81 and doubling plus a half-pixel
 offset gives 0.40/0.42. The opposite tilt does not degrade correspondence.
 BC4 invalid-header candidate counts are 27/27; saved passthrough images detect
 the board successfully. Report:
-`.build/passthrough-calibration-guide/P00-P06-mean/comparison.json`.
+`~/Code/psvr2-datasets/passthrough/calibration-guide/P00-P06-mean/comparison.json`.
 
 Next: `P07-far`, straighten the board and place it approximately 1.5–2 times
 farther away than P06, centred in the stereo views. Keep everything stationary
@@ -383,7 +383,7 @@ has RMS 0.44/0.43. In a 3x3 diagnostic grid the matched corners occupy six cells
 in view 0 (leftmost column missing) and eight in view 1 (bottom-right missing).
 This is strong cross-mode evidence across multiple depths/tilts, with incomplete
 full-field coverage. Report:
-`.build/passthrough-calibration-guide/P00-P07-mean/comparison.json`.
+`~/Code/psvr2-datasets/passthrough/calibration-guide/P00-P07-mean/comparison.json`.
 
 Before requesting further captures, an offline check transferred the existing
 `20260926-charuco-mode4-combined-head.json` lower-camera intrinsics using
@@ -397,7 +397,7 @@ reusing the existing lens/stereo geometry over the sampled area rather than
 refitting it from these eight captures.
 
 The scratch check and report are
-`.build/passthrough-calibration-guide/check_existing_stereo.py` and
+`~/Code/psvr2-datasets/passthrough/calibration-guide/check_existing_stereo.py` and
 `existing-stereo-validation.json`. They preserve the original calibration and
 raw capture. This is an independent check of fixed camera geometry, not a new
 production calibration: the source remains `runtime_usable: false`, edge
@@ -421,7 +421,7 @@ Generate a fresh candidate (the converter refuses to overwrite files):
 ```sh
 .venv/bin/python scripts/psvr2_passthrough_calibration_transfer.py \
   "$HOME/Code/psvr2-datasets/calibration/20260926-charuco-mode4-combined-head.json" \
-  .build/passthrough-calibration-guide/passthrough-candidate-v1.json
+  ~/Code/psvr2-datasets/passthrough/calibration-guide/passthrough-candidate-v1.json
 ```
 
 That candidate has already been generated locally. The source and captures are
@@ -452,20 +452,16 @@ continues to apply to both paths.
 
 ### Next headset check
 
-Use the rebuilt `.build/native-service-check` service and matching diagnostic.
-This build directory previously had PS VR2 and Sense drivers disabled; a
-successful software build alone was not a headset-ready build. Configure and
-check the hardware drivers before using it:
+Use the `build/arm64` service and matching diagnostic. A software-only build
+is not headset-ready: check that the hardware drivers are enabled first:
 
 ```sh
-cmake -S . -B .build/native-service-check \
-  -DXRT_BUILD_DRIVER_PSVR2=ON -DXRT_BUILD_DRIVER_PSSENSE=ON
-cmake --build .build/native-service-check --parallel 8
-rg '^XRT_BUILD_DRIVER_(PSVR2|PSSENSE):BOOL=' .build/native-service-check/CMakeCache.txt
+cmake --build build/arm64 --parallel 8
+rg '^XRT_BUILD_DRIVER_(PSVR2|PSSENSE):BOOL=' build/arm64/CMakeCache.txt
 ```
 
-Both cache values must be `ON`. The configuration and build have now been
-corrected locally after the first unsuccessful test described below.
+Both cache values must be `ON`. (The first unsuccessful test described below
+used an earlier build directory with both drivers disabled.)
 Close XR clients and GAV first; only one process may claim the headset.
 Use launchd for the direct Metal XPC endpoint, rather than starting
 `monado-service` in the foreground. The development helper below unloads the
@@ -475,10 +471,10 @@ it does not overwrite the persistent LaunchAgent plist. In the setup terminal:
 
 ```sh
 cd ~/Code/monado-2
-export XRT_MACOS_PASSTHROUGH_CALIBRATION="$PWD/.build/passthrough-calibration-guide/passthrough-candidate-v1.json"
+export XRT_MACOS_PASSTHROUGH_CALIBRATION="$HOME/Code/psvr2-datasets/passthrough/calibration-guide/passthrough-candidate-v1.json"
 PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=16 PSVR2_AUXILIARY_STREAMS=0 \
 PSVR2_SENSE_6DOF=0 \
-  .build/native-service-check/src/xrt/targets/service/monado-service-xpc-control bootstrap
+  build/arm64/src/xrt/targets/service/monado-service-xpc-control bootstrap
 ```
 
 The helper registers the service without starting a headset session. The client
@@ -487,9 +483,9 @@ compositing:
 
 ```sh
 cd ~/Code/monado-2
-XR_RUNTIME_JSON="$PWD/.build/native-service-check/openxr_monado-dev.json" \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
 XRT_MACOS_CLIENT_COMPOSITOR=0 \
-  .build/native-service-check/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --passthrough-only
 ```
 
@@ -509,7 +505,7 @@ approximate-map comparison.
 After closing the diagnostic, restore the persistent registration:
 
 ```sh
-.build/native-service-check/src/xrt/targets/service/monado-service-xpc-control bootout
+build/arm64/src/xrt/targets/service/monado-service-xpc-control bootout
 launchctl bootstrap "gui/$(id -u)" \
   "$HOME/Library/LaunchAgents/org.freedesktop.monado.service.plist"
 ```
@@ -706,14 +702,14 @@ Close XR clients, then refresh the development registration:
 ```sh
 cd ~/Code/monado-2
 XRT_MACOS_PASSTHROUGH_ROTATION=1 \
-XRT_MACOS_PASSTHROUGH_CALIBRATION="$PWD/.build/passthrough-calibration-guide/passthrough-candidate-v1.json" \
+XRT_MACOS_PASSTHROUGH_CALIBRATION="$HOME/Code/psvr2-datasets/passthrough/calibration-guide/passthrough-candidate-v1.json" \
 PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=16 \
 PSVR2_AUXILIARY_STREAMS=0 PSVR2_SENSE_6DOF=0 \
-  .build/native-service-check/src/xrt/targets/service/monado-service-xpc-control bootstrap
+  build/arm64/src/xrt/targets/service/monado-service-xpc-control bootstrap
 
-XR_RUNTIME_JSON="$PWD/.build/native-service-check/openxr_monado-dev.json" \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
 XRT_MACOS_CLIENT_COMPOSITOR=0 \
-  .build/native-service-check/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --passthrough
 ```
 
@@ -731,10 +727,10 @@ In the client output, verify `Experimental calibrated passthrough` and then
 `Passthrough rotation active` before assessing alignment and motion.
 
 ```sh
-XR_RUNTIME_JSON="$PWD/.build/native-service-check/openxr_monado-dev.json" \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
 XRT_MACOS_CLIENT_COMPOSITOR=1 XRT_MACOS_PASSTHROUGH_ROTATION=1 \
-XRT_MACOS_PASSTHROUGH_CALIBRATION="$PWD/.build/passthrough-calibration-guide/passthrough-candidate-v1.json" \
-  .build/native-service-check/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XRT_MACOS_PASSTHROUGH_CALIBRATION="$HOME/Code/psvr2-datasets/passthrough/calibration-guide/passthrough-candidate-v1.json" \
+  build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --passthrough
 ```
 

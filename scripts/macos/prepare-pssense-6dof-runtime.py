@@ -16,7 +16,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("calibration", type=pathlib.Path)
-    parser.add_argument("--build", type=pathlib.Path, default=ROOT / "build-macos-sense-rel")
+    parser.add_argument("--build", type=pathlib.Path, default=ROOT / "build/arm64")
     args = parser.parse_args()
     build = args.build.resolve()
     calibration = args.calibration.resolve(strict=True)

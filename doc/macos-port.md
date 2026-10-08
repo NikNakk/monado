@@ -273,15 +273,15 @@ The macOS port now supports substantially more than the original bring-up:
 The native diagnostic target remains useful for runtime regression testing:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
-  ./build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+  ./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
 ```
 
 Depth submission can be exercised with:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
-  ./build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --depth-layer
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+  ./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --depth-layer
 ```
 
 Environment blending can be compared with `--blendmode Opaque` (the default)
@@ -660,6 +660,59 @@ than a Monado runtime target. Recreating Valve's compositor is not a goal.
     - maintain known-good cross-repository revisions;
     - split generally useful macOS/OpenXR work from PS VR2-specific changes so
       patches can be reviewed or upstreamed independently.
+
+## Local workspace layout
+
+Reorganised on 2026-10-09. One Monado build folder, with the Wine-side projects
+and the Windows install outside this checkout:
+
+| Path | Contents |
+| --- | --- |
+| `build/arm64` | Service, native OpenXR client, tests and `psvr2-openxr-test` (RelWithDebInfo, PS VR2 and PS Sense on). The LaunchAgents run this build. |
+| `build/x86_64` | x86_64 OpenXR client for Wine (`openxr_monado` only, hardware drivers off). It must carry the same git tag as the service. |
+| `build/openvr-legacy-unity` | The legacy Unity OpenVR proxy, built by `scripts/macos/build-wine-openvr-legacy-unity-proxy.zsh`. |
+| `~/Code/monado-upstreaming` | Clean upstream Monado checkout for preparing merge requests, starting with the cross-platform bug fixes. Not a build or test location for this fork. |
+| `~/Code/macos-wine-xr` | The Wine/XR bridge. `build-in-process/` holds its driver and in-process runtime builds. |
+| `~/Code/dxmt` | DXMT (`NikNakk/dxmt`); `steamvr-in-process` is the branch in use. |
+| `~/Code/xrizer` | xrizer (`NikNakk/xrizer`), used by `scripts/macos/rebuild-xrizer.zsh`. |
+| `~/Code/wine-crossover` | CrossOver 26.3 FOSS Wine: `sources/`, `build/`, `deps-x86_64/`, and `runtime/`, the patched Wine tree with DXMT installed. |
+| `~/Windows` | The SteamVR rig: `prefix/` (Steam, SteamVR, Half-Life: Alyx, Hyperbolica), `bin/wine-crossover-dxmt`, `run-steam.zsh` (Steam with the XR environment, no SteamVR), `run-mwxr.zsh` (SteamVR; both default to the PS VR2), `stop-steamvr.zsh`, and run logs in `logs/`. |
+| `~/Windows/openvr-runtimes` | xrizer and OpenComposite, provisioned by `scripts/macos/provision-{xrizer,opencomposite}.zsh` and installed per game by the `install-*-game.zsh` scripts (default prefix `~/Windows/prefix`). |
+| `~/Code/psvr2-datasets/passthrough/calibration-guide` | Passthrough calibration reports and `passthrough-candidate-v1.json`. |
+| `~/Code/monado-2-archive` | Evidence logs cited by the bridge's SteamVR notes, uncommitted patches from retired checkouts, and the pre-reorganisation LaunchAgent plists. |
+
+`scripts/macos/rebuild-both` rebuilds both Monado builds and restarts the
+service. The LaunchAgent is installed with
+`build/arm64/src/xrt/targets/service/monado-service-xpc-control install`
+(logs in `~/Library/Logs/Monado/`). That writes only lifecycle settings. The
+installed agent then had these added back:
+
+- `PSVR2_SENSE_6DOF=1`, with the mode-4 calibration and camera streams;
+- `XRT_FLOOR_EYE_HEIGHT_M=1.75`;
+- the PS VR2 and PS Sense timing traces, written to `~/psvr2-trace`.
+
+Rerun `install` after moving the build, then add those settings again.
+
+xrizer registration and SteamVR share the prefix's `openvrpaths.vrpath`.
+Valve's loader uses the first runtime entry. `install-xrizer-game.zsh install`
+puts xrizer first and keeps SteamVR's entry, and `restore` removes xrizer.
+The bridge's SteamVR launcher puts SteamVR first again, so rerun the xrizer
+install after a SteamVR session.
+
+If the CrossOver Wine tree moves again, delete `$TMPDIR/winetemp-*` before the
+next start. CrossOver's loader caches an absolute `ntdll.so` link there, keyed
+by the loader binary rather than its path, so after a move Wine fails with
+"could not load ntdll.so".
+
+Dated records elsewhere in these notes still name the earlier folders.
+`build-wine` became `build/arm64`.
+`.build/in-process-native-hardware-current/monado-x64` became `build/x86_64`.
+`.build/steamvr-crossover` became `~/Windows`, with its Wine tree moved to
+`~/Code/wine-crossover/runtime`.
+`.build/in-process-openxr-study` became `~/Code/macos-wine-xr`.
+`.build/passthrough-calibration-guide` moved to `psvr2-datasets`.
+The other `build-*` and `.build/*` folders, the Wine 11.10 rig included, were
+deleted. Their branches remain in the respective repositories.
 
 ## Branch map
 

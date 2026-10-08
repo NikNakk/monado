@@ -75,8 +75,8 @@ Camera only:
 
 ```sh
 PSVR2_CAMERA_STREAMS=1 \
-XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
-./build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --passthrough-only
 ```
 
@@ -84,8 +84,8 @@ Passthrough behind the normal diagnostic scene:
 
 ```sh
 PSVR2_CAMERA_STREAMS=1 \
-XR_RUNTIME_JSON="$PWD/build-macos-psvr2-display/openxr_monado-dev.json" \
-./build-macos-psvr2-display/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --passthrough
 ```
 
