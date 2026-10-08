@@ -13,8 +13,8 @@ number(const cJSON *object, const char *key, double *out)
 	return u_json_get_double(u_json_get(object, key), out) && isfinite(*out);
 }
 
-bool
-u_passthrough_calibration_parse(const char *json, const char *serial, struct u_passthrough_calibration *out)
+static bool
+parse(const char *json, const char *serial, bool require_serial, struct u_passthrough_calibration *out)
 {
 	if (json == NULL || serial == NULL || serial[0] == '\0' || out == NULL) {
 		return false;
@@ -25,7 +25,7 @@ u_passthrough_calibration_parse(const char *json, const char *serial, struct u_p
 	const cJSON *cameras = u_json_get(root, "cameras");
 	bool good = u_json_get_string_into_array(u_json_get(root, "format"), format, sizeof(format)) &&
 	            strcmp(format, "psvr2-passthrough-calibration-v1") == 0 &&
-	            (cJSON_IsNull(u_json_get(root, "headset_serial")) ||
+	            ((!require_serial && cJSON_IsNull(u_json_get(root, "headset_serial"))) ||
 	             (u_json_get_string_into_array(u_json_get(root, "headset_serial"), headset, sizeof(headset)) &&
 	              strcmp(headset, serial) == 0)) &&
 	            u_json_get_string_into_array(u_json_get(root, "projection"), projection, sizeof(projection)) &&
@@ -61,6 +61,18 @@ u_passthrough_calibration_parse(const char *json, const char *serial, struct u_p
 		*out = result;
 	}
 	return good;
+}
+
+bool
+u_passthrough_calibration_parse(const char *json, const char *serial, struct u_passthrough_calibration *out)
+{
+	return parse(json, serial, false, out);
+}
+
+bool
+u_passthrough_calibration_parse_default(const char *json, const char *serial, struct u_passthrough_calibration *out)
+{
+	return parse(json, serial, true, out);
 }
 
 bool

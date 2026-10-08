@@ -101,7 +101,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Depth layers | **Off by default** | `XR_KHR_composition_layer_depth` is not exposed on macOS unless configured with `-DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON`; depth-aware reprojection additionally needs `XRT_COMPOSITOR_DEPTH_REPROJECTION=1`. Depth swapchain formats (including `Depth32Float_Stencil8`) are still creatable. |
 | Wine OpenXR / OpenVR | **External compatibility project** | Wine/OpenVR integration has moved to [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr); Monado retains only generic macOS/Metal runtime and resource-handoff support. |
 | SteamVR games under Wine | **External experimental path** | Game compatibility and launch policy are tracked in [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr) and the relevant OpenVR compatibility projects. |
-| PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; the opt-in transferred calibration is visually confirmed in camera-only and blended-scene service compositing. Blended hosted compositing is also visually confirmed. Rotation correction is implemented opt-in, awaiting a headset check; perceived lag remains. |
+| PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; the opt-in transferred calibration is visually confirmed in camera-only and blended-scene service compositing. Blended hosted compositing is also visually confirmed. Rotation correction has user-confirmed hosted alignment during yaw, pitch and roll and now defaults on with valid calibration. Both compositor modes automatically load a serial-bound user calibration. The user confirmed the defaults check and acceptable subjective latency on 2026-10-09; formal latency measurements remain follow-up. |
 | PS VR2 eye tracking | **Working experimental** | `XR_EXT_eye_gaze_interaction` using the Sony calibration blob plus an optional 9-point user calibration; gaze activates lazily. Accuracy still needs broader hardware validation. |
 | Foveated rendering | **Hardware-validated, opt-in at build time** | Fixed `XR_FB_foveation` / `XR_FB_foveation_configuration` works without gaze; `XR_META_foveation_eye_tracked` adds runtime-owned gaze. Validated on PS VR2 through `monado-service`. Metal is the only rendering backend, via the experimental `XR_MNDX_foveation_metal` companion. |
 | SteamVR Home | **Unresolved** | Not currently working; feasibility depends on how much additional SteamVR/OpenVR behaviour can be reproduced without Valve's compositor. |
@@ -865,8 +865,13 @@ capture is prepared. See the
   October 7 upstream merge. Hardware regression of that merge remains separate.
 - Calibrated PS VR2 camera-only and camera-plus-scene passthrough are visually
   confirmed with service compositing, and blended hosted compositing also passes.
-  Validate the opt-in camera rotational reprojection, assess header/exposure
-  timing and see the [validation and calibration plan](macos-psvr2-passthrough.md#validation-and-calibration-plan-2026-10-08).
+  Camera rotational reprojection now has user-confirmed camera/virtual
+  alignment during yaw, pitch and roll with hosted compositing at `3d6f136e5`.
+  Rotation now defaults on with valid calibration, and both compositor modes
+  automatically load a serial-bound user calibration from `psvr2/passthrough.json`.
+  The user confirmed the defaults check and reports latency feels fine on
+  2026-10-09. Formal header/exposure timing and latency measurements remain a
+  later follow-up; see the [validation and calibration plan](macos-psvr2-passthrough.md#validation-and-calibration-plan-2026-10-08).
 - Validate fixed then eye-tracked foveation in Unity or Unreal; Wine requires
   rendering-backend work as well as extension transport. See the
   [framework plan](macos-openxr-foveation.md#framework-and-wine-validation-plan-2026-10-08).

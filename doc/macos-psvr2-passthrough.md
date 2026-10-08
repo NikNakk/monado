@@ -99,8 +99,9 @@ file. The presenter applies calibrated lens distortion and camera-to-head
 rotation to its optical rays. This is a rotation-only mapping at infinity;
 the user visually confirmed camera-only and blended-scene service compositing
 on 2026-10-08.
-Perceived lag remains; measured head alignment, edge coverage and latency need
-further assessment.
+After rotational correction, the user confirmed the default configuration on
+2026-10-09 and reports that latency feels fine. Measured head alignment, edge
+coverage and formal latency measurements remain later follow-up work.
 See the [candidate and headset commands](macos-psvr2-passthrough-calibration.md#experimental-transferred-runtime-mapping-2026-10-08).
 Set the path in the service and, for client compositing, the client environment.
 Invalid files warn and use the approximate mapping. Unset keeps the default.
@@ -238,11 +239,15 @@ rendering through hosted compositing. The previously reported lag remains an
 unmeasured timing/reprojection issue. See the [detailed record](macos-psvr2-passthrough-calibration.md#calibrated-hosted-blended-scene-visually-confirmed-2026-10-08).
 
 
-## Camera rotation correction (implemented, awaiting hardware), 2026-10-08
+## Camera rotation correction (hosted hardware confirmed), 2026-10-08
 
-The camera background now has opt-in rotational reprojection via
-`XRT_MACOS_PASSTHROUGH_ROTATION=1`. It uses camera header timing and the virtual
+The camera background now enables rotational reprojection by default when a
+valid calibration is loaded; `XRT_MACOS_PASSTHROUGH_ROTATION=0` disables it.
+Both compositor modes automatically look for a serial-bound calibration in
+Monado's user config at `psvr2/passthrough.json`. It uses camera header timing and the virtual
 scene's exact timewarp head orientation. This targets the reported separation
 between camera and virtual details during head rotation; translation remains
-deferred. Static calibrated passthrough remains the default and fallback.
+deferred. Static calibrated passthrough remains the fallback for unavailable
+timing or tracking. The user confirmed camera/virtual alignment during yaw,
+pitch and roll with hosted compositing at `3d6f136e5`, then requested these defaults.
 See the [implementation and launchd check](macos-psvr2-passthrough-calibration.md#opt-in-camera-rotational-reprojection-2026-10-08).
