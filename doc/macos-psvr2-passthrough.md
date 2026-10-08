@@ -97,7 +97,9 @@ compositor debug switches.
 `XRT_MACOS_PASSTHROUGH_CALIBRATION` selects a transferred, versioned calibration
 file. The presenter applies calibrated lens distortion and camera-to-head
 rotation to its optical rays. This is a rotation-only mapping at infinity;
-head alignment, edge coverage and latency still need hardware validation.
+the user visually confirmed camera-only service compositing on 2026-10-08.
+Perceived lag remains; measured head alignment, edge coverage and latency need
+further assessment.
 See the [candidate and headset commands](macos-psvr2-passthrough-calibration.md#experimental-transferred-runtime-mapping-2026-10-08).
 Set the path in the service and, for client compositing, the client environment.
 Invalid files warn and use the approximate mapping. Unset keeps the default.
@@ -144,7 +146,8 @@ geometrically calibrated MR camera system.
 
 Remaining work includes:
 
-- validate the opt-in transferred intrinsics/rotation mapping on hardware;
+- validate blended scenes and hosted compositing with the transferred mapping
+  (camera-only service compositing is visually confirmed);
 - associate camera frames with hardware timestamps and head poses;
 - camera reprojection / late correction;
 - robust stream restart if camera delivery stalls;
@@ -204,3 +207,14 @@ stationary and moving-head checks.
 The [step-by-step ChArUco capture guide](macos-psvr2-passthrough-calibration.md)
 includes the tooling audit, existing mode-4/0x10 correspondence evidence, live
 USB-session commands, and the remaining solve/runtime work (2026-10-08).
+
+
+## Calibrated camera-only result, 2026-10-08
+
+The user reports the calibrated image looks good with `--passthrough-only`,
+service compositing and source commit `c0c24f1a0`. They perceive slightly more
+lag than they remember on PS5; this is subjective, not a measured comparison.
+The BC4 path currently timestamps USB receipt and uses a static UV map without
+camera-pose late reprojection. Measure timing and establish exposure-pose
+association next; retain the geometry result and keep blended-scene/hosted
+validation separate. See the [detailed record](macos-psvr2-passthrough-calibration.md#calibrated-camera-only-image-visually-confirmed-2026-10-08).
