@@ -96,7 +96,26 @@ STAGE under the head and turn it so that its -Z is the way the head faced,
 both averaged over the steady second. Apps on a floor-based space (SteamVR,
 OpenComposite titles) then start facing forward, rather than wherever the
 PS VR2's tracking origin happened to point. `XRT_FLOOR_ALIGN=0` sets only the
-height.
+height. Unit-tested; the first headset session with it is still to come.
+
+## Display sleep while clients run (2026-10-07)
+
+`XRT_MACOS_PREVENT_DISPLAY_SLEEP=1` (default off) makes the **service** hold a
+`PreventUserIdleDisplaySleep` power assertion while any client is connected.
+macOS idle display sleep switches the headset's display off like any other,
+and with `XRT_MACOS_EXIT_ON_DISPLAY_LOSS=1` the service then exits under a
+running game. Off until validated on hardware. The bridge's SteamVR launcher
+keeps the displays awake with `caffeinate` instead.
+
+## PS Sense put-down recovery experiments (2026-10-08)
+
+`PSSENSE_LED_SOFT_RESET=1` restarts the LED schedule of a moving controller
+whose ring has stayed dark, as a new connection would.
+`PSSENSE_LED_SONY_FLAGS=1` sends the flag2 bits 1 and 4 that Sony's driver
+sends while locked. Both are off by default and unvalidated. They target rings
+that stayed dark after a put-down in a SteamVR session; the related clock fix
+(hold the steady mapping only while locked) is not a toggle. See
+[the Sense integration notes](macos-pssense-6dof-integration.md).
 
 ## PS Sense runtime 6DoF opt-in (2026-10-04)
 
