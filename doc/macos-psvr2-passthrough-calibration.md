@@ -451,19 +451,24 @@ continues to apply to both paths.
 ### Next headset check
 
 Use the rebuilt `.build/native-service-check` service and matching diagnostic.
-Stop the installed service/LaunchAgent and GAV first, using the existing local
-service procedure; only one process may claim the headset. Do not mix this
-new runtime with an older active service. In the service terminal:
+Close XR clients and GAV first; only one process may claim the headset.
+Use launchd for the direct Metal XPC endpoint, rather than starting
+`monado-service` in the foreground. The development helper below unloads the
+current service registration and registers its rebuilt sibling service on demand.
+It captures the shell's relevant runtime variables into a temporary plist;
+it does not overwrite the persistent LaunchAgent plist. In the setup terminal:
 
 ```sh
 cd ~/Code/monado-2
 export XRT_MACOS_PASSTHROUGH_CALIBRATION="$PWD/.build/passthrough-calibration-guide/passthrough-candidate-v1.json"
 PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=16 PSVR2_AUXILIARY_STREAMS=0 \
 PSVR2_SENSE_6DOF=0 \
-  .build/native-service-check/src/xrt/targets/service/monado-service
+  .build/native-service-check/src/xrt/targets/service/monado-service-xpc-control bootstrap
 ```
 
-In a second terminal, first use service compositing:
+The helper registers the service without starting a headset session. The client
+activates it through XPC. In the same or a second terminal, first use service
+compositing:
 
 ```sh
 cd ~/Code/monado-2
@@ -473,7 +478,9 @@ XRT_MACOS_CLIENT_COMPOSITOR=0 \
   --passthrough-only
 ```
 
-Confirm the calibration info log before interpreting the image. Check left/right
+Confirm the calibration info log in
+`/tmp/monado-service-launchd.<uid>.err.log` before interpreting the image.
+The helper prints the exact stdout/stderr paths. Check left/right
 assignment, upright orientation, comfortable stereo and stationary board/room
 geometry first. Then exit and run the same diagnostic with `--passthrough` to
 check transparent virtual content over the cameras. For the hosted-client check,
@@ -483,6 +490,18 @@ service's camera settings above. Record the tested commit and distinguish
 stationary geometry from movement-induced lag, near-object parallax and edge
 artifacts. An unset calibration path plus a restarted presenter provides the
 approximate-map comparison.
+
+After closing the diagnostic, restore the persistent registration:
+
+```sh
+.build/native-service-check/src/xrt/targets/service/monado-service-xpc-control bootout
+launchctl bootstrap "gui/$(id -u)" \
+  "$HOME/Library/LaunchAgents/org.freedesktop.monado.service.plist"
+```
+
+This reloads the existing persistent service path and settings. To repeat this
+experiment with different service variables, run the development `bootstrap`
+command again; changing only the client shell cannot update the running service.
 
 Offline validation: macOS service/runtime/diagnostic build, schema/projection
 CTest (including OpenCV fisheye reference values, coordinate signs, inverse
