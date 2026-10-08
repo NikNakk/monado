@@ -47,7 +47,7 @@ done
 
 owd=$(pwd)
 
-cd "$HOME/Code/monado-2/build-wine-dxmt/xrizer-src"
+cd "$HOME/Code/xrizer"
 if (( pull )); then
     git pull
 fi
@@ -58,7 +58,7 @@ BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu='-isystem /opt/homebrew/Cellar/mi
 
 cd "$HOME/Code/monado-2"
 
-MONADO_XRIZER_DLL_SOURCE="$HOME/Code/monado-2/build-wine-dxmt/xrizer-src/target/x86_64-pc-windows-gnu/release/openvr_api.dll" \
+MONADO_XRIZER_DLL_SOURCE="$HOME/Code/xrizer/target/x86_64-pc-windows-gnu/release/openvr_api.dll" \
 scripts/macos/provision-xrizer.zsh
 
 cd "$owd"

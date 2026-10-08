@@ -4,9 +4,8 @@
 set -euo pipefail
 
 script_dir=${0:A:h}
-repo_root=${script_dir:h:h}
-wine_root=${MONADO_WINE_DXMT_ROOT:-${repo_root}/build-wine-dxmt}
-oc_root=${MONADO_OPENCOMPOSITE_ROOT:-${wine_root}/opencomposite}
+runtimes_root=${MONADO_OPENVR_RUNTIMES_ROOT:-${HOME}/Windows/openvr-runtimes}
+oc_root=${MONADO_OPENCOMPOSITE_ROOT:-${runtimes_root}/opencomposite}
 oc_dll=${MONADO_OPENCOMPOSITE_DLL:-${oc_root}/openvr_api.dll}
 
 usage()

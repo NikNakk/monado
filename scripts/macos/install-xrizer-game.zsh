@@ -4,14 +4,40 @@
 set -euo pipefail
 
 script_dir=${0:A:h}
-repo_root=${script_dir:h:h}
-wine_root=${MONADO_WINE_DXMT_ROOT:-${repo_root}/build-wine-dxmt}
-xrizer_root=${MONADO_XRIZER_ROOT:-${wine_root}/xrizer}
+runtimes_root=${MONADO_OPENVR_RUNTIMES_ROOT:-${HOME}/Windows/openvr-runtimes}
+xrizer_root=${MONADO_XRIZER_ROOT:-${runtimes_root}/xrizer}
 xrizer_dll=${MONADO_XRIZER_DLL:-${xrizer_root}/openvr_api.dll}
 xrizer_runtime=${MONADO_XRIZER_RUNTIME_DLL:-${xrizer_root}/bin/vrclient_x64.dll}
 xrizer_loader=${MONADO_XRIZER_OPENXR_LOADER:-${xrizer_root}/openxr_loader.dll}
-wine_prefix=${WINEPREFIX:-${wine_root}/prefix}
-openvr_paths=${wine_prefix}/drive_c/users/${USER}/AppData/Local/openvr/openvrpaths.vrpath
+wine_prefix=${WINEPREFIX:-${HOME}/Windows/prefix}
+runtime_windows="Z:${xrizer_root//\//\\}"
+
+register_runtime()
+{
+	# Valve's loader uses the first "runtime" entry. Put xrizer first (install)
+	# or remove it (restore) in every Windows profile, keeping the other entries
+	# so SteamVR stays registered. The CrossOver prefix's user is "crossover".
+	python3 - "$1" "${wine_prefix}" "${runtime_windows}" <<'PY'
+import json, sys
+from pathlib import Path
+action, prefix, runtime = sys.argv[1:]
+profiles = [p for p in Path(prefix, 'drive_c/users').iterdir() if p.is_dir() and p.name != 'Public']
+if not profiles:
+    sys.exit(f'No Windows user profiles in {prefix}')
+for profile in profiles:
+    path = profile / 'AppData/Local/openvr/openvrpaths.vrpath'
+    if action != 'install' and not path.exists():
+        continue
+    data = json.loads(path.read_text()) if path.exists() else {'jsonid': 'vrpathreg', 'version': 1}
+    runtimes = [r for r in data.get('runtime', []) if r.lower() != runtime.lower()]
+    if action == 'install':
+        runtimes.insert(0, runtime)
+    data['runtime'] = runtimes
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=1))
+    print(f'  OpenVR paths: {path}')
+PY
+}
 
 usage()
 {
@@ -76,24 +102,12 @@ install)
 		exit 1
 	fi
 
-	mkdir -p "${openvr_paths:h}"
-	runtime_windows="Z:${xrizer_root//\//\\}"
-	runtime_windows_json=${runtime_windows//\\/\\\\}
-	cat > "${openvr_paths}" <<EOF
-{
-	"jsonid": "vrpathreg",
-	"runtime": [
-		"${runtime_windows_json}"
-	],
-	"version": 1
-}
-EOF
 	print "Configured xrizer as the OpenVR runtime for this Wine prefix:"
 	print "  Valve loader: ${target}"
 	print "  original:     ${backup}"
 	print "  xrizer:       ${xrizer_runtime}"
 	print "  XR loader:    ${loader}"
-	print "  OpenVR paths: ${openvr_paths}"
+	register_runtime install
 	;;
 restore)
 	if [[ ! -f "${backup}" ]]; then
@@ -107,6 +121,8 @@ restore)
 		rm -f "${loader}"
 	fi
 	print "Restored original OpenVR DLL: ${target}"
+	print "Unregistered xrizer as an OpenVR runtime:"
+	register_runtime restore
 	;;
 *)
 	usage
