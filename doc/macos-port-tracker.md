@@ -129,8 +129,8 @@ options enabled.
 
 - `XR_FB_passthrough` from the stock-headset BC4 cameras, composited in the
   final Metal presentation pass. An opt-in transferred calibration mapping now
-  replaces the approximation; [camera-only service compositing is visually confirmed](macos-psvr2-passthrough-calibration.md#calibrated-camera-only-image-visually-confirmed-2026-10-08).
-  Perceived lag remains; blended scenes and hosted compositing need validation.
+  replaces the approximation; [camera-only and blended-scene service compositing are visually confirmed](macos-psvr2-passthrough-calibration.md#calibrated-blended-scene-visually-confirmed-2026-10-08).
+  Perceived lag remains; hosted compositing needs validation.
 - Opt-in `XR_KHR_generic_controller` mapping for PS Sense.
 - Per-image foveation map association for sparse/re-submitted frames and
   foveated projection layers in the layer squasher (unit-tested; see
@@ -180,8 +180,9 @@ branch. Keep this branch mainly for development history/comparison.
 3. Sense combined defaults have already been used in games for 10–20 minutes,
    confirmed by the user. Broaden reliability coverage without repeating this
    completed gate as outstanding work.
-4. Camera-only calibrated passthrough is visually confirmed. Validate blended
-   scenes and hosted compositing; measure timing and assess camera reprojection.
+4. Camera-only and blended calibrated passthrough are visually confirmed with
+   service compositing. Validate hosted compositing; measure timing and assess
+   camera reprojection.
    Metric alignment and edge coverage remain separate checks.
 5. Validate fixed and eye-tracked foveation in Unity or Unreal, then investigate
    Wine graphics-backend integration.

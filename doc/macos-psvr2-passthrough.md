@@ -97,7 +97,8 @@ compositor debug switches.
 `XRT_MACOS_PASSTHROUGH_CALIBRATION` selects a transferred, versioned calibration
 file. The presenter applies calibrated lens distortion and camera-to-head
 rotation to its optical rays. This is a rotation-only mapping at infinity;
-the user visually confirmed camera-only service compositing on 2026-10-08.
+the user visually confirmed camera-only and blended-scene service compositing
+on 2026-10-08.
 Perceived lag remains; measured head alignment, edge coverage and latency need
 further assessment.
 See the [candidate and headset commands](macos-psvr2-passthrough-calibration.md#experimental-transferred-runtime-mapping-2026-10-08).
@@ -146,8 +147,8 @@ geometrically calibrated MR camera system.
 
 Remaining work includes:
 
-- validate blended scenes and hosted compositing with the transferred mapping
-  (camera-only service compositing is visually confirmed);
+- validate hosted compositing with the transferred mapping (camera-only and
+  blended-scene service compositing are visually confirmed);
 - associate camera frames with hardware timestamps and head poses;
 - camera reprojection / late correction;
 - robust stream restart if camera delivery stalls;
@@ -164,8 +165,8 @@ standard OpenXR.
 ## Validation and calibration plan, 2026-10-08
 
 The API is exposed to applications through `XR_FB_passthrough`, but a visible
-PS VR2 camera-plus-scene hardware result has not been established in the
-current evidence. Extension enumeration and successful lifecycle calls alone
+PS VR2 camera-plus-scene hardware result was still pending when this plan
+was written; it is now visually confirmed below. Extension enumeration and successful lifecycle calls alone
 are insufficient. PS VR2 currently advertises only the `Opaque` environment
 blend mode (`psvr2.c`); selecting `AlphaBlend` in hello_xr is therefore not the
 passthrough test. FB passthrough submits a camera layer beneath a projection
@@ -218,3 +219,11 @@ The BC4 path currently timestamps USB receipt and uses a static UV map without
 camera-pose late reprojection. Measure timing and establish exposure-pose
 association next; retain the geometry result and keep blended-scene/hosted
 validation separate. See the [detailed record](macos-psvr2-passthrough-calibration.md#calibrated-camera-only-image-visually-confirmed-2026-10-08).
+
+
+## Calibrated blended-scene result, 2026-10-08
+
+The follow-up `--passthrough` run with service compositing also received the
+user's “Works well” confirmation. Both native diagnostic camera modes are now
+visually confirmed. Hosted compositing and latency work remain separate; see
+[the detailed record](macos-psvr2-passthrough-calibration.md#calibrated-blended-scene-visually-confirmed-2026-10-08).
