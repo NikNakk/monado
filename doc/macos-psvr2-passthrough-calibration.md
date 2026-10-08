@@ -628,3 +628,111 @@ and exposure/head-pose association for camera reprojection. Unity, Unreal and
 Wine application coverage, full-field metric alignment, depth-dependent
 parallax and lifecycle/handoff robustness remain separate work. Keep the
 calibration and camera streams opt-in.
+
+## Motion mismatch between camera and virtual scene, 2026-10-08
+
+The user reports that rendered details and camera imagery separate while the
+head moves and line up again after it stops. Code inspection confirms the
+relevant asymmetry: the main compositor applies timewarp to the virtual scene
+by default, using its predicted display pose, whereas the final Metal pass
+blends that already-composited application texture with the latest camera image
+through a static calibrated UV map. The camera path has no exposure-to-display
+head-rotation compensation. This explains a motion-dependent mismatch without
+implying the static calibration is wrong; it is not a measurement of the lag.
+
+Correcting it requires a camera exposure timestamp and associated head pose,
+then reprojection of the camera ray from the display pose into the exposure
+pose before calibrated lens projection. Use the same display-pose target as
+the virtual scene. Rotational reprojection can address rotational mismatch;
+translation and near-object parallax require depth or a declared reference
+plane. Disabling virtual-scene ATW is not the intended fix.
+
+## Opt-in camera rotational reprojection, 2026-10-08
+
+The user explicitly scoped the next change to rotation; translation is deferred.
+`XRT_MACOS_PASSTHROUGH_ROTATION=1` now enables camera rotational reprojection
+when a valid transferred calibration is loaded. It is off by default pending a
+hardware result. The static calibration file and its positive visual results
+remain applicable.
+
+On macOS the BC4 driver preserves the camera header timestamp mapped through
+the existing headset-to-monotonic clock calibration. Both eyes get the same
+mapped timestamp. The raw camera time is carried in `source_timestamp`; zero
+marks arrival-only fallback while the clock is unavailable or implausible.
+Existing frame sharing preserves both timestamps, without an IPC layout change.
+Linux retains its prior timestamp behaviour.
+
+For a new uploaded frame, the presenter looks up the tracked head orientation
+at that mapped camera time and caches it with the texture. The Vulkan renderer
+publishes the exact head orientation used for the virtual scene's beginning-of-
+scanout timewarp with its target image. Presentation copies that orientation
+into its queued job, so it cannot race a newer image's pose or make a different
+prediction on the presentation worker. PS VR2 reports global panel refresh,
+so the renderer's scanout-begin/end orientations coincide.
+
+The final Metal pass applies
+`camera_from_head * inverse(world_from_capture_head) * world_from_display_head`
+to each optical head ray before fisheye projection. Optical rays are stored
+alongside the original static UVs in the lookup texture; the per-frame rotation
+and lens projection run on the GPU. Camera and eye translations are unused.
+The virtual scene retains its existing timewarp.
+
+Missing/untracked orientations, arrival-only timestamps, future timestamps or
+frames at least 250 ms old disable correction for the stereo pair and retain
+the static calibrated mapping. Logs report `Passthrough rotation active` or
+`Passthrough rotation unavailable; using static mapping` on the first frame
+and state changes. Without valid calibration, requesting rotation warns and
+keeps the approximate view. Disabling virtual-scene ATW also disables the
+camera correction. No arbitrary timing offset is introduced.
+
+The camera header's precise phase relative to exposure still needs hardware
+assessment: the existing clock mapping is used, but a correct rotation formula
+does not prove exposure timing. Rolling exposure, moving objects, translation
+and nearby-object parallax are outside this rotation-only correction.
+
+Validation: hardware-enabled macOS build; CPU world-direction invariance tests
+for positive/negative yaw, pitch and roll, camera offsets, stationary equivalence,
+invalid poses and stale/invalid timestamps; existing BC4 frame-share timestamp
+round trip and IPC/hosted-session tests. The shared production Metal shader
+compiles and its headless GPU test passes 4,380 assertions against CPU fisheye
+projection across 2,178 rays/rotations on the local GPU. That test skips when
+no Metal device is available. No headset rotation result is claimed yet.
+
+### First rotation check through launchd
+
+Close XR clients, then refresh the development registration:
+
+```sh
+cd ~/Code/monado-2
+XRT_MACOS_PASSTHROUGH_ROTATION=1 \
+XRT_MACOS_PASSTHROUGH_CALIBRATION="$PWD/.build/passthrough-calibration-guide/passthrough-candidate-v1.json" \
+PSVR2_CAMERA_STREAMS=1 PSVR2_CAMERA_MODE=16 \
+PSVR2_AUXILIARY_STREAMS=0 PSVR2_SENSE_6DOF=0 \
+  .build/native-service-check/src/xrt/targets/service/monado-service-xpc-control bootstrap
+
+XR_RUNTIME_JSON="$PWD/.build/native-service-check/openxr_monado-dev.json" \
+XRT_MACOS_CLIENT_COMPOSITOR=0 \
+  .build/native-service-check/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  --passthrough
+```
+
+Check the rotation-active log before interpreting the result. Compare camera
+and virtual details while gently turning the head left/right, looking up/down
+and tilting sideways, keeping the head position as fixed as practical. Look
+for the previous motion-only separation and for image wobble or corrections
+in the wrong direction. The stationary geometry should remain as before.
+
+After the service-composited result, repeat with hosted compositing:
+
+```sh
+XR_RUNTIME_JSON="$PWD/.build/native-service-check/openxr_monado-dev.json" \
+XRT_MACOS_CLIENT_COMPOSITOR=1 XRT_MACOS_PASSTHROUGH_ROTATION=1 \
+XRT_MACOS_PASSTHROUGH_CALIBRATION="$PWD/.build/passthrough-calibration-guide/passthrough-candidate-v1.json" \
+  .build/native-service-check/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+  --passthrough
+```
+
+For an A/B comparison, use `XRT_MACOS_PASSTHROUGH_ROTATION=0` in the process
+that composites (refresh the launchd job for service compositing). Keep the
+calibration file identical. Restore the persistent registration using the
+commands above when finished.

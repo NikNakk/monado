@@ -130,7 +130,8 @@ options enabled.
 - `XR_FB_passthrough` from the stock-headset BC4 cameras, composited in the
   final Metal presentation pass. An opt-in transferred calibration mapping now
   replaces the approximation; [camera-only and blended-scene service compositing are visually confirmed](macos-psvr2-passthrough-calibration.md#calibrated-blended-scene-visually-confirmed-2026-10-08).
-  Blended hosted compositing also passes; perceived lag remains.
+  Blended hosted compositing also passes; perceived lag remains. Camera rotational
+  reprojection is implemented opt-in and awaiting a headset check.
 - Opt-in `XR_KHR_generic_controller` mapping for PS Sense.
 - Per-image foveation map association for sparse/re-submitted frames and
   foveated projection layers in the layer squasher (unit-tested; see

@@ -15,10 +15,12 @@
 #include "main/comp_window.h"
 #include "main/comp_macos_frontend.h"
 #include "main/comp_window_macos_trace_buffer.h"
+#include "main/comp_window_macos_passthrough_shader.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
 #include "util/u_file.h"
 #include "util/u_passthrough_calibration.h"
+#include "math/m_api.h"
 #include "util/u_timing_trace.h"
 #include "util/u_frame_share.h"
 #include "util/u_handles.h"
@@ -58,6 +60,8 @@ struct macos_present_job
 	struct vk_bundle_queue *present_queue;
 	bool passthrough_active;
 	bool passthrough_has_application_layers;
+	struct xrt_quat display_head_orientation;
+	bool display_head_orientation_valid;
 };
 
 /*
@@ -117,6 +121,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
 DEBUG_GET_ONCE_NUM_OPTION(macos_refresh_rate_hz, "XRT_MACOS_REFRESH_RATE_HZ", 0)
 // Vblank timing source: "ca" (default, macOS 14+) or "cv" (legacy fallback).
 DEBUG_GET_ONCE_OPTION(macos_display_link, "XRT_MACOS_DISPLAY_LINK", "ca")
+DEBUG_GET_ONCE_BOOL_OPTION(macos_passthrough_rotation, "XRT_MACOS_PASSTHROUGH_ROTATION", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_fov_deg, "XRT_MACOS_PASSTHROUGH_FOV_DEG", 150)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_convergence_milli, "XRT_MACOS_PASSTHROUGH_CONVERGENCE_MILLI", 100)
 DEBUG_GET_ONCE_NUM_OPTION(macos_passthrough_brightness_percent, "XRT_MACOS_PASSTHROUGH_BRIGHTNESS_PERCENT", 160)
@@ -159,6 +164,12 @@ struct comp_window_macos
 	struct macos_passthrough_sink passthrough_sinks[2];
 	struct xrt_frame *passthrough_frames[2];
 	int64_t passthrough_uploaded_timestamp[2];
+	struct u_passthrough_calibration passthrough_calibration;
+	bool passthrough_rotation_enabled;
+	struct xrt_quat passthrough_capture_orientation[2];
+	bool passthrough_capture_valid[2];
+	bool passthrough_rotation_active;
+	bool passthrough_rotation_status_logged;
 	pthread_mutex_t passthrough_mutex;
 	atomic_bool passthrough_shutdown;
 	bool passthrough_sinks_attached;
@@ -869,6 +880,13 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 		}
 	}
 
+	cwm->passthrough_calibration = calibration;
+	cwm->passthrough_rotation_enabled = calibrated && debug_get_bool_option_macos_passthrough_rotation();
+	if (debug_get_bool_option_macos_passthrough_rotation() && !calibrated) {
+		COMP_WARN(cwm->base.base.c,
+		          "Passthrough rotation requires a valid calibrated mapping; using static view");
+	}
+
 	const float fx = 0.3585564f;
 	const float fy = 0.3762281f;
 	const float camera_width_ratio = 1016.0f / 1024.0f;
@@ -881,7 +899,7 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 	const float fov_rad = fov_deg * 3.14159265358979323846f / 180.0f;
 
 	id<MTLDevice> device = [cwm->metal_layer device];
-	MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRG32Float
+	MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA32Float
 	                                                                                width:MACOS_PASSTHROUGH_MAP_SIZE
 	                                                                               height:MACOS_PASSTHROUGH_MAP_SIZE
 	                                                                            mipmapped:NO];
@@ -889,7 +907,7 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 	[desc setStorageMode:MTLStorageModeManaged];
 
 	size_t count = (size_t)MACOS_PASSTHROUGH_MAP_SIZE * MACOS_PASSTHROUGH_MAP_SIZE;
-	float *map = malloc(count * 2 * sizeof(float));
+	float *map = calloc(count * 4, sizeof(float));
 	if (map == NULL) {
 		return false;
 	}
@@ -903,11 +921,13 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 			for (uint32_t x = 0; x < MACOS_PASSTHROUGH_MAP_SIZE; x++) {
 				float u = ((float)x + 0.5f) / (float)MACOS_PASSTHROUGH_MAP_SIZE;
 				struct xrt_uv_triplet distortion = {0};
-				size_t index = ((size_t)y * MACOS_PASSTHROUGH_MAP_SIZE + x) * 2;
+				size_t index = ((size_t)y * MACOS_PASSTHROUGH_MAP_SIZE + x) * 4;
 
 				if (xrt_device_compute_distortion(xdev, eye, u, v, &distortion) != XRT_SUCCESS) {
 					map[index + 0] = -1.0f;
 					map[index + 1] = -1.0f;
+					map[index + 2] = NAN;
+					map[index + 3] = NAN;
 					continue;
 				}
 
@@ -916,6 +936,9 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 				 * equidistant camera model. */
 				float tan_x = (distortion.g.x - cx) / fx;
 				float tan_y_down = (distortion.g.y - 0.5f) / fy;
+				// Keep optical rays alongside the static UVs for GPU rotation.
+				map[index + 2] = tan_x;
+				map[index + 3] = tan_y_down;
 				if (calibrated) {
 					/* PS VR2 view orientations are identity relative to the head.
 					 * At infinity, eye/camera translations do not affect the ray. */
@@ -971,7 +994,7 @@ macos_passthrough_create_uv_maps(struct comp_window_macos *cwm)
 		[cwm->passthrough_uv_maps[eye] replaceRegion:region
 		                                 mipmapLevel:0
 		                                   withBytes:map
-		                                 bytesPerRow:MACOS_PASSTHROUGH_MAP_SIZE * 2 * sizeof(float)];
+		                                 bytesPerRow:MACOS_PASSTHROUGH_MAP_SIZE * 4 * sizeof(float)];
 	}
 
 	free(map);
@@ -1012,35 +1035,9 @@ macos_passthrough_init(struct comp_window_macos *cwm)
 		}
 	}
 
-	static const char *shader_source =
-	    "#include <metal_stdlib>\n"
-	    "using namespace metal;\n"
-	    "struct VSOut { float4 pos [[position]]; float2 uv; };\n"
-	    "vertex VSOut psvr2_pt_vs(uint vid [[vertex_id]]) {\n"
-	    "  float2 p[3] = {float2(-1,-1), float2(3,-1), float2(-1,3)};\n"
-	    "  VSOut o; o.pos=float4(p[vid],0,1);"
-	    "  o.uv=float2(p[vid].x*0.5+0.5, 1.0-(p[vid].y*0.5+0.5)); return o;\n"
-	    "}\n"
-	    "struct Params { float brightness; uint has_app; uint map_size; uint pad; };\n"
-	    "fragment float4 psvr2_pt_fs(VSOut in [[stage_in]],"
-	    " texture2d<float> app [[texture(0)]], texture2d<float> cam_l [[texture(1)]],"
-	    " texture2d<float> cam_r [[texture(2)]], texture2d<float, access::read> map_l [[texture(3)]],"
-	    " texture2d<float, access::read> map_r [[texture(4)]], constant Params &params [[buffer(0)]]) {\n"
-	    "  constexpr sampler s(coord::normalized, address::clamp_to_edge, filter::linear);\n"
-	    "  bool right = in.uv.x >= 0.5; float2 local_uv=float2(right ? (in.uv.x-0.5)*2.0 : in.uv.x*2.0, in.uv.y);\n"
-	    "  uint2 mi=uint2(min(uint(local_uv.x*float(params.map_size)), params.map_size-1),"
-	    "                 min(uint(local_uv.y*float(params.map_size)), params.map_size-1));\n"
-	    "  float2 cuv = right ? map_r.read(mi).rg : map_l.read(mi).rg;\n"
-	    "  float3 camera=float3(0.0);"
-	    "  if (cuv.x >= 0.0 && cuv.y >= 0.0) { float g=(right ? cam_r.sample(s,cuv).r : cam_l.sample(s,cuv).r);"
-	    "    camera=float3(saturate(g*params.brightness)); }\n"
-	    "  if (params.has_app != 0) { float4 a=app.sample(s,in.uv); return float4(a.rgb + camera*(1.0-a.a), 1.0); "
-	    "}\n"
-	    "  return float4(camera,1.0);\n"
-	    "}\n";
 
 	NSError *error = nil;
-	NSString *source = [NSString stringWithUTF8String:shader_source];
+	NSString *source = [NSString stringWithUTF8String:macos_passthrough_shader_source];
 	id<MTLLibrary> library = [device newLibraryWithSource:source options:nil error:&error];
 	if (library == nil) {
 		COMP_WARN(cwm->base.base.c, "Could not compile PS VR2 passthrough Metal shader: %s",
@@ -1121,6 +1118,22 @@ macos_passthrough_upload(struct comp_window_macos *cwm)
 			                                           withBytes:frame->data
 			                                         bytesPerRow:frame->stride];
 			cwm->passthrough_uploaded_timestamp[eye] = frame->timestamp;
+			cwm->passthrough_capture_valid[eye] = false;
+			if (cwm->passthrough_rotation_enabled &&
+			    u_passthrough_calibration_frame_is_fresh(frame->timestamp, frame->source_timestamp,
+			                                             os_monotonic_get_ns())) {
+				struct xrt_space_relation relation = {0};
+				struct xrt_device *head = cwm->base.base.c->xdev;
+				const enum xrt_space_relation_flags flags = XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+				                                            XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT;
+				if (xrt_device_get_tracked_pose(head, XRT_INPUT_GENERIC_HEAD_POSE, frame->timestamp,
+				                                &relation) == XRT_SUCCESS &&
+				    (relation.relation_flags & flags) == flags &&
+				    math_quat_validate(&relation.pose.orientation)) {
+					cwm->passthrough_capture_orientation[eye] = relation.pose.orientation;
+					cwm->passthrough_capture_valid[eye] = true;
+				}
+			}
 		}
 	}
 
@@ -1135,7 +1148,8 @@ macos_passthrough_encode(struct comp_window_macos *cwm,
                          id<MTLCommandBuffer> command_buffer,
                          id<CAMetalDrawable> drawable,
                          id<MTLTexture> app_texture,
-                         bool has_application_layers)
+                         bool has_application_layers,
+                         const struct macos_present_job *job)
 {
 	if (cwm->passthrough_pipeline == nil || !cwm->passthrough_sinks_attached || !macos_passthrough_upload(cwm)) {
 		return false;
@@ -1157,13 +1171,60 @@ macos_passthrough_encode(struct comp_window_macos *cwm,
 		float brightness;
 		uint32_t has_app;
 		uint32_t map_size;
-		uint32_t pad;
+		uint32_t rotate;
+		struct
+		{
+			float intrinsics[4];
+			float k[4];
+			float rows[3][4];
+		} cameras[2];
 	} params = {
 	    .brightness = (float)debug_get_num_option_macos_passthrough_brightness_percent() / 100.0f,
 	    .has_app = has_application_layers ? 1u : 0u,
 	    .map_size = MACOS_PASSTHROUGH_MAP_SIZE,
-	    .pad = 0,
 	};
+	bool rotate = cwm->passthrough_rotation_enabled && job->display_head_orientation_valid;
+	int64_t now_ns = os_monotonic_get_ns();
+	for (uint32_t eye = 0; rotate && eye < 2; eye++) {
+		const struct u_passthrough_camera *camera = &cwm->passthrough_calibration.cameras[eye];
+		struct xrt_quat camera_from_display;
+		rotate = cwm->passthrough_capture_valid[eye] && now_ns >= cwm->passthrough_uploaded_timestamp[eye] &&
+		         now_ns - cwm->passthrough_uploaded_timestamp[eye] < 250 * U_TIME_1MS_IN_NS &&
+		         u_passthrough_calibration_rotation(camera, &cwm->passthrough_capture_orientation[eye],
+		                                            &job->display_head_orientation, &camera_from_display);
+		if (!rotate) {
+			break;
+		}
+		params.cameras[eye].intrinsics[0] = (float)camera->fx;
+		params.cameras[eye].intrinsics[1] = (float)camera->fy;
+		params.cameras[eye].intrinsics[2] = (float)camera->cx;
+		params.cameras[eye].intrinsics[3] = (float)camera->cy;
+		for (uint32_t k = 0; k < 4; k++) {
+			params.cameras[eye].k[k] = (float)camera->k[k];
+		}
+		for (uint32_t axis = 0; axis < 3; axis++) {
+			struct xrt_vec3 basis = {0}, column;
+			if (axis == 0)
+				basis.x = 1;
+			if (axis == 1)
+				basis.y = 1;
+			if (axis == 2)
+				basis.z = 1;
+			math_quat_rotate_vec3(&camera_from_display, &basis, &column);
+			params.cameras[eye].rows[0][axis] = column.x;
+			params.cameras[eye].rows[1][axis] = column.y;
+			params.cameras[eye].rows[2][axis] = column.z;
+		}
+	}
+	params.rotate = rotate ? 1 : 0;
+	if (cwm->passthrough_rotation_enabled &&
+	    (!cwm->passthrough_rotation_status_logged || rotate != cwm->passthrough_rotation_active)) {
+		COMP_INFO(cwm->base.base.c,
+		          "Passthrough rotation %s (requires fresh camera/header clock and tracked poses)",
+		          rotate ? "active" : "unavailable; using static mapping");
+		cwm->passthrough_rotation_active = rotate;
+		cwm->passthrough_rotation_status_logged = true;
+	}
 
 	[encoder setRenderPipelineState:cwm->passthrough_pipeline];
 	[encoder setFragmentTexture:app_texture atIndex:0];
@@ -1846,7 +1907,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		if (job->passthrough_active) {
 			encoded_passthrough =
 			    macos_passthrough_encode(cwm, command_buffer, drawable, cwm->metal_images[index],
-			                             job->passthrough_has_application_layers);
+			                             job->passthrough_has_application_layers, job);
 		}
 		if (!encoded_passthrough) {
 			id<MTLBlitCommandEncoder> blit = [command_buffer blitCommandEncoder];
@@ -2261,6 +2322,8 @@ comp_window_macos_present(struct comp_target *ct,
 	    .present_queue = present_queue,
 	    .passthrough_active = ct->c->passthrough_active,
 	    .passthrough_has_application_layers = ct->c->passthrough_has_application_layers,
+	    .display_head_orientation = ct->images[index].display_head_orientation,
+	    .display_head_orientation_valid = ct->images[index].display_head_orientation_valid,
 	};
 	if (!cwm->present_worker_enabled) {
 		/* Submit on the compositor thread; async GPU completion does not need a worker. */

@@ -236,3 +236,13 @@ The user also reports “All good” with `--passthrough`,
 This confirms the native diagnostic's camera sharing and calibrated blended
 rendering through hosted compositing. The previously reported lag remains an
 unmeasured timing/reprojection issue. See the [detailed record](macos-psvr2-passthrough-calibration.md#calibrated-hosted-blended-scene-visually-confirmed-2026-10-08).
+
+
+## Camera rotation correction (implemented, awaiting hardware), 2026-10-08
+
+The camera background now has opt-in rotational reprojection via
+`XRT_MACOS_PASSTHROUGH_ROTATION=1`. It uses camera header timing and the virtual
+scene's exact timewarp head orientation. This targets the reported separation
+between camera and virtual details during head rotation; translation remains
+deferred. Static calibrated passthrough remains the default and fallback.
+See the [implementation and launchd check](macos-psvr2-passthrough-calibration.md#opt-in-camera-rotational-reprojection-2026-10-08).

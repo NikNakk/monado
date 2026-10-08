@@ -95,3 +95,31 @@ u_passthrough_calibration_project(const struct u_passthrough_camera *camera,
 	*out_uv = (struct xrt_vec2){(float)u, (float)v};
 	return true;
 }
+
+
+bool
+u_passthrough_calibration_rotation(const struct u_passthrough_camera *camera,
+                                   const struct xrt_quat *capture_head,
+                                   const struct xrt_quat *display_head,
+                                   struct xrt_quat *out_camera_from_display)
+{
+	if (!math_quat_validate(&camera->head_from_camera.orientation) || !math_quat_validate(capture_head) ||
+	    !math_quat_validate(display_head)) {
+		return false;
+	}
+	struct xrt_quat capture_from_world, camera_from_capture, capture_from_display;
+	math_quat_invert(capture_head, &capture_from_world);
+	math_quat_invert(&camera->head_from_camera.orientation, &camera_from_capture);
+	math_quat_rotate(&capture_from_world, display_head, &capture_from_display);
+	math_quat_rotate(&camera_from_capture, &capture_from_display, out_camera_from_display);
+	math_quat_normalize(out_camera_from_display);
+	return true;
+}
+
+
+bool
+u_passthrough_calibration_frame_is_fresh(int64_t timestamp_ns, int64_t source_timestamp_ns, int64_t now_ns)
+{
+	return source_timestamp_ns > 0 && timestamp_ns > 0 && timestamp_ns <= now_ns &&
+	       now_ns - timestamp_ns < 250000000;
+}
