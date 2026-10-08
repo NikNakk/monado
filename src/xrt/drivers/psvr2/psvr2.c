@@ -610,6 +610,10 @@ static void
 psvr2_hmd_destroy(struct xrt_device *xdev)
 {
 	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	if (hmd->teardown_hook != NULL) {
+		hmd->teardown_hook(hmd->teardown_hook_data);
+		hmd->teardown_hook = NULL;
+	}
 	if (hmd->dev != NULL && hmd->camera_enable) {
 		(void)set_camera_mode(hmd, PSVR2_CAMERA_MODE_OFF);
 		hmd->camera_enable = false;
@@ -1102,6 +1106,9 @@ img_xfer_cb(struct libusb_transfer *xfer)
 					size_t first_sink = (camera_set - 4) * 2;
 					frame_sinks[0] = hmd->camera_frame_sinks[first_sink];
 					frame_sinks[1] = hmd->camera_frame_sinks[first_sink + 1];
+					if (frame_sinks[0] != NULL || frame_sinks[1] != NULL) {
+						hmd->camera_frame_pushes_in_flight++;
+					}
 				}
 			}
 		}
@@ -1143,6 +1150,11 @@ img_xfer_cb(struct libusb_transfer *xfer)
 			frame->source_id = (camera_set - 4) * 2 + i;
 			xrt_sink_push_frame(frame_sinks[i], frame);
 			xrt_frame_reference(&frame, NULL);
+		}
+		if (frame_sinks[0] != NULL || frame_sinks[1] != NULL) {
+			os_mutex_lock(&hmd->data_lock);
+			hmd->camera_frame_pushes_in_flight--;
+			os_mutex_unlock(&hmd->data_lock);
 		}
 
 		PSVR2_TRACE(hmd, "Camera frame - %d bytes", xfer->actual_length);

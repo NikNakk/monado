@@ -24,6 +24,7 @@
 
 #ifdef XRT_BUILD_DRIVER_PSSENSE
 #include "pssense/pssense_interface.h"
+#include "target_psvr2_sense_tracking.h"
 #endif
 
 /*
@@ -137,6 +138,11 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 		goto unlock_and_fail;
 	}
 
+#ifdef XRT_BUILD_DRIVER_PSSENSE
+	// Experimental, opt-in optical tracking of the Sense controllers; sets the options it needs before creation.
+	bool sense_tracking = psvr2_sense_tracking_requested();
+#endif
+
 	struct xrt_device *head_xdev = NULL;
 	struct xrt_prober_device *head_xpdev =
 	    u_builder_find_prober_device(xpdevs, xpdev_count, PSVR2_VID, PSVR2_PID, XRT_BUS_TYPE_USB);
@@ -195,6 +201,10 @@ psvr2_open_system_impl(struct xrt_builder *xb,
 
 	tbrh->left = left_xdev;
 	tbrh->right = right_xdev;
+
+	if (sense_tracking && head_xdev != NULL) {
+		(void)psvr2_sense_tracking_start(head_xdev, left_xdev, right_xdev);
+	}
 #endif
 
 	xret = xrt_prober_unlock_list(xp, &xpdevs);

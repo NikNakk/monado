@@ -37,6 +37,13 @@ endif()
 
 if(XRT_BUILD_DRIVER_PSVR2)
 	target_sources(target_lists PRIVATE target_builder_psvr2.c)
+	if(XRT_BUILD_DRIVER_PSSENSE)
+		# Experimental Sense optical tracking with the headset's cameras (PSVR2_SENSE_6DOF=1).
+		target_sources(
+			target_lists PRIVATE target_psvr2_sense_tracking.c target_psvr2_sense_tracking.h
+			)
+		target_link_libraries(target_lists PRIVATE constellation)
+	endif()
 endif()
 
 if(XRT_BUILD_DRIVER_RIFT)

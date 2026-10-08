@@ -107,6 +107,7 @@ struct hid_iokit
 	uint64_t pssense_device_timestamp_host_ns;
 
 	bool pssense_timing_diag;
+	bool pssense_raw_reports;
 	bool pssense_timing_diag_have_last;
 	uint8_t pssense_timing_diag_last_phase;
 	uint8_t pssense_timing_diag_last_sequence;
@@ -136,6 +137,32 @@ iokit_env_enabled(const char *name)
 	const char *value = getenv(name);
 	return value != NULL && value[0] != '\0' && strcmp(value, "0") != 0 && strcmp(value, "false") != 0 &&
 	       strcmp(value, "FALSE") != 0;
+}
+
+/* Experimental wire evidence. Disabled by default; capture stderr in a persistent session directory.
+ * TX bytes are logged AFTER the force-IR override and CRC, with the IOKit result.
+ * RX bytes are logged in the callback, before the bounded input queue can drop them.
+ */
+static void
+iokit_log_raw_report(struct hid_iokit *hid, const char *direction, IOHIDReportType type,
+                     uint32_t report_id, const uint8_t *data, size_t length, IOReturn result,
+                     int64_t start_ns)
+{
+	if (!hid->pssense_raw_reports) {
+		return;
+	}
+	struct timespec realtime = {0};
+	clock_gettime(CLOCK_REALTIME, &realtime);
+	flockfile(stderr);
+	fprintf(stderr, "PSSENSE_RAW side=%c device=%p direction=%s type=%u id=%u start_ns=%lld end_ns=%lld realtime_ns=%lld result=%u length=%zu hex=",
+	        hid->pssense_side, (void *)hid->device, direction, (unsigned)type, report_id,
+	        (long long)start_ns, (long long)os_monotonic_get_ns(),
+	        (long long)realtime.tv_sec * 1000000000LL + realtime.tv_nsec, (unsigned)result, length);
+	for (size_t i = 0; i < length; i++) {
+		fprintf(stderr, "%02x", data[i]);
+	}
+	fputc('\n', stderr);
+	funlockfile(stderr);
 }
 
 static uint32_t
@@ -403,6 +430,7 @@ iokit_input_report_callback(void *context,
 		return;
 	}
 	int64_t timestamp_ns = os_monotonic_get_ns();
+	iokit_log_raw_report(hid, "rx", report_type, report_id, report, (size_t)report_length, result, timestamp_ns);
 
 	struct iokit_input_report *queued = U_TYPED_CALLOC(struct iokit_input_report);
 	if (queued == NULL) {
@@ -658,7 +686,9 @@ iokit_set_report(struct hid_iokit *hid, IOHIDReportType type, const uint8_t *dat
 		report_length--;
 	}
 
+	int64_t start_ns = os_monotonic_get_ns();
 	IOReturn ret = IOHIDDeviceSetReport(hid->device, type, report_id, report, report_length);
+	iokit_log_raw_report(hid, "tx", type, report_id, report, (size_t)report_length, ret, start_ns);
 	if (ret != kIOReturnSuccess) {
 		fprintf(stderr,
 		        "os_hid_iokit: IOHIDDeviceSetReport failed: type=%s id=0x%02x app_length=%zu iokit_length=%ld "
@@ -710,7 +740,10 @@ iokit_get_feature(struct os_hid_device *ohdev, uint8_t report_num, uint8_t *data
 		report_length--;
 	}
 
+	int64_t start_ns = os_monotonic_get_ns();
 	IOReturn ret = IOHIDDeviceGetReport(hid->device, kIOHIDReportTypeFeature, report_num, report, &report_length);
+	iokit_log_raw_report(hid, "feature_rx", kIOHIDReportTypeFeature, report_num, report,
+	                     ret == kIOReturnSuccess ? (size_t)report_length : 0, ret, start_ns);
 	if (ret != kIOReturnSuccess) {
 		return -1;
 	}
@@ -827,6 +860,7 @@ os_hid_open_iokit(void *native_device, struct os_hid_device **out_hid)
 	hid->pssense_side = iokit_pssense_side(hid->device);
 	hid->force_pssense_ir = hid->is_pssense && iokit_env_enabled("PSSENSE_FORCE_IR");
 	hid->pssense_timing_diag = hid->is_pssense && iokit_env_enabled("PSSENSE_TIMING_DIAG");
+	hid->pssense_raw_reports = hid->is_pssense && iokit_env_enabled("PSSENSE_RAW_REPORTS");
 	if (hid->force_pssense_ir) {
 		fprintf(stderr,
 		        "os_hid_iokit: PSSENSE_FORCE_IR=1 enabled for PS VR2 Sense controller; replacing runtime "

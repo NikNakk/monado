@@ -318,6 +318,11 @@ struct psvr2_hmd
 	struct t_timing_event_source camera_timing_source;
 	struct t_timing_event_sink *camera_timing_sinks[2];
 	struct xrt_frame_sink *camera_frame_sinks[4];
+	//! Frame pushes to camera_frame_sinks running outside data_lock; clearing the sinks waits for them.
+	uint32_t camera_frame_pushes_in_flight;
+	//! Run first in destroy, while every other device still exists (psvr2_set_teardown_hook).
+	void (*teardown_hook)(void *data);
+	void *teardown_hook_data;
 	uint32_t last_camera_event_vts_us;
 	uint32_t last_camera_event_sequence;
 

@@ -15,6 +15,8 @@
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_time.h"
+#include "os/os_time.h"
 
 #include "psvr2.h"
 #include "psvr2_interface.h"
@@ -95,7 +97,27 @@ psvr2_set_camera_frame_sinks(struct xrt_device *xdev, struct xrt_frame_sink *con
 	} else {
 		memcpy(hmd->camera_frame_sinks, sinks, sizeof(hmd->camera_frame_sinks));
 	}
+	// The USB thread pushes frames outside the lock: once cleared, wait out any push still using the old sinks,
+	// so the caller may destroy them on return.
+	while (sinks == NULL && hmd->camera_frame_pushes_in_flight > 0) {
+		os_mutex_unlock(&hmd->data_lock);
+		os_nanosleep(U_TIME_1MS_IN_NS);
+		os_mutex_lock(&hmd->data_lock);
+	}
 	os_mutex_unlock(&hmd->data_lock);
+	return true;
+}
+
+bool
+psvr2_set_teardown_hook(struct xrt_device *xdev, void (*hook)(void *data), void *data)
+{
+	if (xdev == NULL || strstr(xdev->str, "PS VR2") == NULL) {
+		return false;
+	}
+
+	struct psvr2_hmd *hmd = psvr2_hmd(xdev);
+	hmd->teardown_hook = hook;
+	hmd->teardown_hook_data = data;
 	return true;
 }
 
