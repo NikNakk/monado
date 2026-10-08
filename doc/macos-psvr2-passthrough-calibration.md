@@ -6,9 +6,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # PS VR2 passthrough ChArUco capture guide
 
-Updated 2026-10-08. This guide separates the capture we can do now from the
-remaining stereo solve, pose alignment and runtime integration. No hardware
-capture was performed while preparing it.
+Updated 2026-10-08. Eight user-operated ChArUco captures support the transferred
+lens/stereo calibration, and the user now confirms the service-composited
+camera-only image looks good. Perceived motion lag remains; blended-scene and
+hosted-client validation are separate outstanding checks. The dated evidence
+below preserves the capture, implementation and failed-startup history.
 
 ## Tooling audit and existing evidence
 
@@ -564,3 +566,30 @@ The hardware-enabled macOS build and existing passthrough/frame-share/hosted-
 client/session CTests pass after the fix. Re-run the same launchd bootstrap and
 camera-only diagnostic commands above with the rebuilt binaries; the actual
 calibrated image and motion remain unvalidated.
+
+
+## Calibrated camera-only image visually confirmed, 2026-10-08
+
+After the IPC capability correction at source commit `c0c24f1a0`, the user
+repeated the service-composited `--passthrough-only` run with mode 16 and the
+transferred candidate. Their report: “Calibration looks good. It feels slightly
+behind lag-wise where I remember the PSVR2 on PS5 being, but otherwise fine.”
+This establishes visible calibrated camera-only output and acceptable apparent
+geometry for this session. It is a subjective comparison from memory, not a
+measured PS5 latency comparison or a full-field/metric alignment validation.
+Keep the calibration opt-in. No blended-scene or hosted-client result is implied.
+
+The BC4 receive path currently stamps each image with host USB-callback time
+(`os_monotonic_get_ns()`), rather than a calibrated exposure timestamp. The
+presenter retains the latest image and uploads it at presentation, with a
+static calibrated UV map; it does not rotate the camera image from its exposure
+head pose to the display head pose. These are concrete timing/reprojection
+limitations, but their share of the reported lag has not been measured.
+
+Next: run `--passthrough` with the same service-composited setup to check the
+virtual scene over the cameras. Then assess hosted compositing separately.
+For latency work, instrument camera arrival-to-presentation age and establish
+BC4 exposure timestamps/pose association before adding late rotational camera
+reprojection. Arrival age alone cannot measure exposure-to-display latency;
+near-object translational parallax still requires depth or a reference plane.
+Do not request more board captures merely because this timing issue remains.

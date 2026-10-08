@@ -101,7 +101,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | Depth layers | **Off by default** | `XR_KHR_composition_layer_depth` is not exposed on macOS unless configured with `-DXRT_FEATURE_OPENXR_LAYER_DEPTH=ON`; depth-aware reprojection additionally needs `XRT_COMPOSITOR_DEPTH_REPROJECTION=1`. Depth swapchain formats (including `Depth32Float_Stencil8`) are still creatable. |
 | Wine OpenXR / OpenVR | **External compatibility project** | Wine/OpenVR integration has moved to [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr); Monado retains only generic macOS/Metal runtime and resource-handoff support. |
 | SteamVR games under Wine | **External experimental path** | Game compatibility and launch policy are tracked in [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr) and the relevant OpenVR compatibility projects. |
-| PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; an opt-in transferred calibration mapping is implemented, with hardware validation still pending. |
+| PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; the opt-in transferred calibration is visually confirmed in camera-only service compositing. Perceived lag remains; blended scenes and hosted compositing need validation. |
 | PS VR2 eye tracking | **Working experimental** | `XR_EXT_eye_gaze_interaction` using the Sony calibration blob plus an optional 9-point user calibration; gaze activates lazily. Accuracy still needs broader hardware validation. |
 | Foveated rendering | **Hardware-validated, opt-in at build time** | Fixed `XR_FB_foveation` / `XR_FB_foveation_configuration` works without gaze; `XR_META_foveation_eye_tracked` adds runtime-owned gaze. Validated on PS VR2 through `monado-service`. Metal is the only rendering backend, via the experimental `XR_MNDX_foveation_metal` companion. |
 | SteamVR Home | **Unresolved** | Not currently working; feasibility depends on how much additional SteamVR/OpenVR behaviour can be reproduced without Valve's compositor. |
@@ -490,8 +490,9 @@ The integration branch now has an experimental runtime path from the stock-heads
 That path already covers the OpenXR API (`XR_FB_passthrough` create/start/
 layer/resume), carrying passthrough layer state through IPC and the multi
 compositor, and compositing the camera image behind application content in the
-final Metal presentation pass. It uses a tunable equidistant-fisheye
-approximation rather than real camera calibration.
+final Metal presentation pass. The opt-in transferred fisheye calibration is
+visually confirmed in camera-only service compositing (2026-10-08); the tunable
+approximation remains the default fallback. Perceived camera lag remains.
 
 What is still missing before this should be considered calibrated MR support:
 
@@ -862,9 +863,9 @@ capture is prepared. See the
 - Check fork formatting with CI-pinned clang-format and cmakelang, update this
   roadmap, and publish the integration branch for Linux/macOS CI after the
   October 7 upstream merge. Hardware regression of that merge remains separate.
-- Establish visible PS VR2 camera-only and camera-plus-scene passthrough before
-  claiming blended application validation. Calibrate the actual passthrough
-  camera mode; see the [validation and calibration plan](macos-psvr2-passthrough.md#validation-and-calibration-plan-2026-10-08).
+- Calibrated PS VR2 camera-only passthrough is visually confirmed. Validate
+  camera-plus-scene and hosted compositing, then measure camera timing and
+  assess late rotational reprojection; see the [validation and calibration plan](macos-psvr2-passthrough.md#validation-and-calibration-plan-2026-10-08).
 - Validate fixed then eye-tracked foveation in Unity or Unreal; Wine requires
   rendering-backend work as well as extension transport. See the
   [framework plan](macos-openxr-foveation.md#framework-and-wine-validation-plan-2026-10-08).
@@ -873,6 +874,7 @@ capture is prepared. See the
 
 Passthrough calibration now has a [live USB capture guide](macos-psvr2-passthrough-calibration.md)
 and the previously uncommitted mode-4/BC4 comparison tooling from the separate
-Sense checkout. The three-position cross-mode evidence supports approximately
-2x lower-camera correspondence; full-field calibration and runtime loading
+Sense checkout. Eight new positions support 2x lower-camera transfer with a
+half-pixel principal-point offset. The opt-in runtime mapping now has a positive
+camera-only visual result; full-field coverage, measured alignment and latency
 remain work (2026-10-08).
