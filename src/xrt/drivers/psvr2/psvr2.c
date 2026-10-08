@@ -1480,6 +1480,17 @@ img_xfer_cb(struct libusb_transfer *xfer)
 					memcpy(xf->data, xfer->buffer + header_size + eye * plane_size, plane_size);
 					xf->timestamp = os_monotonic_get_ns();
 					xf->source_timestamp = xf->timestamp;
+#ifdef XRT_OS_OSX
+					/* Preserve the header clock mapping for camera reprojection.
+					 * A zero source timestamp explicitly marks arrival-only timing. */
+					xf->timestamp = received_ns;
+					xf->source_timestamp = 0;
+					if (camera_timestamp_ns > 0 && camera_timestamp_ns <= received_ns &&
+					    received_ns - camera_timestamp_ns < 250 * U_TIME_1MS_IN_NS) {
+						xf->timestamp = camera_timestamp_ns;
+						xf->source_timestamp = (int64_t)camera_vts_us * U_TIME_1US_IN_NS;
+					}
+#endif
 					xrt_sink_push_frame(sink, xf);
 					xrt_frame_reference(&xf, NULL);
 				}

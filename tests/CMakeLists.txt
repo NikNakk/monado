@@ -173,6 +173,28 @@ if(XRT_HAVE_VULKAN)
 		)
 	add_dependencies(tests_render_pipeline_cache aux_shaders render_shader_specialization)
 	if(APPLE)
+		add_executable(tests_macos_passthrough_rotation tests_macos_passthrough_rotation.mm)
+		target_compile_features(tests_macos_passthrough_rotation PRIVATE cxx_std_17)
+		target_link_libraries(
+			tests_macos_passthrough_rotation
+			PRIVATE
+				aux_util
+				aux_math
+				xrt-external-catch2
+				"-framework Metal"
+				"-framework Foundation"
+			)
+		add_test(
+			NAME tests_macos_passthrough_rotation
+			COMMAND tests_macos_passthrough_rotation
+			)
+		set_target_properties(
+			tests_macos_passthrough_rotation PROPERTIES FOLDER monado_tests
+			)
+		set_tests_properties(tests_macos_passthrough_rotation PROPERTIES SKIP_RETURN_CODE 4)
+	endif()
+
+	if(APPLE)
 		target_sources(tests_render_pipeline_cache PRIVATE tests_macos_metal_device.mm)
 		target_link_libraries(tests_render_pipeline_cache PRIVATE "-framework Metal")
 	endif()

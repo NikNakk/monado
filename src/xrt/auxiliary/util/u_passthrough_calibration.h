@@ -31,6 +31,18 @@ u_passthrough_calibration_project(const struct u_passthrough_camera *camera,
                                   const struct xrt_vec3 *head_ray,
                                   struct xrt_vec2 *out_uv);
 
+//! Require mapped hardware timing and a frame less than 250 ms old (never future-dated).
+bool
+u_passthrough_calibration_frame_is_fresh(int64_t timestamp_ns, int64_t source_timestamp_ns, int64_t now_ns);
+
+//! Map a display-head ray into the camera at capture: inverse(camera) * inverse(capture) * display.
+//! Orientations must be valid unit quaternions in the same tracking origin.
+bool
+u_passthrough_calibration_rotation(const struct u_passthrough_camera *camera,
+                                   const struct xrt_quat *capture_head,
+                                   const struct xrt_quat *display_head,
+                                   struct xrt_quat *out_camera_from_display);
+
 #ifdef __cplusplus
 }
 #endif

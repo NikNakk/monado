@@ -65,6 +65,9 @@ struct comp_target_image
 	VkImageView view;
 	//! Direct-value/storage view, falls back to @ref view when no split is needed.
 	VkImageView storage_view;
+	//! Head orientation used for this image's timewarp, before eye offsets.
+	struct xrt_quat display_head_orientation;
+	bool display_head_orientation_valid;
 };
 
 /*!

@@ -98,3 +98,59 @@ TEST_CASE("Passthrough projection agrees with OpenCV fisheye projectPoints")
 	REQUIRE(uv.x == Catch::Approx((613.18499557 + .5) / 1024).margin(1e-7));
 	REQUIRE(uv.y == Catch::Approx((429.80260821 + .5) / 1016).margin(1e-7));
 }
+
+TEST_CASE("Camera rotational reprojection keeps a world direction fixed across head motion")
+{
+	struct u_passthrough_camera camera = {};
+	struct xrt_vec3 camera_axis = {0, 1, 0};
+	math_quat_from_angle_vector(.25f, &camera_axis, &camera.head_from_camera.orientation);
+	const struct xrt_vec3 camera_ray = {.1f, -.2f, -1};
+	for (const struct xrt_vec3 axis : {xrt_vec3{1, 0, 0}, xrt_vec3{0, 1, 0}, xrt_vec3{0, 0, 1}}) {
+		for (float movement : {-.4f, 0.0f, .4f}) {
+			struct xrt_quat capture, display, inverse_display, camera_from_display;
+			math_quat_from_angle_vector(-.15f, &camera_axis, &capture);
+			math_quat_from_angle_vector(movement, &axis, &display);
+			// A fixed world direction, observed by the camera at capture.
+			struct xrt_vec3 capture_ray, world_ray, display_ray, recovered;
+			math_quat_rotate_vec3(&camera.head_from_camera.orientation, &camera_ray, &capture_ray);
+			math_quat_rotate_vec3(&capture, &capture_ray, &world_ray);
+			math_quat_invert(&display, &inverse_display);
+			math_quat_rotate_vec3(&inverse_display, &world_ray, &display_ray);
+			REQUIRE(u_passthrough_calibration_rotation(&camera, &capture, &display, &camera_from_display));
+			math_quat_rotate_vec3(&camera_from_display, &display_ray, &recovered);
+			CHECK(recovered.x == Catch::Approx(camera_ray.x).margin(1e-6));
+			CHECK(recovered.y == Catch::Approx(camera_ray.y).margin(1e-6));
+			CHECK(recovered.z == Catch::Approx(camera_ray.z).margin(1e-6));
+		}
+	}
+}
+
+TEST_CASE("Stationary rotational reprojection matches the static camera transform and rejects invalid poses")
+{
+	struct u_passthrough_camera camera = {};
+	struct xrt_vec3 axis = {1, 0, 0};
+	math_quat_from_angle_vector(.5f, &axis, &camera.head_from_camera.orientation);
+	struct xrt_quat head, result, inverse_camera;
+	math_quat_from_angle_vector(-.7f, &axis, &head);
+	REQUIRE(u_passthrough_calibration_rotation(&camera, &head, &head, &result));
+	math_quat_invert(&camera.head_from_camera.orientation, &inverse_camera);
+	struct xrt_vec3 ray = {.2f, .3f, -1}, expected, actual;
+	math_quat_rotate_vec3(&inverse_camera, &ray, &expected);
+	math_quat_rotate_vec3(&result, &ray, &actual);
+	CHECK(actual.x == Catch::Approx(expected.x));
+	CHECK(actual.y == Catch::Approx(expected.y));
+	CHECK(actual.z == Catch::Approx(expected.z));
+	struct xrt_quat invalid = {};
+	CHECK_FALSE(u_passthrough_calibration_rotation(&camera, &invalid, &head, &result));
+	CHECK_FALSE(u_passthrough_calibration_rotation(&camera, &head, &invalid, &result));
+}
+
+TEST_CASE("Camera reprojection rejects arrival-only, future and stale timestamps")
+{
+	constexpr int64_t now = 1000000000;
+	CHECK(u_passthrough_calibration_frame_is_fresh(now - 10000000, 900000000, now));
+	CHECK_FALSE(u_passthrough_calibration_frame_is_fresh(now - 10000000, 0, now));
+	CHECK_FALSE(u_passthrough_calibration_frame_is_fresh(0, 900000000, now));
+	CHECK_FALSE(u_passthrough_calibration_frame_is_fresh(now + 1, 900000000, now));
+	CHECK_FALSE(u_passthrough_calibration_frame_is_fresh(now - 250000000, 900000000, now));
+}

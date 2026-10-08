@@ -61,6 +61,18 @@ on 2026-10-08, followed by a successful blended hosted-compositor run. Perceived
 lag remains. Camera streams
 remain opt-in. See the [calibration guide](macos-psvr2-passthrough-calibration.md#experimental-transferred-runtime-mapping-2026-10-08).
 
+## Passthrough rotational reprojection (2026-10-08)
+
+`XRT_MACOS_PASSTHROUGH_ROTATION` (default `0`) opts the macOS presenter into
+camera rotational reprojection. It requires a valid
+`XRT_MACOS_PASSTHROUGH_CALIBRATION`. Set it in the service for service compositing
+and in the client for hosted compositing. The camera header's mapped timestamp
+selects a capture orientation; the camera rays rotate to the same predicted
+head orientation used for the virtual scene's timewarp. Missing/stale timing
+or tracking retains static mapping. Translation is deferred. The CPU and
+headless Metal tests pass; headset validation is pending. See the
+[implementation and launchd test](macos-psvr2-passthrough-calibration.md#opt-in-camera-rotational-reprojection-2026-10-08).
+
 ## Automatic floor calibration (2026-10-06)
 
 `XRT_FLOOR_EYE_HEIGHT_M` (unset, 0.5-2.5) is set in the **service**. Once the

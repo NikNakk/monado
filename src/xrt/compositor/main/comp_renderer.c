@@ -777,6 +777,11 @@ calc_pose_data(struct comp_renderer *r,
 {
 	COMP_TRACE_MARKER();
 
+#ifdef XRT_OS_OSX
+	struct comp_target_image *target_image = &r->c->target->images[r->acquired_buffer];
+	target_image->display_head_orientation_valid = false;
+#endif
+
 	struct xrt_vec3 default_eye_relation = {
 	    0.063000f, /*! @todo get actual ipd_meters */
 	    0.0f,
@@ -819,6 +824,7 @@ calc_pose_data(struct comp_renderer *r,
 		return;
 	}
 
+
 	// Pose at end of scanout
 	if (scanout_time_ns != 0) {
 		xret = xrt_device_get_view_poses( //
@@ -846,6 +852,17 @@ calc_pose_data(struct comp_renderer *r,
 		}
 		head_relation[1] = head_relation[0];
 	}
+
+#ifdef XRT_OS_OSX
+	// Pass the exact same prediction to the final camera pass. Querying again
+	// on its worker would produce a different pose from the virtual scene.
+	target_image->display_head_orientation = head_relation[0].pose.orientation;
+	const enum xrt_space_relation_flags orientation_flags =
+	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT;
+	target_image->display_head_orientation_valid =
+	    (head_relation[0].relation_flags & orientation_flags) == orientation_flags && !r->c->debug.atw_off &&
+	    !debug_get_bool_option_force_atw_off_on_apple();
+#endif
 
 	struct xrt_fov dist_fov[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
 	for (uint32_t i = 0; i < view_count; i++) {
