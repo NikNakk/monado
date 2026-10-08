@@ -8,7 +8,7 @@ import plistlib
 
 root = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--base-plist', type=Path, default=root / 'build-wine/local-sense-default/org.freedesktop.monado.service.plist')
+parser.add_argument('--base-plist', type=Path, default=root / 'build/arm64/local-sense-default/org.freedesktop.monado.service.plist')
 parser.add_argument('--output', type=Path, required=True, help='New evidence directory; existing directories are rejected')
 args = parser.parse_args()
 base = plistlib.loads(args.base_plist.read_bytes())
@@ -35,7 +35,7 @@ Use the same optimised service/runtime, calibration, camera settings and control
 Power-cycle BOTH controllers before EACH trial; a service restart does not clear an existing lockout.
 Close clients before switching profiles. Unload both normal and isolated service registrations, then
 bootstrap ONE trial service.plist (these deliberately reuse the normal service label and endpoint).
-Launch build-wine's psvr2-openxr-test with the normal native-client.env and --generic-controller.
+Launch build/arm64's psvr2-openxr-test with the normal native-client.env and --generic-controller.
 Keep the client OPEN and both rings unobstructed 30-50 cm from the headset for 180 seconds.
 A: probes disabled, no forced rescan. Steady lock is the control; log any spontaneous loss/rescan.
 B: probes enabled, no forced rescan. Same visibility and duration as A.

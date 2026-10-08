@@ -354,7 +354,7 @@ def capture(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("output", type=pathlib.Path, help="new capture directory (must not exist)")
-    parser.add_argument("--build", type=pathlib.Path, default=ROOT / "build-wine")
+    parser.add_argument("--build", type=pathlib.Path, default=ROOT / "build" / "arm64")
     parser.add_argument("--editor", type=pathlib.Path, default=pathlib.Path.home() / "Code/UnrealEngine/Engine/Binaries/Mac/UnrealEditor.app")
     parser.add_argument("--project", type=pathlib.Path, default=pathlib.Path.home() / "Documents/Unreal Projects/MonadoMacTest/MonadoMacTest.uproject")
     parser.add_argument("--seconds", type=float, default=60)

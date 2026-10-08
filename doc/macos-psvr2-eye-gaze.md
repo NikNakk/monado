@@ -26,8 +26,8 @@ The Sony calibration blob, when available, is read from:
 ## Visual gaze test
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --gaze
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --gaze
 ```
 
 A yellow marker is rendered 2 m along the gaze ray returned through the standard
@@ -38,8 +38,8 @@ OpenXR eye-gaze interaction profile.
 Run:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --gaze-calibrate
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --gaze-calibrate
 ```
 
 The calibration is deliberately expressed in eye/head coordinates rather than

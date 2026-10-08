@@ -40,16 +40,16 @@ listed in the architecture document.
 Fixed foveation:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --fb-foveation --foveation-profile aggressive
 ```
 
 Runtime-owned eye-tracked foveation:
 
 ```sh
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --fb-eye-foveation --foveation-profile aggressive
 ```
 
@@ -63,8 +63,8 @@ squasher):
 
 ```sh
 OXR_DEBUG_FOVEATION_BINDING=1 \
-XR_RUNTIME_JSON="$PWD/build-wine/openxr_monado-dev.json" \
-./build-wine/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test \
   --fb-eye-foveation --fb-foveation-sparse-check --foveation-profile aggressive
 ```
 
