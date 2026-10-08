@@ -354,7 +354,7 @@ int
 cli_cmd_psvr2_constellation(int argc, const char **argv)
 {
 	if (argc < 3 || argc > 5) {
-		fprintf(stderr, "Usage: %s %s CALIBRATION.json [duration-seconds: 1-120] [capture-directory]\n",
+		fprintf(stderr, "Usage: %s %s CALIBRATION.json [duration-seconds: 1-900] [capture-directory]\n",
 		        argv[0], argv[1]);
 		return EXIT_FAILURE;
 	}
@@ -363,8 +363,8 @@ cli_cmd_psvr2_constellation(int argc, const char **argv)
 		errno = 0;
 		char *end = NULL;
 		duration_s = strtol(argv[3], &end, 10);
-		if (errno != 0 || end == argv[3] || *end != '\0' || duration_s < 1 || duration_s > 120) {
-			fprintf(stderr, "Duration must be between 1 and 120 seconds.\n");
+		if (errno != 0 || end == argv[3] || *end != '\0' || duration_s < 1 || duration_s > 900) {
+			fprintf(stderr, "Duration must be between 1 and 900 seconds.\n");
 			return EXIT_FAILURE;
 		}
 	}
