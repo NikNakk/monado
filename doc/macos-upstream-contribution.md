@@ -194,3 +194,10 @@ whitespace checks also pass. REUSE passes after adding the missing license
 header to the floor-calibration note. The existing `.build/native-service-check`
 macOS build succeeds without compiler warnings. Linux and macOS CI results for
 the published revision remain to be checked; hardware runs remain user-owned.
+
+The first pushed cleanup (`f85849f02`) passed contribution CI. Linux compiled
+successfully but failed its warning gate on a macOS-only reconnect option
+getter and a C compound literal in the C++ floor-calibration test. The follow-up
+guards the getter with `XRT_OS_OSX` and uses ordinary C++ aggregate assignment;
+it preserves Linux's disabled reconnect behavior and the strict warning gate.
+The macOS rebuild is warning-free and the floor-calibration suite passes.

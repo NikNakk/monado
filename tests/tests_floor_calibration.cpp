@@ -162,7 +162,7 @@ void
 init_fake_head(FakeHead &head)
 {
 	head.origin.type = XRT_TRACKING_TYPE_OTHER;
-	head.origin.initial_offset = (struct xrt_pose)XRT_POSE_IDENTITY;
+	head.origin.initial_offset = XRT_POSE_IDENTITY;
 	head.inputs[0].active = true;
 	head.inputs[0].name = XRT_INPUT_GENERIC_HEAD_POSE;
 	head.inputs[1].active = true;

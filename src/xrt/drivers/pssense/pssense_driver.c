@@ -106,7 +106,9 @@ DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_blob_fallback, "PSSENSE_LED_BOO
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_lost_lit_percent, "PSSENSE_LED_BOOTSTRAP_LOST_LIT_PERCENT", 10)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_full_scan_fallback, "PSSENSE_LED_BOOTSTRAP_FULL_SCAN_FALLBACK", false)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_quick_lock, "PSSENSE_LED_BOOTSTRAP_QUICK_LOCK", false)
+#ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_reconnect, "PSSENSE_RECONNECT", false)
+#endif
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_keep_lock, "PSSENSE_LED_BOOTSTRAP_KEEP_LOCK", false)
 DEBUG_GET_ONCE_NUM_OPTION(pssense_led_bootstrap_track_frames, "PSSENSE_LED_BOOTSTRAP_TRACK_FRAMES", 120)
 DEBUG_GET_ONCE_BOOL_OPTION(pssense_led_bootstrap_track, "PSSENSE_LED_BOOTSTRAP_TRACK", false)
