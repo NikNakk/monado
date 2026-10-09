@@ -140,13 +140,21 @@ function(generate_openxr_runtime_manifest_at_install)
         set(_genmanifest_COMPONENT Unspecified)
     endif()
 
+    # On macOS shared libraries are .dylib, while CMake's MODULE suffix is .so.
+    # The OpenXR runtime and libmonado are both SHARED targets.
+    set(_manifest_library_prefix "${CMAKE_SHARED_MODULE_PREFIX}")
+    set(_manifest_library_suffix "${CMAKE_SHARED_MODULE_SUFFIX}")
+    if(APPLE)
+        set(_manifest_library_prefix "${CMAKE_SHARED_LIBRARY_PREFIX}")
+        set(_manifest_library_suffix "${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    endif()
     set(_runtime_filename
-        "${CMAKE_SHARED_MODULE_PREFIX}${_genmanifest_RUNTIME_TARGET}${CMAKE_SHARED_MODULE_SUFFIX}"
+        "${_manifest_library_prefix}${_genmanifest_RUNTIME_TARGET}${_manifest_library_suffix}"
         )
     set(_libmonado_filename)
     if(_genmanifest_LIBMONADO)
         set(_libmonado_filename
-            "${CMAKE_SHARED_MODULE_PREFIX}${_genmanifest_LIBMONADO}${CMAKE_SHARED_MODULE_SUFFIX}"
+            "${_manifest_library_prefix}${_genmanifest_LIBMONADO}${_manifest_library_suffix}"
             )
     endif()
 

@@ -472,14 +472,22 @@ user steps to unload both old registrations, copy the prepared plist into
 stop hardware. Generated native-client environment instructions select
 `build-wine/openxr_monado-dev.json`, client-hosted compositing, and the normal
 endpoint. Existing Wine launchers must retain their x86-64 manifest override.
-The macOS SDK loader falls back to `/usr/local/share/openxr/1`, currently pointing
-at Meta XR Simulator on this machine, so service registration alone does not
+At the time of that setup, the macOS SDK loader's `/usr/local/share/openxr/1`
+fallback pointed at Meta XR Simulator, so service registration alone did not
 make unconfigured native applications select Monado. Use the generated client
 environment for the current shell. The preparation tool also writes a companion
 client-environment LaunchAgent that sets those two variables with `launchctl
 setenv` at login for subsequently launched GUI apps. It does not start hardware.
 Restart already-open terminals/apps to inherit that environment. Wine launchers
 must continue overriding XR_RUNTIME_JSON with the x86-64 manifest.
+
+On 2026-10-09 the current ARM64 runtime and service were installed in
+`~/.local/monado-psvr2` and selected by the system runtime link. The persistent
+service retains all these preferences, with reconnect, quick lock and headset
+detector blobs explicitly enabled; the GUI environment now selects the installed
+manifest and hosted compositor. See the
+[local installation record](macos-service-direct-xpc.md#current-local-installation-2026-10-09)
+for verification and backups. Repository-wide 6DoF defaults remain opt-in.
 
 The user still observes the IR-ring-always-on/status-LED-off fault. This is
 distinct from the exited I/O thread: Claude's historical fault runs had healthy

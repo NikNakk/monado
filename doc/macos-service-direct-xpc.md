@@ -229,6 +229,44 @@ installed-prefix/bin/monado-service-xpc-control uninstall
 Development `bootstrap` remains useful for A/B testing because it captures the
 current shell's relevant runtime environment into a temporary `/tmp` plist.
 
+### Current local installation (2026-10-09)
+
+The native `build/arm64` build at `bc9591f03`, plus the macOS installed-manifest
+suffix correction, is installed in `~/.local/monado-psvr2`. The system loader's
+`/usr/local/share/openxr/1/active_runtime.json` now points to that prefix's
+`share/openxr/1/openxr_monado.json`, replacing Meta XR Simulator. The manifest
+uses relative paths to `.dylib` files; the install generator previously used
+CMake's macOS MODULE suffix (`.so`) despite these being SHARED libraries.
+The correction is Apple-only and preserves the other platforms' filenames.
+
+The existing service LaunchAgent was retained and its executable path changed
+to the installed `bin/monado-service`; the generic helper's `install` command
+was deliberately not used because it would discard this user's tuning.
+All saved environment settings remain, including Sense 6DoF, the absolute
+combined-head calibration path, camera streams, timing traces, floor height,
+idle exit and display-loss shutdown. Quick lock, headset detector blobs and
+Sense reconnect are explicitly set to `1` in this local profile. This does not
+enable experimental tracking by default for other installations or Linux.
+
+The companion client-environment LaunchAgent now has a single command selecting
+the installed ARM64 manifest and `XRT_MACOS_CLIENT_COMPOSITOR=1` at login.
+Its obsolete extra `build-wine` command argument was removed. Already-running
+applications and terminals retain their inherited environment; restart them or
+update their overrides. Wine launchers must still select the x86-64 manifest.
+
+The previous prefix, both LaunchAgents and original system-link target are
+backed up in `build/arm64/local-install-backups/20261009-225526/`.
+The full native build and all 49 CTest suites pass (four OS-dependent suites
+required an unsandboxed run). With `XR_RUNTIME_JSON` removed, the local SDK
+loader selects the system link, loads Monado and enumerates 62 extensions,
+including `XR_KHR_metal_enable`. The registered service remains idle/on demand;
+this installation check did not initiate a headset run.
+
+The full `cmake --install --prefix` run installed the native runtime and service
+but then encountered the unrelated SteamVR driver's hard-coded
+`/usr/local/share/steamvr-monado` destination. The corrected OpenXR install
+script was rerun independently and succeeded; no SteamVR driver was installed.
+
 ## Validation
 
 Build the service, launchd helper, and OpenXR runtime, bootstrap the direct
