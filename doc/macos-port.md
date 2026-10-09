@@ -673,7 +673,8 @@ and the Windows install outside this checkout:
 | `build/openvr-legacy-unity` | The legacy Unity OpenVR proxy, built by `scripts/macos/build-wine-openvr-legacy-unity-proxy.zsh`. |
 | `~/Code/monado-upstreaming` | Clean upstream Monado checkout for preparing merge requests, starting with the cross-platform bug fixes. Not a build or test location for this fork. |
 | `~/Code/macos-wine-xr` | The Wine/XR bridge. `build-in-process/` holds its driver and in-process runtime builds. |
-| `~/Code/dxmt` | DXMT (`NikNakk/dxmt`); `steamvr-in-process` is the branch in use. |
+| `~/Code/dxmt` | DXMT (`NikNakk/dxmt`); `steamvr-in-process` is the branch in use. Built in `build/` against the CrossOver runtime as its Wine SDK; see the bridge's `docs/steamvr-home.md`. |
+| `~/Code/dxmt-toolchains` | LLVM 15 (x86_64) for building DXMT. Meson refuses it inside the DXMT tree. |
 | `~/Code/xrizer` | xrizer (`NikNakk/xrizer`), used by `scripts/macos/rebuild-xrizer.zsh`. |
 | `~/Code/wine-crossover` | CrossOver 26.3 FOSS Wine: `sources/`, `build/`, `deps-x86_64/`, and `runtime/`, the patched Wine tree with DXMT installed. |
 | `~/Windows` | The SteamVR rig: `prefix/` (Steam, SteamVR, Half-Life: Alyx, Hyperbolica), `bin/wine-crossover-dxmt`, `run-steam.zsh` (Steam with the XR environment, no SteamVR), `run-mwxr.zsh` (SteamVR; both default to the PS VR2), `stop-steamvr.zsh`, and run logs in `logs/`. |
