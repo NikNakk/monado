@@ -228,6 +228,9 @@ side channel used for:
 
 The service can be installed as an on-demand per-user LaunchAgent. See
 [macOS direct service XPC activation](macos-service-direct-xpc.md).
+The [2026-10-09 local installation](macos-service-direct-xpc.md#current-local-installation-2026-10-09)
+selects the current native build through the system OpenXR runtime link and
+preserves the user's Sense 6DoF, reconnect and client-compositor preferences.
 
 ### Chromium
 
@@ -677,7 +680,7 @@ and the Windows install outside this checkout:
 | `~/Code/dxmt-toolchains` | LLVM 15 (x86_64) for building DXMT. Meson refuses it inside the DXMT tree. |
 | `~/Code/xrizer` | xrizer (`NikNakk/xrizer`), used by `scripts/macos/rebuild-xrizer.zsh`. |
 | `~/Code/wine-crossover` | CrossOver 26.3 FOSS Wine: `sources/`, `build/`, `deps-x86_64/`, and `runtime/`, the patched Wine tree with DXMT installed. |
-| `~/Windows` | The SteamVR rig: `prefix/` (Steam, SteamVR, Half-Life: Alyx, Hyperbolica), `bin/wine-crossover-dxmt`, `run-steam.zsh` (Steam with the XR environment, no SteamVR), `run-mwxr.zsh` (SteamVR; both default to the PS VR2), `stop-steamvr.zsh`, and run logs in `logs/`. |
+| `~/Windows` | The SteamVR rig: `prefix/` (Steam, SteamVR, Half-Life: Alyx, Hyperbolica), `bin/wine-crossover-dxmt`, `run-steam.zsh` (Steam with the XR environment, no SteamVR), `run-mwxr.zsh` (SteamVR; both default to the PS VR2), `stop-steamvr.zsh`, `make-apps.zsh` (builds `Steam.app` and `SteamVR.app` in `~/Applications` around the two launchers), and run logs in `logs/`. |
 | `~/Windows/openvr-runtimes` | xrizer and OpenComposite, provisioned by `scripts/macos/provision-{xrizer,opencomposite}.zsh` and installed per game by the `install-*-game.zsh` scripts (default prefix `~/Windows/prefix`). |
 | `~/Code/psvr2-datasets/passthrough/calibration-guide` | Passthrough calibration reports and `passthrough-candidate-v1.json`. |
 | `~/Code/monado-2-archive` | Evidence logs cited by the bridge's SteamVR notes, uncommitted patches from retired checkouts, and the pre-reorganisation LaunchAgent plists. |
