@@ -36,6 +36,8 @@ extern "C" {
 #include "math/m_filter_one_euro.h"
 #include "math/m_filter_fifo.h"
 
+#include "tracking/t_dead_reckoning.h"
+
 #include "util/u_misc.h"
 #include "util/u_debug.h"
 #include "util/u_device.h"
@@ -53,6 +55,8 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <libusb.h>
 
@@ -103,9 +107,7 @@ struct psvr2_et_eye_data
 	bool unk_float_4_valid;
 	struct xrt_vec2 unk_float_4;
 
-	// whether the blink state is valid
 	bool blink_valid;
-	// whether the user is blinking
 	bool blink;
 
 	float blink_interp;
@@ -114,11 +116,9 @@ struct psvr2_et_eye_data
 struct psvr2_et_combined_data
 {
 	bool gaze_point_valid;
-	// gaze point in meters
 	struct xrt_vec3 gaze_point;
 
 	bool gaze_direction_valid;
-	// gaze direction (normalized vector)
 	struct xrt_vec3 gaze_direction;
 
 	struct m_filter_euro_vec3 gaze_direction_filter;
@@ -139,11 +139,8 @@ struct psvr2_et_data
 {
 	struct os_thread_helper eye_tracking_thread;
 
-	//! Whether eye tracking is currently enabled
 	bool want_enabled;
 	bool force_enable;
-
-	//! Whether the eye tracking enable command has been sent
 	bool enabled;
 
 	struct m_relation_history *gaze_relation_history;
@@ -183,15 +180,15 @@ struct psvr2_hmd
 	bool data_lock_initialized;
 
 	/* Device status */
-	uint8_t dprx_status;               //< DisplayPort receiver status
-	xrt_atomic_s32_t proximity_sensor; //< Atomic state for whether the proximity sensor is triggered
-	bool function_button;              //< Boolean state for whether the function button is pressed
+	uint8_t dprx_status;
+	xrt_atomic_s32_t proximity_sensor;
+	bool function_button;
 
-	bool ipd_updated; //< Whether the IPD has been updated, and an HMD info refresh is needed
-	uint8_t ipd_mm;   //< IPD dial value in mm, from 59 to 72mm
+	bool ipd_updated;
+	uint8_t ipd_mm;
 
-	bool camera_enable;                 //< Whether the camera is enabled
-	enum psvr2_camera_mode camera_mode; //< The current camera mode
+	bool camera_enable;
+	enum psvr2_camera_mode camera_mode;
 	struct u_var_button camera_enable_btn;
 	struct u_var_button camera_mode_btn;
 
@@ -199,20 +196,23 @@ struct psvr2_hmd
 	float brightness;
 
 	/* IMU input data */
-	uint32_t last_imu_vts_us;   //< Last VTS timestamp, in microseconds
-	uint16_t last_imu_ts;       //< Last IMU timestamp, in microseconds
-	struct xrt_vec3 last_gyro;  //< Last gyro reading, in rad/s
-	struct xrt_vec3 last_accel; //< Last accel reading, in m/s²
+	uint32_t last_imu_vts_us;
+	uint16_t last_imu_ts;
+	struct xrt_vec3 last_gyro;
+	struct xrt_vec3 last_accel;
 
 	/* SLAM input data */
-	uint32_t last_slam_vts_us;      //< Last slam timestamp, in microseconds
-	struct xrt_pose last_slam_pose; //< Last SLAM pose reading
+	uint32_t last_slam_vts_us;
+	struct xrt_pose last_slam_pose;
+	struct xrt_quat smoothed_slam_orientation;
+	timepoint_ns smoothed_slam_timestamp_ns;
+	bool smoothed_slam_initialized;
 
 	struct xrt_pose slam_correction_pose;
 	struct u_var_button slam_correction_set_btn;
 	struct u_var_button slam_correction_reset_btn;
 
-	struct xrt_pose T_imu_head; //< Constant transform from SLAM tracker pose to head pose
+	struct xrt_pose T_imu_head;
 
 	/* Display parameters */
 	struct u_device_simple_info info;
@@ -223,31 +223,20 @@ struct psvr2_hmd
 	/* USB communication */
 	libusb_context *ctx;
 	libusb_device_handle *dev;
-	/* Whether to claim and stream the camera, gaze, and other optional interfaces. */
 	bool auxiliary_streams_enabled;
 
 	struct os_thread_helper usb_thread;
 	int usb_complete;
 	int usb_active_xfers;
 
-	/* Status report */
 	struct libusb_transfer *status_xfer;
-	/* SLAM (bulk) transfer */
 	struct libusb_transfer *slam_xfer;
-	/* Camera (bulk) transfers */
 	struct libusb_transfer *camera_xfers[NUM_CAM_XFERS];
-	/* LD EP9 (bulk) transfer */
 	struct libusb_transfer *led_detector_xfer;
-	/* RP EP10 (bulk) transfer */
 	struct libusb_transfer *relocalizer_xfer;
-	/* VD EP11 (bulk) transfer */
 	struct libusb_transfer *vd_xfer;
-	/* Gaze transfer */
 	struct libusb_transfer *gaze_xfer;
 
-	/* Distortion calibration parameters, to be used with
-	 * psvr2_compute_distortion_asymmetric. Very specific to
-	 * PS VR2. */
 	float distortion_calibration[8];
 
 	/* Timing data */
@@ -264,6 +253,8 @@ struct psvr2_hmd
 	/* Tracking state */
 	struct m_relation_history *slam_relation_history;
 	struct m_ff_vec3_f32 *ff_gyro;
+	struct psvr2_prediction_capture *prediction_capture;
+	bool prediction_capture_checked;
 	uint64_t timing_query_count;
 	time_duration_ns timing_prediction_total_ns;
 	time_duration_ns timing_imu_after_slam_total_ns;
@@ -315,6 +306,13 @@ psvr2_get_face_tracking(struct xrt_device *xdev,
                         enum xrt_input_name facial_expression_type,
                         int64_t at_timestamp_ns,
                         struct xrt_facial_expression_set *out_value);
+
+#include "psvr2_prediction.h"
+
+/* Replace only calls occurring after this header is included (not the call
+ * inside psvr2_apply_dead_reckoning above). This keeps the experiment confined
+ * to the PSVR2 driver without changing the generic dead-reckoning helper. */
+#define t_apply_dead_reckoning psvr2_apply_dead_reckoning
 
 #ifdef __cplusplus
 }

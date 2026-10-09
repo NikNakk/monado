@@ -55,6 +55,11 @@
 DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_WARN)
 DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(macos_compositor_pose_log, "XRT_MACOS_COMPOSITOR_POSE_LOG", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_scanout_off, "XRT_MACOS_SCANOUT_OFF", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_late_latch, "XRT_MACOS_LATE_LATCH", false)
+#endif
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
 /*
@@ -315,6 +320,13 @@ calc_pose_data(struct comp_renderer *r,
 		}
 	}
 
+#ifdef XRT_OS_OSX
+	// A/B scanout compensation independently of ordinary ATW and display prediction.
+	if (debug_get_bool_option_macos_scanout_off()) {
+		scanout_time_ns = 0;
+	}
+#endif
+
 	int64_t begin_timestamp_ns = r->c->frame.rendering.predicted_display_time_ns;
 	int64_t end_timestamp_ns = begin_timestamp_ns + scanout_time_ns;
 
@@ -392,6 +404,21 @@ calc_pose_data(struct comp_renderer *r,
 		m_relation_chain_push_relation(&xrc, &head_relation[1]);
 		m_relation_chain_resolve(&xrc, &result_scanout_end);
 
+#ifdef XRT_OS_OSX
+		if (debug_get_bool_option_macos_compositor_pose_log()) {
+			const struct xrt_quat *qb = &result_scanout_start.pose.orientation;
+			const struct xrt_quat *qe = &result_scanout_end.pose.orientation;
+			COMP_INFO(r->c,
+			          "macOS compositor device pose: timeline %lld view %u begin_ns %lld end_ns %lld "
+			          "flags_begin %u flags_end %u q_begin_xyzw %.9f %.9f %.9f %.9f "
+			          "q_end_xyzw %.9f %.9f %.9f %.9f",
+			          (long long)r->c->frame.rendering.id, i, (long long)begin_timestamp_ns,
+			          (long long)end_timestamp_ns, (unsigned)result_scanout_start.relation_flags,
+			          (unsigned)result_scanout_end.relation_flags,
+			          qb->x, qb->y, qb->z, qb->w, qe->x, qe->y, qe->z, qe->w);
+		}
+#endif
+
 		// Results to callers.
 		out_fovs[i] = fov;
 		out_world_scanout_begin[i] = result_scanout_start.pose;
@@ -419,7 +446,7 @@ renderer_build_rendering_target_resources(struct comp_renderer *r,
 
 	render_gfx_target_resources_init( //
 	    rtr,                          //
-	    &c->nr,                       //
+	    &c->nr,                       // struct render_resources
 	    &r->target_render_pass,       //
 	    image_view,                   //
 	    extent);                      //
@@ -610,6 +637,15 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 
 	r->c = c;
 	r->settings = &c->settings;
+
+#ifdef XRT_OS_OSX
+	if (debug_get_bool_option_macos_scanout_off()) {
+		COMP_INFO(c, "macOS scanout compensation disabled: using the beginning pose for both endpoints; ATW setting unchanged");
+	}
+	if (debug_get_bool_option_macos_late_latch()) {
+		COMP_INFO(c, "macOS compute late latch enabled: re-sampling device pose after command recording and before queue submit");
+	}
+#endif
 
 	r->acquired_buffer = -1;
 	r->fenced_buffer = -1;
@@ -945,6 +981,46 @@ renderer_fini(struct comp_renderer *r)
 }
 
 
+#ifdef XRT_OS_OSX
+static struct comp_layer *
+get_projection_layer(struct comp_layer_accum *layers);
+
+/* Log the actual view inputs after pose selection, without extra device queries. */
+static void
+log_macos_render_pose(struct comp_renderer *r,
+                      struct chl_frame_state *frame_state,
+                      const struct xrt_pose *begin,
+                      const struct xrt_pose *end,
+                      bool compute,
+                      bool submitted_pose)
+{
+	if (!debug_get_bool_option_macos_compositor_pose_log()) {
+		return;
+	}
+	struct comp_compositor *c = r->c;
+	struct comp_layer *projection = get_projection_layer(&c->base.layer_accum);
+	int64_t app_ns = projection != NULL ? projection->data.timestamp : 0;
+	int64_t target_ns = submitted_pose ? app_ns : c->frame.rendering.predicted_display_time_ns;
+	for (uint32_t view = 0; view < frame_state->view_count; view++) {
+		const struct xrt_quat *qb = &begin[view].orientation;
+		const struct xrt_quat *qe = &end[view].orientation;
+		struct xrt_quat app = projection != NULL ? projection->data.proj.v[view].pose.orientation
+		                                         : (struct xrt_quat){0};
+		COMP_INFO(c,
+		          "macOS compositor render pose: timeline %lld view %u path %s source %s atw %d fast %d "
+		          "layers %u target_begin_ns %lld app_present %d app_ns %lld "
+		          "q_begin_xyzw %.9f %.9f %.9f %.9f q_end_xyzw %.9f %.9f %.9f %.9f "
+		          "app_q_xyzw %.9f %.9f %.9f %.9f",
+		          (long long)c->frame.rendering.id, view, compute ? "compute" : "graphics",
+		          submitted_pose ? "submitted" : "device", frame_state->data.do_timewarp,
+		          frame_state->data.fast_path, c->base.layer_accum.layer_count, (long long)target_ns,
+		          projection != NULL, (long long)app_ns,
+		          qb->x, qb->y, qb->z, qb->w, qe->x, qe->y, qe->z, qe->w,
+		          app.x, app.y, app.z, app.w);
+	}
+}
+#endif
+
 /*
  *
  * Graphics
@@ -995,6 +1071,10 @@ dispatch_graphics(struct comp_renderer *r,
 	    eye_poses,                 //
 	    render->r->view_count);    //
 
+#ifdef XRT_OS_OSX
+	log_macos_render_pose(r, frame_state, world_poses_scanout_begin, world_poses_scanout_begin, false, false);
+#endif
+
 	// Does everything.
 	chl_frame_state_gfx_default_pipeline( //
 	    frame_state,                      //
@@ -1041,6 +1121,88 @@ get_projection_layer(struct comp_layer_accum *layers)
 	return NULL;
 }
 
+#ifdef XRT_OS_OSX
+static bool
+macos_late_latch_compute(struct comp_renderer *r,
+                         struct render_compute *render,
+                         struct chl_frame_state *frame_state,
+                         enum comp_target_fov_source fov_source)
+{
+	if (!debug_get_bool_option_macos_late_latch() || !frame_state->data.do_timewarp || !frame_state->data.fast_path) {
+		return false;
+	}
+
+	struct comp_compositor *c = r->c;
+	struct comp_layer *projection = get_projection_layer(&c->base.layer_accum);
+	if (projection == NULL ||
+	    (projection->data.type != XRT_LAYER_PROJECTION && projection->data.type != XRT_LAYER_PROJECTION_DEPTH)) {
+		static bool warned = false;
+		if (!warned) {
+			COMP_WARN(c, "macOS late latch requested, but current compute fast path has no projection layer");
+			warned = true;
+		}
+		return false;
+	}
+
+	/*
+	 * The compute distortion UBO is shared and persistently mapped. Wait for
+	 * the previous submission before replacing the matrices that the current
+	 * already-recorded dispatch will read.
+	 */
+	renderer_wait_for_last_fence(r);
+
+	struct xrt_fov late_fovs[XRT_MAX_VIEWS];
+	struct xrt_pose late_world_begin[XRT_MAX_VIEWS];
+	struct xrt_pose late_world_end[XRT_MAX_VIEWS];
+	struct xrt_pose late_eye[XRT_MAX_VIEWS];
+	int64_t sample_begin_ns = os_monotonic_get_ns();
+	calc_pose_data(r, fov_source, late_fovs, late_world_begin, late_world_end, late_eye, render->r->view_count);
+	int64_t sample_end_ns = os_monotonic_get_ns();
+
+	struct render_compute_distortion_ubo_data *ubo =
+	    (struct render_compute_distortion_ubo_data *)c->nr.compute.distortion.ubo.mapped;
+	if (ubo == NULL) {
+		COMP_WARN(c, "macOS late latch requested, but compute distortion UBO is not mapped");
+		return false;
+	}
+
+	/* Projection-depth shares the same leading projection-view layout. */
+	for (uint32_t view = 0; view < render->r->view_count; ++view) {
+		const struct xrt_layer_projection_view_data *vd = &projection->data.proj.v[view];
+		render_calc_time_warp_matrix(&vd->pose, &vd->fov, &late_world_begin[view],
+		                             &ubo->transform_timewarp_scanout_begin[view]);
+		render_calc_time_warp_matrix(&vd->pose, &vd->fov, &late_world_end[view],
+		                             &ubo->transform_timewarp_scanout_end[view]);
+	}
+
+	int64_t lead_ns = c->frame.rendering.predicted_display_time_ns - sample_end_ns;
+	int64_t query_ns = sample_end_ns - sample_begin_ns;
+	static uint64_t count = 0;
+	static int64_t lead_total_ns = 0;
+	static int64_t lead_min_ns = INT64_MAX;
+	static int64_t lead_max_ns = INT64_MIN;
+	static int64_t query_total_ns = 0;
+	count++;
+	lead_total_ns += lead_ns;
+	query_total_ns += query_ns;
+	lead_min_ns = lead_ns < lead_min_ns ? lead_ns : lead_min_ns;
+	lead_max_ns = lead_ns > lead_max_ns ? lead_ns : lead_max_ns;
+	if (count == 240) {
+		COMP_INFO(c,
+		          "macOS late latch: pose lead avg %.3fms min %.3fms max %.3fms; pose query avg %.3fms; fast-path UBO updated 240/240",
+		          (double)lead_total_ns / 240.0 / U_TIME_1MS_IN_NS, (double)lead_min_ns / U_TIME_1MS_IN_NS,
+		          (double)lead_max_ns / U_TIME_1MS_IN_NS, (double)query_total_ns / 240.0 / U_TIME_1MS_IN_NS);
+		count = 0;
+		lead_total_ns = 0;
+		lead_min_ns = INT64_MAX;
+		lead_max_ns = INT64_MIN;
+		query_total_ns = 0;
+	}
+
+	return true;
+}
+#endif
+
 /*!
  * @pre render_compute_init(render, &c->nr)
  */
@@ -1074,6 +1236,9 @@ dispatch_compute(struct comp_renderer *r,
 	    eye_poses,                 //
 	    render->r->view_count);    //
 
+#ifdef XRT_OS_OSX
+	bool submitted_pose = false;
+#endif
 	if (!c->base.frame_params.one_projection_layer_fast_path) {
 		struct comp_layer *proj_layer = get_projection_layer(&c->base.layer_accum);
 		int64_t predicted_display_time_ns = c->frame.rendering.predicted_display_time_ns;
@@ -1082,6 +1247,9 @@ dispatch_compute(struct comp_renderer *r,
 		if (proj_layer != NULL && llabs(predicted_display_time_ns - proj_layer->data.timestamp) <= cutoff_ns) {
 			struct xrt_layer_projection_view_data *data = proj_layer->data.proj.v;
 			COMP_SPEW(c, "Using submitted projection layer pose data in compute compositor");
+#ifdef XRT_OS_OSX
+			submitted_pose = true;
+#endif
 
 			// projection_depth shares the same initial view layout as projection
 			for (uint32_t view = 0; view < render->r->view_count; ++view) {
@@ -1095,6 +1263,10 @@ dispatch_compute(struct comp_renderer *r,
 			}
 		}
 	}
+
+#ifdef XRT_OS_OSX
+	log_macos_render_pose(r, frame_state, world_poses_scanout_begin, world_poses_scanout_end, true, submitted_pose);
+#endif
 
 	// Target Vulkan resources..
 	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
@@ -1120,6 +1292,10 @@ dispatch_compute(struct comp_renderer *r,
 	    target_image,                    //
 	    target_storage_view,             //
 	    target_viewport_datas);          //
+
+#ifdef XRT_OS_OSX
+	(void)macos_late_latch_compute(r, render, frame_state, fov_source);
+#endif
 
 	// Everything is ready, submit to the queue.
 	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);

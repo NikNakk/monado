@@ -275,24 +275,28 @@ do_clean_slate_frame(struct pacing_compositor *pc, int64_t now_ns)
  * prediction in it.
  */
 static struct frame *
-walk_forward_through_frames(struct pacing_compositor *pc, int64_t last_present_time_ns, int64_t now_ns)
+walk_forward_through_frames(struct pacing_compositor *pc,
+                            int64_t last_present_time_ns,
+                            int64_t now_ns)
 {
-	// This is the earliest possible time we could present, assuming rendering still must take place.
 	int64_t from_time_ns = now_ns + calc_total_comp_time(pc);
 	int64_t desired_present_time_ns = last_present_time_ns + pc->frame_period_ns;
+	unsigned skipped_periods = 0;
 
 	while (desired_present_time_ns <= from_time_ns) {
-		UPC_LOG_D(
-		    "Skipped!"                                         //
-		    "\n\tfrom_time_ns:            %" PRIu64            //
-		    "\n\tdesired_present_time_ns: %" PRIu64            //
-		    "\n\tdiff_ms: %.2f",                               //
-		    from_time_ns,                                      //
-		    desired_present_time_ns,                           //
-		    ns_to_ms(from_time_ns - desired_present_time_ns)); //
-
-		// Try next frame period.
+		skipped_periods++;
 		desired_present_time_ns += pc->frame_period_ns;
+	}
+
+	if (skipped_periods > 0) {
+		UPC_LOG_W("Pacing skipped %u period(s): frame_period %.3fms, "
+		          "total_comp %.3fms, first target %.3fms behind cutoff",
+		          skipped_periods,
+		          ns_to_ms(pc->frame_period_ns),
+		          ns_to_ms(calc_total_comp_time(pc)),
+		          ns_to_ms(from_time_ns -
+		                   (desired_present_time_ns -
+		                    skipped_periods * pc->frame_period_ns)));
 	}
 
 	struct frame *f = create_frame(pc, STATE_PREDICTED);
