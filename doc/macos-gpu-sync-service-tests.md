@@ -69,6 +69,12 @@ python3 scripts/macos/run-gpu-sync-service.py --output <new-directory> --benchma
 python3 scripts/macos/summarize-gpu-sync-service.py <comparison-directory>
 ```
 
+The CTest entries are opt-in: configure with
+`-DXRT_MACOS_SERVICE_GPU_TESTS=ON -DXRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=ON`.
+They bootstrap a launchd job in the user's GUI domain and need a GPU, and their
+verification reads the timing-diagnostics traces, so default and CI builds do
+not register them.
+
 Use a new result directory per manual run. CTest uses unique per-run directories
 under the existing build tree. Both scenarios have a 60-second test deadline,
 finite client/bootstrap deadlines and automatic removal of their temporary
