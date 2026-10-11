@@ -150,6 +150,9 @@ struct multi_compositor
 		//! Frame id of frame being waited on.
 		int64_t frame_id;
 
+		//! Receipt time of this specific GPU obligation, not last application activity.
+		int64_t submitted_ns;
+
 		//! The wait thread itself
 		struct os_thread_helper oth;
 
@@ -158,6 +161,8 @@ struct multi_compositor
 
 		//! Is the thread waiting, if so the client should block.
 		bool waiting;
+		//! Sticky failure; do not admit another frame into this session.
+		bool failed;
 
 		/*!
 		 * Is the client thread blocked?

@@ -69,6 +69,7 @@
 
 #include "util/comp_vulkan.h"
 #include "util/comp_swapchain_gpu_reuse_internal.h"
+#include "util/comp_swapchain_gpu_reuse.h"
 #include "main/comp_compositor.h"
 #include "main/comp_frame.h"
 
@@ -251,7 +252,10 @@ static void
 compositor_session_cleanup(struct comp_compositor *c)
 {
 	if (c->deferred_surface) {
-		// Make sure we don't have anything to destroy.
+// Make sure we don't have anything to destroy.
+#ifdef XRT_OS_OSX
+		comp_swapchain_gpu_reuse_collect(get_vk(c), false);
+#endif
 		comp_swapchain_shared_garbage_collect(&c->base.cscs);
 		comp_renderer_destroy(&c->r);
 #ifdef XRT_FEATURE_WINDOW_PEEK
@@ -490,7 +494,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
 
 	COMP_SPEW(c, "LAYER_COMMIT finished drawing at %8.3fms", ns_to_ms(c->last_frame_time_ns));
 
-	// Now is a good point to garbage collect.
+// Now is a good point to garbage collect.
+#ifdef XRT_OS_OSX
+	comp_swapchain_gpu_reuse_collect(get_vk(c), false);
+#endif
 	comp_swapchain_shared_garbage_collect(&c->base.cscs);
 #ifdef XRT_OS_OSX
 	macos_frame_pipeline_trace_event("layer_commit_return", frame_id, os_monotonic_get_ns(), 0, 0,
@@ -577,9 +584,15 @@ compositor_destroy(struct xrt_compositor *xc)
 	// Destroy the scratch images fully, we initialized all of them.
 	chl_scratch_fini(&c->scratch);
 
-	// Make sure we don't have anything to destroy.
+// Make sure we don't have anything to destroy.
+#ifdef XRT_OS_OSX
+	comp_swapchain_gpu_reuse_collect(get_vk(c), false);
+#endif
 	comp_swapchain_shared_garbage_collect(&c->base.cscs);
 
+#ifdef XRT_OS_OSX
+	comp_swapchain_gpu_reuse_collect(vk, true);
+#endif
 	// Must be destroyed before Vulkan.
 	comp_swapchain_shared_destroy(&c->base.cscs, vk);
 
