@@ -85,6 +85,10 @@ struct multi_layer_entry
  */
 struct multi_layer_slot
 {
+#ifdef XRT_OS_OSX
+	//! CPU observation of completed producer work, carried with ownership.
+	int64_t gpu_ready_ns;
+#endif
 	struct xrt_layer_frame_data data;
 	uint32_t layer_count;
 	struct multi_layer_entry layers[MULTI_MAX_LAYERS];
@@ -172,6 +176,10 @@ struct multi_compositor
 		 */
 		bool blocked;
 	} wait_thread;
+
+#ifdef XRT_OS_OSX
+	struct comp_gpu_client_budget *gpu_budget;
+#endif
 
 	//! Lock for all of the slots.
 	struct os_mutex slot_lock;

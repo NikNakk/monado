@@ -82,6 +82,8 @@ main(int argc, char **argv)
 {
 	@autoreleasepool {
 		try {
+			const bool budget = argc > 1 && std::string(argv[1]) == "budget";
+			const bool exhausted = argc > 1 && std::string(argv[1]) == "exhausted";
 			const bool missing = argc > 1 && std::string(argv[1]) == "missing";
 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
 			const uint64_t timeout_seconds = argc > 3 ? std::stoull(argv[3]) : 20;
@@ -124,7 +126,7 @@ main(int argc, char **argv)
 			snprintf(info.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "gpu-sync-%d",
 			         getpid());
 			info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
-			info.enabledExtensionCount = missing ? 2 : 1;
+			info.enabledExtensionCount = (missing || budget || exhausted) ? 2 : 1;
 			info.enabledExtensionNames = extensions;
 			checked(xrCreateInstance(&info, &instance), "xrCreateInstance");
 			LOAD(xrGetSystem);
@@ -166,7 +168,7 @@ main(int argc, char **argv)
 			XrSessionCreateInfoOverlayEXTX overlay{};
 			overlay.type = XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX;
 			overlay.sessionLayersPlacement = 1;
-			if (missing)
+			if (missing || budget || exhausted)
 				binding.next = &overlay;
 			XrSessionCreateInfo sessionInfo{};
 			sessionInfo.type = XR_TYPE_SESSION_CREATE_INFO;
@@ -187,8 +189,27 @@ main(int argc, char **argv)
 			swapInfo.sampleCount = 1;
 			swapInfo.width = swapInfo.height = 64;
 			swapInfo.faceCount = swapInfo.arraySize = swapInfo.mipCount = 1;
-			XrSwapchain swapchain;
-			checked(xrCreateSwapchain(session, &swapInfo, &swapchain), "swapchain");
+			XrSwapchain swapchain = XR_NULL_HANDLE;
+			XrResult allocation = xrCreateSwapchain(session, &swapInfo, &swapchain);
+			if (exhausted) {
+				if (XR_SUCCEEDED(allocation)) throw std::runtime_error("Exhausted global budget admitted allocation");
+				checked(xrDestroySpace(space), "space"); checked(xrDestroySession(session), "session");
+				checked(xrDestroyInstance(instance), "instance");
+				fprintf(stdout, "{\"event\":\"result\",\"status\":\"PASS\",\"budget_rejected\":true,\"result\":%d}\n", allocation);
+				return 0;
+			}
+			checked(allocation, "swapchain");
+			if (budget) {
+				XrSwapchain extra = XR_NULL_HANDLE, rejected = XR_NULL_HANDLE;
+				checked(xrCreateSwapchain(session, &swapInfo, &extra), "second allocation");
+				XrResult result = xrCreateSwapchain(session, &swapInfo, &rejected);
+				if (XR_SUCCEEDED(result)) throw std::runtime_error("Per-client budget admitted a third allocation");
+				checked(xrDestroySwapchain(extra), "extra"); checked(xrDestroySwapchain(swapchain), "swapchain");
+				checked(xrDestroySpace(space), "space"); checked(xrDestroySession(session), "session");
+				checked(xrDestroyInstance(instance), "instance");
+				fprintf(stdout, "{\"event\":\"result\",\"status\":\"PASS\",\"budget_rejected\":true,\"result\":%d}\n", result);
+				return 0;
+			}
 			uint32_t count;
 			checked(xrEnumerateSwapchainImages(swapchain, 0, &count, nullptr), "images count");
 			std::vector<XrSwapchainImageMetalKHR> images(count);

@@ -148,6 +148,9 @@ extern const struct comp_target_factory comp_target_factory_mswin;
 struct comp_target *
 comp_window_macos_create(struct comp_compositor *c);
 
+bool
+comp_window_macos_prepare_destroy(struct comp_target *ct);
+
 extern const struct comp_target_factory comp_target_factory_macos;
 #endif // XRT_OS_OSX
 

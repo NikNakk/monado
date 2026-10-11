@@ -575,6 +575,18 @@ compositor_destroy(struct xrt_compositor *xc)
 
 	COMP_DEBUG(c, "COMP_DESTROY");
 
+#ifdef XRT_OS_OSX
+	// Final device-owned work is distinct from client cancellation. A bounded
+	// drain must succeed before any referenced resources or callback state is freed.
+	bool target_drained = comp_window_macos_prepare_destroy(c->target);
+	comp_swapchain_gpu_reuse_collect(vk, false);
+	if (!target_drained || comp_swapchain_gpu_reuse_device_in_use(vk) ||
+	    !comp_renderer_drain(c->r, 500 * U_TIME_1MS_IN_NS)) {
+		U_LOG_W("GPU compositor teardown retained until process exit: bounded drain incomplete");
+		u_var_remove_root(c);
+		return;
+	}
+#endif
 	// Need to do this as early as possible.
 	u_var_remove_root(c);
 

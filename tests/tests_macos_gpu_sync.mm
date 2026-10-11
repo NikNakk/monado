@@ -26,7 +26,17 @@
 #include <sys/un.h>
 #include <unistd.h>
 extern char **environ;
-static constexpr unsigned W = 64, N = 3, BYTES = W * W * 4;
+static unsigned
+texture_width()
+{
+	const char *value = getenv("GPU_SYNC_TEXTURE_SIZE");
+	if (value == nullptr) return 64;
+	char *end = nullptr;
+	unsigned long width = strtoul(value, &end, 10);
+	return end != value && *end == 0 && width >= 16 && width <= 2048 ? (unsigned)width : 0;
+}
+static const unsigned W = texture_width(), BYTES = W * W * 4;
+static constexpr unsigned N = 3;
 static uint64_t
 ns()
 {
@@ -40,11 +50,13 @@ check(bool good, const char *msg)
 		throw std::runtime_error(msg);
 }
 static void
-vkcheck(VkResult result)
+vkcheck_at(VkResult result, int line)
 {
 	if (result != VK_SUCCESS)
-		throw std::runtime_error("Vulkan result " + std::to_string(result));
+		throw std::runtime_error("Vulkan result " + std::to_string(result) + " at line " + std::to_string(line));
 }
+#define vkcheck(result) vkcheck_at(result, __LINE__)
+
 static void
 io(int fd, void *data, size_t size, bool output)
 {
@@ -68,6 +80,7 @@ struct Command
 struct Receipt
 {
 	uint64_t commit_ns;
+	uint64_t gpu_status;
 };
 static void
 pattern(const Command &c, unsigned x, unsigned y, uint8_t p[4])
@@ -97,14 +110,20 @@ surface()
 }
 @protocol GPUSyncEventProtocol
 - (void)eventHandle:(void (^)(MTLSharedEventHandle *))reply;
+- (void)gateHandle:(void (^)(MTLSharedEventHandle *))reply;
 @end
 @interface GPUSyncEventService : NSObject <GPUSyncEventProtocol, NSXPCListenerDelegate>
 @property(retain) id<MTLSharedEvent> event;
+@property(retain) id<MTLSharedEvent> gate;
 @end
 @implementation GPUSyncEventService
 - (void)eventHandle:(void (^)(MTLSharedEventHandle *))reply
 {
 	reply([[self.event newSharedEventHandle] autorelease]);
+}
+- (void)gateHandle:(void (^)(MTLSharedEventHandle *))reply
+{
+	reply([[self.gate newSharedEventHandle] autorelease]);
 }
 - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)connection
 {
@@ -146,6 +165,7 @@ producer(const char *service_name, const char *socket_path)
 	id<MTLSharedEvent> join = [device newSharedEvent];
 	GPUSyncEventService *service = [GPUSyncEventService new];
 	service.event = event;
+	service.gate = [device newSharedEvent];
 	NSXPCListener *listener =
 	    [[NSXPCListener alloc] initWithMachServiceName:[NSString stringWithUTF8String:service_name]];
 	listener.delegate = service;
@@ -215,12 +235,13 @@ producer(const char *service_name, const char *socket_path)
 			_exit(0); // exit with an outstanding, unsignalled obligation
 		if (c.mode == 6) {
 			check(c.value <= previous, "invalid-sequence fixture");
-			Receipt r{0};
+			Receipt r{};
 			io(1, &r, sizeof(r), true);
 			continue;
 		}
 		auto write_texture = [&](id<MTLCommandQueue> q) {
 			id<MTLCommandBuffer> cb = [q commandBuffer];
+			if (c.mode == 9) [cb encodeWaitForEvent:service.gate value:c.value];
 			id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
 			uint32_t words[4] = {(uint32_t)c.frame, (uint32_t)(c.frame >> 32), c.producer, c.image};
 			[enc setComputePipelineState:pipeline];
@@ -234,8 +255,9 @@ producer(const char *service_name, const char *socket_path)
 		    7) { // broken multi-queue: signal now, deliberately write only after consumer acknowledgement
 			id<MTLCommandBuffer> cb = [queues[1] commandBuffer];
 			[cb encodeSignalEvent:event value:c.value];
-			Receipt r{ns()};
+			Receipt r{ns(), 0};
 			[cb commit];
+			r.gpu_status = (uint64_t)cb.status;
 			io(1, &r, sizeof(r), true);
 			char ack;
 			io(0, &ack, 1, false);
@@ -254,8 +276,9 @@ producer(const char *service_name, const char *socket_path)
 			}
 			if (c.mode != 2)
 				[cb encodeSignalEvent:event value:c.value];
-			Receipt r{ns()};
+			Receipt r{ns(), 0};
 			[cb commit];
+			r.gpu_status = (uint64_t)cb.status;
 			io(1, &r, sizeof(r), true);
 			char ack;
 			io(0, &ack, 1, false);
@@ -291,7 +314,8 @@ struct Child
 		std::string sock = directory + "/socket";
 		plist = directory + "/agent.plist";
 		domain = "gui/" + std::to_string(getuid());
-		name = "org.freedesktop.monado.gpu-sync." + std::to_string(getpid());
+		static unsigned sequence = 0;
+		name = "org.freedesktop.monado.gpu-sync." + std::to_string(getpid()) + "." + std::to_string(sequence++);
 		int server = socket(AF_UNIX, SOCK_STREAM, 0);
 		check(server >= 0, "consumer socket");
 		sockaddr_un addr{};
@@ -307,7 +331,8 @@ struct Child
 				[NSString stringWithUTF8String:absolute], @"--producer", label,
 				[NSString stringWithUTF8String:sock.c_str()]
 			],
-			@"MachServices" : @{label : @YES}
+			@"MachServices" : @{label : @YES},
+			@"EnvironmentVariables" : @{@"GPU_SYNC_TEXTURE_SIZE" : [NSString stringWithFormat:@"%u", W]}
 		};
 		NSData *data = [NSPropertyListSerialization dataWithPropertyList:agent
 		                                                          format:NSPropertyListXMLFormat_v1_0
@@ -334,19 +359,18 @@ struct Child
 		io(output, &pid, sizeof(pid), false);
 	}
 	MTLSharedEventHandle *
-	handle()
+	handle(bool gate = false)
 	{
 		__block MTLSharedEventHandle *result = nil;
 		dispatch_semaphore_t done = dispatch_semaphore_create(0);
-		[[connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		  (void)error;
-		  dispatch_semaphore_signal(done);
-		}] eventHandle:^(MTLSharedEventHandle *h) {
-		  result = [h retain];
-		  dispatch_semaphore_signal(done);
+		id<GPUSyncEventProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+			(void)error; dispatch_semaphore_signal(done);
 		}];
-		check(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0 &&
-		          result != nil,
+		void (^reply)(MTLSharedEventHandle *) = ^(MTLSharedEventHandle *h) {
+			result = [h retain]; dispatch_semaphore_signal(done);
+		};
+		if (gate) [proxy gateHandle:reply]; else [proxy eventHandle:reply];
+		check(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0 && result != nil,
 		      "XPC event timeout");
 		return [result autorelease];
 	}
@@ -386,6 +410,10 @@ struct Consumer
 	VkFence fence{};
 	VkSemaphore semaphore{};
 	id<MTLSharedEvent> event = nil;
+	id<MTLSharedEvent> producer_gate = nil;
+	VkSemaphore consumer_gate{};
+	std::thread release_gate;
+	bool unresolved_producer = false;
 	uint64_t registry = 0;
 	uint32_t
 	memory_type(uint32_t bits, VkMemoryPropertyFlags flags)
@@ -465,6 +493,7 @@ struct Consumer
 		check(d != nil, "shared-event decode");
 		check([d[@"registry"] unsignedLongLongValue] == registry, "Metal device mismatch");
 		event = [metal newSharedEventWithHandle:child.handle()];
+		producer_gate = [metal newSharedEventWithHandle:child.handle(true)];
 		check(event != nil, "shared-event import");
 		VkSemaphoreTypeCreateInfo st{};
 		st.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
@@ -478,6 +507,8 @@ struct Consumer
 		sc.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 		sc.pNext = &si;
 		vkcheck(vkCreateSemaphore(device, &sc, nullptr, &semaphore));
+		sc.pNext = &st;
+		vkcheck(vkCreateSemaphore(device, &sc, nullptr, &consumer_gate));
 		for (unsigned i = 0; i < N; ++i) {
 			surfaces[i] = IOSurfaceLookup([d[@"surfaces"][i] unsignedIntValue]);
 			check(surfaces[i] != nullptr, "IOSurface lookup");
@@ -589,7 +620,15 @@ struct Consumer
 		VkBufferImageCopy copy{};
 		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
 		copy.imageExtent = {W, W, 1};
-		vkCmdCopyImageToBuffer(cmd, images[c.image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &copy);
+		unsigned copies = getenv("GPU_SYNC_COPY_REPEATS") ? std::stoul(getenv("GPU_SYNC_COPY_REPEATS")) : 1;
+		check(copies >= 1 && copies <= 1024, "copy repeat bound");
+		for (unsigned i = 0; i < copies; i++) {
+			vkCmdCopyImageToBuffer(cmd, images[c.image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &copy);
+			VkMemoryBarrier order{}; order.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			order.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; order.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			if (i+1 < copies) vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+			                                      0, 1, &order, 0, nullptr, 0, nullptr);
+		}
 		std::swap(barrier.oldLayout, barrier.newLayout);
 		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 		barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
@@ -604,18 +643,29 @@ struct Consumer
 		vkcheck(vkEndCommandBuffer(cmd));
 		VkTimelineSemaphoreSubmitInfo ts{};
 		ts.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-		ts.waitSemaphoreValueCount = 1;
-		ts.pWaitSemaphoreValues = &c.value;
-		VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		uint64_t wait_values[] = {c.value, c.value};
+		VkSemaphore wait_sems[] = {semaphore, consumer_gate};
+		VkPipelineStageFlags stages[] = {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
+		ts.waitSemaphoreValueCount = c.mode == 10 ? 2 : 1;
+		ts.pWaitSemaphoreValues = wait_values;
 		VkSubmitInfo s{};
 		s.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		s.pNext = &ts;
-		s.waitSemaphoreCount = 1;
-		s.pWaitSemaphores = &semaphore;
-		s.pWaitDstStageMask = &stage;
+		s.waitSemaphoreCount = c.mode == 10 ? 2 : 1;
+		s.pWaitSemaphores = wait_sems;
+		s.pWaitDstStageMask = stages;
 		s.commandBufferCount = 1;
 		s.pCommandBuffers = &cmd;
 		uint64_t start = ns();
+		if (c.mode == 10) {
+			if (release_gate.joinable()) release_gate.join();
+			release_gate = std::thread([this, value=c.value] {
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
+				VkSemaphoreSignalInfo signal{}; signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+				signal.semaphore = consumer_gate; signal.value = value;
+				vkSignalSemaphore(device, &signal);
+			});
+		}
 		vkcheck(vkQueueSubmit(queue, 1, &s, fence));
 		pending = true;
 		return ns() - start;
@@ -669,6 +719,9 @@ struct Consumer
 	}
 	~Consumer()
 	{
+		if (release_gate.joinable()) release_gate.join();
+		producer_gate.signaledValue = UINT64_MAX; // Release only the trusted test gate.
+		if (unresolved_producer) return;
 		// On an unresolved consumer fence retain the entire Vulkan device/resources until process exit.
 		if (pending && !complete(0))
 			return;
@@ -687,12 +740,45 @@ struct Consumer
 			}
 			vkDestroySemaphore(device, semaphore, nullptr);
 			[event release];
+			[producer_gate release];
+			vkDestroySemaphore(device, consumer_gate, nullptr);
 			vkDestroyDevice(device, nullptr);
 		}
 		if (instance)
 			vkDestroyInstance(instance, nullptr);
 	}
 };
+static int
+concurrent_producers(const char *path, unsigned frames)
+{
+	uint64_t start = ns();
+	Child first(path); Consumer a(first);
+	Child second(path); Consumer b(second);
+	check(a.registry == b.registry, "concurrent producers must share the same physical device");
+	printf("{\"event\":\"config\",\"scenario\":\"concurrent-producers\",\"producer_pids\":[%d,%d],\"consumer_pid\":%d,\"texture_size\":%u,\"thermal\":%ld}\n",
+	       first.pid, second.pid, getpid(), W, (long)[NSProcessInfo processInfo].thermalState);
+	for (unsigned frame = 1; frame <= frames; frame++) {
+		Command ca{frame,frame,(frame-1)%N,(uint32_t)first.pid,0,0};
+		Command cb=ca; cb.producer=(uint32_t)second.pid;
+		io(first.input,&ca,sizeof(ca),true); io(second.input,&cb,sizeof(cb),true);
+		Receipt ra{},rb{}; io(first.output,&ra,sizeof(ra),false); io(second.output,&rb,sizeof(rb),false);
+		uint64_t until=ns()+500000000;
+		while ((a.event.signaledValue < frame || b.event.signaledValue < frame) && ns()<until)
+			std::this_thread::sleep_for(std::chrono::microseconds(100));
+		check(a.event.signaledValue >= frame && b.event.signaledValue >= frame, "concurrent readiness");
+		a.submit(ca); b.submit(cb);
+		check(a.complete() && b.complete(), "concurrent GPU completion");
+		check(a.pixels(ca) && b.pixels(cb), "cross-producer attribution or overwrite");
+		first.ack(); second.ack();
+		printf("{\"event\":\"concurrent_frame\",\"frame\":%u,\"both_gpu_patterns_valid\":true,\"elapsed_ns\":%llu,\"thermal\":%ld}\n",frame,(unsigned long long)(ns()-start),(long)[NSProcessInfo processInfo].thermalState);
+	}
+	Command stop{}; stop.mode=99;
+	io(first.input,&stop,sizeof(stop),true); io(second.input,&stop,sizeof(stop),true);
+	printf("{\"event\":\"result\",\"scenario\":\"concurrent-producers\",\"status\":\"PASS\",\"consumed\":%u,\"elapsed_ns\":%llu,\"thermal_end\":%ld}\n",
+	       frames*2,(unsigned long long)(ns()-start),(long)[NSProcessInfo processInfo].thermalState);
+	return 0;
+}
+
 static double
 percentile(std::vector<uint64_t> v, double p)
 {
@@ -709,9 +795,11 @@ main(int argc, char **argv)
 		try {
 			if (argc == 4 && !strcmp(argv[1], "--producer"))
 				return producer(argv[2], argv[3]);
+			check(W != 0, "texture size must be 16–2048");
 			std::string scenario = argc > 1 ? argv[1] : "normal";
 			unsigned frames = argc > 2 ? std::stoul(argv[2]) : 12;
 			check(frames > 0 && frames <= 1000000, "frame count bound");
+			if (scenario == "concurrent-producers") return concurrent_producers(argv[0], frames);
 			const unsigned hung = getenv("GPU_SYNC_HUNG_MS") ? std::stoul(getenv("GPU_SYNC_HUNG_MS")) : 500;
 			const unsigned margin =
 			    getenv("GPU_SYNC_MARGIN_US") ? std::stoul(getenv("GPU_SYNC_MARGIN_US")) : 6000;
@@ -721,7 +809,7 @@ main(int argc, char **argv)
 			const std::vector<std::string> scenarios = {
 			    "normal",      "delayed",    "missing",        "future",      "nonmonotonic",
 			    "exit-before", "exit-after", "consumer-delay", "multi-queue", "broken-queue",
-			    "reuse",       "idle",       "cancel-callback"};
+			    "reuse",       "idle",       "cancel-callback", "exit-inflight", "consumer-gpu-delay"};
 			check(std::find(scenarios.begin(), scenarios.end(), scenario) != scenarios.end(),
 			      "unknown scenario");
 			Child child(argv[0]);
@@ -753,11 +841,11 @@ main(int argc, char **argv)
 			printf(
 			    "{\"event\":\"config\",\"scenario\":\"%s\",\"producer_pid\":%d,\"consumer_pid\":%d,\"hung_"
 			    "ms\":%u,\"margin_us\":%u,\"interval_us\":%u,\"thermal\":%ld,\"low_power\":%s,\"seed\":0,"
-			    "\"registry\":%llu}\n",
+			    "\"registry\":%llu,\"texture_size\":%u}\n",
 			    scenario.c_str(), child.pid, getpid(), hung, margin, interval,
 			    (long)[NSProcessInfo processInfo].thermalState,
 			    [NSProcessInfo processInfo].lowPowerModeEnabled ? "true" : "false",
-			    (unsigned long long)gpu.registry);
+			    (unsigned long long)gpu.registry, W);
 			if (scenario == "idle") {
 				std::this_thread::sleep_for(std::chrono::milliseconds(hung + 10));
 				check(!gpu.pending, "idle pending");
@@ -773,6 +861,8 @@ main(int argc, char **argv)
 					c.mode = 2;
 				if (scenario == "exit-before")
 					c.mode = 4;
+				if (scenario == "exit-inflight") c.mode = 9;
+				if (scenario == "consumer-gpu-delay") c.mode = 10;
 				if (scenario == "broken-queue")
 					c.mode = 7;
 				if (scenario == "multi-queue")
@@ -782,6 +872,16 @@ main(int argc, char **argv)
 				Receipt receipt{};
 				if (c.mode != 4)
 					io(child.output, &receipt, sizeof(receipt), false);
+				if (scenario == "exit-inflight") {
+					check(receipt.gpu_status < MTLCommandBufferStatusCompleted && gpu.event.signaledValue < c.value,
+					      "producer must have actual submitted, incomplete GPU work at termination");
+					gpu.unresolved_producer = true;
+					check(kill(child.pid, SIGKILL) == 0, "kill in-flight producer");
+					child.pid = -1;
+					gpu.producer_gate.signaledValue = c.value;
+					printf("{\"event\":\"producer_killed_inflight\",\"gpu_status\":%llu,\"storage_retained\":true}\n",
+					       (unsigned long long)receipt.gpu_status);
+				}
 				uint64_t expected = c.value + (scenario == "future" ? 1 : 0);
 				while (gpu.event.signaledValue < expected &&
 				       ns() - obligation < (uint64_t)hung * 1000000)
@@ -806,12 +906,13 @@ main(int argc, char **argv)
 				    (unsigned long long)receipt.commit_ns, (unsigned long long)observed,
 				    ready ? "true" : "false");
 				if (!ready) {
+					gpu.unresolved_producer = true;
 					check(scenario == "missing" || scenario == "future" ||
-					          scenario == "exit-before",
+					          scenario == "exit-before" || scenario == "exit-inflight",
 					      "unexpected producer stall");
 					blocked++;
 					check(!gpu.pending, "unsignalled submission");
-					if (c.mode != 4)
+					if (c.mode != 4 && c.mode != 9)
 						child.ack();
 					break;
 				}
@@ -828,6 +929,7 @@ main(int argc, char **argv)
 				}
 				check(scenario != "missing" && scenario != "future" && scenario != "exit-before",
 				      "fault unexpectedly ready");
+				if (scenario == "exit-inflight") gpu.unresolved_producer = false;
 				readiness.push_back(observed - obligation);
 				if (scenario == "exit-after") {
 					kill(child.pid, SIGKILL);
@@ -842,6 +944,10 @@ main(int argc, char **argv)
 				    "{\"event\":\"vulkan_wait_submit\",\"frame\":%u,\"value\":%llu,\"stage\":"
 				    "\"TRANSFER\",\"duration_ns\":%llu}\n",
 				    f, (unsigned long long)c.value, (unsigned long long)duration);
+				if (scenario == "consumer-gpu-delay") {
+					check(!gpu.complete(0) && gpu.pending, "actual consumer GPU work must still own the image");
+					printf("{\"event\":\"consumer_gpu_pending\",\"reuse_permitted\":false}\n");
+				}
 				if (scenario == "consumer-delay") {
 					check(gpu.pending, "reuse must remain excluded");
 					std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -863,7 +969,7 @@ main(int argc, char **argv)
 						check(gpu.complete(), "empty submission completion");
 					}
 				}
-				if (scenario == "exit-after")
+				if (scenario == "exit-after" || scenario == "exit-inflight")
 					break;
 				child.ack();
 				if (scenario == "nonmonotonic") {
