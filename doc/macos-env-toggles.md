@@ -1079,10 +1079,14 @@ resolve textures. A setting alone does not prove that zero-copy was used.
 ### Native client GPU hung threshold
 
 `XRT_MACOS_CLIENT_GPU_HUNG_MS` sets the macOS multi-compositor readiness worker
-threshold from submission of an outstanding obligation. Default: 500 ms; valid
-range: 1–10000 ms. Invalid values use the default. Inactivity without an obligation
-does not trigger this threshold. A timeout fails the session and does not authorize
-resource destruction. See [the first-run checkpoint](macos-gpu-sync-first-run.md).
+threshold from submission of an outstanding obligation. Default: 5000 ms; valid
+range: 1–30000 ms (it was 500 ms, 1–10000, before 2026-10-11). Invalid values use
+the default. Inactivity without an obligation does not trigger this threshold.
+Until it expires the client is back-pressured and the compositor reprojects the
+last delivered frame. Expiry, or an outright wait error, loses the session (macOS
+only; other platforms keep their previous behaviour) and does not authorize
+resource destruction. The service CTest runner pins 500 ms so its fault suites
+stay quick. See [the first-run checkpoint](macos-gpu-sync-first-run.md).
 
 ### Headset-free GPU service follow-up (2026-10-11)
 
@@ -1108,7 +1112,7 @@ See [the matched headset comparison](macos-gpu-sync-headset-comparison.md).
 
 | Environment variable | Default | Valid values | Purpose |
 |---|---|---|---|
-| `XRT_MACOS_CLIENT_GPU_HUNG_MS` | 500 | 1–10000 ms | Fail a specific unfulfilled producer obligation; idle sessions remain healthy. |
+| `XRT_MACOS_CLIENT_GPU_HUNG_MS` | 5000 | 1–30000 ms | Fail a specific unfulfilled producer obligation; idle sessions remain healthy. |
 | `XRT_MACOS_FRAME_READINESS_MARGIN_US` | 6000 | 0–100000 µs | Producer readiness cutoff before predicted presentation; late completed frames remain owned for later ticks. |
 | `XRT_MACOS_GPU_CLIENT_MB` | 512 | 1–1024 MiB | Per-client tracked GPU storage admission limit. |
 | `XRT_MACOS_GPU_CLIENT_OBJECTS` | 64 | 1–256 swapchains | Per-client create/import limit, charged through quarantine. |

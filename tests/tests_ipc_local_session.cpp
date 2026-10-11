@@ -9,10 +9,17 @@
 #include "b_session.h"
 #include "xrt/xrt_system.h"
 #include "catch_amalgamated.hpp"
+#include <cstdlib>
 #include <vector>
 
 namespace {
 int remote_creates;
+
+#ifdef XRT_OS_OSX
+// Tests that lose sessions on purpose expect the threshold they were written
+// for, not the default. It is read once, so set it before any compositor exists.
+const int pin_gpu_hung_threshold = setenv("XRT_MACOS_CLIENT_GPU_HUNG_MS", "500", 0);
+#endif
 
 // Use the real multi compositor and its wait thread, without starting a GPU renderer.
 struct Fixture

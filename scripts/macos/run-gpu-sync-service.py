@@ -55,6 +55,9 @@ def main():
         if args.benchmark:
             env.update(XRT_LOG='warn', XRT_COMPOSITOR_LOG_APPLE_SAMPLES='0',
                        XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE='0')
+        if not args.benchmark:
+            # Fault suites lose sessions on purpose; keep each loss quick.
+            env.update(XRT_MACOS_CLIENT_GPU_HUNG_MS='500')
         if args.budget_suite:
             env.update(XRT_MACOS_GPU_CLIENT_OBJECTS='2', XRT_MACOS_GPU_GLOBAL_OBJECTS='8')
         if args.headset:
@@ -65,7 +68,7 @@ def main():
                      'game_mode': 'not requested'}
         telemetry['headset'] = args.headset
         telemetry['gpu_policy'] = {key: env.get(key, default) for key, default in {
-            'XRT_MACOS_FRAME_READINESS_MARGIN_US': '6000', 'XRT_MACOS_CLIENT_GPU_HUNG_MS': '500',
+            'XRT_MACOS_FRAME_READINESS_MARGIN_US': '6000', 'XRT_MACOS_CLIENT_GPU_HUNG_MS': '5000',
             'XRT_MACOS_GPU_CLIENT_MB': '512', 'XRT_MACOS_GPU_CLIENT_OBJECTS': '64',
             'XRT_MACOS_GPU_GLOBAL_OBJECTS': '256'}.items()}
         for key, command in [('power', ['pmset', '-g', 'batt']), ('settings', ['pmset', '-g', 'custom']),
