@@ -1,0 +1,46 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: gpu-sync-19918
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: 
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+ INFO [u_timing_trace_open] Timing trace: /Users/nickkennedy/Code/monado-2/doc/results/macos-gpu-service-20261011/disconnect/monado_psvr2_19918_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [client_metal_release_wait_thread_attach] Metal app-release Stage 4 enabled; shared-event completion will gate frame readiness on Monado's wait thread
+ INFO [ipc_metal_xpc_publish_iosurfaces] Metal XPC published 3 IOSurface(s) token=0x000000004d1aa4fd
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d2db238 device=0x105590310 value=0
+ INFO [ensure_pair] Metal app-release Stage 4 ready: event=0x9b4c64ac0 initial_value=0; app CPU barrier bypassed and frame readiness delegated to Monado wait thread
+{"event":"frame","pid":19918,"frame":1,"image":0,"begin_ns":34304879591000,"end_ns":34304879767000}
+{"event":"frame","pid":19918,"frame":2,"image":1,"begin_ns":34304894350000,"end_ns":34304894726000}
+{"event":"frame","pid":19918,"frame":3,"image":2,"begin_ns":34304912468000,"end_ns":34304912596000}
+{"event":"frame","pid":19918,"frame":4,"image":0,"begin_ns":34304928848000,"end_ns":34304929054000}
+{"event":"frame","pid":19918,"frame":5,"image":1,"begin_ns":34304946208000,"end_ns":34304946334000}
+{"event":"frame","pid":19918,"frame":6,"image":2,"begin_ns":34304963341000,"end_ns":34304963570000}
+{"event":"frame","pid":19918,"frame":7,"image":0,"begin_ns":34304980360000,"end_ns":34304980565000}
+{"event":"frame","pid":19918,"frame":8,"image":1,"begin_ns":34304997109000,"end_ns":34304997322000}
+{"event":"frame","pid":19918,"frame":9,"image":2,"begin_ns":34305014043000,"end_ns":34305014275000}
+{"event":"frame","pid":19918,"frame":10,"image":0,"begin_ns":34305030690000,"end_ns":34305031000000}
+{"event":"fault","time_ns":34305046467000}
+{"event":"suppressed_signal","value":22}
+{"event":"frame","pid":19918,"frame":11,"image":1,"begin_ns":34305046547000,"end_ns":34305046750000}

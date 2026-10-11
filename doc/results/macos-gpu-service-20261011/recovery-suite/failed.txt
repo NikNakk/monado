@@ -1,0 +1,47 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: gpu-sync-19401
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: 
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+ INFO [u_timing_trace_open] Timing trace: /Users/nickkennedy/Code/monado-2/doc/results/macos-gpu-service-20261011/recovery-suite/monado_psvr2_19401_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [client_metal_release_wait_thread_attach] Metal app-release Stage 4 enabled; shared-event completion will gate frame readiness on Monado's wait thread
+ INFO [ipc_metal_xpc_publish_iosurfaces] Metal XPC published 3 IOSurface(s) token=0x000000004d87765d
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d33b586 device=0x1032b1620 value=0
+ INFO [ensure_pair] Metal app-release Stage 4 ready: event=0x8d90a0ac0 initial_value=0; app CPU barrier bypassed and frame readiness delegated to Monado wait thread
+{"event":"frame","pid":19401,"frame":1,"image":0,"begin_ns":34142391562083,"end_ns":34142391981583}
+{"event":"frame","pid":19401,"frame":2,"image":1,"begin_ns":34142397624583,"end_ns":34142397803500}
+{"event":"frame","pid":19401,"frame":3,"image":2,"begin_ns":34142417039416,"end_ns":34142417214083}
+{"event":"frame","pid":19401,"frame":4,"image":0,"begin_ns":34142433968333,"end_ns":34142434186791}
+{"event":"frame","pid":19401,"frame":5,"image":1,"begin_ns":34142448843833,"end_ns":34142448949583}
+{"event":"frame","pid":19401,"frame":6,"image":2,"begin_ns":34142465590583,"end_ns":34142465781333}
+{"event":"frame","pid":19401,"frame":7,"image":0,"begin_ns":34142482206666,"end_ns":34142482361625}
+{"event":"frame","pid":19401,"frame":8,"image":1,"begin_ns":34142498913833,"end_ns":34142499127833}
+{"event":"frame","pid":19401,"frame":9,"image":2,"begin_ns":34142515559125,"end_ns":34142515748958}
+{"event":"frame","pid":19401,"frame":10,"image":0,"begin_ns":34142539405958,"end_ns":34142539636250}
+{"event":"fault","time_ns":34142552708333}
+{"event":"suppressed_signal","value":22}
+{"event":"frame","pid":19401,"frame":11,"image":1,"begin_ns":34142552765166,"end_ns":34142553023875}
+{"event":"result","status":"PASS","frames":11,"lost":true,"recovery_ns":506418917}

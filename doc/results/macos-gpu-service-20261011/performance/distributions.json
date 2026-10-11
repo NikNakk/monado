@@ -1,0 +1,170 @@
+[
+  {
+    "run": "baseline-0",
+    "frames": 600,
+    "throughput_hz": 59.99814206104901,
+    "end_frame_us": {
+      "p50": 135.0,
+      "p95": 264.0,
+      "p99": 390.0,
+      "max": 433.0
+    },
+    "cpu_readiness_wait_us": {
+      "p50": 354.0,
+      "p95": 824.0,
+      "p99": 1101.0,
+      "max": 1517.0
+    },
+    "end_frame_entry_to_latch_us": {
+      "p50": 16107.0,
+      "p95": 16853.0,
+      "p99": 17263.0,
+      "max": 17645.0
+    },
+    "reused_latches": 88,
+    "queue_submit_us": {
+      "p50": 159.0,
+      "p95": 220.0,
+      "p99": 255.0,
+      "max": 278.0
+    },
+    "draw_dispatch_us": {
+      "p50": 275.0,
+      "p95": 362.0,
+      "p99": 412.0,
+      "max": 433.0
+    },
+    "previous_fence_wait_us": {
+      "p50": 1.0,
+      "p95": 2.0,
+      "p99": 3.0,
+      "max": 7.0
+    }
+  },
+  {
+    "run": "baseline-1",
+    "frames": 600,
+    "throughput_hz": 59.987762074830144,
+    "end_frame_us": {
+      "p50": 121.0,
+      "p95": 220.0,
+      "p99": 274.0,
+      "max": 392.0
+    },
+    "cpu_readiness_wait_us": {
+      "p50": 296.0,
+      "p95": 602.0,
+      "p99": 770.0,
+      "max": 3081.0
+    },
+    "end_frame_entry_to_latch_us": {
+      "p50": 1679.0,
+      "p95": 16421.0,
+      "p99": 17149.0,
+      "max": 17306.0
+    },
+    "reused_latches": 140,
+    "queue_submit_us": {
+      "p50": 140.0,
+      "p95": 216.0,
+      "p99": 243.0,
+      "max": 265.0
+    },
+    "draw_dispatch_us": {
+      "p50": 241.0,
+      "p95": 363.0,
+      "p99": 403.0,
+      "max": 433.0
+    },
+    "previous_fence_wait_us": {
+      "p50": 1.0,
+      "p95": 2.0,
+      "p99": 3.0,
+      "max": 7.0
+    }
+  },
+  {
+    "run": "modified-0",
+    "frames": 600,
+    "throughput_hz": 59.99692739812938,
+    "end_frame_us": {
+      "p50": 131.0,
+      "p95": 219.0,
+      "p99": 320.0,
+      "max": 396.0
+    },
+    "cpu_readiness_wait_us": {
+      "p50": 405.0,
+      "p95": 618.0,
+      "p99": 698.0,
+      "max": 1213.0
+    },
+    "end_frame_entry_to_latch_us": {
+      "p50": 16110.0,
+      "p95": 16577.0,
+      "p99": 17156.0,
+      "max": 17383.0
+    },
+    "reused_latches": 87,
+    "queue_submit_us": {
+      "p50": 158.0,
+      "p95": 214.0,
+      "p99": 234.0,
+      "max": 303.0
+    },
+    "draw_dispatch_us": {
+      "p50": 273.0,
+      "p95": 356.0,
+      "p99": 389.0,
+      "max": 476.0
+    },
+    "previous_fence_wait_us": {
+      "p50": 1.0,
+      "p95": 3.0,
+      "p99": 3.0,
+      "max": 7.0
+    }
+  },
+  {
+    "run": "modified-1",
+    "frames": 600,
+    "throughput_hz": 59.99644028150456,
+    "end_frame_us": {
+      "p50": 125.0,
+      "p95": 193.0,
+      "p99": 279.0,
+      "max": 362.0
+    },
+    "cpu_readiness_wait_us": {
+      "p50": 375.0,
+      "p95": 598.0,
+      "p99": 671.0,
+      "max": 774.0
+    },
+    "end_frame_entry_to_latch_us": {
+      "p50": 16154.0,
+      "p95": 16466.0,
+      "p99": 16972.0,
+      "max": 17255.0
+    },
+    "reused_latches": 72,
+    "queue_submit_us": {
+      "p50": 146.0,
+      "p95": 198.0,
+      "p99": 222.0,
+      "max": 266.0
+    },
+    "draw_dispatch_us": {
+      "p50": 249.0,
+      "p95": 337.0,
+      "p99": 379.0,
+      "max": 431.0
+    },
+    "previous_fence_wait_us": {
+      "p50": 1.0,
+      "p95": 2.0,
+      "p99": 3.0,
+      "max": 8.0
+    }
+  }
+]

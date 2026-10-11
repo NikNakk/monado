@@ -1,0 +1,20 @@
+[0/2] Re-checking globbed directories...
+[1/20] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_base.c.o
+[2/20] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_semaphore.c.o
+[3/20] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_compositor.c.o
+[4/20] Building C object src/xrt/compositor/multi/CMakeFiles/comp_multi.dir/comp_multi_compositor.c.o
+[5/20] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_swapchain_gpu_reuse.c.o
+[6/20] Building C object src/xrt/compositor/multi/CMakeFiles/comp_multi.dir/comp_multi_system.c.o
+[7/20] Building OBJC object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_metal_semaphore_probe.m.o
+[8/20] Linking CXX static library src/xrt/compositor/util/libcomp_util.a
+[9/20] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_direct_swapchain.m.o
+[10/20] Linking CXX static library src/xrt/compositor/multi/libcomp_multi.a
+[11/20] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_client.m.o
+[12/20] Linking CXX static library src/xrt/compositor/main/libcomp_main.a
+[13/20] Linking CXX static library src/xrt/compositor/client/libcomp_client.a
+[14/20] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_metal.c.o
+[15/20] Linking CXX static library src/xrt/ipc/libipc_server.a
+[16/20] Linking CXX shared library src/xrt/targets/libmonado/libmonado.25.1.0.dylib
+[17/20] Creating library symlink src/xrt/targets/libmonado/libmonado.25.dylib src/xrt/targets/libmonado/libmonado.dylib
+[18/20] Linking CXX executable src/xrt/targets/service/monado-service
+[19/20] Linking CXX shared library src/xrt/targets/openxr/libopenxr_monado.dylib; Generating OpenXR runtime manifest named /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json for build tree usage

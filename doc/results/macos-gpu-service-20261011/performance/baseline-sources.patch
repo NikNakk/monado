@@ -1,0 +1,717 @@
+diff --git a/src/xrt/compositor/main/comp_compositor.c b/src/xrt/compositor/main/comp_compositor.c
+index b326df7f2..a6c264e2c 100644
+--- a/src/xrt/compositor/main/comp_compositor.c
++++ b/src/xrt/compositor/main/comp_compositor.c
+@@ -69,6 +69,7 @@
+ 
+ #include "util/comp_vulkan.h"
+ #include "util/comp_swapchain_gpu_reuse_internal.h"
++#include "util/comp_swapchain_gpu_reuse.h"
+ #include "main/comp_compositor.h"
+ #include "main/comp_frame.h"
+ 
+@@ -251,7 +252,10 @@ static void
+ compositor_session_cleanup(struct comp_compositor *c)
+ {
+ 	if (c->deferred_surface) {
+-		// Make sure we don't have anything to destroy.
++// Make sure we don't have anything to destroy.
++#ifdef XRT_OS_OSX
++		comp_swapchain_gpu_reuse_collect(get_vk(c), false);
++#endif
+ 		comp_swapchain_shared_garbage_collect(&c->base.cscs);
+ 		comp_renderer_destroy(&c->r);
+ #ifdef XRT_FEATURE_WINDOW_PEEK
+@@ -490,7 +494,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
+ 
+ 	COMP_SPEW(c, "LAYER_COMMIT finished drawing at %8.3fms", ns_to_ms(c->last_frame_time_ns));
+ 
+-	// Now is a good point to garbage collect.
++// Now is a good point to garbage collect.
++#ifdef XRT_OS_OSX
++	comp_swapchain_gpu_reuse_collect(get_vk(c), false);
++#endif
+ 	comp_swapchain_shared_garbage_collect(&c->base.cscs);
+ #ifdef XRT_OS_OSX
+ 	macos_frame_pipeline_trace_event("layer_commit_return", frame_id, os_monotonic_get_ns(), 0, 0,
+@@ -577,9 +584,15 @@ compositor_destroy(struct xrt_compositor *xc)
+ 	// Destroy the scratch images fully, we initialized all of them.
+ 	chl_scratch_fini(&c->scratch);
+ 
+-	// Make sure we don't have anything to destroy.
++// Make sure we don't have anything to destroy.
++#ifdef XRT_OS_OSX
++	comp_swapchain_gpu_reuse_collect(get_vk(c), false);
++#endif
+ 	comp_swapchain_shared_garbage_collect(&c->base.cscs);
+ 
++#ifdef XRT_OS_OSX
++	comp_swapchain_gpu_reuse_collect(vk, true);
++#endif
+ 	// Must be destroyed before Vulkan.
+ 	comp_swapchain_shared_destroy(&c->base.cscs, vk);
+ 
+diff --git a/src/xrt/compositor/multi/comp_multi_compositor.c b/src/xrt/compositor/multi/comp_multi_compositor.c
+index 2a4b21949..0d5f7e034 100644
+--- a/src/xrt/compositor/multi/comp_multi_compositor.c
++++ b/src/xrt/compositor/multi/comp_multi_compositor.c
+@@ -48,6 +48,16 @@
+ #include "android/android_globals.h"
+ #endif
+ 
++#ifdef XRT_OS_OSX
++DEBUG_GET_ONCE_NUM_OPTION(client_gpu_hung_ms, "XRT_MACOS_CLIENT_GPU_HUNG_MS", 500)
++static int64_t
++client_gpu_hung_ns(void)
++{
++	int64_t ms = debug_get_num_option_client_gpu_hung_ms();
++	return (ms > 0 && ms <= 10000 ? ms : 500) * U_TIME_1MS_IN_NS;
++}
++#endif
++
+ DEBUG_GET_ONCE_LOG_OPTION(app_frame_lag_level, "XRT_APP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_DEBUG)
+ #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_app_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
+ 
+@@ -299,14 +309,18 @@ is_pushed_or_waiting_locked(struct multi_compositor *mc)
+ 	       mc->wait_thread.xcsem != NULL; //
+ }
+ 
+-static void
++static xrt_result_t
+ wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
+ {
+ 	COMP_TRACE_MARKER();
+ 	xrt_result_t ret = XRT_SUCCESS;
+ 
+-	// 100ms
++	// Worker only. Never block the renderer on an untrusted future value.
+ 	int64_t timeout_ns = 100 * U_TIME_1MS_IN_NS;
++#ifdef XRT_OS_OSX
++	timeout_ns = 5 * U_TIME_1MS_IN_NS;
++	int64_t started_ns = mc->wait_thread.submitted_ns;
++#endif
+ 
+ 	do {
+ 		ret = xrt_compositor_fence_wait(*xcf_ptr, timeout_ns);
+@@ -314,24 +328,35 @@ wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
+ 			break;
+ 		}
+ 
++#ifdef XRT_OS_OSX
++		if (os_monotonic_get_ns() - started_ns >= client_gpu_hung_ns()) {
++			break;
++		}
++#else
+ 		U_LOG_W("Waiting on client fence timed out > 100ms!");
++#endif
+ 	} while (os_thread_helper_is_running(&mc->wait_thread.oth));
+ 
+ 	xrt_compositor_fence_destroy(xcf_ptr);
+ 
+ 	if (ret != XRT_SUCCESS) {
+-		U_LOG_E("Fence waiting failed!");
++		U_LOG_E("Fence waiting failed: result=%d", ret);
+ 	}
++	return ret;
+ }
+ 
+-static void
++static xrt_result_t
+ wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xcsem_ptr, uint64_t value)
+ {
+ 	COMP_TRACE_MARKER();
+ 	xrt_result_t ret = XRT_SUCCESS;
+ 
+-	// 100ms
++	// Worker only. Never block the renderer on an untrusted future value.
+ 	int64_t timeout_ns = 100 * U_TIME_1MS_IN_NS;
++#ifdef XRT_OS_OSX
++	timeout_ns = 5 * U_TIME_1MS_IN_NS;
++	int64_t started_ns = mc->wait_thread.submitted_ns;
++#endif
+ 
+ 	do {
+ 		ret = xrt_compositor_semaphore_wait(*xcsem_ptr, value, timeout_ns);
+@@ -339,14 +364,21 @@ wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xc
+ 			break;
+ 		}
+ 
++#ifdef XRT_OS_OSX
++		if (os_monotonic_get_ns() - started_ns >= client_gpu_hung_ns()) {
++			break;
++		}
++#else
+ 		U_LOG_W("Waiting on client semaphore value '%" PRIu64 "' timed out > 100ms!", value);
++#endif
+ 	} while (os_thread_helper_is_running(&mc->wait_thread.oth));
+ 
+ 	xrt_compositor_semaphore_reference(xcsem_ptr, NULL);
+ 
+ 	if (ret != XRT_SUCCESS) {
+-		U_LOG_E("Semaphore waiting failed!");
++		U_LOG_E("Semaphore waiting failed: value=%" PRIu64 " result=%d", value, ret);
+ 	}
++	return ret;
+ }
+ 
+ static void
+@@ -474,16 +506,38 @@ run_func(void *ptr)
+ 
+ 		os_thread_helper_unlock(&mc->wait_thread.oth);
+ 
++		xrt_result_t wait_result = XRT_SUCCESS;
+ 		if (xcsem != NULL) {
+ 			int64_t semaphore_wait_start_ns = os_monotonic_get_ns();
+ 			macos_client_gpu_trace_event("semaphore_wait_start", frame_id, value, 0);
+-			wait_semaphore(mc, &xcsem, value);
++			wait_result = wait_semaphore(mc, &xcsem, value);
+ 			int64_t semaphore_wait_end_ns = os_monotonic_get_ns();
+-			macos_client_gpu_trace_event("semaphore_ready", frame_id, value,
+-			                             semaphore_wait_end_ns - semaphore_wait_start_ns);
++			macos_client_gpu_trace_event(wait_result == XRT_SUCCESS ? "semaphore_ready"
++			                                                        : "semaphore_failed",
++			                             frame_id, value, semaphore_wait_end_ns - semaphore_wait_start_ns);
+ 		}
+ 		if (xcf != NULL) {
+-			wait_fence(mc, &xcf);
++			wait_result = wait_fence(mc, &xcf);
++		}
++
++		if (wait_result != XRT_SUCCESS) {
++			/* A timeout is cancellation, never GPU completion. Keep progress
++			 * references until teardown; tracked storage then enters quarantine. */
++			U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d", frame_id,
++			        value, wait_result);
++			if (mc->xses != NULL && os_thread_helper_is_running(&mc->wait_thread.oth)) {
++				union xrt_session_event lost = {.type = XRT_SESSION_EVENT_LOST};
++				xrt_result_t notify = multi_compositor_push_event(mc, &lost);
++				if (notify != XRT_SUCCESS) {
++					U_LOG_E("Could not notify failed client: result=%d", notify);
++				}
++			}
++			os_thread_helper_lock(&mc->wait_thread.oth);
++			mc->wait_thread.failed = true;
++			mc->wait_thread.waiting = false;
++			mc->wait_thread.blocked = false;
++			os_thread_helper_signal_locked(&mc->wait_thread.oth);
++			continue;
+ 		}
+ 
+ 		// Sample time outside of lock.
+@@ -561,6 +615,7 @@ push_fence_to_wait_thread(struct multi_compositor *mc, int64_t frame_id, struct
+ 	assert(mc->wait_thread.xcf == NULL);
+ 
+ 	mc->wait_thread.frame_id = frame_id;
++	mc->wait_thread.submitted_ns = os_monotonic_get_ns();
+ 	mc->wait_thread.xcf = xcf;
+ 
+ 	os_thread_helper_signal_locked(&mc->wait_thread.oth);
+@@ -583,6 +638,7 @@ push_semaphore_to_wait_thread(struct multi_compositor *mc,
+ 	assert(mc->wait_thread.xcsem == NULL);
+ 
+ 	mc->wait_thread.frame_id = frame_id;
++	mc->wait_thread.submitted_ns = os_monotonic_get_ns();
+ 	xrt_compositor_semaphore_reference(&mc->wait_thread.xcsem, xcsem);
+ 	mc->wait_thread.value = value;
+ 
+@@ -849,6 +905,12 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
+ {
+ 	struct multi_compositor *mc = multi_compositor(xc);
+ 	macos_client_gpu_trace_event("layer_begin_entry", data->frame_id, 0, 0);
++	os_thread_helper_lock(&mc->wait_thread.oth);
++	bool already_failed = mc->wait_thread.failed;
++	os_thread_helper_unlock(&mc->wait_thread.oth);
++	if (already_failed) {
++		return XRT_ERROR_IPC_FAILURE;
++	}
+ 
+ 	// As early as possible.
+ 	int64_t now_ns = os_monotonic_get_ns();
+@@ -875,6 +937,12 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
+ 		          ipc_elapsed_ms(wait_start_ns, wait_end_ns));
+ 	}
+ 
++	os_thread_helper_lock(&mc->wait_thread.oth);
++	bool failed = mc->wait_thread.failed;
++	os_thread_helper_unlock(&mc->wait_thread.oth);
++	if (failed) {
++		return XRT_ERROR_IPC_FAILURE;
++	}
+ 	assert(mc->progress.layer_count == 0);
+ 	U_ZERO(&mc->progress);
+ 
+@@ -1093,6 +1161,40 @@ multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
+ 	struct multi_compositor *mc = multi_compositor(xc);
+ 	int64_t frame_id = mc->progress.data.frame_id;
+ 
++#ifdef XRT_OS_OSX
++	for (uint32_t i = 0; i < mc->progress.layer_count; i++) {
++		struct multi_layer_entry *layer = &mc->progress.layers[i];
++		const struct xrt_layer_data *data = &layer->data;
++		uint32_t count = data->type == XRT_LAYER_PROJECTION || data->type == XRT_LAYER_PROJECTION_DEPTH
++		                     ? data->view_count
++		                     : 1;
++		for (uint32_t v = 0; v < count; v++) {
++			uint32_t index;
++			switch (data->type) {
++			case XRT_LAYER_PROJECTION: index = data->proj.v[v].sub.image_index; break;
++			case XRT_LAYER_PROJECTION_DEPTH: index = data->depth.v[v].sub.image_index; break;
++			case XRT_LAYER_QUAD: index = data->quad.sub.image_index; break;
++			case XRT_LAYER_CUBE: index = data->cube.sub.image_index; break;
++			case XRT_LAYER_CYLINDER: index = data->cylinder.sub.image_index; break;
++			case XRT_LAYER_EQUIRECT1: index = data->equirect1.sub.image_index; break;
++			case XRT_LAYER_EQUIRECT2: index = data->equirect2.sub.image_index; break;
++			case XRT_LAYER_PASSTHROUGH: continue;
++			default: return XRT_ERROR_INVALID_ARGUMENT;
++			}
++			xrt_result_t ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[v], index, xcsem, value);
++			if (ret != XRT_SUCCESS) {
++				return ret;
++			}
++			if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
++				ret = comp_swapchain_gpu_reuse_set_producer(
++				    layer->xscs[v + count], data->depth.d[v].sub.image_index, xcsem, value);
++				if (ret != XRT_SUCCESS) {
++					return ret;
++				}
++			}
++		}
++	}
++#endif
+ 	push_semaphore_to_wait_thread(mc, frame_id, xcsem, value);
+ 	macos_client_gpu_trace_event("semaphore_pushed", frame_id, value, 0);
+ 
+diff --git a/src/xrt/compositor/multi/comp_multi_private.h b/src/xrt/compositor/multi/comp_multi_private.h
+index aa83d0c1f..98a495d2d 100644
+--- a/src/xrt/compositor/multi/comp_multi_private.h
++++ b/src/xrt/compositor/multi/comp_multi_private.h
+@@ -150,6 +150,9 @@ struct multi_compositor
+ 		//! Frame id of frame being waited on.
+ 		int64_t frame_id;
+ 
++		//! Receipt time of this specific GPU obligation, not last application activity.
++		int64_t submitted_ns;
++
+ 		//! The wait thread itself
+ 		struct os_thread_helper oth;
+ 
+@@ -158,6 +161,8 @@ struct multi_compositor
+ 
+ 		//! Is the thread waiting, if so the client should block.
+ 		bool waiting;
++		//! Sticky failure; do not admit another frame into this session.
++		bool failed;
+ 
+ 		/*!
+ 		 * Is the client thread blocked?
+diff --git a/src/xrt/compositor/util/comp_semaphore.c b/src/xrt/compositor/util/comp_semaphore.c
+index 4fece621f..297ef0823 100644
+--- a/src/xrt/compositor/util/comp_semaphore.c
++++ b/src/xrt/compositor/util/comp_semaphore.c
+@@ -81,6 +81,18 @@ comp_semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
+  *
+  */
+ 
++bool
++comp_semaphore_matches_vk(struct xrt_compositor_semaphore *sem, struct vk_bundle *vk)
++{
++#ifdef VK_KHR_timeline_semaphore
++	return sem != NULL && sem->wait == comp_semaphore_wait && comp_semaphore(sem)->vk == vk;
++#else
++	(void)sem;
++	(void)vk;
++	return false;
++#endif
++}
++
+ xrt_result_t
+ comp_semaphore_create(struct vk_bundle *vk,
+                       xrt_graphics_sync_handle_t *out_handle,
+diff --git a/src/xrt/compositor/util/comp_semaphore.h b/src/xrt/compositor/util/comp_semaphore.h
+index af31938a0..924884759 100644
+--- a/src/xrt/compositor/util/comp_semaphore.h
++++ b/src/xrt/compositor/util/comp_semaphore.h
+@@ -62,6 +62,10 @@ comp_semaphore(struct xrt_compositor_semaphore *xcsem)
+ }
+ 
+ 
++/* True only for this module's native Vulkan-backed semaphore implementation. */
++bool
++comp_semaphore_matches_vk(struct xrt_compositor_semaphore *sem, struct vk_bundle *vk);
++
+ /*
+  *
+  * 'Exported' functions.
+diff --git a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
+index 7850b221d..fbbcb2168 100644
+--- a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
++++ b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
+@@ -9,6 +9,7 @@
+ #include "util/comp_swapchain_gpu_reuse.h"
+ #include "util/comp_swapchain_gpu_reuse_internal.h"
+ #include "util/comp_swapchain.h"
++#include "util/comp_semaphore.h"
+ #include "util/u_debug.h"
+ #include "util/u_logging.h"
+ #include "util/u_misc.h"
+@@ -35,6 +36,10 @@ struct gpu_reuse_tracker
+ 	struct comp_swapchain *sc;
+ 	struct gpu_reuse_context *context;
+ 	uint64_t last_gpu_use[XRT_MAX_SWAPCHAIN_IMAGES];
++	struct xrt_compositor_semaphore *producer[XRT_MAX_SWAPCHAIN_IMAGES];
++	uint64_t producer_value[XRT_MAX_SWAPCHAIN_IMAGES];
++	uint64_t bytes;
++	bool quarantined;
+ 	uint32_t pending_consumers[XRT_MAX_SWAPCHAIN_IMAGES];
+ 	xrt_result_t (*original_wait_image)(struct xrt_swapchain *, int64_t, uint32_t);
+ 	void (*original_destroy)(struct xrt_swapchain *);
+@@ -85,6 +90,7 @@ struct gpu_reuse_renderer_tls
+ 	struct comp_layer_accum *cla;
+ 	struct gpu_reuse_submit submit;
+ 	struct vk_semaphore_list_signal signal_sems;
++	struct vk_semaphore_list_wait wait_sems;
+ 	const VkSubmitInfo *expected_submit_info;
+ 	const VkSubmitInfo *rejected_submit_info;
+ 	VkResult rejected_result;
+@@ -95,6 +101,11 @@ static pthread_mutex_t g_gpu_reuse_mutex = PTHREAD_MUTEX_INITIALIZER;
+ static pthread_cond_t g_gpu_reuse_cond = PTHREAD_COND_INITIALIZER;
+ static struct gpu_reuse_context *g_gpu_reuse_contexts = NULL;
+ static struct gpu_reuse_native_accum *g_gpu_reuse_native_accums = NULL;
++/* Limit all live plus quarantined tracked storage, and small-object growth. */
++#define GPU_REUSE_MAX_BYTES (UINT64_C(1024) * 1024 * 1024)
++#define GPU_REUSE_MAX_TRACKERS 256
++static uint64_t g_tracked_bytes;
++static uint32_t g_tracker_count;
+ static __thread struct gpu_reuse_renderer_tls g_renderer = {0};
+ 
+ static void
+@@ -278,6 +289,16 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
+ 			return XRT_TIMEOUT;
+ 		}
+ 
++		/* Consumer cancellation does not imply producer completion. Poll only:
++		 * an unresolved producer obligation must never authorize reuse. */
++		if (tracker->producer[image_index] != NULL) {
++			xrt_result_t producer_result = xrt_compositor_semaphore_wait(
++			    tracker->producer[image_index], tracker->producer_value[image_index], 0);
++			if (producer_result != XRT_SUCCESS) {
++				pthread_mutex_unlock(&g_gpu_reuse_mutex);
++				return producer_result;
++			}
++		}
+ 		uint64_t value = tracker->last_gpu_use[image_index];
+ 		VkSemaphore timeline = tracker->context->timeline;
+ 		struct vk_bundle *vk = tracker->context->vk;
+@@ -316,8 +337,11 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
+ 			pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ 			return XRT_SUCCESS;
+ 		}
+-		bool stable =
+-		    tracker->pending_consumers[image_index] == 0 && tracker->last_gpu_use[image_index] == value;
++		bool stable = tracker->pending_consumers[image_index] == 0 &&
++		              tracker->last_gpu_use[image_index] == value &&
++		              (tracker->producer[image_index] == NULL ||
++		               xrt_compositor_semaphore_wait(tracker->producer[image_index],
++		                                             tracker->producer_value[image_index], 0) == XRT_SUCCESS);
+ 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ 		if (stable) {
+ 			return XRT_SUCCESS;
+@@ -325,77 +349,128 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
+ 	}
+ }
+ 
+-static void
+-destroy_context_after_last_tracker(struct gpu_reuse_context *context)
++static bool
++tracker_completed_locked(struct gpu_reuse_tracker *tracker)
+ {
+-	if (context == NULL) {
+-		return;
++	struct vk_bundle *vk = tracker->context->vk;
++	for (uint32_t i = 0; i < tracker->xsc->image_count; i++) {
++		if (tracker->pending_consumers[i] != 0) {
++			return false;
++		}
++		if (tracker->producer[i] != NULL &&
++		    xrt_compositor_semaphore_wait(tracker->producer[i], tracker->producer_value[i], 0) != XRT_SUCCESS) {
++			return false;
++		}
++		uint64_t value = tracker->last_gpu_use[i];
++		if (value != 0) {
++			VkSemaphoreWaitInfo wait = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
++			                            .semaphoreCount = 1,
++			                            .pSemaphores = &tracker->context->timeline,
++			                            .pValues = &value};
++			if (vk->vkWaitSemaphores(vk->device, &wait, 0) != VK_SUCCESS) {
++				return false;
++			}
++		}
+ 	}
++	return true;
++}
+ 
+-#ifdef VK_KHR_timeline_semaphore
+-	if (context->last_submitted_value != 0) {
+-		VkSemaphoreWaitInfo wait_info = {
+-		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+-		    .flags = 0,
+-		    .semaphoreCount = 1,
+-		    .pSemaphores = &context->timeline,
+-		    .pValues = &context->last_submitted_value,
+-		};
+-		VkResult ret = context->vk->vkWaitSemaphores(context->vk->device, &wait_info, UINT64_MAX);
+-		if (ret != VK_SUCCESS) {
+-			VK_ERROR(context->vk, "Waiting for final swapchain GPU reuse value: %s", vk_result_string(ret));
++/* Caller holds the registry lock. original_destroy only enqueues the swapchain
++ * on its existing compositor garbage collector; it does not free GPU storage. */
++static void
++reclaim_tracker_locked(struct gpu_reuse_tracker **ptr)
++{
++	struct gpu_reuse_tracker *t = *ptr;
++	*ptr = t->next;
++	for (uint32_t i = 0; i < t->xsc->image_count; i++) {
++		xrt_compositor_semaphore_reference(&t->producer[i], NULL);
++	}
++	g_tracked_bytes -= t->bytes;
++	g_tracker_count--;
++	t->xsc->wait_image = t->original_wait_image;
++	t->xsc->destroy = t->original_destroy;
++	U_LOG_I("GPU reuse reclaim: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u", (void *)t->xsc,
++	        (unsigned long long)t->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count);
++	t->original_destroy(t->xsc);
++	free(t);
++}
++
++void
++comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown)
++{
++	pthread_mutex_lock(&g_gpu_reuse_mutex);
++	struct gpu_reuse_context **cp = &g_gpu_reuse_contexts;
++	while (*cp != NULL) {
++		struct gpu_reuse_context *c = *cp;
++		if (c->vk != vk) {
++			cp = &c->next;
++			continue;
++		}
++		struct gpu_reuse_tracker **tp = &c->trackers;
++		while (*tp != NULL) {
++			if ((*tp)->quarantined && tracker_completed_locked(*tp)) {
++				reclaim_tracker_locked(tp);
++			} else {
++				tp = &(*tp)->next;
++			}
++		}
++		if (c->trackers == NULL) {
++			vk->vkDestroySemaphore(vk->device, c->timeline, NULL);
++			*cp = c->next;
++			free(c);
++		} else if (device_teardown) {
++			/* Producer access may outlive the Vulkan device. Keep native storage
++			 * until process exit, detach so a reused vk_bundle address is safe.
++			 * Budget remains charged. Never access this device again. */
++			U_LOG_W("GPU reuse device teardown retains unresolved resources until process exit");
++			*cp = c->next;
++			c->vk = NULL;
++		} else {
++			cp = &c->next;
+ 		}
+ 	}
+-#endif
+-
+-	context->vk->vkDestroySemaphore(context->vk->device, context->timeline, NULL);
+-	free(context);
++	pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ }
+ 
+ static void
+ tracked_swapchain_destroy(struct xrt_swapchain *xsc)
+ {
+-	void (*original_destroy)(struct xrt_swapchain *) = NULL;
+-	struct gpu_reuse_tracker *removed = NULL;
+-	struct gpu_reuse_context *empty_context = NULL;
+-
+ 	pthread_mutex_lock(&g_gpu_reuse_mutex);
+ 	struct gpu_reuse_tracker *tracker = find_tracker_locked(xsc);
+ 	if (tracker != NULL) {
+-		struct gpu_reuse_context *context = tracker->context;
+-		struct gpu_reuse_tracker **tracker_ptr = &context->trackers;
+-		while (*tracker_ptr != NULL) {
+-			if (*tracker_ptr == tracker) {
+-				*tracker_ptr = tracker->next;
+-				break;
+-			}
+-			tracker_ptr = &(*tracker_ptr)->next;
+-		}
+-
+-		original_destroy = tracker->original_destroy;
+-		xsc->wait_image = tracker->original_wait_image;
+-		xsc->destroy = tracker->original_destroy;
+-		removed = tracker;
+-
+-		if (context->trackers == NULL) {
+-			struct gpu_reuse_context **context_ptr = &g_gpu_reuse_contexts;
+-			while (*context_ptr != NULL) {
+-				if (*context_ptr == context) {
+-					*context_ptr = context->next;
+-					break;
+-				}
+-				context_ptr = &(*context_ptr)->next;
+-			}
+-			empty_context = context;
+-		}
++		tracker->quarantined = true;
++		U_LOG_I("GPU reuse quarantine: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u", (void *)xsc,
++		        (unsigned long long)tracker->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count);
+ 	}
+ 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
++	/* Existing compositor GC polls it with timeout zero on subsequent frames. */
++}
+ 
+-	free(removed);
+-	destroy_context_after_last_tracker(empty_context);
+-	if (original_destroy != NULL) {
+-		original_destroy(xsc);
++xrt_result_t
++comp_swapchain_gpu_reuse_set_producer(struct xrt_swapchain *xsc,
++                                      uint32_t index,
++                                      struct xrt_compositor_semaphore *sem,
++                                      uint64_t value)
++{
++	pthread_mutex_lock(&g_gpu_reuse_mutex);
++	struct gpu_reuse_tracker *t = find_tracker_locked(xsc);
++	if (t != NULL && index < xsc->image_count) {
++		if (!comp_semaphore_matches_vk(sem, t->context->vk) || t->quarantined) {
++			pthread_mutex_unlock(&g_gpu_reuse_mutex);
++			return XRT_ERROR_VULKAN;
++		}
++		/* Replacing a dependency must not destroy a semaphore referenced by
++		 * an earlier compositor submission. Normal Metal clients keep one
++		 * event per session. Reject a changed payload until completion. */
++		if (t->producer[index] != NULL && t->producer[index] != sem && !tracker_completed_locked(t)) {
++			pthread_mutex_unlock(&g_gpu_reuse_mutex);
++			return XRT_ERROR_VULKAN;
++		}
++		xrt_compositor_semaphore_reference(&t->producer[index], sem);
++		t->producer_value[index] = value;
+ 	}
++	pthread_mutex_unlock(&g_gpu_reuse_mutex);
++	return XRT_SUCCESS;
+ }
+ 
+ xrt_result_t
+@@ -411,12 +486,26 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
+ 		return XRT_ERROR_VULKAN;
+ 	}
+ 
++	uint64_t bytes = 0;
++	for (uint32_t i = 0; i < sc->vkic.image_count; i++) {
++		VkMemoryRequirements requirements = {0};
++		sc->vk->vkGetImageMemoryRequirements(sc->vk->device, sc->vkic.images[i].handle, &requirements);
++		if (requirements.size > GPU_REUSE_MAX_BYTES - bytes) {
++			return XRT_ERROR_ALLOCATION;
++		}
++		bytes += requirements.size;
++	}
+ 	pthread_mutex_lock(&g_gpu_reuse_mutex);
+ 	if (find_tracker_locked(xsc) != NULL) {
+ 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ 		return XRT_SUCCESS;
+ 	}
+ 
++	if (g_tracker_count >= GPU_REUSE_MAX_TRACKERS || bytes > GPU_REUSE_MAX_BYTES - g_tracked_bytes) {
++		pthread_mutex_unlock(&g_gpu_reuse_mutex);
++		U_LOG_E("GPU reuse allocation budget exhausted (live plus quarantined storage)");
++		return XRT_ERROR_ALLOCATION;
++	}
+ 	struct gpu_reuse_context *context = find_context_locked(sc->vk);
+ 	if (context == NULL) {
+ 		context = create_context_locked(sc->vk);
+@@ -433,6 +522,9 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
+ 		return XRT_ERROR_ALLOCATION;
+ 	}
+ 
++	tracker->bytes = bytes;
++	g_tracked_bytes += bytes;
++	g_tracker_count++;
+ 	tracker->xsc = xsc;
+ 	tracker->sc = sc;
+ 	tracker->context = context;
+@@ -825,9 +917,56 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
+ 		return;
+ 	}
+ 
++	U_ZERO(&g_renderer.wait_sems);
++	if (wait_semaphores != NULL) {
++		g_renderer.wait_sems = *wait_semaphores;
++	}
++	bool producer_ready = true;
++	for (uint32_t i = 0; i < g_renderer.submit.image_count; i++) {
++		struct gpu_reuse_submit_image *image = &g_renderer.submit.images[i];
++		struct xrt_compositor_semaphore *producer = image->tracker->producer[image->image_index];
++		if (producer == NULL) {
++			continue;
++		}
++		uint64_t value = image->tracker->producer_value[image->image_index];
++		/* Stage A: zero-time readiness verification; never wait on a future
++		 * payload on the GPU. Stage B still carries exactly this value. */
++		if (xrt_compositor_semaphore_wait(producer, value, 0) != XRT_SUCCESS) {
++			producer_ready = false;
++			break;
++		}
++		VkSemaphore semaphore = comp_semaphore(producer)->semaphore;
++		uint32_t k = 0;
++		for (; k < g_renderer.wait_sems.count; k++) {
++			if (g_renderer.wait_sems.semaphores[k] == semaphore) {
++				break;
++			}
++		}
++		if (k < g_renderer.wait_sems.count) {
++			if (g_renderer.wait_sems.values[k] < value) {
++				g_renderer.wait_sems.values[k] = value;
++			}
++			g_renderer.wait_sems.stages[k] |= VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
++		} else if (k < VK_SEMAPHORE_LIST_MAX_COUNT) {
++			vk_semaphore_list_wait_add_timeline(&g_renderer.wait_sems, semaphore, value,
++			                                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
++		} else {
++			producer_ready = false;
++			break;
++		}
++	}
++	if (!producer_ready) {
++		submit_rollback_locked(&g_renderer.submit);
++		pthread_mutex_unlock(&g_gpu_reuse_mutex);
++		vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
++		                               signal_semaphores, next);
++		g_renderer.rejected_submit_info = &builder->submit_info;
++		g_renderer.rejected_result = VK_NOT_READY;
++		return;
++	}
+ 	vk_semaphore_list_signal_add_timeline(&g_renderer.signal_sems, g_renderer.submit.context->timeline,
+ 	                                      g_renderer.submit.value);
+-	vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
++	vk_submit_info_builder_prepare(builder, &g_renderer.wait_sems, command_buffers, command_buffer_count,
+ 	                               &g_renderer.signal_sems, next);
+ 
+ 	/*
+diff --git a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
+index 717cfec94..3f926e3c8 100644
+--- a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
++++ b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
+@@ -17,6 +17,16 @@ extern "C" {
+ 
+ #ifdef XRT_OS_OSX
+ 
++struct vk_bundle;
++void
++comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown);
++
++xrt_result_t
++comp_swapchain_gpu_reuse_set_producer(struct xrt_swapchain *xsc,
++                                      uint32_t index,
++                                      struct xrt_compositor_semaphore *sem,
++                                      uint64_t value);
++
+ /*!
+  * Enable fine-grained GPU reuse tracking on one native compositor swapchain.
+  * Used by local and service-side Metal shared-texture swapchains, where client

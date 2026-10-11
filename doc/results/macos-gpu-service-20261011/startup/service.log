@@ -1,0 +1,106 @@
+ INFO [ipc_server_main_common] Monado(XRT) by Collabora et al 'v25.1.0-2181-g2f10e2d71' starting up...
+ INFO [p_create_system] Creating system:
+	Builders:
+		qwerty: Qwerty devices builder
+		remote: Remote simulation devices builder
+		simulated: Simulated devices builder
+		rift: Oculus Rift
+		psvr2: PlayStation VR 2
+		rgb_tracking: RGB tracking based devices (PSVR, PSMV, ...)
+		north_star: North Star headset
+		legacy: Legacy probing system
+	No builder selected in config (or wasn't compiled in)
+	Selected simulated because it was certain it could create a head
+	Using builder simulated: Simulated devices builder
+	Got devices:
+		 0: 'Simulated HMD' (id=1)
+	In roles:
+		head: Simulated HMD (Simulated HMD), view count: 2
+		eyes: <none> (<none>)
+		face: <none> (<none>)
+		left: <none> (<none>)
+		right: <none> (<none>)
+		gamepad: <none> (<none>)
+		hand_tracking.unobstructed.left: <none> (<none>)
+		hand_tracking.unobstructed.right: <none> (<none>)
+		hand_tracking.conforming.left: <none> (<none>)
+		hand_tracking.conforming.right: <none> (<none>)
+	Result: XRT_SUCCESS
+DEBUG [comp_main_create_system_compositor] Doing init 0x9f885c000
+ INFO [u_pc_fake_create] Created pacer (non-feedback version aka "fake")
+	estimated_frame_period: 16.666666ms
+	percentage: 20.000000%
+	min_comp_time: 3.000000ms
+	comp_time: 3.333333ms
+ INFO [factory_create_target] 
+################################################################################
+#    Debug image target used, if you wanted to see something in your headset   #
+#             something is probably wrong with your setup, sorry.              #
+################################################################################
+ INFO [vk_log_extension_list] Vulkan instance extensions list(s):
+	Enabled extensions:
+		VK_KHR_external_fence_capabilities        required
+		VK_KHR_external_memory_capabilities       required
+		VK_KHR_external_semaphore_capabilities    required
+		VK_KHR_get_physical_device_properties2    required
+		VK_KHR_get_surface_capabilities2          optional
+		VK_KHR_portability_enumeration            optional
+		VK_KHR_surface                            required
+		VK_EXT_debug_report                       required
+		VK_EXT_swapchain_colorspace               optional
+	Not enabled optional extensions:
+		VK_EXT_display_surface_counter            skipped
+ INFO [create_device] Created device and COMPUTE queue with QUEUE_GLOBAL_PRIORITY_HIGH.
+ INFO [vk_print_device_info] Device info:
+	name: Apple M5
+	vendor: 0x106b
+	product: 0x1a07020a
+	deviceType: VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	apiVersion: 1.0.357
+	driverVersion: 0x000028a2
+ INFO [vk_print_queues_info] Selected Queues/Families:
+	main_queue.queue: 0x9f8c94018
+	main_queue.index: 0
+	main_queue.family_index: 0
+	encode_queue.queue: 0x0
+	encode_queue.index: -1
+	encode_queue.family_index: -1
+ INFO [vk_print_features_info] Features:
+	timestamp_compute_and_graphics: true
+	timestamp_period: 1.000000
+	timestamp_valid_bits: 64
+	timeline_semaphore: true
+ INFO [vk_print_external_handles_info] Supported images:
+	IOSurfaceRef:
+		color import=true export=true
+		depth import=true export=true
+ INFO [vk_print_external_handles_info] Supported fences:
+	VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT: false
+	VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT: false
+ INFO [vk_print_external_handles_info] Supported semaphores:
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT(binary): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT(binary): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT(timeline): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT(timeline): false
+ INFO [comp_vulkan_formats_log] Supported formats:
+	VK_FORMAT_R16G16B16A16_UNORM: true
+	VK_FORMAT_R16G16B16A16_SFLOAT: true
+	VK_FORMAT_R16G16B16_UNORM: false
+	VK_FORMAT_R16G16B16_SFLOAT: false
+	VK_FORMAT_R8G8B8A8_SRGB: true
+	VK_FORMAT_B8G8R8A8_SRGB: true
+	VK_FORMAT_R8G8B8_SRGB: false
+	VK_FORMAT_R8G8B8A8_UNORM: true
+	VK_FORMAT_B8G8R8A8_UNORM: true
+	VK_FORMAT_R8G8B8_UNORM: false
+	VK_FORMAT_B8G8R8_UNORM: false
+	VK_FORMAT_R5G6B5_UNORM_PACK16: true
+	VK_FORMAT_R32_SFLOAT: true
+	VK_FORMAT_D32_SFLOAT: true
+	VK_FORMAT_D16_UNORM: true
+	VK_FORMAT_X8_D24_UNORM_PACK32: false
+	VK_FORMAT_D24_UNORM_S8_UINT: false
+	VK_FORMAT_D32_SFLOAT_S8_UINT: true
+	VK_FORMAT_S8_UINT: true
+ WARN [render_max_layers_capable] Device supports only 8 compositor layers due to Vulkan limits. which is below Vulkan minimum of 16. This may indicate a driver bug. Attempting 16 anyway.
+ INFO [ipc_server_main_common] Server exiting: '0'

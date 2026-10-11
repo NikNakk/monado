@@ -1,0 +1,10 @@
+{
+  "client_exit": 0,
+  "target": "debug_image",
+  "simulated_hmd": true,
+  "command": [
+    "build/arm64/tests/tests_macos_service_gpu_sync",
+    "missing",
+    "120"
+  ]
+}

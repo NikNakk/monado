@@ -1,0 +1,28 @@
+{
+  "target": "debug_image",
+  "clients": [
+    {
+      "client": "failed",
+      "pid": 19624,
+      "exit": 0
+    },
+    {
+      "client": "replacement",
+      "pid": 19630,
+      "exit": 0
+    },
+    {
+      "client": "healthy",
+      "pid": 19608,
+      "exit": 0
+    }
+  ],
+  "status": "PASS",
+  "note": "Offscreen GPU output, not physical display presentation",
+  "gpu_readback_matches": 6,
+  "healthy_new_frames_during_fault": 26,
+  "healthy_latch_max_gap_ms": 33.348,
+  "fault_to_session_loss_ms": 511.249,
+  "failed_swapchain_retained": true,
+  "service_start_count": 1
+}

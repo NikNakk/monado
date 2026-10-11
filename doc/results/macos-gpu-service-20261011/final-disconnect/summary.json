@@ -1,0 +1,32 @@
+{
+  "target": "debug_image",
+  "clients": [
+    {
+      "client": "failed",
+      "pid": 21227,
+      "exit": -9
+    },
+    {
+      "client": "replacement",
+      "pid": 21228,
+      "exit": 0
+    },
+    {
+      "client": "healthy",
+      "pid": 21224,
+      "exit": 0
+    }
+  ],
+  "status": "PASS",
+  "note": "Offscreen GPU output, not physical display presentation",
+  "replacement_fresh_latches": 44,
+  "fault_mode": "disconnect",
+  "healthy_latch_max_gap_before_ms": 33.34,
+  "gpu_readback_matches": 5,
+  "healthy_new_frames_during_fault": 9,
+  "healthy_latch_max_gap_ms": 16.739,
+  "recovery_ms": 170.623,
+  "recovery_endpoint": "replacement_first_frame",
+  "failed_swapchain_retained": true,
+  "service_start_count": 1
+}

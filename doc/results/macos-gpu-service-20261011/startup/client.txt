@@ -1,0 +1,4 @@
+ERROR [ipc_receive_fds] recvmsg(3) failed: no data!
+ERROR [ipc_client_setup_shm] Failed to retrieve shm fd!
+XR_ERROR_RUNTIME_UNAVAILABLE in xrCreateInstance: Failed to create instance '-1'
+xrCreateInstance failed: -51

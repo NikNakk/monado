@@ -1,0 +1,64 @@
+--- a/doc/macos-port.md
++++ b/doc/macos-port.md
+@@ -959,3 +959,18 @@
+ were left running. Keep current DXMT during this investigation, then migrate
+ to its hardened cross-process presentation build as a separate matched-build
+ trial. See [the ownership investigation](macos-psvr2-timing-diagnostics.md#wine-ownership-history-prepared--2026-10-10).
++
++### GPU synchronization first-run checkpoint (2026-10-11)
++
++The native Metal/MoltenVK harness and targeted failed-wait/quarantine fixes are
++implemented. Actual service GPU recovery and performance comparison remain
++unverified; M1/M2 are not complete. See [the checkpoint](macos-gpu-sync-first-run.md)
++for scoped commits, evidence, every exit criterion and required follow-up tests.
++
++### Headset-free GPU service follow-up (2026-10-11)
++
++`XRT_COMPOSITOR_FORCE_DEBUG_IMAGE=1` selects the existing offscreen target.
++The isolated simulated-HMD runner now exercises real native Metal OpenXR and
++Vulkan rendering, timeout/kill recovery, concurrent healthy frames and retained
++quarantine. See [the follow-up](macos-gpu-sync-service-tests.md) for commands,
++A–B–B–A measurements and remaining teardown, budget and timing limits.
+--- a/doc/macos-port-tracker.md
++++ b/doc/macos-port-tracker.md
+@@ -432,3 +432,18 @@
+ next full prefix restart. Current DXMT stays in place; hardened presentation
+ migration is a separate follow-up. See
+ [the evidence and next capture](macos-psvr2-timing-diagnostics.md#wine-ownership-history-prepared--2026-10-10).
++
++### GPU synchronization first-run checkpoint (2026-10-11)
++
++The native Metal/MoltenVK harness and targeted failed-wait/quarantine fixes are
++implemented. Actual service GPU recovery and performance comparison remain
++unverified; M1/M2 are not complete. See [the checkpoint](macos-gpu-sync-first-run.md)
++for scoped commits, evidence, every exit criterion and required follow-up tests.
++
++### Headset-free GPU service follow-up (2026-10-11)
++
++`XRT_COMPOSITOR_FORCE_DEBUG_IMAGE=1` selects the existing offscreen target.
++The isolated simulated-HMD runner now exercises real native Metal OpenXR and
++Vulkan rendering, timeout/kill recovery, concurrent healthy frames and retained
++quarantine. See [the follow-up](macos-gpu-sync-service-tests.md) for commands,
++A–B–B–A measurements and remaining teardown, budget and timing limits.
+--- a/doc/macos-env-toggles.md
++++ b/doc/macos-env-toggles.md
+@@ -1060,3 +1060,19 @@
+ zeroCopy setting; omission preserves the existing setting. Zero-copy still
+ requires compatible format, export support, sample count, and compositor-owned
+ resolve textures. A setting alone does not prove that zero-copy was used.
++
++### Native client GPU hung threshold
++
++`XRT_MACOS_CLIENT_GPU_HUNG_MS` sets the macOS multi-compositor readiness worker
++threshold from submission of an outstanding obligation. Default: 500 ms; valid
++range: 1–10000 ms. Invalid values use the default. Inactivity without an obligation
++does not trigger this threshold. A timeout fails the session and does not authorize
++resource destruction. See [the first-run checkpoint](macos-gpu-sync-first-run.md).
++
++### Headset-free GPU service follow-up (2026-10-11)
++
++`XRT_COMPOSITOR_FORCE_DEBUG_IMAGE=1` selects the existing offscreen target.
++The isolated simulated-HMD runner now exercises real native Metal OpenXR and
++Vulkan rendering, timeout/kill recovery, concurrent healthy frames and retained
++quarantine. See [the follow-up](macos-gpu-sync-service-tests.md) for commands,
++A–B–B–A measurements and remaining teardown, budget and timing limits.

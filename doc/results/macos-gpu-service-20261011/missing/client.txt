@@ -1,0 +1,39 @@
+{"event":"frame","pid":18996,"frame":1,"image":0,"begin_ns":33910050979625,"end_ns":33910051335666}
+{"event":"frame","pid":18996,"frame":2,"image":1,"begin_ns":33910069162041,"end_ns":33910069348791}
+{"event":"frame","pid":18996,"frame":3,"image":2,"begin_ns":33910085706416,"end_ns":33910085989958}
+{"event":"frame","pid":18996,"frame":4,"image":0,"begin_ns":33910103147666,"end_ns":33910103329791}
+{"event":"frame","pid":18996,"frame":5,"image":1,"begin_ns":33910120251416,"end_ns":33910120437333}
+{"event":"frame","pid":18996,"frame":6,"image":2,"begin_ns":33910137344125,"end_ns":33910137541375}
+{"event":"frame","pid":18996,"frame":7,"image":0,"begin_ns":33910154306500,"end_ns":33910154497333}
+{"event":"frame","pid":18996,"frame":8,"image":1,"begin_ns":33910171270333,"end_ns":33910171512125}
+{"event":"frame","pid":18996,"frame":9,"image":2,"begin_ns":33910188092875,"end_ns":33910188377833}
+{"event":"frame","pid":18996,"frame":10,"image":0,"begin_ns":33910204861125,"end_ns":33910204996250}
+{"event":"frame","pid":18996,"frame":11,"image":1,"begin_ns":33910220188041,"end_ns":33910220288708}
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: gpu-sync-18996
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: 
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+FAIL: required progress/session loss not observed

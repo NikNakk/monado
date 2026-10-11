@@ -1,0 +1,140 @@
+Test project /Users/nickkennedy/Code/monado-2/build/arm64
+      Start  1: tests_cxx_wrappers
+ 1/65 Test  #1: tests_cxx_wrappers ........................   Passed    0.36 sec
+      Start  2: tests_deque
+ 2/65 Test  #2: tests_deque ...............................   Passed    0.27 sec
+      Start  3: tests_floor_calibration
+ 3/65 Test  #3: tests_floor_calibration ...................   Passed    0.26 sec
+      Start  4: tests_generic_callbacks
+ 4/65 Test  #4: tests_generic_callbacks ...................   Passed    0.26 sec
+      Start  5: tests_foveation
+ 5/65 Test  #5: tests_foveation ...........................   Passed    0.26 sec
+      Start  6: tests_glue_device
+ 6/65 Test  #6: tests_glue_device .........................   Passed    0.30 sec
+      Start  7: tests_glue_traits
+ 7/65 Test  #7: tests_glue_traits .........................   Passed    0.26 sec
+      Start  8: tests_history_buf
+ 8/65 Test  #8: tests_history_buf .........................   Passed    0.28 sec
+      Start  9: tests_id_ringbuffer
+ 9/65 Test  #9: tests_id_ringbuffer .......................   Passed    0.32 sec
+      Start 10: tests_json
+10/65 Test #10: tests_json ................................   Passed    0.26 sec
+      Start 11: tests_lowpass_float
+11/65 Test #11: tests_lowpass_float .......................   Passed    0.26 sec
+      Start 12: tests_lowpass_integer
+12/65 Test #12: tests_lowpass_integer .....................   Passed    0.27 sec
+      Start 13: tests_pacing
+13/65 Test #13: tests_pacing ..............................   Passed    0.27 sec
+      Start 14: tests_passthrough_calibration
+14/65 Test #14: tests_passthrough_calibration .............   Passed    0.27 sec
+      Start 15: tests_quatexpmap
+15/65 Test #15: tests_quatexpmap ..........................   Passed    0.26 sec
+      Start 16: tests_quat_change_of_basis
+16/65 Test #16: tests_quat_change_of_basis ................   Passed    0.25 sec
+      Start 17: tests_quat_swing_twist
+17/65 Test #17: tests_quat_swing_twist ....................   Passed    0.26 sec
+      Start 18: tests_rational
+18/65 Test #18: tests_rational ............................   Passed    0.26 sec
+      Start 19: tests_relation_chain
+19/65 Test #19: tests_relation_chain ......................   Passed    0.28 sec
+      Start 20: tests_space_overseer
+20/65 Test #20: tests_space_overseer ......................   Passed    0.49 sec
+      Start 21: tests_vector
+21/65 Test #21: tests_vector ..............................   Passed    0.26 sec
+      Start 22: tests_worker
+22/65 Test #22: tests_worker ..............................   Passed    0.77 sec
+      Start 23: tests_pose
+23/65 Test #23: tests_pose ................................   Passed    0.34 sec
+      Start 24: tests_vec3_angle
+24/65 Test #24: tests_vec3_angle ..........................   Passed    0.29 sec
+      Start 25: tests_frame_share
+25/65 Test #25: tests_frame_share .........................   Passed    0.62 sec
+      Start 26: tests_psvr2_tracking_share
+26/65 Test #26: tests_psvr2_tracking_share ................   Passed    0.39 sec
+      Start 27: tests_uv_to_tangent
+27/65 Test #27: tests_uv_to_tangent .......................   Passed    0.35 sec
+      Start 28: tests_render_pipeline_cache
+28/65 Test #28: tests_render_pipeline_cache ...............   Passed    0.35 sec
+      Start 29: tests_input_transform
+29/65 Test #29: tests_input_transform .....................   Passed    0.36 sec
+      Start 30: tests_generic_controller
+30/65 Test #30: tests_generic_controller ..................   Passed    0.30 sec
+      Start 31: tests_foveation_openxr
+31/65 Test #31: tests_foveation_openxr ....................   Passed    0.26 sec
+      Start 32: tests_pose_metrics
+32/65 Test #32: tests_pose_metrics ........................   Passed    0.36 sec
+      Start 33: tests_led_phase_bootstrap
+33/65 Test #33: tests_led_phase_bootstrap .................   Passed    0.40 sec
+      Start 34: tests_imu_optical_filter
+34/65 Test #34: tests_imu_optical_filter ..................   Passed    0.47 sec
+      Start 35: tests_joint_pose_solver
+35/65 Test #35: tests_joint_pose_solver ...................   Passed    1.81 sec
+      Start 36: tests_constellation_dataset
+36/65 Test #36: tests_constellation_dataset ...............   Passed    0.68 sec
+      Start 37: tests_pssense_fusion
+37/65 Test #37: tests_pssense_fusion ......................   Passed    2.62 sec
+      Start 38: tests_ipc_shmem
+38/65 Test #38: tests_ipc_shmem ...........................   Passed    0.28 sec
+      Start 39: tests_macos_hosted_client
+39/65 Test #39: tests_macos_hosted_client .................   Passed    0.26 sec
+      Start 40: tests_macos_passthrough_rotation
+40/65 Test #40: tests_macos_passthrough_rotation ..........   Passed    0.31 sec
+      Start 41: tests_metal_foveation_cache
+41/65 Test #41: tests_metal_foveation_cache ...............   Passed    0.38 sec
+      Start 42: tests_macos_gpu_reuse
+42/65 Test #42: tests_macos_gpu_reuse .....................   Passed    0.37 sec
+      Start 43: tests_macos_gpu_sync_normal
+43/65 Test #43: tests_macos_gpu_sync_normal ...............   Passed    0.18 sec
+      Start 44: tests_macos_gpu_sync_delayed
+44/65 Test #44: tests_macos_gpu_sync_delayed ..............   Passed    1.12 sec
+      Start 45: tests_macos_gpu_sync_missing
+45/65 Test #45: tests_macos_gpu_sync_missing ..............   Passed    0.59 sec
+      Start 46: tests_macos_gpu_sync_future
+46/65 Test #46: tests_macos_gpu_sync_future ...............   Passed    0.57 sec
+      Start 47: tests_macos_gpu_sync_nonmonotonic
+47/65 Test #47: tests_macos_gpu_sync_nonmonotonic .........   Passed    0.16 sec
+      Start 48: tests_macos_gpu_sync_exit-before
+48/65 Test #48: tests_macos_gpu_sync_exit-before ..........   Passed    0.57 sec
+      Start 49: tests_macos_gpu_sync_exit-after
+49/65 Test #49: tests_macos_gpu_sync_exit-after ...........   Passed    0.07 sec
+      Start 50: tests_macos_gpu_sync_consumer-delay
+50/65 Test #50: tests_macos_gpu_sync_consumer-delay .......   Passed    0.39 sec
+      Start 51: tests_macos_gpu_sync_multi-queue
+51/65 Test #51: tests_macos_gpu_sync_multi-queue ..........   Passed    0.18 sec
+      Start 52: tests_macos_gpu_sync_broken-queue
+52/65 Test #52: tests_macos_gpu_sync_broken-queue .........   Passed    0.18 sec
+      Start 53: tests_macos_gpu_sync_reuse
+53/65 Test #53: tests_macos_gpu_sync_reuse ................   Passed    0.18 sec
+      Start 54: tests_macos_gpu_sync_idle
+54/65 Test #54: tests_macos_gpu_sync_idle .................   Passed    0.60 sec
+      Start 55: tests_macos_gpu_sync_cancel-callback
+55/65 Test #55: tests_macos_gpu_sync_cancel-callback ......   Passed    0.17 sec
+      Start 56: tests_macos_service_gpu_sync_missing
+56/65 Test #56: tests_macos_service_gpu_sync_missing ......   Passed    5.37 sec
+      Start 57: tests_macos_service_gpu_sync_disconnect
+57/65 Test #57: tests_macos_service_gpu_sync_disconnect ...   Passed    4.46 sec
+      Start 58: tests_ipc_local_session
+58/65 Test #58: tests_ipc_local_session ...................   Passed    1.35 sec
+      Start 59: tests_ipc_thread_shutdown
+59/65 Test #59: tests_ipc_thread_shutdown .................   Passed    0.28 sec
+      Start 60: tests_ipc_socket_security
+60/65 Test #60: tests_ipc_socket_security .................   Passed    0.27 sec
+      Start 61: tests_metal_xpc_registry
+61/65 Test #61: tests_metal_xpc_registry ..................   Passed    0.32 sec
+      Start 62: tests_macos_remote_layer
+62/65 Test #62: tests_macos_remote_layer ..................   Passed    0.04 sec
+      Start 63: tests_psvr2_sense_tracking
+63/65 Test #63: tests_psvr2_sense_tracking ................   Passed    0.75 sec
+      Start 64: tests_pssense_clock
+64/65 Test #64: tests_pssense_clock .......................   Passed    0.01 sec
+      Start 65: tests_psvr2_controller_visuals
+65/65 Test #65: tests_psvr2_controller_visuals ............   Passed    0.01 sec
+
+100% tests passed out of 65
+
+Label Time Summary:
+gpu        =  14.79 sec*proc (15 tests)
+macos      =  14.79 sec*proc (15 tests)
+service    =   9.83 sec*proc (2 tests)
+
+Total Test time (real) =  35.78 sec

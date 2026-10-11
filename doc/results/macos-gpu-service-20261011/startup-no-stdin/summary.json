@@ -1,0 +1,8 @@
+{
+  "client_exit": 0,
+  "target": "debug_image",
+  "simulated_hmd": true,
+  "command": [
+    "/Users/nickkennedy/Code/monado-2/build/arm64/tests/tests_macos_openxr_loaderless_probe"
+  ]
+}

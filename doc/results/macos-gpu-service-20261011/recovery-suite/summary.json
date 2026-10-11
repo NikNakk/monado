@@ -1,0 +1,22 @@
+{
+  "target": "debug_image",
+  "clients": [
+    {
+      "client": "failed",
+      "pid": 19401,
+      "exit": 0
+    },
+    {
+      "client": "replacement",
+      "pid": 19409,
+      "exit": 0
+    },
+    {
+      "client": "healthy",
+      "pid": 19388,
+      "exit": 0
+    }
+  ],
+  "status": "PASS",
+  "note": "GPU trace verification follows service shutdown"
+}
