@@ -1267,6 +1267,62 @@ macos_release_source_image(struct comp_window_macos *cwm, uint32_t index)
 	}
 }
 
+/*
+ * Make a source image acquirable again only once Vulkan has finished writing
+ * it. A failed Metal command buffer has ended, but its error may have cut short
+ * its wait on the render-complete event, so it proves nothing about the source.
+ * Only a failed Vulkan wait (device loss) leaves the image pinned.
+ */
+static void
+macos_release_source_image_after_render(struct comp_window_macos *cwm,
+                                        struct vk_bundle_queue *present_queue,
+                                        uint32_t index,
+                                        uint64_t timeline_value)
+{
+	struct comp_target *ct = &cwm->base.base;
+	struct vk_bundle *vk = get_vk(cwm);
+	VkResult ret = VK_SUCCESS;
+	if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&
+	    vk->vkWaitSemaphores != NULL) {
+		VkSemaphoreWaitInfo wait_info = {
+		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+		    .semaphoreCount = 1,
+		    .pSemaphores = &ct->semaphores.render_complete,
+		    .pValues = &timeline_value,
+		};
+		ret = vk->vkWaitSemaphores(vk->device, &wait_info, UINT64_MAX);
+	} else {
+		vk_queue_lock(present_queue);
+		ret = vk->vkQueueWaitIdle(present_queue->queue);
+		vk_queue_unlock(present_queue);
+	}
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(ct->c, "Vulkan wait before releasing macOS source image %u: %s", index,
+		           vk_result_string(ret));
+		atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
+		return;
+	}
+	macos_release_source_image(cwm, index);
+}
+
+/*
+ * Metal completion handlers must not block on Vulkan. Retire the image on a
+ * global queue and leave @p group once that is done, so a bounded teardown
+ * drain still covers it.
+ */
+static void
+macos_release_source_image_after_render_async(struct comp_window_macos *cwm,
+                                              dispatch_group_t group,
+                                              struct vk_bundle_queue *present_queue,
+                                              uint32_t index,
+                                              uint64_t timeline_value)
+{
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
+	  macos_release_source_image_after_render(cwm, present_queue, index, timeline_value);
+	  dispatch_group_leave(group);
+	});
+}
+
 static void
 macos_trace_drawable_prefetch(struct comp_window_macos *cwm,
                               const char *event,
@@ -2051,6 +2107,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		uint64_t traced_frame_id = frame_id;
 		uint32_t traced_index = index;
 		uint64_t traced_timeline_value = timeline_semaphore_value;
+		struct vk_bundle_queue *traced_present_queue = present_queue;
 		uint64_t commit_begin_ns = os_monotonic_get_ns();
 		bool traced_shared_event_wait = shared_event_wait;
 		dispatch_group_t command_group = cwm->present_command_group;
@@ -2074,9 +2131,13 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				  completed_gpu_end_s, traced_shared_event_wait ? 1u : 0u);
 			  funlockfile(complete_trace);
 		  }
-		  if (status == MTLCommandBufferStatusCompleted) macos_release_source_image(cwm, traced_index);
-		  else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
-		  dispatch_group_leave(command_group);
+		  if (status == MTLCommandBufferStatusCompleted) {
+			  macos_release_source_image(cwm, traced_index);
+			  dispatch_group_leave(command_group);
+		  } else {
+			  macos_release_source_image_after_render_async(cwm, command_group, traced_present_queue,
+			                                                traced_index, traced_timeline_value);
+		  }
 		}];
 		/* Passive observer of Metal scheduling. The timed-present convenience
 		 * method has its own scheduled handler; this is not a timestamp of
@@ -2242,10 +2303,14 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 					    COMP_ERROR(cwm->base.base.c, "Metal retirement wait failed: %s",
 						       [[[completed_buffer error] localizedDescription] UTF8String]);
 				    }
-				    if ([completed_buffer status] == MTLCommandBufferStatusCompleted)
-				        macos_release_source_image(cwm, retired_job.image_index);
-				    else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
-				    dispatch_group_leave(cwm->present_command_group);
+				    if ([completed_buffer status] == MTLCommandBufferStatusCompleted) {
+					    macos_release_source_image(cwm, retired_job.image_index);
+					    dispatch_group_leave(cwm->present_command_group);
+				    } else {
+					    macos_release_source_image_after_render_async(
+					        cwm, cwm->present_command_group, retired_job.present_queue,
+					        retired_job.image_index, retired_job.timeline_value);
+				    }
 				  }];
 				  [command_buffer commit];
 				  released_by_metal = true;
@@ -2253,29 +2318,8 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 		  }
 
 		  if (!released_by_metal) {
-			  struct comp_target *ct = &cwm->base.base;
-			  struct vk_bundle *vk = get_vk(cwm);
-			  VkResult ret = VK_SUCCESS;
-			  if (ct->semaphores.render_complete != VK_NULL_HANDLE &&
-			      ct->semaphores.render_complete_is_timeline && vk->vkWaitSemaphores != NULL) {
-				  VkSemaphoreWaitInfo wait_info = {
-				      .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
-				      .semaphoreCount = 1,
-				      .pSemaphores = &ct->semaphores.render_complete,
-				      .pValues = &retired_job.timeline_value,
-				  };
-				  ret = vk->vkWaitSemaphores(vk->device, &wait_info, UINT64_MAX);
-			  } else {
-				  vk_queue_lock(retired_job.present_queue);
-				  ret = vk->vkQueueWaitIdle(retired_job.present_queue->queue);
-				  vk_queue_unlock(retired_job.present_queue);
-			  }
-			  if (ret != VK_SUCCESS) {
-				  COMP_ERROR(ct->c, "Vulkan wait while retiring a dropped macOS present job: %s",
-					     vk_result_string(ret));
-			  }
-			  if (ret == VK_SUCCESS) macos_release_source_image(cwm, retired_job.image_index);
-			  else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
+			  macos_release_source_image_after_render(cwm, retired_job.present_queue,
+			                                          retired_job.image_index, retired_job.timeline_value);
 			  dispatch_group_leave(cwm->present_command_group);
 		  }
 	  }
