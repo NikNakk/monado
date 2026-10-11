@@ -69,9 +69,12 @@ waiting for a scheduled slot; completed-slot backpressure also has a finite
 replacement deadline, the same threshold. Replacement of an older completed slot does not
 pretend that a missing producer finished.
 
-**Pre-allocation budgets.** Each client has a default **512 MiB / 64 swapchain**
-budget; the service has a **1 GiB / 256 swapchain** tracked-storage bound.
-Admission reserves conservative image storage before create/import, including
+**Pre-allocation budgets.** Each client has a default budget of **half the
+device-local heap / 64 swapchains**; the service has a **¾ of the heap / 256
+swapchain** tracked-storage bound. Before a device is known these fall back to
+512 MiB and 1 GiB, the fixed values when this evidence was recorded.
+Admission reserves estimated image storage before create/import, from per-format
+texel sizes (16 bytes for unlisted formats), including
 supplied native storage sizes and checked dimensions/overflow. Successful
 allocation reconciles the reservation against Vulkan memory requirements and
 transfers the charge to the tracker. Failed allocation rolls back. Quarantine
@@ -81,7 +84,8 @@ Admission polls reclaimable quarantines too, allowing replacement after the
 last healthy client has ended. Object generations have unique log IDs so
 allocator address reuse cannot confuse recovery evidence.
 
-`XRT_MACOS_GPU_CLIENT_MB` accepts 1–1024, default 512;
+`XRT_MACOS_GPU_GLOBAL_MB` and `XRT_MACOS_GPU_CLIENT_MB` override the byte limits
+(1–1048576 MiB);
 `XRT_MACOS_GPU_CLIENT_OBJECTS` and `XRT_MACOS_GPU_GLOBAL_OBJECTS` accept 1–256,
 default 64/256. These are bounded policy controls, not synchronization bypasses.
 A client's quota cannot be raised beyond the global bound. Safe completed

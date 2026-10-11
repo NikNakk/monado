@@ -1114,14 +1114,16 @@ See [the matched headset comparison](macos-gpu-sync-headset-comparison.md).
 |---|---|---|---|
 | `XRT_MACOS_CLIENT_GPU_HUNG_MS` | 5000 | 1–30000 ms | Fail a specific unfulfilled producer obligation; idle sessions remain healthy. |
 | `XRT_MACOS_FRAME_READINESS_MARGIN_US` | 6000 | 0–100000 µs | Producer readiness cutoff before predicted presentation; late completed frames remain owned for later ticks. |
-| `XRT_MACOS_GPU_CLIENT_MB` | 512 | 1–1024 MiB | Per-client tracked GPU storage admission limit. |
+| `XRT_MACOS_GPU_GLOBAL_MB` | ¾ of the device-local heap | 1–1048576 MiB | Service-wide tracked GPU storage limit (1 GiB until a device is known). |
+| `XRT_MACOS_GPU_CLIENT_MB` | ½ of the device-local heap | 1–1048576 MiB | Per-client tracked GPU storage admission limit, never above the global limit (512 MiB until a device is known). |
 | `XRT_MACOS_GPU_CLIENT_OBJECTS` | 64 | 1–256 swapchains | Per-client create/import limit, charged through quarantine. |
-| `XRT_MACOS_GPU_GLOBAL_OBJECTS` | 256 | 1–256 swapchains | Service-wide create/import limit; global tracked bytes remain bounded at 1 GiB. |
+| `XRT_MACOS_GPU_GLOBAL_OBJECTS` | 256 | 1–256 swapchains | Service-wide create/import limit. |
 
-Invalid values use the documented default. Client GPU reuse waits honour the
-application's timeout, including `XR_INFINITE_DURATION`; a service IPC worker
-waits in 500 ms slices and stops early if its client disconnects or the service
-stops. Timeout retains ownership. Final display-link/presentation/callback drain
+Invalid values use the documented default. The device-local heap is read from
+the compositor's Vulkan device (MoltenVK reports Metal's recommended working
+set). Client GPU reuse waits honour the application's timeout, including
+`XR_INFINITE_DURATION`; a service IPC worker waits in 500 ms slices and stops
+early if its client disconnects or the service stops. Timeout retains ownership. Final display-link/presentation/callback drain
 has a shared 500 ms deadline, followed by at most 500 ms for the last renderer
 fence. An incomplete drain retains the whole device/compositor until process
 exit. These controls preserve the observed CPU-readiness gate, mandatory

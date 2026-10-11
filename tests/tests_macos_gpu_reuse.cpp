@@ -310,3 +310,58 @@ TEST_CASE("an outstanding producer is waited for within the caller's timeout")
 	xrt_compositor_semaphore_reference(&sem, nullptr);
 }
 
+TEST_CASE("allocation limits scale with the device-local heap")
+{
+	Device device;
+	auto big = [](VkDevice, VkImage, VkMemoryRequirements *req) { req->size = UINT64_C(2) * 1024 * 1024 * 1024; };
+	device.vk.vkGetImageMemoryRequirements = big;
+	NativeSwapchain sc{};
+	sc.vk = &device.vk;
+	sc.vkic.image_count = 1;
+	sc.base.base.image_count = 1;
+	sc.base.base.reference.count = 1;
+	sc.base.base.wait_image = [](xrt_swapchain *, int64_t, uint32_t) { return XRT_SUCCESS; };
+	sc.base.base.destroy = [](xrt_swapchain *) {};
+
+	// Unknown heap: 1 GiB global fallback.
+	comp_swapchain_gpu_reuse_note_device(&device.vk);
+	CHECK(comp_swapchain_gpu_reuse_enable(&sc.base.base) == XRT_ERROR_ALLOCATION);
+
+	// A 16 GiB device-local heap allows 12 GiB in total and 8 GiB per client.
+	device.vk.device_memory_props.memoryHeapCount = 1;
+	device.vk.device_memory_props.memoryHeaps[0].size = UINT64_C(16) * 1024 * 1024 * 1024;
+	device.vk.device_memory_props.memoryHeaps[0].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+	comp_swapchain_gpu_reuse_note_device(&device.vk);
+	REQUIRE(comp_swapchain_gpu_reuse_enable(&sc.base.base) == XRT_SUCCESS);
+
+	// PS VR2 per-eye resolution, supersampled 1.5x, RGBA16F in a two-view array
+	// with 4x MSAA: about 1.6 GiB over three images, beyond the old fixed 512 MiB
+	// per client and 1 GiB in total, within 8 GiB per client.
+	auto *budget = comp_gpu_client_budget_create();
+	xrt_swapchain_create_info info{};
+	info.width = 3000;
+	info.height = 3060;
+	info.array_size = 2;
+	info.face_count = info.mip_count = 1;
+	info.sample_count = 4;
+	info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+	REQUIRE(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_SUCCESS);
+	comp_gpu_client_budget_finish();
+	// 16x MSAA with a mip chain is about 9.9 GiB: over the per-client limit.
+	info.sample_count = 16;
+	info.mip_count = 2;
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_ERROR_ALLOCATION);
+	// The same 4x swapchain in an 8-bit format costs half as much.
+	info.sample_count = 4;
+	info.mip_count = 1;
+	info.format = VK_FORMAT_B8G8R8A8_SRGB;
+	REQUIRE(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_SUCCESS);
+	comp_gpu_client_budget_finish();
+	comp_gpu_client_budget_destroy(&budget);
+
+	auto *base = &sc.base.base;
+	xrt_swapchain_reference(&base, nullptr);
+	comp_swapchain_gpu_reuse_collect(&device.vk, false);
+	device.vk.device_memory_props.memoryHeapCount = 0;
+	comp_swapchain_gpu_reuse_note_device(&device.vk);
+}

@@ -973,6 +973,10 @@ compositor_init_vulkan(struct comp_compositor *c)
 		return false;
 	}
 
+#ifdef XRT_OS_OSX
+	comp_swapchain_gpu_reuse_note_device(vk);
+#endif
+
 	// clang-format off
 	static_assert(ARRAY_SIZE(vk_res.client_gpu_deviceUUID.data) == XRT_UUID_SIZE, "array size mismatch");
 	static_assert(ARRAY_SIZE(vk_res.selected_gpu_deviceUUID.data) == XRT_UUID_SIZE, "array size mismatch");
