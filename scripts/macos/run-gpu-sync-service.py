@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright 2026, Nick Kennedy
 # SPDX-License-Identifier: BSL-1.0
-"""Run an isolated simulated-HMD service with the real offscreen renderer."""
+"""Run an isolated GPU service test, offscreen or on the physical headset."""
 import argparse
 import csv
 import re
@@ -20,6 +20,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--client', nargs='+')
     parser.add_argument('--benchmark', action='store_true', help='Disable readback and per-image diagnostic logging')
+    parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
     parser.add_argument('--unique-output', action='store_true')
     parser.add_argument('--fault', choices=['missing', 'disconnect'], default='missing')
     parser.add_argument('--suite', action='store_true', help='Test a healthy client, failed overlay and replacement client in one service')
@@ -50,9 +51,13 @@ def main():
         if args.benchmark:
             env.update(XRT_LOG='warn', XRT_COMPOSITOR_LOG_APPLE_SAMPLES='0',
                        XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE='0')
-        telemetry = {'start_epoch': time.time(), 'workload': '64x64 Metal quad; simulated HMD; debug_image target',
+        if args.headset:
+            env.update(SIMULATED_ENABLE='0', XRT_COMPOSITOR_FORCE_DEBUG_IMAGE='0',
+                       XRT_MACOS_PREVENT_DISPLAY_SLEEP='1', PSVR2_CAMERA_STREAMS='0')
+        telemetry = {'start_epoch': time.time(), 'workload': ('64x64 Metal quad; physical PS VR2 display' if args.headset else '64x64 Metal quad; simulated HMD; debug_image target'),
                      'benchmark': args.benchmark, 'powermetrics': 'not collected; power/frequency unavailable',
                      'game_mode': 'not requested'}
+        telemetry['headset'] = args.headset
         for key, command in [('power', ['pmset', '-g', 'batt']), ('settings', ['pmset', '-g', 'custom']),
                              ('os', ['sw_vers']), ('background_cpu', ['ps', '-A', '-o', '%cpu,comm'])]:
             snapshot = subprocess.run(command, capture_output=True, text=True, timeout=5)
@@ -71,26 +76,26 @@ def main():
                     raise RuntimeError('Service socket did not become ready; inspect service.log')
                 time.sleep(.05)
             if args.suite:
-                return run_suite(build, out, env, args.fault)
+                return run_suite(build, out, env, args.fault, args.headset)
             command = args.client or [str(build/'tests/tests_macos_openxr_loaderless_probe')]
             if args.benchmark:
                 command = ['/usr/bin/caffeinate', '-i']+command
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
             (out/'client.txt').write_text(result.stdout+result.stderr)
             (out/'summary.json').write_text(json.dumps(dict(client_exit=result.returncode,
-                target='debug_image', simulated_hmd=True, command=command), indent=2)+'\n')
+                target=('macos' if args.headset else 'debug_image'), simulated_hmd=not args.headset, command=command), indent=2)+'\n')
             return result.returncode
         finally:
             subprocess.run(['launchctl', 'bootout', domain, str(plist)], timeout=10, check=False)
             if args.suite and (out/'summary.json').exists():
-                verify_suite(out, args.fault)
+                verify_suite(out, args.fault, args.headset)
 
 
 def events(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.startswith('{')]
 
 
-def verify_suite(out, fault_mode):
+def verify_suite(out, fault_mode, headset=False):
     failed = events(out/'failed.txt')
     start = next(row['time_ns'] for row in failed if row['event'] == 'fault')
     if fault_mode == 'missing':
@@ -126,10 +131,29 @@ def verify_suite(out, fault_mode):
         healthy_latch_max_gap_ms=max((b-a)/1e6 for a,b in zip(times,times[1:])),
         recovery_ms=duration/1e6, recovery_endpoint=('session_loss' if fault_mode == 'missing' else 'replacement_first_frame'), failed_swapchain_retained=True,
         service_start_count=1, status='PASS', note='Offscreen GPU output, not physical display presentation')
+    if headset:
+        presented = list(csv.DictReader(next(out.glob('*presented.csv')).open()))
+        fresh_ids = {row['system_frame_id'] for row in during}
+        physical = [row for row in presented if row['frame_id'] in fresh_ids
+                    and start <= int(row['presented_monotonic_ns']) <= finish]
+        replacement_ids = {row['system_frame_id'] for row in replacement_latches}
+        physical_replacement = [row for row in presented if row['frame_id'] in replacement_ids
+                                and int(row['presented_monotonic_ns']) > 0]
+        completed = list(csv.DictReader(next(out.glob('*present_complete.csv')).open()))
+        if not completed or any(row['status'] != '4' or row['shared_event_wait'] != '1' for row in completed):
+            raise RuntimeError('Presentation GPU failure or missing shared-event dependency')
+        if len(physical) < (10 if fault_mode == 'missing' else 1) or len(physical_replacement) < 10:
+            raise RuntimeError('Insufficient actual headset presentation during fault/replacement')
+        pts = sorted(int(row['presented_monotonic_ns']) for row in physical)
+        summary.update(presentation_gpu_completions=len(completed), presentation_gpu_errors=0,
+                       presentation_shared_event_waits=len(completed), healthy_physical_frames_during_fault=len(physical),
+                       replacement_physical_frames=len(physical_replacement),
+                       healthy_physical_max_gap_ms=max(((b-a)/1e6 for a,b in zip(pts,pts[1:])), default=0),
+                       note='Physical CAMetalDrawable presentation callbacks; visual comfort not assessed')
     (out/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
 
 
-def run_suite(build, out, env, fault_mode):
+def run_suite(build, out, env, fault_mode, headset=False):
     executable = str(build/'tests/tests_macos_service_gpu_sync')
     clients = []
     results = []
@@ -165,7 +189,7 @@ def run_suite(build, out, env, fault_mode):
                 if client.poll() is None:
                     client.kill()
                 client.wait(timeout=5)
-    (out/'summary.json').write_text(json.dumps(dict(target='debug_image', clients=results,
+    (out/'summary.json').write_text(json.dumps(dict(target=('macos' if headset else 'debug_image'), clients=results,
         status='PASS', note='GPU trace verification follows service shutdown'), indent=2)+'\n')
     return 0
 
