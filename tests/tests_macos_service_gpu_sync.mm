@@ -1,6 +1,6 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
-// Native Metal OpenXR client for the isolated offscreen service regression.
+// Native Metal OpenXR client for isolated service and headset regressions.
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #define XR_USE_GRAPHICS_API_METAL
@@ -84,6 +84,9 @@ main(int argc, char **argv)
 		try {
 			const bool missing = argc > 1 && std::string(argv[1]) == "missing";
 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
+			const uint64_t timeout_seconds = argc > 3 ? std::stoull(argv[3]) : 20;
+			if (timeout_seconds < 1 || timeout_seconds > 300)
+				throw std::runtime_error("Timeout must be between 1 and 300 seconds");
 			fprintf(
 			    stdout,
 			    "{\"event\":\"config\",\"thermal\":%ld,\"low_power\":%s,\"clock\":\"CLOCK_MONOTONIC\"}\n",
@@ -197,7 +200,7 @@ main(int argc, char **argv)
 			unsigned rendered = 0;
 			bool running = false, lost = false;
 			uint64_t fault = 0;
-			uint64_t deadline = now_ns() + 20000000000ULL;
+			uint64_t deadline = now_ns() + timeout_seconds * 1000000000ULL;
 			while (rendered < frames && now_ns() < deadline) {
 				XrEventDataBuffer event{};
 				event.type = XR_TYPE_EVENT_DATA_BUFFER;

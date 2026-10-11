@@ -19,12 +19,15 @@ def main():
     parser.add_argument('--build', type=Path, default=Path('build/arm64'))
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--client', nargs='+')
+    parser.add_argument('--client-timeout', type=float, default=30, help='Finite client timeout in seconds (1–300)')
     parser.add_argument('--benchmark', action='store_true', help='Disable readback and per-image diagnostic logging')
     parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
     parser.add_argument('--unique-output', action='store_true')
     parser.add_argument('--fault', choices=['missing', 'disconnect'], default='missing')
     parser.add_argument('--suite', action='store_true', help='Test a healthy client, failed overlay and replacement client in one service')
     args = parser.parse_args()
+    if not 1 <= args.client_timeout <= 300:
+        parser.error('--client-timeout must be between 1 and 300 seconds')
     if args.suite and (args.client or args.benchmark):
         parser.error('--suite cannot be combined with --client or --benchmark')
     build = args.build.resolve()
@@ -80,7 +83,7 @@ def main():
             command = args.client or [str(build/'tests/tests_macos_openxr_loaderless_probe')]
             if args.benchmark:
                 command = ['/usr/bin/caffeinate', '-i']+command
-            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=args.client_timeout)
             (out/'client.txt').write_text(result.stdout+result.stderr)
             (out/'summary.json').write_text(json.dumps(dict(client_exit=result.returncode,
                 target=('macos' if args.headset else 'debug_image'), simulated_hmd=not args.headset, command=command), indent=2)+'\n')

@@ -201,7 +201,7 @@ Therefore this comparison supports measured low-load costs and throughput,
 | M2.7 | NOT VERIFIED | Global caps tested; per-client/pre-allocation limits incomplete. |
 | M2.8 | PASS | Replacement renders in same healthy service after timeout and client kill. |
 | M2.9 | PASS | Healthy client latched offscreen and physically presented during both failure/recovery intervals. |
-| M2.10 | NOT VERIFIED | Service A–B–B–A costs recorded; phase/telemetry limitations prevent full non-regression conclusion. |
+| M2.10 | NOT VERIFIED | Offscreen and headset A–B–B–A recorded; typical headset cadence unchanged but rare-gap variation prevents strict non-regression conclusion. |
 | M2.11 | PASS | Available deterministic native/mock/service tests pass; hardware tests listed below. |
 | M2.12 | PASS | Commands, source scope, traces, timing and criteria documented. |
 
@@ -295,3 +295,12 @@ The build passed. The default offscreen service suites passed **2/2 (8.97 s)**
 after adding the hardware option; the previous full **65/65** result remains the
 latest full-suite run. Raw traces, client/service logs, machine summaries,
 build output, restored-service state and working-tree/source scope are retained.
+
+## Matched presentation comparison
+
+A subsequent four-run PS VR2 A–B–B–A capture with readback/per-image logging off
+shows similar typical cadence and median latency, but slightly worse rare gaps
+in the modified samples (0.276% versus 0.234%; maximum 33 ms versus 25 ms).
+Background load varied, so causation and strict tail non-regression remain
+unresolved. See [the matched comparison](macos-gpu-sync-headset-comparison.md)
+for exact variants, physical timestamp joins, full distributions and scope.
