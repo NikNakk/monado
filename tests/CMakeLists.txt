@@ -258,6 +258,14 @@ if(APPLE AND TARGET comp_metal_foveation_cache)
 endif()
 
 if(APPLE)
+	add_executable(tests_macos_gpu_sync tests_macos_gpu_sync.mm)
+	target_compile_features(tests_macos_gpu_sync PRIVATE cxx_std_17)
+	target_link_libraries(tests_macos_gpu_sync PRIVATE Vulkan::Vulkan "-framework Foundation" "-framework Metal" "-framework IOSurface")
+	foreach(scenario normal delayed missing future nonmonotonic exit-before exit-after consumer-delay multi-queue broken-queue reuse idle cancel-callback)
+		add_test(NAME tests_macos_gpu_sync_${scenario} COMMAND tests_macos_gpu_sync ${scenario})
+		set_tests_properties(tests_macos_gpu_sync_${scenario} PROPERTIES TIMEOUT 30 LABELS "macos;gpu")
+	endforeach()
+	set_target_properties(tests_macos_gpu_sync PROPERTIES FOLDER monado_tests)
 	add_executable(tests_macos_iosurface_producer tests_macos_iosurface_producer.c)
 	target_link_libraries(
 		tests_macos_iosurface_producer PRIVATE "-framework CoreFoundation"
