@@ -36,6 +36,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(xcb_fullscreen, "XRT_COMPOSITOR_XCB_FULLSCREEN", fals
 DEBUG_GET_ONCE_NUM_OPTION(xcb_display, "XRT_COMPOSITOR_XCB_DISPLAY", -1)
 DEBUG_GET_ONCE_NUM_OPTION(default_framerate, "XRT_COMPOSITOR_DEFAULT_FRAMERATE", 60)
 DEBUG_GET_ONCE_BOOL_OPTION(compute, "XRT_COMPOSITOR_COMPUTE", USE_COMPUTE_DEFAULT)
+DEBUG_GET_ONCE_BOOL_OPTION(force_debug_image, "XRT_COMPOSITOR_FORCE_DEBUG_IMAGE", false)
 // clang-format on
 
 static inline void
@@ -213,5 +214,8 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 		// HMD screen tends to be much larger then monitors.
 		s->preferred.width /= 2;
 		s->preferred.height /= 2;
+	}
+	if (debug_get_bool_option_force_debug_image()) {
+		s->target_identifier = "debug_image";
 	}
 }

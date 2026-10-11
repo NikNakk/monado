@@ -290,6 +290,18 @@ if(APPLE)
 		)
 	set_target_properties(tests_macos_ipc_swapchain_probe PROPERTIES FOLDER monado_tests)
 
+	add_executable(tests_macos_service_gpu_sync tests_macos_service_gpu_sync.mm)
+	target_compile_features(tests_macos_service_gpu_sync PRIVATE cxx_std_17)
+	target_link_libraries(tests_macos_service_gpu_sync PRIVATE xrt-interfaces xrt-external-openxr "-framework Foundation" "-framework Metal")
+	if(TARGET monado-service)
+        foreach(fault missing disconnect)
+            add_test(NAME tests_macos_service_gpu_sync_${fault}
+                COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/macos/run-gpu-sync-service.py
+                    --build ${CMAKE_BINARY_DIR} --output ${CMAKE_CURRENT_BINARY_DIR}/gpu-service-results
+                    --unique-output --suite --fault ${fault})
+            set_tests_properties(tests_macos_service_gpu_sync_${fault} PROPERTIES TIMEOUT 60 LABELS "macos;gpu;service" RUN_SERIAL TRUE)
+        endforeach()
+    endif()
 	add_executable(tests_macos_openxr_loaderless_probe tests_macos_openxr_loaderless_probe.c)
 	target_link_libraries(
 		tests_macos_openxr_loaderless_probe PRIVATE xrt-interfaces xrt-external-openxr

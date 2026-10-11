@@ -1,0 +1,311 @@
+// Copyright 2026, Nick Kennedy
+// SPDX-License-Identifier: BSL-1.0
+// Native Metal OpenXR client for the isolated offscreen service regression.
+#import <Foundation/Foundation.h>
+#import <Metal/Metal.h>
+#define XR_USE_GRAPHICS_API_METAL
+#include "openxr/openxr.h"
+#include "openxr/openxr_platform.h"
+#include "openxr/openxr_loader_negotiation.h"
+#include <dlfcn.h>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <stdexcept>
+#include <thread>
+#include <vector>
+#include <unistd.h>
+
+// Suppress only the producer completion signal, never enqueue a future GPU wait.
+// All other operations, including real texture writes, use the native queue.
+@interface SignalBuffer : NSObject
+@property(nonatomic, retain) id<MTLCommandBuffer> buffer;
+@property(nonatomic) bool suppress;
+@end
+@implementation SignalBuffer
+- (id)forwardingTargetForSelector:(SEL)selector
+{
+	return self.buffer;
+}
+- (void)encodeSignalEvent:(id<MTLEvent>)event value:(uint64_t)value
+{
+	if (!self.suppress)
+		[self.buffer encodeSignalEvent:event value:value];
+	else
+		fprintf(stdout, "{\"event\":\"suppressed_signal\",\"value\":%llu}\n", (unsigned long long)value);
+}
+- (void)dealloc
+{
+	[_buffer release];
+	[super dealloc];
+}
+@end
+@interface SignalQueue : NSObject
+@property(nonatomic, retain) id<MTLCommandQueue> queue;
+@property(nonatomic) bool suppress;
+@end
+@implementation SignalQueue
+- (id)forwardingTargetForSelector:(SEL)selector
+{
+	return self.queue;
+}
+- (id<MTLCommandBuffer>)commandBuffer
+{
+	SignalBuffer *result = [[[SignalBuffer alloc] init] autorelease];
+	result.buffer = [self.queue commandBuffer];
+	result.suppress = self.suppress;
+	return (id<MTLCommandBuffer>)result;
+}
+- (void)dealloc
+{
+	[_queue release];
+	[super dealloc];
+}
+@end
+
+static uint64_t
+now_ns()
+{
+	struct timespec time{};
+	if (clock_gettime(CLOCK_MONOTONIC, &time) != 0)
+		throw std::runtime_error("clock_gettime");
+	return (uint64_t)time.tv_sec * 1000000000ULL + time.tv_nsec;
+}
+static void
+checked(XrResult result, const char *operation)
+{
+	if (XR_FAILED(result))
+		throw std::runtime_error(std::string(operation) + ": " + std::to_string(result));
+}
+int
+main(int argc, char **argv)
+{
+	@autoreleasepool {
+		try {
+			const bool missing = argc > 1 && std::string(argv[1]) == "missing";
+			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
+			fprintf(
+			    stdout,
+			    "{\"event\":\"config\",\"thermal\":%ld,\"low_power\":%s,\"clock\":\"CLOCK_MONOTONIC\"}\n",
+			    (long)[NSProcessInfo processInfo].thermalState,
+			    [NSProcessInfo processInfo].lowPowerModeEnabled ? "true" : "false");
+			const char *path = getenv("MONADO_OPENXR_RUNTIME_PATH");
+			if (!path)
+				throw std::runtime_error("MONADO_OPENXR_RUNTIME_PATH required");
+			void *library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+			if (!library)
+				throw std::runtime_error(dlerror());
+			auto negotiate =
+			    (PFN_xrNegotiateLoaderRuntimeInterface)dlsym(library, "xrNegotiateLoaderRuntimeInterface");
+			if (!negotiate)
+				throw std::runtime_error("runtime negotiation unavailable");
+			XrNegotiateLoaderInfo loader{};
+			loader.structType = XR_LOADER_INTERFACE_STRUCT_LOADER_INFO;
+			loader.structVersion = XR_LOADER_INFO_STRUCT_VERSION;
+			loader.structSize = sizeof(loader);
+			loader.minInterfaceVersion = loader.maxInterfaceVersion = XR_CURRENT_LOADER_RUNTIME_VERSION;
+			loader.minApiVersion = loader.maxApiVersion = XR_CURRENT_API_VERSION;
+			XrNegotiateRuntimeRequest request{};
+			request.structType = XR_LOADER_INTERFACE_STRUCT_RUNTIME_REQUEST;
+			request.structVersion = XR_RUNTIME_INFO_STRUCT_VERSION;
+			request.structSize = sizeof(request);
+			checked(negotiate(&loader, &request), "negotiate");
+			XrInstance instance = XR_NULL_HANDLE;
+#define LOAD(name)                                                                                                     \
+	PFN_##name name = nullptr;                                                                                     \
+	checked(request.getInstanceProcAddr(instance, #name, (PFN_xrVoidFunction *)&name), #name)
+			LOAD(xrCreateInstance);
+			const char *extensions[] = {XR_KHR_METAL_ENABLE_EXTENSION_NAME, XR_EXTX_OVERLAY_EXTENSION_NAME};
+			XrInstanceCreateInfo info{};
+			info.type = XR_TYPE_INSTANCE_CREATE_INFO;
+			snprintf(info.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "gpu-sync-%d",
+			         getpid());
+			info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+			info.enabledExtensionCount = missing ? 2 : 1;
+			info.enabledExtensionNames = extensions;
+			checked(xrCreateInstance(&info, &instance), "xrCreateInstance");
+			LOAD(xrGetSystem);
+			LOAD(xrGetMetalGraphicsRequirementsKHR);
+			LOAD(xrCreateSession);
+			LOAD(xrPollEvent);
+			LOAD(xrBeginSession);
+			LOAD(xrEndSession);
+			LOAD(xrDestroySession);
+			LOAD(xrDestroyInstance);
+			LOAD(xrCreateReferenceSpace);
+			LOAD(xrDestroySpace);
+			LOAD(xrCreateSwapchain);
+			LOAD(xrEnumerateSwapchainImages);
+			LOAD(xrDestroySwapchain);
+			LOAD(xrAcquireSwapchainImage);
+			LOAD(xrWaitSwapchainImage);
+			LOAD(xrReleaseSwapchainImage);
+			LOAD(xrWaitFrame);
+			LOAD(xrBeginFrame);
+			LOAD(xrEndFrame);
+#undef LOAD
+			XrSystemGetInfo systemInfo{};
+			systemInfo.type = XR_TYPE_SYSTEM_GET_INFO;
+			systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
+			XrSystemId system;
+			checked(xrGetSystem(instance, &systemInfo, &system), "xrGetSystem");
+			XrGraphicsRequirementsMetalKHR requirements{};
+			requirements.type = XR_TYPE_GRAPHICS_REQUIREMENTS_METAL_KHR;
+			checked(xrGetMetalGraphicsRequirementsKHR(instance, system, &requirements),
+			        "metal requirements");
+			id<MTLDevice> device = (id<MTLDevice>)requirements.metalDevice;
+			SignalQueue *queue = [[[SignalQueue alloc] init] autorelease];
+			queue.queue = [device newCommandQueue];
+			[queue.queue release];
+			XrGraphicsBindingMetalKHR binding{};
+			binding.type = XR_TYPE_GRAPHICS_BINDING_METAL_KHR;
+			binding.commandQueue = (void *)queue;
+			XrSessionCreateInfoOverlayEXTX overlay{};
+			overlay.type = XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX;
+			overlay.sessionLayersPlacement = 1;
+			if (missing)
+				binding.next = &overlay;
+			XrSessionCreateInfo sessionInfo{};
+			sessionInfo.type = XR_TYPE_SESSION_CREATE_INFO;
+			sessionInfo.next = &binding;
+			sessionInfo.systemId = system;
+			XrSession session;
+			checked(xrCreateSession(instance, &sessionInfo, &session), "xrCreateSession");
+			XrReferenceSpaceCreateInfo spaceInfo{};
+			spaceInfo.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
+			spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+			spaceInfo.poseInReferenceSpace.orientation.w = 1;
+			XrSpace space;
+			checked(xrCreateReferenceSpace(session, &spaceInfo, &space), "space");
+			XrSwapchainCreateInfo swapInfo{};
+			swapInfo.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
+			swapInfo.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+			swapInfo.format = MTLPixelFormatBGRA8Unorm;
+			swapInfo.sampleCount = 1;
+			swapInfo.width = swapInfo.height = 64;
+			swapInfo.faceCount = swapInfo.arraySize = swapInfo.mipCount = 1;
+			XrSwapchain swapchain;
+			checked(xrCreateSwapchain(session, &swapInfo, &swapchain), "swapchain");
+			uint32_t count;
+			checked(xrEnumerateSwapchainImages(swapchain, 0, &count, nullptr), "images count");
+			std::vector<XrSwapchainImageMetalKHR> images(count);
+			for (auto &image : images)
+				image.type = XR_TYPE_SWAPCHAIN_IMAGE_METAL_KHR;
+			checked(xrEnumerateSwapchainImages(swapchain, count, &count,
+			                                   (XrSwapchainImageBaseHeader *)images.data()),
+			        "images");
+			unsigned rendered = 0;
+			bool running = false, lost = false;
+			uint64_t fault = 0;
+			uint64_t deadline = now_ns() + 20000000000ULL;
+			while (rendered < frames && now_ns() < deadline) {
+				XrEventDataBuffer event{};
+				event.type = XR_TYPE_EVENT_DATA_BUFFER;
+				while (xrPollEvent(instance, &event) == XR_SUCCESS) {
+					if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+						auto state = ((XrEventDataSessionStateChanged *)&event)->state;
+						if (state == XR_SESSION_STATE_READY) {
+							XrSessionBeginInfo begin{};
+							begin.type = XR_TYPE_SESSION_BEGIN_INFO;
+							begin.primaryViewConfigurationType =
+							    XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+							checked(xrBeginSession(session, &begin), "begin session");
+							running = true;
+						}
+						if (state == XR_SESSION_STATE_LOSS_PENDING) {
+							lost = true;
+							break;
+						}
+					}
+					event = {};
+					event.type = XR_TYPE_EVENT_DATA_BUFFER;
+				}
+				if (lost)
+					break;
+				if (!running) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+					continue;
+				}
+				if (fault) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(1));
+					continue;
+				}
+				XrFrameWaitInfo wait{};
+				wait.type = XR_TYPE_FRAME_WAIT_INFO;
+				XrFrameState state{};
+				state.type = XR_TYPE_FRAME_STATE;
+				checked(xrWaitFrame(session, &wait, &state), "wait frame");
+				XrFrameBeginInfo begin{};
+				begin.type = XR_TYPE_FRAME_BEGIN_INFO;
+				checked(xrBeginFrame(session, &begin), "begin frame");
+				uint32_t image;
+				XrSwapchainImageAcquireInfo acquire{};
+				acquire.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
+				checked(xrAcquireSwapchainImage(swapchain, &acquire, &image), "acquire");
+				XrSwapchainImageWaitInfo imageWait{};
+				imageWait.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
+				imageWait.timeout = 1000000000;
+				checked(xrWaitSwapchainImage(swapchain, &imageWait), "wait image");
+				auto command = [queue.queue commandBuffer];
+				MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+				pass.colorAttachments[0].texture = (id<MTLTexture>)images[image].texture;
+				pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+				pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+				pass.colorAttachments[0].clearColor = MTLClearColorMake(.25, .5, .75, 1);
+				[[command renderCommandEncoderWithDescriptor:pass] endEncoding];
+				[command commit];
+				XrSwapchainImageReleaseInfo release{};
+				release.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
+				if (missing && rendered == 10) {
+					queue.suppress = true;
+					fault = now_ns();
+					fprintf(stdout, "{\"event\":\"fault\",\"time_ns\":%llu}\n",
+					        (unsigned long long)fault);
+					fflush(stdout);
+				}
+				checked(xrReleaseSwapchainImage(swapchain, &release), "release");
+				XrCompositionLayerQuad quad{};
+				quad.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+				quad.space = space;
+				quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+				quad.subImage.swapchain = swapchain;
+				quad.subImage.imageRect.extent = {64, 64};
+				quad.pose.orientation.w = 1;
+				quad.pose.position.z = -1.5f;
+				quad.size = {1, 1};
+				const XrCompositionLayerBaseHeader *layer = (XrCompositionLayerBaseHeader *)&quad;
+				XrFrameEndInfo end{};
+				end.type = XR_TYPE_FRAME_END_INFO;
+				end.displayTime = state.predictedDisplayTime;
+				end.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
+				end.layerCount = 1;
+				end.layers = &layer;
+				uint64_t before = now_ns();
+				checked(xrEndFrame(session, &end), "end frame");
+				fprintf(stdout,
+				        "{\"event\":\"frame\",\"pid\":%d,\"frame\":%u,\"image\":%u,\"begin_ns\":%llu,"
+				        "\"end_ns\":%llu}\n",
+				        getpid(), ++rendered, image, (unsigned long long)before,
+				        (unsigned long long)now_ns());
+				fflush(stdout);
+			}
+			if (missing ? !lost : rendered != frames)
+				throw std::runtime_error("required progress/session loss not observed");
+			uint64_t recovery = lost ? now_ns() - fault : 0;
+			checked(xrDestroySwapchain(swapchain), "destroy swapchain");
+			checked(xrDestroySpace(space), "destroy space");
+			checked(xrDestroySession(session), "destroy session");
+			checked(xrDestroyInstance(instance), "destroy instance");
+			fprintf(stdout,
+			        "{\"event\":\"result\",\"status\":\"PASS\",\"frames\":%u,\"lost\":%s,\"recovery_ns\":%"
+			        "llu,\"thermal_end\":%ld}\n",
+			        rendered, lost ? "true" : "false", (unsigned long long)recovery,
+			        (long)[NSProcessInfo processInfo].thermalState);
+			// The runtime keeps Objective-C state; leave dlclose to process teardown.
+			return 0;
+		} catch (const std::exception &error) {
+			fprintf(stderr, "FAIL: %s\n", error.what());
+			return 1;
+		}
+	}
+}

@@ -167,7 +167,11 @@ target_create_images(struct comp_target *ct,
 	if (use_srgb) {
 		dit->base.format = VK_FORMAT_R8G8B8A8_SRGB;
 	}
-	dit->base.final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	// These are ordinary offscreen images, not WSI presentable images.
+	dit->base.final_layout = VK_IMAGE_LAYOUT_GENERAL;
+	// comp_scratch allocates transfer-source capable images, allowing the
+	// existing opt-in compositor readback diagnostics to inspect this target.
+	dit->base.image_usage = create_info->image_usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 }
 
 static bool

@@ -526,6 +526,14 @@ run_func(void *ptr)
 			U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d", frame_id,
 			        value, wait_result);
 			if (mc->xses != NULL && os_thread_helper_is_running(&mc->wait_thread.oth)) {
+				/* LOST makes API calls fail, while LOSS_PENDING also produces
+				 * the OpenXR state event an application can observe when idle. */
+				union xrt_session_event pending = {.type = XRT_SESSION_EVENT_LOSS_PENDING};
+				pending.loss_pending.loss_time_ns = os_monotonic_get_ns();
+				xrt_result_t pending_notify = multi_compositor_push_event(mc, &pending);
+				if (pending_notify != XRT_SUCCESS) {
+					U_LOG_E("Could not notify pending session loss: result=%d", pending_notify);
+				}
 				union xrt_session_event lost = {.type = XRT_SESSION_EVENT_LOST};
 				xrt_result_t notify = multi_compositor_push_event(mc, &lost);
 				if (notify != XRT_SUCCESS) {
