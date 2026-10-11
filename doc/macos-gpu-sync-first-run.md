@@ -1,6 +1,10 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # macOS GPU synchronization: first-run checkpoint, 2026-10-11
 
+This is the historical first checkpoint. The subsequent
+[headset-free service follow-up](macos-gpu-sync-service-tests.md) supersedes its
+service-startup, recovery and performance findings.
+
 The native cross-process harness and targeted production fixes are implemented.
 **M1 and M2 are not complete.** Actual service GPU rendering, recovery and a
 representative before/after service performance comparison remain unverified.
