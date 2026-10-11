@@ -34,6 +34,13 @@ xrt_result_t
 comp_gpu_client_budget_adopt(struct xrt_swapchain *xsc);
 bool
 comp_swapchain_gpu_reuse_device_in_use(struct vk_bundle *vk);
+/*!
+ * Size the default GPU allocation budgets from @p vk's largest device-local
+ * heap. Called once the compositor's device exists; swapchain tracking also
+ * calls it, so this only makes the first client's limits accurate.
+ */
+void
+comp_swapchain_gpu_reuse_note_device(struct vk_bundle *vk);
 void
 comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown);
 

@@ -39,7 +39,9 @@ static __thread struct {
 	struct comp_gpu_client_budget *budget;
 	uint64_t bytes;
 } g_reservation;
-DEBUG_GET_ONCE_NUM_OPTION(gpu_client_mb, "XRT_MACOS_GPU_CLIENT_MB", 512)
+// Zero selects a share of the device-local heap, see global_byte_limit().
+DEBUG_GET_ONCE_NUM_OPTION(gpu_global_mb, "XRT_MACOS_GPU_GLOBAL_MB", 0)
+DEBUG_GET_ONCE_NUM_OPTION(gpu_client_mb, "XRT_MACOS_GPU_CLIENT_MB", 0)
 DEBUG_GET_ONCE_NUM_OPTION(gpu_client_objects, "XRT_MACOS_GPU_CLIENT_OBJECTS", 64)
 DEBUG_GET_ONCE_NUM_OPTION(gpu_global_objects, "XRT_MACOS_GPU_GLOBAL_OBJECTS", 256)
 
@@ -117,9 +119,17 @@ static pthread_mutex_t g_gpu_reuse_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_gpu_reuse_cond = PTHREAD_COND_INITIALIZER;
 static struct gpu_reuse_context *g_gpu_reuse_contexts = NULL;
 static struct gpu_reuse_native_accum *g_gpu_reuse_native_accums = NULL;
-/* Limit all live plus quarantined tracked storage, and small-object growth. */
-#define GPU_REUSE_MAX_BYTES (UINT64_C(1024) * 1024 * 1024)
+/*
+ * Limit all live plus quarantined tracked storage, and small-object growth.
+ * Byte limits default to a share of the device-local heap once a device has
+ * been seen, and to these fallbacks before that.
+ */
+#define GPU_REUSE_FALLBACK_GLOBAL_BYTES (UINT64_C(1024) * 1024 * 1024)
+#define GPU_REUSE_FALLBACK_CLIENT_BYTES (UINT64_C(512) * 1024 * 1024)
+//! Bound for size arithmetic and environment overrides (1 TiB).
+#define GPU_REUSE_MAX_BYTES (UINT64_C(1) << 40)
 #define GPU_REUSE_MAX_TRACKERS 256
+static uint64_t g_device_local_heap_bytes;
 static uint64_t g_tracked_bytes;
 static uint32_t g_tracker_count;
 static uint64_t g_tracker_serial;
@@ -158,17 +168,122 @@ comp_gpu_client_budget_destroy(struct comp_gpu_client_budget **ptr)
 }
 
 static uint64_t
+mb_option_bytes(long mb)
+{
+	return mb > 0 && (uint64_t)mb <= GPU_REUSE_MAX_BYTES / (1024 * 1024) ? (uint64_t)mb * 1024 * 1024 : 0;
+}
+
+//! Caller holds the registry lock.
+static uint64_t
+global_byte_limit(void)
+{
+	uint64_t bytes = mb_option_bytes(debug_get_num_option_gpu_global_mb());
+	if (bytes != 0) {
+		return bytes;
+	}
+	return g_device_local_heap_bytes != 0 ? g_device_local_heap_bytes / 4 * 3 : GPU_REUSE_FALLBACK_GLOBAL_BYTES;
+}
+
+//! Caller holds the registry lock.
+static uint64_t
 client_byte_limit(void)
 {
-	long mb = debug_get_num_option_gpu_client_mb();
-	return (uint64_t)(mb > 0 && mb <= 1024 ? mb : 512) * 1024 * 1024;
+	uint64_t bytes = mb_option_bytes(debug_get_num_option_gpu_client_mb());
+	if (bytes == 0) {
+		bytes = g_device_local_heap_bytes != 0 ? g_device_local_heap_bytes / 2 : GPU_REUSE_FALLBACK_CLIENT_BYTES;
+	}
+	uint64_t global = global_byte_limit();
+	return bytes < global ? bytes : global;
+}
+
+static void
+note_device_locked(struct vk_bundle *vk)
+{
+	uint64_t largest = 0;
+	const VkPhysicalDeviceMemoryProperties *props = &vk->device_memory_props;
+	for (uint32_t i = 0; i < props->memoryHeapCount && i < VK_MAX_MEMORY_HEAPS; i++) {
+		if ((props->memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) != 0 &&
+		    props->memoryHeaps[i].size > largest) {
+			largest = props->memoryHeaps[i].size;
+		}
+	}
+	// Track the latest device; one without a device-local heap means unknown.
+	if (largest == g_device_local_heap_bytes) {
+		return;
+	}
+	g_device_local_heap_bytes = largest;
+	if (largest != 0) {
+		U_LOG_I("GPU reuse budget: device-local heap %llu MiB, global limit %llu MiB, per-client %llu MiB",
+		        (unsigned long long)(largest >> 20), (unsigned long long)(global_byte_limit() >> 20),
+		        (unsigned long long)(client_byte_limit() >> 20));
+	}
+}
+
+void
+comp_swapchain_gpu_reuse_note_device(struct vk_bundle *vk)
+{
+	pthread_mutex_lock(&g_gpu_reuse_mutex);
+	note_device_locked(vk);
+	pthread_mutex_unlock(&g_gpu_reuse_mutex);
+}
+
+/*!
+ * Bytes per texel, or per block for compressed formats over 4x4 texels (the
+ * estimate divides by 16). Unknown formats use 16, an upper bound for every
+ * uncompressed format an application can request.
+ */
+static uint64_t
+format_bytes_per_texel_x16(VkFormat format)
+{
+	switch (format) {
+	case VK_FORMAT_R8_UNORM:
+	case VK_FORMAT_R8_SRGB:
+	case VK_FORMAT_S8_UINT: return 16 * 1;
+	case VK_FORMAT_R8G8_UNORM:
+	case VK_FORMAT_R8G8_SRGB:
+	case VK_FORMAT_R16_UNORM:
+	case VK_FORMAT_R16_SFLOAT:
+	case VK_FORMAT_R5G6B5_UNORM_PACK16:
+	case VK_FORMAT_B5G6R5_UNORM_PACK16:
+	case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
+	case VK_FORMAT_D16_UNORM: return 16 * 2;
+	case VK_FORMAT_R8G8B8A8_UNORM:
+	case VK_FORMAT_R8G8B8A8_SNORM:
+	case VK_FORMAT_R8G8B8A8_SRGB:
+	case VK_FORMAT_B8G8R8A8_UNORM:
+	case VK_FORMAT_B8G8R8A8_SRGB:
+	case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
+	case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
+	case VK_FORMAT_B10G11R11_UFLOAT_PACK32:
+	case VK_FORMAT_E5B9G9R9_UFLOAT_PACK32:
+	case VK_FORMAT_R16G16_UNORM:
+	case VK_FORMAT_R16G16_SFLOAT:
+	case VK_FORMAT_R32_SFLOAT:
+	case VK_FORMAT_X8_D24_UNORM_PACK32:
+	case VK_FORMAT_D24_UNORM_S8_UINT:
+	case VK_FORMAT_D32_SFLOAT: return 16 * 4;
+	case VK_FORMAT_R16G16B16A16_UNORM:
+	case VK_FORMAT_R16G16B16A16_SNORM:
+	case VK_FORMAT_R16G16B16A16_SFLOAT:
+	case VK_FORMAT_R32G32_SFLOAT:
+	case VK_FORMAT_D32_SFLOAT_S8_UINT: return 16 * 8; // Metal pads Depth32Float_Stencil8 to 8 bytes.
+	case VK_FORMAT_R32G32B32A32_SFLOAT: return 16 * 16;
+	case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
+	case VK_FORMAT_BC1_RGBA_SRGB_BLOCK: return 8;
+	case VK_FORMAT_BC3_UNORM_BLOCK:
+	case VK_FORMAT_BC3_SRGB_BLOCK:
+	case VK_FORMAT_BC7_UNORM_BLOCK:
+	case VK_FORMAT_BC7_SRGB_BLOCK: return 16;
+	default: return 16 * 16;
+	}
 }
 
 static bool
 budget_fits_locked(struct comp_gpu_client_budget *budget, uint64_t bytes)
 {
+	uint64_t global = global_byte_limit();
 	return g_tracker_count < budget_objects(debug_get_num_option_gpu_global_objects(), 256) &&
-	       bytes <= GPU_REUSE_MAX_BYTES - g_tracked_bytes &&
+	       g_tracked_bytes <= global && bytes <= global - g_tracked_bytes &&
 	       (budget == NULL || (budget->objects < budget_objects(debug_get_num_option_gpu_client_objects(), 64) &&
 	                           budget->bytes <= client_byte_limit() && bytes <= client_byte_limit() - budget->bytes));
 }
@@ -181,22 +296,18 @@ comp_gpu_client_budget_reserve(struct comp_gpu_client_budget *budget,
 {
 	if (budget == NULL || g_reservation.budget != NULL || image_count == 0 ||
 	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) return XRT_ERROR_INVALID_ARGUMENT;
-	uint64_t pixel_bytes = 16; // Conservative upper bound for supported uncompressed formats.
-	switch ((VkFormat)info->format) {
-	case VK_FORMAT_R8G8B8A8_UNORM: case VK_FORMAT_R8G8B8A8_SRGB:
-	case VK_FORMAT_B8G8R8A8_UNORM: case VK_FORMAT_B8G8R8A8_SRGB:
-	case VK_FORMAT_A2B10G10R10_UNORM_PACK32: case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
-	case VK_FORMAT_D32_SFLOAT: case VK_FORMAT_D24_UNORM_S8_UINT: pixel_bytes = 4; break;
-	case VK_FORMAT_R16G16B16A16_SFLOAT: case VK_FORMAT_D32_SFLOAT_S8_UINT: pixel_bytes = 8; break;
-	case VK_FORMAT_D16_UNORM: pixel_bytes = 2; break;
-	default: break;
-	}
-	uint64_t bytes = pixel_bytes;
+	// Sixteenths of a byte per texel, so compressed blocks stay exact; a full
+	// mip chain adds at most a third, rounded up here to a half.
+	uint64_t bytes = format_bytes_per_texel_x16((VkFormat)info->format);
 	uint64_t factors[] = {info->width, info->height, info->array_size, info->face_count,
-	                      info->sample_count, image_count, info->mip_count > 1 ? 2 : 1};
+	                      info->sample_count, image_count};
 	for (uint32_t i = 0; i < ARRAY_SIZE(factors); i++) {
 		if (factors[i] == 0 || factors[i] > GPU_REUSE_MAX_BYTES / bytes) return XRT_ERROR_ALLOCATION;
 		bytes *= factors[i];
+	}
+	bytes = (bytes + 15) / 16;
+	if (info->mip_count > 1) {
+		bytes += bytes / 2;
 	}
 	// Cover row/page alignment. Supplied transport sizes are an additional lower bound.
 	uint64_t overhead = (uint64_t)image_count * 65536;
@@ -668,13 +779,16 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
 		return XRT_SUCCESS;
 	}
+	note_device_locked(sc->vk);
 
 	struct comp_gpu_client_budget *budget = g_reservation.budget;
 	uint64_t reserved = g_reservation.bytes;
-	bool fits = budget != NULL ?
-	    (bytes <= reserved || (bytes - reserved <= GPU_REUSE_MAX_BYTES - g_tracked_bytes &&
-	                           bytes - reserved <= client_byte_limit() - budget->bytes)) :
-	    budget_fits_locked(NULL, bytes);
+	uint64_t global = global_byte_limit();
+	uint64_t client = client_byte_limit();
+	bool fits = budget != NULL ? (bytes <= reserved ||
+	                              (g_tracked_bytes <= global && bytes - reserved <= global - g_tracked_bytes &&
+	                               budget->bytes <= client && bytes - reserved <= client - budget->bytes))
+	                           : budget_fits_locked(NULL, bytes);
 	if (!fits) {
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
 		U_LOG_E("GPU reuse allocation budget exhausted (live plus quarantined storage)");
