@@ -1016,3 +1016,21 @@ left the GPU work active every frame. See the
 `T_CONSTELLATION_TRACKER_FLAGS_ALLOW_JOINT` flag. Only the Sense runtime and
 PS VR2 diagnostic/replay callers set it. Rift retains its original per-camera
 solver even when the process inherits this environment option.
+
+### Native GPU readiness, allocation and teardown limits — 2026-10-11
+
+| Environment variable | Default | Valid values | Purpose |
+|---|---|---|---|
+| `XRT_MACOS_CLIENT_GPU_HUNG_MS` | 500 | 1–10000 ms | Fail a specific unfulfilled producer obligation; idle sessions remain healthy. |
+| `XRT_MACOS_FRAME_READINESS_MARGIN_US` | 6000 | 0–100000 µs | Producer readiness cutoff before predicted presentation; late completed frames remain owned for later ticks. |
+| `XRT_MACOS_GPU_CLIENT_MB` | 512 | 1–1024 MiB | Per-client tracked GPU storage admission limit. |
+| `XRT_MACOS_GPU_CLIENT_OBJECTS` | 64 | 1–256 swapchains | Per-client create/import limit, charged through quarantine. |
+| `XRT_MACOS_GPU_GLOBAL_OBJECTS` | 256 | 1–256 swapchains | Service-wide create/import limit; global tracked bytes remain bounded at 1 GiB. |
+
+Invalid values use the documented default. Client GPU reuse waits are capped at
+500 ms; timeout retains ownership. Final display-link/presentation/callback drain
+has a shared 500 ms deadline, followed by at most 500 ms for the last renderer
+fence. An incomplete drain retains the whole device/compositor until process
+exit. These controls preserve the observed CPU-readiness gate, mandatory
+already-ready imported Vulkan wait and producer/consumer reuse transitions.
+See [the completion report](macos-gpu-sync-completion.md) for evidence and limits.
