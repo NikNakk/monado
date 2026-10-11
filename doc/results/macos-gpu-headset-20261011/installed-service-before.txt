@@ -1,0 +1,103 @@
+gui/501/org.freedesktop.monado.service = {
+	active count = 2
+	path = /Users/nickkennedy/Library/LaunchAgents/org.freedesktop.monado.service.plist
+	type = LaunchAgent
+	state = running
+
+	program = /Users/nickkennedy/.local/monado-psvr2/bin/monado-service
+	arguments = {
+		/Users/nickkennedy/.local/monado-psvr2/bin/monado-service
+	}
+
+	stdout path = /Users/nickkennedy/Library/Logs/Monado/monado-service.out.log
+	stderr path = /Users/nickkennedy/Library/Logs/Monado/monado-service.err.log
+	inherited environment = {
+		XRT_MACOS_CLIENT_COMPOSITOR => 1
+		XR_RUNTIME_JSON => /Users/nickkennedy/.local/monado-psvr2/share/openxr/1/openxr_monado.json
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.ki2P6DgkhI/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XRT_NO_STDIN => 1
+		PSSENSE_RECONNECT => 1
+		XRT_MACOS_EXIT_ON_DISPLAY_LOSS => 1
+		PSVR2_TIMING_TRACE_DIR => /Users/nickkennedy/psvr2-trace
+		PSVR2_TIMING_TRACE => 1
+		PSVR2_LED_DETECTOR_BLOBS => 1
+		PSSENSE_LED_BOOTSTRAP_QUICK_LOCK => 1
+		IPC_EXIT_WHEN_IDLE_DELAY_MS => 5000
+		XRT_MACOS_DISPLAY_LOSS_DELAY_MS => 3000
+		PSVR2_SENSE_6DOF_CALIBRATION => /Users/nickkennedy/Code/psvr2-datasets/calibration/20260926-charuco-mode4-combined-head.json
+		IPC_EXIT_WHEN_IDLE => 1
+		XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS => 5000
+		XRT_FLOOR_EYE_HEIGHT_M => 1.75
+		PSVR2_DRIVER_TIMING_TRACE => 1
+		PSVR2_CAMERA_STREAMS => 1
+		PSSENSE_TIMING_DIAG => 1
+		XRT_PSSENSE_STAGE_RECENTER => 1
+		PSVR2_TIMING_TRACE_FULLY_BUFFERED => 1
+		PSVR2_SENSE_6DOF => 1
+		XPC_SERVICE_NAME => org.freedesktop.monado.service
+	}
+
+	domain = gui/501 [100016]
+	asid = 100016
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	pid = 13222
+	immediate reason = ipc (mach)
+	forks = 0
+	execs = 1
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxy started suspended = 0
+	checked allocations = 0 (queried = 1)
+	checked allocations reason = no host
+	checked allocations flags = 0x0
+	last exit code = (never exited)
+
+	endpoints = {
+		"org.freedesktop.monado.metal-ipc" = {
+			port = 0x131e8f
+			active = 1
+			managed = 1
+			reset = 0
+			hide = 0
+			watching = 0
+		}
+	}
+
+	resource coalition = {
+		ID = 14449
+		type = resource
+		state = active
+		active count = 1
+		name = org.freedesktop.monado.service
+	}
+
+	jetsam coalition = {
+		ID = 14450
+		type = jetsam
+		state = active
+		active count = 1
+		name = org.freedesktop.monado.service
+	}
+
+	spawn type = interactive (4)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+	job state = running
+
+	properties = inferred program | managed LWCR | has LWCR
+}

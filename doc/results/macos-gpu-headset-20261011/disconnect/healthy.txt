@@ -1,0 +1,276 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: gpu-sync-23295
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: 
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+ INFO [u_timing_trace_open] Timing trace: /Users/nickkennedy/Code/monado-2/doc/results/macos-gpu-headset-20261011/disconnect/monado_psvr2_23295_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [client_metal_release_wait_thread_attach] Metal app-release Stage 4 enabled; shared-event completion will gate frame readiness on Monado's wait thread
+ INFO [ipc_metal_xpc_publish_iosurfaces] Metal XPC published 3 IOSurface(s) token=0x000000004da2dde7
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d44c463 device=0x104afea80 value=0
+ INFO [ensure_pair] Metal app-release Stage 4 ready: event=0x96ac88ac0 initial_value=0; app CPU barrier bypassed and frame readiness delegated to Monado wait thread
+{"event":"config","thermal":0,"low_power":false,"clock":"CLOCK_MONOTONIC"}
+{"event":"frame","pid":23295,"frame":1,"image":0,"begin_ns":37981456828000,"end_ns":37981457207000}
+{"event":"frame","pid":23295,"frame":2,"image":1,"begin_ns":37981463520000,"end_ns":37981463609000}
+{"event":"frame","pid":23295,"frame":3,"image":2,"begin_ns":37981472657000,"end_ns":37981472762000}
+{"event":"frame","pid":23295,"frame":4,"image":0,"begin_ns":37981481652000,"end_ns":37981481759000}
+{"event":"frame","pid":23295,"frame":5,"image":1,"begin_ns":37981490470000,"end_ns":37981490545000}
+{"event":"frame","pid":23295,"frame":6,"image":2,"begin_ns":37981499195000,"end_ns":37981499261000}
+{"event":"frame","pid":23295,"frame":7,"image":0,"begin_ns":37981507867000,"end_ns":37981507930000}
+{"event":"frame","pid":23295,"frame":8,"image":1,"begin_ns":37981516500000,"end_ns":37981516572000}
+{"event":"frame","pid":23295,"frame":9,"image":2,"begin_ns":37981525081000,"end_ns":37981525145000}
+{"event":"frame","pid":23295,"frame":10,"image":0,"begin_ns":37981533833000,"end_ns":37981533943000}
+{"event":"frame","pid":23295,"frame":11,"image":1,"begin_ns":37981542020000,"end_ns":37981542240000}
+{"event":"frame","pid":23295,"frame":12,"image":2,"begin_ns":37981550502000,"end_ns":37981550625000}
+{"event":"frame","pid":23295,"frame":13,"image":0,"begin_ns":37981558694000,"end_ns":37981558794000}
+{"event":"frame","pid":23295,"frame":14,"image":1,"begin_ns":37981567064000,"end_ns":37981567151000}
+{"event":"frame","pid":23295,"frame":15,"image":2,"begin_ns":37981575486000,"end_ns":37981575581000}
+{"event":"frame","pid":23295,"frame":16,"image":0,"begin_ns":37981583804000,"end_ns":37981583897000}
+{"event":"frame","pid":23295,"frame":17,"image":1,"begin_ns":37981591977000,"end_ns":37981592025000}
+{"event":"frame","pid":23295,"frame":18,"image":2,"begin_ns":37981600477000,"end_ns":37981600559000}
+{"event":"frame","pid":23295,"frame":19,"image":0,"begin_ns":37981608786000,"end_ns":37981608874000}
+{"event":"frame","pid":23295,"frame":20,"image":1,"begin_ns":37981617105000,"end_ns":37981617192000}
+{"event":"frame","pid":23295,"frame":21,"image":2,"begin_ns":37981625507000,"end_ns":37981625603000}
+{"event":"frame","pid":23295,"frame":22,"image":0,"begin_ns":37981633787000,"end_ns":37981633885000}
+{"event":"frame","pid":23295,"frame":23,"image":1,"begin_ns":37981642155000,"end_ns":37981642253000}
+{"event":"frame","pid":23295,"frame":24,"image":2,"begin_ns":37981650500000,"end_ns":37981650596000}
+{"event":"frame","pid":23295,"frame":25,"image":0,"begin_ns":37981658819000,"end_ns":37981658918000}
+{"event":"frame","pid":23295,"frame":26,"image":1,"begin_ns":37981667484000,"end_ns":37981667585000}
+{"event":"frame","pid":23295,"frame":27,"image":2,"begin_ns":37981675439000,"end_ns":37981675764000}
+{"event":"frame","pid":23295,"frame":28,"image":0,"begin_ns":37981683768000,"end_ns":37981683855000}
+{"event":"frame","pid":23295,"frame":29,"image":1,"begin_ns":37981692167000,"end_ns":37981692252000}
+{"event":"frame","pid":23295,"frame":30,"image":2,"begin_ns":37981700428000,"end_ns":37981700513000}
+{"event":"frame","pid":23295,"frame":31,"image":0,"begin_ns":37981708955000,"end_ns":37981709057000}
+{"event":"frame","pid":23295,"frame":32,"image":1,"begin_ns":37981717200000,"end_ns":37981717337000}
+{"event":"frame","pid":23295,"frame":33,"image":2,"begin_ns":37981725557000,"end_ns":37981725644000}
+{"event":"frame","pid":23295,"frame":34,"image":0,"begin_ns":37981732426000,"end_ns":37981732519000}
+{"event":"frame","pid":23295,"frame":35,"image":1,"begin_ns":37981741647000,"end_ns":37981741745000}
+{"event":"frame","pid":23295,"frame":36,"image":2,"begin_ns":37981750713000,"end_ns":37981750806000}
+{"event":"frame","pid":23295,"frame":37,"image":0,"begin_ns":37981758844000,"end_ns":37981758932000}
+{"event":"frame","pid":23295,"frame":38,"image":1,"begin_ns":37981767032000,"end_ns":37981767137000}
+{"event":"frame","pid":23295,"frame":39,"image":2,"begin_ns":37981775656000,"end_ns":37981775749000}
+{"event":"frame","pid":23295,"frame":40,"image":0,"begin_ns":37981783930000,"end_ns":37981784038000}
+{"event":"frame","pid":23295,"frame":41,"image":1,"begin_ns":37981791919000,"end_ns":37981792016000}
+{"event":"frame","pid":23295,"frame":42,"image":2,"begin_ns":37981800735000,"end_ns":37981800884000}
+{"event":"frame","pid":23295,"frame":43,"image":0,"begin_ns":37981808877000,"end_ns":37981808971000}
+{"event":"frame","pid":23295,"frame":44,"image":1,"begin_ns":37981817369000,"end_ns":37981817467000}
+{"event":"frame","pid":23295,"frame":45,"image":2,"begin_ns":37981825239000,"end_ns":37981825340000}
+{"event":"frame","pid":23295,"frame":46,"image":0,"begin_ns":37981834084000,"end_ns":37981834182000}
+{"event":"frame","pid":23295,"frame":47,"image":1,"begin_ns":37981842617000,"end_ns":37981842714000}
+{"event":"frame","pid":23295,"frame":48,"image":2,"begin_ns":37981850633000,"end_ns":37981850813000}
+{"event":"frame","pid":23295,"frame":49,"image":0,"begin_ns":37981859069000,"end_ns":37981859195000}
+{"event":"frame","pid":23295,"frame":50,"image":1,"begin_ns":37981867455000,"end_ns":37981867569000}
+{"event":"frame","pid":23295,"frame":51,"image":2,"begin_ns":37981875335000,"end_ns":37981875437000}
+{"event":"frame","pid":23295,"frame":52,"image":0,"begin_ns":37981883652000,"end_ns":37981883763000}
+{"event":"frame","pid":23295,"frame":53,"image":1,"begin_ns":37981893033000,"end_ns":37981893177000}
+{"event":"frame","pid":23295,"frame":54,"image":2,"begin_ns":37981900267000,"end_ns":37981900369000}
+{"event":"frame","pid":23295,"frame":55,"image":0,"begin_ns":37981909186000,"end_ns":37981909362000}
+{"event":"frame","pid":23295,"frame":56,"image":1,"begin_ns":37981916983000,"end_ns":37981917085000}
+{"event":"frame","pid":23295,"frame":57,"image":2,"begin_ns":37981925891000,"end_ns":37981925990000}
+{"event":"frame","pid":23295,"frame":58,"image":0,"begin_ns":37981934109000,"end_ns":37981934206000}
+{"event":"frame","pid":23295,"frame":59,"image":1,"begin_ns":37981942462000,"end_ns":37981942563000}
+{"event":"frame","pid":23295,"frame":60,"image":2,"begin_ns":37981950827000,"end_ns":37981950915000}
+{"event":"frame","pid":23295,"frame":61,"image":0,"begin_ns":37981959132000,"end_ns":37981959228000}
+{"event":"frame","pid":23295,"frame":62,"image":1,"begin_ns":37981966935000,"end_ns":37981967027000}
+{"event":"frame","pid":23295,"frame":63,"image":2,"begin_ns":37981975922000,"end_ns":37981976007000}
+{"event":"frame","pid":23295,"frame":64,"image":0,"begin_ns":37981984099000,"end_ns":37981984198000}
+{"event":"frame","pid":23295,"frame":65,"image":1,"begin_ns":37981992483000,"end_ns":37981992609000}
+{"event":"frame","pid":23295,"frame":66,"image":2,"begin_ns":37982000805000,"end_ns":37982000941000}
+{"event":"frame","pid":23295,"frame":67,"image":0,"begin_ns":37982009137000,"end_ns":37982009245000}
+{"event":"frame","pid":23295,"frame":68,"image":1,"begin_ns":37982017483000,"end_ns":37982017590000}
+{"event":"frame","pid":23295,"frame":69,"image":2,"begin_ns":37982025826000,"end_ns":37982025930000}
+{"event":"frame","pid":23295,"frame":70,"image":0,"begin_ns":37982034219000,"end_ns":37982034317000}
+{"event":"frame","pid":23295,"frame":71,"image":1,"begin_ns":37982042652000,"end_ns":37982042799000}
+{"event":"frame","pid":23295,"frame":72,"image":2,"begin_ns":37982050831000,"end_ns":37982050942000}
+{"event":"frame","pid":23295,"frame":73,"image":0,"begin_ns":37982059246000,"end_ns":37982059368000}
+{"event":"frame","pid":23295,"frame":74,"image":1,"begin_ns":37982067571000,"end_ns":37982067674000}
+{"event":"frame","pid":23295,"frame":75,"image":2,"begin_ns":37982075887000,"end_ns":37982076076000}
+{"event":"frame","pid":23295,"frame":76,"image":0,"begin_ns":37982084229000,"end_ns":37982084339000}
+{"event":"frame","pid":23295,"frame":77,"image":1,"begin_ns":37982092569000,"end_ns":37982092773000}
+{"event":"frame","pid":23295,"frame":78,"image":2,"begin_ns":37982100386000,"end_ns":37982100512000}
+{"event":"frame","pid":23295,"frame":79,"image":0,"begin_ns":37982109524000,"end_ns":37982109690000}
+{"event":"frame","pid":23295,"frame":80,"image":1,"begin_ns":37982117574000,"end_ns":37982117699000}
+{"event":"frame","pid":23295,"frame":81,"image":2,"begin_ns":37982125948000,"end_ns":37982126084000}
+{"event":"frame","pid":23295,"frame":82,"image":0,"begin_ns":37982134281000,"end_ns":37982134398000}
+{"event":"frame","pid":23295,"frame":83,"image":1,"begin_ns":37982142700000,"end_ns":37982142805000}
+{"event":"frame","pid":23295,"frame":84,"image":2,"begin_ns":37982151022000,"end_ns":37982151144000}
+{"event":"frame","pid":23295,"frame":85,"image":0,"begin_ns":37982159491000,"end_ns":37982159573000}
+{"event":"frame","pid":23295,"frame":86,"image":1,"begin_ns":37982167655000,"end_ns":37982167825000}
+{"event":"frame","pid":23295,"frame":87,"image":2,"begin_ns":37982176022000,"end_ns":37982176141000}
+{"event":"frame","pid":23295,"frame":88,"image":0,"begin_ns":37982184360000,"end_ns":37982184461000}
+{"event":"frame","pid":23295,"frame":89,"image":1,"begin_ns":37982192721000,"end_ns":37982192861000}
+{"event":"frame","pid":23295,"frame":90,"image":2,"begin_ns":37982201037000,"end_ns":37982201135000}
+{"event":"frame","pid":23295,"frame":91,"image":0,"begin_ns":37982209500000,"end_ns":37982209604000}
+{"event":"frame","pid":23295,"frame":92,"image":1,"begin_ns":37982217675000,"end_ns":37982217756000}
+{"event":"frame","pid":23295,"frame":93,"image":2,"begin_ns":37982226082000,"end_ns":37982226169000}
+{"event":"frame","pid":23295,"frame":94,"image":0,"begin_ns":37982234392000,"end_ns":37982234500000}
+{"event":"frame","pid":23295,"frame":95,"image":1,"begin_ns":37982242832000,"end_ns":37982242932000}
+{"event":"frame","pid":23295,"frame":96,"image":2,"begin_ns":37982251111000,"end_ns":37982251208000}
+{"event":"frame","pid":23295,"frame":97,"image":0,"begin_ns":37982259517000,"end_ns":37982259611000}
+{"event":"frame","pid":23295,"frame":98,"image":1,"begin_ns":37982267803000,"end_ns":37982267906000}
+{"event":"frame","pid":23295,"frame":99,"image":2,"begin_ns":37982276305000,"end_ns":37982276419000}
+{"event":"frame","pid":23295,"frame":100,"image":0,"begin_ns":37982284689000,"end_ns":37982284819000}
+{"event":"frame","pid":23295,"frame":101,"image":1,"begin_ns":37982292995000,"end_ns":37982293107000}
+{"event":"frame","pid":23295,"frame":102,"image":2,"begin_ns":37982301206000,"end_ns":37982301348000}
+{"event":"frame","pid":23295,"frame":103,"image":0,"begin_ns":37982309994000,"end_ns":37982310146000}
+{"event":"frame","pid":23295,"frame":104,"image":1,"begin_ns":37982317891000,"end_ns":37982318007000}
+{"event":"frame","pid":23295,"frame":105,"image":2,"begin_ns":37982325364000,"end_ns":37982325467000}
+{"event":"frame","pid":23295,"frame":106,"image":0,"begin_ns":37982333286000,"end_ns":37982333417000}
+{"event":"frame","pid":23295,"frame":107,"image":1,"begin_ns":37982343184000,"end_ns":37982343378000}
+{"event":"frame","pid":23295,"frame":108,"image":2,"begin_ns":37982351233000,"end_ns":37982351418000}
+{"event":"frame","pid":23295,"frame":109,"image":0,"begin_ns":37982359710000,"end_ns":37982359881000}
+{"event":"frame","pid":23295,"frame":110,"image":1,"begin_ns":37982367801000,"end_ns":37982367923000}
+{"event":"frame","pid":23295,"frame":111,"image":2,"begin_ns":37982376426000,"end_ns":37982376637000}
+{"event":"frame","pid":23295,"frame":112,"image":0,"begin_ns":37982384499000,"end_ns":37982384568000}
+{"event":"frame","pid":23295,"frame":113,"image":1,"begin_ns":37982392171000,"end_ns":37982392341000}
+{"event":"frame","pid":23295,"frame":114,"image":2,"begin_ns":37982400341000,"end_ns":37982400450000}
+{"event":"frame","pid":23295,"frame":115,"image":0,"begin_ns":37982410452000,"end_ns":37982410615000}
+{"event":"frame","pid":23295,"frame":116,"image":1,"begin_ns":37982417703000,"end_ns":37982417860000}
+{"event":"frame","pid":23295,"frame":117,"image":2,"begin_ns":37982426428000,"end_ns":37982426569000}
+{"event":"frame","pid":23295,"frame":118,"image":0,"begin_ns":37982434558000,"end_ns":37982434647000}
+{"event":"frame","pid":23295,"frame":119,"image":1,"begin_ns":37982443092000,"end_ns":37982443211000}
+{"event":"frame","pid":23295,"frame":120,"image":2,"begin_ns":37982451241000,"end_ns":37982451391000}
+{"event":"frame","pid":23295,"frame":121,"image":0,"begin_ns":37982459725000,"end_ns":37982459857000}
+{"event":"frame","pid":23295,"frame":122,"image":1,"begin_ns":37982466891000,"end_ns":37982467169000}
+{"event":"frame","pid":23295,"frame":123,"image":2,"begin_ns":37982475323000,"end_ns":37982475613000}
+{"event":"frame","pid":23295,"frame":124,"image":0,"begin_ns":37982484064000,"end_ns":37982484192000}
+{"event":"frame","pid":23295,"frame":125,"image":1,"begin_ns":37982493137000,"end_ns":37982493302000}
+{"event":"frame","pid":23295,"frame":126,"image":2,"begin_ns":37982501321000,"end_ns":37982501525000}
+{"event":"frame","pid":23295,"frame":127,"image":0,"begin_ns":37982509791000,"end_ns":37982509962000}
+{"event":"frame","pid":23295,"frame":128,"image":1,"begin_ns":37982517310000,"end_ns":37982517461000}
+{"event":"frame","pid":23295,"frame":129,"image":2,"begin_ns":37982526503000,"end_ns":37982526660000}
+{"event":"frame","pid":23295,"frame":130,"image":0,"begin_ns":37982534356000,"end_ns":37982534466000}
+{"event":"frame","pid":23295,"frame":131,"image":1,"begin_ns":37982543222000,"end_ns":37982543373000}
+{"event":"frame","pid":23295,"frame":132,"image":2,"begin_ns":37982551442000,"end_ns":37982551578000}
+{"event":"frame","pid":23295,"frame":133,"image":0,"begin_ns":37982559768000,"end_ns":37982559901000}
+{"event":"frame","pid":23295,"frame":134,"image":1,"begin_ns":37982568171000,"end_ns":37982568321000}
+{"event":"frame","pid":23295,"frame":135,"image":2,"begin_ns":37982576544000,"end_ns":37982576661000}
+{"event":"frame","pid":23295,"frame":136,"image":0,"begin_ns":37982584838000,"end_ns":37982584981000}
+{"event":"frame","pid":23295,"frame":137,"image":1,"begin_ns":37982593127000,"end_ns":37982593277000}
+{"event":"frame","pid":23295,"frame":138,"image":2,"begin_ns":37982601621000,"end_ns":37982601725000}
+{"event":"frame","pid":23295,"frame":139,"image":0,"begin_ns":37982609977000,"end_ns":37982610111000}
+{"event":"frame","pid":23295,"frame":140,"image":1,"begin_ns":37982617351000,"end_ns":37982617579000}
+{"event":"frame","pid":23295,"frame":141,"image":2,"begin_ns":37982626720000,"end_ns":37982626829000}
+{"event":"frame","pid":23295,"frame":142,"image":0,"begin_ns":37982634364000,"end_ns":37982634429000}
+{"event":"frame","pid":23295,"frame":143,"image":1,"begin_ns":37982643366000,"end_ns":37982643510000}
+{"event":"frame","pid":23295,"frame":144,"image":2,"begin_ns":37982651497000,"end_ns":37982651660000}
+{"event":"frame","pid":23295,"frame":145,"image":0,"begin_ns":37982659599000,"end_ns":37982659724000}
+{"event":"frame","pid":23295,"frame":146,"image":1,"begin_ns":37982667940000,"end_ns":37982668228000}
+{"event":"frame","pid":23295,"frame":147,"image":2,"begin_ns":37982676592000,"end_ns":37982676732000}
+{"event":"frame","pid":23295,"frame":148,"image":0,"begin_ns":37982684944000,"end_ns":37982685044000}
+{"event":"frame","pid":23295,"frame":149,"image":1,"begin_ns":37982692210000,"end_ns":37982692315000}
+{"event":"frame","pid":23295,"frame":150,"image":2,"begin_ns":37982700707000,"end_ns":37982700885000}
+{"event":"frame","pid":23295,"frame":151,"image":0,"begin_ns":37982710228000,"end_ns":37982710399000}
+{"event":"frame","pid":23295,"frame":152,"image":1,"begin_ns":37982718157000,"end_ns":37982718252000}
+{"event":"frame","pid":23295,"frame":153,"image":2,"begin_ns":37982725351000,"end_ns":37982725498000}
+{"event":"frame","pid":23295,"frame":154,"image":0,"begin_ns":37982735943000,"end_ns":37982736185000}
+{"event":"frame","pid":23295,"frame":155,"image":1,"begin_ns":37982741821000,"end_ns":37982741921000}
+{"event":"frame","pid":23295,"frame":156,"image":2,"begin_ns":37982752124000,"end_ns":37982752272000}
+{"event":"frame","pid":23295,"frame":157,"image":0,"begin_ns":37982759955000,"end_ns":37982760189000}
+{"event":"frame","pid":23295,"frame":158,"image":1,"begin_ns":37982768457000,"end_ns":37982768657000}
+{"event":"frame","pid":23295,"frame":159,"image":2,"begin_ns":37982776788000,"end_ns":37982777042000}
+{"event":"frame","pid":23295,"frame":160,"image":0,"begin_ns":37982785225000,"end_ns":37982785475000}
+{"event":"frame","pid":23295,"frame":161,"image":1,"begin_ns":37982793411000,"end_ns":37982793619000}
+{"event":"frame","pid":23295,"frame":162,"image":2,"begin_ns":37982801687000,"end_ns":37982801892000}
+{"event":"frame","pid":23295,"frame":163,"image":0,"begin_ns":37982809862000,"end_ns":37982810093000}
+{"event":"frame","pid":23295,"frame":164,"image":1,"begin_ns":37982817590000,"end_ns":37982817807000}
+{"event":"frame","pid":23295,"frame":165,"image":2,"begin_ns":37982826533000,"end_ns":37982826754000}
+{"event":"frame","pid":23295,"frame":166,"image":0,"begin_ns":37982834221000,"end_ns":37982834357000}
+{"event":"frame","pid":23295,"frame":167,"image":1,"begin_ns":37982843562000,"end_ns":37982843726000}
+{"event":"frame","pid":23295,"frame":168,"image":2,"begin_ns":37982851668000,"end_ns":37982851833000}
+{"event":"frame","pid":23295,"frame":169,"image":0,"begin_ns":37982859907000,"end_ns":37982860058000}
+{"event":"frame","pid":23295,"frame":170,"image":1,"begin_ns":37982868176000,"end_ns":37982868299000}
+{"event":"frame","pid":23295,"frame":171,"image":2,"begin_ns":37982877003000,"end_ns":37982877215000}
+{"event":"frame","pid":23295,"frame":172,"image":0,"begin_ns":37982883663000,"end_ns":37982883782000}
+{"event":"frame","pid":23295,"frame":173,"image":1,"begin_ns":37982893914000,"end_ns":37982894168000}
+{"event":"frame","pid":23295,"frame":174,"image":2,"begin_ns":37982901077000,"end_ns":37982901261000}
+{"event":"frame","pid":23295,"frame":175,"image":0,"begin_ns":37982910352000,"end_ns":37982910511000}
+{"event":"frame","pid":23295,"frame":176,"image":1,"begin_ns":37982917702000,"end_ns":37982917883000}
+{"event":"frame","pid":23295,"frame":177,"image":2,"begin_ns":37982927096000,"end_ns":37982927354000}
+{"event":"frame","pid":23295,"frame":178,"image":0,"begin_ns":37982935174000,"end_ns":37982935355000}
+{"event":"frame","pid":23295,"frame":179,"image":1,"begin_ns":37982943288000,"end_ns":37982943536000}
+{"event":"frame","pid":23295,"frame":180,"image":2,"begin_ns":37982951903000,"end_ns":37982952009000}
+{"event":"frame","pid":23295,"frame":181,"image":0,"begin_ns":37982960402000,"end_ns":37982960568000}
+{"event":"frame","pid":23295,"frame":182,"image":1,"begin_ns":37982969050000,"end_ns":37982969387000}
+{"event":"frame","pid":23295,"frame":183,"image":2,"begin_ns":37982975511000,"end_ns":37982975604000}
+{"event":"frame","pid":23295,"frame":184,"image":0,"begin_ns":37982985448000,"end_ns":37982985670000}
+{"event":"frame","pid":23295,"frame":185,"image":1,"begin_ns":37982993424000,"end_ns":37982993585000}
+{"event":"frame","pid":23295,"frame":186,"image":2,"begin_ns":37983001795000,"end_ns":37983001910000}
+{"event":"frame","pid":23295,"frame":187,"image":0,"begin_ns":37983010148000,"end_ns":37983010263000}
+{"event":"frame","pid":23295,"frame":188,"image":1,"begin_ns":37983018646000,"end_ns":37983018733000}
+{"event":"frame","pid":23295,"frame":189,"image":2,"begin_ns":37983026490000,"end_ns":37983026656000}
+{"event":"frame","pid":23295,"frame":190,"image":0,"begin_ns":37983035392000,"end_ns":37983035478000}
+{"event":"frame","pid":23295,"frame":191,"image":1,"begin_ns":37983043187000,"end_ns":37983043362000}
+{"event":"frame","pid":23295,"frame":192,"image":2,"begin_ns":37983052304000,"end_ns":37983052585000}
+{"event":"frame","pid":23295,"frame":193,"image":0,"begin_ns":37983060322000,"end_ns":37983060477000}
+{"event":"frame","pid":23295,"frame":194,"image":1,"begin_ns":37983068812000,"end_ns":37983069083000}
+{"event":"frame","pid":23295,"frame":195,"image":2,"begin_ns":37983076540000,"end_ns":37983076773000}
+{"event":"frame","pid":23295,"frame":196,"image":0,"begin_ns":37983084574000,"end_ns":37983084905000}
+{"event":"frame","pid":23295,"frame":197,"image":1,"begin_ns":37983093287000,"end_ns":37983093487000}
+{"event":"frame","pid":23295,"frame":198,"image":2,"begin_ns":37983102240000,"end_ns":37983102391000}
+{"event":"frame","pid":23295,"frame":199,"image":0,"begin_ns":37983110438000,"end_ns":37983110560000}
+{"event":"frame","pid":23295,"frame":200,"image":1,"begin_ns":37983118632000,"end_ns":37983118740000}
+{"event":"frame","pid":23295,"frame":201,"image":2,"begin_ns":37983126726000,"end_ns":37983126890000}
+{"event":"frame","pid":23295,"frame":202,"image":0,"begin_ns":37983134373000,"end_ns":37983134500000}
+{"event":"frame","pid":23295,"frame":203,"image":1,"begin_ns":37983143024000,"end_ns":37983143091000}
+{"event":"frame","pid":23295,"frame":204,"image":2,"begin_ns":37983152185000,"end_ns":37983152271000}
+{"event":"frame","pid":23295,"frame":205,"image":0,"begin_ns":37983159643000,"end_ns":37983159717000}
+{"event":"frame","pid":23295,"frame":206,"image":1,"begin_ns":37983168843000,"end_ns":37983168926000}
+{"event":"frame","pid":23295,"frame":207,"image":2,"begin_ns":37983176300000,"end_ns":37983176373000}
+{"event":"frame","pid":23295,"frame":208,"image":0,"begin_ns":37983185535000,"end_ns":37983185629000}
+{"event":"frame","pid":23295,"frame":209,"image":1,"begin_ns":37983193013000,"end_ns":37983193086000}
+{"event":"frame","pid":23295,"frame":210,"image":2,"begin_ns":37983202280000,"end_ns":37983202380000}
+{"event":"frame","pid":23295,"frame":211,"image":0,"begin_ns":37983210311000,"end_ns":37983210389000}
+{"event":"frame","pid":23295,"frame":212,"image":1,"begin_ns":37983218761000,"end_ns":37983218850000}
+{"event":"frame","pid":23295,"frame":213,"image":2,"begin_ns":37983227052000,"end_ns":37983227148000}
+{"event":"frame","pid":23295,"frame":214,"image":0,"begin_ns":37983235441000,"end_ns":37983235524000}
+{"event":"frame","pid":23295,"frame":215,"image":1,"begin_ns":37983243128000,"end_ns":37983243221000}
+{"event":"frame","pid":23295,"frame":216,"image":2,"begin_ns":37983252278000,"end_ns":37983252398000}
+{"event":"frame","pid":23295,"frame":217,"image":0,"begin_ns":37983260557000,"end_ns":37983260692000}
+{"event":"frame","pid":23295,"frame":218,"image":1,"begin_ns":37983268720000,"end_ns":37983268881000}
+{"event":"frame","pid":23295,"frame":219,"image":2,"begin_ns":37983277108000,"end_ns":37983277186000}
+{"event":"frame","pid":23295,"frame":220,"image":0,"begin_ns":37983285455000,"end_ns":37983285605000}
+{"event":"frame","pid":23295,"frame":221,"image":1,"begin_ns":37983293776000,"end_ns":37983293861000}
+{"event":"frame","pid":23295,"frame":222,"image":2,"begin_ns":37983302219000,"end_ns":37983302331000}
+{"event":"frame","pid":23295,"frame":223,"image":0,"begin_ns":37983309667000,"end_ns":37983309741000}
+{"event":"frame","pid":23295,"frame":224,"image":1,"begin_ns":37983319052000,"end_ns":37983319170000}
+{"event":"frame","pid":23295,"frame":225,"image":2,"begin_ns":37983326336000,"end_ns":37983326453000}
+{"event":"frame","pid":23295,"frame":226,"image":0,"begin_ns":37983335752000,"end_ns":37983335922000}
+{"event":"frame","pid":23295,"frame":227,"image":1,"begin_ns":37983342972000,"end_ns":37983343081000}
+{"event":"frame","pid":23295,"frame":228,"image":2,"begin_ns":37983352440000,"end_ns":37983352566000}
+{"event":"frame","pid":23295,"frame":229,"image":0,"begin_ns":37983359688000,"end_ns":37983359795000}
+{"event":"frame","pid":23295,"frame":230,"image":1,"begin_ns":37983369123000,"end_ns":37983369214000}
+{"event":"frame","pid":23295,"frame":231,"image":2,"begin_ns":37983376335000,"end_ns":37983376422000}
+{"event":"frame","pid":23295,"frame":232,"image":0,"begin_ns":37983385829000,"end_ns":37983386085000}
+{"event":"frame","pid":23295,"frame":233,"image":1,"begin_ns":37983393816000,"end_ns":37983393911000}
+{"event":"frame","pid":23295,"frame":234,"image":2,"begin_ns":37983402302000,"end_ns":37983402404000}
+{"event":"frame","pid":23295,"frame":235,"image":0,"begin_ns":37983409741000,"end_ns":37983409846000}
+{"event":"frame","pid":23295,"frame":236,"image":1,"begin_ns":37983419199000,"end_ns":37983419353000}
+{"event":"frame","pid":23295,"frame":237,"image":2,"begin_ns":37983426570000,"end_ns":37983426674000}
+{"event":"frame","pid":23295,"frame":238,"image":0,"begin_ns":37983435790000,"end_ns":37983435861000}
+{"event":"frame","pid":23295,"frame":239,"image":1,"begin_ns":37983443112000,"end_ns":37983443239000}
+ INFO [wrapped_layer_commit] Metal app-release Stage 4: wait-thread handoffs=240 latest_value=480 observed_event=479; app CPU barrier bypassed; ready shared-event dependency retained at comp_main submission
+{"event":"frame","pid":23295,"frame":240,"image":2,"begin_ns":37983452514000,"end_ns":37983452600000}
+{"event":"result","status":"PASS","frames":240,"lost":false,"recovery_ns":0,"thermal_end":0}

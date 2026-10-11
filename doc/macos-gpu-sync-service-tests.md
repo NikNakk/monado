@@ -1,5 +1,5 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
-# Headset-free Monado GPU service tests — 2026-10-11
+# Monado GPU service and headset tests — 2026-10-11
 
 The actual native Metal OpenXR → IPC/XPC → Vulkan/MoltenVK compositor path now
 runs without a headset. Missing-signal and client-kill recovery tests pass,
@@ -8,7 +8,8 @@ quarantine. The initial [first-run checkpoint](macos-gpu-sync-first-run.md) is
 historical; this follow-up supersedes its service-startup and recovery findings.
 Full M1/M2 completion is still not claimed: device-loss/in-flight teardown,
 per-client allocation limits, production deadline policy, thermal stress and
-physical presentation remain outstanding.
+sustained physical presentation remain outstanding. The short hardware follow-up
+below now verifies actual PS VR2 presentation during both fault scenarios.
 
 ## Implementation and reproducibility
 
@@ -120,7 +121,8 @@ replacement latches; disconnect recovery to first replacement frame was
 170.623 ms with 9 fresh healthy frames and 44 replacement latches. These
 repeats retain the same failure quarantine behavior. Their complete
 traces are retained in `final-missing` and `final-disconnect`.
-No headset run, Linux CI run, Chromium change or Wine/DXMT change was performed.
+These offscreen runs did not include the headset. The subsequent hardware results
+are recorded below. No Linux CI run, Chromium change or Wine/DXMT change was performed.
 
 ## Normal-path comparison
 
@@ -198,13 +200,13 @@ Therefore this comparison supports measured low-load costs and throughput,
 | M2.6 | NOT VERIFIED | Other teardown waits/device-loss lifetime remain unaudited/unproven. |
 | M2.7 | NOT VERIFIED | Global caps tested; per-client/pre-allocation limits incomplete. |
 | M2.8 | PASS | Replacement renders in same healthy service after timeout and client kill. |
-| M2.9 | PASS | Healthy client latched during both failure/recovery intervals; offscreen presentation only. |
+| M2.9 | PASS | Healthy client latched offscreen and physically presented during both failure/recovery intervals. |
 | M2.10 | NOT VERIFIED | Service A–B–B–A costs recorded; phase/telemetry limitations prevent full non-regression conclusion. |
 | M2.11 | PASS | Available deterministic native/mock/service tests pass; hardware tests listed below. |
 | M2.12 | PASS | Commands, source scope, traces, timing and criteria documented. |
 
-PASS applies to tested native/offscreen paths, not arbitrary malicious producers,
-physical display presentation or device loss. The global cap and no-future-wait
+PASS applies to the tested native/offscreen and short PS VR2 service paths,
+not arbitrary malicious producers, sustained presentation or device loss. The global cap and no-future-wait
 contract do not authorize premature reclamation when completion never arrives.
 
 ## Remaining work before Chromium or Wine
@@ -218,12 +220,78 @@ contract do not authorize premature reclamation when completion never arrives.
 4. Repeat service timing with controlled submission phase, complete begin/end
    telemetry and optional supported power counters; quantify GPU completion
    separately from delayed CPU observation, including sustained-load resilience.
-5. User-run PS VR2 native Metal regression: normal acquire/release/presentation,
-   missing-signal overlay, killed overlay, replacement and healthy concurrent
-   presentation. Record tested commit and physical output interruptions. The
-   headset is connected, but no agent-owned hardware run was started.
+5. User-worn PS VR2 visual regression and sustained-load validation. Short automated
+   acquire/release, timeout, kill, replacement and concurrent physical presentation
+   checks now pass; visual comfort and long-session resilience remain unverified.
 
 Keep the headset-free suites as routine regression coverage. Physical runs
 should verify the presentation boundary rather than replacing these tests.
 Chromium/Dawn/ANGLE and genuine x86-64 Wine/DXMT work remain deferred until
 separately authorized.
+
+## PS VR2 hardware follow-up — 2026-10-11
+
+Tested HEAD: **`9feaaf70b`**, synchronization implementation **`b09b0c295`**,
+plus the uncommitted `--headset` runner change and the pre-existing integration
+working tree. Exact HEAD and complete working diff are retained in
+[macos-gpu-headset-20261011](results/macos-gpu-headset-20261011/). The hardware
+run was explicitly requested by the user. No further production synchronization
+change was required to pass these tests.
+
+The physical target detected PS VR2 at **4000×2040, 120 Hz**, using the normal
+CA/Metal presentation path. The runner uses `SIMULATED_ENABLE=0`, disables forced
+`debug_image`, keeps camera streams off, prevents display sleep, and uses the
+service compositor (`XRT_MACOS_CLIENT_COMPOSITOR=0`). This tests the native Metal
+client → XPC/IPC → Vulkan → Metal display path; it does not test client-hosted
+Game Mode compositing. Each client clears a 64×64 GPU texture and submits a quad.
+Diagnostic pixel readbacks and per-image logging are enabled, so this is a
+correctness run rather than a production performance comparison.
+
+The older installed LaunchAgent was temporarily removed to release USB ownership.
+Both isolated services were then run serially with finite deadlines. A finally
+block restored the original registration and started its original executable;
+launchctl confirms it is running again. Its plist and environment were not
+modified. `run-headset-tests.py` records that orchestration; invoking `--headset`
+directly requires the operator to ensure exclusive USB ownership and restore
+any installed service they stop. The default CTests remain headset-free.
+
+| Check | Missing signal | Killed client with missing signal |
+|---|---|---|
+| Result | PASS | PASS |
+| Healthy / replacement client frames | 240 / 60 | 240 / 60 |
+| Injection to session loss / replacement first frame | 501.015 ms | 164.964 ms |
+| Fresh healthy latches during fault interval | 60 | 19 |
+| Fresh healthy frames physically presented inside interval | 58 | 18 |
+| Maximum gap between those physical frames | 8.349 ms | 8.342 ms |
+| Replacement fresh frames physically presented | 56 | 58 |
+| Successful presentation GPU completions | 240 | 242 |
+| Presentation GPU errors | 0 | 0 |
+| Both-eye matching GPU output samples | 5 | 5 |
+| Service starts / failed swapchain reclaimed | 1 / no | 1 / no |
+
+Physical counts join fresh client latches to the same compositor frame ID in
+CAMetalDrawable presentation callbacks, requiring a nonzero presented timestamp.
+For the healthy fault-window count, the presented timestamp must also fall inside
+the fault interval. Zero-timestamp startup callbacks are excluded (two per run).
+Each presentation command buffer completed with status 4 and a shared-event wait;
+none used a no-event fallback. The suppressed value 22 was never submitted as a
+producer Vulkan dependency. Failed storage stayed quarantined; healthy and
+replacement storage was reclaimed after completion.
+
+After discarding the first 30 nonzero presentations, cadence p50/p95/p99/max
+was **8.342 / 8.343 / 16.683 / 41.707 ms** for missing-signal and
+**8.342 / 8.343 / 8.343 / 8.349 ms** for disconnect. The 41.707 ms gap lies outside
+the bounded fault interval, between compositor frames 193 and 194. Startup also
+had a 25.025 ms gap in the first run. These short runs therefore establish healthy
+progress through failure and recovery, not perfect presentation cadence.
+
+All client thermal records begin/end at nominal state 0, with Low Power Mode
+false. No GPU power/frequency samples or sustained thermal workload were collected.
+The user was **not wearing the headset**, so visual appearance, moving-head
+judder and comfort are not verified. No in-flight producer kill/device-loss claim
+is added: the kill occurs after the deliberately omitted completion signal.
+
+The build passed. The default offscreen service suites passed **2/2 (8.97 s)**
+after adding the hardware option; the previous full **65/65** result remains the
+latest full-suite run. Raw traces, client/service logs, machine summaries,
+build output, restored-service state and working-tree/source scope are retained.
