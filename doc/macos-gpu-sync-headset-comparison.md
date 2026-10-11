@@ -1,6 +1,8 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # Matched PS VR2 presentation comparison — 2026-10-11
 
+Current native milestone status is recorded in the [M1–M2 completion report](macos-gpu-sync-completion.md). The results below remain evidence for their recorded source versions.
+
 The synchronization fixes show **no clear slowdown in typical presentation** in
 this native service workload. Rare presentation gaps were slightly worse in the
 modified samples: 39 long intervals versus 33, with a 33.367 ms maximum versus

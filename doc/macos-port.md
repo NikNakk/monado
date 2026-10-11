@@ -941,3 +941,16 @@ Sense checkout. Eight new positions support 2x lower-camera transfer with a
 half-pixel principal-point offset. The opt-in runtime mapping now has a positive
 camera-only and blended-scene visual results; full-field coverage, measured alignment and latency
 remain work (2026-10-08).
+
+### Native GPU synchronization M1–M2 completion — 2026-10-11
+
+The native milestones now include the 6 ms readiness cutoff, per-client/global
+pre-import storage budgets, finite consumer waits, bounded display-link/GPU
+teardown and real in-flight producer/consumer lifetime tests. Full integration
+CTest passes 70/70; repeated new GPU cases pass 30/30; sustained concurrent
+stress verifies 24,000 transfers over 92 seconds. Real service quota exhaustion
+retains seven failed clients, rejects additional imports, preserves healthy
+rendering and admits replacement without a restart. Normal-path costs are
+quantified in the [completion report](macos-gpu-sync-completion.md), with every
+M1/M2 criterion and hardware/thermal limitations. Chromium and Wine development
+remain deferred pending separate authorization.

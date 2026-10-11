@@ -1,6 +1,8 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # macOS GPU synchronization: first-run checkpoint, 2026-10-11
 
+Current native milestone status is recorded in the [M1–M2 completion report](macos-gpu-sync-completion.md). The results below remain evidence for their recorded source versions.
+
 This is the historical first checkpoint. The subsequent
 [headset-free service follow-up](macos-gpu-sync-service-tests.md) supersedes its
 service-startup, recovery and performance findings.

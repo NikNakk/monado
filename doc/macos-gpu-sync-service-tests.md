@@ -1,6 +1,8 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # Monado GPU service and headset tests — 2026-10-11
 
+Current native milestone status is recorded in the [M1–M2 completion report](macos-gpu-sync-completion.md). The results below remain evidence for their recorded source versions.
+
 The actual native Metal OpenXR → IPC/XPC → Vulkan/MoltenVK compositor path now
 runs without a headset. Missing-signal and client-kill recovery tests pass,
 including concurrent healthy rendering, replacement-client rendering and
@@ -178,7 +180,7 @@ samples were collected. No Game Mode or priority workaround was enabled.
 Therefore this comparison supports measured low-load costs and throughput,
 **not a thermal-controlled end-to-end performance guarantee**.
 
-## Current exit criteria
+## Exit criteria at this checkpoint (superseded)
 
 | Criterion | Status | Current evidence or remaining limit |
 |---|---|---|

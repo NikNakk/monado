@@ -371,3 +371,16 @@ application validation of integrated Sense 6DoF. This is a historical milestone:
 the October 5 profile/reacquisition work and October 8 confirmation of 10–20
 minute game sessions supersede its initial reliability status.
 See the [application evidence](macos-pssense-6dof-integration.md#first-non-test-application-openbrush-2026-10-04).
+
+### Native GPU synchronization M1–M2 completion — 2026-10-11
+
+The native milestones now include the 6 ms readiness cutoff, per-client/global
+pre-import storage budgets, finite consumer waits, bounded display-link/GPU
+teardown and real in-flight producer/consumer lifetime tests. Full integration
+CTest passes 70/70; repeated new GPU cases pass 30/30; sustained concurrent
+stress verifies 24,000 transfers over 92 seconds. Real service quota exhaustion
+retains seven failed clients, rejects additional imports, preserves healthy
+rendering and admits replacement without a restart. Normal-path costs are
+quantified in the [completion report](macos-gpu-sync-completion.md), with every
+M1/M2 criterion and hardware/thermal limitations. Chromium and Wine development
+remain deferred pending separate authorization.
