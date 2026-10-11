@@ -470,6 +470,11 @@ See [the matched hardware comparison](macos-gpu-sync-headset-comparison.md).
 
 ### Native GPU synchronization M1–M2 completion — 2026-10-11
 
+The allocation-estimate review follow-up now sums every requested mip level and
+rounds compressed dimensions to whole blocks before admission. Its three new
+regression cases and all 68 native CTests pass; raw `doc/results/` captures are
+ignored by Git. See the [completion report](macos-gpu-sync-completion.md).
+
 The native milestones now include the 6 ms readiness cutoff, per-client/global
 pre-import storage budgets, finite consumer waits, bounded display-link/GPU
 teardown and real in-flight producer/consumer lifetime tests. Full integration

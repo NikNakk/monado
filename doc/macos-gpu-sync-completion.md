@@ -43,6 +43,17 @@ dependency is rejected, rather than leaking its slot, references and image
 claims; `cd3046bae` retires a source image behind a CPU Vulkan wait after a
 Metal command-buffer error, rather than pinning it.
 
+Allocation-estimate review follow-up (2026-10-11): skinny mip chains can approach
+2× their base level, and compressed images require whole blocks in each
+dimension, including their small mip tails. Reservations now sum the requested
+levels before applying layer/image counts, preserving checked arithmetic and
+actual-size reconciliation. Three new production-code regression cases cover
+both orientations, partial blocks, mip tails, invalid counts, and successful
+admission after rejection. The incremental build and all **68 native CTests
+PASS** with host GPU/XPC access (16.31 s); the launchd service suites remain
+opt-in and were not run for this allocation-only follow-up. No headset run was
+needed. Raw test output remains local and untracked.
+
 ## What changed to close the gaps
 
 **Readiness policy.** Producer GPU readiness must be observed by predicted
@@ -73,9 +84,11 @@ pretend that a missing producer finished.
 device-local heap / 64 swapchains**; the service has a **¾ of the heap / 256
 swapchain** tracked-storage bound. Before a device is known these fall back to
 512 MiB and 1 GiB, the fixed values when this evidence was recorded.
-Admission reserves estimated image storage before create/import, from per-format
-texel sizes (16 bytes for unlisted formats), including
-supplied native storage sizes and checked dimensions/overflow. Successful
+Admission reserves estimated image storage before create/import, summing each
+requested mip level with dimensions rounded to whole blocks for compressed
+formats (16 bytes per texel for unlisted formats), then applying array, face,
+sample and image counts. Supplied native storage sizes remain a lower bound;
+dimensions, mip counts and overflow are checked. Successful
 allocation reconciles the reservation against Vulkan memory requirements and
 transfers the charge to the tracker. Failed allocation rolls back. Quarantine
 keeps the client's charge and budget object alive after client destruction;
@@ -256,8 +269,12 @@ loss **SKIP**; actual thermally throttled execution **NOT VERIFIED**; Linux CI
 
 Run `cmake --build build/arm64 --parallel`, then
 `ctest --test-dir build/arm64 --output-on-failure` with normal host GPU/XPC access.
-The default suite includes the native GPU faults, production readiness policy
-and real headset-free service missing/disconnect/budget tests.
+The default suite includes the native GPU faults and production readiness policy.
+The launchd-hosted, headset-free service missing/disconnect/budget tests are
+registered only with `XRT_MACOS_SERVICE_GPU_TESTS=ON` and
+`XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=ON`; both require host GPU/XPC access.
+Raw captures under `doc/results/` are ignored by Git; retain concise reports
+in the tracked documentation.
 
 ```sh
 python3 scripts/macos/run-gpu-sync.py --output <new-directory> \

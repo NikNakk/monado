@@ -5,6 +5,7 @@
 #include "util/comp_swapchain_gpu_reuse.h"
 #include "util/comp_swapchain_gpu_reuse_internal.h"
 #include "util/comp_semaphore.h"
+#include <algorithm>
 #include <map>
 #include <vector>
 
@@ -347,7 +348,7 @@ TEST_CASE("allocation limits scale with the device-local heap")
 	info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
 	REQUIRE(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_SUCCESS);
 	comp_gpu_client_budget_finish();
-	// 16x MSAA with a mip chain is about 9.9 GiB: over the per-client limit.
+	// 16x MSAA with two mip levels is about 8.2 GiB: over the per-client limit.
 	info.sample_count = 16;
 	info.mip_count = 2;
 	CHECK(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_ERROR_ALLOCATION);
@@ -362,6 +363,90 @@ TEST_CASE("allocation limits scale with the device-local heap")
 	auto *base = &sc.base.base;
 	xrt_swapchain_reference(&base, nullptr);
 	comp_swapchain_gpu_reuse_collect(&device.vk, false);
+	device.vk.device_memory_props.memoryHeapCount = 0;
+	comp_swapchain_gpu_reuse_note_device(&device.vk);
+}
+
+
+TEST_CASE("pre-allocation budgets include every level of a skinny mip chain")
+{
+	Device device;
+	comp_swapchain_gpu_reuse_note_device(&device.vk);
+	auto *budget = comp_gpu_client_budget_create();
+	xrt_swapchain_create_info info{};
+	info.width = 16384;
+	info.height = 1;
+	info.array_size = 1200;
+	info.face_count = info.sample_count = 1;
+	info.mip_count = 15;
+	info.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+	// Two images contain 629126400 bytes of texels, above the 512 MiB limit.
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 2, nullptr) == XRT_ERROR_ALLOCATION);
+	comp_gpu_client_budget_finish();
+	// Both orientations must count the full chain, not a 1.5x approximation.
+	std::swap(info.width, info.height);
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 2, nullptr) == XRT_ERROR_ALLOCATION);
+	comp_gpu_client_budget_finish();
+	// A single level is smaller and should still be admitted after rejection.
+	info.mip_count = 1;
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 2, nullptr) == XRT_SUCCESS);
+	comp_gpu_client_budget_finish();
+	comp_gpu_client_budget_destroy(&budget);
+}
+
+TEST_CASE("pre-allocation budgets round compressed dimensions to full blocks")
+{
+	Device device;
+	comp_swapchain_gpu_reuse_note_device(&device.vk);
+	auto *budget = comp_gpu_client_budget_create();
+	xrt_swapchain_create_info info{};
+	info.width = 16384;
+	info.height = 1;
+	info.array_size = 2048;
+	info.face_count = info.sample_count = info.mip_count = 1;
+	info.format = VK_FORMAT_BC7_UNORM_BLOCK;
+	// Height 1 still uses a full block row: eight images contain 1 GiB.
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 8, nullptr) == XRT_ERROR_ALLOCATION);
+	comp_gpu_client_budget_finish();
+	std::swap(info.width, info.height);
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 8, nullptr) == XRT_ERROR_ALLOCATION);
+	comp_gpu_client_budget_finish();
+	info.width = info.height = 4;
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 8, nullptr) == XRT_SUCCESS);
+	comp_gpu_client_budget_finish();
+	comp_gpu_client_budget_destroy(&budget);
+}
+
+TEST_CASE("pre-allocation budgets count compressed mip tails and partial blocks")
+{
+	Device device;
+	// A 1 MiB heap gives a 512 KiB client limit.
+	device.vk.device_memory_props.memoryHeapCount = 1;
+	device.vk.device_memory_props.memoryHeaps[0].size = 1024 * 1024;
+	device.vk.device_memory_props.memoryHeaps[0].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
+	comp_swapchain_gpu_reuse_note_device(&device.vk);
+	auto *budget = comp_gpu_client_budget_create();
+	xrt_swapchain_create_info info{};
+	info.width = info.height = 5;
+	info.array_size = 2048;
+	info.face_count = info.sample_count = 1;
+	info.mip_count = 3;
+	info.format = VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
+	// 5x5, 2x2 and 1x1 need 4+1+1 blocks: 48*2048*3 +192 KiB fits.
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_SUCCESS);
+	comp_gpu_client_budget_finish();
+	// BC7 doubles the block size, exceeding the same limit.
+	info.format = VK_FORMAT_BC7_SRGB_BLOCK;
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_ERROR_ALLOCATION);
+	comp_gpu_client_budget_finish();
+	// Reject invalid mip counts without leaving a reservation behind.
+	info.mip_count = UINT32_MAX;
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_ERROR_ALLOCATION);
+	comp_gpu_client_budget_finish();
+	info.mip_count = 0;
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_ERROR_ALLOCATION);
+	comp_gpu_client_budget_finish();
+	comp_gpu_client_budget_destroy(&budget);
 	device.vk.device_memory_props.memoryHeapCount = 0;
 	comp_swapchain_gpu_reuse_note_device(&device.vk);
 }
