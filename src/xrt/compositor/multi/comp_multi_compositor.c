@@ -233,6 +233,56 @@ layer_gpu_reuse_release(struct multi_layer_entry *layer)
 	}
 }
 
+#ifdef XRT_OS_OSX
+static xrt_result_t
+layer_gpu_reuse_set_producer(struct multi_layer_entry *layer, struct xrt_compositor_semaphore *xcsem, uint64_t value)
+{
+	const struct xrt_layer_data *data = &layer->data;
+	xrt_result_t ret = XRT_SUCCESS;
+
+	switch (data->type) {
+	case XRT_LAYER_PROJECTION:
+		for (uint32_t i = 0; i < data->view_count && ret == XRT_SUCCESS; i++) {
+			ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[i], data->proj.v[i].sub.image_index,
+			                                            xcsem, value);
+		}
+		break;
+	case XRT_LAYER_PROJECTION_DEPTH:
+		for (uint32_t i = 0; i < data->view_count && ret == XRT_SUCCESS; i++) {
+			ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[i], data->depth.v[i].sub.image_index,
+			                                            xcsem, value);
+			if (ret == XRT_SUCCESS) {
+				ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[i + data->view_count],
+				                                            data->depth.d[i].sub.image_index, xcsem,
+				                                            value);
+			}
+		}
+		break;
+	case XRT_LAYER_QUAD:
+		ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->quad.sub.image_index, xcsem, value);
+		break;
+	case XRT_LAYER_CUBE:
+		ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->cube.sub.image_index, xcsem, value);
+		break;
+	case XRT_LAYER_CYLINDER:
+		ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->cylinder.sub.image_index, xcsem,
+		                                            value);
+		break;
+	case XRT_LAYER_EQUIRECT1:
+		ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->equirect1.sub.image_index, xcsem,
+		                                            value);
+		break;
+	case XRT_LAYER_EQUIRECT2:
+		ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->equirect2.sub.image_index, xcsem,
+		                                            value);
+		break;
+	case XRT_LAYER_PASSTHROUGH: break;
+	}
+
+	return ret;
+}
+#endif
+
 /*!
  * Clear a slot, need to have the list_and_timing_lock held.
  */
@@ -1209,35 +1259,17 @@ multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 
 #ifdef XRT_OS_OSX
 	for (uint32_t i = 0; i < mc->progress.layer_count; i++) {
-		struct multi_layer_entry *layer = &mc->progress.layers[i];
-		const struct xrt_layer_data *data = &layer->data;
-		uint32_t count = data->type == XRT_LAYER_PROJECTION || data->type == XRT_LAYER_PROJECTION_DEPTH
-		                     ? data->view_count
-		                     : 1;
-		for (uint32_t v = 0; v < count; v++) {
-			uint32_t index;
-			switch (data->type) {
-			case XRT_LAYER_PROJECTION: index = data->proj.v[v].sub.image_index; break;
-			case XRT_LAYER_PROJECTION_DEPTH: index = data->depth.v[v].sub.image_index; break;
-			case XRT_LAYER_QUAD: index = data->quad.sub.image_index; break;
-			case XRT_LAYER_CUBE: index = data->cube.sub.image_index; break;
-			case XRT_LAYER_CYLINDER: index = data->cylinder.sub.image_index; break;
-			case XRT_LAYER_EQUIRECT1: index = data->equirect1.sub.image_index; break;
-			case XRT_LAYER_EQUIRECT2: index = data->equirect2.sub.image_index; break;
-			case XRT_LAYER_PASSTHROUGH: continue;
-			default: return XRT_ERROR_INVALID_ARGUMENT;
-			}
-			xrt_result_t ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[v], index, xcsem, value);
-			if (ret != XRT_SUCCESS) {
-				return ret;
-			}
-			if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
-				ret = comp_swapchain_gpu_reuse_set_producer(
-				    layer->xscs[v + count], data->depth.d[v].sub.image_index, xcsem, value);
-				if (ret != XRT_SUCCESS) {
-					return ret;
-				}
-			}
+		xrt_result_t ret = layer_gpu_reuse_set_producer(&mc->progress.layers[i], xcsem, value);
+		if (ret != XRT_SUCCESS) {
+			/*
+			 * Drop the frame. This releases its consumer claims and swapchain
+			 * references, so the next layer_begin starts from an empty slot.
+			 * The wait thread is idle here: layer_begin waited for it.
+			 */
+			os_mutex_lock(&mc->msc->list_and_timing_lock);
+			slot_clear_locked(mc, &mc->progress);
+			os_mutex_unlock(&mc->msc->list_and_timing_lock);
+			return ret;
 		}
 	}
 #endif
