@@ -3242,3 +3242,25 @@ hash-verified. Headset display availability requires user confirmation before
 retrying. [Evidence](results/openvr-owned-trace-20261011/README.md) retains
 fixture results and failure/restoration records. Pose correction remains off;
 no graphics synchronization/default or hardened-DXMT change was made.
+
+## Native GPU synchronization fault-isolation hardware check — 2026-10-11
+
+At tested HEAD `8ba2bf496` plus the recorded integration working tree, both native
+service fault suites passed on PS VR2 at 4000×2040 / 120 Hz. Missing-signal session
+loss occurred at 501.015 ms; killing the faulty overlay allowed a replacement
+first frame at 164.964 ms. Fresh healthy physical frames continued within both
+fault intervals, with maximum gaps 8.349 / 8.342 ms. The first run separately
+contains a 41.707 ms presentation gap between frames 193 and 194 outside the fault
+interval; this evidence does not resolve residual stalls. Diagnostic readback
+and per-image logging were enabled, so it is not a pacing benchmark. The user was
+not wearing the headset. See [full evidence and scope](macos-gpu-sync-service-tests.md#ps-vr2-hardware-follow-up--2026-10-11).
+
+### Matched native GPU synchronization presentation comparison — 2026-10-11
+
+Four 7,200-frame PS VR2 A–B–B–A runs with diagnostic readbacks/per-image logging
+disabled show similar ordinary cadence (~119.5 Hz) and slightly lower median
+frame-to-display latency with the fixes. Rare gaps were slightly worse in the
+modified samples: 39 versus 33 long intervals, maximum 33 ms versus 25 ms.
+Background activity varied; no causal or strict tail non-regression conclusion
+is established. Current sources/build and the installed service were restored.
+See [the matched hardware comparison](macos-gpu-sync-headset-comparison.md).
