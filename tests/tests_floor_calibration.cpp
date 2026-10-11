@@ -10,6 +10,7 @@
 #include "xrt/xrt_session.h"
 #include "xrt/xrt_tracking.h"
 #include "math/m_api.h"
+#include "os/os_threading.h"
 #include "util/u_floor_calibration.h"
 #include "b_space_overseer.h"
 
@@ -334,4 +335,58 @@ TEST_CASE("Stage recenter long press fires once and resets on release or disconn
 	CHECK_FALSE(u_stage_recenter_hold_update(&hold, false, 2001, 1000));
 	CHECK_FALSE(u_stage_recenter_hold_update(&hold, true, 3000, 1000));
 	CHECK(u_stage_recenter_hold_update(&hold, true, 4000, 1000));
+}
+
+namespace {
+struct os_mutex *g_probe_lock;
+bool g_held_in_update;
+bool g_held_in_pose;
+
+bool
+probe_held()
+{
+	if (os_mutex_trylock(g_probe_lock) != 0) {
+		return true;
+	}
+	os_mutex_unlock(g_probe_lock);
+	return false;
+}
+} // namespace
+
+TEST_CASE("Floor calibration holds the input lock only around head input updates")
+{
+	FakeHead head = {};
+	init_fake_head(head);
+	head.base.update_inputs = [](struct xrt_device *xdev) {
+		g_held_in_update = probe_held();
+		return fake_update_inputs(xdev);
+	};
+	head.base.get_tracked_pose = [](struct xrt_device *xdev, enum xrt_input_name name, int64_t at,
+	                                struct xrt_space_relation *out) {
+		g_held_in_pose = probe_held();
+		return fake_get_tracked_pose(xdev, name, at, out);
+	};
+	struct xrt_device *xdevs[] = {&head.base};
+	struct xrt_session_event_sink sink = {null_push};
+	struct b_space_overseer *uso = b_space_overseer_create(&sink);
+	struct xrt_pose identity = XRT_POSE_IDENTITY;
+	b_space_overseer_legacy_setup(uso, xdevs, 1, &head.base, &identity, false, true);
+	auto *xso = reinterpret_cast<struct xrt_space_overseer *>(uso);
+
+	struct os_mutex lock;
+	REQUIRE(os_mutex_init(&lock) == 0);
+	g_probe_lock = &lock;
+	struct u_floor_calibration fc;
+	u_floor_calibration_init(&fc, 1.6f);
+	fc.input_lock = &lock;
+	g_held_in_update = false;
+	g_held_in_pose = true;
+	CHECK_FALSE(u_floor_calibration_poll(&fc, xso, &head.base, 1));
+	CHECK(g_held_in_update);
+	CHECK_FALSE(g_held_in_pose);
+	CHECK_FALSE(probe_held());
+
+	os_mutex_destroy(&lock);
+	g_probe_lock = nullptr;
+	xrt_space_overseer_destroy(&xso);
 }

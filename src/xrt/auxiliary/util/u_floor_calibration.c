@@ -11,6 +11,7 @@
 
 #include "math/m_api.h"
 #include "math/m_vec3.h"
+#include "os/os_threading.h"
 #include "util/u_logging.h"
 
 #include "util/u_floor_calibration.h"
@@ -91,12 +92,8 @@ u_floor_calibration_push(struct u_floor_calibration *fc,
 }
 
 static bool
-read_worn(struct xrt_device *head)
+read_worn_locked(struct xrt_device *head)
 {
-	if (!head->supported.presence) {
-		return true; // Cannot tell; rely on tracked, level and steady.
-	}
-
 	if (xrt_device_update_inputs(head) != XRT_SUCCESS) {
 		return false;
 	}
@@ -110,6 +107,22 @@ read_worn(struct xrt_device *head)
 	return true;
 }
 
+static bool
+read_worn(struct u_floor_calibration *fc, struct xrt_device *head)
+{
+	if (!head->supported.presence) {
+		return true; // Cannot tell; rely on tracked, level and steady.
+	}
+
+	if (fc->input_lock == NULL) {
+		return read_worn_locked(head);
+	}
+	os_mutex_lock(fc->input_lock);
+	bool worn = read_worn_locked(head);
+	os_mutex_unlock(fc->input_lock);
+	return worn;
+}
+
 bool
 u_floor_calibration_poll(struct u_floor_calibration *fc,
                          struct xrt_space_overseer *xso,
@@ -121,7 +134,7 @@ u_floor_calibration_poll(struct u_floor_calibration *fc,
 	}
 
 	struct u_floor_calibration_sample sample = {.timestamp_ns = now_ns};
-	sample.worn = read_worn(head);
+	sample.worn = read_worn(fc, head);
 
 	// Where the head's poses are reported, then the head pose within that.
 	struct xrt_pose identity = XRT_POSE_IDENTITY;

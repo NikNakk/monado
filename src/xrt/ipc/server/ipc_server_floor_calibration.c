@@ -21,6 +21,7 @@
 #include "server/ipc_server.h"
 
 #include <math.h>
+#include <string.h>
 
 
 DEBUG_GET_ONCE_FLOAT_OPTION(floor_eye_height, "XRT_FLOOR_EYE_HEIGHT_M", 0.0f)
@@ -37,13 +38,82 @@ struct ipc_server_floor_calibration
 	struct os_thread_helper oth;
 	struct u_floor_calibration fc;
 	struct ipc_server *server;
+	//! Right-hand controller and its Options input, refreshed every poll.
 	struct xrt_device *right;
+	int32_t options_index;
+	bool right_logged;
 	struct u_stage_recenter_hold hold;
 	int64_t hold_ns;
 	bool calibrate;
+	bool recenter;
 	struct xrt_space_overseer *xso;
 	struct xrt_device *head;
 };
+
+/*!
+ * Look up the right-hand controller each poll, so a role assigned after
+ * start-up is picked up, and say once whenever the gesture becomes available
+ * or unavailable.
+ */
+static void
+update_right_controller(struct ipc_server_floor_calibration *fcal)
+{
+	struct xrt_system_devices *xsysd = fcal->server->xsysd;
+	struct xrt_system_roles roles = XRT_SYSTEM_ROLES_INIT;
+	struct xrt_device *right = NULL;
+	if (xrt_system_devices_get_roles(xsysd, &roles) == XRT_SUCCESS && roles.right >= 0 &&
+	    (uint32_t)roles.right < xsysd->static_xdev_count) {
+		right = xsysd->static_xdevs[roles.right];
+	}
+	if (right == fcal->right && fcal->right_logged) {
+		return;
+	}
+
+	fcal->right = right;
+	fcal->right_logged = true;
+	fcal->options_index = -1;
+	for (uint32_t i = 0; right != NULL && i < right->input_count; i++) {
+		if (right->inputs[i].name == XRT_INPUT_PSSENSE_OPTIONS_CLICK) {
+			fcal->options_index = (int32_t)i;
+		}
+	}
+	memset(&fcal->hold, 0, sizeof(fcal->hold));
+
+	if (right == NULL) {
+		U_LOG_W("STAGE recenter: no right-hand controller assigned; the gesture is unavailable until one is.");
+	} else if (fcal->options_index < 0) {
+		U_LOG_W("STAGE recenter: right-hand controller '%s' has no Sense Options button; gesture unavailable.",
+		        right->str);
+	} else {
+		U_LOG_I("STAGE recenter: hold Options on '%s' for %lld ms to recentre.", right->str,
+		        (long long)(fcal->hold_ns / U_TIME_1MS_IN_NS));
+	}
+}
+
+/*!
+ * Whether the right controller's Options button is held. The input lock is
+ * held only while the inputs are updated and read. Sets @p out_now_ns to the
+ * time of that read.
+ */
+static bool
+read_options_pressed(struct ipc_server_floor_calibration *fcal, int64_t *out_now_ns)
+{
+	if (fcal->right == NULL || fcal->options_index < 0) {
+		return false;
+	}
+
+	bool pressed = false;
+	os_mutex_lock(&fcal->server->input_lock);
+	if (xrt_device_update_inputs(fcal->right) == XRT_SUCCESS) {
+		int64_t now_ns = os_monotonic_get_ns();
+		const struct xrt_input *input = &fcal->right->inputs[fcal->options_index];
+		pressed = input->active && input->value.boolean && input->timestamp <= now_ns + 100 * U_TIME_1MS_IN_NS &&
+		          now_ns - input->timestamp < U_TIME_1S_IN_NS;
+		*out_now_ns = now_ns;
+	}
+	os_mutex_unlock(&fcal->server->input_lock);
+	return pressed;
+}
 
 static void *
 run_floor_calibration(void *ptr)
@@ -61,23 +131,14 @@ run_floor_calibration(void *ptr)
 		os_thread_helper_unlock(&fcal->oth);
 
 		int64_t now_ns = os_monotonic_get_ns();
-		os_mutex_lock(&fcal->server->input_lock);
 		if (fcal->calibrate) {
 			fcal->calibrate = !u_floor_calibration_poll(&fcal->fc, fcal->xso, fcal->head, now_ns);
 		}
 		bool pressed = false;
-		if (fcal->right != NULL && xrt_device_update_inputs(fcal->right) == XRT_SUCCESS) {
-			now_ns = os_monotonic_get_ns();
-			for (uint32_t i = 0; i < fcal->right->input_count; i++) {
-				const struct xrt_input *input = &fcal->right->inputs[i];
-				if (input->name == XRT_INPUT_PSSENSE_OPTIONS_CLICK) {
-					pressed = input->active && input->value.boolean &&
-					          input->timestamp <= now_ns + 100 * U_TIME_1MS_IN_NS &&
-					          now_ns - input->timestamp < U_TIME_1S_IN_NS;
-				}
-			}
+		if (fcal->recenter) {
+			update_right_controller(fcal);
+			pressed = read_options_pressed(fcal, &now_ns);
 		}
-		os_mutex_unlock(&fcal->server->input_lock);
 		if (u_stage_recenter_hold_update(&fcal->hold, pressed, now_ns, fcal->hold_ns)) {
 			xrt_result_t ret = u_stage_recenter(fcal->xso, fcal->head, now_ns);
 			if (ret == XRT_SUCCESS) {
@@ -86,7 +147,7 @@ run_floor_calibration(void *ptr)
 				U_LOG_W("STAGE recenter refused (%d); release Options before retrying.", ret);
 			}
 		}
-		if (!fcal->calibrate && fcal->right == NULL) {
+		if (!fcal->calibrate && !fcal->recenter) {
 			return NULL;
 		}
 		os_nanosleep(POLL_INTERVAL_NS);
@@ -123,16 +184,12 @@ ipc_server_floor_calibration_start(struct ipc_server *s)
 	struct ipc_server_floor_calibration *fcal = U_TYPED_CALLOC(struct ipc_server_floor_calibration);
 	u_floor_calibration_init(&fcal->fc, eye_height);
 	fcal->fc.align = debug_get_bool_option_floor_align();
+	fcal->fc.input_lock = &s->input_lock;
 	fcal->server = s;
 	fcal->calibrate = eye_height != 0.0f;
+	fcal->recenter = recenter;
+	fcal->options_index = -1;
 	fcal->hold_ns = (int64_t)CLAMP(debug_get_num_option_stage_recenter_hold_ms(), 100, 10000) * U_TIME_1MS_IN_NS;
-	if (recenter) {
-		struct xrt_system_roles roles = XRT_SYSTEM_ROLES_INIT;
-		if (xrt_system_devices_get_roles(s->xsysd, &roles) == XRT_SUCCESS && roles.right >= 0 &&
-		    (uint32_t)roles.right < s->xsysd->static_xdev_count) {
-			fcal->right = s->xsysd->static_xdevs[roles.right];
-		}
-	}
 	fcal->xso = s->xso;
 	fcal->head = head;
 
