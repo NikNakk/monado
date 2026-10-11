@@ -468,6 +468,13 @@ Background activity varied; no causal or strict tail non-regression conclusion
 is established. Current sources/build and the installed service were restored.
 See [the matched hardware comparison](macos-gpu-sync-headset-comparison.md).
 
+### Common Chromium / Monado tracing (2026-10-12)
+
+The authorised M3 investigation is adding Perfetto regression coverage to
+Chromium's real Metal event waits. Our macOS CSV diagnostics should migrate to
+the same event model after native backend, clock correlation and measurement
+parity checks. See the [migration record](macos-gpu-sync-perfetto.md).
+
 ### Native GPU synchronization M1–M2 completion — 2026-10-11
 
 The allocation-estimate review follow-up now sums every requested mip level and
