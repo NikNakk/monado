@@ -178,6 +178,9 @@ struct multi_compositor
 	} wait_thread;
 
 #ifdef XRT_OS_OSX
+	//! Sticky for a session that imports an explicitly requested three-image swapchain.
+	//! Protected by slot_lock. Producer and service GPU waits remain unchanged.
+	bool latest_completed_three_images;
 	struct comp_gpu_client_budget *gpu_budget;
 #endif
 

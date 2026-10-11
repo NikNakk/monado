@@ -451,6 +451,12 @@ wait_for_scheduled_free(struct multi_compositor *mc)
 			os_mutex_unlock(&mc->slot_lock);
 			return;
 		}
+		// This function runs only after the producer fence/semaphore is ready.
+		// Retire an older waiting frame rather than retaining three generations.
+		// Keep delivered for reprojection, and keep service GPU reuse waits.
+		if (mc->latest_completed_three_images) {
+			break;
+		}
 #endif
 		int64_t now_ns = os_monotonic_get_ns();
 #ifdef XRT_OS_OSX
@@ -741,6 +747,35 @@ multi_compositor_get_swapchain_create_properties(struct xrt_compositor *xc,
 }
 
 static xrt_result_t
+finish_swapchain_create(struct multi_compositor *mc,
+                        const struct xrt_swapchain_create_info *info,
+                        xrt_result_t result,
+                        struct xrt_swapchain **out_xsc)
+{
+	if (result != XRT_SUCCESS || (info->create & XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES) == 0) {
+		return result;
+	}
+#ifdef XRT_OS_OSX
+	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) != 0 || (*out_xsc)->image_count != 3) {
+		xrt_swapchain_reference(out_xsc, NULL);
+		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+	}
+	os_mutex_lock(&mc->slot_lock);
+	bool first = !mc->latest_completed_three_images;
+	mc->latest_completed_three_images = true;
+	os_mutex_unlock(&mc->slot_lock);
+	if (first) {
+		U_LOG_I("Three-image compatibility: latest completed scheduling; GPU reuse waits retained");
+	}
+	return XRT_SUCCESS;
+#else
+	(void)mc;
+	xrt_swapchain_reference(out_xsc, NULL);
+	return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+#endif
+}
+
+static xrt_result_t
 multi_compositor_create_swapchain(struct xrt_compositor *xc,
                                   const struct xrt_swapchain_create_info *info,
                                   struct xrt_swapchain **out_xsc)
@@ -760,7 +795,7 @@ multi_compositor_create_swapchain(struct xrt_compositor *xc,
 #else
 	xrt_result_t result = xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
 #endif
-	return result;
+	return finish_swapchain_create(mc, info, result, out_xsc);
 }
 
 static xrt_result_t
@@ -782,7 +817,7 @@ multi_compositor_import_swapchain(struct xrt_compositor *xc,
 #else
 	xrt_result_t result = xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
 #endif
-	return result;
+	return finish_swapchain_create(mc, info, result, out_xsc);
 }
 
 static xrt_result_t
@@ -1408,6 +1443,12 @@ multi_compositor_deliver_any_frames(struct multi_compositor *mc, int64_t display
 	}
 #endif
 	bool deliver = time_is_greater_then_or_within_half_ms(display_time_ns, mc->scheduled.data.display_time_ns);
+#ifdef XRT_OS_OSX
+	// A latest-completed client must latch on the next compositor tick. Keeping
+	// the timestamp gate while continually superseding future scheduled frames
+	// could otherwise keep delivered unchanged indefinitely.
+	deliver |= mc->latest_completed_three_images;
+#endif
 	if (deliver) {
 		slot_move_and_clear_locked(mc, &mc->delivered, &mc->scheduled);
 
