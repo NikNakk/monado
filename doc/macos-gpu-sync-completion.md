@@ -89,8 +89,9 @@ these limits govern admitted tracked storage, not all compositor/system memory.
 
 **Teardown and failure ownership.** Client destruction stops its worker and
 quarantines unresolved producer/consumer references without waiting for GPU
-completion. A client-supplied unlimited consumer wait is capped at 500 ms and returns
-timeout without releasing ownership. Known-completed native images skip the redundant device-idle wait
+completion. A client's swapchain wait honours its own timeout, including an unlimited one;
+the service IPC worker waits in 500 ms slices and gives up early if the client
+disconnects or the service stops. A timeout never releases ownership. Known-completed native images skip the redundant device-idle wait
 when garbage-collected. Final compositor shutdown stops display-link and
 passthrough inputs, retires pending presentation jobs inside a bounded drain,
 and includes the CADisplayLink thread join in the shared 500 ms deadline for

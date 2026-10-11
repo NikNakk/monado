@@ -392,12 +392,12 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
-#ifdef XRT_OS_OSX
-	// An unlimited client timeout must not pin an IPC worker indefinitely.
-	// Timeout preserves ownership; it never authorizes consumer completion.
-	if (timeout_ns > 500000000LL) timeout_ns = 500000000LL;
-#endif
-
+	/*
+	 * The caller's timeout is honoured, including an infinite one. A service
+	 * IPC worker bounds its own calls (see ipc_handle_swapchain_wait_image), so
+	 * a client whose GPU work never completes cannot pin that thread. A timeout
+	 * preserves ownership; it never authorizes consumer completion.
+	 */
 	int64_t start_ns = os_monotonic_get_ns();
 
 	for (;;) {
@@ -432,15 +432,25 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 			return XRT_TIMEOUT;
 		}
 
-		/* Consumer cancellation does not imply producer completion. Poll only:
-		 * an unresolved producer obligation must never authorize reuse. */
-		if (tracker->producer[image_index] != NULL) {
+		/* Consumer cancellation does not imply producer completion: an
+		 * unresolved producer obligation must never authorize reuse. Wait for
+		 * it within the remaining timeout, outside the registry lock, then
+		 * re-evaluate from the top since state may have changed meanwhile. */
+		if (tracker->producer[image_index] != NULL &&
+		    xrt_compositor_semaphore_wait(tracker->producer[image_index], tracker->producer_value[image_index],
+		                                  0) != XRT_SUCCESS) {
+			struct xrt_compositor_semaphore *producer = NULL;
+			xrt_compositor_semaphore_reference(&producer, tracker->producer[image_index]);
+			uint64_t producer_value = tracker->producer_value[image_index];
+			pthread_mutex_unlock(&g_gpu_reuse_mutex);
+
 			xrt_result_t producer_result = xrt_compositor_semaphore_wait(
-			    tracker->producer[image_index], tracker->producer_value[image_index], 0);
+			    producer, producer_value, remaining_timeout_ns(timeout_ns, start_ns));
+			xrt_compositor_semaphore_reference(&producer, NULL);
 			if (producer_result != XRT_SUCCESS) {
-				pthread_mutex_unlock(&g_gpu_reuse_mutex);
 				return producer_result;
 			}
+			continue;
 		}
 		uint64_t value = tracker->last_gpu_use[image_index];
 		VkSemaphore timeline = tracker->context->timeline;

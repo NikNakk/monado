@@ -284,6 +284,7 @@ elseif(APPLE)
 		ipc_server PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c
 				   server/ipc_server_metal.c server/ipc_server_macos_display_host.c
 				   server/ipc_server_tracking_share.c
+				   server/ipc_server_swapchain_wait.c server/ipc_server_swapchain_wait.h
 		)
 
 	if(XRT_FEATURE_SERVICE)

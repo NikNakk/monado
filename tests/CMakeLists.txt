@@ -438,6 +438,21 @@ if(UNIX
 	set_target_properties(tests_ipc_socket_security PROPERTIES FOLDER monado_tests)
 endif()
 
+if(APPLE AND TARGET ipc_server)
+	add_executable(
+		tests_macos_ipc_swapchain_wait tests_macos_ipc_swapchain_wait.cpp
+					       ../src/xrt/ipc/server/ipc_server_swapchain_wait.c
+		)
+	target_include_directories(tests_macos_ipc_swapchain_wait PRIVATE ../src/xrt/ipc)
+	target_link_libraries(
+		tests_macos_ipc_swapchain_wait PRIVATE aux_os aux_util xrt-interfaces
+						       xrt-external-catch2
+		)
+	add_test(NAME tests_macos_ipc_swapchain_wait COMMAND tests_macos_ipc_swapchain_wait)
+	set_tests_properties(tests_macos_ipc_swapchain_wait PROPERTIES TIMEOUT 20)
+	set_target_properties(tests_macos_ipc_swapchain_wait PROPERTIES FOLDER monado_tests)
+endif()
+
 if(APPLE
    AND XRT_FEATURE_SERVICE
    AND TARGET ipc_server

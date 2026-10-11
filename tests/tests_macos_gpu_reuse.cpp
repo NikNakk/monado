@@ -160,9 +160,14 @@ TEST_CASE("pending consumer completion retains storage after producer completion
 	os_mutex_destroy(&queue.mutex);
 	comp_swapchain_gpu_reuse_renderer_leave(&accum);
 	timeouts.clear();
+	CHECK(xrt_swapchain_wait_image(base, 5000000, 0) == XRT_TIMEOUT);
+	REQUIRE_FALSE(timeouts.empty());
+	for (uint64_t timeout : timeouts) CHECK(timeout <= 5000000ULL);
+	// An infinite wait reaches Vulkan unclamped; the IPC worker bounds its own calls.
+	timeouts.clear();
 	CHECK(xrt_swapchain_wait_image(base, INT64_MAX, 0) == XRT_TIMEOUT);
 	REQUIRE_FALSE(timeouts.empty());
-	for (uint64_t timeout : timeouts) CHECK(timeout <= 500000000ULL);
+	CHECK(timeouts.back() == (uint64_t)INT64_MAX);
 
 	int before = destroyed;
 	xrt_swapchain_reference(&base, nullptr);
@@ -283,3 +288,25 @@ TEST_CASE("device loss does not authorize reuse or resource destruction")
 	CHECK(destroyed == before + 1);
 	xrt_compositor_semaphore_reference(&sem, nullptr);
 }
+
+TEST_CASE("an outstanding producer is waited for within the caller's timeout")
+{
+	Device device;
+	auto *sc = device.swapchain();
+	auto *sem = device.producer();
+	auto *base = &sc->base.base;
+	REQUIRE(comp_swapchain_gpu_reuse_set_producer(base, 0, sem, 5) == XRT_SUCCESS);
+	timeouts.clear();
+	CHECK(xrt_swapchain_wait_image(base, 20000000, 0) == XRT_TIMEOUT);
+	// Polled once, then waited with the remaining timeout rather than returning at once.
+	REQUIRE(timeouts.size() >= 2);
+	CHECK(timeouts[0] == 0);
+	CHECK(timeouts[1] > 0);
+	CHECK(timeouts[1] <= 20000000ULL);
+	values[comp_semaphore(sem)->semaphore] = 5;
+	CHECK(xrt_swapchain_wait_image(base, 20000000, 0) == XRT_SUCCESS);
+	xrt_swapchain_reference(&base, nullptr);
+	comp_swapchain_gpu_reuse_collect(&device.vk, false);
+	xrt_compositor_semaphore_reference(&sem, nullptr);
+}
+

@@ -1114,8 +1114,10 @@ See [the matched headset comparison](macos-gpu-sync-headset-comparison.md).
 | `XRT_MACOS_GPU_CLIENT_OBJECTS` | 64 | 1–256 swapchains | Per-client create/import limit, charged through quarantine. |
 | `XRT_MACOS_GPU_GLOBAL_OBJECTS` | 256 | 1–256 swapchains | Service-wide create/import limit; global tracked bytes remain bounded at 1 GiB. |
 
-Invalid values use the documented default. Client GPU reuse waits are capped at
-500 ms; timeout retains ownership. Final display-link/presentation/callback drain
+Invalid values use the documented default. Client GPU reuse waits honour the
+application's timeout, including `XR_INFINITE_DURATION`; a service IPC worker
+waits in 500 ms slices and stops early if its client disconnects or the service
+stops. Timeout retains ownership. Final display-link/presentation/callback drain
 has a shared 500 ms deadline, followed by at most 500 ms for the last renderer
 fence. An incomplete drain retains the whole device/compositor until process
 exit. These controls preserve the observed CPU-readiness gate, mandatory
