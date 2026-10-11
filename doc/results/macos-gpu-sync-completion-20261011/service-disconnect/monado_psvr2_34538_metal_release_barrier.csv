@@ -1,0 +1,1 @@
+sequence,swapchain_id,image_index,barrier_entry_ns,command_buffer_created_ns,before_commit_ns,after_commit_ns,after_wait_ns,create_duration_ns,commit_duration_ns,wait_duration_ns,total_barrier_duration_ns,metal_status,gpu_start_time_s,gpu_end_time_s,gpu_duration_ns

@@ -1,0 +1,9 @@
+Test project /Users/nickkennedy/Code/monado-2/build/arm64
+    Start 42: tests_macos_gpu_policy
+1/2 Test #42: tests_macos_gpu_policy ...........   Passed    0.27 sec
+    Start 43: tests_macos_gpu_reuse
+2/2 Test #43: tests_macos_gpu_reuse ............   Passed    0.27 sec
+
+100% tests passed out of 2
+
+Total Test time (real) =   0.54 sec

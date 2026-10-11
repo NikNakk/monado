@@ -1,0 +1,1960 @@
+// Copyright 2019-2026, Collabora, Ltd.
+// Copyright 2024-2026, NVIDIA CORPORATION.
+// SPDX-License-Identifier: BSL-1.0
+/*!
+ * @file
+ * @brief  Compositor rendering code.
+ * @author Lubosz Sarnecki <lubosz.sarnecki@collabora.com>
+ * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @author Rylie Pavlik <rylie.pavlik@collabora.com>
+ * @author Moshi Turner <moshiturner@protonmail.com>
+ * @ingroup comp_main
+ */
+
+#include "render/render_interface.h"
+#include "xrt/xrt_defines.h"
+#include "xrt/xrt_frame.h"
+#include "xrt/xrt_compositor.h"
+#include "xrt/xrt_results.h"
+
+#include "os/os_time.h"
+
+#include "math/m_api.h"
+#include "math/m_matrix_2x2.h"
+#include "math/m_space.h"
+
+#include "util/u_misc.h"
+#include "util/u_trace_marker.h"
+#include "util/u_distortion_mesh.h"
+#include "util/u_sink.h"
+#include "util/u_var.h"
+#include "util/u_frame_times_widget.h"
+#include "util/u_debug.h"
+#include "util/u_timing_trace.h"
+
+#include "util/comp_render.h"
+#include "util/comp_high_level_render.h"
+#include "util/comp_swapchain_gpu_reuse_internal.h"
+
+#include "main/comp_frame.h"
+#include "main/comp_mirror_to_debug_gui.h"
+
+#ifdef XRT_FEATURE_WINDOW_PEEK
+#include "main/comp_window_peek.h"
+#endif
+
+#include "vk/vk_helpers.h"
+#include "vk/vk_cmd.h"
+#include "vk/vk_image_readback_to_xf_pool.h"
+#include "vk/vk_submit_helpers.h"
+
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <assert.h>
+#include <math.h>
+
+#ifdef XRT_OS_OSX
+#include <stdint.h>
+#include <limits.h>
+#include <time.h>
+#include <unistd.h>
+#endif
+
+DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_WARN)
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+#endif
+#ifdef XRT_OS_OSX
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+DEBUG_GET_ONCE_BOOL_OPTION(comp_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_reprojection_trace, "XRT_MACOS_REPROJECTION_TRACE", false)
+#endif
+#endif
+#define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_comp_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
+
+/*
+ *
+ * Helper macros for adding semaphores to lists.
+ *
+ */
+
+#define ADD_WAIT(LIST, SEMAPHORE, STAGE, IS_TIMELINE)                                                                  \
+	do {                                                                                                           \
+		VkSemaphore _semaphore = SEMAPHORE;                                                                    \
+		if (_semaphore != VK_NULL_HANDLE) {                                                                    \
+			if (IS_TIMELINE) {                                                                             \
+				vk_semaphore_list_wait_add_timeline(&LIST, _semaphore, (uint64_t)frame_id, STAGE);     \
+			} else {                                                                                       \
+				vk_semaphore_list_wait_add_binary(&LIST, _semaphore, STAGE);                           \
+			}                                                                                              \
+		}                                                                                                      \
+	} while (false)
+
+#define ADD_SIGNAL(LIST, SEMAPHORE, IS_TIMELINE)                                                                       \
+	do {                                                                                                           \
+		VkSemaphore _semaphore = SEMAPHORE;                                                                    \
+		if (_semaphore != VK_NULL_HANDLE) {                                                                    \
+			if (IS_TIMELINE) {                                                                             \
+				vk_semaphore_list_signal_add_timeline(&LIST, _semaphore, (uint64_t)frame_id);          \
+			} else {                                                                                       \
+				vk_semaphore_list_signal_add_binary(&LIST, _semaphore);                                \
+			}                                                                                              \
+		}                                                                                                      \
+	} while (false)
+
+
+/*
+ *
+ * Private struct(s).
+ *
+ */
+
+/*!
+ * What is the source of the FoV values used for the final image that the
+ * compositor produces and is sent to the hardware (or software).
+ */
+enum comp_target_fov_source
+{
+	/*!
+	 * The FoV values used for the final target is taken from the
+	 * distortion information on the @ref xrt_hmd_parts struct.
+	 */
+	COMP_TARGET_FOV_SOURCE_DISTORTION,
+
+	/*!
+	 * The FoV values used for the final target is taken from the
+	 * those returned from the device's get_views.
+	 */
+	COMP_TARGET_FOV_SOURCE_DEVICE_VIEWS,
+};
+
+/*!
+ * Holds associated vulkan objects and state to render with a distortion.
+ *
+ * @ingroup comp_main
+ */
+struct comp_renderer
+{
+	//! @name Durable members
+	//! @brief These don't require the images to be created and don't depend on it.
+	//! @{
+
+	//! The compositor we were created by
+	struct comp_compositor *c;
+	struct comp_settings *settings;
+
+	struct comp_mirror_to_debug_gui mirror_to_debug_gui;
+
+#ifdef XRT_OS_OSX
+	FILE *late_render_trace;
+	uint64_t late_render_trace_rows;
+
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	FILE *renderer_stage_trace;
+	uint64_t renderer_stage_trace_rows;
+	FILE *reprojection_trace;
+	uint64_t reprojection_trace_rows;
+	bool reprojection_prev_source_valid;
+	int64_t reprojection_prev_layer_timestamp_ns;
+	uint32_t reprojection_prev_image_index[2];
+	struct xrt_pose reprojection_prev_source_pose[2];
+	bool reprojection_prev_scanout_valid;
+	struct xrt_pose reprojection_prev_scanout_begin[2];
+#endif
+
+	int64_t late_render_target_ns;
+	int64_t late_render_wait_begin_ns;
+	int64_t late_render_wait_end_ns;
+	int64_t late_render_pose_begin_ns;
+	int64_t late_render_pose_end_ns;
+#endif
+
+	//! @}
+
+	//! @name Image-dependent members
+	//! @{
+
+	//! Index of the current buffer/image
+	int32_t acquired_buffer;
+
+	//! Which buffer was last submitted and has a fence pending.
+	int32_t fenced_buffer;
+
+	//! Frame id associated with fenced_buffer, used for deferred GPU timing feedback.
+	int64_t fenced_frame_id;
+
+	/*!
+	 * The render pass used to render to the target, it depends on the
+	 * target's format so will be recreated each time the target changes.
+	 */
+	struct render_gfx_render_pass target_render_pass;
+
+	/*!
+	 * Array of "rendering" target resources equal in size to the number of
+	 * comp_target images. Each target resources holds all of the resources
+	 * needed to render to that target and its views.
+	 */
+	struct render_gfx_target_resources *rtr_array;
+
+	/*!
+	 * Array of fences equal in size to the number of comp_target images.
+	 */
+	VkFence *fences;
+
+	/*!
+	 * The number of renderings/fences we've created: set from comp_target when we use that data.
+	 */
+	uint32_t buffer_count;
+
+	/*!
+	 * Only relevant when using present modes from VK_KHR_shared_presentable_image,
+	 * tracks whether we have waited on the shared present semaphore at least once,
+	 * subsequents present waits are redundant and can be skipped.
+	 */
+	bool shared_present_semaphore_wait_once;
+
+	//! @}
+};
+
+
+/*
+ *
+ * Functions.
+ *
+ */
+
+#ifdef XRT_OS_OSX
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+
+static bool
+renderer_reprojection_trace_enabled(void)
+{
+	return debug_get_bool_option_comp_psvr2_timing_trace() || debug_get_bool_option_macos_reprojection_trace();
+}
+
+static void
+renderer_reprojection_trace_open(struct comp_renderer *r)
+{
+	if (!renderer_reprojection_trace_enabled()) {
+		return;
+	}
+
+	r->reprojection_trace = u_timing_trace_open("reprojection", 256 * 1024);
+	if (r->reprojection_trace == NULL) {
+		return;
+	}
+
+	fputs(
+	    "system_frame_id,sample_ns,predicted_display_ns,desired_present_ns,system_layer_display_ns,"
+	    "path,fast_path,do_timewarp,source_valid,source_changed,layer_type,layer_timestamp_ns,"
+	    "layer_age_to_predicted_ns,view_count,left_image_index,left_array_index,right_image_index,right_array_"
+	    "index,"
+	    "left_src_qx,left_src_qy,left_src_qz,left_src_qw,left_src_px,left_src_py,left_src_pz,"
+	    "left_begin_qx,left_begin_qy,left_begin_qz,left_begin_qw,left_begin_px,left_begin_py,left_begin_pz,"
+	    "left_end_qx,left_end_qy,left_end_qz,left_end_qw,left_end_px,left_end_py,left_end_pz,"
+	    "right_src_qx,right_src_qy,right_src_qz,right_src_qw,right_src_px,right_src_py,right_src_pz,"
+	    "right_begin_qx,right_begin_qy,right_begin_qz,right_begin_qw,right_begin_px,right_begin_py,right_begin_pz,"
+	    "right_end_qx,right_end_qy,right_end_qz,right_end_qw,right_end_px,right_end_py,right_end_pz,"
+	    "left_src_to_begin_deg,left_src_to_end_deg,right_src_to_begin_deg,right_src_to_end_deg,"
+	    "left_source_step_deg,right_source_step_deg,left_scanout_step_deg,right_scanout_step_deg",
+	    r->reprojection_trace);
+	for (uint32_t i = 0; i < 16; ++i) {
+		fprintf(r->reprojection_trace, ",left_tw_begin_m%02u", i);
+	}
+	for (uint32_t i = 0; i < 16; ++i) {
+		fprintf(r->reprojection_trace, ",left_tw_end_m%02u", i);
+	}
+	fputc('\n', r->reprojection_trace);
+	if (!u_timing_trace_fully_buffered()) {
+		fflush(r->reprojection_trace);
+	}
+}
+
+static void
+renderer_reprojection_trace_close(struct comp_renderer *r)
+{
+	if (r->reprojection_trace == NULL) {
+		return;
+	}
+	fflush(r->reprojection_trace);
+	fclose(r->reprojection_trace);
+	r->reprojection_trace = NULL;
+}
+
+static const struct comp_layer *
+renderer_find_projection_layer(const struct comp_layer *layers, uint32_t layer_count)
+{
+	for (uint32_t i = 0; i < layer_count; ++i) {
+		if (layers[i].data.type == XRT_LAYER_PROJECTION || layers[i].data.type == XRT_LAYER_PROJECTION_DEPTH) {
+			return &layers[i];
+		}
+	}
+	return NULL;
+}
+
+static const struct xrt_layer_projection_view_data *
+renderer_projection_views(const struct xrt_layer_data *data)
+{
+	if (data->type == XRT_LAYER_PROJECTION) {
+		return data->proj.v;
+	}
+	if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
+		return data->depth.v;
+	}
+	return NULL;
+}
+
+static double
+renderer_quat_distance_deg(const struct xrt_quat *a, const struct xrt_quat *b)
+{
+	double dot = (double)a->x * b->x + (double)a->y * b->y + (double)a->z * b->z + (double)a->w * b->w;
+	double an = sqrt((double)a->x * a->x + (double)a->y * a->y + (double)a->z * a->z + (double)a->w * a->w);
+	double bn = sqrt((double)b->x * b->x + (double)b->y * b->y + (double)b->z * b->z + (double)b->w * b->w);
+	double denom = an * bn;
+	if (denom <= 1e-12) {
+		return NAN;
+	}
+	double value = fabs(dot / denom);
+	if (value > 1.0) {
+		value = 1.0;
+	}
+	return 2.0 * acos(value) * (180.0 / 3.14159265358979323846);
+}
+
+static void
+renderer_trace_pose(FILE *f, const struct xrt_pose *p)
+{
+	fprintf(f, ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g", p->orientation.x, p->orientation.y, p->orientation.z,
+	        p->orientation.w, p->position.x, p->position.y, p->position.z);
+}
+
+static void
+renderer_trace_matrix(FILE *f, const struct xrt_matrix_4x4 *m)
+{
+	for (uint32_t i = 0; i < 16; ++i) {
+		fprintf(f, ",%.9g", m->v[i]);
+	}
+}
+
+static void
+renderer_reprojection_trace_frame(struct comp_renderer *r,
+                                  const char *path,
+                                  const struct comp_layer *layers,
+                                  uint32_t layer_count,
+                                  const struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS],
+                                  const struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS],
+                                  uint32_t view_count,
+                                  bool fast_path,
+                                  bool do_timewarp)
+{
+	if (r->reprojection_trace == NULL) {
+		return;
+	}
+
+	const struct comp_layer *layer = renderer_find_projection_layer(layers, layer_count);
+	const struct xrt_layer_projection_view_data *views =
+	    layer != NULL ? renderer_projection_views(&layer->data) : NULL;
+	if (layer == NULL || views == NULL || layer->data.view_count == 0 || view_count == 0) {
+		fprintf(r->reprojection_trace, "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,0,0,0,0,0,0,0,0,0,0",
+		        (long long)r->c->frame.rendering.id, (long long)os_monotonic_get_ns(),
+		        (unsigned long long)r->c->frame.rendering.predicted_display_time_ns,
+		        (unsigned long long)r->c->frame.rendering.desired_present_time_ns,
+		        (long long)r->c->base.layer_accum.data.display_time_ns, path, fast_path ? 1 : 0,
+		        do_timewarp ? 1 : 0);
+		/*
+		 * Header has 100 columns total. The prefix above writes 18;
+		 * preserve a rectangular CSV through warm-start/teardown frames.
+		 */
+		for (uint32_t i = 18; i < 100; ++i) {
+			fputs(",nan", r->reprojection_trace);
+		}
+		fputc('\n', r->reprojection_trace);
+		r->reprojection_prev_source_valid = false;
+		r->reprojection_prev_scanout_valid = false;
+		goto flush_maybe;
+	}
+
+	const struct xrt_layer_projection_view_data *left = &views[0];
+	const struct xrt_layer_projection_view_data *right =
+	    layer->data.view_count > 1 && view_count > 1 ? &views[1] : &views[0];
+	const struct xrt_pose *left_begin = &world_poses_scanout_begin[0];
+	const struct xrt_pose *left_end = &world_poses_scanout_end[0];
+	const struct xrt_pose *right_begin = view_count > 1 ? &world_poses_scanout_begin[1] : left_begin;
+	const struct xrt_pose *right_end = view_count > 1 ? &world_poses_scanout_end[1] : left_end;
+
+	bool source_changed = !r->reprojection_prev_source_valid ||
+	                      layer->data.timestamp != r->reprojection_prev_layer_timestamp_ns ||
+	                      left->sub.image_index != r->reprojection_prev_image_index[0] ||
+	                      right->sub.image_index != r->reprojection_prev_image_index[1];
+
+	double left_source_step_deg = NAN;
+	double right_source_step_deg = NAN;
+	if (source_changed && r->reprojection_prev_source_valid) {
+		left_source_step_deg = renderer_quat_distance_deg(&r->reprojection_prev_source_pose[0].orientation,
+		                                                  &left->pose.orientation);
+		right_source_step_deg = renderer_quat_distance_deg(&r->reprojection_prev_source_pose[1].orientation,
+		                                                   &right->pose.orientation);
+	}
+
+	double left_scanout_step_deg = NAN;
+	double right_scanout_step_deg = NAN;
+	if (r->reprojection_prev_scanout_valid) {
+		left_scanout_step_deg = renderer_quat_distance_deg(&r->reprojection_prev_scanout_begin[0].orientation,
+		                                                   &left_begin->orientation);
+		right_scanout_step_deg = renderer_quat_distance_deg(&r->reprojection_prev_scanout_begin[1].orientation,
+		                                                    &right_begin->orientation);
+	}
+
+	struct xrt_matrix_4x4 left_tw_begin;
+	struct xrt_matrix_4x4 left_tw_end;
+	render_calc_time_warp_matrix(&left->pose, &left->fov, left_begin, &left_tw_begin);
+	render_calc_time_warp_matrix(&left->pose, &left->fov, left_end, &left_tw_end);
+
+	fprintf(r->reprojection_trace, "%lld,%lld,%llu,%llu,%lld,%s,%d,%d,1,%d,%u,%lld,%lld,%u,%u,%u,%u,%u",
+	        (long long)r->c->frame.rendering.id, (long long)os_monotonic_get_ns(),
+	        (unsigned long long)r->c->frame.rendering.predicted_display_time_ns,
+	        (unsigned long long)r->c->frame.rendering.desired_present_time_ns,
+	        (long long)r->c->base.layer_accum.data.display_time_ns, path, fast_path ? 1 : 0, do_timewarp ? 1 : 0,
+	        source_changed ? 1 : 0, (unsigned)layer->data.type, (long long)layer->data.timestamp,
+	        (long long)((int64_t)r->c->frame.rendering.predicted_display_time_ns - layer->data.timestamp),
+	        layer->data.view_count, left->sub.image_index, left->sub.array_index, right->sub.image_index,
+	        right->sub.array_index);
+
+	renderer_trace_pose(r->reprojection_trace, &left->pose);
+	renderer_trace_pose(r->reprojection_trace, left_begin);
+	renderer_trace_pose(r->reprojection_trace, left_end);
+	renderer_trace_pose(r->reprojection_trace, &right->pose);
+	renderer_trace_pose(r->reprojection_trace, right_begin);
+	renderer_trace_pose(r->reprojection_trace, right_end);
+
+	fprintf(r->reprojection_trace, ",%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g",
+	        renderer_quat_distance_deg(&left->pose.orientation, &left_begin->orientation),
+	        renderer_quat_distance_deg(&left->pose.orientation, &left_end->orientation),
+	        renderer_quat_distance_deg(&right->pose.orientation, &right_begin->orientation),
+	        renderer_quat_distance_deg(&right->pose.orientation, &right_end->orientation), left_source_step_deg,
+	        right_source_step_deg, left_scanout_step_deg, right_scanout_step_deg);
+	renderer_trace_matrix(r->reprojection_trace, &left_tw_begin);
+	renderer_trace_matrix(r->reprojection_trace, &left_tw_end);
+	fputc('\n', r->reprojection_trace);
+
+	if (source_changed) {
+		r->reprojection_prev_source_pose[0] = left->pose;
+		r->reprojection_prev_source_pose[1] = right->pose;
+		r->reprojection_prev_layer_timestamp_ns = layer->data.timestamp;
+		r->reprojection_prev_image_index[0] = left->sub.image_index;
+		r->reprojection_prev_image_index[1] = right->sub.image_index;
+		r->reprojection_prev_source_valid = true;
+	}
+	r->reprojection_prev_scanout_begin[0] = *left_begin;
+	r->reprojection_prev_scanout_begin[1] = *right_begin;
+	r->reprojection_prev_scanout_valid = true;
+
+flush_maybe:
+	r->reprojection_trace_rows++;
+	if (!u_timing_trace_fully_buffered() && ((r->reprojection_trace_rows % 240) == 0)) {
+		fflush(r->reprojection_trace);
+	}
+}
+
+static void
+renderer_late_render_trace_open(struct comp_renderer *r)
+{
+	if (!debug_get_bool_option_comp_psvr2_timing_trace()) {
+		return;
+	}
+
+	r->late_render_trace = u_timing_trace_open("late_render", 64 * 1024);
+	if (r->late_render_trace == NULL) {
+		return;
+	}
+
+	fputs(
+	    "frame_id,lead_us,desired_present_ns,predicted_display_ns,late_render_target_ns,wait_begin_ns,wait_end_ns,"
+	    "wait_requested_ns,wait_actual_ns,wake_lateness_ns,pose_query_begin_ns,pose_query_end_ns,"
+	    "pose_query_duration_ns,pose_begin_minus_target_ns,pose_begin_to_predicted_ns,"
+	    "desired_offset_us,wait_mode,target_minus_desired_ns,pose_begin_minus_desired_ns\n",
+	    r->late_render_trace);
+	if (!u_timing_trace_fully_buffered()) {
+		fflush(r->late_render_trace);
+	}
+}
+
+static void
+renderer_late_render_trace_close(struct comp_renderer *r)
+{
+	if (r->late_render_trace == NULL) {
+		return;
+	}
+	fflush(r->late_render_trace);
+	fclose(r->late_render_trace);
+	r->late_render_trace = NULL;
+}
+
+#endif
+
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+/*
+ * The late-render wait experiments were removed; late_render.csv still records
+ * the renderer's pose-query timing, with the wait columns left at zero.
+ */
+static void
+renderer_late_render_trace_begin(struct comp_renderer *r)
+{
+	r->late_render_target_ns = 0;
+	r->late_render_pose_begin_ns = 0;
+	r->late_render_pose_end_ns = 0;
+	r->late_render_wait_begin_ns = (int64_t)os_monotonic_get_ns();
+	r->late_render_wait_end_ns = r->late_render_wait_begin_ns;
+}
+#endif
+
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+static void
+renderer_late_render_trace_frame(struct comp_renderer *r)
+{
+	if (r->late_render_trace == NULL) {
+		return;
+	}
+
+	/* The predicted-relative lead mode was removed; its CSV column stays 0 for compatibility. */
+	const int64_t lead_us = 0;
+	/* Removed late-render wait modes; columns kept for CSV compatibility. */
+	const int64_t desired_offset_us = 0;
+	const char *wait_mode = "none";
+	int64_t wait_requested_ns = r->late_render_target_ns > r->late_render_wait_begin_ns
+	                                ? r->late_render_target_ns - r->late_render_wait_begin_ns
+	                                : 0;
+	int64_t wait_actual_ns = r->late_render_wait_end_ns >= r->late_render_wait_begin_ns
+	                             ? r->late_render_wait_end_ns - r->late_render_wait_begin_ns
+	                             : 0;
+	int64_t wake_lateness_ns =
+	    r->late_render_target_ns != 0 ? r->late_render_wait_end_ns - r->late_render_target_ns : 0;
+	int64_t pose_duration_ns =
+	    r->late_render_pose_begin_ns != 0 && r->late_render_pose_end_ns >= r->late_render_pose_begin_ns
+	        ? r->late_render_pose_end_ns - r->late_render_pose_begin_ns
+	        : 0;
+	int64_t pose_begin_minus_target_ns = r->late_render_target_ns != 0 && r->late_render_pose_begin_ns != 0
+	                                         ? r->late_render_pose_begin_ns - r->late_render_target_ns
+	                                         : 0;
+	int64_t pose_begin_to_predicted_ns =
+	    r->late_render_pose_begin_ns != 0
+	        ? r->c->frame.rendering.predicted_display_time_ns - r->late_render_pose_begin_ns
+	        : 0;
+	int64_t desired_present_ns = (int64_t)r->c->frame.rendering.desired_present_time_ns;
+	int64_t target_minus_desired_ns =
+	    r->late_render_target_ns != 0 ? r->late_render_target_ns - desired_present_ns : 0;
+	int64_t pose_begin_minus_desired_ns =
+	    r->late_render_pose_begin_ns != 0 ? r->late_render_pose_begin_ns - desired_present_ns : 0;
+
+	fprintf(r->late_render_trace,
+	        "%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%s,%lld,%lld\n",
+	        (long long)r->c->frame.rendering.id, (long long)lead_us,
+	        (long long)r->c->frame.rendering.desired_present_time_ns,
+	        (long long)r->c->frame.rendering.predicted_display_time_ns, (long long)r->late_render_target_ns,
+	        (long long)r->late_render_wait_begin_ns, (long long)r->late_render_wait_end_ns,
+	        (long long)wait_requested_ns, (long long)wait_actual_ns, (long long)wake_lateness_ns,
+	        (long long)r->late_render_pose_begin_ns, (long long)r->late_render_pose_end_ns,
+	        (long long)pose_duration_ns, (long long)pose_begin_minus_target_ns,
+	        (long long)pose_begin_to_predicted_ns, (long long)desired_offset_us, wait_mode,
+	        (long long)target_minus_desired_ns, (long long)pose_begin_minus_desired_ns);
+
+	r->late_render_trace_rows++;
+	if (!u_timing_trace_fully_buffered() && (r->late_render_trace_rows % 256 == 0)) {
+		fflush(r->late_render_trace);
+	}
+}
+#endif
+
+#endif
+
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+static uint64_t
+renderer_stage_begin(struct comp_renderer *r)
+{
+	(void)r;
+	return debug_get_bool_option_comp_psvr2_timing_trace() ? os_monotonic_get_ns() : 0;
+}
+
+static void
+renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns, int32_t result)
+{
+	if (begin_ns == 0) {
+		return;
+	}
+	// Sample before formatting or opening the trace, so logging is outside the duration.
+	uint64_t end_ns = os_monotonic_get_ns();
+	if (r->renderer_stage_trace == NULL) {
+		r->renderer_stage_trace = u_timing_trace_open("renderer_stage", 64 * 1024);
+		if (r->renderer_stage_trace == NULL) {
+			return;
+		}
+		fputs("frame_id,stage,begin_ns,end_ns,result\n", r->renderer_stage_trace);
+	}
+	int64_t frame_id = r->c->frame.rendering.id >= 0 ? r->c->frame.rendering.id : r->c->frame.waited.id;
+	fprintf(r->renderer_stage_trace, "%lld,%s,%llu,%llu,%d\n", (long long)frame_id, stage,
+	        (unsigned long long)begin_ns, (unsigned long long)end_ns, result);
+	if (++r->renderer_stage_trace_rows % 256 == 0 && !u_timing_trace_fully_buffered()) {
+		fflush(r->renderer_stage_trace);
+	}
+}
+#else
+static inline uint64_t
+renderer_stage_begin(struct comp_renderer *r)
+{
+	(void)r;
+	return 0;
+}
+
+static inline void
+renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns, int32_t result)
+{
+	(void)r;
+	(void)stage;
+	(void)begin_ns;
+	(void)result;
+}
+#endif
+
+static void
+renderer_wait_queue_idle(struct comp_renderer *r)
+{
+	COMP_TRACE_MARKER();
+	struct vk_bundle *vk = &r->c->base.vk;
+
+#ifdef XRT_OS_OSX
+	/*
+	 * On macOS, synchronous queue-idle waits here can wedge WiVRn bring-up:
+	 * the compositor render thread blocks inside vkQueueWaitIdle while a client
+	 * swapchain-create path is trying to submit its own one-shot init work on
+	 * the same queue. These waits are only to quiet validation around resource
+	 * lifetime, so skip them on Apple for this compositor path.
+	 */
+	return;
+#endif
+
+	vk_queue_lock(vk->main_queue);
+	vk->vkQueueWaitIdle(vk->main_queue->queue);
+	vk_queue_unlock(vk->main_queue);
+}
+
+static void
+calc_viewport_data(struct comp_renderer *r,
+                   struct render_viewport_data out_viewport_data[XRT_MAX_VIEWS],
+                   size_t view_count)
+{
+	struct comp_compositor *c = r->c;
+
+	bool pre_rotate = false;
+	if (r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+	    r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
+		COMP_SPEW(c, "Swapping width and height, since we are pre rotating");
+		pre_rotate = true;
+	}
+
+	int w_i32 = pre_rotate ? r->c->xdev->hmd->screens[0].h_pixels : r->c->xdev->hmd->screens[0].w_pixels;
+	int h_i32 = pre_rotate ? r->c->xdev->hmd->screens[0].w_pixels : r->c->xdev->hmd->screens[0].h_pixels;
+
+	float scale_x = (float)r->c->target->width / (float)w_i32;
+	float scale_y = (float)r->c->target->height / (float)h_i32;
+
+	for (uint32_t i = 0; i < view_count; ++i) {
+		struct xrt_view *v = &r->c->xdev->hmd->views[i];
+		if (pre_rotate) {
+			out_viewport_data[i] = (struct render_viewport_data){
+			    .x = (uint32_t)(v->viewport.y_pixels * scale_x),
+			    .y = (uint32_t)(v->viewport.x_pixels * scale_y),
+			    .w = (uint32_t)(v->viewport.h_pixels * scale_x),
+			    .h = (uint32_t)(v->viewport.w_pixels * scale_y),
+			};
+		} else {
+			out_viewport_data[i] = (struct render_viewport_data){
+			    .x = (uint32_t)(v->viewport.x_pixels * scale_x),
+			    .y = (uint32_t)(v->viewport.y_pixels * scale_y),
+			    .w = (uint32_t)(v->viewport.w_pixels * scale_x),
+			    .h = (uint32_t)(v->viewport.h_pixels * scale_y),
+			};
+		}
+	}
+}
+
+static void
+calc_vertex_rot_data(struct comp_renderer *r, struct xrt_matrix_2x2 out_vertex_rots[XRT_MAX_VIEWS], size_t view_count)
+{
+	bool pre_rotate = false;
+	if (r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+	    r->c->target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
+		COMP_SPEW(r->c, "Swapping width and height, since we are pre rotating");
+		pre_rotate = true;
+	}
+
+	const struct xrt_matrix_2x2 rotation_90_cw = {{
+	    .vecs =
+	        {
+	            {0, 1},
+	            {-1, 0},
+	        },
+	}};
+
+	for (uint32_t i = 0; i < view_count; i++) {
+		// Get the view.
+		struct xrt_view *v = &r->c->xdev->hmd->views[i];
+
+		// Copy data.
+		struct xrt_matrix_2x2 rot = v->rot;
+
+		// Should we rotate.
+		if (pre_rotate) {
+			m_mat2x2_multiply(&rot, &rotation_90_cw, &rot);
+		}
+
+		out_vertex_rots[i] = rot;
+	}
+}
+
+/*!
+ * How long to spread the begin/end scanout poses over, in nanoseconds.
+ *
+ * This is not @ref xrt_device_compositor_info::scanout_time_ns: a globally
+ * refreshing panel lights every pixel at once, so it gets 0 here even when it
+ * reports a large scanout time. Returns 0 whenever no compensation applies,
+ * which is not an error.
+ */
+static inline int64_t
+calc_scanout_compensation_ns(struct comp_renderer *r)
+{
+	struct xrt_device *xdev = r->c->xdev;
+
+	if (xdev == NULL || !xdev->supported.compositor_info) {
+		return 0;
+	}
+
+	struct xrt_device_compositor_mode compositor_mode = {
+	    .frame_interval_ns = r->c->frame_interval_ns,
+	};
+	struct xrt_device_compositor_info device_compositor_info = {0};
+	xrt_result_t xret = xrt_device_get_compositor_info( //
+	    xdev,                                           //
+	    &compositor_mode,                               //
+	    &device_compositor_info);                       //
+
+	if (xret != XRT_SUCCESS) {
+		COMP_WARN(r->c, "xrt_device_get_compositor_info failed, assuming 0 scanout time");
+		return 0;
+	}
+
+	switch (device_compositor_info.panel_refresh_type) {
+	case XRT_PANEL_REFRESH_TYPE_ROLLING:
+		if (device_compositor_info.scanout_direction == XRT_SCANOUT_DIRECTION_TOP_TO_BOTTOM) {
+			return device_compositor_info.scanout_time_ns;
+		} else {
+			COMP_SPEW(r->c,
+			          "Unable to apply rolling scanout compensation, only "
+			          "DIRECTION_TOP_TO_BOTTOM is supported");
+			return 0;
+		}
+	case XRT_PANEL_REFRESH_TYPE_GLOBAL:
+		/*!
+		 * The entire panel refreshes at once, so there is no scanout
+		 * spread to compensate for and the begin/end poses coincide.
+		 */
+		return 0;
+	}
+
+	//! No default case above, so a new refresh type warns at compile time.
+	return 0;
+}
+
+static void
+calc_pose_data(struct comp_renderer *r,
+               enum comp_target_fov_source fov_source,
+               struct xrt_fov out_fovs[XRT_MAX_VIEWS],
+               struct xrt_pose out_world_scanout_begin[XRT_MAX_VIEWS],
+               struct xrt_pose out_world_scanout_end[XRT_MAX_VIEWS],
+               struct xrt_pose out_eye[XRT_MAX_VIEWS],
+               uint32_t view_count)
+{
+	COMP_TRACE_MARKER();
+
+#ifdef XRT_OS_OSX
+	struct comp_target_image *target_image = &r->c->target->images[r->acquired_buffer];
+	target_image->display_head_orientation_valid = false;
+#endif
+
+	struct xrt_vec3 default_eye_relation = {
+	    0.063000f, /*! @todo get actual ipd_meters */
+	    0.0f,
+	    0.0f,
+	};
+
+	struct xrt_space_relation head_relation[2] = XRT_SPACE_RELATION_ZERO;
+	struct xrt_fov xdev_fovs[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
+	struct xrt_pose xdev_poses[2][XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
+
+	// Determine view type based on view count
+	enum xrt_view_type view_type = (view_count == 1) ? XRT_VIEW_TYPE_MONO : XRT_VIEW_TYPE_STEREO;
+
+	const int64_t scanout_time_ns = calc_scanout_compensation_ns(r);
+
+	int64_t begin_timestamp_ns = r->c->frame.rendering.predicted_display_time_ns;
+	int64_t end_timestamp_ns = begin_timestamp_ns + scanout_time_ns;
+
+	// Pose at beginning of scanout
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+	r->late_render_pose_begin_ns = (int64_t)os_monotonic_get_ns();
+#endif
+	xrt_result_t xret = xrt_device_get_view_poses( //
+	    r->c->xdev,                                //
+	    &default_eye_relation,                     //
+	    begin_timestamp_ns,                        // at_timestamp_ns
+	    view_type,                                 //
+	    view_count,                                //
+	    &head_relation[0],                         // out_head_relation
+	    xdev_fovs,                                 // out_fovs
+	    xdev_poses[0]);                            //
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+	r->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();
+#endif
+	if (xret != XRT_SUCCESS) {
+		struct u_pp_sink_stack_only sink;
+		u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+		u_pp_xrt_result(dg, xret);
+		U_LOG_E("xrt_device_get_view_poses failed: %s", sink.buffer);
+		return;
+	}
+
+
+	// Pose at end of scanout
+	if (scanout_time_ns != 0) {
+		xret = xrt_device_get_view_poses( //
+		    r->c->xdev,                   //
+		    &default_eye_relation,        //
+		    end_timestamp_ns,             // at_timestamp_ns
+		    view_type,                    //
+		    view_count,                   //
+		    &head_relation[1],            // out_head_relation
+		    xdev_fovs,                    // out_fovs
+		    xdev_poses[1]);               // out_poses
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+		r->late_render_pose_end_ns = (int64_t)os_monotonic_get_ns();
+#endif
+		if (xret != XRT_SUCCESS) {
+			struct u_pp_sink_stack_only sink;
+			u_pp_delegate_t dg = u_pp_sink_stack_only_init(&sink);
+			u_pp_xrt_result(dg, xret);
+			U_LOG_E("xrt_device_get_view_poses failed: %s", sink.buffer);
+			return;
+		}
+	} else {
+		for (size_t i = 0; i < XRT_MAX_VIEWS; ++i) {
+			xdev_poses[1][i] = xdev_poses[0][i];
+		}
+		head_relation[1] = head_relation[0];
+	}
+
+#ifdef XRT_OS_OSX
+	// Pass the exact same prediction to the final camera pass. Querying again
+	// on its worker would produce a different pose from the virtual scene.
+	target_image->display_head_orientation = head_relation[0].pose.orientation;
+	const enum xrt_space_relation_flags orientation_flags =
+	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT;
+	target_image->display_head_orientation_valid =
+	    (head_relation[0].relation_flags & orientation_flags) == orientation_flags && !r->c->debug.atw_off &&
+	    !debug_get_bool_option_force_atw_off_on_apple();
+#endif
+
+	struct xrt_fov dist_fov[XRT_MAX_VIEWS] = XRT_STRUCT_INIT;
+	for (uint32_t i = 0; i < view_count; i++) {
+		dist_fov[i] = r->c->xdev->hmd->distortion.fov[i];
+	}
+
+	bool use_xdev = false; // Probably what we want.
+
+	switch (fov_source) {
+	case COMP_TARGET_FOV_SOURCE_DISTORTION: use_xdev = false; break;
+	case COMP_TARGET_FOV_SOURCE_DEVICE_VIEWS: use_xdev = true; break;
+	}
+
+	for (uint32_t i = 0; i < view_count; i++) {
+		const struct xrt_fov fov = use_xdev ? xdev_fovs[i] : dist_fov[i];
+		const struct xrt_pose eye_pose_scanout_start = xdev_poses[0][i];
+		const struct xrt_pose eye_pose_scanout_end = xdev_poses[1][i];
+
+		struct xrt_space_relation result_scanout_start = {0};
+		struct xrt_space_relation result_scanout_end = {0};
+		struct xrt_relation_chain xrc = {0};
+
+		m_relation_chain_push_pose_if_not_identity(&xrc, &eye_pose_scanout_start);
+		m_relation_chain_push_relation(&xrc, &head_relation[0]);
+		m_relation_chain_resolve(&xrc, &result_scanout_start);
+
+		xrc = (struct xrt_relation_chain){0};
+
+		m_relation_chain_push_pose_if_not_identity(&xrc, &eye_pose_scanout_end);
+		m_relation_chain_push_relation(&xrc, &head_relation[1]);
+		m_relation_chain_resolve(&xrc, &result_scanout_end);
+
+		// Results to callers.
+		out_fovs[i] = fov;
+		out_world_scanout_begin[i] = result_scanout_start.pose;
+		out_world_scanout_end[i] = result_scanout_end.pose;
+		out_eye[i] = eye_pose_scanout_start;
+
+		// For remote rendering targets.
+		r->c->base.frame_params.fovs[i] = fov;
+		r->c->base.frame_params.poses[i] = result_scanout_start.pose;
+	}
+}
+
+//! @pre comp_target_has_images(r->c->target)
+static void
+renderer_build_rendering_target_resources(struct comp_renderer *r,
+                                          struct render_gfx_target_resources *rtr,
+                                          uint32_t index)
+{
+	COMP_TRACE_MARKER();
+
+	struct comp_compositor *c = r->c;
+
+	VkImageView image_view = r->c->target->images[index].view;
+	VkExtent2D extent = {r->c->target->width, r->c->target->height};
+
+	render_gfx_target_resources_init( //
+	    rtr,                          //
+	    &c->nr,                       // struct render_resources
+	    &r->target_render_pass,       //
+	    image_view,                   //
+	    extent);                      //
+}
+
+/*!
+ * @pre comp_target_has_images(r->c->target)
+ * Update r->buffer_count before calling.
+ */
+static void
+renderer_create_renderings_and_fences(struct comp_renderer *r)
+{
+	assert(r->fences == NULL);
+	if (r->buffer_count == 0) {
+		COMP_ERROR(r->c, "Requested 0 command buffers.");
+		return;
+	}
+
+	COMP_DEBUG(r->c, "Allocating %d Command Buffers.", r->buffer_count);
+
+	struct vk_bundle *vk = &r->c->base.vk;
+
+	bool use_compute = r->settings->use_compute;
+	if (!use_compute) {
+		r->rtr_array = U_TYPED_ARRAY_CALLOC(struct render_gfx_target_resources, r->buffer_count);
+
+		render_gfx_render_pass_init(       //
+		    &r->target_render_pass,        // rgrp
+		    &r->c->nr,                     // struct render_resources
+		    r->c->target->format,          //
+		    r->c->target->present_load_op, // load_op
+		    r->c->target->final_layout);   // final_layout
+
+		for (uint32_t i = 0; i < r->buffer_count; ++i) {
+			renderer_build_rendering_target_resources(r, &r->rtr_array[i], i);
+		}
+	}
+
+	r->fences = U_TYPED_ARRAY_CALLOC(VkFence, r->buffer_count);
+
+	for (uint32_t i = 0; i < r->buffer_count; i++) {
+		VkFenceCreateInfo fence_info = {
+		    .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		    .flags = VK_FENCE_CREATE_SIGNALED_BIT,
+		};
+
+		VkResult ret = vk->vkCreateFence( //
+		    vk->device,                   //
+		    &fence_info,                  //
+		    NULL,                         //
+		    &r->fences[i]);               //
+		if (ret != VK_SUCCESS) {
+			COMP_ERROR(r->c, "vkCreateFence: %s", vk_result_string(ret));
+		}
+
+		char buf[] = "Comp Renderer X_XXXX_XXXX";
+		snprintf(buf, ARRAY_SIZE(buf), "Comp Renderer %u", i);
+		VK_NAME_FENCE(vk, r->fences[i], buf);
+	}
+}
+
+static void
+renderer_close_renderings_and_fences(struct comp_renderer *r)
+{
+	struct vk_bundle *vk = &r->c->base.vk;
+	// Renderings
+	if (r->buffer_count > 0 && r->rtr_array != NULL) {
+		for (uint32_t i = 0; i < r->buffer_count; i++) {
+			render_gfx_target_resources_fini(&r->rtr_array[i]);
+		}
+
+		// Close the render pass used for rendering to the target.
+		render_gfx_render_pass_fini(&r->target_render_pass);
+
+		free(r->rtr_array);
+		r->rtr_array = NULL;
+	}
+
+	// Fences
+	if (r->buffer_count > 0 && r->fences != NULL) {
+		for (uint32_t i = 0; i < r->buffer_count; i++) {
+			vk->vkDestroyFence(vk->device, r->fences[i], NULL);
+			r->fences[i] = VK_NULL_HANDLE;
+		}
+		free(r->fences);
+		r->fences = NULL;
+	}
+
+	r->buffer_count = 0;
+	r->acquired_buffer = -1;
+	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
+}
+
+/*!
+ * @brief Ensure that target images and renderings are created, if possible.
+ *
+ * @param r Self pointer
+ * @param force_recreate If true, will tear down and re-create images and renderings, e.g. for a resize
+ *
+ * @returns true if images and renderings are ready and created.
+ *
+ * @private @memberof comp_renderer
+ * @ingroup comp_main
+ */
+static bool
+renderer_ensure_images_and_renderings(struct comp_renderer *r, bool force_recreate)
+{
+	struct comp_compositor *c = r->c;
+	struct comp_target *target = c->target;
+
+	if (!comp_target_check_ready(target)) {
+		// Not ready, so can't render anything.
+		return false;
+	}
+
+	// We will create images if we don't have any images or if we were told to recreate them.
+	bool create = force_recreate || !comp_target_has_images(target) || (r->buffer_count == 0);
+	if (!create) {
+		return true;
+	}
+
+	COMP_DEBUG(c, "Creating images and renderings (force_recreate: %s).", force_recreate ? "true" : "false");
+
+	/*
+	 * This makes sure that any pending command buffer has completed
+	 * and all resources referred by it can now be manipulated. This
+	 * make sure that validation doesn't complain. This is done
+	 * during resize so isn't time critical.
+	 */
+	renderer_wait_queue_idle(r);
+
+	// Make we sure we destroy all dependent things before creating new images.
+	renderer_close_renderings_and_fences(r);
+
+	VkImageUsageFlags image_usage = 0;
+	if (r->settings->use_compute) {
+		image_usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+	} else {
+		image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	}
+
+	if (c->peek) {
+		image_usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	}
+
+	struct comp_target_create_images_info info = {
+	    .extent =
+	        {
+	            .width = r->c->settings.preferred.width,
+	            .height = r->c->settings.preferred.height,
+	        },
+	    .image_usage = image_usage,
+	    .color_space = r->settings->color_space,
+	    .present_mode = r->settings->present_mode,
+	};
+
+	static_assert(ARRAY_SIZE(info.formats) == ARRAY_SIZE(r->c->settings.formats), "Miss-match format array sizes");
+	for (uint32_t i = 0; i < r->c->settings.format_count; i++) {
+		info.formats[info.format_count++] = r->c->settings.formats[i];
+	}
+
+	comp_target_create_images(target, &info, r->c->base.vk.main_queue);
+
+	bool pre_rotate = false;
+	if (target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR ||
+	    target->surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
+		pre_rotate = true;
+	}
+
+	// @todo: is it safe to fail here?
+	if (!render_distortion_images_ensure(&r->c->nr, &r->c->base.vk, r->c->xdev, pre_rotate))
+		return false;
+
+	r->buffer_count = r->c->target->image_count;
+
+	renderer_create_renderings_and_fences(r);
+
+	assert(r->buffer_count != 0);
+
+	return true;
+}
+
+//! Create renderer and initialize non-image-dependent members
+static void
+renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scratch_extent)
+{
+	COMP_TRACE_MARKER();
+
+	r->c = c;
+	r->settings = &c->settings;
+
+#ifdef XRT_OS_OSX
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	renderer_late_render_trace_open(r);
+	renderer_reprojection_trace_open(r);
+#endif
+#endif
+
+	r->acquired_buffer = -1;
+	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
+	r->rtr_array = NULL;
+
+	// Setup the scratch images.
+	bool bret = chl_scratch_ensure( //
+	    &c->scratch,                // scratch
+	    &c->nr,                     // struct render_resources
+	    c->nr.view_count,           // view_count
+	    scratch_extent,             // extent
+	    VK_FORMAT_R8G8B8A8_SRGB);   // format
+	if (!bret) {
+		COMP_ERROR(c, "chl_scratch_ensure: false");
+		assert(bret && "Whelp, can't return a error. But should never really fail.");
+	}
+
+	// Try to early-allocate these, in case we can.
+	renderer_ensure_images_and_renderings(r, false);
+
+	struct vk_bundle *vk = &r->c->base.vk;
+
+	VkResult ret = comp_mirror_init( //
+	    &r->mirror_to_debug_gui,     //
+	    vk,                          //
+	    &c->shaders,                 //
+	    scratch_extent);             //
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(c, "comp_mirror_init: %s", vk_result_string(ret));
+		assert(false && "Whelp, can't return a error. But should never really fail.");
+	}
+}
+
+static void
+renderer_wait_for_last_fence(struct comp_renderer *r)
+{
+	COMP_TRACE_MARKER();
+
+	if (r->fenced_buffer < 0) {
+		return;
+	}
+
+	struct vk_bundle *vk = &r->c->base.vk;
+	VkResult ret;
+
+	uint64_t fence_begin_ns = renderer_stage_begin(r);
+	ret = vk->vkWaitForFences(vk->device, 1, &r->fences[r->fenced_buffer], VK_TRUE, UINT64_MAX);
+	renderer_stage_end(r, "previous_fence_wait", fence_begin_ns, ret);
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(r->c, "vkWaitForFences: %s", vk_result_string(ret));
+	}
+
+#ifdef XRT_OS_OSX
+	uint64_t feedback_begin_ns = renderer_stage_begin(r);
+	if (ret == VK_SUCCESS && r->fenced_frame_id >= 0) {
+		/*
+		 * The previous frame fence guarantees these query results are ready.
+		 * The current frame may already have recorded a vkCmdResetQueryPool,
+		 * but that reset cannot execute until after this function returns and
+		 * the current command buffer is submitted.
+		 */
+		uint64_t gpu_start_ns = 0;
+		uint64_t gpu_end_ns = 0;
+		if (render_resources_get_timestamps(&r->c->nr, &gpu_start_ns, &gpu_end_ns)) {
+			uint64_t now_ns = os_monotonic_get_ns();
+			comp_target_info_gpu(r->c->target, (uint64_t)r->fenced_frame_id, gpu_start_ns, gpu_end_ns,
+			                     now_ns);
+		}
+	}
+
+	if (r->c->nr.apple_source_debug.pending) {
+		if (debug_get_bool_option_log_apple_samples()) {
+			r->c->nr.apple_source_debug.log_count++;
+		}
+		if (debug_get_bool_option_log_apple_samples() &&
+		    (r->c->nr.apple_source_debug.log_count <= 5 || r->c->nr.apple_source_debug.log_count % 120 == 0)) {
+			for (uint32_t i = 0; i < r->c->nr.view_count; ++i) {
+				if ((r->c->nr.apple_source_debug.active_view_mask & (1u << i)) == 0) {
+					continue;
+				}
+
+				const uint8_t *sample = r->c->nr.apple_source_debug.buffers[i].mapped;
+				const bool bgra = render_debug_sample_is_bgra(r->c->nr.apple_source_debug.formats[i]);
+				const uint32_t red = bgra ? 2 : 0;
+				const uint32_t blue = bgra ? 0 : 2;
+				U_LOG_RAW(
+				    "vk-source frame=%lld eye=%u image=%u rgba0=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u)",
+				    (long long)r->c->nr.apple_source_debug.frame_id, i,
+				    r->c->nr.apple_source_debug.image_indices[i], (unsigned)sample[red],
+				    (unsigned)sample[1], (unsigned)sample[blue], (unsigned)sample[3],
+				    (unsigned)sample[4 + red], (unsigned)sample[5], (unsigned)sample[4 + blue],
+				    (unsigned)sample[7]);
+			}
+		}
+
+		r->c->nr.apple_source_debug.pending = false;
+		r->c->nr.apple_source_debug.active_view_mask = 0;
+	}
+
+	if (r->c->nr.apple_target_debug.pending) {
+		if (debug_get_bool_option_log_apple_samples()) {
+			r->c->nr.apple_target_debug.log_count++;
+		}
+		if (debug_get_bool_option_log_apple_samples() &&
+		    (r->c->nr.apple_target_debug.log_count <= 5 || r->c->nr.apple_target_debug.log_count % 120 == 0)) {
+			const uint8_t *sample = r->c->nr.apple_target_debug.buffer.mapped;
+			const bool bgra = render_debug_sample_is_bgra(r->c->nr.apple_target_debug.format);
+			const uint32_t red = bgra ? 2 : 0;
+			const uint32_t blue = bgra ? 0 : 2;
+			U_LOG_RAW(
+			    "vk-target frame=%lld layer=0 rgbaL=(%u,%u,%u,%u) rgbaC=(%u,%u,%u,%u) rgbaR=(%u,%u,%u,%u)",
+			    (long long)r->c->nr.apple_target_debug.frame_id, (unsigned)sample[red], (unsigned)sample[1],
+			    (unsigned)sample[blue], (unsigned)sample[3], (unsigned)sample[4 + red], (unsigned)sample[5],
+			    (unsigned)sample[4 + blue], (unsigned)sample[7], (unsigned)sample[8 + red],
+			    (unsigned)sample[9], (unsigned)sample[8 + blue], (unsigned)sample[11]);
+		}
+
+		r->c->nr.apple_target_debug.pending = false;
+	}
+	renderer_stage_end(r, "previous_gpu_feedback", feedback_begin_ns, ret);
+#endif
+	r->fenced_buffer = -1;
+	r->fenced_frame_id = -1;
+}
+
+static inline bool
+requires_present_acquire_wait(struct comp_renderer *r)
+{
+	/*!
+	 * With shared presentable images there is only one image
+	 * shared between the presentation layer and the compositor,
+	 *
+	 * We only need to wait on the first "acquire image",
+	 * subsueqent frames waiting is redundant.
+	 */
+	if (comp_target_is_shared_presentable_image(r->c->target)) {
+		if (r->shared_present_semaphore_wait_once) {
+			return false;
+		}
+		r->shared_present_semaphore_wait_once = true;
+	}
+
+	return true;
+}
+
+static XRT_CHECK_RESULT VkResult
+renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineStageFlags pipeline_stage_flag)
+{
+	COMP_TRACE_MARKER();
+
+	struct vk_bundle *vk = &r->c->base.vk;
+	int64_t frame_id = r->c->frame.rendering.id;
+	VkResult ret;
+
+	assert(frame_id >= 0);
+
+
+	/*
+	 * Wait for previous frame's work to complete.
+	 */
+
+	// Wait for the last fence, if any.
+	renderer_wait_for_last_fence(r);
+	assert(r->fenced_buffer < 0);
+
+	assert(r->acquired_buffer >= 0);
+	ret = vk->vkResetFences(vk->device, 1, &r->fences[r->acquired_buffer]);
+	VK_CHK_AND_RET(ret, "vkResetFences");
+
+
+	/*
+	 * Semaphore and queue submit info setup.
+	 */
+
+	struct comp_target *ct = r->c->target;
+	struct vk_semaphore_list_wait wait_sems = XRT_STRUCT_INIT;
+	struct vk_semaphore_list_signal signal_sems = XRT_STRUCT_INIT;
+	struct vk_submit_info_builder builder = XRT_STRUCT_INIT;
+
+	if (requires_present_acquire_wait(r)) {
+		ADD_WAIT(wait_sems, ct->semaphores.present_complete, pipeline_stage_flag, false);
+	}
+
+	// Add signal semaphore (render_complete to target).
+	ADD_SIGNAL(signal_sems, ct->semaphores.render_complete, ct->semaphores.render_complete_is_timeline);
+
+	/*
+	 * Build the submit info struct, handles all of the semaphores for us.
+	 * The GPU reuse hook adds its timeline signal when swapchains are tracked
+	 * (macOS service Metal swapchains), and is the plain builder otherwise.
+	 */
+	comp_swapchain_gpu_reuse_submit_info_builder_prepare( //
+	    &builder,                                         //
+	    &wait_sems,                                       //
+	    &cmd,                                             //
+	    1,                                                //
+	    &signal_sems,                                     //
+	    NULL);                                            //
+
+	// Everything prepared, now we are submitting.
+	comp_target_mark_submit_begin(ct, frame_id, os_monotonic_get_ns());
+
+	/*
+	 * The renderer command buffer pool is only accessed from one thread,
+	 * this satisfies the `_locked` requirement of the function. This lets
+	 * us avoid taking a lot of locks. The queue lock will be taken by
+	 * @ref vk_cmd_submit_locked tho.
+	 */
+	uint64_t submit_begin_ns = renderer_stage_begin(r);
+	ret = comp_swapchain_gpu_reuse_vk_cmd_submit_locked(vk, vk->main_queue, 1, &builder.submit_info,
+	                                                    r->fences[r->acquired_buffer]);
+
+	renderer_stage_end(r, "queue_submit", submit_begin_ns, ret);
+
+	// We have now completed the submit, even if we failed.
+	comp_target_mark_submit_end(ct, frame_id, os_monotonic_get_ns());
+
+	// Check after marking as submit complete.
+	VK_CHK_AND_RET(ret, "vk_cmd_submit_locked");
+
+	// This buffer now have a pending fence.
+	r->fenced_buffer = r->acquired_buffer;
+	r->fenced_frame_id = frame_id;
+
+	return ret;
+}
+
+static void
+renderer_acquire_swapchain_image(struct comp_renderer *r)
+{
+	COMP_TRACE_MARKER();
+
+	uint32_t buffer_index = 0;
+	VkResult ret;
+
+	assert(r->acquired_buffer < 0);
+
+	if (!renderer_ensure_images_and_renderings(r, false)) {
+		// Not ready yet.
+		return;
+	}
+	uint64_t acquire_begin_ns = renderer_stage_begin(r);
+	ret = comp_target_acquire(r->c->target, &buffer_index);
+	renderer_stage_end(r, "target_acquire", acquire_begin_ns, ret);
+
+	while ((ret == VK_ERROR_OUT_OF_DATE_KHR) || (ret == VK_SUBOPTIMAL_KHR)) {
+		COMP_DEBUG(r->c, "Received %s.", vk_result_string(ret));
+
+		if (!renderer_ensure_images_and_renderings(r, true)) {
+			// Failed on force recreate.
+			COMP_ERROR(r->c,
+			           "renderer_acquire_swapchain_image: comp_target_acquire was out of date, force "
+			           "re-create image and renderings failed. Probably the target disappeared.");
+			return;
+		}
+
+		/* Acquire image again to silence validation error */
+		ret = comp_target_acquire(r->c->target, &buffer_index);
+	}
+
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(r->c, "comp_target_acquire: %s", vk_result_string(ret));
+	}
+
+	r->acquired_buffer = buffer_index;
+}
+
+static void
+renderer_resize(struct comp_renderer *r)
+{
+	if (!comp_target_check_ready(r->c->target)) {
+		// Can't create images right now.
+		// Just close any existing renderings.
+		renderer_close_renderings_and_fences(r);
+		return;
+	}
+	// Force recreate.
+	renderer_ensure_images_and_renderings(r, true);
+}
+
+static bool
+renderer_present_swapchain_image(struct comp_renderer *r, uint64_t desired_present_time_ns, uint64_t present_slop_ns)
+{
+	COMP_TRACE_MARKER();
+
+	VkResult ret;
+
+	assert(!comp_frame_is_invalid_locked(&r->c->frame.rendering));
+	uint64_t render_complete_signal_value = (uint64_t)r->c->frame.rendering.id;
+
+	ret = comp_target_present(        //
+	    r->c->target,                 //
+	    r->c->base.vk.main_queue,     //
+	    r->acquired_buffer,           //
+	    render_complete_signal_value, //
+	    desired_present_time_ns,      //
+	    present_slop_ns);             //
+	r->acquired_buffer = -1;
+
+	if (ret == VK_ERROR_OUT_OF_DATE_KHR || ret == VK_SUBOPTIMAL_KHR) {
+		renderer_resize(r);
+		return ret != VK_ERROR_OUT_OF_DATE_KHR;
+	}
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(r->c, "vk_swapchain_present: %s", vk_result_string(ret));
+		return false;
+	}
+	return true;
+}
+
+static void
+renderer_wait_for_present(struct comp_renderer *r, uint64_t desired_present_time_ns)
+{
+	struct comp_compositor *c = r->c;
+
+	if (!comp_target_check_ready(c->target)) {
+		return;
+	}
+
+	// For estimating frame misses.
+	uint64_t before_ns = os_monotonic_get_ns();
+
+	if (c->target->wait_for_present_supported) {
+		// reasonable timeout
+		time_duration_ns timeout_ns = c->frame_interval_ns * 2.5f;
+
+		// @note we don't actually care about the return value, just swallow errors, anything *critical* that
+		// may be returned will be handled quite soon by later calls
+		VkResult result = comp_target_wait_for_present(c->target, timeout_ns);
+		(void)result;
+
+		assert(result != VK_ERROR_EXTENSION_NOT_PRESENT);
+	} else {
+		/*
+		 * For direct mode this makes us wait until the last frame has been
+		 * actually shown to the user, this avoids us missing that we have
+		 * missed a frame and miss-predicting the next frame.
+		 *
+		 * Not all drivers follow this behaviour, so KHR_present_wait
+		 * should be preferred in all circumstances.
+		 *
+		 * Only do this if we are ready.
+		 */
+
+		// Do the acquire
+		renderer_acquire_swapchain_image(r);
+	}
+
+	// How long did it take?
+	uint64_t after_ns = os_monotonic_get_ns();
+
+	/*
+	 * Make sure we at least waited 1ms before warning. Then check
+	 * if we are more then 1ms behind when we wanted to present.
+	 */
+	if (before_ns + U_TIME_1MS_IN_NS < after_ns && //
+	    desired_present_time_ns + U_TIME_1MS_IN_NS < after_ns) {
+		uint64_t diff_ns = after_ns - desired_present_time_ns;
+		double diff_ms_f = time_ns_to_ms_f(diff_ns);
+		LOG_FRAME_LAG("Compositor probably missed frame by %.2fms", diff_ms_f);
+	}
+}
+
+static void
+renderer_fini(struct comp_renderer *r)
+{
+	struct vk_bundle *vk = &r->c->base.vk;
+
+#ifdef XRT_OS_OSX
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	if (r->renderer_stage_trace != NULL) {
+		fflush(r->renderer_stage_trace);
+		fclose(r->renderer_stage_trace);
+		r->renderer_stage_trace = NULL;
+	}
+	renderer_late_render_trace_close(r);
+	renderer_reprojection_trace_close(r);
+#endif
+#endif
+
+	// Command buffers
+	renderer_close_renderings_and_fences(r);
+
+	// Do before layer render just in case it holds any references.
+	comp_mirror_fini(&r->mirror_to_debug_gui, vk);
+
+	// Do this after the layer renderer.
+	chl_scratch_free_resources(&r->c->scratch, &r->c->nr);
+}
+
+
+/*
+ *
+ * Graphics
+ *
+ */
+
+/*!
+ * @pre render_gfx_init(render, &c->nr)
+ */
+static XRT_CHECK_RESULT VkResult
+dispatch_graphics(struct comp_renderer *r,
+                  struct render_gfx *render,
+                  struct chl_frame_state *frame_state,
+                  enum comp_target_fov_source fov_source)
+{
+	COMP_TRACE_MARKER();
+
+	struct comp_compositor *c = r->c;
+	struct vk_bundle *vk = &c->base.vk;
+	VkResult ret;
+
+	// Basics
+	const struct comp_layer *layers = c->base.layer_accum.layers;
+	uint32_t layer_count = c->base.layer_accum.layer_count;
+
+	// Resources for the distortion render target.
+	struct render_gfx_target_resources *rtr = &r->rtr_array[r->acquired_buffer];
+
+	// Viewport information.
+	struct render_viewport_data viewport_datas[XRT_MAX_VIEWS];
+	calc_viewport_data(r, viewport_datas, render->r->view_count);
+
+	// Vertex rotation information.
+	struct xrt_matrix_2x2 vertex_rots[XRT_MAX_VIEWS];
+	calc_vertex_rot_data(r, vertex_rots, render->r->view_count);
+
+	// Device view information.
+	struct xrt_fov fovs[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
+	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
+	calc_pose_data(                //
+	    r,                         //
+	    fov_source,                //
+	    fovs,                      //
+	    world_poses_scanout_begin, //
+	    world_poses_scanout_end,   //
+	    eye_poses,                 //
+	    render->r->view_count);    //
+
+#ifdef XRT_OS_OSX
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	renderer_reprojection_trace_frame(r, "graphics", layers, layer_count, world_poses_scanout_begin,
+	                                  world_poses_scanout_end, render->r->view_count, frame_state->data.fast_path,
+	                                  frame_state->data.do_timewarp);
+#endif
+#endif
+
+	// Does everything.
+	chl_frame_state_gfx_default_pipeline( //
+	    frame_state,                      //
+	    render,                           //
+	    layers,                           //
+	    layer_count,                      //
+	    world_poses_scanout_begin,        //
+	    world_poses_scanout_end,          //
+	    eye_poses,                        //
+	    fovs,                             //
+	    rtr,                              //
+	    viewport_datas,                   //
+	    vertex_rots);                     //
+
+	// Everything is ready, submit to the queue.
+	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+	VK_CHK_AND_RET(ret, "renderer_submit_queue");
+
+	return ret;
+}
+
+
+/*
+ *
+ * Compute
+ *
+ */
+
+/*!
+ * @pre render_compute_init(render, &c->nr)
+ */
+static XRT_CHECK_RESULT VkResult
+dispatch_compute(struct comp_renderer *r,
+                 struct render_compute *render,
+                 struct chl_frame_state *frame_state,
+                 enum comp_target_fov_source fov_source)
+{
+	COMP_TRACE_MARKER();
+
+	struct comp_compositor *c = r->c;
+	struct vk_bundle *vk = &c->base.vk;
+	VkResult ret;
+
+	// Basics
+	const struct comp_layer *layers = c->base.layer_accum.layers;
+	uint32_t layer_count = c->base.layer_accum.layer_count;
+
+	// Device view information.
+	struct xrt_fov fovs[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_begin[XRT_MAX_VIEWS];
+	struct xrt_pose world_poses_scanout_end[XRT_MAX_VIEWS];
+	struct xrt_pose eye_poses[XRT_MAX_VIEWS];
+	calc_pose_data(                //
+	    r,                         //
+	    fov_source,                //
+	    fovs,                      //
+	    world_poses_scanout_begin, //
+	    world_poses_scanout_end,   //
+	    eye_poses,                 //
+	    render->r->view_count);    //
+
+	// Submitted poses describe source images. Keep freshly predicted scanout
+	// targets for timewarp on every platform, including remote targets.
+
+
+#ifdef XRT_OS_OSX
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	renderer_reprojection_trace_frame(r, "compute", layers, layer_count, world_poses_scanout_begin,
+	                                  world_poses_scanout_end, render->r->view_count, frame_state->data.fast_path,
+	                                  frame_state->data.do_timewarp);
+#endif
+#endif
+
+	// Target Vulkan resources..
+	VkImage target_image = r->c->target->images[r->acquired_buffer].handle;
+	VkImageView target_storage_view = r->c->target->images[r->acquired_buffer].storage_view;
+	if (target_storage_view == VK_NULL_HANDLE) {
+		target_storage_view = r->c->target->images[r->acquired_buffer].view;
+	}
+	VkImageLayout target_final_layout = r->c->target->final_layout;
+#ifdef XRT_OS_OSX
+	render->r->apple_target_debug.format = (r->c->target->image_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0
+	                                           ? r->c->target->format
+	                                           : VK_FORMAT_UNDEFINED;
+#endif
+
+	// Target view information.
+	struct render_viewport_data target_viewport_datas[XRT_MAX_VIEWS];
+	calc_viewport_data(r, target_viewport_datas, render->r->view_count);
+
+	// Does everything.
+	chl_frame_state_cs_default_pipeline( //
+	    frame_state,                     //
+	    render,                          //
+	    layers,                          //
+	    layer_count,                     //
+	    world_poses_scanout_begin,       //
+	    world_poses_scanout_end,         //
+	    eye_poses,                       //
+	    fovs,                            //
+	    target_image,                    //
+	    target_storage_view,             //
+	    target_final_layout,             //
+	    target_viewport_datas);          //
+
+	// Everything is ready, submit to the queue.
+	ret = renderer_submit_queue(r, render->r->cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+	VK_CHK_AND_RET(ret, "renderer_submit_queue");
+
+	return ret;
+}
+
+
+/*
+ *
+ * Interface functions.
+ *
+ */
+
+XRT_CHECK_RESULT xrt_result_t
+comp_renderer_draw(struct comp_renderer *r)
+{
+	COMP_TRACE_MARKER();
+
+	struct comp_target *ct = r->c->target;
+	struct comp_compositor *c = r->c;
+
+	// Check that we don't have any bad data.
+	assert(!comp_frame_is_invalid_locked(&c->frame.waited));
+	assert(comp_frame_is_invalid_locked(&c->frame.rendering));
+
+	// Move waited frame to rendering frame, clear waited.
+	comp_frame_move_and_clear_locked(&c->frame.rendering, &c->frame.waited);
+
+	// Tell the target we are starting to render, for frame timing.
+	comp_target_mark_begin(ct, c->frame.rendering.id, os_monotonic_get_ns());
+
+	// Are we ready to render? No - skip rendering.
+	if (!comp_target_check_ready(r->c->target)) {
+		// Need to emulate rendering for the timing.
+		//! @todo This should be discard.
+		comp_target_mark_submit_begin(ct, c->frame.rendering.id, os_monotonic_get_ns());
+		comp_target_mark_submit_end(ct, c->frame.rendering.id, os_monotonic_get_ns());
+
+		// Clear the rendering frame.
+		comp_frame_clear_locked(&c->frame.rendering);
+		return XRT_SUCCESS;
+	}
+
+	comp_target_flush(ct);
+
+	comp_target_update_timings(ct);
+
+	if (r->acquired_buffer < 0) {
+		// Ensures that renderings are created.
+		renderer_acquire_swapchain_image(r);
+	}
+
+	comp_target_update_timings(ct);
+
+	// Hardcoded for now.
+	const uint32_t view_count = c->nr.view_count;
+	enum comp_target_fov_source fov_source = COMP_TARGET_FOV_SOURCE_DISTORTION;
+
+	bool fast_path = c->base.frame_params.one_projection_layer_fast_path;
+	bool do_timewarp = !c->debug.atw_off;
+
+#ifdef XRT_OS_OSX
+	// A WiVRn client applies its own ATW, but native OpenXR clients rely on
+	// Monado's compositor to perform late pose correction. Keep the WiVRn
+	// workaround available without disabling ATW for every macOS target.
+	if (debug_get_bool_option_force_atw_off_on_apple()) {
+		do_timewarp = false;
+	}
+#endif
+
+	// Consistency check.
+	assert(!fast_path || c->base.layer_accum.layer_count >= 1);
+
+	// For scratch image debugging.
+	struct chl_frame_state frame_state;
+	chl_frame_state_init( //
+	    &frame_state,     //
+	    &c->nr,           //
+	    view_count,       //
+	    do_timewarp,      //
+	    fast_path,        //
+	    &c->scratch);     //
+
+	bool use_compute = r->settings->use_compute;
+	struct render_gfx render_g = {0};
+	struct render_compute render_c = {0};
+
+#ifdef XRT_OS_OSX
+	c->nr.apple_source_debug.frame_id = c->frame.rendering.id;
+	c->nr.apple_target_debug.frame_id = c->frame.rendering.id;
+#endif
+
+#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+	renderer_late_render_trace_begin(r);
+#endif
+
+	uint64_t dispatch_begin_ns = renderer_stage_begin(r);
+	VkResult res = VK_SUCCESS;
+	if (use_compute) {
+		render_compute_init(&render_c, &c->nr);
+		res = dispatch_compute(r, &render_c, &frame_state, fov_source);
+	} else {
+		render_gfx_init(&render_g, &c->nr);
+		res = dispatch_graphics(r, &render_g, &frame_state, fov_source);
+	}
+	renderer_stage_end(r, "draw_dispatch", dispatch_begin_ns, res);
+	if (res != VK_SUCCESS) {
+		return XRT_ERROR_VULKAN;
+	}
+
+#ifdef XRT_OS_OSX
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	renderer_late_render_trace_frame(r);
+#endif
+#endif
+
+#ifdef XRT_FEATURE_WINDOW_PEEK
+	if (c->peek) {
+		switch (comp_window_peek_get_eye(c->peek)) {
+		case COMP_WINDOW_PEEK_EYE_LEFT: {
+			uint32_t scratch_index = frame_state.scratch_state.views[0].index;
+			struct comp_scratch_single_images *view = &c->scratch.views[0].cssi;
+
+			comp_window_peek_blit(                 //
+			    c->peek,                           //
+			    view->images[scratch_index].image, //
+			    view->info.width,                  //
+			    view->info.height);                //
+		} break;
+		case COMP_WINDOW_PEEK_EYE_RIGHT: {
+			uint32_t scratch_index = frame_state.scratch_state.views[1].index;
+			struct comp_scratch_single_images *view = &c->scratch.views[1].cssi;
+
+			comp_window_peek_blit(                 //
+			    c->peek,                           //
+			    view->images[scratch_index].image, //
+			    view->info.width,                  //
+			    view->info.height);                //
+		} break;
+		case COMP_WINDOW_PEEK_EYE_BOTH:
+			/* TODO: display the undistorted image */
+			comp_window_peek_blit(c->peek, c->target->images[r->acquired_buffer].handle, c->target->width,
+			                      c->target->height);
+			break;
+		}
+	}
+#endif
+
+	uint64_t present_begin_ns = renderer_stage_begin(r);
+	bool present_success = renderer_present_swapchain_image(r, c->frame.rendering.desired_present_time_ns,
+	                                                        c->frame.rendering.present_slop_ns);
+
+	renderer_stage_end(r, "present_enqueue", present_begin_ns, present_success ? 0 : -1);
+
+	// Save for timestamps below.
+	uint64_t frame_id = c->frame.rendering.id;
+	uint64_t desired_present_time_ns = c->frame.rendering.desired_present_time_ns;
+	uint64_t predicted_display_time_ns = c->frame.rendering.predicted_display_time_ns;
+
+	// Clear the rendered frame.
+	comp_frame_clear_locked(&c->frame.rendering);
+
+	xrt_result_t xret = XRT_SUCCESS;
+	comp_mirror_fixup_ui_state(&r->mirror_to_debug_gui, c);
+	if (comp_mirror_is_ready_and_active(&r->mirror_to_debug_gui, c, predicted_display_time_ns)) {
+
+		uint32_t scratch_index = frame_state.scratch_state.views[0].index;
+		struct comp_scratch_single_images *view = &c->scratch.views[0].cssi;
+		struct render_scratch_color_image *rsci = &view->images[scratch_index];
+		VkExtent2D extent = {view->info.width, view->info.width};
+
+		// Used for both, want clamp to edge to no bring in black.
+		VkSampler clamp_to_edge = c->nr.samplers.clamp_to_edge;
+
+		// Covers the whole view.
+		struct xrt_normalized_rect rect = {0, 0, 1.0f, 1.0f};
+
+		xret = comp_mirror_do_blit(    //
+		    &r->mirror_to_debug_gui,   //
+		    &c->base.vk,               //
+		    frame_id,                  //
+		    predicted_display_time_ns, //
+		    rsci->image,               //
+		    rsci->srgb_view,           //
+		    clamp_to_edge,             //
+		    extent,                    //
+		    rect);                     //
+	}
+
+	/*
+	 * This fixes a lot of validation issues as it makes sure that the
+	 * command buffer has completed and all resources referred by it can
+	 * now be manipulated.
+	 *
+	 * This is done after a swap so isn't time critical.
+	 */
+	renderer_wait_queue_idle(r);
+
+	/*
+	 * Free any resources and finalize the scratch images,
+	 * which sends them send to debug UI if it is active.
+	 */
+	chl_frame_state_fini(&frame_state);
+
+	bool collect_gpu_timestamps = xret == XRT_SUCCESS;
+#ifdef XRT_OS_OSX
+	/*
+	 * Reading the current frame's timestamps here blocks for roughly 3.7 ms on
+	 * macOS. renderer_wait_for_last_fence() reads the previous frame's instead.
+	 */
+	collect_gpu_timestamps = false;
+#endif
+
+	// Check timestamps.
+	if (collect_gpu_timestamps) {
+		/*
+		 * Get timestamps of GPU work (if available).
+		 */
+
+		uint64_t gpu_start_ns, gpu_end_ns;
+		if (render_resources_get_timestamps(&c->nr, &gpu_start_ns, &gpu_end_ns)) {
+			uint64_t now_ns = os_monotonic_get_ns();
+			comp_target_info_gpu(ct, frame_id, gpu_start_ns, gpu_end_ns, now_ns);
+		}
+	}
+
+
+	/*
+	 * Free resources.
+	 */
+
+	if (use_compute) {
+		render_compute_fini(&render_c);
+	} else {
+		render_gfx_fini(&render_g);
+	}
+
+	if (present_success) {
+		renderer_wait_for_present(r, desired_present_time_ns);
+	}
+
+	comp_target_update_timings(ct);
+
+	return xret;
+}
+
+struct comp_renderer *
+comp_renderer_create(struct comp_compositor *c, VkExtent2D scratch_extent)
+{
+	struct comp_renderer *r = U_TYPED_CALLOC(struct comp_renderer);
+
+	renderer_init(r, c, scratch_extent);
+
+	return r;
+}
+
+void
+comp_renderer_destroy(struct comp_renderer **ptr_r)
+{
+	if (ptr_r == NULL) {
+		return;
+	}
+
+	struct comp_renderer *r = *ptr_r;
+	if (r == NULL) {
+		return;
+	}
+
+	renderer_fini(r);
+
+	free(r);
+	*ptr_r = NULL;
+}
+
+void
+comp_renderer_add_debug_vars(struct comp_renderer *self)
+{
+	struct comp_renderer *r = self;
+
+	comp_mirror_add_debug_vars(&r->mirror_to_debug_gui, r->c);
+}

@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "scenario": "budget",
+  "global_object_cap": 8,
+  "client_object_cap": 2,
+  "retained_failed_swapchains": 7,
+  "peak_tracked_objects": 8,
+  "healthy_fresh_latches_during_failures": 334,
+  "replacement_fresh_latches": 52,
+  "service_start_count": 1,
+  "pre_import_rejections": 4
+}

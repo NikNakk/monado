@@ -1,0 +1,16 @@
+[
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 24000,
+      "elapsed_ns": 92164948125,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  }
+]

@@ -1,0 +1,1564 @@
+diff --git a/scripts/macos/run-gpu-sync-service.py b/scripts/macos/run-gpu-sync-service.py
+index a1a713593..e81e0734d 100644
+--- a/scripts/macos/run-gpu-sync-service.py
++++ b/scripts/macos/run-gpu-sync-service.py
+@@ -24,11 +24,12 @@ def main():
+     parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
+     parser.add_argument('--unique-output', action='store_true')
+     parser.add_argument('--fault', choices=['missing', 'disconnect'], default='missing')
++    parser.add_argument('--budget-suite', action='store_true', help='Test per-client rejection and repeated failed clients against a small global cap')
+     parser.add_argument('--suite', action='store_true', help='Test a healthy client, failed overlay and replacement client in one service')
+     args = parser.parse_args()
+     if not 1 <= args.client_timeout <= 300:
+         parser.error('--client-timeout must be between 1 and 300 seconds')
+-    if args.suite and (args.client or args.benchmark):
++    if (args.suite or args.budget_suite) and (args.client or args.benchmark):
+         parser.error('--suite cannot be combined with --client or --benchmark')
+     build = args.build.resolve()
+     label = f'org.freedesktop.monado.gpu-sync-service.{os.getpid()}'
+@@ -54,6 +55,8 @@ def main():
+         if args.benchmark:
+             env.update(XRT_LOG='warn', XRT_COMPOSITOR_LOG_APPLE_SAMPLES='0',
+                        XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE='0')
++        if args.budget_suite:
++            env.update(XRT_MACOS_GPU_CLIENT_OBJECTS='2', XRT_MACOS_GPU_GLOBAL_OBJECTS='8')
+         if args.headset:
+             env.update(SIMULATED_ENABLE='0', XRT_COMPOSITOR_FORCE_DEBUG_IMAGE='0',
+                        XRT_MACOS_PREVENT_DISPLAY_SLEEP='1', PSVR2_CAMERA_STREAMS='0')
+@@ -61,6 +64,10 @@ def main():
+                      'benchmark': args.benchmark, 'powermetrics': 'not collected; power/frequency unavailable',
+                      'game_mode': 'not requested'}
+         telemetry['headset'] = args.headset
++        telemetry['gpu_policy'] = {key: env.get(key, default) for key, default in {
++            'XRT_MACOS_FRAME_READINESS_MARGIN_US': '6000', 'XRT_MACOS_CLIENT_GPU_HUNG_MS': '500',
++            'XRT_MACOS_GPU_CLIENT_MB': '512', 'XRT_MACOS_GPU_CLIENT_OBJECTS': '64',
++            'XRT_MACOS_GPU_GLOBAL_OBJECTS': '256'}.items()}
+         for key, command in [('power', ['pmset', '-g', 'batt']), ('settings', ['pmset', '-g', 'custom']),
+                              ('os', ['sw_vers']), ('background_cpu', ['ps', '-A', '-o', '%cpu,comm'])]:
+             snapshot = subprocess.run(command, capture_output=True, text=True, timeout=5)
+@@ -78,6 +85,10 @@ def main():
+                 if time.monotonic() >= deadline:
+                     raise RuntimeError('Service socket did not become ready; inspect service.log')
+                 time.sleep(.05)
++            if args.headset and 'Debug image target used' in (out/'service.log').read_text():
++                raise RuntimeError('Requested headset is unavailable; offscreen fallback cannot validate presentation')
++            if args.budget_suite:
++                return run_budget_suite(build, out, env)
+             if args.suite:
+                 return run_suite(build, out, env, args.fault, args.headset)
+             command = args.client or [str(build/'tests/tests_macos_openxr_loaderless_probe')]
+@@ -90,8 +101,11 @@ def main():
+             return result.returncode
+         finally:
+             subprocess.run(['launchctl', 'bootout', domain, str(plist)], timeout=10, check=False)
+-            if args.suite and (out/'summary.json').exists():
+-                verify_suite(out, args.fault, args.headset)
++            if (out/'summary.json').exists():
++                if args.budget_suite:
++                    verify_budget_suite(out)
++                elif args.suite:
++                    verify_suite(out, args.fault, args.headset)
+ 
+ 
+ def events(path):
+@@ -193,9 +207,73 @@ def run_suite(build, out, env, fault_mode, headset=False):
+                     client.kill()
+                 client.wait(timeout=5)
+     (out/'summary.json').write_text(json.dumps(dict(target=('macos' if headset else 'debug_image'), clients=results,
+-        status='PASS', note='GPU trace verification follows service shutdown'), indent=2)+'\n')
++        status='PENDING', note='GPU trace verification follows service shutdown'), indent=2)+'\n')
+     return 0
+ 
+ 
++def run_budget_suite(build, out, env):
++    executable = str(build/'tests/tests_macos_service_gpu_sync')
++    def client(name, mode, frames):
++        with (out/(name+'.txt')).open('w') as log:
++            subprocess.run([executable, mode, str(frames), '40'], env=env,
++                           stdout=log, stderr=log, check=True, timeout=45)
++    with (out/'healthy.txt').open('w') as log:
++        healthy = subprocess.Popen([executable, 'normal', '900', '40'], env=env, stdout=log, stderr=log)
++        try:
++            deadline = time.monotonic()+10
++            while (out/'healthy.txt').read_text().count('"event":"frame"') < 10:
++                if healthy.poll() is not None or time.monotonic() >= deadline:
++                    raise RuntimeError('Healthy budget client did not start')
++                time.sleep(.01)
++            client('per-client', 'budget', 1)
++            for index in range(7):
++                client('failed-'+str(index), 'missing', 120)
++            client('global-rejected', 'exhausted', 1)
++            if healthy.wait(timeout=40) != 0:
++                raise RuntimeError('Healthy rendering failed at global allocation cap')
++            client('replacement', 'normal', 60)
++        finally:
++            if healthy.poll() is None:
++                healthy.kill()
++            healthy.wait(timeout=5)
++    (out/'summary.json').write_text(json.dumps(dict(status='PENDING',
++        scenario='budget', global_object_cap=8, client_object_cap=2), indent=2)+'\n')
++    return 0
++
++
++def verify_budget_suite(out):
++    log = (out/'service.log').read_text()
++    quarantines = dict((identity, address) for address, identity in re.findall(r'GPU reuse quarantine: swapchain=(0x[0-9a-f]+).* id=(\d+)', log))
++    reclaimed = set(re.findall(r'GPU reuse reclaim:.* id=(\d+)', log))
++    retained = {identity: address for identity, address in quarantines.items() if identity not in reclaimed}
++    if len(retained) != 7 or log.count('GPU allocation rejected before import') < 2:
++        raise RuntimeError('Missing repeated-failure retention or pre-import cap evidence')
++    for address in retained.values():
++        if re.search(r'producer ready wait: swapchain='+address+r' image=\d+ timeline=22 ', log):
++            raise RuntimeError('Repeated failed producer value reached Vulkan')
++    failures = [events(out/('failed-'+str(i)+'.txt')) for i in range(7)]
++    start = next(r['time_ns'] for r in failures[0] if r['event'] == 'fault')
++    last_start = next(r['time_ns'] for r in failures[-1] if r['event'] == 'fault')
++    finish = last_start+next(r['recovery_ns'] for r in failures[-1] if r['event'] == 'result')
++    mapping = list(csv.DictReader(next(out.glob('*client_frame_map.csv')).open()))
++    fresh = [r for r in mapping if r['client_slot'] == '0' and r['reused'] == '0'
++             and start <= int(r['latch_ns']) <= finish]
++    replacement = [r for r in events(out/'replacement.txt') if r['event'] == 'frame']
++    replacement_latches = [r for r in mapping if r['reused'] == '0'
++        and replacement[0]['begin_ns'] <= int(r['latch_ns']) <= replacement[-1]['end_ns']]
++    peak = max(map(int, re.findall(r' objects=(\d+)', log)))
++    if len(fresh) < 100 or len(replacement_latches) < 10 or peak > 8 or log.count('starting up...') != 1:
++        raise RuntimeError('Budget exhaustion damaged healthy rendering or replacement recovery')
++    for name in ['per-client', 'global-rejected']:
++        result = next(r for r in events(out/(name+'.txt')) if r['event'] == 'result')
++        if not result.get('budget_rejected') or result['status'] != 'PASS':
++            raise RuntimeError('Allocation cap was not explicitly rejected')
++    summary = json.loads((out/'summary.json').read_text())
++    summary.update(status='PASS', retained_failed_swapchains=len(retained), peak_tracked_objects=peak,
++        healthy_fresh_latches_during_failures=len(fresh), replacement_fresh_latches=len(replacement_latches),
++        service_start_count=1, pre_import_rejections=log.count('GPU allocation rejected before import'))
++    (out/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
++
++
+ if __name__ == '__main__':
+     raise SystemExit(main())
+diff --git a/scripts/macos/run-gpu-sync.py b/scripts/macos/run-gpu-sync.py
+index 9fb1946ae..ee4241438 100644
+--- a/scripts/macos/run-gpu-sync.py
++++ b/scripts/macos/run-gpu-sync.py
+@@ -11,7 +11,7 @@ import subprocess
+ import time
+ 
+ SCENARIOS = ['normal', 'delayed', 'missing', 'future', 'nonmonotonic', 'exit-before',
+-             'exit-after', 'consumer-delay', 'multi-queue', 'broken-queue', 'reuse', 'idle', 'cancel-callback']
++             'exit-after', 'consumer-delay', 'multi-queue', 'broken-queue', 'reuse', 'idle', 'cancel-callback', 'exit-inflight', 'consumer-gpu-delay', 'concurrent-producers']
+ 
+ def main():
+     p = argparse.ArgumentParser(description=__doc__)
+diff --git a/src/xrt/compositor/main/comp_compositor.c b/src/xrt/compositor/main/comp_compositor.c
+index a6c264e2c..4a065b2dd 100644
+--- a/src/xrt/compositor/main/comp_compositor.c
++++ b/src/xrt/compositor/main/comp_compositor.c
+@@ -575,6 +575,18 @@ compositor_destroy(struct xrt_compositor *xc)
+ 
+ 	COMP_DEBUG(c, "COMP_DESTROY");
+ 
++#ifdef XRT_OS_OSX
++	// Final device-owned work is distinct from client cancellation. A bounded
++	// drain must succeed before any referenced resources or callback state is freed.
++	bool target_drained = comp_window_macos_prepare_destroy(c->target);
++	comp_swapchain_gpu_reuse_collect(vk, false);
++	if (!target_drained || comp_swapchain_gpu_reuse_device_in_use(vk) ||
++	    !comp_renderer_drain(c->r, 500 * U_TIME_1MS_IN_NS)) {
++		U_LOG_W("GPU compositor teardown retained until process exit: bounded drain incomplete");
++		u_var_remove_root(c);
++		return;
++	}
++#endif
+ 	// Need to do this as early as possible.
+ 	u_var_remove_root(c);
+ 
+diff --git a/src/xrt/compositor/main/comp_renderer.c b/src/xrt/compositor/main/comp_renderer.c
+index ed01f9733..b75fb2e9f 100644
+--- a/src/xrt/compositor/main/comp_renderer.c
++++ b/src/xrt/compositor/main/comp_renderer.c
+@@ -1933,6 +1933,16 @@ comp_renderer_create(struct comp_compositor *c, VkExtent2D scratch_extent)
+ 	return r;
+ }
+ 
++#ifdef XRT_OS_OSX
++bool
++comp_renderer_drain(struct comp_renderer *r, uint64_t timeout_ns)
++{
++	if (r == NULL || r->fenced_buffer < 0) return true;
++	struct vk_bundle *vk = &r->c->base.vk;
++	return vk->vkWaitForFences(vk->device, 1, &r->fences[r->fenced_buffer], VK_TRUE, timeout_ns) == VK_SUCCESS;
++}
++#endif
++
+ void
+ comp_renderer_destroy(struct comp_renderer **ptr_r)
+ {
+diff --git a/src/xrt/compositor/main/comp_renderer.h b/src/xrt/compositor/main/comp_renderer.h
+index 3db8331d0..b40560cf4 100644
+--- a/src/xrt/compositor/main/comp_renderer.h
++++ b/src/xrt/compositor/main/comp_renderer.h
+@@ -48,6 +48,11 @@ comp_renderer_create(struct comp_compositor *c, VkExtent2D scratch_extent);
+  * @public @memberof comp_renderer
+  * @ingroup comp_main
+  */
++#ifdef XRT_OS_OSX
++bool
++comp_renderer_drain(struct comp_renderer *r, uint64_t timeout_ns);
++#endif
++
+ void
+ comp_renderer_destroy(struct comp_renderer **ptr_r);
+ 
+diff --git a/src/xrt/compositor/main/comp_window.h b/src/xrt/compositor/main/comp_window.h
+index 65fad79c5..b4892f28e 100644
+--- a/src/xrt/compositor/main/comp_window.h
++++ b/src/xrt/compositor/main/comp_window.h
+@@ -148,6 +148,9 @@ extern const struct comp_target_factory comp_target_factory_mswin;
+ struct comp_target *
+ comp_window_macos_create(struct comp_compositor *c);
+ 
++bool
++comp_window_macos_prepare_destroy(struct comp_target *ct);
++
+ extern const struct comp_target_factory comp_target_factory_macos;
+ #endif // XRT_OS_OSX
+ 
+diff --git a/src/xrt/compositor/main/comp_window_macos.m b/src/xrt/compositor/main/comp_window_macos.m
+index d11dcc76c..1b38b0dbf 100644
+--- a/src/xrt/compositor/main/comp_window_macos.m
++++ b/src/xrt/compositor/main/comp_window_macos.m
+@@ -175,6 +175,7 @@
+ 	bool passthrough_sinks_attached;
+ 	id<MTLSharedEvent> render_complete_event;
+ 	atomic_bool image_in_flight[MACOS_TARGET_IMAGE_COUNT];
++	atomic_bool present_completion_failed;
+ 	dispatch_group_t present_command_group;
+ 	dispatch_queue_t present_worker_queue;
+ 	dispatch_group_t present_worker_group;
+@@ -502,6 +503,7 @@ @interface MonadoCADisplayLinkSource : NSObject {
+ 	dispatch_semaphore_t _finished;
+ 	BOOL _created;
+ 	BOOL _stop;
++	BOOL _joined;
+ 	uint64_t _tickCount;
+ 	FILE *_callbackTrace;
+ 	uint64_t _traceRows;
+@@ -512,6 +514,7 @@ - (instancetype)initWithWindow:(struct comp_window_macos *)cwm displayID:(CGDire
+ - (BOOL)isRunning;
+ - (void)setRunning:(BOOL)running;
+ - (void)shutdown;
++- (BOOL)shutdownBefore:(dispatch_time_t)deadline;
+ @end
+ 
+ @implementation MonadoCADisplayLinkSource
+@@ -680,11 +683,19 @@ - (void)setRunning:(BOOL)running
+ 	        waitUntilDone:YES];
+ }
+ 
+-- (void)shutdown
++- (BOOL)shutdownBefore:(dispatch_time_t)deadline
+ {
+-	// Performing the selector also wakes the run loop so that it sees _stop.
++	if (_joined) return YES;
++	// Keep the source/window alive on timeout: its run loop may still use them.
+ 	[self performSelector:@selector(applyStop) onThread:_thread withObject:nil waitUntilDone:NO];
+-	dispatch_semaphore_wait(_finished, DISPATCH_TIME_FOREVER);
++	if (dispatch_semaphore_wait(_finished, deadline) != 0) return NO;
++	_joined = YES;
++	return YES;
++}
++
++- (void)shutdown
++{
++	(void)[self shutdownBefore:DISPATCH_TIME_FOREVER];
+ }
+ 
+ @end
+@@ -1838,7 +1849,7 @@ - (void)shutdown
+ 	uint64_t after_vk_wait_ns = os_monotonic_get_ns();
+ 	if (ret != VK_SUCCESS) {
+ 		COMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));
+-		macos_release_source_image(cwm, index);
++		atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
+ 		return ret;
+ 	}
+ 
+@@ -2063,7 +2074,8 @@ - (void)shutdown
+ 				  completed_gpu_end_s, traced_shared_event_wait ? 1u : 0u);
+ 			  funlockfile(complete_trace);
+ 		  }
+-		  macos_release_source_image(cwm, traced_index);
++		  if (status == MTLCommandBufferStatusCompleted) macos_release_source_image(cwm, traced_index);
++		  else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
+ 		  dispatch_group_leave(command_group);
+ 		}];
+ 		/* Passive observer of Metal scheduling. The timed-present convenience
+@@ -2230,7 +2242,9 @@ - (void)shutdown
+ 					    COMP_ERROR(cwm->base.base.c, "Metal retirement wait failed: %s",
+ 						       [[[completed_buffer error] localizedDescription] UTF8String]);
+ 				    }
+-				    macos_release_source_image(cwm, retired_job.image_index);
++				    if ([completed_buffer status] == MTLCommandBufferStatusCompleted)
++				        macos_release_source_image(cwm, retired_job.image_index);
++				    else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
+ 				    dispatch_group_leave(cwm->present_command_group);
+ 				  }];
+ 				  [command_buffer commit];
+@@ -2260,7 +2274,8 @@ - (void)shutdown
+ 				  COMP_ERROR(ct->c, "Vulkan wait while retiring a dropped macOS present job: %s",
+ 					     vk_result_string(ret));
+ 			  }
+-			  macos_release_source_image(cwm, retired_job.image_index);
++			  if (ret == VK_SUCCESS) macos_release_source_image(cwm, retired_job.image_index);
++			  else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
+ 			  dispatch_group_leave(cwm->present_command_group);
+ 		  }
+ 	  }
+@@ -2634,6 +2649,42 @@ - (void)shutdown
+ 	free(cwm);
+ }
+ 
++bool
++comp_window_macos_prepare_destroy(struct comp_target *ct)
++{
++	if (ct == NULL || ct->destroy != comp_window_macos_destroy) return true;
++	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
++	dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC);
++	atomic_store_explicit(&cwm->passthrough_shutdown, true, memory_order_release);
++	struct xrt_device *xdev = ct->c != NULL ? ct->c->xdev : NULL;
++	if (cwm->passthrough_sinks_attached && xdev != NULL && xdev->set_passthrough_sinks != NULL) {
++		(void)xdev->set_passthrough_sinks(xdev, NULL, NULL);
++		cwm->passthrough_sinks_attached = false;
++	}
++	if (cwm->ca_display_link != NULL) {
++		if (@available(macOS 14.0, *)) {
++			MonadoCADisplayLinkSource *source = (MonadoCADisplayLinkSource *)cwm->ca_display_link;
++			if (![source shutdownBefore:deadline]) return false;
++		}
++	}
++	macos_display_link_destroy(cwm);
++	pthread_mutex_lock(&cwm->present_worker_mutex);
++	cwm->present_worker_shutdown = true;
++	struct macos_present_job pending_job = cwm->pending_present_job;
++	bool had_pending_job = cwm->pending_present_job_valid;
++	cwm->pending_present_job_valid = false;
++	pthread_mutex_unlock(&cwm->present_worker_mutex);
++	if (had_pending_job) macos_retire_unpresented_job(cwm, &pending_job, "shutdown_drop", 0);
++
++	dispatch_group_t groups[] = {cwm->present_worker_group, cwm->present_command_group, cwm->trace_present_group};
++	// One shared finite deadline. Failed drain retains the entire target/device,
++	// including callback state, rather than freeing objects still used by Metal.
++	for (uint32_t i = 0; i < ARRAY_SIZE(groups); i++) {
++		if (groups[i] != NULL && dispatch_group_wait(groups[i], deadline) != 0) return false;
++	}
++	return !atomic_load_explicit(&cwm->present_completion_failed, memory_order_acquire);
++}
++
+ static struct comp_target *
+ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_client *client)
+ {
+diff --git a/src/xrt/compositor/multi/comp_multi_compositor.c b/src/xrt/compositor/multi/comp_multi_compositor.c
+index f9d2dacf6..7c9feb9f7 100644
+--- a/src/xrt/compositor/multi/comp_multi_compositor.c
++++ b/src/xrt/compositor/multi/comp_multi_compositor.c
+@@ -49,6 +49,7 @@
+ #endif
+ 
+ #ifdef XRT_OS_OSX
++DEBUG_GET_ONCE_NUM_OPTION(client_gpu_margin_us, "XRT_MACOS_FRAME_READINESS_MARGIN_US", 6000)
+ DEBUG_GET_ONCE_NUM_OPTION(client_gpu_hung_ms, "XRT_MACOS_CLIENT_GPU_HUNG_MS", 500)
+ static int64_t
+ client_gpu_hung_ns(void)
+@@ -395,7 +396,19 @@ wait_for_scheduled_free(struct multi_compositor *mc)
+ 
+ 	// Block here if the scheduled slot is not clear.
+ 	while (v_mc->scheduled.active) {
++#ifdef XRT_OS_OSX
++		if (!os_thread_helper_is_running(&mc->wait_thread.oth)) {
++			os_mutex_unlock(&mc->slot_lock);
++			return;
++		}
++#endif
+ 		int64_t now_ns = os_monotonic_get_ns();
++#ifdef XRT_OS_OSX
++		if (now_ns - timing_start_ns >= client_gpu_hung_ns()) {
++			U_LOG_W("Completed-frame scheduling expired; replacing older completed frame");
++			break; // Completed work is not a hung producer; keep delivery/ownership safe.
++		}
++#endif
+ 
+ 		// This frame is for the next frame, drop the old one no matter what.
+ 		if (time_is_within_half_ms(mc->progress.data.display_time_ns, mc->slot_next_frame_display)) {
+@@ -553,6 +566,9 @@ run_func(void *ptr)
+ 
+ 		os_mutex_lock(&mc->msc->list_and_timing_lock);
+ 		u_pa_mark_gpu_done(mc->upa, frame_id, now_ns);
++#ifdef XRT_OS_OSX
++		mc->progress.gpu_ready_ns = now_ns;
++#endif
+ 		os_mutex_unlock(&mc->msc->list_and_timing_lock);
+ 
+ 		// Wait for the delivery slot.
+@@ -683,7 +699,18 @@ multi_compositor_create_swapchain(struct xrt_compositor *xc,
+ 
+ 	struct multi_compositor *mc = multi_compositor(xc);
+ 
+-	return xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
++#ifdef XRT_OS_OSX
++	struct xrt_swapchain_create_properties properties = {0};
++	xrt_result_t result = xrt_comp_get_swapchain_create_properties(&mc->msc->xcn->base, info, &properties);
++	if (result != XRT_SUCCESS) return result;
++	result = comp_gpu_client_budget_reserve(mc->gpu_budget, info, properties.image_count, NULL);
++	if (result != XRT_SUCCESS) return result;
++	result = xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
++	comp_gpu_client_budget_finish();
++#else
++	xrt_result_t result = xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
++#endif
++	return result;
+ }
+ 
+ static xrt_result_t
+@@ -697,7 +724,15 @@ multi_compositor_import_swapchain(struct xrt_compositor *xc,
+ 
+ 	struct multi_compositor *mc = multi_compositor(xc);
+ 
+-	return xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
++#ifdef XRT_OS_OSX
++	xrt_result_t result = comp_gpu_client_budget_reserve(mc->gpu_budget, info, image_count, native_images);
++	if (result != XRT_SUCCESS) return result;
++	result = xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
++	comp_gpu_client_budget_finish();
++#else
++	xrt_result_t result = xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
++#endif
++	return result;
+ }
+ 
+ static xrt_result_t
+@@ -1142,6 +1177,9 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
+ 
+ 		os_mutex_lock(&mc->msc->list_and_timing_lock);
+ 		u_pa_mark_gpu_done(mc->upa, frame_id, now_ns);
++#ifdef XRT_OS_OSX
++		mc->progress.gpu_ready_ns = now_ns;
++#endif
+ 		os_mutex_unlock(&mc->msc->list_and_timing_lock);
+ 
+ 		wait_for_scheduled_free(mc);
+@@ -1294,6 +1332,9 @@ multi_compositor_destroy(struct xrt_compositor *xc)
+ 	os_precise_sleeper_deinit(&mc->scheduled_sleeper);
+ 
+ 	os_mutex_destroy(&mc->slot_lock);
++#ifdef XRT_OS_OSX
++	comp_gpu_client_budget_destroy(&mc->gpu_budget);
++#endif
+ 
+ 	free(mc);
+ }
+@@ -1321,7 +1362,21 @@ multi_compositor_deliver_any_frames(struct multi_compositor *mc, int64_t display
+ 		return;
+ 	}
+ 
+-	if (time_is_greater_then_or_within_half_ms(display_time_ns, mc->scheduled.data.display_time_ns)) {
++#ifdef XRT_OS_OSX
++	int64_t margin_us = debug_get_num_option_client_gpu_margin_us();
++	if (margin_us < 0 || margin_us > 100000) {
++		margin_us = 6000;
++	}
++	int64_t deadline_ns = display_time_ns - margin_us * U_TIME_1US_IN_NS;
++	if (mc->scheduled.gpu_ready_ns > deadline_ns) {
++		macos_client_gpu_trace_event("readiness_deferred", mc->scheduled.data.frame_id, 0,
++		                             mc->scheduled.gpu_ready_ns - deadline_ns);
++		os_mutex_unlock(&mc->slot_lock);
++		return; // Reproject delivered; retain scheduled ownership for a later tick.
++	}
++#endif
++	bool deliver = time_is_greater_then_or_within_half_ms(display_time_ns, mc->scheduled.data.display_time_ns);
++	if (deliver) {
+ 		slot_move_and_clear_locked(mc, &mc->delivered, &mc->scheduled);
+ 
+ 		int64_t frame_time_ns = mc->delivered.data.display_time_ns;
+@@ -1354,6 +1409,14 @@ multi_compositor_create(struct multi_system_compositor *msc,
+ 	COMP_TRACE_MARKER();
+ 
+ 	struct multi_compositor *mc = U_TYPED_CALLOC(struct multi_compositor);
++	if (mc == NULL) return XRT_ERROR_ALLOCATION;
++#ifdef XRT_OS_OSX
++	mc->gpu_budget = comp_gpu_client_budget_create();
++	if (mc->gpu_budget == NULL) { free(mc); return XRT_ERROR_ALLOCATION; }
++	U_LOG_I("Client GPU policy: hung_ms=%lld readiness_margin_us=%ld",
++	        (long long)(client_gpu_hung_ns() / U_TIME_1MS_IN_NS),
++	        debug_get_num_option_client_gpu_margin_us());
++#endif
+ 
+ 	// Initialize state - base session is anything that's not an overlay
+ 	mc->state.is_base_session = !xsi->is_overlay;
+diff --git a/src/xrt/compositor/multi/comp_multi_private.h b/src/xrt/compositor/multi/comp_multi_private.h
+index 98a495d2d..be2d6e5da 100644
+--- a/src/xrt/compositor/multi/comp_multi_private.h
++++ b/src/xrt/compositor/multi/comp_multi_private.h
+@@ -85,6 +85,10 @@ struct multi_layer_entry
+  */
+ struct multi_layer_slot
+ {
++#ifdef XRT_OS_OSX
++	//! CPU observation of completed producer work, carried with ownership.
++	int64_t gpu_ready_ns;
++#endif
+ 	struct xrt_layer_frame_data data;
+ 	uint32_t layer_count;
+ 	struct multi_layer_entry layers[MULTI_MAX_LAYERS];
+@@ -173,6 +177,10 @@ struct multi_compositor
+ 		bool blocked;
+ 	} wait_thread;
+ 
++#ifdef XRT_OS_OSX
++	struct comp_gpu_client_budget *gpu_budget;
++#endif
++
+ 	//! Lock for all of the slots.
+ 	struct os_mutex slot_lock;
+ 
+diff --git a/src/xrt/compositor/util/comp_swapchain.c b/src/xrt/compositor/util/comp_swapchain.c
+index 28ac418f6..6664d6c34 100644
+--- a/src/xrt/compositor/util/comp_swapchain.c
++++ b/src/xrt/compositor/util/comp_swapchain.c
+@@ -28,6 +28,7 @@
+ 
+ #ifdef XRT_OS_OSX
+ #include "util/comp_metal_swapchain_import.h"
++#include "util/comp_swapchain_gpu_reuse.h"
+ #endif
+ 
+ #include <stdio.h>
+@@ -307,7 +308,7 @@ image_view_array_cleanup(struct vk_bundle *vk, size_t array_size, VkImageView **
+  * images that has one or all fields set to NULL.
+  */
+ static void
+-image_cleanup(struct vk_bundle *vk, struct comp_swapchain_image *image)
++image_cleanup(struct vk_bundle *vk, struct comp_swapchain_image *image, bool completed)
+ {
+ 	/*
+ 	 * This makes sure that any pending command buffer has completed and all
+@@ -315,9 +316,16 @@ image_cleanup(struct vk_bundle *vk, struct comp_swapchain_image *image)
+ 	 * validation doesn't complain. This is done during image destruction so
+ 	 * isn't time critical.
+ 	 */
+-	vk_queue_lock(vk->main_queue);
+-	vk->vkDeviceWaitIdle(vk->device);
+-	vk_queue_unlock(vk->main_queue);
++#ifdef XRT_OS_OSX
++	if (!completed) {
++#else
++	(void)completed;
++	{
++#endif
++		vk_queue_lock(vk->main_queue);
++		vk->vkDeviceWaitIdle(vk->device);
++		vk_queue_unlock(vk->main_queue);
++	}
+ 
+ 	// The field array_size is shared, only reset once both are freed.
+ 	image_view_array_cleanup(vk, image->array_size, &image->views.alpha);
+@@ -332,7 +340,7 @@ cleanup_post_create_vulkan_setup(struct vk_bundle *vk, struct comp_swapchain *sc
+ 	uint32_t image_count = sc->vkic.image_count;
+ 
+ 	for (uint32_t i = 0; i < image_count; i++) {
+-		image_cleanup(vk, &(sc->images[i]));
++		image_cleanup(vk, &(sc->images[i]), false);
+ 	}
+ }
+ 
+@@ -685,7 +693,11 @@ comp_swapchain_teardown(struct comp_swapchain *sc)
+ 	}
+ 
+ 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
+-		image_cleanup(vk, &sc->images[i]);
++		#ifdef XRT_OS_OSX
++		image_cleanup(vk, &sc->images[i], sc->gpu_reuse_safe_destroy);
++#else
++		image_cleanup(vk, &sc->images[i], false);
++#endif
+ 	}
+ 
+ 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
+@@ -776,6 +788,10 @@ comp_swapchain_create(struct vk_bundle *vk,
+ 		return xret;
+ 	}
+ 
++#ifdef XRT_OS_OSX
++	xret = comp_gpu_client_budget_adopt(&sc->base.base);
++	if (xret != XRT_SUCCESS) { really_destroy(sc); return xret; }
++#endif
+ 	// Correctly setup refcounts.
+ 	xrt_swapchain_reference(out_xsc, &sc->base.base);
+ 
+@@ -806,6 +822,10 @@ comp_swapchain_import(struct vk_bundle *vk,
+ 		return xret;
+ 	}
+ 
++#ifdef XRT_OS_OSX
++	xret = comp_gpu_client_budget_adopt(&sc->base.base);
++	if (xret != XRT_SUCCESS) { really_destroy(sc); return xret; }
++#endif
+ 	// Correctly setup refcounts.
+ 	xrt_swapchain_reference(out_xsc, &sc->base.base);
+ 
+diff --git a/src/xrt/compositor/util/comp_swapchain.h b/src/xrt/compositor/util/comp_swapchain.h
+index 7e792efb0..28f4680a2 100644
+--- a/src/xrt/compositor/util/comp_swapchain.h
++++ b/src/xrt/compositor/util/comp_swapchain.h
+@@ -96,6 +96,10 @@ struct comp_swapchain
+ 	struct comp_swapchain_shared *cscs;
+ 
+ 	struct vk_image_collection vkic;
++#ifdef XRT_OS_OSX
++	//! All tracked producer and consumer GPU obligations completed before GC.
++	bool gpu_reuse_safe_destroy;
++#endif
+ 	struct comp_swapchain_image images[XRT_MAX_SWAPCHAIN_IMAGES];
+ 
+ 	/*!
+diff --git a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
+index e7a1a5723..79ab44603 100644
+--- a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
++++ b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
+@@ -29,6 +29,20 @@ DEBUG_GET_ONCE_BOOL_OPTION(log_swapchain_gpu_reuse, "XRT_COMPOSITOR_LOG_SWAPCHAI
+ #define GPU_REUSE_MAX_IMAGES_PER_SUBMIT (XRT_MAX_LAYERS * XRT_MAX_VIEWS * 2)
+ 
+ struct gpu_reuse_context;
++struct comp_gpu_client_budget
++{
++	uint64_t bytes;
++	uint32_t objects;
++	uint32_t references;
++};
++static __thread struct {
++	struct comp_gpu_client_budget *budget;
++	uint64_t bytes;
++} g_reservation;
++DEBUG_GET_ONCE_NUM_OPTION(gpu_client_mb, "XRT_MACOS_GPU_CLIENT_MB", 512)
++DEBUG_GET_ONCE_NUM_OPTION(gpu_client_objects, "XRT_MACOS_GPU_CLIENT_OBJECTS", 64)
++DEBUG_GET_ONCE_NUM_OPTION(gpu_global_objects, "XRT_MACOS_GPU_GLOBAL_OBJECTS", 256)
++
+ 
+ struct gpu_reuse_tracker
+ {
+@@ -39,6 +53,8 @@ struct gpu_reuse_tracker
+ 	struct xrt_compositor_semaphore *producer[XRT_MAX_SWAPCHAIN_IMAGES];
+ 	uint64_t producer_value[XRT_MAX_SWAPCHAIN_IMAGES];
+ 	uint64_t bytes;
++	struct comp_gpu_client_budget *budget;
++	uint64_t id;
+ 	bool quarantined;
+ 	uint32_t pending_consumers[XRT_MAX_SWAPCHAIN_IMAGES];
+ 	xrt_result_t (*original_wait_image)(struct xrt_swapchain *, int64_t, uint32_t);
+@@ -106,8 +122,129 @@ static struct gpu_reuse_native_accum *g_gpu_reuse_native_accums = NULL;
+ #define GPU_REUSE_MAX_TRACKERS 256
+ static uint64_t g_tracked_bytes;
+ static uint32_t g_tracker_count;
++static uint64_t g_tracker_serial;
+ static __thread struct gpu_reuse_renderer_tls g_renderer = {0};
+ 
++static bool tracker_completed_locked(struct gpu_reuse_tracker *tracker);
++static void reclaim_tracker_locked(struct gpu_reuse_tracker **ptr);
++
++static uint32_t
++budget_objects(long value, uint32_t fallback)
++{
++	return value > 0 && value <= GPU_REUSE_MAX_TRACKERS ? (uint32_t)value : fallback;
++}
++
++struct comp_gpu_client_budget *
++comp_gpu_client_budget_create(void)
++{
++	struct comp_gpu_client_budget *budget = U_TYPED_CALLOC(struct comp_gpu_client_budget);
++	if (budget != NULL) budget->references = 1;
++	return budget;
++}
++
++static void
++budget_unref_locked(struct comp_gpu_client_budget *budget)
++{
++	if (budget != NULL && --budget->references == 0) free(budget);
++}
++
++void
++comp_gpu_client_budget_destroy(struct comp_gpu_client_budget **ptr)
++{
++	pthread_mutex_lock(&g_gpu_reuse_mutex);
++	budget_unref_locked(*ptr);
++	*ptr = NULL;
++	pthread_mutex_unlock(&g_gpu_reuse_mutex);
++}
++
++static uint64_t
++client_byte_limit(void)
++{
++	long mb = debug_get_num_option_gpu_client_mb();
++	return (uint64_t)(mb > 0 && mb <= 1024 ? mb : 512) * 1024 * 1024;
++}
++
++static bool
++budget_fits_locked(struct comp_gpu_client_budget *budget, uint64_t bytes)
++{
++	return g_tracker_count < budget_objects(debug_get_num_option_gpu_global_objects(), 256) &&
++	       bytes <= GPU_REUSE_MAX_BYTES - g_tracked_bytes &&
++	       (budget == NULL || (budget->objects < budget_objects(debug_get_num_option_gpu_client_objects(), 64) &&
++	                           budget->bytes <= client_byte_limit() && bytes <= client_byte_limit() - budget->bytes));
++}
++
++xrt_result_t
++comp_gpu_client_budget_reserve(struct comp_gpu_client_budget *budget,
++                               const struct xrt_swapchain_create_info *info,
++                               uint32_t image_count,
++                               const struct xrt_image_native *images)
++{
++	if (budget == NULL || g_reservation.budget != NULL || image_count == 0 ||
++	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) return XRT_ERROR_INVALID_ARGUMENT;
++	uint64_t pixel_bytes = 16; // Conservative upper bound for supported uncompressed formats.
++	switch ((VkFormat)info->format) {
++	case VK_FORMAT_R8G8B8A8_UNORM: case VK_FORMAT_R8G8B8A8_SRGB:
++	case VK_FORMAT_B8G8R8A8_UNORM: case VK_FORMAT_B8G8R8A8_SRGB:
++	case VK_FORMAT_A2B10G10R10_UNORM_PACK32: case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
++	case VK_FORMAT_D32_SFLOAT: case VK_FORMAT_D24_UNORM_S8_UINT: pixel_bytes = 4; break;
++	case VK_FORMAT_R16G16B16A16_SFLOAT: case VK_FORMAT_D32_SFLOAT_S8_UINT: pixel_bytes = 8; break;
++	case VK_FORMAT_D16_UNORM: pixel_bytes = 2; break;
++	default: break;
++	}
++	uint64_t bytes = pixel_bytes;
++	uint64_t factors[] = {info->width, info->height, info->array_size, info->face_count,
++	                      info->sample_count, image_count, info->mip_count > 1 ? 2 : 1};
++	for (uint32_t i = 0; i < ARRAY_SIZE(factors); i++) {
++		if (factors[i] == 0 || factors[i] > GPU_REUSE_MAX_BYTES / bytes) return XRT_ERROR_ALLOCATION;
++		bytes *= factors[i];
++	}
++	// Cover row/page alignment. Supplied transport sizes are an additional lower bound.
++	uint64_t overhead = (uint64_t)image_count * 65536;
++	if (bytes > GPU_REUSE_MAX_BYTES - overhead) return XRT_ERROR_ALLOCATION;
++	bytes += overhead;
++	if (images != NULL) {
++		uint64_t supplied = 0;
++		for (uint32_t i = 0; i < image_count; i++) {
++			if (images[i].size > GPU_REUSE_MAX_BYTES - supplied) return XRT_ERROR_ALLOCATION;
++			supplied += images[i].size;
++		}
++		if (supplied > bytes) bytes = supplied;
++	}
++	pthread_mutex_lock(&g_gpu_reuse_mutex);
++	// Poll before admission too: the last client may have stopped the render loop.
++	for (struct gpu_reuse_context *c = g_gpu_reuse_contexts; c != NULL; c = c->next) {
++		struct gpu_reuse_tracker **ptr = &c->trackers;
++		while (*ptr != NULL) {
++			if ((*ptr)->quarantined && tracker_completed_locked(*ptr)) reclaim_tracker_locked(ptr);
++			else ptr = &(*ptr)->next;
++		}
++	}
++	if (!budget_fits_locked(budget, bytes)) {
++		pthread_mutex_unlock(&g_gpu_reuse_mutex);
++		U_LOG_W("GPU allocation rejected before import: bytes=%llu", (unsigned long long)bytes);
++		return XRT_ERROR_ALLOCATION;
++	}
++	g_tracked_bytes += bytes; g_tracker_count++;
++	budget->bytes += bytes; budget->objects++; budget->references++;
++	g_reservation.budget = budget; g_reservation.bytes = bytes;
++	pthread_mutex_unlock(&g_gpu_reuse_mutex);
++	return XRT_SUCCESS;
++}
++
++void
++comp_gpu_client_budget_finish(void)
++{
++	pthread_mutex_lock(&g_gpu_reuse_mutex);
++	if (g_reservation.budget != NULL) {
++		struct comp_gpu_client_budget *budget = g_reservation.budget;
++		g_tracked_bytes -= g_reservation.bytes; g_tracker_count--;
++		budget->bytes -= g_reservation.bytes; budget->objects--;
++		budget_unref_locked(budget);
++		g_reservation.budget = NULL; g_reservation.bytes = 0;
++	}
++	pthread_mutex_unlock(&g_gpu_reuse_mutex);
++}
++
+ static void
+ reuse_log(const char *what, struct xrt_swapchain *xsc, uint32_t image_index, uint64_t value, int64_t extra_ns)
+ {
+@@ -255,6 +392,12 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
+ 		return XRT_ERROR_INVALID_ARGUMENT;
+ 	}
+ 
++#ifdef XRT_OS_OSX
++	// An unlimited client timeout must not pin an IPC worker indefinitely.
++	// Timeout preserves ownership; it never authorizes consumer completion.
++	if (timeout_ns > 500000000LL) timeout_ns = 500000000LL;
++#endif
++
+ 	int64_t start_ns = os_monotonic_get_ns();
+ 
+ 	for (;;) {
+@@ -387,14 +530,29 @@ reclaim_tracker_locked(struct gpu_reuse_tracker **ptr)
+ 	}
+ 	g_tracked_bytes -= t->bytes;
+ 	g_tracker_count--;
++	if (t->budget != NULL) {
++		t->budget->bytes -= t->bytes; t->budget->objects--;
++		budget_unref_locked(t->budget);
++	}
++	t->sc->gpu_reuse_safe_destroy = true;
+ 	t->xsc->wait_image = t->original_wait_image;
+ 	t->xsc->destroy = t->original_destroy;
+-	U_LOG_I("GPU reuse reclaim: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u", (void *)t->xsc,
+-	        (unsigned long long)t->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count);
++	U_LOG_I("GPU reuse reclaim: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u id=%llu", (void *)t->xsc,
++	        (unsigned long long)t->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count, (unsigned long long)t->id);
+ 	t->original_destroy(t->xsc);
+ 	free(t);
+ }
+ 
++bool
++comp_swapchain_gpu_reuse_device_in_use(struct vk_bundle *vk)
++{
++	pthread_mutex_lock(&g_gpu_reuse_mutex);
++	struct gpu_reuse_context *context = find_context_locked(vk);
++	bool in_use = context != NULL && context->trackers != NULL;
++	pthread_mutex_unlock(&g_gpu_reuse_mutex);
++	return in_use;
++}
++
+ void
+ comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown)
+ {
+@@ -439,8 +597,8 @@ tracked_swapchain_destroy(struct xrt_swapchain *xsc)
+ 	struct gpu_reuse_tracker *tracker = find_tracker_locked(xsc);
+ 	if (tracker != NULL) {
+ 		tracker->quarantined = true;
+-		U_LOG_I("GPU reuse quarantine: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u", (void *)xsc,
+-		        (unsigned long long)tracker->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count);
++		U_LOG_I("GPU reuse quarantine: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u id=%llu", (void *)xsc,
++		        (unsigned long long)tracker->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count, (unsigned long long)tracker->id);
+ 	}
+ 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ 	/* Existing compositor GC polls it with timeout zero on subsequent frames. */
+@@ -501,7 +659,13 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
+ 		return XRT_SUCCESS;
+ 	}
+ 
+-	if (g_tracker_count >= GPU_REUSE_MAX_TRACKERS || bytes > GPU_REUSE_MAX_BYTES - g_tracked_bytes) {
++	struct comp_gpu_client_budget *budget = g_reservation.budget;
++	uint64_t reserved = g_reservation.bytes;
++	bool fits = budget != NULL ?
++	    (bytes <= reserved || (bytes - reserved <= GPU_REUSE_MAX_BYTES - g_tracked_bytes &&
++	                           bytes - reserved <= client_byte_limit() - budget->bytes)) :
++	    budget_fits_locked(NULL, bytes);
++	if (!fits) {
+ 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ 		U_LOG_E("GPU reuse allocation budget exhausted (live plus quarantined storage)");
+ 		return XRT_ERROR_ALLOCATION;
+@@ -522,9 +686,16 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
+ 		return XRT_ERROR_ALLOCATION;
+ 	}
+ 
++	tracker->id = ++g_tracker_serial;
+ 	tracker->bytes = bytes;
+-	g_tracked_bytes += bytes;
+-	g_tracker_count++;
++	if (budget != NULL) {
++		g_tracked_bytes = g_tracked_bytes - reserved + bytes;
++		budget->bytes = budget->bytes - reserved + bytes;
++		tracker->budget = budget;
++		g_reservation.budget = NULL; g_reservation.bytes = 0;
++	} else {
++		g_tracked_bytes += bytes; g_tracker_count++;
++	}
+ 	tracker->xsc = xsc;
+ 	tracker->sc = sc;
+ 	tracker->context = context;
+@@ -542,6 +713,12 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
+ 	return XRT_SUCCESS;
+ }
+ 
++xrt_result_t
++comp_gpu_client_budget_adopt(struct xrt_swapchain *xsc)
++{
++	return g_reservation.budget == NULL ? XRT_SUCCESS : comp_swapchain_gpu_reuse_enable(xsc);
++}
++
+ bool
+ comp_swapchain_gpu_reuse_claim_image(struct xrt_swapchain *xsc, uint32_t image_index)
+ {
+diff --git a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
+index 3f926e3c8..2107abd46 100644
+--- a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
++++ b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
+@@ -18,6 +18,22 @@ extern "C" {
+ #ifdef XRT_OS_OSX
+ 
+ struct vk_bundle;
++struct comp_gpu_client_budget;
++struct comp_gpu_client_budget *
++comp_gpu_client_budget_create(void);
++void
++comp_gpu_client_budget_destroy(struct comp_gpu_client_budget **budget);
++xrt_result_t
++comp_gpu_client_budget_reserve(struct comp_gpu_client_budget *budget,
++                               const struct xrt_swapchain_create_info *info,
++                               uint32_t image_count,
++                               const struct xrt_image_native *images);
++void
++comp_gpu_client_budget_finish(void);
++xrt_result_t
++comp_gpu_client_budget_adopt(struct xrt_swapchain *xsc);
++bool
++comp_swapchain_gpu_reuse_device_in_use(struct vk_bundle *vk);
+ void
+ comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown);
+ 
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index b442382a5..82d3ce4fd 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -258,6 +258,10 @@ if(APPLE AND TARGET comp_metal_foveation_cache)
+ endif()
+ 
+ if(APPLE)
++	add_executable(tests_macos_gpu_policy tests_macos_gpu_policy.cpp)
++	target_link_libraries(tests_macos_gpu_policy PRIVATE comp_multi aux_util xrt-external-catch2)
++	add_test(NAME tests_macos_gpu_policy COMMAND tests_macos_gpu_policy)
++	set_target_properties(tests_macos_gpu_policy PROPERTIES FOLDER monado_tests)
+ 	add_executable(tests_macos_gpu_reuse tests_macos_gpu_reuse.cpp)
+ 	target_compile_features(tests_macos_gpu_reuse PRIVATE cxx_std_17)
+ 	target_link_libraries(tests_macos_gpu_reuse PRIVATE comp_util aux_util aux_vk xrt-interfaces xrt-external-catch2)
+@@ -266,7 +270,7 @@ if(APPLE)
+ 	add_executable(tests_macos_gpu_sync tests_macos_gpu_sync.mm)
+ 	target_compile_features(tests_macos_gpu_sync PRIVATE cxx_std_17)
+ 	target_link_libraries(tests_macos_gpu_sync PRIVATE Vulkan::Vulkan "-framework Foundation" "-framework Metal" "-framework IOSurface")
+-	foreach(scenario normal delayed missing future nonmonotonic exit-before exit-after consumer-delay multi-queue broken-queue reuse idle cancel-callback)
++	foreach(scenario normal delayed missing future nonmonotonic exit-before exit-after consumer-delay multi-queue broken-queue reuse idle cancel-callback exit-inflight consumer-gpu-delay concurrent-producers)
+ 		add_test(NAME tests_macos_gpu_sync_${scenario} COMMAND tests_macos_gpu_sync ${scenario})
+ 		set_tests_properties(tests_macos_gpu_sync_${scenario} PROPERTIES TIMEOUT 30 LABELS "macos;gpu")
+ 	endforeach()
+@@ -294,11 +298,16 @@ if(APPLE)
+ 	target_compile_features(tests_macos_service_gpu_sync PRIVATE cxx_std_17)
+ 	target_link_libraries(tests_macos_service_gpu_sync PRIVATE xrt-interfaces xrt-external-openxr "-framework Foundation" "-framework Metal")
+ 	if(TARGET monado-service)
+-        foreach(fault missing disconnect)
++        foreach(fault missing disconnect budget)
++            if(fault STREQUAL "budget")
++                set(service_suite --budget-suite)
++            else()
++                set(service_suite --suite --fault ${fault})
++            endif()
+             add_test(NAME tests_macos_service_gpu_sync_${fault}
+                 COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/macos/run-gpu-sync-service.py
+                     --build ${CMAKE_BINARY_DIR} --output ${CMAKE_CURRENT_BINARY_DIR}/gpu-service-results
+-                    --unique-output --suite --fault ${fault})
++                    --unique-output ${service_suite})
+             set_tests_properties(tests_macos_service_gpu_sync_${fault} PROPERTIES TIMEOUT 60 LABELS "macos;gpu;service" RUN_SERIAL TRUE)
+         endforeach()
+     endif()
+diff --git a/tests/tests_macos_gpu_policy.cpp b/tests/tests_macos_gpu_policy.cpp
+new file mode 100644
+index 000000000..4f6845243
+--- /dev/null
++++ b/tests/tests_macos_gpu_policy.cpp
+@@ -0,0 +1,47 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++#include "catch_amalgamated.hpp"
++#include "multi/comp_multi_private.h"
++#include "util/u_time.h"
++
++TEST_CASE("late completed frame retains its slot until a later readiness cutoff")
++{
++	struct multi_system_compositor system{};
++	xrt_compositor_native native{};
++	os_mutex_init(&system.list_and_timing_lock);
++	os_thread_helper_init(&system.oth);
++	u_pa_factory_create(&system.upaf);
++	system.xcn = &native;
++	system.last_timings.predicted_display_time_ns = os_monotonic_get_ns();
++	system.last_timings.predicted_display_period_ns = 16000000;
++	system.last_timings.diff_ns = 5000000;
++	xrt_session_info info{};
++	xrt_compositor_native *client = nullptr;
++	REQUIRE(multi_compositor_create(&system, &info, nullptr, &client) == XRT_SUCCESS);
++	auto *mc = multi_compositor(&client->base);
++	int64_t frame, wake, gpu, display, period;
++	REQUIRE(xrt_comp_predict_frame(&client->base, &frame, &wake, &gpu, &display, &period) == XRT_SUCCESS);
++	REQUIRE(xrt_comp_mark_frame(&client->base, frame, XRT_COMPOSITOR_FRAME_POINT_WOKE, os_monotonic_get_ns()) == XRT_SUCCESS);
++	REQUIRE(xrt_comp_begin_frame(&client->base, frame) == XRT_SUCCESS);
++	xrt_layer_frame_data data{};
++	data.frame_id = frame;
++	int64_t now = os_monotonic_get_ns();
++	data.display_time_ns = now;
++	REQUIRE(xrt_comp_layer_begin(&client->base, &data) == XRT_SUCCESS);
++	REQUIRE(xrt_comp_layer_commit(&client->base, XRT_GRAPHICS_SYNC_HANDLE_INVALID) == XRT_SUCCESS);
++	os_mutex_lock(&mc->slot_lock);
++	mc->scheduled.gpu_ready_ns = now + 10 * U_TIME_1MS_IN_NS;
++	os_mutex_unlock(&mc->slot_lock);
++	multi_compositor_deliver_any_frames(mc, now + 12 * U_TIME_1MS_IN_NS);
++	CHECK(mc->scheduled.active);
++	CHECK(mc->scheduled.data.frame_id == frame);
++	CHECK_FALSE(mc->delivered.active);
++	multi_compositor_deliver_any_frames(mc, now + 20 * U_TIME_1MS_IN_NS);
++	CHECK_FALSE(mc->scheduled.active);
++	CHECK(mc->delivered.active);
++	CHECK(mc->delivered.data.frame_id == frame);
++	xrt_comp_native_destroy(&client);
++	u_paf_destroy(&system.upaf);
++	os_thread_helper_destroy(&system.oth);
++	os_mutex_destroy(&system.list_and_timing_lock);
++}
+diff --git a/tests/tests_macos_gpu_reuse.cpp b/tests/tests_macos_gpu_reuse.cpp
+index 6dc70dc56..c5573038e 100644
+--- a/tests/tests_macos_gpu_reuse.cpp
++++ b/tests/tests_macos_gpu_reuse.cpp
+@@ -159,6 +159,11 @@ TEST_CASE("pending consumer completion retains storage after producer completion
+ 	                                                    VK_NULL_HANDLE) == VK_SUCCESS);
+ 	os_mutex_destroy(&queue.mutex);
+ 	comp_swapchain_gpu_reuse_renderer_leave(&accum);
++	timeouts.clear();
++	CHECK(xrt_swapchain_wait_image(base, INT64_MAX, 0) == XRT_TIMEOUT);
++	REQUIRE_FALSE(timeouts.empty());
++	for (uint64_t timeout : timeouts) CHECK(timeout <= 500000000ULL);
++
+ 	int before = destroyed;
+ 	xrt_swapchain_reference(&base, nullptr);
+ 	comp_swapchain_gpu_reuse_collect(&device.vk, false);
+@@ -211,3 +216,70 @@ TEST_CASE("repeated failed teardown is bounded and completion restores allocatio
+ 	CHECK(destroyed == before + 257);
+ 	xrt_compositor_semaphore_reference(&sem, nullptr);
+ }
++TEST_CASE("pre-import client budgets retain failed storage and recover only on completion")
++{
++	Device device;
++	auto *budget = comp_gpu_client_budget_create();
++	auto *producer = device.producer();
++	xrt_swapchain_create_info info{};
++	info.width = info.height = 64;
++	info.array_size = info.face_count = info.sample_count = info.mip_count = 1;
++	info.format = VK_FORMAT_B8G8R8A8_UNORM;
++	for (unsigned i = 0; i < 64; i++) {
++		REQUIRE(comp_gpu_client_budget_reserve(budget, &info, 1, nullptr) == XRT_SUCCESS);
++		auto *sc = device.swapchain();
++		comp_gpu_client_budget_finish();
++		auto *base = &sc->base.base;
++		REQUIRE(comp_swapchain_gpu_reuse_set_producer(base, 0, producer, 91) == XRT_SUCCESS);
++		xrt_swapchain_reference(&base, nullptr);
++	}
++	CHECK(comp_gpu_client_budget_reserve(budget, &info, 1, nullptr) == XRT_ERROR_ALLOCATION);
++	comp_gpu_client_budget_destroy(&budget); // Retained trackers keep the owner account alive.
++	auto *other = comp_gpu_client_budget_create();
++	REQUIRE(comp_gpu_client_budget_reserve(other, &info, 1, nullptr) == XRT_SUCCESS);
++	comp_gpu_client_budget_finish();
++	comp_gpu_client_budget_destroy(&other);
++	values[comp_semaphore(producer)->semaphore] = 91;
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	xrt_compositor_semaphore_reference(&producer, nullptr);
++}
++TEST_CASE("pre-import overflow rejection does not consume allocation capacity")
++{
++	auto *budget = comp_gpu_client_budget_create();
++	xrt_swapchain_create_info info{};
++	info.width = info.height = UINT32_MAX;
++	info.array_size = info.face_count = info.sample_count = info.mip_count = 1;
++	CHECK(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_ERROR_ALLOCATION);
++	info.width = info.height = 64;
++	REQUIRE(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_SUCCESS);
++	comp_gpu_client_budget_finish();
++	comp_gpu_client_budget_destroy(&budget);
++}
++
++TEST_CASE("device loss does not authorize reuse or resource destruction")
++{
++	Device device;
++	auto *sc = device.swapchain();
++	auto *sem = device.producer();
++	auto *base = &sc->base.base;
++	REQUIRE(comp_swapchain_gpu_reuse_set_producer(base, 0, sem, 73) == XRT_SUCCESS);
++	auto signal = comp_semaphore(sem)->semaphore;
++	device.vk.vkWaitSemaphores = [](VkDevice, const VkSemaphoreWaitInfo *, uint64_t timeout) {
++		timeouts.push_back(timeout);
++		return VK_ERROR_DEVICE_LOST;
++	};
++	CHECK(xrt_swapchain_wait_image(base, 0, 0) != XRT_SUCCESS);
++	int before = destroyed;
++	xrt_swapchain_reference(&base, nullptr);
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before);
++	CHECK(comp_swapchain_gpu_reuse_device_in_use(&device.vk));
++	// Restore the mock only to clean up the test. Device loss itself proved nothing.
++	device.vk.vkWaitSemaphores = [](VkDevice, const VkSemaphoreWaitInfo *wait, uint64_t) {
++		return values[wait->pSemaphores[0]] >= wait->pValues[0] ? VK_SUCCESS : VK_TIMEOUT;
++	};
++	values[signal] = 73;
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before + 1);
++	xrt_compositor_semaphore_reference(&sem, nullptr);
++}
+diff --git a/tests/tests_macos_gpu_sync.mm b/tests/tests_macos_gpu_sync.mm
+index fe81349b2..e6567e656 100644
+--- a/tests/tests_macos_gpu_sync.mm
++++ b/tests/tests_macos_gpu_sync.mm
+@@ -26,7 +26,17 @@
+ #include <sys/un.h>
+ #include <unistd.h>
+ extern char **environ;
+-static constexpr unsigned W = 64, N = 3, BYTES = W * W * 4;
++static unsigned
++texture_width()
++{
++	const char *value = getenv("GPU_SYNC_TEXTURE_SIZE");
++	if (value == nullptr) return 64;
++	char *end = nullptr;
++	unsigned long width = strtoul(value, &end, 10);
++	return end != value && *end == 0 && width >= 16 && width <= 2048 ? (unsigned)width : 0;
++}
++static const unsigned W = texture_width(), BYTES = W * W * 4;
++static constexpr unsigned N = 3;
+ static uint64_t
+ ns()
+ {
+@@ -40,11 +50,13 @@
+ 		throw std::runtime_error(msg);
+ }
+ static void
+-vkcheck(VkResult result)
++vkcheck_at(VkResult result, int line)
+ {
+ 	if (result != VK_SUCCESS)
+-		throw std::runtime_error("Vulkan result " + std::to_string(result));
++		throw std::runtime_error("Vulkan result " + std::to_string(result) + " at line " + std::to_string(line));
+ }
++#define vkcheck(result) vkcheck_at(result, __LINE__)
++
+ static void
+ io(int fd, void *data, size_t size, bool output)
+ {
+@@ -68,6 +80,7 @@
+ struct Receipt
+ {
+ 	uint64_t commit_ns;
++	uint64_t gpu_status;
+ };
+ static void
+ pattern(const Command &c, unsigned x, unsigned y, uint8_t p[4])
+@@ -97,15 +110,21 @@
+ }
+ @protocol GPUSyncEventProtocol
+ - (void)eventHandle:(void (^)(MTLSharedEventHandle *))reply;
++- (void)gateHandle:(void (^)(MTLSharedEventHandle *))reply;
+ @end
+ @interface GPUSyncEventService : NSObject <GPUSyncEventProtocol, NSXPCListenerDelegate>
+ @property(retain) id<MTLSharedEvent> event;
++@property(retain) id<MTLSharedEvent> gate;
+ @end
+ @implementation GPUSyncEventService
+ - (void)eventHandle:(void (^)(MTLSharedEventHandle *))reply
+ {
+ 	reply([[self.event newSharedEventHandle] autorelease]);
+ }
++- (void)gateHandle:(void (^)(MTLSharedEventHandle *))reply
++{
++	reply([[self.gate newSharedEventHandle] autorelease]);
++}
+ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)connection
+ {
+ 	(void)listener;
+@@ -146,6 +165,7 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 	id<MTLSharedEvent> join = [device newSharedEvent];
+ 	GPUSyncEventService *service = [GPUSyncEventService new];
+ 	service.event = event;
++	service.gate = [device newSharedEvent];
+ 	NSXPCListener *listener =
+ 	    [[NSXPCListener alloc] initWithMachServiceName:[NSString stringWithUTF8String:service_name]];
+ 	listener.delegate = service;
+@@ -215,12 +235,13 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 			_exit(0); // exit with an outstanding, unsignalled obligation
+ 		if (c.mode == 6) {
+ 			check(c.value <= previous, "invalid-sequence fixture");
+-			Receipt r{0};
++			Receipt r{};
+ 			io(1, &r, sizeof(r), true);
+ 			continue;
+ 		}
+ 		auto write_texture = [&](id<MTLCommandQueue> q) {
+ 			id<MTLCommandBuffer> cb = [q commandBuffer];
++			if (c.mode == 9) [cb encodeWaitForEvent:service.gate value:c.value];
+ 			id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
+ 			uint32_t words[4] = {(uint32_t)c.frame, (uint32_t)(c.frame >> 32), c.producer, c.image};
+ 			[enc setComputePipelineState:pipeline];
+@@ -234,8 +255,9 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 		    7) { // broken multi-queue: signal now, deliberately write only after consumer acknowledgement
+ 			id<MTLCommandBuffer> cb = [queues[1] commandBuffer];
+ 			[cb encodeSignalEvent:event value:c.value];
+-			Receipt r{ns()};
++			Receipt r{ns(), 0};
+ 			[cb commit];
++			r.gpu_status = (uint64_t)cb.status;
+ 			io(1, &r, sizeof(r), true);
+ 			char ack;
+ 			io(0, &ack, 1, false);
+@@ -254,8 +276,9 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 			}
+ 			if (c.mode != 2)
+ 				[cb encodeSignalEvent:event value:c.value];
+-			Receipt r{ns()};
++			Receipt r{ns(), 0};
+ 			[cb commit];
++			r.gpu_status = (uint64_t)cb.status;
+ 			io(1, &r, sizeof(r), true);
+ 			char ack;
+ 			io(0, &ack, 1, false);
+@@ -291,7 +314,8 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 		std::string sock = directory + "/socket";
+ 		plist = directory + "/agent.plist";
+ 		domain = "gui/" + std::to_string(getuid());
+-		name = "org.freedesktop.monado.gpu-sync." + std::to_string(getpid());
++		static unsigned sequence = 0;
++		name = "org.freedesktop.monado.gpu-sync." + std::to_string(getpid()) + "." + std::to_string(sequence++);
+ 		int server = socket(AF_UNIX, SOCK_STREAM, 0);
+ 		check(server >= 0, "consumer socket");
+ 		sockaddr_un addr{};
+@@ -307,7 +331,8 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 				[NSString stringWithUTF8String:absolute], @"--producer", label,
+ 				[NSString stringWithUTF8String:sock.c_str()]
+ 			],
+-			@"MachServices" : @{label : @YES}
++			@"MachServices" : @{label : @YES},
++			@"EnvironmentVariables" : @{@"GPU_SYNC_TEXTURE_SIZE" : [NSString stringWithFormat:@"%u", W]}
+ 		};
+ 		NSData *data = [NSPropertyListSerialization dataWithPropertyList:agent
+ 		                                                          format:NSPropertyListXMLFormat_v1_0
+@@ -334,19 +359,18 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 		io(output, &pid, sizeof(pid), false);
+ 	}
+ 	MTLSharedEventHandle *
+-	handle()
++	handle(bool gate = false)
+ 	{
+ 		__block MTLSharedEventHandle *result = nil;
+ 		dispatch_semaphore_t done = dispatch_semaphore_create(0);
+-		[[connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+-		  (void)error;
+-		  dispatch_semaphore_signal(done);
+-		}] eventHandle:^(MTLSharedEventHandle *h) {
+-		  result = [h retain];
+-		  dispatch_semaphore_signal(done);
++		id<GPUSyncEventProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
++			(void)error; dispatch_semaphore_signal(done);
+ 		}];
+-		check(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0 &&
+-		          result != nil,
++		void (^reply)(MTLSharedEventHandle *) = ^(MTLSharedEventHandle *h) {
++			result = [h retain]; dispatch_semaphore_signal(done);
++		};
++		if (gate) [proxy gateHandle:reply]; else [proxy eventHandle:reply];
++		check(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0 && result != nil,
+ 		      "XPC event timeout");
+ 		return [result autorelease];
+ 	}
+@@ -386,6 +410,10 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 	VkFence fence{};
+ 	VkSemaphore semaphore{};
+ 	id<MTLSharedEvent> event = nil;
++	id<MTLSharedEvent> producer_gate = nil;
++	VkSemaphore consumer_gate{};
++	std::thread release_gate;
++	bool unresolved_producer = false;
+ 	uint64_t registry = 0;
+ 	uint32_t
+ 	memory_type(uint32_t bits, VkMemoryPropertyFlags flags)
+@@ -465,6 +493,7 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 		check(d != nil, "shared-event decode");
+ 		check([d[@"registry"] unsignedLongLongValue] == registry, "Metal device mismatch");
+ 		event = [metal newSharedEventWithHandle:child.handle()];
++		producer_gate = [metal newSharedEventWithHandle:child.handle(true)];
+ 		check(event != nil, "shared-event import");
+ 		VkSemaphoreTypeCreateInfo st{};
+ 		st.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+@@ -478,6 +507,8 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 		sc.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+ 		sc.pNext = &si;
+ 		vkcheck(vkCreateSemaphore(device, &sc, nullptr, &semaphore));
++		sc.pNext = &st;
++		vkcheck(vkCreateSemaphore(device, &sc, nullptr, &consumer_gate));
+ 		for (unsigned i = 0; i < N; ++i) {
+ 			surfaces[i] = IOSurfaceLookup([d[@"surfaces"][i] unsignedIntValue]);
+ 			check(surfaces[i] != nullptr, "IOSurface lookup");
+@@ -589,7 +620,15 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 		VkBufferImageCopy copy{};
+ 		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+ 		copy.imageExtent = {W, W, 1};
+-		vkCmdCopyImageToBuffer(cmd, images[c.image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &copy);
++		unsigned copies = getenv("GPU_SYNC_COPY_REPEATS") ? std::stoul(getenv("GPU_SYNC_COPY_REPEATS")) : 1;
++		check(copies >= 1 && copies <= 1024, "copy repeat bound");
++		for (unsigned i = 0; i < copies; i++) {
++			vkCmdCopyImageToBuffer(cmd, images[c.image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &copy);
++			VkMemoryBarrier order{}; order.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
++			order.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; order.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++			if (i+1 < copies) vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
++			                                      0, 1, &order, 0, nullptr, 0, nullptr);
++		}
+ 		std::swap(barrier.oldLayout, barrier.newLayout);
+ 		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+ 		barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+@@ -604,18 +643,29 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 		vkcheck(vkEndCommandBuffer(cmd));
+ 		VkTimelineSemaphoreSubmitInfo ts{};
+ 		ts.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+-		ts.waitSemaphoreValueCount = 1;
+-		ts.pWaitSemaphoreValues = &c.value;
+-		VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
++		uint64_t wait_values[] = {c.value, c.value};
++		VkSemaphore wait_sems[] = {semaphore, consumer_gate};
++		VkPipelineStageFlags stages[] = {VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT};
++		ts.waitSemaphoreValueCount = c.mode == 10 ? 2 : 1;
++		ts.pWaitSemaphoreValues = wait_values;
+ 		VkSubmitInfo s{};
+ 		s.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+ 		s.pNext = &ts;
+-		s.waitSemaphoreCount = 1;
+-		s.pWaitSemaphores = &semaphore;
+-		s.pWaitDstStageMask = &stage;
++		s.waitSemaphoreCount = c.mode == 10 ? 2 : 1;
++		s.pWaitSemaphores = wait_sems;
++		s.pWaitDstStageMask = stages;
+ 		s.commandBufferCount = 1;
+ 		s.pCommandBuffers = &cmd;
+ 		uint64_t start = ns();
++		if (c.mode == 10) {
++			if (release_gate.joinable()) release_gate.join();
++			release_gate = std::thread([this, value=c.value] {
++				std::this_thread::sleep_for(std::chrono::milliseconds(50));
++				VkSemaphoreSignalInfo signal{}; signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
++				signal.semaphore = consumer_gate; signal.value = value;
++				vkSignalSemaphore(device, &signal);
++			});
++		}
+ 		vkcheck(vkQueueSubmit(queue, 1, &s, fence));
+ 		pending = true;
+ 		return ns() - start;
+@@ -669,6 +719,9 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 	}
+ 	~Consumer()
+ 	{
++		if (release_gate.joinable()) release_gate.join();
++		producer_gate.signaledValue = UINT64_MAX; // Release only the trusted test gate.
++		if (unresolved_producer) return;
+ 		// On an unresolved consumer fence retain the entire Vulkan device/resources until process exit.
+ 		if (pending && !complete(0))
+ 			return;
+@@ -687,12 +740,45 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 			}
+ 			vkDestroySemaphore(device, semaphore, nullptr);
+ 			[event release];
++			[producer_gate release];
++			vkDestroySemaphore(device, consumer_gate, nullptr);
+ 			vkDestroyDevice(device, nullptr);
+ 		}
+ 		if (instance)
+ 			vkDestroyInstance(instance, nullptr);
+ 	}
+ };
++static int
++concurrent_producers(const char *path, unsigned frames)
++{
++	uint64_t start = ns();
++	Child first(path); Consumer a(first);
++	Child second(path); Consumer b(second);
++	check(a.registry == b.registry, "concurrent producers must share the same physical device");
++	printf("{\"event\":\"config\",\"scenario\":\"concurrent-producers\",\"producer_pids\":[%d,%d],\"consumer_pid\":%d,\"texture_size\":%u,\"thermal\":%ld}\n",
++	       first.pid, second.pid, getpid(), W, (long)[NSProcessInfo processInfo].thermalState);
++	for (unsigned frame = 1; frame <= frames; frame++) {
++		Command ca{frame,frame,(frame-1)%N,(uint32_t)first.pid,0,0};
++		Command cb=ca; cb.producer=(uint32_t)second.pid;
++		io(first.input,&ca,sizeof(ca),true); io(second.input,&cb,sizeof(cb),true);
++		Receipt ra{},rb{}; io(first.output,&ra,sizeof(ra),false); io(second.output,&rb,sizeof(rb),false);
++		uint64_t until=ns()+500000000;
++		while ((a.event.signaledValue < frame || b.event.signaledValue < frame) && ns()<until)
++			std::this_thread::sleep_for(std::chrono::microseconds(100));
++		check(a.event.signaledValue >= frame && b.event.signaledValue >= frame, "concurrent readiness");
++		a.submit(ca); b.submit(cb);
++		check(a.complete() && b.complete(), "concurrent GPU completion");
++		check(a.pixels(ca) && b.pixels(cb), "cross-producer attribution or overwrite");
++		first.ack(); second.ack();
++		printf("{\"event\":\"concurrent_frame\",\"frame\":%u,\"both_gpu_patterns_valid\":true,\"elapsed_ns\":%llu,\"thermal\":%ld}\n",frame,(unsigned long long)(ns()-start),(long)[NSProcessInfo processInfo].thermalState);
++	}
++	Command stop{}; stop.mode=99;
++	io(first.input,&stop,sizeof(stop),true); io(second.input,&stop,sizeof(stop),true);
++	printf("{\"event\":\"result\",\"scenario\":\"concurrent-producers\",\"status\":\"PASS\",\"consumed\":%u,\"elapsed_ns\":%llu,\"thermal_end\":%ld}\n",
++	       frames*2,(unsigned long long)(ns()-start),(long)[NSProcessInfo processInfo].thermalState);
++	return 0;
++}
++
+ static double
+ percentile(std::vector<uint64_t> v, double p)
+ {
+@@ -709,9 +795,11 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 		try {
+ 			if (argc == 4 && !strcmp(argv[1], "--producer"))
+ 				return producer(argv[2], argv[3]);
++			check(W != 0, "texture size must be 16–2048");
+ 			std::string scenario = argc > 1 ? argv[1] : "normal";
+ 			unsigned frames = argc > 2 ? std::stoul(argv[2]) : 12;
+ 			check(frames > 0 && frames <= 1000000, "frame count bound");
++			if (scenario == "concurrent-producers") return concurrent_producers(argv[0], frames);
+ 			const unsigned hung = getenv("GPU_SYNC_HUNG_MS") ? std::stoul(getenv("GPU_SYNC_HUNG_MS")) : 500;
+ 			const unsigned margin =
+ 			    getenv("GPU_SYNC_MARGIN_US") ? std::stoul(getenv("GPU_SYNC_MARGIN_US")) : 6000;
+@@ -721,7 +809,7 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 			const std::vector<std::string> scenarios = {
+ 			    "normal",      "delayed",    "missing",        "future",      "nonmonotonic",
+ 			    "exit-before", "exit-after", "consumer-delay", "multi-queue", "broken-queue",
+-			    "reuse",       "idle",       "cancel-callback"};
++			    "reuse",       "idle",       "cancel-callback", "exit-inflight", "consumer-gpu-delay"};
+ 			check(std::find(scenarios.begin(), scenarios.end(), scenario) != scenarios.end(),
+ 			      "unknown scenario");
+ 			Child child(argv[0]);
+@@ -753,11 +841,11 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 			printf(
+ 			    "{\"event\":\"config\",\"scenario\":\"%s\",\"producer_pid\":%d,\"consumer_pid\":%d,\"hung_"
+ 			    "ms\":%u,\"margin_us\":%u,\"interval_us\":%u,\"thermal\":%ld,\"low_power\":%s,\"seed\":0,"
+-			    "\"registry\":%llu}\n",
++			    "\"registry\":%llu,\"texture_size\":%u}\n",
+ 			    scenario.c_str(), child.pid, getpid(), hung, margin, interval,
+ 			    (long)[NSProcessInfo processInfo].thermalState,
+ 			    [NSProcessInfo processInfo].lowPowerModeEnabled ? "true" : "false",
+-			    (unsigned long long)gpu.registry);
++			    (unsigned long long)gpu.registry, W);
+ 			if (scenario == "idle") {
+ 				std::this_thread::sleep_for(std::chrono::milliseconds(hung + 10));
+ 				check(!gpu.pending, "idle pending");
+@@ -773,6 +861,8 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 					c.mode = 2;
+ 				if (scenario == "exit-before")
+ 					c.mode = 4;
++				if (scenario == "exit-inflight") c.mode = 9;
++				if (scenario == "consumer-gpu-delay") c.mode = 10;
+ 				if (scenario == "broken-queue")
+ 					c.mode = 7;
+ 				if (scenario == "multi-queue")
+@@ -782,6 +872,16 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 				Receipt receipt{};
+ 				if (c.mode != 4)
+ 					io(child.output, &receipt, sizeof(receipt), false);
++				if (scenario == "exit-inflight") {
++					check(receipt.gpu_status < MTLCommandBufferStatusCompleted && gpu.event.signaledValue < c.value,
++					      "producer must have actual submitted, incomplete GPU work at termination");
++					gpu.unresolved_producer = true;
++					check(kill(child.pid, SIGKILL) == 0, "kill in-flight producer");
++					child.pid = -1;
++					gpu.producer_gate.signaledValue = c.value;
++					printf("{\"event\":\"producer_killed_inflight\",\"gpu_status\":%llu,\"storage_retained\":true}\n",
++					       (unsigned long long)receipt.gpu_status);
++				}
+ 				uint64_t expected = c.value + (scenario == "future" ? 1 : 0);
+ 				while (gpu.event.signaledValue < expected &&
+ 				       ns() - obligation < (uint64_t)hung * 1000000)
+@@ -806,12 +906,13 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 				    (unsigned long long)receipt.commit_ns, (unsigned long long)observed,
+ 				    ready ? "true" : "false");
+ 				if (!ready) {
++					gpu.unresolved_producer = true;
+ 					check(scenario == "missing" || scenario == "future" ||
+-					          scenario == "exit-before",
++					          scenario == "exit-before" || scenario == "exit-inflight",
+ 					      "unexpected producer stall");
+ 					blocked++;
+ 					check(!gpu.pending, "unsignalled submission");
+-					if (c.mode != 4)
++					if (c.mode != 4 && c.mode != 9)
+ 						child.ack();
+ 					break;
+ 				}
+@@ -828,6 +929,7 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 				}
+ 				check(scenario != "missing" && scenario != "future" && scenario != "exit-before",
+ 				      "fault unexpectedly ready");
++				if (scenario == "exit-inflight") gpu.unresolved_producer = false;
+ 				readiness.push_back(observed - obligation);
+ 				if (scenario == "exit-after") {
+ 					kill(child.pid, SIGKILL);
+@@ -842,6 +944,10 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 				    "{\"event\":\"vulkan_wait_submit\",\"frame\":%u,\"value\":%llu,\"stage\":"
+ 				    "\"TRANSFER\",\"duration_ns\":%llu}\n",
+ 				    f, (unsigned long long)c.value, (unsigned long long)duration);
++				if (scenario == "consumer-gpu-delay") {
++					check(!gpu.complete(0) && gpu.pending, "actual consumer GPU work must still own the image");
++					printf("{\"event\":\"consumer_gpu_pending\",\"reuse_permitted\":false}\n");
++				}
+ 				if (scenario == "consumer-delay") {
+ 					check(gpu.pending, "reuse must remain excluded");
+ 					std::this_thread::sleep_for(std::chrono::milliseconds(20));
+@@ -863,7 +969,7 @@ - (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConne
+ 						check(gpu.complete(), "empty submission completion");
+ 					}
+ 				}
+-				if (scenario == "exit-after")
++				if (scenario == "exit-after" || scenario == "exit-inflight")
+ 					break;
+ 				child.ack();
+ 				if (scenario == "nonmonotonic") {
+diff --git a/tests/tests_macos_service_gpu_sync.mm b/tests/tests_macos_service_gpu_sync.mm
+index fa4e95eb5..ec2a1d59b 100644
+--- a/tests/tests_macos_service_gpu_sync.mm
++++ b/tests/tests_macos_service_gpu_sync.mm
+@@ -82,6 +82,8 @@ - (void)dealloc
+ {
+ 	@autoreleasepool {
+ 		try {
++			const bool budget = argc > 1 && std::string(argv[1]) == "budget";
++			const bool exhausted = argc > 1 && std::string(argv[1]) == "exhausted";
+ 			const bool missing = argc > 1 && std::string(argv[1]) == "missing";
+ 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
+ 			const uint64_t timeout_seconds = argc > 3 ? std::stoull(argv[3]) : 20;
+@@ -124,7 +126,7 @@ - (void)dealloc
+ 			snprintf(info.applicationInfo.applicationName, XR_MAX_APPLICATION_NAME_SIZE, "gpu-sync-%d",
+ 			         getpid());
+ 			info.applicationInfo.apiVersion = XR_CURRENT_API_VERSION;
+-			info.enabledExtensionCount = missing ? 2 : 1;
++			info.enabledExtensionCount = (missing || budget || exhausted) ? 2 : 1;
+ 			info.enabledExtensionNames = extensions;
+ 			checked(xrCreateInstance(&info, &instance), "xrCreateInstance");
+ 			LOAD(xrGetSystem);
+@@ -166,7 +168,7 @@ - (void)dealloc
+ 			XrSessionCreateInfoOverlayEXTX overlay{};
+ 			overlay.type = XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX;
+ 			overlay.sessionLayersPlacement = 1;
+-			if (missing)
++			if (missing || budget || exhausted)
+ 				binding.next = &overlay;
+ 			XrSessionCreateInfo sessionInfo{};
+ 			sessionInfo.type = XR_TYPE_SESSION_CREATE_INFO;
+@@ -187,8 +189,27 @@ - (void)dealloc
+ 			swapInfo.sampleCount = 1;
+ 			swapInfo.width = swapInfo.height = 64;
+ 			swapInfo.faceCount = swapInfo.arraySize = swapInfo.mipCount = 1;
+-			XrSwapchain swapchain;
+-			checked(xrCreateSwapchain(session, &swapInfo, &swapchain), "swapchain");
++			XrSwapchain swapchain = XR_NULL_HANDLE;
++			XrResult allocation = xrCreateSwapchain(session, &swapInfo, &swapchain);
++			if (exhausted) {
++				if (XR_SUCCEEDED(allocation)) throw std::runtime_error("Exhausted global budget admitted allocation");
++				checked(xrDestroySpace(space), "space"); checked(xrDestroySession(session), "session");
++				checked(xrDestroyInstance(instance), "instance");
++				fprintf(stdout, "{\"event\":\"result\",\"status\":\"PASS\",\"budget_rejected\":true,\"result\":%d}\n", allocation);
++				return 0;
++			}
++			checked(allocation, "swapchain");
++			if (budget) {
++				XrSwapchain extra = XR_NULL_HANDLE, rejected = XR_NULL_HANDLE;
++				checked(xrCreateSwapchain(session, &swapInfo, &extra), "second allocation");
++				XrResult result = xrCreateSwapchain(session, &swapInfo, &rejected);
++				if (XR_SUCCEEDED(result)) throw std::runtime_error("Per-client budget admitted a third allocation");
++				checked(xrDestroySwapchain(extra), "extra"); checked(xrDestroySwapchain(swapchain), "swapchain");
++				checked(xrDestroySpace(space), "space"); checked(xrDestroySession(session), "session");
++				checked(xrDestroyInstance(instance), "instance");
++				fprintf(stdout, "{\"event\":\"result\",\"status\":\"PASS\",\"budget_rejected\":true,\"result\":%d}\n", result);
++				return 0;
++			}
+ 			uint32_t count;
+ 			checked(xrEnumerateSwapchainImages(swapchain, 0, &count, nullptr), "images count");
+ 			std::vector<XrSwapchainImageMetalKHR> images(count);

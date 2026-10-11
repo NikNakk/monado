@@ -1,0 +1,19 @@
+[0/2] Re-checking globbed directories...
+[1/19] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_swapchain_gpu_reuse.c.o
+[2/19] Linking CXX static library src/xrt/compositor/util/libcomp_util.a
+[3/19] Linking CXX executable tests/tests_macos_gpu_policy
+[4/19] Linking CXX executable tests/tests_macos_gpu_reuse
+[5/19] Linking CXX executable tests/tests_render_pipeline_cache
+[6/19] Linking CXX executable tests/tests_foveation_openxr
+[7/19] Linking CXX shared library src/xrt/targets/libmonado/libmonado.25.1.0.dylib
+[8/19] Creating library symlink src/xrt/targets/libmonado/libmonado.25.dylib src/xrt/targets/libmonado/libmonado.dylib
+[9/19] Linking CXX executable tests/tests_generic_controller
+[10/19] Linking CXX executable src/xrt/targets/ctl/monado-ctl
+[11/19] Linking CXX executable tests/tests_macos_iosurface_import_probe
+[12/19] Linking CXX executable src/xrt/targets/service/monado-service
+[13/19] Linking CXX executable tests/tests_macos_ipc_swapchain_probe
+[14/19] Linking C executable src/xrt/targets/libmonado/libmonado-example
+[15/19] Linking CXX executable tests/tests_ipc_local_session
+[16/19] Linking CXX executable tests/tests_input_transform
+[17/19] Linking CXX executable tests/tests_macos_runtime_probe
+[18/19] Linking CXX shared library src/xrt/targets/openxr/libopenxr_monado.dylib; Generating OpenXR runtime manifest named /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json for build tree usage

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>IPC_EXIT_WHEN_IDLE</key>
+		<string>1</string>
+		<key>IPC_EXIT_WHEN_IDLE_DELAY_MS</key>
+		<string>5000</string>
+		<key>PSSENSE_LED_BOOTSTRAP_QUICK_LOCK</key>
+		<string>1</string>
+		<key>PSSENSE_RECONNECT</key>
+		<string>1</string>
+		<key>PSSENSE_TIMING_DIAG</key>
+		<string>1</string>
+		<key>PSVR2_CAMERA_STREAMS</key>
+		<string>1</string>
+		<key>PSVR2_DRIVER_TIMING_TRACE</key>
+		<string>1</string>
+		<key>PSVR2_LED_DETECTOR_BLOBS</key>
+		<string>1</string>
+		<key>PSVR2_SENSE_6DOF</key>
+		<string>1</string>
+		<key>PSVR2_SENSE_6DOF_CALIBRATION</key>
+		<string>/Users/nickkennedy/Code/psvr2-datasets/calibration/20260926-charuco-mode4-combined-head.json</string>
+		<key>PSVR2_TIMING_TRACE</key>
+		<string>1</string>
+		<key>PSVR2_TIMING_TRACE_DIR</key>
+		<string>/Users/nickkennedy/psvr2-trace</string>
+		<key>PSVR2_TIMING_TRACE_FULLY_BUFFERED</key>
+		<string>1</string>
+		<key>XRT_FLOOR_EYE_HEIGHT_M</key>
+		<string>1.75</string>
+		<key>XRT_MACOS_DISPLAY_LOSS_DELAY_MS</key>
+		<string>3000</string>
+		<key>XRT_MACOS_DISPLAY_LOSS_SHUTDOWN_WATCHDOG_MS</key>
+		<string>5000</string>
+		<key>XRT_MACOS_EXIT_ON_DISPLAY_LOSS</key>
+		<string>1</string>
+		<key>XRT_NO_STDIN</key>
+		<string>1</string>
+		<key>XRT_PSSENSE_STAGE_RECENTER</key>
+		<string>1</string>
+	</dict>
+	<key>Label</key>
+	<string>org.freedesktop.monado.service</string>
+	<key>MachServices</key>
+	<dict>
+		<key>org.freedesktop.monado.metal-ipc</key>
+		<true/>
+	</dict>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Users/nickkennedy/.local/monado-psvr2/bin/monado-service</string>
+	</array>
+	<key>RunAtLoad</key>
+	<false/>
+	<key>StandardErrorPath</key>
+	<string>/Users/nickkennedy/Library/Logs/Monado/monado-service.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/nickkennedy/Library/Logs/Monado/monado-service.out.log</string>
+</dict>
+</plist>

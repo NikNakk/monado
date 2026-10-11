@@ -1,0 +1,22 @@
+{
+  "target": "macos",
+  "clients": [
+    {
+      "client": "failed",
+      "pid": 37889,
+      "exit": 0
+    },
+    {
+      "client": "replacement",
+      "pid": 37891,
+      "exit": 0
+    },
+    {
+      "client": "healthy",
+      "pid": 37884,
+      "exit": 0
+    }
+  ],
+  "status": "PENDING",
+  "note": "GPU trace verification follows service shutdown"
+}

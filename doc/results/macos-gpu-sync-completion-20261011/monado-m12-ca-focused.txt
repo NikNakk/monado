@@ -1,0 +1,20 @@
+Test project /Users/nickkennedy/Code/monado-2/build/arm64
+    Start 42: tests_macos_gpu_policy
+1/5 Test #42: tests_macos_gpu_policy ....................   Passed    0.37 sec
+    Start 43: tests_macos_gpu_reuse
+2/5 Test #43: tests_macos_gpu_reuse .....................   Passed    0.26 sec
+    Start 60: tests_macos_service_gpu_sync_missing
+3/5 Test #60: tests_macos_service_gpu_sync_missing ......   Passed    6.09 sec
+    Start 61: tests_macos_service_gpu_sync_disconnect
+4/5 Test #61: tests_macos_service_gpu_sync_disconnect ...   Passed    4.39 sec
+    Start 62: tests_macos_service_gpu_sync_budget
+5/5 Test #62: tests_macos_service_gpu_sync_budget .......   Passed   16.67 sec
+
+100% tests passed out of 5
+
+Label Time Summary:
+gpu        =  27.15 sec*proc (3 tests)
+macos      =  27.15 sec*proc (3 tests)
+service    =  27.15 sec*proc (3 tests)
+
+Total Test time (real) =  27.78 sec

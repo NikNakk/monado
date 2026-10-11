@@ -1,0 +1,53 @@
+{
+  "head": "bcd3a44583b94a7e592211c91c99d995e396a142",
+  "baseline": "fca1f399d",
+  "frames_per_run": 1800,
+  "warmup_client_frames": 120,
+  "order": [
+    "A0",
+    "B0",
+    "B1",
+    "A1"
+  ],
+  "changed_sources": [
+    "src/xrt/compositor/main/comp_compositor.c",
+    "src/xrt/compositor/main/comp_renderer.c",
+    "src/xrt/compositor/main/comp_renderer.h",
+    "src/xrt/compositor/main/comp_window.h",
+    "src/xrt/compositor/main/comp_window_macos.m",
+    "src/xrt/compositor/multi/comp_multi_compositor.c",
+    "src/xrt/compositor/multi/comp_multi_private.h",
+    "src/xrt/compositor/util/comp_swapchain.c",
+    "src/xrt/compositor/util/comp_swapchain.h",
+    "src/xrt/compositor/util/comp_swapchain_gpu_reuse.c",
+    "src/xrt/compositor/util/comp_swapchain_gpu_reuse.h"
+  ],
+  "source_hashes": {
+    "A": {
+      "src/xrt/compositor/main/comp_compositor.c": "3e09eeca4ab4303ce2689e8ef30d87ba0dfb5557aa57e7e96754ce1fc6fd592d",
+      "src/xrt/compositor/main/comp_renderer.c": "634689801273ac211f274a9851ebc5477d17b4076181aff521308f7b90761b3d",
+      "src/xrt/compositor/main/comp_renderer.h": "fcb21c35481df2a592ae0dfb19cf99f52ffe459335a1a56a60675f191fa06651",
+      "src/xrt/compositor/main/comp_window.h": "e0184ea6696ac5c059851b46ac47382062ddf8e3d684952bf22dce485dabf22d",
+      "src/xrt/compositor/main/comp_window_macos.m": "d0210d2b60de5c1563281ab8b16349c2c488fa7a0d4c4f3df8458ea22d66efe7",
+      "src/xrt/compositor/multi/comp_multi_compositor.c": "c67f2ba87a5703da874f03d8736064d9b54eb1d005e8c0aa63de57c2e80d7405",
+      "src/xrt/compositor/multi/comp_multi_private.h": "91b9c313079657ccc81f3c5e60eb7129e50920e0699e6616328ca2e7a3000ca2",
+      "src/xrt/compositor/util/comp_swapchain.c": "58075e7662b1be8263b5831bfde6cfdb7f6b4a6050e65a983c3317c61c2dc88d",
+      "src/xrt/compositor/util/comp_swapchain.h": "8acc1acd01a009e658dd829dfffb203b64b19601f62c0ee88af614e6eda57dc2",
+      "src/xrt/compositor/util/comp_swapchain_gpu_reuse.c": "64233b62c2a9dfefc6eacaaeb7ef537efc0014d173a007a280128edf5f2e2777",
+      "src/xrt/compositor/util/comp_swapchain_gpu_reuse.h": "de883a58a2000961f90bd428e8f5f334b16cb4e14e511758c7ab006ca11de4fc"
+    },
+    "B": {
+      "src/xrt/compositor/main/comp_compositor.c": "c2807938a5ba0de0a1df2791f35de3df29bd87055b6069bfe8c575acf9e1f279",
+      "src/xrt/compositor/main/comp_renderer.c": "9fe9702f0f9675b73733e093d9041d11c3155dd351e9ba045f638b598ba7e81c",
+      "src/xrt/compositor/main/comp_renderer.h": "974cf8a3ca5f2d9a29e2b5aa0a7e8f2d7a2836913bfe8253add789875a65460a",
+      "src/xrt/compositor/main/comp_window.h": "b2e6c8019a18b108a7c184669d5cc530815a4cd5b50b13b608105fb8c202e340",
+      "src/xrt/compositor/main/comp_window_macos.m": "f097495563e5bd27282f31513f1ca3a80ef7e736755dbc81b9215ea83331759a",
+      "src/xrt/compositor/multi/comp_multi_compositor.c": "7eefaf33a1684cbd5ff67bd7f320de06cbcf41639099438fbbc59d1e0f20b73b",
+      "src/xrt/compositor/multi/comp_multi_private.h": "3bd755b6db8368f0c5e0222354ce0e1b50fdd253869fa183368be5e29c94b4ca",
+      "src/xrt/compositor/util/comp_swapchain.c": "0b2989215255375284b858134dc7f0b6b1f5e3ced22b9202df89b04c178b465a",
+      "src/xrt/compositor/util/comp_swapchain.h": "9dc14a5e4816667560d59f7c8e7a7e90b2a7502f5046a4f40b08c034e661fcb5",
+      "src/xrt/compositor/util/comp_swapchain_gpu_reuse.c": "c3cf5734b8994b77b413c10e5a05efbf4d43ae3269f426381ff15ff47981be60",
+      "src/xrt/compositor/util/comp_swapchain_gpu_reuse.h": "355c8fddd601052f337acd9bccdf6bfcd15be7de943f0a624f6f422fc31eed06"
+    }
+  }
+}

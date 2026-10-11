@@ -1,0 +1,21 @@
+Graphics/Displays:
+
+    Apple M5:
+
+      Chipset Model: Apple M5
+      Type: GPU
+      Bus: Built-In
+      Total Number of Cores: 10
+      Vendor: Apple (0x106b)
+      Metal Support: Metal 4
+      Displays:
+        Color LCD:
+          Display Type: Built-in Liquid Retina Display
+          Resolution: 2880 x 1864 Retina
+          Main Display: Yes
+          Mirror: Off
+          Online: Yes
+          Automatically Adjust Brightness: Yes
+          Display Asleep: Yes
+          Connection Type: Internal
+

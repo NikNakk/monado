@@ -1,0 +1,652 @@
+[
+  {
+    "scenario": "exit-inflight",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 4.453,
+      "submit_us": {
+        "p50": 804.167,
+        "p95": 804.167,
+        "p99": 804.167,
+        "max": 804.167
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2266.792,
+      "end_to_end_p50_us": 4268.125,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1397.919,
+      "submit_us": {
+        "p50": 46.875,
+        "p95": 137.375,
+        "p99": 138.917,
+        "max": 565.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 385.917,
+      "end_to_end_p50_us": 59721.042,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.611,
+      "submit_us": {
+        "p50": 483.25,
+        "p95": 483.25,
+        "p99": 483.25,
+        "max": 483.25
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2024.125,
+      "end_to_end_p50_us": 3508.833,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1430.953,
+      "submit_us": {
+        "p50": 42.333,
+        "p95": 107.5,
+        "p99": 109.5,
+        "max": 480.75
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 514.709,
+      "end_to_end_p50_us": 60747.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 2,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.481,
+      "submit_us": {
+        "p50": 496.667,
+        "p95": 496.667,
+        "p99": 496.667,
+        "max": 496.667
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 1870.333,
+      "end_to_end_p50_us": 3376.417,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 2,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1422.446,
+      "submit_us": {
+        "p50": 25.917,
+        "p95": 73.875,
+        "p99": 99.042,
+        "max": 481.708
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 359.917,
+      "end_to_end_p50_us": 60746.25,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 2,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 3,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.659,
+      "submit_us": {
+        "p50": 494.291,
+        "p95": 494.291,
+        "p99": 494.291,
+        "max": 494.291
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2020.375,
+      "end_to_end_p50_us": 3550.209,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 3,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1392.746,
+      "submit_us": {
+        "p50": 66.458,
+        "p95": 110.333,
+        "p99": 120.958,
+        "max": 478.333
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 389.667,
+      "end_to_end_p50_us": 58797.791,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 3,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 4,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.856,
+      "submit_us": {
+        "p50": 587.041,
+        "p95": 587.041,
+        "p99": 587.041,
+        "max": 587.041
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2238.208,
+      "end_to_end_p50_us": 3742.708,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 4,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1392.449,
+      "submit_us": {
+        "p50": 85.042,
+        "p95": 122.625,
+        "p99": 162.209,
+        "max": 520.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 567.75,
+      "end_to_end_p50_us": 57881.459,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 4,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 5,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.864,
+      "submit_us": {
+        "p50": 596.084,
+        "p95": 596.084,
+        "p99": 596.084,
+        "max": 596.084
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2044.792,
+      "end_to_end_p50_us": 3757.209,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 5,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1389.082,
+      "submit_us": {
+        "p50": 70.5,
+        "p95": 111.958,
+        "p99": 131.209,
+        "max": 508.5
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 519.375,
+      "end_to_end_p50_us": 59173.167,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 5,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 6,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.685,
+      "submit_us": {
+        "p50": 459.5,
+        "p95": 459.5,
+        "p99": 459.5,
+        "max": 459.5
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2079.834,
+      "end_to_end_p50_us": 3584.917,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 6,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1395.872,
+      "submit_us": {
+        "p50": 45.083,
+        "p95": 67.833,
+        "p99": 74.625,
+        "max": 510.959
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 441.792,
+      "end_to_end_p50_us": 60836.334,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 6,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 7,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.667,
+      "submit_us": {
+        "p50": 573.75,
+        "p95": 573.75,
+        "p99": 573.75,
+        "max": 573.75
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 1912.584,
+      "end_to_end_p50_us": 3555.792,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 7,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1415.303,
+      "submit_us": {
+        "p50": 84.792,
+        "p95": 106.125,
+        "p99": 108.5,
+        "max": 587.416
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 544.625,
+      "end_to_end_p50_us": 60185.125,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 7,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 8,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.823,
+      "submit_us": {
+        "p50": 598.5,
+        "p95": 598.5,
+        "p99": 598.5,
+        "max": 598.5
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 1932.792,
+      "end_to_end_p50_us": 3694.167,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 8,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1396.159,
+      "submit_us": {
+        "p50": 64.791,
+        "p95": 132.542,
+        "p99": 146.708,
+        "max": 507.125
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 428.75,
+      "end_to_end_p50_us": 59135.291,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 8,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-inflight",
+    "repeat": 9,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-inflight",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 3.834,
+      "submit_us": {
+        "p50": 675.833,
+        "p95": 675.833,
+        "p99": 675.833,
+        "max": 675.833
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2064.375,
+      "end_to_end_p50_us": 3712.375,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-gpu-delay",
+    "repeat": 9,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-gpu-delay",
+      "status": "PASS",
+      "consumed": 24,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 1385.124,
+      "submit_us": {
+        "p50": 69.25,
+        "p95": 129.167,
+        "p99": 132.75,
+        "max": 489.791
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 523.583,
+      "end_to_end_p50_us": 60506.375,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 9,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "concurrent-producers",
+      "status": "PASS",
+      "consumed": 48,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  }
+]

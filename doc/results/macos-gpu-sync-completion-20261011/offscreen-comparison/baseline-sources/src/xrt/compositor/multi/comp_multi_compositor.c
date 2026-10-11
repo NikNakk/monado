@@ -1,0 +1,1509 @@
+// Copyright 2019-2021, Collabora, Ltd.
+// Copyright 2024-2025, NVIDIA CORPORATION.
+// SPDX-License-Identifier: BSL-1.0
+/*!
+ * @file
+ * @brief  Multi client wrapper compositor.
+ * @author Pete Black <pblack@collabora.com>
+ * @author Jakob Bornecrantz <jakob@collabora.com>
+ * @ingroup comp_multi
+ */
+
+#include "util/u_logging.h"
+#include "xrt/xrt_session.h"
+
+#include "os/os_time.h"
+
+#include "util/u_var.h"
+#include "util/u_wait.h"
+#include "util/u_misc.h"
+#include "util/u_time.h"
+#include "util/u_debug.h"
+#include "util/u_timing_trace.h"
+#include "util/u_handles.h"
+#include "util/u_trace_marker.h"
+#include "util/u_distortion_mesh.h"
+#include "util/comp_swapchain_gpu_reuse.h"
+
+#include "multi/comp_multi_private.h"
+#include "multi/comp_multi_interface.h"
+
+#include <math.h>
+#include <stdio.h>
+#include <assert.h>
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifdef XRT_GRAPHICS_SYNC_HANDLE_IS_FD
+#include <unistd.h>
+#endif
+
+#ifdef XRT_OS_OSX
+#include <unistd.h>
+#endif
+
+#ifdef XRT_OS_ANDROID
+#include "android/android_custom_surface.h"
+#include "android/android_globals.h"
+#endif
+
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_NUM_OPTION(client_gpu_hung_ms, "XRT_MACOS_CLIENT_GPU_HUNG_MS", 500)
+static int64_t
+client_gpu_hung_ns(void)
+{
+	int64_t ms = debug_get_num_option_client_gpu_hung_ms();
+	return (ms > 0 && ms <= 10000 ? ms : 500) * U_TIME_1MS_IN_NS;
+}
+#endif
+
+DEBUG_GET_ONCE_LOG_OPTION(app_frame_lag_level, "XRT_APP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_DEBUG)
+#define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_app_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
+
+static bool
+ipc_frame_timing_enabled(void)
+{
+	static int enabled = -1;
+	if (enabled < 0) {
+		const char *value = getenv("XRT_IPC_FRAME_TIMING");
+		enabled = value != NULL && value[0] != '\0' && strcmp(value, "0") != 0;
+	}
+	return enabled != 0;
+}
+
+static double
+ipc_elapsed_ms(int64_t start_ns, int64_t end_ns)
+{
+	return (double)(end_ns - start_ns) / 1000000.0;
+}
+
+#ifdef XRT_OS_OSX
+static FILE *g_macos_client_gpu_trace = NULL;
+static bool g_macos_client_gpu_trace_failed = false;
+static uint64_t g_macos_client_gpu_trace_rows = 0;
+static bool g_macos_client_gpu_trace_atexit_registered = false;
+
+static bool
+macos_client_gpu_trace_enabled(void)
+{
+	return u_timing_trace_enabled();
+}
+
+static void
+macos_client_gpu_trace_close(void)
+{
+	if (g_macos_client_gpu_trace == NULL) {
+		return;
+	}
+	fflush(g_macos_client_gpu_trace);
+	fclose(g_macos_client_gpu_trace);
+	g_macos_client_gpu_trace = NULL;
+}
+
+static FILE *
+macos_client_gpu_trace_get(void)
+{
+	if (!macos_client_gpu_trace_enabled() || g_macos_client_gpu_trace_failed) {
+		return NULL;
+	}
+	if (g_macos_client_gpu_trace != NULL) {
+		return g_macos_client_gpu_trace;
+	}
+
+	g_macos_client_gpu_trace = u_timing_trace_open("client_gpu", 64u * 1024u);
+	if (g_macos_client_gpu_trace == NULL) {
+		g_macos_client_gpu_trace_failed = true;
+		return NULL;
+	}
+
+	fputs("event,client_frame_id,event_ns,semaphore_value,duration_ns\n", g_macos_client_gpu_trace);
+
+	if (!g_macos_client_gpu_trace_atexit_registered) {
+		atexit(macos_client_gpu_trace_close);
+		g_macos_client_gpu_trace_atexit_registered = true;
+	}
+
+	return g_macos_client_gpu_trace;
+}
+
+static void
+macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semaphore_value, int64_t duration_ns)
+{
+	FILE *file = macos_client_gpu_trace_get();
+	if (file == NULL) {
+		return;
+	}
+
+	flockfile(file);
+	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 "\n", event, frame_id, os_monotonic_get_ns(),
+	        semaphore_value, duration_ns);
+	g_macos_client_gpu_trace_rows++;
+	if (!u_timing_trace_fully_buffered() && (g_macos_client_gpu_trace_rows % 512 == 0)) {
+		fflush(file);
+	}
+	funlockfile(file);
+}
+#else
+// Only traced on macOS.
+static inline void
+macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semaphore_value, int64_t duration_ns)
+{
+	(void)event;
+	(void)frame_id;
+	(void)semaphore_value;
+	(void)duration_ns;
+}
+#endif
+
+/*
+ *
+ * Slot management functions.
+ *
+ */
+
+static void
+layer_gpu_reuse_claim(struct multi_layer_entry *layer)
+{
+	const struct xrt_layer_data *data = &layer->data;
+
+	switch (data->type) {
+	case XRT_LAYER_PROJECTION:
+		for (uint32_t i = 0; i < data->view_count; i++) {
+			(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[i], data->proj.v[i].sub.image_index);
+		}
+		break;
+	case XRT_LAYER_PROJECTION_DEPTH:
+		for (uint32_t i = 0; i < data->view_count; i++) {
+			(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[i], data->depth.v[i].sub.image_index);
+			(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[i + data->view_count],
+			                                           data->depth.d[i].sub.image_index);
+		}
+		break;
+	case XRT_LAYER_QUAD:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->quad.sub.image_index);
+		break;
+	case XRT_LAYER_CUBE:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->cube.sub.image_index);
+		break;
+	case XRT_LAYER_CYLINDER:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->cylinder.sub.image_index);
+		break;
+	case XRT_LAYER_EQUIRECT1:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->equirect1.sub.image_index);
+		break;
+	case XRT_LAYER_EQUIRECT2:
+		(void)comp_swapchain_gpu_reuse_claim_image(layer->xscs[0], data->equirect2.sub.image_index);
+		break;
+	case XRT_LAYER_PASSTHROUGH: break;
+	}
+}
+
+static void
+layer_gpu_reuse_release(struct multi_layer_entry *layer)
+{
+	const struct xrt_layer_data *data = &layer->data;
+
+	switch (data->type) {
+	case XRT_LAYER_PROJECTION:
+		for (uint32_t i = 0; i < data->view_count; i++) {
+			comp_swapchain_gpu_reuse_release_image(layer->xscs[i], data->proj.v[i].sub.image_index);
+		}
+		break;
+	case XRT_LAYER_PROJECTION_DEPTH:
+		for (uint32_t i = 0; i < data->view_count; i++) {
+			comp_swapchain_gpu_reuse_release_image(layer->xscs[i], data->depth.v[i].sub.image_index);
+			comp_swapchain_gpu_reuse_release_image(layer->xscs[i + data->view_count],
+			                                       data->depth.d[i].sub.image_index);
+		}
+		break;
+	case XRT_LAYER_QUAD: comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->quad.sub.image_index); break;
+	case XRT_LAYER_CUBE: comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->cube.sub.image_index); break;
+	case XRT_LAYER_CYLINDER:
+		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->cylinder.sub.image_index);
+		break;
+	case XRT_LAYER_EQUIRECT1:
+		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->equirect1.sub.image_index);
+		break;
+	case XRT_LAYER_EQUIRECT2:
+		comp_swapchain_gpu_reuse_release_image(layer->xscs[0], data->equirect2.sub.image_index);
+		break;
+	case XRT_LAYER_PASSTHROUGH: break;
+	}
+}
+
+/*!
+ * Clear a slot, need to have the list_and_timing_lock held.
+ */
+static void
+slot_clear_locked(struct multi_compositor *mc, struct multi_layer_slot *slot)
+{
+	if (slot->active) {
+		int64_t now_ns = os_monotonic_get_ns();
+		u_pa_retired(mc->upa, slot->data.frame_id, now_ns);
+	}
+
+	for (size_t i = 0; i < slot->layer_count; i++) {
+		layer_gpu_reuse_release(&slot->layers[i]);
+		for (size_t k = 0; k < ARRAY_SIZE(slot->layers[i].xscs); k++) {
+			xrt_swapchain_reference(&slot->layers[i].xscs[k], NULL);
+		}
+	}
+
+	U_ZERO(slot);
+	slot->data.frame_id = -1;
+}
+
+/*!
+ * Clear a slot, need to have the list_and_timing_lock held.
+ */
+static void
+slot_move_into_cleared(struct multi_layer_slot *dst, struct multi_layer_slot *src)
+{
+	assert(!dst->active);
+	assert(dst->data.frame_id == -1);
+
+	// All references are kept.
+	*dst = *src;
+
+	U_ZERO(src);
+	src->data.frame_id = -1;
+}
+
+/*!
+ * Move a slot into a cleared slot, must be cleared before.
+ */
+static void
+slot_move_and_clear_locked(struct multi_compositor *mc, struct multi_layer_slot *dst, struct multi_layer_slot *src)
+{
+	slot_clear_locked(mc, dst);
+	slot_move_into_cleared(dst, src);
+}
+
+
+/*
+ *
+ * Event management functions.
+ *
+ */
+
+xrt_result_t
+multi_compositor_push_event(struct multi_compositor *mc, const union xrt_session_event *xse)
+{
+	// Dispatch to the current event sink.
+	return xrt_session_event_sink_push(mc->xses, xse);
+}
+
+
+/*
+ *
+ * Wait helper thread.
+ *
+ */
+
+static bool
+is_pushed_or_waiting_locked(struct multi_compositor *mc)
+{
+	return mc->wait_thread.waiting ||     //
+	       mc->wait_thread.xcf != NULL || //
+	       mc->wait_thread.xcsem != NULL; //
+}
+
+static xrt_result_t
+wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
+{
+	COMP_TRACE_MARKER();
+	xrt_result_t ret = XRT_SUCCESS;
+
+	// Worker only. Never block the renderer on an untrusted future value.
+	int64_t timeout_ns = 100 * U_TIME_1MS_IN_NS;
+#ifdef XRT_OS_OSX
+	timeout_ns = 5 * U_TIME_1MS_IN_NS;
+	int64_t started_ns = mc->wait_thread.submitted_ns;
+#endif
+
+	do {
+		ret = xrt_compositor_fence_wait(*xcf_ptr, timeout_ns);
+		if (ret != XRT_TIMEOUT) {
+			break;
+		}
+
+#ifdef XRT_OS_OSX
+		if (os_monotonic_get_ns() - started_ns >= client_gpu_hung_ns()) {
+			break;
+		}
+#else
+		U_LOG_W("Waiting on client fence timed out > 100ms!");
+#endif
+	} while (os_thread_helper_is_running(&mc->wait_thread.oth));
+
+	xrt_compositor_fence_destroy(xcf_ptr);
+
+	if (ret != XRT_SUCCESS) {
+		U_LOG_E("Fence waiting failed: result=%d", ret);
+	}
+	return ret;
+}
+
+static xrt_result_t
+wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xcsem_ptr, uint64_t value)
+{
+	COMP_TRACE_MARKER();
+	xrt_result_t ret = XRT_SUCCESS;
+
+	// Worker only. Never block the renderer on an untrusted future value.
+	int64_t timeout_ns = 100 * U_TIME_1MS_IN_NS;
+#ifdef XRT_OS_OSX
+	timeout_ns = 5 * U_TIME_1MS_IN_NS;
+	int64_t started_ns = mc->wait_thread.submitted_ns;
+#endif
+
+	do {
+		ret = xrt_compositor_semaphore_wait(*xcsem_ptr, value, timeout_ns);
+		if (ret != XRT_TIMEOUT) {
+			break;
+		}
+
+#ifdef XRT_OS_OSX
+		if (os_monotonic_get_ns() - started_ns >= client_gpu_hung_ns()) {
+			break;
+		}
+#else
+		U_LOG_W("Waiting on client semaphore value '%" PRIu64 "' timed out > 100ms!", value);
+#endif
+	} while (os_thread_helper_is_running(&mc->wait_thread.oth));
+
+	xrt_compositor_semaphore_reference(xcsem_ptr, NULL);
+
+	if (ret != XRT_SUCCESS) {
+		U_LOG_E("Semaphore waiting failed: value=%" PRIu64 " result=%d", value, ret);
+	}
+	return ret;
+}
+
+static void
+wait_for_scheduled_free(struct multi_compositor *mc)
+{
+	COMP_TRACE_MARKER();
+	int64_t timing_start_ns = os_monotonic_get_ns();
+	int64_t timing_frame_id = mc->progress.data.frame_id;
+	uint32_t sleep_count = 0;
+
+	os_mutex_lock(&mc->slot_lock);
+
+	struct multi_compositor volatile *v_mc = mc;
+
+	// Block here if the scheduled slot is not clear.
+	while (v_mc->scheduled.active) {
+#ifdef XRT_OS_OSX
+		// This function runs only after the producer fence/semaphore is ready.
+		// Retire an older waiting frame rather than retaining three generations.
+		// Keep delivered for reprojection, and keep service GPU reuse waits.
+		if (mc->latest_completed_three_images) {
+			break;
+		}
+#endif
+		int64_t now_ns = os_monotonic_get_ns();
+
+		// This frame is for the next frame, drop the old one no matter what.
+		if (time_is_within_half_ms(mc->progress.data.display_time_ns, mc->slot_next_frame_display)) {
+			LOG_FRAME_LAG("%.3fms: Dropping old missed frame in favour for completed new frame",
+			              time_ns_to_ms_f(now_ns));
+			break;
+		}
+
+		// Replace the scheduled frame if it's in the past.
+		if (v_mc->scheduled.data.display_time_ns < now_ns) {
+			U_LOG_T("%.3fms: Replacing frame for time in past in favour of completed new frame",
+			        time_ns_to_ms_f(now_ns));
+			break;
+		}
+
+		U_LOG_D(
+		    "Two frames have completed GPU work and are waiting to be displayed."
+		    "\n\tnext frame: %fms (%" PRIu64
+		    ") (next time for compositor to pick up frame)"
+		    "\n\tprogress: %fms (%" PRIu64
+		    ")  (latest completed frame)"
+		    "\n\tscheduled: %fms (%" PRIu64 ") (oldest waiting frame)",
+		    time_ns_to_ms_f((int64_t)v_mc->slot_next_frame_display - now_ns),        //
+		    v_mc->slot_next_frame_display,                                           //
+		    time_ns_to_ms_f((int64_t)v_mc->progress.data.display_time_ns - now_ns),  //
+		    v_mc->progress.data.display_time_ns,                                     //
+		    time_ns_to_ms_f((int64_t)v_mc->scheduled.data.display_time_ns - now_ns), //
+		    v_mc->scheduled.data.display_time_ns);                                   //
+
+		os_mutex_unlock(&mc->slot_lock);
+
+		++sleep_count;
+		os_precise_sleeper_nanosleep(&mc->scheduled_sleeper, U_TIME_1MS_IN_NS);
+
+		os_mutex_lock(&mc->slot_lock);
+	}
+
+	os_mutex_unlock(&mc->slot_lock);
+
+	/*
+	 * Need to take list_and_timing_lock before slot_lock because slot_lock
+	 * is taken in multi_compositor_deliver_any_frames with list_and_timing_lock
+	 * held to stop clients from going away.
+	 */
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+	os_mutex_lock(&mc->slot_lock);
+	slot_move_and_clear_locked(mc, &mc->scheduled, &mc->progress);
+	os_mutex_unlock(&mc->slot_lock);
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+	if (ipc_frame_timing_enabled()) {
+		int64_t timing_end_ns = os_monotonic_get_ns();
+		U_LOG_RAW("IPC_FRAME_TIMING server scheduled_free frame=%" PRId64 " duration_ms=%.3f sleeps=%u",
+		          timing_frame_id, ipc_elapsed_ms(timing_start_ns, timing_end_ns), sleep_count);
+	}
+}
+
+static void *
+run_func(void *ptr)
+{
+	struct multi_compositor *mc = (struct multi_compositor *)ptr;
+
+	U_TRACE_SET_THREAD_NAME("Multi Client Module: Waiter");
+	os_thread_name_self("Multi Client Module: Waiter");
+
+	os_thread_helper_lock(&mc->wait_thread.oth);
+
+	// Signal the start function that we are enterting the loop.
+	mc->wait_thread.alive = true;
+	os_thread_helper_signal_locked(&mc->wait_thread.oth);
+
+	/*
+	 * One can view the layer_commit function and the wait thread as a
+	 * producer/consumer pair. This loop is the consumer side of that pair.
+	 * We look for either a fence or a semaphore on each loop, if none are
+	 * found we check if we are running then wait on the conditional
+	 * variable once again waiting to be signalled by the producer.
+	 */
+	while (os_thread_helper_is_running_locked(&mc->wait_thread.oth)) {
+		/*
+		 * Here we wait for the either a semaphore or a fence, if
+		 * neither has been set we wait/sleep here (again).
+		 */
+		if (mc->wait_thread.xcsem == NULL && mc->wait_thread.xcf == NULL) {
+			// Spurious wakeups are handled below.
+			os_thread_helper_wait_locked(&mc->wait_thread.oth);
+			// Fall through here on stopping to clean up and outstanding waits.
+		}
+
+		int64_t frame_id = mc->wait_thread.frame_id;
+		struct xrt_compositor_fence *xcf = mc->wait_thread.xcf;
+		struct xrt_compositor_semaphore *xcsem = mc->wait_thread.xcsem; // No need to ref, a move.
+		uint64_t value = mc->wait_thread.value;
+
+		// Ok to clear these on spurious wakeup as they are empty then anyways.
+		mc->wait_thread.frame_id = 0;
+		mc->wait_thread.xcf = NULL;
+		mc->wait_thread.xcsem = NULL;
+		mc->wait_thread.value = 0;
+
+		// We are being stopped, or a spurious wakeup, loop back and check running.
+		if (xcf == NULL && xcsem == NULL) {
+			continue;
+		}
+
+		// We now know that we should wait.
+		mc->wait_thread.waiting = true;
+
+		os_thread_helper_unlock(&mc->wait_thread.oth);
+
+		xrt_result_t wait_result = XRT_SUCCESS;
+		if (xcsem != NULL) {
+			int64_t semaphore_wait_start_ns = os_monotonic_get_ns();
+			macos_client_gpu_trace_event("semaphore_wait_start", frame_id, value, 0);
+			wait_result = wait_semaphore(mc, &xcsem, value);
+			int64_t semaphore_wait_end_ns = os_monotonic_get_ns();
+			macos_client_gpu_trace_event(wait_result == XRT_SUCCESS ? "semaphore_ready"
+			                                                        : "semaphore_failed",
+			                             frame_id, value, semaphore_wait_end_ns - semaphore_wait_start_ns);
+		}
+		if (xcf != NULL) {
+			wait_result = wait_fence(mc, &xcf);
+		}
+
+		if (wait_result != XRT_SUCCESS) {
+			/* A timeout is cancellation, never GPU completion. Keep progress
+			 * references until teardown; tracked storage then enters quarantine. */
+			U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d", frame_id,
+			        value, wait_result);
+			if (mc->xses != NULL && os_thread_helper_is_running(&mc->wait_thread.oth)) {
+				/* LOST makes API calls fail, while LOSS_PENDING also produces
+				 * the OpenXR state event an application can observe when idle. */
+				union xrt_session_event pending = {.type = XRT_SESSION_EVENT_LOSS_PENDING};
+				pending.loss_pending.loss_time_ns = os_monotonic_get_ns();
+				xrt_result_t pending_notify = multi_compositor_push_event(mc, &pending);
+				if (pending_notify != XRT_SUCCESS) {
+					U_LOG_E("Could not notify pending session loss: result=%d", pending_notify);
+				}
+				union xrt_session_event lost = {.type = XRT_SESSION_EVENT_LOST};
+				xrt_result_t notify = multi_compositor_push_event(mc, &lost);
+				if (notify != XRT_SUCCESS) {
+					U_LOG_E("Could not notify failed client: result=%d", notify);
+				}
+			}
+			os_thread_helper_lock(&mc->wait_thread.oth);
+			mc->wait_thread.failed = true;
+			mc->wait_thread.waiting = false;
+			mc->wait_thread.blocked = false;
+			os_thread_helper_signal_locked(&mc->wait_thread.oth);
+			continue;
+		}
+
+		// Sample time outside of lock.
+		int64_t now_ns = os_monotonic_get_ns();
+
+		os_mutex_lock(&mc->msc->list_and_timing_lock);
+		u_pa_mark_gpu_done(mc->upa, frame_id, now_ns);
+		os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+		// Wait for the delivery slot.
+		int64_t scheduled_wait_start_ns = os_monotonic_get_ns();
+		wait_for_scheduled_free(mc);
+		int64_t scheduled_wait_end_ns = os_monotonic_get_ns();
+		macos_client_gpu_trace_event("scheduled", frame_id, value,
+		                             scheduled_wait_end_ns - scheduled_wait_start_ns);
+
+		os_thread_helper_lock(&mc->wait_thread.oth);
+
+		/*
+		 * Finally no longer waiting, this must be done after
+		 * wait_for_scheduled_free because it moves the slots/layers
+		 * from progress to scheduled to be picked up by the compositor.
+		 */
+		mc->wait_thread.waiting = false;
+
+		if (mc->wait_thread.blocked) {
+			// Release one thread
+			mc->wait_thread.blocked = false;
+			os_thread_helper_signal_locked(&mc->wait_thread.oth);
+		}
+	}
+
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+
+	return NULL;
+}
+
+static void
+wait_for_wait_thread_locked(struct multi_compositor *mc)
+{
+	// Should we wait for the last frame.
+	if (is_pushed_or_waiting_locked(mc)) {
+		COMP_TRACE_IDENT(blocked);
+
+		// There should only be one thread entering here.
+		assert(mc->wait_thread.blocked == false);
+
+		// OK, wait until the wait thread releases us by setting blocked to false
+		mc->wait_thread.blocked = true;
+		while (mc->wait_thread.blocked) {
+			os_thread_helper_wait_locked(&mc->wait_thread.oth);
+		}
+	}
+}
+
+static void
+wait_for_wait_thread(struct multi_compositor *mc)
+{
+	os_thread_helper_lock(&mc->wait_thread.oth);
+
+	wait_for_wait_thread_locked(mc);
+
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+}
+
+static void
+push_fence_to_wait_thread(struct multi_compositor *mc, int64_t frame_id, struct xrt_compositor_fence *xcf)
+{
+	os_thread_helper_lock(&mc->wait_thread.oth);
+
+	// The function begin_layer should have waited, but just in case.
+	assert(!mc->wait_thread.waiting);
+	wait_for_wait_thread_locked(mc);
+
+	assert(mc->wait_thread.xcf == NULL);
+
+	mc->wait_thread.frame_id = frame_id;
+	mc->wait_thread.submitted_ns = os_monotonic_get_ns();
+	mc->wait_thread.xcf = xcf;
+
+	os_thread_helper_signal_locked(&mc->wait_thread.oth);
+
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+}
+
+static void
+push_semaphore_to_wait_thread(struct multi_compositor *mc,
+                              int64_t frame_id,
+                              struct xrt_compositor_semaphore *xcsem,
+                              uint64_t value)
+{
+	os_thread_helper_lock(&mc->wait_thread.oth);
+
+	// The function begin_layer should have waited, but just in case.
+	assert(!mc->wait_thread.waiting);
+	wait_for_wait_thread_locked(mc);
+
+	assert(mc->wait_thread.xcsem == NULL);
+
+	mc->wait_thread.frame_id = frame_id;
+	mc->wait_thread.submitted_ns = os_monotonic_get_ns();
+	xrt_compositor_semaphore_reference(&mc->wait_thread.xcsem, xcsem);
+	mc->wait_thread.value = value;
+
+	os_thread_helper_signal_locked(&mc->wait_thread.oth);
+
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+}
+
+
+/*
+ *
+ * Compositor functions.
+ *
+ */
+
+static xrt_result_t
+multi_compositor_get_swapchain_create_properties(struct xrt_compositor *xc,
+                                                 const struct xrt_swapchain_create_info *info,
+                                                 struct xrt_swapchain_create_properties *xsccp)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	return xrt_comp_get_swapchain_create_properties(&mc->msc->xcn->base, info, xsccp);
+}
+
+static xrt_result_t
+finish_swapchain_create(struct multi_compositor *mc,
+                        const struct xrt_swapchain_create_info *info,
+                        xrt_result_t result,
+                        struct xrt_swapchain **out_xsc)
+{
+	if (result != XRT_SUCCESS || (info->create & XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES) == 0) {
+		return result;
+	}
+#ifdef XRT_OS_OSX
+	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) != 0 || (*out_xsc)->image_count != 3) {
+		xrt_swapchain_reference(out_xsc, NULL);
+		return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+	}
+	os_mutex_lock(&mc->slot_lock);
+	bool first = !mc->latest_completed_three_images;
+	mc->latest_completed_three_images = true;
+	os_mutex_unlock(&mc->slot_lock);
+	if (first) {
+		U_LOG_I("Three-image compatibility: latest completed scheduling; GPU reuse waits retained");
+	}
+	return XRT_SUCCESS;
+#else
+	(void)mc;
+	xrt_swapchain_reference(out_xsc, NULL);
+	return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+#endif
+}
+
+static xrt_result_t
+multi_compositor_create_swapchain(struct xrt_compositor *xc,
+                                  const struct xrt_swapchain_create_info *info,
+                                  struct xrt_swapchain **out_xsc)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	xrt_result_t result = xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
+	return finish_swapchain_create(mc, info, result, out_xsc);
+}
+
+static xrt_result_t
+multi_compositor_import_swapchain(struct xrt_compositor *xc,
+                                  const struct xrt_swapchain_create_info *info,
+                                  struct xrt_image_native *native_images,
+                                  uint32_t image_count,
+                                  struct xrt_swapchain **out_xsc)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	xrt_result_t result = xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
+	return finish_swapchain_create(mc, info, result, out_xsc);
+}
+
+static xrt_result_t
+multi_compositor_import_fence(struct xrt_compositor *xc,
+                              xrt_graphics_sync_handle_t handle,
+                              struct xrt_compositor_fence **out_xcf)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	return xrt_comp_import_fence(&mc->msc->xcn->base, handle, out_xcf);
+}
+
+static xrt_result_t
+multi_compositor_create_semaphore(struct xrt_compositor *xc,
+                                  xrt_graphics_sync_handle_t *out_handle,
+                                  struct xrt_compositor_semaphore **out_xcsem)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	// We don't wrap the semaphore and it's safe to pass it out directly.
+	return xrt_comp_create_semaphore(&mc->msc->xcn->base, out_handle, out_xcsem);
+}
+
+static xrt_result_t
+multi_compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_session_info *info)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	assert(!mc->state.session_active);
+	if (!mc->state.session_active) {
+		multi_system_compositor_update_session_status(mc->msc, true);
+		mc->state.session_active = true;
+		mc->state.session_view_type = info->view_type;
+		if (mc->lifecycle_callbacks != NULL) {
+			mc->lifecycle_callbacks->set_active(mc->lifecycle_ctx, true);
+		}
+	}
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_end_session(struct xrt_compositor *xc)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	assert(mc->state.session_active);
+	if (mc->state.session_active) {
+		multi_system_compositor_update_session_status(mc->msc, false);
+		mc->state.session_active = false;
+		if (mc->lifecycle_callbacks != NULL) {
+			mc->lifecycle_callbacks->set_active(mc->lifecycle_ctx, false);
+		}
+	}
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_predict_frame(struct xrt_compositor *xc,
+                               int64_t *out_frame_id,
+                               int64_t *out_wake_time_ns,
+                               int64_t *out_predicted_gpu_time_ns,
+                               int64_t *out_predicted_display_time_ns,
+                               int64_t *out_predicted_display_period_ns)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+	int64_t now_ns = os_monotonic_get_ns();
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+
+	u_pa_predict(                         //
+	    mc->upa,                          //
+	    now_ns,                           //
+	    out_frame_id,                     //
+	    out_wake_time_ns,                 //
+	    out_predicted_display_time_ns,    //
+	    out_predicted_display_period_ns); //
+
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+	*out_predicted_gpu_time_ns = 0;
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_mark_frame(struct xrt_compositor *xc,
+                            int64_t frame_id,
+                            enum xrt_compositor_frame_point point,
+                            int64_t when_ns)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	int64_t now_ns = os_monotonic_get_ns();
+
+	switch (point) {
+	case XRT_COMPOSITOR_FRAME_POINT_WOKE:
+		os_mutex_lock(&mc->msc->list_and_timing_lock);
+		u_pa_mark_point(mc->upa, frame_id, U_TIMING_POINT_WAKE_UP, now_ns);
+		os_mutex_unlock(&mc->msc->list_and_timing_lock);
+		break;
+	default: assert(false);
+	}
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_wait_frame(struct xrt_compositor *xc,
+                            int64_t *out_frame_id,
+                            int64_t *out_predicted_display_time_ns,
+                            int64_t *out_predicted_display_period_ns)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	int64_t frame_id = -1;
+	int64_t wake_up_time_ns = 0;
+	int64_t predicted_gpu_time_ns = 0;
+
+	xrt_comp_predict_frame(               //
+	    xc,                               //
+	    &frame_id,                        //
+	    &wake_up_time_ns,                 //
+	    &predicted_gpu_time_ns,           //
+	    out_predicted_display_time_ns,    //
+	    out_predicted_display_period_ns); //
+
+	// Wait until the given wake up time.
+	u_wait_until(&mc->frame_sleeper, wake_up_time_ns);
+
+	int64_t now_ns = os_monotonic_get_ns();
+
+	// Signal that we woke up.
+	xrt_comp_mark_frame(xc, frame_id, XRT_COMPOSITOR_FRAME_POINT_WOKE, now_ns);
+
+	*out_frame_id = frame_id;
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_begin_frame(struct xrt_compositor *xc, int64_t frame_id)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+	int64_t now_ns = os_monotonic_get_ns();
+	u_pa_mark_point(mc->upa, frame_id, U_TIMING_POINT_BEGIN, now_ns);
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+	int64_t now_ns = os_monotonic_get_ns();
+
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+	u_pa_mark_discarded(mc->upa, frame_id, now_ns);
+	// Need to drop delivered frame as it shouldn't be reused.
+	multi_compositor_retire_delivered_locked(mc, now_ns);
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	(void)xc;
+	(void)info;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_create_passthrough_layer(struct xrt_compositor *xc,
+                                          const struct xrt_passthrough_layer_create_info *info)
+{
+	(void)xc;
+	(void)info;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_destroy_passthrough(struct xrt_compositor *xc)
+{
+	(void)xc;
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+	macos_client_gpu_trace_event("layer_begin_entry", data->frame_id, 0, 0);
+	os_thread_helper_lock(&mc->wait_thread.oth);
+	bool already_failed = mc->wait_thread.failed;
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+	if (already_failed) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+
+	// As early as possible.
+	int64_t now_ns = os_monotonic_get_ns();
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+	u_pa_mark_delivered(mc->upa, data->frame_id, now_ns, data->display_time_ns);
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+	/*
+	 * We have to block here for the waiting thread to push the last
+	 * submitted frame from the progress slot to the scheduled slot,
+	 * it only does after the sync object has signaled completion.
+	 *
+	 * If the previous frame's GPU work has not completed that means we
+	 * will block here, but that is okay as the app has already submitted
+	 * the GPU for this frame. This should have very little impact on GPU
+	 * utilisation, if any.
+	 */
+	int64_t wait_start_ns = os_monotonic_get_ns();
+	wait_for_wait_thread(mc);
+	int64_t wait_end_ns = os_monotonic_get_ns();
+	macos_client_gpu_trace_event("layer_begin_after_previous", data->frame_id, 0, wait_end_ns - wait_start_ns);
+	if (ipc_frame_timing_enabled()) {
+		U_LOG_RAW("IPC_FRAME_TIMING server layer_begin_wait frame=%" PRId64 " duration_ms=%.3f", data->frame_id,
+		          ipc_elapsed_ms(wait_start_ns, wait_end_ns));
+	}
+
+	os_thread_helper_lock(&mc->wait_thread.oth);
+	bool failed = mc->wait_thread.failed;
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+	if (failed) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
+	assert(mc->progress.layer_count == 0);
+	U_ZERO(&mc->progress);
+
+	mc->progress.active = true;
+	mc->progress.data = *data;
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_projection(struct xrt_compositor *xc,
+                                  struct xrt_device *xdev,
+                                  struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                  const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xrt_swapchain_reference(&mc->progress.layers[index].xscs[i], xsc[i]);
+	}
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_projection_depth(struct xrt_compositor *xc,
+                                        struct xrt_device *xdev,
+                                        struct xrt_swapchain *xsc[XRT_MAX_VIEWS],
+                                        struct xrt_swapchain *d_xsc[XRT_MAX_VIEWS],
+                                        const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+
+	for (uint32_t i = 0; i < data->view_count; ++i) {
+		xrt_swapchain_reference(&mc->progress.layers[index].xscs[i], xsc[i]);
+		xrt_swapchain_reference(&mc->progress.layers[index].xscs[i + data->view_count], d_xsc[i]);
+	}
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_quad(struct xrt_compositor *xc,
+                            struct xrt_device *xdev,
+                            struct xrt_swapchain *xsc,
+                            const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_cube(struct xrt_compositor *xc,
+                            struct xrt_device *xdev,
+                            struct xrt_swapchain *xsc,
+                            const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_cylinder(struct xrt_compositor *xc,
+                                struct xrt_device *xdev,
+                                struct xrt_swapchain *xsc,
+                                const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_equirect1(struct xrt_compositor *xc,
+                                 struct xrt_device *xdev,
+                                 struct xrt_swapchain *xsc,
+                                 const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_equirect2(struct xrt_compositor *xc,
+                                 struct xrt_device *xdev,
+                                 struct xrt_swapchain *xsc,
+                                 const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+	xrt_swapchain_reference(&mc->progress.layers[index].xscs[0], xsc);
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_passthrough(struct xrt_compositor *xc,
+                                   struct xrt_device *xdev,
+                                   const struct xrt_layer_data *data)
+{
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	size_t index = mc->progress.layer_count++;
+	mc->progress.layers[index].xdev = xdev;
+	mc->progress.layers[index].data = *data;
+	layer_gpu_reuse_claim(&mc->progress.layers[index]);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_handle)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+	struct xrt_compositor_fence *xcf = NULL;
+	int64_t frame_id = mc->progress.data.frame_id;
+	int64_t commit_start_ns = os_monotonic_get_ns();
+	int64_t import_start_ns = commit_start_ns;
+
+	do {
+		if (!xrt_graphics_sync_handle_is_valid(sync_handle)) {
+			break;
+		}
+
+		xrt_result_t xret = xrt_comp_import_fence( //
+		    &mc->msc->xcn->base,                   //
+		    sync_handle,                           //
+		    &xcf);                                 //
+		/*!
+		 * If import_fence succeeded, we have transferred ownership to
+		 * the compositor; no need to do anything more. If the call
+		 * failed we need to close the handle.
+		 */
+		if (xret == XRT_SUCCESS) {
+			break;
+		}
+
+		u_graphics_sync_unref(&sync_handle);
+	} while (false); // Goto without the labels.
+	int64_t import_end_ns = os_monotonic_get_ns();
+
+	if (xcf != NULL) {
+		push_fence_to_wait_thread(mc, frame_id, xcf);
+	} else {
+		// Assume that the app side compositor waited.
+		int64_t now_ns = os_monotonic_get_ns();
+
+		os_mutex_lock(&mc->msc->list_and_timing_lock);
+		u_pa_mark_gpu_done(mc->upa, frame_id, now_ns);
+		os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+		wait_for_scheduled_free(mc);
+	}
+
+	if (ipc_frame_timing_enabled()) {
+		int64_t commit_end_ns = os_monotonic_get_ns();
+		U_LOG_RAW("IPC_FRAME_TIMING server layer_commit frame=%" PRId64
+		          " sync_handle=%d imported_fence=%d import_ms=%.3f total_ms=%.3f",
+		          frame_id, xrt_graphics_sync_handle_is_valid(sync_handle) ? 1 : 0, xcf != NULL ? 1 : 0,
+		          ipc_elapsed_ms(import_start_ns, import_end_ns),
+		          ipc_elapsed_ms(commit_start_ns, commit_end_ns));
+	}
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
+                                             struct xrt_compositor_semaphore *xcsem,
+                                             uint64_t value)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+	int64_t frame_id = mc->progress.data.frame_id;
+
+#ifdef XRT_OS_OSX
+	for (uint32_t i = 0; i < mc->progress.layer_count; i++) {
+		struct multi_layer_entry *layer = &mc->progress.layers[i];
+		const struct xrt_layer_data *data = &layer->data;
+		uint32_t count = data->type == XRT_LAYER_PROJECTION || data->type == XRT_LAYER_PROJECTION_DEPTH
+		                     ? data->view_count
+		                     : 1;
+		for (uint32_t v = 0; v < count; v++) {
+			uint32_t index;
+			switch (data->type) {
+			case XRT_LAYER_PROJECTION: index = data->proj.v[v].sub.image_index; break;
+			case XRT_LAYER_PROJECTION_DEPTH: index = data->depth.v[v].sub.image_index; break;
+			case XRT_LAYER_QUAD: index = data->quad.sub.image_index; break;
+			case XRT_LAYER_CUBE: index = data->cube.sub.image_index; break;
+			case XRT_LAYER_CYLINDER: index = data->cylinder.sub.image_index; break;
+			case XRT_LAYER_EQUIRECT1: index = data->equirect1.sub.image_index; break;
+			case XRT_LAYER_EQUIRECT2: index = data->equirect2.sub.image_index; break;
+			case XRT_LAYER_PASSTHROUGH: continue;
+			default: return XRT_ERROR_INVALID_ARGUMENT;
+			}
+			xrt_result_t ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[v], index, xcsem, value);
+			if (ret != XRT_SUCCESS) {
+				return ret;
+			}
+			if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
+				ret = comp_swapchain_gpu_reuse_set_producer(
+				    layer->xscs[v + count], data->depth.d[v].sub.image_index, xcsem, value);
+				if (ret != XRT_SUCCESS) {
+					return ret;
+				}
+			}
+		}
+	}
+#endif
+	push_semaphore_to_wait_thread(mc, frame_id, xcsem, value);
+	macos_client_gpu_trace_event("semaphore_pushed", frame_id, value, 0);
+
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_set_thread_hint(struct xrt_compositor *xc, enum xrt_thread_hint hint, uint32_t thread_id)
+{
+	// No-op
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+multi_compositor_get_display_refresh_rate(struct xrt_compositor *xc, float *out_display_refresh_rate_hz)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	return xrt_comp_get_display_refresh_rate(&mc->msc->xcn->base, out_display_refresh_rate_hz);
+}
+
+static xrt_result_t
+multi_compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display_refresh_rate_hz)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	xrt_comp_request_display_refresh_rate(&mc->msc->xcn->base, display_refresh_rate_hz);
+
+#ifdef XRT_OS_ANDROID
+	// TODO: notify the display refresh changed event by android display callback function.
+	float current_refresh_rate_hz =
+	    android_custom_surface_get_display_refresh_rate(android_globals_get_vm(), android_globals_get_context());
+
+	if (current_refresh_rate_hz != 0 && current_refresh_rate_hz != mc->current_refresh_rate_hz) {
+		xrt_syscomp_notify_display_refresh_changed(&mc->msc->base, xc, mc->current_refresh_rate_hz,
+		                                           current_refresh_rate_hz);
+		mc->current_refresh_rate_hz = current_refresh_rate_hz;
+	}
+#endif
+
+	return XRT_SUCCESS;
+}
+
+static void
+multi_compositor_destroy(struct xrt_compositor *xc)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = multi_compositor(xc);
+
+	if (mc->state.session_active) {
+		multi_system_compositor_update_session_status(mc->msc, false);
+		mc->state.session_active = false;
+	}
+
+	if (mc->lifecycle_callbacks != NULL) {
+		mc->lifecycle_callbacks->destroyed(mc->lifecycle_ctx);
+	}
+
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+
+	// Remove it from the list of clients.
+	for (size_t i = 0; i < MULTI_MAX_CLIENTS; i++) {
+		if (mc->msc->clients[i] == mc) {
+			mc->msc->clients[i] = NULL;
+		}
+	}
+
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+	// Destroy the wait thread, destroy also stops the thread.
+	os_thread_helper_destroy(&mc->wait_thread.oth);
+
+	// We are now off the rendering list, clear slots for any swapchains.
+	os_mutex_lock(&mc->msc->list_and_timing_lock);
+	slot_clear_locked(mc, &mc->progress);
+	slot_clear_locked(mc, &mc->scheduled);
+	slot_clear_locked(mc, &mc->delivered);
+	os_mutex_unlock(&mc->msc->list_and_timing_lock);
+
+	// Does null checking.
+	u_pa_destroy(&mc->upa);
+
+	os_precise_sleeper_deinit(&mc->frame_sleeper);
+	os_precise_sleeper_deinit(&mc->scheduled_sleeper);
+
+	os_mutex_destroy(&mc->slot_lock);
+
+	free(mc);
+}
+
+static void
+log_frame_time_diff(int64_t frame_time_ns, int64_t display_time_ns)
+{
+	int64_t diff_ns = (int64_t)frame_time_ns - (int64_t)display_time_ns;
+	bool late = false;
+	if (diff_ns < 0) {
+		diff_ns = -diff_ns;
+		late = true;
+	}
+
+	LOG_FRAME_LAG("Frame %s by %.2fms!", late ? "late" : "early", time_ns_to_ms_f(diff_ns));
+}
+
+void
+multi_compositor_deliver_any_frames(struct multi_compositor *mc, int64_t display_time_ns)
+{
+	os_mutex_lock(&mc->slot_lock);
+
+	if (!mc->scheduled.active) {
+		os_mutex_unlock(&mc->slot_lock);
+		return;
+	}
+
+	bool deliver = time_is_greater_then_or_within_half_ms(display_time_ns, mc->scheduled.data.display_time_ns);
+#ifdef XRT_OS_OSX
+	// A latest-completed client must latch on the next compositor tick. Keeping
+	// the timestamp gate while continually superseding future scheduled frames
+	// could otherwise keep delivered unchanged indefinitely.
+	deliver |= mc->latest_completed_three_images;
+#endif
+	if (deliver) {
+		slot_move_and_clear_locked(mc, &mc->delivered, &mc->scheduled);
+
+		int64_t frame_time_ns = mc->delivered.data.display_time_ns;
+		if (!time_is_within_half_ms(frame_time_ns, display_time_ns)) {
+			log_frame_time_diff(frame_time_ns, display_time_ns);
+		}
+	}
+
+	os_mutex_unlock(&mc->slot_lock);
+}
+
+void
+multi_compositor_latch_frame_locked(struct multi_compositor *mc, int64_t when_ns, int64_t system_frame_id)
+{
+	u_pa_latched(mc->upa, mc->delivered.data.frame_id, when_ns, system_frame_id);
+}
+
+void
+multi_compositor_retire_delivered_locked(struct multi_compositor *mc, int64_t when_ns)
+{
+	slot_clear_locked(mc, &mc->delivered);
+}
+
+xrt_result_t
+multi_compositor_create(struct multi_system_compositor *msc,
+                        const struct xrt_session_info *xsi,
+                        struct xrt_session_event_sink *xses,
+                        struct xrt_compositor_native **out_xcn)
+{
+	COMP_TRACE_MARKER();
+
+	struct multi_compositor *mc = U_TYPED_CALLOC(struct multi_compositor);
+
+	// Initialize state - base session is anything that's not an overlay
+	mc->state.is_base_session = !xsi->is_overlay;
+
+	mc->base.base.get_swapchain_create_properties = multi_compositor_get_swapchain_create_properties;
+	mc->base.base.create_swapchain = multi_compositor_create_swapchain;
+	mc->base.base.import_swapchain = multi_compositor_import_swapchain;
+	mc->base.base.import_fence = multi_compositor_import_fence;
+	mc->base.base.create_semaphore = multi_compositor_create_semaphore;
+	mc->base.base.create_passthrough = multi_compositor_create_passthrough;
+	mc->base.base.create_passthrough_layer = multi_compositor_create_passthrough_layer;
+	mc->base.base.destroy_passthrough = multi_compositor_destroy_passthrough;
+	mc->base.base.begin_session = multi_compositor_begin_session;
+	mc->base.base.end_session = multi_compositor_end_session;
+	mc->base.base.predict_frame = multi_compositor_predict_frame;
+	mc->base.base.mark_frame = multi_compositor_mark_frame;
+	mc->base.base.wait_frame = multi_compositor_wait_frame;
+	mc->base.base.begin_frame = multi_compositor_begin_frame;
+	mc->base.base.discard_frame = multi_compositor_discard_frame;
+	mc->base.base.layer_begin = multi_compositor_layer_begin;
+	mc->base.base.layer_projection = multi_compositor_layer_projection;
+	mc->base.base.layer_projection_depth = multi_compositor_layer_projection_depth;
+	mc->base.base.layer_quad = multi_compositor_layer_quad;
+	mc->base.base.layer_cube = multi_compositor_layer_cube;
+	mc->base.base.layer_cylinder = multi_compositor_layer_cylinder;
+	mc->base.base.layer_equirect1 = multi_compositor_layer_equirect1;
+	mc->base.base.layer_equirect2 = multi_compositor_layer_equirect2;
+	mc->base.base.layer_passthrough = multi_compositor_layer_passthrough;
+	mc->base.base.layer_commit = multi_compositor_layer_commit;
+	mc->base.base.layer_commit_with_semaphore = multi_compositor_layer_commit_with_semaphore;
+	mc->base.base.destroy = multi_compositor_destroy;
+	mc->base.base.set_thread_hint = multi_compositor_set_thread_hint;
+	mc->base.base.get_display_refresh_rate = multi_compositor_get_display_refresh_rate;
+	mc->base.base.request_display_refresh_rate = multi_compositor_request_display_refresh_rate;
+	mc->msc = msc;
+	mc->xses = xses;
+	mc->xsi = *xsi;
+
+	os_mutex_init(&mc->slot_lock);
+	os_thread_helper_init(&mc->wait_thread.oth);
+
+	// Passthrough our formats from the native compositor to the client.
+	mc->base.base.info = msc->xcn->base.info;
+
+	// Used in wait frame.
+	os_precise_sleeper_init(&mc->frame_sleeper);
+
+	// Used in scheduled waiting function.
+	os_precise_sleeper_init(&mc->scheduled_sleeper);
+
+	// This is safe to do without a lock since we are not on the list yet.
+	u_paf_create(msc->upaf, &mc->upa);
+	if ((xsi->pacing_flags & XRT_SESSION_PACING_USE_MIN_FRAME_PERIOD_BIT) != 0) {
+		u_pa_set_use_min_frame_period(mc->upa, true);
+	}
+
+	os_mutex_lock(&msc->list_and_timing_lock);
+
+	// If we have too many clients, just ignore it.
+	for (size_t i = 0; i < MULTI_MAX_CLIENTS; i++) {
+		if (mc->msc->clients[i] != NULL) {
+			continue;
+		}
+		mc->msc->clients[i] = mc;
+		break;
+	}
+
+	u_pa_info(                                         //
+	    mc->upa,                                       //
+	    msc->last_timings.predicted_display_time_ns,   //
+	    msc->last_timings.predicted_display_period_ns, //
+	    msc->last_timings.diff_ns);                    //
+
+	os_mutex_unlock(&msc->list_and_timing_lock);
+
+	// Last start the wait thread.
+	os_thread_helper_start(&mc->wait_thread.oth, run_func, mc);
+
+	os_thread_helper_lock(&mc->wait_thread.oth);
+
+	// Wait for the wait thread to fully start.
+	while (!mc->wait_thread.alive) {
+		os_thread_helper_wait_locked(&mc->wait_thread.oth);
+	}
+
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+
+#ifdef XRT_OS_ANDROID
+	mc->current_refresh_rate_hz =
+	    android_custom_surface_get_display_refresh_rate(android_globals_get_vm(), android_globals_get_context());
+#endif
+
+	*out_xcn = &mc->base;
+
+	return XRT_SUCCESS;
+}
+
+void
+comp_multi_compositor_set_lifecycle_callbacks(struct xrt_compositor_native *xcn,
+                                              const struct comp_multi_lifecycle_callbacks *callbacks,
+                                              void *ctx)
+{
+	assert(xcn->base.destroy == multi_compositor_destroy);
+	struct multi_compositor *mc = multi_compositor(&xcn->base);
+	mc->lifecycle_callbacks = callbacks;
+	mc->lifecycle_ctx = ctx;
+}

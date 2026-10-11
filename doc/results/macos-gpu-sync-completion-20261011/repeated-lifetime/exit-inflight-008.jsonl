@@ -1,0 +1,6 @@
+{"event":"config","scenario":"exit-inflight","producer_pid":32724,"consumer_pid":32721,"hung_ms":500,"margin_us":6000,"interval_us":8333,"thermal":0,"low_power":false,"seed":0,"registry":4294968652,"texture_size":64}
+{"event":"producer_killed_inflight","gpu_status":2,"storage_retained":true}
+{"event":"presentation_selection","frame":1,"target_ns":40445639195791,"deferred":false}
+{"event":"gate","frame":1,"image":0,"expected":1,"observed":1,"obligation_ns":40445630862791,"commit_ns":40445631191208,"ready_ns":40445632795583,"ready":true}
+{"event":"vulkan_wait_submit","frame":1,"value":1,"stage":"TRANSFER","duration_ns":598500}
+{"event":"result","scenario":"exit-inflight","status":"PASS","consumed":1,"refused":0,"missed_deadlines":0,"runtime_ms":3.823,"submit_us":{"p50":598.500,"p95":598.500,"p99":598.500,"max":598.500},"no_wait_p50_us":0.000,"empty_wait_p50_us":0.000,"ready_p50_us":1932.792,"end_to_end_p50_us":3694.167,"thermal_end":0}

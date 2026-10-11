@@ -1,0 +1,95 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: gpu-sync-34301
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: 
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+ INFO [u_timing_trace_open] Timing trace: /Users/nickkennedy/Code/monado-2/doc/results/macos-gpu-sync-completion-20261011/headset-faults-awake/missing/monado_psvr2_34301_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [client_metal_release_wait_thread_attach] Metal app-release Stage 4 enabled; shared-event completion will gate frame readiness on Monado's wait thread
+ INFO [ipc_metal_xpc_publish_iosurfaces] Metal XPC published 3 IOSurface(s) token=0x000000004d507e43
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d2244a5 device=0x104a29470 value=0
+ INFO [ensure_pair] Metal app-release Stage 4 ready: event=0x76cca0ac0 initial_value=0; app CPU barrier bypassed and frame readiness delegated to Monado wait thread
+{"event":"config","thermal":0,"low_power":false,"clock":"CLOCK_MONOTONIC"}
+{"event":"frame","pid":34301,"frame":1,"image":0,"begin_ns":40849828751000,"end_ns":40849828867000}
+{"event":"frame","pid":34301,"frame":2,"image":1,"begin_ns":40849843989000,"end_ns":40849844080000}
+{"event":"frame","pid":34301,"frame":3,"image":2,"begin_ns":40849861259000,"end_ns":40849861343000}
+{"event":"frame","pid":34301,"frame":4,"image":0,"begin_ns":40849878635000,"end_ns":40849878747000}
+{"event":"frame","pid":34301,"frame":5,"image":1,"begin_ns":40849895758000,"end_ns":40849895842000}
+{"event":"frame","pid":34301,"frame":6,"image":2,"begin_ns":40849912846000,"end_ns":40849912930000}
+{"event":"frame","pid":34301,"frame":7,"image":0,"begin_ns":40849929867000,"end_ns":40849929957000}
+{"event":"frame","pid":34301,"frame":8,"image":1,"begin_ns":40849946729000,"end_ns":40849946816000}
+{"event":"frame","pid":34301,"frame":9,"image":2,"begin_ns":40849963911000,"end_ns":40849964008000}
+{"event":"frame","pid":34301,"frame":10,"image":0,"begin_ns":40849980515000,"end_ns":40849980599000}
+{"event":"frame","pid":34301,"frame":11,"image":1,"begin_ns":40849994919000,"end_ns":40849995002000}
+{"event":"frame","pid":34301,"frame":12,"image":2,"begin_ns":40850013976000,"end_ns":40850014068000}
+{"event":"frame","pid":34301,"frame":13,"image":0,"begin_ns":40850030635000,"end_ns":40850030719000}
+{"event":"frame","pid":34301,"frame":14,"image":1,"begin_ns":40850047300000,"end_ns":40850047410000}
+{"event":"frame","pid":34301,"frame":15,"image":2,"begin_ns":40850063969000,"end_ns":40850064052000}
+{"event":"frame","pid":34301,"frame":16,"image":0,"begin_ns":40850080605000,"end_ns":40850080690000}
+{"event":"frame","pid":34301,"frame":17,"image":1,"begin_ns":40850097308000,"end_ns":40850097426000}
+{"event":"frame","pid":34301,"frame":18,"image":2,"begin_ns":40850112675000,"end_ns":40850112776000}
+{"event":"frame","pid":34301,"frame":19,"image":0,"begin_ns":40850130885000,"end_ns":40850130976000}
+{"event":"frame","pid":34301,"frame":20,"image":1,"begin_ns":40850147217000,"end_ns":40850147322000}
+{"event":"frame","pid":34301,"frame":21,"image":2,"begin_ns":40850162672000,"end_ns":40850162758000}
+{"event":"frame","pid":34301,"frame":22,"image":0,"begin_ns":40850180885000,"end_ns":40850181023000}
+{"event":"frame","pid":34301,"frame":23,"image":1,"begin_ns":40850197200000,"end_ns":40850197294000}
+{"event":"frame","pid":34301,"frame":24,"image":2,"begin_ns":40850212680000,"end_ns":40850212764000}
+{"event":"frame","pid":34301,"frame":25,"image":0,"begin_ns":40850230926000,"end_ns":40850231028000}
+{"event":"frame","pid":34301,"frame":26,"image":1,"begin_ns":40850247239000,"end_ns":40850247334000}
+{"event":"frame","pid":34301,"frame":27,"image":2,"begin_ns":40850262665000,"end_ns":40850262753000}
+{"event":"frame","pid":34301,"frame":28,"image":0,"begin_ns":40850280622000,"end_ns":40850280718000}
+{"event":"frame","pid":34301,"frame":29,"image":1,"begin_ns":40850296001000,"end_ns":40850296091000}
+{"event":"frame","pid":34301,"frame":30,"image":2,"begin_ns":40850313945000,"end_ns":40850314036000}
+{"event":"frame","pid":34301,"frame":31,"image":0,"begin_ns":40850329367000,"end_ns":40850329465000}
+{"event":"frame","pid":34301,"frame":32,"image":1,"begin_ns":40850346023000,"end_ns":40850346125000}
+{"event":"frame","pid":34301,"frame":33,"image":2,"begin_ns":40850362734000,"end_ns":40850362850000}
+{"event":"frame","pid":34301,"frame":34,"image":0,"begin_ns":40850380909000,"end_ns":40850381057000}
+{"event":"frame","pid":34301,"frame":35,"image":1,"begin_ns":40850397380000,"end_ns":40850397499000}
+{"event":"frame","pid":34301,"frame":36,"image":2,"begin_ns":40850413981000,"end_ns":40850414092000}
+{"event":"frame","pid":34301,"frame":37,"image":0,"begin_ns":40850430633000,"end_ns":40850430745000}
+{"event":"frame","pid":34301,"frame":38,"image":1,"begin_ns":40850447315000,"end_ns":40850447447000}
+{"event":"frame","pid":34301,"frame":39,"image":2,"begin_ns":40850462706000,"end_ns":40850462819000}
+{"event":"frame","pid":34301,"frame":40,"image":0,"begin_ns":40850480892000,"end_ns":40850480996000}
+{"event":"frame","pid":34301,"frame":41,"image":1,"begin_ns":40850497403000,"end_ns":40850497541000}
+{"event":"frame","pid":34301,"frame":42,"image":2,"begin_ns":40850514047000,"end_ns":40850514208000}
+{"event":"frame","pid":34301,"frame":43,"image":0,"begin_ns":40850530707000,"end_ns":40850530847000}
+{"event":"frame","pid":34301,"frame":44,"image":1,"begin_ns":40850547289000,"end_ns":40850547399000}
+{"event":"frame","pid":34301,"frame":45,"image":2,"begin_ns":40850563954000,"end_ns":40850564060000}
+{"event":"frame","pid":34301,"frame":46,"image":0,"begin_ns":40850580662000,"end_ns":40850580750000}
+{"event":"frame","pid":34301,"frame":47,"image":1,"begin_ns":40850597293000,"end_ns":40850597380000}
+{"event":"frame","pid":34301,"frame":48,"image":2,"begin_ns":40850613936000,"end_ns":40850614031000}
+{"event":"frame","pid":34301,"frame":49,"image":0,"begin_ns":40850630657000,"end_ns":40850630766000}
+{"event":"frame","pid":34301,"frame":50,"image":1,"begin_ns":40850647280000,"end_ns":40850647391000}
+{"event":"frame","pid":34301,"frame":51,"image":2,"begin_ns":40850663970000,"end_ns":40850664084000}
+{"event":"frame","pid":34301,"frame":52,"image":0,"begin_ns":40850680635000,"end_ns":40850680784000}
+{"event":"frame","pid":34301,"frame":53,"image":1,"begin_ns":40850697406000,"end_ns":40850697594000}
+{"event":"frame","pid":34301,"frame":54,"image":2,"begin_ns":40850714039000,"end_ns":40850714123000}
+{"event":"frame","pid":34301,"frame":55,"image":0,"begin_ns":40850729057000,"end_ns":40850729191000}
+{"event":"frame","pid":34301,"frame":56,"image":1,"begin_ns":40850747657000,"end_ns":40850747779000}
+{"event":"frame","pid":34301,"frame":57,"image":2,"begin_ns":40850764038000,"end_ns":40850764126000}
+{"event":"frame","pid":34301,"frame":58,"image":0,"begin_ns":40850779402000,"end_ns":40850779495000}
+{"event":"frame","pid":34301,"frame":59,"image":1,"begin_ns":40850796035000,"end_ns":40850796129000}
+{"event":"frame","pid":34301,"frame":60,"image":2,"begin_ns":40850814237000,"end_ns":40850814329000}
+{"event":"result","status":"PASS","frames":60,"lost":false,"recovery_ns":0,"thermal_end":0}

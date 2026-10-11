@@ -1,0 +1,9 @@
+[
+  {
+    "scenario": "concurrent-producers",
+    "repeat": 0,
+    "exit": 1,
+    "result": {},
+    "status": "FAIL"
+  }
+]

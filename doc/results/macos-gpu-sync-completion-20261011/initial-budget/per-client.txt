@@ -1,0 +1,42 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: gpu-sync-32017
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: 
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+ INFO [u_timing_trace_open] Timing trace: /Users/nickkennedy/Code/monado-2/build/arm64/tests/gpu-service-results/org.freedesktop.monado.gpu-sync-service.32007/monado_psvr2_32017_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [client_metal_release_wait_thread_attach] Metal app-release Stage 4 enabled; shared-event completion will gate frame readiness on Monado's wait thread
+ INFO [ipc_metal_xpc_publish_iosurfaces] Metal XPC published 3 IOSurface(s) token=0x000000004dcfde25
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d7f503f device=0x1048da150 value=0
+ INFO [ensure_pair] Metal app-release Stage 4 ready: event=0x97509cac0 initial_value=0; app CPU barrier bypassed and frame readiness delegated to Monado wait thread
+ INFO [ipc_metal_xpc_publish_iosurfaces] Metal XPC published 3 IOSurface(s) token=0x000000004d4d1a9d
+ INFO [ipc_metal_xpc_publish_iosurfaces] Metal XPC published 3 IOSurface(s) token=0x000000004d582d7d
+ERROR [ipc_client_compositor_import_iosurface_token] ipc_call_swapchain_import_iosurface_token failed: XRT_ERROR_ALLOCATION [/Users/nickkennedy/Code/monado-2/src/xrt/ipc/client/ipc_client_compositor.c:448]
+ERROR [metal_service_create_iosurface_swapchain] Metal service IOSurface import failed: result=-7 images=3 size=64x64
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d872045
+ERROR [swapchain_server_import] ipc_call_swapchain_import failed: XRT_ERROR_ALLOCATION [/Users/nickkennedy/Code/monado-2/src/xrt/ipc/client/ipc_client_compositor.c:361]
+XR_ERROR_RUNTIME_FAILURE in xrCreateSwapchain: Failed to create swapchain
+{"event":"config","thermal":0,"low_power":false,"clock":"CLOCK_MONOTONIC"}
+{"event":"result","status":"PASS","budget_rejected":true,"result":-2}

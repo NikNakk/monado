@@ -1,0 +1,95 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: gpu-sync-32041
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: 
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+ INFO [u_timing_trace_open] Timing trace: /Users/nickkennedy/Code/monado-2/build/arm64/tests/gpu-service-results/org.freedesktop.monado.gpu-sync-service.32007/monado_psvr2_32041_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [client_metal_release_wait_thread_attach] Metal app-release Stage 4 enabled; shared-event completion will gate frame readiness on Monado's wait thread
+ INFO [ipc_metal_xpc_publish_iosurfaces] Metal XPC published 3 IOSurface(s) token=0x000000004d038490
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004de52af2 device=0x100662150 value=0
+ INFO [ensure_pair] Metal app-release Stage 4 ready: event=0x773498ac0 initial_value=0; app CPU barrier bypassed and frame readiness delegated to Monado wait thread
+{"event":"config","thermal":0,"low_power":false,"clock":"CLOCK_MONOTONIC"}
+{"event":"frame","pid":32041,"frame":1,"image":0,"begin_ns":40065829492000,"end_ns":40065829654000}
+{"event":"frame","pid":32041,"frame":2,"image":1,"begin_ns":40065842002000,"end_ns":40065842404000}
+{"event":"frame","pid":32041,"frame":3,"image":2,"begin_ns":40065862393000,"end_ns":40065862798000}
+{"event":"frame","pid":32041,"frame":4,"image":0,"begin_ns":40065876931000,"end_ns":40065878610000}
+{"event":"frame","pid":32041,"frame":5,"image":1,"begin_ns":40065891063000,"end_ns":40065891361000}
+{"event":"frame","pid":32041,"frame":6,"image":2,"begin_ns":40065914314000,"end_ns":40065914743000}
+{"event":"frame","pid":32041,"frame":7,"image":0,"begin_ns":40065927420000,"end_ns":40065928650000}
+{"event":"frame","pid":32041,"frame":8,"image":1,"begin_ns":40065945670000,"end_ns":40065946040000}
+{"event":"frame","pid":32041,"frame":9,"image":2,"begin_ns":40065962275000,"end_ns":40065962875000}
+{"event":"frame","pid":32041,"frame":10,"image":0,"begin_ns":40065978231000,"end_ns":40065978446000}
+{"event":"frame","pid":32041,"frame":11,"image":1,"begin_ns":40065994502000,"end_ns":40065994715000}
+{"event":"frame","pid":32041,"frame":12,"image":2,"begin_ns":40066011759000,"end_ns":40066012082000}
+{"event":"frame","pid":32041,"frame":13,"image":0,"begin_ns":40066028158000,"end_ns":40066028417000}
+{"event":"frame","pid":32041,"frame":14,"image":1,"begin_ns":40066043874000,"end_ns":40066045363000}
+{"event":"frame","pid":32041,"frame":15,"image":2,"begin_ns":40066058599000,"end_ns":40066058987000}
+{"event":"frame","pid":32041,"frame":16,"image":0,"begin_ns":40066079023000,"end_ns":40066079436000}
+{"event":"frame","pid":32041,"frame":17,"image":1,"begin_ns":40066096109000,"end_ns":40066096632000}
+{"event":"frame","pid":32041,"frame":18,"image":2,"begin_ns":40066112676000,"end_ns":40066113086000}
+{"event":"frame","pid":32041,"frame":19,"image":0,"begin_ns":40066129237000,"end_ns":40066129692000}
+{"event":"frame","pid":32041,"frame":20,"image":1,"begin_ns":40066145950000,"end_ns":40066146398000}
+{"event":"frame","pid":32041,"frame":21,"image":2,"begin_ns":40066162734000,"end_ns":40066163151000}
+{"event":"frame","pid":32041,"frame":22,"image":0,"begin_ns":40066179019000,"end_ns":40066179437000}
+{"event":"frame","pid":32041,"frame":23,"image":1,"begin_ns":40066195724000,"end_ns":40066196135000}
+{"event":"frame","pid":32041,"frame":24,"image":2,"begin_ns":40066206832000,"end_ns":40066207292000}
+{"event":"frame","pid":32041,"frame":25,"image":0,"begin_ns":40066231067000,"end_ns":40066231472000}
+{"event":"frame","pid":32041,"frame":26,"image":1,"begin_ns":40066243769000,"end_ns":40066245381000}
+{"event":"frame","pid":32041,"frame":27,"image":2,"begin_ns":40066262388000,"end_ns":40066262730000}
+{"event":"frame","pid":32041,"frame":28,"image":0,"begin_ns":40066279267000,"end_ns":40066279678000}
+{"event":"frame","pid":32041,"frame":29,"image":1,"begin_ns":40066295950000,"end_ns":40066296344000}
+{"event":"frame","pid":32041,"frame":30,"image":2,"begin_ns":40066312378000,"end_ns":40066312990000}
+{"event":"frame","pid":32041,"frame":31,"image":0,"begin_ns":40066329091000,"end_ns":40066329501000}
+{"event":"frame","pid":32041,"frame":32,"image":1,"begin_ns":40066345738000,"end_ns":40066346209000}
+{"event":"frame","pid":32041,"frame":33,"image":2,"begin_ns":40066362335000,"end_ns":40066362752000}
+{"event":"frame","pid":32041,"frame":34,"image":0,"begin_ns":40066373240000,"end_ns":40066373651000}
+{"event":"frame","pid":32041,"frame":35,"image":1,"begin_ns":40066395698000,"end_ns":40066396122000}
+{"event":"frame","pid":32041,"frame":36,"image":2,"begin_ns":40066408647000,"end_ns":40066409053000}
+{"event":"frame","pid":32041,"frame":37,"image":0,"begin_ns":40066427171000,"end_ns":40066428760000}
+{"event":"frame","pid":32041,"frame":38,"image":1,"begin_ns":40066445837000,"end_ns":40066446261000}
+{"event":"frame","pid":32041,"frame":39,"image":2,"begin_ns":40066462677000,"end_ns":40066463100000}
+{"event":"frame","pid":32041,"frame":40,"image":0,"begin_ns":40066479182000,"end_ns":40066479597000}
+{"event":"frame","pid":32041,"frame":41,"image":1,"begin_ns":40066495867000,"end_ns":40066496301000}
+{"event":"frame","pid":32041,"frame":42,"image":2,"begin_ns":40066512368000,"end_ns":40066512782000}
+{"event":"frame","pid":32041,"frame":43,"image":0,"begin_ns":40066525278000,"end_ns":40066525680000}
+{"event":"frame","pid":32041,"frame":44,"image":1,"begin_ns":40066541907000,"end_ns":40066542305000}
+{"event":"frame","pid":32041,"frame":45,"image":2,"begin_ns":40066563546000,"end_ns":40066564001000}
+{"event":"frame","pid":32041,"frame":46,"image":0,"begin_ns":40066579066000,"end_ns":40066579471000}
+{"event":"frame","pid":32041,"frame":47,"image":1,"begin_ns":40066596350000,"end_ns":40066597004000}
+{"event":"frame","pid":32041,"frame":48,"image":2,"begin_ns":40066612648000,"end_ns":40066613017000}
+{"event":"frame","pid":32041,"frame":49,"image":0,"begin_ns":40066629287000,"end_ns":40066629723000}
+{"event":"frame","pid":32041,"frame":50,"image":1,"begin_ns":40066645730000,"end_ns":40066646141000}
+{"event":"frame","pid":32041,"frame":51,"image":2,"begin_ns":40066663208000,"end_ns":40066663500000}
+{"event":"frame","pid":32041,"frame":52,"image":0,"begin_ns":40066679242000,"end_ns":40066679803000}
+{"event":"frame","pid":32041,"frame":53,"image":1,"begin_ns":40066696025000,"end_ns":40066696446000}
+{"event":"frame","pid":32041,"frame":54,"image":2,"begin_ns":40066712237000,"end_ns":40066712672000}
+{"event":"frame","pid":32041,"frame":55,"image":0,"begin_ns":40066727066000,"end_ns":40066728764000}
+{"event":"frame","pid":32041,"frame":56,"image":1,"begin_ns":40066743549000,"end_ns":40066745298000}
+{"event":"frame","pid":32041,"frame":57,"image":2,"begin_ns":40066762553000,"end_ns":40066762978000}
+{"event":"frame","pid":32041,"frame":58,"image":0,"begin_ns":40066777017000,"end_ns":40066777961000}
+{"event":"frame","pid":32041,"frame":59,"image":1,"begin_ns":40066795132000,"end_ns":40066795386000}
+{"event":"frame","pid":32041,"frame":60,"image":2,"begin_ns":40066812537000,"end_ns":40066812972000}
+{"event":"result","status":"PASS","frames":60,"lost":false,"recovery_ns":0,"thermal_end":0}
