@@ -1,0 +1,2 @@
+{"event":"config","scenario":"idle","producer_pid":12237,"consumer_pid":12235,"hung_ms":500,"margin_us":6000,"interval_us":8333,"thermal":0,"low_power":false,"seed":0,"registry":4294968652}
+{"event":"result","scenario":"idle","status":"PASS","consumed":0,"refused":0,"missed_deadlines":0,"runtime_ms":520.139,"submit_us":{"p50":0.000,"p95":0.000,"p99":0.000,"max":0.000},"no_wait_p50_us":0.000,"ready_p50_us":0.000,"end_to_end_p50_us":0.000,"thermal_end":0}

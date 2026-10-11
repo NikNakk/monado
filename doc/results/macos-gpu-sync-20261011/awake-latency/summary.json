@@ -1,0 +1,54 @@
+[
+  {
+    "scenario": "normal",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "normal",
+      "status": "PASS",
+      "consumed": 1200,
+      "refused": 0,
+      "missed_deadlines": 3,
+      "runtime_ms": 9993.873,
+      "submit_us": {
+        "p50": 63.625,
+        "p95": 107.583,
+        "p99": 151.917,
+        "max": 852.625
+      },
+      "no_wait_p50_us": 14.584,
+      "empty_wait_p50_us": 15.083,
+      "ready_p50_us": 641.208,
+      "end_to_end_p50_us": 1110.125,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "normal",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "normal",
+      "status": "PASS",
+      "consumed": 1200,
+      "refused": 0,
+      "missed_deadlines": 10,
+      "runtime_ms": 9993.205,
+      "submit_us": {
+        "p50": 64.416,
+        "p95": 110.459,
+        "p99": 143.166,
+        "max": 734.125
+      },
+      "no_wait_p50_us": 14.459,
+      "empty_wait_p50_us": 15.0,
+      "ready_p50_us": 642.958,
+      "end_to_end_p50_us": 1115.5,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  }
+]

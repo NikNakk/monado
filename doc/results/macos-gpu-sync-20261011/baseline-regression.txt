@@ -1,0 +1,35 @@
+Filters: "failed producer wait never makes a frame schedulable"
+Randomness seeded to: 539826250
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tests_ipc_local_session is a Catch2 v3.6.0 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+failed producer wait never makes a frame schedulable
+-------------------------------------------------------------------------------
+/Users/nickkennedy/Code/monado-2/tests/tests_ipc_local_session.cpp:364
+...............................................................................
+
+/Users/nickkennedy/Code/monado-2/tests/tests_ipc_local_session.cpp:385: FAILED:
+  CHECK( failed )
+with expansion:
+  false
+
+/Users/nickkennedy/Code/monado-2/tests/tests_ipc_local_session.cpp:387: FAILED:
+  CHECK_FALSE( mc->scheduled.active )
+with expansion:
+  !true
+
+/Users/nickkennedy/Code/monado-2/tests/tests_ipc_local_session.cpp:390: FAILED:
+  CHECK( mc->progress.active )
+with expansion:
+  false
+
+===============================================================================
+test cases:  1 |  0 passed | 1 failed
+assertions: 14 | 11 passed | 3 failed
+
+ERROR [wait_semaphore] Semaphore waiting failed!
+
+exit=3

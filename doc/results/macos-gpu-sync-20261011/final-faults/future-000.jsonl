@@ -1,0 +1,4 @@
+{"event":"config","scenario":"future","producer_pid":14081,"consumer_pid":14079,"hung_ms":500,"margin_us":6000,"interval_us":8333,"thermal":0,"low_power":false,"seed":0,"registry":4294968652}
+{"event":"presentation_selection","frame":1,"target_ns":32180001169291,"deferred":true}
+{"event":"gate","frame":1,"image":0,"expected":2,"observed":1,"obligation_ns":32179492856291,"commit_ns":32179493228083,"ready_ns":32179992930875,"ready":false}
+{"event":"result","scenario":"future","status":"PASS","consumed":0,"refused":1,"missed_deadlines":1,"runtime_ms":500.209,"submit_us":{"p50":0.000,"p95":0.000,"p99":0.000,"max":0.000},"no_wait_p50_us":0.000,"empty_wait_p50_us":0.000,"ready_p50_us":0.000,"end_to_end_p50_us":0.000,"thermal_end":0}

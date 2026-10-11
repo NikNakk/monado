@@ -1,0 +1,1967 @@
+diff --git a/scripts/macos/run-gpu-sync.py b/scripts/macos/run-gpu-sync.py
+new file mode 100644
+index 000000000..9fb1946ae
+--- /dev/null
++++ b/scripts/macos/run-gpu-sync.py
+@@ -0,0 +1,72 @@
++#!/usr/bin/env python3
++# Copyright 2026, Nick Kennedy
++# SPDX-License-Identifier: BSL-1.0
++"""Finite headless GPU correctness/latency runs; retain raw JSONL and telemetry."""
++import argparse
++import concurrent.futures
++import json
++import os
++from pathlib import Path
++import subprocess
++import time
++
++SCENARIOS = ['normal', 'delayed', 'missing', 'future', 'nonmonotonic', 'exit-before',
++             'exit-after', 'consumer-delay', 'multi-queue', 'broken-queue', 'reuse', 'idle', 'cancel-callback']
++
++def main():
++    p = argparse.ArgumentParser(description=__doc__)
++    p.add_argument('--probe', default='build/arm64/tests/tests_macos_gpu_sync')
++    p.add_argument('--output', required=True)
++    p.add_argument('--frames', type=int, default=120)
++    p.add_argument('--repeats', type=int, default=1)
++    p.add_argument('--scenario', choices=SCENARIOS, action='append')
++    p.add_argument('--concurrent', type=int, default=1)
++    p.add_argument('--timeout', type=float, default=60)
++    p.add_argument('--keep-awake', action='store_true', help='Temporarily inhibit idle system sleep during each run')
++    a = p.parse_args()
++    if not 1 <= a.concurrent <= 8 or not 1 <= a.repeats <= 1000:
++        p.error('concurrency/repeat bounds exceeded')
++    out = Path(a.output); out.mkdir(parents=True, exist_ok=True)
++    def capture(command):
++        try:
++            r = subprocess.run(command, text=True, capture_output=True, timeout=5)
++            return dict(command=command, exit=r.returncode, stdout=r.stdout, stderr=r.stderr)
++        except (OSError, subprocess.TimeoutExpired) as e:
++            return dict(command=command, unavailable=str(e))
++    telemetry = dict(start_time=time.time(), game_mode='not requested; headless CLI', keep_awake=a.keep_awake,
++                     commit=capture(['git', 'rev-parse', 'HEAD']),
++                     branch=capture(['git', 'branch', '--show-current']),
++                     dirty=capture(['git', 'status', '--short']),
++                     os=capture(['/usr/bin/sw_vers']),
++                     cpu=capture(['/usr/sbin/sysctl', 'machdep.cpu.brand_string', 'hw.model']),
++                     power=capture(['/usr/bin/pmset', '-g', 'batt']),
++                     settings=capture(['/usr/bin/pmset', '-g', 'custom']),
++                     processes=capture(['/bin/ps', '-axo', 'pid,pcpu,pmem,comm']),
++                     powermetrics='not collected (requires privileged, platform-specific samplers)',
++                     cpu_gpu_frequency='unavailable',
++                     config={k: v for k, v in os.environ.items() if k.startswith('GPU_SYNC_')})
++    (out/'telemetry.json').write_text(json.dumps(telemetry, indent=2)+'\n')
++    jobs = [(s, i) for i in range(a.repeats) for s in (a.scenario or SCENARIOS)]
++    def run(job):
++        s, i = job
++        try:
++            command = [a.probe, s, str(a.frames)]
++            if a.keep_awake:
++                command = ['/usr/bin/caffeinate', '-i'] + command
++            r = subprocess.run(command, text=True, capture_output=True, timeout=a.timeout)
++            (out/f'{s}-{i:03}.jsonl').write_text(r.stdout)
++            (out/f'{s}-{i:03}.stderr').write_text(r.stderr)
++            records = [json.loads(line) for line in r.stdout.splitlines()]
++            summary = next((x for x in records if x.get('event') == 'result'), {})
++            return dict(scenario=s, repeat=i, exit=r.returncode, result=summary,
++                        status='PASS' if r.returncode == 0 and summary.get('status') == 'PASS' else 'FAIL')
++        except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as e:
++            return dict(scenario=s, repeat=i, status='FAIL', error=str(e))
++    with concurrent.futures.ThreadPoolExecutor(max_workers=a.concurrent) as pool:
++        results = list(pool.map(run, jobs))
++    (out/'summary.json').write_text(json.dumps(results, indent=2)+'\n')
++    print(json.dumps(dict(runs=len(results), passed=sum(r['status']=='PASS' for r in results), output=str(out))))
++    return int(any(r['status'] != 'PASS' for r in results))
++
++if __name__ == '__main__':
++    raise SystemExit(main())
+diff --git a/src/xrt/compositor/client/comp_metal_release_wait_thread.m b/src/xrt/compositor/client/comp_metal_release_wait_thread.m
+index 54edd0884..d93557ec2 100644
+--- a/src/xrt/compositor/client/comp_metal_release_wait_thread.m
++++ b/src/xrt/compositor/client/comp_metal_release_wait_thread.m
+@@ -319,7 +319,7 @@
+ 	// Metal has no xrt_graphics_sync_handle here: its synchronization is the
+ 	// shared-event timeline. Hand that timeline to Monado's normal multi-client
+ 	// frame-readiness path instead of blocking the application thread or the
+-	// comp_main Vulkan queue.
++	// comp_main Vulkan queue until readiness has been observed.
+ 	u_graphics_sync_unref(&sync_handle);
+ 	xrt_result_t xret = original_layer_commit_with_semaphore(xc, c->xcsem, wait_value);
+ 	if (xret != XRT_SUCCESS) {
+@@ -348,7 +348,7 @@
+ 	if ((submit_count % METAL_WAIT_THREAD_LOG_WINDOW) == 0) {
+ 		U_LOG_I(
+ 		    "Metal app-release Stage 4: wait-thread handoffs=%llu latest_value=%llu observed_event=%llu; app "
+-		    "CPU barrier and comp_main queue wait both bypassed",
++		    "CPU barrier bypassed; ready shared-event dependency retained at comp_main submission",
+ 		    (unsigned long long)submit_count, (unsigned long long)wait_value, (unsigned long long)observed);
+ 	}
+ 
+diff --git a/src/xrt/compositor/main/comp_compositor.c b/src/xrt/compositor/main/comp_compositor.c
+index b326df7f2..a6c264e2c 100644
+--- a/src/xrt/compositor/main/comp_compositor.c
++++ b/src/xrt/compositor/main/comp_compositor.c
+@@ -69,6 +69,7 @@
+ 
+ #include "util/comp_vulkan.h"
+ #include "util/comp_swapchain_gpu_reuse_internal.h"
++#include "util/comp_swapchain_gpu_reuse.h"
+ #include "main/comp_compositor.h"
+ #include "main/comp_frame.h"
+ 
+@@ -251,7 +252,10 @@ static void
+ compositor_session_cleanup(struct comp_compositor *c)
+ {
+ 	if (c->deferred_surface) {
+-		// Make sure we don't have anything to destroy.
++// Make sure we don't have anything to destroy.
++#ifdef XRT_OS_OSX
++		comp_swapchain_gpu_reuse_collect(get_vk(c), false);
++#endif
+ 		comp_swapchain_shared_garbage_collect(&c->base.cscs);
+ 		comp_renderer_destroy(&c->r);
+ #ifdef XRT_FEATURE_WINDOW_PEEK
+@@ -490,7 +494,10 @@ compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sy
+ 
+ 	COMP_SPEW(c, "LAYER_COMMIT finished drawing at %8.3fms", ns_to_ms(c->last_frame_time_ns));
+ 
+-	// Now is a good point to garbage collect.
++// Now is a good point to garbage collect.
++#ifdef XRT_OS_OSX
++	comp_swapchain_gpu_reuse_collect(get_vk(c), false);
++#endif
+ 	comp_swapchain_shared_garbage_collect(&c->base.cscs);
+ #ifdef XRT_OS_OSX
+ 	macos_frame_pipeline_trace_event("layer_commit_return", frame_id, os_monotonic_get_ns(), 0, 0,
+@@ -577,9 +584,15 @@ compositor_destroy(struct xrt_compositor *xc)
+ 	// Destroy the scratch images fully, we initialized all of them.
+ 	chl_scratch_fini(&c->scratch);
+ 
+-	// Make sure we don't have anything to destroy.
++// Make sure we don't have anything to destroy.
++#ifdef XRT_OS_OSX
++	comp_swapchain_gpu_reuse_collect(get_vk(c), false);
++#endif
+ 	comp_swapchain_shared_garbage_collect(&c->base.cscs);
+ 
++#ifdef XRT_OS_OSX
++	comp_swapchain_gpu_reuse_collect(vk, true);
++#endif
+ 	// Must be destroyed before Vulkan.
+ 	comp_swapchain_shared_destroy(&c->base.cscs, vk);
+ 
+diff --git a/src/xrt/compositor/multi/comp_multi_compositor.c b/src/xrt/compositor/multi/comp_multi_compositor.c
+index 2a4b21949..0d5f7e034 100644
+--- a/src/xrt/compositor/multi/comp_multi_compositor.c
++++ b/src/xrt/compositor/multi/comp_multi_compositor.c
+@@ -48,6 +48,16 @@
+ #include "android/android_globals.h"
+ #endif
+ 
++#ifdef XRT_OS_OSX
++DEBUG_GET_ONCE_NUM_OPTION(client_gpu_hung_ms, "XRT_MACOS_CLIENT_GPU_HUNG_MS", 500)
++static int64_t
++client_gpu_hung_ns(void)
++{
++	int64_t ms = debug_get_num_option_client_gpu_hung_ms();
++	return (ms > 0 && ms <= 10000 ? ms : 500) * U_TIME_1MS_IN_NS;
++}
++#endif
++
+ DEBUG_GET_ONCE_LOG_OPTION(app_frame_lag_level, "XRT_APP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_DEBUG)
+ #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_app_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
+ 
+@@ -299,14 +309,18 @@ is_pushed_or_waiting_locked(struct multi_compositor *mc)
+ 	       mc->wait_thread.xcsem != NULL; //
+ }
+ 
+-static void
++static xrt_result_t
+ wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
+ {
+ 	COMP_TRACE_MARKER();
+ 	xrt_result_t ret = XRT_SUCCESS;
+ 
+-	// 100ms
++	// Worker only. Never block the renderer on an untrusted future value.
+ 	int64_t timeout_ns = 100 * U_TIME_1MS_IN_NS;
++#ifdef XRT_OS_OSX
++	timeout_ns = 5 * U_TIME_1MS_IN_NS;
++	int64_t started_ns = mc->wait_thread.submitted_ns;
++#endif
+ 
+ 	do {
+ 		ret = xrt_compositor_fence_wait(*xcf_ptr, timeout_ns);
+@@ -314,24 +328,35 @@ wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
+ 			break;
+ 		}
+ 
++#ifdef XRT_OS_OSX
++		if (os_monotonic_get_ns() - started_ns >= client_gpu_hung_ns()) {
++			break;
++		}
++#else
+ 		U_LOG_W("Waiting on client fence timed out > 100ms!");
++#endif
+ 	} while (os_thread_helper_is_running(&mc->wait_thread.oth));
+ 
+ 	xrt_compositor_fence_destroy(xcf_ptr);
+ 
+ 	if (ret != XRT_SUCCESS) {
+-		U_LOG_E("Fence waiting failed!");
++		U_LOG_E("Fence waiting failed: result=%d", ret);
+ 	}
++	return ret;
+ }
+ 
+-static void
++static xrt_result_t
+ wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xcsem_ptr, uint64_t value)
+ {
+ 	COMP_TRACE_MARKER();
+ 	xrt_result_t ret = XRT_SUCCESS;
+ 
+-	// 100ms
++	// Worker only. Never block the renderer on an untrusted future value.
+ 	int64_t timeout_ns = 100 * U_TIME_1MS_IN_NS;
++#ifdef XRT_OS_OSX
++	timeout_ns = 5 * U_TIME_1MS_IN_NS;
++	int64_t started_ns = mc->wait_thread.submitted_ns;
++#endif
+ 
+ 	do {
+ 		ret = xrt_compositor_semaphore_wait(*xcsem_ptr, value, timeout_ns);
+@@ -339,14 +364,21 @@ wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xc
+ 			break;
+ 		}
+ 
++#ifdef XRT_OS_OSX
++		if (os_monotonic_get_ns() - started_ns >= client_gpu_hung_ns()) {
++			break;
++		}
++#else
+ 		U_LOG_W("Waiting on client semaphore value '%" PRIu64 "' timed out > 100ms!", value);
++#endif
+ 	} while (os_thread_helper_is_running(&mc->wait_thread.oth));
+ 
+ 	xrt_compositor_semaphore_reference(xcsem_ptr, NULL);
+ 
+ 	if (ret != XRT_SUCCESS) {
+-		U_LOG_E("Semaphore waiting failed!");
++		U_LOG_E("Semaphore waiting failed: value=%" PRIu64 " result=%d", value, ret);
+ 	}
++	return ret;
+ }
+ 
+ static void
+@@ -474,16 +506,38 @@ run_func(void *ptr)
+ 
+ 		os_thread_helper_unlock(&mc->wait_thread.oth);
+ 
++		xrt_result_t wait_result = XRT_SUCCESS;
+ 		if (xcsem != NULL) {
+ 			int64_t semaphore_wait_start_ns = os_monotonic_get_ns();
+ 			macos_client_gpu_trace_event("semaphore_wait_start", frame_id, value, 0);
+-			wait_semaphore(mc, &xcsem, value);
++			wait_result = wait_semaphore(mc, &xcsem, value);
+ 			int64_t semaphore_wait_end_ns = os_monotonic_get_ns();
+-			macos_client_gpu_trace_event("semaphore_ready", frame_id, value,
+-			                             semaphore_wait_end_ns - semaphore_wait_start_ns);
++			macos_client_gpu_trace_event(wait_result == XRT_SUCCESS ? "semaphore_ready"
++			                                                        : "semaphore_failed",
++			                             frame_id, value, semaphore_wait_end_ns - semaphore_wait_start_ns);
+ 		}
+ 		if (xcf != NULL) {
+-			wait_fence(mc, &xcf);
++			wait_result = wait_fence(mc, &xcf);
++		}
++
++		if (wait_result != XRT_SUCCESS) {
++			/* A timeout is cancellation, never GPU completion. Keep progress
++			 * references until teardown; tracked storage then enters quarantine. */
++			U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d", frame_id,
++			        value, wait_result);
++			if (mc->xses != NULL && os_thread_helper_is_running(&mc->wait_thread.oth)) {
++				union xrt_session_event lost = {.type = XRT_SESSION_EVENT_LOST};
++				xrt_result_t notify = multi_compositor_push_event(mc, &lost);
++				if (notify != XRT_SUCCESS) {
++					U_LOG_E("Could not notify failed client: result=%d", notify);
++				}
++			}
++			os_thread_helper_lock(&mc->wait_thread.oth);
++			mc->wait_thread.failed = true;
++			mc->wait_thread.waiting = false;
++			mc->wait_thread.blocked = false;
++			os_thread_helper_signal_locked(&mc->wait_thread.oth);
++			continue;
+ 		}
+ 
+ 		// Sample time outside of lock.
+@@ -561,6 +615,7 @@ push_fence_to_wait_thread(struct multi_compositor *mc, int64_t frame_id, struct
+ 	assert(mc->wait_thread.xcf == NULL);
+ 
+ 	mc->wait_thread.frame_id = frame_id;
++	mc->wait_thread.submitted_ns = os_monotonic_get_ns();
+ 	mc->wait_thread.xcf = xcf;
+ 
+ 	os_thread_helper_signal_locked(&mc->wait_thread.oth);
+@@ -583,6 +638,7 @@ push_semaphore_to_wait_thread(struct multi_compositor *mc,
+ 	assert(mc->wait_thread.xcsem == NULL);
+ 
+ 	mc->wait_thread.frame_id = frame_id;
++	mc->wait_thread.submitted_ns = os_monotonic_get_ns();
+ 	xrt_compositor_semaphore_reference(&mc->wait_thread.xcsem, xcsem);
+ 	mc->wait_thread.value = value;
+ 
+@@ -849,6 +905,12 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
+ {
+ 	struct multi_compositor *mc = multi_compositor(xc);
+ 	macos_client_gpu_trace_event("layer_begin_entry", data->frame_id, 0, 0);
++	os_thread_helper_lock(&mc->wait_thread.oth);
++	bool already_failed = mc->wait_thread.failed;
++	os_thread_helper_unlock(&mc->wait_thread.oth);
++	if (already_failed) {
++		return XRT_ERROR_IPC_FAILURE;
++	}
+ 
+ 	// As early as possible.
+ 	int64_t now_ns = os_monotonic_get_ns();
+@@ -875,6 +937,12 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
+ 		          ipc_elapsed_ms(wait_start_ns, wait_end_ns));
+ 	}
+ 
++	os_thread_helper_lock(&mc->wait_thread.oth);
++	bool failed = mc->wait_thread.failed;
++	os_thread_helper_unlock(&mc->wait_thread.oth);
++	if (failed) {
++		return XRT_ERROR_IPC_FAILURE;
++	}
+ 	assert(mc->progress.layer_count == 0);
+ 	U_ZERO(&mc->progress);
+ 
+@@ -1093,6 +1161,40 @@ multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
+ 	struct multi_compositor *mc = multi_compositor(xc);
+ 	int64_t frame_id = mc->progress.data.frame_id;
+ 
++#ifdef XRT_OS_OSX
++	for (uint32_t i = 0; i < mc->progress.layer_count; i++) {
++		struct multi_layer_entry *layer = &mc->progress.layers[i];
++		const struct xrt_layer_data *data = &layer->data;
++		uint32_t count = data->type == XRT_LAYER_PROJECTION || data->type == XRT_LAYER_PROJECTION_DEPTH
++		                     ? data->view_count
++		                     : 1;
++		for (uint32_t v = 0; v < count; v++) {
++			uint32_t index;
++			switch (data->type) {
++			case XRT_LAYER_PROJECTION: index = data->proj.v[v].sub.image_index; break;
++			case XRT_LAYER_PROJECTION_DEPTH: index = data->depth.v[v].sub.image_index; break;
++			case XRT_LAYER_QUAD: index = data->quad.sub.image_index; break;
++			case XRT_LAYER_CUBE: index = data->cube.sub.image_index; break;
++			case XRT_LAYER_CYLINDER: index = data->cylinder.sub.image_index; break;
++			case XRT_LAYER_EQUIRECT1: index = data->equirect1.sub.image_index; break;
++			case XRT_LAYER_EQUIRECT2: index = data->equirect2.sub.image_index; break;
++			case XRT_LAYER_PASSTHROUGH: continue;
++			default: return XRT_ERROR_INVALID_ARGUMENT;
++			}
++			xrt_result_t ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[v], index, xcsem, value);
++			if (ret != XRT_SUCCESS) {
++				return ret;
++			}
++			if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
++				ret = comp_swapchain_gpu_reuse_set_producer(
++				    layer->xscs[v + count], data->depth.d[v].sub.image_index, xcsem, value);
++				if (ret != XRT_SUCCESS) {
++					return ret;
++				}
++			}
++		}
++	}
++#endif
+ 	push_semaphore_to_wait_thread(mc, frame_id, xcsem, value);
+ 	macos_client_gpu_trace_event("semaphore_pushed", frame_id, value, 0);
+ 
+diff --git a/src/xrt/compositor/multi/comp_multi_private.h b/src/xrt/compositor/multi/comp_multi_private.h
+index aa83d0c1f..98a495d2d 100644
+--- a/src/xrt/compositor/multi/comp_multi_private.h
++++ b/src/xrt/compositor/multi/comp_multi_private.h
+@@ -150,6 +150,9 @@ struct multi_compositor
+ 		//! Frame id of frame being waited on.
+ 		int64_t frame_id;
+ 
++		//! Receipt time of this specific GPU obligation, not last application activity.
++		int64_t submitted_ns;
++
+ 		//! The wait thread itself
+ 		struct os_thread_helper oth;
+ 
+@@ -158,6 +161,8 @@ struct multi_compositor
+ 
+ 		//! Is the thread waiting, if so the client should block.
+ 		bool waiting;
++		//! Sticky failure; do not admit another frame into this session.
++		bool failed;
+ 
+ 		/*!
+ 		 * Is the client thread blocked?
+diff --git a/src/xrt/compositor/util/comp_semaphore.c b/src/xrt/compositor/util/comp_semaphore.c
+index 4fece621f..297ef0823 100644
+--- a/src/xrt/compositor/util/comp_semaphore.c
++++ b/src/xrt/compositor/util/comp_semaphore.c
+@@ -81,6 +81,18 @@ comp_semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
+  *
+  */
+ 
++bool
++comp_semaphore_matches_vk(struct xrt_compositor_semaphore *sem, struct vk_bundle *vk)
++{
++#ifdef VK_KHR_timeline_semaphore
++	return sem != NULL && sem->wait == comp_semaphore_wait && comp_semaphore(sem)->vk == vk;
++#else
++	(void)sem;
++	(void)vk;
++	return false;
++#endif
++}
++
+ xrt_result_t
+ comp_semaphore_create(struct vk_bundle *vk,
+                       xrt_graphics_sync_handle_t *out_handle,
+diff --git a/src/xrt/compositor/util/comp_semaphore.h b/src/xrt/compositor/util/comp_semaphore.h
+index af31938a0..924884759 100644
+--- a/src/xrt/compositor/util/comp_semaphore.h
++++ b/src/xrt/compositor/util/comp_semaphore.h
+@@ -62,6 +62,10 @@ comp_semaphore(struct xrt_compositor_semaphore *xcsem)
+ }
+ 
+ 
++/* True only for this module's native Vulkan-backed semaphore implementation. */
++bool
++comp_semaphore_matches_vk(struct xrt_compositor_semaphore *sem, struct vk_bundle *vk);
++
+ /*
+  *
+  * 'Exported' functions.
+diff --git a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
+index 7850b221d..fbbcb2168 100644
+--- a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
++++ b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.c
+@@ -9,6 +9,7 @@
+ #include "util/comp_swapchain_gpu_reuse.h"
+ #include "util/comp_swapchain_gpu_reuse_internal.h"
+ #include "util/comp_swapchain.h"
++#include "util/comp_semaphore.h"
+ #include "util/u_debug.h"
+ #include "util/u_logging.h"
+ #include "util/u_misc.h"
+@@ -35,6 +36,10 @@ struct gpu_reuse_tracker
+ 	struct comp_swapchain *sc;
+ 	struct gpu_reuse_context *context;
+ 	uint64_t last_gpu_use[XRT_MAX_SWAPCHAIN_IMAGES];
++	struct xrt_compositor_semaphore *producer[XRT_MAX_SWAPCHAIN_IMAGES];
++	uint64_t producer_value[XRT_MAX_SWAPCHAIN_IMAGES];
++	uint64_t bytes;
++	bool quarantined;
+ 	uint32_t pending_consumers[XRT_MAX_SWAPCHAIN_IMAGES];
+ 	xrt_result_t (*original_wait_image)(struct xrt_swapchain *, int64_t, uint32_t);
+ 	void (*original_destroy)(struct xrt_swapchain *);
+@@ -85,6 +90,7 @@ struct gpu_reuse_renderer_tls
+ 	struct comp_layer_accum *cla;
+ 	struct gpu_reuse_submit submit;
+ 	struct vk_semaphore_list_signal signal_sems;
++	struct vk_semaphore_list_wait wait_sems;
+ 	const VkSubmitInfo *expected_submit_info;
+ 	const VkSubmitInfo *rejected_submit_info;
+ 	VkResult rejected_result;
+@@ -95,6 +101,11 @@ static pthread_mutex_t g_gpu_reuse_mutex = PTHREAD_MUTEX_INITIALIZER;
+ static pthread_cond_t g_gpu_reuse_cond = PTHREAD_COND_INITIALIZER;
+ static struct gpu_reuse_context *g_gpu_reuse_contexts = NULL;
+ static struct gpu_reuse_native_accum *g_gpu_reuse_native_accums = NULL;
++/* Limit all live plus quarantined tracked storage, and small-object growth. */
++#define GPU_REUSE_MAX_BYTES (UINT64_C(1024) * 1024 * 1024)
++#define GPU_REUSE_MAX_TRACKERS 256
++static uint64_t g_tracked_bytes;
++static uint32_t g_tracker_count;
+ static __thread struct gpu_reuse_renderer_tls g_renderer = {0};
+ 
+ static void
+@@ -278,6 +289,16 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
+ 			return XRT_TIMEOUT;
+ 		}
+ 
++		/* Consumer cancellation does not imply producer completion. Poll only:
++		 * an unresolved producer obligation must never authorize reuse. */
++		if (tracker->producer[image_index] != NULL) {
++			xrt_result_t producer_result = xrt_compositor_semaphore_wait(
++			    tracker->producer[image_index], tracker->producer_value[image_index], 0);
++			if (producer_result != XRT_SUCCESS) {
++				pthread_mutex_unlock(&g_gpu_reuse_mutex);
++				return producer_result;
++			}
++		}
+ 		uint64_t value = tracker->last_gpu_use[image_index];
+ 		VkSemaphore timeline = tracker->context->timeline;
+ 		struct vk_bundle *vk = tracker->context->vk;
+@@ -316,8 +337,11 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
+ 			pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ 			return XRT_SUCCESS;
+ 		}
+-		bool stable =
+-		    tracker->pending_consumers[image_index] == 0 && tracker->last_gpu_use[image_index] == value;
++		bool stable = tracker->pending_consumers[image_index] == 0 &&
++		              tracker->last_gpu_use[image_index] == value &&
++		              (tracker->producer[image_index] == NULL ||
++		               xrt_compositor_semaphore_wait(tracker->producer[image_index],
++		                                             tracker->producer_value[image_index], 0) == XRT_SUCCESS);
+ 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ 		if (stable) {
+ 			return XRT_SUCCESS;
+@@ -325,77 +349,128 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
+ 	}
+ }
+ 
+-static void
+-destroy_context_after_last_tracker(struct gpu_reuse_context *context)
++static bool
++tracker_completed_locked(struct gpu_reuse_tracker *tracker)
+ {
+-	if (context == NULL) {
+-		return;
++	struct vk_bundle *vk = tracker->context->vk;
++	for (uint32_t i = 0; i < tracker->xsc->image_count; i++) {
++		if (tracker->pending_consumers[i] != 0) {
++			return false;
++		}
++		if (tracker->producer[i] != NULL &&
++		    xrt_compositor_semaphore_wait(tracker->producer[i], tracker->producer_value[i], 0) != XRT_SUCCESS) {
++			return false;
++		}
++		uint64_t value = tracker->last_gpu_use[i];
++		if (value != 0) {
++			VkSemaphoreWaitInfo wait = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
++			                            .semaphoreCount = 1,
++			                            .pSemaphores = &tracker->context->timeline,
++			                            .pValues = &value};
++			if (vk->vkWaitSemaphores(vk->device, &wait, 0) != VK_SUCCESS) {
++				return false;
++			}
++		}
+ 	}
++	return true;
++}
+ 
+-#ifdef VK_KHR_timeline_semaphore
+-	if (context->last_submitted_value != 0) {
+-		VkSemaphoreWaitInfo wait_info = {
+-		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+-		    .flags = 0,
+-		    .semaphoreCount = 1,
+-		    .pSemaphores = &context->timeline,
+-		    .pValues = &context->last_submitted_value,
+-		};
+-		VkResult ret = context->vk->vkWaitSemaphores(context->vk->device, &wait_info, UINT64_MAX);
+-		if (ret != VK_SUCCESS) {
+-			VK_ERROR(context->vk, "Waiting for final swapchain GPU reuse value: %s", vk_result_string(ret));
++/* Caller holds the registry lock. original_destroy only enqueues the swapchain
++ * on its existing compositor garbage collector; it does not free GPU storage. */
++static void
++reclaim_tracker_locked(struct gpu_reuse_tracker **ptr)
++{
++	struct gpu_reuse_tracker *t = *ptr;
++	*ptr = t->next;
++	for (uint32_t i = 0; i < t->xsc->image_count; i++) {
++		xrt_compositor_semaphore_reference(&t->producer[i], NULL);
++	}
++	g_tracked_bytes -= t->bytes;
++	g_tracker_count--;
++	t->xsc->wait_image = t->original_wait_image;
++	t->xsc->destroy = t->original_destroy;
++	U_LOG_I("GPU reuse reclaim: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u", (void *)t->xsc,
++	        (unsigned long long)t->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count);
++	t->original_destroy(t->xsc);
++	free(t);
++}
++
++void
++comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown)
++{
++	pthread_mutex_lock(&g_gpu_reuse_mutex);
++	struct gpu_reuse_context **cp = &g_gpu_reuse_contexts;
++	while (*cp != NULL) {
++		struct gpu_reuse_context *c = *cp;
++		if (c->vk != vk) {
++			cp = &c->next;
++			continue;
++		}
++		struct gpu_reuse_tracker **tp = &c->trackers;
++		while (*tp != NULL) {
++			if ((*tp)->quarantined && tracker_completed_locked(*tp)) {
++				reclaim_tracker_locked(tp);
++			} else {
++				tp = &(*tp)->next;
++			}
++		}
++		if (c->trackers == NULL) {
++			vk->vkDestroySemaphore(vk->device, c->timeline, NULL);
++			*cp = c->next;
++			free(c);
++		} else if (device_teardown) {
++			/* Producer access may outlive the Vulkan device. Keep native storage
++			 * until process exit, detach so a reused vk_bundle address is safe.
++			 * Budget remains charged. Never access this device again. */
++			U_LOG_W("GPU reuse device teardown retains unresolved resources until process exit");
++			*cp = c->next;
++			c->vk = NULL;
++		} else {
++			cp = &c->next;
+ 		}
+ 	}
+-#endif
+-
+-	context->vk->vkDestroySemaphore(context->vk->device, context->timeline, NULL);
+-	free(context);
++	pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ }
+ 
+ static void
+ tracked_swapchain_destroy(struct xrt_swapchain *xsc)
+ {
+-	void (*original_destroy)(struct xrt_swapchain *) = NULL;
+-	struct gpu_reuse_tracker *removed = NULL;
+-	struct gpu_reuse_context *empty_context = NULL;
+-
+ 	pthread_mutex_lock(&g_gpu_reuse_mutex);
+ 	struct gpu_reuse_tracker *tracker = find_tracker_locked(xsc);
+ 	if (tracker != NULL) {
+-		struct gpu_reuse_context *context = tracker->context;
+-		struct gpu_reuse_tracker **tracker_ptr = &context->trackers;
+-		while (*tracker_ptr != NULL) {
+-			if (*tracker_ptr == tracker) {
+-				*tracker_ptr = tracker->next;
+-				break;
+-			}
+-			tracker_ptr = &(*tracker_ptr)->next;
+-		}
+-
+-		original_destroy = tracker->original_destroy;
+-		xsc->wait_image = tracker->original_wait_image;
+-		xsc->destroy = tracker->original_destroy;
+-		removed = tracker;
+-
+-		if (context->trackers == NULL) {
+-			struct gpu_reuse_context **context_ptr = &g_gpu_reuse_contexts;
+-			while (*context_ptr != NULL) {
+-				if (*context_ptr == context) {
+-					*context_ptr = context->next;
+-					break;
+-				}
+-				context_ptr = &(*context_ptr)->next;
+-			}
+-			empty_context = context;
+-		}
++		tracker->quarantined = true;
++		U_LOG_I("GPU reuse quarantine: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u", (void *)xsc,
++		        (unsigned long long)tracker->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count);
+ 	}
+ 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
++	/* Existing compositor GC polls it with timeout zero on subsequent frames. */
++}
+ 
+-	free(removed);
+-	destroy_context_after_last_tracker(empty_context);
+-	if (original_destroy != NULL) {
+-		original_destroy(xsc);
++xrt_result_t
++comp_swapchain_gpu_reuse_set_producer(struct xrt_swapchain *xsc,
++                                      uint32_t index,
++                                      struct xrt_compositor_semaphore *sem,
++                                      uint64_t value)
++{
++	pthread_mutex_lock(&g_gpu_reuse_mutex);
++	struct gpu_reuse_tracker *t = find_tracker_locked(xsc);
++	if (t != NULL && index < xsc->image_count) {
++		if (!comp_semaphore_matches_vk(sem, t->context->vk) || t->quarantined) {
++			pthread_mutex_unlock(&g_gpu_reuse_mutex);
++			return XRT_ERROR_VULKAN;
++		}
++		/* Replacing a dependency must not destroy a semaphore referenced by
++		 * an earlier compositor submission. Normal Metal clients keep one
++		 * event per session. Reject a changed payload until completion. */
++		if (t->producer[index] != NULL && t->producer[index] != sem && !tracker_completed_locked(t)) {
++			pthread_mutex_unlock(&g_gpu_reuse_mutex);
++			return XRT_ERROR_VULKAN;
++		}
++		xrt_compositor_semaphore_reference(&t->producer[index], sem);
++		t->producer_value[index] = value;
+ 	}
++	pthread_mutex_unlock(&g_gpu_reuse_mutex);
++	return XRT_SUCCESS;
+ }
+ 
+ xrt_result_t
+@@ -411,12 +486,26 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
+ 		return XRT_ERROR_VULKAN;
+ 	}
+ 
++	uint64_t bytes = 0;
++	for (uint32_t i = 0; i < sc->vkic.image_count; i++) {
++		VkMemoryRequirements requirements = {0};
++		sc->vk->vkGetImageMemoryRequirements(sc->vk->device, sc->vkic.images[i].handle, &requirements);
++		if (requirements.size > GPU_REUSE_MAX_BYTES - bytes) {
++			return XRT_ERROR_ALLOCATION;
++		}
++		bytes += requirements.size;
++	}
+ 	pthread_mutex_lock(&g_gpu_reuse_mutex);
+ 	if (find_tracker_locked(xsc) != NULL) {
+ 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
+ 		return XRT_SUCCESS;
+ 	}
+ 
++	if (g_tracker_count >= GPU_REUSE_MAX_TRACKERS || bytes > GPU_REUSE_MAX_BYTES - g_tracked_bytes) {
++		pthread_mutex_unlock(&g_gpu_reuse_mutex);
++		U_LOG_E("GPU reuse allocation budget exhausted (live plus quarantined storage)");
++		return XRT_ERROR_ALLOCATION;
++	}
+ 	struct gpu_reuse_context *context = find_context_locked(sc->vk);
+ 	if (context == NULL) {
+ 		context = create_context_locked(sc->vk);
+@@ -433,6 +522,9 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
+ 		return XRT_ERROR_ALLOCATION;
+ 	}
+ 
++	tracker->bytes = bytes;
++	g_tracked_bytes += bytes;
++	g_tracker_count++;
+ 	tracker->xsc = xsc;
+ 	tracker->sc = sc;
+ 	tracker->context = context;
+@@ -825,9 +917,56 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
+ 		return;
+ 	}
+ 
++	U_ZERO(&g_renderer.wait_sems);
++	if (wait_semaphores != NULL) {
++		g_renderer.wait_sems = *wait_semaphores;
++	}
++	bool producer_ready = true;
++	for (uint32_t i = 0; i < g_renderer.submit.image_count; i++) {
++		struct gpu_reuse_submit_image *image = &g_renderer.submit.images[i];
++		struct xrt_compositor_semaphore *producer = image->tracker->producer[image->image_index];
++		if (producer == NULL) {
++			continue;
++		}
++		uint64_t value = image->tracker->producer_value[image->image_index];
++		/* Stage A: zero-time readiness verification; never wait on a future
++		 * payload on the GPU. Stage B still carries exactly this value. */
++		if (xrt_compositor_semaphore_wait(producer, value, 0) != XRT_SUCCESS) {
++			producer_ready = false;
++			break;
++		}
++		VkSemaphore semaphore = comp_semaphore(producer)->semaphore;
++		uint32_t k = 0;
++		for (; k < g_renderer.wait_sems.count; k++) {
++			if (g_renderer.wait_sems.semaphores[k] == semaphore) {
++				break;
++			}
++		}
++		if (k < g_renderer.wait_sems.count) {
++			if (g_renderer.wait_sems.values[k] < value) {
++				g_renderer.wait_sems.values[k] = value;
++			}
++			g_renderer.wait_sems.stages[k] |= VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
++		} else if (k < VK_SEMAPHORE_LIST_MAX_COUNT) {
++			vk_semaphore_list_wait_add_timeline(&g_renderer.wait_sems, semaphore, value,
++			                                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
++		} else {
++			producer_ready = false;
++			break;
++		}
++	}
++	if (!producer_ready) {
++		submit_rollback_locked(&g_renderer.submit);
++		pthread_mutex_unlock(&g_gpu_reuse_mutex);
++		vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
++		                               signal_semaphores, next);
++		g_renderer.rejected_submit_info = &builder->submit_info;
++		g_renderer.rejected_result = VK_NOT_READY;
++		return;
++	}
+ 	vk_semaphore_list_signal_add_timeline(&g_renderer.signal_sems, g_renderer.submit.context->timeline,
+ 	                                      g_renderer.submit.value);
+-	vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
++	vk_submit_info_builder_prepare(builder, &g_renderer.wait_sems, command_buffers, command_buffer_count,
+ 	                               &g_renderer.signal_sems, next);
+ 
+ 	/*
+diff --git a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
+index 717cfec94..3f926e3c8 100644
+--- a/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
++++ b/src/xrt/compositor/util/comp_swapchain_gpu_reuse.h
+@@ -17,6 +17,16 @@ extern "C" {
+ 
+ #ifdef XRT_OS_OSX
+ 
++struct vk_bundle;
++void
++comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown);
++
++xrt_result_t
++comp_swapchain_gpu_reuse_set_producer(struct xrt_swapchain *xsc,
++                                      uint32_t index,
++                                      struct xrt_compositor_semaphore *sem,
++                                      uint64_t value);
++
+ /*!
+  * Enable fine-grained GPU reuse tracking on one native compositor swapchain.
+  * Used by local and service-side Metal shared-texture swapchains, where client
+diff --git a/tests/CMakeLists.txt b/tests/CMakeLists.txt
+index 646d5e84d..2993401f3 100644
+--- a/tests/CMakeLists.txt
++++ b/tests/CMakeLists.txt
+@@ -258,6 +258,19 @@ if(APPLE AND TARGET comp_metal_foveation_cache)
+ endif()
+ 
+ if(APPLE)
++	add_executable(tests_macos_gpu_reuse tests_macos_gpu_reuse.cpp)
++	target_compile_features(tests_macos_gpu_reuse PRIVATE cxx_std_17)
++	target_link_libraries(tests_macos_gpu_reuse PRIVATE comp_util aux_util aux_vk xrt-interfaces xrt-external-catch2)
++	add_test(NAME tests_macos_gpu_reuse COMMAND tests_macos_gpu_reuse)
++	set_target_properties(tests_macos_gpu_reuse PROPERTIES FOLDER monado_tests)
++	add_executable(tests_macos_gpu_sync tests_macos_gpu_sync.mm)
++	target_compile_features(tests_macos_gpu_sync PRIVATE cxx_std_17)
++	target_link_libraries(tests_macos_gpu_sync PRIVATE Vulkan::Vulkan "-framework Foundation" "-framework Metal" "-framework IOSurface")
++	foreach(scenario normal delayed missing future nonmonotonic exit-before exit-after consumer-delay multi-queue broken-queue reuse idle cancel-callback)
++		add_test(NAME tests_macos_gpu_sync_${scenario} COMMAND tests_macos_gpu_sync ${scenario})
++		set_tests_properties(tests_macos_gpu_sync_${scenario} PROPERTIES TIMEOUT 30 LABELS "macos;gpu")
++	endforeach()
++	set_target_properties(tests_macos_gpu_sync PROPERTIES FOLDER monado_tests)
+ 	add_executable(tests_macos_iosurface_producer tests_macos_iosurface_producer.c)
+ 	target_link_libraries(
+ 		tests_macos_iosurface_producer PRIVATE "-framework CoreFoundation"
+diff --git a/tests/tests_macos_gpu_reuse.cpp b/tests/tests_macos_gpu_reuse.cpp
+new file mode 100644
+index 000000000..6dc70dc56
+--- /dev/null
++++ b/tests/tests_macos_gpu_reuse.cpp
+@@ -0,0 +1,213 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++#include "catch_amalgamated.hpp"
++#include "util/comp_swapchain.h"
++#include "util/comp_swapchain_gpu_reuse.h"
++#include "util/comp_swapchain_gpu_reuse_internal.h"
++#include "util/comp_semaphore.h"
++#include <map>
++#include <vector>
++
++namespace {
++std::map<VkSemaphore, uint64_t> values;
++uint64_t handles = 100;
++int destroyed;
++std::vector<uint64_t> timeouts;
++using NativeSwapchain = struct comp_swapchain;
++struct Device
++{
++	vk_bundle vk{};
++	Device()
++	{
++		vk.features.timeline_semaphore = true;
++		vk.has_EXT_metal_objects = true;
++		vk.vkCreateSemaphore = [](VkDevice, const VkSemaphoreCreateInfo *, const VkAllocationCallbacks *,
++		                          VkSemaphore *out) {
++			*out = reinterpret_cast<VkSemaphore>(++handles);
++			values[*out] = 0;
++			return VK_SUCCESS;
++		};
++		vk.vkDestroySemaphore = [](VkDevice, VkSemaphore sem, const VkAllocationCallbacks *) {
++			values.erase(sem);
++		};
++		vk.vkWaitSemaphores = [](VkDevice, const VkSemaphoreWaitInfo *wait, uint64_t timeout) {
++			timeouts.push_back(timeout);
++			for (uint32_t i = 0; i < wait->semaphoreCount; ++i)
++				if (values[wait->pSemaphores[i]] < wait->pValues[i])
++					return VK_TIMEOUT;
++			return VK_SUCCESS;
++		};
++		vk.vkGetImageMemoryRequirements = [](VkDevice, VkImage, VkMemoryRequirements *req) {
++			req->size = 16384;
++		};
++		vk.log_level = U_LOGGING_ERROR;
++	}
++	~Device()
++	{
++		comp_swapchain_gpu_reuse_collect(&vk, true);
++	}
++	NativeSwapchain *
++	swapchain()
++	{
++		auto *sc = new NativeSwapchain{};
++		sc->vk = &vk;
++		sc->vkic.image_count = 1;
++		sc->base.base.image_count = 1;
++		sc->base.base.reference.count = 1;
++		sc->base.base.wait_image = [](xrt_swapchain *, int64_t, uint32_t) { return XRT_SUCCESS; };
++		sc->base.base.destroy = [](xrt_swapchain *base) {
++			destroyed++;
++			delete reinterpret_cast<NativeSwapchain *>(base);
++		};
++		REQUIRE(comp_swapchain_gpu_reuse_enable(&sc->base.base) == XRT_SUCCESS);
++		return sc;
++	}
++	xrt_compositor_semaphore *
++	producer()
++	{
++		xrt_compositor_semaphore *sem = nullptr;
++		REQUIRE(comp_semaphore_import_metal_shared_event(&vk, reinterpret_cast<void *>(1), 0, &sem) ==
++		        XRT_SUCCESS);
++		return sem;
++	}
++};
++} // namespace
++TEST_CASE("producer and consumer obligations quarantine independently and never wait at teardown")
++{
++	Device device;
++	auto *sc = device.swapchain();
++	auto *sem = device.producer();
++	auto *base = &sc->base.base;
++	REQUIRE(comp_swapchain_gpu_reuse_set_producer(base, 0, sem, 7) == XRT_SUCCESS);
++	auto signal = comp_semaphore(sem)->semaphore;
++	CHECK(xrt_swapchain_wait_image(base, 0, 0) == XRT_TIMEOUT);
++	int before = destroyed;
++	timeouts.clear();
++	xrt_swapchain_reference(&base, nullptr);
++	device.vk.vkWaitSemaphores = nullptr; // destroy itself must not call Vulkan or block
++	CHECK(destroyed == before);
++	device.vk.vkWaitSemaphores = [](VkDevice, const VkSemaphoreWaitInfo *wait, uint64_t timeout) {
++		timeouts.push_back(timeout);
++		return values[wait->pSemaphores[0]] >= wait->pValues[0] ? VK_SUCCESS : VK_TIMEOUT;
++	};
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before);
++	values[signal] = 7;
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before + 1);
++	for (auto timeout : timeouts)
++		CHECK(timeout == 0);
++	xrt_compositor_semaphore_reference(&sem, nullptr);
++}
++TEST_CASE("renderer preserves already satisfied producer wait and rejects future values")
++{
++	Device device;
++	auto *sc = device.swapchain();
++	auto *sem = device.producer();
++	auto *base = &sc->base.base;
++	REQUIRE(comp_swapchain_gpu_reuse_set_producer(base, 0, sem, 11) == XRT_SUCCESS);
++	comp_layer_accum accum{};
++	accum.layer_count = 1;
++	accum.layers[0].sc_array[0] = base;
++	accum.layers[0].data.type = XRT_LAYER_QUAD;
++	accum.layers[0].data.quad.sub.image_index = 0;
++	VkCommandBuffer cmd{};
++	vk_submit_info_builder builder{};
++	comp_swapchain_gpu_reuse_renderer_enter(&accum);
++	comp_swapchain_gpu_reuse_submit_info_builder_prepare(&builder, nullptr, &cmd, 1, nullptr, nullptr);
++	vk_bundle_queue queue{};
++	CHECK(comp_swapchain_gpu_reuse_vk_cmd_submit_locked(&device.vk, &queue, 1, &builder.submit_info,
++	                                                    VK_NULL_HANDLE) == VK_NOT_READY);
++	comp_swapchain_gpu_reuse_renderer_leave(&accum);
++	values[comp_semaphore(sem)->semaphore] = 11;
++	comp_swapchain_gpu_reuse_renderer_enter(&accum);
++	comp_swapchain_gpu_reuse_submit_info_builder_prepare(&builder, nullptr, &cmd, 1, nullptr, nullptr);
++	REQUIRE(builder.submit_info.waitSemaphoreCount == 1);
++	CHECK(builder.submit_info.pWaitSemaphores[0] == comp_semaphore(sem)->semaphore);
++	CHECK(builder.submit_info.pWaitDstStageMask[0] == VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
++	auto *timeline = static_cast<const VkTimelineSemaphoreSubmitInfo *>(builder.submit_info.pNext);
++	REQUIRE(timeline != nullptr);
++	CHECK(timeline->pWaitSemaphoreValues[0] == 11);
++	// Abort the prepared submit: it must roll back consumer ownership rather than invent completion.
++	comp_swapchain_gpu_reuse_renderer_leave(&accum);
++	xrt_swapchain_reference(&base, nullptr);
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	xrt_compositor_semaphore_reference(&sem, nullptr);
++}
++TEST_CASE("pending consumer completion retains storage after producer completion")
++{
++	Device device;
++	auto *sc = device.swapchain();
++	auto *base = &sc->base.base;
++	comp_layer_accum accum{};
++	accum.layer_count = 1;
++	accum.layers[0].sc_array[0] = base;
++	accum.layers[0].data.type = XRT_LAYER_QUAD;
++	comp_swapchain_gpu_reuse_renderer_enter(&accum);
++	VkCommandBuffer cmd{};
++	vk_submit_info_builder builder{};
++	comp_swapchain_gpu_reuse_submit_info_builder_prepare(&builder, nullptr, &cmd, 1, nullptr, nullptr);
++	auto *timeline = static_cast<const VkTimelineSemaphoreSubmitInfo *>(builder.submit_info.pNext);
++	REQUIRE(timeline != nullptr);
++	VkSemaphore consumer = builder.submit_info.pSignalSemaphores[0];
++	uint64_t value = timeline->pSignalSemaphoreValues[0];
++	// Emulate an accepted Vulkan submission, with a not-yet-completed consumer timeline.
++	vk_bundle_queue queue{};
++	device.vk.vkQueueSubmit = [](VkQueue, uint32_t, const VkSubmitInfo *, VkFence) { return VK_SUCCESS; };
++	os_mutex_init(&queue.mutex);
++	CHECK(comp_swapchain_gpu_reuse_vk_cmd_submit_locked(&device.vk, &queue, 1, &builder.submit_info,
++	                                                    VK_NULL_HANDLE) == VK_SUCCESS);
++	os_mutex_destroy(&queue.mutex);
++	comp_swapchain_gpu_reuse_renderer_leave(&accum);
++	int before = destroyed;
++	xrt_swapchain_reference(&base, nullptr);
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before);
++	values[consumer] = value;
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before + 1);
++}
++TEST_CASE("oversized storage is rejected before tracking ownership")
++{
++	Device device;
++	NativeSwapchain sc{};
++	sc.vk = &device.vk;
++	sc.vkic.image_count = 1;
++	sc.base.base.image_count = 1;
++	sc.base.base.wait_image = [](xrt_swapchain *, int64_t, uint32_t) { return XRT_SUCCESS; };
++	sc.base.base.destroy = [](xrt_swapchain *) {};
++	device.vk.vkGetImageMemoryRequirements = [](VkDevice, VkImage, VkMemoryRequirements *req) {
++		req->size = UINT64_C(2) * 1024 * 1024 * 1024;
++	};
++	CHECK(comp_swapchain_gpu_reuse_enable(&sc.base.base) == XRT_ERROR_ALLOCATION);
++}
++TEST_CASE("repeated failed teardown is bounded and completion restores allocation capacity")
++{
++	Device device;
++	auto *sem = device.producer();
++	int before = destroyed;
++	for (unsigned i = 0; i < 256; i++) {
++		auto *sc = device.swapchain();
++		auto *base = &sc->base.base;
++		REQUIRE(comp_swapchain_gpu_reuse_set_producer(base, 0, sem, 23) == XRT_SUCCESS);
++		xrt_swapchain_reference(&base, nullptr);
++	}
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before);
++	NativeSwapchain extra{};
++	extra.vk = &device.vk;
++	extra.vkic.image_count = 1;
++	extra.base.base.image_count = 1;
++	extra.base.base.wait_image = [](xrt_swapchain *, int64_t, uint32_t) { return XRT_SUCCESS; };
++	extra.base.base.destroy = [](xrt_swapchain *) {};
++	CHECK(comp_swapchain_gpu_reuse_enable(&extra.base.base) == XRT_ERROR_ALLOCATION);
++	values[comp_semaphore(sem)->semaphore] = 23;
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before + 256);
++	auto *fresh = device.swapchain();
++	auto *base = &fresh->base.base;
++	xrt_swapchain_reference(&base, nullptr);
++	comp_swapchain_gpu_reuse_collect(&device.vk, false);
++	CHECK(destroyed == before + 257);
++	xrt_compositor_semaphore_reference(&sem, nullptr);
++}
+diff --git a/tests/tests_macos_gpu_sync.mm b/tests/tests_macos_gpu_sync.mm
+new file mode 100644
+index 000000000..fe81349b2
+--- /dev/null
++++ b/tests/tests_macos_gpu_sync.mm
+@@ -0,0 +1,901 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++// Headless native two-process Metal -> MoltenVK fault and pixel probe.
++// Uses the existing IOSurface producer probe's 64x64/global-ID fixture transport.
++#define VK_USE_PLATFORM_METAL_EXT
++#import <Foundation/Foundation.h>
++#import <Metal/Metal.h>
++#import <IOSurface/IOSurface.h>
++#include <vulkan/vulkan.h>
++#include <algorithm>
++#include <atomic>
++#include <memory>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <stdexcept>
++#include <string>
++#include <thread>
++#include <vector>
++#include <spawn.h>
++#include <poll.h>
++#include <signal.h>
++#include <sys/wait.h>
++#include <sys/socket.h>
++#include <sys/un.h>
++#include <unistd.h>
++extern char **environ;
++static constexpr unsigned W = 64, N = 3, BYTES = W * W * 4;
++static uint64_t
++ns()
++{
++	return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
++	    .count();
++}
++static void
++check(bool good, const char *msg)
++{
++	if (!good)
++		throw std::runtime_error(msg);
++}
++static void
++vkcheck(VkResult result)
++{
++	if (result != VK_SUCCESS)
++		throw std::runtime_error("Vulkan result " + std::to_string(result));
++}
++static void
++io(int fd, void *data, size_t size, bool output)
++{
++	auto *p = static_cast<char *>(data);
++	while (size) {
++		if (!output) {
++			pollfd f{fd, POLLIN, 0};
++			check(poll(&f, 1, 5000) > 0, "transport timeout");
++		}
++		ssize_t count = output ? write(fd, p, size) : read(fd, p, size);
++		check(count > 0, "transport closed");
++		p += count;
++		size -= count;
++	}
++}
++struct Command
++{
++	uint64_t frame, value;
++	uint32_t image, producer, mode, delay_ms;
++};
++struct Receipt
++{
++	uint64_t commit_ns;
++};
++static void
++pattern(const Command &c, unsigned x, unsigned y, uint8_t p[4])
++{
++	const uint32_t words[4] = {(uint32_t)c.frame, (uint32_t)(c.frame >> 32), c.producer, c.image};
++	p[0] = y % 251;
++	p[1] = (x + y) % 251;
++	p[2] = (words[(x / 4) % 4] >> ((x % 4) * 8)) & 255;
++	p[3] = 255;
++}
++static IOSurfaceRef
++surface()
++{
++#pragma clang diagnostic push
++#pragma clang diagnostic ignored "-Wdeprecated-declarations"
++	NSDictionary *d = @{
++		(id)kIOSurfaceWidth : @(W),
++		(id)kIOSurfaceHeight : @(W),
++		(id)kIOSurfaceBytesPerElement : @4,
++		(id)kIOSurfaceBytesPerRow : @(W * 4),
++		(id)kIOSurfaceAllocSize : @(BYTES),
++		(id)kIOSurfacePixelFormat : @(0x42475241),
++		(id)kIOSurfaceIsGlobal : @YES
++	};
++#pragma clang diagnostic pop
++	return IOSurfaceCreate((CFDictionaryRef)d);
++}
++@protocol GPUSyncEventProtocol
++- (void)eventHandle:(void (^)(MTLSharedEventHandle *))reply;
++@end
++@interface GPUSyncEventService : NSObject <GPUSyncEventProtocol, NSXPCListenerDelegate>
++@property(retain) id<MTLSharedEvent> event;
++@end
++@implementation GPUSyncEventService
++- (void)eventHandle:(void (^)(MTLSharedEventHandle *))reply
++{
++	reply([[self.event newSharedEventHandle] autorelease]);
++}
++- (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)connection
++{
++	(void)listener;
++	connection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(GPUSyncEventProtocol)];
++	connection.exportedObject = self;
++	[connection resume];
++	return YES;
++}
++@end
++static int
++launchctl(const char *verb, const char *domain, const char *plist)
++{
++	char *args[] = {const_cast<char *>("/bin/launchctl"), const_cast<char *>(verb), const_cast<char *>(domain),
++	                const_cast<char *>(plist), nullptr};
++	pid_t pid;
++	check(posix_spawn(&pid, "/bin/launchctl", nullptr, nullptr, args, environ) == 0, "launchctl spawn");
++	int status;
++	check(waitpid(pid, &status, 0) == pid, "launchctl wait");
++	return WIFEXITED(status) ? WEXITSTATUS(status) : 128;
++}
++static void
++metal_complete(id<MTLCommandBuffer> buffer)
++{
++	uint64_t deadline = ns() + 1000000000;
++	while (buffer.status < MTLCommandBufferStatusCompleted && ns() < deadline) {
++		std::this_thread::sleep_for(std::chrono::microseconds(100));
++	}
++	check(buffer.status == MTLCommandBufferStatusCompleted, "producer GPU completion timeout");
++}
++static int
++producer(const char *service_name, const char *socket_path)
++
++{
++	id<MTLDevice> device = MTLCreateSystemDefaultDevice();
++	check(device != nil, "no Metal device");
++	id<MTLCommandQueue> queues[2] = {[device newCommandQueue], [device newCommandQueue]};
++	id<MTLSharedEvent> event = [device newSharedEvent];
++	id<MTLSharedEvent> join = [device newSharedEvent];
++	GPUSyncEventService *service = [GPUSyncEventService new];
++	service.event = event;
++	NSXPCListener *listener =
++	    [[NSXPCListener alloc] initWithMachServiceName:[NSString stringWithUTF8String:service_name]];
++	listener.delegate = service;
++	[listener resume];
++	int channel = socket(AF_UNIX, SOCK_STREAM, 0);
++	check(channel >= 0, "producer socket");
++	sockaddr_un addr{};
++	addr.sun_family = AF_UNIX;
++	strlcpy(addr.sun_path, socket_path, sizeof(addr.sun_path));
++	check(connect(channel, (sockaddr *)&addr, sizeof(addr)) == 0, "producer connect");
++	dup2(channel, 0);
++	dup2(channel, 1);
++	close(channel);
++	pid_t ownpid = getpid();
++	io(1, &ownpid, sizeof(ownpid), true);
++	IOSurfaceRef surfaces[N];
++	id<MTLTexture> textures[N];
++	NSMutableArray *ids = [NSMutableArray array];
++	for (unsigned i = 0; i < N; ++i) {
++		surfaces[i] = surface();
++		check(surfaces[i] != nullptr, "IOSurface creation");
++		MTLTextureDescriptor *desc =
++		    [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
++		                                                       width:W
++		                                                      height:W
++		                                                   mipmapped:NO];
++		desc.storageMode = MTLStorageModeShared;
++		desc.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
++		textures[i] = [device newTextureWithDescriptor:desc iosurface:surfaces[i] plane:0];
++		check(textures[i] != nil, "Metal IOSurface texture");
++		[ids addObject:@(IOSurfaceGetID(surfaces[i]))];
++	}
++	NSError *error = nil;
++	NSString *shader =
++	    @"#include <metal_stdlib>\nusing namespace metal;\n"
++	     "kernel void fill(texture2d<float,access::write> image [[texture(0)]], constant uint4 &ids [[buffer(0)]], "
++	     "uint2 p [[thread_position_in_grid]]) {"
++	     "uint word=ids[(p.x/4)%4]; uint byte=(word>>((p.x%4)*8))&255;"
++	     "image.write(float4(float(byte)/255.0,float((p.x+p.y)%251)/255.0,float(p.y%251)/255.0,1.0),p);}";
++	id<MTLLibrary> library = [device newLibraryWithSource:shader options:nil error:&error];
++	check(library != nil, "producer compute shader");
++	id<MTLFunction> function = [library newFunctionWithName:@"fill"];
++	id<MTLComputePipelineState> pipeline = [device newComputePipelineStateWithFunction:function error:&error];
++	check(pipeline != nil, "producer compute pipeline");
++	[function release];
++	[library release];
++	NSData *archive = [NSKeyedArchiver archivedDataWithRootObject:@{
++		@"surfaces" : ids,
++		@"registry" : @(device.registryID)
++	}
++	                                        requiringSecureCoding:YES
++	                                                        error:&error];
++	if (!archive)
++		fprintf(stderr, "archive: %s\n", error.description.UTF8String);
++	check(archive != nil, "shared-event archive");
++	uint32_t len = (uint32_t)archive.length;
++	io(1, &len, sizeof(len), true);
++	io(1, (void *)archive.bytes, len, true);
++	uint64_t previous = 0;
++	for (;;) {
++		Command c{};
++		io(0, &c, sizeof(c), false);
++		if (c.mode == 99)
++			break;
++		check(c.image < N, "producer image index");
++		if (c.mode == 4)
++			_exit(0); // exit with an outstanding, unsignalled obligation
++		if (c.mode == 6) {
++			check(c.value <= previous, "invalid-sequence fixture");
++			Receipt r{0};
++			io(1, &r, sizeof(r), true);
++			continue;
++		}
++		auto write_texture = [&](id<MTLCommandQueue> q) {
++			id<MTLCommandBuffer> cb = [q commandBuffer];
++			id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
++			uint32_t words[4] = {(uint32_t)c.frame, (uint32_t)(c.frame >> 32), c.producer, c.image};
++			[enc setComputePipelineState:pipeline];
++			[enc setTexture:textures[c.image] atIndex:0];
++			[enc setBytes:words length:sizeof(words) atIndex:0];
++			[enc dispatchThreads:MTLSizeMake(W, W, 1) threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
++			[enc endEncoding];
++			return cb;
++		};
++		if (c.mode ==
++		    7) { // broken multi-queue: signal now, deliberately write only after consumer acknowledgement
++			id<MTLCommandBuffer> cb = [queues[1] commandBuffer];
++			[cb encodeSignalEvent:event value:c.value];
++			Receipt r{ns()};
++			[cb commit];
++			io(1, &r, sizeof(r), true);
++			char ack;
++			io(0, &ack, 1, false);
++			cb = write_texture(queues[0]);
++			[cb commit];
++			metal_complete(cb);
++		} else {
++			if (c.delay_ms)
++				std::this_thread::sleep_for(std::chrono::milliseconds(c.delay_ms));
++			id<MTLCommandBuffer> cb = write_texture(queues[0]);
++			if (c.mode == 8) {
++				[cb encodeSignalEvent:join value:c.value];
++				[cb commit];
++				cb = [queues[1] commandBuffer];
++				[cb encodeWaitForEvent:join value:c.value];
++			}
++			if (c.mode != 2)
++				[cb encodeSignalEvent:event value:c.value];
++			Receipt r{ns()};
++			[cb commit];
++			io(1, &r, sizeof(r), true);
++			char ack;
++			io(0, &ack, 1, false);
++			// Finite normal producer work only. Never encode an unresolved GPU dependency.
++			metal_complete(cb);
++			check(cb.status == MTLCommandBufferStatusCompleted, "Metal command buffer failed");
++		}
++		previous = c.value;
++	}
++	for (unsigned i = 0; i < N; ++i) {
++		[textures[i] release];
++		CFRelease(surfaces[i]);
++	}
++	[pipeline release];
++	[event release];
++	[join release];
++	[queues[0] release];
++	[queues[1] release];
++	[device release];
++	return 0;
++}
++struct Child
++{
++	pid_t pid = -1;
++	int input = -1, output = -1;
++	NSXPCConnection *connection = nil;
++	std::string directory, plist, domain, name;
++	Child(const char *path)
++	{
++		char dir[] = "/tmp/monado-gpu-sync-XXXXXX";
++		check(mkdtemp(dir) != nullptr, "temporary directory");
++		directory = dir;
++		std::string sock = directory + "/socket";
++		plist = directory + "/agent.plist";
++		domain = "gui/" + std::to_string(getuid());
++		name = "org.freedesktop.monado.gpu-sync." + std::to_string(getpid());
++		int server = socket(AF_UNIX, SOCK_STREAM, 0);
++		check(server >= 0, "consumer socket");
++		sockaddr_un addr{};
++		addr.sun_family = AF_UNIX;
++		strlcpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path));
++		check(bind(server, (sockaddr *)&addr, sizeof(addr)) == 0 && listen(server, 1) == 0, "consumer listen");
++		char absolute[4096];
++		check(realpath(path, absolute) != nullptr, "executable path");
++		NSString *label = [NSString stringWithUTF8String:name.c_str()];
++		NSDictionary *agent = @{
++			@"Label" : label,
++			@"ProgramArguments" : @[
++				[NSString stringWithUTF8String:absolute], @"--producer", label,
++				[NSString stringWithUTF8String:sock.c_str()]
++			],
++			@"MachServices" : @{label : @YES}
++		};
++		NSData *data = [NSPropertyListSerialization dataWithPropertyList:agent
++		                                                          format:NSPropertyListXMLFormat_v1_0
++		                                                         options:0
++		                                                           error:nil];
++		check([data writeToFile:[NSString stringWithUTF8String:plist.c_str()] atomically:YES], "launchd plist");
++		check(launchctl("bootstrap", domain.c_str(), plist.c_str()) == 0, "launchd bootstrap");
++		connection = [[NSXPCConnection alloc] initWithMachServiceName:label options:0];
++		connection.remoteObjectInterface =
++		    [NSXPCInterface interfaceWithProtocol:@protocol(GPUSyncEventProtocol)];
++		[connection resume];
++		// Trigger service activation; handle retrieval below performs the actual XPC transfer.
++		[[connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
++		  (void)error;
++		}] eventHandle:^(MTLSharedEventHandle *handle) {
++		  (void)handle;
++		}];
++		pollfd p{server, POLLIN, 0};
++		check(poll(&p, 1, 5000) > 0, "producer activation timeout");
++		input = accept(server, nullptr, nullptr);
++		output = input;
++		close(server);
++		check(input >= 0, "accept producer");
++		io(output, &pid, sizeof(pid), false);
++	}
++	MTLSharedEventHandle *
++	handle()
++	{
++		__block MTLSharedEventHandle *result = nil;
++		dispatch_semaphore_t done = dispatch_semaphore_create(0);
++		[[connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
++		  (void)error;
++		  dispatch_semaphore_signal(done);
++		}] eventHandle:^(MTLSharedEventHandle *h) {
++		  result = [h retain];
++		  dispatch_semaphore_signal(done);
++		}];
++		check(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0 &&
++		          result != nil,
++		      "XPC event timeout");
++		return [result autorelease];
++	}
++	~Child()
++	{
++		[connection invalidate];
++		[connection release];
++		if (input >= 0)
++			close(input);
++		launchctl("bootout", domain.c_str(), plist.c_str());
++		unlink((directory + "/socket").c_str());
++		unlink(plist.c_str());
++		rmdir(directory.c_str());
++	}
++	void
++	ack()
++	{
++		char a = 1;
++		io(input, &a, 1, true);
++	}
++};
++struct Consumer
++{
++	VkInstance instance{};
++	VkPhysicalDevice physical{};
++	VkDevice device{};
++	VkQueue queue{};
++	uint32_t family = 0;
++	VkImage images[N]{};
++	VkDeviceMemory memory[N]{};
++	IOSurfaceRef surfaces[N]{};
++	VkBuffer buffer{};
++	VkDeviceMemory readback{};
++	void *mapped{};
++	VkCommandPool pool{};
++	VkCommandBuffer cmd{};
++	VkFence fence{};
++	VkSemaphore semaphore{};
++	id<MTLSharedEvent> event = nil;
++	uint64_t registry = 0;
++	uint32_t
++	memory_type(uint32_t bits, VkMemoryPropertyFlags flags)
++	{
++		VkPhysicalDeviceMemoryProperties props{};
++		vkGetPhysicalDeviceMemoryProperties(physical, &props);
++		for (unsigned i = 0; i < props.memoryTypeCount; ++i)
++			if ((bits & (1u << i)) && (props.memoryTypes[i].propertyFlags & flags) == flags)
++				return i;
++		throw std::runtime_error("no suitable Vulkan memory");
++	}
++	Consumer(Child &child)
++	{
++		VkApplicationInfo app{};
++		app.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
++		app.pApplicationName = "Monado GPU sync probe";
++		app.apiVersion = VK_API_VERSION_1_2;
++		const char *ie[] = {VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME};
++		VkInstanceCreateInfo ic{};
++		ic.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
++		ic.pApplicationInfo = &app;
++		ic.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
++		ic.enabledExtensionCount = 1;
++		ic.ppEnabledExtensionNames = ie;
++		vkcheck(vkCreateInstance(&ic, nullptr, &instance));
++		uint32_t count = 1;
++		vkcheck(vkEnumeratePhysicalDevices(instance, &count, &physical));
++		vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, nullptr);
++		std::vector<VkQueueFamilyProperties> props(count);
++		vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, props.data());
++		while (family < count && !(props[family].queueFlags & VK_QUEUE_GRAPHICS_BIT))
++			++family;
++		check(family < count, "graphics queue");
++		float priority = 1;
++		VkDeviceQueueCreateInfo qc{};
++		qc.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
++		qc.queueFamilyIndex = family;
++		qc.queueCount = 1;
++		qc.pQueuePriorities = &priority;
++		const char *de[] = {VK_EXT_METAL_OBJECTS_EXTENSION_NAME, "VK_KHR_portability_subset"};
++		VkPhysicalDeviceTimelineSemaphoreFeatures timeline{};
++		timeline.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES;
++		timeline.timelineSemaphore = VK_TRUE;
++		VkExportMetalObjectCreateInfoEXT exportDevice{};
++		exportDevice.sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT;
++		exportDevice.exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_DEVICE_BIT_EXT;
++		exportDevice.pNext = &timeline;
++		VkDeviceCreateInfo dc{};
++		dc.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
++		dc.pNext = &exportDevice;
++		dc.queueCreateInfoCount = 1;
++		dc.pQueueCreateInfos = &qc;
++		dc.enabledExtensionCount = 2;
++		dc.ppEnabledExtensionNames = de;
++		vkcheck(vkCreateDevice(physical, &dc, nullptr, &device));
++		vkGetDeviceQueue(device, family, 0, &queue);
++		VkExportMetalDeviceInfoEXT md{};
++		md.sType = VK_STRUCTURE_TYPE_EXPORT_METAL_DEVICE_INFO_EXT;
++		VkExportMetalObjectsInfoEXT ex{};
++		ex.sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT;
++		ex.pNext = &md;
++		auto exporter = (PFN_vkExportMetalObjectsEXT)vkGetDeviceProcAddr(device, "vkExportMetalObjectsEXT");
++		check(exporter != nullptr, "Metal export entry point");
++		exporter(device, &ex);
++		id<MTLDevice> metal = md.mtlDevice;
++		check(metal != nil, "Vulkan Metal device");
++		registry = metal.registryID;
++		uint32_t length = 0;
++		io(child.output, &length, 4, false);
++		check(length < 1048576, "archive bound");
++		NSMutableData *data = [NSMutableData dataWithLength:length];
++		io(child.output, data.mutableBytes, length, false);
++		NSError *error = nil;
++		NSSet *classes = [NSSet setWithObjects:[NSDictionary class], [NSArray class], [NSNumber class],
++		                                       [NSString class], [MTLSharedEventHandle class], nil];
++		NSDictionary *d = [NSKeyedUnarchiver unarchivedObjectOfClasses:classes fromData:data error:&error];
++		check(d != nil, "shared-event decode");
++		check([d[@"registry"] unsignedLongLongValue] == registry, "Metal device mismatch");
++		event = [metal newSharedEventWithHandle:child.handle()];
++		check(event != nil, "shared-event import");
++		VkSemaphoreTypeCreateInfo st{};
++		st.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
++		st.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
++		st.initialValue = 0;
++		VkImportMetalSharedEventInfoEXT si{};
++		si.sType = VK_STRUCTURE_TYPE_IMPORT_METAL_SHARED_EVENT_INFO_EXT;
++		si.mtlSharedEvent = event;
++		si.pNext = &st;
++		VkSemaphoreCreateInfo sc{};
++		sc.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
++		sc.pNext = &si;
++		vkcheck(vkCreateSemaphore(device, &sc, nullptr, &semaphore));
++		for (unsigned i = 0; i < N; ++i) {
++			surfaces[i] = IOSurfaceLookup([d[@"surfaces"][i] unsignedIntValue]);
++			check(surfaces[i] != nullptr, "IOSurface lookup");
++			VkImportMetalIOSurfaceInfoEXT surf{};
++			surf.sType = VK_STRUCTURE_TYPE_IMPORT_METAL_IO_SURFACE_INFO_EXT;
++			surf.ioSurface = surfaces[i];
++			VkImageCreateInfo im{};
++			im.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
++			im.pNext = &surf;
++			im.imageType = VK_IMAGE_TYPE_2D;
++			im.format = VK_FORMAT_B8G8R8A8_UNORM;
++			im.extent = {W, W, 1};
++			im.mipLevels = 1;
++			im.arrayLayers = 1;
++			im.samples = VK_SAMPLE_COUNT_1_BIT;
++			im.tiling = VK_IMAGE_TILING_OPTIMAL;
++			im.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
++			vkcheck(vkCreateImage(device, &im, nullptr, &images[i]));
++			VkMemoryRequirements req{};
++			vkGetImageMemoryRequirements(device, images[i], &req);
++			VkMemoryDedicatedAllocateInfo dedicated{};
++			dedicated.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
++			dedicated.image = images[i];
++			VkMemoryAllocateInfo alloc{};
++			alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
++			alloc.pNext = &dedicated;
++			alloc.allocationSize = req.size;
++			alloc.memoryTypeIndex = memory_type(req.memoryTypeBits, 0);
++			vkcheck(vkAllocateMemory(device, &alloc, nullptr, &memory[i]));
++			vkcheck(vkBindImageMemory(device, images[i], memory[i], 0));
++		}
++		VkBufferCreateInfo bc{};
++		bc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
++		bc.size = BYTES;
++		bc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
++		vkcheck(vkCreateBuffer(device, &bc, nullptr, &buffer));
++		VkMemoryRequirements req{};
++		vkGetBufferMemoryRequirements(device, buffer, &req);
++		VkMemoryAllocateInfo alloc{};
++		alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
++		alloc.allocationSize = req.size;
++		alloc.memoryTypeIndex = memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
++		                                                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
++		vkcheck(vkAllocateMemory(device, &alloc, nullptr, &readback));
++		vkcheck(vkBindBufferMemory(device, buffer, readback, 0));
++		vkcheck(vkMapMemory(device, readback, 0, BYTES, 0, &mapped));
++		VkCommandPoolCreateInfo pc{};
++		pc.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
++		pc.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
++		pc.queueFamilyIndex = family;
++		vkcheck(vkCreateCommandPool(device, &pc, nullptr, &pool));
++		VkCommandBufferAllocateInfo ca{};
++		ca.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
++		ca.commandPool = pool;
++		ca.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++		ca.commandBufferCount = 1;
++		vkcheck(vkAllocateCommandBuffers(device, &ca, &cmd));
++		VkFenceCreateInfo fc{};
++		fc.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
++		vkcheck(vkCreateFence(device, &fc, nullptr, &fence));
++		VkCommandBufferBeginInfo init{};
++		init.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
++		vkcheck(vkBeginCommandBuffer(cmd, &init));
++		for (unsigned i = 0; i < N; ++i) {
++			VkImageMemoryBarrier barrier{};
++			barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
++			barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
++			barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
++			barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
++			barrier.image = images[i];
++			barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++			barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++			barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
++			vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
++			                     0, 0, nullptr, 0, nullptr, 1, &barrier);
++		}
++		vkcheck(vkEndCommandBuffer(cmd));
++		VkSubmitInfo submit{};
++		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
++		submit.commandBufferCount = 1;
++		submit.pCommandBuffers = &cmd;
++		vkcheck(vkQueueSubmit(queue, 1, &submit, fence));
++		vkcheck(vkWaitForFences(device, 1, &fence, VK_TRUE, 1000000000));
++	}
++	bool pending = false;
++	uint64_t
++	submit(const Command &c, bool wait = true)
++	{
++		check(!pending, "premature consumer reuse");
++		check(event.signaledValue >= c.value, "unsafe future dependency");
++		vkcheck(vkResetCommandBuffer(cmd, 0));
++		vkcheck(vkResetFences(device, 1, &fence));
++		VkCommandBufferBeginInfo begin{};
++		begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
++		vkcheck(vkBeginCommandBuffer(cmd, &begin));
++		VkImageMemoryBarrier barrier{};
++		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
++		barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
++		barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
++		// Imported external content is preserved by the first transition from GENERAL.
++		barrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
++		barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
++		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
++		barrier.image = images[c.image];
++		barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
++		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0,
++		                     nullptr, 0, nullptr, 1, &barrier);
++		VkBufferImageCopy copy{};
++		copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
++		copy.imageExtent = {W, W, 1};
++		vkCmdCopyImageToBuffer(cmd, images[c.image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &copy);
++		std::swap(barrier.oldLayout, barrier.newLayout);
++		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
++		barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
++		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
++		                     nullptr, 0, nullptr, 1, &barrier);
++		VkMemoryBarrier host{};
++		host.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
++		host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++		host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
++		vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &host, 0,
++		                     nullptr, 0, nullptr);
++		vkcheck(vkEndCommandBuffer(cmd));
++		VkTimelineSemaphoreSubmitInfo ts{};
++		ts.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
++		ts.waitSemaphoreValueCount = 1;
++		ts.pWaitSemaphoreValues = &c.value;
++		VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
++		VkSubmitInfo s{};
++		s.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
++		s.pNext = &ts;
++		s.waitSemaphoreCount = 1;
++		s.pWaitSemaphores = &semaphore;
++		s.pWaitDstStageMask = &stage;
++		s.commandBufferCount = 1;
++		s.pCommandBuffers = &cmd;
++		uint64_t start = ns();
++		vkcheck(vkQueueSubmit(queue, 1, &s, fence));
++		pending = true;
++		return ns() - start;
++	}
++	uint64_t
++	overhead(const Command &c, bool wait)
++	{
++		// Identical empty submissions isolate the satisfied-wait submission cost.
++		// Neither benchmark control accesses any shared texture.
++		check(!pending && event.signaledValue >= c.value, "unsafe benchmark dependency");
++		vkcheck(vkResetFences(device, 1, &fence));
++		VkTimelineSemaphoreSubmitInfo ts{};
++		ts.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
++		ts.waitSemaphoreValueCount = wait ? 1 : 0;
++		ts.pWaitSemaphoreValues = &c.value;
++		VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
++		VkSubmitInfo info{};
++		info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
++		info.pNext = &ts;
++		info.waitSemaphoreCount = wait ? 1 : 0;
++		info.pWaitSemaphores = &semaphore;
++		info.pWaitDstStageMask = &stage;
++		uint64_t start = ns();
++		vkcheck(vkQueueSubmit(queue, 1, &info, fence));
++		pending = true;
++		return ns() - start;
++	}
++	bool
++	complete(uint64_t timeout_ns = 1000000000)
++	{
++		VkResult r = vkWaitForFences(device, 1, &fence, VK_TRUE, timeout_ns);
++		if (r == VK_TIMEOUT)
++			return false;
++		vkcheck(r);
++		pending = false;
++		return true;
++	}
++	bool
++	pixels(const Command &c)
++	{
++		uint8_t p[4];
++		for (unsigned y = 0; y < W; y++) {
++			for (unsigned x = 0; x < W; x++) {
++				pattern(c, x, y, p);
++				if (memcmp((char *)mapped + (y * W + x) * 4, p, 4)) {
++					return false;
++				}
++			}
++		}
++		return true;
++	}
++	~Consumer()
++	{
++		// On an unresolved consumer fence retain the entire Vulkan device/resources until process exit.
++		if (pending && !complete(0))
++			return;
++		if (device) {
++			if (mapped)
++				vkUnmapMemory(device, readback);
++			vkDestroyFence(device, fence, nullptr);
++			vkDestroyCommandPool(device, pool, nullptr);
++			vkDestroyBuffer(device, buffer, nullptr);
++			vkFreeMemory(device, readback, nullptr);
++			for (unsigned i = 0; i < N; ++i) {
++				vkDestroyImage(device, images[i], nullptr);
++				vkFreeMemory(device, memory[i], nullptr);
++				if (surfaces[i])
++					CFRelease(surfaces[i]);
++			}
++			vkDestroySemaphore(device, semaphore, nullptr);
++			[event release];
++			vkDestroyDevice(device, nullptr);
++		}
++		if (instance)
++			vkDestroyInstance(instance, nullptr);
++	}
++};
++static double
++percentile(std::vector<uint64_t> v, double p)
++{
++	if (v.empty())
++		return 0;
++	std::sort(v.begin(), v.end());
++	return v[std::min(v.size() - 1, (size_t)(p * (v.size() - 1)))] / 1000.;
++}
++int
++main(int argc, char **argv)
++{
++	signal(SIGPIPE, SIG_IGN);
++	@autoreleasepool {
++		try {
++			if (argc == 4 && !strcmp(argv[1], "--producer"))
++				return producer(argv[2], argv[3]);
++			std::string scenario = argc > 1 ? argv[1] : "normal";
++			unsigned frames = argc > 2 ? std::stoul(argv[2]) : 12;
++			check(frames > 0 && frames <= 1000000, "frame count bound");
++			const unsigned hung = getenv("GPU_SYNC_HUNG_MS") ? std::stoul(getenv("GPU_SYNC_HUNG_MS")) : 500;
++			const unsigned margin =
++			    getenv("GPU_SYNC_MARGIN_US") ? std::stoul(getenv("GPU_SYNC_MARGIN_US")) : 6000;
++			const unsigned interval =
++			    getenv("GPU_SYNC_INTERVAL_US") ? std::stoul(getenv("GPU_SYNC_INTERVAL_US")) : 8333;
++			check(hung > 0 && hung <= 10000 && interval > margin, "timing parameters");
++			const std::vector<std::string> scenarios = {
++			    "normal",      "delayed",    "missing",        "future",      "nonmonotonic",
++			    "exit-before", "exit-after", "consumer-delay", "multi-queue", "broken-queue",
++			    "reuse",       "idle",       "cancel-callback"};
++			check(std::find(scenarios.begin(), scenarios.end(), scenario) != scenarios.end(),
++			      "unknown scenario");
++			Child child(argv[0]);
++			Consumer gpu(child);
++			struct CallbackState
++			{
++				std::atomic<bool> canceled{false};
++				std::atomic<unsigned> callbacks{0}, activations{0};
++			};
++			auto callback_state = std::make_shared<CallbackState>();
++			MTLSharedEventListener *notification = nil;
++			if (scenario == "cancel-callback") {
++				notification = [[MTLSharedEventListener alloc]
++				    initWithDispatchQueue:dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0)];
++				[gpu.event notifyListener:notification
++				                  atValue:1
++				                    block:^(id<MTLSharedEvent> event, uint64_t value) {
++					              (void)event;
++					              (void)value;
++					              if (!callback_state->canceled.load())
++						              callback_state->activations++;
++					              callback_state->callbacks++;
++				                    }];
++				callback_state->canceled = true;
++			}
++			std::vector<uint64_t> submits, controls, empty_waits, readiness, e2e;
++			unsigned consumed = 0, expired = 0, blocked = 0;
++			uint64_t start = ns();
++			printf(
++			    "{\"event\":\"config\",\"scenario\":\"%s\",\"producer_pid\":%d,\"consumer_pid\":%d,\"hung_"
++			    "ms\":%u,\"margin_us\":%u,\"interval_us\":%u,\"thermal\":%ld,\"low_power\":%s,\"seed\":0,"
++			    "\"registry\":%llu}\n",
++			    scenario.c_str(), child.pid, getpid(), hung, margin, interval,
++			    (long)[NSProcessInfo processInfo].thermalState,
++			    [NSProcessInfo processInfo].lowPowerModeEnabled ? "true" : "false",
++			    (unsigned long long)gpu.registry);
++			if (scenario == "idle") {
++				std::this_thread::sleep_for(std::chrono::milliseconds(hung + 10));
++				check(!gpu.pending, "idle pending");
++				frames = 0;
++			}
++			for (unsigned f = 1; f <= frames; ++f) {
++				std::this_thread::sleep_until(std::chrono::steady_clock::time_point(
++				    std::chrono::nanoseconds(start + (uint64_t)(f - 1) * interval * 1000)));
++				Command c{f, f, (f - 1) % N, (uint32_t)child.pid, 0, 0};
++				if (scenario == "delayed" || scenario == "cancel-callback")
++					c.delay_ms = 20;
++				if (scenario == "missing")
++					c.mode = 2;
++				if (scenario == "exit-before")
++					c.mode = 4;
++				if (scenario == "broken-queue")
++					c.mode = 7;
++				if (scenario == "multi-queue")
++					c.mode = 8;
++				uint64_t obligation = ns(), deadline = obligation + (interval - margin) * 1000;
++				io(child.input, &c, sizeof(c), true);
++				Receipt receipt{};
++				if (c.mode != 4)
++					io(child.output, &receipt, sizeof(receipt), false);
++				uint64_t expected = c.value + (scenario == "future" ? 1 : 0);
++				while (gpu.event.signaledValue < expected &&
++				       ns() - obligation < (uint64_t)hung * 1000000)
++					std::this_thread::sleep_for(std::chrono::microseconds(100));
++				uint64_t observed = ns();
++				bool ready = gpu.event.signaledValue >= expected;
++				if (observed > deadline)
++					expired++;
++				uint64_t selected_presentation = obligation + interval * 1000;
++				while (selected_presentation < observed + margin * 1000)
++					selected_presentation += interval * 1000;
++				printf(
++				    "{\"event\":\"presentation_selection\",\"frame\":%u,\"target_ns\":%llu,"
++				    "\"deferred\":%s}\n",
++				    f, (unsigned long long)selected_presentation,
++				    observed > deadline ? "true" : "false");
++				printf(
++				    "{\"event\":\"gate\",\"frame\":%u,\"image\":%u,\"expected\":%llu,\"observed\":%llu,"
++				    "\"obligation_ns\":%llu,\"commit_ns\":%llu,\"ready_ns\":%llu,\"ready\":%s}\n",
++				    f, c.image, (unsigned long long)expected,
++				    (unsigned long long)gpu.event.signaledValue, (unsigned long long)obligation,
++				    (unsigned long long)receipt.commit_ns, (unsigned long long)observed,
++				    ready ? "true" : "false");
++				if (!ready) {
++					check(scenario == "missing" || scenario == "future" ||
++					          scenario == "exit-before",
++					      "unexpected producer stall");
++					blocked++;
++					check(!gpu.pending, "unsignalled submission");
++					if (c.mode != 4)
++						child.ack();
++					break;
++				}
++				if (scenario == "cancel-callback") {
++					uint64_t callback_deadline = ns() + 1000000000;
++					while (!callback_state->callbacks && ns() < callback_deadline)
++						std::this_thread::sleep_for(std::chrono::microseconds(100));
++					check(callback_state->callbacks == 1 && callback_state->activations == 0 &&
++					          !gpu.pending,
++					      "late callback reactivated canceled ownership");
++					child.ack();
++					[notification release];
++					break;
++				}
++				check(scenario != "missing" && scenario != "future" && scenario != "exit-before",
++				      "fault unexpectedly ready");
++				readiness.push_back(observed - obligation);
++				if (scenario == "exit-after") {
++					kill(child.pid, SIGKILL);
++					child.pid = -1;
++				}
++				uint64_t vk_observed = 0;
++				vkcheck(vkGetSemaphoreCounterValue(gpu.device, gpu.semaphore, &vk_observed));
++				check(vk_observed >= c.value, "imported Vulkan payload does not match Metal event");
++				uint64_t duration = gpu.submit(c);
++				submits.push_back(duration);
++				printf(
++				    "{\"event\":\"vulkan_wait_submit\",\"frame\":%u,\"value\":%llu,\"stage\":"
++				    "\"TRANSFER\",\"duration_ns\":%llu}\n",
++				    f, (unsigned long long)c.value, (unsigned long long)duration);
++				if (scenario == "consumer-delay") {
++					check(gpu.pending, "reuse must remain excluded");
++					std::this_thread::sleep_for(std::chrono::milliseconds(20));
++				}
++				check(gpu.complete(), "consumer fence timeout; quarantined until process exit");
++				e2e.push_back(ns() - obligation);
++				bool valid = gpu.pixels(c);
++				check(scenario == "broken-queue" ? !valid : valid, "pixel correctness");
++				consumed++;
++				// Paired no-wait timing is diagnostic only, and occurs after completed GPU ownership.
++				if (scenario == "normal" || scenario == "reuse") {
++					for (unsigned k = 0; k < 2; k++) {
++						bool wait = (f + k) % 2 == 0;
++						uint64_t cost = gpu.overhead(c, wait);
++						(wait ? empty_waits : controls).push_back(cost);
++						printf("{\"event\":\"%s\",\"frame\":%u,\"duration_ns\":%llu}\n",
++						       wait ? "empty_wait_submit" : "empty_control_submit", f,
++						       (unsigned long long)cost);
++						check(gpu.complete(), "empty submission completion");
++					}
++				}
++				if (scenario == "exit-after")
++					break;
++				child.ack();
++				if (scenario == "nonmonotonic") {
++					Command invalid = c;
++					invalid.mode = 6;
++					io(child.input, &invalid, sizeof(invalid), true);
++					Receipt r{};
++					io(child.output, &r, sizeof(r), false);
++					check(r.commit_ns == 0, "nonmonotonic accepted");
++				}
++			}
++			if (scenario == "missing" || scenario == "future" || scenario == "exit-before")
++				check(blocked == 1 && consumed == 0, "fault must refuse GPU work");
++			if (child.pid > 0 && scenario != "exit-before") {
++				Command stop{};
++				stop.mode = 99;
++				io(child.input, &stop, sizeof(stop), true);
++			}
++			printf(
++			    "{\"event\":\"result\",\"scenario\":\"%s\",\"status\":\"PASS\",\"consumed\":%u,\"refused\":"
++			    "%u,\"missed_deadlines\":%u,\"runtime_ms\":%.3f,\"submit_us\":{\"p50\":%.3f,\"p95\":%.3f,"
++			    "\"p99\":%.3f,\"max\":%.3f},\"no_wait_p50_us\":%.3f,\"empty_wait_p50_us\":%.3f,\"ready_p50_"
++			    "us\":%.3f,\"end_to_end_p50_"
++			    "us\":%.3f,\"thermal_end\":%ld}\n",
++			    scenario.c_str(), consumed, blocked, expired, (ns() - start) / 1e6, percentile(submits, .5),
++			    percentile(submits, .95), percentile(submits, .99), percentile(submits, 1),
++			    percentile(controls, .5), percentile(empty_waits, .5), percentile(readiness, .5),
++			    percentile(e2e, .5), (long)[NSProcessInfo processInfo].thermalState);
++			return 0;
++		} catch (const std::exception &e) {
++			fprintf(stderr, "{\"status\":\"FAIL\",\"error\":\"%s\"}\n", e.what());
++			return 1;
++		}
++	}
++}

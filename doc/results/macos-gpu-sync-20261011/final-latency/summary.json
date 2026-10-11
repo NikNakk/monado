@@ -1,0 +1,35 @@
+[
+  {
+    "scenario": "normal",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "normal",
+      "status": "PASS",
+      "consumed": 1200,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 9994.503,
+      "submit_us": {
+        "p50": 59.917,
+        "p95": 96.792,
+        "p99": 119.209,
+        "max": 620.458
+      },
+      "no_wait_p50_us": 10.709,
+      "empty_wait_p50_us": 12.291,
+      "ready_p50_us": 578.292,
+      "end_to_end_p50_us": 1193.083,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "normal",
+    "repeat": 1,
+    "exit": 1,
+    "result": {},
+    "status": "FAIL"
+  }
+]

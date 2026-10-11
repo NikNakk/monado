@@ -1,0 +1,13 @@
+[0/2] Re-checking globbed directories...
+[1/13] Building C object src/xrt/compositor/multi/CMakeFiles/comp_multi.dir/comp_multi_compositor.c.o
+[2/13] Linking CXX static library src/xrt/compositor/multi/libcomp_multi.a
+[3/13] Linking CXX shared library src/xrt/targets/libmonado/libmonado.25.1.0.dylib
+[4/13] Linking CXX executable src/xrt/targets/ctl/monado-ctl
+[5/13] Creating library symlink src/xrt/targets/libmonado/libmonado.25.dylib src/xrt/targets/libmonado/libmonado.dylib
+[6/13] Linking CXX executable src/xrt/targets/service/monado-service
+[7/13] Linking CXX executable tests/tests_macos_runtime_probe
+[8/13] Linking C executable src/xrt/targets/libmonado/libmonado-example
+[9/13] Linking CXX executable tests/tests_macos_ipc_swapchain_probe
+[10/13] Linking CXX executable tests/tests_macos_iosurface_import_probe
+[11/13] Linking CXX executable tests/tests_ipc_local_session
+[12/13] Linking CXX shared library src/xrt/targets/openxr/libopenxr_monado.dylib; Generating OpenXR runtime manifest named /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json for build tree usage

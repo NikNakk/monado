@@ -1,0 +1,4 @@
+{"event":"config","scenario":"exit-after","producer_pid":12207,"consumer_pid":12204,"hung_ms":500,"margin_us":6000,"interval_us":8333,"thermal":0,"low_power":false,"seed":0,"registry":4294968652}
+{"event":"gate","frame":1,"image":0,"expected":1,"observed":1,"obligation_ns":28516458108375,"commit_ns":28516459719625,"ready_ns":28516462588291,"ready":true}
+{"event":"vulkan_wait_submit","frame":1,"value":1,"stage":"TRANSFER","duration_ns":514208}
+{"event":"result","scenario":"exit-after","status":"PASS","consumed":1,"refused":0,"missed_deadlines":1,"runtime_ms":6.279,"submit_us":{"p50":514.208,"p95":514.208,"p99":514.208,"max":514.208},"no_wait_p50_us":0.000,"ready_p50_us":4479.916,"end_to_end_p50_us":6170.125,"thermal_end":0}

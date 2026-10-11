@@ -1,0 +1,602 @@
+[
+  {
+    "scenario": "normal",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "normal",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 38.243,
+      "submit_us": {
+        "p50": 9.084,
+        "p95": 52.542,
+        "p99": 60.792,
+        "max": 846.458
+      },
+      "no_wait_p50_us": 8.291,
+      "ready_p50_us": 383.667,
+      "end_to_end_p50_us": 657.417,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "delayed",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "delayed",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 30,
+      "runtime_ms": 4800.769,
+      "submit_us": {
+        "p50": 57.625,
+        "p95": 161.75,
+        "p99": 178.583,
+        "max": 28079.667
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 165309.334,
+      "end_to_end_p50_us": 165913.125,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "missing",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "missing",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.147,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "future",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "future",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.192,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "nonmonotonic",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "nonmonotonic",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 29.029,
+      "submit_us": {
+        "p50": 10.0,
+        "p95": 54.0,
+        "p99": 76.667,
+        "max": 944.416
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 361.542,
+      "end_to_end_p50_us": 704.5,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-before",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-before",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.219,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-after",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-after",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 4.629,
+      "submit_us": {
+        "p50": 569.958,
+        "p95": 569.958,
+        "p99": 569.958,
+        "max": 569.958
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 2684.208,
+      "end_to_end_p50_us": 4484.875,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-delay",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-delay",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 860.424,
+      "submit_us": {
+        "p50": 44.25,
+        "p95": 91.75,
+        "p99": 99.209,
+        "max": 726.541
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 629.875,
+      "end_to_end_p50_us": 30660.208,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "multi-queue",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "multi-queue",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 56.718,
+      "submit_us": {
+        "p50": 12.334,
+        "p95": 84.334,
+        "p99": 105.417,
+        "max": 972.833
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 861.292,
+      "end_to_end_p50_us": 1601.292,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "broken-queue",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "broken-queue",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 42.596,
+      "submit_us": {
+        "p50": 18.167,
+        "p95": 97.375,
+        "p99": 128.709,
+        "max": 681.083
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 678.917,
+      "end_to_end_p50_us": 996.291,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "reuse",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "reuse",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 57.017,
+      "submit_us": {
+        "p50": 12.583,
+        "p95": 50.834,
+        "p99": 81.667,
+        "max": 803.292
+      },
+      "no_wait_p50_us": 11.709,
+      "ready_p50_us": 558.417,
+      "end_to_end_p50_us": 1071.291,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "idle",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "idle",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 520.193,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "normal",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "normal",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 39.877,
+      "submit_us": {
+        "p50": 9.958,
+        "p95": 37.708,
+        "p99": 59.25,
+        "max": 571.875
+      },
+      "no_wait_p50_us": 10.25,
+      "ready_p50_us": 371.792,
+      "end_to_end_p50_us": 690.583,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "delayed",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "delayed",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 30,
+      "runtime_ms": 4666.56,
+      "submit_us": {
+        "p50": 59.291,
+        "p95": 355.916,
+        "p99": 435.166,
+        "max": 664.25
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 163953.292,
+      "end_to_end_p50_us": 164247.042,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "missing",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "missing",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.262,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "future",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "future",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.184,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "nonmonotonic",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "nonmonotonic",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 34.361,
+      "submit_us": {
+        "p50": 10.708,
+        "p95": 58.292,
+        "p99": 60.459,
+        "max": 590.875
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 515.25,
+      "end_to_end_p50_us": 1060.083,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-before",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-before",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.139,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-after",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-after",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 6.279,
+      "submit_us": {
+        "p50": 514.208,
+        "p95": 514.208,
+        "p99": 514.208,
+        "max": 514.208
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 4479.916,
+      "end_to_end_p50_us": 6170.125,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-delay",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-delay",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 845.099,
+      "submit_us": {
+        "p50": 71.167,
+        "p95": 110.791,
+        "p99": 199.542,
+        "max": 617.084
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 761.917,
+      "end_to_end_p50_us": 29547.375,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "multi-queue",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "multi-queue",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 36.822,
+      "submit_us": {
+        "p50": 11.792,
+        "p95": 61.292,
+        "p99": 69.875,
+        "max": 654.375
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 678.084,
+      "end_to_end_p50_us": 1058.917,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "broken-queue",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "broken-queue",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 34.538,
+      "submit_us": {
+        "p50": 11.375,
+        "p95": 83.042,
+        "p99": 88.458,
+        "max": 725.583
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 684.459,
+      "end_to_end_p50_us": 998.459,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "reuse",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "reuse",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 40.978,
+      "submit_us": {
+        "p50": 9.5,
+        "p95": 41.5,
+        "p99": 61.584,
+        "max": 547.0
+      },
+      "no_wait_p50_us": 11.25,
+      "ready_p50_us": 417.75,
+      "end_to_end_p50_us": 662.209,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "idle",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "idle",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 520.139,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  }
+]

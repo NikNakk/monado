@@ -1,0 +1,56 @@
+ INFO [ipc_server_main_common] Monado(XRT) by Collabora et al 'v25.1.0-2178-g805316beb' starting up...
+ INFO [p_create_system] Creating system:
+	Builders:
+		qwerty: Qwerty devices builder
+		remote: Remote simulation devices builder
+		simulated: Simulated devices builder
+		rift: Oculus Rift
+		psvr2: PlayStation VR 2
+		rgb_tracking: RGB tracking based devices (PSVR, PSMV, ...)
+		north_star: North Star headset
+		legacy: Legacy probing system
+	No builder selected in config (or wasn't compiled in)
+	Selected simulated because it was certain it could create a head
+	Using builder simulated: Simulated devices builder
+	Got devices:
+		 0: 'Simulated HMD' (id=1)
+	In roles:
+		head: Simulated HMD (Simulated HMD), view count: 2
+		eyes: <none> (<none>)
+		face: <none> (<none>)
+		left: <none> (<none>)
+		right: <none> (<none>)
+		gamepad: <none> (<none>)
+		hand_tracking.unobstructed.left: <none> (<none>)
+		hand_tracking.unobstructed.right: <none> (<none>)
+		hand_tracking.conforming.left: <none> (<none>)
+		hand_tracking.conforming.right: <none> (<none>)
+	Result: XRT_SUCCESS
+ INFO [null_compositor_create_system] 
+################################################################################
+# Null compositor starting, if you intended to use the null compositor (for CI #
+# integration) then everything is mostly likely setup correctly. But if you    #
+# intended to use Monado with real hardware it you probably built Monado       #
+# without the main compositor, please check your build config and make sure    #
+# that the main compositor is being built. Also make sure that the environment #
+# variable XRT_COMPOSITOR_NULL is not set.                                     #
+################################################################################
+ INFO [u_pc_fake_create] Created pacer (non-feedback version aka "fake")
+	estimated_frame_period: 50.000000ms
+	percentage: 20.000000%
+	min_comp_time: 3.000000ms
+	comp_time: 10.000000ms
+ INFO [vk_log_extension_list] Vulkan instance extensions list(s):
+	Enabled extensions:
+		VK_KHR_external_fence_capabilities        required
+		VK_KHR_external_memory_capabilities       required
+		VK_KHR_external_semaphore_capabilities    required
+		VK_KHR_get_physical_device_properties2    required
+		VK_KHR_get_surface_capabilities2          optional
+	Not enabled optional extensions:
+		VK_EXT_display_surface_counter            skipped
+ERROR [create_instance] vkCreateInstance: VK_ERROR_INCOMPATIBLE_DRIVER
+	Failed to create Vulkan instance
+ERROR [ipc_server_init_system_if_available_locked] xrt_instance_create_system failed: XRT_ERROR_VULKAN [/Users/nickkennedy/Code/monado-2/src/xrt/ipc/server/ipc_server_process.c:921]
+ERROR [ipc_server_main_common] ipc_server_init_system_if_available_locked failed: XRT_ERROR_VULKAN [/Users/nickkennedy/Code/monado-2/src/xrt/ipc/server/ipc_server_process.c:1259]
+ INFO [ipc_server_main_common] Server exiting: '0'

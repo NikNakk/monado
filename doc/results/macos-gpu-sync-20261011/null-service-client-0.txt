@@ -1,0 +1,15 @@
+ERROR [ipc_client_socket_connect_once] Failed to connect to socket /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/monado-sync-service-h9n7obzh/monado_comp_ipc: No such file or directory!
+ERROR [ipc_client_socket_connect_once] Failed to connect to socket /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/monado-sync-service-h9n7obzh/monado_comp_ipc: No such file or directory!
+ERROR [ipc_client_socket_connect] Monado service reported ready over XPC but its Unix socket still could not be reached
+ERROR [ipc_client_connection_init] Failed to connect to monado service process
+
+###
+#
+# Please make sure that the service process is running
+#
+# It is called "monado-service"
+# In build trees, it is located "build-dir/src/xrt/targets/service/monado-service"
+#
+###
+XR_ERROR_RUNTIME_UNAVAILABLE in xrCreateInstance: Failed to create instance '-1'
+xrCreateInstance failed: -51

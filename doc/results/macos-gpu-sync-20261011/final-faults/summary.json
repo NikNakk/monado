@@ -1,0 +1,678 @@
+[
+  {
+    "scenario": "normal",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "normal",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 244.87,
+      "submit_us": {
+        "p50": 16.083,
+        "p95": 80.709,
+        "p99": 106.375,
+        "max": 1026.291
+      },
+      "no_wait_p50_us": 4.125,
+      "empty_wait_p50_us": 3.958,
+      "ready_p50_us": 542.375,
+      "end_to_end_p50_us": 868.375,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "delayed",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "delayed",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 30,
+      "runtime_ms": 4584.47,
+      "submit_us": {
+        "p50": 45.125,
+        "p95": 139.209,
+        "p99": 139.917,
+        "max": 6748.667
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 163462.167,
+      "end_to_end_p50_us": 163789.958,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "missing",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "missing",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.202,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "future",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "future",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.209,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "nonmonotonic",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "nonmonotonic",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 245.4,
+      "submit_us": {
+        "p50": 11.292,
+        "p95": 62.0,
+        "p99": 63.25,
+        "max": 561.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 381.625,
+      "end_to_end_p50_us": 736.125,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-before",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-before",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.148,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-after",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-after",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 4.403,
+      "submit_us": {
+        "p50": 651.084,
+        "p95": 651.084,
+        "p99": 651.084,
+        "max": 651.084
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2396.0,
+      "end_to_end_p50_us": 4245.083,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-delay",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-delay",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 850.153,
+      "submit_us": {
+        "p50": 36.542,
+        "p95": 94.416,
+        "p99": 107.833,
+        "max": 551.541
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 574.333,
+      "end_to_end_p50_us": 30597.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "multi-queue",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "multi-queue",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 244.067,
+      "submit_us": {
+        "p50": 24.25,
+        "p95": 81.209,
+        "p99": 113.291,
+        "max": 643.5
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 573.792,
+      "end_to_end_p50_us": 1013.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "broken-queue",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "broken-queue",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 247.531,
+      "submit_us": {
+        "p50": 67.458,
+        "p95": 122.5,
+        "p99": 125.166,
+        "max": 1074.708
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 227.209,
+      "end_to_end_p50_us": 845.75,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "reuse",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "reuse",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 246.02,
+      "submit_us": {
+        "p50": 29.125,
+        "p95": 93.375,
+        "p99": 125.209,
+        "max": 956.208
+      },
+      "no_wait_p50_us": 6.042,
+      "empty_wait_p50_us": 6.416,
+      "ready_p50_us": 716.875,
+      "end_to_end_p50_us": 1400.458,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "idle",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "idle",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 511.912,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "cancel-callback",
+    "repeat": 0,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "cancel-callback",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 167.713,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "normal",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "normal",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 244.331,
+      "submit_us": {
+        "p50": 14.125,
+        "p95": 45.666,
+        "p99": 82.125,
+        "max": 6236.959
+      },
+      "no_wait_p50_us": 3.875,
+      "empty_wait_p50_us": 3.834,
+      "ready_p50_us": 533.875,
+      "end_to_end_p50_us": 892.459,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "delayed",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "delayed",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 30,
+      "runtime_ms": 4804.161,
+      "submit_us": {
+        "p50": 46.709,
+        "p95": 140.417,
+        "p99": 222.583,
+        "max": 802.667
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 165404.0,
+      "end_to_end_p50_us": 165868.333,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "missing",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "missing",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.259,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "future",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "future",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.146,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "nonmonotonic",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "nonmonotonic",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 244.947,
+      "submit_us": {
+        "p50": 21.375,
+        "p95": 117.875,
+        "p99": 121.125,
+        "max": 660.666
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 563.292,
+      "end_to_end_p50_us": 911.708,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-before",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-before",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 1,
+      "missed_deadlines": 1,
+      "runtime_ms": 500.198,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "exit-after",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "exit-after",
+      "status": "PASS",
+      "consumed": 1,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 4.127,
+      "submit_us": {
+        "p50": 590.625,
+        "p95": 590.625,
+        "p99": 590.625,
+        "max": 590.625
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 2217.833,
+      "end_to_end_p50_us": 3972.125,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "consumer-delay",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "consumer-delay",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 826.33,
+      "submit_us": {
+        "p50": 57.667,
+        "p95": 182.708,
+        "p99": 196.542,
+        "max": 590.208
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 634.584,
+      "end_to_end_p50_us": 27246.708,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "multi-queue",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "multi-queue",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 246.095,
+      "submit_us": {
+        "p50": 44.791,
+        "p95": 122.25,
+        "p99": 127.333,
+        "max": 806.208
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 606.709,
+      "end_to_end_p50_us": 1127.917,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "broken-queue",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "broken-queue",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 243.274,
+      "submit_us": {
+        "p50": 18.666,
+        "p95": 82.042,
+        "p99": 112.833,
+        "max": 642.458
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 220.417,
+      "end_to_end_p50_us": 598.875,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "reuse",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "reuse",
+      "status": "PASS",
+      "consumed": 30,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 246.161,
+      "submit_us": {
+        "p50": 20.208,
+        "p95": 61.541,
+        "p99": 87.416,
+        "max": 627.5
+      },
+      "no_wait_p50_us": 4.292,
+      "empty_wait_p50_us": 4.5,
+      "ready_p50_us": 540.083,
+      "end_to_end_p50_us": 873.208,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "idle",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "idle",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 0,
+      "missed_deadlines": 0,
+      "runtime_ms": 520.129,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  },
+  {
+    "scenario": "cancel-callback",
+    "repeat": 1,
+    "exit": 0,
+    "result": {
+      "event": "result",
+      "scenario": "cancel-callback",
+      "status": "PASS",
+      "consumed": 0,
+      "refused": 0,
+      "missed_deadlines": 1,
+      "runtime_ms": 168.234,
+      "submit_us": {
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "no_wait_p50_us": 0.0,
+      "empty_wait_p50_us": 0.0,
+      "ready_p50_us": 0.0,
+      "end_to_end_p50_us": 0.0,
+      "thermal_end": 0
+    },
+    "status": "PASS"
+  }
+]
