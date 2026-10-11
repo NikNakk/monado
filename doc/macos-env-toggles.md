@@ -1033,6 +1033,34 @@ an almost vertical gaze and driver-provided STAGE are refused explicitly;
 release before retrying. Apps receive the existing STAGE/LOCAL_FLOOR change
 notifications. Short presses continue to reach apps. See the
 [implementation and hardware gate](macos-floor-calibration.md#runtime-stage-recenter-gesture-2026-10-09).
+
+
+## Opt-in three-image service Metal compatibility (2026-10-10)
+
+`XRT_MACOS_METAL_THREE_IMAGE_SWAPCHAINS=1` is read once in the **client**
+process. Dynamic service-owned Metal swapchains request exactly three images
+and carry an internal creation flag through IPC. The receiving macOS
+multi-compositor verifies the count before enabling latest-completed scheduling
+for that session. Static images remain single; ordinary clients retain their
+existing allocation and scheduling. No OpenXR extension or public create flag
+is advertised. Client-hosted Metal allocation does not use this toggle.
+
+In compatibility mode, a newly producer-GPU-complete frame supersedes the
+previous scheduled frame immediately, and is eligible for delivery on the next
+compositor tick even if its application display timestamp is in the future.
+The delivered source remains available for reprojection until replaced.
+Pending native renderer claims and service-GPU timeline completion waits remain
+active before images become writable. The changed scheduling is experimental
+and requires hardware validation; it can change which ready frames are shown.
+
+The Wine/OpenVR launcher exposes `MWXR_STEAMVR_THREE_IMAGES=1` (default `0`),
+includes it in Steam's environment restart detection, and maps it to this
+client toggle. It applies to Metal clients inheriting that Steam environment,
+including applications launched by Steam. No LaunchAgent environment edit is
+needed. `MWXR_STEAMVR_ZERO_COPY=0|1` independently updates the driver's persistent
+zeroCopy setting; omission preserves the existing setting. Zero-copy still
+requires compatible format, export support, sample count, and compositor-owned
+resolve textures. A setting alone does not prove that zero-copy was used.
 ### Native GPU readiness, allocation and teardown limits — 2026-10-11
 
 | Environment variable | Default | Valid values | Purpose |

@@ -573,6 +573,12 @@ enum xrt_swapchain_create_flags
 	 * both formats in the format list.
 	 */
 	XRT_SWAPCHAIN_CREATE_SAMPLE_AS_SRGB = (1u << 2u),
+	/*!
+	 * Private macOS service-Metal compatibility request: exactly three dynamic
+	 * images, with latest-completed scheduling for this client session.
+	 * Not an OpenXR create flag or an advertised extension.
+	 */
+	XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES = (1u << 3u),
 };
 
 /*!

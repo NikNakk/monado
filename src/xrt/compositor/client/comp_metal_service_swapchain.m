@@ -18,6 +18,7 @@
 #include "client/ipc_client.h"
 #include "shared/ipc_metal_xpc.h"
 #include "util/u_logging.h"
+#include "util/u_debug.h"
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -52,6 +53,8 @@ struct metal_service_swapchain
 	// references alive for exactly the lifetime of the exposed MTLTextures.
 	IOSurfaceRef iosurfaces[XRT_MAX_SWAPCHAIN_IMAGES];
 };
+
+DEBUG_GET_ONCE_BOOL_OPTION(metal_three_images, "XRT_MACOS_METAL_THREE_IMAGE_SWAPCHAINS", false)
 
 static pthread_mutex_t g_contexts_mutex = PTHREAD_MUTEX_INITIALIZER;
 static struct metal_service_compositor_link *g_contexts = NULL;
@@ -501,6 +504,13 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	struct xrt_swapchain_create_info native_info = *info;
 	native_info.format = vk_format;
 	native_info.bits |= xsccp.extra_bits;
+	bool three_images = (info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) == 0 &&
+	                    debug_get_bool_option_metal_three_images();
+	if (three_images) {
+		xsccp.image_count = 3;
+		native_info.create |= XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES;
+		U_LOG_I("Metal service three-image compatibility requested: %ux%u", info->width, info->height);
+	}
 
 	/*
 	 * Prefer a client-owned IOSurface for simple 2D BGRA images. The dedicated
@@ -528,7 +538,7 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	 * authoritative for the matching TLS request, so all four textures become
 	 * real compositor VkImages rather than falling back to the ordinary count.
 	 */
-	if ((info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) == 0 && xsccp.image_count < 4) {
+	if (!three_images && (info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) == 0 && xsccp.image_count < 4) {
 		uint32_t original_image_count = xsccp.image_count;
 		xsccp.image_count = 4;
 		U_LOG_D("Metal service shared-handle swapchain image depth increased from %u to %u",
