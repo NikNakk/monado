@@ -954,6 +954,7 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 			producer_ready = false;
 			break;
 		}
+		reuse_log("producer ready wait", image->tracker->xsc, image->image_index, value, 0);
 	}
 	if (!producer_ready) {
 		submit_rollback_locked(&g_renderer.submit);
