@@ -1075,6 +1075,35 @@ needed. `MWXR_STEAMVR_ZERO_COPY=0|1` independently updates the driver's persiste
 zeroCopy setting; omission preserves the existing setting. Zero-copy still
 requires compatible format, export support, sample count, and compositor-owned
 resolve textures. A setting alone does not prove that zero-copy was used.
+
+### Native client GPU hung threshold
+
+`XRT_MACOS_CLIENT_GPU_HUNG_MS` sets the macOS multi-compositor readiness worker
+threshold from submission of an outstanding obligation. Default: 500 ms; valid
+range: 1–10000 ms. Invalid values use the default. Inactivity without an obligation
+does not trigger this threshold. A timeout fails the session and does not authorize
+resource destruction. See [the first-run checkpoint](macos-gpu-sync-first-run.md).
+
+### Headset-free GPU service follow-up (2026-10-11)
+
+`XRT_COMPOSITOR_FORCE_DEBUG_IMAGE=1` selects the existing offscreen target.
+The isolated simulated-HMD runner now exercises real native Metal OpenXR and
+Vulkan rendering, timeout/kill recovery, concurrent healthy frames and retained
+quarantine. See [the follow-up](macos-gpu-sync-service-tests.md) for commands,
+A–B–B–A measurements and remaining teardown, budget and timing limits.
+
+The runner's explicit `--headset` mode instead sets `SIMULATED_ENABLE=0`,
+`XRT_COMPOSITOR_FORCE_DEBUG_IMAGE=0`, `XRT_MACOS_PREVENT_DISPLAY_SLEEP=1` and
+`PSVR2_CAMERA_STREAMS=0`, retaining `XRT_MACOS_CLIENT_COMPOSITOR=0`. It requires
+exclusive headset USB ownership. Defaults and CTests remain headset-free. See
+[the hardware follow-up](macos-gpu-sync-service-tests.md#ps-vr2-hardware-follow-up--2026-10-11).
+
+Long manual measurements can pass `--client-timeout <seconds>` to the service
+runner (default 30, range 1–300); the native service test accepts an optional
+third positional deadline argument (default 20, range 1–300). These are test
+command arguments and do not alter runtime pacing or the default CTest suites.
+See [the matched headset comparison](macos-gpu-sync-headset-comparison.md).
+
 ### Native GPU readiness, allocation and teardown limits — 2026-10-11
 
 | Environment variable | Default | Valid values | Purpose |

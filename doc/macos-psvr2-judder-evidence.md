@@ -512,3 +512,13 @@ measured producer waits do not explain most of the gap. Compositor mutex
 timeouts persist. The 5879-present run has no visual observation or physical
 display timing claim; investigate Home/OpenVR work/waits next. See
 [the test](macos-psvr2-timing-diagnostics.md#requested-headset-test-of-dxgi-ownership-counters--2026-10-11-0103).
+
+### Matched native GPU synchronization presentation comparison — 2026-10-11
+
+Four 7,200-frame PS VR2 A–B–B–A runs with diagnostic readbacks/per-image logging
+disabled show similar ordinary cadence (~119.5 Hz) and slightly lower median
+frame-to-display latency with the fixes. Rare gaps were slightly worse in the
+modified samples: 39 versus 33 long intervals, maximum 33 ms versus 25 ms.
+Background activity varied; no causal or strict tail non-regression conclusion
+is established. Current sources/build and the installed service were restored.
+See [the matched hardware comparison](macos-gpu-sync-headset-comparison.md).
