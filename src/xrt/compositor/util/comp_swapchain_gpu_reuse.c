@@ -392,6 +392,12 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 		return XRT_ERROR_INVALID_ARGUMENT;
 	}
 
+#ifdef XRT_OS_OSX
+	// An unlimited client timeout must not pin an IPC worker indefinitely.
+	// Timeout preserves ownership; it never authorizes consumer completion.
+	if (timeout_ns > 500000000LL) timeout_ns = 500000000LL;
+#endif
+
 	int64_t start_ns = os_monotonic_get_ns();
 
 	for (;;) {
