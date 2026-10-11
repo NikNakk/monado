@@ -522,8 +522,11 @@ struct ipc_server
 	//! Disable listening on stdin for server stop.
 	bool no_stdin;
 
-	//! Optional automatic floor calibration, see XRT_FLOOR_EYE_HEIGHT_M.
+	//! Automatic floor calibration and optional Sense STAGE recenter polling.
 	struct ipc_server_floor_calibration *floor_calibration;
+
+	//! Serialize service input polling with IPC input snapshots.
+	struct os_mutex input_lock;
 
 #ifdef __APPLE__
 	/*!
@@ -664,7 +667,8 @@ ipc_server_client_destroy_session_and_compositor(volatile struct ipc_client_stat
 
 /*!
  * Start the optional automatic floor calibration once the system exists. Sets
- * the managed STAGE floor from XRT_FLOOR_EYE_HEIGHT_M and the head pose.
+ * the managed STAGE floor from XRT_FLOOR_EYE_HEIGHT_M and the head pose, and
+ * polls the optional XRT_PSSENSE_STAGE_RECENTER gesture after calibration.
  */
 void
 ipc_server_floor_calibration_start(struct ipc_server *s);

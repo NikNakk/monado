@@ -173,12 +173,69 @@ u_floor_calibration_poll(struct u_floor_calibration *fc,
 	}
 
 	if (fc->align) {
-		U_LOG_I("Floor calibration: STAGE floor set to y %.3f m, %.2f m below the steady head, centred at "
-		        "x %.3f z %.3f and facing the head (yaw %.1f deg).",
-		        floor_y, fc->eye_height_m, fc->head_x, fc->head_z, fc->head_yaw * 180.0f / (float)M_PI);
+		U_LOG_I(
+		    "Floor calibration: STAGE floor set to y %.3f m, %.2f m below the steady head, centred at "
+		    "x %.3f z %.3f and facing the head (yaw %.1f deg).",
+		    floor_y, fc->eye_height_m, fc->head_x, fc->head_z, fc->head_yaw * 180.0f / (float)M_PI);
 	} else {
 		U_LOG_I("Floor calibration: STAGE floor set to y %.3f m, %.2f m below the steady head.", floor_y,
 		        fc->eye_height_m);
 	}
 	return true;
+}
+
+
+bool
+u_stage_recenter_hold_update(struct u_stage_recenter_hold *hold, bool pressed, int64_t now_ns, int64_t duration_ns)
+{
+	if (!pressed) {
+		memset(hold, 0, sizeof(*hold));
+		return false;
+	}
+	if (!hold->pressed) {
+		hold->pressed = true;
+		hold->since_ns = now_ns;
+	}
+	if (hold->fired || now_ns - hold->since_ns < duration_ns) {
+		return false;
+	}
+	hold->fired = true;
+	return true;
+}
+
+xrt_result_t
+u_stage_recenter(struct xrt_space_overseer *xso, struct xrt_device *head, int64_t now_ns)
+{
+	struct xrt_pose identity = XRT_POSE_IDENTITY;
+	struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
+	if (xso->semantic.view == NULL || head == NULL) {
+		return XRT_ERROR_UNSUPPORTED_SPACE_TYPE;
+	}
+	xrt_result_t ret = xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, now_ns,
+	                                                   xso->semantic.view, &identity, &relation);
+	const enum xrt_space_relation_flags required =
+	    XRT_SPACE_RELATION_POSITION_VALID_BIT | XRT_SPACE_RELATION_ORIENTATION_VALID_BIT |
+	    XRT_SPACE_RELATION_POSITION_TRACKED_BIT | XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT;
+	if (ret != XRT_SUCCESS) {
+		return ret;
+	}
+	if ((relation.relation_flags & required) != required) {
+		return XRT_ERROR_POSE_NOT_ACTIVE;
+	}
+	struct xrt_vec3 forward = {0, 0, -1}, facing;
+	math_quat_rotate_vec3(&relation.pose.orientation, &forward, &facing);
+	if (!isfinite(facing.x) || !isfinite(facing.z) || hypotf(facing.x, facing.z) < 0.1f ||
+	    !isfinite(relation.pose.position.x) || !isfinite(relation.pose.position.z)) {
+		return XRT_ERROR_POSE_NOT_ACTIVE;
+	}
+	struct xrt_pose stage;
+	ret = xrt_space_overseer_get_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage);
+	if (ret != XRT_SUCCESS) {
+		return ret;
+	}
+	stage.position.x = relation.pose.position.x;
+	stage.position.z = relation.pose.position.z;
+	struct xrt_vec3 up = {0, 1, 0};
+	math_quat_from_angle_vector(atan2f(-facing.x, -facing.z), &up, &stage.orientation);
+	return xrt_space_overseer_set_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage);
 }

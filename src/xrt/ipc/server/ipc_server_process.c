@@ -221,6 +221,7 @@ teardown_all(struct ipc_server *s)
 	u_process_destroy(s->process);
 
 	// Destroyed last.
+	os_mutex_destroy(&s->input_lock);
 	os_mutex_destroy(&s->global_state.lock);
 }
 
@@ -378,6 +379,12 @@ init_all(struct ipc_server *s,
 	if (ret < 0) {
 		IPC_ERROR(s, "Global state lock mutex failed to init!");
 		// Do not call teardown_all here, os_mutex_destroy will assert.
+		return XRT_ERROR_SYNC_PRIMITIVE_CREATION_FAILED;
+	}
+
+	ret = os_mutex_init(&s->input_lock);
+	if (ret < 0) {
+		os_mutex_destroy(&s->global_state.lock);
 		return XRT_ERROR_SYNC_PRIMITIVE_CREATION_FAILED;
 	}
 
