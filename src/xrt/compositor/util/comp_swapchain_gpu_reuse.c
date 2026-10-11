@@ -228,17 +228,18 @@ comp_swapchain_gpu_reuse_note_device(struct vk_bundle *vk)
 }
 
 /*!
- * Bytes per texel, or per block for compressed formats over 4x4 texels (the
- * estimate divides by 16). Unknown formats use 16, an upper bound for every
+ * Bytes per block, with 1x1 blocks for uncompressed formats.
+ * Unknown formats use 16 bytes per texel, an upper bound for every
  * uncompressed format an application can request.
  */
 static uint64_t
-format_bytes_per_texel_x16(VkFormat format)
+format_bytes_per_block(VkFormat format, uint32_t *block_extent)
 {
+	*block_extent = 1;
 	switch (format) {
 	case VK_FORMAT_R8_UNORM:
 	case VK_FORMAT_R8_SRGB:
-	case VK_FORMAT_S8_UINT: return 16 * 1;
+	case VK_FORMAT_S8_UINT: return 1;
 	case VK_FORMAT_R8G8_UNORM:
 	case VK_FORMAT_R8G8_SRGB:
 	case VK_FORMAT_R16_UNORM:
@@ -246,7 +247,7 @@ format_bytes_per_texel_x16(VkFormat format)
 	case VK_FORMAT_R5G6B5_UNORM_PACK16:
 	case VK_FORMAT_B5G6R5_UNORM_PACK16:
 	case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
-	case VK_FORMAT_D16_UNORM: return 16 * 2;
+	case VK_FORMAT_D16_UNORM: return 2;
 	case VK_FORMAT_R8G8B8A8_UNORM:
 	case VK_FORMAT_R8G8B8A8_SNORM:
 	case VK_FORMAT_R8G8B8A8_SRGB:
@@ -261,20 +262,22 @@ format_bytes_per_texel_x16(VkFormat format)
 	case VK_FORMAT_R32_SFLOAT:
 	case VK_FORMAT_X8_D24_UNORM_PACK32:
 	case VK_FORMAT_D24_UNORM_S8_UINT:
-	case VK_FORMAT_D32_SFLOAT: return 16 * 4;
+	case VK_FORMAT_D32_SFLOAT: return 4;
 	case VK_FORMAT_R16G16B16A16_UNORM:
 	case VK_FORMAT_R16G16B16A16_SNORM:
 	case VK_FORMAT_R16G16B16A16_SFLOAT:
 	case VK_FORMAT_R32G32_SFLOAT:
-	case VK_FORMAT_D32_SFLOAT_S8_UINT: return 16 * 8; // Metal pads Depth32Float_Stencil8 to 8 bytes.
-	case VK_FORMAT_R32G32B32A32_SFLOAT: return 16 * 16;
+	case VK_FORMAT_D32_SFLOAT_S8_UINT: return 8; // Metal pads Depth32Float_Stencil8 to 8 bytes.
+	case VK_FORMAT_R32G32B32A32_SFLOAT: return 16;
+	case VK_FORMAT_BC1_RGB_UNORM_BLOCK:
+	case VK_FORMAT_BC1_RGB_SRGB_BLOCK:
 	case VK_FORMAT_BC1_RGBA_UNORM_BLOCK:
-	case VK_FORMAT_BC1_RGBA_SRGB_BLOCK: return 8;
+	case VK_FORMAT_BC1_RGBA_SRGB_BLOCK: *block_extent = 4; return 8;
 	case VK_FORMAT_BC3_UNORM_BLOCK:
 	case VK_FORMAT_BC3_SRGB_BLOCK:
 	case VK_FORMAT_BC7_UNORM_BLOCK:
-	case VK_FORMAT_BC7_SRGB_BLOCK: return 16;
-	default: return 16 * 16;
+	case VK_FORMAT_BC7_SRGB_BLOCK: *block_extent = 4; return 16;
+	default: return 16;
 	}
 }
 
@@ -296,18 +299,40 @@ comp_gpu_client_budget_reserve(struct comp_gpu_client_budget *budget,
 {
 	if (budget == NULL || g_reservation.budget != NULL || image_count == 0 ||
 	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) return XRT_ERROR_INVALID_ARGUMENT;
-	// Sixteenths of a byte per texel, so compressed blocks stay exact; a full
-	// mip chain adds at most a third, rounded up here to a half.
-	uint64_t bytes = format_bytes_per_texel_x16((VkFormat)info->format);
-	uint64_t factors[] = {info->width, info->height, info->array_size, info->face_count,
-	                      info->sample_count, image_count};
+	if (info->width == 0 || info->height == 0 || info->mip_count == 0)
+		return XRT_ERROR_ALLOCATION;
+	uint32_t max_mips = 0;
+	for (uint32_t extent = info->width > info->height ? info->width : info->height; extent != 0; extent >>= 1) {
+		max_mips++;
+	}
+	if (info->mip_count > max_mips)
+		return XRT_ERROR_ALLOCATION;
+
+	uint32_t block_extent;
+	uint64_t block_bytes = format_bytes_per_block((VkFormat)info->format, &block_extent);
+	uint64_t bytes = 0;
+	uint32_t width = info->width;
+	uint32_t height = info->height;
+	for (uint32_t mip = 0; mip < info->mip_count; mip++) {
+		// Round each dimension independently, including the sub-block mip tail.
+		uint64_t blocks_wide = ((uint64_t)width + block_extent - 1) / block_extent;
+		uint64_t blocks_high = ((uint64_t)height + block_extent - 1) / block_extent;
+		if (blocks_wide > GPU_REUSE_MAX_BYTES / block_bytes)
+			return XRT_ERROR_ALLOCATION;
+		uint64_t level_bytes = blocks_wide * block_bytes;
+		if (blocks_high > GPU_REUSE_MAX_BYTES / level_bytes)
+			return XRT_ERROR_ALLOCATION;
+		level_bytes *= blocks_high;
+		if (level_bytes > GPU_REUSE_MAX_BYTES - bytes)
+			return XRT_ERROR_ALLOCATION;
+		bytes += level_bytes;
+		width = width > 1 ? width / 2 : 1;
+		height = height > 1 ? height / 2 : 1;
+	}
+	uint64_t factors[] = {info->array_size, info->face_count, info->sample_count, image_count};
 	for (uint32_t i = 0; i < ARRAY_SIZE(factors); i++) {
 		if (factors[i] == 0 || factors[i] > GPU_REUSE_MAX_BYTES / bytes) return XRT_ERROR_ALLOCATION;
 		bytes *= factors[i];
-	}
-	bytes = (bytes + 15) / 16;
-	if (info->mip_count > 1) {
-		bytes += bytes / 2;
 	}
 	// Cover row/page alignment. Supplied transport sizes are an additional lower bound.
 	uint64_t overhead = (uint64_t)image_count * 65536;

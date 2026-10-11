@@ -120,3 +120,6 @@ result/
 
 # Mac
 .DS_Store
+
+# Raw local test captures; keep summaries in doc/
+/doc/results/
