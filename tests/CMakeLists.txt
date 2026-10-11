@@ -297,20 +297,42 @@ if(APPLE)
 	add_executable(tests_macos_service_gpu_sync tests_macos_service_gpu_sync.mm)
 	target_compile_features(tests_macos_service_gpu_sync PRIVATE cxx_std_17)
 	target_link_libraries(tests_macos_service_gpu_sync PRIVATE xrt-interfaces xrt-external-openxr "-framework Foundation" "-framework Metal")
-	if(TARGET monado-service)
-        foreach(fault missing disconnect budget)
-            if(fault STREQUAL "budget")
-                set(service_suite --budget-suite)
-            else()
-                set(service_suite --suite --fault ${fault})
-            endif()
-            add_test(NAME tests_macos_service_gpu_sync_${fault}
-                COMMAND ${PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/macos/run-gpu-sync-service.py
-                    --build ${CMAKE_BINARY_DIR} --output ${CMAKE_CURRENT_BINARY_DIR}/gpu-service-results
-                    --unique-output ${service_suite})
-            set_tests_properties(tests_macos_service_gpu_sync_${fault} PROPERTIES TIMEOUT 60 LABELS "macos;gpu;service" RUN_SERIAL TRUE)
-        endforeach()
-    endif()
+	# These start an isolated monado-service through launchd in the user's GUI
+	# domain and render through Metal/MoltenVK, so they need a logged-in host
+	# with a GPU. Their verification reads the timing-diagnostics CSV traces.
+	option(XRT_MACOS_SERVICE_GPU_TESTS
+	       "Register the launchd-hosted macOS GPU service tests (needs a GUI session and GPU)" OFF
+		)
+	if(XRT_MACOS_SERVICE_GPU_TESTS AND NOT XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+		message(
+			WARNING
+				"XRT_MACOS_SERVICE_GPU_TESTS needs XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS; not registering them"
+			)
+	endif()
+	if(XRT_MACOS_SERVICE_GPU_TESTS
+	   AND XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	   AND TARGET monado-service
+		)
+		foreach(fault missing disconnect budget)
+			if(fault STREQUAL "budget")
+				set(service_suite --budget-suite)
+			else()
+				set(service_suite --suite --fault ${fault})
+			endif()
+			add_test(
+				NAME tests_macos_service_gpu_sync_${fault}
+				COMMAND
+					${PYTHON_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/macos/run-gpu-sync-service.py
+					--build ${CMAKE_BINARY_DIR} --output
+					${CMAKE_CURRENT_BINARY_DIR}/gpu-service-results --unique-output
+					${service_suite}
+				)
+			set_tests_properties(
+				tests_macos_service_gpu_sync_${fault} PROPERTIES TIMEOUT 60 LABELS
+										 "macos;gpu;service" RUN_SERIAL TRUE
+				)
+		endforeach()
+	endif()
 	add_executable(tests_macos_openxr_loaderless_probe tests_macos_openxr_loaderless_probe.c)
 	target_link_libraries(
 		tests_macos_openxr_loaderless_probe PRIVATE xrt-interfaces xrt-external-openxr
