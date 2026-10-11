@@ -17,6 +17,16 @@ extern "C" {
 
 #ifdef XRT_OS_OSX
 
+struct vk_bundle;
+void
+comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown);
+
+xrt_result_t
+comp_swapchain_gpu_reuse_set_producer(struct xrt_swapchain *xsc,
+                                      uint32_t index,
+                                      struct xrt_compositor_semaphore *sem,
+                                      uint64_t value);
+
 /*!
  * Enable fine-grained GPU reuse tracking on one native compositor swapchain.
  * Used by local and service-side Metal shared-texture swapchains, where client

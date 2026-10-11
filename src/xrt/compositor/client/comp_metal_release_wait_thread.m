@@ -319,7 +319,7 @@ wrapped_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_
 	// Metal has no xrt_graphics_sync_handle here: its synchronization is the
 	// shared-event timeline. Hand that timeline to Monado's normal multi-client
 	// frame-readiness path instead of blocking the application thread or the
-	// comp_main Vulkan queue.
+	// comp_main Vulkan queue until readiness has been observed.
 	u_graphics_sync_unref(&sync_handle);
 	xrt_result_t xret = original_layer_commit_with_semaphore(xc, c->xcsem, wait_value);
 	if (xret != XRT_SUCCESS) {
@@ -348,7 +348,7 @@ wrapped_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handle_t sync_
 	if ((submit_count % METAL_WAIT_THREAD_LOG_WINDOW) == 0) {
 		U_LOG_I(
 		    "Metal app-release Stage 4: wait-thread handoffs=%llu latest_value=%llu observed_event=%llu; app "
-		    "CPU barrier and comp_main queue wait both bypassed",
+		    "CPU barrier bypassed; ready shared-event dependency retained at comp_main submission",
 		    (unsigned long long)submit_count, (unsigned long long)wait_value, (unsigned long long)observed);
 	}
 

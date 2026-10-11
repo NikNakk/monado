@@ -62,6 +62,10 @@ comp_semaphore(struct xrt_compositor_semaphore *xcsem)
 }
 
 
+/* True only for this module's native Vulkan-backed semaphore implementation. */
+bool
+comp_semaphore_matches_vk(struct xrt_compositor_semaphore *sem, struct vk_bundle *vk);
+
 /*
  *
  * 'Exported' functions.
