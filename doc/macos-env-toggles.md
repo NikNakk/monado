@@ -1018,6 +1018,20 @@ PS VR2 diagnostic/replay callers set it. Rift retains its original per-camera
 solver even when the process inherits this environment option.
 
 
+## CPU render-complete wait diagnostic (2026-10-11)
+
+`XRT_MACOS_FORCE_CPU_RENDER_WAIT=1` in the **service** skips exporting the
+compositor's render-complete timeline as an `MTLSharedEvent`. Presentation then
+uses the CPU Vulkan timeline wait before each Metal present, which also turns
+off drawable-slot mode. Default off. It is a diagnostic for separating
+shared-event presentation problems from rendering ones, not a tuning option.
+No hardware result with it is recorded yet; remove it if it settles nothing.
+
+Independently of this toggle, the CPU render-complete waits (present and
+dropped-frame retirement) now report every second while a value is
+outstanding, with the awaited and current timeline values, instead of
+blocking silently.
+
 
 ## Runtime stage recenter gesture (2026-10-09)
 
