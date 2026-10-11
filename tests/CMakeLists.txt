@@ -259,7 +259,7 @@ endif()
 
 if(APPLE)
 	add_executable(tests_macos_gpu_policy tests_macos_gpu_policy.cpp)
-	target_link_libraries(tests_macos_gpu_policy PRIVATE comp_multi aux_util xrt-external-catch2)
+	target_link_libraries(tests_macos_gpu_policy PRIVATE comp_multi comp_util aux_util aux_vk xrt-external-catch2)
 	add_test(NAME tests_macos_gpu_policy COMMAND tests_macos_gpu_policy)
 	set_target_properties(tests_macos_gpu_policy PROPERTIES FOLDER monado_tests)
 	add_executable(tests_macos_gpu_reuse tests_macos_gpu_reuse.cpp)
