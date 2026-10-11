@@ -85,6 +85,8 @@ def main():
                 if time.monotonic() >= deadline:
                     raise RuntimeError('Service socket did not become ready; inspect service.log')
                 time.sleep(.05)
+            if args.headset and 'Debug image target used' in (out/'service.log').read_text():
+                raise RuntimeError('Requested headset is unavailable; offscreen fallback cannot validate presentation')
             if args.budget_suite:
                 return run_budget_suite(build, out, env)
             if args.suite:
