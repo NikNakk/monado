@@ -49,6 +49,7 @@
 #endif
 
 #ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_NUM_OPTION(client_gpu_margin_us, "XRT_MACOS_FRAME_READINESS_MARGIN_US", 6000)
 DEBUG_GET_ONCE_NUM_OPTION(client_gpu_hung_ms, "XRT_MACOS_CLIENT_GPU_HUNG_MS", 500)
 static int64_t
 client_gpu_hung_ns(void)
@@ -395,7 +396,19 @@ wait_for_scheduled_free(struct multi_compositor *mc)
 
 	// Block here if the scheduled slot is not clear.
 	while (v_mc->scheduled.active) {
+#ifdef XRT_OS_OSX
+		if (!os_thread_helper_is_running(&mc->wait_thread.oth)) {
+			os_mutex_unlock(&mc->slot_lock);
+			return;
+		}
+#endif
 		int64_t now_ns = os_monotonic_get_ns();
+#ifdef XRT_OS_OSX
+		if (now_ns - timing_start_ns >= client_gpu_hung_ns()) {
+			U_LOG_W("Completed-frame scheduling expired; replacing older completed frame");
+			break; // Completed work is not a hung producer; keep delivery/ownership safe.
+		}
+#endif
 
 		// This frame is for the next frame, drop the old one no matter what.
 		if (time_is_within_half_ms(mc->progress.data.display_time_ns, mc->slot_next_frame_display)) {
@@ -553,6 +566,9 @@ run_func(void *ptr)
 
 		os_mutex_lock(&mc->msc->list_and_timing_lock);
 		u_pa_mark_gpu_done(mc->upa, frame_id, now_ns);
+#ifdef XRT_OS_OSX
+		mc->progress.gpu_ready_ns = now_ns;
+#endif
 		os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
 		// Wait for the delivery slot.
@@ -683,7 +699,18 @@ multi_compositor_create_swapchain(struct xrt_compositor *xc,
 
 	struct multi_compositor *mc = multi_compositor(xc);
 
-	return xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
+#ifdef XRT_OS_OSX
+	struct xrt_swapchain_create_properties properties = {0};
+	xrt_result_t result = xrt_comp_get_swapchain_create_properties(&mc->msc->xcn->base, info, &properties);
+	if (result != XRT_SUCCESS) return result;
+	result = comp_gpu_client_budget_reserve(mc->gpu_budget, info, properties.image_count, NULL);
+	if (result != XRT_SUCCESS) return result;
+	result = xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
+	comp_gpu_client_budget_finish();
+#else
+	xrt_result_t result = xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
+#endif
+	return result;
 }
 
 static xrt_result_t
@@ -697,7 +724,15 @@ multi_compositor_import_swapchain(struct xrt_compositor *xc,
 
 	struct multi_compositor *mc = multi_compositor(xc);
 
-	return xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
+#ifdef XRT_OS_OSX
+	xrt_result_t result = comp_gpu_client_budget_reserve(mc->gpu_budget, info, image_count, native_images);
+	if (result != XRT_SUCCESS) return result;
+	result = xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
+	comp_gpu_client_budget_finish();
+#else
+	xrt_result_t result = xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
+#endif
+	return result;
 }
 
 static xrt_result_t
@@ -1142,6 +1177,9 @@ multi_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_handl
 
 		os_mutex_lock(&mc->msc->list_and_timing_lock);
 		u_pa_mark_gpu_done(mc->upa, frame_id, now_ns);
+#ifdef XRT_OS_OSX
+		mc->progress.gpu_ready_ns = now_ns;
+#endif
 		os_mutex_unlock(&mc->msc->list_and_timing_lock);
 
 		wait_for_scheduled_free(mc);
@@ -1294,6 +1332,9 @@ multi_compositor_destroy(struct xrt_compositor *xc)
 	os_precise_sleeper_deinit(&mc->scheduled_sleeper);
 
 	os_mutex_destroy(&mc->slot_lock);
+#ifdef XRT_OS_OSX
+	comp_gpu_client_budget_destroy(&mc->gpu_budget);
+#endif
 
 	free(mc);
 }
@@ -1321,7 +1362,21 @@ multi_compositor_deliver_any_frames(struct multi_compositor *mc, int64_t display
 		return;
 	}
 
-	if (time_is_greater_then_or_within_half_ms(display_time_ns, mc->scheduled.data.display_time_ns)) {
+#ifdef XRT_OS_OSX
+	int64_t margin_us = debug_get_num_option_client_gpu_margin_us();
+	if (margin_us < 0 || margin_us > 100000) {
+		margin_us = 6000;
+	}
+	int64_t deadline_ns = display_time_ns - margin_us * U_TIME_1US_IN_NS;
+	if (mc->scheduled.gpu_ready_ns > deadline_ns) {
+		macos_client_gpu_trace_event("readiness_deferred", mc->scheduled.data.frame_id, 0,
+		                             mc->scheduled.gpu_ready_ns - deadline_ns);
+		os_mutex_unlock(&mc->slot_lock);
+		return; // Reproject delivered; retain scheduled ownership for a later tick.
+	}
+#endif
+	bool deliver = time_is_greater_then_or_within_half_ms(display_time_ns, mc->scheduled.data.display_time_ns);
+	if (deliver) {
 		slot_move_and_clear_locked(mc, &mc->delivered, &mc->scheduled);
 
 		int64_t frame_time_ns = mc->delivered.data.display_time_ns;
@@ -1354,6 +1409,14 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = U_TYPED_CALLOC(struct multi_compositor);
+	if (mc == NULL) return XRT_ERROR_ALLOCATION;
+#ifdef XRT_OS_OSX
+	mc->gpu_budget = comp_gpu_client_budget_create();
+	if (mc->gpu_budget == NULL) { free(mc); return XRT_ERROR_ALLOCATION; }
+	U_LOG_I("Client GPU policy: hung_ms=%lld readiness_margin_us=%ld",
+	        (long long)(client_gpu_hung_ns() / U_TIME_1MS_IN_NS),
+	        debug_get_num_option_client_gpu_margin_us());
+#endif
 
 	// Initialize state - base session is anything that's not an overlay
 	mc->state.is_base_session = !xsi->is_overlay;

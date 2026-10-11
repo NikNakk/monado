@@ -96,6 +96,10 @@ struct comp_swapchain
 	struct comp_swapchain_shared *cscs;
 
 	struct vk_image_collection vkic;
+#ifdef XRT_OS_OSX
+	//! All tracked producer and consumer GPU obligations completed before GC.
+	bool gpu_reuse_safe_destroy;
+#endif
 	struct comp_swapchain_image images[XRT_MAX_SWAPCHAIN_IMAGES];
 
 	/*!

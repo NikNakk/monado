@@ -1933,6 +1933,16 @@ comp_renderer_create(struct comp_compositor *c, VkExtent2D scratch_extent)
 	return r;
 }
 
+#ifdef XRT_OS_OSX
+bool
+comp_renderer_drain(struct comp_renderer *r, uint64_t timeout_ns)
+{
+	if (r == NULL || r->fenced_buffer < 0) return true;
+	struct vk_bundle *vk = &r->c->base.vk;
+	return vk->vkWaitForFences(vk->device, 1, &r->fences[r->fenced_buffer], VK_TRUE, timeout_ns) == VK_SUCCESS;
+}
+#endif
+
 void
 comp_renderer_destroy(struct comp_renderer **ptr_r)
 {

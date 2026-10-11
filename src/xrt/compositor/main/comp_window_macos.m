@@ -175,6 +175,7 @@ struct comp_window_macos
 	bool passthrough_sinks_attached;
 	id<MTLSharedEvent> render_complete_event;
 	atomic_bool image_in_flight[MACOS_TARGET_IMAGE_COUNT];
+	atomic_bool present_completion_failed;
 	dispatch_group_t present_command_group;
 	dispatch_queue_t present_worker_queue;
 	dispatch_group_t present_worker_group;
@@ -1838,7 +1839,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	uint64_t after_vk_wait_ns = os_monotonic_get_ns();
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(ct->c, "Vulkan render-complete wait before Metal presentation: %s", vk_result_string(ret));
-		macos_release_source_image(cwm, index);
+		atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
 		return ret;
 	}
 
@@ -2063,7 +2064,8 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				  completed_gpu_end_s, traced_shared_event_wait ? 1u : 0u);
 			  funlockfile(complete_trace);
 		  }
-		  macos_release_source_image(cwm, traced_index);
+		  if (status == MTLCommandBufferStatusCompleted) macos_release_source_image(cwm, traced_index);
+		  else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
 		  dispatch_group_leave(command_group);
 		}];
 		/* Passive observer of Metal scheduling. The timed-present convenience
@@ -2230,7 +2232,9 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 					    COMP_ERROR(cwm->base.base.c, "Metal retirement wait failed: %s",
 						       [[[completed_buffer error] localizedDescription] UTF8String]);
 				    }
-				    macos_release_source_image(cwm, retired_job.image_index);
+				    if ([completed_buffer status] == MTLCommandBufferStatusCompleted)
+				        macos_release_source_image(cwm, retired_job.image_index);
+				    else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
 				    dispatch_group_leave(cwm->present_command_group);
 				  }];
 				  [command_buffer commit];
@@ -2260,7 +2264,8 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 				  COMP_ERROR(ct->c, "Vulkan wait while retiring a dropped macOS present job: %s",
 					     vk_result_string(ret));
 			  }
-			  macos_release_source_image(cwm, retired_job.image_index);
+			  if (ret == VK_SUCCESS) macos_release_source_image(cwm, retired_job.image_index);
+			  else atomic_store_explicit(&cwm->present_completion_failed, true, memory_order_release);
 			  dispatch_group_leave(cwm->present_command_group);
 		  }
 	  }
@@ -2632,6 +2637,36 @@ comp_window_macos_destroy(struct comp_target *ct)
 	pthread_mutex_destroy(&cwm->passthrough_mutex);
 	pthread_mutex_destroy(&cwm->present_worker_mutex);
 	free(cwm);
+}
+
+bool
+comp_window_macos_prepare_destroy(struct comp_target *ct)
+{
+	if (ct == NULL || ct->destroy != comp_window_macos_destroy) return true;
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	atomic_store_explicit(&cwm->passthrough_shutdown, true, memory_order_release);
+	struct xrt_device *xdev = ct->c != NULL ? ct->c->xdev : NULL;
+	if (cwm->passthrough_sinks_attached && xdev != NULL && xdev->set_passthrough_sinks != NULL) {
+		(void)xdev->set_passthrough_sinks(xdev, NULL, NULL);
+		cwm->passthrough_sinks_attached = false;
+	}
+	macos_display_link_destroy(cwm);
+	pthread_mutex_lock(&cwm->present_worker_mutex);
+	cwm->present_worker_shutdown = true;
+	struct macos_present_job pending_job = cwm->pending_present_job;
+	bool had_pending_job = cwm->pending_present_job_valid;
+	cwm->pending_present_job_valid = false;
+	pthread_mutex_unlock(&cwm->present_worker_mutex);
+	if (had_pending_job) macos_retire_unpresented_job(cwm, &pending_job, "shutdown_drop", 0);
+
+	dispatch_group_t groups[] = {cwm->present_worker_group, cwm->present_command_group, cwm->trace_present_group};
+	// One shared finite deadline. Failed drain retains the entire target/device,
+	// including callback state, rather than freeing objects still used by Metal.
+	dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC);
+	for (uint32_t i = 0; i < ARRAY_SIZE(groups); i++) {
+		if (groups[i] != NULL && dispatch_group_wait(groups[i], deadline) != 0) return false;
+	}
+	return !atomic_load_explicit(&cwm->present_completion_failed, memory_order_acquire);
 }
 
 static struct comp_target *
