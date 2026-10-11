@@ -1904,3 +1904,51 @@ ms). So the trigger is in the SteamVR session's conditions, most likely
 Bluetooth load (audio streaming to paired Bluetooth headphones is a
 candidate), not the put-down or the rescans themselves. No display or system
 sleep occurred during that session (`caffeinate` held an assertion).
+
+### Hyperbolica sustained lock loss recurrence, 2026-10-09
+
+The user reports good initial locks followed by loss after a few minutes and
+failed recovery on the installed service `v25.1.0-2178-g805316beb`. They were
+not using Bluetooth headphones. Power-cycling brought the left back briefly;
+the right did not recover. The native service and Wine client version tags
+match, and there are no `src/` changes from the formerly used `d5eba0543` to
+`805316beb`. This is separate from the earlier rejected IPC connection.
+
+The live service log was snapshotted locally at
+`build/arm64/controller-evidence/20261009-hyperbolica-lock-loss/service-snapshot.log`.
+Times below are approximate seconds from the first logged controller clock
+sample, not wall-clock timestamps:
+
+- Right locks at 5.6 s; left quick-locks at 6.7 s.
+- Right loses lock at 187.4 s (`reason=dim`); left at 192.9 s
+  (`frames_since_lit=301`). Both clock holds release as intended.
+- Both disconnect at about 216 s; left reconnects immediately and right at
+  about 222 s. Left quick-locks at 229.5 s but loses lock again at 258.7 s.
+  Right's subsequent hinted scans repeatedly report `lit=0/8` on every camera.
+- The best raw `remote_ns - local_ns` sample in each five-second bin was stable
+  until about 170 s. Relative to the best sample in the first 30 s, it shifts
+  to approximately -18.0 ms (left) / -16.4 ms (right) in the 185–190 s bin,
+  and -27.5 / -26.0 ms by 205–210 s, before the power cycle.
+- Echoed host-timestamp RTT minima remain approximately 35 ms left / 94 ms
+  right across the onset; controller motion reports continue. Therefore the
+  simultaneous clock-sample shift alone does not establish Bluetooth latency
+  as its cause. In particular, headphones cannot explain this run.
+
+The signature resembles the prior sustained no-lit-sample failure, but the
+underlying shared timing or LED scheduling cause remains unresolved. Logs do
+not prove that the rings are physically off, rather than pulsing outside the
+camera exposure windows. `PSSENSE_LED_SOFT_RESET` and `PSSENSE_LED_SONY_FLAGS`
+remain off and unvalidated; neither was silently enabled or promoted to a
+default during this investigation. Reconnect alone did not resolve this run.
+
+**Fresh-service follow-up:** restarting Hyperbolica/Monado did not give the
+right an initial lock. The user confirms both controllers were left connected
+during this restart, so this was not a cold controller restart. The snapshot
+`fresh-service-connected-controllers.log` in the same evidence directory shows
+the left quick-locking (score 3.0), while the right never locks. All 3,263 logged
+right output writes succeed and input/RTT reports continue. Most right scan
+steps see no light; eight steps in one hinted scan see light on camera 3 only,
+with peak 1.0 below the minimum 2.0, followed by more empty scans. This does not
+establish a physically dark ring or a broken HID connection. A cold restart of
+both controllers with the service stopped, then an in-view startup, remains the
+next recovery check; its result is not yet known.

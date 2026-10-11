@@ -374,3 +374,24 @@ comment. Both are removed: native clients retain their live shared-memory
 mapping. The service-based `openxr_monado` target now builds as well. The
 contribution checker also required formatting two previously modified IPC
 files; that follow-up has no behavior or wire-format changes.
+
+
+## Post-reboot USB initialization failure (2026-10-11)
+
+The installed runtime/service `v25.1.0-2178-g805316beb` was discovered and
+launchd-activated after reboot. Chromium and PSVR2 OpenXR Test connected to
+the service, but `xrGetSystem` failed with `XRT_ERROR_DEVICE_CREATION_FAILED`.
+The service's first hardware-open attempt in each process reported
+`Failed to set USB status interface alt 1`; later attempts in that process
+reported `Failed to claim USB status interface`. The persistent LaunchAgent
+and Sense 6DoF/reconnect settings remained present. No competing Monado or GAV
+process was found during the follow-up inspection.
+
+This is a headset USB initialization failure, not evidence of missing runtime
+registration or an IPC version mismatch. The driver currently omits
+`libusb_close` during destruction because of the documented libusb workaround;
+an early alternate-setting failure therefore retains the claimed interface
+for the remaining service lifetime and can explain the subsequent claim errors.
+The initial USB error code is not logged, so its precise cause is unresolved.
+A full headset/adapter power and USB reconnect with VR clients closed is the
+next user hardware check; its result is pending.
