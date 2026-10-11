@@ -211,3 +211,70 @@ TEST_CASE("repeated failed teardown is bounded and completion restores allocatio
 	CHECK(destroyed == before + 257);
 	xrt_compositor_semaphore_reference(&sem, nullptr);
 }
+TEST_CASE("pre-import client budgets retain failed storage and recover only on completion")
+{
+	Device device;
+	auto *budget = comp_gpu_client_budget_create();
+	auto *producer = device.producer();
+	xrt_swapchain_create_info info{};
+	info.width = info.height = 64;
+	info.array_size = info.face_count = info.sample_count = info.mip_count = 1;
+	info.format = VK_FORMAT_B8G8R8A8_UNORM;
+	for (unsigned i = 0; i < 64; i++) {
+		REQUIRE(comp_gpu_client_budget_reserve(budget, &info, 1, nullptr) == XRT_SUCCESS);
+		auto *sc = device.swapchain();
+		comp_gpu_client_budget_finish();
+		auto *base = &sc->base.base;
+		REQUIRE(comp_swapchain_gpu_reuse_set_producer(base, 0, producer, 91) == XRT_SUCCESS);
+		xrt_swapchain_reference(&base, nullptr);
+	}
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 1, nullptr) == XRT_ERROR_ALLOCATION);
+	comp_gpu_client_budget_destroy(&budget); // Retained trackers keep the owner account alive.
+	auto *other = comp_gpu_client_budget_create();
+	REQUIRE(comp_gpu_client_budget_reserve(other, &info, 1, nullptr) == XRT_SUCCESS);
+	comp_gpu_client_budget_finish();
+	comp_gpu_client_budget_destroy(&other);
+	values[comp_semaphore(producer)->semaphore] = 91;
+	comp_swapchain_gpu_reuse_collect(&device.vk, false);
+	xrt_compositor_semaphore_reference(&producer, nullptr);
+}
+TEST_CASE("pre-import overflow rejection does not consume allocation capacity")
+{
+	auto *budget = comp_gpu_client_budget_create();
+	xrt_swapchain_create_info info{};
+	info.width = info.height = UINT32_MAX;
+	info.array_size = info.face_count = info.sample_count = info.mip_count = 1;
+	CHECK(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_ERROR_ALLOCATION);
+	info.width = info.height = 64;
+	REQUIRE(comp_gpu_client_budget_reserve(budget, &info, 3, nullptr) == XRT_SUCCESS);
+	comp_gpu_client_budget_finish();
+	comp_gpu_client_budget_destroy(&budget);
+}
+
+TEST_CASE("device loss does not authorize reuse or resource destruction")
+{
+	Device device;
+	auto *sc = device.swapchain();
+	auto *sem = device.producer();
+	auto *base = &sc->base.base;
+	REQUIRE(comp_swapchain_gpu_reuse_set_producer(base, 0, sem, 73) == XRT_SUCCESS);
+	auto signal = comp_semaphore(sem)->semaphore;
+	device.vk.vkWaitSemaphores = [](VkDevice, const VkSemaphoreWaitInfo *, uint64_t timeout) {
+		timeouts.push_back(timeout);
+		return VK_ERROR_DEVICE_LOST;
+	};
+	CHECK(xrt_swapchain_wait_image(base, 0, 0) != XRT_SUCCESS);
+	int before = destroyed;
+	xrt_swapchain_reference(&base, nullptr);
+	comp_swapchain_gpu_reuse_collect(&device.vk, false);
+	CHECK(destroyed == before);
+	CHECK(comp_swapchain_gpu_reuse_device_in_use(&device.vk));
+	// Restore the mock only to clean up the test. Device loss itself proved nothing.
+	device.vk.vkWaitSemaphores = [](VkDevice, const VkSemaphoreWaitInfo *wait, uint64_t) {
+		return values[wait->pSemaphores[0]] >= wait->pValues[0] ? VK_SUCCESS : VK_TIMEOUT;
+	};
+	values[signal] = 73;
+	comp_swapchain_gpu_reuse_collect(&device.vk, false);
+	CHECK(destroyed == before + 1);
+	xrt_compositor_semaphore_reference(&sem, nullptr);
+}

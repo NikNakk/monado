@@ -11,7 +11,7 @@ import subprocess
 import time
 
 SCENARIOS = ['normal', 'delayed', 'missing', 'future', 'nonmonotonic', 'exit-before',
-             'exit-after', 'consumer-delay', 'multi-queue', 'broken-queue', 'reuse', 'idle', 'cancel-callback']
+             'exit-after', 'consumer-delay', 'multi-queue', 'broken-queue', 'reuse', 'idle', 'cancel-callback', 'exit-inflight', 'consumer-gpu-delay', 'concurrent-producers']
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)

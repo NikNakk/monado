@@ -18,6 +18,22 @@ extern "C" {
 #ifdef XRT_OS_OSX
 
 struct vk_bundle;
+struct comp_gpu_client_budget;
+struct comp_gpu_client_budget *
+comp_gpu_client_budget_create(void);
+void
+comp_gpu_client_budget_destroy(struct comp_gpu_client_budget **budget);
+xrt_result_t
+comp_gpu_client_budget_reserve(struct comp_gpu_client_budget *budget,
+                               const struct xrt_swapchain_create_info *info,
+                               uint32_t image_count,
+                               const struct xrt_image_native *images);
+void
+comp_gpu_client_budget_finish(void);
+xrt_result_t
+comp_gpu_client_budget_adopt(struct xrt_swapchain *xsc);
+bool
+comp_swapchain_gpu_reuse_device_in_use(struct vk_bundle *vk);
 void
 comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown);
 

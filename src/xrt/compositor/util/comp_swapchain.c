@@ -28,6 +28,7 @@
 
 #ifdef XRT_OS_OSX
 #include "util/comp_metal_swapchain_import.h"
+#include "util/comp_swapchain_gpu_reuse.h"
 #endif
 
 #include <stdio.h>
@@ -307,7 +308,7 @@ image_view_array_cleanup(struct vk_bundle *vk, size_t array_size, VkImageView **
  * images that has one or all fields set to NULL.
  */
 static void
-image_cleanup(struct vk_bundle *vk, struct comp_swapchain_image *image)
+image_cleanup(struct vk_bundle *vk, struct comp_swapchain_image *image, bool completed)
 {
 	/*
 	 * This makes sure that any pending command buffer has completed and all
@@ -315,9 +316,16 @@ image_cleanup(struct vk_bundle *vk, struct comp_swapchain_image *image)
 	 * validation doesn't complain. This is done during image destruction so
 	 * isn't time critical.
 	 */
-	vk_queue_lock(vk->main_queue);
-	vk->vkDeviceWaitIdle(vk->device);
-	vk_queue_unlock(vk->main_queue);
+#ifdef XRT_OS_OSX
+	if (!completed) {
+#else
+	(void)completed;
+	{
+#endif
+		vk_queue_lock(vk->main_queue);
+		vk->vkDeviceWaitIdle(vk->device);
+		vk_queue_unlock(vk->main_queue);
+	}
 
 	// The field array_size is shared, only reset once both are freed.
 	image_view_array_cleanup(vk, image->array_size, &image->views.alpha);
@@ -332,7 +340,7 @@ cleanup_post_create_vulkan_setup(struct vk_bundle *vk, struct comp_swapchain *sc
 	uint32_t image_count = sc->vkic.image_count;
 
 	for (uint32_t i = 0; i < image_count; i++) {
-		image_cleanup(vk, &(sc->images[i]));
+		image_cleanup(vk, &(sc->images[i]), false);
 	}
 }
 
@@ -685,7 +693,11 @@ comp_swapchain_teardown(struct comp_swapchain *sc)
 	}
 
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
-		image_cleanup(vk, &sc->images[i]);
+		#ifdef XRT_OS_OSX
+		image_cleanup(vk, &sc->images[i], sc->gpu_reuse_safe_destroy);
+#else
+		image_cleanup(vk, &sc->images[i], false);
+#endif
 	}
 
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
@@ -776,6 +788,10 @@ comp_swapchain_create(struct vk_bundle *vk,
 		return xret;
 	}
 
+#ifdef XRT_OS_OSX
+	xret = comp_gpu_client_budget_adopt(&sc->base.base);
+	if (xret != XRT_SUCCESS) { really_destroy(sc); return xret; }
+#endif
 	// Correctly setup refcounts.
 	xrt_swapchain_reference(out_xsc, &sc->base.base);
 
@@ -806,6 +822,10 @@ comp_swapchain_import(struct vk_bundle *vk,
 		return xret;
 	}
 
+#ifdef XRT_OS_OSX
+	xret = comp_gpu_client_budget_adopt(&sc->base.base);
+	if (xret != XRT_SUCCESS) { really_destroy(sc); return xret; }
+#endif
 	// Correctly setup refcounts.
 	xrt_swapchain_reference(out_xsc, &sc->base.base);
 

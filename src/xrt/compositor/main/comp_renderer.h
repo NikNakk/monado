@@ -48,6 +48,11 @@ comp_renderer_create(struct comp_compositor *c, VkExtent2D scratch_extent);
  * @public @memberof comp_renderer
  * @ingroup comp_main
  */
+#ifdef XRT_OS_OSX
+bool
+comp_renderer_drain(struct comp_renderer *r, uint64_t timeout_ns);
+#endif
+
 void
 comp_renderer_destroy(struct comp_renderer **ptr_r);
 

@@ -24,11 +24,12 @@ def main():
     parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
     parser.add_argument('--unique-output', action='store_true')
     parser.add_argument('--fault', choices=['missing', 'disconnect'], default='missing')
+    parser.add_argument('--budget-suite', action='store_true', help='Test per-client rejection and repeated failed clients against a small global cap')
     parser.add_argument('--suite', action='store_true', help='Test a healthy client, failed overlay and replacement client in one service')
     args = parser.parse_args()
     if not 1 <= args.client_timeout <= 300:
         parser.error('--client-timeout must be between 1 and 300 seconds')
-    if args.suite and (args.client or args.benchmark):
+    if (args.suite or args.budget_suite) and (args.client or args.benchmark):
         parser.error('--suite cannot be combined with --client or --benchmark')
     build = args.build.resolve()
     label = f'org.freedesktop.monado.gpu-sync-service.{os.getpid()}'
@@ -54,6 +55,8 @@ def main():
         if args.benchmark:
             env.update(XRT_LOG='warn', XRT_COMPOSITOR_LOG_APPLE_SAMPLES='0',
                        XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE='0')
+        if args.budget_suite:
+            env.update(XRT_MACOS_GPU_CLIENT_OBJECTS='2', XRT_MACOS_GPU_GLOBAL_OBJECTS='8')
         if args.headset:
             env.update(SIMULATED_ENABLE='0', XRT_COMPOSITOR_FORCE_DEBUG_IMAGE='0',
                        XRT_MACOS_PREVENT_DISPLAY_SLEEP='1', PSVR2_CAMERA_STREAMS='0')
@@ -61,6 +64,10 @@ def main():
                      'benchmark': args.benchmark, 'powermetrics': 'not collected; power/frequency unavailable',
                      'game_mode': 'not requested'}
         telemetry['headset'] = args.headset
+        telemetry['gpu_policy'] = {key: env.get(key, default) for key, default in {
+            'XRT_MACOS_FRAME_READINESS_MARGIN_US': '6000', 'XRT_MACOS_CLIENT_GPU_HUNG_MS': '500',
+            'XRT_MACOS_GPU_CLIENT_MB': '512', 'XRT_MACOS_GPU_CLIENT_OBJECTS': '64',
+            'XRT_MACOS_GPU_GLOBAL_OBJECTS': '256'}.items()}
         for key, command in [('power', ['pmset', '-g', 'batt']), ('settings', ['pmset', '-g', 'custom']),
                              ('os', ['sw_vers']), ('background_cpu', ['ps', '-A', '-o', '%cpu,comm'])]:
             snapshot = subprocess.run(command, capture_output=True, text=True, timeout=5)
@@ -78,6 +85,8 @@ def main():
                 if time.monotonic() >= deadline:
                     raise RuntimeError('Service socket did not become ready; inspect service.log')
                 time.sleep(.05)
+            if args.budget_suite:
+                return run_budget_suite(build, out, env)
             if args.suite:
                 return run_suite(build, out, env, args.fault, args.headset)
             command = args.client or [str(build/'tests/tests_macos_openxr_loaderless_probe')]
@@ -90,8 +99,11 @@ def main():
             return result.returncode
         finally:
             subprocess.run(['launchctl', 'bootout', domain, str(plist)], timeout=10, check=False)
-            if args.suite and (out/'summary.json').exists():
-                verify_suite(out, args.fault, args.headset)
+            if (out/'summary.json').exists():
+                if args.budget_suite:
+                    verify_budget_suite(out)
+                elif args.suite:
+                    verify_suite(out, args.fault, args.headset)
 
 
 def events(path):
@@ -193,8 +205,72 @@ def run_suite(build, out, env, fault_mode, headset=False):
                     client.kill()
                 client.wait(timeout=5)
     (out/'summary.json').write_text(json.dumps(dict(target=('macos' if headset else 'debug_image'), clients=results,
-        status='PASS', note='GPU trace verification follows service shutdown'), indent=2)+'\n')
+        status='PENDING', note='GPU trace verification follows service shutdown'), indent=2)+'\n')
     return 0
+
+
+def run_budget_suite(build, out, env):
+    executable = str(build/'tests/tests_macos_service_gpu_sync')
+    def client(name, mode, frames):
+        with (out/(name+'.txt')).open('w') as log:
+            subprocess.run([executable, mode, str(frames), '40'], env=env,
+                           stdout=log, stderr=log, check=True, timeout=45)
+    with (out/'healthy.txt').open('w') as log:
+        healthy = subprocess.Popen([executable, 'normal', '900', '40'], env=env, stdout=log, stderr=log)
+        try:
+            deadline = time.monotonic()+10
+            while (out/'healthy.txt').read_text().count('"event":"frame"') < 10:
+                if healthy.poll() is not None or time.monotonic() >= deadline:
+                    raise RuntimeError('Healthy budget client did not start')
+                time.sleep(.01)
+            client('per-client', 'budget', 1)
+            for index in range(7):
+                client('failed-'+str(index), 'missing', 120)
+            client('global-rejected', 'exhausted', 1)
+            if healthy.wait(timeout=40) != 0:
+                raise RuntimeError('Healthy rendering failed at global allocation cap')
+            client('replacement', 'normal', 60)
+        finally:
+            if healthy.poll() is None:
+                healthy.kill()
+            healthy.wait(timeout=5)
+    (out/'summary.json').write_text(json.dumps(dict(status='PENDING',
+        scenario='budget', global_object_cap=8, client_object_cap=2), indent=2)+'\n')
+    return 0
+
+
+def verify_budget_suite(out):
+    log = (out/'service.log').read_text()
+    quarantines = dict((identity, address) for address, identity in re.findall(r'GPU reuse quarantine: swapchain=(0x[0-9a-f]+).* id=(\d+)', log))
+    reclaimed = set(re.findall(r'GPU reuse reclaim:.* id=(\d+)', log))
+    retained = {identity: address for identity, address in quarantines.items() if identity not in reclaimed}
+    if len(retained) != 7 or log.count('GPU allocation rejected before import') < 2:
+        raise RuntimeError('Missing repeated-failure retention or pre-import cap evidence')
+    for address in retained.values():
+        if re.search(r'producer ready wait: swapchain='+address+r' image=\d+ timeline=22 ', log):
+            raise RuntimeError('Repeated failed producer value reached Vulkan')
+    failures = [events(out/('failed-'+str(i)+'.txt')) for i in range(7)]
+    start = next(r['time_ns'] for r in failures[0] if r['event'] == 'fault')
+    last_start = next(r['time_ns'] for r in failures[-1] if r['event'] == 'fault')
+    finish = last_start+next(r['recovery_ns'] for r in failures[-1] if r['event'] == 'result')
+    mapping = list(csv.DictReader(next(out.glob('*client_frame_map.csv')).open()))
+    fresh = [r for r in mapping if r['client_slot'] == '0' and r['reused'] == '0'
+             and start <= int(r['latch_ns']) <= finish]
+    replacement = [r for r in events(out/'replacement.txt') if r['event'] == 'frame']
+    replacement_latches = [r for r in mapping if r['reused'] == '0'
+        and replacement[0]['begin_ns'] <= int(r['latch_ns']) <= replacement[-1]['end_ns']]
+    peak = max(map(int, re.findall(r' objects=(\d+)', log)))
+    if len(fresh) < 100 or len(replacement_latches) < 10 or peak > 8 or log.count('starting up...') != 1:
+        raise RuntimeError('Budget exhaustion damaged healthy rendering or replacement recovery')
+    for name in ['per-client', 'global-rejected']:
+        result = next(r for r in events(out/(name+'.txt')) if r['event'] == 'result')
+        if not result.get('budget_rejected') or result['status'] != 'PASS':
+            raise RuntimeError('Allocation cap was not explicitly rejected')
+    summary = json.loads((out/'summary.json').read_text())
+    summary.update(status='PASS', retained_failed_swapchains=len(retained), peak_tracked_objects=peak,
+        healthy_fresh_latches_during_failures=len(fresh), replacement_fresh_latches=len(replacement_latches),
+        service_start_count=1, pre_import_rejections=log.count('GPU allocation rejected before import'))
+    (out/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
 
 
 if __name__ == '__main__':
