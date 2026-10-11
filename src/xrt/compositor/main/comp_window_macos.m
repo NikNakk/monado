@@ -503,6 +503,7 @@ API_AVAILABLE(macos(14.0))
 	dispatch_semaphore_t _finished;
 	BOOL _created;
 	BOOL _stop;
+	BOOL _joined;
 	uint64_t _tickCount;
 	FILE *_callbackTrace;
 	uint64_t _traceRows;
@@ -513,6 +514,7 @@ API_AVAILABLE(macos(14.0))
 - (BOOL)isRunning;
 - (void)setRunning:(BOOL)running;
 - (void)shutdown;
+- (BOOL)shutdownBefore:(dispatch_time_t)deadline;
 @end
 
 @implementation MonadoCADisplayLinkSource
@@ -681,11 +683,19 @@ API_AVAILABLE(macos(14.0))
 	        waitUntilDone:YES];
 }
 
+- (BOOL)shutdownBefore:(dispatch_time_t)deadline
+{
+	if (_joined) return YES;
+	// Keep the source/window alive on timeout: its run loop may still use them.
+	[self performSelector:@selector(applyStop) onThread:_thread withObject:nil waitUntilDone:NO];
+	if (dispatch_semaphore_wait(_finished, deadline) != 0) return NO;
+	_joined = YES;
+	return YES;
+}
+
 - (void)shutdown
 {
-	// Performing the selector also wakes the run loop so that it sees _stop.
-	[self performSelector:@selector(applyStop) onThread:_thread withObject:nil waitUntilDone:NO];
-	dispatch_semaphore_wait(_finished, DISPATCH_TIME_FOREVER);
+	(void)[self shutdownBefore:DISPATCH_TIME_FOREVER];
 }
 
 @end
@@ -2644,11 +2654,18 @@ comp_window_macos_prepare_destroy(struct comp_target *ct)
 {
 	if (ct == NULL || ct->destroy != comp_window_macos_destroy) return true;
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC);
 	atomic_store_explicit(&cwm->passthrough_shutdown, true, memory_order_release);
 	struct xrt_device *xdev = ct->c != NULL ? ct->c->xdev : NULL;
 	if (cwm->passthrough_sinks_attached && xdev != NULL && xdev->set_passthrough_sinks != NULL) {
 		(void)xdev->set_passthrough_sinks(xdev, NULL, NULL);
 		cwm->passthrough_sinks_attached = false;
+	}
+	if (cwm->ca_display_link != NULL) {
+		if (@available(macOS 14.0, *)) {
+			MonadoCADisplayLinkSource *source = (MonadoCADisplayLinkSource *)cwm->ca_display_link;
+			if (![source shutdownBefore:deadline]) return false;
+		}
 	}
 	macos_display_link_destroy(cwm);
 	pthread_mutex_lock(&cwm->present_worker_mutex);
@@ -2662,7 +2679,6 @@ comp_window_macos_prepare_destroy(struct comp_target *ct)
 	dispatch_group_t groups[] = {cwm->present_worker_group, cwm->present_command_group, cwm->trace_present_group};
 	// One shared finite deadline. Failed drain retains the entire target/device,
 	// including callback state, rather than freeing objects still used by Metal.
-	dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC);
 	for (uint32_t i = 0; i < ARRAY_SIZE(groups); i++) {
 		if (groups[i] != NULL && dispatch_group_wait(groups[i], deadline) != 0) return false;
 	}
