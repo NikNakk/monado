@@ -61,11 +61,12 @@ completion before granting image reuse. A producer that signals before writing
 violates the contract: the broken-queue fixture detects corrupt pixels; Monado
 cannot infer missing producer queue ordering from the signal alone.
 
-An outstanding producer obligation still expires after **500 ms** by default,
-measured from submission, rather than from idle time. Failed/timed-out waits
+An outstanding producer obligation expires after **5 s** by default (500 ms when
+this report's evidence was recorded; raised on 2026-10-11 so load-time stalls do
+not lose sessions), measured from submission, rather than from idle time. Failed/timed-out waits
 never mark the frame GPU complete. Worker shutdown checks cancellation while
 waiting for a scheduled slot; completed-slot backpressure also has a finite
-500 ms replacement deadline. Replacement of an older completed slot does not
+replacement deadline, the same threshold. Replacement of an older completed slot does not
 pretend that a missing producer finished.
 
 **Pre-allocation budgets.** Each client has a default **512 MiB / 64 swapchain**

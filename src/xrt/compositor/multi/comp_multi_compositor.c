@@ -50,12 +50,18 @@
 
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_NUM_OPTION(client_gpu_margin_us, "XRT_MACOS_FRAME_READINESS_MARGIN_US", 6000)
-DEBUG_GET_ONCE_NUM_OPTION(client_gpu_hung_ms, "XRT_MACOS_CLIENT_GPU_HUNG_MS", 500)
+/*
+ * How long a submitted frame's GPU work may stay outstanding before the session
+ * is lost. Long enough for load-time stalls; until then the client is simply
+ * back-pressured and the compositor reprojects its last delivered frame.
+ */
+#define CLIENT_GPU_HUNG_DEFAULT_MS 5000
+DEBUG_GET_ONCE_NUM_OPTION(client_gpu_hung_ms, "XRT_MACOS_CLIENT_GPU_HUNG_MS", CLIENT_GPU_HUNG_DEFAULT_MS)
 static int64_t
 client_gpu_hung_ns(void)
 {
 	int64_t ms = debug_get_num_option_client_gpu_hung_ms();
-	return (ms > 0 && ms <= 10000 ? ms : 500) * U_TIME_1MS_IN_NS;
+	return (ms > 0 && ms <= 30000 ? ms : CLIENT_GPU_HUNG_DEFAULT_MS) * U_TIME_1MS_IN_NS;
 }
 #endif
 
@@ -589,9 +595,11 @@ run_func(void *ptr)
 			wait_result = wait_fence(mc, &xcf);
 		}
 
+#ifdef XRT_OS_OSX
 		if (wait_result != XRT_SUCCESS) {
 			/* A timeout is cancellation, never GPU completion. Keep progress
-			 * references until teardown; tracked storage then enters quarantine. */
+			 * references until teardown; tracked storage then enters quarantine.
+			 * Other platforms keep delivering the frame, as before. */
 			U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d", frame_id,
 			        value, wait_result);
 			if (mc->xses != NULL && os_thread_helper_is_running(&mc->wait_thread.oth)) {
@@ -616,6 +624,9 @@ run_func(void *ptr)
 			os_thread_helper_signal_locked(&mc->wait_thread.oth);
 			continue;
 		}
+#else
+		(void)wait_result;
+#endif
 
 		// Sample time outside of lock.
 		int64_t now_ns = os_monotonic_get_ns();
