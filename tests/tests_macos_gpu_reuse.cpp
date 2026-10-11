@@ -159,6 +159,11 @@ TEST_CASE("pending consumer completion retains storage after producer completion
 	                                                    VK_NULL_HANDLE) == VK_SUCCESS);
 	os_mutex_destroy(&queue.mutex);
 	comp_swapchain_gpu_reuse_renderer_leave(&accum);
+	timeouts.clear();
+	CHECK(xrt_swapchain_wait_image(base, INT64_MAX, 0) == XRT_TIMEOUT);
+	REQUIRE_FALSE(timeouts.empty());
+	for (uint64_t timeout : timeouts) CHECK(timeout <= 500000000ULL);
+
 	int before = destroyed;
 	xrt_swapchain_reference(&base, nullptr);
 	comp_swapchain_gpu_reuse_collect(&device.vk, false);
