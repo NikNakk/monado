@@ -1,0 +1,12 @@
+{
+  "all_modified_sources_restored": true,
+  "paths": [
+    "src/xrt/compositor/main/comp_compositor.c",
+    "src/xrt/compositor/multi/comp_multi_compositor.c",
+    "src/xrt/compositor/multi/comp_multi_private.h",
+    "src/xrt/compositor/util/comp_swapchain_gpu_reuse.c",
+    "src/xrt/compositor/util/comp_swapchain_gpu_reuse.h",
+    "src/xrt/compositor/util/comp_semaphore.c",
+    "src/xrt/compositor/util/comp_semaphore.h"
+  ]
+}

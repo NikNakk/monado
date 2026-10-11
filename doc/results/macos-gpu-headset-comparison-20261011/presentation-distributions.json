@@ -1,0 +1,342 @@
+[
+  {
+    "run": "baseline-0",
+    "client_frames": 7200,
+    "warmup_client_frames": 120,
+    "measured_client_frames": 7080,
+    "confirmed_presentations": 7068,
+    "zero_timestamp_callbacks": 4,
+    "physical_throughput_hz": 119.66116223918365,
+    "client_throughput_hz": 119.84734911597131,
+    "cadence_ms": {
+      "p50": 8.341583,
+      "p95": 8.342583,
+      "p99": 8.343292,
+      "max": 16.68425
+    },
+    "cadence_gaps_over_12_5_ms": 13,
+    "cadence_gaps_at_least_20_ms": 0,
+    "estimated_skipped_refreshes": 13,
+    "distinct_client_frames_physically_presented": 5349,
+    "client_frames_without_confirmed_presentation": 1731,
+    "end_frame_entry_to_physical_us": {
+      "p50": 27391.291,
+      "p95": 28587.209,
+      "p99": 28756.875,
+      "max": 38514.5
+    },
+    "end_frame_exit_to_physical_us": {
+      "p50": 27229.042,
+      "p95": 28419.583,
+      "p99": 28601.542,
+      "max": 38368.5
+    },
+    "end_frame_us": {
+      "p50": 156.0,
+      "p95": 279.0,
+      "p99": 372.0,
+      "max": 7653.0
+    },
+    "readiness_wait_us": {
+      "p50": 375.0,
+      "p95": 669.0,
+      "p99": 746.0,
+      "max": 1925.0
+    },
+    "presentation_gpu_errors": 0,
+    "presentation_without_shared_event": 0,
+    "presentation_gpu_work_us": {
+      "p50": 1440.0000000023283,
+      "p95": 1790.2916661114432,
+      "p99": 1864.2499999259599,
+      "max": 3745.2916676556924
+    },
+    "config": {
+      "event": "config",
+      "thermal": 0,
+      "low_power": false,
+      "clock": "CLOCK_MONOTONIC"
+    },
+    "client_result": {
+      "event": "result",
+      "status": "PASS",
+      "frames": 7200,
+      "lost": false,
+      "recovery_ns": 0,
+      "thermal_end": 0
+    },
+    "queue_submit_us": {
+      "p50": 196.0,
+      "p95": 250.0,
+      "p99": 278.0,
+      "max": 353.0
+    },
+    "draw_dispatch_us": {
+      "p50": 343.0,
+      "p95": 420.0,
+      "p99": 456.0,
+      "max": 591.0
+    },
+    "previous_fence_wait_us": {
+      "p50": 2.0,
+      "p95": 3.0,
+      "p99": 4.0,
+      "max": 11.0
+    }
+  },
+  {
+    "run": "modified-0",
+    "client_frames": 7200,
+    "warmup_client_frames": 120,
+    "measured_client_frames": 7080,
+    "confirmed_presentations": 7070,
+    "zero_timestamp_callbacks": 4,
+    "physical_throughput_hz": 119.67808930315874,
+    "client_throughput_hz": 119.84529781835847,
+    "cadence_ms": {
+      "p50": 8.341584,
+      "p95": 8.342666,
+      "p99": 8.3435,
+      "max": 33.366708
+    },
+    "cadence_gaps_over_12_5_ms": 11,
+    "cadence_gaps_at_least_20_ms": 1,
+    "estimated_skipped_refreshes": 13,
+    "distinct_client_frames_physically_presented": 5290,
+    "client_frames_without_confirmed_presentation": 1790,
+    "end_frame_entry_to_physical_us": {
+      "p50": 26791.333,
+      "p95": 28552.875,
+      "p99": 28761.375,
+      "max": 45386.208
+    },
+    "end_frame_exit_to_physical_us": {
+      "p50": 26621.333,
+      "p95": 28407.875,
+      "p99": 28608.208,
+      "max": 45288.208
+    },
+    "end_frame_us": {
+      "p50": 152.0,
+      "p95": 274.0,
+      "p99": 366.0,
+      "max": 1751.0
+    },
+    "readiness_wait_us": {
+      "p50": 440.0,
+      "p95": 691.0,
+      "p99": 768.0,
+      "max": 2121.0
+    },
+    "presentation_gpu_errors": 0,
+    "presentation_without_shared_event": 0,
+    "presentation_gpu_work_us": {
+      "p50": 1560.6666675012093,
+      "p95": 1791.5833323058905,
+      "p99": 1867.3750000743894,
+      "max": 5136.416666573496
+    },
+    "config": {
+      "event": "config",
+      "thermal": 0,
+      "low_power": false,
+      "clock": "CLOCK_MONOTONIC"
+    },
+    "client_result": {
+      "event": "result",
+      "status": "PASS",
+      "frames": 7200,
+      "lost": false,
+      "recovery_ns": 0,
+      "thermal_end": 0
+    },
+    "queue_submit_us": {
+      "p50": 186.0,
+      "p95": 234.0,
+      "p99": 258.0,
+      "max": 374.0
+    },
+    "draw_dispatch_us": {
+      "p50": 330.0,
+      "p95": 405.0,
+      "p99": 445.0,
+      "max": 12387.0
+    },
+    "previous_fence_wait_us": {
+      "p50": 2.0,
+      "p95": 3.0,
+      "p99": 4.0,
+      "max": 12110.0
+    }
+  },
+  {
+    "run": "modified-1",
+    "client_frames": 7200,
+    "warmup_client_frames": 120,
+    "measured_client_frames": 7080,
+    "confirmed_presentations": 7056,
+    "zero_timestamp_callbacks": 3,
+    "physical_throughput_hz": 119.37362021817061,
+    "client_throughput_hz": 119.77801119365192,
+    "cadence_ms": {
+      "p50": 8.341624,
+      "p95": 8.342625,
+      "p99": 8.343626,
+      "max": 33.366749
+    },
+    "cadence_gaps_over_12_5_ms": 28,
+    "cadence_gaps_at_least_20_ms": 1,
+    "estimated_skipped_refreshes": 30,
+    "distinct_client_frames_physically_presented": 5238,
+    "client_frames_without_confirmed_presentation": 1842,
+    "end_frame_entry_to_physical_us": {
+      "p50": 27172.208,
+      "p95": 28529.625,
+      "p99": 28991.0,
+      "max": 53654.167
+    },
+    "end_frame_exit_to_physical_us": {
+      "p50": 26996.208,
+      "p95": 28380.916,
+      "p99": 28829.417,
+      "max": 53518.167
+    },
+    "end_frame_us": {
+      "p50": 150.0,
+      "p95": 272.0,
+      "p99": 364.0,
+      "max": 8988.0
+    },
+    "readiness_wait_us": {
+      "p50": 359.0,
+      "p95": 674.0,
+      "p99": 761.0,
+      "max": 6956.0
+    },
+    "presentation_gpu_errors": 0,
+    "presentation_without_shared_event": 0,
+    "presentation_gpu_work_us": {
+      "p50": 1417.6666663843207,
+      "p95": 1784.0000000433065,
+      "p99": 1855.7500006863847,
+      "max": 3781.4999996044207
+    },
+    "config": {
+      "event": "config",
+      "thermal": 0,
+      "low_power": false,
+      "clock": "CLOCK_MONOTONIC"
+    },
+    "client_result": {
+      "event": "result",
+      "status": "PASS",
+      "frames": 7200,
+      "lost": false,
+      "recovery_ns": 0,
+      "thermal_end": 0
+    },
+    "queue_submit_us": {
+      "p50": 185.0,
+      "p95": 233.0,
+      "p99": 255.0,
+      "max": 408.0
+    },
+    "draw_dispatch_us": {
+      "p50": 327.0,
+      "p95": 402.0,
+      "p99": 442.0,
+      "max": 12498.0
+    },
+    "previous_fence_wait_us": {
+      "p50": 2.0,
+      "p95": 3.0,
+      "p99": 3.0,
+      "max": 12262.0
+    }
+  },
+  {
+    "run": "baseline-1",
+    "client_frames": 7200,
+    "warmup_client_frames": 120,
+    "measured_client_frames": 7080,
+    "confirmed_presentations": 7062,
+    "zero_timestamp_callbacks": 2,
+    "physical_throughput_hz": 119.49457130407838,
+    "client_throughput_hz": 119.78185387656144,
+    "cadence_ms": {
+      "p50": 8.342208,
+      "p95": 8.345582,
+      "p99": 8.346584,
+      "max": 25.028209
+    },
+    "cadence_gaps_over_12_5_ms": 20,
+    "cadence_gaps_at_least_20_ms": 2,
+    "estimated_skipped_refreshes": 22,
+    "distinct_client_frames_physically_presented": 5289,
+    "client_frames_without_confirmed_presentation": 1791,
+    "end_frame_entry_to_physical_us": {
+      "p50": 27307.833,
+      "p95": 28590.833,
+      "p99": 28815.791,
+      "max": 45559.459
+    },
+    "end_frame_exit_to_physical_us": {
+      "p50": 27148.5,
+      "p95": 28438.542,
+      "p99": 28672.667,
+      "max": 45442.459
+    },
+    "end_frame_us": {
+      "p50": 150.0,
+      "p95": 276.0,
+      "p99": 372.0,
+      "max": 7091.0
+    },
+    "readiness_wait_us": {
+      "p50": 377.0,
+      "p95": 681.0,
+      "p99": 773.0,
+      "max": 2961.0
+    },
+    "presentation_gpu_errors": 0,
+    "presentation_without_shared_event": 0,
+    "presentation_gpu_work_us": {
+      "p50": 1416.374998370884,
+      "p95": 1785.8749997685663,
+      "p99": 1852.458333814866,
+      "max": 4325.958332628943
+    },
+    "config": {
+      "event": "config",
+      "thermal": 0,
+      "low_power": false,
+      "clock": "CLOCK_MONOTONIC"
+    },
+    "client_result": {
+      "event": "result",
+      "status": "PASS",
+      "frames": 7200,
+      "lost": false,
+      "recovery_ns": 0,
+      "thermal_end": 0
+    },
+    "queue_submit_us": {
+      "p50": 185.0,
+      "p95": 234.0,
+      "p99": 257.0,
+      "max": 311.0
+    },
+    "draw_dispatch_us": {
+      "p50": 327.0,
+      "p95": 400.0,
+      "p99": 432.0,
+      "max": 12805.0
+    },
+    "previous_fence_wait_us": {
+      "p50": 2.0,
+      "p95": 3.0,
+      "p99": 3.0,
+      "max": 12416.0
+    }
+  }
+]

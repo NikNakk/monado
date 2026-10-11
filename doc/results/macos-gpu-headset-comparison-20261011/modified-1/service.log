@@ -1,0 +1,261 @@
+ INFO [ipc_server_main_common] Monado(XRT) by Collabora et al 'v25.1.0-2184-gd1133762a' starting up...
+ INFO [p_create_system] Creating system:
+	Builders:
+		qwerty: Qwerty devices builder
+		remote: Remote simulation devices builder
+		simulated: Simulated devices builder
+		rift: Oculus Rift
+		psvr2: PlayStation VR 2
+		rgb_tracking: RGB tracking based devices (PSVR, PSMV, ...)
+		north_star: North Star headset
+		legacy: Legacy probing system
+	No builder selected in config (or wasn't compiled in)
+	No builder was certain that it could create a head device
+	Selected legacy because it maybe could create a head
+	Using builder legacy: Legacy probing system
+	Got devices:
+		 0: 'Simulated HMD' (id=1)
+	In roles:
+		head: Simulated HMD (Simulated HMD), view count: 2
+		eyes: <none> (<none>)
+		face: <none> (<none>)
+		left: <none> (<none>)
+		right: <none> (<none>)
+		gamepad: <none> (<none>)
+		hand_tracking.unobstructed.left: <none> (<none>)
+		hand_tracking.unobstructed.right: <none> (<none>)
+		hand_tracking.conforming.left: <none> (<none>)
+		hand_tracking.conforming.right: <none> (<none>)
+	Result: XRT_SUCCESS
+DEBUG [comp_main_create_system_compositor] Doing init 0x72085c000
+ INFO [comp_window_macos_create_base] macOS diagnostic: asynchronous drawable slot with newest-frame worker enabled; nextDrawable stalls supersede pending frames instead of dropping them
+ INFO [find_psvr2_screen] macOS display: 'Built-in Retina Display' 1710x1107
+ INFO [find_psvr2_screen] macOS display: 'PS VR2' 4000x2040
+ INFO [comp_window_macos_init] macOS CAMetalLayer maximumDrawableCount=3
+ INFO [macos_passthrough_init] PS VR2 passthrough unavailable: the head device has no camera source here
+ INFO [comp_window_macos_init] PS VR2 display period 8.333ms (120.00 Hz)
+ INFO [comp_target_swapchain_override_extents] Target 'macOS Metal' overrides compositor extents with (4000x2040) was (0x0 false)
+ INFO [comp_window_macos_init] Selected macOS display 'PS VR2' at 4000x2040 (window front-end)
+ INFO [macos_log_refresh_mode_candidates] PS VR2 current CoreGraphics mode: logical 4000x2040, pixels 4000x2040, refresh 120.000 Hz
+ INFO [macos_log_refresh_mode_candidates] PS VR2 matching CoreGraphics display mode: 120.000 Hz
+ INFO [macos_log_refresh_mode_candidates] PS VR2 matching CoreGraphics display mode: 90.000 Hz
+ INFO [macos_log_refresh_mode_candidates] PS VR2 candidate physical refresh rates for active mode: [90.000, 120.000] Hz
+ INFO [comp_window_macos_init_with_refresh_rate] macOS CAMetalLayer state: framebufferOnly=false displaySyncEnabled=true presentsWithTransaction=false maximumDrawableCount=3 allowsNextDrawableTimeout=true pixelFormat=80 colorspace=kCGColorSpaceSRGB
+ INFO [vk_log_extension_list] Vulkan instance extensions list(s):
+	Enabled extensions:
+		VK_KHR_external_fence_capabilities        required
+		VK_KHR_external_memory_capabilities       required
+		VK_KHR_external_semaphore_capabilities    required
+		VK_KHR_get_physical_device_properties2    required
+		VK_KHR_get_surface_capabilities2          optional
+		VK_KHR_portability_enumeration            optional
+		VK_KHR_surface                            required
+		VK_EXT_debug_report                       required
+		VK_EXT_swapchain_colorspace               optional
+	Not enabled optional extensions:
+		VK_EXT_display_surface_counter            skipped
+ WARN [build_extension_list] Duplicate extension VK_EXT_metal_objects not added twice
+ WARN [build_extension_list] Duplicate extension VK_EXT_metal_objects not added twice
+ INFO [create_device] Created device and COMPUTE queue with QUEUE_GLOBAL_PRIORITY_HIGH.
+ INFO [vk_print_device_info] Device info:
+	name: Apple M5
+	vendor: 0x106b
+	product: 0x1a07020a
+	deviceType: VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	apiVersion: 1.0.357
+	driverVersion: 0x000028a2
+ INFO [vk_print_queues_info] Selected Queues/Families:
+	main_queue.queue: 0x720dc1a58
+	main_queue.index: 0
+	main_queue.family_index: 0
+	encode_queue.queue: 0x0
+	encode_queue.index: -1
+	encode_queue.family_index: -1
+ INFO [vk_print_features_info] Features:
+	timestamp_compute_and_graphics: true
+	timestamp_period: 1.000000
+	timestamp_valid_bits: 64
+	timeline_semaphore: true
+ INFO [vk_print_external_handles_info] Supported images:
+	IOSurfaceRef:
+		color import=true export=true
+		depth import=true export=true
+ INFO [vk_print_external_handles_info] Supported fences:
+	VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT: false
+	VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT: false
+ INFO [vk_print_external_handles_info] Supported semaphores:
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT(binary): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT(binary): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT(timeline): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT(timeline): false
+ INFO [comp_window_macos_init_vulkan] macOS target exported Vulkan render-complete timeline as MTLSharedEvent
+ INFO [comp_window_macos_init_vulkan] macOS target using render-complete timeline semaphore with Metal shared-event handoff
+ INFO [u_pc_fake_create] Created pacer (non-feedback version aka "fake")
+	estimated_frame_period: 8.333333ms
+	percentage: 20.000000%
+	min_comp_time: 3.000000ms
+	comp_time: 3.000000ms
+ INFO [comp_window_macos_create_images] Created 3 IOSurface-backed macOS compositor images at 4000x2040
+ INFO [comp_vulkan_formats_log] Supported formats:
+	VK_FORMAT_R16G16B16A16_UNORM: true
+	VK_FORMAT_R16G16B16A16_SFLOAT: true
+	VK_FORMAT_R16G16B16_UNORM: false
+	VK_FORMAT_R16G16B16_SFLOAT: false
+	VK_FORMAT_R8G8B8A8_SRGB: true
+	VK_FORMAT_B8G8R8A8_SRGB: true
+	VK_FORMAT_R8G8B8_SRGB: false
+	VK_FORMAT_R8G8B8A8_UNORM: true
+	VK_FORMAT_B8G8R8A8_UNORM: true
+	VK_FORMAT_R8G8B8_UNORM: false
+	VK_FORMAT_B8G8R8_UNORM: false
+	VK_FORMAT_R5G6B5_UNORM_PACK16: true
+	VK_FORMAT_R32_SFLOAT: true
+	VK_FORMAT_D32_SFLOAT: true
+	VK_FORMAT_D16_UNORM: true
+	VK_FORMAT_X8_D24_UNORM_PACK32: false
+	VK_FORMAT_D24_UNORM_S8_UINT: false
+	VK_FORMAT_D32_SFLOAT_S8_UINT: true
+	VK_FORMAT_S8_UINT: true
+ WARN [render_max_layers_capable] Device supports only 8 compositor layers due to Vulkan limits. which is below Vulkan minimum of 16. This may indicate a driver bug. Attempting 16 anyway.
+ INFO [comp_window_macos_flush] macOS presentation: window front-end visible=true layer device=set format=80 drawable=4000x2040
+ INFO [comp_window_macos_update_timings] CADisplayLink measured display period 8.341708ms (119.880 Hz)
+ INFO [client_connected] Client 1 connected
+ INFO [ipc_handle_instance_describe_client] Client info:
+	id: 1
+	application_name: 'gpu-sync-26300'
+	pid: 26300
+	extensions:
+		ext_hand_tracking_enabled: false
+		ext_hand_tracking_data_source_enabled: false
+		ext_eye_gaze_interaction_enabled: false
+		ext_future_enabled: false
+		ext_hand_interaction_enabled: false
+		htc_facial_tracking_enabled: false
+		fb_body_tracking_enabled: false
+		meta_body_tracking_full_body_enabled: false
+		meta_body_tracking_calibration_enabled: false
+		meta_body_tracking_fidelity_enabled: false
+		fb_face_tracking2_enabled: false
+		android_face_tracking_enabled: false
+ INFO [finish_external_iosurface_swapchain] External IOSurface swapchain active: id=0 images=3 size=64x64 array_size=1
+ INFO [ipc_handle_compositor_semaphore_create_metal] Metal IPC Stage 4 semaphore active: id=0 token=0x000000004df1d62b event=0x72120b5c0
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.336ms, max 8.347ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 240, superseded 2, drawable >half-refresh 235, >5ms 235, queue delay avg 3.182ms max 4.245ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.414ms, min 6.011ms, max 18.229ms, late 2/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.188ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.338ms, max 8.345ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 480, superseded 5, drawable >half-refresh 475, >5ms 475, queue delay avg 3.206ms max 4.476ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.445ms, min 7.033ms, max 16.715ms, late 3/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.303ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.332ms, max 8.352ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 720, superseded 7, drawable >half-refresh 715, >5ms 715, queue delay avg 3.199ms max 4.476ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.411ms, min 6.302ms, max 16.599ms, late 2/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.268ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.337ms, max 8.346ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 960, superseded 7, drawable >half-refresh 955, >5ms 955, queue delay avg 3.206ms max 4.476ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 8.033ms, max 8.646ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.188ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.339ms, max 8.344ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 1200, superseded 7, drawable >half-refresh 1195, >5ms 1195, queue delay avg 3.216ms max 4.476ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.341ms, min 7.311ms, max 9.401ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.196ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.338ms, max 8.345ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 1440, superseded 7, drawable >half-refresh 1435, >5ms 1435, queue delay avg 3.215ms max 4.476ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 7.957ms, max 8.752ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.206ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.335ms, max 8.349ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 1680, superseded 8, drawable >half-refresh 1675, >5ms 1675, queue delay avg 3.212ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.376ms, min 6.952ms, max 16.602ms, late 1/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.239ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.337ms, max 8.347ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 1920, superseded 8, drawable >half-refresh 1915, >5ms 1915, queue delay avg 3.210ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 8.011ms, max 8.644ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.197ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.339ms, max 8.343ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 2160, superseded 8, drawable >half-refresh 2155, >5ms 2155, queue delay avg 3.213ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.341ms, min 8.009ms, max 8.609ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.204ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.334ms, max 8.349ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 2400, superseded 13, drawable >half-refresh 2395, >5ms 2395, queue delay avg 3.213ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.515ms, min 7.997ms, max 16.750ms, late 5/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.384ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.337ms, max 8.347ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 2640, superseded 13, drawable >half-refresh 2635, >5ms 2635, queue delay avg 3.211ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.343ms, min 7.847ms, max 8.678ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.199ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.337ms, max 8.346ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 2880, superseded 14, drawable >half-refresh 2875, >5ms 2875, queue delay avg 3.210ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.377ms, min 7.665ms, max 16.651ms, late 1/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.233ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.340ms, max 8.343ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 3120, superseded 14, drawable >half-refresh 3115, >5ms 3115, queue delay avg 3.211ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.341ms, min 8.118ms, max 8.702ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.204ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.337ms, max 8.346ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 3360, superseded 14, drawable >half-refresh 3355, >5ms 3355, queue delay avg 3.212ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.341ms, min 7.877ms, max 8.847ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.193ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.336ms, max 8.347ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 3600, superseded 17, drawable >half-refresh 3595, >5ms 3595, queue delay avg 3.209ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.447ms, min 7.968ms, max 16.674ms, late 3/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.311ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.332ms, max 8.352ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 3840, superseded 17, drawable >half-refresh 3835, >5ms 3835, queue delay avg 3.208ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.340ms, min 7.669ms, max 8.936ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.191ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.338ms, max 8.345ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 4080, superseded 17, drawable >half-refresh 4075, >5ms 4075, queue delay avg 3.207ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 8.061ms, max 8.650ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.201ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.334ms, max 8.348ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 4320, superseded 17, drawable >half-refresh 4315, >5ms 4315, queue delay avg 3.208ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 8.081ms, max 8.589ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.201ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.339ms, max 8.344ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 4560, superseded 18, drawable >half-refresh 4555, >5ms 4555, queue delay avg 3.206ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.376ms, min 8.030ms, max 16.790ms, late 1/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.242ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.331ms, max 8.353ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 4800, superseded 18, drawable >half-refresh 4795, >5ms 4795, queue delay avg 3.203ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 7.941ms, max 8.732ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.206ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.334ms, max 8.351ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 5040, superseded 18, drawable >half-refresh 5035, >5ms 5035, queue delay avg 3.202ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 7.966ms, max 8.706ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.204ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.338ms, max 8.346ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 5280, superseded 19, drawable >half-refresh 5275, >5ms 5275, queue delay avg 3.203ms max 4.641ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.376ms, min 8.101ms, max 16.601ms, late 1/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.232ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.376ms, min 7.115ms, max 17.909ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 5520, superseded 29, drawable >half-refresh 5514, >5ms 5514, queue delay avg 3.203ms max 20.261ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.724ms, min 0.115ms, max 25.638ms, late 10/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.604ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.340ms, max 8.344ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 5760, superseded 29, drawable >half-refresh 5754, >5ms 5754, queue delay avg 3.201ms max 20.261ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.341ms, min 5.856ms, max 10.575ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.201ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.339ms, max 8.343ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 6000, superseded 30, drawable >half-refresh 5993, >5ms 5993, queue delay avg 3.199ms max 20.261ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.376ms, min 0.159ms, max 18.558ms, late 2/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.299ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.341ms, max 8.343ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 6240, superseded 30, drawable >half-refresh 6233, >5ms 6233, queue delay avg 3.196ms max 20.261ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 7.786ms, max 8.662ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.262ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.341ms, max 8.343ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 6480, superseded 31, drawable >half-refresh 6473, >5ms 6473, queue delay avg 3.192ms max 20.261ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.377ms, min 7.828ms, max 16.767ms, late 1/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.284ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.340ms, max 8.343ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 6720, superseded 31, drawable >half-refresh 6713, >5ms 6713, queue delay avg 3.191ms max 20.261ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 7.974ms, max 8.707ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.199ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.342ms, min 8.340ms, max 8.343ms
+ INFO [macos_execute_present_job] macOS present worker: submitted 6960, superseded 31, drawable >half-refresh 6953, >5ms 6953, queue delay avg 3.190ms max 20.261ms
+ INFO [macos_execute_present_job] macOS present-worker completion cadence: average 8.342ms, min 7.916ms, max 8.732ms, late 0/240
+ INFO [macos_execute_present_job] macOS presentation CPU waits: Vulkan 0.000ms, drawable 8.198ms
+ INFO [comp_window_macos_update_timings] PS VR2 display-link cadence: average 8.341ms, min 8.276ms, max 8.345ms
+ INFO [client_loop] Client disconnected.
+ INFO [client_disconnected] Client 1 disconnected
+ INFO [ipc_server_main_common] Server exiting: '0'

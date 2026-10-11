@@ -1,0 +1,13 @@
+{
+  "client_exit": 0,
+  "target": "macos",
+  "simulated_hmd": false,
+  "command": [
+    "/usr/bin/caffeinate",
+    "-i",
+    "build/arm64/tests/tests_macos_service_gpu_sync",
+    "normal",
+    "7200",
+    "90"
+  ]
+}

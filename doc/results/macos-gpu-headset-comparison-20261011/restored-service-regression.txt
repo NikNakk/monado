@@ -1,0 +1,14 @@
+Test project /Users/nickkennedy/Code/monado-2/build/arm64
+    Start 56: tests_macos_service_gpu_sync_missing
+1/2 Test #56: tests_macos_service_gpu_sync_missing ......   Passed    5.24 sec
+    Start 57: tests_macos_service_gpu_sync_disconnect
+2/2 Test #57: tests_macos_service_gpu_sync_disconnect ...   Passed    4.53 sec
+
+100% tests passed out of 2
+
+Label Time Summary:
+gpu        =   9.77 sec*proc (2 tests)
+macos      =   9.77 sec*proc (2 tests)
+service    =   9.77 sec*proc (2 tests)
+
+Total Test time (real) =   9.77 sec

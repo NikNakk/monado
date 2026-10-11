@@ -1,0 +1,5 @@
+{
+  "build/arm64/src/xrt/targets/service/monado-service": "9b7a230dd84e2af95dcc1e84e1e63060072470cd24d2ef2254a3563e4578740a",
+  "build/arm64/src/xrt/targets/openxr/libopenxr_monado.dylib": "e5a3a0ad17899c7c324dcbb63ee3458a223719a4f0142980c6ae9a9de8beb18e",
+  "build/arm64/tests/tests_macos_service_gpu_sync": "da4cbb02b1bf9036b4ed74ab9a94aa46d4b00658a2d592a39600e59091e40ef4"
+}

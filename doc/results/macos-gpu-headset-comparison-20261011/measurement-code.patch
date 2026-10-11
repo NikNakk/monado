@@ -1,0 +1,60 @@
+diff --git a/scripts/macos/run-gpu-sync-service.py b/scripts/macos/run-gpu-sync-service.py
+index 1963d113d..a1a713593 100644
+--- a/scripts/macos/run-gpu-sync-service.py
++++ b/scripts/macos/run-gpu-sync-service.py
+@@ -19,12 +19,15 @@ def main():
+     parser.add_argument('--build', type=Path, default=Path('build/arm64'))
+     parser.add_argument('--output', type=Path, required=True)
+     parser.add_argument('--client', nargs='+')
++    parser.add_argument('--client-timeout', type=float, default=30, help='Finite client timeout in seconds (1–300)')
+     parser.add_argument('--benchmark', action='store_true', help='Disable readback and per-image diagnostic logging')
+     parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
+     parser.add_argument('--unique-output', action='store_true')
+     parser.add_argument('--fault', choices=['missing', 'disconnect'], default='missing')
+     parser.add_argument('--suite', action='store_true', help='Test a healthy client, failed overlay and replacement client in one service')
+     args = parser.parse_args()
++    if not 1 <= args.client_timeout <= 300:
++        parser.error('--client-timeout must be between 1 and 300 seconds')
+     if args.suite and (args.client or args.benchmark):
+         parser.error('--suite cannot be combined with --client or --benchmark')
+     build = args.build.resolve()
+@@ -80,7 +83,7 @@ def main():
+             command = args.client or [str(build/'tests/tests_macos_openxr_loaderless_probe')]
+             if args.benchmark:
+                 command = ['/usr/bin/caffeinate', '-i']+command
+-            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
++            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=args.client_timeout)
+             (out/'client.txt').write_text(result.stdout+result.stderr)
+             (out/'summary.json').write_text(json.dumps(dict(client_exit=result.returncode,
+                 target=('macos' if args.headset else 'debug_image'), simulated_hmd=not args.headset, command=command), indent=2)+'\n')
+diff --git a/tests/tests_macos_service_gpu_sync.mm b/tests/tests_macos_service_gpu_sync.mm
+index 1db10e85f..fa4e95eb5 100644
+--- a/tests/tests_macos_service_gpu_sync.mm
++++ b/tests/tests_macos_service_gpu_sync.mm
+@@ -1,6 +1,6 @@
+ // Copyright 2026, Nick Kennedy
+ // SPDX-License-Identifier: BSL-1.0
+-// Native Metal OpenXR client for the isolated offscreen service regression.
++// Native Metal OpenXR client for isolated service and headset regressions.
+ #import <Foundation/Foundation.h>
+ #import <Metal/Metal.h>
+ #define XR_USE_GRAPHICS_API_METAL
+@@ -84,6 +84,9 @@ - (void)dealloc
+ 		try {
+ 			const bool missing = argc > 1 && std::string(argv[1]) == "missing";
+ 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
++			const uint64_t timeout_seconds = argc > 3 ? std::stoull(argv[3]) : 20;
++			if (timeout_seconds < 1 || timeout_seconds > 300)
++				throw std::runtime_error("Timeout must be between 1 and 300 seconds");
+ 			fprintf(
+ 			    stdout,
+ 			    "{\"event\":\"config\",\"thermal\":%ld,\"low_power\":%s,\"clock\":\"CLOCK_MONOTONIC\"}\n",
+@@ -197,7 +200,7 @@ - (void)dealloc
+ 			unsigned rendered = 0;
+ 			bool running = false, lost = false;
+ 			uint64_t fault = 0;
+-			uint64_t deadline = now_ns() + 20000000000ULL;
++			uint64_t deadline = now_ns() + timeout_seconds * 1000000000ULL;
+ 			while (rendered < frames && now_ns() < deadline) {
+ 				XrEventDataBuffer event{};
+ 				event.type = XR_TYPE_EVENT_DATA_BUFFER;

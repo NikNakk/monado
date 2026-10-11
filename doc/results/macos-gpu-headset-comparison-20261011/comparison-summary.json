@@ -1,0 +1,24 @@
+{
+  "baseline": {
+    "cadence_intervals": 14128,
+    "long_gaps": 33,
+    "long_gap_percent": 0.23357870894677238,
+    "gaps_at_least_20_ms": 2,
+    "estimated_skipped_refreshes": 35,
+    "mean_run_throughput_hz": 119.57786677163102,
+    "mean_run_median_entry_to_display_ms": 27.349562,
+    "max_gap_ms": 25.028209,
+    "max_entry_to_display_ms": 45.559459000000004
+  },
+  "modified": {
+    "cadence_intervals": 14124,
+    "long_gaps": 39,
+    "long_gap_percent": 0.27612574341546303,
+    "gaps_at_least_20_ms": 2,
+    "estimated_skipped_refreshes": 43,
+    "mean_run_throughput_hz": 119.52585476066469,
+    "mean_run_median_entry_to_display_ms": 26.9817705,
+    "max_gap_ms": 33.366749,
+    "max_entry_to_display_ms": 53.654167
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "head": "d1133762a71c2bab49260a45ca486c9eb92453ec",
+  "baseline": "805316bebe976256a16c591ee135a5422ffe73a3",
+  "frames_per_run": 7200,
+  "warmup_client_frames": 120,
+  "order": [
+    "A0",
+    "B0",
+    "B1",
+    "A1"
+  ],
+  "changed_sources": [
+    "src/xrt/compositor/main/comp_compositor.c",
+    "src/xrt/compositor/multi/comp_multi_compositor.c",
+    "src/xrt/compositor/multi/comp_multi_private.h",
+    "src/xrt/compositor/util/comp_swapchain_gpu_reuse.c",
+    "src/xrt/compositor/util/comp_swapchain_gpu_reuse.h",
+    "src/xrt/compositor/util/comp_semaphore.c",
+    "src/xrt/compositor/util/comp_semaphore.h"
+  ],
+  "source_hashes": {
+    "A": {
+      "src/xrt/compositor/main/comp_compositor.c": "0e7a2abc3efd1657a2f1f417f8e9183573d3ac428f7c775566917f9cd1243b1e",
+      "src/xrt/compositor/multi/comp_multi_compositor.c": "97e70634ac74f9149098424fd7b9f5c3058465c92b8efc2cb2134eee499edd5a",
+      "src/xrt/compositor/multi/comp_multi_private.h": "05597aa1980616d6a327ed465c9f1a8a2aed3580a46f31a654aa30248c625f84",
+      "src/xrt/compositor/util/comp_swapchain_gpu_reuse.c": "9fb2ba61a4b66e73138cf28d79e40d39ee9354a497ab48e5cc9864ba6dfe9c72",
+      "src/xrt/compositor/util/comp_swapchain_gpu_reuse.h": "f9d65ca7cf99e5998631cee8068041462499e77e853fa9de293a5b6ffbf3a524",
+      "src/xrt/compositor/util/comp_semaphore.c": "42bf3cd9c0646b1df8871081adcb2896445bf06aa16b9f059f38e3524efd231d",
+      "src/xrt/compositor/util/comp_semaphore.h": "f8a1564ae5340609d790b671a11df9dd65ef6701ded8bfe05d635d41cde7c8e3"
+    },
+    "B": {
+      "src/xrt/compositor/main/comp_compositor.c": "3e09eeca4ab4303ce2689e8ef30d87ba0dfb5557aa57e7e96754ce1fc6fd592d",
+      "src/xrt/compositor/multi/comp_multi_compositor.c": "c67f2ba87a5703da874f03d8736064d9b54eb1d005e8c0aa63de57c2e80d7405",
+      "src/xrt/compositor/multi/comp_multi_private.h": "91b9c313079657ccc81f3c5e60eb7129e50920e0699e6616328ca2e7a3000ca2",
+      "src/xrt/compositor/util/comp_swapchain_gpu_reuse.c": "64233b62c2a9dfefc6eacaaeb7ef537efc0014d173a007a280128edf5f2e2777",
+      "src/xrt/compositor/util/comp_swapchain_gpu_reuse.h": "de883a58a2000961f90bd428e8f5f334b16cb4e14e511758c7ab006ca11de4fc",
+      "src/xrt/compositor/util/comp_semaphore.c": "a111aa00897c97fad657770d7866d2751478717ed7c0ea2f1549fe4e6fadde42",
+      "src/xrt/compositor/util/comp_semaphore.h": "5c4b2cdcf4b4f5d10251a97b0945ecce3cc1395fc3cab5259126d1faf10ea9ce"
+    }
+  }
+}

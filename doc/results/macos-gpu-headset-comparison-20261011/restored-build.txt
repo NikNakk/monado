@@ -1,0 +1,212 @@
+[0/2] Re-checking globbed directories...
+[1/211] Building C object src/xrt/auxiliary/os/CMakeFiles/aux_os_ble.dir/os_ble_stubs.c.o
+[2/211] Building C object src/xrt/state_trackers/steamvr_drv/steamvr_bindings/CMakeFiles/ovrd_generated_bindings.dir/b_ovrd_generated_bindings.c.o
+[3/211] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_semaphore.c.o
+[4/211] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_base.c.o
+[5/211] Building C object src/xrt/compositor/multi/CMakeFiles/comp_multi.dir/comp_multi_compositor.c.o
+[6/211] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_swapchain_gpu_reuse.c.o
+[7/211] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_compositor.c.o
+[8/211] Building C object src/xrt/compositor/multi/CMakeFiles/comp_multi.dir/comp_multi_system.c.o
+[9/211] Linking C static library src/xrt/state_trackers/steamvr_drv/steamvr_bindings/libovrd_generated_bindings.a
+[10/211] Building C object src/xrt/targets/common/CMakeFiles/target_instance_no_comp.dir/target_instance_no_comp.c.o
+[11/211] Linking CXX static library src/xrt/auxiliary/os/libaux_os_ble.a
+[12/211] Building OBJC object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_metal_semaphore_probe.m.o
+[13/211] Linking CXX static library src/xrt/compositor/util/libcomp_util.a
+[14/211] Linking CXX static library src/xrt/compositor/multi/libcomp_multi.a
+[15/211] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_direct_swapchain.m.o
+[16/211] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_client.m.o
+[17/211] Linking CXX static library src/xrt/compositor/main/libcomp_main.a
+[18/211] Linking CXX static library src/xrt/compositor/client/libcomp_client.a
+[19/211] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_metal.c.o
+[20/211] Linking CXX shared library src/xrt/targets/libmonado/libmonado.25.1.0.dylib
+[21/211] Building C object src/xrt/drivers/CMakeFiles/drv_sample.dir/sample/sample_hmd.c.o
+[22/211] Building C object src/xrt/drivers/CMakeFiles/drv_sample.dir/sample/sample_prober.c.o
+[23/211] Building CXX object src/xrt/compositor/mock/CMakeFiles/comp_mock.dir/mock_compositor.cpp.o
+[24/211] Building OBJC object src/xrt/ipc/CMakeFiles/monado_metal_xpc_client.dir/shared/monado_metal_xpc_client.m.o
+[25/211] Building OBJC object src/xrt/ipc/CMakeFiles/ipc_metal_xpc_probe.dir/shared/ipc_metal_xpc_probe.m.o
+[26/211] Linking CXX static library src/xrt/ipc/libipc_server.a
+[27/211] Linking CXX static library src/xrt/targets/common/libtarget_instance_no_comp.a
+[28/211] Building OBJC object src/xrt/ipc/CMakeFiles/ipc_metal_xpc_broker.dir/shared/ipc_metal_xpc_broker.m.o
+[29/211] Creating library symlink src/xrt/targets/libmonado/libmonado.25.dylib src/xrt/targets/libmonado/libmonado.dylib
+[30/211] Building C object src/xrt/targets/libmonado/CMakeFiles/libmonado-example.dir/example.c.o
+[31/211] Building CXX object src/xrt/state_trackers/steamvr_drv/CMakeFiles/st_ovrd.dir/ovrd_driver.cpp.o
+[32/211] Linking CXX static library src/xrt/state_trackers/steamvr_drv/libst_ovrd.a
+[33/211] Building CXX object src/xrt/auxiliary/htc/CMakeFiles/aux_htc.dir/htc_config.cpp.o
+[34/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_calibration_dump.c.o
+[35/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_info.c.o
+[36/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_lighthouse.c.o
+[37/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_pssense_test.c.o
+[38/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_psvr2_camera.c.o
+[39/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_psvr2_constellation.c.o
+[40/211] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_synth.dir/tools/constellation_synth.cpp.o
+[41/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_psvr2_pose.c.o
+[42/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_probe.c.o
+[43/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_pose_dump.c.o
+[44/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_slambatch.c.o
+[45/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_test.c.o
+[46/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_main.c.o
+[47/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_calibrate.c.o
+[48/211] Building OBJC object src/xrt/targets/macos_layer_host_probe/CMakeFiles/macos-layer-host-probe.dir/macos_layer_host_probe.m.o
+[49/211] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_psvr2_calibration_record.c.o
+[50/211] Building C object src/xrt/targets/gui/CMakeFiles/gui.dir/gui_sdl2.c.o
+[51/211] Building C object src/xrt/targets/gui/CMakeFiles/gui.dir/gui_sdl2_imgui.c.o
+[52/211] Building C object src/xrt/targets/gui/CMakeFiles/gui.dir/gui_sdl2_main.c.o
+[53/211] Building OBJC object src/xrt/targets/macos_layer_host_probe/CMakeFiles/macos-layer-host-probe-game.dir/macos_layer_host_probe.m.o
+[54/211] Building C object src/xrt/targets/steamvr_drv/CMakeFiles/driver_monado.dir/main.c.o
+[55/211] Building C object src/xrt/targets/ctl/CMakeFiles/monado-ctl.dir/main.c.o
+[56/211] Building OBJC object src/xrt/targets/service/CMakeFiles/monado_service_xpc_control.dir/macos_xpc_control.m.o
+[57/211] Building CXX object tests/CMakeFiles/tests_cxx_wrappers.dir/tests_cxx_wrappers.cpp.o
+[58/211] Building CXX object tests/CMakeFiles/tests_deque.dir/tests_deque.cpp.o
+[59/211] Building CXX object tests/CMakeFiles/tests_floor_calibration.dir/tests_floor_calibration.cpp.o
+[60/211] Building CXX object tests/CMakeFiles/tests_generic_callbacks.dir/tests_generic_callbacks.cpp.o
+[61/211] Building CXX object tests/CMakeFiles/tests_foveation.dir/tests_foveation.cpp.o
+[62/211] Building CXX object src/xrt/targets/psvr2_openxr_test/CMakeFiles/psvr2-openxr-test.dir/psvr2_openxr_test_matrix.mm.o
+[63/211] Building CXX object tests/CMakeFiles/tests_glue_traits.dir/tests_glue_traits.cpp.o
+[64/211] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_replay.dir/tools/frontend_compare.cpp.o
+[65/211] Building CXX object tests/CMakeFiles/tests_id_ringbuffer.dir/tests_id_ringbuffer.cpp.o
+[66/211] Building CXX object tests/CMakeFiles/tests_lowpass_float.dir/tests_lowpass_float.cpp.o
+[67/211] Building CXX object tests/CMakeFiles/tests_history_buf.dir/tests_history_buf.cpp.o
+[68/211] Building CXX object tests/CMakeFiles/tests_glue_device.dir/tests_glue_device.cpp.o
+[69/211] Building CXX object tests/CMakeFiles/tests_lowpass_integer.dir/tests_lowpass_integer.cpp.o
+[70/211] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_replay.dir/tools/fusion_compare.cpp.o
+[71/211] Building CXX object tests/CMakeFiles/tests_passthrough_calibration.dir/tests_passthrough_calibration.cpp.o
+[72/211] Building CXX object tests/CMakeFiles/tests_pacing.dir/tests_pacing.cpp.o
+[73/211] Building CXX object tests/CMakeFiles/tests_json.dir/tests_json.cpp.o
+[74/211] Building CXX object tests/CMakeFiles/tests_quat_change_of_basis.dir/tests_quat_change_of_basis.cpp.o
+[75/211] Building CXX object tests/CMakeFiles/tests_space_overseer.dir/tests_space_overseer.cpp.o
+[76/211] Building CXX object tests/CMakeFiles/tests_quat_swing_twist.dir/tests_quat_swing_twist.cpp.o
+[77/211] Building CXX object tests/CMakeFiles/tests_vector.dir/tests_vector.cpp.o
+[78/211] Building CXX object tests/CMakeFiles/tests_relation_chain.dir/tests_relation_chain.cpp.o
+[79/211] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_fusion.dir/fusion/imu_preintegration.cpp.o
+[80/211] Building CXX object tests/CMakeFiles/tests_rational.dir/tests_rational.cpp.o
+[81/211] Building CXX object tests/CMakeFiles/tests_vec3_angle.dir/tests_vec3_angle.cpp.o
+[82/211] Building CXX object tests/CMakeFiles/tests_pose.dir/tests_pose.cpp.o
+[83/211] Building CXX object tests/CMakeFiles/tests_worker.dir/tests_worker.cpp.o
+[84/211] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_replay.dir/tools/constellation_replay.cpp.o
+[85/211] Building CXX object tests/CMakeFiles/tests_render_pipeline_cache.dir/tests_macos_metal_device.mm.o
+[86/211] Building CXX object tests/CMakeFiles/tests_frame_share.dir/tests_frame_share.cpp.o
+[87/211] Building CXX object tests/CMakeFiles/tests_psvr2_tracking_share.dir/tests_psvr2_tracking_share.cpp.o
+[88/211] Building CXX object tests/CMakeFiles/tests_uv_to_tangent.dir/tests_uv_to_tangent.cpp.o
+[89/211] Building CXX object tests/CMakeFiles/tests_quatexpmap.dir/tests_quatexpmap.cpp.o
+[90/211] Building CXX object tests/CMakeFiles/tests_pose_metrics.dir/tests_pose_metrics.cpp.o
+[91/211] Building CXX object tests/CMakeFiles/tests_foveation_openxr.dir/tests_foveation_openxr.cpp.o
+[92/211] Building CXX object tests/CMakeFiles/tests_render_pipeline_cache.dir/tests_render_pipeline_cache.cpp.o
+[93/211] Building CXX object tests/CMakeFiles/tests_generic_controller.dir/tests_generic_controller.cpp.o
+[94/211] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_fusion.dir/fusion/fusion_math.cpp.o
+[95/211] Building C object tests/CMakeFiles/tests_macos_runtime_probe.dir/tests_macos_runtime_probe.c.o
+[96/211] Building CXX object tests/CMakeFiles/tests_input_transform.dir/tests_input_transform.cpp.o
+[97/211] Building CXX object tests/CMakeFiles/tests_ipc_shmem.dir/tests_ipc_shmem.cpp.o
+[98/211] Building CXX object tests/CMakeFiles/tests_macos_hosted_client.dir/tests_macos_hosted_client.cpp.o
+[99/211] Building C object tests/CMakeFiles/tests_macos_iosurface_producer.dir/tests_macos_iosurface_producer.c.o
+[100/211] Building CXX object tests/CMakeFiles/tests_macos_passthrough_rotation.dir/tests_macos_passthrough_rotation.mm.o
+[101/211] Building C object tests/CMakeFiles/tests_macos_iosurface_import_probe.dir/tests_macos_iosurface_import_probe.c.o
+[102/211] Building C object tests/CMakeFiles/tests_macos_openxr_loaderless_probe.dir/tests_macos_openxr_loaderless_probe.c.o
+[103/211] Building C object tests/CMakeFiles/tests_macos_ipc_swapchain_probe.dir/tests_macos_ipc_swapchain_probe.c.o
+[104/211] Building CXX object tests/CMakeFiles/tests_led_phase_bootstrap.dir/tests_led_phase_bootstrap.cpp.o
+[105/211] Building C object tests/CMakeFiles/tests_macos_remote_pose_bridge.dir/tests_macos_remote_pose_bridge.c.o
+[106/211] Building CXX object tests/CMakeFiles/tests_constellation_dataset.dir/tests_constellation_dataset.cpp.o
+[107/211] Building C object tests/CMakeFiles/tests_macos_remote_pose_packet_sender.dir/tests_macos_remote_pose_packet_sender.c.o
+[108/211] Building C object tests/CMakeFiles/tests_macos_remote_driver_pose_probe.dir/tests_macos_remote_driver_pose_probe.c.o
+[109/211] Building C object tests/CMakeFiles/tests_macos_openxr_vulkan_probe.dir/tests_macos_openxr_vulkan_probe.c.o
+[110/211] Building C object tests/CMakeFiles/tests_ipc_local_session.dir/__/src/xrt/ipc/client/ipc_client_system.c.o
+[111/211] Building C object tests/CMakeFiles/tests_ipc_thread_shutdown.dir/__/src/xrt/ipc/server/ipc_server_thread_shutdown.c.o
+[112/211] Building CXX object tests/CMakeFiles/tests_macos_gpu_reuse.dir/tests_macos_gpu_reuse.cpp.o
+[113/211] Building CXX object tests/CMakeFiles/tests_imu_optical_filter.dir/tests_imu_optical_filter.cpp.o
+[114/211] Building CXX object tests/CMakeFiles/tests_metal_foveation_cache.dir/tests_metal_foveation_cache.mm.o
+[115/211] Building OBJC object tests/CMakeFiles/tests_metal_xpc_registry.dir/__/src/xrt/ipc/shared/ipc_metal_xpc_service.m.o
+[116/211] Building CXX object tests/CMakeFiles/tests_ipc_thread_shutdown.dir/tests_ipc_thread_shutdown.cpp.o
+[117/211] Building CXX object tests/CMakeFiles/tests_macos_gpu_sync.dir/tests_macos_gpu_sync.mm.o
+[118/211] Building C object tests/CMakeFiles/tests_pssense_clock.dir/__/src/xrt/drivers/pssense/pssense_clock.c.o
+[119/211] Linking CXX static library src/xrt/auxiliary/htc/libaux_htc.a
+[120/211] Linking CXX executable src/xrt/tracking/constellation/constellation_synth
+[121/211] Building CXX object tests/CMakeFiles/tests_ipc_socket_security.dir/tests_ipc_socket_security.cpp.o
+[122/211] Linking CXX static library src/xrt/drivers/libdrv_sample.a
+[123/211] Linking CXX static library src/xrt/compositor/mock/libcomp_mock.a
+[124/211] Building CXX object tests/CMakeFiles/tests_joint_pose_solver.dir/tests_joint_pose_solver.cpp.o
+[125/211] Linking OBJC shared library src/xrt/ipc/libmonado_metal_xpc_client.dylib
+[126/211] Linking OBJC executable src/xrt/ipc/monado-ipc-metal-xpc-probe
+[127/211] Linking CXX executable src/xrt/ipc/monado-ipc-metal-xpc-broker
+[128/211] Linking C executable src/xrt/targets/libmonado/libmonado-example
+[129/211] Building CXX object tests/CMakeFiles/tests_metal_xpc_registry.dir/tests_metal_xpc_registry.mm.o
+[130/211] Linking CXX executable src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
+[131/211] Linking CXX executable src/xrt/targets/cli/monado-cli
+[132/211] Linking OBJC executable src/xrt/targets/macos_layer_host_probe/macos-layer-host-probe
+[133/211] Linking CXX shared library src/xrt/targets/openxr/libopenxr_monado.dylib; Generating OpenXR runtime manifest named /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json for build tree usage
+[134/211] Linking OBJC executable src/xrt/targets/macos_layer_host_probe/macos-layer-host-probe-game.app/Contents/MacOS/macos-layer-host-probe-game
+/Users/nickkennedy/Code/monado-2/build/arm64/src/xrt/targets/macos_layer_host_probe/macos-layer-host-probe-game.app: replacing existing signature
+[135/211] Linking CXX executable src/xrt/targets/gui/monado-gui
+[136/211] Linking CXX shared module steamvr-monado/bin/osx64/driver_monado.so
+[137/211] Building CXX object tests/CMakeFiles/tests_ipc_local_session.dir/tests_ipc_local_session.cpp.o
+[138/211] Linking CXX executable src/xrt/targets/service/monado-service-xpc-control
+[139/211] Linking CXX executable src/xrt/targets/ctl/monado-ctl
+[140/211] Linking CXX executable src/xrt/targets/service/monado-service
+[141/211] Linking C executable tests/tests_macos_iosurface_producer
+[142/211] Linking C executable tests/tests_macos_openxr_loaderless_probe
+[143/211] Linking CXX executable tests/tests_macos_gpu_sync
+[144/211] Linking CXX executable tests/tests_macos_openxr_vulkan_probe
+[145/211] Linking CXX executable tests/tests_macos_remote_pose_bridge
+[146/211] Linking CXX executable tests/tests_macos_ipc_swapchain_probe
+[147/211] Linking CXX executable tests/tests_macos_runtime_probe
+[148/211] Linking CXX executable tests/tests_macos_iosurface_import_probe
+[149/211] Linking CXX executable tests/tests_macos_remote_pose_packet_sender
+[150/211] Linking CXX executable tests/tests_macos_remote_driver_pose_probe
+[151/211] Building CXX object tests/CMakeFiles/tests_pssense_clock.dir/tests_pssense_clock.cpp.o
+[152/211] Building CXX object tests/CMakeFiles/tests_macos_remote_layer.dir/tests_macos_remote_layer.mm.o
+[153/211] Building CXX object tests/CMakeFiles/tests_psvr2_sense_tracking.dir/tests_psvr2_sense_tracking.cpp.o
+[154/211] Building CXX object tests/CMakeFiles/tests_pssense_fusion.dir/tests_pssense_fusion.cpp.o
+[155/211] Building CXX object src/external/CMakeFiles/xrt-external-catch2.dir/Catch2/catch_amalgamated.cpp.o
+[156/211] Linking CXX static library src/external/libxrt-external-catch2.a
+[157/211] Linking CXX executable tests/tests_cxx_wrappers
+[158/211] Linking CXX executable tests/tests_deque
+[159/211] Linking CXX executable tests/tests_history_buf
+[160/211] Linking CXX executable tests/tests_floor_calibration
+[161/211] Linking CXX executable tests/tests_glue_device
+[162/211] Linking CXX executable tests/tests_foveation
+[163/211] Linking CXX executable tests/tests_glue_traits
+[164/211] Linking CXX executable tests/tests_json
+[165/211] Linking CXX executable tests/tests_id_ringbuffer
+[166/211] Linking CXX executable tests/tests_generic_callbacks
+[167/211] Linking CXX executable tests/tests_lowpass_float
+[168/211] Linking CXX executable tests/tests_passthrough_calibration
+[169/211] Linking CXX executable tests/tests_rational
+[170/211] Linking CXX executable tests/tests_lowpass_integer
+[171/211] Linking CXX executable tests/tests_pacing
+[172/211] Linking CXX executable tests/tests_quat_swing_twist
+[173/211] Linking CXX executable tests/tests_space_overseer
+[174/211] Linking CXX executable tests/tests_relation_chain
+[175/211] Linking CXX executable tests/tests_quatexpmap
+[176/211] Linking CXX executable tests/tests_quat_change_of_basis
+[177/211] Linking CXX executable tests/tests_psvr2_tracking_share
+[178/211] Linking CXX executable tests/tests_vector
+[179/211] Linking CXX executable tests/tests_frame_share
+[180/211] Linking CXX executable tests/tests_worker
+[181/211] Linking CXX executable tests/tests_vec3_angle
+[182/211] Linking CXX executable tests/tests_pose
+[183/211] Linking CXX executable tests/tests_render_pipeline_cache
+[184/211] Linking CXX executable tests/tests_uv_to_tangent
+[185/211] Linking CXX executable tests/tests_joint_pose_solver
+[186/211] Linking CXX executable tests/tests_pose_metrics
+[187/211] Linking CXX executable tests/tests_led_phase_bootstrap
+[188/211] Linking CXX executable tests/tests_imu_optical_filter
+[189/211] Linking CXX executable tests/tests_constellation_dataset
+[190/211] Linking CXX executable tests/tests_macos_hosted_client
+[191/211] Linking CXX executable tests/tests_macos_gpu_reuse
+[192/211] Linking CXX executable tests/tests_metal_foveation_cache
+[193/211] Linking CXX executable tests/tests_foveation_openxr
+[194/211] Linking CXX executable tests/tests_ipc_shmem
+[195/211] Linking CXX executable tests/tests_input_transform
+[196/211] Linking CXX executable tests/tests_generic_controller
+[197/211] Linking CXX executable tests/tests_pssense_clock
+[198/211] Linking CXX executable tests/tests_ipc_local_session
+[199/211] Linking CXX executable tests/tests_macos_passthrough_rotation
+[200/211] Linking CXX executable tests/tests_psvr2_sense_tracking
+[201/211] Linking CXX executable tests/tests_ipc_thread_shutdown
+[202/211] Linking CXX executable tests/tests_ipc_socket_security
+[203/211] Linking CXX executable tests/tests_metal_xpc_registry
+[204/211] Linking CXX executable tests/tests_macos_remote_layer
+[205/211] Building CXX object tests/CMakeFiles/tests_psvr2_controller_visuals.dir/tests_psvr2_controller_visuals.mm.o
+[206/211] Linking CXX executable tests/tests_psvr2_controller_visuals
+[207/211] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_fusion.dir/fusion/sliding_window_fusion.cpp.o
+[208/211] Linking CXX static library src/xrt/tracking/constellation/libconstellation_fusion.a
+[209/211] Linking CXX executable src/xrt/tracking/constellation/constellation_replay
+[210/211] Linking CXX executable tests/tests_pssense_fusion
