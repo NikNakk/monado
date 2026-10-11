@@ -1017,6 +1017,22 @@ left the GPU work active every frame. See the
 PS VR2 diagnostic/replay callers set it. Rift retains its original per-camera
 solver even when the process inherits this environment option.
 
+
+
+## Runtime stage recenter gesture (2026-10-09)
+
+`XRT_PSSENSE_STAGE_RECENTER=1` in the **service** enables a right Sense Options
+long press, independent of client focus and OpenXR action bindings. Default off
+until hardware validation. `XRT_PSSENSE_STAGE_RECENTER_HOLD_MS` defaults to
+1000 and is clamped to 100–10000 ms. The service samples every 100 ms and fires
+once per hold. Release, disconnection or stale input resets the hold.
+
+The managed STAGE is centred horizontally under the tracked head and yaw is
+aligned to its forward direction. Floor height is preserved. Invalid tracking,
+an almost vertical gaze and driver-provided STAGE are refused explicitly;
+release before retrying. Apps receive the existing STAGE/LOCAL_FLOOR change
+notifications. Short presses continue to reach apps. See the
+[implementation and hardware gate](macos-floor-calibration.md#runtime-stage-recenter-gesture-2026-10-09).
 ### Native GPU readiness, allocation and teardown limits — 2026-10-11
 
 | Environment variable | Default | Valid values | Purpose |

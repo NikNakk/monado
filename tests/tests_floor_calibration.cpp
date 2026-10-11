@@ -123,6 +123,7 @@ struct FakeHead
 	struct xrt_input inputs[2];
 	struct xrt_pose pose;
 	bool worn = true;
+	bool tracked = true;
 };
 
 xrt_result_t
@@ -134,6 +135,9 @@ fake_get_tracked_pose(struct xrt_device *xdev, enum xrt_input_name name, int64_t
 		return XRT_ERROR_INPUT_UNSUPPORTED;
 	}
 	out->pose = head->pose;
+	if (!head->tracked) {
+		return XRT_SUCCESS;
+	}
 	out->relation_flags = (enum xrt_space_relation_flags)(
 	    XRT_SPACE_RELATION_ORIENTATION_VALID_BIT | XRT_SPACE_RELATION_POSITION_VALID_BIT |
 	    XRT_SPACE_RELATION_ORIENTATION_TRACKED_BIT | XRT_SPACE_RELATION_POSITION_TRACKED_BIT);
@@ -264,4 +268,70 @@ TEST_CASE("Floor calibration sets the managed STAGE from the head")
 	}
 
 	xrt_space_overseer_destroy(&xso);
+}
+
+
+TEST_CASE("Stage recenter preserves the floor and updates running spaces")
+{
+	FakeHead head = {};
+	init_fake_head(head);
+	struct xrt_device *devices[] = {&head.base};
+	struct xrt_session_event_sink sink = {null_push};
+	struct b_space_overseer *uso = b_space_overseer_create(&sink);
+	struct xrt_pose identity = XRT_POSE_IDENTITY;
+	b_space_overseer_legacy_setup(uso, devices, 1, &head.base, &identity, false, true);
+	auto *xso = reinterpret_cast<struct xrt_space_overseer *>(uso);
+	struct xrt_pose stage = identity;
+	stage.position.y = -1.35f;
+	REQUIRE(xrt_space_overseer_set_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
+	        XRT_SUCCESS);
+	struct xrt_space *local = nullptr, *floor = nullptr;
+	REQUIRE(xrt_space_overseer_create_local_space(xso, &local, &floor) == XRT_SUCCESS);
+	struct xrt_vec3 up = {0, 1, 0};
+	math_quat_from_angle_vector(1.2f, &up, &head.pose.orientation);
+	head.pose.position = {2.0f, 0.4f, -3.0f};
+	REQUIRE(u_stage_recenter(xso, &head.base, 1) == XRT_SUCCESS);
+	REQUIRE(xrt_space_overseer_get_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
+	        XRT_SUCCESS);
+	CHECK(stage.position.y == Catch::Approx(-1.35f));
+	struct xrt_space_relation in_stage;
+	REQUIRE(xrt_space_overseer_locate_space(xso, xso->semantic.stage, &identity, 1, xso->semantic.view, &identity,
+	                                        &in_stage) == XRT_SUCCESS);
+	CHECK(in_stage.pose.position.x == Catch::Approx(0.0f).margin(1e-5));
+	CHECK(in_stage.pose.position.z == Catch::Approx(0.0f).margin(1e-5));
+	CHECK(in_stage.pose.position.y == Catch::Approx(1.75f));
+	CHECK(in_stage.pose.orientation.w == Catch::Approx(1.0f));
+	struct xrt_space_relation floor_in_root;
+	REQUIRE(xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, 1, floor, &identity,
+	                                        &floor_in_root) == XRT_SUCCESS);
+	CHECK(floor_in_root.pose.position.x == Catch::Approx(2.0f));
+	CHECK(floor_in_root.pose.position.y == Catch::Approx(-1.35f));
+	CHECK(floor_in_root.pose.position.z == Catch::Approx(-3.0f));
+	// A later recenter is absolute in root, rather than accumulating an offset.
+	head.pose.position.x = 4.0f;
+	REQUIRE(u_stage_recenter(xso, &head.base, 2) == XRT_SUCCESS);
+	REQUIRE(xrt_space_overseer_get_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
+	        XRT_SUCCESS);
+	CHECK(stage.position.x == Catch::Approx(4.0f));
+	// Refuse an ambiguous heading without moving the stage.
+	struct xrt_vec3 right = {1, 0, 0};
+	math_quat_from_angle_vector((float)M_PI / 2, &right, &head.pose.orientation);
+	CHECK(u_stage_recenter(xso, &head.base, 3) == XRT_ERROR_POSE_NOT_ACTIVE);
+	head.tracked = false;
+	CHECK(u_stage_recenter(xso, &head.base, 4) == XRT_ERROR_POSE_NOT_ACTIVE);
+	xrt_space_reference(&local, nullptr);
+	xrt_space_reference(&floor, nullptr);
+	xrt_space_overseer_destroy(&xso);
+}
+
+TEST_CASE("Stage recenter long press fires once and resets on release or disconnection")
+{
+	struct u_stage_recenter_hold hold = {};
+	CHECK_FALSE(u_stage_recenter_hold_update(&hold, true, 0, 1000));
+	CHECK_FALSE(u_stage_recenter_hold_update(&hold, true, 999, 1000));
+	CHECK(u_stage_recenter_hold_update(&hold, true, 1000, 1000));
+	CHECK_FALSE(u_stage_recenter_hold_update(&hold, true, 2000, 1000));
+	CHECK_FALSE(u_stage_recenter_hold_update(&hold, false, 2001, 1000));
+	CHECK_FALSE(u_stage_recenter_hold_update(&hold, true, 3000, 1000));
+	CHECK(u_stage_recenter_hold_update(&hold, true, 4000, 1000));
 }

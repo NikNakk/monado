@@ -2257,8 +2257,20 @@ ipc_handle_device_update_input(volatile struct ipc_client_state *ics, uint32_t i
 
 	GET_XDEV_OR_RETURN(ics, device_id, xdev);
 
-	// Update inputs.
+	// Snapshot under the same lock used by runtime button polling. Never hold
+	// this lock during socket writes: a slow client must not stall the gesture.
+	struct xrt_input *inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, xdev->input_count);
+	if (xdev->input_count > 0 && inputs == NULL) {
+		return XRT_ERROR_ALLOCATION;
+	}
+	struct xrt_device snapshot = *xdev;
+	snapshot.inputs = inputs;
+	os_mutex_lock(&ics->server->input_lock);
 	xret = xrt_device_update_inputs(xdev);
+	if (xdev->input_count > 0) {
+		memcpy(inputs, xdev->inputs, xdev->input_count * sizeof(*inputs));
+	}
+	os_mutex_unlock(&ics->server->input_lock);
 
 	/*
 	 * Reply structure, make sure to send the result. We need to tell the
@@ -2273,15 +2285,19 @@ ipc_handle_device_update_input(volatile struct ipc_client_state *ics, uint32_t i
 	};
 
 	xret = ipc_send(imc, &reply, sizeof(reply));
-	IPC_CHK_AND_RET(ics->server, xret, "ipc_send(result reply)");
+	if (xret != XRT_SUCCESS) {
+		goto cleanup;
+	}
 
-	xret = send_device_inputs(ics, xdev);
-	IPC_CHK_AND_RET(ics->server, xret, "send_device_inputs");
+	xret = send_device_inputs(ics, &snapshot);
+	if (xret != XRT_SUCCESS) {
+		goto cleanup;
+	}
 
 	xret = send_device_outputs(ics, xdev);
-	IPC_CHK_AND_RET(ics->server, xret, "send_device_outputs");
-
-	return XRT_SUCCESS;
+	cleanup:
+	free(inputs);
+	return xret;
 }
 
 static struct xrt_input *

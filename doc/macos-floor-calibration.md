@@ -131,4 +131,59 @@ with a fake head device through the real space overseer. The service glue is
 ## Future work
 
 - A seated mode, or detecting seated use, for the automatic calibration.
-- A controller-button or in-headset trigger for recalibration.
+- An in-headset floor-height recalibration trigger (the gesture below only changes horizontal position and yaw).
+
+
+## Runtime stage recenter gesture (2026-10-09)
+
+`XRT_PSSENSE_STAGE_RECENTER=1` enables a right Sense Options hold in the
+service. `XRT_PSSENSE_STAGE_RECENTER_HOLD_MS` chooses the hold length (default
+1000 ms, clamped to 100–10000). The option remains off by default until
+hardware validation. Set it in the service LaunchAgent environment, not just
+the Wine client. Isolated services launched by the companion SteamVR launcher
+also accept these variables from the caller. Use a rebuilt service containing
+this change; older isolated builds cannot implement the gesture.
+
+The existing floor-calibration worker remains alive to sample the raw button
+at 10 Hz after automatic floor calibration finishes. It also runs with no
+configured eye height if the gesture alone is enabled. It checks the input's
+active state and freshness, fires once per hold, and resets on release/loss.
+It uses no app action binding or SteamVR focus. The input mutex serializes
+service polling with IPC snapshots; socket writes happen after releasing it.
+
+The head's tracked pose is located in root, then its horizontal position and
+yaw replace managed STAGE's offset while retaining stage y. This moves every
+STAGE consumer and running per-app LOCAL_FLOOR through the existing space graph
+and sends the existing space-change events. The head and both controllers
+remain in one coordinate system. Driver-provided STAGE, missing/untracked
+poses and a nearly vertical facing direction are refused and logged; release
+before retrying. The gesture does not estimate a new floor or alter LOCAL.
+Short Options presses still reach applications.
+
+The old SteamVR-driver-only hold and world-from-driver transform are removed
+in the companion repository. That path depended on the driver's action binding
+and could not affect direct OpenXR titles such as Hyperbolica.
+
+Unit coverage verifies preserved floor height, recentered head position/yaw,
+a running per-app floor, absolute repeated recentering, refusal of untracked /
+vertical poses and one trigger per hold with release/reset. Native build and
+CTest results are recorded with the completion note below. Hardware validation
+and Linux CI remain pending. The next user check is a hold in SteamVR Home,
+then in direct OpenXR Hyperbolica, checking heading, controller alignment,
+unchanged floor height and one action per hold.
+
+
+### Build and local configuration result
+
+The ARM64 runtime/service, x86_64 Wine runtime and companion SteamVR driver
+build successfully. All 48 runnable macOS CTest suites pass (the IPC shared
+memory, socket-security and remote-layer suites required an unsandboxed rerun);
+one optional passthrough Metal test is skipped. The final recenter/space and IPC
+lifecycle subset also passes after input-snapshot changes. Linux CI and the
+user's headset test remain pending.
+
+The local installed service plist now has `XRT_PSSENSE_STAGE_RECENTER=1`;
+other preferences are preserved. The loaded LaunchAgent must be reloaded to
+read the edited plist before the next user hardware session. This follow-up
+does not restart a running service or launch a hardware test. The hold length
+remains the one-second default. Changes are uncommitted on top of `805316beb`.
