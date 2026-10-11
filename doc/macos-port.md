@@ -46,7 +46,7 @@ work remain separate.
 This document is the high-level status and roadmap for the experimental Monado
 port to Apple Silicon macOS, with PS VR2 as the primary headset.
 
-**Status date:** 2026-10-08
+**Status date:** 2026-10-09
 
 **Current integration branch:** `macos-upstream-clean`
 
@@ -104,7 +104,7 @@ This is development work, not an upstream-supported or packaged Monado target.
 | PS VR2 passthrough in Monado | **Working experimental path** | Stock-headset BC4 cameras are wired to `XR_FB_passthrough` on macOS using a GAV-derived initial fisheye projection; the opt-in transferred calibration is visually confirmed in camera-only and blended-scene service compositing. Blended hosted compositing is also visually confirmed. Rotation correction has user-confirmed hosted alignment during yaw, pitch and roll and now defaults on with valid calibration. Both compositor modes automatically load a serial-bound user calibration. The user confirmed the defaults check and acceptable subjective latency on 2026-10-09; formal latency measurements remain follow-up. |
 | PS VR2 eye tracking | **Working experimental** | `XR_EXT_eye_gaze_interaction` using the Sony calibration blob plus an optional 9-point user calibration; gaze activates lazily. Accuracy still needs broader hardware validation. |
 | Foveated rendering | **Hardware-validated, opt-in at build time** | Fixed `XR_FB_foveation` / `XR_FB_foveation_configuration` works without gaze; `XR_META_foveation_eye_tracked` adds runtime-owned gaze. Validated on PS VR2 through `monado-service`. Metal is the only rendering backend, via the experimental `XR_MNDX_foveation_metal` companion. |
-| SteamVR Home | **Unresolved** | Not currently working; feasibility depends on how much additional SteamVR/OpenVR behaviour can be reproduced without Valve's compositor. |
+| SteamVR Home | **Working experimental Wine path** | Home and Settings/other menus are user-confirmed through the external SteamVR driver and OpenXR. Occasional checkerboards, variable pacing and a non-fatal startup dialog remain unresolved; see the [October 9 follow-up](macos-psvr2-timing-diagnostics.md#wine-application-follow-up--2026-10-09). |
 | End-user packaging | **Not done** | Development launchd installation exists, but there is no polished signed/notarized installer or settings application. |
 
 ## Native macOS architecture
@@ -616,7 +616,7 @@ than a Monado runtime target. Recreating Valve's compositor is not a goal.
 4. **SteamVR/OpenVR compatibility breadth**
    - reduce game-specific shims;
    - improve real controller mappings and OpenVR interfaces;
-   - establish whether SteamVR Home is practical without Valve's compositor.
+   - harden the working SteamVR Home path: checkerboards, pacing and startup diagnostics.
 
 ### Runtime quality and platform completeness
 
@@ -676,7 +676,7 @@ and the Windows install outside this checkout:
 | `build/openvr-legacy-unity` | The legacy Unity OpenVR proxy, built by `scripts/macos/build-wine-openvr-legacy-unity-proxy.zsh`. |
 | `~/Code/monado-upstreaming` | Clean upstream Monado checkout for preparing merge requests, starting with the cross-platform bug fixes. Not a build or test location for this fork. |
 | `~/Code/macos-wine-xr` | The Wine/XR bridge. `build-in-process/` holds its driver and in-process runtime builds. |
-| `~/Code/dxmt` | DXMT (`NikNakk/dxmt`); `steamvr-in-process` is the branch in use. Built in `build/` against the CrossOver runtime as its Wine SDK; see the bridge's `docs/steamvr-home.md`. |
+| `~/Code/dxmt` | DXMT (`NikNakk/dxmt`); `codex/cross-process-presentation-hardening` is the current local branch. Built in `build/` against the CrossOver runtime as its Wine SDK; see the bridge's `docs/steamvr-home.md`. |
 | `~/Code/dxmt-toolchains` | LLVM 15 (x86_64) for building DXMT. Meson refuses it inside the DXMT tree. |
 | `~/Code/xrizer` | xrizer (`NikNakk/xrizer`), used by `scripts/macos/rebuild-xrizer.zsh`. |
 | `~/Code/wine-crossover` | CrossOver 26.3 FOSS Wine: `sources/`, `build/`, `deps-x86_64/`, and `runtime/`, the patched Wine tree with DXMT installed. |
@@ -942,6 +942,23 @@ half-pixel principal-point offset. The opt-in runtime mapping now has a positive
 camera-only and blended-scene visual results; full-field coverage, measured alignment and latency
 remain work (2026-10-08).
 
+
+**2026-10-10 SteamVR three-image trial:** an opt-in service Metal allocation
+and latest-completed scheduling path now matches SteamVR's three fixed
+resolve-image handles. Producer and service GPU waits remain intact. Both
+architectures build and all 48 runnable tests pass (one optional test skips);
+fixed-allocation copy and three-image zero-copy hardware trials are pending.
+See the [trial procedure](macos-psvr2-timing-diagnostics.md#three-image-steamvr-compatibility-prepared-2026-10-10).
+
+
+**2026-10-10 SteamVR synchronization follow-up:** moving copy destination
+waits before source ownership is user-reported as definitely better, with
+occasional black frames and no checkerboards so far. Remaining waits are
+sampled inside Wine. Bounded Wine ownership-history diagnostics are built,
+tested and installed for the next full Wine-prefix restart; live processes
+were left running. Keep current DXMT during this investigation, then migrate
+to its hardened cross-process presentation build as a separate matched-build
+trial. See [the ownership investigation](macos-psvr2-timing-diagnostics.md#wine-ownership-history-prepared--2026-10-10).
 ### Native GPU synchronization M1–M2 completion — 2026-10-11
 
 The native milestones now include the 6 ms readiness cutoff, per-client/global

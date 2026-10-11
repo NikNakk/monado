@@ -400,3 +400,115 @@ barrier with readbacks off. Black noise is therefore visually resolved for
 this follow-up. Keep image-reuse protection and the output barrier; do not
 restore unconditional diagnostic readbacks. Rapid-rotation edge borders
 remain a separate reported phenomenon.
+
+
+## Wine follow-up, 2026-10-09
+
+The user reports occasional checkerboards in both Hyperbolica (direct Wine
+OpenXR) and SteamVR Home (Wine driver through OpenXR), plus variable Home
+frame pacing. No matched capture or tested commit was supplied. Synchronization
+is a candidate; the native UE reuse/output-barrier corrections remain required
+and their prior hardware result is not overturned by this different workload.
+Do not change presentation defaults or call this a confirmed reuse regression
+without tracing actual producer and consumer ordering. See the
+[full follow-up](macos-psvr2-timing-diagnostics.md#wine-application-follow-up--2026-10-09).
+
+
+## DXMT fence regression — 2026-10-10
+
+A matched standalone Wine/Metal test reproduces premature producer completion
+in DXMT's protected immediate context: the pre-fix build fails for both private
+Metal and IOSurface textures, while locking the complete `Signal`/`Wait`
+methods passes. The corrected DLL is installed for fresh Wine launches.
+No headset run has yet established an effect on Hyperbolica/Home checkerboards
+or pacing; the application must enable D3D11 multithread protection for this
+lock to serialize its context. See the
+[ordering evidence](macos-psvr2-timing-diagnostics.md#dxmt-protected-context-fence-ordering--2026-10-10).
+
+
+## Home checkerboards and black frames, 2026-10-10
+
+The user reports persistent checkerboards plus occasional fully black Home
+frames after the matched DXMT installation. The current driver logs confirmed
+sync-texture acquire failures and zero-layer submission; SteamVR logs repeated
+WaitForAcquire failures. The visual issue remains unresolved. Bounded HRESULT
+logging and a user-run copied-image comparison are prepared; neither removing
+the wait nor restoring diagnostic readbacks is justified by this evidence.
+See the [handoff follow-up](macos-psvr2-timing-diagnostics.md#steamvr-home-corruption-persists--2026-10-10).
+
+
+The fresh 00:33 session loads the early-handoff driver and still has black
+frames, including while relatively still. Sampled ReleaseSync calls take
+17.4–193 ms despite some sub-0.4 ms source holds. The next deployed diagnostic
+build retains the previous DXMT presentation baseline, restores verified fence
+locks, and splits release timing into phases. Its three isolated checks pass;
+there is no hardware result for it yet and no visual fix is claimed. See the
+[latest handoff evidence](macos-psvr2-timing-diagnostics.md#early-handoff-build-loaded-black-frames-persist-2026-10-10).
+
+
+## Requested automated Home timing capture — 2026-10-10 07:19
+
+The requested PS VR2 run of the minimal baseline DXMT build completed 4,777
+Home presents. SteamVR reports average compositor CPU/GPU 0.435/1.064 ms
+and application CPU/GPU 2.031/1.264 ms, but sync acquire/release errors remain.
+Logged slow driver holds are 12–28 ms with sub-0.14 ms successful release;
+the earlier long-release stall was not reproduced. No driver acquire failure
+or zero-layer sample was logged. No visual result or display-interval
+measurement is claimed. See the
+[capture and limitations](macos-psvr2-timing-diagnostics.md#requested-home-headset-timing-capture-2026-10-10-0719).
+
+
+## SteamVR ownership delays, 2026-10-10
+
+The latest largest-source copy run still shows black/checkerboard frames,
+without user-reported crashes. Repeated resizing has stopped, while keyed
+acquisition timeouts remain. Destination creation/image waits are now moved
+before source mutex ownership; source GPU reuse protection remains intact.
+Lifecycle and isolated GPU regression tests pass, and the next-launch build
+is installed. No visual improvement is claimed before a fresh hardware run.
+DXMT owner-phase timings now distinguish dispatch/wakeup from time inside Wine.
+See [the implementation and evidence](macos-psvr2-timing-diagnostics.md#destination-preparation-before-source-ownership--2026-10-10).
+
+
+The next source-lock hardware run is user-reported as definitely better,
+with occasional black frames and no checkerboard so far. Updated copy-driver
+activation and minimal DXMT hashes are verified. Owner-phase samples place
+remaining acquisition timeouts and slow releases inside Wine, with short
+owner wakeups. Preserve this as partial improvement, not complete resolution;
+see [the run evidence](macos-psvr2-timing-diagnostics.md#source-lock-run-user-reports-improvement--2026-10-10).
+
+
+The first longer Wine ownership capture locates Home as the owner in 20/22
+sampled timeout snapshots, including a late hold of at least 155.706 ms while
+the driver times out. Failure-window samples show longer Home holds later,
+consistent with the user's report; they are not an unbiased pacing census.
+Matching keys and successful wake sequences are recorded. The remaining
+question is what extends Home's ownership, including rendering/backpressure
+and Wine request latency. See
+[the longer-run evidence](macos-psvr2-timing-diagnostics.md#longer-run-identifies-home-ownership-holds--2026-10-10).
+
+
+The 2026-10-11 user-run ownership diagnostic session develops black frames
+about every 2–3 seconds. The user corrects the first stack capture: it too was
+already symptomatic, so there is no clear-period baseline. Home's sampled
+app-owned interval is much longer than its release handoff; recurring
+compositor acquisition timeouts remain. Unresolved Windows stacks leave the
+specific wait/work within ownership unknown. See
+[the corrected capture record](macos-psvr2-timing-diagnostics.md#frequent-black-frames-ownership-attribution--2026-10-11).
+
+
+The first owned-wait hardware run (2026-10-11 00:17:31) still has user-reported
+black frames. Measured context/flush/capacity/CPU-fence waits explain very
+little of Home's sampled texture ownership. Queue frame-latency waiting
+sometimes contributes, while separate DXGI swapchain pacing remains outside
+the counters. Do not rule out presentation waits or label the remainder CPU
+rendering. See [the capture](macos-psvr2-timing-diagnostics.md#first-run-of-owned-wait-counters--2026-10-11).
+
+
+The requested 2026-10-11 01:03 hardware test confirms the extended Present
+counters work in Home. Selected ownership intervals have median 24.010 ms,
+versus 0.052 ms total Present; separate swapchain pacing is unused. DXMT's
+measured producer waits do not explain most of the gap. Compositor mutex
+timeouts persist. The 5879-present run has no visual observation or physical
+display timing claim; investigate Home/OpenVR work/waits next. See
+[the test](macos-psvr2-timing-diagnostics.md#requested-headset-test-of-dxgi-ownership-counters--2026-10-11-0103).

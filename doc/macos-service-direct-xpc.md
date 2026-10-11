@@ -267,7 +267,50 @@ but then encountered the unrelated SteamVR driver's hard-coded
 `/usr/local/share/steamvr-monado` destination. The corrected OpenXR install
 script was rerun independently and succeeded; no SteamVR driver was installed.
 
+#### Wine client mismatch corrected (2026-10-09)
+
+The first Hyperbolica launch after installation failed: the Wine native client
+still identified itself as `v25.1.0-2175-gd5eba0543`, while the installed service
+was `v25.1.0-2177-gbc9591f03`. The bridge's
+`run-mwxr-20261009-230717/steam.log` records `ipc_client_check_git_tag` rejecting
+both connection attempts and `XR_ERROR_RUNTIME_UNAVAILABLE` from
+`xrCreateInstance`. The service then exited normally with status 0 after its
+configured five-second idle timeout; it did not crash.
+
+Both architecture builds were refreshed after the installation-record commit
+`805316beb`, and the native runtime, libmonado and service were reinstalled into
+the same prefix. Binary inspection confirms the installed service/runtime and
+`build/x86_64` client all report `v25.1.0-2178-g805316beb`; system-loader
+extension enumeration still passes. Settings and launch registrations are
+unchanged. A fresh Hyperbolica launch is required to validate the corrected
+pair; no hardware run was initiated during the correction.
+
+Future updates must rebuild both architectures and reinstall the native
+service/runtime together. `scripts/macos/rebuild-both` rebuilds the development
+trees but does not update this installed prefix. Even documentation commits
+change Monado's version tag and can trigger the strict IPC version check.
+
 ## Validation
+
+### Chromium system-runtime discovery (2026-10-10)
+
+The local Chromium fork now resolves its selected runtime before entering the
+XR sandbox. It honours an explicit `XR_RUNTIME_JSON`, otherwise searches the
+architecture-specific and generic registrations in `/usr/local/share/openxr/1`
+in loader order. It resolves manifest and library symlinks and relative library
+paths, then grants read access to the canonical manifest and read/executable-map
+access to the runtime library's directory. No fixed Monado installation prefix
+is required. Dependencies outside that directory still need separate scoped
+rules; the existing Homebrew dependency allowances remain.
+
+Eight regression tests compile and exercise the actual resolver, and Chromium's
+browser integration and policy compile. A Seatbelt probe using the resolver's
+system-selected paths loads this installed Monado with `XR_RUNTIME_JSON` unset
+and enumerates 62 extensions. Reading the unrelated installed Monado header
+remains denied. The development Chromium framework was relinked and installed
+in `~/Code/chromium/src/out/mac-webxr/Chromium.app`; restart the browser to use
+it. An actual WebXR/headset run remains user validation. This corrects browser
+discovery, not the separate end-user installer/dependency packaging work.
 
 Build the service, launchd helper, and OpenXR runtime, bootstrap the direct
 service, and make sure no manually started `monado-service` or legacy broker is

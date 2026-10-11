@@ -372,6 +372,66 @@ the October 5 profile/reacquisition work and October 8 confirmation of 10–20
 minute game sessions supersede its initial reliability status.
 See the [application evidence](macos-pssense-6dof-integration.md#first-non-test-application-openbrush-2026-10-04).
 
+
+## Wine application follow-up (2026-10-09)
+
+SteamVR Home and Settings/other menus now work, as reported by the user.
+Occasional checkerboards in both direct Wine OpenXR Hyperbolica and the
+SteamVR-driver Home path, variable Home pacing, a failed recenter attempt,
+and a non-fatal startup dialog remain open. CEF causality and the dialog's
+exact wording are unconfirmed. See the
+[report and investigation boundaries](macos-psvr2-timing-diagnostics.md#wine-application-follow-up--2026-10-09).
+
+The service now implements an opt-in right Sense Options hold to recenter
+managed STAGE independently of app bindings/focus; floor height is preserved.
+The companion driver-only gesture is removed. See
+[configuration and validation](macos-floor-calibration.md#runtime-stage-recenter-gesture-2026-10-09).
+
+
+A 2026-10-10 standalone GPU regression confirms premature completion signaling
+in DXMT's protected D3D11 context. The fork now locks full `Signal`/`Wait`
+operations; the matched old build fails and the corrected build passes. The
+verified DLL is installed for fresh Wine launches. Headset results remain
+pending; see the [fence evidence](macos-psvr2-timing-diagnostics.md#dxmt-protected-context-fence-ordering--2026-10-10).
+
+
+The first D3D11-only deployment regressed Steam/SteamVR launch through a missing
+WineMetal presentation export. A complete matching set now passes standalone
+presentation, cross-process fixture pixel capture and the fence regression,
+and is installed. Fresh Steam/SteamVR confirmation remains pending. See the
+[dependency correction](macos-psvr2-timing-diagnostics.md#wine-presentation-dependency-mismatch--2026-10-10).
+
+
+The 00:22 follow-up still shows black frames and adds dashboard/Steam-logo panel
+failures. The broader DXMT library deployment has been rolled back to the
+prior baseline; its fence patch remains in source only. The rebuilt driver now
+queues sync-mutex release after source reads but before runtime frame commit.
+Both dashboard recovery and visual benefit need a fresh user-run launch; see
+[the handoff and rollback](macos-psvr2-timing-diagnostics.md#earlier-sync-handoff-and-presentation-rollback--2026-10-10).
+
+
+The fresh 00:33 session confirms the early-handoff driver but still produces
+black frames: ReleaseSync itself takes up to 193 ms in sampled calls. A minimal
+DXMT build based on the old presentation baseline now reinstates the proven
+fence locks and adds bounded ReleaseSync phase timing. All three isolated
+checks pass and the matching modules are installed; a fresh user launch is
+needed for those diagnostics. See the
+[current evidence](macos-psvr2-timing-diagnostics.md#early-handoff-build-loaded-black-frames-persist-2026-10-10).
+
+
+**2026-10-10 SteamVR three-image trial:** an opt-in service Metal allocation
+and latest-completed scheduling path now matches SteamVR's three fixed
+resolve-image handles. Producer and service GPU waits remain intact. Both
+architectures build and all 48 runnable tests pass (one optional test skips);
+fixed-allocation copy and three-image zero-copy hardware trials are pending.
+See the [trial procedure](macos-psvr2-timing-diagnostics.md#three-image-steamvr-compatibility-prepared-2026-10-10).
+
+
+SteamVR copy-source ownership is shorter and user-reported as improved;
+black frames remain. Wine ownership-history diagnostics are installed for the
+next full prefix restart. Current DXMT stays in place; hardened presentation
+migration is a separate follow-up. See
+[the evidence and next capture](macos-psvr2-timing-diagnostics.md#wine-ownership-history-prepared--2026-10-10).
 ### Native GPU synchronization M1–M2 completion — 2026-10-11
 
 The native milestones now include the 6 ms readiness cutoff, per-client/global
