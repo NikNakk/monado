@@ -22,8 +22,8 @@ The current port documentation selected the integration branch, rather than the 
 
 Commits:
 
-- `3a347d87c`: native two-process harness, runner and CTest scenarios.
-- `e7bd14556`: readiness dependencies, failed-wait handling and quarantine.
+- `dfff38184`: native two-process harness, runner and CTest scenarios.
+- `1c7b515d6`: readiness dependencies, failed-wait handling and quarantine.
 
 The checkout initially contained substantial unrelated, uncommitted changes.
 Commits exclude those changes. Added local-session regression tests depend on the

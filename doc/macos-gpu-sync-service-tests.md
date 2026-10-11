@@ -15,12 +15,12 @@ below now verifies actual PS VR2 presentation during both fault scenarios.
 
 ## Implementation and reproducibility
 
-Implementation commit: **`b09b0c295`**. Review diff: `followup-code.patch` in the
+Implementation commit: **`ba46ccd91`**. Review diff: `followup-code.patch` in the
 evidence directory. Overlapping status documents are updated in the working
 tree; their isolated task diff is `status-doc-updates.patch`.
 
-Working branch remains `codex/macos-gpu-sync-harness`, following `3a347d87c`,
-`e7bd14556` and `2f10e2d71`. Baseline synchronization code is pinned to
+Working branch remains `codex/macos-gpu-sync-harness`, following `dfff38184`,
+`1c7b515d6` and `59f520813`. Baseline synchronization code is pinned to
 `805316bebe976256a16c591ee135a5422ffe73a3`, with the initial integration checkout's
 pre-existing multi-compositor edits retained in both comparisons. Existing
 unrelated working-tree changes remain separate from scoped follow-up commits.
@@ -239,7 +239,7 @@ separately authorized.
 
 ## PS VR2 hardware follow-up — 2026-10-11
 
-Tested HEAD: **`9feaaf70b`**, synchronization implementation **`b09b0c295`**,
+Tested HEAD: **`8ba2bf496`**, synchronization implementation **`ba46ccd91`**,
 plus the uncommitted `--headset` runner change and the pre-existing integration
 working tree. Exact HEAD and complete working diff are retained in
 [macos-gpu-headset-20261011](results/macos-gpu-headset-20261011/). The hardware

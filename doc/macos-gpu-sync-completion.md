@@ -7,7 +7,7 @@ This report supersedes the remaining native synchronization criteria in the
 [headset comparison](macos-gpu-sync-headset-comparison.md).
 Chromium, Wine/DXMT and wider presentation tuning remain outside this run.
 
-Implementation commits: **`bcd3a4458`**, **`7d8bf13d7`**, **`99bd947ec`**, on `codex/macos-gpu-sync-harness`.
+Implementation commits: **`3aaddfeec`**, **`a7d160429`**, **`b6e70ca26`**, on `codex/macos-gpu-sync-harness`.
 Existing unrelated integration edits remain uncommitted and are preserved.
 A separate build of the scoped production/index variants succeeded, without
 relying on the unrelated multi-compositor modifications. The full integration
@@ -15,6 +15,33 @@ checkout is the tested configuration; its exact diff and source variants are
 recorded with the evidence.
 
 Evidence: [macos-gpu-sync-completion-20261011](results/macos-gpu-sync-completion-20261011/).
+
+The raw evidence directories are kept locally under `doc/results/`, untracked,
+like other result captures. The branch was rewritten on 2026-10-11 to drop them
+from history, so the hashes in these notes are the rewritten ones. Files inside
+the evidence directories still cite the original hashes. The original history is
+on the local branch `backup/gpu-sync-harness-with-results`.
+
+| Original | Rewritten | Commit |
+| --- | --- | --- |
+| `3a347d87c` | `dfff38184` | cross-process Metal/MoltenVK harness |
+| `e7bd14556` | `1c7b515d6` | gate GPU dependencies, quarantine swapchains |
+| `2f10e2d71` | `59f520813` | checkpoint docs |
+| `b09b0c295` | `ba46ccd91` | offscreen service rendering and fault recovery |
+| `9feaaf70b` | `8ba2bf496` | offscreen recovery docs |
+| `d1133762a` | `98b4284ad` | headset fault-recovery verification |
+| `fca1f399d` | `a57bb7ebb` | headset before/after comparison |
+| `bcd3a4458` | `3aaddfeec` | readiness budgets, bounded teardown tests |
+| `7d8bf13d7` | `a7d160429` | bounded client consumer waits |
+| `99bd947ec` | `b6e70ca26` | display-link shutdown in bounded drain |
+| `bc5ebc9fe` | `072308ba5` | this report |
+
+Follow-up review fixes, not covered by the hardware evidence above:
+`9e5d166d2` makes the launchd service CTests opt-in
+(`XRT_MACOS_SERVICE_GPU_TESTS`); `cb2bec9ed` drops a frame whose producer
+dependency is rejected, rather than leaking its slot, references and image
+claims; `cd3046bae` retires a source image behind a CPU Vulkan wait after a
+Metal command-buffer error, rather than pinning it.
 
 ## What changed to close the gaps
 
@@ -140,8 +167,8 @@ the no-wait control. The original production offscreen A–B–B–A comparison
 measured +2.5 µs (+1.67%) median Vulkan CPU submission cost; the mandatory
 already-satisfied wait and checks preserve cross-API memory ordering.
 
-The final-policy A–B–B–A comparison uses `fca1f399d` plus the same initial
-integration overrides as A, and `bcd3a4458` plus those integration changes as B.
+The final-policy A–B–B–A comparison uses `a57bb7ebb` plus the same initial
+integration overrides as A, and `3aaddfeec` plus those integration changes as B.
 Eleven production source/header files differ; full variants, source hashes,
 working diff and build logs are recorded in `offscreen-comparison`. Four runs
 submit 1800 normal frames each (~30 s), simulated 60 Hz HMD, 1280×720 real Vulkan

@@ -14,14 +14,14 @@ supersedes the earlier absence of a matched physical comparison, not the
 ## Scope and reproducibility
 
 Evidence: [macos-gpu-headset-comparison-20261011](results/macos-gpu-headset-comparison-20261011/).
-Tested HEAD **`d1133762a`**, with the recorded integration working tree and small
+Tested HEAD **`98b4284ad`**, with the recorded integration working tree and small
 measurement-only changes enabling a longer, still bounded client runtime.
 There are no additional production synchronization or presentation fixes.
 
 A is the synchronization code at `805316bebe976256a16c591ee135a5422ffe73a3`,
 retaining the initial checkout's pre-existing multi-compositor edits through the
 same source overrides as the earlier offscreen comparison. B is the current
-synchronization implementation (`e7bd14556`, followed by `b09b0c295`). Seven
+synchronization implementation (`1c7b515d6`, followed by `ba46ccd91`). Seven
 synchronization source/header files differ; their complete A/B contents and
 SHA-256 hashes are retained. Presentation code, runtime test client, offscreen
 plumbing, configuration and build settings are identical in both arms. This
