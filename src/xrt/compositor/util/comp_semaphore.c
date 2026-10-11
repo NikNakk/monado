@@ -81,6 +81,18 @@ comp_semaphore_destroy(struct xrt_compositor_semaphore *xcsem)
  *
  */
 
+bool
+comp_semaphore_matches_vk(struct xrt_compositor_semaphore *sem, struct vk_bundle *vk)
+{
+#ifdef VK_KHR_timeline_semaphore
+	return sem != NULL && sem->wait == comp_semaphore_wait && comp_semaphore(sem)->vk == vk;
+#else
+	(void)sem;
+	(void)vk;
+	return false;
+#endif
+}
+
 xrt_result_t
 comp_semaphore_create(struct vk_bundle *vk,
                       xrt_graphics_sync_handle_t *out_handle,

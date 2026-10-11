@@ -22,6 +22,7 @@ def main():
     p.add_argument('--scenario', choices=SCENARIOS, action='append')
     p.add_argument('--concurrent', type=int, default=1)
     p.add_argument('--timeout', type=float, default=60)
+    p.add_argument('--keep-awake', action='store_true', help='Temporarily inhibit idle system sleep during each run')
     a = p.parse_args()
     if not 1 <= a.concurrent <= 8 or not 1 <= a.repeats <= 1000:
         p.error('concurrency/repeat bounds exceeded')
@@ -32,7 +33,7 @@ def main():
             return dict(command=command, exit=r.returncode, stdout=r.stdout, stderr=r.stderr)
         except (OSError, subprocess.TimeoutExpired) as e:
             return dict(command=command, unavailable=str(e))
-    telemetry = dict(start_time=time.time(), game_mode='not requested; headless CLI',
+    telemetry = dict(start_time=time.time(), game_mode='not requested; headless CLI', keep_awake=a.keep_awake,
                      commit=capture(['git', 'rev-parse', 'HEAD']),
                      branch=capture(['git', 'branch', '--show-current']),
                      dirty=capture(['git', 'status', '--short']),
@@ -49,7 +50,10 @@ def main():
     def run(job):
         s, i = job
         try:
-            r = subprocess.run([a.probe, s, str(a.frames)], text=True, capture_output=True, timeout=a.timeout)
+            command = [a.probe, s, str(a.frames)]
+            if a.keep_awake:
+                command = ['/usr/bin/caffeinate', '-i'] + command
+            r = subprocess.run(command, text=True, capture_output=True, timeout=a.timeout)
             (out/f'{s}-{i:03}.jsonl').write_text(r.stdout)
             (out/f'{s}-{i:03}.stderr').write_text(r.stderr)
             records = [json.loads(line) for line in r.stdout.splitlines()]

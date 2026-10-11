@@ -9,6 +9,7 @@
 #include "util/comp_swapchain_gpu_reuse.h"
 #include "util/comp_swapchain_gpu_reuse_internal.h"
 #include "util/comp_swapchain.h"
+#include "util/comp_semaphore.h"
 #include "util/u_debug.h"
 #include "util/u_logging.h"
 #include "util/u_misc.h"
@@ -35,6 +36,10 @@ struct gpu_reuse_tracker
 	struct comp_swapchain *sc;
 	struct gpu_reuse_context *context;
 	uint64_t last_gpu_use[XRT_MAX_SWAPCHAIN_IMAGES];
+	struct xrt_compositor_semaphore *producer[XRT_MAX_SWAPCHAIN_IMAGES];
+	uint64_t producer_value[XRT_MAX_SWAPCHAIN_IMAGES];
+	uint64_t bytes;
+	bool quarantined;
 	uint32_t pending_consumers[XRT_MAX_SWAPCHAIN_IMAGES];
 	xrt_result_t (*original_wait_image)(struct xrt_swapchain *, int64_t, uint32_t);
 	void (*original_destroy)(struct xrt_swapchain *);
@@ -85,6 +90,7 @@ struct gpu_reuse_renderer_tls
 	struct comp_layer_accum *cla;
 	struct gpu_reuse_submit submit;
 	struct vk_semaphore_list_signal signal_sems;
+	struct vk_semaphore_list_wait wait_sems;
 	const VkSubmitInfo *expected_submit_info;
 	const VkSubmitInfo *rejected_submit_info;
 	VkResult rejected_result;
@@ -95,6 +101,11 @@ static pthread_mutex_t g_gpu_reuse_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_gpu_reuse_cond = PTHREAD_COND_INITIALIZER;
 static struct gpu_reuse_context *g_gpu_reuse_contexts = NULL;
 static struct gpu_reuse_native_accum *g_gpu_reuse_native_accums = NULL;
+/* Limit all live plus quarantined tracked storage, and small-object growth. */
+#define GPU_REUSE_MAX_BYTES (UINT64_C(1024) * 1024 * 1024)
+#define GPU_REUSE_MAX_TRACKERS 256
+static uint64_t g_tracked_bytes;
+static uint32_t g_tracker_count;
 static __thread struct gpu_reuse_renderer_tls g_renderer = {0};
 
 static void
@@ -278,6 +289,16 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 			return XRT_TIMEOUT;
 		}
 
+		/* Consumer cancellation does not imply producer completion. Poll only:
+		 * an unresolved producer obligation must never authorize reuse. */
+		if (tracker->producer[image_index] != NULL) {
+			xrt_result_t producer_result = xrt_compositor_semaphore_wait(
+			    tracker->producer[image_index], tracker->producer_value[image_index], 0);
+			if (producer_result != XRT_SUCCESS) {
+				pthread_mutex_unlock(&g_gpu_reuse_mutex);
+				return producer_result;
+			}
+		}
 		uint64_t value = tracker->last_gpu_use[image_index];
 		VkSemaphore timeline = tracker->context->timeline;
 		struct vk_bundle *vk = tracker->context->vk;
@@ -316,8 +337,11 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 			pthread_mutex_unlock(&g_gpu_reuse_mutex);
 			return XRT_SUCCESS;
 		}
-		bool stable =
-		    tracker->pending_consumers[image_index] == 0 && tracker->last_gpu_use[image_index] == value;
+		bool stable = tracker->pending_consumers[image_index] == 0 &&
+		              tracker->last_gpu_use[image_index] == value &&
+		              (tracker->producer[image_index] == NULL ||
+		               xrt_compositor_semaphore_wait(tracker->producer[image_index],
+		                                             tracker->producer_value[image_index], 0) == XRT_SUCCESS);
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
 		if (stable) {
 			return XRT_SUCCESS;
@@ -325,77 +349,128 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 	}
 }
 
-static void
-destroy_context_after_last_tracker(struct gpu_reuse_context *context)
+static bool
+tracker_completed_locked(struct gpu_reuse_tracker *tracker)
 {
-	if (context == NULL) {
-		return;
-	}
-
-#ifdef VK_KHR_timeline_semaphore
-	if (context->last_submitted_value != 0) {
-		VkSemaphoreWaitInfo wait_info = {
-		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
-		    .flags = 0,
-		    .semaphoreCount = 1,
-		    .pSemaphores = &context->timeline,
-		    .pValues = &context->last_submitted_value,
-		};
-		VkResult ret = context->vk->vkWaitSemaphores(context->vk->device, &wait_info, UINT64_MAX);
-		if (ret != VK_SUCCESS) {
-			VK_ERROR(context->vk, "Waiting for final swapchain GPU reuse value: %s", vk_result_string(ret));
+	struct vk_bundle *vk = tracker->context->vk;
+	for (uint32_t i = 0; i < tracker->xsc->image_count; i++) {
+		if (tracker->pending_consumers[i] != 0) {
+			return false;
+		}
+		if (tracker->producer[i] != NULL &&
+		    xrt_compositor_semaphore_wait(tracker->producer[i], tracker->producer_value[i], 0) != XRT_SUCCESS) {
+			return false;
+		}
+		uint64_t value = tracker->last_gpu_use[i];
+		if (value != 0) {
+			VkSemaphoreWaitInfo wait = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+			                            .semaphoreCount = 1,
+			                            .pSemaphores = &tracker->context->timeline,
+			                            .pValues = &value};
+			if (vk->vkWaitSemaphores(vk->device, &wait, 0) != VK_SUCCESS) {
+				return false;
+			}
 		}
 	}
-#endif
+	return true;
+}
 
-	context->vk->vkDestroySemaphore(context->vk->device, context->timeline, NULL);
-	free(context);
+/* Caller holds the registry lock. original_destroy only enqueues the swapchain
+ * on its existing compositor garbage collector; it does not free GPU storage. */
+static void
+reclaim_tracker_locked(struct gpu_reuse_tracker **ptr)
+{
+	struct gpu_reuse_tracker *t = *ptr;
+	*ptr = t->next;
+	for (uint32_t i = 0; i < t->xsc->image_count; i++) {
+		xrt_compositor_semaphore_reference(&t->producer[i], NULL);
+	}
+	g_tracked_bytes -= t->bytes;
+	g_tracker_count--;
+	t->xsc->wait_image = t->original_wait_image;
+	t->xsc->destroy = t->original_destroy;
+	U_LOG_I("GPU reuse reclaim: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u", (void *)t->xsc,
+	        (unsigned long long)t->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count);
+	t->original_destroy(t->xsc);
+	free(t);
+}
+
+void
+comp_swapchain_gpu_reuse_collect(struct vk_bundle *vk, bool device_teardown)
+{
+	pthread_mutex_lock(&g_gpu_reuse_mutex);
+	struct gpu_reuse_context **cp = &g_gpu_reuse_contexts;
+	while (*cp != NULL) {
+		struct gpu_reuse_context *c = *cp;
+		if (c->vk != vk) {
+			cp = &c->next;
+			continue;
+		}
+		struct gpu_reuse_tracker **tp = &c->trackers;
+		while (*tp != NULL) {
+			if ((*tp)->quarantined && tracker_completed_locked(*tp)) {
+				reclaim_tracker_locked(tp);
+			} else {
+				tp = &(*tp)->next;
+			}
+		}
+		if (c->trackers == NULL) {
+			vk->vkDestroySemaphore(vk->device, c->timeline, NULL);
+			*cp = c->next;
+			free(c);
+		} else if (device_teardown) {
+			/* Producer access may outlive the Vulkan device. Keep native storage
+			 * until process exit, detach so a reused vk_bundle address is safe.
+			 * Budget remains charged. Never access this device again. */
+			U_LOG_W("GPU reuse device teardown retains unresolved resources until process exit");
+			*cp = c->next;
+			c->vk = NULL;
+		} else {
+			cp = &c->next;
+		}
+	}
+	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 }
 
 static void
 tracked_swapchain_destroy(struct xrt_swapchain *xsc)
 {
-	void (*original_destroy)(struct xrt_swapchain *) = NULL;
-	struct gpu_reuse_tracker *removed = NULL;
-	struct gpu_reuse_context *empty_context = NULL;
-
 	pthread_mutex_lock(&g_gpu_reuse_mutex);
 	struct gpu_reuse_tracker *tracker = find_tracker_locked(xsc);
 	if (tracker != NULL) {
-		struct gpu_reuse_context *context = tracker->context;
-		struct gpu_reuse_tracker **tracker_ptr = &context->trackers;
-		while (*tracker_ptr != NULL) {
-			if (*tracker_ptr == tracker) {
-				*tracker_ptr = tracker->next;
-				break;
-			}
-			tracker_ptr = &(*tracker_ptr)->next;
-		}
-
-		original_destroy = tracker->original_destroy;
-		xsc->wait_image = tracker->original_wait_image;
-		xsc->destroy = tracker->original_destroy;
-		removed = tracker;
-
-		if (context->trackers == NULL) {
-			struct gpu_reuse_context **context_ptr = &g_gpu_reuse_contexts;
-			while (*context_ptr != NULL) {
-				if (*context_ptr == context) {
-					*context_ptr = context->next;
-					break;
-				}
-				context_ptr = &(*context_ptr)->next;
-			}
-			empty_context = context;
-		}
+		tracker->quarantined = true;
+		U_LOG_I("GPU reuse quarantine: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u", (void *)xsc,
+		        (unsigned long long)tracker->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count);
 	}
 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
+	/* Existing compositor GC polls it with timeout zero on subsequent frames. */
+}
 
-	free(removed);
-	destroy_context_after_last_tracker(empty_context);
-	if (original_destroy != NULL) {
-		original_destroy(xsc);
+xrt_result_t
+comp_swapchain_gpu_reuse_set_producer(struct xrt_swapchain *xsc,
+                                      uint32_t index,
+                                      struct xrt_compositor_semaphore *sem,
+                                      uint64_t value)
+{
+	pthread_mutex_lock(&g_gpu_reuse_mutex);
+	struct gpu_reuse_tracker *t = find_tracker_locked(xsc);
+	if (t != NULL && index < xsc->image_count) {
+		if (!comp_semaphore_matches_vk(sem, t->context->vk) || t->quarantined) {
+			pthread_mutex_unlock(&g_gpu_reuse_mutex);
+			return XRT_ERROR_VULKAN;
+		}
+		/* Replacing a dependency must not destroy a semaphore referenced by
+		 * an earlier compositor submission. Normal Metal clients keep one
+		 * event per session. Reject a changed payload until completion. */
+		if (t->producer[index] != NULL && t->producer[index] != sem && !tracker_completed_locked(t)) {
+			pthread_mutex_unlock(&g_gpu_reuse_mutex);
+			return XRT_ERROR_VULKAN;
+		}
+		xrt_compositor_semaphore_reference(&t->producer[index], sem);
+		t->producer_value[index] = value;
 	}
+	pthread_mutex_unlock(&g_gpu_reuse_mutex);
+	return XRT_SUCCESS;
 }
 
 xrt_result_t
@@ -411,12 +486,26 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
 		return XRT_ERROR_VULKAN;
 	}
 
+	uint64_t bytes = 0;
+	for (uint32_t i = 0; i < sc->vkic.image_count; i++) {
+		VkMemoryRequirements requirements = {0};
+		sc->vk->vkGetImageMemoryRequirements(sc->vk->device, sc->vkic.images[i].handle, &requirements);
+		if (requirements.size > GPU_REUSE_MAX_BYTES - bytes) {
+			return XRT_ERROR_ALLOCATION;
+		}
+		bytes += requirements.size;
+	}
 	pthread_mutex_lock(&g_gpu_reuse_mutex);
 	if (find_tracker_locked(xsc) != NULL) {
 		pthread_mutex_unlock(&g_gpu_reuse_mutex);
 		return XRT_SUCCESS;
 	}
 
+	if (g_tracker_count >= GPU_REUSE_MAX_TRACKERS || bytes > GPU_REUSE_MAX_BYTES - g_tracked_bytes) {
+		pthread_mutex_unlock(&g_gpu_reuse_mutex);
+		U_LOG_E("GPU reuse allocation budget exhausted (live plus quarantined storage)");
+		return XRT_ERROR_ALLOCATION;
+	}
 	struct gpu_reuse_context *context = find_context_locked(sc->vk);
 	if (context == NULL) {
 		context = create_context_locked(sc->vk);
@@ -433,6 +522,9 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
 		return XRT_ERROR_ALLOCATION;
 	}
 
+	tracker->bytes = bytes;
+	g_tracked_bytes += bytes;
+	g_tracker_count++;
 	tracker->xsc = xsc;
 	tracker->sc = sc;
 	tracker->context = context;
@@ -825,9 +917,56 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 		return;
 	}
 
+	U_ZERO(&g_renderer.wait_sems);
+	if (wait_semaphores != NULL) {
+		g_renderer.wait_sems = *wait_semaphores;
+	}
+	bool producer_ready = true;
+	for (uint32_t i = 0; i < g_renderer.submit.image_count; i++) {
+		struct gpu_reuse_submit_image *image = &g_renderer.submit.images[i];
+		struct xrt_compositor_semaphore *producer = image->tracker->producer[image->image_index];
+		if (producer == NULL) {
+			continue;
+		}
+		uint64_t value = image->tracker->producer_value[image->image_index];
+		/* Stage A: zero-time readiness verification; never wait on a future
+		 * payload on the GPU. Stage B still carries exactly this value. */
+		if (xrt_compositor_semaphore_wait(producer, value, 0) != XRT_SUCCESS) {
+			producer_ready = false;
+			break;
+		}
+		VkSemaphore semaphore = comp_semaphore(producer)->semaphore;
+		uint32_t k = 0;
+		for (; k < g_renderer.wait_sems.count; k++) {
+			if (g_renderer.wait_sems.semaphores[k] == semaphore) {
+				break;
+			}
+		}
+		if (k < g_renderer.wait_sems.count) {
+			if (g_renderer.wait_sems.values[k] < value) {
+				g_renderer.wait_sems.values[k] = value;
+			}
+			g_renderer.wait_sems.stages[k] |= VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		} else if (k < VK_SEMAPHORE_LIST_MAX_COUNT) {
+			vk_semaphore_list_wait_add_timeline(&g_renderer.wait_sems, semaphore, value,
+			                                    VK_PIPELINE_STAGE_ALL_COMMANDS_BIT);
+		} else {
+			producer_ready = false;
+			break;
+		}
+	}
+	if (!producer_ready) {
+		submit_rollback_locked(&g_renderer.submit);
+		pthread_mutex_unlock(&g_gpu_reuse_mutex);
+		vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
+		                               signal_semaphores, next);
+		g_renderer.rejected_submit_info = &builder->submit_info;
+		g_renderer.rejected_result = VK_NOT_READY;
+		return;
+	}
 	vk_semaphore_list_signal_add_timeline(&g_renderer.signal_sems, g_renderer.submit.context->timeline,
 	                                      g_renderer.submit.value);
-	vk_submit_info_builder_prepare(builder, wait_semaphores, command_buffers, command_buffer_count,
+	vk_submit_info_builder_prepare(builder, &g_renderer.wait_sems, command_buffers, command_buffer_count,
 	                               &g_renderer.signal_sems, next);
 
 	/*

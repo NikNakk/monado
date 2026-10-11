@@ -48,6 +48,16 @@
 #include "android/android_globals.h"
 #endif
 
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_NUM_OPTION(client_gpu_hung_ms, "XRT_MACOS_CLIENT_GPU_HUNG_MS", 500)
+static int64_t
+client_gpu_hung_ns(void)
+{
+	int64_t ms = debug_get_num_option_client_gpu_hung_ms();
+	return (ms > 0 && ms <= 10000 ? ms : 500) * U_TIME_1MS_IN_NS;
+}
+#endif
+
 DEBUG_GET_ONCE_LOG_OPTION(app_frame_lag_level, "XRT_APP_FRAME_LAG_LOG_AS_LEVEL", U_LOGGING_DEBUG)
 #define LOG_FRAME_LAG(...) U_LOG_IFL(debug_get_log_option_app_frame_lag_level(), u_log_get_global_level(), __VA_ARGS__)
 
@@ -299,14 +309,18 @@ is_pushed_or_waiting_locked(struct multi_compositor *mc)
 	       mc->wait_thread.xcsem != NULL; //
 }
 
-static void
+static xrt_result_t
 wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
 {
 	COMP_TRACE_MARKER();
 	xrt_result_t ret = XRT_SUCCESS;
 
-	// 100ms
+	// Worker only. Never block the renderer on an untrusted future value.
 	int64_t timeout_ns = 100 * U_TIME_1MS_IN_NS;
+#ifdef XRT_OS_OSX
+	timeout_ns = 5 * U_TIME_1MS_IN_NS;
+	int64_t started_ns = mc->wait_thread.submitted_ns;
+#endif
 
 	do {
 		ret = xrt_compositor_fence_wait(*xcf_ptr, timeout_ns);
@@ -314,24 +328,35 @@ wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
 			break;
 		}
 
+#ifdef XRT_OS_OSX
+		if (os_monotonic_get_ns() - started_ns >= client_gpu_hung_ns()) {
+			break;
+		}
+#else
 		U_LOG_W("Waiting on client fence timed out > 100ms!");
+#endif
 	} while (os_thread_helper_is_running(&mc->wait_thread.oth));
 
 	xrt_compositor_fence_destroy(xcf_ptr);
 
 	if (ret != XRT_SUCCESS) {
-		U_LOG_E("Fence waiting failed!");
+		U_LOG_E("Fence waiting failed: result=%d", ret);
 	}
+	return ret;
 }
 
-static void
+static xrt_result_t
 wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xcsem_ptr, uint64_t value)
 {
 	COMP_TRACE_MARKER();
 	xrt_result_t ret = XRT_SUCCESS;
 
-	// 100ms
+	// Worker only. Never block the renderer on an untrusted future value.
 	int64_t timeout_ns = 100 * U_TIME_1MS_IN_NS;
+#ifdef XRT_OS_OSX
+	timeout_ns = 5 * U_TIME_1MS_IN_NS;
+	int64_t started_ns = mc->wait_thread.submitted_ns;
+#endif
 
 	do {
 		ret = xrt_compositor_semaphore_wait(*xcsem_ptr, value, timeout_ns);
@@ -339,14 +364,21 @@ wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xc
 			break;
 		}
 
+#ifdef XRT_OS_OSX
+		if (os_monotonic_get_ns() - started_ns >= client_gpu_hung_ns()) {
+			break;
+		}
+#else
 		U_LOG_W("Waiting on client semaphore value '%" PRIu64 "' timed out > 100ms!", value);
+#endif
 	} while (os_thread_helper_is_running(&mc->wait_thread.oth));
 
 	xrt_compositor_semaphore_reference(xcsem_ptr, NULL);
 
 	if (ret != XRT_SUCCESS) {
-		U_LOG_E("Semaphore waiting failed!");
+		U_LOG_E("Semaphore waiting failed: value=%" PRIu64 " result=%d", value, ret);
 	}
+	return ret;
 }
 
 static void
@@ -474,16 +506,38 @@ run_func(void *ptr)
 
 		os_thread_helper_unlock(&mc->wait_thread.oth);
 
+		xrt_result_t wait_result = XRT_SUCCESS;
 		if (xcsem != NULL) {
 			int64_t semaphore_wait_start_ns = os_monotonic_get_ns();
 			macos_client_gpu_trace_event("semaphore_wait_start", frame_id, value, 0);
-			wait_semaphore(mc, &xcsem, value);
+			wait_result = wait_semaphore(mc, &xcsem, value);
 			int64_t semaphore_wait_end_ns = os_monotonic_get_ns();
-			macos_client_gpu_trace_event("semaphore_ready", frame_id, value,
-			                             semaphore_wait_end_ns - semaphore_wait_start_ns);
+			macos_client_gpu_trace_event(wait_result == XRT_SUCCESS ? "semaphore_ready"
+			                                                        : "semaphore_failed",
+			                             frame_id, value, semaphore_wait_end_ns - semaphore_wait_start_ns);
 		}
 		if (xcf != NULL) {
-			wait_fence(mc, &xcf);
+			wait_result = wait_fence(mc, &xcf);
+		}
+
+		if (wait_result != XRT_SUCCESS) {
+			/* A timeout is cancellation, never GPU completion. Keep progress
+			 * references until teardown; tracked storage then enters quarantine. */
+			U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d", frame_id,
+			        value, wait_result);
+			if (mc->xses != NULL && os_thread_helper_is_running(&mc->wait_thread.oth)) {
+				union xrt_session_event lost = {.type = XRT_SESSION_EVENT_LOST};
+				xrt_result_t notify = multi_compositor_push_event(mc, &lost);
+				if (notify != XRT_SUCCESS) {
+					U_LOG_E("Could not notify failed client: result=%d", notify);
+				}
+			}
+			os_thread_helper_lock(&mc->wait_thread.oth);
+			mc->wait_thread.failed = true;
+			mc->wait_thread.waiting = false;
+			mc->wait_thread.blocked = false;
+			os_thread_helper_signal_locked(&mc->wait_thread.oth);
+			continue;
 		}
 
 		// Sample time outside of lock.
@@ -561,6 +615,7 @@ push_fence_to_wait_thread(struct multi_compositor *mc, int64_t frame_id, struct 
 	assert(mc->wait_thread.xcf == NULL);
 
 	mc->wait_thread.frame_id = frame_id;
+	mc->wait_thread.submitted_ns = os_monotonic_get_ns();
 	mc->wait_thread.xcf = xcf;
 
 	os_thread_helper_signal_locked(&mc->wait_thread.oth);
@@ -583,6 +638,7 @@ push_semaphore_to_wait_thread(struct multi_compositor *mc,
 	assert(mc->wait_thread.xcsem == NULL);
 
 	mc->wait_thread.frame_id = frame_id;
+	mc->wait_thread.submitted_ns = os_monotonic_get_ns();
 	xrt_compositor_semaphore_reference(&mc->wait_thread.xcsem, xcsem);
 	mc->wait_thread.value = value;
 
@@ -849,6 +905,12 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
 {
 	struct multi_compositor *mc = multi_compositor(xc);
 	macos_client_gpu_trace_event("layer_begin_entry", data->frame_id, 0, 0);
+	os_thread_helper_lock(&mc->wait_thread.oth);
+	bool already_failed = mc->wait_thread.failed;
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+	if (already_failed) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
 
 	// As early as possible.
 	int64_t now_ns = os_monotonic_get_ns();
@@ -875,6 +937,12 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
 		          ipc_elapsed_ms(wait_start_ns, wait_end_ns));
 	}
 
+	os_thread_helper_lock(&mc->wait_thread.oth);
+	bool failed = mc->wait_thread.failed;
+	os_thread_helper_unlock(&mc->wait_thread.oth);
+	if (failed) {
+		return XRT_ERROR_IPC_FAILURE;
+	}
 	assert(mc->progress.layer_count == 0);
 	U_ZERO(&mc->progress);
 
@@ -1093,6 +1161,40 @@ multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 	struct multi_compositor *mc = multi_compositor(xc);
 	int64_t frame_id = mc->progress.data.frame_id;
 
+#ifdef XRT_OS_OSX
+	for (uint32_t i = 0; i < mc->progress.layer_count; i++) {
+		struct multi_layer_entry *layer = &mc->progress.layers[i];
+		const struct xrt_layer_data *data = &layer->data;
+		uint32_t count = data->type == XRT_LAYER_PROJECTION || data->type == XRT_LAYER_PROJECTION_DEPTH
+		                     ? data->view_count
+		                     : 1;
+		for (uint32_t v = 0; v < count; v++) {
+			uint32_t index;
+			switch (data->type) {
+			case XRT_LAYER_PROJECTION: index = data->proj.v[v].sub.image_index; break;
+			case XRT_LAYER_PROJECTION_DEPTH: index = data->depth.v[v].sub.image_index; break;
+			case XRT_LAYER_QUAD: index = data->quad.sub.image_index; break;
+			case XRT_LAYER_CUBE: index = data->cube.sub.image_index; break;
+			case XRT_LAYER_CYLINDER: index = data->cylinder.sub.image_index; break;
+			case XRT_LAYER_EQUIRECT1: index = data->equirect1.sub.image_index; break;
+			case XRT_LAYER_EQUIRECT2: index = data->equirect2.sub.image_index; break;
+			case XRT_LAYER_PASSTHROUGH: continue;
+			default: return XRT_ERROR_INVALID_ARGUMENT;
+			}
+			xrt_result_t ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[v], index, xcsem, value);
+			if (ret != XRT_SUCCESS) {
+				return ret;
+			}
+			if (data->type == XRT_LAYER_PROJECTION_DEPTH) {
+				ret = comp_swapchain_gpu_reuse_set_producer(
+				    layer->xscs[v + count], data->depth.d[v].sub.image_index, xcsem, value);
+				if (ret != XRT_SUCCESS) {
+					return ret;
+				}
+			}
+		}
+	}
+#endif
 	push_semaphore_to_wait_thread(mc, frame_id, xcsem, value);
 	macos_client_gpu_trace_event("semaphore_pushed", frame_id, value, 0);
 
