@@ -2259,9 +2259,10 @@ ipc_handle_device_update_input(volatile struct ipc_client_state *ics, uint32_t i
 
 	// Snapshot under the same lock used by runtime button polling. Never hold
 	// this lock during socket writes: a slow client must not stall the gesture.
-	struct xrt_input *inputs = U_TYPED_ARRAY_CALLOC(struct xrt_input, xdev->input_count);
-	if (xdev->input_count > 0 && inputs == NULL) {
-		return XRT_ERROR_ALLOCATION;
+	// Same bound as send_device_inputs.
+	struct xrt_input inputs[1024];
+	if (xdev->input_count > ARRAY_SIZE(inputs)) {
+		return XRT_ERROR_IPC_FAILURE;
 	}
 	struct xrt_device snapshot = *xdev;
 	snapshot.inputs = inputs;
@@ -2285,19 +2286,15 @@ ipc_handle_device_update_input(volatile struct ipc_client_state *ics, uint32_t i
 	};
 
 	xret = ipc_send(imc, &reply, sizeof(reply));
-	if (xret != XRT_SUCCESS) {
-		goto cleanup;
-	}
+	IPC_CHK_AND_RET(ics->server, xret, "ipc_send(result reply)");
 
 	xret = send_device_inputs(ics, &snapshot);
-	if (xret != XRT_SUCCESS) {
-		goto cleanup;
-	}
+	IPC_CHK_AND_RET(ics->server, xret, "send_device_inputs");
 
 	xret = send_device_outputs(ics, xdev);
-	cleanup:
-	free(inputs);
-	return xret;
+	IPC_CHK_AND_RET(ics->server, xret, "send_device_outputs");
+
+	return XRT_SUCCESS;
 }
 
 static struct xrt_input *

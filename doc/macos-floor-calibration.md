@@ -150,6 +150,15 @@ configured eye height if the gesture alone is enabled. It checks the input's
 active state and freshness, fires once per hold, and resets on release/loss.
 It uses no app action binding or SteamVR focus. The input mutex serializes
 service polling with IPC snapshots; socket writes happen after releasing it.
+It is held only while a device's inputs are updated and copied (the right
+controller's, and the headset's worn sensor during floor calibration), not
+during pose or space queries.
+
+The right-hand controller is looked up from the system roles on every poll,
+not once at service start. The service logs when the gesture becomes available
+("hold Options on '<device>'"), when no right-hand controller is assigned, and
+when the assigned controller has no Sense Options button. Check for one of
+these lines before testing the gesture.
 
 The head's tracked pose is located in root, then its horizontal position and
 yaw replace managed STAGE's offset while retaining stage y. This moves every

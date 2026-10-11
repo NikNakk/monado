@@ -41,11 +41,15 @@ struct u_floor_calibration_sample
  * STAGE is also centred under the head and turned so that its -Z is the
  * direction the head faced, both averaged over the steady window.
  */
+struct os_mutex;
+
 struct u_floor_calibration
 {
 	float eye_height_m;
 	//! Also set the STAGE's horizontal position and heading from the head.
 	bool align;
+	//! Optional; held only while updating and reading the head's inputs.
+	struct os_mutex *input_lock;
 	bool done;
 
 	bool steady;
