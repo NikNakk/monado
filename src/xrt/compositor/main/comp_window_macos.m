@@ -118,6 +118,9 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
+// Diagnostic: skip the MTLSharedEvent render-complete export so presentation uses
+// the CPU Vulkan timeline wait (this also disables drawable-slot mode).
+DEBUG_GET_ONCE_BOOL_OPTION(macos_force_cpu_render_wait, "XRT_MACOS_FORCE_CPU_RENDER_WAIT", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_refresh_rate_hz, "XRT_MACOS_REFRESH_RATE_HZ", 0)
 // Vblank timing source: "ca" (default, macOS 14+) or "cv" (legacy fallback).
 DEBUG_GET_ONCE_OPTION(macos_display_link, "XRT_MACOS_DISPLAY_LINK", "ca")
@@ -1267,6 +1270,9 @@ macos_release_source_image(struct comp_window_macos *cwm, uint32_t index)
 	}
 }
 
+static VkResult
+macos_wait_render_complete(struct comp_window_macos *cwm, uint64_t value, const char *what);
+
 /*
  * Make a source image acquirable again only once Vulkan has finished writing
  * it. A failed Metal command buffer has ended, but its error may have cut short
@@ -1284,13 +1290,7 @@ macos_release_source_image_after_render(struct comp_window_macos *cwm,
 	VkResult ret = VK_SUCCESS;
 	if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&
 	    vk->vkWaitSemaphores != NULL) {
-		VkSemaphoreWaitInfo wait_info = {
-		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
-		    .semaphoreCount = 1,
-		    .pSemaphores = &ct->semaphores.render_complete,
-		    .pValues = &timeline_value,
-		};
-		ret = vk->vkWaitSemaphores(vk->device, &wait_info, UINT64_MAX);
+		ret = macos_wait_render_complete(cwm, timeline_value, "Retirement");
 	} else {
 		vk_queue_lock(present_queue);
 		ret = vk->vkQueueWaitIdle(present_queue->queue);
@@ -1562,6 +1562,45 @@ comp_window_macos_init(struct comp_target *ct)
 }
 
 /*
+ * Wait on the render-complete timeline without an unbounded block. A render that
+ * has not completed within the reporting interval is logged with the value being
+ * waited for and the semaphore's current value, then waited on again, so a
+ * stalled or faulted Vulkan render is visible instead of silently hanging.
+ */
+#define MACOS_RENDER_WAIT_REPORT_NS (1000ull * 1000ull * 1000ull)
+
+static VkResult
+macos_wait_render_complete(struct comp_window_macos *cwm, uint64_t value, const char *what)
+{
+	struct comp_target *ct = &cwm->base.base;
+	struct vk_bundle *vk = get_vk(cwm);
+	VkSemaphoreWaitInfo wait_info = {
+	    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+	    .semaphoreCount = 1,
+	    .pSemaphores = &ct->semaphores.render_complete,
+	    .pValues = &value,
+	};
+	uint32_t reports = 0;
+	for (;;) {
+		VkResult ret = vk->vkWaitSemaphores(vk->device, &wait_info, MACOS_RENDER_WAIT_REPORT_NS);
+		if (ret != VK_TIMEOUT) {
+			if (reports > 0) {
+				COMP_WARN(ct->c, "%s: render-complete value %" PRIu64 " arrived after ~%u s", what, value,
+				          reports);
+			}
+			return ret;
+		}
+		uint64_t current = 0;
+		if (vk->vkGetSemaphoreCounterValue != NULL) {
+			vk->vkGetSemaphoreCounterValue(vk->device, ct->semaphores.render_complete, &current);
+		}
+		reports++;
+		COMP_ERROR(ct->c, "%s: render-complete value %" PRIu64 " not reached after ~%u s (current %" PRIu64 ")",
+		           what, value, reports, current);
+	}
+}
+
+/*
  * Drawable-slot mode only prefetches drawables once the render-complete timeline
  * is exported as an MTLSharedEvent, and only schedules the present worker once a
  * drawable is prefetched. Without that handoff it would never present, so fall
@@ -1594,7 +1633,8 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 		return true;
 	}
 
-	bool want_shared_event = vk->has_EXT_metal_objects && vk->vkExportMetalObjectsEXT != NULL;
+	bool force_cpu_wait = debug_get_bool_option_macos_force_cpu_render_wait();
+	bool want_shared_event = !force_cpu_wait && vk->has_EXT_metal_objects && vk->vkExportMetalObjectsEXT != NULL;
 
 	VkExportMetalObjectCreateInfoEXT metal_export_info = {
 	    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
@@ -1644,6 +1684,8 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 			          "VK_EXT_metal_objects did not export an MTLSharedEvent; retaining CPU Vulkan wait "
 			          "fallback");
 		}
+	} else if (force_cpu_wait) {
+		COMP_WARN(ct->c, "XRT_MACOS_FORCE_CPU_RENDER_WAIT set; using the CPU Vulkan render-complete wait");
 	} else {
 		COMP_WARN(ct->c,
 		          "VK_EXT_metal_objects unavailable; asynchronous present will retain the CPU Vulkan wait");
@@ -1889,14 +1931,8 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		wait_mode = "metal_shared_event";
 	} else if (ct->semaphores.render_complete != VK_NULL_HANDLE && ct->semaphores.render_complete_is_timeline &&
 	           vk->vkWaitSemaphores != NULL) {
-		VkSemaphoreWaitInfo wait_info = {
-		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
-		    .semaphoreCount = 1,
-		    .pSemaphores = &ct->semaphores.render_complete,
-		    .pValues = &timeline_semaphore_value,
-		};
 		wait_mode = "timeline";
-		ret = vk->vkWaitSemaphores(vk->device, &wait_info, UINT64_MAX);
+		ret = macos_wait_render_complete(cwm, timeline_semaphore_value, "Present");
 	} else {
 		vk_queue_lock(present_queue);
 		ret = vk->vkQueueWaitIdle(present_queue->queue);
