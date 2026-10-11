@@ -18,6 +18,11 @@
 #include "server/ipc_server.h"
 #include "ipc_server_generated.h"
 #include "xrt/xrt_results.h"
+#include "xrt/xrt_config_os.h"
+
+#ifdef XRT_OS_OSX
+#include "server/ipc_server_swapchain_wait.h"
+#endif
 
 
 /*
@@ -216,7 +221,13 @@ ipc_handle_swapchain_wait_image(volatile struct ipc_client_state *ics, uint32_t 
 	struct xrt_swapchain *xsc = ics->xscs[sc_index];
 
 	int64_t start_ns = os_monotonic_get_ns();
+#ifdef XRT_OS_OSX
+	// The macOS compositor honours infinite waits; keep this worker responsive.
+	xrt_result_t xret =
+	    ipc_server_swapchain_wait_in_slices(xsc, timeout_ns, index, ics->imc.ipc_handle, &ics->server->running);
+#else
 	xrt_result_t xret = xrt_swapchain_wait_image(xsc, timeout_ns, index);
+#endif
 	ipc_swapchain_trace_event("wait", id, index, os_monotonic_get_ns() - start_ns, timeout_ns, xret);
 	return xret;
 }
