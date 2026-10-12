@@ -95,6 +95,20 @@ reach the timing runs.
    1.5 m along LOCAL −Z, so rotating the headset moves it off the sample
    points. Frame 122 in attempt 4 is consistent with the same cause.
 
+6. **GPU hang captured.** In run 6, on `77aea62e6`, proof-four passed: all 6
+   samples matched with the head-locked quad. Proof-three then lost the device.
+   MoltenVK reported a GPU hang on the compositor's first submission with client
+   content:
+
+   > `Lost VkDevice after MTLCommandBuffer "vkQueueSubmit MTLCommandBuffer on Queue 0-0" execution failed (code 2): Caused GPU Hang Error (kIOGPUCommandBufferCallbackErrorHang)`
+
+   The producer was not late. The service observed ready value 4 at 594.7 ms
+   and latched the frame at 599.6 ms. The zero-timeout readiness check before
+   submission reads the imported Vulkan semaphore, so MoltenVK already reported
+   value 4 when the GPU wait was queued. The unified log has no GPU messages
+   from that time. The descriptor and window fixes held: the service shut down
+   cleanly, with no crash report.
+
 Follow-up changes:
 
 - The comparison now samples every 30 frames, after a 30-frame warmup. It
@@ -103,6 +117,13 @@ Follow-up changes:
 - Headset proof runs lock the quad to the head (VIEW space, 2 m at 1.5 m).
   Offscreen, all seven samples match, including the startup frames. Timing
   runs are unchanged.
+- The first 8 submissions that wait on a producer now log every wait and
+  signal semaphore, when `XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE=1` (proof
+  runs). Each line gives the target value and the current counter at submission
+  (`Swapchain GPU reuse submit state`). An unmet wait is marked `UNMET`. A
+  signal that does not exceed its current value is marked `NOT_INCREASING`. If
+  every wait was met at submission, the hang is in the command buffer's work or
+  its signals, not in a wait.
 - A failed compute or graphics dispatch now releases its descriptor sets. A
   lost device previously leaked them each frame until allocation failed. A null
   set then crashed MoltenVK in `vkUpdateDescriptorSets`; this produced all
@@ -115,5 +136,5 @@ Rerun with:
 
 ```sh
 MVK_CONFIG_LOG_LEVEL=3 python3 scripts/macos/run-three-image-comparison.py \
-  --headset --frames 2400 --output /tmp/monado-three-image-headset-6
+  --headset --frames 2400 --output /tmp/monado-three-image-headset-7
 ```
