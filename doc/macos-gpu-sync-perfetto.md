@@ -238,3 +238,20 @@ physical-display measurement parity.
 Raw `.pftrace`, CSV, logs and SQL outputs belong under ignored `doc/results/`
 or a temporary capture directory. Commit instrumentation, SQL/test assertions,
 capture tooling and short result summaries, never raw recordings.
+
+## Browser-wide capture scope correction (M5, 2026-10-12)
+
+Use the browser DevTools endpoint for cross-process Chromium tracing. Page
+sessions apply a process filter that excludes the XR utility process; its
+unbound startup writers expire after 30 s and commit to invalid buffer zero.
+The first extended fixture therefore had 273 global discarded chunks despite
+ample central-buffer capacity and clean Monado captures. It was rejected.
+
+The retained fixture correction (`4fed5fb51`) uses browser-level start/end/export
+and verifies real render-loop frame-data and composition events. Long ANGLE and
+Dawn captures and GPU/decoder replacement pass strict joined-trace loss and
+ownership checks. Page commands still use the page endpoint. The native SDK's
+persistent location, hidden symbols, shared-memory hint and file-write policy
+are unchanged. A namespace-isolation trial did not resolve the issue and was
+removed. No loss checks were relaxed. See the [M5 evidence and remaining
+limits](macos-gpu-sync-cross-stack.md).
