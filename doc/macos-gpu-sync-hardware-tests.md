@@ -184,6 +184,23 @@ reach the timing runs.
    remains open. Its rate varies between sessions: 6 of 30 short loop
    startups, but 1 of 24 comparison steps.
 
+   **Metal GPU capture reproduces the hang offscreen.** With
+   `XRT_MACOS_GPU_CAPTURE_DIR` and `MTL_CAPTURE_ENABLED=1`, the service
+   captures its MTLDevice from the first producer-waiting submission. The
+   startup loop's `--gpu-capture` sets both. It stops after four submissions,
+   or at device loss. Offscreen, where startups have never hung otherwise, 9
+   of 9 captured startups hung, with the same
+   `kIOGPUCommandBufferCallbackErrorHang` on the compositor's queue. Capture
+   slows the GPU, as validation does, but here that makes the hang far more
+   likely rather than hiding it. The diagnostic
+   `XRT_MACOS_SKIP_SATISFIED_PRODUCER_GPU_WAIT=1` drops the producer GPU wait
+   once the CPU has seen the value. With it, 5 of 6 captured startups still
+   hung. Offscreen command buffers then contain no GPU wait at all, so under
+   capture the stall is in the buffer's own work, such as the client texture
+   reads, not in a wait. Whether this capture hang is the headset startup hang
+   is not established. Hung captures, for Xcode, are in
+   `/tmp/monado-gpu-captures/`.
+
    Ruled out so far:
    - **CPU ordering.** Hung and passing startups follow the same CPU sequence
      through frame 4: Vulkan submit, present handoff, Metal present commit

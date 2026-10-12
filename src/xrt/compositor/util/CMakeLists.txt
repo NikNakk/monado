@@ -51,6 +51,8 @@ if(APPLE)
 		comp_util
 		PRIVATE
 			comp_swapchain_gpu_reuse.c
+			comp_metal_gpu_capture.h
+			comp_metal_gpu_capture.m
 			comp_metal_semaphore_provider.h
 			comp_metal_semaphore_probe.h
 			comp_metal_semaphore_probe.m
@@ -61,5 +63,5 @@ if(APPLE)
 			comp_metal_texture_device.m
 		)
 
-	target_link_libraries(comp_util PRIVATE "-framework Metal" "-framework IOSurface")
+	target_link_libraries(comp_util PRIVATE "-framework Foundation" "-framework Metal" "-framework IOSurface")
 endif()
