@@ -2768,6 +2768,13 @@ A connected, powered headset is required to complete the comparison.
 
 ### Three-image SteamVR compatibility prepared, 2026-10-10
 
+Update, 2026-10-12: the [native offscreen comparison](macos-three-image-comparison.md)
+now verifies actual three/four array allocations, composed GPU pixels and paired
+timing. No additional three-image starvation was observed. Both modes repeated
+some offscreen frames; headset and SteamVR performance remain pending. The
+linked runner provides a user-operated matched headset path. Earlier statements
+below about no GPU-pixel result describe the implementation-day evidence.
+
 The user authorized implementing the three-image path and will test it later.
 The service Metal client now accepts an opt-in three-image allocation request
 and sends an internal creation flag through IPC. The macOS multi-compositor

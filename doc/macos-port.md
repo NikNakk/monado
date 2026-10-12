@@ -951,6 +951,13 @@ architectures build and all 48 runnable tests pass (one optional test skips);
 fixed-allocation copy and three-image zero-copy hardware trials are pending.
 See the [trial procedure](macos-psvr2-timing-diagnostics.md#three-image-steamvr-compatibility-prepared-2026-10-10).
 
+**2026-10-12 three-image offscreen comparison:** real shared-Metal arrays and
+composed GPU pixel checks pass with both image counts. Four paired 1200-frame
+runs show similar submission, acquisition and latch timing, with no additional
+three-image starvation. Both modes repeat some offscreen frames; physical
+presentation and SteamVR remain user-run gates. See the
+[comparison and headset runner](macos-three-image-comparison.md).
+
 
 **2026-10-10 SteamVR synchronization follow-up:** moving copy destination
 waits before source ownership is user-reported as definitely better, with

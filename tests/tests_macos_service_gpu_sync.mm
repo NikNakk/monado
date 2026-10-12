@@ -86,6 +86,9 @@ main(int argc, char **argv)
 			const bool exhausted = argc > 1 && std::string(argv[1]) == "exhausted";
 			const bool missing = argc > 1 && std::string(argv[1]) == "missing";
 			const bool healthy_overlay = argc > 1 && std::string(argv[1]) == "overlay";
+			const bool array_three = argc > 1 && std::string(argv[1]) == "array-three";
+			const bool array_four = argc > 1 && std::string(argv[1]) == "array-four";
+			const bool array_test = array_three || array_four;
 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
 			const uint64_t timeout_seconds = argc > 3 ? std::stoull(argv[3]) : 20;
 			if (timeout_seconds < 1 || timeout_seconds > 300)
@@ -192,6 +195,12 @@ main(int argc, char **argv)
 			swapInfo.sampleCount = 1;
 			swapInfo.width = swapInfo.height = 64;
 			swapInfo.faceCount = swapInfo.arraySize = swapInfo.mipCount = 1;
+			// Arrays force the production shared-Metal path; simple BGRA IOSurfaces
+			// already have three images even without compatibility scheduling.
+			if (array_test) {
+				swapInfo.arraySize = 2;
+				swapInfo.width = swapInfo.height = 1024;
+			}
 			XrSwapchain swapchain = XR_NULL_HANDLE;
 			XrResult allocation = xrCreateSwapchain(session, &swapInfo, &swapchain);
 			if (exhausted) {
@@ -215,6 +224,10 @@ main(int argc, char **argv)
 			}
 			uint32_t count;
 			checked(xrEnumerateSwapchainImages(swapchain, 0, &count, nullptr), "images count");
+			if (array_test && count != (array_three ? 3u : 4u))
+				throw std::runtime_error("Unexpected production swapchain image count");
+			fprintf(stdout, "{\"event\":\"swapchain\",\"images\":%u,\"array_size\":%u,\"width\":%u}\n",
+			        count, swapInfo.arraySize, swapInfo.width);
 			std::vector<XrSwapchainImageMetalKHR> images(count);
 			for (auto &image : images)
 				image.type = XR_TYPE_SWAPCHAIN_IMAGE_METAL_KHR;
@@ -268,18 +281,23 @@ main(int argc, char **argv)
 				uint32_t image;
 				XrSwapchainImageAcquireInfo acquire{};
 				acquire.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
+				uint64_t acquire_start = now_ns();
 				checked(xrAcquireSwapchainImage(swapchain, &acquire, &image), "acquire");
 				XrSwapchainImageWaitInfo imageWait{};
 				imageWait.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
 				imageWait.timeout = 1000000000;
 				checked(xrWaitSwapchainImage(swapchain, &imageWait), "wait image");
+				uint64_t acquire_end = now_ns();
 				auto command = [queue.queue commandBuffer];
 				MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
 				pass.colorAttachments[0].texture = (id<MTLTexture>)images[image].texture;
 				pass.colorAttachments[0].loadAction = MTLLoadActionClear;
 				pass.colorAttachments[0].storeAction = MTLStoreActionStore;
 				pass.colorAttachments[0].clearColor = MTLClearColorMake(.25, .5, .75, 1);
-				[[command renderCommandEncoderWithDescriptor:pass] endEncoding];
+				for (uint32_t slice = 0; slice < swapInfo.arraySize; ++slice) {
+					pass.colorAttachments[0].slice = slice;
+					[[command renderCommandEncoderWithDescriptor:pass] endEncoding];
+				}
 				[command commit];
 				XrSwapchainImageReleaseInfo release{};
 				release.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
@@ -296,7 +314,8 @@ main(int argc, char **argv)
 				quad.space = space;
 				quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
 				quad.subImage.swapchain = swapchain;
-				quad.subImage.imageRect.extent = {64, 64};
+				quad.subImage.imageRect.extent = {(int32_t)swapInfo.width, (int32_t)swapInfo.height};
+				quad.subImage.imageArrayIndex = array_test ? rendered % 2 : 0;
 				quad.pose.orientation.w = 1;
 				quad.pose.position.z = -1.5f;
 				quad.size = {1, 1};
@@ -311,9 +330,9 @@ main(int argc, char **argv)
 				checked(xrEndFrame(session, &end), "end frame");
 				fprintf(stdout,
 				        "{\"event\":\"frame\",\"pid\":%d,\"frame\":%u,\"image\":%u,\"begin_ns\":%llu,"
-				        "\"end_ns\":%llu}\n",
+				        "\"end_ns\":%llu,\"acquire_wait_ns\":%llu}\n",
 				        getpid(), ++rendered, image, (unsigned long long)before,
-				        (unsigned long long)now_ns());
+				        (unsigned long long)now_ns(), (unsigned long long)(acquire_end - acquire_start));
 				fflush(stdout);
 			}
 			if (missing ? !lost : rendered != frames)

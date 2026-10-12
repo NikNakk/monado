@@ -22,6 +22,7 @@ def main():
     parser.add_argument('--client', nargs='+')
     parser.add_argument('--client-timeout', type=float, default=30, help='Finite client timeout in seconds (1–300)')
     parser.add_argument('--benchmark', action='store_true', help='Disable readback and per-image diagnostic logging')
+    parser.add_argument('--three-images', action='store_true', help='Enable service Metal three-image compatibility scheduling')
     parser.add_argument('--perfetto', action='store_true', help='Capture native Perfetto beside CSV (requires XRT_FEATURE_MACOS_PERFETTO)')
     parser.add_argument('--scale-percentage', type=int, help='Override recommended render scale for offscreen client tests (1–200)')
     parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
@@ -59,6 +60,7 @@ def main():
                    MONADO_OPENXR_RUNTIME_PATH=str(build/'src/xrt/targets/openxr/libopenxr_monado.dylib'))
         if args.perfetto:
             env['XRT_MACOS_PERFETTO_TRACE_DIR'] = str(out)
+        env['XRT_MACOS_METAL_THREE_IMAGE_SWAPCHAINS'] = '1' if args.three_images else '0'
         if args.scale_percentage is not None:
             env['XRT_COMPOSITOR_SCALE_PERCENTAGE'] = str(args.scale_percentage)
         if args.benchmark:
@@ -78,6 +80,7 @@ def main():
         if args.client:
             telemetry['workload'] = 'Custom client; '+('physical PS VR2 display' if args.headset else 'simulated HMD; debug_image target')
         telemetry['headset'] = args.headset
+        telemetry['three_image_compatibility'] = args.three_images
         telemetry['perfetto'] = args.perfetto
         telemetry['render_scale_percentage'] = env.get('XRT_COMPOSITOR_SCALE_PERCENTAGE', '140')
         telemetry['gpu_policy'] = {key: env.get(key, default) for key, default in {
