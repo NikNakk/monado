@@ -98,14 +98,15 @@ def check_auxiliary(directory, processor, summary):
                   transport=check_transport(directory, summary),
                   ownership=check_ownership(processor, service_trace))
     if summary['mode'] == 'pixels':
-        expected = [[255,0,0,255], [0,255,0,255], [0,0,255,255], [255,0,0,255]]
+        expected = [([255,0,0,255],[0,0,255,255]), ([0,255,0,255],[255,0,0,255]),
+                    ([0,0,255,255],[0,255,0,255]), ([255,0,0,255],[0,0,255,255])]
         proof = summary['pixelProof']
         assert len(proof) == 4
         for phase, color in zip(proof, expected):
-            assert phase['expected'] == color and phase['samples']
+            assert phase['expected'] == dict(left=color[0],right=color[1]) and phase['samples']
             for sample in phase['samples']:
                 for eye in ['left', 'right']:
-                    assert all(abs(a-b) <= 1 for a,b in zip(sample[eye], color)), sample
+                    assert all(abs(a-b) <= 1 for a,b in zip(sample[eye], phase['expected'][eye])), sample
         result['pixel_proof'] = proof
         result['scope'] = 'Exact GPU-written colors after ANGLE/Dawn SharedImage transport, Vulkan composition and GPU-completed output readback; sampled eye interiors'
     else:
@@ -139,6 +140,11 @@ def check_auxiliary(directory, processor, summary):
         stages = list(csv.DictReader(next(directory.glob('*renderer_stage.csv')).open()))
         for stage in ['previous_fence_wait', 'queue_submit', 'draw_dispatch']:
             result[stage+'_us'] = distribution([(int(row['end_ns'])-int(row['begin_ns']))/1000 for row in stages if row['stage']==stage and measured(row['end_ns'])])
+        wait_counts = query(processor, archive, f"SELECT name,count(*) n FROM slice WHERE ts>={begin} AND ts<{end} AND name IN ('OpenXRMetalFenceQuery','OpenXRMetalSharedEventWait','OpenXRMetalSharedEventNoWait','OpenXRMetalSharedEventTimeout','OpenXRMetalFenceQueryFailed') GROUP BY name")
+        result['readiness_trace_counts'] = {row['name']:int(row['n']) for row in wait_counts}
+        assert result['readiness_trace_counts'].get('OpenXRMetalFenceQuery',0) >= 100, 'Actual GPU fence queries absent'
+        assert not result['readiness_trace_counts'].get('OpenXRMetalSharedEventTimeout',0)
+        assert not result['readiness_trace_counts'].get('OpenXRMetalFenceQueryFailed',0)
         slices = query(processor, archive, f"SELECT name,dur FROM slice WHERE ts>={begin} AND ts<{end} AND dur>=0 AND name IN ('OpenXRMetalSharedEventWait','ExecuteRAFCallbacks','XRFrameTransport::SubmitFrameDrawnIntoTexture')")
         for name in ['OpenXRMetalSharedEventWait','ExecuteRAFCallbacks','XRFrameTransport::SubmitFrameDrawnIntoTexture']:
             values = [int(row['dur'])/1000 for row in slices if row['name']==name]

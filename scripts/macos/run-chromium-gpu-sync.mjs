@@ -180,9 +180,12 @@ try {
     // The fragment shader writes exact primary colors into the real XR image.
     // The service reads its Vulkan output only after its GPU fence completes.
     result.pixelProof = [];
-    for (const [name, color, bytes] of [
-      ['red', [1,0,0,1], [255,0,0]], ['green', [0,1,0,1], [0,255,0]],
-      ['blue', [0,0,1,1], [0,0,255]], ['red_reuse', [1,0,0,1], [255,0,0]]]) {
+    for (const [name, left, right] of [
+      ['red_blue', [255,0,0,255], [0,0,255,255]],
+      ['green_red', [0,255,0,255], [255,0,0,255]],
+      ['blue_green', [0,0,255,255], [0,255,0,255]],
+      ['red_blue_reuse', [255,0,0,255], [0,0,255,255]]]) {
+      const color = {left: left.map(byte => byte/255), right: right.map(byte => byte/255)};
       await cdp.evaluate(`window.proofColor = ${JSON.stringify(color)}`);
       await sleep(500); // Exclude submissions already in flight at the transition.
       const before = readFileSync(join(output, 'service.log'), 'utf8').length;
@@ -193,10 +196,10 @@ try {
       const samples = [...logs.matchAll(/vk-target frame=(\d+).*rgbaL=\((\d+),(\d+),(\d+),(\d+)\).*rgbaC=\((\d+),(\d+),(\d+),(\d+)\).*rgbaR=\((\d+),(\d+),(\d+),(\d+)\)/g)]
         .map(match => ({frame: Number(match[1]), left: match.slice(2,6).map(Number),
           center: match.slice(6,10).map(Number), right: match.slice(10,14).map(Number)}));
-      if (!samples.length || samples.some(sample => [sample.left, sample.right].some(rgba =>
-          rgba[3] !== 255 || bytes.some((byte, i) => Math.abs(rgba[i]-byte) > 1))))
+      if (!samples.length || samples.some(sample => ['left','right'].some(eye =>
+          (eye === 'left' ? left : right).some((byte, i) => Math.abs(sample[eye][i]-byte) > 1))))
         throw Error('Vulkan pixel mismatch '+name+': '+JSON.stringify(samples));
-      result.pixelProof.push({name, expected: [...bytes,255], samples});
+      result.pixelProof.push({name, expected: {left, right}, samples});
     }
   } else if (mode === 'benchmark') {
     await cdp.evaluate('appendMore()');
