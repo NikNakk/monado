@@ -143,6 +143,23 @@ reach the timing runs.
    start. It classifies a headset startup with no displayed frame as
    `not_presented`, and stops.
 
+   Rerun with the display held awake, on `53c4f9017`:
+
+   | Loop | Slot worker | Presenter wait | GPU hangs |
+   | --- | --- | --- | --- |
+   | `XRT_MACOS_DRAWABLE_SLOT=0` | off | GPU | 2 / 15 |
+   | `XRT_MACOS_FORCE_CPU_RENDER_WAIT=1` | off | CPU | 0 / 15, then 0 / 30 |
+
+   **The presenter's GPU-side wait on `render_complete` is involved.** No
+   startup hung in 45 with the CPU wait, against 6 of 30 with the GPU-side wait
+   (the baseline and slot-off loops). At a 20% rate, 45 clean startups have
+   about a 0.004% chance. The slot worker is not the trigger: the hang persists
+   with it off. In completed startups, the CPU wait matched the baseline:
+   presented interval median 8.342 ms, maximum 8.360 ms, no gap over 12.5 ms,
+   and enqueue-to-display median 27.52 ms in both. The slot-off loop was
+   faster to display (19.20 ms) but had 4 gaps over 12.5 ms in 1153. These are
+   2 s startups, not sustained pacing evidence.
+
    Ruled out so far:
    - **CPU ordering.** Hung and passing startups follow the same CPU sequence
      through frame 4: Vulkan submit, present handoff, Metal present commit
