@@ -15,9 +15,100 @@ def query(processor, trace, sql):
     return list(csv.DictReader(io.StringIO(run.stdout)))
 
 
+def check_auxiliary(directory, processor, summary):
+    from collections import Counter
+    from math import ceil
+    def distribution(values):
+        values = sorted(values)
+        assert values, 'Required timing samples absent'
+        return {name: values[min(len(values)-1, ceil(len(values)*fraction)-1)]
+                for name, fraction in [('p50', .5), ('p95', .95), ('p99', .99), ('max', 1)]}
+    archive = directory/'joined.tar'
+    subprocess.run(['python3', str(Path(__file__).with_name('merge-perfetto.py')),
+                    '--processor', str(processor), '--output', str(archive),
+                    *map(str, sorted(directory.glob('monado_*.pftrace'))),
+                    str(directory/'chromium.pftrace')], check=True, timeout=60)
+    faults = query(processor, archive,
+                  "SELECT name,value FROM stats WHERE severity IN ('error','data_loss') AND value<>0")
+    assert not faults, faults
+    service = (directory/'service.log').read_text()
+    startups = service.count('starting up...')
+    assert startups <= 1 if summary['mode']=='benchmark' else startups == 1
+    assert 'VK_ERROR_DEVICE_LOST' not in service and 'VK_NOT_READY' not in service
+    service_trace = None
+    for candidate in sorted(directory.glob('monado_*.pftrace')):
+        count = query(processor, candidate, "SELECT count(*) n FROM slice WHERE name='producer_obligation'")
+        if int(count[0]['n']):
+            assert service_trace is None
+            service_trace = candidate
+    assert service_trace is not None
+    footer = query(processor, service_trace, "SELECT EXTRACT_ARG(arg_set_id,'debug.flush_acknowledged') ack FROM slice WHERE name='MonadoCaptureEnd'")
+    assert len(footer) == 1 and footer[0]['ack'] == '1'
+    acquire = list(csv.DictReader(next(directory.glob('*ipc_swapchain.csv')).open()))
+    reuse = Counter((row['swapchain_id'], row['image_index']) for row in acquire if row['event'] == 'acquire' and row['result'] == '0')
+    assert sum(n >= 10 for n in reuse.values()) >= 3, 'Transport images were not repeatedly recycled'
+    result = dict(status='PASS', mode=summary['mode'], producer=summary.get('producer', 'angle'),
+                  force_copy=summary['forceCopy'], image_acquisitions={f'{s}:{i}': n for (s,i),n in reuse.items()},
+                  trace_errors=faults, graceful_service_capture=True)
+    if summary['mode'] == 'pixels':
+        expected = [[255,0,0,255], [0,255,0,255], [0,0,255,255], [255,0,0,255]]
+        proof = summary['pixelProof']
+        assert len(proof) == 4
+        for phase, color in zip(proof, expected):
+            assert phase['expected'] == color and phase['samples']
+            for sample in phase['samples']:
+                for eye in ['left', 'right']:
+                    assert all(abs(a-b) <= 1 for a,b in zip(sample[eye], color)), sample
+        result['pixel_proof'] = proof
+        result['scope'] = 'Exact GPU-written colors after ANGLE/Dawn SharedImage transport, Vulkan composition and GPU-completed output readback; sampled eye interiors'
+    else:
+        assert summary['mode'] == 'benchmark'
+        phase = next(row for row in summary['phases'] if row['phase'] == 'normal_path')
+        elapsed_ms = phase['after']['perfNow']-phase['before']['perfNow']
+        result['xr_callback_hz'] = (phase['after']['frames']-phase['before']['frames'])*1000/elapsed_ms
+        assert phase['after']['decoded']-phase['before']['decoded'] >= 100, 'Normal path stopped decoding'
+        assert 'vk-target' not in service and 'vk-source' not in service, 'Readbacks enabled during benchmark'
+        assert result['xr_callback_hz'] >= 45, result
+        correlations = query(processor, service_trace, "SELECT EXTRACT_ARG(arg_set_id,'debug.native_ns') native_ns, EXTRACT_ARG(arg_set_id,'debug.mach_absolute_ns') mach_ns FROM slice WHERE name='MonadoClockCorrelation' ORDER BY ts")
+        assert len(correlations) == 2
+        n0,n1 = [int(row['native_ns']) for row in correlations]
+        m0,m1 = [int(row['mach_ns']) for row in correlations]
+        assert n1>n0 and m1>m0 and abs((m1-m0)/(n1-n0)-1)<.001
+        marks = query(processor, archive, "SELECT name,ts FROM slice WHERE category='blink.user_timing' AND name IN ('monado-test-phase-normal_path','monado-test-phase-normal_path_end')")
+        marks = {row['name']:int(row['ts']) for row in marks}
+        begin,end = marks['monado-test-phase-normal_path'],marks['monado-test-phase-normal_path_end']
+        def measured(native):
+            return begin <= m0+(int(native)-n0)*(m1-m0)//(n1-n0) < end
+        ready = list(csv.DictReader(next(directory.glob('*client_gpu.csv')).open()))
+        result['cpu_readiness_wait_us'] = distribution([int(row['duration_ns'])/1000 for row in ready if row['event']=='semaphore_ready' and measured(row['event_ns'])])
+        submits = list(csv.DictReader(next(directory.glob('*ipc_submit.csv')).open()))
+        entries = {row['client_frame_id']:int(row['event_ns']) for row in submits if row['event']=='handler_entry'}
+        result['ipc_handler_us'] = distribution([(int(row['event_ns'])-entries[row['client_frame_id']])/1000 for row in submits if row['event']=='after_commit' and row['client_frame_id'] in entries and measured(row['event_ns'])])
+        mapping = list(csv.DictReader(next(directory.glob('*client_frame_map.csv')).open()))
+        fresh = [row for row in mapping if row['reused']=='0' and measured(row['latch_ns'])]
+        result['fresh_latches'] = len(fresh)
+        result['fresh_latch_hz'] = len(fresh)*1e9/(end-begin)
+        result['handler_entry_to_latch_us'] = distribution([(int(row['latch_ns'])-entries[row['client_frame_id']])/1000 for row in fresh if row['client_frame_id'] in entries])
+        stages = list(csv.DictReader(next(directory.glob('*renderer_stage.csv')).open()))
+        for stage in ['previous_fence_wait', 'queue_submit', 'draw_dispatch']:
+            result[stage+'_us'] = distribution([(int(row['end_ns'])-int(row['begin_ns']))/1000 for row in stages if row['stage']==stage and measured(row['end_ns'])])
+        slices = query(processor, archive, f"SELECT name,dur FROM slice WHERE ts>={begin} AND ts<{end} AND dur>=0 AND name IN ('OpenXRMetalSharedEventWait','ExecuteRAFCallbacks','XRFrameTransport::SubmitFrameDrawnIntoTexture')")
+        for name in ['OpenXRMetalSharedEventWait','ExecuteRAFCallbacks','XRFrameTransport::SubmitFrameDrawnIntoTexture']:
+            values = [int(row['dur'])/1000 for row in slices if row['name']==name]
+            result[name+'_us'] = distribution(values) if values else None
+        thermal = [json.loads(line) for line in (directory/'thermal.jsonl').read_text().splitlines()]
+        assert len(thermal) >= 3 and all(row['exit']==0 for row in thermal), 'Thermal telemetry incomplete'
+        result['thermal_samples'] = [dict(epoch=row['epoch'], **json.loads(row['output'])) for row in thermal]
+        result['scope'] = '20 second normal-path measurement after warmup; same-clock durations; phase windows calibrated to service clocks; readbacks disabled by wrapper'
+    (directory/'validation.json').write_text(json.dumps(result, indent=2)+'\n')
+    return result
+
+
 def check(directory, processor):
     summary = json.loads((directory/'video-summary.json').read_text())
     assert summary['status'] == 'PASS', summary.get('error', summary)
+    if summary.get('mode', 'faults') != 'faults':
+        return check_auxiliary(directory, processor, summary)
     assert summary['gpuCrash'], 'GPU failure was not exercised'
     assert summary['nativeHealthy']['exit'] == 0
     assert summary['nativeHealthy']['frames'] == 1200

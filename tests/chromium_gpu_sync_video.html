@@ -14,6 +14,7 @@ const state = window.testState = {frames: 0, decoded: 0, waiting: 0, playing: 0,
   sessions: 0, ended: 0, contextLost: 0, samples: [], errors: []};
 let gl, program, texture, layer, session, sourceBuffer, mediaSource;
 let glLostGeneration = 0;
+window.proofColor = null;
 const note = (phase) => {
   performance.mark('monado-test-phase-'+phase);
   state.samples.push({phase, now: performance.now(), frames: state.frames,
@@ -63,6 +64,7 @@ function shader(type, code) {
   return object;
 }
 window.startXR = async () => {
+  if (window.useWebGPU) return startGPU();
   if (session) throw Error('Previous session still active');
   if (gl && (gl.isContextLost() || glLostGeneration !== state.contextLost)) {
     const replacement = canvas.cloneNode(); canvas.replaceWith(replacement);
@@ -78,8 +80,8 @@ window.startXR = async () => {
       out vec2 uv; void main() { vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2);
       uv=p; gl_Position=vec4(p*2.-1.,0.,1.); }`));
     gl.attachShader(program, shader(gl.FRAGMENT_SHADER, `#version 300 es
-      precision mediump float; in vec2 uv; uniform sampler2D image; out vec4 color;
-      void main() { color=texture(image,uv); }`));
+      precision mediump float; in vec2 uv; uniform sampler2D image; uniform vec4 proof; out vec4 color;
+      void main() { color=proof.a > 0. ? proof : texture(image,uv); }`));
     gl.linkProgram(program);
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw Error(gl.getProgramInfoLog(program));
     texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -105,7 +107,9 @@ window.startXR = async () => {
         glLostGeneration === state.contextLost) {
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
-      gl.useProgram(program); gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+      gl.useProgram(program);
+      gl.uniform4fv(gl.getUniformLocation(program, 'proof'), window.proofColor || [0,0,0,0]);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
       for (const view of pose.views) {
         const viewport = layer.getViewport(view);
         gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
@@ -120,6 +124,44 @@ window.startXR = async () => {
   current.requestAnimationFrame(draw);
   note('session_start');
 };
+async function startGPU() {
+  if (session) throw Error('Previous session still active');
+  const adapter = await navigator.gpu.requestAdapter({xrCompatible: true});
+  if (!adapter) throw Error('XR-compatible Dawn adapter unavailable');
+  const device = await adapter.requestDevice();
+  device.addEventListener('uncapturederror', event => state.errors.push(event.error.message));
+  session = await navigator.xr.requestSession('immersive-vr', {requiredFeatures: ['local', 'webgpu']});
+  ++state.sessions;
+  session.addEventListener('end', () => {
+    ++state.ended; session = null; device.destroy(); note('session_end');
+  });
+  const binding = new XRGPUBinding(session, device);
+  const projection = binding.createProjectionLayer({colorFormat: binding.getPreferredColorFormat()});
+  session.updateRenderState({layers: [projection]});
+  const space = await session.requestReferenceSpace('local');
+  const current = session;
+  function draw(time, frame) {
+    if (session !== current) return;
+    try {
+      const pose = frame.getViewerPose(space);
+      if (pose) {
+        const commands = device.createCommandEncoder();
+        for (const view of pose.views) {
+          const sub = binding.getViewSubImage(projection, view);
+          const target = sub.colorTexture.createView(sub.getViewDescriptor());
+          const pass = commands.beginRenderPass({colorAttachments: [{view: target,
+            loadOp: 'clear', storeOp: 'store', clearValue: window.proofColor || [1,0,0,1]}]});
+          pass.end();
+        }
+        device.queue.submit([commands.finish()]);
+        ++state.frames;
+      }
+      current.requestAnimationFrame(draw);
+    } catch (error) { state.errors.push(String(error)); }
+  }
+  current.requestAnimationFrame(draw);
+  note('session_start');
+}
 window.stopXR = async () => { if (session) await session.end(); };
 window.note = note;
 </script>

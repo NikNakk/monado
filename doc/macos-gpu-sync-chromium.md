@@ -151,6 +151,46 @@ concurrent overlay and trace validation. Its status/results are in
 The older bundle's baseline is not a matched performance baseline: the checkout
 also carries other uncommitted transport/media changes.
 
+### Pixel and performance fixture validation
+
+The follow-up fixture has two separate modes, selected with
+`M3_CHROMIUM_MODE=pixels` or `benchmark`. Pixel mode writes exact red, green,
+blue and red-again values into real XR transport images and checks Monado's
+existing Vulkan output readback after its completion fence. It validates both
+eye interiors, excluding the transparent distorted seam at the output center.
+`M3_CHROMIUM_PRODUCER=dawn` uses a real XR-compatible Dawn device, WebGPU
+projection layer and render passes; the default uses ANGLE/WebGL.
+Both modes require repeated acquisition of at least three transport images.
+The pixel matrix covers direct and forced-copy transport separately.
+
+Fixture-development runs with the **older bundle** pass ANGLE pixel checks and
+Dawn pixel checks (four array slices repeatedly recycled). The initial Dawn
+attempt used the wrong feature switch; the next attempt incorrectly required
+opaque pixels at the inter-eye distortion seam. Both failed attempts are
+retained outside Git. The corrected switch is
+`--enable-features=OpenXR,WebXRWebGPUBinding`, and the assertions compare the
+left/right eye interiors. These are diagnostic corrections, not runtime fixes.
+The updated-browser pixel matrix is queued after its video/failure cases.
+
+Benchmark mode uses 3 seconds of warmup and a 20-second normal video/WebXR
+window, with readbacks disabled by `run-gpu-sync-service.py --benchmark`.
+It requires continued decoding and reports callback/fresh-latch throughput,
+CPU readiness, IPC handler duration, handler-entry-to-latch delay, Vulkan
+queue submission and prior-fence wait distributions. Chromium trace durations
+remain distinct from GPU execution durations. Foundation thermal state and
+low-power mode are sampled every five seconds by the native test's GPU-free
+`telemetry` mode. The wrapper also records public power/thermal settings.
+A fixture-development measurement passes at 59.99 XR callbacks/s; it is **not**
+a matched before/after comparison. The matched control will reverse only
+Chromium commit `956c93da4c1` against the same inherited working tree, then
+restore it, using incremental builds and A–B–B–A measurements without compiler
+contention. A reverse-patch dry run succeeds; no control edit has yet been made.
+
+Five further native startup/300-frame runs under compiler load pass with
+MoltenVK diagnostic logging: 1,500 frames total, no device-loss or queue errors.
+The earlier native-only device-loss startup has not reproduced. Its cause
+remains unproven; these repeats do not retroactively turn it into a pass.
+
 ## Milestone gates
 
 | Criterion | Evidence required before completion |

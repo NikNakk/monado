@@ -12,6 +12,7 @@ import plistlib
 import subprocess
 import tempfile
 import time
+import threading
 
 
 def main():
@@ -83,7 +84,7 @@ def main():
             'XRT_MACOS_FRAME_READINESS_MARGIN_US': '6000', 'XRT_MACOS_CLIENT_GPU_HUNG_MS': '5000',
             'XRT_MACOS_GPU_GLOBAL_MB': 'auto', 'XRT_MACOS_GPU_CLIENT_MB': 'auto',
             'XRT_MACOS_GPU_CLIENT_OBJECTS': '64', 'XRT_MACOS_GPU_GLOBAL_OBJECTS': '256'}.items()}
-        for key, command in [('power', ['pmset', '-g', 'batt']), ('settings', ['pmset', '-g', 'custom']),
+        for key, command in [('power', ['pmset', '-g', 'batt']), ('settings', ['pmset', '-g', 'custom']), ('thermal', ['pmset', '-g', 'therm']),
                              ('os', ['sw_vers']), ('background_cpu', ['ps', '-A', '-o', '%cpu,comm'])]:
             snapshot = subprocess.run(command, capture_output=True, text=True, timeout=5)
             telemetry[key] = {'exit': snapshot.returncode, 'stdout': snapshot.stdout}
@@ -109,7 +110,29 @@ def main():
             command = args.client or [str(build/'tests/tests_macos_openxr_loaderless_probe')]
             if args.benchmark:
                 command = ['/usr/bin/caffeinate', '-i']+command
-            result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=args.client_timeout)
+            stop_telemetry = threading.Event()
+            def sample_thermal():
+                # Foundation reports the public system thermal state. Sampling
+                # uses no OpenXR session, GPU resource or privileged power probe.
+                with (out/'thermal.jsonl').open('w') as samples:
+                    while True:
+                        probe = subprocess.run([str(build/'tests/tests_macos_service_gpu_sync'), 'telemetry'],
+                                               capture_output=True, text=True, timeout=5)
+                        samples.write(json.dumps(dict(epoch=time.time(), exit=probe.returncode,
+                                                     output=probe.stdout.strip()))+'\n')
+                        samples.flush()
+                        if stop_telemetry.wait(5):
+                            break
+            sampler = threading.Thread(target=sample_thermal, daemon=True) if args.benchmark else None
+            if sampler:
+                sampler.start()
+            try:
+                result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=args.client_timeout)
+            finally:
+                stop_telemetry.set()
+                if sampler:
+                    sampler.join(timeout=6)
+
             (out/'client.txt').write_text(result.stdout+result.stderr)
             (out/'summary.json').write_text(json.dumps(dict(client_exit=result.returncode,
                 target=('macos' if args.headset else 'debug_image'), simulated_hmd=not args.headset, command=command), indent=2)+'\n')
