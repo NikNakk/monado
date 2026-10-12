@@ -97,15 +97,9 @@ RunGPUProducer(ID3D11Device *device, const char *service, const char *socket)
 		}
 		if (c.mode == 9)
 			require(SUCCEEDED(context4->Wait(gate, c.value)), "controlled in-flight GPU gate");
-		const uint32_t words[4] = {(uint32_t)c.frame, (uint32_t)(c.frame >> 32), c.producer, c.image};
 		for (unsigned y = 0; y < p.width; ++y)
-			for (unsigned x = 0; x < p.width; ++x) {
-				auto *pixel = pixels.data() + (y * p.width + x) * 4;
-				pixel[0] = y % 251;
-				pixel[1] = (x + y) % 251;
-				pixel[2] = (words[(x / 4) % 4] >> ((x % 4) * 8)) & 255;
-				pixel[3] = 255;
-			}
+			for (unsigned x = 0; x < p.width; ++x)
+				gpu_sync_pattern(&c, x, y, pixels.data() + (y * p.width + x) * 4);
 		context->UpdateSubresource(textures[c.image], 0, nullptr, pixels.data(), p.width * 4, 0);
 		require(SUCCEEDED(context4->Signal(join, c.value)), "D3D11 internal completion signal");
 		if (c.mode != 2 && c.mode != 7 && c.mode != 8)
