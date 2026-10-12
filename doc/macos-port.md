@@ -1056,6 +1056,13 @@ separate limits. See the [M5 report and reproduction](macos-gpu-sync-cross-stack
 
 ### Common Chromium / Monado tracing (2026-10-12)
 
+The [runtime sandbox narrowing](macos-chromium-runtime-sandbox.md) now passes
+19 resolver cases, three Seatbelt boundary cases, actual sandboxed ANGLE/Dawn
+stereo pixels, GPU/decoder recovery with an independent native client, and a
+Meta simulator smoke test. Runtime/dependency files and selected IPC endpoints
+are exact grants; simulator permissions are conditional. Physical presentation
+remains unverified.
+
 The authorised M3 investigation now has an opt-in native SDK backend, readiness
 and ownership events, presentation callback observations and paired CSV/Perfetto
 regression checks. Chromium's eleven real-Metal/SQL tests pass. Native capture and

@@ -98,7 +98,7 @@ const browser = spawn(values.chrome, args, {env: {...process.env, XR_RUNTIME_JSO
 browser.stdout.pipe(log); browser.stderr.pipe(log);
 let cdp, traceCdp, tracing = false;
 const result = {status: 'FAIL', started: new Date().toISOString(),
-  target: 'simulated HMD/debug_image', mode, producer, forceCopy: values['force-copy'], sandbox: values.sandbox, args,
+  target: process.env.M3_CHROMIUM_TARGET || 'simulated HMD/debug_image', mode, producer, forceCopy: values['force-copy'], sandbox: values.sandbox, args,
   phases: [], gpuCrash: false};
 class CDP {
   constructor(socket) {
