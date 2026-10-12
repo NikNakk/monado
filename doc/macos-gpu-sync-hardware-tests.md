@@ -137,7 +137,14 @@ reach the timing runs.
    startup, the slot worker had prefetched the next drawable at 99 ms. The
    first client buffer was submitted at 103.6 ms, the presenter committed its
    GPU wait at 103.8 ms, and the watchdog fired about 110 ms after submission.
-   The mechanism inside the slot worker is not yet identified.
+   The mechanism inside the slot worker is not yet identified. Ruled out:
+   - **CPU ordering.** Hung and passing startups follow the same CPU sequence
+     through frame 4: Vulkan submit, present handoff, Metal present commit
+     (GPU wait on `render_complete`), then the slot worker's `nextDrawable`.
+   - **Present committed before the Vulkan buffer.** MoltenVK 1.4.2 reports
+     `synchronousQueueSubmits=1` and `prefillMetalCommandBuffers=0` through
+     `vkGetMoltenVKConfigurationMVK`. The compositor's Metal command buffer is
+     therefore committed before `vkQueueSubmit` returns, ahead of the present.
 
 
 - The comparison now samples every 30 frames, after a 30-frame warmup. It
