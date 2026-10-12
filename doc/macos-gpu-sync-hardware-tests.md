@@ -109,6 +109,13 @@ reach the timing runs.
    from that time. The descriptor and window fixes held: the service shut down
    cleanly, with no crash report.
 
+7. **Not a semaphore deadlock.** In run 8, on `66ba54c3d`, the new log showed
+   proof-three's hung first submission. Producer wait 4 was already at 4, and
+   it signalled `render_complete` 3→4 and the reuse timeline 0→1. This
+   matches the passing proof-four exactly. Twenty offscreen startups of the
+   same case did not hang. On the headset, 4 of 14 startups with client
+   content have hung, each on the first submission that read a client image.
+
 Follow-up changes:
 
 - The comparison now samples every 30 frames, after a 30-frame warmup. It
@@ -124,6 +131,12 @@ Follow-up changes:
   signal that does not exceed its current value is marked `NOT_INCREASING`. If
   every wait was met at submission, the hang is in the command buffer's work or
   its signals, not in a wait.
+- `scripts/macos/run-headset-startup-loop.py` repeats short isolated startups,
+  by default 15 three-image startups of 120 frames. It counts `gpu_hang`,
+  `device_lost`, `usb` and other outcomes in `summary.json`. It stops early on
+  a USB claim failure. `XRT_MACOS_PRIME_PRODUCER_EVENT=1`, passed with
+  `--service-env`, primes each client event on the GPU before first use.
+  Compare a baseline loop with a primed loop.
 - A failed compute or graphics dispatch now releases its descriptor sets. A
   lost device previously leaked them each frame until allocation failed. A null
   set then crashed MoltenVK in `vkUpdateDescriptorSets`; this produced all
@@ -132,9 +145,13 @@ Follow-up changes:
   closed and released it. That left the main loop's tracked reference dangling,
   and its release crashed at shutdown (2026-10-11 21:32, 2026-10-12 19:58).
 
-Rerun with:
+Measure the startup hang rate with and without priming. Stop the installed
+service first.
 
 ```sh
-MVK_CONFIG_LOG_LEVEL=3 python3 scripts/macos/run-three-image-comparison.py \
-  --headset --frames 2400 --output /tmp/monado-three-image-headset-7
+MVK_CONFIG_LOG_LEVEL=3 python3 scripts/macos/run-headset-startup-loop.py \
+  --output /tmp/monado-startup-baseline-1
+MVK_CONFIG_LOG_LEVEL=3 python3 scripts/macos/run-headset-startup-loop.py \
+  --output /tmp/monado-startup-primed-1 \
+  --service-env XRT_MACOS_PRIME_PRODUCER_EVENT=1
 ```
