@@ -1221,3 +1221,13 @@ GPU-side lifetime races. `XRT_MACOS_SKIP_SATISFIED_PRODUCER_GPU_WAIT` was
 briefly added and then removed: with the producer GPU wait skipped, captured
 startups still hung. See
 [the headset attempts](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
+
+
+## Compositor late-delay experiment (2026-10-13)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `XRT_MACOS_COMPOSITOR_LATE_DELAY_US` | `0` | Experiment only. Delay each frame's recording by up to 6000 µs from the start of `comp_renderer_draw`, so timewarp poses are sampled closer to display. Frames currently wait ~8 ms for WindowServer's next pick-up anyway. |
+
+Remove it, or make it a default, after the traced and worn tests in
+[the steady-state latency breakdown](macos-psvr2-timing-diagnostics.md#steady-state-latency-where-the-second-refresh-goes-2026-10-13).

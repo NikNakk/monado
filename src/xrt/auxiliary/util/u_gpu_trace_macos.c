@@ -217,6 +217,7 @@ u_gpu_trace_signpost_gpu_to_glass_end(const struct u_gpu_trace_frame *frame,
 		else if (strcmp(STAGE, "target_acquire") == 0) { OP(LOG, ID, "TargetAcquire", __VA_ARGS__); } \
 		else if (strcmp(STAGE, "slot_acquire") == 0) { OP(LOG, ID, "NextDrawableSlot", __VA_ARGS__); } \
 		else if (strcmp(STAGE, "slot_fallback") == 0) { OP(LOG, ID, "NextDrawableFallback", __VA_ARGS__); } \
+		else if (strcmp(STAGE, "late_delay") == 0) { OP(LOG, ID, "CompositorLateDelay", __VA_ARGS__); } \
 		else { OP(LOG, ID, "NextDrawable", __VA_ARGS__); } \
 	} while (0)
 

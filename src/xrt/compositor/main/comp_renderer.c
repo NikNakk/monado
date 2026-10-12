@@ -18,6 +18,7 @@
 #include "xrt/xrt_results.h"
 
 #include "os/os_time.h"
+#include "util/u_time.h"
 
 #include "math/m_api.h"
 #include "math/m_matrix_2x2.h"
@@ -69,6 +70,10 @@ DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+// Experiment: delay each frame's recording to sample timewarp poses later.
+DEBUG_GET_ONCE_NUM_OPTION(macos_compositor_late_delay_us, "XRT_MACOS_COMPOSITOR_LATE_DELAY_US", 0)
+//! Bound for the late-delay experiment; WindowServer's pick-up leaves ~6-7 ms.
+#define MACOS_COMPOSITOR_LATE_DELAY_MAX_US 6000
 DEBUG_GET_ONCE_NUM_OPTION(log_apple_samples_interval, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES_INTERVAL", 120)
 #endif
 #ifdef XRT_OS_OSX
@@ -1162,6 +1167,11 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 
 #ifdef XRT_OS_OSX
 	r->gpu_trace_id = u_gpu_trace_new_scope();
+	if (debug_get_num_option_macos_compositor_late_delay_us() > 0) {
+		COMP_WARN(c, "XRT_MACOS_COMPOSITOR_LATE_DELAY_US=%lld (capped at %d): delaying each frame's recording",
+		          (long long)debug_get_num_option_macos_compositor_late_delay_us(),
+		          MACOS_COMPOSITOR_LATE_DELAY_MAX_US);
+	}
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_open(r);
 	renderer_reprojection_trace_open(r);
@@ -1770,6 +1780,40 @@ dispatch_compute(struct comp_renderer *r,
  *
  */
 
+#ifdef XRT_OS_OSX
+/*!
+ * Experiment (XRT_MACOS_COMPOSITOR_LATE_DELAY_US): hold the compositor until
+ * @p delay after @p draw_begin_ns before it records, so timewarp poses are
+ * sampled closer to display. Frames on direct display currently finish several
+ * milliseconds before WindowServer's next pick-up, which they wait for anyway.
+ * Sleeps, then spins the final millisecond; skipped if the frame is already late.
+ */
+static void
+renderer_macos_late_delay(struct comp_renderer *r, uint64_t draw_begin_ns)
+{
+	int64_t delay_us = debug_get_num_option_macos_compositor_late_delay_us();
+	if (delay_us <= 0) {
+		return;
+	}
+	if (delay_us > MACOS_COMPOSITOR_LATE_DELAY_MAX_US) {
+		delay_us = MACOS_COMPOSITOR_LATE_DELAY_MAX_US;
+	}
+	const uint64_t target_ns = draw_begin_ns + (uint64_t)delay_us * U_TIME_1US_IN_NS;
+	const uint64_t spin_ns = U_TIME_1MS_IN_NS;
+	uint64_t now_ns = os_monotonic_get_ns();
+	if (now_ns >= target_ns) {
+		return;
+	}
+	struct u_gpu_trace_cpu_interval interval = renderer_stage_begin(r, "late_delay");
+	if (target_ns - now_ns > spin_ns) {
+		os_nanosleep((int64_t)(target_ns - now_ns - spin_ns));
+	}
+	while (os_monotonic_get_ns() < target_ns) {
+	}
+	renderer_stage_end(r, "late_delay", interval, 0);
+}
+#endif
+
 XRT_CHECK_RESULT xrt_result_t
 comp_renderer_draw(struct comp_renderer *r)
 {
@@ -1786,7 +1830,8 @@ comp_renderer_draw(struct comp_renderer *r)
 	comp_frame_move_and_clear_locked(&c->frame.rendering, &c->frame.waited);
 
 	// Tell the target we are starting to render, for frame timing.
-	comp_target_mark_begin(ct, c->frame.rendering.id, os_monotonic_get_ns());
+	const uint64_t draw_begin_ns = os_monotonic_get_ns();
+	comp_target_mark_begin(ct, c->frame.rendering.id, draw_begin_ns);
 
 	// Are we ready to render? No - skip rendering.
 	if (!comp_target_check_ready(r->c->target)) {
@@ -1858,6 +1903,9 @@ comp_renderer_draw(struct comp_renderer *r)
 	 * buffers recorded below. Wait for its fence before touching them; macOS
 	 * skips the end-of-frame queue-idle wait that otherwise guarantees this.
 	 */
+#ifdef XRT_OS_OSX
+	renderer_macos_late_delay(r, draw_begin_ns);
+#endif
 	VkResult res = renderer_wait_for_last_fence(r);
 	if (res != VK_SUCCESS) {
 		chl_frame_state_fini(&frame_state);
