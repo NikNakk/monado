@@ -403,6 +403,60 @@ reuse_log(const char *what, struct xrt_swapchain *xsc, uint32_t image_index, uin
 	        image_index, (unsigned long long)value, (long long)extra_ns);
 }
 
+/*
+ * Number of producer-waiting submissions whose full semaphore state is logged.
+ * Startup GPU hangs have occurred on the first such submissions; this records
+ * whether any wait was unmet when it was queued.
+ */
+#define GPU_REUSE_SUBMIT_STATE_LOG_COUNT 8
+
+static uint64_t
+semaphore_counter(struct vk_bundle *vk, VkSemaphore semaphore)
+{
+	uint64_t current = UINT64_MAX;
+	if (vk->vkGetSemaphoreCounterValue == NULL ||
+	    vk->vkGetSemaphoreCounterValue(vk->device, semaphore, &current) != VK_SUCCESS) {
+		return UINT64_MAX;
+	}
+	return current;
+}
+
+static void
+log_submit_state_locked(struct vk_bundle *vk,
+                        const struct vk_semaphore_list_wait *wait,
+                        const struct vk_semaphore_list_signal *signal,
+                        uint64_t reuse_value)
+{
+	static uint32_t logged = 0; // Guarded by g_gpu_reuse_mutex.
+	if (!debug_get_bool_option_log_swapchain_gpu_reuse() || logged >= GPU_REUSE_SUBMIT_STATE_LOG_COUNT) {
+		return;
+	}
+	logged++;
+
+	// Binary semaphores have value 0 and no counter; UINT64_MAX means unread.
+	const int64_t now_ns = os_monotonic_get_ns();
+	for (uint32_t i = 0; i < wait->count; i++) {
+		const uint64_t current = wait->values[i] != 0 ? semaphore_counter(vk, wait->semaphores[i]) : UINT64_MAX;
+		U_LOG_I(
+		    "Swapchain GPU reuse submit state %u: now_ns=%lld reuse_value=%llu wait[%u] semaphore=%p "
+		    "value=%llu current=%llu stages=0x%x%s",
+		    logged, (long long)now_ns, (unsigned long long)reuse_value, i, (void *)wait->semaphores[i],
+		    (unsigned long long)wait->values[i], (unsigned long long)current, (unsigned)wait->stages[i],
+		    wait->values[i] != 0 && current != UINT64_MAX && current < wait->values[i] ? " UNMET" : "");
+	}
+	for (uint32_t i = 0; i < signal->count; i++) {
+		const uint64_t current =
+		    signal->values[i] != 0 ? semaphore_counter(vk, signal->semaphores[i]) : UINT64_MAX;
+		U_LOG_I(
+		    "Swapchain GPU reuse submit state %u: now_ns=%lld reuse_value=%llu signal[%u] semaphore=%p "
+		    "value=%llu current=%llu%s",
+		    logged, (long long)now_ns, (unsigned long long)reuse_value, i, (void *)signal->semaphores[i],
+		    (unsigned long long)signal->values[i], (unsigned long long)current,
+		    signal->values[i] != 0 && current != UINT64_MAX && current >= signal->values[i] ? " NOT_INCREASING"
+		                                                                                    : "");
+	}
+}
+
 static struct gpu_reuse_context *
 find_context_locked(struct vk_bundle *vk)
 {
@@ -1291,6 +1345,7 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 		g_renderer.wait_sems = *wait_semaphores;
 	}
 	bool producer_ready = true;
+	bool producer_waits = false;
 	for (uint32_t i = 0; i < g_renderer.submit.image_count; i++) {
 		struct gpu_reuse_submit_image *image = &g_renderer.submit.images[i];
 		struct xrt_compositor_semaphore *producer = image->tracker->producer[image->image_index];
@@ -1323,6 +1378,7 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 			producer_ready = false;
 			break;
 		}
+		producer_waits = true;
 		reuse_log("producer ready wait", image->tracker->xsc, image->image_index, value, 0);
 	}
 	if (!producer_ready) {
@@ -1338,6 +1394,10 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 	                                      g_renderer.submit.value);
 	vk_submit_info_builder_prepare(builder, &g_renderer.wait_sems, command_buffers, command_buffer_count,
 	                               &g_renderer.signal_sems, next);
+	if (producer_waits) {
+		log_submit_state_locked(g_renderer.submit.context->vk, &g_renderer.wait_sems, &g_renderer.signal_sems,
+		                        g_renderer.submit.value);
+	}
 
 	/*
 	 * Keep the publication mutex held until this exact VkSubmitInfo has been
