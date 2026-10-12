@@ -140,7 +140,7 @@ python3 scripts/macos/run-gpu-sync-service.py --perfetto --scale-percentage 20 \
   M3_HEALTHY_NATIVE_PATH=/absolute/path/to/build/arm64/tests/tests_macos_service_gpu_sync \
   node scripts/macos/run-chromium-gpu-sync.mjs
 python3 scripts/macos/check-chromium-gpu-sync.py /tmp/new-m3-video-run \
-  --processor /tmp/monado-perfetto-sdk/tools/mac-arm64/trace_processor_shell
+  --processor $HOME/Code/perfetto-sdk-v58.2/tools/mac-arm64/trace_processor_shell
 ```
 
 Set `M3_CHROMIUM_FORCE_COPY=1` to exercise the transfer fallback.
