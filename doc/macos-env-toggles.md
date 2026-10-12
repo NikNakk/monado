@@ -1025,8 +1025,9 @@ compositor's render-complete timeline as an `MTLSharedEvent`. Presentation then
 uses the CPU Vulkan timeline wait before each Metal present, which also turns
 off drawable-slot mode. Default off. It is a diagnostic for separating
 shared-event presentation problems from rendering ones, not a tuning option.
-The first hardware loop with it (2026-10-12) is invalid: the PS VR2 display
-had gone to sleep, so no frame was presented. See
+Hardware result (2026-10-12): no startup GPU hangs in 45 headset startups,
+against 6 in 30 with the default GPU-side wait. Short-run presented cadence
+and enqueue-to-display latency matched the default. See
 [the headset attempts](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
 
 Independently of this toggle, the CPU render-complete waits (present and
@@ -1171,13 +1172,9 @@ priming had completed, so it was removed. See
 [the headset attempts](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
 
 
-## Deferred slot drawable fetch experiment (2026-10-12)
+## Deferred slot drawable fetch experiment (2026-10-12, removed)
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `XRT_MACOS_SLOT_ACQUIRE_AFTER_PRESENT` | `0` | Experiment only. In drawable-slot mode, fetch the next drawable only when no slot present is in flight. The fetch is rescheduled from the present's completion handler, so it no longer overlaps the compositor buffer and present that are still on the GPU. |
-
-This tests whether the slot worker's early `nextDrawable` causes the intermittent
-headset startup GPU hang. Remove it once
-[the startup loop](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12)
-settles the question.
+`XRT_MACOS_SLOT_ACQUIRE_AFTER_PRESENT` was briefly added. It deferred the slot
+worker's next `nextDrawable` until no slot present was in flight. Startups with
+the slot worker off still hung, so the slot fetch was not the trigger, and the
+experiment was removed.
