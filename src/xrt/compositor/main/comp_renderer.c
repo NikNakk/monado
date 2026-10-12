@@ -190,6 +190,15 @@ struct comp_renderer
 	int64_t fenced_frame_id;
 
 	/*!
+	 * Resources of the last submitted frame, released only after its fence
+	 * has signalled: its descriptor sets must not be reset while pending.
+	 */
+	struct render_compute pending_compute;
+	struct render_gfx pending_gfx;
+	bool pending_compute_valid;
+	bool pending_gfx_valid;
+
+	/*!
 	 * The render pass used to render to the target, it depends on the
 	 * target's format so will be recreated each time the target changes.
 	 */
@@ -989,9 +998,21 @@ renderer_create_renderings_and_fences(struct comp_renderer *r)
 }
 
 static void
+renderer_release_pending_frame(struct comp_renderer *r);
+
+static void
 renderer_close_renderings_and_fences(struct comp_renderer *r)
 {
 	struct vk_bundle *vk = &r->c->base.vk;
+	/*
+	 * The last frame may still be pending; it uses these fences and its
+	 * resources. Wait plainly: traces and the target may already be gone.
+	 */
+	if (r->fenced_buffer >= 0 && r->fences != NULL) {
+		(void)vk->vkWaitForFences(vk->device, 1, &r->fences[r->fenced_buffer], VK_TRUE, UINT64_MAX);
+		r->fenced_buffer = -1;
+	}
+	renderer_release_pending_frame(r);
 	// Renderings
 	if (r->buffer_count > 0 && r->rtr_array != NULL) {
 		for (uint32_t i = 0; i < r->buffer_count; i++) {
@@ -1172,13 +1193,13 @@ apple_sample_due(uint64_t count)
 }
 #endif
 
-static void
+static VkResult
 renderer_wait_for_last_fence(struct comp_renderer *r)
 {
 	COMP_TRACE_MARKER();
 
 	if (r->fenced_buffer < 0) {
-		return;
+		return VK_SUCCESS;
 	}
 
 	struct vk_bundle *vk = &r->c->base.vk;
@@ -1265,6 +1286,21 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 #endif
 	r->fenced_buffer = -1;
 	r->fenced_frame_id = -1;
+	return ret;
+}
+
+//! Release the previous frame's render resources; its fence must have signalled.
+static void
+renderer_release_pending_frame(struct comp_renderer *r)
+{
+	if (r->pending_compute_valid) {
+		render_compute_fini(&r->pending_compute);
+		r->pending_compute_valid = false;
+	}
+	if (r->pending_gfx_valid) {
+		render_gfx_fini(&r->pending_gfx);
+		r->pending_gfx_valid = false;
+	}
 }
 
 static inline bool
@@ -1303,8 +1339,9 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	 * Wait for previous frame's work to complete.
 	 */
 
-	// Wait for the last fence, if any.
-	renderer_wait_for_last_fence(r);
+	// Normally already done before recording; see comp_renderer_draw.
+	ret = renderer_wait_for_last_fence(r);
+	VK_CHK_AND_RET(ret, "renderer_wait_for_last_fence");
 	assert(r->fenced_buffer < 0);
 
 	assert(r->acquired_buffer >= 0);
@@ -1793,8 +1830,19 @@ comp_renderer_draw(struct comp_renderer *r)
 	renderer_late_render_trace_begin(r);
 #endif
 
+	/*
+	 * The previous frame shares the command pool, descriptor pools and uniform
+	 * buffers recorded below. Wait for its fence before touching them; macOS
+	 * skips the end-of-frame queue-idle wait that otherwise guarantees this.
+	 */
+	VkResult res = renderer_wait_for_last_fence(r);
+	if (res != VK_SUCCESS) {
+		chl_frame_state_fini(&frame_state);
+		return XRT_ERROR_VULKAN;
+	}
+	renderer_release_pending_frame(r);
+
 	uint64_t dispatch_begin_ns = renderer_stage_begin(r);
-	VkResult res = VK_SUCCESS;
 	if (use_compute) {
 		if (render_compute_init(&render_c, &c->nr)) {
 			res = dispatch_compute(r, &render_c, &frame_state, fov_source);
@@ -1942,10 +1990,16 @@ comp_renderer_draw(struct comp_renderer *r)
 	 * Free resources.
 	 */
 
+	/*
+	 * This frame may still be executing (macOS skips the queue-idle wait), so
+	 * keep its resources until the next frame has waited for its fence.
+	 */
 	if (use_compute) {
-		render_compute_fini(&render_c);
+		r->pending_compute = render_c;
+		r->pending_compute_valid = true;
 	} else {
-		render_gfx_fini(&render_g);
+		r->pending_gfx = render_g;
+		r->pending_gfx_valid = true;
 	}
 
 	if (present_success) {
