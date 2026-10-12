@@ -11,7 +11,11 @@ import {spawn, spawnSync} from 'node:child_process';
 const {values} = parseArgs({options: {
   chrome: {type: 'string'}, output: {type: 'string'}, healthy: {type: 'string'},
   'force-copy': {type: 'boolean', default: false},
+  'pixel-ms': {type: 'string'},
 }});
+const pixelMs = Number(values['pixel-ms'] ?? process.env.M3_CHROMIUM_PIXEL_MS ?? 3000);
+if (!Number.isInteger(pixelMs) || pixelMs < 250 || pixelMs > 60000)
+  throw Error('--pixel-ms must be between 250 and 60000');
 const producer = process.env.M3_CHROMIUM_PRODUCER || 'angle';
 if (!['angle', 'dawn'].includes(producer)) throw Error('Invalid producer');
 const mode = process.env.M3_CHROMIUM_MODE || 'faults';
@@ -89,7 +93,7 @@ if (values.healthy && mode === 'faults') {
 const browser = spawn(values.chrome, args, {env: {...process.env, XR_RUNTIME_JSON: manifest},
   stdio: ['ignore', 'pipe', 'pipe']});
 browser.stdout.pipe(log); browser.stderr.pipe(log);
-let cdp, tracing = false;
+let cdp, traceCdp, tracing = false;
 const result = {status: 'FAIL', started: new Date().toISOString(),
   target: 'simulated HMD/debug_image', mode, producer, forceCopy: values['force-copy'], args,
   phases: [], gpuCrash: false, sandbox: 'disabled for isolated service names'};
@@ -154,7 +158,13 @@ async function observe(phase, duration = 700) {
 try {
   const portFile = join(profile, 'DevToolsActivePort');
   await until(() => existsSync(portFile), 'DevTools startup');
-  const port = readFileSync(portFile, 'utf8').split('\n')[0];
+  const [port, browserSocketPath] = readFileSync(portFile, 'utf8').trim().split('\n');
+  // Page-level tracing filters out the XR utility process. Its unbound startup
+  // writers then expire after 30 s and commit to invalid buffer zero. Use the
+  // browser endpoint for the whole cross-process capture, and the page for JS.
+  const traceSocket = new WebSocket(`ws://127.0.0.1:${port}${browserSocketPath}`);
+  await new Promise((resolve, reject) => { traceSocket.addEventListener('open', resolve); traceSocket.addEventListener('error', reject); });
+  traceCdp = new CDP(traceSocket);
   const target = await until(async () => {
     const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     return pages.find(page => page.type === 'page' && page.url === url);
@@ -165,8 +175,9 @@ try {
   await cdp.call('Runtime.enable');
   await cdp.call('Browser.grantPermissions', {origin: url, permissions: ['vr']});
   await until(() => cdp.evaluate('typeof prepare === "function"'), 'fixture load');
-  await cdp.call('Tracing.start', {traceConfig: {includedCategories: ['xr', 'gpu', 'blink.user_timing']},
+  await traceCdp.call('Tracing.start', {traceConfig: {includedCategories: ['xr', 'gpu', 'blink.user_timing']},
     transferMode: 'ReturnAsStream', streamFormat: 'proto'}); tracing = true;
+  result.traceScope = 'browser';
   await cdp.evaluate(`window.useWebGPU = ${producer === 'dawn'}`);
   result.stage = 'prepare';
   await cdp.evaluate('prepare()');
@@ -189,7 +200,7 @@ try {
       await cdp.evaluate(`window.proofColor = ${JSON.stringify(color)}`);
       await sleep(500); // Exclude submissions already in flight at the transition.
       const before = readFileSync(join(output, 'service.log'), 'utf8').length;
-      await observe('pixels_'+name, 3000);
+      await observe('pixels_'+name, pixelMs);
       const logs = readFileSync(join(output, 'service.log'), 'utf8').slice(before);
       // Left/right samples lie inside each eye. The output center lies on
       // the distorted eye seam and can blend transparent border texels.
@@ -259,21 +270,22 @@ try {
   result.error = String(error); process.exitCode = 1;
   if (cdp) { try { result.failureState = await cdp.evaluate('JSON.parse(JSON.stringify({...testState, mediaReady: document.querySelector("video").readyState, videoError: document.querySelector("video").error?.message, mediaSourceState: typeof mediaSource === "undefined" ? null : mediaSource?.readyState}))'); } catch {} }
 } finally {
-  if (cdp && tracing) {
+  if (traceCdp && tracing) {
     try {
-      const complete = cdp.once('Tracing.tracingComplete');
-      await cdp.call('Tracing.end');
+      const complete = traceCdp.once('Tracing.tracingComplete');
+      await traceCdp.call('Tracing.end');
       const finished = await withTimeout(complete, 10000, 'trace export');
       const chunks = [];
       for (;;) {
-        const part = await cdp.call('IO.read', {handle: finished.stream});
+        const part = await traceCdp.call('IO.read', {handle: finished.stream});
         chunks.push(Buffer.from(part.data, part.base64Encoded ? 'base64' : 'utf8'));
         if (part.eof) break;
       }
       writeFileSync(join(output, 'chromium.pftrace'), Buffer.concat(chunks));
-      await cdp.call('IO.close', {handle: finished.stream});
+      await traceCdp.call('IO.close', {handle: finished.stream});
     } catch (error) { result.traceError = String(error); result.status = 'FAIL'; process.exitCode = 1; }
   }
+  if (traceCdp) traceCdp.socket.close();
   if (cdp) { try { await cdp.call('Browser.close', {}, 3000); } catch {} cdp.socket.close(); }
   if (browser.exitCode === null) browser.kill('SIGTERM');
   await Promise.race([new Promise(resolve => browser.once('exit', resolve)), sleep(3000)]);
