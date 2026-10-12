@@ -50,7 +50,8 @@ def main():
     print(f'GPU service results: {out}', flush=True)
     domain = f'gui/{os.getuid()}'
     with tempfile.TemporaryDirectory(prefix='monado-gpu-service-') as temporary:
-        env = {k: v for k, v in os.environ.items() if not k.startswith(('XRT_', 'PSVR2_', 'SIMULATED_', 'OXR_'))}
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith(('XRT_', 'PSVR2_', 'SIMULATED_', 'OXR_')) and k != 'GPU_SYNC_VIEW_LOCKED'}
         env.update(XDG_RUNTIME_DIR=temporary, XDG_CONFIG_HOME=temporary,
                    XRT_NO_STDIN='1',
                    XRT_LOG='info', XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE='1',
@@ -77,6 +78,9 @@ def main():
             env.update(XRT_MACOS_CLIENT_GPU_HUNG_MS='500')
         if args.budget_suite:
             env.update(XRT_MACOS_GPU_CLIENT_OBJECTS='2', XRT_MACOS_GPU_GLOBAL_OBJECTS='8')
+        if args.headset and args.sample_interval is not None:
+            # Head motion would carry a world-locked quad off the sample points.
+            env['GPU_SYNC_VIEW_LOCKED'] = '1'
         if args.headset:
             env.update(SIMULATED_ENABLE='0', XRT_COMPOSITOR_FORCE_DEBUG_IMAGE='0',
                        XRT_MACOS_PREVENT_DISPLAY_SLEEP='1', PSVR2_CAMERA_STREAMS='0')
@@ -86,6 +90,7 @@ def main():
         if args.client:
             telemetry['workload'] = 'Custom client; '+('physical PS VR2 display' if args.headset else 'simulated HMD; debug_image target')
         telemetry['headset'] = args.headset
+        telemetry['view_locked_quad'] = env.get('GPU_SYNC_VIEW_LOCKED') == '1'
         telemetry['three_image_compatibility'] = args.three_images
         telemetry['perfetto'] = args.perfetto
         telemetry['render_scale_percentage'] = env.get('XRT_COMPOSITOR_SCALE_PERCENTAGE', '140')
