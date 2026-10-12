@@ -468,6 +468,18 @@ Background activity varied; no causal or strict tail non-regression conclusion
 is established. Current sources/build and the installed service were restored.
 See [the matched hardware comparison](macos-gpu-sync-headset-comparison.md).
 
+### Chromium GPU synchronization M3 (2026-10-12)
+
+Chromium commit `956c93da4c1` preserves unresolved write fences across queries,
+fails missing-mailbox queries and cancels Metal submissions on session/context
+retirement. Fifteen actual SharedImage/Dawn/ANGLE tests and eleven real Metal
+waiter tests pass; restoring the old query behavior makes four regressions fail.
+A real-video baseline fixture covers decoder buffering and GPU-process recovery
+with concurrent native fresh latches. Updated-browser validation is queued
+after its incremental build. Exact handoff pixels, matched performance and one
+unresolved native device-loss startup remain open; M3 is incomplete. See the
+[M3 evidence and reproduction record](macos-gpu-sync-chromium.md).
+
 ### Common Chromium / Monado tracing (2026-10-12)
 
 The authorised M3 investigation now has an opt-in native SDK backend, readiness

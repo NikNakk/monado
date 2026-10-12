@@ -1,0 +1,125 @@
+<!doctype html>
+<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<meta charset="utf-8">
+<title>Monado Chromium GPU synchronization fixture</title>
+<video muted playsinline width="128" height="128"></video>
+<canvas width="128" height="128"></canvas>
+<pre id="status"></pre>
+<script>
+// Real MediaSource starvation, video decoding, WebGL/ANGLE and WebXR export.
+// The runner calls startXR with a DevTools user gesture. No fake XR device.
+const video = document.querySelector('video');
+let canvas = document.querySelector('canvas');
+const state = window.testState = {frames: 0, decoded: 0, waiting: 0, playing: 0,
+  sessions: 0, ended: 0, contextLost: 0, samples: [], errors: []};
+let gl, program, texture, layer, session, sourceBuffer, mediaSource;
+let glLostGeneration = 0;
+const note = (phase) => {
+  performance.mark('monado-test-phase-'+phase);
+  state.samples.push({phase, now: performance.now(), frames: state.frames,
+    decoded: state.decoded, time: video.currentTime, readyState: video.readyState});
+  document.querySelector('#status').textContent = JSON.stringify(state, null, 2);
+};
+video.addEventListener('waiting', () => { ++state.waiting; note('waiting'); });
+video.addEventListener('playing', () => { ++state.playing; note('playing'); });
+video.addEventListener('error', () => state.errors.push(String(video.error?.message)));
+function watchContext() {
+  canvas.addEventListener('webglcontextlost', event => {
+    event.preventDefault(); ++state.contextLost; note('context_lost');
+  });
+}
+watchContext();
+const frameDecoded = () => { ++state.decoded; video.requestVideoFrameCallback(frameDecoded); };
+video.requestVideoFrameCallback(frameDecoded);
+
+async function append(name) {
+  const bytes = await (await fetch('/media/' + name)).arrayBuffer();
+  await new Promise((resolve, reject) => {
+    sourceBuffer.addEventListener('updateend', resolve, {once: true});
+    sourceBuffer.addEventListener('error', reject, {once: true});
+    sourceBuffer.appendBuffer(bytes);
+  });
+}
+window.prepare = async () => {
+  mediaSource = new MediaSource();
+  video.src = URL.createObjectURL(mediaSource);
+  await new Promise(resolve => mediaSource.addEventListener('sourceopen', resolve, {once: true}));
+  const mime = 'video/mp4; codecs="avc1.42c01e"';
+  if (!MediaSource.isTypeSupported(mime)) throw Error('H264 MediaSource unavailable');
+  sourceBuffer = mediaSource.addSourceBuffer(mime);
+  await append('init.mp4');
+  await append('segment-1.m4s');
+  await append('segment-2.m4s');
+  note('prepared');
+};
+window.appendMore = async () => {
+  for (let segment = 3; segment <= 12; ++segment) await append(`segment-${segment}.m4s`);
+  mediaSource.endOfStream();
+  note('data_appended');
+};
+function shader(type, code) {
+  const object = gl.createShader(type); gl.shaderSource(object, code); gl.compileShader(object);
+  if (!gl.getShaderParameter(object, gl.COMPILE_STATUS)) throw Error(gl.getShaderInfoLog(object));
+  return object;
+}
+window.startXR = async () => {
+  if (session) throw Error('Previous session still active');
+  if (gl && (gl.isContextLost() || glLostGeneration !== state.contextLost)) {
+    const replacement = canvas.cloneNode(); canvas.replaceWith(replacement);
+    canvas = replacement; watchContext(); gl = null;
+  }
+  if (!gl) {
+    gl = canvas.getContext('webgl2', {xrCompatible: true, antialias: false});
+    if (!gl) throw Error('WebGL2 unavailable');
+    await gl.makeXRCompatible();
+    glLostGeneration = state.contextLost;
+    program = gl.createProgram();
+    gl.attachShader(program, shader(gl.VERTEX_SHADER, `#version 300 es
+      out vec2 uv; void main() { vec2 p=vec2((gl_VertexID<<1)&2, gl_VertexID&2);
+      uv=p; gl_Position=vec4(p*2.-1.,0.,1.); }`));
+    gl.attachShader(program, shader(gl.FRAGMENT_SHADER, `#version 300 es
+      precision mediump float; in vec2 uv; uniform sampler2D image; out vec4 color;
+      void main() { color=texture(image,uv); }`));
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw Error(gl.getProgramInfoLog(program));
+    texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+  await gl.makeXRCompatible();
+  session = await navigator.xr.requestSession('immersive-vr');
+  ++state.sessions;
+  session.addEventListener('end', () => { ++state.ended; session = null; note('session_end'); });
+  // Use the runtime's test-scale recommendation; independently scaling this
+  // legacy base layer can mismatch its imported color and depth attachments.
+  layer = new XRWebGLLayer(session, gl, {framebufferScaleFactor: 1, antialias: false});
+  session.updateRenderState({baseLayer: layer});
+  const space = await session.requestReferenceSpace('local');
+  const current = session;
+  function draw(time, frame) {
+    if (session !== current) return;
+    const pose = frame.getViewerPose(space);
+    if (pose && video.readyState >= 2 && !gl.isContextLost() &&
+        glLostGeneration === state.contextLost) {
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+      gl.useProgram(program); gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+      for (const view of pose.views) {
+        const viewport = layer.getViewport(view);
+        gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      }
+      const error = gl.getError();
+      if (error) { state.errors.push('GL error '+error); return; }
+      ++state.frames;
+    }
+    current.requestAnimationFrame(draw);
+  }
+  current.requestAnimationFrame(draw);
+  note('session_start');
+};
+window.stopXR = async () => { if (session) await session.end(); };
+window.note = note;
+</script>
