@@ -11,6 +11,7 @@ import {spawn, spawnSync} from 'node:child_process';
 const {values} = parseArgs({options: {
   chrome: {type: 'string'}, output: {type: 'string'}, healthy: {type: 'string'},
   'force-copy': {type: 'boolean', default: false},
+  sandbox: {type: 'boolean', default: false},
   'pixel-ms': {type: 'string'},
 }});
 const pixelMs = Number(values['pixel-ms'] ?? process.env.M3_CHROMIUM_PIXEL_MS ?? 3000);
@@ -24,6 +25,7 @@ values.chrome ||= process.env.M3_CHROMIUM_PATH;
 values.output ||= process.env.M3_CHROMIUM_OUTPUT;
 values.healthy ||= process.env.M3_HEALTHY_NATIVE_PATH;
 values['force-copy'] ||= process.env.M3_CHROMIUM_FORCE_COPY === '1';
+values.sandbox ||= process.env.M3_CHROMIUM_SANDBOX === '1';
 if (!values.chrome || !values.output || !process.env.MONADO_OPENXR_RUNTIME_PATH)
   throw Error('Requires --chrome --output and the isolated service environment');
 const output = resolve(values.output);
@@ -70,9 +72,10 @@ const args = ['--user-data-dir='+profile, '--remote-debugging-port=0',
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
   '--disable-backgrounding-occluded-windows', '--enable-logging=stderr',
   '--vmodule=openxr_render_loop=2,openxr_graphics_binding_metal=2,openxr_api_wrapper=2',
-  // Isolated service socket/Mach names are outside the production sandbox's
-  // fixed allowlist. This is an integration fixture, not a sandbox validation.
-  '--no-sandbox', '--app='+url];
+  '--app='+url];
+// Existing captures retain their original unsandboxed configuration. New
+// sandbox validation uses exact selected endpoint permissions in Chromium.
+if (!values.sandbox) args.push('--no-sandbox');
 if (mode === 'benchmark') args.splice(args.findIndex(arg => arg.startsWith('--vmodule=')), 1);
 if (values['force-copy']) args.push('--openxr-metal-force-copy');
 let healthy, healthyText = '', healthyExit;
@@ -95,8 +98,8 @@ const browser = spawn(values.chrome, args, {env: {...process.env, XR_RUNTIME_JSO
 browser.stdout.pipe(log); browser.stderr.pipe(log);
 let cdp, traceCdp, tracing = false;
 const result = {status: 'FAIL', started: new Date().toISOString(),
-  target: 'simulated HMD/debug_image', mode, producer, forceCopy: values['force-copy'], args,
-  phases: [], gpuCrash: false, sandbox: 'disabled for isolated service names'};
+  target: 'simulated HMD/debug_image', mode, producer, forceCopy: values['force-copy'], sandbox: values.sandbox, args,
+  phases: [], gpuCrash: false};
 class CDP {
   constructor(socket) {
     this.socket = socket; this.next = 0; this.pending = new Map(); this.events = new Map();
