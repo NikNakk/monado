@@ -474,20 +474,25 @@ Chromium commit `956c93da4c1` preserves unresolved write fences across queries,
 fails missing-mailbox queries and cancels Metal submissions on session/context
 retirement. Fifteen actual SharedImage/Dawn/ANGLE tests and eleven real Metal
 waiter tests pass; restoring the old query behavior makes four regressions fail.
-A real-video baseline fixture covers decoder buffering and GPU-process recovery
-with concurrent native fresh latches. Updated-browser validation is queued
-after its incremental build. Exact handoff pixels, matched performance and one
-unresolved native device-loss startup remain open; M3 is incomplete. See the
-[M3 evidence and reproduction record](macos-gpu-sync-chromium.md).
+M3's six criteria now pass for the tested offscreen routes: both rebuilt-browser
+video/failure cases, four differing-eye GPU pixel cases and matched A–B–B–A
+measurements pass. Both failure runs preserve 1,200 independent native frames
+without a service restart. Throughput stays near 60 XR callbacks/s; median CPU
+readiness/IPC changes are about 0–1 µs. Latch distributions overlap, with no
+statistical tail guarantee. All 69 native tests pass. XRMediaBinding sparse
+layers, production sandbox compatibility and physical presentation remain
+unverified; the earlier native-only device-loss startup is an unresolved
+platform/runtime observation. See the
+[M3 completion evidence and reproduction record](macos-gpu-sync-chromium.md).
 
 ### Common Chromium / Monado tracing (2026-10-12)
 
 The authorised M3 investigation now has an opt-in native SDK backend, readiness
 and ownership events, presentation callback observations and paired CSV/Perfetto
-regression checks. Chromium's ten real-Metal/SQL tests pass. Native capture and
+regression checks. Chromium's eleven real-Metal/SQL tests pass. Native capture and
 real offscreen service faults pass; explicit clock snapshots/manifests fix a
-sleep-time epoch mismatch when joining captures. Physical-display migration and
-actual Dawn/ANGLE handoff validation remain open. See the
+sleep-time epoch mismatch when joining captures. Actual Dawn/ANGLE handoff
+validation passes in M3; physical-display tracing migration remains open. See the
 [implementation and results](macos-gpu-sync-perfetto.md).
 
 ### Native GPU synchronization M1–M2 completion — 2026-10-11
