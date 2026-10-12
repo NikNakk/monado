@@ -172,6 +172,7 @@ try {
   await cdp.evaluate('prepare()');
   result.stage = 'play_before_XR';
   await cdp.evaluate('document.querySelector("video").play()');
+  await until(() => cdp.evaluate('document.querySelector("video").readyState >= 2'), 'first decoded image');
   result.beforeXR = await state();
   result.stage = 'startXR';
   await cdp.evaluate('startXR()');
