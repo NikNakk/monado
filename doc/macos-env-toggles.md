@@ -1025,7 +1025,11 @@ compositor's render-complete timeline as an `MTLSharedEvent`. Presentation then
 uses the CPU Vulkan timeline wait before each Metal present, which also turns
 off drawable-slot mode. Default off. It is a diagnostic for separating
 shared-event presentation problems from rendering ones, not a tuning option.
-No hardware result with it is recorded yet; remove it if it settles nothing.
+First hardware result (2026-10-12): no startup GPU hangs in 15 headset startups,
+against 4 in 15 without it. `XRT_MACOS_DRAWABLE_SLOT=0` alone, which keeps the
+GPU-side wait, gave the same result. That points at the slot worker rather
+than the shared-event wait; see
+[the headset attempts](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
 
 Independently of this toggle, the CPU render-complete waits (present and
 dropped-frame retirement) now report every second while a value is
