@@ -3316,18 +3316,16 @@ and whether a Monado swap was missing or more than 5 ms late:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Missing or late | 46.9% | 37.1% | 31.1% | 3.2–6.2% | 0–0.6% (4 of 1263) | 1.7–5.6% |
 
-**Conclusion (strong correlation, not yet confirmed by intervention):** when a
-PS VR2 refresh falls within about 1.5 ms after a built-in panel refresh,
-WindowServer often misses the PS VR2 deadline for frames Monado delivered on
-time. Over the whole trace, including the first session and the app switch,
-there is an extra bump of 5.8–8.6% at 4.5–5.0 ms. The MacBook Air panel's
-refresh rate cannot be changed. To confirm, run with the lid closed on mains
-power, with the PS VR2 as the only display, or at 90 Hz, and check that the
-bursts disappear or change period. Candidate mitigations, after confirmation:
-document the lid-closed configuration; or detect the coincidence window from
-both displays' refreshes and drain before the slot starves.
+**Conclusion, confirmed by intervention (run 3, below):** when a PS VR2
+refresh falls within about 1.5 ms after a built-in panel refresh, WindowServer
+often misses the PS VR2 deadline for frames Monado delivered on time. Over the
+whole trace, including the first session and the app switch, there is an extra
+bump of 5.8–8.6% at 4.5–5.0 ms. The MacBook Air panel's refresh rate cannot be
+changed. Closing the lid removes the bursts. A future mitigation with the lid
+open would detect the coincidence window from both displays' refreshes, and
+drain before the slot starves.
 
-### Cube Sea frame-rate drops (open)
+### Cube Sea frame-rate drops (largely explained by run 3)
 
 The user reports Cube Sea, previously a steady 120 fps, dropping to about 60
 for extended periods. In this trace the client delivers 48–58 frames per second
@@ -3356,6 +3354,45 @@ estimate) nor Chromium's WebXR frame loop is instrumented.
   calibration. A smoothed estimate would also explain the hysteresis.
 - **Chromium's scheduling.** After a miss, the WebXR loop may stay out of phase.
 
-Next: signpost `xrWaitFrame`, `xrBeginFrame` and `xrEndFrame` per client, and
-record a Chromium trace (`xr`, `gpu`) alongside Instruments. A lid-closed or
-90 Hz run shows whether Cube Sea holds 120 fps without the bursts.
+Run 3 below answers this: the magic window was the main cause.
+
+### Run 3: magic window off, then lid closed
+
+The user added a later run to the same trace bundle (shown as run 3 in
+Instruments; run 2 was discarded; `xctrace` numbers it run 2). It started at
+23:55:36 BST and lasted 60.8 s. Cube Sea's magic window was turned off, and the
+lid was closed at about 48 s. Analyse with
+`analyse-instruments-display-phase.py --run 2`.
+
+- **Magic window off, lid open (31–44 s):** Cube Sea holds 117–120 fps, apart
+  from the presentation bursts, and does not fall into run 1's sustained
+  ~50 fps stretches. With the magic window on, the page also draws its inline
+  view on the renderer's main thread at the Mac display's 60 Hz, competing with
+  immersive XR frames. That fits run 1's irregular 2–3 refresh intervals with
+  unchanged client GPU time. Turning the magic window off is the user-confirmed
+  fix.
+- **Bursts persist with the lid open,** every ~8 s (7–8, 16, 24–25, 32–33,
+  41–42 s), with the same phase dependence: missing or late 48.9% at 0–0.5 ms
+  and 37.1% at 0.5–1 ms after a built-in refresh, and 0–0.7% at 2–5.5 ms.
+- **Lid closed (from about 49 s):** the built-in display stops refreshing. After
+  a transition dip (49–50 s, with one `display rejected` detachment at 50.17 s),
+  the PS VR2 shows only Monado's surface, directly scanned out. It receives
+  116–120 Monado swaps per second, with no late frames, no superseded presents
+  and no bursts, through to 60 s. **This confirms the built-in display as the
+  cause of the bursts.**
+- **But Cube Sea falls to a steady 46–51 fps with the lid closed,** while the
+  compositor and display run perfectly at 120 Hz. It recovers only when the lid
+  is reopened (user-observed). Likely explanation, unverified: with the PS VR2
+  as the only display, Chromium's window sits under Monado's full-screen window,
+  so Chromium treats it as occluded. It then lowers the renderer's priority, and
+  macOS App Nap may also apply. On Apple silicon, that can move the renderer to
+  efficiency cores. The trace has no CPU scheduling or Chromium trace events, so
+  it cannot show this.
+
+Next: close the lid with Chromium launched with
+`--disable-backgrounding-occluded-windows --disable-renderer-backgrounding
+--disable-background-timer-throttling`, or add System Trace/CPU Profiler to the
+template, to test the occlusion explanation. If confirmed, lid closed with
+those flags (or the Chromium fork setting them for immersive sessions) avoids
+both the bursts and the slowdown. Until then, the best configuration is lid
+open with the magic window off, accepting the ~8 s bursts.

@@ -18,12 +18,12 @@ import subprocess
 import xml.etree.ElementTree as ET
 
 
-def export(trace, schema, out):
-    path = out/f'{schema}.xml'
+def export(trace, schema, out, run=1):
+    path = out/f'run{run}-{schema}.xml'
     if not path.exists():
         with path.open('w') as f:
             subprocess.run(['xcrun', 'xctrace', 'export', '--input', str(trace), '--xpath',
-                            f'/trace-toc/run[@number="1"]/data/table[@schema="{schema}"]'],
+                            f'/trace-toc/run[@number="{run}"]/data/table[@schema="{schema}"]'],
                            stdout=f, check=True)
     return path
 
@@ -50,6 +50,7 @@ def main():
     parser.add_argument('--trace', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True, help='Directory for exports and results')
     parser.add_argument('--late-ms', type=float, default=5.0, help='Swap later than desired by this counts as late')
+    parser.add_argument('--run', type=int, default=1, help='Run number as xctrace numbers it (see --toc)')
     parser.add_argument('--start', type=float, default=0.0, help='Ignore refreshes before this trace time (s)')
     parser.add_argument('--end', type=float, default=1e9, help='Ignore refreshes after this trace time (s)')
     args = parser.parse_args()
@@ -57,7 +58,7 @@ def main():
 
     # Monado's surfaces, and the display they are shown on.
     surfaces, hmd = set(), collections.Counter()
-    for row in rows(export(args.trace, 'displayed-surfaces-interval', args.output)):
+    for row in rows(export(args.trace, 'displayed-surfaces-interval', args.output, args.run)):
         if 'monado-service' in row['event-label'][0]:
             surfaces.add(int(row['surface-id'][0]))
             hmd[row['display-name'][0]] += 1
@@ -66,7 +67,7 @@ def main():
     hmd_name = hmd.most_common(1)[0][0]
 
     vsyncs = collections.defaultdict(list)
-    for row in rows(export(args.trace, 'display-vsyncs-interval', args.output)):
+    for row in rows(export(args.trace, 'display-vsyncs-interval', args.output, args.run)):
         vsyncs[row['display-name'][0]].append(int(row['timestamp'][1]))
     for times in vsyncs.values():
         times.sort()
@@ -74,7 +75,7 @@ def main():
     period = sorted(b-a for a, b in zip(hmd_vsyncs, hmd_vsyncs[1:]))[len(hmd_vsyncs)//2]
 
     swaps = []
-    for row in rows(export(args.trace, 'display-surface-swap', args.output)):
+    for row in rows(export(args.trace, 'display-surface-swap', args.output, args.run)):
         if int(row['surface-id'][0], 16) in surfaces and row['desired-presentation-time'][1]:
             swaps.append((int(row['timestamp'][1]), int(row['desired-presentation-time'][1])))
     swaps.sort()
@@ -94,10 +95,14 @@ def main():
         if len(other) < 2:
             continue
         rate = 1e9*(len(other)-1)/(other[-1]-other[0])
+        other_period = sorted(b-a for a, b in zip(other, other[1:]))[len(other)//2]
         bins = collections.defaultdict(lambda: [0, 0])
         for t in hmd_vsyncs:
             i = bisect.bisect_right(other, t)-1
             if i < 0 or not first <= t <= last or not args.start <= t/1e9 <= args.end:
+                continue
+            # A display that stopped refreshing (lid closed, asleep) has no phase.
+            if t-other[i] > 2*other_period:
                 continue
             # Count only while Monado is presenting: a swap within 50 ms on both sides.
             k = bisect.bisect_left(swap_times, t)
@@ -111,7 +116,7 @@ def main():
             bucket[1] += (not hits) or any(x in late for x in hits)
         result['phase'][name] = {'refresh_hz': rate, 'bins_ms': {k: {'vsyncs': v[0], 'missing_or_late': v[1]}
                                                                  for k, v in sorted(bins.items())}}
-    (args.output/'display-phase.json').write_text(json.dumps(result, indent=2)+'\n')
+    (args.output/f'run{args.run}-display-phase.json').write_text(json.dumps(result, indent=2)+'\n')
 
     print(f'HMD display {hmd_name}: period {period/1e6:.4f} ms, Monado surfaces {sorted(surfaces)}')
     for name, data in result['phase'].items():
