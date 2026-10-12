@@ -1776,14 +1776,28 @@ comp_renderer_draw(struct comp_renderer *r)
 	uint64_t dispatch_begin_ns = renderer_stage_begin(r);
 	VkResult res = VK_SUCCESS;
 	if (use_compute) {
-		render_compute_init(&render_c, &c->nr);
-		res = dispatch_compute(r, &render_c, &frame_state, fov_source);
+		if (render_compute_init(&render_c, &c->nr)) {
+			res = dispatch_compute(r, &render_c, &frame_state, fov_source);
+		} else {
+			res = VK_ERROR_INITIALIZATION_FAILED;
+		}
 	} else {
 		render_gfx_init(&render_g, &c->nr);
 		res = dispatch_graphics(r, &render_g, &frame_state, fov_source);
 	}
 	renderer_stage_end(r, "draw_dispatch", dispatch_begin_ns, res);
 	if (res != VK_SUCCESS) {
+		/*
+		 * Return this frame's descriptor sets to their pools. Otherwise every
+		 * failed frame, such as after device loss, leaks sets until allocation
+		 * fails and a null set reaches vkUpdateDescriptorSets.
+		 */
+		chl_frame_state_fini(&frame_state);
+		if (use_compute) {
+			render_compute_fini(&render_c);
+		} else {
+			render_gfx_fini(&render_g);
+		}
 		return XRT_ERROR_VULKAN;
 	}
 
