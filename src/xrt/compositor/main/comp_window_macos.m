@@ -15,6 +15,7 @@
 #include "main/comp_window.h"
 #include "main/comp_macos_frontend.h"
 #include "main/comp_window_macos_trace_buffer.h"
+#include "main/comp_window_macos_latency_guard.h"
 #include "main/comp_window_macos_passthrough_shader.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
@@ -75,6 +76,8 @@ struct macos_presented_state
 	atomic_uint_fast64_t ref_count;
 	atomic_int_fast64_t latest_observed_present_offset_ns;
 	atomic_uint_fast64_t present_offset_sample_serial;
+	pthread_mutex_t guard_mutex;
+	struct macos_latency_guard guard;
 	FILE *trace_presented;
 };
 
@@ -83,6 +86,10 @@ macos_presented_state_create(FILE *trace_presented)
 {
 	struct macos_presented_state *state = calloc(1, sizeof(*state));
 	if (state == NULL) {
+		return NULL;
+	}
+	if (pthread_mutex_init(&state->guard_mutex, NULL) != 0) {
+		free(state);
 		return NULL;
 	}
 	atomic_init(&state->ref_count, 1);
@@ -112,6 +119,7 @@ macos_presented_state_release(struct macos_presented_state *state)
 		fclose(state->trace_presented);
 		state->trace_presented = NULL;
 	}
+	pthread_mutex_destroy(&state->guard_mutex);
 	free(state);
 }
 
@@ -119,6 +127,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_present_latency_guard, "XRT_MACOS_PRESENT_LATENCY_GUARD", false)
 // Diagnostic: skip the MTLSharedEvent render-complete export so presentation uses
 // the CPU Vulkan timeline wait (this also disables drawable-slot mode).
 DEBUG_GET_ONCE_BOOL_OPTION(macos_force_cpu_render_wait, "XRT_MACOS_FORCE_CPU_RENDER_WAIT", false)
@@ -192,6 +201,7 @@ struct comp_window_macos
 	bool present_worker_shutdown;
 	bool present_worker_enabled;
 	bool drawable_slot_enabled;
+	bool latency_guard_enabled;
 	id<CAMetalDrawable> prefetched_drawable;
 	uint64_t prefetched_drawable_timeline_value;
 	uint64_t prefetched_drawable_begin_ns;
@@ -1909,6 +1919,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	int64_t present_slop_ns = job->present_slop_ns;
 	u_timing_trace_poll_flush_request();
 	uint64_t worker_start_ns = os_monotonic_get_ns();
+
 	uint64_t next_drawable_begin_ns = 0;
 	uint64_t after_drawable_ns = 0;
 	uint64_t before_present_call_ns = 0;
@@ -1929,6 +1940,25 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 	if (index >= ct->image_count || cwm->metal_images[index] == nil) {
 		macos_retire_unpresented_job(cwm, job, "invalid", 0);
 		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+
+	if (cwm->latency_guard_enabled && cwm->presented_state != NULL) {
+		struct macos_presented_state *state = cwm->presented_state;
+		int64_t period = atomic_load_explicit(&cwm->display_period_ns, memory_order_acquire);
+		pthread_mutex_lock(&state->guard_mutex);
+		uint64_t previous_drains = state->guard.drains;
+		bool skip = macos_latency_guard_should_skip(&state->guard, frame_id, worker_start_ns,
+		                                            period > 0 ? (uint64_t)period : 0);
+		uint64_t drains = state->guard.drains;
+		pthread_mutex_unlock(&state->guard_mutex);
+		if (skip) {
+			if (drains != previous_drains) {
+				COMP_INFO(ct->c, "macOS latency guard: drain %llu at frame %llu, withholding one refresh",
+				          (unsigned long long)drains, (unsigned long long)frame_id);
+			}
+			macos_retire_unpresented_job(cwm, job, "latency_guard_drop", 0);
+			return VK_SUCCESS;
+		}
 	}
 
 	uint64_t host_call_ns = job->enqueue_ns;
@@ -2078,6 +2108,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			int64_t traced_desired_present_ns = desired_present_time_ns;
 			uint64_t traced_target_output_ns = target_output_ns;
 			int64_t traced_display_period_ns = cwm->display_period_ns;
+			bool latency_guard_enabled = cwm->latency_guard_enabled;
 			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
 			  double presented_time_s = [presented_drawable presentedTime];
 			  int64_t handler_ns = os_monotonic_get_ns();
@@ -2104,7 +2135,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			   * output slot did Core Animation actually present this
 			   * drawable? 0 is on the selected slot, +1 is one refresh
 			   * later, +2 identifies the persistent deep-queue condition
-			   * seen by GAV. No active queue draining is performed here.
+			   * seen by GAV. The opt-in guard consumes this feedback below.
 			   */
 			  int64_t present_queue_depth = -1;
 			  if (presented_monotonic_ns != 0 && traced_target_output_ns != 0 &&
@@ -2113,22 +2144,32 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				      (double)(presented_monotonic_ns - (int64_t)traced_target_output_ns) /
 				      (double)traced_display_period_ns);
 			  }
-			  if (observed_present_offset_ns > 0) {
+			  if (observed_present_offset_ns > 0 && trace_file != NULL) {
 				  atomic_store_explicit(&presented_state->latest_observed_present_offset_ns,
 					                observed_present_offset_ns, memory_order_release);
 				  atomic_fetch_add_explicit(&presented_state->present_offset_sample_serial, 1,
 					                    memory_order_release);
 			  }
-			  flockfile(trace_file);
-			  fprintf(trace_file,
-				  "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
-				  ",%" PRIi64 "\n",
-				  (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,
-				  (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,
-				  presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns,
-				  present_queue_depth);
-			  macos_trace_buffered_fflush(trace_file);
-			  funlockfile(trace_file);
+			  if (latency_guard_enabled) {
+				  pthread_mutex_lock(&presented_state->guard_mutex);
+				  macos_latency_guard_observe(&presented_state->guard, traced_frame_id,
+				                              presented_monotonic_ns > 0 ? (uint64_t)presented_monotonic_ns : 0,
+				                              present_queue_depth,
+				                              traced_display_period_ns > 0 ? (uint64_t)traced_display_period_ns : 0);
+				  pthread_mutex_unlock(&presented_state->guard_mutex);
+			  }
+			  if (trace_file != NULL) {
+				  flockfile(trace_file);
+				  fprintf(trace_file,
+					  "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
+					  ",%" PRIi64 "\n",
+					  (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,
+					  (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,
+					  presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns,
+					  present_queue_depth);
+				  macos_trace_buffered_fflush(trace_file);
+				  funlockfile(trace_file);
+			  }
 			  macos_presented_state_release(presented_state);
 			}];
 		}
@@ -2806,6 +2847,7 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 	u_macos_hosted_client_reference(client);
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
 	cwm->drawable_slot_enabled = want_drawable_slot;
+	cwm->latency_guard_enabled = debug_get_bool_option_macos_present_latency_guard();
 	/*
 	 * Slot mode is itself a newest-frame presentation worker. The producer may
 	 * keep rendering and replace the single pending job while asynchronous
@@ -2829,6 +2871,14 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 		          "stalls supersede pending frames instead of dropping them");
 	}
 	macos_timing_trace_open(cwm);
+	/* Guard feedback must also work with all diagnostic tracing disabled. */
+	if (cwm->latency_guard_enabled && cwm->presented_state == NULL) {
+		cwm->presented_state = macos_presented_state_create(NULL);
+		if (cwm->presented_state == NULL) {
+			COMP_WARN(c, "macOS latency guard disabled: could not allocate presentation feedback state");
+			cwm->latency_guard_enabled = false;
+		}
+	}
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
 		cwm->io_surfaces[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;

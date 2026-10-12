@@ -26,6 +26,11 @@ high-level status/roadmap.
 
 ## Current integration branch
 
+The native GPU startup resource-lifetime race is fixed. Native three/four-image
+headset comparisons pass; the new presentation latency guard remains opt-in
+because successful one-refresh drains can rebound and cost cadence. See the
+[hardware ledger](macos-gpu-sync-hardware-tests.md).
+
 The integration includes the
 [failed CADisplayLink-owned compositor experiment](macos-cadisplaylink-owned-compositor-experiment.md).
 Only its diagnostics and evidence remain; callback/deferred CA rendering modes

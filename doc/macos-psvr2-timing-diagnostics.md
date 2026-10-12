@@ -34,6 +34,7 @@ cadence intervals vs driven ~5.2–5.8%), and the configuration below restored
 | Control | Default |
 | --- | --- |
 | `XRT_MACOS_DRAWABLE_SLOT` | `1`: newest-frame worker acquires drawables off the compositor thread |
+| `XRT_MACOS_PRESENT_LATENCY_GUARD` | `0`: opt-in bounded presentation drain; native testing shows immediate recovery but possible rebound and additional gaps. See the [matched trial](macos-three-image-comparison.md#opt-in-latency-guard-trial-2026-10-12). |
 | `XRT_MACOS_PRESENT_MIN_DURATION_US` | `8000`: `presentDrawable:afterMinimumDuration:` (known-good 120 Hz value; `0` restores absolute timed presents) |
 | `XRT_MACOS_COMPOSITOR_TIME_CONSTRAINT` | `1`, with `_COMPUTATION_PCT=35` and `_CONSTRAINT_PCT=70` of the display period |
 | `XRT_MACOS_CLIENT_FRAME_MIN_HOLD` | `0` (set `2` to hold each app frame for at least two refreshes, e.g. a 60 Hz app on the 120 Hz headset) |
