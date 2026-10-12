@@ -585,25 +585,29 @@ renderer_late_render_trace_frame(struct comp_renderer *r)
 #endif
 
 #ifdef XRT_OS_OSX
-static uint64_t
-renderer_stage_begin(struct comp_renderer *r)
+static struct u_gpu_trace_cpu_interval
+renderer_stage_begin(struct comp_renderer *r, const char *stage)
 {
-	(void)r;
 	bool enabled = u_gpu_trace_enabled();
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	enabled = enabled || debug_get_bool_option_comp_psvr2_timing_trace();
 #endif
-	return enabled ? os_monotonic_get_ns() : 0;
+	int64_t frame = r->c->frame.rendering.id >= 0 ? r->c->frame.rendering.id : r->c->frame.waited.id;
+	uint64_t native_id = u_gpu_trace_cpu_begin("renderer", stage, r->gpu_trace_id, frame,
+	                                           frame >= 0 ? (uint64_t)frame : 0);
+	return (struct u_gpu_trace_cpu_interval){enabled ? os_monotonic_get_ns() : 0, native_id};
 }
 
 static void
-renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns, int32_t result)
+renderer_stage_end(struct comp_renderer *r, const char *stage, struct u_gpu_trace_cpu_interval interval, int32_t result)
 {
+	uint64_t begin_ns = interval.begin_ns;
 	if (begin_ns == 0) {
 		return;
 	}
 	// Sample before formatting or opening the trace, so logging is outside the duration.
 	uint64_t end_ns = os_monotonic_get_ns();
+	u_gpu_trace_cpu_end("renderer", stage, interval.native_id, result);
 	int64_t frame_id = r->c->frame.rendering.id >= 0 ? r->c->frame.rendering.id : r->c->frame.waited.id;
 	u_gpu_trace_event("renderer", stage, r->gpu_trace_id, frame_id, UINT32_MAX,
 	                  frame_id >= 0 ? (uint64_t)frame_id : 0, end_ns, end_ns - begin_ns);
@@ -628,19 +632,20 @@ renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns
 #endif
 }
 #else
-static inline uint64_t
-renderer_stage_begin(struct comp_renderer *r)
-{
-	(void)r;
-	return 0;
-}
-
-static inline void
-renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns, int32_t result)
+static inline struct u_gpu_trace_cpu_interval
+renderer_stage_begin(struct comp_renderer *r, const char *stage)
 {
 	(void)r;
 	(void)stage;
-	(void)begin_ns;
+	return (struct u_gpu_trace_cpu_interval){0, 0};
+}
+
+static inline void
+renderer_stage_end(struct comp_renderer *r, const char *stage, struct u_gpu_trace_cpu_interval interval, int32_t result)
+{
+	(void)r;
+	(void)stage;
+	(void)interval;
 	(void)result;
 }
 #endif
@@ -1221,7 +1226,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	struct vk_bundle *vk = &r->c->base.vk;
 	VkResult ret;
 
-	uint64_t fence_begin_ns = renderer_stage_begin(r);
+	struct u_gpu_trace_cpu_interval fence_begin_ns = renderer_stage_begin(r, "previous_fence_wait");
 	ret = vk->vkWaitForFences(vk->device, 1, &r->fences[r->fenced_buffer], VK_TRUE, UINT64_MAX);
 	renderer_stage_end(r, "previous_fence_wait", fence_begin_ns, ret);
 	if (ret != VK_SUCCESS) {
@@ -1232,7 +1237,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	}
 
 #ifdef XRT_OS_OSX
-	uint64_t feedback_begin_ns = renderer_stage_begin(r);
+	struct u_gpu_trace_cpu_interval feedback_begin_ns = renderer_stage_begin(r, "previous_gpu_feedback");
 	if (ret == VK_SUCCESS && r->fenced_frame_id >= 0) {
 		/*
 		 * The previous frame fence guarantees these query results are ready.
@@ -1403,7 +1408,7 @@ renderer_submit_queue(struct comp_renderer *r, VkCommandBuffer cmd, VkPipelineSt
 	 * us avoid taking a lot of locks. The queue lock will be taken by
 	 * @ref vk_cmd_submit_locked tho.
 	 */
-	uint64_t submit_begin_ns = renderer_stage_begin(r);
+	struct u_gpu_trace_cpu_interval submit_begin_ns = renderer_stage_begin(r, "queue_submit");
 	ret = comp_swapchain_gpu_reuse_vk_cmd_submit_locked(vk, vk->main_queue, 1, &builder.submit_info,
 	                                                    r->fences[r->acquired_buffer]);
 
@@ -1436,7 +1441,7 @@ renderer_acquire_swapchain_image(struct comp_renderer *r)
 		// Not ready yet.
 		return;
 	}
-	uint64_t acquire_begin_ns = renderer_stage_begin(r);
+	struct u_gpu_trace_cpu_interval acquire_begin_ns = renderer_stage_begin(r, "target_acquire");
 	ret = comp_target_acquire(r->c->target, &buffer_index);
 	renderer_stage_end(r, "target_acquire", acquire_begin_ns, ret);
 
@@ -1483,6 +1488,8 @@ renderer_present_swapchain_image(struct comp_renderer *r, uint64_t desired_prese
 	VkResult ret;
 
 	assert(!comp_frame_is_invalid_locked(&r->c->frame.rendering));
+	// The render-complete timeline deliberately uses the compositor frame ID.
+	// Deferred info_gpu feedback uses this same ID, including after skipped frames.
 	uint64_t render_complete_signal_value = (uint64_t)r->c->frame.rendering.id;
 
 	ret = comp_target_present(        //
@@ -1858,7 +1865,7 @@ comp_renderer_draw(struct comp_renderer *r)
 	}
 	renderer_release_pending_frame(r);
 
-	uint64_t dispatch_begin_ns = renderer_stage_begin(r);
+	struct u_gpu_trace_cpu_interval dispatch_begin_ns = renderer_stage_begin(r, "draw_dispatch");
 	if (use_compute) {
 		if (render_compute_init(&render_c, &c->nr)) {
 			res = dispatch_compute(r, &render_c, &frame_state, fov_source);
@@ -1923,7 +1930,7 @@ comp_renderer_draw(struct comp_renderer *r)
 	}
 #endif
 
-	uint64_t present_begin_ns = renderer_stage_begin(r);
+	struct u_gpu_trace_cpu_interval present_begin_ns = renderer_stage_begin(r, "present_enqueue");
 	bool present_success = renderer_present_swapchain_image(r, c->frame.rendering.desired_present_time_ns,
 	                                                        c->frame.rendering.present_slop_ns);
 

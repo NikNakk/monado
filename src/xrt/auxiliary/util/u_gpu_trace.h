@@ -121,7 +121,19 @@ u_gpu_trace_signpost_enabled(void)
 
 #endif
 
+// CPU stages use an instance ID separate from their source timestamps.
+struct u_gpu_trace_cpu_interval
+{
+	uint64_t begin_ns;
+	uint64_t native_id;
+};
+
 #ifdef XRT_OS_OSX
+uint64_t
+u_gpu_trace_cpu_begin(const char *domain, const char *stage, uint64_t scope, int64_t frame, uint64_t timeline);
+void
+u_gpu_trace_cpu_end(const char *domain, const char *stage, uint64_t id, int32_t result);
+
 struct u_gpu_trace_frame
 {
 	uint64_t scope_id;
