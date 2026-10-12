@@ -1407,7 +1407,9 @@ macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 	  @autoreleasepool {
 		  uint64_t begin_ns = os_monotonic_get_ns();
 		  macos_trace_drawable_prefetch(cwm, "slot_acquire_begin", 0, begin_ns, begin_ns, 0);
+		  uint64_t slot_interval = u_gpu_trace_cpu_begin("presentation", "slot_acquire", cwm->gpu_trace_id, -1, 0);
 		  id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
+		  u_gpu_trace_cpu_end("presentation", "slot_acquire", slot_interval, drawable == nil ? -1 : 0);
 		  uint64_t end_ns = os_monotonic_get_ns();
 		  id<CAMetalDrawable> retained_drawable = drawable != nil ? [drawable retain] : nil;
 		  bool stored = false;
@@ -2018,7 +2020,10 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				next_drawable_begin_ns = os_monotonic_get_ns();
 				macos_trace_drawable_prefetch(cwm, "slot_fallback_begin", timeline_semaphore_value,
 				                              next_drawable_begin_ns, next_drawable_begin_ns, 0);
+				uint64_t fallback_interval = u_gpu_trace_cpu_begin("presentation", "slot_fallback", cwm->gpu_trace_id,
+				                                                     frame_id, timeline_semaphore_value);
 				drawable = [cwm->metal_layer nextDrawable];
+				u_gpu_trace_cpu_end("presentation", "slot_fallback", fallback_interval, drawable == nil ? -1 : 0);
 				after_drawable_ns = os_monotonic_get_ns();
 				macos_trace_drawable_prefetch(cwm, "slot_fallback_end", timeline_semaphore_value,
 				                              after_drawable_ns, next_drawable_begin_ns,
@@ -2043,7 +2048,10 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			macos_trace_present_worker(cwm, "drawable_trace_begin", job, drawable_trace_begin_ns, 0,
 			                           worker_start_ns, 0, 0, 0, 0, shared_event_wait);
 			next_drawable_begin_ns = os_monotonic_get_ns();
+			uint64_t drawable_interval = u_gpu_trace_cpu_begin("presentation", "next_drawable", cwm->gpu_trace_id,
+			                                                    frame_id, timeline_semaphore_value);
 			drawable = [cwm->metal_layer nextDrawable];
+			u_gpu_trace_cpu_end("presentation", "next_drawable", drawable_interval, drawable == nil ? -1 : 0);
 			after_drawable_ns = os_monotonic_get_ns();
 			macos_trace_present_worker(cwm, "drawable_end", job, after_drawable_ns, 0, worker_start_ns,
 			                           next_drawable_begin_ns, after_drawable_ns, 0, 0, shared_event_wait);

@@ -12,12 +12,25 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_signpost, "XRT_MACOS_SIGNPOST", false)
 
 static pthread_once_t signpost_once = PTHREAD_ONCE_INIT;
 static os_log_t signpost_log;
+static os_log_t renderer_log;
+static os_log_t presentation_log;
+static os_log_t gpu_log;
+
+static os_log_t
+log_for_domain(const char *domain)
+{
+	return strcmp(domain, "renderer") == 0 ? renderer_log :
+	       strcmp(domain, "presentation") == 0 ? presentation_log : gpu_log;
+}
 
 static void
 init_signposts(void)
 {
 	if (debug_get_bool_option_macos_signpost()) {
 		signpost_log = os_log_create("org.freedesktop.monado", OS_LOG_CATEGORY_POINTS_OF_INTEREST);
+		renderer_log = os_log_create("org.freedesktop.monado", "renderer");
+		presentation_log = os_log_create("org.freedesktop.monado", "presentation");
+		gpu_log = os_log_create("org.freedesktop.monado", "gpu");
 	}
 }
 
@@ -25,7 +38,8 @@ bool
 u_gpu_trace_signpost_enabled(void)
 {
 	pthread_once(&signpost_once, init_signposts);
-	return signpost_log != NULL && os_signpost_enabled(signpost_log);
+	return signpost_log != NULL && (os_signpost_enabled(signpost_log) || os_signpost_enabled(renderer_log) ||
+	                               os_signpost_enabled(presentation_log) || os_signpost_enabled(gpu_log));
 }
 
 void
@@ -70,9 +84,10 @@ emit(const char *domain,
 	}
 	/* Signposts timestamp the observation now. Retrospective event times and
 	 * durations stay in the payload: do not fabricate GPU execution intervals. */
+	os_log_t log = strcmp(event, "latency_guard_drain") == 0 ? signpost_log : log_for_domain(domain);
 	os_signpost_id_t id = scope_id != 0 ? (os_signpost_id_t)scope_id : OS_SIGNPOST_ID_EXCLUSIVE;
 #define EMIT(NAME)                                                                                                      \
-	os_signpost_event_emit(signpost_log, id, NAME,                                                                   \
+	os_signpost_event_emit(log, id, NAME,                                                                   \
 	                       "domain=%{public}s event=%{public}s scope=%{public}llu owner=%{public}llu "                      \
 	                       "frame_known=%{public}u frame=%{public}llu image=%{public}u timeline=%{public}llu "                \
 	                       "observed_ns=%{public}lld duration_ns=%{public}lld",                                             \
@@ -142,7 +157,7 @@ u_gpu_trace_present_depth_change(const struct u_gpu_trace_frame *frame,
 	if (!u_gpu_trace_signpost_enabled()) {
 		return;
 	}
-	os_signpost_event_emit(signpost_log, frame->scope_id, "PresentQueueDepthChanged",
+	os_signpost_event_emit(signpost_log, frame->scope_id, "PresentLatencyStateChanged",
 	                       "domain=presentation event=present_queue_depth_changed scope=%{public}llu owner=0 "
 	                       "frame=%{public}lld image=%{public}u timeline=%{public}llu "
 	                       "observed_ns=%{public}lld duration_ns=0 previous_depth_known=%{public}u "
@@ -160,7 +175,7 @@ u_gpu_trace_signpost_gpu_to_glass_begin(const struct u_gpu_trace_frame *frame, i
 	    !u_gpu_trace_signpost_enabled()) {
 		return false;
 	}
-	os_signpost_interval_begin(signpost_log, frame->interval_id, "CompositorGPUToGlassObserved",
+	os_signpost_interval_begin(presentation_log, frame->interval_id, "CompositorGPUToGlassObserved",
 	                           "scope=%{public}llu frame=%{public}lld image=%{public}u timeline=%{public}llu "
 	                           "gpu_end_ns=%{public}lld observed_ns=%{public}lld",
 	                           (unsigned long long)frame->scope_id, (long long)frame->frame_id, frame->image_index,
@@ -180,7 +195,7 @@ u_gpu_trace_signpost_gpu_to_glass_end(const struct u_gpu_trace_frame *frame,
 	}
 	bool valid = presented_ns >= gpu_end_ns && gpu_end_ns > 0;
 	uint64_t measured_ns = valid ? (uint64_t)(presented_ns - gpu_end_ns) : 0;
-	os_signpost_interval_end(signpost_log, frame->interval_id, "CompositorGPUToGlassObserved",
+	os_signpost_interval_end(presentation_log, frame->interval_id, "CompositorGPUToGlassObserved",
 	                         "scope=%{public}llu frame=%{public}lld image=%{public}u timeline=%{public}llu "
 	                         "gpu_end_ns=%{public}lld presented_ns=%{public}lld measurement_valid=%{public}u "
 	                         "measured_ns=%{public}llu "
@@ -190,3 +205,45 @@ u_gpu_trace_signpost_gpu_to_glass_end(const struct u_gpu_trace_frame *frame,
 	                         (long long)presented_ns, valid ? 1u : 0u, (unsigned long long)measured_ns, (long long)observed_ns,
 	                         reason != NULL ? reason : "unknown");
 }
+
+// These names are literals because Instruments requires static interval names.
+#define CPU_STAGES(OP, LOG, ID, STAGE, ...) \
+	do { \
+		if (strcmp(STAGE, "previous_fence_wait") == 0) { OP(LOG, ID, "PreviousFenceWait", __VA_ARGS__); } \
+		else if (strcmp(STAGE, "previous_gpu_feedback") == 0) { OP(LOG, ID, "PreviousGPUFeedback", __VA_ARGS__); } \
+		else if (strcmp(STAGE, "draw_dispatch") == 0) { OP(LOG, ID, "DrawDispatch", __VA_ARGS__); } \
+		else if (strcmp(STAGE, "queue_submit") == 0) { OP(LOG, ID, "QueueSubmit", __VA_ARGS__); } \
+		else if (strcmp(STAGE, "present_enqueue") == 0) { OP(LOG, ID, "PresentEnqueue", __VA_ARGS__); } \
+		else if (strcmp(STAGE, "target_acquire") == 0) { OP(LOG, ID, "TargetAcquire", __VA_ARGS__); } \
+		else if (strcmp(STAGE, "slot_acquire") == 0) { OP(LOG, ID, "NextDrawableSlot", __VA_ARGS__); } \
+		else if (strcmp(STAGE, "slot_fallback") == 0) { OP(LOG, ID, "NextDrawableFallback", __VA_ARGS__); } \
+		else { OP(LOG, ID, "NextDrawable", __VA_ARGS__); } \
+	} while (0)
+
+uint64_t
+u_gpu_trace_cpu_begin(const char *domain, const char *stage, uint64_t scope, int64_t frame, uint64_t timeline)
+{
+	if (!u_gpu_trace_signpost_enabled()) {
+		return 0;
+	}
+	os_log_t log = log_for_domain(domain);
+	if (!os_signpost_enabled(log)) {
+		return 0;
+	}
+	uint64_t id = u_gpu_trace_new_scope();
+	CPU_STAGES(os_signpost_interval_begin, log, id, stage,
+	           "scope=%{public}llu frame_known=%{public}u frame=%{public}llu timeline=%{public}llu",
+	           (unsigned long long)scope, frame >= 0 ? 1u : 0u, frame >= 0 ? (unsigned long long)frame : 0,
+	           (unsigned long long)timeline);
+	return id;
+}
+
+void
+u_gpu_trace_cpu_end(const char *domain, const char *stage, uint64_t id, int32_t result)
+{
+	if (id == 0) {
+		return;
+	}
+	CPU_STAGES(os_signpost_interval_end, log_for_domain(domain), id, stage, "result=%{public}d", result);
+}
+#undef CPU_STAGES

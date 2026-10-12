@@ -37,8 +37,8 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 
 ## Native Instruments tracing (2026-10-12)
 
-`XRT_MACOS_SIGNPOST=1` independently enables Monado's Instruments Points of
-Interest observations (default `0`), including renderer stages, readiness,
+`XRT_MACOS_SIGNPOST=1` independently enables Monado's Instruments signposts
+(default `0`), including live renderer/drawable intervals and readiness,
 ownership, presentation and guard drains. It works without Perfetto or CSV
 capture and preserves the existing pacing-feedback condition. Set it in the
 Monado process before launch; see the

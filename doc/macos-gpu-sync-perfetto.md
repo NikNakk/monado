@@ -25,10 +25,12 @@ CSV timing capture; Perfetto and signposts can also capture simultaneously.
 `u_gpu_trace_enabled()` means either backend can emit, while Perfetto's
 start/stop calls continue to control only its own capture.
 
-The subsystem is `org.freedesktop.monado`, category `PointsOfInterest`. Stable
+The subsystem is `org.freedesktop.monado`. Per-frame categories are `renderer`,
+`presentation` and `gpu`; Points of Interest contains latency-state changes and
+latency-guard drains. Stable
 signpost names are `Readiness`, `ImageOwnership`, `RendererStage`,
 `Presentation`, `LatencyGuardDrain`, `LatencyGuardDrop` and the fallback
-`GPUObservation`, `PresentQueueDepthChanged` and
+`GPUObservation`, `PresentLatencyStateChanged` and
 `CompositorGPUToGlassMeasurement`. Public metadata records domain/event, process-local scope and
 owner scope IDs, frame ID, image index, timeline value, `observed_ns` and
 `duration_ns`. These values are numeric identities and internal event names;
@@ -36,7 +38,11 @@ no application image contents are logged.
 
 Existing readiness, ownership and presentation hooks use the shared facade.
 The renderer now emits its fence, submission and dispatch stage observations
-independently of the CSV compile/runtime switches. Drawable-slot acquisition,
+independently of the CSV compile/runtime switches. Live CPU intervals are named
+`PreviousFenceWait`, `PreviousGPUFeedback`, `DrawDispatch`, `QueueSubmit`,
+`PresentEnqueue`, `TargetAcquire`, `NextDrawableSlot`, `NextDrawableFallback`
+and `NextDrawable`, with an ID per invocation and a result at the end.
+Drawable-slot acquisition,
 guard drains/dropped jobs, Metal scheduled/completed callbacks and reported
 physical presentation are included. Presented callbacks retain independent
 feedback state through teardown, and a target created before recording starts
@@ -51,7 +57,9 @@ timestamp; `presented_callback` separately records callback arrival.
 The per-frame `CompositorGPUToGlassObserved` interval joins existing calibrated
 Vulkan compositor GPU-end feedback to the drawable's reported presentation using
 the compositor timeline value. Its **native width measures CPU observations**:
-`os_signpost` cannot backdate either endpoint. The end metadata contains
+`os_signpost` cannot backdate either endpoint. GPU end is observed during the
+next frame's fence feedback, potentially a frame late; presentation is observed
+when its callback arrives, also late. The end metadata contains
 `gpu_end_ns`, `presented_ns`, `measurement_valid` and the actual `measured_ns`
 difference. Perfetto also receives the retrospective
 `compositor_gpu_end_to_display` slice at those measured endpoints. If GPU
@@ -60,8 +68,11 @@ emitted, but no native interval is fabricated. Dropped frames, errors, eviction
 and teardown cancel open intervals with a reason and `measurement_valid=0`.
 Missing or invalid timestamps produce no completed measurement. The join uses a
 bounded 128-entry table and introduces no additional GPU wait or timestamp read.
+The renderer deliberately signals its compositor frame ID as the render-complete
+timeline value; deferred GPU feedback uses that same ID, even after skipped
+frames. This is separate from the target's presentation counter.
 
-`PresentQueueDepthChanged` records the presented callback's existing rounded
+`PresentLatencyStateChanged` records the presented callback's existing rounded
 physical-minus-target depth on the first valid sample and subsequent changes.
 Metadata contains `previous_depth_known`, `previous_depth` and `depth`; stale
 callbacks cannot reverse newer observations. This remains a timing-derived depth
@@ -72,7 +83,7 @@ For a fixture-only recording without the headset:
 
 ```sh
 cmake --build build/arm64 --target tests_macos_signpost --parallel 4
-xcrun xctrace record --template 'Logging' --instrument 'Points of Interest' \
+xcrun xctrace record --template 'Logging' --instrument 'os_signpost' --instrument 'Points of Interest' \
   --time-limit 3s --output /tmp/monado-signposts-new.trace \
   --env XRT_MACOS_SIGNPOST=1 \
   --launch -- "$PWD/build/arm64/tests/tests_macos_signpost"
@@ -80,12 +91,69 @@ xcrun xctrace record --template 'Logging' --instrument 'Points of Interest' \
 
 For the planned headset capture, enable `XRT_MACOS_SIGNPOST=1` in the actual
 Monado process environment, or pass it through the native fixture's
-`--service-env`. Add Points of Interest to Metal System Trace or Game
-Performance and filter for the Monado subsystem. A private fixture service is
+`--service-env`. Add os_signpost, Points of Interest and Display to Metal System Trace, and
+filter signposts for the Monado subsystem. A private fixture service is
 launched by launchd, so recording only the wrapper's Python process will miss
 it: attach to the service or record the relevant system processes. Keep trace
 bundles outside Git and retain physical CSVs to check reproduction/observer
 effects. A physical Instruments capture remains outstanding.
+
+Payload nanoseconds are `CLOCK_MONOTONIC`, not Instruments timestamps. Do not
+subtract a payload timestamp from the native signpost timestamp or assume a
+fixed offset survives system sleep. Align CPU intervals using the signpost's own
+timestamps; compare GPU-end and presentation payloads within their shared clock.
+Use Instruments' Metal GPU and Display tracks for system execution/presentation
+timing. The observation intervals align Monado's callbacks against those tracks.
+
+### Running a real native app
+
+The installed LaunchAgent inspected on 2026-10-12 runs a copied binary under
+`~/.local/monado-psvr2`, not the freshly built service. For a native app using
+client compositing, launch its executable with the development runtime so its
+compositor contains these hooks:
+
+```sh
+cd /Users/nickkennedy/Code/monado-2
+cmake --build build/arm64 --target monado-service openxr_monado --parallel 6
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" \
+XRT_MACOS_CLIENT_COMPOSITOR=1 XRT_MACOS_SIGNPOST=1 \
+  /absolute/path/YourApp.app/Contents/MacOS/YourApp
+```
+
+Keep the app's usual arguments and other environment settings. Set the flag
+before launch: its value is cached on first use. Start Instruments with Metal
+System Trace, add os_signpost, Points of Interest and Display, select the actual
+app process, then record a 30–60 second representative session. Recording all
+processes also captures the service. Save the `.trace` bundle outside Git.
+
+For **service compositing**, the service needs the flag and rebuilt binary too.
+Close XR apps first. This temporary plist preserves the installed configuration
+and leaves its file unchanged:
+
+```sh
+capture_plist=/tmp/monado-signpost-service.plist
+cp "$HOME/Library/LaunchAgents/org.freedesktop.monado.service.plist" "$capture_plist"
+/usr/libexec/PlistBuddy -c 'Set :ProgramArguments:0 /Users/nickkennedy/Code/monado-2/build/arm64/src/xrt/targets/service/monado-service' "$capture_plist"
+/usr/libexec/PlistBuddy -c 'Add :EnvironmentVariables:XRT_MACOS_SIGNPOST string 1' "$capture_plist"
+launchctl bootout "gui/$(id -u)/org.freedesktop.monado.service"
+launchctl bootstrap "gui/$(id -u)" "$capture_plist"
+```
+
+If the key already exists, use `Set` in place of `Add`. Launch the real app
+with the development runtime and its usual compositor configuration. Attach
+Instruments to `monado-service`, or record all processes; recording only the app
+misses the service's compositor. After capture, close the app and restore:
+
+```sh
+launchctl bootout "gui/$(id -u)/org.freedesktop.monado.service"
+launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/org.freedesktop.monado.service.plist"
+```
+
+A Wine app needs the corresponding x86_64 runtime rebuilt and selected by its
+normal launcher. The native arm64 commands above do not update a copied Wine
+runtime. Keep the latency guard and presentation settings unchanged for the
+first capture, so a latency transition can be attributed to the existing path.
+
 
 Verification artifacts are outside Git under
 `/tmp/monado-signpost-interval-final-20261012*`. An actual Instruments Logging +
@@ -348,3 +416,13 @@ persistent location, hidden symbols, shared-memory hint and file-write policy
 are unchanged. A namespace-isolation trial did not resolve the issue and was
 removed. No loss checks were relaxed. See the [M5 evidence and remaining
 limits](macos-gpu-sync-cross-stack.md).
+
+### Signpost review follow-up (2026-10-12)
+
+The review follow-up adds live CPU intervals and category separation, renames the
+native latency marker, and documents clock/feedback bounds. The synthetic fixture
+exercises all nine CPU interval names over eight frames. Instruments exported
+72 completed CPU intervals with eight of each name, plus nine GPU-observation
+intervals; category routing matched the intended split. Five focused CTests and
+the build without Perfetto/CSV diagnostics passed. Its recording is under
+`/tmp/monado-signpost-review-20261012*`; headset validation remains pending.
