@@ -465,3 +465,7 @@ to a presentation change. Exports and compact summaries remain under
 `/tmp/signposted-chromium-*`, outside Git. Repeat with **All Processes** for
 os_signpost, or attach to the service, and confirm `NextDrawableSlot` and
 `PresentLatencyStateChanged` appear before recording a longer session.
+
+The second capture, `/tmp/signposted-chromium-2.trace`, used **All Processes**
+and contains the Monado signposts. It is analysed in
+[the display-phase record](macos-psvr2-timing-diagnostics.md#built-in-display-refresh-phase-and-chromium-frame-rate-drops--2026-10-12).

@@ -3272,3 +3272,90 @@ modified samples: 39 versus 33 long intervals, maximum 33 ms versus 25 ms.
 Background activity varied; no causal or strict tail non-regression conclusion
 is established. Current sources/build and the installed service were restored.
 See [the matched hardware comparison](macos-gpu-sync-headset-comparison.md).
+
+
+## Built-in display refresh phase and Chromium frame-rate drops — 2026-10-12
+
+User-recorded Instruments trace `/tmp/signposted-chromium-2.trace` (60.8 s,
+23:30:42 BST): MonadoInstrumentsTemplate with Metal System Trace, Display and
+os_signpost for all processes. It shows two WebXR apps in Chromium on a
+MacBook Air (`Mac17,4`). Its fixed 60 Hz built-in panel stayed on, and the
+PS VR2 surface was directly scanned out throughout, except during an app switch
+at about 26–30 s. Built-in display: 60.0004 Hz; PS VR2: 119.842 Hz. Thermal
+state was nominal. Exports and analysis outputs are in `/tmp/signposted-chromium-2*`,
+outside Git. Re-run the display analysis with
+`scripts/macos/analyse-instruments-display-phase.py --trace <trace> --output <dir>`.
+
+### Periodic presentation bursts follow the built-in display's refresh
+
+The second app session (31–67 s) composes at a steady 120 Hz, with every
+Monado renderer stage under 1 ms. The renderer's new previous-frame fence wait
+never exceeds 0.02 ms. Roughly every 8 s (at 14, 22–23, 31, 39, 47 and 55–56 s),
+for 1–2 s, the display receives 94–113 instead of 120 Monado swaps per second.
+Core Animation's CPU-to-display median rises from about 16 ms to about 24 ms.
+The 2→3 refresh steps reported earlier are these bursts.
+
+A traced burst start (frames 5969–5976, at about 39.0 s): every frame commits at
+about +3.2 ms and completes in Metal at about +5.1 ms from enqueue. Frames 5970
+and 5971 nevertheless reach the glass at +28.1 ms, against +19.8 ms normally.
+Their drawables are held a refresh longer, so the next `NextDrawableSlot` wait
+lasts 16.6 ms and frame 5972 is superseded. That drain restores +19.7 ms. The
+whole trace has 177 superseded jobs. During bursts, `NextDrawableSlot` and
+Core Animation's `DrawableLifetime` p95 rise from about 8 ms to about 16 ms
+(maximum about 25 ms). Monado GPU time per command buffer is unchanged
+(median about 1.9 ms). WindowServer's GPU time rises from 16–25 ms/s to 30–46
+ms/s in each burst, but its intervals are short; it is a marker, not GPU
+contention.
+
+The PS VR2 refresh drifts against the built-in display's refresh by about
+1 ms/s and wraps every 8.3 s, at exactly the burst times. Classifying every PS
+VR2 refresh in 33–60 s by its offset after the most recent built-in refresh,
+and whether a Monado swap was missing or more than 5 ms late:
+
+| Offset after built-in refresh (ms) | 0–0.5 | 0.5–1 | 1–1.5 | 1.5–2.5 | 2.5–6 | 6–8.3 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Missing or late | 46.9% | 37.1% | 31.1% | 3.2–6.2% | 0–0.6% (4 of 1263) | 1.7–5.6% |
+
+**Conclusion (strong correlation, not yet confirmed by intervention):** when a
+PS VR2 refresh falls within about 1.5 ms after a built-in panel refresh,
+WindowServer often misses the PS VR2 deadline for frames Monado delivered on
+time. Over the whole trace, including the first session and the app switch,
+there is an extra bump of 5.8–8.6% at 4.5–5.0 ms. The MacBook Air panel's
+refresh rate cannot be changed. To confirm, run with the lid closed on mains
+power, with the PS VR2 as the only display, or at 90 Hz, and check that the
+bursts disappear or change period. Candidate mitigations, after confirmation:
+document the lid-closed configuration; or detect the coincidence window from
+both displays' refreshes and drain before the slot starves.
+
+### Cube Sea frame-rate drops (open)
+
+The user reports Cube Sea, previously a steady 120 fps, dropping to about 60
+for extended periods. In this trace the client delivers 48–58 frames per second
+for 38–40 s, around 46 s and 48–59 s, and 116–120 elsewhere. In slow stretches,
+client frame intervals alternate irregularly between 2 and 3 refreshes
+(11–30 ms; 329 two-refresh against 154 three-refresh intervals in 49–59 s).
+That is not a clean 60 Hz lock. Frames also reach Monado slightly later: client
+submit median 7.0 ms against 6.6 ms after compositor submit.
+
+- **The bursts trigger the slowdown, and something holds it.** Slow stretches
+  begin at or just after presentation bursts, but persist without bursts
+  (50–54 s), and recover abruptly at about 59 s.
+- **Not Chromium's GPU.** Chromium GPU time per command buffer is unchanged
+  (median about 2.2 ms), and queue wait barely changes (0.85 against 0.64 ms).
+- **Not Monado's hand-off.** Client frames are GPU-ready on arrival (wait about
+  0.01 ms), and `scheduled` takes about 0.04 ms.
+- **GPU headroom is limited.** Monado's compositor uses 51–56% of the GPU at 120
+  Hz, and Chromium about 23–26% at 120 fps.
+
+The trace cannot separate the two remaining explanations. Neither Monado's app
+pacing (`xrWaitFrame` wake time, predicted display time and period, app-time
+estimate) nor Chromium's WebXR frame loop is instrumented.
+
+- **Monado's app pacer reacting to bursts.** Late and dropped presents feed the
+  app-timing estimates, and, with timing traces enabled, the present-offset
+  calibration. A smoothed estimate would also explain the hysteresis.
+- **Chromium's scheduling.** After a miss, the WebXR loop may stay out of phase.
+
+Next: signpost `xrWaitFrame`, `xrBeginFrame` and `xrEndFrame` per client, and
+record a Chromium trace (`xr`, `gpu`) alongside Instruments. A lid-closed or
+90 Hz run shows whether Cube Sea holds 120 fps without the bursts.
