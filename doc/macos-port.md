@@ -1013,6 +1013,20 @@ unverified; the earlier native-only device-loss startup is an unresolved
 platform/runtime observation. See the
 [M3 completion evidence and reproduction record](macos-gpu-sync-chromium.md).
 
+### Wine/DXMT GPU synchronization M4 (2026-10-12)
+
+The genuine Windows x86-64 D3D11/DXMT producer now passes all sixteen native
+fault/reuse scenarios twice (**32/32**) against the native Vulkan fixture.
+Both native control variants pass 16/16. Nominal-thermal A–B–B–A checks all
+2,880 normal transfers, with about 134 µs additional median Wine readiness
+cost in the matched upload workload; completed-handoff medians move in the
+opposite direction, so no causal presentation claim is made. No additional
+production synchronization changes were needed. M4's synthetic contract gates
+pass; production Wine OpenXR/service failure recovery, SteamVR and physical
+presentation remain separate. Chromium's inherited cleanup is committed and
+its incremental build plus focused fixtures pass. See the
+[M4 evidence, limits and reproduction record](macos-gpu-sync-wine.md).
+
 ### Common Chromium / Monado tracing (2026-10-12)
 
 The authorised M3 investigation now has an opt-in native SDK backend, readiness
