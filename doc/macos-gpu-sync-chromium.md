@@ -2,7 +2,8 @@
 # Chromium SharedImage synchronization: M3
 
 Completion date: 2026-10-12. **M3's six exit criteria pass for the tested
-offscreen Chromium/Monado routes.** M4/Wine remains deferred. The limits below
+offscreen Chromium/Monado routes.** The follow-on [M4 Wine fixture](macos-gpu-sync-wine.md)
+now passes its synthetic contract gates. The limits below
 include unverified XRMediaBinding sparse layers and physical presentation.
 The native M1/M2 evidence remains in [the completion record](macos-gpu-sync-completion.md).
 Common capture and clock validation are in [the Perfetto record](macos-gpu-sync-perfetto.md).
@@ -11,8 +12,9 @@ Common capture and clock validation are in [the Perfetto record](macos-gpu-sync-
 
 Chromium checkout: `~/Code/chromium/src`, branch
 `codex/macos-openxr-upstream-2026-10-04`, tracing groundwork `8fbb7c43c01`.
-The checkout contains unrelated uncommitted transport, sandbox, media and Blink
-work. This investigation preserves it and records only its own changes.
+At measurement time, the checkout contained inherited uncommitted transport,
+sandbox, media and Blink work. The subsequent user-authorized cleanup reviewed,
+tested and committed it in focused units, recorded below.
 Builds use incremental `autoninja -C out/mac-webxr`, with the existing build
 configuration. Raw captures, build logs and result files stay outside Git.
 
@@ -361,9 +363,38 @@ isolated endpoint names, physical PS VR2 display/visual behavior, sustained
 cross-stack stress and pathological driver/GPU resets. The earlier native-only
 device-loss startup remains a known unresolved observation. These limits do not
 substitute for any passing test and are not evidence of physical presentation
-non-regression. M4/Wine and broader M5 work remain separately authorized stages.
+non-regression. The separately authorized M4 fixture is recorded in the
+[Wine ledger](macos-gpu-sync-wine.md); broader M5 work remains a later stage.
 
 Final verification: 15/15 selected SharedImage tests and 11/11 waiter tests
 pass again with no skips after the fixed source is restored; GN checks pass
 for both `//gpu:gl_tests` and `//device/vr:vr`. All 69 native tests pass as
 recorded above. Raw captures and build logs remain outside Git.
+
+## Cleanup after M3 (2026-10-12)
+
+The moved SDK and preceding Monado tracing fixes were already included in the
+rebuilt native service used for the final M3 tests. No reversion was needed.
+The inherited Chromium changes are now committed:
+
+- `647524d8c43`: quiet unsupported actor-tool fallback.
+- `280c82485aa`: compound backing fence forwarding, ANGLE resolve-before-signal
+  ordering, and foveated image tracking labels.
+- `c8fb4717262`: pre-sandbox runtime manifest/library resolution and regression
+  fixture; selected runtime paths replace the old manifest-parent allowance.
+- `81315772c17`: WebGPU/BGRA and stereo atlas/array transfer, forced-copy switch,
+  actual Metal shader readback and WebXR page API fixtures.
+- `6106e05d4bf`: browser-owned seek controls and controller pointing, with page
+  activation isolation. Cleanup additionally rejects non-finite pointer
+  coordinates rather than generating an invalid seek fraction.
+- `b9feb1501cb`: transport/status documentation with explicit validation limits.
+
+The incremental `chrome blink_unittests` build succeeded in **27m46s**, without
+a clean build or a new output directory. The final focused checks pass:
+**8/8** actual runtime-path resolver tests, **4/4** real Metal shader/pixel cases,
+both WebGL/WebGPU page API checks, and **4/4** actual Blink media-control unit
+tests (bounds, seek endpoints, button mapping and non-finite coordinates).
+The Shader/page fixtures supplement the M3 real-browser tests; they are not
+substitutes for them. Chromium's working tree is clean. No raw results or
+generated binaries were committed. Unrelated SteamVR/Wine/DXMT edits in their
+other checkouts were preserved.
