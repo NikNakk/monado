@@ -470,10 +470,13 @@ See [the matched hardware comparison](macos-gpu-sync-headset-comparison.md).
 
 ### Common Chromium / Monado tracing (2026-10-12)
 
-The authorised M3 investigation is adding Perfetto regression coverage to
-Chromium's real Metal event waits. Our macOS CSV diagnostics should migrate to
-the same event model after native backend, clock correlation and measurement
-parity checks. See the [migration record](macos-gpu-sync-perfetto.md).
+The authorised M3 investigation now has an opt-in native SDK backend, readiness
+and ownership events, presentation callback observations and paired CSV/Perfetto
+regression checks. Chromium's ten real-Metal/SQL tests pass. Native capture and
+real offscreen service faults pass; explicit clock snapshots/manifests fix a
+sleep-time epoch mismatch when joining captures. Physical-display migration and
+actual Dawn/ANGLE handoff validation remain open. See the
+[implementation and results](macos-gpu-sync-perfetto.md).
 
 ### Native GPU synchronization M1–M2 completion — 2026-10-11
 

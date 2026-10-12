@@ -1129,3 +1129,21 @@ fence. An incomplete drain retains the whole device/compositor until process
 exit. These controls preserve the observed CPU-readiness gate, mandatory
 already-ready imported Vulkan wait and producer/consumer reuse transitions.
 See [the completion report](macos-gpu-sync-completion.md) for evidence and limits.
+
+
+## Native macOS Perfetto GPU capture (2026-10-12)
+
+| Variable / build option | Default | Purpose |
+| --- | --- | --- |
+| `XRT_FEATURE_MACOS_PERFETTO` (CMake) | off | Compile the C-facing official SDK adapter for macOS GPU diagnostics. |
+| `XRT_PERFETTO_SDK_DIR` (CMake) | unset | External directory containing the pinned SDK's `perfetto.h` / `perfetto.cc`. |
+| `XRT_PERFETTO_TRACE_PROCESSOR` (CMake) | unset | External SQL tool; registers the native capture regression CTest when present. |
+| `XRT_MACOS_PERFETTO_TRACE_DIR` | unset | Existing writable directory for unique private per-process `.pftrace` captures. No recording when unset. |
+
+The native adapter uses 16 MiB buffering, nominal 250 ms background draining and
+a 256 MiB file cap. Recording is separate from `PSVR2_TIMING_TRACE`; the service
+runner's `--perfetto` option enables both formats for parity checks. It preserves
+GPU readiness/reuse gates. Partial process-death captures are marked by a missing
+end event. Clock snapshots and an explicit archive manifest are required before
+joining native monotonic and Chromium/Mach timestamps. See the
+[implementation and validation](macos-gpu-sync-perfetto.md).

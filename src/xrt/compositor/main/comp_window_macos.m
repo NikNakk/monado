@@ -22,6 +22,7 @@
 #include "util/u_passthrough_calibration.h"
 #include "math/m_api.h"
 #include "util/u_timing_trace.h"
+#include "util/u_gpu_trace.h"
 #include "util/u_frame_share.h"
 #include "util/u_handles.h"
 #include "util/u_macos_hosted_client.h"
@@ -151,6 +152,7 @@ struct macos_passthrough_sink
 struct comp_window_macos
 {
 	struct comp_target_swapchain base;
+	uint64_t gpu_trace_id;
 	struct comp_macos_frontend *frontend;
 	struct u_macos_hosted_client *hosted_client;
 	//! Borrowed from the frontend.
@@ -1447,6 +1449,11 @@ macos_trace_present_worker(struct comp_window_macos *cwm,
                            uint32_t queue_depth,
                            bool shared_event_wait)
 {
+	if (u_gpu_trace_enabled()) {
+		uint64_t elapsed_ns = event_ns > job->enqueue_ns ? event_ns - job->enqueue_ns : 0;
+		u_gpu_trace_event("presentation", event, cwm->gpu_trace_id, job->frame_id, job->image_index,
+		                  job->timeline_value, event_ns, elapsed_ns);
+	}
 	if (cwm->trace_present_worker == NULL) {
 		return;
 	}
@@ -2158,6 +2165,11 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			  COMP_ERROR(cwm->base.base.c, "Asynchronous Metal presentation failed: %s",
 				     [[[completed_buffer error] localizedDescription] UTF8String]);
 		  }
+		  u_gpu_trace_event("presentation",
+			            status == MTLCommandBufferStatusCompleted ? "metal_complete_observed"
+			                                                      : "metal_failed_observed",
+			            cwm->gpu_trace_id, traced_frame_id, traced_index, traced_timeline_value,
+			            completion_ns, completion_ns - commit_begin_ns);
 		  if (complete_trace != NULL) {
 			  flockfile(complete_trace);
 			  fprintf(complete_trace, "%llu,%llu,%u,%llu,%lu,%llu,%.17g,%.17g,%u\n",
@@ -2179,21 +2191,27 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		 * method has its own scheduled handler; this is not a timestamp of
 		 * that private handler or of WindowServer accepting the drawable. */
 		FILE *scheduled_trace = cwm->trace_present_scheduled;
-		if (scheduled_trace != NULL) {
+		if (scheduled_trace != NULL || u_gpu_trace_enabled()) {
 			uint64_t registered_ns = os_monotonic_get_ns();
 			uint64_t minimum_duration_us = macos_present_min_duration_us();
 			bool presents_with_transaction = [cwm->metal_layer presentsWithTransaction];
 			dispatch_group_enter(command_group);
 			[command_buffer addScheduledHandler:^(id<MTLCommandBuffer> scheduled_buffer) {
 			  uint64_t scheduled_ns = os_monotonic_get_ns();
-			  flockfile(scheduled_trace);
-			  fprintf(scheduled_trace, "%llu,%llu,%llu,%u,%llu,%lu,%llu,%u\n",
-				  (unsigned long long)traced_frame_id, (unsigned long long)scheduled_ns,
-				  (unsigned long long)registered_ns, traced_index,
-				  (unsigned long long)traced_timeline_value, (unsigned long)[scheduled_buffer status],
-				  (unsigned long long)minimum_duration_us, presents_with_transaction ? 1u : 0u);
-			  macos_trace_buffered_fflush(scheduled_trace);
-			  funlockfile(scheduled_trace);
+			  u_gpu_trace_event("presentation", "metal_scheduled_observed", cwm->gpu_trace_id,
+				            traced_frame_id, traced_index, traced_timeline_value, scheduled_ns,
+				            scheduled_ns - registered_ns);
+			  if (scheduled_trace != NULL) {
+				  flockfile(scheduled_trace);
+				  fprintf(scheduled_trace, "%llu,%llu,%llu,%u,%llu,%lu,%llu,%u\n",
+					  (unsigned long long)traced_frame_id, (unsigned long long)scheduled_ns,
+					  (unsigned long long)registered_ns, traced_index,
+					  (unsigned long long)traced_timeline_value,
+					  (unsigned long)[scheduled_buffer status],
+					  (unsigned long long)minimum_duration_us, presents_with_transaction ? 1u : 0u);
+				  macos_trace_buffered_fflush(scheduled_trace);
+				  funlockfile(scheduled_trace);
+			  }
 			  dispatch_group_leave(command_group);
 			}];
 		}
@@ -2781,6 +2799,7 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 		free(cwm);
 		return NULL;
 	}
+	cwm->gpu_trace_id = u_gpu_trace_new_scope();
 	atomic_init(&cwm->passthrough_shutdown, false);
 	/* Hosted when this is a client whose IPC connection can ask the service to show it. */
 	cwm->hosted_client = client;

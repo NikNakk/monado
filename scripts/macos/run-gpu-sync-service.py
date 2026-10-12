@@ -21,6 +21,7 @@ def main():
     parser.add_argument('--client', nargs='+')
     parser.add_argument('--client-timeout', type=float, default=30, help='Finite client timeout in seconds (1–300)')
     parser.add_argument('--benchmark', action='store_true', help='Disable readback and per-image diagnostic logging')
+    parser.add_argument('--perfetto', action='store_true', help='Capture native Perfetto beside CSV (requires XRT_FEATURE_MACOS_PERFETTO)')
     parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
     parser.add_argument('--unique-output', action='store_true')
     parser.add_argument('--fault', choices=['missing', 'disconnect'], default='missing')
@@ -52,6 +53,8 @@ def main():
                    XRT_MACOS_CLIENT_COMPOSITOR='0',
                    XRT_MACOS_METAL_IPC_SERVICE_NAME=label,
                    MONADO_OPENXR_RUNTIME_PATH=str(build/'src/xrt/targets/openxr/libopenxr_monado.dylib'))
+        if args.perfetto:
+            env['XRT_MACOS_PERFETTO_TRACE_DIR'] = str(out)
         if args.benchmark:
             env.update(XRT_LOG='warn', XRT_COMPOSITOR_LOG_APPLE_SAMPLES='0',
                        XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE='0')
@@ -67,6 +70,7 @@ def main():
                      'benchmark': args.benchmark, 'powermetrics': 'not collected; power/frequency unavailable',
                      'game_mode': 'not requested'}
         telemetry['headset'] = args.headset
+        telemetry['perfetto'] = args.perfetto
         telemetry['gpu_policy'] = {key: env.get(key, default) for key, default in {
             'XRT_MACOS_FRAME_READINESS_MARGIN_US': '6000', 'XRT_MACOS_CLIENT_GPU_HUNG_MS': '5000',
             'XRT_MACOS_GPU_GLOBAL_MB': 'auto', 'XRT_MACOS_GPU_CLIENT_MB': 'auto',

@@ -20,6 +20,7 @@
 #include "util/u_time.h"
 #include "util/u_debug.h"
 #include "util/u_timing_trace.h"
+#include "util/u_gpu_trace.h"
 #include "util/u_handles.h"
 #include "util/u_trace_marker.h"
 #include "util/u_distortion_mesh.h"
@@ -124,7 +125,7 @@ macos_client_gpu_trace_get(void)
 		return NULL;
 	}
 
-	fputs("event,client_frame_id,event_ns,semaphore_value,duration_ns\n", g_macos_client_gpu_trace);
+	fputs("event,client_frame_id,event_ns,semaphore_value,duration_ns,scope_id\n", g_macos_client_gpu_trace);
 
 	if (!g_macos_client_gpu_trace_atexit_registered) {
 		atexit(macos_client_gpu_trace_close);
@@ -135,16 +136,21 @@ macos_client_gpu_trace_get(void)
 }
 
 static void
-macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semaphore_value, int64_t duration_ns)
+macos_client_gpu_trace_event(
+    struct multi_compositor *mc, const char *event, int64_t frame_id, uint64_t semaphore_value, int64_t duration_ns)
 {
-	FILE *file = macos_client_gpu_trace_get();
-	if (file == NULL) {
+	if (!u_gpu_trace_enabled() && !macos_client_gpu_trace_enabled())
 		return;
-	}
+	int64_t now_ns = os_monotonic_get_ns();
+	u_gpu_trace_event("client", event, mc->gpu_trace_id, frame_id, UINT32_MAX, semaphore_value, now_ns,
+	                  duration_ns);
+	FILE *file = macos_client_gpu_trace_get();
+	if (file == NULL)
+		return;
 
 	flockfile(file);
-	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 "\n", event, frame_id, os_monotonic_get_ns(),
-	        semaphore_value, duration_ns);
+	fprintf(file, "%s,%" PRId64 ",%" PRId64 ",%" PRIu64 ",%" PRId64 ",%" PRIu64 "\n", event, frame_id, now_ns,
+	        semaphore_value, duration_ns, mc->gpu_trace_id);
 	g_macos_client_gpu_trace_rows++;
 	if (!u_timing_trace_fully_buffered() && (g_macos_client_gpu_trace_rows % 512 == 0)) {
 		fflush(file);
@@ -154,8 +160,10 @@ macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semap
 #else
 // Only traced on macOS.
 static inline void
-macos_client_gpu_trace_event(const char *event, int64_t frame_id, uint64_t semaphore_value, int64_t duration_ns)
+macos_client_gpu_trace_event(
+    struct multi_compositor *mc, const char *event, int64_t frame_id, uint64_t semaphore_value, int64_t duration_ns)
 {
+	(void)mc;
 	(void)event;
 	(void)frame_id;
 	(void)semaphore_value;
@@ -584,12 +592,12 @@ run_func(void *ptr)
 		xrt_result_t wait_result = XRT_SUCCESS;
 		if (xcsem != NULL) {
 			int64_t semaphore_wait_start_ns = os_monotonic_get_ns();
-			macos_client_gpu_trace_event("semaphore_wait_start", frame_id, value, 0);
+			macos_client_gpu_trace_event(mc, "semaphore_wait_start", frame_id, value, 0);
 			wait_result = wait_semaphore(mc, &xcsem, value);
 			int64_t semaphore_wait_end_ns = os_monotonic_get_ns();
-			macos_client_gpu_trace_event(wait_result == XRT_SUCCESS ? "semaphore_ready"
-			                                                        : "semaphore_failed",
-			                             frame_id, value, semaphore_wait_end_ns - semaphore_wait_start_ns);
+			macos_client_gpu_trace_event(
+			    mc, wait_result == XRT_SUCCESS ? "semaphore_ready" : "semaphore_failed", frame_id, value,
+			    semaphore_wait_end_ns - semaphore_wait_start_ns);
 		}
 		if (xcf != NULL) {
 			wait_result = wait_fence(mc, &xcf);
@@ -642,7 +650,7 @@ run_func(void *ptr)
 		int64_t scheduled_wait_start_ns = os_monotonic_get_ns();
 		wait_for_scheduled_free(mc);
 		int64_t scheduled_wait_end_ns = os_monotonic_get_ns();
-		macos_client_gpu_trace_event("scheduled", frame_id, value,
+		macos_client_gpu_trace_event(mc, "scheduled", frame_id, value,
 		                             scheduled_wait_end_ns - scheduled_wait_start_ns);
 
 		os_thread_helper_lock(&mc->wait_thread.oth);
@@ -1043,7 +1051,7 @@ static xrt_result_t
 multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_data *data)
 {
 	struct multi_compositor *mc = multi_compositor(xc);
-	macos_client_gpu_trace_event("layer_begin_entry", data->frame_id, 0, 0);
+	macos_client_gpu_trace_event(mc, "layer_begin_entry", data->frame_id, 0, 0);
 	os_thread_helper_lock(&mc->wait_thread.oth);
 	bool already_failed = mc->wait_thread.failed;
 	os_thread_helper_unlock(&mc->wait_thread.oth);
@@ -1070,7 +1078,7 @@ multi_compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_f
 	int64_t wait_start_ns = os_monotonic_get_ns();
 	wait_for_wait_thread(mc);
 	int64_t wait_end_ns = os_monotonic_get_ns();
-	macos_client_gpu_trace_event("layer_begin_after_previous", data->frame_id, 0, wait_end_ns - wait_start_ns);
+	macos_client_gpu_trace_event(mc, "layer_begin_after_previous", data->frame_id, 0, wait_end_ns - wait_start_ns);
 	if (ipc_frame_timing_enabled()) {
 		U_LOG_RAW("IPC_FRAME_TIMING server layer_begin_wait frame=%" PRId64 " duration_ms=%.3f", data->frame_id,
 		          ipc_elapsed_ms(wait_start_ns, wait_end_ns));
@@ -1320,7 +1328,7 @@ multi_compositor_layer_commit_with_semaphore(struct xrt_compositor *xc,
 	}
 #endif
 	push_semaphore_to_wait_thread(mc, frame_id, xcsem, value);
-	macos_client_gpu_trace_event("semaphore_pushed", frame_id, value, 0);
+	macos_client_gpu_trace_event(mc, "semaphore_pushed", frame_id, value, 0);
 
 	return XRT_SUCCESS;
 }
@@ -1447,7 +1455,7 @@ multi_compositor_deliver_any_frames(struct multi_compositor *mc, int64_t display
 	}
 	int64_t deadline_ns = display_time_ns - margin_us * U_TIME_1US_IN_NS;
 	if (mc->scheduled.gpu_ready_ns > deadline_ns) {
-		macos_client_gpu_trace_event("readiness_deferred", mc->scheduled.data.frame_id, 0,
+		macos_client_gpu_trace_event(mc, "readiness_deferred", mc->scheduled.data.frame_id, 0,
 		                             mc->scheduled.gpu_ready_ns - deadline_ns);
 		os_mutex_unlock(&mc->slot_lock);
 		return; // Reproject delivered; retain scheduled ownership for a later tick.
@@ -1497,6 +1505,7 @@ multi_compositor_create(struct multi_system_compositor *msc,
 #ifdef XRT_OS_OSX
 	mc->gpu_budget = comp_gpu_client_budget_create();
 	if (mc->gpu_budget == NULL) { free(mc); return XRT_ERROR_ALLOCATION; }
+	mc->gpu_trace_id = comp_gpu_client_budget_trace_id(mc->gpu_budget);
 	U_LOG_I("Client GPU policy: hung_ms=%lld readiness_margin_us=%ld",
 	        (long long)(client_gpu_hung_ns() / U_TIME_1MS_IN_NS),
 	        debug_get_num_option_client_gpu_margin_us());

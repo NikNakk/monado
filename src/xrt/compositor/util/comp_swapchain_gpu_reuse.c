@@ -11,6 +11,7 @@
 #include "util/comp_swapchain.h"
 #include "util/comp_semaphore.h"
 #include "util/u_debug.h"
+#include "util/u_gpu_trace.h"
 #include "util/u_logging.h"
 #include "util/u_misc.h"
 
@@ -31,6 +32,7 @@ DEBUG_GET_ONCE_BOOL_OPTION(log_swapchain_gpu_reuse, "XRT_COMPOSITOR_LOG_SWAPCHAI
 struct gpu_reuse_context;
 struct comp_gpu_client_budget
 {
+	uint64_t trace_id;
 	uint64_t bytes;
 	uint32_t objects;
 	uint32_t references;
@@ -148,8 +150,17 @@ struct comp_gpu_client_budget *
 comp_gpu_client_budget_create(void)
 {
 	struct comp_gpu_client_budget *budget = U_TYPED_CALLOC(struct comp_gpu_client_budget);
-	if (budget != NULL) budget->references = 1;
+	if (budget != NULL) {
+		budget->references = 1;
+		budget->trace_id = u_gpu_trace_new_scope();
+	}
 	return budget;
+}
+
+uint64_t
+comp_gpu_client_budget_trace_id(struct comp_gpu_client_budget *budget)
+{
+	return budget != NULL ? budget->trace_id : 0;
 }
 
 static void
@@ -588,6 +599,8 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 			}
 			continue;
 		}
+		uint64_t trace_id = tracker->id;
+		uint64_t trace_owner_id = tracker->budget != NULL ? tracker->budget->trace_id : 0;
 		uint64_t value = tracker->last_gpu_use[image_index];
 		VkSemaphore timeline = tracker->context->timeline;
 		struct vk_bundle *vk = tracker->context->vk;
@@ -618,6 +631,11 @@ tracked_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t image
 			return XRT_ERROR_VULKAN;
 		}
 
+		if (u_gpu_trace_enabled()) {
+			int64_t completed_ns = os_monotonic_get_ns();
+			u_gpu_trace_owner_event("consumer_gpu_observed", trace_id, trace_owner_id, -1, image_index,
+			                        value, completed_ns, completed_ns - wait_start_ns);
+		}
 		reuse_log("wait complete", xsc, image_index, value, os_monotonic_get_ns() - wait_start_ns);
 
 		pthread_mutex_lock(&g_gpu_reuse_mutex);
@@ -670,6 +688,7 @@ static void
 reclaim_tracker_locked(struct gpu_reuse_tracker **ptr)
 {
 	struct gpu_reuse_tracker *t = *ptr;
+	uint64_t owner_trace_id = t->budget != NULL ? t->budget->trace_id : 0;
 	*ptr = t->next;
 	for (uint32_t i = 0; i < t->xsc->image_count; i++) {
 		xrt_compositor_semaphore_reference(&t->producer[i], NULL);
@@ -685,6 +704,9 @@ reclaim_tracker_locked(struct gpu_reuse_tracker **ptr)
 	t->xsc->destroy = t->original_destroy;
 	U_LOG_I("GPU reuse reclaim: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u id=%llu", (void *)t->xsc,
 	        (unsigned long long)t->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count, (unsigned long long)t->id);
+	if (u_gpu_trace_enabled())
+		u_gpu_trace_owner_event("storage_reclaimed", t->id, owner_trace_id, -1, UINT32_MAX, 0,
+		                        os_monotonic_get_ns(), 0);
 	t->original_destroy(t->xsc);
 	free(t);
 }
@@ -743,6 +765,10 @@ tracked_swapchain_destroy(struct xrt_swapchain *xsc)
 	struct gpu_reuse_tracker *tracker = find_tracker_locked(xsc);
 	if (tracker != NULL) {
 		tracker->quarantined = true;
+		if (u_gpu_trace_enabled())
+			u_gpu_trace_owner_event("storage_quarantined", tracker->id,
+			                        tracker->budget != NULL ? tracker->budget->trace_id : 0, -1, UINT32_MAX,
+			                        0, os_monotonic_get_ns(), 0);
 		U_LOG_I("GPU reuse quarantine: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u id=%llu", (void *)xsc,
 		        (unsigned long long)tracker->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count, (unsigned long long)tracker->id);
 	}
@@ -772,6 +798,10 @@ comp_swapchain_gpu_reuse_set_producer(struct xrt_swapchain *xsc,
 		}
 		xrt_compositor_semaphore_reference(&t->producer[index], sem);
 		t->producer_value[index] = value;
+		if (u_gpu_trace_enabled())
+			u_gpu_trace_owner_event("producer_obligation", t->id,
+			                        t->budget != NULL ? t->budget->trace_id : 0, -1, index, value,
+			                        os_monotonic_get_ns(), 0);
 	}
 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 	return XRT_SUCCESS;
@@ -884,6 +914,10 @@ comp_swapchain_gpu_reuse_claim_image(struct xrt_swapchain *xsc, uint32_t image_i
 
 	assert(tracker->pending_consumers[image_index] != UINT32_MAX);
 	tracker->pending_consumers[image_index]++;
+	if (u_gpu_trace_enabled())
+		u_gpu_trace_owner_event("consumer_claimed", tracker->id,
+		                        tracker->budget != NULL ? tracker->budget->trace_id : 0, -1, image_index,
+		                        tracker->last_gpu_use[image_index], os_monotonic_get_ns(), 0);
 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 	return true;
 }
@@ -901,6 +935,11 @@ comp_swapchain_gpu_reuse_release_image(struct xrt_swapchain *xsc, uint32_t image
 		assert(tracker->pending_consumers[image_index] > 0);
 		if (tracker->pending_consumers[image_index] > 0) {
 			tracker->pending_consumers[image_index]--;
+			if (u_gpu_trace_enabled())
+				u_gpu_trace_owner_event("consumer_claim_released", tracker->id,
+				                        tracker->budget != NULL ? tracker->budget->trace_id : 0, -1,
+				                        image_index, tracker->last_gpu_use[image_index],
+				                        os_monotonic_get_ns(), 0);
 			if (tracker->pending_consumers[image_index] == 0) {
 				pthread_cond_broadcast(&g_gpu_reuse_cond);
 			}
@@ -1099,6 +1138,10 @@ submit_add_image_locked(struct gpu_reuse_submit *submit, struct xrt_swapchain *x
 	image->image_index = image_index;
 	image->previous_value = tracker->last_gpu_use[image_index];
 	tracker->last_gpu_use[image_index] = submit->value;
+	if (u_gpu_trace_enabled())
+		u_gpu_trace_owner_event("consumer_submit_assignment", tracker->id,
+		                        tracker->budget != NULL ? tracker->budget->trace_id : 0, -1, image_index,
+		                        submit->value, os_monotonic_get_ns(), 0);
 	reuse_log("submit assignment", xsc, image_index, submit->value, 0);
 	return true;
 }

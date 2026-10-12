@@ -182,6 +182,7 @@ struct multi_compositor
 	//! Protected by slot_lock. Producer and service GPU waits remain unchanged.
 	bool latest_completed_three_images;
 	struct comp_gpu_client_budget *gpu_budget;
+	uint64_t gpu_trace_id;
 #endif
 
 	//! Lock for all of the slots.
