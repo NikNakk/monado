@@ -83,9 +83,7 @@ GitLab Issues and Merge Requests.
   Relatedly, `git commit -v` (if you commit from the command line) can be a great help
   in making sure you aren't committing things you don't mean to,
   by showing the diff you're committing in your commit message editor.
-  (This can even be set system-wide in `git config --global commit.verbose true`
-  if you find it as life-changing as many others have - thanks
-  [emilyst](https://twitter.com/emilyst/status/1039205453010362368).)
+  (This can even be set system-wide in `git config --global commit.verbose true`.)
 
 - If you can, before submitting a pull/merge request, try building with clang-tidy enabled,
   and if you touched any code that has or should have documentation,
