@@ -1186,9 +1186,11 @@ experiment was removed.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `XRT_MACOS_GPU_CAPTURE_DIR` | unset | With `MTL_CAPTURE_ENABLED=1`, capture the compositor's MTLDevice to `<dir>/monado_<pid>.gputrace`. Capture starts at the first producer-waiting submission and stops before the fifth, or at device loss. |
-| `XRT_MACOS_SKIP_SATISFIED_PRODUCER_GPU_WAIT` | `0` | Diagnostic only. Skip the GPU wait on a producer value the CPU check has already seen. This removes the cross-API memory-ordering guarantee, so it must never be a default. |
+| `XRT_MACOS_GPU_CAPTURE_DIR` | unset | With `MTL_CAPTURE_ENABLED=1`, capture the compositor's MTLDevice to `<dir>/monado_<pid>.gputrace`. Capture starts at the first producer-waiting submission and stops before the fifth, or at device loss. The startup loop's `--gpu-capture` sets both. |
 
-Both exist to investigate the intermittent startup GPU hang. Remove them once it
-is understood; see
+Capture slows the GPU. Before the render-resource lifetime fix, it reproduced
+the startup GPU hang offscreen every time, so it is a useful stress for
+GPU-side lifetime races. `XRT_MACOS_SKIP_SATISFIED_PRODUCER_GPU_WAIT` was
+briefly added and then removed: with the producer GPU wait skipped, captured
+startups still hung. See
 [the headset attempts](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
