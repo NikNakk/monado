@@ -119,6 +119,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_drawable_slot, "XRT_MACOS_DRAWABLE_SLOT", true)
+// Experiment: fetch the next slot drawable only once no slot present is in flight.
+DEBUG_GET_ONCE_BOOL_OPTION(macos_slot_acquire_after_present, "XRT_MACOS_SLOT_ACQUIRE_AFTER_PRESENT", false)
 // Diagnostic: skip the MTLSharedEvent render-complete export so presentation uses
 // the CPU Vulkan timeline wait (this also disables drawable-slot mode).
 DEBUG_GET_ONCE_BOOL_OPTION(macos_force_cpu_render_wait, "XRT_MACOS_FORCE_CPU_RENDER_WAIT", false)
@@ -192,6 +194,8 @@ struct comp_window_macos
 	bool present_worker_shutdown;
 	bool present_worker_enabled;
 	bool drawable_slot_enabled;
+	//! Committed slot-mode presents not yet completed (XRT_MACOS_SLOT_ACQUIRE_AFTER_PRESENT).
+	atomic_uint slot_presents_in_flight;
 	id<CAMetalDrawable> prefetched_drawable;
 	uint64_t prefetched_drawable_timeline_value;
 	uint64_t prefetched_drawable_begin_ns;
@@ -1369,11 +1373,23 @@ macos_release_prefetched_drawable(struct comp_window_macos *cwm, const char *tra
 static void
 macos_present_worker_run_one(struct comp_window_macos *cwm);
 
+static bool
+macos_slot_acquire_deferred(struct comp_window_macos *cwm)
+{
+	return debug_get_bool_option_macos_slot_acquire_after_present() &&
+	       atomic_load_explicit(&cwm->slot_presents_in_flight, memory_order_acquire) > 0;
+}
+
 static void
 macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 {
 	if (!cwm->drawable_slot_enabled || cwm->present_worker_queue == NULL || cwm->present_worker_group == NULL ||
 	    cwm->render_complete_event == nil || cwm->metal_layer == nil) {
+		return;
+	}
+
+	// The completion handler of the in-flight present reschedules this fetch.
+	if (macos_slot_acquire_deferred(cwm)) {
 		return;
 	}
 
@@ -1388,6 +1404,14 @@ macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 
 	dispatch_async(cwm->present_worker_queue, ^{
 	  @autoreleasepool {
+		  if (macos_slot_acquire_deferred(cwm)) {
+			  pthread_mutex_lock(&cwm->present_worker_mutex);
+			  cwm->drawable_slot_acquire_scheduled = false;
+			  pthread_mutex_unlock(&cwm->present_worker_mutex);
+			  macos_trace_drawable_prefetch(cwm, "slot_acquire_deferred", 0, os_monotonic_get_ns(), 0, 0);
+			  dispatch_group_leave(cwm->present_worker_group);
+			  return;
+		  }
 		  uint64_t begin_ns = os_monotonic_get_ns();
 		  macos_trace_drawable_prefetch(cwm, "slot_acquire_begin", 0, begin_ns, begin_ns, 0);
 		  id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
@@ -2156,9 +2180,15 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		dispatch_group_t command_group = cwm->present_command_group;
 		FILE *complete_trace = cwm->trace_present_complete;
 		dispatch_group_enter(command_group);
+		const bool counted_slot_present = cwm->drawable_slot_enabled;
 		[command_buffer addCompletedHandler:^(id<MTLCommandBuffer> completed_buffer) {
 		  uint64_t completion_ns = os_monotonic_get_ns();
 		  MTLCommandBufferStatus status = [completed_buffer status];
+		  if (counted_slot_present &&
+		      atomic_fetch_sub_explicit(&cwm->slot_presents_in_flight, 1, memory_order_acq_rel) == 1 &&
+		      debug_get_bool_option_macos_slot_acquire_after_present()) {
+			  macos_schedule_drawable_slot(cwm);
+		  }
 		  double completed_gpu_start_s = [completed_buffer GPUStartTime];
 		  double completed_gpu_end_s = [completed_buffer GPUEndTime];
 		  if (status == MTLCommandBufferStatusError) {
@@ -2214,6 +2244,9 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			  }
 			  dispatch_group_leave(command_group);
 			}];
+		}
+		if (counted_slot_present) {
+			atomic_fetch_add_explicit(&cwm->slot_presents_in_flight, 1, memory_order_acq_rel);
 		}
 		[command_buffer commit];
 		after_commit_ns = os_monotonic_get_ns();
@@ -2806,6 +2839,9 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 	u_macos_hosted_client_reference(client);
 	bool want_drawable_slot = debug_get_bool_option_macos_drawable_slot();
 	cwm->drawable_slot_enabled = want_drawable_slot;
+	if (want_drawable_slot && debug_get_bool_option_macos_slot_acquire_after_present()) {
+		COMP_WARN(c, "XRT_MACOS_SLOT_ACQUIRE_AFTER_PRESENT set; slot drawables are fetched after each present completes");
+	}
 	/*
 	 * Slot mode is itself a newest-frame presentation worker. The producer may
 	 * keep rendering and replace the single pending job while asynchronous

@@ -8,14 +8,25 @@ three-image comparison's proof step. Headset runs are user-operated: stop the
 installed service first. Results stay outside Git.
 """
 import argparse
+import csv
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import time
 
 
-def classify(directory, exit_code):
+def displayed_frames(directory):
+    """Frames Core Animation reports as shown; 0 when the display was asleep."""
+    paths = list(directory.glob('*_presented.csv'))
+    if not paths:
+        return 0
+    with paths[0].open() as trace:
+        return sum(1 for row in csv.DictReader(trace) if int(row['presented_monotonic_ns'] or 0) > 0)
+
+
+def classify(directory, exit_code, headset):
     log = (directory/'service.log').read_text(errors='replace') if (directory/'service.log').exists() else ''
     if 'kIOGPUCommandBufferCallbackErrorHang' in log:
         return 'gpu_hang'
@@ -25,6 +36,9 @@ def classify(directory, exit_code):
         return 'usb'
     if 'Requested headset is unavailable' in log or exit_code != 0:
         return 'other_failure'
+    # A sleeping display presents nothing and hides presentation-path faults.
+    if headset and displayed_frames(directory) == 0:
+        return 'not_presented'
     return 'pass'
 
 
@@ -47,6 +61,13 @@ def main():
         parser.error('keep results outside Git')
     out.mkdir(parents=True, exist_ok=False)
     commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=repo, text=True).strip()
+    awake = None
+    if not args.offscreen:
+        # The service blocks display sleep only while a client is connected, so
+        # an idle user's display can sleep between startups. Wake it, then hold
+        # it awake for the whole loop.
+        subprocess.run(['/usr/bin/caffeinate', '-u', '-t', '2'], check=False)
+        awake = subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-w', str(os.getpid())])
     results = []
     for index in range(1, args.count+1):
         directory = out/f'start-{index:03d}'
@@ -63,12 +84,15 @@ def main():
         started = time.monotonic()
         with (out/'runner.log').open('a') as log:
             exit_code = subprocess.run(command, cwd=repo, stdout=log, stderr=log, timeout=120).returncode
-        outcome = classify(directory, exit_code)
+        outcome = classify(directory, exit_code, not args.offscreen)
         results.append({'start': index, 'outcome': outcome, 'exit': exit_code,
                         'elapsed_s': round(time.monotonic()-started, 1)})
         print(f'start {index:3d}: {outcome}', flush=True)
         if outcome == 'usb':
             print('USB claim failed; power-cycle the headset before continuing', flush=True)
+            break
+        if outcome == 'not_presented':
+            print('No frame reached the display (asleep?); stopping, as later results would be invalid', flush=True)
             break
     counts = {}
     for result in results:
@@ -76,6 +100,8 @@ def main():
     summary = {'commit': commit, 'images': args.images, 'frames': args.frames, 'headset': not args.offscreen,
                'service_env': args.service_env, 'counts': counts, 'results': results}
     (out/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
+    if awake is not None:
+        awake.terminate()
     print(json.dumps({'counts': counts, 'output': str(out)}), flush=True)
     return 0 if set(counts) == {'pass'} else 1
 

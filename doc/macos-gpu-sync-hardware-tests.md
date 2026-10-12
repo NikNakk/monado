@@ -116,28 +116,34 @@ reach the timing runs.
    same case did not hang. On the headset, 4 of 14 startups with client
    content have hung, each on the first submission that read a client image.
 
-8. **The drawable-slot worker is the trigger.** Startup loops on `a4eb13ddf`
-   (15 three-image startups of 120 frames each, in `/tmp/monado-startup-*`):
+8. **Presentation experiments: first results invalid.** Startup loops on
+   `a4eb13ddf` (15 three-image startups of 120 frames each, in
+   `/tmp/monado-startup-*`):
 
-   | Loop | Slot worker | Presenter wait | GPU hangs |
-   | --- | --- | --- | --- |
-   | Baseline | on | GPU (shared event) | 4 / 15 |
-   | `XRT_MACOS_PRIME_PRODUCER_EVENT=1` | on | GPU | 1 / 15 |
-   | `MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1` | on | GPU | 0 / 15 |
-   | `XRT_MACOS_DRAWABLE_SLOT=0` | off | GPU | 0 / 15 |
-   | `XRT_MACOS_FORCE_CPU_RENDER_WAIT=1` | off | CPU | 0 / 15 |
+   | Loop | Slot worker | Presenter wait | GPU hangs | Display awake |
+   | --- | --- | --- | --- | --- |
+   | Baseline | on | GPU (shared event) | 4 / 15 | all |
+   | `XRT_MACOS_PRIME_PRODUCER_EVENT=1` | on | GPU | 1 / 15 | all |
+   | `MTL_SHADER_VALIDATION=1 MTL_DEBUG_LAYER=1` | on | GPU | 0 / 15 | all |
+   | `XRT_MACOS_DRAWABLE_SLOT=0` | off | GPU | 0 / 6 valid | starts 1–6 only |
+   | `XRT_MACOS_FORCE_CPU_RENDER_WAIT=1` | off | CPU | no valid data | none |
 
    Each hang was on the first submission that read a client image, with every
    wait met. Priming refutes the first-GPU-wait-on-the-event theory: one
-   startup hung after its priming completed. Validation reported no errors,
-   but slowed each composed frame to about 10.5 ms, so it masks a timing race
-   rather than clearing the shaders. Turning off only the slot worker, while
-   keeping the presenter's GPU-side wait, removes the hang. At the baseline
-   rate, 0 of 15 has about a 1% chance; it was seen in two loops. In a hung
-   startup, the slot worker had prefetched the next drawable at 99 ms. The
-   first client buffer was submitted at 103.6 ms, the presenter committed its
-   GPU wait at 103.8 ms, and the watchdog fired about 110 ms after submission.
-   The mechanism inside the slot worker is not yet identified. Ruled out:
+   startup hung after its priming completed. Validation reported no errors, but
+   slowed each composed frame to about 10.5 ms, so it may hide a timing race.
+
+   The last two loops ran unattended. The service blocks display sleep only
+   while a client is connected, so macOS's idle timer put the displays to sleep
+   between startups. From start 7 of the slot-off loop, the PS VR2 produced no
+   vblanks, and Core Animation reported no frame as presented. Those startups
+   cannot show a presentation-path hang. A conclusion briefly recorded here,
+   that the slot worker was the trigger, did not account for this and is
+   withdrawn. The loop now holds `caffeinate -d` and wakes the display at the
+   start. It classifies a headset startup with no displayed frame as
+   `not_presented`, and stops.
+
+   Ruled out so far:
    - **CPU ordering.** Hung and passing startups follow the same CPU sequence
      through frame 4: Vulkan submit, present handoff, Metal present commit
      (GPU wait on `render_complete`), then the slot worker's `nextDrawable`.
