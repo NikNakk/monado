@@ -59,6 +59,26 @@ headless M3–M5 scripts/results must not be relabelled as headset validation.
 
 ## Headset attempts (2026-10-12)
 
+**Resolved: the startup GPU hang was a render-resource lifetime race**
+(`c/main: wait for the previous frame before reusing its render resources`).
+`comp_renderer_draw` reset the shared command pool and rewrote descriptor sets
+and uniform buffers before waiting for the previous frame's fence. It also
+reset descriptor pools straight after submitting. macOS skips the end-of-frame
+queue-idle wait that makes this safe elsewhere, so a pending frame could read
+resources the next frame was rewriting. The fix waits on the existing fence
+before recording, and defers each frame's resource release until after that
+wait. The queue-idle wait stays disabled. Codex identified the ordering.
+
+| Check | Before fix | After fix |
+| --- | --- | --- |
+| Offscreen startups with Metal GPU capture | 15 / 15 hung | 0 / 12 |
+| Headset startups, display awake | about 20% hung (6 / 30) | 0 / 30 |
+| Headset comparison, enqueue-to-display p50 | 19.23 ms | 19.23–19.24 ms |
+| Headset comparison, shown gaps > 12.5 ms per ~2335 | 2–10 | 1–7 |
+
+The earlier investigation notes follow; the items they leave open are answered
+by this fix.
+
 Four user-run attempts at test 1 on `c2703cc0f` (binaries from 14:43) did not
 reach the timing runs.
 
@@ -184,7 +204,7 @@ reach the timing runs.
    remains open. Its rate varies between sessions: 6 of 30 short loop
    startups, but 1 of 24 comparison steps.
 
-   **Metal GPU capture reproduces the hang offscreen.** With
+   **Metal GPU capture reproduces the hang offscreen** (before the fix). With
    `XRT_MACOS_GPU_CAPTURE_DIR` and `MTL_CAPTURE_ENABLED=1`, the service
    captures its MTLDevice from the first producer-waiting submission. The
    startup loop's `--gpu-capture` sets both. It stops after four submissions,
@@ -193,7 +213,7 @@ reach the timing runs.
    `kIOGPUCommandBufferCallbackErrorHang` on the compositor's queue. Capture
    slows the GPU, as validation does, but here that makes the hang far more
    likely rather than hiding it. The diagnostic
-   `XRT_MACOS_SKIP_SATISFIED_PRODUCER_GPU_WAIT=1` drops the producer GPU wait
+   `XRT_MACOS_SKIP_SATISFIED_PRODUCER_GPU_WAIT=1` (since removed) dropped the producer GPU wait
    once the CPU has seen the value. With it, 5 of 6 captured startups still
    hung. Offscreen command buffers then contain no GPU wait at all, so under
    capture the stall is in the buffer's own work, such as the client texture

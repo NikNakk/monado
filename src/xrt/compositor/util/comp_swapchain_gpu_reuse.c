@@ -29,8 +29,6 @@
 #include <string.h>
 
 DEBUG_GET_ONCE_BOOL_OPTION(log_swapchain_gpu_reuse, "XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE", false)
-// Diagnostic only: skip the GPU wait on a producer value the CPU already saw.
-DEBUG_GET_ONCE_BOOL_OPTION(skip_satisfied_producer_gpu_wait, "XRT_MACOS_SKIP_SATISFIED_PRODUCER_GPU_WAIT", false)
 
 #define GPU_REUSE_MAX_IMAGES_PER_SUBMIT (XRT_MAX_LAYERS * XRT_MAX_VIEWS * 2)
 
@@ -1363,13 +1361,6 @@ comp_swapchain_gpu_reuse_submit_info_builder_prepare(struct vk_submit_info_build
 		if (xrt_compositor_semaphore_wait(producer, value, 0) != XRT_SUCCESS) {
 			producer_ready = false;
 			break;
-		}
-		if (debug_get_bool_option_skip_satisfied_producer_gpu_wait()) {
-			// Diagnostic only: drops the cross-process GPU wait, and with it the
-			// guarantee that this queue sees the producer's writes.
-			producer_waits = true;
-			reuse_log("producer ready wait skipped", image->tracker->xsc, image->image_index, value, 0);
-			continue;
 		}
 		VkSemaphore semaphore = comp_semaphore(producer)->semaphore;
 		uint32_t k = 0;
