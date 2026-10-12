@@ -156,9 +156,9 @@ reach the timing runs.
 - `scripts/macos/run-headset-startup-loop.py` repeats short isolated startups,
   by default 15 three-image startups of 120 frames. It counts `gpu_hang`,
   `device_lost`, `usb` and other outcomes in `summary.json`. It stops early on
-  a USB claim failure. `XRT_MACOS_PRIME_PRODUCER_EVENT=1`, passed with
-  `--service-env`, primes each client event on the GPU before first use.
-  Compare a baseline loop with a primed loop.
+  a USB claim failure. `--service-env XRT_NAME=VALUE` passes a setting to
+  each service. The `XRT_MACOS_PRIME_PRODUCER_EVENT` experiment run with it
+  has since been removed.
 - A failed compute or graphics dispatch now releases its descriptor sets. A
   lost device previously leaked them each frame until allocation failed. A null
   set then crashed MoltenVK in `vkUpdateDescriptorSets`; this produced all
@@ -167,13 +167,12 @@ reach the timing runs.
   closed and released it. That left the main loop's tracked reference dangling,
   and its release crashed at shutdown (2026-10-11 21:32, 2026-10-12 19:58).
 
-Measure the startup hang rate with and without priming. Stop the installed
-service first.
+Measure the startup hang rate, with a setting under test passed through.
+Stop the installed service first.
 
 ```sh
 MVK_CONFIG_LOG_LEVEL=3 python3 scripts/macos/run-headset-startup-loop.py \
-  --output /tmp/monado-startup-baseline-1
+  --output /tmp/monado-startup-baseline-2
 MVK_CONFIG_LOG_LEVEL=3 python3 scripts/macos/run-headset-startup-loop.py \
-  --output /tmp/monado-startup-primed-1 \
-  --service-env XRT_MACOS_PRIME_PRODUCER_EVENT=1
+  --output /tmp/monado-startup-noslot-2 --service-env XRT_MACOS_DRAWABLE_SLOT=0
 ```

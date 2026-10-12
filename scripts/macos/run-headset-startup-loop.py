@@ -37,7 +37,7 @@ def main():
     parser.add_argument('--frames', type=int, default=120, help='Client frames per startup (60–2400)')
     parser.add_argument('--offscreen', action='store_true', help='Use the simulated HMD instead of the headset')
     parser.add_argument('--service-env', action='append', default=[], metavar='XRT_NAME=VALUE',
-                        help='Passed to each service, e.g. XRT_MACOS_PRIME_PRODUCER_EVENT=1')
+                        help='Passed to each service, e.g. XRT_MACOS_DRAWABLE_SLOT=0')
     args = parser.parse_args()
     if not 1 <= args.count <= 100 or not 60 <= args.frames <= 2400:
         parser.error('--count must be 1–100 and --frames 60–2400')

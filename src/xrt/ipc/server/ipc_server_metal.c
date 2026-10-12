@@ -15,14 +15,10 @@
 #include "util/comp_metal_semaphore_provider.h"
 #include "util/comp_metal_swapchain_handoff.h"
 #include "util/comp_swapchain_gpu_reuse.h"
-#include "util/u_debug.h"
-#include "util/u_time.h"
 
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
-
-DEBUG_GET_ONCE_BOOL_OPTION(prime_producer_event, "XRT_MACOS_PRIME_PRODUCER_EVENT", false)
 #endif
 
 #if defined(XRT_OS_OSX) && defined(XRT_FEATURE_SERVICE)
@@ -701,12 +697,6 @@ ipc_handle_compositor_semaphore_create_metal(volatile struct ipc_client_state *i
 			xrt_compositor_semaphore_reference(&xcsem, NULL);
 		}
 		return xret != XRT_SUCCESS ? xret : XRT_ERROR_VULKAN;
-	}
-
-	if (debug_get_bool_option_prime_producer_event()) {
-		// Experiment: take the GPU's first wait on this event before the client
-		// can signal it. Failure is logged and does not stop the session.
-		(void)comp_metal_semaphore_prime_gpu_wait(xcsem, 0, U_TIME_1S_IN_NS);
 	}
 
 	uint64_t token = 0;

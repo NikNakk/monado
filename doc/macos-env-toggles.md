@@ -1165,14 +1165,9 @@ non-benchmark runs, and the three-image comparison's proof runs use 30. See
 [the headset test notes](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
 
 
-## Producer event priming experiment (2026-10-12)
+## Producer event priming experiment (2026-10-12, removed)
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `XRT_MACOS_PRIME_PRODUCER_EVENT` | `0` | Experiment only. When a client's Metal ready event is created, submit one wait-only command to the compositor queue at value 0. The service waits up to 1 s for it, before the client can signal the event. |
-
-This tests whether the first GPU wait on a client-signalled event causes the
-intermittent headset startup GPU hang. It is not a fix, and per-frame readiness
-waits are unchanged. Remove it, or make the priming unconditional, once
-[the startup loop](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12)
-settles the question.
+`XRT_MACOS_PRIME_PRODUCER_EVENT` was briefly added. It made the GPU wait once
+on each client's Metal ready event before first use. A startup still hung after
+priming had completed, so it was removed. See
+[the headset attempts](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
