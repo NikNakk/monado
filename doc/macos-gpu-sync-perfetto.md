@@ -73,17 +73,22 @@ requires hardware/clock validation; those CSV measurements remain available.
 
 ### Reproduction
 
+Keep the SDK in a persistent directory outside the checkout: `/tmp` is cleared
+on reboot, and a build configured with this option then fails to reconfigure.
+The script verifies the pinned archives and skips the download when they are
+already present.
+
 ```sh
-python3 scripts/macos/prepare-perfetto.py --sdk-dir /tmp/monado-perfetto-sdk --tools
+python3 scripts/macos/prepare-perfetto.py --sdk-dir $HOME/Code/perfetto-sdk-v58.2 --tools
 cmake -S . -B build/arm64 -DXRT_FEATURE_MACOS_PERFETTO=ON \
-  -DXRT_PERFETTO_SDK_DIR=/tmp/monado-perfetto-sdk \
-  -DXRT_PERFETTO_TRACE_PROCESSOR=/tmp/monado-perfetto-sdk/tools/mac-arm64/trace_processor_shell
+  -DXRT_PERFETTO_SDK_DIR=$HOME/Code/perfetto-sdk-v58.2 \
+  -DXRT_PERFETTO_TRACE_PROCESSOR=$HOME/Code/perfetto-sdk-v58.2/tools/mac-arm64/trace_processor_shell
 cmake --build build/arm64 --parallel
 ctest --test-dir build/arm64 --output-on-failure
 python3 scripts/macos/run-gpu-sync-service.py --suite --fault missing --perfetto \
   --output /tmp/new-perfetto-service-capture
 python3 scripts/macos/check-perfetto.py --service /tmp/new-perfetto-service-capture \
-  --processor /tmp/monado-perfetto-sdk/tools/mac-arm64/trace_processor_shell
+  --processor $HOME/Code/perfetto-sdk-v58.2/tools/mac-arm64/trace_processor_shell
 ```
 
 For an ordinary run, create the output directory first, then set

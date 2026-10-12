@@ -678,6 +678,7 @@ and the Windows install outside this checkout:
 | `~/Code/macos-wine-xr` | The Wine/XR bridge. `build-in-process/` holds its driver and in-process runtime builds. |
 | `~/Code/dxmt` | DXMT (`NikNakk/dxmt`); `codex/cross-process-presentation-hardening` is the current local branch. Built in `build/` against the CrossOver runtime as its Wine SDK; see the bridge's `docs/steamvr-home.md`. |
 | `~/Code/dxmt-toolchains` | LLVM 15 (x86_64) for building DXMT. Meson refuses it inside the DXMT tree. |
+| `~/Code/perfetto-sdk-v58.2` | Hash-pinned Perfetto v58.2 C++ SDK and macOS trace processor for `XRT_FEATURE_MACOS_PERFETTO` builds, from `scripts/macos/prepare-perfetto.py`; see [Perfetto tracing](macos-gpu-sync-perfetto.md). |
 | `~/Code/xrizer` | xrizer (`NikNakk/xrizer`), used by `scripts/macos/rebuild-xrizer.zsh`. |
 | `~/Code/wine-crossover` | CrossOver 26.3 FOSS Wine: `sources/`, `build/`, `deps-x86_64/`, and `runtime/`, the patched Wine tree with DXMT installed. |
 | `~/Windows` | The SteamVR rig: `prefix/` (Steam, SteamVR, Half-Life: Alyx, Hyperbolica), `bin/wine-crossover-dxmt`, `run-steam.zsh` (Steam with the XR environment, no SteamVR), `run-mwxr.zsh` (SteamVR; both default to the PS VR2), `stop-steamvr.zsh`, `make-apps.zsh` (builds `Steam.app` and `SteamVR.app` in `~/Applications` around the two launchers), and run logs in `logs/`. |
