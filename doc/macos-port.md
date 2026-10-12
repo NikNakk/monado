@@ -1027,6 +1027,20 @@ presentation remain separate. Chromium's inherited cleanup is committed and
 its incremental build plus focused fixtures pass. See the
 [M4 evidence, limits and reproduction record](macos-gpu-sync-wine.md).
 
+### Cross-stack GPU synchronization M5 (2026-10-12)
+
+The headless M1–M5 contract investigation is complete for its tested routes.
+Native/Wine stress checks 48,000 exact GPU transfers; extended ANGLE/Dawn stereo
+and reuse checks pass, with balanced claims and complete joined traces. All 69
+native tests, 15 SharedImage tests and 11 waiters pass. Two separate 20 s paired
+comparisons record nominal thermal state, workload differences and substantial
+variation; an isolated ~37 ms offscreen renderer stall remains unexplained.
+The long run found a fixture trace-scope defect: page-level DevTools tracing
+omitted the XR utility. Browser-level tracing fixes it without changing GPU
+synchronization or relaxing loss checks. SteamVR ownership/deployment, Game Mode,
+drawable acquisition, production Wine recovery and physical presentation remain
+separate limits. See the [M5 report and reproduction](macos-gpu-sync-cross-stack.md).
+
 ### Common Chromium / Monado tracing (2026-10-12)
 
 The authorised M3 investigation now has an opt-in native SDK backend, readiness

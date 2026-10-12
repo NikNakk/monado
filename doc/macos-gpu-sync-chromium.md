@@ -373,6 +373,14 @@ recorded above. Raw captures and build logs remain outside Git.
 
 ## Cleanup after M3 (2026-10-12)
 
+M5 follow-up: the original fixture started Chromium tracing on the page debugger
+endpoint, excluding XR utility events. Short M3 traces do not expose the child's
+30 s unbound-startup-writer timeout, but extended captures do. The native GPU,
+ownership, unit-test and CSV evidence remains valid; the old Chromium trace is
+not proof of utility coverage. `4fed5fb51` uses the browser endpoint and checks
+actual render-loop events. Long ANGLE/Dawn captures and GPU/decoder replacement
+then pass strict loss checks. See [the M5 findings](macos-gpu-sync-cross-stack.md).
+
 The moved SDK and preceding Monado tracing fixes were already included in the
 rebuilt native service used for the final M3 tests. No reversion was needed.
 The inherited Chromium changes are now committed:
