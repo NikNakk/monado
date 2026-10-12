@@ -14,6 +14,7 @@
 #include "os/os_time.h"
 
 #include "util/u_debug.h"
+#include "util/u_gpu_trace.h"
 #include "util/u_trace_marker.h"
 
 
@@ -60,6 +61,7 @@ u_trace_marker_setup(enum u_trace_which which)
 void
 u_trace_marker_init(void)
 {
+	u_gpu_trace_init_from_environment();
 	if (!debug_get_bool_option_tracing()) {
 		return;
 	}
@@ -102,6 +104,7 @@ u_trace_marker_setup(enum u_trace_which which)
 void
 u_trace_marker_init(void)
 {
+	u_gpu_trace_init_from_environment();
 	// Noop
 }
 
