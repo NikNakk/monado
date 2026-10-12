@@ -44,6 +44,10 @@ main(int argc, char **argv)
 			fprintf(rows, "%llu,%d,%lld,%d,100\n", (unsigned long long)scope, i / 2, (long long)now, i + 1);
 		costs.push_back(static_cast<int64_t>(
 		    (static_cast<__uint128_t>(mach_absolute_time() - start) * timebase.numer) / timebase.denom));
+		// Real producers emit a few events per frame; an unbroken 10,000-event
+		// burst can outrun the in-process service. Pause outside the timed call.
+		if (i % 500 == 499)
+			os_nanosleep(1000000);
 	}
 	if (strcmp(mode, "crash") == 0) {
 		os_nanosleep(1000000000LL); // Allow the SDK background writer to drain.

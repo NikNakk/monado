@@ -99,6 +99,10 @@ u_gpu_trace_start(const char *path, uint32_t buffer_mb)
 		perfetto::TracingInitArgs args;
 		args.backends = perfetto::kInProcessBackend;
 		args.use_monotonic_clock = true;
+		// Writers drop chunks once the shared buffer between them and the
+		// in-process service is full. The SDK default overflowed in bursts of
+		// a few thousand events; 4 MiB absorbs bursts such as teardown.
+		args.shmem_size_hint_kb = 4096;
 		perfetto::Tracing::Initialize(args);
 		perfetto::TrackEvent::Register();
 		initialized = true;
@@ -110,8 +114,8 @@ u_gpu_trace_start(const char *path, uint32_t buffer_mb)
 	perfetto::TraceConfig config;
 	config.add_buffers()->set_size_kb(buffer_mb * 1024);
 	config.set_write_into_file(true);
+	// Write-into-file mode flushes on every write period; flush_period_ms is ignored.
 	config.set_file_write_period_ms(250);
-	config.set_flush_period_ms(250);
 	config.set_max_file_size_bytes(256u * 1024u * 1024u);
 	config.set_flush_timeout_ms(1000);
 	config.set_data_source_stop_timeout_ms(1000);
