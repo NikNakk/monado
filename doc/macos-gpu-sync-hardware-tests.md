@@ -56,3 +56,52 @@ recovery remain separate coverage gaps in the
 [M5 limits](macos-gpu-sync-cross-stack.md#exit-criteria-and-practical-limits).
 There is not yet a validated single hardware runner for those cases. The
 headless M3–M5 scripts/results must not be relabelled as headset validation.
+
+## Headset attempts (2026-10-12)
+
+Four user-run attempts at test 1 on `c2703cc0f` (binaries from 14:43) did not
+reach the timing runs.
+
+1. **Installed service running.** The LaunchAgent service held the headset, so
+   the private fixture service could not claim it. Boot out
+   `org.freedesktop.monado.service` before a headset fixture run.
+2. **USB status interface stuck.** With no other owner, the fixture service
+   reported `Failed to set USB status interface alt 1`, then
+   `Failed to claim USB status interface`. This is the
+   [post-reboot failure](macos-service-direct-xpc.md#post-reboot-usb-initialization-failure-2026-10-11).
+   A full headset/adapter power cycle and USB reconnect cleared it.
+3. **Startup device loss.** The service lost the Vulkan device
+   (`VK_ERROR_DEVICE_LOST`) on the first composed frame that waited on the
+   client's readiness signal. Nothing was presented. An immediate repeat of the
+   same `array-four` case, with `MVK_CONFIG_LOG_LEVEL=3`, passed: 240 frames
+   were presented, and samples in both eyes matched. The same binaries also
+   pass offscreen. Crash reports show the same sequence at 2026-10-11 00:42 and
+   2026-10-12 08:02. This is the previously recorded unexplained startup
+   device loss, and its cause is still open. Keep `MVK_CONFIG_LOG_LEVEL=3` set
+   for headset runs, so that a recurrence logs MoltenVK's Metal error.
+4. **Pixel check.** The four-image proof run had no device loss, but only one
+   of the then-two required pixel samples matched. Frames 3–6 are blank in
+   every headset run, so few samples could ever count. Composed frame 122
+   latched a fresh client frame (119, not reused), yet its sample was fully
+   transparent: `(0,0,0,0)`, including alpha. Either the target was not written
+   that frame, or the readback read another image. It was not determined which.
+
+Follow-up changes:
+
+- The comparison now samples every 30 frames, after a 30-frame warmup. It
+  records each blank frame in `pixel-check.json`, and fails on more than one
+  blank.
+- A failed compute or graphics dispatch now releases its descriptor sets. A
+  lost device previously leaked them each frame until allocation failed. A null
+  set then crashed MoltenVK in `vkUpdateDescriptorSets`; this produced all
+  three device-loss crash reports. Upstream has the same early return.
+- The PS VR2 window is now created with `releasedWhenClosed` off. Teardown both
+  closed and released it. That left the main loop's tracked reference dangling,
+  and its release crashed at shutdown (2026-10-11 21:32, 2026-10-12 19:58).
+
+Rerun with:
+
+```sh
+MVK_CONFIG_LOG_LEVEL=3 python3 scripts/macos/run-three-image-comparison.py \
+  --headset --frames 2400 --output /tmp/monado-three-image-headset-5
+```

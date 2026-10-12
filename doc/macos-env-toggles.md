@@ -1147,3 +1147,15 @@ GPU readiness/reuse gates. Partial process-death captures are marked by a missin
 end event. Clock snapshots and an explicit archive manifest are required before
 joining native monotonic and Chromium/Mach timestamps. See the
 [implementation and validation](macos-gpu-sync-perfetto.md).
+
+
+## Pixel-sample interval (2026-10-12)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `XRT_COMPOSITOR_LOG_APPLE_SAMPLES_INTERVAL` | `120` | With `XRT_COMPOSITOR_LOG_APPLE_SAMPLES=1`, log the first five source/target samples, then one every N frames. Values of 0 or below use 120. |
+
+The readback still runs every frame while samples are enabled; only logging is
+thinned. `run-gpu-sync-service.py --sample-interval N` sets it for
+non-benchmark runs, and the three-image comparison's proof runs use 30. See
+[the headset test notes](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
