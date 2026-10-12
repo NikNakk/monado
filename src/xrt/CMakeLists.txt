@@ -12,6 +12,11 @@ if(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 	add_compile_definitions(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
 endif()
 
+option(XRT_FEATURE_MACOS_PERFETTO "Compile opt-in macOS Perfetto GPU diagnostics" OFF)
+if(XRT_FEATURE_MACOS_PERFETTO AND NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+	message(FATAL_ERROR "XRT_FEATURE_MACOS_PERFETTO requires macOS")
+endif()
+
 # Order matters.
 add_subdirectory(include)
 add_subdirectory(auxiliary)

@@ -58,6 +58,7 @@ add_library(
 	u_frame.h
 	u_future.h
 	u_future.cpp
+	u_gpu_trace.h
 	u_generic_callbacks.hpp
 	u_git_tag.h
 	u_hand_tracking.c
@@ -294,4 +295,23 @@ target_link_libraries(aux_util_scribble PUBLIC aux-includes aux_util)
 if(XRT_HAVE_OPENCV)
 	target_link_libraries(aux_util_scribble PUBLIC ${OpenCV_LIBRARIES})
 	target_include_directories(aux_util_scribble SYSTEM PRIVATE ${OpenCV_INCLUDE_DIRS})
+endif()
+
+if(APPLE)
+	target_sources(aux_util PRIVATE u_gpu_trace_scope.c)
+endif()
+
+if(XRT_FEATURE_MACOS_PERFETTO)
+	set(XRT_PERFETTO_SDK_DIR "" CACHE PATH "External directory containing official perfetto.h and perfetto.cc")
+	if(NOT EXISTS "${XRT_PERFETTO_SDK_DIR}/perfetto.h" OR NOT EXISTS "${XRT_PERFETTO_SDK_DIR}/perfetto.cc")
+		message(FATAL_ERROR "Set XRT_PERFETTO_SDK_DIR to an external official Perfetto SDK directory")
+	endif()
+	add_library(monado_perfetto_sdk STATIC "${XRT_PERFETTO_SDK_DIR}/perfetto.cc")
+	target_include_directories(monado_perfetto_sdk SYSTEM PUBLIC "${XRT_PERFETTO_SDK_DIR}")
+	target_compile_features(monado_perfetto_sdk PRIVATE cxx_std_17)
+	set_target_properties(monado_perfetto_sdk PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN YES)
+	target_sources(aux_util PRIVATE u_gpu_trace.cpp)
+	set_source_files_properties(u_gpu_trace.cpp PROPERTIES COMPILE_OPTIONS "-fvisibility=hidden")
+	target_compile_features(aux_util PRIVATE cxx_std_17)
+	target_link_libraries(aux_util PRIVATE monado_perfetto_sdk)
 endif()

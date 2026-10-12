@@ -557,3 +557,16 @@ if(APPLE AND TARGET psvr2-openxr-test)
 		)
 	add_test(NAME tests_psvr2_controller_visuals COMMAND tests_psvr2_controller_visuals)
 endif()
+
+if(XRT_FEATURE_MACOS_PERFETTO)
+	add_executable(tests_macos_perfetto tests_macos_perfetto.cpp)
+	target_link_libraries(tests_macos_perfetto PRIVATE aux_util aux_os)
+	target_compile_features(tests_macos_perfetto PRIVATE cxx_std_17)
+	set(XRT_PERFETTO_TRACE_PROCESSOR "" CACHE FILEPATH "External Perfetto trace processor for SQL regression checks")
+	if(EXISTS "${XRT_PERFETTO_TRACE_PROCESSOR}")
+		add_test(NAME tests_macos_perfetto COMMAND ${PYTHON_EXECUTABLE}
+			${CMAKE_SOURCE_DIR}/scripts/macos/check-perfetto.py
+			--fixture $<TARGET_FILE:tests_macos_perfetto> --processor ${XRT_PERFETTO_TRACE_PROCESSOR})
+		set_tests_properties(tests_macos_perfetto PROPERTIES TIMEOUT 30)
+	endif()
+endif()
