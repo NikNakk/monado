@@ -6,6 +6,12 @@ penalty in this bounded native offscreen workload. SteamVR and physical headset
 acceptability remain untested. Keep the four-image default and the compatibility
 mode opt-in until those trials are recorded.
 
+The subsequent [production SteamVR-backend GPU test](macos-steamvr-resolve-copy-test.md)
+exports all three resolve images across Windows processes and reduces the
+backend's per-eye copies from 36 to zero over 18 stereo frames. Actual SteamVR
+deployment and headset acceptance still require the
+[hardware tests](macos-gpu-sync-hardware-tests.md).
+
 This concerns **client swapchain images**, not display drawables. The
 CAMetalLayer drawable pool already uses three. With
 `XRT_MACOS_METAL_THREE_IMAGE_SWAPCHAINS=1`, the service enables latest-completed
