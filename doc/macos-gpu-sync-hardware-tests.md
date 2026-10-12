@@ -160,6 +160,30 @@ reach the timing runs.
    faster to display (19.20 ms) but had 4 gaps over 12.5 ms in 1153. These are
    2 s startups, not sustained pacing evidence.
 
+   **Correction: the CPU wait does not prevent the hang.** Four full
+   comparisons on `cbeedbc75` (2400-frame timing runs, display held
+   awake, in `/tmp/monado-cmp-{gpu,cpu}-{light,load}`) gave one hang with
+   `XRT_MACOS_FORCE_CPU_RENDER_WAIT=1`. It was at the start of the cpu-light
+   A1-four step, in the same way as before, with the presenter in CPU (`timeline`)
+   mode. The other 23 steps completed. The `--background-load` runs looped the M5
+   stress fixture (1024², 64 copies, uploads) for about 77 s of each roughly 90 s
+   comparison.
+
+   | Timing run | Enqueue-to-display p50 | Shown gaps > 12.5 ms |
+   | --- | --- | --- |
+   | GPU wait, light (4 runs) | 19.23 ms in all 4 | 2–10 per ~2330 |
+   | GPU wait, loaded (4 runs) | 19.35–19.37 ms in all 4 | 1–19 per ~2330 |
+   | CPU wait, light (4 runs) | 19.24 ms in 1, 27.56 ms in 3 | 0–3 per ~2340 |
+   | CPU wait, loaded (4 runs) | 27.58–27.72 ms in all 4 | 5–12 per ~2333 |
+
+   Throughput was 119.78–119.89 Hz throughout, and medians of readiness,
+   dispatch and entry-to-latch were similar. The CPU wait usually delivered
+   frames one refresh (about 8.3 ms) later: 7 of 8 runs, against 0 of 8 with
+   the GPU-side wait. Keep the GPU-side shared-event wait as the default.
+   `XRT_MACOS_FORCE_CPU_RENDER_WAIT` stays a diagnostic. The startup hang
+   remains open. Its rate varies between sessions: 6 of 30 short loop
+   startups, but 1 of 24 comparison steps.
+
    Ruled out so far:
    - **CPU ordering.** Hung and passing startups follow the same CPU sequence
      through frame 4: Vulkan submit, present handoff, Metal present commit
