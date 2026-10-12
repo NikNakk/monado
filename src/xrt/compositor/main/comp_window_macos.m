@@ -24,6 +24,7 @@
 #include "math/m_api.h"
 #include "util/u_timing_trace.h"
 #include "util/u_gpu_trace.h"
+#include "util/u_gpu_trace_present.h"
 #include "util/u_frame_share.h"
 #include "util/u_handles.h"
 #include "util/u_macos_hosted_client.h"
@@ -78,6 +79,8 @@ struct macos_presented_state
 	atomic_uint_fast64_t present_offset_sample_serial;
 	pthread_mutex_t guard_mutex;
 	struct macos_latency_guard guard;
+	struct u_gpu_trace_present presentation_trace;
+	uint64_t gpu_trace_id;
 	FILE *trace_presented;
 };
 
@@ -341,6 +344,9 @@ macos_timing_trace_close(struct comp_window_macos *cwm)
 {
 	if (cwm->presented_state != NULL) {
 		/* Ownership of trace_presented belongs to the ref-counted callback state. */
+		pthread_mutex_lock(&cwm->presented_state->guard_mutex);
+		u_gpu_trace_present_close(&cwm->presented_state->presentation_trace);
+		pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
 		cwm->trace_presented = NULL;
 		macos_presented_state_release(cwm->presented_state);
 		cwm->presented_state = NULL;
@@ -1343,10 +1349,11 @@ macos_trace_drawable_prefetch(struct comp_window_macos *cwm,
                               uint64_t begin_ns,
                               uint64_t end_ns)
 {
+	uint64_t wait_ns = end_ns > begin_ns ? end_ns - begin_ns : 0;
+	u_gpu_trace_event("presentation", event, cwm->gpu_trace_id, -1, UINT32_MAX, timeline_value, event_ns, wait_ns);
 	if (cwm->trace_drawable_prefetch == NULL) {
 		return;
 	}
-	uint64_t wait_ns = end_ns > begin_ns ? end_ns - begin_ns : 0;
 	flockfile(cwm->trace_drawable_prefetch);
 	fprintf(cwm->trace_drawable_prefetch, "%s,%llu,%llu,%llu,%llu,%llu\n", event,
 	        (unsigned long long)timeline_value, (unsigned long long)event_ns, (unsigned long long)begin_ns,
@@ -1953,6 +1960,8 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		pthread_mutex_unlock(&state->guard_mutex);
 		if (skip) {
 			if (drains != previous_drains) {
+				u_gpu_trace_event("presentation", "latency_guard_drain", cwm->gpu_trace_id, frame_id, index,
+				                  timeline_semaphore_value, worker_start_ns, 0);
 				COMP_INFO(ct->c, "macOS latency guard: drain %llu at frame %llu, withholding one refresh",
 				          (unsigned long long)drains, (unsigned long long)frame_id);
 			}
@@ -2100,7 +2109,8 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			}
 		}
 
-		if (cwm->presented_state != NULL) {
+		if (cwm->presented_state != NULL &&
+		    (cwm->trace_presented != NULL || cwm->latency_guard_enabled || u_gpu_trace_enabled())) {
 			struct macos_presented_state *presented_state = cwm->presented_state;
 			macos_presented_state_retain(presented_state);
 			FILE *trace_file = presented_state->trace_presented;
@@ -2109,6 +2119,8 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			uint64_t traced_target_output_ns = target_output_ns;
 			int64_t traced_display_period_ns = cwm->display_period_ns;
 			bool latency_guard_enabled = cwm->latency_guard_enabled;
+			uint32_t presented_image_index = index;
+			uint64_t presented_timeline_value = timeline_semaphore_value;
 			[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
 			  double presented_time_s = [presented_drawable presentedTime];
 			  int64_t handler_ns = os_monotonic_get_ns();
@@ -2124,6 +2136,13 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			      presented_host_ns != 0 ? presented_host_ns + handler_offset_ns : 0;
 			  int64_t presented_minus_desired_ns =
 			      presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
+			  u_gpu_trace_event("presentation", "presented_callback", presented_state->gpu_trace_id,
+			                    traced_frame_id, presented_image_index, presented_timeline_value, handler_ns, 0);
+			  if (presented_monotonic_ns > 0) {
+				  u_gpu_trace_event("presentation", "drawable_presented_observed", presented_state->gpu_trace_id,
+				                    traced_frame_id, presented_image_index, presented_timeline_value,
+				                    presented_monotonic_ns, 0);
+			  }
 			  int64_t presented_minus_target_ns =
 			      presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns
 				                          : 0;
@@ -2143,6 +2162,14 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				  present_queue_depth = (int64_t)llround(
 				      (double)(presented_monotonic_ns - (int64_t)traced_target_output_ns) /
 				      (double)traced_display_period_ns);
+			  }
+			  if (u_gpu_trace_enabled()) {
+				  struct u_gpu_trace_frame frame = {presented_state->gpu_trace_id, 0, traced_frame_id,
+				                                    presented_image_index, presented_timeline_value};
+				  pthread_mutex_lock(&presented_state->guard_mutex);
+				  u_gpu_trace_present_reported(&presented_state->presentation_trace, &frame,
+				                               presented_monotonic_ns, handler_ns, present_queue_depth);
+				  pthread_mutex_unlock(&presented_state->guard_mutex);
 			  }
 			  if (observed_present_offset_ns > 0 && trace_file != NULL) {
 				  atomic_store_explicit(&presented_state->latest_observed_present_offset_ns,
@@ -2203,6 +2230,12 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		  double completed_gpu_start_s = [completed_buffer GPUStartTime];
 		  double completed_gpu_end_s = [completed_buffer GPUEndTime];
 		  if (status == MTLCommandBufferStatusError) {
+			  if (cwm->presented_state != NULL) {
+				  pthread_mutex_lock(&cwm->presented_state->guard_mutex);
+				  u_gpu_trace_present_cancel(&cwm->presented_state->presentation_trace,
+				                             traced_timeline_value, "metal_error");
+				  pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
+			  }
 			  COMP_ERROR(cwm->base.base.c, "Asynchronous Metal presentation failed: %s",
 				     [[[completed_buffer error] localizedDescription] UTF8String]);
 		  }
@@ -2367,6 +2400,11 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
                              uint32_t queue_depth)
 {
 	struct macos_present_job retired_job = *job;
+	if (cwm->presented_state != NULL) {
+		pthread_mutex_lock(&cwm->presented_state->guard_mutex);
+		u_gpu_trace_present_cancel(&cwm->presented_state->presentation_trace, job->timeline_value, trace_event);
+		pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
+	}
 	bool shared_event_wait = cwm->render_complete_event != nil;
 	uint64_t event_ns = os_monotonic_get_ns();
 	macos_trace_present_worker(cwm, trace_event, &retired_job, event_ns, 0, 0, 0, 0, 0, queue_depth,
@@ -2489,6 +2527,12 @@ comp_window_macos_present(struct comp_target *ct,
 	    .display_head_orientation = ct->images[index].display_head_orientation,
 	    .display_head_orientation_valid = ct->images[index].display_head_orientation_valid,
 	};
+	if (u_gpu_trace_enabled() && cwm->presented_state != NULL) {
+		pthread_mutex_lock(&cwm->presented_state->guard_mutex);
+		u_gpu_trace_present_prepare(&cwm->presented_state->presentation_trace, job.frame_id, index,
+		                            timeline_semaphore_value);
+		pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
+	}
 	if (!cwm->present_worker_enabled) {
 		/* Submit on the compositor thread; async GPU completion does not need a worker. */
 		return macos_execute_present_job(cwm, &job);
@@ -2546,6 +2590,25 @@ comp_window_macos_wait_for_present(struct comp_target *ct, time_duration_ns time
 	(void)ct;
 	(void)timeout_ns;
 	return VK_ERROR_EXTENSION_NOT_PRESENT;
+}
+
+static void
+comp_window_macos_info_gpu(struct comp_target *ct,
+                           int64_t frame_id,
+                           int64_t gpu_start_ns,
+                           int64_t gpu_end_ns,
+                           int64_t when_ns)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	/* Preserve pacer feedback; consume the existing deferred calibrated timestamps
+	 * without an additional fence wait or query-pool read. */
+	u_pc_info_gpu(cwm->base.upc, frame_id, gpu_start_ns, gpu_end_ns, when_ns);
+	if (u_gpu_trace_enabled() && cwm->presented_state != NULL && frame_id >= 0 &&
+	    gpu_start_ns > 0 && gpu_end_ns >= gpu_start_ns && gpu_end_ns <= when_ns) {
+		pthread_mutex_lock(&cwm->presented_state->guard_mutex);
+		u_gpu_trace_present_gpu_end(&cwm->presented_state->presentation_trace, frame_id, gpu_end_ns, when_ns);
+		pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
+	}
 }
 
 static VkResult
@@ -2871,15 +2934,21 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 		          "stalls supersede pending frames instead of dropping them");
 	}
 	macos_timing_trace_open(cwm);
-	/* Guard feedback must also work with all diagnostic tracing disabled. */
-	if (cwm->latency_guard_enabled && cwm->presented_state == NULL) {
+	/* Keep callback state ready for a capture attached after target creation.
+	 * With tracing/guard disabled, no presented handler is registered. */
+	if (cwm->presented_state == NULL) {
 		cwm->presented_state = macos_presented_state_create(NULL);
 		if (cwm->presented_state == NULL) {
 			COMP_WARN(c, "macOS latency guard disabled: could not allocate presentation feedback state");
 			cwm->latency_guard_enabled = false;
 		}
 	}
+	if (cwm->presented_state != NULL) {
+		cwm->presented_state->gpu_trace_id = cwm->gpu_trace_id;
+		u_gpu_trace_present_init(&cwm->presented_state->presentation_trace, cwm->gpu_trace_id);
+	}
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
+	cwm->base.base.info_gpu = comp_window_macos_info_gpu;
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
 		cwm->io_surfaces[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 	}

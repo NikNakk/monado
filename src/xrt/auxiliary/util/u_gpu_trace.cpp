@@ -1,6 +1,7 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 #include "util/u_gpu_trace.h"
+#include "util/u_gpu_trace_backend.h"
 #include "os/os_time.h"
 #include "util/u_logging.h"
 #include <perfetto.h>
@@ -41,6 +42,7 @@ timestamp(int64_t ns)
 {
 	return {kNativeClock, static_cast<uint64_t>(ns)};
 }
+
 
 void
 clock_correlation()
@@ -171,13 +173,13 @@ u_gpu_trace_stop(void)
 }
 
 extern "C" bool
-u_gpu_trace_enabled(void)
+u_gpu_trace_perfetto_enabled(void)
 {
 	return (capture_state.load(std::memory_order_acquire) & 1) != 0;
 }
 
 extern "C" void
-u_gpu_trace_init_from_environment(void)
+u_gpu_trace_perfetto_init_from_environment(void)
 {
 	std::call_once(environment_once, [] {
 		const char *directory = std::getenv("XRT_MACOS_PERFETTO_TRACE_DIR");
@@ -189,16 +191,16 @@ u_gpu_trace_init_from_environment(void)
 	});
 }
 
-static void
-emit(const char *domain,
-     const char *event,
-     uint64_t scope_id,
-     uint64_t owner_scope_id,
-     int64_t frame_id,
-     uint32_t image_index,
-     uint64_t timeline_value,
-     int64_t timestamp_ns,
-     int64_t duration_ns)
+extern "C" void
+u_gpu_trace_perfetto_emit(const char *domain,
+                          const char *event,
+                          uint64_t scope_id,
+                          uint64_t owner_scope_id,
+                          int64_t frame_id,
+                          uint32_t image_index,
+                          uint64_t timeline_value,
+                          int64_t timestamp_ns,
+                          int64_t duration_ns)
 {
 	const uint64_t generation = capture_state.load(std::memory_order_acquire);
 	if ((generation & 1) == 0 || timestamp_ns <= 0 || domain == nullptr || event == nullptr)
@@ -226,27 +228,22 @@ emit(const char *domain,
 }
 
 extern "C" void
-u_gpu_trace_event(const char *domain,
-                  const char *event,
-                  uint64_t scope_id,
-                  int64_t frame_id,
-                  uint32_t image_index,
-                  uint64_t timeline_value,
-                  int64_t timestamp_ns,
-                  int64_t duration_ns)
+u_gpu_trace_perfetto_depth_change(const struct u_gpu_trace_frame *frame,
+                                  int64_t previous,
+                                  int64_t depth,
+                                  int64_t event_ns)
 {
-	emit(domain, event, scope_id, 0, frame_id, image_index, timeline_value, timestamp_ns, duration_ns);
-}
-extern "C" void
-u_gpu_trace_owner_event(const char *event,
-                        uint64_t scope_id,
-                        uint64_t owner_scope_id,
-                        int64_t frame_id,
-                        uint32_t image_index,
-                        uint64_t timeline_value,
-                        int64_t timestamp_ns,
-                        int64_t duration_ns)
-{
-	emit("ownership", event, scope_id, owner_scope_id, frame_id, image_index, timeline_value, timestamp_ns,
-	     duration_ns);
+	const uint64_t generation = capture_state.load(std::memory_order_acquire);
+	if ((generation & 1) == 0 || event_ns <= 0)
+		return;
+	std::shared_lock<std::shared_mutex> guard(capture_lock);
+	if (capture_state.load(std::memory_order_acquire) != generation)
+		return;
+	auto track = perfetto::NamedTrack("presentation", frame->scope_id);
+	TRACE_EVENT_INSTANT("monado.gpu", "present_queue_depth_changed", track, timestamp(event_ns),
+	                    "record_type", "observation", "domain", "presentation", "scope_id", frame->scope_id,
+	                    "owner_scope_id", 0, "frame_id", frame->frame_id, "image_index", frame->image_index,
+	                    "timeline_value", frame->timeline_value, "event_ns", event_ns, "duration_ns", 0,
+	                    "previous_depth_known", previous >= 0, "previous_depth", previous >= 0 ? previous : 0,
+	                    "depth", depth);
 }

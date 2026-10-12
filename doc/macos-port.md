@@ -54,6 +54,11 @@ native three/four-image hardware checks pass. An opt-in presentation latency
 guard demonstrates one-refresh recovery, but latency can rebound, so it remains
 off by default. See the [hardware evidence](macos-gpu-sync-hardware-tests.md).
 
+The macOS tracing facade now also supports opt-in Instruments signposts,
+independently of Perfetto and CSV capture. Synthetic Instruments metadata parity
+and offscreen runtime tracing pass; physical Instruments profiling remains
+outstanding. See the [tracing workflow](macos-gpu-sync-perfetto.md#native-instruments-signposts-2026-10-12).
+
 **Current integration branch:** `macos-upstream-clean`
 
 **PS Sense 6DoF integration, updated 2026-10-08:** the joint multi-camera

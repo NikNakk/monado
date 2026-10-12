@@ -31,6 +31,11 @@ headset comparisons pass; the new presentation latency guard remains opt-in
 because successful one-refresh drains can rebound and cost cadence. See the
 [hardware ledger](macos-gpu-sync-hardware-tests.md).
 
+Opt-in `XRT_MACOS_SIGNPOST=1` now exposes the common GPU tracing observations
+to Instruments, with synthetic metadata parity and offscreen runtime validation.
+The physical Instruments recording remains pending; see the
+[capture workflow](macos-gpu-sync-perfetto.md#native-instruments-signposts-2026-10-12).
+
 The integration includes the
 [failed CADisplayLink-owned compositor experiment](macos-cadisplaylink-owned-compositor-experiment.md).
 Only its diagnostics and evidence remain; callback/deferred CA rendering modes
