@@ -298,7 +298,7 @@ if(XRT_HAVE_OPENCV)
 endif()
 
 if(APPLE)
-	target_sources(aux_util PRIVATE u_gpu_trace_scope.c)
+	target_sources(aux_util PRIVATE u_gpu_trace_scope.c u_gpu_trace_macos.c u_gpu_trace_present.c)
 endif()
 
 if(XRT_FEATURE_MACOS_PERFETTO)

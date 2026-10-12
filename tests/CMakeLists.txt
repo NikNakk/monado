@@ -229,6 +229,11 @@ if(XRT_HAVE_VULKAN AND XRT_HAVE_D3D12)
 endif()
 
 if(APPLE)
+	add_executable(tests_macos_present_trace tests_macos_present_trace.cpp)
+	target_link_libraries(tests_macos_present_trace PRIVATE aux_util xrt-external-catch2)
+	add_test(NAME tests_macos_present_trace COMMAND tests_macos_present_trace)
+	set_tests_properties(tests_macos_present_trace PROPERTIES ENVIRONMENT "XRT_MACOS_SIGNPOST=0")
+	set_target_properties(tests_macos_present_trace PROPERTIES FOLDER monado_tests)
 	add_executable(tests_macos_runtime_probe tests_macos_runtime_probe.c)
 	target_link_libraries(
 		tests_macos_runtime_probe PRIVATE target_instance xrt-interfaces aux_util
@@ -258,6 +263,11 @@ if(APPLE AND TARGET comp_metal_foveation_cache)
 endif()
 
 if(APPLE)
+	add_executable(tests_macos_signpost tests_macos_signpost.c)
+	target_link_libraries(tests_macos_signpost PRIVATE aux_util)
+	add_test(NAME tests_macos_signpost COMMAND tests_macos_signpost)
+	set_tests_properties(tests_macos_signpost PROPERTIES ENVIRONMENT "XRT_MACOS_SIGNPOST=0")
+	set_target_properties(tests_macos_signpost PROPERTIES FOLDER monado_tests)
 	add_executable(tests_macos_latency_guard tests_macos_latency_guard.cpp)
 	target_link_libraries(tests_macos_latency_guard PRIVATE comp_util xrt-external-catch2)
 	add_test(NAME tests_macos_latency_guard COMMAND tests_macos_latency_guard)

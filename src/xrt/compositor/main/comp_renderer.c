@@ -31,6 +31,7 @@
 #include "util/u_frame_times_widget.h"
 #include "util/u_debug.h"
 #include "util/u_timing_trace.h"
+#include "util/u_gpu_trace.h"
 
 #include "util/comp_render.h"
 #include "util/comp_high_level_render.h"
@@ -152,6 +153,7 @@ struct comp_renderer
 	struct comp_mirror_to_debug_gui mirror_to_debug_gui;
 
 #ifdef XRT_OS_OSX
+	uint64_t gpu_trace_id;
 	FILE *late_render_trace;
 	uint64_t late_render_trace_rows;
 
@@ -582,12 +584,16 @@ renderer_late_render_trace_frame(struct comp_renderer *r)
 
 #endif
 
-#if defined(XRT_OS_OSX) && defined(XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS)
+#ifdef XRT_OS_OSX
 static uint64_t
 renderer_stage_begin(struct comp_renderer *r)
 {
 	(void)r;
-	return debug_get_bool_option_comp_psvr2_timing_trace() ? os_monotonic_get_ns() : 0;
+	bool enabled = u_gpu_trace_enabled();
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	enabled = enabled || debug_get_bool_option_comp_psvr2_timing_trace();
+#endif
+	return enabled ? os_monotonic_get_ns() : 0;
 }
 
 static void
@@ -598,6 +604,13 @@ renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns
 	}
 	// Sample before formatting or opening the trace, so logging is outside the duration.
 	uint64_t end_ns = os_monotonic_get_ns();
+	int64_t frame_id = r->c->frame.rendering.id >= 0 ? r->c->frame.rendering.id : r->c->frame.waited.id;
+	u_gpu_trace_event("renderer", stage, r->gpu_trace_id, frame_id, UINT32_MAX,
+	                  frame_id >= 0 ? (uint64_t)frame_id : 0, end_ns, end_ns - begin_ns);
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+	if (!debug_get_bool_option_comp_psvr2_timing_trace()) {
+		return;
+	}
 	if (r->renderer_stage_trace == NULL) {
 		r->renderer_stage_trace = u_timing_trace_open("renderer_stage", 64 * 1024);
 		if (r->renderer_stage_trace == NULL) {
@@ -605,12 +618,14 @@ renderer_stage_end(struct comp_renderer *r, const char *stage, uint64_t begin_ns
 		}
 		fputs("frame_id,stage,begin_ns,end_ns,result\n", r->renderer_stage_trace);
 	}
-	int64_t frame_id = r->c->frame.rendering.id >= 0 ? r->c->frame.rendering.id : r->c->frame.waited.id;
 	fprintf(r->renderer_stage_trace, "%lld,%s,%llu,%llu,%d\n", (long long)frame_id, stage,
 	        (unsigned long long)begin_ns, (unsigned long long)end_ns, result);
 	if (++r->renderer_stage_trace_rows % 256 == 0 && !u_timing_trace_fully_buffered()) {
 		fflush(r->renderer_stage_trace);
 	}
+#else
+	(void)result;
+#endif
 }
 #else
 static inline uint64_t
@@ -1141,6 +1156,7 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	r->settings = &c->settings;
 
 #ifdef XRT_OS_OSX
+	r->gpu_trace_id = u_gpu_trace_new_scope();
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	renderer_late_render_trace_open(r);
 	renderer_reprojection_trace_open(r);

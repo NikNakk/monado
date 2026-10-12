@@ -35,6 +35,15 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 > project's transitional proxy (2026-10-02). Its transport rows are removed;
 > the dated counts and findings remain historical audit evidence.
 
+## Native Instruments tracing (2026-10-12)
+
+`XRT_MACOS_SIGNPOST=1` independently enables Monado's Instruments Points of
+Interest observations (default `0`), including renderer stages, readiness,
+ownership, presentation and guard drains. It works without Perfetto or CSV
+capture and preserves the existing pacing-feedback condition. Set it in the
+Monado process before launch; see the
+[capture and verified metadata](macos-gpu-sync-perfetto.md#native-instruments-signposts-2026-10-12).
+
 ## Opt-in native presentation latency guard (2026-10-12)
 
 `XRT_MACOS_PRESENT_LATENCY_GUARD=1` enables the native presenter's bounded queue

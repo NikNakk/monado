@@ -85,7 +85,7 @@ main(int argc, char **argv)
 		if (!u_gpu_trace_stop())
 			return 11;
 	}
-	if (u_gpu_trace_enabled() || u_gpu_trace_stop())
+	if ((!u_gpu_trace_signpost_enabled() && u_gpu_trace_enabled()) || u_gpu_trace_stop())
 		return 7;
 	std::sort(costs.begin() + 1000, costs.end());
 	auto first = costs.begin() + 1000;

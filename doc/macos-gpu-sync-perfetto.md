@@ -16,6 +16,99 @@ ownership and presentation-observation hooks are implemented. Retain CSV
 verification during migration; do not replace the existing hardware evidence
 with unvalidated new measurements.
 
+## Native Instruments signposts (2026-10-12)
+
+Monado's macOS `u_gpu_trace` facade now sends the same observations to an
+independent `os_signpost` backend when `XRT_MACOS_SIGNPOST=1` is set before
+process startup. Its default is off. It requires neither the Perfetto SDK nor
+CSV timing capture; Perfetto and signposts can also capture simultaneously.
+`u_gpu_trace_enabled()` means either backend can emit, while Perfetto's
+start/stop calls continue to control only its own capture.
+
+The subsystem is `org.freedesktop.monado`, category `PointsOfInterest`. Stable
+signpost names are `Readiness`, `ImageOwnership`, `RendererStage`,
+`Presentation`, `LatencyGuardDrain`, `LatencyGuardDrop` and the fallback
+`GPUObservation`, `PresentQueueDepthChanged` and
+`CompositorGPUToGlassMeasurement`. Public metadata records domain/event, process-local scope and
+owner scope IDs, frame ID, image index, timeline value, `observed_ns` and
+`duration_ns`. These values are numeric identities and internal event names;
+no application image contents are logged.
+
+Existing readiness, ownership and presentation hooks use the shared facade.
+The renderer now emits its fence, submission and dispatch stage observations
+independently of the CSV compile/runtime switches. Drawable-slot acquisition,
+guard drains/dropped jobs, Metal scheduled/completed callbacks and reported
+physical presentation are included. Presented callbacks retain independent
+feedback state through teardown, and a target created before recording starts
+can register callbacks when capture becomes active. Signpost-only recording
+does not enable the existing CSV-driven present-offset calibration.
+
+Ordinary hooks are instant observation markers. Instruments timestamps their
+emission; retrospective timestamps and durations remain metadata in
+`CLOCK_MONOTONIC`. `drawable_presented_observed` carries the reported physical
+timestamp; `presented_callback` separately records callback arrival.
+
+The per-frame `CompositorGPUToGlassObserved` interval joins existing calibrated
+Vulkan compositor GPU-end feedback to the drawable's reported presentation using
+the compositor timeline value. Its **native width measures CPU observations**:
+`os_signpost` cannot backdate either endpoint. The end metadata contains
+`gpu_end_ns`, `presented_ns`, `measurement_valid` and the actual `measured_ns`
+difference. Perfetto also receives the retrospective
+`compositor_gpu_end_to_display` slice at those measured endpoints. If GPU
+feedback arrives after the presentation callback, the measured slice is still
+emitted, but no native interval is fabricated. Dropped frames, errors, eviction
+and teardown cancel open intervals with a reason and `measurement_valid=0`.
+Missing or invalid timestamps produce no completed measurement. The join uses a
+bounded 128-entry table and introduces no additional GPU wait or timestamp read.
+
+`PresentQueueDepthChanged` records the presented callback's existing rounded
+physical-minus-target depth on the first valid sample and subsequent changes.
+Metadata contains `previous_depth_known`, `previous_depth` and `depth`; stale
+callbacks cannot reverse newer observations. This remains a timing-derived depth
+estimate, not a count of outstanding drawables. Unknown previous values and
+cancelled measurements use explicit validity flags and zero payload values.
+
+For a fixture-only recording without the headset:
+
+```sh
+cmake --build build/arm64 --target tests_macos_signpost --parallel 4
+xcrun xctrace record --template 'Logging' --instrument 'Points of Interest' \
+  --time-limit 3s --output /tmp/monado-signposts-new.trace \
+  --env XRT_MACOS_SIGNPOST=1 \
+  --launch -- "$PWD/build/arm64/tests/tests_macos_signpost"
+```
+
+For the planned headset capture, enable `XRT_MACOS_SIGNPOST=1` in the actual
+Monado process environment, or pass it through the native fixture's
+`--service-env`. Add Points of Interest to Metal System Trace or Game
+Performance and filter for the Monado subsystem. A private fixture service is
+launched by launchd, so recording only the wrapper's Python process will miss
+it: attach to the service or record the relevant system processes. Keep trace
+bundles outside Git and retain physical CSVs to check reproduction/observer
+effects. A physical Instruments capture remains outstanding.
+
+Verification artifacts are outside Git under
+`/tmp/monado-signpost-interval-final-20261012*`. An actual Instruments Logging +
+Points of Interest recording captured **80 Monado markers over eight synthetic
+frames**, with every common domain/event, scope/owner/frame/image/timeline and
+timestamp field exactly matching simultaneous Perfetto observations. This
+includes eight queue-depth changes and eight GPU-to-display measurements.
+Instruments captured eight completed observation intervals and one explicitly
+cancelled interval; each completed interval's measured duration matched the
+Perfetto observation. Perfetto reported no data loss. The existing full Perfetto
+fixture regression passed, including CSV parity, clocks, restart, concurrency
+and crash retention. Five focused CTests passed (presentation joins/cancellation,
+signpost fixture, latency guard, GPU reuse and IPC swapchain wait).
+
+A temporary build at `/tmp/monado-signpost-no-perfetto-build` compiled
+`comp_main` and the signpost fixture with both `XRT_FEATURE_MACOS_PERFETTO` and
+`XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS` off. Its fixture passed with signposts
+disabled and enabled, and has no undefined Perfetto symbols. The normal
+service/runtime build also passed. The production offscreen 240-frame array
+client in `/tmp/monado-signpost-service-offscreen-20261012` passed with both
+backends enabled, and the existing service CSV/Perfetto parity checker passed.
+These are synthetic/offscreen checks, not headset Instruments evidence.
+
 ## Chromium groundwork validated
 
 Chromium commit `8fbb7c43c01` adds per-request Metal completion-wait durations,
