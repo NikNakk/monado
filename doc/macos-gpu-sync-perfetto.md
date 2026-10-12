@@ -1,9 +1,9 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # Common Chromium / Monado GPU traces
 
-Status: 2026-10-12. This is the tracing migration record for the authorised M3
-investigation, not a claim that M3's synchronization or performance gates pass.
-The subsequent producer/fence fixes and real-video fixture are recorded in
+Status: 2026-10-12. This records the tracing migration. The completed M3
+producer/fence fixes, real-video/pixel fixtures and matched measurements are
+recorded in
 [the M3 evidence ledger](macos-gpu-sync-chromium.md).
 
 The macOS CSV instrumentation is fork-local diagnostic code. Chromium's
@@ -127,7 +127,14 @@ allocated track IDs instead of the repeating frame index. It distinguishes
 `OpenXRMetalSharedEventNoWait` from a measured GPU wait. No-wait success is
 permitted only when the caller has established there is no outstanding write
 obligation; it must not mask a missing mailbox or a consumed unresolved fence.
-Those SharedImage correctness checks remain M3 work.
+Those SharedImage correctness checks pass in the completed M3 record.
+
+The committed burst follow-up `d80f86dc0` requests a separate 4 MiB shared
+buffer between SDK writers and the in-process tracing service, and removes the
+ignored flush-period setting. The recording buffer remains 16 MiB by default.
+The final M3 service/runtime are rebuilt with this fix; their joined captures
+pass loss/discard/overwrite checks. The standalone Perfetto regression passes
+with the current backend.
 
 ## Clocks and interpretation
 
