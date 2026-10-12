@@ -184,8 +184,8 @@ also carries other uncommitted transport/media changes.
 ### Pixel and performance fixture validation
 
 The follow-up fixture has two separate modes, selected with
-`M3_CHROMIUM_MODE=pixels` or `benchmark`. Pixel mode writes exact red, green,
-blue and red-again values into real XR transport images and checks Monado's
+`M3_CHROMIUM_MODE=pixels` or `benchmark`. Pixel mode writes distinct exact red/blue, green/red,
+blue/green and red/blue-again eye pairs into real XR transport images and checks Monado's
 existing Vulkan output readback after its completion fence. It validates both
 eye interiors, excluding the transparent distorted seam at the output center.
 `M3_CHROMIUM_PRODUCER=dawn` uses a real XR-compatible Dawn device, WebGPU
@@ -201,7 +201,11 @@ Fixture-development runs with the **older bundle** pass ANGLE pixel checks and
 Dawn pixel checks (four array slices repeatedly recycled). The initial Dawn
 attempt used the wrong feature switch; the next attempt incorrectly required
 opaque pixels at the inter-eye distortion seam. Both failed attempts are
-retained outside Git. The corrected switch is
+retained outside Git. The strengthened fixture draws only each eye's viewport with different
+left/right colors, because whole-atlas clears with identical colors could hide
+slice/viewport mistakes. The older bundle's Dawn stereo fixture passes all four
+pairs. These are still fixture-development results, pending the updated matrix.
+The corrected switch is
 `--enable-features=OpenXR,WebXRWebGPUBinding`, and the assertions compare the
 left/right eye interiors. These are diagnostic corrections, not runtime fixes.
 The updated-browser pixel matrix is queued after its video/failure cases.
