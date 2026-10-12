@@ -512,6 +512,11 @@ its incremental build plus focused fixtures pass. See the
 
 ### Cross-stack GPU synchronization M5 (2026-10-12)
 
+Follow-up: the [Chromium runtime sandbox narrowing](macos-chromium-runtime-sandbox.md)
+closes the tested isolated-endpoint coverage gap with actual sandboxed
+ANGLE/Dawn pixels, recovery and Meta smoke results, plus negative permission
+tests. Headset acceptance remains separate.
+
 The headless M1–M5 contract investigation is complete for its tested routes.
 Native/Wine stress checks 48,000 exact GPU transfers; extended ANGLE/Dawn stereo
 and reuse checks pass, with balanced claims and complete joined traces. All 69

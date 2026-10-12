@@ -373,6 +373,12 @@ recorded above. Raw captures and build logs remain outside Git.
 
 ## Cleanup after M3 (2026-10-12)
 
+Sandbox follow-up: [the narrowed runtime policy](macos-chromium-runtime-sandbox.md)
+now passes real sandbox-enabled ANGLE/Dawn pixel and reuse tests, GPU/decoder
+recovery with native-client progress, and a Meta simulator smoke test. The
+earlier isolated-endpoint sandbox limitation above is historical for those
+captures; physical presentation and sparse layers remain separate gates.
+
 M5 follow-up: the original fixture started Chromium tracing on the page debugger
 endpoint, excluding XR utility events. Short M3 traces do not expose the child's
 30 s unbound-startup-writer timeout, but extended captures do. The native GPU,
