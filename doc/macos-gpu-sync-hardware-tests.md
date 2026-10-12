@@ -79,6 +79,32 @@ wait. The queue-idle wait stays disabled. Codex identified the ordering.
 The earlier investigation notes follow; the items they leave open are answered
 by this fix.
 
+The subsequent user-run `/tmp/monado-three-image-headset-new-new` comparison on
+clean `06e01fc2a7c1c7e7c8bbb58f8e22826ffcadd015` completed all six steps without
+startup retries, GPU hangs or device loss. Both proof runs matched 7/7 eligible
+pixel samples with no blanks. Three and four client images sustained roughly
+120 Hz submission, but three repeated more client latches. Enqueue→display
+medians were about 27.6 ms in both modes, above the earlier comparison in the
+table. See the [full post-fix comparison](macos-three-image-comparison.md#post-fix-physical-headset-comparison-2026-10-12)
+for physical gap counts, measurement definitions and remaining limits.
+
+An explicitly user-authorized Codex slot-off/slot-on hardware follow-up used
+the exact same binaries in `/tmp/monado-slot-{off,on}-20261012-codex`. All twelve
+steps passed without hangs or retries; all four proof checks matched 7/7 pixels.
+Slot off gave 27.7–36.1 ms median enqueue→display latency; slot on gave
+19.4–27.8 ms. Disabling prefetch did not restore low latency, and the same build
+can enter several presentation states. Retain the fence fix and slot default;
+the backlog/pacing trigger remains unresolved. See the
+[matched diagnostic](macos-three-image-comparison.md#matched-drawable-slot-diagnostic-2026-10-12).
+
+The subsequent independently implemented latency-guard trial in
+`/tmp/monado-guard-{off,on}-20261012-codex` completed twelve further steps with
+no hangs or retries and 7/7 samples in every proof check. All six actual
+timing-run drains immediately lowered latency by about one refresh, but some
+rebounded and extra physical gaps occurred. Whole-run four-image medians stayed
+about 27.6 ms. The new `XRT_MACOS_PRESENT_LATENCY_GUARD` therefore remains off
+by default; see the [trial and recovery windows](macos-three-image-comparison.md#opt-in-latency-guard-trial-2026-10-12).
+
 Four user-run attempts at test 1 on `c2703cc0f` (binaries from 14:43) did not
 reach the timing runs.
 

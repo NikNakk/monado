@@ -35,6 +35,24 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 > project's transitional proxy (2026-10-02). Its transport rows are removed;
 > the dated counts and findings remain historical audit evidence.
 
+## Opt-in native presentation latency guard (2026-10-12)
+
+`XRT_MACOS_PRESENT_LATENCY_GUARD=1` enables the native presenter's bounded queue
+drain; its default is `0`. After actual presentation remains at least two
+refreshes after the selected output slot for one second, the presenter withholds
+output for a full refresh, at most once per ten seconds. It still renders and
+retires skipped output images behind their captured Vulkan completion values.
+One drain can skip one or two arriving jobs because of frame-phase jitter.
+The existing render-resource fence and drawable-slot default remain active.
+
+Feedback is independent of timing traces. Enabling the guard without traces
+does not also enable the existing trace-driven present-offset calibration.
+Old, invalid, stale and out-of-order feedback cannot trigger a drain. The
+service logs each drain and the worker CSV records `latency_guard_drop` jobs.
+The native headset trial shows immediate one-refresh recovery, but latency can
+rebound and drain gaps cost cadence. Keep it opt-in; see the
+[matched trial](macos-three-image-comparison.md#opt-in-latency-guard-trial-2026-10-12).
+
 ## Isolated Metal XPC endpoints (2026-10-02)
 
 `XRT_MACOS_METAL_IPC_SERVICE_NAME` selects the Mach-service name used by

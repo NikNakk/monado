@@ -48,6 +48,12 @@ port to Apple Silicon macOS, with PS VR2 as the primary headset.
 
 **Status date:** 2026-10-12
 
+**Native GPU startup hang resolved:** the renderer now waits for the previous
+frame before reusing command/descriptor pools and uniforms. The subsequent
+native three/four-image hardware checks pass. An opt-in presentation latency
+guard demonstrates one-refresh recovery, but latency can rebound, so it remains
+off by default. See the [hardware evidence](macos-gpu-sync-hardware-tests.md).
+
 **Current integration branch:** `macos-upstream-clean`
 
 **PS Sense 6DoF integration, updated 2026-10-08:** the joint multi-camera
