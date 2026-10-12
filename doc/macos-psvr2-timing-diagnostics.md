@@ -3396,3 +3396,64 @@ template, to test the occlusion explanation. If confirmed, lid closed with
 those flags (or the Chromium fork setting them for immersive sessions) avoids
 both the bursts and the slowdown. Until then, the best configuration is lid
 open with the magic window off, accepting the ~8 s bursts.
+
+### Run 4: absolute-time presents (`XRT_MACOS_PRESENT_MIN_DURATION_US=0`)
+
+Question: does `presentDrawable:afterMinimumDuration:` amplify the WindowServer
+misses? Each frame is held until 8 ms after the previous one became visible, so
+a late frame could delay the next. The user added a fourth run to the same
+bundle (`xctrace` run 3; started 00:17:36 BST, 60.9 s). The LaunchAgent plist
+set `XRT_MACOS_PRESENT_MIN_DURATION_US=0`, lid open, Cube Sea's magic window
+on. All 6,996 of Monado's Core Animation present requests carry an absolute
+target time and zero minimum duration, so the flag took effect.
+
+**Where the delay is, from run 1.** Joining Core Animation's client tables to
+display swaps (33–60 s): Monado's present request and its `CAImageQueue` insert
+happen at the same lead before the desired time, for late and on-time frames
+alike (median 13.7 ms). The difference is in WindowServer: generation follows
+the insert by a median 8.1 ms for on-time frames, but 13.7 ms for late ones.
+Monado's process hands every frame over on time. Changing how it presents
+cannot remove the miss.
+
+**Comparison.** Monado's os_signpost data covers only about 30–60 s of each
+run, as Instruments kept the later part of each recording. Signpost-derived
+rates must use that window; display tables cover the whole run.
+
+| 30–60 s | Run 1: min-duration, magic window on | Run 3: min-duration, magic window off | Run 4: absolute time, magic window on |
+| --- | ---: | ---: | ---: |
+| Presents submitted per second | 114.6 | 115.0 | 115.2 |
+| Superseded presents per second | 5.26 | 4.88 | 4.66 |
+| Frames reaching the glass >24 ms after enqueue, per second | 10.3 | 9.7 | 9.0 |
+| Enqueue-to-glass p50 / p95 | 19.20 / 27.51 ms | 19.25 / 27.48 ms | 19.25 / 27.46 ms |
+| Presented but never shown | 0 | 0 | 0 |
+| Cube Sea fps, median | 58 | 119 | 120 |
+
+The phase dependence is unchanged in run 4: missing or late 46.4% at 0–0.5 ms
+and 37.7% at 0.5–1 ms after a built-in refresh, and 0–0.7% at 2.5–6 ms. The
+bursts still recur every ~8 s. Late swaps are almost always isolated, in every
+run: runs of two consecutive late swaps occur at most twice per run. So a
+minimum-duration cascade is not a meaningful amplifier.
+
+**Conclusion.** `afterMinimumDuration` is not measurably harming presentation.
+Absolute-time presents are at most ~10% better on superseded or late frames,
+within run-to-run variation, with identical latency and no skipped frames.
+Keep the 8000 µs default; the hosted-probe record also found worse cadence
+with absolute time. The user saw occasional visual stutters in run 4; these
+match the remaining WindowServer bursts, not an absolute-time side effect.
+Cube Sea holding 120 fps with the magic window on in run 4 is not explained by
+the present mode, since every Monado-side measure matches. Treat it as session
+variation (Chromium window state or Mac-screen activity) until repeated with
+the default present mode.
+
+**Remaining lid-open options.** All of these act on WindowServer's built-in
+display work, not on Monado's presentation:
+
+- Keep the Mac screen quiet during VR. Misses scale with built-in display
+  activity: Instruments' live window made them worse. Fixture runs without
+  Instruments still show 8 s-spaced gap clusters, but only 1–19 gaps per
+  20 s run.
+- Turn the built-in display off without closing the lid. Tools such as
+  BetterDisplay or Lunar do this through private CGS APIs. Apps then move to
+  the headset, so this first needs the Chromium occlusion fix above.
+- Speculative: predict the coincidence windows from both displays' refresh
+  timestamps, and keep the presentation queue shallow during them.
