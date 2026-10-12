@@ -288,6 +288,56 @@ If it is bad, the options are:
   service layer keeps direct scanout. If it does, the service layer can stay
   underneath permanently as an instant fallback.
 
+### 9. Output copy into the drawable (known cost, 2026-10-13)
+
+Client swapchain images are zero-copy into the compositor: native Metal
+swapchains are imported straight into Vulkan, and the compositor samples them
+in place. The compositor's **output** is not. `comp_main` writes each frame
+into one of three IOSurface-backed target images owned by the presenter
+(`metal_images` / `io_surfaces` in `comp_window_macos.m`). The presenter core
+then waits for `render_complete` on its Metal queue, and blits the whole target
+into the `CAMetalDrawable` before `presentDrawable`
+([comp_window_macos.m](../src/xrt/compositor/main/comp_window_macos.m),
+`copyFromTexture:cwm->metal_images[index]`). The service's window target and
+the hosted target share this step.
+
+**Measured cost.** In the 2026-10-12 Chromium Instruments trace, the
+4000×2040 blit takes 0.88–1.35 ms GPU per frame (p50; p95 1.6–2.0 ms):
+11–16% of the 8.34 ms frame budget at 120 Hz. It also moves about 4 GB/s
+through memory. For comparison, compositor compute (`vkCmdDispatch`) takes
+2.3–3.3 ms per frame (p50), depending on the client's layers. See
+[the display-phase record](macos-psvr2-timing-diagnostics.md#built-in-display-refresh-phase-and-chromium-frame-rate-drops--2026-10-12)
+for the trace.
+
+**Why it exists.** No decision record was found; these reasons are inferred
+from the design:
+
+- Rendering straight into a drawable requires holding that drawable before
+  rendering. The evidence ledger rules in compositor-thread `nextDrawable`
+  waits as a cadence-loss mechanism. The off-thread present worker and drawable
+  slot exist to keep drawable acquisition away from the compositor.
+- A rendered target is not tied to a drawable. The newest-frame worker can
+  therefore supersede a pending frame without spending a drawable.
+- With passthrough active, the presenter composites the camera image and the
+  layers into the drawable in Metal, so that path needs a Metal step anyway.
+
+**Possible removal.** The drawable slot now prefetches the next drawable about
+a frame ahead. Core Animation cycles a small fixed set of drawable surfaces:
+three IOSurfaces in the trace. The compositor could import those once into
+Vulkan, and render into the prefetched drawable's surface. Costs:
+
+- the compositor must wait, or skip, when no drawable is ready. During the
+  periodic WindowServer bursts, that is back-pressure on the renderer instead of
+  a superseded present;
+- newest-frame substitution changes form;
+- passthrough still needs its Metal composition.
+
+**Status.** Not pursued. It would return about 1–1.3 ms GPU per frame, but
+probably little latency, since frames wait for the refresh after GPU
+completion. Monado and Chromium together used about 75–80% of the GPU, and no
+issue found so far is GPU-bound. Revisit if heavier clients run out of GPU
+headroom.
+
 ## Clean-up once this works
 
 - Done 2026-09-30: the XPC importance lease (`XRT_MACOS_XPC_IMPORTANCE`), the
@@ -344,6 +394,9 @@ Then passthrough frame sharing, Wine and Chromium.
 - **GPU contention.** The client compositor's Vulkan work now shares the game's
   GPU queue priority, rather than the service's. That is probably better under
   Game Mode, but needs measuring with a heavy game.
+- **Output copy.** Every presented frame is blitted from the compositor's
+  target into the drawable: about 0.9–1.35 ms GPU at 4000×2040. See
+  [component 9](#9-output-copy-into-the-drawable-known-cost-2026-10-13).
 - **Per-process cost.** Every OpenXR client carries a compositor: memory,
   shader compile at session start, and MoltenVK start-up.
 - **Composition-mode hitches at handoff.** The hybrid method showed one
