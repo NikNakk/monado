@@ -60,6 +60,20 @@ def check_transport(directory, summary):
     return dict(expected=expected, observed_creations=log.count(marker))
 
 
+def check_trace_scope(processor, trace, summary):
+    rows = query(processor, trace, """
+      SELECT name,count(*) n FROM slice WHERE name IN
+      ('OpenXrRenderLoop::GetFrameData','CompositeAndSubmit') GROUP BY name
+    """)
+    counts = {row['name']: int(row['n']) for row in rows}
+    if summary.get('traceScope') == 'browser':
+        assert all(counts.get(name, 0) > 0 for name in
+                   ['OpenXrRenderLoop::GetFrameData', 'CompositeAndSubmit']), \
+            'Browser capture omitted the XR utility process'
+    return dict(scope=summary.get('traceScope', 'legacy page scope'),
+                xr_utility_events=counts)
+
+
 def check_auxiliary(directory, processor, summary):
     from collections import Counter
     from math import ceil
@@ -96,7 +110,8 @@ def check_auxiliary(directory, processor, summary):
                   force_copy=summary['forceCopy'], image_acquisitions={f'{s}:{i}': n for (s,i),n in reuse.items()},
                   trace_errors=faults, graceful_service_capture=True,
                   transport=check_transport(directory, summary),
-                  ownership=check_ownership(processor, service_trace))
+                  ownership=check_ownership(processor, service_trace),
+                  trace_scope=check_trace_scope(processor, archive, summary))
     if summary['mode'] == 'pixels':
         expected = [([255,0,0,255],[0,0,255,255]), ([0,255,0,255],[255,0,0,255]),
                     ([0,0,255,255],[0,255,0,255]), ([255,0,0,255],[0,0,255,255])]
@@ -249,7 +264,8 @@ def check(directory, processor):
                   ownership=check_ownership(processor, service_trace),
                   native_frames=1200, fresh_latches=len(fresh), fault_fresh_latches=counts,
                   ownership_events=storage, trace_errors=faults,
-                  clock_calibration=correlations, clock_rate_ppm=((m1-m0)/(n1-n0)-1)*1e6)
+                  clock_calibration=correlations, clock_rate_ppm=((m1-m0)/(n1-n0)-1)*1e6,
+                  trace_scope=check_trace_scope(processor, archive, summary))
     (directory/'validation.json').write_text(json.dumps(result, indent=2)+'\n')
     return result
 
