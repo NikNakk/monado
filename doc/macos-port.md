@@ -958,6 +958,12 @@ three-image starvation. Both modes repeat some offscreen frames; physical
 presentation and SteamVR remain user-run gates. See the
 [comparison and headset runner](macos-three-image-comparison.md).
 
+The subsequent [real SteamVR-backend resolve test](macos-steamvr-resolve-copy-test.md)
+exports runtime-owned images to a separate Windows writer and verifies composed
+stereo pixels: four-image fallback makes 36 per-eye copies over 18 frames;
+three-image mode makes zero. Actual SteamVR and physical acceptance remain the
+[user-run hardware gates](macos-gpu-sync-hardware-tests.md).
+
 
 **2026-10-10 SteamVR synchronization follow-up:** moving copy destination
 waits before source ownership is user-reported as definitely better, with

@@ -432,6 +432,11 @@ three-image starvation or material timing penalty in this small native workload.
 Headset and SteamVR validation remain pending; see the
 [results and user-operated headset runner](macos-three-image-comparison.md).
 
+The [SteamVR backend GPU test](macos-steamvr-resolve-copy-test.md) also confirms
+cross-process runtime-image export and two fewer backend copies per stereo
+frame, with correct composed pixels. Actual SteamVR/headset deployment remains
+pending; [hardware instructions](macos-gpu-sync-hardware-tests.md).
+
 
 SteamVR copy-source ownership is shorter and user-reported as improved;
 black frames remain. Wine ownership-history diagnostics are installed for the
