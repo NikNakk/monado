@@ -123,8 +123,12 @@ XRT_MACOS_CLIENT_COMPOSITOR=1 XRT_MACOS_SIGNPOST=1 \
 Keep the app's usual arguments and other environment settings. Set the flag
 before launch: its value is cached on first use. Start Instruments with Metal
 System Trace, add os_signpost, Points of Interest and Display, select the actual
-app process, then record a 30–60 second representative session. Recording all
-processes also captures the service. Save the `.trace` bundle outside Git.
+app process, then record a 30–60 second representative session. Select **All Processes** for the os_signpost recording scope when testing
+Chromium: its main browser process, GPU helper and Monado service are separate
+processes. System-wide Metal tracks can show Monado command buffers even when
+os_signpost was limited to the main browser; filtering during analysis cannot
+recover signposts excluded at capture. Recording all processes also captures
+the service. Save the `.trace` bundle outside Git.
 
 For **service compositing**, the service needs the flag and rebuilt binary too.
 Close XR apps first. This temporary plist preserves the installed configuration
@@ -426,3 +430,38 @@ exercises all nine CPU interval names over eight frames. Instruments exported
 intervals; category routing matched the intended split. Five focused CTests and
 the build without Perfetto/CSV diagnostics passed. Its recording is under
 `/tmp/monado-signpost-review-20261012*`; headset validation remains pending.
+
+### First Chromium Instruments capture (2026-10-12)
+
+The user recorded `/tmp/signposted-chromium.trace`, 180.804 seconds from
+23:10:01 to 23:13:02 BST, using Metal System Trace and os_signpost. System GPU
+and presentation tracks include four active Monado services using the rebuilt
+checkout's service path. However, os_signpost's exported tables are scoped to
+main Chromium PID 28078 and contain no `org.freedesktop.monado` records. The
+user confirmed the visible Monado entries are Metal command buffers. This is
+useful system evidence, but does not validate the new hooks on hardware or
+resolve the extra-refresh latency question. The exact tested runtime commit
+and WebXR-app-to-session mapping were not embedded/verified.
+
+| Service PID | Callback window, capture seconds | Callbacks | Median callback gap | Gaps >12.5 ms |
+| --- | --- | --- | --- | --- |
+| 28333 | 23.450–54.514 | 3523 | 8.348 ms | 202 / 3522 (5.7%) |
+| 28371 | 81.975–100.985 | 2138 | 8.348 ms | 142 / 2137 (6.6%) |
+| 28383 | 115.550–140.016 | 2841 | 8.348 ms | 93 / 2840 (3.3%) |
+| 28387 | 159.552–179.138 | 2237 | 8.351 ms | 112 / 2236 (5.0%) |
+
+These are **callback-arrival gaps**, not measured on-glass cadence or dropped
+frame counts. They cluster around one/two refresh periods, but callback delivery
+can be delayed. Exported system presentation `Requested Time` fields have an
+unvalidated timebase and are not used as physical endpoints here.
+
+GPU `vkCmdDispatch` execution spans, grouped by process and command-buffer ID
+from earliest dispatch start to latest dispatch end, have medians
+3.106/3.204/2.271/2.472 ms respectively (p95 4.330/4.555/4.171/5.251 ms).
+These spans include gaps between dispatch segments, exclude other frame work,
+and cannot be joined to a measured GPU-to-glass interval in this recording.
+Session restarts and differing workloads preclude attributing the differences
+to a presentation change. Exports and compact summaries remain under
+`/tmp/signposted-chromium-*`, outside Git. Repeat with **All Processes** for
+os_signpost, or attach to the service, and confirm `NextDrawableSlot` and
+`PresentLatencyStateChanged` appear before recording a longer session.
