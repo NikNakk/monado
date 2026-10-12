@@ -21,6 +21,8 @@ struct vk_bundle;
 struct comp_gpu_client_budget;
 struct comp_gpu_client_budget *
 comp_gpu_client_budget_create(void);
+uint64_t
+comp_gpu_client_budget_trace_id(struct comp_gpu_client_budget *budget);
 void
 comp_gpu_client_budget_destroy(struct comp_gpu_client_budget **budget);
 xrt_result_t
