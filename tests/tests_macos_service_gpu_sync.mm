@@ -95,6 +95,8 @@ main(int argc, char **argv)
 			    "{\"event\":\"config\",\"thermal\":%ld,\"low_power\":%s,\"clock\":\"CLOCK_MONOTONIC\"}\n",
 			    (long)[NSProcessInfo processInfo].thermalState,
 			    [NSProcessInfo processInfo].lowPowerModeEnabled ? "true" : "false");
+			if (argc > 1 && std::string(argv[1]) == "telemetry")
+				return 0;
 			const char *path = getenv("MONADO_OPENXR_RUNTIME_PATH");
 			if (!path)
 				throw std::runtime_error("MONADO_OPENXR_RUNTIME_PATH required");

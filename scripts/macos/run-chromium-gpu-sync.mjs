@@ -12,6 +12,10 @@ const {values} = parseArgs({options: {
   chrome: {type: 'string'}, output: {type: 'string'}, healthy: {type: 'string'},
   'force-copy': {type: 'boolean', default: false},
 }});
+const producer = process.env.M3_CHROMIUM_PRODUCER || 'angle';
+if (!['angle', 'dawn'].includes(producer)) throw Error('Invalid producer');
+const mode = process.env.M3_CHROMIUM_MODE || 'faults';
+if (!['faults', 'pixels', 'benchmark'].includes(mode)) throw Error('Invalid M3_CHROMIUM_MODE');
 values.chrome ||= process.env.M3_CHROMIUM_PATH;
 values.output ||= process.env.M3_CHROMIUM_OUTPUT;
 values.healthy ||= process.env.M3_HEALTHY_NATIVE_PATH;
@@ -57,7 +61,7 @@ const profile = join(output, 'profile');
 mkdirSync(profile, {recursive: true});
 const log = createWriteStream(join(output, 'chromium.log'));
 const args = ['--user-data-dir='+profile, '--remote-debugging-port=0',
-  '--no-first-run', '--no-default-browser-check', '--enable-features=OpenXR',
+  '--no-first-run', '--no-default-browser-check', '--enable-features=OpenXR'+(producer === 'dawn' ? ',WebXRWebGPUBinding' : ''),
   '--use-gl=angle', '--use-angle=metal', '--autoplay-policy=no-user-gesture-required',
   '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
   '--disable-backgrounding-occluded-windows', '--enable-logging=stderr',
@@ -65,10 +69,11 @@ const args = ['--user-data-dir='+profile, '--remote-debugging-port=0',
   // Isolated service socket/Mach names are outside the production sandbox's
   // fixed allowlist. This is an integration fixture, not a sandbox validation.
   '--no-sandbox', '--app='+url];
+if (mode === 'benchmark') args.splice(args.findIndex(arg => arg.startsWith('--vmodule=')), 1);
 if (values['force-copy']) args.push('--openxr-metal-force-copy');
 let healthy, healthyText = '', healthyExit;
 const healthyFrames = () => healthyText.split('\n').filter(line => line.startsWith('{"event":"frame"')).length;
-if (values.healthy) {
+if (values.healthy && mode === 'faults') {
   const healthyLog = createWriteStream(join(output, 'healthy.txt'));
   healthy = spawn(values.healthy, ['overlay', '1200', '90'], {stdio: ['ignore', 'pipe', 'pipe']});
   healthy.stdout.pipe(healthyLog); healthy.stderr.pipe(healthyLog);
@@ -86,7 +91,7 @@ const browser = spawn(values.chrome, args, {env: {...process.env, XR_RUNTIME_JSO
 browser.stdout.pipe(log); browser.stderr.pipe(log);
 let cdp, tracing = false;
 const result = {status: 'FAIL', started: new Date().toISOString(),
-  target: 'simulated HMD/debug_image', forceCopy: values['force-copy'], args,
+  target: 'simulated HMD/debug_image', mode, producer, forceCopy: values['force-copy'], args,
   phases: [], gpuCrash: false, sandbox: 'disabled for isolated service names'};
 class CDP {
   constructor(socket) {
@@ -133,12 +138,13 @@ async function until(predicate, label, timeout = 15000) {
   throw Error(label+' timeout');
 }
 async function state() {
-  const current = await cdp.evaluate('JSON.parse(JSON.stringify({...testState, videoTime: document.querySelector("video").currentTime, videoPaused: document.querySelector("video").paused}))');
+  const current = await cdp.evaluate('JSON.parse(JSON.stringify({...testState, videoTime: document.querySelector("video").currentTime, videoPaused: document.querySelector("video").paused, perfNow: performance.now()}))');
   delete current.samples; current.healthyFrames = healthyFrames(); return current;
 }
 async function observe(phase, duration = 700) {
   const before = await state();
   await cdp.evaluate(`note(${JSON.stringify(phase)})`); await sleep(duration);
+  await cdp.evaluate(`note(${JSON.stringify(phase+'_end')})`);
   const after = await state();
   result.phases.push({phase, before, after});
   if (after.errors.length) throw Error(JSON.stringify(after.errors));
@@ -161,6 +167,7 @@ try {
   await until(() => cdp.evaluate('typeof prepare === "function"'), 'fixture load');
   await cdp.call('Tracing.start', {traceConfig: {includedCategories: ['xr', 'gpu', 'blink.user_timing']},
     transferMode: 'ReturnAsStream', streamFormat: 'proto'}); tracing = true;
+  await cdp.evaluate(`window.useWebGPU = ${producer === 'dawn'}`);
   result.stage = 'prepare';
   await cdp.evaluate('prepare()');
   result.stage = 'play_before_XR';
@@ -168,6 +175,34 @@ try {
   result.beforeXR = await state();
   result.stage = 'startXR';
   await cdp.evaluate('startXR()');
+  if (mode === 'pixels') {
+    // The fragment shader writes exact primary colors into the real XR image.
+    // The service reads its Vulkan output only after its GPU fence completes.
+    result.pixelProof = [];
+    for (const [name, color, bytes] of [
+      ['red', [1,0,0,1], [255,0,0]], ['green', [0,1,0,1], [0,255,0]],
+      ['blue', [0,0,1,1], [0,0,255]], ['red_reuse', [1,0,0,1], [255,0,0]]]) {
+      await cdp.evaluate(`window.proofColor = ${JSON.stringify(color)}`);
+      await sleep(500); // Exclude submissions already in flight at the transition.
+      const before = readFileSync(join(output, 'service.log'), 'utf8').length;
+      await observe('pixels_'+name, 3000);
+      const logs = readFileSync(join(output, 'service.log'), 'utf8').slice(before);
+      // Left/right samples lie inside each eye. The output center lies on
+      // the distorted eye seam and can blend transparent border texels.
+      const samples = [...logs.matchAll(/vk-target frame=(\d+).*rgbaL=\((\d+),(\d+),(\d+),(\d+)\).*rgbaC=\((\d+),(\d+),(\d+),(\d+)\).*rgbaR=\((\d+),(\d+),(\d+),(\d+)\)/g)]
+        .map(match => ({frame: Number(match[1]), left: match.slice(2,6).map(Number),
+          center: match.slice(6,10).map(Number), right: match.slice(10,14).map(Number)}));
+      if (!samples.length || samples.some(sample => [sample.left, sample.right].some(rgba =>
+          rgba[3] !== 255 || bytes.some((byte, i) => Math.abs(rgba[i]-byte) > 1))))
+        throw Error('Vulkan pixel mismatch '+name+': '+JSON.stringify(samples));
+      result.pixelProof.push({name, expected: [...bytes,255], samples});
+    }
+  } else if (mode === 'benchmark') {
+    await cdp.evaluate('appendMore()');
+    await cdp.evaluate('document.querySelector("video").loop = true');
+    await observe('warmup', 3000);
+    await observe('normal_path', 20000);
+  } else {
   await observe('playing');
   await cdp.evaluate('document.querySelector("video").pause()');
   const paused = await observe('paused');
@@ -211,6 +246,7 @@ try {
   result.stage = 'startXR';
   await cdp.evaluate('startXR()');
   await observe('gpu_recovery_replacement');
+  }
   await cdp.evaluate('stopXR()');
   await cdp.evaluate("note('complete')");
   result.stage = 'complete';
