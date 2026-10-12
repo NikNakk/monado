@@ -22,6 +22,7 @@ def main():
     parser.add_argument('--client-timeout', type=float, default=30, help='Finite client timeout in seconds (1–300)')
     parser.add_argument('--benchmark', action='store_true', help='Disable readback and per-image diagnostic logging')
     parser.add_argument('--perfetto', action='store_true', help='Capture native Perfetto beside CSV (requires XRT_FEATURE_MACOS_PERFETTO)')
+    parser.add_argument('--scale-percentage', type=int, help='Override recommended render scale for offscreen client tests (1–200)')
     parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
     parser.add_argument('--unique-output', action='store_true')
     parser.add_argument('--fault', choices=['missing', 'disconnect'], default='missing')
@@ -30,6 +31,8 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.client_timeout <= 300:
         parser.error('--client-timeout must be between 1 and 300 seconds')
+    if args.scale_percentage is not None and (args.headset or not 1 <= args.scale_percentage <= 200):
+        parser.error('--scale-percentage requires an offscreen run and a value between 1 and 200')
     if (args.suite or args.budget_suite) and (args.client or args.benchmark):
         parser.error('--suite cannot be combined with --client or --benchmark')
     build = args.build.resolve()
@@ -55,6 +58,8 @@ def main():
                    MONADO_OPENXR_RUNTIME_PATH=str(build/'src/xrt/targets/openxr/libopenxr_monado.dylib'))
         if args.perfetto:
             env['XRT_MACOS_PERFETTO_TRACE_DIR'] = str(out)
+        if args.scale_percentage is not None:
+            env['XRT_COMPOSITOR_SCALE_PERCENTAGE'] = str(args.scale_percentage)
         if args.benchmark:
             env.update(XRT_LOG='warn', XRT_COMPOSITOR_LOG_APPLE_SAMPLES='0',
                        XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE='0')
@@ -69,8 +74,11 @@ def main():
         telemetry = {'start_epoch': time.time(), 'workload': ('64x64 Metal quad; physical PS VR2 display' if args.headset else '64x64 Metal quad; simulated HMD; debug_image target'),
                      'benchmark': args.benchmark, 'powermetrics': 'not collected; power/frequency unavailable',
                      'game_mode': 'not requested'}
+        if args.client:
+            telemetry['workload'] = 'Custom client; '+('physical PS VR2 display' if args.headset else 'simulated HMD; debug_image target')
         telemetry['headset'] = args.headset
         telemetry['perfetto'] = args.perfetto
+        telemetry['render_scale_percentage'] = env.get('XRT_COMPOSITOR_SCALE_PERCENTAGE', '140')
         telemetry['gpu_policy'] = {key: env.get(key, default) for key, default in {
             'XRT_MACOS_FRAME_READINESS_MARGIN_US': '6000', 'XRT_MACOS_CLIENT_GPU_HUNG_MS': '5000',
             'XRT_MACOS_GPU_GLOBAL_MB': 'auto', 'XRT_MACOS_GPU_CLIENT_MB': 'auto',

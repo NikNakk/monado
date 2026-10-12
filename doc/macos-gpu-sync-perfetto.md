@@ -3,6 +3,8 @@
 
 Status: 2026-10-12. This is the tracing migration record for the authorised M3
 investigation, not a claim that M3's synchronization or performance gates pass.
+The subsequent producer/fence fixes and real-video fixture are recorded in
+[the M3 evidence ledger](macos-gpu-sync-chromium.md).
 
 The macOS CSV instrumentation is fork-local diagnostic code. Chromium's
 `TRACE_EVENT` instrumentation already feeds Perfetto. Monado's `u_trace_marker`

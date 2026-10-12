@@ -85,6 +85,7 @@ main(int argc, char **argv)
 			const bool budget = argc > 1 && std::string(argv[1]) == "budget";
 			const bool exhausted = argc > 1 && std::string(argv[1]) == "exhausted";
 			const bool missing = argc > 1 && std::string(argv[1]) == "missing";
+			const bool healthy_overlay = argc > 1 && std::string(argv[1]) == "overlay";
 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
 			const uint64_t timeout_seconds = argc > 3 ? std::stoull(argv[3]) : 20;
 			if (timeout_seconds < 1 || timeout_seconds > 300)
@@ -168,7 +169,7 @@ main(int argc, char **argv)
 			XrSessionCreateInfoOverlayEXTX overlay{};
 			overlay.type = XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX;
 			overlay.sessionLayersPlacement = 1;
-			if (missing || budget || exhausted)
+			if (missing || budget || exhausted || healthy_overlay)
 				binding.next = &overlay;
 			XrSessionCreateInfo sessionInfo{};
 			sessionInfo.type = XR_TYPE_SESSION_CREATE_INFO;
