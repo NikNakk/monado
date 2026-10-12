@@ -65,6 +65,7 @@ DEBUG_GET_ONCE_LOG_OPTION(comp_frame_lag_level, "XRT_COMP_FRAME_LAG_LOG_AS_LEVEL
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(force_atw_off_on_apple, "XRT_COMPOSITOR_FORCE_ATW_OFF_ON_APPLE", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
+DEBUG_GET_ONCE_NUM_OPTION(log_apple_samples_interval, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES_INTERVAL", 120)
 #endif
 #ifdef XRT_OS_OSX
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
@@ -1155,6 +1156,19 @@ renderer_init(struct comp_renderer *r, struct comp_compositor *c, VkExtent2D scr
 	}
 }
 
+#ifdef XRT_OS_OSX
+//! Logs the first five samples, then one per interval (120 by default).
+static bool
+apple_sample_due(uint64_t count)
+{
+	int64_t interval = debug_get_num_option_log_apple_samples_interval();
+	if (interval <= 0) {
+		interval = 120;
+	}
+	return count <= 5 || count % (uint64_t)interval == 0;
+}
+#endif
+
 static void
 renderer_wait_for_last_fence(struct comp_renderer *r)
 {
@@ -1197,7 +1211,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 			r->c->nr.apple_source_debug.log_count++;
 		}
 		if (debug_get_bool_option_log_apple_samples() &&
-		    (r->c->nr.apple_source_debug.log_count <= 5 || r->c->nr.apple_source_debug.log_count % 120 == 0)) {
+		    apple_sample_due(r->c->nr.apple_source_debug.log_count)) {
 			for (uint32_t i = 0; i < r->c->nr.view_count; ++i) {
 				if ((r->c->nr.apple_source_debug.active_view_mask & (1u << i)) == 0) {
 					continue;
@@ -1226,7 +1240,7 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 			r->c->nr.apple_target_debug.log_count++;
 		}
 		if (debug_get_bool_option_log_apple_samples() &&
-		    (r->c->nr.apple_target_debug.log_count <= 5 || r->c->nr.apple_target_debug.log_count % 120 == 0)) {
+		    apple_sample_due(r->c->nr.apple_target_debug.log_count)) {
 			const uint8_t *sample = r->c->nr.apple_target_debug.buffer.mapped;
 			const bool bgra = render_debug_sample_is_bgra(r->c->nr.apple_target_debug.format);
 			const uint32_t red = bgra ? 2 : 0;

@@ -6,11 +6,47 @@ import argparse
 import csv
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
 
 from importlib.machinery import SourceFileLoader
+
+
+PROOF_SAMPLE_INTERVAL = 30
+WARMUP_FRAMES = 30
+EXPECTED = '(137,188,224,255)'
+SAMPLE = re.compile(r'^vk-target frame=(\d+) layer=0 rgbaL=(\([^)]*\)) rgbaC=\([^)]*\) rgbaR=(\([^)]*\))')
+
+
+def pixel_check(path, log):
+    """Check composed pixels on every sampled frame that carried a client layer.
+
+    Startup frames are excluded: the first composed frames can be blank even
+    when they latch a client frame. A single blank later frame is recorded,
+    not fatal; more than one fails the run.
+    """
+    mapping = {int(row['system_frame_id']): row
+               for row in csv.DictReader(next(path.glob('*client_frame_map.csv')).open())}
+    first = min(mapping, default=None)
+    samples = []
+    for line in log.splitlines():
+        match = SAMPLE.match(line)
+        if match and first is not None and int(match[1]) >= first+WARMUP_FRAMES and int(match[1]) in mapping:
+            frame, left, right = int(match[1]), match[2], match[3]
+            row = mapping[frame]
+            samples.append({'frame': frame, 'client_frame_id': int(row['client_frame_id']),
+                            'reused': row['reused'] == '1', 'left': left, 'right': right,
+                            'matched': left == EXPECTED and right == EXPECTED})
+    blanks = [sample for sample in samples if not sample['matched']]
+    result = {'status': 'PASS' if len(samples) >= 4 and len(blanks) <= 1 else 'FAIL',
+              'eligible': len(samples), 'matched': len(samples)-len(blanks),
+              'blank_frames': [sample['frame'] for sample in blanks],
+              'first_client_frame': first, 'warmup_frames': WARMUP_FRAMES,
+              'sample_interval': PROOF_SAMPLE_INTERVAL, 'expected': EXPECTED, 'samples': samples}
+    (path/'pixel-check.json').write_text(json.dumps(result, indent=2)+'\n')
+    return result
 
 
 def main():
@@ -47,6 +83,8 @@ def main():
             command += ['--benchmark']
         if args.headset:
             command += ['--headset']
+        if not benchmark:
+            command += ['--sample-interval', str(PROOF_SAMPLE_INTERVAL)]
         command += ['--client', str(args.build/'tests/tests_macos_service_gpu_sync'),
                     'array-three' if count == 3 else 'array-four',
                     str(args.frames if benchmark else 240), '290']
@@ -62,10 +100,12 @@ def main():
         if not benchmark:
             if ('Three-image compatibility:' in log) != (count == 3):
                 raise RuntimeError(name+': unexpected scheduler')
-            matches = sum('rgbaL=(137,188,224,255)' in row and
-                          'rgbaR=(137,188,224,255)' in row for row in log.splitlines())
-            if matches < 2:
-                raise RuntimeError(name+': insufficient composed GPU pixel checks')
+            check = pixel_check(path, log)
+            print(json.dumps({'run': name, 'pixel_check': {k: check[k] for k in
+                              ('status', 'eligible', 'matched', 'blank_frames')}}), flush=True)
+            if check['status'] != 'PASS':
+                raise RuntimeError(f"{name}: composed pixels matched {check['matched']} of "
+                                   f"{check['eligible']} samples; see pixel-check.json")
         if benchmark:
             summary = timings.summarize(args.output)
             result = next(row for row in summary if row['run'] == name)

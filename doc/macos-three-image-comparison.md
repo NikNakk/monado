@@ -32,7 +32,12 @@ have three images by default and would make an unsuitable count comparison.
 The fixture asserts the enumerated count is exactly three or four, clears both
 slices on the real producer queue and alternates the slice submitted as a quad.
 Separate 240-frame correctness runs verify the service scheduler marker and
-composed Vulkan readbacks of the expected panel in both eyes. These constant
+composed Vulkan readbacks of the expected panel in both eyes. The proof runs log
+a sample every 30 frames. Samples taken within 30 frames of the first client
+latch are excluded, because the first composed headset frames can be blank.
+At least four samples must remain, with at most one blank. Each run's
+`pixel-check.json` lists every sample, and any blank frame with the client frame
+it latched. These constant
 colour samples establish import/composition, not per-frame stale-image detection;
 the M1–M5 patterned reuse tests remain separate evidence.
 
