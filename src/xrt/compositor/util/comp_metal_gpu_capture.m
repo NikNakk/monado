@@ -36,8 +36,7 @@ end_locked(const char *reason)
 	}
 	g_capture_done = true;
 	[[MTLCaptureManager sharedCaptureManager] stopCapture];
-	U_LOG_W("Metal GPU capture stopped (%s) after %u producer-waiting submissions", reason,
-	        g_capture_submissions);
+	U_LOG_W("Metal GPU capture stopped (%s) after %u producer-waiting submissions", reason, g_capture_submissions);
 }
 
 static void
