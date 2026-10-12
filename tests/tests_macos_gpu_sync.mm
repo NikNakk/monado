@@ -1,54 +1,9 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
-// Headless native two-process Metal -> MoltenVK fault and pixel probe.
-// Uses the existing IOSurface producer probe's 64x64/global-ID fixture transport.
+// Native Vulkan consumer with opt-in Windows D3D11/DXMT producer.
 #define VK_USE_PLATFORM_METAL_EXT
-#import <Foundation/Foundation.h>
-#import <Metal/Metal.h>
-#import <IOSurface/IOSurface.h>
 #include <vulkan/vulkan.h>
-#include <algorithm>
-#include <atomic>
-#include <memory>
-#include <chrono>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <stdexcept>
-#include <string>
-#include <thread>
-#include <vector>
-#include <spawn.h>
-#include <poll.h>
-#include <signal.h>
-#include <sys/wait.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
-extern char **environ;
-static unsigned
-texture_width()
-{
-	const char *value = getenv("GPU_SYNC_TEXTURE_SIZE");
-	if (value == nullptr) return 64;
-	char *end = nullptr;
-	unsigned long width = strtoul(value, &end, 10);
-	return end != value && *end == 0 && width >= 16 && width <= 2048 ? (unsigned)width : 0;
-}
-static const unsigned W = texture_width(), BYTES = W * W * 4;
-static constexpr unsigned N = 3;
-static uint64_t
-ns()
-{
-	return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
-	    .count();
-}
-static void
-check(bool good, const char *msg)
-{
-	if (!good)
-		throw std::runtime_error(msg);
-}
+#include "macos_gpu_sync_common.h"
 static void
 vkcheck_at(VkResult result, int line)
 {
@@ -57,103 +12,6 @@ vkcheck_at(VkResult result, int line)
 }
 #define vkcheck(result) vkcheck_at(result, __LINE__)
 
-static void
-io(int fd, void *data, size_t size, bool output)
-{
-	auto *p = static_cast<char *>(data);
-	while (size) {
-		if (!output) {
-			pollfd f{fd, POLLIN, 0};
-			check(poll(&f, 1, 5000) > 0, "transport timeout");
-		}
-		ssize_t count = output ? write(fd, p, size) : read(fd, p, size);
-		check(count > 0, "transport closed");
-		p += count;
-		size -= count;
-	}
-}
-struct Command
-{
-	uint64_t frame, value;
-	uint32_t image, producer, mode, delay_ms;
-};
-struct Receipt
-{
-	uint64_t commit_ns;
-	uint64_t gpu_status;
-};
-static void
-pattern(const Command &c, unsigned x, unsigned y, uint8_t p[4])
-{
-	const uint32_t words[4] = {(uint32_t)c.frame, (uint32_t)(c.frame >> 32), c.producer, c.image};
-	p[0] = y % 251;
-	p[1] = (x + y) % 251;
-	p[2] = (words[(x / 4) % 4] >> ((x % 4) * 8)) & 255;
-	p[3] = 255;
-}
-static IOSurfaceRef
-surface()
-{
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-	NSDictionary *d = @{
-		(id)kIOSurfaceWidth : @(W),
-		(id)kIOSurfaceHeight : @(W),
-		(id)kIOSurfaceBytesPerElement : @4,
-		(id)kIOSurfaceBytesPerRow : @(W * 4),
-		(id)kIOSurfaceAllocSize : @(BYTES),
-		(id)kIOSurfacePixelFormat : @(0x42475241),
-		(id)kIOSurfaceIsGlobal : @YES
-	};
-#pragma clang diagnostic pop
-	return IOSurfaceCreate((CFDictionaryRef)d);
-}
-@protocol GPUSyncEventProtocol
-- (void)eventHandle:(void (^)(MTLSharedEventHandle *))reply;
-- (void)gateHandle:(void (^)(MTLSharedEventHandle *))reply;
-@end
-@interface GPUSyncEventService : NSObject <GPUSyncEventProtocol, NSXPCListenerDelegate>
-@property(retain) id<MTLSharedEvent> event;
-@property(retain) id<MTLSharedEvent> gate;
-@end
-@implementation GPUSyncEventService
-- (void)eventHandle:(void (^)(MTLSharedEventHandle *))reply
-{
-	reply([[self.event newSharedEventHandle] autorelease]);
-}
-- (void)gateHandle:(void (^)(MTLSharedEventHandle *))reply
-{
-	reply([[self.gate newSharedEventHandle] autorelease]);
-}
-- (BOOL)listener:(NSXPCListener *)listener shouldAcceptNewConnection:(NSXPCConnection *)connection
-{
-	(void)listener;
-	connection.exportedInterface = [NSXPCInterface interfaceWithProtocol:@protocol(GPUSyncEventProtocol)];
-	connection.exportedObject = self;
-	[connection resume];
-	return YES;
-}
-@end
-static int
-launchctl(const char *verb, const char *domain, const char *plist)
-{
-	char *args[] = {const_cast<char *>("/bin/launchctl"), const_cast<char *>(verb), const_cast<char *>(domain),
-	                const_cast<char *>(plist), nullptr};
-	pid_t pid;
-	check(posix_spawn(&pid, "/bin/launchctl", nullptr, nullptr, args, environ) == 0, "launchctl spawn");
-	int status;
-	check(waitpid(pid, &status, 0) == pid, "launchctl wait");
-	return WIFEXITED(status) ? WEXITSTATUS(status) : 128;
-}
-static void
-metal_complete(id<MTLCommandBuffer> buffer)
-{
-	uint64_t deadline = ns() + 1000000000;
-	while (buffer.status < MTLCommandBufferStatusCompleted && ns() < deadline) {
-		std::this_thread::sleep_for(std::chrono::microseconds(100));
-	}
-	check(buffer.status == MTLCommandBufferStatusCompleted, "producer GPU completion timeout");
-}
 static int
 producer(const char *service_name, const char *socket_path)
 
@@ -183,6 +41,9 @@ producer(const char *service_name, const char *socket_path)
 	io(1, &ownpid, sizeof(ownpid), true);
 	IOSurfaceRef surfaces[N];
 	id<MTLTexture> textures[N];
+	id<MTLBuffer> uploads[N]{};
+	const bool upload_pattern =
+	    getenv("GPU_SYNC_PRODUCER_UPLOAD") != nullptr && strcmp(getenv("GPU_SYNC_PRODUCER_UPLOAD"), "1") == 0;
 	NSMutableArray *ids = [NSMutableArray array];
 	for (unsigned i = 0; i < N; ++i) {
 		surfaces[i] = surface();
@@ -196,6 +57,10 @@ producer(const char *service_name, const char *socket_path)
 		desc.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
 		textures[i] = [device newTextureWithDescriptor:desc iosurface:surfaces[i] plane:0];
 		check(textures[i] != nil, "Metal IOSurface texture");
+		if (upload_pattern) {
+			uploads[i] = [device newBufferWithLength:BYTES options:MTLResourceStorageModeShared];
+			check(uploads[i] != nil, "native pattern upload buffer");
+		}
 		[ids addObject:@(IOSurfaceGetID(surfaces[i]))];
 	}
 	NSError *error = nil;
@@ -242,6 +107,24 @@ producer(const char *service_name, const char *socket_path)
 		auto write_texture = [&](id<MTLCommandQueue> q) {
 			id<MTLCommandBuffer> cb = [q commandBuffer];
 			if (c.mode == 9) [cb encodeWaitForEvent:service.gate value:c.value];
+			if (upload_pattern) {
+				for (unsigned y = 0; y < W; ++y)
+					for (unsigned x = 0; x < W; ++x)
+						pattern(c, x, y,
+						        (uint8_t *)uploads[c.image].contents + (y * W + x) * 4);
+				id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+				[blit copyFromBuffer:uploads[c.image]
+				           sourceOffset:0
+				      sourceBytesPerRow:W * 4
+				    sourceBytesPerImage:BYTES
+				             sourceSize:MTLSizeMake(W, W, 1)
+				              toTexture:textures[c.image]
+				       destinationSlice:0
+				       destinationLevel:0
+				      destinationOrigin:MTLOriginMake(0, 0, 0)];
+				[blit endEncoding];
+				return cb;
+			}
 			id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
 			uint32_t words[4] = {(uint32_t)c.frame, (uint32_t)(c.frame >> 32), c.producer, c.image};
 			[enc setComputePipelineState:pipeline];
@@ -290,6 +173,7 @@ producer(const char *service_name, const char *socket_path)
 	}
 	for (unsigned i = 0; i < N; ++i) {
 		[textures[i] release];
+		[uploads[i] release];
 		CFRelease(surfaces[i]);
 	}
 	[pipeline release];
@@ -303,60 +187,76 @@ producer(const char *service_name, const char *socket_path)
 struct Child
 {
 	pid_t pid = -1;
-	int input = -1, output = -1;
+	int input = -1, output = -1, server = -1;
 	NSXPCConnection *connection = nil;
 	std::string directory, plist, domain, name;
 	Child(const char *path)
 	{
-		char dir[] = "/tmp/monado-gpu-sync-XXXXXX";
-		check(mkdtemp(dir) != nullptr, "temporary directory");
-		directory = dir;
-		std::string sock = directory + "/socket";
-		plist = directory + "/agent.plist";
-		domain = "gui/" + std::to_string(getuid());
-		static unsigned sequence = 0;
-		name = "org.freedesktop.monado.gpu-sync." + std::to_string(getpid()) + "." + std::to_string(sequence++);
-		int server = socket(AF_UNIX, SOCK_STREAM, 0);
-		check(server >= 0, "consumer socket");
-		sockaddr_un addr{};
-		addr.sun_family = AF_UNIX;
-		strlcpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path));
-		check(bind(server, (sockaddr *)&addr, sizeof(addr)) == 0 && listen(server, 1) == 0, "consumer listen");
-		char absolute[4096];
-		check(realpath(path, absolute) != nullptr, "executable path");
-		NSString *label = [NSString stringWithUTF8String:name.c_str()];
-		NSDictionary *agent = @{
-			@"Label" : label,
-			@"ProgramArguments" : @[
-				[NSString stringWithUTF8String:absolute], @"--producer", label,
-				[NSString stringWithUTF8String:sock.c_str()]
-			],
-			@"MachServices" : @{label : @YES},
-			@"EnvironmentVariables" : @{@"GPU_SYNC_TEXTURE_SIZE" : [NSString stringWithFormat:@"%u", W]}
-		};
-		NSData *data = [NSPropertyListSerialization dataWithPropertyList:agent
-		                                                          format:NSPropertyListXMLFormat_v1_0
-		                                                         options:0
-		                                                           error:nil];
-		check([data writeToFile:[NSString stringWithUTF8String:plist.c_str()] atomically:YES], "launchd plist");
-		check(launchctl("bootstrap", domain.c_str(), plist.c_str()) == 0, "launchd bootstrap");
-		connection = [[NSXPCConnection alloc] initWithMachServiceName:label options:0];
-		connection.remoteObjectInterface =
-		    [NSXPCInterface interfaceWithProtocol:@protocol(GPUSyncEventProtocol)];
-		[connection resume];
-		// Trigger service activation; handle retrieval below performs the actual XPC transfer.
-		[[connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-		  (void)error;
-		}] eventHandle:^(MTLSharedEventHandle *handle) {
-		  (void)handle;
-		}];
-		pollfd p{server, POLLIN, 0};
-		check(poll(&p, 1, 5000) > 0, "producer activation timeout");
-		input = accept(server, nullptr, nullptr);
-		output = input;
-		close(server);
-		check(input >= 0, "accept producer");
-		io(output, &pid, sizeof(pid), false);
+		try {
+			char dir[] = "/tmp/monado-gpu-sync-XXXXXX";
+			check(mkdtemp(dir) != nullptr, "temporary directory");
+			directory = dir;
+			std::string sock = directory + "/socket";
+			plist = directory + "/agent.plist";
+			domain = "gui/" + std::to_string(getuid());
+			static unsigned sequence = 0;
+			name = "org.freedesktop.monado.gpu-sync." + std::to_string(getpid()) + "." +
+			       std::to_string(sequence++);
+			server = socket(AF_UNIX, SOCK_STREAM, 0);
+			check(server >= 0, "consumer socket");
+			sockaddr_un addr{};
+			addr.sun_family = AF_UNIX;
+			strlcpy(addr.sun_path, sock.c_str(), sizeof(addr.sun_path));
+			check(bind(server, (sockaddr *)&addr, sizeof(addr)) == 0 && listen(server, 1) == 0,
+			      "consumer listen");
+			char absolute[4096];
+			const char *wine_launcher = getenv("GPU_SYNC_WINE_LAUNCHER");
+			check(realpath(wine_launcher ? wine_launcher : path, absolute) != nullptr, "executable path");
+			NSString *label = [NSString stringWithUTF8String:name.c_str()];
+			NSDictionary *agent = @{
+				@"Label" : label,
+				@"ProgramArguments" : @[
+					[NSString stringWithUTF8String:absolute], @"--producer", label,
+					[NSString stringWithUTF8String:sock.c_str()]
+				],
+				@"MachServices" : @{label : @YES},
+				@"EnvironmentVariables" : @{
+					@"GPU_SYNC_TEXTURE_SIZE" : [NSString stringWithFormat:@"%u", W],
+					@"GPU_SYNC_PRODUCER_UPLOAD" :
+					    (getenv("GPU_SYNC_PRODUCER_UPLOAD")
+					         ? [NSString stringWithUTF8String:getenv("GPU_SYNC_PRODUCER_UPLOAD")]
+					         : @"")
+				}
+			};
+			NSData *data = [NSPropertyListSerialization dataWithPropertyList:agent
+			                                                          format:NSPropertyListXMLFormat_v1_0
+			                                                         options:0
+			                                                           error:nil];
+			check([data writeToFile:[NSString stringWithUTF8String:plist.c_str()] atomically:YES],
+			      "launchd plist");
+			check(launchctl("bootstrap", domain.c_str(), plist.c_str()) == 0, "launchd bootstrap");
+			connection = [[NSXPCConnection alloc] initWithMachServiceName:label options:0];
+			connection.remoteObjectInterface =
+			    [NSXPCInterface interfaceWithProtocol:@protocol(GPUSyncEventProtocol)];
+			[connection resume];
+			// Trigger service activation; handle retrieval below performs the actual XPC transfer.
+			[[connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
+			  (void)error;
+			}] eventHandle:^(MTLSharedEventHandle *handle) {
+			  (void)handle;
+			}];
+			pollfd p{server, POLLIN, 0};
+			check(poll(&p, 1, wine_launcher ? 60000 : 5000) > 0, "producer activation timeout");
+			input = accept(server, nullptr, nullptr);
+			output = input;
+			close(server);
+			server = -1;
+			check(input >= 0, "accept producer");
+			io(output, &pid, sizeof(pid), false);
+		} catch (...) {
+			cleanup();
+			throw;
+		}
 	}
 	MTLSharedEventHandle *
 	handle(bool gate = false)
@@ -376,11 +276,19 @@ struct Child
 	}
 	~Child()
 	{
+		cleanup();
+	}
+	void
+	cleanup()
+	{
+		if (server >= 0)
+			close(server);
 		[connection invalidate];
 		[connection release];
 		if (input >= 0)
 			close(input);
-		launchctl("bootout", domain.c_str(), plist.c_str());
+		if (!domain.empty() && !plist.empty())
+			launchctl("bootout", domain.c_str(), plist.c_str());
 		unlink((directory + "/socket").c_str());
 		unlink(plist.c_str());
 		rmdir(directory.c_str());
@@ -873,8 +781,12 @@ main(int argc, char **argv)
 				if (c.mode != 4)
 					io(child.output, &receipt, sizeof(receipt), false);
 				if (scenario == "exit-inflight") {
-					check(receipt.gpu_status < MTLCommandBufferStatusCompleted && gpu.event.signaledValue < c.value,
-					      "producer must have actual submitted, incomplete GPU work at termination");
+					check(
+					    (getenv("GPU_SYNC_WINE_LAUNCHER")
+					         ? receipt.gpu_status == UINT64_MAX
+					         : receipt.gpu_status < MTLCommandBufferStatusCompleted) &&
+					        gpu.event.signaledValue < c.value,
+					    "producer must have actual submitted, incomplete GPU work at termination");
 					gpu.unresolved_producer = true;
 					check(kill(child.pid, SIGKILL) == 0, "kill in-flight producer");
 					child.pid = -1;
