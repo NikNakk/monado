@@ -13,6 +13,12 @@ import threading
 import time
 
 
+def require(condition, what):
+    """Fail the run explicitly; unlike assert, this survives python -O."""
+    if not condition:
+        raise RuntimeError(what)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -109,8 +115,11 @@ def main():
             '--frames', str(args.stress_frames), '--timeout', '600'], stress, timeout=750)
         for directory in (native, wine):
             summary = json.loads((directory / 'results/summary.json').read_text())
-            assert len(summary) == 1 and summary[0]['status'] == 'PASS'
-            assert summary[0]['result']['consumed'] == 2 * args.stress_frames
+            require(len(summary) == 1 and summary[0]['status'] == 'PASS',
+                    f'{directory.name}: stress run did not pass')
+            require(summary[0]['result']['consumed'] == 2 * args.stress_frames,
+                    f'{directory.name}: consumed {summary[0]["result"]["consumed"]} '
+                    f'frames, expected {2 * args.stress_frames}')
 
         # Pair native/Wine at 60 Hz for 20 s; compare these matched uploads only.
         for name, use_wine in [('upload-A1', False), ('upload-B1', True),
@@ -121,8 +130,10 @@ def main():
                 settings['GPU_SYNC_WINE_LAUNCHER'] = str(args.wine_artifacts.resolve() / 'launch.zsh')
             directory = run(name, [str(probe), 'normal', '1200'], settings, timeout=160, nominal=True)
             records = [json.loads(line) for line in (directory / 'stdout.txt').read_text().splitlines()]
-            assert records[-1]['status'] == 'PASS' and records[-1]['consumed'] == 1200
-            assert records[0]['thermal'] == 0 and records[-1]['thermal_end'] == 0
+            require(records[-1]['status'] == 'PASS' and records[-1]['consumed'] == 1200,
+                    f'{name}: paired upload run did not consume 1200 frames')
+            require(records[0]['thermal'] == 0 and records[-1]['thermal_end'] == 0,
+                    f'{name}: thermal state was not nominal throughout')
 
     # Video pair uses identical service scale, decoder and benchmark duration.
     for name, producer, mode in [('angle-stress', 'angle', 'pixels'),
