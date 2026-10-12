@@ -32,7 +32,13 @@ texture_width()
 		return 64;
 	char *end = nullptr;
 	unsigned long width = strtoul(value, &end, 10);
-	return end != value && *end == 0 && width >= 16 && width <= 2048 ? (unsigned)width : 0;
+	if (end == value || *end != 0 || width < 16 || width > 2048) {
+		// Fail here, not later as a zero-sized IOSurface or texture.
+		fprintf(stderr, "FAIL GPU_SYNC_TEXTURE_SIZE must be a whole number from 16 to 2048, got '%s'\n",
+		        value);
+		exit(2);
+	}
+	return (unsigned)width;
 }
 static const unsigned W = texture_width(), BYTES = W * W * 4;
 static constexpr unsigned N = 3;
@@ -68,11 +74,7 @@ io(int fd, void *data, size_t size, bool output, int timeout_ms = 5000)
 static void
 pattern(const Command &c, unsigned x, unsigned y, uint8_t p[4])
 {
-	const uint32_t words[4] = {(uint32_t)c.frame, (uint32_t)(c.frame >> 32), c.producer, c.image};
-	p[0] = y % 251;
-	p[1] = (x + y) % 251;
-	p[2] = (words[(x / 4) % 4] >> ((x % 4) * 8)) & 255;
-	p[3] = 255;
+	gpu_sync_pattern(&c, x, y, p);
 }
 static IOSurfaceRef
 surface()
