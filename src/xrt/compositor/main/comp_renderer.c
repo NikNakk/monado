@@ -35,6 +35,9 @@
 #include "util/comp_render.h"
 #include "util/comp_high_level_render.h"
 #include "util/comp_swapchain_gpu_reuse_internal.h"
+#ifdef XRT_OS_OSX
+#include "util/comp_metal_gpu_capture.h"
+#endif
 
 #include "main/comp_frame.h"
 #include "main/comp_mirror_to_debug_gui.h"
@@ -1186,6 +1189,9 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 	renderer_stage_end(r, "previous_fence_wait", fence_begin_ns, ret);
 	if (ret != VK_SUCCESS) {
 		COMP_ERROR(r->c, "vkWaitForFences: %s", vk_result_string(ret));
+#ifdef XRT_OS_OSX
+		comp_metal_gpu_capture_end(vk_result_string(ret));
+#endif
 	}
 
 #ifdef XRT_OS_OSX

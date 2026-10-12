@@ -12,6 +12,7 @@ import csv
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -52,6 +53,9 @@ def main():
     parser.add_argument('--offscreen', action='store_true', help='Use the simulated HMD instead of the headset')
     parser.add_argument('--service-env', action='append', default=[], metavar='XRT_NAME=VALUE',
                         help='Passed to each service, e.g. XRT_MACOS_DRAWABLE_SLOT=0')
+    parser.add_argument('--gpu-capture', action='store_true',
+                        help='Metal GPU capture of the first client submissions; keeps hung captures and the first passing one')
+    parser.add_argument('--stop-on-hang', action='store_true', help='Stop after the first GPU hang')
     args = parser.parse_args()
     if not 1 <= args.count <= 100 or not 60 <= args.frames <= 2400:
         parser.error('--count must be 1–100 and --frames 60–2400')
@@ -79,15 +83,27 @@ def main():
             command += ['--headset']
         for item in args.service_env:
             command += ['--service-env', item]
+        if args.gpu_capture:
+            command += ['--service-env', f'XRT_MACOS_GPU_CAPTURE_DIR={directory}']
         command += ['--client', str(args.build/'tests/tests_macos_service_gpu_sync'), f'array-{args.images}',
                     str(args.frames), '60']
         started = time.monotonic()
+        env = {**os.environ, 'MTL_CAPTURE_ENABLED': '1'} if args.gpu_capture else None
         with (out/'runner.log').open('a') as log:
-            exit_code = subprocess.run(command, cwd=repo, stdout=log, stderr=log, timeout=120).returncode
+            exit_code = subprocess.run(command, cwd=repo, env=env, stdout=log, stderr=log, timeout=180).returncode
         outcome = classify(directory, exit_code, not args.offscreen)
         results.append({'start': index, 'outcome': outcome, 'exit': exit_code,
                         'elapsed_s': round(time.monotonic()-started, 1)})
+        if args.gpu_capture:
+            captures = list(directory.glob('*.gputrace'))
+            if outcome == 'pass' and any(r['outcome'] == 'pass' for r in results[:-1]):
+                for capture in captures:
+                    shutil.rmtree(capture, ignore_errors=True)
+                captures = []
+            results[-1]['captures'] = [str(capture) for capture in captures]
         print(f'start {index:3d}: {outcome}', flush=True)
+        if args.stop_on_hang and outcome == 'gpu_hang':
+            break
         if outcome == 'usb':
             print('USB claim failed; power-cycle the headset before continuing', flush=True)
             break

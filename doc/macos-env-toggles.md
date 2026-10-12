@@ -1180,3 +1180,15 @@ priming had completed, so it was removed. See
 worker's next `nextDrawable` until no slot present was in flight. Startups with
 the slot worker off still hung, so the slot fetch was not the trigger, and the
 experiment was removed.
+
+
+## GPU hang diagnostics (2026-10-12)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `XRT_MACOS_GPU_CAPTURE_DIR` | unset | With `MTL_CAPTURE_ENABLED=1`, capture the compositor's MTLDevice to `<dir>/monado_<pid>.gputrace`. Capture starts at the first producer-waiting submission and stops before the fifth, or at device loss. |
+| `XRT_MACOS_SKIP_SATISFIED_PRODUCER_GPU_WAIT` | `0` | Diagnostic only. Skip the GPU wait on a producer value the CPU check has already seen. This removes the cross-API memory-ordering guarantee, so it must never be a default. |
+
+Both exist to investigate the intermittent startup GPU hang. Remove them once it
+is understood; see
+[the headset attempts](macos-gpu-sync-hardware-tests.md#headset-attempts-2026-10-12).
