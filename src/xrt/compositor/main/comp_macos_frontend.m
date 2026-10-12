@@ -198,6 +198,8 @@ macos_window_frontend_create(struct comp_macos_frontend *cwm)
 		COMP_ERROR(c, "Failed to create the macOS PS VR2 window");
 		return false;
 	}
+	// Teardown closes then releases; a default close would release it too.
+	[window setReleasedWhenClosed:NO];
 
 	CAMetalLayer *metal_layer = macos_frontend_create_metal_layer(cwm, screen);
 	if (metal_layer == nil) {
