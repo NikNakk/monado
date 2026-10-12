@@ -86,11 +86,23 @@ reach the timing runs.
    transparent: `(0,0,0,0)`, including alpha. Either the target was not written
    that frame, or the readback read another image. It was not determined which.
 
+5. **Head motion, not black frames.** With the denser sampling, on `ec2c61ecb`,
+   2 of 7 samples matched. There was again no device loss, and the service
+   exited cleanly. Recorded head pose explains every miss. Pitch moved from
+   −40° to −11°, and yaw from +18° to −7°, during the 2 s run. Both eyes
+   matched only near yaw 12° and pitch −14°. At frame 211, the left eye had
+   lost the quad but the right still had it. The fixture's 1 m quad is fixed
+   1.5 m along LOCAL −Z, so rotating the headset moves it off the sample
+   points. Frame 122 in attempt 4 is consistent with the same cause.
+
 Follow-up changes:
 
 - The comparison now samples every 30 frames, after a 30-frame warmup. It
   records each blank frame in `pixel-check.json`, and fails on more than one
   blank.
+- Headset proof runs lock the quad to the head (VIEW space, 2 m at 1.5 m).
+  Offscreen, all seven samples match, including the startup frames. Timing
+  runs are unchanged.
 - A failed compute or graphics dispatch now releases its descriptor sets. A
   lost device previously leaked them each frame until allocation failed. A null
   set then crashed MoltenVK in `vkUpdateDescriptorSets`; this produced all
@@ -103,5 +115,5 @@ Rerun with:
 
 ```sh
 MVK_CONFIG_LOG_LEVEL=3 python3 scripts/macos/run-three-image-comparison.py \
-  --headset --frames 2400 --output /tmp/monado-three-image-headset-5
+  --headset --frames 2400 --output /tmp/monado-three-image-headset-6
 ```

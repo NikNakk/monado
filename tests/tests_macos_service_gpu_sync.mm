@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -184,7 +185,12 @@ main(int argc, char **argv)
 			checked(xrCreateSession(instance, &sessionInfo, &session), "xrCreateSession");
 			XrReferenceSpaceCreateInfo spaceInfo{};
 			spaceInfo.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
-			spaceInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
+			// A head-locked quad keeps pixel samples valid while a worn or
+			// handled headset moves; the default stays world-locked.
+			const char *view_locked_env = getenv("GPU_SYNC_VIEW_LOCKED");
+			const bool view_locked = view_locked_env != nullptr && strcmp(view_locked_env, "1") == 0;
+			spaceInfo.referenceSpaceType =
+			    view_locked ? XR_REFERENCE_SPACE_TYPE_VIEW : XR_REFERENCE_SPACE_TYPE_LOCAL;
 			spaceInfo.poseInReferenceSpace.orientation.w = 1;
 			XrSpace space;
 			checked(xrCreateReferenceSpace(session, &spaceInfo, &space), "space");
@@ -318,7 +324,8 @@ main(int argc, char **argv)
 				quad.subImage.imageArrayIndex = array_test ? rendered % 2 : 0;
 				quad.pose.orientation.w = 1;
 				quad.pose.position.z = -1.5f;
-				quad.size = {1, 1};
+				// 2 m at 1.5 m spans about ±34°, covering each eye's sample point.
+				quad.size = view_locked ? XrExtent2Df{2, 2} : XrExtent2Df{1, 1};
 				const XrCompositionLayerBaseHeader *layer = (XrCompositionLayerBaseHeader *)&quad;
 				XrFrameEndInfo end{};
 				end.type = XR_TYPE_FRAME_END_INFO;
