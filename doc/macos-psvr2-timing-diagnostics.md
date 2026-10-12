@@ -3457,3 +3457,49 @@ display work, not on Monado's presentation:
   the headset, so this first needs the Chromium occlusion fix above.
 - Speculative: predict the coincidence windows from both displays' refresh
   timestamps, and keep the presentation queue shallow during them.
+
+### Steady-state latency: where the second refresh goes (2026-10-13)
+
+Outside the bursts, enqueue-to-glass is ~19.2 ms (about two refreshes). Phases
+of on-time frames relative to each PS VR2 refresh V (run 1, 33–60 s; run 4
+with absolute-time presents matches within 0.3 ms):
+
+| Step | ms after refresh |
+| --- | ---: |
+| Compositor starts recording (`DrawDispatch` begin) | V + 5.5 |
+| Compositor GPU dispatch ends (after ~2.7 ms GPU queue wait) | V′ + 1.2 |
+| Slot's drawable returns (freed by the swap at V′) | V′ + 0.6 |
+| Core Animation `ImageQueueInsert` | V′ + 1.2–1.5 |
+| Presenter blit on GPU | V′ + 1.8 → 3.0 |
+| WindowServer picks the frame up ("generation") | V″ + 1.0 (8.1 ms after insert) |
+| Swap; frame on glass | V‴ |
+
+Even inserts at V′ + 0.7 wait ~7 ms, so WindowServer's cutoff for a pick-up
+falls before ~0.7 ms after the refresh. The freed drawable returns only at
+~0.55 ms, so a newly filled drawable can never make the next pick-up: with
+three drawables, one refresh of queue is structural. The removals are
+already settled: two drawables, and `CAMetalDisplayLink` with
+`preferredFrameLatency` 1, were both worse. Timewarp predicts to the measured
+display time, so the cost is mainly the prediction horizon.
+
+**Recoverable:** a frame inserted any time before ~V″ + 0.7 ms makes the same
+pick-up, so the compositor finishes ~6–7 ms earlier than necessary. Rendering
+later would not reduce frame-count latency, but would sample timewarp poses
+closer to display. GPU queue wait and dispatch spread (~1.8 ms p10–p90) leave
+a realistic margin of ~3–4 ms. The earlier `LATE_RENDER_DESIRED_OFFSET_US`
+(+2 ms) sometimes broke cadence and was removed, before the slot worker and
+fence fix.
+
+**Experiment:** `XRT_MACOS_COMPOSITOR_LATE_DELAY_US` delays each frame's
+recording by up to 6 ms, measured from the start of `comp_renderer_draw`. It
+sleeps, spins the final millisecond, and is skipped if the frame is already
+late. It appears as `late_delay` in `renderer_stage.csv`, and as
+`CompositorLateDelay` in Instruments. The fake pacer's compositor time is
+fixed (3 ms), so the delay is not compensated away. `U_PACING_COMP_MIN_TIME_MS`
+is an alternative that shifts the whole compositor wake, including the client
+latch. Test 2, 3 and 4 ms in traced sessions. Check that swaps keep the same
+refresh and late rates outside bursts don't rise
+(`analyse-instruments-display-phase.py`), measure pose freshness
+(`late_render.csv`/`pose.csv`), and confirm cadence; then do a worn check.
+Offscreen, 3000 µs gives 3.00 ms delays and 9000 µs is capped at 6.00 ms,
+with no lost frames.
