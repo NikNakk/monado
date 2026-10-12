@@ -229,6 +229,35 @@ runtime build, guard policy tests, GPU-reuse tests and IPC swapchain-wait tests
 pass. Linux behavior is unchanged by the macOS-only implementation; Linux CI
 was not run here.
 
+Further analysis narrows the scheduling question. The default helper uses
+`presentDrawable:afterMinimumDuration:8000 us`, not `atTime:`: the absolute
+`metal_request_ns` logged in `present.csv` is not passed to Metal in this mode.
+Apple defines the duration relative to the previous drawable's visible time.
+The selected target is therefore a diagnostic phase reference, not an enforced
+deadline, and the queue-depth diagnostic is not a measured drawable count.
+Earlier hosted-probe work found that switching to `atTime:` did not cure its
+latency ratchet; do not assume that API switch fixes this native case either.
+
+Using the existing presentation-stall analyser's validated host-clock GPU-end
+conversion, A1 frames `[1275,1330)` versus `[1340,1395)` have median
+enqueue→GPU-end 3.339/3.342 ms, but GPU-end→physical 24.241/15.970 ms.
+For the first recovery and rebound, `[140,195)` versus `[195,435)` have
+enqueue→GPU-end 3.609/3.353 ms and GPU-end→physical 15.830/24.287 ms.
+All 405 joined samples pass clock validation. The extra refresh
+is after GPU completion, even at the rebound. These windows are retained in
+`A1-four/latency-phase-clues.json`.
+
+Present-offset calibration is a separate possible confounder: traced callbacks
+feed an EMA of physical-minus-desired back into the fake pacer's predicted
+display time. The A1 predicted-minus-desired median changes from about 25.02 ms
+before the first drain to 16.90 ms after it, then 25.01 ms after the rebound.
+This offset changes the app-facing prediction, not the compositor's desired
+render deadline directly. It follows observed latency and is not independent
+proof of correct prediction or evidence that it caused the rebound. A test that
+freezes this calibration while retaining physical traces would isolate its
+influence on client pacing; simply disabling traces also removes the measuring
+instrument. Runtime defaults were not changed by this analysis.
+
 A final 2400-frame four-image hardware smoke in
 `/tmp/monado-guard-no-trace-20261012-codex` used a temporary copy of the isolated
 fixture wrapper with `PSVR2_TIMING_TRACE=0`. The final build places guard
