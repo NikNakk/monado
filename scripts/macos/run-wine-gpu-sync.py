@@ -20,7 +20,11 @@ def main():
     parser.add_argument('--frames', type=int, default=120)
     parser.add_argument('--repeats', type=int, default=1)
     parser.add_argument('--scenario', action='append')
+    parser.add_argument('--timeout', type=float, default=160,
+                        help='Finite per-case timeout, including Wine activation (1–3600 s)')
     args = parser.parse_args()
+    if not 1 <= args.timeout <= 3600:
+        parser.error('--timeout must be between 1 and 3600 seconds')
     repo = Path(__file__).resolve().parents[2]
     root, runtime, output = (p.resolve() for p in
                              (args.artifacts, args.wine_runtime, args.output))
@@ -64,7 +68,7 @@ def main():
         command = [sys.executable, str(repo / 'scripts/macos/run-gpu-sync.py'),
                    '--probe', str(repo / 'build/arm64/tests/tests_macos_gpu_sync'),
                    '--output', str(output), '--frames', str(args.frames),
-                   '--repeats', str(args.repeats), '--timeout', '160']
+                   '--repeats', str(args.repeats), '--timeout', str(args.timeout)]
         for scenario in args.scenario or []:
             command += ['--scenario', scenario]
         return subprocess.run(command, cwd=repo, env=env).returncode
