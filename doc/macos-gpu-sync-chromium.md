@@ -37,6 +37,36 @@ The changes add no GPU waits to frame loops and do not change Monado's
 already-signalled Vulkan semaphore wait. Retained pending events describe
 obligations; a timeout or logical cancellation does not prove GPU completion.
 
+## Chromium-to-Monado contract
+
+A Chromium SyncToken proves that the GPU process has handled the producer's
+commands; it does not itself prove completion on the Metal queue. ANGLE's
+end-write access and Dawn's SharedTextureMemory end-access export the actual
+Metal shared-event obligations. The GPU stub snapshots those obligations after
+the SyncTokens and uses the asynchronous 250 ms waiter. The timeout reports
+failed readiness to the caller; it never means the texture is complete.
+
+For a matching pending frame, failed readiness ends the WebXR presentation
+without marking that image rendered or submitting it as a completed frame.
+Queries retain unresolved obligations for retries. Completed unchanged images
+need no new signal. Session/context retirement invalidates outstanding Metal
+submission callbacks even if the render-loop object remains alive.
+
+After successful Chromium readiness, Monado retains its independent CPU
+readiness gate and the imported, already-satisfied Vulkan semaphore wait for
+memory ordering. Logical claim release is separate from GPU completion;
+quarantine/reclaim and image reuse continue to use the M1/M2 GPU contract.
+The checker replays service-side ownership observations, rejects negative or
+unbalanced claims, and rejects reclamation while CPU consumer claims remain.
+It separately rejects trace discard/overwrite/loss statistics. These logical
+checks supplement GPU pixel/reuse tests; they cannot replace them.
+
+The existing Metal copy fallback synchronously completes its own transfer
+before releasing the OpenXR image. This milestone adds no new frame-thread
+wait. Direct ANGLE transport is the normal-path performance comparison; the
+Dawn array path's copy and existing transfer diagnostics are identified as
+separate costs, not attributed to these three synchronization fixes.
+
 ## Regression coverage
 
 - Production IOSurface backing with real Metal events: repeated missing-signal
@@ -161,7 +191,11 @@ eye interiors, excluding the transparent distorted seam at the output center.
 `M3_CHROMIUM_PRODUCER=dawn` uses a real XR-compatible Dawn device, WebGPU
 projection layer and render passes; the default uses ANGLE/WebGL.
 Both modes require repeated acquisition of at least three transport images.
-The pixel matrix covers direct and forced-copy transport separately.
+The pixel matrix covers default and forced-copy requests separately. ANGLE's
+ordinary 2D image uses direct IOSurface transport by default; Dawn's array
+projection image uses the render-copy fallback even without the force-copy
+switch. The checker requires the actual transport label in Chromium's log;
+a default Dawn case must not be described as a direct-image pass.
 
 Fixture-development runs with the **older bundle** pass ANGLE pixel checks and
 Dawn pixel checks (four array slices repeatedly recycled). The initial Dawn
@@ -185,6 +219,17 @@ a matched before/after comparison. The matched control will reverse only
 Chromium commit `956c93da4c1` against the same inherited working tree, then
 restore it, using incremental builds and A–B–B–A measurements without compiler
 contention. A reverse-patch dry run succeeds; no control edit has yet been made.
+
+A decoder-backed `XRMediaBinding` probe cannot create its layers session in
+this runtime configuration. Chromium requires cylinder, equirect2 **and cube**
+extensions for the `layers` feature; this Monado build intentionally has cube
+support disabled. The attempt fails explicitly before any session frames.
+Its raw failure is retained, and the exploratory fixture branch was removed.
+`XRMediaBinding` sparse-layer playback is therefore **NOT VERIFIED** here.
+Real decoder starvation remains covered by the video/ANGLE fixture, while
+completed SharedImage reuse without a new write is covered by the actual
+ANGLE/Dawn representation tests. No unsupported OpenXR extension was enabled
+to bypass the capability check.
 
 Five further native startup/300-frame runs under compiler load pass with
 MoltenVK diagnostic logging: 1,500 frames total, no device-loss or queue errors.

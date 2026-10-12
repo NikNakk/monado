@@ -15,6 +15,51 @@ def query(processor, trace, sql):
     return list(csv.DictReader(io.StringIO(run.stdout)))
 
 
+def check_ownership(processor, service_trace):
+    from collections import Counter
+    rows = query(processor, service_trace, """
+      SELECT name, EXTRACT_ARG(arg_set_id,'debug.scope_id') scope,
+             EXTRACT_ARG(arg_set_id,'debug.image_index') image,
+             EXTRACT_ARG(arg_set_id,'debug.event_ns') event_ns
+      FROM slice WHERE name IN
+        ('consumer_claimed','consumer_claim_released','storage_quarantined','storage_reclaimed')
+        AND EXTRACT_ARG(arg_set_id,'debug.record_type')='observation'
+      ORDER BY CAST(EXTRACT_ARG(arg_set_id,'debug.event_ns') AS INTEGER),id
+    """)
+    assert rows, 'Ownership observations absent'
+    pending = Counter()
+    reclaimed = set()
+    counts = Counter()
+    for row in rows:
+        scope, image = int(row['scope']), int(row['image'])
+        name = row['name']
+        counts[name] += 1
+        assert scope not in reclaimed, 'Ownership event after storage reclamation'
+        if name == 'consumer_claimed':
+            pending[(scope,image)] += 1
+        elif name == 'consumer_claim_released':
+            assert pending[(scope,image)] > 0, 'Released nonexistent consumer claim'
+            pending[(scope,image)] -= 1
+        elif name == 'storage_reclaimed':
+            assert all(n==0 for (owner,_),n in pending.items() if owner==scope), 'Storage reclaimed with outstanding CPU consumer claims'
+            reclaimed.add(scope)
+    assert counts['consumer_claimed'] > 0
+    assert all(n==0 for n in pending.values()), 'Unreleased consumer claims in complete service capture'
+    # Claim release is logical ownership only. It does not prove GPU completion;
+    # the actual Vulkan readback and production GPU reuse tests provide that.
+    return dict(observations=dict(counts), consumer_claims_balanced=True,
+                no_claims_at_reclamation=True)
+
+
+def check_transport(directory, summary):
+    log = (directory/'chromium.log').read_text()
+    expected = ('iosurface-render-copy' if summary['forceCopy'] or
+                summary.get('producer', 'angle') == 'dawn' else 'monado-iosurface-zero-copy')
+    marker = 'transport='+expected
+    assert marker in log, 'Requested transport was not demonstrated: '+expected
+    return dict(expected=expected, observed_creations=log.count(marker))
+
+
 def check_auxiliary(directory, processor, summary):
     from collections import Counter
     from math import ceil
@@ -29,7 +74,7 @@ def check_auxiliary(directory, processor, summary):
                     *map(str, sorted(directory.glob('monado_*.pftrace'))),
                     str(directory/'chromium.pftrace')], check=True, timeout=60)
     faults = query(processor, archive,
-                  "SELECT name,value FROM stats WHERE severity IN ('error','data_loss') AND value<>0")
+                  "SELECT name,value FROM stats WHERE value<>0 AND (severity IN ('error','data_loss') OR name GLOB '*discard*' OR name GLOB '*overwrit*' OR name GLOB '*loss*')")
     assert not faults, faults
     service = (directory/'service.log').read_text()
     startups = service.count('starting up...')
@@ -49,7 +94,9 @@ def check_auxiliary(directory, processor, summary):
     assert sum(n >= 10 for n in reuse.values()) >= 3, 'Transport images were not repeatedly recycled'
     result = dict(status='PASS', mode=summary['mode'], producer=summary.get('producer', 'angle'),
                   force_copy=summary['forceCopy'], image_acquisitions={f'{s}:{i}': n for (s,i),n in reuse.items()},
-                  trace_errors=faults, graceful_service_capture=True)
+                  trace_errors=faults, graceful_service_capture=True,
+                  transport=check_transport(directory, summary),
+                  ownership=check_ownership(processor, service_trace))
     if summary['mode'] == 'pixels':
         expected = [[255,0,0,255], [0,255,0,255], [0,0,255,255], [255,0,0,255]]
         proof = summary['pixelProof']
@@ -128,7 +175,7 @@ def check(directory, processor):
                     '--output', str(archive), *map(str, sorted(directory.glob('monado_*.pftrace'))),
                     str(directory/'chromium.pftrace')], check=True, timeout=60)
     faults = query(processor, archive,
-                   "SELECT name,value FROM stats WHERE severity IN ('error','data_loss') AND value<>0")
+                   "SELECT name,value FROM stats WHERE value<>0 AND (severity IN ('error','data_loss') OR name GLOB '*discard*' OR name GLOB '*overwrit*' OR name GLOB '*loss*')")
     assert not faults, faults
     # Use the service's own two-point calibration for its CSV timestamps.
     # CLOCK_MONOTONIC can slew relative to Mach raw time; a constant offset
@@ -192,6 +239,8 @@ def check(directory, processor):
     assert service.count('starting up...') == 1, 'Service startup count changed'
     assert 'VK_ERROR_DEVICE_LOST' not in service and 'VK_NOT_READY' not in service, 'Service GPU failed'
     result = dict(status='PASS', scope='Offscreen transitions/recovery; not exact handoff pixel or performance validation',
+                  transport=check_transport(directory, summary),
+                  ownership=check_ownership(processor, service_trace),
                   native_frames=1200, fresh_latches=len(fresh), fault_fresh_latches=counts,
                   ownership_events=storage, trace_errors=faults,
                   clock_calibration=correlations, clock_rate_ppm=((m1-m0)/(n1-n0)-1)*1e6)
