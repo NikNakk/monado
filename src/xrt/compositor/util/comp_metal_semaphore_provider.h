@@ -35,6 +35,16 @@ xrt_result_t
 comp_metal_semaphore_import_shared_event_handle(void *mtl_shared_event_handle,
                                                 struct xrt_compositor_semaphore **out_xcsem);
 
+/*!
+ * Experiment: make the compositor queue wait on @p xcsem at @p value once, and
+ * wait up to @p timeout_ns for that submission to complete.
+ *
+ * Used to test whether the first GPU wait on a client-signalled shared event
+ * stalls; see XRT_MACOS_PRIME_PRODUCER_EVENT.
+ */
+xrt_result_t
+comp_metal_semaphore_prime_gpu_wait(struct xrt_compositor_semaphore *xcsem, uint64_t value, uint64_t timeout_ns);
+
 #endif
 
 #ifdef __cplusplus

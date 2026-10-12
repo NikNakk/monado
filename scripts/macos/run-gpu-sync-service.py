@@ -26,6 +26,8 @@ def main():
     parser.add_argument('--perfetto', action='store_true', help='Capture native Perfetto beside CSV (requires XRT_FEATURE_MACOS_PERFETTO)')
     parser.add_argument('--scale-percentage', type=int, help='Override recommended render scale for offscreen client tests (1–200)')
     parser.add_argument('--headset', action='store_true', help='Use the physical headset and display; requires exclusive USB ownership')
+    parser.add_argument('--service-env', action='append', default=[], metavar='XRT_NAME=VALUE',
+                        help='Extra XRT_ setting for the service and client (inherited XRT_ settings are dropped)')
     parser.add_argument('--sample-interval', type=int,
                         help='Log a composed pixel sample every N frames after the first five (1–1000; not with --benchmark)')
     parser.add_argument('--unique-output', action='store_true')
@@ -37,6 +39,12 @@ def main():
         parser.error('--client-timeout must be between 1 and 300 seconds')
     if args.scale_percentage is not None and (args.headset or not 1 <= args.scale_percentage <= 200):
         parser.error('--scale-percentage requires an offscreen run and a value between 1 and 200')
+    extra_env = {}
+    for item in args.service_env:
+        key, sep, value = item.partition('=')
+        if not sep or not key.startswith('XRT_') or not key.replace('_', '').isalnum():
+            parser.error(f'--service-env expects XRT_NAME=VALUE, got {item!r}')
+        extra_env[key] = value
     if args.sample_interval is not None and (args.benchmark or not 1 <= args.sample_interval <= 1000):
         parser.error('--sample-interval requires a non-benchmark run and a value between 1 and 1000')
     if (args.suite or args.budget_suite) and (args.client or args.benchmark):
@@ -70,6 +78,7 @@ def main():
             env['XRT_COMPOSITOR_SCALE_PERCENTAGE'] = str(args.scale_percentage)
         if args.sample_interval is not None:
             env['XRT_COMPOSITOR_LOG_APPLE_SAMPLES_INTERVAL'] = str(args.sample_interval)
+        env.update(extra_env)
         if args.benchmark:
             env.update(XRT_LOG='warn', XRT_COMPOSITOR_LOG_APPLE_SAMPLES='0',
                        XRT_COMPOSITOR_LOG_SWAPCHAIN_GPU_REUSE='0')
@@ -90,6 +99,7 @@ def main():
         if args.client:
             telemetry['workload'] = 'Custom client; '+('physical PS VR2 display' if args.headset else 'simulated HMD; debug_image target')
         telemetry['headset'] = args.headset
+        telemetry['service_env'] = extra_env
         telemetry['view_locked_quad'] = env.get('GPU_SYNC_VIEW_LOCKED') == '1'
         telemetry['three_image_compatibility'] = args.three_images
         telemetry['perfetto'] = args.perfetto

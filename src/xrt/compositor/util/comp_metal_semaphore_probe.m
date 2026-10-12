@@ -11,6 +11,8 @@
 #include "util/comp_metal_semaphore_probe.h"
 #include "util/comp_semaphore.h"
 #include "util/u_logging.h"
+#include "os/os_time.h"
+#include "vk/vk_cmd.h"
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -156,4 +158,59 @@ comp_metal_semaphore_provider_clear(struct vk_bundle *vk)
 		g_provider.attempted = false;
 	}
 	pthread_mutex_unlock(&g_provider.mutex);
+}
+
+xrt_result_t
+comp_metal_semaphore_prime_gpu_wait(struct xrt_compositor_semaphore *xcsem, uint64_t value, uint64_t timeout_ns)
+{
+	// Only semaphores from comp_metal_semaphore_create_client_pair are expected.
+	if (xcsem == NULL) {
+		return XRT_ERROR_VULKAN;
+	}
+	struct comp_semaphore *csem = comp_semaphore(xcsem);
+	struct vk_bundle *vk = csem->vk;
+
+	VkFenceCreateInfo fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+	VkFence fence = VK_NULL_HANDLE;
+	VkResult ret = vk->vkCreateFence(vk->device, &fence_info, NULL, &fence);
+	if (ret != VK_SUCCESS) {
+		return XRT_ERROR_VULKAN;
+	}
+
+	// A wait-only submission: the GPU's first wait on this event happens now,
+	// before the client can signal it, rather than in the first compositor frame.
+	const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	VkTimelineSemaphoreSubmitInfo timeline_info = {
+	    .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+	    .waitSemaphoreValueCount = 1,
+	    .pWaitSemaphoreValues = &value,
+	};
+	VkSubmitInfo submit = {
+	    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+	    .pNext = &timeline_info,
+	    .waitSemaphoreCount = 1,
+	    .pWaitSemaphores = &csem->semaphore,
+	    .pWaitDstStageMask = &stage,
+	};
+
+	const int64_t begin_ns = os_monotonic_get_ns();
+	ret = vk_cmd_submit_locked(vk, vk->main_queue, 1, &submit, fence);
+	if (ret == VK_SUCCESS) {
+		ret = vk->vkWaitForFences(vk->device, 1, &fence, VK_TRUE, timeout_ns);
+	}
+	const int64_t elapsed_ns = os_monotonic_get_ns() - begin_ns;
+	if (ret == VK_TIMEOUT) {
+		// The submission may still be pending; keep the fence rather than destroy it in use.
+		U_LOG_E("Metal producer event GPU prime timed out after %lld ns (value=%llu)", (long long)elapsed_ns,
+		        (unsigned long long)value);
+		return XRT_TIMEOUT;
+	}
+	vk->vkDestroyFence(vk->device, fence, NULL);
+	if (ret != VK_SUCCESS) {
+		U_LOG_E("Metal producer event GPU prime failed: %s", vk_result_string(ret));
+		return XRT_ERROR_VULKAN;
+	}
+	U_LOG_I("Metal producer event GPU prime complete: value=%llu elapsed_ns=%lld", (unsigned long long)value,
+	        (long long)elapsed_ns);
+	return XRT_SUCCESS;
 }
