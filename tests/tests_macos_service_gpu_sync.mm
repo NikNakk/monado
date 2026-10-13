@@ -90,6 +90,7 @@ main(int argc, char **argv)
 			const bool array_three = argc > 1 && std::string(argv[1]) == "array-three";
 			const bool array_four = argc > 1 && std::string(argv[1]) == "array-four";
 			const bool array_test = array_three || array_four;
+			const bool quads_four = argc > 1 && std::string(argv[1]) == "quads-four";
 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
 			const uint64_t timeout_seconds = argc > 3 ? std::stoull(argv[3]) : 20;
 			if (timeout_seconds < 1 || timeout_seconds > 300)
@@ -188,7 +189,8 @@ main(int argc, char **argv)
 			// A head-locked quad keeps pixel samples valid while a worn or
 			// handled headset moves; the default stays world-locked.
 			const char *view_locked_env = getenv("GPU_SYNC_VIEW_LOCKED");
-			const bool view_locked = view_locked_env != nullptr && strcmp(view_locked_env, "1") == 0;
+			const bool view_locked =
+			    quads_four || (view_locked_env != nullptr && strcmp(view_locked_env, "1") == 0);
 			spaceInfo.referenceSpaceType =
 			    view_locked ? XR_REFERENCE_SPACE_TYPE_VIEW : XR_REFERENCE_SPACE_TYPE_LOCAL;
 			spaceInfo.poseInReferenceSpace.orientation.w = 1;
@@ -326,13 +328,23 @@ main(int argc, char **argv)
 				quad.pose.position.z = -1.5f;
 				// 2 m at 1.5 m spans about ±34°, covering each eye's sample point.
 				quad.size = view_locked ? XrExtent2Df{2, 2} : XrExtent2Df{1, 1};
-				const XrCompositionLayerBaseHeader *layer = (XrCompositionLayerBaseHeader *)&quad;
+				XrCompositionLayerQuad quads[4] = {quad, quad, quad, quad};
+				const XrCompositionLayerBaseHeader *layers[4];
+				unsigned quad_count = quads_four ? 4 : 1;
+				for (unsigned q = 0; q < quad_count; q++) {
+					if (quads_four) {
+						quads[q].pose.position.x = (q & 1) ? 0.45f : -0.45f;
+						quads[q].pose.position.y = (q & 2) ? 0.45f : -0.45f;
+						quads[q].size = {0.65f, 0.65f};
+					}
+					layers[q] = (XrCompositionLayerBaseHeader *)&quads[q];
+				}
 				XrFrameEndInfo end{};
 				end.type = XR_TYPE_FRAME_END_INFO;
 				end.displayTime = state.predictedDisplayTime;
 				end.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-				end.layerCount = 1;
-				end.layers = &layer;
+				end.layerCount = quad_count;
+				end.layers = layers;
 				uint64_t before = now_ns();
 				checked(xrEndFrame(session, &end), "end frame");
 				fprintf(stdout,

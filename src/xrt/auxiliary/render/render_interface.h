@@ -374,6 +374,10 @@ struct render_resources
 
 	VkQueryPool query_pool;
 
+	//! Opt-in compute pass queries, read only after the submission fence signals.
+	bool gpu_pass_timing;
+	//! 0: clear, 1: projection fast path, 2: layer composition then distortion.
+	uint32_t gpu_pass_path;
 
 
 	/*
@@ -681,6 +685,16 @@ render_resources_get_timestamps(struct render_resources *r, uint64_t *out_gpu_st
 bool
 render_resources_get_duration(struct render_resources *r, uint64_t *out_gpu_duration_ns);
 
+/*!
+ * Nonblocking pass-duration query. The caller must retire the submission fence
+ * before reading, and before recording the next frame into these resources.
+ * Durations include elapsed GPU contention within each bracket, not just active
+ * execution. Returns false when pass timing is disabled or results unavailable.
+ */
+bool
+render_resources_get_pass_durations(struct render_resources *r,
+                                   uint64_t *out_composition_ns,
+                                   uint64_t *out_distortion_ns);
 
 
 /*

@@ -164,6 +164,8 @@ struct comp_renderer
 
 #ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
 	FILE *renderer_stage_trace;
+	FILE *compositor_gpu_trace;
+	FILE *compositor_gpu_pass_trace;
 	uint64_t renderer_stage_trace_rows;
 	FILE *reprojection_trace;
 	uint64_t reprojection_trace_rows;
@@ -1262,6 +1264,49 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 			comp_target_info_gpu(r->c->target, (uint64_t)r->fenced_frame_id, gpu_start_ns, gpu_end_ns,
 			                     now_ns);
 		}
+#ifdef XRT_FEATURE_MACOS_TIMING_DIAGNOSTICS
+		// The fence above already guarantees query availability. Duration does
+		// not require MoltenVK to expose calibrated host timestamps.
+		if (debug_get_bool_option_comp_psvr2_timing_trace()) {
+			uint64_t duration_ns = 0;
+			if (render_resources_get_duration(&r->c->nr, &duration_ns)) {
+				if (r->compositor_gpu_trace == NULL) {
+					r->compositor_gpu_trace = u_timing_trace_open("compositor_gpu", 64 * 1024);
+					if (r->compositor_gpu_trace != NULL)
+						fputs("frame_id,gpu_duration_ns,feedback_ns\n",
+						      r->compositor_gpu_trace);
+				}
+				if (r->compositor_gpu_trace != NULL) {
+					fprintf(r->compositor_gpu_trace, "%lld,%llu,%llu\n",
+					        (long long)r->fenced_frame_id, (unsigned long long)duration_ns,
+					        (unsigned long long)os_monotonic_get_ns());
+					if (!u_timing_trace_fully_buffered())
+						fflush(r->compositor_gpu_trace);
+				}
+			}
+			uint64_t composition_ns = 0;
+			uint64_t distortion_ns = 0;
+			if (r->settings->use_compute &&
+			    render_resources_get_pass_durations(&r->c->nr, &composition_ns, &distortion_ns)) {
+				if (r->compositor_gpu_pass_trace == NULL) {
+					r->compositor_gpu_pass_trace = u_timing_trace_open("compositor_gpu_pass", 64 * 1024);
+					if (r->compositor_gpu_pass_trace != NULL) {
+						fputs("frame_id,path,composition_ns,distortion_ns,feedback_ns\n",
+						      r->compositor_gpu_pass_trace);
+					}
+				}
+				if (r->compositor_gpu_pass_trace != NULL) {
+					fprintf(r->compositor_gpu_pass_trace, "%lld,%u,%llu,%llu,%llu\n",
+					        (long long)r->fenced_frame_id, r->c->nr.gpu_pass_path,
+					        (unsigned long long)composition_ns, (unsigned long long)distortion_ns,
+					        (unsigned long long)os_monotonic_get_ns());
+					if (!u_timing_trace_fully_buffered()) {
+						fflush(r->compositor_gpu_pass_trace);
+					}
+				}
+			}
+		}
+#endif
 	}
 
 	if (r->c->nr.apple_source_debug.pending) {
@@ -1586,6 +1631,14 @@ renderer_fini(struct comp_renderer *r)
 		fflush(r->renderer_stage_trace);
 		fclose(r->renderer_stage_trace);
 		r->renderer_stage_trace = NULL;
+	}
+	if (r->compositor_gpu_trace != NULL) {
+		fclose(r->compositor_gpu_trace);
+		r->compositor_gpu_trace = NULL;
+	}
+	if (r->compositor_gpu_pass_trace != NULL) {
+		fclose(r->compositor_gpu_pass_trace);
+		r->compositor_gpu_pass_trace = NULL;
 	}
 	renderer_late_render_trace_close(r);
 	renderer_reprojection_trace_close(r);

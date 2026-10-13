@@ -720,7 +720,7 @@ render_compute_begin(struct render_compute *render)
 	    render->r->cmd,        //
 	    render->r->query_pool, //
 	    0,                     // firstQuery
-	    2);                    // queryCount
+	    render->r->gpu_pass_timing ? 6 : 2); // queryCount
 
 	vk->vkCmdWriteTimestamp(               //
 	    render->r->cmd,                    //
@@ -805,6 +805,7 @@ render_compute_layers(struct render_compute *render,
 	    descriptor_set);                    //
 
 	VkPipeline pipeline = do_timewarp ? r->compute.layer.timewarp_pipeline : r->compute.layer.non_timewarp_pipeline;
+
 	vk->vkCmdBindPipeline(              //
 	    render->r->cmd,                 //
 	    VK_PIPELINE_BIND_POINT_COMPUTE, // pipelineBindPoint

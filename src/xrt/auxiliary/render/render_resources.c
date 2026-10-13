@@ -27,6 +27,7 @@
 
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(macos_quad_bounds, "XRT_MACOS_COMPOSITOR_QUAD_BOUNDS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_gpu_pass_timing, "XRT_MACOS_GPU_PASS_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #endif
 
@@ -1085,12 +1086,16 @@ render_resources_init(struct render_resources *r,
 	 * Timestamp pool.
 	 */
 
+	r->gpu_pass_timing = false;
+#ifdef XRT_OS_OSX
+	r->gpu_pass_timing = debug_get_bool_option_macos_gpu_pass_timing();
+#endif
 	VkQueryPoolCreateInfo poolInfo = {
 	    .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
 	    .pNext = NULL,
 	    .flags = 0, // Reserved.
 	    .queryType = VK_QUERY_TYPE_TIMESTAMP,
-	    .queryCount = 2, // Start & end
+	    .queryCount = r->gpu_pass_timing ? 6 : 2, // Frame and optional pass pairs.
 	    .pipelineStatistics = 0, // Not used.
 	};
 
@@ -1281,6 +1286,25 @@ render_resources_get_duration(struct render_resources *r, uint64_t *out_gpu_dura
 	return true;
 }
 
+bool
+render_resources_get_pass_durations(struct render_resources *r,
+                                   uint64_t *out_composition_ns,
+                                   uint64_t *out_distortion_ns)
+{
+	if (!r->gpu_pass_timing) {
+		return false;
+	}
+	uint64_t ticks[4] = {0};
+	struct vk_bundle *vk = r->vk;
+	VkResult ret = vk->vkGetQueryPoolResults(vk->device, r->query_pool, 2, 4, sizeof(ticks), ticks,
+	                                       sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+	if (ret != VK_SUCCESS) {
+		return false;
+	}
+	*out_composition_ns = (uint64_t)((double)(ticks[1] - ticks[0]) * vk->features.timestamp_period);
+	*out_distortion_ns = (uint64_t)((double)(ticks[3] - ticks[2]) * vk->features.timestamp_period);
+	return true;
+}
 
 
 /*
