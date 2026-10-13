@@ -375,6 +375,7 @@ struct render_resources
 	VkQueryPool query_pool;
 
 
+
 	/*
 	 * Static
 	 */
@@ -504,6 +505,9 @@ struct render_resources
 
 			//! Get-or-create cache for layer.comp specialization variants.
 			struct render_layer_pipeline_cache *pipeline_cache;
+
+			//! Whether the quad bounds specialization and its CPU data are enabled.
+			bool quad_bounds_enabled;
 
 			//! Size of combined image sampler array
 			uint32_t image_array_size;
@@ -676,6 +680,7 @@ render_resources_get_timestamps(struct render_resources *r, uint64_t *out_gpu_st
  */
 bool
 render_resources_get_duration(struct render_resources *r, uint64_t *out_gpu_duration_ns);
+
 
 
 /*
@@ -1339,7 +1344,8 @@ struct render_compute_layer_ubo_data
 			uint32_t _padding0;
 		} image_info;
 
-		//! Shared between cylinder and equirect2.
+		//! Cylinder/equirect2 transform; for quads the first column holds
+		//! min/max view UV bounds when the quad-bounds pipeline is enabled.
 		struct xrt_matrix_4x4 mv_inverse;
 
 

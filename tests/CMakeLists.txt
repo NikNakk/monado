@@ -172,6 +172,45 @@ if(XRT_HAVE_VULKAN)
 		tests_render_pipeline_cache SYSTEM PRIVATE ${_aux_shaders_binary_dir}
 		)
 	add_dependencies(tests_render_pipeline_cache aux_shaders render_shader_specialization)
+	# Compile workgroup variants from the production shader; runtime defaults
+	# and specialization keys stay unchanged until hardware measurements justify it.
+	set(_distortion_source "${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders/distortion.comp")
+	set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_distortion_source}")
+	file(READ "${_distortion_source}" _distortion_glsl)
+	string(FIND "${_distortion_glsl}" "local_size_x = 8, local_size_y = 8" _group_declaration)
+	if(_group_declaration EQUAL -1)
+		message(FATAL_ERROR "Update distortion benchmark variants for the shader workgroup declaration")
+	endif()
+	set(_distortion_bench_headers)
+	foreach(_group 8x8 16x8 16x16)
+		string(REPLACE "x" ";" _dims "${_group}")
+		list(GET _dims 0 _x)
+		list(GET _dims 1 _y)
+		string(REPLACE "local_size_x = 8, local_size_y = 8"
+		       "local_size_x = ${_x}, local_size_y = ${_y}" _variant "${_distortion_glsl}")
+		set(_shader "${CMAKE_CURRENT_BINARY_DIR}/distortion_${_group}.comp")
+		file(CONFIGURE OUTPUT "${_shader}" CONTENT "${_variant}" @ONLY)
+		set(_header "${_shader}.h")
+		add_custom_command(OUTPUT "${_header}"
+			COMMAND ${GLSLANGVALIDATOR_COMMAND} -V --target-env spirv1.0
+				-I${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders
+				"${_shader}" --vn distortion_${_group} -o "${_header}"
+			DEPENDS "${_shader}" "${CMAKE_SOURCE_DIR}/src/xrt/auxiliary/render/shaders/srgb.inc.glsl")
+		list(APPEND _distortion_bench_headers "${_header}")
+	endforeach()
+	add_executable(
+		tests_render_compute tests_render_compute.cpp tests_projection_quad.cpp ${_distortion_bench_headers}
+		)
+	target_link_libraries(tests_render_compute PRIVATE aux_render aux_render_cache comp_util aux_vk aux_shaders xrt-external-catch2)
+	target_include_directories(tests_render_compute SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${_aux_shaders_binary_dir})
+	add_dependencies(tests_render_compute aux_shaders render_shader_specialization)
+	add_test(NAME tests_render_compute COMMAND tests_render_compute)
+	set_tests_properties(tests_render_compute PROPERTIES TIMEOUT 60 LABELS "gpu")
+	if(APPLE)
+		target_sources(tests_render_compute PRIVATE tests_macos_metal_device.mm)
+		target_link_libraries(tests_render_compute PRIVATE "-framework Metal")
+	endif()
+
 	if(APPLE)
 		add_executable(tests_macos_passthrough_rotation tests_macos_passthrough_rotation.mm)
 		target_compile_features(tests_macos_passthrough_rotation PRIVATE cxx_std_17)

@@ -19,6 +19,8 @@
 #include "math/m_api.h"
 #include "math/m_mathinclude.h"
 
+#include "render/render_quad_bounds.h"
+
 #include "util/u_misc.h"
 #include "util/u_trace_marker.h"
 
@@ -502,6 +504,9 @@ static inline void
 do_cs_quad_layer(const struct comp_layer *layer,
                  const struct xrt_matrix_4x4 *eye_view_mat,
                  const struct xrt_matrix_4x4 *world_view_mat,
+                 const struct xrt_normalized_rect *pre_transform,
+                 const struct render_viewport_data *target_view,
+                 bool use_quad_bounds,
                  uint32_t view_index,
                  uint32_t cur_layer,
                  uint32_t cur_image,
@@ -575,6 +580,11 @@ do_cs_quad_layer(const struct comp_layer *layer,
 	ubo_data->layers[cur_layer].quad_position.val = quad_position;
 	ubo_data->layers[cur_layer].quad_normal.val = normal_view_space;
 	ubo_data->layers[cur_layer].inverse_quad_transform = inverse_quad_transform;
+	if (use_quad_bounds) {
+		render_quad_view_bounds(&plane_transform_view_space, &q->size, pre_transform, target_view->w,
+		                        target_view->h, ubo_data->layers[cur_layer].mv_inverse.v);
+	}
+
 	ubo_data->layers[cur_layer].image_info.color_image_index = cur_image;
 	cur_image++;
 
@@ -959,19 +969,22 @@ comp_render_cs_layer(struct render_compute *render,
 			    &cur_image);              // out_cur_image
 		} break;
 		case XRT_LAYER_QUAD: {
-			do_cs_quad_layer(                  //
-			    layer,                         // layer
-			    &eye_view,                     // eye_view_mat
-			    &world_view_mat_scanout_begin, // world_view_mat_scanout_begin
-			    view_index,                    // view_index
-			    cur_layer,                     // cur_layer
-			    cur_image,                     // cur_image
-			    clamp_to_edge,                 // clamp_to_edge
-			    clamp_to_border_black,         // clamp_to_border_black
-			    src_samplers,                  // src_samplers
-			    src_image_views,               // src_image_views
-			    ubo_data,                      // ubo_data
-			    &cur_image);                   // out_cur_image
+			do_cs_quad_layer(                                 //
+			    layer,                                        // layer
+			    &eye_view,                                    // eye_view_mat
+			    &world_view_mat_scanout_begin,                // world_view_mat_scanout_begin
+			    pre_transform,                                // view UV to tangent transform
+			    target_view,                                  // pixel margin
+			    render->r->compute.layer.quad_bounds_enabled, // opt-in pipeline variant
+			    view_index,                                   // view_index
+			    cur_layer,                                    // cur_layer
+			    cur_image,                                    // cur_image
+			    clamp_to_edge,                                // clamp_to_edge
+			    clamp_to_border_black,                        // clamp_to_border_black
+			    src_samplers,                                 // src_samplers
+			    src_image_views,                              // src_image_views
+			    ubo_data,                                     // ubo_data
+			    &cur_image);                                  // out_cur_image
 		} break;
 		default:
 			// Should not get here!
@@ -1102,6 +1115,7 @@ comp_render_cs_dispatch(struct render_compute *render,
 
 	// We want to read from the images afterwards.
 	VkImageLayout transition_to = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
 
 	if (fast_path && layer->data.type == XRT_LAYER_PROJECTION) {
 		// Fast path.

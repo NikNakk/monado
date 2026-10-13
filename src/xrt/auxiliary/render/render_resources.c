@@ -23,10 +23,10 @@
 #include "cache/render_compute_pipeline_cache.h"
 #include "cache/render_shader_specialization_helpers.h"
 
-
 #include <stdio.h>
 
 #ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(macos_quad_bounds, "XRT_MACOS_COMPOSITOR_QUAD_BOUNDS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #endif
 
@@ -859,12 +859,22 @@ render_resources_init(struct render_resources *r,
 	    r->pipeline_cache);                  //
 	XVK_CHK_WITH_RET(xret, "render_layer_pipeline_cache_init", false);
 
-	const struct render_layer_spec layer_variants[] = {
+	struct render_layer_spec layer_variants[] = {
 	    render_make_layer_spec(VK_FALSE, VK_TRUE, r->compute.layer.image_array_size,
 	                           RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE),
 	    render_make_layer_spec(VK_TRUE, VK_TRUE, r->compute.layer.image_array_size,
 	                           RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE),
 	};
+
+#ifdef XRT_OS_OSX
+	r->compute.layer.quad_bounds_enabled = debug_get_bool_option_macos_quad_bounds();
+	if (r->compute.layer.quad_bounds_enabled) VK_INFO(r->vk, "Compute quad bounds rejection enabled");
+#else
+	r->compute.layer.quad_bounds_enabled = false;
+#endif
+	for (uint32_t i = 0; i < ARRAY_SIZE(layer_variants); ++i) {
+		layer_variants[i].use_quad_bounds = r->compute.layer.quad_bounds_enabled;
+	}
 
 	xret = render_layer_pipeline_cache_prewarm( //
 	    r->compute.layer.pipeline_cache,        //
@@ -891,6 +901,7 @@ render_resources_init(struct render_resources *r,
 	XVK_CHK_WITH_RET(xret, "render_layer_pipeline_cache_get", false);
 
 	VK_NAME_PIPELINE(vk, r->compute.layer.timewarp_pipeline, "render_resources compute layer timewarp pipeline");
+
 
 	// 64 KiB is the guaranteed-safe maxUniformBufferRange on common drivers,
 	// including MoltenVK; the per-layer depth data leaves little headroom.
@@ -1079,7 +1090,7 @@ render_resources_init(struct render_resources *r,
 	    .pNext = NULL,
 	    .flags = 0, // Reserved.
 	    .queryType = VK_QUERY_TYPE_TIMESTAMP,
-	    .queryCount = 2,         // Start & end
+	    .queryCount = 2, // Start & end
 	    .pipelineStatistics = 0, // Not used.
 	};
 
@@ -1269,6 +1280,7 @@ render_resources_get_duration(struct render_resources *r, uint64_t *out_gpu_dura
 
 	return true;
 }
+
 
 
 /*
