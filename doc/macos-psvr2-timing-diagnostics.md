@@ -3583,3 +3583,49 @@ priority-related. Priority 0 costs Home nothing: 94–100 new frames/s against
 Home itself stays below 120 fps (about 93–100) in every mode. So priority 0 is
 neutral on Home; its benefit needs a GPU-saturating app, such as Half-Life:
 Alyx or a heavy UE scene, still to be tested.
+
+**Unreal Engine A/B (2026-10-13).** `MonadoMacTest` with `-game -vr`, launched
+through `open` against an isolated `build/arm64` service (LaunchAgent
+environment). `XR_RUNTIME_JSON` pointed at the build's runtime, and
+`XRT_MACOS_CLIENT_COMPOSITOR=1` as in the normal client environment: the
+compositor runs in UE's process, and UE's log confirms foreground 1 → 0 on its
+compositor queue in priority-0 runs. A–B–B–A, 30 s settle, 60 s measurement,
+raw traces under `/tmp/monado-ue-ab-20261013`. "UE frames/s" counts new client
+frames latched; "compositor GPU" is the elapsed query interval
+(`compositor_gpu.csv`).
+
+| Scene | Run | Hz | Gaps >12.5 ms | Enqueue→glass p50 | Compositor GPU p50 / p95 | UE frames/s |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Full (GPU-saturated) | A1 default | 119.67 | 0.10% | 19.42 ms | 3.12 / 5.69 ms | 14.2 |
+| | B1 priority 0 | 119.68 | 0.04% | 19.42 ms | 2.75 / 3.05 ms | 10.3 |
+| | B2 priority 0 | 119.63 | 0.10% | 19.41 ms | 3.14 / 3.36 ms | 8.2 |
+| | A2 default | 118.19 | 1.32% | 19.41 ms | 3.97 / 8.72 ms | 10.8 |
+| Light (`-dpcvars`) | A1 default | 119.82 | 0.05% | 19.38 ms | 5.12 / 6.20 ms | 37.7 |
+| | B1 priority 0 | 119.72 | 0.08% | 19.37 ms | 3.09 / 3.33 ms | 36.9 |
+| | B2 priority 0 | 119.60 | 0.10% | 19.37 ms | 3.38 / 3.66 ms | 31.4 |
+| | A2 default | 118.60 | 1.00% | 19.35 ms | 6.35 / 8.32 ms | 30.6 |
+
+The light scene used `-dpcvars=vr.PixelDensity=0.6,r.Nanite=0,
+r.DynamicGlobalIlluminationMethod=0,r.ReflectionMethod=0,
+r.Lumen.DiffuseIndirect.Allow=0,r.Lumen.Reflections.Allow=0,
+r.Shadow.Virtual.Enable=0,r.AntiAliasingMethod=2,r.MotionBlurQuality=0,
+r.VolumetricFog=0`. That roughly tripled UE's rate, from ~14 to 31–38 frames/s.
+
+- **Client compositing already holds cadence at default priority,** even with
+  UE saturating the GPU. In both sessions, though, the late default run
+  degrades: 1.0–1.3% long gaps, and compositor GPU p95 8.3–8.7 ms. Priority-0
+  runs stay at 0.04–0.10%.
+- **Priority 0 makes the compositor's GPU work faster and steadier:** p95
+  3.0–3.7 ms against 5.7–8.7 ms. At default, UE's rendering stretches it.
+- **App cost:** none in the light scene (A–B–B–A means 34.2 against 34.2
+  frames/s). UE's rate drifts down through each session, probably thermally,
+  which A–B–B–A cancels only if it is linear. In the saturated scene the means
+  are 12.5 against 9.3 frames/s, but the same drift confounds it. A cost to a
+  GPU-saturated app remains possible.
+- Latency is unchanged throughout.
+
+**Status.** Priority 0 benefits both compositing modes: decisively for the
+service compositor under contention, and as steadier compositor timing for
+client compositing, with no measured cost to a playable app or SteamVR Home.
+Pending before a default change: a worn trial, and a longer saturated-app run
+with thermal state logged.
