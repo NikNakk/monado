@@ -25,6 +25,8 @@ now measures substantial pose-wait overlap during Home's keyed ownership.
 The subsequent [vsync trial](macos-steamvr-vsync-trial.md) keeps notifications
 alive through source stalls but does not resolve loaded Home acquire delays;
 the unsuccessful clock experiment is removed.
+Re-analysis finds SteamVR starting at 90 Hz and Home holding the token in
+WaitGetPoses until its next frame; a refresh-rate and handoff trial is built.
 
 > **Visual regression resolved:** the user confirms the explicit macOS
 > output-image barrier removes black noise with diagnostic readbacks off.

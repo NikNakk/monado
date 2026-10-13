@@ -26,6 +26,8 @@ now attributes substantial sampled Home ownership to WaitGetPoses overlap.
 The subsequent [vsync trial](macos-steamvr-vsync-trial.md) removes notification
 gaps but does not resolve loaded Home acquisition stalls. The experiment is
 removed; no synchronization policy or visual fix is promoted.
+Re-analysis finds SteamVR starting at 90 Hz and Home holding the token in
+WaitGetPoses until its next frame; a refresh-rate and handoff trial is built.
 
 See the [2026-10-03 inherited compositor audit](macos-inherited-compositor-audit.md)
 for this investigation's changes, additional defects and selective upstream
