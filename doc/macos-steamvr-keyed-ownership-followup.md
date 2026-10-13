@@ -342,3 +342,22 @@ Home moves from three to two refreshes per frame. At level 3 it still needs
 about 13 ms of GPU per frame, so one refresh (8.3 ms) is out of reach without
 a lower level. The proper fix is DXMT timestamps that measure GPU time, so
 Source 2's auto-fidelity and SteamVR's timing work as on Windows.
+
+### Home's own GPU timings under-read — 2026-10-14
+
+DXMT branch `claude/timestamp-queries` (worktree `~/Code/dxmt-timestamp`:
+756a657, the installed diagnostics patch, then `df4e91d`) resolves D3D11
+timestamp queries from Metal counter samples instead of each command
+buffer's `GPUEndTime`. Its fixture under Wine agrees with the old readback
+except where work is queued before the first query in the same command
+buffer (render-target clears: old 2.885 ms, new 6.582 ms, for about 7 ms of
+work). Not yet installed.
+
+Run A, `run-mwxr-20261014-004534`, kept the installed DXMT and turned Home's
+auto-fidelity back on (`+vr_fidelity_level_auto 1`, with spew and
+`-condebug`). Home's console log shows its GPU frame-time readings are
+mostly 0.3–2.7 ms, against about 18 ms measured by Metal System Trace. It
+climbs a level every five frames to level 8 (8x MSAA, 1770×1804). Occasional
+correct readings (8–30 ms) drop it a few levels, after which the next
+sub-millisecond readings take it straight back to 8. Run B, with the new
+`d3d11.dll` installed, is next.
