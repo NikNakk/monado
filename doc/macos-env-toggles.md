@@ -1231,3 +1231,16 @@ startups still hung. See
 
 Remove it, or make it a default, after the traced and worn tests in
 [the steady-state latency breakdown](macos-psvr2-timing-diagnostics.md#steady-state-latency-where-the-second-refresh-goes-2026-10-13).
+
+
+## Metal GPU queue priority (2026-10-13)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `XRT_MACOS_GPU_QUEUE_PRIORITY` | unset | Opt-in. Set the private Metal GPU priority of the compositor's MoltenVK queue and the presenter's queue: `0` highest, `1` macOS default, `2` lowest. When unset, both are only logged. Other values are rejected; Metal aborts the process on an invalid foreground value, so the code validates first. |
+
+Monado's Vulkan `QUEUE_GLOBAL_PRIORITY_HIGH` is accepted by MoltenVK but has no
+GPU effect; this sets the Metal queues directly through private IOGPU selectors,
+each checked with `respondsToSelector:`. The background priority stays 2
+whatever is requested. See
+[the priority evidence](macos-psvr2-timing-diagnostics.md#metal-gpu-queue-priority-2026-10-13).

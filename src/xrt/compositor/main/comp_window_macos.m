@@ -24,6 +24,7 @@
 #include "math/m_api.h"
 #include "util/u_timing_trace.h"
 #include "util/u_gpu_trace.h"
+#include "util/comp_metal_gpu_priority.h"
 #include "util/u_gpu_trace_present.h"
 #include "util/u_frame_share.h"
 #include "util/u_handles.h"
@@ -1722,6 +1723,7 @@ comp_window_macos_init_vulkan(struct comp_target *ct, uint32_t preferred_width, 
 	if (cwm->render_complete_event == nil) {
 		macos_disable_drawable_slot_without_shared_event(cwm);
 	}
+	comp_metal_gpu_priority_apply(vk, (__bridge void *)cwm->present_queue);
 	return true;
 }
 
