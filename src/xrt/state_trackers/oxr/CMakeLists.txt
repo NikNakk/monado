@@ -61,6 +61,7 @@ add_library(
 	oxr_api_system.c
 	oxr_api_verify.h
 	oxr_api_xdev.c
+	oxr_layer_color_scale_bias.h
 	oxr_chain.h
 	oxr_event.c
 	oxr_frame_sync.c

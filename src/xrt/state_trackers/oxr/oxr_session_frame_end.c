@@ -31,6 +31,7 @@
 #include "oxr_chain.h"
 #include "oxr_api_verify.h"
 #include "oxr_chain.h"
+#include "oxr_layer_color_scale_bias.h"
 #include "oxr_xret.h"
 #include "oxr_roles.h"
 
@@ -207,15 +208,6 @@ convert_layer_settings_flags(XrCompositionLayerSettingsFlagsFB xr_layer_settings
 }
 #endif // OXR_HAVE_FB_composition_layer_settings
 
-XRT_MAYBE_UNUSED static void
-fill_in_xr_color(const struct XrColor4f *src, struct xrt_colour_rgba_f32 *dest)
-{
-	dest->r = src->r;
-	dest->g = src->g;
-	dest->b = src->b;
-	dest->a = src->a;
-}
-
 static void
 fill_in_color_scale_bias(struct oxr_session *sess,
                          const XrCompositionLayerBaseHeader *layer,
@@ -229,11 +221,7 @@ fill_in_color_scale_bias(struct oxr_session *sess,
 
 	const XrCompositionLayerColorScaleBiasKHR *color_scale_bias = OXR_GET_INPUT_FROM_CHAIN(
 	    layer->next, XR_TYPE_COMPOSITION_LAYER_COLOR_SCALE_BIAS_KHR, XrCompositionLayerColorScaleBiasKHR);
-	if (color_scale_bias) {
-		xlayer_data->flags |= XRT_LAYER_COMPOSITION_COLOR_BIAS_SCALE;
-		fill_in_xr_color(&color_scale_bias->colorScale, &xlayer_data->color_scale);
-		fill_in_xr_color(&color_scale_bias->colorBias, &xlayer_data->color_bias);
-	}
+	oxr_layer_set_color_scale_bias(color_scale_bias, xlayer_data);
 #endif // OXR_HAVE_KHR_composition_layer_color_scale_bias
 }
 
