@@ -17,6 +17,7 @@ add_library(
 	comp_layer_accum.h
 	comp_layer_accum.c
 	comp_render.h
+	comp_projection_fast_path.h
 	comp_render_cs.c
 	comp_render_gfx.c
 	comp_render_helpers.h

@@ -1,6 +1,7 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 #include "render_compute_test_fixture.h"
+#include "util/comp_projection_fast_path.h"
 
 TEST_CASE("Distortion workgroups preserve stereo pixels and feature paths", "[aux_render][gpu]")
 {
@@ -268,4 +269,39 @@ TEST_CASE("Competing GPU load", "[.][aux_render][gpu][gpu_load]")
 			os_nanosleep(before + 8333333ull - now);
 	}
 	REQUIRE(batch > 0);
+}
+
+TEST_CASE("Projection fast-path diagnostic identifies all policy gates", "[aux_render]")
+{
+	xrt_layer_data layer{};
+	layer.type = XRT_LAYER_PROJECTION;
+	auto reasons = [&](unsigned count, bool passthrough = false, bool peek = false,
+	                   bool mirror = false, bool disabled = false) {
+		return comp_projection_fast_path_rejections(count, count ? &layer : nullptr,
+		                                           passthrough, peek, mirror, disabled);
+	};
+	CHECK(reasons(1) == 0);
+	CHECK(reasons(0) == COMP_FAST_PATH_LAYER_COUNT);
+	CHECK(reasons(2) == COMP_FAST_PATH_LAYER_COUNT);
+	CHECK(reasons(1, true) == COMP_FAST_PATH_PASSTHROUGH);
+	CHECK(reasons(1, false, true) == COMP_FAST_PATH_PEEK);
+	CHECK(reasons(1, false, false, true) == COMP_FAST_PATH_DEBUG_MIRROR);
+	CHECK(reasons(1, false, false, false, true) == COMP_FAST_PATH_DEBUG_DISABLED);
+	CHECK(reasons(1, true, true, true, true) == (COMP_FAST_PATH_PASSTHROUGH | COMP_FAST_PATH_PEEK |
+	                                         COMP_FAST_PATH_DEBUG_MIRROR | COMP_FAST_PATH_DEBUG_DISABLED));
+	layer.flags = XRT_LAYER_COMPOSITION_COLOR_BIAS_SCALE;
+	CHECK(reasons(1) == COMP_FAST_PATH_COLOR_SCALE_BIAS);
+	layer.flags = (xrt_layer_composition_flags)0;
+	layer.proj.chroma_key.curve = .5f;
+	CHECK(reasons(1) == COMP_FAST_PATH_CHROMA_KEY);
+	layer.proj.chroma_key.curve = 0;
+	layer.proj.v[0].foveation.enabled = 1;
+	CHECK(reasons(1) == 0); // Supported by distortion-only rendering.
+	layer.type = XRT_LAYER_PROJECTION_DEPTH;
+	layer.depth.chroma_key.curve = .5f;
+	CHECK(reasons(1) == COMP_FAST_PATH_CHROMA_KEY);
+	layer.depth.chroma_key.curve = 0;
+	CHECK(reasons(1) == 0);
+	layer.type = XRT_LAYER_QUAD;
+	CHECK(reasons(1) == COMP_FAST_PATH_LAYER_TYPE);
 }

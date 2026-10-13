@@ -26,7 +26,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 LABEL = "org.freedesktop.monado.service"
-CLIENT_TRACES = ("shared_tracking", "late_render", "presented", "frame_pipeline", "reprojection", "client_gpu",
+CLIENT_TRACES = ("composition", "shared_tracking", "late_render", "presented", "frame_pipeline", "reprojection", "client_gpu",
                  "present", "present_complete", "present_scheduled", "present_worker", "drawable_prefetch", "ca_callback")
 SERVER_TRACES = ("imu", "slam", "appkit_pump")
 UE_LOW_COST_COMMANDS = (
@@ -228,6 +228,10 @@ def capture(args):
                       UE_OPENXR_LOADER_LIBRARY="/usr/local/lib/libopenxr_loader.dylib",
                       PSVR2_TIMING_TRACE="1", PSVR2_TIMING_TRACE_FULLY_BUFFERED="1",
                       PSVR2_TIMING_TRACE_DIR=str(out / "client"))
+    # Hosted rendering owns queues in the client process. Preserve the installed
+    # GPU-priority setting there as well as in the captured service environment.
+    if "XRT_MACOS_GPU_QUEUE_PRIORITY" in env:
+        client_env["XRT_MACOS_GPU_QUEUE_PRIORITY"] = env["XRT_MACOS_GPU_QUEUE_PRIORITY"]
     argv = ["open", "-n", "-W", "--stdout", str(out / "client.log"), "--stderr", str(out / "client.log")]
     for key, value in client_env.items():
         argv += ["--env", f"{key}={value}"]
