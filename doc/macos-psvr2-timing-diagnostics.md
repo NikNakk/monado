@@ -3556,3 +3556,30 @@ Before a default change: test a real heavy game, and the client-hosted (Game
 Mode) path, where the setting applies in the game's process. Measure the
 game's own frame rate cost, and do a worn check. Private API: re-verify on each
 macOS update; the selectors are checked before use and values validated.
+
+**SteamVR Home A/B (2026-10-13).** Windows SteamVR through `macos-wine-xr`
+isolated mode, with the `build/arm64` service (`eba73e3ba` plus uncommitted
+Codex experiments, all off). Each run used the installed LaunchAgent's
+environment (PS Sense 6DoF, camera streams, timing traces). Built-in display
+on; no added competitor. The Wine client (`build/x86_64`, `6f96e49ee`) needed
+`IPC_IGNORE_VERSION=1`: the IPC protocol is byte-identical, but the git-tag
+check otherwise makes SteamVR report no headset. Runs alternated default and
+`XRT_MACOS_GPU_QUEUE_PRIORITY=0`, measuring 60 s after a 60 s settle (traces:
+`~/psvr2-trace`, PIDs 1682/2051/2312/2643). The service log confirms
+foreground 1 → 0 on the compositor queue in priority-0 runs.
+
+| Run | Physical Hz | Gaps >12.5 ms | Max gap | Enqueue→glass p50 / p95 | Home new frames/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A1 default | 118.93 | 0.77% | 25.0 ms | 19.34 / 27.62 ms | 40.6 (warm-up) |
+| B1 priority 0 | 119.20 | 0.57% | 16.7 ms | 19.29 / 19.42 ms | 99.5 |
+| B2 priority 0 | 118.01 | 1.21% | 150.1 ms | 19.30 / 19.43 ms | 93.9 |
+| A2 default | 117.83 | 1.43% | 125.1 ms | 19.31 / 19.43 ms | 92.8 |
+
+Home does not load the GPU enough to contend with the compositor. Cadence and
+latency match with and without priority 0, and the remaining gaps (WindowServer
+bursts, plus single 125–150 ms stalls in one run of each mode) are not
+priority-related. Priority 0 costs Home nothing: 94–100 new frames/s against
+93 in the matched default run. A1 is the first run, probably still loading.
+Home itself stays below 120 fps (about 93–100) in every mode. So priority 0 is
+neutral on Home; its benefit needs a GPU-saturating app, such as Half-Life:
+Alyx or a heavy UE scene, still to be tested.
