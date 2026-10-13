@@ -90,6 +90,7 @@ main(int argc, char **argv)
 			const bool array_three = argc > 1 && std::string(argv[1]) == "array-three";
 			const bool array_four = argc > 1 && std::string(argv[1]) == "array-four";
 			const bool array_test = array_three || array_four;
+			const bool projection_only = argc > 1 && std::string(argv[1]) == "projection-only";
 			const bool projection_quads = argc > 1 && std::string(argv[1]) == "projection-quads-four";
 			const bool quads_four = projection_quads || (argc > 1 && std::string(argv[1]) == "quads-four");
 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
@@ -334,8 +335,8 @@ main(int argc, char **argv)
 				const XrCompositionLayerBaseHeader *layers[5];
 				XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
 				XrCompositionLayerProjectionView projection_views[2]{};
-				unsigned projection_count = projection_quads ? 1 : 0;
-				if (projection_quads) {
+				unsigned projection_count = projection_only || projection_quads ? 1 : 0;
+				if (projection_count) {
 					XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
 					locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 					locate.displayTime = state.predictedDisplayTime;
@@ -356,7 +357,7 @@ main(int argc, char **argv)
 					projection.views = projection_views;
 					layers[0] = (XrCompositionLayerBaseHeader *)&projection;
 				}
-				unsigned quad_count = quads_four ? 4 : 1;
+				unsigned quad_count = projection_only ? 0 : quads_four ? 4 : 1;
 				for (unsigned q = 0; q < quad_count; q++) {
 					if (quads_four) {
 						quads[q].pose.position.x = (q & 1) ? 0.45f : -0.45f;
