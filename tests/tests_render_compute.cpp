@@ -281,6 +281,11 @@ TEST_CASE("Projection fast-path diagnostic identifies all policy gates", "[aux_r
 		                                           passthrough, peek, mirror, disabled);
 	};
 	CHECK(reasons(1) == 0);
+	layer.flags = XRT_LAYER_COMPOSITION_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+	CHECK(reasons(1) == 0); // Alpha handling is already supported.
+	layer.flags = (xrt_layer_composition_flags)(layer.flags | XRT_LAYER_COMPOSITION_UNPREMULTIPLIED_ALPHA_BIT);
+	CHECK(reasons(1) == 0);
+	layer.flags = (xrt_layer_composition_flags)0;
 	CHECK(reasons(0) == COMP_FAST_PATH_LAYER_COUNT);
 	CHECK(reasons(2) == COMP_FAST_PATH_LAYER_COUNT);
 	CHECK(reasons(1, true) == COMP_FAST_PATH_PASSTHROUGH);
