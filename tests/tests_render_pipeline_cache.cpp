@@ -6,6 +6,7 @@
  */
 
 #include "catch_amalgamated.hpp"
+#include "render_vulkan_test_context.h"
 
 #include "cache/render_compute_pipeline_cache.h"
 #include "cache/render_compute_pipeline_cache.hpp"
@@ -13,8 +14,6 @@
 
 #include "render/render_interface.h"
 
-#include "util/comp_vulkan.h"
-#include "util/u_extension_list.h"
 #include "vk/vk_helpers.h"
 #include "xrt/xrt_defines.h"
 
@@ -26,11 +25,6 @@
 #include <cstddef>
 #include <cstring>
 #include <type_traits>
-
-#ifdef XRT_OS_OSX
-extern "C" bool
-tests_macos_has_metal_device(void);
-#endif
 
 namespace {
 
@@ -65,89 +59,6 @@ make_test_blit_ms_spec(int32_t color_transform_mode = 0)
 	return render_make_blit_ms_spec((uint32_t)color_transform_mode);
 }
 
-struct MinimalVulkanContext
-{
-	vk_bundle vk{};
-
-	~MinimalVulkanContext()
-	{
-		shutdown();
-	}
-
-	bool
-	init()
-	{
-#ifdef XRT_OS_OSX
-		// Hosted macOS VMs may not expose a Metal GPU. Avoid entering the ICD
-		// in that case; the fixture reports the unavailable device as a skip.
-		if (!tests_macos_has_metal_device()) {
-			return false;
-		}
-#endif
-		static const char *required_instance_extensions[] = {nullptr};
-		static const char *optional_instance_extensions[] = {
-		    VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
-#ifdef XRT_OS_OSX
-		    VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
-#endif
-		};
-		static const char *required_device_extensions[] = {nullptr};
-		static const char *optional_device_extensions[] = {
-#ifdef XRT_OS_OSX
-		    "VK_KHR_portability_subset", // May be absent from non-beta Vulkan headers.
-#endif
-		    nullptr,
-		};
-
-		auto required_instance_ext_list = u_extension_list_create_from_array(
-		    required_instance_extensions, ARRAY_SIZE(required_instance_extensions));
-		auto optional_instance_ext_list = u_extension_list_create_from_array(
-		    optional_instance_extensions, ARRAY_SIZE(optional_instance_extensions));
-		auto required_device_ext_list = u_extension_list_create_from_array(
-		    required_device_extensions, ARRAY_SIZE(required_device_extensions));
-		auto optional_device_ext_list = u_extension_list_create_from_array(
-		    optional_device_extensions, ARRAY_SIZE(optional_device_extensions));
-
-		struct comp_vulkan_arguments vk_args = {
-		    .required_instance_version = VK_MAKE_VERSION(1, 0, 0),
-		    .get_instance_proc_address = vkGetInstanceProcAddr,
-		    .required_instance_extensions = required_instance_ext_list,
-		    .optional_instance_extensions = optional_instance_ext_list,
-		    .required_device_extensions = required_device_ext_list,
-		    .optional_device_extensions = optional_device_ext_list,
-		    .log_level = U_LOGGING_WARN,
-		    .only_compute_queue = false,
-		    .timeline_semaphore = false,
-		    .selected_gpu_index = -1,
-		    .lookup_with_uuid = false,
-		    .selected_gpu_uuid = {},
-		    .client_gpu_index = -1,
-		};
-
-		struct comp_vulkan_results vk_res = {};
-		const bool ok = comp_vulkan_init_bundle(&vk, &vk_args, &vk_res);
-
-		u_extension_list_destroy(&required_instance_ext_list);
-		u_extension_list_destroy(&optional_instance_ext_list);
-		u_extension_list_destroy(&required_device_ext_list);
-		u_extension_list_destroy(&optional_device_ext_list);
-
-		return ok;
-	}
-
-	void
-	shutdown()
-	{
-		if (vk.device != VK_NULL_HANDLE) {
-			vk.vkDeviceWaitIdle(vk.device);
-			vk.vkDestroyDevice(vk.device, nullptr);
-		}
-		if (vk.instance != VK_NULL_HANDLE) {
-			vk.vkDestroyInstance(vk.instance, nullptr);
-		}
-		vk = {};
-	}
-};
 
 VkShaderModule
 create_distortion_shader_module(vk_bundle *vk)
@@ -627,8 +538,8 @@ TEST_CASE("render_distortion C pipeline cache wrapper", "[aux_render][pipeline_c
 TEST_CASE("render_layer_spec is a padding-free specialization key", "[aux_render][pipeline_cache]")
 {
 	STATIC_REQUIRE(std::is_trivially_copyable_v<render_layer_spec>);
-	// layer.comp has four specialization constants; the generated POD stores each as a 4-byte field.
-	STATIC_REQUIRE(sizeof(render_layer_spec) == 4u * sizeof(int32_t));
+	// layer.comp has five specialization constants; the generated POD stores each as a 4-byte field.
+	STATIC_REQUIRE(sizeof(render_layer_spec) == 5u * sizeof(int32_t));
 	// Must match k_inset_blend_edge default in layer.comp.
 	STATIC_REQUIRE(RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE == 0.05f);
 
@@ -637,6 +548,7 @@ TEST_CASE("render_layer_spec is a padding-free specialization key", "[aux_render
 	CHECK(key.do_color_correction == VK_TRUE);
 	CHECK(key.sampler_array_size == 16);
 	CHECK(key.inset_blend_edge == RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE);
+	CHECK(key.use_quad_bounds == VK_FALSE);
 }
 
 TEST_CASE("ComputePipelineCache<render_layer_spec> caches by key", "[aux_render][pipeline_cache][gpu]")
@@ -657,6 +569,12 @@ TEST_CASE("ComputePipelineCache<render_layer_spec> caches by key", "[aux_render]
 
 	CHECK(first == second);
 	CHECK(first != timewarp_pipeline);
+	auto bounded = non_timewarp;
+	bounded.use_quad_bounds = VK_TRUE;
+	VkPipeline bounded_pipeline = VK_NULL_HANDLE;
+	REQUIRE(fixture.cache.get(&fixture.ctx.vk, bounded, bounded_pipeline) == VK_SUCCESS);
+	CHECK(first != bounded_pipeline);
+
 }
 
 TEST_CASE("render_layer C pipeline cache wrapper", "[aux_render][pipeline_cache][gpu]")

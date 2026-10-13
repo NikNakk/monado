@@ -60,6 +60,9 @@ layout(constant_id = 3) const int k_sampler_array_size = 16;
 //! See RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE in render_interface.h for default value.
 layout(constant_id = 4) const float k_inset_blend_edge = 0.0;
 
+// Opt-in conservative quad rejection; false preserves the original pipeline.
+layout(constant_id = 5) const bool k_use_quad_bounds = false;
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 // layer 0 color, [optional: layer 0 depth], layer 1, ...
@@ -636,6 +639,16 @@ vec3 get_direction(vec2 uv)
 
 vec4 do_quad(vec2 view_uv, uint layer)
 {
+	// mv_inverse is used by cylinder/equirect layers. For quads, its first
+	// column holds conservative min/max view UVs when this variant is enabled.
+	if (k_use_quad_bounds) {
+		vec4 bounds = LAYER.mv_inverse[0];
+		if (view_uv.x < bounds.x || view_uv.y < bounds.y ||
+		    view_uv.x > bounds.z || view_uv.y > bounds.w) {
+			return vec4(0.0);
+		}
+	}
+
 	uint source_image_index = LAYER.image_info.color_image_index;
 
 	// center point of the plane in view space.
