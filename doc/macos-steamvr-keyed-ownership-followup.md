@@ -80,3 +80,118 @@ Raw trace and summary are in `/tmp/monado-steamvr-keyed-followup-20261013/`;
 Wine history came from the existing prefix server's
 `~/Windows/logs/run-mwxr-20261013-183706/steam.log`. Only code and this concise
 record are retained in Git. External bridge/DXMT uncommitted work was preserved.
+
+## Handoff order and the 90 Hz start — 2026-10-13
+
+Interleaving the 21:40 run's server history with the shim trace shows the
+same cycle every Home frame (the mutex is SteamVR's sync texture, key 0):
+
+| ms | Event |
+| ---: | --- |
+| 0 | Home enters WaitGetPoses and releases |
+| 0.02–0.4 | vrcompositor acquires and releases |
+| 0.6–0.8 | driver Present acquires and releases |
+| 1.2 | Home re-acquires, still in WaitGetPoses |
+| 13–15 | WaitGetPoses returns; render; two Submits |
+| ~18 | vrcompositor queues an acquire (`0x103`) right after Submit |
+| 22–24 | next WaitGetPoses; release |
+
+Home holds the token about 97% of the time, almost all of it inside
+WaitGetPoses, and only gives it up at its next WaitGetPoses, 4–7 ms after its
+last Submit. It never calls PostPresentHandoff. The cycle averages about
+22.7 ms, about 2 × 11.1 ms rather than a 120 Hz multiple. Every SteamVR start
+in `vrcompositor.txt` logs `Updated HMD Prop_DisplayFrequency_Float to
+90.000000`, and Home's session stats report `FPS Average Target 90`. The bridge
+driver started from its `displayFrequency` default of 90 and only reported
+119.88 Hz about 0.6 s after the compositor had initialised; the compositor
+logs no change. The working hypothesis is that SteamVR throttles Home against
+a 90 Hz budget (half rate under load), and that the long holds are that
+throttle. The heartbeat trial kept vsync events flowing but could not change
+it.
+
+Separately, the driver's "vsync to photons" moved 16.7 → 25 → 91.8 ms
+(12 refreshes) in the 22:41 run. The driver's OpenXR frame begins in
+PostPresent and ends in the next Present, after its up-to-100 ms source
+acquire, so Monado's app pacer counts Home's hold as app frame time. Not yet
+changed.
+
+Two bridge changes are built for a hardware trial (not committed or
+tested on hardware):
+
+- The driver reports the runtime's refresh rate from activation; the
+  `displayFrequency` setting now defaults to 0 and only overrides it. The
+  first version used `xrGetDisplayRefreshRateFB`, which the bridge's Wine-side
+  runtime does not pass through, so run `run-mwxr-20261013-232237` (isolated
+  `build/arm64` service at `6393b6592`) still started SteamVR at 90 Hz. The
+  driver now falls back to the shortest period of eight empty frames. Check that
+  `vrcompositor.txt` logs 120 at start-up and Home's stats target 120.
+- The OpenVR shim traces PostPresentHandoff, and with
+  `MWXR_OPENVR_SHIM_HANDOFF=1` calls it after both eyes are submitted. Its
+  fixture passes. Run it as a separate A/B after the frequency change, since
+  Home may still draw its desktop window after Submit.
+
+Compare Home's cycle, WaitGetPoses duration, ownership holds and driver/
+compositor acquire timeouts against this run.
+
+That 90 Hz run is a second baseline with the shim tracing PostPresentHandoff:
+Home made no PostPresentHandoff calls. The shim's five-second "calls/s" counts
+each frame twice, because Home's IVRCompositor_024 and _025 wrappers nest;
+the figures below merge nested calls from the trace.
+
+### Refresh-rate A/B — 2026-10-13
+
+Both runs: isolated `build/arm64` service at `6393b6592`, installed LaunchAgent
+environment, shim tracing, handoff injection off, Home only. Steady state
+excludes the first 60 s. One run each, with different session lengths and
+Home activity, so this is indicative rather than a controlled benchmark.
+
+| | `232237`, 90 Hz start | `233833`, 120 Hz start |
+| --- | ---: | ---: |
+| SteamVR compositor frequency | 90 | 120.000008 |
+| Home frames/s (steady) | 25.0 | 34.9 |
+| Frame period p10 / p50 / p90 | 24.3 / 34.4 / 54.6 ms | 16.7 / 25.1 / 34.1 ms |
+| Periods > 50 ms | 694 | 229 |
+| WaitGetPoses p50 / p90 | 20.5 / 36.9 ms | 19.4 / 25.1 ms |
+| SteamVR ApplicationTime CPU / GPU | 10.82 / 1.58 ms | 8.04 / 0.95 ms |
+| SteamVR "Timed out" presents | 173 | 272 |
+| Driver vsync-to-photons | up to 75 ms | 42–67 ms typical |
+
+Starting SteamVR at the real refresh rate is an improvement: more frames,
+fewer long gaps, a tighter wait tail. Home still runs at a median of three
+refreshes per frame. Its measured CPU time (8.04 ms) sits at the 8.33 ms
+budget, while its GPU time is about 1 ms. That CPU time runs from
+WaitGetPoses returning until the next WaitGetPoses, because Home never hands
+off, so it includes Home's post-Submit work. The driver still logged 100 ms
+source-acquire failures (empty frames, seen as black) at 23:39:41, 23:40:03,
+23:40:06, 23:40:15 and 23:40:32; the log samples after five. The next run
+adds `MWXR_OPENVR_SHIM_HANDOFF=1` with the same refresh-rate fix.
+
+
+### Handoff A/B — 2026-10-13
+
+Run `234437` repeats `233833` (120 Hz start) with `MWXR_OPENVR_SHIM_HANDOFF=1`.
+The shim injected about 40 handoffs per second, one per frame; Home made no
+calls of its own. It ran for about 2.5 minutes (76 s steady), shorter than
+`233833`. Wine ownership history was not captured, so mutex holds are not
+compared.
+
+| | `233833`, no handoff | `234437`, injected handoff |
+| --- | ---: | ---: |
+| Home frames/s (steady) | 34.9 | 34.4 |
+| Frame period p10 / p50 / p90 | 16.7 / 25.1 / 34.1 ms | 23.2 / 25.1 / 36.0 ms |
+| Periods > 50 ms (per second) | 229 (1.16) | 108 (1.42) |
+| WaitGetPoses p50 / p90 | 19.4 / 25.1 ms | 17.6 / 21.7 ms |
+| SteamVR ApplicationTime CPU / GPU | 8.04 / 0.95 ms | 5.07 / 1.07 ms |
+| SteamVR "Timed out" presents | 272 | 76 |
+| Driver 100 ms acquire failures logged | 5+ | 0 |
+| vrcompositor WaitForAcquire warnings | 26 | 35 |
+| Driver vsync-to-photons | 42–67 ms | 17–58 ms |
+
+The handoff does what it should for SteamVR's accounting: Home's measured CPU
+time falls by about 3 ms, and this shorter run logged no driver acquire
+failures, the empty-frame (black) path. It does not change Home's cadence:
+still a median of three refreshes per frame, with about 18 ms of each spent
+in WaitGetPoses. So the CPU budget was not what held Home at three refreshes.
+The remaining suspect is the pacing loop through Monado: the driver's OpenXR
+frame spans SteamVR's whole Home-gated frame, Monado predicts display 5–8
+refreshes ahead, and SteamVR schedules Home's wake from that prediction.
