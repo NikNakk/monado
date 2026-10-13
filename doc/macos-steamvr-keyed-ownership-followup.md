@@ -361,3 +361,14 @@ climbs a level every five frames to level 8 (8x MSAA, 1770×1804). Occasional
 correct readings (8–30 ms) drop it a few levels, after which the next
 sub-millisecond readings take it straight back to 8. Run B, with the new
 `d3d11.dll` installed, is next.
+
+Run B, `run-mwxr-20261014-004923`, with `df4e91d` installed (backup and
+hashes in `~/Windows/backups/dxmt-756a657-diag/`): Home's readings are
+unchanged, mostly 0.22–0.28 ms, and it still returns to level 8 within a
+second of each drop. So the counter-sample fix is not reaching Home's
+measurement, or Home's GPU time does not come from its own timestamp
+queries. Home's DXMT log shows two D3D11 devices, feature levels 11_1 and
+11_0; the second is probably SteamVR's client library's, whose queries
+would run on a separate Metal queue and could not see Home's work.
+`4641e69` adds logging of timestamp query sources and readback outcomes and
+is installed for the next run.
