@@ -538,8 +538,8 @@ TEST_CASE("render_distortion C pipeline cache wrapper", "[aux_render][pipeline_c
 TEST_CASE("render_layer_spec is a padding-free specialization key", "[aux_render][pipeline_cache]")
 {
 	STATIC_REQUIRE(std::is_trivially_copyable_v<render_layer_spec>);
-	// layer.comp has five specialization constants; the generated POD stores each as a 4-byte field.
-	STATIC_REQUIRE(sizeof(render_layer_spec) == 5u * sizeof(int32_t));
+	// layer.comp has six specialization constants; the generated POD stores each as a 4-byte field.
+	STATIC_REQUIRE(sizeof(render_layer_spec) == 6u * sizeof(int32_t));
 	// Must match k_inset_blend_edge default in layer.comp.
 	STATIC_REQUIRE(RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE == 0.05f);
 
@@ -549,6 +549,7 @@ TEST_CASE("render_layer_spec is a padding-free specialization key", "[aux_render
 	CHECK(key.sampler_array_size == 16);
 	CHECK(key.inset_blend_edge == RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE);
 	CHECK(key.use_quad_bounds == VK_FALSE);
+	CHECK(key.use_common_layers == VK_FALSE);
 }
 
 TEST_CASE("ComputePipelineCache<render_layer_spec> caches by key", "[aux_render][pipeline_cache][gpu]")
@@ -574,7 +575,12 @@ TEST_CASE("ComputePipelineCache<render_layer_spec> caches by key", "[aux_render]
 	VkPipeline bounded_pipeline = VK_NULL_HANDLE;
 	REQUIRE(fixture.cache.get(&fixture.ctx.vk, bounded, bounded_pipeline) == VK_SUCCESS);
 	CHECK(first != bounded_pipeline);
-
+	auto common = bounded;
+	common.use_common_layers = VK_TRUE;
+	VkPipeline common_pipeline = VK_NULL_HANDLE;
+	REQUIRE(fixture.cache.get(&fixture.ctx.vk, common, common_pipeline) == VK_SUCCESS);
+	CHECK(common_pipeline != first);
+	CHECK(common_pipeline != bounded_pipeline);
 }
 
 TEST_CASE("render_layer C pipeline cache wrapper", "[aux_render][pipeline_cache][gpu]")

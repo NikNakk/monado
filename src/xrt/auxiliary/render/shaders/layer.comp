@@ -63,6 +63,9 @@ layout(constant_id = 4) const float k_inset_blend_edge = 0.0;
 // Opt-in conservative quad rejection; false preserves the original pipeline.
 layout(constant_id = 5) const bool k_use_quad_bounds = false;
 
+// CPU validates projection first, then quads, without optional projection features.
+layout(constant_id = 6) const bool k_use_common_layers = false;
+
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 // layer 0 color, [optional: layer 0 depth], layer 1, ...
@@ -585,13 +588,13 @@ vec4 do_projection_uv(vec2 view_uv, uint layer, out vec2 out_uv)
 
 	// Map from view space coordinates to sub image view coordinates.
 	vec2 image_uv;
-	if (k_do_timewarp && LAYER.image_info.has_depth != 0) {
+	if (!k_use_common_layers && k_do_timewarp && LAYER.image_info.has_depth != 0) {
 		image_uv = transform_uv_projection_depth(output_view_uv, view_uv, layer);
 	} else {
 		image_uv = transform_uv_subimage(view_uv, layer);
 	}
 
-	image_uv = transform_uv_foveation(image_uv, layer);
+	if (!k_use_common_layers) image_uv = transform_uv_foveation(image_uv, layer);
 
 	// Sample the source.
 	vec4 colour = vec4(texture(source[source_image_index], image_uv).rgba);
@@ -738,43 +741,52 @@ vec4 do_layers(vec2 view_uv)
 	for (uint layer = 0; layer < layer_count; layer++) {
 		vec4 rgba = vec4(0, 0, 0, 0);
 
-		switch (LAYER.layer_data.layer_type) {
-		case LAYER_COMP_TYPE_NOOP:
-			continue;
-		case LAYER_COMP_TYPE_QUAD:
-			rgba = do_quad(view_uv, layer);
-			// Quad alpha inversion is done inside
-			break;
-		case LAYER_COMP_TYPE_CYLINDER:
-			rgba = do_cylinder(view_uv, layer);
-			rgba.a = invert_alpha(rgba.a, layer);
-			break;
-		case LAYER_COMP_TYPE_EQUIRECT2:
-			rgba = do_equirect2(view_uv, layer);
-			rgba.a = invert_alpha(rgba.a, layer);
-			break;
-		case LAYER_COMP_TYPE_PROJECTION:
-			rgba = do_projection(view_uv, layer);
-			rgba.a = invert_alpha(rgba.a, layer);
-			rgba = apply_chroma_key(rgba, layer);
-			break;
-		case LAYER_COMP_TYPE_CONTEXT:
-			// The second layer is the inset, which handles both.
-			continue;
-		case LAYER_COMP_TYPE_INSET:
-			float inset_blend_factor = 0.0;
-			vec4 context_rgba = do_projection(view_uv, layer - 1);
-			vec4 inset_rgba = do_projection_inset(view_uv, layer, inset_blend_factor);
+		if (k_use_common_layers) {
+			if (layer == 0) {
+				rgba = do_projection(view_uv, layer);
+				rgba.a = invert_alpha(rgba.a, layer);
+			} else {
+				rgba = do_quad(view_uv, layer);
+			}
+		} else {
+			switch (LAYER.layer_data.layer_type) {
+			case LAYER_COMP_TYPE_NOOP:
+				continue;
+			case LAYER_COMP_TYPE_QUAD:
+				rgba = do_quad(view_uv, layer);
+				// Quad alpha inversion is done inside
+				break;
+			case LAYER_COMP_TYPE_CYLINDER:
+				rgba = do_cylinder(view_uv, layer);
+				rgba.a = invert_alpha(rgba.a, layer);
+				break;
+			case LAYER_COMP_TYPE_EQUIRECT2:
+				rgba = do_equirect2(view_uv, layer);
+				rgba.a = invert_alpha(rgba.a, layer);
+				break;
+			case LAYER_COMP_TYPE_PROJECTION:
+				rgba = do_projection(view_uv, layer);
+				rgba.a = invert_alpha(rgba.a, layer);
+				rgba = apply_chroma_key(rgba, layer);
+				break;
+			case LAYER_COMP_TYPE_CONTEXT:
+				// The second layer is the inset, which handles both.
+				continue;
+			case LAYER_COMP_TYPE_INSET:
+				float inset_blend_factor = 0.0;
+				vec4 context_rgba = do_projection(view_uv, layer - 1);
+				vec4 inset_rgba = do_projection_inset(view_uv, layer, inset_blend_factor);
 
-			/*
-			 * We handle this here so that any additional effects
-			 * are applied after the two "layers" are blended,
-			 * so the quad views layer is treated as one layer.
-			 */
-			rgba = mix(context_rgba, inset_rgba, inset_blend_factor);
-			rgba = apply_chroma_key(rgba, layer);
-			break;
-		default: break;
+				/*
+				 * We handle this here so that any additional effects
+				 * are applied after the two "layers" are blended,
+				 * so the quad views layer is treated as one layer.
+				 */
+				rgba = mix(context_rgba, inset_rgba, inset_blend_factor);
+				rgba = apply_chroma_key(rgba, layer);
+				break;
+			default: break;
+			}
 		}
 
 		// Apply color scale and bias

@@ -90,7 +90,8 @@ main(int argc, char **argv)
 			const bool array_three = argc > 1 && std::string(argv[1]) == "array-three";
 			const bool array_four = argc > 1 && std::string(argv[1]) == "array-four";
 			const bool array_test = array_three || array_four;
-			const bool quads_four = argc > 1 && std::string(argv[1]) == "quads-four";
+			const bool projection_quads = argc > 1 && std::string(argv[1]) == "projection-quads-four";
+			const bool quads_four = projection_quads || (argc > 1 && std::string(argv[1]) == "quads-four");
 			const unsigned frames = argc > 2 ? std::stoul(argv[2]) : 120;
 			const uint64_t timeout_seconds = argc > 3 ? std::stoull(argv[3]) : 20;
 			if (timeout_seconds < 1 || timeout_seconds > 300)
@@ -156,6 +157,7 @@ main(int argc, char **argv)
 			LOAD(xrWaitFrame);
 			LOAD(xrBeginFrame);
 			LOAD(xrEndFrame);
+			LOAD(xrLocateViews);
 #undef LOAD
 			XrSystemGetInfo systemInfo{};
 			systemInfo.type = XR_TYPE_SYSTEM_GET_INFO;
@@ -329,7 +331,31 @@ main(int argc, char **argv)
 				// 2 m at 1.5 m spans about ±34°, covering each eye's sample point.
 				quad.size = view_locked ? XrExtent2Df{2, 2} : XrExtent2Df{1, 1};
 				XrCompositionLayerQuad quads[4] = {quad, quad, quad, quad};
-				const XrCompositionLayerBaseHeader *layers[4];
+				const XrCompositionLayerBaseHeader *layers[5];
+				XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+				XrCompositionLayerProjectionView projection_views[2]{};
+				unsigned projection_count = projection_quads ? 1 : 0;
+				if (projection_quads) {
+					XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
+					locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+					locate.displayTime = state.predictedDisplayTime;
+					locate.space = space;
+					XrViewState view_state{XR_TYPE_VIEW_STATE};
+					XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+					uint32_t view_count = 0;
+					checked(xrLocateViews(session, &locate, &view_state, 2, &view_count, views), "locate stereo views");
+					if (view_count != 2) throw std::runtime_error("Expected stereo projection views");
+					for (unsigned eye = 0; eye < 2; ++eye) {
+						projection_views[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
+						projection_views[eye].pose = views[eye].pose;
+						projection_views[eye].fov = views[eye].fov;
+						projection_views[eye].subImage = quad.subImage;
+					}
+					projection.space = space;
+					projection.viewCount = 2;
+					projection.views = projection_views;
+					layers[0] = (XrCompositionLayerBaseHeader *)&projection;
+				}
 				unsigned quad_count = quads_four ? 4 : 1;
 				for (unsigned q = 0; q < quad_count; q++) {
 					if (quads_four) {
@@ -337,13 +363,13 @@ main(int argc, char **argv)
 						quads[q].pose.position.y = (q & 2) ? 0.45f : -0.45f;
 						quads[q].size = {0.65f, 0.65f};
 					}
-					layers[q] = (XrCompositionLayerBaseHeader *)&quads[q];
+					layers[projection_count + q] = (XrCompositionLayerBaseHeader *)&quads[q];
 				}
 				XrFrameEndInfo end{};
 				end.type = XR_TYPE_FRAME_END_INFO;
 				end.displayTime = state.predictedDisplayTime;
 				end.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-				end.layerCount = quad_count;
+				end.layerCount = projection_count + quad_count;
 				end.layers = layers;
 				uint64_t before = now_ns();
 				checked(xrEndFrame(session, &end), "end frame");

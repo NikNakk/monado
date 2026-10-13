@@ -563,7 +563,8 @@ struct LayerFixture : Fixture
 		}
 	}
 	VkPipeline
-	layer_pipeline(bool candidate, bool correction = false, bool timewarp = true)
+	layer_pipeline(bool candidate, bool correction = false, bool timewarp = true,
+	               bool common = false)
 	{
 		VkShaderModuleCreateInfo mi{};
 		mi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -574,6 +575,7 @@ struct LayerFixture : Fixture
 		modules.push_back(module);
 		auto spec = render_make_layer_spec(timewarp, correction, layer_sampler_count, RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE);
 		spec.use_quad_bounds = candidate;
+		spec.use_common_layers = common;
 		auto &entries = ShaderSpecializationMap<render_layer_spec>::kEntries;
 		VkSpecializationInfo sp{uint32_t(entries.size()), entries.data(), sizeof(spec), &spec};
 		VkComputePipelineCreateInfo ci{};

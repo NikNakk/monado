@@ -20,6 +20,7 @@
 #include "math/m_mathinclude.h"
 
 #include "render/render_quad_bounds.h"
+#include "render/render_layer_specialization.h"
 
 #include "util/u_misc.h"
 #include "util/u_trace_marker.h"
@@ -1041,7 +1042,9 @@ comp_render_cs_layer(struct render_compute *render,
 	    cur_image,             //
 	    target_image_view,     //
 	    target_view,           //
-	    do_timewarp);          //
+	    do_timewarp,           //
+	    render->r->compute.layer.common_layers_enabled &&
+	        render_layer_common_eligible(ubo_data, foveation_data));
 }
 
 void

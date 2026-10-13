@@ -27,6 +27,7 @@
 
 #ifdef XRT_OS_OSX
 DEBUG_GET_ONCE_BOOL_OPTION(macos_quad_bounds, "XRT_MACOS_COMPOSITOR_QUAD_BOUNDS", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_common_layers, "XRT_MACOS_COMPOSITOR_COMMON_LAYERS", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_gpu_pass_timing, "XRT_MACOS_GPU_PASS_TIMING", false)
 DEBUG_GET_ONCE_BOOL_OPTION(log_apple_samples, "XRT_COMPOSITOR_LOG_APPLE_SAMPLES", false)
 #endif
@@ -869,9 +870,13 @@ render_resources_init(struct render_resources *r,
 
 #ifdef XRT_OS_OSX
 	r->compute.layer.quad_bounds_enabled = debug_get_bool_option_macos_quad_bounds();
+	r->compute.layer.common_layers_enabled = debug_get_bool_option_macos_common_layers();
+	r->compute.layer.common_layers_logged = false;
+	if (r->compute.layer.common_layers_enabled) VK_INFO(r->vk, "Compute common-layer specialization enabled");
 	if (r->compute.layer.quad_bounds_enabled) VK_INFO(r->vk, "Compute quad bounds rejection enabled");
 #else
 	r->compute.layer.quad_bounds_enabled = false;
+	r->compute.layer.common_layers_enabled = false;
 #endif
 	for (uint32_t i = 0; i < ARRAY_SIZE(layer_variants); ++i) {
 		layer_variants[i].use_quad_bounds = r->compute.layer.quad_bounds_enabled;
@@ -903,6 +908,20 @@ render_resources_init(struct render_resources *r,
 
 	VK_NAME_PIPELINE(vk, r->compute.layer.timewarp_pipeline, "render_resources compute layer timewarp pipeline");
 
+	if (r->compute.layer.common_layers_enabled) {
+		for (uint32_t i = 0; i < ARRAY_SIZE(layer_variants); ++i) {
+			layer_variants[i].use_common_layers = VK_TRUE;
+		}
+		xret = render_layer_pipeline_cache_prewarm(r->compute.layer.pipeline_cache, vk,
+		                                          layer_variants, ARRAY_SIZE(layer_variants));
+		XVK_CHK_WITH_RET(xret, "render_layer_pipeline_cache_prewarm common", false);
+		xret = render_layer_pipeline_cache_get(r->compute.layer.pipeline_cache, vk,
+		                                      &layer_variants[0], &r->compute.layer.common_non_timewarp_pipeline);
+		XVK_CHK_WITH_RET(xret, "render_layer_pipeline_cache_get common non-timewarp", false);
+		xret = render_layer_pipeline_cache_get(r->compute.layer.pipeline_cache, vk,
+		                                      &layer_variants[1], &r->compute.layer.common_timewarp_pipeline);
+		XVK_CHK_WITH_RET(xret, "render_layer_pipeline_cache_get common timewarp", false);
+	}
 
 	// 64 KiB is the guaranteed-safe maxUniformBufferRange on common drivers,
 	// including MoltenVK; the per-layer depth data leaves little headroom.
@@ -1166,6 +1185,8 @@ render_resources_fini(struct render_resources *r)
 	if (r->compute.layer.pipeline_cache != NULL) {
 		r->compute.layer.non_timewarp_pipeline = VK_NULL_HANDLE;
 		r->compute.layer.timewarp_pipeline = VK_NULL_HANDLE;
+		r->compute.layer.common_non_timewarp_pipeline = VK_NULL_HANDLE;
+		r->compute.layer.common_timewarp_pipeline = VK_NULL_HANDLE;
 		render_layer_pipeline_cache_destroy(&r->compute.layer.pipeline_cache, vk);
 	}
 	D(PipelineLayout, r->compute.layer.pipeline_layout);
