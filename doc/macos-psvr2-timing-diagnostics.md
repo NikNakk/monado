@@ -31,6 +31,12 @@ actual game benefit and visual acceptance remain unestablished. These captures
 predate the later GPU-priority setting documented below; combined effects have
 not been measured.
 
+The [projection census](macos-projection-workload-census.md) records complete
+native layer inputs and exact fast-path blockers. At installed priority 0, UE's
+single projection is blocked by identity color scale/bias; native Unity, Wine
+Hyperbolica and sampled Home select the fast path. This is diagnostic evidence,
+not a new shader or presentation change.
+
 ## Current presentation defaults
 
 Presentation uses CADisplayLink pacing with timed Metal presents.

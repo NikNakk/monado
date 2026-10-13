@@ -83,3 +83,9 @@ motion, chromatic edges and overlays. A single ordinary projection may already
 use distortion-only rendering; measure the selected path before tuning it.
 See the [investigation summary](macos-compositor-gpu-efficiency.md) for rejected
 approaches, methodology, build limitations and retained capture tools.
+
+The later [projection-only census](macos-projection-workload-census.md) confirms
+one-projection fast-path rendering in native Unity, Wine Hyperbolica and sampled
+Home, and an
+identity color-scale/bias flag blocking native UE. That is the next relevant
+extra-pass hypothesis; no regular-game quad benefit has been established.

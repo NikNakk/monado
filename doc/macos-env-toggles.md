@@ -1258,8 +1258,29 @@ Remove it, or make it a default, after the traced and worn tests in
 | --- | --- | --- |
 | `XRT_MACOS_GPU_QUEUE_PRIORITY` | unset | Opt-in. Set the private Metal GPU priority of the compositor's MoltenVK queue and the presenter's queue: `0` highest, `1` macOS default, `2` lowest. When unset, both are only logged. Other values are rejected; Metal aborts the process on an invalid foreground value, so the code validates first. |
 
+The user's installed LaunchAgent currently sets `XRT_MACOS_GPU_QUEUE_PRIORITY=0`
+(2026-10-13); this differs from the library's unset default. Hosted compositor
+captures must pass the setting to the client process too. Record the actual
+queue readback rather than assuming a capture inherited the installed profile.
+
 Monado's Vulkan `QUEUE_GLOBAL_PRIORITY_HIGH` is accepted by MoltenVK but has no
 GPU effect; this sets the Metal queues directly through private IOGPU selectors,
 each checked with `respondsToSelector:`. The background priority stays 2
 whatever is requested. See
 [the priority evidence](macos-psvr2-timing-diagnostics.md#metal-gpu-queue-priority-2026-10-13).
+
+## Projection workload census (2026-10-13)
+
+With `PSVR2_TIMING_TRACE=1`, `composition.csv` records one summary row (layer
+index -1) and every native submitted layer: count, type, flags, projection view
+count, chroma key, foveation, first-view source dimensions and color scale/bias.
+The summary records compute selection and a fast-path rejection bitmask:
+1 layer count; 2 passthrough; 4 peek; 8 debug mirror; 16 debug disable;
+32 unsupported type; 64 color scale/bias flag; 128 active chroma key. Zero means
+eligible. This observes the existing policy without changing rendering.
+
+`analyze-projection-census.py` validates complete layer lists and policy agreement,
+then summarizes patterns/blockers after per-compositor startup/end trimming.
+Short startup traces are explicitly unmeasured. Raw captures stay outside Git.
+The UE tracking runner includes this trace and preserves installed GPU priority
+in the hosted client. See [the findings](macos-projection-workload-census.md).
