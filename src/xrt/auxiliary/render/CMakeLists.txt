@@ -13,6 +13,7 @@ add_library(
 	render_distortion.c
 	render_gfx.c
 	render_interface.h
+	render_layer_specialization.h
 	render_quad_bounds.h
 	render_resources.c
 	render_sub_alloc.c

@@ -47,6 +47,7 @@ render_make_layer_spec(VkBool32 do_timewarp,
 	    .sampler_array_size = (int32_t)sampler_array_size,
 	    .inset_blend_edge = inset_blend_edge,
 	    .use_quad_bounds = VK_FALSE,
+	    .use_common_layers = VK_FALSE,
 	};
 
 	return spec;

@@ -777,7 +777,8 @@ render_compute_layers(struct render_compute *render,
                       uint32_t num_srcs,
                       VkImageView target_image_view,
                       const struct render_viewport_data *view,
-                      bool do_timewarp)
+                      bool do_timewarp,
+                      bool common_layers)
 {
 	assert(render->r != NULL);
 
@@ -805,7 +806,14 @@ render_compute_layers(struct render_compute *render,
 	    descriptor_set);                    //
 
 	VkPipeline pipeline = do_timewarp ? r->compute.layer.timewarp_pipeline : r->compute.layer.non_timewarp_pipeline;
-
+	if (r->compute.layer.common_layers_enabled && common_layers) {
+		if (!r->compute.layer.common_layers_logged) {
+			VK_INFO(vk, "First common-layer compute dispatch selected");
+			r->compute.layer.common_layers_logged = true;
+		}
+		pipeline = do_timewarp ? r->compute.layer.common_timewarp_pipeline
+		                       : r->compute.layer.common_non_timewarp_pipeline;
+	}
 	vk->vkCmdBindPipeline(              //
 	    render->r->cmd,                 //
 	    VK_PIPELINE_BIND_POINT_COMPUTE, // pipelineBindPoint

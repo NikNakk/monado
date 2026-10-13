@@ -199,7 +199,7 @@ if(XRT_HAVE_VULKAN)
 		list(APPEND _distortion_bench_headers "${_header}")
 	endforeach()
 	add_executable(
-		tests_render_compute tests_render_compute.cpp tests_projection_quad.cpp ${_distortion_bench_headers}
+		tests_render_compute tests_render_compute.cpp tests_projection_quad.cpp tests_layer_specialization.cpp ${_distortion_bench_headers}
 		)
 	target_link_libraries(tests_render_compute PRIVATE aux_render aux_render_cache comp_util aux_vk aux_shaders xrt-external-catch2)
 	target_include_directories(tests_render_compute SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${_aux_shaders_binary_dir})

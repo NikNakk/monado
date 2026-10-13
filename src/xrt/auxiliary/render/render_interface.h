@@ -513,6 +513,12 @@ struct render_resources
 			//! Whether the quad bounds specialization and its CPU data are enabled.
 			bool quad_bounds_enabled;
 
+			//! Opt-in common-layer specialization, with generic fallback.
+			bool common_layers_enabled;
+			bool common_layers_logged;
+			VkPipeline common_non_timewarp_pipeline;
+			VkPipeline common_timewarp_pipeline;
+
 			//! Size of combined image sampler array
 			uint32_t image_array_size;
 
@@ -1604,7 +1610,8 @@ render_compute_layers(struct render_compute *render,
                       uint32_t num_srcs,
                       VkImageView target_image_view,
                       const struct render_viewport_data *view,
-                      bool timewarp);
+                      bool timewarp,
+                      bool common_layers);
 
 /*!
  * @public @memberof render_compute
