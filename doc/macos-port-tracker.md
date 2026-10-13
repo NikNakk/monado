@@ -13,6 +13,10 @@ profiling and repeatable benchmarks. Rejected presentation, buffering, fusion
 and map-packing experiments are removed. Defaults remain unchanged; game-layer
 applicability and visual acceptance are separate gates. The measurements predate
 the subsequent Metal GPU priority work and do not establish their combined gain.
+The [projection workload census](macos-projection-workload-census.md) now shows
+UE blocked by an identity color-scale/bias flag, while native Unity, Wine
+Hyperbolica and sampled SteamVR Home already use the single-projection fast path.
+Current captures preserve installed GPU priority 0.
 
 See the [2026-10-03 inherited compositor audit](macos-inherited-compositor-audit.md)
 for this investigation's changes, additional defects and selective upstream

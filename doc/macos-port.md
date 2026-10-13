@@ -12,6 +12,10 @@ profiling and repeatable benchmarks. Rejected presentation, buffering, fusion
 and map-packing experiments are removed. Defaults remain unchanged; game-layer
 applicability and visual acceptance are separate gates. The measurements predate
 the subsequent Metal GPU priority work and do not establish their combined gain.
+The [projection workload census](macos-projection-workload-census.md) now shows
+UE blocked by an identity color-scale/bias flag, while native Unity, Wine
+Hyperbolica and sampled SteamVR Home already use the single-projection fast path.
+Current captures preserve installed GPU priority 0.
 
 > **Visual regression resolved:** the user confirms the explicit macOS
 > output-image barrier removes black noise with diagnostic readbacks off.
