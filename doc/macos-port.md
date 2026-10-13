@@ -15,7 +15,10 @@ the subsequent Metal GPU priority work and do not establish their combined gain.
 The [projection workload census](macos-projection-workload-census.md) now shows
 UE blocked by an identity color-scale/bias flag, while native Unity, Wine
 Hyperbolica and sampled SteamVR Home already use the single-projection fast path.
-Current captures preserve installed GPU priority 0.
+Current captures preserve installed GPU priority 0. The subsequent
+[cross-platform identity-transform fix](macos-projection-identity-color-transform.md)
+restores UE fast-path eligibility and cuts measured compositor GPU time from
+2.645 to 1.255 ms; non-identity transforms and other gates are preserved.
 
 > **Visual regression resolved:** the user confirms the explicit macOS
 > output-image barrier removes black noise with diagnostic readbacks off.

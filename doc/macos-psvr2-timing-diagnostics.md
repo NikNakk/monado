@@ -35,7 +35,10 @@ The [projection census](macos-projection-workload-census.md) records complete
 native layer inputs and exact fast-path blockers. At installed priority 0, UE's
 single projection is blocked by identity color scale/bias; native Unity, Wine
 Hyperbolica and sampled Home select the fast path. This is diagnostic evidence,
-not a new shader or presentation change.
+not a new shader or presentation change. The subsequent
+[identity-transform fix](macos-projection-identity-color-transform.md) normalizes
+the no-op attachment cross-platform, preserving the existing compositor gates;
+matched priority-0 UE captures measure 2.645 → 1.255 ms median compositor GPU time.
 
 ## Current presentation defaults
 

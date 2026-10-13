@@ -10,6 +10,10 @@ Native OpenBrush, Wine Hyperbolica and the sampled SteamVR Home workload already
 single-projection distortion fast path. The existing projection-plus-quads
 optimization does not apply to these measured nonempty submissions.
 
+The subsequent [identity-transform fix](macos-projection-identity-color-transform.md)
+resolves this rejection at OpenXR conversion; the table below retains the
+pre-fix census evidence.
+
 ## Diagnostic and capture method
 
 `PSVR2_TIMING_TRACE=1` now writes `composition.csv`: one frame summary (index -1)
@@ -77,7 +81,11 @@ Local captures: `/tmp/monado-ue-layer-census-long-20261013`,
 `/tmp/monado-hyperbolica-xr-layer-census-20261013`. These temporary files are not durable
 project evidence; the observations and limitations above are the retained record.
 
-## Next optimization gate
+## Optimization and remaining visual gate
+
+The [identity-transform fix](macos-projection-identity-color-transform.md) now
+implements normalization and validates priority-0 GPU savings. The original
+proposal below records the remaining visual/image-quality caveats.
 
 Test whether a macOS identity scale/bias attachment can use the already existing
 projection fast path. It must preserve opaque/alpha semantics and image quality:

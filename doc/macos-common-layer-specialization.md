@@ -87,5 +87,7 @@ approaches, methodology, build limitations and retained capture tools.
 The later [projection-only census](macos-projection-workload-census.md) confirms
 one-projection fast-path rendering in native Unity, Wine Hyperbolica and sampled
 Home, and an
-identity color-scale/bias flag blocking native UE. That is the next relevant
-extra-pass hypothesis; no regular-game quad benefit has been established.
+identity color-scale/bias flag blocking native UE. The subsequent
+[identity-transform fix](macos-projection-identity-color-transform.md) removes
+that extra pass through cross-platform OpenXR conversion; no regular-game quad
+benefit has been established.
