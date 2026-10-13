@@ -280,3 +280,39 @@ xrWaitFrame pacing. Not yet known: whether Home's or vrcompositor's command
 buffer carrying the release signal is committed late, scheduled late, or
 waits behind other work. A Metal System Trace of a Home session would show
 the commit and execution times of those command buffers directly.
+
+### Metal System Trace: Home is GPU-bound, and DXMT's timestamps hide it — 2026-10-14
+
+User-recorded `/tmp/steam-vr-home.trace` (MonadoInstrumentsTemplate, all
+processes, 61 s, during `run-mwxr-20261014-001027` with the same settings as
+the previous run). Top-level Metal GPU intervals, union per process:
+
+| Process | Command buffers/s | GPU busy | Submit → GPU start p50 / p90 |
+| --- | ---: | ---: | ---: |
+| Home (`steamtours.exe`) | 133 | **628 ms/s** | 5.0 / 19.1 ms |
+| Monado service | 197 | 172 ms/s | 0.22 / 1.24 ms |
+| vrserver (bridge driver) | 28 | 8 ms/s | 22.4 / 26.3 ms |
+| vrcompositor | 80 | 0.6 ms/s | 23.3 / 31.9 ms |
+
+Home uses about 18 ms of GPU per frame at its ~35 frames/s, 68% of it
+fragment shading; its largest command buffer per frame takes 19.7 ms at p90.
+The driver and vrcompositor submit almost nothing but wait about 22 ms for
+the sync texture behind Home's work. So the 17 ms the driver trace attributed
+to the sync-texture wait is Home's own GPU time, and the pacer's three-refresh
+slot follows from it (two refreshes are 16.7 ms).
+
+SteamVR reported about 1 ms of GPU for Home because DXMT 756a657 resolves
+`D3D11_QUERY_TIMESTAMP` with `TimestampReadbackCBuf`: every timestamp in a
+command buffer is that buffer's `gpuEndTime`, so begin/end pairs within one
+buffer read nearly zero. Source 2's adaptive fidelity sees the same
+near-zero GPU time and raises resolution: SteamVR recommended 1252×1276 per
+eye (render target scale 0.20 from its 333 MP/s GPU speed measurement), but
+Home rendered up to 1770×1804, about twice the pixels.
+
+Earlier "Home ownership" holds and keyed-mutex timeouts in these notes are
+consistent with this: Home's GPU-side release follows its own long GPU work.
+No synchronisation defect is indicated for the steady state. Next:
+confirm by starting Home with adaptive fidelity off at the recommended
+resolution, and fix DXMT's timestamp queries (sample-buffer timestamps at
+encoder boundaries) so that Source 2, SteamVR and other D3D11 games see real
+GPU times.
