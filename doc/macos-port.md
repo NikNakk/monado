@@ -22,7 +22,9 @@ restores UE fast-path eligibility and cuts measured compositor GPU time from
 
 The [SteamVR ownership/OpenVR follow-up](macos-steamvr-keyed-ownership-followup.md)
 now measures substantial pose-wait overlap during Home's keyed ownership.
-Independent vsync notification is a controlled next hypothesis, not a proven fix.
+The subsequent [vsync trial](macos-steamvr-vsync-trial.md) keeps notifications
+alive through source stalls but does not resolve loaded Home acquire delays;
+the unsuccessful clock experiment is removed.
 
 > **Visual regression resolved:** the user confirms the explicit macOS
 > output-image barrier removes black noise with diagnostic readbacks off.
