@@ -1092,6 +1092,15 @@ comp_render_cs_layers(struct render_compute *render,
 	    VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT); // dst_stage_mask
 }
 
+static void
+crc_pass_timestamp(struct render_compute *render, uint32_t query)
+{
+	if (render->r->gpu_pass_timing) {
+		render->r->vk->vkCmdWriteTimestamp(render->r->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+		                                  render->r->query_pool, query);
+	}
+}
+
 void
 comp_render_cs_dispatch(struct render_compute *render,
                         const struct comp_layer *layers,
@@ -1116,6 +1125,17 @@ comp_render_cs_dispatch(struct render_compute *render,
 	// We want to read from the images afterwards.
 	VkImageLayout transition_to = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
+	// Empty composition brackets on the fast/clear paths keep every query ready.
+	crc_pass_timestamp(render, 2);
+	render->r->gpu_pass_path = 0;
+	if (fast_path && (layer->data.type == XRT_LAYER_PROJECTION ||
+	                  layer->data.type == XRT_LAYER_PROJECTION_DEPTH)) {
+		render->r->gpu_pass_path = 1;
+	}
+	if (render->r->gpu_pass_path == 1 || layer_count == 0) {
+		crc_pass_timestamp(render, 3);
+		crc_pass_timestamp(render, 4);
+	}
 
 	if (fast_path && layer->data.type == XRT_LAYER_PROJECTION) {
 		// Fast path.
@@ -1144,6 +1164,7 @@ comp_render_cs_dispatch(struct render_compute *render,
 		    vds);                 //
 
 	} else if (layer_count > 0) {
+		render->r->gpu_pass_path = 2;
 		// Compute layer squasher
 		if (fast_path) {
 			U_LOG_W("Wanted fast path but no projection layer, falling back to layer squasher.");
@@ -1158,6 +1179,8 @@ comp_render_cs_dispatch(struct render_compute *render,
 		    layer_count,       //
 		    d,                 //
 		    transition_to);    //
+		crc_pass_timestamp(render, 3);
+		crc_pass_timestamp(render, 4);
 
 		/*
 		 * Distortion.
@@ -1172,4 +1195,5 @@ comp_render_cs_dispatch(struct render_compute *render,
 		    render,       //
 		    d);           //
 	}
+	crc_pass_timestamp(render, 5);
 }

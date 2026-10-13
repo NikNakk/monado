@@ -2069,6 +2069,11 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			macos_retire_unpresented_job(cwm, job, "command_buffer_error", 0);
 			return VK_ERROR_DEVICE_LOST;
 		}
+		if (u_gpu_trace_signpost_enabled()) {
+			command_buffer.label = [NSString stringWithFormat:@"MonadoCopy frame=%llu timeline=%llu image=%u",
+			                            (unsigned long long)frame_id,
+			                            (unsigned long long)timeline_semaphore_value, index];
+		}
 		if (shared_event_wait) {
 			[command_buffer encodeWaitForEvent:cwm->render_complete_event value:timeline_semaphore_value];
 		}
