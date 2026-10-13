@@ -3650,3 +3650,15 @@ service compositor under contention, and as steadier compositor timing for
 client compositing, with no measured cost to a playable app or SteamVR Home.
 Pending before a default change: a worn trial, and a longer saturated-app run
 with thermal state logged.
+
+
+## SteamVR ownership/OpenVR join — 2026-10-13
+
+The [fresh Home follow-up](macos-steamvr-keyed-ownership-followup.md) obtains the
+previously blocked OpenVR call trace. Thirty deduplicated failure-history release
+intervals have median 22.227 ms ownership and 13.468 ms WaitGetPoses overlap;
+median overlap fraction is 63.5%. Timeout snapshots are different evidence and
+show less overlap. Source acquisition precedes PostPresent's vsync event, so
+independent notification is the next controlled hypothesis, not a proven fix.
+Mutex/fence/pose/scheduling semantics remain unchanged; Valve's DLL is restored
+and the temporary session is closed. Raw capture files remain outside Git.
