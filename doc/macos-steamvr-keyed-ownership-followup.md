@@ -195,3 +195,53 @@ in WaitGetPoses. So the CPU budget was not what held Home at three refreshes.
 The remaining suspect is the pacing loop through Monado: the driver's OpenXR
 frame spans SteamVR's whole Home-gated frame, Monado predicts display 5–8
 refreshes ahead, and SteamVR schedules Home's wake from that prediction.
+
+### Monado's app pacer holds the driver at three refreshes — 2026-10-14
+
+Monado's `app_pacing` timing trace (written with `PSVR2_TIMING_TRACE=1`,
+which isolated runs inherit from the LaunchAgent) has one session, the
+bridge driver. Excluding the first 60 s, the pacer's period for it is mostly
+three refreshes:
+
+| Run | Pacer period, refreshes (frames) | Monado "GPU" p50 / p90 | "Draw" p50 / p90 |
+| --- | --- | ---: | ---: |
+| `232237`, 90 Hz start | mostly 3–5 | 27.5 / 40.9 ms | 17.6 / 34.1 ms |
+| `233833`, 120 Hz | 3: 5206, 2: 1341, 4: 505 | 18.4 / 23.8 ms | 8.6 / 21.9 ms |
+| `234437`, + handoff | 3: 2621, 4: 219, 2: 99 | 19.1 / 24.1 ms | 6.5 / 24.4 ms |
+
+Monado's "GPU" time runs from the driver's xrEndFrame until the frame's
+GPU fence signals; "draw" runs from xrBeginFrame to xrEndFrame. SteamVR
+reports about 1 ms of GPU work for both Home and its compositor, yet the
+driver's frames take 18–19 ms to signal. Draw plus GPU is about 25–27 ms, so
+the pacer gives the driver a three-refresh slot, which is Home's cadence.
+The driver's copy fence follows the GPU wait on SteamVR's sync texture, so
+a late release signal from DXMT would explain it. Not yet attributed.
+
+The bridge driver now has an opt-in frame trace for this:
+`MWXR_DRIVER_FRAME_TRACE=1` writes the run's `driver-frames.csv` with each
+OpenXR frame's CPU stages (wait, begin, destination preparation, source
+acquire, sync release, xrEndFrame), ID3D11Fence timestamps after the source's
+keyed-mutex GPU wait and after the copies, and each vsync event. The fence
+path was checked against the rig's DXMT in a scratch prefix.
+[`analyze-steamvr-driver-pacing.py`](../scripts/macos/analyze-steamvr-driver-pacing.py)
+joins it with `app_pacing.csv`. Monado's XrTime is its monotonic clock minus
+a per-instance constant, and Wine's QPC is not on Monado's epoch here
+(about 5 s apart), so frames are matched by exact predicted display time;
+a cadence too regular to align is refused.
+[Its fixture](../tests/test_macos_steamvr_driver_pacing.py) covers the
+alignment, stage arithmetic and refusal cases.
+
+Next run (handoff kept on, as it removed acquire failures):
+
+```sh
+MWXR_MONADO=isolated MONADO_SERVICE_BUILD=$HOME/Code/monado-2/build/arm64 \
+  MWXR_OPENVR_SHIM_INSTALL=1 MWXR_OPENVR_SHIM_TRACE=1 MWXR_OPENVR_SHIM_HANDOFF=1 \
+  MWXR_OPENVR_SHIM_FIX_POSE=0 MWXR_DRIVER_FRAME_TRACE=1 ~/Windows/run-mwxr.zsh
+python3 scripts/macos/analyze-steamvr-driver-pacing.py \
+  ~/Windows/logs/<run>/driver-frames.csv ~/psvr2-trace/monado_psvr2_<pid>_app_pacing.csv
+```
+
+If `gpu_source_after_acquire` carries the 18 ms, the delay is the GPU wait for
+the previous owner's release (DXMT/Wine signalling); if
+`gpu_copies_after_source` does, it is the copy or its flush; if neither and
+`monado_gpu_done_after_driver_copies` is large, it is in Monado's fence wait.
