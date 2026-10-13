@@ -53,6 +53,8 @@ if(APPLE)
 			comp_swapchain_gpu_reuse.c
 			comp_metal_gpu_capture.h
 			comp_metal_gpu_capture.m
+			comp_metal_gpu_priority.h
+			comp_metal_gpu_priority.m
 			comp_metal_semaphore_provider.h
 			comp_metal_semaphore_probe.h
 			comp_metal_semaphore_probe.m

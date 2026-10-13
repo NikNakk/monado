@@ -3503,3 +3503,56 @@ refresh and late rates outside bursts don't rise
 (`late_render.csv`/`pose.csv`), and confirm cadence; then do a worn check.
 Offscreen, 3000 µs gives 3.00 ms delays and 9000 µs is capped at 6.00 ms,
 with no lost frames.
+
+## Metal GPU queue priority — 2026-10-13
+
+**Vulkan priority has no effect.** The service logs `Created device and COMPUTE
+queue with QUEUE_GLOBAL_PRIORITY_HIGH` (MoltenVK rejects REALTIME), but MoltenVK
+1.4.2 does not pass it to Metal, and Metal has no public queue priority. Under
+contention, the compositor queue competed at the macOS default.
+
+**Private Metal priority.** Runtime introspection on Apple M5 shows
+`IOGPUMetalCommandQueue` `getGPUPriority`/`setGPUPriority:` and
+`getBackgroundGPUPriority`/`setBackgroundGPUPriority:`. A new queue reports
+foreground 1, background 2; the device reports `supportPriorityBand=1`.
+Foreground values 0–2 are accepted; 3 triggers the Metal assertion `priority (3)
+is not valid for foreground`, which aborts the process. Background stays 2 when 0
+or 1 is requested.
+
+**Standalone two-process test** (Metal compute, ~1 ms job every 8.33 ms, against
+a competitor keeping two ~8 ms command buffers in flight; two repeats each):
+
+| Measured queue | GPU execution p50 | Commit → completion p50 / p99 |
+| --- | ---: | ---: |
+| No competitor, default | 0.92 ms | 1.37 / 2.17 ms |
+| Competitor, default (1) | 1.89 ms | 2.02–2.03 / 2.47–3.45 ms |
+| Competitor, priority 0 | 0.28 ms | 0.39 / 0.45–0.46 ms |
+| Competitor, priority 2 | ~105 ms | ~105 / ~117 ms |
+
+0 is highest and effectively pre-empts the competitor. 2 is near-starved. The
+idle job is slower than the loaded one (0.92 against 0.28 ms) because of GPU
+clocks: idle timings partly reflect low clocks.
+
+**Headset A/B** with `XRT_MACOS_GPU_QUEUE_PRIORITY` (A–B–B–A, 15 s each, native
+four-image array client, built-in display on, the same saturating Metal
+competitor throughout; raw data in `/tmp/monado-gpu-priority-20261013`). The
+service log confirms foreground 1 → 0 on both the compositor (MoltenVK) and
+presenter queues. Background stays 2.
+
+| Run | Physical Hz | Gaps >12.5 ms | Max gap | Enqueue→glass p50 / p95 |
+| --- | ---: | ---: | ---: | ---: |
+| A1 default | 43.69 | 60.66% | 91.8 ms | 27.21 / 87.52 ms |
+| B1 priority 0 | 119.80 | 0.06% | 16.7 ms | 19.19 / 19.39 ms |
+| B2 priority 0 | 119.88 | 0.00% | 8.4 ms | 19.18 / 19.39 ms |
+| A2 default | 45.25 | 59.06% | 83.4 ms | 26.88 / 86.36 ms |
+
+With priority 0, the compositor holds full cadence and idle latency under a
+competitor that otherwise drives it to ~45 Hz. So the service's foreground
+priority does apply. This competitor is synthetic, with no game rendering,
+Game Mode or WindowServer load. It does not address the WindowServer
+built-in-display bursts, where frames already finish on time.
+
+Before a default change: test a real heavy game, and the client-hosted (Game
+Mode) path, where the setting applies in the game's process. Measure the
+game's own frame rate cost, and do a worn check. Private API: re-verify on each
+macOS update; the selectors are checked before use and values validated.
