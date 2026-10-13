@@ -316,3 +316,29 @@ confirm by starting Home with adaptive fidelity off at the recommended
 resolution, and fix DXMT's timestamp queries (sample-buffer timestamps at
 encoder boundaries) so that Source 2, SteamVR and other D3D11 games see real
 GPU times.
+
+### Fixed Home fidelity confirms the diagnosis — 2026-10-14
+
+SteamVR's `tools.vrmanifest` now starts Home with `-condebug
++vr_fidelity_level_auto 0 +vr_fidelity_level_spew 1` (original saved as
+`~/Windows/backups/tools.vrmanifest.before-fidelity-20261014`; a SteamVR
+update may restore it). Home's console log shows its fidelity table comes
+from `steamtours/pak01.vpk:vr_fidelity_levels.csv` with the `nvidia` profile,
+default level 3 of 9, and a top level of 8x MSAA at 1770×1804. With auto
+off it stayed at level 3, 1248–1252 × 1272–1276 per eye (SteamVR's
+recommendation), in run `run-mwxr-20261014-002745` (same settings as
+`000314`; the user reports it looks better).
+
+| | `000314`, adaptive | `002745`, level 3 fixed |
+| --- | ---: | ---: |
+| Monado pacer period (refreshes: frames) | 3: 5235, 2: 1782 | 2: 3620, 3: 1554 |
+| Home frames/s (steady) | ~35 | 47.6 |
+| Home frame period p10 / p50 / p90 | — | 15.9 / 17.2 / 26.0 ms |
+| Driver GPU source wait p50 / p90 | 17.4 / 20.1 ms | 13.5 / 23.2 ms |
+| Driver 100 ms acquire failures | 0 | 1 |
+| SteamVR ApplicationTime CPU / GPU | 5.07 / 1.07 ms (`234437`) | 3.98 / 0.94 ms |
+
+Home moves from three to two refreshes per frame. At level 3 it still needs
+about 13 ms of GPU per frame, so one refresh (8.3 ms) is out of reach without
+a lower level. The proper fix is DXMT timestamps that measure GPU time, so
+Source 2's auto-fidelity and SteamVR's timing work as on Windows.
