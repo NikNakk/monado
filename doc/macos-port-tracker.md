@@ -21,6 +21,11 @@ Current captures preserve installed GPU priority 0. The subsequent
 restores UE fast-path eligibility and cuts measured compositor GPU time from
 2.645 to 1.255 ms; non-identity transforms and other gates are preserved.
 
+The [SteamVR ownership/OpenVR follow-up](macos-steamvr-keyed-ownership-followup.md)
+now attributes substantial sampled Home ownership to WaitGetPoses overlap.
+A source-acquisition/vsync feedback loop is the next controlled hypothesis;
+no synchronization policy or visual fix is claimed.
+
 See the [2026-10-03 inherited compositor audit](macos-inherited-compositor-audit.md)
 for this investigation's changes, additional defects and selective upstream
 restoration changes. Diagnostic readbacks are now opt-in and format/usage
