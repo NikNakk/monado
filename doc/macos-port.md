@@ -6,6 +6,13 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The [2026-10-13 GPU-efficiency study](macos-compositor-gpu-efficiency.md) retains
+opt-in quad bounds, a guarded projection-plus-quads specialization, GPU pass
+profiling and repeatable benchmarks. Rejected presentation, buffering, fusion
+and map-packing experiments are removed. Defaults remain unchanged; game-layer
+applicability and visual acceptance are separate gates. The measurements predate
+the subsequent Metal GPU priority work and do not establish their combined gain.
+
 > **Visual regression resolved:** the user confirms the explicit macOS
 > output-image barrier removes black noise with diagnostic readbacks off.
 > Client-hosted GPU-reuse protection remains active. Keep both protections;

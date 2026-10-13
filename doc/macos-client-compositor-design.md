@@ -332,11 +332,12 @@ Vulkan, and render into the prefetched drawable's surface. Costs:
 - newest-frame substitution changes form;
 - passthrough still needs its Metal composition.
 
-**Status.** Not pursued. It would return about 1–1.3 ms GPU per frame, but
-probably little latency, since frames wait for the refresh after GPU
-completion. Monado and Chromium together used about 75–80% of the GPU, and no
-issue found so far is GPU-bound. Revisit if heavier clients run out of GPU
-headroom.
+**Status, 2026-10-13.** Offscreen direct output reduces GPU work, but physical
+prefetch acquisition and callback-supplied drawable trials lose cadence to CA
+copying. Non-opaque driven layers improve loaded throughput by gaining another
+refresh of buffering, not by demonstrating earlier display. The unsuccessful
+implementations and diagnostic probes are removed. Keep copying and submission
+backpressure; see the [measured rejections](macos-compositor-gpu-efficiency.md#rejected-experiments).
 
 ## Clean-up once this works
 

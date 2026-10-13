@@ -35,6 +35,25 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 > project's transitional proxy (2026-10-02). Its transport rows are removed;
 > the dated counts and findings remain historical audit evidence.
 
+## Compute efficiency and profiling (2026-10-13)
+
+All three runtime options default to `0` and are inactive on Linux. Set them in
+the process doing composition: the client for hosted composition, otherwise the
+service. See [results and rejected experiments](macos-compositor-gpu-efficiency.md).
+
+| Option | Effect |
+| --- | --- |
+| `XRT_MACOS_COMPOSITOR_QUAD_BOUNDS=1` | Conservative per-eye rectangle rejection before quad intersections; unsafe geometry uses full-view bounds. Pixel tests pass; visual acceptance remains pending. |
+| `XRT_MACOS_COMPOSITOR_COMMON_LAYERS=1` | Specialized first-projection-plus-quads shader, selected only without depth, foveation or chroma key; final per-eye inputs otherwise use the generic pipeline. See [scope and results](macos-common-layer-specialization.md). |
+| `XRT_MACOS_GPU_PASS_TIMING=1` | Four additional composition/distortion GPU timestamps. Fence-retired results appear in `compositor_gpu_pass.csv` with `PSVR2_TIMING_TRACE=1`. Path 0: clear; 1: projection fast path; 2: composition plus distortion. Queries add no GPU wait but can perturb execution. |
+
+`XRT_MACOS_SIGNPOST=1` additionally labels Metal copy commands with trace frame
+ID, renderer timeline value and image index for Instruments correlation.
+Test-only CSV paths are `MONADO_DISTORTION_BENCH_CSV`, `MONADO_LAYER_BENCH_CSV`,
+`MONADO_PROJECTION_QUAD_CSV`, `MONADO_LAYER_SPECIAL_CSV` and `MONADO_GPU_LOAD_CSV`;
+they do not change runtime rendering defaults. Capture runners write outside the
+checkout by passing an explicit `--output` directory.
+
 ## Native Instruments tracing (2026-10-12)
 
 `XRT_MACOS_SIGNPOST=1` independently enables Monado's Instruments signposts

@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS PS VR2 judder evidence ledger
 
+> **2026-10-13 GPU experiments:** unrestricted two-frame resources remove CPU
+> fence waits but reduce saturated cadence from ~98–104 to ~76 Hz and add a
+> refresh of buffering. Direct/driven output also loses cadence. Keep CA copying,
+> bounded submission and reuse guards. See the [efficiency study](macos-compositor-gpu-efficiency.md).
+> These findings predate GPU-priority controls and do not replace visual checks.
+
 > **Image-reuse fix confirmed, 2026-10-03.** The user confirms the local Metal
 > GPU reuse guard fixes partial black frames/black noise. Retain it alongside
 > fresh scanout target poses, which the previous moving runs confirm remove
