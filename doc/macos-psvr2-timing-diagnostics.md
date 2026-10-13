@@ -3662,3 +3662,16 @@ show less overlap. Source acquisition precedes PostPresent's vsync event, so
 independent notification is the next controlled hypothesis, not a proven fix.
 Mutex/fence/pose/scheduling semantics remain unchanged; Valve's DLL is restored
 and the temporary session is closed. Raw capture files remain outside Git.
+
+
+## Independent-vsync trial rejected — 2026-10-13
+
+The [verified Home-only A/B](macos-steamvr-vsync-trial.md) tests the notification
+feedback hypothesis under paced GPU contention and priority 0. A stall heartbeat
+reduces median notification gaps from 64.303 to 8.371 ms, and emits during every
+one of its 111 source acquires longer than 20 ms. Source acquire p95 nevertheless
+rises from 27.679 to 33.032 ms; 23 vs 19 failures in approximately 56-second
+windows do not establish a reliable improvement. Home renderer/focus/loading
+and dashboard state are explicitly verified; earlier ungated runs are excluded.
+The failed clock code is removed and the pre-trial bridge source/runtime DLL are
+restored. No new default, visual or end-to-end latency improvement is claimed.

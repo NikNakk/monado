@@ -23,8 +23,9 @@ restores UE fast-path eligibility and cuts measured compositor GPU time from
 
 The [SteamVR ownership/OpenVR follow-up](macos-steamvr-keyed-ownership-followup.md)
 now attributes substantial sampled Home ownership to WaitGetPoses overlap.
-A source-acquisition/vsync feedback loop is the next controlled hypothesis;
-no synchronization policy or visual fix is claimed.
+The subsequent [vsync trial](macos-steamvr-vsync-trial.md) removes notification
+gaps but does not resolve loaded Home acquisition stalls. The experiment is
+removed; no synchronization policy or visual fix is promoted.
 
 See the [2026-10-03 inherited compositor audit](macos-inherited-compositor-audit.md)
 for this investigation's changes, additional defects and selective upstream

@@ -39,7 +39,11 @@ population estimate. DXMT's coarser long-hold samples suggested roughly 21 ms
 pose overlap in a 24 ms median hold; use the exact server join above for the
 retained result. Rendering, scheduling and other untraced waits remain possible.
 
-## Concrete next intervention
+The subsequent [controlled vsync trial](macos-steamvr-vsync-trial.md) implements
+and tests this hypothesis: notifications continue through source stalls, but
+loaded Home acquisition delays persist. The unsuccessful clock is removed.
+
+## Intervention proposed before the trial
 
 `driver.cpp` direct-mode `Present` acquires the sync texture with a 100 ms
 limit. Its `PostPresent` then calls `WaitAndBeginFrame` and emits `VsyncEvent`.
