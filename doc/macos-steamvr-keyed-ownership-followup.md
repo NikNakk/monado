@@ -245,3 +245,38 @@ If `gpu_source_after_acquire` carries the 18 ms, the delay is the GPU wait for
 the previous owner's release (DXMT/Wine signalling); if
 `gpu_copies_after_source` does, it is the copy or its flush; if neither and
 `monado_gpu_done_after_driver_copies` is large, it is in Monado's fence wait.
+
+### Driver frame trace: the delay is the GPU wait on the sync texture — 2026-10-14
+
+Run `run-mwxr-20261014-000314` (120 Hz start, handoff injection, driver
+frame trace; Monado trace `monado_psvr2_37798_app_pacing.csv`). The analyser
+aligned 7377 steady-state frames (Monado id = driver frame + 8); Monado's
+draw time matches the driver's begin-to-end time (p50 5.50 vs 5.53 ms),
+confirming the join.
+
+| Stage (after the first 60 s) | p50 | p90 |
+| --- | ---: | ---: |
+| Driver CPU: source acquire | 0.12 ms | 0.83 ms |
+| Driver CPU: copies and sync release | 0.25 ms | 0.73 ms |
+| GPU: source wait passed, after the CPU acquire | **17.4 ms** | 20.1 ms |
+| GPU: copies done, after that | 0.43 ms | 1.0 ms |
+| Monado sees the fence, after the copies | 2.0 ms | 2.9 ms |
+| Monado "GPU" time | 17.5 ms | 20.2 ms |
+| Pacer period, refreshes | 3: 5235, 2: 1782, 1: 186 | |
+
+DXMT's AcquireSync returns on the CPU at once and queues a GPU wait for the
+previous owner's release value; each ReleaseSync queues a GPU signal after
+that owner's earlier work, then flushes. So the driver's wait covers
+vrcompositor's release, which itself waited on Home's. Joined with the shim
+trace, the driver's source wait completes 13.3 / 17.0 / 19.4 ms (p10/50/90)
+after Home's injected handoff, a few ms before Home's next Submit. Home
+releases promptly on the CPU, but the release takes about 17 ms to reach the
+driver on the GPU, while SteamVR reports about 1 ms of GPU work for Home.
+
+The signal times show no concentration at the built-in display's 60 Hz
+(resultant length 0.01), so a 60 Hz drawable wait is not indicated. Their
+moderate lock to the 120 Hz refresh (0.38) is inherited from the driver's
+xrWaitFrame pacing. Not yet known: whether Home's or vrcompositor's command
+buffer carrying the release signal is committed late, scheduled late, or
+waits behind other work. A Metal System Trace of a Home session would show
+the commit and execution times of those command buffers directly.
