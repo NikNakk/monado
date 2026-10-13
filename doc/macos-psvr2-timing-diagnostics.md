@@ -19,6 +19,18 @@ SPDX-License-Identifier: BSL-1.0
 > traces, then measure added tracking load. No new display-pacing result has
 > been established. See [the integration note](macos-pssense-6dof-integration.md).
 
+## GPU-efficiency follow-up (2026-10-13)
+
+The [GPU-efficiency study](macos-compositor-gpu-efficiency.md) tests rendering,
+copy avoidance, callback-owned presentation and submission depth. Direct output
+and unrestricted two-frame resources lose cadence; their implementations are
+removed. Opt-in shader improvements and pass diagnostics remain, with current
+CA copying and submission backpressure. A synthetic projection-plus-four-quads
+workload improves loaded cadence from ~93–95 to ~103–104 Hz with specialization;
+actual game benefit and visual acceptance remain unestablished. These captures
+predate the later GPU-priority setting documented below; combined effects have
+not been measured.
+
 ## Current presentation defaults
 
 Presentation uses CADisplayLink pacing with timed Metal presents.

@@ -7,6 +7,13 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [2026-10-13 GPU-efficiency study](macos-compositor-gpu-efficiency.md) retains
+opt-in quad bounds, a guarded projection-plus-quads specialization, GPU pass
+profiling and repeatable benchmarks. Rejected presentation, buffering, fusion
+and map-packing experiments are removed. Defaults remain unchanged; game-layer
+applicability and visual acceptance are separate gates. The measurements predate
+the subsequent Metal GPU priority work and do not establish their combined gain.
+
 See the [2026-10-03 inherited compositor audit](macos-inherited-compositor-audit.md)
 for this investigation's changes, additional defects and selective upstream
 restoration changes. Diagnostic readbacks are now opt-in and format/usage
