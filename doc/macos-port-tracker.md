@@ -16,7 +16,8 @@ to `c2c608a3f`. Both native Vulkan sharing options default to on, with independe
 now match `v25.1.0-2310-g84b3749c2`, with the existing LaunchAgent preferences
 preserved. The remote branch has not been pushed. The earlier user headset
 checkpoint covers the original Vulkan implementation; visual testing of the
-new installed build remains a user-operated follow-up.
+new installed build is a [required publication gate](macos-graphics-integration-review.md#installed-build-headset-gate-before-publication).
+The original hardware approval predates the barrier-fence and teardown fixes.
 
 The [2026-10-14 Vulkan Metal swapchain follow-up](macos-vulkan-metal-swapchains.md)
 keeps MoltenVK, adds opt-in native Vulkan array/depth images through standard
