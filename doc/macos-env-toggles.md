@@ -35,6 +35,41 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 > project's transitional proxy (2026-10-02). Its transport rows are removed;
 > the dated counts and findings remain historical audit evidence.
 
+## Vulkan client shared-event frame handoff (2026-10-14)
+
+`XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` (default `0`, macOS only) changes how a
+native Vulkan OpenXR client hands each frame to the compositor. macOS has no
+opaque-FD timeline semaphore or sync-FD fence, so by default
+`comp_vk_client.c` calls `vkQueueWaitIdle` on every `xrEndFrame`. The
+application's CPU then waits for all of its own GPU work and cannot overlap
+the next frame with it. With the option, the client imports a Metal shared
+event as a Vulkan timeline (`VK_EXT_metal_objects`), using the Metal client's
+pair helpers, and commits with a GPU signal instead. If setup fails, the
+client logs a warning and keeps the queue-idle wait. Set it in the client's
+environment. Metal, OpenGL and Wine/DXMT clients are unaffected.
+
+Tested at `b7bcef7fd` on an M5 MacBook Air, offscreen with the simulated
+headset at 60 Hz. The client was `tests_macos_openxr_vulkan_probe` with
+per-view swapchains, 9 ms of CPU work per frame, a GPU load of 60 clears on
+the last swapchain, and no probe-side submit waits
+(`MACOS_OPENXR_VULKAN_PROBE_{PER_VIEW_SWAPCHAINS,CPU_US,GPU_LOAD,ASYNC_SUBMIT}`).
+Runs used an isolated service, 600 frames each, ordered A–B–B–A:
+
+| Handoff | Frame rate | `xrEndFrame` median |
+| --- | ---: | ---: |
+| Queue-idle wait (default) | 26.2 / 28.2 fps; pacing fell to 30 Hz | 7.44 / 7.43 ms |
+| Shared event | 60.0 / 60.0 fps | 0.14 / 0.14 ms |
+
+With 4 ms of CPU work and a lighter GPU load, both fit in the frame and both
+ran at 60 fps; `xrEndFrame` still fell from 3.0 ms to 0.13 ms. A
+service-composited check with pixel sampling showed the expected per-eye
+colours and flash phases, with no warnings beyond the usual layer-limit
+notice. In-process composition (`XRT_MACOS_CLIENT_COMPOSITOR=1`) needs the
+physical headset, so its local semaphore pair is untested, as is any
+on-headset run. The default stereo array swapchain asserts in MoltenVK
+(IOSurface textures cannot be 2D arrays) with or without this option. Keep it
+opt-in until the headset and in-process paths pass.
+
 ## Compute efficiency and profiling (2026-10-13)
 
 All three runtime options default to `0` and are inactive on Linux. Set them in
