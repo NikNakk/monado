@@ -291,7 +291,7 @@ TEST_CASE("Stage recenter preserves the floor and updates running spaces")
 	struct xrt_vec3 up = {0, 1, 0};
 	math_quat_from_angle_vector(1.2f, &up, &head.pose.orientation);
 	head.pose.position = {2.0f, 0.4f, -3.0f};
-	REQUIRE(u_stage_recenter(xso, &head.base, 1) == XRT_SUCCESS);
+	REQUIRE(u_stage_recenter(xso, &head.base, 1, 0.0f) == XRT_SUCCESS);
 	REQUIRE(xrt_space_overseer_get_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
 	        XRT_SUCCESS);
 	CHECK(stage.position.y == Catch::Approx(-1.35f));
@@ -310,16 +310,53 @@ TEST_CASE("Stage recenter preserves the floor and updates running spaces")
 	CHECK(floor_in_root.pose.position.z == Catch::Approx(-3.0f));
 	// A later recenter is absolute in root, rather than accumulating an offset.
 	head.pose.position.x = 4.0f;
-	REQUIRE(u_stage_recenter(xso, &head.base, 2) == XRT_SUCCESS);
+	REQUIRE(u_stage_recenter(xso, &head.base, 2, 0.0f) == XRT_SUCCESS);
 	REQUIRE(xrt_space_overseer_get_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
 	        XRT_SUCCESS);
 	CHECK(stage.position.x == Catch::Approx(4.0f));
 	// Refuse an ambiguous heading without moving the stage.
 	struct xrt_vec3 right = {1, 0, 0};
 	math_quat_from_angle_vector((float)M_PI / 2, &right, &head.pose.orientation);
-	CHECK(u_stage_recenter(xso, &head.base, 3) == XRT_ERROR_POSE_NOT_ACTIVE);
+	CHECK(u_stage_recenter(xso, &head.base, 3, 0.0f) == XRT_ERROR_POSE_NOT_ACTIVE);
 	head.tracked = false;
-	CHECK(u_stage_recenter(xso, &head.base, 4) == XRT_ERROR_POSE_NOT_ACTIVE);
+	CHECK(u_stage_recenter(xso, &head.base, 4, 0.0f) == XRT_ERROR_POSE_NOT_ACTIVE);
+	xrt_space_reference(&local, nullptr);
+	xrt_space_reference(&floor, nullptr);
+	xrt_space_overseer_destroy(&xso);
+}
+
+TEST_CASE("Stage recenter with an eye height re-measures the floor")
+{
+	FakeHead head = {};
+	init_fake_head(head);
+	struct xrt_device *devices[] = {&head.base};
+	struct xrt_session_event_sink sink = {null_push};
+	struct b_space_overseer *uso = b_space_overseer_create(&sink);
+	struct xrt_pose identity = XRT_POSE_IDENTITY;
+	b_space_overseer_legacy_setup(uso, devices, 1, &head.base, &identity, false, true);
+	auto *xso = reinterpret_cast<struct xrt_space_overseer *>(uso);
+	// Calibrated while seated: the floor is too low.
+	struct xrt_pose stage = identity;
+	stage.position.y = -1.75f;
+	REQUIRE(xrt_space_overseer_set_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
+	        XRT_SUCCESS);
+	struct xrt_space *local = nullptr, *floor = nullptr;
+	REQUIRE(xrt_space_overseer_create_local_space(xso, &local, &floor) == XRT_SUCCESS);
+	// Standing: the head is 0.5 m higher in root.
+	head.pose.position = {1.0f, 0.5f, 2.0f};
+	REQUIRE(u_stage_recenter(xso, &head.base, 1, 1.72f) == XRT_SUCCESS);
+	REQUIRE(xrt_space_overseer_get_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage) ==
+	        XRT_SUCCESS);
+	CHECK(stage.position.y == Catch::Approx(0.5f - 1.72f));
+	struct xrt_space_relation in_stage;
+	REQUIRE(xrt_space_overseer_locate_space(xso, xso->semantic.stage, &identity, 1, xso->semantic.view, &identity,
+	                                        &in_stage) == XRT_SUCCESS);
+	CHECK(in_stage.pose.position.y == Catch::Approx(1.72f));
+	// Running apps' floors follow.
+	struct xrt_space_relation floor_in_root;
+	REQUIRE(xrt_space_overseer_locate_space(xso, xso->semantic.root, &identity, 1, floor, &identity,
+	                                        &floor_in_root) == XRT_SUCCESS);
+	CHECK(floor_in_root.pose.position.y == Catch::Approx(0.5f - 1.72f));
 	xrt_space_reference(&local, nullptr);
 	xrt_space_reference(&floor, nullptr);
 	xrt_space_overseer_destroy(&xso);

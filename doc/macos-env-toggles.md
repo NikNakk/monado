@@ -1093,7 +1093,9 @@ until hardware validation. `XRT_PSSENSE_STAGE_RECENTER_HOLD_MS` defaults to
 once per hold. Release, disconnection or stale input resets the hold.
 
 The managed STAGE is centred horizontally under the tracked head and yaw is
-aligned to its forward direction. Floor height is preserved. Invalid tracking,
+aligned to its forward direction. With `XRT_FLOOR_EYE_HEIGHT_M` set, the
+floor is also re-measured, that far below the head (since 2026-10-14);
+otherwise floor height is preserved. Invalid tracking,
 an almost vertical gaze and driver-provided STAGE are refused explicitly;
 release before retrying. Apps receive the existing STAGE/LOCAL_FLOOR change
 notifications. Short presses continue to reach apps. See the
