@@ -410,7 +410,7 @@ TEST_CASE("Floor calibration holds the input lock only around head input updates
 	b_space_overseer_legacy_setup(uso, xdevs, 1, &head.base, &identity, false, true);
 	auto *xso = reinterpret_cast<struct xrt_space_overseer *>(uso);
 
-	struct os_mutex lock;
+	struct os_mutex lock{};
 	REQUIRE(os_mutex_init(&lock) == 0);
 	g_probe_lock = &lock;
 	struct u_floor_calibration fc;

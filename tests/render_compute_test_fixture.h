@@ -466,7 +466,8 @@ struct LayerFixture : Fixture
 			REQUIRE(vk().vkAllocateDescriptorSets(vk().device, &ai, &layer_sets[eye]) == VK_SUCCESS);
 			std::vector<VkDescriptorImageInfo> src(sampler_count);
 			for (uint32_t i = 0; i < sampler_count; ++i)
-				src[i] = {sampler, images[i == 0 ? eye : 1 - eye].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+				src[i] = {sampler, images[i == 0 ? eye : 1 - eye].view,
+				          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 			VkDescriptorImageInfo out{VK_NULL_HANDLE, images[8].view, VK_IMAGE_LAYOUT_GENERAL};
 			VkDescriptorBufferInfo ub{layer_ubo[eye].buffer, 0, layer_ubo[eye].size};
 			VkDescriptorBufferInfo fb{foveation_ubo.buffer, 0, foveation_ubo.size};
@@ -563,8 +564,7 @@ struct LayerFixture : Fixture
 		}
 	}
 	VkPipeline
-	layer_pipeline(bool candidate, bool correction = false, bool timewarp = true,
-	               bool common = false)
+	layer_pipeline(bool candidate, bool correction = false, bool timewarp = true, bool common = false)
 	{
 		VkShaderModuleCreateInfo mi{};
 		mi.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -573,7 +573,8 @@ struct LayerFixture : Fixture
 		VkShaderModule module{};
 		REQUIRE(vk().vkCreateShaderModule(vk().device, &mi, nullptr, &module) == VK_SUCCESS);
 		modules.push_back(module);
-		auto spec = render_make_layer_spec(timewarp, correction, layer_sampler_count, RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE);
+		auto spec = render_make_layer_spec(timewarp, correction, layer_sampler_count,
+		                                   RENDER_LAYER_DEFAULT_INSET_BLEND_EDGE);
 		spec.use_quad_bounds = candidate;
 		spec.use_common_layers = common;
 		auto &entries = ShaderSpecializationMap<render_layer_spec>::kEntries;
@@ -639,5 +640,4 @@ struct LayerFixture : Fixture
 	}
 };
 
-const char *scenarios[] = {"distortion", "scanline-timewarp", "foveation", "depth"};
 } // namespace

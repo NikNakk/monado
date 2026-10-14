@@ -18,7 +18,8 @@ TEST_CASE("Common projection quad shader preserves final stereo pixels", "[aux_r
 					for (unsigned quads : {1u, 4u}) {
 						for (unsigned pose : {0u, 3u, 17u, 19u, 20u, 21u, 22u, 23u, 25u, 28u}) {
 							for (unsigned flags : {0u, 1u, 2u, 3u}) {
-								CAPTURE(scale, timewarp, correction, alpha, quads, pose, flags);
+								CAPTURE(scale, timewarp, correction, alpha, quads, pose,
+								        flags);
 								f.scene(pose, flags, timewarp ? 1 : 0, quads);
 								f.run_composition(baseline, distortion, 1, true);
 								auto pixels = f.snapshot();
@@ -35,14 +36,17 @@ TEST_CASE("Common projection quad shader preserves final stereo pixels", "[aux_r
 
 TEST_CASE("Common projection quad pipeline GPU benchmark", "[.][gpu][layer_specialization_benchmark]")
 {
-	const char *path = std::getenv("MONADO_LAYER_SPECIAL_CSV"); REQUIRE(path);
-	std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path, "w"), &std::fclose);
+	const char *path = std::getenv("MONADO_LAYER_SPECIAL_CSV");
+	REQUIRE(path);
+	auto close_file = [](FILE *f) { std::fclose(f); };
+	std::unique_ptr<FILE, decltype(close_file)> file(std::fopen(path, "w"), close_file);
 	REQUIRE(file);
 	std::fprintf(file.get(), "scale,quads,round,variant,total_ms,host_start_ns,host_end_ns\n");
 	for (float scale : {1.f, 1.4f}) {
 		ProjectionQuadFixture f;
 		f.init_composition(2000, 2040, scale, 16);
-		if (!f.queries) SKIP("GPU timestamps unavailable");
+		if (!f.queries)
+			SKIP("GPU timestamps unavailable");
 		auto baseline = f.layer_pipeline(true, true, true);
 		auto candidate = f.layer_pipeline(true, true, true, true);
 		auto distortion = f.pipeline(variants[0], 1, false);
@@ -54,10 +58,12 @@ TEST_CASE("Common projection quad pipeline GPU benchmark", "[.][gpu][layer_speci
 				for (unsigned n = 0; n < 2; ++n) {
 					bool special = (round % 2 ? 1 - n : n) != 0;
 					uint64_t begin = os_monotonic_get_ns();
-					double ms = f.run_composition(special ? candidate : baseline, distortion, 6, false);
+					double ms =
+					    f.run_composition(special ? candidate : baseline, distortion, 6, false);
 					uint64_t end = os_monotonic_get_ns();
 					std::fprintf(file.get(), "%.2f,%u,%u,%s,%.9f,%llu,%llu\n", scale, quads, round,
-					             special ? "specialized" : "baseline", ms, (unsigned long long)begin, (unsigned long long)end);
+					             special ? "specialized" : "baseline", ms,
+					             (unsigned long long)begin, (unsigned long long)end);
 					std::fflush(file.get());
 				}
 			}

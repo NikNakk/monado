@@ -72,6 +72,7 @@ TEST_CASE("Identity distortion agrees with CPU color and alpha reference", "[aux
 
 TEST_CASE("Distortion GPU workgroup benchmark", "[.][aux_render][gpu][benchmark]")
 {
+	const char *scenarios[] = {"distortion", "scanline-timewarp", "foveation", "depth"};
 	// Explicit invocation only: -- benchmarks never impose timing thresholds on CI.
 	Fixture f;
 	const char *small = std::getenv("MONADO_DISTORTION_BENCH_SMALL");
@@ -80,7 +81,8 @@ TEST_CASE("Distortion GPU workgroup benchmark", "[.][aux_render][gpu][benchmark]
 		SKIP("GPU timestamps unavailable");
 	const char *path = std::getenv("MONADO_DISTORTION_BENCH_CSV");
 	REQUIRE(path != nullptr);
-	std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path, "w"), &std::fclose);
+	auto close_file = [](FILE *f) { std::fclose(f); };
+	std::unique_ptr<FILE, decltype(close_file)> file(std::fopen(path, "w"), close_file);
 	REQUIRE(file != nullptr);
 	FILE *csv = file.get();
 	std::fprintf(csv, "scenario,alpha,width,height,round,workgroup,dispatches,gpu_ms\n");
@@ -182,7 +184,8 @@ TEST_CASE("Layer composition GPU benchmark", "[.][aux_render][gpu][layer_benchma
 		SKIP("GPU timestamps unavailable");
 	const char *path = std::getenv("MONADO_LAYER_BENCH_CSV");
 	REQUIRE(path != nullptr);
-	std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path, "w"), &std::fclose);
+	auto close_file = [](FILE *f) { std::fclose(f); };
+	std::unique_ptr<FILE, decltype(close_file)> file(std::fopen(path, "w"), close_file);
 	REQUIRE(file != nullptr);
 	std::fprintf(file.get(),
 	             "quads,correction,width,height,round,variant,frames,gpu_ms,host_start_ns,host_end_ns\n");
@@ -235,7 +238,8 @@ TEST_CASE("Competing GPU load", "[.][aux_render][gpu][gpu_load]")
 	REQUIRE(mode != nullptr);
 	bool paced = std::strcmp(mode, "paced") == 0;
 	REQUIRE((paced || std::strcmp(mode, "saturated") == 0));
-	std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path, "w"), &std::fclose);
+	auto close_file = [](FILE *f) { std::fclose(f); };
+	std::unique_ptr<FILE, decltype(close_file)> file(std::fopen(path, "w"), close_file);
 	REQUIRE(file != nullptr);
 	std::fprintf(file.get(), "batch,dispatches,host_start_ns,host_end_ns,gpu_batch_ms\n");
 	std::fflush(file.get());
@@ -275,10 +279,10 @@ TEST_CASE("Projection fast-path diagnostic identifies all policy gates", "[aux_r
 {
 	xrt_layer_data layer{};
 	layer.type = XRT_LAYER_PROJECTION;
-	auto reasons = [&](unsigned count, bool passthrough = false, bool peek = false,
-	                   bool mirror = false, bool disabled = false) {
-		return comp_projection_fast_path_rejections(count, count ? &layer : nullptr,
-		                                           passthrough, peek, mirror, disabled);
+	auto reasons = [&](unsigned count, bool passthrough = false, bool peek = false, bool mirror = false,
+	                   bool disabled = false) {
+		return comp_projection_fast_path_rejections(count, count ? &layer : nullptr, passthrough, peek, mirror,
+		                                            disabled);
 	};
 	CHECK(reasons(1) == 0);
 	layer.flags = XRT_LAYER_COMPOSITION_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
@@ -293,7 +297,7 @@ TEST_CASE("Projection fast-path diagnostic identifies all policy gates", "[aux_r
 	CHECK(reasons(1, false, false, true) == COMP_FAST_PATH_DEBUG_MIRROR);
 	CHECK(reasons(1, false, false, false, true) == COMP_FAST_PATH_DEBUG_DISABLED);
 	CHECK(reasons(1, true, true, true, true) == (COMP_FAST_PATH_PASSTHROUGH | COMP_FAST_PATH_PEEK |
-	                                         COMP_FAST_PATH_DEBUG_MIRROR | COMP_FAST_PATH_DEBUG_DISABLED));
+	                                             COMP_FAST_PATH_DEBUG_MIRROR | COMP_FAST_PATH_DEBUG_DISABLED));
 	layer.flags = XRT_LAYER_COMPOSITION_COLOR_BIAS_SCALE;
 	CHECK(reasons(1) == COMP_FAST_PATH_COLOR_SCALE_BIAS);
 	layer.flags = (xrt_layer_composition_flags)0;
