@@ -18,6 +18,10 @@
 
 #include "comp_vk_client.h"
 
+#ifdef XRT_HAVE_VK_CLIENT_SHARED_EVENT
+#include "comp_vk_client_shared_event.h"
+#endif
+
 
 // Prefixed with OXR since the only user right now is the OpenXR state tracker.
 DEBUG_GET_ONCE_LOG_OPTION(vulkan_log, "OXR_VULKAN_LOG", U_LOGGING_INFO)
@@ -908,6 +912,14 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 		if (xret != XRT_SUCCESS) {
 			goto err_pool;
 		}
+	}
+#endif
+
+#ifdef XRT_HAVE_VK_CLIENT_SHARED_EVENT
+	// macOS has no exportable timeline or fence, so commit would fall back to
+	// vkQueueWaitIdle; opt in to a Metal shared-event timeline instead.
+	if (c->sync.xcsem == NULL && client_vk_shared_event_enabled()) {
+		(void)client_vk_shared_event_create(c->xcn, &c->vk, &c->sync.semaphore, &c->sync.xcsem, &c->sync.value);
 	}
 #endif
 
