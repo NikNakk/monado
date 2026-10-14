@@ -1,0 +1,64 @@
+{
+  "implementation_and_fixture_commit": "ac96a07fa",
+  "driver_patch_sha256": "165e3f6521702df1343fe08169e8743df0960014904012a44a10c94e88541813",
+  "runner_sha256": "713a4bed635b49f9f36745a0e2211de37109ef171a9fea7b8da5288a33f502d9",
+  "comparison": "sequential physical hosted colour-only Vulkan API 1.2 BGRA8 UNORM; three images per eye; 180 frames; no concurrent test suite",
+  "game_mode": "not requested or independently verified",
+  "runs": {
+    "budget": {
+      "results": {
+        "budget-failed": {
+          "exit": 1,
+          "wait_seconds": 18.878484833
+        },
+        "budget-healthy": {
+          "exit": 0,
+          "wait_seconds": 2.9147855840000005
+        }
+      },
+      "events": {
+        "layer_begin_entry": 104,
+        "layer_begin_after_previous": 88,
+        "semaphore_pushed": 104,
+        "semaphore_wait_start": 104,
+        "semaphore_failed": 32,
+        "semaphore_ready": 72,
+        "scheduled": 72
+      }
+    },
+    "matched-mvk": {
+      "results": {
+        "probe": {
+          "exit": 0,
+          "wait_seconds": 2.6983112090000003
+        }
+      },
+      "events": {
+        "layer_begin_entry": 180,
+        "layer_begin_after_previous": 180
+      }
+    },
+    "matched-kk": {
+      "results": {
+        "probe": {
+          "exit": 0,
+          "wait_seconds": 2.807716792
+        }
+      },
+      "events": {
+        "layer_begin_entry": 180,
+        "layer_begin_after_previous": 180,
+        "semaphore_pushed": 180,
+        "semaphore_wait_start": 180,
+        "semaphore_ready": 180,
+        "scheduled": 180
+      }
+    }
+  },
+  "binary_sha256": {
+    "runtime": "ff4ae9f4144a92bd2fd7019061026484f54fa0fe5fa7aed30543b88b4ac723bf",
+    "fixture": "592879ac3778933f1d7146c66302c06932314811a8801990c788e6f35bfcfd5a",
+    "driver": "8272dd81d15bd36a72981c48c32d9e366627e84ab62cc5ecf1c515237ebd34b7"
+  },
+  "version_label_note": "Runtime configuration/version label predates the later source commits; ac96a07fa records the runtime/fixture source, hashes record final tested binaries."
+}

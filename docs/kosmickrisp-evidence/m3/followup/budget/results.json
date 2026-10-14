@@ -1,0 +1,10 @@
+{
+  "budget-failed": {
+    "exit": 1,
+    "wait_seconds": 18.878484833
+  },
+  "budget-healthy": {
+    "exit": 0,
+    "wait_seconds": 2.9147855840000005
+  }
+}

@@ -1,0 +1,3 @@
+[0/2] Re-checking globbed directories...
+[1/3] Building C object tests/CMakeFiles/tests_macos_openxr_vulkan_probe.dir/tests_macos_openxr_vulkan_probe.c.o
+[2/3] Linking CXX executable tests/tests_macos_openxr_vulkan_probe

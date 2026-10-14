@@ -1,0 +1,3 @@
+ INFO [comp_window_macos_init] Selected macOS display 'PS VR2' at 4000x2040 (window front-end)
+ INFO [macos_host_attach] Hosting client 1 (CAContext 3396849637) in the headset window
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000

@@ -1,0 +1,651 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-budget-final/service/monado_psvr2_85119_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004dc18948 device=0x1037be0d0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004dd04624
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d0cea65
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+ERROR [ipc_compositor_swapchain_wait_image] ipc_call_swapchain_wait_image failed: XRT_TIMEOUT [/private/tmp/monado-kosmickrisp-m3/src/xrt/ipc/client/ipc_client_compositor.c:191]
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+XR_ERROR_SESSION_LOST in xrAcquireSwapchainImage: KosmicKrisp producer session lost during acquire
+xrAcquireSwapchainImage failed: -17
+ WARN [client_vk_compositor_destroy] Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain
+Runtime queue metrics: submits=16 submit_ns=408000 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 1/9 exit=1
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-budget-final/service/monado_psvr2_85119_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004dbfd796 device=0x1037be0d0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d380a9c
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004dafaae4
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+ERROR [ipc_compositor_swapchain_wait_image] ipc_call_swapchain_wait_image failed: XRT_TIMEOUT [/private/tmp/monado-kosmickrisp-m3/src/xrt/ipc/client/ipc_client_compositor.c:191]
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+XR_ERROR_SESSION_LOST in xrAcquireSwapchainImage: KosmicKrisp producer session lost during acquire
+xrAcquireSwapchainImage failed: -17
+ WARN [client_vk_compositor_destroy] Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain
+Runtime queue metrics: submits=16 submit_ns=441000 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 2/9 exit=1
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-budget-final/service/monado_psvr2_85119_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004ddf30aa device=0x1037be0d0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004dac7cfd
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d7fabef
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+ERROR [ipc_compositor_swapchain_wait_image] ipc_call_swapchain_wait_image failed: XRT_TIMEOUT [/private/tmp/monado-kosmickrisp-m3/src/xrt/ipc/client/ipc_client_compositor.c:191]
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+XR_ERROR_SESSION_LOST in xrAcquireSwapchainImage: KosmicKrisp producer session lost during acquire
+xrAcquireSwapchainImage failed: -17
+ WARN [client_vk_compositor_destroy] Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain
+Runtime queue metrics: submits=16 submit_ns=337000 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 3/9 exit=1
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-budget-final/service/monado_psvr2_85119_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d4ae135 device=0x1037be0d0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d021bfd
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004dc48cdb
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+ERROR [ipc_compositor_swapchain_wait_image] ipc_call_swapchain_wait_image failed: XRT_TIMEOUT [/private/tmp/monado-kosmickrisp-m3/src/xrt/ipc/client/ipc_client_compositor.c:191]
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+XR_ERROR_SESSION_LOST in xrAcquireSwapchainImage: KosmicKrisp producer session lost during acquire
+xrAcquireSwapchainImage failed: -17
+ WARN [client_vk_compositor_destroy] Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain
+Runtime queue metrics: submits=16 submit_ns=401000 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 4/9 exit=1
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-budget-final/service/monado_psvr2_85119_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d9e7fa3 device=0x1037be0d0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004da6c211
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004de36483
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+ERROR [ipc_compositor_swapchain_wait_image] ipc_call_swapchain_wait_image failed: XRT_TIMEOUT [/private/tmp/monado-kosmickrisp-m3/src/xrt/ipc/client/ipc_client_compositor.c:191]
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+XR_ERROR_SESSION_LOST in xrAcquireSwapchainImage: KosmicKrisp producer session lost during acquire
+xrAcquireSwapchainImage failed: -17
+ WARN [client_vk_compositor_destroy] Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain
+Runtime queue metrics: submits=16 submit_ns=410000 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 5/9 exit=1
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-budget-final/service/monado_psvr2_85119_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d10d02f device=0x1037be0d0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d5f2209
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004dcaa883
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+ERROR [ipc_compositor_swapchain_wait_image] ipc_call_swapchain_wait_image failed: XRT_TIMEOUT [/private/tmp/monado-kosmickrisp-m3/src/xrt/ipc/client/ipc_client_compositor.c:191]
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+XR_ERROR_SESSION_LOST in xrAcquireSwapchainImage: KosmicKrisp producer session lost during acquire
+xrAcquireSwapchainImage failed: -17
+ WARN [client_vk_compositor_destroy] Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain
+Runtime queue metrics: submits=16 submit_ns=486000 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 6/9 exit=1
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-budget-final/service/monado_psvr2_85119_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004dc614d8 device=0x1037be0d0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d3bbac3
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d0ace4b
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+ERROR [ipc_compositor_swapchain_wait_image] ipc_call_swapchain_wait_image failed: XRT_TIMEOUT [/private/tmp/monado-kosmickrisp-m3/src/xrt/ipc/client/ipc_client_compositor.c:191]
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+XR_ERROR_SESSION_LOST in xrAcquireSwapchainImage: KosmicKrisp producer session lost during acquire
+xrAcquireSwapchainImage failed: -17
+ WARN [client_vk_compositor_destroy] Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain
+Runtime queue metrics: submits=16 submit_ns=429000 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 7/9 exit=1
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-budget-final/service/monado_psvr2_85119_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004d57290f device=0x1037be0d0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d557d8f
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d62c406
+Probe swapchain: format=37 width=896 height=1007 samples=1 arrays=1 images=4
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+probe suppressed runtime producer signal
+ERROR [ipc_compositor_swapchain_wait_image] ipc_call_swapchain_wait_image failed: XRT_TIMEOUT [/private/tmp/monado-kosmickrisp-m3/src/xrt/ipc/client/ipc_client_compositor.c:191]
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+WARNING in xrAcquireSwapchainImage: Session state changed to the same state (XR_SESSION_STATE_LOSS_PENDING), not sending XrEventDataSessionStateChanged
+XR_ERROR_SESSION_LOST in xrAcquireSwapchainImage: KosmicKrisp producer session lost during acquire
+xrAcquireSwapchainImage failed: -17
+ WARN [client_vk_compositor_destroy] Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain
+Runtime queue metrics: submits=16 submit_ns=407000 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 8/9 exit=1
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Simulated HMD'
+	Eyes: '<none>'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0xc1151c000
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0xc115c4000
+	vulkanInstance: 0xc1151c000
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ERROR [client_vk_metal_create] KosmicKrisp process frontend budget exhausted (8 active or retained); restart after failed GPU work
+XR_ERROR_INITIALIZATION_FAILED in xrCreateSession: Failed to create an vk client compositor
+xrCreateSession failed: -6
+Runtime queue metrics: submits=0 submit_ns=0 idle_waits=0 idle_ns=0
+Repeated Vulkan probe iteration 9/9 exit=1

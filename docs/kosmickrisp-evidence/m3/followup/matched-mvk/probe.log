@@ -1,0 +1,1263 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: tests_macos_openxr_vulkan_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: monado
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.1.58
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+DEBUG [comp_main_create_system_compositor] Doing init 0x950858000
+ INFO [comp_window_macos_create_base] macOS diagnostic: asynchronous drawable slot with newest-frame worker enabled; nextDrawable stalls supersede pending frames instead of dropping them
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_present.csv
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_presented.csv
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_present_complete.csv
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_present_scheduled.csv
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_present_worker.csv
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_drawable_prefetch.csv
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_vblank.csv
+ INFO [find_psvr2_screen] macOS display: 'Built-in Retina Display' 1710x1107
+ INFO [find_psvr2_screen] macOS display: 'PS VR2' 4000x2040
+ INFO [macos_hosted_frontend_create] Presenting through the service's headset window (CAContext 3396849637)
+ INFO [comp_window_macos_init] macOS CAMetalLayer maximumDrawableCount=3
+ INFO [macos_passthrough_init] PS VR2 passthrough unavailable: the head device has no camera source here
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_ca_callback.csv
+ INFO [macos_display_link_create] macOS vblank source: CADisplayLink (XRT_MACOS_DISPLAY_LINK=ca)
+ INFO [comp_window_macos_init] PS VR2 display period 11.111ms (90.00 Hz)
+ INFO [comp_target_swapchain_override_extents] Target 'macOS Metal' overrides compositor extents with (4000x2040) was (0x0 false)
+ INFO [comp_window_macos_init] Selected macOS display 'PS VR2' at 4000x2040 (hosted front-end)
+ INFO [macos_log_refresh_mode_candidates] PS VR2 current CoreGraphics mode: logical 4000x2040, pixels 4000x2040, refresh 90.000 Hz
+ INFO [macos_log_refresh_mode_candidates] PS VR2 matching CoreGraphics display mode: 120.000 Hz
+ INFO [macos_log_refresh_mode_candidates] PS VR2 matching CoreGraphics display mode: 90.000 Hz
+ INFO [macos_log_refresh_mode_candidates] PS VR2 candidate physical refresh rates for active mode: [90.000, 120.000] Hz
+ INFO [comp_window_macos_init_with_refresh_rate] macOS CAMetalLayer state: framebufferOnly=false displaySyncEnabled=true presentsWithTransaction=false maximumDrawableCount=3 allowsNextDrawableTimeout=true pixelFormat=80 colorspace=kCGColorSpaceSRGB
+ INFO [vk_log_extension_list] Vulkan instance extensions list(s):
+	Enabled extensions:
+		VK_KHR_external_fence_capabilities        required
+		VK_KHR_external_memory_capabilities       required
+		VK_KHR_external_semaphore_capabilities    required
+		VK_KHR_get_physical_device_properties2    required
+		VK_KHR_get_surface_capabilities2          optional
+		VK_KHR_portability_enumeration            optional
+		VK_KHR_surface                            required
+		VK_EXT_debug_report                       required
+		VK_EXT_swapchain_colorspace               optional
+	Not enabled optional extensions:
+		VK_EXT_display_surface_counter            skipped
+ WARN [build_extension_list] Duplicate extension VK_EXT_metal_objects not added twice
+ WARN [build_extension_list] Duplicate extension VK_EXT_metal_objects not added twice
+ INFO [create_device] Created device and COMPUTE queue with QUEUE_GLOBAL_PRIORITY_HIGH.
+ INFO [vk_print_device_info] Device info:
+	name: Apple M5
+	vendor: 0x106b
+	product: 0x1a07020a
+	deviceType: VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU
+	apiVersion: 1.0.357
+	driverVersion: 0x000028a2
+ INFO [vk_print_queues_info] Selected Queues/Families:
+	main_queue.queue: 0x1029fe678
+	main_queue.index: 0
+	main_queue.family_index: 0
+	encode_queue.queue: 0x0
+	encode_queue.index: -1
+	encode_queue.family_index: -1
+ INFO [vk_print_features_info] Features:
+	timestamp_compute_and_graphics: true
+	timestamp_period: 1.000000
+	timestamp_valid_bits: 64
+	timeline_semaphore: true
+ INFO [vk_print_external_handles_info] Supported images:
+	IOSurfaceRef:
+		color import=true export=true
+		depth import=true export=true
+ INFO [vk_print_external_handles_info] Supported fences:
+	VK_EXTERNAL_FENCE_HANDLE_TYPE_SYNC_FD_BIT: false
+	VK_EXTERNAL_FENCE_HANDLE_TYPE_OPAQUE_FD_BIT: false
+ INFO [vk_print_external_handles_info] Supported semaphores:
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT(binary): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT(binary): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT(timeline): false
+	VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD_BIT(timeline): false
+ INFO [note_device_locked] GPU reuse budget: device-local heap 24576 MiB, global limit 18432 MiB, per-client 12288 MiB
+ INFO [comp_metal_semaphore_probe] Metal timeline shared-event probe succeeded: event=0x951083100 initial_value=0; in-process client provider registered
+ INFO [render_resources_init] New renderer initialized!
+ INFO [comp_window_macos_init_vulkan] macOS target exported Vulkan render-complete timeline as MTLSharedEvent
+ INFO [comp_window_macos_init_vulkan] macOS target using render-complete timeline semaphore with Metal shared-event handoff
+ INFO [apply_to_queue] Metal GPU priority, compositor (MoltenVK) queue: foreground=1 background=2 (unchanged)
+ INFO [apply_to_queue] Metal GPU priority, presenter queue: foreground=1 background=2 (unchanged)
+ INFO [u_pc_fake_create] Created pacer (non-feedback version aka "fake")
+	estimated_frame_period: 11.111111ms
+	percentage: 20.000000%
+	min_comp_time: 3.000000ms
+	comp_time: 3.000000ms
+ INFO [comp_window_macos_create_images] Created 3 IOSurface-backed macOS compositor images at 4000x2040
+ INFO [comp_vulkan_formats_log] Supported formats:
+	VK_FORMAT_R16G16B16A16_UNORM: true
+	VK_FORMAT_R16G16B16A16_SFLOAT: true
+	VK_FORMAT_R16G16B16_UNORM: false
+	VK_FORMAT_R16G16B16_SFLOAT: false
+	VK_FORMAT_R8G8B8A8_SRGB: true
+	VK_FORMAT_B8G8R8A8_SRGB: true
+	VK_FORMAT_R8G8B8_SRGB: false
+	VK_FORMAT_R8G8B8A8_UNORM: true
+	VK_FORMAT_B8G8R8A8_UNORM: true
+	VK_FORMAT_R8G8B8_UNORM: false
+	VK_FORMAT_B8G8R8_UNORM: false
+	VK_FORMAT_R5G6B5_UNORM_PACK16: true
+	VK_FORMAT_R32_SFLOAT: true
+	VK_FORMAT_D32_SFLOAT: true
+	VK_FORMAT_D16_UNORM: true
+	VK_FORMAT_X8_D24_UNORM_PACK32: false
+	VK_FORMAT_D24_UNORM_S8_UINT: false
+	VK_FORMAT_D32_SFLOAT_S8_UINT: true
+	VK_FORMAT_S8_UINT: true
+ WARN [render_max_layers_capable] Device supports only 8 compositor layers due to Vulkan limits. which is below Vulkan minimum of 16. This may indicate a driver bug. Attempting 16 anyway.
+ INFO [ipc_client_macos_hosted_create_system_compositor] Compositing in-process; the service hosts this client's layer
+ INFO [update_session_state_locked] Doing warm start, 0 active app session(s).
+ INFO [comp_window_macos_update_timings] CADisplayLink measured display period 11.122208ms (89.910 Hz)
+LOG in xrGetSystem: Selected devices
+	Head: 'PS VR2 HMD'
+	Eyes: 'PS VR2 HMD'
+	Left: 'PlayStation VR2 Sense Controller (L)'
+	Right: 'PlayStation VR2 Sense Controller (R)'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_frame_pipeline.csv
+ INFO [macos_compositor_update_time_constraint] macOS diagnostic: Multi Client Module time constraint updated: refresh_hz=89.910 period_ns=11122208 computation_ns=3892772 constraint_ns=7785545 computation_pct=35 constraint_pct=70
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_compositor_rt.csv
+ INFO [macos_compositor_rt_trace_get] macOS compositor realtime trace enabled
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_reprojection_source.csv
+ INFO [reprojection_source_trace_open] Reprojection source trace enabled
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_composition.csv
+ INFO [comp_window_macos_flush] macOS presentation: hosted front-end visible=true layer device=set format=80 drawable=4000x2040
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0x951140800
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+		VK_KHR_portability_enumeration
+ INFO [update_session_state_locked] Stopped native session, 0 active app session(s).
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0x95129f018
+	vulkanInstance: 0x951140800
+	external_fence_fd: false
+	external_semaphore_fd: false
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_EXT_metal_objects
+		VK_KHR_portability_subset
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [update_session_state_locked] Started native session, 1 active app session(s).
+ INFO [comp_swapchain_gpu_reuse_enable] Swapchain GPU reuse tracking enabled: swapchain=0x95156b000 images=3 timeline=0x950da7f20
+Probe swapchain: format=44 width=2800 height=2856 samples=1 arrays=1 images=3
+ INFO [comp_swapchain_gpu_reuse_enable] Swapchain GPU reuse tracking enabled: swapchain=0x95156b800 images=3 timeline=0x950da7f20
+Probe swapchain: format=44 width=2800 height=2856 samples=1 arrays=1 images=3
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_app_pacing.csv
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-matched-final-mvk/service/monado_psvr2_84440_client_gpu.csv
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=1 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=1 extra_ns=0
+vk-target frame=4 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=2 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=2 extra_ns=0
+vk-target frame=5 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=3 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=3 extra_ns=0
+vk-target frame=6 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=4 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=4 extra_ns=0
+vk-target frame=7 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=5 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=5 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=3 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=3 extra_ns=54500
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=3 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=3 extra_ns=19458
+vk-target frame=8 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=6 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=6 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=4 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=4 extra_ns=43916
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=4 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=4 extra_ns=11292
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=7 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=7 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=5 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=5 extra_ns=22083
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=5 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=5 extra_ns=15083
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=8 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=8 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=6 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=6 extra_ns=24708
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=6 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=6 extra_ns=18709
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=9 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=9 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=7 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=7 extra_ns=39750
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=7 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=7 extra_ns=12292
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=10 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=10 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=8 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=8 extra_ns=43542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=8 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=8 extra_ns=6625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=11 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=11 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=9 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=9 extra_ns=29458
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=9 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=9 extra_ns=16000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=12 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=12 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=10 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=10 extra_ns=20000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=10 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=10 extra_ns=14709
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=13 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=13 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=11 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=11 extra_ns=10000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=11 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=11 extra_ns=10042
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=14 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=14 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=12 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=12 extra_ns=14250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=12 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=12 extra_ns=16083
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=15 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=15 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=13 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=13 extra_ns=16375
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=13 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=13 extra_ns=6417
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=16 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=16 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=14 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=14 extra_ns=12334
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=14 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=14 extra_ns=7834
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=17 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=17 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=15 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=15 extra_ns=6917
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=15 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=15 extra_ns=8500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=18 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=18 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=16 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=16 extra_ns=15417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=16 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=16 extra_ns=7000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=19 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=19 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=17 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=17 extra_ns=12417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=17 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=17 extra_ns=9250
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=20 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=20 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=19 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=19 extra_ns=12750
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=19 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=19 extra_ns=7958
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=21 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=21 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=20 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=20 extra_ns=42459
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=20 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=20 extra_ns=21333
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=22 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=22 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=17 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=17 extra_ns=12792
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=17 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=17 extra_ns=10667
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=23 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=23 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=22 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=22 extra_ns=27417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=22 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=22 extra_ns=13708
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=24 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=24 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=20 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=20 extra_ns=18667
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=20 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=20 extra_ns=6417
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=25 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=25 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=24 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=24 extra_ns=15625
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=24 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=24 extra_ns=6375
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=26 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=26 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=22 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=22 extra_ns=16666
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=22 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=22 extra_ns=11000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=27 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=27 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=25 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=25 extra_ns=11667
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=25 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=25 extra_ns=5625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=28 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=28 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=26 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=26 extra_ns=7334
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=26 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=26 extra_ns=6833
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=29 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=29 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=27 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=27 extra_ns=32834
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=27 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=27 extra_ns=7125
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=30 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=30 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=28 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=28 extra_ns=11417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=28 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=28 extra_ns=7417
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=31 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=31 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=30 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=30 extra_ns=10250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=30 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=30 extra_ns=9042
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=32 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=32 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=27 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=27 extra_ns=73375
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=27 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=27 extra_ns=32833
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=33 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=33 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=31 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=31 extra_ns=45625
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=31 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=31 extra_ns=22583
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=34 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=34 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=33 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=33 extra_ns=40292
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=33 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=33 extra_ns=34500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=35 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=35 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=27 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=27 extra_ns=302458
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=27 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=27 extra_ns=40709
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=36 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=36 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=34 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=34 extra_ns=114792
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=34 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=34 extra_ns=27417
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=37 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=37 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=35 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=35 extra_ns=42542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=35 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=35 extra_ns=28167
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=38 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=38 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=36 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=36 extra_ns=60834
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=36 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=36 extra_ns=35875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=39 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=39 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=38 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=38 extra_ns=112042
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=38 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=38 extra_ns=27250
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=40 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=40 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=35 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=35 extra_ns=137250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=35 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=35 extra_ns=58791
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=41 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=41 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=39 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=39 extra_ns=97792
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=39 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=39 extra_ns=37209
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=42 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=42 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=41 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=41 extra_ns=133875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=41 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=41 extra_ns=39209
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=43 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=43 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=35 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=35 extra_ns=113542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=35 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=35 extra_ns=39167
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=44 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=44 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=42 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=42 extra_ns=104500
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=42 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=42 extra_ns=43042
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=45 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=45 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=43 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=43 extra_ns=104875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=43 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=43 extra_ns=28875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=46 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=46 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=45 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=45 extra_ns=49917
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=45 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=45 extra_ns=60959
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=47 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=47 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=42 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=42 extra_ns=160542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=42 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=42 extra_ns=64500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=48 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=48 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=46 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=46 extra_ns=125917
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=46 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=46 extra_ns=30917
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=49 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=49 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=47 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=47 extra_ns=66333
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=47 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=47 extra_ns=64083
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=50 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=50 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=48 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=48 extra_ns=21792
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=48 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=48 extra_ns=8625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=51 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=51 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=49 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=49 extra_ns=21292
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=49 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=49 extra_ns=9875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=52 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=52 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=50 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=50 extra_ns=24708
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=50 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=50 extra_ns=29750
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=53 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=53 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=52 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=52 extra_ns=12375
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=52 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=52 extra_ns=24541
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=54 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=54 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=49 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=49 extra_ns=65667
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=49 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=49 extra_ns=29500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=55 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=55 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=54 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=54 extra_ns=73917
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=54 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=54 extra_ns=121375
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=56 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=56 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=52 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=52 extra_ns=67500
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=52 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=52 extra_ns=42959
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=57 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=57 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=56 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=56 extra_ns=62917
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=56 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=56 extra_ns=25167
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=58 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=58 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=54 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=54 extra_ns=74458
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=54 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=54 extra_ns=119375
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=59 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=59 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=57 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=57 extra_ns=55750
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=57 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=57 extra_ns=16875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=60 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=60 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=58 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=58 extra_ns=69625
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=58 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=58 extra_ns=14708
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=61 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=61 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=60 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=60 extra_ns=105750
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=60 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=60 extra_ns=39917
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=62 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=62 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=57 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=57 extra_ns=54000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=57 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=57 extra_ns=30500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=63 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=63 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=61 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=61 extra_ns=35458
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=61 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=61 extra_ns=35208
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=64 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=64 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=63 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=63 extra_ns=104875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=63 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=63 extra_ns=38875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=65 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=65 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=57 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=57 extra_ns=48625
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=57 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=57 extra_ns=66334
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=66 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=66 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=64 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=64 extra_ns=90042
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=64 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=64 extra_ns=22083
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=67 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=67 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=66 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=66 extra_ns=102167
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=66 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=66 extra_ns=39000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=68 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=68 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=57 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=57 extra_ns=43166
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=57 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=57 extra_ns=32250
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=69 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=69 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=67 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=67 extra_ns=47625
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=67 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=67 extra_ns=13875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=70 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=70 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=68 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=68 extra_ns=143500
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=68 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=68 extra_ns=22042
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=71 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=71 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=69 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=69 extra_ns=47667
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=69 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=69 extra_ns=18084
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=72 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=72 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=70 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=70 extra_ns=54209
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=70 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=70 extra_ns=26416
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=73 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=73 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=71 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=71 extra_ns=81250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=71 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=71 extra_ns=39916
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=74 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=74 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=72 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=72 extra_ns=76416
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=75 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=75 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=72 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=72 extra_ns=15417
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=76 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=76 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=73 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=73 extra_ns=113209
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=73 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=73 extra_ns=22666
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=77 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=77 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=75 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=75 extra_ns=41166
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=75 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=75 extra_ns=17375
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=78 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=78 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=76 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=76 extra_ns=78791
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=76 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=76 extra_ns=23375
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=79 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=79 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=77 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=77 extra_ns=62542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=77 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=77 extra_ns=82459
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=80 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=80 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=78 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=78 extra_ns=99250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=78 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=78 extra_ns=27250
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=81 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=81 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=80 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=80 extra_ns=109750
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=80 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=80 extra_ns=16750
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=82 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=82 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=77 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=77 extra_ns=92875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=77 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=77 extra_ns=68416
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=83 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=83 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=81 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=81 extra_ns=78334
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=81 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=81 extra_ns=43875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=84 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=84 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=83 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=83 extra_ns=39417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=83 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=83 extra_ns=16041
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=85 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=85 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=77 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=77 extra_ns=120875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=77 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=77 extra_ns=22459
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=86 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=86 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=84 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=84 extra_ns=33833
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=84 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=84 extra_ns=26291
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=87 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=87 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=85 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=85 extra_ns=38042
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=85 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=85 extra_ns=26000
+ INFO [-[MonadoCADisplayLinkSource checkTicking]] CADisplayLink fired 90 times in its first second
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=88 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=88 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=86 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=86 extra_ns=57542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=86 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=86 extra_ns=27000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=89 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=89 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=87 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=87 extra_ns=133875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=87 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=87 extra_ns=34166
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=90 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=90 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=89 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=89 extra_ns=38958
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=89 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=89 extra_ns=20083
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=91 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=91 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=86 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=86 extra_ns=150708
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=86 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=86 extra_ns=36125
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=92 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=92 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=90 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=90 extra_ns=102041
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=90 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=90 extra_ns=31500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=93 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=93 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=91 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=91 extra_ns=71125
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=91 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=91 extra_ns=33333
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=94 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=94 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=95 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=95 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=93 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=93 extra_ns=73459
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=93 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=93 extra_ns=41250
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=96 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=96 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=94 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=94 extra_ns=71625
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=94 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=94 extra_ns=27916
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=97 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=97 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=95 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=95 extra_ns=89750
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=95 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=95 extra_ns=89625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=98 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=98 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=96 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=96 extra_ns=51458
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=96 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=96 extra_ns=44667
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=99 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=99 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=97 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=97 extra_ns=53541
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=97 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=97 extra_ns=26750
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=100 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=100 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=98 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=98 extra_ns=50500
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=98 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=98 extra_ns=31125
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=101 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=101 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=99 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=99 extra_ns=80333
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=99 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=99 extra_ns=20458
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=102 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=102 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=100 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=100 extra_ns=59875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=100 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=100 extra_ns=22834
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=103 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=103 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=101 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=101 extra_ns=62000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=101 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=101 extra_ns=40792
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=104 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=104 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=102 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=102 extra_ns=47417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=102 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=102 extra_ns=24208
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=105 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=105 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=103 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=103 extra_ns=53291
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=103 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=103 extra_ns=19333
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=106 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=106 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=104 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=104 extra_ns=51500
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=104 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=104 extra_ns=22625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=107 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=107 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=105 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=105 extra_ns=65042
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=105 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=105 extra_ns=12250
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=108 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=108 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=106 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=106 extra_ns=56292
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=106 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=106 extra_ns=20792
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=109 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=109 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=107 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=107 extra_ns=76209
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=107 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=107 extra_ns=32417
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=110 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=110 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=108 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=108 extra_ns=73292
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=108 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=108 extra_ns=21791
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=111 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=111 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=109 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=109 extra_ns=70208
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=109 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=109 extra_ns=17125
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=112 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=112 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=110 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=110 extra_ns=64209
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=110 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=110 extra_ns=23250
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=113 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=113 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=111 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=111 extra_ns=60208
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=111 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=111 extra_ns=13375
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=114 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=114 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=112 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=112 extra_ns=41333
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=112 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=112 extra_ns=27750
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=115 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=115 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=113 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=113 extra_ns=58000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=113 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=113 extra_ns=11000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=116 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=116 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=114 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=114 extra_ns=53750
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=114 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=114 extra_ns=13625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=117 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=117 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=115 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=115 extra_ns=37542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=115 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=115 extra_ns=28125
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=118 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=118 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=116 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=116 extra_ns=68625
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=116 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=116 extra_ns=18333
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=119 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=119 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=117 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=117 extra_ns=41458
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=117 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=117 extra_ns=12834
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=120 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=120 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=118 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=118 extra_ns=51708
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=118 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=118 extra_ns=19875
+vk-target frame=123 layer=0 rgbaL=(255,249,90,255) rgbaC=(90,255,255,255) rgbaR=(90,255,255,255)
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=121 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=121 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=119 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=119 extra_ns=60667
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=119 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=119 extra_ns=19875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=122 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=122 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=120 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=120 extra_ns=38583
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=120 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=120 extra_ns=25834
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=123 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=123 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=122 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=122 extra_ns=68917
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=122 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=122 extra_ns=34458
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=124 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=124 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=119 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=119 extra_ns=78209
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=119 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=119 extra_ns=30417
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=125 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=125 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=124 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=124 extra_ns=53042
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=124 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=124 extra_ns=33750
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=126 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=126 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=122 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=122 extra_ns=40708
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=122 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=122 extra_ns=28541
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=127 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=127 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=125 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=125 extra_ns=83875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=125 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=125 extra_ns=22000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=128 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=128 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=126 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=126 extra_ns=59375
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=126 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=126 extra_ns=25416
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=129 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=129 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=128 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=128 extra_ns=61542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=128 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=128 extra_ns=41417
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=130 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=130 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=125 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=125 extra_ns=70875
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=125 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=125 extra_ns=31625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=131 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=131 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=130 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=130 extra_ns=79292
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=130 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=130 extra_ns=32750
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=132 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=132 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=128 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=128 extra_ns=78292
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=128 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=128 extra_ns=31833
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=133 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=133 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=132 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=132 extra_ns=60459
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=132 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=132 extra_ns=38916
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=134 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=134 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=130 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=130 extra_ns=69417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=130 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=130 extra_ns=33917
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=135 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=135 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=133 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=133 extra_ns=94167
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=133 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=133 extra_ns=56375
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=136 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=136 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=134 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=134 extra_ns=89250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=134 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=134 extra_ns=49708
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=137 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=137 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=136 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=136 extra_ns=47417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=136 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=136 extra_ns=30792
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=138 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=138 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=133 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=133 extra_ns=102375
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=133 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=133 extra_ns=27458
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=139 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=139 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=137 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=137 extra_ns=44458
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=137 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=137 extra_ns=30458
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=140 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=140 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=138 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=138 extra_ns=238125
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=138 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=138 extra_ns=32000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=141 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=141 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=139 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=139 extra_ns=45583
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=139 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=139 extra_ns=19625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=142 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=142 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=141 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=141 extra_ns=48000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=141 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=141 extra_ns=18542
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=143 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=143 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=138 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=138 extra_ns=67416
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=138 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=138 extra_ns=13667
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=144 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=144 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=142 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=142 extra_ns=74208
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=142 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=142 extra_ns=28583
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=145 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=145 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=143 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=143 extra_ns=70000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=143 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=143 extra_ns=33917
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=146 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=146 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=144 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=144 extra_ns=64000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=144 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=144 extra_ns=36416
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=147 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=147 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=145 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=145 extra_ns=57250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=145 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=145 extra_ns=47166
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=148 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=148 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=146 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=146 extra_ns=82250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=146 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=146 extra_ns=45125
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=149 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=149 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=148 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=148 extra_ns=119708
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=148 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=148 extra_ns=54625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=150 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=150 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=145 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=145 extra_ns=55959
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=145 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=145 extra_ns=32209
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=151 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=151 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=149 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=149 extra_ns=90334
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=149 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=149 extra_ns=34792
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=152 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=152 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=150 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=150 extra_ns=77292
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=150 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=150 extra_ns=47500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=153 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=153 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=151 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=151 extra_ns=76916
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=151 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=151 extra_ns=52625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=154 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=154 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=152 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=152 extra_ns=85375
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=152 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=152 extra_ns=33750
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=155 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=155 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=154 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=154 extra_ns=72500
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=154 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=154 extra_ns=31500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=156 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=156 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=151 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=151 extra_ns=57250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=151 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=151 extra_ns=30958
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=157 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=157 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=155 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=155 extra_ns=75208
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=155 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=155 extra_ns=46542
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=158 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=158 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=156 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=156 extra_ns=67375
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=156 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=156 extra_ns=39000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=159 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=159 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=157 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=157 extra_ns=73917
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=157 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=157 extra_ns=36667
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=160 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=160 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=158 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=158 extra_ns=91833
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=158 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=158 extra_ns=42625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=161 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=161 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=159 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=159 extra_ns=71042
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=159 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=159 extra_ns=16333
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=162 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=162 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=160 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=160 extra_ns=79291
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=160 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=160 extra_ns=33500
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=163 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=163 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=161 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=161 extra_ns=40458
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=161 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=161 extra_ns=27292
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=164 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=164 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=162 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=162 extra_ns=53542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=162 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=162 extra_ns=40750
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=165 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=165 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=163 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=163 extra_ns=80041
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=163 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=163 extra_ns=37125
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=166 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=166 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=164 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=164 extra_ns=76250
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=164 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=164 extra_ns=39000
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=167 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=167 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=166 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=166 extra_ns=51333
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=166 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=166 extra_ns=22875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=168 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=168 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=163 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=163 extra_ns=50417
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=163 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=163 extra_ns=50792
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=169 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=169 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=167 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=167 extra_ns=49375
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=167 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=167 extra_ns=26667
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=170 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=170 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=168 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=168 extra_ns=38000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=168 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=168 extra_ns=16125
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=171 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=171 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=169 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=169 extra_ns=34584
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=169 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=169 extra_ns=34375
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=172 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=172 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=170 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=170 extra_ns=60291
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=170 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=170 extra_ns=50709
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=173 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=173 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=172 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=172 extra_ns=43792
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=172 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=172 extra_ns=25208
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=174 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=174 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=169 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=169 extra_ns=42000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=169 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=169 extra_ns=29917
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=175 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=175 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=174 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=174 extra_ns=66791
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=174 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=174 extra_ns=36875
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=176 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=176 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=172 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=172 extra_ns=183000
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=172 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=172 extra_ns=21917
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=177 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=177 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=175 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=175 extra_ns=77583
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=175 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=175 extra_ns=22333
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=178 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=178 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=176 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=176 extra_ns=71333
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=176 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=176 extra_ns=26542
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=179 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=179 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=177 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=177 extra_ns=37833
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=177 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=177 extra_ns=21625
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=2 timeline=180 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=2 timeline=180 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=0 timeline=178 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=0 timeline=178 extra_ns=41542
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=0 timeline=178 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=0 timeline=178 extra_ns=20333
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=0 timeline=181 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=0 timeline=181 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=1 timeline=179 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=1 timeline=179 extra_ns=48625
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=1 timeline=179 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=1 timeline=179 extra_ns=31667
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=182 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=182 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b000 image=2 timeline=180 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b000 image=2 timeline=180 extra_ns=98500
+ INFO [reuse_log] Swapchain GPU reuse wait: swapchain=0x95156b800 image=2 timeline=180 extra_ns=9223372036854775807
+ INFO [reuse_log] Swapchain GPU reuse wait complete: swapchain=0x95156b800 image=2 timeline=180 extra_ns=24542
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b000 image=1 timeline=183 extra_ns=0
+ INFO [reuse_log] Swapchain GPU reuse submit assignment: swapchain=0x95156b800 image=1 timeline=183 extra_ns=0
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x95156b000 bytes=98893824 retained_bytes=197787648 objects=2 id=1
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x95156b800 bytes=98893824 retained_bytes=197787648 objects=2 id=2
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x95156b800 bytes=98893824 retained_bytes=98893824 objects=1 id=2
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x95156b000 bytes=98893824 retained_bytes=0 objects=0 id=1
+ INFO [multi_main_loop] Stopped native session, shutting down.
+Runtime queue metrics: submits=720 submit_ns=20373000 idle_waits=180 idle_ns=9986000
+OpenXR Vulkan probe created session, 2 swapchain(s), and submitted 180 projection frames.

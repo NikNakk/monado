@@ -1,0 +1,48 @@
+[
+  {
+    "capture": "/private/tmp/kosmickrisp-study/m3-matched-final-mvk",
+    "descriptors": [
+      "format=44 width=2800 height=2856 samples=1 arrays=1 images=3",
+      "format=44 width=2800 height=2856 samples=1 arrays=1 images=3"
+    ],
+    "results": {
+      "probe": {
+        "exit": 0,
+        "wait_seconds": 2.6983112090000003
+      }
+    },
+    "runtime_submit_count": 720,
+    "runtime_submit_ms": 20.373,
+    "runtime_idle_count": 180,
+    "runtime_idle_ms": 9.986,
+    "last_consumed_client_frame": 179,
+    "presentation_callbacks": 186,
+    "positive_presentation_timestamps": 0,
+    "presentation_interval_ms_median": null,
+    "presentation_command_buffer_gpu_ms_median": 0.9966249926947057,
+    "compositor_thread_cpu_ms_median": 0.375417
+  },
+  {
+    "capture": "/private/tmp/kosmickrisp-study/m3-matched-final-kk",
+    "descriptors": [
+      "format=44 width=2800 height=2856 samples=1 arrays=1 images=3",
+      "format=44 width=2800 height=2856 samples=1 arrays=1 images=3"
+    ],
+    "results": {
+      "probe": {
+        "exit": 0,
+        "wait_seconds": 2.807716792
+      }
+    },
+    "runtime_submit_count": 900,
+    "runtime_submit_ms": 22.418,
+    "runtime_idle_count": 0,
+    "runtime_idle_ms": 0.0,
+    "last_consumed_client_frame": 179,
+    "presentation_callbacks": 180,
+    "positive_presentation_timestamps": 0,
+    "presentation_interval_ms_median": null,
+    "presentation_command_buffer_gpu_ms_median": 1.5903750027064234,
+    "compositor_thread_cpu_ms_median": 0.499542
+  }
+]

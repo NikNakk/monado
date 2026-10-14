@@ -1,0 +1,117 @@
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996fb2000 bytes=14811136 retained_bytes=29622272 objects=2 id=1
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996fb2800 bytes=14811136 retained_bytes=29622272 objects=2 id=2
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996fb3000 bytes=14811136 retained_bytes=59244544 objects=4 id=3
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996fb3800 bytes=14811136 retained_bytes=59244544 objects=4 id=4
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996814000 bytes=14811136 retained_bytes=88866816 objects=6 id=5
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996814800 bytes=14811136 retained_bytes=88866816 objects=6 id=6
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996815000 bytes=14811136 retained_bytes=118489088 objects=8 id=7
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996815800 bytes=14811136 retained_bytes=118489088 objects=8 id=8
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996816000 bytes=14811136 retained_bytes=148111360 objects=10 id=9
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996816800 bytes=14811136 retained_bytes=148111360 objects=10 id=10
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996817000 bytes=14811136 retained_bytes=177733632 objects=12 id=11
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x996817800 bytes=14811136 retained_bytes=177733632 objects=12 id=12
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c4000 bytes=14811136 retained_bytes=207355904 objects=14 id=13
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c4800 bytes=14811136 retained_bytes=207355904 objects=14 id=14
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c5000 bytes=14811136 retained_bytes=236978176 objects=16 id=15
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c5800 bytes=14811136 retained_bytes=236978176 objects=16 id=16
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=17
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=18
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=251789312 objects=17 id=18
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=236978176 objects=16 id=17
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=19
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=20
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=251789312 objects=17 id=20
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=236978176 objects=16 id=19
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=21
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=22
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=251789312 objects=17 id=22
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=236978176 objects=16 id=21
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=23
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=24
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=251789312 objects=17 id=24
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=236978176 objects=16 id=23
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=25
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=26
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=251789312 objects=17 id=26
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=236978176 objects=16 id=25
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=27
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=28
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=251789312 objects=17 id=28
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=236978176 objects=16 id=27
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=29
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=30
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=251789312 objects=17 id=30
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=236978176 objects=16 id=29
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=31
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=32
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=251789312 objects=17 id=32
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=236978176 objects=16 id=31
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=33
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=34
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=251789312 objects=17 id=34
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=236978176 objects=16 id=33
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=35
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=36
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=251789312 objects=17 id=36
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=236978176 objects=16 id=35
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=37
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=38
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=251789312 objects=17 id=38
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=236978176 objects=16 id=37
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6800 bytes=14811136 retained_bytes=266600448 objects=18 id=39
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x9968c6000 bytes=14811136 retained_bytes=266600448 objects=18 id=40
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6000 bytes=14811136 retained_bytes=251789312 objects=17 id=40
+ INFO [reclaim_tracker_locked] GPU reuse reclaim: swapchain=0x9968c6800 bytes=14811136 retained_bytes=236978176 objects=16 id=39

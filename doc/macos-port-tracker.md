@@ -9,7 +9,7 @@ SPDX-License-Identifier: BSL-1.0
 
 ## Experimental KosmicKrisp Vulkan path (2026-10-14)
 
-`codex/kosmickrisp-openxr-m3` adds opt-in native Vulkan over Metal swapchains/readiness. Physical hello_xr service composition was accepted by the user; real hosted composition and graceful early stop pass at 90 Hz. Actual Game Mode, resource budgets and matched comparison remain pending; ordinary Vulkan baseline depth IOSurface allocation aborted. See [physical M3 evidence](../docs/kosmickrisp-openxr-assessment.md#physical-acceptance-and-hosted-follow-up-2026-10-14).
+`codex/kosmickrisp-openxr-m3` adds opt-in native Vulkan over Metal swapchains/readiness. Physical hello_xr service composition was accepted by the user; real hosted composition and graceful early stop pass at 90 Hz. A process cap passes eight retained failures / rejection of session nine and twelve healthy lifecycles; matching BGRA probes verify zero KK queue-idle handoffs versus 180 for MoltenVK, with no demonstrated timing gain. Actual Game Mode, resource budgets and matched comparison remain pending; ordinary Vulkan baseline depth IOSurface allocation aborted. See [physical M3 evidence](../docs/kosmickrisp-openxr-assessment.md#physical-acceptance-and-hosted-follow-up-2026-10-14).
 
 
 The [2026-10-13 GPU-efficiency study](macos-compositor-gpu-efficiency.md) retains

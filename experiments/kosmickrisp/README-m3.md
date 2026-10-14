@@ -135,3 +135,50 @@ hello sample selects different preferred formats and optional depth on that
 backend; this is not a format-matched performance comparison. The first physical
 baseline aborted on a Depth32Float IOSurface allocation. Keep this failure
 separate from KK acceptance and do not claim comparative timing gains.
+
+## Matching colour-only probes and frontend budget
+
+For the depth-free comparison, use `--mode probe --bgra --three-images --hosted`
+with `--headset`. Run `--backend moltenvk` and `--backend kosmickrisp` sequentially
+in fresh directories, with no concurrent GPU tests. Both probes request Vulkan
+1.2, two BGRA8 UNORM 2800x2856 single-layer/single-sample swapchains and three
+images per eye on this headset. Descriptor logs verify actual allocation.
+
+The normal driver has no shared-event readiness trace in this Vulkan frontend:
+its existing frame commit uses queue idle. The runner therefore checks actual
+compositor source consumption, rather than requiring KK semaphore events.
+Neither consumption nor a Metal presented-handler invocation proves scanout when
+`presented_monotonic_ns` is zero. The final colour-only captures had zero positive
+presentation timestamps. Do not substitute callback cadence for scanout cadence.
+
+Summarize the two captures with:
+
+```sh
+python3 "$repo/experiments/kosmickrisp/summarize-matched.py" \
+  "$study/m3-matched-final-mvk" "$study/m3-matched-final-kk" \
+  --output "$study/m3-matched-summary.json"
+```
+
+Probe-only runtime queue metrics instrument calls made through the runtime's
+Vulkan dispatch: they exclude direct application calls, compositor-own dispatch,
+shader compilation outside those calls and whole-process CPU usage. They add
+clock reads, and total wall time in a driver call is not pure CPU execution.
+
+Use `--mode budget` with the simulated service (omit `--headset` and `--hosted`).
+It pins the runtime module while repeatedly creating/destroying sessions in one
+process. Eight deliberately failed sessions retain reservations; session nine is
+rejected. A separate healthy process creates/destroys twelve sessions, submitting
+six frames each. Assertions require 32 failed obligations, 72 ready/scheduled
+values, exactly one budget rejection and no healthy budget exhaustion. This tests
+counts and ownership behavior, not an actual GPU device-loss reset.
+
+The experimental driver adapter permits eight active or retained frontends per
+process. Safe destroy releases a reservation; unresolved teardown retains it.
+At exhaustion, new experimental sessions fail initialization with a diagnostic;
+the application must restart after unresolved GPU failures. Existing native
+swapchain byte/object quotas remain applicable. This count cap does not define a
+complete cross-process byte budget or reclaim unresolved GPU resources.
+
+Actual Game Mode remains a separate user-observed fullscreen application gate.
+These headless CLI probes and hosted selection alone do not confirm activation,
+service external backgrounding or recovery across Game Mode/menu transitions.

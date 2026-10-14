@@ -8,7 +8,7 @@ SPDX-License-Identifier: BSL-1.0
 
 ## Experimental KosmicKrisp Vulkan path (2026-10-14)
 
-An isolated opt-in KosmicKrisp Vulkan client adapter is implemented on `codex/kosmickrisp-openxr-m3`. The user accepted hello_xr on physical PSVR2; a subsequent real hosted/client-compositor run and graceful early stop passed at 4000x2040, 90 Hz. Actual Game Mode, device-loss/resource budgets and matched performance comparison remain pending. The attempted ordinary Vulkan/MoltenVK baseline aborted on depth IOSurface creation. See [assessment and evidence](../docs/kosmickrisp-openxr-assessment.md#physical-acceptance-and-hosted-follow-up-2026-10-14). Defaults and the deployed runtime remain unchanged.
+An isolated opt-in KosmicKrisp Vulkan client adapter is implemented on `codex/kosmickrisp-openxr-m3`. The user accepted hello_xr on physical PSVR2; a subsequent real hosted/client-compositor run and graceful early stop passed at 4000x2040, 90 Hz. A process cap passes eight retained failures / rejection of session nine and twelve healthy lifecycles; matching BGRA probes verify zero KK queue-idle handoffs versus 180 for MoltenVK, with no demonstrated timing gain. Actual Game Mode, device-loss/resource budgets and matched performance comparison remain pending. The attempted ordinary Vulkan/MoltenVK baseline aborted on depth IOSurface creation. See [assessment and evidence](../docs/kosmickrisp-openxr-assessment.md#physical-acceptance-and-hosted-follow-up-2026-10-14). Defaults and the deployed runtime remain unchanged.
 
 
 The [2026-10-13 GPU-efficiency study](macos-compositor-gpu-efficiency.md) retains

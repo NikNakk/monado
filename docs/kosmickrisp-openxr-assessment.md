@@ -937,3 +937,80 @@ manifest. No production service or library installation, merge or push occurred.
 All temporary headset tests have been stopped. Next priorities are actual Game
 Mode verification, a matched colour-only baseline, device-loss/repeated-session
 resource budgets and standard Mesa import APIs before wider application trials.
+
+### Matching colour-only comparison and frontend cap (2026-10-14)
+
+Runtime and fixture commit `ac96a07fa` adds a process-local cap of **eight active
+or retained experimental frontends**, with atomic reservation/release. Failed
+initialization releases its reservation; successful safe destroy does too.
+Unresolved GPU teardown keeps it charged. The ninth session is rejected before
+allocating another Metal provider, returning `XR_ERROR_INITIALIZATION_FAILED`
+with an explicit budget diagnostic. Metal clients and feature-disabled builds
+are unaffected. This bounds frontend accumulation by count; it does not by itself
+bound every byte, reclaim unresolved resources or recover an actually lost GPU.
+Existing native swapchain byte/object quotas still govern backing allocations.
+
+The final [budget runner](kosmickrisp-evidence/m3/followup/budget/results.json)
+passes with eight failed sessions in one process and exactly one rejection for
+session nine. It observes 32 failed producer obligations and no ready/scheduled
+frames from those sessions. A separate healthy process creates and destroys
+**12 sessions**, with 72 ready/scheduled values and no budget exhaustion. The
+runtime is pinned throughout each process, so reloading a fresh module cannot
+reset the count and manufacture a pass. [Regression suite](kosmickrisp-evidence/m3/followup/monado-cap-ctest.log)
+passes **74/74** after the cap change. The tests simulate missing signals; actual
+GPU device loss, driver reset and concurrent reservation races remain untested.
+
+The matching colour-only probes avoid the previous optional-depth crash. Both
+allocate two swapchains: BGRA8 UNORM (`VkFormat 44`), 2800x2856, one layer/mip/sample,
+three images each. Both request Vulkan 1.2 and submit 180 projection frames,
+compositing in-process through the physical 4000x2040 PSVR2 target at its existing
+90 Hz mode. They run sequentially with identical tracing and no concurrent test
+suite. [Raw summary](kosmickrisp-evidence/m3/followup/matched-summary.json) and
+[reproducible analyzer](../experiments/kosmickrisp/summarize-matched.py) preserve
+source consumption, driver-call metrics and presentation validity separately.
+
+| Short colour-clear probe | MoltenVK client | KosmicKrisp client |
+| --- | ---: | ---: |
+| Client exit / submitted frames | 0 / 180 | 0 / 180 |
+| Last observed compositor source frame | 179 | 179 |
+| Runtime `vkQueueSubmit` calls / total elapsed | 720 / 20.373 ms | 900 / 22.418 ms |
+| Runtime `vkQueueWaitIdle` calls / total elapsed | 180 / 9.986 ms | 0 / 0 ms |
+| Presenter Metal command-buffer GPU median | 0.997 ms | 1.590 ms |
+| Compositor thread CPU median between predictions | 0.375 ms | 0.500 ms |
+| Presented callbacks / positive actual presentation timestamps | 186 / 0 | 180 / 0 |
+
+This verifies a useful **additional synchronization path**: KK adds one timeline
+signal submit per frame and avoids the normal Vulkan frontend's queue-idle frame
+handoff. It does not prove higher performance. The tiny clear workload, short
+runs, startup, driver work, tracing, render/present scheduling, uncontrolled power
+state and differing underlying transport carriers prevent a general CPU/GPU gain
+claim. API elapsed totals exclude direct application calls and are not full CPU
+usage; the Metal command-buffer interval is not total Vulkan rendering time.
+In particular the KK presenter/CPU medians are higher in these captures, so they
+must not be described as a speedup.
+
+Every actual-presentation timestamp is zero in these short probe runs. The cause
+has not been established; an executed callback does not establish a displayed
+frame. **No scanout cadence or frame-pacing comparison is valid.** The earlier
+user-viewed/hosted hello_xr runs retain their independent positive-timestamp and
+visual evidence. An initial baseline runner erroneously required semaphore
+readiness events on the queue-idle path; it was corrected to inspect compositor
+consumption. Earlier runs with four KK images, Vulkan-version differences or
+concurrent CTest are excluded from this matching table.
+
+All physical probes and temporary services were stopped. Game Mode was neither
+requested nor independently confirmed. Existing port evidence proves why hosted
+composition is needed, but these CLI probes do not reproduce a real application's
+fullscreen Game Mode/menu transitions. That acceptance gate remains open and
+needs independently observed activation/policy plus physical timing traces.
+
+The recommendation remains an opt-in native Vulkan option, preserving Metal and
+MoltenVK compositor paths. Next steps: standard Mesa import ownership APIs and
+layer compatibility; a real fullscreen native Vulkan client for Game Mode;
+long-run allocation/device-loss testing; format/array extensions with pixel/event
+proof; and only then D3D12 bridge work and broader performance comparisons. There
+is no evidence yet to replace DXMT or alter the Wine bridge.
+
+The follow-up manifest includes final runtime, probe and driver binary SHA256.
+The runtime version banner retains its initial configure-time `5aa80413e` label;
+source commit `ac96a07fa` and the binary hashes identify these later tests.
