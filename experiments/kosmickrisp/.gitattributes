@@ -1,0 +1,3 @@
+# Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0
+# Blank unified-diff context lines contain a required space prefix.
+*.patch -whitespace
