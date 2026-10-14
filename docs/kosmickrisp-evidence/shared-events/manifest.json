@@ -1,0 +1,14 @@
+{
+  "mesa_base_commit": "aac5108bbfa3051f03a71c695b3a6f961ea0fc46",
+  "mesa_branch": "codex/openxr-shared-event-diagnostic",
+  "advertises_metal_objects": false,
+  "uses_private_diagnostic_hooks": true,
+  "shared_texture_transfer_tested": false,
+  "source_sha256": {
+    "experiments/kosmickrisp/shared-event-peer.mm": "c2ff733ba4b97271f1159c5facdff4717283cce6d9de64e4e8c270854b2ae070",
+    "experiments/kosmickrisp/mesa-shared-event-diagnostic.patch": "c3855028778637a845caf7d5f6d77e3083d8b1f7d63768ea78ff52674041a7b9",
+    "experiments/kosmickrisp/shared-event-probe.mm": "99729ce3f616f4c59f9c57719d2a32d9dc4bc4e9a243d7876b05f887ac1fc99f",
+    "experiments/kosmickrisp/run-shared-events.py": "37ceaebffc925271ee95221959804a60a295c91062d09ec0a9c130ab21215e90",
+    "experiments/kosmickrisp/shared-event-peer.h": "00c205404e92a0f947909698be142e801868d853695b51e9109b2b53c41f7869"
+  }
+}

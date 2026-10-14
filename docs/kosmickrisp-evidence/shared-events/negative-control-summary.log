@@ -1,0 +1,4 @@
+evidence directory: /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-shared-event-zkd0rox7
+cross_process local_pid=37165 peer_pid=37166 same_registry=1
+premature completion value=1
+PASS negative control: missing peer wait detected before gate release

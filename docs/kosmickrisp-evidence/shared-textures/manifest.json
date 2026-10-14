@@ -1,0 +1,35 @@
+{
+  "mesa_base_commit": "aac5108bbfa3051f03a71c695b3a6f961ea0fc46",
+  "mesa_branch": "codex/openxr-texture-diagnostic",
+  "formats": [
+    "VK_FORMAT_R8G8B8A8_UNORM",
+    "VK_FORMAT_B8G8R8A8_UNORM"
+  ],
+  "dimensions": [
+    64,
+    64
+  ],
+  "row_stride_bytes": 512,
+  "layers": 1,
+  "mip_levels": 1,
+  "samples": 1,
+  "standard_extension_implemented": false,
+  "private_diagnostic_hooks": true,
+  "image_handoff_copies": 0,
+  "diagnostic_copies": "texture-to-buffer pixel readbacks in each process",
+  "glslang_version": "16.5.0",
+  "positive_exits": {
+    "rgba": 0,
+    "bgra": 0
+  },
+  "negative_probe_exit": 1,
+  "source_sha256": {
+    "experiments/kosmickrisp/shared-texture-peer.h": "386598a3ae50304de0b510917ea7c5c4f1c21720d418c8c031783d0c43336da1",
+    "experiments/kosmickrisp/pattern.vert": "8b0cbcc4a4bfd86326dd1002b3819e1ae296e65289a16bfacf9265f6220909a6",
+    "experiments/kosmickrisp/shared-texture-peer.mm": "f996e1f315cebdf38d6cd049936b5e4f5181b12929b95928992eacd89ab20fc8",
+    "experiments/kosmickrisp/shared-texture-probe.mm": "8bb6df83360d5dde93ef3c4e8490c1a077b0685008b823ef16b151ed25ee1ea4",
+    "experiments/kosmickrisp/run-shared-textures.py": "ded7c7738a18bc2de0c214394dd05ecb0a573d426e7e3da449c113542e43c8d1",
+    "experiments/kosmickrisp/mesa-shared-texture-diagnostic.patch": "fc6c57cefc669040610a8bf55b2ed2cbe996a9807dbdc76b4feace2fdeba3312",
+    "experiments/kosmickrisp/pattern.frag": "845532b59e2a8f50af2510d8698d6449ba2a18bf8e23410457299d70c435dd8b"
+  }
+}

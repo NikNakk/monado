@@ -602,3 +602,12 @@ fixes are retained. The combined installed DLL at `1eb76cd` passes 97 Wine tests
 succeeds; remaining frame pacing is under investigation. See the
 [startup investigation and cleanup](macos-alyx-xrizer-startup.md) and
 [gameplay/pacing evidence](macos-steamvr-keyed-ownership-followup.md).
+
+### KosmicKrisp native Vulkan assessment — 2026-10-14
+
+The [isolated assessment and prototype](../docs/kosmickrisp-openxr-assessment.md)
+verifies real Vulkan shader output on RGBA8/BGRA8 IOSurfaces, consumed in a second
+process with exact GPU shared-event ordering and no image handoff copy. This
+requires private diagnostic Mesa hooks; upstream standard APIs, stereo arrays
+and production lifecycle validation remain. Milestone 2 is paused for review.
+No production graphics paths are changed by this work.

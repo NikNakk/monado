@@ -1,0 +1,203 @@
+diff --git a/src/kosmickrisp/bridge/mtl_texture.h b/src/kosmickrisp/bridge/mtl_texture.h
+index ace552e..d212ca3 100644
+--- a/src/kosmickrisp/bridge/mtl_texture.h
++++ b/src/kosmickrisp/bridge/mtl_texture.h
+@@ -13,6 +13,8 @@
+ 
+ /* TODO_KOSMICKRISP Move this to bridge. */
+ struct kk_view_layout;
++struct kk_image_layout;
++struct kk_image_layout;
+ 
+ /* Utils */
+ uint64_t mtl_texture_get_gpu_resource_id(mtl_texture *texture);
+@@ -32,4 +34,7 @@ void mtl_texture_get_bytes(mtl_texture *texture, void *host_ptr,
+ void mtl_texture_replace_region(mtl_texture *texture, const void *host_ptr,
+                                 struct mtl_texture_memory_copy *data);
+ 
++int mtl_test_texture_matches(mtl_texture *texture, mtl_device *device,
++                             const struct kk_image_layout *layout);
++
+ #endif /* MTL_TEXTURE_H */
+diff --git a/src/kosmickrisp/bridge/mtl_texture.m b/src/kosmickrisp/bridge/mtl_texture.m
+index b4426dc..99482ae 100644
+--- a/src/kosmickrisp/bridge/mtl_texture.m
++++ b/src/kosmickrisp/bridge/mtl_texture.m
+@@ -13,6 +13,7 @@
+ #include "vulkan/vulkan.h"
+ 
+ #include <Metal/MTLTexture.h>
++#include <Metal/MTLDevice.h>
+ 
+ uint64_t
+ mtl_texture_get_gpu_resource_id(mtl_texture *texture)
+@@ -134,3 +135,20 @@
+                   bytesPerImage:data->buffer_2d_image_size_B];
+    }
+ }
++
++int
++mtl_test_texture_matches(mtl_texture *texture, mtl_device *device,
++                         const struct kk_image_layout *layout)
++{
++   @autoreleasepool {
++      id<MTLTexture> tex = (id<MTLTexture>)texture;
++      id<MTLDevice> dev = (id<MTLDevice>)device;
++      return tex && tex.device.registryID == dev.registryID &&
++             tex.pixelFormat == layout->format.mtl &&
++             tex.textureType == MTLTextureType2D &&
++             tex.width == layout->width_px && tex.height == layout->height_px &&
++             tex.depth == 1 && tex.arrayLength == 1 &&
++             tex.mipmapLevelCount == 1 && tex.sampleCount == 1 &&
++             ((tex.usage & layout->usage) == layout->usage);
++   }
++}
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index 5cbf34b..256f7f5 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -592,6 +592,12 @@ static void
+ kk_image_finish(struct kk_device *dev, struct kk_image *image,
+                 const VkAllocationCallbacks *pAllocator)
+ {
++   if (image->diagnostic_imported) {
++      simple_mtx_lock(&dev->residency_set.mutex);
++      mtl_residency_set_remove_allocation(dev->residency_set.handle,
++                                         image->planes[0].mtl_handle);
++      simple_mtx_unlock(&dev->residency_set.mutex);
++   }
+    for (uint8_t plane = 0; plane < image->plane_count; plane++) {
+       kk_image_plane_finish(dev, &image->planes[plane], image->vk.create_flags,
+                             pAllocator);
+@@ -927,6 +933,9 @@ kk_bind_image_memory(struct kk_device *dev, const VkBindImageMemoryInfo *info)
+    }
+ #endif
+ 
++   if (image->diagnostic_imported)
++      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++
+    uint64_t offset_B = info->memoryOffset;
+    if (image->disjoint) {
+       const VkBindImagePlaneMemoryInfo *plane_info =
+@@ -1192,3 +1201,39 @@ kk_image_set_label(struct kk_image *image, const char *label)
+          mtl_resource_set_label(image->planes[i].mtl_handle_array, label);
+    }
+ }
++
++PUBLIC VkResult
++kk_test_bind_texture(VkDevice device, VkImage vk_image, void *texture)
++{
++   VK_FROM_HANDLE(kk_device, dev, device);
++   VK_FROM_HANDLE(kk_image, image, vk_image);
++   if (!image || image->vk.base.device != &dev->vk || !texture)
++      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++   if (image->plane_count != 1 || image->vk.image_type != VK_IMAGE_TYPE_2D ||
++       image->vk.array_layers != 1 || image->vk.mip_levels != 1 ||
++       image->vk.samples != VK_SAMPLE_COUNT_1_BIT || image->vk.create_flags ||
++       image->vk.tiling != VK_IMAGE_TILING_OPTIMAL ||
++       (image->vk.format != VK_FORMAT_R8G8B8A8_UNORM &&
++        image->vk.format != VK_FORMAT_B8G8R8A8_UNORM) ||
++       image->planes[0].mtl_handle ||
++       !mtl_test_texture_matches(texture, dev->mtl_handle,
++                                 &image->planes[0].layout))
++      return VK_ERROR_FORMAT_NOT_SUPPORTED;
++   image->planes[0].mtl_handle = mtl_retain(texture);
++   image->planes[0].addr = mtl_texture_get_gpu_resource_id(texture);
++   simple_mtx_lock(&dev->residency_set.mutex);
++   mtl_residency_set_add_allocation(dev->residency_set.handle, texture);
++   simple_mtx_unlock(&dev->residency_set.mutex);
++   image->diagnostic_imported = true;
++   return VK_SUCCESS;
++}
++
++PUBLIC VkResult
++kk_test_copy_image_texture(VkImage vk_image, void **texture)
++{
++   VK_FROM_HANDLE(kk_image, image, vk_image);
++   if (!image || !texture || !image->diagnostic_imported)
++      return VK_ERROR_INVALID_EXTERNAL_HANDLE;
++   *texture = mtl_retain(image->planes[0].mtl_handle);
++   return *texture ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
++}
+diff --git a/src/kosmickrisp/vulkan/kk_image.h b/src/kosmickrisp/vulkan/kk_image.h
+index 40e75a2..ee4ee94 100644
+--- a/src/kosmickrisp/vulkan/kk_image.h
++++ b/src/kosmickrisp/vulkan/kk_image.h
+@@ -52,6 +52,7 @@ struct kk_image {
+ 
+    /* Forces alpha value to be one when creating views. Needed for WSI */
+    bool wsi_opaque_alpha;
++   bool diagnostic_imported;
+ 
+    uint8_t plane_count;
+    struct kk_image_plane planes[3];
+@@ -140,4 +141,8 @@ mtl_texture *kk_image_plane_create_texture(struct kk_image_plane *plane,
+ 
+ void kk_image_set_label(struct kk_image *image, const char *label);
+ 
++PUBLIC VkResult kk_test_bind_texture(VkDevice device, VkImage image,
++                                     void *texture);
++PUBLIC VkResult kk_test_copy_image_texture(VkImage image, void **texture);
++
+ #endif
+diff --git a/src/kosmickrisp/vulkan/kk_sync.c b/src/kosmickrisp/vulkan/kk_sync.c
+index f44200c..626d061 100644
+--- a/src/kosmickrisp/vulkan/kk_sync.c
++++ b/src/kosmickrisp/vulkan/kk_sync.c
+@@ -7,6 +7,7 @@
+ #include "kk_sync.h"
+ 
+ #include "kk_device.h"
++#include "vk_semaphore.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+ 
+@@ -104,3 +105,36 @@ const struct vk_sync_type kk_sync_type = {
+    .export_win32_handle = NULL,
+    .set_win32_export_params = NULL,
+ };
++
++PUBLIC VkResult
++kk_test_copy_shared_event(VkSemaphore semaphore, void **event)
++{
++   if (!semaphore || !event)
++      return VK_ERROR_INITIALIZATION_FAILED;
++   *event = NULL;
++   VK_FROM_HANDLE(vk_semaphore, sem, semaphore);
++   struct vk_sync *sync = vk_semaphore_get_active_sync(sem);
++   if (sem->type != VK_SEMAPHORE_TYPE_TIMELINE || sync->type != &kk_sync_type)
++      return VK_ERROR_FEATURE_NOT_PRESENT;
++   struct kk_sync_timeline *timeline =
++      container_of(sync, struct kk_sync_timeline, base);
++   *event = mtl_retain(timeline->mtl_handle);
++   return *event ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
++}
++
++PUBLIC VkResult
++kk_test_set_shared_event(VkSemaphore semaphore, void *event)
++{
++   if (!semaphore || !event)
++      return VK_ERROR_INITIALIZATION_FAILED;
++   VK_FROM_HANDLE(vk_semaphore, sem, semaphore);
++   struct vk_sync *sync = vk_semaphore_get_active_sync(sem);
++   if (sem->type != VK_SEMAPHORE_TYPE_TIMELINE || sync->type != &kk_sync_type)
++      return VK_ERROR_FEATURE_NOT_PRESENT;
++   struct kk_sync_timeline *timeline =
++      container_of(sync, struct kk_sync_timeline, base);
++   void *retained = mtl_retain(event);
++   mtl_release(timeline->mtl_handle);
++   timeline->mtl_handle = retained;
++   return VK_SUCCESS;
++}
+diff --git a/src/kosmickrisp/vulkan/kk_sync.h b/src/kosmickrisp/vulkan/kk_sync.h
+index da4f149..2f898b7 100644
+--- a/src/kosmickrisp/vulkan/kk_sync.h
++++ b/src/kosmickrisp/vulkan/kk_sync.h
+@@ -20,4 +20,7 @@ struct kk_sync_timeline {
+ 
+ extern const struct vk_sync_type kk_sync_type;
+ 
++PUBLIC VkResult kk_test_copy_shared_event(VkSemaphore semaphore, void **event);
++PUBLIC VkResult kk_test_set_shared_event(VkSemaphore semaphore, void *event);
++
+ #endif

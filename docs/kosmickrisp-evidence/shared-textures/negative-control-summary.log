@@ -1,0 +1,6 @@
+evidence directory: /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-shared-texture-d83zjd60
+/Users/nickkennedy/Code/monado-2/experiments/kosmickrisp/pattern.vert
+/Users/nickkennedy/Code/monado-2/experiments/kosmickrisp/pattern.frag
+cross_process local_pid=53507 peer_pid=53508 same_registry=1 peer_iosurface_id=246 storage_identity=1
+premature completion value=1
+PASS negative control: missing peer wait detected before gate release

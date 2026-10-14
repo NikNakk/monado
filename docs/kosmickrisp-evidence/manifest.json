@@ -1,0 +1,15 @@
+{
+  "mesa_commit": "aac5108bbfa3051f03a71c695b3a6f961ea0fc46",
+  "monado_base": "95c0c64256d6a6c3e6fbca67f55cb679b4f5fa5a",
+  "production_modified": false,
+  "gpu": "Apple M5 10-core GPU",
+  "os": "macOS 26.7.1 25G241",
+  "source_sha256": {
+    "experiments/kosmickrisp/probe.mm": "3f2e8512b69ad5f3ee3ed499ac472ff1beb7ea381d9688f691caaea65ca01142",
+    "experiments/kosmickrisp/run.sh": "8c4697293e822cf98fe1597f905a201813e0f63485a231a0cce00acf153ffe4b"
+  },
+  "normal_exit": 0,
+  "negative_control_exit": 1,
+  "cross_process_zero_copy": "blocked / not executed",
+  "cross_api_gpu_event_handoff": "blocked / not executed"
+}

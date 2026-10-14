@@ -1,0 +1,61 @@
+diff --git a/src/kosmickrisp/vulkan/kk_sync.c b/src/kosmickrisp/vulkan/kk_sync.c
+index f44200c..626d061 100644
+--- a/src/kosmickrisp/vulkan/kk_sync.c
++++ b/src/kosmickrisp/vulkan/kk_sync.c
+@@ -7,6 +7,7 @@
+ #include "kk_sync.h"
+ 
+ #include "kk_device.h"
++#include "vk_semaphore.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
+ 
+@@ -104,3 +105,36 @@ const struct vk_sync_type kk_sync_type = {
+    .export_win32_handle = NULL,
+    .set_win32_export_params = NULL,
+ };
++
++PUBLIC VkResult
++kk_test_copy_shared_event(VkSemaphore semaphore, void **event)
++{
++   if (!semaphore || !event)
++      return VK_ERROR_INITIALIZATION_FAILED;
++   *event = NULL;
++   VK_FROM_HANDLE(vk_semaphore, sem, semaphore);
++   struct vk_sync *sync = vk_semaphore_get_active_sync(sem);
++   if (sem->type != VK_SEMAPHORE_TYPE_TIMELINE || sync->type != &kk_sync_type)
++      return VK_ERROR_FEATURE_NOT_PRESENT;
++   struct kk_sync_timeline *timeline =
++      container_of(sync, struct kk_sync_timeline, base);
++   *event = mtl_retain(timeline->mtl_handle);
++   return *event ? VK_SUCCESS : VK_ERROR_OUT_OF_HOST_MEMORY;
++}
++
++PUBLIC VkResult
++kk_test_set_shared_event(VkSemaphore semaphore, void *event)
++{
++   if (!semaphore || !event)
++      return VK_ERROR_INITIALIZATION_FAILED;
++   VK_FROM_HANDLE(vk_semaphore, sem, semaphore);
++   struct vk_sync *sync = vk_semaphore_get_active_sync(sem);
++   if (sem->type != VK_SEMAPHORE_TYPE_TIMELINE || sync->type != &kk_sync_type)
++      return VK_ERROR_FEATURE_NOT_PRESENT;
++   struct kk_sync_timeline *timeline =
++      container_of(sync, struct kk_sync_timeline, base);
++   void *retained = mtl_retain(event);
++   mtl_release(timeline->mtl_handle);
++   timeline->mtl_handle = retained;
++   return VK_SUCCESS;
++}
+diff --git a/src/kosmickrisp/vulkan/kk_sync.h b/src/kosmickrisp/vulkan/kk_sync.h
+index da4f149..2f898b7 100644
+--- a/src/kosmickrisp/vulkan/kk_sync.h
++++ b/src/kosmickrisp/vulkan/kk_sync.h
+@@ -20,4 +20,7 @@ struct kk_sync_timeline {
+ 
+ extern const struct vk_sync_type kk_sync_type;
+ 
++PUBLIC VkResult kk_test_copy_shared_event(VkSemaphore semaphore, void **event);
++PUBLIC VkResult kk_test_set_shared_event(VkSemaphore semaphore, void *event);
++
+ #endif

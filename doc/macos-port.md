@@ -1131,3 +1131,12 @@ rendering and admits replacement without a restart. Normal-path costs are
 quantified in the [completion report](macos-gpu-sync-completion.md), with every
 M1/M2 criterion and hardware/thermal limitations. Chromium and Wine development
 remain deferred pending separate authorization.
+
+### KosmicKrisp native Vulkan assessment — 2026-10-14
+
+The [isolated assessment and prototype](../docs/kosmickrisp-openxr-assessment.md)
+verifies real Vulkan shader output on RGBA8/BGRA8 IOSurfaces, consumed in a second
+process with exact GPU shared-event ordering and no image handoff copy. This
+requires private diagnostic Mesa hooks; upstream standard APIs, stereo arrays
+and production lifecycle validation remain. Milestone 2 is paused for review.
+No production graphics paths are changed by this work.

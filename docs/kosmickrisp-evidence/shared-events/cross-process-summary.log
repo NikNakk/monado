@@ -1,0 +1,36 @@
+evidence directory: /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-shared-event-bw19awq7
+cross_process local_pid=37136 peer_pid=37143 same_registry=1
+gpu_chain value=1 producer=1 done=1 ack=1 submit_us=62.791 pending_before_gate=1
+gpu_chain value=2 producer=2 done=2 ack=2 submit_us=18.833 pending_before_gate=1
+gpu_chain value=3 producer=3 done=3 ack=3 submit_us=18.708 pending_before_gate=1
+gpu_chain value=4 producer=4 done=4 ack=4 submit_us=11.333 pending_before_gate=1
+gpu_chain value=5 producer=5 done=5 ack=5 submit_us=71.625 pending_before_gate=1
+gpu_chain value=6 producer=6 done=6 ack=6 submit_us=11.416 pending_before_gate=1
+gpu_chain value=7 producer=7 done=7 ack=7 submit_us=21.250 pending_before_gate=1
+gpu_chain value=8 producer=8 done=8 ack=8 submit_us=16.250 pending_before_gate=1
+gpu_chain value=9 producer=9 done=9 ack=9 submit_us=11.916 pending_before_gate=1
+gpu_chain value=10 producer=10 done=10 ack=10 submit_us=9.708 pending_before_gate=1
+gpu_chain value=11 producer=11 done=11 ack=11 submit_us=8.041 pending_before_gate=1
+gpu_chain value=12 producer=12 done=12 ack=12 submit_us=6.084 pending_before_gate=1
+gpu_chain value=13 producer=13 done=13 ack=13 submit_us=5.625 pending_before_gate=1
+gpu_chain value=14 producer=14 done=14 ack=14 submit_us=7.583 pending_before_gate=1
+gpu_chain value=15 producer=15 done=15 ack=15 submit_us=11.667 pending_before_gate=1
+gpu_chain value=16 producer=16 done=16 ack=16 submit_us=8.667 pending_before_gate=1
+gpu_chain value=17 producer=17 done=17 ack=17 submit_us=7.292 pending_before_gate=1
+gpu_chain value=18 producer=18 done=18 ack=18 submit_us=12.250 pending_before_gate=1
+gpu_chain value=19 producer=19 done=19 ack=19 submit_us=10.958 pending_before_gate=1
+gpu_chain value=20 producer=20 done=20 ack=20 submit_us=8.709 pending_before_gate=1
+gpu_chain value=21 producer=21 done=21 ack=21 submit_us=5.625 pending_before_gate=1
+gpu_chain value=22 producer=22 done=22 ack=22 submit_us=7.209 pending_before_gate=1
+gpu_chain value=23 producer=23 done=23 ack=23 submit_us=5.416 pending_before_gate=1
+gpu_chain value=24 producer=24 done=24 ack=24 submit_us=12.459 pending_before_gate=1
+gpu_chain value=25 producer=25 done=25 ack=25 submit_us=8.667 pending_before_gate=1
+gpu_chain value=26 producer=26 done=26 ack=26 submit_us=6.666 pending_before_gate=1
+gpu_chain value=27 producer=27 done=27 ack=27 submit_us=6.417 pending_before_gate=1
+gpu_chain value=28 producer=28 done=28 ack=28 submit_us=5.709 pending_before_gate=1
+gpu_chain value=29 producer=29 done=29 ack=29 submit_us=5.500 pending_before_gate=1
+gpu_chain value=30 producer=30 done=30 ack=30 submit_us=8.083 pending_before_gate=1
+gpu_chain value=31 producer=31 done=31 ack=31 submit_us=6.250 pending_before_gate=1
+gpu_chain value=32 producer=32 done=32 ack=32 submit_us=5.625 pending_before_gate=1
+PASS Vulkan -> Metal -> Vulkan GPU event chain: 32 delayed frames, 131072 pixels, exact producer/done/ack values; elapsed_ms=827.525
+PASS cross-process GPU event handle chain: 32 values; peer GPU filled and verified 131072 bytes; texture storage not transferred

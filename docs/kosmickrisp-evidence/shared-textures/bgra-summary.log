@@ -1,0 +1,38 @@
+evidence directory: /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-shared-texture-owcne_2m
+/Users/nickkennedy/Code/monado-2/experiments/kosmickrisp/pattern.vert
+/Users/nickkennedy/Code/monado-2/experiments/kosmickrisp/pattern.frag
+cross_process local_pid=53481 peer_pid=53483 same_registry=1 peer_iosurface_id=246 storage_identity=1
+gpu_chain value=1 producer=1 done=1 ack=1 submit_us=93.041 pending_before_gate=1
+gpu_chain value=2 producer=2 done=2 ack=2 submit_us=25.750 pending_before_gate=1
+gpu_chain value=3 producer=3 done=3 ack=3 submit_us=47.292 pending_before_gate=1
+gpu_chain value=4 producer=4 done=4 ack=4 submit_us=28.334 pending_before_gate=1
+gpu_chain value=5 producer=5 done=5 ack=5 submit_us=82.625 pending_before_gate=1
+gpu_chain value=6 producer=6 done=6 ack=6 submit_us=29.250 pending_before_gate=1
+gpu_chain value=7 producer=7 done=7 ack=7 submit_us=58.208 pending_before_gate=1
+gpu_chain value=8 producer=8 done=8 ack=8 submit_us=92.042 pending_before_gate=1
+gpu_chain value=9 producer=9 done=9 ack=9 submit_us=47.625 pending_before_gate=1
+gpu_chain value=10 producer=10 done=10 ack=10 submit_us=30.000 pending_before_gate=1
+gpu_chain value=11 producer=11 done=11 ack=11 submit_us=42.458 pending_before_gate=1
+gpu_chain value=12 producer=12 done=12 ack=12 submit_us=67.083 pending_before_gate=1
+gpu_chain value=13 producer=13 done=13 ack=13 submit_us=55.542 pending_before_gate=1
+gpu_chain value=14 producer=14 done=14 ack=14 submit_us=39.916 pending_before_gate=1
+gpu_chain value=15 producer=15 done=15 ack=15 submit_us=27.792 pending_before_gate=1
+gpu_chain value=16 producer=16 done=16 ack=16 submit_us=47.959 pending_before_gate=1
+gpu_chain value=17 producer=17 done=17 ack=17 submit_us=52.833 pending_before_gate=1
+gpu_chain value=18 producer=18 done=18 ack=18 submit_us=40.416 pending_before_gate=1
+gpu_chain value=19 producer=19 done=19 ack=19 submit_us=46.583 pending_before_gate=1
+gpu_chain value=20 producer=20 done=20 ack=20 submit_us=29.834 pending_before_gate=1
+gpu_chain value=21 producer=21 done=21 ack=21 submit_us=35.542 pending_before_gate=1
+gpu_chain value=22 producer=22 done=22 ack=22 submit_us=31.667 pending_before_gate=1
+gpu_chain value=23 producer=23 done=23 ack=23 submit_us=35.125 pending_before_gate=1
+gpu_chain value=24 producer=24 done=24 ack=24 submit_us=52.292 pending_before_gate=1
+gpu_chain value=25 producer=25 done=25 ack=25 submit_us=63.292 pending_before_gate=1
+gpu_chain value=26 producer=26 done=26 ack=26 submit_us=36.833 pending_before_gate=1
+gpu_chain value=27 producer=27 done=27 ack=27 submit_us=41.125 pending_before_gate=1
+gpu_chain value=28 producer=28 done=28 ack=28 submit_us=50.625 pending_before_gate=1
+gpu_chain value=29 producer=29 done=29 ack=29 submit_us=39.334 pending_before_gate=1
+gpu_chain value=30 producer=30 done=30 ack=30 submit_us=119.958 pending_before_gate=1
+gpu_chain value=31 producer=31 done=31 ack=31 submit_us=35.458 pending_before_gate=1
+gpu_chain value=32 producer=32 done=32 ack=32 submit_us=47.959 pending_before_gate=1
+PASS Vulkan imported IOSurface texture: 32 delayed shader-rendered frames, 131072 local pixels, exact producer/done/ack values; elapsed_ms=945.013
+PASS cross-process texture zero-copy: 32 values; peer verified 131072 pixels on same IOSurface; GPU producer and consumer ordering passed
