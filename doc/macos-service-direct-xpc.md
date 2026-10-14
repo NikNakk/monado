@@ -404,7 +404,10 @@ re-measuring Options hold and the earlier service changes. The native runtime,
 libmonado, Metal XPC client, service and CLI tools were installed into
 `~/.local/monado-psvr2` target by target (`cmake -P <dir>/cmake_install.cmake`
 for `ipc`, `service`, `openxr`, `libmonado`, `ctl`, `cli` and `gui`), which
-skips the SteamVR driver's hard-coded `/usr/local` destination. The installed
+skips the SteamVR driver's hard-coded `/usr/local` destination. That
+destination now follows the install prefix (`CMAKE_INSTALL_DATADIR`), so
+`cmake --install build/arm64 --prefix ~/.local/monado-psvr2` works in one step
+and also refreshes `share/steamvr-monado`. The installed
 service and runtime (arm64) and the Wine client in `build/x86_64` (x86_64)
 all report `v25.1.0-2287-g42f4fde50`.
 
