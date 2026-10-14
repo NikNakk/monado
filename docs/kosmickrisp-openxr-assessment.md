@@ -37,6 +37,7 @@ The experimental Monado branch is `codex/macos-vulkan-metal-swapchains`, retaini
 Claude's shared-event work and ten general commits by ancestry. The reviewed `codex/macos-graphics-integration` candidate defaults both Vulkan
 sharing switches to on with independent fallbacks; see the
 [cumulative review](../doc/macos-graphics-integration-review.md). The user confirms service/hosted `hello_xr` and stereo arrays with readbacks
-disabled after the probe visibility fix. Real-game Game Mode comparisons, the Linux gate and Wine graphics
-paths remain outstanding. No integration merge, push or installed runtime change
-is included.
+disabled after the probe visibility fix. Real-game Game Mode comparisons and Wine graphics
+paths remain outstanding. The Linux gate now passes 48/48; the user-approved
+local integration fast-forward to `c2c608a3f` includes these changes. No push or
+installed runtime change is included.

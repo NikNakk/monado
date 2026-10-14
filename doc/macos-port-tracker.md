@@ -7,13 +7,15 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
-The [graphics integration review](macos-graphics-integration-review.md) prepares
-`codex/macos-graphics-integration` for `macos-upstream-clean`, enables both native
-Vulkan sharing options by default in that candidate, and fixes lifecycle and
-clock-domain review findings. The user separately authorised correcting the
-[inherited Linux solver gate](macos-linux-solver-gate.md). Integration and installed
-runtime promotion are pending; the earlier hardware checkpoint remains valid
-for the original Vulkan implementation.
+The [graphics integration review](macos-graphics-integration-review.md) is now
+integrated locally into `macos-upstream-clean` by the user-approved fast-forward
+to `c2c608a3f`. Both native Vulkan sharing options default to on, with independent
+`=0` fallbacks. Lifecycle/clock review fixes and the separately approved
+[Linux solver correction](macos-linux-solver-gate.md) are included. Linux passes
+48/48 tests and macOS 78/78. The installed runtime has not been rebuilt or
+restarted, and the remote branch has not been pushed. The earlier user headset
+checkpoint covers the original Vulkan implementation; a new installed-build
+checkpoint remains a user-operated follow-up.
 
 The [2026-10-14 Vulkan Metal swapchain follow-up](macos-vulkan-metal-swapchains.md)
 keeps MoltenVK, adds opt-in native Vulkan array/depth images through standard

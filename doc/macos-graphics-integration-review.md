@@ -7,8 +7,12 @@ SPDX-License-Identifier: BSL-1.0
 
 Candidate: `codex/macos-graphics-integration`, in
 `/private/tmp/monado-macos-graphics-integration`. It preserves both the previous
-GPU synchronisation branch and the Vulkan follow-up by ancestry. No integration
-branch, installed runtime, remote branch or Wine/DXMT checkout has been changed.
+GPU synchronisation branch and the Vulkan follow-up by ancestry. The user
+approved local integration after the Linux gate passed. `macos-upstream-clean`
+was fast-forwarded from `805316beb` to reviewed commit `c2c608a3f`; the main
+checkout now uses that branch. This documentation checkpoint follows the same
+isolated development branch. The installed runtime, remote branch and Wine/DXMT
+checkouts have not been changed.
 
 ## Sources and scope
 
@@ -121,17 +125,19 @@ negative control are documented in [the interoperability note](macos-vulkan-meta
 
 ## Remaining scope and integration plan
 
-The candidate supports a fast-forward of either recorded integration head;
-recheck remote state immediately before any publication. Keep the Linux solver
+The local integration fast-forward is complete. The live remote remained
+`bc9591f0313508cdb19fcb3ddf8e2c39c1e2232b` at integration; recheck it immediately
+before any later publication. Keep the Linux solver
 fix separately revertible from the graphics changes. No upstream merge request
 or DCO certification is created: the project's contribution policy requires
 human sign-off for upstream submission. Source remains separable from WineOpenXR,
 DXMT and the archived Mesa experiment; no external project code was adapted in
 these review corrections.
 
-After integration approval, advance `macos-upstream-clean`, rebuild the normal
-ARM64/runtime and x86_64/client configurations, and use the existing installation
-workflow. Hardware runs remain user-operated. A fresh four-case headset repeat
+The next operational step is to rebuild the normal ARM64/runtime and
+x86_64/client configurations and use the existing installation workflow.
+This local branch integration did not perform that deployment or restart the
+service. Hardware runs remain user-operated. A fresh four-case headset repeat
 on the final installed revision provides the installation checkpoint; existing
 Metal/Wine clients should then get their normal regression runs. Intel Mac
 hardware, combined real-game performance and PS Sense replay/performance for
