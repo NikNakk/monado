@@ -420,3 +420,34 @@ frames/s at level 8 then) without thermal control. Not yet known: why the
 figure rose in run H, whether the DXMT changes in vrcompositor or the shim's
 calls matter, and how vrcompositor's timing spans Home's work across
 separate Metal queues.
+
+### SteamVR's client measures Home's GPU time but it never arrives — 2026-10-14
+
+Run I (`run-mwxr-20261014-072947`, DXMT `4e179d7` diagnostics) logged each
+GetData in a window of Home's timing queries. Per frame there are three
+timestamps and a disjoint query, double-buffered and read one frame later:
+A after WaitGetPoses returns, B after the second Submit, C inside
+PostPresentHandoff (which only SteamVR's client sees, as the shim injects
+it), so these are SteamVR's client `CGpuTiming` queries (strings in
+`vrclient_x64.dll`; `gputiming_d3d11.cpp` in vrcompositor). With the DXMT
+fixes their values are right: B − A = 11.9–13.8 ms, C − B ≈ 0.13 ms. About
+half the reads found C or the disjoint not yet ready.
+
+Yet SteamVR's frame timing reports pre- and post-submit GPU as exactly 0.00,
+total render GPU is vrcompositor's own GPU time plus 0.2 ms (0.3–0.5 ms in
+run I), and Home's auto-fidelity, which follows total render GPU, returned
+to level 8. Run H's 5 ms figure was vrcompositor's own GPU time rising,
+probably from contention with Home, not a measurement of Home.
+
+Run J tested readiness: a temporary DXMT change made not-ready timing reads
+flush and wait up to 20 ms. More than 8,000 waits all completed in time,
+but pre-submit GPU stayed 0.00. So SteamVR discards or never uses its
+client's correct measurements for another reason, without logging it. The
+experiment was dropped from the branch; `4e179d7` is installed again.
+
+The DXMT branch still holds two fixes confirmed by the fixture
+(`df4e91d` counter samples, `b18b48a` deferred-context placement) and one
+precaution (`0ebe00b`, wait for earlier command buffers). They correct D3D11
+timestamps for any title, but do not by themselves fix SteamVR Home, whose
+resolution follows SteamVR's figures. The fixed-fidelity workaround remains
+the dependable setting.
