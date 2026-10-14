@@ -642,3 +642,27 @@ starts SteamVR and puts it first in `openvrpaths.vrpath`.
 Not a like-for-like comparison with SteamVR's 41.5 frames/s: the resolution
 gap explains most of the difference. A fair rerun needs a lower recommended
 size, for example `XRT_COMPOSITOR_SCALE_PERCENTAGE=63` (≈1260×1285).
+
+### Alyx through xrizer at 45% scale, 120 Hz — 2026-10-14
+
+The same setup with all of the day's fixes (Monado `27b821eaf` clock,
+xrizer `1eb76cd`, wineopenxr `f5da0cd`), plus `OXR_VIEWPORT_SCALE_PERCENTAGE=45`
+in Alyx's environment. That per-app client setting gave a recommended target
+of 1260×1285 (SteamVR at 120 Hz: 1252×1276). Monado trace
+`monado_psvr2_19155_*`, 362 s; thermal state fair at both ends.
+
+- Auto-fidelity held level 0 for about 286 of 298 logged seconds. Level 0
+  rendered 1020×1040 per eye.
+- 34.9 frames/s overall: 37–54 per 30 s in the first 3.5 minutes, then
+  falling to 22–30 (heat, and the end includes idle time). Frame periods in
+  refreshes: 2: 13%, 3: 48%, 4: 18%, 5: 13%, 6+: 4%, none at 1. Period
+  p10/50/90 17.3/26.0/42.9 ms, 455 gaps over 50 ms. Monado `gpu_actual`
+  p10/50/90 11.6/16.4/29.8 ms, draw 3.3 ms p50.
+- No controller lock losses during play. In the previous full-size run the
+  locks were lost about 40 s after the controllers were put down (the open
+  "rings stay dark" case), with the clock comparison flat throughout.
+
+The user rated it the best run so far, though visibly lower resolution. It
+is close to SteamVR's 41.5 frames/s at the same size but still GPU-bound at
+level 0 against the 8.3 ms budget. 90 Hz with a larger scale is the next
+trade-off to try.
