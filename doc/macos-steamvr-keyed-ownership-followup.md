@@ -392,3 +392,31 @@ occlusion queries already do. The fixture's deferred cases read 0.000 ms for
 10 and 40 render-target clears without it and 4.170 / 17.473 ms with it
 (5.799 / 19.464 ms flush-to-event). Installed; SteamVR and Steam need a
 restart to load it.
+
+### Home reads SteamVR's total render GPU — 2026-10-14
+
+Further DXMT changes on `claude/timestamp-queries`, installed in turn:
+`b18b48a` samples deferred-context timestamps at their place in the command
+list (fixture: 0.000 ms before, 4.170 / 17.473 ms after, for 10 / 40
+clears); `198540b` logs encoder sequences; `afee1cb` makes each sample also
+wait for the previous command buffer's end signal. None changed Home's
+sub-millisecond readings in the first minute of runs E–G.
+
+The encoder log shows Home's frame as `render, S, W, "L M P", "M S B M S"` on
+one queue: its timestamps sit in small command buffers around Submit and
+present, not inside the rendering. The OpenVR shim's new frame-timing log
+(`MWXR_OPENVR_SHIM_FRAME_TIMING=1`, run H `run-mwxr-20261014-071827`)
+shows why: Home's auto-fidelity "last frame" equals SteamVR's
+`m_flTotalRenderGpuMs` (07:20:16, 5.15 ms in both), while SteamVR's pre- and
+post-submit GPU times for the app are always 0.00. Total render GPU is
+vrcompositor's GPU time plus 0.2 ms, measured in vrcompositor's process.
+
+In run H that figure rose from 0.4–0.9 ms to a median of 5.1 ms after about
+two minutes, and Home settled at levels 2–4, cycling every few frames, at
+about 100 frames/s after 60 s. Run G (same DLL, no frame-timing calls) kept
+Home at level 8 at 75–81 frames/s. These runs followed about five hours of
+sleep, so frame rates are not comparable with the overnight runs (35–48
+frames/s at level 8 then) without thermal control. Not yet known: why the
+figure rose in run H, whether the DXMT changes in vrcompositor or the shim's
+calls matter, and how vrcompositor's timing spans Home's work across
+separate Metal queues.
