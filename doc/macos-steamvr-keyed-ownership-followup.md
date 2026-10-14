@@ -666,3 +666,39 @@ The user rated it the best run so far, though visibly lower resolution. It
 is close to SteamVR's 41.5 frames/s at the same size but still GPU-bound at
 level 0 against the 8.3 ms budget. 90 Hz with a larger scale is the next
 trade-off to try.
+
+### Where the long frame gaps go, xrizer runs — 2026-10-14
+
+Decomposing gaps over 50 ms in the 45%/120 Hz (`19155`) and 64%/90 Hz
+(`22026`) app_pacing traces into phases:
+
+- Monado's pacing is not the cause: the app wakes on time and starts the frame
+  (wake to `xrBeginFrame`) in 0.2 ms, in long and normal frames alike.
+- Swapchain image waits are negligible (`ipc_swapchain` wait p99 11 µs, max
+  0.27 ms over about 8,500 frames).
+- `xrBeginFrame` to `xrEndFrame` grows from 2.4 ms (p50, normal frames) to
+  30 ms p50 / 61 ms p90 in long gaps at 90 Hz, while GPU time is unchanged
+  (21 ms). The stall is about 1.5 to 3 GPU frames, consistent with the CPU
+  waiting for earlier GPU work. At 45%/120 Hz long gaps multiplied as the
+  machine heated (a few per 10 s, then 70+ per 10 s after four minutes). The
+  very largest gaps (about 1 s) lie outside the frame and look like game
+  hitches.
+- xrizer's D3D11 submit has no GPU waits, and its timing queries do not flush.
+  The bridge's wineopenxr release signals a D3D11 fence and calls `Flush()`
+  (`graphics_interop_dxmt.cpp:57`).
+
+A `sample` run (5 ms interval, 2 s chunks) was abandoned: suspending Alyx for
+about 50 threads under Rosetta ruined frame pacing for the whole run, and the
+Windows-side frames are anonymous. It did show DXMT's finish thread in
+`waitUntilCompleted` and one thread blocked in `NtWaitForAlertByThreadId`
+(Windows `WaitOnAddress`, an atomic wait) for 148 of 149 samples. DXMT's two
+CPU throttles are atomic waits: `chunk_ongoing.wait` (32 chunks in flight,
+`dxmt_command_queue.cpp:110`) and `frame_latency_fence_.wait`
+(`dxmt_command_queue.hpp:274`). The existing `OwnershipWaitDiagnostics` time
+both, but only while a keyed texture is owned, so they record nothing on the
+xrizer path.
+
+Next: a DXMT diagnostic build that times those waits, plus `Flush`, all the
+time under an environment variable, and logs each one over 5 ms with a
+`CLOCK_UPTIME_RAW` timestamp. Those can be matched to app_pacing frames
+without the sampler's overhead.
