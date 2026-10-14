@@ -9,6 +9,7 @@
  * @ingroup oxr_main
  */
 
+#include "xrt/xrt_config_build.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -18,6 +19,9 @@
 #include "util/u_extension_list.h"
 
 #include "vk/vk_helpers.h"
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+#include "client/comp_vk_metal.h"
+#endif
 
 #include "xrt/xrt_gfx_vk.h"
 
@@ -79,10 +83,14 @@ oxr_vk_get_device_exts(struct oxr_logger *log,
                        uint32_t *namesCountOutput,
                        char *namesString)
 {
-	size_t length = strlen(xrt_gfx_vk_device_extensions) + 1;
+	const char *extensions = xrt_gfx_vk_device_extensions;
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (client_vk_metal_enabled())
+		extensions = client_vk_metal_device_extensions();
+#endif
+	size_t length = strlen(extensions) + 1;
 
-	OXR_TWO_CALL_HELPER(log, namesCapacityInput, namesCountOutput, namesString, length,
-	                    xrt_gfx_vk_device_extensions, XR_SUCCESS);
+	OXR_TWO_CALL_HELPER(log, namesCapacityInput, namesCountOutput, namesString, length, extensions, XR_SUCCESS);
 }
 
 XrResult
@@ -93,6 +101,13 @@ oxr_vk_get_requirements(struct oxr_logger *log,
 	struct xrt_api_requirements ver;
 
 	xrt_gfx_vk_get_versions(&ver);
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (client_vk_metal_enabled()) {
+		ver.min_major = 1;
+		ver.min_minor = 2;
+		ver.min_patch = 0;
+	}
+#endif
 	graphicsRequirements->minApiVersionSupported = XR_MAKE_VERSION(ver.min_major, ver.min_minor, ver.min_patch);
 	graphicsRequirements->maxApiVersionSupported = XR_MAKE_VERSION(ver.max_major, ver.max_minor, ver.max_patch);
 
@@ -436,8 +451,24 @@ oxr_vk_create_vulkan_device(struct oxr_logger *log,
 
 	VkPhysicalDevice physical_device = createInfo->vulkanPhysicalDevice;
 
-	struct u_extension_list_builder *device_extension_builder = u_extension_list_builder_create_from_array(
-	    required_vk_device_extensions, ARRAY_SIZE(required_vk_device_extensions));
+	struct u_extension_list_builder *device_extension_builder = u_extension_list_builder_create_from_array(NULL, 0);
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	bool kosmic = client_vk_metal_enabled();
+	if (kosmic &&
+	    (!client_vk_metal_matches(vulkanGetInstanceProcAddr, sys->vulkan_enable2_instance, physical_device) ||
+	     createInfo->vulkanCreateInfo->enabledLayerCount)) {
+		u_extension_list_builder_destroy(&device_extension_builder);
+		*vulkanResult = VK_ERROR_FEATURE_NOT_PRESENT;
+		return XR_SUCCESS;
+	}
+#endif
+	for (uint32_t i = 0; i < ARRAY_SIZE(required_vk_device_extensions); ++i) {
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+		if (kosmic && strcmp(required_vk_device_extensions[i], VK_EXT_METAL_OBJECTS_EXTENSION_NAME) == 0)
+			continue;
+#endif
+		u_extension_list_builder_append_unique(device_extension_builder, required_vk_device_extensions[i]);
+	}
 
 	for (uint32_t i = 0; i < createInfo->vulkanCreateInfo->enabledExtensionCount; i++) {
 		u_extension_list_builder_append_unique(device_extension_builder,
@@ -642,6 +673,28 @@ oxr_vk_get_physical_device(struct oxr_logger *log,
 		                 "Call to vkEnumeratePhysicalDevices returned zero VkPhysicalDevices");
 	}
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (client_vk_metal_enabled()) {
+		int selected = -1;
+		for (uint32_t i = 0; i < count; ++i)
+			if (client_vk_metal_matches(vulkanGetInstanceProcAddr, vulkanInstance, phys[i])) {
+				selected = (int)i;
+				break;
+			}
+		if (selected < 0) {
+			free(phys);
+			return oxr_error(
+			    log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+			    "Experimental KosmicKrisp requested but no KosmicKrisp physical device is available");
+		}
+		*vkPhysicalDevice = phys[selected];
+		sys->suggested_vulkan_physical_device = *vkPhysicalDevice;
+		sys->vulkan_enable2_instance = vulkanInstance;
+		sys->vk_get_instance_proc_addr = vulkanGetInstanceProcAddr;
+		free(phys);
+		return XR_SUCCESS;
+	}
+#endif
 	char suggested_uuid_str[UUID_STR_SIZE] = {0};
 	snprint_uuid(suggested_uuid_str, ARRAY_SIZE(suggested_uuid_str), &sys->xsysc->info.client_vk_deviceUUID);
 

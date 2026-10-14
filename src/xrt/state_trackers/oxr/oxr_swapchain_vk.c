@@ -8,6 +8,10 @@
  * @ingroup comp_client
  */
 
+#include "xrt/xrt_config_build.h"
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+#include "client/comp_vk_metal.h"
+#endif
 #include "util/u_debug.h"
 
 #include "oxr_objects.h"
@@ -40,7 +44,22 @@ vk_implicit_acquire_image(struct oxr_logger *log,
 	 * to be able to insert our transition.
 	 */
 	if (WAIT_IN_ACQUIRE) {
-		xret = xrt_swapchain_wait_image(xsc, XR_INFINITE_DURATION, index);
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+		if (client_vk_metal_enabled()) {
+			for (;;) {
+				xret = xrt_swapchain_wait_image(xsc, 50000000ll, index);
+				if (xret != XRT_TIMEOUT)
+					break;
+				CHECK_OXR_RET(oxr_session_poll(log, sc->sess));
+				if (sc->sess->has_lost)
+					return oxr_error(log, XR_ERROR_SESSION_LOST,
+					                 "KosmicKrisp producer session lost during acquire");
+			}
+		} else
+#endif
+		{
+			xret = xrt_swapchain_wait_image(xsc, XR_INFINITE_DURATION, index);
+		}
 		OXR_CHECK_XRET(log, sc->sess, xret, xrt_swapchain_wait_image);
 	}
 

@@ -17,6 +17,10 @@
 #include "util/u_debug.h"
 
 #include "comp_vk_client.h"
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+#include "client/comp_vk_metal.h"
+#include "os/os_time.h"
+#endif
 
 
 // Prefixed with OXR since the only user right now is the OpenXR state tracker.
@@ -39,6 +43,10 @@ client_vk_swapchain(struct xrt_swapchain *xsc)
 static inline struct xrt_swapchain *
 to_native_swapchain(struct xrt_swapchain *xsc)
 {
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (client_vk_swapchain(xsc)->xscm)
+		return &client_vk_swapchain(xsc)->xscm->base;
+#endif
 	return &client_vk_swapchain(xsc)->xscn->base;
 }
 
@@ -59,6 +67,10 @@ client_vk_compositor(struct xrt_compositor *xc)
 static inline struct xrt_compositor *
 to_native_compositor(struct xrt_compositor *xc)
 {
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (client_vk_compositor(xc)->xcm)
+		return &client_vk_compositor(xc)->xcm->base;
+#endif
 	return &client_vk_compositor(xc)->xcn->base;
 }
 
@@ -181,11 +193,13 @@ submit_semaphore(struct client_vk_compositor *c, xrt_result_t *out_xret)
 	    .pSignalSemaphores = semaphores,
 	};
 
+	vk_queue_lock(vk->main_queue);
 	ret = vk->vkQueueSubmit(   //
 	    vk->main_queue->queue, // queue
 	    1,                     // submitCount
 	    &submit_info,          // pSubmits
 	    VK_NULL_HANDLE);       // fence
+	vk_queue_unlock(vk->main_queue);
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "vkQueueSubmit: %s", vk_result_string(ret));
 		*out_xret = XRT_ERROR_VULKAN;
@@ -193,7 +207,7 @@ submit_semaphore(struct client_vk_compositor *c, xrt_result_t *out_xret)
 	}
 
 	*out_xret = xrt_comp_layer_commit_with_semaphore( //
-	    &c->xcn->base,                                // xc
+	    to_native_compositor(&c->base),               // xc
 	    c->sync.xcsem,                                // xcsem
 	    values[0]);                                   // value
 
@@ -264,6 +278,21 @@ submit_fallback(struct client_vk_compositor *c, xrt_result_t *out_xret)
  *
  */
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+static bool
+metal_swapchain_complete(struct client_vk_swapchain *sc)
+{
+	struct vk_bundle *vk = &sc->c->vk;
+	for (uint32_t i = 0; i < sc->base.base.image_count; ++i) {
+		if (sc->acquired[i] ||
+		    (sc->acquire_fence[i] && vk->vkGetFenceStatus(vk->device, sc->acquire_fence[i]) != VK_SUCCESS) ||
+		    (sc->release_fence[i] && vk->vkGetFenceStatus(vk->device, sc->release_fence[i]) != VK_SUCCESS))
+			return false;
+	}
+	return true;
+}
+#endif
+
 static void
 client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 {
@@ -273,6 +302,17 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 	struct client_vk_compositor *c = sc->c;
 	struct vk_bundle *vk = &c->vk;
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (sc->xscm && !metal_swapchain_complete(sc)) {
+		if (!sc->retired) {
+			sc->retired = true;
+			sc->retired_next = c->retired_swapchains;
+			c->retired_swapchains = sc;
+		}
+		U_LOG_D("Deferring incomplete KosmicKrisp swapchain until bounded frontend teardown");
+		return;
+	}
+#endif
 	vk_cmd_pool_lock(&c->pool);
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
 		if (sc->acquire[i] != VK_NULL_HANDLE) {
@@ -298,6 +338,18 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 		}
 	}
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (sc->xscm) {
+		for (uint32_t i = 0; i < sc->base.base.image_count; ++i) {
+			if (sc->acquire_fence[i])
+				vk->vkDestroyFence(vk->device, sc->acquire_fence[i], NULL);
+			if (sc->release_fence[i])
+				vk->vkDestroyFence(vk->device, sc->release_fence[i], NULL);
+		}
+		struct xrt_swapchain *metal = &sc->xscm->base;
+		xrt_swapchain_reference(&metal, NULL);
+	}
+#endif
 	// Drop our reference, does NULL checking.
 	xrt_swapchain_native_reference(&sc->xscn, NULL);
 
@@ -314,12 +366,16 @@ client_vk_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index
 	uint32_t index = 0;
 
 	// Pipe down call into native swapchain.
-	xret = xrt_swapchain_acquire_image(&sc->xscn->base, &index);
+	xret = xrt_swapchain_acquire_image(to_native_swapchain(xsc), &index);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
 
 	// Finally done.
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (sc->xscm)
+		sc->acquired[index] = true;
+#endif
 	*out_index = index;
 
 	return XRT_SUCCESS;
@@ -348,6 +404,29 @@ client_vk_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_di
 	default: assert(false);
 	}
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (sc->xscm) {
+		struct vk_bundle *vk = &sc->c->vk;
+		VkFence *fence =
+		    direction == XRT_BARRIER_TO_APP ? &sc->acquire_fence[index] : &sc->release_fence[index];
+		if (*fence) {
+			if (vk->vkGetFenceStatus(vk->device, *fence) != VK_SUCCESS)
+				return XRT_ERROR_VULKAN;
+			if (vk->vkResetFences(vk->device, 1, fence) != VK_SUCCESS)
+				return XRT_ERROR_VULKAN;
+		} else {
+			VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+			if (vk->vkCreateFence(vk->device, &fi, NULL, fence) != VK_SUCCESS)
+				return XRT_ERROR_VULKAN;
+		}
+		VkSubmitInfo si = {
+		    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd_buffer};
+		vk_queue_lock(vk->main_queue);
+		VkResult result = vk->vkQueueSubmit(vk->main_queue->queue, 1, &si, *fence);
+		vk_queue_unlock(vk->main_queue);
+		return result == VK_SUCCESS ? XRT_SUCCESS : XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
+	}
+#endif
 	return submit_image_barrier(sc, cmd_buffer);
 }
 
@@ -357,7 +436,13 @@ client_vk_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 	COMP_TRACE_MARKER();
 
 	// Pipe down call into native swapchain.
-	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
+	xrt_result_t result = xrt_swapchain_release_image(to_native_swapchain(xsc), index);
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
+	if (result == XRT_SUCCESS && sc->xscm)
+		sc->acquired[index] = false;
+#endif
+	return result;
 }
 
 static xrt_result_t
@@ -402,6 +487,36 @@ client_vk_compositor_destroy(struct xrt_compositor *xc)
 	struct client_vk_compositor *c = client_vk_compositor(xc);
 	struct vk_bundle *vk = &c->vk;
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (c->metal) {
+		int64_t deadline = os_monotonic_get_ns() + 500000000ll;
+		for (;;) {
+			struct client_vk_swapchain **link = &c->retired_swapchains;
+			while (*link) {
+				struct client_vk_swapchain *sc = *link;
+				if (!metal_swapchain_complete(sc)) {
+					link = &sc->retired_next;
+					continue;
+				}
+				*link = sc->retired_next;
+				sc->retired = false;
+				client_vk_swapchain_destroy(&sc->base.base);
+			}
+			uint64_t observed = 0;
+			bool timeline_ready =
+			    !c->sync.value ||
+			    (vk->vkGetSemaphoreCounterValue(vk->device, c->sync.semaphore, &observed) == VK_SUCCESS &&
+			     observed >= c->sync.value);
+			if (!c->retired_swapchains && timeline_ready)
+				break;
+			if (os_monotonic_get_ns() >= deadline) {
+				U_LOG_W("Retaining unresolved KosmicKrisp frontend after 500 ms teardown drain");
+				return;
+			}
+			os_nanosleep(1000000ull);
+		}
+	}
+#endif
 	if (c->sync.semaphore != VK_NULL_HANDLE) {
 		vk->vkDestroySemaphore(vk->device, c->sync.semaphore, NULL);
 		c->sync.semaphore = VK_NULL_HANDLE;
@@ -412,7 +527,13 @@ client_vk_compositor_destroy(struct xrt_compositor *xc)
 	vk_cmd_pool_destroy(vk, &c->pool);
 
 	vk_deinit_mutex(vk);
-
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (c->xcm) {
+		struct xrt_compositor *metal = &c->xcm->base;
+		xrt_comp_destroy(&metal);
+	}
+	client_vk_metal_destroy(c->metal);
+#endif
 	free(c);
 }
 
@@ -483,7 +604,7 @@ client_vk_compositor_layer_projection(struct xrt_compositor *xc,
 
 	assert(data->type == XRT_LAYER_PROJECTION);
 	for (uint32_t i = 0; i < data->view_count; ++i) {
-		xscn[i] = &client_vk_swapchain(xsc[i])->xscn->base;
+		xscn[i] = to_native_swapchain(xsc[i]);
 	}
 
 	xcn = to_native_compositor(xc);
@@ -629,6 +750,12 @@ client_vk_compositor_layer_commit(struct xrt_compositor *xc, xrt_graphics_sync_h
 	}
 
 	xrt_result_t xret = XRT_SUCCESS;
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (c->metal) {
+		u_graphics_sync_unref(&sync_handle);
+		return submit_semaphore(c, &xret) ? xret : XRT_ERROR_VULKAN;
+	}
+#endif
 	if (submit_handle(c, sync_handle, &xret)) {
 		return xret;
 	} else if (submit_semaphore(c, &xret)) {
@@ -648,6 +775,15 @@ client_vk_compositor_get_swapchain_create_properties(struct xrt_compositor *xc,
                                                      const struct xrt_swapchain_create_info *info,
                                                      struct xrt_swapchain_create_properties *xsccp)
 {
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (client_vk_compositor(xc)->metal) {
+		struct xrt_swapchain_create_info metal_info = *info;
+		metal_info.format = client_vk_metal_format(info->format);
+		if (!metal_info.format)
+			return XRT_ERROR_SWAPCHAIN_FORMAT_UNSUPPORTED;
+		return xrt_comp_get_swapchain_create_properties(to_native_compositor(xc), &metal_info, xsccp);
+	}
+#endif
 	return xrt_comp_get_swapchain_create_properties(to_native_compositor(xc), info, xsccp);
 }
 
@@ -664,7 +800,7 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	xrt_result_t xret;
 
 	struct xrt_swapchain_create_properties xsccp = XRT_STRUCT_INIT;
-	xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, info, &xsccp);
+	xret = client_vk_compositor_get_swapchain_create_properties(xc, info, &xsccp);
 	if (xret != XRT_SUCCESS) {
 		VK_ERROR(vk, "Failed to get create properties: %u", xret);
 		return xret;
@@ -674,15 +810,34 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	struct xrt_swapchain_create_info xinfo = *info;
 	xinfo.bits |= xsccp.extra_bits;
 
-	struct xrt_swapchain_native *xscn = NULL; // Has to be NULL.
-	xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
-
-	if (xret != XRT_SUCCESS) {
-		return xret;
+	struct xrt_swapchain_native *xscn = NULL;
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	struct xrt_swapchain_metal *xscm = NULL;
+	if (c->metal) {
+		if (!client_vk_metal_format(xinfo.format) || xinfo.array_size != 1 || xinfo.face_count != 1 ||
+		    xinfo.mip_count != 1 || xinfo.sample_count != 1 || xinfo.create ||
+		    (xinfo.bits & (XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL | XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS |
+		                   XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT)))
+			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+		struct xrt_swapchain_create_info metal_info = xinfo;
+		metal_info.format = client_vk_metal_format(xinfo.format);
+		struct xrt_swapchain *metal = NULL;
+		xret = xrt_comp_create_swapchain(&c->xcm->base, &metal_info, &metal);
+		if (xret != XRT_SUCCESS)
+			return xret;
+		xscm = (struct xrt_swapchain_metal *)metal;
+	} else
+#endif
+	{
+		xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
+		if (xret != XRT_SUCCESS)
+			return xret;
 	}
-	assert(xscn != NULL);
-
-	struct xrt_swapchain *xsc = &xscn->base;
+	struct xrt_swapchain *xsc =
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	    xscm ? &xscm->base :
+#endif
+	         &xscn->base;
 
 	VkAccessFlags barrier_access_mask = vk_csci_get_barrier_access_mask(xinfo.bits);
 
@@ -693,6 +848,10 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	assert(barrier_aspect_mask != 0);
 
 	struct client_vk_swapchain *sc = U_TYPED_CALLOC(struct client_vk_swapchain);
+	if (!sc) {
+		xrt_swapchain_reference(&xsc, NULL);
+		return XRT_ERROR_ALLOCATION;
+	}
 	sc->base.base.destroy = client_vk_swapchain_destroy;
 	sc->base.base.acquire_image = client_vk_swapchain_acquire_image;
 	sc->base.base.wait_image = client_vk_swapchain_wait_image;
@@ -702,16 +861,29 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	sc->base.base.image_count = xsc->image_count; // Fetch the number of images from the native swapchain.
 	sc->c = c;
 	sc->xscn = xscn;
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	sc->xscm = xscm;
+#endif
 
 	for (uint32_t i = 0; i < xsc->image_count; i++) {
-		ret = vk_create_image_from_native(vk, &xinfo, &xscn->images[i], &sc->base.images[i], &sc->mems[i]);
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+		if (c->metal) {
+			ret = client_vk_metal_import_image(c->metal, &xinfo, xscm->images[i], &sc->base.images[i]);
+		} else
+#endif
+		{
+			ret = vk_create_image_from_native(vk, &xinfo, &xscn->images[i], &sc->base.images[i],
+			                                  &sc->mems[i]);
+		}
 
 		if (ret != VK_SUCCESS) {
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 
 		VK_NAME_IMAGE(vk, sc->base.images[i], "vk_image_collection image");
-		VK_NAME_DEVICE_MEMORY(vk, sc->mems[i], "vk_image_collection device_memory");
+		if (sc->mems[i])
+			VK_NAME_DEVICE_MEMORY(vk, sc->mems[i], "vk_image_collection device_memory");
 	}
 
 	vk_cmd_pool_lock(&c->pool);
@@ -722,12 +894,14 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, flags, &sc->acquire[i]);
 		if (ret != VK_SUCCESS) {
 			vk_cmd_pool_unlock(&c->pool);
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 		VK_NAME_COMMAND_BUFFER(vk, sc->acquire[i], "client_vk_swapchain acquire command buffer");
 		ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, flags, &sc->release[i]);
 		if (ret != VK_SUCCESS) {
 			vk_cmd_pool_unlock(&c->pool);
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 		VK_NAME_COMMAND_BUFFER(vk, sc->release[i], "client_vk_swapchain release command buffer");
@@ -769,6 +943,10 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		    .subresourceRange = subresource_range,
 		};
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+		if (c->metal)
+			release.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+#endif
 		//! @todo less conservative pipeline stage masks based on usage
 		vk->vkCmdPipelineBarrier(               //
 		    sc->acquire[i],                     // commandBuffer
@@ -798,12 +976,14 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		if (ret != VK_SUCCESS) {
 			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
 			vk_cmd_pool_unlock(&c->pool);
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 		ret = vk->vkEndCommandBuffer(sc->release[i]);
 		if (ret != VK_SUCCESS) {
 			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
 			vk_cmd_pool_unlock(&c->pool);
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 	}
@@ -902,8 +1082,21 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 
 	VK_NAME_COMMAND_POOL(&c->vk, c->pool.pool, "client_vk_compositor command pool");
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (client_vk_metal_enabled()) {
+		c->metal = client_vk_metal_create(xcn, &c->vk, &c->xcm, &c->sync.semaphore, &c->sync.xcsem);
+		if (!c->metal)
+			goto err_pool;
+		c->base.info.format_count = 0;
+		for (uint32_t i = 0; i < xcn->base.info.format_count; ++i) {
+			int64_t format = xcn->base.info.formats[i];
+			if (client_vk_metal_format(format))
+				c->base.info.formats[c->base.info.format_count++] = format;
+		}
+	} else
+#endif
 #ifdef VK_KHR_timeline_semaphore
-	if (vk_can_import_and_export_timeline_semaphore(&c->vk)) {
+	    if (vk_can_import_and_export_timeline_semaphore(&c->vk)) {
 		xret = setup_semaphore(c);
 		if (xret != XRT_SUCCESS) {
 			goto err_pool;
@@ -941,6 +1134,18 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	return c;
 
 err_pool:
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (c->metal) {
+		if (c->sync.semaphore)
+			c->vk.vkDestroySemaphore(c->vk.device, c->sync.semaphore, NULL);
+		xrt_compositor_semaphore_reference(&c->sync.xcsem, NULL);
+		if (c->xcm) {
+			struct xrt_compositor *metal = &c->xcm->base;
+			xrt_comp_destroy(&metal);
+		}
+		client_vk_metal_destroy(c->metal);
+	}
+#endif
 	vk_cmd_pool_destroy(&c->vk, &c->pool);
 err_mutex:
 	vk_deinit_mutex(&c->vk);

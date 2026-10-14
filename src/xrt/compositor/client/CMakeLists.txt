@@ -20,6 +20,10 @@ if(XRT_HAVE_VULKAN)
 endif()
 
 if(APPLE)
+    if(XRT_FEATURE_MACOS_KOSMICKRISP)
+        target_sources(comp_client PRIVATE comp_vk_metal.m comp_vk_metal.h)
+        target_include_directories(comp_client PRIVATE ${XRT_MACOS_KOSMICKRISP_INCLUDE_DIR})
+    endif()
 	# Per-swapchain Metal foveation map cache, separate so it can be unit tested
 	# without the rest of the client compositor.
 	add_library(

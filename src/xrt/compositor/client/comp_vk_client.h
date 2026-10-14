@@ -12,6 +12,7 @@
 #pragma once
 
 #include "vk/vk_helpers.h"
+#include "xrt/xrt_config_build.h"
 #include "vk/vk_cmd_pool.h"
 #include "xrt/xrt_gfx_vk.h"
 
@@ -42,6 +43,14 @@ struct client_vk_swapchain
 
 	//! Owning reference to the backing native swapchain.
 	struct xrt_swapchain_native *xscn;
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	struct xrt_swapchain_metal *xscm;
+	VkFence acquire_fence[XRT_MAX_SWAPCHAIN_IMAGES];
+	VkFence release_fence[XRT_MAX_SWAPCHAIN_IMAGES];
+	bool acquired[XRT_MAX_SWAPCHAIN_IMAGES];
+	struct client_vk_swapchain *retired_next;
+	bool retired;
+#endif
 
 	//! Non-owning reference to our parent compositor.
 	struct client_vk_compositor *c;
@@ -68,6 +77,11 @@ struct client_vk_compositor
 
 	//! Owning reference to the backing native compositor
 	struct xrt_compositor_native *xcn;
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	struct xrt_compositor_metal *xcm;
+	struct client_vk_metal_context *metal;
+	struct client_vk_swapchain *retired_swapchains;
+#endif
 
 	struct
 	{

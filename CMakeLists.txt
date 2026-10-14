@@ -479,6 +479,14 @@ option(XRT_FEATURE_OPENXR_LAYER_FB_DEPTH_TEST "Enable XR_FB_composition_layer_de
 option(XRT_FEATURE_OPENXR_LAYER_FB_PASSTHROUGH "Enable XR_FB_passthrough" ${APPLE})
 
 # Defaults for OpenXR spaces
+option(XRT_FEATURE_MACOS_KOSMICKRISP "Build experimental KosmicKrisp Vulkan/Metal client adapter" OFF)
+if(XRT_FEATURE_MACOS_KOSMICKRISP)
+    if(NOT APPLE OR NOT XRT_MODULE_COMPOSITOR_UTIL OR NOT XRT_FEATURE_SERVICE)
+        message(FATAL_ERROR "KosmicKrisp adapter requires macOS compositor util and service")
+    endif()
+    find_path(XRT_MACOS_KOSMICKRISP_INCLUDE_DIR kosmickrisp_metal_interop.h REQUIRED)
+endif()
+
 option(XRT_FEATURE_OPENXR_SPACE_LOCAL_FLOOR "Enable XR_EXT_local_floor" ON)
 option(XRT_FEATURE_OPENXR_SPACE_UNBOUNDED "Enable XR_MSFT_unbounded_reference_space" ON)
 

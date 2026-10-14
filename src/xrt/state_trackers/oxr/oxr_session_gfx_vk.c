@@ -9,6 +9,7 @@
  * @ingroup comp_client
  */
 
+#include "xrt/xrt_config_build.h"
 #include "xrt/xrt_instance.h"
 #include "xrt/xrt_handles.h"
 #include "xrt/xrt_gfx_vk.h"
@@ -17,6 +18,9 @@
 #include "util/u_debug.h"
 
 #include "vk/vk_helpers.h"
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+#include "client/comp_vk_metal.h"
+#endif
 
 #include "oxr_objects.h"
 #include "oxr_logger.h"
@@ -140,22 +144,29 @@ oxr_session_populate_vk(struct oxr_logger *log,
 	}
 #endif
 
+#ifdef XRT_FEATURE_MACOS_KOSMICKRISP
+	if (client_vk_metal_enabled() &&
+	    (!sys->inst->extensions.KHR_vulkan_enable2 || !timeline_semaphore_enabled ||
+	     !client_vk_metal_matches(sys->vk_get_instance_proc_addr, next->instance, next->physicalDevice)))
+		return oxr_error(log, XR_ERROR_GRAPHICS_DEVICE_INVALID,
+		                 "KosmicKrisp requires Vulkan enable2, its selected device and timeline semaphores");
+#endif
 	struct xrt_compositor_native *xcn = sess->xcn;
-	struct xrt_compositor *xc = xrt_gfx_vk_provider_create( //
-	    xcn,                                                //
-	    next->instance,                                     //
-	    vkGetInstanceProcAddr,                              //
-	    next->physicalDevice,                               //
-	    next->device,                                       //
-	    external_fence_fd_enabled,                          //
-	    external_semaphore_fd_enabled,                      //
-	    timeline_semaphore_enabled,                         //
-	    image_format_list_enabled,                          //
-	    metal_objects_enabled,                              //
-	    debug_utils_enabled,                                //
-	    renderdoc_enabled,                                  //
-	    next->queueFamilyIndex,                             //
-	    next->queueIndex);                                  //
+	struct xrt_compositor *xc = xrt_gfx_vk_provider_create(                                      //
+	    xcn,                                                                                     //
+	    next->instance,                                                                          //
+	    sys->vk_get_instance_proc_addr ? sys->vk_get_instance_proc_addr : vkGetInstanceProcAddr, //
+	    next->physicalDevice,                                                                    //
+	    next->device,                                                                            //
+	    external_fence_fd_enabled,                                                               //
+	    external_semaphore_fd_enabled,                                                           //
+	    timeline_semaphore_enabled,                                                              //
+	    image_format_list_enabled,                                                               //
+	    metal_objects_enabled,                                                                   //
+	    debug_utils_enabled,                                                                     //
+	    renderdoc_enabled,                                                                       //
+	    next->queueFamilyIndex,                                                                  //
+	    next->queueIndex);                                                                       //
 
 	if (xc == NULL) {
 		return oxr_error(log, XR_ERROR_INITIALIZATION_FAILED, "Failed to create an vk client compositor");

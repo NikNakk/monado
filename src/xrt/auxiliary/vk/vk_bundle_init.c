@@ -470,6 +470,36 @@ select_preferred_device(struct vk_bundle *vk, VkPhysicalDevice *devices, uint32_
 {
 	assert(device_count > 0);
 
+#ifdef XRT_OS_OSX
+	// Preserve GPU preference within drivers capable of native Metal presentation.
+	int metal_index = -1;
+	VkPhysicalDeviceProperties metal_properties = {0};
+	for (uint32_t i = 0; i < device_count; ++i) {
+		uint32_t count = 0;
+		if (vk->vkEnumerateDeviceExtensionProperties(devices[i], NULL, &count, NULL) != VK_SUCCESS)
+			continue;
+		VkExtensionProperties *extensions = calloc(count, sizeof(*extensions));
+		if (!extensions)
+			continue;
+		VkResult result = vk->vkEnumerateDeviceExtensionProperties(devices[i], NULL, &count, extensions);
+		bool metal = false;
+		if (result == VK_SUCCESS)
+			for (uint32_t j = 0; j < count; ++j)
+				if (strcmp(extensions[j].extensionName, VK_EXT_METAL_OBJECTS_EXTENSION_NAME) == 0)
+					metal = true;
+		free(extensions);
+		if (!metal)
+			continue;
+		VkPhysicalDeviceProperties properties;
+		vk->vkGetPhysicalDeviceProperties(devices[i], &properties);
+		if (metal_index < 0 || device_is_preferred(&properties, &metal_properties)) {
+			metal_index = (int)i;
+			metal_properties = properties;
+		}
+	}
+	if (metal_index >= 0)
+		return (uint32_t)metal_index;
+#endif
 	// Default to first if there is only one.
 	uint32_t gpu_index = 0;
 	VkPhysicalDeviceProperties gpu_properties;
