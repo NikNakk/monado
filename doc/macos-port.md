@@ -8,7 +8,7 @@ SPDX-License-Identifier: BSL-1.0
 
 ## Experimental KosmicKrisp Vulkan path (2026-10-14)
 
-An isolated opt-in KosmicKrisp Vulkan client adapter is implemented on `codex/kosmickrisp-openxr-m3`. Vulkan hello_xr, BGRA, concurrent clients and failed-producer recovery pass with a simulated service; PSVR2 and hosted/Game Mode acceptance remain pending. See [assessment and evidence](../docs/kosmickrisp-openxr-assessment.md#milestone-3--authorized-experimental-integration-2026-10-14). Defaults and the deployed runtime remain unchanged.
+An isolated opt-in KosmicKrisp Vulkan client adapter is implemented on `codex/kosmickrisp-openxr-m3`. Vulkan hello_xr, BGRA, concurrent clients and failed-producer recovery pass with a simulated service; PSVR2 and hosted/Game Mode acceptance remain pending. See [assessment and evidence](../docs/kosmickrisp-openxr-assessment.md#milestone-3--authorized-experimental-integration-2026-10-14). Defaults and the deployed runtime remain unchanged. A first user-requested physical viewing run now selects the real PSVR2 display at 90 Hz and advances producer values; completion and visual acceptance are pending.
 
 
 The [2026-10-13 GPU-efficiency study](macos-compositor-gpu-efficiency.md) retains

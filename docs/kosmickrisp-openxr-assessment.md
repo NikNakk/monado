@@ -870,3 +870,15 @@ Priorities before wider acceptance:
    Preserve DXMT; compare D3D11 only with matched measurements.
 
 No merge, push, production installation or physical hardware run was performed.
+
+
+### First user-requested hardware viewing run (2026-10-14)
+
+Started Vulkan2 hello_xr on the physical PSVR2 at the user's request, using runtime
+implementation `416f276fd` / M3 branch `9da3d1bb5`, with a four-minute viewing
+interval added to the runner. Logs at
+`/private/tmp/kosmickrisp-study/m3-hardware-view-20261014/` show PSVR2 USB tracking,
+the real 4000x2040 display selected at 90 Hz, MoltenVK service composition,
+KosmicKrisp client import and advancing producer values. This run is still active
+when this note is written: graceful completion, visual acceptance, detailed frame
+pacing and Game Mode are not yet established. No refresh mode was changed.

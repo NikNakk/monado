@@ -22,11 +22,14 @@ p.add_argument('--icd', type=Path, required=True)
 p.add_argument('--molten-icd', type=Path, required=True)
 p.add_argument('--mode', choices=['probe', 'hello', 'faults'], default='probe')
 p.add_argument('--hello', type=Path)
+p.add_argument('--seconds', type=int, default=8, help='Hello viewing interval, 1 to 240 seconds')
 p.add_argument('--bad-library', type=Path)
 p.add_argument('--output', type=Path, required=True)
 p.add_argument('--bgra', action='store_true')
 p.add_argument('--hosted', action='store_true')
 a = p.parse_args()
+if not 1 <= a.seconds <= 240:
+    p.error('--seconds must be between 1 and 240')
 if a.service_output:
     args = sys.argv[1:]
     i = args.index('--service-output')
@@ -39,7 +42,7 @@ if a.service_output:
                             '\nrunpy.run_path(sys.argv[0],run_name="__main__")\n')
         service = Path(__file__).resolve().parents[2] / 'scripts/macos/run-gpu-sync-service.py'
         command = [sys.executable, str(service), '--build', str(a.build),
-                   '--output', str(a.service_output), '--client-timeout', '60']
+                   '--output', str(a.service_output), '--client-timeout', str(max(60, a.seconds + 20))]
         if a.headset:
             command.append('--headset')
         command += ['--client', sys.executable, str(launcher)]
@@ -102,7 +105,7 @@ try:
         if not a.hello:
             p.error('--hello is required for hello mode')
         child = spawn('hello', command=[str(a.hello), '-g', 'Vulkan2', '-bm', 'Opaque', '-v'])
-        time.sleep(8)
+        time.sleep(a.seconds)
         if child.poll() is not None:
             raise RuntimeError('hello exited before the rendering interval finished')
         child.stdin.write(b'\n')

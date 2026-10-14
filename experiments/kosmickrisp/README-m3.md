@@ -99,7 +99,8 @@ cmake --build "$study/hello-build-m3" --target hello_xr --parallel 6
 
 Append `--mode hello --hello "$study/hello-build-m3/src/tests/hello_xr/hello_xr"`
 to the isolated-run command. It renders for eight seconds, sends stdin newline to
-quit cleanly, and requires exit 0. Evidence must include readiness/scheduling and
+quit cleanly, and requires exit 0. Append `--seconds 240` for a four-minute
+viewing interval; the service timeout adjusts to allow graceful shutdown. Evidence must include readiness/scheduling and
 non-black service output; process exit alone does not prove rendering.
 
 For a **user-operated** PSVR2 trial, first close GAV and stop the ordinary headset
