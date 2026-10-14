@@ -287,10 +287,38 @@ submit_fallback(struct client_vk_compositor *c, xrt_result_t *out_xret)
  */
 
 #ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+struct client_vk_retired_fence
+{
+	VkFence fence;
+	struct client_vk_retired_fence *next;
+};
+
+static void
+metal_collect_barrier_fences(struct client_vk_swapchain *sc)
+{
+	struct vk_bundle *vk = &sc->c->vk;
+	struct client_vk_retired_fence **link = &sc->retired_fences;
+	while (*link) {
+		struct client_vk_retired_fence *node = *link;
+		if (vk->vkGetFenceStatus(vk->device, node->fence) != VK_SUCCESS) {
+			link = &node->next;
+			continue;
+		}
+		*link = node->next;
+		vk->vkDestroyFence(vk->device, node->fence, NULL);
+		free(node);
+		--sc->retired_fence_count;
+	}
+}
+
 static bool
 metal_swapchain_complete(struct client_vk_swapchain *sc)
 {
 	struct vk_bundle *vk = &sc->c->vk;
+	metal_collect_barrier_fences(sc);
+	if (sc->retired_fences ||
+	    (sc->destroy_fence && vk->vkGetFenceStatus(vk->device, sc->destroy_fence) != VK_SUCCESS))
+		return false;
 	for (uint32_t i = 0; i < sc->base.base.image_count; ++i) {
 		if (sc->acquired[i] ||
 		    (sc->acquire_fence[i] && vk->vkGetFenceStatus(vk->device, sc->acquire_fence[i]) != VK_SUCCESS) ||
@@ -311,6 +339,25 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 	struct vk_bundle *vk = &c->vk;
 
 #ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (c->metal && !sc->destroy_fence) {
+		bool acquired = false;
+		for (uint32_t i = 0; i < sc->base.base.image_count; ++i)
+			acquired |= sc->acquired[i];
+		if (acquired) {
+			// Destroying a swapchain may implicitly abandon acquired images.
+			// A queue marker covers already submitted app work without waiting
+			// on the CPU or retaining a healthy frontend indefinitely.
+			VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+			if (vk->vkCreateFence(vk->device, &fi, NULL, &sc->destroy_fence) == VK_SUCCESS) {
+				VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
+				vk_queue_lock(vk->main_queue);
+				VkResult result = vk->vkQueueSubmit(vk->main_queue->queue, 1, &si, sc->destroy_fence);
+				vk_queue_unlock(vk->main_queue);
+				if (result == VK_SUCCESS)
+					memset(sc->acquired, 0, sizeof(sc->acquired));
+			}
+		}
+	}
 	if (c->metal && !metal_swapchain_complete(sc)) {
 		if (!sc->retired) {
 			sc->retired = true;
@@ -353,6 +400,8 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 		if (sc->release_fence[i])
 			vk->vkDestroyFence(vk->device, sc->release_fence[i], NULL);
 	}
+	if (sc->destroy_fence)
+		vk->vkDestroyFence(vk->device, sc->destroy_fence, NULL);
 	if (sc->xscm) {
 		struct xrt_swapchain *metal = &sc->xscm->base;
 		xrt_swapchain_reference(&metal, NULL);
@@ -387,7 +436,6 @@ client_vk_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index
 {
 	COMP_TRACE_MARKER();
 
-	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
 	xrt_result_t xret;
 	uint32_t index = 0;
 
@@ -398,6 +446,7 @@ client_vk_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index
 	}
 
 #ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
 	if (sc->c->metal)
 		sc->acquired[index] = true;
 #endif
@@ -435,15 +484,38 @@ client_vk_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_di
 		struct vk_bundle *vk = &sc->c->vk;
 		VkFence *fence =
 		    direction == XRT_BARRIER_TO_APP ? &sc->acquire_fence[index] : &sc->release_fence[index];
-		if (*fence) {
-			if (vk->vkGetFenceStatus(vk->device, *fence) != VK_SUCCESS)
-				return XRT_ERROR_VULKAN;
+		metal_collect_barrier_fences(sc);
+		VkResult status = *fence ? vk->vkGetFenceStatus(vk->device, *fence) : VK_NOT_READY;
+		if (*fence && status == VK_SUCCESS) {
 			if (vk->vkResetFences(vk->device, 1, fence) != VK_SUCCESS)
 				return XRT_ERROR_VULKAN;
 		} else {
-			VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-			if (vk->vkCreateFence(vk->device, &fi, NULL, fence) != VK_SUCCESS)
+			if (*fence && status != VK_NOT_READY)
 				return XRT_ERROR_VULKAN;
+			// Reacquisition before frame submission may leave a previous barrier
+			// in flight. Its command buffer permits simultaneous use, but its
+			// fence must not be reset or destroyed while pending.
+			struct client_vk_retired_fence *node = NULL;
+			if (*fence) {
+				if (sc->retired_fence_count >= 64)
+					return XRT_ERROR_ALLOCATION;
+				node = calloc(1, sizeof(*node));
+				if (!node)
+					return XRT_ERROR_ALLOCATION;
+			}
+			VkFence fresh = VK_NULL_HANDLE;
+			VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+			if (vk->vkCreateFence(vk->device, &fi, NULL, &fresh) != VK_SUCCESS) {
+				free(node);
+				return XRT_ERROR_VULKAN;
+			}
+			if (node) {
+				node->fence = *fence;
+				node->next = sc->retired_fences;
+				sc->retired_fences = node;
+				++sc->retired_fence_count;
+			}
+			*fence = fresh;
 		}
 		VkSubmitInfo si = {
 		    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd_buffer};

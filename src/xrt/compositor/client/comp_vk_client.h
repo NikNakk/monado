@@ -28,6 +28,7 @@ extern "C" {
 
 struct client_vk_compositor;
 struct client_vk_metal_texture_context;
+struct client_vk_retired_fence;
 
 /*!
  * Wraps the real compositor swapchain providing a Vulkan based interface.
@@ -51,6 +52,9 @@ struct client_vk_swapchain
 	VkFence acquire_fence[XRT_MAX_SWAPCHAIN_IMAGES];
 	VkFence release_fence[XRT_MAX_SWAPCHAIN_IMAGES];
 	bool acquired[XRT_MAX_SWAPCHAIN_IMAGES];
+	struct client_vk_retired_fence *retired_fences;
+	uint32_t retired_fence_count;
+	VkFence destroy_fence;
 	struct client_vk_swapchain *retired_next;
 	bool retired;
 #endif
