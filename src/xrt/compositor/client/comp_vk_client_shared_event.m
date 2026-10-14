@@ -18,7 +18,7 @@
 #include "util/u_debug.h"
 #include "util/u_logging.h"
 
-DEBUG_GET_ONCE_BOOL_OPTION(vk_client_shared_event, "XRT_MACOS_VK_CLIENT_SHARED_EVENT", false)
+DEBUG_GET_ONCE_BOOL_OPTION(vk_client_shared_event, "XRT_MACOS_VK_CLIENT_SHARED_EVENT", true)
 
 bool
 client_vk_shared_event_enabled(void)

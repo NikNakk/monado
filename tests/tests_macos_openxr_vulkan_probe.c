@@ -7,6 +7,7 @@
 
 #define XR_USE_GRAPHICS_API_VULKAN 1
 
+#define VK_USE_PLATFORM_METAL_EXT 1
 #include <vulkan/vulkan.h>
 
 #include "openxr/openxr.h"
@@ -233,9 +234,7 @@ get_src_access_mask_for_layout(VkImageLayout layout)
 static uint64_t
 probe_clock_ns(void)
 {
-	struct timespec value;
-	clock_gettime(CLOCK_MONOTONIC, &value);
-	return (uint64_t)value.tv_sec * 1000000000ull + (uint64_t)value.tv_nsec;
+	return clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 }
 
 static uint32_t
@@ -1375,6 +1374,77 @@ run_probe(void)
 		}
 	}
 
+	uint32_t recycle_cycles = get_env_u32("MACOS_OPENXR_VULKAN_PROBE_REACQUIRE_CYCLES", 0);
+	if (recycle_cycles) {
+		// Hold the application's queue while recycling images before any
+		// frame commit. Old runtime barrier fences are deliberately pending.
+		PFN_vkSignalSemaphoreKHR signal_gate =
+		    (PFN_vkSignalSemaphoreKHR)vkGetDeviceProcAddr(vk_device, "vkSignalSemaphoreKHR");
+		if (!signal_gate) {
+			ret = fail_msg("No KHR timeline gate signal function");
+			goto out;
+		}
+		VkSemaphore gate = VK_NULL_HANDLE;
+		VkExportMetalObjectCreateInfoEXT export_gate = {
+		    .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECT_CREATE_INFO_EXT,
+		    .exportObjectType = VK_EXPORT_METAL_OBJECT_TYPE_METAL_SHARED_EVENT_BIT_EXT};
+		VkSemaphoreTypeCreateInfo type = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+		                                  .pNext = &export_gate,
+		                                  .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE};
+		VkSemaphoreCreateInfo create = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &type};
+		VkResult result = vkCreateSemaphore(vk_device, &create, NULL, &gate);
+		if (result != VK_SUCCESS) {
+			ret = fail_vk("reacquire gate create", result);
+			goto out;
+		}
+		uint64_t value = 1;
+		VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+		VkTimelineSemaphoreSubmitInfo timeline = {.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+		                                          .waitSemaphoreValueCount = 1,
+		                                          .pWaitSemaphoreValues = &value};
+		VkSubmitInfo blocked = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		                        .pNext = &timeline,
+		                        .waitSemaphoreCount = 1,
+		                        .pWaitSemaphores = &gate,
+		                        .pWaitDstStageMask = &stage};
+		result = vkQueueSubmit(vk_ctx.queue, 1, &blocked, VK_NULL_HANDLE);
+		if (result != VK_SUCCESS) {
+			vkDestroySemaphore(vk_device, gate, NULL);
+			ret = fail_vk("reacquire gate submit", result);
+			goto out;
+		}
+		XrResult recycle_result = XR_SUCCESS;
+		for (uint32_t i = 0; i < recycle_cycles && recycle_result == XR_SUCCESS; ++i) {
+			uint32_t index = 0;
+			XrSwapchainImageAcquireInfo acquire = {.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+			XrSwapchainImageWaitInfo wait = {.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO,
+			                                 .timeout = XR_INFINITE_DURATION};
+			XrSwapchainImageReleaseInfo release = {.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+			recycle_result = xrAcquireSwapchainImage(swapchains[0].handle, &acquire, &index);
+			if (recycle_result == XR_SUCCESS)
+				recycle_result = xrWaitSwapchainImage(swapchains[0].handle, &wait);
+			if (recycle_result == XR_SUCCESS)
+				recycle_result = xrReleaseSwapchainImage(swapchains[0].handle, &release);
+		}
+		VkSemaphoreSignalInfo signal = {
+		    .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO, .semaphore = gate, .value = 1};
+		result = signal_gate(vk_device, &signal);
+		// Fixture cleanup only; production barrier submission never waits here.
+		if (result == VK_SUCCESS)
+			result = vkQueueWaitIdle(vk_ctx.queue);
+		vkDestroySemaphore(vk_device, gate, NULL);
+		if (result != VK_SUCCESS) {
+			ret = fail_vk("reacquire gate drain", result);
+			goto out;
+		}
+		if (recycle_result != XR_SUCCESS) {
+			ret = fail_xr("reacquire before frame commit", recycle_result);
+			goto out;
+		}
+		fprintf(stderr, "PASS %u image reacquisitions with pending GPU barriers before frame commit\n",
+		        recycle_cycles);
+	}
+
 	XrView *located_views = calloc(view_count, sizeof(*located_views));
 	if (located_views == NULL) {
 		ret = fail_msg("calloc(located views) failed");
@@ -1616,6 +1686,23 @@ run_probe(void)
 	free(projection_views);
 	free(located_views);
 	ret = 0;
+
+	if (ret == 0 && getenv("MACOS_OPENXR_VULKAN_PROBE_DESTROY_ACQUIRED")) {
+		uint32_t index = 0;
+		XrSwapchainImageAcquireInfo acquire = {.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+		xr = xrAcquireSwapchainImage(swapchains[0].handle, &acquire, &index);
+		if (xr != XR_SUCCESS) {
+			ret = fail_xr("destroy-acquired acquire", xr);
+			goto out;
+		}
+		xr = xrDestroySwapchain(swapchains[0].handle);
+		if (xr != XR_SUCCESS) {
+			ret = fail_xr("destroy acquired swapchain", xr);
+			goto out;
+		}
+		swapchains[0].handle = XR_NULL_HANDLE;
+		fprintf(stderr, "PASS destroyed acquired swapchain without release\n");
+	}
 
 out:
 	if (swapchains != NULL) {

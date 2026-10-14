@@ -29,6 +29,7 @@ def main():
     parser.add_argument('--headset', action='store_true')
     parser.add_argument('--no-readbacks', action='store_true', help='Visual acceptance: disable compositor pixel readbacks')
     parser.add_argument('--per-view', action='store_true', help='Existing single-layer IOSurface path')
+    parser.add_argument('--runtime-defaults', action='store_true', help='Leave both Vulkan switches unset to verify runtime defaults')
     parser.add_argument('--cpu-handoff', action='store_true', help='Keep texture import, disable frame shared-event option')
     parser.add_argument('--suppress-signal', action='store_true', help='Test-only missing producer timeline signal')
     parser.add_argument('--unsupported-cube', action='store_true')
@@ -48,6 +49,8 @@ def main():
         parser.error('--skip-peer-wait requires --mode import --cross-process')
     if args.cross_process and args.mode != 'import':
         parser.error('--cross-process is for --mode import')
+    if args.runtime_defaults and args.cpu_handoff:
+        parser.error('--runtime-defaults cannot be combined with --cpu-handoff')
     if args.suppress_signal and args.cpu_handoff:
         parser.error('--suppress-signal requires the shared-event handoff')
     build, output = args.build.resolve(), args.output.resolve()
@@ -121,6 +124,9 @@ def main():
                    MACOS_OPENXR_VULKAN_PROBE_SOURCE_SAMPLES='1',
                    MACOS_OPENXR_VULKAN_PROBE_ASYNC_SUBMIT='1',
                    MACOS_OPENXR_VULKAN_PROBE_REPEAT=str(args.repeat))
+        if args.runtime_defaults:
+            env.pop('XRT_MACOS_VK_CLIENT_METAL_TEXTURES', None)
+            env.pop('XRT_MACOS_VK_CLIENT_SHARED_EVENT', None)
         if args.no_readbacks:
             env.pop('MACOS_OPENXR_VULKAN_PROBE_SOURCE_SAMPLES', None)
         for key, enabled in [('MACOS_OPENXR_VULKAN_PROBE_SUPPRESS_RUNTIME_SIGNAL', args.suppress_signal),

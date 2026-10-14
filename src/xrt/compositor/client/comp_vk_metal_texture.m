@@ -8,7 +8,7 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 
-DEBUG_GET_ONCE_BOOL_OPTION(vk_metal_textures, "XRT_MACOS_VK_CLIENT_METAL_TEXTURES", false)
+DEBUG_GET_ONCE_BOOL_OPTION(vk_metal_textures, "XRT_MACOS_VK_CLIENT_METAL_TEXTURES", true)
 static atomic_uint context_count;
 enum
 {
