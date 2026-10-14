@@ -1,0 +1,300 @@
+The Meson build system
+Version: 1.12.0
+Source dir: /private/tmp/kosmickrisp-study/mesa-m3
+Build dir: /private/tmp/kosmickrisp-study/build-m3
+Build type: native build
+Project name: mesa
+Project version: 26.3.0-devel
+C compiler for the host machine: cc (clang 21.0.0 "Apple clang version 21.0.0 (clang-2100.3.34.2)")
+C linker for the host machine: cc ld64 27037.1
+C++ compiler for the host machine: c++ (clang 21.0.0 "Apple clang version 21.0.0 (clang-2100.3.34.2)")
+C++ linker for the host machine: c++ ld64 27037.1
+Host machine cpu family: aarch64
+Host machine cpu: aarch64
+Objective-C compiler for the host machine: clang (clang 23.1.3)
+Objective-C linker for the host machine: clang ld64 27037.1
+Checking for size of "void*" : 8 
+Checking if "-mtls-dialect=gnu2" runs: DID NOT COMPILE
+Checking if "-mtls-dialect=desc" runs: DID NOT COMPILE
+Dependency libglvnd for host machine skipped: feature glvnd disabled
+Program glslangValidator found: YES (/opt/homebrew/bin/glslangValidator)
+Dependency libva for host machine skipped: feature gallium-va disabled
+Program python3.16 found: NO
+Program python3.15 found: NO
+Program python3.14 found: YES 3.14.7 3.14.7 (/private/tmp/kosmickrisp-study/venv314/bin/python3.14)
+Fetching value of define "ETIME" : 101 
+Compiler for C supports arguments -gsplit-dwarf: YES 
+Compiler for C supports link arguments -Wl,--gdb-index: NO 
+Checking for function "bswap32" : YES 
+Checking for function "bswap64" : YES 
+Checking for function "clz" : YES 
+Checking for function "clzll" : YES 
+Checking for function "ctz" : YES 
+Checking for function "expect" : YES 
+Checking for function "ffs" : YES 
+Checking for function "ffsll" : YES 
+Checking for function "popcount" : YES 
+Checking for function "popcountll" : YES 
+Checking for function "unreachable" : YES 
+Checking for function "types_compatible_p" : YES 
+Checking for function "__builtin_add_overflow" : YES 
+Checking for function "__builtin_add_overflow_p" : NO 
+Checking for function "__builtin_sub_overflow_p" : NO 
+Checking for function "__builtin_arm_get_fpscr" : NO 
+Checking for function "__builtin_arm_set_fpscr" : NO 
+Checking for function "__builtin_aarch64_get_fpcr" : NO 
+Checking for function "__builtin_aarch64_set_fpcr" : NO 
+Compiler for C supports function attribute const: YES 
+Compiler for C supports function attribute flatten: YES 
+Compiler for C supports function attribute malloc: YES 
+Compiler for C supports function attribute pure: YES 
+Compiler for C supports function attribute unused: YES 
+Compiler for C supports function attribute warn_unused_result: YES 
+Compiler for C supports function attribute weak: YES 
+Compiler for C supports function attribute format: YES 
+Compiler for C supports function attribute packed: YES 
+Compiler for C supports function attribute returns_nonnull: YES 
+Compiler for C supports function attribute alias: NO 
+Compiler for C supports function attribute noreturn: YES 
+Compiler for C supports function attribute optimize: NO 
+Compiler for C supports function attribute cold: YES 
+Compiler for C supports function attribute visibility:hidden: YES 
+Checking if "__uint128_t" compiles: YES 
+Checking for function "reallocarray" : NO 
+Checking for function "fmemopen" : YES 
+Checking for function "mallinfo2" : NO 
+Checking if "gc-sections" links: NO 
+Compiler for C supports arguments -Werror=implicit-function-declaration: YES 
+Compiler for C supports arguments -Werror=missing-prototypes: YES 
+Compiler for C supports arguments -Werror=return-type: YES 
+Compiler for C supports arguments -Werror=empty-body: YES 
+Compiler for C supports arguments -Werror=incompatible-pointer-types: YES 
+Compiler for C supports arguments -Werror=int-conversion: YES 
+Compiler for C supports arguments -Wimplicit-fallthrough: YES 
+Compiler for C supports arguments -Wmisleading-indentation: YES 
+Compiler for C supports arguments -Wno-error=maybe-uninitialized: NO 
+Compiler for C supports arguments -Wno-missing-field-initializers: YES 
+Compiler for C supports arguments -Wno-format-truncation: YES 
+Compiler for C supports arguments -Wno-nonnull-compare: NO 
+Compiler for C supports arguments -fno-math-errno: YES 
+Compiler for C supports arguments -fno-trapping-math: YES 
+Compiler for C supports arguments -Qunused-arguments: YES 
+Compiler for C supports arguments -fno-common: YES 
+Compiler for C supports arguments -Wno-unknown-pragmas: YES 
+Compiler for C supports arguments -Wno-microsoft-enum-value: YES 
+Compiler for C supports arguments -Wno-unused-function: YES 
+Compiler for C supports arguments -Werror=format: YES 
+Compiler for C supports arguments -Wformat-security: YES 
+Compiler for C supports arguments -Werror=thread-safety: YES 
+Compiler for C++ supports arguments -Werror=return-type: YES 
+Compiler for C++ supports arguments -Werror=empty-body: YES 
+Compiler for C++ supports arguments -Wmisleading-indentation: YES 
+Compiler for C++ supports arguments -Wno-error=maybe-uninitialized: NO 
+Compiler for C++ supports arguments -Wno-non-virtual-dtor: YES 
+Compiler for C++ supports arguments -Wno-missing-field-initializers: YES 
+Compiler for C++ supports arguments -Wno-format-truncation: YES 
+Compiler for C++ supports arguments -fno-math-errno: YES 
+Compiler for C++ supports arguments -fno-trapping-math: YES 
+Compiler for C++ supports arguments -Qunused-arguments: YES 
+Compiler for C++ supports arguments -flifetime-dse=1: NO 
+Compiler for C++ supports arguments -Wno-unknown-pragmas: YES 
+Compiler for C++ supports arguments -Wno-microsoft-enum-value: YES 
+Compiler for C++ supports arguments -Werror=format: YES 
+Compiler for C++ supports arguments -Wformat-security: YES 
+Compiler for C supports arguments -Wno-override-init: YES 
+Compiler for C supports arguments -Wno-initializer-overrides: YES 
+Compiler for C supports arguments -Werror=pointer-arith: YES 
+Compiler for C supports arguments -Werror=vla: YES 
+Compiler for C supports arguments -Werror=gnu-empty-initializer: YES 
+Compiler for C supports arguments -Wgnu-pointer-arith: YES 
+Compiler for C++ supports arguments -Werror=pointer-arith: YES 
+Compiler for C++ supports arguments -Werror=vla: YES 
+Compiler for C++ supports arguments -Werror=gnu-empty-initializer: YES 
+Compiler for C++ supports arguments -Wgnu-pointer-arith: YES 
+Compiler for C supports arguments -Werror=date-time: YES 
+Compiler for C supports arguments -Werror=gnu-alignof-expression: YES 
+Compiler for C supports arguments -Werror=ignored-qualifiers: YES 
+Compiler for C supports arguments -Werror=implicit-fallthrough: YES 
+Compiler for C supports arguments -Werror=int-conversion: YES (cached)
+Compiler for C supports arguments -Werror=missing-prototypes: YES (cached)
+Compiler for C supports arguments -Werror=pragma-pack: YES 
+Compiler for C supports arguments -Werror=pragma-pack-suspicious-include: YES 
+Compiler for C supports arguments -Werror=sizeof-array-div: YES 
+Compiler for C supports arguments -Werror=string-plus-int: YES 
+Compiler for C supports arguments -Werror=unreachable-code-loop-increment: YES 
+Compiler for C++ supports arguments -D_LIBCPP_ENABLE_THREAD_SAFETY_ANNOTATIONS: YES 
+Compiler for C++ supports arguments -Werror=date-time: YES 
+Compiler for C++ supports arguments -Werror=gnu-alignof-expression: YES 
+Compiler for C++ supports arguments -Werror=ignored-qualifiers: YES 
+Compiler for C++ supports arguments -Werror=implicit-fallthrough: YES 
+Compiler for C++ supports arguments -Werror=pragma-pack: YES 
+Compiler for C++ supports arguments -Werror=pragma-pack-suspicious-include: YES 
+Compiler for C++ supports arguments -Werror=sizeof-array-div: YES 
+Compiler for C++ supports arguments -Werror=string-plus-int: YES 
+Compiler for C++ supports arguments -Werror=unreachable-code-loop-increment: YES 
+Compiler for C++ supports arguments -Werror=missing-prototypes: YES 
+Checking for function "__builtin_ia32_clflushopt" : NO 
+Checking if "GCC atomic builtins" compiles: YES 
+Checking if "GCC atomic builtins required -latomic" links: YES 
+Checking if "GCC 64bit atomics" with dependency  links: YES 
+Library ws2_32 found: NO
+Header "sys/sysmacros.h" has symbol "major" : NO 
+Header "sys/mkdev.h" has symbol "major" : NO 
+Check usable header "sched.h" : YES 
+Checking for function "sched_getaffinity" : NO 
+Check usable header "sys/sysctl.h" : YES 
+Check usable header "xlocale.h" : YES 
+Check usable header "linux/futex.h" : NO 
+Check usable header "endian.h" : NO 
+Check usable header "dlfcn.h" : YES 
+Check usable header "sys/shm.h" : YES 
+Check usable header "cet.h" : YES 
+Check usable header "pthread_np.h" : NO 
+Check usable header "poll.h" : YES 
+Check usable header "sys/inotify.h" : NO 
+Check usable header "linux/udmabuf.h" : NO 
+Checking for function "strtof" : YES 
+Checking for function "mkostemp" : YES 
+Checking for function "memfd_create" : NO 
+Checking for function "random_r" : NO 
+Checking for function "flock" : YES 
+Checking for function "strtok_r" : YES 
+Checking for function "getrandom" : NO 
+Checking for function "qsort_s" : NO 
+Checking for function "posix_fallocate" : NO 
+Checking for function "secure_getenv" : NO 
+Checking for function "sysconf" : YES 
+Header "unistd.h" has symbol "_SC_PHYS_PAGES" : YES 
+Checking if "GNU qsort_r" links: NO 
+Checking if "BSD qsort_r" links: YES 
+Header "time.h" has symbol "struct timespec" : YES 
+Checking for function "thrd_create" : NO 
+Header "errno.h" has symbol "program_invocation_name" : NO 
+Header "math.h" has symbol "issignaling" : NO 
+Checking for function "posix_memalign" : YES 
+Checking whether type "struct dirent" has member "d_type" : YES 
+Checking if "strtod has locale support" links: YES 
+Checking if "Bsymbolic" links: NO 
+Checking if "version-script" links: NO 
+Checking if "dynamic-list" links: NO 
+Compiler for C supports link arguments -Wl,--build-id=sha1: NO 
+Checking for function "dlopen" : YES 
+Checking for function "dladdr" with dependency : YES 
+Checking for function "dl_iterate_phdr" : NO 
+Checking for function "clock_gettime" : YES 
+Found pkg-config: YES (/opt/homebrew/bin/pkg-config) 3.0.7
+WARNING: Static library 'z' not found for dependency 'zlib', may not be statically linked
+Run-time dependency zlib found: YES 1.2.12
+Found CMake: /opt/homebrew/bin/cmake (4.4.3)
+Run-time dependency libdisplay-info found: NO  (tried pkg-config, framework and cmake)
+Dependency libzstd for host machine skipped: feature zstd disabled
+Run-time dependency threads found: YES
+Checking for function "pthread_setaffinity_np" with dependency threads: NO 
+Library expat found: NO
+Library m found: YES
+Run-time dependency libudev found: NO  (tried pkg-config, framework and cmake)
+llvm-config found: YES (/opt/homebrew/opt/llvm/bin/llvm-config) 23.1.3
+Run-time dependency LLVM (modules: all-targets, bitwriter, core, coverage, engine, executionengine, instcombine, irreader, libdriver, linker, lto, mcdisassembler, mcjit, native, option, scalaropts, target, transformutils, abi, all-targets, coroutines, frontenddriver, frontendhlsl, lto, windowsdriver) found: YES 23.1.3
+WARNING: Static library 'LLVMSPIRVLib' not found for dependency 'LLVMSPIRVLib', may not be statically linked
+Run-time dependency llvmspirvlib found: YES 23.1.0.0
+WARNING: Static library 'SPIRV-Tools-opt' not found for dependency 'SPIRV-Tools', may not be statically linked
+WARNING: Static library 'SPIRV-Tools' not found for dependency 'SPIRV-Tools', may not be statically linked
+WARNING: Static library 'SPIRV-Tools-link' not found for dependency 'SPIRV-Tools', may not be statically linked
+Run-time dependency spirv-tools found: YES 2026.3.1
+Library clang-cpp found: YES
+Run-time dependency lua54 found: NO  (tried pkg-config, framework and cmake)
+Run-time dependency lua5.4 found: NO  (tried pkg-config, framework and cmake)
+Run-time dependency lua-5.4 found: NO  (tried pkg-config, framework and cmake)
+Run-time dependency lua53 found: NO  (tried pkg-config, framework and cmake)
+Run-time dependency lua5.3 found: NO  (tried pkg-config, framework and cmake)
+Run-time dependency lua-5.3 found: NO  (tried pkg-config, framework and cmake)
+Run-time dependency lua found: NO  (tried pkg-config and framework)
+Run-time dependency libelf found: NO  (tried pkg-config, framework and cmake)
+Library elf found: NO
+Run-time dependency valgrind found: NO  (tried pkg-config)
+Program bison found: YES (/usr/bin/bison)
+Program bison found: NO found 2.3 but need: '> 2.3' (/usr/bin/bison)
+Program flex found: YES (/usr/bin/flex)
+Program ln found: YES (/bin/ln)
+Library System found: NO
+Library sensors found: NO
+Program nm found: YES (/usr/bin/nm)
+Program symbols-check.py found: YES (/opt/homebrew/opt/python@3.14/bin/python3.14 /private/tmp/kosmickrisp-study/mesa-m3/bin/symbols-check.py)
+Program install_megadrivers.py found: YES (/opt/homebrew/opt/python@3.14/bin/python3.14 /private/tmp/kosmickrisp-study/mesa-m3/bin/install_megadrivers.py)
+Compiler for C supports arguments -Wno-error: YES 
+Checking whether type "spvtools::LinkerOptions" has member "SetAllowPtrTypeMismatch(true)" with dependency SPIRV-Tools: YES 
+Compiler for C supports link arguments -fPIC: YES 
+Program decode.py found: YES (/private/tmp/kosmickrisp-study/mesa-m3/src/compiler/isaspec/decode.py)
+Program encode.py found: YES (/private/tmp/kosmickrisp-study/mesa-m3/src/compiler/isaspec/encode.py)
+Run-time dependency appleframeworks found: YES (QuartzCore, Metal)
+Run-time dependency appleframeworks found: YES (Foundation)
+Program sphinx-build skipped: feature html-docs disabled
+Build targets in project: 79
+
+mesa 26.3.0-devel
+
+  Directories
+    prefix           : /opt/homebrew
+    libdir           : lib
+    includedir       : include
+
+  Common C and C++ arguments
+    c_cpp_args       :
+
+  OpenGL
+    OpenGL           : NO
+    ES1              : NO
+    ES2              : NO
+    GLVND            : NO
+
+  DRI
+    Platform         : apple
+    Driver dir       : /opt/homebrew/lib/dri
+
+  GLX
+    Enabled          : NO
+    Provider         : None
+
+  EGL
+    Enabled          : NO
+
+  GBM
+    Enabled          : NO
+
+  Vulkan
+    Drivers          : kosmickrisp
+    Platforms        : macos
+    ICD dir          : share/vulkan/icd.d
+    Intel Ray tracing: NO
+
+  Video
+    Codecs           : all_free av1dec av1enc vp9dec mpeg12dec jpegdec
+    APIs             : vulkan
+    Encoding         : YES
+
+  LLVM
+    Required         : enabled
+    Version          : 23.1.3
+
+  Gallium
+    Enabled          : NO
+
+  Perfetto
+    Enabled          : NO
+
+  Teflon (TensorFlow Lite delegate)
+    Enabled          : NO
+
+  Torx (PyTorch backend)
+    Enabled          : NO
+
+  User defined options
+    buildtype        : debugoptimized
+    gallium-drivers  : 
+    opengl           : false
+    platforms        : macos
+    prefer_static    : true
+    vulkan-drivers   : kosmickrisp
+    zstd             : disabled
+
+Found ninja-1.13.2 at /opt/homebrew/bin/ninja

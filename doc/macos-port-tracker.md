@@ -7,6 +7,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+## Experimental KosmicKrisp Vulkan path (2026-10-14)
+
+`codex/kosmickrisp-openxr-m3` adds an opt-in Vulkan frontend over existing Metal swapchains/readiness. Offscreen hello_xr, BGRA and failure/concurrency checks pass; hardware and hosted acceptance are pending. See [M3 assessment](../docs/kosmickrisp-openxr-assessment.md#milestone-3--authorized-experimental-integration-2026-10-14).
+
+
 The [2026-10-13 GPU-efficiency study](macos-compositor-gpu-efficiency.md) retains
 opt-in quad bounds, a guarded projection-plus-quads specialization, GPU pass
 profiling and repeatable benchmarks. Rejected presentation, buffering, fusion

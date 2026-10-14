@@ -6,6 +6,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 environment toggle audit
 
+## Experimental KosmicKrisp Vulkan path (2026-10-14)
+
+With build option `XRT_FEATURE_MACOS_KOSMICKRISP=ON` (default OFF), client-only `XRT_MACOS_KOSMICKRISP=1` selects the experimental native Vulkan enable2 adapter. `XRT_MACOS_KOSMICKRISP_LIBRARY` must name the matching patched driver library. Both KK and MoltenVK ICDs must be visible in the client. Leave the service environment unchanged. Only simple RGBA8/BGRA8 UNORM swapchains are supported. See [build and isolated runner](../experiments/kosmickrisp/README-m3.md). These variables do not affect Linux or Metal clients.
+
+
 Audit of every `DEBUG_GET_ONCE_*` option and raw `getenv()` added on
 `macos-wine-openvr-legacy-unity` since its merge-base with `combined`
 (`9c1dbc39`, which is also the tip of `combined`). Snapshot: `eb607ca`,

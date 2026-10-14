@@ -1,0 +1,9 @@
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+vk-target frame=5 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+vk-target frame=6 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+vk-target frame=7 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+vk-target frame=8 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+vk-target frame=9 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,188,91,255) rgbaR=(0,249,124,255)
+vk-target frame=124 layer=0 rgbaL=(255,249,90,255) rgbaC=(86,246,246,255) rgbaR=(90,255,255,255)
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x706d71000 bytes=11108352 retained_bytes=22216704 objects=2 id=1
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x706d70800 bytes=11108352 retained_bytes=22216704 objects=2 id=2

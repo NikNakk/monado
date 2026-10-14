@@ -1,0 +1,8 @@
+[0/2] Re-checking globbed directories...
+[1/8] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_vk_metal.m.o
+[2/8] Linking CXX static library src/xrt/compositor/client/libcomp_client.a
+[3/8] Linking CXX executable tests/tests_oxr_layer_color_scale_bias
+[4/8] Linking CXX executable tests/tests_input_transform
+[5/8] Linking CXX executable tests/tests_foveation_openxr
+[6/8] Linking CXX executable tests/tests_generic_controller
+[7/8] Linking CXX shared library src/xrt/targets/openxr/libopenxr_monado.dylib; Generating OpenXR runtime manifest named /private/tmp/kosmickrisp-study/monado-build-m3/openxr_monado-dev.json for build tree usage

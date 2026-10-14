@@ -1,0 +1,782 @@
+[0/2] Re-checking globbed directories...
+[1/738] Building C object src/external/CMakeFiles/xrt-external-metrics.dir/metrics/monado_metrics.pb.c.o
+[2/738] Generating X_macro lists in /private/tmp/kosmickrisp-study/monado-build-m3-off/src/xrt/include/xrt/xrt_macro_lists.h.inc
+[3/738] Building C object src/external/CMakeFiles/xrt-external-nanopb.dir/nanopb/pb_common.c.o
+[4/738] Building CXX object src/xrt/auxiliary/os/CMakeFiles/aux_os.dir/os_time.cpp.o
+[5/738] Building C object src/xrt/auxiliary/os/CMakeFiles/aux_os.dir/os_hid_hidraw.c.o
+[6/738] Building C object src/external/CMakeFiles/xrt-external-nanopb.dir/nanopb/pb_encode.c.o
+[7/738] Building C object src/xrt/auxiliary/os/CMakeFiles/aux_os.dir/os_serial_stubs.c.o
+[8/738] Building C object src/external/CMakeFiles/xrt-external-nanopb.dir/nanopb/pb_decode.c.o
+[9/738] Generating blit.comp.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/blit.comp
+[10/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_bitwise.c.o
+[11/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_autoexpgain.c.o
+[12/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_body_tracker.c.o
+[13/738] Linking C static library src/external/libxrt-external-nanopb.a
+[14/738] Building C object src/xrt/auxiliary/os/CMakeFiles/aux_os.dir/os_hid_iokit.c.o
+[15/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_body_tracker_ni.c.o
+[16/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_builder_helpers.c.o
+[17/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_builder_search.c.o
+[18/738] Linking C static library src/external/libxrt-external-metrics.a
+[19/738] Linking CXX static library src/xrt/auxiliary/os/libaux_os.a
+[20/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_cobs.c.o
+[21/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_debug.c.o
+[22/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_device_id.c.o
+[23/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_device.c.o
+[24/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_device_ni.c.o
+[25/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_distortion.c.o
+[26/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_file.c.o
+[27/738] Generating render_shader_specialization.h.inc and render_shader_specialization.hpp.inc
+[28/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_distortion_mesh_rift.c.o
+[29/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_distortion_mesh.c.o
+[30/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_format.c.o
+[31/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_frame.c.o
+[32/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_floor_calibration.c.o
+[33/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_hand_tracking.c.o
+[34/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_hand_simulation.c.o
+[35/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_handles.c.o
+[36/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_future.cpp.o
+[37/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_imu_sink_split.c.o
+[38/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_imu_sink_force_monotonic.c.o
+[39/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_deque.cpp.o
+[40/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_file.cpp.o
+[41/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_limited_unique_id.cpp.o
+[42/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_hashmap.cpp.o
+[43/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_id_ringbuffer.cpp.o
+[44/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_json.c.o
+[45/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_logging.c.o
+[46/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_misc.c.o
+[47/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_metrics.c.o
+[48/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_hashset.cpp.o
+[49/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_passthrough_calibration.c.o
+[50/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_pacing_compositor_fake.c.o
+[51/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_pacing_compositor.c.o
+[52/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_pacing_app.c.o
+[53/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_prober.c.o
+[54/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_resampler.c.o
+[55/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_pretty_print.c.o
+[56/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_system_devices_ni.c.o
+[57/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_system_devices.c.o
+[58/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_str_to_enum.c.o
+[59/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_live_stats.cpp.o
+[60/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_system_helpers.c.o
+[61/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_thread_priority.c.o
+[62/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_trace_marker.c.o
+[63/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_timing_trace.c.o
+[64/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_time.cpp.o
+[65/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_tracked_imu_3dof.c.o
+[66/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_win32_com_guard.cpp.o
+[67/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_visibility_mask.c.o
+[68/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_config_json.c.o
+[69/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_git_tag.c.o
+[70/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_worker.c.o
+[71/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_frame_share.c.o
+[72/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_macos_hosted_client.c.o
+[73/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_gpu_trace_scope.c.o
+[74/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_macos_display_host.c.o
+[75/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_gpu_trace_present.c.o
+[76/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_gpu_trace_macos.c.o
+[77/738] Building C object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_clock_tracking.c.o
+[78/738] Building C object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_filter_fifo.c.o
+[79/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_vector.cpp.o
+[80/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_worker.cpp.o
+[81/738] Building C object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_filter_one_euro.c.o
+[82/738] Building C object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_imu_3dof.c.o
+[83/738] Building C object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_imu_pre.c.o
+[84/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_extension_list.cpp.o
+[85/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util.dir/u_var.cpp.o
+[86/738] Building CXX object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_matrix_projection.cpp.o
+[87/738] Building CXX object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_lowpass_float.cpp.o
+[88/738] Building CXX object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_lowpass_integer.cpp.o
+[89/738] Building CXX object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_hash.cpp.o
+[90/738] Building C object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_optics.c.o
+[91/738] Building C object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_permutation.c.o
+[92/738] Building C object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_predict.c.o
+[93/738] Linking CXX static library src/xrt/auxiliary/util/libaux_util.a
+[94/738] Generating blit_ms.comp.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/blit_ms.comp
+[95/738] Building CXX object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_space.cpp.o
+[96/738] Generating clear.comp.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/clear.comp
+[97/738] Generating layer.comp.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer.comp
+[98/738] Generating distortion.comp.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/distortion.comp
+[99/738] Generating layer_cylinder.frag.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer_cylinder.frag
+[100/738] Generating layer_cylinder.vert.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer_cylinder.vert
+[101/738] Generating layer_equirect2.frag.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer_equirect2.frag
+[102/738] Generating layer_equirect2.vert.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer_equirect2.vert
+[103/738] Building CXX object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_relation_history.cpp.o
+[104/738] Generating layer_projection.frag.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer_projection.frag
+[105/738] Generating layer_projection.vert.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer_projection.vert
+[106/738] Generating layer_quad.frag.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer_quad.frag
+[107/738] Generating layer_quad.vert.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/layer_quad.vert
+[108/738] Generating mesh.frag.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/mesh.frag
+[109/738] Generating mesh.vert.h
+/private/tmp/monado-kosmickrisp-m3/src/xrt/auxiliary/render/shaders/mesh.vert
+[110/738] Merging JSON files into /private/tmp/kosmickrisp-study/monado-build-m3-off/src/xrt/ipc/proto.json
+[111/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_blob_visualizer.c.o
+[112/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_combiner.c.o
+[113/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_force_genlock.c.o
+[114/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_deinterleaver.c.o
+[115/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_simple_queue.c.o
+[116/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_queue.c.o
+[117/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_quirk.c.o
+[118/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_stereo_sbs_split.c.o
+[119/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_split.c.o
+[120/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_sink.dir/u_sink_converter.c.o
+[121/738] Building CXX object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_quatexpmap.cpp.o
+[122/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/imgui/imgui_tables.cpp.o
+[123/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/imgui/backends/imgui_impl_opengl3.cpp.o
+[124/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/imgui/imgui_demo.cpp.o
+[125/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/cimgui/cimgui.cpp.o
+[126/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/imgui/imgui_draw.cpp.o
+[127/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/implot/implot_demo.cpp.o
+[128/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/imgui/imgui_widgets.cpp.o
+[129/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/imgui_monado/imgui_monado.cpp.o
+[130/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/implot/implot.cpp.o
+[131/738] Building C object src/xrt/auxiliary/ogl/CMakeFiles/aux_ogl.dir/ogl_helpers.c.o
+[132/738] Building C object src/xrt/auxiliary/ogl/CMakeFiles/aux_ogl.dir/ogl_api.c.o
+[133/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_camera_models.cpp.o
+[134/738] Building C object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_data_utils.c.o
+[135/738] Building C object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_dead_reckoning.c.o
+[136/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_openvr_tracker.cpp.o
+[137/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/cimplot/cimplot.cpp.o
+[138/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/imgui/imgui.cpp.o
+[139/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_convert.cpp.o
+[140/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_calibration.cpp.o
+[141/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_debug_hsv_filter.cpp.o
+[142/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_debug_hsv_picker.cpp.o
+[143/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_debug_hsv_viewer.cpp.o
+[144/738] Building C object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_hsv_filter.c.o
+[145/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_frame_cv_mat_wrapper.cpp.o
+[146/738] Building CXX object src/xrt/auxiliary/math/CMakeFiles/aux_math.dir/m_base.cpp.o
+[147/738] Linking CXX static library src/xrt/auxiliary/math/libaux_math.a
+[148/738] Generating vk_helpers_h_funcs.h.inc
+[149/738] Generating vk_helpers_h_ext.h.inc
+[150/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_file.cpp.o
+[151/738] Generating vk_bundle_init_instance_ext.c.inc
+[152/738] Generating vk_bundle_init_device_ext.c.inc
+[153/738] Generating vk_function_loaders_instance.c.inc
+[154/738] Generating vk_function_loaders_device.c.inc
+[155/738] Generating ipc_protocol_generated.h from protocol JSON description
+[156/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_bundle_init.c.o
+[157/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_cmd.c.o
+[158/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_tracker_psmv.cpp.o
+[159/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_cmd_pool.c.o
+[160/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_compositor_flags.c.o
+[161/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_debug.c.o
+[162/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_enumerate.c.o
+[163/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_extensions_helpers.c.o
+[164/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_format.c.o
+[165/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_function_loaders.c.o
+[166/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_helpers.c.o
+[167/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_image_readback_to_xf_pool.c.o
+[168/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_queue_builder.c.o
+[169/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_image_allocator.c.o
+[170/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_queue_family.c.o
+[171/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_print.c.o
+[172/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_state_creators.c.o
+[173/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_submit_helpers.c.o
+[174/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_surface_info.c.o
+[175/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_sync_objects.c.o
+[176/738] Building C object src/xrt/auxiliary/vk/CMakeFiles/aux_vk.dir/vk_time.c.o
+[177/738] Linking CXX static library src/xrt/auxiliary/vk/libaux_vk.a
+[178/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_imu.cpp.o
+[179/738] Building C object src/xrt/auxiliary/render/shaders/CMakeFiles/aux_shaders.dir/render_shaders.c.o
+[180/738] Linking CXX static library src/xrt/auxiliary/render/shaders/libaux_shaders.a
+[181/738] Building C object src/xrt/auxiliary/render/CMakeFiles/aux_render.dir/render_buffer.c.o
+[182/738] Building C object src/xrt/auxiliary/render/CMakeFiles/aux_render.dir/render_compute.c.o
+[183/738] Building C object src/xrt/auxiliary/render/CMakeFiles/aux_render.dir/render_distortion.c.o
+[184/738] Building C object src/xrt/auxiliary/render/CMakeFiles/aux_render.dir/render_gfx.c.o
+[185/738] Building C object src/xrt/auxiliary/render/CMakeFiles/aux_render.dir/render_sub_alloc.c.o
+[186/738] Building C object src/xrt/auxiliary/render/CMakeFiles/aux_render.dir/render_util.c.o
+[187/738] Building C object src/xrt/auxiliary/render/CMakeFiles/aux_render.dir/render_resources.c.o
+[188/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_base.c.o
+[189/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_high_level_render.c.o
+[190/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_high_level_scratch.c.o
+[191/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_layer_accum.c.o
+[192/738] Building CXX object src/xrt/auxiliary/render/cache/CMakeFiles/aux_render_cache.dir/render_compute_pipeline_cache.cpp.o
+[193/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_render_cs.c.o
+[194/738] Linking CXX static library src/xrt/auxiliary/render/cache/libaux_render_cache.a
+[195/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_render_gfx.c.o
+[196/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_scratch.c.o
+[197/738] Linking CXX static library src/xrt/auxiliary/render/libaux_render.a
+[198/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_semaphore.c.o
+[199/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_sync.c.o
+[200/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_swapchain.c.o
+[201/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_vulkan.c.o
+[202/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_swapchain_gpu_reuse.c.o
+[203/738] Building OBJC object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_metal_gpu_capture.m.o
+[204/738] Building OBJC object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_metal_gpu_priority.m.o
+[205/738] Building OBJC object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_metal_semaphore_probe.m.o
+[206/738] Building C object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_metal_swapchain_import.c.o
+[207/738] Building C object src/xrt/compositor/multi/CMakeFiles/comp_multi.dir/comp_multi_compositor.c.o
+[208/738] Building C object src/xrt/compositor/multi/CMakeFiles/comp_multi.dir/comp_multi_system.c.o
+[209/738] Building OBJC object src/xrt/compositor/util/CMakeFiles/comp_util.dir/comp_metal_texture_device.m.o
+[210/738] Linking CXX static library src/xrt/auxiliary/util/libaux_util_sink.a
+[211/738] Linking CXX static library src/xrt/compositor/util/libcomp_util.a
+[212/738] Building C object src/xrt/base/CMakeFiles/base.dir/b_app_policy.c.o
+[213/738] Building C object src/xrt/base/CMakeFiles/base.dir/b_session.c.o
+[214/738] Building CXX object src/xrt/base/CMakeFiles/base.dir/b_body_tracker.cpp.o
+[215/738] Building C object src/xrt/base/CMakeFiles/base.dir/b_tracked_device.c.o
+[216/738] Building C object src/xrt/base/CMakeFiles/base.dir/b_space_overseer.c.o
+[217/738] Building C object src/xrt/base/CMakeFiles/base.dir/b_system_devices.c.o
+[218/738] Building CXX object src/xrt/base/CMakeFiles/base.dir/b_hand_tracker.cpp.o
+[219/738] Building C object src/xrt/base/CMakeFiles/base.dir/b_system.c.o
+[220/738] Building C object src/xrt/base/CMakeFiles/base.dir/b_timing_source.c.o
+[221/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_settings.c.o
+[222/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_compositor.c.o
+[223/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_renderer.c.o
+/private/tmp/monado-kosmickrisp-m3/src/xrt/compositor/main/comp_renderer.c:1864:31: warning: comparison of integers of different signs: 'int64_t' (aka 'long long') and 'const uint64_t' (aka 'const unsigned long long') [-Wsign-compare]
+ 1864 |         while (os_monotonic_get_ns() < target_ns) {
+      |                ~~~~~~~~~~~~~~~~~~~~~ ^ ~~~~~~~~~
+1 warning generated.
+[224/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_window_debug_image.c.o
+[225/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_target_swapchain.c.o
+[226/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_mirror_to_debug_gui.c.o
+[227/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_euroc_recorder.cpp.o
+[228/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_window_peek.c.o
+[229/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_window_vk_display.c.o
+[230/738] Linking CXX static library src/xrt/compositor/multi/libcomp_multi.a
+[231/738] Building C object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_window_direct.c.o
+[232/738] Building C object src/xrt/ipc/CMakeFiles/ipc_shared.dir/shared/ipc_utils.c.o
+[233/738] Building C object src/xrt/ipc/CMakeFiles/ipc_shared.dir/shared/ipc_shmem.c.o
+[234/738] Building C object src/xrt/ipc/CMakeFiles/ipc_shared.dir/shared/ipc_socket_security.c.o
+[235/738] Building C object src/xrt/ipc/CMakeFiles/ipc_shared.dir/shared/ipc_message_channel_unix.c.o
+[236/738] Building OBJC object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_macos_frontend.m.o
+[237/738] Building OBJC object src/xrt/ipc/CMakeFiles/ipc_shared.dir/shared/ipc_metal_xpc.m.o
+[238/738] Building OBJC object src/xrt/compositor/main/CMakeFiles/comp_main.dir/comp_window_macos.m.o
+[239/738] Building OBJC object src/xrt/ipc/CMakeFiles/ipc_shared.dir/shared/ipc_metal_xpc_service.m.o
+[240/738] Linking CXX static library src/xrt/auxiliary/ogl/libaux_ogl.a
+[241/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui-sdl2.dir/imgui/backends/imgui_impl_sdl2.cpp.o
+[242/738] Building C object src/xrt/auxiliary/foveation/CMakeFiles/aux_foveation.dir/u_foveation.c.o
+[243/738] Linking CXX static library src/xrt/base/libbase.a
+[244/738] Building C object src/xrt/drivers/CMakeFiles/drv_qwerty.dir/qwerty/qwerty_prober.c.o
+[245/738] Building C object src/xrt/drivers/CMakeFiles/drv_qwerty.dir/qwerty/qwerty_device.c.o
+[246/738] Linking CXX static library src/xrt/compositor/main/libcomp_main.a
+[247/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui_base.dir/gui_ogl.c.o
+[248/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui_base.dir/gui_ogl_sink.c.o
+[249/738] Building C object src/xrt/drivers/CMakeFiles/drv_qwerty.dir/qwerty/qwerty_sdl.c.o
+[250/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui_base.dir/gui_scene_debug.c.o
+[251/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui_base.dir/gui_widget_native_images.c.o
+[252/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui_base.dir/gui_stb.c.o
+[253/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui_base.dir/gui_window_record.c.o
+[254/738] Linking CXX static library src/xrt/ipc/libipc_shared.a
+[255/738] Building CXX object src/xrt/state_trackers/gui/CMakeFiles/st_gui_base.dir/gui_scene.cpp.o
+[256/738] Linking C static library src/xrt/auxiliary/foveation/libaux_foveation.a
+[257/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_process.dir/u_process.c.o
+[258/738] Building C object src/xrt/auxiliary/vive/CMakeFiles/aux_vive.dir/vive_bindings.c.o
+[259/738] Building C object src/xrt/auxiliary/vive/CMakeFiles/aux_vive.dir/vive_builder.c.o
+[260/738] Building C object src/xrt/auxiliary/util/CMakeFiles/aux_util_debug_gui.dir/u_debug_gui.c.o
+[261/738] Building C object src/xrt/auxiliary/vive/CMakeFiles/aux_vive.dir/vive_calibration.c.o
+[262/738] Building C object src/xrt/auxiliary/vive/CMakeFiles/aux_vive.dir/vive_common.c.o
+[263/738] Building OBJC object src/xrt/auxiliary/metal/CMakeFiles/aux_metal_foveation.dir/m_metal_foveation.m.o
+[264/738] Building C object src/xrt/auxiliary/vive/CMakeFiles/aux_vive.dir/vive_poses.c.o
+[265/738] Building C object src/xrt/auxiliary/vive/CMakeFiles/aux_vive.dir/vive_tweaks.c.o
+[266/738] Building C object src/xrt/auxiliary/vive/CMakeFiles/aux_vive.dir/vive_config.c.o
+[267/738] Building C object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/correspondence_search.c.o
+[268/738] Building CXX object src/xrt/auxiliary/util/CMakeFiles/aux_util_scribble.dir/u_frame_scribble.cpp.o
+[269/738] Linking CXX static library src/xrt/auxiliary/util/libaux_util_scribble.a
+[270/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/image_point_sort.cpp.o
+[271/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/constellation_debug_scribble.cpp.o
+[272/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/t_constellation_tracker_joint.cpp.o
+[273/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/oriented_bootstrap.cpp.o
+[274/738] Building C object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/t_led_phase_bootstrap.c.o
+[275/738] Building C object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/led_search_model.c.o
+[276/738] Building C object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/pose_metrics.c.o
+[277/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/stereo_bootstrap.cpp.o
+[278/738] Building CXX object src/xrt/auxiliary/tracking/CMakeFiles/aux_tracking.dir/t_kalman.cpp.o
+[279/738] Linking CXX static library src/xrt/auxiliary/tracking/libaux_tracking.a
+[280/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/t_constellation_tracker.cpp.o
+[281/738] Building C object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/t_led_sync_refinement.c.o
+[282/738] Building C object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/t_rift_blobwatch.c.o
+[283/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/t_constellation_tracker_dataset.cpp.o
+[284/738] Linking CXX static library src/xrt/drivers/libdrv_qwerty.a
+[285/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/joint_pose_solver.cpp.o
+[286/738] Building C object src/xrt/drivers/CMakeFiles/drv_uvc.dir/uvc/uvc_driver.c.o
+[287/738] Building C object src/xrt/drivers/CMakeFiles/drv_psvr2.dir/psvr2/psvr2_prober.c.o
+[288/738] Building C object src/xrt/drivers/CMakeFiles/drv_psvr2.dir/psvr2/psvr2_distortion.c.o
+[289/738] Building C object src/xrt/drivers/CMakeFiles/drv_psvr2.dir/psvr2/psvr2_eye.c.o
+[290/738] Building C object src/xrt/drivers/CMakeFiles/drv_psvr2.dir/psvr2/psvr2.c.o
+[291/738] Generating ipc_client_generated.c from protocol JSON description
+[292/738] Generating ipc_client_generated.h from protocol JSON description
+[293/738] Linking OBJC static library src/xrt/auxiliary/metal/libaux_metal_foveation.a
+[294/738] Linking CXX static library src/xrt/auxiliary/util/libaux_util_process.a
+[295/738] Linking CXX static library src/xrt/auxiliary/vive/libaux_vive.a
+[296/738] Building CXX object src/xrt/drivers/CMakeFiles/drv_cemu.dir/ht_ctrl_emu/ht_ctrl_emu.cpp.o
+[297/738] Building C object src/xrt/drivers/CMakeFiles/drv_blubur_s1.dir/blubur_s1/blubur_s1_hmd.c.o
+[298/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/optimizer/ransac.cpp.o
+[299/738] Building CXX object src/external/imgui/CMakeFiles/xrt-external-imgui.dir/implot/implot_items.cpp.o
+[300/738] Building C object src/xrt/drivers/CMakeFiles/drv_blubur_s1.dir/blubur_s1/blubur_s1_prober.c.o
+[301/738] Building C object src/xrt/drivers/CMakeFiles/drv_simulated.dir/simulated/simulated_controller.c.o
+[302/738] Linking CXX static library src/external/imgui/libxrt-external-imgui.a
+[303/738] Building C object src/xrt/drivers/CMakeFiles/drv_simulated.dir/simulated/simulated_hmd.c.o
+[304/738] Building C object src/xrt/drivers/CMakeFiles/drv_simulated.dir/simulated/simulated_prober.c.o
+[305/738] Linking CXX static library src/xrt/state_trackers/gui/libst_gui_base.a
+[306/738] Linking CXX static library src/external/imgui/libxrt-external-imgui-sdl2.a
+[307/738] Building C object src/xrt/drivers/CMakeFiles/drv_twrap.dir/twrap/twrap_slam.c.o
+[308/738] Linking CXX static library src/xrt/auxiliary/util/libaux_util_debug_gui.a
+[309/738] Building C object src/xrt/drivers/CMakeFiles/drv_hdk.dir/hdk/hdk_prober.c.o
+[310/738] Building CXX object src/xrt/drivers/CMakeFiles/drv_hdk.dir/hdk/hdk_device.cpp.o
+[311/738] Building C object src/xrt/drivers/CMakeFiles/drv_hydra.dir/hydra/hydra_driver.c.o
+[312/738] Linking CXX static library src/xrt/drivers/libdrv_uvc.a
+[313/738] Building C object src/xrt/drivers/CMakeFiles/drv_ns.dir/north_star/ns_hmd.c.o
+[314/738] Building C object src/xrt/drivers/CMakeFiles/drv_psmv.dir/psmv/psmv_driver.c.o
+[315/738] Building C object src/xrt/drivers/CMakeFiles/drv_pssense.dir/pssense/pssense_clock.c.o
+[316/738] Linking CXX static library src/xrt/drivers/libdrv_psvr2.a
+[317/738] Building C object src/xrt/drivers/CMakeFiles/drv_remote.dir/remote/r_device.c.o
+[318/738] Building C object src/xrt/drivers/CMakeFiles/drv_pssense.dir/pssense/pssense_driver.c.o
+[319/738] Building C object src/xrt/drivers/CMakeFiles/drv_remote.dir/remote/r_hmd.c.o
+[320/738] Building CXX object src/xrt/drivers/CMakeFiles/drv_ns.dir/north_star/distortion_3d/deformation_northstar.cpp.o
+[321/738] Building C object src/xrt/drivers/CMakeFiles/drv_remote.dir/remote/r_hub.c.o
+[322/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift.dir/rift/rift_bindings.c.o
+[323/738] Building C object src/xrt/drivers/CMakeFiles/drv_rokid.dir/rokid/rokid_hmd.c.o
+[324/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift.dir/rift/rift_usb.c.o
+[325/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift.dir/rift/rift_driver.c.o
+[326/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift.dir/rift/rift_radio.c.o
+[327/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift_sensor.dir/rift_sensor/ar0134.c.o
+[328/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift_sensor.dir/rift_sensor/esp570.c.o
+[329/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift_sensor.dir/rift_sensor/esp770u.c.o
+[330/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift_sensor.dir/rift_sensor/mt9v034.c.o
+[331/738] Building C object src/xrt/drivers/CMakeFiles/drv_multi.dir/multi_wrapper/multi.c.o
+[332/738] Building C object src/xrt/drivers/CMakeFiles/drv_rift_sensor.dir/rift_sensor/rift_sensor.c.o
+[333/738] Building C object src/xrt/drivers/CMakeFiles/drv_euroc.dir/euroc/euroc_device.c.o
+[334/738] Building C object src/xrt/drivers/CMakeFiles/drv_euroc.dir/euroc/euroc_runner.c.o
+[335/738] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_metal_foveation_cache.dir/comp_metal_foveation_cache.m.o
+[336/738] Generating b_ovrd_generated_bindings.c
+[337/738] Building CXX object src/xrt/drivers/CMakeFiles/drv_rift.dir/rift/rift_touch_calibration.cpp.o
+[338/738] Generating b_ovrd_generated_bindings.h
+[339/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_app_policy.c.o
+[340/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/ipc_client_generated.c.o
+[341/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_compositor.c.o
+[342/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_connection.c.o
+[343/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_device.c.o
+[344/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_future.c.o
+[345/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_body_tracker.c.o
+[346/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_hand_tracker.c.o
+[347/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_hmd.c.o
+[348/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/t_imu_optical_filter.cpp.o
+[349/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_instance.c.o
+[350/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_session.c.o
+[351/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_system.c.o
+[352/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_space_overseer.c.o
+[353/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_system_devices.c.o
+[354/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_tracking_origin.c.o
+[355/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_xdev.c.o
+[356/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_metal_swapchain_import.c.o
+[357/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_macos_hosted.c.o
+[358/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_passthrough.c.o
+[359/738] Building C object src/xrt/targets/helpers/CMakeFiles/target_helpers.dir/target_builder_helpers.c.o
+[360/738] Linking CXX static library src/xrt/drivers/libdrv_cemu.a
+[361/738] Building C object src/xrt/ipc/CMakeFiles/ipc_client.dir/client/ipc_client_tracking_share.c.o
+[362/738] Building CXX object src/xrt/drivers/CMakeFiles/drv_euroc.dir/euroc/euroc_player.cpp.o
+[363/738] Linking CXX static library src/xrt/drivers/libdrv_blubur_s1.a
+[364/738] Linking CXX static library src/xrt/drivers/libdrv_twrap.a
+[365/738] Linking CXX static library src/xrt/drivers/libdrv_simulated.a
+[366/738] Linking CXX static library src/xrt/drivers/libdrv_hdk.a
+[367/738] Linking CXX static library src/xrt/drivers/libdrv_hydra.a
+[368/738] Linking CXX static library src/xrt/drivers/libdrv_ns.a
+[369/738] Linking CXX static library src/xrt/drivers/libdrv_psmv.a
+[370/738] Linking CXX static library src/xrt/drivers/libdrv_rokid.a
+[371/738] Linking CXX static library src/xrt/drivers/libdrv_remote.a
+[372/738] Linking CXX static library src/xrt/drivers/libdrv_rift_sensor.a
+[373/738] Linking CXX static library src/xrt/drivers/libdrv_multi.a
+[374/738] Linking CXX static library src/xrt/drivers/libdrv_euroc.a
+[375/738] Generating openvr_forward_macros.h
+Wrote 616 forwarding macro(s) and 84 FnTable macro(s) to /private/tmp/kosmickrisp-study/monado-build-m3-off/src/external/openvr_includes/openvr_forward_macros.h
+[376/738] Building C object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_vk_glue.c.o
+[377/738] Building C object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_glue.c.o
+[378/738] Building C object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_vk_client.c.o
+/private/tmp/monado-kosmickrisp-m3/src/xrt/compositor/client/comp_vk_client.c:364:30: warning: unused variable 'sc' [-Wunused-variable]
+  364 |         struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
+      |                                     ^~
+1 warning generated.
+[379/738] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_client.m.o
+[380/738] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_release_wait_thread.m.o
+[381/738] Building C object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_service_semaphore.c.o
+[382/738] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_service_swapchain.m.o
+[383/738] Building OBJC object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_metal_direct_swapchain.m.o
+[384/738] Building C object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_gl_client.c.o
+[385/738] Building C object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_gl_glue.c.o
+[386/738] Linking OBJC static library src/xrt/compositor/client/libcomp_metal_foveation_cache.a
+[387/738] Building C object src/xrt/compositor/client/CMakeFiles/comp_client.dir/comp_gl_memobj_swapchain.c.o
+[388/738] Generating oxr_generated_bindings.h
+[389/738] Generating oxr_generated_bindings.c
+[390/738] Generating oxr_extension_support.h
+[391/738] Building C object src/xrt/state_trackers/prober/CMakeFiles/st_prober.dir/p_dump.c.o
+[392/738] Building C object src/xrt/state_trackers/prober/CMakeFiles/st_prober.dir/p_tracking.c.o
+[393/738] Building C object src/xrt/compositor/null/CMakeFiles/comp_null.dir/null_compositor.c.o
+[394/738] Building C object src/xrt/state_trackers/steamvr_drv/steamvr_bindings/CMakeFiles/ovrd_generated_bindings.dir/b_ovrd_generated_bindings.c.o
+[395/738] Building C object src/xrt/state_trackers/prober/CMakeFiles/st_prober.dir/p_libusb.c.o
+[396/738] Building C object src/xrt/state_trackers/prober/CMakeFiles/st_prober.dir/p_prober.c.o
+[397/738] Building C object src/xrt/state_trackers/prober/CMakeFiles/st_prober.dir/p_osx_hid.c.o
+[398/738] Generating ipc_server_generated.c from protocol JSON description
+[399/738] Generating ipc_server_generated.h from protocol JSON description
+[400/738] Linking CXX static library src/xrt/ipc/libipc_client.a
+[401/738] Linking CXX static library src/xrt/targets/helpers/libtarget_helpers.a
+[402/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_lists.c.o
+[403/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_builder_legacy.c.o
+[404/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_builder_remote.c.o
+[405/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_builder_rgb_tracking.c.o
+[406/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_builder_psvr2.c.o
+[407/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_psvr2_sense_tracking.c.o
+[408/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_builder_rift.c.o
+[409/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_builder_simulated.c.o
+[410/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_builder_north_star.c.o
+[411/738] Building C object src/xrt/auxiliary/os/CMakeFiles/aux_os_ble.dir/os_ble_stubs.c.o
+[412/738] Building C object src/xrt/targets/common/CMakeFiles/target_lists.dir/target_builder_qwerty.c.o
+[413/738] Building C object src/xrt/targets/libmonado/CMakeFiles/monado.dir/monado.c.o
+[414/738] Linking CXX static library src/xrt/compositor/client/libcomp_client.a
+[415/738] Linking CXX static library src/xrt/compositor/null/libcomp_null.a
+[416/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_prober.c.o
+[417/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_calibrate.c.o
+[418/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation.dir/optimizer/pose_optimize.cpp.o
+[419/738] Linking CXX static library src/xrt/tracking/constellation/libconstellation.a
+[420/738] Linking CXX static library src/xrt/drivers/libdrv_pssense.a
+[421/738] Linking CXX static library src/xrt/drivers/libdrv_rift.a
+[422/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_hand_tracking_demo.c.o
+[423/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_main_menu.c.o
+[424/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_record.c.o
+[425/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_record_euroc.c.o
+[426/738] Building CXX object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_constellation_tracker_test.cpp.o
+[427/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_remote.c.o
+[428/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_resampler_test.c.o
+[429/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_tracking_overrides.c.o
+[430/738] Building C object src/xrt/state_trackers/gui/CMakeFiles/st_gui.dir/gui_scene_video.c.o
+[431/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_binding.c.o
+[432/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_api_action.c.o
+[433/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_dpad_state.c.o
+[434/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_get_state.c.o
+[435/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_haptic.c.o
+[436/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_input_transform.c.o
+[437/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_instance_action_context.c.o
+[438/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_input.c.o
+[439/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_pair_hashset.c.o
+[440/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_instance_path_cache.c.o
+[441/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_interaction_profile_array.c.o
+[442/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_session_action_context.c.o
+[443/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_session_attached_actions.c.o
+[444/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_set_haptic.c.o
+[445/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/common/oxr_handle_array.c.o
+[446/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/actions/oxr_subaction.c.o
+[447/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/path/oxr_path_store.c.o
+[448/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/common/oxr_handle_base.c.o
+[449/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_foveation.c.o
+[450/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_negotiate.c.o
+[451/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_instance.c.o
+[452/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_session.c.o
+[453/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_space.c.o
+[454/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_swapchain.c.o
+[455/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_system.c.o
+[456/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_xdev.c.o
+[457/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_frame_sync.c.o
+[458/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_event.c.o
+[459/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_foveation_policy.c.o
+[460/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_instance.c.o
+[461/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_logger.c.o
+[462/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_pretty_print.c.o
+[463/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_roles.c.o
+[464/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_session.c.o
+[465/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_session_frame_end.c.o
+[466/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_space.c.o
+[467/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_swapchain.c.o
+[468/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_system.c.o
+[469/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_verify.c.o
+[470/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_xdev.c.o
+[471/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_session_gfx_vk.c.o
+[472/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_fusion.dir/fusion/imu_preintegration.cpp.o
+[473/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_swapchain_vk.c.o
+[474/738] Building CXX object src/external/CMakeFiles/xrt-external-catch2.dir/Catch2/catch_amalgamated.cpp.o
+[475/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/bindings/oxr_generated_bindings.c.o
+[476/738] Linking CXX static library src/external/libxrt-external-catch2.a
+[477/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_vulkan.c.o
+[478/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_session_gfx_metal.c.o
+[479/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_swapchain_metal.c.o
+[480/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_swapchain_gl.c.o
+[481/738] Building OBJC object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_metal.m.o
+[482/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_passthrough.c.o
+[483/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_passthrough.c.o
+[484/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_face_tracking_android.c.o
+[485/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_face_tracking_android.c.o
+[486/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_face_tracking_htc.c.o
+[487/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_face_tracking_htc.c.o
+[488/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_face_tracking2_fb.c.o
+[489/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_face_tracking2_fb.c.o
+[490/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_future.c.o
+[491/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_future.c.o
+[492/738] Linking CXX static library src/xrt/state_trackers/prober/libst_prober.a
+[493/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_api_hand_tracking.c.o
+[494/738] Linking C static library src/xrt/state_trackers/steamvr_drv/steamvr_bindings/libovrd_generated_bindings.a
+[495/738] Building C object src/xrt/state_trackers/oxr/CMakeFiles/st_oxr.dir/oxr_hand_tracking.c.o
+[496/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_handler_app_policy.c.o
+[497/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/ipc_server_generated.c.o
+[498/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_handler_body_tracker.c.o
+[499/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_handler_hand_tracker.c.o
+[500/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_handler.c.o
+[501/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_handler_swapchain.c.o
+[502/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_per_client_thread.c.o
+[503/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_floor_calibration.c.o
+[504/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_thread_shutdown.c.o
+[505/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_process.c.o
+[506/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_fusion.dir/fusion/fusion_math.cpp.o
+[507/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_objects.c.o
+[508/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_metal.c.o
+[509/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_macos_display_host.c.o
+[510/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_tracking_share.c.o
+[511/738] Building CXX object src/xrt/state_trackers/steamvr_drv/CMakeFiles/st_ovrd.dir/ovrd_driver.cpp.o
+[512/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_swapchain_wait.c.o
+[513/738] Building C object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_metal_client_cleanup.c.o
+[514/738] Linking CXX static library src/xrt/targets/common/libtarget_lists.a
+[515/738] Building C object src/xrt/targets/common/CMakeFiles/target_instance_no_comp.dir/target_instance_no_comp.c.o
+[516/738] Building C object src/xrt/targets/common/CMakeFiles/target_instance.dir/target_instance.c.o
+[517/738] Generating SteamVR input profiles to /private/tmp/kosmickrisp-study/monado-build-m3-off/steamvr-monado/resources/input/
+[518/738] Linking CXX shared library src/xrt/targets/libmonado/libmonado.25.1.0.dylib
+[519/738] Generating distortion_8x8.comp.h
+/private/tmp/kosmickrisp-study/monado-build-m3-off/tests/distortion_8x8.comp
+[520/738] Building OBJC object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_mainloop_apple.c.o
+[521/738] Generating distortion_16x16.comp.h
+/private/tmp/kosmickrisp-study/monado-build-m3-off/tests/distortion_16x16.comp
+[522/738] Generating distortion_16x8.comp.h
+/private/tmp/kosmickrisp-study/monado-build-m3-off/tests/distortion_16x8.comp
+[523/738] Linking CXX static library src/xrt/auxiliary/os/libaux_os_ble.a
+[524/738] Building OBJC object src/xrt/ipc/CMakeFiles/ipc_server.dir/server/ipc_server_mainloop_apple_xpc.m.o
+[525/738] Building CXX object src/xrt/auxiliary/htc/CMakeFiles/aux_htc.dir/htc_config.cpp.o
+[526/738] Building C object src/xrt/drivers/CMakeFiles/drv_sample.dir/sample/sample_hmd.c.o
+[527/738] Building C object src/xrt/drivers/CMakeFiles/drv_sample.dir/sample/sample_prober.c.o
+[528/738] Building CXX object src/xrt/compositor/mock/CMakeFiles/comp_mock.dir/mock_compositor.cpp.o
+[529/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_synth.dir/tools/constellation_synth.cpp.o
+[530/738] Linking CXX static library src/xrt/state_trackers/gui/libst_gui.a
+[531/738] Linking CXX static library src/xrt/state_trackers/steamvr_drv/libst_ovrd.a
+[532/738] Linking CXX static library src/xrt/state_trackers/oxr/libst_oxr.a
+[533/738] Building OBJC object src/xrt/ipc/CMakeFiles/ipc_metal_xpc_probe.dir/shared/ipc_metal_xpc_probe.m.o
+[534/738] Building OBJC object src/xrt/ipc/CMakeFiles/monado_metal_xpc_client.dir/shared/monado_metal_xpc_client.m.o
+[535/738] Linking CXX static library src/xrt/ipc/libipc_server.a
+[536/738] Linking CXX static library src/xrt/targets/common/libtarget_instance.a
+[537/738] Linking CXX static library src/xrt/targets/common/libtarget_instance_no_comp.a
+[538/738] Creating library symlink src/xrt/targets/libmonado/libmonado.25.dylib src/xrt/targets/libmonado/libmonado.dylib
+[539/738] Building C object src/xrt/targets/libmonado/CMakeFiles/libmonado-example.dir/example.c.o
+[540/738] Building OBJC object src/xrt/ipc/CMakeFiles/ipc_metal_xpc_broker.dir/shared/ipc_metal_xpc_broker.m.o
+[541/738] Building C object src/xrt/targets/openxr/CMakeFiles/openxr_monado.dir/target.c.o
+[542/738] Building OBJC object src/xrt/targets/macos_layer_host_probe/CMakeFiles/macos-layer-host-probe.dir/macos_layer_host_probe.m.o
+[543/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_replay.dir/tools/frontend_compare.cpp.o
+[544/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_calibration_dump.c.o
+[545/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_info.c.o
+[546/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_lighthouse.c.o
+[547/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_pssense_test.c.o
+[548/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_psvr2_camera.c.o
+[549/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_psvr2_constellation.c.o
+[550/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_psvr2_pose.c.o
+[551/738] Building OBJC object src/xrt/targets/macos_layer_host_probe/CMakeFiles/macos-layer-host-probe-game.dir/macos_layer_host_probe.m.o
+[552/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_probe.c.o
+[553/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_slambatch.c.o
+[554/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_pose_dump.c.o
+[555/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_main.c.o
+[556/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_test.c.o
+[557/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_calibrate.c.o
+[558/738] Building C object src/xrt/targets/cli/CMakeFiles/cli.dir/cli_cmd_psvr2_calibration_record.c.o
+[559/738] Building C object src/xrt/targets/gui/CMakeFiles/gui.dir/gui_sdl2.c.o
+[560/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_replay.dir/tools/fusion_compare.cpp.o
+[561/738] Building C object src/xrt/targets/gui/CMakeFiles/gui.dir/gui_sdl2_imgui.c.o
+[562/738] Building C object src/xrt/targets/gui/CMakeFiles/gui.dir/gui_sdl2_main.c.o
+[563/738] Building C object src/xrt/targets/service/CMakeFiles/monado-service.dir/main.c.o
+[564/738] Building C object src/xrt/targets/steamvr_drv/CMakeFiles/driver_monado.dir/main.c.o
+[565/738] Building C object src/xrt/targets/ctl/CMakeFiles/monado-ctl.dir/main.c.o
+[566/738] Building CXX object src/xrt/targets/psvr2_openxr_test/CMakeFiles/psvr2-openxr-test.dir/psvr2_openxr_test_matrix.mm.o
+[567/738] Building OBJC object src/xrt/targets/service/CMakeFiles/monado_service_xpc_control.dir/macos_xpc_control.m.o
+[568/738] Building CXX object tests/CMakeFiles/tests_deque.dir/tests_deque.cpp.o
+[569/738] Building CXX object tests/CMakeFiles/tests_cxx_wrappers.dir/tests_cxx_wrappers.cpp.o
+[570/738] Building CXX object tests/CMakeFiles/tests_floor_calibration.dir/tests_floor_calibration.cpp.o
+[571/738] Building CXX object tests/CMakeFiles/tests_generic_callbacks.dir/tests_generic_callbacks.cpp.o
+[572/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_replay.dir/tools/constellation_replay.cpp.o
+[573/738] Building CXX object tests/CMakeFiles/tests_foveation.dir/tests_foveation.cpp.o
+[574/738] Building CXX object tests/CMakeFiles/tests_glue_traits.dir/tests_glue_traits.cpp.o
+[575/738] Building CXX object tests/CMakeFiles/tests_id_ringbuffer.dir/tests_id_ringbuffer.cpp.o
+[576/738] Building CXX object tests/CMakeFiles/tests_glue_device.dir/tests_glue_device.cpp.o
+[577/738] Building CXX object tests/CMakeFiles/tests_history_buf.dir/tests_history_buf.cpp.o
+[578/738] Building CXX object tests/CMakeFiles/tests_lowpass_float.dir/tests_lowpass_float.cpp.o
+[579/738] Building CXX object tests/CMakeFiles/tests_lowpass_integer.dir/tests_lowpass_integer.cpp.o
+[580/738] Building CXX object tests/CMakeFiles/tests_json.dir/tests_json.cpp.o
+[581/738] Building CXX object tests/CMakeFiles/tests_pacing.dir/tests_pacing.cpp.o
+[582/738] Building CXX object tests/CMakeFiles/tests_passthrough_calibration.dir/tests_passthrough_calibration.cpp.o
+[583/738] Building CXX object tests/CMakeFiles/tests_relation_chain.dir/tests_relation_chain.cpp.o
+[584/738] Building CXX object tests/CMakeFiles/tests_quat_change_of_basis.dir/tests_quat_change_of_basis.cpp.o
+[585/738] Building CXX object tests/CMakeFiles/tests_quat_swing_twist.dir/tests_quat_swing_twist.cpp.o
+[586/738] Building CXX object tests/CMakeFiles/tests_rational.dir/tests_rational.cpp.o
+[587/738] Building CXX object tests/CMakeFiles/tests_space_overseer.dir/tests_space_overseer.cpp.o
+[588/738] Building CXX object tests/CMakeFiles/tests_vector.dir/tests_vector.cpp.o
+[589/738] Building CXX object tests/CMakeFiles/tests_pose.dir/tests_pose.cpp.o
+[590/738] Building CXX object tests/CMakeFiles/tests_worker.dir/tests_worker.cpp.o
+[591/738] Building CXX object tests/CMakeFiles/tests_quatexpmap.dir/tests_quatexpmap.cpp.o
+[592/738] Building CXX object tests/CMakeFiles/tests_vec3_angle.dir/tests_vec3_angle.cpp.o
+[593/738] Building CXX object src/xrt/tracking/constellation/CMakeFiles/constellation_fusion.dir/fusion/sliding_window_fusion.cpp.o
+[594/738] Building CXX object tests/CMakeFiles/tests_render_pipeline_cache.dir/tests_macos_metal_device.mm.o
+[595/738] Linking CXX static library src/xrt/tracking/constellation/libconstellation_fusion.a
+[596/738] Building CXX object tests/CMakeFiles/tests_frame_share.dir/tests_frame_share.cpp.o
+[597/738] Building CXX object tests/CMakeFiles/tests_uv_to_tangent.dir/tests_uv_to_tangent.cpp.o
+[598/738] Building CXX object tests/CMakeFiles/tests_psvr2_tracking_share.dir/tests_psvr2_tracking_share.cpp.o
+[599/738] Building CXX object tests/CMakeFiles/tests_render_pipeline_cache.dir/tests_render_pipeline_cache.cpp.o
+[600/738] Building CXX object tests/CMakeFiles/tests_foveation_openxr.dir/tests_foveation_openxr.cpp.o
+[601/738] Building CXX object tests/CMakeFiles/tests_generic_controller.dir/tests_generic_controller.cpp.o
+[602/738] Building CXX object tests/CMakeFiles/tests_oxr_layer_color_scale_bias.dir/tests_oxr_layer_color_scale_bias.cpp.o
+[603/738] Building CXX object tests/CMakeFiles/tests_pose_metrics.dir/tests_pose_metrics.cpp.o
+[604/738] Building CXX object tests/CMakeFiles/tests_input_transform.dir/tests_input_transform.cpp.o
+[605/738] Building CXX object tests/CMakeFiles/tests_led_phase_bootstrap.dir/tests_led_phase_bootstrap.cpp.o
+[606/738] Building CXX object tests/CMakeFiles/tests_constellation_dataset.dir/tests_constellation_dataset.cpp.o
+[607/738] Building CXX object tests/CMakeFiles/tests_ipc_shmem.dir/tests_ipc_shmem.cpp.o
+[608/738] Building CXX object tests/CMakeFiles/tests_imu_optical_filter.dir/tests_imu_optical_filter.cpp.o
+[609/738] Building CXX object tests/CMakeFiles/tests_time_clock.dir/tests_time_clock.cpp.o
+[610/738] Building CXX object tests/CMakeFiles/tests_macos_hosted_client.dir/tests_macos_hosted_client.cpp.o
+[611/738] Building CXX object tests/CMakeFiles/tests_render_compute.dir/tests_macos_metal_device.mm.o
+[612/738] Building CXX object tests/CMakeFiles/tests_joint_pose_solver.dir/tests_joint_pose_solver.cpp.o
+[613/738] Building CXX object tests/CMakeFiles/tests_render_compute.dir/tests_render_compute.cpp.o
+[614/738] Building C object tests/CMakeFiles/tests_macos_runtime_probe.dir/tests_macos_runtime_probe.c.o
+[615/738] Building CXX object tests/CMakeFiles/tests_macos_present_trace.dir/tests_macos_present_trace.cpp.o
+[616/738] Building C object tests/CMakeFiles/tests_macos_signpost.dir/tests_macos_signpost.c.o
+[617/738] Building CXX object tests/CMakeFiles/tests_render_compute.dir/tests_projection_quad.cpp.o
+[618/738] Building CXX object tests/CMakeFiles/tests_render_compute.dir/tests_layer_specialization.cpp.o
+[619/738] Building CXX object tests/CMakeFiles/tests_macos_passthrough_rotation.dir/tests_macos_passthrough_rotation.mm.o
+[620/738] Building CXX object tests/CMakeFiles/tests_pssense_fusion.dir/tests_pssense_fusion.cpp.o
+[621/738] Building C object tests/CMakeFiles/tests_macos_iosurface_producer.dir/tests_macos_iosurface_producer.c.o
+[622/738] Building C object tests/CMakeFiles/tests_macos_iosurface_import_probe.dir/tests_macos_iosurface_import_probe.c.o
+[623/738] Building CXX object tests/CMakeFiles/tests_macos_latency_guard.dir/tests_macos_latency_guard.cpp.o
+[624/738] Building C object tests/CMakeFiles/tests_macos_ipc_swapchain_probe.dir/tests_macos_ipc_swapchain_probe.c.o
+[625/738] Building C object tests/CMakeFiles/tests_macos_openxr_loaderless_probe.dir/tests_macos_openxr_loaderless_probe.c.o
+[626/738] Building CXX object tests/CMakeFiles/tests_metal_foveation_cache.dir/tests_metal_foveation_cache.mm.o
+[627/738] Building CXX object tests/CMakeFiles/tests_macos_gpu_policy.dir/tests_macos_gpu_policy.cpp.o
+[628/738] Building C object tests/CMakeFiles/tests_macos_openxr_vulkan_probe.dir/tests_macos_openxr_vulkan_probe.c.o
+[629/738] Building C object tests/CMakeFiles/tests_macos_remote_pose_bridge.dir/tests_macos_remote_pose_bridge.c.o
+[630/738] Building C object tests/CMakeFiles/tests_macos_remote_pose_packet_sender.dir/tests_macos_remote_pose_packet_sender.c.o
+[631/738] Building C object tests/CMakeFiles/tests_macos_remote_driver_pose_probe.dir/tests_macos_remote_driver_pose_probe.c.o
+[632/738] Building C object tests/CMakeFiles/tests_ipc_local_session.dir/__/src/xrt/ipc/client/ipc_client_system.c.o
+[633/738] Building CXX object tests/CMakeFiles/tests_macos_gpu_reuse.dir/tests_macos_gpu_reuse.cpp.o
+[634/738] Building C object tests/CMakeFiles/tests_ipc_thread_shutdown.dir/__/src/xrt/ipc/server/ipc_server_thread_shutdown.c.o
+[635/738] Building CXX object tests/CMakeFiles/tests_macos_gpu_sync.dir/tests_macos_gpu_sync.mm.o
+[636/738] Building C object tests/CMakeFiles/tests_macos_ipc_swapchain_wait.dir/__/src/xrt/ipc/server/ipc_server_swapchain_wait.c.o
+[637/738] Building CXX object tests/CMakeFiles/tests_macos_service_gpu_sync.dir/tests_macos_service_gpu_sync.mm.o
+/private/tmp/monado-kosmickrisp-m3/tests/tests_macos_service_gpu_sync.mm:336:81: warning: missing field 'next' initializer [-Wmissing-field-initializers]
+  336 |                                 XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+      |                                                                                                             ^
+/private/tmp/monado-kosmickrisp-m3/tests/tests_macos_service_gpu_sync.mm:340:54: warning: missing field 'next' initializer [-Wmissing-field-initializers]
+  340 |                                         XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
+      |                                                                                         ^
+/private/tmp/monado-kosmickrisp-m3/tests/tests_macos_service_gpu_sync.mm:344:47: warning: missing field 'next' initializer [-Wmissing-field-initializers]
+  344 |                                         XrViewState view_state{XR_TYPE_VIEW_STATE};
+      |                                                                                  ^
+/private/tmp/monado-kosmickrisp-m3/tests/tests_macos_service_gpu_sync.mm:345:38: warning: missing field 'next' initializer [-Wmissing-field-initializers]
+  345 |                                         XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+      |                                                                         ^
+/private/tmp/monado-kosmickrisp-m3/tests/tests_macos_service_gpu_sync.mm:345:54: warning: missing field 'next' initializer [-Wmissing-field-initializers]
+  345 |                                         XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+      |                                                                                         ^
+5 warnings generated.
+[638/738] Building OBJC object tests/CMakeFiles/tests_metal_xpc_registry.dir/__/src/xrt/ipc/shared/ipc_metal_xpc_service.m.o
+[639/738] Building CXX object tests/CMakeFiles/tests_ipc_thread_shutdown.dir/tests_ipc_thread_shutdown.cpp.o
+[640/738] Building CXX object tests/CMakeFiles/tests_ipc_socket_security.dir/tests_ipc_socket_security.cpp.o
+[641/738] Building CXX object tests/CMakeFiles/tests_macos_ipc_swapchain_wait.dir/tests_macos_ipc_swapchain_wait.cpp.o
+[642/738] Building CXX object tests/CMakeFiles/tests_ipc_local_session.dir/tests_ipc_local_session.cpp.o
+[643/738] Building C object tests/CMakeFiles/tests_pssense_clock.dir/__/src/xrt/drivers/pssense/pssense_clock.c.o
+[644/738] Linking CXX static library src/xrt/auxiliary/htc/libaux_htc.a
+[645/738] Linking CXX executable src/xrt/tracking/constellation/constellation_replay
+[646/738] Linking CXX executable src/xrt/tracking/constellation/constellation_synth
+[647/738] Linking CXX static library src/xrt/drivers/libdrv_sample.a
+[648/738] Linking CXX static library src/xrt/compositor/mock/libcomp_mock.a
+[649/738] Building CXX object tests/CMakeFiles/tests_metal_xpc_registry.dir/tests_metal_xpc_registry.mm.o
+[650/738] Linking OBJC shared library src/xrt/ipc/libmonado_metal_xpc_client.dylib
+[651/738] Linking OBJC executable src/xrt/ipc/monado-ipc-metal-xpc-probe
+[652/738] Linking CXX executable src/xrt/ipc/monado-ipc-metal-xpc-broker
+[653/738] Generating ipc-structs.txt from protocol JSON description
+[654/738] Linking C executable src/xrt/targets/libmonado/libmonado-example
+[655/738] Linking CXX executable src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test
+[656/738] Linking CXX shared library src/xrt/targets/openxr/libopenxr_monado.dylib; Generating OpenXR runtime manifest named /private/tmp/kosmickrisp-study/monado-build-m3-off/openxr_monado-dev.json for build tree usage
+[657/738] Linking OBJC executable src/xrt/targets/macos_layer_host_probe/macos-layer-host-probe
+[658/738] Linking CXX executable src/xrt/targets/cli/monado-cli
+[659/738] Building CXX object tests/CMakeFiles/tests_pssense_clock.dir/tests_pssense_clock.cpp.o
+[660/738] Linking OBJC executable src/xrt/targets/macos_layer_host_probe/macos-layer-host-probe-game.app/Contents/MacOS/macos-layer-host-probe-game
+/private/tmp/kosmickrisp-study/monado-build-m3-off/src/xrt/targets/macos_layer_host_probe/macos-layer-host-probe-game.app: replacing existing signature
+[661/738] Linking CXX executable src/xrt/targets/gui/monado-gui
+[662/738] Linking CXX executable src/xrt/targets/ctl/monado-ctl
+[663/738] Linking CXX executable src/xrt/targets/service/monado-service
+[664/738] Building CXX object tests/CMakeFiles/tests_macos_remote_layer.dir/tests_macos_remote_layer.mm.o
+[665/738] Linking CXX shared module steamvr-monado/bin/osx64/driver_monado.so
+[666/738] Building CXX object tests/CMakeFiles/tests_psvr2_sense_tracking.dir/tests_psvr2_sense_tracking.cpp.o
+[667/738] Linking CXX executable src/xrt/targets/service/monado-service-xpc-control
+[668/738] Linking CXX executable tests/tests_cxx_wrappers
+[669/738] Linking CXX executable tests/tests_deque
+[670/738] Linking CXX executable tests/tests_floor_calibration
+[671/738] Linking CXX executable tests/tests_generic_callbacks
+[672/738] Linking CXX executable tests/tests_foveation
+[673/738] Linking CXX executable tests/tests_glue_device
+[674/738] Linking CXX executable tests/tests_glue_traits
+[675/738] Linking CXX executable tests/tests_history_buf
+[676/738] Linking CXX executable tests/tests_id_ringbuffer
+[677/738] Linking CXX executable tests/tests_json
+[678/738] Linking CXX executable tests/tests_lowpass_float
+[679/738] Linking CXX executable tests/tests_lowpass_integer
+[680/738] Linking CXX executable tests/tests_pacing
+[681/738] Linking CXX executable tests/tests_passthrough_calibration
+[682/738] Linking CXX executable tests/tests_quatexpmap
+[683/738] Linking CXX executable tests/tests_quat_change_of_basis
+[684/738] Linking CXX executable tests/tests_quat_swing_twist
+[685/738] Linking CXX executable tests/tests_rational
+[686/738] Linking CXX executable tests/tests_relation_chain
+[687/738] Linking CXX executable tests/tests_space_overseer
+[688/738] Linking CXX executable tests/tests_vector
+[689/738] Linking CXX executable tests/tests_worker
+[690/738] Linking CXX executable tests/tests_pose
+[691/738] Linking CXX executable tests/tests_frame_share
+[692/738] Linking CXX executable tests/tests_vec3_angle
+[693/738] Linking CXX executable tests/tests_psvr2_tracking_share
+[694/738] Linking CXX executable tests/tests_uv_to_tangent
+[695/738] Linking CXX executable tests/tests_render_pipeline_cache
+[696/738] Linking CXX executable tests/tests_input_transform
+[697/738] Linking CXX executable tests/tests_generic_controller
+[698/738] Linking CXX executable tests/tests_oxr_layer_color_scale_bias
+[699/738] Linking CXX executable tests/tests_foveation_openxr
+[700/738] Linking CXX executable tests/tests_imu_optical_filter
+[701/738] Linking CXX executable tests/tests_pose_metrics
+[702/738] Linking CXX executable tests/tests_led_phase_bootstrap
+[703/738] Linking CXX executable tests/tests_joint_pose_solver
+[704/738] Linking CXX executable tests/tests_constellation_dataset
+[705/738] Linking CXX executable tests/tests_pssense_fusion
+[706/738] Linking CXX executable tests/tests_macos_hosted_client
+[707/738] Linking CXX executable tests/tests_time_clock
+[708/738] Linking CXX executable tests/tests_macos_present_trace
+[709/738] Linking CXX executable tests/tests_ipc_shmem
+[710/738] Linking CXX executable tests/tests_render_compute
+[711/738] Linking CXX executable tests/tests_macos_signpost
+[712/738] Linking CXX executable tests/tests_macos_passthrough_rotation
+[713/738] Linking CXX executable tests/tests_metal_foveation_cache
+[714/738] Linking CXX executable tests/tests_macos_gpu_sync
+[715/738] Linking CXX executable tests/tests_macos_latency_guard
+[716/738] Linking CXX executable tests/tests_macos_gpu_reuse
+[717/738] Linking CXX executable tests/tests_macos_runtime_probe
+[718/738] Linking CXX executable tests/tests_macos_gpu_policy
+[719/738] Linking C executable tests/tests_macos_iosurface_producer
+[720/738] Linking C executable tests/tests_macos_openxr_loaderless_probe
+[721/738] Linking CXX executable tests/tests_macos_remote_pose_bridge
+[722/738] Linking CXX executable tests/tests_macos_openxr_vulkan_probe
+[723/738] Linking CXX executable tests/tests_macos_service_gpu_sync
+[724/738] Linking CXX executable tests/tests_macos_ipc_swapchain_probe
+[725/738] Linking CXX executable tests/tests_macos_iosurface_import_probe
+[726/738] Linking CXX executable tests/tests_macos_remote_pose_packet_sender
+[727/738] Linking CXX executable tests/tests_macos_remote_driver_pose_probe
+[728/738] Linking CXX executable tests/tests_macos_ipc_swapchain_wait
+[729/738] Linking CXX executable tests/tests_ipc_local_session
+[730/738] Linking CXX executable tests/tests_ipc_thread_shutdown
+[731/738] Linking CXX executable tests/tests_ipc_socket_security
+[732/738] Linking CXX executable tests/tests_metal_xpc_registry
+[733/738] Linking CXX executable tests/tests_psvr2_sense_tracking
+[734/738] Linking CXX executable tests/tests_pssense_clock
+[735/738] Linking CXX executable tests/tests_macos_remote_layer
+[736/738] Building CXX object tests/CMakeFiles/tests_psvr2_controller_visuals.dir/tests_psvr2_controller_visuals.mm.o
+[737/738] Linking CXX executable tests/tests_psvr2_controller_visuals

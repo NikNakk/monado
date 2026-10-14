@@ -1,0 +1,45 @@
+ninja: Entering directory `/private/tmp/kosmickrisp-study/build-m3'
+[1/35] Generating src/git_sha1.h with a custom command
+[2/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_bo.c.o
+[3/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_buffer.c.o
+[4/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_buffer_view.c.o
+[5/35] Compiling Objective-C object src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_texture.m.o
+[6/35] Compiling Objective-C object src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_bridge.m.o
+[7/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_cmd_clear.c.o
+[8/35] Compiling C object src/kosmickrisp/vulkan/libkk_device_cmd_dispatch_table.a.p/meson-generated_.._.._util_kk_dispatch_cmd.c.o
+[9/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_cmd_buffer.c.o
+[10/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_cmd_copy.c.o
+[11/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_cmd_dispatch.c.o
+[12/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_cmd_pool.c.o
+[13/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_cmd_meta.c.o
+[14/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_device_memory.c.o
+[15/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_device_lib.c.o
+[16/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_format.c.o
+[17/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_event.c.o
+[18/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_device.c.o
+[19/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_image_layout.c.o
+[20/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_cmd_draw.c.o
+[21/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_image_view.c.o
+[22/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_image.c.o
+[23/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_nir_lower_vbo.c.o
+[24/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_query_pool.c.o
+[25/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_queue.c.o
+[26/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_physical_device.c.o
+[27/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_nir_lower_descriptors.c.o
+[28/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_sampler.c.o
+[29/35] Linking static target src/kosmickrisp/bridge/libmtl_bridge.a
+FAILED: [code=127] src/kosmickrisp/bridge/libmtl_bridge.a 
+rm -f src/kosmickrisp/bridge/libmtl_bridge.a && llvm-ar csrD src/kosmickrisp/bridge/libmtl_bridge.a src/kosmickrisp/bridge/libmtl_bridge.a.p/vk_to_mtl_map.c.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_argument_table.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_bridge.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_buffer.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_command_buffer.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_command_queue.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_compiler.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_device.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_encoder.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_heap.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_render_state.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_residency_set.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_sampler.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_sync.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/mtl_texture.m.o src/kosmickrisp/bridge/libmtl_bridge.a.p/ns_process_info.m.o
+/bin/sh: llvm-ar: command not found
+[30/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_sync.c.o
+[31/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_wsi.c.o
+[32/35] Compiling C object src/kosmickrisp/vulkan/libkk.a.p/kk_shader.c.o
+ninja: build stopped: subcommand failed.
+ninja: Entering directory `/private/tmp/kosmickrisp-study/build-m3'
+[1/6] Generating src/git_sha1.h with a custom command
+[2/5] Linking static target src/kosmickrisp/bridge/libmtl_bridge.a
+[3/5] Linking static target src/kosmickrisp/vulkan/libkk.a
+[4/5] Linking target src/kosmickrisp/vulkan/libvulkan_kosmickrisp.dylib
+ld: warning: ignoring duplicate libraries: '-lSPIRV-Tools', '-lSPIRV-Tools-link', '-lSPIRV-Tools-opt', '-lz'
+[5/5] Linking target src/kosmickrisp/kosmicomp
+ld: warning: ignoring duplicate libraries: '-lSPIRV-Tools', '-lSPIRV-Tools-link', '-lSPIRV-Tools-opt', '-lz'

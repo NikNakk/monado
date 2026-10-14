@@ -1,0 +1,9 @@
+{
+  "client_exit": 0,
+  "target": "debug_image",
+  "simulated_hmd": true,
+  "command": [
+    "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+    "/var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-openxr-launch-m1s42its/client.py"
+  ]
+}

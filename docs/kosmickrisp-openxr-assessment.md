@@ -738,3 +738,135 @@ Current final source hashes and descriptor/version details are in the manifest.
 No Monado runtime sources, Wine/DXMT code, deployed libraries, system ICD/runtime
 manifests or headset services were changed. Only the isolated experiment and
 assessment/index documents are updated. No branch was merged or pushed.
+
+## Milestone 3 — authorized experimental integration, 2026-10-14
+
+The user authorized M3 after reviewing M2. Implementation is isolated on
+`codex/kosmickrisp-openxr-m3`, based on `5aa80413e`; runtime implementation `416f276fd`. It has **offscreen OpenXR
+validation, not PSVR2 or Game Mode acceptance**. The original checkout,
+`macos-upstream-clean`, installed services and runtime manifests are unchanged.
+Wine, DXMT and M4 remain separate. The M2 pause above records the earlier gate.
+
+### Implemented architecture and compatibility
+
+The client Vulkan frontend now optionally wraps the existing Metal service/direct
+provider. That provider owns swapchain allocation and XPC transport. KosmicKrisp
+imports those exact `MTLTexture` objects; no replacement image storage or texture
+handoff copy is introduced. The existing service MoltenVK compositor samples them.
+The runtime-owned `MTLSharedEvent` is imported into KosmicKrisp as a timeline
+semaphore. A queue submission signals it after application rendering and release
+barriers, then the existing native readiness worker schedules the frame. Existing
+producer obligations, consumer completion and storage quarantine remain in force.
+There is no second compositor, sync-FD export, Metal release CPU wait, or queue-idle
+fallback in the experimental frame commit. Normal Vulkan acquire still waits for
+safe native reuse, as required by the existing implicit-barrier path.
+
+| Case | M3 result / limit |
+| --- | --- |
+| Vulkan enable2, API 1.2, timeline, native Apple M5 | Implemented and tested with both ICDs visible; client selects KK, service retains MoltenVK |
+| RGBA8/BGRA8 UNORM, 2D, single layer/mip/sample | Supported; per-eye swapchains and shader/clear rendering pass |
+| Cross-process native shared texture handles | Tested through existing Metal provider and XPC, using the imported native storage |
+| IOSurface-only carrier | M2 shader/event proof remains valid; M3 runs use the provider's preferred shared texture handle carrier, no separate forced-IOSurface M3 run |
+| Producer GPU ordering / reuse | Runtime event values observed; native reuse guard and barrier fences preserved |
+| Missing signal | Four failed obligations, zero ready/scheduled frames for that client; session loss observed in acquire; unresolved frontend retained |
+| Concurrent clients, killed client, replacement | Healthy 600 frames, killed overlay 25 ready frames, replacement 180; same service |
+| Arrays, mips, MSAA, static/protected, depth, storage, mutable | Explicit unsupported; formats limited to the two proven UNORM formats |
+| Vulkan layers / generic Vulkan Metal extensions | Unsupported by this experimental C ABI; no partial `VK_EXT_metal_objects` advertisement |
+| Feature off / current Metal path | Separate build passes normal Metal simulated-service probe |
+| Client compositor / Game Mode | Simulated hosting rejected, service fallback succeeds; actual hosted composition unvalidated |
+| Linux | Apple-only adapter/build guard; Linux build and CI not executed here |
+| D3D12 / D3D11 / performance advantage | No new evidence; no Wine or DXMT changes |
+
+Mesa uses a **versioned downstream C ABI**, `kk_get_metal_interop_api(1)`, for
+retained device access, creation-time texture import and timeline-event import.
+This is an experimental bridge, not a supported Vulkan extension implementation
+or conformant external-memory binding. The patch does not resolve standard Mesa
+interop upstreaming. It validates texture geometry/format/device and retains the
+native object; its trusted-object API is not an arbitrary native-object security
+boundary. Monado rejects incompatible library ABI and dispatch ownership before
+calling it. Physical-device handles are queried through the Vulkan loader; only
+verified device dispatch is passed into the driver ABI. Vulkan layers are rejected
+because directly created handles would bypass their object registration.
+
+The separate [Mesa patch](../experiments/kosmickrisp/mesa-openxr-metal-interop.patch)
+applies to `aac5108bbfa3051f03a71c695b3a6f961ea0fc46` (Mesa 26.3.0-devel). It
+supersedes the M2 diagnostic patches; do not stack them. Licensing is MIT for Mesa
+changes and BSL-1.0 for Monado/runner. No code was copied from Hadron, steamac or
+DXMT. Mesa's contribution restrictions recorded in M1 still apply: this downstream
+experiment is not an upstream submission.
+
+### Results and practical limits
+
+[Manifest](kosmickrisp-evidence/m3/manifest.json) records exact source revisions,
+patch SHA256, hardware, OS, Xcode and per-client readiness counts.
+Tests ran on Apple M5, macOS 26.7.1 (25G241), Xcode 27.0 (27A266a), without headset.
+OpenXR-SDK-Source was `3ed64d0f9bb680f24b80a085091e5c8fab38f7b7`.
+
+- [hello_xr](kosmickrisp-evidence/m3/hello/hello.log): official unmodified Vulkan2
+  sample, 8-second rendering interval, exit 0; 325 producer values ready/scheduled.
+  Service target readback includes centre `(119,151,151,255)` at frame 246.
+- [BGRA probe](kosmickrisp-evidence/m3/bgra/probe.log): 180 submitted, ready and
+  scheduled frames; ordinary healthy teardown without retained-frontend warning.
+- [Fault suite](kosmickrisp-evidence/m3/faults/results.json): suppressed-signal
+  client exit 1 with `XR_ERROR_SESSION_LOST`, measured process wait 2.344 s including
+  startup and bounded teardown. Missing API, unsupported array and wrong driver
+  exit 1. Healthy and replacement exit 0. Trace scope 3 has four failures and no
+  readiness/scheduling; scopes 2/7 have 600/180 ready and scheduled values.
+- [CTest](kosmickrisp-evidence/m3/monado-ctest-m3-final.log): 74/74 pass, 18.51 s
+  with host GPU/IPC access. Initial sandbox failures were environmental and are
+  not counted as successful tests.
+- Feature-disabled complete build and [Metal probe](kosmickrisp-evidence/m3/metal-off-summary.json)
+  pass. Final adapter also rejects a null loader getter before calling it.
+- [Hosted attempt](kosmickrisp-evidence/m3/hosted/probe.log) records rejection
+  and service fallback; its exit 0 must not be counted as hosted-path validation.
+
+After removing unused diagnostic export helpers from the versioned driver patch,
+a final RGBA probe again observed 180 ready/scheduled frames and exit 0;
+[final driver build](kosmickrisp-evidence/m3/mesa-final-build.log) records a
+missing `llvm-ar` PATH attempt and the corrected successful build. The adapter
+also preserves requested Vulkan transfer usage bits; sampled/storage workloads
+remain outside this test coverage.
+
+The fault test found an infinite wait in the existing Vulkan implicit acquire
+path, before session loss could be polled. In opt-in mode only, native waits are
+now sliced at 50 ms and session loss checked between slices; incomplete storage
+never becomes reusable. Swapchain destroy retires unfinished barrier resources.
+Session teardown polls completion for at most 500 ms and retains an unresolved
+frontend until process exit. This favors safety but is **not a bounded-memory
+solution for repeated failed sessions in a long-lived process**. Application-owned
+VkDevice destruction after unresolved GPU work remains an application/driver
+lifecycle boundary. Device loss, long-run allocation stability, multi-GPU/queue
+operation and all acquire/destroy permutations need more validation.
+
+These captures are correctness evidence. They run instrumented simulated targets
+with startup/compilation overhead, some concurrent GPU work and 500 ms hung policy.
+They do not establish GPU timings, CPU savings, frame pacing or a performance gain
+against MoltenVK/DXMT. M2's exact pixel/event validation supports the storage and
+ordering claim; hello target readback alone is not a per-frame stale-pixel test.
+
+### Reproduction and next gates
+
+See [M3 build/run instructions](../experiments/kosmickrisp/README-m3.md). Compile
+option `XRT_FEATURE_MACOS_KOSMICKRISP` defaults OFF; runtime
+`XRT_MACOS_KOSMICKRISP=1` and `XRT_MACOS_KOSMICKRISP_LIBRARY` are client-only.
+Keep both explicit ICDs visible to the client, while the service uses MoltenVK.
+The runner prepares and removes a unique temporary service, writes logs outside
+the repository, and considers abnormal hello termination a failure.
+
+Priorities before wider acceptance:
+
+1. User-operated PSVR2 Vulkan hello_xr test, then the real hosted/client compositor
+   path under Game Mode. Verify both ICD selections, visual correctness, lifecycle
+   and native timing traces. Keep current production paths available.
+2. Device-loss and repeated-session resource budgets, finite timeout/failed-acquire
+   state tests, direct compositor lifetime, forced IOSurface transport and sustained
+   concurrent clients. Resolve retained frontend policy before production use.
+3. Standard creation/import ownership and semaphore APIs in Mesa, Vulkan layer
+   compatibility and conformance; extend descriptor support only with pixel/event
+   and negative tests. Stereo arrays and sRGB are the next useful formats.
+4. Matched native Vulkan/MoltenVK performance captures on the headset, separating
+   shader compilation, GPU work, reuse waits, transport, compositor and presentation.
+5. M4 D3D12/VKD3D-Proton investigation in the separate bridge, after native acceptance.
+   Preserve DXMT; compare D3D11 only with matched measurements.
+
+No merge, push, production installation or physical hardware run was performed.

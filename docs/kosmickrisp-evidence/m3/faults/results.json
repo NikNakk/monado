@@ -1,0 +1,29 @@
+{
+  "missing": {
+    "exit": 1,
+    "wait_seconds": 2.344311209
+  },
+  "bad-library": {
+    "exit": 1,
+    "wait_seconds": 0.3928314999999998
+  },
+  "unsupported-array": {
+    "exit": 1,
+    "wait_seconds": 0.283149458
+  },
+  "wrong-driver": {
+    "exit": 1,
+    "wait_seconds": 0.1308397079999999
+  },
+  "killed": {
+    "exit": -9
+  },
+  "replacement": {
+    "exit": 0,
+    "wait_seconds": 3.2868222080000002
+  },
+  "healthy": {
+    "exit": 0,
+    "wait_seconds": 2.7009309999999997
+  }
+}

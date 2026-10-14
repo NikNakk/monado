@@ -1,0 +1,146 @@
+{
+  "mesa_base": "aac5108bbfa3051f03a71c695b3a6f961ea0fc46",
+  "monado_base": "5aa80413ed2932a73892984e950037c93638ad27",
+  "openxr_sdk_source": "3ed64d0f9bb680f24b80a085091e5c8fab38f7b7",
+  "hardware": "MacBook Air Apple M5, 10 CPU/10 GPU, 24 GB",
+  "os": "macOS 26.7.1 (25G241)",
+  "xcode": "27.0 (27A266a)",
+  "runs": {
+    "bgra": {
+      "results": {
+        "probe": {
+          "exit": 0,
+          "wait_seconds": 3.9840869169999995
+        }
+      },
+      "events_by_scope": {
+        "2": {
+          "layer_begin_entry": 180,
+          "layer_begin_after_previous": 180,
+          "semaphore_pushed": 180,
+          "semaphore_wait_start": 180,
+          "semaphore_ready": 180,
+          "scheduled": 180
+        }
+      }
+    },
+    "hello": {
+      "results": {
+        "hello": {
+          "exit": 0,
+          "wait_seconds": 0.016916916999999643
+        }
+      },
+      "events_by_scope": {
+        "2": {
+          "layer_begin_entry": 325,
+          "layer_begin_after_previous": 325,
+          "semaphore_pushed": 325,
+          "semaphore_wait_start": 325,
+          "semaphore_ready": 325,
+          "scheduled": 325
+        }
+      }
+    },
+    "faults": {
+      "results": {
+        "missing": {
+          "exit": 1,
+          "wait_seconds": 2.344311209
+        },
+        "bad-library": {
+          "exit": 1,
+          "wait_seconds": 0.3928314999999998
+        },
+        "unsupported-array": {
+          "exit": 1,
+          "wait_seconds": 0.283149458
+        },
+        "wrong-driver": {
+          "exit": 1,
+          "wait_seconds": 0.1308397079999999
+        },
+        "killed": {
+          "exit": -9
+        },
+        "replacement": {
+          "exit": 0,
+          "wait_seconds": 3.2868222080000002
+        },
+        "healthy": {
+          "exit": 0,
+          "wait_seconds": 2.7009309999999997
+        }
+      },
+      "events_by_scope": {
+        "2": {
+          "layer_begin_entry": 600,
+          "layer_begin_after_previous": 600,
+          "semaphore_pushed": 600,
+          "semaphore_wait_start": 600,
+          "semaphore_ready": 600,
+          "scheduled": 600
+        },
+        "3": {
+          "layer_begin_entry": 4,
+          "layer_begin_after_previous": 2,
+          "semaphore_pushed": 4,
+          "semaphore_wait_start": 4,
+          "semaphore_failed": 4
+        },
+        "6": {
+          "layer_begin_entry": 25,
+          "layer_begin_after_previous": 25,
+          "semaphore_pushed": 25,
+          "semaphore_wait_start": 25,
+          "semaphore_ready": 25,
+          "scheduled": 25
+        },
+        "7": {
+          "layer_begin_entry": 180,
+          "layer_begin_after_previous": 180,
+          "semaphore_pushed": 180,
+          "semaphore_wait_start": 180,
+          "semaphore_ready": 180,
+          "scheduled": 180
+        }
+      }
+    },
+    "hosted": {
+      "results": {
+        "probe": {
+          "exit": 0,
+          "wait_seconds": 3.241653125
+        }
+      },
+      "events_by_scope": {
+        "2": {
+          "layer_begin_entry": 180,
+          "layer_begin_after_previous": 180,
+          "semaphore_pushed": 180,
+          "semaphore_wait_start": 180,
+          "semaphore_ready": 180,
+          "scheduled": 180
+        }
+      }
+    }
+  },
+  "patch_sha256": "165e3f6521702df1343fe08169e8743df0960014904012a44a10c94e88541813",
+  "implementation_commit": "416f276fd",
+  "final_streamlined_abi_probe": {
+    "results": {
+      "probe": {
+        "exit": 0,
+        "wait_seconds": 4.352676167
+      }
+    },
+    "events": {
+      "layer_begin_entry": 180,
+      "layer_begin_after_previous": 180,
+      "semaphore_pushed": 180,
+      "semaphore_wait_start": 180,
+      "semaphore_ready": 180,
+      "scheduled": 180
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "client_exit": 0,
+  "target": "debug_image",
+  "simulated_hmd": true,
+  "command": [
+    "/private/tmp/kosmickrisp-study/monado-build-m3-off/tests/tests_macos_openxr_loaderless_probe"
+  ]
+}

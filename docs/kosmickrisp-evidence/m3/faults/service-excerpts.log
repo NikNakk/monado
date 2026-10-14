@@ -1,0 +1,27 @@
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+vk-target frame=5 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+vk-target frame=6 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+vk-target frame=7 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+vk-target frame=8 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+vk-target frame=9 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ERROR [run_func] Client GPU obligation failed: frame=1 value=1 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=2 result=2
+vk-target frame=124 layer=0 rgbaL=(255,249,90,255) rgbaC=(78,224,224,255) rgbaR=(90,255,255,255)
+ERROR [run_func] Client GPU obligation failed: frame=1 value=3 result=2
+ERROR [run_func] Client GPU obligation failed: frame=1 value=4 result=2
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x90f40e000 bytes=14811136 retained_bytes=59244544 objects=4 id=3
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x90f40e800 bytes=14811136 retained_bytes=59244544 objects=4 id=4
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+vk-target frame=244 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x90f40f000 bytes=14811136 retained_bytes=88866816 objects=6 id=5
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x90f40f800 bytes=14811136 retained_bytes=88866816 objects=6 id=6
+ INFO [multi_compositor_create] Client GPU policy: hung_ms=500 readiness_margin_us=6000
+vk-target frame=364 layer=0 rgbaL=(255,249,90,255) rgbaC=(90,255,255,255) rgbaR=(90,255,255,255)
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x90f40f800 bytes=14811136 retained_bytes=88866816 objects=6 id=7
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x90f40f000 bytes=14811136 retained_bytes=88866816 objects=6 id=8
+vk-target frame=484 layer=0 rgbaL=(249,108,0,255) rgbaC=(0,249,124,255) rgbaR=(0,249,124,255)
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x90f40d000 bytes=14811136 retained_bytes=59244544 objects=4 id=1
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0x90f40d800 bytes=14811136 retained_bytes=59244544 objects=4 id=2

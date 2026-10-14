@@ -1,0 +1,233 @@
+-- The C compiler identification is AppleClang 21.0.0.21000334
+-- The CXX compiler identification is AppleClang 21.0.0.21000334
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- The OBJC compiler identification is AppleClang 21.0.0.21000334
+-- Detecting OBJC compiler ABI info
+-- Detecting OBJC compiler ABI info - done
+-- Check for working OBJC compiler: /usr/bin/cc - skipped
+-- Found Python3: /opt/homebrew/Frameworks/Python.framework/Versions/3.14/bin/python3.14 (found version "3.14.7") found components: Interpreter
+-- Found Vulkan: /opt/homebrew/lib/libvulkan.dylib (found version "1.4.357") found components: glslc glslangValidator
+-- Could NOT find HIDAPI (missing: HIDAPI_INCLUDE_DIR HIDAPI_LIBRARY) 
+-- Found PkgConfig: /opt/homebrew/bin/pkg-config (found version "3.0.7")
+-- Could NOT find bluetooth (missing: bluetooth_LIBRARY bluetooth_INCLUDE_DIR) 
+-- Could NOT find OpenHMD (missing: OPENHMD_INCLUDE_DIR OPENHMD_LIBRARY) 
+-- Found OpenCV: /opt/homebrew/Cellar/opencv/5.0.0_7 (found version "5.0.0") found components: core highgui imgproc imgcodecs video calib features
+-- Found Libusb1: /opt/homebrew/lib/libusb-1.0.dylib
+-- Found JPEG: /opt/homebrew/lib/libjpeg.dylib (found version "80")
+-- Could NOT find realsense2 (missing: realsense2_DIR)
+-- Could NOT find rerun_sdk (missing: rerun_sdk_DIR)
+-- Could NOT find depthai (missing: depthai_DIR)
+-- Found ZLIB: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/lib/libz.tbd (found version "1.2.12")
+-- Could NOT find cJSON (missing: CJSON_INCLUDE_DIR CJSON_LIBRARY) 
+-- Could NOT find LeapV2 (missing: LeapV2_INCLUDE_DIR LeapV2_LIBRARY) 
+-- Could NOT find LeapSDK (missing: LeapSDK_DIR)
+-- Could NOT find ONNXRuntime (missing: ONNXRuntime_INCLUDE_DIR ONNXRuntime_LIBRARY) 
+-- Found METIS: /opt/homebrew/include (found suitable version "5.1.0", minimum required is "5.1.0")
+-- Found Threads: TRUE
+-- Found AMD headers in: /opt/homebrew/include/suitesparse
+-- Found AMD library: /opt/homebrew/lib/libamd.dylib
+-- Found CAMD headers in: /opt/homebrew/include/suitesparse
+-- Found CAMD library: /opt/homebrew/lib/libcamd.dylib
+-- Found CCOLAMD headers in: /opt/homebrew/include/suitesparse
+-- Found CCOLAMD library: /opt/homebrew/lib/libccolamd.dylib
+-- Found CHOLMOD headers in: /opt/homebrew/include/suitesparse
+-- Found CHOLMOD library: /opt/homebrew/lib/libcholmod.dylib
+-- Found COLAMD headers in: /opt/homebrew/include/suitesparse
+-- Found COLAMD library: /opt/homebrew/lib/libcolamd.dylib
+-- Found SPQR headers in: /opt/homebrew/include/suitesparse
+-- Found SPQR library: /opt/homebrew/lib/libspqr.dylib
+-- Found Config headers in: /opt/homebrew/include/suitesparse
+-- Found Config library: /opt/homebrew/lib/libsuitesparseconfig.dylib
+-- Found Intel Thread Building Blocks (TBB) library (2023.1 / ) include location: . Assuming SuiteSparseQR was compiled with TBB.
+-- Looking for shm_open in rt
+-- Looking for shm_open in rt - not found
+-- Could not find librt, but found SuiteSparse_config, assuming that SuiteSparse was compiled without timing.
+-- Found METIS: /opt/homebrew/include (found version "5.1.0")
+-- Looking for cholmod_metis
+-- Looking for cholmod_metis - found
+-- Found SuiteSparse: /opt/homebrew/include/suitesparse (found suitable version "7.14.0", minimum required is "7.12.1") found components: AMD CAMD CCOLAMD CHOLMOD COLAMD SPQR Config
+-- Found required Ceres dependency: Eigen version 5.0.1 in /opt/homebrew/share/eigen3/cmake
+-- Found required Ceres dependency: glog
+-- Found required Ceres dependency: gflags
+-- Found Ceres version: 2.2.0 installed in: /opt/homebrew with components: [EigenSparse, SparseLinearAlgebraLibrary, LAPACK, SuiteSparse, AccelerateSparse, SchurSpecializations]
+-- Performing Test HAVE_EGL
+-- Performing Test HAVE_EGL - Failed
+-- Could NOT find EGL (missing: EGL_INCLUDE_DIR HAVE_EGL EGL_LIBRARY) 
+-- Could NOT find Percetto (missing: Percetto_INCLUDE_DIR Percetto_LIBRARY) 
+-- Could NOT find Systemd (missing: SYSTEMD_INCLUDE_DIR SYSTEMD_LIBRARY) 
+-- Could NOT find OpenGLES (missing: OpenGLES_V3_LIBRARY OpenGLES_V3_INCLUDE_DIR V3) 
+-- Checking for module 'libuvc'
+--   Package 'libuvc' not found
+-- Found OpenGL: /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/OpenGL.framework
+-- OpenVR not found
+-- Enabled drivers: blubur_s1 drv_cemu drv_multi euroc hdk hydra ns psmv pssense psvr2 qwerty remote rift rokid simulated uvc
+-- Could NOT find Doxygen (missing: DOXYGEN_EXECUTABLE) 
+-- #####----- Config -----#####
+-- #    GIT_DESC:        v25.1.0-2294-g5aa80413e
+-- #
+-- #    BIGCERES:        ON
+-- #    BLUETOOTH:       OFF
+-- #    D3D11:           OFF
+-- #    D3D12:           OFF
+-- #    DBUS:            OFF
+-- #    EGL:             OFF
+-- #    GST (GStreamer): OFF
+-- #    HIDAPI:          OFF
+-- #    JPEG:            ON
+-- #    LIBBSD:          OFF
+-- #    LIBUSB:          ON
+-- #    LIBUVC:          OFF
+-- #    ONNXRUNTIME:     OFF
+-- #    OPENCV:          ON
+-- #    OPENGL:          ON
+-- #    OPENGLES:        OFF
+-- #    OPENGL_GLX:      OFF
+-- #    PERCETTO:        OFF
+-- #    REALSENSE:       OFF
+-- #    OPENVR:          OFF
+-- #    SDL2:            ON
+-- #    SYSTEM_CJSON:    OFF
+-- #    SYSTEMD:         OFF
+-- #    TRACY:           OFF
+-- #    VULKAN:          ON
+-- #    WAYLAND:         OFF
+-- #    WAYLAND_DIRECT:  OFF
+-- #    XCB:             OFF
+-- #    XLIB:            OFF
+-- #    XRANDR:          OFF
+-- #
+-- #    MODULE_AUX_HTC:                ON
+-- #    MODULE_AUX_VIVE:               ON
+-- #    MODULE_COMPOSITOR:             ON
+-- #    MODULE_COMPOSITOR_MAIN:        ON
+-- #    MODULE_COMPOSITOR_NULL:        ON
+-- #    MODULE_CONSTELLATION_TRACKING: ON
+-- #    MODULE_MERCURY_HANDTRACKING:   OFF
+-- #    MODULE_IPC:                    ON
+-- #    MODULE_MONADO_GUI:             ON
+-- #    MODULE_MONADO_CLI:             ON
+-- #    MODULE_OPENVR_STATE_TRACKER:   OFF
+-- #    MODULE_OPENXR_STATE_TRACKER:   ON
+-- #
+-- #    FEATURE_AHARDWARE_BUFFER:                      OFF
+-- #    FEATURE_CLIENT_DEBUG_GUI:                      OFF
+-- #    FEATURE_COLOR_LOG:                             OFF
+-- #    FEATURE_DEBUG_GUI:                             ON
+-- #    FEATURE_OPENVR:                                OFF
+-- #    FEATURE_OPENXR:                                ON
+-- #    FEATURE_RENDERDOC:                             OFF
+-- #    FEATURE_RERUN:                                 OFF
+-- #    FEATURE_SERVICE:                               ON
+-- #    FEATURE_SERVICE_SYSTEMD:                       OFF
+-- #    FEATURE_SLAM:                                  OFF
+-- #    FEATURE_SSE2:                                  ON
+-- #    FEATURE_STEAMVR_PLUGIN:                        ON
+-- #    FEATURE_TRACING:                               OFF
+-- #    FEATURE_WINDOW_PEEK:                           ON
+-- #
+-- #    FEATURE_OPENXR_ACTIVE_ACTION_SET_PRIORITY:             ON
+-- #    FEATURE_OPENXR_BODY_TRACKING_BD:                       OFF
+-- #    FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META:         OFF
+-- #    FEATURE_OPENXR_BODY_TRACKING_FB:                       OFF
+-- #    FEATURE_OPENXR_BODY_TRACKING_FIDELITY_META:            OFF
+-- #    FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META:           OFF
+-- #    FEATURE_OPENXR_DEBUG_UTILS:                            OFF
+-- #    FEATURE_OPENXR_DISPLAY_REFRESH_RATE:                   ON
+-- #    FEATURE_OPENXR_FACE_TRACKING2_FB:                      ON
+-- #    FEATURE_OPENXR_FACE_TRACKING_ANDROID:                  ON
+-- #    FEATURE_OPENXR_FACIAL_TRACKING_HTC:                    ON
+-- #    FEATURE_OPENXR_FB_FOVEATION:                           OFF
+-- #    FEATURE_OPENXR_FB_FOVEATION_CONFIGURATION:             OFF
+-- #    FEATURE_OPENXR_FB_SWAPCHAIN_UPDATE_STATE:              OFF
+-- #    FEATURE_OPENXR_FORCE_FEEDBACK_CURL:                    ON
+-- #    FEATURE_OPENXR_FUTURE_EXT:                             ON
+-- #    FEATURE_OPENXR_HAND_TRACKING_DATA_SOURCE_EXT:          ON
+-- #    FEATURE_OPENXR_HAND_TRACKING_EXT:                      ON
+-- #    FEATURE_OPENXR_HAPTIC_PCM:                             ON
+-- #    FEATURE_OPENXR_HEADLESS:                               ON
+-- #    FEATURE_OPENXR_INVERTED_ALPHA:                         OFF
+-- #    FEATURE_OPENXR_INTERACTION_CONTACTGLOVE2:              ON
+-- #    FEATURE_OPENXR_INTERACTION_EXT_EYE_GAZE:               ON
+-- #    FEATURE_OPENXR_INTERACTION_EXT_HAND:                   ON
+-- #    FEATURE_OPENXR_INTERACTION_EXT_PALM_POSE:              OFF
+-- #    FEATURE_OPENXR_INTERACTION_KHR_GENERIC:                OFF
+-- #    FEATURE_OPENXR_INTERACTION_LOGITECH_MX_INK:            OFF
+-- #    FEATURE_OPENXR_INTERACTION_ML2:                        ON
+-- #    FEATURE_OPENXR_INTERACTION_MNDX:                       ON
+-- #    FEATURE_OPENXR_INTERACTION_MSFT_HAND:                  OFF
+-- #    FEATURE_OPENXR_INTERACTION_OPPO:                       ON
+-- #    FEATURE_OPENXR_INTERACTION_WINMR:                      ON
+-- #    FEATURE_OPENXR_LAYER_COLOR_SCALE_BIAS:                 ON
+-- #    FEATURE_OPENXR_LAYER_CUBE:                             ON
+-- #    FEATURE_OPENXR_LAYER_CYLINDER:                         ON
+-- #    FEATURE_OPENXR_LAYER_DEPTH:                            OFF
+-- #    FEATURE_OPENXR_LAYER_EQUIRECT1:                        OFF
+-- #    FEATURE_OPENXR_LAYER_EQUIRECT2:                        ON
+-- #    FEATURE_OPENXR_LAYER_FB_ALPHA_BLEND:                   OFF
+-- #    FEATURE_OPENXR_LAYER_FB_DEPTH_TEST:                    OFF
+-- #    FEATURE_OPENXR_LAYER_FB_IMAGE_LAYOUT                   OFF
+-- #    FEATURE_OPENXR_LAYER_FB_PASSTHROUGH:                   ON
+-- #    FEATURE_OPENXR_LAYER_FB_SETTINGS:                      OFF
+-- #    FEATURE_OPENXR_META_FOVEATION_EYE_TRACKED:             OFF
+-- #    FEATURE_OPENXR_MNDX_FOVEATION_METAL:                   OFF
+-- #    FEATURE_OPENXR_OVERLAY:                                ON
+-- #    FEATURE_OPENXR_PERFORMANCE_SETTINGS:                   OFF
+-- #    FEATURE_OPENXR_PLANE_DETECTION:                        OFF
+-- #    FEATURE_OPENXR_SPACE_LOCAL_FLOOR:                      ON
+-- #    FEATURE_OPENXR_SPACE_UNBOUNDED:                        ON
+-- #    FEATURE_OPENXR_USER_PRESENCE:                          ON
+-- #    FEATURE_OPENXR_VISIBILITY_MASK:                        ON
+-- #    FEATURE_OPENXR_VULKAN_SWAPCHAIN_FORMAT_LIST:           ON
+-- #    FEATURE_OPENXR_XDEV_SPACE:                             ON
+-- #
+-- #    DRIVER_ANDROID:              OFF
+-- #    DRIVER_ARDUINO:              OFF
+-- #    DRIVER_BLUBUR_S1:            ON
+-- #    DRIVER_CONTACTGLOVE:         OFF
+-- #    DRIVER_DAYDREAM:             OFF
+-- #    DRIVER_DEPTHAI:              OFF
+-- #    DRIVER_EUROC:                ON
+-- #    DRIVER_HANDTRACKING:         OFF
+-- #    DRIVER_HDK:                  ON
+-- #    DRIVER_HYDRA:                ON
+-- #    DRIVER_ILLIXR:               OFF
+-- #    DRIVER_NS:                   ON
+-- #    DRIVER_OHMD:                 OFF
+-- #    DRIVER_OPENGLOVES:           OFF
+-- #    DRIVER_PSMV:                 ON
+-- #    DRIVER_PSSENSE:              ON
+-- #    DRIVER_PSVR:                 OFF
+-- #    DRIVER_PSVR2:                ON
+-- #    DRIVER_QWERTY:               ON
+-- #    DRIVER_REALSENSE:            OFF
+-- #    DRIVER_REMOTE:               ON
+-- #    DRIVER_RIFT:                 ON
+-- #    DRIVER_RIFT_SENSOR:          ON
+-- #    DRIVER_RIFT_S:               OFF
+-- #    DRIVER_ROKID:                ON
+-- #    DRIVER_SIMULATED:            ON
+-- #    DRIVER_SIMULAVR:             OFF
+-- #    DRIVER_SURVIVE:              OFF
+-- #    DRIVER_TWRAP:                ON
+-- #    DRIVER_UVC:                  ON
+-- #    DRIVER_ULV2:                 OFF
+-- #    DRIVER_ULV5:                 OFF
+-- #    DRIVER_VF:                   OFF
+-- #    DRIVER_VIVE:                 OFF
+-- #    DRIVER_WMR:                  OFF
+-- #    DRIVER_XREAL_AIR:            OFF
+-- #    DRIVER_STEAMVR_LIGHTHOUSE:   OFF
+-- #    DRIVER_SOLARXR:              OFF
+-- #####----- Config -----#####
+-- Configuring done (4.2s)
+-- Generating done (0.1s)
+-- Build files have been written to: /private/tmp/kosmickrisp-study/monado-build-m3-off
