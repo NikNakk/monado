@@ -481,3 +481,38 @@ Reverse-engineering `vrclient_x64.dll` (the installed SteamVR build) with
 
 The shim's probe code for this is uncommitted, with hard-coded RVAs for this
 SteamVR build only.
+
+### Root cause and fix: Home was classified as a D3D10 app — 2026-10-14
+
+A one-shot breakpoint trace of the shared-texture Submit function (648
+basic blocks; method and patch in the bridge's
+`docs/results/steamvr-gpu-timing-20261014/`) showed Home's Submit taking
+the internal API code 2 branch, which creates "Scene … D3D10" textures. The
+classifier (`vrclient_x64.dll` `0x18014eec0`) first asks a DirectX texture
+for `ID3D10Texture2D` and, if that works and the texture has a device,
+treats the app as D3D10; only otherwise does it try `ID3D11Texture2D`. DXMT's
+D3D11 resources answered every D3D10 interface, unlike Windows, and the
+D3D10 path never initialises the client's GPU timing. Hence pre-submit GPU
+0.00, total render GPU without Home's work, and auto-fidelity at level 8.
+
+DXMT `8624164` exposes D3D10 interfaces only on resources whose device was
+created through `D3D10CoreCreateDevice` (`GetDirectXVersion() == 10`); its
+fixture shows a D3D11 texture refusing them (previously accepted) and a D3D10
+texture keeping them. Run `run-mwxr-20261014-083339` with it installed:
+
+| | Before (`082539` etc.) | With `8624164` |
+| --- | ---: | ---: |
+| SteamVR pre-submit GPU | 0.00 | 5.8–8.0 ms |
+| SteamVR total render GPU | 0.3–0.5 ms | 6.4–8.5 ms |
+| Home auto-fidelity | climbs to level 8 | settles at level 0 within a second |
+| Home frames/s after 60 s | 75–81 (cool machine) | 114.3 |
+| Home frame period p10/50/90 | — | 7.5 / 8.5 / 11.1 ms |
+
+Home now holds about one refresh per frame at 120 Hz, at the lowest fidelity
+level, because its GPU frame at level 0 (6–8 ms) nearly fills the 8.33 ms
+budget. One run, not thermally controlled. The installed `d3d11.dll` is the
+`claude/timestamp-queries` branch including its diagnostic logging commits;
+which of the timestamp fixes (`df4e91d`, `b18b48a`, `0ebe00b`) this result
+also depends on has not been isolated. The fixed-fidelity manifest arguments
+are no longer needed; Home's arguments still carry auto-fidelity spew and
+`-condebug` for observation.

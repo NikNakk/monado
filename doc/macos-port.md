@@ -27,6 +27,10 @@ alive through source stalls but does not resolve loaded Home acquire delays;
 the unsuccessful clock experiment is removed.
 Re-analysis finds SteamVR starting at 90 Hz and Home holding the token in
 WaitGetPoses until its next frame; a refresh-rate and handoff trial is built.
+Root cause of Home's three-refresh cadence: DXMT D3D11 textures answered
+D3D10 interfaces, so SteamVR treated Home as D3D10 and never measured its GPU
+time; Home's auto-fidelity then ran at maximum resolution. DXMT `8624164`
+fixes the classification; Home settles at about 114 frames/s.
 
 > **Visual regression resolved:** the user confirms the explicit macOS
 > output-image barrier removes black noise with diagnostic readbacks off.
