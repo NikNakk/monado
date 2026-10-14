@@ -341,16 +341,20 @@ main(int argc, char **argv)
 				quad.size = view_locked ? XrExtent2Df{2, 2} : XrExtent2Df{1, 1};
 				XrCompositionLayerQuad quads[4] = {quad, quad, quad, quad};
 				const XrCompositionLayerBaseHeader *layers[5];
-				XrCompositionLayerProjection projection{XR_TYPE_COMPOSITION_LAYER_PROJECTION};
+				XrCompositionLayerProjection projection{};
+				projection.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
 				XrCompositionLayerProjectionView projection_views[2]{};
 				unsigned projection_count = projection_only || projection_quads ? 1 : 0;
 				if (projection_count) {
-					XrViewLocateInfo locate{XR_TYPE_VIEW_LOCATE_INFO};
+					XrViewLocateInfo locate{};
+					locate.type = XR_TYPE_VIEW_LOCATE_INFO;
 					locate.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
 					locate.displayTime = state.predictedDisplayTime;
 					locate.space = space;
-					XrViewState view_state{XR_TYPE_VIEW_STATE};
-					XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
+					XrViewState view_state{};
+					view_state.type = XR_TYPE_VIEW_STATE;
+					XrView views[2]{};
+					views[0].type = views[1].type = XR_TYPE_VIEW;
 					uint32_t view_count = 0;
 					checked(xrLocateViews(session, &locate, &view_state, 2, &view_count, views),
 					        "locate stereo views");
