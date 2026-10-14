@@ -395,3 +395,26 @@ for the remaining service lifetime and can explain the subsequent claim errors.
 The initial USB error code is not logged, so its precise cause is unresolved.
 A full headset/adapter power and USB reconnect with VR clients closed is the
 next user hardware check; its result is pending.
+
+#### Update to `42f4fde50` (2026-10-14)
+
+Both architecture builds were reconfigured to refresh the version tag and
+rebuilt at `42f4fde50`. That includes the unslewed macOS clock, the floor
+re-measuring Options hold and the earlier service changes. The native runtime,
+libmonado, Metal XPC client, service and CLI tools were installed into
+`~/.local/monado-psvr2` target by target (`cmake -P <dir>/cmake_install.cmake`
+for `ipc`, `service`, `openxr`, `libmonado`, `ctl`, `cli` and `gui`), which
+skips the SteamVR driver's hard-coded `/usr/local` destination. The installed
+service and runtime (arm64) and the Wine client in `build/x86_64` (x86_64)
+all report `v25.1.0-2287-g42f4fde50`.
+
+The service LaunchAgent's `XRT_FLOOR_EYE_HEIGHT_M` is now 1.72 (the user is
+1.84 m tall), and the agent was reloaded (bootout and bootstrap) to read it. It
+is idle and on demand. The previous prefix and both LaunchAgent plists are
+backed up in `build/arm64/local-install-backups/20261014-132622/`.
+
+`scripts/macos/rebuild-both` ends with `launchctl kickstart -k` on this
+service. That starts it even with no client, and with no client it never
+reaches its idle exit, so it holds the headset's USB interfaces. One such
+instance blocked an isolated run on 2026-10-14. These steps therefore omit
+the kickstart.
