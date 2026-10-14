@@ -1,0 +1,20 @@
+Randomness seeded to: 1721902851
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+test is a Catch2 v3.6.0 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+Vulkan acquire cancels after loss even when the event owner already consumed it
+-------------------------------------------------------------------------------
+/private/tmp/monado-macos-graphics-integration/tests/tests_oxr_vk_acquire_loss.cpp:85
+...............................................................................
+
+/private/tmp/monado-macos-graphics-integration/tests/tests_oxr_vk_acquire_loss.cpp:134: FAILED:
+  CHECK( event_dispatches.load() == 0 )
+with expansion:
+  1 == 0
+
+===============================================================================
+test cases: 1 | 1 failed
+assertions: 6 | 5 passed | 1 failed
