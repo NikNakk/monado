@@ -451,3 +451,33 @@ precaution (`0ebe00b`, wait for earlier command buffers). They correct D3D11
 timestamps for any title, but do not by themselves fix SteamVR Home, whose
 resolution follows SteamVR's figures. The fixed-fidelity workaround remains
 the dependable setting.
+
+### Why SteamVR's pre-submit GPU time is zero — 2026-10-14 (in progress)
+
+Reverse-engineering `vrclient_x64.dll` (the installed SteamVR build) with
+`objdump`, plus read-only probes from the OpenVR shim, gives:
+
+- `CGpuTiming::GetDeltas` (`0x1802d21d0`) reads a disjoint query and N
+  timestamps through `ID3D11DeviceContext::GetData` (flags 0, spinning to a
+  deadline) and writes `(tsᵢ − tsᵢ₋₁) / Frequency × 1000` ms; missing
+  results, a zero frequency or a disjoint frame give 0.
+- The compositor client (vtable RVA `0x3b4db8`; the only instance is the
+  global at RVA `0x49cd98`) calls it through `0x180143f50`, writing pre- and
+  post-submit GPU ms to `+0x130c`/`+0x1310`, which go into the per-frame
+  message to vrcompositor at `+0x1f0`/`+0x1f4`.
+- In Home, that client's `CGpuTiming` (at `+0xd68`) is constructed but never
+  initialised: its device slot (`+0xe00`) stays null, its frame and query
+  counts stay 0, and so do pre- and post-submit. A memory scan found no
+  other instance. So SteamVR never measures Home's GPU time; the A/B/C
+  queries seen earlier belong to some other timer.
+- Initialisation (`CGpuTiming::Init`, `0x1802d2610`, 3 queries, "Compositor
+  Client") happens in the shared-texture Submit path, function `0x180153d20`
+  in `vrcompositorsharedtextures.cpp`. For the D3D11-style path (internal
+  code 3/4) it should run on the first Submit, unless an earlier exit is
+  taken. The function's "Setting max texture dimensions …" log line, which
+  precedes one initialisation site, never appears in `vrclient_steamtours.txt`,
+  while its earlier "Found Windows 10 or newer…" line does. Which exit is
+  taken is not yet identified.
+
+The shim's probe code for this is uncommitted, with hard-coded RVAs for this
+SteamVR build only.
