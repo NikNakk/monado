@@ -1,0 +1,62 @@
+Cross-process peer pid=30908 producer pid=30909 format=37 layers=1
+PASS cross-process exact pixels format=37 layers=1 value=1
+PASS cross-process exact pixels format=37 layers=1 value=2
+PASS cross-process exact pixels format=37 layers=1 value=3
+PASS cross-process exact pixels format=37 layers=1 value=4
+PASS imported texture format=37 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+Cross-process peer pid=30908 producer pid=30909 format=37 layers=2
+PASS cross-process exact pixels format=37 layers=2 value=1
+PASS cross-process exact pixels format=37 layers=2 value=2
+PASS cross-process exact pixels format=37 layers=2 value=3
+PASS cross-process exact pixels format=37 layers=2 value=4
+PASS imported texture format=37 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+Cross-process peer pid=30908 producer pid=30909 format=50 layers=1
+PASS cross-process exact pixels format=50 layers=1 value=1
+PASS cross-process exact pixels format=50 layers=1 value=2
+PASS cross-process exact pixels format=50 layers=1 value=3
+PASS cross-process exact pixels format=50 layers=1 value=4
+PASS imported texture format=50 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+Cross-process peer pid=30908 producer pid=30909 format=50 layers=2
+PASS cross-process exact pixels format=50 layers=2 value=1
+PASS cross-process exact pixels format=50 layers=2 value=2
+PASS cross-process exact pixels format=50 layers=2 value=3
+PASS cross-process exact pixels format=50 layers=2 value=4
+PASS imported texture format=50 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+Cross-process peer pid=30908 producer pid=30909 format=44 layers=1
+PASS cross-process exact pixels format=44 layers=1 value=1
+PASS cross-process exact pixels format=44 layers=1 value=2
+PASS cross-process exact pixels format=44 layers=1 value=3
+PASS cross-process exact pixels format=44 layers=1 value=4
+PASS imported texture format=44 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+Cross-process peer pid=30908 producer pid=30909 format=44 layers=2
+PASS cross-process exact pixels format=44 layers=2 value=1
+PASS cross-process exact pixels format=44 layers=2 value=2
+PASS cross-process exact pixels format=44 layers=2 value=3
+PASS cross-process exact pixels format=44 layers=2 value=4
+PASS imported texture format=44 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+Cross-process peer pid=30908 producer pid=30909 format=43 layers=1
+PASS cross-process exact pixels format=43 layers=1 value=1
+PASS cross-process exact pixels format=43 layers=1 value=2
+PASS cross-process exact pixels format=43 layers=1 value=3
+PASS cross-process exact pixels format=43 layers=1 value=4
+PASS imported texture format=43 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+Cross-process peer pid=30908 producer pid=30909 format=43 layers=2
+PASS cross-process exact pixels format=43 layers=2 value=1
+PASS cross-process exact pixels format=43 layers=2 value=2
+PASS cross-process exact pixels format=43 layers=2 value=3
+PASS cross-process exact pixels format=43 layers=2 value=4
+PASS imported texture format=43 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=91 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=91 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=97 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=97 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=100 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=100 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=124 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=124 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=126 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=126 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=130 layers=1 identity=1 bound_without_memory=1 GPU values=1..4
+PASS imported texture format=130 layers=2 identity=1 bound_without_memory=1 GPU values=1..4
+PASS 491520 pixels; GPU producer/consumer ordering; colour, sRGB, float, depth and stencil
+2026-10-14 21:14:11.043 tests_macos_vk_metal_texture_import[30909:7837908] Metal API Validation Enabled

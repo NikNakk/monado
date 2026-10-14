@@ -1,0 +1,19 @@
+ WARN [client_vk_compositor_destroy] Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain
+Repeated Vulkan probe iteration 1/9 exit=1
+ WARN [client_vk_compositor_destroy] Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain
+Repeated Vulkan probe iteration 2/9 exit=1
+ WARN [client_vk_compositor_destroy] Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain
+Repeated Vulkan probe iteration 3/9 exit=1
+ WARN [client_vk_compositor_destroy] Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain
+Repeated Vulkan probe iteration 4/9 exit=1
+ WARN [client_vk_compositor_destroy] Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain
+Repeated Vulkan probe iteration 5/9 exit=1
+ WARN [client_vk_compositor_destroy] Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain
+Repeated Vulkan probe iteration 6/9 exit=1
+ WARN [client_vk_compositor_destroy] Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain
+Repeated Vulkan probe iteration 7/9 exit=1
+ WARN [client_vk_compositor_destroy] Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain
+Repeated Vulkan probe iteration 8/9 exit=1
+ERROR [client_vk_metal_texture_context_create] Vulkan Metal frontend budget exhausted: 8 active or retained contexts; restart after unresolved GPU work
+xrCreateSession failed: -6
+Repeated Vulkan probe iteration 9/9 exit=1
