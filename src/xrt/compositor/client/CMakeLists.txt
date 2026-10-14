@@ -42,6 +42,14 @@ if(APPLE)
 			comp_client PRIVATE comp_metal_release_wait_thread.h
 					    comp_metal_release_wait_thread.m
 			)
+		if(XRT_HAVE_VULKAN)
+			# Shared-event frame handoff for Vulkan clients.
+			target_sources(
+				comp_client PRIVATE comp_vk_client_shared_event.h
+						    comp_vk_client_shared_event.m
+				)
+			target_compile_definitions(comp_client PRIVATE XRT_HAVE_VK_CLIENT_SHARED_EVENT)
+		endif()
 		if(XRT_FEATURE_SERVICE)
 			# Service builds carry both swapchain paths: the service (XPC)
 			# path, and the direct path for clients that composite
