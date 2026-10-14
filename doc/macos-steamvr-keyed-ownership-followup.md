@@ -372,3 +372,23 @@ queries. Home's DXMT log shows two D3D11 devices, feature levels 11_1 and
 would run on a separate Metal queue and could not see Home's work.
 `4641e69` adds logging of timestamp query sources and readback outcomes and
 is installed for the next run.
+
+### The cause: deferred-context timestamps sampled before the work — 2026-10-14
+
+Run C, `run-mwxr-20261014-010446`, with the diagnostic build `4641e69`:
+all of Home's timestamp queries come through one immediate context on its
+feature level 11_0 device (whose command buffers carry its rendering), and
+every readback resolved from a counter sample, with no fallbacks. Home
+still read 0.22–0.29 ms. Readbacks such as one sample for four queries, and
+pairs inside command buffers with 12–57 µs of GPU work, pointed at the
+queries' placement rather than their resolution.
+
+DXMT's deferred context only listed `D3D11_QUERY_TIMESTAMP` queries;
+`ExecuteCommandList` ended them all on the immediate context before
+replaying the list. Source 2 records its frame in deferred contexts, so its
+begin/end pairs always sampled the same point ahead of the work. DXMT
+`b18b48a` records a sample op at each query's place in the command list, as
+occlusion queries already do. The fixture's deferred cases read 0.000 ms for
+10 and 40 render-target clears without it and 4.170 / 17.473 ms with it
+(5.799 / 19.464 ms flush-to-event). Installed; SteamVR and Steam need a
+restart to load it.
