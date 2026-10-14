@@ -185,7 +185,10 @@ timeout, while another application thread can enter the same function through
 lock. The instance event mutex protects queue push/pop, but is acquired after
 session polling in `oxr_poll_event`; it does not serialize those mutations.
 Reading `has_lost` in the acquire loop also needs a synchronization strategy.
-This is a source-level finding, not a reproduced race or a fixed implementation.
+The isolated [loss-status fix](macos-vulkan-acquire-loss-status.md) now removes
+the acquire-side event dispatcher and makes loss access atomic, with focused
+concurrency regression coverage. It is not integrated or installed. The original
+finding was static inspection, not a reproduced full-runtime race.
 
 Do not simply remove polling and restore an unbounded acquire wait: the loop
 was added for failed-producer recovery. Prefer a loss-aware/cancellable XRT
@@ -195,4 +198,4 @@ accesses. Validate concurrent event polling, pending GPU ownership, session
 loss and teardown with a targeted concurrency regression, ideally under a
 race detector. A lock around only the acquire-side call would not protect the
 other poller or all state readers. The user classified this as nonblocking for
-the local merge; no runtime change or race-safety claim is made here.
+the local merge. See the linked fix record for validation and deployment status.

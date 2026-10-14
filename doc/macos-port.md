@@ -17,6 +17,8 @@ preserved. The remote branch has not been pushed. The earlier user headset
 checkpoint covers the original Vulkan implementation; visual testing of the
 new installed build is a [required publication gate](macos-graphics-integration-review.md#installed-build-headset-gate-before-publication).
 The original hardware approval predates the barrier-fence and teardown fixes.
+The isolated [Vulkan acquire loss-status fix](macos-vulkan-acquire-loss-status.md)
+removes acquire-side event dispatch; it is not yet integrated or installed.
 
 The [2026-10-14 Vulkan Metal swapchain follow-up](macos-vulkan-metal-swapchains.md)
 keeps MoltenVK, adds opt-in native Vulkan array/depth images through standard
