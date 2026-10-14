@@ -20,7 +20,26 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <inttypes.h>
 
+static uint64_t runtime_submit_count, runtime_submit_ns, runtime_idle_count, runtime_idle_ns;
+static uint64_t
+probe_clock_ns(void)
+{
+	struct timespec value;
+	clock_gettime(CLOCK_MONOTONIC, &value);
+	return (uint64_t)value.tv_sec * 1000000000ull + value.tv_nsec;
+}
+static VKAPI_ATTR VkResult VKAPI_CALL
+probe_queue_wait_idle(VkQueue queue)
+{
+	uint64_t start = probe_clock_ns();
+	VkResult result = vkQueueWaitIdle(queue);
+	runtime_idle_count++;
+	runtime_idle_ns += probe_clock_ns() - start;
+	return result;
+}
 static VKAPI_ATTR VkResult VKAPI_CALL
 probe_queue_submit(VkQueue queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence)
 {
@@ -29,13 +48,19 @@ probe_queue_submit(VkQueue queue, uint32_t count, const VkSubmitInfo *submits, V
 		fprintf(stderr, "probe suppressed runtime producer signal\n");
 		return VK_SUCCESS;
 	}
-	return vkQueueSubmit(queue, count, submits, fence);
+	uint64_t start = probe_clock_ns();
+	VkResult result = vkQueueSubmit(queue, count, submits, fence);
+	runtime_submit_count++;
+	runtime_submit_ns += probe_clock_ns() - start;
+	return result;
 }
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
 probe_get_device_proc(VkDevice device, const char *name)
 {
 	if (strcmp(name, "vkQueueSubmit") == 0)
 		return (PFN_vkVoidFunction)probe_queue_submit;
+	if (strcmp(name, "vkQueueWaitIdle") == 0)
+		return (PFN_vkVoidFunction)probe_queue_wait_idle;
 	return vkGetDeviceProcAddr(device, name);
 }
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
@@ -751,9 +776,10 @@ clear_swapchain_image(VkDevice device,
 	return 0;
 }
 
-int
-main(void)
+static int
+run_probe(void)
 {
+	runtime_submit_count = runtime_submit_ns = runtime_idle_count = runtime_idle_ns = 0;
 	int ret = 1;
 	void *runtime = NULL;
 	XrInstance instance = XR_NULL_HANDLE;
@@ -983,7 +1009,9 @@ main(void)
 	    .applicationVersion = 1,
 	    .pEngineName = "monado",
 	    .engineVersion = 1,
-	    .apiVersion = getenv("XRT_MACOS_KOSMICKRISP") ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1,
+	    .apiVersion = (getenv("XRT_MACOS_KOSMICKRISP") || getenv("MACOS_OPENXR_VULKAN_PROBE_API_1_2"))
+	                      ? VK_API_VERSION_1_2
+	                      : VK_API_VERSION_1_1,
 	};
 	VkInstanceCreateInfo vk_instance_info = {
 	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -1218,6 +1246,11 @@ main(void)
 			goto out;
 		}
 
+		fprintf(stderr,
+		        "Probe swapchain: format=%" PRId64 " width=%u height=%u samples=%u arrays=%u images=%u\n",
+		        swapchains[i].create_info.format, swapchains[i].create_info.width,
+		        swapchains[i].create_info.height, swapchains[i].create_info.sampleCount,
+		        swapchains[i].create_info.arraySize, swapchains[i].image_count);
 		swapchains[i].images = calloc(swapchains[i].image_count, sizeof(*swapchains[i].images));
 		if (swapchains[i].images == NULL) {
 			ret = fail_msg("calloc(swapchain images) failed");
@@ -1496,5 +1529,37 @@ out:
 	if (runtime != NULL) {
 		dlclose(runtime);
 	}
+	fprintf(stderr,
+	        "Runtime queue metrics: submits=%" PRIu64 " submit_ns=%" PRIu64 " idle_waits=%" PRIu64
+	        " idle_ns=%" PRIu64 "\n",
+	        runtime_submit_count, runtime_submit_ns, runtime_idle_count, runtime_idle_ns);
 	return ret;
+}
+
+
+int
+main(void)
+{
+	const char *repeat_env = getenv("MACOS_OPENXR_VULKAN_PROBE_REPEAT");
+	if (!repeat_env)
+		return run_probe();
+	char *end = NULL;
+	long repeat = strtol(repeat_env, &end, 10);
+	if (!end || *end || repeat < 1 || repeat > 16)
+		return fail_msg("Invalid repeat count, expected integer in [1,16]");
+	const char *runtime_path = getenv("MONADO_OPENXR_RUNTIME_PATH");
+	if (!runtime_path)
+		return fail_msg("Repeated probe needs MONADO_OPENXR_RUNTIME_PATH");
+	void *pin = dlopen(runtime_path, RTLD_NOW | RTLD_LOCAL);
+	if (!pin)
+		return fail_msg("Could not pin runtime for repeated sessions");
+	int result = 0;
+	for (long i = 0; i < repeat; ++i) {
+		int ret = run_probe();
+		fprintf(stderr, "Repeated Vulkan probe iteration %ld/%ld exit=%d\n", i + 1, repeat, ret);
+		if (ret)
+			result = ret;
+	}
+	dlclose(pin);
+	return result;
 }

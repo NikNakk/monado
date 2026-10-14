@@ -9,10 +9,17 @@
 #include "kosmickrisp_metal_interop.h"
 #include <dlfcn.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <string.h>
 DEBUG_GET_ONCE_BOOL_OPTION(kosmickrisp, "XRT_MACOS_KOSMICKRISP", false)
+static atomic_uint frontend_count;
+enum
+{
+	MAX_METAL_FRONTENDS = 8
+};
 struct client_vk_metal_context
 {
+	bool budget_reserved;
 	void *library;
 	const struct kk_metal_interop_api *api;
 	VkDevice vk_device;
@@ -64,6 +71,8 @@ client_vk_metal_destroy(struct client_vk_metal_context *c)
 	[c->device release];
 	if (c->library)
 		dlclose(c->library);
+	if (c->budget_reserved)
+		atomic_fetch_sub_explicit(&frontend_count, 1, memory_order_relaxed);
 	free(c);
 }
 struct client_vk_metal_context *
@@ -79,6 +88,15 @@ client_vk_metal_create(struct xrt_compositor_native *xcn,
 	struct client_vk_metal_context *c = calloc(1, sizeof(*c));
 	if (!c)
 		return NULL;
+	if (atomic_fetch_add_explicit(&frontend_count, 1, memory_order_relaxed) >= MAX_METAL_FRONTENDS) {
+		atomic_fetch_sub_explicit(&frontend_count, 1, memory_order_relaxed);
+		U_LOG_E(
+		    "KosmicKrisp process frontend budget exhausted (8 active or retained); restart after failed GPU "
+		    "work");
+		free(c);
+		return NULL;
+	}
+	c->budget_reserved = true;
 	c->vk_device = vk->device;
 	c->library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
 	PFN_kk_get_metal_interop_api get_api =
