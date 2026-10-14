@@ -91,11 +91,13 @@ u_floor_calibration_poll(struct u_floor_calibration *fc,
                          int64_t now_ns);
 
 /*!
- * Recenter managed STAGE horizontally and in yaw, preserving its floor height.
- * Refuses unavailable tracking and a head looking vertically up/down.
+ * Recenter managed STAGE horizontally and in yaw. With a positive
+ * @p eye_height_m, also put the floor that far below the head; with zero,
+ * preserve the floor height. Refuses unavailable tracking and a head looking
+ * vertically up/down.
  */
 xrt_result_t
-u_stage_recenter(struct xrt_space_overseer *xso, struct xrt_device *head, int64_t now_ns);
+u_stage_recenter(struct xrt_space_overseer *xso, struct xrt_device *head, int64_t now_ns, float eye_height_m);
 
 //! One trigger per continuous hold; inactive/disconnected input resets the hold.
 struct u_stage_recenter_hold

@@ -182,6 +182,22 @@ then in direct OpenXR Hyperbolica, checking heading, controller alignment,
 unchanged floor height and one action per hold.
 
 
+### The hold also re-measures the floor (2026-10-14)
+
+Automatic calibration runs once per service start, at the first moment the
+headset is worn, level and steady. A Wine game's isolated service starts with
+the game, often while the user is still seated at the computer. A seated
+measurement puts the floor about half a metre too low: the user is taller than
+everyone and cannot reach the floor, and the hold could not correct it.
+
+With `XRT_FLOOR_EYE_HEIGHT_M` set, the hold now also sets the floor that far
+below the head's current height (`u_stage_recenter` takes the eye height; zero
+keeps the earlier height-preserving behaviour). Stand upright, look ahead and
+hold Options. A pending automatic calibration is cancelled so that it cannot
+replace the standing measurement. Unit-tested: a seated calibration corrected
+by a standing hold, with a running app's floor following. Hardware check
+pending. The user's eye height is 1.72 m (1.84 m tall).
+
 ### Build and local configuration result
 
 The ARM64 runtime/service, x86_64 Wine runtime and companion SteamVR driver

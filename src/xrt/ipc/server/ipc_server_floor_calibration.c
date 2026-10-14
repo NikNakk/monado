@@ -85,8 +85,9 @@ update_right_controller(struct ipc_server_floor_calibration *fcal)
 		U_LOG_W("STAGE recenter: right-hand controller '%s' has no Sense Options button; gesture unavailable.",
 		        right->str);
 	} else {
-		U_LOG_I("STAGE recenter: hold Options on '%s' for %lld ms to recentre.", right->str,
-		        (long long)(fcal->hold_ns / U_TIME_1MS_IN_NS));
+		U_LOG_I("STAGE recenter: hold Options on '%s' for %lld ms to recentre%s.", right->str,
+		        (long long)(fcal->hold_ns / U_TIME_1MS_IN_NS),
+		        fcal->fc.eye_height_m > 0.0f ? " and re-measure the floor" : "");
 	}
 }
 
@@ -140,8 +141,16 @@ run_floor_calibration(void *ptr)
 			pressed = read_options_pressed(fcal, &now_ns);
 		}
 		if (u_stage_recenter_hold_update(&fcal->hold, pressed, now_ns, fcal->hold_ns)) {
-			xrt_result_t ret = u_stage_recenter(fcal->xso, fcal->head, now_ns);
-			if (ret == XRT_SUCCESS) {
+			// With an eye height configured, the hold also re-measures the
+			// floor, so a calibration taken while seated can be redone standing.
+			float eye_height = fcal->fc.eye_height_m;
+			xrt_result_t ret = u_stage_recenter(fcal->xso, fcal->head, now_ns, eye_height);
+			if (ret == XRT_SUCCESS && eye_height > 0.0f) {
+				U_LOG_I("STAGE recentered from right Sense Options hold, floor %.2f m below the head.",
+				        eye_height);
+				// The STAGE now holds a standing measurement; do not replace it.
+				fcal->calibrate = false;
+			} else if (ret == XRT_SUCCESS) {
 				U_LOG_I("STAGE recentered from right Sense Options hold (floor height preserved).");
 			} else {
 				U_LOG_W("STAGE recenter refused (%d); release Options before retrying.", ret);

@@ -217,7 +217,7 @@ u_stage_recenter_hold_update(struct u_stage_recenter_hold *hold, bool pressed, i
 }
 
 xrt_result_t
-u_stage_recenter(struct xrt_space_overseer *xso, struct xrt_device *head, int64_t now_ns)
+u_stage_recenter(struct xrt_space_overseer *xso, struct xrt_device *head, int64_t now_ns, float eye_height_m)
 {
 	struct xrt_pose identity = XRT_POSE_IDENTITY;
 	struct xrt_space_relation relation = XRT_SPACE_RELATION_ZERO;
@@ -248,6 +248,12 @@ u_stage_recenter(struct xrt_space_overseer *xso, struct xrt_device *head, int64_
 	}
 	stage.position.x = relation.pose.position.x;
 	stage.position.z = relation.pose.position.z;
+	if (eye_height_m > 0.0f) {
+		if (!isfinite(relation.pose.position.y)) {
+			return XRT_ERROR_POSE_NOT_ACTIVE;
+		}
+		stage.position.y = relation.pose.position.y - eye_height_m;
+	}
 	struct xrt_vec3 up = {0, 1, 0};
 	math_quat_from_angle_vector(atan2f(-facing.x, -facing.z), &up, &stage.orientation);
 	return xrt_space_overseer_set_reference_space_offset(xso, XRT_SPACE_REFERENCE_TYPE_STAGE, &stage);
