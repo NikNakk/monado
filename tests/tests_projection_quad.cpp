@@ -22,10 +22,12 @@ TEST_CASE("Projection quad two-pass rendering preserves bounded stereo pixels", 
 						f.run_composition(bounded, dist, 1, true);
 						REQUIRE(f.snapshot() == pixels);
 						bool has_rgb = false;
-						for (size_t i = 0; i < pixels.size(); ++i) has_rgb |= i % 4 != 3 && pixels[i] != 0;
+						for (size_t i = 0; i < pixels.size(); ++i)
+							has_rgb |= i % 4 != 3 && pixels[i] != 0;
 						CHECK(has_rgb);
 						if (!alpha) {
-							for (size_t i = 3; i < pixels.size(); i += 4) REQUIRE(pixels[i] == 255);
+							for (size_t i = 3; i < pixels.size(); i += 4)
+								REQUIRE(pixels[i] == 255);
 						}
 					}
 				}
@@ -38,13 +40,15 @@ TEST_CASE("Projection quad full pipeline GPU benchmark", "[.][gpu][projection_qu
 {
 	const char *path = std::getenv("MONADO_PROJECTION_QUAD_CSV");
 	REQUIRE(path != nullptr);
-	std::unique_ptr<FILE, decltype(&std::fclose)> file(std::fopen(path, "w"), &std::fclose);
+	auto close_file = [](FILE *f) { std::fclose(f); };
+	std::unique_ptr<FILE, decltype(close_file)> file(std::fopen(path, "w"), close_file);
 	REQUIRE(file != nullptr);
 	std::fprintf(file.get(), "scale,round,variant,total_ms,host_start_ns,host_end_ns\n");
 	for (float scale : {1.f, 1.4f}) {
 		ProjectionQuadFixture f;
 		f.init_composition(2000, 2040, scale);
-		if (!f.queries) SKIP("GPU timestamps unavailable");
+		if (!f.queries)
+			SKIP("GPU timestamps unavailable");
 		f.scene(0, 1, 1);
 		auto original = f.layer_pipeline(false, true, true);
 		auto bounded = f.layer_pipeline(true, true, true);
@@ -58,8 +62,8 @@ TEST_CASE("Projection quad full pipeline GPU benchmark", "[.][gpu][projection_qu
 				double elapsed = f.run_composition(candidate ? bounded : original, dist, 6, false);
 				uint64_t end_ns = os_monotonic_get_ns();
 				std::fprintf(file.get(), "%.2f,%u,%s,%.9f,%llu,%llu\n", scale, round,
-				             candidate ? "bounds" : "baseline", elapsed,
-				             (unsigned long long)begin_ns, (unsigned long long)end_ns);
+				             candidate ? "bounds" : "baseline", elapsed, (unsigned long long)begin_ns,
+				             (unsigned long long)end_ns);
 				std::fflush(file.get());
 			}
 		}
