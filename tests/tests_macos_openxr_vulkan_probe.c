@@ -21,6 +21,31 @@
 #include <stdlib.h>
 #include <string.h>
 
+static VKAPI_ATTR VkResult VKAPI_CALL
+probe_queue_submit(VkQueue queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence)
+{
+	if (getenv("MACOS_OPENXR_VULKAN_PROBE_SUPPRESS_RUNTIME_SIGNAL") && count == 1 &&
+	    submits[0].commandBufferCount == 0 && submits[0].signalSemaphoreCount > 0) {
+		fprintf(stderr, "probe suppressed runtime producer signal\n");
+		return VK_SUCCESS;
+	}
+	return vkQueueSubmit(queue, count, submits, fence);
+}
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+probe_get_device_proc(VkDevice device, const char *name)
+{
+	if (strcmp(name, "vkQueueSubmit") == 0)
+		return (PFN_vkVoidFunction)probe_queue_submit;
+	return vkGetDeviceProcAddr(device, name);
+}
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+probe_get_instance_proc(VkInstance instance, const char *name)
+{
+	if (strcmp(name, "vkGetDeviceProcAddr") == 0)
+		return (PFN_vkVoidFunction)probe_get_device_proc;
+	return vkGetInstanceProcAddr(instance, name);
+}
+
 static int
 fail_xr(const char *what, XrResult result)
 {
@@ -839,10 +864,11 @@ main(void)
 
 	const char *enabled_xr_extensions[] = {
 	    XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
+	    XR_EXTX_OVERLAY_EXTENSION_NAME,
 	};
 	XrInstanceCreateInfo instance_info = {
 	    .type = XR_TYPE_INSTANCE_CREATE_INFO,
-	    .enabledExtensionCount = 1,
+	    .enabledExtensionCount = getenv("MACOS_OPENXR_VULKAN_PROBE_OVERLAY") ? 2 : 1,
 	    .enabledExtensionNames = enabled_xr_extensions,
 	};
 	snprintf(instance_info.applicationInfo.applicationName, sizeof(instance_info.applicationInfo.applicationName),
@@ -957,7 +983,7 @@ main(void)
 	    .applicationVersion = 1,
 	    .pEngineName = "monado",
 	    .engineVersion = 1,
-	    .apiVersion = VK_API_VERSION_1_1,
+	    .apiVersion = getenv("XRT_MACOS_KOSMICKRISP") ? VK_API_VERSION_1_2 : VK_API_VERSION_1_1,
 	};
 	VkInstanceCreateInfo vk_instance_info = {
 	    .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -973,7 +999,7 @@ main(void)
 	    .type = XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR,
 	    .systemId = system_id,
 	    .createFlags = 0,
-	    .pfnGetInstanceProcAddr = vkGetInstanceProcAddr,
+	    .pfnGetInstanceProcAddr = probe_get_instance_proc,
 	    .vulkanCreateInfo = &vk_instance_info,
 	    .vulkanAllocator = NULL,
 	};
@@ -1032,7 +1058,7 @@ main(void)
 	    .type = XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR,
 	    .systemId = system_id,
 	    .createFlags = 0,
-	    .pfnGetInstanceProcAddr = vkGetInstanceProcAddr,
+	    .pfnGetInstanceProcAddr = probe_get_instance_proc,
 	    .vulkanPhysicalDevice = physical_device,
 	    .vulkanCreateInfo = &vk_device_info,
 	    .vulkanAllocator = NULL,
@@ -1047,8 +1073,11 @@ main(void)
 		goto out;
 	}
 
+	XrSessionCreateInfoOverlayEXTX overlay = {.type = XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX,
+	                                          .sessionLayersPlacement = 1};
 	XrGraphicsBindingVulkanKHR binding = {
 	    .type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR,
+	    .next = getenv("MACOS_OPENXR_VULKAN_PROBE_OVERLAY") ? &overlay : NULL,
 	    .instance = vk_instance,
 	    .physicalDevice = physical_device,
 	    .device = vk_device,
@@ -1164,7 +1193,7 @@ main(void)
 		    .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
 		    .createFlags = 0,
 		    .usageFlags = get_swapchain_usage_flags(),
-		    .format = formats[0],
+		    .format = getenv("MACOS_OPENXR_VULKAN_PROBE_BGRA") ? VK_FORMAT_B8G8R8A8_UNORM : formats[0],
 		    .sampleCount = views[i].recommendedSwapchainSampleCount,
 		    .width = views[i].recommendedImageRectWidth,
 		    .height = views[i].recommendedImageRectHeight,
