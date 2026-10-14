@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--format', type=int, default=44, help='Vulkan colour format (44=BGRA8 UNORM; 50=BGRA8 sRGB)')
     parser.add_argument('--hosted', action='store_true')
     parser.add_argument('--headset', action='store_true')
+    parser.add_argument('--no-readbacks', action='store_true', help='Visual acceptance: disable compositor pixel readbacks')
     parser.add_argument('--per-view', action='store_true', help='Existing single-layer IOSurface path')
     parser.add_argument('--cpu-handoff', action='store_true', help='Keep texture import, disable frame shared-event option')
     parser.add_argument('--suppress-signal', action='store_true', help='Test-only missing producer timeline signal')
@@ -92,7 +93,11 @@ def main():
             # it in finally. Only the child receives the experimental options.
             command = [sys.executable, str(Path(__file__).with_name('run-gpu-sync-service.py')),
                        '--build', str(build), '--output', str(output), '--client-timeout',
-                       str(max(30, args.seconds+15, args.repeat*3+15)), '--sample-interval', '15']
+                       str(max(30, args.seconds+15, args.repeat*3+15))]
+            if args.no_readbacks:
+                command += ['--service-env', 'XRT_COMPOSITOR_LOG_APPLE_SAMPLES=0']
+            else:
+                command += ['--sample-interval', '15']
             if args.headset:
                 command += ['--headset']
             child = Path(temporary)/'client.py'
@@ -116,6 +121,8 @@ def main():
                    MACOS_OPENXR_VULKAN_PROBE_SOURCE_SAMPLES='1',
                    MACOS_OPENXR_VULKAN_PROBE_ASYNC_SUBMIT='1',
                    MACOS_OPENXR_VULKAN_PROBE_REPEAT=str(args.repeat))
+        if args.no_readbacks:
+            env.pop('MACOS_OPENXR_VULKAN_PROBE_SOURCE_SAMPLES', None)
         for key, enabled in [('MACOS_OPENXR_VULKAN_PROBE_SUPPRESS_RUNTIME_SIGNAL', args.suppress_signal),
                              ('MACOS_OPENXR_VULKAN_PROBE_UNSUPPORTED_CUBE', args.unsupported_cube)]:
             env.pop(key, None)

@@ -130,7 +130,9 @@ The budget command deliberately exits nonzero: require eight retained warnings
 and ninth-session `XR_ERROR_INITIALIZATION_FAILED`. `--unsupported-cube` also
 exits nonzero with `XR_ERROR_FEATURE_UNSUPPORTED`. `--cpu-handoff` and `--per-view`
 select the two fallback regressions. `--moltenvk` overrides the library path.
-For user-run PS VR2 tests, add `--headset`, then `--hosted` for client composition.
+For user-run PS VR2 visual tests, add `--headset --no-readbacks`, then
+`--hosted` for client composition. `--no-readbacks` disables compositor source
+and target pixel readbacks while retaining initialization logs.
 The runner rejects a hosted fallback as a successful hosted test. No new headset
 run was made in this follow-up.
 
