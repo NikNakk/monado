@@ -1,0 +1,3 @@
+Cross-process peer pid=30934 producer pid=30935 format=37 layers=1
+2026-10-14 21:14:13.762 tests_macos_vk_metal_texture_import[30935:7838064] Metal API Validation Enabled
+FAIL consumer ran before producer gate

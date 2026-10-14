@@ -7,6 +7,15 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [2026-10-14 Vulkan Metal swapchain follow-up](macos-vulkan-metal-swapchains.md)
+keeps MoltenVK, adds opt-in native Vulkan array/depth images through standard
+Metal object import, and preserves the existing shared-event frame handoff.
+Exact GPU-ordered pixels pass within and across processes; service `hello_xr`,
+recovery and repeated-session tests pass. Hosted/headset acceptance remains a
+user hardware gate. KosmicKrisp research is archived; no integration merge or
+installed runtime change is included.
+
+
 The [2026-10-13 GPU-efficiency study](macos-compositor-gpu-efficiency.md) retains
 opt-in quad bounds, a guarded projection-plus-quads specialization, GPU pass
 profiling and repeatable benchmarks. Rejected presentation, buffering, fusion

@@ -82,9 +82,26 @@ and flash phases, with no new warnings; the in-process run logged the local
 semaphore pair. Those runs' timings are not comparable, because full logging
 and readbacks load the service. The isolated service inherited
 `XRT_MACOS_GPU_QUEUE_PRIORITY=0` from the launchd environment, which applied
-equally to every run. The default stereo array swapchain asserts in MoltenVK
-(IOSurface textures cannot be 2D arrays) with or without this option. Still to
-test: a real Vulkan application, and Game Mode.
+equally to every run. The subsequent opt-in Metal texture path supports native
+stereo arrays and depth, and unmodified Vulkan `hello_xr` passes offscreen.
+With that path disabled, advanced geometry is explicitly unsupported instead
+of reaching the old IOSurface array assertion. User headset acceptance and
+Game Mode remain gates; see [the implementation](macos-vulkan-metal-swapchains.md).
+
+## Native Vulkan Metal array/depth swapchains (2026-10-14)
+
+`XRT_MACOS_VK_CLIENT_METAL_TEXTURES=1` selects the existing Metal texture provider
+for native Vulkan arrays/depth and wraps its textures with `VK_EXT_metal_objects`.
+Set it in the client; default is `0`. Single-layer colour keeps IOSurface.
+Enable `XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` separately to avoid the CPU frame
+handoff fallback. No compositor or production texture copy is added.
+
+Single-mip, single-sample 2D/array images are supported for formats listed in
+[the compatibility matrix](macos-vulkan-metal-swapchains.md#compatibility-matrix).
+Cube/MSAA/mips and protected/mutable images are explicitly unsupported. Same-GPU
+sharing is required. Teardown drains for at most 500 ms, retaining unresolved
+frontends until exit; the process permits eight active/retained frontends.
+Existing Metal allocation/enumeration preferences are preserved.
 
 ## Compute efficiency and profiling (2026-10-13)
 

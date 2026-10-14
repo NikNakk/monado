@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-14",
+  "branch": "codex/macos-vulkan-metal-swapchains",
+  "source_commit": "f1841a3bc3bb840a787493a26add3d170da94ce3",
+  "runtime_commit": "fef029cd7",
+  "fixture_commit": "ea4ede3cb",
+  "allocation_guard_commit": "f1841a3bc",
+  "ctest_source_commit": "ea4ede3cb",
+  "ctest_result": "75/75 passed",
+  "guard_followup": "60-frame separate-process array service regression passed after f1841a3bc",
+  "hardware": {
+    "model": "M5 MacBook Air Mac17,4",
+    "ram_gb": 24,
+    "architecture": "arm64"
+  },
+  "os": "macOS 26.7.1 / 25G241",
+  "xcode": "27.0 / 27A266a",
+  "dependencies": {
+    "moltenvk": "1.4.2",
+    "vulkan_headers": "1.4.357.0",
+    "vulkan_loader": "1.4.357.0",
+    "cmake": "4.4.3",
+    "ninja": "1.13.2"
+  },
+  "build": {
+    "generator": "Ninja",
+    "build_type": "RelWithDebInfo",
+    "compiler": "AppleClang 21.0.0.21000334",
+    "flags": "-O2 -g -DNDEBUG",
+    "extra_flags": "",
+    "architecture": "host default arm64",
+    "mesa_dependencies": false
+  },
+  "hello_sdk_source": "3ed64d0f9bb680f24b80a085091e5c8fab38f7b7",
+  "texture_proof": {
+    "local_pixels": 491520,
+    "local_format_layer_cases": 20,
+    "remote_pixels": 196608,
+    "remote_format_layer_value_checks": 32,
+    "values": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "negative_control": "missing GPU wait detected before gate release",
+    "cpu_readbacks": "verification only"
+  },
+  "limits": [
+    "No new physical headset run",
+    "Hosted offscreen fell back to service; not counted as hosted validation",
+    "No new performance benchmark",
+    "No Linux CI or Wine run",
+    "Float/depth exact cross-process pixels not tested"
+  ],
+  "archive_tag": "archive/kosmickrisp-2026-10-14",
+  "archive_commit": "1025b3623230965052df1e3c1373adf24c52037b",
+  "binary_sha256": {
+    "runtime": "3ee3b78eb7db1535f122a29168722eebcd5bab4514f119c35593666a98fa487f",
+    "service": "fb65ddf2594641a4ba396d80a60535ecf085105a6288ea0999e6138604cec169",
+    "vulkan_probe": "232ed034fb38d82e27df51728983df827f08657c53cf3d2a3299711dde53abf3",
+    "texture_import": "a5006601ac680189a278fbfdea50f532f3cfe181a48c09965739845026aa3bed",
+    "texture_peer": "3ea344bf36be5de3494503bd98057d3a00109f94e199a5c88d29d8a6fe5ea8ba",
+    "hello_xr": "2c93819743a1ab487e7a74d04e501b770f40ad47547a462a7a8472eebfdee4f9",
+    "moltenvk": "05df2d2145b9ef5b86b08ed93a7a6e916815c2bbac244298a50b2d58061600d1"
+  }
+}

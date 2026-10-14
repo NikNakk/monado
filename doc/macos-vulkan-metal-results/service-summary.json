@@ -1,0 +1,46 @@
+{
+  "bgra-service": {
+    "client_exit": 0,
+    "target": "debug_image",
+    "simulated_hmd": true
+  },
+  "srgb-service": {
+    "client_exit": 0,
+    "target": "debug_image",
+    "simulated_hmd": true
+  },
+  "cpu-service": {
+    "client_exit": 0,
+    "target": "debug_image",
+    "simulated_hmd": true
+  },
+  "iosurface-service": {
+    "client_exit": 1,
+    "target": "debug_image",
+    "simulated_hmd": true
+  },
+  "hello-final": {
+    "client_exit": 0,
+    "target": "debug_image",
+    "simulated_hmd": true
+  },
+  "metal-baseline": {
+    "client_exit": 0,
+    "target": "debug_image",
+    "simulated_hmd": true
+  },
+  "concurrent-recovery": {
+    "client_exit": 0,
+    "target": "debug_image",
+    "simulated_hmd": true,
+    "concurrent_healthy": true,
+    "replacement": true,
+    "missing_signal_session_loss": true,
+    "fault_process_seconds": 1.930983334
+  },
+  "provider-guard-service": {
+    "client_exit": 0,
+    "target": "debug_image",
+    "simulated_hmd": true
+  }
+}

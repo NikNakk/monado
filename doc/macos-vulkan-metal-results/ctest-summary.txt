@@ -1,0 +1,7 @@
+100% tests passed out of 75
+
+Label Time Summary:
+gpu      =   9.89 sec*proc (18 tests)
+macos    =   8.33 sec*proc (17 tests)
+
+Total Test time (real) =  37.00 sec
