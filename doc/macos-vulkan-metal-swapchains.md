@@ -19,6 +19,30 @@ The KosmicKrisp work is saved at local tag `archive/kosmickrisp-2026-10-14`
 `macos-upstream-clean`, the GPU harness branch and installed runtime are unchanged.
 Nothing has been merged or pushed.
 
+## User headset checkpoint — 2026-10-14
+
+At runner commit `9075aa35b`, the user reports that service `hello_xr`, service
+stereo arrays and hosted `hello_xr` work. Hosted stereo arrays are entirely
+black with readbacks off. The hosted-array log confirms direct Metal textures,
+an in-process event pair, 900 submitted frames and about 90 FPS; advancing GPU
+timelines do not establish visible image correctness. The failure was subsequently resolved by the probe event-loop fix below. The sampled repeat remained black to the user, but all sampled source layers
+and composed output have the expected colours. This narrows the failure to
+hosted visibility/presentation, rather than missing array pixels. The probe
+never polled OpenXR events after READY: hosted visibility changes are applied
+by `local_session_poll_events` in `ipc_client_system.c`. Commit `d419f8527` polls
+throughout the frame loop. The user confirms the 900-frame hosted-array repeat
+now shows colours with diagnostic readbacks disabled. All four requested visual
+tests therefore pass: service/hosted `hello_xr` and service/hosted arrays.
+
+The render-pass diagnostic aborted on Metal validation because its async
+fixture freed an image view while GPU work still referenced it. The same commit
+waits before destroying those test-only resources. Both 60-frame offscreen clear
+paths and concurrent fault/replacement recovery pass after the fix. No runtime
+sharing, synchronization or compositor defaults were changed.
+
+Raw runs: `/private/tmp/vulkan-metal-hardware-20261014-212814`. Preserve the
+working paths; keep the new array/depth switch experimental.
+
 ## Allocation and ordering
 
 Set `XRT_MACOS_VK_CLIENT_METAL_TEXTURES=1` **in the Vulkan client**. It defaults
@@ -77,7 +101,7 @@ also protect failure handling.
 | Missing producer signal | Bounded session loss; unresolved frontend retained | Recovery requires new session/process as described above |
 | Concurrent healthy/fault/replacement | Healthy 300 frames, failed overlay, replacement 60 frames | Separate service; fault process exits in 1.93 s in recorded run |
 | Repeated sessions | 12 healthy pass; eight unresolved retain; ninth rejected | Per-process frontend budget intentionally finite |
-| Hosted Vulkan path | Implementation reuses direct Metal provider | Offscreen hosting rejected and fell back; new code needs user headset validation |
+| Hosted Vulkan path | User confirms `hello_xr`; direct provider and event pair initialize | Initial black array probe fixed by polling visibility events; user confirms 900-frame no-readback repeat |
 | Cube, MSAA, mips, protected/mutable images | Explicit unsupported before Metal allocation | Cube rejection executed; other restrictions inspected |
 | Missing Metal object support | Simple native images retain fallback | Advanced geometry explicitly unsupported; alternate device not tested |
 | Linux / x86 Wine | macOS helper guarded; Linux queue safety preserved | No Linux CI or Wine regression run here |
@@ -133,8 +157,7 @@ select the two fallback regressions. `--moltenvk` overrides the library path.
 For user-run PS VR2 visual tests, add `--headset --no-readbacks`, then
 `--hosted` for client composition. `--no-readbacks` disables compositor source
 and target pixel readbacks while retaining initialization logs.
-The runner rejects a hosted fallback as a successful hosted test. No new headset
-run was made in this follow-up.
+The runner rejects a hosted fallback as a successful hosted test. The later user headset runs are recorded in the checkpoint above.
 
 ## Performance and remaining gates
 
@@ -148,8 +171,9 @@ or frame-pacing benchmark. No array/depth overhead gain is claimed.
 
 Next, in priority order:
 
-1. User-run `hello_xr` and stereo array tests on PS VR2, service then hosted;
-   confirm colours/depth, shutdown and presentation without diagnostic readbacks.
+1. **Visual gate passed:** user confirms `hello_xr` and stereo arrays on PS VR2,
+   service and hosted, with diagnostic readbacks disabled after `d419f8527`.
+   Longer application stress and compositor depth-reprojection checks remain.
 2. Comparable loaded/game/Game Mode runs, with GPU timings, CPU overhead and
    actual presentation timestamps. Keep both switches opt-in until validated.
 3. Linux CI, older Apple devices/OS versions, static-image/geometry limits,

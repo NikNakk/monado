@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-14",
+  "runner_commit": "9075aa35b",
+  "runtime_commit": "f1841a3bc",
+  "user_report": {
+    "hello-service": "works",
+    "array-service": "works",
+    "hello-hosted": "works",
+    "array-hosted": "black",
+    "array-hosted-sampled": "black",
+    "array-hosted-renderpass": "exited quickly"
+  },
+  "array_hosted_sampled_evidence": "Expected source and target colours despite reported black display",
+  "renderpass_failure": "Metal assertion: image view destroyed while GPU command buffer still referenced it",
+  "probe_fix_commit": "d419f8527",
+  "probe_fix_visual_confirmation": "User confirms array-hosted-fixed works, 900 frames, no diagnostic readbacks",
+  "followup_tests": {
+    "transfer_clear_service_frames": 60,
+    "renderpass_clear_service_frames": 60,
+    "concurrent_recovery": {
+      "concurrent_healthy": true,
+      "replacement": true,
+      "missing_signal_session_loss": true,
+      "fault_process_seconds": 1.2692741669999998
+    }
+  },
+  "raw_log_sha256": {
+    "hello-service": "90dec8ef4ea808de66d9e7faa21c42a0f1c035acfc474420230c40c91dca1f82",
+    "array-service": "e734d6dbc01352856c9a59231644f65ffa132cbabca17b93e638ac06d16066f4",
+    "hello-hosted": "12c0e4f059f59bb4dd3449ecdfb93221d9e7e0c9cb0c6553fb19fd9c544bd437",
+    "array-hosted": "c8ecf42a6b6a3c6ab4af225e3bd183c7b1421eb5e0a0d95837c49b595cb7e550",
+    "array-hosted-sampled": "9b793d3b367b7ec820aee8b84bd380b7f27d2e12b76a1e930b7f0106f7699460",
+    "array-hosted-renderpass": "18fa407a51e11e90f348d866b5c0b4e472d0829df098ee485caa5bdb45c62f6f",
+    "array-hosted-fixed": "ea80c2c3eccf81256ea462fc29b3d57b8ed62826535663fece7e204542645171"
+  },
+  "final_visual_gate": "All four requested service/hosted hello_xr and array runs pass by user report"
+}
