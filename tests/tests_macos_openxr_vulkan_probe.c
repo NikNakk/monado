@@ -191,6 +191,8 @@ get_swapchain_usage_flags(void)
 		usage |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
 	}
 
+	if (getenv("MACOS_OPENXR_VULKAN_PROBE_SOURCE_SAMPLES"))
+		usage |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
 	return usage;
 }
 
@@ -1221,12 +1223,17 @@ run_probe(void)
 		    .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
 		    .createFlags = 0,
 		    .usageFlags = get_swapchain_usage_flags(),
-		    .format = getenv("MACOS_OPENXR_VULKAN_PROBE_BGRA") ? VK_FORMAT_B8G8R8A8_UNORM : formats[0],
+		    .format = getenv("MACOS_OPENXR_VULKAN_PROBE_BGRA")
+		                  ? (getenv("MACOS_OPENXR_VULKAN_PROBE_SRGB") ? VK_FORMAT_B8G8R8A8_SRGB
+		                                                              : VK_FORMAT_B8G8R8A8_UNORM)
+		                  : (getenv("MACOS_OPENXR_VULKAN_PROBE_SRGB") ? VK_FORMAT_R8G8B8A8_SRGB : formats[0]),
 		    .sampleCount = views[i].recommendedSwapchainSampleCount,
 		    .width = views[i].recommendedImageRectWidth,
 		    .height = views[i].recommendedImageRectHeight,
 		    .faceCount = 1,
-		    .arraySize = per_view_swapchains ? 1 : view_count,
+		    .arraySize = per_view_swapchains
+		                     ? 1
+		                     : (getenv("MACOS_OPENXR_VULKAN_PROBE_UNSUPPORTED_ARRAY") ? 3 : view_count),
 		    .mipCount = 1,
 		};
 	}
@@ -1351,23 +1358,25 @@ run_probe(void)
 				                           get_probe_app_layout(&swapchains[i]));
 			}
 
-			const bool flash_phase = ((frame / 30) % 2) != 0;
-			VkClearColorValue clear_color = {
-			    .float32 =
-			        {
-			            i == 0 ? (flash_phase ? 1.00f : 0.95f) : (flash_phase ? 0.10f : 0.00f),
-			            i == 0 ? (flash_phase ? 0.95f : 0.15f) : (flash_phase ? 1.00f : 0.95f),
-			            i == 0 ? (flash_phase ? 0.10f : 0.00f) : (flash_phase ? 1.00f : 0.20f),
-			            1.0f,
-			        },
-			};
-			uint32_t layer = per_view_swapchains ? 0 : i;
-			if (clear_swapchain_image(vk_device, &vk_ctx, &swapchains[i], image_index, layer,
-			                          &clear_color) != 0) {
-				free(projection_views);
-				free(located_views);
-				ret = 1;
-				goto out;
+			for (uint32_t layer = 0; layer < swapchains[i].create_info.arraySize; ++layer) {
+				uint32_t eye = per_view_swapchains ? i : layer;
+				const bool flash_phase = ((frame / 30) % 2) != 0;
+				VkClearColorValue clear_color = {
+				    .float32 =
+				        {
+				            eye == 0 ? (flash_phase ? 1.00f : 0.95f) : (flash_phase ? 0.10f : 0.00f),
+				            eye == 0 ? (flash_phase ? 0.95f : 0.15f) : (flash_phase ? 1.00f : 0.95f),
+				            eye == 0 ? (flash_phase ? 0.10f : 0.00f) : (flash_phase ? 1.00f : 0.20f),
+				            1.0f,
+				        },
+				};
+				if (clear_swapchain_image(vk_device, &vk_ctx, &swapchains[i], image_index, layer,
+				                          &clear_color) != 0) {
+					free(projection_views);
+					free(located_views);
+					ret = 1;
+					goto out;
+				}
 			}
 		}
 

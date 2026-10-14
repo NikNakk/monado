@@ -7,6 +7,7 @@ import collections
 import csv
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -26,6 +27,9 @@ p.add_argument('--seconds', type=int, default=8, help='Hello viewing interval, 1
 p.add_argument('--bad-library', type=Path)
 p.add_argument('--output', type=Path, required=True)
 p.add_argument('--bgra', action='store_true')
+p.add_argument('--srgb', action='store_true')
+p.add_argument('--source-samples', action='store_true')
+p.add_argument('--array', action='store_true', help='Use one stereo-array swapchain')
 p.add_argument('--hosted', action='store_true')
 p.add_argument('--three-images', action='store_true')
 p.add_argument('--backend', choices=['kosmickrisp', 'moltenvk'], default='kosmickrisp')
@@ -80,6 +84,22 @@ if a.service_output:
                 raise RuntimeError('probe readiness/scheduling evidence missing')
         elif not any(events['scheduled'] > 0 for events in scopes.values()):
             raise RuntimeError('hello scheduling evidence missing')
+        if a.mode == 'probe' and a.source_samples:
+            client_log = (a.output / 'probe.log').read_text()
+            format_match = re.search(r'Probe swapchain: format=(\d+)', client_log)
+            if not format_match or int(format_match[1]) not in [37, 43, 44, 50]:
+                raise RuntimeError('source samples require an eight-bit colour format')
+            srgb = int(format_match[1]) in [43, 50]
+            expected = [(249, 108, 0, 255), (0, 249, 124, 255)] if srgb else [(242, 38, 0, 255), (0, 242, 51, 255)]
+            logs = (a.service_output / 'service.log').read_text() + client_log
+            seen = collections.defaultdict(dict)
+            pattern = r'vk-source frame=(\d+) eye=(\d+).*rgbaC=\((\d+),(\d+),(\d+),(\d+)\)'
+            for frame, eye, red, green, blue, alpha in re.findall(pattern, logs):
+                seen[frame][int(eye)] = tuple(map(int, [red, green, blue, alpha]))
+            def matching(eyes):
+                return all(eye in eyes and all(abs(x-y) <= 1 for x, y in zip(eyes[eye], expected[eye])) for eye in [0, 1])
+            if not any(matching(eyes) for eyes in seen.values()):
+                raise RuntimeError('compositor did not observe the expected distinct eye colours')
         sys.exit(0)
 if a.headset:
     p.error('--headset requires --service-output')
@@ -97,6 +117,12 @@ if a.backend == 'moltenvk':
     env['VK_DRIVER_FILES'] = str(a.molten_icd)
 if a.bgra:
     env['MACOS_OPENXR_VULKAN_PROBE_BGRA'] = '1'
+if a.srgb:
+    env['MACOS_OPENXR_VULKAN_PROBE_SRGB'] = '1'
+if a.array:
+    env['MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS'] = '0'
+if a.source_samples:
+    env['MACOS_OPENXR_VULKAN_PROBE_SOURCE_SAMPLES'] = '1'
 if a.hosted:
     env['XRT_MACOS_CLIENT_COMPOSITOR'] = '1'
 exe = str(a.build / 'tests/tests_macos_openxr_vulkan_probe')
@@ -155,7 +181,7 @@ try:
         cases = [('missing', {'MACOS_OPENXR_VULKAN_PROBE_SUPPRESS_RUNTIME_SIGNAL': '1',
                               'MACOS_OPENXR_VULKAN_PROBE_OVERLAY': '1'}),
                  ('bad-library', {'XRT_MACOS_KOSMICKRISP_LIBRARY': str(a.bad_library or a.output / 'absent.dylib')}),
-                 ('unsupported-array', {'MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS': '0'}),
+                 ('unsupported-array', {'MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS': '0', 'MACOS_OPENXR_VULKAN_PROBE_UNSUPPORTED_ARRAY': '1'}),
                  ('wrong-driver', {'VK_DRIVER_FILES': str(a.molten_icd)})]
         for name, extra in cases:
             wait(name, spawn(name, extra), 'reject', 12)

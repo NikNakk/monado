@@ -814,8 +814,8 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 #ifdef XRT_FEATURE_MACOS_KOSMICKRISP
 	struct xrt_swapchain_metal *xscm = NULL;
 	if (c->metal) {
-		if (!client_vk_metal_format(xinfo.format) || xinfo.array_size != 1 || xinfo.face_count != 1 ||
-		    xinfo.mip_count != 1 || xinfo.sample_count != 1 || xinfo.create ||
+		if (!client_vk_metal_format(xinfo.format) || (xinfo.array_size != 1 && xinfo.array_size != 2) ||
+		    xinfo.face_count != 1 || xinfo.mip_count != 1 || xinfo.sample_count != 1 || xinfo.create ||
 		    (xinfo.bits & (XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL | XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS |
 		                   XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT)))
 			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;

@@ -58,7 +58,9 @@ client_vk_metal_format(int64_t format)
 {
 	switch (format) {
 	case VK_FORMAT_R8G8B8A8_UNORM: return MTLPixelFormatRGBA8Unorm;
+	case VK_FORMAT_R8G8B8A8_SRGB: return MTLPixelFormatRGBA8Unorm_sRGB;
 	case VK_FORMAT_B8G8R8A8_UNORM: return MTLPixelFormatBGRA8Unorm;
+	case VK_FORMAT_B8G8R8A8_SRGB: return MTLPixelFormatBGRA8Unorm_sRGB;
 	default: return 0;
 	}
 }
@@ -159,8 +161,8 @@ client_vk_metal_import_image(struct client_vk_metal_context *c,
                              void *texture,
                              VkImage *out)
 {
-	if (!c || !client_vk_metal_format(info->format) || info->array_size != 1 || info->face_count != 1 ||
-	    info->mip_count != 1 || info->sample_count != 1 || info->create ||
+	if (!c || !client_vk_metal_format(info->format) || (info->array_size != 1 && info->array_size != 2) ||
+	    info->face_count != 1 || info->mip_count != 1 || info->sample_count != 1 || info->create ||
 	    (info->bits & (XRT_SWAPCHAIN_USAGE_DEPTH_STENCIL | XRT_SWAPCHAIN_USAGE_UNORDERED_ACCESS |
 	                   XRT_SWAPCHAIN_USAGE_MUTABLE_FORMAT)))
 		return VK_ERROR_FORMAT_NOT_SUPPORTED;
@@ -169,7 +171,7 @@ client_vk_metal_import_image(struct client_vk_metal_context *c,
 	                        .format = (VkFormat)info->format,
 	                        .extent = {info->width, info->height, 1},
 	                        .mipLevels = 1,
-	                        .arrayLayers = 1,
+	                        .arrayLayers = info->array_size,
 	                        .samples = VK_SAMPLE_COUNT_1_BIT,
 	                        .tiling = VK_IMAGE_TILING_OPTIMAL,
 	                        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
