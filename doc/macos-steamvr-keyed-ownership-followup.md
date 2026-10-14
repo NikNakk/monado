@@ -602,3 +602,32 @@ within scene/thermal variation: 40.2 frames/s, post-submit p50/p90
 thirds. The post-submit gap tracks the GPU frame time, consistent with GPU
 backpressure blocking Alyx's CPU after Submit (for example DXMT waiting for
 a frame slot or GPU completion); not yet confirmed by CPU sampling.
+
+### Alyx through xrizer at 120 Hz — 2026-10-14
+
+xrizer `cb2986a` (`NikNakk/xrizer` `windows-openxr-d3d11`), launched directly
+with the bridge's `run-in-process-alyx.zsh` against the isolated service
+(`XRT_MACOS_REFRESH_RATE_HZ=120`), clean DXMT baseline, `+vr_fidelity_level_auto 1`.
+Run `alyx-xrizer-20261014-120708`, Monado trace `monado_psvr2_7386_*`,
+about 16 minutes of play; thermal state nominal at start, fair at the end.
+
+An earlier attempt with `655d448` hung at Alyx's first Submit: the graphics
+session restart held the session write lock while input re-read the session.
+`c88ab64` fixes that. Launching Alyx from Steam does not test xrizer: Steam
+starts SteamVR and puts it first in `openvrpaths.vrpath`.
+
+- Recommended render target 2800×2856 (Monado's default 140% scale), and
+  Alyx's level-0 swapchain was 2268×2313 per eye. Through SteamVR at 120 Hz
+  it was 1252×1276, so xrizer renders about 3.3 times the pixels.
+- Auto-fidelity now gets real GPU timing (xrizer no longer reports a fixed
+  9 ms): it moved between levels during loads and held level 0 for 786 s.
+- 21.9 frames/s overall, falling from 25–27 to 17–18 as the machine heated;
+  frame intervals mostly 4–7 refreshes. Monado `gpu_actual` p10/50/90
+  31.2/33.3/41.2 ms, draw 2.0 ms p50, so the frame is GPU-bound.
+- xrizer reports 90 Hz to Alyx (`Refresh Rate: 90.00 Hz`) on a 120 Hz
+  service, and no HMD manufacturer (Alyx logs "falling back to gamepad"
+  before choosing Touch).
+
+Not a like-for-like comparison with SteamVR's 41.5 frames/s: the resolution
+gap explains most of the difference. A fair rerun needs a lower recommended
+size, for example `XRT_COMPOSITOR_SCALE_PERCENTAGE=63` (≈1260×1285).
