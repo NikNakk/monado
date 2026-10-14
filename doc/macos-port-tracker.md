@@ -12,10 +12,11 @@ integrated locally into `macos-upstream-clean` by the user-approved fast-forward
 to `c2c608a3f`. Both native Vulkan sharing options default to on, with independent
 `=0` fallbacks. Lifecycle/clock review fixes and the separately approved
 [Linux solver correction](macos-linux-solver-gate.md) are included. Linux passes
-48/48 tests and macOS 78/78. The installed runtime has not been rebuilt or
-restarted, and the remote branch has not been pushed. The earlier user headset
-checkpoint covers the original Vulkan implementation; a new installed-build
-checkpoint remains a user-operated follow-up.
+48/48 tests and macOS 78/78. The [installed service and Wine x64 client](macos-service-direct-xpc.md#integration-service-and-matching-wine-client-installation--2026-10-14)
+now match `v25.1.0-2310-g84b3749c2`, with the existing LaunchAgent preferences
+preserved. The remote branch has not been pushed. The earlier user headset
+checkpoint covers the original Vulkan implementation; visual testing of the
+new installed build remains a user-operated follow-up.
 
 The [2026-10-14 Vulkan Metal swapchain follow-up](macos-vulkan-metal-swapchains.md)
 keeps MoltenVK, adds opt-in native Vulkan array/depth images through standard

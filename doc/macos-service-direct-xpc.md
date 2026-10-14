@@ -422,3 +422,49 @@ reaches its idle exit, so it holds the headset's USB interfaces. One such
 instance blocked an isolated run on 2026-10-14. These steps omitted the
 kickstart, and the script now restarts the service only if it is already
 running.
+
+
+## Integration service and matching Wine client installation — 2026-10-14
+
+At the user's request, the service/native runtime and Wine x64 Monado client
+were rebuilt from integration revision `84b3749c20cd7f3daadf60434561649c8617cb74`.
+All three embed `v25.1.0-2310-g84b3749c2`; the x64 libmonado dependency also
+matches. Both caches were reconfigured with `-U GIT_DESC`, RelWithDebInfo and
+`XRT_FEATURE_OPENXR_INTERACTION_KHR_GENERIC=ON`, preserving the other settings.
+The ARM64 build retains its existing Perfetto configuration.
+
+The full ARM64 build and x64 `openxr_monado` target pass. The first ARM64 build
+hit a missing GUI archive at link time; Ninja recovered its incomplete build
+log and the retry completed without source changes. The external Perfetto SDK
+emitted GNU variadic-macro warnings. These are deployment-build observations,
+not changes to compiler policy or runtime features.
+
+The ARM64 prefix was refreshed with:
+
+```sh
+cmake --install build/arm64 --prefix "$HOME/.local/monado-psvr2"
+```
+
+The existing service LaunchAgent was booted out and re-bootstrapped, with a
+retry for launchd's transient bootstrap error 5. Neither LaunchAgent plist was
+rewritten; byte comparisons against the backup confirm all settings retained,
+including Sense 6DoF/calibration, floor eye height 1.72 m, timing traces,
+reconnection and GPU priority 0. The client environment still selects installed
+Monado and client compositing. The system OpenXR manifest link still resolves
+to the installed prefix. At verification the new service was running under
+launchd, PID 76316; no kickstart or manual headset visual test was performed.
+
+Wine's launcher uses `build/x86_64/openxr_monado-dev.json`, whose library path
+resolves to the newly built x64 runtime. The Windows bridge and DXMT source/
+binaries were not changed. Native ARM64 and Rosetta x64 load/loader-negotiation
+and extension-enumeration probes pass (61 and 57 extensions respectively),
+without creating an OpenXR instance/session. This proves loadability and matching
+binary revisions, not new headset presentation acceptance.
+
+The previous prefix and both plists are preserved in
+`build/arm64/local-install-backups/20261014-230758-integration/`.
+Build/install/load logs remain in the two normal build directories. The durable
+[installation manifest](macos-graphics-integration-results/local-install-20261014.json)
+records source revision, architecture, binary hashes, manifests and backup path.
+Any already-open application must reopen its runtime to use the rebuilt client.
+The following documentation commit does not alter the deployed runtime sources.
