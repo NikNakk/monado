@@ -1,6 +1,7 @@
 // Copyright 2018-2024, Collabora, Ltd.
 // Copyright 2023-2026, NVIDIA CORPORATION.
 // Copyright 2026, Beyley Cardellio
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -1476,7 +1477,7 @@ struct oxr_session
 	 * Used as reference for local space.  */
 	// struct xrt_space_relation local_space_pure_relation;
 
-	bool has_lost;
+	xrt_atomic_s32_t has_lost;
 };
 
 /*!

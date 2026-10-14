@@ -1,4 +1,5 @@
 // Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -10,6 +11,7 @@
 
 #include "xrt/xrt_config_os.h"
 #include "xrt/xrt_config_build.h"
+#include "xrt/xrt_session.h"
 #if defined(XRT_OS_OSX) && defined(XRT_MODULE_COMPOSITOR_UTIL)
 #include "client/comp_vk_client_shared_event.h"
 #include "client/comp_vk_metal_texture.h"
@@ -52,10 +54,15 @@ vk_implicit_acquire_image(struct oxr_logger *log,
 				xret = xrt_swapchain_wait_image(xsc, 50000000ll, index);
 				if (xret != XRT_TIMEOUT)
 					break;
-				CHECK_OXR_RET(oxr_session_poll(log, sc->sess));
-				if (sc->sess->has_lost)
+				// Do not dispatch OpenXR events here: xrPollEvent may run on another thread.
+				bool lost = false;
+				xrt_result_t status = xrt_session_get_loss_status(sc->sess->xs, &lost);
+				OXR_CHECK_XRET(log, sc->sess, status, xrt_session_get_loss_status);
+				if (lost || xrt_atomic_s32_load(&sc->sess->has_lost)) {
+					xrt_atomic_s32_store(&sc->sess->has_lost, 1);
 					return oxr_error(log, XR_ERROR_SESSION_LOST,
 					                 "Producer session lost during Vulkan image acquire");
+				}
 			}
 		} else
 #endif

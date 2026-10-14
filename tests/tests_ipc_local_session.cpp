@@ -14,6 +14,7 @@
 
 namespace {
 int remote_creates;
+xrt_session *remote_session;
 
 #ifdef XRT_OS_OSX
 // Tests that lose sessions on purpose expect the threshold they were written
@@ -120,7 +121,8 @@ ipc_call_system_get_properties(ipc_connection *, xrt_system_properties *)
 xrt_session *
 ipc_client_session_create(ipc_connection *)
 {
-	return &b_session_create(nullptr)->base;
+	remote_session = &b_session_create(nullptr)->base;
+	return remote_session;
 }
 xrt_result_t
 ipc_client_create_native_compositor(xrt_system_compositor *, const xrt_session_info *, xrt_compositor_native **)
@@ -520,3 +522,38 @@ TEST_CASE("completed frame misses readiness cutoff without losing ownership and 
 	xrt_swapchain_reference(&sc, nullptr);
 }
 #endif
+
+TEST_CASE("hosted session loss query preserves queued local loss")
+{
+	Fixture f;
+	f.create_session();
+	bool lost = true;
+	REQUIRE(xrt_session_get_loss_status(f.session, &lost) == XRT_SUCCESS);
+	CHECK_FALSE(lost);
+	auto *mc = reinterpret_cast<struct multi_compositor *>(f.compositor);
+	union xrt_session_event event{};
+	event.type = XRT_SESSION_EVENT_LOST;
+	REQUIRE(xrt_session_event_sink_push(mc->xses, &event) == XRT_SUCCESS);
+	REQUIRE(xrt_session_get_loss_status(f.session, &lost) == XRT_SUCCESS);
+	CHECK(lost);
+	REQUIRE(xrt_session_poll_events(f.session, &event) == XRT_SUCCESS);
+	CHECK(event.type == XRT_SESSION_EVENT_LOST);
+	REQUIRE(xrt_session_get_loss_status(f.session, &lost) == XRT_SUCCESS);
+	CHECK(lost);
+}
+
+TEST_CASE("hosted loss query ignores unused remote compositor loss but detects transport failure")
+{
+	Fixture f;
+	f.create_session();
+	union xrt_session_event event{};
+	event.type = XRT_SESSION_EVENT_LOST;
+	b_session_event_push(reinterpret_cast<b_session *>(remote_session), &event);
+	bool lost = true;
+	REQUIRE(xrt_session_get_loss_status(f.session, &lost) == XRT_SUCCESS);
+	CHECK_FALSE(lost);
+	REQUIRE(xrt_session_poll_events(remote_session, &event) == XRT_SUCCESS);
+	CHECK(event.type == XRT_SESSION_EVENT_LOST);
+	remote_session->get_loss_status = [](xrt_session *, bool *) { return XRT_ERROR_IPC_FAILURE; };
+	CHECK(xrt_session_get_loss_status(f.session, &lost) == XRT_ERROR_IPC_FAILURE);
+}

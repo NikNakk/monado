@@ -455,6 +455,20 @@ if(APPLE)
 	endif()
 endif()
 
+if(APPLE AND TARGET st_oxr AND TARGET base AND XRT_HAVE_VULKAN AND XRT_MODULE_COMPOSITOR_UTIL)
+	add_executable(tests_oxr_vk_acquire_loss tests_oxr_vk_acquire_loss.cpp)
+	target_link_libraries(tests_oxr_vk_acquire_loss PRIVATE st_oxr base aux_util xrt-external-catch2 xrt-external-openxr)
+	add_test(NAME tests_oxr_vk_acquire_loss COMMAND tests_oxr_vk_acquire_loss)
+	set_target_properties(tests_oxr_vk_acquire_loss PROPERTIES FOLDER monado_tests)
+endif()
+
+if(TARGET base)
+	add_executable(tests_session_loss_status tests_session_loss_status.cpp)
+	target_link_libraries(tests_session_loss_status PRIVATE base aux_util xrt-external-catch2)
+	add_test(NAME tests_session_loss_status COMMAND tests_session_loss_status)
+	set_target_properties(tests_session_loss_status PROPERTIES FOLDER monado_tests)
+endif()
+
 if(UNIX
    AND TARGET comp_multi
    AND TARGET ipc_shared

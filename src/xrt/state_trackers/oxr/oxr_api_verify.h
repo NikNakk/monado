@@ -1,5 +1,6 @@
 // Copyright 2018-2024, Collabora, Ltd.
 // Copyright 2025-2026, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -343,7 +344,7 @@ struct oxr_subaction_paths;
 
 #define OXR_VERIFY_SESSION_NOT_LOST(log, sess)                                                                         \
 	do {                                                                                                           \
-		if (sess->has_lost) {                                                                                  \
+		if (xrt_atomic_s32_load(&sess->has_lost)) {                                                            \
 			return oxr_error(log, XR_ERROR_SESSION_LOST, "Session is lost");                               \
 		}                                                                                                      \
 	} while (false)
