@@ -40,6 +40,10 @@ struct xrt_compositor_metal *
 client_metal_service_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue);
 #endif
 
+/* True when an allocation wrapper replaced the ordinary IOSurface provider. */
+bool
+client_metal_compositor_has_texture_provider(struct xrt_compositor_metal *compositor);
+
 /* Borrowed native backing; direct and service swapchains share this prefix. */
 struct xrt_swapchain_native *
 client_metal_swapchain_get_native(struct xrt_swapchain_metal *swapchain);

@@ -116,6 +116,13 @@ client_vk_metal_texture_swapchain_create(struct client_vk_metal_texture_context 
 #else
 		c->metal = client_metal_direct_compositor_create(c->native, c->device, c->queue);
 #endif
+		// The existing factories can fall back to IOSurface on wrapper allocation
+		// failure. That fallback cannot represent the requested array/depth shape.
+		if (c->metal && !client_metal_compositor_has_texture_provider(c->metal)) {
+			struct xrt_compositor *base = &c->metal->base;
+			xrt_comp_destroy(&base);
+			c->metal = NULL;
+		}
 		if (!c->metal) {
 			[c->queue release];
 			c->queue = nil;
