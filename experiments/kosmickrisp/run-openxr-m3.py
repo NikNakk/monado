@@ -27,6 +27,7 @@ p.add_argument('--bad-library', type=Path)
 p.add_argument('--output', type=Path, required=True)
 p.add_argument('--bgra', action='store_true')
 p.add_argument('--hosted', action='store_true')
+p.add_argument('--backend', choices=['kosmickrisp', 'moltenvk'], default='kosmickrisp')
 a = p.parse_args()
 if not 1 <= a.seconds <= 240:
     p.error('--seconds must be between 1 and 240')
@@ -75,6 +76,10 @@ env = dict(os.environ, XR_RUNTIME_JSON=str(a.build / 'openxr_monado-dev.json'),
            MACOS_OPENXR_VULKAN_PROBE_FRAMES='180',
            MACOS_OPENXR_VULKAN_PROBE_PER_VIEW_SWAPCHAINS='1',
            MACOS_OPENXR_VULKAN_PROBE_COLOR_ATTACHMENT_CLEAR='1')
+if a.backend == 'moltenvk':
+    env.pop('XRT_MACOS_KOSMICKRISP', None)
+    env.pop('XRT_MACOS_KOSMICKRISP_LIBRARY', None)
+    env['VK_DRIVER_FILES'] = str(a.molten_icd)
 if a.bgra:
     env['MACOS_OPENXR_VULKAN_PROBE_BGRA'] = '1'
 if a.hosted:
@@ -105,8 +110,13 @@ try:
         if not a.hello:
             p.error('--hello is required for hello mode')
         child = spawn('hello', command=[str(a.hello), '-g', 'Vulkan2', '-bm', 'Opaque', '-v'])
-        time.sleep(a.seconds)
+        deadline = time.monotonic() + a.seconds
+        while time.monotonic() < deadline and not (a.output / 'STOP').exists():
+            if child.poll() is not None:
+                break
+            time.sleep(.1)
         if child.poll() is not None:
+            results['hello'] = {'exit': child.returncode, 'early_exit': True}
             raise RuntimeError('hello exited before the rendering interval finished')
         child.stdin.write(b'\n')
         child.stdin.flush()

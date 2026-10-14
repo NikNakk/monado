@@ -100,7 +100,9 @@ cmake --build "$study/hello-build-m3" --target hello_xr --parallel 6
 Append `--mode hello --hello "$study/hello-build-m3/src/tests/hello_xr/hello_xr"`
 to the isolated-run command. It renders for eight seconds, sends stdin newline to
 quit cleanly, and requires exit 0. Append `--seconds 240` for a four-minute
-viewing interval; the service timeout adjusts to allow graceful shutdown. Evidence must include readiness/scheduling and
+viewing interval; the service timeout adjusts to allow graceful shutdown. Create
+`STOP` in the client output directory to end viewing early through the sample's
+normal stdin shutdown. Use fresh output directories for each run. Evidence must include readiness/scheduling and
 non-black service output; process exit alone does not prove rendering.
 
 For a **user-operated** PSVR2 trial, first close GAV and stop the ordinary headset
@@ -127,3 +129,9 @@ unresolved resources. Retention until process exit needs further long-lived-clie
 budget/lifecycle work before production use. None of these tests establish OpenXR
 or Vulkan conformance, driver device-loss recovery, physical Game Mode acceptance,
 or a speedup over existing graphics paths.
+
+`--backend moltenvk` runs the baseline driver with KK disabled. The official
+hello sample selects different preferred formats and optional depth on that
+backend; this is not a format-matched performance comparison. The first physical
+baseline aborted on a Depth32Float IOSurface allocation. Keep this failure
+separate from KK acceptance and do not claim comparative timing gains.
