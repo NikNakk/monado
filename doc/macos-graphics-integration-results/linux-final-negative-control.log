@@ -1,0 +1,23 @@
+Filters: "Joint solver reproduces*"
+Randomness seeded to: 2132284135
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tests_joint_original_control is a Catch2 v3.6.0 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+Joint solver reproduces frozen Linux regression inputs
+  Re-acquisition does not retain a wrong blob association
+-------------------------------------------------------------------------------
+/src/tests/tests_joint_pose_solver.cpp:635
+...............................................................................
+
+/src/tests/tests_joint_pose_solver.cpp:645: FAILED:
+  CHECK( angle_deg(quat_of(result.Tcv_world_device), quat_of(fixture.truth)) < 2.0 )
+with expansion:
+  2.98209672765081368 < 2.0
+
+===============================================================================
+test cases:  1 |  0 passed | 1 failed
+assertions: 13 | 12 passed | 1 failed
+

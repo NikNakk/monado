@@ -7,7 +7,7 @@
 Use MoltenVK's standard `VK_EXT_metal_objects` support with the existing Metal
 swapchain transport. KosmicKrisp remains archived research: the tested workloads
 showed no rendering advantage, and shared-event frame handoff works with
-MoltenVK too. This follow-up adds opt-in array/depth support to native Vulkan
+MoltenVK too. This follow-up adds array/depth support to native Vulkan
 OpenXR clients. It adds no compositor, Mesa dependency or Wine/DXMT change.
 
 Branch: `codex/macos-vulkan-metal-swapchains`, based on Claude's
@@ -18,6 +18,16 @@ The KosmicKrisp work is saved at local tag `archive/kosmickrisp-2026-10-14`
 (`1025b3623`), including the driver benchmarks and stereo/sRGB experiments.
 `macos-upstream-clean`, the GPU harness branch and installed runtime are unchanged.
 Nothing has been merged or pushed.
+
+## Integration candidate
+
+The [cumulative review](macos-graphics-integration-review.md) prepares
+`codex/macos-graphics-integration` with both Vulkan switches defaulting to on,
+independent `=0` fallbacks, bounded pending-fence retirement and acquired-image
+destruction markers. This supersedes the original opt-in recommendation after
+the user's four-case visual acceptance. Neither integration head nor installed
+runtime has been promoted. Historical experiment settings below remain evidence
+of the tested revisions.
 
 ## User headset checkpoint — 2026-10-14
 
@@ -41,12 +51,12 @@ paths and concurrent fault/replacement recovery pass after the fix. No runtime
 sharing, synchronization or compositor defaults were changed.
 
 Raw runs: `/private/tmp/vulkan-metal-hardware-20261014-212814`. Preserve the
-working paths; keep the new array/depth switch experimental.
+working paths; the user subsequently authorised making the Vulkan options default-on.
 
 ## Allocation and ordering
 
-Set `XRT_MACOS_VK_CLIENT_METAL_TEXTURES=1` **in the Vulkan client**. It defaults
-to off. Simple single-layer colour images retain the existing IOSurface path.
+Set `XRT_MACOS_VK_CLIENT_METAL_TEXTURES=1` **in the Vulkan client** to force it on, or `=0` to disable it. The
+integration candidate defaults to on. Simple single-layer colour images retain the existing IOSurface path.
 Arrays and depth use the existing Metal provider: shared textures and XPC
 handles for service composition, direct textures for client-hosted composition.
 The Vulkan frontend keeps both Metal and native swapchain references. Layer
@@ -64,7 +74,7 @@ receives only `MTLSharedTextureHandle` and shared-event handles; no image pixels
 are transported. The macOS SDK documents that reopening this handle shares the
 same texture across processes on the same GPU.
 
-Enable the independent `XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` option for GPU frame
+Keep the independent `XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` option enabled (also default-on in the candidate) for GPU frame
 handoff. It uses Claude's runtime-owned shared-event/Vulkan timeline pair and
 preserves its initial value. The signal follows client rendering on the same
 queue; native compositor readiness/reuse infrastructure consumes it. Disable
@@ -175,7 +185,9 @@ Next, in priority order:
    service and hosted, with diagnostic readbacks disabled after `d419f8527`.
    Longer application stress and compositor depth-reprojection checks remain.
 2. Comparable loaded/game/Game Mode runs, with GPU timings, CPU overhead and
-   actual presentation timestamps. Keep both switches opt-in until validated.
+   actual presentation timestamps. Both sharing switches are default-on in the
+   reviewed candidate after visual acceptance; these comparisons quantify their
+   effect on real applications.
 3. Linux CI, older Apple devices/OS versions, static-image/geometry limits,
    device loss, killed-client/teardown and longer concurrency stress.
 4. Review small general patches for integration/upstream submission; no merge

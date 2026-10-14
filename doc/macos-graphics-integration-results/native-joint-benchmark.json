@@ -1,0 +1,152 @@
+{
+  "rows": [
+    {
+      "iteration": 0,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 0,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 1,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 1,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 2,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 2,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 3,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 3,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 4,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 4,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 5,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 5,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 6,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 6,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 7,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 7,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 8,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 8,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 9,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 9,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 10,
+      "version": "before",
+      "seconds_per_100_trials": 0.019,
+      "exit_code": 0
+    },
+    {
+      "iteration": 10,
+      "version": "after",
+      "seconds_per_100_trials": 0.021,
+      "exit_code": 0
+    },
+    {
+      "iteration": 11,
+      "version": "after",
+      "seconds_per_100_trials": 0.02,
+      "exit_code": 0
+    },
+    {
+      "iteration": 11,
+      "version": "before",
+      "seconds_per_100_trials": 0.022,
+      "exit_code": 0
+    }
+  ],
+  "median_seconds_per_100_trials_excluding_warmup": {
+    "before": 0.019,
+    "after": 0.02
+  }
+}

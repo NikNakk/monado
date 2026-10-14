@@ -1,0 +1,28 @@
+Filters: "Joint solve converges from a tracking-sized prior"
+Randomness seeded to: 687843659
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tests_joint_pose_solver is a Catch2 v3.6.0 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+Joint solve converges from a tracking-sized prior
+-------------------------------------------------------------------------------
+/baseline/tests/tests_joint_pose_solver.cpp:189
+...............................................................................
+
+/baseline/tests/tests_joint_pose_solver.cpp:209: FAILED:
+  CHECK( angle_deg(quat_of(result.Tcv_world_device), quat_of(trial.truth)) < 1.0 )
+with expansion:
+  1.02795447274547413 < 1.0
+with messages:
+  i := 24
+  result.matches := 55
+  result.cameras_used := 4
+  result.rms_px := 0.296034753f
+  result.coverage := 1.0f
+
+===============================================================================
+test cases:   1 |   0 passed | 1 failed
+assertions: 250 | 249 passed | 1 failed
+

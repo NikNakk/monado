@@ -7,6 +7,14 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [graphics integration review](macos-graphics-integration-review.md) prepares
+`codex/macos-graphics-integration` for `macos-upstream-clean`, enables both native
+Vulkan sharing options by default in that candidate, and fixes lifecycle and
+clock-domain review findings. The user separately authorised correcting the
+[inherited Linux solver gate](macos-linux-solver-gate.md). Integration and installed
+runtime promotion are pending; the earlier hardware checkpoint remains valid
+for the original Vulkan implementation.
+
 The [2026-10-14 Vulkan Metal swapchain follow-up](macos-vulkan-metal-swapchains.md)
 keeps MoltenVK, adds opt-in native Vulkan array/depth images through standard
 Metal object import, and preserves the existing shared-event frame handoff.

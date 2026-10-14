@@ -1,0 +1,70 @@
+Filters: "Joint solve converges*","Joint solve never*","Stereo bootstrap separates*"
+Randomness seeded to: 1558178763
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tests_joint_pose_solver is a Catch2 v3.6.0 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+Joint solve converges from a tracking-sized prior
+-------------------------------------------------------------------------------
+/src/tests/tests_joint_pose_solver.cpp:189
+...............................................................................
+
+/src/tests/tests_joint_pose_solver.cpp:212: FAILED:
+  CHECK( angle_deg(quat_of(result.Tcv_world_device), quat_of(trial.truth)) < 1.0 )
+with expansion:
+  1.02795447274547413 < 1.0
+with messages:
+  i := 24
+  result.matches := 55
+  result.cameras_used := 4
+  result.rms_px := 0.296034753f
+  result.coverage := 1.0f
+  angle_deg(quat_of(at_truth.Tcv_world_device), quat_of(trial.truth)) := 1.
+  02972621085304783
+  at_truth.rms_px := 0.296038866f
+
+-------------------------------------------------------------------------------
+Joint solve never accepts a wrong pose from a re-acquisition-sized prior
+-------------------------------------------------------------------------------
+/src/tests/tests_joint_pose_solver.cpp:216
+...............................................................................
+
+/src/tests/tests_joint_pose_solver.cpp:251: FAILED:
+  CHECK( angle_deg(quat_of(result.Tcv_world_device), quat_of(trial.truth)) < 2.0 )
+with expansion:
+  2.98209672765081368 < 2.0
+with messages:
+  i := 36
+  result.matches := 53
+  result.rms_px := 0.661982238f
+  result.coverage := 1.0f
+  result.outliers := 0
+  angle_deg(quat_of(at_truth.Tcv_world_device), quat_of(trial.truth)) := 0.
+  56937017326943917
+  at_truth.rms_px := 0.263802528f
+
+-------------------------------------------------------------------------------
+Stereo bootstrap separates two mirror-image rings
+-------------------------------------------------------------------------------
+/src/tests/tests_joint_pose_solver.cpp:347
+...............................................................................
+
+/src/tests/tests_joint_pose_solver.cpp:371: FAILED:
+  REQUIRE( left_ok )
+with expansion:
+  false
+with messages:
+  i := 2
+  left_result.points := 38
+  left_result.inliers := 12
+  left_result.hypotheses := 20004 (0x4e24)
+  left_result.refined.matches := 45
+  left_result.refined.rms_px := 0.806289971f
+  left_result.refined.coverage := 0.771428585f
+
+===============================================================================
+test cases:   3 |   0 passed | 3 failed
+assertions: 450 | 447 passed | 3 failed
+

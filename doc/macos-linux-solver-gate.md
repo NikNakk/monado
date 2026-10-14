@@ -7,7 +7,8 @@ SPDX-License-Identifier: BSL-1.0
 
 The graphics candidate uncovered an inherited PS Sense synthetic pose-solver
 failure on Ubuntu 24.04 x86_64. The user authorised fixing this separately before
-promoting the graphics work. These changes do not enable controller optical
+promoting the graphics work. The fix is commit `60bb084d7`, also retained on
+`codex/macos-linux-solver-gate`. These changes do not enable controller optical
 tracking, change camera-stream defaults, or change graphics handling.
 
 ## Diagnosis and correction
@@ -101,16 +102,15 @@ cmake --build /tmp/monado-linux-check --target tests_joint_pose_solver
 
 ## Validation
 
-The full Ubuntu suite passes 48/48 (331.37 s under x86_64 emulation). The complete
-macOS solver executable passes 1,089 assertions in 13 cases. The full macOS
-suite passes 78/78, including 21 GPU cases and three service recovery cases.
-The full Linux build has no compiler warnings. The unchanged solver reproduces the re-acquisition failure in the frozen test.
-The stereo fixture now validates the existing aligned-orientation recovery
-contract, and the mirror fixture guards rejection. Logs are
-preserved in [the evidence directory](macos-graphics-integration-results/).
-The complete macOS suite passes 78/78 (48.35 s), including 21 GPU cases and
-three service recovery cases. The recorded negative control fails only the
-original 2.9821-degree re-acquisition check.
+The full Ubuntu suite passes 48/48 (331.37 s under x86_64 emulation), with
+1,080 solver assertions in 13 cases and no build warnings. The macOS suite
+passes 78/78 (48.35 s), including 21 GPU cases and three service recovery cases;
+its solver has 1,089 passing assertions in 13 cases because the random stress
+fixtures differ between standard libraries. The recorded original-source
+negative control fails only the frozen 2.9821-degree re-acquisition check.
+The stereo fixture validates existing aligned-orientation recovery, and the
+mirror fixture guards rejection. Logs and source hashes are preserved in
+[the evidence directory](macos-graphics-integration-results/).
 
 A preliminary native CPU comparison alternated the before/after 100-trial
 re-acquisition fixture for 12 pairs, discarding the first warm-up pair. Median
