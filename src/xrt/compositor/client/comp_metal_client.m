@@ -1070,6 +1070,12 @@ client_metal_compositor_destroy(struct xrt_compositor *xc)
 	free(c);
 }
 
+bool
+client_metal_compositor_has_texture_provider(struct xrt_compositor_metal *compositor)
+{
+	return compositor && compositor->base.create_swapchain != client_metal_compositor_create_swapchain;
+}
+
 struct xrt_compositor_metal *
 client_metal_compositor_create(struct xrt_compositor_native *xcn, void *metal_device, void *command_queue)
 {
