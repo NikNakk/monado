@@ -8,6 +8,12 @@
  * @ingroup comp_client
  */
 
+#include "xrt/xrt_config_os.h"
+#include "xrt/xrt_config_build.h"
+#if defined(XRT_OS_OSX) && defined(XRT_MODULE_COMPOSITOR_UTIL)
+#include "client/comp_vk_client_shared_event.h"
+#include "client/comp_vk_metal_texture.h"
+#endif
 #include "util/u_debug.h"
 
 #include "oxr_objects.h"
@@ -40,7 +46,22 @@ vk_implicit_acquire_image(struct oxr_logger *log,
 	 * to be able to insert our transition.
 	 */
 	if (WAIT_IN_ACQUIRE) {
-		xret = xrt_swapchain_wait_image(xsc, XR_INFINITE_DURATION, index);
+#if defined(XRT_OS_OSX) && defined(XRT_MODULE_COMPOSITOR_UTIL)
+		if (client_vk_shared_event_enabled() || client_vk_metal_texture_enabled()) {
+			for (;;) {
+				xret = xrt_swapchain_wait_image(xsc, 50000000ll, index);
+				if (xret != XRT_TIMEOUT)
+					break;
+				CHECK_OXR_RET(oxr_session_poll(log, sc->sess));
+				if (sc->sess->has_lost)
+					return oxr_error(log, XR_ERROR_SESSION_LOST,
+					                 "Producer session lost during Vulkan image acquire");
+			}
+		} else
+#endif
+		{
+			xret = xrt_swapchain_wait_image(xsc, XR_INFINITE_DURATION, index);
+		}
 		OXR_CHECK_XRET(log, sc->sess, xret, xrt_swapchain_wait_image);
 	}
 

@@ -91,6 +91,9 @@ metal_format_to_vk(MTLPixelFormat format)
 	case MTLPixelFormatDepth16Unorm: return 124;          // VK_FORMAT_D16_UNORM
 	case MTLPixelFormatDepth32Float: return 126;          // VK_FORMAT_D32_SFLOAT
 	case MTLPixelFormatDepth32Float_Stencil8: return 130; // VK_FORMAT_D32_SFLOAT_S8_UINT
+	case MTLPixelFormatRGBA16Unorm: return 91;
+	case MTLPixelFormatRGBA16Float: return 97;
+	case MTLPixelFormatR32Float: return 100;
 	default: return 0;
 	}
 }
@@ -505,7 +508,8 @@ metal_service_create_swapchain(struct xrt_compositor *xc,
 	native_info.format = vk_format;
 	native_info.bits |= xsccp.extra_bits;
 	bool three_images = (info->create & XRT_SWAPCHAIN_CREATE_STATIC_IMAGE) == 0 &&
-	                    debug_get_bool_option_metal_three_images();
+	                    (debug_get_bool_option_metal_three_images() ||
+	                     (info->create & XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES) != 0);
 	if (three_images) {
 		xsccp.image_count = 3;
 		native_info.create |= XRT_SWAPCHAIN_CREATE_MACOS_THREE_IMAGES;

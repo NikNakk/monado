@@ -17,6 +17,10 @@
 #include "util/u_debug.h"
 
 #include "comp_vk_client.h"
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+#include "comp_vk_metal_texture.h"
+#include "os/os_time.h"
+#endif
 
 #ifdef XRT_HAVE_VK_CLIENT_SHARED_EVENT
 #include "comp_vk_client_shared_event.h"
@@ -44,6 +48,17 @@ static inline struct xrt_swapchain *
 to_native_swapchain(struct xrt_swapchain *xsc)
 {
 	return &client_vk_swapchain(xsc)->xscn->base;
+}
+
+static inline struct xrt_swapchain *
+to_backing_swapchain(struct xrt_swapchain *xsc)
+{
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	struct client_vk_swapchain *sc = client_vk_swapchain(xsc);
+	if (sc->xscm)
+		return &sc->xscm->base;
+#endif
+	return to_native_swapchain(xsc);
 }
 
 /*!
@@ -168,7 +183,7 @@ submit_semaphore(struct client_vk_compositor *c, xrt_result_t *out_xret)
 	    c->sync.semaphore,
 	};
 	uint64_t values[1] = {
-	    ++(c->sync.value),
+	    c->sync.value + 1,
 	};
 
 	VkTimelineSemaphoreSubmitInfo semaphore_submit_info = {
@@ -185,17 +200,20 @@ submit_semaphore(struct client_vk_compositor *c, xrt_result_t *out_xret)
 	    .pSignalSemaphores = semaphores,
 	};
 
+	vk_queue_lock(vk->main_queue);
 	ret = vk->vkQueueSubmit(   //
 	    vk->main_queue->queue, // queue
 	    1,                     // submitCount
 	    &submit_info,          // pSubmits
 	    VK_NULL_HANDLE);       // fence
+	vk_queue_unlock(vk->main_queue);
 	if (ret != VK_SUCCESS) {
 		VK_ERROR(vk, "vkQueueSubmit: %s", vk_result_string(ret));
 		*out_xret = XRT_ERROR_VULKAN;
 		return true;
 	}
 
+	c->sync.value = values[0];
 	*out_xret = xrt_comp_layer_commit_with_semaphore( //
 	    &c->xcn->base,                                // xc
 	    c->sync.xcsem,                                // xcsem
@@ -268,6 +286,21 @@ submit_fallback(struct client_vk_compositor *c, xrt_result_t *out_xret)
  *
  */
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+static bool
+metal_swapchain_complete(struct client_vk_swapchain *sc)
+{
+	struct vk_bundle *vk = &sc->c->vk;
+	for (uint32_t i = 0; i < sc->base.base.image_count; ++i) {
+		if (sc->acquired[i] ||
+		    (sc->acquire_fence[i] && vk->vkGetFenceStatus(vk->device, sc->acquire_fence[i]) != VK_SUCCESS) ||
+		    (sc->release_fence[i] && vk->vkGetFenceStatus(vk->device, sc->release_fence[i]) != VK_SUCCESS))
+			return false;
+	}
+	return true;
+}
+#endif
+
 static void
 client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 {
@@ -277,6 +310,17 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 	struct client_vk_compositor *c = sc->c;
 	struct vk_bundle *vk = &c->vk;
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (c->metal && !metal_swapchain_complete(sc)) {
+		if (!sc->retired) {
+			sc->retired = true;
+			sc->retired_next = c->retired_swapchains;
+			c->retired_swapchains = sc;
+		}
+		U_LOG_D("Deferring incomplete Vulkan Metal swapchain until bounded frontend teardown");
+		return;
+	}
+#endif
 	vk_cmd_pool_lock(&c->pool);
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
 		if (sc->acquire[i] != VK_NULL_HANDLE) {
@@ -302,11 +346,41 @@ client_vk_swapchain_destroy(struct xrt_swapchain *xsc)
 		}
 	}
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	for (uint32_t i = 0; i < sc->base.base.image_count; ++i) {
+		if (sc->acquire_fence[i])
+			vk->vkDestroyFence(vk->device, sc->acquire_fence[i], NULL);
+		if (sc->release_fence[i])
+			vk->vkDestroyFence(vk->device, sc->release_fence[i], NULL);
+	}
+	if (sc->xscm) {
+		struct xrt_swapchain *metal = &sc->xscm->base;
+		xrt_swapchain_reference(&metal, NULL);
+	}
+#endif
 	// Drop our reference, does NULL checking.
 	xrt_swapchain_native_reference(&sc->xscn, NULL);
 
 	free(sc);
 }
+
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+static void
+client_vk_reap_retired(struct client_vk_compositor *c)
+{
+	struct client_vk_swapchain **link = &c->retired_swapchains;
+	while (*link) {
+		struct client_vk_swapchain *sc = *link;
+		if (!metal_swapchain_complete(sc)) {
+			link = &sc->retired_next;
+			continue;
+		}
+		*link = sc->retired_next;
+		sc->retired = false;
+		client_vk_swapchain_destroy(&sc->base.base);
+	}
+}
+#endif
 
 static xrt_result_t
 client_vk_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index)
@@ -318,11 +392,15 @@ client_vk_swapchain_acquire_image(struct xrt_swapchain *xsc, uint32_t *out_index
 	uint32_t index = 0;
 
 	// Pipe down call into native swapchain.
-	xret = xrt_swapchain_acquire_image(&sc->xscn->base, &index);
+	xret = xrt_swapchain_acquire_image(to_backing_swapchain(xsc), &index);
 	if (xret != XRT_SUCCESS) {
 		return xret;
 	}
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (sc->c->metal)
+		sc->acquired[index] = true;
+#endif
 	// Finally done.
 	*out_index = index;
 
@@ -335,7 +413,7 @@ client_vk_swapchain_wait_image(struct xrt_swapchain *xsc, int64_t timeout_ns, ui
 	COMP_TRACE_MARKER();
 
 	// Pipe down call into native swapchain.
-	return xrt_swapchain_wait_image(to_native_swapchain(xsc), timeout_ns, index);
+	return xrt_swapchain_wait_image(to_backing_swapchain(xsc), timeout_ns, index);
 }
 
 static xrt_result_t
@@ -352,6 +430,29 @@ client_vk_swapchain_barrier_image(struct xrt_swapchain *xsc, enum xrt_barrier_di
 	default: assert(false);
 	}
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (sc->c->metal) {
+		struct vk_bundle *vk = &sc->c->vk;
+		VkFence *fence =
+		    direction == XRT_BARRIER_TO_APP ? &sc->acquire_fence[index] : &sc->release_fence[index];
+		if (*fence) {
+			if (vk->vkGetFenceStatus(vk->device, *fence) != VK_SUCCESS)
+				return XRT_ERROR_VULKAN;
+			if (vk->vkResetFences(vk->device, 1, fence) != VK_SUCCESS)
+				return XRT_ERROR_VULKAN;
+		} else {
+			VkFenceCreateInfo fi = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+			if (vk->vkCreateFence(vk->device, &fi, NULL, fence) != VK_SUCCESS)
+				return XRT_ERROR_VULKAN;
+		}
+		VkSubmitInfo si = {
+		    .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .commandBufferCount = 1, .pCommandBuffers = &cmd_buffer};
+		vk_queue_lock(vk->main_queue);
+		VkResult result = vk->vkQueueSubmit(vk->main_queue->queue, 1, &si, *fence);
+		vk_queue_unlock(vk->main_queue);
+		return result == VK_SUCCESS ? XRT_SUCCESS : XRT_ERROR_FAILED_TO_SUBMIT_VULKAN_COMMANDS;
+	}
+#endif
 	return submit_image_barrier(sc, cmd_buffer);
 }
 
@@ -361,7 +462,12 @@ client_vk_swapchain_release_image(struct xrt_swapchain *xsc, uint32_t index)
 	COMP_TRACE_MARKER();
 
 	// Pipe down call into native swapchain.
-	return xrt_swapchain_release_image(to_native_swapchain(xsc), index);
+	xrt_result_t result = xrt_swapchain_release_image(to_backing_swapchain(xsc), index);
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (result == XRT_SUCCESS && client_vk_swapchain(xsc)->c->metal)
+		client_vk_swapchain(xsc)->acquired[index] = false;
+#endif
+	return result;
 }
 
 static xrt_result_t
@@ -406,6 +512,26 @@ client_vk_compositor_destroy(struct xrt_compositor *xc)
 	struct client_vk_compositor *c = client_vk_compositor(xc);
 	struct vk_bundle *vk = &c->vk;
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (c->metal) {
+		int64_t deadline = os_monotonic_get_ns() + 500000000ll;
+		for (;;) {
+			client_vk_reap_retired(c);
+			uint64_t observed = 0;
+			bool timeline_ready =
+			    !c->sync.value ||
+			    (vk->vkGetSemaphoreCounterValue(vk->device, c->sync.semaphore, &observed) == VK_SUCCESS &&
+			     observed >= c->sync.value);
+			if (!c->retired_swapchains && timeline_ready)
+				break;
+			if (os_monotonic_get_ns() >= deadline) {
+				U_LOG_W("Retaining unresolved Vulkan Metal frontend after 500 ms teardown drain");
+				return;
+			}
+			os_nanosleep(1000000ull);
+		}
+	}
+#endif
 	if (c->sync.semaphore != VK_NULL_HANDLE) {
 		vk->vkDestroySemaphore(vk->device, c->sync.semaphore, NULL);
 		c->sync.semaphore = VK_NULL_HANDLE;
@@ -416,7 +542,9 @@ client_vk_compositor_destroy(struct xrt_compositor *xc)
 	vk_cmd_pool_destroy(vk, &c->pool);
 
 	vk_deinit_mutex(vk);
-
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	client_vk_metal_texture_context_destroy(c->metal);
+#endif
 	free(c);
 }
 
@@ -667,6 +795,11 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	VkResult ret;
 	xrt_result_t xret;
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (c->metal)
+		client_vk_reap_retired(c);
+#endif
+
 	struct xrt_swapchain_create_properties xsccp = XRT_STRUCT_INIT;
 	xret = xrt_comp_get_swapchain_create_properties(&c->xcn->base, info, &xsccp);
 	if (xret != XRT_SUCCESS) {
@@ -678,14 +811,20 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	struct xrt_swapchain_create_info xinfo = *info;
 	xinfo.bits |= xsccp.extra_bits;
 
-	struct xrt_swapchain_native *xscn = NULL; // Has to be NULL.
-	xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
-
-	if (xret != XRT_SUCCESS) {
-		return xret;
+	struct xrt_swapchain_native *xscn = NULL;
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	struct xrt_swapchain_metal *xscm = NULL;
+	if (client_vk_metal_texture_required(&xinfo)) {
+		if (!client_vk_metal_texture_enabled())
+			return XRT_ERROR_SWAPCHAIN_FLAG_VALID_BUT_UNSUPPORTED;
+		xret = client_vk_metal_texture_swapchain_create(c->metal, &xinfo, &xscm, &xscn);
+	} else
+#endif
+	{
+		xret = xrt_comp_native_create_swapchain(c->xcn, &xinfo, &xscn);
 	}
-	assert(xscn != NULL);
-
+	if (xret != XRT_SUCCESS)
+		return xret;
 	struct xrt_swapchain *xsc = &xscn->base;
 
 	VkAccessFlags barrier_access_mask = vk_csci_get_barrier_access_mask(xinfo.bits);
@@ -697,6 +836,16 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	assert(barrier_aspect_mask != 0);
 
 	struct client_vk_swapchain *sc = U_TYPED_CALLOC(struct client_vk_swapchain);
+	if (!sc) {
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+		if (xscm) {
+			struct xrt_swapchain *metal = &xscm->base;
+			xrt_swapchain_reference(&metal, NULL);
+		}
+#endif
+		xrt_swapchain_native_reference(&xscn, NULL);
+		return XRT_ERROR_ALLOCATION;
+	}
 	sc->base.base.destroy = client_vk_swapchain_destroy;
 	sc->base.base.acquire_image = client_vk_swapchain_acquire_image;
 	sc->base.base.wait_image = client_vk_swapchain_wait_image;
@@ -706,16 +855,29 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 	sc->base.base.image_count = xsc->image_count; // Fetch the number of images from the native swapchain.
 	sc->c = c;
 	sc->xscn = xscn;
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	sc->xscm = xscm;
+#endif
 
 	for (uint32_t i = 0; i < xsc->image_count; i++) {
-		ret = vk_create_image_from_native(vk, &xinfo, &xscn->images[i], &sc->base.images[i], &sc->mems[i]);
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+		if (sc->xscm)
+			ret = client_vk_metal_texture_import(vk, &xinfo, sc->xscm->images[i], &sc->base.images[i]);
+		else
+#endif
+		{
+			ret = vk_create_image_from_native(vk, &xinfo, &xscn->images[i], &sc->base.images[i],
+			                                  &sc->mems[i]);
+		}
 
 		if (ret != VK_SUCCESS) {
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 
 		VK_NAME_IMAGE(vk, sc->base.images[i], "vk_image_collection image");
-		VK_NAME_DEVICE_MEMORY(vk, sc->mems[i], "vk_image_collection device_memory");
+		if (sc->mems[i])
+			VK_NAME_DEVICE_MEMORY(vk, sc->mems[i], "vk_image_collection device_memory");
 	}
 
 	vk_cmd_pool_lock(&c->pool);
@@ -726,12 +888,14 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, flags, &sc->acquire[i]);
 		if (ret != VK_SUCCESS) {
 			vk_cmd_pool_unlock(&c->pool);
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 		VK_NAME_COMMAND_BUFFER(vk, sc->acquire[i], "client_vk_swapchain acquire command buffer");
 		ret = vk_cmd_pool_create_and_begin_cmd_buffer_locked(vk, &c->pool, flags, &sc->release[i]);
 		if (ret != VK_SUCCESS) {
 			vk_cmd_pool_unlock(&c->pool);
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 		VK_NAME_COMMAND_BUFFER(vk, sc->release[i], "client_vk_swapchain release command buffer");
@@ -773,6 +937,10 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		    .subresourceRange = subresource_range,
 		};
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+		if (c->metal)
+			release.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+#endif
 		//! @todo less conservative pipeline stage masks based on usage
 		vk->vkCmdPipelineBarrier(               //
 		    sc->acquire[i],                     // commandBuffer
@@ -802,12 +970,14 @@ client_vk_swapchain_create(struct xrt_compositor *xc,
 		if (ret != VK_SUCCESS) {
 			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
 			vk_cmd_pool_unlock(&c->pool);
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 		ret = vk->vkEndCommandBuffer(sc->release[i]);
 		if (ret != VK_SUCCESS) {
 			VK_ERROR(vk, "vkEndCommandBuffer: %s", vk_result_string(ret));
 			vk_cmd_pool_unlock(&c->pool);
+			client_vk_swapchain_destroy(&sc->base.base);
 			return XRT_ERROR_VULKAN;
 		}
 	}
@@ -840,6 +1010,8 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	xrt_result_t xret;
 	VkResult ret;
 	struct client_vk_compositor *c = U_TYPED_CALLOC(struct client_vk_compositor);
+	if (!c)
+		return NULL;
 
 	c->base.get_swapchain_create_properties = client_vk_compositor_get_swapchain_create_properties;
 	c->base.create_swapchain = client_vk_swapchain_create;
@@ -923,6 +1095,18 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	}
 #endif
 
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	if (client_vk_metal_texture_enabled() || c->sync.xcsem) {
+		if (c->vk.has_EXT_metal_objects && c->vk.vkExportMetalObjectsEXT) {
+			c->metal = client_vk_metal_texture_context_create(c->xcn, &c->vk);
+			if (!c->metal)
+				goto err_pool;
+		} else {
+			U_LOG_W("Metal texture import unavailable; retaining native single-layer Vulkan swapchains");
+		}
+	}
+#endif
+
 	// Get max texture size.
 	{
 		struct vk_bundle *vk = &c->vk;
@@ -953,6 +1137,12 @@ client_vk_compositor_create(struct xrt_compositor_native *xcn,
 	return c;
 
 err_pool:
+	if (c->sync.semaphore)
+		c->vk.vkDestroySemaphore(c->vk.device, c->sync.semaphore, NULL);
+	xrt_compositor_semaphore_reference(&c->sync.xcsem, NULL);
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	client_vk_metal_texture_context_destroy(c->metal);
+#endif
 	vk_cmd_pool_destroy(&c->vk, &c->pool);
 err_mutex:
 	vk_deinit_mutex(&c->vk);
