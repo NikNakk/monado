@@ -142,7 +142,7 @@ def main():
                 failed = subprocess.run(command, env=fault_env, capture_output=True, text=True, timeout=15)
                 text = failed.stdout+failed.stderr
                 (output/'failed.txt').write_text(text)
-                assert failed.returncode != 0 and 'xrAcquireSwapchainImage failed: -17' in text
+                assert failed.returncode != 0 and 'failed: -17' in text
                 assert 'Retaining unresolved Vulkan Metal frontend' in text
                 loss_seconds = time.monotonic()-started
                 replacement = subprocess.run(command, env=dict(env, MACOS_OPENXR_VULKAN_PROBE_OVERLAY='1',

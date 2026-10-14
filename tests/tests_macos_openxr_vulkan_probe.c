@@ -466,6 +466,10 @@ clear_swapchain_image_with_color_attachment(VkDevice device,
 
 	ret = submit_command_buffer_and_wait(device, ctx, "vkQueueSubmit(color_attachment_clear)",
 	                                     "color_attachment_clear(submit)");
+	// This fixture destroys the framebuffer/view below; async submission cannot
+	// outlive them. This wait is test-only, outside the runtime frame handoff.
+	if (ret == 0)
+		ret = wait_for_fence(device, ctx->fence, "color_attachment_clear(resources)");
 	if (ret == 0) {
 		*layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 	}
@@ -501,6 +505,27 @@ get_proc(PFN_xrGetInstanceProcAddr get_instance_proc_addr,
 	}
 
 	return 0;
+}
+
+// Hosted layer visibility follows service state when OpenXR events are polled.
+// A graphics-only probe must keep processing events after xrBeginSession too.
+static int
+poll_session_events(PFN_xrPollEvent xrPollEvent, XrInstance instance)
+{
+	for (;;) {
+		XrEventDataBuffer event = {.type = XR_TYPE_EVENT_DATA_BUFFER};
+		XrResult result = xrPollEvent(instance, &event);
+		if (result == XR_EVENT_UNAVAILABLE)
+			return 0;
+		if (result != XR_SUCCESS)
+			return fail_xr("xrPollEvent(frame)", result);
+		if (event.type == XR_TYPE_EVENT_DATA_SESSION_STATE_CHANGED) {
+			const XrEventDataSessionStateChanged *state = (const XrEventDataSessionStateChanged *)&event;
+			fprintf(stderr, "Vulkan probe session state=%d\n", state->state);
+		}
+		if (event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING)
+			return fail_msg("OpenXR instance lost during probe");
+	}
 }
 
 static int
@@ -1371,6 +1396,12 @@ run_probe(void)
 	XrTime *display_times = calloc(frame_count, sizeof(*display_times));
 	XrDuration display_period = 0;
 	for (uint32_t frame = 0; frame < frame_count; ++frame) {
+		if (poll_session_events(xrPollEvent, instance) != 0) {
+			free(projection_views);
+			free(located_views);
+			ret = 1;
+			goto out;
+		}
 		XrFrameWaitInfo frame_wait_info = {
 		    .type = XR_TYPE_FRAME_WAIT_INFO,
 		};
