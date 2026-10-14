@@ -25,8 +25,8 @@ The [cumulative review](macos-graphics-integration-review.md) prepares
 `codex/macos-graphics-integration` with both Vulkan switches defaulting to on,
 independent `=0` fallbacks, bounded pending-fence retirement and acquired-image
 destruction markers. This supersedes the original opt-in recommendation after
-the user's four-case visual acceptance. Neither integration head nor installed
-runtime has been promoted. Historical experiment settings below remain evidence
+the user's four-case visual acceptance. The user subsequently approved the local integration fast-forward to
+`c2c608a3f`. The remote branch and installed runtime have not been promoted. Historical experiment settings below remain evidence
 of the tested revisions.
 
 ## User headset checkpoint — 2026-10-14
