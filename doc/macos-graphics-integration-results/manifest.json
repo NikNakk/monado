@@ -75,12 +75,13 @@
     "failure": "2.98209672765081368 degrees exceeds unchanged 2-degree re-acquisition bound"
   },
   "log_hashes": {
-    "linux-final-negative-control.log": "5b052bfc15828a5eebdaa1eebd65bd687dbb2ef63ef538c4a1e227d67d1dc4fc",
+    "linux-final-negative-control.log": "5e2b308be4d07c8b04f01cf2b603ce0996770d3d53042eadab14b8ea61b5ecd8",
     "macos-final-ctest.log": "7015cdca283bf10c96eababd4baf76620967488362d94c0afb29818adbf43a69",
-    "macos-minimal-final-test.log": "5cb1e887ecbfc1590059048f253c9d8aed28d1a0009b62ca4d950e19226980f0",
-    "linux-fix-truth-test.log": "a0153d4c3318748ff3eb59c9354242a57cf3821e611db9b66ffe614f1109f237",
+    "macos-minimal-final-test.log": "cf75698b20209d7a008d107e220c448273afb6fafd837c9d833851b0c82888a8",
+    "linux-fix-truth-test.log": "10d78fa6ab2b12fd7341bff6324632a807053dd4d26264cd6428451f1bf3e052",
     "native-joint-benchmark.json": "4374f664696905526cb34f34d0a44b5befb0f2a0826f9b3a9ba9d7262073c5a9",
     "linux-fix-final-ctest.log": "d81ff62e14c31481c16ef014123ec4c16b078b4b889df19139e18d9f8cecc1bc",
-    "ubuntu24-baseline-joint-test.log": "ef3e3d834a333f698c8e5677f2a4e0811134f7fc543f5363022f0a912606a4a7"
-  }
+    "ubuntu24-baseline-joint-test.log": "566caee398a5ce54de09b1ff4f4303b59ba5a4555f0608b844137875c000d206"
+  },
+  "log_text_normalisation": "Removed surplus trailing blank lines from four logs; measurements unchanged."
 }

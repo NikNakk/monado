@@ -4,7 +4,7 @@
 
 Keep MoltenVK for the native OpenXR path. The useful findings are explicit GPU
 frame handoff and shared Metal texture import; both work through MoltenVK's
-standard API. The [implemented follow-up](../doc/macos-vulkan-metal-swapchains.md)
+standard API. The [implemented follow-up](macos-vulkan-metal-swapchains.md)
 contains the current compatibility matrix, prototype results, measured evidence,
 reproduction instructions and prioritised plan.
 
@@ -36,11 +36,12 @@ Same M5, 600 frames, four A–B–B–A runs per workload; not a game benchmark.
 The experimental Monado branch is `codex/macos-vulkan-metal-swapchains`, retaining
 Claude's shared-event work and ten general commits by ancestry. The reviewed `codex/macos-graphics-integration` candidate defaults both Vulkan
 sharing switches to on with independent fallbacks; see the
-[cumulative review](../doc/macos-graphics-integration-review.md). The user confirms service/hosted `hello_xr` and stereo arrays with readbacks
+[cumulative review](macos-graphics-integration-review.md). The user confirms service/hosted `hello_xr` and stereo arrays with readbacks
 disabled after the probe visibility fix. Real-game Game Mode comparisons and Wine graphics
 paths remain outstanding. The Linux gate now passes 48/48; the user-approved
 local integration fast-forward to `c2c608a3f` includes these changes. No push is included. The user subsequently requested installation: service and
 Wine x64 Monado client now both carry `v25.1.0-2310-g84b3749c2`; the
-[deployment record](../doc/macos-service-direct-xpc.md#integration-service-and-matching-wine-client-installation--2026-10-14)
-contains version/load checks and preserved settings. No Mesa driver or Windows
+[deployment record](macos-service-direct-xpc.md#integration-service-and-matching-wine-client-installation--2026-10-14)
+contains version/load checks and preserved settings. Publication is gated on
+the installed-build headset repeat in the [review](macos-graphics-integration-review.md#installed-build-headset-gate-before-publication). No Mesa driver or Windows
 bridge change was required.

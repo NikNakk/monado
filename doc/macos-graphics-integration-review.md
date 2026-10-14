@@ -144,3 +144,55 @@ Metal/Wine clients should then get their normal regression runs. Intel Mac
 hardware, combined real-game performance and PS Sense replay/performance for
 the solver correction remain unmeasured. D3D12/VKD3D-Proton and a DXVK/DXMT XR
 comparison remain separate follow-ups, with DXMT retained.
+
+
+## Installed-build headset gate before publication
+
+**Pending: do not push the default-on Vulkan integration before this check.**
+The user confirmed the original implementation (`f1841a3bc` with probe fix
+`d419f8527`). That hardware checkpoint precedes `041546532`, which changes
+barrier-fence retirement and acquired-swapchain teardown. The offscreen proofs,
+recovery tests and passing builds do not establish headset acceptance of those
+later changes.
+
+The installed service/native client and Wine x64 client currently match
+`v25.1.0-2310-g84b3749c2`. All commits since that installation are documentation
+only. The user-approved default-on configuration is retained locally while
+publication awaits the user's four-case repeat on this installed version:
+
+- Vulkan `hello_xr`, service composition.
+- Vulkan stereo arrays, service composition.
+- Vulkan `hello_xr`, hosted composition.
+- Vulkan stereo arrays, hosted composition.
+
+Leave both Vulkan sharing switches unset to exercise their defaults and disable
+source/presentation diagnostic readbacks. Confirm eye colours, depth/occlusion,
+presentation, shutdown and a subsequent clean session; record the tested git
+tag, run configuration and user observations. The runner's default mode starts
+an isolated build-tree service, so do not describe such a run as an installed
+service test without confirming the actual runtime/service paths. Hardware runs
+remain user-operated. There is no new headset result in this review follow-up.
+If the source/runtime changes again, repeat against the newly installed matching
+binaries before publication.
+
+## Acquire-wait event polling concurrency follow-up
+
+Static inspection confirms a potential race in the macOS Vulkan wait path:
+`vk_implicit_acquire_image` calls `oxr_session_poll` after a 50 ms image-wait
+timeout, while another application thread can enter the same function through
+`xrPollEvent`/`oxr_poll_event`. `oxr_session_poll` drains XRT events and mutates
+`state`, visibility/focus, presence and `has_lost` without a session-level poll
+lock. The instance event mutex protects queue push/pop, but is acquired after
+session polling in `oxr_poll_event`; it does not serialize those mutations.
+Reading `has_lost` in the acquire loop also needs a synchronization strategy.
+This is a source-level finding, not a reproduced race or a fixed implementation.
+
+Do not simply remove polling and restore an unbounded acquire wait: the loop
+was added for failed-producer recovery. Prefer a loss-aware/cancellable XRT
+image wait that does not dispatch OpenXR events from the acquire thread, or a
+consistent session/event synchronization design covering all relevant state
+accesses. Validate concurrent event polling, pending GPU ownership, session
+loss and teardown with a targeted concurrency regression, ideally under a
+race detector. A lock around only the acquire-side call would not protect the
+other poller or all state readers. The user classified this as nonblocking for
+the local merge; no runtime change or race-safety claim is made here.
