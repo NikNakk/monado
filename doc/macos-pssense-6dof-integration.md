@@ -1952,3 +1952,56 @@ with peak 1.0 below the minimum 2.0, followed by more empty scans. This does not
 establish a physically dark ring or a broken HID connection. A cold restart of
 both controllers with the service stopped, then an in-view startup, remains the
 next recovery check; its result is not yet known.
+
+### The shared clock shift is the host clock: macOS slews CLOCK_MONOTONIC, 2026-10-14
+
+**Recurrence.** Half-Life: Alyx through xrizer on the isolated service
+(`run-mwxr-20261014-120626`, Monado trace `monado_psvr2_7386_*`). Both
+controllers connected at about 12:20:07 and tracked well (about 1,700 fused
+poses per 30 s each). About 2.5 minutes later both lost lock 6.6 s apart
+(left `frames_since_lit=301 locked_lit=0/1092`, right `reason=dim
+lit_reports=41/1204`). Hinted rescans then found no lit step until Alyx was
+stopped. This is the Hyperbolica signature above.
+
+**What moved.** Best `remote − local` per 10 s, relative to the start, in
+seconds from the first controller clock sample:
+
+| Bin | Left | Right | Headset VTS − host (USB IMU trace) |
+| --- | --- | --- | --- |
+| 0–130 s | −0.1 to +0.9 ms | −0.2 to +0.8 ms | −0.8 to −2.2 ms (ordinary drift) |
+| 130–140 s | −6.1 | −6.1 | −9.2 |
+| 140–150 s | −17.4 | −17.5 | −20.6 |
+| 150–160 s | −23.5 | −23.6 | −26.8 |
+| 160–170 s | −27.2 | −26.8 | −30.1 |
+| 200–210 s | −30.3 | −30.2 | −34.1 |
+
+The two Bluetooth controllers and the USB headset moved together, to within
+0.4 ms per bin, while the controllers' echoed round-trip minima stayed flat
+(right about 33 ms, left about 82 ms). Three independent device clocks cannot
+shift in step, and late report delivery would raise the round trip. So the
+host timestamps moved: Monado's `os_monotonic_get_ns` used
+`clock_gettime(CLOCK_MONOTONIC)`, which macOS steers with time
+synchronisation. At 12:28 that clock was 4.98 s behind `CLOCK_MONOTONIC_RAW`
+and still moving at about 8 ppm.
+
+**Why tracking fails.** Both mappings that schedule the LEDs follow the host
+clock at no more than 200 ppm: the headset's minimum-delay filter
+(`PSVR2_ROBUST_CLOCK_MAX_PPM=200`) and the controllers' steady hold. A slew of
+about 1 ms per second outruns both. The headset's `hw2mono_vts` offset moved
+only 2 ms per 10 s and was 16 ms behind by 200 s, against a lock tolerance of
+about ±350 µs. After the hold was released, the controller estimate pinned at
+−200 ppm. The rings were scheduled outside the camera exposures, which matches
+"lost, never relocks, LEDs apparently dark". This also explains why the 10-08
+and 10-09 cases appeared mid-session with no Bluetooth cause.
+
+**Change.** On macOS, `os_monotonic_get_ns` now returns `CLOCK_UPTIME_RAW`
+(Mach absolute time in nanoseconds). That clock is never slewed, it is the
+time base of CoreVideo, IOKit HID and Metal, and like Linux `CLOCK_MONOTONIC`
+it stops during sleep. `XR_KHR_convert_timespec_time` keeps its
+`CLOCK_MONOTONIC` meaning by converting through the clocks' current offset, so
+the Wine bridge's performance-counter conversion is unchanged.
+`tests_time_clock` covers both points, and passes on arm64 and on x86_64 under
+Rosetta. The service and the Wine client must both be rebuilt, because they
+share time over IPC. Hardware validation is pending: a session longer than
+the usual 2–3 minutes to onset should keep both locks, and the
+`remote − local` bins should stay within normal drift.

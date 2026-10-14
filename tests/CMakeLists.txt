@@ -106,6 +106,10 @@ if(UNIX AND NOT MSVC)
 	target_link_libraries(tests_macos_hosted_client PRIVATE aux_util xrt-external-catch2)
 	add_test(NAME tests_macos_hosted_client COMMAND tests_macos_hosted_client)
 	set_target_properties(tests_macos_hosted_client PROPERTIES FOLDER monado_tests)
+	add_executable(tests_time_clock tests_time_clock.cpp)
+	target_link_libraries(tests_time_clock PRIVATE aux_util xrt-external-catch2)
+	add_test(NAME tests_time_clock COMMAND tests_time_clock)
+	set_target_properties(tests_time_clock PROPERTIES FOLDER monado_tests)
 endif()
 
 # For tests that require more than just aux_util, link those other libs down here.

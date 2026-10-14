@@ -32,9 +32,9 @@ bool initialized = false;
 bool shutdown_registered = false;
 std::once_flag environment_once;
 
-// SDKs on macOS label Mach uptime as builtin clocks 3/6. Native Monado uses
-// clock_gettime(CLOCK_MONOTONIC), whose epoch includes accumulated sleep.
-// A namespaced global clock avoids conflating those domains. IDs 64..127
+// SDKs on macOS label Mach uptime as builtin clocks 3/6. Native Monado's
+// clock is Mach uptime on macOS too, but other platforms differ, so a
+// namespaced global clock keeps the domain explicit. IDs 64..127
 // would be writer-sequence-local and would need snapshots on every thread.
 constexpr uint32_t kNativeClock = 0x4d4f4e00;
 perfetto::TraceTimestamp

@@ -34,6 +34,31 @@ struct time_state
 
 /*
  *
+ * Helpers.
+ *
+ */
+
+/*!
+ * Timespec times are CLOCK_MONOTONIC (XR_KHR_convert_timespec_time). On macOS
+ * the monotonic clock is CLOCK_UPTIME_RAW, which CLOCK_MONOTONIC is slewed
+ * against, so convert through their current offset.
+ */
+static int64_t
+clock_monotonic_minus_monotonic_ns(void)
+{
+#if defined(XRT_OS_OSX)
+	int64_t before = os_monotonic_get_ns();
+	int64_t clock_monotonic = (int64_t)clock_gettime_nsec_np(CLOCK_MONOTONIC);
+	int64_t after = os_monotonic_get_ns();
+	return clock_monotonic - (before + (after - before) / 2);
+#else
+	return 0;
+#endif
+}
+
+
+/*
+ *
  * 'Exported' functions.
  *
  */
@@ -84,7 +109,7 @@ time_state_to_timespec(struct time_state const *state, timepoint_ns timestamp, s
 	assert(state != NULL);
 	assert(out != NULL);
 
-	int64_t ns = time_state_ts_to_monotonic_ns(state, timestamp);
+	int64_t ns = time_state_ts_to_monotonic_ns(state, timestamp) + clock_monotonic_minus_monotonic_ns();
 
 	out->tv_sec = ns / (U_1_000_000_000);
 	out->tv_nsec = ns % (U_1_000_000_000);
@@ -100,7 +125,7 @@ time_state_from_timespec(struct time_state const *state, const struct timespec *
 	ns += (int64_t)timespecTime->tv_nsec;
 	ns += (int64_t)timespecTime->tv_sec * U_1_000_000_000;
 
-	return time_state_monotonic_to_ts_ns(state, ns);
+	return time_state_monotonic_to_ts_ns(state, ns - clock_monotonic_minus_monotonic_ns());
 }
 
 extern "C" timepoint_ns

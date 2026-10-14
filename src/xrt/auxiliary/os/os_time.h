@@ -82,6 +82,12 @@ extern "C" {
 
 /*!
  * Return a monotonic clock in nanoseconds.
+ *
+ * On macOS this is CLOCK_UPTIME_RAW (mach_absolute_time in nanoseconds), not
+ * CLOCK_MONOTONIC: macOS slews CLOCK_MONOTONIC with time synchronisation, by
+ * tens of milliseconds within a minute, which breaks device clock mappings.
+ * Like Linux CLOCK_MONOTONIC, it does not advance during sleep.
+ *
  * @ingroup aux_os_time
  */
 static inline int64_t
@@ -345,7 +351,9 @@ os_ns_per_qpc_tick_get(void)
 static inline int64_t
 os_monotonic_get_ns(void)
 {
-#if defined(XRT_OS_LINUX) || defined(XRT_OS_OSX)
+#if defined(XRT_OS_OSX)
+	return (int64_t)clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
+#elif defined(XRT_OS_LINUX)
 	struct timespec ts;
 	int ret = clock_gettime(CLOCK_MONOTONIC, &ts);
 	if (ret != 0) {
