@@ -1,0 +1,9 @@
+{
+  "client_exit": -2,
+  "target": "macos",
+  "simulated_hmd": false,
+  "command": [
+    "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+    "/var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-openxr-launch-t1mihac5/client.py"
+  ]
+}

@@ -1,0 +1,116 @@
+[18:18:58.731][Info   ] Press any key to shutdown...
+[18:18:58.802][Verbose] Available Extensions: (58)
+[18:18:58.802][Verbose]   Name=XR_KHR_binding_modification SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_KHR_composition_layer_color_scale_bias SpecVersion=5
+[18:18:58.802][Verbose]   Name=XR_KHR_composition_layer_cube SpecVersion=8
+[18:18:58.802][Verbose]   Name=XR_KHR_composition_layer_cylinder SpecVersion=4
+[18:18:58.802][Verbose]   Name=XR_KHR_composition_layer_equirect2 SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_KHR_convert_timespec_time SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_KHR_extended_struct_name_lengths SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_KHR_locate_spaces SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_KHR_maintenance1 SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_KHR_metal_enable SpecVersion=3
+[18:18:58.802][Verbose]   Name=XR_KHR_opengl_enable SpecVersion=12
+[18:18:58.802][Verbose]   Name=XR_KHR_swapchain_usage_input_attachment_bit SpecVersion=3
+[18:18:58.802][Verbose]   Name=XR_KHR_visibility_mask SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_KHR_vulkan_enable SpecVersion=10
+[18:18:58.802][Verbose]   Name=XR_KHR_vulkan_enable2 SpecVersion=4
+[18:18:58.802][Verbose]   Name=XR_KHR_vulkan_swapchain_format_list SpecVersion=5
+[18:18:58.802][Verbose]   Name=XR_EXT_active_action_set_priority SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_EXT_dpad_binding SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_EXT_eye_gaze_interaction SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_EXT_future SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_EXT_hand_interaction SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_EXT_hand_tracking SpecVersion=4
+[18:18:58.802][Verbose]   Name=XR_EXT_hand_tracking_data_source SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_EXT_hp_mixed_reality_controller SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_EXT_local_floor SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_EXT_samsung_odyssey_controller SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_EXT_user_presence SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_ANDROID_face_tracking SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_BD_controller_interaction SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_FB_display_refresh_rate SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_FB_face_tracking2 SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_FB_haptic_pcm SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_FB_passthrough SpecVersion=4
+[18:18:58.802][Verbose]   Name=XR_FB_touch_controller_pro SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_FB_touch_controller_proximity SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_HTC_facial_tracking SpecVersion=3
+[18:18:58.802][Verbose]   Name=XR_HTC_vive_cosmos_controller_interaction SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_HTC_vive_focus3_controller_interaction SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_META_touch_controller_plus SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_ML_ml2_controller_interaction SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MND_headless SpecVersion=3
+[18:18:58.802][Verbose]   Name=XR_MND_swapchain_usage_input_attachment_bit SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_MND_contactglove2_interaction SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MSFT_unbounded_reference_space SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_OPPO_controller_interaction SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_VARJO_quad_views SpecVersion=2
+[18:18:58.802][Verbose]   Name=XR_EXTX_overlay SpecVersion=5
+[18:18:58.802][Verbose]   Name=XR_MNDX_ball_on_a_stick_controller SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MNDX_blubur_s1 SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MNDX_flipvr SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MNDX_force_feedback_curl SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MNDX_hydra SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MNDX_oculus_remote SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MNDX_psvr2_interaction SpecVersion=1
+[18:18:58.802][Verbose]   Name=XR_MNDX_system_buttons SpecVersion=1
+[18:18:58.802][Verbose]   NaLOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: HelloXR
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: 
+	createInfo->applicationInfo.engineVersion: 0
+	createInfo->applicationInfo.apiVersion: 1.0.63
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'PS VR2 HMD'
+	Eyes: 'PS VR2 HMD'
+	Left: '<none>'
+	Right: '<none>'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+LOG in xrCreateVulkanInstanceKHR: Creation of VkInstance:
+	result: VK_SUCCESS
+	vulkanInstance: 0x103609f40
+	extensions:
+		VK_KHR_external_fence_capabilities
+		VK_KHR_external_memory_capabilities
+		VK_KHR_external_semaphore_capabilities
+		VK_KHR_get_physical_device_properties2
+		VK_EXT_debug_utils
+LOG in xrCreateVulkanDeviceKHR: Creation of VkDevice:
+	result: VK_SUCCESS
+	vulkanDevice: 0x71f1c8000
+	vulkanInstance: 0x103609f40
+	external_fence_fd: true
+	external_semaphore_fd: true
+	timelineSemaphore: true
+	extensions:
+		VK_KHR_dedicated_allocation
+		VK_KHR_external_fence
+		VK_KHR_external_memory
+		VK_KHR_external_semaphore
+		VK_KHR_get_memory_requirements2
+		VK_KHR_external_semaphore_fd
+		VK_KHR_external_fence_fd
+		VK_KHR_image_format_list
+		VK_KHR_timeline_semaphore
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/kosmickrisp-study/m3-hardware-view-20261014/service/monado_psvr2_80428_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [ipc_metal_xpc_take_shared_event] Metal XPC took and recreated shared event token=0x000000004decdb33 device=0x1035f73e0 value=0
+ INFO [client_vk_metal_create] Experimental KosmicKrisp Metal adapter: registry=4294968652 ABI=1; native swapchains and readiness semaphore
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004d7247c8
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 4 shared texture handle(s) token=0x000000004df21f3e

@@ -1,0 +1,7 @@
+ INFO [comp_window_macos_init] PS VR2 display period 11.111ms (90.00 Hz)
+ INFO [comp_window_macos_init] Selected macOS display 'PS VR2' at 4000x2040 (window front-end)
+ INFO [comp_window_macos_create_images] Created 3 IOSurface-backed macOS compositor images at 4000x2040
+ INFO [comp_window_macos_update_timings] CADisplayLink measured display period 11.122209ms (89.910 Hz)
+ INFO [comp_window_macos_flush] macOS presentation: window front-end visible=true layer device=set format=80 drawable=4000x2040
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0xc54c8c000 bytes=131858432 retained_bytes=263716864 objects=2 id=1
+ INFO [tracked_swapchain_destroy] GPU reuse quarantine: swapchain=0xc54c8c800 bytes=131858432 retained_bytes=263716864 objects=2 id=2

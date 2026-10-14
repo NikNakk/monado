@@ -1,0 +1,6 @@
+ INFO [comp_window_macos_init] PS VR2 display period 11.111ms (90.00 Hz)
+ INFO [comp_window_macos_init] Selected macOS display 'PS VR2' at 4000x2040 (window front-end)
+ INFO [comp_window_macos_create_images] Created 3 IOSurface-backed macOS compositor images at 4000x2040
+ INFO [comp_window_macos_update_timings] CADisplayLink measured display period 11.122209ms (89.910 Hz)
+ INFO [comp_window_macos_flush] macOS presentation: window front-end visible=true layer device=set format=80 drawable=4000x2040
+ INFO [macos_host_attach] Hosting client 1 (CAContext 3233150816) in the headset window

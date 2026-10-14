@@ -1,0 +1,92 @@
+{
+  "runtime_implementation_commit": "416f276fd",
+  "branch_at_first_view": "e6b1a53d4",
+  "user_feedback": "Works well",
+  "display": "PS VR2 4000x2040 at 90 Hz",
+  "game_mode": "not requested/verified",
+  "runs": {
+    "service-view": {
+      "summary": {
+        "client_exit": -2,
+        "target": "macos",
+        "simulated_hmd": false,
+        "command": [
+          "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+          "/var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-openxr-launch-t1mihac5/client.py"
+        ]
+      },
+      "readiness": {
+        "layer_begin_entry": 8119,
+        "layer_begin_after_previous": 8119,
+        "semaphore_pushed": 8119,
+        "semaphore_wait_start": 8119,
+        "semaphore_ready": 8119,
+        "scheduled": 8119
+      },
+      "presentations": 8353,
+      "presentation_interval_ms_median": 11.122167,
+      "presentation_command_buffer_gpu_ms_median": 1.3747291668551043,
+      "termination": "user-requested interrupt; not a graceful-exit pass"
+    },
+    "hosted": {
+      "summary": {
+        "client_exit": 0,
+        "target": "macos",
+        "simulated_hmd": false,
+        "command": [
+          "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+          "/var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-openxr-launch-ll0sey0e/client.py"
+        ]
+      },
+      "readiness": {
+        "layer_begin_entry": 2534,
+        "layer_begin_after_previous": 2534,
+        "semaphore_pushed": 2534,
+        "semaphore_wait_start": 2534,
+        "semaphore_ready": 2534,
+        "scheduled": 2534
+      },
+      "presentations": 2533,
+      "presentation_interval_ms_median": 11.122167,
+      "presentation_command_buffer_gpu_ms_median": 1.4068958262214437
+    },
+    "baseline-abort": {
+      "summary": {
+        "client_exit": 1,
+        "target": "macos",
+        "simulated_hmd": false,
+        "command": [
+          "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+          "/var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-openxr-launch-5sp6apnh/client.py"
+        ]
+      },
+      "readiness": {},
+      "presentations": 0,
+      "presentation_command_buffer_gpu_ms_median": 1.0047916730400175,
+      "termination": "sample abort: Depth32Float IOSurface texture forbidden by Metal; unmatched color/depth formats"
+    },
+    "graceful-stop": {
+      "summary": {
+        "client_exit": 0,
+        "target": "macos",
+        "simulated_hmd": false,
+        "command": [
+          "/Applications/Xcode.app/Contents/Developer/usr/bin/python3",
+          "/var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-openxr-launch-_4thzadj/client.py"
+        ]
+      },
+      "readiness": {
+        "layer_begin_entry": 686,
+        "layer_begin_after_previous": 686,
+        "semaphore_pushed": 686,
+        "semaphore_wait_start": 686,
+        "semaphore_ready": 686,
+        "scheduled": 686
+      },
+      "presentations": 682,
+      "presentation_interval_ms_median": 11.122167,
+      "presentation_command_buffer_gpu_ms_median": 1.4065625000512227
+    }
+  },
+  "runner_sha256": "49248b1b81c7997b661f00220168a1de260c5784c885aed9f542621cd8381fd8"
+}

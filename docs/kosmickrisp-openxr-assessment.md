@@ -742,8 +742,8 @@ assessment/index documents are updated. No branch was merged or pushed.
 ## Milestone 3 — authorized experimental integration, 2026-10-14
 
 The user authorized M3 after reviewing M2. Implementation is isolated on
-`codex/kosmickrisp-openxr-m3`, based on `5aa80413e`; runtime implementation `416f276fd`. It has **offscreen OpenXR
-validation, not PSVR2 or Game Mode acceptance**. The original checkout,
+`codex/kosmickrisp-openxr-m3`, based on `5aa80413e`; runtime implementation `416f276fd`. It now has **physical PSVR2 service-path acceptance and a clean hosted-path
+run** (see the follow-up below); actual Game Mode remains unvalidated. The original checkout,
 `macos-upstream-clean`, installed services and runtime manifests are unchanged.
 Wine, DXMT and M4 remain separate. The M2 pause above records the earlier gate.
 
@@ -773,7 +773,7 @@ safe native reuse, as required by the existing implicit-barrier path.
 | Arrays, mips, MSAA, static/protected, depth, storage, mutable | Explicit unsupported; formats limited to the two proven UNORM formats |
 | Vulkan layers / generic Vulkan Metal extensions | Unsupported by this experimental C ABI; no partial `VK_EXT_metal_objects` advertisement |
 | Feature off / current Metal path | Separate build passes normal Metal simulated-service probe |
-| Client compositor / Game Mode | Simulated hosting rejected, service fallback succeeds; actual hosted composition unvalidated |
+| Client compositor / Game Mode | Simulated hosting initially fell back; subsequent physical hosted hello_xr passed. Actual Game Mode remains unvalidated |
 | Linux | Apple-only adapter/build guard; Linux build and CI not executed here |
 | D3D12 / D3D11 / performance advantage | No new evidence; no Wine or DXMT changes |
 
@@ -869,8 +869,8 @@ Priorities before wider acceptance:
 5. M4 D3D12/VKD3D-Proton investigation in the separate bridge, after native acceptance.
    Preserve DXMT; compare D3D11 only with matched measurements.
 
-No merge, push, production installation or physical hardware run was performed.
-
+At the initial M3 report, no merge, push, production installation or physical
+hardware run had been performed. Subsequent user-requested runs follow.
 
 ### First user-requested hardware viewing run (2026-10-14)
 
@@ -882,3 +882,58 @@ the real 4000x2040 display selected at 90 Hz, MoltenVK service composition,
 KosmicKrisp client import and advancing producer values. This run is still active
 when this note is written: graceful completion, visual acceptance, detailed frame
 pacing and Game Mode are not yet established. No refresh mode was changed.
+
+
+### Physical acceptance and hosted follow-up (2026-10-14)
+
+The user reported **“Works well”** for the service-composited Vulkan2 hello_xr
+scene, then requested stopping it and proceeding. The initial run was stopped by
+interrupting its runner (client wrapper exit -2); its `finally` block terminated
+the sample and removed the isolated service. This is a user-requested stop, not a
+graceful sample-exit pass. A subsequent stop-file control sends the sample its
+normal stdin shutdown; that physical hosted test exited 0 and cleaned up.
+
+[Hardware manifest and source hashes](kosmickrisp-evidence/m3/hardware/manifest.json)
+and raw readiness/presentation traces record:
+
+| Run | Ready / scheduled producer values | Actual presentation callbacks | Median presentation interval | Exit / acceptance |
+| --- | ---: | ---: | ---: | --- |
+| Service composition, user viewing | 8,119 / 8,119 | 8,353 | 11.122167 ms | User accepted scene; requested interrupt |
+| Hosted composition, 30 s viewing interval | 2,534 / 2,534 | 2,533 | 11.122167 ms | Sample exit 0; actual hosted selection |
+| Hosted graceful early stop | 686 / 686 | 682 | 11.122167 ms | STOP-file stdin shutdown, sample exit 0 |
+
+Counts include startup/teardown; presentation callbacks include compositor-only
+frames and repeated outputs, so they are not distinct application frame counts.
+Intervals use sorted unique positive `presented_monotonic_ns`, without warmup
+exclusion. These are short correctness captures with full tracing, not a latency
+or thermal benchmark. The real display stayed 4000x2040 at its existing 90 Hz mode.
+No producer readiness failure appeared in those three runs. The hosted log
+confirms `Compositing in-process` and a service-hosted CAContext, with MoltenVK for
+the compositor and KK for the client adapter. No fallback occurred in the physical
+hosted runs. The user visually accepted the service run; hosted visual acceptance
+and actual Game Mode activation/throttling still need separate verification.
+
+Presentation command-buffer GPU intervals have medians 1.375 ms (service) and
+1.407 ms (hosted). These measure the presenter's Metal command buffer, including
+its shared-event ordering, not total client rendering or all Vulkan compositor
+passes. They establish no performance advantage and should not be compared as a
+controlled A/B experiment: workloads, duration, head motion and thermal history
+were not held constant.
+
+The first MoltenVK baseline aborted before a valid application presentation:
+[baseline log](kosmickrisp-evidence/m3/hardware/baseline-abort/hello.log) reports
+`MTLPixelFormatDepth32Float` forbidden for an IOSurface texture. The official sample
+selected sRGB colour and optional depth on the normal driver, versus UNORM colour
+without exported depth on KK. The crash stack places the assertion in MoltenVK
+`MVKImagePlane::getMTLTexture` -> Metal IOSurface texture creation. This is a
+normal Vulkan-path descriptor/transport blocker found by the comparison, not
+proof that KK is faster. No baseline timing result is valid. A useful comparison
+must force matching colour-only descriptors or first fix normal depth transport.
+No ordinary Metal/Wine path was replaced or altered to accommodate the sample.
+
+Runtime implementation remains `416f276fd`. Runner changes add early stop,
+viewing duration and baseline selection; source SHA256 is captured in the hardware
+manifest. No production service or library installation, merge or push occurred.
+All temporary headset tests have been stopped. Next priorities are actual Game
+Mode verification, a matched colour-only baseline, device-loss/repeated-session
+resource budgets and standard Mesa import APIs before wider application trials.

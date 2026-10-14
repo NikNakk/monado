@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "/var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/kk-openxr-launch-t1mihac5/client.py", line 3, in <module>
+    runpy.run_path(sys.argv[0],run_name="__main__")
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py", line 268, in run_path
+    return _run_module_code(code, init_globals, run_name,
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py", line 97, in _run_module_code
+    _run_code(code, mod_globals, init_globals,
+  File "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/runpy.py", line 87, in _run_code
+    exec(code, run_globals)
+  File "/private/tmp/monado-kosmickrisp-m3/experiments/kosmickrisp/run-openxr-m3.py", line 108, in <module>
+    time.sleep(a.seconds)
+KeyboardInterrupt
