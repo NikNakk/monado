@@ -1014,3 +1014,47 @@ is no evidence yet to replace DXMT or alter the Wine bridge.
 The follow-up manifest includes final runtime, probe and driver binary SHA256.
 The runtime version banner retains its initial configure-time `5aa80413e` label;
 source commit `ac96a07fa` and the binary hashes identify these later tests.
+
+### Offscreen driver benchmark (2026-10-14)
+
+This is a direct comparison of the two drivers' rendering cost, outside OpenXR.
+[`kkbench`](../experiments/kosmickrisp/driver-benchmark/kkbench.c) renders the
+same work through whichever ICD the loader selects. Each frame fills a
+4000×2040 BGRA target with one fullscreen triangle, or with strips drawn
+separately for the many-draws cases, with two frames in flight. GPU time is
+from Vulkan timestamps; both drivers' values agree with wall-clock time per
+frame. [`sweep.py`](../experiments/kosmickrisp/driver-benchmark/sweep.py) runs
+600 frames per run (30 warm-up frames excluded), four runs per case, ordered
+KosmicKrisp, MoltenVK, MoltenVK, KosmicKrisp. KosmicKrisp is the unpatched
+`aac5108bb` debug-optimised build; MoltenVK is Homebrew 1.4.2. Same M5 MacBook
+Air, no headset. [Raw results](kosmickrisp-evidence/m3/followup/driver-benchmark/results.jsonl).
+
+| Workload | KK GPU ms | MVK GPU ms | KK slower by |
+| --- | ---: | ---: | ---: |
+| Arithmetic loop ×4 | 0.684 | 0.634 | 8% |
+| Arithmetic loop ×16 | 2.492 | 2.426 | 3% |
+| Arithmetic loop ×64 | 9.76 | 9.66 | 1% |
+| Warped texture sampling, 1 tap | 0.467 | 0.415 | 12% |
+| Warped texture sampling, 4 taps | 0.648 | 0.564 | 15% |
+| Warped texture sampling, 12 taps | 1.273 | 1.170 | 9% |
+| 200 draws | 0.31 | 0.26 | 18% |
+| 2,000 draws | 1.01 | 0.945 | 7% |
+
+Repeat runs agreed to within about 0.5%. KosmicKrisp adds roughly 0.05–0.1 ms
+per frame and samples textures about 10% more slowly; arithmetic-bound work
+converges, as expected when both drivers end in Apple's shader compiler.
+Recording and submitting a frame took about 60 µs on KosmicKrisp against
+20–48 µs on MoltenVK. At 2,000 draws both were near 0.5–0.66 ms. The
+KosmicKrisp build probably retains assertions, so its CPU figures are
+pessimistic. At 90–120 Hz the GPU differences are about 1% of the frame budget.
+Single synthetic shaders do not represent a game's mix, but nothing here
+suggests a rendering advantage for either driver.
+
+The matched OpenXR probe's apparent synchronization benefit, no
+`vkQueueWaitIdle` per frame, is not specific to KosmicKrisp. On MoltenVK the
+ordinary Vulkan client path falls back to that wait only because macOS has no
+opaque-FD timeline or sync-FD fence. An opt-in Metal shared-event handoff for
+MoltenVK clients (`XRT_MACOS_VK_CLIENT_SHARED_EVENT=1`, branch
+`claude/vk-client-shared-event`, commit `b7bcef7fd`) removes it. Offscreen with
+9 ms of CPU and a heavy GPU load per frame, that raised the probe from 26–28
+fps (pacing at 30 Hz) to 60 fps. See `doc/macos-env-toggles.md` on that branch.
