@@ -35,6 +35,7 @@ Same M5, 600 frames, four A–B–B–A runs per workload; not a game benchmark.
 
 The experimental Monado branch is `codex/macos-vulkan-metal-swapchains`, retaining
 Claude's shared-event work and ten general commits by ancestry. The runtime
-remains opt-in. User headset validation, Game Mode, Linux CI and Wine graphics
-paths are outstanding. No integration merge, push or installed runtime change
+remains opt-in. The user confirms service/hosted `hello_xr` and stereo arrays with readbacks
+disabled after the probe visibility fix. Game Mode, Linux CI and Wine graphics
+paths remain outstanding. No integration merge, push or installed runtime change
 is included.

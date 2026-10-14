@@ -11,8 +11,9 @@ The [2026-10-14 Vulkan Metal swapchain follow-up](macos-vulkan-metal-swapchains.
 keeps MoltenVK, adds opt-in native Vulkan array/depth images through standard
 Metal object import, and preserves the existing shared-event frame handoff.
 Exact GPU-ordered pixels pass within and across processes; service `hello_xr`,
-recovery and repeated-session tests pass. Hosted/headset acceptance remains a
-user hardware gate. KosmicKrisp research is archived; no integration merge or
+recovery and repeated-session tests pass. The user confirms service/hosted arrays and `hello_xr` with readbacks disabled.
+An initially black hosted-array probe was fixed by polling visibility events;
+the runtime sharing path was unchanged. KosmicKrisp research is archived; no integration merge or
 installed runtime change is included.
 
 
