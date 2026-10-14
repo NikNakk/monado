@@ -101,7 +101,7 @@ def policy_timeline(out):
 def analyze(out, window_s=5):
     process = json.loads((out / "process.json").read_text())
     window = json.loads((out / "window.json").read_text())
-    if window["clock"] != "CLOCK_MONOTONIC":
+    if window["clock"] not in ("CLOCK_MONOTONIC", "CLOCK_UPTIME_RAW"):
         raise ValueError("Capture window is not in Monado's clock domain")
     begin, end = window["start_ns"], window["end_ns"]
     client, server = process["client_pid"], process["server_pid"]

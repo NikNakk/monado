@@ -67,10 +67,7 @@
 static uint64_t
 now_ns()
 {
-	struct timespec time{};
-	if (clock_gettime(CLOCK_MONOTONIC, &time) != 0)
-		throw std::runtime_error("clock_gettime");
-	return (uint64_t)time.tv_sec * 1000000000ULL + time.tv_nsec;
+	return clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
 }
 static void
 checked(XrResult result, const char *operation)
@@ -99,7 +96,7 @@ main(int argc, char **argv)
 				throw std::runtime_error("Timeout must be between 1 and 300 seconds");
 			fprintf(
 			    stdout,
-			    "{\"event\":\"config\",\"thermal\":%ld,\"low_power\":%s,\"clock\":\"CLOCK_MONOTONIC\"}\n",
+			    "{\"event\":\"config\",\"thermal\":%ld,\"low_power\":%s,\"clock\":\"CLOCK_UPTIME_RAW\"}\n",
 			    (long)[NSProcessInfo processInfo].thermalState,
 			    [NSProcessInfo processInfo].lowPowerModeEnabled ? "true" : "false");
 			if (argc > 1 && std::string(argv[1]) == "telemetry")
@@ -215,10 +212,15 @@ main(int argc, char **argv)
 			XrSwapchain swapchain = XR_NULL_HANDLE;
 			XrResult allocation = xrCreateSwapchain(session, &swapInfo, &swapchain);
 			if (exhausted) {
-				if (XR_SUCCEEDED(allocation)) throw std::runtime_error("Exhausted global budget admitted allocation");
-				checked(xrDestroySpace(space), "space"); checked(xrDestroySession(session), "session");
+				if (XR_SUCCEEDED(allocation))
+					throw std::runtime_error("Exhausted global budget admitted allocation");
+				checked(xrDestroySpace(space), "space");
+				checked(xrDestroySession(session), "session");
 				checked(xrDestroyInstance(instance), "instance");
-				fprintf(stdout, "{\"event\":\"result\",\"status\":\"PASS\",\"budget_rejected\":true,\"result\":%d}\n", allocation);
+				fprintf(stdout,
+				        "{\"event\":\"result\",\"status\":\"PASS\",\"budget_rejected\":true,\"result\":"
+				        "%d}\n",
+				        allocation);
 				return 0;
 			}
 			checked(allocation, "swapchain");
@@ -226,11 +228,17 @@ main(int argc, char **argv)
 				XrSwapchain extra = XR_NULL_HANDLE, rejected = XR_NULL_HANDLE;
 				checked(xrCreateSwapchain(session, &swapInfo, &extra), "second allocation");
 				XrResult result = xrCreateSwapchain(session, &swapInfo, &rejected);
-				if (XR_SUCCEEDED(result)) throw std::runtime_error("Per-client budget admitted a third allocation");
-				checked(xrDestroySwapchain(extra), "extra"); checked(xrDestroySwapchain(swapchain), "swapchain");
-				checked(xrDestroySpace(space), "space"); checked(xrDestroySession(session), "session");
+				if (XR_SUCCEEDED(result))
+					throw std::runtime_error("Per-client budget admitted a third allocation");
+				checked(xrDestroySwapchain(extra), "extra");
+				checked(xrDestroySwapchain(swapchain), "swapchain");
+				checked(xrDestroySpace(space), "space");
+				checked(xrDestroySession(session), "session");
 				checked(xrDestroyInstance(instance), "instance");
-				fprintf(stdout, "{\"event\":\"result\",\"status\":\"PASS\",\"budget_rejected\":true,\"result\":%d}\n", result);
+				fprintf(stdout,
+				        "{\"event\":\"result\",\"status\":\"PASS\",\"budget_rejected\":true,\"result\":"
+				        "%d}\n",
+				        result);
 				return 0;
 			}
 			uint32_t count;
@@ -344,8 +352,10 @@ main(int argc, char **argv)
 					XrViewState view_state{XR_TYPE_VIEW_STATE};
 					XrView views[2] = {{XR_TYPE_VIEW}, {XR_TYPE_VIEW}};
 					uint32_t view_count = 0;
-					checked(xrLocateViews(session, &locate, &view_state, 2, &view_count, views), "locate stereo views");
-					if (view_count != 2) throw std::runtime_error("Expected stereo projection views");
+					checked(xrLocateViews(session, &locate, &view_state, 2, &view_count, views),
+					        "locate stereo views");
+					if (view_count != 2)
+						throw std::runtime_error("Expected stereo projection views");
 					for (unsigned eye = 0; eye < 2; ++eye) {
 						projection_views[eye].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
 						projection_views[eye].pose = views[eye].pose;
@@ -378,7 +388,8 @@ main(int argc, char **argv)
 				        "{\"event\":\"frame\",\"pid\":%d,\"frame\":%u,\"image\":%u,\"begin_ns\":%llu,"
 				        "\"end_ns\":%llu,\"acquire_wait_ns\":%llu}\n",
 				        getpid(), ++rendered, image, (unsigned long long)before,
-				        (unsigned long long)now_ns(), (unsigned long long)(acquire_end - acquire_start));
+				        (unsigned long long)now_ns(),
+				        (unsigned long long)(acquire_end - acquire_start));
 				fflush(stdout);
 			}
 			if (missing ? !lost : rendered != frames)

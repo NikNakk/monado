@@ -54,7 +54,7 @@ def main():
                                   'sync_to': {'file': native[0].name, 'clock': 'MONOTONIC_RAW'},
                                   'offset_ns': 0}} for path in args.traces],
             'attributes': {'timeline': 'Mach absolute nanoseconds',
-                           'native_clock': 'Monado CLOCK_MONOTONIC with captured snapshots',
+                           'native_clock': 'Monado native clock with captured snapshots',
                            'provenance': 'Caller-supplied same-host Chromium/native SDK captures',
                            'sdk_clock_alias': 'macOS SDK BOOTTIME is Mach uptime, zero offset to MONOTONIC_RAW'}}}
         args.manifest.parent.mkdir(parents=True, exist_ok=True)

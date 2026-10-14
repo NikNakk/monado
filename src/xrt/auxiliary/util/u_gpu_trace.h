@@ -49,7 +49,7 @@ void
 u_gpu_trace_init_from_environment(void);
 bool
 u_gpu_trace_enabled(void);
-//! timestamp_ns is CLOCK_MONOTONIC; duration_ns describes an interval ending there.
+//! timestamp_ns uses os_monotonic_get_ns (CLOCK_UPTIME_RAW on macOS); duration_ns describes an interval ending there.
 void
 u_gpu_trace_event(const char *domain,
                   const char *event,
