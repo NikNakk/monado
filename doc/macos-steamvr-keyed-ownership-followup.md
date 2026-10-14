@@ -541,3 +541,23 @@ A 90 Hz attempt (`XRT_MACOS_REFRESH_RATE_HZ=90`, run
 `run-mwxr-20261014-085401`) failed: the PS VR2 had dropped off USB and its
 display reported asleep, so Monado used its simulated HMD, and
 `CGDisplaySetDisplayMode` returned CGError 1014. Not a 90 Hz result.
+
+### 90 Hz Home and thermal drift — 2026-10-14
+
+With the headset awake again, `XRT_MACOS_REFRESH_RATE_HZ=90` switched the PS
+VR2 to 90 Hz (run `run-mwxr-20261014-090242`; SteamVR's display frequency
+90). Home did worse than at 120 Hz: SteamVR recommends a larger render
+target at 90 Hz (1428×1456 against 1252×1276 per eye), so even at level 0
+Home's pre-submit GPU was 13.2 ms (p50) against an 11.1 ms budget and
+SteamVR held it at half rate: 45.7 frames/s, period p50 22.3 ms, 15 gaps over
+50 ms in 105 s. At 120 Hz (`084953`): 7.0 ms against 8.33 ms, 103.7
+frames/s.
+
+These runs are not thermally controlled. At a fixed level, pre-submit GPU
+rose through each run by thirds: 6.66 / 7.04 / 7.51 ms at 120 Hz and
+12.91 / 13.94 / 14.87 ms at 90 Hz, after hours of testing on a fanless
+MacBook Air; `ProcessInfo.thermalState` was "fair" afterwards, with no
+thermal warning recorded by `pmset`. The user also saw Home's frame timing
+worsen towards the end and occasional CPU spikes. A first Alyx launch at
+120 Hz (`090754`) was stopped to let the machine cool; its first readings
+were pre-submit 12.4–16.4 ms.
