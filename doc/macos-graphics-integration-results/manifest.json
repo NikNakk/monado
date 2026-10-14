@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-14",
+  "candidate_branch": "codex/macos-graphics-integration",
+  "functional_source_commit": "4e468fe7de8030e9ca39974145bff4d4b1123306",
+  "linux_fix_commit": "60bb084d7af72e421ba98395bf7ce3d10e4194b7",
+  "remote_integration_base": "bc9591f0313508cdb19fcb3ddf8e2c39c1e2232b",
+  "local_integration_base": "805316bebe976256a16c591ee135a5422ffe73a3",
+  "tests_built_before_committing": true,
+  "source_hashes": {
+    "src/xrt/compositor/client/comp_vk_client.c": "4a89a2fdd200ac9cc9f447a32f00f713e55b2a6173ce863039b120a09ba594fa",
+    "src/xrt/compositor/client/comp_vk_client.h": "2cfc83402c58336ab4d7de69ddc183551dd6f94f6490f41c6da92fcc7319ae5c",
+    "src/xrt/compositor/main/comp_renderer.c": "a418f9806418c61106b22cce6311724e3eb9489151f6049dbecb28e8635a4ae6",
+    "src/xrt/tracking/constellation/joint_pose_solver.cpp": "e32edfc3c223f010fbf63213d28722dcfd1c6a638011cb7b433fcbf367008f9b",
+    "src/xrt/tracking/constellation/stereo_bootstrap.cpp": "8fcff2b4e6b056b75251e551c9c6a603ec64e28eb78bc72acfe74051f7a8df07",
+    "tests/tests_joint_pose_solver.cpp": "71f8a98da8ab9124011835b25b73b4ac425c0d4df2b348ccb27f2fb17ef56069",
+    "tests/joint_pose_solver_fixtures.hpp": "64289e242f41e20abf73c0836e07a0bf54cfecb5898845296f72329bbae33e52",
+    "tests/tests_macos_service_gpu_sync.mm": "7421d90230fa81503bc6788c58c02d65b3cfa062f229ff14aaaae6ff923b04a4"
+  },
+  "macos": {
+    "os": "26.7.1 (25G241)",
+    "hardware": "Apple M5 MacBook Air, 24 GB",
+    "compiler": "Apple clang 21.0.0 (clang-2100.3.34.2)",
+    "xcode": "27.0 (27A266a)",
+    "architecture": "arm64",
+    "cmake": "4.4.3",
+    "ninja": "1.13.2",
+    "moltenvk": "1.4.2",
+    "vulkan_headers_and_loader": "1.4.357.0",
+    "build_type": "RelWithDebInfo",
+    "flags": [
+      "-DXRT_FEATURE_MACOS_TIMING_DIAGNOSTICS=ON",
+      "-DXRT_MACOS_SERVICE_GPU_TESTS=ON"
+    ],
+    "ctest": {
+      "passed": 78,
+      "total": 78,
+      "seconds": 48.35
+    },
+    "joint_solver": {
+      "cases": 13,
+      "assertions": 1089,
+      "passed": true
+    },
+    "no_new_headset_run": true
+  },
+  "linux": {
+    "os": "Ubuntu 24.04",
+    "container_image": "ubuntu@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
+    "architecture": "x86_64 emulated on Apple Silicon",
+    "compiler": "GCC 13.3.0",
+    "cmake": "3.28.3",
+    "ninja": "1.11.1",
+    "eigen": "3.4.0",
+    "ceres": "2.2.0",
+    "vulkan_headers": "1.3.275.0",
+    "glslang": "15.1.0",
+    "cmake_feature_overrides": [],
+    "build_type": "unset (default CI)",
+    "compiler_warnings": 0,
+    "ctest": {
+      "passed": 48,
+      "total": 48,
+      "seconds": 331.37
+    },
+    "joint_solver": {
+      "cases": 13,
+      "assertions": 1080,
+      "passed": true
+    }
+  },
+  "negative_control": {
+    "original_sources": "6293ba232:joint_pose_solver.cpp and stereo_bootstrap.cpp (unchanged from integration base)",
+    "frozen_test_assertions": 13,
+    "failed_assertions": 1,
+    "failure": "2.98209672765081368 degrees exceeds unchanged 2-degree re-acquisition bound"
+  },
+  "log_hashes": {
+    "linux-final-negative-control.log": "5b052bfc15828a5eebdaa1eebd65bd687dbb2ef63ef538c4a1e227d67d1dc4fc",
+    "macos-final-ctest.log": "7015cdca283bf10c96eababd4baf76620967488362d94c0afb29818adbf43a69",
+    "macos-minimal-final-test.log": "5cb1e887ecbfc1590059048f253c9d8aed28d1a0009b62ca4d950e19226980f0",
+    "linux-fix-truth-test.log": "a0153d4c3318748ff3eb59c9354242a57cf3821e611db9b66ffe614f1109f237",
+    "native-joint-benchmark.json": "4374f664696905526cb34f34d0a44b5befb0f2a0826f9b3a9ba9d7262073c5a9",
+    "linux-fix-final-ctest.log": "d81ff62e14c31481c16ef014123ec4c16b078b4b889df19139e18d9f8cecc1bc",
+    "ubuntu24-baseline-joint-test.log": "ef3e3d834a333f698c8e5677f2a4e0811134f7fc543f5363022f0a912606a4a7"
+  }
+}

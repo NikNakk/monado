@@ -17,7 +17,7 @@ a private Mesa ABI into the active runtime branch.
 
 | Requirement | Inspected KosmicKrisp snapshot / archived experiment | Active MoltenVK follow-up |
 | --- | --- | --- |
-| Native Vulkan OpenXR | Diagnostic patched driver worked | Standard API, opt-in native Metal-backed array/depth path |
+| Native Vulkan OpenXR | Diagnostic patched driver worked | Standard API, native Metal-backed array/depth path; default-on in integration candidate |
 | Metal texture interoperability | Upstream Metal external-memory support was MTLHeap-only; diagnostic hooks added texture import | `VK_EXT_metal_objects`; exact imported/exported texture identity; no image allocation/bind |
 | Cross-process storage and ordering | Patched texture/event proof, archived | Shared texture handles; exact pixels at GPU values 1–4 in an independent process; missing-wait negative control |
 | Additional compositor/copy | No inherent requirement demonstrated | Existing compositor and Metal transport; no production image copy introduced |
@@ -34,8 +34,9 @@ warped sampling ×4: 0.648/0.564 ms, and 200 draws: 0.31/0.26 ms (KK/MVK).
 Same M5, 600 frames, four A–B–B–A runs per workload; not a game benchmark.
 
 The experimental Monado branch is `codex/macos-vulkan-metal-swapchains`, retaining
-Claude's shared-event work and ten general commits by ancestry. The runtime
-remains opt-in. The user confirms service/hosted `hello_xr` and stereo arrays with readbacks
-disabled after the probe visibility fix. Game Mode, Linux CI and Wine graphics
+Claude's shared-event work and ten general commits by ancestry. The reviewed `codex/macos-graphics-integration` candidate defaults both Vulkan
+sharing switches to on with independent fallbacks; see the
+[cumulative review](../doc/macos-graphics-integration-review.md). The user confirms service/hosted `hello_xr` and stereo arrays with readbacks
+disabled after the probe visibility fix. Real-game Game Mode comparisons, the Linux gate and Wine graphics
 paths remain outstanding. No integration merge, push or installed runtime change
 is included.

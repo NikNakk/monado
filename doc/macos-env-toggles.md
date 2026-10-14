@@ -37,9 +37,9 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 
 ## Vulkan client shared-event frame handoff (2026-10-14)
 
-`XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` (default `0`, macOS only) changes how a
+`XRT_MACOS_VK_CLIENT_SHARED_EVENT` (default `1` in the graphics integration candidate, macOS only) changes how a
 native Vulkan OpenXR client hands each frame to the compositor. macOS has no
-opaque-FD timeline semaphore or sync-FD fence, so by default
+opaque-FD timeline semaphore or sync-FD fence. With this option disabled,
 `comp_vk_client.c` calls `vkQueueWaitIdle` on every `xrEndFrame`. The
 application's CPU then waits for all of its own GPU work and cannot overlap
 the next frame with it. With the option, the client imports a Metal shared
@@ -57,7 +57,7 @@ Runs used an isolated service, 600 frames each, ordered A–B–B–A:
 
 | Handoff | Frame rate | `xrEndFrame` median |
 | --- | ---: | ---: |
-| Queue-idle wait (default) | 26.2 / 28.2 fps; pacing fell to 30 Hz | 7.44 / 7.43 ms |
+| Queue-idle wait (historical default) | 26.2 / 28.2 fps; pacing fell to 30 Hz | 7.44 / 7.43 ms |
 | Shared event | 60.0 / 60.0 fps | 0.14 / 0.14 ms |
 
 With 4 ms of CPU work and a lighter GPU load, both fit in the frame and both
@@ -82,18 +82,19 @@ and flash phases, with no new warnings; the in-process run logged the local
 semaphore pair. Those runs' timings are not comparable, because full logging
 and readbacks load the service. The isolated service inherited
 `XRT_MACOS_GPU_QUEUE_PRIORITY=0` from the launchd environment, which applied
-equally to every run. The subsequent opt-in Metal texture path supports native
+equally to every run. The subsequent Metal texture path supports native
 stereo arrays and depth, and unmodified Vulkan `hello_xr` passes offscreen.
 With that path disabled, advanced geometry is explicitly unsupported instead
-of reaching the old IOSurface array assertion. User headset acceptance and
-Game Mode remain gates; see [the implementation](macos-vulkan-metal-swapchains.md).
+of reaching the old IOSurface array assertion. The user confirms the four service/hosted visual tests;
+real-game Game Mode comparisons remain a separate gate; see [the implementation](macos-vulkan-metal-swapchains.md).
 
 ## Native Vulkan Metal array/depth swapchains (2026-10-14)
 
 `XRT_MACOS_VK_CLIENT_METAL_TEXTURES=1` selects the existing Metal texture provider
 for native Vulkan arrays/depth and wraps its textures with `VK_EXT_metal_objects`.
-Set it in the client; default is `0`. Single-layer colour keeps IOSurface.
-Enable `XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` separately to avoid the CPU frame
+Default is `1` in the graphics integration candidate. Set `=0` in the client
+to disable it. Single-layer colour keeps IOSurface.
+Keep `XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` enabled to avoid the CPU frame
 handoff fallback. No compositor or production texture copy is added.
 
 Single-mip, single-sample 2D/array images are supported for formats listed in

@@ -1,0 +1,105 @@
+Internal ctest changing into directory: /build
+Test project /build
+      Start 37: tests_joint_pose_solver
+      Start 39: tests_pssense_fusion
+      Start 36: tests_imu_optical_filter
+      Start 43: tests_render_compute
+ 1/48 Test #43: tests_render_compute ...............   Passed    5.91 sec
+      Start 29: tests_render_pipeline_cache
+ 2/48 Test #29: tests_render_pipeline_cache ........   Passed    0.87 sec
+      Start 22: tests_worker
+ 3/48 Test #22: tests_worker .......................   Passed    0.56 sec
+      Start 26: tests_psvr2_tracking_share
+ 4/48 Test #26: tests_psvr2_tracking_share .........   Passed    0.38 sec
+      Start 25: tests_frame_share
+ 5/48 Test #25: tests_frame_share ..................   Passed    0.34 sec
+      Start 35: tests_led_phase_bootstrap
+ 6/48 Test #35: tests_led_phase_bootstrap ..........   Passed    0.09 sec
+      Start 47: tests_psvr2_sense_tracking
+ 7/48 Test #47: tests_psvr2_sense_tracking .........   Passed    0.06 sec
+      Start 13: tests_pacing
+ 8/48 Test #13: tests_pacing .......................   Passed    0.07 sec
+      Start 15: tests_quatexpmap
+ 9/48 Test #15: tests_quatexpmap ...................   Passed    0.07 sec
+      Start 30: tests_input_transform
+10/48 Test #30: tests_input_transform ..............   Passed    0.05 sec
+      Start 34: tests_pose_metrics
+11/48 Test #34: tests_pose_metrics .................   Passed    0.05 sec
+      Start 48: tests_pssense_clock
+12/48 Test #48: tests_pssense_clock ................   Passed    0.05 sec
+      Start 38: tests_constellation_dataset
+13/48 Test #38: tests_constellation_dataset ........   Passed    0.05 sec
+      Start 18: tests_rational
+14/48 Test #18: tests_rational .....................   Passed    0.04 sec
+      Start 16: tests_quat_change_of_basis
+15/48 Test #16: tests_quat_change_of_basis .........   Passed    0.04 sec
+      Start 10: tests_json
+16/48 Test #10: tests_json .........................   Passed    0.05 sec
+      Start 46: tests_ipc_socket_security
+17/48 Test #46: tests_ipc_socket_security ..........   Passed    0.04 sec
+      Start  6: tests_glue_device
+18/48 Test  #6: tests_glue_device ..................   Passed    0.04 sec
+      Start 31: tests_generic_controller
+19/48 Test #31: tests_generic_controller ...........   Passed    0.04 sec
+      Start 17: tests_quat_swing_twist
+20/48 Test #17: tests_quat_swing_twist .............   Passed    0.03 sec
+      Start 45: tests_ipc_thread_shutdown
+21/48 Test #45: tests_ipc_thread_shutdown ..........   Passed    0.04 sec
+      Start  9: tests_id_ringbuffer
+22/48 Test  #9: tests_id_ringbuffer ................   Passed    0.04 sec
+      Start  4: tests_generic_callbacks
+23/48 Test  #4: tests_generic_callbacks ............   Passed    0.04 sec
+      Start 44: tests_ipc_local_session
+24/48 Test #44: tests_ipc_local_session ............   Passed    0.04 sec
+      Start 23: tests_pose
+25/48 Test #23: tests_pose .........................   Passed    0.04 sec
+      Start 32: tests_foveation_openxr
+26/48 Test #32: tests_foveation_openxr .............   Passed    0.04 sec
+      Start 14: tests_passthrough_calibration
+27/48 Test #14: tests_passthrough_calibration ......   Passed    0.04 sec
+      Start 12: tests_lowpass_integer
+28/48 Test #12: tests_lowpass_integer ..............   Passed    0.04 sec
+      Start  8: tests_history_buf
+29/48 Test  #8: tests_history_buf ..................   Passed    0.04 sec
+      Start  3: tests_floor_calibration
+30/48 Test  #3: tests_floor_calibration ............   Passed    0.04 sec
+      Start 28: tests_uv_to_tangent
+31/48 Test #28: tests_uv_to_tangent ................   Passed    0.04 sec
+      Start  2: tests_deque
+32/48 Test  #2: tests_deque ........................   Passed    0.03 sec
+      Start 11: tests_lowpass_float
+33/48 Test #11: tests_lowpass_float ................   Passed    0.04 sec
+      Start 20: tests_space_overseer
+34/48 Test #20: tests_space_overseer ...............   Passed    0.04 sec
+      Start 24: tests_vec3_angle
+35/48 Test #24: tests_vec3_angle ...................   Passed    0.03 sec
+      Start 21: tests_vector
+36/48 Test #21: tests_vector .......................   Passed    0.03 sec
+      Start 33: tests_oxr_layer_color_scale_bias
+37/48 Test #33: tests_oxr_layer_color_scale_bias ...   Passed    0.03 sec
+      Start 40: tests_ipc_shmem
+38/48 Test #40: tests_ipc_shmem ....................   Passed    0.03 sec
+      Start 19: tests_relation_chain
+39/48 Test #19: tests_relation_chain ...............   Passed    0.04 sec
+      Start  5: tests_foveation
+40/48 Test  #5: tests_foveation ....................   Passed    0.04 sec
+      Start 41: tests_macos_hosted_client
+41/48 Test #41: tests_macos_hosted_client ..........   Passed    0.03 sec
+      Start 42: tests_time_clock
+42/48 Test #42: tests_time_clock ...................   Passed    0.03 sec
+      Start 27: tests_comp_client_vulkan
+43/48 Test #27: tests_comp_client_vulkan ...........   Passed    0.03 sec
+      Start  7: tests_glue_traits
+44/48 Test  #7: tests_glue_traits ..................   Passed    0.03 sec
+      Start  1: tests_cxx_wrappers
+45/48 Test  #1: tests_cxx_wrappers .................   Passed    0.03 sec
+46/48 Test #36: tests_imu_optical_filter ...........   Passed   13.59 sec
+47/48 Test #39: tests_pssense_fusion ...............   Passed  233.07 sec
+48/48 Test #37: tests_joint_pose_solver ............   Passed  331.35 sec
+
+100% tests passed, 0 tests failed out of 48
+
+Label Time Summary:
+gpu    =   5.91 sec*proc (1 test)
+
+Total Test time (real) = 331.37 sec
