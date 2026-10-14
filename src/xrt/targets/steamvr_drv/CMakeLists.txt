@@ -67,5 +67,5 @@ set_target_properties(driver_monado PROPERTIES PREFIX "")
 
 install(
 	DIRECTORY "${PROJECT_BINARY_DIR}/steamvr-monado"
-	DESTINATION "${CMAKE_INSTALL_PREFIX}/share"
+	DESTINATION "${CMAKE_INSTALL_DATADIR}"
 	)
