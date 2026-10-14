@@ -516,3 +516,28 @@ which of the timestamp fixes (`df4e91d`, `b18b48a`, `0ebe00b`) this result
 also depends on has not been isolated. The fixed-fidelity manifest arguments
 are no longer needed; Home's arguments still carry auto-fidelity spew and
 `-condebug` for observation.
+
+### Clean DXMT baseline — 2026-10-14
+
+Run `run-mwxr-20261014-084241` with only the D3D10-interface fix (DXMT
+`8b7037c` on the installed baseline `effde9e`) was not enough: half of
+SteamVR's sampled pre-submit readings were 0.00 and the rest 12–18 ms; Home
+alternated between levels 0 and 1 at 66.8 frames/s. The timestamp fixes are
+therefore also needed (not bisected further).
+
+The new installed baseline is DXMT branch `claude/steamvr-gpu-timing`
+(worktree `~/Code/dxmt-d3d10fix`): `effde9e`, then `8b7037c` D3D10
+interfaces, `f04c8e9` counter-sample timestamps, `18d2073` deferred-context
+timestamps and `435b2eb` the earlier-command-buffer wait, without the
+diagnostic commits. Both fixtures pass (`d3d11.dll` SHA-256
+`17a296ea…3d01eef`; the original remains in
+`~/Windows/backups/dxmt-756a657-diag/`). Run `run-mwxr-20261014-084953` at
+120 Hz: SteamVR pre-submit GPU non-zero in every sample (p10/50/90
+6.32/6.96/10.69 ms), total render p50 7.49 ms, Home settled at level 0 at
+103.7 frames/s (period p10/50/90 7.9/9.1/11.9 ms, 11 gaps over 50 ms in
+109 s).
+
+A 90 Hz attempt (`XRT_MACOS_REFRESH_RATE_HZ=90`, run
+`run-mwxr-20261014-085401`) failed: the PS VR2 had dropped off USB and its
+display reported asleep, so Monado used its simulated HMD, and
+`CGDisplaySetDisplayMode` returned CGError 1014. Not a 90 Hz result.
