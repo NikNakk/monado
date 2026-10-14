@@ -26,7 +26,12 @@ cd "${0:A:h:h:h}"
   cmake --build "$x64" \
     --target openxr_monado --parallel 6
 
-  # Restart the registered service using the rebuilt executable.
-  launchctl kickstart -k \
-    "gui/$(id -u)/org.freedesktop.monado.service"
+  # Restart the registered service only if it is running, so that it reloads
+  # its executable. A kickstart with no client starts a service that never
+  # reaches its idle exit, and it then holds the headset. The LaunchAgent may
+  # run an installed copy, which this script does not update.
+  service="gui/$(id -u)/org.freedesktop.monado.service"
+  if launchctl print "$service" 2>/dev/null | grep -q '^[[:space:]]*state = running'; then
+    launchctl kickstart -k "$service"
+  fi
 )

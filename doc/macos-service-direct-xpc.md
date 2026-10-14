@@ -416,5 +416,6 @@ backed up in `build/arm64/local-install-backups/20261014-132622/`.
 `scripts/macos/rebuild-both` ends with `launchctl kickstart -k` on this
 service. That starts it even with no client, and with no client it never
 reaches its idle exit, so it holds the headset's USB interfaces. One such
-instance blocked an isolated run on 2026-10-14. These steps therefore omit
-the kickstart.
+instance blocked an isolated run on 2026-10-14. These steps omitted the
+kickstart, and the script now restarts the service only if it is already
+running.
