@@ -628,6 +628,17 @@ starts SteamVR and puts it first in `openvrpaths.vrpath`.
   service, and no HMD manufacturer (Alyx logs "falling back to gamepad"
   before choosing Touch).
 
+  Fixed the same day. xrizer `15e9926`, `c6ff3f9` and `1eb76cd`: the fallback
+  rate was a period in seconds, the float property getter never reported
+  success (so Alyx used its 90 Hz default even when given 120), and the HMD
+  now reports the runtime and system names. Bridge `f5da0cd` passes
+  `XR_FB_display_refresh_rate` through wineopenxr, so xrizer gets Monado's
+  rate before the first frame. Alyx then logs `Refresh Rate: 120.00 Hz
+  (120/1 -> 120/1)`, manufacturer `Monado(XRT) by Collabora et al …`,
+  model `Monado: PS VR2 HMD`. The rebuilt wineopenxr is installed in the
+  bridge's `build-in-process/gate` (previous binaries backed up in
+  `~/Windows/backups/wineopenxr-gate-20261014`).
+
 Not a like-for-like comparison with SteamVR's 41.5 frames/s: the resolution
 gap explains most of the difference. A fair rerun needs a lower recommended
 size, for example `XRT_COMPOSITOR_SCALE_PERCENTAGE=63` (≈1260×1285).
