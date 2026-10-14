@@ -1,5 +1,6 @@
 // Copyright 2020-2023, Collabora, Ltd.
 // Copyright 2025-2026, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -279,6 +280,12 @@ struct xrt_session
 	xrt_result_t (*request_exit)(struct xrt_session *xs);
 
 	/*!
+	 * Read sticky session loss without consuming events. Safe concurrently with
+	 * event polling and event publication; does not dispatch OpenXR state changes.
+	 */
+	xrt_result_t (*get_loss_status)(struct xrt_session *xs, bool *out_lost);
+
+	/*!
 	 * Destroy the session, must be destroyed after the native compositor.
 	 *
 	 * Code consuming this interface should use @ref xrt_session_destroy.
@@ -312,6 +319,20 @@ XRT_CHECK_RESULT static inline xrt_result_t
 xrt_session_request_exit(struct xrt_session *xs)
 {
 	return xs->request_exit(xs);
+}
+
+/*!
+ * @copydoc xrt_session::get_loss_status
+ * @public @memberof xrt_session
+ */
+XRT_CHECK_RESULT XRT_NONNULL_ALL static inline xrt_result_t
+xrt_session_get_loss_status(struct xrt_session *xs, bool *out_lost)
+{
+	*out_lost = false;
+	if (xs->get_loss_status == NULL) {
+		return XRT_ERROR_NOT_IMPLEMENTED;
+	}
+	return xs->get_loss_status(xs, out_lost);
 }
 
 /*!

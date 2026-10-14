@@ -1,5 +1,6 @@
 // Copyright 2018-2024, Collabora, Ltd.
 // Copyright 2024-2026, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -718,7 +719,7 @@ oxr_session_poll(struct oxr_logger *log, struct oxr_session *sess)
 			    log, sess, XR_SESSION_STATE_LOSS_PENDING,
 			    time_state_monotonic_to_ts_ns(sess->sys->inst->timekeeping, xse.loss_pending.loss_time_ns));
 			break;
-		case XRT_SESSION_EVENT_LOST: sess->has_lost = true; break;
+		case XRT_SESSION_EVENT_LOST: xrt_atomic_s32_store(&sess->has_lost, 1); break;
 		case XRT_SESSION_EVENT_REQUEST_EXIT: oxr_session_request_exit(log, sess); break;
 		case XRT_SESSION_EVENT_DISPLAY_REFRESH_RATE_CHANGE:
 #ifdef OXR_HAVE_FB_display_refresh_rate

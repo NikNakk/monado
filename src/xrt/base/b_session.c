@@ -1,5 +1,6 @@
 // Copyright 2023, Collabora, Ltd.
 // Copyright 2026, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -48,6 +49,16 @@ poll_events(struct xrt_session *xs, union xrt_session_event *out_xse)
 
 	b_session_event_pop(bs, out_xse);
 
+	return XRT_SUCCESS;
+}
+
+static xrt_result_t
+get_loss_status(struct xrt_session *xs, bool *out_lost)
+{
+	struct b_session *bs = b_session(xs);
+	os_mutex_lock(&bs->events.mutex);
+	*out_lost = bs->events.lost;
+	os_mutex_unlock(&bs->events.mutex);
 	return XRT_SUCCESS;
 }
 
@@ -101,6 +112,7 @@ b_session_create(struct b_system *bsys)
 
 	// xrt_session fields.
 	bs->base.poll_events = poll_events;
+	bs->base.get_loss_status = get_loss_status;
 	bs->base.request_exit = request_exit;
 	bs->base.destroy = destroy;
 
@@ -127,6 +139,9 @@ b_session_event_push(struct b_session *bs, const union xrt_session_event *xse)
 	use->xse = *xse;
 
 	os_mutex_lock(&bs->events.mutex);
+	if (xse->type == XRT_SESSION_EVENT_LOST) {
+		bs->events.lost = true;
+	}
 
 	// Find the last slot.
 	struct b_session_event **slot = &bs->events.ptr;

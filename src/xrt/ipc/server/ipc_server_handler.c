@@ -1,5 +1,6 @@
 // Copyright 2020-2024, Collabora, Ltd.
 // Copyright 2025-2026, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -657,6 +658,15 @@ ipc_handle_session_poll_events(volatile struct ipc_client_state *ics, union xrt_
 	}
 
 	return xrt_session_poll_events(ics->xs, out_xse);
+}
+
+xrt_result_t
+ipc_handle_session_get_loss_status(volatile struct ipc_client_state *ics, bool *out_lost)
+{
+	if (ics->xs == NULL) {
+		return XRT_ERROR_IPC_SESSION_NOT_CREATED;
+	}
+	return xrt_session_get_loss_status(ics->xs, out_lost);
 }
 
 xrt_result_t

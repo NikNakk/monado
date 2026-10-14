@@ -1,5 +1,6 @@
 // Copyright 2023, Collabora, Ltd.
 // Copyright 2026, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -51,6 +52,8 @@ struct b_session
 	{
 		struct os_mutex mutex;
 		struct b_session_event *ptr;
+		//! Sticky loss, protected by the event mutex even after the loss event is popped.
+		bool lost;
 	} events;
 };
 

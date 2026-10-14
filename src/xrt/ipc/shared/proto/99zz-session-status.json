@@ -1,0 +1,8 @@
+{
+	"$schema": "../proto.schema.json",
+	"session_get_loss_status": {
+		"out": [
+			{"name": "lost", "type": "bool"}
+		]
+	}
+}

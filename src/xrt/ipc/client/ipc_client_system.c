@@ -1,5 +1,6 @@
 // Copyright 2020-2023, Collabora, Ltd.
 // Copyright 2025, NVIDIA CORPORATION.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -206,6 +207,22 @@ local_session_poll_events(struct xrt_session *xs, union xrt_session_event *out_x
 }
 
 static xrt_result_t
+local_session_get_loss_status(struct xrt_session *xs, bool *out_lost)
+{
+	struct ipc_client_local_session *ils = ipc_local_session(xs);
+	// Local GPU obligations own session loss; remote headless-compositor loss
+	// is intentionally ignored, just as in local_session_poll_events.
+	xrt_result_t xret = xrt_session_get_loss_status(&ils->local->base, out_lost);
+	if (xret != XRT_SUCCESS || *out_lost) {
+		return xret;
+	}
+	// Still check the service connection: an unavailable service must cancel
+	// a stalled local acquire even if no application thread polls events.
+	bool remote_lost = false;
+	return xrt_session_get_loss_status(ils->remote, &remote_lost);
+}
+
+static xrt_result_t
 local_session_request_exit(struct xrt_session *xs)
 {
 	struct ipc_client_local_session *ils = ipc_local_session(xs);
@@ -257,6 +274,7 @@ create_with_local_comp(struct ipc_client_system *icsys,
 		return XRT_ERROR_ALLOCATION;
 	}
 	ils->base.poll_events = local_session_poll_events;
+	ils->base.get_loss_status = local_session_get_loss_status;
 	ils->base.request_exit = local_session_request_exit;
 	ils->base.destroy = local_session_destroy;
 	ils->ipc_c = icsys->ipc_c;

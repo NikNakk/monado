@@ -1,4 +1,5 @@
 // Copyright 2019-2023, Collabora, Ltd.
+// Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -23,7 +24,7 @@
 	do {                                                                                                           \
 		xrt_result_t check_ret = (RESULTS);                                                                    \
 		if (check_ret == XRT_ERROR_IPC_FAILURE) {                                                              \
-			(SESS)->has_lost = true;                                                                       \
+			xrt_atomic_s32_store(&(SESS)->has_lost, 1);                                                    \
 			return oxr_error((LOG), XR_ERROR_INSTANCE_LOST, "Call to " #FUNCTION " failed");               \
 		}                                                                                                      \
 		if (check_ret != XRT_SUCCESS) {                                                                        \
@@ -41,7 +42,7 @@
 	do {                                                                                                           \
 		xrt_result_t check_ret = (RESULTS);                                                                    \
 		if (check_ret == XRT_ERROR_IPC_FAILURE) {                                                              \
-			(SESS)->has_lost = true;                                                                       \
+			xrt_atomic_s32_store(&(SESS)->has_lost, 1);                                                    \
 			XR_RES = oxr_error(LOG, XR_ERROR_INSTANCE_LOST, "Call to " #FUNCTION " failed");               \
 			goto GOTO_LABEL;                                                                               \
 		}                                                                                                      \
