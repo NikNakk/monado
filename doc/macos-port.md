@@ -597,6 +597,12 @@ the new foveated swapchain path.
 
 ## External Wine, OpenVR and SteamVR applications
 
+The [2026-10-14 Alyx xrizer startup investigation](macos-alyx-xrizer-startup.md)
+identifies and fixes a recursive session-read deadlock during graphics-device
+replacement. The reviewed cleanup and Claude's later property fixes are committed;
+the combined DLL is installed and user-operated gameplay succeeds. Remaining
+frame pacing is tracked in the [gameplay evidence](macos-steamvr-keyed-ownership-followup.md).
+
 Wine/OpenVR compatibility is developed outside Monado in
 [NikNakk/macos-wine-xr](https://github.com/NikNakk/macos-wine-xr).
 The native arm64 Monado service remains the headset runtime/compositor, while
