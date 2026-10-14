@@ -398,6 +398,18 @@ if(APPLE)
 		)
 	set_target_properties(tests_macos_openxr_loaderless_probe PROPERTIES FOLDER monado_tests)
 
+	if(XRT_HAVE_VULKAN AND XRT_MODULE_COMPOSITOR_UTIL AND TARGET ipc_client)
+		add_executable(tests_macos_vk_metal_texture_peer tests_macos_vk_metal_texture_peer.m)
+		target_link_libraries(tests_macos_vk_metal_texture_peer PRIVATE "-framework Metal" "-framework Foundation")
+		set_target_properties(tests_macos_vk_metal_texture_peer PROPERTIES FOLDER monado_tests)
+		add_executable(tests_macos_vk_metal_texture_import tests_macos_vk_metal_texture_import.m)
+		target_link_libraries(tests_macos_vk_metal_texture_import PRIVATE comp_client ipc_client aux_vk
+			"-framework Metal" "-framework Foundation")
+		add_test(NAME tests_macos_vk_metal_texture_import COMMAND tests_macos_vk_metal_texture_import)
+		set_tests_properties(tests_macos_vk_metal_texture_import PROPERTIES TIMEOUT 30
+			LABELS "macos;gpu" RUN_SERIAL TRUE)
+		set_target_properties(tests_macos_vk_metal_texture_import PROPERTIES FOLDER monado_tests)
+	endif()
 	add_executable(tests_macos_openxr_vulkan_probe tests_macos_openxr_vulkan_probe.c)
 	target_link_libraries(
 		tests_macos_openxr_vulkan_probe PRIVATE aux_vk xrt-interfaces xrt-external-openxr

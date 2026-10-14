@@ -22,6 +22,31 @@
 #include <string.h>
 #include <time.h>
 
+static VKAPI_ATTR VkResult VKAPI_CALL
+probe_queue_submit(VkQueue queue, uint32_t count, const VkSubmitInfo *submits, VkFence fence)
+{
+	if (getenv("MACOS_OPENXR_VULKAN_PROBE_SUPPRESS_RUNTIME_SIGNAL") && count == 1 &&
+	    submits[0].commandBufferCount == 0 && submits[0].signalSemaphoreCount > 0) {
+		fprintf(stderr, "probe suppressed runtime producer signal\n");
+		return VK_SUCCESS;
+	}
+	return vkQueueSubmit(queue, count, submits, fence);
+}
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+probe_get_device_proc(VkDevice device, const char *name)
+{
+	if (!strcmp(name, "vkQueueSubmit"))
+		return (PFN_vkVoidFunction)probe_queue_submit;
+	return vkGetDeviceProcAddr(device, name);
+}
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+probe_get_instance_proc(VkInstance instance, const char *name)
+{
+	if (!strcmp(name, "vkGetDeviceProcAddr"))
+		return (PFN_vkVoidFunction)probe_get_device_proc;
+	return vkGetInstanceProcAddr(instance, name);
+}
+
 static int
 fail_xr(const char *what, XrResult result)
 {
@@ -142,6 +167,8 @@ get_swapchain_usage_flags(void)
 		usage |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
 	}
 
+	if (getenv("MACOS_OPENXR_VULKAN_PROBE_SOURCE_SAMPLES"))
+		usage |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
 	return usage;
 }
 
@@ -812,8 +839,8 @@ print_frame_timing(uint32_t count, uint64_t *starts, uint64_t *end_frame, const 
 	free(intervals);
 }
 
-int
-main(void)
+static int
+run_probe(void)
 {
 	int ret = 1;
 	void *runtime = NULL;
@@ -925,10 +952,11 @@ main(void)
 
 	const char *enabled_xr_extensions[] = {
 	    XR_KHR_VULKAN_ENABLE2_EXTENSION_NAME,
+	    XR_EXTX_OVERLAY_EXTENSION_NAME,
 	};
 	XrInstanceCreateInfo instance_info = {
 	    .type = XR_TYPE_INSTANCE_CREATE_INFO,
-	    .enabledExtensionCount = 1,
+	    .enabledExtensionCount = getenv("MACOS_OPENXR_VULKAN_PROBE_OVERLAY") ? 2 : 1,
 	    .enabledExtensionNames = enabled_xr_extensions,
 	};
 	snprintf(instance_info.applicationInfo.applicationName, sizeof(instance_info.applicationInfo.applicationName),
@@ -1059,7 +1087,7 @@ main(void)
 	    .type = XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR,
 	    .systemId = system_id,
 	    .createFlags = 0,
-	    .pfnGetInstanceProcAddr = vkGetInstanceProcAddr,
+	    .pfnGetInstanceProcAddr = probe_get_instance_proc,
 	    .vulkanCreateInfo = &vk_instance_info,
 	    .vulkanAllocator = NULL,
 	};
@@ -1118,7 +1146,7 @@ main(void)
 	    .type = XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR,
 	    .systemId = system_id,
 	    .createFlags = 0,
-	    .pfnGetInstanceProcAddr = vkGetInstanceProcAddr,
+	    .pfnGetInstanceProcAddr = probe_get_instance_proc,
 	    .vulkanPhysicalDevice = physical_device,
 	    .vulkanCreateInfo = &vk_device_info,
 	    .vulkanAllocator = NULL,
@@ -1133,8 +1161,11 @@ main(void)
 		goto out;
 	}
 
+	XrSessionCreateInfoOverlayEXTX overlay = {.type = XR_TYPE_SESSION_CREATE_INFO_OVERLAY_EXTX,
+	                                          .sessionLayersPlacement = 1};
 	XrGraphicsBindingVulkanKHR binding = {
 	    .type = XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR,
+	    .next = getenv("MACOS_OPENXR_VULKAN_PROBE_OVERLAY") ? &overlay : NULL,
 	    .instance = vk_instance,
 	    .physicalDevice = physical_device,
 	    .device = vk_device,
@@ -1234,6 +1265,20 @@ main(void)
 		goto out;
 	}
 
+	int64_t selected_format = formats[0];
+	const char *requested_format = getenv("MACOS_OPENXR_VULKAN_PROBE_COLOR_FORMAT");
+	if (requested_format) {
+		selected_format = get_env_u32("MACOS_OPENXR_VULKAN_PROBE_COLOR_FORMAT", 0);
+		bool found = false;
+		for (uint32_t i = 0; i < format_count; ++i)
+			found |= formats[i] == selected_format;
+		if (!found) {
+			free(formats);
+			free(views);
+			ret = fail_msg("Requested format not advertised");
+			goto out;
+		}
+	}
 	swapchain_count = per_view_swapchains ? view_count : 1;
 	swapchains = calloc(swapchain_count, sizeof(*swapchains));
 	if (swapchains == NULL) {
@@ -1250,12 +1295,14 @@ main(void)
 		    .type = XR_TYPE_SWAPCHAIN_CREATE_INFO,
 		    .createFlags = 0,
 		    .usageFlags = get_swapchain_usage_flags(),
-		    .format = formats[0],
+		    .format = selected_format,
 		    .sampleCount = views[i].recommendedSwapchainSampleCount,
 		    .width = views[i].recommendedImageRectWidth,
 		    .height = views[i].recommendedImageRectHeight,
-		    .faceCount = 1,
-		    .arraySize = per_view_swapchains ? 1 : view_count,
+		    .faceCount = getenv("MACOS_OPENXR_VULKAN_PROBE_UNSUPPORTED_CUBE") ? 6 : 1,
+		    .arraySize = per_view_swapchains
+		                     ? 1
+		                     : (getenv("MACOS_OPENXR_VULKAN_PROBE_UNSUPPORTED_CUBE") ? 6 : view_count),
 		    .mipCount = 1,
 		};
 	}
@@ -1385,24 +1432,26 @@ main(void)
 				                           get_probe_app_layout(&swapchains[i]));
 			}
 
-			const bool flash_phase = ((frame / 30) % 2) != 0;
-			VkClearColorValue clear_color = {
-			    .float32 =
-			        {
-			            i == 0 ? (flash_phase ? 1.00f : 0.95f) : (flash_phase ? 0.10f : 0.00f),
-			            i == 0 ? (flash_phase ? 0.95f : 0.15f) : (flash_phase ? 1.00f : 0.95f),
-			            i == 0 ? (flash_phase ? 0.10f : 0.00f) : (flash_phase ? 1.00f : 0.20f),
-			            1.0f,
-			        },
-			};
-			uint32_t layer = per_view_swapchains ? 0 : i;
-			g_clear_repeats = i == swapchain_count - 1 ? get_gpu_load() : 1;
-			if (clear_swapchain_image(vk_device, &vk_ctx, &swapchains[i], image_index, layer,
-			                          &clear_color) != 0) {
-				free(projection_views);
-				free(located_views);
-				ret = 1;
-				goto out;
+			for (uint32_t layer = 0; layer < swapchains[i].create_info.arraySize; ++layer) {
+				uint32_t eye = per_view_swapchains ? i : layer;
+				const bool flash_phase = ((frame / 30) % 2) != 0;
+				VkClearColorValue clear_color = {
+				    .float32 =
+				        {
+				            eye == 0 ? (flash_phase ? 1.00f : 0.95f) : (flash_phase ? 0.10f : 0.00f),
+				            eye == 0 ? (flash_phase ? 0.95f : 0.15f) : (flash_phase ? 1.00f : 0.95f),
+				            eye == 0 ? (flash_phase ? 0.10f : 0.00f) : (flash_phase ? 1.00f : 0.20f),
+				            1.0f,
+				        },
+				};
+				g_clear_repeats = i == swapchain_count - 1 ? get_gpu_load() : 1;
+				if (clear_swapchain_image(vk_device, &vk_ctx, &swapchains[i], image_index, layer,
+				                          &clear_color) != 0) {
+					free(projection_views);
+					free(located_views);
+					ret = 1;
+					goto out;
+				}
 			}
 		}
 
@@ -1571,4 +1620,31 @@ out:
 		dlclose(runtime);
 	}
 	return ret;
+}
+
+int
+main(void)
+{
+	const char *repeat_env = getenv("MACOS_OPENXR_VULKAN_PROBE_REPEAT");
+	if (!repeat_env)
+		return run_probe();
+	char *end = NULL;
+	long repeat = strtol(repeat_env, &end, 10);
+	if (!end || *end || repeat < 1 || repeat > 16)
+		return fail_msg("Invalid repeat count, expected integer in [1,16]");
+	const char *runtime_path = getenv("MONADO_OPENXR_RUNTIME_PATH");
+	if (!runtime_path)
+		return fail_msg("Repeated probe needs MONADO_OPENXR_RUNTIME_PATH");
+	void *pin = dlopen(runtime_path, RTLD_NOW | RTLD_LOCAL);
+	if (!pin)
+		return fail_msg("Could not pin runtime for repeated sessions");
+	int result = 0;
+	for (long i = 0; i < repeat; ++i) {
+		int ret = run_probe();
+		fprintf(stderr, "Repeated Vulkan probe iteration %ld/%ld exit=%d\n", i + 1, repeat, ret);
+		if (ret)
+			result = ret;
+	}
+	dlclose(pin);
+	return result;
 }
