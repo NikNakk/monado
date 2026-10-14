@@ -1861,7 +1861,7 @@ renderer_macos_late_delay(struct comp_renderer *r, uint64_t draw_begin_ns)
 	if (target_ns - now_ns > spin_ns) {
 		os_nanosleep((int64_t)(target_ns - now_ns - spin_ns));
 	}
-	while (os_monotonic_get_ns() < target_ns) {
+	while ((uint64_t)os_monotonic_get_ns() < target_ns) {
 	}
 	renderer_stage_end(r, "late_delay", interval, 0);
 }
