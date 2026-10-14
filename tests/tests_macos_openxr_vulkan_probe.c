@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int
 fail_xr(const char *what, XrResult result)
@@ -202,6 +203,47 @@ get_src_access_mask_for_layout(VkImageLayout layout)
 	}
 }
 
+static uint64_t
+probe_clock_ns(void)
+{
+	struct timespec value;
+	clock_gettime(CLOCK_MONOTONIC, &value);
+	return (uint64_t)value.tv_sec * 1000000000ull + (uint64_t)value.tv_nsec;
+}
+
+static uint32_t
+get_env_u32(const char *name, uint32_t fallback)
+{
+	const char *value = getenv(name);
+	return value != NULL && value[0] != '\0' ? (uint32_t)strtoul(value, NULL, 10) : fallback;
+}
+
+// Repeats for the next clear; only the last swapchain each frame gets the load,
+// so the probe's single fence does not stall the CPU between swapchains.
+static uint32_t g_clear_repeats = 1;
+
+// Clears per frame, to give the GPU work to do.
+static uint32_t
+get_gpu_load(void)
+{
+	uint32_t value = get_env_u32("MACOS_OPENXR_VULKAN_PROBE_GPU_LOAD", 1);
+	return value == 0 ? 1 : value;
+}
+
+// Busy CPU time per frame, standing in for an application's own frame work.
+static uint32_t
+get_cpu_work_us(void)
+{
+	return get_env_u32("MACOS_OPENXR_VULKAN_PROBE_CPU_US", 0);
+}
+
+// Do not wait for each frame's submit, as a real application would not.
+static bool
+use_async_submit(void)
+{
+	return get_env_u32("MACOS_OPENXR_VULKAN_PROBE_ASYNC_SUBMIT", 0) != 0;
+}
+
 static int
 wait_for_fence(VkDevice device, VkFence fence, const char *what)
 {
@@ -235,6 +277,10 @@ submit_command_buffer_and_wait(VkDevice device,
 		return fail_vk(submit_what, vk);
 	}
 
+	// The next submit's pre-submit fence wait still guards the command buffer.
+	if (use_async_submit()) {
+		return 0;
+	}
 	return wait_for_fence(device, ctx->fence, wait_what);
 }
 
@@ -686,8 +732,10 @@ clear_swapchain_image(VkDevice device,
 		    .baseArrayLayer = array_layer,
 		    .layerCount = 1,
 		};
-		vkCmdClearColorImage(ctx->command_buffer, swapchain->images[image_index].image,
-		                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, color, 1, &clear_range);
+		for (uint32_t i = 0; i < g_clear_repeats; i++) {
+			vkCmdClearColorImage(ctx->command_buffer, swapchain->images[image_index].image,
+			                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, color, 1, &clear_range);
+		}
 	}
 
 	VkImageMemoryBarrier back_to_color_attachment = {
@@ -724,6 +772,44 @@ clear_swapchain_image(VkDevice device,
 
 	*layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 	return 0;
+}
+
+static int
+compare_u64(const void *a, const void *b)
+{
+	uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+	return x < y ? -1 : x > y;
+}
+
+static void
+print_frame_timing(uint32_t count, uint64_t *starts, uint64_t *end_frame, const XrTime *display, XrDuration period)
+{
+	// Skip the first second of startup.
+	uint32_t skip = count > 180 ? 90 : 0;
+	if (count < skip + 2 || period <= 0) {
+		return;
+	}
+	uint32_t n = count - skip;
+	uint64_t *intervals = calloc(n - 1, sizeof(*intervals));
+	uint32_t skipped_display_periods = 0;
+	for (uint32_t i = skip + 1; i < count; i++) {
+		intervals[i - skip - 1] = starts[i] - starts[i - 1];
+		XrDuration step = display[i] - display[i - 1];
+		skipped_display_periods +=
+		    step > period + period / 2 ? (uint32_t)((step + period / 2) / period) - 1 : 0;
+	}
+	qsort(intervals, n - 1, sizeof(*intervals), compare_u64);
+	qsort(end_frame + skip, n, sizeof(*end_frame), compare_u64);
+	double span_s = (double)(starts[count - 1] - starts[skip]) / 1e9;
+	fprintf(stdout,
+	        "{\"frames\":%u,\"fps\":%.2f,\"display_hz\":%.2f,\"skipped_display_periods\":%u,"
+	        "\"frame_interval_ms_median\":%.3f,\"frame_interval_ms_p95\":%.3f,"
+	        "\"xrEndFrame_ms_median\":%.3f,\"xrEndFrame_ms_p95\":%.3f,"
+	        "\"gpu_load\":%u,\"cpu_us\":%u,\"async_submit\":%d}\n",
+	        n, (n - 1) / span_s, 1e9 / (double)period, skipped_display_periods, intervals[(n - 1) / 2] / 1e6,
+	        intervals[(n - 1) * 95 / 100] / 1e6, end_frame[skip + n / 2] / 1e6,
+	        end_frame[skip + n * 95 / 100] / 1e6, get_gpu_load(), get_cpu_work_us(), use_async_submit());
+	free(intervals);
 }
 
 int
@@ -1233,6 +1319,10 @@ main(void)
 		goto out;
 	}
 
+	uint64_t *frame_start_ns = calloc(frame_count, sizeof(*frame_start_ns));
+	uint64_t *end_frame_ns = calloc(frame_count, sizeof(*end_frame_ns));
+	XrTime *display_times = calloc(frame_count, sizeof(*display_times));
+	XrDuration display_period = 0;
 	for (uint32_t frame = 0; frame < frame_count; ++frame) {
 		XrFrameWaitInfo frame_wait_info = {
 		    .type = XR_TYPE_FRAME_WAIT_INFO,
@@ -1257,6 +1347,12 @@ main(void)
 			free(located_views);
 			ret = fail_xr("xrBeginFrame", xr);
 			goto out;
+		}
+		frame_start_ns[frame] = probe_clock_ns();
+		display_times[frame] = frame_state.predictedDisplayTime;
+		display_period = frame_state.predictedDisplayPeriod;
+		for (uint64_t until = frame_start_ns[frame] + (uint64_t)get_cpu_work_us() * 1000ull;
+		     probe_clock_ns() < until;) {
 		}
 
 		for (uint32_t i = 0; i < swapchain_count; ++i) {
@@ -1300,6 +1396,7 @@ main(void)
 			        },
 			};
 			uint32_t layer = per_view_swapchains ? 0 : i;
+			g_clear_repeats = i == swapchain_count - 1 ? get_gpu_load() : 1;
 			if (clear_swapchain_image(vk_device, &vk_ctx, &swapchains[i], image_index, layer,
 			                          &clear_color) != 0) {
 				free(projection_views);
@@ -1419,7 +1516,9 @@ main(void)
 		    .layerCount = 1,
 		    .layers = layers,
 		};
+		uint64_t end_start_ns = probe_clock_ns();
 		xr = xrEndFrame(session, &frame_end_info);
+		end_frame_ns[frame] = probe_clock_ns() - end_start_ns;
 		if (xr != XR_SUCCESS) {
 			free(projection_views);
 			free(located_views);
@@ -1428,6 +1527,10 @@ main(void)
 		}
 	}
 
+	print_frame_timing(frame_count, frame_start_ns, end_frame_ns, display_times, display_period);
+	free(frame_start_ns);
+	free(end_frame_ns);
+	free(display_times);
 	fprintf(stdout, "OpenXR Vulkan probe created session, %u swapchain(s), and submitted %u %s frames.\n",
 	        swapchain_count, frame_count, use_quad_layer ? "quad-layer" : "projection");
 	free(projection_views);
