@@ -14,6 +14,7 @@ The script uses the same UnrealEditor -game -vr launch as the user's captures.
 """
 import argparse
 import csv
+import ctypes
 import json
 import os
 import pathlib
@@ -37,10 +38,14 @@ UE_LOW_COST_COMMANDS = (
 )
 
 
+# Match os_monotonic_get_ns explicitly, independently of Python's clock choice.
+_raw_clock = ctypes.CDLL(None).clock_gettime_nsec_np
+_raw_clock.argtypes = [ctypes.c_int]
+_raw_clock.restype = ctypes.c_uint64
+
+
 def host_ns():
-    # os_monotonic_get_ns uses CLOCK_MONOTONIC. Python's time.monotonic_ns()
-    # uses another Darwin clock on some versions; do not join it to Monado CSVs.
-    return time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+    return _raw_clock(8)  # CLOCK_UPTIME_RAW from the macOS SDK.
 
 
 def pids(name):
@@ -290,7 +295,7 @@ def capture(args):
         wait(2)
         checks = [{"host_ns": host_ns(), "sizes": check_buffered(paths, baseline)}]
         start = host_ns()
-        (out / "window.json").write_text(json.dumps({"start_ns": start, "clock": "CLOCK_MONOTONIC"}, indent=2))
+        (out / "window.json").write_text(json.dumps({"start_ns": start, "clock": "CLOCK_UPTIME_RAW"}, indent=2))
         print(f"CAPTURE START: {args.seconds:g} seconds; client {client}, service {server}", flush=True)
         if not args.static:
             if args.game_mode_protocol == "continuous":
@@ -321,7 +326,7 @@ def capture(args):
         end = host_ns()
         checks.append({"host_ns": end, "sizes": check_buffered(paths, baseline)})
         (out / "buffer-checks.json").write_text(json.dumps(checks, indent=2))
-        (out / "window.json").write_text(json.dumps({"start_ns": start, "end_ns": end, "clock": "CLOCK_MONOTONIC"}, indent=2))
+        (out / "window.json").write_text(json.dumps({"start_ns": start, "end_ns": end, "clock": "CLOCK_UPTIME_RAW"}, indent=2))
         print("MEASUREMENT COMPLETE; requesting buffered trace flush", flush=True)
         wait(.1)
         flush_capture(out, client, server)

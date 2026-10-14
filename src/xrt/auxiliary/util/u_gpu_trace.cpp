@@ -143,7 +143,7 @@ u_gpu_trace_start(const char *path, uint32_t buffer_mb)
 	if (sysctlbyname("kern.bootsessionuuid", boot_id, &boot_length, nullptr, 0) != 0)
 		boot_id[0] = '\0';
 	TRACE_EVENT_INSTANT("monado.gpu", "MonadoCaptureContext", "boot_id", boot_id, "pid", getpid(),
-	                    "native_clock_id", kNativeClock, "native_clock_source", "CLOCK_MONOTONIC", "sdk_timeline",
+	                    "native_clock_id", kNativeClock, "native_clock_source", "CLOCK_UPTIME_RAW", "sdk_timeline",
 	                    "Mach absolute nanoseconds");
 	U_LOG_I("Perfetto capture started: %s (buffer %u MiB)", path, buffer_mb);
 	return true;

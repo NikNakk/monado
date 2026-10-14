@@ -42,7 +42,7 @@ def gpu_end_ns(complete, presented, commit_ns):
 def analyze(out, threshold_ms=20):
     metadata = json.loads((out / "process.json").read_text())
     window = json.loads((out / "window.json").read_text())
-    if window["clock"] != "CLOCK_MONOTONIC":
+    if window["clock"] not in ("CLOCK_MONOTONIC", "CLOCK_UPTIME_RAW"):
         raise ValueError("Unknown window clock")
     start, end = window["start_ns"], window["end_ns"]
     missing = []
