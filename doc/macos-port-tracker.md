@@ -592,3 +592,13 @@ rendering and admits replacement without a restart. Normal-path costs are
 quantified in the [completion report](macos-gpu-sync-completion.md), with every
 M1/M2 criterion and hardware/thermal limitations. Chromium and Wine development
 remain deferred pending separate authorization.
+
+### Alyx direct xrizer startup — 2026-10-14
+
+The apparent exit was a recursive session-read deadlock during graphics restart.
+The fix and reviewed cleanup are committed in xrizer; Claude's later property
+fixes are retained. The combined installed DLL at `1eb76cd` passes 97 Wine tests
+(2 ignored), with the deadlock regression 10/10. User-operated gameplay now
+succeeds; remaining frame pacing is under investigation. See the
+[startup investigation and cleanup](macos-alyx-xrizer-startup.md) and
+[gameplay/pacing evidence](macos-steamvr-keyed-ownership-followup.md).
