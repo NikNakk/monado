@@ -1,0 +1,38 @@
+{
+  "source_commit": "84b3749c20cd7f3daadf60434561649c8617cb74",
+  "git_tag": "v25.1.0-2310-g84b3749c2",
+  "backup": "/Users/nickkennedy/Code/monado-2/build/arm64/local-install-backups/20261014-230758-integration",
+  "binaries": {
+    "installed_service": {
+      "path": "/Users/nickkennedy/.local/monado-psvr2/bin/monado-service",
+      "git_tag": "v25.1.0-2310-g84b3749c2",
+      "sha256": "a46d6737432fdc7e25892afe6d8c0df4942d87653476797eb7aff120aee56bf1",
+      "file": "Mach-O 64-bit executable arm64"
+    },
+    "installed_arm64_runtime": {
+      "path": "/Users/nickkennedy/.local/monado-psvr2/lib/libopenxr_monado.dylib",
+      "git_tag": "v25.1.0-2310-g84b3749c2",
+      "sha256": "19da04cd2a46df411ba69931eb4883febc2f5cfabea1cd12ef1d5704b99657af",
+      "file": "Mach-O 64-bit dynamically linked shared library arm64"
+    },
+    "wine_x64_runtime": {
+      "path": "/Users/nickkennedy/Code/monado-2/build/x86_64/src/xrt/targets/openxr/libopenxr_monado.dylib",
+      "git_tag": "v25.1.0-2310-g84b3749c2",
+      "sha256": "256c03e9f2507182cb2d16eb45f03c2ae40c17432ee3170556e4b16c991c8f27",
+      "file": "Mach-O 64-bit dynamically linked shared library x86_64"
+    },
+    "wine_x64_libmonado": {
+      "path": "/Users/nickkennedy/Code/monado-2/build/x86_64/src/xrt/targets/libmonado/libmonado.25.1.0.dylib",
+      "git_tag": "v25.1.0-2310-g84b3749c2",
+      "sha256": "60aaab3a9ef57880790dd2cc79bad2bec7f217375ad8775130959c95885f9f48",
+      "file": "Mach-O 64-bit dynamically linked shared library x86_64"
+    }
+  },
+  "launchagents_preserved": true,
+  "service_state": "running",
+  "service_pid": 76316,
+  "native_runtime_manifest": "/Users/nickkennedy/.local/monado-psvr2/share/openxr/1/openxr_monado.json",
+  "wine_runtime_manifest": "/Users/nickkennedy/Code/monado-2/build/x86_64/openxr_monado-dev.json",
+  "arm64_loader_probe": "runtime_loaded=1 loader_interface=1 extension_count=61",
+  "wine_x64_loader_probe": "runtime_loaded=1 loader_interface=1 extension_count=57"
+}

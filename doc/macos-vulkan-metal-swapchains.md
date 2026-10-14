@@ -26,7 +26,9 @@ The [cumulative review](macos-graphics-integration-review.md) prepares
 independent `=0` fallbacks, bounded pending-fence retirement and acquired-image
 destruction markers. This supersedes the original opt-in recommendation after
 the user's four-case visual acceptance. The user subsequently approved the local integration fast-forward to
-`c2c608a3f`. The remote branch and installed runtime have not been promoted. Historical experiment settings below remain evidence
+`c2c608a3f`. The remote branch remains unpublished; the subsequently approved
+service and Wine x64 installation matches `84b3749c2`. See the
+[deployment record](macos-service-direct-xpc.md#integration-service-and-matching-wine-client-installation--2026-10-14). Historical experiment settings below remain evidence
 of the tested revisions.
 
 ## User headset checkpoint — 2026-10-14

@@ -11,8 +11,10 @@ GPU synchronisation branch and the Vulkan follow-up by ancestry. The user
 approved local integration after the Linux gate passed. `macos-upstream-clean`
 was fast-forwarded from `805316beb` to reviewed commit `c2c608a3f`; the main
 checkout now uses that branch. This documentation checkpoint follows the same
-isolated development branch. The installed runtime, remote branch and Wine/DXMT
-checkouts have not been changed.
+isolated development branch. Following separate installation approval, the
+service and Wine x64 Monado runtime were deployed from `84b3749c2`, both carrying
+`v25.1.0-2310-g84b3749c2`; see the [installation record](macos-service-direct-xpc.md#integration-service-and-matching-wine-client-installation--2026-10-14).
+The remote branch and Wine/DXMT project code have not been changed.
 
 ## Sources and scope
 
@@ -134,10 +136,9 @@ human sign-off for upstream submission. Source remains separable from WineOpenXR
 DXMT and the archived Mesa experiment; no external project code was adapted in
 these review corrections.
 
-The next operational step is to rebuild the normal ARM64/runtime and
-x86_64/client configurations and use the existing installation workflow.
-This local branch integration did not perform that deployment or restart the
-service. Hardware runs remain user-operated. A fresh four-case headset repeat
+The separately approved installation is complete: normal ARM64/runtime and
+x86_64/client builds match at `84b3749c2`, the prefix is updated and the existing
+LaunchAgent is re-registered with its preferences preserved. Hardware runs remain user-operated. A fresh four-case headset repeat
 on the final installed revision provides the installation checkpoint; existing
 Metal/Wine clients should then get their normal regression runs. Intel Mac
 hardware, combined real-game performance and PS Sense replay/performance for

@@ -37,7 +37,7 @@ that names the variable or its `debug_get_*` accessor (`git log -G`).
 
 ## Vulkan client shared-event frame handoff (2026-10-14)
 
-`XRT_MACOS_VK_CLIENT_SHARED_EVENT` (default `1` in the graphics integration candidate, macOS only) changes how a
+`XRT_MACOS_VK_CLIENT_SHARED_EVENT` (default `1` on macOS) changes how a
 native Vulkan OpenXR client hands each frame to the compositor. macOS has no
 opaque-FD timeline semaphore or sync-FD fence. With this option disabled,
 `comp_vk_client.c` calls `vkQueueWaitIdle` on every `xrEndFrame`. The
@@ -92,7 +92,7 @@ real-game Game Mode comparisons remain a separate gate; see [the implementation]
 
 `XRT_MACOS_VK_CLIENT_METAL_TEXTURES=1` selects the existing Metal texture provider
 for native Vulkan arrays/depth and wraps its textures with `VK_EXT_metal_objects`.
-Default is `1` in the graphics integration candidate. Set `=0` in the client
+Default is `1` on the integration branch. Set `=0` in the client
 to disable it. Single-layer colour keeps IOSurface.
 Keep `XRT_MACOS_VK_CLIENT_SHARED_EVENT=1` enabled to avoid the CPU frame
 handoff fallback. No compositor or production texture copy is added.
