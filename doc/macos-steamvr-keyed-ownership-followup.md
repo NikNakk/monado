@@ -585,3 +585,20 @@ hold a steady divisor. Lowering SteamVR's per-app render resolution, or 90 Hz
 with a lower resolution, are the next options; the CPU late starts and long
 gaps are a separate issue to attribute. Home's original launch arguments are
 restored in `tools.vrmanifest` from the backup.
+
+### Alyx CPU late starts: not the companion window — 2026-10-14
+
+Splitting Alyx's frames from the shim trace (run `091817`, after 60 s):
+WaitGetPoses → first Submit (render CPU) p50/p90 2.9/4.9 ms, last Submit →
+next WaitGetPoses 15.1/30.5 ms (45.5/81.7 ms on frames over 50 ms), wait in
+WaitGetPoses 0.5/7.7 ms. SteamVR shows the post-submit stretch as
+"Application (other)" CPU and late starts.
+
+A run with `-nowindow` added (`093629`, 09:38–09:42) was redundant: Steam
+already launches Alyx with `-nowindow` (Steam's gameprocess log, including
+the 09:20 run), so there is no desktop companion window. Results matched
+within scene/thermal variation: 40.2 frames/s, post-submit p50/p90
+14.5/23.8 ms, render 3.1 ms, SteamVR pre-submit GPU 14.0/16.5/17.8 ms by
+thirds. The post-submit gap tracks the GPU frame time, consistent with GPU
+backpressure blocking Alyx's CPU after Submit (for example DXMT waiting for
+a frame slot or GPU completion); not yet confirmed by CPU sampling.
