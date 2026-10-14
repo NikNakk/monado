@@ -64,11 +64,27 @@ With 4 ms of CPU work and a lighter GPU load, both fit in the frame and both
 ran at 60 fps; `xrEndFrame` still fell from 3.0 ms to 0.13 ms. A
 service-composited check with pixel sampling showed the expected per-eye
 colours and flash phases, with no warnings beyond the usual layer-limit
-notice. In-process composition (`XRT_MACOS_CLIENT_COMPOSITOR=1`) needs the
-physical headset, so its local semaphore pair is untested, as is any
-on-headset run. The default stereo array swapchain asserts in MoltenVK
-(IOSurface textures cannot be 2D arrays) with or without this option. Keep it
-opt-in until the headset and in-process paths pass.
+notice.
+
+On the physical PS VR2 at 90 Hz (same build and probe; output not viewed), the load
+was 7 ms of CPU and 8 clears (about 5 ms of GPU) per frame, 900 frames per run,
+A–B–B–A for each composition mode:
+
+| Composition | Handoff | Frame rate | Skipped display periods | `xrEndFrame` median |
+| --- | --- | ---: | ---: | ---: |
+| Service | Queue-idle wait | 34.0 / 34.0 fps; pacing fell to 45 Hz | 108 / 115 | 6.7 / 7.3 ms |
+| Service | Shared event | 87.8 / 89.9 fps | 19 / 0 | 0.20 / 0.20 ms |
+| In-process | Queue-idle wait | 44.7 / 44.6 fps | 817 / 821 | 6.1 / 6.2 ms |
+| In-process | Shared event | 89.9 / 89.9 fps | 0 / 0 | 0.08 / 0.08 ms |
+
+Logged, pixel-sampled runs in both modes showed the correct per-eye colours
+and flash phases, with no new warnings; the in-process run logged the local
+semaphore pair. Those runs' timings are not comparable, because full logging
+and readbacks load the service. The isolated service inherited
+`XRT_MACOS_GPU_QUEUE_PRIORITY=0` from the launchd environment, which applied
+equally to every run. The default stereo array swapchain asserts in MoltenVK
+(IOSurface textures cannot be 2D arrays) with or without this option. Still to
+test: a real Vulkan application, and Game Mode.
 
 ## Compute efficiency and profiling (2026-10-13)
 
