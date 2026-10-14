@@ -561,3 +561,27 @@ thermal warning recorded by `pmset`. The user also saw Home's frame timing
 worsen towards the end and occasional CPU spikes. A first Alyx launch at
 120 Hz (`090754`) was stopped to let the machine cool; its first readings
 were pre-submit 12.4–16.4 ms.
+
+### Half-Life: Alyx at 120 Hz — 2026-10-14
+
+Run `run-mwxr-20261014-091817`, 09:18–09:27, started after a cool-down
+(thermal state "nominal" at start, "fair" at the end), installed DXMT
+`claude/steamvr-gpu-timing`, Alyx launched through SteamVR (app 546560,
+`-condebug +vr_fidelity_level_spew 1`, OpenVR shim in its `bin/win64`; Valve's
+`openvr_api.dll` restored afterwards). The user loaded into a level.
+
+- SteamVR measures Alyx's GPU time: pre-submit non-zero in 95% of samples,
+  median by thirds 11.48 / 13.18 / 13.77 ms, p90 18.19 ms (the user's frame
+  timing graph shows a step from about 13–14 to 18–20 ms partway through).
+- Alyx's auto-fidelity (7 levels) dropped to level 0 at 09:21:19 and stayed,
+  so the fidelity system now works for Alyx too.
+- Even at level 0 the GPU frame exceeds the 8.33 ms budget: 41.5 frames/s,
+  period p10/50/90 11.0 / 22.4 / 36.7 ms. Frame periods in refreshes:
+  1: 21%, 2: 19%, 3: 32%, 4: 19%, 5+: 9%. 309 gaps over 50 ms in 343 s
+  (median 60 ms, max 896 ms), and the CPU graph shows many late starts.
+
+Alyx is GPU-bound at 120 Hz even at its lowest fidelity, and it does not
+hold a steady divisor. Lowering SteamVR's per-app render resolution, or 90 Hz
+with a lower resolution, are the next options; the CPU late starts and long
+gaps are a separate issue to attribute. Home's original launch arguments are
+restored in `tools.vrmanifest` from the backup.
