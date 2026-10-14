@@ -296,6 +296,14 @@ namespace {
 			for (int step = 0; step < params.steps_per_gate; step++) {
 				device = gauss_newton_step(cameras, frames, model, device, matches, params.huber_px,
 				                           orientation);
+				// Settle changing correspondences at the tightest gate; keep coarse bootstrap batches
+				// fixed.
+				if (gate == params.gates_px.back()) {
+					matches = associate(cameras, frames, model, device, gate);
+					if (matches.size() < 3) {
+						break;
+					}
+				}
 			}
 		}
 
