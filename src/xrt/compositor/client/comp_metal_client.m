@@ -106,6 +106,12 @@ to_native_swapchain(struct xrt_swapchain *xsc)
 	return &client_metal_swapchain(xsc)->xscn->base;
 }
 
+struct xrt_swapchain_native *
+client_metal_swapchain_get_native(struct xrt_swapchain_metal *swapchain)
+{
+	return client_metal_swapchain(&swapchain->base)->xscn;
+}
+
 static inline struct xrt_compositor *
 to_native_compositor(struct xrt_compositor *xc)
 {
@@ -320,6 +326,9 @@ metal_format_to_vk(int64_t format)
 	case MTLPixelFormatDepth16Unorm: return 124;          // VK_FORMAT_D16_UNORM
 	case MTLPixelFormatDepth32Float: return 126;          // VK_FORMAT_D32_SFLOAT
 	case MTLPixelFormatDepth32Float_Stencil8: return 130; // VK_FORMAT_D32_SFLOAT_S8_UINT
+	case MTLPixelFormatRGBA16Unorm: return 91;
+	case MTLPixelFormatRGBA16Float: return 97;
+	case MTLPixelFormatR32Float: return 100;
 	default: return 0;
 	}
 }

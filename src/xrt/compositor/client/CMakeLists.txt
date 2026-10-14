@@ -45,10 +45,13 @@ if(APPLE)
 		if(XRT_HAVE_VULKAN)
 			# Shared-event frame handoff for Vulkan clients.
 			target_sources(
-				comp_client PRIVATE comp_vk_client_shared_event.h
+				comp_client PRIVATE comp_vk_metal_texture.h comp_vk_metal_texture.m
+						    comp_vk_client_shared_event.h
 						    comp_vk_client_shared_event.m
 				)
-			target_compile_definitions(comp_client PRIVATE XRT_HAVE_VK_CLIENT_SHARED_EVENT)
+			target_compile_definitions(
+				comp_client PRIVATE XRT_HAVE_VK_CLIENT_SHARED_EVENT XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+				)
 		endif()
 		if(XRT_FEATURE_SERVICE)
 			# Service builds carry both swapchain paths: the service (XPC)

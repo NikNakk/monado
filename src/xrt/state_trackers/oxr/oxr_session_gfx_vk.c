@@ -141,10 +141,12 @@ oxr_session_populate_vk(struct oxr_logger *log,
 #endif
 
 	struct xrt_compositor_native *xcn = sess->xcn;
+	PFN_vkGetInstanceProcAddr get_instance_proc_addr =
+	    sys->vk_get_instance_proc_addr ? sys->vk_get_instance_proc_addr : vkGetInstanceProcAddr;
 	struct xrt_compositor *xc = xrt_gfx_vk_provider_create( //
 	    xcn,                                                //
 	    next->instance,                                     //
-	    vkGetInstanceProcAddr,                              //
+	    get_instance_proc_addr,                             //
 	    next->physicalDevice,                               //
 	    next->device,                                       //
 	    external_fence_fd_enabled,                          //

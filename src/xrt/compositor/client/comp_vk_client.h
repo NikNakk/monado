@@ -27,6 +27,7 @@ extern "C" {
  */
 
 struct client_vk_compositor;
+struct client_vk_metal_texture_context;
 
 /*!
  * Wraps the real compositor swapchain providing a Vulkan based interface.
@@ -45,6 +46,14 @@ struct client_vk_swapchain
 
 	//! Non-owning reference to our parent compositor.
 	struct client_vk_compositor *c;
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	struct xrt_swapchain_metal *xscm;
+	VkFence acquire_fence[XRT_MAX_SWAPCHAIN_IMAGES];
+	VkFence release_fence[XRT_MAX_SWAPCHAIN_IMAGES];
+	bool acquired[XRT_MAX_SWAPCHAIN_IMAGES];
+	struct client_vk_swapchain *retired_next;
+	bool retired;
+#endif
 
 	// Memory
 	VkDeviceMemory mems[XRT_MAX_SWAPCHAIN_IMAGES];
@@ -68,6 +77,10 @@ struct client_vk_compositor
 
 	//! Owning reference to the backing native compositor
 	struct xrt_compositor_native *xcn;
+#ifdef XRT_HAVE_VK_CLIENT_METAL_TEXTURES
+	struct client_vk_metal_texture_context *metal;
+	struct client_vk_swapchain *retired_swapchains;
+#endif
 
 	struct
 	{

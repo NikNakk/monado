@@ -107,5 +107,5 @@ xrt_gfx_vk_provider_create(struct xrt_compositor_native *xcn,
 	    queue_family_index,                                         //
 	    queue_index);                                               //
 
-	return &vcc->base;
+	return vcc ? &vcc->base : NULL;
 }
