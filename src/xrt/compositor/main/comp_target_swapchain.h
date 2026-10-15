@@ -44,6 +44,9 @@ struct comp_target_swapchain
 	//! If we should use display timing.
 	enum comp_target_display_timing_usage timing_usage;
 
+	//! Optional passive observer, called after the pacer consumes each feedback entry.
+	void (*on_present_feedback)(struct comp_target_swapchain *, const VkPastPresentationTimingGOOGLE *);
+
 	//! Also works as a frame index.
 	int64_t current_frame_id;
 
