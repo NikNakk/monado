@@ -12,6 +12,7 @@ from analyze import summarize, table, distribution
 # The presentation implementation is the intended independent variable.
 ALLOWED_ENV_DIFFERENCES = {
     'XRT_MACOS_WSI_GENERIC', 'XRT_MACOS_WSI_GENERIC_CV', 'XRT_MACOS_WSI_GENERIC_CALIBRATE',
+    'XRT_MACOS_WSI_GENERIC_ADAPTIVE', 'XRT_MACOS_WSI_GENERIC_LATCH_US',
 }
 METRICS = {
     'present_hz': ('observed_present_hz', None),
