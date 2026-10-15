@@ -1,0 +1,245 @@
+{
+  "method": "Euclidean distance between successive raw_pos xyz in driver SLAM receipt CSV. No interpolation or sample exclusion. Flags are driver relation flags, not independently verified headset confidence.",
+  "results": [
+    {
+      "case": "hello-service",
+      "service_pid": 93762,
+      "trace": "/Users/nickkennedy/psvr2-trace/monado_psvr2_93762_slam.csv",
+      "trace_sha256": "d54f06b6d47ebebe5bda60b7fb2e1759ea6162631a2b30c149be7bf7c548bbbe",
+      "samples": 2868,
+      "steps_over_10cm": 10,
+      "largest_steps": [
+        {
+          "step_m": 0.3097224638059449,
+          "dt_ms": 33.396,
+          "host_received_ns": 301567586152041,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.30542568686861454,
+          "dt_ms": 33.366,
+          "host_received_ns": 301606123010750,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.2855043886468933,
+          "dt_ms": 33.366,
+          "host_received_ns": 301573156795583,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.28474151132420483,
+          "dt_ms": 33.366,
+          "host_received_ns": 301570955744458,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.22047793320184547,
+          "dt_ms": 33.844,
+          "host_received_ns": 301586187671791,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.13092498151202053,
+          "dt_ms": 33.366,
+          "host_received_ns": 301562046820250,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.11907909444014485,
+          "dt_ms": 32.529,
+          "host_received_ns": 301604422186958,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.11864903949011436,
+          "dt_ms": 33.201,
+          "host_received_ns": 301580514182083,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.11709446500407127,
+          "dt_ms": 51.102,
+          "host_received_ns": 301607725936583,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.11523160169156099,
+          "dt_ms": 32.827,
+          "host_received_ns": 301607275238208,
+          "previous_flags": 63,
+          "flags": 63
+        }
+      ]
+    },
+    {
+      "case": "hello-hosted",
+      "service_pid": 94709,
+      "trace": "/Users/nickkennedy/psvr2-trace/monado_psvr2_94709_slam.csv",
+      "trace_sha256": "2ae1fb8df1ed8c0c041aa8ef936924254f05f88b6920d387c5fe296209e09b16",
+      "samples": 2994,
+      "steps_over_10cm": 0,
+      "largest_steps": [
+        {
+          "step_m": 0.002059659593605487,
+          "dt_ms": 16.681,
+          "host_received_ns": 301751134453000,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020192593720606963,
+          "dt_ms": 16.683,
+          "host_received_ns": 301717651055125,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.002018045687595621,
+          "dt_ms": 16.683,
+          "host_received_ns": 301717666210500,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020179992100234486,
+          "dt_ms": 16.682,
+          "host_received_ns": 301731180271916,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.002017644805622667,
+          "dt_ms": 16.683,
+          "host_received_ns": 301707873110000,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.002017644805622667,
+          "dt_ms": 16.686,
+          "host_received_ns": 301712730571208,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020171777913151312,
+          "dt_ms": 16.683,
+          "host_received_ns": 301719219056333,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020170081040134197,
+          "dt_ms": 16.683,
+          "host_received_ns": 301711195694166,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020170081040134197,
+          "dt_ms": 16.683,
+          "host_received_ns": 301727860552416,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020170081040134197,
+          "dt_ms": 16.683,
+          "host_received_ns": 301749366215041,
+          "previous_flags": 63,
+          "flags": 63
+        }
+      ]
+    },
+    {
+      "case": "hello-hosted-repeat-1",
+      "service_pid": 95648,
+      "trace": "/Users/nickkennedy/psvr2-trace/monado_psvr2_95648_slam.csv",
+      "trace_sha256": "62426959dfbb9bae6b293577c7668c1a9a643df1aa8a2ff16a6812b42f523e22",
+      "samples": 2989,
+      "steps_over_10cm": 0,
+      "largest_steps": [
+        {
+          "step_m": 0.010471559660993383,
+          "dt_ms": 33.368,
+          "host_received_ns": 301924156622000,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020192533277566755,
+          "dt_ms": 16.684,
+          "host_received_ns": 301906654105708,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.002018391994053134,
+          "dt_ms": 16.683,
+          "host_received_ns": 301946411691875,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.002018391994052382,
+          "dt_ms": 16.683,
+          "host_received_ns": 301948395698458,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020180396432078257,
+          "dt_ms": 16.683,
+          "host_received_ns": 301944842253875,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.002017640268148565,
+          "dt_ms": 16.682,
+          "host_received_ns": 301906620924958,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020170081039570555,
+          "dt_ms": 16.682,
+          "host_received_ns": 301944743859583,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.0020167349086221693,
+          "dt_ms": 16.682,
+          "host_received_ns": 301950197778625,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.002016490320248237,
+          "dt_ms": 16.683,
+          "host_received_ns": 301914647129000,
+          "previous_flags": 63,
+          "flags": 63
+        },
+        {
+          "step_m": 0.002016487292708675,
+          "dt_ms": 16.683,
+          "host_received_ns": 301940839819750,
+          "previous_flags": 63,
+          "flags": 63
+        }
+      ]
+    }
+  ]
+}

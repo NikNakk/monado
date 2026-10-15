@@ -134,3 +134,24 @@ array runs completed. The temporary launcher and all raw logs remain under
 records commands, timestamps, exit codes and log hashes. The normal ARM64
 installation build recovered an incomplete Ninja log and emitted existing
 external Perfetto variadic-macro warnings; both architecture builds completed.
+
+### Tracking symptom clarification
+
+The user localizes the symptom to the first, service-composited `hello_xr`:
+the head-locked cube and distant cubes looked fine, while the nearby world-locked
+large cube made occasional large jumps and juddered with tiny head movements.
+They did not observe the first hosted scene. A 45-second hosted repeat exits
+cleanly; its visual result is pending.
+
+The existing raw SLAM receipt trace for the service run contains ten consecutive
+sample steps above 10 cm, with a maximum 30.97 cm in 33.396 ms. These positions
+are recorded from headset data before prediction/rendering. The largest samples
+have driver relation flags 63 on both sides; that is not independent hardware
+confidence. The first hosted run has no steps over 10 cm (maximum 2.06 mm), and
+the observed-repeat trace likewise has none (maximum 10.47 mm). These are
+unmatched head motions at different times, so they do not prove a compositor-mode
+cause or a hardware fault. They establish raw positional discontinuities in the
+run the user found problematic, warranting tracking-state investigation before
+attributing the effect to Vulkan synchronization. No tracking fix or visual
+acceptance is claimed. The [analysis record](macos-graphics-integration-results/headset-tracking-20261015.json)
+retains trace paths, hashes, method and largest steps.
