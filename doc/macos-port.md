@@ -15,7 +15,9 @@ native and all WSI modes, hosted WSI, passthrough pixel checks and native
 shutdown; see [the branch validation](macos-wsi-migration.md#headset-validation-of-the-branch-16-october-2026)).
 Visual acceptance,
 calibration/rotation parity for WSI passthrough and automatic recovery remain
-pending. See [the integration notes](macos-wsi-migration.md#integrated-branch-15-october-2026).
+pending. See [the integration notes](macos-wsi-migration.md#integrated-branch-15-october-2026). An opt-in correction lets the stock adaptive pacer keep display-rate
+cadence on WSI with about one refresh less latency at 90 Hz, at the cost of
+worse tails; see [the adaptive pacing results](macos-wsi-generic-experiment.md#corrected-feedback-for-the-adaptive-pacer-16-october-2026).
 
 The [graphics integration review](macos-graphics-integration-review.md) is now
 integrated locally into `macos-upstream-clean` by the user-approved fast-forward
