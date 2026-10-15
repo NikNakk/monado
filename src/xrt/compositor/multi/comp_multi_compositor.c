@@ -1374,13 +1374,25 @@ multi_compositor_request_display_refresh_rate(struct xrt_compositor *xc, float d
 
 	struct multi_compositor *mc = multi_compositor(xc);
 
+#ifdef XRT_OS_OSX
+	xrt_result_t result = xrt_comp_request_display_refresh_rate(&mc->msc->xcn->base, display_refresh_rate_hz);
+	if (result != XRT_SUCCESS) {
+		return result;
+	}
+#else
 	xrt_comp_request_display_refresh_rate(&mc->msc->xcn->base, display_refresh_rate_hz);
+#endif
 
 #ifdef XRT_OS_ANDROID
 	// TODO: notify the display refresh changed event by android display callback function.
 	float current_refresh_rate_hz =
 	    android_custom_surface_get_display_refresh_rate(android_globals_get_vm(), android_globals_get_context());
-
+#elif defined(XRT_OS_OSX)
+	// The compositor has applied the physical switch when the request returns.
+	float current_refresh_rate_hz = 0.0f;
+	(void)xrt_comp_get_display_refresh_rate(&mc->msc->xcn->base, &current_refresh_rate_hz);
+#endif
+#if defined(XRT_OS_ANDROID) || defined(XRT_OS_OSX)
 	if (current_refresh_rate_hz != 0 && current_refresh_rate_hz != mc->current_refresh_rate_hz) {
 		xrt_syscomp_notify_display_refresh_changed(&mc->msc->base, xc, mc->current_refresh_rate_hz,
 		                                           current_refresh_rate_hz);
