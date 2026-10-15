@@ -6,6 +6,28 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 environment toggle audit
 
+## Current opt-in WSI experiment (15 October 2026)
+
+The generic target is committed on `claude/macos-wsi-integration`; see
+[the integration notes and review follow-up](macos-wsi-migration.md) for
+validation and limitations.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `XRT_MACOS_WSI_GENERIC` | `0` | Select the separate FIFO Vulkan target, including hosted clients. |
+| `XRT_MACOS_WSI_GENERIC_CV` | `0` | Use the fake pacer with CVDisplayLink phase. |
+| `XRT_MACOS_WSI_GENERIC_CALIBRATE` | `0` | Calibrate presentation offset; needs generic CV mode. |
+| `XRT_MACOS_WSI_PASSTHROUGH` | `0` | Enable the blocking Metal passthrough correctness bridge. |
+| `XRT_MACOS_WSI_PASSTHROUGH_VERIFY` | `0` | Read back the first composed output for pixel verification. |
+
+The native-wrapper `XRT_MACOS_WSI`, its `XRT_MACOS_WSI_MAX_PENDING` credit
+limit, and `XRT_MACOS_GPU_ATTRIBUTION` diagnostic are removed. Old flags and
+commands in historical capture reports do not select executable experiment modes.
+Native presentation defaults are unchanged; WSI passthrough still lacks native
+calibration/rotation parity, and sleep/disconnect recovery requires restart.
+
+## Historical audit
+
 Audit of every `DEBUG_GET_ONCE_*` option and raw `getenv()` added on
 `macos-wine-openvr-legacy-unity` since its merge-base with `combined`
 (`9c1dbc39`, which is also the tip of `combined`). Snapshot: `eb607ca`,

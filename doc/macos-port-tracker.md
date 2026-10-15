@@ -7,6 +7,16 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The opt-in generic Vulkan WSI target and its experiment are committed on
+`claude/macos-wsi-integration` (worktree `build/review/wsi-integration`), with
+display refresh requests now applied between frames by the main compositor for
+every target and pacers changing period in place. Native stays the default.
+The experiment's [hardware reruns](macos-wsi-headset-fixes.md) passed native and
+all WSI refresh cycles and the passthrough pixel checks, but on the experiment
+sources: repeat them on the branch before merging. Visual acceptance,
+calibration/rotation parity for WSI passthrough and automatic recovery remain
+pending. See [the integration notes](macos-wsi-migration.md#integrated-branch-15-october-2026).
+
 The [graphics integration review](macos-graphics-integration-review.md) is now
 integrated locally into `macos-upstream-clean` by the user-approved fast-forward
 to `c2c608a3f`. Both native Vulkan sharing options default to on, with independent
