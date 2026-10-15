@@ -48,6 +48,38 @@ clang -fobjc-arc -framework AppKit -framework CoreGraphics build/review/wsi-inte
 python3 build/review/wsi-integration/scripts/macos/wsi-experiment/run.py --build build/review/wsi-integration-build --display-helper build/review/wsi-display-mode --output build/review/wsi-integration-refresh --conditions native wsi-generic wsi-generic-cv --hz 90 --seconds 15 --repeats 1 --refresh-cycle
 ```
 
+### Headset validation of the branch (16 October 2026)
+
+Claude ran the checks above on the headset at the user's request, using
+`build/review/wsi-integration-build`, the light 24-instance application and Metal
+API validation, with the lid open. The runner restored 4000x2040 at 90 Hz and the
+installed service registration after every group.
+
+| Check | Commit | Result |
+| --- | --- | --- |
+| Refresh cycle: native, GOOGLE WSI, CV WSI, calibrated CV WSI | `ffeda97f0` | All pass: 90 Hz before `xrBeginSession` in under 1 ms, 73 Hz rejected without a mode change, 90->120->90->120 verified |
+| Hosted session: GOOGLE WSI and calibrated CV WSI, 90 Hz | `ffeda97f0` | Pass; visibility hidden->pending->visible->hidden |
+| Camera-only passthrough, calibrated CV WSI, 120 Hz | `ffeda97f0` | Pass; 6,104 samples, no alpha or grey errors |
+| Overlay passthrough, service, 90 Hz | `ffeda97f0` | **Fail**, see below |
+| Overlay passthrough, service, 90 Hz, three repeats | `da79ed3d4` | All pass; 1-3 opaque application samples each, no mismatches |
+| Overlay passthrough, hosted, 90 Hz | both | Pass |
+| Native 90 Hz shutdown, three repeats | `da79ed3d4` | Pass; no GPU-fault lines |
+| Passthrough requested without the WSI bridge | `da79ed3d4` | Pass; the application finds no capability and exits before a session, no service errors |
+
+The overlay failure was in the verifier, not the composition. Its first overlay
+frame had application layers but sampled no opaque application pixel, and the
+check treated that as a failure; that readback and every other had no
+mismatches, and the next frame verified. Codex's earlier pass sampled opaque
+pixels on its first overlay frame. The verifier now retries such frames and only
+fails after 120 frames without an opaque sample. Overlay coverage remains a few
+samples per frame in this scene, a sanity check rather than visual validation.
+
+Captures, `functional-summary.txt` and the `check_hw.py` checker that produced it
+are in `build/review/wsi-integration-hw-20261016/`. These are functional checks,
+not a performance comparison. Visual acceptance in the headset, lid-closed runs,
+Game Mode, sleep and reconnect, and WSI passthrough calibration and rotation
+remain open.
+
 The rest of this document is the experiment's record and is kept as written.
 
 The active Monado-2 worktree is `build/review/wsi-source`, branch
