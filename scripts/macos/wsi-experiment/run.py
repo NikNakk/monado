@@ -27,13 +27,14 @@ def main():
     parser.add_argument('--seconds', type=float, default=15)
     parser.add_argument('--repeats', type=int, default=2)
     parser.add_argument('--hz', type=int, nargs='+', default=[90, 120])
-    parser.add_argument('--conditions', nargs='+', choices=['native', 'native-timed', 'wsi-generic', 'wsi-generic-cv', 'wsi-generic-calibrated'],
+    parser.add_argument('--conditions', nargs='+', choices=['native', 'native-timed', 'wsi-generic', 'wsi-generic-adaptive', 'wsi-generic-cv', 'wsi-generic-calibrated'],
                         default=['native', 'native-timed', 'wsi-generic', 'wsi-generic-cv', 'wsi-generic-calibrated'])
     parser.add_argument('--native-display-link', choices=['ca', 'cv'], default='ca')
     parser.add_argument('--metal-validation', action='store_true')
     parser.add_argument('--loads', nargs='+', choices=['baseline', 'light', 'cpu', 'gpu4', 'gpu16'], default=['baseline'])
     parser.add_argument('--generic-max-comp-percent', type=int, default=30)
     parser.add_argument('--generic-fake-pacing', action='store_true')
+    parser.add_argument('--generic-latch-us', type=int, default=0, help='Latch allowance for wsi-generic-adaptive')
     parser.add_argument('--hosted', action='store_true')
     parser.add_argument('--verify-passthrough', action='store_true')
     parser.add_argument('--refresh-cycle', action='store_true')
@@ -118,6 +119,8 @@ def main():
                             'XRT_MACOS_WSI_GENERIC': '1' if condition.startswith('wsi-generic') else '0',
                             'XRT_MACOS_WSI_GENERIC_CV': '1' if condition in ('wsi-generic-cv', 'wsi-generic-calibrated') else '0',
                             'XRT_MACOS_WSI_GENERIC_CALIBRATE': '1' if condition == 'wsi-generic-calibrated' else '0',
+                            'XRT_MACOS_WSI_GENERIC_ADAPTIVE': '1' if condition == 'wsi-generic-adaptive' else '0',
+                            'XRT_MACOS_WSI_GENERIC_LATCH_US': str(args.generic_latch_us),
                             'XRT_COMPOSITOR_PREFERRED_IMAGE_COUNT': '3', 'XRT_COMPOSITOR_COMPUTE': '1',
                             'XRT_COMPOSITOR_DEPTH_REPROJECTION': '0',
                             'XRT_COMPOSITOR_USE_DISPLAY_TIMING': '0' if args.generic_fake_pacing else '1',

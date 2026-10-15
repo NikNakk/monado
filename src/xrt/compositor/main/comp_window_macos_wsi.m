@@ -20,6 +20,7 @@
 #include "main/comp_macos_wsi_passthrough.h"
 #include "main/comp_macos_display.h"
 #include "main/comp_macos_display_timing.h"
+#include "main/comp_present_feedback_correction.h"
 #include "util/u_debug.h"
 #include "util/u_misc.h"
 #include "util/u_pacing.h"
@@ -39,6 +40,8 @@ DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_wsi, "XRT_MACOS_WSI_GENERIC", false)
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_cv, "XRT_MACOS_WSI_GENERIC_CV", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_calibrate, "XRT_MACOS_WSI_GENERIC_CALIBRATE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_adaptive, "XRT_MACOS_WSI_GENERIC_ADAPTIVE", false)
+DEBUG_GET_ONCE_NUM_OPTION(macos_generic_latch_us, "XRT_MACOS_WSI_GENERIC_LATCH_US", 0)
 
 #define WSI_TIMING_HISTORY 2048
 
@@ -58,20 +61,26 @@ struct comp_window_macos_wsi
 	atomic_uint_fast64_t latest_vblank_ns;
 	int64_t period_ns;
 	bool use_cv, calibrate;
+
+	//! Corrects feedback for the adaptive display-timing pacer, without CVDisplayLink.
+	bool adaptive;
+	struct comp_present_feedback_correction correction;
+	int64_t base_present_offset_ns;
+	int64_t applied_delay_ns;
 	struct comp_macos_wsi_passthrough *passthrough;
 	uint64_t last_vblank_ns;
 	int64_t calibrated_offset_ns;
 	uint32_t offset_samples;
 	struct
 	{
-		int64_t id, desired_ns;
+		int64_t id, desired_ns, gpu_end_ns;
 		uint64_t ticket;
-		bool valid;
+		bool valid, has_gpu_end;
 	} history[WSI_TIMING_HISTORY];
 
 	// Experiment instrumentation; never write files from the display-link callback.
 	struct comp_target ops;
-	FILE *feedback, *acquire, *gpu, *refresh, *vblank, *offset;
+	FILE *feedback, *acquire, *gpu, *refresh, *vblank, *offset, *adaptive_trace;
 };
 
 static struct comp_window_macos_wsi *
@@ -206,6 +215,11 @@ apply_refresh(struct comp_target *ct, float hz)
 	w->offset_samples = 0;
 	w->calibrated_offset_ns = 0;
 	memset(w->history, 0, sizeof(w->history));
+	comp_present_feedback_correction_reset(&w->correction, w->period_ns);
+	if (w->adaptive && w->applied_delay_ns != 0 && w->base.upc != NULL) {
+		u_pc_update_present_offset(w->base.upc, 0, w->base_present_offset_ns);
+	}
+	w->applied_delay_ns = 0;
 	ct->c->frame_interval_ns = (uint64_t)w->period_ns;
 	if (w->base.upc != NULL && !u_pc_update_frame_period(w->base.upc, w->period_ns)) {
 		w->display_lost = true;
@@ -316,6 +330,7 @@ init_window(struct comp_target *ct)
 		}
 		ct->c->frame_interval_ns = (uint64_t)w->period_ns;
 	}
+	comp_present_feedback_correction_reset(&w->correction, w->period_ns);
 	// GOOGLE display timing needs no conversion: MoltenVK reports Mach absolute time,
 	// the same CLOCK_UPTIME_RAW domain as os_monotonic_get_ns() on macOS.
 	int requested_hz = debug_get_num_option_macos_generic_refresh();
@@ -370,7 +385,7 @@ destroy(struct comp_target *ct)
 	comp_macos_frontend_destroy(&w->frontend);
 	u_macos_hosted_client_release(w->hosted_client);
 
-	FILE *files[] = {w->feedback, w->acquire, w->gpu, w->refresh, w->vblank, w->offset};
+	FILE *files[] = {w->feedback, w->acquire, w->gpu, w->refresh, w->vblank, w->offset, w->adaptive_trace};
 	for (uint32_t i = 0; i < ARRAY_SIZE(files); ++i) {
 		if (files[i] != NULL) {
 			fclose(files[i]);
@@ -384,34 +399,59 @@ static void
 trace_feedback(struct comp_target_swapchain *cts, VkPastPresentationTimingGOOGLE *t)
 {
 	struct comp_window_macos_wsi *w = (struct comp_window_macos_wsi *)cts;
-	{
-		uint32_t slot = t->presentID % WSI_TIMING_HISTORY;
-		if (w->history[slot].valid && w->history[slot].id == t->presentID && t->actualPresentTime > 0) {
-			int64_t sample_ns = (int64_t)t->actualPresentTime - w->history[slot].desired_ns;
-			comp_macos_frontend_note_presented(w->frontend, w->history[slot].ticket);
-			bool accepted = w->calibrate && sample_ns > 0 && sample_ns <= w->period_ns * 4;
-			if (accepted) {
-				w->calibrated_offset_ns =
-				    w->offset_samples == 0 ? sample_ns : (w->calibrated_offset_ns * 7 + sample_ns) / 8;
-				if (w->offset_samples < UINT32_MAX) {
-					w->offset_samples++;
-				}
-				if (w->offset_samples >= 8) {
-					u_pc_update_present_offset(cts->upc, t->presentID, w->calibrated_offset_ns);
-				}
-			}
-			if (w->offset != NULL) {
-				fprintf(w->offset, "%u,%" PRIi64 ",%" PRIi64 ",%u,%d\n", t->presentID, sample_ns,
-				        w->calibrated_offset_ns, w->offset_samples, accepted);
-			}
-			w->history[slot].valid = false;
-		}
-	}
+	// Trace what the driver reported, before any correction.
 	if (w->feedback != NULL) {
 		fprintf(w->feedback, "feedback,%u,%llu,%llu,%llu,0,0,0,0,0,%llu,%llu,0\n", t->presentID,
 		        (unsigned long long)os_monotonic_get_ns(), (unsigned long long)t->desiredPresentTime,
 		        (unsigned long long)t->actualPresentTime, (unsigned long long)t->earliestPresentTime,
 		        (unsigned long long)t->presentMargin);
+	}
+	uint32_t slot = t->presentID % WSI_TIMING_HISTORY;
+	bool known = w->history[slot].valid && w->history[slot].id == t->presentID;
+	if (known && t->actualPresentTime > 0) {
+		int64_t sample_ns = (int64_t)t->actualPresentTime - w->history[slot].desired_ns;
+		comp_macos_frontend_note_presented(w->frontend, w->history[slot].ticket);
+		bool accepted = w->calibrate && sample_ns > 0 && sample_ns <= w->period_ns * 4;
+		if (accepted) {
+			w->calibrated_offset_ns =
+			    w->offset_samples == 0 ? sample_ns : (w->calibrated_offset_ns * 7 + sample_ns) / 8;
+			if (w->offset_samples < UINT32_MAX) {
+				w->offset_samples++;
+			}
+			if (w->offset_samples >= 8) {
+				u_pc_update_present_offset(cts->upc, t->presentID, w->calibrated_offset_ns);
+			}
+		}
+		if (w->offset != NULL) {
+			fprintf(w->offset, "%u,%" PRIi64 ",%" PRIi64 ",%u,%d\n", t->presentID, sample_ns,
+			        w->calibrated_offset_ns, w->offset_samples, accepted);
+		}
+	}
+	if (w->adaptive && known) {
+		int64_t desired_ns = w->history[slot].desired_ns;
+		if (t->actualPresentTime > 0) {
+			comp_present_feedback_correction_observe(&w->correction, desired_ns,
+			                                         (int64_t)t->actualPresentTime);
+		}
+		uint64_t raw_margin = t->presentMargin;
+		comp_present_feedback_correction_apply(&w->correction, desired_ns, w->history[slot].has_gpu_end,
+		                                       w->history[slot].gpu_end_ns, &t->actualPresentTime,
+		                                       &t->earliestPresentTime, &t->presentMargin);
+		// Predicted display times must include the delay removed from the feedback.
+		int64_t delay_ns = w->correction.delay_ns;
+		if (llabs(delay_ns - w->applied_delay_ns) > 100000 && cts->upc != NULL) {
+			u_pc_update_present_offset(cts->upc, t->presentID, w->base_present_offset_ns + delay_ns);
+			w->applied_delay_ns = delay_ns;
+		}
+		if (w->adaptive_trace != NULL) {
+			fprintf(w->adaptive_trace, "%u,%" PRIi64 ",%llu,%llu,%d,%" PRIi64 ",%llu\n", t->presentID,
+			        delay_ns, (unsigned long long)raw_margin, (unsigned long long)t->presentMargin,
+			        w->history[slot].has_gpu_end, w->history[slot].gpu_end_ns,
+			        (unsigned long long)t->actualPresentTime);
+		}
+	}
+	if (known) {
+		w->history[slot].valid = false;
 	}
 }
 
@@ -455,9 +495,11 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 	}
 	CAMetalLayer *layer = w->frontend_info.metal_layer;
 	CFStringRef color = layer.colorspace != NULL ? CGColorSpaceCopyName(layer.colorspace) : NULL;
-	COMP_INFO(ct->c, "EXPERIMENT generic WSI: CVDisplayLink=%d calibration=%d, %u images, %ux%u, refresh=%llu ns",
-	          w->use_cv, w->calibrate, ct->image_count, ct->width, ct->height,
-	          (unsigned long long)duration.refreshDuration);
+	COMP_INFO(
+	    ct->c,
+	    "EXPERIMENT generic WSI: CVDisplayLink=%d calibration=%d adaptive=%d, %u images, %ux%u, refresh=%llu ns",
+	    w->use_cv, w->calibrate, w->adaptive, ct->image_count, ct->width, ct->height,
+	    (unsigned long long)duration.refreshDuration);
 	COMP_INFO(ct->c,
 	          "EXPERIMENT effective layer: framebufferOnly=%d displaySync=%d transaction=%d drawables=%lu "
 	          "timeout=%d format=%lu colorspace=%s",
@@ -500,6 +542,7 @@ present(struct comp_target *ct,
 		w->history[slot].id = w->base.current_frame_id;
 		w->history[slot].desired_ns = desired;
 		w->history[slot].ticket = comp_macos_frontend_present_ticket(w->frontend);
+		w->history[slot].has_gpu_end = false;
 		w->history[slot].valid = true;
 	}
 	VkResult composed = VK_SUCCESS;
@@ -543,6 +586,11 @@ info_gpu(struct comp_target *ct, int64_t id, int64_t start, int64_t end, int64_t
 {
 	struct comp_window_macos_wsi *w = from_target(ct);
 	w->ops.info_gpu(ct, id, start, end, when);
+	uint32_t slot = (uint64_t)id % WSI_TIMING_HISTORY;
+	if (w->history[slot].valid && w->history[slot].id == id) {
+		w->history[slot].gpu_end_ns = end;
+		w->history[slot].has_gpu_end = true;
+	}
 	if (w->gpu != NULL) {
 		fprintf(w->gpu, "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n", id, start, end, when);
 	}
@@ -582,6 +630,15 @@ comp_window_macos_wsi_create_hosted(struct comp_compositor *c,
 	u_macos_hosted_client_reference(client);
 	w->use_cv = debug_get_bool_option_macos_generic_cv();
 	w->calibrate = w->use_cv && debug_get_bool_option_macos_generic_calibrate();
+	w->adaptive = debug_get_bool_option_macos_generic_adaptive();
+	if (w->adaptive && w->use_cv) {
+		COMP_WARN(c, "XRT_MACOS_WSI_GENERIC_ADAPTIVE needs the display-timing pacer; ignored with _CV");
+		w->adaptive = false;
+	}
+	struct u_pc_display_timing_config pacer_config = u_pc_display_timing_get_default_config();
+	w->correction.latch_ns = (int64_t)debug_get_num_option_macos_generic_latch_us() * 1000;
+	w->correction.neutral_margin_ns = pacer_config.margin_ns;
+	w->base_present_offset_ns = pacer_config.present_to_display_offset_ns;
 	atomic_init(&w->latest_vblank_ns, 0);
 	atomic_init(&w->display_lost, false);
 	comp_target_swapchain_init_and_set_fnptrs(&w->base, w->use_cv ? COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING
@@ -618,6 +675,11 @@ comp_window_macos_wsi_create_hosted(struct comp_compositor *c,
 	}
 	if (w->calibrate) {
 		w->offset = open_trace("cv_offset", "frame_id,sample_ns,filtered_ns,sample_count,accepted");
+	}
+	if (w->adaptive) {
+		w->adaptive_trace = open_trace("adaptive_feedback",
+		                               "frame_id,delay_ns,raw_margin_ns,margin_ns,has_gpu_end,"
+		                               "gpu_end_ns,corrected_actual_ns");
 	}
 	*out = ct;
 	return true;
