@@ -264,3 +264,101 @@ The [matched native comparison](macos-wsi-native-comparison.md) adds 36 interlea
 performance captures, four CPU-load validation captures and client-frame readiness
 joins. The 120 Hz GPU-load presentation gain reproduces, while the 90 Hz case
 shows fewer distinct client frames despite higher presentation cadence.
+
+## Corrected feedback for the adaptive pacer (16 October 2026)
+
+Branch `claude/macos-wsi-integration`. This revisits the stock display-timing
+("GOOGLE") pacer results above, which lost about a quarter of refreshes.
+
+### What the feedback actually says
+
+Two problems sat under the earlier result.
+
+- **GPU times were wrong on macOS.** `vk_convert_timestamps_to_host_ns` asked
+  MoltenVK for a `CLOCK_MONOTONIC` host timestamp. MoltenVK only calibrates
+  against the device and `CLOCK_MONOTONIC_RAW`, and for `CLOCK_MONOTONIC` it
+  returns success with a host time of zero (probe: `time_domains.c` in the
+  evidence directory). Absolute compositor GPU times were therefore meaningless
+  on both targets; durations were unaffected. Fixed in `vk/time`.
+- **CoreAnimation shows every frame one refresh late.** With correct GPU times,
+  the stock pacer's frames at 90 and 120 Hz, light and heavy load, were all
+  presented exactly one refresh after the requested time (11.16 ms and 8.37 ms
+  later), even though the GPU finished within about 2 ms of the requested time.
+  The pacer therefore counted every frame as missed, kept raising its budget
+  and stepped past refreshes. MoltenVK's estimated `presentMargin` (about 14.7 ms
+  at 90 Hz, 11 ms at 120 Hz) measures from presentation start, not slack.
+
+A closed-loop unit test drives the real pacer against a vblank-grid display
+with that one-refresh delay: with raw feedback it presents on 75% of refreshes,
+close to the 71% measured on the headset.
+
+### The opt-in correction
+
+`XRT_MACOS_WSI_GENERIC_ADAPTIVE=1` keeps the stock display-timing pacer but
+corrects each feedback entry before it is consumed
+(`comp_present_feedback_correction.h`):
+
+- the constant presentation delay is estimated as the minimum of actual minus
+  desired presentation over the last 64 frames, so a genuine miss still reads
+  as a further refresh late, and is removed from the actual and earliest times;
+- the margin is the desired time plus a latch allowance minus the frame's
+  compositor GPU completion (`XRT_MACOS_WSI_GENERIC_LATCH_US`, default 0, which
+  is conservative); a frame without GPU data reports the pacer's target margin;
+- the removed delay is added to the pacer's present-to-display offset.
+
+In the same simulation the corrected pacer presents on every refresh.
+
+### Headset comparison
+
+Interleaved runner order, two repeats of 12 s per cell after a 2 s warm-up, the
+light 24-instance scene or 16 GPU passes per eye, lid open, no Metal validation.
+Ranges are across repeats. "Wake to present" is the reported presentation time
+minus the compositor's wake for that frame, a proxy for pose-sample age at
+display; the strict analyzer's sample age needs renderer reprojection traces this
+build does not record. Prediction error compares the pacer's predicted display
+time with the reported presentation time; the GOOGLE-paced rows include the
+pacer's 4 ms present-to-display offset by design, so compare it within a target.
+
+| Hz / load | Condition | Presents/s | Client frames/s | Wake to present p50 / p99 (ms) | Prediction error p50 / p99 (ms) |
+| --- | --- | --- | --- | --- | --- |
+| 90 / light | native | 89.0-89.8 | 64.9-65.5 | 25.2 / 25.2-36.3 | 0.0 / 1.2-11.1 |
+| 90 / light | stock adaptive | 67.3 | 55.2-56.1 | 15.5 / 15.5 | 7.2 / 7.2 |
+| 90 / light | **corrected adaptive** | 89.4-89.5 | 64.0-65.6 | 18.0 / 19.1-29.3 | 3.9 / 4.0-7.2 |
+| 90 / light | calibrated CV | 89.7-89.9 | 65.1-65.6 | 25.2 / 25.2 | 0.0 / 0.0-3.2 |
+| 90 / gpu16 | native | 89.5-89.9 | 59.4-62.9 | 25.2 / 25.2 | 0.0 / 0.0-2.3 |
+| 90 / gpu16 | stock adaptive | 66.6-67.3 | 57.2-57.4 | 15.5 / 15.5-26.6 | 7.2 / 7.2-18.3 |
+| 90 / gpu16 | **corrected adaptive** | 86.8-89.4 | 65.3-67.3 | 15.1-15.6 / 25.8-38.1 | 3.9 / 7.2-18.3 |
+| 90 / gpu16 | calibrated CV | 89.6-89.7 | 63.9-67.6 | 25.2 / 25.2 | 0.0 / 3.2-5.8 |
+| 120 / light | native | 119.4 | 90.7-92.6 | 19.6 / 19.7 | 0.0 / 1.8-3.0 |
+| 120 / light | stock adaptive | 88.7-89.3 | 72.2 | 11.8 / 20.2 | 4.4 / 12.7 |
+| 120 / light | **corrected adaptive** | 114.8-119.9 | 87.0-89.7 | 14.0-14.2 / 15.5-28.8 | 3.9 / 4.0-12.8 |
+| 120 / light | calibrated CV | 118.6-119.6 | 87.2-87.4 | 19.7 / 19.7-28.0 | 0.0 / 2.8-8.3 |
+| 120 / gpu16 | native | 117.6-119.0 | 53.6-55.3 | 19.6 / 28.0 | 0.0 / 7.3-8.3 |
+| 120 / gpu16 | stock adaptive | 88.3-88.7 | 39.8-41.6 | 11.8 / 20.2-28.5 | 4.4 / 12.7-21.0 |
+| 120 / gpu16 | **corrected adaptive** | 114.6-119.7 | 64.7-66.5 | 14.5-14.8 / 16.0-28.9 | 3.9 / 4.0-12.7 |
+| 120 / gpu16 | calibrated CV | 119.5-119.7 | 43.8-45.5 | 19.7 / 19.7 | 0.0 / 2.0-4.5 |
+
+What this establishes:
+
+- The correction restores near display-rate cadence (87-89.5/s at 90 Hz,
+  115-120/s at 120 Hz), against 67/s and 88-89/s for the stock pacer.
+- It keeps most of the adaptive pacer's latency advantage: median wake to
+  present is 15-18 ms at 90 Hz and 14-15 ms at 120 Hz, against 25 ms and 20 ms
+  for native and calibrated CV, about one refresh less at 90 Hz.
+- Under heavy load at 120 Hz it delivered the most distinct client frames
+  (65-66/s, against 44-55/s).
+- Its tails are worse: p99 wake to present reaches 26-38 ms at 90 Hz heavy load,
+  and one repeat in each 120 Hz cell ran at about 115/s. The latch allowance is
+  untuned at 0.
+
+Not established: motion-to-photon latency, visual smoothness, behaviour with
+the lid closed, hosted Game Mode, or anything about native. Next steps: sweep
+`XRT_MACOS_WSI_GENERIC_LATCH_US` (for example 0, 1000, 2000), look at the
+`adaptive_feedback` trace for the tail frames, then a worn visual comparison.
+If it holds, the same correction could feed the native target, which would need
+its own GPU-completion and presentation inputs.
+
+Evidence: `build/review/wsi-integration-hw-20261016/` in the Monado-2 checkout,
+`latch-lead/` (stock pacer, with `summary.txt`), `adaptive-compare/` (with
+`summary.md`), `gpu-clock-check/`, and the scripts `latch_lead.py`,
+`pacing_compare.py` and `time_domains.c`.

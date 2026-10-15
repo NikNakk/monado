@@ -17,6 +17,8 @@ validation and limitations.
 | `XRT_MACOS_WSI_GENERIC` | `0` | Select the separate FIFO Vulkan target, including hosted clients. |
 | `XRT_MACOS_WSI_GENERIC_CV` | `0` | Use the fake pacer with CVDisplayLink phase. |
 | `XRT_MACOS_WSI_GENERIC_CALIBRATE` | `0` | Calibrate presentation offset; needs generic CV mode. |
+| `XRT_MACOS_WSI_GENERIC_ADAPTIVE` | `0` | Correct GOOGLE feedback for the adaptive display-timing pacer; not with CV mode. |
+| `XRT_MACOS_WSI_GENERIC_LATCH_US` | `0` | With `_ADAPTIVE`, how long after the desired present time GPU work may finish. |
 | `XRT_MACOS_WSI_PASSTHROUGH` | `0` | Enable the blocking Metal passthrough correctness bridge. |
 | `XRT_MACOS_WSI_PASSTHROUGH_VERIFY` | `0` | Read back the first composed output for pixel verification. |
 
