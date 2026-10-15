@@ -269,6 +269,35 @@ os_cond_wait(struct os_cond *oc, struct os_mutex *om)
 }
 
 /*!
+ * Wait, giving up after @p timeout_ns nanoseconds from now.
+ *
+ * The same rules as @ref os_cond_wait apply, including spurious wakeups:
+ * test the condition in a loop. You own the mutex again when this returns.
+ *
+ * @return 0 when woken, nonzero on timeout or error.
+ *
+ * @public @memberof os_cond
+ */
+static inline int
+os_cond_timedwait(struct os_cond *oc, struct os_mutex *om, uint64_t timeout_ns)
+{
+	assert(oc->initialized);
+	struct timespec abs_timeout;
+#if defined(XRT_OS_WINDOWS) && !defined(XRT_ENV_MINGW)
+	struct timespec relative;
+	os_ns_to_timespec((int64_t)timeout_ns, &relative);
+	pthread_win32_getabstime_np(&abs_timeout, &relative);
+#else
+	struct timespec now;
+	if (clock_gettime(CLOCK_REALTIME, &now) < 0) {
+		return -1;
+	}
+	os_ns_to_timespec(os_timespec_to_ns(&now) + (int64_t)timeout_ns, &abs_timeout);
+#endif
+	return pthread_cond_timedwait(&oc->cond, &om->mutex, &abs_timeout);
+}
+
+/*!
  * Clean up.
  *
  * @public @memberof os_cond
