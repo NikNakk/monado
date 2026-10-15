@@ -10,6 +10,9 @@
 #include "xrt/xrt_system.h"
 #include "catch_amalgamated.hpp"
 #include <cstdlib>
+#include <atomic>
+#include <cstring>
+#include "util/u_logging.h"
 #include <vector>
 
 namespace {
@@ -568,5 +571,51 @@ TEST_CASE("passthrough rejection propagates from the native target before layer 
 	};
 	xrt_passthrough_create_info info{};
 	CHECK(xrt_comp_create_passthrough(&f.compositor->base, &info) == XRT_ERROR_FEATURE_NOT_SUPPORTED);
+}
+#endif
+
+#ifdef XRT_OS_OSX
+TEST_CASE("stopping an unresolved producer cancels without logging a GPU fault")
+{
+	struct Capture
+	{
+		std::atomic<int> faults{0};
+		Capture()
+		{
+			u_log_set_sink(
+			    [](const char *, int, const char *, u_logging_level, const char *format, va_list,
+			       void *data) {
+				    if (strstr(format, "Semaphore waiting failed") ||
+				        strstr(format, "Client GPU obligation failed")) {
+					    static_cast<Capture *>(data)->faults.fetch_add(1);
+				    }
+			    },
+			    this);
+		}
+		~Capture()
+		{
+			u_log_set_sink(nullptr, nullptr);
+		}
+	} capture;
+	ProducerGate gate;
+	Fixture f;
+	f.create_session();
+	install_test_allocator(f);
+	xrt_swapchain_create_info info{};
+	info.width = info.height = 64;
+	info.array_size = info.face_count = info.sample_count = info.mip_count = 1;
+	xrt_swapchain *sc = nullptr;
+	REQUIRE(xrt_comp_create_swapchain(&f.compositor->base, &info, &sc) == XRT_SUCCESS);
+	submit_test_layer(f, sc, 0);
+	REQUIRE(xrt_comp_layer_commit_with_semaphore(&f.compositor->base, &gate, 42) == XRT_SUCCESS);
+	{
+		std::unique_lock<std::mutex> lock(gate.mutex);
+		REQUIRE(gate.changed.wait_for(lock, std::chrono::seconds(1), [&] { return gate.entered; }));
+	}
+	auto started = std::chrono::steady_clock::now();
+	xrt_comp_native_destroy(&f.compositor);
+	CHECK(std::chrono::steady_clock::now() - started < std::chrono::milliseconds(250));
+	CHECK(capture.faults.load() == 0);
+	xrt_swapchain_reference(&sc, nullptr);
 }
 #endif

@@ -404,7 +404,11 @@ wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
 
 	xrt_compositor_fence_destroy(xcf_ptr);
 
-	if (ret != XRT_SUCCESS) {
+	if (ret != XRT_SUCCESS
+#ifdef XRT_OS_OSX
+	    && os_thread_helper_is_running(&mc->wait_thread.oth)
+#endif
+	) {
 		U_LOG_E("Fence waiting failed: result=%d", ret);
 	}
 	return ret;
@@ -440,7 +444,11 @@ wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xc
 
 	xrt_compositor_semaphore_reference(xcsem_ptr, NULL);
 
-	if (ret != XRT_SUCCESS) {
+	if (ret != XRT_SUCCESS
+#ifdef XRT_OS_OSX
+	    && os_thread_helper_is_running(&mc->wait_thread.oth)
+#endif
+	) {
 		U_LOG_E("Semaphore waiting failed: value=%" PRIu64 " result=%d", value, ret);
 	}
 	return ret;
@@ -608,8 +616,12 @@ run_func(void *ptr)
 			/* A timeout is cancellation, never GPU completion. Keep progress
 			 * references until teardown; tracked storage then enters quarantine.
 			 * Other platforms keep delivering the frame, as before. */
-			U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d", frame_id,
-			        value, wait_result);
+			if (os_thread_helper_is_running(&mc->wait_thread.oth)) {
+				U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d",
+				        frame_id, value, wait_result);
+			} else {
+				macos_client_gpu_trace_event(mc, "wait_cancelled", frame_id, value, wait_result);
+			}
 			if (mc->xses != NULL && os_thread_helper_is_running(&mc->wait_thread.oth)) {
 				/* LOST makes API calls fail, while LOSS_PENDING also produces
 				 * the OpenXR state event an application can observe when idle. */
