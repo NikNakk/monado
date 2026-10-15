@@ -557,3 +557,16 @@ TEST_CASE("hosted loss query ignores unused remote compositor loss but detects t
 	remote_session->get_loss_status = [](xrt_session *, bool *) { return XRT_ERROR_IPC_FAILURE; };
 	CHECK(xrt_session_get_loss_status(f.session, &lost) == XRT_ERROR_IPC_FAILURE);
 }
+
+#ifdef XRT_OS_OSX
+TEST_CASE("passthrough rejection propagates from the native target before layer submission")
+{
+	Fixture f;
+	f.create_session();
+	f.native.base.create_passthrough = [](xrt_compositor *, const xrt_passthrough_create_info *) {
+		return XRT_ERROR_FEATURE_NOT_SUPPORTED;
+	};
+	xrt_passthrough_create_info info{};
+	CHECK(xrt_comp_create_passthrough(&f.compositor->base, &info) == XRT_ERROR_FEATURE_NOT_SUPPORTED);
+}
+#endif

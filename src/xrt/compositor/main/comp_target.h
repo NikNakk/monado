@@ -139,6 +139,9 @@ struct comp_target
 	//! Owning compositor.
 	struct comp_compositor *c;
 
+	//! Explicit opt-out for targets without a configured passthrough path.
+	bool passthrough_unsupported;
+
 	//! Name of the backing system.
 	const char *name;
 

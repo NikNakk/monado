@@ -504,6 +504,14 @@ compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_d
 }
 
 static xrt_result_t
+compositor_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	(void)info;
+	struct comp_compositor *c = comp_compositor(xc);
+	return c->target != NULL && c->target->passthrough_unsupported ? XRT_ERROR_FEATURE_NOT_SUPPORTED : XRT_SUCCESS;
+}
+
+static xrt_result_t
 compositor_layer_passthrough(struct xrt_compositor *xc, struct xrt_device *xdev, const struct xrt_layer_data *data)
 {
 	struct comp_compositor *c = comp_compositor(xc);
@@ -1470,6 +1478,7 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	/* Override the generic no-op passthrough hooks for the native compositor. */
 	iface->layer_begin = compositor_layer_begin;
 	iface->layer_passthrough = compositor_layer_passthrough;
+	iface->create_passthrough = compositor_create_passthrough;
 
 	// Init the settings to default.
 	comp_settings_init(&c->settings, xdev);

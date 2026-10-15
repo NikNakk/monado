@@ -17,6 +17,7 @@
 #include <math.h>
 #include <string.h>
 #include "main/comp_macos_frontend.h"
+#include "main/comp_macos_wsi_passthrough.h"
 #include "main/comp_macos_display.h"
 #include "main/comp_macos_display_timing.h"
 #include "util/u_debug.h"
@@ -28,6 +29,8 @@
 #include <stdio.h>
 
 DEBUG_GET_ONCE_NUM_OPTION(macos_generic_refresh, "XRT_MACOS_REFRESH_RATE_HZ", 0)
+
+DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_passthrough, "XRT_MACOS_WSI_PASSTHROUGH", false)
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_wsi, "XRT_MACOS_WSI_GENERIC", false)
 
@@ -45,6 +48,7 @@ struct comp_window_macos_wsi
 	struct comp_macos_frontend *frontend;
 	struct u_macos_hosted_client *hosted_client;
 	atomic_bool display_lost;
+	bool passthrough_warning;
 	float physical_rate_hz;
 	int64_t last_mode_poll_ns;
 	struct comp_macos_frontend_info frontend_info;
@@ -54,6 +58,7 @@ struct comp_window_macos_wsi
 	atomic_uint_fast64_t latest_vblank_ns;
 	int64_t period_ns;
 	bool use_cv, calibrate;
+	struct comp_macos_wsi_passthrough *passthrough;
 	uint64_t last_vblank_ns;
 	int64_t calibrated_offset_ns;
 	uint32_t offset_samples;
@@ -360,6 +365,7 @@ destroy(struct comp_target *ct)
 	if (w->display_link != NULL) {
 		comp_macos_display_link_destroy(&w->display_link);
 	}
+	comp_macos_wsi_passthrough_destroy(&w->passthrough);
 	comp_target_swapchain_cleanup(&w->base);
 	comp_macos_frontend_destroy(&w->frontend);
 	u_macos_hosted_client_release(w->hosted_client);
@@ -414,6 +420,10 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 {
 	struct comp_window_macos_wsi *w = from_target(ct);
 	struct comp_target_create_images_info fifo = *info;
+	comp_macos_wsi_passthrough_destroy(&w->passthrough);
+	if (debug_get_bool_option_macos_wsi_passthrough()) {
+		fifo.image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	}
 	fifo.present_mode = VK_PRESENT_MODE_FIFO_KHR;
 	w->ops.create_images(ct, &fifo, queue);
 	if (w->base.swapchain.handle == VK_NULL_HANDLE) {
@@ -423,6 +433,15 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 		if (!comp_macos_display_link_start(w->display_link)) {
 			COMP_ERROR(ct->c, "Could not start generic WSI CVDisplayLink");
 			return;
+		}
+	}
+	ct->passthrough_unsupported = true;
+	if (debug_get_bool_option_macos_wsi_passthrough()) {
+		w->passthrough = comp_macos_wsi_passthrough_create(ct, queue, [w->frontend_info.metal_layer device],
+		                                                   w->hosted_client == NULL);
+		ct->passthrough_unsupported = w->passthrough == NULL;
+		if (w->passthrough == NULL) {
+			COMP_ERROR(ct->c, "Could not initialize WSI passthrough interop");
 		}
 	}
 	struct vk_bundle *vk = &ct->c->base.vk;
@@ -483,9 +502,34 @@ present(struct comp_target *ct,
 		w->history[slot].ticket = comp_macos_frontend_present_ticket(w->frontend);
 		w->history[slot].valid = true;
 	}
+	VkResult composed = VK_SUCCESS;
+	if (ct->c->passthrough_active) {
+		bool present_ready = true;
+		if (w->passthrough == NULL) {
+			if (!w->passthrough_warning) {
+				COMP_WARN(ct->c,
+				          "WSI passthrough unavailable; create must be rejected unless the bridge is "
+				          "enabled");
+				w->passthrough_warning = true;
+			}
+		} else {
+			composed = comp_macos_wsi_passthrough_compose(
+			    w->passthrough, index, ct->c->passthrough_has_application_layers, &present_ready);
+		}
+		if (!present_ready) {
+			// Do not acquire more images with uncertain layout/semaphore state.
+			// Swapchain destruction on target teardown releases the acquired image.
+			w->display_lost = true;
+			return composed;
+		}
+	}
 	uint64_t begin = os_monotonic_get_ns();
 	VkResult ret = w->ops.present(ct, queue, index, value, desired, slop);
 	uint64_t end = os_monotonic_get_ns();
+	if (ret == VK_SUCCESS && composed != VK_SUCCESS && composed != VK_NOT_READY) {
+		COMP_ERROR(ct->c, "WSI passthrough failed (%d); acquired image presented after restoration", composed);
+		ret = composed;
+	}
 	if (w->feedback != NULL) {
 		fprintf(w->feedback, "submit,%" PRIi64 ",%llu,%" PRIi64 ",0,%llu,%llu,0,0,%d,0,0,%" PRIi64 "\n",
 		        w->base.current_frame_id, (unsigned long long)end, desired, (unsigned long long)begin,
@@ -561,6 +605,7 @@ comp_window_macos_wsi_create_hosted(struct comp_compositor *c,
 	ct->get_refresh_rates = get_rates;
 	ct->get_current_refresh_rate = get_rate;
 	ct->request_refresh_rate = request_rate;
+	ct->passthrough_unsupported = true;
 	w->base.on_present_feedback = trace_feedback;
 	w->feedback = open_trace("wsi",
 	                         "event,frame_id,event_ns,desired_present_ns,actual_present_ns,begin_ns,end_ns,credit_"
