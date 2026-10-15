@@ -2,7 +2,7 @@
   "installed_tag": "v25.1.0-2314-gcd9294f8c",
   "sdk_source_commit": "3ed64d0f9bb680f24b80a085091e5c8fab38f7b7",
   "physical_display": "PS VR2 4000x2040; selected mode 90 Hz, measured ~89.91 Hz",
-  "user_report": "Stereo array test looked fine; hello_xr head tracking seemed off. Which composition mode and symptom are awaiting clarification.",
+  "user_report": "First/service hello_xr: head-locked and distant cubes fine; nearby world-locked large cube sometimes jumps and judders with tiny head movements. First hosted scene not observed. Stereo array test looked fine. Hosted repeat awaiting visual report.",
   "acceptance": "pending: investigate hello_xr tracking before publication",
   "cases": [
     {
@@ -150,6 +150,29 @@
           "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         }
       }
+    },
+    {
+      "case": "hello-hosted",
+      "source_commit": "116c876e87014b3af420c844e0fd79ff0f90b4df",
+      "command": [
+        "/private/tmp/kosmickrisp-study/hello-build-m3/src/tests/hello_xr/hello_xr",
+        "-g",
+        "Vulkan2",
+        "-bm",
+        "Opaque",
+        "-v"
+      ],
+      "runtime_manifest": "/Users/nickkennedy/.local/monado-psvr2/share/openxr/1/openxr_monado.json",
+      "client_compositor": "1",
+      "vulkan_sharing_options": "unset (defaults)",
+      "readbacks": false,
+      "start": "2026-10-15T08:24:48+0100",
+      "user_visual_result": "pending",
+      "pid": 95647,
+      "exit_code": 0,
+      "finish": "2026-10-15T08:25:33+0100",
+      "runtime_source_commit": "cd9294f8cc00dc5f365f70b341d41640ee20bdce",
+      "note": "source_commit in launcher metadata is checkout HEAD; intervening commit is documentation only. Installed binaries unchanged."
     }
   ]
 }
