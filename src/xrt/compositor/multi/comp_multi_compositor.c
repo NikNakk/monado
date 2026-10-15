@@ -1026,9 +1026,14 @@ multi_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 static xrt_result_t
 multi_compositor_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
 {
+#ifdef XRT_OS_OSX
+	struct multi_compositor *mc = multi_compositor(xc);
+	return xrt_comp_create_passthrough(&mc->msc->xcn->base, info);
+#else
 	(void)xc;
 	(void)info;
 	return XRT_SUCCESS;
+#endif
 }
 
 static xrt_result_t
