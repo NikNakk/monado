@@ -415,6 +415,9 @@ do_update_timings_google_display_timing(struct comp_target_swapchain *cts)
 	    timings);                          //
 	int64_t now_ns = os_monotonic_get_ns();
 	for (uint32_t i = 0; i < count; i++) {
+		if (cts->on_present_feedback != NULL) {
+			cts->on_present_feedback(cts, &timings[i]);
+		}
 		u_pc_info(cts->upc,                       //
 		          timings[i].presentID,           //
 		          timings[i].desiredPresentTime,  //
@@ -422,9 +425,6 @@ do_update_timings_google_display_timing(struct comp_target_swapchain *cts)
 		          timings[i].earliestPresentTime, //
 		          timings[i].presentMargin,       //
 		          now_ns);                        //
-		if (cts->on_present_feedback != NULL) {
-			cts->on_present_feedback(cts, &timings[i]);
-		}
 	}
 
 	free(timings);
