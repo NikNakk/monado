@@ -241,5 +241,25 @@
         }
       ]
     }
-  ]
+  ],
+  "stationary_followup": {
+    "user_report": "User says headset was still that time after hosted repeat; visual hosted evaluation deferred.",
+    "case": "hello-hosted-repeat-1",
+    "typical_position_step_mm": 0.0992,
+    "position_axis_span_mm": [
+      14.4,
+      15.175,
+      33.2
+    ],
+    "raw_orientation_step_deg": 33.85624838870984,
+    "corrected_orientation_step_deg": 33.85624744853766,
+    "step_dt_ms": 33.368,
+    "elapsed_since_trace_start_s": 18.100343709,
+    "driver_relation_flags_before_after": [
+      63,
+      63
+    ],
+    "quaternion_comparison": "2*acos(abs(normalized dot)): sign-invariant angular distance",
+    "interpretation": "Mostly quiet samples with drift and a discrete raw orientation discontinuity. Does not establish hardware vs decoding vs tracking-state root cause, or exact perceptual effect after IMU prediction/timewarp."
+  }
 }
