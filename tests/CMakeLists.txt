@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: BSL-1.0
 
 set(tests
+    tests_comp_refresh_request
     tests_cxx_wrappers
     tests_deque
     tests_floor_calibration
