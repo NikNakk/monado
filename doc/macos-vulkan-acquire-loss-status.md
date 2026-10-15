@@ -5,8 +5,14 @@ SPDX-License-Identifier: BSL-1.0 -->
 
 The isolated `codex/macos-vulkan-acquire-loss-status` branch, based on
 `cf6bedeb2`, implements the fix at `7a494b87e` and removes OpenXR event dispatch from the macOS Vulkan acquire wait.
-It is not installed or merged into `macos-upstream-clean`. The installed ARM64
-service/runtime and Wine x64 runtime remain `v25.1.0-2310-g84b3749c2`.
+The user requested headset checks on 2026-10-15. The tested branch was then
+fast-forwarded locally into `macos-upstream-clean` at `cd9294f8c`. Matching ARM64
+service/runtime and Wine x64 runtime are installed as `v25.1.0-2314-gcd9294f8c`;
+the [installation manifest](macos-graphics-integration-results/local-install-20261015.json)
+records paths, hashes and the previous-installation backup. Existing LaunchAgent
+plists are byte-for-byte preserved. Both loader probes pass (61 ARM64 / 57 x64
+extensions). No remote push has occurred. Headset visual acceptance is pending
+the user observations below.
 
 ## Behavior and ownership
 
@@ -92,9 +98,39 @@ Ubuntu packages: GCC `4:13.2.0-7ubuntu1`, CMake `3.28.3-1build7`, Ninja
 Vulkan `1.3.275.0-1build1` and glslang `15.1.0-2~ubuntu0.24.04.2`. Linux validation runs in an
 amd64 Ubuntu container, not as a runtime dependency.
 
-After review, integrate and deploy matching ARM64/service and x64 clients, then
-repeat the user-operated four-case service/hosted `hello_xr` and stereo-array
-headset checks. The [publication gate](macos-graphics-integration-review.md#installed-build-headset-gate-before-publication)
-remains pending; a future installation changes its tested revision. No push or
-production installation is part of this fix. Source is original BSL-1.0 work;
+Matching ARM64/service and x64 clients are now deployed for the user-operated
+four-case service/hosted `hello_xr` and stereo-array headset checks. The [publication gate](macos-graphics-integration-review.md#installed-build-headset-gate-before-publication)
+remains pending; a future installation changes its tested revision. The requested installation is complete; no push has occurred. Source is original BSL-1.0 work;
 no external project code was adapted.
+
+## Installed headset checks — 2026-10-15
+
+At the user's request all four checks were launched against the installed runtime
+and launchd service at `cd9294f8c` (`v25.1.0-2314-gcd9294f8c`). `hello_xr`
+ran for 45 seconds in each mode and shut down through its normal stdin command.
+Each stereo-array check submitted 3600 projection frames and exited zero. Both
+hosted runs explicitly log client-process composition; the hosted array logs
+`remote=0`, two layers and the Metal shared-event frame handoff. The sharing
+switches were unset and source/presentation diagnostic readbacks disabled.
+This is installed-service testing, not the isolated simulated-HMD launcher.
+
+The user reports that the stereo array test looked fine, but `hello_xr` head
+tracking seemed off. The mode and nature of that symptom are awaiting
+clarification. **The publication gate remains open.** Successful process exits
+and array colours do not establish correct head tracking, depth or frame pacing.
+The physical display was already configured at 90 Hz (~89.91 Hz measured);
+no display refresh change was requested or applied. No pose, prediction or
+presentation source changed between the prior installed `84b3749c2` and this
+build; the polling fix is the only runtime source delta. This narrows the
+investigation but does not rule out an indirect graphics timing effect.
+
+The unmodified SDK `hello_xr` source is clean at
+`3ed64d0f9bb680f24b80a085091e5c8fab38f7b7`, built Release. The first array launch
+exited before rendering because the temporary launcher lacked
+`MONADO_OPENXR_RUNTIME_PATH`; after setting it to the installed runtime, both
+array runs completed. The temporary launcher and all raw logs remain under
+`build/arm64/headset-gate-20261015/` (launcher copy below); the
+[durable run manifest](macos-graphics-integration-results/headset-checks-20261015.json)
+records commands, timestamps, exit codes and log hashes. The normal ARM64
+installation build recovered an incomplete Ninja log and emitted existing
+external Perfetto variadic-macro warnings; both architecture builds completed.

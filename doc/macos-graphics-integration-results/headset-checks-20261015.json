@@ -1,0 +1,155 @@
+{
+  "installed_tag": "v25.1.0-2314-gcd9294f8c",
+  "sdk_source_commit": "3ed64d0f9bb680f24b80a085091e5c8fab38f7b7",
+  "physical_display": "PS VR2 4000x2040; selected mode 90 Hz, measured ~89.91 Hz",
+  "user_report": "Stereo array test looked fine; hello_xr head tracking seemed off. Which composition mode and symptom are awaiting clarification.",
+  "acceptance": "pending: investigate hello_xr tracking before publication",
+  "cases": [
+    {
+      "case": "hello-service",
+      "source_commit": "cd9294f8cc00dc5f365f70b341d41640ee20bdce",
+      "command": [
+        "/private/tmp/kosmickrisp-study/hello-build-m3/src/tests/hello_xr/hello_xr",
+        "-g",
+        "Vulkan2",
+        "-bm",
+        "Opaque",
+        "-v"
+      ],
+      "runtime_manifest": "/Users/nickkennedy/.local/monado-psvr2/share/openxr/1/openxr_monado.json",
+      "client_compositor": "0",
+      "vulkan_sharing_options": "unset (defaults)",
+      "readbacks": false,
+      "start": "2026-10-15T08:19:02+0100",
+      "user_visual_result": "pending",
+      "pid": 93758,
+      "exit_code": 0,
+      "finish": "2026-10-15T08:19:47+0100",
+      "logs": {
+        "launchd-during.txt": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/hello-service/launchd-during.txt",
+          "sha256": "7b254cca71983495638a432ade8715b0a167f272121af1ccaa4a27bcdd05ebd3"
+        },
+        "client.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/hello-service/client.log",
+          "sha256": "e7554fc97e729f6ca90d089d2e53bb117e567110e06472740ec4772213203c45"
+        },
+        "monado-service.err.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/hello-service/monado-service.err.log",
+          "sha256": "8265aa611cb3fa79daf08d9b22953a8929d3e65a564949cc34543fca3cb8fde2"
+        },
+        "monado-service.out.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/hello-service/monado-service.out.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "case": "array-service",
+      "source_commit": "cd9294f8cc00dc5f365f70b341d41640ee20bdce",
+      "command": [
+        "/Users/nickkennedy/Code/monado-2/build/arm64/tests/tests_macos_openxr_vulkan_probe"
+      ],
+      "runtime_manifest": "/Users/nickkennedy/.local/monado-psvr2/share/openxr/1/openxr_monado.json",
+      "client_compositor": "0",
+      "vulkan_sharing_options": "unset (defaults)",
+      "readbacks": false,
+      "start": "2026-10-15T08:20:19+0100",
+      "user_visual_result": "pending",
+      "pid": 94272,
+      "exit_code": 0,
+      "finish": "2026-10-15T08:21:00+0100",
+      "logs": {
+        "launchd-during.txt": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/array-service/launchd-during.txt",
+          "sha256": "c7313fedf856a02bc197d1f2195d717d1940f5c748b01877d9c38bb5dee67343"
+        },
+        "client.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/array-service/client.log",
+          "sha256": "90f61952eb2ee823e804e6d6e8234031ebb77368c66f6e0cf369d3e936e65a18"
+        },
+        "monado-service.err.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/array-service/monado-service.err.log",
+          "sha256": "eaeda109376ac59d6f513639e842929839207d0c643c97c86362e9be79dc5821"
+        },
+        "monado-service.out.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/array-service/monado-service.out.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "case": "hello-hosted",
+      "source_commit": "cd9294f8cc00dc5f365f70b341d41640ee20bdce",
+      "command": [
+        "/private/tmp/kosmickrisp-study/hello-build-m3/src/tests/hello_xr/hello_xr",
+        "-g",
+        "Vulkan2",
+        "-bm",
+        "Opaque",
+        "-v"
+      ],
+      "runtime_manifest": "/Users/nickkennedy/.local/monado-psvr2/share/openxr/1/openxr_monado.json",
+      "client_compositor": "1",
+      "vulkan_sharing_options": "unset (defaults)",
+      "readbacks": false,
+      "start": "2026-10-15T08:21:25+0100",
+      "user_visual_result": "pending",
+      "pid": 94708,
+      "exit_code": 0,
+      "finish": "2026-10-15T08:22:10+0100",
+      "logs": {
+        "launchd-during.txt": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/hello-hosted/launchd-during.txt",
+          "sha256": "07d211325abdfc7fc0e1d0083c39ace5c505b730bdaf8e7683cf341d6e278861"
+        },
+        "client.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/hello-hosted/client.log",
+          "sha256": "84ead78e1fe633b7ab5a986f2ec5e54893848d66dbd4498283178655dade4a59"
+        },
+        "monado-service.err.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/hello-hosted/monado-service.err.log",
+          "sha256": "efbcc39f510e011764aad132f7fb8518050d2e41569f88d7d7dc36a188778eb9"
+        },
+        "monado-service.out.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/hello-hosted/monado-service.out.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    },
+    {
+      "case": "array-hosted",
+      "source_commit": "cd9294f8cc00dc5f365f70b341d41640ee20bdce",
+      "command": [
+        "/Users/nickkennedy/Code/monado-2/build/arm64/tests/tests_macos_openxr_vulkan_probe"
+      ],
+      "runtime_manifest": "/Users/nickkennedy/.local/monado-psvr2/share/openxr/1/openxr_monado.json",
+      "client_compositor": "1",
+      "vulkan_sharing_options": "unset (defaults)",
+      "readbacks": false,
+      "start": "2026-10-15T08:22:23+0100",
+      "user_visual_result": "pending",
+      "pid": 95088,
+      "exit_code": 0,
+      "finish": "2026-10-15T08:23:05+0100",
+      "logs": {
+        "launchd-during.txt": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/array-hosted/launchd-during.txt",
+          "sha256": "c991ac1d9e86ac7485ddf5eff340900a539532d2c0d61de5367b342ddb7d249e"
+        },
+        "client.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/array-hosted/client.log",
+          "sha256": "18988fffc7d057a28fd6911c7eff5023cc2df5be81f71b5b1d41ecb1cb35368e"
+        },
+        "monado-service.err.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/array-hosted/monado-service.err.log",
+          "sha256": "4454270618e9ff4adad2182c57cae47d77e0c0dcff3d92a99191ad57c3328de8"
+        },
+        "monado-service.out.log": {
+          "path": "/Users/nickkennedy/Code/monado-2/build/arm64/headset-gate-20261015/array-hosted/monado-service.out.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    }
+  ]
+}

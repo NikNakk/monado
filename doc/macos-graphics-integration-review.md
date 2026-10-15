@@ -148,6 +148,13 @@ comparison remain separate follow-ups, with DXMT retained.
 
 ## Installed-build headset gate before publication
 
+2026-10-15 update: the matching polling-fix build is installed at
+`v25.1.0-2314-gcd9294f8c`. All four runs exit cleanly; the user reports arrays
+look fine but `hello_xr` head tracking seems off. **Acceptance remains pending**
+while that symptom is investigated; see the
+[run record](macos-vulkan-acquire-loss-status.md#installed-headset-checks--2026-10-15).
+The text below records the preceding installation checkpoint.
+
 **Pending: do not push the default-on Vulkan integration before this check.**
 The user confirmed the original implementation (`f1841a3bc` with probe fix
 `d419f8527`). That hardware checkpoint precedes `041546532`, which changes
