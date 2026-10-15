@@ -1,0 +1,26 @@
+{
+  "source_commit": "cd9294f8cc00dc5f365f70b341d41640ee20bdce",
+  "backup": "/Users/nickkennedy/Code/monado-2/build/arm64/local-install-backups/20261015-081749-polling-headset",
+  "binaries": {
+    "service": {
+      "path": "/Users/nickkennedy/.local/monado-psvr2/bin/monado-service",
+      "tag": "v25.1.0-2314-gcd9294f8c",
+      "sha256": "45064e66936a00f451b43cc342c893934172402ec72d8ea2c3f361c7a4e849e5"
+    },
+    "native_runtime": {
+      "path": "/Users/nickkennedy/.local/monado-psvr2/lib/libopenxr_monado.dylib",
+      "tag": "v25.1.0-2314-gcd9294f8c",
+      "sha256": "2c1a5d99bce07394667454685bc6a2141a5b835b8d5c54db1f97e5c437800dd7"
+    },
+    "wine_runtime": {
+      "path": "/Users/nickkennedy/Code/monado-2/build/x86_64/src/xrt/targets/openxr/libopenxr_monado.dylib",
+      "tag": "v25.1.0-2314-gcd9294f8c",
+      "sha256": "229864e4c4700a7f451e51ec37f0768546b713e674210f466bbb864497244319"
+    },
+    "wine_libmonado": {
+      "path": "/Users/nickkennedy/Code/monado-2/build/x86_64/src/xrt/targets/libmonado/libmonado.25.1.0.dylib",
+      "tag": "v25.1.0-2314-gcd9294f8c",
+      "sha256": "316e2d1408826d3aafb2c7c72d45eac1a9c3e9b8bcb058a8a69bf5dcca74bef9"
+    }
+  }
+}
