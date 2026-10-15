@@ -40,3 +40,9 @@ bool
 comp_macos_frontend_detect(void);
 CGDirectDisplayID
 comp_macos_frontend_display_id(NSScreen *screen);
+
+//! Capture at submission; acknowledge only when that submission was presented.
+uint64_t
+comp_macos_frontend_present_ticket(struct comp_macos_frontend *frontend);
+void
+comp_macos_frontend_note_presented(struct comp_macos_frontend *frontend, uint64_t ticket);
