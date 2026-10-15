@@ -379,9 +379,9 @@ destroy(struct comp_target *ct)
 	free(w);
 }
 
-// The generic helper has already delivered these normalized timestamps to its pacer.
+// Called for each feedback entry before the generic helper delivers it to the pacer.
 static void
-trace_feedback(struct comp_target_swapchain *cts, const VkPastPresentationTimingGOOGLE *t)
+trace_feedback(struct comp_target_swapchain *cts, VkPastPresentationTimingGOOGLE *t)
 {
 	struct comp_window_macos_wsi *w = (struct comp_window_macos_wsi *)cts;
 	{
