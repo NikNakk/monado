@@ -168,6 +168,7 @@ struct comp_window_macos
 {
 	struct comp_target_swapchain base;
 	uint64_t gpu_trace_id;
+	FILE *trace_gpu;
 	struct comp_macos_frontend *frontend;
 	struct u_macos_hosted_client *hosted_client;
 	//! Borrowed from the frontend.
@@ -2835,6 +2836,10 @@ comp_window_macos_destroy(struct comp_target *ct)
 	}
 	macos_drain_present_worker(cwm);
 	macos_release_prefetched_drawable(cwm, "destroy_release");
+	if (cwm->trace_gpu != NULL) {
+		macos_trace_buffered_fflush(cwm->trace_gpu);
+		fclose(cwm->trace_gpu);
+	}
 	macos_timing_trace_close(cwm);
 	comp_window_macos_free_images(cwm);
 	if (cwm->render_complete_event != nil) {
@@ -2904,6 +2909,17 @@ comp_window_macos_prepare_destroy(struct comp_target *ct)
 	return !atomic_load_explicit(&cwm->present_completion_failed, memory_order_acquire);
 }
 
+static void
+macos_trace_info_gpu(struct comp_target *ct, int64_t frame_id, int64_t start_ns, int64_t end_ns, int64_t when_ns)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	comp_window_macos_info_gpu(ct, frame_id, start_ns, end_ns, when_ns);
+	if (cwm->trace_gpu != NULL) {
+		fprintf(cwm->trace_gpu, "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n", frame_id, start_ns, end_ns,
+		        when_ns);
+	}
+}
+
 static struct comp_target *
 comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_client *client)
 {
@@ -2965,7 +2981,8 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 		u_gpu_trace_present_init(&cwm->presented_state->presentation_trace, cwm->gpu_trace_id);
 	}
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
-	cwm->base.base.info_gpu = comp_window_macos_info_gpu;
+	cwm->base.base.info_gpu = macos_trace_info_gpu;
+	cwm->trace_gpu = macos_timing_trace_open_file("compositor_gpu", "frame_id,start_ns,end_ns,when_ns");
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
 		cwm->io_surfaces[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 	}
