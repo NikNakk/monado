@@ -2635,7 +2635,7 @@ comp_window_macos_update_timings(struct comp_target *ct)
 	// frame IDs and feedback remain valid. The presentation worker reads this atomically.
 	if (observed_period_ns > 0 && llabs(observed_period_ns - cwm->display_period_ns) > 100 &&
 	    cwm->base.upc != NULL) {
-		u_pc_fake_set_frame_period(cwm->base.upc, observed_period_ns);
+		(void)u_pc_update_frame_period(cwm->base.upc, observed_period_ns);
 		cwm->display_period_ns = observed_period_ns;
 		ct->c->frame_interval_ns = observed_period_ns;
 		COMP_INFO(ct->c, "CADisplayLink measured display period %.6fms (%.3f Hz)",
@@ -3325,9 +3325,9 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 		cwm->display_period_ns = (int64_t)llround((double)U_TIME_1S_IN_NS / (double)selected_hz);
 	}
 	ct->c->frame_interval_ns = cwm->display_period_ns;
+	// Update the pacer in place, so outstanding frame IDs and present-offset feedback stay valid.
 	if (cwm->base.upc != NULL) {
-		u_pc_destroy(&cwm->base.upc);
-		u_pc_fake_create(cwm->display_period_ns, os_monotonic_get_ns(), &cwm->base.upc);
+		(void)u_pc_update_frame_period(cwm->base.upc, cwm->display_period_ns);
 	}
 	[CATransaction flush];
 	macos_schedule_drawable_slot(cwm);

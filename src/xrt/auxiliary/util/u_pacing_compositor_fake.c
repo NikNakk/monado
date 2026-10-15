@@ -449,10 +449,10 @@ pc_destroy(struct u_pacing_compositor *upc)
 	free(ft);
 }
 
-void
-u_pc_fake_set_frame_period(struct u_pacing_compositor *upc, int64_t frame_period_ns)
+static void
+pc_update_frame_period(struct u_pacing_compositor *upc, int64_t frame_period_ns)
 {
-	assert(upc != NULL && upc->predict == pc_predict);
+	// Keep the compositor time budget: it tracks measured work, not the period.
 	assert(frame_period_ns > 0);
 	fake_timing(upc)->frame_period_ns = frame_period_ns;
 }
@@ -474,6 +474,7 @@ u_pc_fake_create(int64_t estimated_frame_period_ns, int64_t now_ns, struct u_pac
 	ft->base.info_gpu = pc_info_gpu;
 	ft->base.update_vblank_from_display_control = pc_update_vblank_from_display_control;
 	ft->base.update_present_offset = pc_update_present_offset;
+	ft->base.update_frame_period = pc_update_frame_period;
 	ft->base.destroy = pc_destroy;
 	ft->frame_period_ns = estimated_frame_period_ns;
 
