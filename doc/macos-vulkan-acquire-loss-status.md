@@ -155,3 +155,22 @@ run the user found problematic, warranting tracking-state investigation before
 attributing the effect to Vulkan synchronization. No tracking fix or visual
 acceptance is claimed. The [analysis record](macos-graphics-integration-results/headset-tracking-20261015.json)
 retains trace paths, hashes, method and largest steps.
+
+### Stationary hosted repeat follow-up
+
+The user deferred visual inspection and reported that the headset was still
+that time (interpreted as the latest hosted repeat). Its raw SLAM position
+changes have a median 0.0992 mm per sample, but the axis ranges over the ~50 s
+trace are 14.4 / 15.175 / 33.2 mm. Crucially, raw SLAM orientation steps by
+33.856 degrees over 33.368 ms, 18.100 s after the first trace sample. The
+corrected orientation has the same step; driver relation flags are 63 before
+and after. The angular comparison normalizes quaternions and uses the absolute
+dot product, so this is not a quaternion sign-flip artifact. Most adjacent
+orientation changes are small (median 0.0065 degrees).
+
+The trace therefore reflects a mostly stationary headset with drift and an
+abrupt orientation discontinuity, not a stable stationary pose throughout.
+This upstream-of-rendering observation is not a diagnosis of firmware versus
+packet decoding or tracking-state behavior, and the final rendered orientation
+also involves IMU prediction/timewarp. Visual hosted acceptance remains deferred.
+The tracking evidence JSON includes the exact sample timing and calculation.
