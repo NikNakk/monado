@@ -14,6 +14,7 @@
 
 #include "main/comp_window.h"
 #include "main/comp_macos_frontend.h"
+#include "main/comp_macos_display.h"
 #include "main/comp_window_macos_trace_buffer.h"
 #include "main/comp_window_macos_latency_guard.h"
 #include "main/comp_window_macos_passthrough_shader.h"
@@ -3105,127 +3106,11 @@ macos_log_refresh_mode_candidates(struct comp_target *ct)
 	CGDisplayModeRelease(current_mode);
 }
 
-static uint32_t
-macos_collect_refresh_rates(struct comp_window_macos *cwm, float *out_rates)
-{
-	CGDirectDisplayID display_id = cwm->display_id;
-	if (display_id == kCGNullDirectDisplay) {
-		return 0;
-	}
-	CGDisplayModeRef current_mode = CGDisplayCopyDisplayMode(display_id);
-	if (current_mode == NULL) {
-		return 0;
-	}
-	size_t width = CGDisplayModeGetWidth(current_mode);
-	size_t height = CGDisplayModeGetHeight(current_mode);
-	size_t pixel_width = CGDisplayModeGetPixelWidth(current_mode);
-	size_t pixel_height = CGDisplayModeGetPixelHeight(current_mode);
-	CGDisplayModeRelease(current_mode);
-
-	CFArrayRef modes = CGDisplayCopyAllDisplayModes(display_id, NULL);
-	if (modes == NULL) {
-		return 0;
-	}
-	uint32_t count = 0;
-	for (CFIndex i = 0; i < CFArrayGetCount(modes); i++) {
-		CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-		if (mode == NULL || CGDisplayModeGetWidth(mode) != width || CGDisplayModeGetHeight(mode) != height ||
-		    CGDisplayModeGetPixelWidth(mode) != pixel_width ||
-		    CGDisplayModeGetPixelHeight(mode) != pixel_height) {
-			continue;
-		}
-		double refresh_hz = CGDisplayModeGetRefreshRate(mode);
-		if (!(refresh_hz > 1.0)) {
-			continue;
-		}
-		bool duplicate = false;
-		for (uint32_t j = 0; j < count; j++) {
-			if (fabs((double)out_rates[j] - refresh_hz) < 0.05) {
-				duplicate = true;
-				break;
-			}
-		}
-		if (!duplicate && count < XRT_MAX_SUPPORTED_REFRESH_RATES) {
-			out_rates[count++] = (float)refresh_hz;
-		}
-	}
-	CFRelease(modes);
-	for (uint32_t i = 1; i < count; i++) {
-		float value = out_rates[i];
-		uint32_t j = i;
-		while (j > 0 && out_rates[j - 1] > value) {
-			out_rates[j] = out_rates[j - 1];
-			j--;
-		}
-		out_rates[j] = value;
-	}
-	return count;
-}
-
-static CGDisplayModeRef
-macos_copy_refresh_mode(struct comp_window_macos *cwm, float requested_hz, float *out_selected_hz)
-{
-	CGDirectDisplayID display_id = cwm->display_id;
-	CGDisplayModeRef current_mode =
-	    display_id != kCGNullDirectDisplay ? CGDisplayCopyDisplayMode(display_id) : NULL;
-	if (current_mode == NULL) {
-		return NULL;
-	}
-	size_t width = CGDisplayModeGetWidth(current_mode);
-	size_t height = CGDisplayModeGetHeight(current_mode);
-	size_t pixel_width = CGDisplayModeGetPixelWidth(current_mode);
-	size_t pixel_height = CGDisplayModeGetPixelHeight(current_mode);
-	CGDisplayModeRelease(current_mode);
-
-	CFArrayRef modes = CGDisplayCopyAllDisplayModes(display_id, NULL);
-	if (modes == NULL) {
-		return NULL;
-	}
-	CGDisplayModeRef selected = NULL;
-	double selected_hz = 0.0;
-	double best_error = HUGE_VAL;
-	for (CFIndex i = 0; i < CFArrayGetCount(modes); i++) {
-		CGDisplayModeRef mode = (CGDisplayModeRef)CFArrayGetValueAtIndex(modes, i);
-		if (mode == NULL || CGDisplayModeGetWidth(mode) != width || CGDisplayModeGetHeight(mode) != height ||
-		    CGDisplayModeGetPixelWidth(mode) != pixel_width ||
-		    CGDisplayModeGetPixelHeight(mode) != pixel_height) {
-			continue;
-		}
-		double refresh_hz = CGDisplayModeGetRefreshRate(mode);
-		if (!(refresh_hz > 1.0)) {
-			continue;
-		}
-		if (requested_hz <= 0.0f) {
-			if (refresh_hz > selected_hz) {
-				selected = mode;
-				selected_hz = refresh_hz;
-			}
-		} else {
-			double error = fabs(refresh_hz - (double)requested_hz);
-			if (error < best_error) {
-				best_error = error;
-				selected = mode;
-				selected_hz = refresh_hz;
-			}
-		}
-	}
-	if (selected != NULL && (requested_hz <= 0.0f || best_error < 0.5)) {
-		CGDisplayModeRetain(selected);
-	} else {
-		selected = NULL;
-	}
-	CFRelease(modes);
-	if (out_selected_hz != NULL) {
-		*out_selected_hz = (float)selected_hz;
-	}
-	return selected;
-}
-
 static xrt_result_t
 comp_window_macos_get_refresh_rates_physical(struct comp_target *ct, uint32_t *out_count, float *out_rates)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
-	uint32_t count = macos_collect_refresh_rates(cwm, out_rates);
+	uint32_t count = comp_macos_display_rates(cwm->display_id, XRT_MAX_SUPPORTED_REFRESH_RATES, out_rates);
 	if (count == 0) {
 		return comp_window_macos_get_refresh_rates(ct, out_count, out_rates);
 	}
@@ -3288,7 +3173,7 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 	}
 
 	float selected_hz = 0.0f;
-	CGDisplayModeRef selected_mode = macos_copy_refresh_mode(cwm, requested_hz, &selected_hz);
+	CGDisplayModeRef selected_mode = comp_macos_display_copy_mode(cwm->display_id, requested_hz, &selected_hz);
 	if (selected_mode == NULL) {
 		COMP_WARN(ct->c, "PS VR2 refresh request %.3f Hz does not match an available same-geometry mode",
 		          requested_hz);
@@ -3308,11 +3193,12 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 	bool display_link_was_running = macos_display_link_is_running(cwm);
 	macos_display_link_stop(cwm);
 
-	CGError cgret = CGDisplaySetDisplayMode(display_id, selected_mode, NULL);
+	// Wait for the mode to settle: CoreGraphics briefly reports transient modes.
+	bool mode_set = comp_macos_display_set_mode(display_id, selected_mode);
 	CGDisplayModeRelease(selected_mode);
-	if (cgret != kCGErrorSuccess) {
-		COMP_ERROR(ct->c, "Failed to switch PS VR2 physical refresh from %.3f to %.3f Hz (CGError %d)",
-		           current_hz, selected_hz, (int)cgret);
+	if (!mode_set) {
+		COMP_ERROR(ct->c, "Failed to switch PS VR2 physical refresh from %.3f to %.3f Hz", current_hz,
+		           selected_hz);
 		(void)macos_recreate_display_link(cwm, display_id, display_link_was_running);
 		return XRT_ERROR_OUTPUT_REQUEST_FAILURE;
 	}

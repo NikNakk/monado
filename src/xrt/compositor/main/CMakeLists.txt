@@ -61,6 +61,8 @@ if(APPLE)
 		comp_main
 		PRIVATE
 			comp_window_macos.m
+			comp_macos_display.m
+			comp_macos_display.h
 			comp_macos_frontend.m
 			comp_macos_frontend.h
 			comp_window_macos_hosted.h
