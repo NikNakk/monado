@@ -10,9 +10,10 @@ The opt-in generic Vulkan WSI target and its experiment are committed on
 `claude/macos-wsi-integration` (worktree `build/review/wsi-integration`), with
 display refresh requests now applied between frames by the main compositor for
 every target and pacers changing period in place. Native stays the default.
-The experiment's [hardware reruns](macos-wsi-headset-fixes.md) passed native and
-all WSI refresh cycles and the passthrough pixel checks, but on the experiment
-sources: repeat them on the branch before merging. Visual acceptance,
+The functional headset checks pass on the branch itself (refresh cycles for
+native and all WSI modes, hosted WSI, passthrough pixel checks and native
+shutdown; see [the branch validation](macos-wsi-migration.md#headset-validation-of-the-branch-16-october-2026)).
+Visual acceptance,
 calibration/rotation parity for WSI passthrough and automatic recovery remain
 pending. See [the integration notes](macos-wsi-migration.md#integrated-branch-15-october-2026).
 
