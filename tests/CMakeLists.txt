@@ -6,6 +6,7 @@
 set(tests
     tests_comp_refresh_request
     tests_cxx_wrappers
+    tests_macos_display_timing
     tests_deque
     tests_floor_calibration
     tests_generic_callbacks

@@ -128,6 +128,7 @@ macos_presented_state_release(struct macos_presented_state *state)
 	free(state);
 }
 
+DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_generic, "XRT_MACOS_WSI_GENERIC", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
@@ -2996,7 +2997,7 @@ detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
 	(void)ctf;
 	(void)c;
 	@autoreleasepool {
-		return comp_macos_frontend_detect();
+		return !debug_get_bool_option_macos_wsi_generic() && comp_macos_frontend_detect();
 	}
 }
 
@@ -3296,6 +3297,9 @@ static bool
 create_hosted_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
 {
 	const struct comp_macos_hosted_target_factory *factory = (const struct comp_macos_hosted_target_factory *)ctf;
+	if (debug_get_bool_option_macos_wsi_generic()) {
+		return comp_window_macos_wsi_create_hosted(c, factory->client, out_ct);
+	}
 	*out_ct = comp_window_macos_create_with_client(c, factory->client);
 	return *out_ct != NULL;
 }
@@ -3333,7 +3337,8 @@ comp_window_macos_hosted_factory_create(struct u_macos_hosted_client *client)
 	if (factory == NULL) {
 		return NULL;
 	}
-	factory->base = comp_target_factory_macos;
+	factory->base = debug_get_bool_option_macos_wsi_generic() ? comp_target_factory_macos_wsi_generic
+	                                                          : comp_target_factory_macos;
 	factory->base.name = "macOS Hosted Metal Layer";
 	factory->base.identifier = "macos-hosted";
 	factory->base.disable_peek = true;
