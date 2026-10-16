@@ -44,6 +44,8 @@ def main():
     parser.add_argument('--loads', nargs='+', choices=['baseline', 'light', 'cpu', 'gpu4', 'gpu16'], default=['baseline'])
     parser.add_argument('--generic-max-comp-percent', type=int, default=30)
     parser.add_argument('--generic-fake-pacing', action='store_true')
+    parser.add_argument('--service-env', action='append', default=[], metavar='KEY=VALUE',
+                        help='Extra service environment variable, for example MoltenVK settings; repeatable')
     parser.add_argument('--generic-latch-us', type=int, default=0, help='Latch allowance for wsi-generic-adaptive')
     parser.add_argument('--hosted', action='store_true')
     parser.add_argument('--verify-passthrough', action='store_true')
@@ -142,6 +144,11 @@ def main():
                             'IPC_EXIT_WHEN_IDLE': '0', 'IPC_EXIT_ON_DISCONNECT': '0',
                             'XR_RUNTIME_JSON': str(build / 'openxr_monado-dev.json'),
                         }
+                        for item in args.service_env:
+                            key, sep, value = item.partition('=')
+                            if not sep or not key:
+                                raise RuntimeError(f'--service-env needs KEY=VALUE, not {item!r}')
+                            env[key] = value
                         if args.refresh_cycle:
                             env['PSVR2_TEST_REFRESH_CYCLE'] = '1'
                         if args.passthrough and not args.passthrough_without_bridge:
