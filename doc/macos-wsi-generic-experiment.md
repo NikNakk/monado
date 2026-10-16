@@ -426,14 +426,50 @@ in how MoltenVK presents, not the layer configuration.
 
 The WSI latency and cadence figures above come from MoltenVK's presentation
 times, which already include WindowServer's composition, so the comparisons
-stand as measured. Composition does cost WindowServer GPU work, may contribute
-to the misses with an on-time wake, GPU and present call, and leaves WSI
-exposed to the built-in display's composition cycle. A WSI presenter proposed
-upstream should go direct to display; finding why MoltenVK's presents are not
-(candidates include `MVK_CONFIG_PRESENT_WITH_COMMAND_BUFFER` and timed
-presentation) is the next step.
+stand as measured.
+
+**Cause: the compute compositor.** Further traced 120 Hz sessions of stock WSI:
+
+| Variant | Layer | Direct to display |
+| --- | --- | --- |
+| As configured | opaque, no EDR, 1:1 scale, bounds = drawable | 0 of 713 |
+| `MVK_CONFIG_PRESENT_WITH_COMMAND_BUFFER=0` | same | 0 of 705 |
+| No requested present time (fake pacer) | same | 0 of 932 |
+| Graphics compositor, `XRT_COMPOSITOR_COMPUTE=0` | `framebufferOnly` 1, format 81 (BGRA8 sRGB) | **711 of 711** |
+
+The compute compositor, the default everywhere but Android, writes into the
+swapchain image as a storage image. MoltenVK must then allow shader writes to
+the drawable (`framebufferOnly` 0) and use a unorm format, because storage
+images cannot be sRGB, and WindowServer composites such drawables. The native
+target is unaffected because it renders into its own images and copies into the
+drawable. Neither MoltenVK's presentation path nor timed presentation matters.
+
+Adaptive WSI at latch -1000 us, two repeats per cell, graphics batch then
+compute batch (sequential, not interleaved), all 16 sessions rendered:
+
+| Hz / load | Compositor | Presents/s | Client frames/s | Wake to present p50 / p99 (ms) | Real misses |
+| --- | --- | --- | --- | --- | --- |
+| 90 / light | graphics (direct) | 88.3-89.9 | 67.5-69.5 | 16.5-16.7 / 17.4-27.6 | 0-4.9% |
+| 90 / light | compute (composited) | 89.9 | 67.7-69.0 | 19.2-19.3 / 20.0-20.1 | 0% |
+| 90 / gpu16 | graphics (direct) | 89.4-89.9 | 65.4-65.6 | 15.5-15.7 / 16.3-26.9 | 0-1.3% |
+| 90 / gpu16 | compute (composited) | 89.7-89.9 | 66.8-67.7 | 16.3-16.4 / 18.0-20.9 | 0-0.3% |
+| 120 / light | graphics (direct) | 119.7-119.9 | 92.3-92.8 | 13.7 / 14.4-14.5 | 0-0.3% |
+| 120 / light | compute (composited) | 119.6-119.9 | 87.4 | 15.3-15.6 / 17.7-23.7 | 0-0.7% |
+| 120 / gpu16 | graphics (direct) | 119.3-119.9 | 72.2-72.3 | 12.6-15.0 / 15.8-20.4 | 0-1.3% |
+| 120 / gpu16 | compute (composited) | 117.9-119.7 | 65.9-66.7 | 12.9-15.7 / 16.7-23.9 | 0.2-4.3% |
+
+Going direct lowers median wake to present by about 1-3 ms in most cells and
+helps cadence and client frames at 120 Hz. It does not remove the
+one-refresh CoreAnimation delay (the delay estimate is unchanged, about 11.9 ms
+at 90 Hz and 9 ms at 120 Hz). Miss rates vary more between batches than
+between compositors (this compute batch missed less than the same setting in
+the sweep), so no miss-rate difference is established.
+
+Next: make the WSI target go direct by default, either by selecting the graphics
+compositor when the WSI target is chosen or by rendering through an intermediate
+image as the native target does, then repeat the interleaved comparison.
 
 Evidence: `build/review/wsi-integration-hw-20261016/direct-display/`
 (`presenters.trace`, `runs/`, and `direct_display.py`, which reports
 direct-to-display frames per session from the `displayed-surfaces-interval`
-export).
+export), `direct-display-2/` (the variant traces) and `direct-compare/`.
