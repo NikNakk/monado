@@ -526,6 +526,23 @@ earlier attempt lost head tracking part-way and is kept as
   delivers the most at 90 Hz heavy load (74/s).
 - Calibrated CV WSI now matches native closely on cadence and latency.
 
+**Worn visual comparison (16 October 2026).** The user wore the headset for
+60 s each of native, adaptive WSI (latch -1000 us) and calibrated CV WSI at
+90 Hz with the full diagnostic scene (`--loads baseline`) and saw little to tell
+them apart: no correctness or smoothness issue in any. Traces from the same
+sessions (`build/review/wsi-visual-1655/`):
+
+| Presenter | Presents/s | Client frames/s | Wake to present p50 / p99 (ms) | Real misses |
+| --- | --- | --- | --- | --- |
+| Native | 89.6 | 67.5 | 25.2 / 25.3 | - |
+| Adaptive WSI | 89.7 | 68.7 | 17.9 / 20.2 | 0.5% |
+| Calibrated CV WSI | 89.9 | 66.3 | 25.2 / 25.2 | - |
+
+Worn, with real head motion and the full scene, adaptive WSI missed only 0.5%
+of frames, against 3.7-9.4% in the static desk runs, so those miss rates may
+partly reflect the stationary headset and light scene. Its roughly 7 ms lower
+median latency was not perceptible in this test.
+
 **Recording note.** Each `xctrace` recording leaves 4-11 GB of raw
 `instruments*.ktrace` staging data in `$TMPDIR`, even after saving. Three
 recordings and a fourth long one filled the disk on this machine, and the fourth
