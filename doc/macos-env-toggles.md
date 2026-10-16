@@ -27,8 +27,11 @@ limit, and `XRT_MACOS_GPU_ATTRIBUTION` diagnostic are removed. Old flags and
 commands in historical capture reports do not select executable experiment modes.
 With the WSI target, the compositor now defaults to the graphics path, which goes
 direct to display; `XRT_COMPOSITOR_COMPUTE=1` restores the compute path, which
-WindowServer composites. `XRT_MACOS_GPU_QUEUE_PRIORITY` now applies to it too. Native presentation
-defaults are unchanged; WSI passthrough still lacks native
+WindowServer composites. `XRT_MACOS_GPU_QUEUE_PRIORITY` now applies to it too.
+WSI passthrough defaults to compute. With an explicit `XRT_COMPOSITOR_COMPUTE=0`,
+the graphics target remains usable but passthrough creation returns unsupported:
+the graphics path's opaque alpha would hide the camera.
+Native presentation defaults are unchanged; WSI passthrough still lacks native
 calibration/rotation parity, and sleep/disconnect recovery requires restart.
 
 ## Historical audit

@@ -304,15 +304,8 @@ compositor_apply_refresh_rate_locked(void *ptr, float display_refresh_rate_hz)
 		return XRT_SUCCESS;
 	}
 
-	int64_t frame_interval_ns = c->frame_interval_ns;
-	xrt_result_t result = comp_target_request_refresh_rate(c->target, display_refresh_rate_hz);
-
-	// Keep a period the target measured itself, otherwise assume the change is immediate.
-	if (result == XRT_SUCCESS && c->frame_interval_ns == frame_interval_ns) {
-		c->frame_interval_ns = U_TIME_1S_IN_NS / display_refresh_rate_hz;
-	}
-
-	return result;
+	// The target owns its measured period, including on a successful same-rate request.
+	return comp_target_request_refresh_rate(c->target, display_refresh_rate_hz);
 }
 
 static xrt_result_t
