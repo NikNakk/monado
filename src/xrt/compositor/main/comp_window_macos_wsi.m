@@ -509,6 +509,14 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 	if (color != NULL) {
 		CFRelease(color);
 	}
+	// Properties that decide whether WindowServer can scan the layer out directly.
+	COMP_INFO(ct->c,
+	          "EXPERIMENT direct-display layer: opaque=%d edr=%d contentsScale=%.2f gravity=%s bounds=%.0fx%.0f "
+	          "drawable=%.0fx%.0f hidden=%d opacity=%.2f sublayers=%lu superlayer=%d",
+	          layer.opaque, layer.wantsExtendedDynamicRangeContent, layer.contentsScale,
+	          [layer.contentsGravity UTF8String], layer.bounds.size.width, layer.bounds.size.height,
+	          layer.drawableSize.width, layer.drawableSize.height, layer.hidden, layer.opacity,
+	          (unsigned long)layer.sublayers.count, layer.superlayer != nil);
 }
 
 static VkResult
