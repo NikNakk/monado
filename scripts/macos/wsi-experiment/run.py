@@ -15,6 +15,16 @@ import tempfile
 import time
 
 
+def wait_unloaded(domain, label, timeout=15):
+    """launchctl bootout returns before launchd has removed the job; wait for it."""
+    deadline = time.monotonic() + timeout
+    while subprocess.run(['launchctl', 'print', f'{domain}/{label}'], capture_output=True).returncode == 0:
+        if time.monotonic() > deadline:
+            return False
+        time.sleep(0.25)
+    return True
+
+
 def stamp():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -62,7 +72,7 @@ def main():
     was_loaded = old.returncode == 0
     if was_loaded and re.search(r'^\s*pid = \d+', old.stdout, re.MULTILINE):
         raise RuntimeError('Existing Monado service is running; stop its applications before this experiment')
-    if subprocess.run(['launchctl', 'print', f'{domain}/{label}'], capture_output=True).returncode == 0:
+    if not wait_unloaded(domain, label):
         raise RuntimeError('An experiment job is already loaded')
     initial_mode = subprocess.check_output([str(helper)], text=True).strip()
     manifest = {'start_utc': stamp(), 'initial_mode': initial_mode, 'old_job_was_loaded': was_loaded,
@@ -191,6 +201,8 @@ def main():
                         run['measured_display_mode'] = current
                         subprocess.run(['launchctl', 'bootout', f'{domain}/{label}'], check=True)
                         registered = False
+                        if not wait_unloaded(domain, label):
+                            raise RuntimeError('Experiment job did not unload')
                         time.sleep(2)
                         run['end_utc'] = stamp()
                         manifest_path.write_text(json.dumps(manifest, indent=2) + '\n')
@@ -206,6 +218,7 @@ def main():
                 client.wait()
         if registered:
             subprocess.run(['launchctl', 'bootout', f'{domain}/{label}'], check=False)
+            wait_unloaded(domain, label)
             time.sleep(2)
         restored = subprocess.run([str(helper), '--restore', initial_mode.split()[0]])
         manifest['display_restore_exit_code'] = restored.returncode
