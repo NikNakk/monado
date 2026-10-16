@@ -960,6 +960,7 @@ struct application
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool test_generic_controller = false;
+	bool animate = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool standard_foveation = false;
@@ -2614,6 +2615,40 @@ append_controller_input_panels(application &app, const XrPosef &head_pose)
 	                           panel.world_instances.end());
 }
 
+/*
+ * --animate adds moving objects, positioned for each frame's
+ * predicted display time. Timewarp corrects head motion but not object motion,
+ * so these show repeated or late application frames as stalls and jumps.
+ */
+static void
+append_animated_objects(application &app, XrTime predicted_display_time)
+{
+	if (!app.animate || !app.scene.initialized) {
+		return;
+	}
+	const diagnostic_scene &scene = app.scene;
+	const double t_s = (double)predicted_display_time * 1e-9;
+
+	// Eight boxes orbiting at eye height, 1.6 m away, at one radian per second.
+	const double orbit = fmod(t_s, 2.0 * M_PI);
+	for (int i = 0; i < 8; i++) {
+		const float angle = (float)(orbit + i * M_PI / 4.0);
+		const simd_float3 position =
+		    scene.origin + 1.6f * (cosf(angle) * scene.forward + sinf(angle) * scene.right);
+		const simd_float4 color = make_float4(1.0f, 0.25f + 0.09f * i, 0.15f, 1.0f);
+		app.frame_instances.push_back(
+		    {basis_model(position, scene.right, scene.up, -scene.forward, make_float3(0.12f, 0.12f, 0.12f)),
+		     color});
+	}
+
+	// A white box swinging 0.6 m each side, 1.2 m ahead, every 1.5 s: up to 2.5 m/s.
+	const float swing = 0.6f * (float)sin(fmod(t_s, 1.5) * 2.0 * M_PI / 1.5);
+	const simd_float3 swing_position = scene.origin + 1.2f * scene.forward + swing * scene.right;
+	app.frame_instances.push_back(
+	    {basis_model(swing_position, scene.right, scene.up, -scene.forward, make_float3(0.08f, 0.08f, 0.08f)),
+	     make_float4(1.0f, 1.0f, 1.0f, 1.0f)});
+}
+
 static void
 render_views(application &app, XrTime predicted_display_time)
 {
@@ -2630,6 +2665,7 @@ render_views(application &app, XrTime predicted_display_time)
 		append_gaze_marker(app, predicted_display_time);
 		append_controller_markers(app, predicted_display_time);
 		append_controller_input_panels(app, head_pose);
+		append_animated_objects(app, predicted_display_time);
 	}
 	if (app.frame_instances.size() > app.renderer.max_instances) {
 		fatal("diagnostic scene exceeded Metal instance buffer capacity");
@@ -3194,6 +3230,7 @@ run(int argc, char **argv)
 	bool passthrough_only = false;
 	bool test_gaze = false;
 	bool test_generic_controller = false;
+	bool animate = false;
 	bool gaze_calibrate = false;
 	bool gaze_foveation = false;
 	bool standard_foveation = false;
@@ -3224,6 +3261,8 @@ run(int argc, char **argv)
 			passthrough_only = true;
 		} else if (strcmp(argv[i], "--generic-controller") == 0) {
 			test_generic_controller = true;
+		} else if (strcmp(argv[i], "--animate") == 0) {
+			animate = true;
 		} else if (strcmp(argv[i], "--gaze") == 0) {
 			test_gaze = true;
 		} else if (strcmp(argv[i], "--gaze-calibrate") == 0) {
@@ -3253,7 +3292,7 @@ run(int argc, char **argv)
 			    stderr,
 			    "Usage: %s [--loader /path/to/libopenxr_loader.1.dylib] [--blendmode Opaque|AlphaBlend] "
 			    "[--depth-layer] "
-			    "[--passthrough|--passthrough-only] [--generic-controller] "
+			    "[--passthrough|--passthrough-only] [--generic-controller] [--animate] "
 			    "[--gaze|--gaze-calibrate|--gaze-foveation] "
 			    "[--fb-foveation|--fb-eye-foveation] [--fb-foveation-sparse-check] "
 			    "[--foveation-profile reference|strong|aggressive|aggressive-plus|near-extreme|extreme]\n"
@@ -3266,6 +3305,8 @@ run(int argc, char **argv)
 			    "  --generic-controller validates XR_KHR_generic_controller on both hands and logs action "
 			    "state, draws controller poses and head-relative input panels (green pressed, red "
 			    "inactive).\n"
+			    "  --animate adds orbiting boxes and a swinging white box, positioned for each frame's "
+			    "predicted display time, to show repeated or mistimed frames.\n"
 			    "  --gaze enables XR_EXT_eye_gaze_interaction and draws a yellow gaze marker.\n"
 			    "  --gaze-calibrate runs a 9-point head-relative calibration and saves it for the driver.\n"
 			    "  --gaze-foveation renders through gaze-driven Metal VRR plus an application resolve "
@@ -3309,6 +3350,10 @@ run(int argc, char **argv)
 	}
 	app.test_gaze = test_gaze;
 	app.test_generic_controller = test_generic_controller;
+	app.animate = animate;
+	if (animate) {
+		fprintf(stderr, "psvr2-openxr-test: animated objects enabled\n");
+	}
 	app.gaze_calibrate = gaze_calibrate;
 	app.gaze_foveation = gaze_foveation;
 	app.standard_foveation = standard_foveation;
