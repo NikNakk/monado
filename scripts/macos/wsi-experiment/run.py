@@ -44,6 +44,8 @@ def main():
     parser.add_argument('--loads', nargs='+', choices=['baseline', 'light', 'cpu', 'gpu4', 'gpu16'], default=['baseline'])
     parser.add_argument('--generic-max-comp-percent', type=int, default=30)
     parser.add_argument('--generic-fake-pacing', action='store_true')
+    parser.add_argument('--app-arg', action='append', default=[], metavar='ARG',
+                        help='Extra psvr2-openxr-test argument, for example --animate; repeatable')
     parser.add_argument('--service-env', action='append', default=[], metavar='KEY=VALUE',
                         help='Extra service environment variable, for example MoltenVK settings; repeatable')
     parser.add_argument('--generic-latch-us', type=int, default=0, help='Latch allowance for wsi-generic-adaptive')
@@ -165,7 +167,7 @@ def main():
                             'StandardOutPath': str(directory / 'service.stdout.log'),
                             'StandardErrorPath': str(directory / 'service.stderr.log'),
                         }))
-                        app_command = [str(app)] + ([('--passthrough-only' if args.passthrough == 'only' else '--passthrough')] if args.passthrough else [])
+                        app_command = [str(app)] + ([('--passthrough-only' if args.passthrough == 'only' else '--passthrough')] if args.passthrough else []) + args.app_arg
                         trace_directory = directory / 'application-traces' if args.hosted else directory
                         if args.hosted:
                             trace_directory.mkdir()
