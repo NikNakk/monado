@@ -362,3 +362,44 @@ Evidence: `build/review/wsi-integration-hw-20261016/` in the Monado-2 checkout,
 `latch-lead/` (stock pacer, with `summary.txt`), `adaptive-compare/` (with
 `summary.md`), `gpu-clock-check/`, and the scripts `latch_lead.py`,
 `pacing_compare.py` and `time_domains.c`.
+
+### Latch allowance sweep (16 October 2026): incomplete
+
+The sweep ran the corrected adaptive mode at latch allowances of -1000, 0, 1000
+and 2000 us, 90 and 120 Hz, light and gpu16 load, two repeats each. It is not
+conclusive, because the headset stopped tracking part-way through.
+
+- **Lost tracking, not a Monado hang.** `psvr2-openxr-test` only renders and
+  submits a projection layer while `xrLocateViews` reports a valid position and
+  orientation. From one run late in the latch-0 batch onwards, and in every run
+  after it, including native and stock WSI control runs, the application never
+  rendered: zero frames carried a client layer. Earlier the same binaries
+  rendered normally. The most likely cause is the headset's inside-out tracking
+  becoming invalid after it sat idle for hours or the room lighting changed.
+  The service logs do not record tracking state, so this is inferred.
+- **Valid data, latch 0.** In the seven sessions with an application, 0-9.4% of
+  frames were real misses, a further refresh late, as in the earlier
+  comparison. Most misses were frames whose GPU work finished 2-3 ms after the
+  desired time; about a fifth had an on-time wake, GPU and present call yet
+  still missed, which points at WindowServer or CoreAnimation scheduling. The
+  compositor never woke late.
+- **Compositor-only indication, other latches.** Without an application, the
+  load is the compositor alone and gpu16 means nothing, so treat these only as a
+  direction: median wake to present fell as the allowance grew (90 Hz: about
+  16.2 ms at -1000, 14.3 ms at 1000, 12.6-13.3 ms at 2000) while misses rose
+  (-1000: 0-1.3%; 1000: 0.2-3.6%; 2000: 0.5-7.6%, and one 90 Hz session at 48%
+  that fell to 77 presents/s).
+- **Estimator fix.** One session locked its delay estimate at 0.38 ms instead
+  of about 8.8 ms, because the window minimum included a frame that landed
+  early while the pacer settled. The estimate now uses the 25th percentile of
+  the window. This is unit-tested but not yet run on the headset.
+- **Runner fix.** `launchctl bootout` returns before the job is removed, which
+  made the first attempt at the 1000 and 2000 us batches refuse to start. The
+  runner now waits for the experiment job to unload.
+
+To finish: with the headset tracking (lights on, headset moved or worn briefly),
+rerun the sweep with the percentile estimator and confirm in each capture that
+the application rendered (`diagnostic world contains` in `application.log`).
+`check_hw.py`, `pacing_compare.py`, `adaptive_tails.py` and the captures are in
+`build/review/wsi-integration-hw-20261016/latch-sweep/`; the control runs that
+showed the stall on every presenter are `stall-control/` and `tracking-check/`.
