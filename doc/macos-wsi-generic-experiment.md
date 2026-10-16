@@ -465,9 +465,61 @@ at 90 Hz and 9 ms at 120 Hz). Miss rates vary more between batches than
 between compositors (this compute batch missed less than the same setting in
 the sweep), so no miss-rate difference is established.
 
-Next: make the WSI target go direct by default, either by selecting the graphics
-compositor when the WSI target is chosen or by rendering through an intermediate
-image as the native target does, then repeat the interleaved comparison.
+### Direct by default, and GPU queue priority (16 October 2026)
+
+- **GPU queue priority was never applied to WSI.** The runner, like the
+  installed service, sets `XRT_MACOS_GPU_QUEUE_PRIORITY=0` (highest), but only
+  the native target applied it. Every WSI result above therefore ran the WSI
+  compositor queue at the default priority while native ran at the highest,
+  which matters most under the gpu16 load. The WSI target now applies it too;
+  every WSI session logs `foreground 1 -> 0`.
+- **The WSI target now selects the graphics compositor** unless
+  `XRT_COMPOSITOR_COMPUTE` is set, and the runner no longer forces compute.
+- **Except with WSI passthrough.** The first trace of the new default showed the
+  overlay readback with every sampled application pixel opaque and only 9 of
+  6,104 samples non-black: the graphics path writes opaque alpha, so the camera
+  never showed through, while the pixel check still passed because it only
+  compares opaque pixels. With `XRT_MACOS_WSI_PASSTHROUGH` the compute path is
+  kept; the camera then fills the frame (5,788 non-black samples, 5 opaque
+  application samples, no mismatches). That bridge is not direct to display
+  either way.
+
+A new trace of the defaults at 120 Hz, light load:
+
+| Session | Direct to display |
+| --- | --- |
+| Native | 520 of 522 frames |
+| Adaptive WSI | 695 of 696 |
+| Calibrated CV WSI | 710 of 711 |
+| Hosted adaptive WSI (scanned out from the client process) | 680 of 682 |
+
+The odd composited frame falls at a session transition.
+
+An interleaved comparison of native, adaptive WSI (latch -1000 us) and
+calibrated CV WSI at 90 and 120 Hz then lost head tracking part-way: only ten
+90 Hz sessions rendered. Those show, per session:
+
+| 90 Hz | Native | Adaptive WSI | Calibrated CV WSI |
+| --- | --- | --- | --- |
+| Presents/s | 89.0-89.7 | 88.0-89.8 | 89.7-89.9 |
+| Wake to present p50 (ms) | 25.2 | 15.4-16.4 | 25.2 |
+| Wake to present p99 (ms) | 25.2-36.4 | 16.4-27.3 | 25.2 |
+| Real misses | - | 0.3-5.4% | - |
+
+With the same priority and direct scanout, adaptive WSI keeps about one refresh
+less median latency than native at 90 Hz. The 120 Hz half and the remaining
+90 Hz repeats need rerunning with the headset tracking. Earlier WSI-against-native
+comparisons in this document were made with WSI at a lower GPU priority and
+composited; repeat any that inform a decision.
+
+**Recording note.** Each `xctrace` recording leaves 4-11 GB of raw
+`instruments*.ktrace` staging data in `$TMPDIR`, even after saving. Three
+recordings and a fourth long one filled the disk on this machine, and the fourth
+trace could not be saved. Keep recordings short, and delete the staging file
+after each save.
+
+Evidence: `direct-default-2/` (trace, sessions, passthrough check) and
+`direct-default-compare/` in `build/review/wsi-integration-hw-20261016/`.
 
 Evidence: `build/review/wsi-integration-hw-20261016/direct-display/`
 (`presenters.trace`, `runs/`, and `direct_display.py`, which reports
