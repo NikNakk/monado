@@ -8,9 +8,9 @@
  * through VK_GOOGLE_display_timing, even when it was ready in time, and
  * MoltenVK estimates presentMargin as actual minus begin-presentation time.
  * Fed unchanged, the adaptive pacer sees every frame as missed. This removes
- * the constant presentation delay, measured as the recent minimum of actual
- * minus desired presentation, and derives the margin from compositor GPU
- * completion instead.
+ * the constant presentation delay, measured as a low percentile of recent
+ * actual minus desired presentation times, and derives the margin from
+ * compositor GPU completion instead.
  *
  * @ingroup comp_main
  */
@@ -73,13 +73,23 @@ comp_present_feedback_correction_observe(struct comp_present_feedback_correction
 		return;
 	}
 
-	// Frames that genuinely missed are a whole refresh later, so the minimum is the pipeline delay.
-	int64_t delay_ns = c->samples[0];
-	for (uint32_t i = 1; i < c->count; i++) {
-		if (c->samples[i] < delay_ns) {
-			delay_ns = c->samples[i];
+	/*
+	 * Frames that genuinely missed are a whole refresh later, and while the
+	 * pacer is still settling an occasional frame lands early. The 25th
+	 * percentile ignores both: a single early frame cannot set the delay, and
+	 * up to three quarters of the window may be misses.
+	 */
+	int64_t sorted[COMP_PRESENT_FEEDBACK_WINDOW];
+	for (uint32_t i = 0; i < c->count; i++) {
+		int64_t value = c->samples[i];
+		uint32_t j = i;
+		while (j > 0 && sorted[j - 1] > value) {
+			sorted[j] = sorted[j - 1];
+			j--;
 		}
+		sorted[j] = value;
 	}
+	int64_t delay_ns = sorted[c->count / 4];
 	if (delay_ns < 0) {
 		delay_ns = 0;
 	}
