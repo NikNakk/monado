@@ -28,7 +28,7 @@ make_correction(int64_t latch_ns = 0)
 
 } // namespace
 
-TEST_CASE("The presentation delay is the recent minimum lateness", "[compositor][pacing]")
+TEST_CASE("The presentation delay is a low percentile of recent lateness", "[compositor][pacing]")
 {
 	auto c = make_correction();
 	for (int i = 0; i < COMP_PRESENT_FEEDBACK_MIN_SAMPLES - 1; i++) {
@@ -41,6 +41,10 @@ TEST_CASE("The presentation delay is the recent minimum lateness", "[compositor]
 
 	// A genuine miss is a refresh later still and does not move the estimate.
 	comp_present_feedback_correction_observe(&c, 2100000000, 2100000000 + 2 * kPeriod);
+	CHECK(c.delay_ns == kPeriod);
+
+	// A single early frame while the pacer settles does not set the delay.
+	comp_present_feedback_correction_observe(&c, 2200000000, 2200000000 + 380000);
 	CHECK(c.delay_ns == kPeriod);
 
 	// Frames that are on time pull it back down.
