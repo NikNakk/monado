@@ -9,6 +9,7 @@
  */
 
 #include "util/u_debug.h"
+#include <stdlib.h>
 #include "comp_settings.h"
 
 #ifdef XRT_OS_ANDROID
@@ -37,6 +38,10 @@ DEBUG_GET_ONCE_NUM_OPTION(xcb_display, "XRT_COMPOSITOR_XCB_DISPLAY", -1)
 DEBUG_GET_ONCE_NUM_OPTION(default_framerate, "XRT_COMPOSITOR_DEFAULT_FRAMERATE", 60)
 DEBUG_GET_ONCE_BOOL_OPTION(compute, "XRT_COMPOSITOR_COMPUTE", USE_COMPUTE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(force_debug_image, "XRT_COMPOSITOR_FORCE_DEBUG_IMAGE", false)
+#ifdef XRT_OS_OSX
+DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_generic, "XRT_MACOS_WSI_GENERIC", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_passthrough, "XRT_MACOS_WSI_PASSTHROUGH", false)
+#endif
 // clang-format on
 
 static inline void
@@ -103,6 +108,21 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 	}
 
 	s->use_compute = debug_get_bool_option_compute();
+#ifdef XRT_OS_OSX
+	/*
+	 * The compute path writes the swapchain image as a storage image, so the
+	 * experimental WSI target's drawables cannot be scanned out directly and
+	 * WindowServer composites them. Unless asked for explicitly, use the
+	 * graphics path with that target. The native target copies into its
+	 * drawables, so it is direct to display either way. The WSI passthrough
+	 * bridge needs the compute path's alpha, and is not direct to display
+	 * anyway, so keep compute there.
+	 */
+	if (debug_get_bool_option_macos_wsi_generic() && !debug_get_bool_option_macos_wsi_passthrough() &&
+	    getenv("XRT_COMPOSITOR_COMPUTE") == NULL) {
+		s->use_compute = false;
+	}
+#endif
 
 	if (s->use_compute) {
 #if defined(XRT_OS_OSX)
