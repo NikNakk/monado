@@ -363,43 +363,45 @@ Evidence: `build/review/wsi-integration-hw-20261016/` in the Monado-2 checkout,
 `summary.md`), `gpu-clock-check/`, and the scripts `latch_lead.py`,
 `pacing_compare.py` and `time_domains.c`.
 
-### Latch allowance sweep (16 October 2026): incomplete
+### Latch allowance sweep (16 October 2026)
 
-The sweep ran the corrected adaptive mode at latch allowances of -1000, 0, 1000
-and 2000 us, 90 and 120 Hz, light and gpu16 load, two repeats each. It is not
-conclusive, because the headset stopped tracking part-way through.
+Corrected adaptive mode with the percentile delay estimate, at latch allowances
+of -1000, 0, 1000 and 2000 us; 90 and 120 Hz; light and gpu16 load; two repeats
+of 12 s each; lid open. Every one of the 32 sessions rendered: 98-99.6% of
+compositor frames carried the application layer. "Real misses" are frames shown
+at least one refresh later than intended after the delay correction.
 
-- **Lost tracking, not a Monado hang.** `psvr2-openxr-test` only renders and
-  submits a projection layer while `xrLocateViews` reports a valid position and
-  orientation. From one run late in the latch-0 batch onwards, and in every run
-  after it, including native and stock WSI control runs, the application never
-  rendered: zero frames carried a client layer. Earlier the same binaries
-  rendered normally. The most likely cause is the headset's inside-out tracking
-  becoming invalid after it sat idle for hours or the room lighting changed.
-  The service logs do not record tracking state, so this is inferred.
-- **Valid data, latch 0.** In the seven sessions with an application, 0-9.4% of
-  frames were real misses, a further refresh late, as in the earlier
-  comparison. Most misses were frames whose GPU work finished 2-3 ms after the
-  desired time; about a fifth had an on-time wake, GPU and present call yet
-  still missed, which points at WindowServer or CoreAnimation scheduling. The
-  compositor never woke late.
-- **Compositor-only indication, other latches.** Without an application, the
-  load is the compositor alone and gpu16 means nothing, so treat these only as a
-  direction: median wake to present fell as the allowance grew (90 Hz: about
-  16.2 ms at -1000, 14.3 ms at 1000, 12.6-13.3 ms at 2000) while misses rose
-  (-1000: 0-1.3%; 1000: 0.2-3.6%; 2000: 0.5-7.6%, and one 90 Hz session at 48%
-  that fell to 77 presents/s).
-- **Estimator fix.** One session locked its delay estimate at 0.38 ms instead
-  of about 8.8 ms, because the window minimum included a frame that landed
-  early while the pacer settled. The estimate now uses the 25th percentile of
-  the window. This is unit-tested but not yet run on the headset.
-- **Runner fix.** `launchctl bootout` returns before the job is removed, which
-  made the first attempt at the 1000 and 2000 us batches refuse to start. The
-  runner now waits for the experiment job to unload.
+| Latch | Real misses 90 / 120 Hz | Presents/s 90 / 120 Hz | Wake to present p50 90 / 120 Hz (ms) | Wake to present p99 90 / 120 Hz (ms) |
+| --- | --- | --- | --- | --- |
+| -1000 us | 1.0-3.5% / 4.3-6.6% | 88.8-89.5 / 116.7-117.8 | 15.8-20.2 / 14.5-16.2 | 18.4-32.4 / 23.8-31.2 |
+| 0 | 3.1-10.8% / 8.2-11.1% | 86.8-88.9 / 114.9-116.4 | 15.5-17.3 / 13.4-13.9 | 27.9-36.5 / 24.4-30.2 |
+| 1000 us | 10.9-13.4% / 11.2-14.2% | 85.7-86.8 / 113.2-114.3 | 15.1-16.3 / 12.8-13.0 | 27.1-28.9 / 24.4-37.3 |
+| 2000 us | 13.9-17.3% / 13.2-19.1% | 85.1-85.7 / 112.2-113.6 | 15.2-15.9 / 11.9-13.0 | 27.2-36.4 / 21.7-29.5 |
 
-To finish: with the headset tracking (lights on, headset moved or worn briefly),
-rerun the sweep with the percentile estimator and confirm in each capture that
-the application rendered (`diagnostic world contains` in `application.log`).
-`check_hw.py`, `pacing_compare.py`, `adaptive_tails.py` and the captures are in
-`build/review/wsi-integration-hw-20261016/latch-sweep/`; the control runs that
-showed the stall on every presenter are `stall-control/` and `tracking-check/`.
+What it shows:
+
+- A larger allowance buys only 1-2 ms of median latency while misses rise
+  steeply, so 0 and above are too aggressive. -1000 us gives the best balance
+  measured: near display-rate cadence at 90 Hz, and the lowest miss rate at
+  120 Hz, while still about one refresh quicker than native at 90 Hz
+  (native and calibrated CV: 25.2 ms at 90 Hz, 19.6-19.7 ms at 120 Hz).
+- Most misses are GPU work finishing after the desired time, which the latch
+  allowance controls. In every setting a further 15-40 misses per session had
+  an on-time wake, GPU and present call. That floor, about 2-3%, looks like
+  WindowServer or CoreAnimation scheduling rather than anything Monado controls.
+- At 120 Hz even -1000 us presents slightly less often than calibrated CV
+  (116.7-117.8/s against 119.5-119.7/s), so the adaptive mode trades some
+  cadence for latency there.
+- The percentile estimate held at 8.7-9.2 ms (120 Hz) and 11.4-12.1 ms (90 Hz)
+  in every session, with no early lock-on.
+
+An earlier attempt at this sweep lost head tracking part-way through: the test
+application only renders while `xrLocateViews` reports a valid pose, and from
+one session onwards it rendered nothing on any presenter. Those captures
+(`latch-sweep/`, `stall-control/`, `tracking-check/`) are kept but not used.
+The runner now also waits for `launchctl bootout` to finish, which had made one
+batch refuse to start.
+
+Not yet tried: allowances below -1000 us, more repeats, and a worn visual
+comparison. Evidence: `build/review/wsi-integration-hw-20261016/latch-sweep-2/`
+(per-latch `summary.md`, and `tails.txt` from `adaptive_tails.py`).
