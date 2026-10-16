@@ -495,22 +495,36 @@ A new trace of the defaults at 120 Hz, light load:
 
 The odd composited frame falls at a session transition.
 
-An interleaved comparison of native, adaptive WSI (latch -1000 us) and
-calibrated CV WSI at 90 and 120 Hz then lost head tracking part-way: only ten
-90 Hz sessions rendered. Those show, per session:
+Interleaved comparison with every presenter direct to display and at GPU
+priority 0: native, adaptive WSI (latch -1000 us) and calibrated CV WSI, 90 and
+120 Hz, light and gpu16 load, two repeats of 12 s. All 24 sessions rendered (an
+earlier attempt lost head tracking part-way and is kept as
+`direct-default-compare/`, not used).
 
-| 90 Hz | Native | Adaptive WSI | Calibrated CV WSI |
-| --- | --- | --- | --- |
-| Presents/s | 89.0-89.7 | 88.0-89.8 | 89.7-89.9 |
-| Wake to present p50 (ms) | 25.2 | 15.4-16.4 | 25.2 |
-| Wake to present p99 (ms) | 25.2-36.4 | 16.4-27.3 | 25.2 |
-| Real misses | - | 0.3-5.4% | - |
+| Hz / load | Presenter | Presents/s | Client frames/s | Wake to present p50 / p99 (ms) |
+| --- | --- | --- | --- | --- |
+| 90 / light | native | 87.8-89.6 | 64.1-66.9 | 25.2 / 25.2-36.4 |
+| 90 / light | adaptive WSI | 87.2-88.7 | 63.3-65.4 | 16.4 / 27.5-28.3 |
+| 90 / light | calibrated CV WSI | 88.2-89.7 | 62.9-63.3 | 25.2 / 25.2-37.2 |
+| 90 / gpu16 | native | 89.2-89.6 | 58.1-61.8 | 25.2 / 25.2-36.4 |
+| 90 / gpu16 | adaptive WSI | 87.4-88.8 | 66.7-67.1 | 15.3 / 26.4-37.1 |
+| 90 / gpu16 | calibrated CV WSI | 89.1-89.6 | 73.8-74.5 | 25.2 / 25.2-36.4 |
+| 120 / light | native | 118.8-118.9 | 90.8-92.0 | 19.6 / 28.0 |
+| 120 / light | adaptive WSI | 117.2-118.4 | 85.6-88.5 | 12.4-13.7 / 21.0-22.1 |
+| 120 / light | calibrated CV WSI | 119.0-119.1 | 86.3-89.1 | 19.7 / 28.0 |
+| 120 / gpu16 | native | 119.0-119.4 | 53.8-55.5 | 19.7 / 19.7-28.0 |
+| 120 / gpu16 | adaptive WSI | 116.0-117.4 | 68.3-68.7 | 12.6-12.9 / 21.1-21.5 |
+| 120 / gpu16 | calibrated CV WSI | 119.0-119.3 | 45.9-46.3 | 19.7 / 28.0 |
 
-With the same priority and direct scanout, adaptive WSI keeps about one refresh
-less median latency than native at 90 Hz. The 120 Hz half and the remaining
-90 Hz repeats need rerunning with the headset tracking. Earlier WSI-against-native
-comparisons in this document were made with WSI at a lower GPU priority and
-composited; repeat any that inform a decision.
+- Adaptive WSI keeps about one refresh less median latency than native at
+  90 Hz (15.3-16.4 against 25.2 ms) and about 6-7 ms less at 120 Hz.
+- It pays with 3.7-9.4% real misses, so slightly fewer presents per second
+  (1-3/s fewer than native). Its p99 is similar to native at 90 Hz and better
+  at 120 Hz (21-22 against 28 ms).
+- Under heavy load it delivers more client frames than native at both rates,
+  and far more than calibrated CV at 120 Hz (68 against 46/s); calibrated CV
+  delivers the most at 90 Hz heavy load (74/s).
+- Calibrated CV WSI now matches native closely on cadence and latency.
 
 **Recording note.** Each `xctrace` recording leaves 4-11 GB of raw
 `instruments*.ktrace` staging data in `$TMPDIR`, even after saving. Three

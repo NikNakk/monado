@@ -479,7 +479,13 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 		}
 	}
 	ct->passthrough_unsupported = true;
-	if (debug_get_bool_option_macos_wsi_passthrough()) {
+	if (debug_get_bool_option_macos_wsi_passthrough() && !ct->c->settings.use_compute) {
+		// Graphics writes opaque alpha, so the bridge cannot reveal the camera.
+		// Keep create_passthrough returning unsupported rather than hiding it behind the app.
+		COMP_WARN(ct->c,
+		          "WSI passthrough requires the compute compositor; passthrough is unsupported with "
+		          "XRT_COMPOSITOR_COMPUTE=0");
+	} else if (debug_get_bool_option_macos_wsi_passthrough()) {
 		w->passthrough = comp_macos_wsi_passthrough_create(ct, queue, [w->frontend_info.metal_layer device],
 		                                                   w->hosted_client == NULL);
 		ct->passthrough_unsupported = w->passthrough == NULL;

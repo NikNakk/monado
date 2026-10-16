@@ -48,6 +48,35 @@ clang -fobjc-arc -framework AppKit -framework CoreGraphics build/review/wsi-inte
 python3 build/review/wsi-integration/scripts/macos/wsi-experiment/run.py --build build/review/wsi-integration-build --display-helper build/review/wsi-display-mode --output build/review/wsi-integration-refresh --conditions native wsi-generic wsi-generic-cv --hz 90 --seconds 15 --repeats 1 --refresh-cycle
 ```
 
+### Review fixes after `f46892ad4` (16 October 2026)
+
+- WSI with `XRT_MACOS_WSI_PASSTHROUGH=1` and an explicit
+  `XRT_COMPOSITOR_COMPUTE=0` keeps the graphics target running, but does not
+  create the passthrough bridge. It warns at image creation and passthrough
+  creation returns unsupported. This avoids advertising an overlay whose
+  opaque application image hides the camera. The default compute passthrough
+  path is unchanged.
+- Refresh targets own the compositor period as well as their pacer period.
+  The main compositor no longer replaces an unchanged period with `1/hz`:
+  a successful same-rate request now preserves the measured 119.88 Hz period,
+  and a mode change keeps the target's new measurement. The only target refresh
+  callbacks on this branch are native macOS and WSI; both already update the
+  period when a change takes effect.
+
+Regression probes compile the production refresh dispatcher and bridge-selection
+block with mocked hardware calls. All eight cases pass, and the unchanged
+`f46892ad4` code reproduces both failures. The probe and output are saved in
+`build/review/wsi-review-fixes-check-guards.py` and
+`build/review/wsi-review-fixes-guards.log` in the main checkout. These are CPU
+checks, not new headset or visual validation.
+
+The full macOS RelWithDebInfo build passes without compiler warnings, all
+**80/80 CTests** pass, and the capture/analysis Python checks pass **23/23**.
+Build and test logs are in `build/review/wsi-review-fixes-macos-*.log`.
+The Ubuntu 24.04 Linux CI dependency configuration also builds without compiler
+warnings and passes **52/52 CTests** (311.53 seconds under x86-64 emulation).
+Its configure, build and test logs are in `build/review/wsi-review-fixes-linux-*.log`.
+
 ### Headset validation of the branch (16 October 2026)
 
 Claude ran the checks above on the headset at the user's request, using
