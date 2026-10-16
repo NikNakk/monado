@@ -25,8 +25,9 @@ validation and limitations.
 The native-wrapper `XRT_MACOS_WSI`, its `XRT_MACOS_WSI_MAX_PENDING` credit
 limit, and `XRT_MACOS_GPU_ATTRIBUTION` diagnostic are removed. Old flags and
 commands in historical capture reports do not select executable experiment modes.
-With the default compute compositor the WSI target is composited by WindowServer;
-`XRT_COMPOSITOR_COMPUTE=0` lets it go direct to display. Native presentation
+With the WSI target, the compositor now defaults to the graphics path, which goes
+direct to display; `XRT_COMPOSITOR_COMPUTE=1` restores the compute path, which
+WindowServer composites. `XRT_MACOS_GPU_QUEUE_PRIORITY` now applies to it too. Native presentation
 defaults are unchanged; WSI passthrough still lacks native
 calibration/rotation parity, and sleep/disconnect recovery requires restart.
 

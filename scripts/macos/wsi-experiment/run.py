@@ -133,7 +133,7 @@ def main():
                             'XRT_MACOS_WSI_GENERIC_CALIBRATE': '1' if condition == 'wsi-generic-calibrated' else '0',
                             'XRT_MACOS_WSI_GENERIC_ADAPTIVE': '1' if condition == 'wsi-generic-adaptive' else '0',
                             'XRT_MACOS_WSI_GENERIC_LATCH_US': str(args.generic_latch_us),
-                            'XRT_COMPOSITOR_PREFERRED_IMAGE_COUNT': '3', 'XRT_COMPOSITOR_COMPUTE': '1',
+                            'XRT_COMPOSITOR_PREFERRED_IMAGE_COUNT': '3',
                             'XRT_COMPOSITOR_DEPTH_REPROJECTION': '0',
                             'XRT_COMPOSITOR_USE_DISPLAY_TIMING': '0' if args.generic_fake_pacing else '1',
                             'U_PACING_COMP_PRESENT_TO_DISPLAY_OFFSET_MS': '4',
