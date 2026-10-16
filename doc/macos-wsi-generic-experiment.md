@@ -405,3 +405,35 @@ batch refuse to start.
 Not yet tried: allowances below -1000 us, more repeats, and a worn visual
 comparison. Evidence: `build/review/wsi-integration-hw-20261016/latch-sweep-2/`
 (per-latch `summary.md`, and `tails.txt` from `adaptive_tails.py`).
+
+### Direct to display (16 October 2026)
+
+An Instruments Display trace (`MonadoInstrumentsTemplate`, recorded with
+`xctrace`) covered one 120 Hz session each of native, corrected adaptive WSI
+and calibrated CV WSI, light load, lid open:
+
+| Presenter | PS VR2 surfaces displayed | Direct to display |
+| --- | --- | --- |
+| Native | monado-service's three drawables | 947 of 947 frames |
+| Adaptive WSI | three surfaces with no owning process | 0 of 903 |
+| Calibrated CV WSI | three surfaces with no owning process | 0 of 936 |
+
+**The native target is still scanned out directly. Both WSI modes are not:**
+WindowServer composites them, and the trace gives no detachment reason. Both
+targets logged identical `CAMetalLayer` settings (BGRA8, sRGB,
+`framebufferOnly` off, display sync on, three drawables), so the difference is
+in how MoltenVK presents, not the layer configuration.
+
+The WSI latency and cadence figures above come from MoltenVK's presentation
+times, which already include WindowServer's composition, so the comparisons
+stand as measured. Composition does cost WindowServer GPU work, may contribute
+to the misses with an on-time wake, GPU and present call, and leaves WSI
+exposed to the built-in display's composition cycle. A WSI presenter proposed
+upstream should go direct to display; finding why MoltenVK's presents are not
+(candidates include `MVK_CONFIG_PRESENT_WITH_COMMAND_BUFFER` and timed
+presentation) is the next step.
+
+Evidence: `build/review/wsi-integration-hw-20261016/direct-display/`
+(`presenters.trace`, `runs/`, and `direct_display.py`, which reports
+direct-to-display frames per session from the `displayed-surfaces-interval`
+export).
