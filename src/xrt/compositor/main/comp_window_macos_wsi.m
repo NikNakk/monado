@@ -14,6 +14,7 @@
 #include "main/comp_window.h"
 #include "main/comp_window_macos_hosted.h"
 #include "util/u_macos_hosted_client.h"
+#include "util/comp_metal_gpu_priority.h"
 #include <math.h>
 #include <string.h>
 #include "main/comp_macos_frontend.h"
@@ -353,6 +354,8 @@ init_surface(struct comp_target *ct, uint32_t width, uint32_t height)
 		COMP_ERROR(ct->c, "Generic WSI comparison requires GOOGLE display timing");
 		return false;
 	}
+	// Same XRT_MACOS_GPU_QUEUE_PRIORITY handling as the native target; MoltenVK presents on this queue.
+	comp_metal_gpu_priority_apply(vk, NULL);
 	VkMetalSurfaceCreateInfoEXT info = {
 	    .sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
 	    .pLayer = w->frontend_info.metal_layer,
