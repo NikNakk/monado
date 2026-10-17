@@ -75,8 +75,8 @@ TEST_CASE("Distortion GPU workgroup benchmark", "[.][aux_render][gpu][benchmark]
 	const char *scenarios[] = {"distortion", "scanline-timewarp", "foveation", "depth"};
 	// Explicit invocation only: -- benchmarks never impose timing thresholds on CI.
 	Fixture f;
-	const char *small = std::getenv("MONADO_DISTORTION_BENCH_SMALL");
-	f.init(small ? 1000 : 2000, small ? 1020 : 2040);
+	bool use_small_extent = std::getenv("MONADO_DISTORTION_BENCH_SMALL") != nullptr;
+	f.init(use_small_extent ? 1000 : 2000, use_small_extent ? 1020 : 2040);
 	if (!f.queries)
 		SKIP("GPU timestamps unavailable");
 	const char *path = std::getenv("MONADO_DISTORTION_BENCH_CSV");
@@ -177,8 +177,8 @@ TEST_CASE("Quad bounds preserve layer composition", "[aux_render][gpu]")
 TEST_CASE("Layer composition GPU benchmark", "[.][aux_render][gpu][layer_benchmark]")
 {
 	LayerFixture f;
-	bool small = std::getenv("MONADO_DISTORTION_BENCH_SMALL") != nullptr;
-	f.init(small ? 1000 : 2000, small ? 1020 : 2040);
+	bool use_small_extent = std::getenv("MONADO_DISTORTION_BENCH_SMALL") != nullptr;
+	f.init(use_small_extent ? 1000 : 2000, use_small_extent ? 1020 : 2040);
 	f.init_layers();
 	if (!f.queries)
 		SKIP("GPU timestamps unavailable");
