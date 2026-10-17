@@ -4,6 +4,8 @@
 # SPDX-License-Identifier: BSL-1.0
 
 set(tests
+    tests_macos_display_timing
+    tests_comp_target_timing
     tests_cxx_wrappers
     tests_deque
     tests_floor_calibration

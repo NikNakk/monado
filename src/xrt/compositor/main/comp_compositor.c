@@ -311,6 +311,9 @@ compositor_begin_session(struct xrt_compositor *xc, const struct xrt_begin_sessi
 	}
 	// clang-format on
 
+	if (c->target != NULL && c->target->set_session_active != NULL) {
+		c->target->set_session_active(c->target, true);
+	}
 	return XRT_SUCCESS;
 }
 
@@ -320,6 +323,9 @@ compositor_end_session(struct xrt_compositor *xc)
 	struct comp_compositor *c = comp_compositor(xc);
 	COMP_DEBUG(c, "END_SESSION");
 
+	if (c->target != NULL && c->target->set_session_active != NULL) {
+		c->target->set_session_active(c->target, false);
+	}
 	compositor_session_cleanup(c);
 
 	return XRT_SUCCESS;
@@ -460,6 +466,14 @@ compositor_layer_begin(struct xrt_compositor *xc, const struct xrt_layer_frame_d
 	c->passthrough_active = false;
 	c->passthrough_has_application_layers = false;
 	return comp_layer_accum_begin(&c->base.layer_accum, data);
+}
+
+static xrt_result_t
+compositor_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
+{
+	(void)info;
+	struct comp_compositor *c = comp_compositor(xc);
+	return c->target != NULL && c->target->passthrough_unsupported ? XRT_ERROR_FEATURE_NOT_SUPPORTED : XRT_SUCCESS;
 }
 
 static xrt_result_t
@@ -638,9 +652,11 @@ compositor_request_display_refresh_rate(struct xrt_compositor *xc, float display
 	struct comp_compositor *c = comp_compositor(xc);
 	if (c->target && c->target->request_refresh_rate) {
 		xrt_result_t result = comp_target_request_refresh_rate(c->target, display_refresh_rate_hz);
-		// Assume refresh rate change is immediate
+#ifndef XRT_OS_OSX
+		// macOS targets own their measured period; do not replace it with requested Hz.
 		if (result == XRT_SUCCESS)
 			c->frame_interval_ns = U_TIME_1S_IN_NS / display_refresh_rate_hz;
+#endif
 		return result;
 	}
 #endif
@@ -1120,6 +1136,7 @@ const struct comp_target_factory *ctfs[] = {
 #endif
 #ifdef XRT_OS_OSX
     &comp_target_factory_macos,
+    &comp_target_factory_macos_wsi_generic,
 #endif
 #ifdef VK_USE_PLATFORM_XLIB_XRANDR_EXT
     &comp_target_factory_direct_nvidia,
@@ -1420,6 +1437,7 @@ comp_main_create_system_compositor(struct xrt_device *xdev,
 	/* Override the generic no-op passthrough hooks for the native compositor. */
 	iface->layer_begin = compositor_layer_begin;
 	iface->layer_passthrough = compositor_layer_passthrough;
+	iface->create_passthrough = compositor_create_passthrough;
 
 	// Init the settings to default.
 	comp_settings_init(&c->settings, xdev);

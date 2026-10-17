@@ -21,6 +21,7 @@
 
 #include "main/comp_compositor.h"
 #include "main/comp_target_swapchain.h"
+#include "main/comp_target_swapchain_timing.h"
 
 #include <assert.h>
 #include <stdlib.h>
@@ -415,6 +416,14 @@ do_update_timings_google_display_timing(struct comp_target_swapchain *cts)
 	    timings);                          //
 	int64_t now_ns = os_monotonic_get_ns();
 	for (uint32_t i = 0; i < count; i++) {
+		// Durations (presentMargin) must remain unchanged when changing clock domains.
+		VkPastPresentationTimingGOOGLE *t = &timings[i];
+		t->desiredPresentTime =
+		    comp_target_timing_apply_offset(t->desiredPresentTime, cts->presentation_clock_offset_ns);
+		t->actualPresentTime =
+		    comp_target_timing_apply_offset(t->actualPresentTime, cts->presentation_clock_offset_ns);
+		t->earliestPresentTime =
+		    comp_target_timing_apply_offset(t->earliestPresentTime, cts->presentation_clock_offset_ns);
 		u_pc_info(cts->upc,                       //
 		          timings[i].presentID,           //
 		          timings[i].desiredPresentTime,  //
@@ -422,6 +431,9 @@ do_update_timings_google_display_timing(struct comp_target_swapchain *cts)
 		          timings[i].earliestPresentTime, //
 		          timings[i].presentMargin,       //
 		          now_ns);                        //
+		if (cts->on_present_feedback != NULL) {
+			cts->on_present_feedback(cts, t);
+		}
 	}
 
 	free(timings);
@@ -1018,7 +1030,8 @@ comp_target_swapchain_present(struct comp_target *ct,
 #ifdef VK_GOOGLE_display_timing
 	VkPresentTimeGOOGLE times = {
 	    .presentID = (uint32_t)cts->current_frame_id,
-	    .desiredPresentTime = desired_present_time_ns - present_slop_ns,
+	    .desiredPresentTime = comp_target_timing_apply_offset(desired_present_time_ns - present_slop_ns,
+	                                                          -cts->presentation_clock_offset_ns),
 	};
 
 	VkPresentTimesInfoGOOGLE timings = {
@@ -1315,6 +1328,8 @@ comp_target_swapchain_init_and_set_fnptrs(struct comp_target_swapchain *cts,
                                           enum comp_target_display_timing_usage timing_usage)
 {
 	cts->timing_usage = timing_usage;
+	cts->presentation_clock_offset_ns = 0;
+	cts->on_present_feedback = NULL;
 	cts->base.check_ready = comp_target_swapchain_check_ready;
 	cts->base.is_shared_presentable_image = comp_target_swapchain_is_shared_presentable_image;
 	cts->base.create_images = comp_target_swapchain_create_images;

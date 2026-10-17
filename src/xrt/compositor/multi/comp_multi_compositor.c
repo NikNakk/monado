@@ -404,7 +404,11 @@ wait_fence(struct multi_compositor *mc, struct xrt_compositor_fence **xcf_ptr)
 
 	xrt_compositor_fence_destroy(xcf_ptr);
 
-	if (ret != XRT_SUCCESS) {
+	if (ret != XRT_SUCCESS
+#ifdef XRT_OS_OSX
+	    && os_thread_helper_is_running(&mc->wait_thread.oth)
+#endif
+	) {
 		U_LOG_E("Fence waiting failed: result=%d", ret);
 	}
 	return ret;
@@ -440,7 +444,11 @@ wait_semaphore(struct multi_compositor *mc, struct xrt_compositor_semaphore **xc
 
 	xrt_compositor_semaphore_reference(xcsem_ptr, NULL);
 
-	if (ret != XRT_SUCCESS) {
+	if (ret != XRT_SUCCESS
+#ifdef XRT_OS_OSX
+	    && os_thread_helper_is_running(&mc->wait_thread.oth)
+#endif
+	) {
 		U_LOG_E("Semaphore waiting failed: value=%" PRIu64 " result=%d", value, ret);
 	}
 	return ret;
@@ -608,8 +616,12 @@ run_func(void *ptr)
 			/* A timeout is cancellation, never GPU completion. Keep progress
 			 * references until teardown; tracked storage then enters quarantine.
 			 * Other platforms keep delivering the frame, as before. */
-			U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d", frame_id,
-			        value, wait_result);
+			if (os_thread_helper_is_running(&mc->wait_thread.oth)) {
+				U_LOG_E("Client GPU obligation failed: frame=%" PRId64 " value=%" PRIu64 " result=%d",
+				        frame_id, value, wait_result);
+			} else {
+				macos_client_gpu_trace_event(mc, "wait_cancelled", frame_id, value, wait_result);
+			}
 			if (mc->xses != NULL && os_thread_helper_is_running(&mc->wait_thread.oth)) {
 				/* LOST makes API calls fail, while LOSS_PENDING also produces
 				 * the OpenXR state event an application can observe when idle. */
@@ -1026,9 +1038,14 @@ multi_compositor_discard_frame(struct xrt_compositor *xc, int64_t frame_id)
 static xrt_result_t
 multi_compositor_create_passthrough(struct xrt_compositor *xc, const struct xrt_passthrough_create_info *info)
 {
+#ifdef XRT_OS_OSX
+	struct multi_compositor *mc = multi_compositor(xc);
+	return xrt_comp_create_passthrough(&mc->msc->xcn->base, info);
+#else
 	(void)xc;
 	(void)info;
 	return XRT_SUCCESS;
+#endif
 }
 
 static xrt_result_t
@@ -1357,13 +1374,24 @@ multi_compositor_request_display_refresh_rate(struct xrt_compositor *xc, float d
 
 	struct multi_compositor *mc = multi_compositor(xc);
 
+#ifdef XRT_OS_OSX
+	xrt_result_t result = xrt_comp_request_display_refresh_rate(&mc->msc->xcn->base, display_refresh_rate_hz);
+	if (result != XRT_SUCCESS) {
+		return result;
+	}
+#else
 	xrt_comp_request_display_refresh_rate(&mc->msc->xcn->base, display_refresh_rate_hz);
+#endif
 
 #ifdef XRT_OS_ANDROID
 	// TODO: notify the display refresh changed event by android display callback function.
 	float current_refresh_rate_hz =
 	    android_custom_surface_get_display_refresh_rate(android_globals_get_vm(), android_globals_get_context());
-
+#elif defined(XRT_OS_OSX)
+	float current_refresh_rate_hz = 0.0f;
+	(void)xrt_comp_get_display_refresh_rate(&mc->msc->xcn->base, &current_refresh_rate_hz);
+#endif
+#if defined(XRT_OS_ANDROID) || defined(XRT_OS_OSX)
 	if (current_refresh_rate_hz != 0 && current_refresh_rate_hz != mc->current_refresh_rate_hz) {
 		xrt_syscomp_notify_display_refresh_changed(&mc->msc->base, xc, mc->current_refresh_rate_hz,
 		                                           current_refresh_rate_hz);

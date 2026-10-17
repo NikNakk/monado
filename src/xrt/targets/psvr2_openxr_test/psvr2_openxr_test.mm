@@ -31,6 +31,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -90,6 +91,10 @@ static gpu_timing_state g_gpu_timing_foveated_standard;
 static void
 record_gpu_timing(gpu_timing_state &state, const char *label, id<MTLCommandBuffer> command_buffer)
 {
+	if (command_buffer.status == MTLCommandBufferStatusError) {
+		fprintf(stderr, "psvr2-openxr-test: GPU command error: %s\n",
+		        command_buffer.error.localizedDescription.UTF8String);
+	}
 	const CFTimeInterval start = command_buffer.GPUStartTime;
 	const CFTimeInterval end = command_buffer.GPUEndTime;
 	if (!(end > start)) {
@@ -146,6 +151,9 @@ struct xr_api
 	PFN_xrGetInstanceProcAddr get_instance_proc_addr = nullptr;
 	PFN_xrEnumerateInstanceExtensionProperties enumerate_instance_extension_properties = nullptr;
 	PFN_xrCreateInstance create_instance = nullptr;
+	PFN_xrEnumerateDisplayRefreshRatesFB enumerate_refresh = nullptr;
+	PFN_xrGetDisplayRefreshRateFB get_refresh = nullptr;
+	PFN_xrRequestDisplayRefreshRateFB request_refresh = nullptr;
 	PFN_xrDestroyInstance destroy_instance = nullptr;
 	PFN_xrGetInstanceProperties get_instance_properties = nullptr;
 	PFN_xrGetSystem get_system = nullptr;
@@ -1076,6 +1084,12 @@ create_instance(application &app)
 	}
 
 	std::vector<const char *> extensions = {XR_KHR_METAL_ENABLE_EXTENSION_NAME};
+	if (getenv("PSVR2_TEST_REFRESH_CYCLE") != nullptr) {
+		if (!has_extension(app.xr, XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME)) {
+			fatal("refresh integration test requires XR_FB_display_refresh_rate");
+		}
+		extensions.push_back(XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME);
+	}
 	if (app.submit_depth_layer) {
 		extensions.push_back(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME);
 	}
@@ -1108,6 +1122,14 @@ create_instance(application &app)
 	create_info.enabledExtensionNames = extensions.data();
 	check_xr(app.xr.create_instance(&create_info, &app.instance), "xrCreateInstance");
 	load_instance_xr_functions(app.xr, app.instance);
+	if (getenv("PSVR2_TEST_REFRESH_CYCLE") != nullptr) {
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrEnumerateDisplayRefreshRatesFB",
+		             &app.xr.enumerate_refresh);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrGetDisplayRefreshRateFB",
+		             &app.xr.get_refresh);
+		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrRequestDisplayRefreshRateFB",
+		             &app.xr.request_refresh);
+	}
 	if (app.standard_foveation) {
 		load_xr_proc(app.xr.get_instance_proc_addr, app.instance, "xrCreateFoveationProfileFB",
 		             &app.xr.create_foveation_profile_fb);
@@ -2723,26 +2745,42 @@ render_views(application &app, XrTime predicted_display_time)
 		    app.submit_depth_layer ? MTLStoreActionStore : MTLStoreActionDontCare;
 		render_pass.depthAttachment.clearDepth = 1.0;
 
-		id<MTLRenderCommandEncoder> encoder = [command_buffer renderCommandEncoderWithDescriptor:render_pass];
-		if (encoder == nil) {
-			fatal("could not create Metal render command encoder");
+		// Repeat complete cleared passes so depth rejection cannot eliminate the load.
+		static const int stress_passes = [] {
+			const char *value = getenv("PSVR2_TEST_GPU_PASSES");
+			const int passes = value ? std::clamp(atoi(value), 1, 64) : 1;
+			fprintf(stderr, "psvr2-openxr-test: stress GPU passes per eye=%d\n", passes);
+			return passes;
+		}();
+		static const size_t instance_limit = [] {
+			const char *value = getenv("PSVR2_TEST_MAX_INSTANCES");
+			const size_t limit = value ? (size_t)std::clamp(atoi(value), 1, 10000) : 10000;
+			fprintf(stderr, "psvr2-openxr-test: stress instance limit=%zu\n", limit);
+			return limit;
+		}();
+		for (int pass = 0; pass < stress_passes; ++pass) {
+			id<MTLRenderCommandEncoder> encoder =
+			    [command_buffer renderCommandEncoderWithDescriptor:render_pass];
+			if (encoder == nil) {
+				fatal("could not create Metal render command encoder");
+			}
+			[encoder setRenderPipelineState:app.renderer.pipeline];
+			[encoder setDepthStencilState:app.renderer.depth_state];
+			[encoder setCullMode:MTLCullModeNone];
+			[encoder setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height,
+			                                 0.0, 1.0}];
+			[encoder setVertexBuffer:app.renderer.cube_vertex_buffer offset:0 atIndex:0];
+			[encoder setVertexBuffer:app.renderer.instance_buffer offset:0 atIndex:1];
+			const matrix_float4x4 projection = projection_matrix(app.views[i].fov, 0.05f, 100.0f);
+			const matrix_float4x4 view = view_matrix(app.views[i].pose);
+			const matrix_float4x4 view_projection = simd_mul(projection, view);
+			[encoder setVertexBytes:&view_projection length:sizeof(view_projection) atIndex:2];
+			[encoder drawPrimitives:MTLPrimitiveTypeTriangle
+			            vertexStart:0
+			            vertexCount:sizeof(k_cube_vertices) / sizeof(k_cube_vertices[0])
+			          instanceCount:std::min(app.frame_instances.size(), instance_limit)];
+			[encoder endEncoding];
 		}
-		[encoder setRenderPipelineState:app.renderer.pipeline];
-		[encoder setDepthStencilState:app.renderer.depth_state];
-		[encoder setCullMode:MTLCullModeNone];
-		[encoder
-		    setViewport:MTLViewport{0.0, 0.0, (double)swapchain.width, (double)swapchain.height, 0.0, 1.0}];
-		[encoder setVertexBuffer:app.renderer.cube_vertex_buffer offset:0 atIndex:0];
-		[encoder setVertexBuffer:app.renderer.instance_buffer offset:0 atIndex:1];
-		const matrix_float4x4 projection = projection_matrix(app.views[i].fov, 0.05f, 100.0f);
-		const matrix_float4x4 view = view_matrix(app.views[i].pose);
-		const matrix_float4x4 view_projection = simd_mul(projection, view);
-		[encoder setVertexBytes:&view_projection length:sizeof(view_projection) atIndex:2];
-		[encoder drawPrimitives:MTLPrimitiveTypeTriangle
-		            vertexStart:0
-		            vertexCount:sizeof(k_cube_vertices) / sizeof(k_cube_vertices[0])
-		          instanceCount:app.frame_instances.size()];
-		[encoder endEncoding];
 
 		if (app.gaze_foveation) {
 			encode_gaze_foveation_resolve(app, swapchain, resolve_command_buffer, color_texture);
@@ -2792,6 +2830,25 @@ poll_events(application &app)
 			    reinterpret_cast<const XrEventDataSessionStateChanged *>(&event);
 			app.session_state = state_changed->state;
 			if (state_changed->state == XR_SESSION_STATE_READY && !app.session_running) {
+				if (app.xr.request_refresh != nullptr) {
+					const auto before = std::chrono::steady_clock::now();
+					check_xr(app.xr.request_refresh(app.session, 90.0f),
+					         "xrRequestDisplayRefreshRateFB(before begin)");
+					const auto elapsed =
+					    std::chrono::duration<double>(std::chrono::steady_clock::now() - before)
+					        .count();
+					float current = 0;
+					check_xr(app.xr.get_refresh(app.session, &current),
+					         "xrGetDisplayRefreshRateFB(before begin)");
+					if (fabsf(current - 90.0f) > 0.5f || elapsed >= 5.0) {
+						fatal(
+						    "idle refresh request failed or waited for the inactive "
+						    "compositor");
+					}
+					fprintf(stderr,
+					        "psvr2-openxr-test: refresh before begin verified %.3f Hz in %.3f s\n",
+					        current, elapsed);
+				}
 				XrSessionBeginInfo begin_info =
 				    xr_struct<XrSessionBeginInfo>(XR_TYPE_SESSION_BEGIN_INFO);
 				begin_info.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
@@ -2910,7 +2967,48 @@ render_frame(application &app)
 	end_info.environmentBlendMode = app.blend_mode;
 	end_info.layerCount = layer_count;
 	end_info.layers = layer_count > 0 ? layers : nullptr;
+	// Controlled application scheduling stalls, independent of the presenter.
+	static uint64_t stress_frame = 0;
+	static const int delay_us = [] {
+		const char *value = getenv("PSVR2_TEST_CPU_DELAY_US");
+		return value ? std::clamp(atoi(value), 0, 100000) : 0;
+	}();
+	if (++stress_frame % 90 == 0 && delay_us > 0) {
+		fprintf(stderr, "psvr2-openxr-test: stress CPU delay frame=%llu us=%d\n",
+		        (unsigned long long)stress_frame, delay_us);
+		usleep((useconds_t)delay_us);
+	}
 	check_xr(app.xr.end_frame(app.session, &end_info), "xrEndFrame");
+	if (app.xr.request_refresh != nullptr && (stress_frame == 90 || stress_frame == 270 || stress_frame == 450)) {
+		float requested = stress_frame == 270 ? 90.0f : 120.0f;
+		check_xr(app.xr.request_refresh(app.session, requested), "xrRequestDisplayRefreshRateFB");
+		float current = 0;
+		check_xr(app.xr.get_refresh(app.session, &current), "xrGetDisplayRefreshRateFB");
+		if (fabsf(current - requested) > 0.5f) {
+			fatal("physical refresh request did not apply");
+		}
+		fprintf(stderr, "psvr2-openxr-test: refresh cycle verified %.3f Hz frame=%llu\n", current,
+		        (unsigned long long)stress_frame);
+	}
+	if (app.xr.request_refresh != nullptr && stress_frame == 30) {
+		uint32_t count = 0;
+		check_xr(app.xr.enumerate_refresh(app.session, 0, &count, nullptr), "xrEnumerateDisplayRefreshRatesFB");
+		std::vector<float> rates(count);
+		check_xr(app.xr.enumerate_refresh(app.session, count, &count, rates.data()),
+		         "xrEnumerateDisplayRefreshRatesFB");
+		fprintf(stderr, "psvr2-openxr-test: refresh rates count=%u\n", count);
+		float previous = 0, after = 0;
+		check_xr(app.xr.get_refresh(app.session, &previous), "xrGetDisplayRefreshRateFB");
+		XrResult invalid = app.xr.request_refresh(app.session, 73.0f);
+		if (invalid != XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB) {
+			fatal("unsupported refresh request was not rejected");
+		}
+		check_xr(app.xr.get_refresh(app.session, &after), "xrGetDisplayRefreshRateFB");
+		if (fabsf(previous - after) > 0.05f) {
+			fatal("unsupported refresh request changed display mode");
+		}
+		fprintf(stderr, "psvr2-openxr-test: unsupported refresh rejected without mode change\n");
+	}
 }
 
 static void

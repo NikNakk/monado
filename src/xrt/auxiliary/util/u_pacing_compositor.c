@@ -803,3 +803,25 @@ u_pc_display_timing_create(int64_t estimated_frame_period_ns,
 
 	return XRT_SUCCESS;
 }
+
+bool
+u_pc_display_timing_update_period(struct u_pacing_compositor *upc, int64_t period_ns, int64_t now_ns)
+{
+	(void)now_ns;
+	if (upc == NULL || upc->predict != pc_predict || period_ns <= 0) {
+		return false;
+	}
+	struct pacing_compositor *pc = pacing_compositor(upc);
+	// Retain the learned absolute budget and caller configuration. Only limits
+	// and adaptation steps tied to the period change, in their original ratios.
+	int64_t previous_period_ns = pc->frame_period_ns;
+	pc->comp_time_max_ns = (int64_t)((double)pc->comp_time_max_ns * (double)period_ns / (double)previous_period_ns);
+	pc->adjust_missed_ns = (int64_t)((double)pc->adjust_missed_ns * (double)period_ns / (double)previous_period_ns);
+	pc->adjust_non_miss_ns =
+	    (int64_t)((double)pc->adjust_non_miss_ns * (double)period_ns / (double)previous_period_ns);
+	if (pc->comp_time_ns > pc->comp_time_max_ns) {
+		pc->comp_time_ns = pc->comp_time_max_ns;
+	}
+	pc->frame_period_ns = period_ns;
+	return true;
+}

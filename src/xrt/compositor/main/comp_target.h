@@ -139,6 +139,12 @@ struct comp_target
 	//! Owning compositor.
 	struct comp_compositor *c;
 
+	//! Optional session-boundary notification on the compositor thread.
+	void (*set_session_active)(struct comp_target *ct, bool active);
+
+	//! Explicit opt-out for targets without a configured passthrough path.
+	bool passthrough_unsupported;
+
 	//! Name of the backing system.
 	const char *name;
 
