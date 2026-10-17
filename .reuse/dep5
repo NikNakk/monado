@@ -146,3 +146,18 @@ Comment: SPDX-License-Identifier missing.
 Files: src/external/metrics/*
 Copyright: 2022, Collabora, Ltd.
 License: BSL-1.0
+
+Files: doc/macos-graphics-integration-results/*.json
+ doc/macos-graphics-integration-results/*.log
+Copyright: No copyright
+License: CC0-1.0
+Comment: Machine-generated test logs and capture metadata.
+
+Files: doc/macos-wsi-cv-experiment.md
+ doc/macos-wsi-experiment.md
+ doc/macos-wsi-generic-experiment.md
+ doc/macos-wsi-native-comparison.md
+ scripts/macos/wsi-experiment/*
+Copyright: 2026, Nick Kennedy
+License: BSL-1.0
+Comment: macOS WSI experiment reports and capture/analysis tooling.
