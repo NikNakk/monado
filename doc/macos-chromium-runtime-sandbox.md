@@ -1,4 +1,8 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 # Chromium runtime sandbox narrowing, 2026-10-12
 
 **The tested Monado and Meta routes now work with Chromium's sandbox enabled.**

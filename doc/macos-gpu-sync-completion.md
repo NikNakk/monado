@@ -1,4 +1,8 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 # Native macOS GPU synchronization: M1–M2 completion, 2026-10-11
 
 This report supersedes the remaining native synchronization criteria in the
