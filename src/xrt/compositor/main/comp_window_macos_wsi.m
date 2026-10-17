@@ -18,7 +18,8 @@
 #include <math.h>
 #include <string.h>
 #include "main/comp_macos_frontend.h"
-#include "main/comp_macos_wsi_passthrough.h"
+#include "main/comp_vulkan_passthrough.h"
+#include "render/render_output.h"
 #include "main/comp_macos_display.h"
 #include "main/comp_macos_display_timing.h"
 #include "main/comp_present_feedback_correction.h"
@@ -34,14 +35,15 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_generic_refresh, "XRT_MACOS_REFRESH_RATE_HZ", 0)
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_passthrough, "XRT_MACOS_WSI_PASSTHROUGH", false)
 
+
 DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_wsi, "XRT_MACOS_WSI_GENERIC", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_cv, "XRT_MACOS_WSI_GENERIC_CV", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_calibrate, "XRT_MACOS_WSI_GENERIC_CALIBRATE", false)
+DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_adaptive, "XRT_MACOS_WSI_GENERIC_ADAPTIVE", false)
 
 // Keep the validated CV source opt-in while comparing Apple's replacement APIs.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_cv, "XRT_MACOS_WSI_GENERIC_CV", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_calibrate, "XRT_MACOS_WSI_GENERIC_CALIBRATE", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_adaptive, "XRT_MACOS_WSI_GENERIC_ADAPTIVE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_generic_latch_us, "XRT_MACOS_WSI_GENERIC_LATCH_US", 0)
 
 #define WSI_TIMING_HISTORY 2048
@@ -68,7 +70,10 @@ struct comp_window_macos_wsi
 	struct comp_present_feedback_correction correction;
 	int64_t base_present_offset_ns;
 	int64_t applied_delay_ns;
-	struct comp_macos_wsi_passthrough *passthrough;
+	struct comp_vulkan_passthrough *passthrough;
+	struct render_output *output;
+	struct comp_target_image *swapchain_images;
+	VkImageUsageFlags surface_image_usage;
 	uint64_t last_vblank_ns;
 	int64_t calibrated_offset_ns;
 	uint32_t offset_samples;
@@ -376,6 +381,26 @@ set_title(struct comp_target *ct, const char *title)
 	comp_macos_frontend_set_title(from_target(ct)->frontend, title);
 }
 
+static bool
+destroy_output(struct comp_window_macos_wsi *w)
+{
+	struct comp_target *ct = &w->base.base;
+	VkResult ret = render_output_destroy(&w->output);
+	if (ret != VK_SUCCESS) {
+		COMP_ERROR(ct->c, "WSI output drain failed (%d); retaining private images and swapchain", ret);
+		w->display_lost = true;
+		return false;
+	}
+	if (w->swapchain_images != NULL) {
+		free(ct->images); // Views/images themselves belong to render_output.
+		ct->images = w->swapchain_images;
+		w->swapchain_images = NULL;
+		ct->image_usage = w->surface_image_usage;
+		ct->final_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	}
+	return true;
+}
+
 static void
 destroy(struct comp_target *ct)
 {
@@ -383,7 +408,13 @@ destroy(struct comp_target *ct)
 	if (w->display_link != NULL) {
 		comp_macos_display_link_destroy(&w->display_link);
 	}
-	comp_macos_wsi_passthrough_destroy(&w->passthrough);
+	if (!comp_vulkan_passthrough_destroy(&w->passthrough)) {
+		w->display_lost = true;
+		return;
+	}
+	if (!destroy_output(w)) {
+		return;
+	}
 	comp_target_swapchain_cleanup(&w->base);
 	comp_macos_frontend_destroy(&w->frontend);
 	u_macos_hosted_client_release(w->hosted_client);
@@ -463,14 +494,56 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 {
 	struct comp_window_macos_wsi *w = from_target(ct);
 	struct comp_target_create_images_info fifo = *info;
-	comp_macos_wsi_passthrough_destroy(&w->passthrough);
-	if (debug_get_bool_option_macos_wsi_passthrough()) {
-		fifo.image_usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	ct->passthrough_unsupported = true;
+	if (!comp_vulkan_passthrough_destroy(&w->passthrough)) {
+		w->display_lost = true;
+		return;
+	}
+	if (!destroy_output(w)) {
+		return;
+	}
+	bool private_output = ct->c->settings.use_compute;
+	if (private_output) {
+		// Compute and camera shaders write private images, never Metal drawables.
+		// Keep the WSI images usable as ordinary presentation render targets.
+		fifo.image_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	}
 	fifo.present_mode = VK_PRESENT_MODE_FIFO_KHR;
 	w->ops.create_images(ct, &fifo, queue);
 	if (w->base.swapchain.handle == VK_NULL_HANDLE) {
 		return;
+	}
+	if (private_output) {
+		VkImage destinations[XRT_MAX_SWAPCHAIN_IMAGES];
+		if (ct->image_count > ARRAY_SIZE(destinations)) {
+			w->display_lost = true;
+			return;
+		}
+		for (uint32_t i = 0; i < ct->image_count; i++) {
+			destinations[i] = ct->images[i].handle;
+		}
+		VkImageUsageFlags usage = info->image_usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+		w->output = render_output_create(&ct->c->base.vk, queue, ct->format,
+		                                 (VkExtent2D){ct->width, ct->height}, usage, destinations,
+		                                 ct->image_count);
+		struct comp_target_image *images = U_TYPED_ARRAY_CALLOC(struct comp_target_image, ct->image_count);
+		if (w->output == NULL || images == NULL) {
+			free(images);
+			COMP_ERROR(ct->c, "Could not create private WSI compute output");
+			w->display_lost = true;
+			return;
+		}
+		w->swapchain_images = ct->images;
+		w->surface_image_usage = ct->image_usage;
+		ct->images = images;
+		ct->image_usage = usage;
+		ct->final_layout = VK_IMAGE_LAYOUT_GENERAL;
+		for (uint32_t i = 0; i < ct->image_count; i++) {
+			images[i].handle = render_output_image(w->output, i);
+			images[i].view = render_output_view(w->output, i);
+			images[i].storage_view = images[i].view;
+		}
+		COMP_INFO(ct->c, "WSI compute output: %u private images, GPU copy to presentation images", ct->image_count);
 	}
 	if (w->display_link != NULL && !comp_macos_display_link_running(w->display_link)) {
 		if (!comp_macos_display_link_start(w->display_link)) {
@@ -486,11 +559,10 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 		          "WSI passthrough requires the compute compositor; passthrough is unsupported with "
 		          "XRT_COMPOSITOR_COMPUTE=0");
 	} else if (debug_get_bool_option_macos_wsi_passthrough()) {
-		w->passthrough = comp_macos_wsi_passthrough_create(ct, queue, [w->frontend_info.metal_layer device],
-		                                                   w->hosted_client == NULL);
+		w->passthrough = comp_vulkan_passthrough_create(ct, queue, w->hosted_client == NULL);
 		ct->passthrough_unsupported = w->passthrough == NULL;
 		if (w->passthrough == NULL) {
-			COMP_ERROR(ct->c, "Could not initialize WSI passthrough interop");
+			COMP_ERROR(ct->c, "Could not initialize Vulkan camera composition");
 		}
 	}
 	struct vk_bundle *vk = &ct->c->base.vk;
@@ -573,7 +645,7 @@ present(struct comp_target *ct,
 				w->passthrough_warning = true;
 			}
 		} else {
-			composed = comp_macos_wsi_passthrough_compose(
+			composed = comp_vulkan_passthrough_compose(
 			    w->passthrough, index, ct->c->passthrough_has_application_layers, &present_ready);
 		}
 		if (!present_ready) {
@@ -581,6 +653,15 @@ present(struct comp_target *ct,
 			// Swapchain destruction on target teardown releases the acquired image.
 			w->display_lost = true;
 			return composed;
+		}
+	}
+	if (w->output != NULL) {
+		VkResult copied = render_output_copy(w->output, index, ct->semaphores.render_complete,
+		                                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+		if (copied != VK_SUCCESS) {
+			COMP_ERROR(ct->c, "WSI output copy failed (%d); retiring target", copied);
+			w->display_lost = true;
+			return copied;
 		}
 	}
 	uint64_t begin = os_monotonic_get_ns();
