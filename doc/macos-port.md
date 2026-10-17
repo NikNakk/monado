@@ -6,6 +6,28 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
+(default `native`). `wsi` selects calibrated CV WSI; the old WSI selection
+booleans are retired. See [selector migration](macos-wsi-migration.md#unified-presenter-selector-17-october-2026).
+
+The [WSI passthrough parity change](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026)
+now reuses native camera calibration and rotational correction on the WSI
+integration worktree. Camera-only and gentle blended-motion
+checks pass, but rapid-motion shimmer is worse than the native control. Earlier
+wake-up improves measured WSI cadence without consistently fixing the image;
+the [Vulkan camera replacement](macos-wsi-vulkan-passthrough.md) now removes
+those blocking waits and reaches about 117–119 presents/s in short functional
+runs, with final camera CPU submission around 0.38–0.42 ms median.
+The subsequent moving-head check still shimmers despite 118.18 presents/s;
+WSI default promotion remains blocked on visual quality. The user independently
+isolates `XRT_COMPOSITOR_COMPUTE=1` as the trigger in WSI testing and reports
+native is fine. Native uses compute by default; focus on WSI compute/output.
+Visual acceptance remains pending; native is still default (16 October 2026).
+A [private-output candidate](macos-wsi-vulkan-passthrough.md#private-compute-output-candidate)
+now keeps WSI compute/camera shader writes out of presentation images and adds
+a Vulkan copy. Its visual quality, direct scanout and performance are untested;
+no further headset run is started while the user lacks access.
+
 The opt-in generic Vulkan WSI target and its experiment are committed on
 `claude/macos-wsi-integration` (worktree `build/review/wsi-integration`), with
 display refresh requests now applied between frames by the main compositor for
