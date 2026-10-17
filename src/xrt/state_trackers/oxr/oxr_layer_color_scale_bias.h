@@ -12,8 +12,7 @@
  * The caller initializes layer flags before calling this once per submission.
  */
 static inline void
-oxr_layer_set_color_scale_bias(const XrCompositionLayerColorScaleBiasKHR *transform,
-                               struct xrt_layer_data *data)
+oxr_layer_set_color_scale_bias(const XrCompositionLayerColorScaleBiasKHR *transform, struct xrt_layer_data *data)
 {
 	if (transform == NULL) {
 		return;
@@ -30,8 +29,8 @@ oxr_layer_set_color_scale_bias(const XrCompositionLayerColorScaleBiasKHR *transf
 	data->color_bias.b = bias->b;
 	data->color_bias.a = bias->a;
 
-	if (scale->r == 1.0f && scale->g == 1.0f && scale->b == 1.0f && scale->a == 1.0f &&
-	    bias->r == 0.0f && bias->g == 0.0f && bias->b == 0.0f && bias->a == 0.0f) {
+	if (scale->r == 1.0f && scale->g == 1.0f && scale->b == 1.0f && scale->a == 1.0f && bias->r == 0.0f &&
+	    bias->g == 0.0f && bias->b == 0.0f && bias->a == 0.0f) {
 		return;
 	}
 

@@ -34,8 +34,7 @@ texture_width()
 	unsigned long width = strtoul(value, &end, 10);
 	if (end == value || *end != 0 || width < 16 || width > 2048) {
 		// Fail here, not later as a zero-sized IOSurface or texture.
-		fprintf(stderr, "FAIL GPU_SYNC_TEXTURE_SIZE must be a whole number from 16 to 2048, got '%s'\n",
-		        value);
+		fprintf(stderr, "FAIL GPU_SYNC_TEXTURE_SIZE must be a whole number from 16 to 2048, got '%s'\n", value);
 		exit(2);
 	}
 	return (unsigned)width;

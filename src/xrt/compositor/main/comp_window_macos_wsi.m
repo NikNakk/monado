@@ -519,9 +519,9 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 			destinations[i] = ct->images[i].handle;
 		}
 		VkImageUsageFlags usage = info->image_usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-		w->output = render_output_create(&ct->c->base.vk, queue, ct->format,
-		                                 (VkExtent2D){ct->width, ct->height}, usage, destinations,
-		                                 ct->image_count);
+		w->output =
+		    render_output_create(&ct->c->base.vk, queue, ct->format, (VkExtent2D){ct->width, ct->height}, usage,
+		                         destinations, ct->image_count);
 		struct comp_target_image *images = U_TYPED_ARRAY_CALLOC(struct comp_target_image, ct->image_count);
 		if (w->output == NULL || images == NULL) {
 			free(images);
@@ -539,7 +539,8 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 			images[i].view = render_output_view(w->output, i);
 			images[i].storage_view = images[i].view;
 		}
-		COMP_INFO(ct->c, "WSI compute output: %u private images, GPU copy to presentation images", ct->image_count);
+		COMP_INFO(ct->c, "WSI compute output: %u private images, GPU copy to presentation images",
+		          ct->image_count);
 	}
 	if (w->display_link != NULL && !comp_macos_display_link_running(w->display_link)) {
 		if (!comp_macos_display_link_start(w->display_link)) {

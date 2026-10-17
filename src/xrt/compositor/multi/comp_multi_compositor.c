@@ -266,9 +266,8 @@ layer_gpu_reuse_set_producer(struct multi_layer_entry *layer, struct xrt_composi
 			ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[i], data->depth.v[i].sub.image_index,
 			                                            xcsem, value);
 			if (ret == XRT_SUCCESS) {
-				ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[i + data->view_count],
-				                                            data->depth.d[i].sub.image_index, xcsem,
-				                                            value);
+				ret = comp_swapchain_gpu_reuse_set_producer(
+				    layer->xscs[i + data->view_count], data->depth.d[i].sub.image_index, xcsem, value);
 			}
 		}
 		break;
@@ -279,8 +278,8 @@ layer_gpu_reuse_set_producer(struct multi_layer_entry *layer, struct xrt_composi
 		ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->cube.sub.image_index, xcsem, value);
 		break;
 	case XRT_LAYER_CYLINDER:
-		ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->cylinder.sub.image_index, xcsem,
-		                                            value);
+		ret =
+		    comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->cylinder.sub.image_index, xcsem, value);
 		break;
 	case XRT_LAYER_EQUIRECT1:
 		ret = comp_swapchain_gpu_reuse_set_producer(layer->xscs[0], data->equirect1.sub.image_index, xcsem,
@@ -818,9 +817,11 @@ multi_compositor_create_swapchain(struct xrt_compositor *xc,
 #ifdef XRT_OS_OSX
 	struct xrt_swapchain_create_properties properties = {0};
 	xrt_result_t result = xrt_comp_get_swapchain_create_properties(&mc->msc->xcn->base, info, &properties);
-	if (result != XRT_SUCCESS) return result;
+	if (result != XRT_SUCCESS)
+		return result;
 	result = comp_gpu_client_budget_reserve(mc->gpu_budget, info, properties.image_count, NULL);
-	if (result != XRT_SUCCESS) return result;
+	if (result != XRT_SUCCESS)
+		return result;
 	result = xrt_comp_create_swapchain(&mc->msc->xcn->base, info, out_xsc);
 	comp_gpu_client_budget_finish();
 #else
@@ -842,7 +843,8 @@ multi_compositor_import_swapchain(struct xrt_compositor *xc,
 
 #ifdef XRT_OS_OSX
 	xrt_result_t result = comp_gpu_client_budget_reserve(mc->gpu_budget, info, image_count, native_images);
-	if (result != XRT_SUCCESS) return result;
+	if (result != XRT_SUCCESS)
+		return result;
 	result = xrt_comp_import_swapchain(&mc->msc->xcn->base, info, native_images, image_count, out_xsc);
 	comp_gpu_client_budget_finish();
 #else
@@ -1530,14 +1532,17 @@ multi_compositor_create(struct multi_system_compositor *msc,
 	COMP_TRACE_MARKER();
 
 	struct multi_compositor *mc = U_TYPED_CALLOC(struct multi_compositor);
-	if (mc == NULL) return XRT_ERROR_ALLOCATION;
+	if (mc == NULL)
+		return XRT_ERROR_ALLOCATION;
 #ifdef XRT_OS_OSX
 	mc->gpu_budget = comp_gpu_client_budget_create();
-	if (mc->gpu_budget == NULL) { free(mc); return XRT_ERROR_ALLOCATION; }
+	if (mc->gpu_budget == NULL) {
+		free(mc);
+		return XRT_ERROR_ALLOCATION;
+	}
 	mc->gpu_trace_id = comp_gpu_client_budget_trace_id(mc->gpu_budget);
 	U_LOG_I("Client GPU policy: hung_ms=%lld readiness_margin_us=%ld",
-	        (long long)(client_gpu_hung_ns() / U_TIME_1MS_IN_NS),
-	        debug_get_num_option_client_gpu_margin_us());
+	        (long long)(client_gpu_hung_ns() / U_TIME_1MS_IN_NS), debug_get_num_option_client_gpu_margin_us());
 #endif
 
 	// Initialize state - base session is anything that's not an overlay

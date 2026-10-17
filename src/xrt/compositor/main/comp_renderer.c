@@ -600,8 +600,8 @@ renderer_stage_begin(struct comp_renderer *r, const char *stage)
 	enabled = enabled || debug_get_bool_option_comp_psvr2_timing_trace();
 #endif
 	int64_t frame = r->c->frame.rendering.id >= 0 ? r->c->frame.rendering.id : r->c->frame.waited.id;
-	uint64_t native_id = u_gpu_trace_cpu_begin("renderer", stage, r->gpu_trace_id, frame,
-	                                           frame >= 0 ? (uint64_t)frame : 0);
+	uint64_t native_id =
+	    u_gpu_trace_cpu_begin("renderer", stage, r->gpu_trace_id, frame, frame >= 0 ? (uint64_t)frame : 0);
 	return (struct u_gpu_trace_cpu_interval){enabled ? os_monotonic_get_ns() : 0, native_id};
 }
 
@@ -1289,7 +1289,8 @@ renderer_wait_for_last_fence(struct comp_renderer *r)
 			if (r->settings->use_compute &&
 			    render_resources_get_pass_durations(&r->c->nr, &composition_ns, &distortion_ns)) {
 				if (r->compositor_gpu_pass_trace == NULL) {
-					r->compositor_gpu_pass_trace = u_timing_trace_open("compositor_gpu_pass", 64 * 1024);
+					r->compositor_gpu_pass_trace =
+					    u_timing_trace_open("compositor_gpu_pass", 64 * 1024);
 					if (r->compositor_gpu_pass_trace != NULL) {
 						fputs("frame_id,path,composition_ns,distortion_ns,feedback_ns\n",
 						      r->compositor_gpu_pass_trace);
@@ -2149,7 +2150,8 @@ comp_renderer_create(struct comp_compositor *c, VkExtent2D scratch_extent)
 bool
 comp_renderer_drain(struct comp_renderer *r, uint64_t timeout_ns)
 {
-	if (r == NULL || r->fenced_buffer < 0) return true;
+	if (r == NULL || r->fenced_buffer < 0)
+		return true;
 	struct vk_bundle *vk = &r->c->base.vk;
 	return vk->vkWaitForFences(vk->device, 1, &r->fences[r->fenced_buffer], VK_TRUE, timeout_ns) == VK_SUCCESS;
 }

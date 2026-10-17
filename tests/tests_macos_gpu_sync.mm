@@ -8,7 +8,8 @@ static void
 vkcheck_at(VkResult result, int line)
 {
 	if (result != VK_SUCCESS)
-		throw std::runtime_error("Vulkan result " + std::to_string(result) + " at line " + std::to_string(line));
+		throw std::runtime_error("Vulkan result " + std::to_string(result) + " at line " +
+		                         std::to_string(line));
 }
 #define vkcheck(result) vkcheck_at(result, __LINE__)
 
@@ -106,7 +107,8 @@ producer(const char *service_name, const char *socket_path)
 		}
 		auto write_texture = [&](id<MTLCommandQueue> q) {
 			id<MTLCommandBuffer> cb = [q commandBuffer];
-			if (c.mode == 9) [cb encodeWaitForEvent:service.gate value:c.value];
+			if (c.mode == 9)
+				[cb encodeWaitForEvent:service.gate value:c.value];
 			if (upload_pattern) {
 				for (unsigned y = 0; y < W; ++y)
 					for (unsigned x = 0; x < W; ++x)
@@ -224,7 +226,7 @@ struct Child
 					@"GPU_SYNC_TEXTURE_SIZE" : [NSString stringWithFormat:@"%u", W],
 					@"GPU_SYNC_PRODUCER_UPLOAD" :
 					    (getenv("GPU_SYNC_PRODUCER_UPLOAD")
-					         ? [NSString stringWithUTF8String:getenv("GPU_SYNC_PRODUCER_UPLOAD")]
+			                         ? [NSString stringWithUTF8String:getenv("GPU_SYNC_PRODUCER_UPLOAD")]
 					         : @"")
 				}
 			};
@@ -264,13 +266,19 @@ struct Child
 		__block MTLSharedEventHandle *result = nil;
 		dispatch_semaphore_t done = dispatch_semaphore_create(0);
 		id<GPUSyncEventProtocol> proxy = [connection remoteObjectProxyWithErrorHandler:^(NSError *error) {
-			(void)error; dispatch_semaphore_signal(done);
+		  (void)error;
+		  dispatch_semaphore_signal(done);
 		}];
 		void (^reply)(MTLSharedEventHandle *) = ^(MTLSharedEventHandle *h) {
-			result = [h retain]; dispatch_semaphore_signal(done);
+		  result = [h retain];
+		  dispatch_semaphore_signal(done);
 		};
-		if (gate) [proxy gateHandle:reply]; else [proxy eventHandle:reply];
-		check(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0 && result != nil,
+		if (gate)
+			[proxy gateHandle:reply];
+		else
+			[proxy eventHandle:reply];
+		check(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0 &&
+		          result != nil,
 		      "XPC event timeout");
 		return [result autorelease];
 	}
@@ -531,11 +539,16 @@ struct Consumer
 		unsigned copies = getenv("GPU_SYNC_COPY_REPEATS") ? std::stoul(getenv("GPU_SYNC_COPY_REPEATS")) : 1;
 		check(copies >= 1 && copies <= 1024, "copy repeat bound");
 		for (unsigned i = 0; i < copies; i++) {
-			vkCmdCopyImageToBuffer(cmd, images[c.image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1, &copy);
-			VkMemoryBarrier order{}; order.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-			order.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; order.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-			if (i+1 < copies) vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-			                                      0, 1, &order, 0, nullptr, 0, nullptr);
+			vkCmdCopyImageToBuffer(cmd, images[c.image], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer, 1,
+			                       &copy);
+			VkMemoryBarrier order{};
+			order.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+			order.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			order.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			if (i + 1 < copies)
+				vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
+				                     VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 1, &order, 0, nullptr, 0,
+				                     nullptr);
 		}
 		std::swap(barrier.oldLayout, barrier.newLayout);
 		barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -566,11 +579,14 @@ struct Consumer
 		s.pCommandBuffers = &cmd;
 		uint64_t start = ns();
 		if (c.mode == 10) {
-			if (release_gate.joinable()) release_gate.join();
-			release_gate = std::thread([this, value=c.value] {
+			if (release_gate.joinable())
+				release_gate.join();
+			release_gate = std::thread([this, value = c.value] {
 				std::this_thread::sleep_for(std::chrono::milliseconds(50));
-				VkSemaphoreSignalInfo signal{}; signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
-				signal.semaphore = consumer_gate; signal.value = value;
+				VkSemaphoreSignalInfo signal{};
+				signal.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO;
+				signal.semaphore = consumer_gate;
+				signal.value = value;
 				vkSignalSemaphore(device, &signal);
 			});
 		}
@@ -627,9 +643,11 @@ struct Consumer
 	}
 	~Consumer()
 	{
-		if (release_gate.joinable()) release_gate.join();
+		if (release_gate.joinable())
+			release_gate.join();
 		producer_gate.signaledValue = UINT64_MAX; // Release only the trusted test gate.
-		if (unresolved_producer) return;
+		if (unresolved_producer)
+			return;
 		// On an unresolved consumer fence retain the entire Vulkan device/resources until process exit.
 		if (pending && !complete(0))
 			return;
@@ -660,30 +678,47 @@ static int
 concurrent_producers(const char *path, unsigned frames)
 {
 	uint64_t start = ns();
-	Child first(path); Consumer a(first);
-	Child second(path); Consumer b(second);
+	Child first(path);
+	Consumer a(first);
+	Child second(path);
+	Consumer b(second);
 	check(a.registry == b.registry, "concurrent producers must share the same physical device");
-	printf("{\"event\":\"config\",\"scenario\":\"concurrent-producers\",\"producer_pids\":[%d,%d],\"consumer_pid\":%d,\"texture_size\":%u,\"thermal\":%ld}\n",
-	       first.pid, second.pid, getpid(), W, (long)[NSProcessInfo processInfo].thermalState);
+	printf(
+	    "{\"event\":\"config\",\"scenario\":\"concurrent-producers\",\"producer_pids\":[%d,%d],\"consumer_pid\":%d,"
+	    "\"texture_size\":%u,\"thermal\":%ld}\n",
+	    first.pid, second.pid, getpid(), W, (long)[NSProcessInfo processInfo].thermalState);
 	for (unsigned frame = 1; frame <= frames; frame++) {
-		Command ca{frame,frame,(frame-1)%N,(uint32_t)first.pid,0,0};
-		Command cb=ca; cb.producer=(uint32_t)second.pid;
-		io(first.input,&ca,sizeof(ca),true); io(second.input,&cb,sizeof(cb),true);
-		Receipt ra{},rb{}; io(first.output,&ra,sizeof(ra),false); io(second.output,&rb,sizeof(rb),false);
-		uint64_t until=ns()+500000000;
-		while ((a.event.signaledValue < frame || b.event.signaledValue < frame) && ns()<until)
+		Command ca{frame, frame, (frame - 1) % N, (uint32_t)first.pid, 0, 0};
+		Command cb = ca;
+		cb.producer = (uint32_t)second.pid;
+		io(first.input, &ca, sizeof(ca), true);
+		io(second.input, &cb, sizeof(cb), true);
+		Receipt ra{}, rb{};
+		io(first.output, &ra, sizeof(ra), false);
+		io(second.output, &rb, sizeof(rb), false);
+		uint64_t until = ns() + 500000000;
+		while ((a.event.signaledValue < frame || b.event.signaledValue < frame) && ns() < until)
 			std::this_thread::sleep_for(std::chrono::microseconds(100));
 		check(a.event.signaledValue >= frame && b.event.signaledValue >= frame, "concurrent readiness");
-		a.submit(ca); b.submit(cb);
+		a.submit(ca);
+		b.submit(cb);
 		check(a.complete() && b.complete(), "concurrent GPU completion");
 		check(a.pixels(ca) && b.pixels(cb), "cross-producer attribution or overwrite");
-		first.ack(); second.ack();
-		printf("{\"event\":\"concurrent_frame\",\"frame\":%u,\"both_gpu_patterns_valid\":true,\"elapsed_ns\":%llu,\"thermal\":%ld}\n",frame,(unsigned long long)(ns()-start),(long)[NSProcessInfo processInfo].thermalState);
+		first.ack();
+		second.ack();
+		printf(
+		    "{\"event\":\"concurrent_frame\",\"frame\":%u,\"both_gpu_patterns_valid\":true,\"elapsed_ns\":%llu,"
+		    "\"thermal\":%ld}\n",
+		    frame, (unsigned long long)(ns() - start), (long)[NSProcessInfo processInfo].thermalState);
 	}
-	Command stop{}; stop.mode=99;
-	io(first.input,&stop,sizeof(stop),true); io(second.input,&stop,sizeof(stop),true);
-	printf("{\"event\":\"result\",\"scenario\":\"concurrent-producers\",\"status\":\"PASS\",\"consumed\":%u,\"elapsed_ns\":%llu,\"thermal_end\":%ld}\n",
-	       frames*2,(unsigned long long)(ns()-start),(long)[NSProcessInfo processInfo].thermalState);
+	Command stop{};
+	stop.mode = 99;
+	io(first.input, &stop, sizeof(stop), true);
+	io(second.input, &stop, sizeof(stop), true);
+	printf(
+	    "{\"event\":\"result\",\"scenario\":\"concurrent-producers\",\"status\":\"PASS\",\"consumed\":%u,\"elapsed_"
+	    "ns\":%llu,\"thermal_end\":%ld}\n",
+	    frames * 2, (unsigned long long)(ns() - start), (long)[NSProcessInfo processInfo].thermalState);
 	return 0;
 }
 
@@ -707,7 +742,8 @@ main(int argc, char **argv)
 			std::string scenario = argc > 1 ? argv[1] : "normal";
 			unsigned frames = argc > 2 ? std::stoul(argv[2]) : 12;
 			check(frames > 0 && frames <= 1000000, "frame count bound");
-			if (scenario == "concurrent-producers") return concurrent_producers(argv[0], frames);
+			if (scenario == "concurrent-producers")
+				return concurrent_producers(argv[0], frames);
 			const unsigned hung = getenv("GPU_SYNC_HUNG_MS") ? std::stoul(getenv("GPU_SYNC_HUNG_MS")) : 500;
 			const unsigned margin =
 			    getenv("GPU_SYNC_MARGIN_US") ? std::stoul(getenv("GPU_SYNC_MARGIN_US")) : 6000;
@@ -715,8 +751,8 @@ main(int argc, char **argv)
 			    getenv("GPU_SYNC_INTERVAL_US") ? std::stoul(getenv("GPU_SYNC_INTERVAL_US")) : 8333;
 			check(hung > 0 && hung <= 10000 && interval > margin, "timing parameters");
 			const std::vector<std::string> scenarios = {
-			    "normal",      "delayed",    "missing",        "future",      "nonmonotonic",
-			    "exit-before", "exit-after", "consumer-delay", "multi-queue", "broken-queue",
+			    "normal",      "delayed",    "missing",         "future",        "nonmonotonic",
+			    "exit-before", "exit-after", "consumer-delay",  "multi-queue",   "broken-queue",
 			    "reuse",       "idle",       "cancel-callback", "exit-inflight", "consumer-gpu-delay"};
 			check(std::find(scenarios.begin(), scenarios.end(), scenario) != scenarios.end(),
 			      "unknown scenario");
@@ -769,8 +805,10 @@ main(int argc, char **argv)
 					c.mode = 2;
 				if (scenario == "exit-before")
 					c.mode = 4;
-				if (scenario == "exit-inflight") c.mode = 9;
-				if (scenario == "consumer-gpu-delay") c.mode = 10;
+				if (scenario == "exit-inflight")
+					c.mode = 9;
+				if (scenario == "consumer-gpu-delay")
+					c.mode = 10;
 				if (scenario == "broken-queue")
 					c.mode = 7;
 				if (scenario == "multi-queue")
@@ -784,15 +822,17 @@ main(int argc, char **argv)
 					check(
 					    (getenv("GPU_SYNC_WINE_LAUNCHER")
 					         ? receipt.gpu_status == UINT64_MAX
-					         : receipt.gpu_status < MTLCommandBufferStatusCompleted) &&
+						 : receipt.gpu_status < MTLCommandBufferStatusCompleted) &&
 					        gpu.event.signaledValue < c.value,
 					    "producer must have actual submitted, incomplete GPU work at termination");
 					gpu.unresolved_producer = true;
 					check(kill(child.pid, SIGKILL) == 0, "kill in-flight producer");
 					child.pid = -1;
 					gpu.producer_gate.signaledValue = c.value;
-					printf("{\"event\":\"producer_killed_inflight\",\"gpu_status\":%llu,\"storage_retained\":true}\n",
-					       (unsigned long long)receipt.gpu_status);
+					printf(
+					    "{\"event\":\"producer_killed_inflight\",\"gpu_status\":%llu,\"storage_"
+					    "retained\":true}\n",
+					    (unsigned long long)receipt.gpu_status);
 				}
 				uint64_t expected = c.value + (scenario == "future" ? 1 : 0);
 				while (gpu.event.signaledValue < expected &&
@@ -841,7 +881,8 @@ main(int argc, char **argv)
 				}
 				check(scenario != "missing" && scenario != "future" && scenario != "exit-before",
 				      "fault unexpectedly ready");
-				if (scenario == "exit-inflight") gpu.unresolved_producer = false;
+				if (scenario == "exit-inflight")
+					gpu.unresolved_producer = false;
 				readiness.push_back(observed - obligation);
 				if (scenario == "exit-after") {
 					kill(child.pid, SIGKILL);
@@ -857,7 +898,8 @@ main(int argc, char **argv)
 				    "\"TRANSFER\",\"duration_ns\":%llu}\n",
 				    f, (unsigned long long)c.value, (unsigned long long)duration);
 				if (scenario == "consumer-gpu-delay") {
-					check(!gpu.complete(0) && gpu.pending, "actual consumer GPU work must still own the image");
+					check(!gpu.complete(0) && gpu.pending,
+					      "actual consumer GPU work must still own the image");
 					printf("{\"event\":\"consumer_gpu_pending\",\"reuse_permitted\":false}\n");
 				}
 				if (scenario == "consumer-delay") {

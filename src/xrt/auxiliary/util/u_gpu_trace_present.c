@@ -18,7 +18,8 @@ cancel_entry(struct u_gpu_trace_present_entry *entry, const char *reason)
 		return;
 	}
 	if (entry->native_started) {
-		u_gpu_trace_signpost_gpu_to_glass_end(&entry->frame, entry->gpu_end_ns, 0, os_monotonic_get_ns(), reason);
+		u_gpu_trace_signpost_gpu_to_glass_end(&entry->frame, entry->gpu_end_ns, 0, os_monotonic_get_ns(),
+		                                      reason);
 	}
 	entry->native_started = false;
 	entry->terminal = true;
@@ -62,11 +63,11 @@ finish(struct u_gpu_trace_present_entry *entry, int64_t observed_ns)
 	entry->measured_ns = entry->presented_ns - entry->gpu_end_ns;
 	if (entry->native_started) {
 		u_gpu_trace_signpost_gpu_to_glass_end(&entry->frame, entry->gpu_end_ns, entry->presented_ns,
-		                                     observed_ns, "presented");
+		                                      observed_ns, "presented");
 	}
-	u_gpu_trace_event("presentation", "compositor_gpu_end_to_display", entry->frame.scope_id,
-	                  entry->frame.frame_id, entry->frame.image_index, entry->frame.timeline_value,
-	                  entry->presented_ns, entry->measured_ns);
+	u_gpu_trace_event("presentation", "compositor_gpu_end_to_display", entry->frame.scope_id, entry->frame.frame_id,
+	                  entry->frame.image_index, entry->frame.timeline_value, entry->presented_ns,
+	                  entry->measured_ns);
 	entry->native_started = false;
 	entry->terminal = true;
 }
@@ -98,7 +99,8 @@ u_gpu_trace_present_reported(struct u_gpu_trace_present *state,
 	if (state->closed) {
 		return;
 	}
-	if (presented_ns > 0 && depth >= 0 && frame->frame_id > 0 && (uint64_t)frame->frame_id > state->latest_depth_frame) {
+	if (presented_ns > 0 && depth >= 0 && frame->frame_id > 0 &&
+	    (uint64_t)frame->frame_id > state->latest_depth_frame) {
 		if (state->depth != depth) {
 			u_gpu_trace_present_depth_change(frame, state->depth, depth, presented_ns);
 			state->depth = depth;

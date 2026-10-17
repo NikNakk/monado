@@ -3550,7 +3550,7 @@ a competitor keeping two ~8 ms command buffers in flight; two repeats each):
 | Competitor, priority 0 | 0.28 ms | 0.39 / 0.45–0.46 ms |
 | Competitor, priority 2 | ~105 ms | ~105 / ~117 ms |
 
-0 is highest and effectively pre-empts the competitor. 2 is near-starved. The
+0 is highest and effectively preempts the competitor. 2 is near-starved. The
 idle job is slower than the loaded one (0.92 against 0.28 ms) because of GPU
 clocks: idle timings partly reflect low clocks.
 

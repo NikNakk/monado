@@ -693,7 +693,7 @@ comp_swapchain_teardown(struct comp_swapchain *sc)
 	}
 
 	for (uint32_t i = 0; i < sc->base.base.image_count; i++) {
-		#ifdef XRT_OS_OSX
+#ifdef XRT_OS_OSX
 		image_cleanup(vk, &sc->images[i], sc->gpu_reuse_safe_destroy);
 #else
 		image_cleanup(vk, &sc->images[i], false);
@@ -790,7 +790,10 @@ comp_swapchain_create(struct vk_bundle *vk,
 
 #ifdef XRT_OS_OSX
 	xret = comp_gpu_client_budget_adopt(&sc->base.base);
-	if (xret != XRT_SUCCESS) { really_destroy(sc); return xret; }
+	if (xret != XRT_SUCCESS) {
+		really_destroy(sc);
+		return xret;
+	}
 #endif
 	// Correctly setup refcounts.
 	xrt_swapchain_reference(out_xsc, &sc->base.base);
@@ -824,7 +827,10 @@ comp_swapchain_import(struct vk_bundle *vk,
 
 #ifdef XRT_OS_OSX
 	xret = comp_gpu_client_budget_adopt(&sc->base.base);
-	if (xret != XRT_SUCCESS) { really_destroy(sc); return xret; }
+	if (xret != XRT_SUCCESS) {
+		really_destroy(sc);
+		return xret;
+	}
 #endif
 	// Correctly setup refcounts.
 	xrt_swapchain_reference(out_xsc, &sc->base.base);

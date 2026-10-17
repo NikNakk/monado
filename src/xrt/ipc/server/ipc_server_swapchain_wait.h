@@ -27,11 +27,8 @@ extern "C" {
  * timeout is still honoured.
  */
 xrt_result_t
-ipc_server_swapchain_wait_in_slices(struct xrt_swapchain *xsc,
-                                    int64_t timeout_ns,
-                                    uint32_t index,
-                                    int client_fd,
-                                    const volatile bool *running);
+ipc_server_swapchain_wait_in_slices(
+    struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t index, int client_fd, const volatile bool *running);
 
 #ifdef __cplusplus
 }

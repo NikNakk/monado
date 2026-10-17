@@ -872,8 +872,10 @@ render_resources_init(struct render_resources *r,
 	r->compute.layer.quad_bounds_enabled = debug_get_bool_option_macos_quad_bounds();
 	r->compute.layer.common_layers_enabled = debug_get_bool_option_macos_common_layers();
 	r->compute.layer.common_layers_logged = false;
-	if (r->compute.layer.common_layers_enabled) VK_INFO(r->vk, "Compute common-layer specialization enabled");
-	if (r->compute.layer.quad_bounds_enabled) VK_INFO(r->vk, "Compute quad bounds rejection enabled");
+	if (r->compute.layer.common_layers_enabled)
+		VK_INFO(r->vk, "Compute common-layer specialization enabled");
+	if (r->compute.layer.quad_bounds_enabled)
+		VK_INFO(r->vk, "Compute quad bounds rejection enabled");
 #else
 	r->compute.layer.quad_bounds_enabled = false;
 	r->compute.layer.common_layers_enabled = false;
@@ -912,14 +914,14 @@ render_resources_init(struct render_resources *r,
 		for (uint32_t i = 0; i < ARRAY_SIZE(layer_variants); ++i) {
 			layer_variants[i].use_common_layers = VK_TRUE;
 		}
-		xret = render_layer_pipeline_cache_prewarm(r->compute.layer.pipeline_cache, vk,
-		                                          layer_variants, ARRAY_SIZE(layer_variants));
+		xret = render_layer_pipeline_cache_prewarm(r->compute.layer.pipeline_cache, vk, layer_variants,
+		                                           ARRAY_SIZE(layer_variants));
 		XVK_CHK_WITH_RET(xret, "render_layer_pipeline_cache_prewarm common", false);
-		xret = render_layer_pipeline_cache_get(r->compute.layer.pipeline_cache, vk,
-		                                      &layer_variants[0], &r->compute.layer.common_non_timewarp_pipeline);
+		xret = render_layer_pipeline_cache_get(r->compute.layer.pipeline_cache, vk, &layer_variants[0],
+		                                       &r->compute.layer.common_non_timewarp_pipeline);
 		XVK_CHK_WITH_RET(xret, "render_layer_pipeline_cache_get common non-timewarp", false);
-		xret = render_layer_pipeline_cache_get(r->compute.layer.pipeline_cache, vk,
-		                                      &layer_variants[1], &r->compute.layer.common_timewarp_pipeline);
+		xret = render_layer_pipeline_cache_get(r->compute.layer.pipeline_cache, vk, &layer_variants[1],
+		                                       &r->compute.layer.common_timewarp_pipeline);
 		XVK_CHK_WITH_RET(xret, "render_layer_pipeline_cache_get common timewarp", false);
 	}
 
@@ -1115,7 +1117,7 @@ render_resources_init(struct render_resources *r,
 	    .flags = 0, // Reserved.
 	    .queryType = VK_QUERY_TYPE_TIMESTAMP,
 	    .queryCount = r->gpu_pass_timing ? 6 : 2, // Frame and optional pass pairs.
-	    .pipelineStatistics = 0, // Not used.
+	    .pipelineStatistics = 0,                  // Not used.
 	};
 
 	vk->vkCreateQueryPool( //
@@ -1309,8 +1311,8 @@ render_resources_get_duration(struct render_resources *r, uint64_t *out_gpu_dura
 
 bool
 render_resources_get_pass_durations(struct render_resources *r,
-                                   uint64_t *out_composition_ns,
-                                   uint64_t *out_distortion_ns)
+                                    uint64_t *out_composition_ns,
+                                    uint64_t *out_distortion_ns)
 {
 	if (!r->gpu_pass_timing) {
 		return false;
@@ -1318,7 +1320,7 @@ render_resources_get_pass_durations(struct render_resources *r,
 	uint64_t ticks[4] = {0};
 	struct vk_bundle *vk = r->vk;
 	VkResult ret = vk->vkGetQueryPoolResults(vk->device, r->query_pool, 2, 4, sizeof(ticks), ticks,
-	                                       sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+	                                         sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
 	if (ret != VK_SUCCESS) {
 		return false;
 	}

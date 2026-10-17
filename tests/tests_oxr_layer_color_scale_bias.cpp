@@ -41,7 +41,8 @@ TEST_CASE("Every non-identity OpenXR color component retains transformation")
 		for (bool change_scale : {false, true}) {
 			for (unsigned channel = 0; channel < 4; ++channel) {
 				for (float changed : {0.25f, -0.5f, std::nextafter(change_scale ? 1.0f : 0.0f, 2.0f),
-				                      std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
+				                      std::numeric_limits<float>::infinity(),
+				                      std::numeric_limits<float>::quiet_NaN()}) {
 					auto value = identity();
 					XrColor4f &color = change_scale ? value.colorScale : value.colorBias;
 					float *components[] = {&color.r, &color.g, &color.b, &color.a};
@@ -50,10 +51,12 @@ TEST_CASE("Every non-identity OpenXR color component retains transformation")
 					data.type = type;
 					data.flags = XRT_LAYER_COMPOSITION_UNPREMULTIPLIED_ALPHA_BIT;
 					oxr_layer_set_color_scale_bias(&value, &data);
-					CHECK(data.flags == (XRT_LAYER_COMPOSITION_UNPREMULTIPLIED_ALPHA_BIT | XRT_LAYER_COMPOSITION_COLOR_BIAS_SCALE));
+					CHECK(data.flags == (XRT_LAYER_COMPOSITION_UNPREMULTIPLIED_ALPHA_BIT |
+					                     XRT_LAYER_COMPOSITION_COLOR_BIAS_SCALE));
 					const auto &result = change_scale ? data.color_scale : data.color_bias;
 					float stored[] = {result.r, result.g, result.b, result.a};
-					CHECK((std::isnan(changed) ? std::isnan(stored[channel]) : stored[channel] == changed));
+					CHECK((std::isnan(changed) ? std::isnan(stored[channel])
+					                           : stored[channel] == changed));
 				}
 			}
 		}
