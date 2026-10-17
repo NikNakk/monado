@@ -11,19 +11,42 @@ upstream, with optional features disabled by default. The current sync base is
 `ec188bb13`; update the base in `scripts/check-contribution-style.py` when the
 next upstream sync is reviewed.
 
-Upstream submissions are paused as of 2026-10-08 while the first merge request
-awaits merge and the contributor learns the review process. Local integration,
-CI and evidence maintenance continue; the review units below are future work.
+## Upstream progress, 2026-10-15
+
+- **0A merged:** [MR !3029](https://gitlab.freedesktop.org/monado/monado/-/merge_requests/3029),
+  generic IPC shutdown ordering and regression tests, is upstream as `10c57897e`.
+  The pause while waiting for the first MR to merge has ended.
+- **0B parked:** defer native peer identity and endpoint ownership to the macOS
+  service/XPC series. Kernel peer identity is needed for PID-scoped Metal/XPC
+  ownership, but no independent Linux failure has been established that justifies
+  the proposed connection checks or replacement of the application-reported PID.
+  Preserve existing Linux access policy; any Linux fix needs its own reproducer.
+  The uncommitted `codex/unix-socket-security` draft is saved in the upstreaming
+  checkout's named stash, `2ac3a31f12ff5d1336ffd3b8ca173ee798f18a79`.
+- **0C active:** generic dead-reckoning FIFO edge fix on
+  `codex/dead-reckoning-fifo` in `~/Code/monado-upstreaming`, based on latest
+  fetched upstream `8b259763f`, including merged !3029. The uncommitted patch
+  moves the starting-index decrement after the timestamp search. One regression
+  test has four sections covering bases before, equal to the oldest, within and
+  after the retained sample history. The two boundary sections fail before the
+  fix; all 28 assertions pass afterward on Linux and macOS, with focused macOS
+  ASan/UBSan coverage. Formatting checks pass. Human review/sign-off, commit and submission
+  remain outstanding; no MR number has been assigned.
+- **Following work:** 0D, coherent macOS portability fixes, then platform
+  foundations and the minimum viable macOS runtime. The review-unit identifiers
+  and dependency outline are in [the upstreaming review](macos-upstreaming-review.md#11-proposed-upstream-merge-request-series).
 
 ## Review units
 
-1. Generic IPC shutdown ordering and regression tests. This can be reviewed
-   independently of the macOS port.
+1. Generic fixes: 0A IPC shutdown is merged; 0C dead-reckoning FIFO handling is
+   active; 0D portability fixes follow. Keep each independently reviewable.
 2. Platform foundations: build support, IOKit HID, native time/filesystem helpers
    and the basic macOS presenter. Keep PS VR2 policy changes separate from the
    generic platform interfaces.
 3. Metal/IOSurface transport, authenticated native peer identity, bounded XPC
-   handoffs and launchd lifecycle. Include rejection, cleanup and ownership tests.
+   handoffs and launchd lifecycle. Include the deferred 0B socket ownership work
+   with rejection, cleanup and ownership tests. Do not extend Linux connection
+   policy as preparation for macOS.
 4. Hosted client composition and display ownership, including teardown and
    passthrough sharing. Explain the private QuartzCore dependency and preserve
    explicit unsupported behavior when the interfaces are unavailable.

@@ -1002,8 +1002,11 @@ capture is prepared. See the
 - Validate fixed then eye-tracked foveation in Unity or Unreal; Wine requires
   rendering-backend work as well as extension transport. See the
   [framework plan](macos-openxr-foveation.md#framework-and-wine-validation-plan-2026-10-08).
-- Upstream submissions are paused pending the first MR's merge and a clearer
-  understanding of the process. Continue local quality and CI work.
+- MR !3029 (0A, IPC shutdown) is merged. The active upstream topic is 0C,
+  the dead-reckoning FIFO edge fix, on `codex/dead-reckoning-fifo` in the separate
+  upstreaming checkout. 0B is parked for macOS service/XPC work; a standalone
+  Linux change needs a concrete reproducer. See the
+  [upstream progress record](macos-upstream-contribution.md#upstream-progress-2026-10-15).
 
 Passthrough calibration now has a [live USB capture guide](macos-psvr2-passthrough-calibration.md)
 and the previously uncommitted mode-4/BC4 comparison tooling from the separate
