@@ -240,10 +240,9 @@ u_gpu_trace_perfetto_depth_change(const struct u_gpu_trace_frame *frame,
 	if (capture_state.load(std::memory_order_acquire) != generation)
 		return;
 	auto track = perfetto::NamedTrack("presentation", frame->scope_id);
-	TRACE_EVENT_INSTANT("monado.gpu", "present_queue_depth_changed", track, timestamp(event_ns),
-	                    "record_type", "observation", "domain", "presentation", "scope_id", frame->scope_id,
-	                    "owner_scope_id", 0, "frame_id", frame->frame_id, "image_index", frame->image_index,
-	                    "timeline_value", frame->timeline_value, "event_ns", event_ns, "duration_ns", 0,
-	                    "previous_depth_known", previous >= 0, "previous_depth", previous >= 0 ? previous : 0,
-	                    "depth", depth);
+	TRACE_EVENT_INSTANT("monado.gpu", "present_queue_depth_changed", track, timestamp(event_ns), "record_type",
+	                    "observation", "domain", "presentation", "scope_id", frame->scope_id, "owner_scope_id", 0,
+	                    "frame_id", frame->frame_id, "image_index", frame->image_index, "timeline_value",
+	                    frame->timeline_value, "event_ns", event_ns, "duration_ns", 0, "previous_depth_known",
+	                    previous >= 0, "previous_depth", previous >= 0 ? previous : 0, "depth", depth);
 }

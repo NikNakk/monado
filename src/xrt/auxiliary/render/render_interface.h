@@ -699,8 +699,8 @@ render_resources_get_duration(struct render_resources *r, uint64_t *out_gpu_dura
  */
 bool
 render_resources_get_pass_durations(struct render_resources *r,
-                                   uint64_t *out_composition_ns,
-                                   uint64_t *out_distortion_ns);
+                                    uint64_t *out_composition_ns,
+                                    uint64_t *out_distortion_ns);
 
 
 /*

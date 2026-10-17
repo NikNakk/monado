@@ -1043,8 +1043,7 @@ comp_render_cs_layer(struct render_compute *render,
 	    target_image_view,     //
 	    target_view,           //
 	    do_timewarp,           //
-	    render->r->compute.layer.common_layers_enabled &&
-	        render_layer_common_eligible(ubo_data, foveation_data));
+	    render->r->compute.layer.common_layers_enabled && render_layer_common_eligible(ubo_data, foveation_data));
 }
 
 void
@@ -1100,7 +1099,7 @@ crc_pass_timestamp(struct render_compute *render, uint32_t query)
 {
 	if (render->r->gpu_pass_timing) {
 		render->r->vk->vkCmdWriteTimestamp(render->r->cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-		                                  render->r->query_pool, query);
+		                                   render->r->query_pool, query);
 	}
 }
 
@@ -1131,8 +1130,7 @@ comp_render_cs_dispatch(struct render_compute *render,
 	// Empty composition brackets on the fast/clear paths keep every query ready.
 	crc_pass_timestamp(render, 2);
 	render->r->gpu_pass_path = 0;
-	if (fast_path && (layer->data.type == XRT_LAYER_PROJECTION ||
-	                  layer->data.type == XRT_LAYER_PROJECTION_DEPTH)) {
+	if (fast_path && (layer->data.type == XRT_LAYER_PROJECTION || layer->data.type == XRT_LAYER_PROJECTION_DEPTH)) {
 		render->r->gpu_pass_path = 1;
 	}
 	if (render->r->gpu_pass_path == 1 || layer_count == 0) {

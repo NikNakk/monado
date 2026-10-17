@@ -707,10 +707,12 @@ API_AVAILABLE(macos(14.0))
 
 - (BOOL)shutdownBefore:(dispatch_time_t)deadline
 {
-	if (_joined) return YES;
+	if (_joined)
+		return YES;
 	// Keep the source/window alive on timeout: its run loop may still use them.
 	[self performSelector:@selector(applyStop) onThread:_thread withObject:nil waitUntilDone:NO];
-	if (dispatch_semaphore_wait(_finished, deadline) != 0) return NO;
+	if (dispatch_semaphore_wait(_finished, deadline) != 0)
+		return NO;
 	_joined = YES;
 	return YES;
 }
@@ -1408,7 +1410,8 @@ macos_schedule_drawable_slot(struct comp_window_macos *cwm)
 	  @autoreleasepool {
 		  uint64_t begin_ns = os_monotonic_get_ns();
 		  macos_trace_drawable_prefetch(cwm, "slot_acquire_begin", 0, begin_ns, begin_ns, 0);
-		  uint64_t slot_interval = u_gpu_trace_cpu_begin("presentation", "slot_acquire", cwm->gpu_trace_id, -1, 0);
+		  uint64_t slot_interval =
+		      u_gpu_trace_cpu_begin("presentation", "slot_acquire", cwm->gpu_trace_id, -1, 0);
 		  id<CAMetalDrawable> drawable = [cwm->metal_layer nextDrawable];
 		  u_gpu_trace_cpu_end("presentation", "slot_acquire", slot_interval, drawable == nil ? -1 : 0);
 		  uint64_t end_ns = os_monotonic_get_ns();
@@ -1612,8 +1615,8 @@ macos_wait_render_complete(struct comp_window_macos *cwm, uint64_t value, const 
 		VkResult ret = vk->vkWaitSemaphores(vk->device, &wait_info, MACOS_RENDER_WAIT_REPORT_NS);
 		if (ret != VK_TIMEOUT) {
 			if (reports > 0) {
-				COMP_WARN(ct->c, "%s: render-complete value %" PRIu64 " arrived after ~%u s", what, value,
-				          reports);
+				COMP_WARN(ct->c, "%s: render-complete value %" PRIu64 " arrived after ~%u s", what,
+				          value, reports);
 			}
 			return ret;
 		}
@@ -1964,9 +1967,10 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 		pthread_mutex_unlock(&state->guard_mutex);
 		if (skip) {
 			if (drains != previous_drains) {
-				u_gpu_trace_event("presentation", "latency_guard_drain", cwm->gpu_trace_id, frame_id, index,
-				                  timeline_semaphore_value, worker_start_ns, 0);
-				COMP_INFO(ct->c, "macOS latency guard: drain %llu at frame %llu, withholding one refresh",
+				u_gpu_trace_event("presentation", "latency_guard_drain", cwm->gpu_trace_id, frame_id,
+				                  index, timeline_semaphore_value, worker_start_ns, 0);
+				COMP_INFO(ct->c,
+				          "macOS latency guard: drain %llu at frame %llu, withholding one refresh",
 				          (unsigned long long)drains, (unsigned long long)frame_id);
 			}
 			macos_retire_unpresented_job(cwm, job, "latency_guard_drop", 0);
@@ -2022,10 +2026,12 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 				next_drawable_begin_ns = os_monotonic_get_ns();
 				macos_trace_drawable_prefetch(cwm, "slot_fallback_begin", timeline_semaphore_value,
 				                              next_drawable_begin_ns, next_drawable_begin_ns, 0);
-				uint64_t fallback_interval = u_gpu_trace_cpu_begin("presentation", "slot_fallback", cwm->gpu_trace_id,
-				                                                     frame_id, timeline_semaphore_value);
+				uint64_t fallback_interval =
+				    u_gpu_trace_cpu_begin("presentation", "slot_fallback", cwm->gpu_trace_id, frame_id,
+				                          timeline_semaphore_value);
 				drawable = [cwm->metal_layer nextDrawable];
-				u_gpu_trace_cpu_end("presentation", "slot_fallback", fallback_interval, drawable == nil ? -1 : 0);
+				u_gpu_trace_cpu_end("presentation", "slot_fallback", fallback_interval,
+				                    drawable == nil ? -1 : 0);
 				after_drawable_ns = os_monotonic_get_ns();
 				macos_trace_drawable_prefetch(cwm, "slot_fallback_end", timeline_semaphore_value,
 				                              after_drawable_ns, next_drawable_begin_ns,
@@ -2050,10 +2056,11 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			macos_trace_present_worker(cwm, "drawable_trace_begin", job, drawable_trace_begin_ns, 0,
 			                           worker_start_ns, 0, 0, 0, 0, shared_event_wait);
 			next_drawable_begin_ns = os_monotonic_get_ns();
-			uint64_t drawable_interval = u_gpu_trace_cpu_begin("presentation", "next_drawable", cwm->gpu_trace_id,
-			                                                    frame_id, timeline_semaphore_value);
+			uint64_t drawable_interval = u_gpu_trace_cpu_begin(
+			    "presentation", "next_drawable", cwm->gpu_trace_id, frame_id, timeline_semaphore_value);
 			drawable = [cwm->metal_layer nextDrawable];
-			u_gpu_trace_cpu_end("presentation", "next_drawable", drawable_interval, drawable == nil ? -1 : 0);
+			u_gpu_trace_cpu_end("presentation", "next_drawable", drawable_interval,
+			                    drawable == nil ? -1 : 0);
 			after_drawable_ns = os_monotonic_get_ns();
 			macos_trace_present_worker(cwm, "drawable_end", job, after_drawable_ns, 0, worker_start_ns,
 			                           next_drawable_begin_ns, after_drawable_ns, 0, 0, shared_event_wait);
@@ -2070,9 +2077,10 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			return VK_ERROR_DEVICE_LOST;
 		}
 		if (u_gpu_trace_signpost_enabled()) {
-			command_buffer.label = [NSString stringWithFormat:@"MonadoCopy frame=%llu timeline=%llu image=%u",
-			                            (unsigned long long)frame_id,
-			                            (unsigned long long)timeline_semaphore_value, index];
+			command_buffer.label =
+			    [NSString stringWithFormat:@"MonadoCopy frame=%llu timeline=%llu image=%u",
+			                               (unsigned long long)frame_id,
+			                               (unsigned long long)timeline_semaphore_value, index];
 		}
 		if (shared_event_wait) {
 			[command_buffer encodeWaitForEvent:cwm->render_complete_event value:timeline_semaphore_value];
@@ -2152,11 +2160,13 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			  int64_t presented_minus_desired_ns =
 			      presented_monotonic_ns != 0 ? presented_monotonic_ns - traced_desired_present_ns : 0;
 			  u_gpu_trace_event("presentation", "presented_callback", presented_state->gpu_trace_id,
-			                    traced_frame_id, presented_image_index, presented_timeline_value, handler_ns, 0);
+				            traced_frame_id, presented_image_index, presented_timeline_value,
+				            handler_ns, 0);
 			  if (presented_monotonic_ns > 0) {
-				  u_gpu_trace_event("presentation", "drawable_presented_observed", presented_state->gpu_trace_id,
-				                    traced_frame_id, presented_image_index, presented_timeline_value,
-				                    presented_monotonic_ns, 0);
+				  u_gpu_trace_event("presentation", "drawable_presented_observed",
+					            presented_state->gpu_trace_id, traced_frame_id,
+					            presented_image_index, presented_timeline_value,
+					            presented_monotonic_ns, 0);
 			  }
 			  int64_t presented_minus_target_ns =
 			      presented_monotonic_ns != 0 ? presented_monotonic_ns - (int64_t)traced_target_output_ns
@@ -2180,10 +2190,10 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			  }
 			  if (u_gpu_trace_enabled()) {
 				  struct u_gpu_trace_frame frame = {presented_state->gpu_trace_id, 0, traced_frame_id,
-				                                    presented_image_index, presented_timeline_value};
+					                            presented_image_index, presented_timeline_value};
 				  pthread_mutex_lock(&presented_state->guard_mutex);
 				  u_gpu_trace_present_reported(&presented_state->presentation_trace, &frame,
-				                               presented_monotonic_ns, handler_ns, present_queue_depth);
+					                       presented_monotonic_ns, handler_ns, present_queue_depth);
 				  pthread_mutex_unlock(&presented_state->guard_mutex);
 			  }
 			  if (observed_present_offset_ns > 0 && trace_file != NULL) {
@@ -2194,21 +2204,22 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			  }
 			  if (latency_guard_enabled) {
 				  pthread_mutex_lock(&presented_state->guard_mutex);
-				  macos_latency_guard_observe(&presented_state->guard, traced_frame_id,
-				                              presented_monotonic_ns > 0 ? (uint64_t)presented_monotonic_ns : 0,
-				                              present_queue_depth,
-				                              traced_display_period_ns > 0 ? (uint64_t)traced_display_period_ns : 0);
+				  macos_latency_guard_observe(
+				      &presented_state->guard, traced_frame_id,
+				      presented_monotonic_ns > 0 ? (uint64_t)presented_monotonic_ns : 0,
+				      present_queue_depth,
+				      traced_display_period_ns > 0 ? (uint64_t)traced_display_period_ns : 0);
 				  pthread_mutex_unlock(&presented_state->guard_mutex);
 			  }
 			  if (trace_file != NULL) {
 				  flockfile(trace_file);
 				  fprintf(trace_file,
-					  "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64
-					  ",%" PRIi64 "\n",
+					  "%llu,%" PRIi64 ",%" PRIi64 ",%llu,%.17g,%" PRIi64 ",%" PRIi64 ",%" PRIi64
+					  ",%" PRIi64 ",%" PRIi64 "\n",
 					  (unsigned long long)traced_frame_id, handler_ns, traced_desired_present_ns,
-					  (unsigned long long)traced_target_output_ns, presented_time_s, presented_monotonic_ns,
-					  presented_minus_desired_ns, presented_minus_target_ns, observed_present_offset_ns,
-					  present_queue_depth);
+					  (unsigned long long)traced_target_output_ns, presented_time_s,
+					  presented_monotonic_ns, presented_minus_desired_ns, presented_minus_target_ns,
+					  observed_present_offset_ns, present_queue_depth);
 				  macos_trace_buffered_fflush(trace_file);
 				  funlockfile(trace_file);
 			  }
@@ -2248,7 +2259,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			  if (cwm->presented_state != NULL) {
 				  pthread_mutex_lock(&cwm->presented_state->guard_mutex);
 				  u_gpu_trace_present_cancel(&cwm->presented_state->presentation_trace,
-				                             traced_timeline_value, "metal_error");
+					                     traced_timeline_value, "metal_error");
 				  pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
 			  }
 			  COMP_ERROR(cwm->base.base.c, "Asynchronous Metal presentation failed: %s",
@@ -2273,7 +2284,7 @@ macos_execute_present_job(struct comp_window_macos *cwm, const struct macos_pres
 			  dispatch_group_leave(command_group);
 		  } else {
 			  macos_release_source_image_after_render_async(cwm, command_group, traced_present_queue,
-			                                                traced_index, traced_timeline_value);
+				                                        traced_index, traced_timeline_value);
 		  }
 		}];
 		/* Passive observer of Metal scheduling. The timed-present convenience
@@ -2456,8 +2467,8 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 					    dispatch_group_leave(cwm->present_command_group);
 				    } else {
 					    macos_release_source_image_after_render_async(
-					        cwm, cwm->present_command_group, retired_job.present_queue,
-					        retired_job.image_index, retired_job.timeline_value);
+						cwm, cwm->present_command_group, retired_job.present_queue,
+						retired_job.image_index, retired_job.timeline_value);
 				    }
 				  }];
 				  [command_buffer commit];
@@ -2467,7 +2478,7 @@ macos_retire_unpresented_job(struct comp_window_macos *cwm,
 
 		  if (!released_by_metal) {
 			  macos_release_source_image_after_render(cwm, retired_job.present_queue,
-			                                          retired_job.image_index, retired_job.timeline_value);
+				                                  retired_job.image_index, retired_job.timeline_value);
 			  dispatch_group_leave(cwm->present_command_group);
 		  }
 	  }
@@ -2608,18 +2619,15 @@ comp_window_macos_wait_for_present(struct comp_target *ct, time_duration_ns time
 }
 
 static void
-comp_window_macos_info_gpu(struct comp_target *ct,
-                           int64_t frame_id,
-                           int64_t gpu_start_ns,
-                           int64_t gpu_end_ns,
-                           int64_t when_ns)
+comp_window_macos_info_gpu(
+    struct comp_target *ct, int64_t frame_id, int64_t gpu_start_ns, int64_t gpu_end_ns, int64_t when_ns)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	/* Preserve pacer feedback; consume the existing deferred calibrated timestamps
 	 * without an additional fence wait or query-pool read. */
 	u_pc_info_gpu(cwm->base.upc, frame_id, gpu_start_ns, gpu_end_ns, when_ns);
-	if (u_gpu_trace_enabled() && cwm->presented_state != NULL && frame_id >= 0 &&
-	    gpu_start_ns > 0 && gpu_end_ns >= gpu_start_ns && gpu_end_ns <= when_ns) {
+	if (u_gpu_trace_enabled() && cwm->presented_state != NULL && frame_id >= 0 && gpu_start_ns > 0 &&
+	    gpu_end_ns >= gpu_start_ns && gpu_end_ns <= when_ns) {
 		pthread_mutex_lock(&cwm->presented_state->guard_mutex);
 		u_gpu_trace_present_gpu_end(&cwm->presented_state->presentation_trace, frame_id, gpu_end_ns, when_ns);
 		pthread_mutex_unlock(&cwm->presented_state->guard_mutex);
@@ -2869,7 +2877,8 @@ comp_window_macos_destroy(struct comp_target *ct)
 bool
 comp_window_macos_prepare_destroy(struct comp_target *ct)
 {
-	if (ct == NULL || ct->destroy != comp_window_macos_destroy) return true;
+	if (ct == NULL || ct->destroy != comp_window_macos_destroy)
+		return true;
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC);
 	atomic_store_explicit(&cwm->passthrough_shutdown, true, memory_order_release);
@@ -2881,7 +2890,8 @@ comp_window_macos_prepare_destroy(struct comp_target *ct)
 	if (cwm->ca_display_link != NULL) {
 		if (@available(macOS 14.0, *)) {
 			MonadoCADisplayLinkSource *source = (MonadoCADisplayLinkSource *)cwm->ca_display_link;
-			if (![source shutdownBefore:deadline]) return false;
+			if (![source shutdownBefore:deadline])
+				return false;
 		}
 	}
 	macos_display_link_destroy(cwm);
@@ -2891,13 +2901,15 @@ comp_window_macos_prepare_destroy(struct comp_target *ct)
 	bool had_pending_job = cwm->pending_present_job_valid;
 	cwm->pending_present_job_valid = false;
 	pthread_mutex_unlock(&cwm->present_worker_mutex);
-	if (had_pending_job) macos_retire_unpresented_job(cwm, &pending_job, "shutdown_drop", 0);
+	if (had_pending_job)
+		macos_retire_unpresented_job(cwm, &pending_job, "shutdown_drop", 0);
 
 	dispatch_group_t groups[] = {cwm->present_worker_group, cwm->present_command_group, cwm->trace_present_group};
 	// One shared finite deadline. Failed drain retains the entire target/device,
 	// including callback state, rather than freeing objects still used by Metal.
 	for (uint32_t i = 0; i < ARRAY_SIZE(groups); i++) {
-		if (groups[i] != NULL && dispatch_group_wait(groups[i], deadline) != 0) return false;
+		if (groups[i] != NULL && dispatch_group_wait(groups[i], deadline) != 0)
+			return false;
 	}
 	return !atomic_load_explicit(&cwm->present_completion_failed, memory_order_acquire);
 }

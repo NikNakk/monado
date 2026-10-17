@@ -32,21 +32,19 @@ client_hung_up(int fd)
 }
 
 xrt_result_t
-ipc_server_swapchain_wait_in_slices(struct xrt_swapchain *xsc,
-                                    int64_t timeout_ns,
-                                    uint32_t index,
-                                    int client_fd,
-                                    const volatile bool *running)
+ipc_server_swapchain_wait_in_slices(
+    struct xrt_swapchain *xsc, int64_t timeout_ns, uint32_t index, int client_fd, const volatile bool *running)
 {
 	int64_t start_ns = os_monotonic_get_ns();
 
 	for (;;) {
 		int64_t elapsed_ns = os_monotonic_get_ns() - start_ns;
-		int64_t remaining_ns = timeout_ns == INT64_MAX ? INT64_MAX
+		int64_t remaining_ns = timeout_ns == INT64_MAX   ? INT64_MAX
 		                       : timeout_ns > elapsed_ns ? timeout_ns - elapsed_ns
 		                                                 : 0;
-		int64_t slice_ns =
-		    remaining_ns < IPC_SERVER_SWAPCHAIN_WAIT_SLICE_NS ? remaining_ns : IPC_SERVER_SWAPCHAIN_WAIT_SLICE_NS;
+		int64_t slice_ns = remaining_ns < IPC_SERVER_SWAPCHAIN_WAIT_SLICE_NS
+		                       ? remaining_ns
+		                       : IPC_SERVER_SWAPCHAIN_WAIT_SLICE_NS;
 
 		xrt_result_t xret = xrt_swapchain_wait_image(xsc, slice_ns, index);
 		if (xret != XRT_TIMEOUT || remaining_ns <= slice_ns || !*running || client_hung_up(client_fd)) {
