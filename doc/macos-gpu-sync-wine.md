@@ -1,4 +1,8 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 # Wine/DXMT GPU synchronization: M4, 2026-10-12
 
 **M4's six exit criteria pass for the synthetic Windows/DXMT → native Vulkan

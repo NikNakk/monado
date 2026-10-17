@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0
+// Copyright 2026, Nick Kennedy
+// SPDX-License-Identifier: BSL-1.0
 // Run inside run-gpu-sync-service.py --client, with an isolated simulated HMD.
 import {parseArgs} from 'node:util';
 import {readFileSync, writeFileSync, mkdirSync, existsSync, createWriteStream} from 'node:fs';
