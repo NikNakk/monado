@@ -14,25 +14,37 @@ validation and limitations.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `XRT_MACOS_WSI_GENERIC` | `0` | Select the separate FIFO Vulkan target, including hosted clients. |
-| `XRT_MACOS_WSI_GENERIC_CV` | `0` | Use the fake pacer with CVDisplayLink phase. |
-| `XRT_MACOS_WSI_GENERIC_CALIBRATE` | `0` | Calibrate presentation offset; needs generic CV mode. |
-| `XRT_MACOS_WSI_GENERIC_ADAPTIVE` | `0` | Correct GOOGLE feedback for the adaptive display-timing pacer; not with CV mode. |
-| `XRT_MACOS_WSI_GENERIC_LATCH_US` | `0` | With `_ADAPTIVE`, how long after the desired present time GPU work may finish. |
-| `XRT_MACOS_WSI_PASSTHROUGH` | `0` | Enable the blocking Metal passthrough correctness bridge. |
-| `XRT_MACOS_WSI_PASSTHROUGH_VERIFY` | `0` | Read back the first composed output for pixel verification. |
+| `XRT_MACOS_PRESENTER` | `native` | `wsi`: calibrated CV-paced Vulkan WSI; `wsi-adaptive`: adaptive display-timing WSI; `native`: Metal presenter. Applies to service and hosted compositors. |
+| `XRT_MACOS_WSI_GENERIC_LATCH_US` | `0` | With `wsi-adaptive`, how long after the desired present time GPU work may finish. |
+| `XRT_MACOS_WSI_PASSTHROUGH` | `0` | Enable GPU-ordered Vulkan camera composition with the compute compositor. |
+
+Presenter selection is read once per process. Unset selects `native`; an empty
+or unknown value logs a warning and falls back to native. Set it in the service
+and, for client compositing, in the client launch environment. The old
+`XRT_MACOS_WSI_GENERIC`, `_CV`, `_CALIBRATE` and `_ADAPTIVE` selection flags are
+removed and ignored by the runtime. Old capture manifests remain readable by
+the analysis tools. `_LATCH_US` remains an advanced adaptive timing control,
+and passthrough remains independently opt-in.
 
 The native-wrapper `XRT_MACOS_WSI`, its `XRT_MACOS_WSI_MAX_PENDING` credit
 limit, and `XRT_MACOS_GPU_ATTRIBUTION` diagnostic are removed. Old flags and
 commands in historical capture reports do not select executable experiment modes.
 With the WSI target, the compositor now defaults to the graphics path, which goes
-direct to display; `XRT_COMPOSITOR_COMPUTE=1` restores the compute path, which
-WindowServer composites. `XRT_MACOS_GPU_QUEUE_PRIORITY` now applies to it too.
+direct to display. `XRT_COMPOSITOR_COMPUTE=1` selects compute; the current
+[private-output candidate](macos-wsi-vulkan-passthrough.md#private-compute-output-candidate)
+keeps shader writes in private images and copies into WSI presentation images.
+The earlier direct-storage implementation was WindowServer-composited and
+failed moving-head checks; visual quality and direct scanout of the candidate
+remain unvalidated. `XRT_MACOS_GPU_QUEUE_PRIORITY` now applies to it too.
 WSI passthrough defaults to compute. With an explicit `XRT_COMPOSITOR_COMPUTE=0`,
 the graphics target remains usable but passthrough creation returns unsupported:
 the graphics path's opaque alpha would hide the camera.
-Native presentation defaults are unchanged; WSI passthrough still lacks native
-calibration/rotation parity, and sleep/disconnect recovery requires restart.
+Native presentation defaults are unchanged pending the calibrated WSI camera
+visual check. The [Vulkan replacement](macos-wsi-vulkan-passthrough.md) removes
+the blocking Metal bridge and its `XRT_MACOS_WSI_PASSTHROUGH_VERIFY` /
+`--verify-passthrough` controls. WSI now uses the native per-headset calibration and rotation
+settings; see [the test procedure and default-switch plan](macos-wsi-migration.md#calibrated-wsi-passthrough-prepared-16-october-2026).
+Sleep/disconnect recovery requires restart.
 
 ## Historical audit
 
