@@ -1,4 +1,8 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 # SteamVR backend resolve-copy reduction, 2026-10-12
 
 **Three-image compatibility enables the production SteamVR backend to remove

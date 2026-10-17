@@ -1,4 +1,8 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 # Three versus four service Metal images, 2026-10-12
 
 The opt-in three-image path passes the bounded native offscreen and physical

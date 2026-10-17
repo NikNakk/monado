@@ -1,4 +1,8 @@
-<!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
+<!--
+Copyright 2026, Nick Kennedy
+
+SPDX-License-Identifier: BSL-1.0
+-->
 
 # KosmicKrisp / OpenXR assessment: decision update — 2026-10-14
 

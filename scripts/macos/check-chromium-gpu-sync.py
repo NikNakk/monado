@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-# Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
 """Check a Chromium video fixture, joined trace and native fresh-latch evidence."""
 import argparse
 import csv
