@@ -11,6 +11,15 @@ SPDX-License-Identifier: BSL-1.0
 **Recorded upstream sync base:** 045931d12f1cc9afde942f7905db08e6f51b9d8e
 **Review date:** 2 October 2026
 
+**Plan update, 15 October 2026:** 0A / MR !3029 is merged (`10c57897e`).
+0B is parked and deferred to macOS service/XPC enablement; no independent Linux
+bug has been demonstrated to justify the draft's behavioral changes. 0C is the
+active topic on `codex/dead-reckoning-fifo` in `~/Code/monado-upstreaming`, based
+on fetched upstream `8b259763f`. The FIFO fix and regression tests are prepared
+and uncommitted; Linux/macOS tests and formatting pass. See the
+[current progress record](macos-upstream-contribution.md#upstream-progress-2026-10-15).
+The reviewed branch/tip above remain the historical October 2 review snapshot.
+
 | **Purpose: turn the mature integration branch into a small, reviewable, dependency-aware series of upstream Monado merge requests, while keeping experimental and compatibility work out of the upstream core.** |
 |------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 
@@ -76,13 +85,13 @@ PSVR2_HEADSET_HAPTICS should remain an experiment because it is understood to re
 
 “As-is” here means that the substantive implementation does not need architectural redesign; it still needs rebasing, Monado formatting, DCO/provenance review, and focused tests where appropriate.
 
-**Generic IPC shutdown ordering:** Strong first MR. Stop every client before joining, prevent late thread revival, cancel synchronous Windows pipe reads, and make repeated shutdown safe. The existing tests include a real synchronous named-pipe reader.
+**Generic IPC shutdown ordering:** Merged as MR !3029 (`10c57897e`). Stop every client before joining, prevent late thread revival, cancel synchronous Windows pipe reads, and make repeated shutdown safe. The existing tests include a real synchronous named-pipe reader.
 
-**Native Unix socket peer identity and endpoint protection:** getpeereid/LOCAL_PEERPID on macOS and SO_PEERCRED on Linux, safe lock-file ownership, preservation of live sockets and recovery of stale ones. Submit separately from Metal/XPC.
+**Native Unix socket peer identity and endpoint protection (0B, deferred):** Carry kernel peer identity and socket lifetime/ownership with macOS service/XPC enablement, where the peer PID establishes ownership of graphics resources. The generic Linux draft is parked: no independent Linux bug has been reproduced to justify new connection restrictions or replacing the application-reported PID. Linux changes require a separate concrete reproducer and compatibility review.
 
 **Small portability fixes:** Group coherent fixes such as SOCK_CLOEXEC fallback, missing inttypes include, CJSON_HIDE_SYMBOLS support, and macOS config/JSON enablement; do not preserve each AI CI repair as its own commit.
 
-**Generic dead-reckoning FIFO edge fix:** Conceptually independent. Add a targeted regression test, then submit as a small MR.
+**Generic dead-reckoning FIFO edge fix (0C, active):** Prepared on a fresh upstream branch with regressions that fail before the fix and pass afterward. Human review/sign-off, commit and submission are next.
 
 **IOKit HID backend:** A conventional platform implementation behind os_hid; suitable for the macOS foundations MR.
 
@@ -251,9 +260,9 @@ upstream/main..\<new-topic-tip\>
 
 | **MR** | **Contents**                                                                                                                    | **Depends on**  | **Recommendation**              |
 |--------|---------------------------------------------------------------------------------------------------------------------------------|-----------------|---------------------------------|
-| 0A     | Generic IPC shutdown ordering + Windows cancellation + tests                                                                    | —               | Submit first                    |
-| 0B     | Unix peer identity / safe socket ownership                                                                                      | —               | Submit early                    |
-| 0C     | Generic dead-reckoning FIFO edge fix + test                                                                                     | —               | Independent                     |
+| 0A     | Generic IPC shutdown ordering + Windows cancellation + tests                                                                    | —               | Merged: MR !3029                 |
+| 0B     | Unix peer identity / safe socket ownership                                                                                      | macOS service   | Parked; carry with MR 4          |
+| 0C     | Generic dead-reckoning FIFO edge fix + test                                                                                     | —               | Active; next submission          |
 | 0D     | Small portability fixes needed by macOS builds                                                                                  | —               | Independent/grouped             |
 | 1      | macOS platform foundations: Objective-C build, OS paths/time, IOKit HID, IOSurface handle lifetime, basic Apple build plumbing  | 0D              | Core macOS                      |
 | 2      | Minimum viable macOS runtime: display frontend + CAMetalLayer presentation + MoltenVK/IOSurface compositor path + proven pacing | 1               | Larger cohesive MR              |
@@ -336,7 +345,7 @@ If hardware testing shows that the service architecture is intrinsically require
 
 19. Audit all new copyright/author headers, especially @author OpenAI combined with Collabora copyright.
 
-20. Add a regression test for the generic t_dead_reckoning change.
+20. Review and submit the prepared 0C t_dead_reckoning patch and regression tests.
 
 21. Ensure baseline macOS support does not depend on generated research CSVs or tracing.
 
@@ -387,5 +396,5 @@ The eventual upstream Monado tree should contain normal macOS build support, IOK
 
 It should not contain the history of how the port was discovered: Wine game launch scripts, DXMT patches, fake controller positioning, failed presentation modes, hundreds of experiment toggles, generated timing CSVs, AI workflow metadata or transitional RPC protocols.
 
-| **Bottom line: upstreaming should now become a reconstruction-and-review exercise, not more integration-branch cleanup. Start with generic IPC shutdown, socket security, macOS foundations and a minimum viable macOS runtime; use a clean freedesktop.org GitLab fork for those branches.** |
+| **Bottom line: upstreaming should now become a reconstruction-and-review exercise, not more integration-branch cleanup. IPC shutdown is merged; continue with dead-reckoning and portability fixes, then macOS foundations and a minimum viable runtime. Defer socket identity/ownership to macOS service support; use a clean freedesktop.org GitLab fork for those branches.** |
 |-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

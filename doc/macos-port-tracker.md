@@ -255,8 +255,10 @@ branch. Keep this branch mainly for development history/comparison.
 5. Validate fixed and eye-tracked foveation in Unity or Unreal, then investigate
    Wine graphics-backend integration.
 6. Continue Chromium graphics sharing, OpenXR regression coverage and packaging.
-7. Upstream submissions are paused while the first MR awaits merge and the
-   contributor learns the review process.
+7. MR !3029 (0A) is merged. Prepare 0C, the dead-reckoning FIFO edge fix,
+   on `codex/dead-reckoning-fifo` from upstream `8b259763f`. Defer 0B to macOS
+   service/XPC work; preserve existing Linux connection policy. See the
+   [upstream progress record](macos-upstream-contribution.md#upstream-progress-2026-10-15).
 
 ## Related repositories
 
