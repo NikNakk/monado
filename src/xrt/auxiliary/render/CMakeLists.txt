@@ -9,6 +9,10 @@
 add_library(
 	aux_render STATIC
 	render_buffer.c
+	render_camera.c
+	render_camera.h
+	render_output.c
+	render_output.h
 	render_compute.c
 	render_distortion.c
 	render_gfx.c

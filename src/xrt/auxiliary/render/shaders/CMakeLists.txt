@@ -14,6 +14,7 @@ set(SHADERS
     blit.comp
     blit_ms.comp
     clear.comp
+    camera.comp
     distortion.comp
     layer.comp
     mesh.frag
