@@ -110,13 +110,10 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 	s->use_compute = debug_get_bool_option_compute();
 #ifdef XRT_OS_OSX
 	/*
-	 * The compute path writes the swapchain image as a storage image, so the
-	 * experimental WSI target's drawables cannot be scanned out directly and
-	 * WindowServer composites them. Unless asked for explicitly, use the
-	 * graphics path with that target. The native target copies into its
-	 * drawables, so it is direct to display either way. The WSI passthrough
-	 * bridge needs the compute path's alpha, and is not direct to display
-	 * anyway, so keep compute there.
+	 * Keep the validated graphics WSI default. Explicit compute now renders
+	 * into private images and copies to the WSI images, like the native
+	 * target's separation of rendering from presentation. Its visual quality
+	 * still needs hardware validation. Passthrough needs compute's alpha.
 	 */
 	if (debug_get_bool_option_macos_wsi_generic() && !debug_get_bool_option_macos_wsi_passthrough() &&
 	    getenv("XRT_COMPOSITOR_COMPUTE") == NULL) {

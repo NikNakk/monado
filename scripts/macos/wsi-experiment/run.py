@@ -50,7 +50,6 @@ def main():
                         help='Extra service environment variable, for example MoltenVK settings; repeatable')
     parser.add_argument('--generic-latch-us', type=int, default=0, help='Latch allowance for wsi-generic-adaptive')
     parser.add_argument('--hosted', action='store_true')
-    parser.add_argument('--verify-passthrough', action='store_true')
     parser.add_argument('--refresh-cycle', action='store_true')
     parser.add_argument('--passthrough', choices=['overlay', 'only'])
     parser.add_argument('--passthrough-without-bridge', action='store_true', help='Negative capability check: request passthrough without enabling the WSI bridge')
@@ -155,8 +154,6 @@ def main():
                             env['PSVR2_TEST_REFRESH_CYCLE'] = '1'
                         if args.passthrough and not args.passthrough_without_bridge:
                             env['XRT_MACOS_WSI_PASSTHROUGH'] = '1'
-                        if args.verify_passthrough:
-                            env['XRT_MACOS_WSI_PASSTHROUGH_VERIFY'] = '1'
                         if args.metal_validation:
                             env['MTL_DEBUG_LAYER'] = '1'
                         plist = runtime / 'experiment.plist'
