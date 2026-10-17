@@ -11,6 +11,9 @@
 #include "util/u_debug.h"
 #include <stdlib.h>
 #include "comp_settings.h"
+#ifdef XRT_OS_OSX
+#include "comp_macos_presenter.h"
+#endif
 
 #ifdef XRT_OS_ANDROID
 #define USE_COMPUTE_DEFAULT false
@@ -39,7 +42,6 @@ DEBUG_GET_ONCE_NUM_OPTION(default_framerate, "XRT_COMPOSITOR_DEFAULT_FRAMERATE",
 DEBUG_GET_ONCE_BOOL_OPTION(compute, "XRT_COMPOSITOR_COMPUTE", USE_COMPUTE_DEFAULT)
 DEBUG_GET_ONCE_BOOL_OPTION(force_debug_image, "XRT_COMPOSITOR_FORCE_DEBUG_IMAGE", false)
 #ifdef XRT_OS_OSX
-DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_generic, "XRT_MACOS_WSI_GENERIC", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_passthrough, "XRT_MACOS_WSI_PASSTHROUGH", false)
 #endif
 // clang-format on
@@ -115,7 +117,7 @@ comp_settings_init(struct comp_settings *s, struct xrt_device *xdev)
 	 * target's separation of rendering from presentation. Its visual quality
 	 * still needs hardware validation. Passthrough needs compute's alpha.
 	 */
-	if (debug_get_bool_option_macos_wsi_generic() && !debug_get_bool_option_macos_wsi_passthrough() &&
+	if (comp_macos_presenter_is_wsi() && !debug_get_bool_option_macos_wsi_passthrough() &&
 	    getenv("XRT_COMPOSITOR_COMPUTE") == NULL) {
 		s->use_compute = false;
 	}

@@ -196,6 +196,22 @@ class AnalysisTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'calibration did not activate'):
                 summarize(run, 0)
 
+    def test_current_presenter_manifest_uses_calibrated_wsi_without_old_flags(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            run, _ = self.cv_fixture(directory)
+            run['condition'] = 'wsi'
+            run['environment'] = {'XRT_MACOS_PRESENTER': 'wsi'}
+            self.write(directory, 'cv_offset', [
+                dict(frame_id=i, sample_ns=5000000, filtered_ns=5000000, sample_count=i, accepted=1)
+                for i in range(1, 9)])
+            self.assertEqual(summarize(run, 0)['calibrated_offset_ms']['p50'], 5)
+            run['condition'] = 'wsi-adaptive'
+            run['environment']['XRT_MACOS_PRESENTER'] = 'wsi-adaptive'
+            result = summarize(run, 0)
+            self.assertEqual(result['joined_feedback_frames'], 1)
+            self.assertEqual(result['calibrated_offset_ms']['count'], 0)
+
     def test_refresh_mismatch_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = self.fixture(pathlib.Path(temporary))
@@ -214,6 +230,18 @@ class AnalysisTests(unittest.TestCase):
             self.write(directory, 'reprojection', [dict(system_frame_id=1, source_valid=0)])
             with self.assertRaisesRegex(ValueError, 'no application projection'):
                 summarize(run, 0)
+
+
+class PresenterPolicyTests(unittest.TestCase):
+    def test_current_selector_overrides_archived_flags(self):
+        from analyze import presenter_policy
+        for mode, expected in [('native', (False, False)), ('wsi', (True, True)),
+                               ('wsi-adaptive', (False, False))]:
+            env = {'XRT_MACOS_PRESENTER': mode, 'XRT_MACOS_WSI_GENERIC_CV': '1',
+                   'XRT_MACOS_WSI_GENERIC_CALIBRATE': '1'}
+            self.assertEqual(presenter_policy({'environment': env}), expected)
+        with self.assertRaisesRegex(ValueError, 'invalid presenter'):
+            presenter_policy({'environment': {'XRT_MACOS_PRESENTER': 'typo'}})
 
 
 if __name__ == '__main__':

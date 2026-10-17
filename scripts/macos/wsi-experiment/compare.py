@@ -11,6 +11,7 @@ from analyze import summarize, table, distribution
 
 # The presentation implementation is the intended independent variable.
 ALLOWED_ENV_DIFFERENCES = {
+    'XRT_MACOS_PRESENTER',  # Current selector; the old keys below are for archived manifests.
     'XRT_MACOS_WSI_GENERIC', 'XRT_MACOS_WSI_GENERIC_CV', 'XRT_MACOS_WSI_GENERIC_CALIBRATE',
     'XRT_MACOS_WSI_GENERIC_ADAPTIVE', 'XRT_MACOS_WSI_GENERIC_LATCH_US',
 }
@@ -33,8 +34,8 @@ def pair_results(manifest, results):
         raise ValueError('one analyzed result is required per capture')
     groups = collections.defaultdict(dict)
     for run, result in zip(runs, results):
-        condition = run['condition']
-        if condition not in ('native', 'wsi-generic-calibrated'):
+        condition = 'wsi' if run['condition'] == 'wsi-generic-calibrated' else run['condition']
+        if condition not in ('native', 'wsi'):
             raise ValueError('expected native and calibrated WSI conditions only')
         if (run.get('application_exit_code') != 0 or not run.get('end_utc') or
                 result['directory'] != run['directory']):
@@ -45,10 +46,10 @@ def pair_results(manifest, results):
         groups[key][condition] = (run, result)
     pairs = []
     for (hz, load, repeat), conditions in sorted(groups.items()):
-        if set(conditions) != {'native', 'wsi-generic-calibrated'}:
+        if set(conditions) != {'native', 'wsi'}:
             raise ValueError('unmatched native/WSI capture')
         native_run, native = conditions['native']
-        wsi_run, wsi = conditions['wsi-generic-calibrated']
+        wsi_run, wsi = conditions['wsi']
         keys = set(native_run['environment']) | set(wsi_run['environment'])
         differences = {key for key in keys if native_run['environment'].get(key) != wsi_run['environment'].get(key)}
         # Trace destinations vary by capture; this cannot affect rendering policy.

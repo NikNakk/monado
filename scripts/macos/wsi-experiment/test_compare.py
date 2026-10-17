@@ -32,6 +32,14 @@ class PairTests(unittest.TestCase):
         self.assertEqual(pair['deltas_wsi_minus_native']['sample_age_p99_ms'], 1)
         self.assertAlmostEqual(pair['present_rate_change_percent'], 100 / 90)
 
+    def test_current_selector_matches_native_and_wsi(self):
+        manifest, results = self.fixture()
+        for run, mode in zip(manifest['runs'], ('native', 'wsi')):
+            run['condition'] = mode
+            run['environment'].pop('XRT_MACOS_WSI_GENERIC')
+            run['environment']['XRT_MACOS_PRESENTER'] = mode
+        self.assertEqual(len(pair_results(manifest, results)), 1)
+
     def test_changed_workload_rejected(self):
         manifest, results = self.fixture()
         manifest['runs'][1]['environment']['PSVR2_TEST_GPU_PASSES'] = '16'
