@@ -163,7 +163,8 @@ TEST_CASE("pending consumer completion retains storage after producer completion
 	timeouts.clear();
 	CHECK(xrt_swapchain_wait_image(base, 5000000, 0) == XRT_TIMEOUT);
 	REQUIRE_FALSE(timeouts.empty());
-	for (uint64_t timeout : timeouts) CHECK(timeout <= 5000000ULL);
+	for (uint64_t timeout : timeouts)
+		CHECK(timeout <= 5000000ULL);
 	// An infinite wait reaches Vulkan unclamped; the IPC worker bounds its own calls.
 	timeouts.clear();
 	CHECK(xrt_swapchain_wait_image(base, INT64_MAX, 0) == XRT_TIMEOUT);

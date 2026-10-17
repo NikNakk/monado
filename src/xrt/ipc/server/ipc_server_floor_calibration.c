@@ -108,7 +108,8 @@ read_options_pressed(struct ipc_server_floor_calibration *fcal, int64_t *out_now
 	if (xrt_device_update_inputs(fcal->right) == XRT_SUCCESS) {
 		int64_t now_ns = os_monotonic_get_ns();
 		const struct xrt_input *input = &fcal->right->inputs[fcal->options_index];
-		pressed = input->active && input->value.boolean && input->timestamp <= now_ns + 100 * U_TIME_1MS_IN_NS &&
+		pressed = input->active && input->value.boolean &&
+		          input->timestamp <= now_ns + 100 * U_TIME_1MS_IN_NS &&
 		          now_ns - input->timestamp < U_TIME_1S_IN_NS;
 		*out_now_ns = now_ns;
 	}

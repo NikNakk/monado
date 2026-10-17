@@ -247,12 +247,15 @@ struct ProducerGate : xrt_compositor_semaphore
 			std::unique_lock<std::mutex> lock(gate->mutex);
 			gate->entered = true;
 			gate->changed.notify_all();
-			return gate->changed.wait_for(lock, std::chrono::nanoseconds(timeout), [&] { return gate->ready; })
-			           ? XRT_SUCCESS : XRT_TIMEOUT;
+			return gate->changed.wait_for(lock, std::chrono::nanoseconds(timeout),
+			                              [&] { return gate->ready; })
+			           ? XRT_SUCCESS
+				   : XRT_TIMEOUT;
 		};
 		destroy = [](xrt_compositor_semaphore *) {};
 	}
-	void signal()
+	void
+	signal()
 	{
 		std::lock_guard<std::mutex> lock(mutex);
 		ready = true;
@@ -379,7 +382,7 @@ TEST_CASE("three-image scheduling retires superseded frames only after producer 
 		std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 	CHECK(scheduled_image(mc) == 2);
-	CHECK(mc->delivered.layers[0].data.quad.sub.image_index == 0); // preserve reprojection source
+	CHECK(mc->delivered.layers[0].data.quad.sub.image_index == 0);       // preserve reprojection source
 	CHECK(__atomic_load_n(&sc->reference.count, __ATOMIC_RELAXED) == 3); // superseded image is released
 	xrt_swapchain_reference(&sc, nullptr);
 }
@@ -489,7 +492,8 @@ TEST_CASE("unresolved client does not stop another client on the same multi comp
 		xrt_swapchain_reference(&sc, nullptr);
 		xrt_comp_native_destroy(&healthy);
 		// Second connection is created after the failed session's hung threshold.
-		if (i == 0) std::this_thread::sleep_for(std::chrono::milliseconds(550));
+		if (i == 0)
+			std::this_thread::sleep_for(std::chrono::milliseconds(550));
 	}
 	xrt_swapchain_reference(&failed_sc, nullptr);
 }

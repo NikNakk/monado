@@ -40,7 +40,8 @@ struct comp_gpu_client_budget
 	uint32_t objects;
 	uint32_t references;
 };
-static __thread struct {
+static __thread struct
+{
 	struct comp_gpu_client_budget *budget;
 	uint64_t bytes;
 } g_reservation;
@@ -140,8 +141,10 @@ static uint32_t g_tracker_count;
 static uint64_t g_tracker_serial;
 static __thread struct gpu_reuse_renderer_tls g_renderer = {0};
 
-static bool tracker_completed_locked(struct gpu_reuse_tracker *tracker);
-static void reclaim_tracker_locked(struct gpu_reuse_tracker **ptr);
+static bool
+tracker_completed_locked(struct gpu_reuse_tracker *tracker);
+static void
+reclaim_tracker_locked(struct gpu_reuse_tracker **ptr);
 
 static uint32_t
 budget_objects(long value, uint32_t fallback)
@@ -169,7 +172,8 @@ comp_gpu_client_budget_trace_id(struct comp_gpu_client_budget *budget)
 static void
 budget_unref_locked(struct comp_gpu_client_budget *budget)
 {
-	if (budget != NULL && --budget->references == 0) free(budget);
+	if (budget != NULL && --budget->references == 0)
+		free(budget);
 }
 
 void
@@ -204,7 +208,8 @@ client_byte_limit(void)
 {
 	uint64_t bytes = mb_option_bytes(debug_get_num_option_gpu_client_mb());
 	if (bytes == 0) {
-		bytes = g_device_local_heap_bytes != 0 ? g_device_local_heap_bytes / 2 : GPU_REUSE_FALLBACK_CLIENT_BYTES;
+		bytes =
+		    g_device_local_heap_bytes != 0 ? g_device_local_heap_bytes / 2 : GPU_REUSE_FALLBACK_CLIENT_BYTES;
 	}
 	uint64_t global = global_byte_limit();
 	return bytes < global ? bytes : global;
@@ -301,8 +306,9 @@ budget_fits_locked(struct comp_gpu_client_budget *budget, uint64_t bytes)
 	uint64_t global = global_byte_limit();
 	return g_tracker_count < budget_objects(debug_get_num_option_gpu_global_objects(), 256) &&
 	       g_tracked_bytes <= global && bytes <= global - g_tracked_bytes &&
-	       (budget == NULL || (budget->objects < budget_objects(debug_get_num_option_gpu_client_objects(), 64) &&
-	                           budget->bytes <= client_byte_limit() && bytes <= client_byte_limit() - budget->bytes));
+	       (budget == NULL ||
+	        (budget->objects < budget_objects(debug_get_num_option_gpu_client_objects(), 64) &&
+	         budget->bytes <= client_byte_limit() && bytes <= client_byte_limit() - budget->bytes));
 }
 
 xrt_result_t
@@ -312,7 +318,8 @@ comp_gpu_client_budget_reserve(struct comp_gpu_client_budget *budget,
                                const struct xrt_image_native *images)
 {
 	if (budget == NULL || g_reservation.budget != NULL || image_count == 0 ||
-	    image_count > XRT_MAX_SWAPCHAIN_IMAGES) return XRT_ERROR_INVALID_ARGUMENT;
+	    image_count > XRT_MAX_SWAPCHAIN_IMAGES)
+		return XRT_ERROR_INVALID_ARGUMENT;
 	if (info->width == 0 || info->height == 0 || info->mip_count == 0)
 		return XRT_ERROR_ALLOCATION;
 	uint32_t max_mips = 0;
@@ -345,28 +352,34 @@ comp_gpu_client_budget_reserve(struct comp_gpu_client_budget *budget,
 	}
 	uint64_t factors[] = {info->array_size, info->face_count, info->sample_count, image_count};
 	for (uint32_t i = 0; i < ARRAY_SIZE(factors); i++) {
-		if (factors[i] == 0 || factors[i] > GPU_REUSE_MAX_BYTES / bytes) return XRT_ERROR_ALLOCATION;
+		if (factors[i] == 0 || factors[i] > GPU_REUSE_MAX_BYTES / bytes)
+			return XRT_ERROR_ALLOCATION;
 		bytes *= factors[i];
 	}
 	// Cover row/page alignment. Supplied transport sizes are an additional lower bound.
 	uint64_t overhead = (uint64_t)image_count * 65536;
-	if (bytes > GPU_REUSE_MAX_BYTES - overhead) return XRT_ERROR_ALLOCATION;
+	if (bytes > GPU_REUSE_MAX_BYTES - overhead)
+		return XRT_ERROR_ALLOCATION;
 	bytes += overhead;
 	if (images != NULL) {
 		uint64_t supplied = 0;
 		for (uint32_t i = 0; i < image_count; i++) {
-			if (images[i].size > GPU_REUSE_MAX_BYTES - supplied) return XRT_ERROR_ALLOCATION;
+			if (images[i].size > GPU_REUSE_MAX_BYTES - supplied)
+				return XRT_ERROR_ALLOCATION;
 			supplied += images[i].size;
 		}
-		if (supplied > bytes) bytes = supplied;
+		if (supplied > bytes)
+			bytes = supplied;
 	}
 	pthread_mutex_lock(&g_gpu_reuse_mutex);
 	// Poll before admission too: the last client may have stopped the render loop.
 	for (struct gpu_reuse_context *c = g_gpu_reuse_contexts; c != NULL; c = c->next) {
 		struct gpu_reuse_tracker **ptr = &c->trackers;
 		while (*ptr != NULL) {
-			if ((*ptr)->quarantined && tracker_completed_locked(*ptr)) reclaim_tracker_locked(ptr);
-			else ptr = &(*ptr)->next;
+			if ((*ptr)->quarantined && tracker_completed_locked(*ptr))
+				reclaim_tracker_locked(ptr);
+			else
+				ptr = &(*ptr)->next;
 		}
 	}
 	if (!budget_fits_locked(budget, bytes)) {
@@ -374,9 +387,13 @@ comp_gpu_client_budget_reserve(struct comp_gpu_client_budget *budget,
 		U_LOG_W("GPU allocation rejected before import: bytes=%llu", (unsigned long long)bytes);
 		return XRT_ERROR_ALLOCATION;
 	}
-	g_tracked_bytes += bytes; g_tracker_count++;
-	budget->bytes += bytes; budget->objects++; budget->references++;
-	g_reservation.budget = budget; g_reservation.bytes = bytes;
+	g_tracked_bytes += bytes;
+	g_tracker_count++;
+	budget->bytes += bytes;
+	budget->objects++;
+	budget->references++;
+	g_reservation.budget = budget;
+	g_reservation.bytes = bytes;
 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 	return XRT_SUCCESS;
 }
@@ -387,10 +404,13 @@ comp_gpu_client_budget_finish(void)
 	pthread_mutex_lock(&g_gpu_reuse_mutex);
 	if (g_reservation.budget != NULL) {
 		struct comp_gpu_client_budget *budget = g_reservation.budget;
-		g_tracked_bytes -= g_reservation.bytes; g_tracker_count--;
-		budget->bytes -= g_reservation.bytes; budget->objects--;
+		g_tracked_bytes -= g_reservation.bytes;
+		g_tracker_count--;
+		budget->bytes -= g_reservation.bytes;
+		budget->objects--;
 		budget_unref_locked(budget);
-		g_reservation.budget = NULL; g_reservation.bytes = 0;
+		g_reservation.budget = NULL;
+		g_reservation.bytes = 0;
 	}
 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 }
@@ -753,14 +773,16 @@ reclaim_tracker_locked(struct gpu_reuse_tracker **ptr)
 	g_tracked_bytes -= t->bytes;
 	g_tracker_count--;
 	if (t->budget != NULL) {
-		t->budget->bytes -= t->bytes; t->budget->objects--;
+		t->budget->bytes -= t->bytes;
+		t->budget->objects--;
 		budget_unref_locked(t->budget);
 	}
 	t->sc->gpu_reuse_safe_destroy = true;
 	t->xsc->wait_image = t->original_wait_image;
 	t->xsc->destroy = t->original_destroy;
 	U_LOG_I("GPU reuse reclaim: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u id=%llu", (void *)t->xsc,
-	        (unsigned long long)t->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count, (unsigned long long)t->id);
+	        (unsigned long long)t->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count,
+	        (unsigned long long)t->id);
 	if (u_gpu_trace_enabled())
 		u_gpu_trace_owner_event("storage_reclaimed", t->id, owner_trace_id, -1, UINT32_MAX, 0,
 		                        os_monotonic_get_ns(), 0);
@@ -826,8 +848,9 @@ tracked_swapchain_destroy(struct xrt_swapchain *xsc)
 			u_gpu_trace_owner_event("storage_quarantined", tracker->id,
 			                        tracker->budget != NULL ? tracker->budget->trace_id : 0, -1, UINT32_MAX,
 			                        0, os_monotonic_get_ns(), 0);
-		U_LOG_I("GPU reuse quarantine: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u id=%llu", (void *)xsc,
-		        (unsigned long long)tracker->bytes, (unsigned long long)g_tracked_bytes, g_tracker_count, (unsigned long long)tracker->id);
+		U_LOG_I("GPU reuse quarantine: swapchain=%p bytes=%llu retained_bytes=%llu objects=%u id=%llu",
+		        (void *)xsc, (unsigned long long)tracker->bytes, (unsigned long long)g_tracked_bytes,
+		        g_tracker_count, (unsigned long long)tracker->id);
 	}
 	pthread_mutex_unlock(&g_gpu_reuse_mutex);
 	/* Existing compositor GC polls it with timeout zero on subsequent frames. */
@@ -928,9 +951,11 @@ comp_swapchain_gpu_reuse_enable(struct xrt_swapchain *xsc)
 		g_tracked_bytes = g_tracked_bytes - reserved + bytes;
 		budget->bytes = budget->bytes - reserved + bytes;
 		tracker->budget = budget;
-		g_reservation.budget = NULL; g_reservation.bytes = 0;
+		g_reservation.budget = NULL;
+		g_reservation.bytes = 0;
 	} else {
-		g_tracked_bytes += bytes; g_tracker_count++;
+		g_tracked_bytes += bytes;
+		g_tracker_count++;
 	}
 	tracker->xsc = xsc;
 	tracker->sc = sc;
