@@ -70,8 +70,8 @@ comp_vulkan_passthrough_compose(struct comp_vulkan_passthrough *pt, uint32_t ind
 	uint64_t snapshot = pt->timing ? os_monotonic_get_ns() : 0;
 	bool submitted = false;
 	VkResult ret =
-	    render_camera_submit(pt->renderer, index, pt->ct->final_layout,
-	                         pt->ct->semaphores.render_complete, sample.frames, &sample.params, &submitted);
+	    render_camera_submit(pt->renderer, index, pt->ct->final_layout, pt->ct->semaphores.render_complete,
+	                         sample.frames, &sample.params, &submitted);
 	comp_psvr2_passthrough_sample_release(&sample);
 	if (ret != VK_SUCCESS && (submitted || ret == VK_TIMEOUT || ret == VK_ERROR_DEVICE_LOST))
 		*present_ready = false;

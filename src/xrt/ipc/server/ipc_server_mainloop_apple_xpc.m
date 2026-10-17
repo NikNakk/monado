@@ -340,9 +340,9 @@ poll_display_sleep_assertion(struct ipc_server *vs)
 	if (g_display_sleep_assertion != kIOPMNullAssertionID) {
 		return;
 	}
-	IOReturn ret = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep, kIOPMAssertionLevelOn,
-	                                           CFSTR("Monado: an XR application is running"),
-	                                           &g_display_sleep_assertion);
+	IOReturn ret =
+	    IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep, kIOPMAssertionLevelOn,
+	                                CFSTR("Monado: an XR application is running"), &g_display_sleep_assertion);
 	if (ret != kIOReturnSuccess) {
 		g_display_sleep_assertion = kIOPMNullAssertionID;
 		U_LOG_W("Could not prevent idle display sleep (0x%x)", ret);

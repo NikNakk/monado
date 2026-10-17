@@ -19,7 +19,8 @@ struct ProjectionQuadFixture : LayerFixture
 		init_layers(samplers);
 		scratch_width = uint32_t(std::lround(w * scale));
 		scratch_height = uint32_t(std::lround(h * scale));
-		REQUIRE(vk_create_sampler(&vk(), VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, &scratch_sampler) == VK_SUCCESS);
+		REQUIRE(vk_create_sampler(&vk(), VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, &scratch_sampler) ==
+		        VK_SUCCESS);
 		for (unsigned eye = 0; eye < 2; ++eye) {
 			REQUIRE(render_buffer_map(&vk(), &layer_ubo[eye]) == VK_SUCCESS);
 			scratch[eye].extent = {scratch_width, scratch_height};
@@ -27,11 +28,11 @@ struct ProjectionQuadFixture : LayerFixture
 			                                     VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
 			                                     &scratch[eye].memory, &scratch[eye].image) == VK_SUCCESS);
 			REQUIRE(vk_create_view_usage(&vk(), scratch[eye].image, VK_IMAGE_VIEW_TYPE_2D,
-			                             VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT,
-			                             color_range, &scratch[eye].view) == VK_SUCCESS);
+			                             VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_STORAGE_BIT, color_range,
+			                             &scratch[eye].view) == VK_SUCCESS);
 			REQUIRE(vk_create_view_usage(&vk(), scratch[eye].image, VK_IMAGE_VIEW_TYPE_2D,
-			                             VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT,
-			                             color_range, &scratch_sample[eye]) == VK_SUCCESS);
+			                             VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_USAGE_SAMPLED_BIT, color_range,
+			                             &scratch_sample[eye]) == VK_SUCCESS);
 			auto cmd = begin();
 			barrier(cmd, scratch[eye], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, 0,
 			        VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -92,7 +93,7 @@ struct ProjectionQuadFixture : LayerFixture
 			b.dstAccessMask = to_sample ? VK_ACCESS_SHADER_READ_BIT : VK_ACCESS_SHADER_WRITE_BIT;
 		}
 		vk().vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 2, barriers);
+		                          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 2, barriers);
 	}
 
 	double
@@ -112,7 +113,8 @@ struct ProjectionQuadFixture : LayerFixture
 			}
 			transition_scratch(cmd, true);
 			vk().vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, distortion);
-			vk().vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
+			vk().vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0,
+			                             nullptr);
 			vk().vkCmdDispatch(cmd, (width + 7) / 8, (height + 7) / 8, 2);
 			transition_scratch(cmd, false);
 			barrier(cmd, images[8], VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
@@ -131,18 +133,25 @@ struct ProjectionQuadFixture : LayerFixture
 
 	~ProjectionQuadFixture()
 	{
-		if (!vk().device) return;
+		if (!vk().device)
+			return;
 		vk().vkDeviceWaitIdle(vk().device);
 		// All pipelines are gone before either derived/base descriptor layout.
-		for (auto p : pipelines) vk().vkDestroyPipeline(vk().device, p, nullptr);
+		for (auto p : pipelines)
+			vk().vkDestroyPipeline(vk().device, p, nullptr);
 		pipelines.clear();
 		for (unsigned eye = 0; eye < 2; ++eye) {
-			if (scratch_sample[eye]) vk().vkDestroyImageView(vk().device, scratch_sample[eye], nullptr);
-			if (scratch[eye].view) vk().vkDestroyImageView(vk().device, scratch[eye].view, nullptr);
-			if (scratch[eye].image) vk().vkDestroyImage(vk().device, scratch[eye].image, nullptr);
-			if (scratch[eye].memory) vk().vkFreeMemory(vk().device, scratch[eye].memory, nullptr);
+			if (scratch_sample[eye])
+				vk().vkDestroyImageView(vk().device, scratch_sample[eye], nullptr);
+			if (scratch[eye].view)
+				vk().vkDestroyImageView(vk().device, scratch[eye].view, nullptr);
+			if (scratch[eye].image)
+				vk().vkDestroyImage(vk().device, scratch[eye].image, nullptr);
+			if (scratch[eye].memory)
+				vk().vkFreeMemory(vk().device, scratch[eye].memory, nullptr);
 		}
-		if (scratch_sampler) vk().vkDestroySampler(vk().device, scratch_sampler, nullptr);
+		if (scratch_sampler)
+			vk().vkDestroySampler(vk().device, scratch_sampler, nullptr);
 	}
 };
 } // namespace

@@ -205,22 +205,26 @@ static uint64_t g_macos_composition_trace_rows;
 static void
 macos_composition_trace(struct comp_compositor *c, bool fast_path)
 {
-	if (!debug_get_bool_option_macos_psvr2_frame_pipeline_trace() || g_macos_composition_trace_failed) return;
+	if (!debug_get_bool_option_macos_psvr2_frame_pipeline_trace() || g_macos_composition_trace_failed)
+		return;
 	if (g_macos_composition_trace == NULL) {
 		g_macos_composition_trace = u_timing_trace_open("composition", 64u * 1024u);
 		if (g_macos_composition_trace == NULL) {
 			g_macos_composition_trace_failed = true;
 			return;
 		}
-		fputs("compositor_id,event_ns,frame_id,layer_index,layer_count,fast_path,rejection_mask,use_compute,"
-		      "passthrough,peek,debug_mirror,debug_disable,layer_type,flags,view_count,chroma_curve,foveated_views,"
-		      "source_width,source_height,color_scale_r,color_scale_g,color_scale_b,color_scale_a,"
-		      "color_bias_r,color_bias_g,color_bias_b,color_bias_a\n", g_macos_composition_trace);
+		fputs(
+		    "compositor_id,event_ns,frame_id,layer_index,layer_count,fast_path,rejection_mask,use_compute,"
+		    "passthrough,peek,debug_mirror,debug_disable,layer_type,flags,view_count,chroma_curve,foveated_"
+		    "views,"
+		    "source_width,source_height,color_scale_r,color_scale_g,color_scale_b,color_scale_a,"
+		    "color_bias_r,color_bias_g,color_bias_b,color_bias_a\n",
+		    g_macos_composition_trace);
 	}
 	uint32_t count = c->base.layer_accum.layer_count;
-	uint32_t mask = comp_projection_fast_path_rejections(
-	    count, count ? &c->base.layer_accum.layers[0].data : NULL, c->passthrough_active,
-	    c->peek != NULL, c->mirroring_to_debug_gui, c->debug.disable_fast_path);
+	uint32_t mask = comp_projection_fast_path_rejections(count, count ? &c->base.layer_accum.layers[0].data : NULL,
+	                                                     c->passthrough_active, c->peek != NULL,
+	                                                     c->mirroring_to_debug_gui, c->debug.disable_fast_path);
 	assert(fast_path == (mask == 0));
 	int64_t event_ns = os_monotonic_get_ns();
 	flockfile(g_macos_composition_trace);
@@ -239,22 +243,26 @@ macos_composition_trace(struct comp_compositor *c, bool fast_path)
 			}
 			if (d->type == XRT_LAYER_PROJECTION || d->type == XRT_LAYER_PROJECTION_DEPTH) {
 				views = d->view_count;
-				curve = d->type == XRT_LAYER_PROJECTION ? d->proj.chroma_key.curve : d->depth.chroma_key.curve;
+				curve = d->type == XRT_LAYER_PROJECTION ? d->proj.chroma_key.curve
+				                                        : d->depth.chroma_key.curve;
 				for (uint32_t eye = 0; eye < views && eye < XRT_MAX_VIEWS; ++eye) {
 					const struct xrt_layer_projection_view_data *v =
 					    d->type == XRT_LAYER_PROJECTION ? &d->proj.v[eye] : &d->depth.v[eye];
 					foveated += v->foveation.enabled != 0;
-					if (eye == 0) { width = v->sub.rect.extent.w; height = v->sub.rect.extent.h; }
+					if (eye == 0) {
+						width = v->sub.rect.extent.w;
+						height = v->sub.rect.extent.h;
+					}
 				}
 			}
 		}
 		fprintf(g_macos_composition_trace,
 		        "%p,%lld,%lld,%d,%u,%d,%u,%d,%d,%d,%d,%d,%d,%u,%u,%.9g,%u,%u,%u,"
 		        "%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g,%.9g\n",
-		        (void *)c, (long long)event_ns, (long long)c->frame.waited.id, i, count, fast_path,
-		        mask, c->settings.use_compute, c->passthrough_active, c->peek != NULL,
-		        c->mirroring_to_debug_gui, c->debug.disable_fast_path, type, flags, views, curve,
-		        foveated, width, height, scale.r, scale.g, scale.b, scale.a, bias.r, bias.g, bias.b, bias.a);
+		        (void *)c, (long long)event_ns, (long long)c->frame.waited.id, i, count, fast_path, mask,
+		        c->settings.use_compute, c->passthrough_active, c->peek != NULL, c->mirroring_to_debug_gui,
+		        c->debug.disable_fast_path, type, flags, views, curve, foveated, width, height, scale.r,
+		        scale.g, scale.b, scale.a, bias.r, bias.g, bias.b, bias.a);
 		g_macos_composition_trace_rows++;
 	}
 	if (!u_timing_trace_fully_buffered() && g_macos_composition_trace_rows >= 512) {
@@ -267,7 +275,8 @@ macos_composition_trace(struct comp_compositor *c, bool fast_path)
 static void
 macos_composition_trace_close(void)
 {
-	if (g_macos_composition_trace != NULL) fclose(g_macos_composition_trace);
+	if (g_macos_composition_trace != NULL)
+		fclose(g_macos_composition_trace);
 	g_macos_composition_trace = NULL;
 	g_macos_composition_trace_rows = 0;
 }

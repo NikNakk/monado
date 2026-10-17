@@ -716,10 +716,10 @@ render_compute_begin(struct render_compute *render)
 	    &begin_info);               //
 	VK_CHK_WITH_RET(ret, "vkBeginCommandBuffer", false);
 
-	vk->vkCmdResetQueryPool(   //
-	    render->r->cmd,        //
-	    render->r->query_pool, //
-	    0,                     // firstQuery
+	vk->vkCmdResetQueryPool(                 //
+	    render->r->cmd,                      //
+	    render->r->query_pool,               //
+	    0,                                   // firstQuery
 	    render->r->gpu_pass_timing ? 6 : 2); // queryCount
 
 	vk->vkCmdWriteTimestamp(               //

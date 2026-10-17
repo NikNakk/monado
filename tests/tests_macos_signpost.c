@@ -37,9 +37,11 @@ main(int argc, char **argv)
 		os_nanosleep(1000000);
 		int64_t physical_ns = os_monotonic_get_ns();
 		struct u_gpu_trace_frame reported = {scope, 0, frame, 0, frame};
-		u_gpu_trace_present_reported(&presentation, &reported, physical_ns, os_monotonic_get_ns(), frame % 2 + 1);
-		const char *stages[] = {"previous_fence_wait", "previous_gpu_feedback", "draw_dispatch", "queue_submit",
-		                        "present_enqueue", "target_acquire", "slot_acquire", "slot_fallback", "next_drawable"};
+		u_gpu_trace_present_reported(&presentation, &reported, physical_ns, os_monotonic_get_ns(),
+		                             frame % 2 + 1);
+		const char *stages[] = {"previous_fence_wait", "previous_gpu_feedback", "draw_dispatch",
+		                        "queue_submit",        "present_enqueue",       "target_acquire",
+		                        "slot_acquire",        "slot_fallback",         "next_drawable"};
 		for (unsigned i = 0; i < sizeof(stages) / sizeof(stages[0]); i++) {
 			const char *domain = i < 6 ? "renderer" : "presentation";
 			uint64_t interval = u_gpu_trace_cpu_begin(domain, stages[i], scope, frame, frame);

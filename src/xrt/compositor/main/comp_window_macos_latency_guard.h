@@ -18,18 +18,14 @@ struct macos_latency_guard
 };
 
 static inline void
-macos_latency_guard_observe(struct macos_latency_guard *guard,
-                            uint64_t frame,
-                            uint64_t presented_ns,
-                            int64_t depth,
-                            uint64_t period)
+macos_latency_guard_observe(
+    struct macos_latency_guard *guard, uint64_t frame, uint64_t presented_ns, int64_t depth, uint64_t period)
 {
 	if (presented_ns == 0 || depth < 0 || frame <= guard->ignore_through_frame || frame <= guard->latest_frame) {
 		return;
 	}
-	if (period == 0 || (guard->latest_present_ns != 0 &&
-	                    (presented_ns < guard->latest_present_ns ||
-	                     presented_ns - guard->latest_present_ns > 4 * period))) {
+	if (period == 0 || (guard->latest_present_ns != 0 && (presented_ns < guard->latest_present_ns ||
+	                                                      presented_ns - guard->latest_present_ns > 4 * period))) {
 		guard->deep_since_ns = 0;
 	}
 	guard->latest_frame = frame;
@@ -56,7 +52,8 @@ macos_latency_guard_should_skip(struct macos_latency_guard *guard, uint64_t fram
 	if (guard->deep_since_ns == 0 || now < guard->latest_present_ns ||
 	    now - guard->latest_present_ns > 4 * period || now < guard->deep_since_ns ||
 	    now - guard->deep_since_ns < 1000000000ULL ||
-	    (guard->last_drain_ns != 0 && (now < guard->last_drain_ns || now - guard->last_drain_ns < 10000000000ULL))) {
+	    (guard->last_drain_ns != 0 &&
+	     (now < guard->last_drain_ns || now - guard->last_drain_ns < 10000000000ULL))) {
 		return false;
 	}
 	guard->deep_since_ns = 0;

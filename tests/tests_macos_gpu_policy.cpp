@@ -68,7 +68,8 @@ TEST_CASE("late completed frame retains its slot until a later readiness cutoff"
 	auto *mc = multi_compositor(&client->base);
 	int64_t frame, wake, gpu, display, period;
 	REQUIRE(xrt_comp_predict_frame(&client->base, &frame, &wake, &gpu, &display, &period) == XRT_SUCCESS);
-	REQUIRE(xrt_comp_mark_frame(&client->base, frame, XRT_COMPOSITOR_FRAME_POINT_WOKE, os_monotonic_get_ns()) == XRT_SUCCESS);
+	REQUIRE(xrt_comp_mark_frame(&client->base, frame, XRT_COMPOSITOR_FRAME_POINT_WOKE, os_monotonic_get_ns()) ==
+	        XRT_SUCCESS);
 	REQUIRE(xrt_comp_begin_frame(&client->base, frame) == XRT_SUCCESS);
 	xrt_layer_frame_data data{};
 	data.frame_id = frame;
@@ -132,8 +133,8 @@ TEST_CASE("rejected producer dependency drops the frame and releases its claims"
 	for (int round = 0; round < 2; round++) {
 		int64_t frame, wake, gpu, display, period;
 		REQUIRE(xrt_comp_predict_frame(&client->base, &frame, &wake, &gpu, &display, &period) == XRT_SUCCESS);
-		REQUIRE(xrt_comp_mark_frame(&client->base, frame, XRT_COMPOSITOR_FRAME_POINT_WOKE, os_monotonic_get_ns()) ==
-		        XRT_SUCCESS);
+		REQUIRE(xrt_comp_mark_frame(&client->base, frame, XRT_COMPOSITOR_FRAME_POINT_WOKE,
+		                            os_monotonic_get_ns()) == XRT_SUCCESS);
 		REQUIRE(xrt_comp_begin_frame(&client->base, frame) == XRT_SUCCESS);
 		xrt_layer_frame_data data{};
 		data.frame_id = frame;

@@ -19,8 +19,9 @@ static os_log_t gpu_log;
 static os_log_t
 log_for_domain(const char *domain)
 {
-	return strcmp(domain, "renderer") == 0 ? renderer_log :
-	       strcmp(domain, "presentation") == 0 ? presentation_log : gpu_log;
+	return strcmp(domain, "renderer") == 0       ? renderer_log
+	       : strcmp(domain, "presentation") == 0 ? presentation_log
+	                                             : gpu_log;
 }
 
 static void
@@ -39,7 +40,7 @@ u_gpu_trace_signpost_enabled(void)
 {
 	pthread_once(&signpost_once, init_signposts);
 	return signpost_log != NULL && (os_signpost_enabled(signpost_log) || os_signpost_enabled(renderer_log) ||
-	                               os_signpost_enabled(presentation_log) || os_signpost_enabled(gpu_log));
+	                                os_signpost_enabled(presentation_log) || os_signpost_enabled(gpu_log));
 }
 
 void
@@ -86,15 +87,14 @@ emit(const char *domain,
 	 * durations stay in the payload: do not fabricate GPU execution intervals. */
 	os_log_t log = strcmp(event, "latency_guard_drain") == 0 ? signpost_log : log_for_domain(domain);
 	os_signpost_id_t id = scope_id != 0 ? (os_signpost_id_t)scope_id : OS_SIGNPOST_ID_EXCLUSIVE;
-#define EMIT(NAME)                                                                                                      \
-	os_signpost_event_emit(log, id, NAME,                                                                   \
-	                       "domain=%{public}s event=%{public}s scope=%{public}llu owner=%{public}llu "                      \
-	                       "frame_known=%{public}u frame=%{public}llu image=%{public}u timeline=%{public}llu "                \
-	                       "observed_ns=%{public}lld duration_ns=%{public}lld",                                             \
-	                       domain, event, (unsigned long long)scope_id, (unsigned long long)owner_scope_id,                 \
-	                       frame_id >= 0 ? 1u : 0u, frame_id >= 0 ? (unsigned long long)frame_id : 0,                       \
-	                       image_index, (unsigned long long)timeline_value,                                                \
-	                       (long long)timestamp_ns, (long long)duration_ns)
+#define EMIT(NAME)                                                                                                     \
+	os_signpost_event_emit(log, id, NAME,                                                                          \
+	                       "domain=%{public}s event=%{public}s scope=%{public}llu owner=%{public}llu "             \
+	                       "frame_known=%{public}u frame=%{public}llu image=%{public}u timeline=%{public}llu "     \
+	                       "observed_ns=%{public}lld duration_ns=%{public}lld",                                    \
+	                       domain, event, (unsigned long long)scope_id, (unsigned long long)owner_scope_id,        \
+	                       frame_id >= 0 ? 1u : 0u, frame_id >= 0 ? (unsigned long long)frame_id : 0, image_index, \
+	                       (unsigned long long)timeline_value, (long long)timestamp_ns, (long long)duration_ns)
 	if (strcmp(event, "latency_guard_drain") == 0) {
 		EMIT("LatencyGuardDrain");
 	} else if (strcmp(event, "latency_guard_drop") == 0) {
@@ -163,9 +163,8 @@ u_gpu_trace_present_depth_change(const struct u_gpu_trace_frame *frame,
 	                       "observed_ns=%{public}lld duration_ns=0 previous_depth_known=%{public}u "
 	                       "previous_depth=%{public}llu depth=%{public}lld",
 	                       (unsigned long long)frame->scope_id, (long long)frame->frame_id, frame->image_index,
-	                       (unsigned long long)frame->timeline_value, (long long)event_ns,
-	                       previous >= 0 ? 1u : 0u, previous >= 0 ? (unsigned long long)previous : 0,
-	                       (long long)depth);
+	                       (unsigned long long)frame->timeline_value, (long long)event_ns, previous >= 0 ? 1u : 0u,
+	                       previous >= 0 ? (unsigned long long)previous : 0, (long long)depth);
 }
 
 bool
@@ -179,7 +178,8 @@ u_gpu_trace_signpost_gpu_to_glass_begin(const struct u_gpu_trace_frame *frame, i
 	                           "scope=%{public}llu frame=%{public}lld image=%{public}u timeline=%{public}llu "
 	                           "gpu_end_ns=%{public}lld observed_ns=%{public}lld",
 	                           (unsigned long long)frame->scope_id, (long long)frame->frame_id, frame->image_index,
-	                           (unsigned long long)frame->timeline_value, (long long)gpu_end_ns, (long long)observed_ns);
+	                           (unsigned long long)frame->timeline_value, (long long)gpu_end_ns,
+	                           (long long)observed_ns);
 	return true;
 }
 
@@ -202,23 +202,34 @@ u_gpu_trace_signpost_gpu_to_glass_end(const struct u_gpu_trace_frame *frame,
 	                         "observed_ns=%{public}lld reason=%{public}s",
 	                         (unsigned long long)frame->scope_id, (long long)frame->frame_id, frame->image_index,
 	                         (unsigned long long)frame->timeline_value, (long long)gpu_end_ns,
-	                         (long long)presented_ns, valid ? 1u : 0u, (unsigned long long)measured_ns, (long long)observed_ns,
-	                         reason != NULL ? reason : "unknown");
+	                         (long long)presented_ns, valid ? 1u : 0u, (unsigned long long)measured_ns,
+	                         (long long)observed_ns, reason != NULL ? reason : "unknown");
 }
 
 // These names are literals because Instruments requires static interval names.
-#define CPU_STAGES(OP, LOG, ID, STAGE, ...) \
-	do { \
-		if (strcmp(STAGE, "previous_fence_wait") == 0) { OP(LOG, ID, "PreviousFenceWait", __VA_ARGS__); } \
-		else if (strcmp(STAGE, "previous_gpu_feedback") == 0) { OP(LOG, ID, "PreviousGPUFeedback", __VA_ARGS__); } \
-		else if (strcmp(STAGE, "draw_dispatch") == 0) { OP(LOG, ID, "DrawDispatch", __VA_ARGS__); } \
-		else if (strcmp(STAGE, "queue_submit") == 0) { OP(LOG, ID, "QueueSubmit", __VA_ARGS__); } \
-		else if (strcmp(STAGE, "present_enqueue") == 0) { OP(LOG, ID, "PresentEnqueue", __VA_ARGS__); } \
-		else if (strcmp(STAGE, "target_acquire") == 0) { OP(LOG, ID, "TargetAcquire", __VA_ARGS__); } \
-		else if (strcmp(STAGE, "slot_acquire") == 0) { OP(LOG, ID, "NextDrawableSlot", __VA_ARGS__); } \
-		else if (strcmp(STAGE, "slot_fallback") == 0) { OP(LOG, ID, "NextDrawableFallback", __VA_ARGS__); } \
-		else if (strcmp(STAGE, "late_delay") == 0) { OP(LOG, ID, "CompositorLateDelay", __VA_ARGS__); } \
-		else { OP(LOG, ID, "NextDrawable", __VA_ARGS__); } \
+#define CPU_STAGES(OP, LOG, ID, STAGE, ...)                                                                            \
+	do {                                                                                                           \
+		if (strcmp(STAGE, "previous_fence_wait") == 0) {                                                       \
+			OP(LOG, ID, "PreviousFenceWait", __VA_ARGS__);                                                 \
+		} else if (strcmp(STAGE, "previous_gpu_feedback") == 0) {                                              \
+			OP(LOG, ID, "PreviousGPUFeedback", __VA_ARGS__);                                               \
+		} else if (strcmp(STAGE, "draw_dispatch") == 0) {                                                      \
+			OP(LOG, ID, "DrawDispatch", __VA_ARGS__);                                                      \
+		} else if (strcmp(STAGE, "queue_submit") == 0) {                                                       \
+			OP(LOG, ID, "QueueSubmit", __VA_ARGS__);                                                       \
+		} else if (strcmp(STAGE, "present_enqueue") == 0) {                                                    \
+			OP(LOG, ID, "PresentEnqueue", __VA_ARGS__);                                                    \
+		} else if (strcmp(STAGE, "target_acquire") == 0) {                                                     \
+			OP(LOG, ID, "TargetAcquire", __VA_ARGS__);                                                     \
+		} else if (strcmp(STAGE, "slot_acquire") == 0) {                                                       \
+			OP(LOG, ID, "NextDrawableSlot", __VA_ARGS__);                                                  \
+		} else if (strcmp(STAGE, "slot_fallback") == 0) {                                                      \
+			OP(LOG, ID, "NextDrawableFallback", __VA_ARGS__);                                              \
+		} else if (strcmp(STAGE, "late_delay") == 0) {                                                         \
+			OP(LOG, ID, "CompositorLateDelay", __VA_ARGS__);                                               \
+		} else {                                                                                               \
+			OP(LOG, ID, "NextDrawable", __VA_ARGS__);                                                      \
+		}                                                                                                      \
 	} while (0)
 
 uint64_t

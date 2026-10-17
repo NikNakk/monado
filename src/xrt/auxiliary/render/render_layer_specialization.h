@@ -16,9 +16,11 @@ render_layer_common_eligible(const struct render_compute_layer_ubo_data *data,
 		return false;
 	}
 	for (uint32_t i = 0; i < count; ++i) {
-		if (i > 0 && data->layers[i].layer_data.layer_type != LAYER_COMP_TYPE_QUAD) return false;
+		if (i > 0 && data->layers[i].layer_data.layer_type != LAYER_COMP_TYPE_QUAD)
+			return false;
 		if (data->layers[i].image_info.has_depth != 0 || foveation->layer_slot[i] != 0 ||
-		    !(data->layers[i].chroma_key.curve <= 0.0f)) return false;
+		    !(data->layers[i].chroma_key.curve <= 0.0f))
+			return false;
 	}
 	return true;
 }

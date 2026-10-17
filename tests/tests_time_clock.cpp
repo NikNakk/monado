@@ -51,8 +51,7 @@ TEST_CASE("macOS monotonic clock is mach absolute time")
 {
 	mach_timebase_info_data_t timebase;
 	REQUIRE(mach_timebase_info(&timebase) == KERN_SUCCESS);
-	int64_t mach_ns =
-	    (int64_t)(((__uint128_t)mach_absolute_time() * timebase.numer) / timebase.denom);
+	int64_t mach_ns = (int64_t)(((__uint128_t)mach_absolute_time() * timebase.numer) / timebase.denom);
 	CHECK(std::llabs(os_monotonic_get_ns() - mach_ns) <= kTolerance);
 }
 #endif
