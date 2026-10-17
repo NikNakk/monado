@@ -37,8 +37,8 @@ def main():
     parser.add_argument('--seconds', type=float, default=15)
     parser.add_argument('--repeats', type=int, default=2)
     parser.add_argument('--hz', type=int, nargs='+', default=[90, 120])
-    parser.add_argument('--conditions', nargs='+', choices=['native', 'native-timed', 'wsi-generic', 'wsi-generic-adaptive', 'wsi-generic-cv', 'wsi-generic-calibrated'],
-                        default=['native', 'native-timed', 'wsi-generic', 'wsi-generic-cv', 'wsi-generic-calibrated'])
+    parser.add_argument('--conditions', nargs='+', choices=['native', 'native-timed', 'wsi', 'wsi-adaptive'],
+                        default=['native', 'native-timed', 'wsi', 'wsi-adaptive'])
     parser.add_argument('--native-display-link', choices=['ca', 'cv'], default='ca')
     parser.add_argument('--metal-validation', action='store_true')
     parser.add_argument('--loads', nargs='+', choices=['baseline', 'light', 'cpu', 'gpu4', 'gpu16'], default=['baseline'])
@@ -129,10 +129,7 @@ def main():
                             'PSVR2_CAMERA_STREAMS': '1' if args.passthrough else '0', 'PSVR2_GAZE_STREAMS': '0',
                             'XRT_MACOS_CLIENT_COMPOSITOR': '1' if args.hosted else '0', 'XRT_MACOS_GPU_QUEUE_PRIORITY': '0',
                             'XRT_MACOS_DISPLAY_LINK': args.native_display_link, 'XRT_MACOS_REFRESH_RATE_HZ': str(hz),
-                            'XRT_MACOS_WSI_GENERIC': '1' if condition.startswith('wsi-generic') else '0',
-                            'XRT_MACOS_WSI_GENERIC_CV': '1' if condition in ('wsi-generic-cv', 'wsi-generic-calibrated') else '0',
-                            'XRT_MACOS_WSI_GENERIC_CALIBRATE': '1' if condition == 'wsi-generic-calibrated' else '0',
-                            'XRT_MACOS_WSI_GENERIC_ADAPTIVE': '1' if condition == 'wsi-generic-adaptive' else '0',
+                            'XRT_MACOS_PRESENTER': condition if condition.startswith('wsi') else 'native',
                             'XRT_MACOS_WSI_GENERIC_LATCH_US': str(args.generic_latch_us),
                             'XRT_COMPOSITOR_PREFERRED_IMAGE_COUNT': '3',
                             'XRT_COMPOSITOR_DEPTH_REPROJECTION': '0',

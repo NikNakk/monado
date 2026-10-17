@@ -12,6 +12,7 @@
 #import <QuartzCore/QuartzCore.h>
 
 #include "main/comp_window.h"
+#include "main/comp_macos_presenter.h"
 #include "main/comp_window_macos_hosted.h"
 #include "util/u_macos_hosted_client.h"
 #include "util/comp_metal_gpu_priority.h"
@@ -35,11 +36,6 @@ DEBUG_GET_ONCE_NUM_OPTION(macos_generic_refresh, "XRT_MACOS_REFRESH_RATE_HZ", 0)
 
 DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_passthrough, "XRT_MACOS_WSI_PASSTHROUGH", false)
 
-
-DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_wsi, "XRT_MACOS_WSI_GENERIC", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_cv, "XRT_MACOS_WSI_GENERIC_CV", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_calibrate, "XRT_MACOS_WSI_GENERIC_CALIBRATE", false)
-DEBUG_GET_ONCE_BOOL_OPTION(macos_generic_adaptive, "XRT_MACOS_WSI_GENERIC_ADAPTIVE", false)
 
 // Keep the validated CV source opt-in while comparing Apple's replacement APIs.
 #pragma clang diagnostic push
@@ -712,7 +708,7 @@ detect(const struct comp_target_factory *factory, struct comp_compositor *c)
 {
 	(void)factory;
 	(void)c;
-	return debug_get_bool_option_macos_generic_wsi() && comp_macos_frontend_detect();
+	return comp_macos_presenter_is_wsi() && comp_macos_frontend_detect();
 }
 
 bool
@@ -726,13 +722,10 @@ comp_window_macos_wsi_create_hosted(struct comp_compositor *c,
 	}
 	w->hosted_client = client;
 	u_macos_hosted_client_reference(client);
-	w->use_cv = debug_get_bool_option_macos_generic_cv();
-	w->calibrate = w->use_cv && debug_get_bool_option_macos_generic_calibrate();
-	w->adaptive = debug_get_bool_option_macos_generic_adaptive();
-	if (w->adaptive && w->use_cv) {
-		COMP_WARN(c, "XRT_MACOS_WSI_GENERIC_ADAPTIVE needs the display-timing pacer; ignored with _CV");
-		w->adaptive = false;
-	}
+	enum comp_macos_presenter mode = comp_macos_presenter_get();
+	w->use_cv = mode == COMP_MACOS_PRESENTER_WSI;
+	w->calibrate = w->use_cv;
+	w->adaptive = mode == COMP_MACOS_PRESENTER_WSI_ADAPTIVE;
 	struct u_pc_display_timing_config pacer_config = u_pc_display_timing_get_default_config();
 	w->correction.latch_ns = (int64_t)debug_get_num_option_macos_generic_latch_us() * 1000;
 	w->correction.neutral_margin_ns = pacer_config.margin_ns;

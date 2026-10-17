@@ -8,6 +8,7 @@ set(tests
     tests_present_feedback_correction
     tests_cxx_wrappers
     tests_macos_display_timing
+    tests_macos_presenter
     tests_deque
     tests_floor_calibration
     tests_generic_callbacks
@@ -94,6 +95,15 @@ foreach(testname ${tests})
 	add_test(NAME ${testname} COMMAND ${testname} --success --allow-running-no-tests)
 	set_target_properties(${testname} PROPERTIES FOLDER monado_tests)
 endforeach()
+
+if(APPLE)
+	target_sources(tests_macos_presenter PRIVATE ../src/xrt/compositor/main/comp_macos_presenter.c)
+	foreach(mode native wsi wsi-adaptive invalid)
+		add_test(NAME tests_macos_presenter_${mode} COMMAND tests_macos_presenter "[presenter-runtime]")
+		set_tests_properties(tests_macos_presenter_${mode} PROPERTIES
+			ENVIRONMENT "XRT_MACOS_PRESENTER=${mode};XRT_MACOS_WSI_GENERIC=1;XRT_MACOS_WSI_GENERIC_CV=1")
+	endforeach()
+endif()
 
 if(UNIX
    AND NOT ANDROID

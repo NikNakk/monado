@@ -64,6 +64,8 @@ if(APPLE)
 			comp_macos_display.m
 			comp_macos_display.h
 			comp_macos_display_timing.h
+			comp_macos_presenter.c
+			comp_macos_presenter.h
 			comp_window_macos_wsi.m
 			comp_vulkan_passthrough.c
 			comp_vulkan_passthrough.h

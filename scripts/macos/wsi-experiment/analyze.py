@@ -11,6 +11,18 @@ import re
 import statistics
 
 
+def presenter_policy(run):
+    """Current selector takes precedence; retain old flags only for archived captures."""
+    env = run['environment']
+    if 'XRT_MACOS_PRESENTER' in env:
+        mode = env['XRT_MACOS_PRESENTER']
+        if mode not in ('native', 'wsi', 'wsi-adaptive'):
+            raise ValueError('invalid presenter selection in capture manifest')
+        return mode == 'wsi', mode == 'wsi'
+    return (env.get('XRT_MACOS_WSI_GENERIC_CV') == '1',
+            env.get('XRT_MACOS_WSI_GENERIC_CALIBRATE') == '1')
+
+
 def distribution(values):
     a = sorted(values)
     def q(p):
@@ -58,6 +70,8 @@ def summarize(run, warmup):
     frames = {int(r['system_frame_id']): r for r in reprojection if int(r['sample_ns']) >= start}
     if not frames:
         raise ValueError(f'{directory}: no frames after warm-up')
+    generic_wsi = (run['condition'].startswith('wsi-generic') or
+                   run['environment'].get('XRT_MACOS_PRESENTER') in ('wsi', 'wsi-adaptive'))
     wsi = run['condition'].startswith('wsi')
     acquire = []
     if wsi:
@@ -66,7 +80,7 @@ def summarize(run, warmup):
             if any(int(r['result']) not in (0, 1000001003) or not 0 <= int(r['image_index']) < 3 for r in acquire):
                 raise ValueError(f'{directory}: invalid WSI acquisition result/image')
         trace = table(directory, 'wsi')
-        if run['condition'].startswith('wsi-generic'):
+        if generic_wsi:
             submitted = {int(r['frame_id']): r for r in trace if r['event'] == 'submit'}
             for row in trace:
                 if row['event'] == 'feedback' and int(row['frame_id']) in submitted:
@@ -79,7 +93,7 @@ def summarize(run, warmup):
         present_call = [(int(r['end_ns']) - int(r['begin_ns'])) / 1e6 for r in submits]
         credits = [int(r['credit_wait_ns']) / 1e6 for r in submits]
         max_pending = max((int(r['pending']) for r in submits), default=0)
-        limit = int(run['environment']['XRT_MACOS_WSI_MAX_PENDING'])
+        limit = int(run['environment'].get('XRT_MACOS_WSI_MAX_PENDING', '0'))
         if limit and max_pending > limit:
             raise ValueError(f'{directory}: presentation credit bound violated')
         if any(int(r['result']) not in (0, 1000001003) for r in submits):
@@ -101,12 +115,12 @@ def summarize(run, warmup):
         raise ValueError(f'{directory}: presentation frame order is not strictly increasing')
     times = sorted(actual for _, _, actual in joined)
     intervals = [(b - a) / 1e6 for a, b in zip(times, times[1:])]
-    nominal = statistics.median(int(r['display_period_ns']) for r in table(directory, 'cv_vblank' if run.get('hosted') and run['environment'].get('XRT_MACOS_WSI_GENERIC_CV') == '1' else 'refresh' if run['condition'].startswith('wsi-generic') else 'vblank')
+    cv, calibrated = presenter_policy(run)
+    nominal = statistics.median(int(r['display_period_ns']) for r in table(directory, 'cv_vblank' if run.get('hosted') and cv else 'refresh' if generic_wsi else 'vblank')
                                 if int(r['display_period_ns']) > 0)
     measured_hz = 1e9 / nominal
     if abs(measured_hz - run['requested_hz']) > 1:
         raise ValueError(f'{directory}: display-link period differs from requested refresh')
-    cv = run['environment'].get('XRT_MACOS_WSI_GENERIC_CV') == '1'
     cv_rows = table(directory, 'cv_vblank') if cv else []
     if cv:
         if len(cv_rows) < 8 or any(int(r['vblank_ns']) <= 0 or int(r['vblank_ns']) > int(r['consumed_ns']) for r in cv_rows):
@@ -117,7 +131,6 @@ def summarize(run, warmup):
             raise ValueError(f'{directory}: CVDisplayLink period differs from requested refresh')
         if 'CVDisplayLink=1' not in service_log + app_log or 'non-feedback version' not in service_log + app_log:
             raise ValueError(f'{directory}: CV source / fallback pacer not observed')
-    calibrated = run['environment'].get('XRT_MACOS_WSI_GENERIC_CALIBRATE') == '1'
     offset_rows = table(directory, 'cv_offset') if calibrated else []
     if calibrated:
         if not cv or not any(int(r['sample_count']) >= 8 for r in offset_rows):
@@ -164,7 +177,7 @@ def summarize(run, warmup):
         'directory': run['directory'], 'condition': run['condition'], 'requested_hz': run['requested_hz'],
         'repeat': run['repeat'], 'load': run.get('load', 'baseline'),
         'gpu_attribution': run.get('gpu_attribution', False), 'warmup_seconds': warmup, 'display_hz': measured_hz,
-        'refresh_source': 'CVDisplayLink (hosted physical display)' if run.get('hosted') and cv else 'GOOGLE refresh-cycle query' if run['condition'].startswith('wsi-generic') else 'CVDisplayLink',
+        'refresh_source': 'CVDisplayLink (hosted physical display)' if run.get('hosted') and cv else 'GOOGLE refresh-cycle query' if generic_wsi else 'CVDisplayLink',
         'rendered_frames': len(frames), 'joined_feedback_frames': len(joined),
         'feedback_coverage_percent': len(joined) / len(frames) * 100,
         'observed_present_hz': (len(times) - 1) * 1e9 / (times[-1] - times[0]) if len(times) > 1 and times[-1] > times[0] else None,
@@ -187,7 +200,7 @@ def summarize(run, warmup):
         'max_pending_at_submit': max_pending,
         'generic_display_timing_enabled': not cv and run['environment'].get('XRT_COMPOSITOR_USE_DISPLAY_TIMING', '1') == '1',
         'cv_vblank_samples': len(cv_rows),
-        'pacing_source': 'CVDisplayLink' if cv else ('GOOGLE feedback' if run['condition'].startswith('wsi-generic') and run['environment'].get('XRT_COMPOSITOR_USE_DISPLAY_TIMING', '1') == '1' else 'fallback estimates' if run['condition'].startswith('wsi-generic') else 'native CADisplayLink' if run['environment'].get('XRT_MACOS_DISPLAY_LINK', 'cv') == 'ca' else 'native CVDisplayLink'),
+        'pacing_source': 'CVDisplayLink' if cv else ('GOOGLE feedback' if run['condition'].startswith('wsi') and run['environment'].get('XRT_COMPOSITOR_USE_DISPLAY_TIMING', '1') == '1' else 'fallback estimates' if run['condition'].startswith('wsi') else 'native CADisplayLink' if run['environment'].get('XRT_MACOS_DISPLAY_LINK', 'cv') == 'ca' else 'native CVDisplayLink'),
         'cv_observed_interval_ms': distribution([(int(b['vblank_ns']) - int(a['vblank_ns'])) / 1e6 for a, b in zip(cv_rows, cv_rows[1:])]),
         'calibrated_offset_ms': distribution([int(r['filtered_ns']) / 1e6 for r in offset_rows if int(r['sample_count']) >= 8]),
         'generic_max_comp_percent': int(run['environment'].get('U_PACING_COMP_TIME_MAX_FRACTION_PERCENT', '30')),
