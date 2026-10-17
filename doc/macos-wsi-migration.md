@@ -1,0 +1,126 @@
+<!--
+Copyright 2026, Nick Kennedy
+SPDX-License-Identifier: BSL-1.0
+-->
+
+# Current WSI experiment and review follow-up
+
+The active Monado-2 worktree is `build/review/wsi-source`, branch
+`experiment/macos-wsi-current-native`, based on
+`f076c87ed8715e00a66c58e6bec7ad43b5ad19b1`. The old worktree in the
+`monado-upstreaming` repository is preserved. The main checkout's four dirty
+documentation files are untouched. Source transfer used the self-contained
+patch with SHA-256 `5ac511c3b4f84416557b66f7f54cab0a448130f53234f3532c4b31a024ee173f`.
+
+## Claude review dispositions
+
+- Idle native refresh requests apply immediately. Active native requests now
+  apply at prediction boundaries: hardware testing showed the direct API-thread
+  drain could wait while the compositor kept feeding the presenter. The existing
+  `u_pc_fake_set_frame_period` preserves frame IDs, phase, presentation offset
+  and compositor budget. The older base actually recreated the fake pacer in
+  this request path; using the existing setter also removes that reset.
+- Native and generic WSI targets queue active-session requests at prediction
+  boundaries. An optional target session callback serializes session transitions
+  with idle API requests. Before begin and after end, requests apply immediately
+  under the queue lock. Stopping a session processes any queued request before
+  its rendering loop sleeps. A completed request retains success even when
+  its timed wait expired while the apply function held the mutex. Outstanding
+  waiters prevent a second caller overwriting the first result.
+- The duplicate fake-period update now delegates to the existing setter rather
+  than resetting its budget or phase. The GOOGLE pacer still updates its own
+  period without restarting frame IDs, retaining its learned budget, offset
+  and caller configuration (with the budget clamped to the new maximum).
+- The native-wrapper WSI target, `XRT_MACOS_WSI`,
+  `XRT_MACOS_WSI_MAX_PENDING`, and their credit loop are removed. Native GPU
+  attribution changes are removed too. Historical analysis still understands
+  those old capture formats, but the runner rejects the removed conditions.
+- Passthrough export/Metal/pixel-check failures after transition all attempt to
+  restore PRESENT_SRC and re-signal render completion. Recoverable failures
+  present the acquired image before returning the composition error. Missing
+  passthrough support is rejected at creation with an explicit unsupported
+  result. A defensive presentation fallback warns once without renderer spam. If Vulkan synchronization cannot be restored, the target stops acquiring
+  and releases the outstanding image through swapchain destruction at teardown.
+- Physical mode changes now wait for an active display with matching geometry
+  and the requested rate before adopting timing; inactive-display fallback
+  values such as 60 Hz cannot become the WSI pacer period.
+- Camera startup is a not-ready state and preserves normal image presentation.
+  Camera-only and actual overlay pixel verification run separately.
+- Stopping a GPU waiter cancels its pending obligation without publishing GPU
+  completion or reporting a false device fault; real live-client timeouts keep
+  their loss and quarantine behavior.
+- Refresh request errors propagate on macOS only; Linux and Android keep
+  their prior request behavior. Shared clock conversion defaults to zero offset
+  on other targets.
+- Test CMake changes are just the two test registrations; formatting churn and
+  stray pacing-header blank lines are removed.
+
+## Current controls and limits
+
+Native remains the default with its CADisplayLink pacing, calibrated/rotational
+passthrough and normal shared-event handoff. `XRT_MACOS_WSI_GENERIC=1` selects
+WSI. `_GENERIC_CV=1` adds CV phase and `_GENERIC_CALIBRATE=1` calibrates its
+presentation offset. The opt-in `_PASSTHROUGH=1` / `_PASSTHROUGH_VERIFY=1`
+bridge is still a blocking correctness experiment with static mapping; parity
+with native calibration and rotational correction remains open.
+
+Sleep clock discontinuities and display loss require target/service restart.
+Automatic recovery is not implemented. The current-base hardware gates include
+refresh requests before begin, 90→120→90→120, invalid-rate rejection, repeated
+sessions, hosted visibility, verified overlay/only passthrough, and sleep/reconnect.
+The [hardware fixes and reruns](macos-wsi-headset-fixes.md) now pass native and
+all WSI refresh cycles, camera-only pixels and actual overlay pixels, including
+hosted WSI. The original failed captures remain in the initial-check ledger.
+Visual acceptance and the integration gaps above remain pending.
+
+## Earlier review validation
+
+Final fix validation is recorded in [the hardware-fix report](macos-wsi-headset-fixes.md).
+
+- Fresh macOS RelWithDebInfo configure and full build passed without compiler
+  warnings. Final host CTest run passed **79/79** (21.66 s).
+- Python capture/analysis tests passed **23/23**. The display-mode helper builds,
+  and runner help lists only the remaining conditions.
+- Ubuntu 24.04, GCC 13.3, default CMake options and the Linux CI dependency recipe:
+  full build passed without compiler warnings, and **51/51 CTests passed**
+  (531.12 s). This used Docker x86_64 emulation on Apple Silicon; times are
+  validation costs. The full suite was run before the last non-Apple request
+  behavior restoration and strengthened timing assertions. A final incremental
+  build and the two timing test executables validate those changes; unrelated
+  solver/fusion cases are not repeated.
+- The timeout race negative control passes with corrected code and fails when
+  its old unconditional timeout handling is restored in a temporary header.
+- clang-format 23.1.3 formatted new source and changed lines using the repository
+  configuration (which already includes an Objective-C section). Test CMake has
+  exactly two added lines. The complete portable patch passes strict whitespace
+  and clean-index application checks at the exact base.
+- Initial sandboxed macOS CTest failures were host-access restrictions affecting
+  GPU, sockets and remote layers. Host-permission runs pass all tests. The final
+  build uses a newly configured directory after an overlapping initial build
+  damaged Ninja's log; the final clean build and subsequent incremental update
+  logs contain no compiler warnings.
+
+Evidence is in the main checkout's `build/review/wsi-review-*` logs. The reviewed
+portable source patch and per-file hashes are
+`build/review/wsi-migration/review-followup.patch` and
+`review-followup-snapshot.json`. Nothing is committed, pushed or installed.
+
+## Build and user-operated pilot
+
+From the main Monado-2 directory:
+
+```sh
+cmake -S build/review/wsi-source -B build/review/wsi-current-native-fresh -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build/review/wsi-current-native-fresh --parallel 6
+ctest --test-dir build/review/wsi-current-native-fresh --output-on-failure
+python3 -B -m unittest discover -s build/review/wsi-source/scripts/macos/wsi-experiment -p 'test_*.py'
+clang -fobjc-arc -framework AppKit -framework CoreGraphics build/review/wsi-source/scripts/macos/wsi-experiment/display_mode.m -o build/review/wsi-display-mode
+python3 build/review/wsi-source/scripts/macos/wsi-experiment/run.py --build build/review/wsi-current-native-fresh --display-helper build/review/wsi-display-mode --output build/review/wsi-refresh-current-base --conditions native wsi-generic wsi-generic-cv --hz 90 --seconds 15 --repeats 1 --refresh-cycle
+```
+
+The refresh pilot now explicitly requests 90 Hz before `xrBeginSession` and
+checks its duration and physical mode. The runner uses an isolated service and
+restores prior registration/display mode. Headset runs require user authorization;
+the user explicitly authorized the initial automated checks recorded above. The installed runtime has not been replaced.
+All old-base timing claims remain historical. New performance comparisons must
+follow correctness and include distinct client frames as well as cadence/tails.

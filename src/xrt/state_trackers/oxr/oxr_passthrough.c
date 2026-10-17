@@ -101,7 +101,11 @@ oxr_passthrough_create(struct oxr_logger *log,
 	info.create = convert_create_flags(createInfo->flags);
 	xret = xrt_comp_create_passthrough(sess->compositor, &info);
 	if (xret != XRT_SUCCESS) {
-		return oxr_error(log, XR_ERROR_RUNTIME_FAILURE, "Failed to create passthrough");
+		oxr_handle_destroy(log, &passthrough->handle);
+		return oxr_error(log,
+		                 xret == XRT_ERROR_FEATURE_NOT_SUPPORTED ? XR_ERROR_FEATURE_UNSUPPORTED
+		                                                         : XR_ERROR_RUNTIME_FAILURE,
+		                 "Failed to create passthrough");
 	}
 
 	*out_passthrough = passthrough;

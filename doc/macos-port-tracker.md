@@ -7,6 +7,15 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The opt-in generic WSI experiment is now in a Monado-2 worktree on this base.
+The review follow-up removes the native-wrapper/credit prototype, restores
+synchronous native refresh, fixes idle WSI requests and restores images on
+passthrough failures. See [the current migration record](macos-wsi-migration.md).
+The [hardware fixes and reruns](macos-wsi-headset-fixes.md) pass native and all
+WSI refresh cycles, camera-only output and actual overlay pixel checks, including
+hosted WSI. The initial failed captures are preserved. Visual acceptance,
+calibration/rotation parity and automatic recovery remain pending.
+
 The [graphics integration review](macos-graphics-integration-review.md) is now
 integrated locally into `macos-upstream-clean` by the user-approved fast-forward
 to `c2c608a3f`. Both native Vulkan sharing options default to on, with independent

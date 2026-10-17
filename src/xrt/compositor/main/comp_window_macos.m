@@ -14,6 +14,8 @@
 
 #include "main/comp_window.h"
 #include "main/comp_macos_frontend.h"
+#include "main/comp_macos_display.h"
+#include "main/comp_macos_refresh.h"
 #include "main/comp_window_macos_trace_buffer.h"
 #include "main/comp_window_macos_latency_guard.h"
 #include "main/comp_window_macos_passthrough_shader.h"
@@ -127,6 +129,7 @@ macos_presented_state_release(struct macos_presented_state *state)
 	free(state);
 }
 
+DEBUG_GET_ONCE_BOOL_OPTION(macos_wsi_generic, "XRT_MACOS_WSI_GENERIC", false)
 DEBUG_GET_ONCE_BOOL_OPTION(macos_psvr2_timing_trace, "PSVR2_TIMING_TRACE", false)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_min_lead_us, "XRT_MACOS_PRESENT_MIN_LEAD_US", 2000)
 DEBUG_GET_ONCE_NUM_OPTION(macos_present_prelatch_us, "XRT_MACOS_PRESENT_PRELATCH_US", 2000)
@@ -165,7 +168,10 @@ struct macos_passthrough_sink
 struct comp_window_macos
 {
 	struct comp_target_swapchain base;
+	struct comp_macos_refresh_queue refresh_queue;
+	void (*calc_frame_pacing)(struct comp_target *, int64_t *, int64_t *, int64_t *, int64_t *, int64_t *);
 	uint64_t gpu_trace_id;
+	FILE *trace_gpu;
 	struct comp_macos_frontend *frontend;
 	struct u_macos_hosted_client *hosted_client;
 	//! Borrowed from the frontend.
@@ -2801,6 +2807,7 @@ comp_window_macos_destroy(struct comp_target *ct)
 {
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 
+	comp_macos_refresh_fini(&cwm->refresh_queue);
 	atomic_store_explicit(&cwm->passthrough_shutdown, true, memory_order_release);
 	struct xrt_device *xdev = ct->c != NULL ? ct->c->xdev : NULL;
 	if (cwm->passthrough_sinks_attached && xdev != NULL && xdev->set_passthrough_sinks != NULL) {
@@ -2833,6 +2840,10 @@ comp_window_macos_destroy(struct comp_target *ct)
 	}
 	macos_drain_present_worker(cwm);
 	macos_release_prefetched_drawable(cwm, "destroy_release");
+	if (cwm->trace_gpu != NULL) {
+		macos_trace_buffered_fflush(cwm->trace_gpu);
+		fclose(cwm->trace_gpu);
+	}
 	macos_timing_trace_close(cwm);
 	comp_window_macos_free_images(cwm);
 	if (cwm->render_complete_event != nil) {
@@ -2902,6 +2913,43 @@ comp_window_macos_prepare_destroy(struct comp_target *ct)
 	return !atomic_load_explicit(&cwm->present_completion_failed, memory_order_acquire);
 }
 
+static void
+macos_trace_info_gpu(struct comp_target *ct, int64_t frame_id, int64_t start_ns, int64_t end_ns, int64_t when_ns)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	comp_window_macos_info_gpu(ct, frame_id, start_ns, end_ns, when_ns);
+	if (cwm->trace_gpu != NULL) {
+		fprintf(cwm->trace_gpu, "%" PRIi64 ",%" PRIi64 ",%" PRIi64 ",%" PRIi64 "\n", frame_id, start_ns, end_ns,
+		        when_ns);
+	}
+}
+
+static xrt_result_t
+macos_apply_refresh_rate_physical(void *ctx, float requested_hz);
+
+static xrt_result_t
+comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float hz)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	return comp_macos_refresh_request(&cwm->refresh_queue, hz, 5000000000LL, macos_apply_refresh_rate_physical, ct);
+}
+
+static void
+macos_set_session_active(struct comp_target *ct, bool active)
+{
+	comp_macos_refresh_set_active(&((struct comp_window_macos *)ct)->refresh_queue, active,
+	                              macos_apply_refresh_rate_physical, ct);
+}
+
+static void
+macos_calc_frame_pacing(
+    struct comp_target *ct, int64_t *id, int64_t *wake, int64_t *desired, int64_t *slop, int64_t *display)
+{
+	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
+	comp_macos_refresh_process(&cwm->refresh_queue, macos_apply_refresh_rate_physical, ct);
+	cwm->calc_frame_pacing(ct, id, wake, desired, slop, display);
+}
+
 static struct comp_target *
 comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_client *client)
 {
@@ -2914,6 +2962,12 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 		return NULL;
 	}
 	if (pthread_mutex_init(&cwm->passthrough_mutex, NULL) != 0) {
+		pthread_mutex_destroy(&cwm->present_worker_mutex);
+		free(cwm);
+		return NULL;
+	}
+	if (!comp_macos_refresh_init(&cwm->refresh_queue)) {
+		pthread_mutex_destroy(&cwm->passthrough_mutex);
 		pthread_mutex_destroy(&cwm->present_worker_mutex);
 		free(cwm);
 		return NULL;
@@ -2963,7 +3017,11 @@ comp_window_macos_create_base(struct comp_compositor *c, struct u_macos_hosted_c
 		u_gpu_trace_present_init(&cwm->presented_state->presentation_trace, cwm->gpu_trace_id);
 	}
 	comp_target_swapchain_init_and_set_fnptrs(&cwm->base, COMP_TARGET_FORCE_FAKE_DISPLAY_TIMING);
-	cwm->base.base.info_gpu = comp_window_macos_info_gpu;
+	cwm->calc_frame_pacing = cwm->base.base.calc_frame_pacing;
+	cwm->base.base.calc_frame_pacing = macos_calc_frame_pacing;
+	cwm->base.base.set_session_active = macos_set_session_active;
+	cwm->base.base.info_gpu = macos_trace_info_gpu;
+	cwm->trace_gpu = macos_timing_trace_open_file("compositor_gpu", "frame_id,start_ns,end_ns,when_ns");
 	for (uint32_t i = 0; i < MACOS_TARGET_IMAGE_COUNT; i++) {
 		cwm->io_surfaces[i] = XRT_GRAPHICS_BUFFER_HANDLE_INVALID;
 	}
@@ -2995,7 +3053,7 @@ detect(const struct comp_target_factory *ctf, struct comp_compositor *c)
 	(void)ctf;
 	(void)c;
 	@autoreleasepool {
-		return comp_macos_frontend_detect();
+		return !debug_get_bool_option_macos_wsi_generic() && comp_macos_frontend_detect();
 	}
 }
 
@@ -3279,8 +3337,9 @@ macos_recreate_display_link(struct comp_window_macos *cwm, CGDirectDisplayID dis
 }
 
 static xrt_result_t
-comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float requested_hz)
+macos_apply_refresh_rate_physical(void *ctx, float requested_hz)
 {
+	struct comp_target *ct = ctx;
 	struct comp_window_macos *cwm = (struct comp_window_macos *)ct;
 	CGDirectDisplayID display_id = cwm->display_id;
 	if (display_id == kCGNullDirectDisplay) {
@@ -3308,11 +3367,11 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 	bool display_link_was_running = macos_display_link_is_running(cwm);
 	macos_display_link_stop(cwm);
 
-	CGError cgret = CGDisplaySetDisplayMode(display_id, selected_mode, NULL);
+	bool mode_set = comp_macos_display_set_mode(display_id, selected_mode);
 	CGDisplayModeRelease(selected_mode);
-	if (cgret != kCGErrorSuccess) {
-		COMP_ERROR(ct->c, "Failed to switch PS VR2 physical refresh from %.3f to %.3f Hz (CGError %d)",
-		           current_hz, selected_hz, (int)cgret);
+	if (!mode_set) {
+		COMP_ERROR(ct->c, "Failed to switch PS VR2 physical refresh from %.3f to %.3f Hz", current_hz,
+		           selected_hz);
 		(void)macos_recreate_display_link(cwm, display_id, display_link_was_running);
 		return XRT_ERROR_OUTPUT_REQUEST_FAILURE;
 	}
@@ -3326,8 +3385,7 @@ comp_window_macos_request_refresh_rate_physical(struct comp_target *ct, float re
 	}
 	ct->c->frame_interval_ns = cwm->display_period_ns;
 	if (cwm->base.upc != NULL) {
-		u_pc_destroy(&cwm->base.upc);
-		u_pc_fake_create(cwm->display_period_ns, os_monotonic_get_ns(), &cwm->base.upc);
+		u_pc_fake_set_frame_period(cwm->base.upc, cwm->display_period_ns);
 	}
 	[CATransaction flush];
 	macos_schedule_drawable_slot(cwm);
@@ -3410,6 +3468,9 @@ static bool
 create_hosted_target(const struct comp_target_factory *ctf, struct comp_compositor *c, struct comp_target **out_ct)
 {
 	const struct comp_macos_hosted_target_factory *factory = (const struct comp_macos_hosted_target_factory *)ctf;
+	if (debug_get_bool_option_macos_wsi_generic()) {
+		return comp_window_macos_wsi_create_hosted(c, factory->client, out_ct);
+	}
 	*out_ct = comp_window_macos_create_with_client(c, factory->client);
 	return *out_ct != NULL;
 }
@@ -3447,7 +3508,8 @@ comp_window_macos_hosted_factory_create(struct u_macos_hosted_client *client)
 	if (factory == NULL) {
 		return NULL;
 	}
-	factory->base = comp_target_factory_macos;
+	factory->base = debug_get_bool_option_macos_wsi_generic() ? comp_target_factory_macos_wsi_generic
+	                                                          : comp_target_factory_macos;
 	factory->base.name = "macOS Hosted Metal Layer";
 	factory->base.identifier = "macos-hosted";
 	factory->base.disable_peek = true;

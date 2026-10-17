@@ -774,6 +774,20 @@ u_pc_display_timing_create(int64_t estimated_frame_period_ns,
 xrt_result_t
 u_pc_fake_create(int64_t estimated_frame_period_ns, int64_t now_ns, struct u_pacing_compositor **out_upc);
 
+//! Change refresh period on the compositor thread without restarting frame IDs.
+//! Returns false for an unsupported pacer or a nonpositive period.
+bool
+u_pc_fake_update_period(struct u_pacing_compositor *upc, int64_t period_ns, int64_t now_ns);
+bool
+u_pc_display_timing_update_period(struct u_pacing_compositor *upc, int64_t period_ns, int64_t now_ns);
+
+static inline bool
+u_pc_update_period(struct u_pacing_compositor *upc, int64_t period_ns, int64_t now_ns)
+{
+	return u_pc_fake_update_period(upc, period_ns, now_ns) ||
+	       u_pc_display_timing_update_period(upc, period_ns, now_ns);
+}
+
 /*!
  * Refine the frame period of a fake pacer without discarding outstanding frames,
  * frame IDs, phase or present-offset feedback. Call on the pacer's owning thread.

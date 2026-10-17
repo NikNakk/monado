@@ -531,3 +531,14 @@ u_pc_fake_create(int64_t estimated_frame_period_ns, int64_t now_ns, struct u_pac
 
 	return XRT_SUCCESS;
 }
+
+bool
+u_pc_fake_update_period(struct u_pacing_compositor *upc, int64_t period_ns, int64_t now_ns)
+{
+	if (upc == NULL || upc->predict != pc_predict || period_ns <= 0) {
+		return false;
+	}
+	(void)now_ns;
+	u_pc_fake_set_frame_period(upc, period_ns);
+	return true;
+}

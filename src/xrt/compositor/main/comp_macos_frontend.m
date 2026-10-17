@@ -348,6 +348,10 @@ macos_host_set_visibility(void *ctx, uint32_t client_id, enum u_macos_display_ho
 				[cwm->root_layer addSublayer:entry->host];
 				[entry->host release];
 			}
+			if (entry->visibility != visibility) {
+				COMP_INFO(cwm->c, "Hosted client %u visibility %d -> %d", client_id,
+				          (int)entry->visibility, (int)visibility);
+			}
 			entry->host.hidden = visibility == U_MACOS_DISPLAY_HOST_HIDDEN;
 			entry->visibility = visibility;
 			macos_host_update_service_layer_locked(cwm);
@@ -651,13 +655,34 @@ comp_macos_frontend_name(struct comp_macos_frontend *frontend)
 	return frontend->frontend->name;
 }
 
-void
-comp_macos_frontend_note_present(struct comp_macos_frontend *frontend, id<MTLDrawable> drawable)
+uint64_t
+comp_macos_frontend_present_ticket(struct comp_macos_frontend *frontend)
 {
-	uint64_t ticket = u_macos_hosted_client_present_ticket(frontend->hosted_client);
+	return u_macos_hosted_client_present_ticket(frontend->hosted_client);
+}
+
+void
+comp_macos_frontend_note_presented(struct comp_macos_frontend *frontend, uint64_t ticket)
+{
 	if (ticket == 0) {
 		return;
 	}
+	MonadoHostedPresentNotification *notification =
+	    [[MonadoHostedPresentNotification alloc] initWithClient:frontend->hosted_client ticket:ticket];
+	dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+	  [notification presented];
+	});
+	[notification release];
+}
+
+void
+comp_macos_frontend_note_present(struct comp_macos_frontend *frontend, id<MTLDrawable> drawable)
+{
+	uint64_t ticket = comp_macos_frontend_present_ticket(frontend);
+	if (ticket == 0) {
+		return;
+	}
+	// Do not capture frontend: the drawable callback may outlive target teardown.
 	MonadoHostedPresentNotification *notification =
 	    [[MonadoHostedPresentNotification alloc] initWithClient:frontend->hosted_client ticket:ticket];
 	[drawable addPresentedHandler:^(id<MTLDrawable> presented_drawable) {
