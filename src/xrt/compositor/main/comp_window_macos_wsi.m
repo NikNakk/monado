@@ -153,8 +153,10 @@ get_rate(struct comp_target *ct, float *rate)
 	if (mode == NULL) {
 		return XRT_ERROR_OUTPUT_REQUEST_FAILURE;
 	}
-	if (CGDisplayModeGetPixelWidth(mode) != w->frontend_info.pixel_width ||
-	    CGDisplayModeGetPixelHeight(mode) != w->frontend_info.pixel_height) {
+	// A desktop window is smaller than its display; only a headset fills it.
+	bool windowed = w->frontend != NULL && comp_macos_frontend_is_desktop(w->frontend);
+	if (!windowed && (CGDisplayModeGetPixelWidth(mode) != w->frontend_info.pixel_width ||
+	                  CGDisplayModeGetPixelHeight(mode) != w->frontend_info.pixel_height)) {
 		CGDisplayModeRelease(mode);
 		return XRT_ERROR_OUTPUT_REQUEST_FAILURE;
 	}

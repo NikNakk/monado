@@ -108,11 +108,40 @@ comp_macos_display_link_period(struct comp_macos_display_link *link)
 }
 #pragma clang diagnostic pop
 
+/*
+ * A built-in panel only hosts the simulated-HMD desktop window: never change
+ * its mode. It offers just its current refresh rate.
+ */
+static bool
+is_fixed_display(CGDirectDisplayID display_id)
+{
+	return CGDisplayIsBuiltin(display_id) != 0;
+}
+
+static double
+current_refresh_hz(CGDirectDisplayID display_id)
+{
+	CGDisplayModeRef mode = CGDisplayCopyDisplayMode(display_id);
+	double hz = mode != NULL ? CGDisplayModeGetRefreshRate(mode) : 0.0;
+	if (mode != NULL) {
+		CGDisplayModeRelease(mode);
+	}
+	return hz;
+}
+
 uint32_t
 comp_macos_display_rates(CGDirectDisplayID display_id, uint32_t capacity, float *out_rates)
 {
 	if (display_id == kCGNullDirectDisplay) {
 		return 0;
+	}
+	if (is_fixed_display(display_id)) {
+		double hz = current_refresh_hz(display_id);
+		if (!(hz > 1.0) || capacity == 0) {
+			return 0;
+		}
+		out_rates[0] = (float)hz;
+		return 1;
 	}
 	CGDisplayModeRef current_mode = CGDisplayCopyDisplayMode(display_id);
 	if (current_mode == NULL) {
@@ -175,6 +204,18 @@ comp_macos_display_copy_mode(CGDirectDisplayID display_id, float requested_hz, f
 	if (current_mode == NULL) {
 		return NULL;
 	}
+	if (is_fixed_display(display_id)) {
+		// Only the current mode, so a request can never switch it.
+		double hz = CGDisplayModeGetRefreshRate(current_mode);
+		if (hz > 1.0 && (requested_hz <= 0.0f || fabs(hz - (double)requested_hz) < 0.5)) {
+			if (out_selected_hz != NULL) {
+				*out_selected_hz = (float)hz;
+			}
+			return current_mode; // Already retained by the copy.
+		}
+		CGDisplayModeRelease(current_mode);
+		return NULL;
+	}
 	size_t width = CGDisplayModeGetWidth(current_mode);
 	size_t height = CGDisplayModeGetHeight(current_mode);
 	size_t pixel_width = CGDisplayModeGetPixelWidth(current_mode);
@@ -228,6 +269,9 @@ comp_macos_display_copy_mode(CGDirectDisplayID display_id, float requested_hz, f
 bool
 comp_macos_display_set_mode(CGDirectDisplayID display, CGDisplayModeRef mode)
 {
+	if (is_fixed_display(display)) {
+		return fabs(current_refresh_hz(display) - CGDisplayModeGetRefreshRate(mode)) < 0.05;
+	}
 	if (CGDisplaySetDisplayMode(display, mode, NULL) != kCGErrorSuccess) {
 		return false;
 	}
