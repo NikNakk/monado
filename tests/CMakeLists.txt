@@ -10,6 +10,7 @@ set(tests
     tests_macos_display_timing
     tests_macos_presenter
     tests_deque
+    tests_desktop_pose
     tests_floor_calibration
     tests_generic_callbacks
     tests_foveation
