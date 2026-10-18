@@ -32,7 +32,9 @@ commands in historical capture reports do not select executable experiment modes
 With the WSI target, the compositor now defaults to the graphics path, which goes
 direct to display. `XRT_COMPOSITOR_COMPUTE=1` selects compute; the current
 [private-output candidate](macos-wsi-vulkan-passthrough.md#private-compute-output-candidate)
-keeps shader writes in private images and copies into WSI presentation images.
+keeps shader writes in private images; a [fragment output pass](macos-wsi-vulkan-passthrough.md#fragment-output-pass-18-october-2026)
+(plain, or the camera blend with passthrough) then renders the WSI images, which
+are only render targets.
 The earlier direct-storage implementation was WindowServer-composited and
 failed moving-head checks; visual quality and direct scanout of the candidate
 remain unvalidated. `XRT_MACOS_GPU_QUEUE_PRIORITY` now applies to it too.

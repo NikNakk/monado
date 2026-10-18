@@ -41,8 +41,10 @@ No new headset run is started; the private-output visual gate remains pending.
 
 The user isolates `XRT_COMPOSITOR_COMPUTE=1` as the trigger in WSI and reports
 native working. The [private-output candidate](macos-wsi-vulkan-passthrough.md#private-compute-output-candidate)
-now renders WSI compute output into private images before a GPU-ordered Vulkan
-copy to presentation images, retaining calibration and rotation. Native stays
+now renders WSI compute output into private images. Since 18 October a
+[fragment output pass](macos-wsi-vulkan-passthrough.md#fragment-output-pass-18-october-2026)
+(plain, or the camera blend) renders the presentation images instead of a copy,
+retaining calibration and rotation. Native stays
 default. Earlier performance captures below predate this candidate; its real
 display behavior and moving-head quality await headset access.
 
