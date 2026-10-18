@@ -10,8 +10,9 @@ Added 18 October 2026 on `claude/wsi-fragment-output`. On 19 October the user ra
 on a Mac with `psvr2-openxr-test --passthrough`: the room and scene rendered and the
 trackpad controls worked (commit `00567077e`, not compositing in the client).
 At `e4411508c` the close button stopped the client and service cleanly, and the
-WSI presenter looked right with `XRT_COMPOSITOR_COMPUTE` both on and off. Client
-compositing (`XRT_MACOS_CLIENT_COMPOSITOR=1`) has not been tried yet.
+WSI presenter looked right with `XRT_COMPOSITOR_COMPUTE` both on and off. With
+client compositing (`XRT_MACOS_CLIENT_COMPOSITOR=1`) the scene, room and close
+button also worked, once the client had the presenter variables too (below).
 
 `SIMULATED_DESKTOP=1` runs Monado without a headset. It uses the simulated HMD and
 shows the compositor's output in an ordinary window on the Mac's built-in display
@@ -43,6 +44,23 @@ With the experiment runner, pass these through `--service-env`. The variable als
 turns on the simulated builder, so `SIMULATED_ENABLE` is not needed. If a PS VR2 is
 attached, its builder still wins on priority; disconnect it or close Monado's USB
 access first.
+
+The client needs the service through launchd, which serves the Metal XPC
+endpoint, so a hand-started `monado-service` does not work. The development
+LaunchAgent copies `XRT_*` and similar variables from the shell but not
+`SIMULATED_*`, so set that one in launchd's environment:
+
+```sh
+launchctl setenv SIMULATED_DESKTOP 1
+XRT_MACOS_PRESENTER=wsi XRT_MACOS_WSI_PASSTHROUGH=1 \
+  ./build/arm64/src/xrt/targets/service/monado-service-xpc-control bootstrap
+XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" XRT_MACOS_CLIENT_COMPOSITOR=0 \
+  ./build/arm64/src/xrt/targets/psvr2_openxr_test/psvr2-openxr-test --passthrough
+```
+
+Afterwards, `launchctl unsetenv SIMULATED_DESKTOP`, run
+`monado-service-xpc-control bootout`, and bootstrap the persistent LaunchAgent
+again.
 
 ## What it covers
 
@@ -82,7 +100,10 @@ psvr2-openxr-test --passthrough   # or --passthrough-only, or any XR_FB_passthro
 
 - The simulated HMD advertises `XR_FB_passthrough` (a stub camera hook) only with
   `SIMULATED_DESKTOP`. The service also flags passthrough to clients, which draw
-  their own room when compositing in-process (set `SIMULATED_DESKTOP` there too).
+  their own room when compositing in-process. Such a client needs
+  `SIMULATED_DESKTOP=1 XRT_MACOS_PRESENTER=wsi XRT_MACOS_WSI_PASSTHROUGH=1` in its
+  own environment; without the presenter variables it uses the native presenter,
+  warns, and shows the scene with no room.
 - The WSI presenter only, which uses compute when passthrough is on. The native
   presenter declines with a warning; matching it in Metal, as the visual control,
   is a later step.
