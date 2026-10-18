@@ -6,7 +6,9 @@ SPDX-License-Identifier: BSL-1.0
 
 # Simulated HMD in a desktop window
 
-Added 18 October 2026 on `claude/wsi-fragment-output`. It has not yet run on a Mac.
+Added 18 October 2026 on `claude/wsi-fragment-output`. On 19 October the user ran it
+on a Mac with `psvr2-openxr-test --passthrough`: the room and scene rendered and the
+trackpad controls worked (commit `00567077e`, not compositing in the client).
 
 `SIMULATED_DESKTOP=1` runs Monado without a headset. It uses the simulated HMD and
 shows the compositor's output in an ordinary window on the Mac's built-in display
@@ -43,8 +45,10 @@ access first.
 
 - The window keeps the simulated HMD's panel aspect (16:9) at up to 90% of the
   visible screen. Its size in pixels becomes the compositor target, so nothing is
-  stretched. It is fixed-size and cannot be closed by the user; stop the service to
-  close it.
+  stretched. It is fixed-size. Its close button stops the service: each connected
+  application is asked to exit its session (as if it had called
+  `xrRequestExitSession`), and the service stops once they have disconnected, or
+  after 3 seconds if one does not respond.
 - Presentation, pacing (from the built-in display's link), the compute/graphics
   compositors, timewarp and the WSI fragment output pass all run as with the
   headset. The simulated HMD has no lens distortion.
@@ -70,7 +74,7 @@ real cameras, to test that correction too.
 
 ```sh
 SIMULATED_DESKTOP=1 XRT_MACOS_PRESENTER=wsi XRT_MACOS_WSI_PASSTHROUGH=1 monado-service
-psvr2-openxr-test --passthrough overlay   # or any XR_FB_passthrough app
+psvr2-openxr-test --passthrough   # or --passthrough-only, or any XR_FB_passthrough app
 ```
 
 - The simulated HMD advertises `XR_FB_passthrough` (a stub camera hook) only with

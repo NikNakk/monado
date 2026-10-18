@@ -170,7 +170,7 @@ desktop_window_size(struct comp_compositor *c, NSScreen *screen)
 //! Metres of head movement per point of two-finger scrolling.
 #define DESKTOP_METRES_PER_POINT 0.002f
 
-@interface MonadoDesktopView : NSView {
+@interface MonadoDesktopView : NSView <NSWindowDelegate> {
 	BOOL _captured;
 }
 - (void)releasePointer;
@@ -199,6 +199,13 @@ desktop_window_size(struct comp_compositor *c, NSScreen *screen)
 - (void)windowDidResignKey:(NSNotification *)notification
 {
 	[self releasePointer];
+}
+- (BOOL)windowShouldClose:(NSWindow *)sender
+{
+	// The service owns the window: ask it to stop, and close with it.
+	[self releasePointer];
+	u_macos_display_host_request_close();
+	return NO;
 }
 - (void)capturePointer
 {
@@ -380,7 +387,7 @@ macos_window_frontend_create(struct comp_macos_frontend *cwm)
 		NSRect visible = [screen visibleFrame];
 		content_rect = NSMakeRect(NSMidX(visible) - cwm->size.width / 2, NSMidY(visible) - cwm->size.height / 2,
 		                          cwm->size.width, cwm->size.height);
-		style = NSWindowStyleMaskTitled | NSWindowStyleMaskMiniaturizable;
+		style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
 	}
 	NSWindow *window = [[NSWindow alloc] initWithContentRect:content_rect
 	                                               styleMask:style
@@ -418,6 +425,10 @@ macos_window_frontend_create(struct comp_macos_frontend *cwm)
 	[content_view setLayer:root_layer];
 	[content_view setWantsLayer:YES];
 	[window setContentView:content_view];
+	if (cwm->desktop) {
+		// The close button stops the service (windowShouldClose:).
+		[window setDelegate:(MonadoDesktopView *)content_view];
+	}
 	[content_view release];
 
 	[root_layer addSublayer:metal_layer];
@@ -652,6 +663,7 @@ macos_window_frontend_destroy(struct comp_macos_frontend *cwm)
 
 	if (cwm->desktop) {
 		[(MonadoDesktopView *)[cwm->window contentView] releasePointer];
+		[cwm->window setDelegate:nil];
 	}
 	[cwm->window orderOut:nil];
 	[cwm->window close];

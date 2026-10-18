@@ -293,6 +293,8 @@ elseif(APPLE)
 			PRIVATE server/ipc_server_mainloop_apple_xpc.m
 				server/ipc_metal_client_cleanup.c server/ipc_metal_client_cleanup.h
 			)
+		# The window-close path broadcasts session events through b_system.
+		target_link_libraries(ipc_server PRIVATE base)
 	endif()
 	set_source_files_properties(
 		${CMAKE_CURRENT_SOURCE_DIR}/server/ipc_server_mainloop_apple.c PROPERTIES LANGUAGE
