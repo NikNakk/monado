@@ -41,9 +41,10 @@ SIMULATED_DESKTOP=1 XRT_MACOS_PRESENTER=wsi XRT_COMPOSITOR_COMPUTE=1 monado-serv
 ```
 
 With the experiment runner, pass these through `--service-env`. The variable also
-turns on the simulated builder, so `SIMULATED_ENABLE` is not needed. If a PS VR2 is
-attached, its builder still wins on priority; disconnect it or close Monado's USB
-access first.
+turns on the simulated builder, so `SIMULATED_ENABLE` is not needed. The prober
+takes the first builder in its list that is certain of a head (it does not compare
+priorities), and the qwerty and simulated builders come before the PS VR2's. So
+they are chosen even with a headset attached, and the headset is left unclaimed.
 
 The client needs the service through launchd, which serves the Metal XPC
 endpoint, so a hand-started `monado-service` does not work. The development
@@ -61,6 +62,37 @@ XR_RUNTIME_JSON="$PWD/build/arm64/openxr_monado-dev.json" XRT_MACOS_CLIENT_COMPO
 Afterwards, `launchctl unsetenv SIMULATED_DESKTOP`, run
 `monado-service-xpc-control bootout`, and bootstrap the persistent LaunchAgent
 again.
+
+## Qwerty controllers
+
+Add `QWERTY_ENABLE=1` to the service's environment (through `launchctl setenv`,
+like `SIMULATED_DESKTOP`) to use upstream's qwerty devices instead of the simulated
+HMD: a 1280x720 HMD and two controllers with simple-controller bindings. They take
+their input from the same window, not from qwerty's SDL debug window.
+
+| Input | Effect |
+| --- | --- |
+| Click in the window | Capture the pointer. Later clicks are the trigger |
+| Secondary click (two-finger click) | Squeeze |
+| Pointer, once captured | Turn the focused device |
+| Two fingers | Move the focused device relative to its orientation (2 mm per point) |
+| W A S D, Q E | Move forward, left, back, right; down, up |
+| Arrow keys | Turn |
+| Hold left Shift | Sprint |
+| Hold left Control / left Option | Focus the left / right controller instead of the head |
+| N, B | Menu, system |
+| T F G H, V | Thumbstick up, left, down, right; click |
+| I J K L, M | Trackpad up, left, down, right; click |
+| C | Controllers follow the head, or stop following |
+| R | Reset the controllers (the focused one, or both) |
+| `-` / `=`, or a mouse wheel | Slower / faster movement for the focused device |
+| `Esc`, or switching window | Release the pointer; switching also releases every key |
+
+Controller-only input with the head focused goes to the right controller. The
+keys are positional (US layout positions on any keyboard). Qwerty moves "per
+frame": each key-held step happens on every pose query, so its speed depends on
+how often the compositor and application ask. Trackpad moves and pointer turns
+are applied once and do not have this problem.
 
 ## What it covers
 
@@ -115,6 +147,14 @@ psvr2-openxr-test --passthrough   # or --passthrough-only, or any XR_FB_passthro
 
 - `auxiliary/util/u_desktop_pose.c`: the pose state (yaw, pitch, floor position)
   behind a mutex; tested by `tests/tests_desktop_pose.cpp`.
+- `auxiliary/util/u_desktop_input.c`: a bridge for the window's key, pointer and
+  trackpad events (keys as USB HID usages). A driver registers to receive them;
+  when none has, the window steers `u_desktop_pose`.
+- `drivers/qwerty`: `qwerty_input.c` maps those events to qwerty actions. The SDL
+  path (`qwerty_sdl.c`) now converts SDL events and uses the same mapping. In
+  desktop mode the qwerty system registers with the bridge, and its HMD
+  advertises the simulated-room passthrough. Tested by
+  `tests/tests_qwerty_desktop_input.cpp`.
 - `drivers/simulated`: `SIMULATED_MOVEMENT_DESKTOP` reads that pose relative to
   the HMD's centre (1.6 m eye height from the simulated builder).
 - `compositor/main/comp_macos_frontend.m`: display choice, the window and the
