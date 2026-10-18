@@ -403,7 +403,8 @@ desktop_push_button(enum u_desktop_input_type type, enum u_desktop_input_button 
 	struct u_desktop_input_event input = {
 	    .type = down ? U_DESKTOP_INPUT_KEY_DOWN : U_DESKTOP_INPUT_KEY_UP,
 	    .key = desktop_hid_usage([event keyCode]),
-	    .repeat = down && [event isARepeat],
+	    // Only key events answer isARepeat; modifier (flags-changed) events throw.
+	    .repeat = [event type] == NSEventTypeKeyDown && [event isARepeat],
 	};
 	if (input.key != 0) {
 		u_desktop_input_push(&input);
