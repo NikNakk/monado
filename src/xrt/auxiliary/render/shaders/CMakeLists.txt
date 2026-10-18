@@ -14,11 +14,13 @@ set(SHADERS
     blit.comp
     blit_ms.comp
     clear.comp
-    camera.comp
+    camera.frag
     distortion.comp
+    fullscreen.vert
     layer.comp
     mesh.frag
     mesh.vert
+    output.frag
     layer_cylinder.frag
     layer_cylinder.vert
     layer_equirect2.frag

@@ -500,9 +500,10 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 	}
 	bool private_output = ct->c->settings.use_compute;
 	if (private_output) {
-		// Compute and camera shaders write private images, never Metal drawables.
-		// Keep the WSI images usable as ordinary presentation render targets.
-		fifo.image_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		// Compute shaders write private images, never Metal drawables. A
+		// full-screen fragment pass (plain or camera blend) then renders each
+		// drawable, which is only ever a render target, as with graphics.
+		fifo.image_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	}
 	fifo.present_mode = VK_PRESENT_MODE_FIFO_KHR;
 	w->ops.create_images(ct, &fifo, queue);
@@ -510,18 +511,19 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 		return;
 	}
 	if (private_output) {
-		VkImage destinations[XRT_MAX_SWAPCHAIN_IMAGES];
+		VkImageView destinations[XRT_MAX_SWAPCHAIN_IMAGES];
 		if (ct->image_count > ARRAY_SIZE(destinations)) {
 			w->display_lost = true;
 			return;
 		}
 		for (uint32_t i = 0; i < ct->image_count; i++) {
-			destinations[i] = ct->images[i].handle;
+			destinations[i] = ct->images[i].view;
 		}
 		VkImageUsageFlags usage = info->image_usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 		w->output =
-		    render_output_create(&ct->c->base.vk, queue, ct->format, (VkExtent2D){ct->width, ct->height}, usage,
-		                         destinations, ct->image_count);
+		    render_output_create(&ct->c->base.vk, queue, ct->c->shaders.fullscreen_vert,
+		                         ct->c->shaders.output_frag, ct->format, (VkExtent2D){ct->width, ct->height},
+		                         usage, destinations, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, ct->image_count);
 		struct comp_target_image *images = U_TYPED_ARRAY_CALLOC(struct comp_target_image, ct->image_count);
 		if (w->output == NULL || images == NULL) {
 			free(images);
@@ -539,7 +541,7 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 			images[i].view = render_output_view(w->output, i);
 			images[i].storage_view = images[i].view;
 		}
-		COMP_INFO(ct->c, "WSI compute output: %u private images, GPU copy to presentation images",
+		COMP_INFO(ct->c, "WSI compute output: %u private images, fragment pass to presentation images",
 		          ct->image_count);
 	}
 	if (w->display_link != NULL && !comp_macos_display_link_running(w->display_link)) {
@@ -556,7 +558,15 @@ create_images(struct comp_target *ct, const struct comp_target_create_images_inf
 		          "WSI passthrough requires the compute compositor; passthrough is unsupported with "
 		          "XRT_COMPOSITOR_COMPUTE=0");
 	} else if (debug_get_bool_option_macos_wsi_passthrough()) {
-		w->passthrough = comp_vulkan_passthrough_create(ct, queue, w->hosted_client == NULL);
+		VkImageView destinations[XRT_MAX_SWAPCHAIN_IMAGES];
+		for (uint32_t i = 0; w->swapchain_images != NULL && i < ct->image_count; i++) {
+			destinations[i] = w->swapchain_images[i].view;
+		}
+		// The camera pass reads the private compute output and renders the drawable.
+		w->passthrough = w->swapchain_images == NULL
+		                     ? NULL
+		                     : comp_vulkan_passthrough_create(ct, queue, w->hosted_client == NULL, destinations,
+		                                                      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 		ct->passthrough_unsupported = w->passthrough == NULL;
 		if (w->passthrough == NULL) {
 			COMP_ERROR(ct->c, "Could not initialize Vulkan camera composition");
@@ -632,6 +642,7 @@ present(struct comp_target *ct,
 		w->history[slot].valid = true;
 	}
 	VkResult composed = VK_SUCCESS;
+	bool camera_presented = false;
 	if (ct->c->passthrough_active) {
 		bool present_ready = true;
 		if (w->passthrough == NULL) {
@@ -644,6 +655,7 @@ present(struct comp_target *ct,
 		} else {
 			composed = comp_vulkan_passthrough_compose(
 			    w->passthrough, index, ct->c->passthrough_has_application_layers, &present_ready);
+			camera_presented = composed == VK_SUCCESS;
 		}
 		if (!present_ready) {
 			// Do not acquire more images with uncertain layout/semaphore state.
@@ -652,13 +664,14 @@ present(struct comp_target *ct,
 			return composed;
 		}
 	}
-	if (w->output != NULL) {
-		VkResult copied = render_output_copy(w->output, index, ct->semaphores.render_complete,
-		                                     VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-		if (copied != VK_SUCCESS) {
-			COMP_ERROR(ct->c, "WSI output copy failed (%d); retiring target", copied);
+	// The camera pass already rendered the drawable; otherwise (no passthrough,
+	// or no fresh camera frame) render the private compute output into it.
+	if (w->output != NULL && !camera_presented) {
+		VkResult rendered = render_output_present(w->output, index, ct->semaphores.render_complete);
+		if (rendered != VK_SUCCESS) {
+			COMP_ERROR(ct->c, "WSI output pass failed (%d); retiring target", rendered);
 			w->display_lost = true;
-			return copied;
+			return rendered;
 		}
 	}
 	uint64_t begin = os_monotonic_get_ns();

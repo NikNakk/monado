@@ -2,18 +2,17 @@
 // SPDX-License-Identifier: BSL-1.0
 #version 450
 
-layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0) uniform sampler2D application;
 layout(set = 0, binding = 1) uniform sampler2D cameras[2];
 layout(set = 0, binding = 2) uniform sampler2D mappings[2];
-layout(set = 0, binding = 3) uniform writeonly image2D target;
+layout(location = 0) out vec4 target;
 struct Camera
 {
 	vec4 intrinsics;
 	vec4 k;
 	vec4 rows[3];
 };
-layout(set = 0, binding = 4, std140) uniform Params
+layout(set = 0, binding = 3, std140) uniform Params
 {
 	float brightness;
 	uint has_app;
@@ -45,10 +44,8 @@ camera_uv(vec2 tangent, Camera c, ivec2 extent)
 void
 main()
 {
-	ivec2 xy = ivec2(gl_GlobalInvocationID.xy);
-	ivec2 extent = imageSize(target);
-	if (any(greaterThanEqual(xy, extent)))
-		return;
+	ivec2 xy = ivec2(gl_FragCoord.xy);
+	ivec2 extent = textureSize(application, 0);
 	vec2 uv = (vec2(xy) + 0.5) / vec2(extent);
 	bool right = uv.x >= 0.5;
 	vec2 local_uv = vec2(right ? (uv.x - 0.5) * 2.0 : uv.x * 2.0, uv.y);
@@ -62,7 +59,8 @@ main()
 	}
 	vec3 camera = vec3(0);
 	if (cuv.x >= 0.0 && cuv.y >= 0.0) {
-		float gray = right ? texture(cameras[1], cuv).r : texture(cameras[0], cuv).r;
+		// Explicit LOD: implicit derivatives are undefined in this non-uniform branch.
+		float gray = right ? textureLod(cameras[1], cuv, 0.0).r : textureLod(cameras[0], cuv, 0.0).r;
 		camera = vec3(clamp(gray * params.brightness, 0.0, 1.0));
 	}
 	vec3 color = camera;
@@ -70,5 +68,5 @@ main()
 		vec4 app = texelFetch(application, xy, 0);
 		color = app.rgb + camera * (1.0 - app.a);
 	}
-	imageStore(target, xy, vec4(color, 1));
+	target = vec4(color, 1);
 }

@@ -27,7 +27,9 @@ struct render_shaders
 	VkShaderModule blit_comp;
 	VkShaderModule blit_ms_comp;
 	VkShaderModule clear_comp;
-	VkShaderModule camera_comp;
+	VkShaderModule camera_frag;
+	VkShaderModule fullscreen_vert;
+	VkShaderModule output_frag;
 	VkShaderModule layer_comp;
 	VkShaderModule distortion_comp;
 
