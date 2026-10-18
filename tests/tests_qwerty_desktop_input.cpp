@@ -22,6 +22,7 @@ namespace {
 
 // USB HID keyboard usages.
 constexpr uint16_t key_w = 26;
+constexpr uint16_t key_r = 21;
 constexpr uint16_t key_lctrl = 224;
 
 struct Devices
@@ -150,4 +151,28 @@ TEST_CASE("Desktop modifiers and clicks reach the controllers", "[qwerty_desktop
 	push(U_DESKTOP_INPUT_FOCUS_LOST);
 	CHECK_FALSE(qwerty_controller(devices.left)->trigger_clicked);
 	CHECK_FALSE(qwerty_controller(devices.right)->squeeze_clicked);
+}
+
+TEST_CASE("R brings lost controllers back in front of the head", "[qwerty_desktop]")
+{
+	Devices devices;
+	xrt_pose left_start = pose_of(devices.left, XRT_INPUT_WMR_GRIP_POSE);
+	xrt_pose right_start = pose_of(devices.right, XRT_INPUT_WMR_GRIP_POSE);
+
+	// Send the left controller far behind, then the right one off to the side.
+	push(U_DESKTOP_INPUT_KEY_DOWN, key_lctrl);
+	push(U_DESKTOP_INPUT_MOVE, 0, 0.0f, -3.0f);
+	// Read the pose before releasing control, which drops moves not yet applied.
+	CHECK(pose_of(devices.left, XRT_INPUT_WMR_GRIP_POSE).position.z == Approx(left_start.position.z + 3.0f));
+	push(U_DESKTOP_INPUT_KEY_UP, key_lctrl);
+
+	// With the head focused, R resets both.
+	push(U_DESKTOP_INPUT_KEY_DOWN, key_r);
+	push(U_DESKTOP_INPUT_KEY_UP, key_r);
+	xrt_pose left_back = pose_of(devices.left, XRT_INPUT_WMR_GRIP_POSE);
+	xrt_pose right_back = pose_of(devices.right, XRT_INPUT_WMR_GRIP_POSE);
+	CHECK(left_back.position.x == Approx(left_start.position.x));
+	CHECK(left_back.position.y == Approx(left_start.position.y));
+	CHECK(left_back.position.z == Approx(left_start.position.z));
+	CHECK(right_back.position.z == Approx(right_start.position.z));
 }

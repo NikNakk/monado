@@ -795,7 +795,8 @@ macos_window_frontend_set_title(struct comp_macos_frontend *cwm, const char *tit
 	if (cwm->desktop) {
 		NSString *help = u_desktop_input_active()
 		                     ? @" - click to capture; WASD/QE or two fingers move, pointer looks, click triggers, "
-		                       @"hold Ctrl/Option for the left/right controller, Esc frees the pointer"
+		                       @"hold Ctrl/Option for the left/right controller, R brings the controllers back, "
+		                       @"Esc frees the pointer"
 		                     : @" - click to look, two fingers to move, R resets, Esc frees the pointer";
 		text = [text stringByAppendingString:help];
 	}

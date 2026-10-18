@@ -13,6 +13,10 @@ At `e4411508c` the close button stopped the client and service cleanly, and the
 WSI presenter looked right with `XRT_COMPOSITOR_COMPUTE` both on and off. With
 client compositing (`XRT_MACOS_CLIENT_COMPOSITOR=1`) the scene, room and close
 button also worked, once the client had the presenter variables too (below).
+With `QWERTY_ENABLE=1` at `74c75de00` (the first qwerty commit, `9650a96ef`,
+terminated the service on a modifier key), the head controls and the
+Control/Option focus worked in `psvr2-openxr-test`, and in Open Brush the
+controllers moved and turned as expected.
 
 `SIMULATED_DESKTOP=1` runs Monado without a headset. It uses the simulated HMD and
 shows the compositor's output in an ordinary window on the Mac's built-in display
@@ -84,7 +88,7 @@ their input from the same window, not from qwerty's SDL debug window.
 | T F G H, V | Thumbstick up, left, down, right; click |
 | I J K L, M | Trackpad up, left, down, right; click |
 | C | Controllers follow the head, or stop following |
-| R | Reset the controllers (the focused one, or both) |
+| R | Bring the controllers back to their starting place in front of the head, following it again (the focused one, or both) |
 | `-` / `=`, or a mouse wheel | Slower / faster movement for the focused device |
 | `Esc`, or switching window | Release the pointer; switching also releases every key |
 
