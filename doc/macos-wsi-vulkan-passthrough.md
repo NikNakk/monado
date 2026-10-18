@@ -583,3 +583,14 @@ directories for each.
    against the camera during gentle and fast motion and sudden stops.
 3. If both look right, record a display trace to settle direct scanout.
 4. Repeat hosted and refresh/recreation checks.
+
+
+## Simulated room source (18 October 2026)
+
+With `SIMULATED_DESKTOP=1`, the same camera pass draws a simulated room instead
+of camera images (`RENDER_CAMERA_MODE_ROOM`), at the exact eye poses used for
+timewarp. It tests whether application content and background stay locked
+without a headset. `render_camera_params.rotate` is now `mode` (static, rotate
+or room), and the parameters grow to 240 bytes with each eye's world pose. In
+room mode no camera frames are uploaded. See
+[the desktop simulation note](macos-desktop-simulation.md#simulated-passthrough-room).
