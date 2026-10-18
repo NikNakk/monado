@@ -52,7 +52,7 @@ struct CameraFixture
 	//! private_output: sample render_output's private images, sharing its
 	//! destinations, as the macOS WSI target does.
 	void
-	init(bool private_output = false)
+	init(bool private_output = false, bool room_maps = false)
 	{
 		f.init(17, height);
 		auto &vk = f.vk();
@@ -98,6 +98,16 @@ struct CameraFixture
 				}
 			maps[eye][0] = maps[eye][1] = -1;
 			maps[eye][2] = maps[eye][3] = NAN;
+			if (room_maps) {
+				// The room interpolates rays between texels: a wide, finite field of view.
+				for (unsigned y = 0; y < map_size; y++)
+					for (unsigned x = 0; x < map_size; x++) {
+						size_t n = (y * map_size + x) * 4;
+						maps[eye][n] = maps[eye][n + 1] = -1;
+						maps[eye][n + 2] = -1.2f + 2.4f * (float(x) + .5f) / map_size;
+						maps[eye][n + 3] = -0.9f + 1.8f * (float(y) + .5f) / map_size;
+					}
+			}
 		}
 		if (private_output) {
 			output = render_output_create(&vk, vk.main_queue, vert, output_shader, VK_FORMAT_R8G8B8A8_UNORM,
@@ -262,7 +272,7 @@ TEST_CASE("Vulkan camera composition preserves stereo, alpha and calibrated rota
 	CAPTURE(private_output);
 	CameraFixture cf;
 	cf.init(private_output);
-	static_assert(sizeof(render_camera_params) == 176);
+	static_assert(sizeof(render_camera_params) == 240);
 	for (unsigned round = 0; round < 7; round++) {
 		for (unsigned slot = 0; slot < 3; slot++)
 			cf.clear(slot, slot == 2 ? 255 : 80);
@@ -276,7 +286,7 @@ TEST_CASE("Vulkan camera composition preserves stereo, alpha and calibrated rota
 			params.brightness = 1.6f;
 			params.has_app = slot != 0;
 			params.map_size = cf.map_size;
-			params.rotate = round != 0;
+			params.mode = round != 0 ? RENDER_CAMERA_MODE_ROTATE : RENDER_CAMERA_MODE_STATIC;
 			auto cal = cf.calibration;
 			for (unsigned eye = 0; eye < 2; eye++) {
 				xrt_vec3 axis{};
@@ -322,7 +332,7 @@ TEST_CASE("Vulkan camera composition preserves stereo, alpha and calibrated rota
 					size_t m = (my * cf.map_size + mx) * 4;
 					xrt_vec2 uv{cf.maps[eye][m], cf.maps[eye][m + 1]};
 					bool valid = uv.x >= 0 && uv.y >= 0;
-					if (params.rotate) {
+					if (params.mode == RENDER_CAMERA_MODE_ROTATE) {
 						xrt_vec3 ray{cf.maps[eye][m + 2], -cf.maps[eye][m + 3], -1};
 						valid = u_passthrough_calibration_project(&cal[eye], &ray, &uv);
 					}
@@ -546,4 +556,183 @@ TEST_CASE("Camera queue OOM preserves synchronization and permits retry", "[aux_
 	cf.consume(0);
 	auto pixels = cf.pixels(0);
 	CHECK(std::any_of(pixels.begin(), pixels.end(), [](uint8_t v) { return v != 0 && v != 255; }));
+}
+
+namespace {
+// CPU reference for the room in camera.frag.
+struct Vec3
+{
+	double x, y, z;
+};
+Vec3
+rotate(const float q[4], Vec3 v)
+{
+	Vec3 u{q[0], q[1], q[2]};
+	auto cross = [](Vec3 a, Vec3 b) {
+		return Vec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+	};
+	Vec3 t = cross(u, v);
+	t = {2 * t.x, 2 * t.y, 2 * t.z};
+	Vec3 c = cross(u, t);
+	return {v.x + q[3] * t.x + c.x, v.y + q[3] * t.y + c.y, v.z + q[3] * t.z + c.z};
+}
+double
+smoothstep(double e0, double e1, double x)
+{
+	double t = std::clamp((x - e0) / (e1 - e0), 0.0, 1.0);
+	return t * t * (3 - 2 * t);
+}
+double
+grid_line(double a, double b)
+{
+	auto d = [](double p) { return std::abs(p / 0.5 - std::round(p / 0.5)) * 0.5; };
+	return 1 - smoothstep(0, 0.015, std::min(d(a), d(b)));
+}
+std::array<double, 3>
+room_color(double tx, double ty, const float orientation[4], const float position[4])
+{
+	Vec3 dir = rotate(orientation, [&] {
+		double len = std::sqrt(tx * tx + ty * ty + 1);
+		return Vec3{tx / len, -ty / len, -1 / len};
+	}());
+	const double lo[3] = {-2.5, 0, -2.5}, hi[3] = {2.5, 2.7, 2.5};
+	const double o[3] = {position[0], position[1], position[2]}, d[3] = {dir.x, dir.y, dir.z};
+	double t[3];
+	for (int i = 0; i < 3; i++)
+		t[i] = std::abs(d[i]) > 1e-8 ? ((d[i] > 0 ? hi[i] : lo[i]) - o[i]) / d[i] : 1e30;
+	double hit = std::min(t[0], std::min(t[1], t[2]));
+	double p[3] = {o[0] + d[0] * hit, o[1] + d[1] * hit, o[2] + d[2] * hit};
+	std::array<double, 3> base;
+	double line;
+	if (hit == t[1]) {
+		base = d[1] < 0 ? std::array<double, 3>{.35, .55, .35} : std::array<double, 3>{.8, .8, .8};
+		line = grid_line(p[0], p[2]);
+	} else if (hit == t[2]) {
+		base = d[2] < 0 ? std::array<double, 3>{.35, .45, .75} : std::array<double, 3>{.75, .65, .35};
+		line = grid_line(p[0], p[1]);
+	} else {
+		base = d[0] < 0 ? std::array<double, 3>{.75, .4, .4} : std::array<double, 3>{.55, .4, .7};
+		line = grid_line(p[2], p[1]);
+	}
+	for (auto &c : base)
+		c *= 1 - 0.5 * line;
+	return base;
+}
+//! Bilinear tangent ray, as map_tangent() in the shader.
+std::array<double, 2>
+map_tangent(const CameraFixture &cf, unsigned eye, double u, double v)
+{
+	const unsigned n = CameraFixture::map_size;
+	double px = u * n - .5, py = v * n - .5;
+	int x0 = int(std::floor(px)), y0 = int(std::floor(py));
+	double fx = px - x0, fy = py - y0;
+	auto at = [&](int x, int y, int c) {
+		x = std::clamp(x, 0, int(n) - 1);
+		y = std::clamp(y, 0, int(n) - 1);
+		return double(cf.maps[eye][(size_t(y) * n + x) * 4 + 2 + c]);
+	};
+	std::array<double, 2> r;
+	for (int c = 0; c < 2; c++)
+		r[c] = (1 - fy) * ((1 - fx) * at(x0, y0, c) + fx * at(x0 + 1, y0, c)) +
+		       fy * ((1 - fx) * at(x0, y0 + 1, c) + fx * at(x0 + 1, y0 + 1, c));
+	return r;
+}
+} // namespace
+
+TEST_CASE("Simulated room is drawn at each eye's pose under the application", "[aux_render][gpu][camera]")
+{
+	bool private_output = GENERATE(false, true);
+	CAPTURE(private_output);
+	CameraFixture cf;
+	cf.init(private_output, true);
+	struct Case
+	{
+		float yaw, pitch, x, y, z;
+		unsigned alpha;
+		bool has_app;
+	};
+	// Straight ahead, turned left, looking down; application absent, blended, opaque.
+	const Case cases[3] = {{0, 0, 0, 1.6f, 0, 0, false},
+	                       {1.5707963f, 0, 0.4f, 1.5f, -0.3f, 80, true},
+	                       {0.3f, -1.0f, -0.6f, 1.2f, 0.7f, 255, true}};
+	std::array<std::vector<uint8_t>, 3> expected;
+	for (unsigned slot = 0; slot < 3; slot++) {
+		const Case &k = cases[slot];
+		cf.clear(slot, k.alpha);
+		render_camera_params params{};
+		params.has_app = k.has_app;
+		params.map_size = cf.map_size;
+		params.mode = RENDER_CAMERA_MODE_ROOM;
+		// Yaw about +Y, then pitch about the head's +X, as the desktop pose does.
+		float cy = std::cos(k.yaw / 2), sy = std::sin(k.yaw / 2), cp = std::cos(k.pitch / 2),
+		      sp = std::sin(k.pitch / 2);
+		for (unsigned eye = 0; eye < 2; eye++) {
+			auto &v = params.views[eye];
+			v.orientation[0] = cy * sp;
+			v.orientation[1] = sy * cp;
+			v.orientation[2] = -sy * sp;
+			v.orientation[3] = cy * cp;
+			v.position[0] = k.x + (eye ? 0.03f : -0.03f);
+			v.position[1] = k.y;
+			v.position[2] = k.z;
+		}
+		expected[slot].resize(cf.width * cf.height * 4);
+		for (unsigned y = 0; y < cf.height; y++)
+			for (unsigned x = 0; x < cf.width; x++) {
+				double u = (x + .5) / cf.width, v = (y + .5) / cf.height;
+				unsigned eye = u >= .5;
+				double lu = eye ? (u - .5) * 2 : u * 2;
+				auto tan = map_tangent(cf, eye, lu, v);
+				auto room = room_color(tan[0], tan[1], params.views[eye].orientation,
+				                       params.views[eye].position);
+				size_t n = (y * cf.width + x) * 4;
+				for (unsigned c = 0; c < 3; c++) {
+					double value = room[c];
+					if (k.has_app)
+						value =
+						    double(40 - c * 10) / 255 + room[c] * (1 - double(k.alpha) / 255);
+					expected[slot][n + c] = uint8_t(std::lround(std::min(1.0, value) * 255));
+				}
+				expected[slot][n + 3] = 255;
+			}
+		cf.signal(slot);
+		bool submitted = false;
+		// No camera frames: the room needs none.
+		xrt_frame *none[2] = {nullptr, nullptr};
+		REQUIRE(render_camera_submit(cf.renderer, slot, cf.complete[slot], none, &params, &submitted) ==
+		        VK_SUCCESS);
+		REQUIRE(submitted);
+	}
+	for (unsigned slot = 0; slot < 3; slot++) {
+		cf.consume(slot);
+		auto actual = cf.pixels(slot);
+		unsigned max_error = 0;
+		for (size_t n = 0; n < actual.size(); n++)
+			max_error = std::max(max_error, unsigned(std::abs(int(actual[n]) - int(expected[slot][n]))));
+		CAPTURE(slot, max_error);
+		CHECK(max_error <= 2);
+	}
+	// Sanity on the geometry itself: straight ahead is the blue front wall,
+	// turned left the red left wall, looking down the green floor.
+	auto centre = [&](unsigned slot) {
+		size_t n = (size_t(cf.height / 2) * cf.width + cf.width / 4) * 4;
+		return std::array<int, 3>{expected[slot][n], expected[slot][n + 1], expected[slot][n + 2]};
+	};
+	auto front = centre(0);
+	CHECK(front[2] > front[0]);
+	CHECK(front[2] > front[1]);
+}
+
+TEST_CASE("Simulated room geometry: walls and floor by direction", "[camera][room]")
+{
+	const float identity[4] = {0, 0, 0, 1};
+	const float eye[4] = {0, 1.6f, 0, 0};
+	// Avoid grid lines: aim slightly off the axes.
+	auto ahead = room_color(0.13, -0.07, identity, eye);
+	CHECK((ahead[2] > ahead[0] && ahead[2] > ahead[1])); // Front wall, blue.
+	auto down = room_color(0.13, 3.0, identity, eye);
+	CHECK((down[1] > down[0] && down[1] > down[2])); // Floor, green.
+	const float left_turn[4] = {0, std::sin(0.785398f), 0, std::cos(0.785398f)};
+	auto left = room_color(0.13, -0.07, left_turn, eye);
+	CHECK((left[0] > left[1] && left[0] > left[2])); // Left wall, red.
 }

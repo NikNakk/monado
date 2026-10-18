@@ -9,15 +9,32 @@
 extern "C" {
 #endif
 
+//! What the pass draws behind the application.
+enum render_camera_mode
+{
+	//! Camera image through the static UVs in the maps.
+	RENDER_CAMERA_MODE_STATIC = 0,
+	//! Camera image through the calibrated projection in cameras[].
+	RENDER_CAMERA_MODE_ROTATE = 1,
+	//! A simulated room seen from views[]; no camera frames are used.
+	RENDER_CAMERA_MODE_ROOM = 2,
+};
+
 //! Stereo ray-to-camera projection, matching the shader's std140 layout.
 struct render_camera_params
 {
 	float brightness;
-	uint32_t has_app, map_size, rotate;
+	uint32_t has_app, map_size;
+	uint32_t mode; //!< enum render_camera_mode
 	struct
 	{
 		float intrinsics[4], k[4], rows[3][4];
 	} cameras[2];
+	//! RENDER_CAMERA_MODE_ROOM: each eye's world pose; orientation x, y, z, w.
+	struct
+	{
+		float orientation[4], position[4];
+	} views[2];
 };
 struct render_camera;
 
@@ -46,6 +63,7 @@ render_camera_create(struct vk_bundle *vk,
                      uint32_t count);
 
 //! Upload a CPU snapshot and queue camera composition after render_complete.
+//! In RENDER_CAMERA_MODE_ROOM frames may be NULL and are ignored.
 //! The binary semaphore is consumed and re-signalled on the GPU, preserving the
 //! caller's existing present wait. Per-image storage is reused only after its
 //! previous submission completes; normal submissions never wait for this frame.

@@ -339,7 +339,7 @@ comp_psvr2_passthrough_sample(struct comp_psvr2_passthrough *pt,
 			params->cameras[eye].rows[2][axis] = column.z;
 		}
 	}
-	params->rotate = rotate ? 1 : 0;
+	params->mode = rotate ? RENDER_CAMERA_MODE_ROTATE : RENDER_CAMERA_MODE_STATIC;
 	if (pt->passthrough_rotation_enabled &&
 	    (!pt->passthrough_rotation_status_logged || rotate != pt->passthrough_rotation_active)) {
 		COMP_INFO(pt->c, "Passthrough rotation %s (requires fresh camera/header clock and tracked poses)",
