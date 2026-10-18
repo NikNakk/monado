@@ -33,6 +33,8 @@ add_library(
 	u_cobs.h
 	u_debug.c
 	u_debug.h
+	u_desktop_pose.c
+	u_desktop_pose.h
 	u_deque.cpp
 	u_deque.h
 	u_device.c

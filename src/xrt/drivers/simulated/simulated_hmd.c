@@ -15,6 +15,7 @@
 #include "math/m_mathinclude.h"
 
 #include "util/u_debug.h"
+#include "util/u_desktop_pose.h"
 #include "util/u_device.h"
 #include "util/u_distortion_mesh.h"
 #include "util/u_logging.h"
@@ -136,6 +137,13 @@ simulated_hmd_get_tracked_pose(struct xrt_device *xdev,
 		// Reset pose.
 		hmd->pose = hmd->center;
 		break;
+	case SIMULATED_MOVEMENT_DESKTOP: {
+		struct xrt_pose tmp;
+		u_desktop_pose_get(&tmp);
+
+		// Transform with center to set it.
+		math_pose_transform(&hmd->center, &tmp, &hmd->pose);
+	} break;
 	}
 
 	out_relation->pose = hmd->pose;

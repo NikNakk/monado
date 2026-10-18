@@ -15,6 +15,7 @@
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_desktop_pose.h"
 #include "util/u_config_json.h"
 
 #include "target_builder_helpers.h"
@@ -109,7 +110,9 @@ simulated_open_system_impl(struct xrt_builder *xb,
 	const char *left_str = debug_get_option_simulated_left();
 	const char *right_str = debug_get_option_simulated_right();
 
-	struct xrt_device *head = simulated_hmd_create(SIMULATED_MOVEMENT_WOBBLE, &head_center);
+	enum simulated_movement movement =
+	    u_desktop_pose_enabled() ? SIMULATED_MOVEMENT_DESKTOP : SIMULATED_MOVEMENT_WOBBLE;
+	struct xrt_device *head = simulated_hmd_create(movement, &head_center);
 	struct xrt_device *left = create_controller(left_str, left_type, &left_center, head->tracking_origin);
 	struct xrt_device *right = create_controller(right_str, right_type, &right_center, head->tracking_origin);
 
@@ -163,7 +166,9 @@ t_builder_simulated_create(void)
 	ub->base.name = "Simulated devices builder";
 	ub->base.driver_identifiers = driver_list;
 	ub->base.driver_identifier_count = ARRAY_SIZE(driver_list);
-	ub->base.exclude_from_automatic_discovery = !debug_get_bool_option_simulated_enabled();
+	// SIMULATED_DESKTOP implies SIMULATED_ENABLE: one variable for the desktop setup.
+	ub->base.exclude_from_automatic_discovery =
+	    !debug_get_bool_option_simulated_enabled() && !u_desktop_pose_enabled();
 
 	// t_builder fields.
 	ub->open_system_static_roles = simulated_open_system_impl;

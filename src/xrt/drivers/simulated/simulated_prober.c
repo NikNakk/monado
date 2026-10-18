@@ -14,6 +14,7 @@
 
 #include "util/u_misc.h"
 #include "util/u_debug.h"
+#include "util/u_desktop_pose.h"
 
 #include "simulated_interface.h"
 
@@ -64,6 +65,9 @@ simulated_prober_autoprobe(struct xrt_auto_prober *xap,
 	enum simulated_movement movement = SIMULATED_MOVEMENT_WOBBLE;
 	if (debug_get_bool_option_simulated_rotate()) {
 		movement = SIMULATED_MOVEMENT_ROTATE;
+	}
+	if (u_desktop_pose_enabled()) {
+		movement = SIMULATED_MOVEMENT_DESKTOP;
 	}
 
 	const struct xrt_pose center = XRT_POSE_IDENTITY;
