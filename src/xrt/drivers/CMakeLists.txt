@@ -91,6 +91,7 @@ if(XRT_BUILD_DRIVER_QWERTY)
 		drv_qwerty STATIC
 		qwerty/qwerty_device.c
 		qwerty/qwerty_device.h
+		qwerty/qwerty_input.c
 		qwerty/qwerty_interface.h
 		qwerty/qwerty_prober.c
 		qwerty/qwerty_sdl.c

@@ -615,6 +615,17 @@ if(TARGET constellation_fusion)
 		)
 endif()
 
+if(XRT_BUILD_DRIVER_QWERTY)
+	add_executable(tests_qwerty_desktop_input tests_qwerty_desktop_input.cpp)
+	target_link_libraries(
+		tests_qwerty_desktop_input PRIVATE drv_qwerty drv_qwerty_includes xrt-interfaces aux_util
+						   xrt-external-catch2
+		)
+	add_test(NAME tests_qwerty_desktop_input COMMAND tests_qwerty_desktop_input)
+	set_tests_properties(tests_qwerty_desktop_input PROPERTIES ENVIRONMENT "SIMULATED_DESKTOP=1")
+	set_target_properties(tests_qwerty_desktop_input PROPERTIES FOLDER monado_tests)
+endif()
+
 if(XRT_BUILD_DRIVER_PSVR2 AND XRT_BUILD_DRIVER_PSSENSE)
 	add_executable(tests_psvr2_sense_tracking tests_psvr2_sense_tracking.cpp)
 	target_link_libraries(

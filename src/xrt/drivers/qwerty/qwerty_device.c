@@ -19,6 +19,8 @@
 #include "util/u_logging.h"
 #include "util/u_time.h"
 #include "util/u_misc.h"
+#include "util/u_desktop_input.h"
+#include "util/u_desktop_pose.h"
 #include "os/os_time.h"
 
 #include "qwerty_device.h"
@@ -234,10 +236,12 @@ qwerty_get_tracked_pose(struct xrt_device *xd,
 	float sprint_boost = qd->sprint_pressed ? powf(MOVEMENT_SPEED_STEP, SPRINT_STEPS) : 1;
 	float mov_speed = qd->movement_speed * sprint_boost;
 	struct xrt_vec3 pos_delta = {
-	    mov_speed * (qd->right_pressed - qd->left_pressed),
+	    mov_speed * (qd->right_pressed - qd->left_pressed) + qd->right_delta,
 	    0, // Up/down movement will be relative to base space
-	    mov_speed * (qd->backward_pressed - qd->forward_pressed),
+	    mov_speed * (qd->backward_pressed - qd->forward_pressed) - qd->forward_delta,
 	};
+	qd->right_delta = 0;
+	qd->forward_delta = 0;
 	math_quat_rotate_vec3(&qd->pose.orientation, &pos_delta, &pos_delta);
 	pos_delta.y += mov_speed * (qd->up_pressed - qd->down_pressed);
 	math_vec3_accum(&pos_delta, &qd->pose.position);
@@ -294,6 +298,19 @@ qwerty_destroy(struct xrt_device *xd)
 	u_device_free(xd);
 }
 
+/*!
+ * With SIMULATED_DESKTOP the compositor draws a simulated room as passthrough,
+ * so advertise support. There are no camera frames to deliver.
+ */
+static xrt_result_t
+qwerty_hmd_set_passthrough_sinks(struct xrt_device *xd, struct xrt_frame_sink *left, struct xrt_frame_sink *right)
+{
+	(void)xd;
+	(void)left;
+	(void)right;
+	return XRT_SUCCESS;
+}
+
 struct qwerty_hmd *
 qwerty_hmd_create(void)
 {
@@ -343,6 +360,9 @@ qwerty_hmd_create(void)
 	xd->get_tracked_pose = qwerty_get_tracked_pose;
 	xd->get_view_poses = u_device_get_view_poses;
 	xd->destroy = qwerty_destroy;
+	if (u_desktop_pose_enabled()) {
+		xd->set_passthrough_sinks = qwerty_hmd_set_passthrough_sinks;
+	}
 	u_distortion_mesh_set_none(xd); // Fill in xd->compute_distortion()
 
 	return qh;
@@ -400,6 +420,14 @@ qwerty_controller_create(bool is_left, struct qwerty_hmd *qhmd)
 }
 
 // System methods
+
+static void
+qwerty_desktop_input(void *ctx, const struct u_desktop_input_event *event)
+{
+	struct qwerty_system *qs = (struct qwerty_system *)ctx;
+	struct qwerty_device *default_qdev = qs->hmd != NULL ? &qs->hmd->base : &qs->rctrl->base;
+	qwerty_process_input(qs, default_qdev, qs->rctrl, event);
+}
 
 static void
 qwerty_setup_var_tracking(struct qwerty_system *qs)
@@ -482,6 +510,11 @@ qwerty_system_create(struct qwerty_hmd *qhmd,
 
 	qwerty_setup_var_tracking(qs);
 
+	// SIMULATED_DESKTOP: take input from the window that shows the output.
+	if (u_desktop_pose_enabled()) {
+		u_desktop_input_register(qwerty_desktop_input, qs);
+	}
+
 	return qs;
 }
 
@@ -512,6 +545,7 @@ qwerty_system_destroy(struct qwerty_system *qs)
 	if (!all_devices_clean) {
 		return;
 	}
+	u_desktop_input_unregister(qs);
 	u_var_remove_root(qs);
 	free(qs);
 }
@@ -567,6 +601,13 @@ qwerty_change_movement_speed(struct qwerty_device *qd, float steps)
 }
 
 void
+qwerty_add_move_delta(struct qwerty_device *qd, float right_m, float forward_m)
+{
+	qd->right_delta += right_m;
+	qd->forward_delta += forward_m;
+}
+
+void
 qwerty_release_all(struct qwerty_device *qd)
 {
 	qd->left_pressed = false;
@@ -582,6 +623,8 @@ qwerty_release_all(struct qwerty_device *qd)
 	qd->sprint_pressed = false;
 	qd->yaw_delta = 0;
 	qd->pitch_delta = 0;
+	qd->right_delta = 0;
+	qd->forward_delta = 0;
 }
 
 // Controller methods
