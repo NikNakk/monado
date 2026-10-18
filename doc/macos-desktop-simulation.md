@@ -9,6 +9,9 @@ SPDX-License-Identifier: BSL-1.0
 Added 18 October 2026 on `claude/wsi-fragment-output`. On 19 October the user ran it
 on a Mac with `psvr2-openxr-test --passthrough`: the room and scene rendered and the
 trackpad controls worked (commit `00567077e`, not compositing in the client).
+At `e4411508c` the close button stopped the client and service cleanly, and the
+WSI presenter looked right with `XRT_COMPOSITOR_COMPUTE` both on and off. Client
+compositing (`XRT_MACOS_CLIENT_COMPOSITOR=1`) has not been tried yet.
 
 `SIMULATED_DESKTOP=1` runs Monado without a headset. It uses the simulated HMD and
 shows the compositor's output in an ordinary window on the Mac's built-in display
