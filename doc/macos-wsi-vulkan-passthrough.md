@@ -556,7 +556,8 @@ twice.
 
 ### Software validation
 
-- Linux (Ubuntu 24.04, GCC 13) default build has no compiler warnings.
+- Linux (Ubuntu 24.04, GCC 13) default build has no compiler warnings, and the
+  full CTest suite passes (53/53) with Lavapipe as the Vulkan device.
 - Mesa Lavapipe 25.2 (LLVM 20.1.2) runs the camera and output GPU tests, 7 cases
   and 64,662 assertions, with `VK_LAYER_KHRONOS_validation` and synchronization
   validation on. Neither reports an error. Tests cover stereo, alpha and
