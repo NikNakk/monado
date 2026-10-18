@@ -154,6 +154,19 @@ simulated_hmd_get_tracked_pose(struct xrt_device *xdev,
 	return XRT_SUCCESS;
 }
 
+/*!
+ * With SIMULATED_DESKTOP the compositor draws a simulated room as passthrough,
+ * so advertise support. There are no camera frames to deliver.
+ */
+static xrt_result_t
+simulated_hmd_set_passthrough_sinks(struct xrt_device *xdev, struct xrt_frame_sink *left, struct xrt_frame_sink *right)
+{
+	(void)xdev;
+	(void)left;
+	(void)right;
+	return XRT_SUCCESS;
+}
+
 static xrt_result_t
 simulated_ref_space_usage(struct xrt_device *xdev,
                           enum xrt_reference_space_type type,
@@ -215,6 +228,9 @@ simulated_hmd_create(enum simulated_movement movement, const struct xrt_pose *ce
 	hmd->diameter_m = 0.05f;
 	hmd->log_level = simulated_log_level();
 	hmd->movement = movement;
+	if (movement == SIMULATED_MOVEMENT_DESKTOP) {
+		hmd->base.set_passthrough_sinks = simulated_hmd_set_passthrough_sinks;
+	}
 
 	hmd->base.hmd->view_count = debug_get_num_option_view_count();
 	// Print name.

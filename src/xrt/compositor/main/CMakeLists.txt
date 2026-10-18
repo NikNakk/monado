@@ -71,6 +71,8 @@ if(APPLE)
 			comp_vulkan_passthrough.h
 			comp_psvr2_passthrough.c
 			comp_psvr2_passthrough.h
+			comp_sim_room_passthrough.c
+			comp_sim_room_passthrough.h
 			comp_macos_frontend.m
 			comp_macos_frontend.h
 			comp_window_macos_hosted.h

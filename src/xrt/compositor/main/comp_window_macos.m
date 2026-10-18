@@ -21,6 +21,7 @@
 #include "main/comp_window_macos_passthrough_shader.h"
 #include "xrt/xrt_frame.h"
 #include "util/u_debug.h"
+#include "util/u_desktop_pose.h"
 #include "util/u_file.h"
 #include "util/u_passthrough_calibration.h"
 #include "math/m_api.h"
@@ -1059,6 +1060,12 @@ macos_passthrough_init(struct comp_window_macos *cwm)
 	 * IPC devices have no passthrough sinks, as the cameras are the service's.
 	 */
 	struct xrt_device *xdev = cwm->base.base.c->xdev;
+	if (u_desktop_pose_enabled()) {
+		COMP_WARN(cwm->base.base.c,
+		          "The simulated passthrough room is drawn by the WSI presenter only "
+		          "(XRT_MACOS_PRESENTER=wsi, XRT_MACOS_WSI_PASSTHROUGH=1)");
+		return false;
+	}
 	if (xdev == NULL || xdev->set_passthrough_sinks == NULL) {
 		COMP_INFO(cwm->base.base.c,
 		          "PS VR2 passthrough unavailable: the head device has no camera source here");
