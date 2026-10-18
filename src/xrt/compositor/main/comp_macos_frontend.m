@@ -3,6 +3,8 @@
 #include "main/comp_macos_frontend.h"
 #include "main/comp_compositor.h"
 #include "main/comp_macos_remote_layer.h"
+#include "xrt/xrt_device.h"
+#include "util/u_desktop_pose.h"
 #include "util/u_macos_display_host.h"
 #include "util/u_macos_hosted_client.h"
 #include "util/u_misc.h"
@@ -10,6 +12,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import <Metal/Metal.h>
 #include <dispatch/dispatch.h>
+#include <math.h>
 #include <pthread.h>
 
 struct macos_frontend_ops;
@@ -39,6 +42,10 @@ struct comp_macos_frontend
 	CAContext *hosted_context;
 	/* The headset display, fixed for the session. */
 	CGDirectDisplayID display_id;
+	/* Simulated HMD in a desktop window (SIMULATED_DESKTOP=1), not full screen. */
+	bool desktop;
+	/* Layer size in points: the screen, or the desktop window's content. */
+	NSSize size;
 	char display_name[128];
 	/* Owns the layer's container; the presenter only uses metal_layer. */
 	const struct macos_frontend_ops *frontend;
@@ -74,6 +81,37 @@ find_psvr2_screen(struct comp_compositor *c)
 		}
 	}
 	return width_fallback;
+}
+
+//! The built-in panel, else the main screen.
+static NSScreen *
+find_desktop_screen(void)
+{
+	for (NSScreen *screen in [NSScreen screens]) {
+		CGDirectDisplayID display_id = comp_macos_frontend_display_id(screen);
+		if (display_id != kCGNullDirectDisplay && CGDisplayIsBuiltin(display_id)) {
+			return screen;
+		}
+	}
+	return [NSScreen mainScreen];
+}
+
+/*!
+ * The desktop window's content size in points: the simulated HMD's panel
+ * aspect (so nothing is stretched), as large as fits 90% of the visible area.
+ * A hosted client computes the same size from the same screen.
+ */
+static NSSize
+desktop_window_size(struct comp_compositor *c, NSScreen *screen)
+{
+	double aspect = 16.0 / 9.0;
+	if (c != NULL && c->xdev != NULL && c->xdev->hmd != NULL && c->xdev->hmd->screens[0].w_pixels > 0 &&
+	    c->xdev->hmd->screens[0].h_pixels > 0) {
+		aspect = (double)c->xdev->hmd->screens[0].w_pixels / (double)c->xdev->hmd->screens[0].h_pixels;
+	}
+	NSSize visible = [screen visibleFrame].size;
+	double width = fmin(visible.width * 0.9, visible.height * 0.9 * aspect);
+	return NSMakeSize(floor(width), floor(width / aspect));
 }
 
 /*
@@ -116,6 +154,130 @@ find_psvr2_screen(struct comp_compositor *c)
 }
 @end
 
+/*
+ *
+ * Desktop window input (SIMULATED_DESKTOP=1).
+ *
+ * Click captures the pointer; then moving one finger on the trackpad turns the
+ * head (yaw and pitch) and two fingers move it across the floor. Esc frees the
+ * pointer and R returns to the starting pose. The service's main loop pumps
+ * AppKit events, so these handlers run on the main thread.
+ *
+ */
+
+//! Radians of head rotation per point of pointer movement (0.15 degrees).
+#define DESKTOP_RADIANS_PER_POINT 0.0026179939f
+//! Metres of head movement per point of two-finger scrolling.
+#define DESKTOP_METRES_PER_POINT 0.002f
+
+@interface MonadoDesktopView : NSView {
+	BOOL _captured;
+}
+- (void)releasePointer;
+@end
+
+@implementation MonadoDesktopView
+- (BOOL)acceptsFirstResponder
+{
+	return YES;
+}
+- (BOOL)acceptsFirstMouse:(NSEvent *)event
+{
+	return YES;
+}
+- (void)viewDidMoveToWindow
+{
+	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	if ([self window] != nil) {
+		// Never keep the pointer captured behind another window.
+		[[NSNotificationCenter defaultCenter] addObserver:self
+		                                         selector:@selector(windowDidResignKey:)
+		                                             name:NSWindowDidResignKeyNotification
+		                                           object:[self window]];
+	}
+}
+- (void)windowDidResignKey:(NSNotification *)notification
+{
+	[self releasePointer];
+}
+- (void)capturePointer
+{
+	if (_captured) {
+		return;
+	}
+	_captured = YES;
+	CGAssociateMouseAndMouseCursorPosition(false);
+	[NSCursor hide];
+}
+- (void)releasePointer
+{
+	if (!_captured) {
+		return;
+	}
+	_captured = NO;
+	CGAssociateMouseAndMouseCursorPosition(true);
+	[NSCursor unhide];
+}
+- (void)mouseDown:(NSEvent *)event
+{
+	[self capturePointer];
+}
+- (void)look:(NSEvent *)event
+{
+	if (!_captured) {
+		return;
+	}
+	// Pointer right turns right (negative yaw); pointer up (negative deltaY) looks up.
+	u_desktop_pose_rotate(-(float)[event deltaX] * DESKTOP_RADIANS_PER_POINT,
+	                      -(float)[event deltaY] * DESKTOP_RADIANS_PER_POINT);
+}
+- (void)mouseMoved:(NSEvent *)event
+{
+	[self look:event];
+}
+- (void)mouseDragged:(NSEvent *)event
+{
+	[self look:event];
+}
+- (void)scrollWheel:(NSEvent *)event
+{
+	// Ignore inertial scrolling: movement stops when the fingers lift.
+	if ([event momentumPhase] != NSEventPhaseNone) {
+		return;
+	}
+	CGFloat dx = [event scrollingDeltaX];
+	CGFloat dy = [event scrollingDeltaY];
+	if (![event hasPreciseScrollingDeltas]) {
+		// A mouse wheel reports lines, not points.
+		dx *= 10.0;
+		dy *= 10.0;
+	}
+	// Recover the fingers' direction whatever the natural-scrolling setting.
+	CGFloat fingers_right = [event isDirectionInvertedFromDevice] ? dx : -dx;
+	CGFloat fingers_up = [event isDirectionInvertedFromDevice] ? -dy : dy;
+	// Fingers away from you move forward, as on a joystick.
+	u_desktop_pose_move((float)fingers_right * DESKTOP_METRES_PER_POINT,
+	                    (float)fingers_up * DESKTOP_METRES_PER_POINT);
+}
+- (void)keyDown:(NSEvent *)event
+{
+	if ([event keyCode] == 53) { // Escape
+		[self releasePointer];
+		return;
+	}
+	NSString *chars = [event charactersIgnoringModifiers];
+	if ([chars caseInsensitiveCompare:@"r"] == NSOrderedSame) {
+		u_desktop_pose_reset();
+	}
+}
+- (void)dealloc
+{
+	[[NSNotificationCenter defaultCenter] removeObserver:self];
+	[self releasePointer];
+	[super dealloc];
+}
+@end
+
 struct macos_frontend_ops
 {
 	const char *name;
@@ -136,6 +298,27 @@ static NSScreen *
 macos_frontend_select_display(struct comp_macos_frontend *cwm)
 {
 	struct comp_compositor *c = cwm->c;
+	if (u_desktop_pose_enabled()) {
+		NSScreen *screen = find_desktop_screen();
+		CGDirectDisplayID display_id =
+		    screen != nil ? comp_macos_frontend_display_id(screen) : kCGNullDirectDisplay;
+		if (display_id == kCGNullDirectDisplay) {
+			COMP_ERROR(c, "SIMULATED_DESKTOP: no usable desktop display");
+			return nil;
+		}
+		NSSize size = desktop_window_size(c, screen);
+		double scale = [screen backingScaleFactor];
+		cwm->desktop = true;
+		cwm->size = size;
+		cwm->display_id = display_id;
+		cwm->pixel_width = (uint32_t)lround(size.width * scale);
+		cwm->pixel_height = (uint32_t)lround(size.height * scale);
+		snprintf(cwm->display_name, sizeof(cwm->display_name), "%s (simulated HMD window)",
+		         [[screen localizedName] UTF8String]);
+		COMP_INFO(c, "SIMULATED_DESKTOP: %ux%u pixel window on '%s'", cwm->pixel_width, cwm->pixel_height,
+		          [[screen localizedName] UTF8String]);
+		return screen;
+	}
 	NSScreen *screen = find_psvr2_screen(c);
 	if (screen == nil) {
 		COMP_ERROR(c, "Could not find a display named 'PS VR2' or a 4000-pixel-wide fallback");
@@ -149,6 +332,7 @@ macos_frontend_select_display(struct comp_macos_frontend *cwm)
 		return nil;
 	}
 	cwm->display_id = display_id;
+	cwm->size = [screen frame].size;
 	cwm->pixel_width = (uint32_t)width;
 	cwm->pixel_height = (uint32_t)height;
 	snprintf(cwm->display_name, sizeof(cwm->display_name), "%s", [[screen localizedName] UTF8String]);
@@ -163,7 +347,7 @@ macos_frontend_create_metal_layer(struct comp_macos_frontend *cwm, NSScreen *scr
 		COMP_ERROR(cwm->c, "Failed to create the default Metal device");
 		return nil;
 	}
-	NSSize size = [screen frame].size;
+	NSSize size = cwm->size;
 	CAMetalLayer *layer = [[CAMetalLayer alloc] init];
 	[layer setDevice:device];
 	[device release];
@@ -189,8 +373,17 @@ macos_window_frontend_create(struct comp_macos_frontend *cwm)
 	[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 	[NSApp finishLaunching];
 
-	NSWindow *window = [[NSWindow alloc] initWithContentRect:[screen frame]
-	                                               styleMask:NSWindowStyleMaskBorderless
+	NSRect content_rect = [screen frame];
+	NSWindowStyleMask style = NSWindowStyleMaskBorderless;
+	if (cwm->desktop) {
+		// An ordinary, fixed-size window: the target size follows it.
+		NSRect visible = [screen visibleFrame];
+		content_rect = NSMakeRect(NSMidX(visible) - cwm->size.width / 2, NSMidY(visible) - cwm->size.height / 2,
+		                          cwm->size.width, cwm->size.height);
+		style = NSWindowStyleMaskTitled | NSWindowStyleMaskMiniaturizable;
+	}
+	NSWindow *window = [[NSWindow alloc] initWithContentRect:content_rect
+	                                               styleMask:style
 	                                                 backing:NSBackingStoreBuffered
 	                                                   defer:NO
 	                                                  screen:screen];
@@ -213,8 +406,10 @@ macos_window_frontend_create(struct comp_macos_frontend *cwm)
 	 * sit beside it, and the presenter's layer can be hidden on its own while
 	 * a client is shown. This replaces an MTKView, whose layer AppKit owns.
 	 */
-	NSSize size = [screen frame].size;
-	NSView *content_view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+	NSSize size = cwm->size;
+	NSRect content_frame = NSMakeRect(0, 0, size.width, size.height);
+	NSView *content_view = cwm->desktop ? [[MonadoDesktopView alloc] initWithFrame:content_frame]
+	                                    : [[NSView alloc] initWithFrame:content_frame];
 	CALayer *root_layer = [[CALayer alloc] init];
 	CGColorRef black = CGColorCreateGenericRGB(0.0, 0.0, 0.0, 1.0);
 	[root_layer setBackgroundColor:black];
@@ -393,6 +588,17 @@ static void
 macos_window_frontend_show(struct comp_macos_frontend *cwm)
 {
 	NSWindow *window = cwm->window;
+	if (cwm->desktop) {
+		// An ordinary window that takes the trackpad and keyboard.
+		[window setAcceptsMouseMovedEvents:YES];
+		[window makeKeyAndOrderFront:nil];
+		[window makeFirstResponder:[window contentView]];
+		[NSApp activateIgnoringOtherApps:YES];
+		[CATransaction flush];
+		u_macos_display_host_register(&macos_display_host_ops, cwm);
+		cwm->host_registered = true;
+		return;
+	}
 	[window setBackgroundColor:[NSColor blackColor]];
 	[window setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces |
 	                              NSWindowCollectionBehaviorFullScreenAuxiliary |
@@ -414,7 +620,12 @@ macos_window_frontend_show(struct comp_macos_frontend *cwm)
 static void
 macos_window_frontend_set_title(struct comp_macos_frontend *cwm, const char *title)
 {
-	[cwm->window setTitle:[NSString stringWithUTF8String:title]];
+	NSString *text = [NSString stringWithUTF8String:title];
+	if (cwm->desktop) {
+		text = [text
+		    stringByAppendingString:@" - click to look, two fingers to move, R resets, Esc frees the pointer"];
+	}
+	[cwm->window setTitle:text];
 }
 
 static bool
@@ -439,6 +650,9 @@ macos_window_frontend_destroy(struct comp_macos_frontend *cwm)
 	}
 	pthread_mutex_unlock(&cwm->host_mutex);
 
+	if (cwm->desktop) {
+		[(MonadoDesktopView *)[cwm->window contentView] releasePointer];
+	}
 	[cwm->window orderOut:nil];
 	[cwm->window close];
 	[cwm->window release];
@@ -489,7 +703,7 @@ macos_hosted_frontend_create(struct comp_macos_frontend *cwm)
 	if (metal_layer == nil) {
 		return false;
 	}
-	NSSize size = [screen frame].size;
+	NSSize size = cwm->size;
 	CGRect bounds = CGRectMake(0, 0, size.width, size.height);
 
 	[CATransaction begin];
@@ -699,6 +913,12 @@ bool
 comp_macos_frontend_detect(void)
 {
 	@autoreleasepool {
-		return find_psvr2_screen(NULL) != nil;
+		return u_desktop_pose_enabled() || find_psvr2_screen(NULL) != nil;
 	}
+}
+
+bool
+comp_macos_frontend_is_desktop(struct comp_macos_frontend *frontend)
+{
+	return frontend->desktop;
 }
