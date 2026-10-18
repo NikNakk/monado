@@ -25,9 +25,11 @@ isolates `XRT_COMPOSITOR_COMPUTE=1` as the trigger in WSI testing and reports
 native is fine. Native uses compute by default; focus on WSI compute/output.
 Visual acceptance remains pending; native is still default (16 October 2026).
 A [private-output candidate](macos-wsi-vulkan-passthrough.md#private-compute-output-candidate)
-now keeps WSI compute/camera shader writes out of presentation images and adds
-a Vulkan copy. Its visual quality, direct scanout and performance are untested;
-no further headset run is started while the user lacks access.
+keeps WSI compute/camera shader writes out of presentation images. Since
+18 October a [fragment output pass](macos-wsi-vulkan-passthrough.md#fragment-output-pass-18-october-2026)
+replaces its copies and the camera compute pass, leaving presentation images
+as render targets only. Its visual quality, direct scanout and performance
+are untested on hardware.
 
 The opt-in generic Vulkan WSI target and its experiment are committed on
 `claude/macos-wsi-integration` (worktree `build/review/wsi-integration`), with

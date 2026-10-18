@@ -5,7 +5,8 @@ SPDX-License-Identifier: BSL-1.0
 
 # Vulkan camera composition for macOS WSI
 
-Updated 17 October 2026. Worktree `build/review/wsi-integration`, based on
+Updated 18 October 2026: the copy and camera compute pass are replaced by
+[fragment output passes](#fragment-output-pass-18-october-2026). Previously updated 17 October 2026. Worktree `build/review/wsi-integration`, based on
 `ec4c02591` plus the fork checkpoint recorded below. Native remains the default;
 WSI/passthrough remains opt-in. No installed-runtime change or upstream
 submission is part of this checkpoint.
@@ -25,22 +26,26 @@ chiefly waiting for Vulkan distortion and then Metal camera completion. A
 roughly 0.13 ms final layout wait is not the main cost. Adding another fixed
 offset would leave those serial waits in the compositor thread.
 
-The replacement stays in Vulkan: upload BC4 camera snapshots, copy the already
-composited application image, project calibrated camera rays, blend the camera
-under premultiplied application alpha, and return the output to its incoming
-layout. The current WSI compute candidate uses private GENERAL-layout images
-and a separate Vulkan copy to the presentation images (see below). No Metal texture export, private GPU priority call, cross-API event
+The replacement stays in Vulkan: upload BC4 camera snapshots, project calibrated
+camera rays and blend the camera under premultiplied application alpha. The
+current WSI compute path renders into private GENERAL-layout images. A
+full-screen fragment pass then renders each presentation image, either a plain
+pass-through or the camera blend (see the
+[fragment output pass](#fragment-output-pass-18-october-2026)). No Metal texture export, private GPU priority call, cross-API event
 translation or per-frame CPU completion wait is needed for this camera pass.
 The native presenter is unchanged and remains the visual control.
 
 ## Review boundaries
 
-- `render/render_camera.c`, its header and `shaders/camera.comp` implement the
+- `render/render_camera.c`, its header and `shaders/camera.frag` implement the
   Vulkan operation. They have no macOS, PS VR2, USB, IPC, config-file or
   presentation policy. The shader accepts stereo UV/ray maps, intrinsics,
   distortion and per-frame rotation. Image dimensions come from the inputs.
 - `render/render_output.c` owns private output images and queues an ordered
-  copy into caller-owned presentation images. It has no platform/camera policy.
+  pass-through fragment pass (`shaders/output.frag`) into caller-owned
+  presentation views. `render/render_fullscreen.c` and `shaders/fullscreen.vert`
+  are the shared full-screen triangle, render pass and pipeline. None of these
+  has platform/camera policy.
 - `main/comp_psvr2_passthrough.c` owns the current PS VR2 BC4 source, optical
   map construction, headset-bound calibration selection and header-time capture
   pose. Its PS VR2 name is deliberate: this is not a proposed universal camera
@@ -70,18 +75,20 @@ presentation dependency. One Vulkan batch consumes it at `ALL_COMMANDS` and re-s
 composition, under the existing queue lock. The final WSI presenter keeps its existing wait;
 no generic target interface or semaphore substitution is introduced.
 
-Each output image has its own application copy, BC4 camera images, coherent
+Each output image has its own framebuffer, BC4 camera images, coherent
 upload buffers, uniform buffer, command buffer and completion fence. The camera source and parameters can be released immediately
 after the CPU snapshot is copied. The output slot's fence must complete before
 any of those buffers or commands are reused. This prevents an older queued
 frame from seeing a newer camera texture or rotation. Calibration maps are
 immutable and initialized on the same queue before they are sampled.
 
-The output transitions from its incoming layout to transfer source, then
-storage output, and back to the incoming layout. Upload and application-copy
-barriers order their writes before shader sampling. The pass currently accepts
-linear RGBA8/BGRA8 UNORM outputs with storage/sampling support and BC4 sampled
-camera support; it rejects unsupported formats explicitly. The WSI adapter
+The private source stays in its layout and is sampled in place; the
+presentation image is only a color attachment, starting UNDEFINED and finishing
+in the presentation layout. Upload and source barriers order earlier writes
+before shader sampling. The pass currently accepts linear RGBA8/BGRA8 UNORM
+images with color-attachment/sampling support and BC4 sampled camera support;
+it rejects unsupported formats explicitly. (Earlier versions copied the
+application image and wrote the output from a compute shader.) The WSI adapter
 still requires the compute compositor for transparent application alpha.
 
 Slot reuse and teardown have bounded 500 ms fence waits. A timed-out teardown
@@ -504,3 +511,74 @@ saved at `409c1c769` on `experiment/macos-wsi-current-native`, marked WIP and no
 merged into the current WSI or integration branch. Its Python tests pass, but
 its runtime tree is not revalidated at this checkpoint. Fork backup is separate
 from upstream submission, DCO certification and installed-runtime promotion.
+
+
+## Fragment output pass (18 October 2026)
+
+The private-output candidate removed shader writes from the drawables but kept
+two full-frame copies when passthrough was on (application image into the
+camera slot, then private image into the drawable). It also requested
+`TRANSFER_DST` on the WSI images, which makes MoltenVK set
+`framebufferOnly = NO`. This step replaces both copies and the camera compute
+dispatch with full-screen fragment passes. No headset run has tested it yet.
+
+- `render_output_present` (replacing `render_output_copy`) draws one
+  full-screen triangle into the presentation view. `output.frag` passes the
+  private image through with `texelFetch`, alpha included.
+- With passthrough on, `render_camera` is the final pass instead. `camera.frag`
+  is the former `camera.comp` shader, changed only in its inputs and outputs
+  and in sampling the camera at an explicit level of detail 0. It samples the
+  private image in place and renders the drawable. The output pass is skipped for that frame. If the camera pass does
+  not submit (no fresh camera frame, rejected input or queue OOM), the plain
+  output pass still writes the drawable.
+- The WSI swapchain now requests only `COLOR_ATTACHMENT`, as the graphics
+  compositor does, so MoltenVK leaves `framebufferOnly` on. Shader storage and
+  `TRANSFER_SRC` usage stay on the private images.
+- Synchronization is unchanged: one batch per frame consumes and re-signals the
+  binary `render_complete` semaphore. Per-slot fences, bounded 500 ms reuse and
+  drain waits and retain-on-timeout teardown keep their previous behaviour.
+
+Effect per frame with passthrough: one fragment pass instead of two
+4000x2040 copies plus a compute dispatch, and no per-slot application image
+(about 93 MiB less memory). Without passthrough: one fragment pass instead of
+one copy.
+
+### Open question: direct scanout
+
+The Instruments trace showed direct scanout only for the graphics compositor,
+whose layer was `framebufferOnly` 1 with BGRA8 sRGB. This pass matches the
+`framebufferOnly` setting but keeps the compute compositor's UNORM swapchain
+format, because the private image already holds sRGB-encoded values. Only a new
+display trace can tell whether that is enough. If it is not, the next step is an
+sRGB swapchain with the private image sampled through an sRGB view
+(`MUTABLE_FORMAT`), so the values are decoded and re-encoded rather than encoded
+twice.
+
+### Software validation
+
+- Linux (Ubuntu 24.04, GCC 13) default build has no compiler warnings.
+- Mesa Lavapipe 25.2 (LLVM 20.1.2) runs the camera and output GPU tests, 7 cases
+  and 64,662 assertions, with `VK_LAYER_KHRONOS_validation` and synchronization
+  validation on. Neither reports an error. Tests cover stereo, alpha and
+  calibrated rotation through standalone sources and through `render_output`'s
+  private images, exact distortion bytes and alpha through the output pass,
+  destinations without STORAGE, SAMPLED or TRANSFER_DST, blocked-queue reuse and
+  drain retention, and queue OOM.
+- New and changed sources pass clang-format 23.1.1.
+- Not run here: the macOS build (the WSI target is Objective-C) and any Apple GPU
+  test. Run the macOS CI recipe before a headset session.
+
+### Headset checks
+
+These replace the private-output checks above. Use separate output
+directories for each.
+
+1. `--conditions wsi --service-env XRT_COMPOSITOR_COMPUTE=1`, full baseline
+   scene, no app passthrough request. Expect `WSI compute output: ... fragment
+   pass to presentation images` in the service log and
+   `framebufferOnly=1` on the `EXPERIMENT effective layer` line. Check for the
+   earlier flicker and head-locking.
+2. The same with `--passthrough overlay`. Check that the boxes stay fixed
+   against the camera during gentle and fast motion and sudden stops.
+3. If both look right, record a display trace to settle direct scanout.
+4. Repeat hosted and refresh/recreation checks.
