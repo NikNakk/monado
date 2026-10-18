@@ -257,8 +257,10 @@ render_camera_submit(struct render_camera *rc,
                      bool *submitted)
 {
 	*submitted = false;
-	if (index >= rc->count || rc->failed || params->map_size != rc->map_size)
+	if (index >= rc->count || rc->failed || params->map_size != rc->map_size ||
+	    params->mode > RENDER_CAMERA_MODE_ROOM)
 		return VK_ERROR_INITIALIZATION_FAILED;
+	bool room = params->mode == RENDER_CAMERA_MODE_ROOM;
 	struct vk_bundle *vk = rc->vk;
 	struct camera_slot *slot = &rc->slots[index];
 	if (slot->pending) {
@@ -269,14 +271,14 @@ render_camera_submit(struct render_camera *rc,
 	}
 	uint32_t rows = (rc->camera_extent.height + 3) / 4;
 	size_t row_bytes = ((rc->camera_extent.width + 3) / 4) * 8;
-	for (uint32_t eye = 0; eye < 2; eye++) {
+	for (uint32_t eye = 0; !room && eye < 2; eye++) {
 		struct xrt_frame *frame = frames[eye];
 		if (frame == NULL || frame->data == NULL || frame->format != XRT_FORMAT_BC4 ||
 		    frame->width != rc->camera_extent.width || frame->height != rc->camera_extent.height ||
 		    frame->stride < row_bytes || frame->size < (rows - 1) * frame->stride + row_bytes)
 			return VK_ERROR_INITIALIZATION_FAILED;
 	}
-	for (uint32_t eye = 0; eye < 2; eye++) {
+	for (uint32_t eye = 0; !room && eye < 2; eye++) {
 		for (uint32_t row = 0; row < rows; row++) {
 			memcpy((char *)slot->upload[eye].mapped + row * row_bytes,
 			       frames[eye]->data + row * frames[eye]->stride, row_bytes);
@@ -298,8 +300,15 @@ render_camera_submit(struct render_camera *rc,
 			upload(rc, cmd, rc->map_upload.buffer, eye * bytes, rc->maps[eye].image,
 			       (VkExtent2D){rc->map_size, rc->map_size});
 	}
-	for (uint32_t eye = 0; eye < 2; eye++)
-		upload(rc, cmd, slot->upload[eye].buffer, 0, slot->cameras[eye].image, rc->camera_extent);
+	for (uint32_t eye = 0; eye < 2; eye++) {
+		if (room) {
+			// Bound but not sampled: give them a valid layout, contents undefined.
+			barrier(rc, cmd, slot->cameras[eye].image, VK_IMAGE_LAYOUT_UNDEFINED,
+			        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, VK_ACCESS_SHADER_READ_BIT);
+		} else {
+			upload(rc, cmd, slot->upload[eye].buffer, 0, slot->cameras[eye].image, rc->camera_extent);
+		}
+	}
 	// The application is sampled in place from the separate source image; the
 	// destination is only a render target. Order earlier writes before sampling
 	// and this read before the source is next rendered.
