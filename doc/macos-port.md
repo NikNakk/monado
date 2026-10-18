@@ -29,6 +29,9 @@ keeps WSI compute/camera shader writes out of presentation images. Since
 replaces its copies and the camera compute pass, leaving presentation images
 as render targets only. Its visual quality, direct scanout and performance
 are untested on hardware.
+`SIMULATED_DESKTOP=1` runs a [simulated HMD in a desktop window](macos-desktop-simulation.md)
+on the built-in display, steered with the trackpad, for headset-free checks of
+the WSI compute path (not passthrough).
 
 The opt-in generic Vulkan WSI target and its experiment are committed on
 `claude/macos-wsi-integration` (worktree `build/review/wsi-integration`), with
