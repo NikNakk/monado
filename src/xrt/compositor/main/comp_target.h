@@ -68,6 +68,9 @@ struct comp_target_image
 	//! Head orientation used for this image's timewarp, before eye offsets.
 	struct xrt_quat display_head_orientation;
 	bool display_head_orientation_valid;
+	//! Each eye's world pose at the start of scanout, as used for timewarp.
+	struct xrt_pose display_view_poses[2];
+	bool display_view_poses_valid;
 };
 
 /*!
