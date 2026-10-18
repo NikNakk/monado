@@ -4,49 +4,72 @@
 #include "render/render_camera.h"
 #include "render/render_output.h"
 #include "util/u_passthrough_calibration.h"
-#include "camera.comp.h"
+#include "camera.frag.h"
+#include "fullscreen.vert.h"
+#include "output.frag.h"
 
 namespace {
 struct CameraFixture
 {
 	Fixture f;
-	std::array<Image, 3> outputs{};
+	//! Presentation-like destinations (render target only) and the separate
+	//! application sources the camera pass samples.
+	std::array<Image, 3> outputs{}, sources{};
 	std::array<VkSemaphore, 3> complete{};
-	VkShaderModule shader{};
+	VkShaderModule vert{}, frag{}, output_shader{};
 	render_camera *renderer{};
 	render_output *output{};
 	std::array<std::vector<float>, 2> maps;
 	std::array<u_passthrough_camera, 2> calibration{};
 	static constexpr unsigned map_size = 5, width = 34, height = 13, cw = 12, ch = 8;
 
+	VkShaderModule
+	module(const uint32_t *code, size_t size)
+	{
+		VkShaderModuleCreateInfo si{};
+		si.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		si.codeSize = size;
+		si.pCode = code;
+		VkShaderModule result{};
+		REQUIRE(f.vk().vkCreateShaderModule(f.vk().device, &si, nullptr, &result) == VK_SUCCESS);
+		return result;
+	}
 	void
-	init(bool copy_output = false)
+	create_image(Image &image, VkImageUsageFlags usage)
+	{
+		auto &vk = f.vk();
+		image.extent = {width, height};
+		REQUIRE(vk_create_image_simple(&vk, image.extent, VK_FORMAT_R8G8B8A8_UNORM, usage, &image.memory,
+		                               &image.image) == VK_SUCCESS);
+		REQUIRE(vk_create_view(&vk, image.image, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM, color_range,
+		                       &image.view) == VK_SUCCESS);
+		auto cmd = f.begin();
+		f.barrier(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, 0,
+		          VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		          VK_PIPELINE_STAGE_TRANSFER_BIT);
+		f.finish(cmd);
+	}
+	//! private_output: sample render_output's private images, sharing its
+	//! destinations, as the macOS WSI target does.
+	void
+	init(bool private_output = false)
 	{
 		f.init(17, height);
 		auto &vk = f.vk();
-		VkShaderModuleCreateInfo si{};
-		si.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		si.codeSize = sizeof(camera_comp);
-		si.pCode = camera_comp;
-		REQUIRE(vk.vkCreateShaderModule(vk.device, &si, nullptr, &shader) == VK_SUCCESS);
+		vert = module(fullscreen_vert, sizeof(fullscreen_vert));
+		frag = module(camera_frag, sizeof(camera_frag));
+		output_shader = module(output_frag, sizeof(output_frag));
 		VkImage images[3];
-		VkImageView views[3];
+		VkImageView views[3], destinations[3];
 		for (unsigned i = 0; i < outputs.size(); i++) {
-			auto &image = outputs[i];
-			image.extent = {width, height};
-			REQUIRE(vk_create_image_simple(&vk, image.extent, VK_FORMAT_R8G8B8A8_UNORM,
-			                               VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-			                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-			                               &image.memory, &image.image) == VK_SUCCESS);
-			REQUIRE(vk_create_view(&vk, image.image, VK_IMAGE_VIEW_TYPE_2D, VK_FORMAT_R8G8B8A8_UNORM,
-			                       color_range, &image.view) == VK_SUCCESS);
-			images[i] = image.image;
-			views[i] = image.view;
-			auto cmd = f.begin();
-			f.barrier(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL, 0,
-			          VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-			          VK_PIPELINE_STAGE_TRANSFER_BIT);
-			f.finish(cmd);
+			// TRANSFER_SRC is solely for this test's readback.
+			create_image(outputs[i], VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+			destinations[i] = outputs[i].view;
+			if (!private_output) {
+				create_image(sources[i], VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+				images[i] = sources[i].image;
+				views[i] = sources[i].view;
+			}
 			VkSemaphoreCreateInfo sem{};
 			sem.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 			REQUIRE(vk.vkCreateSemaphore(vk.device, &sem, nullptr, &complete[i]) == VK_SUCCESS);
@@ -76,10 +99,11 @@ struct CameraFixture
 			maps[eye][0] = maps[eye][1] = -1;
 			maps[eye][2] = maps[eye][3] = NAN;
 		}
-		if (copy_output) {
-			output = render_output_create(&vk, vk.main_queue, VK_FORMAT_R8G8B8A8_UNORM, {width, height},
+		if (private_output) {
+			output = render_output_create(&vk, vk.main_queue, vert, output_shader, VK_FORMAT_R8G8B8A8_UNORM,
+			                              {width, height},
 			                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-			                              images, 3);
+			                              destinations, VK_IMAGE_LAYOUT_GENERAL, 3);
 			REQUIRE(output != nullptr);
 			for (unsigned i = 0; i < 3; i++) {
 				images[i] = render_output_image(output, i);
@@ -93,8 +117,9 @@ struct CameraFixture
 			}
 		}
 		const float *mapping[2] = {maps[0].data(), maps[1].data()};
-		renderer = render_camera_create(&vk, vk.main_queue, shader, VK_FORMAT_R8G8B8A8_UNORM, {width, height},
-		                                {cw, ch}, map_size, mapping, images, views, 3);
+		renderer = render_camera_create(&vk, vk.main_queue, vert, frag, VK_FORMAT_R8G8B8A8_UNORM,
+		                                {width, height}, {cw, ch}, map_size, mapping, images, views,
+		                                VK_IMAGE_LAYOUT_GENERAL, destinations, VK_IMAGE_LAYOUT_GENERAL, 3);
 		REQUIRE(renderer != nullptr);
 	}
 
@@ -102,7 +127,7 @@ struct CameraFixture
 	clear(unsigned index, unsigned alpha)
 	{
 		auto cmd = f.begin();
-		auto image = outputs[index];
+		auto image = sources[index];
 		if (output != nullptr)
 			image.image = render_output_image(output, index);
 		f.barrier(cmd, image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL,
@@ -131,9 +156,6 @@ struct CameraFixture
 	void
 	consume(unsigned index)
 	{
-		if (output != nullptr)
-			REQUIRE(render_output_copy(output, index, complete[index], VK_IMAGE_LAYOUT_GENERAL) ==
-			        VK_SUCCESS);
 		VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 		VkSubmitInfo submit{};
 		submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -186,16 +208,18 @@ struct CameraFixture
 		for (auto sem : complete)
 			if (sem)
 				f.vk().vkDestroySemaphore(f.vk().device, sem, nullptr);
-		for (auto &image : outputs) {
-			if (image.view)
-				f.vk().vkDestroyImageView(f.vk().device, image.view, nullptr);
-			if (image.image)
-				f.vk().vkDestroyImage(f.vk().device, image.image, nullptr);
-			if (image.memory)
-				f.vk().vkFreeMemory(f.vk().device, image.memory, nullptr);
-		}
-		if (shader)
-			f.vk().vkDestroyShaderModule(f.vk().device, shader, nullptr);
+		for (auto *images : {&outputs, &sources})
+			for (auto &image : *images) {
+				if (image.view)
+					f.vk().vkDestroyImageView(f.vk().device, image.view, nullptr);
+				if (image.image)
+					f.vk().vkDestroyImage(f.vk().device, image.image, nullptr);
+				if (image.memory)
+					f.vk().vkFreeMemory(f.vk().device, image.memory, nullptr);
+			}
+		for (auto shader : {vert, frag, output_shader})
+			if (shader)
+				f.vk().vkDestroyShaderModule(f.vk().device, shader, nullptr);
 	}
 };
 
@@ -234,10 +258,10 @@ camera_sample(unsigned eye, unsigned seed, xrt_vec2 uv)
 
 TEST_CASE("Vulkan camera composition preserves stereo, alpha and calibrated rotation", "[aux_render][gpu][camera]")
 {
-	bool copy_output = GENERATE(false, true);
-	CAPTURE(copy_output);
+	bool private_output = GENERATE(false, true);
+	CAPTURE(private_output);
 	CameraFixture cf;
-	cf.init(copy_output);
+	cf.init(private_output);
 	static_assert(sizeof(render_camera_params) == 176);
 	for (unsigned round = 0; round < 7; round++) {
 		for (unsigned slot = 0; slot < 3; slot++)
@@ -327,8 +351,8 @@ TEST_CASE("Vulkan camera composition preserves stereo, alpha and calibrated rota
 			xrt_frame *source[2] = {&frames[0], &frames[1]};
 			bool submitted = false;
 			cf.signal(slot);
-			REQUIRE(render_camera_submit(cf.renderer, slot, VK_IMAGE_LAYOUT_GENERAL, cf.complete[slot],
-			                             source, &params, &submitted) == VK_SUCCESS);
+			REQUIRE(render_camera_submit(cf.renderer, slot, cf.complete[slot], source, &params,
+			                             &submitted) == VK_SUCCESS);
 			REQUIRE(submitted);
 			// CPU source and parameters may be discarded immediately after submission.
 			std::fill(left.begin(), left.end(), 0);
@@ -364,8 +388,8 @@ TEST_CASE("Camera input rejection leaves the producer semaphore available", "[au
 	xrt_frame *frames[2] = {&frame, &frame};
 	bool submitted = true;
 	cf.signal(0);
-	CHECK(render_camera_submit(cf.renderer, 0, VK_IMAGE_LAYOUT_GENERAL, cf.complete[0], frames, &params,
-	                           &submitted) == VK_ERROR_INITIALIZATION_FAILED);
+	CHECK(render_camera_submit(cf.renderer, 0, cf.complete[0], frames, &params, &submitted) ==
+	      VK_ERROR_INITIALIZATION_FAILED);
 	CHECK_FALSE(submitted);
 	cf.consume(0); // The rejected frame must not consume or re-signal it.
 }
@@ -432,8 +456,8 @@ TEST_CASE("Camera submissions return before GPU readiness and retain pending sto
 		params.brightness = 1;
 
 		bool submitted = false;
-		REQUIRE(render_camera_submit(cf.renderer, slot, VK_IMAGE_LAYOUT_GENERAL, cf.complete[slot], frames,
-		                             &params, &submitted) == VK_SUCCESS);
+		REQUIRE(render_camera_submit(cf.renderer, slot, cf.complete[slot], frames, &params, &submitted) ==
+		        VK_SUCCESS);
 		REQUIRE(submitted);
 	}
 	// A reused output slot must not overwrite pending camera or uniform storage.
@@ -449,8 +473,8 @@ TEST_CASE("Camera submissions return before GPU readiness and retain pending sto
 	replacement_frame.data = newer.data();
 	xrt_frame *replacement_frames[2] = {&replacement_frame, &replacement_frame};
 	bool resubmitted = true;
-	CHECK(render_camera_submit(cf.renderer, 0, VK_IMAGE_LAYOUT_GENERAL, cf.complete[0], replacement_frames,
-	                           &replacement, &resubmitted) == VK_TIMEOUT);
+	CHECK(render_camera_submit(cf.renderer, 0, cf.complete[0], replacement_frames, &replacement, &resubmitted) ==
+	      VK_TIMEOUT);
 	CHECK_FALSE(resubmitted);
 	// Host has not released the gate: a synchronous bridge cannot reach here.
 	// Destruction must return a bounded timeout without freeing any resources.
@@ -511,14 +535,13 @@ TEST_CASE("Camera queue OOM preserves synchronization and permits retry", "[aux_
 			}
 		} restore{cf.f.vk(), cf.f.vk().vkQueueSubmit};
 		cf.f.vk().vkQueueSubmit = camera_submit_oom;
-		CHECK(render_camera_submit(cf.renderer, 0, VK_IMAGE_LAYOUT_GENERAL, cf.complete[0], frames, &params,
-		                           &submitted) == VK_ERROR_OUT_OF_HOST_MEMORY);
+		CHECK(render_camera_submit(cf.renderer, 0, cf.complete[0], frames, &params, &submitted) ==
+		      VK_ERROR_OUT_OF_HOST_MEMORY);
 		CHECK_FALSE(submitted);
 	}
 	cf.consume(0); // The failed call must leave the original signal untouched.
 	cf.signal(0);
-	REQUIRE(render_camera_submit(cf.renderer, 0, VK_IMAGE_LAYOUT_GENERAL, cf.complete[0], frames, &params,
-	                             &submitted) == VK_SUCCESS);
+	REQUIRE(render_camera_submit(cf.renderer, 0, cf.complete[0], frames, &params, &submitted) == VK_SUCCESS);
 	CHECK(submitted);
 	cf.consume(0);
 	auto pixels = cf.pixels(0);

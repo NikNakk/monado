@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 /* Stereo camera composition using only Vulkan. No presentation or device policy. */
 #include "render/render_camera.h"
+#include "render/render_fullscreen.h"
 #include "render/render_interface.h"
 #include "vk/vk_cmd_pool.h"
 #include <stdlib.h>
@@ -20,9 +21,10 @@ struct camera_image
 };
 struct camera_slot
 {
-	struct camera_image application, cameras[2];
+	struct camera_image cameras[2];
 	struct render_buffer upload[2], params;
-	VkImage target;
+	VkImage source;
+	VkFramebuffer framebuffer;
 	VkDescriptorSet descriptors;
 	VkCommandBuffer commands;
 	VkFence fence;
@@ -33,6 +35,7 @@ struct render_camera
 	struct vk_bundle *vk;
 	struct vk_cmd_pool pool;
 	bool pool_ready, maps_initialized, failed;
+	VkImageLayout source_layout;
 	VkExtent2D extent, camera_extent;
 	uint32_t count, map_size;
 	struct camera_slot *slots;
@@ -41,8 +44,7 @@ struct render_camera
 	VkSampler sampler;
 	VkDescriptorSetLayout set_layout;
 	VkDescriptorPool descriptors;
-	VkPipelineLayout pipeline_layout;
-	VkPipeline pipeline;
+	struct render_fullscreen pass;
 };
 
 static bool
@@ -106,22 +108,27 @@ supports(struct vk_bundle *vk, VkFormat format, VkFormatFeatureFlags features)
 struct render_camera *
 render_camera_create(struct vk_bundle *vk,
                      struct vk_bundle_queue *queue,
-                     VkShaderModule shader,
+                     VkShaderModule vert,
+                     VkShaderModule frag,
                      VkFormat format,
                      VkExtent2D extent,
                      VkExtent2D camera_extent,
                      uint32_t map_size,
                      const float *maps[2],
-                     const VkImage *images,
-                     const VkImageView *views,
+                     const VkImage *sources,
+                     const VkImageView *source_views,
+                     VkImageLayout source_layout,
+                     const VkImageView *destinations,
+                     VkImageLayout destination_layout,
                      uint32_t count)
 {
-	// These are linear UNORM views, matching the compositor output. SRGB storage
-	// images are not required by Vulkan and must not be silently reinterpreted.
+	// These are linear UNORM views, matching the compositor output, which is
+	// already sRGB-encoded. An SRGB destination would encode it a second time.
 	if ((format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_B8G8R8A8_UNORM) || count == 0 ||
 	    count > XRT_MAX_SWAPCHAIN_IMAGES || extent.width == 0 || extent.height == 0 || camera_extent.width == 0 ||
-	    camera_extent.height == 0 || map_size == 0 || map_size > 4096 || !maps[0] || !maps[1] ||
-	    !supports(vk, format, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) ||
+	    camera_extent.height == 0 || map_size == 0 || map_size > 4096 || !maps[0] || !maps[1] || !sources ||
+	    !source_views || !destinations ||
+	    !supports(vk, format, VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) ||
 	    !supports(vk, VK_FORMAT_BC4_UNORM_BLOCK,
 	              VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
 		return NULL;
@@ -130,6 +137,7 @@ render_camera_create(struct vk_bundle *vk,
 	if (rc == NULL)
 		return NULL;
 	rc->vk = vk;
+	rc->source_layout = source_layout;
 	rc->extent = extent;
 	rc->camera_extent = camera_extent;
 	rc->count = count;
@@ -145,35 +153,25 @@ render_camera_create(struct vk_bundle *vk,
 		goto fail;
 
 	VkDescriptorSetLayoutBinding bindings[] = {
-	    {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
-	    {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
-	    {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
-	    {3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
-	    {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
+	    {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
+	    {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
+	    {2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
+	    {3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
 	};
 	VkDescriptorSetLayoutCreateInfo set_info = {
 	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-	    .bindingCount = 5,
+	    .bindingCount = 4,
 	    .pBindings = bindings,
 	};
 	if (vk->vkCreateDescriptorSetLayout(vk->device, &set_info, NULL, &rc->set_layout) != VK_SUCCESS)
 		goto fail;
-	VkPipelineLayoutCreateInfo layout_info = {
-	    .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-	    .setLayoutCount = 1,
-	    .pSetLayouts = &rc->set_layout,
-	};
-	if (vk->vkCreatePipelineLayout(vk->device, &layout_info, NULL, &rc->pipeline_layout) != VK_SUCCESS)
-		goto fail;
-	if (vk_create_compute_pipeline(vk, VK_NULL_HANDLE, shader, rc->pipeline_layout, NULL, &rc->pipeline) !=
-	    VK_SUCCESS)
+	if (render_fullscreen_init(vk, &rc->pass, vert, frag, rc->set_layout, format, destination_layout) != VK_SUCCESS)
 		goto fail;
 	VkDescriptorPoolSize sizes[] = {
 	    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5 * count},
-	    {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, count},
 	    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, count},
 	};
-	if (!vk_init_descriptor_pool(vk, sizes, 3, count, &rc->descriptors))
+	if (!vk_init_descriptor_pool(vk, sizes, 2, count, &rc->descriptors))
 		goto fail;
 	VkDeviceSize map_bytes = (VkDeviceSize)map_size * map_size * 4 * sizeof(float);
 	if (!create_buffer(rc, &rc->map_upload, 2 * map_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT))
@@ -188,9 +186,10 @@ render_camera_create(struct vk_bundle *vk,
 	    (VkDeviceSize)((camera_extent.width + 3) / 4) * ((camera_extent.height + 3) / 4) * 8;
 	for (uint32_t i = 0; i < count; i++) {
 		struct camera_slot *slot = &rc->slots[i];
-		slot->target = images[i];
-		if (!create_image(rc, &slot->application, extent, format,
-		                  VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT))
+		slot->source = sources[i];
+		if (sources[i] == VK_NULL_HANDLE ||
+		    render_fullscreen_framebuffer(vk, &rc->pass, destinations[i], extent, &slot->framebuffer) !=
+		        VK_SUCCESS)
 			goto fail;
 		for (uint32_t eye = 0; eye < 2; eye++) {
 			if (!create_image(rc, &slot->cameras[eye], camera_extent, VK_FORMAT_BC4_UNORM_BLOCK,
@@ -206,8 +205,7 @@ render_camera_create(struct vk_bundle *vk,
 		    vk_cmd_pool_create_cmd_buffer(vk, &rc->pool, &slot->commands) != VK_SUCCESS ||
 		    !vk_allocate_descriptor_sets(vk, rc->descriptors, 1, &rc->set_layout, &slot->descriptors))
 			goto fail;
-		VkDescriptorImageInfo app = {rc->sampler, slot->application.view,
-		                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+		VkDescriptorImageInfo app = {rc->sampler, source_views[i], source_layout};
 		VkDescriptorImageInfo camera[2], mapping[2];
 		for (uint32_t eye = 0; eye < 2; eye++) {
 			camera[eye] = (VkDescriptorImageInfo){rc->sampler, slot->cameras[eye].view,
@@ -215,7 +213,6 @@ render_camera_create(struct vk_bundle *vk,
 			mapping[eye] = (VkDescriptorImageInfo){rc->sampler, rc->maps[eye].view,
 			                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 		}
-		VkDescriptorImageInfo target = {VK_NULL_HANDLE, views[i], VK_IMAGE_LAYOUT_GENERAL};
 		VkDescriptorBufferInfo params = {slot->params.buffer, 0, sizeof(struct render_camera_params)};
 		VkWriteDescriptorSet writes[] = {
 		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -240,16 +237,10 @@ render_camera_create(struct vk_bundle *vk,
 		     .dstSet = slot->descriptors,
 		     .dstBinding = 3,
 		     .descriptorCount = 1,
-		     .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-		     .pImageInfo = &target},
-		    {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-		     .dstSet = slot->descriptors,
-		     .dstBinding = 4,
-		     .descriptorCount = 1,
 		     .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 		     .pBufferInfo = &params},
 		};
-		vk->vkUpdateDescriptorSets(vk->device, 5, writes, 0, NULL);
+		vk->vkUpdateDescriptorSets(vk->device, 4, writes, 0, NULL);
 	}
 	return rc;
 fail:
@@ -260,7 +251,6 @@ fail:
 VkResult
 render_camera_submit(struct render_camera *rc,
                      uint32_t index,
-                     VkImageLayout layout,
                      VkSemaphore render_complete,
                      struct xrt_frame *frames[2],
                      const struct render_camera_params *params,
@@ -310,29 +300,14 @@ render_camera_submit(struct render_camera *rc,
 	}
 	for (uint32_t eye = 0; eye < 2; eye++)
 		upload(rc, cmd, slot->upload[eye].buffer, 0, slot->cameras[eye].image, rc->camera_extent);
-	// Copy before overwriting: the application image and camera output must
-	// never alias in a shader invocation. The copy belongs to this output slot.
-	barrier(rc, cmd, slot->target, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_MEMORY_WRITE_BIT,
-	        VK_ACCESS_TRANSFER_READ_BIT);
-	barrier(rc, cmd, slot->application.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
-	        VK_ACCESS_TRANSFER_WRITE_BIT);
-	VkImageCopy copy = {
-	    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-	    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-	    .extent = {rc->extent.width, rc->extent.height, 1},
-	};
-	vk->vkCmdCopyImage(cmd, slot->target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, slot->application.image,
-	                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-	barrier(rc, cmd, slot->application.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-	        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-	barrier(rc, cmd, slot->target, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-	        VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_SHADER_WRITE_BIT);
-	vk->vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, rc->pipeline);
-	vk->vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, rc->pipeline_layout, 0, 1, &slot->descriptors,
-	                            0, NULL);
-	vk->vkCmdDispatch(cmd, (rc->extent.width + 7) / 8, (rc->extent.height + 7) / 8, 1);
-	barrier(rc, cmd, slot->target, VK_IMAGE_LAYOUT_GENERAL, layout, VK_ACCESS_SHADER_WRITE_BIT,
-	        VK_ACCESS_MEMORY_READ_BIT);
+	// The application is sampled in place from the separate source image; the
+	// destination is only a render target. Order earlier writes before sampling
+	// and this read before the source is next rendered.
+	barrier(rc, cmd, slot->source, rc->source_layout, rc->source_layout, VK_ACCESS_MEMORY_WRITE_BIT,
+	        VK_ACCESS_SHADER_READ_BIT);
+	render_fullscreen_draw(vk, &rc->pass, cmd, slot->framebuffer, rc->extent, slot->descriptors);
+	barrier(rc, cmd, slot->source, rc->source_layout, rc->source_layout, VK_ACCESS_SHADER_READ_BIT,
+	        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
 	ret = vk->vkEndCommandBuffer(cmd);
 	if (ret != VK_SUCCESS)
 		goto done;
@@ -404,7 +379,8 @@ render_camera_destroy(struct render_camera **ptr)
 		struct camera_slot *slot = &rc->slots[i];
 		if (slot->fence)
 			vk->vkDestroyFence(vk->device, slot->fence, NULL);
-		free_image(vk, &slot->application);
+		if (slot->framebuffer)
+			vk->vkDestroyFramebuffer(vk->device, slot->framebuffer, NULL);
 		for (uint32_t eye = 0; eye < 2; eye++) {
 			free_image(vk, &slot->cameras[eye]);
 			render_buffer_fini(vk, &slot->upload[eye]);
@@ -413,10 +389,7 @@ render_camera_destroy(struct render_camera **ptr)
 	}
 	if (rc->pool_ready)
 		vk_cmd_pool_destroy(vk, &rc->pool);
-	if (rc->pipeline)
-		vk->vkDestroyPipeline(vk->device, rc->pipeline, NULL);
-	if (rc->pipeline_layout)
-		vk->vkDestroyPipelineLayout(vk->device, rc->pipeline_layout, NULL);
+	render_fullscreen_fini(vk, &rc->pass);
 	if (rc->descriptors)
 		vk->vkDestroyDescriptorPool(vk->device, rc->descriptors, NULL);
 	if (rc->set_layout)

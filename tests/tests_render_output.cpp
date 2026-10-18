@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "render_compute_test_fixture.h"
 #include "render/render_output.h"
+#include "fullscreen.vert.h"
+#include "output.frag.h"
 
 namespace {
 struct OutputFixture
@@ -9,29 +11,48 @@ struct OutputFixture
 	Fixture f;
 	std::array<Image, 3> destinations{};
 	std::array<VkSemaphore, 3> complete{};
+	VkShaderModule vert{}, frag{};
 	render_output *output{};
+	VkShaderModule
+	module(const uint32_t *code, size_t size)
+	{
+		VkShaderModuleCreateInfo info{};
+		info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		info.codeSize = size;
+		info.pCode = code;
+		VkShaderModule result{};
+		REQUIRE(f.vk().vkCreateShaderModule(f.vk().device, &info, nullptr, &result) == VK_SUCCESS);
+		return result;
+	}
 	void
 	init(VkFormat format = VK_FORMAT_R8G8B8A8_UNORM)
 	{
 		f.init(67, 39);
 		auto &vk = f.vk();
-		VkImage images[3];
+		vert = module(fullscreen_vert, sizeof(fullscreen_vert));
+		frag = module(output_frag, sizeof(output_frag));
+		VkImageView views[3];
 		for (unsigned i = 0; i < 3; i++) {
 			auto &dst = destinations[i];
 			dst.extent = {2 * f.width, f.height};
-			// Deliberately exclude STORAGE and SAMPLED from presentation images.
+			// Presentation images are render targets only: no STORAGE, SAMPLED or
+			// TRANSFER_DST. TRANSFER_SRC is solely for this test's readback.
 			REQUIRE(vk_create_image_simple(&vk, dst.extent, format,
 			                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-			                                   VK_IMAGE_USAGE_TRANSFER_DST_BIT |
 			                                   VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
 			                               &dst.memory, &dst.image) == VK_SUCCESS);
-			images[i] = dst.image;
+			REQUIRE(vk_create_view(&vk, dst.image, VK_IMAGE_VIEW_TYPE_2D, format, color_range, &dst.view) ==
+			        VK_SUCCESS);
+			views[i] = dst.view;
 			VkSemaphoreCreateInfo info{};
 			info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 			REQUIRE(vk.vkCreateSemaphore(vk.device, &info, nullptr, &complete[i]) == VK_SUCCESS);
 		}
-		output = render_output_create(&vk, vk.main_queue, format, {2 * f.width, f.height},
-		                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, images, 3);
+		// TRANSFER_SRC lets the test read the private distortion result directly.
+		output = render_output_create(&vk, vk.main_queue, vert, frag, format, {2 * f.width, f.height},
+		                              VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+		                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+		                              views, VK_IMAGE_LAYOUT_GENERAL, 3);
 		REQUIRE(output != nullptr);
 	}
 	Image
@@ -121,11 +142,17 @@ struct OutputFixture
 		for (unsigned i = 0; i < 3; i++) {
 			if (complete[i])
 				f.vk().vkDestroySemaphore(f.vk().device, complete[i], nullptr);
+			if (destinations[i].view)
+				f.vk().vkDestroyImageView(f.vk().device, destinations[i].view, nullptr);
 			if (destinations[i].image)
 				f.vk().vkDestroyImage(f.vk().device, destinations[i].image, nullptr);
 			if (destinations[i].memory)
 				f.vk().vkFreeMemory(f.vk().device, destinations[i].memory, nullptr);
 		}
+		if (vert)
+			f.vk().vkDestroyShaderModule(f.vk().device, vert, nullptr);
+		if (frag)
+			f.vk().vkDestroyShaderModule(f.vk().device, frag, nullptr);
 	}
 };
 } // namespace
@@ -155,13 +182,11 @@ TEST_CASE("Output submission failure leaves the producer signal consumable", "[a
 			}
 		} restore{of.f.vk(), of.f.vk().vkQueueSubmit};
 		of.f.vk().vkQueueSubmit = output_submit_oom;
-		CHECK(render_output_copy(of.output, 0, of.complete[0], VK_IMAGE_LAYOUT_GENERAL) ==
-		      VK_ERROR_OUT_OF_HOST_MEMORY);
+		CHECK(render_output_present(of.output, 0, of.complete[0]) == VK_ERROR_OUT_OF_HOST_MEMORY);
 	}
 	of.consume(0);
 	// A failed output target must be retired, even for a retryable queue OOM.
-	CHECK(render_output_copy(of.output, 0, of.complete[0], VK_IMAGE_LAYOUT_GENERAL) ==
-	      VK_ERROR_INITIALIZATION_FAILED);
+	CHECK(render_output_present(of.output, 0, of.complete[0]) == VK_ERROR_INITIALIZATION_FAILED);
 	CHECK(render_output_destroy(&of.output) == VK_SUCCESS);
 	CHECK(of.output == nullptr);
 }
@@ -202,8 +227,7 @@ TEST_CASE("Private compute output preserves distortion pixels and alpha", "[aux_
 				f.run(pipeline, variants[0], 1, true);
 				auto expected = f.snapshot();
 				of.signal(slot);
-				REQUIRE(render_output_copy(of.output, slot, of.complete[slot],
-				                           VK_IMAGE_LAYOUT_GENERAL) == VK_SUCCESS);
+				REQUIRE(render_output_present(of.output, slot, of.complete[slot]) == VK_SUCCESS);
 				of.consume(slot);
 				CHECK(of.pixels(of.destinations[slot]) == expected);
 			}
@@ -258,8 +282,8 @@ TEST_CASE("Private output queues independent slots and retains blocked resources
 	vk_queue_unlock(vk.main_queue);
 	REQUIRE(ret == VK_SUCCESS);
 	for (unsigned i = 0; i < 3; i++)
-		REQUIRE(render_output_copy(of.output, i, of.complete[i], VK_IMAGE_LAYOUT_GENERAL) == VK_SUCCESS);
-	CHECK(render_output_copy(of.output, 0, of.complete[0], VK_IMAGE_LAYOUT_GENERAL) == VK_TIMEOUT);
+		REQUIRE(render_output_present(of.output, i, of.complete[i]) == VK_SUCCESS);
+	CHECK(render_output_present(of.output, 0, of.complete[0]) == VK_TIMEOUT);
 	auto *retained = of.output;
 	CHECK(render_output_destroy(&of.output) == VK_TIMEOUT);
 	CHECK(of.output == retained);

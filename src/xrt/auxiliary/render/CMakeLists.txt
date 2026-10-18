@@ -14,6 +14,8 @@ add_library(
 	render_output.c
 	render_output.h
 	render_compute.c
+	render_fullscreen.c
+	render_fullscreen.h
 	render_distortion.c
 	render_gfx.c
 	render_interface.h

@@ -19,9 +19,14 @@ struct comp_vulkan_passthrough
 };
 
 struct comp_vulkan_passthrough *
-comp_vulkan_passthrough_create(struct comp_target *ct, struct vk_bundle_queue *queue, bool is_service)
+comp_vulkan_passthrough_create(struct comp_target *ct,
+                               struct vk_bundle_queue *queue,
+                               bool is_service,
+                               const VkImageView *destinations,
+                               VkImageLayout destination_layout)
 {
-	if (ct->semaphores.render_complete_is_timeline || ct->image_count > XRT_MAX_SWAPCHAIN_IMAGES)
+	if (ct->semaphores.render_complete_is_timeline || ct->image_count > XRT_MAX_SWAPCHAIN_IMAGES ||
+	    destinations == NULL)
 		return NULL;
 	struct comp_vulkan_passthrough *pt = calloc(1, sizeof(*pt));
 	if (pt == NULL)
@@ -34,12 +39,13 @@ comp_vulkan_passthrough_create(struct comp_target *ct, struct vk_bundle_queue *q
 	VkImageView views[XRT_MAX_SWAPCHAIN_IMAGES];
 	for (uint32_t i = 0; i < ct->image_count; i++) {
 		images[i] = ct->images[i].handle;
-		views[i] = ct->images[i].storage_view;
+		views[i] = ct->images[i].view;
 	}
 	const float *maps[2] = {comp_psvr2_passthrough_map(pt->camera, 0), comp_psvr2_passthrough_map(pt->camera, 1)};
-	pt->renderer = render_camera_create(&ct->c->base.vk, queue, ct->c->shaders.camera_comp, ct->format,
-	                                    (VkExtent2D){ct->width, ct->height}, (VkExtent2D){1024, 1016}, 512, maps,
-	                                    images, views, ct->image_count);
+	pt->renderer =
+	    render_camera_create(&ct->c->base.vk, queue, ct->c->shaders.fullscreen_vert, ct->c->shaders.camera_frag,
+	                         ct->format, (VkExtent2D){ct->width, ct->height}, (VkExtent2D){1024, 1016}, 512, maps,
+	                         images, views, ct->final_layout, destinations, destination_layout, ct->image_count);
 	if (pt->renderer == NULL)
 		goto fail;
 	if (u_timing_trace_enabled()) {
@@ -69,9 +75,8 @@ comp_vulkan_passthrough_compose(struct comp_vulkan_passthrough *pt, uint32_t ind
 		return VK_NOT_READY;
 	uint64_t snapshot = pt->timing ? os_monotonic_get_ns() : 0;
 	bool submitted = false;
-	VkResult ret =
-	    render_camera_submit(pt->renderer, index, pt->ct->final_layout, pt->ct->semaphores.render_complete,
-	                         sample.frames, &sample.params, &submitted);
+	VkResult ret = render_camera_submit(pt->renderer, index, pt->ct->semaphores.render_complete, sample.frames,
+	                                    &sample.params, &submitted);
 	comp_psvr2_passthrough_sample_release(&sample);
 	if (ret != VK_SUCCESS && (submitted || ret == VK_TIMEOUT || ret == VK_ERROR_DEVICE_LOST))
 		*present_ready = false;

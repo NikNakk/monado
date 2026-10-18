@@ -21,32 +21,41 @@ struct render_camera_params
 };
 struct render_camera;
 
-//! All images belong to the caller and must outlive this renderer. The maps
-//! contain static UVs in xy and optical tangent rays in zw, one float4 per texel.
+//! All images belong to the caller and must outlive this renderer. Sources hold
+//! the composited application (premultiplied alpha), are sampled in
+//! source_layout and need SAMPLED usage. Destinations are only rendered to
+//! (COLOR_ATTACHMENT usage) and finish in destination_layout. Sources and
+//! destinations must not alias. The maps contain static UVs in xy and optical
+//! tangent rays in zw, one float4 per texel. vert/frag are the shared
+//! full-screen and camera shaders.
 struct render_camera *
 render_camera_create(struct vk_bundle *vk,
                      struct vk_bundle_queue *queue,
-                     VkShaderModule shader,
+                     VkShaderModule vert,
+                     VkShaderModule frag,
                      VkFormat format,
                      VkExtent2D extent,
                      VkExtent2D camera_extent,
                      uint32_t map_size,
                      const float *maps[2],
-                     const VkImage *images,
-                     const VkImageView *views,
+                     const VkImage *sources,
+                     const VkImageView *source_views,
+                     VkImageLayout source_layout,
+                     const VkImageView *destinations,
+                     VkImageLayout destination_layout,
                      uint32_t count);
 
 //! Upload a CPU snapshot and queue camera composition after render_complete.
 //! The binary semaphore is consumed and re-signalled on the GPU, preserving the
 //! caller's existing present wait. Per-image storage is reused only after its
 //! previous submission completes; normal submissions never wait for this frame.
-//! The image starts and finishes in layout. The caller serializes these calls.
-//! OOM leaves synchronization unchanged. Other submission failures require
-//! target retirement because device state may be uncertain.
+//! The source stays in its layout; previous destination contents are discarded.
+//! The caller serializes these calls. OOM leaves synchronization unchanged.
+//! Other submission failures require target retirement because device state
+//! may be uncertain.
 VkResult
 render_camera_submit(struct render_camera *rc,
                      uint32_t index,
-                     VkImageLayout layout,
                      VkSemaphore render_complete,
                      struct xrt_frame *frames[2],
                      const struct render_camera_params *params,

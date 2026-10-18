@@ -1,7 +1,8 @@
 // Copyright 2026, Nick Kennedy
 // SPDX-License-Identifier: BSL-1.0
-/* Keep shader-write usage off presentation images, using only Vulkan. */
+/* Keep shader-write and transfer usage off presentation images, using only Vulkan. */
 #include "render_output.h"
+#include "render/render_fullscreen.h"
 #include "vk/vk_cmd_pool.h"
 #include <stdlib.h>
 
@@ -10,9 +11,11 @@ static const VkImageSubresourceRange color_range = {VK_IMAGE_ASPECT_COLOR_BIT, 0
 
 struct output_slot
 {
-	VkImage image, destination;
+	VkImage image;
 	VkDeviceMemory memory;
 	VkImageView view;
+	VkFramebuffer framebuffer;
+	VkDescriptorSet descriptors;
 	VkCommandBuffer commands;
 	VkFence fence;
 	bool pending;
@@ -26,15 +29,22 @@ struct render_output
 	VkExtent2D extent;
 	uint32_t count;
 	struct output_slot *slots;
+	struct render_fullscreen pass;
+	VkSampler sampler;
+	VkDescriptorSetLayout set_layout;
+	VkDescriptorPool descriptors;
 };
 
 struct render_output *
 render_output_create(struct vk_bundle *vk,
                      struct vk_bundle_queue *queue,
+                     VkShaderModule vert,
+                     VkShaderModule frag,
                      VkFormat format,
                      VkExtent2D extent,
                      VkImageUsageFlags render_usage,
-                     const VkImage *destinations,
+                     const VkImageView *destinations,
+                     VkImageLayout destination_layout,
                      uint32_t count)
 {
 	if (count == 0 || count > XRT_MAX_SWAPCHAIN_IMAGES || extent.width == 0 || extent.height == 0 ||
@@ -53,15 +63,44 @@ render_output_create(struct vk_bundle *vk,
 	    VK_SUCCESS)
 		goto fail;
 	output->pool_ready = true;
+	if (vk_create_sampler(vk, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, &output->sampler) != VK_SUCCESS)
+		goto fail;
+	VkDescriptorSetLayoutBinding binding = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+	                                        VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
+	VkDescriptorSetLayoutCreateInfo set_info = {
+	    .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+	    .bindingCount = 1,
+	    .pBindings = &binding,
+	};
+	if (vk->vkCreateDescriptorSetLayout(vk->device, &set_info, NULL, &output->set_layout) != VK_SUCCESS)
+		goto fail;
+	if (render_fullscreen_init(vk, &output->pass, vert, frag, output->set_layout, format, destination_layout) !=
+	    VK_SUCCESS)
+		goto fail;
+	VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, count};
+	if (!vk_init_descriptor_pool(vk, &size, 1, count, &output->descriptors))
+		goto fail;
 	for (uint32_t i = 0; i < count; i++) {
 		struct output_slot *slot = &output->slots[i];
-		slot->destination = destinations[i];
-		if (slot->destination == VK_NULL_HANDLE ||
-		    vk_create_image_simple(vk, extent, format, render_usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-		                           &slot->memory, &slot->image) != VK_SUCCESS ||
+		if (destinations[i] == VK_NULL_HANDLE ||
+		    vk_create_image_simple(vk, extent, format, render_usage | VK_IMAGE_USAGE_SAMPLED_BIT, &slot->memory,
+		                           &slot->image) != VK_SUCCESS ||
 		    vk_create_view(vk, slot->image, VK_IMAGE_VIEW_TYPE_2D, format, color_range, &slot->view) !=
-		        VK_SUCCESS)
+		        VK_SUCCESS ||
+		    render_fullscreen_framebuffer(vk, &output->pass, destinations[i], extent, &slot->framebuffer) !=
+		        VK_SUCCESS ||
+		    !vk_allocate_descriptor_sets(vk, output->descriptors, 1, &output->set_layout, &slot->descriptors))
 			goto fail;
+		VkDescriptorImageInfo source = {output->sampler, slot->view, VK_IMAGE_LAYOUT_GENERAL};
+		VkWriteDescriptorSet write = {
+		    .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		    .dstSet = slot->descriptors,
+		    .dstBinding = 0,
+		    .descriptorCount = 1,
+		    .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+		    .pImageInfo = &source,
+		};
+		vk->vkUpdateDescriptorSets(vk->device, 1, &write, 0, NULL);
 		VkFenceCreateInfo fence = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
 		if (vk->vkCreateFence(vk->device, &fence, NULL, &slot->fence) != VK_SUCCESS)
 			goto fail;
@@ -106,7 +145,7 @@ barrier(struct render_output *output,
 }
 
 VkResult
-render_output_copy(struct render_output *output, uint32_t index, VkSemaphore complete, VkImageLayout destination_layout)
+render_output_present(struct render_output *output, uint32_t index, VkSemaphore complete)
 {
 	if (index >= output->count || complete == VK_NULL_HANDLE || output->failed)
 		return VK_ERROR_INITIALIZATION_FAILED;
@@ -127,21 +166,13 @@ render_output_copy(struct render_output *output, uint32_t index, VkSemaphore com
 	VkResult ret = vk->vkBeginCommandBuffer(cmd, &begin);
 	if (ret != VK_SUCCESS)
 		goto done;
-	barrier(output, cmd, slot->image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-	        VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-	barrier(output, cmd, slot->destination, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
-	        VK_ACCESS_TRANSFER_WRITE_BIT);
-	VkImageCopy copy = {
-	    .srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-	    .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-	    .extent = {output->extent.width, output->extent.height, 1},
-	};
-	vk->vkCmdCopyImage(cmd, slot->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, slot->destination,
-	                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-	barrier(output, cmd, slot->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
-	        VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
-	barrier(output, cmd, slot->destination, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, destination_layout,
-	        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT);
+	// The private image stays in GENERAL; order earlier shader/transfer writes
+	// before sampling, and this read before the next frame's writes.
+	barrier(output, cmd, slot->image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_MEMORY_WRITE_BIT,
+	        VK_ACCESS_SHADER_READ_BIT);
+	render_fullscreen_draw(vk, &output->pass, cmd, slot->framebuffer, output->extent, slot->descriptors);
+	barrier(output, cmd, slot->image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_READ_BIT,
+	        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
 	ret = vk->vkEndCommandBuffer(cmd);
 	if (ret != VK_SUCCESS)
 		goto done;
@@ -194,6 +225,8 @@ render_output_destroy(struct render_output **ptr)
 		struct output_slot *slot = &output->slots[i];
 		if (slot->fence)
 			vk->vkDestroyFence(vk->device, slot->fence, NULL);
+		if (slot->framebuffer)
+			vk->vkDestroyFramebuffer(vk->device, slot->framebuffer, NULL);
 		if (slot->view)
 			vk->vkDestroyImageView(vk->device, slot->view, NULL);
 		if (slot->image)
@@ -203,6 +236,13 @@ render_output_destroy(struct render_output **ptr)
 	}
 	if (output->pool_ready)
 		vk_cmd_pool_destroy(vk, &output->pool);
+	render_fullscreen_fini(vk, &output->pass);
+	if (output->descriptors)
+		vk->vkDestroyDescriptorPool(vk->device, output->descriptors, NULL);
+	if (output->set_layout)
+		vk->vkDestroyDescriptorSetLayout(vk->device, output->set_layout, NULL);
+	if (output->sampler)
+		vk->vkDestroySampler(vk->device, output->sampler, NULL);
 	free(output->slots);
 	free(output);
 	*ptr = NULL;

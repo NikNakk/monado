@@ -29,7 +29,9 @@
 #include "blit.comp.h"
 #include "blit_ms.comp.h"
 #include "clear.comp.h"
-#include "camera.comp.h"
+#include "camera.frag.h"
+#include "fullscreen.vert.h"
+#include "output.frag.h"
 #include "layer.comp.h"
 #include "distortion.comp.h"
 #include "layer_cylinder.frag.h"
@@ -108,7 +110,9 @@ render_shaders_load(struct render_shaders *s, struct vk_bundle *vk)
 	LOAD(blit_ms_comp);
 
 	LOAD(clear_comp);
-	LOAD(camera_comp);
+	LOAD(camera_frag);
+	LOAD(fullscreen_vert);
+	LOAD(output_frag);
 
 	LOAD(layer_comp);
 
@@ -137,7 +141,9 @@ render_shaders_fini(struct render_shaders *s, struct vk_bundle *vk)
 	D(ShaderModule, s->blit_comp);
 	D(ShaderModule, s->blit_ms_comp);
 	D(ShaderModule, s->clear_comp);
-	D(ShaderModule, s->camera_comp);
+	D(ShaderModule, s->camera_frag);
+	D(ShaderModule, s->fullscreen_vert);
+	D(ShaderModule, s->output_frag);
 	D(ShaderModule, s->distortion_comp);
 	D(ShaderModule, s->layer_comp);
 	D(ShaderModule, s->mesh_vert);
