@@ -103,6 +103,12 @@ oxr_session_populate_vk(struct oxr_logger *log,
 		external_fence_fd_enabled = true;
 		external_semaphore_fd_enabled = true;
 	}
+#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+	// The legacy extension list requires VK_EXT_metal_objects, even when
+	// Vulkan objects were created by the application rather than enable2.
+	if (sys->inst->extensions.KHR_vulkan_enable) {
+		metal_objects_enabled = true;
+	}
 #endif
 
 	if (!timeline_semaphore_enabled &&
