@@ -7,6 +7,12 @@
 
 #version 460
 
+#extension GL_GOOGLE_include_directive : require
+
+// Has to match RENDER_BINDING_LAYER_PROJECTION_FOVEATION in render_interface.h.
+#define FOVEATION_BINDING 2
+#include "foveation.inc.glsl"
+
 layout (binding = 0, std140) uniform Config
 {
 	vec4 post_transform;
@@ -24,6 +30,11 @@ layout (location = 0) out vec4 out_color;
 
 void main ()
 {
-	out_color = texture(image, uv);
+	vec2 image_uv = uv;
+	if (foveation_enabled()) {
+		image_uv = transform_uv_foveation(image_uv);
+	}
+
+	out_color = texture(image, image_uv);
 	out_color = clamp(out_color * ubo.color_scale + ubo.color_bias, 0.0, 1.0);
 }

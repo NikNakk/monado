@@ -101,6 +101,12 @@ extern "C" {
 //! The binding that the shared layer fragment shader has its source on.
 #define RENDER_BINDING_LAYER_SHARED_SRC 1
 
+//! The binding of the projection layer fragment shader's foveation map.
+#define RENDER_BINDING_LAYER_PROJECTION_FOVEATION 2
+
+//! Number of std140 vec4s that hold one axis of a foveation map.
+#define RENDER_FOVEATION_BOUNDARY_VEC4_COUNT ((XRT_FOVEATION_MAP_BOUNDARY_COUNT + 3) / 4)
+
 /*!
  * Default inset blend edge width for layer projection edge blending.
  * Must match the default in layer.comp (k_inset_blend_edge).
@@ -419,6 +425,12 @@ struct render_resources
 		 */
 		struct render_buffer shared_ubo;
 
+		/*!
+		 * A zeroed @ref render_gfx_foveation_ubo_data, bound for every
+		 * graphics draw whose source has no foveation map.
+		 */
+		struct render_buffer foveation_disabled_ubo;
+
 		struct
 		{
 			struct
@@ -439,6 +451,9 @@ struct render_resources
 
 		//! The binding index for the UBO.
 		uint32_t ubo_binding;
+
+		//! The binding index for the foveation map UBO.
+		uint32_t foveation_binding;
 
 		//! Descriptor set layout for mesh distortion.
 		VkDescriptorSetLayout descriptor_set_layout;
@@ -988,6 +1003,44 @@ struct render_gfx_mesh_ubo_data
 };
 
 /*!
+ * Foveation map for one graphics draw (mesh distortion or projection layer),
+ * see foveation.inc.glsl. Larger than @ref RENDER_ALWAYS_SAFE_UBO_ALIGNMENT,
+ * so it has its own binding rather than joining the draw's UBO.
+ *
+ * @relates render_gfx
+ */
+struct render_gfx_foveation_ubo_data
+{
+	uint32_t enabled;
+	uint32_t boundary_count;
+	uint32_t _pad[2];
+
+	//! Boundaries packed as std140 vec4s.
+	struct
+	{
+		float v[4];
+	} x[RENDER_FOVEATION_BOUNDARY_VEC4_COUNT], y[RENDER_FOVEATION_BOUNDARY_VEC4_COUNT];
+};
+
+/*!
+ * Maximum number of foveated draws per graphics frame and view: the mesh
+ * distortion draw plus up to @ref RENDER_MAX_FOVEATED_LAYERS projection layers
+ * in the layer squasher, as on the compute path.
+ */
+#define RENDER_GFX_MAX_FOVEATED_DRAWS_PER_VIEW (RENDER_MAX_FOVEATED_LAYERS + 1)
+
+/*!
+ * True if a map's sample count is the one the shaders read.
+ *
+ * @relates render_gfx
+ */
+static inline bool
+render_gfx_foveation_map_is_valid(const struct xrt_foveation_map_data *map)
+{
+	return map->boundary_count == XRT_FOVEATION_MAP_BOUNDARY_COUNT;
+}
+
+/*!
  * UBO data that is sent to the layer cylinder shader.
  *
  * @relates render_gfx
@@ -1065,11 +1118,15 @@ struct render_gfx_layer_quad_data
  * descriptor pool of @ref render_resources, both of which will be reset once
  * closed, so don't save any reference to these objects beyond the frame.
  *
+ * @p src_foveation may be NULL. When it is enabled the caller has checked it
+ * with @ref render_gfx_foveation_map_is_valid.
+ *
  * @public @memberof render_gfx
  */
 XRT_CHECK_RESULT VkResult
 render_gfx_mesh_alloc_and_write(struct render_gfx *render,
                                 const struct render_gfx_mesh_ubo_data *data,
+                                const struct xrt_foveation_map_data *src_foveation,
                                 VkSampler src_sampler,
                                 VkImageView src_image_view,
                                 VkDescriptorSet *out_descriptor_set);
@@ -1103,12 +1160,14 @@ render_gfx_layer_equirect2_alloc_and_write(struct render_gfx *render,
 /*!
  * Allocate and write a UBO and descriptor_set to be used for projection layer
  * rendering, the content of @p data need to be valid at the time of the call.
+ * @p src_foveation as for @ref render_gfx_mesh_alloc_and_write.
  *
  * @public @memberof render_gfx
  */
 XRT_CHECK_RESULT VkResult
 render_gfx_layer_projection_alloc_and_write(struct render_gfx *render,
                                             const struct render_gfx_layer_projection_data *data,
+                                            const struct xrt_foveation_map_data *src_foveation,
                                             VkSampler src_sampler,
                                             VkImageView src_image_view,
                                             VkDescriptorSet *out_descriptor_set);
@@ -1465,12 +1524,6 @@ struct render_compute_layer_ubo_data
 	} layers[RENDER_MAX_LAYERS];
 };
 
-/*!
- * UBO data that is sent to the compute distortion shaders.
- *
- * @relates render_compute
- */
-#define RENDER_FOVEATION_BOUNDARY_VEC4_COUNT ((XRT_FOVEATION_MAP_BOUNDARY_COUNT + 3) / 4)
 
 /*!
  * Number of projection layers per layer-squasher run that can carry an
@@ -1499,6 +1552,11 @@ struct render_compute_layer_foveation_ubo_data
 	    y[RENDER_MAX_FOVEATED_LAYERS * RENDER_FOVEATION_BOUNDARY_VEC4_COUNT];
 };
 
+/*!
+ * UBO data that is sent to the compute distortion shaders.
+ *
+ * @relates render_compute
+ */
 struct render_compute_distortion_ubo_data
 {
 	struct render_viewport_data views[XRT_MAX_VIEWS];
