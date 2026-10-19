@@ -177,3 +177,10 @@ The constrained launch gate stays intact. Next: strict Vulkan request/error
 handling and the raw-syscall translation audit, followed by actual Valve Lua
 allocator lifecycle validation once the guest-execution boundary is settled.
 No FDM implementation or extension advertisement was added.
+
+## Strict Vulkan and SVC follow-up
+
+The [strict Vulkan/SVC report](macos-alyx-strict-vulkan.md) records successful
+strict initialization/device tests on both drivers and a conservative SVC
+execution guard. The private-memory ABI translation boundary now needs user
+clarification before any Valve Lua or game code is executed.

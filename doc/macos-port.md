@@ -13,7 +13,9 @@ interop. ARM64 binaries are now downloaded: the [20 October read-only audit](mac
 identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
 branch patch. The [constrained-host follow-up](macos-alyx-constrained-host.md)
 adds tested callback substitution and a preflight-only build. Managed thread
-lifetime fixtures now pass; actual guest ABI and syscall handling remain pending. Actual game calls remain unobserved. No installed-runtime change
+lifetime fixtures now pass. [Strict Vulkan tests](macos-alyx-strict-vulkan.md)
+also pass on both drivers; the private-memory ABI translation boundary needs
+user clarification before executing Valve code. Actual game calls remain unobserved. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

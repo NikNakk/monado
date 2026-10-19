@@ -1,0 +1,101 @@
+From e97ae5246b4e0b076bd95a2b71b9ba353fe8fc51 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 01:16:07 +0200
+Subject: [PATCH] test: verify raw SVC guard before guest mapping
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile          |  6 +++++
+ NativeARM/host/XRIZER.md         | 19 ++++++++++++++++
+ NativeARM/host/tests/svc_guard.c | 38 ++++++++++++++++++++++++++++++++
+ 3 files changed, 63 insertions(+)
+ create mode 100644 NativeARM/host/tests/svc_guard.c
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index ab50baa..4e88c0b 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -108,3 +108,9 @@ check-guest-threads: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
+ 	KL_GUEST_THREAD_TRACKING=1 python3 -c 'import subprocess,sys; subprocess.run([sys.argv[1]], check=True, timeout=30)' $(OUT)/check-guest-threads
+ 
+ .PHONY: check-guest-threads
++
++check-svc-guard: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/check-svc-guard tests/svc_guard.c $^ $(LDLIBS) -I.
++	$(OUT)/check-svc-guard
++
++.PHONY: check-svc-guard
+diff --git a/NativeARM/host/XRIZER.md b/NativeARM/host/XRIZER.md
+index 7da2ad7..ff1a296 100644
+--- a/NativeARM/host/XRIZER.md
++++ b/NativeARM/host/XRIZER.md
+@@ -99,3 +99,22 @@ plus live/dead signal-zero queries and
+ Actual game glibc unwind/cancellation ABI, unmanaged guest callbacks, async
+ cancellation, fork, raw SVC/clone/clear_child_tid and nonzero-signal semantics
+ are unverified. See Klepton's `GUEST_THREADS.md` for the scope of this prototype.
++
++### Raw SVC execution guard fixture
++
++With the matching Klepton `KL_SVC_POLICY=reject` implementation:
++
++```sh
++make -C NativeARM/host KL=/private/tmp/alyx-klepton \
++  OUT=/private/tmp/alyx-constrained-host-build HOST_MODE=constrained \
++  VR_RUNTIME=xrizer check-svc-guard
++```
++
++Owned ELF fixtures verify conservative refusal of SVC candidates before guest
++mapping, malformed executable ranges/headers, truncated files, invalid policy
++and pretranslated-image bypass. No guest instructions execute. This guard is
++not syscall emulation and does not resolve TLS/x18 ABI translation permissions.
++The constrained host's unconditional execution gate remains in place.
++Klepton's separate `KL_VK_STRICT=1` mode now preserves graphics requests and
++returns driver errors rather than using its legacy feature repair/stub paths;
++see `VULKAN_BACKENDS.md` in that checkout for native driver tests.
+diff --git a/NativeARM/host/tests/svc_guard.c b/NativeARM/host/tests/svc_guard.c
+new file mode 100644
+index 0000000..ef4ca3e
+--- /dev/null
++++ b/NativeARM/host/tests/svc_guard.c
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++// Small host-owned ELF files, no constructors or guest code execution.
++#include "klepton.h"
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <stdint.h>
++#include <string.h>
++#include <unistd.h>
++#include <fcntl.h>
++typedef struct {uint8_t ident[16];uint16_t type,machine;uint32_t version;uint64_t entry,phoff,shoff;uint32_t flags;uint16_t ehsize,phsize,phnum,shsize,shnum,shstr;} ehdr;
++typedef struct {uint32_t type,flags;uint64_t offset,va,pa,filesz,memsz,align;} phdr;
++static void check(uint32_t opcode,int malformed,const char *expect){
++ uint8_t buf[128]={0};ehdr *e=(void*)buf;
++ memcpy(e->ident,"\177ELF\2\1\1",7);e->machine=183;e->type=3;e->version=1;
++ e->ehsize=sizeof *e;e->phoff=sizeof *e;e->phsize=sizeof(phdr);e->phnum=1;
++ phdr *p=(void*)(buf+e->phoff);p->type=1;p->flags=5;p->offset=120;p->va=0x1000;p->filesz=4;p->memsz=4;p->align=4;
++ memcpy(buf+120,&opcode,4);
++ if(malformed==1)e->phoff=10000;
++ if(malformed==2)p->filesz=10000;
++ char path[]="/private/tmp/kl-svc-fixture.XXXXXX";int fd=mkstemp(path);assert(fd>=0);
++ size_t size=malformed==3 ? 16 : sizeof buf;
++ assert(write(fd,buf,size)==size);close(fd);
++ assert(!kl_load(path));assert(strstr(kl_error(),expect));unlink(path);
++}
++int main(void){
++ setenv("KL_SVC_POLICY","reject",1);
++ check(0xd4000001,0,"raw SVC instruction candidate");
++ check(0xd4001001,0,"raw SVC instruction candidate"); // SVC with nonzero immediate
++ check(0xd503201f,1,"invalid program headers");
++ check(0xd503201f,2,"invalid executable segment");
++ check(0xd503201f,3,"truncated ELF header");
++ assert(!kl_load_dylib("/nonexistent-translated-game.dylib"));
++ assert(strstr(kl_error(),"rejects pretranslated Mach-O"));
++ setenv("KL_SVC_POLICY","typo",1);check(0xd4000001,0,"unknown KL_SVC_POLICY");
++ puts("PASS: SVC #0/nonzero immediate, malformed headers/segments and unknown policy refuse before guest mapping");
++}
+-- 
+2.54.0 (Apple Git-157)
+

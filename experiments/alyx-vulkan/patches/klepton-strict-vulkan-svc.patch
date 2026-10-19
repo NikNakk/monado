@@ -1,0 +1,699 @@
+From f2b0c233e3290bf8f8a8ffea2a022de1887cbb97 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 01:15:50 +0200
+Subject: [PATCH 1/2] vulkan: add opt-in strict dispatch and request
+ preservation
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ VULKAN_BACKENDS.md                |  48 ++++++++
+ runtime/gfx/kl_vulkan.c           | 186 ++++++++++++++++++++++++++----
+ tests/t_vulkan_strict.c           |  51 ++++++++
+ tests/t_vulkan_strict_driver.c    |  53 +++++++++
+ tests/t_vulkan_strict_real.c      |  62 ++++++++++
+ tools/check_vulkan_strict.sh      |  12 ++
+ tools/check_vulkan_strict_real.sh |  11 ++
+ 7 files changed, 398 insertions(+), 25 deletions(-)
+ create mode 100644 tests/t_vulkan_strict.c
+ create mode 100644 tests/t_vulkan_strict_driver.c
+ create mode 100644 tests/t_vulkan_strict_real.c
+ create mode 100644 tools/check_vulkan_strict.sh
+ create mode 100644 tools/check_vulkan_strict_real.sh
+
+diff --git a/VULKAN_BACKENDS.md b/VULKAN_BACKENDS.md
+index 8e02092..18b722f 100644
+--- a/VULKAN_BACKENDS.md
++++ b/VULKAN_BACKENDS.md
+@@ -39,3 +39,51 @@ strict mode before a game trace can establish driver requirements reliably;
+ the trace does not endorse them. In particular, compare pre-clamp requests
+ with driver answers and forwarded requests. Disable async compilation when
+ measuring synchronous compilation cost. No guest game code was run here.
++
++## Strict graphics boundary
++
++`KL_VK_STRICT=1` is opt-in and latched on first use. The legacy path remains
++the default. In strict mode:
++
++- Graphics/shader/render-pass/property commands go directly to the selected
++  Vulkan dispatch implementation. Klepton's repair, emulation and async-pipeline
++  wrappers are bypassed. Missing functions return NULL; no success stub is used.
++- Instance/device requests preserve API version, layers, feature structures,
++  pNext and requested extensions. Unsupported requests reach the driver and its
++  error is returned. No feature clamp/retry, GPU/null-handle substitution or
++  automatic Metal-object extension addition occurs.
++- The implemented synthetic desktop WSI remains adapted. Its instance extension
++  names are removed from the request passed to the native driver; advertised
++  Vulkan portability enumeration/subset requirements are appended when needed.
++  This intentionally remains a synthetic desktop swapchain, not native desktop
++  presentation or a claim of complete Vulkan loader/WSI conformance.
++- Extension lists are allocated to request size rather than capped at 64 names.
++  Instance enumeration errors and layer errors propagate. Device bookkeeping is
++  released on destroy; strict bookkeeping overflow destroys/refuses the device.
++
++Owned fake-driver request-preservation checks (no GPU):
++
++```sh
++sh tools/check_vulkan_strict.sh
++```
++
++Real driver initialization, feature query, device creation, missing function,
++unsupported-feature refusal and complete extension/driver census (no game or XR):
++
++```sh
++KL_VULKAN_LIBRARY=/opt/homebrew/lib/libvulkan.1.dylib \
++VK_DRIVER_FILES=/opt/homebrew/Cellar/molten-vk/1.4.2/etc/vulkan/icd.d/MoltenVK_icd.json \
++sh tools/check_vulkan_strict_real.sh
++
++KL_VULKAN_LIBRARY=/opt/homebrew/lib/libvulkan.1.dylib \
++VK_DRIVER_FILES=/private/tmp/alyx-mesa-build/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json \
++sh tools/check_vulkan_strict_real.sh
++```
++
++20 October: both pass on Apple M5 outside the filesystem sandbox (sandboxed
++Metal access was unavailable). MoltenVK driverID14/info1.4.2, KosmicKrisp
++driverID28/Mesa27.0.0-devel git0913fce718. Each creates a device, returns
++VK_ERROR_FEATURE_NOT_PRESENT for geometryShader and preserves the requested
++true flag. Both query base fragmentDensityMap=false. This does not resolve
++KosmicKrisp's missing Metal-object interoperability with Monado and is not an
++Alyx run or a benchmark.
+diff --git a/runtime/gfx/kl_vulkan.c b/runtime/gfx/kl_vulkan.c
+index d119046..93dd47a 100644
+--- a/runtime/gfx/kl_vulkan.c
++++ b/runtime/gfx/kl_vulkan.c
+@@ -119,6 +119,13 @@ void *kl_vulkan_xr_image_mtl(unsigned long long img) { (void)img; return NULL; }
+ 
+ #define KLVK_MAX_IMAGES 8
+ 
++// Opt-in: preserve graphics semantics; only synthetic desktop WSI and
++// Vulkan portability requirements are adapted at this boundary.
++static int strict_enabled;
++static pthread_once_t strict_once = PTHREAD_ONCE_INIT;
++static void strict_configure(void) { strict_enabled = kl_env_on("KL_VK_STRICT", 0); }
++static int vk_strict(void) { pthread_once(&strict_once, strict_configure); return strict_enabled; }
++
+ static int vk_trace(void) {
+     static int on = -1;
+     if (on < 0) on = kl_env_on("KL_VK_TRACE", 0);
+@@ -249,7 +256,7 @@ static void vk_init(void) {
+         extern const char *kl_driver_target_name(void);
+         const char *t = kl_driver_target_name();
+         int def = (t && strcmp(t, "wrath2") == 0) ? 1 : 0;
+-        if (kl_env_on("KL_MVK_COMPILE_TIMEOUT", def))
++        if (!vk_strict() && kl_env_on("KL_MVK_COMPILE_TIMEOUT", def))
+             setenv("MVK_CONFIG_METAL_COMPILE_TIMEOUT", "10000000000", 0); // 10 s
+     }
+ 
+@@ -270,7 +277,7 @@ static void vk_init(void) {
+         extern const char *kl_driver_target_name(void);
+         const char *t = kl_driver_target_name();
+         int def = (t && strcmp(t, "wanderer") == 0) ? 1 : 0;
+-        if (kl_env_on("KL_MVK_NO_ARGBUF", def))
++        if (!vk_strict() && kl_env_on("KL_MVK_NO_ARGBUF", def))
+             setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "0", 0);  // 0 = NEVER
+     }
+ 
+@@ -492,11 +499,14 @@ static VkResult klvk_EnumerateInstanceExtensionProperties(
+             real_gipa(NULL, "vkEnumerateInstanceExtensionProperties");
+     if (!real) return VK_ERROR_INITIALIZATION_FAILED;
+ 
++    if (vk_strict() && layer) return real(layer, count, props);
+     uint32_t n = 0;
+-    real(layer, &n, NULL);
++    VkResult enumeration = real(layer, &n, NULL);
++    if (vk_strict() && enumeration != VK_SUCCESS) return enumeration;
+     VkExtensionProperties *tmp = calloc(n + 8, sizeof *tmp);
+     if (!tmp) return VK_ERROR_OUT_OF_HOST_MEMORY;
+-    real(layer, &n, tmp);
++    enumeration = real(layer, &n, tmp);
++    if (vk_strict() && enumeration != VK_SUCCESS) { free(tmp); return enumeration; }
+ 
+     // VK_KHR_android_surface is advertised because we implement it. Unity tests
+     // for it before enabling it, and a Vulkan build that cannot find a surface
+@@ -532,6 +542,54 @@ static VkResult klvk_EnumerateInstanceExtensionProperties(
+     return r;
+ }
+ 
++static int synthetic_wsi(const char *name) {
++    return !strcmp(name, "VK_KHR_android_surface") || !strcmp(name, "VK_KHR_xcb_surface") ||
++           !strcmp(name, "VK_KHR_xlib_surface") || !strcmp(name, "VK_KHR_wayland_surface");
++}
++
++// Preserve every requested name (including unknown names) and every caller
++// feature/pNext/layer/API field. Only remove implemented WSI names and append
++// an advertised, required portability extension. No fixed 64-name truncation.
++static const char **strict_extensions(uint32_t n, const char *const *names,
++                                      int instance, uint32_t *used, int *portability) {
++    *used = 0; *portability = 0;
++    const char **result = calloc((size_t)n + 1, sizeof *result);
++    if (!result) return NULL;
++    for (uint32_t i = 0; i < n; ++i)
++        if (!instance || !synthetic_wsi(names[i])) result[(*used)++] = names[i];
++    const char *required = instance ? "VK_KHR_portability_enumeration" : "VK_KHR_portability_subset";
++    for (uint32_t i = 0; i < *used; ++i) if (!strcmp(result[i], required)) {
++        *portability = 1; return result;
++    }
++    return result;
++}
++
++static VkResult strict_instance(const VkInstanceCreateInfo *ci,
++                               const VkAllocationCallbacks *alloc, VkInstance *out) {
++    uint32_t n; int portability;
++    const char **names = strict_extensions(ci->enabledExtensionCount, ci->ppEnabledExtensionNames, 1, &n, &portability);
++    if (!names) return VK_ERROR_OUT_OF_HOST_MEMORY;
++    PFN_vkEnumerateInstanceExtensionProperties enumerate =
++        (PFN_vkEnumerateInstanceExtensionProperties)real_gipa(NULL, "vkEnumerateInstanceExtensionProperties");
++    uint32_t count = 0;
++    VkResult r = enumerate ? enumerate(NULL, &count, NULL) : VK_ERROR_INITIALIZATION_FAILED;
++    VkExtensionProperties *props = r == VK_SUCCESS ? calloc((size_t)count + 1, sizeof *props) : NULL;
++    if (r == VK_SUCCESS && !props) r = VK_ERROR_OUT_OF_HOST_MEMORY;
++    if (r == VK_SUCCESS) r = enumerate(NULL, &count, props);
++    if (r == VK_SUCCESS && !portability && ext_supported(props, count, "VK_KHR_portability_enumeration")) {
++        names[n++] = "VK_KHR_portability_enumeration"; portability = 1;
++    }
++    VkInstanceCreateInfo copy = *ci;
++    copy.enabledExtensionCount = n; copy.ppEnabledExtensionNames = names;
++    if (portability) copy.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
++    trace_extensions("strict-instance-forwarded", n, names);
++    PFN_vkCreateInstance create = (PFN_vkCreateInstance)real_gipa(NULL, "vkCreateInstance");
++    if (r == VK_SUCCESS) r = create ? create(&copy, alloc, out) : VK_ERROR_INITIALIZATION_FAILED;
++    if (r == VK_SUCCESS) g_instance = *out;
++    free(props); free(names);
++    return r;
++}
++
+ static VkResult klvk_CreateInstance(const VkInstanceCreateInfo *ci,
+                                     const VkAllocationCallbacks *alloc,
+                                     VkInstance *out) {
+@@ -543,6 +601,7 @@ static VkResult klvk_CreateInstance(const VkInstanceCreateInfo *ci,
+         (PFN_vkEnumerateInstanceExtensionProperties)
+             real_gipa(NULL, "vkEnumerateInstanceExtensionProperties");
+     if (!real || !enum_ext) return VK_ERROR_INITIALIZATION_FAILED;
++    if (vk_strict()) return strict_instance(ci, alloc, out);
+ 
+     uint32_t nhave = 0;
+     enum_ext(NULL, &nhave, NULL);
+@@ -747,6 +806,64 @@ static unsigned klvk_clamp_features(VkPhysicalDevice phys, VkDeviceCreateInfo *c
+     return off;
+ }
+ 
++static VkResult record_device(VkPhysicalDevice phys, const VkDeviceCreateInfo *ci,
++                              const VkAllocationCallbacks *alloc, VkDevice *out) {
++    klvk_device *d = calloc(1, sizeof *d);
++    if (!d) {
++        PFN_vkDestroyDevice destroy = (PFN_vkDestroyDevice)real_gdpa(*out, "vkDestroyDevice");
++        if (destroy) destroy(*out, alloc);
++        *out = VK_NULL_HANDLE;
++        return VK_ERROR_OUT_OF_HOST_MEMORY;
++    }
++    d->dev = *out;
++    d->phys = phys;
++    d->queue_family = ci && ci->queueCreateInfoCount ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0;
++    dev_resolve(d);
++    // A queue of our own, for the acquire signal and the capture submit. Taken
++    // from the guest's own first queue family, which is the one it will present
++    // on — see the note in klvk_AcquireNextImageKHR about the sharing.
++    if (d->GetDeviceQueue) d->GetDeviceQueue(d->dev, d->queue_family, 0, &d->queue);
++
++    pthread_mutex_lock(&g_lock);
++    int stored = g_ndev < (int)(sizeof g_devs / sizeof *g_devs);
++    if (stored) g_devs[g_ndev++] = d;
++    pthread_mutex_unlock(&g_lock);
++    if (!stored && vk_strict()) {
++        PFN_vkDestroyDevice destroy = (PFN_vkDestroyDevice)real_gdpa(*out, "vkDestroyDevice");
++        if (destroy) destroy(*out, alloc);
++        free(d); *out = VK_NULL_HANDLE;
++        return VK_ERROR_TOO_MANY_OBJECTS;
++    }
++
++    VKI("vkCreateDevice tracked, queue family %u\n", d->queue_family);
++    return VK_SUCCESS;
++}
++static VkResult strict_device(VkPhysicalDevice phys, const VkDeviceCreateInfo *ci,
++                              const VkAllocationCallbacks *alloc, VkDevice *out) {
++    PFN_vkCreateDevice create = (PFN_vkCreateDevice)real_gipa(g_instance, "vkCreateDevice");
++    PFN_vkEnumerateDeviceExtensionProperties enumerate =
++        (PFN_vkEnumerateDeviceExtensionProperties)real_gipa(g_instance, "vkEnumerateDeviceExtensionProperties");
++    if (!create || !enumerate) return VK_ERROR_INITIALIZATION_FAILED;
++    uint32_t n, count = 0; int portability;
++    const char **names = strict_extensions(ci->enabledExtensionCount, ci->ppEnabledExtensionNames, 0, &n, &portability);
++    if (!names) return VK_ERROR_OUT_OF_HOST_MEMORY;
++    VkResult r = enumerate(phys, NULL, &count, NULL);
++    VkExtensionProperties *props = r == VK_SUCCESS ? calloc((size_t)count + 1, sizeof *props) : NULL;
++    if (r == VK_SUCCESS && !props) r = VK_ERROR_OUT_OF_HOST_MEMORY;
++    if (r == VK_SUCCESS) r = enumerate(phys, NULL, &count, props);
++    if (r == VK_SUCCESS && !portability && ext_supported(props, count, "VK_KHR_portability_subset"))
++        names[n++] = "VK_KHR_portability_subset";
++    VkDeviceCreateInfo copy = *ci;
++    copy.enabledExtensionCount = n; copy.ppEnabledExtensionNames = names;
++    trace_extensions("strict-device-request", ci->enabledExtensionCount, ci->ppEnabledExtensionNames);
++    trace_chain("strict-device-request", ci->pNext);
++    trace_extensions("strict-device-forwarded", n, names);
++    if (r == VK_SUCCESS) r = create(phys, &copy, alloc, out);
++    free(props); free(names);
++    // In particular: no FEATURE_NOT_PRESENT clamp/retry or mutation of caller pNext.
++    return r == VK_SUCCESS ? record_device(phys, ci, alloc, out) : r;
++}
++
+ static VkResult klvk_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreateInfo *ci,
+                                   const VkAllocationCallbacks *alloc, VkDevice *out) {
+     PFN_vkCreateDevice real = (PFN_vkCreateDevice)real_gipa(g_instance, "vkCreateDevice");
+@@ -754,6 +871,7 @@ static VkResult klvk_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreateInf
+         (PFN_vkEnumerateDeviceExtensionProperties)
+             real_gipa(g_instance, "vkEnumerateDeviceExtensionProperties");
+     if (!real) return VK_ERROR_INITIALIZATION_FAILED;
++    if (vk_strict()) return strict_device(phys, ci, alloc, out);
+     // The whole point of the null-substitution family: Unity reaches here with a
+     // NULL physicalDevice (its GPU select left it null), and MoltenVK would make
+     // a device on nothing. Give it the real GPU so it gets a working VkDevice.
+@@ -812,23 +930,7 @@ static VkResult klvk_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreateInf
+     free(have);
+     if (r != VK_SUCCESS) { VKI("vkCreateDevice FAILED %d\n", r); return r; }
+ 
+-    klvk_device *d = calloc(1, sizeof *d);
+-    if (!d) return VK_ERROR_OUT_OF_HOST_MEMORY;
+-    d->dev = *out;
+-    d->phys = phys;
+-    d->queue_family = ci && ci->queueCreateInfoCount ? ci->pQueueCreateInfos[0].queueFamilyIndex : 0;
+-    dev_resolve(d);
+-    // A queue of our own, for the acquire signal and the capture submit. Taken
+-    // from the guest's own first queue family, which is the one it will present
+-    // on — see the note in klvk_AcquireNextImageKHR about the sharing.
+-    if (d->GetDeviceQueue) d->GetDeviceQueue(d->dev, d->queue_family, 0, &d->queue);
+-
+-    pthread_mutex_lock(&g_lock);
+-    if (g_ndev < (int)(sizeof g_devs / sizeof *g_devs)) g_devs[g_ndev++] = d;
+-    pthread_mutex_unlock(&g_lock);
+-
+-    VKI("vkCreateDevice ok — %u extension(s), queue family %u\n", keep.n, d->queue_family);
+-    return VK_SUCCESS;
++    return record_device(phys, ci, alloc, out);
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -6196,7 +6298,35 @@ static const entry g_ours[] = {
+ #undef E
+ };
+ 
++static void strict_destroy_device(VkDevice dev, const VkAllocationCallbacks *alloc) {
++    PFN_vkDestroyDevice destroy = (PFN_vkDestroyDevice)real_gdpa(dev, "vkDestroyDevice");
++    pthread_mutex_lock(&g_lock);
++    for (int i = 0; i < g_ndev; ++i) if (g_devs[i]->dev == dev) {
++        free(g_devs[i]); g_devs[i] = g_devs[--g_ndev]; break;
++    }
++    pthread_mutex_unlock(&g_lock);
++    if (destroy) destroy(dev, alloc);
++}
++
+ static PFN_vkVoidFunction ours(const char *name) {
++    if (vk_strict()) {
++        if (!strcmp(name, "vkDestroyDevice")) return (PFN_vkVoidFunction)strict_destroy_device;
++        static const char *allowed[] = {
++            "vkCreateInstance", "vkEnumerateInstanceExtensionProperties", "vkCreateDevice",
++            "vkCreateAndroidSurfaceKHR", "vkCreateXcbSurfaceKHR", "vkCreateXlibSurfaceKHR", "vkCreateWaylandSurfaceKHR",
++            "vkDestroySurfaceKHR", "vkGetPhysicalDeviceXcbPresentationSupportKHR",
++            "vkGetPhysicalDeviceXlibPresentationSupportKHR", "vkGetPhysicalDeviceWaylandPresentationSupportKHR",
++            "vkGetPhysicalDeviceSurfaceSupportKHR", "vkGetPhysicalDeviceSurfaceCapabilitiesKHR",
++            "vkGetPhysicalDeviceSurfaceFormatsKHR", "vkGetPhysicalDeviceSurfacePresentModesKHR",
++            "vkCreateSwapchainKHR", "vkDestroySwapchainKHR", "vkGetSwapchainImagesKHR",
++            "vkAcquireNextImageKHR", "vkQueuePresentKHR"
++        };
++        int match = 0;
++        for (size_t i = 0; i < sizeof allowed / sizeof *allowed; ++i)
++            if (!strcmp(name, allowed[i])) { match = 1; break; }
++        if (!match) return NULL;
++    }
++
+     // KL_TRACE: reveal which render-pass / dynamic-rendering entry points the
+     // guest actually resolves, and whether we hand back our wrapper or fall
+     // through to the real MoltenVK one. This is how we learn why the compositing
+@@ -6253,12 +6383,15 @@ static PFN_vkVoidFunction VKAPI_CALL klvk_GetInstanceProcAddr(VkInstance inst,
+     if (!strcmp(name, "vkGetInstanceProcAddr"))
+         return (PFN_vkVoidFunction)klvk_GetInstanceProcAddr;
+     if (!strcmp(name, "vkGetDeviceProcAddr"))
+-        return (PFN_vkVoidFunction)klvk_GetDeviceProcAddr;
++        return vk_strict() && !inst ? NULL : (PFN_vkVoidFunction)klvk_GetDeviceProcAddr;
++    if (vk_strict() && !inst && strcmp(name, "vkCreateInstance") &&
++        strcmp(name, "vkEnumerateInstanceExtensionProperties") &&
++        strcmp(name, "vkEnumerateInstanceLayerProperties") && strcmp(name, "vkEnumerateInstanceVersion")) return NULL;
+     PFN_vkVoidFunction m = ours(name);
+     if (m) return m;
+     if (!g_avail) return NULL;
+-    PFN_vkVoidFunction fn = real_gipa(inst ? inst : g_instance, name);
+-    if (!fn) { klvk_note_missing(name); return (PFN_vkVoidFunction)klvk_missing_trap; }
++    PFN_vkVoidFunction fn = real_gipa(vk_strict() ? inst : (inst ? inst : g_instance), name);
++    if (!fn && !vk_strict()) { klvk_note_missing(name); return (PFN_vkVoidFunction)klvk_missing_trap; }
+     return fn;
+ }
+ 
+@@ -6271,10 +6404,13 @@ static PFN_vkVoidFunction VKAPI_CALL klvk_GetDeviceProcAddr(VkDevice dev,
+     if (!strcmp(name, "vkGetDeviceProcAddr"))
+         return (PFN_vkVoidFunction)klvk_GetDeviceProcAddr;
+     PFN_vkVoidFunction m = ours(name);
++    if (m && vk_strict() && strcmp(name, "vkDestroyDevice") && strcmp(name, "vkCreateSwapchainKHR") &&
++        strcmp(name, "vkDestroySwapchainKHR") && strcmp(name, "vkGetSwapchainImagesKHR") &&
++        strcmp(name, "vkAcquireNextImageKHR") && strcmp(name, "vkQueuePresentKHR")) return NULL;
+     if (m) return m;
+     if (!g_avail || !real_gdpa) return NULL;
+     PFN_vkVoidFunction fn = real_gdpa(dev, name);
+-    if (!fn) { klvk_note_missing(name); return (PFN_vkVoidFunction)klvk_missing_trap; }
++    if (!fn && !vk_strict()) { klvk_note_missing(name); return (PFN_vkVoidFunction)klvk_missing_trap; }
+     return fn;
+ }
+ 
+diff --git a/tests/t_vulkan_strict.c b/tests/t_vulkan_strict.c
+new file mode 100644
+index 0000000..199fa46
+--- /dev/null
++++ b/tests/t_vulkan_strict.c
+@@ -0,0 +1,51 @@
++// SPDX-License-Identifier: MIT
++#define VK_NO_PROTOTYPES
++#include <vulkan/vulkan.h>
++#include <assert.h>
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++const char *kl_driver_target_name(void){return "strict-fixture";}
++void kl_glfb_note_eye_mtl_texture(int a,int b,void*c,int d,int e,int f){abort();}
++int main(int argc,char **argv){
++ assert(argc==3);
++ void *driver=dlopen(argv[2],RTLD_NOW|RTLD_LOCAL);assert(driver);
++ void *lib=dlopen(argv[1],RTLD_LAZY|RTLD_LOCAL);assert(lib);
++ void *(*sym)(const char*)=dlsym(lib,"kl_vulkan_sym");assert(sym);
++ PFN_vkGetInstanceProcAddr gipa=sym("vkGetInstanceProcAddr");
++ PFN_vkGetDeviceProcAddr gdpa=sym("vkGetDeviceProcAddr");
++ PFN_vkGetInstanceProcAddr native=dlsym(driver,"vkGetInstanceProcAddr");
++ assert(!gipa(NULL,"vkCreateDevice"));assert(!gdpa((VkDevice)1,"vkCreateInstance"));
++ assert(!gipa(NULL,"vkUnknownNeverProvided"));assert(!gdpa((VkDevice)1,"vkUnknownNeverProvided"));
++ assert(!gipa(NULL,"vkGetPhysicalDeviceFragmentShadingRatesKHR"));
++ PFN_vkEnumerateInstanceExtensionProperties ie=(PFN_vkEnumerateInstanceExtensionProperties)gipa(NULL,"vkEnumerateInstanceExtensionProperties");
++ uint32_t count=0;assert(ie("VK_LAYER_MISSING",&count,NULL)==VK_ERROR_LAYER_NOT_PRESENT);
++ const char *direct[]={"vkCreateGraphicsPipelines","vkCreateShaderModule","vkGetPhysicalDeviceFeatures2","vkCmdBeginRenderPass","vkCreateImage"};
++ for(unsigned i=0;i<5;i++){
++  assert(gipa((VkInstance)1,direct[i])==native((VkInstance)1,direct[i]));
++  assert(gdpa((VkDevice)1,direct[i])==native(NULL,direct[i]));
++ }
++ char buf[70][32];const char *names[71];
++ for(int i=0;i<70;i++){snprintf(buf[i],32,"VK_TEST_%d",i);names[i]=buf[i];}
++ names[0]="VK_TEST_missing";names[70]="VK_KHR_xcb_surface";
++ const char *layer="VK_LAYER_TEST";
++ VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.apiVersion=VK_API_VERSION_1_0};
++ VkInstanceCreateInfo ci={.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,.pApplicationInfo=&app,
++ .enabledLayerCount=1,.ppEnabledLayerNames=&layer,.enabledExtensionCount=71,.ppEnabledExtensionNames=names};
++ VkInstanceCreateInfo before=ci;VkInstance inst;
++ PFN_vkCreateInstance create=(PFN_vkCreateInstance)gipa(NULL,"vkCreateInstance");
++ assert(create(&ci,NULL,&inst)==VK_ERROR_EXTENSION_NOT_PRESENT);
++ assert(!memcmp(&ci,&before,sizeof ci));assert(app.apiVersion==VK_API_VERSION_1_0);
++ VkPhysicalDeviceFragmentDensityMapFeaturesEXT f={.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT,.fragmentDensityMap=1,.fragmentDensityMapDynamic=1};
++ VkPhysicalDeviceFeatures features={.geometryShader=1};
++ VkDeviceCreateInfo dc={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.pNext=&f,.pEnabledFeatures=&features,
++ .enabledExtensionCount=1,.ppEnabledExtensionNames=names,.enabledLayerCount=1,.ppEnabledLayerNames=&layer};
++ VkDeviceCreateInfo db=dc;VkDevice dev;
++ PFN_vkCreateDevice cd=(PFN_vkCreateDevice)gipa((VkInstance)1,"vkCreateDevice");
++ assert(cd((VkPhysicalDevice)0x200,&dc,NULL,&dev)==VK_ERROR_FEATURE_NOT_PRESENT);
++ int(*calls)(void)=dlsym(driver,"driver_calls");assert(calls()==1);
++ assert(!memcmp(&dc,&db,sizeof dc)&&f.fragmentDensityMap&&f.fragmentDensityMapDynamic&&features.geometryShader);
++ assert(cd(NULL,&dc,NULL,&dev)==VK_ERROR_INITIALIZATION_FAILED);assert(calls()==1);
++ puts("PASS: strict Vulkan preserves >64 extensions, layers/API/features/pNext; no retry, null substitution, graphics repair or success stub");
++}
+diff --git a/tests/t_vulkan_strict_driver.c b/tests/t_vulkan_strict_driver.c
+new file mode 100644
+index 0000000..ed7e13b
+--- /dev/null
++++ b/tests/t_vulkan_strict_driver.c
+@@ -0,0 +1,53 @@
++// SPDX-License-Identifier: MIT
++// Host-owned fake dispatch library: checks exact forwarded requests.
++#define VK_NO_PROTOTYPES
++#include <vulkan/vulkan.h>
++#include <assert.h>
++#include <string.h>
++static int calls;
++static VkResult inst_ext(const char *layer,uint32_t *n,VkExtensionProperties *p) {
++ if(layer) return VK_ERROR_LAYER_NOT_PRESENT;
++ if(!p) {*n=1;return VK_SUCCESS;}
++ assert(*n>=1);*n=1;strcpy(p[0].extensionName,"VK_KHR_portability_enumeration");return VK_SUCCESS;
++}
++static VkResult device_ext(VkPhysicalDevice pd,const char *layer,uint32_t *n,VkExtensionProperties *p) {
++ if(!pd) return VK_ERROR_INITIALIZATION_FAILED;
++ if(!p) {*n=2;return VK_SUCCESS;}
++ assert(*n>=2);*n=2;strcpy(p[0].extensionName,"VK_KHR_portability_subset");strcpy(p[1].extensionName,"VK_EXT_metal_objects");return VK_SUCCESS;
++}
++static VkResult create_instance(const VkInstanceCreateInfo *ci,const VkAllocationCallbacks *a,VkInstance *out) {
++ assert(ci->pApplicationInfo->apiVersion==VK_API_VERSION_1_0);
++ assert(ci->enabledLayerCount==1 && !strcmp(ci->ppEnabledLayerNames[0],"VK_LAYER_TEST"));
++ assert(ci->enabledExtensionCount==71);
++ assert(!strcmp(ci->ppEnabledExtensionNames[0],"VK_TEST_missing"));
++ assert(!strcmp(ci->ppEnabledExtensionNames[69],"VK_TEST_69"));
++ assert(!strcmp(ci->ppEnabledExtensionNames[70],"VK_KHR_portability_enumeration"));
++ assert(ci->flags & VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR);
++ *out=(VkInstance)(uintptr_t)0x100;return VK_ERROR_EXTENSION_NOT_PRESENT;
++}
++static VkResult create_device(VkPhysicalDevice pd,const VkDeviceCreateInfo *ci,const VkAllocationCallbacks *a,VkDevice *out) {
++ calls++;
++ assert(pd==(VkPhysicalDevice)(uintptr_t)0x200);
++ assert(ci->enabledLayerCount==1 && !strcmp(ci->ppEnabledLayerNames[0],"VK_LAYER_TEST"));
++ assert(ci->enabledExtensionCount==2);
++ assert(!strcmp(ci->ppEnabledExtensionNames[0],"VK_TEST_missing"));
++ assert(!strcmp(ci->ppEnabledExtensionNames[1],"VK_KHR_portability_subset"));
++ const VkPhysicalDeviceFragmentDensityMapFeaturesEXT *f=ci->pNext;
++ assert(f && f->fragmentDensityMap==VK_TRUE && f->fragmentDensityMapDynamic==VK_TRUE);
++ assert(ci->pEnabledFeatures->geometryShader==VK_TRUE);
++ return VK_ERROR_FEATURE_NOT_PRESENT;
++}
++int driver_calls(void){return calls;}
++static void sentinel(void){}
++VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance inst,const char *name) {
++#define F(n,f) if(!strcmp(name,n))return (PFN_vkVoidFunction)f
++ F("vkEnumerateInstanceExtensionProperties",inst_ext);F("vkCreateInstance",create_instance);
++ F("vkEnumerateDeviceExtensionProperties",device_ext);F("vkCreateDevice",create_device);
++ F("vkCreateGraphicsPipelines",sentinel);F("vkGetPhysicalDeviceFeatures2",sentinel);
++ F("vkCreateShaderModule",sentinel);F("vkCmdBeginRenderPass",sentinel);
++ F("vkCreateImage",sentinel);
++ return NULL;
++}
++VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice dev,const char *name) {
++ return vkGetInstanceProcAddr(NULL,name);
++}
+diff --git a/tests/t_vulkan_strict_real.c b/tests/t_vulkan_strict_real.c
+new file mode 100644
+index 0000000..9b4d059
+--- /dev/null
++++ b/tests/t_vulkan_strict_real.c
+@@ -0,0 +1,62 @@
++// SPDX-License-Identifier: MIT
++// Guest Vulkan boundary smoke test. Does not load any game or OpenVR runtime.
++#define VK_NO_PROTOTYPES
++#include <vulkan/vulkan.h>
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <assert.h>
++#include <string.h>
++const char *kl_driver_target_name(void) { return "alyx-probe"; }
++void kl_glfb_note_eye_mtl_texture(int a,int b,void *c,int d,int e,int f) { abort(); }
++int main(int argc, char **argv) {
++ if (argc != 2) return 2;
++ void *h=dlopen(argv[1], RTLD_LAZY|RTLD_LOCAL);
++ if(!h) {puts(dlerror());return 1;}
++ void *(*sym)(const char*)=dlsym(h,"kl_vulkan_sym");
++ PFN_vkGetInstanceProcAddr gipa=(PFN_vkGetInstanceProcAddr)sym("vkGetInstanceProcAddr");
++ if(!gipa) return 1;
++ PFN_vkCreateInstance create=(PFN_vkCreateInstance)gipa(0,"vkCreateInstance");
++ VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.apiVersion=VK_API_VERSION_1_2};
++ VkInstanceCreateInfo ci={.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,.pApplicationInfo=&app};
++ VkInstance instance;
++ VkResult r=create(&ci,0,&instance);printf("CreateInstance=%d\n",r);if(r) return 1;
++ PFN_vkEnumeratePhysicalDevices enumerate=(PFN_vkEnumeratePhysicalDevices)gipa(instance,"vkEnumeratePhysicalDevices");
++ uint32_t n=1;VkPhysicalDevice pd; r=enumerate(instance,&n,&pd); if(r) return 1;
++ VkPhysicalDeviceFragmentDensityMapFeaturesEXT fdm={.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
++ VkPhysicalDeviceFeatures2 f={.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,.pNext=&fdm};
++ PFN_vkGetPhysicalDeviceFeatures2 features=(PFN_vkGetPhysicalDeviceFeatures2)gipa(instance,"vkGetPhysicalDeviceFeatures2");
++ features(pd,&f);printf("fdm=%u dynamic=%u\n",fdm.fragmentDensityMap,fdm.fragmentDensityMapDynamic);
++ VkPhysicalDeviceProperties props;
++ ((PFN_vkGetPhysicalDeviceProperties)gipa(instance,"vkGetPhysicalDeviceProperties"))(pd,&props);
++ printf("device=%s vendor=%#x deviceID=%#x driverVersion=%u api=%u.%u.%u\n",props.deviceName,props.vendorID,props.deviceID,props.driverVersion,VK_API_VERSION_MAJOR(props.apiVersion),VK_API_VERSION_MINOR(props.apiVersion),VK_API_VERSION_PATCH(props.apiVersion));
++ VkPhysicalDeviceDriverProperties driver={.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
++ VkPhysicalDeviceProperties2 p2={.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,.pNext=&driver};
++ ((PFN_vkGetPhysicalDeviceProperties2)gipa(instance,"vkGetPhysicalDeviceProperties2"))(pd,&p2);
++ printf("driverID=%u driverName=%s driverInfo=%s\n",driver.driverID,driver.driverName,driver.driverInfo);
++ uint32_t ext_count=0;PFN_vkEnumerateDeviceExtensionProperties enum_ext=(PFN_vkEnumerateDeviceExtensionProperties)gipa(instance,"vkEnumerateDeviceExtensionProperties");
++ assert(enum_ext(pd,NULL,&ext_count,NULL)==VK_SUCCESS);
++ VkExtensionProperties *extensions=calloc(ext_count,sizeof *extensions);assert(extensions);
++ assert(enum_ext(pd,NULL,&ext_count,extensions)==VK_SUCCESS);
++ for(uint32_t i=0;i<ext_count;i++)printf("extension=%s spec=%u\n",extensions[i].extensionName,extensions[i].specVersion);
++ free(extensions);
++ uint32_t nq=0;
++ PFN_vkGetPhysicalDeviceQueueFamilyProperties queues=(PFN_vkGetPhysicalDeviceQueueFamilyProperties)gipa(instance,"vkGetPhysicalDeviceQueueFamilyProperties");
++ queues(pd,&nq,NULL);assert(nq);VkQueueFamilyProperties *qp=calloc(nq,sizeof *qp);queues(pd,&nq,qp);
++ uint32_t family=0;while(family<nq && !(qp[family].queueFlags&VK_QUEUE_GRAPHICS_BIT))family++;assert(family<nq);free(qp);
++ float priority=1;VkDeviceQueueCreateInfo q={.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,.queueFamilyIndex=family,.queueCount=1,.pQueuePriorities=&priority};
++ VkDeviceCreateInfo dc={.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.queueCreateInfoCount=1,.pQueueCreateInfos=&q};
++ VkDevice dev;PFN_vkCreateDevice cd=(PFN_vkCreateDevice)gipa(instance,"vkCreateDevice");
++ r=cd(pd,&dc,NULL,&dev);printf("CreateDevice=%d\n",r);assert(r==VK_SUCCESS);
++ PFN_vkGetDeviceProcAddr gdpa=(PFN_vkGetDeviceProcAddr)sym("vkGetDeviceProcAddr");
++ assert(!gdpa(dev,"vkNeverProvidedTEST"));
++ ((PFN_vkDestroyDevice)gdpa(dev,"vkDestroyDevice"))(dev,NULL);
++ VkPhysicalDeviceFeatures request={0};
++ VkBool32 *have=(VkBool32*)&f.features,*want=(VkBool32*)&request;
++ size_t index=0;while(index<sizeof request/sizeof *want && have[index])index++;
++ assert(index<sizeof request/sizeof *want);want[index]=VK_TRUE;dc.pEnabledFeatures=&request;
++ r=cd(pd,&dc,NULL,&dev);printf("unsupportedFeatureIndex=%zu CreateDevice=%d requestedAfter=%u\n",index,r,want[index]);
++ assert(r==VK_ERROR_FEATURE_NOT_PRESENT && want[index]==VK_TRUE);
++ ((PFN_vkDestroyInstance)gipa(instance,"vkDestroyInstance"))(instance,0);
++ return 0;
++}
+diff --git a/tools/check_vulkan_strict.sh b/tools/check_vulkan_strict.sh
+new file mode 100644
+index 0000000..f6cf47a
+--- /dev/null
++++ b/tools/check_vulkan_strict.sh
+@@ -0,0 +1,12 @@
++#!/bin/sh
++# SPDX-License-Identifier: MIT
++set -eu
++cd "$(dirname "$0")/.."
++work=$(mktemp -d /private/tmp/klepton-vulkan-strict.XXXXXX)
++trap 'rm -rf "$work"' EXIT
++prefix=${VULKAN_SDK:-/opt/homebrew}
++clang -dynamiclib -O1 -I"$prefix/include" -Iruntime -Iruntime/gfx -Iruntime/guest \
++ runtime/gfx/kl_vulkan.c runtime/kl_env.c -Wl,-undefined,dynamic_lookup -lz -o "$work/libklvulkan.dylib"
++clang -dynamiclib -I"$prefix/include" tests/t_vulkan_strict_driver.c -o "$work/driver.dylib"
++clang -I"$prefix/include" -Wl,-export_dynamic tests/t_vulkan_strict.c -o "$work/test"
++KL_VK_STRICT=1 KL_VULKAN_LIBRARY="$work/driver.dylib" "$work/test" "$work/libklvulkan.dylib" "$work/driver.dylib"
+diff --git a/tools/check_vulkan_strict_real.sh b/tools/check_vulkan_strict_real.sh
+new file mode 100644
+index 0000000..9e91b0a
+--- /dev/null
++++ b/tools/check_vulkan_strict_real.sh
+@@ -0,0 +1,11 @@
++#!/bin/sh
++# SPDX-License-Identifier: MIT
++set -eu
++cd "$(dirname "$0")/.."
++work=$(mktemp -d /private/tmp/klepton-vulkan-real.XXXXXX)
++trap 'rm -rf "$work"' EXIT
++prefix=${VULKAN_SDK:-/opt/homebrew}
++clang -dynamiclib -O1 -I"$prefix/include" -Iruntime -Iruntime/gfx -Iruntime/guest \
++ runtime/gfx/kl_vulkan.c runtime/kl_env.c -Wl,-undefined,dynamic_lookup -lz -o "$work/libklvulkan.dylib"
++clang -I"$prefix/include" -Wl,-export_dynamic tests/t_vulkan_strict_real.c -o "$work/test"
++KL_VK_STRICT=1 "$work/test" "$work/libklvulkan.dylib"
+-- 
+2.54.0 (Apple Git-157)
+
+
+From 66e30ebced7495fe8549a11c4e8ccb65d36a5a6c Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 01:15:50 +0200
+Subject: [PATCH 2/2] loader: add conservative pre-mapping raw SVC refusal
+ policy
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ SVC_POLICY.md      | 26 ++++++++++++++++++++++++++
+ runtime/kl_image.c | 36 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 62 insertions(+)
+ create mode 100644 SVC_POLICY.md
+
+diff --git a/SVC_POLICY.md b/SVC_POLICY.md
+new file mode 100644
+index 0000000..4f8bae5
+--- /dev/null
++++ b/SVC_POLICY.md
+@@ -0,0 +1,26 @@
++# Raw syscall preflight policy
++
++`KL_SVC_POLICY=reject` conservatively refuses AArch64 SVC instruction candidates
++in file-backed executable ELF LOAD segments **before guest mapping, relocation,
++ABI rewrites or constructors**. It recognizes SVC with any immediate, not just
++SVC #0, and does not use the six-word x8 heuristic. Bounds of inspected program
++headers and executable bytes are checked. Invalid policy values fail explicitly.
++Pretranslated Mach-O loading is also refused under this policy, preventing that
++path from bypassing the ELF scan. Default/unset or `legacy` retains existing
++behaviour, including its heuristic bare-SVC NOP pass.
++
++This is an execution guard, not syscall translation. A conservative executable
++segment scan can reject data which happens to encode an SVC instruction. It
++cannot prove which candidates execute, and does not make guest TLS/x18/CTR
++instruction rewriting disappear. Keep its setting stable across loading; unlike
++strict Vulkan selection, this experimental policy is read per load.
++
++Owned ELF fixtures in VeRantyx's `check-svc-guard` test SVC #0, SVC with nonzero
++immediate, malformed program headers/executable segments, a truncated ELF,
++unknown policy and refusal of pretranslated images. They execute no ELF code.
++
++Before any actual game run, settle the allowed private-memory ABI translation
++boundary, audit the actual syscall sites and implement explicit translation or
++refusal of operations required by those sites. Broadly NOPing candidates is not
++a correct general Linux syscall strategy. This guard is deliberately unable to
++run images that contain candidates, even if a particular path never reaches one.
+diff --git a/runtime/kl_image.c b/runtime/kl_image.c
+index c84cabc..0534e0f 100644
+--- a/runtime/kl_image.c
++++ b/runtime/kl_image.c
+@@ -667,6 +667,11 @@ static int bind_dynamic(kl_image *img, const Elf64_Phdr *ph, int phnum, uint64_t
+ // list. dlsym would be the obvious route and is precisely what we cannot use —
+ // the translated dylib deliberately exports nothing.
+ kl_image *kl_load_dylib(const char *path) {
++    const char *svc_policy = getenv("KL_SVC_POLICY");
++    if (svc_policy && strcmp(svc_policy, "legacy")) {
++        err("KL_SVC_POLICY rejects pretranslated Mach-O images; use audited runtime ELF");
++        return NULL;
++    }
+     char real[PATH_MAX];
+     if (!realpath(path, real)) snprintf(real, sizeof real, "%s", path);
+ 
+@@ -1046,11 +1051,41 @@ static int protect_pages(kl_image *img, const Elf64_Ehdr *eh, const Elf64_Phdr *
+     return 0;
+ }
+ 
++// Conservative execution gate, not a syscall emulator. Scan file-backed
++// executable LOAD bytes before allocating/relocating any guest mapping. Data
++// inside those segments can cause false positives; refusal is intentional.
++static int reject_raw_svc(const uint8_t *file, size_t size, const Elf64_Ehdr *eh) {
++    const char *policy = getenv("KL_SVC_POLICY");
++    if (!policy || !strcmp(policy, "legacy")) return 0;
++    if (strcmp(policy, "reject")) { err("unknown KL_SVC_POLICY (use legacy or reject)"); return -1; }
++    if (eh->e_phentsize != sizeof(Elf64_Phdr) || eh->e_phoff > size ||
++        eh->e_phnum > (size - eh->e_phoff) / sizeof(Elf64_Phdr)) {
++        err("SVC preflight: invalid program headers"); return -1;
++    }
++    const Elf64_Phdr *ph = (const Elf64_Phdr *)(file + eh->e_phoff);
++    for (unsigned i = 0; i < eh->e_phnum; ++i) {
++        if (ph[i].p_type != PT_LOAD || !(ph[i].p_flags & PF_X)) continue;
++        if (ph[i].p_offset > size || ph[i].p_filesz > size - ph[i].p_offset) {
++            err("SVC preflight: invalid executable segment"); return -1;
++        }
++        for (uint64_t off = (4 - (ph[i].p_vaddr & 3)) & 3; off + 4 <= ph[i].p_filesz; off += 4) {
++            uint32_t word; memcpy(&word, file + ph[i].p_offset + off, sizeof word);
++            if ((word & 0xffe0001fu) == 0xd4000001u) {
++                err("raw SVC instruction candidate at VA %#llx refused by KL_SVC_POLICY=reject (before guest mapping)",
++                    (unsigned long long)(ph[i].p_vaddr + off));
++                return -1;
++            }
++        }
++    }
++    return 0;
++}
++
+ kl_image *kl_load(const char *path) {
+     int fd = open(path, O_RDONLY);
+     if (fd < 0) { err("open %s: %s", path, strerror(errno)); return NULL; }
+     struct stat sb;
+     if (fstat(fd, &sb) != 0) { err("fstat: %s", strerror(errno)); close(fd); return NULL; }
++    if (sb.st_size < (off_t)sizeof(Elf64_Ehdr)) { err("truncated ELF header"); close(fd); return NULL; }
+     uint8_t *file = mmap(NULL, (size_t)sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+     close(fd);
+     if (file == MAP_FAILED) { err("mmap file: %s", strerror(errno)); return NULL; }
+@@ -1062,6 +1097,7 @@ kl_image *kl_load(const char *path) {
+     if (eh->e_machine != 183) { err("not AArch64 (e_machine=%u)", eh->e_machine);
+                                 munmap(file, sb.st_size); return NULL; }
+ 
++    if (reject_raw_svc(file, (size_t)sb.st_size, eh)) { munmap(file, sb.st_size); return NULL; }
+     const Elf64_Phdr *ph = (const Elf64_Phdr *)(file + eh->e_phoff);
+     uint64_t lo = UINT64_MAX, hi = 0;
+     for (int i = 0; i < eh->e_phnum; i++)
+-- 
+2.54.0 (Apple Git-157)
+

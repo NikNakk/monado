@@ -1,0 +1,3 @@
+  [vk] explicit Vulkan dispatch library: /private/tmp/klepton-vulkan-strict.QD6hiZ/driver.dylib
+  [vk] Vulkan dispatch loaded — instance API 1.0.0
+PASS: strict Vulkan preserves >64 extensions, layers/API/features/pNext; no retry, null substitution, graphics repair or success stub
