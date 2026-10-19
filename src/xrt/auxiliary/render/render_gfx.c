@@ -8,10 +8,12 @@
  * @ingroup aux_render
  */
 
+#include "util/u_misc.h"
 #include "vk/vk_mini_helpers.h"
 
 #include "render/render_interface.h"
 
+#include <assert.h>
 #include <stdio.h>
 
 
@@ -192,6 +194,8 @@ update_ubo_and_src_descriptor_set(struct vk_bundle *vk,
                                   uint32_t src_binding,
                                   VkSampler sampler,
                                   VkImageView image_view,
+                                  const struct render_sub_alloc *foveation,
+                                  uint32_t foveation_binding,
                                   VkDescriptorSet descriptor_set)
 {
 	VkDescriptorImageInfo image_info = {
@@ -206,7 +210,13 @@ update_ubo_and_src_descriptor_set(struct vk_bundle *vk,
 	    .range = size,
 	};
 
-	VkWriteDescriptorSet write_descriptor_sets[2] = {
+	VkDescriptorBufferInfo foveation_info = {
+	    .buffer = foveation != NULL ? foveation->buffer : VK_NULL_HANDLE,
+	    .offset = foveation != NULL ? foveation->offset : 0,
+	    .range = foveation != NULL ? foveation->size : 0,
+	};
+
+	VkWriteDescriptorSet write_descriptor_sets[3] = {
 	    {
 	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
 	        .dstSet = descriptor_set,
@@ -223,18 +233,73 @@ update_ubo_and_src_descriptor_set(struct vk_bundle *vk,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 	        .pBufferInfo = &buffer_info,
 	    },
+	    {
+	        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+	        .dstSet = descriptor_set,
+	        .dstBinding = foveation_binding,
+	        .descriptorCount = 1,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .pBufferInfo = &foveation_info,
+	    },
 	};
 
-	vk->vkUpdateDescriptorSets(            //
-	    vk->device,                        //
-	    ARRAY_SIZE(write_descriptor_sets), // descriptorWriteCount
-	    write_descriptor_sets,             // pDescriptorWrites
-	    0,                                 // descriptorCopyCount
-	    NULL);                             // pDescriptorCopies
+	// The foveation map is only written for the shaders that read it.
+	uint32_t write_count = foveation != NULL ? 3 : 2;
+
+	vk->vkUpdateDescriptorSets( //
+	    vk->device,             //
+	    write_count,            // descriptorWriteCount
+	    write_descriptor_sets,  // pDescriptorWrites
+	    0,                      // descriptorCopyCount
+	    NULL);                  // pDescriptorCopies
+}
+
+/// The foveation map buffer range for a draw: a sub-allocated copy of an
+/// enabled map, or the shared zeroed (disabled) one.
+XRT_CHECK_RESULT static VkResult
+foveation_alloc_and_write(struct render_gfx *render,
+                          const struct xrt_foveation_map_data *map,
+                          struct render_sub_alloc *out_rsa)
+{
+	struct render_resources *r = render->r;
+	struct vk_bundle *vk = vk_from_render(render);
+
+	if (map == NULL || map->enabled == 0) {
+		*out_rsa = (struct render_sub_alloc){
+		    .buffer = r->gfx.foveation_disabled_ubo.buffer,
+		    .size = sizeof(struct render_gfx_foveation_ubo_data),
+		    .offset = 0,
+		};
+		return VK_SUCCESS;
+	}
+
+	// Callers skip the draw for an invalid map, see render_gfx_foveation_map_is_valid.
+	assert(render_gfx_foveation_map_is_valid(map));
+
+	struct render_gfx_foveation_ubo_data *data = NULL;
+	VkResult ret = render_sub_alloc_ubo_alloc_and_get_ptr( //
+	    vk,                                                //
+	    &render->ubo_tracker,                              // rsat
+	    sizeof(*data),                                     // size
+	    (void **)&data,                                    // out_ptr
+	    out_rsa);                                          // out_rsa
+	VK_CHK_AND_RET(ret, "render_sub_alloc_ubo_alloc_and_get_ptr");
+
+	U_ZERO(data);
+	data->enabled = 1;
+	data->boundary_count = XRT_FOVEATION_MAP_BOUNDARY_COUNT;
+	for (uint32_t i = 0; i < XRT_FOVEATION_MAP_BOUNDARY_COUNT; ++i) {
+		data->x[i / 4u].v[i % 4u] = map->x[i];
+		data->y[i / 4u].v[i % 4u] = map->y[i];
+	}
+
+	return VK_SUCCESS;
 }
 
 /// Sub-allocate a UBO for our layer-specific data,
 /// and create a descriptor set for it and the layer image to sample.
+/// If @p foveation_binding is not UINT32_MAX, also writes the source's
+/// foveation map (NULL for none) there.
 XRT_CHECK_RESULT static VkResult
 do_ubo_and_src_alloc_and_write(struct render_gfx *render,
                                uint32_t ubo_binding,
@@ -243,15 +308,23 @@ do_ubo_and_src_alloc_and_write(struct render_gfx *render,
                                uint32_t src_binding,
                                VkSampler src_sampler,
                                VkImageView src_image_view,
+                               uint32_t foveation_binding,
+                               const struct xrt_foveation_map_data *src_foveation,
                                VkDescriptorPool descriptor_pool,
                                VkDescriptorSetLayout descriptor_set_layout,
                                VkDescriptorSet *out_descriptor_set)
 {
 	VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 	struct render_sub_alloc ubo = XRT_STRUCT_INIT;
+	struct render_sub_alloc foveation = XRT_STRUCT_INIT;
 	struct vk_bundle *vk = vk_from_render(render);
 
 	VkResult ret;
+
+	if (foveation_binding != UINT32_MAX) {
+		ret = foveation_alloc_and_write(render, src_foveation, &foveation);
+		VK_CHK_AND_RET(ret, "foveation_alloc_and_write");
+	}
 
 
 	/*
@@ -277,16 +350,18 @@ do_ubo_and_src_alloc_and_write(struct render_gfx *render,
 	    &descriptor_set);           //
 	VK_CHK_AND_RET(ret, "vk_create_descriptor_set");
 
-	update_ubo_and_src_descriptor_set( //
-	    vk,                            //
-	    ubo_binding,                   //
-	    ubo.buffer,                    //
-	    ubo.offset,                    //
-	    ubo.size,                      //
-	    src_binding,                   //
-	    src_sampler,                   //
-	    src_image_view,                //
-	    descriptor_set);               //
+	update_ubo_and_src_descriptor_set(                       //
+	    vk,                                                  //
+	    ubo_binding,                                         //
+	    ubo.buffer,                                          //
+	    ubo.offset,                                          //
+	    ubo.size,                                            //
+	    src_binding,                                         //
+	    src_sampler,                                         //
+	    src_image_view,                                      //
+	    foveation_binding != UINT32_MAX ? &foveation : NULL, //
+	    foveation_binding,                                   //
+	    descriptor_set);                                     //
 
 	*out_descriptor_set = descriptor_set;
 
@@ -1170,6 +1245,7 @@ render_gfx_end_view(struct render_gfx *render)
 XRT_CHECK_RESULT VkResult
 render_gfx_mesh_alloc_and_write(struct render_gfx *render,
                                 const struct render_gfx_mesh_ubo_data *data,
+                                const struct xrt_foveation_map_data *src_foveation,
                                 VkSampler src_sampler,
                                 VkImageView src_image_view,
                                 VkDescriptorSet *out_descriptor_set)
@@ -1184,6 +1260,8 @@ render_gfx_mesh_alloc_and_write(struct render_gfx *render,
 	    r->mesh.src_binding,                //
 	    src_sampler,                        //
 	    src_image_view,                     //
+	    r->mesh.foveation_binding,          //
+	    src_foveation,                      //
 	    r->gfx.ubo_and_src_descriptor_pool, //
 	    r->mesh.descriptor_set_layout,      //
 	    out_descriptor_set);                //
@@ -1289,6 +1367,8 @@ render_gfx_layer_cylinder_alloc_and_write(struct render_gfx *render,
 	    RENDER_BINDING_LAYER_SHARED_SRC,           // src_binding
 	    src_sampler,                               //
 	    src_image_view,                            //
+	    UINT32_MAX,                                // foveation_binding
+	    NULL,                                      // src_foveation
 	    r->gfx.ubo_and_src_descriptor_pool,        //
 	    r->gfx.layer.shared.descriptor_set_layout, //
 	    out_descriptor_set);                       //
@@ -1311,6 +1391,8 @@ render_gfx_layer_equirect2_alloc_and_write(struct render_gfx *render,
 	    RENDER_BINDING_LAYER_SHARED_SRC,           // src_binding
 	    src_sampler,                               //
 	    src_image_view,                            //
+	    UINT32_MAX,                                // foveation_binding
+	    NULL,                                      // src_foveation
 	    r->gfx.ubo_and_src_descriptor_pool,        //
 	    r->gfx.layer.shared.descriptor_set_layout, //
 	    out_descriptor_set);                       //
@@ -1319,6 +1401,7 @@ render_gfx_layer_equirect2_alloc_and_write(struct render_gfx *render,
 XRT_CHECK_RESULT VkResult
 render_gfx_layer_projection_alloc_and_write(struct render_gfx *render,
                                             const struct render_gfx_layer_projection_data *data,
+                                            const struct xrt_foveation_map_data *src_foveation,
                                             VkSampler src_sampler,
                                             VkImageView src_image_view,
                                             VkDescriptorSet *out_descriptor_set)
@@ -1333,6 +1416,8 @@ render_gfx_layer_projection_alloc_and_write(struct render_gfx *render,
 	    RENDER_BINDING_LAYER_SHARED_SRC,           // src_binding
 	    src_sampler,                               //
 	    src_image_view,                            //
+	    RENDER_BINDING_LAYER_PROJECTION_FOVEATION, // foveation_binding
+	    src_foveation,                             //
 	    r->gfx.ubo_and_src_descriptor_pool,        //
 	    r->gfx.layer.shared.descriptor_set_layout, //
 	    out_descriptor_set);                       //
@@ -1355,6 +1440,8 @@ render_gfx_layer_quad_alloc_and_write(struct render_gfx *render,
 	    RENDER_BINDING_LAYER_SHARED_SRC,           // src_binding
 	    src_sampler,                               //
 	    src_image_view,                            //
+	    UINT32_MAX,                                // foveation_binding
+	    NULL,                                      // src_foveation
 	    r->gfx.ubo_and_src_descriptor_pool,        //
 	    r->gfx.layer.shared.descriptor_set_layout, //
 	    out_descriptor_set);                       //

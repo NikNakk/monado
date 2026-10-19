@@ -43,11 +43,12 @@ XRT_CHECK_RESULT static VkResult
 create_gfx_ubo_and_src_descriptor_set_layout(struct vk_bundle *vk,
                                              uint32_t ubo_binding,
                                              uint32_t src_binding,
+                                             uint32_t foveation_binding,
                                              VkDescriptorSetLayout *out_descriptor_set_layout)
 {
 	VkResult ret;
 
-	VkDescriptorSetLayoutBinding set_layout_bindings[2] = {
+	VkDescriptorSetLayoutBinding set_layout_bindings[3] = {
 	    {
 	        .binding = src_binding,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -59,6 +60,13 @@ create_gfx_ubo_and_src_descriptor_set_layout(struct vk_bundle *vk,
 	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
 	        .descriptorCount = 1,
 	        .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+	    },
+	    {
+	        // Foveation map of the source, see render_gfx_foveation_ubo_data.
+	        .binding = foveation_binding,
+	        .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+	        .descriptorCount = 1,
+	        .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
 	    },
 	};
 
@@ -462,6 +470,7 @@ render_resources_init(struct render_resources *r,
 	r->view_count = xdev->hmd->view_count;
 	r->mesh.src_binding = 0;
 	r->mesh.ubo_binding = 1;
+	r->mesh.foveation_binding = 2;
 	struct xrt_hmd_parts *parts = xdev->hmd;
 	for (uint32_t i = 0; i < r->view_count; ++i) {
 		render_calc_uv_to_tangent_lengths_rect(&parts->distortion.fov[i], &r->distortion.uv_to_tanangle[i]);
@@ -677,7 +686,8 @@ render_resources_init(struct render_resources *r,
 		const uint32_t mesh_shader_count = RENDER_MAX_LAYER_RUNS_COUNT(r);
 
 		struct vk_descriptor_pool_info mesh_pool_info = {
-		    .uniform_per_descriptor_count = 1,
+		    // The draw's UBO and its source's foveation map.
+		    .uniform_per_descriptor_count = 2,
 		    .sampler_per_descriptor_count = 1,
 		    .storage_image_per_descriptor_count = 0,
 		    .storage_buffer_per_descriptor_count = 0,
@@ -713,6 +723,12 @@ render_resources_init(struct render_resources *r,
 		// Calculate size.
 		VkDeviceSize size = buffer_count * RENDER_ALWAYS_SAFE_UBO_ALIGNMENT;
 
+		// Foveation maps for the foveated draws, larger than one slot each.
+		const VkDeviceSize foveation_slot_size =
+		    (sizeof(struct render_gfx_foveation_ubo_data) + RENDER_ALWAYS_SAFE_UBO_ALIGNMENT - 1) /
+		    RENDER_ALWAYS_SAFE_UBO_ALIGNMENT * RENDER_ALWAYS_SAFE_UBO_ALIGNMENT;
+		size += RENDER_MAX_LAYER_RUNS_COUNT(r) * RENDER_GFX_MAX_FOVEATED_DRAWS_PER_VIEW * foveation_slot_size;
+
 		ret = render_buffer_init(  //
 		    vk,                    // vk_bundle
 		    &r->gfx.shared_ubo,    // buffer
@@ -726,6 +742,24 @@ render_resources_init(struct render_resources *r,
 		    vk,                  // vk_bundle
 		    &r->gfx.shared_ubo); // buffer
 		VK_CHK_WITH_RET(ret, "render_buffer_map", false);
+
+		// Bound for every draw whose source is not foveated.
+		struct render_gfx_foveation_ubo_data foveation_disabled = XRT_STRUCT_INIT;
+		ret = render_buffer_init(           //
+		    vk,                             // vk_bundle
+		    &r->gfx.foveation_disabled_ubo, // buffer
+		    usage_flags,                    // usage_flags
+		    memory_property_flags,          // memory_property_flags
+		    sizeof(foveation_disabled));    // size
+		VK_CHK_WITH_RET(ret, "render_buffer_init", false);
+
+		ret = render_buffer_write(          //
+		    vk,                             // vk_bundle
+		    &r->gfx.foveation_disabled_ubo, // buffer
+		    &foveation_disabled,            // data
+		    sizeof(foveation_disabled));    // size
+		VK_CHK_WITH_RET(ret, "render_buffer_write", false);
+		VK_NAME_BUFFER(vk, r->gfx.foveation_disabled_ubo.buffer, "render_resources gfx foveation disabled ubo");
 	}
 
 
@@ -737,6 +771,7 @@ render_resources_init(struct render_resources *r,
 	    vk,                                             // vk_bundle
 	    RENDER_BINDING_LAYER_SHARED_UBO,                // ubo_binding
 	    RENDER_BINDING_LAYER_SHARED_SRC,                // src_binding
+	    RENDER_BINDING_LAYER_PROJECTION_FOVEATION,      // foveation_binding
 	    &r->gfx.layer.shared.descriptor_set_layout);    // out_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_gfx_ubo_and_src_descriptor_set_layout", false);
 
@@ -761,6 +796,7 @@ render_resources_init(struct render_resources *r,
 	    vk,                                             // vk_bundle
 	    r->mesh.ubo_binding,                            // ubo_binding
 	    r->mesh.src_binding,                            // src_binding
+	    r->mesh.foveation_binding,                      // foveation_binding
 	    &r->mesh.descriptor_set_layout);                // out_mesh_descriptor_set_layout
 	VK_CHK_WITH_RET(ret, "create_gfx_ubo_and_src_descriptor_set_layout", false);
 
@@ -1166,6 +1202,7 @@ render_resources_fini(struct render_resources *r)
 	DF(Memory, r->mock.color.memory);
 
 	render_buffer_fini(vk, &r->gfx.shared_ubo);
+	render_buffer_fini(vk, &r->gfx.foveation_disabled_ubo);
 	D(DescriptorPool, r->gfx.ubo_and_src_descriptor_pool);
 
 	D(DescriptorSetLayout, r->gfx.layer.shared.descriptor_set_layout);

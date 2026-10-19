@@ -74,7 +74,7 @@ ordinary OpenXR projection layer
 Monado compositor
         |
         | exact matching 129-sample logical -> physical map
-        | existing distortion/timewarp compute path
+        | distortion/timewarp pass (compute or graphics)
         v
 display
 ```
@@ -200,8 +200,9 @@ The same Metal cache retains the exact dense logical-to-physical transform used
 to construct the rate map. At projection submission the OpenXR state tracker
 copies that map into `xrt_foveation_map_data`.
 
-The existing compute distortion/timewarp shader already understands this data,
-so for a single projection layer the compositor performs, in one pass:
+The compute distortion/timewarp shader and the graphics path's mesh distortion
+shader both understand this data, so for a single projection layer the
+compositor performs, in one pass:
 
 1. timewarp;
 2. optical/chromatic distortion;
@@ -214,9 +215,30 @@ Frames that need the layer squasher (more than one layer, passthrough, colour
 bias/scale) apply the same reconstruction in `layer.comp` from a small per-run
 foveation UBO holding up to eight maps per view. A projection layer carrying a
 map that cannot be applied is not composited rather than being sampled with the
-wrong transform. The graphics (non-compute) compositor path cannot reconstruct
-foveated images and logs an error once if it sees one; compute is the default
-on macOS.
+wrong transform.
+
+### Graphics compositor path
+
+The graphics (non-compute) path, which the WSI presenters use by default, does
+the same reconstruction since 2026-10-19:
+
+- **Single projection layer:** `mesh.frag` remaps each colour channel's UV per
+  fragment. The vertex shader cannot do it: the map is piecewise linear in 128
+  cells, far finer than the distortion mesh.
+- **Layer squasher:** `layer_projection.frag` remaps the layer's UV before
+  sampling. As in `layer.comp`, up to eight foveated projection layers per view
+  are composited; further ones, and maps with the wrong sample count, are
+  skipped and logged once.
+- **Data:** both shaders include `foveation.inc.glsl` and read one map from a
+  third uniform binding (`render_gfx_foveation_ubo_data`, about 1 KiB, too large
+  for the 256-byte per-draw UBO slots). Enabled maps are sub-allocated from the
+  shared graphics UBO, which grew to hold them. Draws without a map bind a
+  shared zeroed buffer, so the only per-draw cost is a uniform branch.
+
+`tests_render_compute` checks both draws on a Vulkan device
+(`[foveation]`): a source whose texels encode their own coordinates is drawn
+with and without a map, and every sample must land where the CPU reference of
+the map says.
 
 ## Runtime-owned eye tracking and privacy
 
@@ -424,6 +446,8 @@ worn or fail to recover.
   (unit-tested; see above);
 - foveated projection layers through the layer squasher, e.g. with
   `--passthrough` or multi-layer Chromium immersive media;
+- the graphics compositor path (WSI presenters) on MoltenVK, both the single
+  layer and the squasher; it has run only on lavapipe so far;
 - the in-process (direct) Metal swapchain path with the standard extensions;
 - Chromium using the standard path;
 - performance comparisons between off, fixed and eye-tracked foveation.
@@ -444,7 +468,8 @@ includes:
 - per-image Metal map association, lifetime and packed layouts
   (`tests_metal_foveation_cache`, skipped where Metal lacks rate maps);
 - Metal swapchain transport across vanilla, direct and service/XPC paths;
-- compositor use of the matching dense map;
+- compositor use of the matching dense map, on the compute path and (on a
+  Vulkan device) the graphics path;
 - the end-to-end diagnostic build.
 
 ## Framework and Wine validation plan, 2026-10-08
