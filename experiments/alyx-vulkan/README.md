@@ -125,3 +125,17 @@ clang -pthread experiments/alyx-vulkan/host-adapter-smoke.c \
 XRIZER_VRCLIENT=/private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib \
   /tmp/alyx-adapter-smoke
 ```
+
+## Read-only ARM64 inventory (20 October)
+
+```sh
+python3 experiments/alyx-vulkan/inspect-arm64.py \
+  --depot '/Users/nickkennedy/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steamapps/content/app_546560/depot_546564' \
+  --output /tmp/alyx-static-new
+```
+
+This only reads ELF files and produces hashes, strings, symbol metadata and
+candidate string references. It never loads libraries or translates code.
+It hashes the inspected files again afterwards and fails if any changed.
+Read the [manual audit](../../doc/macos-alyx-arm64-static-audit.md) for checked
+interpretations; candidate addresses alone do not prove execution or control flow.

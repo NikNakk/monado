@@ -3,6 +3,12 @@ SPDX-License-Identifier: BSL-1.0 -->
 
 # Native ARM64 Alyx: dual Vulkan investigation — 19 October 2026
 
+**20 October follow-up:** ARM64 game binaries are now available. The
+[read-only binary and host-patch audit](macos-alyx-arm64-static-audit.md) establishes
+CPU-authored FDM and per-eye offset code paths, plus a possible callback-based
+replacement for the Lua instruction repair. No game has been run. The
+19 October unavailability statements below describe that initial checkpoint.
+
 **Stop-point result:** selectable ICDs, a built native xrizer host adapter, initial
 foveation tracing and offscreen tests are ready. **KosmicKrisp is not yet a working
 Monado/OpenXR backend.** It lacks `VK_EXT_metal_objects`, required for the existing

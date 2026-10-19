@@ -10,8 +10,10 @@ SPDX-License-Identifier: BSL-1.0
 The [native ARM64 Alyx dual-Vulkan investigation](macos-alyx-kosmickrisp.md)
 now builds/selects KosmicKrisp and MoltenVK in isolation. MoltenVK passes xrizer
 stereo submissions; KosmicKrisp is blocked by missing standard Metal-object
-interop. Native game files and actual Alyx foveation evidence remain unavailable.
-No installed-runtime change or full FDM implementation is included.
+interop. ARM64 binaries are now downloaded: the [20 October read-only audit](macos-alyx-arm64-static-audit.md)
+identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
+branch patch. Actual game calls remain unobserved. No installed-runtime change
+or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now
 integrated locally into `macos-upstream-clean` by the user-approved fast-forward
