@@ -99,3 +99,81 @@ are promising, but Metal sampling semantics/reconstruction still require proof.
 KosmicKrisp remains blocked at Monado interoperability by missing
 `VK_EXT_metal_objects`; this follow-up does not resolve it. No FDM extension or
 accelerated prototype was implemented or advertised.
+
+## Managed thread-lifetime implementation follow-up
+
+The next step is now implemented as an **opt-in prototype**. Klepton is at
+`e7c22d9` (implementation `1b05bbf`, TLS prerequisite `28ca4de`); VeRantyx is at
+`0659a70` (host integration `d1e8185`). Signed, reconstructable patches are
+`klepton-guest-threads.patch` and `verantyx-guest-threads.patch` in the existing
+experiment patch directory. The default remains `KL_GUEST_THREAD_TRACKING=0`.
+
+With tracking enabled, guest pthreads enter a mutex-protected registry before
+running their callback. A bottom cleanup handler records body completion for
+normal return, explicit pthread_exit and deferred cancellation. Allocated guest
+pthread-key tables and ELF/C++ TLS blocks keep an entry alive until their guest
+destructors finish. Completed entries are removed, without kernel liveness
+fallback, fixed limits or tombstones. Entry gettid paths register the initial
+thread as well. The older diagnostic thread registry remains separate, with
+cancellation now covered by its trampoline cleanup.
+
+The host's signal-zero thread probe consumes this registry. `tkill` and
+same-process `tgkill` return ESRCH for completed/unknown managed IDs;
+cross-process tgkill returns ENOSYS. In this opt-in mode the **interposed** Linux
+syscall 93 (`exit`) follows pthread_exit, rather than killing the whole host.
+This does not handle inline raw SVC, clone, clear_child_tid or robust-futex exit.
+Nonzero signals remain a separate audit.
+
+A TLS prerequisite fixes an existing uninitialized read: temporary pthread key
+allocation now initially passes a null destructor, before recreating the desired
+slot with its actual destructor. The registry itself avoids native C
+thread-local storage. An initial real-shim test aborted because Darwin could
+tear that storage down before pthread-key destructors still needed the registry;
+bookkeeping is now looked up by current thread ID under its mutex instead.
+
+### Results and reproduction
+
+```sh
+make -C /private/tmp/alyx-verantyx/NativeARM/host \
+  KL=/private/tmp/alyx-klepton OUT=/private/tmp/alyx-constrained-host-build \
+  HOST_MODE=constrained VR_RUNTIME=xrizer check-guest-threads
+```
+
+The fixture links the **actual Klepton and host shims**, not mocked thread
+functions. Its callbacks are owned native test code; it loads no ELF/game.
+It has a 30-second execution timeout.
+
+- Nine cases pass: normal return, pthread_exit, deferred cancellation, C++ TLS
+  plus pthread-key destructors, four rounds of pthread-key destructors, detach,
+  interposed syscall(exit), nested C++ TLS destructor registration and
+  pthread-key-to-C++ TLS destructor registration.
+- Each case proves liveness while the guest destructor is blocked, then ESRCH
+  after completion. Signal-zero tkill/tgkill test both live and completed IDs;
+  unrelated target processes fail explicitly with ENOSYS.
+- 100 fast threads alternate normal return and explicit exit without guest
+  destructor tables; every completed ID gives ESRCH after join.
+- Existing Lua setter fixture, native kernel-thread fixture and constrained CLI/
+  symbol checks still pass. Both legacy and constrained hosts compile/link.
+  The known host `tmpnam` deprecation warning remains.
+
+Evidence: `doc/alyx-constrained-host-results/guest-threads.log` and
+`lifecycle-regression.log`. Source trees are isolated; installed Monado,
+primary checkouts and game files were not touched. This follow-up did not read
+or execute game binaries and did not repeat GPU benchmarks.
+
+### Remaining launch gates
+
+This addresses the retained-kernel-thread problem for **managed, shim-created
+threads in the tested paths**. It does not prove that Alyx's video patch is
+unnecessary in actual playback. Guest glibc cancellation/unwind/cleanup ABI,
+unmanaged native-to-guest callbacks, async cancellation, fork, integer-width
+gettid limits and the initial thread's explicit-exit lifecycle remain unverified.
+An entry created solely by gettid without a managed exit can remain conservatively
+live. The state represents completion of managed guest callbacks/destructors,
+not the last native kernel teardown instruction. The prototype does not claim
+complete Linux thread semantics.
+
+The constrained launch gate stays intact. Next: strict Vulkan request/error
+handling and the raw-syscall translation audit, followed by actual Valve Lua
+allocator lifecycle validation once the guest-execution boundary is settled.
+No FDM implementation or extension advertisement was added.

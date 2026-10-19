@@ -1,0 +1,376 @@
+From d1e818594262456b20e80b31c957a717ac9cb70d Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 00:28:32 +0200
+Subject: [PATCH 1/2] host: use opt-in guest lifetime for thread probes and
+ test real shims
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile              |  11 ++-
+ NativeARM/host/XRIZER.md             |  25 +++++
+ NativeARM/host/kl_glibc.c            |  20 +++-
+ NativeARM/host/kl_thread_probe.c     |   5 +
+ NativeARM/host/tests/guest_threads.c | 134 +++++++++++++++++++++++++++
+ 5 files changed, 190 insertions(+), 5 deletions(-)
+ create mode 100644 NativeARM/host/tests/guest_threads.c
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index 7fad4ca..ab50baa 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -86,8 +86,8 @@ check-lua-builtin:
+ 
+ check-thread-probe:
+ 	@mkdir -p $(OUT)
+-	$(CC) $(CFLAGS) -o $(OUT)/check-thread-probe tests/thread_probe.c kl_thread_probe.c -I.
+-	$(OUT)/check-thread-probe
++	$(CC) $(CFLAGS) -o $(OUT)/check-thread-probe tests/thread_probe.c kl_thread_probe.c $(KL)/runtime/kl_guest_threads.c $(KL)/runtime/kl_env.c -I.
++	KL_GUEST_THREAD_TRACKING=0 $(OUT)/check-thread-probe
+ 
+ .PHONY: check-thread-probe
+ 
+@@ -101,3 +101,10 @@ check-host-mode:
+ 
+ $(RT_OBJS) $(HOST_OBJS) $(VRRT_OBJS): | check-host-mode
+ .PHONY: check-host-mode
++
++# Real Klepton pthread/TLS shims, host-owned callbacks, no ELF/game loading.
++check-guest-threads: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/check-guest-threads tests/guest_threads.c $^ $(LDLIBS) -I.
++	KL_GUEST_THREAD_TRACKING=1 python3 -c 'import subprocess,sys; subprocess.run([sys.argv[1]], check=True, timeout=30)' $(OUT)/check-guest-threads
++
++.PHONY: check-guest-threads
+diff --git a/NativeARM/host/XRIZER.md b/NativeARM/host/XRIZER.md
+index 2d938db..dabe3ce 100644
+--- a/NativeARM/host/XRIZER.md
++++ b/NativeARM/host/XRIZER.md
+@@ -73,3 +73,28 @@ the strength of the existing kernel query.
+ Still unverified: Valve Lua mmap/mremap growth, shrink, allocation failure,
+ 47-bit addressing and teardown; page-size handling outside Lua; guest syscall
+ translation and actual Alyx/OpenVR/Vulkan calls. No game was launched here.
++
++### Managed guest-thread prototype
++
++With the matching experimental Klepton revision, `KL_GUEST_THREAD_TRACKING=1`
++uses managed guest lifetime for signal-zero thread probes, rather than the
++kernel query. Default remains off. Entries stay live through guest cleanup,
++pthread-key and C++ TLS destructors, then disappear even if macOS retains a
++kernel thread. Interposed Linux syscall 93 exits the current pthread in this
++mode; cross-process tgkill queries return ENOSYS. Raw SVC and nonzero signals
++remain separate work.
++
++```sh
++make -C NativeARM/host KL=/private/tmp/alyx-klepton \
++  OUT=/private/tmp/alyx-constrained-host-build HOST_MODE=constrained \
++  VR_RUNTIME=xrizer check-guest-threads
++```
++
++This runs real Klepton/host shims with owned native callbacks and a 30-second
++timeout, without loading ELF/game code. Seven lifecycle cases cover return,
++exit, deferred cancellation, C++ TLS, repeated pthread-key destructors, detached
++threads and interposed syscall(exit), plus live/dead signal-zero queries and
++100 fast return/exit cycles. The constrained launch gate stays in place.
++Actual game glibc unwind/cancellation ABI, unmanaged guest callbacks, async
++cancellation, fork, raw SVC/clone/clear_child_tid and nonzero-signal semantics
++are unverified. See Klepton's `GUEST_THREADS.md` for the scope of this prototype.
+diff --git a/NativeARM/host/kl_glibc.c b/NativeARM/host/kl_glibc.c
+index 74a9c65..1d46fa6 100644
+--- a/NativeARM/host/kl_glibc.c
++++ b/NativeARM/host/kl_glibc.c
+@@ -1,4 +1,5 @@
+ #include "kl_thread_probe.h"
++#include "kl_guest_threads.h"
+ // glibc symbol layer for Klepton.
+ //
+ // Klepton's shim translates bionic (Android libc) names to Darwin. Valve's
+@@ -311,7 +312,7 @@ long klgh_syscall(long nr, kl_va *va) {
+     long a[6];
+     for (int i = 0; i < 6; i++) a[i] = (long)kl_va_gp(va);
+     switch (nr) {
+-    case 178: { uint64_t t = 0; pthread_threadid_np(NULL, &t); return (long)t; }          // gettid
++    case 178: { kl_guest_thread_enter(); uint64_t t = 0; pthread_threadid_np(NULL, &t); return (long)t; }          // gettid
+     case 278: arc4random_buf((void *)a[0], (size_t)a[1]); return a[1];                     // getrandom
+     case 101: { struct timespec ts = { 0, 0 }; const struct timespec *rq = (const struct timespec *)a[0]; if (rq) nanosleep(rq, &ts); return 0; } // nanosleep
+     case 172: return getpid();                                                               // getpid
+@@ -324,6 +325,11 @@ long klgh_syscall(long nr, kl_va *va) {
+     case 131: case 130: {
+         long tid = nr == 131 ? a[1] : a[0], sig = nr == 131 ? a[2] : a[1];
+         if (sig == 0) {
++            // Tracking covers only this host process. Do not answer for an
++            // unrelated process merely because its tid matches a local ID.
++            if (kl_guest_thread_tracking() && nr == 131 && a[0] != getpid()) {
++                errno = ENOSYS; return -1;
++            }
+             return kl_thread_probe(tid);
+         }
+         uint64_t self = 0; pthread_threadid_np(NULL, &self);
+@@ -332,7 +338,15 @@ long klgh_syscall(long nr, kl_va *va) {
+         if (lower) return lower(nr, a[0], a[1], a[2], a[3], a[4], a[5]);   // another thread, real signal
+         errno = ENOSYS; return -1;
+     }
+-    case 93: exit_trace("syscall(exit)", (int)a[0]); fflush(NULL); _exit((int)a[0]);      // exit
++    case 93:
++        if (kl_guest_thread_tracking()) {
++            // Linux exit ends only the calling thread. pthread_exit runs the
++            // managed trampoline cleanup; it must not terminate the process.
++            void (*thread_exit)(void *) = (void (*)(void *))B("pthread_exit");
++            if (thread_exit) thread_exit((void *)(intptr_t)a[0]);
++            errno = ENOSYS; return -1;
++        }
++        exit_trace("syscall(exit)", (int)a[0]); fflush(NULL); _exit((int)a[0]);      // exit
+     case 94: exit_trace("syscall(exit_group)", (int)a[0]); fflush(NULL); _exit((int)a[0]); // exit_group
+     default: {
+         // Klepton's raw-syscall shim: futex (which Source 2's thread primitives
+@@ -638,7 +652,7 @@ static int klg_pthread_setaffinity_np(pthread_t t, size_t size, const void *set)
+ static int klg_pthread_getaffinity_np(pthread_t t, size_t size, uint64_t *set) { return klg_sched_getaffinity(0, size, set); }
+ static int klg_get_nprocs(void) { return ncpu(); }
+ static int klg_sched_getcpu(void) { return 0; }
+-static int klg_gettid(void) { uint64_t t = 0; pthread_threadid_np(NULL, &t); return (int)t; }
++static int klg_gettid(void) { kl_guest_thread_enter(); uint64_t t = 0; pthread_threadid_np(NULL, &t); return (int)t; }
+ static int klg_prctl(int opt, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5) {
+     if (opt == 15) { pthread_setname_np((const char *)(uintptr_t)a2); return 0; }    // PR_SET_NAME
+     if (opt == 16) { pthread_getname_np(pthread_self(), (char *)(uintptr_t)a2, 16); return 0; }
+diff --git a/NativeARM/host/kl_thread_probe.c b/NativeARM/host/kl_thread_probe.c
+index 7b914cc..33d62ac 100644
+--- a/NativeARM/host/kl_thread_probe.c
++++ b/NativeARM/host/kl_thread_probe.c
+@@ -6,11 +6,16 @@
+ #include <libproc.h>
+ #include <sys/proc_info.h>
+ #include "kl_thread_probe.h"
++#include "kl_guest_threads.h"
+ 
+ // Klepton exposes pthread_threadid_np IDs as guest gettid values. Probe only
+ // this process. A cached kernel thread may outlive pthread_join; this is NOT
+ // sufficient for Linux guest thread-exit semantics. Never translate these IDs into pthread_t or send a real signal.
+ long kl_thread_probe(long tid) {
++    if (kl_guest_thread_tracking()) {
++        if (tid > 0 && kl_guest_thread_alive((uint64_t)tid)) return 0;
++        errno = ESRCH; return -1;
++    }
+     struct proc_threadinfo info;
+     if (tid > 0 && proc_pidinfo(getpid(), PROC_PIDTHREADID64INFO,
+                               (uint64_t)tid, &info, sizeof info) == sizeof info)
+diff --git a/NativeARM/host/tests/guest_threads.c b/NativeARM/host/tests/guest_threads.c
+new file mode 100644
+index 0000000..e01d07e
+--- /dev/null
++++ b/NativeARM/host/tests/guest_threads.c
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: BSL-1.0
++// Copyright 2026, Nick Kennedy
++// Executes real shim paths with owned callbacks; never loads game/ELF code.
++#include <assert.h>
++#include <errno.h>
++#include <pthread.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <unistd.h>
++#include "klepton.h"
++#include "kl_glibc.h"
++#include "kl_thread_probe.h"
++#include "kl_guest_threads.h"
++#include "kl_va.h"
++extern long klgh_syscall(long, kl_va *);
++static long guest_syscall(long n, long a, long b, long c) {
++    long regs[6] = {a, b, c, 0, 0, 0};
++    kl_va va = {.gr_top = regs + 6, .gr_offs = -48};
++    return klgh_syscall(n, &va);
++}
++extern void *kl_shim_lookup(const char *);
++extern int kl_tls_thread_atexit(void (*)(void *), void *, void *);
++static int (*create_guest)(pthread_t *, const void *, void *(*)(void *), void *);
++static int (*join_guest)(pthread_t, void **);
++static int (*detach_guest)(pthread_t);
++static void (*exit_guest)(void *);
++static int (*key_create)(int *, void (*)(void *));
++static int (*key_delete)(int);
++static int (*setspecific_guest)(int, const void *);
++static int (*gettid_guest)(void);
++static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
++static pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
++static int ready, release_body, in_dtor, release_dtor, mode, dtor_count;
++static uint64_t tid;
++static int key;
++static void cleanup(void *p) {
++    // Guest cleanup handlers must still see themselves alive on pthread_exit/cancel.
++    assert(kl_thread_probe(tid) == 0);
++}
++static void destructor(void *p) {
++    pthread_mutex_lock(&mu);
++    assert(kl_thread_probe(tid) == 0);
++    ++dtor_count;
++    if (mode == 4 && dtor_count < 4) assert(!setspecific_guest(key, p));
++    in_dtor = 1; pthread_cond_signal(&cv);
++    while (!release_dtor) pthread_cond_wait(&cv, &mu);
++    pthread_mutex_unlock(&mu);
++}
++static void unlock(void *p) { pthread_mutex_unlock(&mu); }
++static void *worker(void *p) {
++    pthread_cleanup_push(cleanup, NULL);
++    assert(!pthread_threadid_np(NULL, &tid));
++    assert((uint64_t)gettid_guest() == tid);
++    assert(kl_thread_probe(tid) == 0);
++    assert(!setspecific_guest(key, (void *)1));
++    if (mode == 3) assert(!kl_tls_thread_atexit(destructor, (void *)2, NULL));
++    pthread_mutex_lock(&mu);
++    pthread_cleanup_push(unlock, NULL);
++    ready = 1; pthread_cond_signal(&cv);
++    while (!release_body) pthread_cond_wait(&cv, &mu);
++    pthread_cleanup_pop(1);
++    if (mode == 1) exit_guest((void *)42);
++    if (mode == 6) guest_syscall(93, 42, 0, 0);
++    pthread_cleanup_pop(1);
++    return (void *)42;
++}
++static void *fast_exit(void *p) {
++    uint64_t id; assert(!pthread_threadid_np(NULL, &id));
++    exit_guest((void *)(uintptr_t)id);
++    return NULL;
++}
++static void *fast(void *p) {
++    uint64_t id; assert(!pthread_threadid_np(NULL, &id));
++    return (void *)(uintptr_t)id;
++}
++int main(void) {
++    setvbuf(stdout, NULL, _IONBF, 0);
++    kl_glibc_install("guest-thread-fixture");
++    create_guest = kl_shim_lookup("pthread_create");
++    join_guest = kl_shim_lookup("pthread_join");
++    detach_guest = kl_shim_lookup("pthread_detach");
++    exit_guest = kl_shim_lookup("pthread_exit");
++    key_create = kl_shim_lookup("pthread_key_create");
++    key_delete = kl_shim_lookup("pthread_key_delete");
++    setspecific_guest = kl_shim_lookup("pthread_setspecific");
++    gettid_guest = kl_shim_lookup("gettid");
++    assert(create_guest && join_guest && detach_guest && exit_guest && key_create && key_delete && setspecific_guest && gettid_guest);
++    assert(kl_guest_thread_tracking());
++    gettid_guest(); // register this guest entry thread
++    uint64_t self; assert(!pthread_threadid_np(NULL, &self));
++    assert(kl_thread_probe(self) == 0);
++    assert(kl_thread_probe(-1) == -1 && errno == ESRCH);
++    for (mode = 0; mode < 7; ++mode) {
++        ready = release_body = in_dtor = release_dtor = dtor_count = 0;
++        assert(!key_create(&key, destructor));
++        pthread_t thread; assert(!create_guest(&thread, NULL, worker, NULL));
++        pthread_mutex_lock(&mu);
++        while (!ready) pthread_cond_wait(&cv, &mu);
++        assert(kl_thread_probe(tid) == 0);
++        assert(guest_syscall(130, tid, 0, 0) == 0);
++        assert(guest_syscall(131, getpid(), tid, 0) == 0);
++        errno = 0;
++        assert(guest_syscall(131, getpid() + 100000, tid, 0) == -1 && errno == ENOSYS);
++        if (mode == 5) assert(!detach_guest(thread));
++        if (mode == 2) assert(!pthread_cancel(thread));
++        else { release_body = 1; pthread_cond_signal(&cv); }
++        while (!in_dtor) pthread_cond_wait(&cv, &mu);
++        assert(kl_thread_probe(tid) == 0); // keep live throughout blocked guest dtor
++        release_dtor = 1; pthread_cond_signal(&cv);
++        pthread_mutex_unlock(&mu);
++        if (mode != 5) {
++            void *result; assert(!join_guest(thread, &result));
++            assert(result == (mode == 2 ? PTHREAD_CANCELED : (void *)42));
++        } else {
++            // Detached thread: await registry removal, not a Darwin pthread handle.
++            for (int i = 0; i < 10000 && kl_thread_probe(tid) == 0; ++i) usleep(100);
++        }
++        assert(kl_thread_probe(tid) == -1 && errno == ESRCH);
++        assert(guest_syscall(130, tid, 0, 0) == -1 && errno == ESRCH);
++        assert(guest_syscall(131, getpid(), tid, 0) == -1 && errno == ESRCH);
++        assert(dtor_count == (mode == 3 ? 2 : mode == 4 ? 4 : 1));
++        assert(!key_delete(key));
++        printf("PASS mode %d: live through destructor, ESRCH after completion\n", mode);
++    }
++    // Repeated fast exits catch stale entries and kernel-thread reuse.
++    for (int i = 0; i < 100; ++i) {
++        pthread_t t;
++        assert(!create_guest(&t, NULL, i & 1 ? fast_exit : fast, NULL));
++        void *id;
++        assert(!join_guest(t, &id));
++        assert(kl_thread_probe((long)(uintptr_t)id) == -1 && errno == ESRCH);
++    }
++    puts("PASS: return/exit/cancel/C++ TLS/repeated TSD/detach/syscall-exit, tkill/tgkill, 100 fast threads");
++}
+-- 
+2.54.0 (Apple Git-157)
+
+
+From 0659a70aab4d515b06cd2f884e1e4eebda6161f3 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 00:29:04 +0200
+Subject: [PATCH 2/2] test: cover nested and cross-domain guest thread
+ destructors
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/XRIZER.md             |  5 +++--
+ NativeARM/host/tests/guest_threads.c | 10 ++++++----
+ 2 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/NativeARM/host/XRIZER.md b/NativeARM/host/XRIZER.md
+index dabe3ce..7da2ad7 100644
+--- a/NativeARM/host/XRIZER.md
++++ b/NativeARM/host/XRIZER.md
+@@ -91,9 +91,10 @@ make -C NativeARM/host KL=/private/tmp/alyx-klepton \
+ ```
+ 
+ This runs real Klepton/host shims with owned native callbacks and a 30-second
+-timeout, without loading ELF/game code. Seven lifecycle cases cover return,
++timeout, without loading ELF/game code. Nine lifecycle cases cover return,
+ exit, deferred cancellation, C++ TLS, repeated pthread-key destructors, detached
+-threads and interposed syscall(exit), plus live/dead signal-zero queries and
++threads, interposed syscall(exit) and nested/cross-domain destructor registration,
++plus live/dead signal-zero queries and
+ 100 fast return/exit cycles. The constrained launch gate stays in place.
+ Actual game glibc unwind/cancellation ABI, unmanaged guest callbacks, async
+ cancellation, fork, raw SVC/clone/clear_child_tid and nonzero-signal semantics
+diff --git a/NativeARM/host/tests/guest_threads.c b/NativeARM/host/tests/guest_threads.c
+index e01d07e..ea261a5 100644
+--- a/NativeARM/host/tests/guest_threads.c
++++ b/NativeARM/host/tests/guest_threads.c
+@@ -41,6 +41,8 @@ static void destructor(void *p) {
+     pthread_mutex_lock(&mu);
+     assert(kl_thread_probe(tid) == 0);
+     ++dtor_count;
++    if ((mode == 7 && p == (void *)2) || (mode == 8 && p == (void *)1))
++        assert(!kl_tls_thread_atexit(destructor, (void *)3, NULL));
+     if (mode == 4 && dtor_count < 4) assert(!setspecific_guest(key, p));
+     in_dtor = 1; pthread_cond_signal(&cv);
+     while (!release_dtor) pthread_cond_wait(&cv, &mu);
+@@ -53,7 +55,7 @@ static void *worker(void *p) {
+     assert((uint64_t)gettid_guest() == tid);
+     assert(kl_thread_probe(tid) == 0);
+     assert(!setspecific_guest(key, (void *)1));
+-    if (mode == 3) assert(!kl_tls_thread_atexit(destructor, (void *)2, NULL));
++    if (mode == 3 || mode == 7) assert(!kl_tls_thread_atexit(destructor, (void *)2, NULL));
+     pthread_mutex_lock(&mu);
+     pthread_cleanup_push(unlock, NULL);
+     ready = 1; pthread_cond_signal(&cv);
+@@ -90,7 +92,7 @@ int main(void) {
+     uint64_t self; assert(!pthread_threadid_np(NULL, &self));
+     assert(kl_thread_probe(self) == 0);
+     assert(kl_thread_probe(-1) == -1 && errno == ESRCH);
+-    for (mode = 0; mode < 7; ++mode) {
++    for (mode = 0; mode < 9; ++mode) {
+         ready = release_body = in_dtor = release_dtor = dtor_count = 0;
+         assert(!key_create(&key, destructor));
+         pthread_t thread; assert(!create_guest(&thread, NULL, worker, NULL));
+@@ -118,7 +120,7 @@ int main(void) {
+         assert(kl_thread_probe(tid) == -1 && errno == ESRCH);
+         assert(guest_syscall(130, tid, 0, 0) == -1 && errno == ESRCH);
+         assert(guest_syscall(131, getpid(), tid, 0) == -1 && errno == ESRCH);
+-        assert(dtor_count == (mode == 3 ? 2 : mode == 4 ? 4 : 1));
++        assert(dtor_count == (mode == 7 ? 3 : (mode == 3 || mode == 8) ? 2 : mode == 4 ? 4 : 1));
+         assert(!key_delete(key));
+         printf("PASS mode %d: live through destructor, ESRCH after completion\n", mode);
+     }
+@@ -130,5 +132,5 @@ int main(void) {
+         assert(!join_guest(t, &id));
+         assert(kl_thread_probe((long)(uintptr_t)id) == -1 && errno == ESRCH);
+     }
+-    puts("PASS: return/exit/cancel/C++ TLS/repeated TSD/detach/syscall-exit, tkill/tgkill, 100 fast threads");
++    puts("PASS: return/exit/cancel/C++ TLS/repeated TSD/detach/syscall-exit, tkill/tgkill, nested/cross-domain destructors, 100 fast threads");
+ }
+-- 
+2.54.0 (Apple Git-157)
+

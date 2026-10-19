@@ -269,3 +269,7 @@ Lua setter replacement and native fixtures, with a preflight-only host gate.
 A joined pthread still answers alive through the existing kernel query; guest
 thread-lifetime tracking is now an explicit prerequisite to retiring the video
 patch. Valve Lua allocator lifecycle and actual game execution remain unverified.
+
+A subsequent opt-in managed-thread registry now passes real-shim lifecycle tests,
+including guest destructors, cancellation and detached threads. See the linked
+constrained-host report for its precise scope and remaining game-execution gates.

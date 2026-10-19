@@ -12,8 +12,8 @@ stereo submissions; KosmicKrisp is blocked by missing standard Metal-object
 interop. ARM64 binaries are now downloaded: the [20 October read-only audit](macos-alyx-arm64-static-audit.md)
 identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
 branch patch. The [constrained-host follow-up](macos-alyx-constrained-host.md)
-adds tested callback substitution and a preflight-only build; guest thread-exit
-tracking remains a launch blocker. Actual game calls remain unobserved. No installed-runtime change
+adds tested callback substitution and a preflight-only build. Managed thread
+lifetime fixtures now pass; actual guest ABI and syscall handling remain pending. Actual game calls remain unobserved. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

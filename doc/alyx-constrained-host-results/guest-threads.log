@@ -1,0 +1,12 @@
+KL_GUEST_THREAD_TRACKING=1 python3 -c 'import subprocess,sys; subprocess.run([sys.argv[1]], check=True, timeout=30)' /private/tmp/alyx-constrained-host-build/check-guest-threads
+  [thr] guest threads at default QoS (KL_GUEST_QOS=0)
+PASS mode 0: live through destructor, ESRCH after completion
+PASS mode 1: live through destructor, ESRCH after completion
+PASS mode 2: live through destructor, ESRCH after completion
+PASS mode 3: live through destructor, ESRCH after completion
+PASS mode 4: live through destructor, ESRCH after completion
+PASS mode 5: live through destructor, ESRCH after completion
+PASS mode 6: live through destructor, ESRCH after completion
+PASS mode 7: live through destructor, ESRCH after completion
+PASS mode 8: live through destructor, ESRCH after completion
+PASS: return/exit/cancel/C++ TLS/repeated TSD/detach/syscall-exit, tkill/tgkill, nested/cross-domain destructors, 100 fast threads

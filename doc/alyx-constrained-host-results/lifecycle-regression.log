@@ -1,0 +1,17 @@
+[lua-builtin] selected built-in mmap allocator (game lifecycle unvalidated)
+[lua-builtin] selected built-in mmap allocator (game lifecycle unvalidated)
+[lua-builtin] original setter unavailable; refusing to continue
+[lua-builtin] original setter unavailable; refusing to continue
+[lua-builtin] original setter unavailable; refusing to continue
+PASS: callback substitution, repeated binding, missing image/symbol and recursion fail closed
+joined pthread kernel probe: -1 (0 means retained kernel thread; guest exit tracking still needed)
+PASS: kernel current/live/terminated/invalid probes; guest pthread-exit semantics remain unverified
+  [thr] guest threads at default QoS (KL_GUEST_QOS=0)
+PASS mode 0: live through destructor, ESRCH after completion
+PASS mode 1: live through destructor, ESRCH after completion
+PASS mode 2: live through destructor, ESRCH after completion
+PASS mode 3: live through destructor, ESRCH after completion
+PASS mode 4: live through destructor, ESRCH after completion
+PASS mode 5: live through destructor, ESRCH after completion
+PASS mode 6: live through destructor, ESRCH after completion
+PASS: return/exit/cancel/C++ TLS/repeated TSD/detach/syscall-exit, tkill/tgkill, 100 fast threads
