@@ -261,3 +261,11 @@ The CPU-authored map and granularity-aligned offsets make a narrower Metal
 prototype more plausible than an unrestricted GPU-generated FDM implementation,
 but radial maps, non-subsampled semantics, reconstruction/depth and shader
 coordinates remain substantive correctness work.
+
+## Implementation follow-up
+
+The [constrained-host follow-up](macos-alyx-constrained-host.md) implements the
+Lua setter replacement and native fixtures, with a preflight-only host gate.
+A joined pthread still answers alive through the existing kernel query; guest
+thread-lifetime tracking is now an explicit prerequisite to retiring the video
+patch. Valve Lua allocator lifecycle and actual game execution remain unverified.
