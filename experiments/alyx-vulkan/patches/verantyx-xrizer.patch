@@ -1,0 +1,128 @@
+From 4c354a63bba2bcfb61f6ce7de25e9f9c22cd095e Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Mon, 19 Oct 2026 23:42:54 +0200
+Subject: [PATCH] native: add an opt-in xrizer host runtime adapter
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile    |  8 +++++++-
+ NativeARM/host/XRIZER.md   | 28 ++++++++++++++++++++++++++++
+ NativeARM/host/alyx_host.c |  4 +++-
+ NativeARM/host/kl_xrizer.c | 29 +++++++++++++++++++++++++++++
+ 4 files changed, 67 insertions(+), 2 deletions(-)
+ create mode 100644 NativeARM/host/XRIZER.md
+ create mode 100644 NativeARM/host/kl_xrizer.c
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index 348e170..3479d81 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -11,7 +11,8 @@ OUT ?= ../build/host
+ CC  := clang
+ 
+ RUNTIME := $(shell $(MAKE) -s -C $(KL) -f Makefile -f $(CURDIR)/print-runtime.mk print-runtime)
+-INC := -I$(KL)/runtime -I$(KL)/runtime/jni -I$(KL)/runtime/libc -I$(KL)/runtime/gfx \
++VULKAN_INCLUDE ?= /opt/homebrew/include
++INC := -I$(VULKAN_INCLUDE) -I$(KL)/runtime -I$(KL)/runtime/jni -I$(KL)/runtime/libc -I$(KL)/runtime/gfx \
+        -I$(KL)/runtime/xr -I$(KL)/runtime/media -I$(KL)/runtime/guest -I$(KL)/runtime/diag \
+        -I$(KL)/vendor-moltenvk/out/include
+ CFLAGS := -g -O1 -Wall -Wextra -Wno-unused-parameter -arch arm64 $(INC)
+@@ -27,6 +28,11 @@ VRRT_DIR  := ../vrruntime
+ VRRT_SRCS := $(notdir $(wildcard $(VRRT_DIR)/*.cpp))
+ VRRT_OBJS := $(patsubst %,$(OUT)/vrrt/%.o,$(VRRT_SRCS))
+ VRRT_HDRS := $(wildcard $(VRRT_DIR)/*.h) $(wildcard $(VRRT_DIR)/openvr/*.h)
++# Opt-in native xrizer adapter. No VeRantyx readback/compositor objects linked.
++ifeq ($(VR_RUNTIME),xrizer)
++VRRT_OBJS :=
++HOST_OBJS += $(OUT)/kl_xrizer.c.o
++endif
+ CXXFLAGS  := -std=c++17 -g -O1 -Wall -Wno-unused-parameter -arch arm64 -I$(VRRT_DIR) -I$(KL)/vendor-moltenvk/out/include
+ MVK_DIR   := $(abspath $(KL)/vendor-moltenvk/out/macos)
+ HDRS      := $(wildcard $(KL)/runtime/*.h) $(wildcard $(KL)/runtime/*/*.h) $(wildcard *.h)
+diff --git a/NativeARM/host/XRIZER.md b/NativeARM/host/XRIZER.md
+new file mode 100644
+index 0000000..6bac002
+--- /dev/null
++++ b/NativeARM/host/XRIZER.md
+@@ -0,0 +1,28 @@
++# Native xrizer host adapter
++
++Build without VeRantyx's renderer/readback objects:
++
++```sh
++make -C NativeARM/host KL=/path/to/patched-Klepton \
++  OUT=/tmp/alyx-native-xrizer-build VR_RUNTIME=xrizer -j6
++```
++
++`XRIZER_VRCLIENT` must name the native ARM64 xrizer `libxrizer.dylib` (or packaged
++`vrclient.dylib`). The adapter serves `VRClientCoreFactory` through Klepton's
++existing `/vrclient.so` host-module redirect. It does not reinterpret Vulkan
++handles, translate C++ interfaces or create another compositor. The two parties
++must still agree on OpenVR interface versions and struct ABI; this has not been
++validated with an actual ARM64 Alyx build.
++
++`VERANTYX_OPENVR_ROOT` selects an isolated OpenVR registry directory instead
++of the existing default under `~/Verantyx_VR_Drive`. Use xrizer's dual-driver
++launcher to set the common Vulkan loader and one ICD for the complete process.
++The default Makefile path remains VeRantyx's own runtime.
++
++The ARM64 host builds and the adapter forwards the factory from the actual
++xrizer dylib. The game has NOT been run. The existing host and Klepton
++prerequisites still translate guest binaries and apply runtime instruction
++repairs (including LuaJIT and video fixes). A no-game-binary-modification policy
++therefore blocks using this host as-is: audit/replace these mechanisms first.
++Steam authentication must still go through the owner's signed-in macOS Steam.
++No launcher, global registry, Steam account or game content was changed here.
+diff --git a/NativeARM/host/alyx_host.c b/NativeARM/host/alyx_host.c
+index 8b5dc6f..17283b5 100644
+--- a/NativeARM/host/alyx_host.c
++++ b/NativeARM/host/alyx_host.c
+@@ -35,7 +35,9 @@ extern void vrrt_init(const char *gameDir);
+ static void install_vr_path_registry(void) {
+     const char *home = getenv("HOME");
+     char dir[PATH_MAX], sub[PATH_MAX], file[PATH_MAX], reg[PATH_MAX];
+-    snprintf(dir, sizeof dir, "%s/Verantyx_VR_Drive/verantyx_openvr", home ? home : "/tmp");
++    const char *override = getenv("VERANTYX_OPENVR_ROOT");
++    if (override && *override) snprintf(dir, sizeof dir, "%s", override);
++    else snprintf(dir, sizeof dir, "%s/Verantyx_VR_Drive/verantyx_openvr", home ? home : "/tmp");
+     snprintf(sub, sizeof sub, "%s/bin/linuxarm64", dir);
+     snprintf(file, sizeof file, "%s/vrclient.so", sub);
+     snprintf(reg, sizeof reg, "%s/openvrpaths.vrpath", dir);
+diff --git a/NativeARM/host/kl_xrizer.c b/NativeARM/host/kl_xrizer.c
+new file mode 100644
+index 0000000..12f6c12
+--- /dev/null
++++ b/NativeARM/host/kl_xrizer.c
+@@ -0,0 +1,29 @@
++// SPDX-License-Identifier: MIT
++// Host-module adapter: guest OpenVR C++ interfaces are implemented by native xrizer.
++#include <dlfcn.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <pthread.h>
++static void *runtime;
++static pthread_once_t once = PTHREAD_ONCE_INIT;
++static void load_runtime(void) {
++    const char *path = getenv("XRIZER_VRCLIENT");
++    if (!path || !*path) {
++        fprintf(stderr, "XRIZER_VRCLIENT must name a native ARM64 vrclient.dylib\n");
++        exit(1);
++    }
++    runtime = dlopen(path, RTLD_NOW | RTLD_LOCAL);
++    if (!runtime || !dlsym(runtime, "VRClientCoreFactory")) {
++        const char *error = dlerror();
++        fprintf(stderr, "Cannot load native xrizer %s: %s\n", path,
++                error ? error : "missing VRClientCoreFactory");
++        exit(1);
++    }
++    fprintf(stderr, "OpenVR: native xrizer %s (no VeRantyx renderer)\n", path);
++}
++void vrrt_init(const char *game_dir) { (void)game_dir; pthread_once(&once, load_runtime); }
++void *vrrt_dlsym(const char *name) {
++    pthread_once(&once, load_runtime);
++    return name && !strcmp(name, "VRClientCoreFactory") ? dlsym(runtime, name) : NULL;
++}
+-- 
+2.54.0 (Apple Git-157)
+

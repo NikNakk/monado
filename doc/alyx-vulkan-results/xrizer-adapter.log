@@ -1,0 +1,2 @@
+OpenVR: native xrizer /private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib (no VeRantyx renderer)
+PASS native xrizer factory forwarding; unknown symbol rejected

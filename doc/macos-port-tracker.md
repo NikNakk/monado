@@ -7,6 +7,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [native ARM64 Alyx dual-Vulkan investigation](macos-alyx-kosmickrisp.md)
+now builds/selects KosmicKrisp and MoltenVK in isolation. MoltenVK passes xrizer
+stereo submissions; KosmicKrisp is blocked by missing standard Metal-object
+interop. Native game files and actual Alyx foveation evidence remain unavailable.
+No installed-runtime change or full FDM implementation is included.
+
 The [graphics integration review](macos-graphics-integration-review.md) is now
 integrated locally into `macos-upstream-clean` by the user-approved fast-forward
 to `c2c608a3f`. Both native Vulkan sharing options default to on, with independent

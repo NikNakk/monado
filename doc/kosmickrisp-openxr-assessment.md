@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # KosmicKrisp / OpenXR assessment: decision update — 2026-10-14
 
+The [19 October native ARM64 Alyx reassessment](macos-alyx-kosmickrisp.md)
+adds a current Mesa build, selectable ICDs, initial tracing and new measurements.
+KosmicKrisp still lacks the standard Metal-object transport needed by Monado;
+actual Alyx foveation requirements remain unobserved. The earlier workload
+conclusions below retain their original scope.
+
 Keep MoltenVK for the native OpenXR path. The useful findings are explicit GPU
 frame handoff and shared Metal texture import; both work through MoltenVK's
 standard API. The [implemented follow-up](macos-vulkan-metal-swapchains.md)

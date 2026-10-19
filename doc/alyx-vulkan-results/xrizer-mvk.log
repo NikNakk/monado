@@ -1,0 +1,180 @@
+LOG in xrCreateInstance: Instance created
+	createInfo->applicationInfo.applicationName: vulkan_submit_probe
+	createInfo->applicationInfo.applicationVersion: 0
+	createInfo->applicationInfo.engineName: XRizer
+	createInfo->applicationInfo.engineVersion: 5000
+	createInfo->applicationInfo.apiVersion: 1.0.0
+	appinfo.detected.engine.name: (null)
+	appinfo.detected.engine.version: 0.0.0
+	quirks.disable_vulkan_format_depth: false
+	quirks.disable_vulkan_format_depth_stencil: false
+	quirks.disable_quad_views: false
+	quirks.no_validation_error_in_create_ref_space: true
+	quirks.skip_end_session: false
+	quirks.parallel_views: false
+	quirks.no_texture_source_alpha: false
+	quirks.ignore_invalid_swapchain_usage_bits: false
+
+LOG in xrGetSystem: Selected devices
+	Head: 'Qwerty HMD'
+	Eyes: '<none>'
+	Left: 'Qwerty Left Controller'
+	Right: 'Qwerty Right Controller'
+	Gamepad: '<none>'
+	Hand-Tracking Left (unobstructed): '<none>'
+	Hand-Tracking Right (unobstructed): '<none>'
+	Hand-Tracking Left (conforming): '<none>'
+	Hand-Tracking Right (conforming): '<none>'
+ WARN [client_vk_shared_event_create] Vulkan client shared-event handoff needs timeline semaphores and VK_EXT_metal_objects
+xrizer: IVRSystem_026 and IVRCompositor_029, 896x1007 per eye
+instance extensions xrizer asks for: VK_KHR_external_fence_capabilities VK_KHR_external_memory_capabilities VK_KHR_external_semaphore_capabilities VK_KHR_get_physical_device_properties2
+device=Apple M5 vendor=0x106b deviceID=0x1a07020a api=1.2.357 driverVersion=10402 driverID=14 driver=MoltenVK info=1.4.2 UUID=0000106b1a07020a0000000000000000
+available_device_extension=VK_KHR_16bit_storage version=1
+available_device_extension=VK_KHR_8bit_storage version=1
+available_device_extension=VK_KHR_bind_memory2 version=1
+available_device_extension=VK_KHR_buffer_device_address version=1
+available_device_extension=VK_KHR_calibrated_timestamps version=1
+available_device_extension=VK_KHR_copy_commands2 version=1
+available_device_extension=VK_KHR_create_renderpass2 version=1
+available_device_extension=VK_KHR_dedicated_allocation version=3
+available_device_extension=VK_KHR_deferred_host_operations version=4
+available_device_extension=VK_KHR_depth_stencil_resolve version=1
+available_device_extension=VK_KHR_descriptor_update_template version=1
+available_device_extension=VK_KHR_device_group version=4
+available_device_extension=VK_KHR_driver_properties version=1
+available_device_extension=VK_KHR_dynamic_rendering version=1
+available_device_extension=VK_KHR_dynamic_rendering_local_read version=1
+available_device_extension=VK_KHR_external_fence version=1
+available_device_extension=VK_KHR_external_memory version=1
+available_device_extension=VK_KHR_external_semaphore version=1
+available_device_extension=VK_KHR_format_feature_flags2 version=2
+available_device_extension=VK_KHR_fragment_shader_barycentric version=1
+available_device_extension=VK_KHR_get_memory_requirements2 version=1
+available_device_extension=VK_KHR_global_priority version=1
+available_device_extension=VK_KHR_image_format_list version=1
+available_device_extension=VK_KHR_imageless_framebuffer version=1
+available_device_extension=VK_KHR_incremental_present version=2
+available_device_extension=VK_KHR_index_type_uint8 version=1
+available_device_extension=VK_KHR_line_rasterization version=1
+available_device_extension=VK_KHR_load_store_op_none version=1
+available_device_extension=VK_KHR_maintenance1 version=2
+available_device_extension=VK_KHR_maintenance2 version=1
+available_device_extension=VK_KHR_maintenance3 version=1
+available_device_extension=VK_KHR_maintenance4 version=2
+available_device_extension=VK_KHR_maintenance5 version=1
+available_device_extension=VK_KHR_maintenance6 version=1
+available_device_extension=VK_KHR_maintenance7 version=1
+available_device_extension=VK_KHR_maintenance8 version=1
+available_device_extension=VK_KHR_maintenance9 version=1
+available_device_extension=VK_KHR_map_memory2 version=1
+available_device_extension=VK_KHR_multiview version=1
+available_device_extension=VK_KHR_portability_subset version=1
+available_device_extension=VK_KHR_present_id version=1
+available_device_extension=VK_KHR_present_id2 version=1
+available_device_extension=VK_KHR_present_wait version=1
+available_device_extension=VK_KHR_present_wait2 version=1
+available_device_extension=VK_KHR_push_descriptor version=2
+available_device_extension=VK_KHR_relaxed_block_layout version=1
+available_device_extension=VK_KHR_robustness2 version=1
+available_device_extension=VK_KHR_sampler_mirror_clamp_to_edge version=3
+available_device_extension=VK_KHR_sampler_ycbcr_conversion version=14
+available_device_extension=VK_KHR_separate_depth_stencil_layouts version=1
+available_device_extension=VK_KHR_shader_draw_parameters version=1
+available_device_extension=VK_KHR_shader_expect_assume version=1
+available_device_extension=VK_KHR_shader_float_controls version=4
+available_device_extension=VK_KHR_shader_float_controls2 version=1
+available_device_extension=VK_KHR_shader_float16_int8 version=1
+available_device_extension=VK_KHR_shader_fma version=1
+available_device_extension=VK_KHR_shader_integer_dot_product version=1
+available_device_extension=VK_KHR_shader_maximal_reconvergence version=1
+available_device_extension=VK_KHR_shader_non_semantic_info version=1
+available_device_extension=VK_KHR_shader_relaxed_extended_instruction version=1
+available_device_extension=VK_KHR_shader_subgroup_extended_types version=1
+available_device_extension=VK_KHR_shader_subgroup_rotate version=2
+available_device_extension=VK_KHR_shader_subgroup_uniform_control_flow version=1
+available_device_extension=VK_KHR_shader_terminate_invocation version=1
+available_device_extension=VK_KHR_spirv_1_4 version=1
+available_device_extension=VK_KHR_storage_buffer_storage_class version=1
+available_device_extension=VK_KHR_swapchain version=70
+available_device_extension=VK_KHR_swapchain_maintenance1 version=1
+available_device_extension=VK_KHR_swapchain_mutable_format version=1
+available_device_extension=VK_KHR_synchronization2 version=1
+available_device_extension=VK_KHR_timeline_semaphore version=2
+available_device_extension=VK_KHR_uniform_buffer_standard_layout version=1
+available_device_extension=VK_KHR_variable_pointers version=1
+available_device_extension=VK_KHR_vertex_attribute_divisor version=1
+available_device_extension=VK_KHR_vulkan_memory_model version=3
+available_device_extension=VK_KHR_zero_initialize_workgroup_memory version=1
+available_device_extension=VK_EXT_4444_formats version=1
+available_device_extension=VK_EXT_buffer_device_address version=2
+available_device_extension=VK_EXT_calibrated_timestamps version=2
+available_device_extension=VK_EXT_debug_marker version=4
+available_device_extension=VK_EXT_depth_clip_control version=1
+available_device_extension=VK_EXT_descriptor_indexing version=2
+available_device_extension=VK_EXT_extended_dynamic_state version=1
+available_device_extension=VK_EXT_extended_dynamic_state2 version=1
+available_device_extension=VK_EXT_extended_dynamic_state3 version=2
+available_device_extension=VK_EXT_external_memory_host version=1
+available_device_extension=VK_EXT_external_memory_metal version=1
+available_device_extension=VK_EXT_fragment_shader_interlock version=1
+available_device_extension=VK_EXT_global_priority version=2
+available_device_extension=VK_EXT_global_priority_query version=1
+available_device_extension=VK_EXT_hdr_metadata version=3
+available_device_extension=VK_EXT_host_image_copy version=1
+available_device_extension=VK_EXT_host_query_reset version=1
+available_device_extension=VK_EXT_image_2d_view_of_3d version=1
+available_device_extension=VK_EXT_image_robustness version=1
+available_device_extension=VK_EXT_index_type_uint8 version=1
+available_device_extension=VK_EXT_inline_uniform_block version=1
+available_device_extension=VK_EXT_line_rasterization version=1
+available_device_extension=VK_EXT_load_store_op_none version=1
+available_device_extension=VK_EXT_memory_budget version=1
+available_device_extension=VK_EXT_metal_objects version=2
+available_device_extension=VK_EXT_pipeline_creation_cache_control version=3
+available_device_extension=VK_EXT_pipeline_creation_feedback version=1
+available_device_extension=VK_EXT_pipeline_robustness version=1
+available_device_extension=VK_EXT_post_depth_coverage version=1
+available_device_extension=VK_EXT_private_data version=1
+available_device_extension=VK_EXT_robustness2 version=1
+available_device_extension=VK_EXT_sample_locations version=1
+available_device_extension=VK_EXT_sampler_filter_minmax version=2
+available_device_extension=VK_EXT_scalar_block_layout version=1
+available_device_extension=VK_EXT_separate_stencil_usage version=1
+available_device_extension=VK_EXT_shader_atomic_float version=1
+available_device_extension=VK_EXT_shader_demote_to_helper_invocation version=1
+available_device_extension=VK_EXT_shader_stencil_export version=1
+available_device_extension=VK_EXT_shader_subgroup_ballot version=1
+available_device_extension=VK_EXT_shader_subgroup_vote version=1
+available_device_extension=VK_EXT_shader_viewport_index_layer version=1
+available_device_extension=VK_EXT_subgroup_size_control version=2
+available_device_extension=VK_EXT_swapchain_maintenance1 version=1
+available_device_extension=VK_EXT_texel_buffer_alignment version=1
+available_device_extension=VK_EXT_texture_compression_astc_hdr version=1
+available_device_extension=V WARN [client_vk_shared_event_create] Vulkan client shared-event handoff needs timeline semaphores and VK_EXT_metal_objects
+ INFO [u_timing_trace_open] Timing trace: /private/tmp/alyx-results/mvk-xrizer-final/monado_psvr2_21446_metal_release_barrier.csv
+ INFO [client_metal_service_compositor_create] Metal service swapchain path installed: Metal-owned textures are transported through the XPC broker and imported directly into service Vulkan images
+ INFO [metal_service_create_swapchain] Metal service three-image compatibility requested: 896x1007
+ INFO [ipc_metal_xpc_publish_textures] Metal XPC published 3 shared texture handle(s) token=0x000000004d35ffc4
+ INFO [client_vk_metal_texture_swapchain_create] Vulkan Metal-backed swapchain: format=43 layers=2 images=3 remote=1
+ INFO [client_vk_metal_texture_import] Vulkan Metal import: image=0xc410d0b40 source=0x103765a50 exported=0x103765a50 format=43 layers=2; no image memory allocation or bind
+ INFO [client_vk_metal_texture_import] Vulkan Metal import: image=0xc410d0c80 source=0x103765e90 exported=0x103765e90 format=43 layers=2; no image memory allocation or bind
+ INFO [client_vk_metal_texture_import] Vulkan Metal import: image=0xc410d0dc0 source=0x10376d140 exported=0x10376d140 format=43 layers=2; no image memory allocation or bind
+XR_ERROR_FEATURE_UNSUPPORTED in xrCreateHandTrackerEXT: System does not support hand tracking
+XR_ERROR_FEATURE_UNSUPPORTED in xrCreateHandTrackerEXT: System does not support hand tracking
+K_EXT_tooling_info version=1
+available_device_extension=VK_EXT_vertex_attribute_divisor version=3
+available_device_extension=VK_AMD_gpu_shader_half_float version=2
+available_device_extension=VK_AMD_negative_viewport_height version=1
+available_device_extension=VK_AMD_shader_image_load_store_lod version=1
+available_device_extension=VK_AMD_shader_trinary_minmax version=1
+available_device_extension=VK_GOOGLE_display_timing version=1
+available_device_extension=VK_IMG_format_pvrtc version=1
+available_device_extension=VK_INTEL_shader_integer_functions2 version=1
+available_device_extension=VK_NV_fragment_shader_barycentric version=1
+Vulkan device: Apple M5
+device extensions xrizer asks for: VK_KHR_dedicated_allocation VK_KHR_external_fence VK_KHR_external_memory VK_KHR_external_semaphore VK_KHR_get_memory_requirements2 VK_KHR_image_format_list VK_EXT_metal_objects
+enabled_timeline_semaphore=1
+frame 0: HMD valid at (0.000, 1.600, 0.000)
+frame 90: HMD valid at (0.000, 1.600, 0.000)
+done: 180 frames, 0 errors
+{"frames":180,"errors":0,"startup_first_handoff_ms":488.168,"warmup_frames":30,"frame_ms_median":16.607,"frame_ms_p95":19.513,"frame_ms_p99":19.910}
