@@ -9,6 +9,11 @@
 
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+
+// Has to match mesh.foveation_binding in render_resources.c.
+#define FOVEATION_BINDING 2
+#include "foveation.inc.glsl"
 
 layout (binding = 0) uniform sampler2D tex_sampler;
 
@@ -20,9 +25,21 @@ layout (location = 0) out vec4 out_color;
 
 void main()
 {
-	float r = texture(tex_sampler, in_ruv).x;
-	float g = texture(tex_sampler, in_guv).y;
-	float b = texture(tex_sampler, in_buv).z;
+	vec2 r_uv = in_ruv;
+	vec2 g_uv = in_guv;
+	vec2 b_uv = in_buv;
+
+	// Per fragment: the map is piecewise linear, so it can't be applied to
+	// the interpolated mesh vertices.
+	if (foveation_enabled()) {
+		r_uv = transform_uv_foveation(r_uv);
+		g_uv = transform_uv_foveation(g_uv);
+		b_uv = transform_uv_foveation(b_uv);
+	}
+
+	float r = texture(tex_sampler, r_uv).x;
+	float g = texture(tex_sampler, g_uv).y;
+	float b = texture(tex_sampler, b_uv).z;
 
 	out_color = vec4(r, g, b, 1.0);
 }

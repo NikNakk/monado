@@ -8,7 +8,7 @@
 
 include(ShaderSpecialization)
 
-set(DEPENDS blit.inc.glsl hsv.inc.glsl layer_defines.inc.glsl srgb.inc.glsl)
+set(DEPENDS blit.inc.glsl foveation.inc.glsl hsv.inc.glsl layer_defines.inc.glsl srgb.inc.glsl)
 
 set(SHADERS
     blit.comp

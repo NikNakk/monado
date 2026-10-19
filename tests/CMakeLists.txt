@@ -224,6 +224,7 @@ if(XRT_HAVE_VULKAN)
 		tests_render_output.cpp
 		tests_projection_quad.cpp
 		tests_layer_specialization.cpp
+		tests_render_gfx_foveation.cpp
 		${_distortion_bench_headers}
 		)
 	target_link_libraries(tests_render_compute PRIVATE aux_render aux_render_cache comp_util aux_vk aux_shaders xrt-external-catch2)

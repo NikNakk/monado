@@ -52,6 +52,9 @@ struct gfx_layer_view_state
 	/// TODO move to parent struct
 	uint32_t layer_count;
 
+	/// Number of those that sample a foveated image.
+	uint32_t foveated_layer_count;
+
 	/// Full rotation and translation VP matrix, in world space.
 	struct xrt_matrix_4x4 world_vp_full;
 	/// Full rotation and translation VP matrix, in view space.
@@ -94,6 +97,9 @@ struct gfx_mesh_view_data
 	struct xrt_normalized_rect src_norm_rect;
 	VkSampler src_sampler;
 	VkImageView src_image_view;
+
+	/// Foveation map of the source, NULL if it is not foveated.
+	const struct xrt_foveation_map_data *src_foveation;
 };
 
 /*
@@ -134,13 +140,39 @@ gfx_mesh_add_view(struct gfx_mesh_data *md,
                   const struct xrt_fov *src_fov,
                   const struct xrt_normalized_rect *src_norm_rect,
                   VkSampler src_sampler,
-                  VkImageView src_image_view)
+                  VkImageView src_image_view,
+                  const struct xrt_foveation_map_data *src_foveation)
 {
 	md->views[view_index].src_pose = *src_pose;
 	md->views[view_index].src_fov = *src_fov;
 	md->views[view_index].src_norm_rect = *src_norm_rect;
 	md->views[view_index].src_sampler = src_sampler;
 	md->views[view_index].src_image_view = src_image_view;
+	md->views[view_index].src_foveation = src_foveation;
+}
+
+/*!
+ * The foveation map (experimental Metal variable-rasterization-rate source
+ * image) to apply when sampling a projection view, or NULL. An enabled map
+ * with the wrong sample count is ignored, as on the compute fast path.
+ */
+static const struct xrt_foveation_map_data *
+get_view_foveation(const struct xrt_layer_projection_view_data *vd)
+{
+	const struct xrt_foveation_map_data *map = &vd->foveation;
+	if (map->enabled == 0) {
+		return NULL;
+	}
+	if (!render_gfx_foveation_map_is_valid(map)) {
+		static bool logged = false;
+		if (!logged) {
+			U_LOG_E("Ignoring foveation map with %u samples, expected %u (logged once)",
+			        map->boundary_count, XRT_FOVEATION_MAP_BOUNDARY_COUNT);
+			logged = true;
+		}
+		return NULL;
+	}
+	return map;
 }
 
 
@@ -398,6 +430,29 @@ do_projection_layer(struct render_gfx *render,
 
 	struct vk_bundle *vk = render->r->vk;
 	VkResult ret;
+
+	/*
+	 * Foveated source image. Depth layers never carry a map, see
+	 * oxr_session_frame_end.c. A layer whose map can't be applied is not
+	 * composited rather than sampled with the wrong transform, as in the
+	 * compute layer squasher.
+	 */
+	const struct xrt_foveation_map_data *src_foveation = NULL;
+	if (layer_data->type == XRT_LAYER_PROJECTION && vd->foveation.enabled != 0) {
+		const bool valid = render_gfx_foveation_map_is_valid(&vd->foveation);
+		if (!valid || state->foveated_layer_count >= RENDER_MAX_FOVEATED_LAYERS) {
+			static bool logged = false;
+			if (!logged) {
+				U_LOG_E("Skipping foveated projection layer: %s (logged once)",
+				        !valid ? "invalid map" : "too many foveated layers");
+				logged = true;
+			}
+			return VK_SUCCESS;
+		}
+		state->foveated_layer_count++;
+		src_foveation = &vd->foveation;
+	}
+
 	// Color
 	VkSampler src_sampler = clamp_to_border_black;
 	VkImageView src_image_view = get_image_view(image, layer_data->flags, array_index);
@@ -426,6 +481,7 @@ do_projection_layer(struct render_gfx *render,
 	ret = render_gfx_layer_projection_alloc_and_write( //
 	    render,                                        //
 	    &data,                                         //
+	    src_foveation,                                 //
 	    src_sampler,                                   //
 	    src_image_view,                                //
 	    &descriptor_set);                              // out_descriptor_set
@@ -555,6 +611,7 @@ crg_distortion_common(struct render_gfx *render,
 		ret = render_gfx_mesh_alloc_and_write( //
 		    render,                            //
 		    &data,                             //
+		    md->views[i].src_foveation,        //
 		    md->views[i].src_sampler,          //
 		    md->views[i].src_image_view,       //
 		    &ms.descriptor_sets[i]);           //
@@ -625,7 +682,8 @@ crg_distortion_after_squash(struct render_gfx *render, const struct comp_render_
 		    &src_fov,              //
 		    &src_norm_rect,        //
 		    clamp_to_border_black, // src_sampler
-		    src_image_view);       //
+		    src_image_view,        //
+		    NULL);                 // src_foveation, the squashed image is not foveated
 	}
 
 	crg_distortion_common( //
@@ -666,14 +724,15 @@ crg_distortion_fast_path(struct render_gfx *render,
 			src_norm_rect.h = -src_norm_rect.h;
 		}
 
-		gfx_mesh_add_view(         //
-		    &md,                   // md
-		    i,                     // view_index
-		    &src_pose,             // src_pose
-		    &src_fov,              // src_fov
-		    &src_norm_rect,        // src_norm_rect
-		    clamp_to_border_black, // src_sampler
-		    src_image_view);       // src_image_view
+		gfx_mesh_add_view(               //
+		    &md,                         // md
+		    i,                           // view_index
+		    &src_pose,                   // src_pose
+		    &src_fov,                    // src_fov
+		    &src_norm_rect,              // src_norm_rect
+		    clamp_to_border_black,       // src_sampler
+		    src_image_view,              // src_image_view
+		    get_view_foveation(vds[i])); // src_foveation
 	}
 
 	crg_distortion_common( //
@@ -897,35 +956,6 @@ err_layer:
 
 
 
-/*!
- * The graphics path does not reconstruct experimental Metal
- * variable-rasterization-rate source images; only the compute path does. Say
- * so loudly rather than let a compacted image look like a rendering bug.
- */
-static void
-warn_if_foveated_layers(const struct comp_layer *layers, uint32_t layer_count)
-{
-	static bool logged = false;
-	if (logged) {
-		return;
-	}
-	for (uint32_t i = 0; i < layer_count; i++) {
-		const struct xrt_layer_data *data = &layers[i].data;
-		if (data->type != XRT_LAYER_PROJECTION) {
-			continue;
-		}
-		for (uint32_t v = 0; v < data->view_count; v++) {
-			if (data->proj.v[v].foveation.enabled != 0) {
-				U_LOG_E(
-				    "Graphics compositor path cannot sample foveated projection images; "
-				    "use the compute path (XRT_COMPOSITOR_COMPUTE=1). Logged once.");
-				logged = true;
-				return;
-			}
-		}
-	}
-}
-
 void
 comp_render_gfx_dispatch(struct render_gfx *render,
                          const struct comp_layer *layers,
@@ -937,8 +967,6 @@ comp_render_gfx_dispatch(struct render_gfx *render,
 		assert(d->target.initialized);
 		return;
 	}
-
-	warn_if_foveated_layers(layers, layer_count);
 
 	// Convenience.
 	bool fast_path = d->fast_path;
