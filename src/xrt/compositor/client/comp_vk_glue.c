@@ -50,14 +50,17 @@ const char *xrt_gfx_vk_device_extensions = VK_KHR_DEDICATED_ALLOCATION_EXTENSION
 #endif
 
 // Platform version of "external_fence" and "external_semaphore"
-#if defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
+#if defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
+    // Checked before the sync handle type, which is also FD on macOS: MoltenVK has neither
+    // VK_KHR_external_semaphore_fd nor VK_KHR_external_fence_fd, so vkCreateDevice fails for any
+    // XR_KHR_vulkan_enable app that enables this list as given.
+    ;
+
+#elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_FD)
     " " VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME " " VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME;
 
 #elif defined(XRT_GRAPHICS_SYNC_HANDLE_IS_WIN32_HANDLE)
     " " VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME " " VK_KHR_EXTERNAL_FENCE_WIN32_EXTENSION_NAME;
-
-#elif defined(XRT_GRAPHICS_BUFFER_HANDLE_IS_IOSURFACE)
-    " " VK_KHR_EXTERNAL_SEMAPHORE_FD_EXTENSION_NAME " " VK_KHR_EXTERNAL_FENCE_FD_EXTENSION_NAME;
 
 #else
 #error "Need port!"
