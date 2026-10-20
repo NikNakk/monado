@@ -1,0 +1,25 @@
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libtier0.so: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libstdc++.so.6)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libstdc++.so.6: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs libgcc_s.so.1
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libgcc_s.so.1 -> loading (/private/tmp/alyx-native-guest-libs-runtime/libgcc_s.so.1)
+  [dl] /private/tmp/alyx-native-guest-libs-runtime/libgcc_s.so.1: 1 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+[proc] synthetic /proc and /sys at /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/klepton-proc.fna5Br (10 cpus, 6144 MB budget)
+VM reserve 65536 host-page=16384 base=0x107178000
+VM commit offset=0 length=4096 result=0x107178000 errno=0
+VM commit offset=4096 length=4096 result=0x0 errno=22
+VM commit offset=8192 length=4096 result=0x0 errno=22
+VM commit offset=12288 length=4096 result=0x0 errno=22
+  [glibc] 506 table entries, 62 aliases, 0 stub calls
+PASS: real tier0 reproduces 4KiB commit failure; host-aligned 16KiB commit/write/read/release succeeds

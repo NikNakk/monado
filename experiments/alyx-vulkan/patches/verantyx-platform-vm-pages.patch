@@ -1,0 +1,416 @@
+From b8b3ccf17ddddef8dd7eb6fb8276e424899bb9b3 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 11:24:45 +0200
+Subject: [PATCH] Adapt engine VM commits to macOS page granularity
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile                       |   7 +-
+ NativeARM/host/alyx_host.c                    |   2 +
+ NativeARM/host/kl_platform_vm.c               | 154 ++++++++++++++++++
+ NativeARM/host/kl_platform_vm.h               |   8 +
+ NativeARM/host/tests/valve_lua.c              |   3 +-
+ NativeARM/host/tests/valve_panorama_runtime.c |  18 +-
+ NativeARM/host/tests/valve_vm_pages.c         | 103 ++++++++++++
+ 7 files changed, 291 insertions(+), 4 deletions(-)
+ create mode 100644 NativeARM/host/kl_platform_vm.c
+ create mode 100644 NativeARM/host/kl_platform_vm.h
+ create mode 100644 NativeARM/host/tests/valve_vm_pages.c
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index b9e8aac..4f79ce6 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -26,7 +26,7 @@ HOST_SRCS := alyx_host.c kl_thread_probe.c kl_glibc.c kl_glibc_va.S kl_enginelog
+ HOST_MODE ?= legacy
+ ifeq ($(HOST_MODE),constrained)
+ CFLAGS += -DALYX_CONSTRAINED_HOST=1
+-HOST_SRCS := $(filter-out kl_luafix.c kl_guestfix.c,$(HOST_SRCS)) kl_lua_builtin.c
++HOST_SRCS := $(filter-out kl_luafix.c kl_guestfix.c,$(HOST_SRCS)) kl_lua_builtin.c kl_platform_vm.c
+ else ifneq ($(HOST_MODE),legacy)
+ $(error HOST_MODE must be legacy or constrained)
+ endif
+@@ -159,3 +159,8 @@ valve-panorama-runtime: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS
+ 	$(CC) $(CFLAGS) -o $(OUT)/valve-panorama-runtime tests/valve_panorama_runtime.c $^ $(LDLIBS) -I.
+ 
+ .PHONY: valve-panorama-runtime
++
++valve-vm-pages: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/valve-vm-pages tests/valve_vm_pages.c $^ $(LDLIBS) -I.
++
++.PHONY: valve-vm-pages
+diff --git a/NativeARM/host/alyx_host.c b/NativeARM/host/alyx_host.c
+index 920cee5..6265116 100644
+--- a/NativeARM/host/alyx_host.c
++++ b/NativeARM/host/alyx_host.c
+@@ -32,6 +32,7 @@ static void constrained_image_check(const char *path, kl_image *img) {
+ #include "kl_sdlshim.h"
+ #ifdef ALYX_CONSTRAINED_HOST
+ #include "kl_lua_builtin.h"
++#include "kl_platform_vm.h"
+ #else
+ #include "kl_luafix.h"
+ #endif
+@@ -215,6 +216,7 @@ int main(int argc, char **argv) {
+ 
+ #ifdef ALYX_CONSTRAINED_HOST
+     kl_lua_builtin_install();
++    kl_platform_vm_install();
+     kl_image_loaded_hook = constrained_image_check;
+ #endif
+     if (do_probe) return probe(argc - first_lib, argv + first_lib);
+diff --git a/NativeARM/host/kl_platform_vm.c b/NativeARM/host/kl_platform_vm.c
+new file mode 100644
+index 0000000..c1d055d
+--- /dev/null
++++ b/NativeARM/host/kl_platform_vm.c
+@@ -0,0 +1,154 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++#include "kl_platform_vm.h"
++#include "klepton.h"
++#include <errno.h>
++#include <pthread.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <sys/mman.h>
++#include <unistd.h>
++
++// Source's Linux platform allocator uses 4KiB commit/decommit granularity even
++// when libc reports a larger page. Track ONLY reservations made through these
++// platform exports. The host protection of each page is the union of its live
++// guest subpages: decommitting one never revokes a live neighbour's access.
++// This supplies real backing and preserves data, but cannot provide 4KiB guard
++// faults on a 16KiB host. No executable-memory workaround or arbitrary libc
++// mprotect rounding is provided.
++#define GUEST_PAGE 4096u
++struct reservation {
++    unsigned char *base, *protection;
++    size_t size;
++    struct reservation *next;
++};
++static struct reservation *reservations;
++static pthread_mutex_t lock=PTHREAD_MUTEX_INITIALIZER;
++static size_t host_page;
++static unsigned commit_messages;
++static void *original(const char *name) {
++    kl_image *image=kl_find_image("libtier0.so");
++    void *fn=image ? kl_sym(image,name) : NULL;
++    if(!fn) {fprintf(stderr,"[platform-vm] missing original %s; refusing\n",name);abort();}
++    return fn;
++}
++static int rounded(size_t n,size_t alignment,size_t *out) {
++    if(!n || n>SIZE_MAX-(alignment-1))return 0;
++    *out=(n+alignment-1)&~(alignment-1);return 1;
++}
++static struct reservation *find(void *address,size_t n) {
++    uintptr_t a=(uintptr_t)address;
++    for(struct reservation *r=reservations;r;r=r->next) {
++        uintptr_t b=(uintptr_t)r->base;
++        if(a>=b && a-b<r->size && n<=r->size-(a-b))return r;
++    }
++    return NULL;
++}
++static int page_protection(const unsigned char *p,size_t count) {
++    int result=0;for(size_t i=0;i<count;i++)result|=p[i];return result;
++}
++// Called under lock. A failed host update restores previously changed pages;
++// guest bookkeeping changes only after every host update succeeds.
++static int protect(struct reservation *r,void *address,size_t n,int access) {
++    size_t length;
++    if(((uintptr_t)address&(GUEST_PAGE-1)) || !rounded(n,GUEST_PAGE,&length) ||
++       !find(address,length) || (access&~(PROT_READ|PROT_WRITE))) {
++        errno=(access&PROT_EXEC)?EPERM:EINVAL;return 0;
++    }
++    size_t first=((unsigned char*)address-r->base)/GUEST_PAGE;
++    size_t last=first+length/GUEST_PAGE, per_host=host_page/GUEST_PAGE;
++    size_t begin=first/per_host, end=(last+per_host-1)/per_host;
++    for(size_t page=begin;page<end;page++) {
++        int permissions=0;
++        for(size_t sub=page*per_host;sub<(page+1)*per_host;sub++)
++            permissions|=(sub>=first && sub<last)?access:r->protection[sub];
++        if(mprotect(r->base+page*host_page,host_page,permissions)) {
++            int saved=errno;
++            for(size_t undo=begin;undo<page;undo++) {
++                int old=page_protection(r->protection+undo*per_host,per_host);
++                if(mprotect(r->base+undo*host_page,host_page,old)) {
++                    fprintf(stderr,"[platform-vm] protection rollback failed; refusing\n");abort();
++                }
++            }
++            errno=saved;return 0;
++        }
++    }
++    memset(r->protection+first,access,last-first);
++    return 1;
++}
++static void *allocate(void *address,size_t n,int type,int access,void *maximum) {
++    void *(*real)(void*,size_t,int,int,void*)=original("Plat_VirtualAlloc");
++    if(host_page==GUEST_PAGE)return real(address,n,type,access,maximum);
++    pthread_mutex_lock(&lock);
++    struct reservation *r=find(address,1);
++    if(type==2 && r) {
++        int ok=protect(r,address,n,access);int saved=errno;
++        if(ok && (((uintptr_t)address&(host_page-1)) || (n&(host_page-1))) && commit_messages<8) {
++            commit_messages++;
++            fprintf(stderr,"[platform-vm] subpage commit translated offset=%zu size=%zu host-page=%zu\n",
++                (size_t)((unsigned char*)address-r->base),n,host_page);
++        }
++        if(!ok)fprintf(stderr,"[platform-vm] commit refused address=%p size=%zu access=%d errno=%d\n",address,n,access,saved);
++        pthread_mutex_unlock(&lock);errno=saved;return ok?address:NULL;
++    }
++    // Preserve native handling of special flags, maximum-address requests,
++    // executable mappings and operations outside reservations we own.
++    if((type!=1 && type!=3) || maximum || (access&~3)) {
++        pthread_mutex_unlock(&lock);return real(address,n,type,access,maximum);
++    }
++    size_t size,span;
++    if(!rounded(n,GUEST_PAGE,&size) || !rounded(n,host_page,&span)) {
++        pthread_mutex_unlock(&lock);errno=EINVAL;return NULL;
++    }
++    r=calloc(1,sizeof *r);
++    if(r)r->protection=calloc(span/GUEST_PAGE,1);
++    if(!r || !r->protection) {
++        free(r);pthread_mutex_unlock(&lock);errno=ENOMEM;return NULL;
++    }
++    void *base=real(address,n,type,access,maximum);int saved=errno;
++    if(!base) {free(r->protection);free(r);pthread_mutex_unlock(&lock);errno=saved;return NULL;}
++    r->base=base;r->size=size;
++    if(type==3)memset(r->protection,access,size/GUEST_PAGE);
++    r->next=reservations;reservations=r;
++    pthread_mutex_unlock(&lock);errno=saved;return base;
++}
++static int release(void *address,size_t n,int type) {
++    int (*real)(void*,size_t,int)=original("Plat_VirtualFree");
++    pthread_mutex_lock(&lock);
++    struct reservation *r=find(address,1);
++    if(r && type==4) {
++        int ok=protect(r,address,n,PROT_NONE);int saved=errno;
++        pthread_mutex_unlock(&lock);errno=saved;return ok;
++    }
++    size_t released_size=0;
++    if(r && type==8 && (address!=r->base || !rounded(n,GUEST_PAGE,&released_size) || released_size!=r->size)) {
++        pthread_mutex_unlock(&lock);errno=EINVAL;return 0;
++    }
++    int ok=real(address,n,type);int saved=errno;
++    if(ok && r && type==8) {
++        struct reservation **link=&reservations;while(*link!=r)link=&(*link)->next;
++        *link=r->next;free(r->protection);free(r);
++    }
++    pthread_mutex_unlock(&lock);errno=saved;return ok;
++}
++static int change_access(void *address,size_t n,int access) {
++    pthread_mutex_lock(&lock);struct reservation *r=find(address,1);
++    if(r) {
++        int ok=protect(r,address,n,access);int saved=errno;
++        pthread_mutex_unlock(&lock);errno=saved;return ok;
++    }
++    pthread_mutex_unlock(&lock);
++    int (*real)(void*,size_t,int)=original("Plat_VirtualProtect");
++    return real(address,n,access);
++}
++void kl_platform_vm_install(void) {
++    host_page=getpagesize();
++    if(host_page<GUEST_PAGE || host_page%GUEST_PAGE || (host_page&(host_page-1)))abort();
++    if(host_page==GUEST_PAGE)return;
++    kl_interpose("Plat_VirtualAlloc",allocate);
++    kl_interpose("Plat_VirtualFree",release);
++    kl_interpose("Plat_VirtualProtect",change_access);
++    fprintf(stderr,"[platform-vm] guest commit=4096 host protection=%zu; subpage protections are combined; 4KiB guard faults unavailable\n",host_page);
++}
+diff --git a/NativeARM/host/kl_platform_vm.h b/NativeARM/host/kl_platform_vm.h
+new file mode 100644
+index 0000000..bd3a8dd
+--- /dev/null
++++ b/NativeARM/host/kl_platform_vm.h
+@@ -0,0 +1,8 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++#ifndef KL_PLATFORM_VM_H
++#define KL_PLATFORM_VM_H
++// Adapt Source platform VM reservations to host protection granularity.
++// Does not alter instructions. Sub-host-page guard faults are not emulated.
++void kl_platform_vm_install(void);
++#endif
+diff --git a/NativeARM/host/tests/valve_lua.c b/NativeARM/host/tests/valve_lua.c
+index cb3c209..313521f 100644
+--- a/NativeARM/host/tests/valve_lua.c
++++ b/NativeARM/host/tests/valve_lua.c
+@@ -5,6 +5,7 @@
+ #include "klepton.h"
+ #include "kl_glibc.h"
+ #include "kl_lua_builtin.h"
++#include "kl_platform_vm.h"
+ #include "kl_fault.h"
+ #include <assert.h>
+ #include <errno.h>
+@@ -83,7 +84,7 @@ int main(int argc,char **argv) {
+     assert(real_mmap&&real_munmap&&real_remap);
+     kl_interpose("mmap",watch_mmap);kl_interpose("mmap64",watch_mmap);
+     kl_interpose("munmap",watch_unmap);kl_interpose("mremap",watch_remap);
+-    kl_lua_builtin_install();kl_image_loaded_hook=safety;
++    kl_lua_builtin_install();kl_platform_vm_install();kl_image_loaded_hook=safety;
+     char path[4096];snprintf(path,sizeof path,"%s/libvscript.so",argv[1]);
+     kl_image *image=kl_load_recursive(path);
+     if(!image) {fprintf(stderr,"[lua-test] load failed: %s\n",kl_error());return 3;}
+diff --git a/NativeARM/host/tests/valve_panorama_runtime.c b/NativeARM/host/tests/valve_panorama_runtime.c
+index a378351..9d24048 100644
+--- a/NativeARM/host/tests/valve_panorama_runtime.c
++++ b/NativeARM/host/tests/valve_panorama_runtime.c
+@@ -4,9 +4,11 @@
+ #include "klepton.h"
+ #include "kl_glibc.h"
+ #include "kl_lua_builtin.h"
++#include "kl_platform_vm.h"
+ #include "kl_fault.h"
+ #include <assert.h>
+ #include <stdio.h>
++#include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
+ static void safety(const char *path,kl_image *image) {
+@@ -16,17 +18,29 @@ static void safety(const char *path,kl_image *image) {
+     }
+ }
+ int main(int argc,char **argv) {
+-    assert(argc==2);setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
++    assert(argc==2 || argc==4);setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
+     setenv("KL_LOAD_DEFER_INIT","1",1);setenv("KL_LOAD_NO_INIT","0",1);
+     setenv("KL_SVC_POLICY","trap-code",1);setenv("KL_GUEST_PATCH","0",1);
+     setenv("KL_TLS_REWRITE_FORCE","1",1);setenv("KL_GUEST_THREAD_TRACKING","1",1);
+     kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_fault_install();
+-    kl_lua_builtin_install();kl_image_loaded_hook=safety;
++    kl_lua_builtin_install();kl_platform_vm_install();kl_image_loaded_hook=safety;
+     const char *names[]={"libpanorama_text_pango.so","libharfbuzz-icu.so","libvorbisfile.so","libpanorama.so"};
+     for(unsigned i=0;i<sizeof names/sizeof names[0];i++) {
+         char path[4096];snprintf(path,sizeof path,"%s/%s",argv[1],names[i]);
+         assert(kl_load_recursive(path));printf("RUNTIME constructors pass: %s\n",names[i]);
+     }
++    // Optional relocation offsets discovered from this input's ELF by readelf.
++    // Assert that the actual Panorama PLT imports bind to the adapter.
++    if(argc==4) {
++        kl_image *panorama=kl_find_image("libpanorama.so");assert(panorama);
++        const char *symbols[]={"Plat_VirtualAlloc","Plat_VirtualFree"};
++        for(int i=0;i<2;i++) {
++            uintptr_t offset=strtoull(argv[i+2],NULL,0);
++            assert(offset<=kl_span(panorama)-sizeof(void*));
++            assert(*(void**)((char*)kl_base(panorama)+offset)==kl_interpose_lookup(symbols[i]));
++            printf("RUNTIME Panorama relocation adapter binding pass: %s\n",symbols[i]);
++        }
++    }
+     const char *(*version)(int)=(void*)kl_guest_sym_global("OpenSSL_version");assert(version);
+     int (*digest)(void*,const char*,const char*,const void*,size_t,unsigned char*,size_t*)=(void*)kl_guest_sym_global("EVP_Q_digest");assert(digest);
+     unsigned char bytes[64];size_t length=0;
+diff --git a/NativeARM/host/tests/valve_vm_pages.c b/NativeARM/host/tests/valve_vm_pages.c
+new file mode 100644
+index 0000000..49c5535
+--- /dev/null
++++ b/NativeARM/host/tests/valve_vm_pages.c
+@@ -0,0 +1,103 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++// Owner-supplied tier0 platform VM exports only. No game/Steam/OpenXR entry.
++#include "klepton.h"
++#include "kl_glibc.h"
++#include "kl_fault.h"
++#include "kl_platform_vm.h"
++#include <mach/mach.h>
++#include <mach/mach_vm.h>
++#include <string.h>
++#include <assert.h>
++#include <errno.h>
++#include <stdint.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/mman.h>
++#include <unistd.h>
++static void safety(const char *path, kl_image *image) {
++    const kl_stats *s=kl_get_stats(image); unsigned missing; kl_missing_imports(image,&missing);
++    if(missing || s->svc_sites!=s->svc_trapped || s->tls_refused || s->x18_refused || s->ctr_refused) {
++        fprintf(stderr,"VM image refused: %s missing=%u\n",path,missing);exit(3);
++    }
++}
++static int permissions(void *address) {
++    mach_vm_address_t start=(uintptr_t)address;mach_vm_size_t size;
++    vm_region_basic_info_data_64_t info;mach_msg_type_number_t count=VM_REGION_BASIC_INFO_COUNT_64;
++    mach_port_t object=MACH_PORT_NULL;
++    assert(mach_vm_region(mach_task_self(),&start,&size,VM_REGION_BASIC_INFO_64,
++        (vm_region_info_t)&info,&count,&object)==KERN_SUCCESS);
++    if(object!=MACH_PORT_NULL)mach_port_deallocate(mach_task_self(),object);
++    assert(start<=(uintptr_t)address && (uintptr_t)address-start<size);
++    return info.protection;
++}
++int main(int argc,char **argv) {
++    assert(argc==2 || (argc==3 && !strcmp(argv[2],"--adapted")));
++    int adapted=argc==3;setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
++    setenv("KL_LOAD_DEFER_INIT","1",1);setenv("KL_LOAD_NO_INIT","0",1);
++    setenv("KL_SVC_POLICY","trap-code",1);setenv("KL_GUEST_PATCH","0",1);
++    setenv("KL_TLS_REWRITE_FORCE","1",1);setenv("KL_GUEST_THREAD_TRACKING","1",1);
++    kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_fault_install();
++    if(adapted)kl_platform_vm_install();
++    kl_image_loaded_hook=safety;
++    char path[4096];snprintf(path,sizeof path,"%s/libtier0.so",argv[1]);
++    kl_image *image=kl_load_recursive(path);assert(image);
++    void *(*alloc)(void*,size_t,int,int,void*)=kl_sym(image,"Plat_VirtualAlloc");
++    int (*release)(void*,size_t,int)=kl_sym(image,"Plat_VirtualFree");
++    int (*change)(void*,size_t,int)=kl_sym(image,"Plat_VirtualProtect");
++    if(adapted) {
++        alloc=kl_interpose_lookup("Plat_VirtualAlloc");
++        release=kl_interpose_lookup("Plat_VirtualFree");
++        change=kl_interpose_lookup("Plat_VirtualProtect");
++    }
++    assert(alloc && release && change);size_t page=getpagesize();assert(page==16384);
++    unsigned char *base=alloc(NULL,65536,1,0,NULL);assert(base);
++    printf("VM reserve 65536 host-page=%zu base=%p\n",page,base);
++    for(size_t offset=0;offset<page;offset+=4096) {
++        errno=0;void *p=alloc(base+offset,4096,2,3,NULL);int saved=errno;
++        printf("VM commit offset=%zu length=4096 result=%p errno=%d\n",offset,p,saved);
++        if(!offset || adapted) {assert(p==base+offset);base[offset]=0x5a;}
++        else assert(!p && saved==EINVAL);
++    }
++    assert(base[0]==0x5a);
++    if(adapted) {
++        for(size_t offset=0;offset<page;offset+=4096)assert(base[offset]==0x5a);
++        // Removing one subpage must not revoke or erase its live neighbours.
++        assert(release(base+4096,4096,4));assert(base[8192]==0x5a);
++        assert(permissions(base)==(VM_PROT_READ|VM_PROT_WRITE));
++        assert(release(base,4096,4));assert(release(base+8192,4096,4));
++        assert(release(base+12288,4096,4));assert(permissions(base)==VM_PROT_NONE);
++        assert(alloc(base+4096,4096,2,3,NULL)==base+4096);assert(base[4096]==0x5a);
++        assert(change(base+4096,4096,PROT_READ));assert(permissions(base)==VM_PROT_READ);
++        errno=0;assert(!change(base+4096,4096,PROT_EXEC) && errno==EPERM);
++        assert(permissions(base)==VM_PROT_READ);
++        errno=0;assert(!alloc(base+1,4096,2,3,NULL) && errno==EINVAL);
++        errno=0;assert(!release(base+4096,4096,8) && errno==EINVAL);
++        errno=0;assert(!alloc(base,65537,2,3,NULL) && errno==EINVAL);
++        errno=0;assert(!release(base,65537,8) && errno==EINVAL);
++        assert(change(base+4096,4096,3));base[4096]=0x6b;
++        // A range crossing host pages preserves independent permissions.
++        assert(alloc(base+12288,8192,2,3,NULL)==base+12288);
++        base[16384]=0x7c;assert(release(base+12288,4096,4));assert(base[16384]==0x7c);
++        assert(change(base+4096,4096,PROT_READ));
++        assert(permissions(base)==VM_PROT_READ);
++        assert(permissions(base+16384)==(VM_PROT_READ|VM_PROT_WRITE));
++    }
++    assert(release(base,65536,8));
++    base=alloc(NULL,65536,1,0,NULL);assert(base);
++    for(size_t offset=0;offset<65536;offset+=page) {
++        assert(alloc(base+offset,page,2,3,NULL)==base+offset);
++        for(size_t i=0;i<page;i++)base[offset+i]=(unsigned char)(offset/page+1);
++    }
++    for(size_t i=0;i<65536;i++)assert(base[i]==(unsigned char)(i/page+1));
++    assert(release(base,65536,8));
++    if(adapted) {
++        // Non-page-sized reservation/release lengths use Linux page rounding.
++        base=alloc(NULL,5000,1,0,NULL);assert(base);
++        assert(alloc(base+4096,1,2,3,NULL)==base+4096);base[4096]=0x41;
++        assert(release(base,5000,8));
++    }
++    kl_glibc_report(stderr);
++    if(adapted)puts("PASS: adapted 4KiB commit/decommit/protect, neighbour data, host permissions, invalid/exec/partial-release rejection; 16KiB lifecycle");
++    else puts("PASS: real tier0 reproduces 4KiB commit failure; host-aligned 16KiB commit/write/read/release succeeds");
++}
+-- 
+2.54.0 (Apple Git-157)
+

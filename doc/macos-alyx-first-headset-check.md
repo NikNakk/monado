@@ -519,6 +519,55 @@ Full-engine user confirmation, overlay/stereo image correctness, multisample
 source handling, game-specific Fontconfig warnings and earlier command-buffer
 purge warnings remain unverified or unresolved. No substantial FDM work begins.
 
+## Tenth run: sound, fatal allocation and platform VM adapter
+
+The user reports sound before failure. The engine prints an allocation failure
+for4096bytes and then faults at tier0+0x6c040. Read-only inspection identifies
+an intentional NULL store of0xdeadbeef in its fatal OOM handler. The Panorama
+caller is at+0x339e68, following the virtual-commit failure path; the same error
+label is also reachable on arena-capacity exhaustion. The log alone does not
+provide the failed syscall errno or prove physical RAM exhaustion. Exit245
+encodes SIGSEGV through the backend wrapper.
+
+A headless test of the owner's unmodified tier0 exports reproduces a concrete
+ABI mismatch: reserve64KiB, commit4KiB at the base succeeds, and commits at
+base+4096/+8192/+12288 return NULL with EINVAL. macOS host pages are16KiB;
+Panorama uses a hardcoded4KiB default commit granularity. A16KiB commit/write/
+read/release control succeeds. No engine/gameplay entry point, Steam or headset
+is involved in this test.
+
+Signed VeRantyx `b8b3ccf` adds a constrained-host platform VM adapter, tracking
+only reservations obtained through Plat_VirtualAlloc and interposing its
+commit/free/protect exports. It combines the logical guest subpage protection
+bits for each host page, applies real mprotect operations, keeps neighbouring
+data/access alive on partial decommit, and forgets allocations only after a
+successful whole-reservation release. Invalid ranges, partial releases and
+executable protection changes on tracked reservations are refused. Special
+flags/max-address paths and untracked operations retain their original handling.
+No generic libc mprotect rounding, game instruction edit, allocator-success
+stub, Monado change or additional GPU copy is introduced.
+
+The important limit is protection granularity: one live4KiB subpage can make
+its16KiB host page accessible, so individual4KiB guard faults and mixed subpage
+protections cannot be faithfully represented. This is logged at startup. The
+adapter is a targeted platform compatibility implementation, not general4KiB
+virtual-memory emulation or evidence of successful Alyx gameplay.
+
+The adapted real-tier0 test passes successive4KiB commits, data preservation,
+decommit/recommit, cross-host-page ranges, host read-only/PROT_NONE queries,
+invalid ranges, executable refusal and rounded reservation lengths. The
+Panorama dependency fixture passes with zero stubs and verifies its actual ELF
+PLT allocation/free imports bind to the adapter. The Lua stress/GC/ENOMEM
+recovery fixture passes with unchanged input hashes; launcher regression passes.
+Source/binary identity, sanitized fatal excerpt and logs are in
+[vm-tenth-run](alyx-valve-lua-results/vm-tenth-run/README.md).
+The isolated host is rebuilt; full-engine confirmation is the next user test.
+
+The tenth log separately reports Steam is not logged in during certificate
+acquisition. Native Steam ownership/authentication remains unverified. The
+warning has not been bypassed; account identifiers/full logs are not committed.
+The repeated unsupported stage-override warnings also remain unresolved.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -529,7 +578,7 @@ cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-runtime \
-  --output /private/tmp/alyx-monado-tenth \
+  --output /private/tmp/alyx-monado-eleventh \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -541,7 +590,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-tenth/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-eleventh/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.
@@ -554,9 +603,10 @@ excerpt are in `doc/alyx-valve-lua-results/`, alongside the Lua/module evidence.
 
 ## Still unverified / next milestone
 
-There is no actual Alyx Vulkan device/pipeline/FDM negotiation trace yet:
-startup stopped at VR initialization before that rendering checkpoint. The
-existing driver-boundary tests remain separate evidence. Stereo/depth images,
+Alyx now creates a real Vulkan device and reaches overlay submission, with
+requested device features/extensions traced in the earlier checkpoints. No
+actual FDM enable or rendered game frame is verified. Standalone driver and
+pipeline tests remain separate evidence. Stereo/depth images,
 actual Steam/gameplay progression, video playback, nonzero signals/unwind/raw
 syscalls and headset frame timing remain unverified. A reached SVC marker needs
 a specific implementation or trap-semantics analysis; do not change it to NOP.

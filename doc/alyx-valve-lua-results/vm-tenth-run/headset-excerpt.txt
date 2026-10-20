@@ -1,0 +1,7 @@
+[engine ch13] Loading (startup)
+[engine ch2 warn] ***** OUT OF MEMORY! /+/ attempted allocation size: 4096 ****
+[klepton] fault: signal 11 at 0x0, pc libtier0.so+0x6c040 (0x11123c040), thread 15826654 (main)
+    lr (who called it): libtier0.so+0x6c030
+
+User reports sound before failure. Exit245 encodes SIGSEGV through the backend Python wrapper.
+No account identifiers or full engine log retained.

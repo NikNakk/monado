@@ -15,11 +15,13 @@ identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
 branch patch. Headless engine startup reaches xrizer. The first user headset run exposed a
 launcher cache/Monado socket conflict, now corrected with passing regression
 checks; see the [headset checkpoint](macos-alyx-first-headset-check.md).
-The ninth run reaches xrizer skybox/overlay submission. Its invalid zero-sample
-graphics pipeline is corrected; real pipeline/shader tests pass on both drivers
-and83 unit tests pass. The isolated xrizer library is rebuilt for user validation;
-image correctness and command-buffer warnings remain unverified or unresolved. No rendered game frame yet. No installed-runtime change
-or full FDM implementation is included.
+The tenth user run reaches sound, then a fatal4096-byte allocation failure.
+A real-tier0 headless test reproduces a4KiB/16KiB page-alignment mismatch.
+The isolated host now adapts platform VM commits; neighbouring data/protection,
+Panorama import binding and Lua regressions pass. Individual4KiB guard faults
+remain unsupported; full-engine confirmation is pending. No rendered game frame
+or FDM enable is verified, and Steam authentication remains unverified.
+No installed-runtime change or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now
 integrated locally into `macos-upstream-clean` by the user-approved fast-forward
