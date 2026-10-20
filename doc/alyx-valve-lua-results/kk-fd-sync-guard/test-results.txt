@@ -1,0 +1,9 @@
+Isolated RelWithDebInfo build: PASS
+CTest: 88/88 PASS
+Real vk_init_from_given fixture: 128 combinations, 1408 assertions PASS
+Same regression without six extension guards: 288/1408 assertions fail
+Guard restored and rebuilt: 1408/1408 PASS
+Klepton strict real KosmicKrisp with timeline + sample-location profiles: CreateDevice=0; unsupported core feature returns -8 unchanged
+KK and unchanged MoltenVK launcher dry-runs: PASS
+Installed runtime SHA256 unchanged
+Actual Alyx with KosmicKrisp: pending user test

@@ -1,0 +1,44 @@
+{
+  "monado_base": "90a6cdb64",
+  "guard_commit": "285916e1d672bbb0d07ffdecfef7e35b5f89d811",
+  "kosmickrisp_source": "c8e17c9784475a745e7be26fb5d4cd2313b9197c",
+  "xrizer_library_source": "0cc9d3a44645ca7d51452fc0a47a541975707261",
+  "klepton_source": "32038c2527b927274600313272ada34adc3f3dfb",
+  "results": {
+    "kosmickrisp": {
+      "device": "device=Apple M5 vendor=0x106b deviceID=0x64 api=1.4.363 driverVersion=109457507 driverID=28 driver=KosmicKrisp info=Mesa 27.0.0-devel (git-0c9a1f072e) UUID=4c050000010000000000000000000000",
+      "driver_library_sha256": "83e46e62122f6352a2b94e7efc25abe1e122e41a7b5ad8eb02dc869a4bee0664",
+      "exit": 0,
+      "frames": 180,
+      "errors": 0,
+      "timeline_shared_event": true,
+      "gpu_timestamp_records": 178,
+      "timestamp_period_ns": "41.666668",
+      "valid_bits": 64
+    },
+    "moltenvk": {
+      "device": "device=Apple M5 vendor=0x106b deviceID=0x1a07020a api=1.2.357 driverVersion=10402 driverID=14 driver=MoltenVK info=1.4.2 UUID=0000106b1a07020a0000000000000000",
+      "driver_library_sha256": "05df2d2145b9ef5b86b08ed93a7a6e916815c2bbac244298a50b2d58061600d1",
+      "exit": 0,
+      "frames": 180,
+      "errors": 0,
+      "timeline_shared_event": true
+    }
+  },
+  "guarded_runtime": {
+    "path": "/Users/nickkennedy/Code/alyx-native/build/monado-kk-fd-guard/src/xrt/targets/openxr/libopenxr_monado.dylib",
+    "sha256": "ecb5f17be88a17d6c8faae7e8861b0b6fc93b66eebe186418193fc22f1d856c4"
+  },
+  "installed_runtime": {
+    "path": "/Users/nickkennedy/Code/monado-2/build/arm64/src/xrt/targets/openxr/libopenxr_monado.dylib",
+    "sha256": "71f382ce7528bb5263db48e759e5b5ac1c3911d47c383f5fd1b16fd15c656902"
+  },
+  "host": {
+    "path": "/Users/nickkennedy/Code/alyx-native/build/host-timeline/alyx_host",
+    "sha256": "45f4c3b85ddab9272c1937eb2d0f69658df32cb7513721b236f92b95d3e9f725"
+  },
+  "xrizer": {
+    "path": "/Users/nickkennedy/Code/alyx-native/build/xrizer-gpu-timing/release/libxrizer.dylib",
+    "sha256": "6547068da978895e603df51cc25040b40c9cebebee973d684429cd8a6d97a9aa"
+  }
+}

@@ -1,0 +1,12 @@
+--- a/tools/macos/vulkan_submit_probe.cpp
++++ b/tools/macos/vulkan_submit_probe.cpp
+@@ -232,6 +232,9 @@
+ 	vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, device_available.data());
+ 	if (has_extension(device_available, "VK_KHR_portability_subset"))
+ 		add_unique(device_exts, "VK_KHR_portability_subset");
++	// Monado currently resolves timeline KHR names, so enable their supported extension.
++	if (has_extension(device_available, "VK_KHR_timeline_semaphore"))
++		add_unique(device_exts, "VK_KHR_timeline_semaphore");
+ 	for (const auto &e : device_exts)
+ 		if (!has_extension(device_available, e.c_str()))
+ 			std::printf("warning: the device lacks %s\n", e.c_str());

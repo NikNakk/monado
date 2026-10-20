@@ -6,6 +6,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+An isolated [external FD synchronization fix and KosmicKrisp Alyx candidate](macos-vulkan-fd-sync-guard.md)
+passes 88 tests and paired 180-frame xrizer probes with timeline handoff. The
+installed runtime/service is unchanged; actual Alyx on the new driver is the
+next user checkpoint.
+
+
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`
 (default `native`). `wsi` selects calibrated CV WSI; the old WSI selection
 booleans are retired. See [selector migration](macos-wsi-migration.md#unified-presenter-selector-17-october-2026).

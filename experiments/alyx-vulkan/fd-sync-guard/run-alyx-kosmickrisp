@@ -1,0 +1,12 @@
+#!/bin/sh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+# Opt-in experimental client driver; installed Monado service remains on MoltenVK.
+set -eu
+base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
+exec "$base/run-alyx-gpu-timing" \
+ --driver kosmickrisp \
+ --icd "$base/build/kk-metal-objects/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json" \
+ --runtime-json "$base/build/monado-kk-fd-guard/openxr_monado-dev.json" \
+ --extended-dynamic-state3 disabled --sample-locations-compat enabled \
+ --api-trace "$@"

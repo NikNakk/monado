@@ -50,7 +50,7 @@ if(XRT_HAVE_VULKAN)
 	if(NOT APPLE)
 		list(APPEND tests tests_comp_client_vulkan)
 	endif()
-	list(APPEND tests tests_uv_to_tangent tests_render_pipeline_cache)
+	list(APPEND tests tests_uv_to_tangent tests_render_pipeline_cache tests_vk_external_sync)
 endif()
 if(XRT_FEATURE_OPENXR)
 	list(
@@ -177,6 +177,7 @@ if(XRT_HAVE_VULKAN)
 			)
 	endif()
 	target_link_libraries(tests_uv_to_tangent PRIVATE aux_render)
+	target_link_libraries(tests_vk_external_sync PRIVATE aux_vk)
 	target_link_libraries(
 		tests_render_pipeline_cache
 		PRIVATE
