@@ -663,18 +663,33 @@ The fixed optimized candidate and matching instrumented debug build are retained
 separately. Original successful debug library/host are unchanged. Further user
 validation is needed; no measured performance improvement is claimed.
 
+## Durable workspace (20 October 2026)
+
+The user correctly flagged that the active experiment was under/private/tmp.
+Linked Monado/original-xrizer worktree commits already lived in permanent Git
+repositories, but standalone clones, dependencies, binaries and the prepared
+game root could be lost when temporary storage is cleared. The complete local
+experiment is now preserved at `/Users/nickkennedy/Code/alyx-native`.
+
+Six independent Git mirrors and checkouts retain available local history and
+shallow boundaries with no object alternates. Builds, extracted dependencies,
+prepared game files/saves and private run logs were copied using APFS clones.
+741 temporary-path symlinks were relocated, with no unmapped links remaining;
+all193 active guest library names and six critical binary hashes match the
+originals. The relocated VM test, default/optimized launcher dry runs and both
+driver-only censuses pass. No full-game test has yet used the permanent paths.
+See [the durable workspace record](alyx-valve-lua-results/durable-workspace/README.md).
+Original temporary paths and the installed Monado runtime remain untouched.
+Use the permanent sources for further work; old build metadata may retain debug
+source paths and should be regenerated when rebuilding from the new sources.
+
 ## Next user test: optimized xrizer
 
 Keep native Steam signed in and the current simulated-HMD setup. Run:
 
 ```sh
-python3 /private/tmp/alyx-verantyx/NativeARM/scripts/launch_xrizer.py \
-  --root /private/tmp/alyx-native-game-root \
-  --libs /private/tmp/alyx-native-guest-libs-runtime \
-  --output /private/tmp/alyx-monado-fourteenth \
-  --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
-  --xrizer-library /private/tmp/xrizer-perf-target/release/libxrizer.dylib \
-  --api-trace --timeout 180
+~/Code/alyx-native/run-alyx --optimized --api-trace \
+  --output ~/Code/alyx-native/runs/next-test --timeout 180
 ```
 
 Load the same save/scene, retain graphics settings and remain stationary for
@@ -682,15 +697,15 @@ Load the same save/scene, retain graphics settings and remain stationary for
 The launcher retains the automatic24GiB budget and common MoltenVK loader.
 It stops only its process group after180seconds; use a new output directory
 for each repeat. This is still a user-run gameplay check, not an unattended
-benchmark. Remove --xrizer-library to return to the original working library.
+benchmark. Omit --optimized to return to the original working library.
 
 For a matched instrumented debug comparison, use
-/private/tmp/xrizer-perf-target/debug/libxrizer.dylib and a new output directory.
+/Users/nickkennedy/Code/alyx-native/workspace/xrizer-perf-target/debug/libxrizer.dylib and a new output directory.
 API CSV analysis (optionally select a steady-state window after loading):
 
 ```sh
-python3 /private/tmp/alyx-verantyx/NativeARM/scripts/summarize_api_trace.py \
-  /private/tmp/alyx-monado-fourteenth/xrizer-api.csv
+python3 ~/Code/alyx-native/workspace/alyx-verantyx/NativeARM/scripts/summarize_api_trace.py \
+  ~/Code/alyx-native/runs/next-test/xrizer-api.csv
 ```
 
 The resulting median/p95/p99 describe API wall duration and pose-call cadence.

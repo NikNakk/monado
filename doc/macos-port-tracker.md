@@ -25,6 +25,9 @@ and fixed in the isolated candidate.85 unit tests pass, including both stage
 regressions; invalid-UTF-8 log handling also passes a two-wrapper regression.
 The prior native MoltenVK pipeline test passes; gameplay revalidation is next.
 Wine GPU timing fixes exist, but their D3D11 queries need a Vulkan counterpart. PS VR2 gameplay and FDM enable are unverified.
+The experiment is now preserved in `~/Code/alyx-native`, with independent Git
+mirrors, APFS data/build copies and relocated runtime links. Permanent-path
+VM/launcher/driver checks pass; use its `run-alyx` launcher for the next game test.
 No installed-runtime change or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

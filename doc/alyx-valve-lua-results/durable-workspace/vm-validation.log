@@ -1,0 +1,35 @@
+[platform-vm] guest commit=4096 host protection=16384; subpage protections are combined; 4KiB guard faults unavailable
+  [dl] /Users/nickkennedy/Code/alyx-native/workspace/alyx-native-guest-libs-runtime/libtier0.so: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/Users/nickkennedy/Code/alyx-native/workspace/alyx-native-guest-libs-runtime/libstdc++.so.6)
+  [dl] /Users/nickkennedy/Code/alyx-native/workspace/alyx-native-guest-libs-runtime/libstdc++.so.6: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs libgcc_s.so.1
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libgcc_s.so.1 -> loading (/Users/nickkennedy/Code/alyx-native/workspace/alyx-native-guest-libs-runtime/libgcc_s.so.1)
+  [dl] /Users/nickkennedy/Code/alyx-native/workspace/alyx-native-guest-libs-runtime/libgcc_s.so.1: 1 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+[proc] synthetic /proc and /sys at /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/klepton-proc.KpeGbB (10 cpus, 24576 MB budget)
+VM reserve 65536 host-page=16384 base=0x107e10000
+[platform-vm] subpage commit translated offset=0 size=4096 host-page=16384
+VM commit offset=0 length=4096 result=0x107e10000 errno=0
+[platform-vm] subpage commit translated offset=4096 size=4096 host-page=16384
+VM commit offset=4096 length=4096 result=0x107e11000 errno=0
+[platform-vm] subpage commit translated offset=8192 size=4096 host-page=16384
+VM commit offset=8192 length=4096 result=0x107e12000 errno=0
+[platform-vm] subpage commit translated offset=12288 size=4096 host-page=16384
+VM commit offset=12288 length=4096 result=0x107e13000 errno=0
+[platform-vm] subpage commit translated offset=4096 size=4096 host-page=16384
+[platform-vm] commit refused address=0x107e10001 size=4096 access=3 errno=22
+[platform-vm] commit refused address=0x107e10000 size=65537 access=3 errno=22
+[platform-vm] subpage commit translated offset=12288 size=8192 host-page=16384
+[platform-vm] subpage commit translated offset=4096 size=1 host-page=16384
+  [glibc] 506 table entries, 62 aliases, 0 stub calls
+PASS: adapted 4KiB commit/decommit/protect, neighbour data, host permissions, invalid/exec/partial-release rejection; 16KiB lifecycle
