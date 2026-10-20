@@ -23,8 +23,10 @@ save into a level on the simulated HMD: first native ARM64 gameplay confirmed.
 Frame rate is reportedly below the best Wine runs, without matched measurements.
 The launcher now reports this24GiB Mac's RAM instead of its inherited6GiB budget;
 the twelfth user run confirms warning removal and subjectively better performance.
-An isolated optimized xrizer/API-wall trace passes83 unit tests and a native
-MoltenVK overlay test; a matched scene comparison is the next user check.
+The optimized trial exposed a stage-swapchain fallback panic, reproduced locally
+and fixed in the isolated candidate.85 unit tests pass, including both stage
+regressions; invalid-UTF-8 log handling also passes a two-wrapper regression.
+The prior native MoltenVK pipeline test passes; gameplay revalidation is next.
 Wine GPU timing fixes exist, but their D3D11 queries need a Vulkan counterpart. PS VR2 gameplay and FDM enable are unverified.
 No installed-runtime change or full FDM implementation is included.
 

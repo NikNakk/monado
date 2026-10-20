@@ -1,0 +1,87 @@
+From aa6ea3f1f0fa3b11cd481a82d7391a4c64fb6e2a Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 14:46:30 +0200
+Subject: [PATCH] Retain launch identity and tolerate binary crash-log output
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/scripts/launch_xrizer.py         |  4 +-
+ NativeARM/scripts/test_launch_log_bytes.py | 44 ++++++++++++++++++++++
+ 2 files changed, 47 insertions(+), 1 deletion(-)
+ create mode 100644 NativeARM/scripts/test_launch_log_bytes.py
+
+diff --git a/NativeARM/scripts/launch_xrizer.py b/NativeARM/scripts/launch_xrizer.py
+index 00e00b0..c209feb 100644
+--- a/NativeARM/scripts/launch_xrizer.py
++++ b/NativeARM/scripts/launch_xrizer.py
+@@ -131,6 +131,8 @@ ET.ElementTree(fontconfig).write(settings['FONTCONFIG_FILE'],encoding='utf-8',xm
+ env={k:v for k,v in os.environ.items() if not k.startswith(('KL_','VERANTYX_','MVK_CONFIG_'))}
+ env.update(settings)
+ started=time.time()
++manifest['started_unix']=started
++(args.output/'launch-manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
+ with (args.output/'launcher.log').open('w') as log:
+  child=subprocess.Popen(command,cwd=args.root,env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+  try:
+@@ -141,7 +143,7 @@ with (args.output/'launcher.log').open('w') as log:
+   except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
+   code=124 if isinstance(error,subprocess.TimeoutExpired) else 130
+ log=args.output/'backend/run.log'
+-text=log.read_text() if log.is_file() else ''
++text=log.read_text(encoding='utf-8',errors='replace') if log.is_file() else ''
+ checkpoint='ERROR_RUNTIME_UNAVAILABLE' in text
+ manifest.update(exit_code=code,elapsed_seconds=time.time()-started,
+                 source2_entry_observed='Source2Main(' in text,
+diff --git a/NativeARM/scripts/test_launch_log_bytes.py b/NativeARM/scripts/test_launch_log_bytes.py
+new file mode 100644
+index 0000000..4be1f57
+--- /dev/null
++++ b/NativeARM/scripts/test_launch_log_bytes.py
+@@ -0,0 +1,44 @@
++#!/usr/bin/env python3
++# Copyright 2026, Nick Kennedy
++# SPDX-License-Identifier: BSL-1.0
++"""Run both real wrappers with inert driver/host fixtures and binary log bytes.
++Usage: test_launch_log_bytes.py /path/to/tools/macos/run-vulkan-backend.py
++No Vulkan, Steam, OpenXR, game or hardware is loaded.
++"""
++import json
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++
++backend=Path(sys.argv[1]).resolve(strict=True)
++with tempfile.TemporaryDirectory() as tmp:
++    root=Path(tmp).resolve()
++    game=root/'game';libs=root/'libs';xrizer=root/'xrizer'
++    for path in [game/'clone-manifest.json',libs/'libraries.json',
++                 game/'game/bin/linuxsteamrtarm64/libengine2.so',
++                 xrizer/'target/debug/libxrizer.dylib',root/'openxr-loader',root/'driver.dylib']:
++        path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(b'inert fixture')
++    runner=xrizer/'tools/macos/run-vulkan-backend.py'
++    runner.parent.mkdir(parents=True);runner.write_bytes(backend.read_bytes())
++    probe=xrizer/'target/vulkan_submit_probe'
++    probe.write_text('#!/usr/bin/env python3\nprint("device=fixture driverID=14 ")\n');probe.chmod(0o755)
++    host=root/'host'
++    host.write_text('#!/usr/bin/env python3\nimport os,sys\nos.write(1,b"Source2Main(fixture)\\nraw byte: \\xfc\\n")\nsys.exit(7)\n');host.chmod(0o755)
++    icd=root/'icd.json';icd.write_text(json.dumps({'ICD':{'library_path':str(root/'driver.dylib')}}))
++    output=root/'output'
++    command=[sys.executable,str(Path(__file__).with_name('launch_xrizer.py')),
++             '--root',str(game),'--libs',str(libs),'--xrizer',str(xrizer),
++             '--host',str(host),'--openxr-loader',str(root/'openxr-loader'),
++             '--icd',str(icd),'--output',str(output),'--memory-mb','16384',
++             '--no-xr-runtime','--timeout','10']
++    run=subprocess.run(command,capture_output=True,text=True,timeout=15)
++    assert run.returncode==7,(run.returncode,run.stderr)
++    assert 'UnicodeDecodeError' not in run.stdout+run.stderr
++    assert '\ufffd' in run.stdout
++    assert (output/'backend/run.log').read_bytes()==b'Source2Main(fixture)\nraw byte: \xfc\n'
++    assert json.loads((output/'backend/manifest.json').read_text())['exit_code']==7
++    launch=json.loads((output/'launch-manifest.json').read_text())
++    assert launch['exit_code']==7 and launch['source2_entry_observed']
++    assert launch['started_unix']>0
++print('PASS: both real wrappers preserve child exit7 and raw non-UTF-8 bytes, render replacement text, and retain manifests; inert fixtures only')
+-- 
+2.54.0 (Apple Git-157)
+

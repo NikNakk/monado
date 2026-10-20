@@ -1,0 +1,108 @@
+   Compiling xrizer v0.5.0 (/private/tmp/xrizer-performance)
+warning: function `view_matrix` is never used
+   --> src/stage.rs:258:8
+    |
+258 | pub fn view_matrix(view: &openxr::View) -> Mat4 {
+    |        ^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `projection_matrix` is never used
+   --> src/stage.rs:268:8
+    |
+268 | pub fn projection_matrix(fov: openxr::Fovf, near: f32, far: f32) -> Mat4 {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: `xrizer` (lib test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.23s
+     Running unittests src/lib.rs (/private/tmp/xrizer-perf-target/debug/deps/xrizer-cece6ba948d8da41)
+
+running 86 tests
+test clientcore::tests::inject_force ... ok
+test clientcore::tests::inject ... ok
+test clientcore::tests::inject_multithread_force ... ok
+test compositor::tests::bad_bounds ... ok
+test compositor::tests::allow_flipped_bounds ... ok
+test clientcore::tests::restart ... ok
+test compositor::tests::error_on_multiple_same_eye_submit ... ok
+test compositor::tests::explicit_timing_session_restart_after_waitgetposes ... ok
+test compositor::tests::explicit_timing_no_submit ... ok
+test compositor::tests::explicit_timing_multiple_waitgetposes ... ok
+test compositor::tests::explicit_timing_unfocused ... ok
+test compositor::tests::allow_waitgetposes_without_submit ... ok
+test compositor::tests::get_frame_timing ... ok
+test compositor::tests::explicit_timing ... ok
+test graphics_backends::vulkan::native_overlay_pipeline_tests::native_overlay_pipeline ... ignored, requires an explicit native Vulkan ICD and Metal access
+test compositor::tests::recreate_swapchain ... ok
+test compositor::tests::vulkan_extensions ... ok
+test compositor::tests::zero_dims_texture ... ok
+test compositor::tests::submit_overlay_without_projection_layer ... ok
+test compositor::tests::unsupported_stage_keeps_submitted_application_eyes ... ok
+test compositor::tests::failed_stage_recreation_does_not_reuse_discarded_eyes ... ok
+test compositor::tests::unsupported_format ... ok
+test compositor::tests::explicit_timing_multiple_submit_explicit_timing_data ... ok
+test input::custom_bindings::tests::dpad_input_same_action_on_different_inputs ... ok
+test input::custom_bindings::tests::dpad_input_different_sets_have_different_actions ... ok
+test input::custom_bindings::tests::grab_per_hand ... ok
+test input::custom_bindings::tests::toggle_button ... ok
+test input::custom_bindings::tests::dpad_input ... ok
+test input::custom_bindings::tests::toggle_button_per_hand ... ok
+test input::custom_bindings::tests::dpad_input_use_non_dpad_when_available ... ok
+test input::custom_bindings::tests::dpad_cross_profile_actions ... ok
+test input::legacy::tests::button_a ... ok
+test input::legacy::tests::button_app_menu ... ok
+test input::legacy::tests::button_main_xy_click ... ok
+test input::legacy::tests::button_main_xy_touch ... ok
+test input::custom_bindings::tests::double_tap_timeout ... ok
+test input::custom_bindings::tests::double_tap ... ok
+test input::custom_bindings::tests::grab_binding ... ok
+test input::custom_bindings::tests::grab_binding_custom_threshold ... ok
+test input::custom_bindings::tests::double_tap_bindings ... ok
+test input::legacy::tests::no_legacy_input_before_session_setup ... ok
+test input::legacy::tests::button_squeeze_click ... ok
+test input::legacy::tests::button_trigger_click ... ok
+test input::legacy::tests::legacy_haptic ... ok
+test input::custom_bindings::tests::grip_touch_from_pull_oculus ... ok
+test input::legacy::tests::poses_updated ... ok
+test input::custom_bindings::tests::trigger_no_touch_from_pull_oculus ... ok
+test input::devices::tests::get_tracker_serial ... ok
+test input::devices::tests::get_tracker_pose ... ok
+test input::tests::actions_with_bad_paths ... ok
+test input::legacy::tests::init_controller_state_on_failure ... ok
+test input::profiles::meta_touch_plus::tests::verify_bindings ... ok
+test input::profiles::knuckles::tests::verify_bindings ... ok
+test input::tests::cased_actions ... ok
+test input::profiles::oculus_touch::tests::verify_bindings ... ok
+test input::profiles::vive_focus3::tests::verify_bindings ... ok
+test input::profiles::simple_controller::tests::verify_bindings ... ok
+test input::legacy::tests::no_legacy_input_with_manifest ... ok
+test input::tests::analog_action_initialize_on_failure ... ok
+test input::profiles::vive_controller::tests::verify_bindings ... ok
+test input::tests::empty_manifest ... ok
+test input::tests::implicit_action_sets ... ok
+test input::legacy::tests::legacy_haptic_with_action_manifest ... ok
+test input::tests::detect_controller_after_manifest_load ... ok
+test openxr_data::tests::session_restart_contended ... ok
+test rendermodels::tests::component_render_model_name_contract ... ok
+test rendermodels::tests::cstr_write_out_contract ... ok
+test input::tests::digital_action_initalize_on_failure ... ok
+test rendermodels::tests::get_component_count_contract ... ok
+test rendermodels::tests::get_component_name_contract ... ok
+test rendermodels::tests::get_component_state_contract ... ok
+test input::tests::handles_dont_change_after_load ... ok
+test input::tests::input_state_flow ... ok
+test input::tests::pose_action_no_restrict ... ok
+test rendermodels::tests::render_model_count_and_iter_name ... ok
+test rendermodels::tests::render_model_has_component_contract ... ok
+test system::tests::unity_required_properties ... ok
+test input::tests::load_actions_race ... ok
+test rendermodels::tests::load_and_free_texture_contract ... ok
+test rendermodels::tests::load_and_free_render_model_contract ... ok
+test input::tests::raw_pose_waitgetposes_and_skeletal_pose_identical ... ok
+test input::tests::raw_pose_switch_profile ... ok
+test rendermodels::tests::get_render_model_data_able_to_resolve_all_elements ... ok
+test input::tests::unknown_handles ... ok
+test input::tests::reload_manifest_on_session_restart ... ok
+test rendermodels::tests::embedded_models_parse_and_have_reasonable_geometry ... ok
+
+test result: ok. 85 passed; 0 failed; 1 ignored; 0 measured; 3 filtered out; finished in 0.09s

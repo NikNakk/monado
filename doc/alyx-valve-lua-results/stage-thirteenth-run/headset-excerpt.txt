@@ -1,0 +1,49 @@
+[2026-10-20T14:29:25.967 INFO  xrizer::compositor ThreadId(2)] recreating swapchain for stage override: 896x1007
+[2026-10-20T14:29:25.971 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.020 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.034 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.050 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.068 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.085 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.218 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.235 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.251 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.267 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.283 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.301 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.318 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.333 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.351 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.367 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.384 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.401 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.833 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.852 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.886 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.901 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.917 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.935 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.952 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.967 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:26.985 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.001 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.018 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.035 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.050 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.067 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.085 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.101 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.118 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.135 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.152 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.169 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.215 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.250 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.268 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.286 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:27.387 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:53.180 INFO  xrizer::compositor ThreadId(2)] recreating swapchain for stage override: 896x1007
+[2026-10-20T14:29:53.187 WARN  xrizer::compositor ThreadId(2)] failed to render stage override: stage overrides are unsupported by this graphics backend
+[2026-10-20T14:29:53.188 ERROR xrizer ThreadId(2)] panicked at src/compositor.rs:1692:44:
+Eye 0 has not been submitted!
+[klepton] fault: signal 6 at 0x1868205e8, pc __pthread_kill+0x8 (0x1868205e8), thread 15927854 (a guest worker thread)

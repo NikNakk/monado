@@ -631,6 +631,38 @@ debug library and host remain byte-identical; default library selection is
 unchanged. No GPU timing claim or feedback behavior change is made by this
 candidate, and no additional compositor/copy is introduced.
 
+## Thirteenth run: optimized stage fallback panic; wrappers hid the cause
+
+The user reports a launcher crash. The backend manifest records a32.04-second
+SIGABRT (child-6); first-frame submission preceded the crash. xrizer panics on
+"Eye0 has not been submitted" after recreating a stage swapchain for a backend
+that cannot render stages. That recreation cleared both submitted eyes after
+stereo readiness had already been computed; the fallback used the stale value.
+A real frame-controller regression reproduces the exact panic before the fix.
+This logic also exists in the original debug build; optimization is not proven
+to be the trigger.
+
+Signed performance xrizer2b73755 checks stage support before mutating swapchains,
+logs unsupported stages once per controller, and rechecks eye availability
+after a supported stage attempt. Only the existing D3D11 stage renderer opts in.
+Vulkan retains the application/skybox fallback without losing its scene images.
+A second regression confirms that supported-but-failed stage recreation cannot
+reuse discarded eyes. Both pass in optimized and debug tests; full unit suite
+is85pass,1ignored native-GPU test and3known input skips.
+
+Both Python wrappers then encountered invalid UTF-8 in the crash diagnostics,
+obscuring the panic and losing the outer final manifest. Backend a8feb75/5c2b9c0
+and VeRantyx aa6ea3f use replacement decoding for display; original log bytes
+remain intact. The outer manifest is now also written before launch. A bounded
+inert-fixture test runs both real wrappers with a non-UTF-8 byte and child exit7:
+raw bytes, final status and both manifests are preserved. Launcher regression
+passes. [Focused evidence](alyx-valve-lua-results/stage-thirteenth-run/README.md)
+includes no full game log or account identifiers.
+
+The fixed optimized candidate and matching instrumented debug build are retained
+separately. Original successful debug library/host are unchanged. Further user
+validation is needed; no measured performance improvement is claimed.
+
 ## Next user test: optimized xrizer
 
 Keep native Steam signed in and the current simulated-HMD setup. Run:
@@ -639,7 +671,7 @@ Keep native Steam signed in and the current simulated-HMD setup. Run:
 python3 /private/tmp/alyx-verantyx/NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-runtime \
-  --output /private/tmp/alyx-monado-thirteenth \
+  --output /private/tmp/alyx-monado-fourteenth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --xrizer-library /private/tmp/xrizer-perf-target/release/libxrizer.dylib \
   --api-trace --timeout 180
@@ -658,7 +690,7 @@ API CSV analysis (optionally select a steady-state window after loading):
 
 ```sh
 python3 /private/tmp/alyx-verantyx/NativeARM/scripts/summarize_api_trace.py \
-  /private/tmp/alyx-monado-thirteenth/xrizer-api.csv
+  /private/tmp/alyx-monado-fourteenth/xrizer-api.csv
 ```
 
 The resulting median/p95/p99 describe API wall duration and pose-call cadence.

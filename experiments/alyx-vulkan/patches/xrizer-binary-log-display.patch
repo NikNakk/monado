@@ -1,0 +1,26 @@
+From 5c2b9c0bb37709cc72900bf67f7f268af75a73d6 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 14:46:27 +0200
+Subject: [PATCH] Display binary guest logs without masking child exit status
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ tools/macos/run-vulkan-backend.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/macos/run-vulkan-backend.py b/tools/macos/run-vulkan-backend.py
+index 604ba48..4ebb5ee 100644
+--- a/tools/macos/run-vulkan-backend.py
++++ b/tools/macos/run-vulkan-backend.py
+@@ -60,7 +60,7 @@ def main():
+         result = subprocess.run(command, env=env, stdout=log, stderr=subprocess.STDOUT)
+     manifest.update(exit_code=result.returncode, elapsed_seconds=time.time()-manifest['started_unix'])
+     (args.output/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
+-    print((args.output/'run.log').read_text(), end='')
++    print((args.output/'run.log').read_text(encoding='utf-8', errors='replace'), end='')
+     return result.returncode
+ 
+ 
+-- 
+2.54.0 (Apple Git-157)
+
