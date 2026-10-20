@@ -287,6 +287,74 @@ selection is unchanged. A sixth user run is needed for the full engine path.
 The dispatch-loader reproduction establishes the previously NULL function slot
 and native command behaviour; it does not establish game-frame correctness.
 
+## Sixth user result: import guard stops the font stack
+
+The corrected sample-location profile activates and Alyx passes the previous
+NULL call. The run exits3, about2.05seconds after launch, when loading the
+Pango/FreeType font stack: missing GLib/GObject/GIO, FriBidi, compression, PNG and
+Expat dependencies leave56 unresolved FreeType imports. The safety guard refuses
+constructors. This is an explicit import failure, not an observed GPU fault.
+Command-buffer purge warnings (2577 allocated, zero currently available) occur
+earlier and remain a separate unresolved observation; no first game frame is
+claimed. The total run time is a startup observation, not a frame benchmark.
+
+Twelve public Debian ARM64 packages are now extracted into
+`/private/tmp/alyx-font-runtime`, with HTTPS package-index size/SHA256 verification,
+archives and copyright notices retained. Nothing is installed. The expanded
+allowlist in the existing fetch script records exact versions/URLs/hashes in
+`font-stack-sixth-run/dependency-manifest.json`. A new flat search directory
+`/private/tmp/alyx-native-guest-libs-fonts` has162 names, preserving all previous
+inputs and adding the new runtime. The old directory remains untouched.
+Twenty-one font-stack libraries now pass relocation diagnostics with zero
+unresolved imports or refused ABI rewrites.
+
+Constructor probing then exposed the existing FreeType/HarfBuzz dependency
+cycle:29 imports bind only after all members are mapped. Immediate validation
+and constructors ran too early. Signed Klepton `66cf7a0` adds opt-in
+KL_LOAD_DEFER_INIT=1: map the recursive group, rebind missing imports, run all
+new-image validation hooks, then dependency-order constructors. Original hook
+load paths/aliases are preserved. A Lua regression initially caught alias-path
+changes from canonicalization; that was corrected before committing. Existing
+non-opt-in loader behaviour is preserved. Missing-import checks are retained.
+
+Signed VeRantyx `c05f415` enables this ordering in the constrained host, provides
+an owned cyclic-ELF fixture and real font-layout test, and writes private
+Fontconfig configuration/cache per launch. System macOS fonts are read in place;
+no fonts or game binaries are copied/modified by this preparation step. The
+existing private game clone remains the execution root. No installed Monado
+runtime, service, OpenXR JSON or Steam authentication behaviour is changed.
+
+Actual local checks, with no headset session:
+
+- Owned AArch64 cyclic libraries: both validation hooks see resolved imports
+  before either constructor; constructors call across the cycle and return77;
+  repeated loading does not reinitialize.
+- Real font constructors: all21 libraries load with zero unresolved imports,
+  and the probe exits0 with zero libc fallback-stub calls.
+- Real Pango/FreeType/HarfBuzz/Fontconfig layout: English83x15pixels and mixed
+  Greek/Arabic71x16pixels, zero unknown glyphs, zero libc fallback-stub calls.
+  This verifies layout execution, not headset typography or game font assets.
+- Valve Lua allocator regression under the new ordering: all previous allocation,
+  teardown, mremap-fallback and ENOMEM/recovery checks pass; five input hashes
+  remain unchanged and libc reports zero fallback-stub calls.
+- Engine constructor probe with the expanded library directory passes, with
+  zero unresolved imports and libc fallback-stub calls. Launcher environment/
+  driver-profile dry-run regression passes.
+
+The constrained host is rebuilt. Use the new library directory in the next
+command. The full engine must still confirm progression past fonts and expose
+any subsequent rendering/synchronization failure. Focused evidence is in
+`alyx-valve-lua-results/font-stack-sixth-run/`; no game code/disassembly is included.
+
+To reproduce preparation in fresh output directories, use the existing
+`fetch_lua_runtime.py --packages` interface with the12 names from its retained
+manifest, then `prepare_guest_dir.py` with the GNU, UUID and font runtime trees
+as inputs. Build `check-loader-cycle` and `valve-font-stack` targets in the
+isolated constrained host build to reproduce the additional tests. The font
+layout fixture needs FONTCONFIG_FILE pointing at a configuration containing
+`/System/Library/Fonts` and an isolated cachedir; the launcher now writes that
+configuration automatically.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -296,8 +364,8 @@ Use the normal PS VR2/Monado setup. From the isolated VeRantyx checkout:
 cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
-  --libs /private/tmp/alyx-native-guest-libs-ready \
-  --output /private/tmp/alyx-monado-sixth \
+  --libs /private/tmp/alyx-native-guest-libs-fonts \
+  --output /private/tmp/alyx-monado-seventh \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -309,7 +377,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-sixth/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-seventh/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.

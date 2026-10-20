@@ -1,0 +1,7 @@
+PASS Lua real ELF setter relocation binding; original Lua range branch unchanged
+PASS Lua round=0 strings/table-resize/collect/close live-mapped-bytes=0 peak=17321984
+PASS Lua round=1 strings/table-resize/collect/close live-mapped-bytes=0 peak=17321984
+PASS Lua round=2 strings/table-resize/collect/close live-mapped-bytes=0 peak=17321984
+PASS Lua newstate returns NULL on injected anonymous mmap ENOMEM
+PASS Lua allocator maps=393230 unmaps=393229 mremap=3 failures=30; recovered after ENOMEM
+  [glibc] 506 table entries, 62 aliases, 0 stub calls

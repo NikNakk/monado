@@ -18,10 +18,11 @@ also pass on both drivers. Private-memory ABI translation is now authorized;
 [actual Valve Lua and headless engine startup](macos-alyx-first-headset-check.md)
 pass their checkpoints. The first user run exposed an isolated-cache IPC-directory error; the launcher
 now preserves the native Monado socket directory, with regression checks passing.
-The fifth user run identifies an inactive sample-location compatibility guard.
-The corrected profile now passes replay of the exact request through the actual
-hash-checked renderer dispatch loaders, including native command submission.
-A rebuilt host awaits full-engine user confirmation. No rendered game frame
+The sixth user run passes the sample-location fault and stops at missing font
+dependencies. An expanded isolated runtime and corrected cyclic-library
+initialization now pass real font layout, engine constructors and Lua regression
+checks. A rebuilt host awaits full-engine user confirmation; earlier command
+buffer purge warnings remain unresolved. No rendered game frame
 or FDM extension enable is verified. No installed-runtime change
 or full FDM implementation is included.
 

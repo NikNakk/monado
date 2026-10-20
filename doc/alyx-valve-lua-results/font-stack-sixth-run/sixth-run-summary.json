@@ -1,0 +1,11 @@
+{
+  "exit_code": 3,
+  "elapsed_seconds": 2.050516128540039,
+  "command_buffer_purge_warnings": 100,
+  "termination": "Import guard refuses FreeType with 56 missing imports during Pango font-stack load.",
+  "new_runtime_packages": 12,
+  "font_stack_libraries_checked": 21,
+  "flat_library_names": 162,
+  "font_cache": "Private per-launch cache; system fonts read in place, never copied.",
+  "still_unverified": "Full Alyx engine progression and visual/headset results after the font fixes; earlier command-buffer purge warnings remain a separate unresolved observation."
+}

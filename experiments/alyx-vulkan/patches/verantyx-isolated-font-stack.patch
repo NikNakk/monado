@@ -1,0 +1,283 @@
+From c05f415ae4d9e8764315d0862302f5dac079b84f Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 09:34:09 +0200
+Subject: [PATCH] native: prepare isolated font dependencies and validate
+ cyclic initialization
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile                 | 10 +++++
+ NativeARM/host/alyx_host.c              |  2 +-
+ NativeARM/host/tests/loader_cycle.c     | 27 +++++++++++++
+ NativeARM/host/tests/make_cycle_elf.py  | 53 +++++++++++++++++++++++++
+ NativeARM/host/tests/valve_font_stack.c | 46 +++++++++++++++++++++
+ NativeARM/host/tests/valve_lua.c        |  2 +-
+ NativeARM/scripts/fetch_lua_runtime.py  |  4 +-
+ NativeARM/scripts/launch_xrizer.py      | 10 ++++-
+ NativeARM/scripts/test_launch_xrizer.py |  2 +
+ 9 files changed, 151 insertions(+), 5 deletions(-)
+ create mode 100644 NativeARM/host/tests/loader_cycle.c
+ create mode 100644 NativeARM/host/tests/make_cycle_elf.py
+ create mode 100644 NativeARM/host/tests/valve_font_stack.c
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index 8b5efb0..be98023 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -144,3 +144,13 @@ valve-vulkan-dispatch: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS)
+ 	$(CC) $(CFLAGS) -o $(OUT)/valve-vulkan-dispatch tests/valve_vulkan_dispatch.c $^ $(LDLIBS) -I.
+ 
+ .PHONY: valve-vulkan-dispatch
++
++check-loader-cycle: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/check-loader-cycle tests/loader_cycle.c $^ $(LDLIBS) -I.
++
++.PHONY: check-loader-cycle
++
++valve-font-stack: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/valve-font-stack tests/valve_font_stack.c $^ $(LDLIBS) -I.
++
++.PHONY: valve-font-stack
+diff --git a/NativeARM/host/alyx_host.c b/NativeARM/host/alyx_host.c
+index 33f7c08..920cee5 100644
+--- a/NativeARM/host/alyx_host.c
++++ b/NativeARM/host/alyx_host.c
+@@ -169,7 +169,7 @@ int main(int argc, char **argv) {
+     }
+     setenv("KL_GUEST_PATCH","0",1); setenv("KL_SVC_POLICY","trap-code",1);
+     setenv("KL_VK_STRICT","1",1); setenv("KL_GUEST_THREAD_TRACKING","1",1);
+-    setenv("KL_LOAD_NO_INIT","0",1); setenv("KL_TLS_REWRITE_FORCE","1",1);
++    setenv("KL_LOAD_NO_INIT","0",1); setenv("KL_LOAD_DEFER_INIT","1",1); setenv("KL_TLS_REWRITE_FORCE","1",1);
+     setenv("KL_VK_ASYNC_PIPELINES","0",1);
+     unsetenv("KL_DYLIB_DIR"); unsetenv("KL_INIT_SKIP"); unsetenv("KL_INIT_SLEEP");
+ #endif
+diff --git a/NativeARM/host/tests/loader_cycle.c b/NativeARM/host/tests/loader_cycle.c
+new file mode 100644
+index 0000000..6331936
+--- /dev/null
++++ b/NativeARM/host/tests/loader_cycle.c
+@@ -0,0 +1,27 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++#include "klepton.h"
++#include "kl_glibc.h"
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++static int checks;
++static void verify(const char *path,kl_image *image) {
++    unsigned missing;kl_missing_imports(image,&missing);assert(!missing);
++    // Both hooks must run before either constructor, after both images bind.
++    kl_image *a=kl_find_image("libcycle_a.so"),*b=kl_find_image("libcycle_b.so");assert(a&&b);
++    int (*read_a)(void)=kl_sym(a,"result_a"),(*read_b)(void)=kl_sym(b,"get_b");
++    assert(read_a && read_b && read_a()==0 && read_b()==0);checks++;
++}
++int main(int argc,char **argv) {
++    assert(argc==2);setenv("KL_LOAD_DEFER_INIT","1",1);setenv("KL_LOAD_NO_INIT","0",1);
++    setenv("KL_SVC_POLICY","trap-code",1);setenv("KL_GUEST_PATCH","0",1);
++    kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_image_loaded_hook=verify;
++    char path[4096];snprintf(path,sizeof path,"%s/libcycle_a.so",argv[1]);
++    kl_image *a=kl_load_recursive(path);assert(a && checks==2);
++    int (*read_a)(void)=kl_sym(a,"result_a");assert(read_a && read_a()==77);
++    kl_image *b=kl_find_image("libcycle_b.so");int (*read_b)(void)=kl_sym(b,"get_b");assert(read_b()==77);
++    assert(kl_load_recursive(path)==a && checks==2 && read_a()==77);
++    puts("PASS: actual cyclic ELF imports bind before all validation hooks and dependency-ordered constructors; repeat load does not reinitialize");
++}
+diff --git a/NativeARM/host/tests/make_cycle_elf.py b/NativeARM/host/tests/make_cycle_elf.py
+new file mode 100644
+index 0000000..c9800f4
+--- /dev/null
++++ b/NativeARM/host/tests/make_cycle_elf.py
+@@ -0,0 +1,53 @@
++#!/usr/bin/env python3
++# Copyright 2026, Nick Kennedy
++# SPDX-License-Identifier: BSL-1.0
++"""Create two tiny owned AArch64 ELF libraries, with cyclic imports and ctors.
++No compiler, linker, system libraries or game inputs are needed.
++"""
++import argparse
++from pathlib import Path
++import struct
++
++def adr(register, pc, target):
++    delta=(target-pc)&0x1fffff
++    return 0x10000000 | ((delta&3)<<29) | ((delta>>2)<<5) | register
++
++def image(path, side):
++    data=bytearray(0x4b00)
++    def put(offset,fmt,*values):struct.pack_into('<'+fmt,data,offset,*values)
++    strings=b'\0'
++    names={}
++    for name in ['libcycle_a.so','libcycle_b.so','get_a','get_b','result_a']:
++        names[name]=len(strings);strings+=name.encode()+b'\0'
++    data[0x4100:0x4100+len(strings)]=strings
++    symbols=[('',0,0,0)]
++    if side=='a':symbols += [('get_a',0x1000,8,1),('result_a',0x1020,12,1),('get_b',0,0,0)]
++    else:symbols += [('get_b',0x1020,12,1),('get_a',0,0,0)]
++    for i,(name,value,size,section) in enumerate(symbols):
++        put(0x4200+24*i,'IBBHQQ',names.get(name,0),0x12 if i else 0,0,section,value,size)
++    put(0x4300,'II',1,len(symbols)) # DT_HASH supplies symbol count
++    # Export get_a returns 77; the state getter reads memory written by ctor.
++    put(0x1000,'II',0x52800000 | (77<<5),0xd65f03c0)
++    put(0x1020,'III',adr(16,0x1020,0x4610),0xb9400200,0xd65f03c0)
++    # Constructor: preserve LR, call imported peer, store its value, restore LR.
++    put(0x1080,'IIIIIIII',0xa9bf7bfd,adr(16,0x1084,0x4600),0xf9400210,
++        0xd63f0200,adr(16,0x1090,0x4610),0xb9000200,0xa8c17bfd,0xd65f03c0)
++    put(0x4500,'QQq',0x4400,1027,0x1080) # RELATIVE init-array pointer
++    put(0x4518,'QQq',0x4600,((len(symbols)-1)<<32)|1026,0) # GLOB_DAT import
++    dynamic=[(1,names['libcycle_b.so' if side=='a' else 'libcycle_a.so']),
++             (5,0x4100),(10,len(strings)),(6,0x4200),(11,24),(4,0x4300),
++             (25,0x4400),(27,8),(7,0x4500),(8,48),(9,24),(0,0)]
++    for i,(tag,value) in enumerate(dynamic):put(0x4000+i*16,'qQ',tag,value)
++    ident=b'\x7fELF'+bytes([2,1,1,0])+bytes(8)
++    put(0,'16sHHIQQQIHHHHHH',ident,3,183,1,0,64,0x4800,0,64,56,3,64,3,0)
++    put(64,'IIQQQQQQ',1,5,0,0,0,0x2000,0x2000,0x4000)
++    put(120,'IIQQQQQQ',1,6,0x4000,0x4000,0x4000,0x1000,0x1000,0x4000)
++    put(176,'IIQQQQQQ',2,6,0x4000,0x4000,0x4000,len(dynamic)*16,len(dynamic)*16,8)
++    put(0x4840,'IIQQQQIIQQ',0,1,6,0x1000,0x1000,0x100,0,0,4,0)
++    put(0x4880,'IIQQQQIIQQ',0,1,3,0x4000,0x4000,0x700,0,0,8,0)
++    path.write_bytes(data)
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('output',type=Path)
++    args=parser.parse_args();args.output.mkdir(parents=True,exist_ok=False)
++    for side in ['a','b']:image(args.output/f'libcycle_{side}.so',side)
+diff --git a/NativeARM/host/tests/valve_font_stack.c b/NativeARM/host/tests/valve_font_stack.c
+new file mode 100644
+index 0000000..e06c9a1
+--- /dev/null
++++ b/NativeARM/host/tests/valve_font_stack.c
+@@ -0,0 +1,46 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++// Exercise the real guest Pango/FreeType/HarfBuzz stack without Steam/OpenXR/GPU.
++#include "klepton.h"
++#include "kl_glibc.h"
++#include "kl_lua_builtin.h"
++#include "kl_fault.h"
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++static void safety(const char *path,kl_image *image) {
++    const kl_stats *s=kl_get_stats(image);unsigned missing;kl_missing_imports(image,&missing);
++    if(missing || s->svc_sites!=s->svc_trapped || s->tls_refused || s->x18_refused || s->ctr_refused) {
++        fprintf(stderr,"font image refused: %s missing=%u\n",path,missing);exit(3);
++    }
++}
++int main(int argc,char **argv) {
++    assert(argc==2);setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
++    setenv("KL_LOAD_DEFER_INIT","1",1);setenv("KL_LOAD_NO_INIT","0",1);
++    setenv("KL_SVC_POLICY","trap-code",1);setenv("KL_GUEST_PATCH","0",1);
++    setenv("KL_TLS_REWRITE_FORCE","1",1);setenv("KL_GUEST_THREAD_TRACKING","1",1);
++    kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_fault_install();
++    kl_lua_builtin_install();kl_image_loaded_hook=safety;
++    char path[4096];snprintf(path,sizeof path,"%s/libpangoft2-1.0.so",argv[1]);
++    assert(kl_load_recursive(path));
++    void *(*new_map)(void)=(void*)kl_guest_sym_global("pango_ft2_font_map_new");assert(new_map);
++    void *(*new_context)(void*)=(void*)kl_guest_sym_global("pango_font_map_create_context");assert(new_context);
++    void *(*new_layout)(void*)=(void*)kl_guest_sym_global("pango_layout_new");assert(new_layout);
++    void (*set_text)(void*,const char*,int)=(void*)kl_guest_sym_global("pango_layout_set_text");assert(set_text);
++    void (*get_size)(void*,int*,int*)=(void*)kl_guest_sym_global("pango_layout_get_pixel_size");assert(get_size);
++    int (*unknown)(void*)=(void*)kl_guest_sym_global("pango_layout_get_unknown_glyphs_count");assert(unknown);
++    void *(*description)(const char*)=(void*)kl_guest_sym_global("pango_font_description_from_string");assert(description);
++    void (*set_font)(void*,void*)=(void*)kl_guest_sym_global("pango_layout_set_font_description");assert(set_font);
++    void (*free_description)(void*)=(void*)kl_guest_sym_global("pango_font_description_free");assert(free_description);
++    void (*unref)(void*)=(void*)kl_guest_sym_global("g_object_unref");assert(unref);
++    void *map=new_map();assert(map);void *context=new_context(map);assert(context);
++    void *layout=new_layout(context);assert(layout);void *font=description("Helvetica 14");assert(font);set_font(layout,font);
++    const char *strings[]={"Half-Life Alyx","Alyx Ω مرحبا"};
++    for(unsigned i=0;i<2;i++) {
++        set_text(layout,strings[i],-1);int width=0,height=0;get_size(layout,&width,&height);
++        printf("FONT-SHAPE text=%u size=%dx%d unknown=%d\n",i,width,height,unknown(layout));assert(width>0 && height>0 && unknown(layout)==0);
++    }
++    free_description(font);unref(layout);unref(context);unref(map);
++    kl_glibc_report(stderr);
++    puts("PASS: real Pango/FreeType/HarfBuzz ASCII and mixed-script font layout, constructor/import guards retained");
++}
+diff --git a/NativeARM/host/tests/valve_lua.c b/NativeARM/host/tests/valve_lua.c
+index f16747c..cb3c209 100644
+--- a/NativeARM/host/tests/valve_lua.c
++++ b/NativeARM/host/tests/valve_lua.c
+@@ -73,7 +73,7 @@ int main(int argc,char **argv) {
+     setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
+     struct rlimit no_core={0,0};setrlimit(RLIMIT_CORE,&no_core);
+     setenv("KL_GUEST_PATCH","0",1);setenv("KL_SVC_POLICY","reject-code",1);
+-    setenv("KL_VK_STRICT","1",1);setenv("KL_GUEST_THREAD_TRACKING","1",1);
++    setenv("KL_LOAD_DEFER_INIT","1",1);setenv("KL_VK_STRICT","1",1);setenv("KL_GUEST_THREAD_TRACKING","1",1);
+     setenv("KL_TLS_REWRITE_FORCE","1",1);
+     unsetenv("KL_DYLIB_DIR");
+     kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_fault_install();
+diff --git a/NativeARM/scripts/fetch_lua_runtime.py b/NativeARM/scripts/fetch_lua_runtime.py
+index f291e82..64f80e0 100644
+--- a/NativeARM/scripts/fetch_lua_runtime.py
++++ b/NativeARM/scripts/fetch_lua_runtime.py
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env python3
+ # SPDX-License-Identifier: BSL-1.0
+ # Copyright 2026, Nick Kennedy
+-"""Fetch only GNU C++/unwind ARM64 runtime packages into a NEW test directory.
++"""Fetch selected ARM64 runtime packages into a NEW test directory.
+ No installation, maintainer scripts or game modifications. HTTPS index/package
+ SHA256 verification; metadata/archives and copyright files retained for audit.
+ """
+@@ -15,7 +15,7 @@ import urllib.request
+ 
+ parser = argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('output', type=Path)
+-parser.add_argument('--packages', nargs='+', choices=['libstdc++6', 'libgcc-s1', 'libuuid1'], default=['libstdc++6', 'libgcc-s1'])
++parser.add_argument('--packages', nargs='+', choices=['libstdc++6', 'libgcc-s1', 'libuuid1', 'libglib2.0-0t64', 'libpcre2-8-0', 'libffi8', 'libmount1', 'libblkid1', 'libselinux1', 'libpng16-16t64', 'libexpat1', 'libbz2-1.0', 'libbrotli1', 'libfribidi0', 'zlib1g'], default=['libstdc++6', 'libgcc-s1'])
+ args = parser.parse_args()
+ args.output.mkdir(parents=True, exist_ok=False)
+ mirror = 'https://deb.debian.org/debian/'
+diff --git a/NativeARM/scripts/launch_xrizer.py b/NativeARM/scripts/launch_xrizer.py
+index a6514ed..a3173e0 100644
+--- a/NativeARM/scripts/launch_xrizer.py
++++ b/NativeARM/scripts/launch_xrizer.py
+@@ -13,6 +13,7 @@ from pathlib import Path
+ import signal
+ import subprocess
+ import time
++import xml.etree.ElementTree as ET
+ 
+ parser=argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('--root',type=Path,required=True)
+@@ -66,6 +67,8 @@ settings={
+  'XR_RUNTIME_JSON':str(args.runtime_json or args.output/'deliberately-unavailable-openxr.json'),
+  'XDG_CACHE_HOME':str(args.output/'cache'),
+  'XDG_CONFIG_HOME':str(args.output/'config'),
++ 'FONTCONFIG_FILE':str(args.output/'config/fonts.conf'),
++ 'FONTCONFIG_PATH':str(args.output/'config'),
+  'KL_VK_FOVEATION_TRACE':'1',
+  'ALYX_RESULT_FILE':str(args.output/'engine-result.log'),
+ }
+@@ -93,7 +96,12 @@ manifest={'command':command,'environment':settings,'timeout':args.timeout,'headl
+ if args.dry_run:
+  print(json.dumps(manifest,indent=2));raise SystemExit(0)
+ args.output.mkdir(parents=True,exist_ok=False)
+-for name in ['state/guest-home','state/openvr','cache','config']:(args.output/name).mkdir(parents=True,exist_ok=True)
++for name in ['state/guest-home','state/openvr','cache/fontconfig','config']:(args.output/name).mkdir(parents=True,exist_ok=True)
++# Read system fonts without copying them or writing a user's font cache.
++fontconfig=ET.Element('fontconfig')
++ET.SubElement(fontconfig,'dir').text='/System/Library/Fonts'
++ET.SubElement(fontconfig,'cachedir').text=str(args.output/'cache/fontconfig')
++ET.ElementTree(fontconfig).write(settings['FONTCONFIG_FILE'],encoding='utf-8',xml_declaration=True)
+ env={k:v for k,v in os.environ.items() if not k.startswith(('KL_','VERANTYX_','MVK_CONFIG_'))}
+ env.update(settings)
+ started=time.time()
+diff --git a/NativeARM/scripts/test_launch_xrizer.py b/NativeARM/scripts/test_launch_xrizer.py
+index 26d939f..e86e5a6 100644
+--- a/NativeARM/scripts/test_launch_xrizer.py
++++ b/NativeARM/scripts/test_launch_xrizer.py
+@@ -50,6 +50,8 @@ class NativeRuntimeDirectoryTest(unittest.TestCase):
+                     self.assertEqual(settings['XDG_RUNTIME_DIR'], str(expected))
+                     self.assertEqual(settings['XDG_CACHE_HOME'], str(output / 'cache'))
+                     self.assertEqual(settings['XDG_CONFIG_HOME'], str(output / 'config'))
++                    self.assertEqual(settings['FONTCONFIG_FILE'],str(output/'config/fonts.conf'))
++                    self.assertEqual(settings['FONTCONFIG_PATH'],str(output/'config'))
+                     self.assertFalse(output.exists())
+                     manifest=json.loads(run.stdout)
+                     self.assertTrue(manifest['extended_dynamic_state3_disabled'])
+-- 
+2.54.0 (Apple Git-157)
+
