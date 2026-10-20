@@ -461,6 +461,64 @@ The constrained host is rebuilt and the ninth-command dry-run is ready. Full
 engine progression, first-frame/stereo correctness, game font mappings and the
 earlier command-buffer purge warnings remain unverified or unresolved.
 
+## Ninth user result: xrizer overlay pipeline sample count
+
+The ninth run reaches xrizer's skybox/overlay texture submission path. The stack
+passes OverlayMan::set_skybox, Overlay::set_texture and VulkanData's overlay copy
+before panicking at create_graphics_pipelines (old line822), with
+ERROR_INITIALIZATION_FAILED. The run lasts about5.54seconds and the child abort
+is encoded as exit250 by the Python backend; this is not a Vulkan result code.
+A scene image or visible headset frame is still not established.
+
+The overlay builder used ash::vk::PipelineMultisampleStateCreateInfo::default(),
+whose required rasterizationSamples field is zero. Zero is not a valid sample
+count. The render pass already uses a proper SampleCountFlags value derived from
+the source/target sample count. Signed xrizer `8417a1d` sets pipeline rasterization
+samples to that same value and logs overlay source/target formats and sample
+count when creating the pipeline. This fixes a generic invalid pipeline state,
+without altering game shaders, Vulkan feature requests or Monado.
+
+A new ignored macOS native-GPU test invokes the **actual private overlay builder
+and real embedded shaders**, selecting an explicit ICD through the existing
+loader helper. Before the fix, it reproduces the same initialization failure.
+After the fix it creates RGBA UNORM→sRGB and BGRA UNORM→sRGB single-sample
+pipelines successfully on both MoltenVK1.4.2 and the existing Mesa/KosmicKrisp
+build. The test creates no OpenXR instance, game process or headset session.
+It verifies pipeline/shader creation, not a draw, image correctness, MSAA
+sampling or presentation. The observed test durations are not performance
+benchmarks. KosmicKrisp's missing standard Metal-object interop still blocks the
+Monado zero-copy path.
+
+The normal xrizer unit suite reports83 pass,1 explicitly ignored native GPU test,
+and3 existing input tests filtered exactly as in macOS branch CI. The GPU test
+was then executed explicitly on both drivers; two existing unused-stage-function
+warnings remain. The existing default-probe path did not cover this shader
+pipeline, which is why its earlier stereo-submit result did not catch the bug.
+No further runtime compositor or texture copy is introduced.
+
+The isolated debug library is rebuilt with
+`XRIZER_VERSION=8417a1d cargo build --offline -p xrizer`. Its SHA256 differs from
+the ninth-run library and is recorded beside source revision/build command in
+`overlay-ninth-run/xrizer-build-identity.json`. The previous isolated binary is
+saved at `/private/tmp/xrizer-before-overlay-fix.dylib`; no binary is committed.
+The installed Monado/runtime JSON is unchanged. The next launcher dry-run hashes
+the rebuilt library automatically.
+
+Native GPU reproduction (outside the restrictive GPU sandbox):
+
+```sh
+cd /private/tmp/xrizer-dual-vulkan
+XRIZER_VULKAN_LIBRARY=/opt/homebrew/lib/libvulkan.1.dylib \
+VK_DRIVER_FILES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \
+  cargo test --offline --lib native_overlay_pipeline -- --ignored --nocapture
+```
+
+For KosmicKrisp, substitute the retained build-tree ICD
+`/private/tmp/alyx-mesa-build/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json`.
+Full-engine user confirmation, overlay/stereo image correctness, multisample
+source handling, game-specific Fontconfig warnings and earlier command-buffer
+purge warnings remain unverified or unresolved. No substantial FDM work begins.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -471,7 +529,7 @@ cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-runtime \
-  --output /private/tmp/alyx-monado-ninth \
+  --output /private/tmp/alyx-monado-tenth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -483,7 +541,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-ninth/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-tenth/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.

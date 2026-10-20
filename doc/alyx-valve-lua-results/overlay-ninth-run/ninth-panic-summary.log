@@ -1,0 +1,5 @@
+[2026-10-20T11:03:15.815 ERROR xrizer ThreadId(2)] panicked at src/graphics_backends/vulkan.rs:822:18:
+called `Result::unwrap()` on an `Err` value: ([0x0], ERROR_INITIALIZATION_FAILED)
+  14: <xrizer::overlay::OverlayMan>::set_skybox::{closure#0}
+  15: <core::result::Result<xrizer::overlay::RealSessionData, openvr::bindings::vr::EVROverlayError>>::and_then::<(), <xrizer::overlay::OverlayMan>::set_skybox::{closure#0}>
+  16: <xrizer::overlay::OverlayMan>::set_skybox
