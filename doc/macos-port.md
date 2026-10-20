@@ -18,12 +18,12 @@ also pass on both drivers. Private-memory ABI translation is now authorized;
 [actual Valve Lua and headless engine startup](macos-alyx-first-headset-check.md)
 pass their checkpoints. The first user run exposed an isolated-cache IPC-directory error; the launcher
 now preserves the native Monado socket directory, with regression checks passing.
-The tenth user run reaches sound, then a fatal4096-byte allocation failure.
-A real-tier0 headless test reproduces a4KiB/16KiB page-alignment mismatch.
-The isolated host now adapts platform VM commits; neighbouring data/protection,
-Panorama import binding and Lua regressions pass. Individual4KiB guard faults
-remain unsupported; full-engine confirmation is pending. No rendered game frame
-or FDM enable is verified, and Steam authentication remains unverified.
+The eleventh user run plays the Valve intro, reaches the menu and restores a
+save into a level on the simulated HMD: first native ARM64 gameplay confirmed.
+Frame rate is reportedly below the best Wine runs, without matched measurements.
+The launcher now reports this24GiB Mac's RAM instead of its inherited6GiB budget;
+regressions and the automatic-RAM dry-run pass. UI warning removal and performance
+profiling remain pending. PS VR2 gameplay and FDM enable are unverified.
 No installed-runtime change or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

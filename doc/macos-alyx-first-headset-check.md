@@ -568,17 +568,61 @@ acquisition. Native Steam ownership/authentication remains unverified. The
 warning has not been bypassed; account identifiers/full logs are not committed.
 The repeated unsupported stage-override warnings also remain unresolved.
 
+## Eleventh run: first successful simulated-HMD gameplay
+
+On20October2026 the user confirms Valve intro playback, menu access, loading
+an existing save and entering the level, using Monado's **simulated HMD**. This
+is the first functional native ARM64 Alyx→Klepton→xrizer→Monado gameplay
+checkpoint. It does not validate PS VR2 display/input, sustained gameplay,
+performance parity or FDM. The user reports substantially lower frame rate
+than the best Wine runs and a low-RAM warning at the menu; no FPS/frame-time
+numbers or matched Wine configuration were captured.
+
+The tested VeRantyx host is `b8b3ccf`, Klepton `44985ec`, xrizer `8417a1d`
+(debug library); source/binary hashes match the tenth-run VM-adapter identity.
+The selected driver is MoltenVK1.4.2 through the common Vulkan loader. The log
+records first compositor submission, save restoration and map loading. The
+platform VM adapter translates subpage commits and the user passes the previous
+fatal allocation point. No fragment-density-map or fragment-shading-rate
+extension appears in the requested/enabled device extension list. Entry-point
+lookups alone are not evidence of using a rendering feature.
+
+The native launcher inherited Klepton's Android-oriented6144MiB budget through
+synthetic /proc/meminfo/sysinfo. A direct host query reports25769803776bytes
+(24576MiB/24GiB). Signed VeRantyx `74396b5` makes this launcher set the existing
+KL_MEM_TOTAL_MB override from host RAM by default; `--memory-mb N` permits a
+recorded explicit override. Klepton retains its host cap and process-memory
+pressure accounting. Its generic default and all installed runtimes are
+unchanged. This changes reported RAM, not physical capacity or guaranteed free
+memory; disappearance of the UI warning requires the next user run.
+
+Launcher inert-file regression checks pass (including explicit forwarding and
+invalid-value rejection). A real automatic-RAM dry-run records24576MiB and
+creates no output directory or engine process. The source patch and sanitized
+checkpoint facts are in [gameplay-eleventh-run](alyx-valve-lua-results/gameplay-eleventh-run/README.md).
+No full engine log or account identifier is committed.
+
+Performance remains unmeasured. The run uses a debug xrizer library, synchronous
+pipeline creation, diagnostic logging, and a simulated-HMD recommendation of
+896×1007 per eye at90Hz. The log contains323 repeated unsupported stage-override
+warnings. These are profiling candidates, not established causes of the Wine
+comparison. Next compare identical scene/resolution/quality, warmed caches,
+CPU/GPU frame times and thermal/run order with a separately retained optimized
+build. Keep this working binary as a baseline. No substantial FDM implementation
+begins at this checkpoint.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
-Use the normal PS VR2/Monado setup. From the isolated VeRantyx checkout:
+Keep the current simulated-HMD/Monado setup for the RAM comparison. From the
+isolated VeRantyx checkout:
 
 ```sh
 cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-runtime \
-  --output /private/tmp/alyx-monado-eleventh \
+  --output /private/tmp/alyx-monado-twelfth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -588,9 +632,8 @@ editing it or the service. The output directory must be new; change its name on
 repeat runs. The wrapper stops its own process group after120seconds, and Ctrl-C
 also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
-Report whether it reaches the menu, whether both eyes display correctly, and
-any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-eleventh/backend/`; launch metadata also hashes the host,
+Report whether the RAM warning disappears and whether save loading still works. Logs and selected-driver census are under
+`/private/tmp/alyx-monado-twelfth/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.
@@ -605,15 +648,17 @@ excerpt are in `doc/alyx-valve-lua-results/`, alongside the Lua/module evidence.
 
 Alyx now creates a real Vulkan device and reaches overlay submission, with
 requested device features/extensions traced in the earlier checkpoints. No
-actual FDM enable or rendered game frame is verified. Standalone driver and
+actual FDM enable is verified; user-confirmed level rendering uses the simulated
+HMD. Standalone driver and
 pipeline tests remain separate evidence. Stereo/depth images,
-actual Steam/gameplay progression, video playback, nonzero signals/unwind/raw
-syscalls and headset frame timing remain unverified. A reached SVC marker needs
+sustained gameplay, PS VR2 display/input, nonzero signals/unwind/raw
+syscalls and headset frame timing remain unverified. Intro video playback and
+loading a saved level are now user-confirmed on the simulated HMD. A reached SVC marker needs
 a specific implementation or trap-semantics analysis; do not change it to NOP.
 
 KosmicKrisp still lacks the VK_EXT_metal_objects path required by the present
 Monado sharing architecture. Its standalone device tests pass, but end-to-end
-OpenXR use is blocked. The next milestone is a MoltenVK first frame plus an
+OpenXR use is blocked. The next milestone is a measured MoltenVK gameplay baseline plus an
 observed Alyx foveation trace, then a minimal reproduction of the actual API
 operations. The prior Metal rasterization-rate-map/FDM assessment remains valid;
 no substantial FDM implementation has begun.
