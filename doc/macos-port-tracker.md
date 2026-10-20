@@ -12,7 +12,10 @@ now builds/selects KosmicKrisp and MoltenVK in isolation. MoltenVK passes xrizer
 stereo submissions; KosmicKrisp is blocked by missing standard Metal-object
 interop. ARM64 binaries are now downloaded: the [20 October read-only audit](macos-alyx-arm64-static-audit.md)
 identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
-branch patch. Actual game calls remain unobserved. No installed-runtime change
+branch patch. Headless engine startup reaches xrizer. The first user headset run exposed a
+launcher cache/Monado socket conflict, now corrected with passing regression
+checks; see the [headset checkpoint](macos-alyx-first-headset-check.md).
+Actual game Vulkan calls remain unobserved. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

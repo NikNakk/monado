@@ -1,0 +1,102 @@
+From 8345f0c9463d27a64dae3c5dd37cb257a956ff01 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 08:56:31 +0200
+Subject: [PATCH] launch: preserve native Monado IPC path when isolating game
+ caches
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/scripts/launch_xrizer.py      | 11 +++++
+ NativeARM/scripts/test_launch_xrizer.py | 57 +++++++++++++++++++++++++
+ 2 files changed, 68 insertions(+)
+ create mode 100644 NativeARM/scripts/test_launch_xrizer.py
+
+diff --git a/NativeARM/scripts/launch_xrizer.py b/NativeARM/scripts/launch_xrizer.py
+index 1807333..0c17853 100644
+--- a/NativeARM/scripts/launch_xrizer.py
++++ b/NativeARM/scripts/launch_xrizer.py
+@@ -42,7 +42,18 @@ vrclient=args.xrizer/'target/debug/libxrizer.dylib';assert vrclient.is_file()
+ backend=args.xrizer/'tools/macos/run-vulkan-backend.py';assert backend.is_file()
+ if args.runtime_json:args.runtime_json=args.runtime_json.resolve(strict=True)
+ extra=args.engine_args[1:] if args.engine_args[:1]==['--'] else args.engine_args
++# Monado resolves its IPC directory from XDG_RUNTIME_DIR, then (on macOS)
++# XDG_CACHE_HOME/monado, then HOME/Library/Caches/monado. Capture the native
++# environment before isolating game caches; otherwise XPC starts the normal
++# service but this process looks for its socket inside the game's private cache.
++if 'XDG_RUNTIME_DIR' in os.environ:
++    native_runtime_dir=os.environ['XDG_RUNTIME_DIR']
++elif 'XDG_CACHE_HOME' in os.environ:
++    native_runtime_dir=os.environ['XDG_CACHE_HOME']+'/monado'
++else:
++    native_runtime_dir=str(Path.home()/'Library/Caches/monado')
+ settings={
++ 'XDG_RUNTIME_DIR':native_runtime_dir,
+  'VERANTYX_GUEST_HOME':str(args.output/'state/guest-home'),
+  'VERANTYX_OPENVR_ROOT':str(args.output/'state/openvr'),
+  'VERANTYX_REQUIRE_STEAM':'1',
+diff --git a/NativeARM/scripts/test_launch_xrizer.py b/NativeARM/scripts/test_launch_xrizer.py
+new file mode 100644
+index 0000000..04cf31d
+--- /dev/null
++++ b/NativeARM/scripts/test_launch_xrizer.py
+@@ -0,0 +1,57 @@
++#!/usr/bin/env python3
++# SPDX-License-Identifier: BSL-1.0
++# Copyright 2026, Nick Kennedy
++"""Check native IPC discovery survives the launcher's game-cache isolation.
++
++Uses inert file fixtures and --dry-run; never loads Steam, a driver or Monado.
++"""
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import unittest
++
++
++class NativeRuntimeDirectoryTest(unittest.TestCase):
++    def test_native_environment_precedence(self):
++        with tempfile.TemporaryDirectory() as temporary:
++            root = Path(temporary)
++            game = root / 'game-root'
++            libs = root / 'libs'
++            xrizer = root / 'xrizer'
++            fixtures = [game / 'clone-manifest.json', libs / 'libraries.json',
++                        xrizer / 'target/debug/libxrizer.dylib',
++                        xrizer / 'tools/macos/run-vulkan-backend.py',
++                        game / 'game/bin/linuxsteamrtarm64/libengine2.so',
++                        root / 'host', root / 'loader']
++            for path in fixtures:
++                path.parent.mkdir(parents=True, exist_ok=True)
++                path.write_bytes(b'inert dry-run fixture')
++            cases = [({}, root / 'native-home/Library/Caches/monado'),
++                     ({'XDG_CACHE_HOME': str(root / 'native-cache')},
++                      root / 'native-cache/monado'),
++                     ({'XDG_CACHE_HOME': str(root / 'native-cache'),
++                       'XDG_RUNTIME_DIR': str(root / 'native-runtime')},
++                      root / 'native-runtime')]
++            for inherited, expected in cases:
++                with self.subTest(inherited=inherited):
++                    env = {k: v for k, v in os.environ.items()
++                           if k not in ('XDG_CACHE_HOME', 'XDG_RUNTIME_DIR')}
++                    env.update(HOME=str(root / 'native-home'), **inherited)
++                    output = (root / 'output').resolve()
++                    command = [sys.executable, str(Path(__file__).with_name('launch_xrizer.py')),
++                               '--root', str(game), '--libs', str(libs), '--xrizer', str(xrizer),
++                               '--host', str(root / 'host'), '--openxr-loader', str(root / 'loader'),
++                               '--output', str(output), '--no-xr-runtime', '--dry-run']
++                    run = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
++                    settings = json.loads(run.stdout)['environment']
++                    self.assertEqual(settings['XDG_RUNTIME_DIR'], str(expected))
++                    self.assertEqual(settings['XDG_CACHE_HOME'], str(output / 'cache'))
++                    self.assertEqual(settings['XDG_CONFIG_HOME'], str(output / 'config'))
++                    self.assertFalse(output.exists())
++
++
++if __name__ == '__main__':
++    unittest.main()
+-- 
+2.54.0 (Apple Git-157)
+

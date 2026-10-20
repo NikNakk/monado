@@ -4,7 +4,8 @@
 Actual Valve Lua tests, engine/module constructor probes and a bounded headless
 Alyx startup now pass their defined checkpoints. Source2Main reaches native
 xrizer and fails exactly at the deliberately unavailable OpenXR runtime.
-The next test needs the user and PS VR2/Monado. **There is no rendered Alyx
+The first user test reached the Monado connection stage but exposed a launcher
+cache-isolation bug, now corrected. The next test needs the user and PS VR2/Monado. **There is no rendered Alyx
 frame or headset result yet.**
 
 The user explicitly authorized necessary private-memory ABI translation.
@@ -79,7 +80,30 @@ The real Steam client must be running. No ownership/authentication results are
 fabricated. Early SteamAPI callbacks are observed, but full ownership/gameplay
 progression is not proven by an early OpenXR-failure exit.
 
-## First user test
+## First user result and IPC-directory correction
+
+The 20 October 08:52 user run loaded native xrizer and the OpenXR loader. XPC
+reported the service ready, but the client tried the wrong Unix socket:
+`/private/tmp/alyx-monado-first/cache/monado/monado_comp_ipc`.
+This was a launcher environment bug, not evidence of an array-import failure.
+The installed service socket was observed at
+`/Users/nickkennedy/Library/Caches/monado/monado_comp_ipc`.
+
+VeRantyx signed commit `8345f0c` captures Monado's native runtime directory
+before isolating game caches and supplies it through `XDG_RUNTIME_DIR`. It
+preserves inherited runtime-directory overrides first, inherited cache/monado
+second, otherwise native HOME/Library/Caches/monado, matching macOS Monado's
+`u_file_get_runtime_dir`. The game still has private cache/config directories.
+No host rebuild or installed service/runtime change is required.
+
+Validation: the inert launcher dry-run regression covers all three precedence
+cases and private-cache/config preservation; all pass. The real headset-command
+dry-run records the normal native directory, verifies its socket currently
+exists and leaves the second output directory uncreated. No new headset run was
+performed by the agent; connection/session success remains for the user to test.
+The signed patch is archived as `verantyx-native-runtime-dir.patch`.
+
+## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
 Use the normal PS VR2/Monado setup. From the isolated VeRantyx checkout:
@@ -89,7 +113,7 @@ cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-ready \
-  --output /private/tmp/alyx-monado-first \
+  --output /private/tmp/alyx-monado-second \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -101,7 +125,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-first/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-second/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.
