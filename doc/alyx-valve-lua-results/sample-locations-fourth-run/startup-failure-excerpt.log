@@ -1,0 +1,25 @@
+  [vk] fdm strict-device-forwarded extension=VK_KHR_swapchain
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dedicated_allocation
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_fence
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_memory
+  [vk] fdm strict-device-forwarded extension=VK_KHR_external_semaphore
+  [vk] fdm strict-device-forwarded extension=VK_KHR_get_memory_requirements2
+  [vk] fdm strict-device-forwarded extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-forwarded extension=VK_EXT_metal_objects
+  [vk] fdm strict-device-forwarded extension=VK_KHR_descriptor_update_template
+  [vk] fdm strict-device-forwarded extension=VK_KHR_image_format_list
+  [vk] fdm strict-device-forwarded extension=VK_KHR_maintenance1
+  [vk] fdm strict-device-forwarded extension=VK_KHR_maintenance2
+  [vk] fdm strict-device-forwarded extension=VK_EXT_separate_stencil_usage
+  [vk] fdm strict-device-forwarded extension=VK_KHR_swapchain_mutable_format
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dynamic_rendering
+  [vk] fdm strict-device-forwarded extension=VK_KHR_dynamic_rendering_local_read
+  [vk] fdm strict-device-forwarded extension=VK_KHR_depth_stencil_resolve
+  [vk] fdm strict-device-forwarded extension=VK_KHR_create_renderpass2
+  [vk] fdm strict-device-forwarded extension=VK_EXT_host_image_copy
+  [vk] fdm strict-device-forwarded extension=VK_KHR_multiview
+  [vk] fdm strict-device-forwarded extension=VK_KHR_portability_subset
+  [vk] strict vkCreateDevice driver result=0
+  [vk] vkCreateSwapchainKHR -> 4 image(s) 1280x720 fmt 43 (ours, no presentation engine)
+[klepton] fault: signal 11 at 0x0, pc <host>+0x0 (0x0), thread 15590035 (main)
+    lr (who called it): librendersystemvulkan.so+0x266684

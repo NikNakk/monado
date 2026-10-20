@@ -18,10 +18,11 @@ also pass on both drivers. Private-memory ABI translation is now authorized;
 [actual Valve Lua and headless engine startup](macos-alyx-first-headset-check.md)
 pass their checkpoints. The first user run exposed an isolated-cache IPC-directory error; the launcher
 now preserves the native Monado socket directory, with regression checks passing.
-The third run identifies unsupported dynamic color-write-mask requests. Native
-reproductions pass with the engine-fallback request; the launcher now selects
-Alyx's own dynamic-state3 disable option for MoltenVK, pending user validation. Alyx enables no
-FDM extension in this observed request; rendering remains unobserved. No installed-runtime change
+The fourth user run passes device creation but faults on a sample-location
+command still used by Alyx's state3 fallback. A narrow opt-in now enables the
+real supported sample-location feature; native command recording/submission
+tests pass and a rebuilt host awaits user confirmation. No rendered game frame
+or FDM extension enable is verified. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

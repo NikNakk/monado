@@ -1,0 +1,12 @@
+{
+  "renderer_sha256": "02edbf8f2040cd8a3103038583447865ca7d34f36f13daacab9d4d194cb9d04d",
+  "call_va": "0x266680",
+  "return_va": "0x266684",
+  "dispatch_slot": "0xa52830",
+  "dispatch_store_va": "0x2cdfb8",
+  "resolved_function_string_va": "0x16cef0",
+  "function": "vkCmdSetSampleLocationsEnableEXT",
+  "observed_argument": "VK_FALSE",
+  "method": "Read-only LLVM disassembly: return address identifies indirect call, global slot and generated dispatch-load string/store. No game instruction bytes redistributed.",
+  "native_reproduction": "Without EDS3 feature/extension, device proc address is NULL. Explicitly enable supported SampleLocationsEnable with ColorWriteMask false: real enable/disable commands record/submit/complete."
+}

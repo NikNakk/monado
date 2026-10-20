@@ -5,8 +5,7 @@ Actual Valve Lua tests, engine/module constructor probes and a bounded headless
 Alyx startup now pass their defined checkpoints. Source2Main reaches native
 xrizer and fails exactly at the deliberately unavailable OpenXR runtime.
 The first user test reached the Monado connection stage but exposed a launcher
-cache-isolation bug, now corrected. The next test needs the user and PS VR2/Monado. **There is no rendered Alyx
-frame or headset result yet.**
+cache-isolation bug, now corrected. The next test needs the user and PS VR2/Monado. **No rendered Alyx frame has been verified.**
 
 The user explicitly authorized necessary private-memory ABI translation.
 Installed game binaries remain unchanged. No game-specific Lua/video text
@@ -182,6 +181,58 @@ VK_DRIVER_FILES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \
   /private/tmp/alyx-device-request-test
 ```
 
+## Fourth user result: device succeeds, sample-location call faults
+
+The built-in state3-disable option removes the broad state3 feature request:
+actual vkCreateDevice returns success. Alyx creates its synthetic mirror
+swapchain, then jumps through NULL at renderer return VA0x266684. Read-only
+callsite/dispatch initialization inspection identifies global slot0xa52830 as
+`vkCmdSetSampleLocationsEnableEXT`; the observed call requests VK_FALSE.
+The command remains used by this build despite its broad state3-disable option.
+Therefore the engine option alone is an incomplete fallback. Missing shader
+cache and the engine's unusual printed driver-version formatting are not the
+identified fault; the loader census remains authoritative for driver identity.
+
+Signed Klepton commit `23bcf0d` adds opt-in
+`KL_VK_SAMPLE_LOCATIONS_COMPAT=1`. For a device requesting VK_EXT_sample_locations,
+it checks real extension/feature support, adds VK_EXT_extended_dynamic_state3
+and a feature struct enabling **only** SampleLocationsEnable, and forwards the
+result to the driver. It does not request unsupported ColorWriteMask. Caller
+features/pNext remain unchanged. An existing state3 structure is preserved;
+if it does not enable SampleLocationsEnable, this explicit profile fails rather
+than rewriting it. Missing native support fails explicitly. No no-op command,
+NULL suppression, feature removal, graphics emulation or extension advertisement
+is introduced. This is an explicitly logged additive device-negotiation
+exception to the otherwise strict profile, not observational instrumentation.
+
+Signed VeRantyx commit `d72bdbe` enables that profile automatically for MoltenVK
+when using the broad state3 fallback. `--sample-locations-compat enabled|disabled`
+permits explicit comparisons; default `auto` leaves KosmicKrisp unchanged. Both
+the original request and forwarded extension/pNext chain are logged, and the
+manifest records the effective choice. Compare drivers with explicit matching
+policies. The constrained host has been rebuilt; installed Monado is unchanged.
+
+Actual native MoltenVK tests reproduce a NULL device proc address with the
+profile off. With it on, the real command resolves and records VK_TRUE followed
+by VK_FALSE, submits and completes. Tests also verify unchanged caller create
+info, existing feature chains and persistent rejection of unsupported
+ColorWriteMask. The existing strict fake-driver regression still passes.
+Launcher dry-runs cover all runtime-directory precedence cases, automatic driver
+selection and explicit profile overrides; all pass. Focused evidence is in
+`alyx-valve-lua-results/sample-locations-fourth-run/`.
+
+```sh
+cd /private/tmp/alyx-klepton
+KL_VULKAN_LIBRARY=/opt/homebrew/lib/libvulkan.1.dylib \
+VK_DRIVER_FILES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \
+  sh tools/check_vulkan_sample_locations.sh
+```
+
+The next user run must confirm this resolves the actual engine call and expose
+any subsequent failures. It remains a startup checkpoint, not a first-frame or
+stereo-correctness result. FDM remains unimplemented and disabled in observed
+Alyx device requests.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -192,7 +243,7 @@ cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-ready \
-  --output /private/tmp/alyx-monado-fourth \
+  --output /private/tmp/alyx-monado-fifth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -204,7 +255,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-fourth/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-fifth/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.
