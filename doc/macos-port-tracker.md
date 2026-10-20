@@ -15,7 +15,8 @@ identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
 branch patch. Headless engine startup reaches xrizer. The first user headset run exposed a
 launcher cache/Monado socket conflict, now corrected with passing regression
 checks; see the [headset checkpoint](macos-alyx-first-headset-check.md).
-Actual game Vulkan calls remain unobserved. No installed-runtime change
+The repeat run reaches Alyx vkCreateDevice but fails. Exact feature/error
+diagnostics are built for the next user run; no rendered game frame yet. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

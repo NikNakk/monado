@@ -18,8 +18,9 @@ also pass on both drivers. Private-memory ABI translation is now authorized;
 [actual Valve Lua and headless engine startup](macos-alyx-first-headset-check.md)
 pass their checkpoints. The first user run exposed an isolated-cache IPC-directory error; the launcher
 now preserves the native Monado socket directory, with regression checks passing.
-A repeat MoltenVK/Monado headset run needs the user;
-Alyx rendering/foveation API calls remain unobserved. No installed-runtime change
+The repeat run reaches Alyx Vulkan device creation, which fails; exact feature
+request/error diagnostics are built and need a third user run. Alyx enables no
+FDM extension in this observed request; rendering remains unobserved. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

@@ -103,6 +103,36 @@ exists and leaves the second output directory uncreated. No new headset run was
 performed by the agent; connection/session success remains for the user to test.
 The signed patch is archived as `verantyx-native-runtime-dir.patch`.
 
+## Second user result: Vulkan device creation
+
+The repeat user run gets past the socket failure: xrizer logs creation of an
+OpenXR Vulkan session. Alyx selects Apple M5 and attempts its own vkCreateDevice,
+which fails. The old trace did not record the VkResult or feature values, so the
+specific cause is not yet established. All 22 distinct requested extensions
+(23 entries, including duplicate image_format_list) appear in MoltenVK's driver
+census. This rules out a simple unadvertised extension-name request; it does not
+prove valid feature/extension dependencies, queues or device-create semantics.
+The six pNext structs are multiview, dynamic rendering, dynamic rendering local
+read, host image copy, extended dynamic state and extended dynamic state3.
+No FDM feature struct or FDM extension enable appears in this device request.
+That does not establish all foveation queries or future fallback behaviour.
+
+Klepton signed commit `cdc60bc` adds observational request logging for core
+feature words, known pNext payload words, queue families/counts/priorities and
+the exact driver/enumeration VkResult. Structure tail padding is labelled as
+such; payload indexes must be decoded against the Vulkan registry. No feature
+clamping, dropped extension, retry or fabricated success is added. The existing
+constrained host binary has been rebuilt with this diagnostic.
+
+The fake-driver fixture checks exact feature payload/error logging and unchanged
+requests with no retry. The real MoltenVK standalone test passes device creation
+and rejects an intentionally unsupported geometryShader with -8 while retaining
+the requested bit. The sandbox initially hid Metal (-9); the same standalone
+check outside the sandbox passes. Neither test loads Monado or claims the HMD.
+Focused user-request and fixture evidence is retained in
+`alyx-valve-lua-results/device-create-second-run/`. A third user run is needed
+to observe the actual Alyx device failure code and feature request.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -113,7 +143,7 @@ cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-ready \
-  --output /private/tmp/alyx-monado-second \
+  --output /private/tmp/alyx-monado-third \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -125,7 +155,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-second/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-third/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.

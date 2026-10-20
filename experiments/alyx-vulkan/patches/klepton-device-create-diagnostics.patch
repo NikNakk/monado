@@ -1,0 +1,107 @@
+From cdc60bc9cb36ebdd36bf8e39fca257792262a214 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 08:59:48 +0200
+Subject: [PATCH] vulkan: trace exact device feature requests and creation
+ failures
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ runtime/gfx/kl_vulkan.c      | 51 +++++++++++++++++++++++++++++++++++-
+ tools/check_vulkan_strict.sh | 14 +++++++++-
+ 2 files changed, 63 insertions(+), 2 deletions(-)
+
+diff --git a/runtime/gfx/kl_vulkan.c b/runtime/gfx/kl_vulkan.c
+index 93dd47a..5def5b8 100644
+--- a/runtime/gfx/kl_vulkan.c
++++ b/runtime/gfx/kl_vulkan.c
+@@ -838,6 +838,49 @@ static VkResult record_device(VkPhysicalDevice phys, const VkDeviceCreateInfo *c
+     VKI("vkCreateDevice tracked, queue family %u\n", d->queue_family);
+     return VK_SUCCESS;
+ }
++// Capture device requests without changing feature negotiation. Payload words
++// exclude sType/pNext; trailing structure padding is explicitly not a feature.
++// Together with the Vulkan registry these identify exact requested fields.
++static void trace_device_request(const VkDeviceCreateInfo *ci) {
++    if (!fdm_trace()) return;
++    VKI("device-request flags=%u queues=%u layers=%u coreFeatures=%s\n",
++        ci->flags, ci->queueCreateInfoCount, ci->enabledLayerCount,
++        ci->pEnabledFeatures ? "present" : "absent");
++    if (ci->pEnabledFeatures) {
++        const VkBool32 *words = (const void *)ci->pEnabledFeatures;
++        for (size_t i = 0; i < sizeof(*ci->pEnabledFeatures) / sizeof(*words); i++)
++            VKI("device-request core word=%zu value=%u\n", i, words[i]);
++    }
++    for (uint32_t i = 0; i < ci->queueCreateInfoCount; i++) {
++        const VkDeviceQueueCreateInfo *q = &ci->pQueueCreateInfos[i];
++        VKI("device-request queue=%u family=%u count=%u flags=%u\n",
++            i, q->queueFamilyIndex, q->queueCount, q->flags);
++        for (uint32_t j = 0; j < q->queueCount; j++)
++            VKI("device-request queue=%u priority=%u value=%a\n", i, j,
++                (double)q->pQueuePriorities[j]);
++        trace_chain("device-queue-request", q->pNext);
++    }
++    for (const VkBaseInStructure *p = ci->pNext; p; p = p->pNext) {
++        if (p->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
++            const VkPhysicalDeviceFeatures2 *f = (const void *)p;
++            const VkBool32 *words = (const void *)&f->features;
++            for (size_t i = 0; i < sizeof(f->features) / sizeof(*words); i++)
++                VKI("device-request features2-core word=%zu value=%u\n", i, words[i]);
++        }
++        for (size_t k = 0; k < sizeof(klvk_feature_structs) / sizeof(klvk_feature_structs[0]); k++) {
++            if (klvk_feature_structs[k].st != p->sType) continue;
++            const size_t offset = sizeof(VkBaseInStructure);
++            const unsigned char *bytes = (const void *)p;
++            for (size_t i = offset; i + sizeof(uint32_t) <= klvk_feature_structs[k].size; i += sizeof(uint32_t)) {
++                uint32_t value; memcpy(&value, bytes + i, sizeof(value));
++                VKI("device-request %s payloadWord=%zu value=%u (may include tail padding)\n",
++                    klvk_feature_structs[k].name, (i - offset) / sizeof(uint32_t), value);
++            }
++            break;
++        }
++    }
++}
++
+ static VkResult strict_device(VkPhysicalDevice phys, const VkDeviceCreateInfo *ci,
+                               const VkAllocationCallbacks *alloc, VkDevice *out) {
+     PFN_vkCreateDevice create = (PFN_vkCreateDevice)real_gipa(g_instance, "vkCreateDevice");
+@@ -857,8 +900,14 @@ static VkResult strict_device(VkPhysicalDevice phys, const VkDeviceCreateInfo *c
+     copy.enabledExtensionCount = n; copy.ppEnabledExtensionNames = names;
+     trace_extensions("strict-device-request", ci->enabledExtensionCount, ci->ppEnabledExtensionNames);
+     trace_chain("strict-device-request", ci->pNext);
++    trace_device_request(ci);
+     trace_extensions("strict-device-forwarded", n, names);
+-    if (r == VK_SUCCESS) r = create(phys, &copy, alloc, out);
++    if (r == VK_SUCCESS) {
++        r = create(phys, &copy, alloc, out);
++        VKI("strict vkCreateDevice driver result=%d\n", (int)r);
++    } else {
++        VKI("strict vkCreateDevice extension enumeration result=%d\n", (int)r);
++    }
+     free(props); free(names);
+     // In particular: no FEATURE_NOT_PRESENT clamp/retry or mutation of caller pNext.
+     return r == VK_SUCCESS ? record_device(phys, ci, alloc, out) : r;
+diff --git a/tools/check_vulkan_strict.sh b/tools/check_vulkan_strict.sh
+index f6cf47a..7aed126 100644
+--- a/tools/check_vulkan_strict.sh
++++ b/tools/check_vulkan_strict.sh
+@@ -9,4 +9,16 @@ clang -dynamiclib -O1 -I"$prefix/include" -Iruntime -Iruntime/gfx -Iruntime/gues
+  runtime/gfx/kl_vulkan.c runtime/kl_env.c -Wl,-undefined,dynamic_lookup -lz -o "$work/libklvulkan.dylib"
+ clang -dynamiclib -I"$prefix/include" tests/t_vulkan_strict_driver.c -o "$work/driver.dylib"
+ clang -I"$prefix/include" -Wl,-export_dynamic tests/t_vulkan_strict.c -o "$work/test"
+-KL_VK_STRICT=1 KL_VULKAN_LIBRARY="$work/driver.dylib" "$work/test" "$work/libklvulkan.dylib" "$work/driver.dylib"
++KL_VK_FOVEATION_TRACE=1 KL_VK_STRICT=1 KL_VULKAN_LIBRARY="$work/driver.dylib" "$work/test" "$work/libklvulkan.dylib" "$work/driver.dylib" >"$work/trace.log" 2>&1
++cat "$work/trace.log"
++python3 - "$work/trace.log" <<'CHECK'
++from pathlib import Path
++import sys
++s=Path(sys.argv[1]).read_text()
++assert 'device-request core word=4 value=1' in s  # geometryShader
++assert 'VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=0 value=1' in s
++assert 'VkPhysicalDeviceFragmentDensityMapFeaturesEXT payloadWord=1 value=1' in s
++assert 'strict vkCreateDevice driver result=-8' in s
++assert 'strict vkCreateDevice extension enumeration result=-3' in s
++print('PASS: exact feature payload and driver/enumeration failure diagnostics')
++CHECK
+-- 
+2.54.0 (Apple Git-157)
+

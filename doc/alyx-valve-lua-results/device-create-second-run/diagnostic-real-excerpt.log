@@ -1,0 +1,7 @@
+CreateInstance=0
+device=Apple M5 vendor=0x106b deviceID=0x1a07020a driverVersion=10402 api=1.2.357
+driverID=14 driverName=MoltenVK driverInfo=1.4.2
+  [vk] strict vkCreateDevice driver result=0
+  [vk] strict vkCreateDevice driver result=-8
+CreateDevice=0
+unsupportedFeatureIndex=4 CreateDevice=-8 requestedAfter=1
