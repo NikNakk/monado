@@ -355,6 +355,71 @@ layout fixture needs FONTCONFIG_FILE pointing at a configuration containing
 `/System/Library/Fonts` and an isolated cachedir; the launcher now writes that
 configuration automatically.
 
+## Seventh user result: Panorama OpenSSL imports and whole-tree dependency audit
+
+Font-stack loading now succeeds. The next engine stop is
+libpanorama_text_pango.so: missing libssl.so.3/libcrypto.so.3 leave39 unresolved
+imports and the guard refuses constructors. The log also identifies missing
+libatomic.so.1 in GLib, whose imported functions happened to bind through the
+existing shim. No guard has been weakened.
+
+Signed VeRantyx `1b7d0ac` expands the hash-verified fetch allowlist and adds a
+static whole-input dependency audit plus a headless Panorama/runtime fixture.
+Auditing every unique ELF input also found Ogg and ICU67 gaps. An additional
+transitive OpenSSL dependency, Zstandard, was found by the expanded audit.
+Five packages are now extracted into additional temporary runtime trees:
+
+- libssl3t64 `3.5.7-1~deb13u2` (libssl.so.3 and libcrypto.so.3).
+- libatomic1 `14.2.0-19`, libogg0 `1.3.5-3+b2`.
+- libicu67 `67.1-7`, from the official Debian bullseye ARM64 index, preserving
+  the exact .so.67 ABI required by the bundled HarfBuzz ICU module. No .so.76
+  rename/substitution is used. The fetch script now has explicit --suite support.
+- libzstd1 `1.5.7+dfsg-1` for OpenSSL's compression dependency.
+
+Manifests retain exact package URLs, SHA256/size checks and copyright/archive
+locations. No package installation or game binary change occurs. The new flat
+directory `/private/tmp/alyx-native-guest-libs-runtime` contains193 names for106
+unique ELF files. All previous directories remain available.
+
+The final DT_NEEDED audit across **all106 prepared ELF inputs** reports zero
+missing non-shim libraries. Expected absent files are classified using the
+explicit shim list parsed from the tested Klepton source. This is a packaging
+check; it does not establish every import ABI, future dlopen name or game path.
+The audit and manifests are retained in `panorama-seventh-run/`.
+
+Actual local runtime checks pass without Source2Main, Steam, network or OpenXR:
+
+- Panorama text module relocation: nine libraries, zero unresolved imports and
+  refused ABI rewrites.
+- Constructors for libpanorama_text_pango, libharfbuzz-icu, libvorbisfile and
+  libpanorama pass under the constrained import/ABI guards and deferred ordering.
+- Real guest OpenSSL SHA256 of "abc" matches the known answer; RAND_bytes returns
+  success; TLS_method/SSL_CTX_new/SSL_new and object teardown pass. This is object
+  lifecycle coverage, not a TLS handshake or authentication test.
+- HarfBuzz ICU67 Unicode-functions integration initializes; Vorbis dependencies
+  load. Panorama's V8 dependencies pass constructor loading, without claiming
+  that JavaScript JIT or gameplay is tested.
+- Font-layout regression with the expanded runtime remains83x15/71x16pixels,
+  zero unknown glyphs and zero libc fallback-stub calls. The Panorama fixture
+  likewise reports zero libc fallback-stub calls. Launcher dry-run regression
+  and the next real-command dry-run pass.
+
+No host/runtime code change or rebuild was needed for the new libraries; the
+existing rebuilt constrained host is used. The test executable is built by the
+`valve-panorama-runtime` Makefile target. Reproduce the static audit with:
+
+```sh
+python3 /private/tmp/alyx-verantyx/NativeARM/scripts/audit_guest_dependencies.py \
+  --libs /private/tmp/alyx-native-guest-libs-runtime \
+  --klepton /private/tmp/alyx-klepton \
+  --output /private/tmp/alyx-dependency-audit-repeat.json
+```
+
+The output JSON must be new. Continue using the new library directory below.
+Full-engine progression, first-frame/stereo correctness and the earlier
+command-buffer purge warnings remain unverified or unresolved. No installed
+Monado/runtime/Steam authentication change or FDM implementation is included.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -364,8 +429,8 @@ Use the normal PS VR2/Monado setup. From the isolated VeRantyx checkout:
 cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
-  --libs /private/tmp/alyx-native-guest-libs-fonts \
-  --output /private/tmp/alyx-monado-seventh \
+  --libs /private/tmp/alyx-native-guest-libs-runtime \
+  --output /private/tmp/alyx-monado-eighth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -377,7 +442,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-seventh/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-eighth/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.

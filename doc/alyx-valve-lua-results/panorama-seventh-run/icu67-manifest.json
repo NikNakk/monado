@@ -1,0 +1,27 @@
+{
+  "index_url": "https://deb.debian.org/debian/dists/bullseye/main/binary-arm64/Packages.gz",
+  "index_sha256": "762c657d18dfd7ec4d716791564d519b9b20d39a909df49835aa9925a4f48b4a",
+  "packages": [
+    {
+      "name": "libicu67",
+      "version": "67.1-7",
+      "url": "https://deb.debian.org/debian/pool/main/i/icu/libicu67_67.1-7_arm64.deb",
+      "sha256": "776303db230b275d8a17dfe8f0012bf61093dfc910f0d51f175be36707686efe",
+      "files": [
+        "./usr/lib/aarch64-linux-gnu/libicudata.so.67.1",
+        "./usr/lib/aarch64-linux-gnu/libicui18n.so.67.1",
+        "./usr/lib/aarch64-linux-gnu/libicuio.so.67.1",
+        "./usr/lib/aarch64-linux-gnu/libicutest.so.67.1",
+        "./usr/lib/aarch64-linux-gnu/libicutu.so.67.1",
+        "./usr/lib/aarch64-linux-gnu/libicuuc.so.67.1",
+        "./usr/share/doc/libicu67/copyright",
+        "./usr/lib/aarch64-linux-gnu/libicudata.so.67",
+        "./usr/lib/aarch64-linux-gnu/libicui18n.so.67",
+        "./usr/lib/aarch64-linux-gnu/libicuio.so.67",
+        "./usr/lib/aarch64-linux-gnu/libicutest.so.67",
+        "./usr/lib/aarch64-linux-gnu/libicutu.so.67",
+        "./usr/lib/aarch64-linux-gnu/libicuuc.so.67"
+      ]
+    }
+  ]
+}
