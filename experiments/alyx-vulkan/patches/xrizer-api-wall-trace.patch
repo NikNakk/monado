@@ -1,0 +1,158 @@
+From 66399cb03db47637ae3d7cc7253b28ad65637873 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 14:25:53 +0200
+Subject: [PATCH] Add optional API wall-time capture for native performance
+ diagnosis
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ src/api_trace.rs  | 96 +++++++++++++++++++++++++++++++++++++++++++++++
+ src/compositor.rs |  3 ++
+ src/lib.rs        |  1 +
+ 3 files changed, 100 insertions(+)
+ create mode 100644 src/api_trace.rs
+
+diff --git a/src/api_trace.rs b/src/api_trace.rs
+new file mode 100644
+index 0000000..e25af3d
+--- /dev/null
++++ b/src/api_trace.rs
+@@ -0,0 +1,96 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: GPL-3.0-or-later
++//! Optional API wall-clock diagnostics. Not GPU execution or presentation time.
++use std::{
++    fs::{File, OpenOptions},
++    io::{BufWriter, Write},
++    sync::{Mutex, OnceLock},
++    time::Instant,
++};
++struct Capture {
++    epoch: Instant,
++    writer: Mutex<Option<BufWriter<File>>>,
++}
++static CAPTURE: OnceLock<Option<Capture>> = OnceLock::new();
++pub struct Span {
++    capture: Option<&'static Capture>,
++    started: Instant,
++    event: &'static str,
++    frame: u32,
++    eye: i32,
++}
++impl Span {
++    pub fn new(event: &'static str, frame: u32, eye: i32) -> Option<Self> {
++        let capture = CAPTURE
++            .get_or_init(|| {
++                let path = std::env::var_os("XRIZER_API_TRACE")?;
++                if path.is_empty() {
++                    return None;
++                }
++                let open = || -> std::io::Result<BufWriter<File>> {
++                    let file = OpenOptions::new()
++                        .write(true)
++                        .create_new(true)
++                        .open(&path)?;
++                    let mut writer = BufWriter::with_capacity(16384, file);
++                    writeln!(writer, "event,frame,eye,start_ns,duration_ns")?;
++                    writer.flush()?;
++                    Ok(writer)
++                };
++                match open() {
++                    Ok(writer) => Some(Capture {
++                        epoch: Instant::now(),
++                        writer: Mutex::new(Some(writer)),
++                    }),
++                    Err(error) => {
++                        eprintln!("[xrizer-api-trace] cannot create {path:?}: {error}");
++                        None
++                    }
++                }
++            })
++            .as_ref()?;
++        Some(Self {
++            capture: Some(capture),
++            started: Instant::now(),
++            event,
++            frame,
++            eye,
++        })
++    }
++}
++impl Drop for Span {
++    fn drop(&mut self) {
++        let finished = Instant::now();
++        let Some(capture) = self.capture else {
++            return;
++        };
++        let Ok(mut guard) = capture.writer.lock() else {
++            return;
++        };
++        let Some(writer) = guard.as_mut() else {
++            return;
++        };
++        let result = writeln!(
++            writer,
++            "{},{},{},{},{}",
++            self.event,
++            self.frame,
++            self.eye,
++            self.started.duration_since(capture.epoch).as_nanos(),
++            finished.duration_since(self.started).as_nanos()
++        );
++        // Flush at handoff so completed frames survive a bounded launcher stop.
++        // The measured interval ends before this writer lock or I/O.
++        let result = result.and_then(|()| {
++            if self.event == "handoff" {
++                writer.flush()
++            } else {
++                Ok(())
++            }
++        });
++        if let Err(error) = result {
++            eprintln!("[xrizer-api-trace] capture disabled after write error: {error}");
++            *guard = None;
++        }
++    }
++}
+diff --git a/src/compositor.rs b/src/compositor.rs
+index b83f260..682a22b 100644
+--- a/src/compositor.rs
++++ b/src/compositor.rs
+@@ -770,6 +770,7 @@ impl vr::IVRCompositor029_Interface for Compositor {
+         true
+     }
+     fn PostPresentHandoff(&self) {
++        let _api_trace = crate::api_trace::Span::new("handoff", self.metrics.index.load(Ordering::Relaxed), -1);
+         #[macros::any_graphics(DynFrameController)]
+         fn end_frame<G: GraphicsBackend + 'static>(
+             ctrl: &mut FrameController<G>,
+@@ -861,6 +862,7 @@ impl vr::IVRCompositor029_Interface for Compositor {
+         bounds: *const vr::VRTextureBounds_t,
+         submit_flags: vr::EVRSubmitFlags,
+     ) -> vr::EVRCompositorError {
++        let _api_trace = crate::api_trace::Span::new("submit", self.metrics.index.load(Ordering::Relaxed), eye as i32);
+         let bounds = unsafe { bounds.as_ref() }
+             .copied()
+             .unwrap_or(vr::VRTextureBounds_t {
+@@ -1020,6 +1022,7 @@ impl vr::IVRCompositor029_Interface for Compositor {
+         game_pose_array: *mut vr::TrackedDevicePose_t,
+         game_pose_count: u32,
+     ) -> vr::EVRCompositorError {
++        let _api_trace = crate::api_trace::Span::new("wait_poses", self.metrics.index.load(Ordering::Relaxed), -1);
+         tracy_span!("WaitGetPoses impl");
+         trace!(
+             "[alyx-comp] WaitGetPoses render_poses={} game_poses={} frame_state={:?} timing={:?} stage_active={}",
+diff --git a/src/lib.rs b/src/lib.rs
+index f1b196e..5396159 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -1,5 +1,6 @@
+ #![deny(clippy::all)]
+ 
++mod api_trace;
+ mod applications;
+ mod chaperone;
+ mod clientcore;
+-- 
+2.54.0 (Apple Git-157)
+

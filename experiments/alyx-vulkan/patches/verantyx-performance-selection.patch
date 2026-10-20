@@ -1,0 +1,126 @@
+From 7e27157798acf0a65223d96bc9ad73670e8a50a2 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 14:26:47 +0200
+Subject: [PATCH] Select isolated xrizer builds and summarize API wall-time
+ captures
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/scripts/launch_xrizer.py       |  5 ++-
+ NativeARM/scripts/summarize_api_trace.py | 52 ++++++++++++++++++++++++
+ NativeARM/scripts/test_launch_xrizer.py  | 10 +++++
+ 3 files changed, 66 insertions(+), 1 deletion(-)
+ create mode 100644 NativeARM/scripts/summarize_api_trace.py
+
+diff --git a/NativeARM/scripts/launch_xrizer.py b/NativeARM/scripts/launch_xrizer.py
+index 851a8ca..00e00b0 100644
+--- a/NativeARM/scripts/launch_xrizer.py
++++ b/NativeARM/scripts/launch_xrizer.py
+@@ -25,6 +25,8 @@ parser.add_argument('--extended-dynamic-state3', choices=['auto','enabled','disa
+                     help="auto uses Alyx's disable switch for MoltenVK: its color-write-mask feature is unsupported")
+ parser.add_argument('--host',type=Path,default=Path('/private/tmp/alyx-constrained-host-build/alyx_host'))
+ parser.add_argument('--xrizer',type=Path,default=Path('/private/tmp/xrizer-dual-vulkan'))
++parser.add_argument('--xrizer-library',type=Path,help='explicit native xrizer library; default retains the working debug build')
++parser.add_argument('--api-trace',action='store_true',help='capture optional xrizer API wall durations, not GPU time')
+ parser.add_argument('--openxr-loader',type=Path,default=Path('/Users/nickkennedy/Code/OpenXR-SDK/build/macos/src/loader/Release/libopenxr_loader.dylib'))
+ parser.add_argument('--sample-locations-compat', choices=['auto','enabled','disabled'], default='auto',
+                     help='auto enables the supported sample-location command for MoltenVK with the state3 fallback')
+@@ -50,7 +52,7 @@ assert not args.output.exists(), 'output must be new'
+ assert '"' not in str(args.output) and '\\' not in str(args.output)
+ assert (args.root/'clone-manifest.json').is_file(), 'use the isolated cloned root'
+ assert (args.libs/'libraries.json').is_file()
+-vrclient=args.xrizer/'target/debug/libxrizer.dylib';assert vrclient.is_file()
++vrclient=(args.xrizer_library or args.xrizer/'target/debug/libxrizer.dylib').resolve(strict=True);assert vrclient.is_file()
+ backend=args.xrizer/'tools/macos/run-vulkan-backend.py';assert backend.is_file()
+ if args.runtime_json:args.runtime_json=args.runtime_json.resolve(strict=True)
+ extra=args.engine_args[1:] if args.engine_args[:1]==['--'] else args.engine_args
+@@ -85,6 +87,7 @@ settings={
+  'VERANTYX_OPENVR_ROOT':str(args.output/'state/openvr'),
+  'VERANTYX_REQUIRE_STEAM':'1',
+  'XRIZER_VRCLIENT':str(vrclient),
++ 'XRIZER_API_TRACE':str(args.output/'xrizer-api.csv') if args.api_trace else '',
+  'XRIZER_OPENXR_LOADER':str(args.openxr_loader),
+  'XR_RUNTIME_JSON':str(args.runtime_json or args.output/'deliberately-unavailable-openxr.json'),
+  'XDG_CACHE_HOME':str(args.output/'cache'),
+diff --git a/NativeARM/scripts/summarize_api_trace.py b/NativeARM/scripts/summarize_api_trace.py
+new file mode 100644
+index 0000000..bc63d1a
+--- /dev/null
++++ b/NativeARM/scripts/summarize_api_trace.py
+@@ -0,0 +1,52 @@
++#!/usr/bin/env python3
++# Copyright 2026, Nick Kennedy
++# SPDX-License-Identifier: BSL-1.0
++"""Summarize xrizer API wall durations/cadence. No GPU or presentation estimates."""
++import argparse
++import csv
++import json
++import math
++from collections import defaultdict
++from pathlib import Path
++
++
++def distribution(values):
++    values=sorted(values)
++    def percentile(p):
++        at=(len(values)-1)*p
++        lo=int(at)
++        return values[lo]+(values[min(lo+1,len(values)-1)]-values[lo])*(at-lo)
++    return {'count':len(values),'median_ms':percentile(.5),
++            'p95_ms':percentile(.95),'p99_ms':percentile(.99)}
++
++
++def summarize(path, start=0.0, end=math.inf):
++    groups=defaultdict(list)
++    waits=[]
++    with Path(path).open(newline='') as stream:
++        for row in csv.DictReader(stream):
++            timestamp=int(row['start_ns'])/1e9
++            duration=int(row['duration_ns'])/1e6
++            if duration<0:raise ValueError('negative API duration')
++            if not start<=timestamp<end:continue
++            key=row['event']+(':eye'+row['eye'] if row['event']=='submit' else '')
++            groups[key].append(duration)
++            if row['event']=='wait_poses':waits.append(timestamp)
++    waits.sort()
++    intervals=[(b-a)*1000 for a,b in zip(waits,waits[1:])]
++    result={'measurement':'API wall durations, including blocking; not CPU busy, GPU execution, or presentation latency',
++            'window_seconds':[start,end if math.isfinite(end) else None],
++            'api_wall':{key:distribution(values) for key,values in sorted(groups.items())},
++            'caution':'nested handoff may be included in wait_poses; do not sum these durations'}
++    if intervals:result['wait_poses_start_interval']=distribution(intervals)
++    return result
++
++
++if __name__=='__main__':
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('csv',type=Path)
++    parser.add_argument('--start-seconds',type=float,default=0)
++    parser.add_argument('--end-seconds',type=float,default=math.inf)
++    args=parser.parse_args()
++    if not 0<=args.start_seconds<args.end_seconds:parser.error('invalid time window')
++    print(json.dumps(summarize(args.csv,args.start_seconds,args.end_seconds),indent=2,allow_nan=False))
+diff --git a/NativeARM/scripts/test_launch_xrizer.py b/NativeARM/scripts/test_launch_xrizer.py
+index ec9bd55..f1946b2 100644
+--- a/NativeARM/scripts/test_launch_xrizer.py
++++ b/NativeARM/scripts/test_launch_xrizer.py
+@@ -49,6 +49,16 @@ class NativeRuntimeDirectoryTest(unittest.TestCase):
+                     run = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+                     settings = json.loads(run.stdout)['environment']
+                     self.assertEqual(settings['KL_MEM_TOTAL_MB'],'16384')
++                    self.assertEqual(settings['XRIZER_API_TRACE'],'')
++                    alternate=root/'optimized.dylib';alternate.write_bytes(b'inert optimized fixture')
++                    traced=subprocess.run(command+['--xrizer-library',str(alternate),'--api-trace'],
++                                          env=env,capture_output=True,text=True,check=True)
++                    traced=json.loads(traced.stdout)
++                    self.assertEqual(traced['environment']['XRIZER_VRCLIENT'],str(alternate.resolve()))
++                    self.assertEqual(traced['environment']['XRIZER_API_TRACE'],str(output/'xrizer-api.csv'))
++                    self.assertEqual(traced['binaries']['xrizer']['path'],str(alternate.resolve()))
++                    self.assertNotEqual(traced['binaries']['xrizer']['sha256'],
++                                        json.loads(run.stdout)['binaries']['xrizer']['sha256'])
+                     self.assertEqual(json.loads(run.stdout)['guest_memory_mb_requested'],16384)
+                     self.assertEqual(json.loads(run.stdout)['guest_memory_source'],'explicit')
+                     self.assertEqual(settings['XDG_RUNTIME_DIR'], str(expected))
+-- 
+2.54.0 (Apple Git-157)
+

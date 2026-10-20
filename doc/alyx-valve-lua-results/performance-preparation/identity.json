@@ -1,0 +1,29 @@
+{
+  "xrizer_performance_revision": "66399cb",
+  "verantyx_revision": "7e27157",
+  "build": "CARGO_TARGET_DIR=/private/tmp/xrizer-perf-target XRIZER_VERSION=66399cb cargo build --offline [--release] -p xrizer",
+  "files": {
+    "original_debug": {
+      "path": "/private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib",
+      "sha256": "24b28582ece09b1758203311f98437e85d37365ecf705d2fce53ccc5698ecfb8"
+    },
+    "original_source_release": {
+      "path": "/private/tmp/xrizer-8417a1d-release.dylib",
+      "sha256": "8f5702acaf4129c211af183e6817d790e2bb01fa29e8f5df3ac7ba179b05640d"
+    },
+    "instrumented_debug": {
+      "path": "/private/tmp/xrizer-perf-target/debug/libxrizer.dylib",
+      "sha256": "25aa5ad04bdd4f8d9c90983603b8e6e09b969e137f12025a5354e8ba024d7ce4"
+    },
+    "instrumented_release": {
+      "path": "/private/tmp/xrizer-perf-target/release/libxrizer.dylib",
+      "sha256": "ae6fd321f7298aec52dd7bed1e2954b7e8d11373527cc3245ccdb101b6ad5a9b"
+    },
+    "host": {
+      "path": "/private/tmp/alyx-constrained-host-build/alyx_host",
+      "sha256": "e09474df969b96362181065192ac268680039fc9cc11be1ed0718ead5d7c18b4"
+    }
+  },
+  "game_performance_results": null,
+  "working_debug_and_host_hashes_match_twelfth_run": true
+}

@@ -611,38 +611,59 @@ CPU/GPU frame times and thermal/run order with a separately retained optimized
 build. Keep this working binary as a baseline. No substantial FDM implementation
 begins at this checkpoint.
 
-## Next user test
+## Twelfth run: RAM warning removed; optimized comparison prepared
 
-Native macOS Steam must be running and signed in to the account that owns Alyx.
-Keep the current simulated-HMD/Monado setup for the RAM comparison. From the
-isolated VeRantyx checkout:
+The user reports improved performance and no RAM warning. The manifest and
+synthetic guest memory report both confirm24576MiB. The run reaches first-frame
+submission without a fatal OOM log. This validates the RAM-reporting change;
+performance improvement remains qualitative. It does not establish a RAM-only
+performance cause, because cache/scene/run-order effects are uncontrolled.
+
+The user also correctly recalls the Wine GPU timing fix. Local Wine xrizer has
+cb2986a shared history plus3fffac0 D3D11 queries; the native Vulkan branch still
+has older synthetic GPU values. Reuse the shared history/validity logic when
+adding Vulkan queries. Full findings, tested revisions, retained binary hashes
+and limitations are in [performance-preparation](alyx-valve-lua-results/performance-preparation/README.md).
+
+An isolated optional API-wall trace and optimized build are ready.83 unit tests
+and the explicit optimized MoltenVK overlay test pass. The original successful
+debug library and host remain byte-identical; default library selection is
+unchanged. No GPU timing claim or feedback behavior change is made by this
+candidate, and no additional compositor/copy is introduced.
+
+## Next user test: optimized xrizer
+
+Keep native Steam signed in and the current simulated-HMD setup. Run:
 
 ```sh
-cd /private/tmp/alyx-verantyx
-python3 NativeARM/scripts/launch_xrizer.py \
+python3 /private/tmp/alyx-verantyx/NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-runtime \
-  --output /private/tmp/alyx-monado-twelfth \
+  --output /private/tmp/alyx-monado-thirteenth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
-  --timeout 120
+  --xrizer-library /private/tmp/xrizer-perf-target/release/libxrizer.dylib \
+  --api-trace --timeout 180
 ```
 
-This selects MoltenVK by default and uses the existing runtime JSON without
-editing it or the service. The output directory must be new; change its name on
-repeat runs. The wrapper stops its own process group after120seconds, and Ctrl-C
-also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
+Load the same save/scene, retain graphics settings and remain stationary for
+30seconds after loading. Note the approximate elapsed time at level entry.
+The launcher retains the automatic24GiB budget and common MoltenVK loader.
+It stops only its process group after180seconds; use a new output directory
+for each repeat. This is still a user-run gameplay check, not an unattended
+benchmark. Remove --xrizer-library to return to the original working library.
 
-Report whether the RAM warning disappears and whether save loading still works. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-twelfth/backend/`; launch metadata also hashes the host,
-xrizer, OpenXR loader, engine and selected Monado client library. An exit status
-of0 alone does not establish success: the engine used0 for its deliberate
-VR-init failure in the headless test.
+For a matched instrumented debug comparison, use
+/private/tmp/xrizer-perf-target/debug/libxrizer.dylib and a new output directory.
+API CSV analysis (optionally select a steady-state window after loading):
 
-A headless reproduction uses `--no-xr-runtime` instead of `--runtime-json PATH`.
-The explicit unavailable override was checked against the local Khronos loader
-source: it does not fall back to a registered runtime. That run did not load
-Monado or claim the headset. Its selected-driver census and focused startup
-excerpt are in `doc/alyx-valve-lua-results/`, alongside the Lua/module evidence.
+```sh
+python3 /private/tmp/alyx-verantyx/NativeARM/scripts/summarize_api_trace.py \
+  /private/tmp/alyx-monado-thirteenth/xrizer-api.csv
+```
+
+The resulting median/p95/p99 describe API wall duration and pose-call cadence.
+They are neither GPU execution nor presentation latency. Do not use the current
+native GetFrameTiming GPU fields as measured data; those remain placeholders.
 
 ## Still unverified / next milestone
 
