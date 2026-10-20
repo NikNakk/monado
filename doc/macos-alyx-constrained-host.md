@@ -1,6 +1,11 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # ARM64 Alyx constrained-host follow-up — 20 October 2026
 
+Current follow-up: [private-memory ABI translation is authorized and actual
+Valve Lua/headless engine tests now pass](macos-alyx-first-headset-check.md).
+The constrained host can run with explicit --run-constrained. Earlier sections
+below record the preflight-only implementation history.
+
 A Lua callback replacement and a **preflight-only constrained build** are now
 implemented in the isolated VeRantyx checkout. This is not a successful game
 launch or a completed runnable constrained mode. The native thread fixture

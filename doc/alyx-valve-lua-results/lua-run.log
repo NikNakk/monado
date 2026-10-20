@@ -1,0 +1,83 @@
+  [dl] /private/tmp/valve-lua-final/lib/libvscript.so: 5 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libtier0.so
+  [dl]     needs libvstdlib.so
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/valve-lua-final/lib/libstdc++.so.6)
+  [dl] /private/tmp/valve-lua-final/lib/libstdc++.so.6: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libc.so.6
+  [dl]     needs libgcc_s.so.1
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libc.so.6 -> shim-served (skip)
+  [dl]     libgcc_s.so.1 -> loading (/private/tmp/valve-lua-final/lib/libgcc_s.so.1)
+  [dl] /private/tmp/valve-lua-final/lib/libgcc_s.so.1: 1 DT_NEEDED
+  [dl]     needs libc.so.6
+  [dl]     libc.so.6 -> shim-served (skip)
+[lua-image] libgcc_s.so.1 TLS=2 x18=56 CTR=1 SVC=0 missing=0 refused=0/0/0
+[lua-image] libstdc++.so.6 TLS=5 x18=217 CTR=0 SVC=0 missing=0 refused=0/0/0
+  [dl]     libtier0.so -> loading (/private/tmp/valve-lua-final/lib/libtier0.so)
+  [dl] /private/tmp/valve-lua-final/lib/libtier0.so: 3 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/valve-lua-final/lib/libstdc++.so.6)
+  [dl]     libc.so.6 -> shim-served (skip)
+[lua-image] libtier0.so TLS=63 x18=22 CTR=0 SVC=0 missing=0 refused=0/0/0
+[proc] synthetic /proc and /sys at /var/folders/gs/rb65_ql96tj5nh0pm2_6jgt80000gn/T/klepton-proc.Wuy4ca (10 cpus, 6144 MB budget)
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+[lua-map] allocate bytes=2147483648 address=0x300000000 prot=0 flags=0x22
+[lua-map] release bytes=2147483648 address=0x300000000 result=0
+  [dl]     libvstdlib.so -> loading (/private/tmp/valve-lua-final/lib/libvstdlib.so)
+  [dl] /private/tmp/valve-lua-final/lib/libvstdlib.so: 4 DT_NEEDED
+  [dl]     needs libm.so.6
+  [dl]     needs libstdc++.so.6
+  [dl]     needs libtier0.so
+  [dl]     needs libc.so.6
+  [dl]     libm.so.6 -> shim-served (skip)
+  [dl]     libstdc++.so.6 -> loading (/private/tmp/valve-lua-final/lib/libstdc++.so.6)
+  [dl]     libtier0.so -> loading (/private/tmp/valve-lua-final/lib/libtier0.so)
+  [dl]     libc.so.6 -> shim-served (skip)
+[lua-image] libvstdlib.so TLS=10 x18=73 CTR=0 SVC=0 missing=0 refused=0/0/0
+  [dl]     libc.so.6 -> shim-served (skip)
+[lua-image] libvscript.so TLS=1 x18=153 CTR=1 SVC=0 missing=0 refused=0/0/0
+PASS Lua real ELF setter relocation binding; original Lua range branch unchanged
+[lua-builtin] selected built-in mmap allocator (game lifecycle unvalidated)
+PASS Lua round=0 strings/table-resize/collect/close live-mapped-bytes=0 peak=17321984
+PASS Lua round=1 strings/table-resize/collect/close live-mapped-bytes=0 peak=17321984
+PASS Lua round=2 strings/table-resize/collect/close live-mapped-bytes=0 peak=17321984
+PASS Lua newstate returns NULL on injected anonymous mmap ENOMEM
+PASS Lua allocator maps=393230 unmaps=393229 mremap=3 failures=30; recovered after ENOMEM
+  [glibc] 506 table entries, 62 aliases, 0 stub calls

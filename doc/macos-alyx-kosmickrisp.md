@@ -341,3 +341,10 @@ if the observed semantics fit; **KK adds roughly 3–6 weeks** for standard Meta
 interop/lifetime tests before comparable XR validation. Unrestricted FDM,
 GPU-produced maps, offset variants and conformance can take months and may need
 an API change or substantial emulation. Stop here before substantial FDM work.
+
+## Native engine checkpoint
+
+The [20 October Valve Lua/headless startup report](macos-alyx-first-headset-check.md)
+now provides actual Valve-library and Source2Main evidence, an isolated cloned
+game root and the first user headset command. No headset rendering or actual
+Alyx foveation negotiation is claimed yet.

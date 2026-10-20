@@ -1,0 +1,15 @@
+PASS: SVC immediates become named BRK; unrelated instruction unchanged; owned native BRK stops with SIGTRAP
+PASS: callback substitution, repeated binding, missing image/symbol and recursion fail closed
+PASS: kernel current/live/terminated/invalid probes; guest pthread-exit semantics remain unverified
+PASS: SVC #0/nonzero immediate, malformed headers/segments and unknown policy refuse; section-aware policy distinguishes executable code/data
+PASS: guest HOME redirect leaves native HOME unchanged; other variables and default path preserve behaviour
+PASS mode 0: live through destructor, ESRCH after completion
+PASS mode 1: live through destructor, ESRCH after completion
+PASS mode 2: live through destructor, ESRCH after completion
+PASS mode 3: live through destructor, ESRCH after completion
+PASS mode 4: live through destructor, ESRCH after completion
+PASS mode 5: live through destructor, ESRCH after completion
+PASS mode 6: live through destructor, ESRCH after completion
+PASS mode 7: live through destructor, ESRCH after completion
+PASS mode 8: live through destructor, ESRCH after completion
+PASS: return/exit/cancel/C++ TLS/repeated TSD/detach/syscall-exit, tkill/tgkill, nested/cross-domain destructors, 100 fast threads

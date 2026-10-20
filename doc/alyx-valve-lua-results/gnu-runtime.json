@@ -1,0 +1,25 @@
+{
+  "index_url": "https://deb.debian.org/debian/dists/trixie/main/binary-arm64/Packages.gz",
+  "index_sha256": "eb08ac2299585e234f64ed3c1dbe5b71e149cd68a84b711ceea85dcfc2627135",
+  "packages": [
+    {
+      "name": "libgcc-s1",
+      "version": "14.2.0-19",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-14/libgcc-s1_14.2.0-19_arm64.deb",
+      "sha256": "1108bc87879833d6d9a145f22a4a15cddb34e065b4b5f4b97bee586adbac2851",
+      "files": [
+        "./usr/lib/aarch64-linux-gnu/libgcc_s.so.1"
+      ]
+    },
+    {
+      "name": "libstdc++6",
+      "version": "14.2.0-19",
+      "url": "https://deb.debian.org/debian/pool/main/g/gcc-14/libstdc++6_14.2.0-19_arm64.deb",
+      "sha256": "6669b0c52a2e7c6af9adfdabce3ff6e286065cdfbc7b85280862b5f799daebee",
+      "files": [
+        "./usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.33",
+        "./usr/lib/aarch64-linux-gnu/libstdc++.so.6"
+      ]
+    }
+  ]
+}

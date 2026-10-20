@@ -1,0 +1,8 @@
+{
+  "content": "/Users/nickkennedy/Windows/prefix/drive_c/Program Files (x86)/Steam/steamapps/common/Half-Life Alyx",
+  "depot": "/Users/nickkennedy/Library/Application Support/Steam/Steam.AppBundle/Steam/Contents/MacOS/steamapps/content/app_546560/depot_546564",
+  "output": "/private/tmp/alyx-native-game-root",
+  "method": "APFS clonefile; separate inodes; no symlink write-through",
+  "files": 3219,
+  "logical_bytes": 74167277039
+}

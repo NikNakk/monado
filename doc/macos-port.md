@@ -12,10 +12,12 @@ stereo submissions; KosmicKrisp is blocked by missing standard Metal-object
 interop. ARM64 binaries are now downloaded: the [20 October read-only audit](macos-alyx-arm64-static-audit.md)
 identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
 branch patch. The [constrained-host follow-up](macos-alyx-constrained-host.md)
-adds tested callback substitution and a preflight-only build. Managed thread
+adds tested callback substitution and controlled execution opt-in. Managed thread
 lifetime fixtures now pass. [Strict Vulkan tests](macos-alyx-strict-vulkan.md)
-also pass on both drivers; the private-memory ABI translation boundary needs
-user clarification before executing Valve code. Actual game calls remain unobserved. No installed-runtime change
+also pass on both drivers. Private-memory ABI translation is now authorized;
+[actual Valve Lua and headless engine startup](macos-alyx-first-headset-check.md)
+pass their checkpoints. The first MoltenVK/Monado headset run needs the user;
+Alyx rendering/foveation API calls remain unobserved. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

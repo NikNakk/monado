@@ -123,3 +123,10 @@ not justified by either answer.
 The previous FDM feasibility conclusions and KosmicKrisp
 `VK_EXT_metal_objects` interoperability blocker remain unchanged. No FDM code,
 game files, installed runtime or primary checkout was changed in this step.
+
+## Authorization and execution follow-up
+
+The user has now authorized necessary private-memory ABI translation.
+[Actual Valve Lua tests and a bounded headless engine run](macos-alyx-first-headset-check.md)
+pass their defined checkpoints; the first user headset test is prepared.
+The input request above records the previous checkpoint and is resolved.

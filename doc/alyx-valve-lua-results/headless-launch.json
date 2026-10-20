@@ -1,0 +1,41 @@
+{
+  "command": [
+    "python3",
+    "/private/tmp/xrizer-dual-vulkan/tools/macos/run-vulkan-backend.py",
+    "--driver",
+    "moltenvk",
+    "--output",
+    "/private/tmp/alyx-headless-first/backend",
+    "--",
+    "/private/tmp/alyx-constrained-host-build/alyx_host",
+    "--run-constrained",
+    "--libdir",
+    "/private/tmp/alyx-native-guest-libs-ready",
+    "--game",
+    "/private/tmp/alyx-native-game-root",
+    "--",
+    "-vr",
+    "-steam",
+    "-vulkan",
+    "-nowindow",
+    "-console",
+    "+map",
+    "startup"
+  ],
+  "environment": {
+    "VERANTYX_GUEST_HOME": "/private/tmp/alyx-headless-first/state/guest-home",
+    "VERANTYX_OPENVR_ROOT": "/private/tmp/alyx-headless-first/state/openvr",
+    "VERANTYX_REQUIRE_STEAM": "1",
+    "XRIZER_VRCLIENT": "/private/tmp/xrizer-dual-vulkan/target/debug/libxrizer.dylib",
+    "XRIZER_OPENXR_LOADER": "/Users/nickkennedy/Code/OpenXR-SDK/build/macos/src/loader/Release/libopenxr_loader.dylib",
+    "XR_RUNTIME_JSON": "/private/tmp/alyx-headless-first/deliberately-unavailable-openxr.json",
+    "XDG_CACHE_HOME": "/private/tmp/alyx-headless-first/cache",
+    "XDG_CONFIG_HOME": "/private/tmp/alyx-headless-first/config",
+    "KL_VK_FOVEATION_TRACE": "1",
+    "ALYX_RESULT_FILE": "/private/tmp/alyx-headless-first/engine-result.log"
+  },
+  "timeout": 30,
+  "headless": true,
+  "exit_code": 0,
+  "elapsed_seconds": 1.199601173400879
+}
