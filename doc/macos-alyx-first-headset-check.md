@@ -233,6 +233,60 @@ any subsequent failures. It remains a startup checkpoint, not a first-frame or
 stereo-correctness result. FDM remains unimplemented and disabled in observed
 Alyx device requests.
 
+## Fifth user result: profile guard skipped; actual renderer replay now passes
+
+The next user run faults at the same sample-location call. Its manifest correctly
+sets KL_VK_SAMPLE_LOCATIONS_COMPAT=1, but its request contains neither
+VK_EXT_sample_locations nor VK_EXT_extended_dynamic_state3. The engine's broad
+state3-disable option removes both. The first profile required sample_locations
+in the incoming list and silently skipped activation. No compatibility-enable
+message or added extension/feature appeared in that run. The previous standalone
+fixture retained sample_locations, so it failed to model this prerequisite.
+That fixture's success did not establish that the profile activated in Alyx.
+
+Signed Klepton correction `829f1ec` applies the explicit profile even when both
+extensions are omitted, after checking real support for both and the feature.
+It reserves space for the portability addition plus both extension additions.
+It still preserves every caller-requested feature/structure and rejects missing
+support or unsupported caller features. The native regression now starts with
+neither extension, and passes command resolution, record/submit/completion and
+unchanged-request/unsupported-feature checks.
+
+Signed VeRantyx test commit `1b8cb5d` adds a closer reproduction, using the owner's
+actual renderer and exactly this run's captured core features, four feature
+structures,20 extension entries and queue request. The harness checks the known
+renderer SHA256 before using private entry RVAs. It loads/relocates the renderer
+with constructors disabled and executes **only its generated Vulkan dispatch
+loaders**, then reads the actual function slot. It does not run Source2Main,
+Steam authentication, OpenXR or a headset session. Original and cloned renderer
+hashes remain unchanged after the tests. Private-memory ABI translation remains
+necessary; no game-specific Lua/video logic patch is linked or enabled.
+
+With compatibility off, device creation passes but the actual renderer slot is
+NULL, reproducing the failed startup prerequisite. With compatibility on, the
+actual slot matches the native driver's function, and calls through it record
+VK_FALSE/VK_TRUE/VK_FALSE, submit and complete. The exact captured caller
+structures remain byte-for-byte unchanged. The existing strict fake-driver and
+launcher policy/environment regressions pass. Evidence is in
+`alyx-valve-lua-results/sample-locations-fifth-run/`.
+
+Reproduction after building the `valve-vulkan-dispatch` target in the isolated
+constrained host directory (use profile0/expected0 for the negative case):
+
+```sh
+KL_VULKAN_LIBRARY=/opt/homebrew/lib/libvulkan.1.dylib \
+VK_DRIVER_FILES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \
+KL_VK_SAMPLE_LOCATIONS_COMPAT=1 \
+XR_RUNTIME_JSON=/private/tmp/disabled-openxr-dispatch-test.json \
+  /private/tmp/alyx-constrained-host-build/valve-vulkan-dispatch \
+  /private/tmp/alyx-native-guest-libs-ready 1
+```
+
+The host is rebuilt with the corrected profile; the launcher's default profile
+selection is unchanged. A sixth user run is needed for the full engine path.
+The dispatch-loader reproduction establishes the previously NULL function slot
+and native command behaviour; it does not establish game-frame correctness.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -243,7 +297,7 @@ cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-ready \
-  --output /private/tmp/alyx-monado-fifth \
+  --output /private/tmp/alyx-monado-sixth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -255,7 +309,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-fifth/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-sixth/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.

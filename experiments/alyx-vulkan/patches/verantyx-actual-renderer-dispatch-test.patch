@@ -1,0 +1,167 @@
+From 1b8cb5d879631e1cc813c593cf54989f891141c9 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 09:21:27 +0200
+Subject: [PATCH] tests: replay captured Alyx device through actual renderer
+ dispatch loaders
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/Makefile                      |  6 ++
+ NativeARM/host/tests/alyx_captured_device.h  | 33 +++++++
+ NativeARM/host/tests/valve_vulkan_dispatch.c | 90 ++++++++++++++++++++
+ 3 files changed, 129 insertions(+)
+ create mode 100644 NativeARM/host/tests/alyx_captured_device.h
+ create mode 100644 NativeARM/host/tests/valve_vulkan_dispatch.c
+
+diff --git a/NativeARM/host/Makefile b/NativeARM/host/Makefile
+index 054c8f5..8b5efb0 100644
+--- a/NativeARM/host/Makefile
++++ b/NativeARM/host/Makefile
+@@ -138,3 +138,9 @@ check-guest-home: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
+ 	$(OUT)/check-guest-home
+ 
+ .PHONY: check-guest-home
++
++# Hash-checked renderer dispatch-loader test; no engine entry, Steam or OpenXR.
++valve-vulkan-dispatch: $(RT_OBJS) $(filter-out $(OUT)/alyx_host.c.o,$(HOST_OBJS))
++	$(CC) $(CFLAGS) -o $(OUT)/valve-vulkan-dispatch tests/valve_vulkan_dispatch.c $^ $(LDLIBS) -I.
++
++.PHONY: valve-vulkan-dispatch
+diff --git a/NativeARM/host/tests/alyx_captured_device.h b/NativeARM/host/tests/alyx_captured_device.h
+new file mode 100644
+index 0000000..cc23d3c
+--- /dev/null
++++ b/NativeARM/host/tests/alyx_captured_device.h
+@@ -0,0 +1,33 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++// Exact fifth user run request, decoded from observational logs against vk.xml.
++// No game bytes or disassembly; portability and optional profile additions are not in this capture.
++#include <vulkan/vulkan.h>
++#include <string.h>
++struct alyx_captured_device { VkDeviceCreateInfo ci; VkDeviceQueueCreateInfo queue;
++float priority; VkPhysicalDeviceFeatures core;
++VkPhysicalDeviceMultiviewFeatures feature0;
++VkPhysicalDeviceDynamicRenderingFeatures feature1;
++VkPhysicalDeviceDynamicRenderingLocalReadFeatures feature2;
++VkPhysicalDeviceHostImageCopyFeatures feature3;
++};
++static void alyx_captured_device_init(struct alyx_captured_device *r) {
++memset(r,0,sizeof *r);
++static const VkBool32 words[]={0,1,1,1,0,1,1,1,0,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0,1,1,1,1,1,0,1,1,1,1,1,1,1,0,0,1,1,0,1,0,0,0,0,0,0,0,0,0,0,1};
++_Static_assert(sizeof words==sizeof r->core,"feature ABI");
++memcpy(&r->core,words,sizeof words);
++static const char *extensions[]={"VK_KHR_swapchain","VK_KHR_dedicated_allocation","VK_KHR_external_fence","VK_KHR_external_memory","VK_KHR_external_semaphore","VK_KHR_get_memory_requirements2","VK_KHR_image_format_list","VK_EXT_metal_objects","VK_KHR_descriptor_update_template","VK_KHR_image_format_list","VK_KHR_maintenance1","VK_KHR_maintenance2","VK_EXT_separate_stencil_usage","VK_KHR_swapchain_mutable_format","VK_KHR_dynamic_rendering","VK_KHR_dynamic_rendering_local_read","VK_KHR_depth_stencil_resolve","VK_KHR_create_renderpass2","VK_EXT_host_image_copy","VK_KHR_multiview"};
++r->priority=1; r->queue=(VkDeviceQueueCreateInfo){.sType=VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,.queueCount=1,.pQueuePriorities=&r->priority};
++r->feature0.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
++r->feature0.multiview=1;
++r->feature1.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
++r->feature1.dynamicRendering=1;
++r->feature0.pNext=&r->feature1;
++r->feature2.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES;
++r->feature2.dynamicRenderingLocalRead=1;
++r->feature1.pNext=&r->feature2;
++r->feature3.sType=VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_HOST_IMAGE_COPY_FEATURES;
++r->feature3.hostImageCopy=1;
++r->feature2.pNext=&r->feature3;
++r->ci=(VkDeviceCreateInfo){.sType=VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,.pNext=&r->feature0,.pEnabledFeatures=&r->core,.queueCreateInfoCount=1,.pQueueCreateInfos=&r->queue,.enabledExtensionCount=sizeof extensions/sizeof extensions[0],.ppEnabledExtensionNames=extensions};
++}
+diff --git a/NativeARM/host/tests/valve_vulkan_dispatch.c b/NativeARM/host/tests/valve_vulkan_dispatch.c
+new file mode 100644
+index 0000000..0fb1a0a
+--- /dev/null
++++ b/NativeARM/host/tests/valve_vulkan_dispatch.c
+@@ -0,0 +1,90 @@
++// Copyright 2026, Nick Kennedy
++// SPDX-License-Identifier: BSL-1.0
++// Load the owner's renderer, execute only its hash-checked Vulkan dispatch loaders,
++// and replay the exact fifth-run device request. No Source2Main, Steam or OpenXR.
++#define VK_NO_PROTOTYPES
++#include "alyx_captured_device.h"
++#include "klepton.h"
++#include "kl_glibc.h"
++#include "kl_lua_builtin.h"
++#include "kl_vulkan.h"
++#include "kl_fault.h"
++#include <CommonCrypto/CommonDigest.h>
++#include <assert.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <sys/resource.h>
++static void safety(const char *path,kl_image *image) {
++    const kl_stats *s=kl_get_stats(image);unsigned missing=0;kl_missing_imports(image,&missing);
++    if(missing || s->svc_sites!=s->svc_trapped || s->tls_refused || s->x18_refused || s->ctr_refused) {
++        fprintf(stderr,"unsafe imports/ABI translation: %s\n",path);exit(3);
++    }
++}
++static void check_renderer(const char *path) {
++    FILE *f=fopen(path,"rb");assert(f);CC_SHA256_CTX ctx;CC_SHA256_Init(&ctx);
++    unsigned char bytes[16384],hash[CC_SHA256_DIGEST_LENGTH];size_t n;
++    while((n=fread(bytes,1,sizeof bytes,f)))CC_SHA256_Update(&ctx,bytes,(CC_LONG)n);
++    assert(!ferror(f));fclose(f);CC_SHA256_Final(hash,&ctx);
++    char text[65];for(unsigned i=0;i<sizeof hash;i++)sprintf(text+2*i,"%02x",hash[i]);
++    assert(!strcmp(text,"02edbf8f2040cd8a3103038583447865ca7d34f36f13daacab9d4d194cb9d04d"));
++}
++int main(int argc,char **argv) {
++    assert(argc==3);int expected=atoi(argv[2]);
++    setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
++    struct rlimit limit={0,0};setrlimit(RLIMIT_CORE,&limit);
++    setenv("KL_LOAD_NO_INIT","1",1); // audited dispatch loaders are self-contained
++    setenv("KL_SVC_POLICY","trap-code",1);setenv("KL_GUEST_PATCH","0",1);
++    setenv("KL_VK_STRICT","1",1);setenv("KL_TLS_REWRITE_FORCE","1",1);
++    setenv("KL_GUEST_THREAD_TRACKING","1",1);unsetenv("KL_DYLIB_DIR");
++    char renderer[4096];snprintf(renderer,sizeof renderer,"%s/librendersystemvulkan.so",argv[1]);
++    check_renderer(renderer);
++    kl_glibc_install(argv[0]);kl_set_library_path(argv[1]);kl_thread_init();kl_fault_install();
++    kl_lua_builtin_install();kl_image_loaded_hook=safety;
++    kl_image *image=kl_load_recursive(renderer);assert(image);
++    assert(kl_span(image)>0xa52838);char *base=kl_base(image);
++    PFN_vkGetInstanceProcAddr gipa=(void*)kl_vulkan_sym("vkGetInstanceProcAddr");assert(gipa);
++    PFN_vkGetDeviceProcAddr gdpa=(void*)kl_vulkan_sym("vkGetDeviceProcAddr");assert(gdpa);
++    // The only private game entry points executed: generated dispatch-table loaders.
++    void (*initialize)(PFN_vkGetInstanceProcAddr)=(void*)(base+0x2d24e0);
++    void (*load_instance)(VkInstance)=(void*)(base+0x2d264c);
++    void (*load_device)(VkDevice)=(void*)(base+0x2d26ac);
++    initialize(gipa);
++    VkApplicationInfo app={.sType=VK_STRUCTURE_TYPE_APPLICATION_INFO,.apiVersion=VK_API_VERSION_1_2};
++    VkInstanceCreateInfo ic={.sType=VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,.pApplicationInfo=&app};
++    VkInstance instance;
++    assert(((PFN_vkCreateInstance)gipa(0,"vkCreateInstance"))(&ic,0,&instance)==VK_SUCCESS);
++    load_instance(instance);
++    uint32_t n=1;VkPhysicalDevice pd;
++    assert(((PFN_vkEnumeratePhysicalDevices)gipa(instance,"vkEnumeratePhysicalDevices"))(instance,&n,&pd)==VK_SUCCESS);
++    struct alyx_captured_device captured;alyx_captured_device_init(&captured);
++    struct alyx_captured_device before=captured;
++    VkDevice device;
++    assert(((PFN_vkCreateDevice)gipa(instance,"vkCreateDevice"))(pd,&captured.ci,0,&device)==VK_SUCCESS);
++    assert(!memcmp(&captured,&before,sizeof captured));
++    load_device(device);
++    PFN_vkCmdSetSampleLocationsEnableEXT sample=*(PFN_vkCmdSetSampleLocationsEnableEXT*)(base+0xa52830);
++    printf("VALVE-DISPATCH profile=%d real-slot-available=%d\n",expected,sample!=NULL);
++    assert((sample!=NULL)==expected);
++    assert(sample==(PFN_vkCmdSetSampleLocationsEnableEXT)gdpa(device,"vkCmdSetSampleLocationsEnableEXT"));
++    if(sample) {
++        VkCommandPoolCreateInfo pc={.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};VkCommandPool pool;
++        assert(((PFN_vkCreateCommandPool)gdpa(device,"vkCreateCommandPool"))(device,&pc,0,&pool)==VK_SUCCESS);
++        VkCommandBufferAllocateInfo ac={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
++            .commandPool=pool,.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY,.commandBufferCount=1};VkCommandBuffer command;
++        assert(((PFN_vkAllocateCommandBuffers)gdpa(device,"vkAllocateCommandBuffers"))(device,&ac,&command)==VK_SUCCESS);
++        VkCommandBufferBeginInfo bc={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
++        assert(((PFN_vkBeginCommandBuffer)gdpa(device,"vkBeginCommandBuffer"))(command,&bc)==VK_SUCCESS);
++        sample(command,VK_FALSE);sample(command,VK_TRUE);sample(command,VK_FALSE);
++        assert(((PFN_vkEndCommandBuffer)gdpa(device,"vkEndCommandBuffer"))(command)==VK_SUCCESS);
++        VkQueue queue;((PFN_vkGetDeviceQueue)gdpa(device,"vkGetDeviceQueue"))(device,0,0,&queue);
++        VkSubmitInfo submit={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&command};
++        assert(((PFN_vkQueueSubmit)gdpa(device,"vkQueueSubmit"))(queue,1,&submit,VK_NULL_HANDLE)==VK_SUCCESS);
++        assert(((PFN_vkQueueWaitIdle)gdpa(device,"vkQueueWaitIdle"))(queue)==VK_SUCCESS);
++        ((PFN_vkDestroyCommandPool)gdpa(device,"vkDestroyCommandPool"))(device,pool,0);
++        puts("VALVE-DISPATCH PASS: actual renderer slot commands record, submit and complete");
++    }
++    ((PFN_vkDestroyDevice)gdpa(device,"vkDestroyDevice"))(device,0);
++    ((PFN_vkDestroyInstance)gipa(instance,"vkDestroyInstance"))(instance,0);
++    puts("VALVE-DISPATCH PASS: exact captured request and caller structures preserved");
++    return 0;
++}
+-- 
+2.54.0 (Apple Git-157)
+

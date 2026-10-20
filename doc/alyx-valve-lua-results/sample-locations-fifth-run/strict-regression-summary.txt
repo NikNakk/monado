@@ -1,0 +1,2 @@
+PASS: strict Vulkan preserves >64 extensions, layers/API/features/pNext; no retry, null substitution, graphics repair or success stub
+PASS: exact feature payload and driver/enumeration failure diagnostics

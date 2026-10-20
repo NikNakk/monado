@@ -15,10 +15,9 @@ identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
 branch patch. Headless engine startup reaches xrizer. The first user headset run exposed a
 launcher cache/Monado socket conflict, now corrected with passing regression
 checks; see the [headset checkpoint](macos-alyx-first-headset-check.md).
-The fourth run passes device creation but faults on a sample-location command
-still used by Alyx's state3 fallback. A narrow explicit compatibility profile
-enables the real supported feature; native command tests pass and the rebuilt
-host awaits user confirmation. No rendered game frame yet. No installed-runtime change
+The fifth run identifies a skipped sample-location profile guard. The corrected
+profile passes the captured request through actual hash-checked renderer dispatch
+loaders and native command submission. Full-engine user confirmation is pending. No rendered game frame yet. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now
