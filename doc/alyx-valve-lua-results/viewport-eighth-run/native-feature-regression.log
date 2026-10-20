@@ -1,0 +1,24 @@
+  [vk] explicit Vulkan dispatch library: /opt/homebrew/lib/libvulkan.1.dylib
+  [vk] Vulkan dispatch loaded — instance API 1.4.363
+  [vk] strict vkCreateDevice driver result=0
+  [vk] vkCreateDevice tracked, queue family 0
+profile=0 native-command-available=0
+  [vk] explicit Vulkan dispatch library: /opt/homebrew/lib/libvulkan.1.dylib
+  [vk] Vulkan dispatch loaded — instance API 1.4.363
+  [vk] Alyx compatibility: enabled real extendedDynamicState and sample-location state; caller features preserved
+  [vk] strict vkCreateDevice driver result=0
+  [vk] vkCreateDevice tracked, queue family 0
+  [vk] strict vkCreateDevice preflight result=-8
+  [vk] Alyx compatibility: enabled real extendedDynamicState and sample-location state; caller features preserved
+  [vk] strict vkCreateDevice driver result=0
+  [vk] vkCreateDevice tracked, queue family 0
+  [vk] Alyx compatibility: enabled real extendedDynamicState and sample-location state; caller features preserved
+[mvk-error] VK_ERROR_FEATURE_NOT_PRESENT: vkCreateDevice(): Requested physical device feature specified by the 11th flag in VkPhysicalDeviceExtendedDynamicState3FeaturesEXT is not available on this device.
+  [vk] strict vkCreateDevice driver result=-8
+  [vk] strict vkCreateDevice preflight result=-8
+  [vk] Alyx compatibility: enabled real extendedDynamicState and sample-location state; caller features preserved
+  [vk] strict vkCreateDevice driver result=0
+  [vk] vkCreateDevice tracked, queue family 0
+profile=1 native-command-available=1
+PASS: native sample-location enable/disable commands record, submit and complete
+PASS: existing EDS1/EDS3 feature chains preserved; unsupported color-write-mask requests still fail

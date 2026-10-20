@@ -18,11 +18,11 @@ also pass on both drivers. Private-memory ABI translation is now authorized;
 [actual Valve Lua and headless engine startup](macos-alyx-first-headset-check.md)
 pass their checkpoints. The first user run exposed an isolated-cache IPC-directory error; the launcher
 now preserves the native Monado socket directory, with regression checks passing.
-The seventh run passes font loading and stops at missing Panorama OpenSSL
-dependencies. The expanded isolated runtime now passes a106-ELF dependency audit
-and real Panorama/OpenSSL/ICU constructor/API checks, with font regressions green.
-Full-engine user confirmation and earlier command-buffer purge warnings remain
-pending. No rendered game frame
+The eighth run passes dependencies and faults on a worker viewport command.
+The explicit compatibility profile now enables supported EDS1 state; all12 real
+renderer command slots pass native record/submit tests. A rebuilt host awaits
+full-engine confirmation. The106-ELF dependency audit and Panorama/font checks
+remain green; earlier command-buffer purge warnings remain unresolved. No rendered game frame
 or FDM extension enable is verified. No installed-runtime change
 or full FDM implementation is included.
 

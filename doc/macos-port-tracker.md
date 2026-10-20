@@ -15,9 +15,9 @@ identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
 branch patch. Headless engine startup reaches xrizer. The first user headset run exposed a
 launcher cache/Monado socket conflict, now corrected with passing regression
 checks; see the [headset checkpoint](macos-alyx-first-headset-check.md).
-The seventh run passes fonts and stops at Panorama OpenSSL imports. The new
-isolated runtime closes the106-ELF dependency graph and passes real Panorama,
-OpenSSL and ICU API/constructor tests. Full-engine confirmation is pending;
+The eighth run passes dependencies and faults at a worker viewport command.
+The explicit supported-state profile now covers EDS1; all12 actual renderer
+slots pass native record/submit tests. Full-engine confirmation is pending;
 command-buffer purge warnings remain unresolved. No rendered game frame yet. No installed-runtime change
 or full FDM implementation is included.
 

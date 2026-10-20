@@ -420,6 +420,47 @@ Full-engine progression, first-frame/stereo correctness and the earlier
 command-buffer purge warnings remain unverified or unresolved. No installed
 Monado/runtime/Steam authentication change or FDM implementation is included.
 
+## Eighth user result: worker-thread viewport dispatch fault
+
+The eighth run passes dependency checks and progresses into a Vulkan worker.
+It faults with SIGSEGV at PC0, renderer return VA0x26d374 (about1.81seconds after
+launch). The dispatch slot0xa52788, assigned by the renderer's generated loader
+at0x2cddc0, is `vkCmdSetViewportWithCountEXT`. Fontconfig's earlier warnings are
+not the identified fatal event; correctness of game-specific font configuration
+still needs visual validation. The recorded exit245 is the backend Python
+process's modulo256 representation of a -11 child return, not a Vulkan VkResult.
+The earlier null sample-location slot is now resolved.
+
+The broad engine state3-disable option also removes EDS1 from the incoming
+request, despite the renderer using viewport/scissor dynamic commands.
+Klepton signed commit `44985ec` extends the **explicit** compatibility profile:
+query real support and add VK_EXT_extended_dynamic_state plus extendedDynamicState
+alongside the existing supported sample-location state. It reserves extension
+space for all additions, avoids duplicate structs, preserves caller chains/bits,
+and fails explicitly on missing support or incompatible existing feature structs.
+It does not enable unsupported ColorWriteMask or advertise a new driver feature.
+The historical KL_VK_SAMPLE_LOCATIONS_COMPAT setting now controls both supported
+state groups needed by this engine fallback. Default non-profile strict dispatch
+remains unchanged.
+
+VeRantyx signed test commit `9651574` expands the hash-checked actual-renderer
+harness to all12 EDS1 command slots. The eighth-run original device request
+matches its fifth-run capture exactly for extensions, features and queues.
+With compatibility off, all12 slots are NULL. With it on, every slot equals the
+native driver's function. Commands through those real slots record viewport and
+scissor counts1/2/1, culling/front-face/topology, depth/stencil states and vertex
+buffer binding with real allocated memory, then submit and complete. The existing
+sample-location commands remain covered. This exercises recording/submission;
+it does not test a graphics pipeline consuming those states or a rendered image.
+
+The separate native regression verifies existing EDS1/EDS3 chains are preserved,
+false requested enable fields are not rewritten, and unsupported ColorWriteMask
+requests still fail. The unchanged strict fake-driver and launcher dry-run tests
+pass. Focused evidence is in `alyx-valve-lua-results/viewport-eighth-run/`.
+The constrained host is rebuilt and the ninth-command dry-run is ready. Full
+engine progression, first-frame/stereo correctness, game font mappings and the
+earlier command-buffer purge warnings remain unverified or unresolved.
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -430,7 +471,7 @@ cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-runtime \
-  --output /private/tmp/alyx-monado-eighth \
+  --output /private/tmp/alyx-monado-ninth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -442,7 +483,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-eighth/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-ninth/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.

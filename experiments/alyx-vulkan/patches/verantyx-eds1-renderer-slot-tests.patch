@@ -1,0 +1,100 @@
+From 9651574f2fdc45743500b5ba45c88b258537fcca Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Tue, 20 Oct 2026 09:52:34 +0200
+Subject: [PATCH] tests: exercise every EDS1 command through actual renderer
+ dispatch slots
+
+Signed-off-by: Nick Kennedy <nick@nick-kennedy.com>
+---
+ NativeARM/host/tests/valve_vulkan_dispatch.c | 55 +++++++++++++++++++-
+ 1 file changed, 54 insertions(+), 1 deletion(-)
+
+diff --git a/NativeARM/host/tests/valve_vulkan_dispatch.c b/NativeARM/host/tests/valve_vulkan_dispatch.c
+index 0fb1a0a..0c83336 100644
+--- a/NativeARM/host/tests/valve_vulkan_dispatch.c
++++ b/NativeARM/host/tests/valve_vulkan_dispatch.c
+@@ -28,6 +28,20 @@ static void check_renderer(const char *path) {
+     char text[65];for(unsigned i=0;i<sizeof hash;i++)sprintf(text+2*i,"%02x",hash[i]);
+     assert(!strcmp(text,"02edbf8f2040cd8a3103038583447865ca7d34f36f13daacab9d4d194cb9d04d"));
+ }
++static const struct { const char *name; size_t slot; } state1_commands[] = {
++    {"vkCmdBindVertexBuffers2EXT",0xa52730}, {"vkCmdSetCullModeEXT",0xa52738},
++    {"vkCmdSetDepthBoundsTestEnableEXT",0xa52740}, {"vkCmdSetDepthCompareOpEXT",0xa52748},
++    {"vkCmdSetDepthTestEnableEXT",0xa52750}, {"vkCmdSetDepthWriteEnableEXT",0xa52758},
++    {"vkCmdSetFrontFaceEXT",0xa52760}, {"vkCmdSetPrimitiveTopologyEXT",0xa52768},
++    {"vkCmdSetScissorWithCountEXT",0xa52770}, {"vkCmdSetStencilOpEXT",0xa52778},
++    {"vkCmdSetStencilTestEnableEXT",0xa52780}, {"vkCmdSetViewportWithCountEXT",0xa52788},
++};
++static PFN_vkVoidFunction renderer_command(char *base,const char *name) {
++    for(unsigned i=0;i<sizeof state1_commands/sizeof state1_commands[0];i++)
++        if(!strcmp(name,state1_commands[i].name))
++            return *(PFN_vkVoidFunction*)(base+state1_commands[i].slot);
++    abort();
++}
+ int main(int argc,char **argv) {
+     assert(argc==3);int expected=atoi(argv[2]);
+     setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);
+@@ -66,6 +80,12 @@ int main(int argc,char **argv) {
+     printf("VALVE-DISPATCH profile=%d real-slot-available=%d\n",expected,sample!=NULL);
+     assert((sample!=NULL)==expected);
+     assert(sample==(PFN_vkCmdSetSampleLocationsEnableEXT)gdpa(device,"vkCmdSetSampleLocationsEnableEXT"));
++    for(unsigned i=0;i<sizeof state1_commands/sizeof state1_commands[0];i++) {
++        PFN_vkVoidFunction fn=renderer_command(base,state1_commands[i].name);
++        printf("VALVE-DISPATCH %s available=%d\n",state1_commands[i].name,fn!=NULL);
++        assert((fn!=NULL)==expected);
++        assert(fn==gdpa(device,state1_commands[i].name));
++    }
+     if(sample) {
+         VkCommandPoolCreateInfo pc={.sType=VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};VkCommandPool pool;
+         assert(((PFN_vkCreateCommandPool)gdpa(device,"vkCreateCommandPool"))(device,&pc,0,&pool)==VK_SUCCESS);
+@@ -75,13 +95,46 @@ int main(int argc,char **argv) {
+         VkCommandBufferBeginInfo bc={.sType=VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+         assert(((PFN_vkBeginCommandBuffer)gdpa(device,"vkBeginCommandBuffer"))(command,&bc)==VK_SUCCESS);
+         sample(command,VK_FALSE);sample(command,VK_TRUE);sample(command,VK_FALSE);
++#define STATE(name,...) ((PFN_##name)renderer_command(base,#name))(command,__VA_ARGS__)
++        VkViewport viewports[2]={{0,0,16,16,0,1},{16,0,16,16,0,1}};
++        VkRect2D scissors[2]={{{0,0},{16,16}},{{16,0},{16,16}}};
++        const uint32_t counts[]={1,2,1};
++        for(unsigned i=0;i<3;i++) {
++            STATE(vkCmdSetViewportWithCountEXT,counts[i],viewports);
++            STATE(vkCmdSetScissorWithCountEXT,counts[i],scissors);
++        }
++        STATE(vkCmdSetCullModeEXT,VK_CULL_MODE_NONE);
++        STATE(vkCmdSetFrontFaceEXT,VK_FRONT_FACE_COUNTER_CLOCKWISE);
++        STATE(vkCmdSetPrimitiveTopologyEXT,VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
++        STATE(vkCmdSetDepthBoundsTestEnableEXT,VK_FALSE);
++        STATE(vkCmdSetDepthCompareOpEXT,VK_COMPARE_OP_ALWAYS);
++        STATE(vkCmdSetDepthTestEnableEXT,VK_FALSE);
++        STATE(vkCmdSetDepthWriteEnableEXT,VK_FALSE);
++        STATE(vkCmdSetStencilTestEnableEXT,VK_FALSE);
++        STATE(vkCmdSetStencilOpEXT,VK_STENCIL_FACE_FRONT_AND_BACK,VK_STENCIL_OP_KEEP,
++              VK_STENCIL_OP_KEEP,VK_STENCIL_OP_KEEP,VK_COMPARE_OP_ALWAYS);
++        VkBufferCreateInfo bi={.sType=VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
++            .size=64,.usage=VK_BUFFER_USAGE_VERTEX_BUFFER_BIT};VkBuffer buffer;
++        assert(((PFN_vkCreateBuffer)gdpa(device,"vkCreateBuffer"))(device,&bi,0,&buffer)==VK_SUCCESS);
++        VkMemoryRequirements mr;
++        ((PFN_vkGetBufferMemoryRequirements)gdpa(device,"vkGetBufferMemoryRequirements"))(device,buffer,&mr);
++        uint32_t type=0;while(type<32 && !(mr.memoryTypeBits&(1u<<type)))type++;assert(type<32);
++        VkMemoryAllocateInfo ai={.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
++            .allocationSize=mr.size,.memoryTypeIndex=type};VkDeviceMemory memory;
++        assert(((PFN_vkAllocateMemory)gdpa(device,"vkAllocateMemory"))(device,&ai,0,&memory)==VK_SUCCESS);
++        assert(((PFN_vkBindBufferMemory)gdpa(device,"vkBindBufferMemory"))(device,buffer,memory,0)==VK_SUCCESS);
++        VkDeviceSize offset=0,size=16,stride=4;
++        STATE(vkCmdBindVertexBuffers2EXT,0,1,&buffer,&offset,&size,&stride);
++#undef STATE
+         assert(((PFN_vkEndCommandBuffer)gdpa(device,"vkEndCommandBuffer"))(command)==VK_SUCCESS);
+         VkQueue queue;((PFN_vkGetDeviceQueue)gdpa(device,"vkGetDeviceQueue"))(device,0,0,&queue);
+         VkSubmitInfo submit={.sType=VK_STRUCTURE_TYPE_SUBMIT_INFO,.commandBufferCount=1,.pCommandBuffers=&command};
+         assert(((PFN_vkQueueSubmit)gdpa(device,"vkQueueSubmit"))(queue,1,&submit,VK_NULL_HANDLE)==VK_SUCCESS);
+         assert(((PFN_vkQueueWaitIdle)gdpa(device,"vkQueueWaitIdle"))(queue)==VK_SUCCESS);
+         ((PFN_vkDestroyCommandPool)gdpa(device,"vkDestroyCommandPool"))(device,pool,0);
+-        puts("VALVE-DISPATCH PASS: actual renderer slot commands record, submit and complete");
++        ((PFN_vkDestroyBuffer)gdpa(device,"vkDestroyBuffer"))(device,buffer,0);
++        ((PFN_vkFreeMemory)gdpa(device,"vkFreeMemory"))(device,memory,0);
++        puts("VALVE-DISPATCH PASS: all 12 real EDS1 slots plus sample-location commands record, submit and complete");
+     }
+     ((PFN_vkDestroyDevice)gdpa(device,"vkDestroyDevice"))(device,0);
+     ((PFN_vkDestroyInstance)gipa(instance,"vkDestroyInstance"))(instance,0);
+-- 
+2.54.0 (Apple Git-157)
+
