@@ -133,6 +133,55 @@ Focused user-request and fixture evidence is retained in
 `alyx-valve-lua-results/device-create-second-run/`. A third user run is needed
 to observe the actual Alyx device failure code and feature request.
 
+## Third user result: exact unsupported feature and engine fallback
+
+Alyx's actual request returns `VK_ERROR_FEATURE_NOT_PRESENT` (-8).
+Decoding all core and six extension-structure feature payloads against the
+Vulkan registry, then querying MoltenVK in a standalone reproduction, finds
+exactly one requested-but-unsupported field:
+`VkPhysicalDeviceExtendedDynamicState3FeaturesEXT.extendedDynamicState3ColorWriteMask`.
+The other enabled field in that structure is
+`extendedDynamicState3SampleLocationsEnable`, which is supported.
+
+On Apple M5 / MoltenVK1.4.2 (driverVersion10402), both Vulkan1.2 and1.3 standalone
+runs reproduce the captured request's -8. Clearing only ColorWriteMask in the
+standalone fixture succeeds. Omitting the entire state3 structure and extension,
+modelling the engine's disabled-extension path, also succeeds. These are native
+device tests, with no game, Steam, Monado or headset loaded. The per-feature
+comparison and fixtures are retained in `alyx-valve-lua-results/device-create-third-run/`.
+The earlier diagnostic's hand-written compact fixture initially used the wrong
+second enabled field; it was corrected to SampleLocationsEnable before committing
+and the corrected fixture passes both versions. The registry-driven comparison
+identified ColorWriteMask correctly throughout.
+
+Read-only inspection of the owner's renderer confirms an existing engine option
+`-vulkan_disable_ext_dynamic_state_3`: the CommandLine query conditionally skips
+the extension-enable path. Original and cloned renderer hashes still match the
+original static audit. No binary or Vulkan feature query is patched.
+
+VeRantyx signed commit `eb01bb2` adds that engine option by default for MoltenVK.
+`--extended-dynamic-state3 enabled` restores the original request for diagnosis;
+`disabled` applies the same fallback to either driver, while default `auto` leaves
+KosmicKrisp unchanged. The launch manifest records the effective choice. Controlled
+driver comparisons must explicitly select the same engine policy. Existing strict
+dispatch still preserves feature requests and errors; no clamping or retry is used.
+Launcher dry-run regression covers default MoltenVK fallback, explicit enable,
+KosmicKrisp auto and explicit disable across all three runtime-directory cases.
+All pass; the real launch dry-run preserves native IPC discovery and enables the
+engine option. Runtime confirmation that Alyx takes this fallback, plus any
+subsequent rendering failures, still requires the next user run.
+
+Standalone reproduction (the first invocation uses Vulkan1.3; add any argument
+for Vulkan1.2):
+
+```sh
+clang -I/opt/homebrew/include -L/opt/homebrew/lib \
+  /private/tmp/alyx-verantyx/NativeARM/host/tests/alyx_device_request.c \
+  -lvulkan -o /private/tmp/alyx-device-request-test
+VK_DRIVER_FILES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json \
+  /private/tmp/alyx-device-request-test
+```
+
 ## Next user test
 
 Native macOS Steam must be running and signed in to the account that owns Alyx.
@@ -143,7 +192,7 @@ cd /private/tmp/alyx-verantyx
 python3 NativeARM/scripts/launch_xrizer.py \
   --root /private/tmp/alyx-native-game-root \
   --libs /private/tmp/alyx-native-guest-libs-ready \
-  --output /private/tmp/alyx-monado-third \
+  --output /private/tmp/alyx-monado-fourth \
   --runtime-json /Users/nickkennedy/Code/monado-2/build/arm64/openxr_monado-dev.json \
   --timeout 120
 ```
@@ -155,7 +204,7 @@ also stops that group. No `-noasserts`/`-nopassiveasserts` flags are supplied.
 
 Report whether it reaches the menu, whether both eyes display correctly, and
 any visible/stated error. Logs and selected-driver census are under
-`/private/tmp/alyx-monado-third/backend/`; launch metadata also hashes the host,
+`/private/tmp/alyx-monado-fourth/backend/`; launch metadata also hashes the host,
 xrizer, OpenXR loader, engine and selected Monado client library. An exit status
 of0 alone does not establish success: the engine used0 for its deliberate
 VR-init failure in the headless test.

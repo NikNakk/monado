@@ -15,8 +15,10 @@ identifies CPU-generated FDM, per-eye offsets and a route to replace the Lua
 branch patch. Headless engine startup reaches xrizer. The first user headset run exposed a
 launcher cache/Monado socket conflict, now corrected with passing regression
 checks; see the [headset checkpoint](macos-alyx-first-headset-check.md).
-The repeat run reaches Alyx vkCreateDevice but fails. Exact feature/error
-diagnostics are built for the next user run; no rendered game frame yet. No installed-runtime change
+The third run identifies an unsupported dynamic color-write-mask feature. The
+launcher now selects Alyx's built-in dynamic-state3 fallback for MoltenVK; native
+reproductions pass, but the next user run must confirm engine behaviour. No
+rendered game frame yet. No installed-runtime change
 or full FDM implementation is included.
 
 The [graphics integration review](macos-graphics-integration-review.md) is now

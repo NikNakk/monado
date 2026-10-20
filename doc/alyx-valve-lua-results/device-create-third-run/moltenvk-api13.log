@@ -1,0 +1,6 @@
+instance=0 api=4206592
+device=Apple M5 driverVersion=10402
+sampleLocationsEnable=1 colorWriteMask=0
+original-request=-8
+only-color-write-mask-disabled=0
+engine-fallback-request-model=0
