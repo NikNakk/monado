@@ -108,3 +108,64 @@ Next steps:
 - Find which passes take the GPU time.
 - Run a controlled FDM on/off comparison at a fixed fidelity level and a lower
   render size.
+
+## Frame-rate investigation — 22 October 2026
+
+Tools are in [`kosmickrisp-fdm/perf`](../experiments/alyx-vulkan/kosmickrisp-fdm/perf).
+`memsample.py` samples free, wired and compressed memory, pageouts, swap, the
+GPU driver's `PerformanceStatistics` (allocated and in-use memory, utilisation,
+split scenes) and Alyx's footprint every 2 s. `headset-profile-run` adds that,
+plus optional Metal System Traces, to a headset run. Mesa `e9a3c7e` (patch 0006)
+adds `KK_LABEL_PASSES`, `KK_ENCODER_STATS` and logging of Metal command queue
+errors.
+
+### With Alyx's Deckard fidelity table
+
+Alyx loads `vr_fidelity_levels_deckard.csv`. On the PSVR2 it renders 2184×2227
+(2× MSAA) to 3360×3427 (4× MSAA) per eye, and is GPU bound at about 95%.
+
+| Time | Free | Compressed | Pageouts | GPU allocated | Alyx footprint | GPU busy |
+|---|---|---|---|---|---|---|
+| 8 s | 1.8 GB | 1.5 GB | 366k | 6.1 GB | 5.4 GB | 99% |
+| 34 s | 78 MB | 1.4 GB | 366k | 7.1 GB | 6.3 GB | 97% |
+| 63 s | 47 MB | 6.7 GB | 485k | 8.1 GB | 10.2 GB | 81% |
+
+The 24 GB machine runs out of memory and pages. Both profiled runs then crashed
+with `MTL_COMMAND_QUEUE_ERROR_TIMEOUT` (device lost; xrizer panics afterwards).
+Even at level 0, GPU time was 130–140 ms per frame.
+
+A Metal trace of Alyx's process put compute at 79% of its GPU time, fragment at
+16% and vertex at 5%, which is why FDM made no difference there. No compute
+encoder ended a render pass. Most compute encoders come from KK's built-in
+kernels (query reset and copy, predicated draws) and from copies; Alyx's own
+dispatches are rare. In a desktop trace the built-in kernels averaged about
+0.4 ms each, and every KK encoder ends with a full GPU barrier. Instruments did
+not associate most render-pass intervals with their labels, so a complete
+per-pass breakdown was not possible.
+
+### With a low-resolution override table
+
+Alyx reads `game/hlvr/vr_fidelity_levels_override.csv` when it exists. The
+[override used](../experiments/alyx-vulkan/kosmickrisp-fdm/perf/vr_fidelity_levels_override.csv)
+has scales 0.25–0.6 and 2× MSAA. These are paired unattended 300 s runs on the
+static menu: fixed level 5 (1344×1344 render area in 1680×1713 targets),
+`XRT_MACOS_EXIT_ON_DISPLAY_LOSS=0`, with
+`claude-headset-lowres-off-2` (`+vr_fdm 0`) against `claude-headset-lowres-fdm-2`
+(`fdm,fdm_rate`, `+vr_fdm 1 +vr_render_subsampled_depth 1`).
+
+| Steady 40–290 s | FDM off | Rate-mapped FDM |
+|---|---:|---:|
+| Frame rate | 29.9 fps | 33.7 fps |
+| GPU time, median / p90 | 25.7 / 32.3 ms | **19.1** / 26.7 ms |
+| Frame interval, median / p99 | 33.3 / 52.2 ms | 31.2 / 50.5 ms |
+| Alyx footprint / GPU allocation | 4.4 / 4.6 GB | 4.5 / 4.7 GB |
+| Paging, swap growth | none | none |
+
+All 53,248 FDM passes were rate mapped. FDM cuts median GPU time by 26%. In both
+runs GPU time on the static scene rises over the first three minutes (20 to
+29 ms off, 16 to 24 ms on), possibly thermal throttling on this fanless machine;
+this was not confirmed. The frame interval is about 4× the 8.33 ms display period.
+
+Unattended runs need `XRT_MACOS_EXIT_ON_DISPLAY_LOSS=0`: with nobody wearing it,
+the PSVR2 display turns off, and the service otherwise exits. The headset wrapper
+now lets environment variables override the LaunchAgent's PSVR2 settings.

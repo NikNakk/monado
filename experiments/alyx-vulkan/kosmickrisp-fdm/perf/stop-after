@@ -1,0 +1,10 @@
+#!/bin/sh
+# usage: stop-after SECONDS RUN_NAME   (Ctrl+C the headset wrapper of that run)
+set -eu
+perl -e "select(undef,undef,undef,$1)"
+p=$(pgrep -f "with-matching-monado-headset.py.*$2" | head -1 || true)
+[ -n "$p" ] && kill -INT "$p"
+for i in $(seq 1 60); do
+  pgrep -x monado-service >/dev/null || pgrep -x alyx_host >/dev/null || exit 0
+  perl -e 'select(undef,undef,undef,1)'
+done

@@ -1,0 +1,34 @@
+#!/bin/sh
+# Headset run with memory sampling and two short Metal System Traces.
+# usage: headset-profile-run OUTPUT_NAME [game args...]
+# Uses MESA_KK_EXPERIMENTAL from the environment (default fdm,fdm_rate).
+set -eu
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
+name=$1; shift
+out="$base/runs/$name"
+export MESA_KK_EXPERIMENTAL=${MESA_KK_EXPERIMENTAL-fdm,fdm_rate}
+export KK_LABEL_PASSES=1
+"$here/../headset/run-alyx-kk-headset" --output "$out" --timeout 300 -- "$@" \
+  > "$out.launcher.txt" 2>&1 &
+launcher=$!
+python3 "$here/memsample.py" "$out.memory.csv" --interval 2 &
+sampler=$!
+pid=
+for i in $(seq 1 120); do
+  pid=$(pgrep -x alyx_host | head -1 || true)
+  [ -n "$pid" ] && break
+  sleep 1
+done
+start=$(date +%s)
+for at in ${PROFILE_TRACE_AT:-30 60}; do
+  while [ $(( $(date +%s) - start )) -lt $at ]; do
+    kill -0 "$pid" 2>/dev/null || break 2
+    sleep 2
+  done
+  xcrun xctrace record --template 'Metal System Trace' --attach "$pid" \
+    --time-limit 15s --output "$out.metal-$at.trace" > "$out.metal-$at.log" 2>&1 || true
+done
+wait "$launcher" || true
+kill "$sampler" 2>/dev/null || true
+echo "done: $out"

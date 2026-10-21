@@ -98,7 +98,7 @@ def main():
         installed = plistlib.loads(agent.read_bytes()).get('EnvironmentVariables', {})
         installed = {k: v for k, v in installed.items()
                      if not k.startswith('IPC_EXIT_WHEN_IDLE')}
-        env.update(installed)
+        env.update({k: v for k, v in installed.items() if k not in os.environ})
         env.update(SIMULATED_ENABLE='0', SIMULATED_DESKTOP='0', QWERTY_ENABLE='0',
                    XRT_COMPOSITOR_FORCE_DEBUG_IMAGE='0')
         running = subprocess.run(['pgrep', '-x', 'monado-service'], capture_output=True)

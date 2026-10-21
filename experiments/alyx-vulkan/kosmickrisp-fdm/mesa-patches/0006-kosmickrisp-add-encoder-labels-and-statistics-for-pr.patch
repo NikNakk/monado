@@ -1,0 +1,193 @@
+From e9a3c7e982290e5698d1cef5975b6f97293c9303 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Thu, 22 Oct 2026 00:21:59 +0100
+Subject: [PATCH] kosmickrisp: add encoder labels and statistics for profiling
+
+KK_LABEL_PASSES=1 labels render encoders with their attachments, render
+area, view mask and whether a rate map is applied, and labels compute
+encoders with the function that opened them. KK_ENCODER_STATS=1 counts
+new encoders by source and how many ended a render pass. Command queue
+errors are now always logged before the device is marked lost.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c | 90 +++++++++++++++++++++++++-
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h |  3 +-
+ src/kosmickrisp/vulkan/kk_queue.c      |  4 ++
+ 3 files changed, 95 insertions(+), 2 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index 22f4bf7..0a2c7eb 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -20,6 +20,9 @@
+ #include "kosmickrisp/bridge/mtl_encoder.h"
+ #include "kosmickrisp/bridge/vk_to_mtl_map.h"
+ 
++#include "util/u_debug.h"
++#include "util/log.h"
++#include "util/simple_mtx.h"
+ #include "vk_alloc.h"
+ #include "vk_common_entrypoints.h"
+ #include "vk_format.h"
+@@ -257,6 +260,50 @@ kk_encoder_update_debug(struct kk_cmd_buffer *cmd, mtl_command_encoder *encoder)
+       mtl_encoder_push_debug_group(encoder, label->pLabelName);
+ }
+ 
++static void kk_encoder_stat(const char *what, bool broke_render);
++
++static bool
++kk_label_passes(void)
++{
++   static int enabled = -1;
++   if (enabled < 0)
++      enabled = debug_get_bool_option("KK_LABEL_PASSES", false);
++   return enabled;
++}
++
++static void
++kk_label_render_encoder(struct kk_cmd_buffer *cmd)
++{
++   const struct kk_rendering_state *render = &cmd->state.gfx.render;
++   char label[192];
++   int n = 0;
++   const struct kk_image_view *first = NULL;
++   for (uint32_t i = 0; i < render->color_att_count && !first; i++)
++      first = render->color_att[i].iview;
++   if (!first)
++      first = render->depth_att.iview ?: render->stencil_att.iview;
++   if (first)
++      n += snprintf(label + n, sizeof(label) - n, "rp %ux%u s%u",
++                    first->vk.image->extent.width, first->vk.image->extent.height,
++                    first->vk.image->samples);
++   else
++      n += snprintf(label + n, sizeof(label) - n, "rp noatt");
++   n += snprintf(label + n, sizeof(label) - n, " area %ux%u c%u",
++                 render->area.extent.width, render->area.extent.height,
++                 render->color_att_count);
++   for (uint32_t i = 0; i < render->color_att_count && n < (int)sizeof(label) - 16; i++)
++      if (render->color_att[i].iview)
++         n += snprintf(label + n, sizeof(label) - n, " f%d%s",
++                       render->color_att[i].iview->vk.format,
++                       render->color_att[i].resolve_mode ? "r" : "");
++   if (render->depth_att.iview)
++      n += snprintf(label + n, sizeof(label) - n, " d%d",
++                    render->depth_att.iview->vk.format);
++   snprintf(label + n, sizeof(label) - n, " v%x%s", render->view_mask,
++            cmd->state.gfx.fdm.density ? " fdm" : "");
++   mtl_encoder_set_label(cmd->metal.render, label);
++}
++
+ void
+ cs_start_render(struct kk_cmd_buffer *cmd)
+ {
+@@ -269,8 +316,11 @@ cs_start_render(struct kk_cmd_buffer *cmd)
+ 
+    cmd->metal.render = mtl_new_render_command_encoder_with_descriptor(
+       cmd->metal.cmd_buf, state->render_pass_descriptor);
++   kk_encoder_stat(state->need_to_start_render_pass ? "render restart" : "render", false);
+ 
+    kk_encoder_update_debug(cmd, cmd->metal.render);
++   if (kk_label_passes())
++      kk_label_render_encoder(cmd);
+    /* Starting a new render pass means we already flushed and no barrier is
+     * needed. */
+    state->render.write_available = false;
+@@ -310,9 +360,45 @@ cs_get_render(struct kk_cmd_buffer *cmd)
+    return cmd->metal.render;
+ }
+ 
++static void
++kk_encoder_stat(const char *what, bool broke_render)
++{
++   static int enabled = -1;
++   if (enabled < 0)
++      enabled = debug_get_bool_option("KK_ENCODER_STATS", false);
++   if (!enabled)
++      return;
++   static simple_mtx_t lock = SIMPLE_MTX_INITIALIZER;
++   static struct {
++      const char *what;
++      uint64_t count, broke;
++   } stats[32];
++   static uint32_t stat_count;
++   static uint64_t total;
++   simple_mtx_lock(&lock);
++   uint32_t i;
++   for (i = 0; i < stat_count && stats[i].what != what; i++)
++      ;
++   if (i == stat_count && stat_count < ARRAY_SIZE(stats))
++      stats[stat_count++].what = what;
++   if (i < stat_count) {
++      stats[i].count++;
++      stats[i].broke += broke_render;
++   }
++   if ((++total % 20000) == 0) {
++      for (uint32_t j = 0; j < stat_count; j++)
++         mesa_logi("kk-encoders: %s: %llu new, %llu ended a render pass", stats[j].what,
++                   (unsigned long long)stats[j].count,
++                   (unsigned long long)stats[j].broke);
++   }
++   simple_mtx_unlock(&lock);
++}
++
+ mtl_compute_encoder *
+-cs_get_compute(struct kk_cmd_buffer *cmd)
++cs_get_compute_from(struct kk_cmd_buffer *cmd, const char *caller)
+ {
++   if (cmd->metal.compute == NULL)
++      kk_encoder_stat(caller, cmd->metal.render != NULL);
+    /* If we are inside render, we need to force a restart later */
+    if (cmd->metal.render) {
+       kk_apply_attachment_store_ops(cmd, true);
+@@ -325,6 +411,8 @@ cs_get_compute(struct kk_cmd_buffer *cmd)
+       cmd->metal.compute = mtl_new_compute_command_encoder(cmd->metal.cmd_buf);
+       mtl_compute_set_argument_table(cmd->metal.compute, cmd->argument_table);
+       kk_encoder_update_debug(cmd, cmd->metal.compute);
++      if (kk_label_passes())
++         mtl_encoder_set_label(cmd->metal.compute, caller);
+    }
+ 
+    return cmd->metal.compute;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index 60352fb..379ad3a 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -319,7 +319,8 @@ kk_get_descriptors_state(struct kk_cmd_buffer *cmd,
+ 
+ void cs_start_render(struct kk_cmd_buffer *cmd);
+ mtl_render_encoder *cs_get_render(struct kk_cmd_buffer *cmd);
+-mtl_compute_encoder *cs_get_compute(struct kk_cmd_buffer *cmd);
++mtl_compute_encoder *cs_get_compute_from(struct kk_cmd_buffer *cmd, const char *caller);
++#define cs_get_compute(cmd) cs_get_compute_from(cmd, __func__)
+ void cs_end(struct kk_cmd_buffer *cmd);
+ void kk_cmd_bind_root_to_argument_table(struct kk_cmd_buffer *cmd,
+                                         uint64_t addr);
+diff --git a/src/kosmickrisp/vulkan/kk_queue.c b/src/kosmickrisp/vulkan/kk_queue.c
+index 5509318..9c9db0c 100644
+--- a/src/kosmickrisp/vulkan/kk_queue.c
++++ b/src/kosmickrisp/vulkan/kk_queue.c
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include "kk_queue.h"
++#include "util/log.h"
+ #include "kk_buffer.h"
+ #include "kk_cmd_buffer.h"
+ #include "kk_device.h"
+@@ -44,6 +45,9 @@ static void
+ check_device_lost(struct kk_device *dev, struct mtl_feedback_data *data)
+ {
+    if (data->error != MTL_COMMAND_QUEUE_ERROR_NONE) {
++      mesa_loge("kk: command queue error %s: %s",
++                mtl_command_queue_error_to_string(data->error),
++                data->error_message ? data->error_message : "(no message)");
+       vk_device_set_lost(
+          &dev->vk, "Command queue error: %s, with message \"%s\"",
+          mtl_command_queue_error_to_string(data->error), data->error_message);
+-- 
+2.54.0 (Apple Git-157)
+
