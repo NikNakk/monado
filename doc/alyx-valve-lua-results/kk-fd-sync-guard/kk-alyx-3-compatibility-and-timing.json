@@ -1,0 +1,224 @@
+{
+  "user_observation": "That worked. Subjectively performance worse than MVK.",
+  "run": "kk-alyx-3",
+  "exit_code": 130,
+  "elapsed_seconds": 147.78263592720032,
+  "device_creation_results": [
+    "0"
+  ],
+  "comparisons": {
+    "kk-alyx-3": {
+      "measurement": "API wall durations, including blocking; not CPU busy, GPU execution, or presentation latency",
+      "window_seconds": [
+        90,
+        115
+      ],
+      "api_wall": {
+        "handoff": {
+          "count": 928,
+          "median_ms": 0.1158335,
+          "p95_ms": 0.2813999,
+          "p99_ms": 2.2911501600000057
+        },
+        "submit:eye0": {
+          "count": 928,
+          "median_ms": 0.02675,
+          "p95_ms": 0.05694155,
+          "p99_ms": 0.08297584000000002
+        },
+        "submit:eye1": {
+          "count": 928,
+          "median_ms": 0.078375,
+          "p95_ms": 0.21328749999999988,
+          "p99_ms": 0.9649831800000013
+        },
+        "wait_poses": {
+          "count": 929,
+          "median_ms": 10.473042,
+          "p95_ms": 32.09933319999995,
+          "p99_ms": 75.94081500000004
+        },
+        "xr_acquire_image": {
+          "count": 929,
+          "median_ms": 0.098792,
+          "p95_ms": 0.14936659999999985,
+          "p99_ms": 0.29058976000000014
+        },
+        "xr_begin_frame": {
+          "count": 929,
+          "median_ms": 0.030625,
+          "p95_ms": 0.078583,
+          "p99_ms": 0.11786196000000002
+        },
+        "xr_end_frame": {
+          "count": 928,
+          "median_ms": 0.109625,
+          "p95_ms": 0.26588915,
+          "p99_ms": 2.284080110000006
+        },
+        "xr_locate_views_view": {
+          "count": 929,
+          "median_ms": 0.086333,
+          "p95_ms": 0.108167,
+          "p99_ms": 0.11835024000000008
+        },
+        "xr_locate_views_world": {
+          "count": 929,
+          "median_ms": 0.074792,
+          "p95_ms": 0.0925252,
+          "p99_ms": 0.10549452
+        },
+        "xr_release_image": {
+          "count": 928,
+          "median_ms": 0.037604,
+          "p95_ms": 0.1283080999999999,
+          "p99_ms": 0.8980960900000009
+        },
+        "xr_wait_frame": {
+          "count": 929,
+          "median_ms": 10.165875,
+          "p95_ms": 31.791499999999942,
+          "p99_ms": 75.72349024000003
+        },
+        "xr_wait_image": {
+          "count": 929,
+          "median_ms": 0.000167,
+          "p95_ms": 0.000416,
+          "p99_ms": 0.0007677600000000023
+        }
+      },
+      "caution": "nested handoff may be included in wait_poses; do not sum these durations",
+      "wait_poses_start_interval": {
+        "count": 928,
+        "median_ms": 17.09302100000798,
+        "p95_ms": 53.359948149999056,
+        "p99_ms": 214.3216236599974
+      },
+      "application_gpu_clock_interval": {
+        "count": 929,
+        "median_ms": 13.49475,
+        "p95_ms": 21.10109279999998,
+        "p99_ms": 107.654016800001
+      },
+      "feedback_join": {
+        "records": 53,
+        "mismatches_at_001ms_rounding": 0
+      },
+      "first_logged_completed_gpu_frame_after_last_loading_end_api_seconds": 57.050375708,
+      "custom_resolve_path_logged": false,
+      "limitations": [
+        "Historic runs, not paired experimental control. Scene/movement, shader caches and thermal state uncontrolled.",
+        "Same requested fidelity 0; actual settled fidelity/render resolution not established.",
+        "GPU clock interval includes waits and idle gaps; does not measure GPU busy time or full compositor cost.",
+        "Frame-ID join used for GPU/API CSVs; timestamps have different epochs. Wall-clock logs not normalized to launcher Unix epoch."
+      ]
+    },
+    "gpu-timing-fixed0-1": {
+      "measurement": "API wall durations, including blocking; not CPU busy, GPU execution, or presentation latency",
+      "window_seconds": [
+        90,
+        115
+      ],
+      "api_wall": {
+        "handoff": {
+          "count": 1495,
+          "median_ms": 0.1555,
+          "p95_ms": 0.26665449999999996,
+          "p99_ms": 0.49653105999999975
+        },
+        "submit:eye0": {
+          "count": 1495,
+          "median_ms": 0.03675,
+          "p95_ms": 0.0562998,
+          "p99_ms": 0.07917104
+        },
+        "submit:eye1": {
+          "count": 1495,
+          "median_ms": 0.079875,
+          "p95_ms": 0.1405252,
+          "p99_ms": 0.21763099999999957
+        },
+        "wait_poses": {
+          "count": 1495,
+          "median_ms": 9.79475,
+          "p95_ms": 12.4142206,
+          "p99_ms": 13.466259999999998
+        },
+        "xr_acquire_image": {
+          "count": 1495,
+          "median_ms": 0.094167,
+          "p95_ms": 0.14862939999999997,
+          "p99_ms": 0.3678464399999998
+        },
+        "xr_begin_frame": {
+          "count": 1495,
+          "median_ms": 0.035208,
+          "p95_ms": 0.0714002,
+          "p99_ms": 0.09627607999999979
+        },
+        "xr_end_frame": {
+          "count": 1495,
+          "median_ms": 0.147583,
+          "p95_ms": 0.25722049999999996,
+          "p99_ms": 0.48501753999999975
+        },
+        "xr_locate_views_view": {
+          "count": 1495,
+          "median_ms": 0.085875,
+          "p95_ms": 0.1012083,
+          "p99_ms": 0.12020497999999992
+        },
+        "xr_locate_views_world": {
+          "count": 1495,
+          "median_ms": 0.074666,
+          "p95_ms": 0.08808329999999999,
+          "p99_ms": 0.10026997999999998
+        },
+        "xr_release_image": {
+          "count": 1495,
+          "median_ms": 0.038125,
+          "p95_ms": 0.09250429999999998,
+          "p99_ms": 0.1594525399999997
+        },
+        "xr_wait_frame": {
+          "count": 1495,
+          "median_ms": 9.48575,
+          "p95_ms": 12.0712124,
+          "p99_ms": 13.089357999999997
+        },
+        "xr_wait_image": {
+          "count": 1495,
+          "median_ms": 0.000125,
+          "p95_ms": 0.000209,
+          "p99_ms": 0.000375
+        }
+      },
+      "caution": "nested handoff may be included in wait_poses; do not sum these durations",
+      "wait_poses_start_interval": {
+        "count": 1494,
+        "median_ms": 16.819312499990247,
+        "p95_ms": 20.12358925000086,
+        "p99_ms": 21.808478559993883
+      },
+      "application_gpu_clock_interval": {
+        "count": 1495,
+        "median_ms": 14.0305,
+        "p95_ms": 14.9769294,
+        "p99_ms": 15.460645519999995
+      },
+      "feedback_join": {
+        "records": 59,
+        "mismatches_at_001ms_rounding": 0
+      },
+      "first_logged_completed_gpu_frame_after_last_loading_end_api_seconds": 41.275808125,
+      "custom_resolve_path_logged": false,
+      "limitations": [
+        "Historic runs, not paired experimental control. Scene/movement, shader caches and thermal state uncontrolled.",
+        "Same requested fidelity 0; actual settled fidelity/render resolution not established.",
+        "GPU clock interval includes waits and idle gaps; does not measure GPU busy time or full compositor cost.",
+        "Frame-ID join used for GPU/API CSVs; timestamps have different epochs. Wall-clock logs not normalized to launcher Unix epoch."
+      ]
+    }
+  },
+  "next_control": "run-alyx-moltenvk-control: same rebuilt runtime/service, host, xrizer, requested fidelity, and custom-resolve fallback; only client driver differs."
+}

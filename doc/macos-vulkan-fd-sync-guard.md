@@ -164,3 +164,55 @@ passes and pipelines rather than implement the unrelated stage-override renderer
 [Sanitized run identity and comparisons](alyx-valve-lua-results/kk-fd-sync-guard/kk-alyx-2-menu.json)
 retain the evidence without private game logs. The installed runtime and default
 experimental profile are unchanged.
+
+## Custom-resolve fallback succeeds; hitching remains — 21 October
+
+User: "That worked. Subjectively performance worse than MVK." The next run
+forwards the game disable option, no longer logs the programmable-resolve path,
+creates its device successfully and ends with Ctrl+C (130) after 147.78 seconds.
+No Klepton fault, xrizer panic, device loss or OpenXR instance-loss marker occurs.
+Logs show restoration of the same a1_intro_world_2 save and loading completion.
+The option is now the default only in the opt-in KK helper: this is a confirmed
+working game fallback, not a fix to KK's VK_EXT_custom_resolve implementation.
+The driver continues to report its capabilities unchanged.
+
+The API 90–115-second window is after loading in both the KK and prior
+fixed-fidelity-request MoltenVK captures. Frame IDs join the GPU samples to that
+API window; absolute CSV timestamps are not assumed to share an epoch. A logged
+completed GPU frame after the final loading-end maps to API second 57.05 for KK
+and 41.28 for the older MVK run. No conversion of native logger wall times into
+launcher Unix times is needed.
+
+| Capture measure (ms) | KK median | KK p95 | KK p99 | Earlier MVK median | Earlier MVK p95 | Earlier MVK p99 |
+|---|---:|---:|---:|---:|---:|---:|
+| Application GPU-clock interval | 13.495 | 21.101 | 107.654 | 14.031 | 14.977 | 15.461 |
+| Pose-call start interval | 17.093 | 53.360 | 214.322 | 16.819 | 20.124 | 21.808 |
+| xrEndFrame wall duration | 0.110 | 0.266 | 2.284 | 0.148 | 0.257 | 0.485 |
+
+KK has 929 GPU records in the selected window versus 1495 in the historical
+MoltenVK capture. 53 logged actual game timing returns match the KK CSV to
+0.001ms rounding, with no mismatches. Feedback is being consumed, not just
+collected. The larger tails support the reported hitching. Similar median GPU
+intervals do not establish equal GPU throughput: these intervals include waits/
+idle gaps and the whole application queue boundary, not GPU busy utilization.
+Scene motion, shader compilation/caches, actual settled fidelity, thermal state
+and service configuration are not controlled between these historical runs.
+No matched performance ratio or cause of the stalls follows from this table.
+
+A dedicated `~/Code/alyx-native/run-alyx-moltenvk-control` now uses the same
+paired service/runtime, timing-enabled xrizer, host and fallback options, changing
+only the client ICD. Default KK/MVK dry-runs pass, including the KK helper's
+engine-argument separator handling. The original successful MoltenVK launcher
+is unchanged. For a current control, repeat the same save, wait and movement:
+
+```sh
+~/Code/alyx-native/run-alyx-moltenvk-control \
+  --output ~/Code/alyx-native/runs/mvk-paired-control-1 --timeout 300 \
+  -- +vr_fidelity_level_auto 0 +vr_fidelity_level 0
+```
+
+[Numeric evidence and limitations](alyx-valve-lua-results/kk-fd-sync-guard/kk-alyx-3-compatibility-and-timing.json)
+are committed; private game logs remain in the permanent workspace. If the
+paired MVK capture is smooth, instrument KK pipeline compilation and queue
+submission around the outlier frames. Do not optimize or benchmark FDM before
+establishing this non-FDM baseline.

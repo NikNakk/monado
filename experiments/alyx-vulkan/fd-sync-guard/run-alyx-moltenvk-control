@@ -1,0 +1,8 @@
+#!/bin/sh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+# Same paired service, host, xrizer and fallback settings; only the client ICD differs.
+set -eu
+base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
+exec "$base/run-alyx-kosmickrisp" --driver moltenvk \
+ --icd /opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json "$@"

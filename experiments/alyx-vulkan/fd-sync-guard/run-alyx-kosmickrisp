@@ -4,6 +4,18 @@
 # Opt-in experimental client driver with a matching temporary Monado service.
 set -eu
 base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
+# Alyx's programmable-resolve path loses the main scene on this KK prototype.
+# Use its built-in fallback; preserve the driver's truthful extension reporting.
+has_separator=0
+has_fallback=0
+for argument do
+ case "$argument" in
+  --) has_separator=1 ;;
+  -vulkan_disable_ext_custom_resolve) has_fallback=1 ;;
+ esac
+done
+if [ "$has_separator" = 0 ]; then set -- "$@" --; fi
+if [ "$has_fallback" = 0 ]; then set -- "$@" -vulkan_disable_ext_custom_resolve; fi
 exec python3 "$base/with-matching-monado.py" \
  --build "$base/build/monado-kk-fd-guard" -- \
  "$base/run-alyx-gpu-timing" \
