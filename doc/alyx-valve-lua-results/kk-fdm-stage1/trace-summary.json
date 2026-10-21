@@ -1,0 +1,91 @@
+{
+  "extensions": {
+    "VK_EXT_fragment_density_map": {
+      "driver_available": true,
+      "game_requested": true,
+      "forwarded": true
+    },
+    "VK_EXT_fragment_density_map2": {
+      "driver_available": false,
+      "game_requested": false,
+      "forwarded": false
+    },
+    "VK_EXT_fragment_density_map_offset": {
+      "driver_available": false,
+      "game_requested": false,
+      "forwarded": false
+    },
+    "VK_QCOM_fragment_density_map_offset": {
+      "driver_available": false,
+      "game_requested": false,
+      "forwarded": false
+    },
+    "VK_KHR_fragment_shading_rate": {
+      "driver_available": false,
+      "game_requested": false,
+      "forwarded": false
+    }
+  },
+  "device_creation_results": [
+    0
+  ],
+  "function_lookups": {
+    "vkGetPhysicalDeviceFragmentShadingRatesKHR": 1,
+    "vkCmdBeginRenderPass": 1,
+    "vkCmdEndRenderPass": 1,
+    "vkCmdNextSubpass": 1,
+    "vkCreateRenderPass": 1,
+    "vkDestroyRenderPass": 1,
+    "vkCmdBeginRenderPass2": 1,
+    "vkCmdEndRenderPass2": 1,
+    "vkCmdNextSubpass2": 1,
+    "vkCreateRenderPass2": 1,
+    "vkGetDeviceSubpassShadingMaxWorkgroupSizeHUAWEI": 1,
+    "vkCmdSubpassShadingHUAWEI": 1,
+    "vkCmdBeginRenderPass2KHR": 1,
+    "vkCmdEndRenderPass2KHR": 1,
+    "vkCmdNextSubpass2KHR": 1,
+    "vkCreateRenderPass2KHR": 1,
+    "vkCmdSetFragmentShadingRateKHR": 1,
+    "vkCmdSetFragmentShadingRateEnumNV": 1
+  },
+  "observed_query_calls": {
+    "GetPhysicalDeviceFeatures2KHR": 1,
+    "GetPhysicalDeviceProperties2KHR": 1
+  },
+  "extension_enumeration_calls": 4,
+  "shading_rate_command_calls": 0,
+  "shader_capabilities": {
+    "1": 243,
+    "45": 204,
+    "4439": 195,
+    "50": 100,
+    "40": 5,
+    "32": 6
+  },
+  "shader_builtins": {
+    "0": 88,
+    "28": 6,
+    "4440": 194,
+    "15": 127,
+    "22": 1,
+    "17": 11,
+    "3": 6
+  },
+  "density_shader_metadata": {
+    "FragmentDensityEXT": 0,
+    "FragSizeEXT": 0,
+    "FragInvocationCountEXT": 0
+  },
+  "native_dispatch_bypasses": [],
+  "limitations": [
+    "Function lookup does not establish execution or feature enablement.",
+    "Selected observational trampolines are not a complete Vulkan capture; dispatch bypasses leave gaps.",
+    "Reported extension availability comes from the separate selected-driver census.",
+    "No active foveation or acceleration is inferred from these records alone."
+  ],
+  "fdm_payload_record_count": 31818,
+  "fdm_payload_record_kinds": [
+    "[vk] fdm observe CmdBeginRenderingKHR"
+  ]
+}

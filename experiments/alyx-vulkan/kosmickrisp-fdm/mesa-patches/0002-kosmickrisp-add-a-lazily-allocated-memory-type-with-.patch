@@ -1,0 +1,123 @@
+From 6f2ade0ed6c166012b61253e169eecf54bb30d0f Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 18:50:32 +0100
+Subject: [PATCH 2/2] kosmickrisp: add a lazily allocated memory type with the
+ fdm experiment
+
+On its FDM path native Alyx creates its subsampled multisampled colour
+target as a transient attachment and asks for DEVICE_LOCAL |
+LAZILY_ALLOCATED memory. KosmicKrisp had no such type, the allocation
+failed and the game bound VK_NULL_HANDLE, which crashed in
+kk_BindImageMemory2.
+
+With MESA_KK_EXPERIMENTAL=fdm, add a DEVICE_LOCAL | LAZILY_ALLOCATED type
+on the system heap. It is fully backed, so input attachment and custom
+resolve reads of those images still work, and only images with
+TRANSIENT_ATTACHMENT usage may use it; buffers, imports and other images
+exclude it.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_buffer.c          |  2 +-
+ src/kosmickrisp/vulkan/kk_device_memory.c   |  4 ++--
+ src/kosmickrisp/vulkan/kk_image.c           |  2 ++
+ src/kosmickrisp/vulkan/kk_physical_device.c |  8 ++++++++
+ src/kosmickrisp/vulkan/kk_physical_device.h | 12 ++++++++++++
+ 5 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_buffer.c b/src/kosmickrisp/vulkan/kk_buffer.c
+index 73fd1f5..f440ed8 100644
+--- a/src/kosmickrisp/vulkan/kk_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_buffer.c
+@@ -82,7 +82,7 @@ kk_GetDeviceBufferMemoryRequirements(
+    pMemoryRequirements->memoryRequirements = (VkMemoryRequirements){
+       .size = align64(pInfo->pCreateInfo->size, alignment),
+       .alignment = alignment,
+-      .memoryTypeBits = BITFIELD_MASK(pdev->mem_type_count),
++      .memoryTypeBits = kk_non_lazy_memory_types(pdev),
+    };
+ 
+    vk_foreach_struct(sType, ext, pMemoryRequirements->pNext) {
+diff --git a/src/kosmickrisp/vulkan/kk_device_memory.c b/src/kosmickrisp/vulkan/kk_device_memory.c
+index e658bd7..721dd6c 100644
+--- a/src/kosmickrisp/vulkan/kk_device_memory.c
++++ b/src/kosmickrisp/vulkan/kk_device_memory.c
+@@ -57,7 +57,7 @@ kk_GetMemoryMetalHandlePropertiesEXT(
+       return vk_error(dev, VK_ERROR_INVALID_EXTERNAL_HANDLE);
+    }
+    pMemoryMetalHandleProperties->memoryTypeBits =
+-      BITFIELD_MASK(pdev->mem_type_count);
++      kk_non_lazy_memory_types(pdev);
+ 
+    return VK_SUCCESS;
+ }
+@@ -80,7 +80,7 @@ kk_GetMemoryHostPointerPropertiesEXT(
+       return vk_error(dev, VK_ERROR_INVALID_EXTERNAL_HANDLE);
+    }
+    pMemoryHostPointerProperties->memoryTypeBits =
+-      BITFIELD_MASK(pdev->mem_type_count);
++      kk_non_lazy_memory_types(pdev);
+ 
+    return VK_SUCCESS;
+ }
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index ef13d36..f8eb5e8 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -683,6 +683,8 @@ kk_get_image_memory_requirements(struct kk_device *dev, struct kk_image *image,
+ {
+    struct kk_physical_device *pdev = kk_device_physical(dev);
+    uint32_t memory_types = (1 << pdev->mem_type_count) - 1;
++   if (!(image->vk.usage & VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT))
++      memory_types &= kk_non_lazy_memory_types(pdev);
+ 
+    /* Remove non host visible heaps from the types for host image copy in case
+     * of potential issues. This should be removed when we get ReBAR.
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index 4af5824..f495c43 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -1211,6 +1211,14 @@ kk_enumerate_physical_devices(struct vk_instance *_instance)
+       .heapIndex = sysmem_heap_idx,
+    };
+ 
++   if (KK_EXPERIMENTAL(FDM)) {
++      pdev->mem_types[pdev->mem_type_count++] = (VkMemoryType){
++         .propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
++                          VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT,
++         .heapIndex = sysmem_heap_idx,
++      };
++   }
++
+    assert(pdev->mem_heap_count <= ARRAY_SIZE(pdev->mem_heaps));
+    assert(pdev->mem_type_count <= ARRAY_SIZE(pdev->mem_types));
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.h b/src/kosmickrisp/vulkan/kk_physical_device.h
+index 283dc9f..3ef0c42 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.h
++++ b/src/kosmickrisp/vulkan/kk_physical_device.h
+@@ -86,6 +86,18 @@ kk_min_cbuf_alignment()
+    return 16;
+ }
+ 
++static inline uint32_t
++kk_non_lazy_memory_types(const struct kk_physical_device *pdev)
++{
++   uint32_t types = 0;
++   for (uint32_t i = 0; i < pdev->mem_type_count; i++) {
++      if (!(pdev->mem_types[i].propertyFlags &
++            VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT))
++         types |= BITFIELD_BIT(i);
++   }
++   return types;
++}
++
+ VK_DEFINE_HANDLE_CASTS(kk_physical_device, vk.base, VkPhysicalDevice,
+                        VK_OBJECT_TYPE_PHYSICAL_DEVICE)
+ 
+-- 
+2.54.0 (Apple Git-157)
+

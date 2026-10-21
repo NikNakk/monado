@@ -1,0 +1,163 @@
+From 425a224198d8b67e0825fa3ad34cf057baae5152 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 18:42:51 +0100
+Subject: [PATCH 1/2] kosmickrisp: add opt-in full-rate
+ VK_EXT_fragment_density_map
+
+MESA_KK_EXPERIMENTAL=fdm advertises VK_EXT_fragment_density_map with
+fragmentDensityMap and fragmentDensityMapNonSubsampledImages, texel sizes
+32x32 to 1024x1024 and no fragmentDensityInvocations. R8G8_UNORM gains the
+density map format feature and FRAGMENT_DENSITY_MAP usage maps to it.
+
+Rendering ignores the density map and shades every pixel, which the
+specification allows since an implementation may use a smaller fragment
+area than the map requests. FragSizeEXT is lowered to (1, 1) and
+FragInvocationCountEXT to the sample count for per-sample shading, else 1.
+Subsampled images and samplers are ordinary ones, which is valid when no
+fragment covers more than one pixel. Off by default.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_debug.c           |  1 +
+ src/kosmickrisp/vulkan/kk_debug.h           |  1 +
+ src/kosmickrisp/vulkan/kk_image.c           |  6 +++++
+ src/kosmickrisp/vulkan/kk_physical_device.c | 12 +++++++++
+ src/kosmickrisp/vulkan/kk_shader.c          | 27 +++++++++++++++++++++
+ 5 files changed, 47 insertions(+)
+
+diff --git a/src/kosmickrisp/vulkan/kk_debug.c b/src/kosmickrisp/vulkan/kk_debug.c
+index 1805d66..9a3cff0 100644
+--- a/src/kosmickrisp/vulkan/kk_debug.c
++++ b/src/kosmickrisp/vulkan/kk_debug.c
+@@ -23,6 +23,7 @@ const struct debug_named_value experimental_flags[] = {
+    {"custom_border", KK_EXPERIMENTAL_CUSTOM_BORDER},
+    {"image_view_min_lod", KK_EXPERIMENTAL_IMAGE_VIEW_MIN_LOD},
+    {"m5_optimize_e5b9g9r9", KK_EXPERIMENTAL_M5_OPTIMIZE_E5B9G9R9},
++   {"fdm", KK_EXPERIMENTAL_FDM},
+    {NULL, 0},
+ };
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_debug.h b/src/kosmickrisp/vulkan/kk_debug.h
+index f454804..a3b3117 100644
+--- a/src/kosmickrisp/vulkan/kk_debug.h
++++ b/src/kosmickrisp/vulkan/kk_debug.h
+@@ -26,6 +26,7 @@ enum kk_experimental {
+    /* Using allowGPUOptimizedContents on M5 for this format causes
+     * vkCmdCopyImage() tests in CTS to fail, but it is otherwise usable */
+    KK_EXPERIMENTAL_M5_OPTIMIZE_E5B9G9R9 = 1ull << 2,
++   KK_EXPERIMENTAL_FDM = 1ull << 3,
+ };
+ 
+ extern enum kk_experimental kk_mesa_experimental_flags;
+diff --git a/src/kosmickrisp/vulkan/kk_image.c b/src/kosmickrisp/vulkan/kk_image.c
+index d89285e..ef13d36 100644
+--- a/src/kosmickrisp/vulkan/kk_image.c
++++ b/src/kosmickrisp/vulkan/kk_image.c
+@@ -86,6 +86,10 @@ kk_get_image_plane_format_features(struct kk_physical_device *pdev,
+    if (va_format->atomic)
+       features |= VK_FORMAT_FEATURE_2_STORAGE_IMAGE_ATOMIC_BIT;
+ 
++   if (vk_format == VK_FORMAT_R8G8_UNORM && tiling == VK_IMAGE_TILING_OPTIMAL &&
++       pdev->vk.supported_extensions.EXT_fragment_density_map)
++      features |= VK_FORMAT_FEATURE_2_FRAGMENT_DENSITY_MAP_BIT_EXT;
++
+    if (features != 0) {
+       features |= VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT;
+       features |= VK_FORMAT_FEATURE_2_TRANSFER_DST_BIT;
+@@ -189,6 +193,8 @@ vk_image_usage_to_format_features(VkImageUsageFlagBits usage_flag)
+              VK_FORMAT_FEATURE_2_DEPTH_STENCIL_ATTACHMENT_BIT;
+    case VK_IMAGE_USAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR:
+       return VK_FORMAT_FEATURE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
++   case VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT:
++      return VK_FORMAT_FEATURE_2_FRAGMENT_DENSITY_MAP_BIT_EXT;
+    default:
+       return 0;
+    }
+diff --git a/src/kosmickrisp/vulkan/kk_physical_device.c b/src/kosmickrisp/vulkan/kk_physical_device.c
+index ef751fb..4af5824 100644
+--- a/src/kosmickrisp/vulkan/kk_physical_device.c
++++ b/src/kosmickrisp/vulkan/kk_physical_device.c
+@@ -181,6 +181,7 @@ kk_get_device_extensions(const struct kk_instance *instance,
+       .EXT_depth_clip_enable = true,
+       .EXT_extended_dynamic_state3 = true,
+       .EXT_external_memory_metal = true,
++      .EXT_fragment_density_map = KK_EXPERIMENTAL(FDM),
+ #ifdef VK_USE_PLATFORM_METAL_EXT
+       .EXT_metal_objects = true,
+ #endif
+@@ -455,6 +456,12 @@ kk_get_device_features(
+       /* VK_EXT_custom_resolve */
+       .customResolve = true,
+ 
++      /* VK_EXT_fragment_density_map */
++      .fragmentDensityMap = supported_extensions->EXT_fragment_density_map,
++      .fragmentDensityMapDynamic = false,
++      .fragmentDensityMapNonSubsampledImages =
++         supported_extensions->EXT_fragment_density_map,
++
+       /* VK_EXT_depth_clip_control */
+       .depthClipControl = true,
+ 
+@@ -845,6 +852,11 @@ kk_get_device_properties(
+       /* VK_EXT_multi_draw */
+       .maxMultiDrawCount = UINT32_MAX,
+ 
++      /* VK_EXT_fragment_density_map */
++      .minFragmentDensityTexelSize = {32, 32},
++      .maxFragmentDensityTexelSize = {1024, 1024},
++      .fragmentDensityInvocations = false,
++
+       /* VK_EXT_nested_command_buffer */
+       .maxCommandBufferNestingLevel = UINT32_MAX,
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index 7a63632..c4b2a41 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -500,6 +500,26 @@ lower_subpass_dim(nir_builder *b, nir_tex_instr *tex, UNUSED void *_data)
+    return true;
+ }
+ 
++static bool
++kk_lower_full_rate_fdm(nir_builder *b, nir_intrinsic_instr *intrin, void *data)
++{
++   const uint32_t *invocations = data;
++
++   switch (intrin->intrinsic) {
++   case nir_intrinsic_load_frag_size:
++      b->cursor = nir_before_instr(&intrin->instr);
++      nir_def_replace(&intrin->def,
++                      nir_imm_ivec2(b, 1, 1));
++      return true;
++   case nir_intrinsic_load_frag_invocation_count:
++      b->cursor = nir_before_instr(&intrin->instr);
++      nir_def_replace(&intrin->def, nir_imm_int(b, *invocations));
++      return true;
++   default:
++      return false;
++   }
++}
++
+ static void
+ kk_lower_fs(struct kk_device *dev, nir_shader *nir,
+             const struct vk_graphics_pipeline_state *state)
+@@ -509,6 +529,13 @@ kk_lower_fs(struct kk_device *dev, nir_shader *nir,
+    nir->info.fs.uses_sample_shading |=
+       state->ms && state->ms->sample_shading_enable;
+ 
++   uint32_t fdm_invocations = 1;
++   if (nir->info.fs.uses_sample_shading && state->ms &&
++       state->ms->rasterization_samples > 1)
++      fdm_invocations = state->ms->rasterization_samples;
++   NIR_PASS(_, nir, nir_shader_intrinsics_pass, kk_lower_full_rate_fdm,
++            nir_metadata_control_flow, &fdm_invocations);
++
+    /* Must be lowered before blending */
+    if (state->ms) {
+       NIR_PASS(_, nir, msl_nir_lower_multisample_alpha,
+-- 
+2.54.0 (Apple Git-157)
+

@@ -7,6 +7,13 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+Native Alyx now runs its real FDM path on KosmicKrisp: see
+[FDM stage 1](macos-alyx-kosmickrisp-fdm-stage1.md). An opt-in
+(`MESA_KK_EXPERIMENTAL=fdm`) full-rate `VK_EXT_fragment_density_map` lets the
+game enable FDM, build its 21x24x2 `ultra` square map and render through
+subsampled targets. The picture is normal; no shading is reduced yet
+(21 October 2026).
+
 Custom resolve now renders on KosmicKrisp in native Alyx: see the
 [input attachment fix](macos-alyx-kosmickrisp-custom-resolve-fix.md). Resolving
 shaders now read the multisampled attachments rather than the placeholder
