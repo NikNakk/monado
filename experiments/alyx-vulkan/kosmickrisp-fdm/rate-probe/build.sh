@@ -2,12 +2,12 @@
 # Copyright 2026, Nick Kennedy
 # SPDX-License-Identifier: MIT
 # Build the rate-mapped FDM probe and its shaders into OUT.
-# Run: OUT/probe_rate OUT [--custom-resolve] with MESA_KK_EXPERIMENTAL=fdm,fdm_rate.
+# Run: OUT/probe_rate OUT [options] with MESA_KK_EXPERIMENTAL=fdm,fdm_rate; see probe_rate.c.
 set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 out=${1:?usage: build.sh OUT}
 mkdir -p "$out"
-for s in fill.vert coord.frag sample.frag resolve.frag; do
+for s in fill.vert coord.frag sample.frag sample_views.frag fetch_views.frag resolve.frag; do
  glslangValidator -V --target-env vulkan1.3 "$here/$s" -o "$out/$s.spv" >/dev/null
  spirv-val --target-env vulkan1.3 "$out/$s.spv"
 done

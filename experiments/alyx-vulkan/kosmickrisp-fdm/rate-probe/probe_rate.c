@@ -14,7 +14,20 @@
 // custom-resolves it into the subsampled image inside the same FDM pass, as
 // Alyx does.
 //
-// usage: probe_rate SHADER_DIR [--custom-resolve]   (driver from VK_DRIVER_FILES)
+// --eye-maps gives the right eye a different map (centre shifted 3 texels
+// right). --views reads each eye through its own single-layer view, as Alyx
+// does; --fetch does the same with texelFetch.
+//
+// usage: probe_rate SHADER_DIR [--custom-resolve] [--eye-maps] [--views|--fetch]
+//        [--area] [--samples4] [--switch] [--mixed]   (driver from VK_DRIVER_FILES)
+// --mixed adds a larger second colour attachment to the FDM pass, so the rate
+// map's screen is bigger than the image read back (not with --custom-resolve).
+// --switch renders the target again with a second density map after the
+// readback pass, in the same command buffer, as Alyx does when its fidelity
+// level changes. The readback must still decode with the first map.
+// --area renders only the top-left 448x512 with a 14x16 map sized to that area,
+// as Alyx's dynamic resolution does; --samples4 uses 4x MSAA with
+// --custom-resolve.
 
 #include <vulkan/vulkan.h>
 
@@ -38,6 +51,8 @@
       }                                                                  \
    } while (0)
 
+static int eye_maps, area, extra_att;
+static int mw = MW, mh = MH, aw = W, ah = H, vw = W, vh = H;
 static VkDevice dev;
 static VkPhysicalDevice phys;
 
@@ -156,10 +171,11 @@ make_pipeline(VkShaderModule vs, VkShaderModule fs, VkPipelineLayout layout,
               VkFormat fmt, VkPipelineCreateFlags flags,
               VkSampleCountFlagBits samples, const void *rendering_next)
 {
+   VkFormat fmts[2] = {fmt, fmt};
    VkPipelineRenderingCreateInfo prci = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
       .pNext = rendering_next, .viewMask = 3,
-      .colorAttachmentCount = 1, .pColorAttachmentFormats = &fmt};
+      .colorAttachmentCount = extra_att ? 2 : 1, .pColorAttachmentFormats = fmts};
    VkPipelineShaderStageCreateInfo st[2] = {
       {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
        .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vs, .pName = "main"},
@@ -170,8 +186,8 @@ make_pipeline(VkShaderModule vs, VkShaderModule fs, VkPipelineLayout layout,
    VkPipelineInputAssemblyStateCreateInfo ia = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
       .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
-   VkViewport vp = {0, 0, W, H, 0, 1};
-   VkRect2D sc = {{0, 0}, {W, H}};
+   VkViewport vp = {0, 0, vw, vh, 0, 1};
+   VkRect2D sc = {{0, 0}, {vw, vh}};
    VkPipelineViewportStateCreateInfo vps = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
       .viewportCount = 1, .pViewports = &vp, .scissorCount = 1, .pScissors = &sc};
@@ -181,10 +197,11 @@ make_pipeline(VkShaderModule vs, VkShaderModule fs, VkPipelineLayout layout,
    VkPipelineMultisampleStateCreateInfo ms = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
       .rasterizationSamples = samples};
-   VkPipelineColorBlendAttachmentState cba = {.colorWriteMask = 0xf};
+   VkPipelineColorBlendAttachmentState cba[2] = {{.colorWriteMask = 0xf},
+                                                 {.colorWriteMask = 0xf}};
    VkPipelineColorBlendStateCreateInfo cb = {
       .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-      .attachmentCount = 1, .pAttachments = &cba};
+      .attachmentCount = extra_att ? 2 : 1, .pAttachments = cba};
    VkGraphicsPipelineCreateInfo gp = {
       .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &prci,
       .flags = flags, .stageCount = 2, .pStages = st, .pVertexInputState = &vi,
@@ -196,11 +213,20 @@ make_pipeline(VkShaderModule vs, VkShaderModule fs, VkPipelineLayout layout,
    return p;
 }
 
+
 static int
-in_centre(int x, int y)
+in_centre_texel(int l, int tx, int ty)
 {
-   int tx = x / 32, ty = y / 32;
-   return tx >= 6 && tx <= 14 && ty >= 8 && ty <= 15;
+   int shift = eye_maps && l ? 3 : 0;
+   if (area)
+      return tx >= 4 + shift && tx <= 9 + shift && ty >= 5 && ty <= 10;
+   return tx >= 6 + shift && tx <= 14 + shift && ty >= 8 && ty <= 15;
+}
+
+static int
+in_centre(int l, int x, int y)
+{
+   return in_centre_texel(l, x / 32, y / 32);
 }
 
 int
@@ -209,7 +235,36 @@ main(int argc, char **argv)
    if (argc < 2)
       return 2;
    const char *dir = argv[1];
-   const int cr = argc > 2 && !strcmp(argv[2], "--custom-resolve");
+   int cr = 0, views = 0, fetch = 0, samples4 = 0, sw = 0, mixed = 0;
+   for (int i = 2; i < argc; i++) {
+      if (!strcmp(argv[i], "--custom-resolve"))
+         cr = 1;
+      else if (!strcmp(argv[i], "--eye-maps"))
+         eye_maps = 1;
+      else if (!strcmp(argv[i], "--views"))
+         views = 1;
+      else if (!strcmp(argv[i], "--fetch"))
+         fetch = 1;
+      else if (!strcmp(argv[i], "--area"))
+         area = 1;
+      else if (!strcmp(argv[i], "--samples4"))
+         samples4 = 1;
+      else if (!strcmp(argv[i], "--switch"))
+         sw = 1;
+      else if (!strcmp(argv[i], "--mixed"))
+         mixed = 1;
+      else
+         return 2;
+   }
+   const int split = views || fetch;
+   if (area) {
+      mw = 14;
+      mh = 16;
+      aw = 448;
+      ah = 512;
+   }
+   const VkSampleCountFlagBits ms_samples =
+      samples4 ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_2_BIT;
    const VkFormat cfmt = VK_FORMAT_R16G16B16A16_UNORM;
 
    VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
@@ -262,14 +317,14 @@ main(int argc, char **argv)
    vkGetDeviceQueue(dev, 0, 0, &queue);
 
    void *stage_map;
-   VkBuffer stage = make_buffer(MW * MH * 2 * LAYERS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &stage_map);
+   VkBuffer stage = make_buffer(mw * mh * 2 * LAYERS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &stage_map);
    uint8_t *m = stage_map;
    for (int l = 0; l < LAYERS; l++)
-      for (int y = 0; y < MH; y++)
-         for (int x = 0; x < MW; x++) {
-            uint8_t v = (x >= 6 && x <= 14 && y >= 8 && y <= 15) ? 255 : 56;
-            m[((l * MH + y) * MW + x) * 2 + 0] = v;
-            m[((l * MH + y) * MW + x) * 2 + 1] = v;
+      for (int y = 0; y < mh; y++)
+         for (int x = 0; x < mw; x++) {
+            uint8_t v = in_centre_texel(l, x, y) ? 255 : 56;
+            m[((l * mh + y) * mw + x) * 2 + 0] = v;
+            m[((l * mh + y) * mw + x) * 2 + 1] = v;
          }
    void *counter_map;
    VkBuffer counter = make_buffer(4, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &counter_map);
@@ -277,21 +332,40 @@ main(int argc, char **argv)
    void *out_map;
    VkBuffer outbuf = make_buffer((VkDeviceSize)W * H * 8 * LAYERS, VK_BUFFER_USAGE_TRANSFER_DST_BIT, &out_map);
 
-   VkImage map = make_image(VK_FORMAT_R8G8_UNORM, MW, MH,
+   VkImage map = make_image(VK_FORMAT_R8G8_UNORM, mw, mh,
                             VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT |
                                VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0);
    VkImageView map_v = make_view(map, VK_FORMAT_R8G8_UNORM);
+   void *stage2_map;
+   VkBuffer stage2 = make_buffer(mw * mh * 2 * LAYERS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, &stage2_map);
+   for (int i = 0; i < mw * mh * LAYERS; i++) {
+      int x = i % mw, y = (i / mw) % mh;
+      uint8_t v = (x < 5 && y < 6) ? 255 : 40;
+      ((uint8_t *)stage2_map)[i * 2] = v;
+      ((uint8_t *)stage2_map)[i * 2 + 1] = v;
+   }
+   VkImage map2 = make_image(VK_FORMAT_R8G8_UNORM, mw, mh,
+                             VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT |
+                                VK_IMAGE_USAGE_TRANSFER_DST_BIT, 0);
+   VkImageView map2_v = make_view(map2, VK_FORMAT_R8G8_UNORM);
    VkImage target = make_image(cfmt, W, H,
                                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT);
    VkImageView target_v = make_view(target, cfmt);
+   VkImageView big_v = VK_NULL_HANDLE;
+   VkImage big = VK_NULL_HANDLE;
+   if (mixed) {
+      big = make_image(cfmt, W + 160, H + 96, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                               VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT);
+      big_v = make_view(big, cfmt);
+   }
    VkImage ms = VK_NULL_HANDLE;
    VkImageView ms_v = VK_NULL_HANDLE;
    if (cr) {
       ms = make_image_ms(cfmt, W, H,
                          VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                             VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
-                         VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT, VK_SAMPLE_COUNT_2_BIT);
+                         VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT, ms_samples);
       ms_v = make_view(ms, cfmt);
    }
    VkImage out = make_image(cfmt, W, H,
@@ -311,6 +385,9 @@ main(int argc, char **argv)
                                        .setLayoutCount = 1, .pSetLayouts = &csl};
    VkPipelineLayout clayout;
    VKOK(vkCreatePipelineLayout(dev, &cplci, NULL, &clayout));
+   vw = aw;
+   vh = ah;
+   extra_att = mixed;
    VkCustomResolveCreateInfoEXT crc_fill = {
       .sType = VK_STRUCTURE_TYPE_CUSTOM_RESOLVE_CREATE_INFO_EXT,
       .customResolve = VK_FALSE, .colorAttachmentCount = 1,
@@ -318,7 +395,7 @@ main(int argc, char **argv)
    VkPipeline coord_pipe =
       make_pipeline(vs, load_shader(dir, "coord.frag.spv"), clayout, cfmt,
                     VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT,
-                    cr ? VK_SAMPLE_COUNT_2_BIT : VK_SAMPLE_COUNT_1_BIT,
+                    cr ? ms_samples : VK_SAMPLE_COUNT_1_BIT,
                     cr ? &crc_fill : NULL);
 
    uint32_t color_index = 0;
@@ -357,22 +434,29 @@ main(int argc, char **argv)
       .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
    VkSampler sampler;
    VKOK(vkCreateSampler(dev, &sci, NULL, &sampler));
-   VkDescriptorSetLayoutBinding sbind = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-                                         VK_SHADER_STAGE_FRAGMENT_BIT, &sampler};
+   VkDescriptorSetLayoutBinding sbind[2] = {
+      {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, &sampler},
+      {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, &sampler}};
    VkDescriptorSetLayoutCreateInfo sslci = {
       .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-      .bindingCount = 1, .pBindings = &sbind};
+      .bindingCount = split ? 2 : 1, .pBindings = sbind};
    VkDescriptorSetLayout ssl;
    VKOK(vkCreateDescriptorSetLayout(dev, &sslci, NULL, &ssl));
    VkPipelineLayoutCreateInfo splci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
                                        .setLayoutCount = 1, .pSetLayouts = &ssl};
    VkPipelineLayout slayout;
    VKOK(vkCreatePipelineLayout(dev, &splci, NULL, &slayout));
-   VkPipeline sample_pipe = make_pipeline(vs, load_shader(dir, "sample.frag.spv"), slayout, cfmt, 0,
+   vw = W;
+   vh = H;
+   extra_att = 0;
+   VkPipeline sample_pipe = make_pipeline(vs, load_shader(dir, fetch ? "fetch_views.frag.spv"
+                                                       : views ? "sample_views.frag.spv"
+                                                               : "sample.frag.spv"),
+                                          slayout, cfmt, 0,
                                           VK_SAMPLE_COUNT_1_BIT, NULL);
 
    VkDescriptorPoolSize ps[3] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
-                                 {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
+                                 {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2},
                                  {VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1}};
    VkDescriptorPoolCreateInfo dpci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
                                       .maxSets = 3, .poolSizeCount = 3, .pPoolSizes = ps};
@@ -395,6 +479,25 @@ main(int argc, char **argv)
        .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
        .pImageInfo = &dii}};
    vkUpdateDescriptorSets(dev, 2, w, 0, NULL);
+   if (split) {
+      VkImageView layer_v[2];
+      VkDescriptorImageInfo lii[2];
+      VkWriteDescriptorSet lw[2];
+      for (int l = 0; l < 2; l++) {
+         VkImageViewCreateInfo lci = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = target,
+            .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY, .format = cfmt,
+            .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, l, 1}};
+         VKOK(vkCreateImageView(dev, &lci, NULL, &layer_v[l]));
+         lii[l] = (VkDescriptorImageInfo){VK_NULL_HANDLE, layer_v[l],
+                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+         lw[l] = (VkWriteDescriptorSet){
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = sset, .dstBinding = l,
+            .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            .pImageInfo = &lii[l]};
+      }
+      vkUpdateDescriptorSets(dev, 2, lw, 0, NULL);
+   }
    VkDescriptorSet rset = VK_NULL_HANDLE;
    if (cr) {
       VkDescriptorSetAllocateInfo a3 = a1;
@@ -421,13 +524,19 @@ main(int argc, char **argv)
 
    barrier(cb, map, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
    VkBufferImageCopy up = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, LAYERS},
-                           .imageExtent = {MW, MH, 1}};
+                           .imageExtent = {mw, mh, 1}};
    vkCmdCopyBufferToImage(cb, stage, map, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &up);
    barrier(cb, map, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+           VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT);
+   barrier(cb, map2, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+   vkCmdCopyBufferToImage(cb, stage2, map2, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &up);
+   barrier(cb, map2, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
            VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT);
    VkImageLayout att_layout =
       cr ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
    barrier(cb, target, VK_IMAGE_LAYOUT_UNDEFINED, att_layout);
+   if (mixed)
+      barrier(cb, big, VK_IMAGE_LAYOUT_UNDEFINED, att_layout);
    if (cr)
       barrier(cb, ms, VK_IMAGE_LAYOUT_UNDEFINED, att_layout);
 
@@ -444,10 +553,12 @@ main(int argc, char **argv)
       att.resolveImageView = target_v;
       att.resolveImageLayout = VK_IMAGE_LAYOUT_GENERAL;
    }
+   VkRenderingAttachmentInfo atts[2] = {att, att};
+   atts[1].imageView = big_v;
    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .pNext = &fdm_att,
                          .flags = cr ? VK_RENDERING_CUSTOM_RESOLVE_BIT_EXT : 0,
-                         .renderArea = {{0, 0}, {W, H}}, .layerCount = 1, .viewMask = 3,
-                         .colorAttachmentCount = 1, .pColorAttachments = &att};
+                         .renderArea = {{0, 0}, {aw, ah}}, .layerCount = 1, .viewMask = 3,
+                         .colorAttachmentCount = mixed ? 2 : 1, .pColorAttachments = atts};
    vkCmdBeginRendering(cb, &ri);
    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, coord_pipe);
    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, clayout, 0, 1, &cset, 0, NULL);
@@ -472,15 +583,36 @@ main(int argc, char **argv)
    att2.resolveMode = VK_RESOLVE_MODE_NONE;
    att2.resolveImageView = VK_NULL_HANDLE;
    VkRenderingInfo ri2 = ri;
+   ri2.renderArea = (VkRect2D){{0, 0}, {W, H}};
    ri2.pNext = NULL;
    ri2.flags = 0;
    ri2.pColorAttachments = &att2;
+   ri2.colorAttachmentCount = 1;
    vkCmdBeginRendering(cb, &ri2);
    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, sample_pipe);
    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, slayout, 0, 1, &sset, 0, NULL);
    vkCmdDraw(cb, 3, 1, 0, 0);
    vkCmdEndRendering(cb);
    barrier(cb, out, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+   if (sw) {
+      barrier(cb, target, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, att_layout);
+      fdm_att.imageView = map2_v;
+      vkCmdBeginRendering(cb, &ri);
+      vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, coord_pipe);
+      vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, clayout, 0, 1, &cset, 0, NULL);
+      vkCmdDraw(cb, 3, 1, 0, 0);
+      if (cr) {
+         PFN_vkCmdBeginCustomResolveEXT begin_custom_resolve =
+            (PFN_vkCmdBeginCustomResolveEXT)vkGetDeviceProcAddr(dev, "vkCmdBeginCustomResolveEXT");
+         VkBeginCustomResolveInfoEXT bcr = {.sType = VK_STRUCTURE_TYPE_BEGIN_CUSTOM_RESOLVE_INFO_EXT};
+         begin_custom_resolve(cb, &bcr);
+         vkCmdSetRenderingInputAttachmentIndices(cb, &ial);
+         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, resolve_pipe);
+         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, rlayout, 0, 1, &rset, 0, NULL);
+         vkCmdDraw(cb, 3, 1, 0, 0);
+      }
+      vkCmdEndRendering(cb);
+   }
    VkBufferImageCopy down = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, LAYERS},
                              .imageExtent = {W, H, 1}};
    vkCmdCopyImageToBuffer(cb, out, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, outbuf, 1, &down);
@@ -506,28 +638,39 @@ main(int argc, char **argv)
    }
    for (int l = 0; l < LAYERS; l++) {
       double max_c = 0, max_p = 0;
-      int bad_c = 0, bad_p = 0, bad_layer = 0;
-      for (int y = 0; y < H; y++)
-         for (int x = 0; x < W; x++) {
+      int bad_c = 0, bad_p = 0, bad_layer = 0, bad_edge = 0;
+      for (int y = 0; y < ah; y++)
+         for (int x = 0; x < aw; x++) {
             const uint16_t *p = px + ((size_t)(l * H + y) * W + x) * 4;
             double ex = fabs(p[0] / 65535.0 * W - (x + 0.5));
             double ey = fabs(p[1] / 65535.0 * H - (y + 0.5));
             double e = ex > ey ? ex : ey;
+            if (area && (x == aw - 1 || y == ah - 1)) {
+               bad_edge += e > 6.0;
+               continue;
+            }
             if (p[2] != (l ? 65535 : 0))
                bad_layer++;
-            if (in_centre(x, y)) {
+            if (in_centre(l, x, y)) {
                if (e > max_c) max_c = e;
                if (e > 0.6) bad_c++;
             } else {
                if (e > max_p) max_p = e;
-               if (e > 6.0) bad_p++;
+               if (e > 6.0) {
+                  if (!bad_p && getenv("PROBE_SHOW_BAD"))
+                     printf("  first bad periphery pixel layer %d at (%d,%d)\n", l, x, y);
+                  bad_p++;
+               }
             }
          }
       int ok = !bad_c && !bad_p && !bad_layer;
       failures += !ok;
       printf("%s layer %d: max screen error centre %.2f px (bad %d), periphery %.2f px "
-             "(bad %d), wrong layer %d\n",
+             "(bad %d), wrong layer %d",
              ok ? "PASS" : "FAIL", l, max_c, bad_c, max_p, bad_p, bad_layer);
+      if (area)
+         printf(", render-area edge pixels unshaded %d (not counted)", bad_edge);
+      printf("\n");
    }
    printf("%s: %d failure(s)\n", failures ? "FAILED" : "OK", failures);
    return failures ? 1 : 0;

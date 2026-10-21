@@ -1,0 +1,619 @@
+From 22b4fc7d1172f1daf97c6fc58b1d4892fa1cf287 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Wed, 21 Oct 2026 23:44:15 +0100
+Subject: [PATCH] kosmickrisp: fix fdm_rate for Alyx's headset render paths
+
+Serialise rate map creation and use across recording threads, and only
+rebuild a map when the captured density data changes.
+
+Lay the rate map out at the 32 pixel density texel size instead of
+stretching the density map over the framebuffer, so maps sized to a
+smaller render area land where the application expects.
+
+Give each map version its own parameter block, and update an image's
+block with a GPU copy recorded before the render pass that uses the map,
+so work recorded earlier still decodes with the map it rendered with.
+
+Carry the view's base layer and the image's own size in the sampled
+image descriptor for coordinate mapping, and map texel fetches of
+subsampled images. Input attachments keep physical coordinates.
+
+KK_FDM_DEBUG=1 logs density uploads, pass setups and how subsampled
+images are used.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_copy.c          |   4 +
+ src/kosmickrisp/vulkan/kk_cmd_meta.c          |   5 +
+ src/kosmickrisp/vulkan/kk_descriptor_set.c    |  22 +-
+ src/kosmickrisp/vulkan/kk_descriptor_types.h  |   4 +-
+ src/kosmickrisp/vulkan/kk_fdm.c               | 241 ++++++++++++++++--
+ src/kosmickrisp/vulkan/kk_fdm.h               |   5 +
+ src/kosmickrisp/vulkan/kk_image.h             |   2 +
+ .../vulkan/kk_nir_lower_descriptors.c         |  37 ++-
+ 8 files changed, 285 insertions(+), 35 deletions(-)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_copy.c b/src/kosmickrisp/vulkan/kk_cmd_copy.c
+index 8ab0089..ed6913d 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_copy.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_copy.c
+@@ -6,6 +6,7 @@
+  */
+ 
+ #include "kk_cmd_buffer.h"
++#include "kk_fdm.h"
+ 
+ #include "kk_bo.h"
+ #include "kk_buffer.h"
+@@ -127,6 +128,7 @@ kk_CmdCopyImageToBuffer2(VkCommandBuffer commandBuffer,
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
+    VK_FROM_HANDLE(kk_image, image, pCopyImageToBufferInfo->srcImage);
+    VK_FROM_HANDLE(kk_buffer, buffer, pCopyImageToBufferInfo->dstBuffer);
++   kk_fdm_note_use(&image->vk, "copy to buffer source");
+ 
+    mtl_compute_encoder *encoder = cs_get_compute(cmd);
+    for (unsigned r = 0; r < pCopyImageToBufferInfo->regionCount; r++) {
+@@ -362,6 +364,8 @@ kk_CmdCopyImage2(VkCommandBuffer commandBuffer,
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
+    VK_FROM_HANDLE(kk_image, src, pCopyImageInfo->srcImage);
+    VK_FROM_HANDLE(kk_image, dst, pCopyImageInfo->dstImage);
++   kk_fdm_note_use(&src->vk, "copy source");
++   kk_fdm_note_use(&dst->vk, "copy destination");
+ 
+    size_t buffer_size = 0u;
+ 
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_meta.c b/src/kosmickrisp/vulkan/kk_cmd_meta.c
+index 9163df5..fc66dee 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_meta.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_meta.c
+@@ -8,6 +8,7 @@
+  */
+ 
+ #include "kk_private.h"
++#include "kk_fdm.h"
+ 
+ #include "kk_buffer.h"
+ #include "kk_cmd_buffer.h"
+@@ -240,6 +241,8 @@ kk_CmdBlitImage2(VkCommandBuffer commandBuffer,
+    struct kk_device *dev = kk_cmd_buffer_device(cmd);
+ 
+    struct kk_meta_save save;
++   kk_fdm_note_use(vk_image_from_handle(pBlitImageInfo->srcImage), "blit source");
++   kk_fdm_note_use(vk_image_from_handle(pBlitImageInfo->dstImage), "blit destination");
+    kk_meta_begin(cmd, &save, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                  "meta:vkCmdBlitImage2");
+    vk_meta_blit_image2(&cmd->vk, &dev->meta, pBlitImageInfo);
+@@ -254,6 +257,8 @@ kk_CmdResolveImage2(VkCommandBuffer commandBuffer,
+    struct kk_device *dev = kk_cmd_buffer_device(cmd);
+ 
+    struct kk_meta_save save;
++   kk_fdm_note_use(vk_image_from_handle(pResolveImageInfo->srcImage), "resolve source");
++   kk_fdm_note_use(vk_image_from_handle(pResolveImageInfo->dstImage), "resolve destination");
+    kk_meta_begin(cmd, &save, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                  "meta:vkCmdResolveImage2");
+    vk_meta_resolve_image2(&cmd->vk, &dev->meta, pResolveImageInfo);
+diff --git a/src/kosmickrisp/vulkan/kk_descriptor_set.c b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+index afd0ab2..bcc035c 100644
+--- a/src/kosmickrisp/vulkan/kk_descriptor_set.c
++++ b/src/kosmickrisp/vulkan/kk_descriptor_set.c
+@@ -13,6 +13,7 @@
+ #include "kk_descriptor_set_layout.h"
+ #include "kk_device.h"
+ #include "kk_image.h"
++#include "kk_fdm.h"
+ #include "kk_entrypoints.h"
+ #include "kk_image_view.h"
+ #include "kk_physical_device.h"
+@@ -93,7 +94,25 @@ get_sampled_image_view_desc(VkDescriptorType descriptor_type,
+          const struct kk_image *image =
+             container_of(view->vk.image, struct kk_image, vk);
+          desc[plane].rate_params =
+-            image->rate_params ? image->rate_params->gpu : 0;
++            image->rate_params && !is_input_attachment ? image->rate_params->gpu
++                                                       : 0;
++         desc[plane].rate_base_layer = view->vk.base_array_layer;
++         desc[plane].rate_image_size[0] =
++            u_minify(view->vk.image->extent.width, view->vk.base_mip_level);
++         desc[plane].rate_image_size[1] =
++            u_minify(view->vk.image->extent.height, view->vk.base_mip_level);
++         kk_fdm_note_view(&view->vk, is_input_attachment ? "input" : "sampled");
++         if (is_input_attachment)
++            kk_fdm_note_use(&image->vk, "input attachment");
++         else if (descriptor_type != VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
++            kk_fdm_note_use(&image->vk, "sampled image, separate sampler");
++         else if (info->sampler == VK_NULL_HANDLE)
++            kk_fdm_note_use(&image->vk, "combined, no sampler in write");
++         else if (vk_sampler_from_handle(info->sampler)->flags &
++                  VK_SAMPLER_CREATE_SUBSAMPLED_BIT_EXT)
++            kk_fdm_note_use(&image->vk, "combined, subsampled sampler");
++         else
++            kk_fdm_note_use(&image->vk, "combined, ordinary sampler");
+ 
+          float min_lod = MAX2(view->vk.min_lod - view->vk.base_mip_level, 0.0);
+          desc[plane].image_min_lod_fp16 = _mesa_float_to_half(min_lod);
+@@ -181,6 +200,7 @@ get_storage_image_view_desc(
+ 
+       /* Storage images are always single plane */
+       assert(view->plane_count == 1);
++      kk_fdm_note_use(view->vk.image, "storage image");
+       uint8_t plane = 0;
+ 
+       assert(view->planes[plane].storage_gpu_resource_id);
+diff --git a/src/kosmickrisp/vulkan/kk_descriptor_types.h b/src/kosmickrisp/vulkan/kk_descriptor_types.h
+index 46ceeeb..33c8b0a 100644
+--- a/src/kosmickrisp/vulkan/kk_descriptor_types.h
++++ b/src/kosmickrisp/vulkan/kk_descriptor_types.h
+@@ -29,7 +29,9 @@ struct kk_sampled_image_descriptor {
+    uint16_t pad_to_64_bits;
+    uint32_t border[4];
+    uint64_t rate_params;
+-   uint64_t pad_to_power_2[2];
++   uint32_t rate_base_layer;
++   uint32_t rate_image_size[2];
++   uint32_t pad_to_power_2;
+ };
+ 
+ static_assert(sizeof(struct kk_sampled_image_descriptor) == 64,
+diff --git a/src/kosmickrisp/vulkan/kk_fdm.c b/src/kosmickrisp/vulkan/kk_fdm.c
+index 779cd47..870d5d5 100644
+--- a/src/kosmickrisp/vulkan/kk_fdm.c
++++ b/src/kosmickrisp/vulkan/kk_fdm.c
+@@ -13,15 +13,19 @@
+ #include "kk_image_view.h"
+ 
+ #include "kosmickrisp/bridge/mtl_bridge.h"
++#include "kosmickrisp/bridge/mtl_encoder.h"
+ #include "kosmickrisp/bridge/mtl_rate_map.h"
+ 
+ #include "util/log.h"
++#include "util/simple_mtx.h"
+ #include "util/u_debug.h"
+ #include "vk_util.h"
+ 
+ #include <stdlib.h>
+ #include <string.h>
+ 
++static simple_mtx_t kk_fdm_lock = SIMPLE_MTX_INITIALIZER;
++
+ static bool
+ kk_fdm_debug(void)
+ {
+@@ -44,10 +48,13 @@ kk_fdm_capture(struct kk_image *image, const uint8_t *src, uint32_t row_length,
+    const uint32_t w = image->vk.extent.width;
+    const uint32_t h = image->vk.extent.height;
+    const uint32_t layers = image->vk.array_layers;
++   simple_mtx_lock(&kk_fdm_lock);
+    if (image->fdm.cpu == NULL) {
+       image->fdm.cpu = calloc((size_t)w * h * layers, 2);
+-      if (image->fdm.cpu == NULL)
++      if (image->fdm.cpu == NULL) {
++         simple_mtx_unlock(&kk_fdm_lock);
+          return;
++      }
+       image->fdm.width = w;
+       image->fdm.height = h;
+       image->fdm.layers = layers;
+@@ -58,6 +65,7 @@ kk_fdm_capture(struct kk_image *image, const uint8_t *src, uint32_t row_length,
+    if (image_height == 0)
+       image_height = extent.height;
+ 
++   bool changed = image->fdm.version == 0;
+    const uint32_t layer_count = vk_image_subresource_layer_count(&image->vk, subresource);
+    for (uint32_t l = 0; l < layer_count; l++) {
+       const uint32_t layer = subresource->baseArrayLayer + l;
+@@ -65,13 +73,92 @@ kk_fdm_capture(struct kk_image *image, const uint8_t *src, uint32_t row_length,
+          break;
+       for (uint32_t y = 0; y < extent.height && offset.y + y < h; y++) {
+          uint32_t copy_w = MIN2(extent.width, w - MIN2((uint32_t)offset.x, w));
+-         memcpy(image->fdm.cpu +
+-                   (((size_t)layer * h + offset.y + y) * w + offset.x) * 2,
+-                src + (((size_t)l * image_height + y) * row_length) * 2,
+-                (size_t)copy_w * 2);
++         uint8_t *dst = image->fdm.cpu +
++                        (((size_t)layer * h + offset.y + y) * w + offset.x) * 2;
++         const uint8_t *row = src + (((size_t)l * image_height + y) * row_length) * 2;
++         if (memcmp(dst, row, (size_t)copy_w * 2)) {
++            memcpy(dst, row, (size_t)copy_w * 2);
++            changed = true;
++         }
++      }
++   }
++   if (changed)
++      image->fdm.version++;
++   if (kk_fdm_debug()) {
++      bool same = layers < 2 || !memcmp(image->fdm.cpu, image->fdm.cpu + (size_t)w * h * 2,
++                                        (size_t)w * h * 2);
++      uint32_t full[2] = {0, 0};
++      for (uint32_t l = 0; l < MIN2(layers, 2); l++)
++         for (uint32_t i = 0; i < w * h; i++)
++            full[l] += image->fdm.cpu[((size_t)l * w * h + i) * 2] == 255;
++      mesa_logi("kk-fdm: density upload %ux%ux%u %s, layers %s, full-rate texels %u/%u",
++                extent.width, extent.height, layer_count,
++                changed ? "changed" : "unchanged", same ? "identical" : "differ",
++                full[0], full[1]);
++   }
++   simple_mtx_unlock(&kk_fdm_lock);
++}
++
++void
++kk_fdm_note_use(const struct vk_image *image, const char *what)
++{
++   if (image == NULL ||
++       !(image->create_flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT) ||
++       !KK_EXPERIMENTAL(FDM_RATE) || !kk_fdm_debug())
++      return;
++   static struct {
++      const struct vk_image *image;
++      const char *what;
++   } seen[256];
++   static uint32_t seen_count;
++   simple_mtx_lock(&kk_fdm_lock);
++   for (uint32_t i = 0; i < seen_count; i++) {
++      if (seen[i].image == image && seen[i].what == what) {
++         simple_mtx_unlock(&kk_fdm_lock);
++         return;
++      }
++   }
++   if (seen_count < ARRAY_SIZE(seen)) {
++      seen[seen_count].image = image;
++      seen[seen_count].what = what;
++      seen_count++;
++      mesa_logi("kk-fdm: use %s: image %p format %d samples %u %ux%ux%u usage 0x%x",
++                what, (const void *)image, image->format, image->samples,
++                image->extent.width, image->extent.height, image->array_layers,
++                (unsigned)image->usage);
++   }
++   simple_mtx_unlock(&kk_fdm_lock);
++}
++
++void
++kk_fdm_note_view(const struct vk_image_view *view, const char *what)
++{
++   if (view == NULL ||
++       !(view->image->create_flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT) ||
++       !KK_EXPERIMENTAL(FDM_RATE) || !kk_fdm_debug())
++      return;
++   static struct {
++      const struct vk_image_view *view;
++      const char *what;
++   } seen[256];
++   static uint32_t seen_count;
++   simple_mtx_lock(&kk_fdm_lock);
++   for (uint32_t i = 0; i < seen_count; i++) {
++      if (seen[i].view == view && seen[i].what == what) {
++         simple_mtx_unlock(&kk_fdm_lock);
++         return;
+       }
+    }
+-   image->fdm.version++;
++   if (seen_count < ARRAY_SIZE(seen)) {
++      seen[seen_count].view = view;
++      seen[seen_count].what = what;
++      seen_count++;
++      mesa_logi("kk-fdm: view %s: view type %d layers %u+%u image %ux%ux%u format %d",
++                what, view->view_type, view->base_array_layer, view->layer_count,
++                view->image->extent.width, view->image->extent.height,
++                view->image->array_layers, view->format);
++   }
++   simple_mtx_unlock(&kk_fdm_lock);
+ }
+ 
+ VkResult
+@@ -96,15 +183,22 @@ kk_fdm_image_finish(struct kk_device *dev, struct kk_image *image)
+       kk_destroy_bo(dev, image->rate_params);
+    if (image->fdm.params)
+       kk_destroy_bo(dev, image->fdm.params);
++   for (uint32_t i = 0; i < image->fdm.old_params_count; i++)
++      kk_destroy_bo(dev, image->fdm.old_params[i]);
++   free(image->fdm.old_params);
+    if (image->fdm.map)
+       mtl_release(image->fdm.map);
+    free(image->fdm.cpu);
+ }
+ 
++#define KK_FDM_TEXEL_SIZE 32
++
+ static float
+ kk_fdm_density(const struct kk_image *density, uint32_t layer, uint32_t x,
+                uint32_t y, uint32_t channel)
+ {
++   x = MIN2(x, density->fdm.width - 1);
++   y = MIN2(y, density->fdm.height - 1);
+    const uint8_t *texel =
+       density->fdm.cpu +
+       (((size_t)layer * density->fdm.height + y) * density->fdm.width + x) * 2;
+@@ -123,7 +217,8 @@ kk_fdm_get_map(struct kk_device *dev, struct kk_image *density,
+        density->fdm.map_height == screen.height)
+       return density->fdm.map;
+ 
+-   const uint32_t mw = density->fdm.width, mh = density->fdm.height;
++   const uint32_t mw = DIV_ROUND_UP(screen.width, KK_FDM_TEXEL_SIZE);
++   const uint32_t mh = DIV_ROUND_UP(screen.height, KK_FDM_TEXEL_SIZE);
+    const uint32_t layers = MIN2(density->fdm.layers, KK_RATE_PARAMS_MAX_LAYERS);
+    const uint32_t nh = 2 * mw + 1, nv = 2 * mh + 1;
+    float *horizontal = calloc((size_t)nh * layers, sizeof(float));
+@@ -175,12 +270,25 @@ kk_fdm_get_map(struct kk_device *dev, struct kk_image *density,
+       mtl_release(map);
+       return NULL;
+    }
+-   if (density->fdm.params == NULL &&
+-       kk_alloc_bo(dev, &density->vk.base, KK_RATE_PARAMS_SIZE_B, 0,
+-                   &density->fdm.params) != VK_SUCCESS) {
++   struct kk_bo *params;
++   if (kk_alloc_bo(dev, &density->vk.base, KK_RATE_PARAMS_SIZE_B, 0, &params) !=
++       VK_SUCCESS) {
+       mtl_release(map);
+       return NULL;
+    }
++   if (density->fdm.params) {
++      struct kk_bo **old =
++         realloc(density->fdm.old_params,
++                 (density->fdm.old_params_count + 1) * sizeof(*old));
++      if (old == NULL) {
++         kk_destroy_bo(dev, params);
++         mtl_release(map);
++         return NULL;
++      }
++      old[density->fdm.old_params_count++] = density->fdm.params;
++      density->fdm.old_params = old;
++   }
++   density->fdm.params = params;
+ 
+    struct kk_rate_params_header *header = density->fdm.params->cpu;
+    memset(header, 0, KK_RATE_PARAMS_HEADER_B);
+@@ -237,20 +345,60 @@ kk_fdm_all_subsampled(const struct kk_rendering_state *render)
+ }
+ 
+ static void
+-kk_fdm_publish(struct kk_image *density, struct kk_image_view *iview)
++kk_fdm_log_view(const char *what, uint32_t i, const struct kk_image_view *iview)
++{
++   if (iview == NULL)
++      return;
++   const struct vk_image *img = iview->vk.image;
++   mesa_logi("kk-fdm:   %s %u: format %d samples %u %ux%ux%u usage 0x%x %s", what,
++             i, img->format, img->samples, img->extent.width, img->extent.height,
++             img->array_layers, (unsigned)img->usage,
++             (img->create_flags & VK_IMAGE_CREATE_SUBSAMPLED_BIT_EXT)
++                ? "subsampled"
++                : "NOT subsampled");
++}
++
++static void
++kk_fdm_log_pass(const struct kk_rendering_state *render, const char *why)
++{
++   mesa_logi("kk-fdm: %s", why);
++   for (uint32_t i = 0; i < render->color_att_count; i++) {
++      kk_fdm_log_view("color", i, render->color_att[i].iview);
++      if (render->color_att[i].resolve_mode != VK_RESOLVE_MODE_NONE)
++         kk_fdm_log_view("color resolve", i, render->color_att[i].resolve_iview);
++   }
++   kk_fdm_log_view("depth", 0, render->depth_att.iview);
++   if (render->depth_att.resolve_mode != VK_RESOLVE_MODE_NONE)
++      kk_fdm_log_view("depth resolve", 0, render->depth_att.resolve_iview);
++   if (render->stencil_att.iview != render->depth_att.iview)
++      kk_fdm_log_view("stencil", 0, render->stencil_att.iview);
++}
++
++static void
++kk_fdm_publish(struct kk_cmd_buffer *cmd, struct kk_image *density,
++               struct kk_image_view *iview)
+ {
+    if (iview == NULL)
+       return;
+    struct kk_image *image = container_of(iview->vk.image, struct kk_image, vk);
+    if (image->rate_params == NULL)
+       return;
+-   if (image->rate_params_owner == density->fdm.map &&
+-       image->rate_params_version == density->fdm.map_version)
++   if (image->rate_params_owner == density->fdm.params)
+       return;
+-   memcpy(image->rate_params->cpu, density->fdm.params->cpu,
+-          KK_RATE_PARAMS_SIZE_B);
+-   image->rate_params_owner = density->fdm.map;
+-   image->rate_params_version = density->fdm.map_version;
++   if (cmd->metal.render == NULL)
++      mtl_copy_from_buffer_to_buffer(cs_get_compute(cmd), density->fdm.params->map,
++                                     0, image->rate_params->map, 0,
++                                     KK_RATE_PARAMS_SIZE_B);
++   else
++      memcpy(image->rate_params->cpu, density->fdm.params->cpu,
++             KK_RATE_PARAMS_SIZE_B);
++   if (kk_fdm_debug()) {
++      static uint32_t republished;
++      if (image->rate_params_owner != NULL && (++republished & (republished - 1)) == 0)
++         mesa_logi("kk-fdm: %u parameter block rewrites of already-published images",
++                   republished);
++   }
++   image->rate_params_owner = density->fdm.params;
+ }
+ 
+ void
+@@ -277,13 +425,57 @@ kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
+    }
+    gfx->fdm.carry = false;
+ 
++   simple_mtx_lock(&kk_fdm_lock);
+    void *map = density ? kk_fdm_get_map(dev, density, screen) : NULL;
+    if (map && !kk_fdm_all_subsampled(render)) {
+       static uint32_t logged;
+       if (kk_fdm_debug() && logged++ < 8)
+-         mesa_logi("kk-fdm: full rate, pass has a non-subsampled attachment");
++         kk_fdm_log_pass(render, "full rate, non-subsampled attachment");
+       map = NULL;
+    }
++   if (density && kk_fdm_debug()) {
++      static struct {
++         const void *density, *image;
++         uint32_t sw, sh, ax, ay, aw, ah;
++      } combos[64];
++      static uint32_t combo_count;
++      const void *first = render->color_att_count && render->color_att[0].iview
++                             ? (const void *)render->color_att[0].iview->vk.image
++                             : NULL;
++      bool found = false;
++      for (uint32_t i = 0; i < combo_count && !found; i++)
++         found = combos[i].density == density && combos[i].image == first &&
++                 combos[i].sw == screen.width && combos[i].sh == screen.height &&
++                 combos[i].ax == (uint32_t)render->area.offset.x &&
++                 combos[i].ay == (uint32_t)render->area.offset.y &&
++                 combos[i].aw == render->area.extent.width &&
++                 combos[i].ah == render->area.extent.height;
++      if (!found && combo_count < ARRAY_SIZE(combos)) {
++         combos[combo_count].density = density;
++         combos[combo_count].image = first;
++         combos[combo_count].sw = screen.width;
++         combos[combo_count].sh = screen.height;
++         combos[combo_count].ax = render->area.offset.x;
++         combos[combo_count].ay = render->area.offset.y;
++         combos[combo_count].aw = render->area.extent.width;
++         combos[combo_count].ah = render->area.extent.height;
++         combo_count++;
++         mesa_logi("kk-fdm: pass density %ux%u screen %ux%u area %d,%d %ux%u views 0x%x %s",
++                   density->vk.extent.width, density->vk.extent.height, screen.width,
++                   screen.height, render->area.offset.x, render->area.offset.y,
++                   render->area.extent.width, render->area.extent.height,
++                   render->view_mask, map ? "mapped" : "full rate");
++         kk_fdm_log_pass(render, "  attachments:");
++      }
++      static uint32_t applied, fallback;
++      if (map)
++         applied++;
++      else
++         fallback++;
++      if (((applied + fallback) & 4095) == 0)
++         mesa_logi("kk-fdm: %u FDM passes rate mapped, %u at full rate", applied,
++                   fallback);
++   }
+ 
+    gfx->fdm.density = map ? density : NULL;
+    uint64_t params = 0;
+@@ -291,14 +483,15 @@ kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
+       mtl_render_pass_descriptor_set_rate_map(descriptor, map);
+       params = density->fdm.params->gpu;
+       for (uint32_t i = 0; i < render->color_att_count; i++) {
+-         kk_fdm_publish(density, render->color_att[i].iview);
+-         kk_fdm_publish(density, render->color_att[i].resolve_iview);
++         kk_fdm_publish(cmd, density, render->color_att[i].iview);
++         kk_fdm_publish(cmd, density, render->color_att[i].resolve_iview);
+       }
+-      kk_fdm_publish(density, render->depth_att.iview);
+-      kk_fdm_publish(density, render->depth_att.resolve_iview);
+-      kk_fdm_publish(density, render->stencil_att.iview);
+-      kk_fdm_publish(density, render->stencil_att.resolve_iview);
++      kk_fdm_publish(cmd, density, render->depth_att.iview);
++      kk_fdm_publish(cmd, density, render->depth_att.resolve_iview);
++      kk_fdm_publish(cmd, density, render->stencil_att.iview);
++      kk_fdm_publish(cmd, density, render->stencil_att.resolve_iview);
+    }
++   simple_mtx_unlock(&kk_fdm_lock);
+ 
+    struct kk_descriptor_state *desc = &gfx->descriptors;
+    if (desc->root.fdm_rate_params != params) {
+diff --git a/src/kosmickrisp/vulkan/kk_fdm.h b/src/kosmickrisp/vulkan/kk_fdm.h
+index 6ca86ff..e98e3bc 100644
+--- a/src/kosmickrisp/vulkan/kk_fdm.h
++++ b/src/kosmickrisp/vulkan/kk_fdm.h
+@@ -19,4 +19,9 @@ void kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
+ 
+ void kk_fdm_carry_to_next_rendering(struct kk_cmd_buffer *cmd);
+ 
++struct vk_image;
++void kk_fdm_note_use(const struct vk_image *image, const char *what);
++struct vk_image_view;
++void kk_fdm_note_view(const struct vk_image_view *view, const char *what);
++
+ #endif
+diff --git a/src/kosmickrisp/vulkan/kk_image.h b/src/kosmickrisp/vulkan/kk_image.h
+index d44c43d..f58665f 100644
+--- a/src/kosmickrisp/vulkan/kk_image.h
++++ b/src/kosmickrisp/vulkan/kk_image.h
+@@ -64,6 +64,8 @@ struct kk_image {
+       void *map;
+       uint32_t map_version, map_width, map_height, map_layers;
+       struct kk_bo *params;
++      struct kk_bo **old_params;
++      uint32_t old_params_count;
+    } fdm;
+ 
+    struct kk_bo *rate_params;
+diff --git a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
+index 44ba9f4..1aad9db 100644
+--- a/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
++++ b/src/kosmickrisp/vulkan/kk_nir_lower_descriptors.c
+@@ -506,6 +506,7 @@ kk_lower_subsampled_coord(nir_builder *b, nir_tex_instr *tex,
+    nir_def *coord = tex->src[ci].src.ssa;
+    if (coord->num_components < 2 || coord->bit_size != 32)
+       return;
++   const bool fetch = tex->op == nir_texop_txf || tex->op == nir_texop_txf_ms;
+ 
+    nir_def *addr = load_resource_deref_desc(
+       b, 1, 64, texture,
+@@ -518,27 +519,38 @@ kk_lower_subsampled_coord(nir_builder *b, nir_tex_instr *tex,
+    nir_push_if(b, nir_ine_imm(b, valid, 0));
+ 
+    nir_def *screen = nir_u2f32(
+-      b, kk_load_rate_u32(b, addr, offsetof(struct kk_rate_params_header, screen), 2));
+-   nir_def *layer = nir_imm_int(b, 0);
++      b, load_resource_deref_desc(
++            b, 2, 32, texture,
++            plane_offset_B +
++               offsetof(struct kk_sampled_image_descriptor, rate_image_size),
++            ctx));
++   nir_def *layer = load_resource_deref_desc(
++      b, 1, 32, texture,
++      plane_offset_B +
++         offsetof(struct kk_sampled_image_descriptor, rate_base_layer),
++      ctx);
+    if (tex->is_array) {
+-      nir_def *layers = kk_load_rate_u32(
+-         b, addr, offsetof(struct kk_rate_params_header, layers), 1);
+-      nir_def *l = nir_f2u32(
+-         b, nir_fround_even(b, nir_channel(b, coord, coord->num_components - 1)));
+-      layer = nir_umin(b, l, nir_iadd_imm(b, layers, -1));
++      nir_def *l = nir_channel(b, coord, coord->num_components - 1);
++      if (!fetch)
++         l = nir_f2u32(b, nir_fround_even(b, l));
++      layer = nir_iadd(b, layer, l);
+    }
++   nir_def *layers =
++      kk_load_rate_u32(b, addr, offsetof(struct kk_rate_params_header, layers), 1);
++   layer = nir_umin(b, layer, nir_iadd_imm(b, layers, -1));
+    nir_def *phys_addr = nir_iadd(
+       b, nir_iadd_imm(b, addr, offsetof(struct kk_rate_params_header, physical)),
+       nir_u2u64(b, nir_imul_imm(b, layer, 8)));
+    nir_def *phys_size = nir_u2f32(
+       b, nir_build_load_global_constant(b, 2, 32, phys_addr, .align_mul = 4));
+ 
+-   nir_def *xy = nir_fmul(b, nir_channels(b, coord, 0x3), screen);
++   nir_def *xy = fetch ? nir_fadd_imm(b, nir_i2f32(b, nir_channels(b, coord, 0x3)), 0.5f)
++                       : nir_fmul(b, nir_channels(b, coord, 0x3), screen);
+    nir_def *ph = nir_rate_map_screen_to_physical_kk(
+       b, nir_iadd_imm(b, addr, KK_RATE_PARAMS_HEADER_B), xy, layer);
+    ph = nir_fmax(b, ph, nir_imm_float(b, 0.5f));
+    ph = nir_fmin(b, ph, nir_fadd_imm(b, phys_size, -0.5f));
+-   nir_def *uv = nir_fdiv(b, ph, screen);
++   nir_def *uv = fetch ? nir_f2i32(b, nir_ffloor(b, ph)) : nir_fdiv(b, ph, screen);
+ 
+    nir_def *comps[4];
+    for (unsigned i = 0; i < coord->num_components; i++)
+@@ -580,6 +592,13 @@ lower_tex(nir_builder *b, nir_tex_instr *tex,
+       kk_lower_subsampled_coord(b, tex,
+                                 nir_src_as_deref(nir_src_for_ssa(texture)),
+                                 plane_offset_B, ctx);
++   else if (KK_EXPERIMENTAL(FDM_RATE) &&
++            (tex->op == nir_texop_txf || tex->op == nir_texop_txf_ms) &&
++            (tex->sampler_dim == GLSL_SAMPLER_DIM_2D ||
++             tex->sampler_dim == GLSL_SAMPLER_DIM_MS))
++      kk_lower_subsampled_coord(b, tex,
++                                nir_src_as_deref(nir_src_for_ssa(texture)),
++                                plane_offset_B, ctx);
+ 
+    /* LOD bias is passed in the descriptor set, rather than embedded into
+     * the sampler descriptor. There's no spot in the hardware descriptor,
+-- 
+2.54.0 (Apple Git-157)
+
