@@ -16,7 +16,12 @@
 
 #include "vive/vive_common.h"
 
+#include "xrt/xrt_config_drivers.h"
+
 #include "vp2/vp2_hid.h"
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+#include "pimax_p2/pimax_p2.h"
+#endif
 
 #include "openvr_driver.h"
 
@@ -153,6 +158,20 @@ struct VivePro2Data
 	}
 };
 
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+struct PimaxData
+{
+	pimax_p2_device *dev{nullptr};
+
+	~PimaxData()
+	{
+		if (dev != nullptr) {
+			pimax_p2_destroy(dev);
+		}
+	}
+};
+#endif
+
 class HmdDevice : public Device
 {
 public:
@@ -174,6 +193,9 @@ public:
 	// @todo Remove when clang-format is updated in CI
 	// clang-format off
 	struct VivePro2Data vp2{};
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+	struct PimaxData pimax{};
+#endif
 	// clang-format on
 
 	HmdDevice(const DeviceBuilder &builder);
@@ -217,6 +239,11 @@ public:
 
 	bool
 	init_vive_pro_2(struct xrt_prober *xp);
+
+#ifdef XRT_BUILD_DRIVER_PIMAX_P2
+	bool
+	init_pimax(pimax_p2_device *pdev);
+#endif
 
 private:
 	std::unique_ptr<Parts> hmd_parts{nullptr};
