@@ -387,6 +387,7 @@ option_with_deps(XRT_BUILD_DRIVER_WMR "Enable Windows Mixed Reality driver" DEPE
 option_with_deps(XRT_BUILD_DRIVER_XREAL_AIR "Enable Xreal Air HMD driver" DEPENDS XRT_HAVE_HIDAPI)
 option_with_deps(XRT_BUILD_DRIVER_SIMULAVR "Enable simula driver" DEPENDS XRT_HAVE_REALSENSE)
 option_with_deps(XRT_BUILD_DRIVER_SOLARXR "Enable SolarXR driver" DEPENDS XRT_HAVE_LINUX XRT_MODULE_IPC)
+option_with_deps(XRT_BUILD_DRIVER_PIMAX_P2 "Enable Pimax P2 driver" DEPENDS XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE XRT_HAVE_HIDAPI)
 option(XRT_BUILD_DRIVER_SIMULATED "Enable simulated driver" ON)
 
 option(XRT_BUILD_SAMPLES "Enable compiling sample code implementations that will not be linked into any final targets" ON)
@@ -510,6 +511,7 @@ list(
 	"XREAL_AIR"
 	"STEAMVR_LIGHTHOUSE"
 	"SOLARXR"
+	"PIMAX_P2"
 	)
 
 # Package name needs to be known by the native code itself.
@@ -775,6 +777,7 @@ message(STATUS "#    DRIVER_WMR:                  ${XRT_BUILD_DRIVER_WMR}")
 message(STATUS "#    DRIVER_XREAL_AIR:            ${XRT_BUILD_DRIVER_XREAL_AIR}")
 message(STATUS "#    DRIVER_STEAMVR_LIGHTHOUSE:   ${XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE}")
 message(STATUS "#    DRIVER_SOLARXR:              ${XRT_BUILD_DRIVER_SOLARXR}")
+message(STATUS "#    DRIVER_PIMAX_P2:             ${XRT_BUILD_DRIVER_PIMAX_P2}")
 message(STATUS "#####----- Config -----#####")
 # cmake-format: on
 

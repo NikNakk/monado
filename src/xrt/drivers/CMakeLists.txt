@@ -668,6 +668,12 @@ if(XRT_BUILD_DRIVER_STEAMVR_LIGHTHOUSE)
 	list(APPEND ENABLED_HEADSET_DRIVERS steamvr_lh)
 endif()
 
+if(XRT_BUILD_DRIVER_PIMAX_P2)
+	add_subdirectory(pimax_p2)
+	target_link_libraries(drv_steamvr_lh PRIVATE drv_pimax_p2)
+	list(APPEND ENABLED_HEADSET_DRIVERS pimax_p2)
+endif()
+
 if(XRT_BUILD_DRIVER_SOLARXR)
 	add_library(
 		drv_solarxr STATIC
