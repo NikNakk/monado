@@ -1,0 +1,72 @@
+{
+  "date": "2026-10-21",
+  "source_base": "c8e17c9784475a745e7be26fb5d4cd2313b9197c",
+  "source_worktree": "/Users/nickkennedy/Code/alyx-native/workspace/kk-custom-resolve",
+  "source_patch": "mesa-fixed-depth.patch in Monado evidence branch",
+  "build_kind": "fresh Meson configuration and driver target, all 575 actions completed; no overlay objects",
+  "build_options": "[options]\nbuildtype = release\nplatforms = macos\nvulkan-drivers = kosmickrisp\ngallium-drivers = \nopengl = false\nzstd = disabled\nprefer_static = true\n\n[properties]\n\n",
+  "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+  "files": {
+    "library": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/kk-custom-resolve-clean/src/kosmickrisp/vulkan/libvulkan_kosmickrisp.dylib",
+      "sha256": "740f2aba7306460d2e4190c2e1a5c91f509afcdbd292e5d69ed6576a34b90d74"
+    },
+    "source": {
+      "path": "/Users/nickkennedy/Code/alyx-native/workspace/kk-custom-resolve/src/kosmickrisp/vulkan/kk_cmd_draw.c",
+      "sha256": "6257f3f15f7c43fc3799d6caa28072a13d3eb8a27bfda442bdd08483d7ee9940"
+    },
+    "icd": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/kk-custom-resolve-clean/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json",
+      "sha256": "3c6a1d2b07e492fcdce4e9d5b103ba2590dc8f287960fd094dda92e9a6a820f4"
+    },
+    "probe": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/custom-resolve-depth/probe",
+      "sha256": "33fecd517f5149cf0f2985a772c7b83f159fe99998806fc3997a2e3e717d0798"
+    },
+    "host": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/host-custom-resolve/alyx_host",
+      "sha256": "8f2d0f9064b229d7a26c8ad60be5e2fb4200a4c4637254834b484caca1160acd"
+    }
+  },
+  "tests": {
+    "depth-clean": {
+      "color_passed": 26,
+      "depth_passed": 16,
+      "failures": 0,
+      "metal_api_validation": true,
+      "identity": "device=Apple M5 vendor=0x106b deviceID=0x64 driverVersion=109457507 driver=KosmicKrisp info=Mesa 27.0.0-devel (git-c8e17c9784)"
+    },
+    "depth-clean-strict": {
+      "color_passed": 26,
+      "depth_passed": 16,
+      "failures": 0,
+      "metal_api_validation": true,
+      "identity": "device=Apple M5 vendor=0x106b deviceID=0x64 driverVersion=109457507 driver=KosmicKrisp info=Mesa 27.0.0-devel (git-c8e17c9784)"
+    },
+    "metal_interop": {
+      "passed": 26,
+      "failures": 0
+    },
+    "xrizer": {
+      "frames": 180,
+      "errors": 0,
+      "timeline_enabled": true
+    },
+    "alyx": {
+      "exit_code": 124,
+      "elapsed_seconds": 90.0106987953186,
+      "custom_resolve_commands_recorded": 128,
+      "faults": 0,
+      "panics": 0,
+      "device_lost": 0,
+      "selected_library": "/Users/nickkennedy/Code/alyx-native/build/kk-custom-resolve-clean/src/kosmickrisp/vulkan/libvulkan_kosmickrisp.dylib",
+      "visual_scene_verified": false,
+      "controlled_timeout": true
+    }
+  },
+  "limits": [
+    "Visual main scene restoration and saved-game/headset quality remain unverified",
+    "No performance comparison or FDM acceleration result",
+    "Mesa worktree remains uncommitted; exact patch committed as evidence in Monado"
+  ]
+}

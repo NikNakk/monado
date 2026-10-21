@@ -10,7 +10,8 @@ The isolated [Alyx custom resolve diagnosis](macos-alyx-custom-resolve.md) now
 reproduces and fixes dropped fixed-depth resolves alongside custom color. All
 16 mixed mono/stereo and suspend/resume cases pass, as do Metal interop and 180
 xrizer submissions. A two-minute Alyx candidate run completes without a recorded
-crash; visual scene restoration and a clean build remain pending. The working
+crash; a full clean build also passes the matrix and integration checks. Visual
+scene restoration remains pending. The working
 KK fallback and MoltenVK default remain unchanged (21 October 2026).
 
 The user-selected Medium KK run feels closer to MVK, with pose-call p99

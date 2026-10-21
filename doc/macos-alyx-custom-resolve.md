@@ -1,7 +1,13 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # Alyx custom resolve diagnosis — 21 October 2026
 
-**Follow-up:** an automated Alyx capture now exposes a specific driver defect:
+**Current:** the full clean-built driver passes the 26 color and 16 mixed-depth
+checks, 26 Metal interoperability checks and 180 xrizer frames. A 90-second
+clean-driver Alyx run records actual custom resolve calls without a fault, panic
+or device loss. The opt-in gameplay launcher now selects the clean build. Visual
+scene restoration remains unverified; see the clean-build follow-up below.
+
+An automated Alyx capture exposes a specific driver defect:
 fixed-function depth/stencil resolves are suppressed alongside custom color
 resolve. The candidate fixes an owned reproduction in all 16 mono/stereo,
 two/four-sample, STORE/DONT_CARE and suspend/resume configurations. A two-minute
@@ -13,8 +19,8 @@ The user confirmed that disabling `VK_EXT_custom_resolve` through Alyx's own
 `-vulkan_disable_ext_custom_resolve` switch restores the missing main scene on
 KosmicKrisp. This isolates a rendering path, not a particular driver bug.
 The working `run-alyx-kosmickrisp` retains that fallback; MoltenVK stays the
-original default. No driver implementation change is justified by the tests
-below yet. No installed runtime/service, game executable or graphics setting
+original default. The initial color-only tests did not isolate the defect; the
+subsequent mixed-depth tests do. No installed runtime/service, game executable or graphics setting
 was changed by this investigation.
 
 ## Changes and revisions
@@ -255,3 +261,35 @@ The existing `run-alyx-kosmickrisp` still disables custom resolve; MoltenVK rema
 default. Do not promote this candidate or infer a performance gain until visual
 testing and a clean driver build pass. No substantial FDM implementation begins
 at this point.
+
+## Full clean build follow-up
+
+The single-object overlay caveat above is now resolved for the opt-in gameplay
+candidate. `build/kk-custom-resolve-clean` was configured from scratch with the
+same seven explicit Meson options as the original build; all 575 driver build
+actions completed. It reports Mesa 27.0.0-devel git-c8e17c9784; the exact patched
+source and library hashes are recorded in
+[clean-build results](alyx-valve-lua-results/custom-resolve/clean-build-results.json).
+The driver identity string does not encode the uncommitted patch, so use those
+hashes and the versioned patch to identify it precisely.
+
+The clean build passes all 26 color checks and 16 depth checks both directly
+and through the strict Klepton observer, all 26 Metal interop checks, and 180
+xrizer submissions with zero errors and timeline enabled. A separate 90-second
+Alyx run (`kk-custom-resolve-clean-1`) records 128 bounded custom resolve calls,
+ends at the configured timeout (124), and records no fault, panic or device loss.
+These are process/API and pixel-test results, not visual scene confirmation.
+The native UI inventory did not expose the unbundled game/service window for
+an automated visual inspection.
+
+The gameplay command above now selects the clean driver. The overlay build and
+its results remain as historical evidence. Rebuild from a new directory with:
+
+```sh
+sh "$experiment/build-clean.sh" "$root/build/kk-custom-resolve-clean-another"
+```
+
+The preserved Python environment was relocated from `/tmp`; its Meson console
+script still has an obsolete absolute shebang. The build helper invokes the
+Meson module through the permanent Python interpreter instead. Configuration,
+build and final test logs remain under `validation/custom-resolve`.
