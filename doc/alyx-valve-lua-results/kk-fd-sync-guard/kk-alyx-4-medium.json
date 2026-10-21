@@ -1,0 +1,142 @@
+{
+  "run": "kk-alyx-4",
+  "user_report": "Manually selected Medium rather than High; performance felt more like MVK.",
+  "manifest": {
+    "elapsed_seconds": 223.85138416290283,
+    "exit_code": 130,
+    "timeline_handoff": true,
+    "measured_gpu_timing": true,
+    "binaries": {
+      "host": {
+        "path": "/Users/nickkennedy/Code/alyx-native/build/host-timeline/alyx_host",
+        "sha256": "45f4c3b85ddab9272c1937eb2d0f69658df32cb7513721b236f92b95d3e9f725"
+      },
+      "xrizer": {
+        "path": "/Users/nickkennedy/Code/alyx-native/build/xrizer-gpu-timing/release/libxrizer.dylib",
+        "sha256": "6547068da978895e603df51cc25040b40c9cebebee973d684429cd8a6d97a9aa"
+      },
+      "openxr_loader": {
+        "path": "/Users/nickkennedy/Code/OpenXR-SDK/build/macos/src/loader/Release/libopenxr_loader.dylib",
+        "sha256": "965161677bbc6415110ebc264216891114963eb89689db5153316b55802642a0"
+      },
+      "engine": {
+        "path": "/Users/nickkennedy/Code/alyx-native/workspace/alyx-native-game-root/game/bin/linuxsteamrtarm64/libengine2.so",
+        "sha256": "43ff2a7ce24488690b408d61976a3d0f9609dc61ca4d5675d3e07f5b038bf333"
+      },
+      "monado_runtime": {
+        "path": "/Users/nickkennedy/Code/alyx-native/build/monado-kk-fd-guard/src/xrt/targets/openxr/libopenxr_monado.dylib",
+        "sha256": "ce577d53dfde349f175b7227b5776e912d5b59893bb48df720e6be4708957a0b"
+      }
+    }
+  },
+  "settings_changes": {
+    "DeviceID": [
+      "436666890",
+      "100"
+    ]
+  },
+  "window": {
+    "measurement": "API wall durations, including blocking; not CPU busy, GPU execution, or presentation latency",
+    "window_seconds": [
+      140,
+      165
+    ],
+    "api_wall": {
+      "handoff": {
+        "count": 1496,
+        "median_ms": 0.12085399999999999,
+        "p95_ms": 0.21691725,
+        "p99_ms": 0.33183894999999985
+      },
+      "submit:eye0": {
+        "count": 1496,
+        "median_ms": 0.024917,
+        "p95_ms": 0.047604,
+        "p99_ms": 0.06205659999999999
+      },
+      "submit:eye1": {
+        "count": 1496,
+        "median_ms": 0.072834,
+        "p95_ms": 0.13367725,
+        "p99_ms": 0.19443334999999892
+      },
+      "wait_poses": {
+        "count": 1496,
+        "median_ms": 10.577438,
+        "p95_ms": 13.3731875,
+        "p99_ms": 14.346798249999999
+      },
+      "xr_acquire_image": {
+        "count": 1496,
+        "median_ms": 0.102084,
+        "p95_ms": 0.124416,
+        "p99_ms": 0.2388128
+      },
+      "xr_begin_frame": {
+        "count": 1496,
+        "median_ms": 0.0396045,
+        "p95_ms": 0.07262474999999999,
+        "p99_ms": 0.09119759999999989
+      },
+      "xr_end_frame": {
+        "count": 1496,
+        "median_ms": 0.1147085,
+        "p95_ms": 0.20838525,
+        "p99_ms": 0.31978959999999995
+      },
+      "xr_locate_views_view": {
+        "count": 1496,
+        "median_ms": 0.086,
+        "p95_ms": 0.1004685,
+        "p99_ms": 0.11267225
+      },
+      "xr_locate_views_world": {
+        "count": 1496,
+        "median_ms": 0.075792,
+        "p95_ms": 0.08698924999999999,
+        "p99_ms": 0.09909345
+      },
+      "xr_release_image": {
+        "count": 1496,
+        "median_ms": 0.0363545,
+        "p95_ms": 0.0812085,
+        "p99_ms": 0.14486284999999993
+      },
+      "xr_wait_frame": {
+        "count": 1496,
+        "median_ms": 10.294875000000001,
+        "p95_ms": 13.031677250000001,
+        "p99_ms": 14.057668399999999
+      },
+      "xr_wait_image": {
+        "count": 1496,
+        "median_ms": 0.000167,
+        "p95_ms": 0.000333,
+        "p99_ms": 0.0005
+      }
+    },
+    "caution": "nested handoff may be included in wait_poses; do not sum these durations",
+    "wait_poses_start_interval": {
+      "count": 1495,
+      "median_ms": 16.649583000003076,
+      "p95_ms": 20.794562599991195,
+      "p99_ms": 21.892431020017955
+    },
+    "application_gpu_clock_interval": {
+      "count": 1496,
+      "median_ms": 13.7222925,
+      "p95_ms": 14.687354,
+      "p99_ms": 15.327406299999998
+    }
+  },
+  "feedback": {
+    "matched_records": 104,
+    "mismatches_at_log_rounding": 0
+  },
+  "timing_context": "Later performance-override log maps to next completed frame at API second 54.115; last loading-end to 91.705. Window 140-165 is later than both.",
+  "limitations": [
+    "User label establishes selected UI preset; persisted settings do not prove previous High was active.",
+    "Only device ID differs before/after; in-memory settings are incompletely captured.",
+    "Motion, caches and thermal conditions uncontrolled; no matched Medium-versus-Medium speed ratio."
+  ]
+}

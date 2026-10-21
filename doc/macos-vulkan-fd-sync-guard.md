@@ -271,3 +271,35 @@ and verified active settings as well as fixed fidelity, with warmed caches and
 controlled scene/motion. Do not treat the historical KK/MVK tail difference as
 a pure driver throughput comparison. No further game run is requested solely
 to remeasure the same unpinned setup.
+
+## User-selected Medium KK checkpoint — 21 October
+
+The user manually selected Medium instead of High in `kk-alyx-4` and reports
+that it feels more like MVK. This is KosmicKrisp with the custom-resolve fallback,
+timeline handoff and measured feedback. The save is restored; Ctrl+C (130) ends
+the run after 223.85 seconds. The later performance-override log is followed
+by a completed frame at API second 54.115; final loading completion is followed
+by one at 91.705.
+
+The later 140–165-second API window has pose-call intervals median 16.650ms,
+p95 20.795ms and p99 21.892ms. Application GPU-clock intervals are median
+13.722ms, p95 14.687ms and p99 15.327ms (1496 frame-ID-joined GPU samples).
+This is much steadier than the previous KK outlier window (pose p99 214.322ms),
+supporting the user's report. It does not establish GPU utilization or a fixed
+driver speed ratio.
+
+Before/after video snapshots show only DeviceID changed, from MVK's real ID to
+KK's 100; stored graphics parameters are otherwise identical. The log prints
+`perf mode override: 2` at startup and again near the UI action. The user
+selection is useful active-UI evidence, but the files do not prove that the
+previous High state had applied a different persistent preset. Cache warming
+and differences in movement remain possible contributors to the improvement.
+
+Medium is the proposed common quality baseline for subsequent comparisons,
+selected explicitly in-game on each driver, with fixed fidelity, settings
+recording and warmed caches. No driver, runtime or game configuration was
+changed by the agent for this observation. Custom-resolve driver correctness
+and the previous stalls remain separate investigation items.
+
+[Medium-run evidence](alyx-valve-lua-results/kk-fd-sync-guard/kk-alyx-4-medium.json)
+records binary identities, setting differences and feedback consistency.

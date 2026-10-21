@@ -7,6 +7,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The user-selected Medium KK run feels closer to MVK, with pose-call p99
+21.9ms in a later post-load window. Cache and active-quality controls remain
+unverified; see the [current driver trial](macos-vulkan-fd-sync-guard.md).
+
+
 An isolated [external FD synchronization fix and KosmicKrisp Alyx candidate](macos-vulkan-fd-sync-guard.md)
 passes 88 tests and paired 180-frame xrizer probes with timeline handoff. The
 installed runtime/service is unchanged. After the initial user IPC-version
