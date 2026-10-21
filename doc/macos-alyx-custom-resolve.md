@@ -1,6 +1,14 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # Alyx custom resolve diagnosis — 21 October 2026
 
+**Follow-up:** an automated Alyx capture now exposes a specific driver defect:
+fixed-function depth/stencil resolves are suppressed alongside custom color
+resolve. The candidate fixes an owned reproduction in all 16 mono/stereo,
+two/four-sample, STORE/DONT_CARE and suspend/resume configurations. A two-minute
+Alyx run completes without a recorded crash or device loss; visual restoration
+of the main scene is still unverified. See the follow-up below. The initial
+color-only results and limitations remain useful historical evidence.
+
 The user confirmed that disabling `VK_EXT_custom_resolve` through Alyx's own
 `-vulkan_disable_ext_custom_resolve` switch restores the missing main scene on
 KosmicKrisp. This isolates a rendering path, not a particular driver bug.
@@ -140,3 +148,110 @@ resume the owned stereo color/depth and density-map reconstruction experiment;
 custom resolve is not a prerequisite for that experiment. Vulkan's custom
 resolve source/destination and render-pass semantics are described by the
 [Khronos extension proposal](https://docs.vulkan.org/features/latest/features/proposals/VK_EXT_custom_resolve.html).
+
+## Automated capture and fixed-depth candidate
+
+The user authorized running Alyx while unavailable. The first attempt started
+successfully but produced no observer records: `launch_xrizer.py` deliberately
+filters inherited `KL_*` variables, including the new tracing setting. That run
+was stopped cleanly (exit 130), not used as an API trace. The previous dry-run
+check had verified the command but missed this environment propagation issue.
+
+The correction is an explicit `--custom-resolve-trace` launcher option that sets
+the sanitized child environment, records the selection and rejects an old host.
+It is committed with DCO as `c9c93b3` on VeRantyx branch
+`codex/alyx-custom-resolve-launch` in `workspace/verantyx-custom-resolve`.
+Opt-out explicitly sets the variable to zero even if inherited as one. The trace
+launcher now invokes that isolated script. Dry-run assertions check both the
+manifest setting and child environment; incompatible-host rejection also passes.
+
+The second run (`runs/kk-custom-resolve-2`) records actual custom resolve calls.
+Alyx uses two-sample, two-layer stereo arrays, viewMask 3, dynamic rendering
+with suspend/resume, B10G11R11_UFLOAT_PACK32 color and D32_SFLOAT_S8_UINT depth.
+Color uses CUSTOM resolve, whereas depth and stencil use SAMPLE_ZERO. The
+resolving shader metadata includes multisampled input attachments at indices
+0 and 1, three image-read instructions and FragDepth/ViewIndex decorations.
+The 180-second capture ends at its configured timeout (124), without a recorded
+fault/panic/device loss. The observer reaches its explicit 128-command custom
+resolve budget. Direct `CmdDraw` records are absent; draw tracing does not yet
+cover all indexed/indirect/secondary forms and is not a complete replay.
+
+### Reproduced defect and change
+
+`kk_CmdEndRendering2KHR` originally disables **all** meta resolves whenever the
+rendering flags include CUSTOM_RESOLVE. KosmicKrisp separately forces depth and
+stencil resolves through its meta path because of a known Metal synchronization
+issue. The combination therefore drops ordinary depth/stencil resolves whenever
+color is custom-resolved. `kk_CmdBeginCustomResolveEXT` calls this ending path
+while switching to the shader-resolve targets.
+
+The [candidate patch](../experiments/alyx-vulkan/custom-resolve/mesa-fixed-depth.patch)
+filters CUSTOM on each attachment when choosing meta work, preserving ordinary
+resolves on other attachments. The global suppression now applies only when
+rendering is suspended. Custom attachments are still resolved by the shader;
+they are never passed to the fixed-function meta resolver. No shader changes,
+extension spoofing, Monado accommodation or additional compositor is involved.
+
+The owned probe initializes resolved depth to 0.875, draws depth 0.375, then
+performs custom color plus SAMPLE_ZERO depth resolve. With the original driver,
+all 16 configurations leave the sentinel 0.875; the candidate produces 0.375
+for every pixel. Stereo cases also use different per-eye colors to catch layer
+mix-ups. The matrix covers two/four samples, one/two views, STORE/DONT_CARE and
+uninterrupted/suspended-resumed rendering. It uses RGBA8 and D32 rather than
+claiming to replay Alyx's full packed-color/depth-stencil shaders.
+
+[Recorded identities and results](alyx-valve-lua-results/custom-resolve/depth-fix-results.json):
+
+| Test | Original KK | Candidate KK |
+|---|---:|---:|
+| Color checks, including 16 mixed color/depth configurations | 26/26 | 26/26 |
+| Fixed-depth checks in those mixed configurations | 0/16 | 16/16 |
+| Same matrix through strict Klepton observation | not repeated | all pass |
+| Existing Metal object/shared-event checks | prior baseline | 26 pass, zero failures |
+| xrizer with matching temporary Monado, timeline enabled | prior baseline | 180 frames, zero errors |
+
+The current MoltenVK control still passes all four available color baseline
+cases; custom resolve is unavailable. All GPU probe runs above enable Metal API
+validation; no validation errors were reported. No performance result is inferred
+from correctness probes or instrumented game startup.
+
+### Candidate build and gameplay
+
+Mesa source is isolated at `workspace/kk-custom-resolve`, branch
+`codex/custom-resolve-fixed-depth`, based on c8e17c9. Only `kk_cmd_draw.c` differs.
+Its exact patch is versioned in this Monado branch; the Mesa worktree itself
+remains uncommitted. No Mesa contribution or AI-written upstream communication
+has been made. The original Claude worktree remains clean.
+
+`build/kk-custom-resolve-final` contains a **single-object overlay build**, not a
+clean Mesa build: a new command-draw object replaces the old one in an isolated
+copy of libkk.a, linked against the existing tested dependencies. The baseline
+archive is hash-checked unchanged. `build-overlay.py` records commands, source,
+base archive and final library hashes in `build-identity.json`. A full clean
+build remains a promotion gate. Recreate into a new output directory with:
+
+```sh
+python3 "$experiment/build-overlay.py" "$root/build/kk-metal-objects" \
+  "$root/workspace/kk-custom-resolve" "$root/build/kk-custom-resolve-another"
+```
+
+`runs/kk-custom-resolve-fixed-1` uses that candidate and actual custom resolve
+for 120 seconds, ending at the configured timeout (124). Device creation succeeds;
+custom resolve commands execute; no fault, panic or device loss is recorded.
+This is evidence of process/API operation, not visual confirmation of the scene.
+All temporary service jobs are removed by their runner.
+
+For the later visual check, a separate launcher uses the ordinary successful
+GPU-timing host without the custom metadata observer:
+
+```sh
+~/Code/alyx-native/run-alyx-kosmickrisp-custom-resolve \
+  --output ~/Code/alyx-native/runs/kk-custom-resolve-visual-1 --timeout 300 \
+  -- +vr_fidelity_level_auto 0 +vr_fidelity_level 0
+```
+
+Check the main environment, then the usual save and both eyes when available.
+The existing `run-alyx-kosmickrisp` still disables custom resolve; MoltenVK remains
+default. Do not promote this candidate or infer a performance gain until visual
+testing and a clean driver build pass. No substantial FDM implementation begins
+at this point.

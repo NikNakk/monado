@@ -310,3 +310,9 @@ The [separate custom resolve investigation](macos-alyx-custom-resolve.md) adds
 an owned GPU probe and an opt-in trace host/launcher. The basic valid color
 resolve matrix passes directly and through Klepton; an actual Alyx capture is
 needed before claiming a driver fix. The normal KK fallback remains enabled.
+
+The subsequent automated capture identifies mixed custom-color/fixed-depth
+resolves as a concrete KK defect. A separate driver candidate passes all 16
+owned depth cases, Metal interop and 180 xrizer submissions. Alyx completes a
+bounded candidate run; visual restoration remains pending. See the follow-up
+for exact patch/build identities and the separate gameplay command.
