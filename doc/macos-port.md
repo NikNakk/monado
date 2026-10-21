@@ -8,8 +8,9 @@ SPDX-License-Identifier: BSL-1.0
 
 An isolated [external FD synchronization fix and KosmicKrisp Alyx candidate](macos-vulkan-fd-sync-guard.md)
 passes 88 tests and paired 180-frame xrizer probes with timeline handoff. The
-installed runtime/service is unchanged; actual Alyx on the new driver is the
-next user checkpoint.
+installed runtime/service is unchanged. After the initial user IPC-version
+conflict, the launcher now starts a matching temporary simulated-HMD service;
+actual Alyx on the new driver is the next user checkpoint.
 
 
 Presenter selection now uses `XRT_MACOS_PRESENTER=wsi|wsi-adaptive|native`

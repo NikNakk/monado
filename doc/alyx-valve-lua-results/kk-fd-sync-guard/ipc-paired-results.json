@@ -1,0 +1,41 @@
+{
+  "original_failure": {
+    "client": "v25.1.0-2380-g1823c339d",
+    "service": "v25.1.0-2379-g90a6cdb64"
+  },
+  "rebuilt_revision": "3f2a9f5c4",
+  "probes": [
+    {
+      "mode": "offscreen",
+      "frames": 180,
+      "errors": 0,
+      "client_exit": 0,
+      "temporary_job_removed": true,
+      "service_version_line": " INFO [ipc_server_main_common] Monado(XRT) by Collabora et al 'v25.1.0-2381-g3f2a9f5c4' starting up...",
+      "runtime_sha256": "ce577d53dfde349f175b7227b5776e912d5b59893bb48df720e6be4708957a0b",
+      "service_sha256": "d6d33541e58c5d3f8dd91ed9d87ea2a544c11de3de7a441147b0772f4b5329de",
+      "version_check_bypassed": false
+    },
+    {
+      "mode": "desktop",
+      "frames": 180,
+      "errors": 0,
+      "client_exit": 0,
+      "temporary_job_removed": true,
+      "service_version_line": " INFO [ipc_server_main_common] Monado(XRT) by Collabora et al 'v25.1.0-2381-g3f2a9f5c4' starting up...",
+      "runtime_sha256": "ce577d53dfde349f175b7227b5776e912d5b59893bb48df720e6be4708957a0b",
+      "service_sha256": "d6d33541e58c5d3f8dd91ed9d87ea2a544c11de3de7a441147b0772f4b5329de",
+      "version_check_bypassed": false
+    }
+  ],
+  "cleanup_tests": {
+    "client_failure_exit": 7,
+    "interrupt_exit": 130,
+    "both_jobs_removed": true
+  },
+  "primary_development_runtime_at_repair": {
+    "sha256": "1bb3182bf66adf76a2ccf55509586e0142c0185a9c3d5649e7058b5ba0c6d49d",
+    "mtime_unix": 1792565774.2401168,
+    "note": "Primary build timestamp 07:56:14 predates this repair. No primary build or installed runtime was rebuilt by the repair."
+  }
+}

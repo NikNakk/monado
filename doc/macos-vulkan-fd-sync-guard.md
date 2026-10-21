@@ -66,7 +66,7 @@ With native Steam running/signed in and the usual simulated-HMD setup:
 
 ```sh
 ~/Code/alyx-native/run-alyx-kosmickrisp \
-  --output ~/Code/alyx-native/runs/kk-alyx-1 --timeout 300 \
+  --output ~/Code/alyx-native/runs/kk-alyx-2 --timeout 300 \
   -- +vr_fidelity_level_auto 0 +vr_fidelity_level 0
 ```
 
@@ -82,7 +82,7 @@ The helper wraps the successful GPU-timing launcher with explicit selections:
   --icd ~/Code/alyx-native/build/kk-metal-objects/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json \
   --runtime-json ~/Code/alyx-native/build/monado-kk-fd-guard/openxr_monado-dev.json \
   --extended-dynamic-state3 disabled --sample-locations-compat enabled \
-  --api-trace --output ~/Code/alyx-native/runs/kk-alyx-1 --timeout 300 \
+  --api-trace --output ~/Code/alyx-native/runs/kk-alyx-2 --timeout 300 \
   -- +vr_fidelity_level_auto 0 +vr_fidelity_level 0
 ```
 
@@ -93,3 +93,38 @@ The helper's source is kept under `experiments/alyx-vulkan/fd-sync-guard`.
 Driver, loader and client-runtime hashes and the full extension census are saved
 by the launchers. The installed service stays on its working driver. The original
 `run-alyx` and `run-alyx-gpu-timing` still default to MoltenVK/the installed runtime.
+
+## IPC version correction — 21 October
+
+The first user Alyx attempt failed before creating an OpenXR instance: the
+isolated client identified as v25.1.0-2380-g1823c339d while the installed service
+identified as v25.1.0-2379-g90a6cdb64. Monado checks exact Git version strings,
+not just wire-protocol layout. The earlier instruction selecting only the new
+client runtime was incomplete. No game compatibility result can be inferred.
+
+Both isolated service and runtime were rebuilt together at 3f2a9f5c4. The opt-in
+launcher now invokes `~/Code/alyx-native/with-matching-monado.py`, which starts
+that build's service as a uniquely named temporary launchd job, selects a private
+IPC directory/XPC endpoint for both processes, and keeps the service on MoltenVK.
+Desktop simulated-HMD mode is explicit in both the client and service. No global
+launchd environment, installed job, installed runtime or game file is modified.
+`IPC_IGNORE_VERSION` is removed from the test environment: the check stays on.
+
+Service output is saved beside the game run in `kk-alyx-2-monado/`; temporary
+plists and socket directories are removed on exit. Reusing either output
+directory is rejected. A real paired offscreen probe completes 180 frames, zero
+errors with the strict version check. Separate failing-client (exit 7) and
+Ctrl+C (exit 130) checks verify that the temporary job is removed. A desktop
+probe is also recorded in the private permanent workspace. Game rendering is
+still a user checkpoint.
+
+The direct `run-alyx-gpu-timing --runtime-json ...` expansion above describes
+the client command only. Use `run-alyx-kosmickrisp` to start the matching service
+as well. Rebuild both together with:
+
+```sh
+cmake -S ~/Code/monado-2/build/review/kk-fd-guard \
+  -B ~/Code/alyx-native/build/monado-kk-fd-guard -G Ninja \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON
+cmake --build ~/Code/alyx-native/build/monado-kk-fd-guard --parallel 6
+```
