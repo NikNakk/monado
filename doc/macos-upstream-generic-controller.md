@@ -152,12 +152,22 @@ by the agent.
 
 ## I/O-cache follow-up validation
 
-The full native arm64 build and x86-64 OpenXR runtime build succeed.
+The tested source merge is `302e9beaa`; both runtime builds report
+`v25.1.0-2451-g302e9beaa`. The full native arm64 build and x86-64 OpenXR runtime
+build succeed. A compiled C layout probe produces identical sizes and offsets
+on arm64 and x86-64 (under Rosetta), including the 21,304-byte cache-info
+structure and its profile/input/output metadata arrays.
 All **91 native CTest suites pass**, with no skips, in 48.33 s. Generic and
 compatibility resolver regressions pass **849 assertions in 5 test cases**.
 The new IPC fixture, including actual OpenXR action synchronization and priority
-overrides, passes in the full native run. Linux CI results are recorded below
-when complete.
+overrides, passes in the full native run. The Ubuntu 24.04 default CI
+configuration builds with **no compiler warnings** and passes **57/57 CTest
+suites**, with no skips, in 524.90 s under Docker x86-64 emulation on Apple
+Silicon. This includes the solver, fusion and IPC-backed OpenXR regressions.
+The Linux build uses no feature overrides and an empty CMake build type,
+matching the CI recipe. The native and Linux logs are saved locally at
+`/tmp/monado-io-cache-native-ctest.log` and
+`/tmp/monado-io-cache-linux-ci.log`.
 The new `tests_io_cache_ipc` fixture uses the real generated IPC dispatcher,
 handlers and client proxy with synthetic devices, without starting the service
 or claiming hardware. It covers metadata, native samples, stale generations,
