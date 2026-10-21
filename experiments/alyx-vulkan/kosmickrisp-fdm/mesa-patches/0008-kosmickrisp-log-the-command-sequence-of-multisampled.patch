@@ -1,0 +1,299 @@
+From 3d34c42da1db7a15bc1563bd2cbf5959412ca8b2 Mon Sep 17 00:00:00 2001
+From: Nick Kennedy <nick@nick-kennedy.com>
+Date: Thu, 22 Oct 2026 00:43:26 +0100
+Subject: [PATCH 2/2] kosmickrisp: log the command sequence of multisampled FDM
+ passes
+
+KK_SEQ_LOG=1 logs rendering begins and ends, custom resolve switches,
+draws with their fragment shader outputs, and barriers inside the pass,
+for three multisampled FDM passes once 3000 have been recorded. Fragment
+shader info now records outputs_written.
+
+AI-written commit text (biblioklept).
+
+Generated-by: LLM
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/kosmickrisp/vulkan/kk_cmd_buffer.c | 24 +++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_cmd_buffer.h |  2 ++
+ src/kosmickrisp/vulkan/kk_cmd_draw.c   | 33 ++++++++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_fdm.c        | 31 ++++++++++++++++++++++++
+ src/kosmickrisp/vulkan/kk_fdm.h        |  2 ++
+ src/kosmickrisp/vulkan/kk_shader.c     |  1 +
+ src/kosmickrisp/vulkan/kk_shader.h     |  2 ++
+ 7 files changed, 95 insertions(+)
+
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.c b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+index e690da7..2a4014a 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.c
+@@ -10,6 +10,7 @@
+ #include "kk_buffer.h"
+ #include "kk_cmd_pool.h"
+ #include "kk_debug.h"
++#include "kk_fdm.h"
+ #include "kk_descriptor_set_layout.h"
+ #include "kk_entrypoints.h"
+ #include "kk_format.h"
+@@ -708,6 +709,29 @@ kk_cmd_barrier(struct kk_cmd_buffer *cmd, const VkDependencyInfo *dep)
+        * break the render pass. See comment in kk_barrier_requires_encoder_split
+        */
+       const bool required = kk_barrier_requires_encoder_split(cmd, dep);
++      if (cmd->state.gfx.seq_log) {
++         VkPipelineStageFlags2 ss = 0, ds = 0;
++         VkAccessFlags2 sa = 0, da = 0;
++         for (uint32_t i = 0; i < dep->memoryBarrierCount; i++) {
++            ss |= dep->pMemoryBarriers[i].srcStageMask;
++            ds |= dep->pMemoryBarriers[i].dstStageMask;
++            sa |= dep->pMemoryBarriers[i].srcAccessMask;
++            da |= dep->pMemoryBarriers[i].dstAccessMask;
++         }
++         for (uint32_t i = 0; i < dep->imageMemoryBarrierCount; i++) {
++            ss |= dep->pImageMemoryBarriers[i].srcStageMask;
++            ds |= dep->pImageMemoryBarriers[i].dstStageMask;
++            sa |= dep->pImageMemoryBarriers[i].srcAccessMask;
++            da |= dep->pImageMemoryBarriers[i].dstAccessMask;
++         }
++         kk_seq_log(cmd, "barrier in pass: %u memory %u buffer %u image, flags 0x%x, "
++                         "src 0x%llx/0x%llx dst 0x%llx/0x%llx, %s",
++                    dep->memoryBarrierCount, dep->bufferMemoryBarrierCount,
++                    dep->imageMemoryBarrierCount, dep->dependencyFlags,
++                    (unsigned long long)ss, (unsigned long long)sa,
++                    (unsigned long long)ds, (unsigned long long)da,
++                    required ? "split required" : "split for msaa");
++      }
+       if (cmd->state.gfx.render.samples > 1 || required) {
+          kk_encoder_stat(required ? "barrier split, required"
+                                   : "barrier split, msaa only",
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_buffer.h b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+index 8645004..419d7f8 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_buffer.h
++++ b/src/kosmickrisp/vulkan/kk_cmd_buffer.h
+@@ -171,6 +171,8 @@ struct kk_graphics_state {
+       uint32_t view_mask;
+       bool active;
+    } custom_resolve_debug;
++   bool seq_log;
++   bool in_custom_resolve;
+ 
+    struct {
+       enum mtl_visibility_result_mode mode;
+diff --git a/src/kosmickrisp/vulkan/kk_cmd_draw.c b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+index 01049c5..66ea25d 100644
+--- a/src/kosmickrisp/vulkan/kk_cmd_draw.c
++++ b/src/kosmickrisp/vulkan/kk_cmd_draw.c
+@@ -444,6 +444,15 @@ kk_CmdBeginRendering(VkCommandBuffer commandBuffer,
+ 
+    kk_fdm_setup_rendering(cmd, pRenderingInfo, pass_descriptor,
+                           framebuffer_extent);
++   kk_seq_log(cmd, "begin rendering%s flags 0x%x samples %u area %ux%u colors %u "
++                   "resolve %d/%d depth %s resolve %d stencil resolve %d views 0x%x",
++              cmd->state.gfx.in_custom_resolve ? " (custom resolve stage)" : "",
++              render->flags, render->samples, render->area.extent.width,
++              render->area.extent.height, render->color_att_count,
++              render->color_att_count ? (int)render->color_att[0].resolve_mode : -1,
++              render->color_att_count > 1 ? (int)render->color_att[1].resolve_mode : -1,
++              render->depth_att.iview ? "yes" : "no", (int)render->depth_att.resolve_mode,
++              (int)render->stencil_att.resolve_mode, render->view_mask);
+ 
+    /* Rendering with no attachments requires pushing the start of the render
+     * pass to first pipeline binding to know sample count. */
+@@ -595,6 +604,8 @@ kk_CmdEndRendering2KHR(VkCommandBuffer commandBuffer,
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
+    struct kk_rendering_state *render = &cmd->state.gfx.render;
+    bool need_meta_resolve = false;
++   kk_seq_log(cmd, "end rendering");
++   cmd->state.gfx.in_custom_resolve = false;
+ 
+    /* Translate render state back to VK for meta */
+    VkRenderingAttachmentInfo vk_color_att[KK_MAX_RTS];
+@@ -817,7 +828,9 @@ kk_CmdBeginCustomResolveEXT(
+       }
+    }
+ 
++   kk_seq_log(cmd, "begin custom resolve");
+    kk_CmdEndRendering2KHR(commandBuffer, &end_info);
++   cmd->state.gfx.in_custom_resolve = true;
+    kk_fdm_carry_to_next_rendering(cmd);
+    cmd->state.gfx.restart_barrier = true;
+    kk_CmdBeginRendering(commandBuffer, &rendering_info);
+@@ -2237,6 +2250,18 @@ kk_draw(struct kk_cmd_buffer *cmd, struct kk_draw_command *data)
+    }
+ }
+ 
++static void
++kk_seq_draw(struct kk_cmd_buffer *cmd, const char *what, uint32_t count,
++            uint32_t instances)
++{
++   if (!cmd->state.gfx.seq_log)
++      return;
++   const struct kk_shader *fs = cmd->state.shaders[MESA_SHADER_FRAGMENT];
++   kk_seq_log(cmd, "%s %u x%u fs %p outputs 0x%llx", what, count, instances,
++              (const void *)fs,
++              fs ? (unsigned long long)fs->info.fs.outputs_written : 0ull);
++}
++
+ VKAPI_ATTR void VKAPI_CALL
+ kk_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount,
+            uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance)
+@@ -2246,6 +2271,7 @@ kk_CmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount,
+       return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_seq_draw(cmd, "draw", vertexCount, instanceCount);
+ 
+    const struct vk_dynamic_graphics_state *dyn =
+       &cmd->vk.dynamic_graphics_state;
+@@ -2280,6 +2306,7 @@ kk_CmdDrawMultiEXT(VkCommandBuffer commandBuffer, uint32_t drawCount,
+       return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_seq_draw(cmd, "DrawMultiEXT", 0, 0);
+ 
+    const struct vk_dynamic_graphics_state *dyn =
+       &cmd->vk.dynamic_graphics_state;
+@@ -2334,6 +2361,7 @@ kk_CmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount,
+       return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_seq_draw(cmd, "draw indexed", indexCount, instanceCount);
+ 
+    const struct vk_dynamic_graphics_state *dyn =
+       &cmd->vk.dynamic_graphics_state;
+@@ -2374,6 +2402,7 @@ kk_CmdDrawMultiIndexedEXT(VkCommandBuffer commandBuffer, uint32_t drawCount,
+       return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_seq_draw(cmd, "DrawMultiIndexedEXT", 0, 0);
+ 
+    const struct vk_dynamic_graphics_state *dyn =
+       &cmd->vk.dynamic_graphics_state;
+@@ -2431,6 +2460,7 @@ kk_CmdDrawIndirect2KHR(VkCommandBuffer commandBuffer,
+       return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_seq_draw(cmd, "DrawIndirect2KHR", 0, 0);
+ 
+    const struct vk_dynamic_graphics_state *dyn =
+       &cmd->vk.dynamic_graphics_state;
+@@ -2460,6 +2490,7 @@ kk_CmdDrawIndexedIndirect2KHR(VkCommandBuffer commandBuffer,
+       return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_seq_draw(cmd, "DrawIndexedIndirect2KHR", 0, 0);
+ 
+    const struct vk_dynamic_graphics_state *dyn =
+       &cmd->vk.dynamic_graphics_state;
+@@ -2492,6 +2523,7 @@ kk_CmdDrawIndirectCount2KHR(VkCommandBuffer commandBuffer,
+       return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_seq_draw(cmd, "DrawIndirectCount2KHR", 0, 0);
+ 
+    const struct vk_dynamic_graphics_state *dyn =
+       &cmd->vk.dynamic_graphics_state;
+@@ -2523,6 +2555,7 @@ kk_CmdDrawIndexedIndirectCount2KHR(VkCommandBuffer commandBuffer,
+       return;
+ 
+    VK_FROM_HANDLE(kk_cmd_buffer, cmd, commandBuffer);
++   kk_seq_draw(cmd, "DrawIndexedIndirectCount2KHR", 0, 0);
+ 
+    const struct vk_dynamic_graphics_state *dyn =
+       &cmd->vk.dynamic_graphics_state;
+diff --git a/src/kosmickrisp/vulkan/kk_fdm.c b/src/kosmickrisp/vulkan/kk_fdm.c
+index 870d5d5..a38cd9b 100644
+--- a/src/kosmickrisp/vulkan/kk_fdm.c
++++ b/src/kosmickrisp/vulkan/kk_fdm.c
+@@ -21,6 +21,8 @@
+ #include "util/u_debug.h"
+ #include "vk_util.h"
+ 
++#include <stdarg.h>
++#include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+ 
+@@ -425,6 +427,22 @@ kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
+    }
+    gfx->fdm.carry = false;
+ 
++   if (!gfx->in_custom_resolve)
++      gfx->seq_log = false;
++   if (density && render->samples > 1 && !gfx->in_custom_resolve) {
++      static int enabled = -1;
++      static uint32_t ms_passes;
++      if (enabled < 0)
++         enabled = debug_get_bool_option("KK_SEQ_LOG", false);
++      gfx->seq_log = false;
++      if (enabled) {
++         simple_mtx_lock(&kk_fdm_lock);
++         uint32_t n = ms_passes++;
++         simple_mtx_unlock(&kk_fdm_lock);
++         gfx->seq_log = n >= 3000 && n < 3003;
++      }
++   }
++
+    simple_mtx_lock(&kk_fdm_lock);
+    void *map = density ? kk_fdm_get_map(dev, density, screen) : NULL;
+    if (map && !kk_fdm_all_subsampled(render)) {
+@@ -500,6 +518,19 @@ kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
+    }
+ }
+ 
++void
++kk_seq_log(struct kk_cmd_buffer *cmd, const char *fmt, ...)
++{
++   if (!cmd->state.gfx.seq_log)
++      return;
++   char buf[256];
++   va_list ap;
++   va_start(ap, fmt);
++   vsnprintf(buf, sizeof(buf), fmt, ap);
++   va_end(ap);
++   mesa_logi("kk-seq %p: %s", (void *)cmd, buf);
++}
++
+ void
+ kk_fdm_carry_to_next_rendering(struct kk_cmd_buffer *cmd)
+ {
+diff --git a/src/kosmickrisp/vulkan/kk_fdm.h b/src/kosmickrisp/vulkan/kk_fdm.h
+index e98e3bc..60f81e0 100644
+--- a/src/kosmickrisp/vulkan/kk_fdm.h
++++ b/src/kosmickrisp/vulkan/kk_fdm.h
+@@ -19,6 +19,8 @@ void kk_fdm_setup_rendering(struct kk_cmd_buffer *cmd,
+ 
+ void kk_fdm_carry_to_next_rendering(struct kk_cmd_buffer *cmd);
+ 
++void kk_seq_log(struct kk_cmd_buffer *cmd, const char *fmt, ...);
++
+ struct vk_image;
+ void kk_fdm_note_use(const struct vk_image *image, const char *what);
+ struct vk_image_view;
+diff --git a/src/kosmickrisp/vulkan/kk_shader.c b/src/kosmickrisp/vulkan/kk_shader.c
+index d64ae09..40072ba 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.c
++++ b/src/kosmickrisp/vulkan/kk_shader.c
+@@ -1065,6 +1065,7 @@ gather_shader_info(struct kk_shader *shader, nir_shader *nir,
+       if (nir->info.fs.depth_layout == FRAG_DEPTH_LAYOUT_NONE)
+          nir->info.fs.depth_layout = FRAG_DEPTH_LAYOUT_ANY;
+       shader->info.fs.uses_flat_varyings = fs_uses_flat_varying(nir);
++      shader->info.fs.outputs_written = nir->info.outputs_written;
+    } else if (nir->info.stage == MESA_SHADER_COMPUTE) {
+       shader->info.cs.local_size.x = nir->info.workgroup_size[0];
+       shader->info.cs.local_size.y = nir->info.workgroup_size[1];
+diff --git a/src/kosmickrisp/vulkan/kk_shader.h b/src/kosmickrisp/vulkan/kk_shader.h
+index dc5e060..63bcc77 100644
+--- a/src/kosmickrisp/vulkan/kk_shader.h
++++ b/src/kosmickrisp/vulkan/kk_shader.h
+@@ -99,6 +99,8 @@ struct kk_shader_info {
+ 
+       struct {
+          bool uses_flat_varyings;
++         bool custom_resolve;
++         uint64_t outputs_written;
+       } fs;
+ 
+       struct {
+-- 
+2.54.0 (Apple Git-157)
+

@@ -169,3 +169,60 @@ this was not confirmed. The frame interval is about 4× the 8.33 ms display peri
 Unattended runs need `XRT_MACOS_EXIT_ON_DISPLAY_LOSS=0`: with nobody wearing it,
 the PSVR2 display turns off, and the service otherwise exits. The headset wrapper
 now lets environment variables override the LaunchAgent's PSVR2 settings.
+
+## Encoder overhead and in-pass resolve — 22 October 2026
+
+### Barriers between encoders (Mesa `4563150`, patch 0007)
+
+Alyx records about 160 render passes per frame and a pipeline barrier between
+almost every pair (721,950 barriers for 727,011 render passes in a desktop run).
+KK ended every encoder with a barrier on all stages and dropped barriers recorded
+between encoders. Nearly all of Alyx's barriers are one of two kinds: attachment
+and transfer writes (`0x1600`/`0x1500`) before tests, colour output, compute and
+transfer (`0x1f00`), with the vertex shader added in about half (`0x1f08`). So the
+next pass's vertex work need not wait for the previous pass's fragment work.
+
+`MESA_KK_EXPERIMENTAL=light_barriers`:
+
+- Converts barriers recorded between encoders to Metal stages.
+- Applies them at the start of the next render encoder, with no barrier at
+  encoder end.
+- Keeps full barriers for compute encoders, the start of each command buffer,
+  render-pass restarts and splits, resumed passes and the custom-resolve switch.
+- Makes `vkCmdWaitEvents2` apply its dependencies.
+
+All probes pass with it. On the desktop menu (`claude-barrier-ab-*-1`, level 5,
+FDM on), median GPU time falls from 10.98 to 8.21 ms (p90 from 12.33 to
+10.74 ms). It has not yet been checked visually on the headset.
+
+### Custom resolve in tile memory (experiment)
+
+[`tile-resolve/tile_resolve.m`](../experiments/alyx-vulkan/kosmickrisp-fdm/tile-resolve/tile_resolve.m)
+renders a 2-layer MSAA target and resolves it in the same render pass with a tile
+function. The function reads every sample from the implicit imageblock, gets the
+layer from `[[render_target_array_index]]` and writes a texture array. It matches
+a two-pass resolve; 4× MSAA needs 16×16 tiles.
+
+| Size, MSAA | Tile resolve, memoryless | Store + resolve pass (KK today) | MSAA memory |
+|---|---:|---:|---:|
+| 1680×1713×2, 2× | 1.29 ms | 1.14 ms | 90 MB |
+| same, rate map | 0.62 ms | 1.04 ms | 90 MB |
+| 1680×1713×2, 4× | 0.77 ms | 2.47 ms | 180 MB |
+| 3360×3427×2, 4× | 1.56 ms | 8.89 ms | 710 MB |
+| same, rate map | 0.61 ms | 3.61 ms | 710 MB |
+
+With a rate map, the last physical row is not covered by the two-pass reference;
+those rows are excluded from the comparison.
+
+`KK_SEQ_LOG=1` (Mesa `3d34c42`, patch 0008) shows that this does not carry over
+directly to Alyx. Each stereo FDM pass is recorded as three command buffers using
+suspend and resume (rendering flags `0x82`, `0x86`, `0x84`), and the custom-resolve
+stage is in the last one. The middle segment also contains a `BY_REGION`
+colour-attachment-write to input-attachment-read barrier, which KK splits because
+the pass is multisampled. Tile memory cannot survive a Metal command-buffer
+boundary or a split, so the MSAA images must stay backed. They are stored and
+reloaded at every boundary.
+
+Memoryless MSAA would need suspended and resumed passes merged across command
+buffers. A tile resolve in the last segment alone would save one MSAA store and
+reload per frame, about 0.4 ms at the current settings, but no memory.
