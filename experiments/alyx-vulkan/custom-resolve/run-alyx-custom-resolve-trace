@@ -1,0 +1,16 @@
+#!/bin/sh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+# Diagnostic only: exercise the currently failing native custom-resolve path.
+set -eu
+base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
+export KL_VK_CUSTOM_RESOLVE_TRACE=1
+exec python3 "$base/with-matching-monado.py" \
+ --build "$base/build/monado-kk-fd-guard" -- \
+ "$base/run-alyx-gpu-timing" \
+ --host "$base/build/host-custom-resolve/alyx_host" \
+ --driver kosmickrisp \
+ --icd "$base/build/kk-metal-objects/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json" \
+ --runtime-json "$base/build/monado-kk-fd-guard/openxr_monado-dev.json" \
+ --extended-dynamic-state3 disabled --sample-locations-compat enabled \
+ --api-trace "$@"

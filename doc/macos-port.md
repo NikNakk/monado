@@ -6,6 +6,11 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS / PS VR2 Port Status
 
+The isolated [Alyx custom resolve diagnosis](macos-alyx-custom-resolve.md) now
+passes the owned color-resolve matrix on KosmicKrisp directly and through Klepton.
+A separate trace launcher is ready for the actual failing Alyx configuration;
+the working KK fallback and MoltenVK default remain unchanged (21 October 2026).
+
 The user-selected Medium KK run feels closer to MVK, with pose-call p99
 21.9ms in a later post-load window. Cache and active-quality controls remain
 unverified; see the [current driver trial](macos-vulkan-fd-sync-guard.md).

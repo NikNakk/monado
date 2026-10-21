@@ -1,0 +1,94 @@
+{
+  "date": "2026-10-21",
+  "purpose": "Custom resolve correctness diagnosis; no performance comparison",
+  "klepton_revision": "11a1525032d675d93a6fc6fd75615976c15f4829",
+  "verantyx_revision": "5c7fb013b0bb1e6cc4ae2609e919f53bfa0d4a7b",
+  "kosmickrisp_revision": "c8e17c9784475a745e7be26fb5d4cd2313b9197c",
+  "files": {
+    "host": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/host-custom-resolve/alyx_host",
+      "sha256": "8f2d0f9064b229d7a26c8ad60be5e2fb4200a4c4637254834b484caca1160acd"
+    },
+    "probe": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/custom-resolve/probe",
+      "sha256": "52c05694626a37a5264615132549b50e0f2936bba8758c103604df63403a0218"
+    },
+    "probe_shim": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/custom-resolve/shim.dylib",
+      "sha256": "773a2ea7e071be6813debb80562865034312e5b8fd7c8767a5589d81e8ed43b0"
+    },
+    "kk_driver": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/kk-metal-objects/src/kosmickrisp/vulkan/libvulkan_kosmickrisp.dylib",
+      "sha256": "83e46e62122f6352a2b94e7efc25abe1e122e41a7b5ad8eb02dc869a4bee0664"
+    },
+    "loader": {
+      "path": "/opt/homebrew/Cellar/vulkan-loader/1.4.363.0/lib/libvulkan.1.4.363.dylib",
+      "sha256": "09cf05a9396f69f6bea59a0addffac313af01f8db5019a9eac3157c85db9bb59"
+    },
+    "mvk_driver": {
+      "path": "/opt/homebrew/Cellar/molten-vk/1.4.2/lib/libMoltenVK.dylib",
+      "sha256": "05df2d2145b9ef5b86b08ed93a7a6e916815c2bbac244298a50b2d58061600d1"
+    },
+    "xrizer": {
+      "path": "/Users/nickkennedy/Code/alyx-native/build/xrizer-gpu-timing/release/libxrizer.dylib",
+      "sha256": "6547068da978895e603df51cc25040b40c9cebebee973d684429cd8a6d97a9aa"
+    }
+  },
+  "tests": {
+    "kk_direct": {
+      "metal_api_validation": true,
+      "cases": 10,
+      "bad_pixels": 0,
+      "results": [
+        "legacy custom=0 samples=1 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=1 samples=1 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=1 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=1 samples=1 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=4 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=1 samples=4 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "dynamic custom=1 samples=4 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=4 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=1 samples=4 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "dynamic custom=1 samples=4 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS"
+      ],
+      "identity": "device=Apple M5 vendor=0x106b deviceID=0x64 driverVersion=109457507 driver=KosmicKrisp info=Mesa 27.0.0-devel (git-0c9a1f072e)"
+    },
+    "kk_strict": {
+      "metal_api_validation": true,
+      "cases": 10,
+      "bad_pixels": 0,
+      "results": [
+        "legacy custom=0 samples=1 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=1 samples=1 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=1 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=1 samples=1 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=4 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=1 samples=4 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "dynamic custom=1 samples=4 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=4 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=1 samples=4 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "dynamic custom=1 samples=4 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS"
+      ],
+      "identity": "device=Apple M5 vendor=0x106b deviceID=0x64 driverVersion=109457507 driver=KosmicKrisp info=Mesa 27.0.0-devel (git-0c9a1f072e)"
+    },
+    "mvk_direct": {
+      "metal_api_validation": true,
+      "cases": 4,
+      "bad_pixels": 0,
+      "results": [
+        "legacy custom=0 samples=1 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=1 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=4 store=STORE pixels_bad=0/1024 first=191,64,128,255 PASS",
+        "legacy custom=0 samples=4 store=DONT_CARE pixels_bad=0/1024 first=191,64,128,255 PASS"
+      ],
+      "identity": "device=Apple M5 vendor=0x106b deviceID=0x1a07020a driverVersion=10402 driver=MoltenVK info=1.4.2"
+    }
+  },
+  "limits": [
+    "Color only, one eye/layer, constant source with component-permutation shader",
+    "No Alyx run yet with this observer",
+    "No depth, stereo, mixed formats, indirect/secondary commands or custom sample locations validated",
+    "No Vulkan validation layer installed; SPIR-V and Metal API validation used",
+    "Single-sampled dynamic custom resolve source is excluded by VUID-VkRenderingAttachmentInfo-imageView-06861; exploratory invalid results are not driver defect evidence"
+  ]
+}

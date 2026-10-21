@@ -303,3 +303,10 @@ and the previous stalls remain separate investigation items.
 
 [Medium-run evidence](alyx-valve-lua-results/kk-fd-sync-guard/kk-alyx-4-medium.json)
 records binary identities, setting differences and feedback consistency.
+
+## Custom resolve follow-up — 21 October
+
+The [separate custom resolve investigation](macos-alyx-custom-resolve.md) adds
+an owned GPU probe and an opt-in trace host/launcher. The basic valid color
+resolve matrix passes directly and through Klepton; an actual Alyx capture is
+needed before claiming a driver fix. The normal KK fallback remains enabled.
