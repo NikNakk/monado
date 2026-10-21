@@ -1,6 +1,14 @@
 <!-- Copyright 2026, Nick Kennedy; SPDX-License-Identifier: BSL-1.0 -->
 # Alyx custom resolve diagnosis — 21 October 2026
 
+**Latest user result:** custom resolve still gives hands/menu without the main
+background. The fixed-depth patch is necessary for the owned mixed-depth cases
+but is not a complete Alyx rendering fix. With the same clean driver and custom
+resolve disabled, the user reaches the menu and usual saved level. The shared
+[file-limit and controller corrections](macos-alyx-open-file-limit.md) restore
+terminal startup and interactive devices. Intro playback remains unverified.
+Use `run-alyx-kosmickrisp-clean` for that working configuration.
+
 **Current:** the full clean-built driver passes the 26 color and 16 mixed-depth
 checks, 26 Metal interoperability checks and 180 xrizer frames. A 90-second
 clean-driver Alyx run records actual custom resolve calls without a fault, panic

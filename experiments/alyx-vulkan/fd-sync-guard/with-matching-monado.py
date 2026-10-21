@@ -9,10 +9,29 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import resource
 import signal
 import subprocess
 import tempfile
 import time
+
+
+def prepare_client_file_limit(minimum=8192):
+    """Raise only this launcher's soft limit; children inherit it at exec."""
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    target = minimum if hard == resource.RLIM_INFINITY else min(minimum, hard)
+    result = {'soft_before': soft, 'minimum': minimum,
+              'hard': None if hard == resource.RLIM_INFINITY else hard}
+    if soft != resource.RLIM_INFINITY and soft < target:
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (target, hard))
+        except (OSError, ValueError) as error:
+            result['raise_error'] = str(error)
+    after, after_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    result.update(soft_after=after,
+                  minimum_met=after == resource.RLIM_INFINITY or after >= minimum,
+                  hard_unchanged=hard == after_hard)
+    return result
 
 
 
@@ -67,12 +86,16 @@ def main():
                SIMULATED_DESKTOP='1' if args.mode == 'desktop' else '0', SIMULATED_ENABLE='1',
                PSVR2_CAMERA_STREAMS='0', XRT_NO_STDIN='1', IPC_EXIT_WHEN_IDLE='0',
                XRT_COMPOSITOR_NULL='0', XRT_COMPOSITOR_FORCE_DEBUG_IMAGE='0' if args.mode == 'desktop' else '1')
+    # Desktop Alyx needs the same interactive devices as the working user runs.
+    env.setdefault('QWERTY_ENABLE', '1' if args.mode == 'desktop' else '0')
     if args.mode == 'offscreen':
         env['XRT_MACOS_CLIENT_COMPOSITOR'] = '0'
     if '--dry-run' in options:
         return subprocess.run(command, env=env).returncode
     if output.exists() or service_output.exists():
         parser.error('client and companion -monado output directories must both be new')
+    file_limits = prepare_client_file_limit()
+    print('Client open-file limit:', file_limits, flush=True)
     service_output.mkdir(parents=True)
     native_root = Path(os.environ.get('ALYX_NATIVE_ROOT', str(Path.home()/'Code/alyx-native')))
     settings = {'before': snapshot_video_settings(native_root)}
@@ -91,7 +114,9 @@ def main():
                     'service': str(service), 'runtime': str(runtime), 'label': label,
                     'service_sha256': hashlib.sha256(service.read_bytes()).hexdigest(),
                     'runtime_sha256': hashlib.sha256(runtime.read_bytes()).hexdigest(),
-                    'version_check_bypassed': False, 'installed_service_changed': False}
+                    'version_check_bypassed': False, 'installed_service_changed': False,
+                    'client_open_file_limits': file_limits}
+        identity['qwerty_enable'] = env['QWERTY_ENABLE']
         (service_output/'identity.json').write_text(json.dumps(identity, indent=2)+'\n')
         print('Matching Monado service logs:', service_output, flush=True)
         bootstrapped = False

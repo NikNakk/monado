@@ -1,0 +1,8 @@
+#!/bin/sh
+# Copyright 2026, Nick Kennedy
+# SPDX-License-Identifier: BSL-1.0
+# Clean driver with the visually validated engine rendering fallback.
+set -eu
+base=${ALYX_NATIVE_ROOT:-"$HOME/Code/alyx-native"}
+exec "$base/run-alyx-kosmickrisp" \
+ --icd "$base/build/kk-custom-resolve-clean/src/kosmickrisp/vulkan/kosmickrisp_mesa_devenv_icd.aarch64.json" "$@"

@@ -1,0 +1,68 @@
+{
+  "date": "2026-10-21",
+  "parent_launchd_soft_limit": 256,
+  "agent_soft_limit": 1048575,
+  "minimum_client_limit": 8192,
+  "hard_limit_unchanged": true,
+  "runs": {
+    "mvk-low-fd-repro-1": {
+      "exit": 124,
+      "elapsed_seconds": 65.05128979682922,
+      "errno24_count": 5436,
+      "startup_world_failed": true,
+      "server_failed": 1,
+      "file_limits": null
+    },
+    "mvk-fixed-fd-1": {
+      "exit": 124,
+      "elapsed_seconds": 65.0123929977417,
+      "errno24_count": 0,
+      "startup_world_failed": false,
+      "server_failed": 0,
+      "file_limits": {
+        "soft_before": 256,
+        "minimum": 8192,
+        "hard": null,
+        "soft_after": 8192,
+        "minimum_met": true,
+        "hard_unchanged": true
+      }
+    },
+    "kk-fixed-fd-1": {
+      "exit": 124,
+      "elapsed_seconds": 354.35815596580505,
+      "errno24_count": 0,
+      "startup_world_failed": false,
+      "server_failed": 0,
+      "file_limits": {
+        "soft_before": 256,
+        "minimum": 8192,
+        "hard": null,
+        "soft_after": 8192,
+        "minimum_met": true,
+        "hard_unchanged": true
+      }
+    }
+  },
+  "low_limit_fd_sample": [
+    {
+      "pid": 12169,
+      "open_fds": 256,
+      "highest_fd": 255
+    }
+  ],
+  "corrected_fd_samples": [
+    {
+      "time": 1792597883.235522,
+      "pid": 12582,
+      "open_fds": 338,
+      "highest_fd": 337
+    }
+  ],
+  "user_results": {
+    "custom_resolve_enabled": "hands/menu but no background",
+    "custom_resolve_disabled_clean_driver": "menu and usual saved level work",
+    "intro_video": "user uncertain; remains unverified",
+    "controllers": "Qwerty left/right restored in desktop service inventory"
+  }
+}

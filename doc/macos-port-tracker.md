@@ -7,6 +7,12 @@ SPDX-License-Identifier: BSL-1.0
 
 # macOS Port Tracker
 
+The [native Alyx launch correction](macos-alyx-open-file-limit.md) raises the
+client's inherited file budget and restores desktop Qwerty controllers. The
+user reaches the usual level with the clean KK driver and custom resolve off.
+Custom resolve still loses the main environment; its proven fixed-depth patch
+is insufficient on its own. Intro video playback remains unverified.
+
 The isolated [Alyx custom resolve diagnosis](macos-alyx-custom-resolve.md) now
 reproduces and fixes dropped fixed-depth resolves alongside custom color. All
 16 mixed mono/stereo and suspend/resume cases pass, as do Metal interop and 180
